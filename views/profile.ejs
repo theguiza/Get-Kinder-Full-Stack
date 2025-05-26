@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Google Tag Manager -->
+<script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+  new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+  j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+  'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+  })(window,document,'script','dataLayer','GTM-W4NR6FZ9');</script>
+  <!-- End Google Tag Manager -->
+  <title>About Get Kinder | AI for Good & Kindness Movement</title>
+  <meta name="description" content="Learn how Get Kinder and KAI, your personal kindness coach, empower people to spread kindness through meaningful, sustainable daily actions.">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-SgOJa3DmI69IUzQ2PVdRZhwQ+dy64/BUtbMJw1MZ8t5HZApcHrRKUc4W0kG879m7" crossorigin="anonymous">
+  <link rel="stylesheet" href="./css/style.css">
+</head>
+<body class="gradient-background">
+<!-- Google Tag Manager (noscript) -->
+<noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-W4NR6FZ9" height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+  <!-- End Google Tag Manager (noscript) -->
+   <header>
+  <nav class="navbar navbar-light bg-white navbar-expand-lg">
+    <div class="container-fluid d-flex">
+      <a class="navbar-brand" href="/"> 
+        <img src="./images/logo.png" alt="Get Kinder logo" height="100">
+      </a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav"
+        aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div class="collapse navbar-collapse justify-content-end" id="navbarNav">
+        <ul class="navbar-nav">
+          <li class="nav-item"><a class="nav-link mx-1" href="/" style="font-size: 1.5rem; color: #455a7c; font-weight: bold; margin-right: 80px;" ">Home </a></li>
+        </ul>
+      </div>
+    </div>
+  </nav>
+</header> 
+ <section id="title">
+  <div class="container profile-page rounded bg-white mt-5 mb-5 px-3">
+    <form id="profile-form" action="/profile" method="POST">
+      <div class="row">
+
+        <!-- Left: Profile Picture -->
+        <div class="col-md-3 border-right">
+          <div class="d-flex flex-column align-items-center text-center p-3 py-5">
+            <img class="rounded-circle mt-5" width="150px" src="<%= user.picture || '/images/nerdy-KAI.png' %>"> <br> 
+            <strong><%= user.firstname + " " + user.lastname %></strong><br> 
+            <span class="text-black-50"><%= user.email %></span>
+          </div>
+        </div>
+
+        <!-- Middle: Profile Form -->
+        <div class="col-md-5 border-right">
+          <div class="p-3 py-5">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+              <h1 class="text-right" style="color: #455a7c;">Your Get Kinder Profile</h1>
+            </div>
+
+            <div class="row mt-2">
+              <div class="col-md-6">
+                <label class="labels">First Name</label>
+                <input name="firstname" type="text" class="form-control" placeholder="first name" value="<%= user.firstname || '' %>">
+              </div>
+              <div class="col-md-6">
+                <label class="labels">Last Name</label>
+                <input name="lastname" type="text" class="form-control" placeholder="last name" value="<%= user.lastname || '' %>">
+              </div>
+            </div>
+
+            <div class="row mt-3">
+              <div class="col-md-12 mb-2">
+                <label class="labels">Email</label>
+                <input name="email" type="email" class="form-control" placeholder="enter email" value="<%= user.email || '' %>">
+              </div>
+              <div class="col-md-12 mb-2">
+                <label class="labels">Mobile Number</label>
+                <input name="phone" type="text" class="form-control" placeholder="enter phone number" value="<%= user.phone || '' %>">
+              </div>
+              <div class="col-md-12 mb-2">
+                <label class="labels">Address Line 1</label>
+                <input name="address1" type="text" class="form-control" placeholder="enter address line 1" value="<%= user.address1 || '' %>">
+              </div>
+              <div class="col-md-12 mb-2">
+                <label class="labels">Address Line 2</label>
+                <input name="address2" type="text" class="form-control" placeholder="enter address line 2" value="<%= user.address2 || '' %>">
+              </div>
+              <div class="col-md-12 mb-2">
+                <label class="labels">City</label>
+                <input name="city" type="text" class="form-control" placeholder="enter city" value="<%= user.city || '' %>">
+              </div>
+            </div>
+            <div class="row mt-2">
+              <div class="col-md-6">
+                <label class="labels">State or Province</label>
+                <input name="state" type="text" class="form-control" placeholder="enter state or province" value="<%= user.state || '' %>">
+              </div>
+              <div class="col-md-6">
+                <label class="labels">Country</label>
+                <input name="country" type="text" class="form-control" placeholder="enter country" value="<%= user.country || '' %>"><br> 
+              </div>
+            </div>
+
+<div class="mt-4">
+  <h2 style="color: #455a7c;">UN Sustainable Development Goals</h2>
+
+  <% const sdgOptions = [
+    "1 – No Poverty", "2 – Zero Hunger", "3 – Good Health and Well-being",
+    "4 – Quality Education", "5 – Gender Equality", "6 – Clean Water and Sanitation",
+    "7 – Affordable and Clean Energy", "8 – Decent Work and Economic Growth",
+    "9 – Industry, Innovation and Infrastructure", "10 – Reduced Inequality",
+    "11 – Sustainable Cities and Communities", "12 – Responsible Consumption and Production",
+    "13 – Climate Action", "14 – Life Below Water", "15 – Life on Land",
+    "16 – Peace, Justice and Strong Institutions", "17 – Partnerships for the Goals"
+  ]; %>
+
+  <!-- SDG 1 -->
+  <div class="row align-items-center mb-3">
+    <div class="col-auto">
+      <% if (user.sdg1) { const number = user.sdg1.split(/\s*[-–—]\s*/)[0].trim(); %>
+        <img src="/images/sdgs/goal_<%= number %>.png" alt="SDG <%= number %>" class="img-fluid" style="max-width: 60px;">
+      <% } %>
+    </div>
+    <div class="col">
+      <select name="sdg1" class="form-select">
+        <option value="">Select your first SDG</option>
+        <% sdgOptions.forEach((option) => { %>
+          <option value="<%= option %>" <%= user.sdg1 === option ? 'selected' : '' %>><%= option %></option>
+        <% }); %>
+      </select>
+    </div>
+  </div>
+
+  <!-- SDG 2 -->
+ <div class="row align-items-center mb-3">
+    <div class="col-auto">
+      <% if (user.sdg2) { const number = user.sdg2.split(/\s*[-–—]\s*/)[0].trim(); %>
+        <img src="/images/sdgs/goal_<%= number %>.png" alt="SDG <%= number %>" class="img-fluid" style="max-width: 60px;">
+      <% } %>
+    </div>
+    <div class="col">
+      <select name="sdg2" class="form-select">
+        <option value="">Select your second SDG</option>
+        <% sdgOptions.forEach((option) => { %>
+          <option value="<%= option %>" <%= user.sdg2 === option ? 'selected' : '' %>><%= option %></option>
+        <% }); %>
+      </select>
+    </div>
+  </div>
+
+  <!-- SDG 3 -->
+ <div class="row align-items-center mb-3">
+    <div class="col-auto">
+      <% if (user.sdg3) { const number = user.sdg3.split(/\s*[-–—]\s*/)[0].trim(); %>
+        <img src="/images/sdgs/goal_<%= number %>.png" alt="SDG <%= number %>" class="img-fluid" style="max-width: 60px;">
+      <% } %>
+    </div>
+    <div class="col">
+      <select name="sdg3" class="form-select">
+        <option value="">Select your third SDG</option>
+        <% sdgOptions.forEach((option) => { %>
+          <option value="<%= option %>" <%= user.sdg3 === option ? 'selected' : '' %>><%= option %></option>
+        <% }); %>
+      </select>
+    </div>
+  </div>
+
+
+
+</div>
+
+            <div class="mt-4 text-center">
+              <button class="btn btn-primary profile-button" type="submit">Save Profile</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: Interests Column -->
+        <div class="col-md-4">
+          <div class="p-3 py-5">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h2 class="text-right" style="color: #455a7c; margin-top: 40px;">Your Kindness Interests</h2>
+            </div>
+            <div class="form-group mb-3">
+              <label class="labels">Interest 1</label>
+              <input type="text" name="interest1" class="form-control" placeholder="Enter your kindness interest 1" value="<%= user.interest1 || '' %>">
+            </div>
+            <div class="form-group mb-3">
+              <label class="labels">Interest 2</label>
+              <input type="text" name="interest2" class="form-control" placeholder="Enter your kindness interest 2" value="<%= user.interest2 || '' %>">
+            </div>
+            <div class="form-group mb-3">
+              <label class="labels">Interest 2</label>
+              <input type="text" name="interest3" class="form-control" placeholder="Enter your kindness interest 3" value="<%= user.interest3 || '' %>">
+            </div>
+            <div class="text-center">
+              <button class="btn btn-outline-primary" type="submit">Update Interests</button>
+            </div>
+          </div>
+        </div>
+
+      </div> <!-- end .row -->
+    </form>
+  </div>
+</section>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/js/bootstrap.bundle.min.js" integrity="sha384-k6d4wzSIapyDyv1kpU366/PK5hCdSbCRGRCMv+eplOQJWyd1fbcAu9OCUj5zNLiq" crossorigin="anonymous"></script>
+</body>
+</html>
