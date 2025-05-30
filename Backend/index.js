@@ -7,17 +7,32 @@ import dotenv from "dotenv";
 import bcrypt from 'bcrypt';
 import session from 'express-session'; 
 import passport from 'passport';
+import cors from 'cors';
 import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
 import { Strategy as FacebookStrategy } from "passport-facebook"; 
-//pass data from our express server over to our ejs template using a javascript object with different properties and we use the ejs syntax to pick up the properties and insert them into the html template
+import { createThread, createMessage, createAndPollRun, listMessages } from './assistant.js';
+import OpenAI from "openai";
+
 const hashedPassword = await bcrypt.hash("userInputPassword", 10); 
 dotenv.config(); 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const rootPath = path.join(__dirname, "../");
 const apiKey = process.env.OPENAI_API_KEY;
-const app = express(); 
+const app = express();
 const port = 5001; 
+
+const openai = new OpenAI();
+app.use(session({
+  secret: process.env.SESSION_SECRET,
+  resave: false,
+  saveUninitialized: false
+}));
+
+app.use(cors({
+  origin: 'http://localhost:5001', // ← your frontend URL (adjust if needed)
+  credentials: true                // ← this allows cookies to be sent across origins
+}));
 
 app.use(session({
   secret: process.env.SESSION_SECRET || "default_secret",
@@ -107,7 +122,6 @@ app.post("/profile", async (req, res) => {
   if (!req.isAuthenticated || !req.isAuthenticated()) {
     return res.redirect("/login");
   }
-
   const {
     firstname,
     lastname,
@@ -125,7 +139,6 @@ app.post("/profile", async (req, res) => {
     sdg2,
     sdg3
   } = req.body;
-
   try {
     await db.query(
       `UPDATE userdata
@@ -136,7 +149,6 @@ app.post("/profile", async (req, res) => {
        WHERE email = $3`,
       [firstname, lastname, email, phone, address1, address2, city, state, country, interest1, interest2, interest3, sdg1, sdg2, sdg3]
     );
-
     // Update session user
     req.user = {
       ...req.user,
@@ -164,19 +176,44 @@ app.post("/profile", async (req, res) => {
   }
 });
 
+// app.set('trust proxy', 1); // if behind reverse proxy like Heroku or Vercel
+
 app.set("view engine", "ejs");
 app.set("views", path.join(rootPath, "views")); // or wherever you store your .ejs files
 
-app.get("/", (req, res) => {
-  const success = req.query.success === "1"; // ✅ registration success
-  const loginSuccess = req.query.login === "1"; // ✅ login success
-  const name = req.query.name; // ✅ user's name from login
-  res.render("index", {
-    title: "Home",
-    success,
-    loginSuccess,
-    name,
-  });
+// === Updated home route ===
+app.get("/", async (req, res, next) => {
+  try {
+    // ▶️ existing logic
+    const success      = req.query.success === "1";  // registration success
+    const loginSuccess = req.query.login   === "1";  // login success
+    const name         = req.query.name;            // user's name
+    
+    // ▶️ new chat-history logic
+    let chatHistory = [];
+    if (req.session && req.session.threadId) {
+      const thread = await openai.beta.threads.retrieve(req.session.threadId);
+      chatHistory = Array.isArray(thread.messages)
+        ? thread.messages
+        : [];
+    }
+    const threadId = (req.session && req.session.threadId) || "";
+    
+    // ▶️ render everything to your template
+    res.render("index", {
+      title:        "Home",
+      success,
+      loginSuccess,
+      name,
+      
+      // our additions:
+      chatHistory,
+      threadId
+    });
+    
+  } catch (err) {
+    next(err);
+  }
 });
 
 app.get("/auth/google", passport.authenticate("google", { scope: ["profile", "email"] })); 
@@ -247,6 +284,35 @@ app.get("/profile", async (req, res) => {
   } catch (err) {
     console.error("Profile DB error:", err);
     res.status(500).send("Error loading profile.");
+  }
+});
+
+app.get('/api/chat/init', async (req, res) => {
+  const thread = await createThread();
+  res.json({ thread_id: thread.id });
+});
+
+app.post('/api/chat/message', async (req, res) => {
+  try {
+    if (!req.session.threadId) {
+      const thread = await createThread();
+      req.session.threadId = thread.id;
+    }
+
+    const threadId = req.session.threadId;
+    const userMessage = req.body.message;
+
+    await createMessage(threadId, userMessage);
+    await createAndPollRun(threadId);
+
+    const messages = await listMessages(threadId);
+    const lastMessage = messages.data.find(m => m.role === 'assistant');
+    const reply = lastMessage ? lastMessage.content[0].text.value : "(No reply)";
+
+    res.json({ reply });
+  } catch (err) {
+    console.error("🔥 Error in /api/chat/message:", err);
+    res.status(500).json({ error: "Something went wrong." });
   }
 });
 
@@ -343,27 +409,3 @@ passport.deserializeUser(async (email, done) => {
 app.listen(port, () => {
     console.log(`Server is running on port ${port}.`);
 }); 
-// export async function getThreads() from the public/assistant.js file to see if it works here updated by Bluey
-/* app.get("/", async (req, res) => {
-  const apiKey = process.env.OPENAI_API_KEY;
-  const headers = {
-    "Content-Type": "application/json",
-    "Authorization": `Bearer ${apiKey}`,
-    "OpenAI-Beta": "assistants=v2",
-  };
-  try {
-    const response = await axios.get("https://api.openai.com/v1/assistants", { headers });
-    // Send assistant data to EJS template
-    res.render("index", {
-      title: "Assistants List",
-      assistants: response.data.data, // assuming response.data has a 'data' array
-    });
-  } catch (error) {
-    console.error("Error fetching assistants:", error.response?.data || error.message);
-    res.render("index", {
-      title: "Assistants List",
-      assistants: [],
-      error: "Failed to fetch assistants."
-    });
-  }
-}); */ 

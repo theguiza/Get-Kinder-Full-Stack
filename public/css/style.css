@@ -253,3 +253,34 @@ p {
     cursor: pointer;
     border: solid 10px #455a7c
 }
+
+#chat2 .form-control {
+border-color: transparent;
+}
+
+#chat2 .form-control:focus {
+border-color: transparent;
+box-shadow: inset 0px 0px 0px 1px transparent;
+}
+
+.divider:after,
+.divider:before {
+content: "";
+flex: 1;
+height: 1px;
+background: #eee;
+}
+
+.typing.dots span {
+  animation: blink 1s infinite;
+  font-size: 2rem;
+  color: #455a7c;
+}
+.typing.dots span:nth-child(2) { animation-delay: 0.2s; }
+.typing.dots span:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes blink {
+  0%, 100% { opacity: 0.2; }
+  50% { opacity: 1; }
+}
+
