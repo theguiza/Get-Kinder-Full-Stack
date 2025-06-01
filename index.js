@@ -62,7 +62,7 @@ await pool.connect()
 
 // 7) Compute rootPath if needed for static files
 //const rootPath = __dirname;
-const rootPath = path.join(__dirname, "../");
+//const rootPath = path.join(__dirname, "../");
 
 // 8) Initialize OpenAI client
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -81,7 +81,7 @@ app.use(session({
 }));
 app.use(passport.initialize());
 app.use(passport.session());
-app.use(express.static(path.join(rootPath, "public")));
+app.use(express.static(path.join(__dirname, "public")));
 
 // Make `user` available in all EJS templates
 app.use((req, res, next) => {
@@ -91,7 +91,7 @@ app.use((req, res, next) => {
 
 // 10) View engine setup (EJS)
 app.set("view engine", "ejs");
-app.set("views", path.join(rootPath, "views"));
+app.set("views", path.join(__dirname, "views"));
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 11) Passport / Authentication configuration
