@@ -61,7 +61,8 @@ await pool.connect()
   .catch(err => console.error("‼️  Error connecting to Postgres:", err));
 
 // 7) Compute rootPath if needed for static files
-const rootPath = __dirname;
+//const rootPath = __dirname;
+const rootPath = path.join(__dirname, "../");
 
 // 8) Initialize OpenAI client
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
