@@ -111,21 +111,21 @@
                     </div>
 
                     <!-- Body -->
-<div id="chatBody" class="card-body overflow-auto px-3" style="height: 400px;">
-  <% if (chatHistory && chatHistory.length) { 
-       chatHistory.forEach(msg => {
-         if (msg.role === "user") { %>
-           <div class="d-flex justify-content-end mt-2">
-             <!-- 1) User avatar on the right-aligned bubble -->
-             <div class="d-flex align-items-center">
-               <div class="bg-primary text-white rounded-3 px-3 py-2">
-                 <%= msg.content %>
-               </div>
-               <!-- (Optional) If you want a user picture, point to your own file here -->
-               <img src="./images/User.png"
-                    alt="you"
-                    class="rounded-circle ms-2"
-                    style="width: 35px; height: 35px;">
+              <div id="chatBody" class="card-body overflow-auto px-3" style="height: 400px;">
+                  <% if (chatHistory && chatHistory.length) { 
+                        chatHistory.forEach(msg => {
+                       if (msg.role === "user") { %>
+                  <div class="d-flex justify-content-end mt-2">
+                    <!-- 1) User avatar on the right-aligned bubble -->
+                    <div class="d-flex align-items-center">
+                      <div class="bg-primary text-white rounded-3 px-3 py-2">
+                        <%= msg.content %>
+                      </div>
+                      <!-- (Optional) If you want a user picture, point to your own file here -->
+                      <img src="./images/User.png"
+                            alt="you"
+                            class="rounded-circle ms-2"
+                            style="width: 35px; height: 35px;">
              </div>
            </div>
          <% } else { %>
@@ -143,7 +143,6 @@
        });
      } %>
 </div>
-
           <!-- (Off-screen template for typing indicator—also showing KAI’s avatar) -->
           <template id="typingIndicatorTemplate">
             <div class="d-flex align-items-center mt-2" id="typingIndicator">
