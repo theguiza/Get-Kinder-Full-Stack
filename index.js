@@ -98,64 +98,133 @@ app.set("views", path.join(__dirname, "views"));
 // ─────────────────────────────────────────────────────────────────────────────
 
 // 11.1) Google OAuth Strategy
-passport.use(new GoogleStrategy({
-    clientID:     process.env.GOOGLE_CLIENT_ID     || "YOUR_GOOGLE_CLIENT_ID",
-    clientSecret: process.env.GOOGLE_CLIENT_SECRET || "YOUR_GOOGLE_CLIENT_SECRET",
-    callbackURL:  process.env.GOOGLE_CALLBACK_URL  || "/auth/google/callback"
-  },
-  async (accessToken, refreshToken, profile, done) => {
-    try {
-      const email = profile.emails[0].value;
-      const result = await pool.query(
-        "SELECT * FROM userdata WHERE email = $1",
-        [email]
-      );
-      if (result.rows.length) {
-        return done(null, result.rows[0]);
-      } else {
-        const insert = await pool.query(
-          "INSERT INTO userdata (firstname, lastname, email, password) VALUES ($1, $2, $3, $4) RETURNING *",
-          [profile.name?.givenName || "", profile.name?.familyName || "", email, null]
+passport.use(
+  new GoogleStrategy(
+    {
+      clientID:     process.env.GOOGLE_CLIENT_ID     || "YOUR_GOOGLE_CLIENT_ID",
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET || "YOUR_GOOGLE_CLIENT_SECRET",
+      callbackURL:  process.env.GOOGLE_CALLBACK_URL  || "/auth/google/callback",
+    },
+    async (accessToken, refreshToken, profile, done) => {
+      try {
+        // 1) Extract the user’s email
+        const email = profile.emails[0].value;
+
+        // 2) Try to find an existing row by email
+        const result = await pool.query(
+          "SELECT * FROM userdata WHERE email = $1",
+          [email]
         );
-        return done(null, insert.rows[0]);
+        if (result.rows.length) {
+          // If user already exists, return that row (including google_id & picture)
+          return done(null, result.rows[0]);
+        } else {
+          // 3) This is a brand-new OAuth signup → extract Google ID + profile picture URL
+          const googleId = profile.id || null;
+          // profile.photos is often an array; pick index 0 if it exists
+          const photoUrl =
+            Array.isArray(profile.photos) && profile.photos.length
+              ? profile.photos[0].value
+              : null;
+
+          // 4) Insert all required columns + google_id + picture
+          const insert = await pool.query(
+            `INSERT INTO userdata 
+               (firstname, lastname, email, password, google_id, picture)
+             VALUES
+               ($1,       $2,       $3,    $4,       $5,        $6)
+             RETURNING *`,
+            [
+              profile.name?.givenName || "",
+              profile.name?.familyName || "",
+              email,
+              /* password = */ null,
+              googleId,
+              photoUrl,
+            ]
+          );
+          return done(null, insert.rows[0]);
+        }
+      } catch (err) {
+        return done(err, null);
       }
-    } catch (err) {
-      return done(err, null);
     }
-  }
-));
+  )
+);
 
 // 11.2) Facebook OAuth Strategy
-passport.use(new FacebookStrategy({
-    clientID:     process.env.FACEBOOK_APP_ID     || "YOUR_FACEBOOK_APP_ID",
-    clientSecret: process.env.FACEBOOK_APP_SECRET || "YOUR_FACEBOOK_APP_SECRET",
-    callbackURL:  process.env.FACEBOOK_CALLBACK_URL  || "/auth/facebook/callback",
-    profileFields: ["id", "displayName", "emails"]
-  },
-  async (accessToken, refreshToken, profile, cb) => {
-    try {
-      const email = (profile.emails && profile.emails[0]) ? profile.emails[0].value : null;
-      if (!email) {
-        return cb(new Error("Facebook profile did not return an email"), null);
-      }
-      const result = await pool.query(
-        "SELECT * FROM userdata WHERE email = $1",
-        [email]
-      );
-      if (result.rows.length) {
-        return cb(null, result.rows[0]);
-      } else {
-        const insert = await pool.query(
-          "INSERT INTO userdata (firstname, lastname, email, password) VALUES ($1, $2, $3, $4) RETURNING *",
-          [profile.name?.givenName || "", profile.name?.familyName || "", email, null]
+passport.use(
+  new FacebookStrategy(
+    {
+      clientID:     process.env.FACEBOOK_APP_ID     || "YOUR_FACEBOOK_APP_ID",
+      clientSecret: process.env.FACEBOOK_APP_SECRET || "YOUR_FACEBOOK_APP_SECRET",
+      callbackURL:  process.env.FACEBOOK_CALLBACK_URL || "/auth/facebook/callback",
+      profileFields: [
+        "id",
+        "displayName",
+        "emails",
+        "photos"              // ← request the “photos” array so that we can read profile picture
+      ],
+    },
+    async (accessToken, refreshToken, profile, cb) => {
+      try {
+        // 1) Pull the user’s email (Facebook may not always return one, but if it does…)
+        const email = Array.isArray(profile.emails) && profile.emails.length
+          ? profile.emails[0].value
+          : null;
+        if (!email) {
+          return cb(new Error("Facebook profile did not return an email"), null);
+        }
+
+        // 2) See if this email already exists in userdata
+        const result = await pool.query(
+          "SELECT * FROM userdata WHERE email = $1",
+          [email]
         );
-        return cb(null, insert.rows[0]);
+        if (result.rows.length) {
+          // If user already exists, return that record (including existing facebook_id/picture)
+          return cb(null, result.rows[0]);
+        } else {
+          //
+          // 3) First‐time Facebook signup → extract facebook_id + profile picture URL
+          //
+          const facebookId = profile.id || null;
+
+          // The “photos” array is returned because we put "photos" in profileFields.
+          // Typically, profile.photos = [ { value: "https://.../picture.jpg", ... } ]
+          const photoUrl =
+            Array.isArray(profile.photos) && profile.photos.length
+              ? profile.photos[0].value
+              : null;
+
+          //
+          // 4) INSERT into userdata (including facebook_id + picture)
+          //
+          const insert = await pool.query(
+            `INSERT INTO userdata
+              (firstname,    lastname,     email,      password,    facebook_id,  picture)
+             VALUES
+              ($1,           $2,           $3,         $4,          $5,           $6)
+             RETURNING *`,
+            [
+              // Split displayName into first/last if you like; here we just do a simple attempt:
+              (profile.name?.givenName  || ""), 
+              (profile.name?.familyName || ""), 
+              email,
+              /* password */             null, 
+              facebookId,
+              photoUrl,
+            ]
+          );
+          return cb(null, insert.rows[0]);
+        }
+      } catch (err) {
+        return cb(err, null);
       }
-    } catch (err) {
-      return cb(err, null);
     }
-  }
-));
+  )
+);
+
 
 // 11.3) Serialize / Deserialize
 passport.serializeUser((user, done) => {
@@ -246,12 +315,16 @@ app.post("/profile", async (req, res) => {
   if (!req.isAuthenticated || !req.isAuthenticated()) {
     return res.redirect("/login");
   }
+
+  // Now we are also expecting `picture` from the form (e.g. a URL or some upload handler)
   const {
     firstname, lastname, email, phone,
     address1, address2, city, state, country,
     interest1, interest2, interest3,
-    sdg1, sdg2, sdg3
+    sdg1, sdg2, sdg3,
+    picture   // <— newly added field from your profile form
   } = req.body;
+
   try {
     await pool.query(
       `UPDATE userdata
@@ -270,27 +343,32 @@ app.post("/profile", async (req, res) => {
            interest3 = $12,
            sdg1      = $13,
            sdg2      = $14,
-           sdg3      = $15
+           sdg3      = $15,
+           picture   = $16
        WHERE email = $3`,
       [
         firstname, lastname, email, phone,
         address1, address2, city, state, country,
         interest1, interest2, interest3,
-        sdg1, sdg2, sdg3
+        sdg1, sdg2, sdg3,
+        picture        // <— include picture as $16
       ]
     );
-    // Update session user object
+
+    // Update session user object so res.locals.user is fresh.
     req.user = {
       ...req.user,
       firstname, lastname, email, phone,
       address1, address2, city, state, country,
       interest1, interest2, interest3,
-      sdg1, sdg2, sdg3
+      sdg1, sdg2, sdg3,
+      picture        // <— reflect new picture URL
     };
-    res.redirect("/profile");
+
+    return res.redirect("/profile");
   } catch (err) {
     console.error("Error updating profile:", err);
-    res.status(500).send("Error updating profile");
+    return res.status(500).send("Error updating profile");
   }
 });
 

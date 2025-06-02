@@ -1,0 +1,47 @@
+#version: "3.9"   # Use Docker Compose v3.9
+
+services:
+  # ---------- 1) postgres service ----------
+  postgres:
+    image: postgres:15-alpine
+    container_name: get-kinder-full-stack_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: my_local_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # (Optional) If you have a SQL dump named dump.sql in this repo,
+    # you can mount it and run an initialization script:
+    # volumes:
+    #  - ./dump.sql:/docker-entrypoint-initdb.d/dump.sql
+    # When Postgres container first starts, it will automatically import
+    # /docker-entrypoint-initdb.d/dump.sql into the new database.
+
+  # ---------- 2) nodeapp service ----------
+  nodeapp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: get-kinder-full-stack_node
+    restart: on-failure
+    ports:
+      - "5001:5001"
+    environment:
+      # When nodeapp tries to connect to Postgres, it should connect to service name "postgres" on the Docker network:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: my_local_db
+      # In your Express code, you should also read PORT from env:
+      PORT: 5001
+    depends_on:
+      - postgres
+
+# Persistent volume for Postgres data:
+volumes:
+  pgdata:
