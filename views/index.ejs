@@ -34,20 +34,6 @@
 <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-W4NR6FZ9"
   height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
   <!-- End Google Tag Manager (noscript) -->
-
-  <!-- NEW: Display database time (dbTime) or an error if unavailable -->
-  <% if (typeof dbTime !== 'undefined' && dbTime) { %>
-    <div class="alert alert-info alert-dismissible fade show auto-dismiss" role="alert">
-      Database time: <%= dbTime %>
-      <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-    </div>
-  <% } else { %>
-    <div class="alert alert-danger alert-dismissible fade show auto-dismiss" role="alert">
-      Database is unavailable right now.
-      <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-    </div>
-  <% } %>
-
   <% if (success) { %>
     <div class="alert alert-success alert-dismissible fade show auto-dismiss" role="alert">
       Registration successful! Welcome to Get Kinder 🌟
@@ -119,7 +105,7 @@
                     <!-- Header -->
                     <div class="card-header d-flex justify-content-between align-items-center p-3">
                       <div class="d-flex align-items-center">
-                        <img src="/images/kai.png" alt="KAI" class="rounded-circle me-2" style="width: 40px; height: 40px;">
+                        <img src="./images/KAI.png" alt="KAI" class="rounded-circle me-2" style="width: 40px; height: 40px;">
                         <h4 class="mb-0" style="color: #455a7c;">Chat with KAI now</h4>
                       </div>
                     </div>
@@ -137,7 +123,7 @@
                                </div>
                              <% } else { %>
                                <div class="d-flex align-items-center mt-2">
-                                 <img src="/images/kai.png" class="rounded-circle me-2" style="width:35px;height:35px;">
+                                 <img src="./images/KAI.png" class="rounded-circle me-2" style="width:35px;height:35px;">
                                  <div class="bg-body-tertiary rounded-3 px-3 py-2">
                                    <%= msg.content %>
                                  </div>
