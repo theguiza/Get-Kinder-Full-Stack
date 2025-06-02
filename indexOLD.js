@@ -64,7 +64,7 @@ await pool.connect()
 // 7) Compute rootPath if needed for static files
 //const rootPath = __dirname;
 //const rootPath = path.join(__dirname, "../");
-app.set("trust proxy", 1);
+
 // 8) Initialize OpenAI client
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const PgSession = connectPgSimple(session);
