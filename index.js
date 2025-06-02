@@ -76,17 +76,20 @@ app.use(express.urlencoded({ extended: true }));
 app.use(
   session({
     store: new PgSession({
-      pool: pool,                // ← use your existing Pool instance
-      tableName: "user_session", // ← name of the table in Postgres
-      // You can omit “tableName” entirely; default is “session”
-      // If the table does not exist, connect-pg-simple will create it.
+      pool: pool,                // ← your existing Pool instance
+      tableName: "user_session", // ← table name that connect-pg-simple will use
+      // ──────────────────────────────────────────────────────
+      // ADD THIS PROPERTY to have connect-pg-simple auto‐create
+      // the "user_session" table if it doesn’t already exist:
+      createTableIfMissing: true
+      // ──────────────────────────────────────────────────────
     }),
     secret: process.env.SESSION_SECRET || "default_secret",
-    resave: false,              // recommended: false
-    saveUninitialized: false,   // recommended: false
+    resave: false,
+    saveUninitialized: false,
     cookie: {
-      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
-      secure: process.env.NODE_ENV === "production", // only send cookie over HTTPS in prod
+      maxAge: 30 * 24 * 60 * 60 * 1000,
+      secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
     },
   })
