@@ -111,37 +111,51 @@
                     </div>
 
                     <!-- Body -->
-                    <div id="chatBody" class="card-body overflow-auto px-3" style="height: 400px;">
-                      <!-- 1. Replay history -->
-                      <% if (chatHistory && chatHistory.length) { 
-                           chatHistory.forEach(msg => {
-                             if (msg.role === "user") { %>
-                               <div class="d-flex justify-content-end mt-2">
-                                 <div class="bg-primary text-white rounded-3 px-3 py-2">
-                                   <%= msg.content %>
-                                 </div>
-                               </div>
-                             <% } else { %>
-                               <div class="d-flex align-items-center mt-2">
-                                 <img src="./images/KAI.png" class="rounded-circle me-2" style="width:35px;height:35px;">
-                                 <div class="bg-body-tertiary rounded-3 px-3 py-2">
-                                   <%= msg.content %>
-                                 </div>
-                               </div>
-                      <%   } 
-                           });
-                         } %>
-                    </div>
-                    <!-- off-screen template for our typing indicator -->
-                    <template id="typingIndicatorTemplate">
-                      <div class="d-flex align-items-center mt-2" id="typingIndicator">
-                        <img src="/images/kai.png" class="rounded-circle me-2" style="width: 35px; height: 35px;">
-                        <div class="typing dots bg-body-tertiary rounded-3 px-3 py-2">
-                          <span>.</span><span>.</span><span>.</span>
-                        </div>
-                      </div>
-                    </template>
+<div id="chatBody" class="card-body overflow-auto px-3" style="height: 400px;">
+  <% if (chatHistory && chatHistory.length) { 
+       chatHistory.forEach(msg => {
+         if (msg.role === "user") { %>
+           <div class="d-flex justify-content-end mt-2">
+             <!-- 1) User avatar on the right-aligned bubble -->
+             <div class="d-flex align-items-center">
+               <div class="bg-primary text-white rounded-3 px-3 py-2">
+                 <%= msg.content %>
+               </div>
+               <!-- (Optional) If you want a user picture, point to your own file here -->
+               <img src="./images/User.png"
+                    alt="you"
+                    class="rounded-circle ms-2"
+                    style="width: 35px; height: 35px;">
+             </div>
+           </div>
+         <% } else { %>
+           <div class="d-flex align-items-center mt-2">
+             <!-- 2) KAI’s avatar next to her reply -->
+             <img src="./images/KAI.png"
+                  alt="KAI"
+                  class="rounded-circle me-2"
+                  style="width: 35px; height: 35px;">
+             <div class="bg-body-tertiary rounded-3 px-3 py-2">
+               <%= msg.content %>
+             </div>
+           </div>
+  <%   } 
+       });
+     } %>
+</div>
 
+          <!-- (Off-screen template for typing indicator—also showing KAI’s avatar) -->
+          <template id="typingIndicatorTemplate">
+            <div class="d-flex align-items-center mt-2" id="typingIndicator">
+              <img src="./images/KAI.png"
+                  alt="KAI"
+                  class="rounded-circle me-2"
+                  style="width: 35px; height: 35px;">
+              <div class="typing dots bg-body-tertiary rounded-3 px-3 py-2">
+                <span>.</span><span>.</span><span>.</span>
+              </div>
+            </div>
+          </template>
                     <!-- Footer / Input -->
                     <div class="card-footer text-muted d-flex align-items-center p-3">
                       <input type="text" id="chatInput" class="form-control form-control-lg ms-2" placeholder="Type message...">

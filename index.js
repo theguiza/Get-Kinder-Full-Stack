@@ -22,6 +22,7 @@ import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import { Strategy as FacebookStrategy } from "passport-facebook";
 import { createThread, createMessage, createAndPollRun, listMessages } from "./Backend/assistant.js";
 import OpenAI from "openai";
+import connectPgSimple from "connect-pg-simple";
 
 // 3) Compute __dirname for ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -66,19 +67,30 @@ await pool.connect()
 
 // 8) Initialize OpenAI client
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const PgSession = connectPgSimple(session);
 
 // 9) Middleware setup
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(session({
-  secret: process.env.SESSION_SECRET || "default_secret",
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
-  }
-}));
+app.use(
+  session({
+    store: new PgSession({
+      pool: pool,                // ← use your existing Pool instance
+      tableName: "user_session", // ← name of the table in Postgres
+      // You can omit “tableName” entirely; default is “session”
+      // If the table does not exist, connect-pg-simple will create it.
+    }),
+    secret: process.env.SESSION_SECRET || "default_secret",
+    resave: false,              // recommended: false
+    saveUninitialized: false,   // recommended: false
+    cookie: {
+      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+      secure: process.env.NODE_ENV === "production", // only send cookie over HTTPS in prod
+      sameSite: "lax",
+    },
+  })
+);
 app.use(passport.initialize());
 app.use(passport.session());
 app.use(express.static(path.join(__dirname, "public")));
