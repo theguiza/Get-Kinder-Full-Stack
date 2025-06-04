@@ -110,11 +110,6 @@
     line-height: 35px;
 }
 
-.login_wrapper a.google-plus {
-    background: #db4c3e;
-    border: 1px solid #db4c3e;
-}
-
 .login_wrapper h2 {
     font-size: 18px;
     font-weight: 500;
@@ -227,10 +222,35 @@ p {
     border-color: #2c6ad4;
 }
 
-.login_wrapper a.google-plus:hover {
-    background: #bd4033;
-    border-color: #bd4033;
+.login_wrapper a.google-plus {
+  /* Base state */
+  color: #000;
+  background-color: #fff;
+  border: 1px solid #ccc;
+  text-align: center;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
 }
+
+.login_wrapper a.google-plus img {
+  /* you can leave icon-styles inline or move them here */
+  height: 20px;
+  width: 20px;
+  margin-right: 8px;
+  vertical-align: middle;
+}
+
+/* Hover state */
+.login_wrapper a.google-plus:hover {
+  background-color: #DB4437;
+  border-color: #DB4437;
+  color: #fff;
+}
+
+.login_wrapper a.google-plus:hover img {
+  /* optional: invert the icon to white, if you want */
+  filter: brightness(0) invert(1);
+}
+
 
 .form-control:focus {
     box-shadow: none;
