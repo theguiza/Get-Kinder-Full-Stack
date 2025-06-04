@@ -233,8 +233,8 @@ p {
 
 .login_wrapper a.google-plus img {
   /* you can leave icon-styles inline or move them here */
-  height: 20px;
-  width: 20px;
+  height: 40px;
+  width: 40px;
   margin-right: 8px;
   vertical-align: middle;
 }
