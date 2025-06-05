@@ -72,7 +72,7 @@
                   <span class="navbar-text fw-bold me-2" style="font-size: 1.2rem; color: #455a7c;">
                     <%= user.firstname || user.email %>
                   </span>
-                  <img src="<%= user.picture ? user.picture : '/images/nerdy-KAI.png' %>" class="rounded-circle me-3" width="32" height="32" alt="User Avatar">
+                  <img src="<%= user.picture ? user.picture : '/images/nerdy-KAI.png' %>" class="rounded-circle me-3" width="32" height="32" alt="Get Kinder User Avatar">
                   <button class="btn btn-outline-danger btn-sm" data-bs-toggle="modal" data-bs-target="#logoutModal">Log Out</button>
                 </li>
               <% } else { %>
@@ -114,13 +114,11 @@
                         chatHistory.forEach(msg => {
                        if (msg.role === "user") { %>
                   <div class="d-flex justify-content-end mt-2">
-                    <!-- 1) User avatar on the right-aligned bubble -->
                     <div class="d-flex align-items-center">
                       <div class="bg-primary text-white rounded-3 px-3 py-2">
                         <%= msg.content %>
                       </div>
-                      <!-- (Optional) If you want a user picture, point to your own file here -->
-                      <img src="<%= user.picture || '/images/nerdy-KAI.png' %>" alt="get kinder user profile picture" class="rounded-circle ms-2" style="width: 35px; height: 35px;">
+                      <img src="<%= (msg.user && msg.user.picture) || '/images/nerdy-KAI.png' %>" alt="get kinder user profile picture" class="rounded-circle ms-2" style="width: 35px; height: 35px;">
              </div>
            </div>
          <% } else { %>
@@ -294,6 +292,12 @@
       });
     });
   </script>
+<% if (typeof user !== 'undefined' && user) { %>
+   <script>
+     window.loggedInUserPicture = "<%= user.picture || '/images/nerdy-KAI.png' %>";
+   </script>
+   <script src="/js/chat.js"></script>
+ <% } %>
   <script src="/js/chat.js"></script>
 </body>
 </html>

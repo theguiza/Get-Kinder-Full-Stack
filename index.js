@@ -23,7 +23,20 @@ import { Strategy as FacebookStrategy } from "passport-facebook";
 import { createThread, createMessage, createAndPollRun, listMessages } from "./Backend/assistant.js";
 import OpenAI from "openai";
 import connectPgSimple from "connect-pg-simple";
+import multer from "multer";
 
+//const multer = require('multer');
+// Instead of diskStorage, use memoryStorage:
+const uploadAvatar = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 2 * 1024 * 1024 }, // 2 MB max
+  fileFilter: (req, file, cb) => {
+    if (!file.mimetype.startsWith('image/')) {
+      return cb(new Error('Only image files are allowed!'), false);
+    }
+    cb(null, true);
+  },
+});
 // 3) Compute __dirname for ES modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -72,7 +85,8 @@ const PgSession = connectPgSimple(session);
 // 9) Middleware setup
 app.use(cors());
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+//app.use(express.urlencoded({ extended: true }));
+app.use(express.urlencoded({ extended: false }));
 app.use(
   session({
     store: new PgSession({
@@ -326,87 +340,135 @@ app.get("/logout", (req, res, next) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // 13) Profile Update Route
 // ─────────────────────────────────────────────────────────────────────────────
-app.post("/profile", async (req, res) => {
-  if (!req.isAuthenticated || !req.isAuthenticated()) {
-    return res.redirect("/login");
+function ensureAuthenticated(req, res, next) {
+  if (req.isAuthenticated && req.isAuthenticated()) {
+    return next();
   }
+  return res.redirect("/login");
+}
 
-  // Now we are also expecting `picture` from the form (e.g. a URL or some upload handler)
-  const {
-    firstname, lastname, email, phone,
-    address1, address2, city, state, country,
-    interest1, interest2, interest3,
-    sdg1, sdg2, sdg3,
-    picture   // <— newly added field from your profile form
-  } = req.body;
+app.post(
+  '/profile',
+  ensureAuthenticated,
+  uploadAvatar.single('picture'),
+  async (req, res) => {
+    // 1) Extract text fields from req.body
+    const {
+      firstname,
+      lastname,
+      email,
+      phone,
+      address1,
+      address2,
+      city,
+      state,
+      country,
+      interest1,
+      interest2,
+      interest3,
+      sdg1,
+      sdg2,
+      sdg3,
+    } = req.body;
 
-  try {
-    await pool.query(
-      `UPDATE userdata
-         SET 
-           firstname = $1,
-           lastname  = $2,
-           email     = $3,
-           phone     = $4,
-           address1  = $5,
-           address2  = $6,
-           city      = $7,
-           state     = $8,
-           country   = $9,
-           interest1 = $10,
-           interest2 = $11,
-           interest3 = $12,
-           sdg1      = $13,
-           sdg2      = $14,
-           sdg3      = $15,
-           picture   = $16
-       WHERE email = $3`,
-      [
-        firstname, lastname, email, phone,
-        address1, address2, city, state, country,
-        interest1, interest2, interest3,
-        sdg1, sdg2, sdg3,
-        picture        // <— include picture as $16
-      ]
-    );
+    // 2) Build Base64‐encoded data URI if a file was uploaded; otherwise keep existing
+    let newPictureData = req.user.picture || null;
+    if (req.file) {
+      const mimeType = req.file.mimetype; // e.g. "image/png"
+      const base64str = req.file.buffer.toString('base64');
+      newPictureData = `data:${mimeType};base64,${base64str}`;
+    }
 
-    // Update session user object so res.locals.user is fresh.
-    req.user = {
-      ...req.user,
-      firstname, lastname, email, phone,
-      address1, address2, city, state, country,
-      interest1, interest2, interest3,
-      sdg1, sdg2, sdg3,
-      picture        // <— reflect new picture URL
-    };
+    try {
+      // 3) Update all fields, including picture (TEXT column)
+      await pool.query(
+        `
+        UPDATE userdata
+           SET
+             firstname = $1,
+             lastname  = $2,
+             email     = $3,
+             phone     = $4,
+             address1  = $5,
+             address2  = $6,
+             city      = $7,
+             state     = $8,
+             country   = $9,
+             interest1 = $10,
+             interest2 = $11,
+             interest3 = $12,
+             sdg1      = $13,
+             sdg2      = $14,
+             sdg3      = $15,
+             picture   = $16
+         WHERE email = $3
+        `,
+        [
+          firstname,
+          lastname,
+          email,
+          phone,
+          address1,
+          address2,
+          city,
+          state,
+          country,
+          interest1,
+          interest2,
+          interest3,
+          sdg1,
+          sdg2,
+          sdg3,
+          newPictureData,
+        ]
+      );
 
-    return res.redirect("/profile");
-  } catch (err) {
-    console.error("Error updating profile:", err);
-    return res.status(500).send("Error updating profile");
+      // 4) Update req.user so EJS picks up new picture immediately
+      req.user = {
+        ...req.user,
+        firstname,
+        lastname,
+        email,
+        phone,
+        address1,
+        address2,
+        city,
+        state,
+        country,
+        interest1,
+        interest2,
+        interest3,
+        sdg1,
+        sdg2,
+        sdg3,
+        picture: newPictureData,
+      };
+
+      return res.redirect('/profile');
+    } catch (err) {
+      console.error('Error updating profile:', err);
+      return res.status(500).send('Error updating profile');
+    }
   }
-});
+);
 
 // 13.4) View Profile Route
-app.get("/profile", async (req, res) => {
-  if (!req.isAuthenticated || !req.isAuthenticated()) {
-    return res.redirect("/login");
-  }
+app.get('/profile', ensureAuthenticated, async (req, res) => {
   try {
     const result = await pool.query(
-      "SELECT * FROM userdata WHERE email = $1",
+      'SELECT * FROM userdata WHERE email = $1',
       [req.user.email]
     );
     if (result.rows.length === 0) {
-      return res.redirect("/login");
+      return res.redirect('/login');
     }
-    res.render("profile", {
-      title: "User Profile",
-      user: result.rows[0]
+    return res.render('profile', {
+      title: 'User Profile',
+      user: result.rows[0],
     });
   } catch (err) {
-    console.error("Profile DB error:", err);
-    res.status(500).send("Error loading profile.");
+    console.error('Profile DB error:', err);
+    return res.status(500).send('Error loading profile.');
   }
 });
 

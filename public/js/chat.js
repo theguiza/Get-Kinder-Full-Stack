@@ -39,21 +39,22 @@ document.addEventListener('DOMContentLoaded', () => {
   
 });
 
-  function appendUserBubble(text) {
-    const bubble = document.createElement('div');
-    bubble.classList.add('user-bubble');
-    bubble.innerText = text;
-    chatBody.appendChild(bubble);
-    chatBody.scrollTop = chatBody.scrollHeight;
-  }
+function appendAssistantBubble(text) {
+  if (!text) return;
 
-  function appendAssistantBubble(text) {
-    const bubble = document.createElement('div');
-    bubble.classList.add('assistant-bubble');
-    bubble.innerText = text;
-    chatBody.appendChild(bubble);
-    chatBody.scrollTop = chatBody.scrollHeight;
-  }
+  const wrapper = document.createElement('div');
+  wrapper.className = 'd-flex mt-2 align-items-start';
+
+  wrapper.innerHTML = `
+    <img src="./images/KAI.png" alt="KAI – the AI kindness coach" class="rounded-circle flex-shrink-0 me-2" style="width: 35px; height: 35px;">
+    <div class="bg-body-tertiary rounded-3 px-3 py-2 ms-2 flex-grow-1" style="max-width: calc(100% - 50px);">
+      ${sanitizeHTML(text)}
+    </div>
+  `;
+
+  chatBody.appendChild(wrapper);
+  chatBody.scrollTop = chatBody.scrollHeight;
+}
 
 function appendUserBubble(text) {
   const html = `
@@ -61,7 +62,12 @@ function appendUserBubble(text) {
       <div style="background-color: #455a7c; color: white; max-width: 100%; min-width: 50px;" class="p-2 rounded-3 d-inline-block">
         <p class="small mb-0" style="color: white;">${sanitizeHTML(text)}</p>
       </div>
-      <img src="/images/nerdy-KAI.png" alt="you" class="rounded-circle ms-2" style="width: 45px; height: 45px;">
+      <img
+        src="${window.loggedInUserPicture}"
+        alt="get kinder user avatar"
+        class="rounded-circle ms-2"
+        style="width: 45px; height: 45px;"
+      >
     </div>
   `;
   document.getElementById('chatBody').insertAdjacentHTML('beforeend', html);

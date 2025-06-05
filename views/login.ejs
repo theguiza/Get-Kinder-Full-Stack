@@ -120,28 +120,6 @@
     }
   }
 </script>
-<!-- Facebook SDK 
-<script async defer crossorigin="anonymous" 
-  src="https://connect.facebook.net/en_US/sdk.js"></script>
-
-<script>
-  window.fbAsyncInit = function () {
-    FB.init({
-      appId: '<%= process.env.FACEBOOK_APP_ID || "YOUR_DEFAULT_APP_ID" %>',
-      cookie: true,
-      xfbml: true,
-      version: 'v19.0'
-    });
-
-    document.getElementById("fb-login-btn").addEventListener("click", function () {
-      FB.login(function (response) {
-        if (response.authResponse) {
-          window.location.href = "/auth/facebook";
-        }
-      }, { scope: 'public_profile,email' });
-    });
-  };
-</script> -->
   <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script> 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/js/bootstrap.bundle.min.js" integrity="sha384-k6d4wzSIapyDyv1kpU366/PK5hCdSbCRGRCMv+eplOQJWyd1fbcAu9OCUj5zNLiq" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
