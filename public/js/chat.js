@@ -20,6 +20,8 @@ document.addEventListener('DOMContentLoaded', () => {
    typingIndicator.style.display = 'flex';
    chatBody.appendChild(typingIndicator);
 
+     chatBody.scrollTop = chatBody.scrollHeight;
+
     try {
       const response = await fetch('/api/chat/message', {
         method: 'POST',

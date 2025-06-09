@@ -110,6 +110,23 @@
                     </div>
                     <!-- Body -->
               <div id="chatBody" class="card-body overflow-auto px-3" style="height: 400px;">
+                  <% if (!chatHistory || !chatHistory.length) { %>
+    <!-- Initial hard-coded greeting from KAI -->
+    <div class="d-flex mt-2 align-items-start">
+      <img
+        src="./images/KAI.png"
+        alt="KAI – the AI kindness coach"
+        class="rounded-circle flex-shrink-0 me-2"
+        style="width: 35px; height: 35px;"
+      />
+      <div
+        class="bg-body-tertiary rounded-3 px-3 py-2 ms-2 flex-grow-1"
+        style="max-width: calc(100% - 50px);"
+      >
+        👋 Hello! I’m KAI, your Kind AI coach. How can I help you today? Start with a Kindness Style Quiz?
+      </div>
+    </div>
+  <% } %>
                   <% if (chatHistory && chatHistory.length) { 
                         chatHistory.forEach(msg => {
                        if (msg.role === "user") { %>
