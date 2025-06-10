@@ -494,7 +494,7 @@ app.get("/", async (req, res, next) => {
     const success      = req.query.success === "1";   // registration success
     const loginSuccess = req.query.login   === "1";   // login success
     const name         = req.query.name   || "";      // user’s name/email
-
+     const title        = "Home";  // title for the EJS template
     // B) Database connectivity check
     let dbTime = null;
     try {
@@ -506,23 +506,29 @@ app.get("/", async (req, res, next) => {
     }
 
     // C) Chat-history logic (OpenAI threads)
-    let chatHistory = [];
-    if (req.session && req.session.threadId) {
-      const thread = await openai.beta.threads.retrieve(req.session.threadId);
-      chatHistory = Array.isArray(thread.messages) ? thread.messages : [];
-    }
-    const threadId = (req.session && req.session.threadId) || "";
+// C) Chat-history logic
+let chatHistory = [];
+if (req.session && req.session.threadId) {
+  const thread = await openai.beta.threads.retrieve(req.session.threadId);
+  chatHistory = Array.isArray(thread.messages) ? thread.messages : [];
+}
+const threadId = (req.session && req.session.threadId) || "";
 
-    // D) Render index.ejs with all variables
-    return res.render("index", {
-      title:        "Home",
-      success,
-      loginSuccess,
-      name,
-      chatHistory,
-      threadId,
-      dbTime
-    });
+// NEW: are they new?
+const isNewUser = chatHistory.length === 0;
+
+// D) Render index.ejs (pass the flag)
+return res.render("index", {
+  title:        "Home",
+  success,
+  loginSuccess,
+  name,
+  chatHistory,
+  threadId,
+  dbTime,
+  isNewUser    // ← add this line
+});
+
   } catch (err) {
     return next(err);
   }
