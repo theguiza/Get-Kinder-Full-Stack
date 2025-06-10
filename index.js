@@ -480,7 +480,6 @@ app.get("/contact", (req, res) => res.render("contact", { title: "Contact Us" })
 app.get("/accessability", (req, res) => res.render("accessability", { title: "Accessibility" }));
 app.get("/privacy",      (req, res) => res.render("privacy",      { title: "Privacy Policy" }));
 app.get("/terms",        (req, res) => res.render("terms",        { title: "Terms of Service" }));
-
 // 14.1) Login and Register pages (GET)
 app.get("/login",    (req, res) => res.render("login",    { title: "Log In",     facebookAppId: process.env.FACEBOOK_APP_ID }));
 app.get("/register", (req, res) => res.render("register", { title: "Sign Up" }));
