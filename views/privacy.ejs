@@ -24,6 +24,7 @@
 
   <link rel="icon" href="./images/favicon.png" sizes="32x32" type="image/png">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-SgOJa3DmI69IUzQ2PVdRZhwQ+dy64/BUtbMJw1MZ8t5HZApcHrRKUc4W0kG879m7" crossorigin="anonymous">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
   <link rel="stylesheet" href="./css/style.css">
 </head>
 
@@ -154,34 +155,56 @@
             </ul>
           </div> 
           </div> 
-  <!-- Footer section needs a logo to the far left -->
-  <section id="contact" class="gradient-background">
-    <div class="container ">
-      <footer class="row row-cols-1 row-cols-sm-2 row-cols-md-5 py-5 mt-5 border-top">
-        <div class="col mb-3">
-          <div class="col mb-3">
-                 <a href="#">
-                  <img src="./images/heart.png" alt="Get Kinder Heart" height="150">
-                 </a>
-              </div>
-          <p class="text-body-secondary">© Get Kindr Foundation </p>
-        </div>
-
-        <div class="col mb-3">
-        </div>
-
-        <div class="container-fluid"></div>
+<section id="footer" class="gradient-background">
+  <div class="container">
+    <footer class="row align-items-center py-5 mt-5 border-top text-body-secondary">
+      <!-- 1) Logo: centered on xs, left on md+ -->
+      <div class="col-12 col-md-4 mb-4 mb-md-0 text-center text-md-start">
+        <a href="#">
+          <img src="./images/heart.png" alt="Get Kinder Heart" height="150">
+        </a>
+        <p class="mt-2">
+          &copy;
+          <a href="https://getkindr.com/" target="_blank" rel="noopener noreferrer"
+             class="text-body-secondary text-decoration-underline">
+            Get Kindr Foundation
+          </a>
+        </p>
+      </div>
+      <!-- 2) Social Icons: always centered -->
+      <div class="col-12 col-md-4 mb-4 mb-md-0 d-flex justify-content-center">
+        <a class="btn btn-floating m-1 text-white" style="background-color: #3b5998;"
+           href="https://www.facebook.com/profile.php?id=61576860759313" role="button">
+          <i class="fab fa-facebook-f"></i>
+        </a>
+        <a class="btn btn-floating m-1 text-white" style="background-color: #ac2bac;"
+           href="https://www.instagram.com/getkinder/" role="button">
+          <i class="fab fa-instagram"></i>
+        </a>
+        <a class="btn btn-floating m-1 text-white" style="background-color: #0082ca;"
+           href="https://www.linkedin.com/company/getkindrfoundation/" role="button">
+          <i class="fab fa-linkedin-in"></i>
+        </a>
+        <a class="btn btn-floating m-1 text-white" style="background-color: #c8232c;"
+           href="https://ca.pinterest.com/getkindr/" role="button">
+          <i class="fab fa-pinterest"></i>
+        </a>
+      </div>
+      <!-- 3) More About: centered on xs, right on md+ -->
+      <div class="col-12 col-md-4 mb-4 mb-md-0 text-center text-md-end">
         <h5>More About Get Kinder</h5>
         <ul class="nav flex-column">
-          <li class="nav-item mb-2"><a href="/" class="nav-link p-0 text-body-secondary">Home</a></li>
+          <li class="nav-item mb-2"><a href="/"            class="nav-link p-0 text-body-secondary">Home</a></li>
           <li class="nav-item mb-2"><a href="about" class="nav-link p-0 text-body-secondary">About</a></li>
-          <li class="nav-item mb-2"><a href="contact" class="nav-link p-0 text-body-secondary">Contact</a></li>
-          <li class="nav-item mb-2"><a href="#" class="nav-link p-0 text-body-secondary">Privacy</a></li>
-          <li class="nav-item mb-2"><a href="terms" class="nav-link p-0 text-body-secondary">Terms</a></li>
+          <li class="nav-item mb-2"><a href="contact"     class="nav-link p-0 text-body-secondary">Contact</a></li>
+          <li class="nav-item mb-2"><a href="privacy"     class="nav-link p-0 text-body-secondary">Privacy</a></li>
+          <li class="nav-item mb-2"><a href="terms"       class="nav-link p-0 text-body-secondary">Terms</a></li>
           <li class="nav-item mb-2"><a href="accessability" class="nav-link p-0 text-body-secondary">Accessability</a></li>
         </ul>
       </div>
-  </section>
+    </footer>
+  </div>
+</section>
   <script async type='module' src='https://interfaces.zapier.com/assets/web-components/zapier-interfaces/zapier-interfaces.esm.js'></script>
   <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script> 
   <script src="assistant.js" charset="UTF-8"></script> 

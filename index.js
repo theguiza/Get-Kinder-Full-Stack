@@ -24,9 +24,13 @@ import { createThread, createMessage, createAndPollRun, listMessages } from "./B
 import OpenAI from "openai";
 import connectPgSimple from "connect-pg-simple";
 import multer from "multer";
+import cron from "node-cron";
+import ejs from "ejs";
 
-//const multer = require('multer');
-// Instead of diskStorage, use memoryStorage:
+import { FUNCTIONS } from "./openaiFunctions.js";
+import { fetchUserEmails, fetchKindnessPrompts, fetchEmailSubject } from "./fetchData.js";
+import { sendDailyKindnessPrompts } from "./kindnessEmailer.js";
+
 const uploadAvatar = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 2 * 1024 * 1024 }, // 2 MB max
@@ -477,7 +481,7 @@ app.get('/profile', ensureAuthenticated, async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 app.get("/about",   (req, res) => res.render("about",   { title: "About Us" }));
 app.get("/contact", (req, res) => res.render("contact", { title: "Contact Us" }));
-app.get("/accessability", (req, res) => res.render("accessability", { title: "Accessibility" }));
+app.get("/accessability", (req, res) => res.render("accessability", { title: "Accessability" }));
 app.get("/privacy",      (req, res) => res.render("privacy",      { title: "Privacy Policy" }));
 app.get("/terms",        (req, res) => res.render("terms",        { title: "Terms of Service" }));
 // 14.1) Login and Register pages (GET)
@@ -585,6 +589,75 @@ app.post('/api/chat/message', async (req, res) => {
     res.status(500).json({ error: "Something went wrong." });
   }
 });
+// On-demand function-call endpoint
+app.post("/chat", async (req, res) => {
+  try {
+    const { message } = req.body;
+    const completion = await openai.chat.completions.create({
+      model:       "gpt-4o-mini",
+      messages: [
+        { role: "system", content: "You’re a kindness assistant." },
+        { role: "user",   content: message }
+      ],
+      functions:      FUNCTIONS,
+      function_call:  "auto"
+    });
+
+    const msg = completion.choices[0].message;
+
+    // NEW: check for tool_calls instead of deprecated function_call
+    if (msg.finish_reason === "tool_calls" && Array.isArray(msg.tool_calls)) {
+      // grab the first tool call
+      const call = msg.tool_calls[0];
+      if (call.function.name === "send_daily_kindness_prompts") {
+        const args = JSON.parse(call.function.arguments);
+        await sendDailyKindnessPrompts(args);
+        return res.json({
+          role:    "assistant",
+          content: "✅ Prompts sent!"
+        });
+      }
+    }
+
+    // fallback to normal chat response
+    res.json({
+      role:    msg.role,
+      content: msg.content
+    });
+  } catch (err) {
+    console.error("Error in /chat:", err);
+    res.status(500).json({
+      role:    "assistant",
+      content: `❌ ${err.message}`
+    });
+  }
+});
+
+
+// Cron: run every day at KINDNESS_SEND_TIME (HH:MM, Vancouver)
+const [hour, minute] = process.env.KINDNESS_SEND_TIME.split(":");
+cron.schedule(
+  `${minute} ${hour} * * *`,
+  async () => {
+    console.log(`[${new Date().toISOString()}] running daily kindness job…`);
+    try {
+      const user_emails      = await fetchUserEmails();
+      const kindness_prompts = await fetchKindnessPrompts();
+      const subject          = fetchEmailSubject();
+      const send_time        = new Date().toISOString();
+
+      await sendDailyKindnessPrompts({
+        user_emails,
+        kindness_prompts,
+        subject,
+        send_time
+      });
+    } catch (e) {
+      console.error("Daily job failed:", e);
+    }
+  },
+  { timezone: "America/Vancouver" }
+);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 18) Start the server
