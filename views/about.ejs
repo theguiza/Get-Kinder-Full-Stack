@@ -23,25 +23,58 @@
 <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-W4NR6FZ9"
   height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
   <!-- End Google Tag Manager (noscript) -->
-   <header>
-  <nav class="navbar navbar-light bg-white navbar-expand-lg">
-    <div class="container-fluid d-flex">
-      <a class="navbar-brand" href="/"> 
-        <img src="./images/logo.png" alt="Get Kinder logo" height="100">
-      </a>
-      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav"
-        aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
-        <span class="navbar-toggler-icon"></span>
-      </button>
-      <div class="collapse navbar-collapse justify-content-end" id="navbarNav">
-        <ul class="navbar-nav">
-          <li class="nav-item"><a class="nav-link mx-1" href="/" style="font-size: 1.5rem; color: #455a7c; font-weight: bold; margin-right: 80px;" ">Home </a></li>
-        </ul>
-      </div>
+    <% if (success) { %>
+    <div class="alert alert-success alert-dismissible fade show auto-dismiss" role="alert">
+      Registration successful! Welcome to Get Kinder 🌟
+      <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
     </div>
-  </nav>
-</header>
-  
+  <% } %>
+
+  <% if (loginSuccess && name) { %>
+    <div class="alert alert-success alert-dismissible fade show auto-dismiss" role="alert">
+      Welcome back, <%= name %>! 🎉
+      <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+  <% } %>
+    <header>
+      <nav class="navbar navbar-light bg-white navbar-expand-lg">
+        <div class="container-fluid d-flex">
+          <a class="navbar-brand" href="/">
+            <img src="/images/logo.png" alt="Get Kinder logo" height="100">
+          </a>
+          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav"
+            aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+            <span class="navbar-toggler-icon"></span>
+          </button>
+          <div class="collapse navbar-collapse justify-content-end" id="navbarNav">
+            <ul class="navbar-nav align-items-center">
+              <li class="nav-item">
+                <a class="nav-link mx-1" href="blog" style="font-size: 1.2rem; color: #455a7c; font-weight: bold; padding-right: 30px;">Blog</a>
+              </li>
+              <li class="nav-item">
+                <a class="nav-link mx-1" href="profile" style="font-size: 1.2rem; color: #455a7c; font-weight: bold; padding-right: 30px;">Profile</a>
+              </li>
+              <li class="nav-item">
+                <a class="nav-link mx-1" href="about" style="font-size: 1.2rem; color: #455a7c; font-weight: bold; padding-right: 30px;">About</a>
+              </li>
+              <% if (user) { %>
+                <li class="nav-item d-flex align-items-center me-3">
+                  <span class="navbar-text fw-bold me-2" style="font-size: 1.2rem; color: #455a7c;">
+                    <%= user.firstname || user.email %>
+                  </span>
+                  <img src="<%= user.picture ? user.picture : '/images/nerdy-KAI.png' %>" class="rounded-circle me-3" width="32" height="32" alt="Get Kinder User Avatar">
+                  <button class="btn btn-outline-danger btn-sm" data-bs-toggle="modal" data-bs-target="#logoutModal">Log Out</button>
+                </li>
+              <% } else { %>
+                <li class="nav-item">
+                  <a class="btn btn-primary btn-lgr" style="font-size: 1.2rem; color: white; text-decoration: none; width: 100%; min-width: 120px; text-align: center;" href="login" role="button">Log In</a>
+                </li>
+              <% } %>
+            </ul>
+          </div>
+        </div>
+      </nav>
+    </header>
   <section id="title" class="gradient-background">
     <div class="container py-5">
       <h1 style="color: aliceblue; font-size: 4rem; margin-bottom: 40px;">About Get Kinder</h1>
@@ -119,13 +152,11 @@
             </div>
             <div>
               <h3 style="color: #455a7c; font-size: 2.5rem;">Vision.</h3>
-              <p style="font-size: 1.2rem;">We envision a kinder, more compassionate world driven by innovative <strong> AI for Good </strong> solutions. By harnessing <strong>Kinder AI™</strong>  and aligning with the <strong>UN's 17 Sustainable Development Goals</strong>, we aim to foster resilience, strengthen communities, and amplify global happiness—one intentional act of kindness at a time.</p>
+              <p style="font-size: 1.2rem;">As part of the <a href="https://getkindr.com/" target="_blank" rel="noopener noreferrer">Get Kindr Foundation</a> we envision a kinder, more compassionate world driven by innovative <strong> AI for Good </strong> solutions. By harnessing <strong>Kinder AI™</strong>  and aligning with the <strong>UN's 17 Sustainable Development Goals</strong>, we aim to foster resilience, strengthen communities, and amplify global happiness—one intentional act of kindness at a time.</p>
               <p style="font-size: 1.2rem;"><strong>Get Kinder, doing good feels good.</strong> </p>
-
             </div>
           </div>
         </div>
-  
       </div>
     </div>
   </section>
@@ -148,19 +179,19 @@
       <!-- 2) Social Icons: always centered -->
       <div class="col-12 col-md-4 mb-4 mb-md-0 d-flex justify-content-center">
         <a class="btn btn-floating m-1 text-white" style="background-color: #3b5998;"
-           href="https://www.facebook.com/profile.php?id=61576860759313" role="button">
+           href="https://www.facebook.com/profile.php?id=61576860759313" role="button" target="_blank" rel="noopener noreferrer">
           <i class="fab fa-facebook-f"></i>
         </a>
         <a class="btn btn-floating m-1 text-white" style="background-color: #ac2bac;"
-           href="https://www.instagram.com/getkinder/" role="button">
+           href="https://www.instagram.com/getkinder/" role="button" target="_blank" rel="noopener noreferrer">
           <i class="fab fa-instagram"></i>
         </a>
         <a class="btn btn-floating m-1 text-white" style="background-color: #0082ca;"
-           href="https://www.linkedin.com/company/getkindrfoundation/" role="button">
+           href="https://www.linkedin.com/company/getkindrfoundation/" role="button" target="_blank" rel="noopener noreferrer">
           <i class="fab fa-linkedin-in"></i>
         </a>
         <a class="btn btn-floating m-1 text-white" style="background-color: #c8232c;"
-           href="https://ca.pinterest.com/getkindr/" role="button">
+           href="https://ca.pinterest.com/getkindr/" role="button" target="_blank" rel="noopener noreferrer">
           <i class="fab fa-pinterest"></i>
         </a>
       </div>
@@ -179,7 +210,25 @@
     </footer>
   </div>
 </section>
+   <div class="modal fade" id="logoutModal" tabindex="-1" aria-labelledby="logoutModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Confirm Logout</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="https://www.gravatar.com/avatar/1a5cfe35718514d764a42484a0fb0830?s=64&d=robohashmodal-body">
+          Are you sure you want to log out?
+        </div>
+        <div class="modal-footer">
+          <form action="/logout" method="GET">
+            <button type="submit" class="btn btn-danger">Log Out</button>
+          </form>
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/js/bootstrap.bundle.min.js" integrity="sha384-k6d4wzSIapyDyv1kpU366/PK5hCdSbCRGRCMv+eplOQJWyd1fbcAu9OCUj5zNLiq" crossorigin="anonymous"></script>
 </body>
-
 </html>

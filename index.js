@@ -455,10 +455,10 @@ app.post(
     }
   }
 );
-
 // 13.4) View Profile Route
 app.get('/profile', ensureAuthenticated, async (req, res) => {
   try {
+    // 1) Fetch the user's record
     const result = await pool.query(
       'SELECT * FROM userdata WHERE email = $1',
       [req.user.email]
@@ -466,20 +466,26 @@ app.get('/profile', ensureAuthenticated, async (req, res) => {
     if (result.rows.length === 0) {
       return res.redirect('/login');
     }
+    // 2) Mirror your home/about/blog locals
+    const success      = req.query.success === '1';   // registration alert
+    const loginSuccess = req.query.login   === '1';   // login alert
+    const name         = req.query.name    || '';     // firstname/email
+    // 3) Render profile.ejs with all flags + user data
     return res.render('profile', {
-      title: 'User Profile',
-      user: result.rows[0],
+      title:        'User Profile',
+      user:         result.rows[0],
+      success,
+      loginSuccess,
+      name
     });
   } catch (err) {
     console.error('Profile DB error:', err);
     return res.status(500).send('Error loading profile.');
   }
 });
-
 // ─────────────────────────────────────────────────────────────────────────────
 // 14) Static Content Pages
 // ─────────────────────────────────────────────────────────────────────────────
-app.get("/about",   (req, res) => res.render("about",   { title: "About Us" }));
 app.get("/contact", (req, res) => res.render("contact", { title: "Contact Us" }));
 app.get("/accessability", (req, res) => res.render("accessability", { title: "Accessability" }));
 app.get("/privacy",      (req, res) => res.render("privacy",      { title: "Privacy Policy" }));
@@ -488,6 +494,34 @@ app.get("/terms",        (req, res) => res.render("terms",        { title: "Term
 app.get("/login",    (req, res) => res.render("login",    { title: "Log In",     facebookAppId: process.env.FACEBOOK_APP_ID }));
 app.get("/register", (req, res) => res.render("register", { title: "Sign Up" }));
 
+app.get("/about", (req, res) => {
+  // mirror the same flags you use on your home route
+  const success      = req.query.success === "1";
+  const loginSuccess = req.query.login   === "1";
+  const name         = req.query.name    || "";
+
+  res.render("about", {
+    title:        "About Us",
+    success,
+    loginSuccess,
+    name,
+    user:         req.user
+  });
+});
+
+app.get("/blog", (req, res) => {
+  const success      = req.query.success === "1";
+  const loginSuccess = req.query.login   === "1";
+  const name         = req.query.name    || "";
+
+  res.render("blog", {
+    title:        "Kinder Blog",
+    success,
+    loginSuccess,
+    name,
+    user:         req.user
+  });
+});
 // ─────────────────────────────────────────────────────────────────────────────
 // 15) Updated Home Route (with DB time check and chat-history logic)
 // ─────────────────────────────────────────────────────────────────────────────

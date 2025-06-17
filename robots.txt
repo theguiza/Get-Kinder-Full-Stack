@@ -1,0 +1,30 @@
+# robots.txt for https://getkinder.ai
+
+#────────────────────────────────────────────────────────────────
+# Universal rules for all crawlers
+#────────────────────────────────────────────────────────────────
+User-agent: *
+# Block access to sensitive directories
+Disallow: /admin/
+Disallow: /private/
+# Block PDF files to conserve crawl budget (if supported)
+Disallow: /*.pdf$
+# Allow crawling of static assets required for rendering
+Allow: /assets/css/
+Allow: /assets/js/
+Allow: /assets/images/
+
+#────────────────────────────────────────────────────────────────
+# Specific override for Googlebot
+#────────────────────────────────────────────────────────────────
+User-agent: Googlebot
+# Allow full access except sensitive directories
+Disallow: /admin/
+Disallow: /private/
+Allow: /
+
+#────────────────────────────────────────────────────────────────
+# Sitemap declarations (placed at end)
+#────────────────────────────────────────────────────────────────
+Sitemap: https://example.com/sitemap.xml
+Sitemap: https://example.com/sitemap-news.xml

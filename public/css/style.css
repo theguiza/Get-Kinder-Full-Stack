@@ -304,3 +304,13 @@ background: #eee;
   50% { opacity: 1; }
 }
 
+/* shifts the .col-md-8 box 10px right without changing its flex width */
+.shift-right {
+  position: relative;
+  left: 15px;
+}
+
+.shift-left {
+  position: relative;
+  right: 15px;
+}

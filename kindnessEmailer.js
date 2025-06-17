@@ -3,6 +3,10 @@ import ejs from "ejs";
 import path from "path";
 import { getUserByEmail } from "./fetchData.js"; 
 
+// ES-module __dirname shim:
+//const __filename = fileURLToPath(import.meta.url); - causing a load failure
+// const __dirname = dirname(__filename);
+
 export async function sendDailyKindnessPrompts({
   user_emails,
   kindness_prompts,
@@ -33,8 +37,10 @@ export async function sendDailyKindnessPrompts({
 
   await Promise.all(
     user_emails.map(async (to, i) => {
+      const { firstname = "" } = await getUserByEmail(to);
       const html = await ejs.renderFile(templatePath, {
-        prompt: kindness_prompts[i]
+        prompt: kindness_prompts[i],
+        userName:     firstname
       });
       await transporter.sendMail({
         from: `"Kindness Bot" <${process.env.SMTP_USER}>`,
