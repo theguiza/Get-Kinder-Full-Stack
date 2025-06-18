@@ -314,3 +314,17 @@ background: #eee;
   position: relative;
   right: 15px;
 }
+.blog-post ul,
+.blog-post ol {
+  /* match the default body/paragraph sizing & spacing */
+  font-size: var(--bs-body-font-size);    /* 1rem by default */
+  line-height: var(--bs-body-line-height);/* 1.5 by default */
+  margin-left: 2rem;      /* keep your existing indentation */
+  margin-bottom: 1rem;    /* same bottom margin as <p> */
+  color: #455a7c;
+}
+.blog-post p {
+  font-size: 1.1rem;
+  line-height: 1.6;
+  color: #455a7c;
+}
