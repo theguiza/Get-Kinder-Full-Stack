@@ -26,5 +26,5 @@ Allow: /
 #────────────────────────────────────────────────────────────────
 # Sitemap declarations (placed at end)
 #────────────────────────────────────────────────────────────────
-Sitemap: https://example.com/sitemap.xml
-Sitemap: https://example.com/sitemap-news.xml
+Sitemap: https://getkinder.ai/sitemap.xml
+

@@ -12,6 +12,16 @@
   <!-- End Google Tag Manager -->
   <title>About Get Kinder | AI for Good & Kindness Movement</title>
   <meta name="description" content="Learn how Get Kinder and KAI, your personal kindness coach, empower people to spread kindness through meaningful, sustainable daily actions.">
+  <meta name="keywords" content="Get Kinder, AI kindness coach, daily acts of kindness, happiness, connection, wellbeing, UN Sustainable Development Goals, volunteering near me">
+  <meta name="author" content="Get Kindr Foundation">
+  <meta name="robots" content="index, follow">
+
+  <meta property="og:title" content="Get Kinder | The 5-Minute AI Kindness Hack for Happiness & Connection">
+  <meta property="og:description" content="Discover Get Kinder, your AI-powered kindness coach. Build deeper connections, spread joy, and improve wellbeing with daily 5-minute acts of kindness.">
+  <meta property="og:url" content="https://getkinder.ai/">
+  <meta property="og:type" content="website">
+
+  <link rel="icon" href="/images/favicon.png" sizes="32x32" type="image/png">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-SgOJa3DmI69IUzQ2PVdRZhwQ+dy64/BUtbMJw1MZ8t5HZApcHrRKUc4W0kG879m7" crossorigin="anonymous">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
   <link rel="stylesheet" href="./css/style.css">
@@ -35,45 +45,45 @@
   <% } %>
 
   <section id="title" class="gradient-background">
-    <header>
-      <nav class="navbar navbar-light bg-white navbar-expand-lg">
+   <header>
+      <nav class="navbar fixed-top navbar-light bg-white navbar-expand-lg">
         <div class="container-fluid d-flex">
-          <a class="navbar-brand" href="/">
-            <img src="/images/logo.png" alt="Get Kinder logo" height="100">
-          </a>
-          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav"
-            aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+          <a class="navbar-brand" href="/"><img src="/images/logo.png" alt="Get Kinder logo" height="100"> </a>
+          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
             <span class="navbar-toggler-icon"></span>
           </button>
-          <div class="collapse navbar-collapse justify-content-end" id="navbarNav">
+          <div class="collapse navbar-collapse justify-content-center" id="navbarNav">
             <ul class="navbar-nav align-items-center">
               <li class="nav-item">
-                <a class="nav-link mx-1" href="blog" style="font-size: 1.2rem; color: #455a7c; font-weight: bold; padding-right: 30px;">Blog</a>
+                <a class="btn btn-outline-primary btn-lg custom-hover" href="/#chat2" style="font-size: 1.2rem; color: #455a7c; margin-right: 30px; margin-left: 10px; padding-left: 10px;"><img src="/images/kai-real.png" alt="real Kindness AI Companion Kai" width="35" height="35" class="me-2">Chat with Kai Now</a>
               </li>
               <li class="nav-item">
-                <a class="nav-link mx-1" href="profile" style="font-size: 1.2rem; color: #455a7c; font-weight: bold; padding-right: 30px;">Profile</a>
+                <a class="nav-link mx-1 font-hover" href="blog" style="font-size: 1.2rem; color: #455a7c; padding-right: 30px;">Blog</a>
               </li>
               <li class="nav-item">
-                <a class="nav-link mx-1" href="about" style="font-size: 1.2rem; color: #455a7c; font-weight: bold; padding-right: 30px;">About</a>
+                <a class="nav-link mx-1 font-hover" href="about" style="font-size: 1.2rem; color: #455a7c; padding-right: 30px;">About</a>
               </li>
-              <% if (user) { %>
+              <li class="nav-item">
+                <a class="nav-link mx-1 font-hover" href="/" style="font-size: 1.2rem; color: #455a7c; padding-right: 30px;">Home</a>
+              </li>
+              </ul>
+            </div>
+              <div class="collapse navbar-collapse justify-content-end" id="navbarNav">
+                <ul class="navbar-nav d-flex align-items-center">              <% if (user) { %>
                 <li class="nav-item d-flex align-items-center me-3">
-                  <span class="navbar-text fw-bold me-2" style="font-size: 1.2rem; color: #455a7c;">
-                    <%= user.firstname || user.email %>
-                  </span>
+                  <span class="navbar-text fw-bold me-2" style="font-size: 1.2rem; color: #455a7c;"><%= user.firstname || user.email %></span>
                   <img src="<%= user.picture ? user.picture : '/images/nerdy-KAI.png' %>" class="rounded-circle me-3" width="32" height="32" alt="Get Kinder User Avatar">
                   <button class="btn btn-outline-danger btn-sm" data-bs-toggle="modal" data-bs-target="#logoutModal">Log Out</button>
                 </li>
               <% } else { %>
-                <li class="nav-item">
-                  <a class="btn btn-primary btn-lgr" style="font-size: 1.2rem; color: white; text-decoration: none; width: 100%; min-width: 120px; text-align: center;" href="login" role="button">Log In</a>
+                <li class="nav-item"><a class="btn btn-primary btn-lg" 
+                  style="font-size: 1.2rem; color: white; text-decoration: none; width: 100%; min-width: 120px; text-align: center;" href="login" role="button">Log In</a>
                 </li>
               <% } %>
             </ul>
-          </div>
+            </div>
         </div>
       </nav>
-    </header>
  <section id="title">
   <div class="container profile-page rounded bg-white mt-5 mb-5 px-3">
     <form id="profile-form" action="/profile" method="POST" enctype="multipart/form-data">
@@ -271,7 +281,7 @@
       <!-- 1) Logo: centered on xs, left on md+ -->
       <div class="col-12 col-md-4 mb-4 mb-md-0 text-center text-md-start">
         <a href="#">
-          <img src="./images/heart.png" alt="Get Kinder Heart" height="150">
+          <img src="./images/heart3D.png" alt="Get Kinder Heart" height="150">
         </a>
         <p class="mt-2">
           &copy;

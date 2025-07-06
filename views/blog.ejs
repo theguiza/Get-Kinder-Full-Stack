@@ -21,6 +21,8 @@
   <meta property="og:description" content="Discover Get Kinder, your AI-powered kindness coach. Build deeper connections, spread joy, and improve wellbeing with daily 5-minute acts of kindness.">
   <meta property="og:url" content="https://getkinder.ai/">
   <meta property="og:type" content="website">
+
+  <link rel="icon" href="/images/favicon.png" sizes="32x32" type="image/png">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-SgOJa3DmI69IUzQ2PVdRZhwQ+dy64/BUtbMJw1MZ8t5HZApcHrRKUc4W0kG879m7" crossorigin="anonymous">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
   <link rel="stylesheet" href="./css/style.css">
@@ -43,48 +45,48 @@
       <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
     </div>
   <% } %>
-    <header>
-      <nav class="navbar navbar-light bg-white navbar-expand-lg">
+   <header>
+      <nav class="navbar fixed-top navbar-light bg-white navbar-expand-lg">
         <div class="container-fluid d-flex">
-          <a class="navbar-brand" href="/">
-            <img src="/images/logo.png" alt="Get Kinder logo" height="100">
-          </a>
-          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav"
-            aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+          <a class="navbar-brand" href="/"><img src="/images/logo.png" alt="Get Kinder logo" height="100"> </a>
+          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
             <span class="navbar-toggler-icon"></span>
           </button>
-          <div class="collapse navbar-collapse justify-content-end" id="navbarNav">
+          <div class="collapse navbar-collapse justify-content-center" id="navbarNav">
             <ul class="navbar-nav align-items-center">
               <li class="nav-item">
-                <a class="nav-link mx-1" href="blog" style="font-size: 1.2rem; color: #455a7c; font-weight: bold; padding-right: 30px;">Blog</a>
+                <a class="btn btn-outline-primary btn-lg custom-hover" href="/#chat2" style="font-size: 1.2rem; color: #455a7c; margin-right: 30px; margin-left: 10px; padding-left: 10px;"><img src="/images/kai-real.png" alt="real Kindness AI Companion Kai" width="35" height="35" class="me-2">Chat with Kai Now</a>
               </li>
               <li class="nav-item">
-                <a class="nav-link mx-1" href="profile" style="font-size: 1.2rem; color: #455a7c; font-weight: bold; padding-right: 30px;">Profile</a>
+                <a class="nav-link mx-1 font-hover" href="About" style="font-size: 1.2rem; color: #455a7c; padding-right: 30px;">About</a>
               </li>
               <li class="nav-item">
-                <a class="nav-link mx-1" href="about" style="font-size: 1.2rem; color: #455a7c; font-weight: bold; padding-right: 30px;">About</a>
+                <a class="nav-link mx-1 font-hover" href="profile" style="font-size: 1.2rem; color: #455a7c; padding-right: 30px;">Profile</a>
               </li>
-              <% if (user) { %>
+              <li class="nav-item">
+                <a class="nav-link mx-1 font-hover" href="/" style="font-size: 1.2rem; color: #455a7c; padding-right: 30px;">Home</a>
+              </li>
+              </ul>
+            </div>
+              <div class="collapse navbar-collapse justify-content-end" id="navbarNav">
+                <ul class="navbar-nav d-flex align-items-center">              <% if (user) { %>
                 <li class="nav-item d-flex align-items-center me-3">
-                  <span class="navbar-text fw-bold me-2" style="font-size: 1.2rem; color: #455a7c;">
-                    <%= user.firstname || user.email %>
-                  </span>
+                  <span class="navbar-text fw-bold me-2" style="font-size: 1.2rem; color: #455a7c;"><%= user.firstname || user.email %></span>
                   <img src="<%= user.picture ? user.picture : '/images/nerdy-KAI.png' %>" class="rounded-circle me-3" width="32" height="32" alt="Get Kinder User Avatar">
                   <button class="btn btn-outline-danger btn-sm" data-bs-toggle="modal" data-bs-target="#logoutModal">Log Out</button>
                 </li>
               <% } else { %>
-                <li class="nav-item">
-                  <a class="btn btn-primary btn-lgr" style="font-size: 1.2rem; color: white; text-decoration: none; width: 100%; min-width: 120px; text-align: center;" href="login" role="button">Log In</a>
+                <li class="nav-item"><a class="btn btn-primary btn-lg" 
+                  style="font-size: 1.2rem; color: white; text-decoration: none; width: 100%; min-width: 120px; text-align: center;" href="login" role="button">Log In</a>
                 </li>
               <% } %>
             </ul>
-          </div>
+            </div>
         </div>
       </nav>
-    </header>
 <section class="gradient-background"> 
 <main class="container">
-  <div class="p-4 p-md-5 mb-4 ">
+  <div class="p-4 p-md-5 mb-2">
     <div class="col-lg-6 px-0">
         <h1 class="display-4" style="color: aliceblue;">Find out why kindness is so important for your happiness! </h1>
         <p class="lead my-3" style="color: aliceblue;">Read on to discover the science behind how being kind to yourself and others really does make you happier, helps you build connections with others, and creates better communities.</p>
@@ -92,66 +94,74 @@
     </div>
   </section>
 <br>
-    <div class="row mb-2">
-      <div class="col-md-6 shift-right">
-        <div class="row g-0 border rounded overflow-hidden flex-md-row mb-4 shadow-sm h-md-250 position-relative">
-          <div class="col p-4 d-flex flex-column position-static">
-            <h2 class="d-inline-block mb-2 text-primary-emphasis" style="color: #455a7c !important;">Featured post</h2>
-            <h3 class="mb-0" style="color: #ff5656 !important;">Why Kindness is Essential</h3>
+   <div class="container py-3">
+  <div class="row g-2">
+    <!-- First card -->
+    <div class="col-12 col-md-6">
+      <div class="border rounded overflow-hidden shadow-sm p-4 m-3 h-100">
+        <div class="row align-items-start">
+          <a href="#why-kindness-is-essential" class="icon-link gap-1" style="text-decoration: none;"><svg class="bi" aria-hidden="true"><use xlink:href="#chevron-right"/></svg>
+          <!-- Text column -->
+          <div class="col pe-4">
+            <h2 class="mb-2 text-primary-emphasis" style="color: #455a7c !important;">Featured post</h2>
+            <h3 class="mb-0" style="color: #ff5656 !important;"> Why Kindness is Essential</h3>
             <div class="mb-1 text-body-secondary">March 12</div>
-            <p class="card-text mb-auto">Here at Get Kinder we know that kindness is the fundamental human quality that binds communities together and fuels positive change.</p>
-            <a href="#why-kindness-is-essential" class="icon-link gap-1 icon-link-hover stretched-link">Continue reading <svg class="bi" aria-hidden="true"><use xlink:href="#chevron-right"></use></svg></a>
+            <p class="mb-auto">Here at Get Kinder we know that kindness is the fundamental human quality that binds communities together and fuels positive change.</p>
           </div>
+          <!-- Image column -->
           <div class="col-auto d-none d-lg-block">
-            <img src="./images/KAI.png" alt="KAI - the AI kindness coach"  style="width: 200px; height: 250px;">
+            <img src="./images/kai-real.png" alt="KAI – the AI kindness coach" style="width:200px; height:250px;">
           </div>
         </div>
       </div>
-      <div class="col-md-6">
-        <div class="row g-0 border rounded overflow-hidden flex-md-row mb-4 shadow-sm h-md-250 position-relative">
-          <div class="col p-4 d-flex flex-column position-static">
+      </a>
+    </div>
+    <!-- Second card -->
+    <div class="col-12 col-md-6">
+      <div class="border rounded overflow-hidden shadow-sm p-4 m-3 h-100">
+        <div class="row align-items-start">
+          <a href="#making_kindness_habit" class="icon-link gap-1" style="text-decoration: none;"><svg class="bi" aria-hidden="true"><use xlink:href="#chevron-right"/></svg>
+          <!-- Text column -->
+          <div class="col pe-4">
             <strong class="d-inline-block mb-2 text-success-emphasis" style="color: #455a7c !important;">Kindness Habits</strong>
-            <h3 class="mb-0" style="color: #ff5656 !important;">Kindness Habits are Fun & Rewarding</h3>
+            <h3 class="mb-0" style="color: #ff5656 !important;">Kindness Habits are Fun &amp; Rewarding</h3>
             <div class="mb-1 text-body-secondary">April 11</div>
             <p class="mb-auto">Ready to make kindness a habit? Follow this 3 week challenge alongside Get Kinder’s daily prompts and progress tracker.</p>
-            <a href="#making_kindness_habit" class="icon-link gap-1 icon-link-hover stretched-link">
-              Continue reading
-              <svg class="bi" aria-hidden="true"><use xlink:href="#chevron-right"></use></svg>
-            </a>
           </div>
+          <!-- Image column -->
           <div class="col-auto d-none d-lg-block">
-            <img src="./images/targetHeart.png" alt="a target with a heart at the bullseye"  style="width: 250px; height: 250px;">
+            <img src="./images/heart-target-3D.png" alt="a target with a heart at the bullseye" style="width:250px; height:250px;">
           </div>
         </div>
       </div>
+      </a>
     </div>
-  <br>
-    <div class="row g-5 shift-right">
-      <div class="col-md-8">
-        <h2 class="fst-italic" style="color: #455a7c !important; font-size: 2rem; font-weight: bold;">
-          Kindness Blog Posts
-        </h2>
-  <br>
-<article class="blog-post text-body">
-  <div class="px-2 px-md-0">
+  </div>
+</div>
+<div class="row g-5 my-5 mx-3 mx-md-3">
+   <div class="col-md-8 px-3 px-md-3">
+      <h2 class="fst-italic" style="color: #455a7c !important; font-size: 3rem; font-weight: bold; margin-bottom: 2rem; margin-left: 1.5rem;">Kindness Blog Posts</h2>
+        <br>
+      <article class="blog-post text-body">
+        <div id="why-kindness-is-essential" class="px-2 px-md-0">
           <div class="row g-0 border rounded overflow-hidden flex-md-row p-4 shadow-sm h-md-250 position-relative align-items-center">
             <div class="col-12 col-md-auto">
-          <h3 id="why-kindness-is-essential" class="display-5 link-body-emphasis mb-1" style="color: #ff5656 !important;">Why Kindness is Essential</h3>
+          <h3 class="display-5 link-body-emphasis mb-1" style="color: #ff5656 !important;">Why Kindness is Essential</h3>
             </div>
             <div class="col d-flex justify-content-end">
-              <img src="./images/KAI.png" alt="KAI - the AI kindness coach" style="width: 200px; height: 250px;">
+              <img src="./images/kai-real.png" alt="KAI - the AI kindness coach" style="width: 200px; height: 250px;">
             </div>
           <p class="blog-post-meta">March 12, 2025 by <a href="/">kai</a></p>
           <p>Here at <a href="https://getkindr.com/" target="_blank" rel="noopener noreferrer">Kinder AI™</a>, we believe kindness is the human glue that binds communities and fuels positive change. Even the smallest gesture—holding a door, buying a coffee, sharing a smile—sparks reward centres in the brain, releasing <strong>oxytocin</strong> and <strong>dopamine</strong> that lower stress and <strong>boost happiness</strong>. According to a functional MRI study <a href="https://greatergood.berkeley.edu/images/uploads/Harbaugh-MotivesForDonations_1.pdf" target="_blank" rel="noopener noreferrer">in Science (Harbaugh et al., 2007)</a>, donating to charity activated the same mesolimbic pathway that is activated by chocolate or social connection
               → Speak to Kai about taking the Kindness-Style Quiz to discover how you naturally give and receive kindness.</p>
           <h3 style="color: #455a7c !important;">How Kindness Rewires Your Brain and Creates Happiness</h3>
-          <ul class="fs-6 lh-base ms-4 mb-3" style="margin-left: 2rem;">
+          <ul class="fs-6 lh-base ms-4 mb-3" style="margin-left: 2rem; padding-right: 1rem;">
             <li style="margin-bottom: 1rem;">Helper’s High: A 27-study meta-analysis in the <a href="https://www.sciencedirect.com/science/article/pii/S0022103117303451" target="_blank" rel="noopener noreferrer">Journal of Experimental Social Psychology (Curry et al., 2018)</a> found that performing random acts of kindness produces a small-to-medium lift in subjective well-being—evidence of the classic “helper’s high.”</li>
             <li style="margin-bottom: 1rem;">Stress Buffer: A <a href="https://www.sciencedirect.com/science/article/pii/S2666497621000655" target="_blank" rel="noopener noreferrer">2021 RCT in Psychoneuroendocrinology</a> showed that a supportive hug or self-soothing touch cut cortisol spikes by up to 40 percent.</li>
             <li style="margin-bottom: 1rem;">Micro-Acts, Macro Impact: The 2024 UCSF/UC Berkeley Big Joy project, published in the Journal of Medical Internet Research, tracked nearly 18 000 participants and found that just 5 minutes of daily “micro-joy” (gratitude, awe, or small kindnesses) significantly boosted happiness and emotional regulation [study summary].</li>
           </ul>
-          <h3 style="color: #455a7c !important;">Six Everyday Ways to Practise Kindness</h3>
-            <ol class= "shift-left" style="margin-left: 2rem;">
+          <h3 style="color: #455a7c !important;">Six Everyday Ways to Practice Kindness</h3>
+            <ol class= "shift-left" style="margin-left: 2rem; padding-right: 1rem;">
               <li style="margin-bottom: 1rem;"><strong>Active Listening</strong> — Give someone your full, undistracted phone-free, attention.</li>
               <li style="margin-bottom: 1rem;"><strong>Random Acts</strong> — pay for a stranger’s coffee, leave an uplifting note, pick up litter on your next walk.</li>
               <li style="margin-bottom: 1rem;"><strong>Genuine Compliments</strong> — Notice effort, celebrate strengths, and speak appreciation out loud to share positivity with others.</li>
@@ -165,14 +175,14 @@
           </div>
         </article>
   <br>
-        <article class="blog-post">
-          <div class="px-2 px-md-0">
+        <article class="blog-post" id="making_kindness_habit">
+          <div  class="px-2 px-md-0">
             <div class="row g-0 border rounded overflow-hidden flex-md-row p-4 shadow-sm h-md-250 position-relative align-items-center">
             <div class="col-12 col-md-auto">
-          <h3 id="making_kindness_habit" class="display-5 link-body-emphasis mb-1" style="color: #ff5656 !important;">Kind Habits are Fun & Rewarding</h3>
+          <h3  class="display-5 link-body-emphasis mb-1" style="color: #ff5656 !important;">Kind Habits are Fun & Rewarding</h3>
             </div>
             <div class="col d-flex justify-content-end">
-              <img src="./images/targetHeart.png" alt="KAI - the AI kindness coach" style="width: 200px; height: 200px;">
+              <img src="./images/heart-target-3D.png" alt="KAI - the AI kindness coach" style="width: auto; height: 200px;">
             </div>
           <p class="blog-post-meta">April 11, 2025 by <a href="/">kai</a></p>
             <p>Ready to make kindness a habit? Follow this three-week challenge alongside Get Kinder’s daily prompts and progress tracker. Each week centers on a new theme—micro-kindness, deep connection, and ripple effect—to help you expand your impact.</p>
@@ -184,7 +194,7 @@
             <p>Amplify your kindness beyond your inner circle. Organize a mini donation drive, mentor a peer, or lead a neighborhood clean-up. Invite friends through the app, share your challenge updates in the community feed, and watch the wave of compassion grow.</p>
           <h3 style="color: #455a7c !important;">Tips to Sustain Your Daily Kindness Habit</h3>
           <p>Link kindness to daily routines—set reminders with your morning coffee or evening wind-down. Celebrate progress with Get Kinder’s badge system, and share a weekly recap with a friend or in the app’s community. Accountability and acknowledgement will keep your compassion practice thriving.</p>
-          <ol class= "shift-left" style="margin-left: 2rem;">
+          <ol class= "shift-left" style="margin-left: 2rem; padding-right: 1rem;">
             <li style="margin-bottom: 1rem;"><strong>Habit-Stack</strong> — Pair a small habit with your morning coffee, walk to work, or any other regular activity to remind you to be kind.</li>
             <li style="margin-bottom: 1rem;"><strong>Celebrate Dopamine Hits</strong> — Tell your friends for positive reinforcement, and the encourage them to get kinder. Get badges from Kai = brain reward.</li>
             <li style="margin-bottom: 1rem;"><strong>Weekly Recap</strong> — Review your progress with Kai and share with a friend or the in-app community for accountability.</li>
@@ -197,8 +207,8 @@
       <div class="col-md-4">
         <div class="position-sticky" style="top: 2rem;">
           <div class="p-4 mb-3 bg-body-tertiary rounded">
-            <h4 class="fst-italic" style="color: #455a7c !important;">Get Kindr Foundation</h4>
-            <p class="mb-0">To find out more about the science of kindness you can find more kindness blogs at the <a href="https://getkindr.com/" target="_blank" rel="noopener noreferrer">Get Kindr Foundation</a>. Links to recent posts below.</p>
+            <h3 style="color: #455a7c !important;">More at the Get Kindr Foundation</h3>
+            <p class="mb-0">To find out more about the science of kindness you can find more blogs on why kindness makes you happier at the <a href="https://getkindr.com/" target="_blank" rel="noopener noreferrer">Get Kindr Foundation</a>. Links to recent posts below.</p>
           </div>
           <div>
             <div class="px-2 px-md-0">
@@ -255,7 +265,7 @@
       <!-- 1) Logo: centered on xs, left on md+ -->
       <div class="col-12 col-md-4 mb-4 mb-md-0 text-center text-md-start">
         <a href="#">
-          <img src="./images/heart.png" alt="Get Kinder Heart" height="150">
+          <img src="./images/heart3D.png" alt="Get Kinder Heart" height="150">
         </a>
         <p class="mt-2">
           &copy;

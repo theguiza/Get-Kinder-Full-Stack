@@ -22,6 +22,11 @@
     background-position: 0% 50%;
   }
 }
+p {
+    color:#455a7c;
+    font-size: 1rem;
+    line-height: 24px;
+}
 
 .icon-square {
   width: 3rem;
@@ -54,9 +59,17 @@
 .profile-card:hover {
   box-shadow: 0 0 20px rgba(0, 0, 0, 0.2); /* optional stronger shadow on hover */
 } 
-    body {
-        background-color: #f8f9fa;
-    }
+.profile-hover {
+  border-radius: 10px;
+  background-color: rgba(255, 255, 255, 0.05);
+  box-shadow: 0 0 20px rgba(0, 0, 0, 0.2);
+  padding: 15px;
+  height: 100%;
+} 
+.profile-hover:hover {
+  box-shadow: 0 0 20px rgba(0, 0, 0, 0.2); /* optional stronger shadow on hover */
+} 
+
     .contact-form {
         background: #ffffff;
         padding: 30px;
@@ -70,6 +83,15 @@
     .btn-primary:hover {
         background-color: #3a86b5;
         border-color: #3a86b5;
+    }
+      
+    .btn-primary2 {
+        background-color: aliceblue; 
+       border-color: #455a7c;
+    }
+    .btn-primary2:hover {
+        background-color:#455a7c;
+        border-color: aliceblue;
     }
   
     .login_form_wrapper {
@@ -206,11 +228,6 @@
     margin: 0;
 }
 
-p {
-    color: #999999;
-    font-size: 14px;
-    line-height: 24px;
-}
 
 .login_wrapper a.login_btn:hover {
     background-color: #2c6ad4;
@@ -274,15 +291,6 @@ p {
     border: solid 10px #455a7c
 }
 
-#chat2 .form-control {
-border-color: transparent;
-}
-
-#chat2 .form-control:focus {
-border-color: transparent;
-box-shadow: inset 0px 0px 0px 1px transparent;
-}
-
 .divider:after,
 .divider:before {
 content: "";
@@ -307,7 +315,7 @@ background: #eee;
 /* shifts the .col-md-8 box 10px right without changing its flex width */
 .shift-right {
   position: relative;
-  left: 15px;
+  left: 40px;
 }
 
 .shift-left {
@@ -327,4 +335,138 @@ background: #eee;
   font-size: 1.1rem;
   line-height: 1.6;
   color: #455a7c;
+}
+
+.card {
+  transition: transform 0.5s ease;
+}
+.card:hover {
+  transform: scale(1.05);
+}
+
+body {
+  background: #f8f9fa;
+  padding-top: 100px; /* desktop header height */
+}
+
+@media (max-width: 767.98px) {
+  /* phones & small tablets */
+  body {
+    padding-top: 70px; /* accommodate the taller mobile nav */
+  }
+}
+.profile-body {
+  background: #ff5656;
+  padding-top: 0px; /* desktop header height */
+}
+
+/* Modern Filled Tabs */
+.modern-tabs {
+    background: white;
+    padding: 2rem;
+    border-radius: 1rem;
+    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.08);
+}
+
+.modern-tabs .nav-tabs {
+    border: none;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.modern-tabs .nav-link {
+    border: none;
+    padding: 1rem 1.5rem;
+    border-radius: 0.5rem;
+    font-weight: 500;
+    color: #6c757d;
+    transition: all 0.3s ease;
+}
+
+.modern-tabs .nav-link:hover {
+    background: #f8f9fa;
+    color: #0d6efd;
+}
+
+.modern-tabs .nav-link.active {
+    background: #0d6efd;
+    color: white;
+}
+
+/* Content Animation */
+.tab-pane.fade {
+    transition: all 0.2s ease-out;
+}
+
+.tab-pane.fade.show {
+    animation: fadeIn 0.5s ease-out;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+  /* leave extra space above this when it becomes target */
+#chat2 {
+  scroll-margin-top: 110px;
+}
+
+#chat2 .form-control {
+border-color: transparent;
+}
+
+#chat2 .form-control:focus {
+border-color: transparent;
+box-shadow: inset 0px 0px 0px 1px transparent;
+}
+
+#why-kindness-is-essential {
+  scroll-margin-top: 110px;
+}
+
+#making_kindness_habits {
+  scroll-margin-top: 110px;
+}
+
+#custom-cards{
+  scroll-margin-top: 100px;
+}
+
+.custom-hover:hover {
+  background-color: #455a7c;
+  color: white !important;
+  border-color: #455a7c;
+}
+
+.font-hover:hover{
+  color: #ff5656 !important;
+  font-weight: bold;
+}
+
+/* make every LI in a .list-unstyled a 2-column grid */
+.unstyled2 li {
+  display: grid;
+  grid-template-columns: 30px auto; /* icon = 30px, text takes the rest */
+  column-gap: 0.5rem;                /* same as your .me-2 */
+  margin-bottom: 0.5rem;             /* your existing spacing */
+  align-items: start;
+}
+.unstyled2 li img {
+  width: 30px;   /* lock image size */
+  height: 30px;
+}
+/* in your stylesheet, after Bootstrap’s CSS */
+@media (max-width: 767.98px) {
+  /* only on mobile (<768px) */
+  .logo-img {
+    height: 80px;  /* or whatever smaller size you prefer */
+    width: auto;   /* preserve aspect ratio */
+  }
 }

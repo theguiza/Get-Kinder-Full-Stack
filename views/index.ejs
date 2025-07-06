@@ -32,7 +32,7 @@
 
 <body>
  <!-- Google Tag Manager (noscript) -->
-<noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-W4NR6FZ9"
+  <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-W4NR6FZ9"
   height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
   <!-- End Google Tag Manager (noscript) -->
   <% if (success) { %>
@@ -41,113 +41,316 @@
       <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
     </div>
   <% } %>
-
   <% if (loginSuccess && name) { %>
     <div class="alert alert-success alert-dismissible fade show auto-dismiss" role="alert">
       Welcome back, <%= name %>! 🎉
       <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
     </div>
   <% } %>
-
-  <section id="title" class="gradient-background">
+  <section id="title">
     <header>
-      <nav class="navbar navbar-light bg-white navbar-expand-lg">
+      <nav class="navbar fixed-top navbar-light bg-white navbar-expand-lg">
         <div class="container-fluid d-flex">
-          <a class="navbar-brand" href="/">
-            <img src="/images/logo.png" alt="Get Kinder logo" height="100">
-          </a>
-          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav"
-            aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+          <a class="navbar-brand" href="/"><img src="/images/logo.png" alt="Get Kinder logo" class="logo-img" height="80" width: auto;> </a>
+          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
             <span class="navbar-toggler-icon"></span>
           </button>
-          <div class="collapse navbar-collapse justify-content-end" id="navbarNav">
+          <div class="collapse navbar-collapse justify-content-center" id="navbarNav">
             <ul class="navbar-nav align-items-center">
               <li class="nav-item">
-                <a class="nav-link mx-1" href="blog" style="font-size: 1.2rem; color: #455a7c; font-weight: bold; padding-right: 30px;">Blog</a>
+                <a class="btn btn-outline-primary btn-lg custom-hover" href="#chat2" style="font-size: 1.2rem; color: #455a7c; margin-right: 30px; margin-left: 30px; padding-left: 10px;"><img src="/images/kai-real.png" alt="real Kindness AI Companion Kai" width="35" height="35" class="me-2">Chat with Kai Now</a>
               </li>
               <li class="nav-item">
-                <a class="nav-link mx-1" href="profile" style="font-size: 1.2rem; color: #455a7c; font-weight: bold; padding-right: 30px;">Profile</a>
+                <a class="nav-link mx-1 font-hover" href="blog" style="font-size: 1.2rem; color: #455a7c; padding-right: 30px;">Blog</a>
               </li>
               <li class="nav-item">
-                <a class="nav-link mx-1" href="about" style="font-size: 1.2rem; color: #455a7c; font-weight: bold; padding-right: 30px;">About</a>
+                <a class="nav-link mx-1 font-hover" href="profile" style="font-size: 1.2rem; color: #455a7c; padding-right: 30px;">Profile</a>
               </li>
-              <% if (user) { %>
+              <li class="nav-item">
+                <a class="nav-link mx-1 font-hover" href="about" style="font-size: 1.2rem; color: #455a7c; padding-right: 30px;">About</a>
+              </li>
+              </ul>
+            </div>
+              <div class="collapse navbar-collapse justify-content-end">
+                <ul class="navbar-nav d-flex align-items-center">              <% if (user) { %>
                 <li class="nav-item d-flex align-items-center me-3">
-                  <span class="navbar-text fw-bold me-2" style="font-size: 1.2rem; color: #455a7c;">
-                    <%= user.firstname || user.email %>
-                  </span>
-                  <img src="<%= user.picture ? user.picture : '/images/nerdy-KAI.png' %>" class="rounded-circle me-3" width="32" height="32" alt="Get Kinder User Avatar">
+                  <span class="navbar-text fw-bold me-2" style="font-size: 1.2rem; color: #455a7c;"><%= user.firstname || user.email %></span>
+                  <img src="<%= (user && user.picture) ? user.picture : '/images/nerdy-KAI.png' %>"  class="rounded-circle me-3" width="32" height="32" alt="Get Kinder User Avatar">
                   <button class="btn btn-outline-danger btn-sm" data-bs-toggle="modal" data-bs-target="#logoutModal">Log Out</button>
                 </li>
               <% } else { %>
-                <li class="nav-item">
-                  <a class="btn btn-primary btn-lgr" style="font-size: 1.2rem; color: white; text-decoration: none; width: 100%; min-width: 120px; text-align: center;" href="login" role="button">Log In</a>
+                <li class="nav-item"><a class="btn btn-primary btn-lg" 
+                  style="font-size: 1.2rem; color: white; text-decoration: none; width: 100%; min-width: 120px; text-align: center;" href="login" role="button">Log In</a>
                 </li>
               <% } %>
             </ul>
-          </div>
+            </div>
         </div>
       </nav>
     </header>
-
-    <div class="container col-xxl-8 px-4">
-      <div class="row flex-lg-row-reverse align-items-center g-5 pt-3">
-        <div class="col-10 col-sm-8 col-lg-6">
-          <img src="./images/KAI.png" class="d-block mx-lg-auto img-fluid" alt="picture of KAI our Kinder AI coach" height="200" loading="lazy">
+ <!-- Hero Section -->
+<section class="gradient-background py-5 pb-0">
+  <div class="container"> 
+    <!-- 1) Full-width headline -->
+    <div class="row">
+      <div class="col-12 text-center">
+        <h1 class="display-2 fw-bold text-white mb-3">Get Kinder. Feel Happier</h1>
+        <p class="fw-bold text-white mb-3" style="font-size: 1.5rem;">KAI your personal Kinder AI™ Companion helps you build emotional wellbeing through small, science-backed acts of kindness.</p> 
+      </div>
+    </div>
+    <!-- 2) Two-column beneath:  text+CTA right, image right -->
+    <div class="row gx-1 justify-content-center align-items-center">
+      <!-- Left: text+CTA -->
+      <div class="col-lg-5 text-center text-lg-start mb-4 mb-lg-0">
+        <ul class="list-unstyled unstyled2" style="color: aliceblue ; font-size: 1.2rem; line-height: 1.6; padding-right: 0.5rem;">
+        <li class="d-flex align-items-start mb-2" style="margin-bottom: 0.5rem;"><img src="/images/heart3D.png" alt="3d Get Kinder Heart" width="30" height="30" class="me-2"> <span>5-minute happiness habits that actually stick</span></li>
+          <li class="d-flex align-items-start mb-2" style="margin-bottom: 0.5rem;"> <img src="/images/heart3D.png" alt="3d Get Kinder Heart" width="30" height="30" class="me-2"><span>Find your Kindness Superpower in under 2 minutes</span> </li>
+          <li class="d-flex align-items-start mb-2" style="margin-bottom: 0.5rem;"> <img src="/images/heart3D.png" alt="3d Get Kinder Heart" width="30" height="30" class="me-2"><span>Receive personalized nudges that ripple joy into your real life</span></li>
+        </ul>
+        <p style="color: aliceblue ; font-size: 1.2rem; line-height: 1.6; padding-right: 1rem;">Helping others doesn’t just brighten their day — it transforms yours. Join our kindness movement today!</p>
+        <div class="d-flex justify-content-center">
+          <a class="btn btn-primary2 custom-hover fw-bold mb-1 p-2" href="#custom-cards" style="font-size: 1.3rem; color: #455a7c; padding-left: 1rem; padding-right: 1rem; width: 300px;">
+            <img src="/images/kai-real.png" alt="real Kindness AI Companion Kai" width="35" height="35" class="me-2"> Speak with Kai Now</a>
+        </div> 
+      </div>
+      <!-- Right: kai image -->
+      <img src="./images/kai-real.png" alt="picture of KAI our Kinder AI coach" class="img-fluid p-0 m-0 mt-md-3 pt-md-3" style="max-height: 300px; width: auto;" loading="lazy"> 
+      
+    </div>
+  </div>
+</section>
+<!-- NAV TABS: FOUR CARDS -->
+<div id="custom-cards" class="container-fluid px-0.5 px-md-4 pt-3 pb-5">
+  <div class="modern-tabs">
+    <ul class="nav nav-tabs flex-wrap" id="filledTabs" role="tablist">
+      <!-- Card 1 -->
+      <li class="nav-item flex-fill d-flex justify-content-center text-center" role="presentation">
+        <button class="nav-link active p-0" id="start-tab" data-bs-toggle="tab" data-bs-target="#start" type="button" role="tab" style="text-decoration:none;color:inherit;">
+          <div class="card mx-auto" style="position:relative; overflow:hidden; width:250px; max-width:100%; height:250px; background-color:rgba(255,187,187,0.4);">
+            <img src="./images/kai-get-kinder-3D.png" class="card-img-top" alt="Get Kinder & Happier Now"  style="width:100%; height:100%; object-fit:cover;">
+            <div style="position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.3); z-index:1;"></div>
+            <h3 class="display-6 lh-1 fw-bold" style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:100%; margin:0; color:aliceblue; text-shadow:3px 3px 5px rgba(0,0,0,0.8); z-index:2;">
+              Get Kinder & Happier Now</h3>
+            <div class="card-body" style="position:absolute; bottom:0.5rem; right:0.5rem; z-index:2; padding:0;"><svg class="bi" aria-hidden="true"><use xlink:href="#chevron-right"></use></svg>
+            </div>
+          </div>
+        </button>
+      </li>
+      <!-- Card 2 -->
+      <li class="nav-item flex-fill d-flex justify-content-center text-center" role="presentation">
+        <button class="nav-link p-0" id="superpower-tab" data-bs-toggle="tab" data-bs-target="#superpower" type="button" role="tab" style="text-decoration:none;color:inherit;">
+          <div class="card mx-auto" style="position:relative; overflow:hidden; width:250px; max-width:100%; height:250px; background-color:rgba(181,189,203,0.4);">
+            <img src="./images/kai-superhero-3D.png" class="card-img-top" alt="Find Your Kindness Superpower" style="width:100%; height:100%; object-fit:contain; ">
+            <div style="position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.3); z-index:1;"></div>
+            <h3 class="display-6 lh-1 fw-bold"
+                style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:100%; margin:0; color:aliceblue; text-shadow:3px 3px 5px rgba(0,0,0,0.8); z-index:2;">
+              Find Your Kindness Superpower</h3>
+            <div class="card-body" style="position:absolute; bottom:0.5rem; right:0.5rem; z-index:2; padding:0;"><svg class="bi" aria-hidden="true"><use xlink:href="#chevron-right"></use></svg>
+            </div>
+          </div>
+        </button>
+      </li>
+      <!-- Card 3 -->
+      <li class="nav-item flex-fill d-flex justify-content-center text-center" role="presentation">
+        <button class="nav-link p-0" id="talk-tab" data-bs-toggle="tab" data-bs-target="#talk" type="button" role="tab" style="text-decoration:none;color:inherit;">
+          <div class="card mx-auto" style="position:relative; overflow:hidden; width:250px; max-width:100%; height:250px; background-color:rgba(255,86,86,0.4);">
+            <img src="./images/kai-real.png" class="card-img-top" alt="Kai is Here to Talk" style="width:100%; height:100%; object-fit:cover;">
+            <div style="position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.3); z-index:1;"></div>
+            <h3 class="display-6 lh-1 fw-bold" style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:100%; margin:0; color:aliceblue; text-shadow:3px 3px 5px rgba(0,0,0,0.8); z-index:2;">
+              Kai is Here to Talk </h3>
+            <div class="card-body" style="position:absolute; bottom:0.5rem; right:0.5rem; z-index:2; padding:0;"><svg class="bi" aria-hidden="true"><use xlink:href="#chevron-right"></use></svg>
+            </div>
+          </div>
+        </button>
+      </li>
+      <!-- Card 4 -->
+      <li class="nav-item flex-fill d-flex justify-content-center text-center" role="presentation">
+        <button class="nav-link p-0" id="happier-tab" data-bs-toggle="tab" data-bs-target="#happier" type="button" role="tab" style="text-decoration:none;color:inherit;">
+          <div class="card mx-auto" style="position:relative; overflow:hidden; width:250px; max-width:100%; height:250px; background-color:rgba(69,90,124,0.4);">
+            <img src="./images/kai-feel-happier-3D.png" class="card-img-top" alt="Feel Happier Every Day" style="width:100%; height:100%; object-fit:cover;">
+            <div style="position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.3); z-index:1;"></div>
+            <h3 class="display-6 lh-1 fw-bold" style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:100%; margin:0; color:aliceblue; text-shadow:3px 3px 5px rgba(0,0,0,0.8); z-index:2;">
+              Feel Happier Every Day</h3>
+            <div class="card-body"style="position:absolute; bottom:0.5rem; right:0.5rem; z-index:2; padding:0;"><svg class="bi" aria-hidden="true"><use xlink:href="#chevron-right"></use></svg>
+            </div>
+          </div>
+        </button>
+      </li>
+    </ul>
+    <!-- CONTENT + CHAT ROW -->
+    <div class="row gx-4 gy-4 mt-3">
+      <!-- LEFT: Tab Panes -->
+      <div class="col-12 col-md-6">
+        <div class="tab-content" id="filledTabsContent">
+          <!-- Pane: Start -->
+          <div class="tab-pane fade show active" id="start" role="tabpanel">
+            <div class="container px-1 px-md-4 pt-2" >
+              <div class="bg-body mx-auto py-4 px-1 px-md-4" style="border-radius:21px;">
+                <div class="row gx-2 gx-md-4 gy-4">
+                  <div class="col-12">
+                    <div class="card" style="position:relative; overflow:hidden; width:200px; max-width:100%; height:200px; background-color:rgba(255,187,187,0.4);">
+                      <img src="./images/kai-get-kinder-3D.png" class="card-img-top" alt="Get Kinder & Happier Now" style="width:100%; height:100%; object-fit:cover;">
+                      <div style="position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.3); z-index:1;"></div>
+                      <h3 class="display-7 lh-1 fw-bold text-center" style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:100%; margin:0; color:aliceblue; text-shadow:3px 3px 5px rgba(0,0,0,0.8); z-index:2;">
+                        Get Kinder & Happier Now
+                      </h3>
+                      <div class="card-body" style="position:absolute; bottom:0.5rem; right:0.5rem; z-index:2; padding:0;"><svg class="bi" aria-hidden="true"><use xlink:href="#chevron-right"></use></svg>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="col-12">
+                    <h3 style="color:#ff5656; margin-bottom: 1rem;">Feel happier with quick check-ins and easy tips for being kind to yourself or others.</h3>
+                    <div class="btn-group ms-2" role="group" aria-label="Quick starters">
+                    <ul class="list-unstyled ps-0">
+                     <li><a class="btn btn-outline-primary btn-lg starter-btn custom-hover fw-bold" href="#chat2" data-prompt="I would like a baseline check in Kai" style="font-size: 1.1rem; color: #455a7c; width: 300px;"><img src="/images/kai-get-kinder-3D.png" alt="real Kindness AI Companion Kai" width="35" height="35" class="me-2"> Baseline Check-In </a> </li>
+                     <p style="margin-bottom: 1rem; margin-top: 0.5rem;">Your current emotional & physical state guides kai to help you feel happier.</p>
+                      <li><a class="btn btn-outline-primary btn-lg starter-btn custom-hover fw-bold" href="#chat2" data-prompt="Kai provide me with a self Kindness Insight or tip"style="font-size: 1.1rem; color: #455a7c; width: 300px;"><img src="/images/kai-get-kinder-3D.png" alt="real Kindness AI Companion Kai" width="35" height="35" class="me-2">Self Kindness Insight</a></li>
+                      <p style="margin-bottom: 1rem; margin-top: 0.5rem;">Kai provides a self-kindness insight or tip to help you be kinder to yourself.</p>
+                      <li> <a class="btn btn-outline-primary btn-lg starter-btn custom-hover fw-bold" href="#chat2" data-prompt="Kai give me tips for being kind to others"style="font-size: 1.1rem; color: #455a7c; width: 300px;"><img src="/images/kai-get-kinder-3D.png" alt="real Kindness AI Companion Kai" width="35" height="35" class="me-2"> Kindness Tips</a> </li>
+                     <p style="margin-bottom: 1rem; margin-top: 0.5rem;"> Ask Kai for a tip on how to be kinder to others and feel happier.</p>
+                    </ul>
+                    </div>
+                    <p>Read the blogs here at <a href="https://getkinder.ai/blog" target="_blank" rel="noopener">Kinder AI™ Blog</a>, or at <a href="https://getkindr.com/blog" target="_blank" rel="noopener">the Get Kindr Foundation.</a> to learn more about why this works. </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- Pane: Superpower -->
+          <div class="tab-pane fade" id="superpower" role="tabpanel">
+            <div class="container px-1 px-md-4 pt-2" style="margin-top:1rem;">
+              <div class="row gx-2 gx-md-4 gy-4">
+                <div class="col-12">
+                  <div class="card" style="position:relative; overflow:hidden; width:200px; max-width:100%; height:200px; background-color:rgba(181,189,203,0.4);">
+                    <img src="./images/kai-superhero-3D.png" class="card-img-top" alt="Find Your Kindness Superpower" style="width:100%; height:100%; object-fit:contain; object-position:center;">
+                    <div style="position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.3); z-index:1;"></div>
+                    <h3 class="display-7 lh-1 fw-bold text-center" style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:100%; margin:0; color:aliceblue; text-shadow:3px 3px 5px rgba(0,0,0,0.8); z-index:2;">
+                      Find Your Kindness Superpower</h3>
+                    <div class="card-body" style="position:absolute; bottom:0.5rem; right:0.5rem; z-index:2; padding:0;"><svg class="bi" aria-hidden="true"><use xlink:href="#chevron-right"></use></svg>
+                    </div>
+                  </div>
+                </div>
+                <div class="col-12">
+                  <h3 style="color:#ff5656; margin-bottom: 1rem;">Find your Kindness Style so you can own your superpower, amplify it and share it.</h3>
+                    <div class="btn-group ms-2" role="group" aria-label="Quick starters">
+                    <ul class="list-unstyled ps-0">
+                     <li><a class="btn btn-outline-primary btn-lg starter-btn custom-hover fw-bold " href="#chat2" data-prompt="I would like to do the short kindness style quiz, Kai" style="font-size: 1.1rem; color: #455a7c; width: 325px;"><img src="/images/kai-superhero-3D.png" alt="real Kindness AI Companion Kai" width="35" height="35" class="me-2">Kindness Style Quiz - Short</a> </li>
+                     <p style="margin-bottom: 1rem; margin-top: 0.5rem;">Find your Kindness Superpower with a short quiz (approx 2 minutes)?</p>
+                      <li><a class="btn btn-outline-primary btn-lg starter-btn custom-hover fw-bold " href="#chat2" data-prompt="I would like to do the long kindness style quiz, Kai"style="font-size: 1.1rem; color: #455a7c; width: 325px;"><img src="/images/kai-superhero-3D.png" alt="real Kindness AI Companion Kai" width="35" height="35" class="me-2">Kindness Style Quiz - Long</a></li>
+                      <p style="margin-bottom: 1rem; margin-top: 0.5rem;">Find your Kindness Superpower with a longer quiz (approx 4 minutes)?</p>
+                    </ul>
+                    </div>
+                    <p style="margin-bottom: 1rem; margin-top: 0.5rem;">Read the blogs here at <a href="https://getkinder.ai/blog" target="_blank" rel="noopener">Kinder AI™ Blog</a>, or at <a href="https://getkindr.com/blog" target="_blank" rel="noopener">the Get Kindr Foundation.</a> to learn more about why this works. </p>
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- Pane: Talk -->
+          <div class="tab-pane fade" id="talk" role="tabpanel">
+            <div class="container px-1 px-md-4 pt-2" style="margin-top:1rem;">
+              <div class="row gx-2 gx-md-4 gy-4">
+                <div class="col-12">
+                  <div class="card" style="position:relative; overflow:hidden; width:200px; max-width:100%; height:200px; background-color:rgba(255,86,86,0.4);">
+                    <img src="./images/kai-real.png" class="card-img-top" alt="Kai is Here to Talk" style="width:100%; height:100%; object-fit:cover;">
+                    <div style="position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.3); z-index:1;"></div>
+                    <h3 class="display-7 lh-1 fw-bold text-center" style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:100%; margin:0; color:aliceblue; text-shadow:3px 3px 5px rgba(0,0,0,0.8); z-index:2;">
+                      Kai is Here to Talk</h3>
+                    <div class="card-body"
+                         style="position:absolute; bottom:0.5rem; right:0.5rem; z-index:2; padding:0;">
+                      <svg class="bi" aria-hidden="true"><use xlink:href="#chevron-right"></use></svg>
+                    </div>
+                  </div>
+                </div>
+                <div class="col-12">
+                  <h3 style="color:#ff5656; margin-bottom: 1rem;">Speak to Kai about being kinder to yourself and others so you feel happier and more connected.</h3>
+                    <div class="btn-group ms-2" role="group" aria-label="Quick starters">
+                    <ul class="list-unstyled ps-0">
+                     <li><a class="btn btn-outline-primary btn-lg starter-btn custom-hover fw-bold " href="#chat2" data-prompt="How can I feel less stressed today Kai" style="font-size: 1.1rem; color: #455a7c; width: 325px;"><img src="/images/kai-get-kinder-3D.png" alt="real Kindness AI Companion Kai" width="35" height="35" class="me-2"> Feel Less Stressed </a> </li>
+                     <p style="margin-bottom: 1rem; margin-top: 0.5rem;">Check in with Kai to find out how you can lower your stress level.</p>
+                      <li> <a class="btn btn-outline-primary btn-lg starter-btn custom-hover fw-bold " href="#chat2" data-prompt="Kai let me know how I can be kinder to myself"style="font-size: 1.1rem; color: #455a7c; width: 325px;"><img src="/images/kai-get-kinder-3D.png" alt="real Kindness AI Companion Kai" width="35" height="35" class="me-2"> Be Kinder to Myself</a> </li>
+                     <p style="margin-bottom: 1rem; margin-top: 0.5rem;"> Chat with Kai to learn how you can be kinder to yourself and feel happier.</p>
+                     <li> <a class="btn btn-outline-primary btn-lg starter-btn custom-hover fw-bold " href="#chat2" data-prompt="Kai let me know how I can be kinder with others"style="font-size: 1.1rem; color: #455a7c; width: 325px;"><img src="/images/kai-get-kinder-3D.png" alt="real Kindness AI Companion Kai" width="35" height="35" class="me-2"> Be Kinder With Others</a> </li>
+                     <p style="margin-bottom: 1rem; margin-top: 0.5rem;"> Chat with Kai to learn how you can get kinder with others and feel happier.</p>
+                    <li><a class="btn btn-outline-primary btn-lg starter-btn custom-hover fw-bold " href="#chat2" data-prompt="Kai provide me with a a quick kindness ritual, aligned with my superpower"style="font-size: 1.1rem; color: #455a7c; width: 325px;"><img src="/images/kai-get-kinder-3D.png" alt="real Kindness AI Companion Kai" width="35" height="35" class="me-2">Find a Kindness Ritual</a></li>
+                      <p style="margin-bottom: 1rem; margin-top: 0.5rem;">Ask Kai for a repeatable regular kindness tip aligned to your superpower.</p>
+                      </ul>
+                    </div>
+                    <p>Read the blogs here at <a href="https://getkinder.ai/blog" target="_blank" rel="noopener">Kinder AI™ Blog</a>, or at <a href="https://getkindr.com/blog" target="_blank" rel="noopener">the Get Kindr Foundation.</a> to learn more about why this works. </p>
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- Pane: Happier -->
+          <div class="tab-pane fade" id="happier" role="tabpanel">
+            <div class="container px-1 px-md-4 pt-2" style="margin-top:1rem;">
+              <div class="row gx-2 gx-md-4 gy-4">
+                <div class="col-12">
+                  <div class="card" style="position:relative; overflow:hidden; width:200px; max-width:100%; height:200px; background-color:rgba(69,90,124,0.4);">
+                    <img src="./images/kai-feel-happier-3D.png" class="card-img-top" alt="Feel Happier Every Day" style="width:100%; height:100%; object-fit:cover;">
+                    <div style="position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.3); z-index:1;"></div>
+                    <h3 class="display-7 lh-1 fw-bold text-center" style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:100%; margin:0; color:aliceblue; text-shadow:3px 3px 5px rgba(0,0,0,0.8); z-index:2;">
+                      Feel Happier Every Day</h3>
+                    <div class="card-body"
+                         style="position:absolute; bottom:0.5rem; right:0.5rem; z-index:2; padding:0;">
+                      <svg class="bi" aria-hidden="true"><use xlink:href="#chevron-right"></use></svg>
+                    </div>
+                  </div>
+                </div>
+                <div class="col-12">
+                  <h3 style="color:#ff5656; margin-bottom: 1rem;"> See how easy it is to make happiness your new normal and spread kindness every day.</h3>
+                    <div class="btn-group ms-2" role="group" aria-label="Quick starters">
+                    <ul class="list-unstyled ps-0">
+                     <li><a class="btn btn-outline-primary btn-lg starter-btn custom-hover " href="#chat2" data-prompt="How can I create a kindness habit Kai" style="font-size: 1.1rem; color: #455a7c; width: 325px;"><img src="/images/kai-get-kinder-3D.png" alt="real Kindness AI Companion Kai" width="35" height="35" class="me-2">Start With Small Kind Acts</a> </li>
+                     <p style="margin-bottom: 1rem; margin-top: 0.5rem;">Begin by discovering your "why", your Kindness Superpower will help.</p>
+                      <li><a class="btn btn-outline-primary btn-lg starter-btn custom-hover f" href="#chat2" data-prompt="I want to know what makes me happy"style="font-size: 1.1rem; color: #455a7c; width: 325px;"><img src="/images/kai-get-kinder-3D.png" alt="real Kindness AI Companion Kai" width="35" height="35" class="me-2">Find What Makes You Happy?</a></li>
+                      <p style="margin-bottom: 1rem; margin-top: 0.5rem;">Then every day refine what makes you the happiest and doing more of that.</p>
+                      <li> <a class="btn btn-outline-primary btn-lg starter-btn custom-hover " href="#chat2" data-prompt="How can I sustain my kindness habit, and habit stack?"style="font-size: 1.1rem; color: #455a7c; width: 325px;"><img src="/images/kai-get-kinder-3D.png" alt="real Kindness AI Companion Kai" width="35" height="35" class="me-2">Now Keep the Streak Going</a> </li>
+                     <p style="margin-bottom: 1rem; margin-top: 0.5rem;"> Let's put it all together and make a streak!</p>
+                     <li> <a class="btn btn-outline-primary btn-lg starter-btn custom-hover" href="#chat2" data-prompt="Help me build kindness habit stacks"style="font-size: 1.1rem; color: #455a7c; width: 325px;"><img src="/images/kai-get-kinder-3D.png" alt="real Kindness AI Companion Kai" width="35" height="35" class="me-2">Time to Build on This</a> </li>
+                     <p style="margin-bottom: 1rem; margin-top: 0.5rem;"> Build your kindness identity by staying consistent, and watch your joy compound. </p>
+                    </ul>
+                    </div>
+                    <p>Read the blogs here at <a href="https://getkinder.ai/blog" target="_blank" rel="noopener">Kinder AI™ Blog</a>, or at <a href="https://getkindr.com/blog" target="_blank" rel="noopener">the Get Kindr Foundation.</a> to learn more about why this works. </p>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
-        <div class="col-lg-6">
-          <h1 class="display-5 fw-bold text-white lh-1 mb-3">Boost happiness and spark deeper connections with Kinder AI™ your daily 5-minute kindness hack.</h1>
-          <p class="lead text-white mt-1">KAI—your personal Kinder AI™ Coach helps you create fulfillment and joy from the inside out with small, personalized, meaningful actions.</p>
-          <p class="lead text-white mt-1">Helping others doesn’t just brighten their day — it transforms yours, join our kindness movement today!</p>
-
-          <section>
-            <div class="container-fluid py-4">
-              <div class="row justify-content-center">
-                <div class="col-12" style="max-width: 500px;">
-                  <div class="card w-100 shadow" id="chat2">             
+      </div>
+        <!-- RIGHT: CHAT WINDOW -->
+      <div class="col-12 col-md-6 mx-md-auto px-0" id="chat2">
+       <section>
+            <div class="container-fluid py-4 px-0 px-md-4  mx-md-0">
+              <div class="row justify-content-center gx-0 gx-md-4">
+                <div class="col-12" >
+                  <div class="card w-100 shadow" >             
                     <!-- Header -->
-                    <div class="card-header d-flex justify-content-between align-items-center p-3">
-                      <div class="d-flex align-items-center">
-                        <img src="./images/KAI.png" alt="KAI - the AI kindness coach" class="rounded-circle me-2" style="width: 40px; height: 40px;">
-                        <h4 class="mb-0" style="color: #455a7c;">Chat with KAI now</h4>
+                    <div class="card-header d-flex justify-content-between align-items-center p-3" >
+                      <div class="d-flex align-items-center" >
+                        <img src="./images/kai-real.png" alt="KAI - the AI kindness coach" class="rounded-circle me-2" style="width: 40px; height: 40px;">
+                        <h4 class="mb-0" style="color: #455a7c;">Chat With KAI Now</h4>
                       </div>
                     </div>
                     <!-- Body -->
               <div id="chatBody" class="card-body overflow-auto px-3" style="height: 400px;">
-   <% if (typeof isNewUser !== 'undefined' && isNewUser) { %>
-    <!-- FIRST‐TIME GREETING -->
-    <div class="d-flex mt-2 align-items-start">
-      <img
-        src="./images/KAI.png"
-        alt="KAI – the AI kindness coach"
-        class="rounded-circle flex-shrink-0 me-2"
-        style="width: 35px; height: 35px;"
-      />
-      <div
-        class="bg-body-tertiary rounded-3 px-3 py-2 ms-2 flex-grow-1"
-        style="max-width: calc(100% - 50px);"
-      >
-        👋 Hello! I’m KAI, your AI kindness coach. How can I help you get kinder today?
+      <% if (typeof isNewUser !== 'undefined' && isNewUser) { %>
+        <!-- FIRST‐TIME GREETING -->
+        <div class="d-flex mt-2 align-items-start">
+          <img src="./images/kai-real.png" alt="KAI – the AI kindness coach" class="rounded-circle flex-shrink-0 me-2"style="width: 35px; height: 35px;"/>
+          <div class="bg-body-tertiary rounded-3 px-3 py-2 ms-2 flex-grow-1" style="max-width: calc(100% - 50px);">
+        👋 Hello! I’m KAI, your Kindness-AI Companion. How can I help you feel happier today?
       </div>
     </div>
 
-  <% } else if (typeof isNewUser !== 'undefined') { %>
+      <% } else if (typeof isNewUser !== 'undefined') { %>
     <!-- RETURNING USER GREETING -->
     <div class="d-flex mt-2 align-items-start">
-      <img
-        src="./images/KAI.png"
-        alt="KAI – the AI kindness coach"
-        class="rounded-circle flex-shrink-0 me-2"
-        style="width: 35px; height: 35px;"
-      />
-      <div
-        class="bg-body-tertiary rounded-3 px-3 py-2 ms-2 flex-grow-1"
-        style="max-width: calc(100% - 50px);"
-      >
+      <img src="./images/kai-real.png" alt="KAI – the AI kindness coach" class="rounded-circle flex-shrink-0 me-2" style="width: 35px; height: 35px;"/>
+      <div class="bg-body-tertiary rounded-3 px-3 py-2 ms-2 flex-grow-1" style="max-width: calc(100% - 50px);">
         👋 Welcome back! How can I help you today?
       </div>
     </div>
-  <% } %>
+    <% } %>
                   <% if (chatHistory && chatHistory.length) { 
                         chatHistory.forEach(msg => {
                        if (msg.role === "user") { %>
@@ -155,13 +358,13 @@
                     <div class="d-flex align-items-center">
                       <div class="bg-primary text-white rounded-3 px-3 py-2">
                         <%= msg.content %>
-                      </div>
-                      <img src="<%= (msg.user && msg.user.picture) || '/images/nerdy-KAI.png' %>" alt="get kinder user profile picture" class="rounded-circle ms-2" style="width: 35px; height: 35px;">
+                      
+                      <img src="<%= (msg.user && msg.user.picture) ? msg.user.picture : '/images/nerdy-KAI.png' %>" alt="get kinder user profile picture" class="rounded-circle ms-2" style="width: 35px; height: 35px;">
              </div>
            </div>
          <% } else { %>
             <div class="d-flex mt-2 align-items-start">
-              <img src="./images/KAI.png" alt="KAI – the AI kindness coach" class="rounded-circle flex-shrink-0 me-2" style="width: 35px; height: 35px;">
+              <img src="./images/kai-real.png" alt="KAI – the AI kindness coach" class="rounded-circle flex-shrink-0 me-2" style="width: 35px; height: 35px;">
               <div class="bg-body-tertiary rounded-3 px-3 py-2 ms-2 flex-grow-1" style="max-width: calc(100% - 50px);">
                 <%= msg.content %>
               </div>
@@ -173,7 +376,7 @@
           <!-- (Off-screen template for typing indicator—also showing KAI’s avatar) -->
           <template id="typingIndicatorTemplate">
             <div class="d-flex align-items-center mt-2" id="typingIndicator">
-              <img src="./images/KAI.png" alt="KAI - the AI kindness coach" class="rounded-circle me-2" style="width: 35px; height: 35px;">
+              <img src="./images/kai-real.png" alt="KAI - the AI kindness coach" class="rounded-circle me-2" style="width: 35px; height: 35px;">
               <div class="typing dots bg-body-tertiary rounded-3 px-3 py-2">
                 <span>.</span><span>.</span><span>.</span>
               </div>
@@ -198,31 +401,15 @@
               </div>
             </div>
           </section>
-
-          <p style="color: aliceblue; text-align: center;">Remember KAI can make mistakes and does not provide mental health advice</p>          
-
-          <div style="display: flex; justify-content: center; padding: 0.5rem;">
-            <a href="mailto:kai@getkinder.ai?subject=Feedback%20on%20KAI&body=Hi%20Team%2C%20I%20have%20some%20feedback%20about%20KAI..."
-               class="btn btn-primary btn-lgr"
-               style="color: white; text-decoration: none; width: 100%; max-width: 425px; text-align: center;">
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor"
-                   class="bi bi-chat-right-heart-fill" viewBox="0 0 16 16" style="margin-right: 8px;">
-                <path d="M16 2a2 2 0 0 0-2-2H2a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h9.586a1 1 0 0 1 .707.293l2.853 
-                         2.853a.5.5 0 0 0 .854-.353zM8 3.993c1.664-1.711 5.825 1.283 0 5.132-5.825-3.85-1.664-6.843 
-                         0-5.132"/>
-              </svg>
-              Click Here to Give us Feedback on KAI
-            </a>
-          </div>
-
-        </div>
       </div>
-    </div>
-  </section>
-
+    </div> <!-- /.row -->
+    <div class="col-12 text-center mt-4"> <p class="mb-0" style="color:#455a7c;"> Remember KAI can make mistakes and does not provide mental health advice</p></div>
+  </div> <!-- /.modern-tabs -->
+</div> <!-- /#custom-cards -->
   <!-- nonprofit support section-->
   <section id="supporters">
-    <div class="container py-5">
+     <div class="container-fluid px-0.5 px-md-4 pt-3 pb-3">
+  <div class="modern-tabs">
       <h2 style="color: #455a7c; font-size: 2.5rem"> Kinder AI™ Made Possible by Support</h2> 
       <div class="row gy-4 row-cols-1 row-cols-md-3">
         <div class="col">
@@ -237,8 +424,7 @@
             </div>
           </div>
         </div>
-
-        <div class="col">
+          <div class="col">
           <div class="d-flex align-items-center justify-content-center profile-card m-3 gap-3">  
             <div
               class="icon-square text-body-emphasis bg-body-secondary d-inline-flex align-items-center justify-content-center fs-4 flex-shrink-0 me-3">
@@ -250,7 +436,6 @@
             </div>
           </div>
         </div>
-
         <div class="col">
           <div class="d-flex align-items-center justify-content-center profile-card m-3 gap-3">  
             <div
@@ -265,8 +450,8 @@
         </div>
       </div>
     </div>
+  </div>
   </section>
-
   <div class="modal fade" id="logoutModal" tabindex="-1" aria-labelledby="logoutModalLabel" aria-hidden="true">
     <div class="modal-dialog">
       <div class="modal-content">
@@ -286,13 +471,14 @@
       </div>
     </div>
   </div>
-<section id="footer" class="gradient-background">
+ <!-- navigation footer section-->
+  <section id="footer" class="gradient-background">
   <div class="container">
     <footer class="row align-items-center py-5 mt-5 border-top text-body-secondary">
       <!-- 1) Logo: centered on xs, left on md+ -->
       <div class="col-12 col-md-4 mb-4 mb-md-0 text-center text-md-start">
         <a href="#">
-          <img src="./images/heart.png" alt="Get Kinder Heart" height="150">
+          <img src="./images/heart3D.png" alt="Get Kinder Heart" height="150">
         </a>
         <p class="mt-2">
           &copy;
@@ -351,10 +537,54 @@
   </script>
 <% if (typeof user !== 'undefined' && user) { %>
    <script>
-     window.loggedInUserPicture = "<%= user.picture || '/images/nerdy-KAI.png' %>";
+     window.loggedInUserPicture = "<%= user.picture ? user.picture : '/images/nerdy-KAI.png' %>"; 
    </script>
    <script src="/js/chat.js"></script>
  <% } %>
   <script src="/js/chat.js"></script>
+  <script>
+    // Grab references
+const chatInput   = document.getElementById('chatInput');
+const sendBtn     = document.getElementById('sendBtn');
+
+document.querySelectorAll('.starter-btn').forEach(btn =>
+  btn.addEventListener('click', () => {
+    // pull the message from data-prompt
+    chatInput.value = btn.dataset.prompt;
+    sendBtn.click();
+    chatInput.value = ''; // clear if your send logic doesn’t already
+  })
+);
+</script>
+ <script>
+document.addEventListener('DOMContentLoaded', function() {
+  var tabEl = document.getElementById('filledTabs');
+  function scrollToPaneSelector(selector) {
+    var pane = document.querySelector(selector);
+    if (!pane) return;
+    // 1) measure your header
+    var header = document.querySelector('.navbar.fixed-top, .navbar.sticky-top');
+    var headerHeight = header ? header.getBoundingClientRect().height : 0;
+    // 2) extra breathing room
+    var extra = 10;
+    // 3) compute final Y
+    var paneTop = pane.getBoundingClientRect().top + window.pageYOffset;
+    var targetY = paneTop - headerHeight - extra;
+    window.scrollTo({ top: targetY, behavior: 'smooth' });
+  }
+  // on real tab changes (cards 2–4 and when switching back to card 1)
+  tabEl.addEventListener('shown.bs.tab', function(e) {
+    scrollToPaneSelector(e.target.getAttribute('data-bs-target'));
+  });
+  // when you click the already-active first tab
+  var first = document.getElementById('start-tab');
+  if (first) {
+    first.addEventListener('click', function() {
+      // only scroll if we actually want to re-center it
+      scrollToPaneSelector('#start');
+    });
+  }
+});
+</script>
 </body>
 </html>

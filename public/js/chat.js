@@ -48,7 +48,7 @@ function appendAssistantBubble(text) {
   wrapper.className = 'd-flex mt-2 align-items-start';
 
   wrapper.innerHTML = `
-    <img src="./images/KAI.png" alt="KAI – the AI kindness coach" class="rounded-circle flex-shrink-0 me-2" style="width: 35px; height: 35px;">
+    <img src="./images/kai-real.png" alt="KAI – the AI kindness coach" class="rounded-circle flex-shrink-0 me-2" style="width: 35px; height: 35px;">
     <div class="bg-body-tertiary rounded-3 px-3 py-2 ms-2 flex-grow-1" style="max-width: calc(100% - 50px);">
       ${sanitizeHTML(text)}
     </div>
@@ -59,16 +59,20 @@ function appendAssistantBubble(text) {
 }
 
 function appendUserBubble(text) {
+
+  const pic = window.loggedInUserPicture || '/images/nerdy-KAI.png';
+
   const html = `
     <div class="d-flex flex-row justify-content-end mb-4 pt-1">
-      <div style="background-color: #455a7c; color: white; max-width: 100%; min-width: 50px;" class="p-2 rounded-3 d-inline-block">
+          <div class="p-2 rounded-3 d-inline-block" style="background-color: #455a7c; color: white; max-width: 100%; min-width: 50px;" class="p-2 rounded-3 d-inline-block">
         <p class="small mb-0" style="color: white;">${sanitizeHTML(text)}</p>
       </div>
       <img
-        src="${window.loggedInUserPicture}"
+        src="${pic}"
         alt="get kinder user avatar"
         class="rounded-circle ms-2"
         style="width: 45px; height: 45px;"
+        onerror="this.onerror=null; this.src='/images/nerdy-KAI.png';"
       >
     </div>
   `;
@@ -85,7 +89,7 @@ function appendKaiBubble(text) {
   const wrapper = document.createElement('div');
   wrapper.className = 'd-flex flex-row justify-content-start mb-4';
   wrapper.innerHTML = `
-    <img src="/images/kai.png" alt="KAI" class="rounded-circle me-2" style="width: 45px; height: 45px;">
+    <img src="/images/kai-real.png" alt="KAI" class="rounded-circle me-2" style="width: 45px; height: 45px;">
     <div class="bg-body-tertiary p-2 rounded-3" style="max-width: 85%; word-break: break-word;">
       <p class="small mb-0">${sanitizeHTML(text)}</p>
     </div>
