@@ -17,7 +17,7 @@
   <meta name="author" content="Get Kindr Foundation">
   <meta name="robots" content="index, follow">
 
-  <meta property="og:title" content="Get Kinder | The 5-Minute AI Kindness Hack for Happiness & Connection">
+  <meta property="og:title" content="Get Kinder | whoops 404 - Page Not Found">
   <meta property="og:description" content="Discover Get Kinder, your AI-powered kindness coach. Build deeper connections, spread joy, and improve wellbeing with daily 5-minute acts of kindness.">
   <meta property="og:url" content="https://getkinder.ai/">
   <meta property="og:type" content="website">
@@ -33,7 +33,6 @@
 <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-W4NR6FZ9"
   height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
   <!-- End Google Tag Manager (noscript) -->
-  <section id="title" class="gradient-background"> <!-- Create a white header using Bootstrap classes. Include an image aligned to the left and a navigation bar aligned to the right with 4 options and a "Sign Up" button. Use 'navbar', 'navbar-light', 'bg-white', 'navbar-expand-lg', and 'd-flex' classes for layout. -->
    <header>
       <nav class="navbar fixed-top navbar-light bg-white navbar-expand-lg">
         <div class="container-fluid d-flex">
@@ -41,93 +40,19 @@
           <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
             <span class="navbar-toggler-icon"></span>
           </button>
-          <div class="collapse navbar-collapse justify-content-center" id="navbarNav">
-            <ul class="navbar-nav align-items-center">
-              <li class="nav-item">
-                <a class="btn btn-outline-primary btn-lg custom-hover" href="/#chat2" style="font-size: 1.2rem; color: #455a7c; margin-right: 30px; margin-left: 10px; padding-left: 10px;"><img src="/images/kai-real.png" alt="real Kindness AI Companion Kai" width="35" height="35" class="me-2">Chat with Kai Now</a>
-              </li>
-              <li class="nav-item">
-                <a class="nav-link mx-1 font-hover" href="blog" style="font-size: 1.2rem; color: #455a7c; padding-right: 30px;">Blog</a>
-              </li>
-              <li class="nav-item">
-                <a class="nav-link mx-1 font-hover" href="profile" style="font-size: 1.2rem; color: #455a7c; padding-right: 30px;">Profile</a>
-              </li>
-              <li class="nav-item">
-                <a class="nav-link mx-1 font-hover" href="/" style="font-size: 1.2rem; color: #455a7c; padding-right: 30px;">Home</a>
-              </li>
-              </ul>
-            </div>
-              <div class="collapse navbar-collapse justify-content-end" id="navbarNav">
-                <ul class="navbar-nav d-flex align-items-center">              <% if (user) { %>
-                <li class="nav-item d-flex align-items-center me-3">
-                  <span class="navbar-text fw-bold me-2" style="font-size: 1.2rem; color: #455a7c;"><%= user.firstname || user.email %></span>
-                  <img src="<%= user.picture ? user.picture : '/images/nerdy-KAI.png' %>" class="rounded-circle me-3" width="32" height="32" alt="Get Kinder User Avatar">
-                  <button class="btn btn-outline-danger btn-sm" data-bs-toggle="modal" data-bs-target="#logoutModal">Log Out</button>
-                </li>
-              <% } else { %>
-                <li class="nav-item"><a class="btn btn-primary btn-lg" 
-                  style="font-size: 1.2rem; color: white; text-decoration: none; width: 100%; min-width: 120px; text-align: center;" href="login" role="button">Log In</a>
-                </li>
-              <% } %>
-            </ul>
-            </div>
-        </div>
+          
       </nav>
-    <div class="container col-xxl-8 px-4 ">
-      <div class="row flex-lg-row-reverse align-items-center g-5 pt-3">
-        <div class="col-10 col-sm-8 col-lg-6">
-          <img src="./images/kai-real.png" class="d-block mx-lg-auto img-fluid" alt="picture of KAI our Kinder AI coach" height="300"
-            loading="lazy">
-        </div>
-        <div class="col-lg-6">
-            <h1 class="display-5 fw-bold text-white lh-1 mb-3">Get Kinder Contact</h1>
-            <p class="lead text-white mt-1"> We would love to hear from you.</p>
-            <p class="lead text-white mt-1">If you have any questions, feedback, or inquiries about our platform, please reach out to us through your preferred method below.</p>
-          </section> 
-        </div>
-      </div>
-      </div>
-    </div>
-  </section>
-  <!-- contact form section-->
-  <section id="contact">
+  <!-- nonprofit support section-->
     <div class="container mt-5"> <!-- make h2 font color: #455a7c-->
-      <h2 class="text-center" style="color: #455a7c;">Contact Get Kinder</h2>
-      <p class="lead text-center mt-1">We'd love to hear from you. Please fill out the form below and we'll respond as soon as possible.</p>
-      <h3 class="mt-4"></h3>
-    </div>
-  </section>
-  <div class="container my-5">
-    <div class="row justify-content-center">
-        <div class="col-lg-6"></div>
-            <div class="contact-form">
-                <form action="https://formspree.io/f/xldbabay" method="POST">
-                    <div class="mb-3">
-                        <label for="name" class="form-label">Your Name</label>
-                        <input type="text" class="form-control" id="name" name="name" required>
-                    </div>
-                    <div class="mb-3">
-                        <label for="email" class="form-label">Your Email</label>
-                        <input type="email" class="form-control" id="email" name="_replyto" required>
-                    </div>
-                    <div class="mb-3">
-                        <label for="subject" class="form-label">Subject</label>
-                        <input type="text" class="form-control" id="subject" name="subject" required>
-                    </div>
-                    <div class="mb-3">
-                        <label for="message" class="form-label">Message</label>
-                        <textarea class="form-control" id="message" name="message" rows="5" required></textarea>
-                    </div>
-                    <div class="d-grid">
-                        <button type="submit" class="btn btn-primary btn-lg">Send Message</button>
-                    </div>
-                </form>
-            </div>
 
-            <p class="text-center mt-4 text-muted">Alternatively, email us at <a href="mailto:hello@getkindr.com">hello@getkindr.com </a></p>
-        </div>
+<main class="error-page">
+      <img src="./images/404error-Kai.png" class="d-block mx-lg-auto img-fluid" alt="picture of KAI our Kinder AI coach" height="300" loading="lazy">
+  <h1 style="color: #ff5656; font-size: 3rem; margin-top: 2rem;">Oops! Page Not Found (404)</h1>
+  <p style="color: #455a7c; font-size: 1.5rem; margin-top: 1rem;">We can’t find your page. Click the button below to return by to kindness!</p>
+  <a href="/" class="btn btn-primary btn-lg">Go Back Home</a>
+</main>
     </div>
-</div>
+
   <div class="modal fade" id="logoutModal" tabindex="-1" aria-labelledby="logoutModalLabel" aria-hidden="true">
     <div class="modal-dialog">
       <div class="modal-content">
@@ -197,6 +122,22 @@
     </footer>
   </div>
 </section>
+<style>
+  .error-page {
+    text-align: center;
+    margin: 4rem auto;
+  }
+  .error-page code { background:#f5f5f5; padding:0.2em 0.4em; }
+  .btn {
+    display: inline-block;
+    margin-top:1rem;
+    padding:0.6em 1.2em;
+    border-radius:4px;
+    background:#007ACC;
+    color:#fff;
+    text-decoration:none;
+  }
+</style>
   <script async type='module' src='https://interfaces.zapier.com/assets/web-components/zapier-interfaces/zapier-interfaces.esm.js'></script>
   <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script> 
   <script src="assistant.js" charset="UTF-8"></script> 

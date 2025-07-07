@@ -493,6 +493,7 @@ app.get("/terms",        (req, res) => res.render("terms",        { title: "Term
 // 14.1) Login and Register pages (GET)
 app.get("/login",    (req, res) => res.render("login",    { title: "Log In",     facebookAppId: process.env.FACEBOOK_APP_ID }));
 app.get("/register", (req, res) => res.render("register", { title: "Sign Up" }));
+app.get("/404", (req, res) => res.render("404", { title: "404 ERROR" }));
 
 app.get("/about", (req, res) => {
   // mirror the same flags you use on your home route
