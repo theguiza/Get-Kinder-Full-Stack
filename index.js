@@ -363,7 +363,7 @@ app.post(
       email,
       phone,
       address1,
-      address2,
+      kindness_style,
       city,
       state,
       country,
@@ -394,7 +394,7 @@ app.post(
              email     = $3,
              phone     = $4,
              address1  = $5,
-             address2  = $6,
+             kindness_style  = $6,
              city      = $7,
              state     = $8,
              country   = $9,
@@ -413,7 +413,7 @@ app.post(
           email,
           phone,
           address1,
-          address2,
+          kindness_style,
           city,
           state,
           country,
@@ -435,7 +435,7 @@ app.post(
         email,
         phone,
         address1,
-        address2,
+        kindness_style,
         city,
         state,
         country,
@@ -450,8 +450,10 @@ app.post(
 
       return res.redirect('/profile');
     } catch (err) {
-      console.error('Error updating profile:', err);
-      return res.status(500).send('Error updating profile');
+      console.error('Error updating profile:', err.stack);
+      return res
+      .status(500)
+      .send('Error updating profile: ' + err.message);
     }
   }
 );
