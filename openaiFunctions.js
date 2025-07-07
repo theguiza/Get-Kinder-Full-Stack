@@ -1,4 +1,3 @@
-// src/openaiFunctions.js
 
 export const FUNCTIONS = [
   {
