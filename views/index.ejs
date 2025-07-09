@@ -318,7 +318,7 @@
         </div>
       </div>
         <!-- RIGHT: CHAT WINDOW -->
-      <div class="col-12 col-md-6 mx-md-auto px-0" id="chat2">
+      <div class="chat-container col-12 col-md-6 mx-md-auto px-0" id="chat2">
        <section>
             <div class="container-fluid py-4 px-0 px-md-4  mx-md-0">
               <div class="row justify-content-center gx-0 gx-md-4">
@@ -333,24 +333,24 @@
                     </div>
                     <!-- Body -->
               <div id="chatBody" class="card-body overflow-auto px-3" style="height: 400px;">
-      <% if (typeof isNewUser !== 'undefined' && isNewUser) { %>
+        <% if (typeof isNewUser !== 'undefined' && isNewUser) { %>
         <!-- FIRST‐TIME GREETING -->
         <div class="d-flex mt-2 align-items-start">
           <img src="./images/kai-real.png" alt="KAI – the AI kindness coach" class="rounded-circle flex-shrink-0 me-2"style="width: 35px; height: 35px;"/>
           <div class="bg-body-tertiary rounded-3 px-3 py-2 ms-2 flex-grow-1" style="max-width: calc(100% - 50px);">
         👋 Hello! I’m KAI, your Kindness-AI Companion. How can I help you feel happier today?
-      </div>
-    </div>
+        </div>
+        </div>
 
-      <% } else if (typeof isNewUser !== 'undefined') { %>
-    <!-- RETURNING USER GREETING -->
-    <div class="d-flex mt-2 align-items-start">
-      <img src="./images/kai-real.png" alt="KAI – the AI kindness coach" class="rounded-circle flex-shrink-0 me-2" style="width: 35px; height: 35px;"/>
-      <div class="bg-body-tertiary rounded-3 px-3 py-2 ms-2 flex-grow-1" style="max-width: calc(100% - 50px);">
-        👋 Welcome back! How can I help you today?
-      </div>
-    </div>
-    <% } %>
+          <% } else if (typeof isNewUser !== 'undefined') { %>
+          <!-- RETURNING USER GREETING -->
+          <div class="d-flex mt-2 align-items-start">
+            <img src="./images/kai-real.png" alt="KAI – the AI kindness coach" class="rounded-circle flex-shrink-0 me-2" style="width: 35px; height: 35px;"/>
+          <div class="bg-body-tertiary rounded-3 px-3 py-2 ms-2 flex-grow-1" style="max-width: calc(100% - 50px);">
+              👋 Welcome back! How can I help you today?
+            </div>
+          </div>
+          <% } %>
                   <% if (chatHistory && chatHistory.length) { 
                         chatHistory.forEach(msg => {
                        if (msg.role === "user") { %>
@@ -370,9 +370,9 @@
               </div>
             </div>
           <%   } 
-       });
-     } %>
-</div>
+          });
+          } %>
+        </div>
           <!-- (Off-screen template for typing indicator—also showing KAI’s avatar) -->
           <template id="typingIndicatorTemplate">
             <div class="d-flex align-items-center mt-2" id="typingIndicator">
@@ -584,6 +584,56 @@ document.addEventListener('DOMContentLoaded', function() {
       scrollToPaneSelector('#start');
     });
   }
+});
+</script>
+<script>
+// 2) Capture the “full” height when the page loads (before any keyboard)
+let fullHeight = window.visualViewport
+               ? window.visualViewport.height
+               : window.innerHeight;
+
+// 3) Reference your chat container & input
+const chatEl  = document.getElementById('chat2');
+const inputEl = document.getElementById('chatInput');
+
+// 4) A single handler to recompute the bottom offset
+function updateChatPosition() {
+  // pick the API that works
+  const vh = window.visualViewport
+           ? window.visualViewport.height
+           : window.innerHeight;
+
+  // how many pixels did the viewport shrink?
+  const shrinkBy = fullHeight - vh;
+
+  // if keyboard is open, push up; else reset
+  chatEl.style.bottom = (shrinkBy > 0 ? shrinkBy : 0) + 'px';
+}
+
+// 5) Hook up listeners
+//   • visualViewport.resize fires reliably on iOS Safari & modern Android
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', updateChatPosition);
+} else {
+  // fallback: some Android browsers fire window.resize instead
+  window.addEventListener('resize', updateChatPosition);
+}
+
+// 6) Also reset when the user dismisses the keyboard (input loses focus)
+//    (some browsers won’t fire resize until much later, so blur is a nice backup)
+inputEl.addEventListener('blur', () => {
+  chatEl.style.bottom = '0px';
+});
+
+// 7) (Optional) if your page orientation can change:
+window.addEventListener('orientationchange', () => {
+  // recalculate “full” height after rotate
+  setTimeout(() => {
+    fullHeight = window.visualViewport
+               ? window.visualViewport.height
+               : window.innerHeight;
+    updateChatPosition();
+  }, 300);
 });
 </script>
 </body>

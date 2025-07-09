@@ -470,3 +470,9 @@ box-shadow: inset 0px 0px 0px 1px transparent;
     width: auto;   /* preserve aspect ratio */
   }
 }
+
+  .chat-container {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    transition: bottom 0.2s ease;
+  }
