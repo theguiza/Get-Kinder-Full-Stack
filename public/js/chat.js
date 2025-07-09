@@ -116,3 +116,4 @@ function hideTypingIndicator() {
   if (indicator) indicator.style.display = 'none';
 }
 
+
