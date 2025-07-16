@@ -122,6 +122,7 @@ app.use((req, res, next) => {
   next();
 });
 
+
 // 10) View engine setup (EJS)
 app.set("view engine", "ejs");
 app.set("views", path.join(__dirname, "views"));
@@ -573,7 +574,9 @@ return res.render("index", {
     return next(err);
   }
 });
-
+app.get('/sitemap.xml', (req, res) => {
+  res.sendFile(path.join(__dirname, 'sitemap.xml'));
+});
 // ─────────────────────────────────────────────────────────────────────────────
 // 16) OAuth Callback Routes
 // ─────────────────────────────────────────────────────────────────────────────
@@ -695,7 +698,20 @@ cron.schedule(
   },
   { timezone: "America/Vancouver" }
 );
+// ... your other routes and middleware
 
+// 404 catch-all route - MUST BE THE LAST ROUTE
+app.use((req, res, next) => {
+    res.status(404).render('404', { title: 'Page Not Found' }); // Assuming '404.ejs' is your 404 page
+});
+
+// Optional: Error handling middleware (good practice)
+app.use((err, req, res, next) => {
+    console.error(err.stack);
+    res.status(500).send('Something broke!');
+});
+
+// ... your app.listen or server start
 // ─────────────────────────────────────────────────────────────────────────────
 // 18) Start the server
 // ─────────────────────────────────────────────────────────────────────────────
