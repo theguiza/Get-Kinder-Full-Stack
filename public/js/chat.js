@@ -115,34 +115,51 @@ function hideTypingIndicator() {
   const indicator = document.getElementById('typingIndicator');
   if (indicator) indicator.style.display = 'none';
 }
-// store the viewport height before the keyboard shows
-let initialViewportHeight = window.innerHeight;
+// ===== add this to the bottom of /js/chat.js =====
+(function() {
+  // grab existing elements
+  const chatInput = document.getElementById('chatInput');
+  const chatBody  = document.getElementById('chatBody');
+  const chatCard  = document.getElementById('chat-card-container');
 
-// when the input (already grabbed as `input`) gains focus, update the baseline
-input.addEventListener('focus', function() {
-  initialViewportHeight = window.innerHeight;
-});
+  // initial viewport height baseline
+  let prevHeight = window.visualViewport
+    ? window.visualViewport.height
+    : window.innerHeight;
 
-// on any viewport resize (keyboard show/hide), check if it’s back to (or above) the baseline
-window.addEventListener('resize', function() {
-  if (window.innerHeight >= initialViewportHeight) {
-    // scroll your messages container to the bottom
-    const chatBody = document.getElementById('chatBody');
-    chatBody.scrollTop = chatBody.scrollHeight;
-    // and bring the overall chat card back into view
-    document
-      .getElementById('chat-card-container')
-      .scrollIntoView({ behavior: 'smooth', block: 'end' });
+  // helper to scroll both the inner message list and the card itself
+  function scrollChatToBottom() {
+    if (chatBody) {
+      chatBody.scrollTop = chatBody.scrollHeight;
+    }
+    if (chatCard) {
+      chatCard.scrollIntoView({ block: 'end', behavior: 'smooth' });
+    }
   }
-});
 
-// as a fallback, also do the same when the input blurs
-input.addEventListener('blur', function() {
-  setTimeout(function() {
-    const chatBody = document.getElementById('chatBody');
-    chatBody.scrollTop = chatBody.scrollHeight;
-    document
-      .getElementById('chat-card-container')
-      .scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, 100);
-});
+  // listen for viewport resizes (iOS keyboard show/hide)
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', () => {
+      const curr = window.visualViewport.height;
+      // when height *increases* past our last baseline, keyboard was dismissed
+      if (curr > prevHeight + 10) {
+        scrollChatToBottom();
+      }
+      prevHeight = curr;
+    });
+  } else {
+    // fallback for browsers without visualViewport
+    window.addEventListener('resize', () => {
+      const curr = window.innerHeight;
+      if (curr > prevHeight) {
+        scrollChatToBottom();
+      }
+      prevHeight = curr;
+    });
+  }
+
+  // safety-net: also after input blur (keyboard hide)
+  chatInput.addEventListener('blur', () => {
+    setTimeout(scrollChatToBottom, 50);
+  });
+})();
