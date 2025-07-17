@@ -115,5 +115,34 @@ function hideTypingIndicator() {
   const indicator = document.getElementById('typingIndicator');
   if (indicator) indicator.style.display = 'none';
 }
+// store the viewport height before the keyboard shows
+let initialViewportHeight = window.innerHeight;
 
+// when the input (already grabbed as `input`) gains focus, update the baseline
+input.addEventListener('focus', function() {
+  initialViewportHeight = window.innerHeight;
+});
 
+// on any viewport resize (keyboard show/hide), check if it’s back to (or above) the baseline
+window.addEventListener('resize', function() {
+  if (window.innerHeight >= initialViewportHeight) {
+    // scroll your messages container to the bottom
+    const chatBody = document.getElementById('chatBody');
+    chatBody.scrollTop = chatBody.scrollHeight;
+    // and bring the overall chat card back into view
+    document
+      .getElementById('chat-card-container')
+      .scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }
+});
+
+// as a fallback, also do the same when the input blurs
+input.addEventListener('blur', function() {
+  setTimeout(function() {
+    const chatBody = document.getElementById('chatBody');
+    chatBody.scrollTop = chatBody.scrollHeight;
+    document
+      .getElementById('chat-card-container')
+      .scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, 100);
+});
