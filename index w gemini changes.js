@@ -20,7 +20,7 @@ import passport from "passport";
 import cors from "cors";
 import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import { Strategy as FacebookStrategy } from "passport-facebook";
-import { createThread, createMessage, createAndPollRun, listMessages } from "./Backend/assistant.js";
+import { createThread } from "./Backend/assistant.js"; // took out createAndPollRun, createMessage, listMessages
 import OpenAI from "openai";
 import connectPgSimple from "connect-pg-simple";
 import multer from "multer";
@@ -121,6 +121,7 @@ app.use((req, res, next) => {
   res.locals.user = req.user;
   next();
 });
+
 
 // 10) View engine setup (EJS)
 app.set("view engine", "ejs");
@@ -363,7 +364,7 @@ app.post(
       email,
       phone,
       address1,
-      address2,
+      kindness_style,
       city,
       state,
       country,
@@ -394,7 +395,7 @@ app.post(
              email     = $3,
              phone     = $4,
              address1  = $5,
-             address2  = $6,
+             kindness_style  = $6,
              city      = $7,
              state     = $8,
              country   = $9,
@@ -413,7 +414,7 @@ app.post(
           email,
           phone,
           address1,
-          address2,
+          kindness_style,
           city,
           state,
           country,
@@ -435,7 +436,7 @@ app.post(
         email,
         phone,
         address1,
-        address2,
+        kindness_style,
         city,
         state,
         country,
@@ -450,8 +451,10 @@ app.post(
 
       return res.redirect('/profile');
     } catch (err) {
-      console.error('Error updating profile:', err);
-      return res.status(500).send('Error updating profile');
+      console.error('Error updating profile:', err.stack);
+      return res
+      .status(500)
+      .send('Error updating profile: ' + err.message);
     }
   }
 );
@@ -493,6 +496,7 @@ app.get("/terms",        (req, res) => res.render("terms",        { title: "Term
 // 14.1) Login and Register pages (GET)
 app.get("/login",    (req, res) => res.render("login",    { title: "Log In",     facebookAppId: process.env.FACEBOOK_APP_ID }));
 app.get("/register", (req, res) => res.render("register", { title: "Sign Up" }));
+app.get("/404", (req, res) => res.render("404", { title: "404 ERROR" }));
 
 app.get("/about", (req, res) => {
   // mirror the same flags you use on your home route
@@ -570,7 +574,9 @@ return res.render("index", {
     return next(err);
   }
 });
-
+app.get('/sitemap.xml', (req, res) => {
+  res.sendFile(path.join(__dirname, 'sitemap.xml'));
+});
 // ─────────────────────────────────────────────────────────────────────────────
 // 16) OAuth Callback Routes
 // ─────────────────────────────────────────────────────────────────────────────
@@ -590,7 +596,7 @@ app.get("/auth/facebook/callback",
   }
 );
 
-// ─────────────────────────────────────────────────────────────────────────────
+/* ─────────────────────────────────────────────────────────────────────────────
 // 17) Chat API Endpoints (assistant functionality)
 // ─────────────────────────────────────────────────────────────────────────────
 app.get('/api/chat/init', async (req, res) => {
@@ -665,8 +671,79 @@ app.post("/chat", async (req, res) => {
       content: `❌ ${err.message}`
     });
   }
+}); */
+// =========================================================================
+//  CHAT API & FUNCTION CALLING LOGIC (PASTE THIS CODE IN YOUR INDEX.JS)
+// =========================================================================
+
+// This is the function the Assistant will call via the "tool" mechanism.
+const saveKindnessType = async (userId, kindnessType) => {
+  // We can only save the style if a user is logged in (i.e., we have a userId).
+  if (!userId) {
+    console.log(`[DB] Anonymous user finished quiz. Type not saved.`);
+    return { success: true, message: "Quiz complete! Please log in or register to save your kindness type to your profile." };
+  }
+  try {
+    // Update the 'kindness_style' column in your main 'userdata' table.
+    const query = 'UPDATE userdata SET kindness_style = $1 WHERE id = $2';
+    await pool.query(query, [kindnessType, userId]);
+    console.log(`[DB] Saved kindness style '${kindnessType}' for user ID ${userId}.`);
+    return { success: true, message: `Excellent! I've updated your profile with your new kindness type.` };
+  } catch (error) {
+    console.error('[DB] Error saving kindness style:', error);
+    return { success: false, message: 'I ran into a problem saving your kindness type.' };
+  }
+};
+
+// API route to START a new chat session
+app.post("/api/chat/start", async (req, res) => {
+  try {
+    const thread = await createThread();
+    const threadId = thread.id;
+    // Check if the user is logged in via passport's session
+    const loggedInUserId = req.user ? req.user.id : null;
+
+    // Create a new record in our chat_sessions table
+    const query = `
+        INSERT INTO chat_sessions (thread_id, user_id)
+        VALUES ($1, $2)
+        RETURNING id
+    `;
+    const result = await pool.query(query, [threadId, loggedInUserId]);
+    const chatSessionId = result.rows[0].id; // The UUID for this session
+
+    console.log(`[API] New session started. Chat Session ID: ${chatSessionId}, Thread ID: ${threadId}`);
+    res.json({ chatSessionId: chatSessionId, threadId: threadId });
+  } catch (error) {
+    console.error("[API] Error starting chat:", error);
+    res.status(500).json({ error: "Could not start new chat session." });
+  }
 });
 
+
+// API route to handle an ONGOING chat message
+app.post("/api/chat/message", async (req, res) => {
+  const { message, threadId, chatSessionId } = req.body;
+  if (!threadId || !chatSessionId || !message) {
+    return res.status(400).json({ error: "chatSessionId, threadId, and message are required." });
+  }
+
+  // Get the logged-in user's ID to pass to the save function
+  const loggedInUserId = req.user ? req.user.id : null;
+
+  try {
+    // We pass the database function directly to the assistant handler
+    const assistantResponse = await getAssistantResponse(message, threadId, loggedInUserId, saveKindnessType);
+    res.json({ reply: assistantResponse });
+  } catch (error) {
+    console.error("[API] Chat processing error:", error);
+    res.status(500).json({ error: "Sorry, I couldn't process your message." });
+  }
+});
+
+// =========================================================================
+//  END OF CHAT API LOGIC
+// =========================================================================
 
 // Cron: run every day at KINDNESS_SEND_TIME (HH:MM, Vancouver)
 const [hour, minute] = process.env.KINDNESS_SEND_TIME.split(":");
@@ -692,7 +769,20 @@ cron.schedule(
   },
   { timezone: "America/Vancouver" }
 );
+// ... your other routes and middleware
 
+// 404 catch-all route - MUST BE THE LAST ROUTE
+app.use((req, res, next) => {
+    res.status(404).render('404', { title: 'Page Not Found' }); // Assuming '404.ejs' is your 404 page
+});
+
+// Optional: Error handling middleware (good practice)
+app.use((err, req, res, next) => {
+    console.error(err.stack);
+    res.status(500).send('Something broke!');
+});
+
+// ... your app.listen or server start
 // ─────────────────────────────────────────────────────────────────────────────
 // 18) Start the server
 // ─────────────────────────────────────────────────────────────────────────────
