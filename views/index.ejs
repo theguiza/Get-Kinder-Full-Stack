@@ -70,24 +70,24 @@
                 <a class="nav-link mx-1 font-hover" href="about" style="font-size: 1.2rem; color: #455a7c; padding-right: 30px;">About</a>
               </li>
               </ul>
-            </div>
-              <div class="collapse navbar-collapse justify-content-end">
+              </div>
+              <div class="collapse navbar-collapse justify-content-end" id="navbarNav">
                 <ul class="navbar-nav d-flex align-items-center">              <% if (user) { %>
                 <li class="nav-item d-flex align-items-center me-3">
                   <span class="navbar-text fw-bold me-2" style="font-size: 1.2rem; color: #455a7c;"><%= user.firstname || user.email %></span>
                   <img src="<%= (user && user.picture) ? user.picture : '/images/nerdy-KAI.png' %>"  class="rounded-circle me-3" width="32" height="32" alt="Get Kinder User Avatar">
                   <button class="btn btn-outline-danger btn-sm" data-bs-toggle="modal" data-bs-target="#logoutModal">Log Out</button>
                 </li>
-              <% } else { %>
+                <% } else { %>
                 <li class="nav-item"><a class="btn btn-primary btn-lg" 
                   style="font-size: 1.2rem; color: white; text-decoration: none; width: 100%; min-width: 120px; text-align: center;" href="login" role="button">Log In</a>
                 </li>
-              <% } %>
-            </ul>
+                <% } %>
+              </ul>
             </div>
         </div>
       </nav>
- 
+    </header>
  <!-- Hero Section -->
 <section class="gradient-background py-5 pb-0">
   <div class="container"> 
