@@ -25,11 +25,10 @@ import OpenAI from "openai";
 import connectPgSimple from "connect-pg-simple";
 import multer from "multer";
 import cron from "node-cron";
-import ejs from "ejs";
-
 import { FUNCTIONS } from "./openaiFunctions.js";
 import { fetchUserEmails, fetchKindnessPrompts, fetchEmailSubject } from "./fetchData.js";
 import { sendDailyKindnessPrompts } from "./kindnessEmailer.js";
+import { makeDashboardController } from "./Backend/dashboardController.js";
 
 const uploadAvatar = multer({
   storage: multer.memoryStorage(),
@@ -494,6 +493,10 @@ app.get("/terms",        (req, res) => res.render("terms",        { title: "Term
 app.get("/login",    (req, res) => res.render("login",    { title: "Log In",     facebookAppId: process.env.FACEBOOK_APP_ID }));
 app.get("/register", (req, res) => res.render("register", { title: "Sign Up" }));
 app.get("/404", (req, res) => res.render("404", { title: "404 ERROR" }));
+app.get("/error", (req, res) => res.render("error", { title: "500 ERROR" }));
+const { getDashboard } = makeDashboardController(pool);
+app.get("/dashboard", ensureAuthenticated, getDashboard);
+
 
 app.get("/about", (req, res) => {
   // mirror the same flags you use on your home route
