@@ -284,6 +284,19 @@ Why: Transform static mockup into fully functional dashboard matching design req
         }
 
         /* Chat toggle button */
+        .hidden {
+            display: none !important;
+        }
+
+        .btn-loading .btn-text {
+            display: none;
+        }
+
+        .btn-loading .btn-loading {
+            display: inline-flex !important;
+            align-items: center;
+        }
+
         .chat-toggle {
             position: fixed;
             bottom: 24px;
@@ -531,14 +544,20 @@ Why: Transform static mockup into fully functional dashboard matching design req
                         var pct = ((activeChallenge.current_day / activeChallenge.total_days) * 100).toFixed(1);
                         %>
                         <div class="progress-bar">
-                            <div class="progress-fill" <%= 'style="width:' + pct + '%"' %>>
+                            <div class="progress-fill" data-width="<%= pct %>"></div>
                         </div>
                         
                         <p class="challenge-description"><%= activeChallenge.description %></p>
-                        <button class="btn" onclick="askKAI('What should I do for Day <%= activeChallenge.current_day %> of <%= activeChallenge.challenge_name %>?')">Get Today's Guidance</button>
+                        <!-- BOLT: Morning Prompt - Replace guidance button with morning prompt -->
+                        <button class="btn btn-secondary" onclick="openMorningPrompt()">
+                            See Your Morning Prompt
+                        </button>
                     <% } else { %>
+                        <!-- BOLT: UI change - Better messaging for no active challenge -->
                         <p class="challenge-description">You don't have an active challenge yet — we've started 'Discover the Power of Kindness' for you.</p>
-                        <button class="btn" onclick="window.location.reload()">Refresh Dashboard</button>
+                        <button class="btn btn-secondary" onclick="openMorningPrompt()">
+                            See Your Morning Prompt
+                        </button>
                     <% } %>
                 </div>
 
@@ -629,7 +648,7 @@ Why: Transform static mockup into fully functional dashboard matching design req
                             <span><%= levelProgress %>%</span>
                         </div>
                         <div class="progress-bar">
-                            <div class="progress-fill"><%= levelProgress %>%</div>
+                            <div class="progress-fill" data-width="<%= levelProgress %>"></div>
                         </div>
                     <% } %>
                 </div>
@@ -711,6 +730,54 @@ Why: Transform static mockup into fully functional dashboard matching design req
         </div>
     </div>
 
+    <!-- BOLT: Morning Prompt Modal -->
+    <div id="morningPromptModal" class="hidden" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 2000; display: flex; align-items: center; justify-content: center;">
+        <div style="background: white; border-radius: 16px; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto;">
+            <div style="background: #455a7c; color: white; padding: 20px; border-radius: 16px 16px 0 0; display: flex; justify-content: space-between; align-items: center;">
+                <h5 id="dayTitle">Loading...</h5>
+                <button type="button" onclick="closeMorningPrompt()" style="background: none; border: none; color: white; font-size: 24px; cursor: pointer;">&times;</button>
+            </div>
+            <div style="padding: 24px;">
+                    <div class="mb-4">
+                    <h6 style="color: #455a7c; font-weight: 600; margin-bottom: 8px;">Today's Principle</h6>
+                    <p id="principle" style="color: #718096;">Loading principle...</p>
+                    </div>
+                    
+                    <div class="mb-4">
+                    <h6 style="color: #455a7c; font-weight: 600; margin-bottom: 8px;">Your Guidance</h6>
+                    <p id="body">Loading today's guidance...</p>
+                    </div>
+                    
+                    <div class="mb-4">
+                    <h6 style="color: #455a7c; font-weight: 600; margin-bottom: 8px;">Suggested Acts of Kindness</h6>
+                    <ul id="suggestedActs">
+                        <li>Loading suggestions...</li>
+                    </ul>
+                    </div>
+                    
+                    <div class="mb-4">
+                    <h6 style="color: #455a7c; font-weight: 600; margin-bottom: 8px;">Your Reflection</h6>
+                    <textarea id="reflection" rows="4" 
+                              placeholder="How are you feeling about today's challenge? What insights do you have?"
+                              style="width: 100%; padding: 12px; border: 1px solid #e2e8f0; border-radius: 8px; resize: vertical; font-family: inherit;"></textarea>
+                    </div>
+            </div>
+            <div style="padding: 20px; border-top: 1px solid #e2e8f0; display: flex; gap: 12px; justify-content: flex-end;">
+                <button type="button" id="sendReflection" class="btn" style="background: #ff5656; color: white;">
+                    <span class="btn-text">Send to KAI</span>
+                    <span class="btn-loading hidden">
+                        <span style="display: inline-block; width: 16px; height: 16px; border: 2px solid #ffffff; border-radius: 50%; border-top-color: transparent; animation: spin 1s linear infinite; margin-right: 8px;"></span>
+                        Saving...
+                    </span>
+                </button>
+                <button type="button" id="markDone" class="btn btn-secondary">Mark Day as Done</button>
+                <button type="button" class="btn" onclick="closeMorningPrompt()" style="background: #e2e8f0; color: #4a5568;">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Logout Modal -->
+    <div class="modal fade" id="logoutModal" tabindex="-1" aria-labelledby="logoutModalLabel" aria-hidden="true">
     <!-- Logout Modal -->
     <div class="modal fade" id="logoutModal" tabindex="-1" aria-labelledby="logoutModalLabel" aria-hidden="true">
         <div class="modal-dialog">
@@ -875,7 +942,7 @@ Why: Transform static mockup into fully functional dashboard matching design req
         window.addEventListener('load', () => {
             const progressBars = document.querySelectorAll('.progress-fill');
             progressBars.forEach(bar => {
-                const width = bar.style.width;
+                const width = bar.getAttribute('data-width') + '%';
                 bar.style.width = '0%';
                 setTimeout(() => {
                     bar.style.width = width;
@@ -885,5 +952,20 @@ Why: Transform static mockup into fully functional dashboard matching design req
     </script>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/js/bootstrap.bundle.min.js" integrity="sha384-k6d4wzSIapyDyv1kpU366/PK5hCdSbCRGRCMv+eplOQJWyd1fbcAu9OCUj5zNLiq" crossorigin="anonymous"></script>
+    <!-- BOLT: Morning Prompt - Include dashboard JavaScript -->
+    <script src="/js/dashboard.js"></script>
+    
+    <script>
+        // Auto-dismiss alerts after 5 seconds
+        document.addEventListener('DOMContentLoaded', function() {
+            const alerts = document.querySelectorAll('.alert.auto-dismiss');
+            alerts.forEach(alert => {
+                setTimeout(() => {
+                    const bsAlert = new bootstrap.Alert(alert);
+                    bsAlert.close();
+                }, 5000);
+            });
+        });
+    </script>
 </body>
 </html>

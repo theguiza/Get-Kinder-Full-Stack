@@ -492,27 +492,15 @@ app.get('/profile', ensureAuthenticated, async (req, res) => {
 });
 // ─────────────────────────────────────────────────────────────────────────────
 // 14) Static Content Pages
-// ─────────────────────────────────────────────────────────────────────────────
-app.get("/contact", (req, res) => res.render("contact", { title: "Contact Us" }));
-app.get("/accessability", (req, res) => res.render("accessability", { title: "Accessability" }));
-app.get("/privacy",      (req, res) => res.render("privacy",      { title: "Privacy Policy" }));
-app.get("/terms",        (req, res) => res.render("terms",        { title: "Terms of Service" }));
-// 14.1) Login and Register pages (GET)
-app.get("/login",    (req, res) => res.render("login",    { title: "Log In",     facebookAppId: process.env.FACEBOOK_APP_ID }));
-app.get("/register", (req, res) => res.render("register", { title: "Sign Up" }));
-app.get("/404", (req, res) => res.render("404", { title: "404 ERROR" }));
-app.get("/error", (req, res) => res.render("error", { title: "500 ERROR" }));
-const { getDashboard, cancelChallenge } = makeDashboardController(pool);
+// BOLT: Dashboard - Initialize dashboard controller with all functions
+const { getDashboard, getMorningPrompt, saveReflection, markDayDone, cancelChallenge } = makeDashboardController(pool);
+
+// BOLT: Dashboard - All dashboard routes
 app.get("/dashboard", ensureAuthenticated, getDashboard);
+app.get('/dashboard/morning-prompt', ensureAuthenticated, getMorningPrompt);
+app.post('/dashboard/reflect', ensureAuthenticated, saveReflection);
+app.post('/dashboard/mark-done', ensureAuthenticated, markDayDone);
 app.post("/challenge/cancel", ensureAuthenticated, cancelChallenge);
-
-app.get("/dashboard", ensureAuthenticated, getDashboard);
-
-// BOLT: DB - Add challenge cancellation endpoint
-app.post("/challenge/cancel", ensureAuthenticated, cancelChallenge);
-// BOLT: DB - Add challenge cancellation endpoint
-app.post("/challenge/cancel", ensureAuthenticated, cancelChallenge);
-
 
 app.get("/about", (req, res) => {
   // mirror the same flags you use on your home route

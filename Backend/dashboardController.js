@@ -29,6 +29,12 @@ export function makeDashboardController(pool) {
         activeChallenge = await autoAssignFirstChallenge(userId);
       }
       
+      // BOLT: DB - Check if challenge is completed (current_day > total_days)
+      if (activeChallenge && activeChallenge.current_day > activeChallenge.total_days) {
+        await completeChallenge(userId, activeChallenge.user_challenge_id);
+        activeChallenge = null; // Will show next challenge suggestion
+      }
+      
       // BOLT: DB - Get next available challenge for preview
       const nextChallenge = await getNextChallenge(userId);
       
@@ -68,6 +74,176 @@ export function makeDashboardController(pool) {
   };
 
   /**
+   * BOLT: Morning Prompt - Get current day's challenge content
+   * @param {Object} req - Express request object
+   * @param {Object} res - Express response object
+   */
+  const getMorningPrompt = async (req, res) => {
+    try {
+      console.log('getMorningPrompt called for user:', req.user.id);
+      
+      const userId = req.user.id;
+      
+      // BOLT: DB - Get user's active challenge
+      const activeChallenge = await getActiveChallenge(userId);
+      console.log('Active challenge:', activeChallenge);
+      
+      if (!activeChallenge) {
+        console.log('No active challenge found, returning mock data');
+        // Return mock data for testing
+        return res.json({
+          dayNumber: 1,
+          dayTitle: 'Welcome to Your Kindness Journey',
+          principle: 'Every small act of kindness creates ripples of positive change.',
+          body: 'Today, focus on being present and noticing opportunities to spread kindness around you.',
+          suggestedActs: [
+            'Smile at three strangers',
+            'Hold the door open for someone',
+            'Send a thank you message to a friend'
+          ],
+          existingReflection: '',
+          challengeName: 'Discover the Power of Kindness'
+        });
+      }
+      
+      // BOLT: DB - Fetch day template for current day
+      const dayTemplate = await pool.query(`
+        SELECT day_number, day_title, principle, body, suggested_acts
+        FROM challenge_day_templates
+        WHERE challenge_id = $1 AND day_number = $2
+      `, [activeChallenge.challenge_id, activeChallenge.current_day]);
+      
+      if (dayTemplate.rows.length === 0) {
+        return res.status(404).json({ error: 'Day template not found' });
+      }
+      
+      const template = dayTemplate.rows[0];
+      
+      // BOLT: DB - Check if user has existing reflection for this day
+      const existingReflection = await pool.query(`
+        SELECT reflection
+        FROM challenge_logs
+        WHERE user_id = $1 AND challenge_id = $2 AND day_number = $3
+      `, [userId, activeChallenge.challenge_id, activeChallenge.current_day]);
+      
+      res.json({
+        dayNumber: template.day_number,
+        dayTitle: template.day_title,
+        principle: template.principle,
+        body: template.body,
+        suggestedActs: Array.isArray(template.suggested_acts) ? template.suggested_acts : [],
+        existingReflection: existingReflection.rows[0]?.reflection || '',
+        challengeName: activeChallenge.challenge_name
+      });
+      
+    } catch (error) {
+      console.error('Morning prompt error:', error);
+      res.status(500).json({ error: 'Failed to load morning prompt' });
+    }
+  };
+
+  /**
+   * BOLT: Reflection - Save user reflection to database and KAI
+   * @param {Object} req - Express request object
+   * @param {Object} res - Express response object
+   */
+  const saveReflection = async (req, res) => {
+    try {
+      const userId = req.user.id;
+      const { reflection } = req.body;
+      
+      if (!reflection || reflection.trim().length === 0) {
+        return res.status(400).json({ error: 'Reflection cannot be empty' });
+      }
+      
+      // BOLT: DB - Get user's active challenge
+      const activeChallenge = await getActiveChallenge(userId);
+      if (!activeChallenge) {
+        return res.status(404).json({ error: 'No active challenge found' });
+      }
+      
+      // BOLT: DB - Save reflection to challenge_logs
+      await pool.query(`
+        INSERT INTO challenge_logs (user_id, challenge_id, day_number, reflection, created_at)
+        VALUES ($1, $2, $3, $4, NOW())
+        ON CONFLICT (user_id, challenge_id, day_number)
+        DO UPDATE SET reflection = EXCLUDED.reflection, updated_at = NOW()
+      `, [userId, activeChallenge.challenge_id, activeChallenge.current_day, reflection.trim()]);
+      
+      // BOLT: KAI integration - Save to KAI interactions for context
+      await pool.query(`
+        INSERT INTO kai_interactions (user_id, context_type, context_id, message, created_at)
+        VALUES ($1, 'reflection', $2, $3, NOW())
+      `, [userId, activeChallenge.challenge_id, reflection.trim()]);
+      
+      res.json({ 
+        success: true, 
+        message: 'Reflection saved successfully!' 
+      });
+      
+    } catch (error) {
+      console.error('Save reflection error:', error);
+      res.status(500).json({ error: 'Failed to save reflection' });
+    }
+  };
+
+  /**
+   * BOLT: Progress - Mark current day as done and advance challenge
+   * @param {Object} req - Express request object
+   * @param {Object} res - Express response object
+   */
+  const markDayDone = async (req, res) => {
+    try {
+      const userId = req.user.id;
+      
+      // BOLT: DB - Get user's active challenge
+      const activeChallenge = await getActiveChallenge(userId);
+      if (!activeChallenge) {
+        return res.status(404).json({ error: 'No active challenge found' });
+      }
+      
+      const newDay = activeChallenge.current_day + 1;
+      
+      // BOLT: DB - Mark current day as completed in challenge_logs
+      await pool.query(`
+        INSERT INTO challenge_logs (user_id, challenge_id, day_number, completed, completed_at)
+        VALUES ($1, $2, $3, true, NOW())
+        ON CONFLICT (user_id, challenge_id, day_number)
+        DO UPDATE SET completed = true, completed_at = NOW()
+      `, [userId, activeChallenge.challenge_id, activeChallenge.current_day]);
+      
+      // BOLT: DB - Check if challenge is completed
+      if (newDay > activeChallenge.total_days) {
+        // BOLT: DB - Mark challenge as completed
+        await completeChallenge(userId, activeChallenge.user_challenge_id);
+        
+        res.json({ 
+          success: true, 
+          challengeCompleted: true,
+          message: 'Congratulations! You completed the challenge!' 
+        });
+      } else {
+        // BOLT: DB - Advance to next day
+        await pool.query(`
+          UPDATE user_challenges 
+          SET current_day = $1, updated_at = NOW()
+          WHERE id = $2
+        `, [newDay, activeChallenge.user_challenge_id]);
+        
+        res.json({ 
+          success: true, 
+          challengeCompleted: false,
+          newDay: newDay,
+          message: `Great job! Moving to day ${newDay}` 
+        });
+      }
+      
+    } catch (error) {
+      console.error('Mark day done error:', error);
+      res.status(500).json({ error: 'Failed to mark day as done' });
+    }
+  };
+  /**
    * Cancel current active challenge
    * @param {Object} req - Express request object  
    * @param {Object} res - Express response object
@@ -94,6 +270,25 @@ export function makeDashboardController(pool) {
     }
   };
 
+  /**
+   * BOLT: DB - Complete a challenge and update status
+   * @param {number} userId - User ID
+   * @param {number} userChallengeId - User challenge ID
+   */
+  async function completeChallenge(userId, userChallengeId) {
+    try {
+      await pool.query(`
+        UPDATE user_challenges 
+        SET status = 'completed', completed_at = NOW(), updated_at = NOW()
+        WHERE id = $1 AND user_id = $2
+      `, [userChallengeId, userId]);
+      
+      console.log(`Challenge completed for user ${userId}`);
+    } catch (error) {
+      console.error('Error completing challenge:', error);
+      throw error;
+    }
+  }
   /**
    * Get user's active challenge with challenge details
    * @param {number} userId - User ID
@@ -323,6 +518,9 @@ export function makeDashboardController(pool) {
 
   return {
     getDashboard,
+    getMorningPrompt,
+    saveReflection,
+    markDayDone,
     cancelChallenge
   };
 }

@@ -351,3 +351,25 @@ export async function createDashboardMessage(threadId, content, userContext = {}
   
   return await createMessage(threadId, contextualContent);
 }
+
+// BOLT: KAI integration - Save reflection to KAI for context
+export async function saveReflectionToKAI(userId, challengeId, dayNumber, reflection, pool) {
+  try {
+    // BOLT: DB - Save to kai_interactions for conversation context
+    await pool.query(`
+      INSERT INTO kai_interactions (user_id, context_type, context_id, message, created_at)
+      VALUES ($1, 'reflection', $2, $3, NOW())
+    `, [userId, challengeId, `Day ${dayNumber}: ${reflection}`]);
+    
+    return {
+      success: true,
+      message: 'Reflection saved to KAI context'
+    };
+  } catch (error) {
+    console.error('Error saving reflection to KAI:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
