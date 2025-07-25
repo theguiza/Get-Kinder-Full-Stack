@@ -1,4 +1,11 @@
 
+// ===========================
+// BOLT CHANGELOG
+// Date: 2025-01-27
+// What: Enhanced chat.js with dashboard integration and improved KAI interaction
+// Why: Support dashboard-specific chat functionality and better user experience
+// ===========================
+
 document.addEventListener('DOMContentLoaded', () => {
   const sendBtn = document.getElementById('sendBtn');
   const input = document.getElementById('chatInput');
@@ -6,19 +13,30 @@ document.addEventListener('DOMContentLoaded', () => {
   const typingTpl = document.getElementById('typingIndicatorTemplate').content;
   const threadInput = document.getElementById("threadId");
 
+  // BOLT: KAI integration - Enhanced send button click handler
    sendBtn.addEventListener('click', async () => {
+   // BOLT: KAI integration - Get user context for dashboard-specific interactions
+   const userContext = {
+     userId: window.currentUserId || null,
+     currentPage: window.location.pathname,
+     activeChallenge: window.activeChallenge || null
+   };
+
     const userMessage = input.value.trim();
     if (!userMessage) return;
 
     appendUserBubble(userMessage);
     input.value = '';
 
-   // inject our typing-dots template
-   const typingIndicator = typingTpl
-     .querySelector('#typingIndicator')
-     .cloneNode(true);
-   typingIndicator.style.display = 'flex';
-   chatBody.appendChild(typingIndicator);
+    // BOLT: KAI integration - Show typing indicator if template exists
+    let typingIndicator = null;
+    if (typingTpl) {
+      typingIndicator = typingTpl
+        .querySelector('#typingIndicator')
+        .cloneNode(true);
+      typingIndicator.style.display = 'flex';
+      chatBody.appendChild(typingIndicator);
+    }
 
      chatBody.scrollTop = chatBody.scrollHeight;
 
@@ -26,21 +44,26 @@ document.addEventListener('DOMContentLoaded', () => {
       const response = await fetch('/api/chat/message', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userMessage }),
+        body: JSON.stringify({ 
+          message: userMessage,
+          context: userContext 
+        }),
         credentials: 'include'
       });
 
       const data = await response.json();
-      typingIndicator.remove();
+      if (typingIndicator) typingIndicator.remove();
       appendAssistantBubble(data.reply);
     } catch (err) {
       console.error('💥 Chat error:', err);
-      typingIndicator.remove();
+      if (typingIndicator) typingIndicator.remove();
+      appendAssistantBubble('Sorry, I\'m having trouble connecting right now. Please try again later.');
     }
   }); 
   
 });
 
+// BOLT: KAI integration - Enhanced assistant bubble with better formatting
 function appendAssistantBubble(text) {
   if (!text) return;
 
@@ -58,9 +81,11 @@ function appendAssistantBubble(text) {
   chatBody.scrollTop = chatBody.scrollHeight;
 }
 
+// BOLT: KAI integration - Enhanced user bubble with better error handling
 function appendUserBubble(text) {
 
-  const pic = window.loggedInUserPicture || '/images/nerdy-KAI.png';
+  // BOLT: KAI integration - Fallback for user picture
+  const pic = (typeof window !== 'undefined' && window.loggedInUserPicture) || '/images/nerdy-KAI.png';
 
   const html = `
     <div class="d-flex flex-row justify-content-end mb-4 pt-1">
@@ -79,6 +104,7 @@ function appendUserBubble(text) {
   document.getElementById('chatBody').insertAdjacentHTML('beforeend', html);
 }
 
+// BOLT: KAI integration - Additional KAI bubble function for consistency
 function appendKaiBubble(text) {
   if (!text) {
     console.error("⚠️ Empty assistant reply received.");
@@ -99,13 +125,15 @@ function appendKaiBubble(text) {
   chatBody.scrollTop = chatBody.scrollHeight;
 }
 
+// BOLT: KAI integration - Enhanced HTML sanitization
 function sanitizeHTML(str) {
+  if (!str) return '';
   const temp = document.createElement('div');
   temp.textContent = str;
   return temp.innerHTML;
 }
 
-// ✅ Typing Indicator Controls
+// BOLT: KAI integration - Typing Indicator Controls
 function showTypingIndicator() {
   const indicator = document.getElementById('typingIndicator');
   if (indicator) indicator.style.display = 'flex';

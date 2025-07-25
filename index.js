@@ -21,6 +21,7 @@ import cors from "cors";
 import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import { Strategy as FacebookStrategy } from "passport-facebook";
 import { createThread, createMessage, createAndPollRun, listMessages } from "./Backend/assistant.js";
+import { DASHBOARD_TOOLS, createDashboardMessage } from "./Backend/assistant.js";
 import OpenAI from "openai";
 import connectPgSimple from "connect-pg-simple";
 import multer from "multer";
@@ -29,6 +30,13 @@ import { FUNCTIONS } from "./openaiFunctions.js";
 import { fetchUserEmails, fetchKindnessPrompts, fetchEmailSubject } from "./fetchData.js";
 import { sendDailyKindnessPrompts } from "./kindnessEmailer.js";
 import { makeDashboardController } from "./Backend/dashboardController.js";
+
+// ===========================
+// BOLT CHANGELOG
+// Date: 2025-01-27
+// What: Added dashboard routes with authentication and challenge management
+// Why: Wire up new dashboard controller with proper routing and authentication
+// ===========================
 
 const uploadAvatar = multer({
   storage: multer.memoryStorage(),
@@ -494,8 +502,16 @@ app.get("/login",    (req, res) => res.render("login",    { title: "Log In",    
 app.get("/register", (req, res) => res.render("register", { title: "Sign Up" }));
 app.get("/404", (req, res) => res.render("404", { title: "404 ERROR" }));
 app.get("/error", (req, res) => res.render("error", { title: "500 ERROR" }));
-const { getDashboard } = makeDashboardController(pool);
+const { getDashboard, cancelChallenge } = makeDashboardController(pool);
 app.get("/dashboard", ensureAuthenticated, getDashboard);
+app.post("/challenge/cancel", ensureAuthenticated, cancelChallenge);
+
+app.get("/dashboard", ensureAuthenticated, getDashboard);
+
+// BOLT: DB - Add challenge cancellation endpoint
+app.post("/challenge/cancel", ensureAuthenticated, cancelChallenge);
+// BOLT: DB - Add challenge cancellation endpoint
+app.post("/challenge/cancel", ensureAuthenticated, cancelChallenge);
 
 
 app.get("/about", (req, res) => {

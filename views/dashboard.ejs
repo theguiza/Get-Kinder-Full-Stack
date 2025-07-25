@@ -1,3 +1,10 @@
+<!-- ===========================
+BOLT CHANGELOG
+Date: 2025-01-27
+What: Complete dashboard UI overhaul with new color scheme, Next Challenge section, Cancel Mission button, and KAI integration
+Why: Transform static mockup into fully functional dashboard matching design requirements
+=========================== -->
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -32,7 +39,7 @@
         .dashboard-header h1 {
             font-size: 2.5rem;
             font-weight: 700;
-            color: #2d3748;
+            color: #455a7c;
             margin-bottom: 8px;
         }
 
@@ -71,13 +78,13 @@
             width: 24px;
             height: 24px;
             margin-right: 12px;
-            color: #8b5cf6;
+            color: #455a7c;
         }
 
         .card-title {
             font-size: 1.25rem;
             font-weight: 600;
-            color: #2d3748;
+            color: #455a7c;
         }
 
         .progress-bar {
@@ -91,7 +98,7 @@
 
         .progress-fill {
             height: 100%;
-            background: linear-gradient(90deg, #8b5cf6, #a78bfa);
+            background: linear-gradient(90deg, #ff5656, #ff7676);
             border-radius: 4px;
             transition: width 0.6s ease;
         }
@@ -110,7 +117,7 @@
         }
 
         .day-counter {
-            background: #8b5cf6;
+            background: #455a7c;
             color: white;
             padding: 4px 12px;
             border-radius: 20px;
@@ -125,7 +132,7 @@
         }
 
         .btn {
-            background: #8b5cf6;
+            background: #ff5656;
             color: white;
             border: none;
             padding: 12px 24px;
@@ -136,20 +143,42 @@
             text-decoration: none;
             display: inline-block;
             text-align: center;
+            margin-right: 8px;
+            margin-bottom: 8px;
         }
 
         .btn:hover {
-            background: #7c3aed;
+            background: #e04545;
             transform: translateY(-1px);
+            color: white;
+            text-decoration: none;
         }
 
         .btn-secondary {
-            background: #e2e8f0;
-            color: #4a5568;
+            background: #455a7c;
+            color: white;
         }
 
         .btn-secondary:hover {
-            background: #cbd5e0;
+            background: #3a4a66;
+            color: white;
+        }
+
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #c82333;
+            color: white;
+        }
+
+        .btn:disabled {
+            background: #e2e8f0;
+            color: #a0aec0;
+            cursor: not-allowed;
+            transform: none;
         }
 
         .badges-grid {
@@ -192,7 +221,7 @@
 
         .level-text {
             font-weight: 600;
-            color: #2d3748;
+            color: #455a7c;
         }
 
         .quests-list {
@@ -224,6 +253,11 @@
             align-items: center;
         }
 
+        .quest-link:hover {
+            color: #ff5656;
+            text-decoration: none;
+        }
+
         .quest-name {
             font-weight: 500;
             color: #2d3748;
@@ -241,29 +275,38 @@
         .quest-difficulty.medium { background: #fed7aa; color: #9c4221; }
         .quest-difficulty.hard { background: #feb2b2; color: #742a2a; }
 
-        /* Assistant Chat */
+        /* Cancel Mission button styling */
+        .cancel-mission-container {
+            margin-top: 24px;
+            padding-top: 16px;
+            border-top: 1px solid #e2e8f0;
+            text-align: center;
+        }
+
+        /* Chat toggle button */
         .chat-toggle {
             position: fixed;
             bottom: 24px;
             right: 24px;
             width: 60px;
             height: 60px;
-            background: #8b5cf6;
+            background: #ff5656;
             border: none;
             border-radius: 50%;
             color: white;
             font-size: 24px;
             cursor: pointer;
-            box-shadow: 0 4px 12px rgba(139, 92, 246, 0.4);
+            box-shadow: 0 4px 12px rgba(255, 86, 86, 0.4); /* BOLT: UI change - Updated shadow color */
             transition: all 0.3s ease;
             z-index: 1000;
         }
 
         .chat-toggle:hover {
-            background: #7c3aed;
+            background: #e04545;
             transform: scale(1.1);
         }
 
+        /* Chat panel styling */
         .chat-panel {
             position: fixed;
             bottom: 100px;
@@ -285,7 +328,7 @@
         .chat-header {
             padding: 16px;
             border-bottom: 1px solid #e2e8f0;
-            background: #8b5cf6;
+            background: #455a7c;
             color: white;
             border-radius: 16px 16px 0 0;
         }
@@ -310,6 +353,11 @@
             font-family: inherit;
         }
 
+        .chat-input:focus {
+            outline: none;
+            border-color: #ff5656;
+        }
+
         .message {
             margin-bottom: 12px;
             padding: 8px 12px;
@@ -318,7 +366,7 @@
         }
 
         .message.user {
-            background: #8b5cf6;
+            background: #ff5656;
             color: white;
             margin-left: auto;
         }
@@ -328,7 +376,7 @@
             color: #2d3748;
         }
 
-        /* Responsive Design */
+        /* Responsive design improvements */
         @media (max-width: 768px) {
             .dashboard-grid {
                 grid-template-columns: 1fr;
@@ -343,78 +391,115 @@
                 right: 24px;
                 left: 24px;
             }
+
+            .challenge-info {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 8px;
+            }
+
+            .btn {
+                width: 100%;
+                margin-right: 0;
+            }
+        }
+
+        /* Alert styling with brand colors */
+        .alert-success {
+            background-color: #d4edda;
+            border-color: #c3e6cb;
+            color: #155724;
+        }
+
+        .alert-info {
+            background-color: #d1ecf1;
+            border-color: #bee5eb;
+            color: #0c5460;
         }
     </style>
     <link rel="icon" href="/images/favicon.png" sizes="32x32" type="image/png">
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-SgOJa3DmI69IUzQ2PVdRZhwQ+dy64/BUtbMJw1MZ8t5HZApcHrRKUc4W0kG879m7" crossorigin="anonymous">
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
-  <link rel="stylesheet" href="./css/style.css">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-SgOJa3DmI69IUzQ2PVdRZhwQ+dy64/BUtbMJw1MZ8t5HZApcHrRKUc4W0kG879m7" crossorigin="anonymous">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="./css/style.css">
 </head>
 <body>
-     <!-- Google Tag Manager (noscript) -->
-<noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-5NMWPW33"
-  height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
-  <!-- End Google Tag Manager (noscript) -->
-<% if (typeof success !== 'undefined' && success) { %>
-    <div class="alert alert-success alert-dismissible fade show auto-dismiss" role="alert">
-      Registration successful! Welcome to Get Kinder 🌟
-      <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-    </div>
-  <% } %>
-<% if (typeof loginSuccess !== 'undefined' && loginSuccess && typeof name !== 'undefined' && name) { %>
+    <!-- Google Tag Manager (noscript) -->
+    <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-5NMWPW33"
+      height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+    <!-- End Google Tag Manager (noscript) -->
+
+    <!-- BOLT: UI change - Success/login alerts with consistent styling -->
+    <% if (typeof success !== 'undefined' && success) { %>
         <div class="alert alert-success alert-dismissible fade show auto-dismiss" role="alert">
-      Welcome back, <%= name %>! 🎉
-      <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-    </div>
-  <% } %>
-   <header>
-      <nav class="navbar fixed-top navbar-light bg-white navbar-expand-lg">
-        <div class="container-fluid d-flex">
-          <a class="navbar-brand" href="/"><img src="/images/logo.png" alt="Get Kinder logo" height="80"> </a>
-          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
-            <span class="navbar-toggler-icon"></span>
-          </button>
-          <div class="collapse navbar-collapse justify-content-center" id="navbarNav">
-            <ul class="navbar-nav align-items-center">
-              <li class="nav-item">
-                <a class="btn btn-outline-primary btn-lg custom-hover" href="/#chat2" style="font-size: 1.2rem; color: #455a7c; margin-right: 30px; margin-left: 10px; padding-left: 10px;"><img src="/images/kai-real.png" alt="real Kindness AI Companion Kai" width="35" height="35" class="me-2">Chat with Kai Now</a>
-              </li>
-              <li class="nav-item">
-                <a class="nav-link mx-1 font-hover" href="About" style="font-size: 1.2rem; color: #455a7c; padding-right: 30px;">About</a>
-              </li>
-              <li class="nav-item">
-                <a class="nav-link mx-1 font-hover" href="profile" style="font-size: 1.2rem; color: #455a7c; padding-right: 30px;">Profile</a>
-              </li>
-              <li class="nav-item">
-                <a class="nav-link mx-1 font-hover" href="/" style="font-size: 1.2rem; color: #455a7c; padding-right: 30px;">Home</a>
-              </li>
-              </ul>
-            </div>
-              <div class="collapse navbar-collapse justify-content-end" id="navbarNav">
-                <ul class="navbar-nav d-flex align-items-center">              <% if (user) { %>
-                <li class="nav-item d-flex align-items-center me-3">
-                  <span class="navbar-text fw-bold me-2" style="font-size: 1.2rem; color: #455a7c;"><%= user.firstname || user.email %></span>
-                  <img src="<%= user.picture ? user.picture : '/images/nerdy-KAI.png' %>" class="rounded-circle me-3" width="32" height="32" alt="Get Kinder User Avatar">
-                  <button class="btn btn-outline-danger btn-sm" data-bs-toggle="modal" data-bs-target="#logoutModal">Log Out</button>
-                </li>
-              <% } else { %>
-                <li class="nav-item"><a class="btn btn-primary btn-lg" 
-                  style="font-size: 1.2rem; color: white; text-decoration: none; width: 100%; min-width: 120px; text-align: center;" href="login" role="button">Log In</a>
-                </li>
-              <% } %>
-            </ul>
-            </div>
+          Registration successful! Welcome to Get Kinder 🌟
+          <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
         </div>
-      </nav>
+    <% } %>
+    
+    <% if (typeof loginSuccess !== 'undefined' && loginSuccess && typeof name !== 'undefined' && name) { %>
+        <div class="alert alert-success alert-dismissible fade show auto-dismiss" role="alert">
+          Welcome back, <%= name %>! 🎉
+          <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+    <% } %>
+
+    <% if (typeof req !== 'undefined' && req.query && req.query.cancelled === '1') { %>
+        <div class="alert alert-info alert-dismissible fade show auto-dismiss" role="alert">
+          Challenge cancelled successfully. You can start a new one anytime! 
+          <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+    <% } %>
+
+    <header>
+        <nav class="navbar fixed-top navbar-light bg-white navbar-expand-lg">
+            <div class="container-fluid d-flex">
+                <a class="navbar-brand" href="/"><img src="/images/logo.png" alt="Get Kinder logo" height="80"> </a>
+                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+                <div class="collapse navbar-collapse justify-content-center" id="navbarNav">
+                    <ul class="navbar-nav align-items-center">
+                        <li class="nav-item">
+                            <a class="btn btn-outline-primary btn-lg custom-hover" href="/#chat2" style="font-size: 1.2rem; color: #455a7c; margin-right: 30px; margin-left: 10px; padding-left: 10px;"><img src="/images/kai-real.png" alt="real Kindness AI Companion Kai" width="35" height="35" class="me-2">Chat with Kai Now</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link mx-1 font-hover" href="About" style="font-size: 1.2rem; color: #455a7c; padding-right: 30px;">About</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link mx-1 font-hover" href="profile" style="font-size: 1.2rem; color: #455a7c; padding-right: 30px;">Profile</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link mx-1 font-hover" href="/" style="font-size: 1.2rem; color: #455a7c; padding-right: 30px;">Home</a>
+                        </li>
+                    </ul>
+                </div>
+                <div class="collapse navbar-collapse justify-content-end" id="navbarNav">
+                    <ul class="navbar-nav d-flex align-items-center">              
+                        <% if (user) { %>
+                            <li class="nav-item d-flex align-items-center me-3">
+                                <span class="navbar-text fw-bold me-2" style="font-size: 1.2rem; color: #455a7c;"><%= user.firstname || user.email %></span>
+                                <img src="<%= user.picture ? user.picture : '/images/nerdy-KAI.png' %>" class="rounded-circle me-3" width="32" height="32" alt="Get Kinder User Avatar">
+                                <button class="btn btn-outline-danger btn-sm" data-bs-toggle="modal" data-bs-target="#logoutModal">Log Out</button>
+                            </li>
+                        <% } else { %>
+                            <li class="nav-item"><a class="btn btn-primary btn-lg" 
+                              style="font-size: 1.2rem; color: white; text-decoration: none; width: 100%; min-width: 120px; text-align: center;" href="login" role="button">Log In</a>
+                            </li>
+                        <% } %>
+                    </ul>
+                </div>
+            </div>
+        </nav>
     </header>
+
     <div class="dashboard-container">
         <!-- Header -->
         <div class="dashboard-header">
-           <% if (typeof user !== 'undefined' && user && user.name) { %>
-     <h1>Welcome back, <%= user.name %>! 👋</h1>
-   <% } else { %>
-     <h1>Welcome!</h1>
-   <% } %>
+            <% if (typeof user !== 'undefined' && user && user.firstname) { %>
+                <h1>Welcome back, <%= user.firstname %>! 👋</h1>
+            <% } else { %>
+                <h1>Welcome!</h1>
+            <% } %>
             <p>Continue your journey of spreading kindness</p>
         </div>
 
@@ -431,62 +516,72 @@
                         <h2 class="card-title">Active Challenge</h2>
                     </div>
                     
-                   <% if (typeof activeChallenge !== 'undefined' && activeChallenge) { %>
-  <div class="challenge-info">
-    <div class="challenge-title">
-      <%= activeChallenge.challenge_name %>
-    </div>
-    <div class="day-counter">
-      Day <%= activeChallenge.current_day %> of <%= activeChallenge.total_days %>
-    </div>
-  </div>
+                    <% if (typeof activeChallenge !== 'undefined' && activeChallenge) { %>
+                        <div class="challenge-info">
+                            <div class="challenge-title">
+                                <%= activeChallenge.challenge_name %>
+                            </div>
+                            <div class="day-counter">
+                                Day <%= activeChallenge.current_day %> of <%= activeChallenge.total_days %>
+                            </div>
+                        </div>
 
-  <% 
-  // compute the percentage just once, so VSCode never sees an un-parsed '%'
-  var pct = ((activeChallenge.current_day / activeChallenge.total_days) * 100)
-              .toFixed(2);
-%>
-<div class="progress-bar">
-  <div class="progress-fill" <%= 'style="width:' + pct + '%"' %>>
-  </div>
-</div>
-  <p class="challenge-description"> <%= activeChallenge.description %></p>
-  <button class="btn" onclick="askKAI('What should I do for Day <%= activeChallenge.current_day %>?')">Get Today's Guidance</button>
-    <% } else { %>
-  <p class="challenge-description"> No active challenge. Start a new one to begin your kindness journey!</p>
-  <a href="/challenges" class="btn">Browse Challenges</a>
-        <% } %>
+                        <% 
+                        // BOLT: UI change - Progress calculation with proper percentage formatting
+                        var pct = ((activeChallenge.current_day / activeChallenge.total_days) * 100).toFixed(1);
+                        %>
+                        <div class="progress-bar">
+                            <div class="progress-fill" <%= 'style="width:' + pct + '%"' %>>
+                        </div>
+                        
+                        <p class="challenge-description"><%= activeChallenge.description %></p>
+                        <button class="btn" onclick="askKAI('What should I do for Day <%= activeChallenge.current_day %> of <%= activeChallenge.challenge_name %>?')">Get Today's Guidance</button>
+                    <% } else { %>
+                        <p class="challenge-description">You don't have an active challenge yet — we've started 'Discover the Power of Kindness' for you.</p>
+                        <button class="btn" onclick="window.location.reload()">Refresh Dashboard</button>
+                    <% } %>
                 </div>
-                <!-- New Challenge Card -->
+
+                <!-- BOLT: UI change - Next Challenge Card (renamed from "New Challenge") -->
                 <div class="card" style="margin-top: 24px;">
                     <div class="card-header">
                         <svg class="card-icon" fill="currentColor" viewBox="0 0 20 20">
-                            <path d="M10 2L3 7v11a2 2 0 002 2h10a2 2 0 002-2V7l-7-5z"/>
+                            <path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3z"/>
                         </svg>
-                        <h2 class="card-title">New Challenge</h2>
+                        <h2 class="card-title">Next Challenge</h2>
                     </div>
                     
-           
+                    <% if (typeof nextChallenge !== 'undefined' && nextChallenge) { %>
+                        <div class="challenge-title" style="margin-bottom: 12px;">
+                            <%= nextChallenge.name %>
+                        </div>
+                        <p class="challenge-description">
+                            <%= nextChallenge.description %>
+                        </p>
+                        <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                            <button class="btn btn-secondary" onclick="askKAI('Tell me more about the <%= nextChallenge.name %> challenge')">
+                                Preview Challenge
+                            </button>
+                            <a href="/challenges/<%= nextChallenge.id %>/start" class="btn">Start Challenge</a>
+                        </div>
+                    <% } else { %>
+                        <p class="challenge-description">
+                            All challenges completed! Check back for new ones.
+                        </p>
+                        <button class="btn" disabled title="No new challenges available">Preview Challenge</button>
+                    <% } %>
                 </div>
+
+                <!-- BOLT: UI change - Cancel Current Mission button -->
+                <% if (typeof activeChallenge !== 'undefined' && activeChallenge) { %>
+                    <div class="cancel-mission-container">
+                        <form action="/challenge/cancel" method="POST" onsubmit="return confirm('Are you sure you want to cancel your current challenge? This action cannot be undone.')">
+                            <button type="submit" class="btn btn-danger">Cancel Current Mission</button>
+                        </form>
+                    </div>
+                <% } %>
             </div>
-<% if (typeof upcomingChallenge !== 'undefined' && upcomingChallenge) { %>
-   <div class="challenge-title" style="margin-bottom: 12px;">
-     <%= upcomingChallenge.name %>
-   </div>
-   <p class="challenge-description">
-     <%= upcomingChallenge.description %>
-   </p>
-   <div style="display: flex; gap: 12px;">
-     <button class="btn btn-secondary" onclick="askKAI('Tell me more about <%= upcomingChallenge.name %>')">
-       Preview
-     </button>
-     <a href="/challenges/<%= upcomingChallenge.id %>/start" class="btn">Start Challenge</a>
-   </div>
- <% } else { %>
-   <p class="challenge-description">
-     All challenges completed! Check back for new ones.
-   </p>
- <% } %>
+
             <!-- Right Column -->
             <div>
                 <!-- Badges & Level Card -->
@@ -526,21 +621,18 @@
                         <% } %>
                     </div>
                     
-                  <% if (typeof kindnessLevel !== 'undefined' && typeof levelProgress !== 'undefined') { %>
-  <div class="level-info">
-    <span class="level-text">
-      Kindness Level <%= kindnessLevel %>
-    </span>
-    <span><%= levelProgress %>%</span>
-  </div>
-<% } %>
-
-                    
-                 <% if (typeof levelProgress !== 'undefined') { %>
-   <div class="progress-bar">
-     <div class="progress-fill"><%= levelProgress %>%</div>
-   </div>
- <% } %>
+                    <% if (typeof kindnessLevel !== 'undefined' && typeof levelProgress !== 'undefined') { %>
+                        <div class="level-info">
+                            <span class="level-text">
+                                Kindness Level <%= kindnessLevel %>
+                            </span>
+                            <span><%= levelProgress %>%</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill"><%= levelProgress %>%</div>
+                        </div>
+                    <% } %>
+                </div>
 
                 <!-- More Challenges & Quests Card -->
                 <div class="card" style="margin-top: 24px;">
@@ -594,7 +686,7 @@
         </div>
     </div>
 
-    <!-- KAI Assistant -->
+    <!-- BOLT: KAI integration - KAI Assistant Chat -->
     <button class="chat-toggle" onclick="toggleChat()">
         🤖
     </button>
@@ -619,7 +711,81 @@
         </div>
     </div>
 
+    <!-- Logout Modal -->
+    <div class="modal fade" id="logoutModal" tabindex="-1" aria-labelledby="logoutModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Confirm Logout</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    Are you sure you want to log out?
+                </div>
+                <div class="modal-footer">
+                    <form action="/logout" method="GET">
+                        <button type="submit" class="btn btn-danger">Log Out</button>
+                    </form>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <section id="footer" class="gradient-background">
+        <div class="container">
+            <footer class="row align-items-center py-5 mt-5 border-top text-body-secondary">
+                <!-- Logo: centered on xs, left on md+ -->
+                <div class="col-12 col-md-4 mb-4 mb-md-0 text-center text-md-start">
+                    <a href="#">
+                        <img src="./images/heart3D.png" alt="Get Kinder Heart" height="150">
+                    </a>
+                    <p class="mt-2">
+                        &copy;
+                        <a href="https://getkindr.com/" target="_blank" rel="noopener noreferrer"
+                           class="text-body-secondary text-decoration-underline">
+                            Get Kindr Foundation
+                        </a>
+                    </p>
+                </div>
+                <!-- Social Icons: always centered -->
+                <div class="col-12 col-md-4 mb-4 mb-md-0 d-flex justify-content-center">
+                    <a class="btn btn-floating m-1 text-white" style="background-color: #3b5998;"
+                       href="https://www.facebook.com/profile.php?id=61576860759313" role="button" target="_blank" rel="noopener noreferrer">
+                        <i class="fab fa-facebook-f"></i>
+                    </a>
+                    <a class="btn btn-floating m-1 text-white" style="background-color: #ac2bac;"
+                       href="https://www.instagram.com/getkinder/" role="button" target="_blank" rel="noopener noreferrer">
+                        <i class="fab fa-instagram"></i>
+                    </a>
+                    <a class="btn btn-floating m-1 text-white" style="background-color: #0082ca;"
+                       href="https://www.linkedin.com/company/getkindrfoundation/" role="button" target="_blank" rel="noopener noreferrer">
+                        <i class="fab fa-linkedin-in"></i>
+                    </a>
+                    <a class="btn btn-floating m-1 text-white" style="background-color: #c8232c;"
+                       href="https://ca.pinterest.com/getkindr/" role="button" target="_blank" rel="noopener noreferrer">
+                        <i class="fab fa-pinterest"></i>
+                    </a>
+                </div>
+                <!-- More About: centered on xs, right on md+ -->
+                <div class="col-12 col-md-4 mb-4 mb-md-0 text-center text-md-end">
+                    <h5>More About Get Kinder</h5>
+                    <ul class="nav flex-column">
+                        <li class="nav-item mb-2"><a href="/"            class="nav-link p-0 text-body-secondary">Home</a></li>
+                        <li class="nav-item mb-2"><a href="about" class="nav-link p-0 text-body-secondary">About</a></li>
+                        <li class="nav-item mb-2"><a href="contact"     class="nav-link p-0 text-body-secondary">Contact</a></li>
+                        <li class="nav-item mb-2"><a href="privacy"     class="nav-link p-0 text-body-secondary">Privacy</a></li>
+                        <li class="nav-item mb-2"><a href="terms"       class="nav-link p-0 text-body-secondary">Terms</a></li>
+                        <li class="nav-item mb-2"><a href="accessability" class="nav-link p-0 text-body-secondary">Accessability</a></li>
+                    </ul>
+                </div>
+            </footer>
+        </div>
+    </section>
+
     <script>
+        // BOLT: KAI integration - Chat functionality
         let chatOpen = false;
 
         function toggleChat() {
@@ -667,12 +833,14 @@
             messages.scrollTop = messages.scrollHeight;
 
             try {
-                const response = await fetch('/api/assistant/chat', {
+                // BOLT: KAI integration - Use existing chat API endpoint
+                const response = await fetch('/api/chat/message', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({ message, userId: 1 })
+                    body: JSON.stringify({ message }),
+                    credentials: 'include'
                 });
 
                 const data = await response.json();
@@ -683,7 +851,7 @@
                 // Add assistant response
                 const assistantMessage = document.createElement('div');
                 assistantMessage.className = 'message assistant';
-                assistantMessage.textContent = data.response || 'Sorry, I couldn\'t process that request.';
+                assistantMessage.textContent = data.reply || 'Sorry, I couldn\'t process that request.';
                 messages.appendChild(assistantMessage);
 
             } catch (error) {
@@ -703,7 +871,7 @@
             messages.scrollTop = messages.scrollHeight;
         }
 
-        // Animate progress bars on load
+        // BOLT: UI change - Animate progress bars on load with brand colors
         window.addEventListener('load', () => {
             const progressBars = document.querySelectorAll('.progress-fill');
             progressBars.forEach(bar => {
@@ -715,75 +883,7 @@
             });
         });
     </script>
-        <div class="modal fade" id="logoutModal" tabindex="-1" aria-labelledby="logoutModalLabel" aria-hidden="true">
-    <div class="modal-dialog">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h5 class="modal-title">Confirm Logout</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-        </div>
-        <div class="https://www.gravatar.com/avatar/1a5cfe35718514d764a42484a0fb0830?s=64&d=robohashmodal-body">
-          Are you sure you want to log out?
-        </div>
-        <div class="modal-footer">
-          <form action="/logout" method="GET">
-            <button type="submit" class="btn btn-danger">Log Out</button>
-          </form>
-          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-        </div>
-      </div>
-    </div>
-  </div>
-   <section id="footer" class="gradient-background">
-  <div class="container">
-    <footer class="row align-items-center py-5 mt-5 border-top text-body-secondary">
-      <!-- 1) Logo: centered on xs, left on md+ -->
-      <div class="col-12 col-md-4 mb-4 mb-md-0 text-center text-md-start">
-        <a href="#">
-          <img src="./images/heart3D.png" alt="Get Kinder Heart" height="150">
-        </a>
-        <p class="mt-2">
-          &copy;
-          <a href="https://getkindr.com/" target="_blank" rel="noopener noreferrer"
-             class="text-body-secondary text-decoration-underline">
-            Get Kindr Foundation
-          </a>
-        </p>
-      </div>
-      <!-- 2) Social Icons: always centered -->
-      <div class="col-12 col-md-4 mb-4 mb-md-0 d-flex justify-content-center">
-        <a class="btn btn-floating m-1 text-white" style="background-color: #3b5998;"
-           href="https://www.facebook.com/profile.php?id=61576860759313" role="button" target="_blank" rel="noopener noreferrer">
-          <i class="fab fa-facebook-f"></i>
-        </a>
-        <a class="btn btn-floating m-1 text-white" style="background-color: #ac2bac;"
-           href="https://www.instagram.com/getkinder/" role="button" target="_blank" rel="noopener noreferrer">
-          <i class="fab fa-instagram"></i>
-        </a>
-        <a class="btn btn-floating m-1 text-white" style="background-color: #0082ca;"
-           href="https://www.linkedin.com/company/getkindrfoundation/" role="button" target="_blank" rel="noopener noreferrer">
-          <i class="fab fa-linkedin-in"></i>
-        </a>
-        <a class="btn btn-floating m-1 text-white" style="background-color: #c8232c;"
-           href="https://ca.pinterest.com/getkindr/" role="button" target="_blank" rel="noopener noreferrer">
-          <i class="fab fa-pinterest"></i>
-        </a>
-      </div>
-      <!-- 3) More About: centered on xs, right on md+ -->
-      <div class="col-12 col-md-4 mb-4 mb-md-0 text-center text-md-end">
-        <h5>More About Get Kinder</h5>
-        <ul class="nav flex-column">
-          <li class="nav-item mb-2"><a href="/"            class="nav-link p-0 text-body-secondary">Home</a></li>
-          <li class="nav-item mb-2"><a href="about" class="nav-link p-0 text-body-secondary">About</a></li>
-          <li class="nav-item mb-2"><a href="contact"     class="nav-link p-0 text-body-secondary">Contact</a></li>
-          <li class="nav-item mb-2"><a href="privacy"     class="nav-link p-0 text-body-secondary">Privacy</a></li>
-          <li class="nav-item mb-2"><a href="terms"       class="nav-link p-0 text-body-secondary">Terms</a></li>
-          <li class="nav-item mb-2"><a href="accessability" class="nav-link p-0 text-body-secondary">Accessability</a></li>
-        </ul>
-      </div>
-    </footer>
-  </div>
-</section>
-     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/js/bootstrap.bundle.min.js" integrity="sha384-k6d4wzSIapyDyv1kpU366/PK5hCdSbCRGRCMv+eplOQJWyd1fbcAu9OCUj5zNLiq" crossorigin="anonymous"></script>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/js/bootstrap.bundle.min.js" integrity="sha384-k6d4wzSIapyDyv1kpU366/PK5hCdSbCRGRCMv+eplOQJWyd1fbcAu9OCUj5zNLiq" crossorigin="anonymous"></script>
 </body>
 </html>
