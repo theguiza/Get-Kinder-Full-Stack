@@ -4,7 +4,8 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+     "build": "vite build"
   },
   "repository": {
     "type": "git",
@@ -13,7 +14,7 @@
   "keywords": [],
   "author": "Michael Wozney",
   "license": "ISC",
-  "description": "",
+  "description": "Get Kinder is a full stack web application that promotes kindness and positive social interactions through AI-powered features and user engagement.",
   "bugs": {
     "url": "https://github.com/theguiza//Get-Kinder-Full-Stack/issues"
   },
@@ -21,8 +22,8 @@
     "axios": "^1.9.0",
     "bcrypt": "^6.0.0",
     "body-parser": "^2.2.0",
+    "canvas-confetti": "^1.9.3",
     "connect-pg-simple": "^10.0.0",
-    "cor": "^0.0.0",
     "cors": "^2.8.5",
     "dotenv": "^16.0.3",
     "ejs": "^3.1.10",
@@ -38,6 +39,12 @@
     "passport-google-oauth20": "^2.0.0",
     "passport-local": "^1.0.0",
     "path": "^0.12.7",
-    "pg": "^8.16.0"
+    "pg": "^8.16.0",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^5.0.3",
+    "vite": "^7.1.7"
   }
 }

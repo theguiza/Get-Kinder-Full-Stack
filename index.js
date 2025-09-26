@@ -95,7 +95,7 @@ const PgSession = connectPgSimple(session);
 
 // 9) Middleware setup
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "5mb" }));
 //app.use(express.urlencoded({ extended: true }));
 app.use(express.urlencoded({ extended: false }));
 app.use(
@@ -501,6 +501,68 @@ app.get("/login",    (req, res) => res.render("login",    { title: "Log In",    
 app.get("/register", (req, res) => res.render("register", { title: "Sign Up" }));
 app.get("/404", (req, res) => res.render("404", { title: "404 ERROR" }));
 app.get("/error", (req, res) => res.render("error", { title: "500 ERROR" }));
+// Middleware to ensure authentication for API routes
+function ensureAuthenticatedApi(req, res, next) {
+  if (req.isAuthenticated && req.isAuthenticated()) return next();
+  return res.status(401).json({ error: "unauthorized" });
+}
+// routes and controllers for Bestie Vibes quiz
+app.get("/friendQuiz", (req, res) => {const isAuthed = !!(req.isAuthenticated && req.isAuthenticated());
+  res.render("friendQuiz", { isAuthed }); }); // views/friendQuiz.ejs
+
+  app.post("/api/friends", ensureAuthenticatedApi, async (req, res) => {
+  try {
+    const { rows: [owner] } =
+      await pool.query("SELECT id FROM public.userdata WHERE email=$1", [req.user.email]);
+    if (!owner) return res.status(400).json({ error: "owner not found" });
+
+    const {
+      name, email, phone,
+      archetype_primary, archetype_secondary,
+      score, evidence_direct, evidence_proxy,
+      flags_count, red_flags = [],
+      snapshot = {}, signals = {},
+      notes = null, picture = null,
+    } = req.body;
+
+    const { rows: [friend] } = await pool.query(`
+      INSERT INTO public.friends (
+        owner_user_id, name, email, phone,
+        archetype_primary, archetype_secondary,
+        score, evidence_direct, evidence_proxy,
+        flags_count, red_flags, snapshot, signals, notes, picture
+      )
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+      ON CONFLICT (owner_user_id, lower(name)) DO UPDATE SET
+        email               = EXCLUDED.email,
+        phone               = EXCLUDED.phone,
+        archetype_primary   = EXCLUDED.archetype_primary,
+        archetype_secondary = EXCLUDED.archetype_secondary,
+        score               = EXCLUDED.score,
+        evidence_direct     = EXCLUDED.evidence_direct,
+        evidence_proxy      = EXCLUDED.evidence_proxy,
+        flags_count         = EXCLUDED.flags_count,
+        red_flags           = EXCLUDED.red_flags,
+        snapshot            = EXCLUDED.snapshot,
+        signals             = EXCLUDED.signals,
+        notes               = COALESCE(public.friends.notes, EXCLUDED.notes),
+        picture             = COALESCE(EXCLUDED.picture, public.friends.picture),
+        updated_at          = now()
+      RETURNING *;
+    `, [
+      owner.id, name, email, phone,
+      archetype_primary, archetype_secondary,
+      score, evidence_direct, evidence_proxy,
+      flags_count, red_flags, snapshot, signals, notes, picture
+    ]);
+
+    res.status(201).json(friend);
+  } catch (e) {
+    console.error("create friend error", e);
+    res.status(500).json({ error: "failed to create friend" });
+  }
+});
+
 // BOLT: Dashboard - Initialize dashboard controller with all functions
 const { getDashboard, getMorningPrompt, saveReflection, markDayDone, cancelChallenge } = makeDashboardController(pool);
 
