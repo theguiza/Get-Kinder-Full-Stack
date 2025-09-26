@@ -506,9 +506,12 @@ function ensureAuthenticatedApi(req, res, next) {
   if (req.isAuthenticated && req.isAuthenticated()) return next();
   return res.status(401).json({ error: "unauthorized" });
 }
-// routes and controllers for Bestie Vibes quiz
-app.get("/friendQuiz", (req, res) => {const isAuthed = !!(req.isAuthenticated && req.isAuthenticated());
-  res.render("friendQuiz", { isAuthed }); }); // views/friendQuiz.ejs
+// Bestie Vibes quiz (canonical path = /friend-quiz)
+app.get("/friendQuiz", (req, res) => res.redirect(301, "/friend-quiz"));
+app.get("/friend-quiz", (req, res) => {
+  const isAuthed = !!(req.isAuthenticated && req.isAuthenticated());
+  res.render("friendQuiz", { isAuthed });
+});
 
   app.post("/api/friends", ensureAuthenticatedApi, async (req, res) => {
   try {
