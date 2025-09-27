@@ -506,31 +506,12 @@ function ensureAuthenticatedApi(req, res, next) {
   if (req.isAuthenticated && req.isAuthenticated()) return next();
   return res.status(401).json({ error: "unauthorized" });
 }
-// Bestie Vibes quiz (canonical path = /friend-quiz)
-// --- CSP for Bestie Vibes Quiz (route-level only) ---
-const QUIZ_CSP = [
-  "default-src 'self'",
-  // inline snippets for GTM/GA + your small inline mount & __bestie_onSave
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://www.googletagmanager.com https://www.google-analytics.com https://js-na3.hs-scripts.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com",
-  "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://fonts.googleapis.com",
-  // data: for camera/file preview and base64 avatars
-  "img-src 'self' data: https://www.google-analytics.com https://www.googletagmanager.com https://js-na3.hs-scripts.com",
-  "font-src 'self' data: https://fonts.gstatic.com https://cdnjs.cloudflare.com",
-  "connect-src 'self' https://www.google-analytics.com https://region1.analytics.google.com https://js-na3.hs-scripts.com",
-  "frame-src 'self' https://www.googletagmanager.com https://js-na3.hs-scripts.com",
-  "object-src 'none'",
-  "base-uri 'self'",
-  "form-action 'self'"
-].join('; ');
-
-function quizCsp(req, res, next) {
-  res.setHeader('Content-Security-Policy', QUIZ_CSP);
-  next();
-}
-
-app.get(['/friend-quiz', '/friendQuiz'], quizCsp, (req, res) => {
+app.get(['/friend-quiz', '/friendQuiz'], (req, res) => {
   const isAuthed = !!(req.isAuthenticated && req.isAuthenticated());
-  res.render('friendQuiz', { isAuthed });
+  res.render('friendQuiz', { 
+    isAuthed,
+    assetTag: process.env.ASSET_TAG ?? Date.now().toString(36)
+   });
 });
 
   app.post("/api/friends", ensureAuthenticatedApi, async (req, res) => {

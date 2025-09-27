@@ -183,7 +183,7 @@
    <div id="bestie-quiz-root"></div>
 
 <!-- Bundle + mount -->
-<script src="/js/bundles/bestie-vibes.js?<%= assetTag %>"></script>
+<script src="/js/bundles/bestie-vibes.js?<%= (typeof assetTag !== 'undefined' ? assetTag : '') %>"></script>
 <script>window.renderBestieVibesQuiz('#bestie-quiz-root');</script>
 
     </section>
