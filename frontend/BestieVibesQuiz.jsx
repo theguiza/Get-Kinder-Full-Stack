@@ -3,7 +3,7 @@
 // New: "Signals Round" for low-context assessments, Unknown option, proxy scoring, and evidence meter.
 // Rounds: Signals, Vibes, Adulting, Values, Archetype + Red-Flag Bingo. Save multiple candidates.
 
-import { useMemo, useState, useRef } from 'react'
+import { useMemo, useState, useRef, useEffect } from 'react'
 import confetti from 'canvas-confetti'
 
 // ---------- Config ----------
@@ -19,7 +19,7 @@ const WEIGHTS = {
 }
 
 // When a core field is unknown, we use a proxy from Signals Round at this fraction of weight
-const PROXY_FRACTION = 0.45 // 45% credit for thin-slice evidence
+const DEFAULT_PROXY_FRACTION = 0.45 // 45% credit for thin-slice evidence
 
 const DEFAULT_ANSWERS = {
   // Core fields (set to null for low-info start)
@@ -189,24 +189,24 @@ function topArchetypesFromAnswers(a) {
     .map(([name, score]) => ({ name, score, ...ARCHETYPE_MAP[name] }))
 }
 
-function evidenceBreakdown(a) {
-  const keys = Object.keys(WEIGHTS)
+function evidenceBreakdown(a, weights, proxyFraction) {
+  const keys = Object.keys(weights)
   let directW = 0, proxyW = 0, totalW = 0
   for (const k of keys) {
-    const w = WEIGHTS[k]
+    const w = weights[k]
     totalW += w
     if (a[k] != null) directW += w
-    else proxyW += w * PROXY_FRACTION
+    else proxyW += w * proxyFraction
   }
   return {
-    direct: directW / totalW, // 0..1
-    proxy: proxyW / totalW,   // 0..1
-    total: (directW + proxyW) / totalW,
+    direct: totalW ? directW / totalW : 0,
+    proxy: totalW ? proxyW / totalW : 0,
+    total: totalW ? (directW + proxyW) / totalW : 0,
     directW, proxyW, totalW,
   }
 }
 
-function nextTests(a) {
+function nextTests(a, weights) {
   // Recommend 3 evidence-building micro-tests for highest-weight unknowns
   const ideas = {
     reliability: 'Set a small plan with a time window; see if they confirm & show on time.',
@@ -218,7 +218,7 @@ function nextTests(a) {
     logistics: 'Offer two realistic time slots next week; see if scheduling is smooth.',
     activity: 'Propose a repeating anchor (Thu walk / Sun coffee).',
   }
-  const unknowns = Object.entries(WEIGHTS)
+  const unknowns = Object.entries(weights)
     .filter(([k]) => a[k] == null)
     .sort(([,wa], [,wb]) => wb - wa)
     .map(([k]) => ({ k, tip: ideas[k] }))
@@ -227,6 +227,10 @@ function nextTests(a) {
 
 export default function BestieVibesQuiz(props = {}) {
   const { onSave } = props
+  const [weights, setWeights] = useState({ ...WEIGHTS })
+  const [proxyFraction, setProxyFraction] = useState(DEFAULT_PROXY_FRACTION)
+  const [isAdminMode] = useState(() => (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('admin')))
+  const [showConfig, setShowConfig] = useState(false)
   const [candidateName, setCandidateName] = useState('')
   const [answers, setAnswers] = useState({ ...DEFAULT_ANSWERS })
   const [roundIndex, setRoundIndex] = useState(0)
@@ -238,15 +242,63 @@ export default function BestieVibesQuiz(props = {}) {
   const camInputRef = useRef(null)
   const fileInputRef = useRef(null)
 
-  const ev = useMemo(() => evidenceBreakdown(answers), [answers])
+  // Load config & draft on mount
+  useEffect(() => {
+    try {
+      const cfg = JSON.parse(localStorage.getItem('bestie_config') || 'null')
+      if (cfg) {
+        if (cfg.weights) setWeights((prev) => ({ ...prev, ...cfg.weights }))
+        if (typeof cfg.proxyFraction === 'number') setProxyFraction(cfg.proxyFraction)
+      }
+      const draft = JSON.parse(localStorage.getItem('bestie_quiz_draft') || 'null')
+      if (draft) {
+        setCandidateName(draft.candidateName || '')
+        setAnswers({ ...DEFAULT_ANSWERS, ...(draft.answers || {}) })
+        setFlags(draft.flags || {})
+        setRoundIndex(draft.roundIndex || 0)
+        setPictureData(draft.pictureData || null)
+      }
+    } catch {}
+  }, [])
+
+  // Persist config & draft
+  useEffect(() => {
+    try { localStorage.setItem('bestie_config', JSON.stringify({ weights, proxyFraction })) } catch {}
+  }, [weights, proxyFraction])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('bestie_quiz_draft', JSON.stringify({ candidateName, answers, flags, roundIndex, pictureData, ts: Date.now() }))
+    } catch {}
+  }, [candidateName, answers, flags, roundIndex, pictureData])
+
+  // Load saved scoreboard on mount
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('bestie_saved')
+      if (raw) {
+        const arr = JSON.parse(raw)
+        if (Array.isArray(arr)) setSaved(arr)
+      }
+    } catch {}
+  }, [])
+
+  // Persist saved scoreboard whenever it changes
+  useEffect(() => {
+    try {
+      localStorage.setItem('bestie_saved', JSON.stringify(saved))
+    } catch {}
+  }, [saved])
+
+  const ev = useMemo(() => evidenceBreakdown(answers, weights, proxyFraction), [answers, weights, proxyFraction])
 
   // Dynamic normalization: denominator reflects direct + proxy contributions
   const score = useMemo(() => {
     let num = 0
     let denom = 0
-    for (const [k, w] of Object.entries(WEIGHTS)) {
+    for (const [k, w] of Object.entries(weights)) {
       const hasDirect = answers[k] != null
-      const contrib = hasDirect ? 1 : PROXY_FRACTION
+      const contrib = hasDirect ? 1 : proxyFraction
       const value = hasDirect ? answers[k] : proxyForField(k, answers)
       num += (value || 0) * w * contrib
       denom += 5 * w * contrib
@@ -254,7 +306,7 @@ export default function BestieVibesQuiz(props = {}) {
     if (denom === 0) return 0
     const normalized = Math.round((num / denom) * 100)
     return Math.min(100, Math.max(0, normalized))
-  }, [answers])
+  }, [answers, weights, proxyFraction])
 
   const dealbreakerCount = useMemo(() => Object.values(flags).filter(Boolean).length, [flags])
   const tier = tierFromScore(score, ev)
@@ -275,7 +327,6 @@ export default function BestieVibesQuiz(props = {}) {
     // allow re-selecting the same file later
     e.target.value = ''
   }
-
   const resetQuiz = () => {
     setAnswers({ ...DEFAULT_ANSWERS })
     setFlags({})
@@ -310,8 +361,17 @@ export default function BestieVibesQuiz(props = {}) {
         const res = await fetch('/api/friends', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
           body: JSON.stringify(payload),
         })
+        if (res.status === 401) {
+          // Public play + gated save: redirect to login and come back
+          const returnTo = '/friend-quiz'
+          const loginUrl = `/login?returnTo=${encodeURIComponent(returnTo)}`
+          setSaveMsg('Please log in to save.')
+          window.location.assign(loginUrl)
+          return
+        }
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
       }
       setSaveMsg('Saved to friends ✓')
@@ -357,15 +417,19 @@ export default function BestieVibesQuiz(props = {}) {
     return templates[Math.floor(Math.random() * templates.length)]
   }, [score, primary?.name])
 
-  const tests = useMemo(() => nextTests(answers), [answers])
+  const tests = useMemo(() => nextTests(answers, weights), [answers, weights])
 
   return (
     <div className="min-h-screen w-full bg-gradient-to-b from-violet-50 to-white text-[#455a7c] p-6">
       <div className="max-w-4xl mx-auto">
         <header className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-6">
           <div>
-            <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight">Bestie Vibes Quiz <span className="text-[#455a7c]">{tier.emoji}</span></h1>
-            <p className="text-[#455a7c] mt-1">Low-context mode: use quick signals first. Score vibes, spot 🚩s, and get next tests.</p>
+            <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight">Friendship Fit Quiz <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full border border-slate-300 text-xs font-semibold">KAI</span></h1>
+            <p className="text-[#455a7c] mt-1">Take this quiz for each current or potential friend to see who to prioritize. Share results, next moves, challenges, and invites with KAI to plan next steps.</p>
+            <ul className="text-[#455a7c] mt-1 list-disc list-inside space-y-1 text-sm">
+              <li>To save the results, you will be asked to sign in if you are not already signed in.</li>
+              <li>All friendship types and a scoreboard of the friends assessed are below.</li>
+            </ul>
           </div>
           <div className="flex items-center gap-3 flex-wrap">
             <input
@@ -399,7 +463,6 @@ export default function BestieVibesQuiz(props = {}) {
               />
               🖼️ Upload
             </label>
-
             {pictureData && (
               <div className="flex items-center gap-2">
                 <img src={pictureData} alt="preview" className="h-10 w-10 rounded-xl object-cover border" />
@@ -419,11 +482,40 @@ export default function BestieVibesQuiz(props = {}) {
           </div>
         </header>
 
+        {isAdminMode && (
+          <div className="flex items-center justify-end mb-4">
+            <button onClick={() => setShowConfig(v => !v)} className="px-3 py-1.5 rounded-xl border bg-white hover:bg-[#455a7c]/5 text-sm">⚙️ Scoring</button>
+          </div>
+        )}
+
+        {isAdminMode && showConfig && (
+          <div className="p-4 rounded-2xl bg-white shadow-sm border mb-6">
+            <div className="flex items-center justify-between">
+              <h2 className="font-semibold">Scoring Controls</h2>
+              <button onClick={() => { setWeights({ ...WEIGHTS }); setProxyFraction(DEFAULT_PROXY_FRACTION) }} className="px-3 py-1.5 rounded-xl border bg-white hover:bg-[#455a7c]/5 text-sm">Reset defaults</button>
+            </div>
+            <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-3 mt-3">
+              {Object.entries(weights).map(([k,v]) => (
+                <label key={k} className="text-sm">
+                  <div className="font-medium capitalize">{k}</div>
+                  <input type="range" min={0} max={5} step={1} value={v} onChange={(e)=> setWeights(prev => ({ ...prev, [k]: Number(e.target.value) }))} className="w-full" />
+                  <div className="text-xs text-slate-600">Weight: {v}</div>
+                </label>
+              ))}
+            </div>
+            <div className="mt-3">
+              <div className="font-medium text-sm">Proxy fraction</div>
+              <input type="range" min={0} max={1} step={0.05} value={proxyFraction} onChange={(e)=> setProxyFraction(Number(e.target.value))} className="w-full" />
+              <div className="text-xs text-slate-600">{Math.round(proxyFraction * 100)}% credit when using first‑meet signals as proxies</div>
+            </div>
+          </div>
+        )}
+
         {/* Scoreboard */}
         <div className="grid md:grid-cols-4 gap-4 mb-6">
           {/* Score card */}
           <div className="p-4 rounded-2xl bg-white shadow-sm border col-span-2 md:col-span-1">
-            <div className="text-sm text-[#455a7c]">Score</div>
+            <div className="text-sm text-[#455a7c]">Friendship Score</div>
             <div className="mt-1 flex items-end gap-3">
               <div className="text-5xl font-extrabold">{dealbreakerCount >= 2 ? '🚫' : score}</div>
               <div className="flex-1">
@@ -456,7 +548,7 @@ export default function BestieVibesQuiz(props = {}) {
 
           {/* Archetype card */}
           <div className="p-4 rounded-2xl bg-white shadow-sm border">
-            <div className="text-sm text-[#455a7c]">Archetype</div>
+            <div className="text-sm text-[#455a7c]">Friend Type</div>
             <div className="mt-1 text-2xl font-bold">{primary?.emoji} {primary?.name}</div>
             <div className="text-sm text-[#455a7c]">{primary?.desc}</div>
             <div className="text-xs text-[#455a7c] mt-2">Secondary: <span className="font-medium">{secondary?.emoji} {secondary?.name}</span></div>
@@ -476,7 +568,7 @@ export default function BestieVibesQuiz(props = {}) {
         {/* Dealbreaker Bingo */}
         <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 mb-6">
           <div className="flex items-center justify-between">
-            <h2 className="font-semibold text-rose-700">Red‑Flag Bingo 🚩</h2>
+            <h2 className="font-semibold text-rose-700">1.	Red‑Flag Bingo 🚩: select concerns with this person you have</h2>
             <div className="text-sm text-rose-700">{dealbreakerCount} / 2 triggers auto‑pass</div>
           </div>
           <div className="grid sm:grid-cols-5 gap-2 mt-3">
@@ -499,7 +591,7 @@ export default function BestieVibesQuiz(props = {}) {
 
         {/* Round Navigator */}
         <div className="flex items-center justify-between mb-3">
-          <div className="text-sm text-[#455a7c]">Round {roundIndex + 1} / {ROUNDS.length} — <span className="font-medium">{ROUNDS[roundIndex]}</span></div>
+          <div className="text-sm text-[#455a7c] font-bold">2. {ROUNDS[roundIndex]} {roundIndex + 1}/{ROUNDS.length}: Answer all of these to assess this person’s friend type and fit for you</div>
           <div className="flex gap-2">
             <button onClick={prevRound} className="px-3 py-1.5 rounded-xl border bg-white hover:bg-[#455a7c]/5 disabled:opacity-50" disabled={roundIndex === 0}>Back</button>
             <button onClick={nextRound} className="px-3 py-1.5 rounded-xl border bg-white hover:bg-[#455a7c]/5 disabled:opacity-50" disabled={roundIndex === ROUNDS.length - 1}>Next</button>
@@ -512,7 +604,7 @@ export default function BestieVibesQuiz(props = {}) {
             <div key={q.id} className="p-4 rounded-2xl bg-white shadow-sm border">
               <div className="flex items-center justify-between">
                 <h3 className="font-semibold">{q.emoji} {q.title}</h3>
-                <span className="text-xs text-[#455a7c]">{WEIGHTS[q.weightKey] ? `×${WEIGHTS[q.weightKey]}` : (q.id.startsWith('sig_') ? 'signal' : 'archetype')}</span>
+                <span className="text-xs text-[#455a7c]">{weights[q.weightKey] ? `×${weights[q.weightKey]}` : (q.id.startsWith('sig_') ? 'signal' : 'archetype')}</span>
               </div>
               <div className="text-sm text-[#455a7c] mt-1">{q.hint}</div>
               <div className="mt-3 flex justify-between text-xs text-[#455a7c]">
@@ -557,8 +649,8 @@ export default function BestieVibesQuiz(props = {}) {
 
         {/* Archetype Library & Deep Dive */}
         <div className="p-4 rounded-2xl bg-white shadow-sm border mb-8">
-          <h3 className="font-semibold">Archetype Library 📚 — Do we have them all?</h3>
-          <p className="text-sm text-[#455a7c] mt-2">This 8‑pack covers the big axes of friendship: <b>Depth</b> (Confidante, Caregiver), <b>Stability</b> (Anchor), <b>Novelty</b> (Adventurer), <b>Coordination</b> (Communicator, Connector), and <b>Growth</b> (Coach, Collaborator). Most close friends blend 2–3. Use the cards below to spot strengths, watch‑outs, and best micro‑plans.</p>
+          <h3 className="font-semibold">Friendship Types — Do you have them all? Which is most important to you?</h3>
+          <p className="text-sm text-[#455a7c] mt-2">This main types of friends are: <b>Depth</b> (Confidante, Caregiver), <b>Stability</b> (Anchor), <b>Novelty</b> (Adventurer), <b>Coordination</b> (Communicator, Connector), and <b>Growth</b> (Coach, Collaborator). Most close friends blend 2–3. Use the cards below to spot strengths, watch‑outs, and best micro‑plans.</p>
 
           <div className="grid md:grid-cols-2 gap-3 mt-4">
             {[
