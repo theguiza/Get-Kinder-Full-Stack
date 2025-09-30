@@ -932,25 +932,11 @@ app.get('/api/chat/init', async (req, res) => {
   }
 });
 
-app.post('/api/chat/message', async (req, res) => {
-  try {
-    if (!req.session.threadId) {
-      const thread = await createThread();
-      req.session.threadId = thread.id;
-    }
-    const threadId = req.session.threadId;
-    const userMessage = req.body.message;
-    await createMessage(threadId, userMessage);
-    await createAndPollRun(threadId);
-    const messages = await listMessages(threadId);
-    const lastMessage = messages.data.find(m => m.role === 'assistant');
-    const reply = lastMessage ? lastMessage.content[0].text.value : "(No reply)";
-    res.json({ reply });
-  } catch (err) {
-    console.error("Error in /api/chat/message:", err);
-    res.status(500).json({ error: "Something went wrong." });
-  }
+// Legacy chat endpoint → redirect to the tool-aware one
+app.post('/api/chat/message', ensureAuthenticatedApi, (req, res) => {
+  res.redirect(307, '/kai-chat'); // 307 preserves method & body
 });
+
 // On-demand function-call endpoint
 app.post("/chat", async (req, res) => {
   try {
@@ -1024,7 +1010,7 @@ app.post('/kai-chat', ensureAuthenticatedApi, async (req, res) => {
     await createDashboardMessage(threadId, message, contextForKai);
 
     // 5) Run the assistant WITH tools (Assistants API v2)
-    //const run = await createAndPollRun(threadId, DASHBOARD_TOOLS);
+    const run = await createAndPollRun(threadId, DASHBOARD_TOOLS);
 
     // 6) Fetch latest assistant reply
     const msgList = await listMessages(threadId);

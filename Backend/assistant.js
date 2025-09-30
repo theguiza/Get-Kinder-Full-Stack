@@ -6,7 +6,7 @@ dotenv.config();
 import { run as neoRun } from './db/neo4j.js';
 
 // Tool execution context (filled by the route before createAndPollRun)
-let TOOL_CONTEXT = { ownerId: null }; // (add pool later if you want DB writes)
+let TOOL_CONTEXT = { ownerId: null, pool: null }; 
 export function setToolContext(ctx = {}) {
   TOOL_CONTEXT = { ...TOOL_CONTEXT, ...ctx };
 }
@@ -385,7 +385,7 @@ export const DASHBOARD_TOOLS = [
   type: 'function',
   function: {
     name: 'recommend_from_graph',
-    description: 'Return top N friends to reach out to with supporting graph details (latest assessment, archetypes, observations, flags, last interaction).',
+    description: 'Alias of mattering_suggestions. Returns latest assessment per friend with optional filters.',
     parameters: {
       type: 'object',
       properties: {
