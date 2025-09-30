@@ -1,13 +1,9 @@
 // index.js
-
 // ─────────────────────────────────────────────────────────────────────────────
 // ES Module version (package.json includes "type": "module")
 // ─────────────────────────────────────────────────────────────────────────────
-
-// 1) Load environment variables
 import dotenv from "dotenv";
 dotenv.config();
-
 // 2) Import dependencies via ES module syntax
 import express from "express";
 import path from "path";
@@ -20,23 +16,26 @@ import passport from "passport";
 import cors from "cors";
 import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import { Strategy as FacebookStrategy } from "passport-facebook";
-import { createThread, createMessage, createAndPollRun, listMessages } from "./Backend/assistant.js";
-import { DASHBOARD_TOOLS, createDashboardMessage } from "./Backend/assistant.js";
+//import { createThread, createMessage, createAndPollRun, listMessages } from "./Backend/assistant.js";
 import OpenAI from "openai";
 import connectPgSimple from "connect-pg-simple";
 import multer from "multer";
 import cron from "node-cron";
 import { FUNCTIONS } from "./openaiFunctions.js";
-import { fetchUserEmails, fetchKindnessPrompts, fetchEmailSubject } from "./fetchData.js";
-import { sendDailyKindnessPrompts } from "./kindnessEmailer.js";
+//import { fetchUserEmails, fetchKindnessPrompts, fetchEmailSubject } from "./fetchData.js";
+//import { sendDailyKindnessPrompts } from "./kindnessEmailer.js";
 import { makeDashboardController } from "./Backend/dashboardController.js";
+import { verify as neoVerify, run as neoRun, close as neoClose } from './Backend/db/neo4j.js';
+// after: dotenv.config();
+const { fetchUserEmails, fetchKindnessPrompts, fetchEmailSubject } = await import("./fetchData.js");
+const { sendDailyKindnessPrompts } = await import("./kindnessEmailer.js");
 
-// ===========================
-// BOLT CHANGELOG
-// Date: 2025-01-27
-// What: Added dashboard routes with authentication and challenge management
-// Why: Wire up new dashboard controller with proper routing and authentication
-// ===========================
+neoVerify()
+  .then(() => console.log('Neo4j connected ✅'))
+  .catch(err => console.error('Neo4j connect failed (non-fatal):', err.message));
+
+process.on('SIGINT',  () => { neoClose().finally(() => process.exit(0)); });
+process.on('SIGTERM', () => { neoClose().finally(() => process.exit(0)); });
 
 const uploadAvatar = multer({
   storage: multer.memoryStorage(),
@@ -48,6 +47,19 @@ const uploadAvatar = multer({
     cb(null, true);
   },
 });
+// KAI (Assistants API) plumbing
+import {
+  // chat endpoints need these
+  createThread,
+  createMessage,
+  createAndPollRun,
+  listMessages,
+  // tool-aware / dashboard bits
+  DASHBOARD_TOOLS,
+  setToolContext,
+  getOrCreateThread,
+  createDashboardMessage
+} from './Backend/assistant.js';
 // 3) Compute __dirname for ES modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -264,8 +276,6 @@ passport.use(
     }
   )
 );
-
-
 // 11.3) Serialize / Deserialize
 passport.serializeUser((user, done) => {
   done(null, user.email);
@@ -282,11 +292,131 @@ passport.deserializeUser(async (email, done) => {
     done(err, null);
   }
 });
+// ─────────────────────────────────────────────────────────────────────────────
+// --- Neo4j mirror helper ---
+// ─────────────────────────────────────────────────────────────────────────────
+async function mirrorAssessmentToGraph({
+  ownerId, friendId, name,
+  score = 0,
+  evidence_direct = 0,
+  evidence_proxy = 0,
+  archetype_primary = null,
+  archetype_secondary = null,
+  red_flags = [],
+  snapshot = {},
+  signals = {}
+}) {
+  const nowIso = new Date().toISOString();
 
+  // tier bucketing (same thresholds you’ve been using)
+  const tier =
+    evidence_direct < 0.35 ? 'Provisional • Low Evidence' :
+    score >= 85           ? 'Bestie Material' :
+    score >= 70           ? 'Strong Contender' :
+    score >= 50           ? 'Potential Pal' :
+                            'Acquaintance Energy';
+
+  const cypher = `
+    MERGE (u:User {id:$user_id})
+    MERGE (p:Person {id:$friend_id})
+      ON CREATE SET p.display_name = $name
+      ON MATCH  SET p.display_name = coalesce($name, p.display_name)
+    MERGE (u)-[r:CONSIDERS]->(p)
+      SET r.last_assessed_at = datetime($created_at),
+          r.last_score       = $score,
+          r.last_tier        = $tier,
+          r.flags_count      = size($flags)
+    WITH u,p
+    CREATE (a:Assessment {
+      id: randomUUID(),
+      created_at: datetime($created_at),
+      score: $score,
+      tier:  $tier,
+      direct_ratio: $direct_ratio,
+      proxy_ratio:  $proxy_ratio,
+      source: "webapp"
+    })
+    MERGE (p)-[:HAS_ASSESSMENT]->(a)
+    WITH a, $snapshot AS snap, $signals AS sigs, $flags AS flags
+
+    // 1) SNAPSHOT → Observations (mostly 'direct')
+    WITH a, sigs, flags, snap,
+         [k IN keys(snap) | {
+           field: k,
+           value: toFloat(snap[k]),
+           round:
+             CASE
+               WHEN k IN ['reliability','reciprocity','logistics'] THEN 'Adulting Round'
+               WHEN k IN ['values','safety','activity']           THEN 'Values Round'
+               WHEN k IN ['chemistry','interaction']              THEN 'Vibes Round'
+               WHEN k STARTS WITH 'arch_'                         THEN 'Archetype Round'
+               ELSE 'Signals Round'
+             END,
+           source: CASE WHEN k STARTS WITH 'sig_' THEN 'signal' ELSE 'direct' END
+         }] AS obs1
+    UNWIND obs1 AS o1
+      WITH a, sigs, flags, snap, o1
+      WHERE o1.value IS NOT NULL
+      CREATE (ob1:Observation {
+        field:o1.field, value:o1.value, round:o1.round, source:o1.source, observed_at:a.created_at
+      })
+      MERGE (a)-[:REPORTED]->(ob1)
+
+    // 2) SIGNALS → Observations (dedupe if same key existed in snapshot)
+    WITH a, flags, snap, sigs,
+         [k IN [x IN keys(sigs) WHERE NOT x IN keys(snap)] | {
+           field: k,
+           value: toFloat(sigs[k]),
+           round:  'Signals Round',
+           source: 'signal'
+         }] AS obs2
+    UNWIND obs2 AS o2
+      WITH a, flags, o2
+      WHERE o2.value IS NOT NULL
+      CREATE (ob2:Observation {
+        field:o2.field, value:o2.value, round:o2.round, source:o2.source, observed_at:a.created_at
+      })
+      MERGE (a)-[:REPORTED]->(ob2)
+
+    // 3) ARCHETYPES → ranked edges
+    WITH a, $archetype_primary AS ap, $archetype_secondary AS asec
+    FOREACH (_ IN CASE WHEN ap   IS NULL THEN [] ELSE [1] END |
+      MERGE (ar1:Archetype {name: ap})
+      MERGE (a)-[:TOP_ARCHETYPE {rank:1}]->(ar1)
+    )
+    FOREACH (_ IN CASE WHEN asec IS NULL THEN [] ELSE [1] END |
+      MERGE (ar2:Archetype {name: asec})
+      MERGE (a)-[:TOP_ARCHETYPE {rank:2}]->(ar2)
+    )
+
+    // 4) FLAGS → edges
+    WITH a, $flags AS flist
+    UNWIND flist AS f
+      MERGE (fl:Flag {id:f})
+      MERGE (a)-[:HAS_FLAG]->(fl)
+  `;
+
+  const params = {
+    user_id: String(ownerId),
+    friend_id: String(friendId),
+    name: name || 'Unknown',
+    created_at: nowIso,
+    score: Number(score) || 0,
+    direct_ratio: Number(evidence_direct) || 0,
+    proxy_ratio: Number(evidence_proxy) || 0,
+    tier, // must be present for $tier
+    archetype_primary,
+    archetype_secondary,
+    flags: Array.isArray(red_flags) ? red_flags : [],
+    snapshot,
+    signals
+  };
+
+  await neoRun(cypher, params);
+}
 // ─────────────────────────────────────────────────────────────────────────────
 // 12) Signup & Login Routes
 // ─────────────────────────────────────────────────────────────────────────────
-
 // 12.1) Signup Route
 app.post("/register", async (req, res, next) => {
   const { firstname, lastname, email, password } = req.body;
@@ -310,7 +440,6 @@ app.post("/register", async (req, res, next) => {
     res.status(500).send("Error registering user");
   }
 });
-
 // 12.2) Login Route
 app.post("/login", async (req, res, next) => {
   const { email, password } = req.body;
@@ -339,7 +468,6 @@ app.post("/login", async (req, res, next) => {
     res.status(500).send("Internal server error");
   }
 });
-
 // 12.3) Logout Route
 app.get("/logout", (req, res, next) => {
   req.logout(err => {
@@ -347,7 +475,6 @@ app.get("/logout", (req, res, next) => {
     res.redirect("/?login=0");
   });
 });
-
 // ─────────────────────────────────────────────────────────────────────────────
 // 13) Profile Update Route
 // ─────────────────────────────────────────────────────────────────────────────
@@ -357,7 +484,6 @@ function ensureAuthenticated(req, res, next) {
   }
   return res.redirect("/login");
 }
-
 app.post(
   '/profile',
   ensureAuthenticated,
@@ -506,6 +632,57 @@ function ensureAuthenticatedApi(req, res, next) {
   if (req.isAuthenticated && req.isAuthenticated()) return next();
   return res.status(401).json({ error: "unauthorized" });
 }
+async function resolveOwnerId(req, pool) {
+  // Prefer the authenticated id if present
+  if (req.user?.id) return String(req.user.id);
+
+  // Otherwise look up by email
+  if (!req.user?.email) throw new Error("Missing req.user.email");
+  const { rows: [owner] } = await pool.query(
+    "SELECT id FROM public.userdata WHERE email=$1 LIMIT 1",
+    [req.user.email]
+  );
+  if (!owner) throw new Error("owner not found");
+  return String(owner.id);
+}
+
+app.get('/api/graph/friends/latest', ensureAuthenticatedApi, async (req, res) => {
+  try {
+    const { rows: [owner] } = await pool.query(
+      'SELECT id FROM public.userdata WHERE email=$1 LIMIT 1',
+      [req.user.email]
+    );
+    if (!owner) return res.status(400).json({ error: 'owner not found' });
+
+    const q = `
+      MATCH (u:User {id:$ownerId})-[:CONSIDERS]->(p:Person)-[:HAS_ASSESSMENT]->(a:Assessment)
+      WITH p, a ORDER BY a.created_at DESC
+      WITH p, collect(a)[0] AS la
+      RETURN p.id AS friend_id, p.display_name AS name,
+             la.score AS score, la.tier AS tier,
+             la.direct_ratio AS direct_ratio, la.proxy_ratio AS proxy_ratio,
+             la.created_at AS assessed_at
+      ORDER BY assessed_at DESC
+      LIMIT $limit
+    `;
+
+    const result = await neoRun(q, { ownerId: String(owner.id), limit: 100 });
+
+    res.json(result.records.map(r => ({
+      friend_id:    r.get('friend_id'),
+      name:         r.get('name'),
+      score:        r.get('score'),
+      tier:         r.get('tier'),
+      direct_ratio: r.get('direct_ratio'),
+      proxy_ratio:  r.get('proxy_ratio'),
+      assessed_at:  r.get('assessed_at'),
+    })));
+  } catch (e) {
+    console.error('GET /api/graph/friends/latest error:', e);
+    res.status(500).json({ error: 'graph query failed' });
+  }
+});
+
 app.get(['/friend-quiz', '/friendQuiz'], (req, res) => {
   const isAuthed = !!(req.isAuthenticated && req.isAuthenticated());
   res.render('friendQuiz', { 
@@ -560,14 +737,32 @@ app.get(['/friend-quiz', '/friendQuiz'], (req, res) => {
       flags_count, red_flags, snapshot, signals, notes, picture
     ]);
 
-    res.status(201).json(friend);
-  } catch (e) {
-    console.error("create friend error", e);
-    res.status(500).json({ error: "failed to create friend" });
+    // --- [ADD] mirror to Neo4j (best-effort, non-blocking) ---
+    try {
+      await mirrorAssessmentToGraph({
+        ownerId: owner.id,                  // from earlier SELECT
+        friendId: friend.id,                // from INSERT RETURNING
+        name: friend.name,
+        score: friend.score,
+        evidence_direct: friend.evidence_direct,
+        evidence_proxy: friend.evidence_proxy,
+        archetype_primary: friend.archetype_primary,
+        archetype_secondary: friend.archetype_secondary,
+        red_flags: friend.red_flags || [],
+        snapshot: friend.snapshot || {},
+        signals: friend.signals || {}
+      });
+    } catch (e) {
+      console.error('Neo4j mirror failed (continuing):', e.message);
+    }
+  } catch (err) {
+    console.error('Error in /api/friends:', err);
+    res.status(500).json({ error: 'Server error' });
   }
+  return res.status(201).json({ ok: true, friend_id: friend.id });
 });
 
-// BOLT: Dashboard - Initialize dashboard controller with all functions
+// Dashboard - Initialize dashboard controller with all functions
 const { getDashboard, getMorningPrompt, saveReflection, markDayDone, cancelChallenge } = makeDashboardController(pool);
 
 // BOLT: Dashboard - All dashboard routes
@@ -672,7 +867,52 @@ app.get("/auth/facebook/callback",
     res.redirect(`/?login=1&name=${encodeURIComponent(req.user.firstname || req.user.email)}`);
   }
 );
+// --- for mattering graph in neo4j: latest assessment per friend, ordered by score ---
+app.get('/api/graph/suggestions', ensureAuthenticatedApi, async (req, res) => {
+  try {
+    const { rows: [owner] } = await pool.query(
+      'SELECT id FROM public.userdata WHERE email=$1 LIMIT 1',
+      [req.user.email]
+    );
+    if (!owner) return res.status(400).json({ error: 'owner not found' });
 
+    const cypher = `
+      MATCH (u:User {id:$user_id})-[:CONSIDERS]->(p:Person)-[:HAS_ASSESSMENT]->(a:Assessment)
+WITH p, a ORDER BY a.created_at DESC
+WITH p, collect(a)[0] AS la
+WITH p, la,
+     la.score AS base,
+     duration.between(date(la.created_at), date()).days AS days,
+     CASE
+       WHEN days <= 14 THEN 6
+       WHEN days <= 30 THEN 3
+       WHEN days <= 60 THEN 1
+       ELSE 0
+     END AS recency_bonus
+RETURN p.id AS friend_id, p.display_name AS name,
+       la.score AS score, la.tier AS tier,
+       la.direct_ratio AS direct_ratio, la.proxy_ratio AS proxy_ratio,
+       la.created_at AS assessed_at,
+       (base + recency_bonus) AS rank_score
+ORDER BY rank_score DESC
+LIMIT $limit
+    `;
+    const result = await neoRun(cypher, { user_id: String(owner.id), limit: 20 });
+    const suggestions = result.records.map(r => ({
+      friend_id:   r.get('friend_id'),
+      name:        r.get('name'),
+      score:       r.get('score'),
+      tier:        r.get('tier'),
+      direct_ratio:r.get('direct_ratio'),
+      proxy_ratio: r.get('proxy_ratio'),
+      assessed_at: r.get('assessed_at'),
+    }));
+    res.json({ suggestions });
+  } catch (err) {
+    console.error('GET /api/graph/suggestions error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
 // ─────────────────────────────────────────────────────────────────────────────
 // 17) Chat API Endpoints (assistant functionality)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -750,7 +990,60 @@ app.post("/chat", async (req, res) => {
   }
 });
 
+// Tool-aware Assistants route (uses DASHBOARD_TOOLS and sets tool context)
+app.post('/kai-chat', ensureAuthenticatedApi, async (req, res) => {
+  try {
+    const { message, userContext } = req.body || {};
+    if (typeof message !== 'string' || !message.trim()) {
+      return res.status(400).json({ error: 'message (string) is required' });
+    }
 
+    // 1) Resolve who this request is for (tools use this)
+    const ownerId = await resolveOwnerId(req, pool);
+
+    // 2) Make ownerId and pool available to tools (graph + DB tools)
+    setToolContext({ ownerId, pool });
+
+    // 3) Thread management (persist per session)
+    if (!req.session.threadId) {
+      const thread = await createThread();
+      req.session.threadId = thread.id;
+    }
+    const threadId = req.session.threadId;
+
+    // 4) Add message; include optional user context for KAI to read
+    const contextForKai = userContext || {
+      user_email: req.user?.email || null,
+      user_name:  req.user?.firstname || req.user?.name || null
+    };
+    await createDashboardMessage(threadId, message, contextForKai);
+
+    // 5) Run the assistant WITH tools (Assistants API v2)
+    //const run = await createAndPollRun(threadId, DASHBOARD_TOOLS);
+
+    // 6) Fetch latest assistant reply
+    const msgList = await listMessages(threadId);
+    const assistantMsgs = (msgList?.data || [])
+      .filter(m => m.role === 'assistant')
+      .sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+    const latest = assistantMsgs[0];
+
+    const textParts = (latest?.content || [])
+      .map(c => c?.text?.value)
+      .filter(Boolean);
+    const reply = textParts.join('\n').trim() || '(No reply)';
+
+    return res.json({
+      ok: true,
+      thread_id: threadId,
+      reply,
+      run_status: run?.status || null
+    });
+  } catch (e) {
+    console.error('POST /kai-chat error:', e);
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
 // Cron: run every day at KINDNESS_SEND_TIME (HH:MM, Vancouver)
 const [hour, minute] = process.env.KINDNESS_SEND_TIME.split(":");
 cron.schedule(
@@ -775,7 +1068,123 @@ cron.schedule(
   },
   { timezone: "America/Vancouver" }
 );
+// ─────────────────────────────────────────────────────────────────────────────
+// DEV UTIL: backfill Neo4j from existing Postgres friends
+// Auth: requires login (uses ensureAuthenticatedApi). Safe to keep dev-only.
+// ─────────────────────────────────────────────────────────────────────────────
+const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || 'michael.wozney@getkindr.com')
+  .split(',')
+  .map(s => s.trim().toLowerCase());
 
+function ensureAdmin(req, res, next) {
+  const authed = req.isAuthenticated && req.isAuthenticated();
+  const email = (req.user?.email || '').toLowerCase();
+  if (authed && ADMIN_EMAILS.includes(email)) return next();
+  return res.status(403).json({ error: 'forbidden' });
+}
+
+if (process.env.NODE_ENV !== 'production') {
+  app.post('/dev/graph/backfill', ensureAuthenticatedApi, async (req, res) => {
+    try {
+      const ownerId = await resolveOwnerId(req, pool);
+      const { limit = 1000, offset = 0, dry = false } = req.body || {};
+
+      const { rows } = await pool.query(
+        `SELECT id, name, email, phone,
+                archetype_primary, archetype_secondary,
+                score, evidence_direct, evidence_proxy,
+                flags_count, red_flags, snapshot, signals, notes, picture
+           FROM public.friends
+          WHERE owner_user_id = $1
+          ORDER BY updated_at DESC NULLS LAST, id DESC
+          LIMIT $2 OFFSET $3`,
+        [ownerId, Number(limit), Number(offset)]
+      );
+      if (dry) {
+        return res.json({ ok: true, owner_id: ownerId, found: rows.length, mirrored: 0, errors: [] });
+      }
+      const errors = [];
+      let mirrored = 0;
+      for (const f of rows) {
+        try {
+          await mirrorAssessmentToGraph({
+            ownerId,
+            friendId: f.id,
+            name: f.name || 'Unknown',
+            score: f.score ?? 0,
+            evidence_direct: f.evidence_direct ?? 0,
+            evidence_proxy: f.evidence_proxy ?? 0,
+            archetype_primary: f.archetype_primary || null,
+            archetype_secondary: f.archetype_secondary || null,
+            red_flags: Array.isArray(f.red_flags) ? f.red_flags : [],
+            snapshot: f.snapshot || {},
+            signals: f.signals || {}
+          });
+          mirrored++;
+        } catch (e) {
+          errors.push({ id: f.id, name: f.name, error: e.message });
+        }
+      }
+
+      return res.json({ ok: true, owner_id: ownerId, found: rows.length, mirrored, errors });
+    } catch (e) {
+      console.error('POST /dev/graph/backfill error:', e);
+      return res.status(500).json({ ok: false, error: e.message });
+    }
+  });
+}
+// ADMIN: backfill Neo4j from existing Postgres friends (prod-safe)
+app.post('/admin/graph/backfill', ensureAuthenticatedApi, ensureAdmin, async (req, res) => {
+  try {
+    const ownerId = await resolveOwnerId(req, pool);
+    const { limit = 200, offset = 0, dry = true } = req.body || {};
+
+    const { rows } = await pool.query(
+      `SELECT id, name, email, phone,
+              archetype_primary, archetype_secondary,
+              score, evidence_direct, evidence_proxy,
+              flags_count, red_flags, snapshot, signals, notes, picture
+         FROM public.friends
+        WHERE owner_user_id = $1
+        ORDER BY updated_at DESC NULLS LAST, id DESC
+        LIMIT $2 OFFSET $3`,
+      [ownerId, Number(limit), Number(offset)]
+    );
+
+    if (dry) {
+      return res.json({ ok: true, owner_id: ownerId, found: rows.length, mirrored: 0, errors: [] });
+    }
+
+    const errors = [];
+    let mirrored = 0;
+
+    for (const f of rows) {
+      try {
+        await mirrorAssessmentToGraph({
+          ownerId,
+          friendId: f.id,
+          name: f.name || 'Unknown',
+          score: f.score ?? 0,
+          evidence_direct: f.evidence_direct ?? 0,
+          evidence_proxy: f.evidence_proxy ?? 0,
+          archetype_primary: f.archetype_primary || null,
+          archetype_secondary: f.archetype_secondary || null,
+          red_flags: Array.isArray(f.red_flags) ? f.red_flags : [],
+          snapshot: f.snapshot || {},
+          signals: f.signals || {}
+        });
+        mirrored++;
+      } catch (e) {
+        errors.push({ id: f.id, name: f.name, error: e.message });
+      }
+    }
+
+    return res.json({ ok: true, owner_id: ownerId, found: rows.length, mirrored, errors });
+  } catch (e) {
+    console.error('POST /admin/graph/backfill error:', e);
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
 // ─────────────────────────────────────────────────────────────────────────────
 // 18) Start the server
 // ─────────────────────────────────────────────────────────────────────────────

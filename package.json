@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node index.js",
-     "build": "vite build"
+    "build": "vite build"
   },
   "repository": {
     "type": "git",
@@ -25,11 +25,12 @@
     "canvas-confetti": "^1.9.3",
     "connect-pg-simple": "^10.0.0",
     "cors": "^2.8.5",
-    "dotenv": "^16.0.3",
+    "dotenv": "^16.6.1",
     "ejs": "^3.1.10",
     "express": "^5.1.0",
     "express-session": "^1.18.1",
     "multer": "^2.0.1",
+    "neo4j-driver": "^5.28.2",
     "node-cron": "^4.1.0",
     "nodemailer": "^7.0.3",
     "openai": "^5.0.1",

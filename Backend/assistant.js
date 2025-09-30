@@ -1,12 +1,15 @@
-// ===========================
-// BOLT CHANGELOG
-// Date: 2025-01-27
-// What: Enhanced assistant.js with dashboard integration and reflection saving capabilities
-// Why: Support dashboard-specific KAI interactions and challenge reflection logging
-// ===========================
 
 import dotenv from 'dotenv';
 dotenv.config();
+
+// Graph + context
+import { run as neoRun } from './db/neo4j.js';
+
+// Tool execution context (filled by the route before createAndPollRun)
+let TOOL_CONTEXT = { ownerId: null }; // (add pool later if you want DB writes)
+export function setToolContext(ctx = {}) {
+  TOOL_CONTEXT = { ...TOOL_CONTEXT, ...ctx };
+}
 
 const ASSISTANT_ID = process.env.OPENAI_ASSISTANT_ID;
 const API_KEY = process.env.OPENAI_API_KEY;
@@ -19,7 +22,7 @@ function getHeaders() {
   };
 }
 
-// BOLT: KAI integration - Enhanced thread management for dashboard context
+// KAI integration - Enhanced thread management for dashboard context
 export async function getOrCreateThread(req) {
   if (req.session.threadId) {
     return req.session.threadId;
@@ -59,7 +62,7 @@ export async function createMessage(threadId, content) {
   return await response.json();
 }
 
-// BOLT: KAI integration - Enhanced run creation with tool support for dashboard functions
+//  KAI integration - Enhanced run creation with tool support for dashboard functions
 export async function createAndPollRun(threadId, tools = []) {
   const runEndpoint = `https://api.openai.com/v1/threads/${threadId}/runs`;
 
@@ -67,7 +70,7 @@ export async function createAndPollRun(threadId, tools = []) {
     assistant_id: ASSISTANT_ID
   };
 
-  // BOLT: KAI integration - Add tools if provided for dashboard-specific functions
+  // KAI integration - Add tools if provided for dashboard-specific functions
   if (tools && tools.length > 0) {
     runPayload.tools = tools;
   }
@@ -84,7 +87,7 @@ export async function createAndPollRun(threadId, tools = []) {
   let runStatus = run.status;
   let runResult = null;
   
-  // BOLT: KAI integration - Enhanced polling with tool call handling
+  // KAI integration - Enhanced polling with tool call handling
   while (runStatus !== 'completed' && runStatus !== 'failed') {
     await new Promise(resolve => setTimeout(resolve, 1000));
 
@@ -97,7 +100,7 @@ export async function createAndPollRun(threadId, tools = []) {
     runResult = await statusCheck.json();
     runStatus = runResult.status;
 
-    // BOLT: KAI integration - Handle tool calls if they occur
+    // KAI integration - Handle tool calls if they occur
     if (runStatus === 'requires_action' && runResult.required_action) {
       const toolCalls = runResult.required_action.submit_tool_outputs.tool_calls;
       const toolOutputs = [];
@@ -126,24 +129,113 @@ export async function createAndPollRun(threadId, tools = []) {
   return runResult;
 }
 
-// BOLT: KAI integration - Tool call handler for dashboard-specific functions
+// KAI integration - Tool call handler for dashboard-specific functions
+// KAI integration - Tool call handler for dashboard-specific functions
+// KAI integration - Tool call handler for dashboard-specific functions
 async function handleToolCall(toolCall) {
   const { name, arguments: args } = toolCall.function;
-  const parsedArgs = JSON.parse(args);
+
+  // Be defensive about malformed JSON from the model
+  let parsedArgs = {};
+  try {
+    parsedArgs = args ? JSON.parse(args) : {};
+  } catch (e) {
+    return { error: `Invalid arguments for ${name}: ${e.message}` };
+  }
 
   switch (name) {
+    // --- NEW: Graph tools ---
+    case 'mattering_suggestions':
+      // Reads Neo4j and returns latest-per-friend rows (optionally filtered)
+      return await tool_mattering_suggestions(parsedArgs);
+
+    case 'log_interaction':
+      // Writes a minimal INTERACTION edge in Neo4j
+      return await tool_log_interaction(parsedArgs);
+
+    // --- Existing tools (leave as-is) ---
     case 'save_reflection':
       return await saveReflectionToProfile(parsedArgs);
+
     case 'generate_mystery_quest':
       return await generateMysteryQuest(parsedArgs);
+
     case 'get_challenge_preview':
       return await getChallengePreview(parsedArgs);
+
     default:
       return { error: `Unknown tool: ${name}` };
   }
 }
 
-// BOLT: DB - Save user reflection to challenge_logs table
+async function tool_mattering_suggestions({ limit=20, min_score=null, exclude_flags=[], window_days=null }) {
+  const ownerId = String(TOOL_CONTEXT.ownerId || '');
+  if (!ownerId) return { error: 'ownerId missing in TOOL_CONTEXT' };
+
+  const cypher = `
+    MATCH (u:User {id:$ownerId})-[:CONSIDERS]->(p:Person)-[:HAS_ASSESSMENT]->(a:Assessment)
+    WITH p, a ORDER BY a.created_at DESC
+    WITH p, collect(a)[0] AS la
+    OPTIONAL MATCH (la)-[:HAS_FLAG]->(fl:Flag)
+    WITH p, la, collect(fl.id) AS flags
+    WHERE ($min_score IS NULL OR la.score >= $min_score)
+      AND (size($exclude_flags) = 0 OR none(f IN flags WHERE f IN $exclude_flags))
+    WITH p, la, flags,
+         la.score AS base,
+         CASE
+           WHEN $window_days IS NULL THEN 0
+           ELSE CASE
+             WHEN la.created_at >= datetime() - duration({ days: toInteger($window_days) }) THEN 3
+             WHEN la.created_at >= datetime() - duration({ days: toInteger($window_days) * 2 }) THEN 1
+             ELSE 0
+           END
+         END AS recency_bonus
+    RETURN p.id AS friend_id,
+           p.display_name AS name,
+           la.score AS score,
+           la.tier  AS tier,
+           la.direct_ratio AS direct_ratio,
+           la.proxy_ratio  AS proxy_ratio,
+           la.created_at   AS assessed_at,
+           flags           AS flags,
+           (base + recency_bonus) AS rank_score
+    ORDER BY assessed_at DESC
+    LIMIT toInteger($limit)
+  `;
+  const result = await neoRun(cypher, { ownerId, limit, min_score, exclude_flags, window_days });
+  return result.records.map(r => ({
+    friend_id:    r.get('friend_id'),
+    name:         r.get('name'),
+    score:        r.get('score'),
+    tier:         r.get('tier'),
+    direct_ratio: r.get('direct_ratio'),
+    proxy_ratio:  r.get('proxy_ratio'),
+    assessed_at:  r.get('assessed_at'),
+    flags:        r.get('flags'),
+    rank_score:   r.get('rank_score')
+  }));
+}
+
+async function tool_log_interaction({ friend_id, channel, occurred_at=null, notes=null }) {
+  const ownerId = String(TOOL_CONTEXT.ownerId || '');
+  if (!ownerId) return { error: 'ownerId missing in TOOL_CONTEXT' };
+
+  const cypher = `
+    MATCH (u:User {id:$ownerId}), (p:Person {id:$friend_id})
+    MERGE (u)-[i:INTERACTION {id: coalesce($id, randomUUID())}]->(p)
+      ON CREATE SET i.created_at = datetime()
+    SET i.channel = $channel,
+        i.occurred_at = coalesce(datetime($occurred_at), datetime()),
+        i.notes = coalesce($notes, "")
+    RETURN i.id AS id, i.channel AS channel, i.occurred_at AS occurred_at
+  `;
+  const result = await neoRun(cypher, {
+    ownerId, friend_id, channel, occurred_at, notes, id: null
+  });
+  const r = result.records[0];
+  return { id: r.get('id'), channel: r.get('channel'), occurred_at: r.get('occurred_at') };
+}
+// DB - Save user reflection to challenge_logs table
 async function saveReflectionToProfile({ userId, challengeId, dayNumber, reflection, pool }) {
   try {
     if (!pool) {
@@ -172,14 +264,14 @@ async function saveReflectionToProfile({ userId, challengeId, dayNumber, reflect
   }
 }
 
-// BOLT: DB - Generate and save mystery quest task
+// DB - Generate and save mystery quest task
 async function generateMysteryQuest({ userId, questType = 'random_kindness', pool }) {
   try {
     if (!pool) {
       throw new Error('Database pool not provided');
     }
 
-    // BOLT: DB - Generate a random kindness task
+    // DB - Generate a random kindness task
     const mysteryTasks = [
       'Leave a positive note for a stranger to find',
       'Pay for someone\'s coffee or meal',
@@ -217,7 +309,7 @@ async function generateMysteryQuest({ userId, questType = 'random_kindness', poo
   }
 }
 
-// BOLT: DB - Get challenge preview information
+// DB - Get challenge preview information
 async function getChallengePreview({ challengeId, pool }) {
   try {
     if (!pool) {
@@ -273,7 +365,7 @@ export async function listMessages(threadId) {
   return await response.json();
 }
 
-// BOLT: KAI integration - Dashboard-specific tools definition
+// KAI integration - Dashboard-specific tools definition
 export const DASHBOARD_TOOLS = [
   {
     type: 'function',
@@ -342,20 +434,54 @@ export const DASHBOARD_TOOLS = [
         required: ['challengeId']
       }
     }
+  },
+  // ---- Graph tools ----
+{
+  type: 'function',
+  function: {
+    name: 'mattering_suggestions',
+    description: 'Return latest assessment per friend for the signed-in user, with optional filters.',
+    parameters: {
+      type: 'object',
+      properties: {
+        limit:        { type: 'integer', minimum: 1, maximum: 200, default: 20 },
+        min_score:    { type: 'number',  minimum: 0, maximum: 100 },
+        exclude_flags:{ type: 'array',   items: { type: 'string' } },
+        window_days:  { type: 'integer', minimum: 1, maximum: 365, description: 'Optional recency window' }
+      }
+    }
   }
+},
+{
+  type: 'function',
+  function: {
+    name: 'log_interaction',
+    description: 'Record that the user interacted with a friend (e.g., text/call/coffee).',
+    parameters: {
+      type: 'object',
+      properties: {
+        friend_id:   { type: 'string' },
+        channel:     { type: 'string', enum: ['text','call','dm','coffee','video','other'] },
+        occurred_at: { type: 'string', description: 'ISO datetime; defaults to now' },
+        notes:       { type: 'string' }
+      },
+      required: ['friend_id','channel']
+    }
+  }
+}
 ];
 
-// BOLT: KAI integration - Enhanced message creation with context
+// KAI integration - Enhanced message creation with context
 export async function createDashboardMessage(threadId, content, userContext = {}) {
   const contextualContent = `User Context: ${JSON.stringify(userContext)}\n\nUser Message: ${content}`;
   
   return await createMessage(threadId, contextualContent);
 }
 
-// BOLT: KAI integration - Save reflection to KAI for context
+// KAI integration - Save reflection to KAI for context
 export async function saveReflectionToKAI(userId, challengeId, dayNumber, reflection, pool) {
   try {
-    // BOLT: DB - Save to kai_interactions for conversation context
+    // DB - Save to kai_interactions for conversation context
     await pool.query(`
       INSERT INTO kai_interactions (user_id, context_type, context_id, message, created_at)
       VALUES ($1, 'reflection', $2, $3, NOW())
