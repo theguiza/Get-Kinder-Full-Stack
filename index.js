@@ -697,14 +697,17 @@ app.get(['/friend-quiz', '/friendQuiz'], (req, res) => {
       await pool.query("SELECT id FROM public.userdata WHERE email=$1", [req.user.email]);
     if (!owner) return res.status(400).json({ error: "owner not found" });
 
+    // Normalize name on the server to reduce duplicates
     const {
-      name, email, phone,
+      name: rawName, email, phone,
       archetype_primary, archetype_secondary,
       score, evidence_direct, evidence_proxy,
       flags_count, red_flags = [],
       snapshot = {}, signals = {},
       notes = null, picture = null,
     } = req.body;
+
+    const name = (typeof rawName === 'string' ? rawName.trim() : 'Unknown');
 
     const { rows: [friend] } = await pool.query(`
       INSERT INTO public.friends (
@@ -714,7 +717,7 @@ app.get(['/friend-quiz', '/friendQuiz'], (req, res) => {
         flags_count, red_flags, snapshot, signals, notes, picture
       )
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
-      ON CONFLICT (owner_user_id, lower(name)) DO UPDATE SET
+      ON CONFLICT (owner_user_id, name) DO UPDATE SET
         email               = EXCLUDED.email,
         phone               = EXCLUDED.phone,
         archetype_primary   = EXCLUDED.archetype_primary,
@@ -737,11 +740,11 @@ app.get(['/friend-quiz', '/friendQuiz'], (req, res) => {
       flags_count, red_flags, snapshot, signals, notes, picture
     ]);
 
-    // --- [ADD] mirror to Neo4j (best-effort, non-blocking) ---
+    // Mirror to Neo4j (best-effort)
     try {
       await mirrorAssessmentToGraph({
-        ownerId: owner.id,                  // from earlier SELECT
-        friendId: friend.id,                // from INSERT RETURNING
+        ownerId: owner.id,
+        friendId: friend.id,
         name: friend.name,
         score: friend.score,
         evidence_direct: friend.evidence_direct,
@@ -755,11 +758,13 @@ app.get(['/friend-quiz', '/friendQuiz'], (req, res) => {
     } catch (e) {
       console.error('Neo4j mirror failed (continuing):', e.message);
     }
+
+    // ✅ Always respond
+    return res.json({ ok: true, id: friend.id, name: friend.name });
   } catch (err) {
     console.error('Error in /api/friends:', err);
-    res.status(500).json({ error: 'Server error' });
+    return res.status(500).json({ error: 'Server error' });
   }
-  return res.status(201).json({ ok: true, friend_id: friend.id });
 });
 
 // Dashboard - Initialize dashboard controller with all functions
