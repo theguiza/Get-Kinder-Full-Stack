@@ -128,9 +128,6 @@ export async function createAndPollRun(threadId, tools = []) {
 
   return runResult;
 }
-
-// KAI integration - Tool call handler for dashboard-specific functions
-// KAI integration - Tool call handler for dashboard-specific functions
 // KAI integration - Tool call handler for dashboard-specific functions
 async function handleToolCall(toolCall) {
   const { name, arguments: args } = toolCall.function;
@@ -145,6 +142,15 @@ async function handleToolCall(toolCall) {
 
   switch (name) {
     // --- NEW: Graph tools ---
+    case 'recommend_from_graph':
+      return await tool_recommend_from_graph(parsedArgs);
+
+    case 'find_friend':
+      return await tool_find_friend(parsedArgs);
+
+    case 'get_friend_contacts':
+      return await tool_get_friend_contacts(parsedArgs);
+
     case 'mattering_suggestions':
       // Reads Neo4j and returns latest-per-friend rows (optionally filtered)
       return await tool_mattering_suggestions(parsedArgs);
@@ -220,6 +226,9 @@ async function tool_log_interaction({ friend_id, channel, occurred_at=null, note
   const ownerId = String(TOOL_CONTEXT.ownerId || '');
   if (!ownerId) return { error: 'ownerId missing in TOOL_CONTEXT' };
 
+  // Normalize for Neo4j Person.id (string)
+  const personId = String(friend_id);
+
   const cypher = `
     MATCH (u:User {id:$ownerId}), (p:Person {id:$friend_id})
     MERGE (u)-[i:INTERACTION {id: coalesce($id, randomUUID())}]->(p)
@@ -230,7 +239,12 @@ async function tool_log_interaction({ friend_id, channel, occurred_at=null, note
     RETURN i.id AS id, i.channel AS channel, i.occurred_at AS occurred_at
   `;
   const result = await neoRun(cypher, {
-    ownerId, friend_id, channel, occurred_at, notes, id: null
+    ownerId,
+    friend_id: personId,
+    channel,
+    occurred_at,
+    notes,
+    id: null
   });
   const r = result.records[0];
   return { id: r.get('id'), channel: r.get('channel'), occurred_at: r.get('occurred_at') };
@@ -368,6 +382,52 @@ export async function listMessages(threadId) {
 // KAI integration - Dashboard-specific tools definition
 export const DASHBOARD_TOOLS = [
   {
+  type: 'function',
+  function: {
+    name: 'recommend_from_graph',
+    description: 'Return top N friends to reach out to with supporting graph details (latest assessment, archetypes, observations, flags, last interaction).',
+    parameters: {
+      type: 'object',
+      properties: {
+        limit:            { type: 'integer', minimum: 1, maximum: 50,  default: 3 },
+        min_score:        { type: 'number',  minimum: 0, maximum: 100 },
+        exclude_flags:    { type: 'array',   items: { type: 'string' } },
+        window_days:      { type: 'integer', minimum: 1, maximum: 365, description: 'Recency boost window' },
+        prefer_stale_days:{ type: 'integer', minimum: 7, maximum: 365, description: 'Prefer if no interaction in ≥ X days' }
+      }
+    }
+  }
+},
+{
+  type: 'function',
+  function: {
+    name: 'find_friend',
+    description: 'Find (owner-scoped) friend rows by name substring; resolves friend_id from free text.',
+    parameters: {
+      type: 'object',
+      properties: {
+        name:  { type: 'string',  description: 'Partial/full name, case-insensitive' },
+        limit: { type: 'integer', minimum: 1, maximum: 50, default: 5 }
+      },
+      required: ['name']
+    }
+  }
+},
+{
+  type: 'function',
+  function: {
+    name: 'get_friend_contacts',
+    description: 'Fetch contact info (email/phone) for a friend (Postgres).',
+    parameters: {
+      type: 'object',
+      properties: {
+        friend_id: { type: 'integer' }
+      },
+      required: ['friend_id']
+    }
+  }
+},
+  {
     type: 'function',
     function: {
       name: 'save_reflection',
@@ -498,4 +558,143 @@ export async function saveReflectionToKAI(userId, challengeId, dayNumber, reflec
       error: error.message
     };
   }
+}
+async function tool_recommend_from_graph({
+  limit = 3,
+  min_score = null,
+  exclude_flags = [],
+  window_days = 30,
+  prefer_stale_days = 14
+}) {
+  const ownerId = String(TOOL_CONTEXT.ownerId || '');
+  if (!ownerId) return { error: 'ownerId missing in TOOL_CONTEXT' };
+
+  const cypher = `
+    MATCH (u:User {id:$ownerId})-[:CONSIDERS]->(p:Person)-[:HAS_ASSESSMENT]->(a:Assessment)
+    WITH u,p,a ORDER BY a.created_at DESC
+    WITH u,p,collect(a)[0] AS la
+    OPTIONAL MATCH (la)-[:HAS_FLAG]->(fl:Flag)
+    WITH u,p,la, collect(DISTINCT fl.id) AS flags
+    OPTIONAL MATCH (la)-[t:TOP_ARCHETYPE]->(ar:Archetype)
+    WITH u,p,la, flags, collect(DISTINCT {rank:t.rank, name:ar.name}) AS archetypes
+    OPTIONAL MATCH (la)-[:REPORTED]->(o:Observation)
+    WITH u,p,la, flags, archetypes,
+         collect(DISTINCT {field:o.field, value:o.value, round:o.round, source:o.source}) AS obs
+    OPTIONAL MATCH (u)-[i:INTERACTION]->(p)
+    WITH p, la, flags, archetypes, obs, max(i.occurred_at) AS last_interaction
+    WITH p, la, flags, archetypes, obs, last_interaction,
+         la.score AS base,
+         CASE
+           WHEN $window_days IS NULL THEN 0
+           ELSE CASE
+             WHEN la.created_at >= datetime() - duration({ days: toInteger($window_days) }) THEN 3
+             WHEN la.created_at >= datetime() - duration({ days: toInteger($window_days) * 2 }) THEN 1
+             ELSE 0
+           END
+         END AS recency_bonus,
+         CASE
+           WHEN last_interaction IS NULL THEN 2
+           WHEN duration.between(date(last_interaction), date()).days >= toInteger($prefer_stale_days) THEN 2
+           ELSE 0
+         END AS stale_bonus
+    WHERE ($min_score IS NULL OR la.score >= $min_score)
+      AND (size($exclude_flags) = 0 OR none(f IN flags WHERE f IN $exclude_flags))
+    RETURN
+      p.id AS friend_id,
+      p.display_name AS name,
+      la.score AS score,
+      la.tier  AS tier,
+      la.direct_ratio AS direct_ratio,
+      la.proxy_ratio  AS proxy_ratio,
+      la.created_at   AS assessed_at,
+      flags,
+      archetypes,
+      obs,
+      last_interaction,
+      (base + recency_bonus + stale_bonus) AS rank_score
+    ORDER BY rank_score DESC, assessed_at DESC
+    LIMIT toInteger($limit)
+  `;
+
+  const result = await neoRun(cypher, {
+    ownerId, limit, min_score, exclude_flags, window_days, prefer_stale_days
+  });
+
+  return result.records.map(r => {
+    const arche = (r.get('archetypes') || []).filter(Boolean).sort((a,b)=> (a.rank||99)-(b.rank||99));
+    const obs   = (r.get('obs') || []).filter(Boolean);
+
+    // strongest per round
+    const byRound = {};
+    for (const o of obs) {
+      if (!o || o.value == null) continue;
+      const key = o.round || 'Other';
+      if (!byRound[key] || o.value > byRound[key].value) byRound[key] = o;
+    }
+    const top_observations = Object.values(byRound)
+      .sort((a,b)=> (b.value||0)-(a.value||0))
+      .slice(0, 4);
+
+    // quick interest callouts
+    const signals = obs
+      .filter(o => (o.source === 'signal') || String(o.field||'').startsWith('sig_'))
+      .map(o => o.field);
+
+    return {
+      friend_id:    r.get('friend_id'),
+      name:         r.get('name'),
+      score:        r.get('score'),
+      tier:         r.get('tier'),
+      direct_ratio: r.get('direct_ratio'),
+      proxy_ratio:  r.get('proxy_ratio'),
+      assessed_at:  r.get('assessed_at'),
+      rank_score:   r.get('rank_score'),
+      flags:        r.get('flags') || [],
+      archetypes:   arche,               // [{rank:1,name:'…'}, {rank:2,name:'…'}]
+      signals,                           // ['sig_nhl', ...]
+      top_observations,                  // [{field,value,round,source}, ...]
+      last_interaction: r.get('last_interaction') || null
+    };
+  });
+}
+
+async function tool_find_friend({ name, limit = 5 }) {
+  const ownerId = String(TOOL_CONTEXT.ownerId || '');
+  const pool    = TOOL_CONTEXT.pool;
+  if (!ownerId) return { error: 'ownerId missing in TOOL_CONTEXT' };
+  if (!pool)    return { error: 'DB pool missing in TOOL_CONTEXT' };
+  if (!name || !name.trim()) return { error: 'name is required' };
+
+  const q = `
+    SELECT id, name, email, phone, score, updated_at
+      FROM public.friends
+     WHERE owner_user_id = $1 AND name ILIKE $2
+     ORDER BY updated_at DESC NULLS LAST, name ASC
+     LIMIT $3
+  `;
+  const { rows } = await pool.query(q, [ownerId, `%${name.trim()}%`, Number(limit)]);
+  return rows.map(r => ({
+    friend_id: r.id,
+    name: r.name,
+    email: r.email,
+    phone: r.phone,
+    score: r.score,
+    updated_at: r.updated_at
+  }));
+}
+
+async function tool_get_friend_contacts({ friend_id }) {
+  const ownerId = String(TOOL_CONTEXT.ownerId || '');
+  const pool    = TOOL_CONTEXT.pool;
+  if (!ownerId) return { error: 'ownerId missing in TOOL_CONTEXT' };
+  if (!pool)    return { error: 'DB pool missing in TOOL_CONTEXT' };
+  if (!friend_id) return { error: 'friend_id is required' };
+
+  const { rows } = await pool.query(
+    `SELECT id, name, email, phone FROM public.friends WHERE id=$1 AND owner_user_id=$2 LIMIT 1`,
+    [friend_id, ownerId]
+  );
+  if (!rows.length) return { error: 'friend not found for owner' };
+  const f = rows[0];
+  return { friend_id: f.id, name: f.name, email: f.email, phone: f.phone };
 }
