@@ -392,7 +392,10 @@ export const DASHBOARD_TOOLS = [
     parameters: {
       type: 'object',
       properties: {
+        // Prefer friend_id, but allow friend_name fallback
         friend_id:   { type: 'string', description: 'Friend UUID (friends.id)' },
+        friend_name: { type: 'string', description: 'Friend name (fallback if UUID unknown)' },
+
         channel:     { type: 'string', enum: ['email','sms'], default: 'email' },
         to:          { type: 'string', description: 'Override destination; otherwise uses friend.email/phone' },
         subject:     { type: 'string' },
@@ -400,7 +403,9 @@ export const DASHBOARD_TOOLS = [
         send_after:  { type: 'string', description: 'ISO datetime; defaults to now' },
         preview_only:{ type: 'boolean' }
       },
-      required: ['friend_id','channel','message']
+      // We can’t express "oneOf" well here, so keep message required;
+      // handler will enforce (friend_id || friend_name)
+      required: ['channel','message']
     }
   }
 },
@@ -554,66 +559,120 @@ export const DASHBOARD_TOOLS = [
 }
 ];
 async function tool_queue_nudge({
-  friend_id, channel = 'email', to = null, subject = null, message,
-  send_after = null, preview_only = false
+  friend_id = null,
+  friend_name = null,
+  channel = 'email',
+  to = null,
+  subject = null,
+  message,
+  send_after = null,
+  preview_only = false
 }) {
-  const ownerId = String(TOOL_CONTEXT.ownerId || '');
-  const pool    = TOOL_CONTEXT.pool;
-  if (!ownerId) return { error: 'ownerId missing in TOOL_CONTEXT' };
-  if (!pool)    return { error: 'DB pool missing in TOOL_CONTEXT' };
+  try {
+    const ownerId = String(TOOL_CONTEXT.ownerId || '');
+    const pool    = TOOL_CONTEXT.pool;
+    if (!ownerId) return { error: 'ownerId missing in TOOL_CONTEXT' };
+    if (!pool)    return { error: 'DB pool missing in TOOL_CONTEXT' };
 
-  // 1) Resolve friend (UUID) for this owner
-  const { rows } = await pool.query(
-    `SELECT id, name, email, phone
-       FROM public.friends
-      WHERE id = $1::uuid AND owner_user_id = $2
-      LIMIT 1`,
-    [friend_id, ownerId]
-  );
-  if (!rows.length) return { error: `friend ${friend_id} not found for owner` };
-  const friend = rows[0];
+    // --- 1) Resolve friend (UUID first; fallback to name) ---
+    let friendRow = null;
 
-  // 2) Destination resolution
-  let to_address = to;
-  if (!to_address) {
-    if (channel === 'email') to_address = friend.email || null;
-    if (channel === 'sms')   to_address = friend.phone || null;
-  }
-  if (!to_address) {
-    return { error: `no ${channel} destination (provide "to" or add ${channel} to friend)` };
-  }
+    if (friend_id) {
+      // Validate UUID-ish early to avoid Postgres error text crashing the run
+      const uuidLike = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(friend_id);
+      if (!uuidLike) {
+        return { error: `friend_id is not a valid UUID: ${friend_id}` };
+      }
+      const byId = await pool.query(
+        `SELECT id, name, email, phone
+           FROM public.friends
+          WHERE id = $1::uuid AND owner_user_id = $2
+          LIMIT 1`,
+        [friend_id, ownerId]
+      );
+      if (byId.rows.length) friendRow = byId.rows[0];
+    }
 
-  const safeSubject = subject || (channel === 'email' ? `A quick nudge for ${friend.name}` : null);
-  const sendAfterIso = send_after ? new Date(send_after).toISOString() : new Date().toISOString();
+    if (!friendRow && friend_name) {
+      const byName = await pool.query(
+        `SELECT id, name, email, phone
+           FROM public.friends
+          WHERE owner_user_id = $1
+            AND lower(name) = lower($2)
+          ORDER BY updated_at DESC NULLS LAST, id DESC
+          LIMIT 2`,
+        [ownerId, friend_name]
+      );
+      if (byName.rows.length === 0) {
+        return { error: `friend_name not found for owner: ${friend_name}` };
+      }
+      if (byName.rows.length > 1) {
+        return { error: `multiple friends match name "${friend_name}". Please specify friend_id.` };
+      }
+      friendRow = byName.rows[0];
+      friend_id = friendRow.id; // ensure we have UUID going forward
+    }
 
-  // 3) Preview-only (don’t write)
-  if (preview_only) {
-    return {
-      preview: true,
+    if (!friendRow) {
+      return { error: 'Provide friend_id (UUID) or friend_name (exact).' };
+    }
+
+    // --- 2) Destination resolution ---
+    let to_address = to;
+    if (!to_address) {
+      if (channel === 'email') to_address = friendRow.email || null;
+      if (channel === 'sms')   to_address = friendRow.phone || null;
+    }
+    if (!to_address) {
+      return { error: `no ${channel} destination (provide "to" or add ${channel} to friend)` };
+    }
+
+    const safeSubject = subject || (channel === 'email' ? `A quick nudge for ${friendRow.name}` : null);
+    const sendAfterIso = send_after ? new Date(send_after).toISOString() : new Date().toISOString();
+
+    // --- 3) Preview-only (no DB write) ---
+    if (preview_only) {
+      return {
+        preview: true,
+        friend_id,
+        friend_name: friendRow.name,
+        channel,
+        to: to_address,
+        subject: safeSubject,
+        message,
+        send_after: sendAfterIso
+      };
+    }
+
+    // --- 4) Insert into outbox (friend_id is UUID) ---
+    const ins = await pool.query(`
+      INSERT INTO nudges_outbox
+        (owner_user_id, friend_id, channel, to_address, subject, body_text, body_html, send_after, status, meta)
+      VALUES
+        ($1, $2::uuid, $3, $4, $5, $6, NULL, $7, 'queued',
+         jsonb_build_object('friend_name', $8))
+      RETURNING id, send_after
+    `, [
+      ownerId,
+      friend_id,
       channel,
-      to: to_address,
-      subject: safeSubject,
+      to_address,
+      safeSubject,
       message,
-      send_after: sendAfterIso
+      sendAfterIso,
+      friendRow.name
+    ]);
+
+    return {
+      queued: true,
+      id: ins.rows[0].id,
+      friend_id,
+      friend_name: friendRow.name,
+      send_after: ins.rows[0].send_after
     };
+  } catch (e) {
+    return { error: e.message || String(e) };
   }
-
-  // 4) Insert into outbox (friend_id is UUID)
-  const ins = await pool.query(`
-    INSERT INTO nudges_outbox
-      (owner_user_id, friend_id, channel, to_address, subject, body_text, body_html, send_after, status, meta)
-    VALUES
-      ($1, $2::uuid, $3, $4, $5, $6, NULL, $7, 'queued', jsonb_build_object('friend_name',$8))
-    RETURNING id, send_after
-  `, [
-    ownerId, friend_id, channel, to_address,
-    safeSubject,
-    message,                     // body_text
-    sendAfterIso,
-    friend.name
-  ]);
-
-  return { queued: true, id: ins.rows[0].id, send_after: ins.rows[0].send_after };
 }
 // KAI integration - Enhanced message creation with context
 export async function createDashboardMessage(threadId, content, userContext = {}) {
