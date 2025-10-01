@@ -943,11 +943,54 @@ app.get('/api/chat/init', async (req, res) => {
   }
 });
 
-// Legacy chat endpoint → redirect to the tool-aware one
-app.post('/api/chat/message', ensureAuthenticatedApi, (req, res) => {
-  res.redirect(307, '/kai-chat'); // 307 preserves method & body
-});
+// Tool-aware chat endpoint (no redirect; plays nice with chat.js)
+app.post('/api/chat/message', ensureAuthenticatedApi, async (req, res) => {
+  try {
+    const msg = (req.body?.message ?? '').toString().trim();
+    if (!msg) {
+      return res.status(400).json({ error: 'message (string) is required' });
+    }
 
+    // 1) Resolve user and set tool context so KAI tools know owner + DB pool
+    const ownerId = await resolveOwnerId(req, pool);
+    setToolContext({ ownerId, pool });
+
+    // 2) Thread management (per session)
+    const threadId = await getOrCreateThread(req);
+
+    // 3) Accept either `userContext` (preferred) or legacy `context` from chat.js
+    const userContext = req.body.userContext || req.body.context || {
+      user_email: req.user?.email || null,
+      user_name:  req.user?.firstname || req.user?.name || null,
+    };
+
+    // 4) Add user message (with context for KAI)
+    await createDashboardMessage(threadId, msg, userContext);
+
+    // 5) Run Assistants API with your tools
+    await createAndPollRun(threadId, DASHBOARD_TOOLS);
+
+    // 6) Get latest assistant reply
+    const msgList = await listMessages(threadId);
+    const assistantMsgs = (msgList?.data || [])
+      .filter(m => m.role === 'assistant')
+      .sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+    const latest = assistantMsgs[0];
+
+    const reply =
+      (latest?.content || [])
+        .map(c => c?.text?.value)
+        .filter(Boolean)
+        .join('\n')
+        .trim() || '(No reply)';
+
+    // IMPORTANT: keep the legacy shape your chat.js expects
+    return res.json({ reply });
+  } catch (err) {
+    console.error('Error in /api/chat/message:', err);
+    return res.status(500).json({ error: 'Something went wrong.' });
+  }
+});
 // On-demand function-call endpoint
 app.post("/chat", async (req, res) => {
   try {
