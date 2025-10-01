@@ -26,11 +26,11 @@ import { FUNCTIONS } from "./openaiFunctions.js";
 //import { sendDailyKindnessPrompts } from "./kindnessEmailer.js";
 import { makeDashboardController } from "./Backend/dashboardController.js";
 import { verify as neoVerify, run as neoRun, close as neoClose } from './Backend/db/neo4j.js';
-// after: dotenv.config();
+import { deliverQueuedNudges } from './kindnessEmailer.js';
 const { fetchUserEmails, fetchKindnessPrompts, fetchEmailSubject } = await import("./fetchData.js");
 const { sendDailyKindnessPrompts } = await import("./kindnessEmailer.js");
 // near your other top-level dynamic imports (keep your style)
-const { sendNudgeEmail } = await import("./kindnessEmailer.js");
+//const { sendNudgeEmail } = await import("./kindnessEmailer.js");
 neoVerify()
   .then(() => console.log('Neo4j connected ✅'))
   .catch(err => console.error('Neo4j connect failed (non-fatal):', err.message));
@@ -633,6 +633,16 @@ function ensureAuthenticatedApi(req, res, next) {
   if (req.isAuthenticated && req.isAuthenticated()) return next();
   return res.status(401).json({ error: "unauthorized" });
 }
+function ensureAdmin(req, res, next) {
+  const list = (process.env.ADMIN_EMAILS || '')
+    .split(',')
+    .map(s => s.trim().toLowerCase())
+    .filter(Boolean);
+
+  const userEmail = (req.user?.email || '').toLowerCase();
+  if (list.includes(userEmail)) return next();
+  return res.status(403).json({ error: 'forbidden' });
+}
 async function resolveOwnerId(req, pool) {
   // Prefer the authenticated id if present
   if (req.user?.id) return String(req.user.id);
@@ -1028,66 +1038,38 @@ app.post('/kai-chat', ensureAuthenticatedApi, async (req, res) => {
     return res.status(500).json({ ok: false, error: e.message });
   }
 });
-// this sets up KAI to send nudges to users
-async function deliverQueuedNudges(pool) {
-  const { rows } = await pool.query(`
-    SELECT id, owner_user_id, friend_id, channel, to_address, subject, body_text, body_html, attempts
-      FROM nudges_outbox
-     WHERE status='queued' AND send_after <= NOW()
-     ORDER BY id
-     LIMIT 50
-  `);
-  for (const n of rows) {
+// Admin: deliver any queued nudges now (safe for prod)
+app.post('/admin/nudges/deliver-now',
+  ensureAuthenticatedApi,
+  ensureAdmin,
+  async (req, res) => {
     try {
-      if (n.channel === 'email') {
-        if (!n.to_address) throw new Error('missing to_address');
-        await sendNudgeEmail({
-          to: n.to_address,
-          subject: n.subject || 'A quick nudge ✉️',
-          text: n.body_text,
-          html: n.body_html
-        });
-      } else if (n.channel === 'sms') {
-        // TODO: plug Twilio later
-        throw new Error('sms channel not implemented yet');
-      }
-      await pool.query(
-        `UPDATE nudges_outbox
-            SET status='sent', attempts=attempts+1, updated_at=NOW(), last_error=NULL
-          WHERE id=$1`,
-        [n.id]
-      );
+      const { max = 50 } = req.body || {};
+      const result = await deliverQueuedNudges(pool, { max: Number(max) });
+      return res.json({ ok: true, ...result });
     } catch (e) {
-      const attempts = n.attempts + 1;
-      await pool.query(
-        `UPDATE nudges_outbox
-            SET attempts=$2,
-                status = CASE WHEN $2 >= 3 THEN 'failed' ELSE 'queued' END,
-                last_error=$3,
-                updated_at=NOW()
-          WHERE id=$1`,
-        [n.id, attempts, e.message]
-      );
+      console.error('deliver-now error:', e);
+      return res.status(500).json({ ok: false, error: e.message });
     }
   }
+);
+// Deliver queued nudges every 5 minutes in production
+if (process.env.NODE_ENV === 'production') {
+  cron.schedule(
+    '*/5 * * * *',
+    async () => {
+      try {
+        const result = await deliverQueuedNudges(pool, { max: 100 });
+        if (result?.sent) {
+          console.log(`[nudges] sent=${result.sent} failed=${result.failed}`);
+        }
+      } catch (e) {
+        console.error('[nudges] cron failed:', e);
+      }
+    },
+    { timezone: 'America/Vancouver' }
+  );
 }
-// Every 2 minutes (tune as you like)
-cron.schedule('*/2 * * * *', async () => {
-  try {
-    await deliverQueuedNudges(pool);
-  } catch (e) {
-    console.error('deliverQueuedNudges error:', e);
-  }
-}, { timezone: 'America/Vancouver' });
-// Manual admin trigger (handy for immediate tests)
-app.post('/admin/nudges/deliver', ensureAuthenticatedApi, ensureAdmin, async (_req, res) => {
-  try {
-    await deliverQueuedNudges(pool);
-    res.json({ ok: true });
-  } catch (e) {
-    res.status(500).json({ ok:false, error: e.message });
-  }
-});
 // Cron: run every day at KINDNESS_SEND_TIME (HH:MM, Vancouver)
 const [hour, minute] = process.env.KINDNESS_SEND_TIME.split(":");
 cron.schedule(
@@ -1116,16 +1098,6 @@ cron.schedule(
 // DEV UTIL: backfill Neo4j from existing Postgres friends
 // Auth: requires login (uses ensureAuthenticatedApi). Safe to keep dev-only.
 // ─────────────────────────────────────────────────────────────────────────────
-const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || 'michael.wozney@getkindr.com')
-  .split(',')
-  .map(s => s.trim().toLowerCase());
-
-function ensureAdmin(req, res, next) {
-  const authed = req.isAuthenticated && req.isAuthenticated();
-  const email = (req.user?.email || '').toLowerCase();
-  if (authed && ADMIN_EMAILS.includes(email)) return next();
-  return res.status(403).json({ error: 'forbidden' });
-}
 
 if (process.env.NODE_ENV !== 'production') {
   app.post('/dev/graph/backfill', ensureAuthenticatedApi, async (req, res) => {

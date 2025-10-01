@@ -28,12 +28,7 @@ export async function sendDailyKindnessPrompts({
     }
   });
 
-  const templatePath = path.join(
-    __dirname,
-    "..",
-    "views",
-    "email.ejs"
-  );
+     const templatePath = path.resolve(process.cwd(), 'views', 'email.ejs');  // const templatePath = path.join( __dirname,  "..", "views", "email.ejs");
 
   await Promise.all(
     user_emails.map(async (to, i) => {
@@ -99,3 +94,75 @@ export async function sendNudgeEmail({ to, subject, text, html, bcc = 'kai@getki
   return { messageId: info.messageId };
 }
 
+// Core delivery worker for nudges_outbox
+export async function deliverQueuedNudges(pool, { max = 100 } = {}) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Lock a batch of due email nudges for sending
+    const { rows } = await client.query(
+      `UPDATE nudges_outbox
+          SET status = 'processing',
+              updated_at = NOW()
+        WHERE id IN (
+          SELECT id
+            FROM nudges_outbox
+           WHERE status = 'queued'
+             AND channel = 'email'
+             AND send_after <= NOW()
+           ORDER BY send_after ASC, id ASC
+           FOR UPDATE SKIP LOCKED
+           LIMIT $1
+        )
+        RETURNING id, to_address, subject, body_text, body_html, attempts`,
+      [max]
+    );
+
+    let sent = 0, failed = 0;
+    const errors = [];
+
+    for (const row of rows) {
+      try {
+        await sendNudgeEmail({
+          to: row.to_address,
+          subject: row.subject || 'A quick nudge ✉️',
+          text: row.body_text || undefined,
+          html: row.body_html || undefined
+        });
+
+        await client.query(
+          `UPDATE nudges_outbox
+              SET status='sent',
+                  attempts = attempts + 1,
+                  last_error = NULL,
+                  updated_at = NOW()
+            WHERE id = $1`,
+          [row.id]
+        );
+        sent++;
+      } catch (e) {
+        // Retry up to 5 times, then mark failed
+        await client.query(
+          `UPDATE nudges_outbox
+              SET attempts = attempts + 1,
+                  status = CASE WHEN attempts + 1 >= 5 THEN 'failed' ELSE 'queued' END,
+                  last_error = $2,
+                  updated_at = NOW()
+            WHERE id = $1`,
+          [row.id, e.message || String(e)]
+        );
+        failed++;
+        errors.push({ id: row.id, error: e.message || String(e) });
+      }
+    }
+
+    await client.query('COMMIT');
+    return { picked: rows.length, sent, failed, errors };
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+}
