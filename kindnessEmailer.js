@@ -56,3 +56,46 @@ export async function sendDailyKindnessPrompts({
     `[${new Date().toISOString()}] Sent ${user_emails.length} kindness emails`
   );
 }
+// --- Nudge sender (email) ---
+let _nudgesTransporter = null;
+function getNudgesTransport() {
+  if (_nudgesTransporter) return _nudgesTransporter;
+
+  const url = process.env.SMTP_URL;
+  if (url) {
+    _nudgesTransporter = nodemailer.createTransport(url);
+  } else {
+    const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD } = process.env;
+    if (!SMTP_HOST || !SMTP_PORT || !SMTP_USER || !SMTP_PASSWORD) {
+      throw new Error('SMTP_* env vars missing (SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD)');
+    }
+    _nudgesTransporter = nodemailer.createTransport({
+      host: SMTP_HOST,
+      port: Number(SMTP_PORT),
+      secure: false,
+      auth: { user: SMTP_USER, pass: SMTP_PASSWORD }
+    });
+  }
+  return _nudgesTransporter;
+}
+/**
+ * sendNudgeEmail: minimal one-off sender.
+ * Default BCC -> kai@getkindr.com. Pass bcc=null to disable.
+ */
+export async function sendNudgeEmail({ to, subject, text, html, bcc = 'kai@getkindr.com' }) {
+  const t = getNudgesTransport();
+  const from = process.env.MAIL_FROM || `Kinder <${process.env.SMTP_USER}>`;
+
+  const mail = {
+    from,
+    to,
+    subject: subject || 'A quick nudge ✉️',
+    text: text || undefined,
+    html: html || undefined
+  };
+  if (bcc) mail.bcc = bcc;
+
+  const info = await t.sendMail(mail);
+  return { messageId: info.messageId };
+}
+

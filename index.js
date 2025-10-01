@@ -29,7 +29,8 @@ import { verify as neoVerify, run as neoRun, close as neoClose } from './Backend
 // after: dotenv.config();
 const { fetchUserEmails, fetchKindnessPrompts, fetchEmailSubject } = await import("./fetchData.js");
 const { sendDailyKindnessPrompts } = await import("./kindnessEmailer.js");
-
+// near your other top-level dynamic imports (keep your style)
+const { sendNudgeEmail } = await import("./kindnessEmailer.js");
 neoVerify()
   .then(() => console.log('Neo4j connected ✅'))
   .catch(err => console.error('Neo4j connect failed (non-fatal):', err.message));
@@ -980,7 +981,6 @@ app.post("/chat", async (req, res) => {
     });
   }
 });
-
 // Tool-aware Assistants route (uses DASHBOARD_TOOLS and sets tool context)
 app.post('/kai-chat', ensureAuthenticatedApi, async (req, res) => {
   try {
@@ -988,30 +988,24 @@ app.post('/kai-chat', ensureAuthenticatedApi, async (req, res) => {
     if (typeof message !== 'string' || !message.trim()) {
       return res.status(400).json({ error: 'message (string) is required' });
     }
-
     // 1) Resolve who this request is for (tools use this)
     const ownerId = await resolveOwnerId(req, pool);
-
     // 2) Make ownerId and pool available to tools (graph + DB tools)
     setToolContext({ ownerId, pool });
-
     // 3) Thread management (persist per session)
     if (!req.session.threadId) {
       const thread = await createThread();
       req.session.threadId = thread.id;
     }
     const threadId = req.session.threadId;
-
     // 4) Add message; include optional user context for KAI to read
     const contextForKai = userContext || {
       user_email: req.user?.email || null,
       user_name:  req.user?.firstname || req.user?.name || null
     };
     await createDashboardMessage(threadId, message, contextForKai);
-
     // 5) Run the assistant WITH tools (Assistants API v2)
     const run = await createAndPollRun(threadId, DASHBOARD_TOOLS);
-
     // 6) Fetch latest assistant reply
     const msgList = await listMessages(threadId);
     const assistantMsgs = (msgList?.data || [])
@@ -1023,7 +1017,6 @@ app.post('/kai-chat', ensureAuthenticatedApi, async (req, res) => {
       .map(c => c?.text?.value)
       .filter(Boolean);
     const reply = textParts.join('\n').trim() || '(No reply)';
-
     return res.json({
       ok: true,
       thread_id: threadId,
@@ -1033,6 +1026,66 @@ app.post('/kai-chat', ensureAuthenticatedApi, async (req, res) => {
   } catch (e) {
     console.error('POST /kai-chat error:', e);
     return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+// this sets up KAI to send nudges to users
+async function deliverQueuedNudges(pool) {
+  const { rows } = await pool.query(`
+    SELECT id, owner_user_id, friend_id, channel, to_address, subject, body_text, body_html, attempts
+      FROM nudges_outbox
+     WHERE status='queued' AND send_after <= NOW()
+     ORDER BY id
+     LIMIT 50
+  `);
+  for (const n of rows) {
+    try {
+      if (n.channel === 'email') {
+        if (!n.to_address) throw new Error('missing to_address');
+        await sendNudgeEmail({
+          to: n.to_address,
+          subject: n.subject || 'A quick nudge ✉️',
+          text: n.body_text,
+          html: n.body_html
+        });
+      } else if (n.channel === 'sms') {
+        // TODO: plug Twilio later
+        throw new Error('sms channel not implemented yet');
+      }
+      await pool.query(
+        `UPDATE nudges_outbox
+            SET status='sent', attempts=attempts+1, updated_at=NOW(), last_error=NULL
+          WHERE id=$1`,
+        [n.id]
+      );
+    } catch (e) {
+      const attempts = n.attempts + 1;
+      await pool.query(
+        `UPDATE nudges_outbox
+            SET attempts=$2,
+                status = CASE WHEN $2 >= 3 THEN 'failed' ELSE 'queued' END,
+                last_error=$3,
+                updated_at=NOW()
+          WHERE id=$1`,
+        [n.id, attempts, e.message]
+      );
+    }
+  }
+}
+// Every 2 minutes (tune as you like)
+cron.schedule('*/2 * * * *', async () => {
+  try {
+    await deliverQueuedNudges(pool);
+  } catch (e) {
+    console.error('deliverQueuedNudges error:', e);
+  }
+}, { timezone: 'America/Vancouver' });
+// Manual admin trigger (handy for immediate tests)
+app.post('/admin/nudges/deliver', ensureAuthenticatedApi, ensureAdmin, async (_req, res) => {
+  try {
+    await deliverQueuedNudges(pool);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ ok:false, error: e.message });
   }
 });
 // Cron: run every day at KINDNESS_SEND_TIME (HH:MM, Vancouver)
