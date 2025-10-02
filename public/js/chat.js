@@ -6,6 +6,44 @@ document.addEventListener('DOMContentLoaded', () => {
   const typingTpl = document.getElementById('typingIndicatorTemplate')?.content;
   const threadInput = document.getElementById('threadId');
 
+  // ---- Keyboard / viewport resize fix (mobile safe) ----
+(function installKeyboardResizeFix() {
+  const root = document.documentElement;
+
+  // Compute the visible height and expose as a CSS var
+  const updateAppHeight = () => {
+    const h = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
+    root.style.setProperty('--app-height', `${Math.round(h)}px`);
+
+    // Optional: keep chat scrolled to bottom when keyboard toggles
+    const chatBody = document.getElementById('chatBody');
+    if (chatBody) {
+      // If content grows/shrinks due to keyboard, stay pinned to latest message
+      chatBody.scrollTop = chatBody.scrollHeight;
+    }
+  };
+
+  // Initial compute
+  updateAppHeight();
+
+  // Recompute on window resizes & orientation changes
+  window.addEventListener('resize', updateAppHeight, { passive: true });
+  window.addEventListener('orientationchange', () => {
+    // iOS needs a tiny delay after rotation for correct numbers
+    setTimeout(updateAppHeight, 250);
+  }, { passive: true });
+
+  // VisualViewport (best signal for keyboard show/hide)
+  if (window.visualViewport) {
+    const vv = window.visualViewport;
+    vv.addEventListener('resize', updateAppHeight, { passive: true });
+    vv.addEventListener('scroll', updateAppHeight, { passive: true });
+  }
+
+  // iOS quirk: when inputs blur, give the browser a moment to restore layout
+  window.addEventListener('focusout', () => setTimeout(updateAppHeight, 50), { passive: true });
+})();
+
   // Send button
   sendBtn.addEventListener('click', async () => {
     // build UI context

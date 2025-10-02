@@ -471,3 +471,21 @@ box-shadow: inset 0px 0px 0px 1px transparent;
     width: auto;   /* preserve aspect ratio */
   }
 }
+/* Base: dynamic "100% of what is actually visible" */
+:root { --app-height: 100vh; }
+
+html, body {
+  height: var(--app-height);
+  min-height: var(--app-height);
+}
+
+/* If you have a page wrapper, make it use the dynamic height too */
+#app, .page, .chat-page {
+  min-height: var(--app-height);
+}
+
+/* If your message list needs a max height, tie it to --app-height */
+#chatBody {
+  max-height: calc(var(--app-height) - 120px); /* adjust 120px to your header/footer total */
+  overflow: auto;
+}

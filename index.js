@@ -61,6 +61,7 @@ import {
   getOrCreateThread,
   createDashboardMessage
 } from './Backend/assistant.js';
+
 // 3) Compute __dirname for ES modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
