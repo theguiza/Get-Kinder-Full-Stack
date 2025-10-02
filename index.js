@@ -944,53 +944,79 @@ app.get('/api/chat/init', async (req, res) => {
 });
 
 // Tool-aware chat endpoint (no redirect; plays nice with chat.js)
-app.post('/api/chat/message', ensureAuthenticatedApi, async (req, res) => {
+// Unified chat endpoint: tools when authed, plain model otherwise
+// Public chat endpoint: everyone can chat. Tools only for logged-in users.
+app.post('/api/chat/message', async (req, res) => {
   try {
-    const msg = (req.body?.message ?? '').toString().trim();
-    if (!msg) {
-      return res.status(400).json({ error: 'message (string) is required' });
-    }
+    const { message, userContext, context } = req.body || {};
+    const msg = (message ?? '').toString().trim();
+    if (!msg) return res.status(400).json({ error: 'message (string) is required' });
 
-    // 1) Resolve user and set tool context so KAI tools know owner + DB pool
-    const ownerId = await resolveOwnerId(req, pool);
-    setToolContext({ ownerId, pool });
+    const isAuthed = !!(req.isAuthenticated && req.isAuthenticated());
 
-    // 2) Thread management (per session)
-    const threadId = await getOrCreateThread(req);
+    if (isAuthed) {
+      // ==== TOOL-AWARE PATH (logged-in users only) ====
+      // Make tool handlers owner-aware (DB, email, graph, etc.)
+      const ownerId = await resolveOwnerId(req, pool);       // throws if no req.user.email
+      setToolContext({ ownerId, pool });                     // assistants tool context
+      const threadId = await getOrCreateThread(req);         // per-session thread
 
-    // 3) Accept either `userContext` (preferred) or legacy `context` from chat.js
-    const userContext = req.body.userContext || req.body.context || {
-      user_email: req.user?.email || null,
-      user_name:  req.user?.firstname || req.user?.name || null,
-    };
+      const ctx = userContext || context || {
+        user_email: req.user?.email || null,
+        user_name:  req.user?.firstname || req.user?.name || null
+      };
 
-    // 4) Add user message (with context for KAI)
-    await createDashboardMessage(threadId, msg, userContext);
+      // Add user msg + run Assistants with your dashboard tools
+      await createDashboardMessage(threadId, msg, ctx);      // adds message to thread
+      await createAndPollRun(threadId, DASHBOARD_TOOLS);     // run with tools
 
-    // 5) Run Assistants API with your tools
-    await createAndPollRun(threadId, DASHBOARD_TOOLS);
+      // Return latest assistant reply from thread
+      const msgList = await listMessages(threadId);
+      const assistantMsgs = (msgList?.data || [])
+        .filter(m => m.role === 'assistant')
+        .sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+      const latest = assistantMsgs[0];
 
-    // 6) Get latest assistant reply
-    const msgList = await listMessages(threadId);
-    const assistantMsgs = (msgList?.data || [])
-      .filter(m => m.role === 'assistant')
-      .sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
-    const latest = assistantMsgs[0];
-
-    const reply =
-      (latest?.content || [])
+      const reply = (latest?.content || [])
         .map(c => c?.text?.value)
         .filter(Boolean)
         .join('\n')
         .trim() || '(No reply)';
 
-    // IMPORTANT: keep the legacy shape your chat.js expects
+      return res.json({ reply });                            // chat.js expects { reply }
+    }
+
+    // ==== CHAT-ONLY PATH (unauthenticated users) ====
+    // No tools. KAI must tell users to sign in if they ask for a nudge/email/DB action.
+    const completion = await openai.chat.completions.create({
+      model: process.env.OPENAI_CHAT_MODEL || "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content:
+`You are KAI, an encouraging, positive, fun, outcome-oriented mattering coach helping people to connect in real life so they feel less lonely.
+CAPABILITIES:
+- You can chat and coach anyone. Help people reduce loneliness by improving real-life conversation and friendship-building skills. Emphasize everyday behaviors that foster kindness, liking, closeness, responsiveness, and follow-through—never diagnosis or therapy.
+- You CANNOT send nudges, emails, or perform account-scoped actions unless the user is signed in.
+POLICY:
+- If the user asks for a nudge, email, SMS, reminder, or any action that requires tools, reply FIRST with:
+  "To send nudges or emails, please sign in." 
+  Then briefly continue with a helpful alternative (e.g., a draft message they can copy).`
+        },
+        { role: "user", content: msg }
+      ]
+      // IMPORTANT: do NOT pass `functions` here (avoids the previous `strict` error).
+    });
+
+    const m = completion.choices[0].message;
+    const reply = (m?.content || '').toString().trim() || "I’m here to help!";
     return res.json({ reply });
   } catch (err) {
     console.error('Error in /api/chat/message:', err);
     return res.status(500).json({ error: 'Something went wrong.' });
   }
 });
+
 // On-demand function-call endpoint
 app.post("/chat", async (req, res) => {
   try {

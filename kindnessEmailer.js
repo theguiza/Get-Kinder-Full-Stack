@@ -1,11 +1,12 @@
 import nodemailer from "nodemailer";
 import ejs from "ejs";
-import path from "path";
+import path, { dirname } from "path";
+import { fileURLToPath } from "url";
 import { getUserByEmail } from "./fetchData.js"; 
 
 // ES-module __dirname shim:
-//const __filename = fileURLToPath(import.meta.url); - causing a load failure
-// const __dirname = dirname(__filename);
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 export async function sendDailyKindnessPrompts({
   user_emails,
@@ -28,7 +29,7 @@ export async function sendDailyKindnessPrompts({
     }
   });
 
-     const templatePath = path.resolve(process.cwd(), 'views', 'email.ejs');  // const templatePath = path.join( __dirname,  "..", "views", "email.ejs");
+    const templatePath = path.join( __dirname,  "..", "views", "email.ejs"); // const templatePath = path.resolve(process.cwd(), 'views', 'email.ejs');  
 
   await Promise.all(
     user_emails.map(async (to, i) => {
