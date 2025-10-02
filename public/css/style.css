@@ -489,9 +489,26 @@ html, body, #app, .page, .chat-page, .full-height {
   }
 }
 
-/* Example: keep your chat list inside the visible space */
+/* Chat message list: fill remaining space and scroll; neutralize inline fixed height */
 #chatBody {
-  max-height: calc(var(--app-height) - 120px); /* adjust 120px to your header+composer total */
+  height: auto !important;                      /* overrides style="height: 400px" */
+  max-height: calc(var(--app-height) - 120px);  /* keep your existing offset */
+  flex: 1 1 auto;                               /* allow grow/shrink in flex column */
+  min-height: 0;                                /* CRITICAL: let it shrink */
   overflow: auto;
+}
+/* Make the chat card a vertical flex container so #chatBody can grow/shrink */
+#chat-card-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  max-height: var(--app-height);
+}
+
+/* Keep the input/footer pinned; plays nice with mobile keyboards */
+.card-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
 }
 
