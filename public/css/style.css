@@ -471,21 +471,27 @@ box-shadow: inset 0px 0px 0px 1px transparent;
     width: auto;   /* preserve aspect ratio */
   }
 }
-/* Base: dynamic "100% of what is actually visible" */
+/* FINAL: dynamic "100% of what is actually visible" */
 :root { --app-height: 100vh; }
 
-html, body {
+/* Full-height shells use the dynamic height var */
+html, body, #app, .page, .chat-page, .full-height {
   height: var(--app-height);
   min-height: var(--app-height);
 }
 
-/* If you have a page wrapper, make it use the dynamic height too */
-#app, .page, .chat-page {
-  min-height: var(--app-height);
+/* Progressive enhancement: when dvh exists, tie the var to it */
+@supports (height: 100dvh) {
+  :root { --app-height: 100dvh; }
+  html, body, #app, .page, .chat-page, .full-height {
+    height: var(--app-height);
+    min-height: var(--app-height);
+  }
 }
 
-/* If your message list needs a max height, tie it to --app-height */
+/* Example: keep your chat list inside the visible space */
 #chatBody {
-  max-height: calc(var(--app-height) - 120px); /* adjust 120px to your header/footer total */
+  max-height: calc(var(--app-height) - 120px); /* adjust 120px to your header+composer total */
   overflow: auto;
 }
+
