@@ -1,32 +1,22 @@
-// viewport-fix.js
+// /public/js/viewport-fix.js
 (() => {
   const root = document.documentElement;
 
-  // Compute the *visible* viewport height (visual viewport if available).
-  function updateVisibleHeight() {
+  function update() {
     const h = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
-    root.style.setProperty('--vvh', `${Math.round(h)}px`);
-
-    // If you have a scrollable chat list, keep it pinned after height changes.
-    const chatBody = document.getElementById('chatBody');
-    if (chatBody) chatBody.scrollTop = chatBody.scrollHeight;
+    root.style.setProperty('--app-height', `${Math.round(h)}px`);
+    const cb = document.getElementById('chatBody');
+    if (cb) cb.scrollTop = cb.scrollHeight; // keep scrolled after height changes
   }
 
-  const rafUpdate = () => requestAnimationFrame(updateVisibleHeight);
+  const raf = () => requestAnimationFrame(update);
 
-  // Initial read
-  updateVisibleHeight();
-
-  // VisualViewport is the authoritative signal for keyboard show/hide.
+  update(); // initial
   if (window.visualViewport) {
-    visualViewport.addEventListener('resize', rafUpdate, { passive: true });
-    visualViewport.addEventListener('scroll', rafUpdate, { passive: true }); // handles URL bar shifts too
+    visualViewport.addEventListener('resize', raf, { passive: true });
+    visualViewport.addEventListener('scroll',  raf, { passive: true }); // URL bar & keyboard shifts
   }
-
-  // Fallbacks + rotations
-  window.addEventListener('resize', rafUpdate, { passive: true });
-  window.addEventListener('orientationchange', () => setTimeout(updateVisibleHeight, 250), { passive: true });
-
-  // iOS quirk: when inputs blur and the keyboard is dismissing, recalc once more.
-  window.addEventListener('focusout', () => setTimeout(updateVisibleHeight, 60), { passive: true });
+  window.addEventListener('resize', raf, { passive: true });
+  window.addEventListener('orientationchange', () => setTimeout(update, 250), { passive: true });
+  window.addEventListener('focusout', () => setTimeout(update, 60), { passive: true }); // iOS keyboard dismiss quirk
 })();

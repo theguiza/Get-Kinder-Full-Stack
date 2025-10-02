@@ -4,7 +4,6 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import dotenv from "dotenv";
 dotenv.config();
-// 2) Import dependencies via ES module syntax
 import express from "express";
 import path from "path";
 import { dirname } from "path";
@@ -22,15 +21,12 @@ import connectPgSimple from "connect-pg-simple";
 import multer from "multer";
 import cron from "node-cron";
 import { FUNCTIONS } from "./openaiFunctions.js";
-//import { fetchUserEmails, fetchKindnessPrompts, fetchEmailSubject } from "./fetchData.js";
-//import { sendDailyKindnessPrompts } from "./kindnessEmailer.js";
 import { makeDashboardController } from "./Backend/dashboardController.js";
 import { verify as neoVerify, run as neoRun, close as neoClose } from './Backend/db/neo4j.js';
 import { deliverQueuedNudges } from './kindnessEmailer.js';
 const { fetchUserEmails, fetchKindnessPrompts, fetchEmailSubject } = await import("./fetchData.js");
 const { sendDailyKindnessPrompts } = await import("./kindnessEmailer.js");
-// near your other top-level dynamic imports (keep your style)
-//const { sendNudgeEmail } = await import("./kindnessEmailer.js");
+
 neoVerify()
   .then(() => console.log('Neo4j connected ✅'))
   .catch(err => console.error('Neo4j connect failed (non-fatal):', err.message));
@@ -48,6 +44,19 @@ const uploadAvatar = multer({
     cb(null, true);
   },
 });
+// Map legacy FUNCTIONS → Chat Completions tools
+const TOOLS = Array.isArray(FUNCTIONS)
+  ? FUNCTIONS.map(fn => ({
+      type: "function",
+      function: {
+        name: fn.name,
+        description: fn.description,
+        parameters: fn.parameters
+      },
+      ...(fn.strict !== undefined ? { strict: !!fn.strict } : {})
+    }))
+  : [];
+
 // KAI (Assistants API) plumbing
 import {
   // chat endpoints need these
@@ -943,10 +952,7 @@ app.get('/api/chat/init', async (req, res) => {
     res.status(500).json({ error: "Unable to initialize chat." });
   }
 });
-
-// Tool-aware chat endpoint (no redirect; plays nice with chat.js)
-// Unified chat endpoint: tools when authed, plain model otherwise
-// Public chat endpoint: everyone can chat. Tools only for logged-in users.
+// Unified public chat endpoint: tools when authed, plain model otherwise
 app.post('/api/chat/message', async (req, res) => {
   try {
     const { message, userContext, context } = req.body || {};
@@ -957,21 +963,19 @@ app.post('/api/chat/message', async (req, res) => {
 
     if (isAuthed) {
       // ==== TOOL-AWARE PATH (logged-in users only) ====
-      // Make tool handlers owner-aware (DB, email, graph, etc.)
-      const ownerId = await resolveOwnerId(req, pool);       // throws if no req.user.email
-      setToolContext({ ownerId, pool });                     // assistants tool context
-      const threadId = await getOrCreateThread(req);         // per-session thread
+      const ownerId = await resolveOwnerId(req, pool);
+      setToolContext({ ownerId, pool });
+
+      const threadId = await getOrCreateThread(req);
 
       const ctx = userContext || context || {
         user_email: req.user?.email || null,
         user_name:  req.user?.firstname || req.user?.name || null
       };
 
-      // Add user msg + run Assistants with your dashboard tools
-      await createDashboardMessage(threadId, msg, ctx);      // adds message to thread
-      await createAndPollRun(threadId, DASHBOARD_TOOLS);     // run with tools
+      await createDashboardMessage(threadId, msg, ctx);
+      await createAndPollRun(threadId, DASHBOARD_TOOLS);
 
-      // Return latest assistant reply from thread
       const msgList = await listMessages(threadId);
       const assistantMsgs = (msgList?.data || [])
         .filter(m => m.role === 'assistant')
@@ -984,11 +988,10 @@ app.post('/api/chat/message', async (req, res) => {
         .join('\n')
         .trim() || '(No reply)';
 
-      return res.json({ reply });                            // chat.js expects { reply }
+      return res.json({ reply }); // chat.js expects { reply }
     }
 
-    // ==== CHAT-ONLY PATH (unauthenticated users) ====
-    // No tools. KAI must tell users to sign in if they ask for a nudge/email/DB action.
+    // ==== CHAT-ONLY PATH (guests) ====
     const completion = await openai.chat.completions.create({
       model: process.env.OPENAI_CHAT_MODEL || "gpt-4o-mini",
       messages: [
@@ -997,16 +1000,16 @@ app.post('/api/chat/message', async (req, res) => {
           content:
 `You are KAI, an encouraging, positive, fun, outcome-oriented mattering coach helping people to connect in real life so they feel less lonely.
 CAPABILITIES:
-- You can chat and coach anyone. Help people reduce loneliness by improving real-life conversation and friendship-building skills. Emphasize everyday behaviors that foster kindness, liking, closeness, responsiveness, and follow-through—never diagnosis or therapy.
+- You can chat and coach anyone.
 - You CANNOT send nudges, emails, or perform account-scoped actions unless the user is signed in.
 POLICY:
 - If the user asks for a nudge, email, SMS, reminder, or any action that requires tools, reply FIRST with:
-  "To send nudges or emails, please sign in." 
+  "To send nudges or emails, please sign in."
   Then briefly continue with a helpful alternative (e.g., a draft message they can copy).`
         },
         { role: "user", content: msg }
       ]
-      // IMPORTANT: do NOT pass `functions` here (avoids the previous `strict` error).
+      // IMPORTANT: do NOT pass `functions` here (prevents the earlier `strict` error).
     });
 
     const m = completion.choices[0].message;
@@ -1022,32 +1025,31 @@ POLICY:
 app.post("/chat", async (req, res) => {
   try {
     const { message } = req.body;
-    const completion = await openai.chat.completions.create({
-      model:       "gpt-4o-mini",
+       const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
       messages: [
         { role: "system", content: "You’re a kindness assistant." },
         { role: "user",   content: message }
       ],
-      functions:      FUNCTIONS,
-      function_call:  "auto"
+      tools:       TOOLS,      // modern function calling
+      tool_choice: "auto"      // let the model decide if/when to call
     });
-
     const msg = completion.choices[0].message;
+    // Tools path: model decided to call one or more functions
+    if (msg.finish_reason === "tool_calls" && Array.isArray(msg.tool_calls) && msg.tool_calls.length) {
+      for (const call of msg.tool_calls) {
+        const name   = call?.function?.name;
+        const argStr = call?.function?.arguments || "{}";
+        let args = {};
+        try { args = JSON.parse(argStr); } catch {} // tolerate minor JSON issues
 
-    // NEW: check for tool_calls instead of deprecated function_call
-    if (msg.finish_reason === "tool_calls" && Array.isArray(msg.tool_calls)) {
-      // grab the first tool call
-      const call = msg.tool_calls[0];
-      if (call.function.name === "send_daily_kindness_prompts") {
-        const args = JSON.parse(call.function.arguments);
-        await sendDailyKindnessPrompts(args);
-        return res.json({
-          role:    "assistant",
-          content: "✅ Prompts sent!"
-        });
+        if (name === "send_daily_kindness_prompts") {
+          await sendDailyKindnessPrompts(args);
+          return res.json({ role: "assistant", content: "✅ Prompts sent!" });
+        }
+        // add more handlers here if you later expose more tools via TOOLS
       }
     }
-
     // fallback to normal chat response
     res.json({
       role:    msg.role,

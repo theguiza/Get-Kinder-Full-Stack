@@ -19,24 +19,22 @@ export async function sendDailyKindnessPrompts({
     throw new Error("user_emails.length must match kindness_prompts.length");
   }
 
-  const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: +process.env.SMTP_PORT,
-    secure: false,
-    auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASSWORD
-    }
-  });
+const port = Number(process.env.SMTP_PORT);
+const secure = port === 465; // SMTPS on 465 needs secure:true; 587 stays false (STARTTLS)
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST,
+  port,
+  secure,
+  auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD }
+});
 
-    const templatePath = path.join( __dirname,  "..", "views", "email.ejs"); // const templatePath = path.resolve(process.cwd(), 'views', 'email.ejs');  
-
+   const templatePath = path.join(__dirname, "views", "email.ejs");
   await Promise.all(
     user_emails.map(async (to, i) => {
       const { firstname = "" } = await getUserByEmail(to);
       const html = await ejs.renderFile(templatePath, {
         prompt: kindness_prompts[i],
-        userName:     firstname
+        user: { firstname }
       });
       await transporter.sendMail({
         from: `"Kindness Bot" <${process.env.SMTP_USER}>`,
