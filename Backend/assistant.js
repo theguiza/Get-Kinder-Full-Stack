@@ -582,10 +582,12 @@ async function tool_queue_nudge({
 
     if (friend_id) {
       // Validate UUID-ish early to avoid Postgres error text crashing the run
+      console.log('[queue_nudge] validating friend_id', friend_id);
       const uuidLike = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(friend_id);
       if (!uuidLike) {
         return { error: `friend_id is not a valid UUID: ${friend_id}` };
       }
+      console.log('[queue_nudge] fetching friend by id…');
       const byId = await pool.query(
         `SELECT id, name, email, phone
            FROM public.friends
@@ -594,9 +596,11 @@ async function tool_queue_nudge({
         [friend_id, ownerId]
       );
       if (byId.rows.length) friendRow = byId.rows[0];
+      console.log('[queue_nudge] friendRow by id =', friendRow);
     }
 
     if (!friendRow && friend_name) {
+      console.log('[queue_nudge] fetching friend by exact name…', friend_name);
       const byName = await pool.query(
         `SELECT id, name, email, phone
            FROM public.friends
@@ -606,6 +610,7 @@ async function tool_queue_nudge({
           LIMIT 2`,
         [ownerId, friend_name]
       );
+      console.log('[queue_nudge] byName count =', byName.rows.length);
       if (byName.rows.length === 0) {
         return { error: `friend_name not found for owner: ${friend_name}` };
       }
@@ -625,6 +630,7 @@ async function tool_queue_nudge({
       if (channel === 'email') to_address = friendRow.email || null;
       if (channel === 'sms')   to_address = friendRow.phone || null;
     }
+    console.log('[queue_nudge] resolved to_address =', to_address);
     if (!to_address) {
       return { error: `no ${channel} destination (provide "to" or add ${channel} to friend)` };
     }
@@ -634,6 +640,7 @@ async function tool_queue_nudge({
 
     // --- 3) Preview-only (no DB write) ---
     if (preview_only) {
+      console.log('[queue_nudge] preview_only -> skipping insert');
       return {
         preview: true,
         friend_id,
@@ -648,6 +655,7 @@ async function tool_queue_nudge({
       console.log('[queue_nudge] ownerId=%s friend_id=%s channel=%s preview_only=%s',
          ownerId, friend_id, channel, preview_only); // for debugging should be removed in production
     // --- 4) Insert into outbox (friend_id is UUID) ---
+    console.log('[queue_nudge] inserting into nudges_outbox…');
     const ins = await pool.query(`
       INSERT INTO nudges_outbox
         (owner_user_id, friend_id, channel, to_address, subject, body_text, body_html, send_after, status, meta)
@@ -665,7 +673,7 @@ async function tool_queue_nudge({
       sendAfterIso,
       friendRow.name
     ]);
-
+    console.log('[queue_nudge] queued id=', ins.rows[0]?.id);
     return {
       queued: true,
       id: ins.rows[0].id,
@@ -674,6 +682,7 @@ async function tool_queue_nudge({
       send_after: ins.rows[0].send_after
     };
   } catch (e) {
+    console.error('[queue_nudge] error:', e);
     return { error: e.message || String(e) };
   }
   const { rows: [inserted] } = await pool.query(
