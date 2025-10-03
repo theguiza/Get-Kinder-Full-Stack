@@ -72,35 +72,44 @@ function getNudgesTransport() {
   }
   return _nudgesTransporter;
 }
- //sendNudgeEmail: minimal one-off sender.
- //Default BCC -> kai@getkinder.com. Pass bcc=null to disable.
+ // --- Nudge sender (email) ---
 export async function sendNudgeEmail({
-  to, subject, text, html,
-  bcc = process.env.BCC_EMAIL || process.env.SMTP_USER || 'kai@getkinder.ai'
+  to,
+  subject,
+  text,
+  html,
+  // default BCC -> env overrideable; falls back to your SMTP user
+  bcc = process.env.BCC_EMAIL || process.env.SMTP_USER || 'kai@getkinder.ai',
+  // new:
+  fromName,
+  replyTo
 }) {
   const t = getNudgesTransport();
-  const from = process.env.MAIL_FROM || `Kinder <${process.env.SMTP_USER}>`;
-
+  // "Michael via Kinder <kai@getkinder.ai>"
+  const from = process.env.MAIL_FROM
+    ? process.env.MAIL_FROM
+    : `${fromName || 'Via Get Kinder'} <${process.env.SMTP_USER}>`;
   const mail = {
     from,
     to,
-    subject: subject || 'A quick nudge ✉️',
+    subject: subject || 'A quick nudge ✉️', // deliverQueuedNudges supplies personalized default
     text: text || undefined,
     html: html || undefined
   };
+  if (replyTo) mail.replyTo = replyTo;
   if (bcc) mail.bcc = bcc;
 
   const info = await t.sendMail(mail);
   return { messageId: info.messageId };
 }
-
 // Core delivery worker for nudges_outbox
+// Core delivery worker for nudges_outbox (emails)
 export async function deliverQueuedNudges(pool, { max = 100 } = {}) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-    // Lock a batch of due email nudges for sending
+    // Lock & mark a batch as processing
     const { rows } = await client.query(
       `UPDATE nudges_outbox
           SET status = 'processing',
@@ -115,7 +124,8 @@ export async function deliverQueuedNudges(pool, { max = 100 } = {}) {
            FOR UPDATE SKIP LOCKED
            LIMIT $1
         )
-        RETURNING id, to_address, subject, body_text, body_html, attempts`,
+        RETURNING id, owner_user_id, friend_id, channel, to_address,
+                  subject, body_text, body_html, attempts`,
       [max]
     );
 
@@ -124,11 +134,33 @@ export async function deliverQueuedNudges(pool, { max = 100 } = {}) {
 
     for (const row of rows) {
       try {
+        // Identify the human sender (the owner who queued this nudge)
+        const { rows: [owner] } = await client.query(
+          `SELECT firstname, email
+             FROM userdata
+            WHERE id = $1
+            LIMIT 1`,
+          [row.owner_user_id]
+        );
+
+        const ownerFirst =
+          (owner?.firstname || owner?.email?.split('@')[0] || 'your friend').trim();
+        const fromName = `${ownerFirst} via Kinder`;
+        const replyTo  = owner?.email || null;
+
+        // ✅ If no subject was queued, use a personal default
+        const subject = (row.subject && row.subject.trim())
+          ? row.subject
+          : `A note from ${ownerFirst}`;
+
         await sendNudgeEmail({
           to: row.to_address,
-          subject: row.subject || 'A quick nudge ✉️',
+          subject,
           text: row.body_text || undefined,
-          html: row.body_html || undefined
+          html: row.body_html || undefined,
+          fromName,
+          replyTo
+          // bcc default is handled inside sendNudgeEmail
         });
 
         await client.query(
@@ -142,7 +174,6 @@ export async function deliverQueuedNudges(pool, { max = 100 } = {}) {
         );
         sent++;
       } catch (e) {
-        // Retry up to 5 times, then mark failed
         await client.query(
           `UPDATE nudges_outbox
               SET attempts = attempts + 1,
@@ -166,3 +197,4 @@ export async function deliverQueuedNudges(pool, { max = 100 } = {}) {
     client.release();
   }
 }
+
