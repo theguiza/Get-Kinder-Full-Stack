@@ -656,23 +656,37 @@ async function tool_queue_nudge({
          ownerId, friend_id, channel, preview_only); // for debugging should be removed in production
     // --- 4) Insert into outbox (friend_id is UUID) ---
     console.log('[queue_nudge] inserting into nudges_outbox…');
-    const ins = await pool.query(`
-      INSERT INTO nudges_outbox
-        (owner_user_id, friend_id, channel, to_address, subject, body_text, body_html, send_after, status, meta)
-      VALUES
-        ($1, $2::uuid, $3, $4, $5, $6, NULL, $7, 'queued',
-         jsonb_build_object('friend_name', $8))
-      RETURNING id, send_after
-    `, [
-      ownerId,
-      friend_id,
-      channel,
-      to_address,
-      safeSubject,
-      message,
-      sendAfterIso,
-      friendRow.name
-    ]);
+// ensure we never pass NULL/undefined as "unknown" text
+const bodyText = (message && String(message).trim()) || 'Just a quick nudge to connect 😊';
+
+// --- 4) Insert into outbox (friend_id is UUID) ---
+const ins = await pool.query(`
+  INSERT INTO nudges_outbox
+    (owner_user_id, friend_id, channel, to_address, subject, body_text, body_html, send_after, status, meta)
+  VALUES
+    (
+      $1::int,
+      $2::uuid,
+      $3::text,
+      $4::text,
+      $5::text,
+      $6::text,
+      NULL,
+      $7::timestamptz,
+      'queued',
+      jsonb_build_object('friend_name', $8::text)
+    )
+  RETURNING id, send_after
+`, [
+  ownerId,         // if your column is integer, ownerId will cast via ::int
+  friend_id,
+  channel,
+  to_address,
+  safeSubject,
+  bodyText,
+  sendAfterIso,    // ISO string → ::timestamptz
+  friendRow.name
+]);
     console.log('[queue_nudge] queued id=', ins.rows[0]?.id);
     return {
       queued: true,
