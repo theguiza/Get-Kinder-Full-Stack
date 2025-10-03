@@ -232,6 +232,7 @@ export default function BestieVibesQuiz(props = {}) {
   const [isAdminMode] = useState(() => (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('admin')))
   const [showConfig, setShowConfig] = useState(false)
   const [candidateName, setCandidateName] = useState('')
+  const [friendEmail, setFriendEmail] = useState('')
   const [answers, setAnswers] = useState({ ...DEFAULT_ANSWERS })
   const [roundIndex, setRoundIndex] = useState(0)
   const [flags, setFlags] = useState({})
@@ -253,6 +254,7 @@ export default function BestieVibesQuiz(props = {}) {
       const draft = JSON.parse(localStorage.getItem('bestie_quiz_draft') || 'null')
       if (draft) {
         setCandidateName(draft.candidateName || '')
+        setFriendEmail(draft.friendEmail || '')
         setAnswers({ ...DEFAULT_ANSWERS, ...(draft.answers || {}) })
         setFlags(draft.flags || {})
         setRoundIndex(draft.roundIndex || 0)
@@ -268,9 +270,9 @@ export default function BestieVibesQuiz(props = {}) {
 
   useEffect(() => {
     try {
-      localStorage.setItem('bestie_quiz_draft', JSON.stringify({ candidateName, answers, flags, roundIndex, pictureData, ts: Date.now() }))
+      localStorage.setItem('bestie_quiz_draft', JSON.stringify({ candidateName, friendEmail, answers, flags, roundIndex, pictureData, ts: Date.now() }))
     } catch {}
-  }, [candidateName, answers, flags, roundIndex, pictureData])
+  }, [candidateName, friendEmail, answers, flags, roundIndex, pictureData])
 
   // Load saved scoreboard on mount
   useEffect(() => {
@@ -332,6 +334,7 @@ export default function BestieVibesQuiz(props = {}) {
     setFlags({})
     setRoundIndex(0)
     setCandidateName('')
+    setFriendEmail('')
   }
 
   const saveCandidate = async () => {
@@ -339,6 +342,7 @@ export default function BestieVibesQuiz(props = {}) {
 
     const payload = {
       name,
+      email: friendEmail.trim() || null,
       archetype_primary: primary?.name,
       archetype_secondary: secondary?.name,
       score,
@@ -424,11 +428,11 @@ export default function BestieVibesQuiz(props = {}) {
       <div className="max-w-4xl mx-auto">
         <header className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-6">
           <div>
-            <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight">Friendship Fit Quiz <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full border border-slate-300 text-xs font-semibold">KAI</span></h1>
-            <p className="text-[#455a7c] mt-1">Take this quiz for each current or potential friend to see who to prioritize. Share results, next moves, challenges, and invites with KAI to plan next steps.</p>
+            <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight">Friendship Fit Quiz </h1>
+            <p className="text-[#455a7c] mt-1">Take this quiz for each current or potential friend to see who to prioritize.</p>
             <ul className="text-[#455a7c] mt-1 list-disc list-inside space-y-1 text-sm">
-              <li>To save the results, you will be asked to sign in if you are not already signed in.</li>
-              <li>All friendship types and a scoreboard of the friends assessed are below.</li>
+              <li>Speak with KAI about your friends to determine next steps and even ask KAI to contact them with plans if you provided their email!</li>
+              <li> A list of your friends and their score are at the bottom of the page for future reference. Refresh info as you have it</li>
             </ul>
           </div>
           <div className="flex items-center gap-3 flex-wrap">
@@ -436,6 +440,13 @@ export default function BestieVibesQuiz(props = {}) {
               value={candidateName}
               onChange={(e) => setCandidateName(e.target.value)}
               placeholder="Potential/Current Friend name"
+              className="px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#455a7c]"
+            />
+            <input
+              type="email"
+              value={friendEmail}
+              onChange={(e) => setFriendEmail(e.target.value)}
+              placeholder="Friend email & KAI can contact them for you"
               className="px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#455a7c]"
             />
 
@@ -512,10 +523,10 @@ export default function BestieVibesQuiz(props = {}) {
         )}
 
         {/* Scoreboard */}
-        <div className="grid md:grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
           {/* Score card */}
-          <div className="p-4 rounded-2xl bg-white shadow-sm border col-span-2 md:col-span-1">
-            <div className="text-sm text-[#455a7c]">Friendship Score</div>
+          <div className="p-4 rounded-2xl bg-white shadow-sm border">
+            <div className="text-lg font-bold text-[#455a7c]">Friendship Score</div>
             <div className="mt-1 flex items-end gap-3">
               <div className="text-5xl font-extrabold">{dealbreakerCount >= 2 ? '🚫' : score}</div>
               <div className="flex-1">
@@ -532,7 +543,7 @@ export default function BestieVibesQuiz(props = {}) {
 
           {/* Evidence card */}
           <div className="p-4 rounded-2xl bg-white shadow-sm border">
-            <div className="text-sm text-[#455a7c]">Evidence</div>
+            <div className="text-lg font-bold text-[#455a7c]">Evidence</div>
             <div className="mt-2 space-y-1 text-sm">
               <div className="flex items-center justify-between"><span>Direct</span><span className="font-semibold">{Math.round(ev.direct * 100)}%</span></div>
               <div className="w-full h-2 rounded-full bg-slate-200 overflow-hidden">
@@ -548,7 +559,7 @@ export default function BestieVibesQuiz(props = {}) {
 
           {/* Archetype card */}
           <div className="p-4 rounded-2xl bg-white shadow-sm border">
-            <div className="text-sm text-[#455a7c]">Friend Type</div>
+            <div className="text-lg font-bold text-[#455a7c]">Friend Type</div>
             <div className="mt-1 text-2xl font-bold">{primary?.emoji} {primary?.name}</div>
             <div className="text-sm text-[#455a7c]">{primary?.desc}</div>
             <div className="text-xs text-[#455a7c] mt-2">Secondary: <span className="font-medium">{secondary?.emoji} {secondary?.name}</span></div>
@@ -556,7 +567,7 @@ export default function BestieVibesQuiz(props = {}) {
 
           {/* Next move */}
           <div className="p-4 rounded-2xl bg-white shadow-sm border">
-            <div className="text-sm text-[#455a7c]">Next move</div>
+            <div className="text-lg font-bold text-[#455a7c]">Next Move</div>
             <div className="mt-1 text-[#455a7c]">{suggestion}</div>
             <div className="text-xs text-[#455a7c] mt-2">Top tests to run:</div>
             <ul className="text-xs text-[#455a7c] list-disc list-inside mt-1 space-y-1">
@@ -564,6 +575,8 @@ export default function BestieVibesQuiz(props = {}) {
             </ul>
           </div>
         </div>
+
+        <h2 className="text-xl md:text-2xl font-bold text-[#455a7c] mb-2">Quiz Starts Here:</h2>
 
         {/* Dealbreaker Bingo */}
         <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 mb-6">
@@ -630,7 +643,7 @@ export default function BestieVibesQuiz(props = {}) {
         {/* Tips & micro-challenges */}
         <div className="grid md:grid-cols-2 gap-4 mb-8">
           <div className="p-4 rounded-2xl bg-white shadow-sm border">
-            <h3 className="font-semibold">Micro‑Challenges 🎯</h3>
+            <h3 className="text-lg font-bold text-[#455a7c]">Micro‑Challenges 🎯</h3>
             <ul className="list-disc list-inside text-[#455a7c] mt-2 space-y-1">
               <li><b>Signal reliability:</b> set a plan in 2 taps; follow up next day with a meme or link.</li>
               <li><b>Safety check:</b> share a medium‑vulnerable story; notice how they handle it.</li>
@@ -638,7 +651,7 @@ export default function BestieVibesQuiz(props = {}) {
             </ul>
           </div>
           <div className="p-4 rounded-2xl bg-white shadow-sm border">
-            <h3 className="font-semibold">Invite Scripts 💬</h3>
+            <h3 className="text-lg font-bold text-[#455a7c]">Invite Scripts 💬</h3>
             <div className="text-[#455a7c] mt-2 space-y-2">
               <p>• “This week: coffee walk & catch‑up? Tue 6p or Sat 11a ☕🚶”</p>
               <p>• “Paint night / bouldering / arcade run—feel like trying one? 🎨🧗 Sun 3p?”</p>
@@ -649,7 +662,7 @@ export default function BestieVibesQuiz(props = {}) {
 
         {/* Archetype Library & Deep Dive */}
         <div className="p-4 rounded-2xl bg-white shadow-sm border mb-8">
-          <h3 className="font-semibold">Friendship Types — Do you have them all? Which is most important to you?</h3>
+          <h3 className="text-lg font-bold text-[#455a7c]">Friendship Types — Do you have them all? Which is most important to you?</h3>
           <p className="text-sm text-[#455a7c] mt-2">This main types of friends are: <b>Depth</b> (Confidante, Caregiver), <b>Stability</b> (Anchor), <b>Novelty</b> (Adventurer), <b>Coordination</b> (Communicator, Connector), and <b>Growth</b> (Coach, Collaborator). Most close friends blend 2–3. Use the cards below to spot strengths, watch‑outs, and best micro‑plans.</p>
 
           <div className="grid md:grid-cols-2 gap-3 mt-4">
@@ -677,7 +690,7 @@ export default function BestieVibesQuiz(props = {}) {
         {/* Saved candidates */}
         <div className="p-4 rounded-2xl bg-white shadow-sm border">
           <div className="flex items-center justify-between">
-            <h3 className="font-semibold">Scoreboard 📊</h3>
+            <h3 className="text-lg font-bold text-[#455a7c]">Scoreboard 📊</h3>
             <button onClick={() => setSaved([])} className="text-sm text-[#455a7c] hover:underline">Clear</button>
           </div>
           {saved.length === 0 ? (
