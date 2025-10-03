@@ -1146,7 +1146,9 @@ if (process.env.NODE_ENV === 'production') {
   );
 }
 // Cron: run every day at KINDNESS_SEND_TIME (HH:MM, Vancouver)
-const [hour, minute] = process.env.KINDNESS_SEND_TIME.split(":");
+const KINDNESS_SEND_TIME = process.env.KINDNESS_SEND_TIME || "09:00";
+const [hour, minute] = KINDNESS_SEND_TIME.split(":");
+
 cron.schedule(
   `${minute} ${hour} * * *`,
   async () => {

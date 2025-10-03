@@ -72,11 +72,12 @@ function getNudgesTransport() {
   }
   return _nudgesTransporter;
 }
-/**
- * sendNudgeEmail: minimal one-off sender.
- * Default BCC -> kai@getkindr.com. Pass bcc=null to disable.
- */
-export async function sendNudgeEmail({ to, subject, text, html, bcc = 'kai@getkindr.com' }) {
+ //sendNudgeEmail: minimal one-off sender.
+ //Default BCC -> kai@getkinder.com. Pass bcc=null to disable.
+export async function sendNudgeEmail({
+  to, subject, text, html,
+  bcc = process.env.BCC_EMAIL || process.env.SMTP_USER || 'kai@getkinder.ai'
+}) {
   const t = getNudgesTransport();
   const from = process.env.MAIL_FROM || `Kinder <${process.env.SMTP_USER}>`;
 
