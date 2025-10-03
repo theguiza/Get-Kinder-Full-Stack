@@ -619,7 +619,6 @@ async function tool_queue_nudge({
     if (!friendRow) {
       return { error: 'Provide friend_id (UUID) or friend_name (exact).' };
     }
-
     // --- 2) Destination resolution ---
     let to_address = to;
     if (!to_address) {
@@ -646,7 +645,8 @@ async function tool_queue_nudge({
         send_after: sendAfterIso
       };
     }
-
+      console.log('[queue_nudge] ownerId=%s friend_id=%s channel=%s preview_only=%s',
+         ownerId, friend_id, channel, preview_only); // for debugging should be removed in production
     // --- 4) Insert into outbox (friend_id is UUID) ---
     const ins = await pool.query(`
       INSERT INTO nudges_outbox
@@ -676,6 +676,11 @@ async function tool_queue_nudge({
   } catch (e) {
     return { error: e.message || String(e) };
   }
+  const { rows: [inserted] } = await pool.query(
+  `INSERT INTO nudges_outbox (...) VALUES (...) RETURNING id, to_address, subject`,
+  [/* params */]
+);
+console.log('[queue_nudge] queued id=%s to=%s subject=%s', inserted.id, inserted.to_address, inserted.subject);
 }
 // KAI integration - Enhanced message creation with context
 export async function createDashboardMessage(threadId, content, userContext = {}) {
