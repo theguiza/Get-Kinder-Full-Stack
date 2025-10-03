@@ -1016,8 +1016,11 @@ POLICY:
     const reply = (m?.content || '').toString().trim() || "I’m here to help!";
     return res.json({ reply });
   } catch (err) {
-    console.error('Error in /api/chat/message:', err);
-    return res.status(500).json({ error: 'Something went wrong.' });
+    console.error('Error in /api/chat/message:', err?.stack || err);
+return res.status(500).json({
+  error: 'assistant_run_failed',
+  details: typeof err?.message === 'string' ? err.message : String(err)
+});
   }
 });
 
