@@ -449,7 +449,10 @@ export const DASHBOARD_TOOLS = [
     parameters: {
       type: 'object',
       properties: {
-        friend_id: { type: 'integer' }
+        friend_id: {
+          type: 'string',
+          description: 'Friend UUID (friends.id) use find_friend first to resolve from name'
+        }
       },
       required: ['friend_id']
     }
@@ -832,9 +835,16 @@ async function tool_get_friend_contacts({ friend_id }) {
   if (!ownerId) return { error: 'ownerId missing in TOOL_CONTEXT' };
   if (!pool)    return { error: 'DB pool missing in TOOL_CONTEXT' };
   if (!friend_id) return { error: 'friend_id is required' };
-
+// Enforce UUID early to avoid Postgres casting errors
+  const uuidLike = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(friend_id);
+  if (!uuidLike) {
+    return { error: `friend_id is not a valid UUID: ${friend_id}` };
+  }
   const { rows } = await pool.query(
-    `SELECT id, name, email, phone FROM public.friends WHERE id=$1 AND owner_user_id=$2 LIMIT 1`,
+  `SELECT id, name, email, phone
+    FROM public.friends
+    WHERE id = $1::uuid AND owner_user_id = $2
+    LIMIT 1`,
     [friend_id, ownerId]
   );
   if (!rows.length) return { error: 'friend not found for owner' };
