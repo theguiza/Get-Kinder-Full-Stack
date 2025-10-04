@@ -660,7 +660,7 @@ async function tool_queue_nudge({
       return { error: `no ${channel} destination (provide "to" or add ${channel} to friend)` };
     }
 
-    const safeSubject  = subject || (channel === 'email' ? `A note from ${friendRow.name}` : null);
+    const safeSubject  = subject || null;
     const sendAfterIso = send_after ? new Date(send_after).toISOString() : new Date().toISOString();
 
     // 3) Preview only

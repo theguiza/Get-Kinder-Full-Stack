@@ -145,13 +145,19 @@ export async function deliverQueuedNudges(pool, { max = 100 } = {}) {
 
         const ownerFirst =
           (owner?.firstname || owner?.email?.split('@')[0] || 'your friend').trim();
-        const fromName = `${ownerFirst} via Kinder`;
+        const fromName = `${ownerFirst} via Get Kinder`;
         const replyTo  = owner?.email || null;
 
-        // ✅ If no subject was queued, use a personal default
+        // ✅ Subject: "{user}, sending a friendly message to {friend}"
+        //    We look up the friend name to personalize it.
+        const { rows: [friend] } = await client.query(
+          `SELECT name FROM public.friends WHERE id = $1 LIMIT 1`,
+          [row.friend_id]
+        );
+        const friendName = (friend?.name || 'your friend').trim();
         const subject = (row.subject && row.subject.trim())
           ? row.subject
-          : `A note from ${ownerFirst}`;
+          : `${ownerFirst}, sending a friendly message to ${friendName}`;
 
         await sendNudgeEmail({
           to: row.to_address,
