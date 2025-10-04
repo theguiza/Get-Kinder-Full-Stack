@@ -561,6 +561,38 @@ export const DASHBOARD_TOOLS = [
   }
 }
 ];
+// Quota helper (owner/day + per-recipient/day)
+async function checkNudgeQuota(pool, ownerId, to, {
+  maxPerDay = Number(process.env.NUDGE_DAILY_LIMIT) || 25,
+  maxPerRecipient = Number(process.env.NUDGE_PER_RECIPIENT_LIMIT) || 3
+} = {}) {
+  const [{ rows: [{ cnt_owner }] }, { rows: [{ cnt_rcpt }] }] = await Promise.all([
+    pool.query(
+      `SELECT COUNT(*)::int AS cnt_owner
+         FROM nudges_outbox
+        WHERE owner_user_id = $1
+          AND created_at >= NOW() - INTERVAL '1 day'`,
+      [ownerId]
+    ),
+    pool.query(
+      `SELECT COUNT(*)::int AS cnt_rcpt
+         FROM nudges_outbox
+        WHERE owner_user_id = $1
+          AND to_address = $2
+          AND created_at >= NOW() - INTERVAL '1 day'`,
+      [ownerId, to]
+    )
+  ]);
+
+  if (cnt_owner >= maxPerDay) {
+    return { error: `Daily limit reached (${maxPerDay}). Try again tomorrow.` };
+  }
+  if (cnt_rcpt >= maxPerRecipient) {
+    return { error: `You’ve already nudged this person ${cnt_rcpt} times today.` };
+  }
+  return { ok: true };
+}
+
 async function tool_queue_nudge({
   friend_id = null,
   friend_name = null,
@@ -577,17 +609,13 @@ async function tool_queue_nudge({
     if (!ownerId) return { error: 'ownerId missing in TOOL_CONTEXT' };
     if (!pool)    return { error: 'DB pool missing in TOOL_CONTEXT' };
 
-    // --- 1) Resolve friend (UUID first; fallback to name) ---
+    // 1) Resolve friend (UUID first; fallback to exact name)
     let friendRow = null;
 
     if (friend_id) {
-      // Validate UUID-ish early to avoid Postgres error text crashing the run
-      console.log('[queue_nudge] validating friend_id', friend_id);
       const uuidLike = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(friend_id);
-      if (!uuidLike) {
-        return { error: `friend_id is not a valid UUID: ${friend_id}` };
-      }
-      console.log('[queue_nudge] fetching friend by id…');
+      if (!uuidLike) return { error: `friend_id is not a valid UUID: ${friend_id}` };
+
       const byId = await pool.query(
         `SELECT id, name, email, phone
            FROM public.friends
@@ -596,11 +624,9 @@ async function tool_queue_nudge({
         [friend_id, ownerId]
       );
       if (byId.rows.length) friendRow = byId.rows[0];
-      console.log('[queue_nudge] friendRow by id =', friendRow);
     }
 
     if (!friendRow && friend_name) {
-      console.log('[queue_nudge] fetching friend by exact name…', friend_name);
       const byName = await pool.query(
         `SELECT id, name, email, phone
            FROM public.friends
@@ -610,7 +636,6 @@ async function tool_queue_nudge({
           LIMIT 2`,
         [ownerId, friend_name]
       );
-      console.log('[queue_nudge] byName count =', byName.rows.length);
       if (byName.rows.length === 0) {
         return { error: `friend_name not found for owner: ${friend_name}` };
       }
@@ -618,29 +643,28 @@ async function tool_queue_nudge({
         return { error: `multiple friends match name "${friend_name}". Please specify friend_id.` };
       }
       friendRow = byName.rows[0];
-      friend_id = friendRow.id; // ensure we have UUID going forward
+      friend_id = friendRow.id; // ensure UUID going forward
     }
 
     if (!friendRow) {
       return { error: 'Provide friend_id (UUID) or friend_name (exact).' };
     }
-    // --- 2) Destination resolution ---
+
+    // 2) Destination
     let to_address = to;
     if (!to_address) {
       if (channel === 'email') to_address = friendRow.email || null;
       if (channel === 'sms')   to_address = friendRow.phone || null;
     }
-    console.log('[queue_nudge] resolved to_address =', to_address);
     if (!to_address) {
       return { error: `no ${channel} destination (provide "to" or add ${channel} to friend)` };
     }
 
-    const safeSubject = subject || (channel === 'email' ? `A quick nudge for ${friendRow.name}` : null);
+    const safeSubject  = subject || (channel === 'email' ? `A note from ${friendRow.name}` : null);
     const sendAfterIso = send_after ? new Date(send_after).toISOString() : new Date().toISOString();
 
-    // --- 3) Preview-only (no DB write) ---
+    // 3) Preview only
     if (preview_only) {
-      console.log('[queue_nudge] preview_only -> skipping insert');
       return {
         preview: true,
         friend_id,
@@ -652,44 +676,31 @@ async function tool_queue_nudge({
         send_after: sendAfterIso
       };
     }
-      console.log('[queue_nudge] ownerId=%s friend_id=%s channel=%s preview_only=%s',
-         ownerId, friend_id, channel, preview_only); // for debugging should be removed in production
-    // --- 3.5) Enforce quotas before inserting ---
-    console.log('[queue_nudge] inserting into nudges_outbox…');
-    const quota = await checkNudgeQuota(pool, ownerId, to_address);
-     if (quota.error) return { error: quota.error };
-// ensure we never pass NULL/undefined as "unknown" text
-const bodyText = (message && String(message).trim()) || 'Just a quick nudge to connect 😊';
 
-// --- 4) Insert into outbox (friend_id is UUID) ---
-const ins = await pool.query(`
-  INSERT INTO nudges_outbox
-    (owner_user_id, friend_id, channel, to_address, subject, body_text, body_html, send_after, status, meta)
-  VALUES
-    (
-      $1::int,
-      $2::uuid,
-      $3::text,
-      $4::text,
-      $5::text,
-      $6::text,
-      NULL,
-      $7::timestamptz,
-      'queued',
-      jsonb_build_object('friend_name', $8::text)
-    )
-  RETURNING id, send_after
-`, [
-  ownerId,         // if your column is integer, ownerId will cast via ::int
-  friend_id,
-  channel,
-  to_address,
-  safeSubject,
-  bodyText,
-  sendAfterIso,    // ISO string → ::timestamptz
-  friendRow.name
-]);
-    console.log('[queue_nudge] queued id=', ins.rows[0]?.id);
+    // 3.5) Quota guard
+    const quota = await checkNudgeQuota(pool, ownerId, to_address);
+    if (quota.error) return { error: quota.error };
+
+    // 4) Insert outbox row
+    const bodyText = (message && String(message).trim()) || 'Just a quick nudge to connect 😊';
+    const ins = await pool.query(`
+      INSERT INTO nudges_outbox
+        (owner_user_id, friend_id, channel, to_address, subject, body_text, body_html, send_after, status, meta)
+      VALUES
+        ($1::int, $2::uuid, $3::text, $4::text, $5::text, $6::text, NULL, $7::timestamptz, 'queued',
+         jsonb_build_object('friend_name', $8::text))
+      RETURNING id, send_after
+    `, [
+      ownerId,
+      friend_id,
+      channel,
+      to_address,
+      safeSubject,
+      bodyText,
+      sendAfterIso,
+      friendRow.name
+    ]);
+
     return {
       queued: true,
       id: ins.rows[0].id,
@@ -701,12 +712,8 @@ const ins = await pool.query(`
     console.error('[queue_nudge] error:', e);
     return { error: e.message || String(e) };
   }
-  const { rows: [inserted] } = await pool.query(
-  `INSERT INTO nudges_outbox (...) VALUES (...) RETURNING id, to_address, subject`,
-  [/* params */]
-);
-console.log('[queue_nudge] queued id=%s to=%s subject=%s', inserted.id, inserted.to_address, inserted.subject);
 }
+
 // KAI integration - Enhanced message creation with context
 export async function createDashboardMessage(threadId, content, userContext = {}) {
   const contextualContent = `User Context: ${JSON.stringify(userContext)}\n\nUser Message: ${content}`;
@@ -856,37 +863,6 @@ async function tool_find_friend({ name, limit = 5 }) {
     score: r.score,
     updated_at: r.updated_at
   }));
-  // Quota helper (owner/day + per-recipient/day)
-async function checkNudgeQuota(pool, ownerId, to, {
-  maxPerDay = Number(process.env.NUDGE_DAILY_LIMIT) || 25,
-  maxPerRecipient = Number(process.env.NUDGE_PER_RECIPIENT_LIMIT) || 3
-} = {}) {
-  const [{ rows: [{ cnt_owner }] }, { rows: [{ cnt_rcpt }] }] = await Promise.all([
-    pool.query(
-      `SELECT COUNT(*)::int AS cnt_owner
-         FROM nudges_outbox
-        WHERE owner_user_id = $1
-          AND created_at >= NOW() - INTERVAL '1 day'`,
-      [ownerId]
-    ),
-    pool.query(
-      `SELECT COUNT(*)::int AS cnt_rcpt
-         FROM nudges_outbox
-        WHERE owner_user_id = $1
-          AND to_address = $2
-          AND created_at >= NOW() - INTERVAL '1 day'`,
-      [ownerId, to]
-    )
-  ]);
-
-  if (cnt_owner >= maxPerDay) {
-    return { error: `Daily limit reached (${maxPerDay}). Try again tomorrow.` };
-  }
-  if (cnt_rcpt >= maxPerRecipient) {
-    return { error: `You’ve already nudged this person ${cnt_rcpt} times today.` };
-  }
-  return { ok: true };
-}
 }
 
 async function tool_get_friend_contacts({ friend_id }) {
