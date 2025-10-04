@@ -104,9 +104,12 @@ if (process.env.DATABASE_URL) {
   });
 }
 // Immediately test the database connection (optional)
-await pool.connect()
-  .then(() => console.log("🌐 Connected to Postgres successfully."))
-  .catch(err => console.error("‼️  Error connecting to Postgres:", err));
+try {
+  await pool.query('SELECT 1');   // one-shot; no client to release
+  console.log("🌐 Connected to Postgres successfully.");
+} catch (err) {
+  console.error("‼️ Error connecting to Postgres:", err);
+}
 
 // 7) Compute rootPath if needed for static files
 //const rootPath = __dirname;

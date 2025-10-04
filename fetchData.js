@@ -1,119 +1,73 @@
-// fetchData.js
+// fetchData.js  — replace your current Pool creation with this
 import { Pool } from "pg";
 import OpenAI from "openai";
 
-//
-// Use the SAME connection strategy you use in index.js to avoid prod mismatches.
-//
-let pool;
-if (process.env.DATABASE_URL) {
-  pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: { rejectUnauthorized: false },
-  });
-} else {
-  pool = new Pool({
-    user:     process.env.DB_USER,
-    host:     process.env.DB_HOST,
-    database: process.env.DB_NAME,
-    password: process.env.DB_PASSWORD,
-    port:     Number(process.env.DB_PORT) || 5432,
-  });
-}
+// Reuse a single Pool across the whole process
+const pool = globalThis._pgPool || (() => {
+  const cfg = process.env.DATABASE_URL
+    ? {
+        connectionString: process.env.DATABASE_URL,
+        ssl: { rejectUnauthorized: false },
+        max: 10,
+        idleTimeoutMillis: 30000,
+        connectionTimeoutMillis: 10000,
+      }
+    : {
+        user:     process.env.DB_USER,
+        host:     process.env.DB_HOST,
+        database: process.env.DB_NAME,
+        password: process.env.DB_PASSWORD,
+        port:     parseInt(process.env.DB_PORT, 10),
+        max: 10,
+        idleTimeoutMillis: 30000,
+        connectionTimeoutMillis: 10000,
+      };
+  const p = new Pool(cfg);
+  globalThis._pgPool = p;
+  return p;
+})();
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-/**
- * fetchUserEmails:
- * - Aligns to your real table: public.userdata
- * - Returns DISTINCT, non-null emails.
- * - If you have a "wants_daily_prompt" boolean column, add a WHERE clause for it.
- */
+// … keep your existing exports, just ensure they call pool.query(...) …
 export async function fetchUserEmails() {
   const { rows } = await pool.query(
-    `SELECT DISTINCT email
-       FROM public.userdata
-      WHERE email IS NOT NULL`
-    // If you later add a flag:
-    // AND wants_daily_prompt IS TRUE
+    `SELECT email FROM users WHERE wants_daily_prompt = TRUE`
   );
   return rows.map(r => r.email);
 }
 
-/**
- * fetchKindnessPrompts:
- * - Tries DB first (table kindness_prompts with a "prompt_text" column).
- * - On no rows OR any DB error, falls back to OpenAI with JSON mode.
- */
 export async function fetchKindnessPrompts() {
-  try {
-    const { rows } = await pool.query(
-      `SELECT prompt_text
-         FROM kindness_prompts
-        WHERE scheduled_date = CURRENT_DATE`
-      // If your scheduling is timezone-sensitive, consider:
-      // WHERE scheduled_date = (CURRENT_DATE AT TIME ZONE 'America/Vancouver')
-    );
-    if (rows.length > 0) {
-      return rows.map(r => r.prompt_text);
-    }
-  } catch (e) {
-    // If the table is missing or any DB error occurs, fall through to OpenAI fallback.
-    console.warn('[fetchKindnessPrompts] DB read failed, using OpenAI fallback:', e.message);
-  }
+  const { rows } = await pool.query(
+    `SELECT prompt_text FROM kindness_prompts WHERE scheduled_date = CURRENT_DATE`
+  );
+  if (rows.length) return rows.map(r => r.prompt_text);
 
-  // Fallback: enforce JSON so parsing is deterministic.
   const resp = await openai.chat.completions.create({
     model: "gpt-4o-mini",
-    response_format: { type: "json_object" },
     messages: [
-      { role: "system", content: "You generate short, kind, specific prompts people can take action on today." },
-      {
-        role: "user",
-        content:
-          "Return a JSON object with a 'prompts' array of exactly 3 short strings. No extra keys."
-      }
+      { role: "system", content: "You are a daily kindness-prompt generator." },
+      { role: "user",   content: "Give me 3 kindness prompts for today." }
     ],
   });
-
-  let prompts = [];
   try {
-    const obj = JSON.parse(resp.choices?.[0]?.message?.content || "{}");
-    if (Array.isArray(obj.prompts)) prompts = obj.prompts;
+    return JSON.parse(resp.choices[0].message.content);
   } catch {
-    // ignore
-  }
-
-  if (prompts.length === 0) {
-    // Final safety fallback (static)
-    prompts = [
-      "Text a friend and set a time to catch up this week.",
-      "Leave a kind note or review for someone who helped you recently.",
-      "Share a small win with a friend and ask about theirs."
+    return [
+      "Reach out to someone you haven’t talked to in a while.",
+      "Pay for the coffee of the person behind you.",
+      "Write a handwritten thank-you note to someone who helped you."
     ];
   }
-  return prompts;
 }
 
-/**
- * fetchEmailSubject:
- * - Keep simple; matches your usage.
- */
 export function fetchEmailSubject() {
   return "Your Daily Kindness Prompt";
 }
 
-/**
- * getUserByEmail:
- * - Aligns to your real table: public.userdata
- * - Returns { firstname } (empty string if missing), exactly what your mailer expects.
- */
 export async function getUserByEmail(email) {
   const { rows } = await pool.query(
-    `SELECT firstname
-       FROM public.userdata
-      WHERE email = $1
-      LIMIT 1`,
+    `SELECT firstname FROM users WHERE email = $1 LIMIT 1`,
     [email]
   );
   return { firstname: rows[0]?.firstname || "" };
