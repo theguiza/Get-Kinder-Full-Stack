@@ -654,8 +654,10 @@ async function tool_queue_nudge({
     }
       console.log('[queue_nudge] ownerId=%s friend_id=%s channel=%s preview_only=%s',
          ownerId, friend_id, channel, preview_only); // for debugging should be removed in production
-    // --- 4) Insert into outbox (friend_id is UUID) ---
+    // --- 3.5) Enforce quotas before inserting ---
     console.log('[queue_nudge] inserting into nudges_outbox…');
+    const quota = await checkNudgeQuota(pool, ownerId, to_address);
+     if (quota.error) return { error: quota.error };
 // ensure we never pass NULL/undefined as "unknown" text
 const bodyText = (message && String(message).trim()) || 'Just a quick nudge to connect 😊';
 
@@ -831,7 +833,6 @@ async function tool_recommend_from_graph({
     };
   });
 }
-
 async function tool_find_friend({ name, limit = 5 }) {
   const ownerId = String(TOOL_CONTEXT.ownerId || '');
   const pool    = TOOL_CONTEXT.pool;
@@ -855,6 +856,37 @@ async function tool_find_friend({ name, limit = 5 }) {
     score: r.score,
     updated_at: r.updated_at
   }));
+  // Quota helper (owner/day + per-recipient/day)
+async function checkNudgeQuota(pool, ownerId, to, {
+  maxPerDay = Number(process.env.NUDGE_DAILY_LIMIT) || 25,
+  maxPerRecipient = Number(process.env.NUDGE_PER_RECIPIENT_LIMIT) || 3
+} = {}) {
+  const [{ rows: [{ cnt_owner }] }, { rows: [{ cnt_rcpt }] }] = await Promise.all([
+    pool.query(
+      `SELECT COUNT(*)::int AS cnt_owner
+         FROM nudges_outbox
+        WHERE owner_user_id = $1
+          AND created_at >= NOW() - INTERVAL '1 day'`,
+      [ownerId]
+    ),
+    pool.query(
+      `SELECT COUNT(*)::int AS cnt_rcpt
+         FROM nudges_outbox
+        WHERE owner_user_id = $1
+          AND to_address = $2
+          AND created_at >= NOW() - INTERVAL '1 day'`,
+      [ownerId, to]
+    )
+  ]);
+
+  if (cnt_owner >= maxPerDay) {
+    return { error: `Daily limit reached (${maxPerDay}). Try again tomorrow.` };
+  }
+  if (cnt_rcpt >= maxPerRecipient) {
+    return { error: `You’ve already nudged this person ${cnt_rcpt} times today.` };
+  }
+  return { ok: true };
+}
 }
 
 async function tool_get_friend_contacts({ friend_id }) {

@@ -8,7 +8,7 @@ import express from "express";
 import path from "path";
 import { dirname } from "path";
 import { fileURLToPath } from "url";
-import { Pool } from "pg";
+import pool from "./Backend/db/pg.js";
 import bcrypt from "bcrypt";
 import session from "express-session";
 import passport from "passport";
@@ -81,35 +81,13 @@ const app = express();
 // 5) Determine port (Render/Docker set process.env.PORT; fallback to 5001)
 const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 5001;
 
-// 6) Configure PostgreSQL connection with a single Pool instance - 
-let pool;
-
-if (process.env.DATABASE_URL) {
-  // === Running on Render.com ===
-  // Use the single DATABASE_URL that Render provides; enable SSL with rejectUnauthorized: false
-  pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: { rejectUnauthorized: false }
-  });
-} else {
-  // === Local / Docker setup ===
-  pool = new Pool({
-    user:     process.env.DB_USER     || "postgres",
-    host:     process.env.DB_HOST     || "postgres",
-    database: process.env.DB_NAME     || "my_local_db",
-    password: process.env.DB_PASSWORD || "postgres",
-    port:     process.env.DB_PORT
-               ? parseInt(process.env.DB_PORT, 10)
-               : 5432
-  });
-}
-// Immediately test the database connection (optional)
 try {
-  await pool.query('SELECT 1');   // one-shot; no client to release
+  await pool.query('SELECT 1');  // one-shot; no client to release
   console.log("🌐 Connected to Postgres successfully.");
 } catch (err) {
-  console.error("‼️ Error connecting to Postgres:", err);
+  console.error("‼️  Error connecting to Postgres:", err);
 }
+
 
 // 7) Compute rootPath if needed for static files
 //const rootPath = __dirname;

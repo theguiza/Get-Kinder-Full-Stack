@@ -1,31 +1,6 @@
 // fetchData.js  — replace your current Pool creation with this
-import { Pool } from "pg";
+import pool from "./Backend/db/pg.js";
 import OpenAI from "openai";
-
-// Reuse a single Pool across the whole process
-const pool = globalThis._pgPool || (() => {
-  const cfg = process.env.DATABASE_URL
-    ? {
-        connectionString: process.env.DATABASE_URL,
-        ssl: { rejectUnauthorized: false },
-        max: 10,
-        idleTimeoutMillis: 30000,
-        connectionTimeoutMillis: 10000,
-      }
-    : {
-        user:     process.env.DB_USER,
-        host:     process.env.DB_HOST,
-        database: process.env.DB_NAME,
-        password: process.env.DB_PASSWORD,
-        port:     parseInt(process.env.DB_PORT, 10),
-        max: 10,
-        idleTimeoutMillis: 30000,
-        connectionTimeoutMillis: 10000,
-      };
-  const p = new Pool(cfg);
-  globalThis._pgPool = p;
-  return p;
-})();
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
