@@ -21,6 +21,57 @@ function getHeaders() {
     "OpenAI-Beta": "assistants=v2"
   };
 }
+// === KAI canonical instructions (used to configure the Assistant object) ===
+export const KAI_ASSISTANT_INSTRUCTIONS = `
+You are KAI, a warm, encouraging, outcome-oriented mattering coach helping people connect IRL and feel less lonely. You are not a clinician; do not diagnose or provide therapy.
+
+Default style
+- 30-60 words unless the user asks for more.
+- Structure every reply as: 1–2 line empathic reflection -> one practical idea -> one inviting question.
+- Warm, human, concise, non-judgmental; celebrate small wins. Offer Low / Medium / High effort options when helpful.
+
+Context contract
+- Inputs may begin with "User Context: {...}" then "User Message: ...". Use the context silently for personalization; do not echo or restate the User Context.
+
+Knowledge use
+- Prefer content retrieved from attached knowledge files (if any). If retrieval returns nothing relevant, answer using the core methods below. Do not reference or promise files that aren’t attached.
+
+Capabilities & methods
+- OARS micro-loops (Open questions, Affirmations, Reflections, Summaries)
+- High-quality listening; ask follow-ups to raise perceived partner responsiveness
+- Active-constructive responding to others’ good news
+- Gradual, reciprocal self-disclosure; low-stakes initiations; implementation intentions and tiny “friendship reps”
+- Use NAN when relevant: Noticing -> Affirming -> Needing
+
+Tools & auth
+- For any account-scoped action (send nudge/email/SMS/reminder, log interactions, access contacts, etc.):
+  - If not authenticated or a tool is unavailable: first reply "To send nudges or emails, please sign in." Then provide a copy-paste draft or next-best alternative.
+  - If authenticated and tools are available: call the tool. After success, confirm plainly ("I've queued it for 9am tomorrow."). If a tool fails, say so briefly and offer a copy-paste draft.
+
+Safety
+- If the user expresses imminent risk:
+  - "If you're in immediate danger, call your local emergency number now."
+  - "United States/Canada: call or text 988 (Suicide & Crisis Lifeline). UK & ROI: Samaritans 116 123. If outside these regions, search your country's crisis line or contact local emergency services."
+  - Offer to help craft a message to a trusted person or find local resources.
+
+Tone guardrails
+- No medical, legal, or diagnostic claims. Be specific, human, and actionable. Avoid jargon and long lists unless the user explicitly asks.
+`.trim();
+
+// === One-shot helper to update the Assistant object with the canonical text ===
+// NOTE: Uses your existing headers + fetch + assistants v2 header.
+export async function updateAssistantInstructions(instructions = KAI_ASSISTANT_INSTRUCTIONS) {
+  const endpoint = `https://api.openai.com/v1/assistants/${ASSISTANT_ID}`;
+  const res = await fetch(endpoint, {
+    method: 'POST', // assistants v2 update
+    headers: getHeaders(),
+    body: JSON.stringify({ instructions })
+  });
+  if (!res.ok) {
+    throw new Error(`Assistant update failed: ${await res.text()}`);
+  }
+  return await res.json();
+}
 
 // KAI integration - Enhanced thread management for dashboard context
 export async function getOrCreateThread(req) {
@@ -128,8 +179,71 @@ export async function createAndPollRun(threadId, tools = []) {
 
   return runResult;
 }
+// Stream a run as SSE frames; auto-handle requires_action tool calls.
+// onEvent(evt) receives OpenAI event objects and internal 'tool.result' pings.
+export async function createAndStreamRun(threadId, tools = [], onEvent) {
+  const runEndpoint = `https://api.openai.com/v1/threads/${threadId}/runs`;
+  const payload = { assistant_id: ASSISTANT_ID };
+  if (Array.isArray(tools) && tools.length) payload.tools = tools;
+
+  const res = await fetch(`${runEndpoint}?stream=true`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok || !res.body) throw new Error(await res.text());
+
+  const reader  = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    // SSE frames are separated by a blank line
+    let idx;
+    while ((idx = buffer.indexOf('\n\n')) >= 0) {
+      const frame = buffer.slice(0, idx).trim();
+      buffer = buffer.slice(idx + 2);
+
+      for (const line of frame.split('\n')) {
+        if (!line.startsWith('data:')) continue;
+        const data = line.slice(5).trim();
+        if (!data || data === '[DONE]') {
+          onEvent?.({ type: 'openai.done' });
+          continue;
+        }
+
+        let evt;
+        try { evt = JSON.parse(data); } catch { continue; }
+        onEvent?.(evt);
+
+        // Mid-stream tool calls
+        if (evt.type === 'thread.run.requires_action') {
+          const runId = evt?.data?.id;
+          const calls = evt?.data?.required_action?.submit_tool_outputs?.tool_calls ?? [];
+          const outputs = [];
+          for (const call of calls) {
+            const out = await handleToolCall(call); // uses your existing switch
+            outputs.push({ tool_call_id: call.id, output: JSON.stringify(out) });
+            onEvent?.({ type: 'tool.result', call, data: out });
+          }
+          const submit = await fetch(`${runEndpoint}/${runId}/submit_tool_outputs`, {
+            method: 'POST',
+            headers: getHeaders(),
+            body: JSON.stringify({ tool_outputs: outputs })
+          });
+          if (!submit.ok) throw new Error(await submit.text());
+        }
+      }
+    }
+  }
+}
+
 // KAI integration - Tool call handler for dashboard-specific functions
-async function handleToolCall(toolCall) {
+export async function handleToolCall(toolCall) {
   const { name, arguments: args } = toolCall.function;
 
   // Be defensive about malformed JSON from the model
