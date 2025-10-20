@@ -1,0 +1,90 @@
+<!-- views/partials/kai-chat-floating.ejs -->
+<button class="chat-toggle" id="kaiChatToggle" type="button" aria-controls="kaiChatPanel" aria-expanded="false">
+  <span style="display:flex;align-items:center;justify-content:center;width:100%;height:100%;">
+    <img src="/images/speakWithKAI-Button.png" alt="Kindness AI Companion Kai">
+  </span>
+</button>
+
+<div class="chat-panel" id="kaiChatPanel" aria-hidden="true">
+  <div class="chat-header">
+    <h3>Chat with KAI Now</h3>
+  </div>
+
+  <div class="chat-messages" id="kaiChatMessages">
+    <div class="message assistant">
+      <%= typeof greetText !== 'undefined'
+        ? greetText
+        : "Hi! I'm KAI, your AI assistant. How can I help you matter today?" %>
+    </div>
+  </div>
+
+  <div class="chat-input-container">
+    <textarea
+      class="chat-input"
+      id="kaiChatInput"
+      placeholder="Ask KAI anything about your friend journey..."
+      rows="2"
+    ></textarea>
+  </div>
+</div>
+
+<script>
+(() => {
+  const panel = document.getElementById('kaiChatPanel');
+  const toggleBtn = document.getElementById('kaiChatToggle');
+  const input = document.getElementById('kaiChatInput');
+  const messagesEl = document.getElementById('kaiChatMessages');
+
+  function open() {
+    panel.classList.add('active');
+    toggleBtn.setAttribute('aria-expanded','true');
+    panel.setAttribute('aria-hidden','false');
+  }
+  function close() {
+    panel.classList.remove('active');
+    toggleBtn.setAttribute('aria-expanded','false');
+    panel.setAttribute('aria-hidden','true');
+  }
+  function toggle() { panel.classList.contains('active') ? close() : open(); }
+
+  toggleBtn.addEventListener('click', toggle);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+  });
+
+  async function send(messageOpt) {
+    const text = (messageOpt ?? input.value).trim();
+    if (!text) return;
+
+    messagesEl.insertAdjacentHTML('beforeend', '<div class="message user"></div>');
+    messagesEl.lastElementChild.textContent = text;
+    input.value = '';
+
+    messagesEl.insertAdjacentHTML('beforeend', '<div class="message assistant">KAI is thinking...</div>');
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+
+    try {
+      const res = await fetch('/api/chat/message', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        credentials: 'include',
+        body: JSON.stringify({ message: text })
+      });
+      const data = await res.json();
+
+      messagesEl.removeChild(messagesEl.lastElementChild);
+      messagesEl.insertAdjacentHTML('beforeend', '<div class="message assistant"></div>');
+      messagesEl.lastElementChild.textContent = data.reply || "Sorry, I couldn't process that request.";
+    } catch (err) {
+      console.error('Chat error:', err);
+      messagesEl.removeChild(messagesEl.lastElementChild);
+      messagesEl.insertAdjacentHTML('beforeend', '<div class="message assistant">Sorry, I\'m having trouble connecting right now. Please try again later.</div>');
+    }
+
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  // Global helper so other buttons/links can open the chat with a preset message
+  window.askKAI = function(msg) { open(); if (msg) { input.value = msg; send(msg); } };
+})();
+</script>

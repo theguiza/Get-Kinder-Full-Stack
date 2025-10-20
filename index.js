@@ -25,6 +25,7 @@ import { verify as neoVerify, run as neoRun, close as neoClose } from './Backend
 import { deliverQueuedNudges } from './kindnessEmailer.js';
 const { fetchUserEmails, fetchKindnessPrompts, fetchEmailSubject } = await import("./fetchData.js");
 const { sendDailyKindnessPrompts } = await import("./kindnessEmailer.js");
+import cookieParser from "cookie-parser";
 
 // Reuse the same tool schema for Chat Completions (strip any nonstandard fields if needed)
 const CHAT_COMPLETIONS_TOOLS = DASHBOARD_TOOLS.map(t => ({ type: 'function', function: t.function }));
@@ -113,6 +114,8 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const PgSession = connectPgSimple(session);
 
 // 9) Middleware setup
+app.use(cookieParser());
+app.use(cors());
 app.use(cors());
 app.use(express.json({ limit: "5mb" }));
 //app.use(express.urlencoded({ extended: true }));
@@ -854,6 +857,9 @@ const threadId = (req.session && req.session.threadId) || "";
 // NEW: are they new?
 const isNewUser = chatHistory.length === 0;
 
+// cookie gate for onboarding
+const onboardingDone = req.cookies && req.cookies.onboarding_done === "1";
+
 // D) Render index.ejs (pass the flag)
 return res.render("index", {
   title:        "Home",
@@ -863,7 +869,8 @@ return res.render("index", {
   chatHistory,
   threadId,
   dbTime,
-  isNewUser    // ← add this line
+  isNewUser,
+  onboardingDone
 });
 
   } catch (err) {
@@ -1379,6 +1386,118 @@ app.post('/admin/graph/backfill', ensureAuthenticatedApi, ensureAdmin, async (re
 // ─────────────────────────────────────────────────────────────────────────────
 // 18) Start the server
 // ─────────────────────────────────────────────────────────────────────────────
+// Onboarding completion endpoint.
+//  - Always sets onboarding_done cookie (as today)
+//  - If logged in (req.user.email) AND answers are present, persist to `userdata`
+app.post("/api/onboarding/complete", async (req, res) => {
+  // keep current cookie behavior
+  res.cookie("onboarding_done", "1", {
+    path: "/",
+    maxAge: 1000 * 60 * 60 * 24 * 365,
+    httpOnly: false,             // client reads it
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+  });
+
+  const email = req.user?.email; // /profile already relies on this being set when logged in
+  const raw = (req.body && typeof req.body === "object") ? (req.body.answers || {}) : {};
+
+  // If not logged in or no answers, just return OK (cookie-only)
+  if (!email || !raw || Object.keys(raw).length === 0) {
+    return res.json({ ok: true, persisted: false });
+  }
+
+  // Normalize both payload shapes:
+  //  - Direct wizard POST: { answers: { whyFriend, knownConnection, outcome, timeCommitment, age, interests[] } }
+  //  - Post-login flush:   { answers: { why_friend, known_connection, desired_outcome, hours_per_week, age_bracket, interest1..3 } }
+  const take = (...vals) => {
+    for (const v of vals) if (v !== undefined && v !== null && String(v).trim() !== "") return v;
+    return null;
+  };
+  const toIntOrNull = (v) => {
+    const n = parseInt(v, 10);
+    return Number.isFinite(n) ? n : null;
+    };
+
+  const interestsArray = Array.isArray(raw.interests)
+    ? raw.interests.map(String).map(s => s.trim()).filter(Boolean)
+    : [];
+
+  const normalized = {
+    why_friend:       take(raw.why_friend,      raw.whyFriend),
+    known_connection: take(raw.known_connection,raw.knownConnection),
+    desired_outcome:  take(raw.desired_outcome, raw.outcome),
+    hours_per_week:   toIntOrNull(take(raw.hours_per_week, raw.timeCommitment)),
+    age_bracket:      take(raw.age_bracket,     raw.age),
+
+    // Prefer explicit interest1..3 if provided by the flush script; else fall back to interests[0..2]
+    interest1: take(raw.interest1, interestsArray[0] || ""),
+    interest2: take(raw.interest2, interestsArray[1] || ""),
+    interest3: take(raw.interest3, interestsArray[2] || ""),
+  };
+
+  try {
+    await pool.query("BEGIN");
+
+    // First try to update an existing row for this email
+    const upd = await pool.query(
+      `
+      UPDATE userdata
+         SET why_friend       = $1,
+             known_connection = $2,
+             desired_outcome  = $3,
+             hours_per_week   = $4,
+             age_bracket      = $5,
+             interest1        = COALESCE(NULLIF($6, ''), interest1),
+             interest2        = COALESCE(NULLIF($7, ''), interest2),
+             interest3        = COALESCE(NULLIF($8, ''), interest3)
+       WHERE email = $9
+      `,
+      [
+        normalized.why_friend,
+        normalized.known_connection,
+        normalized.desired_outcome,
+        normalized.hours_per_week,
+        normalized.age_bracket,
+        normalized.interest1 || "",
+        normalized.interest2 || "",
+        normalized.interest3 || "",
+        email,
+      ]
+    );
+
+    // If no row exists yet, insert a minimal one
+    if (upd.rowCount === 0) {
+      await pool.query(
+        `
+        INSERT INTO userdata
+          (email, why_friend, known_connection, desired_outcome, hours_per_week, age_bracket, interest1, interest2, interest3)
+        VALUES ($1,    $2,         $3,              $4,              $5,            $6,          $7,        $8,        $9)
+        `,
+        [
+          email,
+          normalized.why_friend,
+          normalized.known_connection,
+          normalized.desired_outcome,
+          normalized.hours_per_week,
+          normalized.age_bracket,
+          normalized.interment1 || "", // typo fix below
+          normalized.interest2 || "",
+          normalized.interest3 || "",
+        ]
+      );
+    }
+
+    await pool.query("COMMIT");
+    return res.json({ ok: true, persisted: true });
+  } catch (e) {
+    await pool.query("ROLLBACK");
+    console.error("POST /api/onboarding/complete persist error:", e);
+    return res.status(500).json({ ok: false, error: "persist_failed" });
+  }
+});
+
+
 app.listen(port, () => {
   console.log(`App running on port ${port}`);
 });

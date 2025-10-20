@@ -511,4 +511,436 @@ html, body, #app, .page, .chat-page, .full-height {
   bottom: 0;
   z-index: 1;
 }
+/* START OF DASHBOARD & KAI CHAT STYLING */
 
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            min-height: 100vh;
+            padding: 24px;
+            color: #2d3748;
+        }
+
+        .dashboard-container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .dashboard-header {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+
+        .dashboard-header h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: #455a7c;
+            margin-bottom: 8px;
+        }
+
+        .dashboard-header p {
+            font-size: 1.1rem;
+            color: #718096;
+        }
+
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+            margin-bottom: 32px;
+        }
+
+        .card {
+            background: white;
+            border-radius: 16px;
+            padding: 24px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            transition: all 0.3s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .card-icon {
+            width: 24px;
+            height: 24px;
+            margin-right: 12px;
+            color: #455a7c;
+        }
+
+        .card-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #455a7c;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e2e8f0;
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 16px 0;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #ff5656, #ff7676);
+            border-radius: 4px;
+            transition: width 0.6s ease;
+        }
+
+        .challenge-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .challenge-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #2d3748;
+        }
+
+        .day-counter {
+            background: #455a7c;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.875rem;
+            font-weight: 500;
+        }
+
+        .challenge-description {
+            color: #718096;
+            line-height: 1.5;
+            margin-bottom: 16px;
+        }
+
+        .btn {
+            background: #ff5656;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-decoration: none;
+            display: inline-block;
+            text-align: center;
+            margin-right: 8px;
+            margin-bottom: 8px;
+        }
+
+        .btn:hover {
+            background: #e04545;
+            transform: translateY(-1px);
+            color: white;
+            text-decoration: none;
+        }
+
+        .btn-secondary {
+            background: #455a7c;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #3a4a66;
+            color: white;
+        }
+
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #c82333;
+            color: white;
+        }
+
+        .btn:disabled {
+            background: #e2e8f0;
+            color: #a0aec0;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .badges-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+
+        .badge-item {
+            text-align: center;
+            padding: 16px;
+            background: #f7fafc;
+            border-radius: 12px;
+            transition: all 0.2s ease;
+        }
+
+        .badge-item:hover {
+            background: #edf2f7;
+            transform: scale(1.05);
+        }
+
+        .badge-icon {
+            font-size: 2rem;
+            margin-bottom: 8px;
+        }
+
+        .badge-name {
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: #4a5568;
+        }
+
+        .level-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .level-text {
+            font-weight: 600;
+            color: #455a7c;
+        }
+
+        .quests-list {
+            list-style: none;
+        }
+
+        .quest-item {
+            padding: 12px 0;
+            border-bottom: 1px solid #e2e8f0;
+            transition: all 0.2s ease;
+        }
+
+        .quest-item:last-child {
+            border-bottom: none;
+        }
+
+        .quest-item:hover {
+            background: #f7fafc;
+            margin: 0 -16px;
+            padding: 12px 16px;
+            border-radius: 8px;
+        }
+
+        .quest-link {
+            text-decoration: none;
+            color: #4a5568;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .quest-link:hover {
+            color: #ff5656;
+            text-decoration: none;
+        }
+
+        .quest-name {
+            font-weight: 500;
+            color: #2d3748;
+        }
+
+        .quest-difficulty {
+            font-size: 0.875rem;
+            padding: 2px 8px;
+            border-radius: 12px;
+            background: #e2e8f0;
+            color: #4a5568;
+        }
+
+        .quest-difficulty.easy { background: #c6f6d5; color: #22543d; }
+        .quest-difficulty.medium { background: #fed7aa; color: #9c4221; }
+        .quest-difficulty.hard { background: #feb2b2; color: #742a2a; }
+
+        /* Cancel Mission button styling */
+        .cancel-mission-container {
+            margin-top: 24px;
+            padding-top: 16px;
+            border-top: 1px solid #e2e8f0;
+            text-align: center;
+        }
+
+        /* Chat toggle button */
+        .hidden {
+            display: none !important;
+        }
+
+        .btn-loading .btn-text {
+            display: none;
+        }
+
+        .btn-loading .btn-loading {
+            display: inline-flex !important;
+            align-items: center;
+        }
+
+        .chat-toggle {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            width: 100px;
+            height: 100px;
+            background: #ff5656;
+            border: none;
+            border-radius: 50%;
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(255, 86, 86, 0.4); /*  UI change - Updated shadow color */
+            transition: all 0.3s ease;
+            z-index: 1000;
+        }
+
+        .chat-toggle:hover {
+            background: #e04545;
+            transform: scale(1.1);
+        }
+
+/* FORCE the PNG to match the button size exactly */
+.chat-toggle img {
+      display: block !important;
+  width: 150% !important;
+  height: 150% !important;
+  max-width: 150% !important;
+  max-height: 150% !important;
+  object-fit: cover;         /* use 'cover' if you want it touching the edge */
+  margin: 0 !important;        /* overrides Bootstrap .me-2 */
+  position: static !important; /* overrides left:4px nudge */
+  left: auto !important;
+  flex: 0 0 auto !important;   /* neutralize flex shrinking/growing */
+}
+
+        /* Chat panel styling */
+        .chat-panel {
+            position: fixed;
+            bottom: 100px;
+            right: 24px;
+            width: 350px;
+            height: 400px;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+            display: none;
+            flex-direction: column;
+            z-index: 1000;
+        }
+
+        .chat-panel.active {
+            display: flex;
+        }
+
+        .chat-header {
+            padding: 16px;
+            border-bottom: 1px solid #e2e8f0;
+            background: #455a7c;
+            color: white;
+            border-radius: 16px 16px 0 0;
+        }
+
+        .chat-messages {
+            flex: 1;
+            padding: 16px;
+            overflow-y: auto;
+        }
+
+        .chat-input-container {
+            padding: 16px;
+            border-top: 1px solid #e2e8f0;
+        }
+
+        .chat-input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            resize: none;
+            font-family: inherit;
+        }
+
+        .chat-input:focus {
+            outline: none;
+            border-color: #ff5656;
+        }
+
+        .message {
+            margin-bottom: 12px;
+            padding: 8px 12px;
+            border-radius: 12px;
+            max-width: 80%;
+        }
+
+        .message.user {
+            background: #ff5656;
+            color: white;
+            margin-left: auto;
+        }
+
+        .message.assistant {
+            background: #f7fafc;
+            color: #2d3748;
+        }
+
+        /* Responsive design improvements */
+        @media (max-width: 768px) {
+            .dashboard-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .badges-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            
+            .chat-panel {
+                width: calc(100vw - 48px);
+                right: 24px;
+                left: 24px;
+            }
+
+            .challenge-info {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 8px;
+            }
+
+            .btn {
+                width: 100%;
+                margin-right: 0;
+            }
+        }
+
+        /* Alert styling with brand colors */
+        .alert-success {
+            background-color: #d4edda;
+            border-color: #c3e6cb;
+            color: #155724;
+        }
+
+        .alert-info {
+            background-color: #d1ecf1;
+            border-color: #bee5eb;
+            color: #0c5460;
+        }

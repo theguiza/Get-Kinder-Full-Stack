@@ -26,7 +26,7 @@
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
   <link rel="stylesheet" href="./css/style.css">
 </head>
-<body class="gradient-background">
+<body >
 <!-- Google Tag Manager (noscript) -->
 <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-5NMWPW33" height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
   <!-- End Google Tag Manager (noscript) -->
@@ -44,52 +44,54 @@
     </div>
   <% } %>
 
-  <section id="title" class="gradient-background">
-   <header>
+  <section id="title">
+  <header>
       <nav class="navbar fixed-top navbar-light bg-white navbar-expand-lg">
         <div class="container-fluid d-flex">
-          <a class="navbar-brand" href="/"><img src="/images/logo.png" alt="Get Kinder logo" height="80"> </a>
+          <a class="navbar-brand" href="/"><img src="/images/logo.png" alt="Get Kinder logo" class="logo-img" height="80" width: auto;> </a>
           <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
-            <span class="navbar-toggler-icon"></span>
-          </button>
+            <span class="navbar-toggler-icon"></span></button>
           <div class="collapse navbar-collapse justify-content-center" id="navbarNav">
             <ul class="navbar-nav align-items-center">
-              <li class="nav-item">
-                <a class="btn btn-outline-primary btn-lg custom-hover" href="/#chat2" style="font-size: 1.2rem; color: #455a7c; margin-right: 30px; margin-left: 10px; padding-left: 10px;"><img src="/images/kai-real.png" alt="real Kindness AI Companion Kai" width="35" height="35" class="me-2">Chat with Kai Now</a>
-              </li>
-                <li class="nav-item">
+             <li class="nav-item">
                 <a class="nav-link mx-1 font-hover" href="/" style="font-size: 1.2rem; color: #455a7c; padding-right: 30px;">Home</a>
               </li>
-              <li class="nav-item">
-                <a class="nav-link mx-1 font-hover" href="blog" style="font-size: 1.2rem; color: #455a7c; padding-right: 30px;">Blog</a>
+               <li class="nav-item">
+                <a class="nav-link mx-1 font-hover" href="dashboard" style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;">Friend Arcs</a>
+              </li>
+                 <li class="nav-item">
+                <a class="nav-link mx-1 font-hover" href="friendQuiz" style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;">Quiz</a>
+              </li>
+               <li class="nav-item">
+                <a class="nav-link mx-1 font-hover" href="blog" style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;">Blog</a>
               </li>
               <li class="nav-item">
-                <a class="nav-link mx-1 font-hover" href="about" style="font-size: 1.2rem; color: #455a7c; padding-right: 30px;">About</a>
+                <a class="nav-link mx-1 font-hover" href="about" style="font-size: 1.1rem; color: #455a7c; padding-right: 40px;">About</a>
               </li>
-            <li class="nav-item">
-                <a class="nav-link mx-1 font-hover" href="friendQuiz" style="font-size: 1.2rem; color: #455a7c; padding-right: 30px;">Quiz</a>
-              </li>
-              </ul>
-            </div>
-              <div class="collapse navbar-collapse justify-content-end" id="navbarNav">
+                <li class="nav-item">
+              <a class="btn btn-primary btn-lg" href="https://square.link/u/GjQpbcoi" style="font-size: 1.2rem; color:aliceblue; background-color: #ff5656; border-color: #ff5656;  "target="_blank" rel="noopener noreferrer">DONATE</a> </li>
+             </li>
+             </ul>
+              </div>
+              <div class="collapse navbar-collapse justify-content-end">
                 <ul class="navbar-nav d-flex align-items-center">              <% if (user) { %>
                 <li class="nav-item d-flex align-items-center me-3">
-                  <span class="navbar-text fw-bold me-2" style="font-size: 1.2rem; color: #455a7c;"><%= user.firstname || user.email %></span>
-                  <img src="<%= user.picture ? user.picture : '/images/nerdy-KAI.png' %>" class="rounded-circle me-3" width="32" height="32" alt="Get Kinder User Avatar">
+                  <span class="navbar-text fw-bold me-2" style="font-size: 1.1rem; color: #455a7c;"><%= user.firstname || user.email %></span>
+                  <img src="<%= (user && user.picture) ? user.picture : '/images/nerdy-KAI.png' %>"  class="rounded-circle me-3" width="32" height="32" alt="Get Kinder User Avatar">
                   <button class="btn btn-outline-danger btn-sm" data-bs-toggle="modal" data-bs-target="#logoutModal">Log Out</button>
                 </li>
-              <% } else { %>
+                <% } else { %>
                 <li class="nav-item"><a class="btn btn-primary btn-lg" 
                   style="font-size: 1.2rem; color: white; text-decoration: none; width: 100%; min-width: 120px; text-align: center;" href="login" role="button">Log In</a>
                 </li>
-              <% } %>
-            </ul>
+                <% } %>
+              </ul>
             </div>
         </div>
       </nav>
-     </header> 
+    </header>
       <section id="title">
-      <div class="container profile-page rounded bg-white mt-5 mb-5 px-3">
+      <div class="container profile-page rounded bg-white mt-5 mb-5 px-3 pt-4">
         <form id="profile-form" action="/profile" method="POST" enctype="multipart/form-data">
       <div class="row">
         <!-- Left: Profile Picture -->
@@ -229,19 +231,19 @@
         <div class="col-md-4">
           <div class="p-3 py-5">
             <div class="d-flex justify-content-between align-items-center mb-3">
-                <h2 class="text-right" style="color: #455a7c; margin-top: 40px;">Your Kindness Interests</h2>
+                <h2 class="text-right" style="color: #455a7c; margin-top: 40px;">Your Interests</h2>
             </div>
             <div class="form-group mb-3">
               <label class="labels">Interest 1</label>
-              <input type="text" name="interest1" class="form-control" placeholder="Enter your kindness interest 1" value="<%= user.interest1 || '' %>">
+              <input type="text" name="interest1" class="form-control" placeholder="Enter your interest 1" value="<%= user.interest1 || '' %>">
             </div>
             <div class="form-group mb-3">
               <label class="labels">Interest 2</label>
-              <input type="text" name="interest2" class="form-control" placeholder="Enter your kindness interest 2" value="<%= user.interest2 || '' %>">
+              <input type="text" name="interest2" class="form-control" placeholder="Enter your interest 2" value="<%= user.interest2 || '' %>">
             </div>
             <div class="form-group mb-3">
               <label class="labels">Interest 2</label>
-              <input type="text" name="interest3" class="form-control" placeholder="Enter your kindness interest 3" value="<%= user.interest3 || '' %>">
+              <input type="text" name="interest3" class="form-control" placeholder="Enter your interest 3" value="<%= user.interest3 || '' %>">
             </div>
             <div class="text-center">
               <button class="btn btn-outline-primary" type="submit">Update Interests</button>

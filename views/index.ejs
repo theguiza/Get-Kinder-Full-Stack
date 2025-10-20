@@ -29,9 +29,13 @@
   <meta property="og:type" content="website">
 
   <link rel="icon" href="/images/favicon.png" sizes="32x32" type="image/png">
+  
+
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-SgOJa3DmI69IUzQ2PVdRZhwQ+dy64/BUtbMJw1MZ8t5HZApcHrRKUc4W0kG879m7" crossorigin="anonymous">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
-  <link rel="stylesheet" href="/css/style.css"> 
+  <link rel="stylesheet" href="/css/style.css">
+  <!-- AOS (Animate On Scroll) -->
+  <link href="https://unpkg.com/aos@2.3.1/dist/aos.css" rel="stylesheet"> 
   <meta name="google-site-verification" content="5P6KC5fl0v3t5zQrKy3RvlK5c0yeXKpRUb4FbhkF0eY" />
 </head>
 
@@ -58,29 +62,30 @@
         <div class="container-fluid d-flex">
           <a class="navbar-brand" href="/"><img src="/images/logo.png" alt="Get Kinder logo" class="logo-img" height="80" width: auto;> </a>
           <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
-            <span class="navbar-toggler-icon"></span>
-          </button>
+            <span class="navbar-toggler-icon"></span></button>
           <div class="collapse navbar-collapse justify-content-center" id="navbarNav">
             <ul class="navbar-nav align-items-center">
               <li class="nav-item">
-                <a class="btn btn-outline-primary btn-lg custom-hover" href="#chat2" style="font-size: 1.1rem; color: #455a7c; margin-right: 30px; margin-left: 20px; padding-left: 10px;"><img src="/images/kai-real.png" alt="real Kindness AI Companion Kai" width="35" height="35" class="me-2">Chat with KAI</a>
+                <a class="nav-link mx-1 font-hover" href="friendQuiz" style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;">Quiz</a>
               </li>
-              <li class="nav-item">
+               <li class="nav-item">
+                <a class="nav-link mx-1 font-hover" href="dashboard" style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;">Friend arcs</a>
+              </li>
+                 <li class="nav-item">
+                <a class="nav-link mx-1 font-hover" href="profile" style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;">Profile</a>
+              </li>
+               <li class="nav-item">
                 <a class="nav-link mx-1 font-hover" href="blog" style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;">Blog</a>
               </li>
               <li class="nav-item">
-                <a class="nav-link mx-1 font-hover" href="profile" style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;">Profile</a>
-              </li>
-              <li class="nav-item">
-                <a class="nav-link mx-1 font-hover" href="about" style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;">About</a>
+                <a class="nav-link mx-1 font-hover" href="about" style="font-size: 1.1rem; color: #455a7c; padding-right: 40px;">About</a>
               </li>
                 <li class="nav-item">
-                <a class="nav-link mx-1 font-hover" href="friendQuiz" style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;">Quiz</a>
-              </li>
-              <a class="btn btn-primary btn-lg" href="https://square.link/u/GjQpbcoi" style="font-size: 1.2rem; color:aliceblue; background-color: #ff5656; border-color: #ff5656; margin-right: 20px; margin-left: 20px; padding-left: 10px; "target="_blank" rel="noopener noreferrer">DONATE</a> </li>
-              </ul>
+              <a class="btn btn-primary btn-lg" href="https://square.link/u/GjQpbcoi" style="font-size: 1.2rem; color:aliceblue; background-color: #ff5656; border-color: #ff5656;  "target="_blank" rel="noopener noreferrer">DONATE</a> </li>
+             </li>
+             </ul>
               </div>
-              <div class="collapse navbar-collapse justify-content-end" id="navbarNav">
+              <div class="collapse navbar-collapse justify-content-end">
                 <ul class="navbar-nav d-flex align-items-center">              <% if (user) { %>
                 <li class="nav-item d-flex align-items-center me-3">
                   <span class="navbar-text fw-bold me-2" style="font-size: 1.1rem; color: #455a7c;"><%= user.firstname || user.email %></span>
@@ -98,33 +103,33 @@
       </nav>
     </header>
  <!-- Hero Section -->
-<section class="gradient-background py-5 pb-0">
+<section class=" py-5 pb-0">
   <div class="container"> 
     <!-- 1) Full-width headline -->
-    <div class="row">
-      <div class="col-12 text-center">
-        <h1 class="display-2 text-white mb-3">Your Best Social Life is Curated for You </h1>
-        <p class="text-white mb-3" style="font-size: 1.5rem;"><em>KAI</em> is your 24/7 <em>Social Concierge</em> helping you make real friends, feel seen, & stay effortlessly connected</p> 
+    <div class="text-center">
+      <h1 class="display-2 mb-3 pt-5" style="color: #ff5656" data-aos="fade-up">Your Best Social Life is Curated for You</h1>
+    <p class="mb-3" style="color: #455a7c; font-size: 1.5rem;" data-aos="fade-up" data-aos-delay="100"><em>KAI</em> is your 24/7 <em>Social Concierge</em> helping you make real friends, feel seen, & stay effortlessly connected</p> 
       </div>
+     </div>
     </div>
     <!-- 2) Two-column beneath:  text+CTA right, image right -->
     <div class="row gx-1 justify-content-center align-items-center">
       <!-- Left: text+CTA -->
-      <div class="col-lg-5 text-center text-lg-start mb-4 mb-lg-0">
-   <p style="color: aliceblue ; font-size: 1.2rem; line-height: 1.6; padding-right: 1rem;">
-  <strong>Personalized Support</strong>- build skill & confidence to connect IRL. <em>KAI</em> meets you where you are at, making friends is easy.</p>
-   <div class="d-flex justify-content-center">
-          <a class="btn btn-primary2 custom-hover fw-bold mb-1 p-2" href="#custom-cards" style="font-size: 1.3rem; color: #455a7c; padding-left: 1rem; padding-right: 1rem; width: 300px;">
-            <img src="/images/kai-real.png" alt="real Kindness AI Companion Kai" width="35" height="35" class="me-2">Build My Social Skills</a>
+      <div class="col-lg-5  mb-4 mb-lg-0">
+   <p style="font-size: 1.2rem; line-height: 1.6; padding-right: 1rem;">
+  <strong>Personalized Support</strong>- Chat with <em>KAI</em> to start connecting IRL now, and if you completed the onboarding survey <em>KAI</em> can help you now.</p>
+   <div class="d-flex ">
+          <a class="btn btn-primary2 custom-hover fw-bold mb-3" href="javascript:window.askKAI('Hey KAI, remind me of my onboarding answers and lets plan meeting friends IRL')" style="font-size: 1.3rem; color: aliceblue; padding-left: 1rem; padding-right: 1rem; width: 300px;">
+            <img src="/images/kai-real.png" alt="real Kindness AI Companion Kai" width="35" height="35" class="me-2">Speak With KAI</a>
         </div> 
-   <p style="color: aliceblue ; font-size: 1.2rem; line-height: 1.6; padding-right: 1rem;"> <strong>No More Guessing </strong>- take a quick friend quiz to focus on meeting your people.</p>
-        <div class="d-flex justify-content-center">
-          <a class="btn btn-primary2 custom-hover fw-bold mb-1 p-2" href="friendQuiz" style="font-size: 1.3rem; color: #455a7c; padding-left: 1rem; padding-right: 1rem; width: 300px;">
+   <p style=" font-size: 1.2rem; line-height: 1.6; padding-right: 1rem;"> <strong>No More Guessing </strong>- take a quick friend quiz to focus on meeting the right people for you.</p>
+        <div class="d-flex ">
+          <a class="btn btn-primary2 custom-hover fw-bold mb-1 p-2" href="friendQuiz" style="font-size: 1.3rem; color: aliceblue; padding-left: 1rem; padding-right: 1rem; width: 300px;">
             <img src="/images/kai-real.png" alt="real Kindness AI Companion Kai" width="35" height="35" class="me-2">Find the Right People</a>
         </div> 
       </div>
       <!-- Right: kai image -->
-      <img src="./images/homePageKai 1.png" alt="picture of KAI our Kinder AI coach" class="img-fluid p-0 m-0 mt-md-3 pt-md-3" style="max-height: 300px; width: auto;" loading="lazy"> 
+      <img src="./images/homePageKai.png" alt="picture of KAI our Kinder AI coach" class="img-fluid p-0 m-0 mt-md-3 pt-md-3" style="max-height: 300px; width: auto;" data-aos="zoom-out" loading="lazy"> 
     </div>
   </div>
 </section>
@@ -134,297 +139,85 @@
   <div class="modern-tabs">
      <div class="col-12 text-center">
       <h2 class="display-4 mb-3" style="color: #ff5656;">Build Confidence. Create Connection. Grow Your Significance</h2>
-      <p class="lead mb-4" style="color: #455a7c;">Click on the 3 steps below to begin with a check-in, act with support, and then reflect with KAI — or chat anytime for personalized support.</p>
     </div>
-    <ul class="nav nav-tabs flex-wrap" id="filledTabs" role="tablist">
-      <!-- Card 1 -->
-      <li class="nav-item flex-fill d-flex justify-content-center text-center" role="presentation">
-        <button class="nav-link active p-0" id="start-tab" data-bs-toggle="tab" data-bs-target="#start" type="button" role="tab" style="text-decoration:none;color:inherit;">
-          <div class="card mx-auto" style="position:relative; overflow:hidden; width:250px; max-width:100%; "> <!-- background-color:rgba(255,187,187,0.4);--> 
-            <img src="./images/step1Confidence.png" class="card-img-top" alt="Get Kinder & Happier Now"  style="width:100%; height:100%; object-fit:cover;">
-            <div style="position:absolute; top:0; left:0; width:100%; height:100%;  z-index:1;"></div>  <!-- background:rgba(0,0,0,0.3);--> 
-            <!--<h3 class="display-6 lh-1 fw-bold" style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:100%; margin:0; color:aliceblue; text-shadow:3px 3px 5px rgba(0,0,0,0.8); z-index:2;">
-              Check-In & Self Mattering</h3>   -->
-            <div class="card-body" style="position:absolute; bottom:0.5rem; right:0.5rem; z-index:2; padding:0;"><svg class="bi" aria-hidden="true"><use xlink:href="#chevron-right"></use></svg>
-            </div>
-          </div>
-        </button>
-      </li>
-      <!-- Card 2 
-      <li class="nav-item flex-fill d-flex justify-content-center text-center" role="presentation">
-        <button class="nav-link p-0" id="superpower-tab" data-bs-toggle="tab" data-bs-target="#superpower" type="button" role="tab" style="text-decoration:none;color:inherit;">
-          <div class="card mx-auto" style="position:relative; overflow:hidden; width:250px; max-width:100%; height:250px; background-color:rgba(181,189,203,0.4);">
-            <img src="./images/kai-superhero-3D.png" class="card-img-top" alt="Find Your Kindness Superpower" style="width:100%; height:100%; object-fit:contain; ">
-            <div style="position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.3); z-index:1;"></div>
-            <h3 class="display-6 lh-1 fw-bold"
-                style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:100%; margin:0; color:aliceblue; text-shadow:3px 3px 5px rgba(0,0,0,0.8); z-index:2;">
-              Find Your Kindness Superpower</h3>
-            <div class="card-body" style="position:absolute; bottom:0.5rem; right:0.5rem; z-index:2; padding:0;"><svg class="bi" aria-hidden="true"><use xlink:href="#chevron-right"></use></svg>
-            </div>
-          </div>
-        </button>
-      </li> -->
-      <!-- Card 3 -->
-      <li class="nav-item flex-fill d-flex justify-content-center text-center" role="presentation">
-        <button class="nav-link p-0" id="talk-tab" data-bs-toggle="tab" data-bs-target="#talk" type="button" role="tab" style="text-decoration:none;color:inherit;">
-          <div class="card mx-auto" style="position:relative; overflow:hidden; width:250px; max-width:100%;">
-            <img src="./images/step2Friends.png" class="card-img-top" alt="Kai is Here to Talk" style="width:100%; height:100%; object-fit:contain;">
-            <div style="position:absolute; top:0; left:0; width:100%; height:100%; z-index:1;"></div>
-           <!-- <h3 class="display-6 lh-1 fw-bold" style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:100%; margin:0; color:aliceblue; text-shadow:3px 3px 5px rgba(0,0,0,0.8); z-index:2;">
-              Support & Action </h3> -->
-            <div class="card-body" style="position:absolute; bottom:0.5rem; right:0.5rem; z-index:2; padding:0;"><svg class="bi" aria-hidden="true"><use xlink:href="#chevron-right"></use></svg>
-            </div>
-          </div>
-        </button>
-      </li>
-      <!-- Card 4 -->
-      <li class="nav-item flex-fill d-flex justify-content-center text-center" role="presentation">
-        <button class="nav-link p-0" id="happier-tab" data-bs-toggle="tab" data-bs-target="#happier" type="button" role="tab" style="text-decoration:none;color:inherit;">
-          <div class="card mx-auto" style="position:relative; overflow:hidden; width:250px; max-width:100%;">
-            <img src="./images/step3Refection.png" class="card-img-top" alt="Feel Happier Every Day" style="width:100%; height:100%; object-fit:contain;">
-            <div style="position:absolute; top:0; left:0; width:100%; height:100%;  z-index:1;"></div>
-           <!--  <h3 class="display-6 lh-1 fw-bold" style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:100%; margin:0; color:aliceblue; text-shadow:3px 3px 5px rgba(0,0,0,0.8); z-index:2;">
-              Reflection & Significance</h3> -->
-            <div class="card-body"style="position:absolute; bottom:0.5rem; right:0.5rem; z-index:2; padding:0;"><svg class="bi" aria-hidden="true"><use xlink:href="#chevron-right"></use></svg>
-            </div>
-          </div>
-        </button>
-      </li>
-    </ul>
-    <!-- CONTENT + CHAT ROW -->
-    <div class="row gx-4 gy-4 mt-3">
-      <!-- LEFT: Tab Panes -->
-      <div class="col-12 col-md-6">
-        <div class="tab-content" id="filledTabsContent">
-          <!-- Pane: Start -->
-          <div class="tab-pane fade show active" id="start" role="tabpanel">
-            <div class="container px-1 px-md-4 pt-2" >
-              <div class="bg-body mx-auto py-4 px-1 px-md-4" style="border-radius:21px;">
-                <div class="row gx-2 gx-md-4 gy-4">
-                  <div class="col-12">
-                    <div class="card" style="position:relative; overflow:hidden; width:200px; max-width:100%; height:200px; background-color:rgba(255,187,187,0.4);">
-                      <img src="./images/kai-get-kinder-3D.png" class="card-img-top" alt="Get Kinder & Happier Now" style="width:100%; height:100%; object-fit:cover;">
-                      <div style="position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.3); z-index:1;"></div>
-                      <h3 class="display-7 lh-1 fw-bold text-center" style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:100%; margin:0; color:aliceblue; text-shadow:3px 3px 5px rgba(0,0,0,0.8); z-index:2;">
-                         Build Your Confidence
-                      </h3>
-                      <div class="card-body" style="position:absolute; bottom:0.5rem; right:0.5rem; z-index:2; padding:0;"><svg class="bi" aria-hidden="true"><use xlink:href="#chevron-right"></use></svg>
-                      </div>
-                    </div>
-                  </div>
-                  <div class="col-12">
-                    <h3 style="color:#ff5656; margin-bottom: 1rem;">Check-In, gauge your emotional state, get affirmations, or ask how KAI can help.</h3>
-                    <div class="btn-group ms-2" role="group" aria-label="Quick starters">
-                    <ul class="list-unstyled ps-0">
-                      <li><a class="btn btn-outline-primary btn-lg starter-btn custom-hover fw-bold" href="#chat2" data-prompt="I would like an orientation on what you do Kai" style="font-size: 1.1rem; color: #455a7c; width: 300px;"><img src="/images/kai-get-kinder-3D.png" alt="real Kindness AI Companion Kai" width="35" height="35" class="me-2"> 
-                        How KAI Can Help You </a> </li>
-                     <p style="margin-bottom: 1rem; margin-top: 0.5rem;">Find out more about how KAI can help you matter and be more connected to others.</p>
-                     <li><a class="btn btn-outline-primary btn-lg starter-btn custom-hover fw-bold" href="#chat2" data-prompt="I would like a baseline check in Kai" style="font-size: 1.1rem; color: #455a7c; width: 300px;"><img src="/images/kai-get-kinder-3D.png" alt="real Kindness AI Companion Kai" width="35" height="35" class="me-2"> 
-                      Baseline Check-In </a> </li>
-                     <p style="margin-bottom: 1rem; margin-top: 0.5rem;">Assess your emotional & physical state to provide KAI a starting point for support.</p>
-                      <li><a class="btn btn-outline-primary btn-lg starter-btn custom-hover fw-bold" href="#chat2" data-prompt="Kai I want to set a goal or intention to matter and connect with others"style="font-size: 1.1rem; color: #455a7c; width: 300px;"><img src="/images/kai-get-kinder-3D.png" alt="real Kindness AI Companion Kai" width="35" height="35" class="me-2">
-                        Set Intention or Goal</a></li>
-                      <p style="margin-bottom: 1rem; margin-top: 0.5rem;">KAI helps you set a goal to begin mattering and build connections </p>
-                      <li> <a class="btn btn-outline-primary btn-lg starter-btn custom-hover fw-bold" href="#chat2" data-prompt="Kai give me an affirmation and lets chat"style="font-size: 1.1rem; color: #455a7c; width: 300px;"><img src="/images/kai-get-kinder-3D.png" alt="real Kindness AI Companion Kai" width="35" height="35" class="me-2"> 
-                        Get a Pick Me Up</a> </li>
-                     <p style="margin-bottom: 1rem; margin-top: 0.5rem;"> Ask KAI for an affirmation and feel more confident.</p>
-                    </ul>
-                    </div>
-                    <p>Read the blogs here at <a href="https://getkinder.ai/blog" target="_blank" rel="noopener">Kinder AI™ Blog</a> or at <a href="https://getkindr.com/blog" target="_blank" rel="noopener">the Get Kindr Foundation</a> to learn more about why this works. </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-          <!-- Pane: Superpower
-          <div class="tab-pane fade" id="superpower" role="tabpanel">
-            <div class="container px-1 px-md-4 pt-2" style="margin-top:1rem;">
-              <div class="row gx-2 gx-md-4 gy-4">
-                <div class="col-12">
-                  <div class="card" style="position:relative; overflow:hidden; width:200px; max-width:100%; height:200px; background-color:rgba(181,189,203,0.4);">
-                    <img src="./images/kai-superhero-3D.png" class="card-img-top" alt="Find Your Kindness Superpower" style="width:100%; height:100%; object-fit:contain; object-position:center;">
-                    <div style="position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.3); z-index:1;"></div>
-                    <h3 class="display-7 lh-1 fw-bold text-center" style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:100%; margin:0; color:aliceblue; text-shadow:3px 3px 5px rgba(0,0,0,0.8); z-index:2;">
-                      Find Your Kindness Superpower</h3>
-                    <div class="card-body" style="position:absolute; bottom:0.5rem; right:0.5rem; z-index:2; padding:0;"><svg class="bi" aria-hidden="true"><use xlink:href="#chevron-right"></use></svg>
-                    </div>
-                  </div>
-                </div>
-                <div class="col-12">
-                  <h3 style="color:#ff5656; margin-bottom: 1rem;">Find your Kindness Style so you can own your superpower, amplify it and share it.</h3>
-                    <div class="btn-group ms-2" role="group" aria-label="Quick starters">
-                    <ul class="list-unstyled ps-0">
-                     <li><a class="btn btn-outline-primary btn-lg starter-btn custom-hover fw-bold " href="#chat2" data-prompt="I would like to do the short kindness style quiz, KAI" style="font-size: 1.1rem; color: #455a7c; width: 325px;"><img src="/images/kai-superhero-3D.png" alt="real Kindness AI Companion Kai" width="35" height="35" class="me-2">Kindness Style Quiz - Short</a> </li>
-                     <p style="margin-bottom: 1rem; margin-top: 0.5rem;">Find your Kindness Superpower with a short quiz (approx 2 minutes)?</p>
-                      <li><a class="btn btn-outline-primary btn-lg starter-btn custom-hover fw-bold " href="#chat2" data-prompt="I would like to do the long kindness style quiz, KAI"style="font-size: 1.1rem; color: #455a7c; width: 325px;"><img src="/images/kai-superhero-3D.png" alt="real Kindness AI Companion Kai" width="35" height="35" class="me-2">Kindness Style Quiz - Long</a></li>
-                      <p style="margin-bottom: 1rem; margin-top: 0.5rem;">Find your Kindness Superpower with a longer quiz (approx 4 minutes)?</p>
-                    </ul>
-                    </div>
-                    <p>Read the blogs here at <a href="https://getkinder.ai/blog" target="_blank" rel="noopener">Kinder AI™ Blog</a> or at <a href="https://getkindr.com/blog" target="_blank" rel="noopener">the Get Kindr Foundation</a> to learn more about why this works. </p>
-                </div>
-              </div>
-            </div>
-          </div> -->
-          <!-- Pane: Talk -->
-          <div class="tab-pane fade" id="talk" role="tabpanel">
-            <div class="container px-1 px-md-4 pt-2" style="margin-top:1rem;">
-              <div class="row gx-2 gx-md-4 gy-4">
-                <div class="col-12">
-                  <div class="card" style="position:relative; overflow:hidden; width:200px; max-width:100%; height:200px; background-color:rgba(255,86,86,0.4);">
-                    <img src="./images/kai-real.png" class="card-img-top" alt="Kai is Here to Talk" style="width:100%; height:100%; object-fit:cover;">
-                    <div style="position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.3); z-index:1;"></div>
-                    <h3 class="display-7 lh-1 fw-bold text-center" style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:100%; margin:0; color:aliceblue; text-shadow:3px 3px 5px rgba(0,0,0,0.8); z-index:2;">
-                      Grow Real Friendships</h3>
-                    <div class="card-body"
-                         style="position:absolute; bottom:0.5rem; right:0.5rem; z-index:2; padding:0;">
-                      <svg class="bi" aria-hidden="true"><use xlink:href="#chevron-right"></use></svg>
-                    </div>
-                  </div>
-                </div>
-                <div class="col-12">
-                  <h3 style="color:#ff5656; margin-bottom: 1rem;">When you are ready connect with others KAI can help you in many ways.</h3>
-                    <div class="btn-group ms-2" role="group" aria-label="Quick starters">
-                    <ul class="list-unstyled ps-0">
-                     <li><a class="btn btn-outline-primary btn-lg starter-btn custom-hover fw-bold " href="#chat2" data-prompt="How can I feel less stressed about my social interactions KAI. Ask me for context." style="font-size: 1.1rem; color: #455a7c; width: 325px;"><img src="/images/kai-get-kinder-3D.png" alt="real Kindness AI Companion Kai" width="35" height="35" class="me-2"> 
-                      Feel Less Stressed </a> </li>
-                     <p style="margin-bottom: 1rem; margin-top: 0.5rem;">Check in with KAI to find out how you can manager your level of stress.</p>
-                      <li> <a class="btn btn-outline-primary btn-lg starter-btn custom-hover fw-bold " href="#chat2" data-prompt="KAI give me some conversation starters. Ask me for context."style="font-size: 1.1rem; color: #455a7c; width: 325px;"><img src="/images/kai-get-kinder-3D.png" alt="real Kindness AI Companion Kai" width="35" height="35" class="me-2"> 
-                        Conversation Starters</a> </li>
-                     <p style="margin-bottom: 1rem; margin-top: 0.5rem;"> Ask KAI for a conversation starter - start the discussion well and it ends well</p>
-                     <li> <a class="btn btn-outline-primary btn-lg starter-btn custom-hover fw-bold " href="#chat2" data-prompt="KAI I need some help with my conversation. Ask me for context."style="font-size: 1.1rem; color: #455a7c; width: 325px;"><img src="/images/kai-get-kinder-3D.png" alt="real Kindness AI Companion Kai" width="35" height="35" class="me-2"> 
-                      Get Support</a> </li>
-                     <p style="margin-bottom: 1rem; margin-top: 0.5rem;"> KAI is here to help ensure you connect effectively with others.</p>
-                    </div>
-                    <p>Read the blogs here at <a href="https://getkinder.ai/blog" target="_blank" rel="noopener">Kinder AI™ Blog</a> or at <a href="https://getkindr.com/blog" target="_blank" rel="noopener">the Get Kindr Foundation</a> to learn more about why this works. </p>
-                </div>
-              </div>
-            </div>
-          </div>
-          <!-- Pane: Happier -->
-          <div class="tab-pane fade" id="happier" role="tabpanel">
-            <div class="container px-1 px-md-4 pt-2" style="margin-top:1rem;">
-              <div class="row gx-2 gx-md-4 gy-4">
-                <div class="col-12">
-                  <div class="card" style="position:relative; overflow:hidden; width:200px; max-width:100%; height:200px; background-color:rgba(69,90,124,0.4);">
-                    <img src="./images/kai-feel-happier-3D.png" class="card-img-top" alt="Feel Happier Every Day" style="width:100%; height:100%; object-fit:cover;">
-                    <div style="position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.3); z-index:1;"></div>
-                    <h3 class="display-7 lh-1 fw-bold text-center" style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:100%; margin:0; color:aliceblue; text-shadow:3px 3px 5px rgba(0,0,0,0.8); z-index:2;">
-                      Reflection & Ripple</h3>
-                    <div class="card-body"
-                         style="position:absolute; bottom:0.5rem; right:0.5rem; z-index:2; padding:0;">
-                      <svg class="bi" aria-hidden="true"><use xlink:href="#chevron-right"></use></svg>
-                    </div>
-                  </div>
-                </div>
-                <div class="col-12">
-                  <h3 style="color:#ff5656; margin-bottom: 1rem;"> Reflect with KAI about your day to improve connections and increase your ripple of impact.</h3>
-                    <div class="btn-group ms-2" role="group" aria-label="Quick starters">
-                    <ul class="list-unstyled ps-0">
-                      <li><a class="btn btn-outline-primary btn-lg starter-btn custom-hover" href="#chat2" data-prompt="I want to tell you about my attempts to connect. Ask me for context."style="font-size: 1.1rem; color: #455a7c; width: 350px;"><img src="/images/kai-get-kinder-3D.png" alt="real Kindness AI Companion Kai" width="35" height="35" class="me-2">
-                        Update KAI on Your Day</a></li>
-                      <p style="margin-bottom: 1rem; margin-top: 0.5rem;">Let KAI know how your day and about the connections made.</p>
-                     <li><a class="btn btn-outline-primary btn-lg starter-btn custom-hover " href="#chat2" data-prompt="Lets make a plan to connect with others tomorrow. Ask me how today went." style="font-size: 1.1rem; color: #455a7c; width: 350px;"><img src="/images/kai-get-kinder-3D.png" alt="real Kindness AI Companion Kai" width="35" height="35" class="me-2">
-                      Make a Plan for Tomorrow</a> </li>
-                     <p style="margin-bottom: 1rem; margin-top: 0.5rem;">Chat with KAI to apply what you learned today and hit the ground running tomorrow</p>
-                     <li> <a class="btn btn-outline-primary btn-lg starter-btn custom-hover" href="#chat2" data-prompt="Give me ideas to do together with my friends. Ask me for context."style="font-size: 1.1rem; color: #455a7c; width: 350px;"><img src="/images/kai-get-kinder-3D.png" alt="real Kindness AI Companion Kai" width="35" height="35" class="me-2">
-                     Ready to Plan a Group Event</a> </li>
-                     <p style="margin-bottom: 1rem; margin-top: 0.5rem;"> Ask KAI for ideas for me and my friends to do together. </p>
-                    </ul>
-                    </div>
-                    <p>Read the blogs here at <a href="https://getkinder.ai/blog" target="_blank" rel="noopener">Kinder AI™ Blog</a> or at <a href="https://getkindr.com/blog" target="_blank" rel="noopener">the Get Kindr Foundation</a> to learn more about why this works. </p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+   <!-- tab 1 - quiz -->
+    <section id="quiz" class="py-5">
+  <div class="container">
+    <div class="row align-items-center gy-5">
+      <!-- Image -->
+      <div class="col-12 col-lg-6 text-center" data-aos="zoom-out" data-aos-delay="150">
+        <img src="/images/happyGirls.jpeg" class="img-fluid rounded-4 shadow-sm" alt="About Get Kinder">
       </div>
-        <!-- RIGHT: CHAT WINDOW -->
-      <div class=" col-12 col-md-6 mx-md-auto px-0" id="chat2">
-       <section>
-            <div class="container-fluid py-4 px-0 px-md-4  mx-md-0">
-              <div class="row justify-content-center gx-0 gx-md-4">
-                <div class="col-12" >
-                  <div class="card w-100 shadow" id="chat-card-container">             
-                    <!-- Header -->
-                    <div class="card-header d-flex justify-content-between align-items-center p-3" >
-                      <div class="d-flex align-items-center" >
-                        <img src="./images/kai-real.png" alt="KAI - the AI kindness coach" class="rounded-circle me-2" style="width: 40px; height: 40px;">
-                        <h4 class="mb-0" style="color: #455a7c;">Chat With KAI Now</h4>
-                      </div>
-                    </div>
-                    <!-- Body -->
-              <div id="chatBody" class="card-body overflow-auto px-3" style="height: 400px;">
-        <% if (typeof isNewUser !== 'undefined' && isNewUser) { %>
-        <!-- FIRST‐TIME GREETING -->
-        <div class="d-flex mt-2 align-items-start">
-          <img src="./images/kai-real.png" alt="KAI – the AI kindness coach" class="rounded-circle flex-shrink-0 me-2"style="width: 35px; height: 35px;"/>
-          <div class="bg-body-tertiary rounded-3 px-3 py-2 ms-2 flex-grow-1" style="max-width: calc(100% - 50px);">
-        👋 Hello! I’m KAI, your AI Companion. How can I help you matter today?
+      <!-- Text -->
+      <div class="col-12 col-lg-6">
+        <h3 class="fw-semibold mb-2" style="color:#ff5656;" data-aos="fade-up">Focus on the Right People Fast</h3>
+        <h2 class="h2 fw-bold mb-3" data-aos="fade-up" data-aos-delay="80" style="color:#455a7c;">Find out who to focus on in our 2-minute Friend Quiz</h2>
+        <p class="text-secondary mb-4" data-aos="fade-up" data-aos-delay="140">
+          Take a couple of minutes to complete the quiz to confirm 2–3 great candidates most likely to become close friends—plus a few easy first moves you can take today. Then work with <em>KAI</em>, your friendly AI companion, to plan how to turn the right people you know into friends.
+        </p>
+        <a href="friendQuiz" class="btn btn-dark" data-aos="fade-up" data-aos-delay="200">Take the Quiz Now</a>
+      </div>
+    </div>
+  </div>
+</section>
+   <!-- tab 2 - challenges -->
+<section id="arcs" class="py-5">
+  <div class="container">
+    <div class="row align-items-center gy-5">
+      <div class="col-12 col-lg-6 order-lg-2 text-center" data-aos="zoom-out" data-aos-delay="150">
+        <img src="/images/friendsHavingLunch.jpg" class="img-fluid rounded-4 shadow-sm" alt="About Get Kinder">
+      </div>
+      <div class="col-12 col-lg-6 order-lg-1">
+        <h3 class="fw-semibold mb-2" style="color:#ff5656;" data-aos="fade-up">Gain Momentum Fast</h3>
+        <h2 class="h2 fw-bold mb-3" data-aos="fade-up" data-aos-delay="80" style="color:#455a7c;">Get started easily and quickly.</h2>
+        <p class="text-secondary mb-4" data-aos="fade-up" data-aos-delay="140">
+      Tell <em>KAI</em> your vibe (coffee vs. walk, weekdays vs. weekends, budget). <em>KAI</em> lines up one doable step at a time with pre-filled invites, gentle scripts, and public-place ideas—plus fail-forward options if plans change.</p>
+        <a href="javascript:window.askKAI()" class="btn btn-dark" data-aos="fade-up" data-aos-delay="200">Chat With Kai</a>
+      </div>
+    </div>
+  </div>
+</section>
+  <!-- tab 3 - challenges -->
+   <section id="about" class="py-5">
+  <div class="container">
+    <div class="row align-items-center gy-5">
+      <!-- Image -->
+      <div class="col-12 col-lg-6 text-center" data-aos="zoom-out" data-aos-delay="150">
+        <img src="/images/friendsOnBeach.jpg" class="img-fluid rounded-4 shadow-sm" alt="About Get Kinder">
+      </div>
+      <!-- Text -->
+      <div class="col-12 col-lg-6">
+        <h3 class="fw-semibold mb-2" style="color:#ff5656;" data-aos="fade-up">Get Staying Power, not just a one-off</h3>
+        <h2 class="h2 fw-bold mb-3" data-aos="fade-up" data-aos-delay="80" style="color:#455a7c;">Keep it going (from “nice hang” → real friendship)</h2>
+        <p class="text-secondary mb-4" data-aos="fade-up" data-aos-delay="140">
+Get started making a new friend with a starter <em>Friend Arcs</em> . KAI will build and guide you through a short <em>Friend Arc</em> — tiny, timed steps to carry you from “we should hang” to an on-calendar plan by Day 7, at your pace.</p>
+        <a href="dashboard" class="btn btn-dark" data-aos="fade-up" data-aos-delay="200">Get Started</a>
+      </div>
+    </div>
+  </div>
+</section>
+ <!-- tab 4 - mattering graph -->
+<section id="about" class="py-5">
+  <div class="container">
+    <div class="row align-items-center gy-5">
+      <div class="col-12 col-lg-6 order-lg-2 text-center" data-aos="zoom-out" data-aos-delay="150">
+        <img src="/images/2friendsInIndia.jpg" class="img-fluid rounded-4 shadow-sm" alt="About Get Kinder">
+      </div>
+      <div class="col-12 col-lg-6 order-lg-1">
+        <h3 class="fw-semibold mb-2" style="color:#ff5656;" data-aos="fade-up">Get staying power, not just a one-off</h3>
+        <h2 class="h2 fw-bold mb-3" data-aos="fade-up" data-aos-delay="80" style="color:#455a7c;"><em>Custom Arcs</em> Makes Making Friends Easy.</h2>
+        <p class="text-secondary mb-4" data-aos="fade-up" data-aos-delay="140">
+<em>KAI</em> keeps a <em>Mattering Graph</em> of your hangs and highlights meaningful moments—like noticing, affirming, and asking for help—so you build recurring touch points to turn an acquaintance to a friend, or a friend into a best friend . When it helps, <em>KAI</em> can send thoughtful follow-ups, thank-you notes, and gentle check-ins on your behalf.</p>
+        <a href="dashboard" class="btn btn-dark" data-aos="fade-up" data-aos-delay="200">Find Your Custom Arc</a>
+      </div>
+    </div>
+  </div>
+</section>
+      <div class="col-12 text-center mt-2 mb-2"> <p class="mb-0" style="color:#455a7c;"> Remember KAI can make mistakes and does not provide mental health advice</p></div>
+</div>
         </div>
-        </div>
-
-          <% } else if (typeof isNewUser !== 'undefined') { %>
-          <!-- RETURNING USER GREETING -->
-          <div class="d-flex mt-2 align-items-start">
-            <img src="./images/kai-real.png" alt="KAI – the AI kindness coach" class="rounded-circle flex-shrink-0 me-2" style="width: 35px; height: 35px;"/>
-          <div class="bg-body-tertiary rounded-3 px-3 py-2 ms-2 flex-grow-1" style="max-width: calc(100% - 50px);">
-              👋 Welcome back! How can I help you today?
-            </div>
-          </div>
-          <% } %>
-                  <% if (chatHistory && chatHistory.length) { 
-                        chatHistory.forEach(msg => {
-                       if (msg.role === "user") { %>
-                  <div class="d-flex justify-content-end mt-2">
-                    <div class="d-flex align-items-center">
-                      <div class="bg-primary text-white rounded-3 px-3 py-2">
-                        <%= msg.content %>
-                      
-                      <img src="<%= (msg.user && msg.user.picture) ? msg.user.picture : '/images/nerdy-KAI.png' %>" alt="get kinder user profile picture" class="rounded-circle ms-2" style="width: 35px; height: 35px;">
-             </div>
-           </div>
-         <% } else { %>
-            <div class="d-flex mt-2 align-items-start">
-              <img src="./images/kai-real.png" alt="KAI – the AI kindness coach" class="rounded-circle flex-shrink-0 me-2" style="width: 35px; height: 35px;">
-              <div class="bg-body-tertiary rounded-3 px-3 py-2 ms-2 flex-grow-1" style="max-width: calc(100% - 50px);">
-                <%= msg.content %>
-              </div>
-            </div>
-          <%   } 
-          });
-          } %>
-        </div>
-          <!-- (Off-screen template for typing indicator—also showing KAI’s avatar) -->
-          <template id="typingIndicatorTemplate">
-            <div class="d-flex align-items-center mt-2" id="typingIndicator">
-              <img src="./images/kai-real.png" alt="KAI - the AI kindness coach" class="rounded-circle me-2" style="width: 35px; height: 35px;">
-              <div class="typing dots bg-body-tertiary rounded-3 px-3 py-2">
-                <span>.</span><span>.</span><span>.</span>
-              </div>
-            </div>
-          </template>
-                    <!-- Footer / Input -->
-                    <div class="card-footer text-muted d-flex align-items-center p-3">
-                      <input type="text" id="chatInput" class="form-control form-control-lg ms-2" placeholder="Type message...">
-                      <input type="hidden" id="threadId" value="<%= threadId %>">
-                      <button class="btn btn-primary ms-3" id="sendBtn"><i class="fas fa-paper-plane"></i></button>
-                      <script>
-                        document.getElementById('chatInput').addEventListener('keydown', function(e) {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            document.getElementById('sendBtn').click();
-                          }
-                        });
-                      </script>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </section>
       </div>
     </div> <!-- /.row -->
-    <div class="col-12 text-center mt-4"> <p class="mb-0" style="color:#455a7c;"> Remember KAI can make mistakes and does not provide mental health advice</p></div>
   </div> <!-- /.modern-tabs -->
 </div> <!-- /#custom-cards -->
 </div>
@@ -556,9 +349,56 @@
       window.loggedInUserPicture = "<%= user.picture ? user.picture : '/images/nerdy-KAI.png' %>";
     </script>
   <% } %>
+<% if (typeof user !== 'undefined' && user) { %>
+<script>
+(function flushOnboardingDraftOnce() {
+  try {
+    var RAW_KEY = 'onboarding.draft';
+    var FLUSH_FLAG = 'onboarding.flushed';
+    if (localStorage.getItem(FLUSH_FLAG) === '1') return;
 
-  <!-- 3) Load chat.js ONCE (remove your duplicate include) -->
-  <script src="/js/chat.js"></script>
+    var raw = localStorage.getItem(RAW_KEY);
+    if (!raw) return;
+    var draft = JSON.parse(raw); // { v, answers, index, ts }
+    var a = (draft && draft.answers) || {};
+
+    // Map onboarding answers -> userdata fields
+    var interests = Array.isArray(a.interests)
+      ? a.interests.map(String).map(s => s.trim()).filter(Boolean)
+      : [];
+
+    var payload = {
+      // new columns you asked for:
+      why_friend:        a.whyFriend || null,
+      known_connection:  a.knownConnection || null,
+      desired_outcome:   a.outcome || null,
+      hours_per_week:    (typeof a.timeCommitment === 'number') ? a.timeCommitment : null,
+      age_bracket:       a.age || null,
+
+      // existing columns on profile page:
+      interest1: interests[0] || '',
+      interest2: interests[1] || '',
+      interest3: interests[2] || ''
+    };
+
+    fetch('/api/onboarding/complete', {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json' },
+      body: JSON.stringify({ answers: payload, source: 'post_login_flush' })
+    })
+    .then(function (res) {
+      if (!res.ok) return;
+      // mark done & prevent remounting
+      localStorage.removeItem(RAW_KEY);
+      localStorage.setItem(FLUSH_FLAG, '1');
+      document.cookie = 'onboarding_done=1; Max-Age=31536000; Path=/';
+    })
+    .catch(function(){ /* swallow */ });
+
+  } catch (e) { /* swallow */ }
+})();
+</script>
+<% } %>
 
   <!-- your existing inline scripts that use #chatInput, #sendBtn, tabs, etc. -->
   <script>
@@ -607,8 +447,61 @@
       if (first) first.addEventListener('click', function() { scrollToPaneSelector('#start'); });
     });
   </script>
+<%- include('partials/kai-chat-floating', {
+  greetText: "👋 Hello! I’m KAI, your AI Companion. How can I help you matter today?"
+}) %>
 
+<script>
+  // Starter buttons now open the floating chat and send the prompt
+  document.querySelectorAll('.starter-btn').forEach(btn => {
+    btn.addEventListener('click', () => window.askKAI(btn.dataset.prompt));
+  });
+</script>
   <!-- HubSpot (can stay last) -->
-  <script type="text/javascript" id="hs-script-loader" async defer src="//js-na3.hs-scripts.com/342094649.js"></script>
+  <script type="text/javascript" id="hs-script-loader" async defer src="//js-na3.hs-scripts.com/342094649.js">
+  </script>
+
+<% if (!onboardingDone) { %>
+  <div id="onboarding-root"></div>
+  <script>
+    (function () {
+      // If the bundle tag isn't on the page, inject it and mount on load.
+      var hasBundle = Array.prototype.some.call(document.scripts, function (s) {
+        return (s.src || '').indexOf('/js/bundles/bestie-vibes.js') !== -1;
+      });
+
+      function mount() {
+        if (window.renderOnboarding) {
+          // If helper exists, mount explicitly
+          window.renderOnboarding('#onboarding-root');
+        }
+        // If there’s auto-boot code in the bundle, it will mount on its own.
+      }
+
+      if (!hasBundle) {
+        var s = document.createElement('script');
+        s.src = '/js/bundles/bestie-vibes.js?v=' + Date.now(); // cache bust
+        s.defer = true;
+        s.onload = mount;
+        s.onerror = function () {
+          console.error('Onboarding bundle failed to load:', s.src);
+        };
+        document.body.appendChild(s);
+      } else {
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', mount, { once: true });
+        } else {
+          mount();
+        }
+      }
+    })();
+  </script>
+<% } %>
+
+  <!-- AOS (Animate On Scroll) -->
+  <script src="https://unpkg.com/aos@2.3.1/dist/aos.js"></script>
+  <script>
+    AOS.init({ duration: 600, easing: "ease", once: true, anchorPlacement: "top-bottom" });
+  </script>
 </body>
 </html>

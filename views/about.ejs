@@ -54,59 +54,61 @@
       <header>
       <nav class="navbar fixed-top navbar-light bg-white navbar-expand-lg">
         <div class="container-fluid d-flex">
-          <a class="navbar-brand" href="/"><img src="/images/logo.png" alt="Get Kinder logo" height="80"> </a>
+          <a class="navbar-brand" href="/"><img src="/images/logo.png" alt="Get Kinder logo" class="logo-img" height="80" width: auto;> </a>
           <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
-            <span class="navbar-toggler-icon"></span>
-          </button>
+            <span class="navbar-toggler-icon"></span></button>
           <div class="collapse navbar-collapse justify-content-center" id="navbarNav">
             <ul class="navbar-nav align-items-center">
-              <li class="nav-item">
-                <a class="btn btn-outline-primary btn-lg custom-hover" href="/#chat2" style="font-size: 1.2rem; color: #455a7c; margin-right: 30px; margin-left: 10px; padding-left: 10px;"><img src="/images/kai-real.png" alt="real Kindness AI Companion Kai" width="35" height="35" class="me-2">Chat with Kai Now</a>
-              </li>
-              <li class="nav-item">
+             <li class="nav-item">
                 <a class="nav-link mx-1 font-hover" href="/" style="font-size: 1.2rem; color: #455a7c; padding-right: 30px;">Home</a>
               </li>
-              <li class="nav-item">
-                <a class="nav-link mx-1 font-hover" href="blog" style="font-size: 1.2rem; color: #455a7c; padding-right: 30px;">Blog</a>
-              </li>
-              <li class="nav-item">
-                <a class="nav-link mx-1 font-hover" href="profile" style="font-size: 1.2rem; color: #455a7c; padding-right: 30px;">Profile</a>
+               <li class="nav-item">
+                <a class="nav-link mx-1 font-hover" href="dashboard" style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;">Friend Arcs</a>
               </li>
                <li class="nav-item">
-                <a class="nav-link mx-1 font-hover" href="friendQuiz" style="font-size: 1.2rem; color: #455a7c; padding-right: 30px;">Quiz</a>
+                <a class="nav-link mx-1 font-hover" href="friendQuiz" style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;">Quiz</a>
               </li>
-              </ul>
-            </div>
-              <div class="collapse navbar-collapse justify-content-end" id="navbarNav">
+                 <li class="nav-item">
+                <a class="nav-link mx-1 font-hover" href="profile" style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;">Profile</a>
+              </li>
+               <li class="nav-item">
+                <a class="nav-link mx-1 font-hover" href="blog" style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;">Blog</a>
+              </li>
+                <li class="nav-item">
+              <a class="btn btn-primary btn-lg" href="https://square.link/u/GjQpbcoi" style="font-size: 1.2rem; color:aliceblue; background-color: #ff5656; border-color: #ff5656;  "target="_blank" rel="noopener noreferrer">DONATE</a> </li>
+             </li>
+             </ul>
+              </div>
+              <div class="collapse navbar-collapse justify-content-end">
                 <ul class="navbar-nav d-flex align-items-center">              <% if (user) { %>
                 <li class="nav-item d-flex align-items-center me-3">
-                  <span class="navbar-text fw-bold me-2" style="font-size: 1.2rem; color: #455a7c;"><%= user.firstname || user.email %></span>
-                  <img src="<%= user.picture ? user.picture : '/images/nerdy-KAI.png' %>" class="rounded-circle me-3" width="32" height="32" alt="Get Kinder User Avatar">
+                  <span class="navbar-text fw-bold me-2" style="font-size: 1.1rem; color: #455a7c;"><%= user.firstname || user.email %></span>
+                  <img src="<%= (user && user.picture) ? user.picture : '/images/nerdy-KAI.png' %>"  class="rounded-circle me-3" width="32" height="32" alt="Get Kinder User Avatar">
                   <button class="btn btn-outline-danger btn-sm" data-bs-toggle="modal" data-bs-target="#logoutModal">Log Out</button>
                 </li>
-              <% } else { %>
+                <% } else { %>
                 <li class="nav-item"><a class="btn btn-primary btn-lg" 
                   style="font-size: 1.2rem; color: white; text-decoration: none; width: 100%; min-width: 120px; text-align: center;" href="login" role="button">Log In</a>
                 </li>
-              <% } %>
-            </ul>
+                <% } %>
+              </ul>
             </div>
         </div>
       </nav>
     </header>
-  <section id="title" class="gradient-background">
+  <section id="title" >
     <div class="container py-5">
-        <h1 class="display-2 my-5 text-center" style="color: aliceblue;">About Get Kinder</h1>
-      <h2 class="display-4 mb-3 text-center" style="color: aliceblue;">Who We Are</h2>
+        <h1 class="display-1 my-5 text-center" style="color: #ff5656">About Get Kinder</h1>
+      <h2 class="display-4 mb-3 text-center" style="color: #455a7c;">Who We Are</h2>
         <div class="row g-4 row-cols-1 row-cols-md-3">
           <div class="col text-center">
             <div class="profile-card p-3"> 
             <img class="bd-placeholder-img rounded-circle mb-3" width="140" height="140" src="./images/michael.png" alt="Michael Wozney"></img>
             <h2 class="display-7 lh-1 fw-bold" style="width: 100%; text-align: center; color: aliceblue; text-shadow: 2px 2px 3px rgba(0,0,0,0.8); z-index: 2; margin-bottom: 1rem;"> Michael Wozney </h2>
-            <h5 class="fw-bold" style="color: aliceblue; padding-bottom: 10px;"><em>Co-Founder & CEO</em></h5>
-            <p style="color: aliceblue; font-size: 1.1rem;">Michael’s lifelong journey of helping others began with a degree in psychology and working with individuals with special needs — leading to founding a community services organization. </p>
-            <p style="color: aliceblue; font-size: 1.1rem;">With an MBA and over 15 years guiding leaders to be more kind, effective, and values-driven, he has shaped positive workplace cultures across healthcare and global multinationals.</p>
-            <p style="color: aliceblue; font-size: 1.1rem;">Today, he’s uniquely equipped to scale that impact globally—bringing the power of kindness to people and communities around the world. </p>
+            <h5 class="fw-bold" style="color: #ff5656; padding-bottom: 10px;"><em>Co-Founder & CEO</em></h5>
+            <p style="color: #455a7c; font-size: 1.1rem;">Michael’s lifelong journey of helping others began with a degree in psychology and working with individuals with special needs — leading to founding a community services organization. </p>
+            <p style="color:  #455a7c; font-size: 1.1rem;">With an MBA and over 15 years guiding leaders to be more kind, effective, and values-driven, he has shaped positive workplace cultures across healthcare and global multinationals.</p>
+            <p style="color:  #455a7c; font-size: 1.1rem;">Today, he’s uniquely equipped to scale that impact globally—bringing the power of kindness to people and communities around the world. </p>
           </div><!-- <p><a class="btn btn-secondary" href="#">View details »</a></p>  -->
           </div>
 
@@ -114,19 +116,19 @@
             <div class="profile-card p-3"> 
             <img class="bd-placeholder-img rounded-circle mb-3" width="140" height="140" src="./images/erin.png" alt="Michael Wozney"></img>
            <h2 class="display-7 lh-1 fw-bold" style="width: 100%; text-align: center; color: aliceblue; text-shadow: 2px 2px 3px rgba(0,0,0,0.8); z-index: 2; margin-bottom: 1rem;"> Erin Gray </h2>
-            <h5 class="fw-bold" style="color: aliceblue; padding-bottom: 10px;"><em>Co-Founder & COO</em></h5>
-            <p style="color: aliceblue; font-size: 1.1rem;">From an early age, Erin has been an active member of her community, shaped by her family’s dedication to volunteering and helping neighbours.</p>
-            <p style="color: aliceblue; font-size: 1.1rem;">She earned her master’s degree in London and went on to close multimillion-dollar deals in Dubai and across the Middle East.</p> 
-            <p style="color: aliceblue; font-size: 1.1rem;">Now, she’s bringing these global skills and leadership experience back to what matters most to her—making the world a better place through Kinder AI™.</p>    
+            <h5 class="fw-bold" style="color:  #ff5656; padding-bottom: 10px;"><em>Co-Founder & COO</em></h5>
+            <p style="color:  #455a7c; font-size: 1.1rem;">From an early age, Erin has been an active member of her community, shaped by her family’s dedication to volunteering and helping neighbours.</p>
+            <p style="color:  #455a7c;font-size: 1.1rem;">She earned her master’s degree in London and went on to close multimillion-dollar deals in Dubai and across the Middle East.</p> 
+            <p style="color:  #455a7c; font-size: 1.1rem;">Now, she’s bringing these global skills and leadership experience back to what matters most to her—making the world a better place through Kinder AI™.</p>    
           </div>
         </div>
           <div class="col text-center">
             <div class="profile-card p-3"> 
             <img class="bd-placeholder-img rounded-circle mb-3" width="140" height="140" src="./images/tate.png" alt="Michael Wozney"></img>
            <h2 class="display-7 lh-1 fw-bold" style="width: 100%; text-align: center; color: aliceblue; text-shadow: 2px 2px 3px rgba(0,0,0,0.8); z-index: 2; margin-bottom: 1rem;"> Tate Wozney </h2>
-            <h5 class="fw-bold" style="color: aliceblue; padding-bottom: 10px;"><em>Co-Founder</em></h5>
-            <p style="color: aliceblue; font-size: 1.1rem;">Being kind is baked into Tate's being, and despite being the youngest member of the team he already brings a long history and passion for helping others! Including volunteering with many organizations.</p>
-            <p style="color: aliceblue; font-size: 1.1rem;">Combine that with his critically important perspective of the younger generation, and he is perfectly positioned to ensure Get Kinder is impactful and resonates with everyone.</p>
+            <h5 class="fw-bold" style="color:  #ff5656; padding-bottom: 10px;"><em>Co-Founder</em></h5>
+            <p style="color:  #455a7c; font-size: 1.1rem;">Being kind is baked into Tate's being, and despite being the youngest member of the team he already brings a long history and passion for helping others! Including volunteering with many organizations.</p>
+            <p style="color:  #455a7c;font-size: 1.1rem;">Combine that with his critically important perspective of the younger generation, and he is perfectly positioned to ensure Get Kinder is impactful and resonates with everyone.</p>
           </div>
         </div><!-- /.col-lg-4 -->
         </div><!-- /.row -->

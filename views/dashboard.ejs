@@ -1,971 +1,274 @@
-<!-- ===========================
-BOLT CHANGELOG
-Date: 2025-01-27
-What: Complete dashboard UI overhaul with new color scheme, Next Challenge section, Cancel Mission button, and KAI integration
-Why: Transform static mockup into fully functional dashboard matching design requirements
-=========================== -->
 
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kindness Challenge Dashboard</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Kindness Challenge Dashboard</title>
 
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-            min-height: 100vh;
-            padding: 24px;
-            color: #2d3748;
-        }
+  <link rel="stylesheet" href="./css/style.css" />
+  <link rel="icon" href="/images/favicon.png" sizes="32x32" type="image/png" />
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-SgOJa3DmI69IUzQ2PVdRZhwQ+dy64/BUtbMJw1MZ8t5HZApcHrRKUc4W0kG879m7" crossorigin="anonymous"/>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet"/>
 
-        .dashboard-container {
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-
-        .dashboard-header {
-            text-align: center;
-            margin-bottom: 32px;
-        }
-
-        .dashboard-header h1 {
-            font-size: 2.5rem;
-            font-weight: 700;
-            color: #455a7c;
-            margin-bottom: 8px;
-        }
-
-        .dashboard-header p {
-            font-size: 1.1rem;
-            color: #718096;
-        }
-
-        .dashboard-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 24px;
-            margin-bottom: 32px;
-        }
-
-        .card {
-            background: white;
-            border-radius: 16px;
-            padding: 24px;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-            transition: all 0.3s ease;
-        }
-
-        .card:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 25px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-        }
-
-        .card-header {
-            display: flex;
-            align-items: center;
-            margin-bottom: 16px;
-        }
-
-        .card-icon {
-            width: 24px;
-            height: 24px;
-            margin-right: 12px;
-            color: #455a7c;
-        }
-
-        .card-title {
-            font-size: 1.25rem;
-            font-weight: 600;
-            color: #455a7c;
-        }
-
-        .progress-bar {
-            width: 100%;
-            height: 8px;
-            background: #e2e8f0;
-            border-radius: 4px;
-            overflow: hidden;
-            margin: 16px 0;
-        }
-
-        .progress-fill {
-            height: 100%;
-            background: linear-gradient(90deg, #ff5656, #ff7676);
-            border-radius: 4px;
-            transition: width 0.6s ease;
-        }
-
-        .challenge-info {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 16px;
-        }
-
-        .challenge-title {
-            font-size: 1.1rem;
-            font-weight: 600;
-            color: #2d3748;
-        }
-
-        .day-counter {
-            background: #455a7c;
-            color: white;
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 0.875rem;
-            font-weight: 500;
-        }
-
-        .challenge-description {
-            color: #718096;
-            line-height: 1.5;
-            margin-bottom: 16px;
-        }
-
-        .btn {
-            background: #ff5656;
-            color: white;
-            border: none;
-            padding: 12px 24px;
-            border-radius: 8px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            text-decoration: none;
-            display: inline-block;
-            text-align: center;
-            margin-right: 8px;
-            margin-bottom: 8px;
-        }
-
-        .btn:hover {
-            background: #e04545;
-            transform: translateY(-1px);
-            color: white;
-            text-decoration: none;
-        }
-
-        .btn-secondary {
-            background: #455a7c;
-            color: white;
-        }
-
-        .btn-secondary:hover {
-            background: #3a4a66;
-            color: white;
-        }
-
-        .btn-danger {
-            background: #dc3545;
-            color: white;
-        }
-
-        .btn-danger:hover {
-            background: #c82333;
-            color: white;
-        }
-
-        .btn:disabled {
-            background: #e2e8f0;
-            color: #a0aec0;
-            cursor: not-allowed;
-            transform: none;
-        }
-
-        .badges-grid {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 16px;
-            margin-bottom: 16px;
-        }
-
-        .badge-item {
-            text-align: center;
-            padding: 16px;
-            background: #f7fafc;
-            border-radius: 12px;
-            transition: all 0.2s ease;
-        }
-
-        .badge-item:hover {
-            background: #edf2f7;
-            transform: scale(1.05);
-        }
-
-        .badge-icon {
-            font-size: 2rem;
-            margin-bottom: 8px;
-        }
-
-        .badge-name {
-            font-size: 0.875rem;
-            font-weight: 500;
-            color: #4a5568;
-        }
-
-        .level-info {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 8px;
-        }
-
-        .level-text {
-            font-weight: 600;
-            color: #455a7c;
-        }
-
-        .quests-list {
-            list-style: none;
-        }
-
-        .quest-item {
-            padding: 12px 0;
-            border-bottom: 1px solid #e2e8f0;
-            transition: all 0.2s ease;
-        }
-
-        .quest-item:last-child {
-            border-bottom: none;
-        }
-
-        .quest-item:hover {
-            background: #f7fafc;
-            margin: 0 -16px;
-            padding: 12px 16px;
-            border-radius: 8px;
-        }
-
-        .quest-link {
-            text-decoration: none;
-            color: #4a5568;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .quest-link:hover {
-            color: #ff5656;
-            text-decoration: none;
-        }
-
-        .quest-name {
-            font-weight: 500;
-            color: #2d3748;
-        }
-
-        .quest-difficulty {
-            font-size: 0.875rem;
-            padding: 2px 8px;
-            border-radius: 12px;
-            background: #e2e8f0;
-            color: #4a5568;
-        }
-
-        .quest-difficulty.easy { background: #c6f6d5; color: #22543d; }
-        .quest-difficulty.medium { background: #fed7aa; color: #9c4221; }
-        .quest-difficulty.hard { background: #feb2b2; color: #742a2a; }
-
-        /* Cancel Mission button styling */
-        .cancel-mission-container {
-            margin-top: 24px;
-            padding-top: 16px;
-            border-top: 1px solid #e2e8f0;
-            text-align: center;
-        }
-
-        /* Chat toggle button */
-        .hidden {
-            display: none !important;
-        }
-
-        .btn-loading .btn-text {
-            display: none;
-        }
-
-        .btn-loading .btn-loading {
-            display: inline-flex !important;
-            align-items: center;
-        }
-
-        .chat-toggle {
-            position: fixed;
-            bottom: 24px;
-            right: 24px;
-            width: 60px;
-            height: 60px;
-            background: #ff5656;
-            border: none;
-            border-radius: 50%;
-            color: white;
-            font-size: 24px;
-            cursor: pointer;
-            box-shadow: 0 4px 12px rgba(255, 86, 86, 0.4); /* BOLT: UI change - Updated shadow color */
-            transition: all 0.3s ease;
-            z-index: 1000;
-        }
-
-        .chat-toggle:hover {
-            background: #e04545;
-            transform: scale(1.1);
-        }
-
-        /* Chat panel styling */
-        .chat-panel {
-            position: fixed;
-            bottom: 100px;
-            right: 24px;
-            width: 350px;
-            height: 400px;
-            background: white;
-            border-radius: 16px;
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
-            display: none;
-            flex-direction: column;
-            z-index: 1000;
-        }
-
-        .chat-panel.active {
-            display: flex;
-        }
-
-        .chat-header {
-            padding: 16px;
-            border-bottom: 1px solid #e2e8f0;
-            background: #455a7c;
-            color: white;
-            border-radius: 16px 16px 0 0;
-        }
-
-        .chat-messages {
-            flex: 1;
-            padding: 16px;
-            overflow-y: auto;
-        }
-
-        .chat-input-container {
-            padding: 16px;
-            border-top: 1px solid #e2e8f0;
-        }
-
-        .chat-input {
-            width: 100%;
-            padding: 12px;
-            border: 1px solid #e2e8f0;
-            border-radius: 8px;
-            resize: none;
-            font-family: inherit;
-        }
-
-        .chat-input:focus {
-            outline: none;
-            border-color: #ff5656;
-        }
-
-        .message {
-            margin-bottom: 12px;
-            padding: 8px 12px;
-            border-radius: 12px;
-            max-width: 80%;
-        }
-
-        .message.user {
-            background: #ff5656;
-            color: white;
-            margin-left: auto;
-        }
-
-        .message.assistant {
-            background: #f7fafc;
-            color: #2d3748;
-        }
-
-        /* Responsive design improvements */
-        @media (max-width: 768px) {
-            .dashboard-grid {
-                grid-template-columns: 1fr;
-            }
-            
-            .badges-grid {
-                grid-template-columns: repeat(2, 1fr);
-            }
-            
-            .chat-panel {
-                width: calc(100vw - 48px);
-                right: 24px;
-                left: 24px;
-            }
-
-            .challenge-info {
-                flex-direction: column;
-                align-items: flex-start;
-                gap: 8px;
-            }
-
-            .btn {
-                width: 100%;
-                margin-right: 0;
-            }
-        }
-
-        /* Alert styling with brand colors */
-        .alert-success {
-            background-color: #d4edda;
-            border-color: #c3e6cb;
-            color: #155724;
-        }
-
-        .alert-info {
-            background-color: #d1ecf1;
-            border-color: #bee5eb;
-            color: #0c5460;
-        }
-    </style>
-    <link rel="icon" href="/images/favicon.png" sizes="32x32" type="image/png">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-SgOJa3DmI69IUzQ2PVdRZhwQ+dy64/BUtbMJw1MZ8t5HZApcHrRKUc4W0kG879m7" crossorigin="anonymous">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="./css/style.css">
+<!-- Tailwind (CDN) with preflight disabled so it doesn't fight Bootstrap -->
+<script>
+  window.tailwind = window.tailwind || {};
+  window.tailwind.config = {
+    corePlugins: {
+      preflight: false,
+      visibility: false   // 🚫 disables Tailwind's visibility utilities (including 'collapse')
+    }
+  };
+</script>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  :root { --navbar-height: 86px; }
+  body { padding-top: var(--navbar-height); }
+  @media (max-width: 991.98px) { :root { --navbar-height: 72px; } }
+  /* ✅ Keep Bootstrap collapses visible on desktop across ALL navbar-collapses */
+  @media (min-width: 992px) {
+    .navbar-expand-lg .navbar-collapse { display: flex !important; }
+  }
+  /* ✅ Neutralize any visibility: collapse applied by other styles */
+  .navbar .collapse { visibility: visible !important; }
+  /* Logo size (match your working page) */
+  .navbar-brand img {
+    height: 56px;
+    max-height: 56px;
+    width: auto !important;
+  }
+  #footer .footer-heart {
+    height: 120px;
+    max-height: 120px;
+    width: auto !important;
+  }
+</style>
+  <!-- Google Tag Manager -->
+  <script>
+    (function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+    new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+    j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+    'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+    })(window,document,'script','dataLayer','GTM-5NMWPW33');
+  </script>
+  <!-- End Google Tag Manager -->
 </head>
 <body>
-    <!-- Google Tag Manager (noscript) -->
-    <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-5NMWPW33"
-      height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
-    <!-- End Google Tag Manager (noscript) -->
-
-    <!-- BOLT: UI change - Success/login alerts with consistent styling -->
-    <% if (typeof success !== 'undefined' && success) { %>
-        <div class="alert alert-success alert-dismissible fade show auto-dismiss" role="alert">
-          Registration successful! Welcome to Get Kinder 🌟
-          <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-        </div>
-    <% } %>
-    
-    <% if (typeof loginSuccess !== 'undefined' && loginSuccess && typeof name !== 'undefined' && name) { %>
-        <div class="alert alert-success alert-dismissible fade show auto-dismiss" role="alert">
-          Welcome back, <%= name %>! 🎉
-          <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-        </div>
-    <% } %>
-
-    <% if (typeof req !== 'undefined' && req.query && req.query.cancelled === '1') { %>
-        <div class="alert alert-info alert-dismissible fade show auto-dismiss" role="alert">
-          Challenge cancelled successfully. You can start a new one anytime! 
-          <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-        </div>
-    <% } %>
-
-    <header>
-        <nav class="navbar fixed-top navbar-light bg-white navbar-expand-lg">
-            <div class="container-fluid d-flex">
-                <a class="navbar-brand" href="/"><img src="/images/logo.png" alt="Get Kinder logo" height="80"> </a>
-                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
-                    <span class="navbar-toggler-icon"></span>
-                </button>
-                <div class="collapse navbar-collapse justify-content-center" id="navbarNav">
-                    <ul class="navbar-nav align-items-center">
-                        <li class="nav-item">
-                            <a class="btn btn-outline-primary btn-lg custom-hover" href="/#chat2" style="font-size: 1.2rem; color: #455a7c; margin-right: 30px; margin-left: 10px; padding-left: 10px;"><img src="/images/kai-real.png" alt="real Kindness AI Companion Kai" width="35" height="35" class="me-2">Chat with Kai Now</a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link mx-1 font-hover" href="About" style="font-size: 1.2rem; color: #455a7c; padding-right: 30px;">About</a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link mx-1 font-hover" href="profile" style="font-size: 1.2rem; color: #455a7c; padding-right: 30px;">Profile</a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link mx-1 font-hover" href="/" style="font-size: 1.2rem; color: #455a7c; padding-right: 30px;">Home</a>
-                        </li>
-                    </ul>
-                </div>
-                <div class="collapse navbar-collapse justify-content-end" id="navbarNav">
-                    <ul class="navbar-nav d-flex align-items-center">              
-                        <% if (user) { %>
-                            <li class="nav-item d-flex align-items-center me-3">
-                                <span class="navbar-text fw-bold me-2" style="font-size: 1.2rem; color: #455a7c;"><%= user.firstname || user.email %></span>
-                                <img src="<%= user.picture ? user.picture : '/images/nerdy-KAI.png' %>" class="rounded-circle me-3" width="32" height="32" alt="Get Kinder User Avatar">
-                                <button class="btn btn-outline-danger btn-sm" data-bs-toggle="modal" data-bs-target="#logoutModal">Log Out</button>
-                            </li>
-                        <% } else { %>
-                            <li class="nav-item"><a class="btn btn-primary btn-lg" 
-                              style="font-size: 1.2rem; color: white; text-decoration: none; width: 100%; min-width: 120px; text-align: center;" href="login" role="button">Log In</a>
-                            </li>
-                        <% } %>
-                    </ul>
-                </div>
-            </div>
-        </nav>
-    </header>
-
-    <div class="dashboard-container">
-        <!-- Header -->
-        <div class="dashboard-header">
-            <% if (typeof user !== 'undefined' && user && user.firstname) { %>
-                <h1>Welcome back, <%= user.firstname %>! 👋</h1>
-            <% } else { %>
-                <h1>Welcome!</h1>
-            <% } %>
-            <p>Continue your journey of spreading kindness</p>
-        </div>
-
-        <!-- Main Dashboard Grid -->
-        <div class="dashboard-grid">
-            <!-- Left Column -->
-            <div>
-                <!-- Active Challenge Card -->
-                <div class="card">
-                    <div class="card-header">
-                        <svg class="card-icon" fill="currentColor" viewBox="0 0 20 20">
-                            <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                        </svg>
-                        <h2 class="card-title">Active Challenge</h2>
-                    </div>
-                    
-                    <% if (typeof activeChallenge !== 'undefined' && activeChallenge) { %>
-                        <div class="challenge-info">
-                            <div class="challenge-title">
-                                <%= activeChallenge.challenge_name %>
-                            </div>
-                            <div class="day-counter">
-                                Day <%= activeChallenge.current_day %> of <%= activeChallenge.total_days %>
-                            </div>
-                        </div>
-
-                        <% 
-                        // BOLT: UI change - Progress calculation with proper percentage formatting
-                        var pct = ((activeChallenge.current_day / activeChallenge.total_days) * 100).toFixed(1);
-                        %>
-                        <div class="progress-bar">
-                            <div class="progress-fill" data-width="<%= pct %>"></div>
-                        </div>
-                        
-                        <p class="challenge-description"><%= activeChallenge.description %></p>
-                        <!-- BOLT: Morning Prompt - Replace guidance button with morning prompt -->
-                        <button class="btn btn-secondary" onclick="openMorningPrompt()">
-                            See Your Morning Prompt
-                        </button>
-                    <% } else { %>
-                        <!-- BOLT: UI change - Better messaging for no active challenge -->
-                        <p class="challenge-description">You don't have an active challenge yet — we've started 'Discover the Power of Kindness' for you.</p>
-                        <button class="btn btn-secondary" onclick="openMorningPrompt()">
-                            See Your Morning Prompt
-                        </button>
-                    <% } %>
-                </div>
-
-                <!-- BOLT: UI change - Next Challenge Card (renamed from "New Challenge") -->
-                <div class="card" style="margin-top: 24px;">
-                    <div class="card-header">
-                        <svg class="card-icon" fill="currentColor" viewBox="0 0 20 20">
-                            <path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3z"/>
-                        </svg>
-                        <h2 class="card-title">Next Challenge</h2>
-                    </div>
-                    
-                    <% if (typeof nextChallenge !== 'undefined' && nextChallenge) { %>
-                        <div class="challenge-title" style="margin-bottom: 12px;">
-                            <%= nextChallenge.name %>
-                        </div>
-                        <p class="challenge-description">
-                            <%= nextChallenge.description %>
-                        </p>
-                        <div style="display: flex; gap: 12px; flex-wrap: wrap;">
-                            <button class="btn btn-secondary" onclick="askKAI('Tell me more about the <%= nextChallenge.name %> challenge')">
-                                Preview Challenge
-                            </button>
-                            <a href="/challenges/<%= nextChallenge.id %>/start" class="btn">Start Challenge</a>
-                        </div>
-                    <% } else { %>
-                        <p class="challenge-description">
-                            All challenges completed! Check back for new ones.
-                        </p>
-                        <button class="btn" disabled title="No new challenges available">Preview Challenge</button>
-                    <% } %>
-                </div>
-
-                <!-- BOLT: UI change - Cancel Current Mission button -->
-                <% if (typeof activeChallenge !== 'undefined' && activeChallenge) { %>
-                    <div class="cancel-mission-container">
-                        <form action="/challenge/cancel" method="POST" onsubmit="return confirm('Are you sure you want to cancel your current challenge? This action cannot be undone.')">
-                            <button type="submit" class="btn btn-danger">Cancel Current Mission</button>
-                        </form>
-                    </div>
+  <!-- Google Tag Manager (noscript) -->
+  <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-5NMWPW33" height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+  <!-- Alerts -->
+  <% if (typeof success !== 'undefined' && success) { %>
+    <div class="alert alert-success alert-dismissible fade show auto-dismiss" role="alert">
+      Registration successful! Welcome to Get Kinder 🌟
+      <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+  <% } %>
+  <% if (typeof loginSuccess !== 'undefined' && loginSuccess && typeof name !== 'undefined' && name) { %>
+    <div class="alert alert-success alert-dismissible fade show auto-dismiss" role="alert">
+      Welcome back, <%= name %>! 🎉
+      <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+  <% } %>
+  <% if (typeof req !== 'undefined' && req.query && req.query.cancelled === '1') { %>
+    <div class="alert alert-info alert-dismissible fade show auto-dismiss" role="alert">
+      Challenge cancelled successfully. You can start a new one anytime!
+      <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+  <% } %>
+  <!-- Header -->
+   <header>
+      <nav class="navbar fixed-top navbar-light bg-white navbar-expand-lg">
+        <div class="container-fluid d-flex">
+          <a class="navbar-brand" href="/"><img src="/images/logo.png" alt="Get Kinder logo" class="logo-img" height="80" width: auto;> </a>
+          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+            <span class="navbar-toggler-icon"></span></button>
+          <div class="collapse navbar-collapse justify-content-center" id="navbarNav">
+            <ul class="navbar-nav align-items-center">
+             <li class="nav-item">
+                <a class="nav-link mx-1 font-hover" href="/" style="font-size: 1.2rem; color: #455a7c; padding-right: 30px;">Home</a>
+              </li>
+               <li class="nav-item">
+                <a class="nav-link mx-1 font-hover" href="friendQuiz" style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;">Quiz</a>
+              </li>
+                 <li class="nav-item">
+                <a class="nav-link mx-1 font-hover" href="profile" style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;">Profile</a>
+              </li>
+               <li class="nav-item">
+                <a class="nav-link mx-1 font-hover" href="blog" style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;">Blog</a>
+              </li>
+              <li class="nav-item">
+                <a class="nav-link mx-1 font-hover" href="about" style="font-size: 1.1rem; color: #455a7c; padding-right: 40px;">About</a>
+              </li>
+                <li class="nav-item">
+              <a class="btn btn-primary btn-lg" href="https://square.link/u/GjQpbcoi" style="font-size: 1.2rem; color:aliceblue; background-color: #ff5656; border-color: #ff5656;  "target="_blank" rel="noopener noreferrer">DONATE</a> </li>
+             </li>
+             </ul>
+              </div>
+              <div class="collapse navbar-collapse justify-content-end">
+                <ul class="navbar-nav d-flex align-items-center">              <% if (user) { %>
+                <li class="nav-item d-flex align-items-center me-3">
+                  <span class="navbar-text fw-bold me-2" style="font-size: 1.1rem; color: #455a7c;"><%= user.firstname || user.email %></span>
+                  <img src="<%= (user && user.picture) ? user.picture : '/images/nerdy-KAI.png' %>"  class="rounded-circle me-3" width="32" height="32" alt="Get Kinder User Avatar">
+                  <button class="btn btn-outline-danger btn-sm" data-bs-toggle="modal" data-bs-target="#logoutModal">Log Out</button>
+                </li>
+                <% } else { %>
+                <li class="nav-item"><a class="btn btn-primary btn-lg" 
+                  style="font-size: 1.2rem; color: white; text-decoration: none; width: 100%; min-width: 120px; text-align: center;" href="login" role="button">Log In</a>
+                </li>
                 <% } %>
-            </div>
-
-            <!-- Right Column -->
-            <div>
-                <!-- Badges & Level Card -->
-                <div class="card">
-                    <div class="card-header">
-                        <svg class="card-icon" fill="currentColor" viewBox="0 0 20 20">
-                            <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/>
-                        </svg>
-                        <h2 class="card-title">Badges & Level</h2>
-                    </div>
-                    
-                    <div class="badges-grid">
-                        <% if (typeof userBadges !== 'undefined' && userBadges.length > 0) { %>
-                            <% userBadges.slice(0, 4).forEach(badge => { %>
-                                <div class="badge-item">
-                                    <div class="badge-icon"><%= badge.icon || '🏆' %></div>
-                                    <div class="badge-name"><%= badge.name %></div>
-                                </div>
-                            <% }) %>
-                        <% } else { %>
-                            <div class="badge-item">
-                                <div class="badge-icon">🌟</div>
-                                <div class="badge-name">Starter</div>
-                            </div>
-                            <div class="badge-item" style="opacity: 0.5;">
-                                <div class="badge-icon">❤️</div>
-                                <div class="badge-name">Kind Heart</div>
-                            </div>
-                            <div class="badge-item" style="opacity: 0.5;">
-                                <div class="badge-icon">🤝</div>
-                                <div class="badge-name">Helper</div>
-                            </div>
-                            <div class="badge-item" style="opacity: 0.5;">
-                                <div class="badge-icon">🌈</div>
-                                <div class="badge-name">Spreader</div>
-                            </div>
-                        <% } %>
-                    </div>
-                    
-                    <% if (typeof kindnessLevel !== 'undefined' && typeof levelProgress !== 'undefined') { %>
-                        <div class="level-info">
-                            <span class="level-text">
-                                Kindness Level <%= kindnessLevel %>
-                            </span>
-                            <span><%= levelProgress %>%</span>
-                        </div>
-                        <div class="progress-bar">
-                            <div class="progress-fill" data-width="<%= levelProgress %>"></div>
-                        </div>
-                    <% } %>
-                </div>
-
-                <!-- More Challenges & Quests Card -->
-                <div class="card" style="margin-top: 24px;">
-                    <div class="card-header">
-                        <svg class="card-icon" fill="currentColor" viewBox="0 0 20 20">
-                            <path d="M7 3a1 1 0 000 2h6a1 1 0 100-2H7zM4 7a1 1 0 011-1h10a1 1 0 110 2H5a1 1 0 01-1-1zM2 11a2 2 0 012-2h12a2 2 0 012 2v4a2 2 0 01-2 2H4a2 2 0 01-2-2v-4z"/>
-                        </svg>
-                        <h2 class="card-title">More Challenges & Quests</h2>
-                    </div>
-                    
-                    <ul class="quests-list">
-                        <% if (typeof quests !== 'undefined' && quests.length > 0) { %>
-                            <% quests.forEach(quest => { %>
-                                <li class="quest-item">
-                                    <a href="/quests/<%= quest.id %>" class="quest-link">
-                                        <div>
-                                            <div class="quest-name"><%= quest.name %></div>
-                                            <div style="font-size: 0.875rem; color: #718096; margin-top: 4px;">
-                                                <%= quest.description %>
-                                            </div>
-                                        </div>
-                                        <span class="quest-difficulty <%= quest.difficulty.toLowerCase() %>">
-                                            <%= quest.difficulty %>
-                                        </span>
-                                    </a>
-                                </li>
-                            <% }) %>
-                        <% } else { %>
-                            <li class="quest-item">
-                                <div class="quest-name">Random Acts of Kindness</div>
-                                <div style="font-size: 0.875rem; color: #718096; margin-top: 4px;">
-                                    Spread unexpected joy to strangers
-                                </div>
-                            </li>
-                            <li class="quest-item">
-                                <div class="quest-name">Compliment Chain Reaction</div>
-                                <div style="font-size: 0.875rem; color: #718096; margin-top: 4px;">
-                                    Start a wave of positivity with genuine compliments
-                                </div>
-                            </li>
-                            <li class="quest-item">
-                                <div class="quest-name">Community Helper</div>
-                                <div style="font-size: 0.875rem; color: #718096; margin-top: 4px;">
-                                    Volunteer for local community initiatives
-                                </div>
-                            </li>
-                        <% } %>
-                    </ul>
-                </div>
+              </ul>
             </div>
         </div>
+      </nav>
+
+  <!-- Main container -->
+  <div class="dashboard-container">
+    <div class="dashboard-header container py-3">
+      <% if (typeof user !== 'undefined' && user && user.firstname) { %>
+        <h1>Welcome back, <%= user.firstname %>! 👋</h1>
+      <% } else { %>
+        <h1>Welcome!</h1>
+      <% } %>
+      <p>Follow the Friends Arcs below and make more Friends</p>
     </div>
 
-    <!-- BOLT: KAI integration - KAI Assistant Chat -->
-    <button class="chat-toggle" onclick="toggleChat()">
-        🤖
-    </button>
+    <!-- Friend Challenges mount -->
+    <div id="friend-challenges-root" class="container my-4"></div>
 
-    <div class="chat-panel" id="chatPanel">
-        <div class="chat-header">
-            <h3>KAI - Your Kindness Assistant</h3>
-        </div>
-        <div class="chat-messages" id="chatMessages">
-            <div class="message assistant">
-                Hi! I'm KAI, your kindness assistant. Ask me about your challenges, get daily inspiration, or share your reflections!
-            </div>
-        </div>
-        <div class="chat-input-container">
-            <textarea 
-                class="chat-input" 
-                id="chatInput" 
-                placeholder="Ask KAI anything about your kindness journey..."
-                rows="2"
-                onkeypress="handleChatKeyPress(event)"
-            ></textarea>
-        </div>
-    </div>
-
-    <!-- BOLT: Morning Prompt Modal -->
-    <div id="morningPromptModal" class="hidden" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 2000; display: flex; align-items: center; justify-content: center;">
-        <div style="background: white; border-radius: 16px; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto;">
-            <div style="background: #455a7c; color: white; padding: 20px; border-radius: 16px 16px 0 0; display: flex; justify-content: space-between; align-items: center;">
-                <h5 id="dayTitle">Loading...</h5>
-                <button type="button" onclick="closeMorningPrompt()" style="background: none; border: none; color: white; font-size: 24px; cursor: pointer;">&times;</button>
-            </div>
-            <div style="padding: 24px;">
-                    <div class="mb-4">
-                    <h6 style="color: #455a7c; font-weight: 600; margin-bottom: 8px;">Today's Principle</h6>
-                    <p id="principle" style="color: #718096;">Loading principle...</p>
-                    </div>
-                    
-                    <div class="mb-4">
-                    <h6 style="color: #455a7c; font-weight: 600; margin-bottom: 8px;">Your Guidance</h6>
-                    <p id="body">Loading today's guidance...</p>
-                    </div>
-                    
-                    <div class="mb-4">
-                    <h6 style="color: #455a7c; font-weight: 600; margin-bottom: 8px;">Suggested Acts of Kindness</h6>
-                    <ul id="suggestedActs">
-                        <li>Loading suggestions...</li>
-                    </ul>
-                    </div>
-                    
-                    <div class="mb-4">
-                    <h6 style="color: #455a7c; font-weight: 600; margin-bottom: 8px;">Your Reflection</h6>
-                    <textarea id="reflection" rows="4" 
-                              placeholder="How are you feeling about today's challenge? What insights do you have?"
-                              style="width: 100%; padding: 12px; border: 1px solid #e2e8f0; border-radius: 8px; resize: vertical; font-family: inherit;"></textarea>
-                    </div>
-            </div>
-            <div style="padding: 20px; border-top: 1px solid #e2e8f0; display: flex; gap: 12px; justify-content: flex-end;">
-                <button type="button" id="sendReflection" class="btn" style="background: #ff5656; color: white;">
-                    <span class="btn-text">Send to KAI</span>
-                    <span class="btn-loading hidden">
-                        <span style="display: inline-block; width: 16px; height: 16px; border: 2px solid #ffffff; border-radius: 50%; border-top-color: transparent; animation: spin 1s linear infinite; margin-right: 8px;"></span>
-                        Saving...
-                    </span>
-                </button>
-                <button type="button" id="markDone" class="btn btn-secondary">Mark Day as Done</button>
-                <button type="button" class="btn" onclick="closeMorningPrompt()" style="background: #e2e8f0; color: #4a5568;">Close</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Logout Modal -->
-    <div class="modal fade" id="logoutModal" tabindex="-1" aria-labelledby="logoutModalLabel" aria-hidden="true">
-    <!-- Logout Modal -->
-    <div class="modal fade" id="logoutModal" tabindex="-1" aria-labelledby="logoutModalLabel" aria-hidden="true">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">Confirm Logout</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    Are you sure you want to log out?
-                </div>
-                <div class="modal-footer">
-                    <form action="/logout" method="GET">
-                        <button type="submit" class="btn btn-danger">Log Out</button>
-                    </form>
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Footer -->
-    <section id="footer" class="gradient-background">
-        <div class="container">
-            <footer class="row align-items-center py-5 mt-5 border-top text-body-secondary">
-                <!-- Logo: centered on xs, left on md+ -->
-                <div class="col-12 col-md-4 mb-4 mb-md-0 text-center text-md-start">
-                    <a href="#">
-                        <img src="./images/heart3D.png" alt="Get Kinder Heart" height="150">
-                    </a>
-                    <p class="mt-2">
-                        &copy;
-                        <a href="https://getkindr.com/" target="_blank" rel="noopener noreferrer"
-                           class="text-body-secondary text-decoration-underline">
-                            Get Kindr Foundation
-                        </a>
-                    </p>
-                </div>
-                <!-- Social Icons: always centered -->
-                <div class="col-12 col-md-4 mb-4 mb-md-0 d-flex justify-content-center">
-                    <a class="btn btn-floating m-1 text-white" style="background-color: #3b5998;"
-                       href="https://www.facebook.com/profile.php?id=61576860759313" role="button" target="_blank" rel="noopener noreferrer">
-                        <i class="fab fa-facebook-f"></i>
-                    </a>
-                    <a class="btn btn-floating m-1 text-white" style="background-color: #ac2bac;"
-                       href="https://www.instagram.com/getkinder/" role="button" target="_blank" rel="noopener noreferrer">
-                        <i class="fab fa-instagram"></i>
-                    </a>
-                    <a class="btn btn-floating m-1 text-white" style="background-color: #0082ca;"
-                       href="https://www.linkedin.com/company/getkindrfoundation/" role="button" target="_blank" rel="noopener noreferrer">
-                        <i class="fab fa-linkedin-in"></i>
-                    </a>
-                    <a class="btn btn-floating m-1 text-white" style="background-color: #c8232c;"
-                       href="https://ca.pinterest.com/getkindr/" role="button" target="_blank" rel="noopener noreferrer">
-                        <i class="fab fa-pinterest"></i>
-                    </a>
-                </div>
-                <!-- More About: centered on xs, right on md+ -->
-                <div class="col-12 col-md-4 mb-4 mb-md-0 text-center text-md-end">
-                    <h5>More About Get Kinder</h5>
-                    <ul class="nav flex-column">
-                        <li class="nav-item mb-2"><a href="/"            class="nav-link p-0 text-body-secondary">Home</a></li>
-                        <li class="nav-item mb-2"><a href="about" class="nav-link p-0 text-body-secondary">About</a></li>
-                        <li class="nav-item mb-2"><a href="contact"     class="nav-link p-0 text-body-secondary">Contact</a></li>
-                        <li class="nav-item mb-2"><a href="privacy"     class="nav-link p-0 text-body-secondary">Privacy</a></li>
-                        <li class="nav-item mb-2"><a href="terms"       class="nav-link p-0 text-body-secondary">Terms</a></li>
-                        <li class="nav-item mb-2"><a href="accessability" class="nav-link p-0 text-body-secondary">Accessability</a></li>
-                    </ul>
-                </div>
-            </footer>
-        </div>
-    </section>
-
+    <!-- Friend Challenges props (JSON script => avoids EJS-in-JS linter errors) -->
+    <%
+      var __arcs = (typeof arcs !== 'undefined' && Array.isArray(arcs)) ? arcs : [];
+      var __initialArcId = (typeof initialArcId !== 'undefined') ? initialArcId : "";
+    %>
+    <script type="application/json" id="friend-challenges-props"><%- JSON.stringify({
+      arcs: __arcs,
+      initialArcId: __initialArcId
+    }).replace(/</g, '\\u003c') %></script>
     <script>
-        // BOLT: KAI integration - Chat functionality
-        let chatOpen = false;
-
-        function toggleChat() {
-            const panel = document.getElementById('chatPanel');
-            chatOpen = !chatOpen;
-            panel.classList.toggle('active', chatOpen);
-        }
-
-        function handleChatKeyPress(event) {
-            if (event.key === 'Enter' && !event.shiftKey) {
-                event.preventDefault();
-                sendMessage();
-            }
-        }
-
-        function askKAI(message) {
-            if (!chatOpen) toggleChat();
-            document.getElementById('chatInput').value = message;
-            sendMessage();
-        }
-
-        async function sendMessage() {
-            const input = document.getElementById('chatInput');
-            const messages = document.getElementById('chatMessages');
-            const message = input.value.trim();
-
-            if (!message) return;
-
-            // Add user message
-            const userMessage = document.createElement('div');
-            userMessage.className = 'message user';
-            userMessage.textContent = message;
-            messages.appendChild(userMessage);
-
-            // Clear input
-            input.value = '';
-
-            // Add loading message
-            const loadingMessage = document.createElement('div');
-            loadingMessage.className = 'message assistant';
-            loadingMessage.textContent = 'KAI is thinking...';
-            messages.appendChild(loadingMessage);
-
-            // Scroll to bottom
-            messages.scrollTop = messages.scrollHeight;
-
-            try {
-                // BOLT: KAI integration - Use existing chat API endpoint
-                const response = await fetch('/api/chat/message', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ message }),
-                    credentials: 'include'
-                });
-
-                const data = await response.json();
-
-                // Remove loading message
-                messages.removeChild(loadingMessage);
-
-                // Add assistant response
-                const assistantMessage = document.createElement('div');
-                assistantMessage.className = 'message assistant';
-                assistantMessage.textContent = data.reply || 'Sorry, I couldn\'t process that request.';
-                messages.appendChild(assistantMessage);
-
-            } catch (error) {
-                console.error('Chat error:', error);
-                
-                // Remove loading message
-                messages.removeChild(loadingMessage);
-
-                // Add error message
-                const errorMessage = document.createElement('div');
-                errorMessage.className = 'message assistant';
-                errorMessage.textContent = 'Sorry, I\'m having trouble connecting right now. Please try again later.';
-                messages.appendChild(errorMessage);
-            }
-
-            // Scroll to bottom
-            messages.scrollTop = messages.scrollHeight;
-        }
-
-        // BOLT: UI change - Animate progress bars on load with brand colors
-        window.addEventListener('load', () => {
-            const progressBars = document.querySelectorAll('.progress-fill');
-            progressBars.forEach(bar => {
-                const width = bar.getAttribute('data-width') + '%';
-                bar.style.width = '0%';
-                setTimeout(() => {
-                    bar.style.width = width;
-                }, 500);
-            });
-        });
+      (function () {
+        try {
+          var el = document.getElementById('friend-challenges-props');
+          window.__friendChallengesProps = el ? JSON.parse(el.textContent) : {};
+        } catch (_) { window.__friendChallengesProps = {}; }
+      }());
     </script>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/js/bootstrap.bundle.min.js" integrity="sha384-k6d4wzSIapyDyv1kpU366/PK5hCdSbCRGRCMv+eplOQJWyd1fbcAu9OCUj5zNLiq" crossorigin="anonymous"></script>
-    <!-- BOLT: Morning Prompt - Include dashboard JavaScript -->
-    <script src="/js/dashboard.js"></script>
-    
+    <!-- Bundle that contains entry.jsx -->
+    <script src="/js/bundles/entry.js?<%= (typeof assetTag !== 'undefined' ? assetTag : '') %>"></script>
+    <!-- (Optional) hard-mount fallback -->
     <script>
-        // Auto-dismiss alerts after 5 seconds
-        document.addEventListener('DOMContentLoaded', function() {
-            const alerts = document.querySelectorAll('.alert.auto-dismiss');
-            alerts.forEach(alert => {
-                setTimeout(() => {
-                    const bsAlert = new bootstrap.Alert(alert);
-                    bsAlert.close();
-                }, 5000);
-            });
-        });
+      window.renderFriendChallenges?.('#friend-challenges-root', window.__friendChallengesProps || {});
     </script>
+  </div> <!-- CLOSES .dashboard-container -->
+
+  <!-- Logout Modal -->
+  <div class="modal fade" id="logoutModal" tabindex="-1" aria-labelledby="logoutModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="logoutModalLabel">Confirm Logout</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">Are you sure you want to log out?</div>
+        <div class="modal-footer">
+          <form action="/logout" method="GET">
+            <button type="submit" class="btn btn-danger">Log Out</button>
+          </form>
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <section id="footer" class="gradient-background mt-5">
+    <div class="container">
+      <footer class="row align-items-center py-5 border-top text-body-secondary">
+        <!-- Logo: centered on xs, left on md+ -->
+        <div class="col-12 col-md-4 mb-4 mb-md-0 text-center text-md-start">
+          <a href="#"><img src="./images/heart3D.png" alt="Get Kinder Heart" class="footer-heart"></a>
+          <p class="mt-2">&copy;
+            <a href="https://getkindr.com/" target="_blank" rel="noopener noreferrer" class="text-body-secondary text-decoration-underline">Get Kindr Foundation</a>
+          </p>
+        </div>
+        <!-- Social Icons -->
+        <div class="col-12 col-md-4 mb-4 mb-md-0 d-flex justify-content-center">
+          <a class="btn btn-floating m-1 text-white" style="background-color:#3b5998;" href="https://www.facebook.com/profile.php?id=61576860759313" role="button" target="_blank" rel="noopener noreferrer"><i class="fab fa-facebook-f"></i></a>
+          <a class="btn btn-floating m-1 text-white" style="background-color:#ac2bac;" href="https://www.instagram.com/getkinder/" role="button" target="_blank" rel="noopener noreferrer"><i class="fab fa-instagram"></i></a>
+          <a class="btn btn-floating m-1 text-white" style="background-color:#0082ca;" href="https://www.linkedin.com/company/getkindrfoundation/" role="button" target="_blank" rel="noopener noreferrer"><i class="fab fa-linkedin-in"></i></a>
+          <a class="btn btn-floating m-1 text-white" style="background-color:#c8232c;" href="https://ca.pinterest.com/getkindr/" role="button" target="_blank" rel="noopener noreferrer"><i class="fab fa-pinterest"></i></a>
+        </div>
+        <!-- More About -->
+        <div class="col-12 col-md-4 mb-4 mb-md-0 text-center text-md-end">
+          <h5>More About Get Kinder</h5>
+          <ul class="nav flex-column">
+            <li class="nav-item mb-2"><a href="/" class="nav-link p-0 text-body-secondary">Home</a></li>
+            <li class="nav-item mb-2"><a href="about" class="nav-link p-0 text-body-secondary">About</a></li>
+            <li class="nav-item mb-2"><a href="contact" class="nav-link p-0 text-body-secondary">Contact</a></li>
+            <li class="nav-item mb-2"><a href="privacy" class="nav-link p-0 text-body-secondary">Privacy</a></li>
+            <li class="nav-item mb-2"><a href="terms" class="nav-link p-0 text-body-secondary">Terms</a></li>
+            <li class="nav-item mb-2"><a href="accessability" class="nav-link p-0 text-body-secondary">Accessability</a></li>
+          </ul>
+        </div>
+      </footer>
+    </div>
+  </section>
+
+  <!-- Scripts -->
+  <script>
+    // Chat toggle
+    let chatOpen = false;
+    function toggleChat() {
+      const panel = document.getElementById('chatPanel');
+      chatOpen = !chatOpen;
+      panel.classList.toggle('active', chatOpen);
+    }
+    function handleChatKeyPress(event) {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault(); sendMessage();
+      }
+    }
+    function askKAI(message) {
+      if (!chatOpen) toggleChat();
+      document.getElementById('chatInput').value = message; sendMessage();
+    }
+    async function sendMessage() {
+      const input = document.getElementById('chatInput');
+      const messages = document.getElementById('chatMessages');
+      const message = input.value.trim();
+      if (!message) return;
+      const userMessage = document.createElement('div');
+      userMessage.className = 'message user'; userMessage.textContent = message; messages.appendChild(userMessage);
+      input.value = '';
+      const loadingMessage = document.createElement('div');
+      loadingMessage.className = 'message assistant'; loadingMessage.textContent = 'KAI is thinking...'; messages.appendChild(loadingMessage);
+      messages.scrollTop = messages.scrollHeight;
+      try {
+        const response = await fetch('/api/chat/message', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ message }), credentials:'include' });
+        const data = await response.json();
+        messages.removeChild(loadingMessage);
+        const assistantMessage = document.createElement('div');
+        assistantMessage.className = 'message assistant'; assistantMessage.textContent = data.reply || 'Sorry, I couldn\'t process that request.'; messages.appendChild(assistantMessage);
+      } catch (error) {
+        console.error('Chat error:', error);
+        messages.removeChild(loadingMessage);
+        const errorMessage = document.createElement('div');
+        errorMessage.className = 'message assistant'; errorMessage.textContent = 'Sorry, I\'m having trouble connecting right now. Please try again later.'; messages.appendChild(errorMessage);
+      }
+      messages.scrollTop = messages.scrollHeight;
+    }
+    // Auto-dismiss alerts after 5s
+    document.addEventListener('DOMContentLoaded', function() {
+      const alerts = document.querySelectorAll('.alert.auto-dismiss');
+      alerts.forEach(alert => {
+        setTimeout(() => { const bsAlert = new bootstrap.Alert(alert); bsAlert.close(); }, 5000);
+      });
+    });
+  </script>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/js/bootstrap.bundle.min.js" integrity="sha384-k6d4wzSIapyDyv1kpU366/PK5hCdSbCRGRCMv+eplOQJWyd1fbcAu9OCUj5zNLiq" crossorigin="anonymous"></script>
+  <script src="/js/dashboard.js"></script>
+  <%- include('partials/kai-chat-floating', { greetText: "👋 Hi! I’m KAI. How can I help you matter today?" }) %>
 </body>
 </html>

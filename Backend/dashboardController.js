@@ -1,6 +1,4 @@
 // ===========================
-// BOLT CHANGELOG
-// Date: 2025-01-27
 // What: Dashboard controller with proper database integration using existing styling approach
 // Why: No Tailwind needed - using custom CSS and Bootstrap as in original files
 // ===========================
@@ -21,34 +19,34 @@ export function makeDashboardController(pool) {
     try {
       const userId = req.user.id;
       
-      // BOLT: DB - Fetch or create active challenge for user
+      //  DB - Fetch or create active challenge for user
       let activeChallenge = await getActiveChallenge(userId);
       
-      // BOLT: DB - Auto-assign first challenge if user has none
+      // DB - Auto-assign first challenge if user has none
       if (!activeChallenge) {
         activeChallenge = await autoAssignFirstChallenge(userId);
       }
       
-      // BOLT: DB - Check if challenge is completed (current_day > total_days)
+      //  DB - Check if challenge is completed (current_day > total_days)
       if (activeChallenge && activeChallenge.current_day > activeChallenge.total_days) {
         await completeChallenge(userId, activeChallenge.user_challenge_id);
         activeChallenge = null; // Will show next challenge suggestion
       }
       
-      // BOLT: DB - Get next available challenge for preview
+      //  DB - Get next available challenge for preview
       const nextChallenge = await getNextChallenge(userId);
       
-      // BOLT: DB - Calculate user's kindness level
+      // DB - Calculate user's kindness level
       const kindnessLevel = await calculateKindnessLevel(userId);
       const levelProgress = await calculateLevelProgress(userId);
       
-      // BOLT: DB - Fetch user badges
+      //  DB - Fetch user badges
       const userBadges = await getUserBadges(userId);
       
-      // BOLT: DB - Get active quests for sidebar
+      //  DB - Get active quests for sidebar
       const quests = await getActiveQuests(userId);
       
-      // BOLT: UI - Render dashboard with all data
+      //  UI - Render dashboard with all data
       res.render('dashboard', {
         title: 'Kindness Challenge Dashboard',
         user: req.user,
@@ -74,7 +72,7 @@ export function makeDashboardController(pool) {
   };
 
   /**
-   * BOLT: Morning Prompt - Get current day's challenge content
+   * Morning Prompt - Get current day's challenge content
    * @param {Object} req - Express request object
    * @param {Object} res - Express response object
    */
@@ -84,7 +82,7 @@ export function makeDashboardController(pool) {
       
       const userId = req.user.id;
       
-      // BOLT: DB - Get user's active challenge
+      // DB - Get user's active challenge
       const activeChallenge = await getActiveChallenge(userId);
       console.log('Active challenge:', activeChallenge);
       
@@ -106,7 +104,7 @@ export function makeDashboardController(pool) {
         });
       }
       
-      // BOLT: DB - Fetch day template for current day
+      // DB - Fetch day template for current day
       const dayTemplate = await pool.query(`
         SELECT day_number, day_title, principle, body, suggested_acts
         FROM challenge_day_templates
@@ -119,7 +117,7 @@ export function makeDashboardController(pool) {
       
       const template = dayTemplate.rows[0];
       
-      // BOLT: DB - Check if user has existing reflection for this day
+      //  DB - Check if user has existing reflection for this day
       const existingReflection = await pool.query(`
         SELECT reflection
         FROM challenge_logs
@@ -143,7 +141,7 @@ export function makeDashboardController(pool) {
   };
 
   /**
-   * BOLT: Reflection - Save user reflection to database and KAI
+   * Reflection - Save user reflection to database and KAI
    * @param {Object} req - Express request object
    * @param {Object} res - Express response object
    */
@@ -156,13 +154,13 @@ export function makeDashboardController(pool) {
         return res.status(400).json({ error: 'Reflection cannot be empty' });
       }
       
-      // BOLT: DB - Get user's active challenge
+      //  DB - Get user's active challenge
       const activeChallenge = await getActiveChallenge(userId);
       if (!activeChallenge) {
         return res.status(404).json({ error: 'No active challenge found' });
       }
       
-      // BOLT: DB - Save reflection to challenge_logs
+      //  DB - Save reflection to challenge_logs
       await pool.query(`
         INSERT INTO challenge_logs (user_id, challenge_id, day_number, reflection, created_at)
         VALUES ($1, $2, $3, $4, NOW())
@@ -170,7 +168,7 @@ export function makeDashboardController(pool) {
         DO UPDATE SET reflection = EXCLUDED.reflection, updated_at = NOW()
       `, [userId, activeChallenge.challenge_id, activeChallenge.current_day, reflection.trim()]);
       
-      // BOLT: KAI integration - Save to KAI interactions for context
+      // KAI integration - Save to KAI interactions for context
       await pool.query(`
         INSERT INTO kai_interactions (user_id, context_type, context_id, message, created_at)
         VALUES ($1, 'reflection', $2, $3, NOW())
@@ -188,7 +186,7 @@ export function makeDashboardController(pool) {
   };
 
   /**
-   * BOLT: Progress - Mark current day as done and advance challenge
+   *  Progress - Mark current day as done and advance challenge
    * @param {Object} req - Express request object
    * @param {Object} res - Express response object
    */
@@ -196,7 +194,7 @@ export function makeDashboardController(pool) {
     try {
       const userId = req.user.id;
       
-      // BOLT: DB - Get user's active challenge
+      //  DB - Get user's active challenge
       const activeChallenge = await getActiveChallenge(userId);
       if (!activeChallenge) {
         return res.status(404).json({ error: 'No active challenge found' });
@@ -204,7 +202,7 @@ export function makeDashboardController(pool) {
       
       const newDay = activeChallenge.current_day + 1;
       
-      // BOLT: DB - Mark current day as completed in challenge_logs
+      //  DB - Mark current day as completed in challenge_logs
       await pool.query(`
         INSERT INTO challenge_logs (user_id, challenge_id, day_number, completed, completed_at)
         VALUES ($1, $2, $3, true, NOW())
@@ -212,9 +210,9 @@ export function makeDashboardController(pool) {
         DO UPDATE SET completed = true, completed_at = NOW()
       `, [userId, activeChallenge.challenge_id, activeChallenge.current_day]);
       
-      // BOLT: DB - Check if challenge is completed
+      // DB - Check if challenge is completed
       if (newDay > activeChallenge.total_days) {
-        // BOLT: DB - Mark challenge as completed
+        //  DB - Mark challenge as completed
         await completeChallenge(userId, activeChallenge.user_challenge_id);
         
         res.json({ 
@@ -223,7 +221,7 @@ export function makeDashboardController(pool) {
           message: 'Congratulations! You completed the challenge!' 
         });
       } else {
-        // BOLT: DB - Advance to next day
+        //  DB - Advance to next day
         await pool.query(`
           UPDATE user_challenges 
           SET current_day = $1, updated_at = NOW()
@@ -252,7 +250,7 @@ export function makeDashboardController(pool) {
     try {
       const userId = req.user.id;
       
-      // BOLT: DB - Update active challenge status to cancelled
+      // DB - Update active challenge status to cancelled
       await pool.query(
         `UPDATE user_challenges 
          SET status = 'cancelled', 
@@ -261,7 +259,7 @@ export function makeDashboardController(pool) {
         [userId]
       );
       
-      // BOLT: UI - Redirect back to dashboard with success message
+      //  UI - Redirect back to dashboard with success message
       res.redirect('/dashboard?cancelled=1');
       
     } catch (error) {
@@ -271,7 +269,7 @@ export function makeDashboardController(pool) {
   };
 
   /**
-   * BOLT: DB - Complete a challenge and update status
+   *  DB - Complete a challenge and update status
    * @param {number} userId - User ID
    * @param {number} userChallengeId - User challenge ID
    */
@@ -296,7 +294,7 @@ export function makeDashboardController(pool) {
    */
   async function getActiveChallenge(userId) {
     try {
-      // BOLT: DB - Join user_challenges with challenges table for active challenge
+      // DB - Join user_challenges with challenges table for active challenge
       const result = await pool.query(`
         SELECT 
           uc.id as user_challenge_id,
@@ -328,7 +326,7 @@ export function makeDashboardController(pool) {
    */
   async function autoAssignFirstChallenge(userId) {
     try {
-      // BOLT: DB - Find the "Discover the Power of Kindness" challenge
+      // DB - Find the "Discover the Power of Kindness" challenge
       const challengeResult = await pool.query(`
         SELECT id, name, description, total_days, difficulty
         FROM challenges 
@@ -337,7 +335,7 @@ export function makeDashboardController(pool) {
       `);
       
       if (challengeResult.rows.length === 0) {
-        // BOLT: DB - Fallback to first available challenge if default doesn't exist
+        // DB - Fallback to first available challenge if default doesn't exist
         const fallbackResult = await pool.query(`
           SELECT id, name, description, total_days, difficulty
           FROM challenges 
@@ -351,7 +349,7 @@ export function makeDashboardController(pool) {
         
         const challenge = fallbackResult.rows[0];
         
-        // BOLT: DB - Insert user_challenge record
+        //  DB - Insert user_challenge record
         await pool.query(`
           INSERT INTO user_challenges (user_id, challenge_id, status, current_day, start_date)
           VALUES ($1, $2, 'active', 1, NOW())
@@ -369,7 +367,7 @@ export function makeDashboardController(pool) {
       
       const challenge = challengeResult.rows[0];
       
-      // BOLT: DB - Insert user_challenge record for default challenge
+      // DB - Insert user_challenge record for default challenge
       await pool.query(`
         INSERT INTO user_challenges (user_id, challenge_id, status, current_day, start_date)
         VALUES ($1, $2, 'active', 1, NOW())
@@ -397,7 +395,7 @@ export function makeDashboardController(pool) {
    */
   async function getNextChallenge(userId) {
     try {
-      // BOLT: DB - Find first challenge user hasn't started
+      //  DB - Find first challenge user hasn't started
       const result = await pool.query(`
         SELECT c.id, c.name, c.description, c.total_days, c.difficulty
         FROM challenges c
@@ -424,7 +422,7 @@ export function makeDashboardController(pool) {
    */
   async function calculateKindnessLevel(userId) {
     try {
-      // BOLT: DB - Sum all completed challenge days and divide by 10
+      //  DB - Sum all completed challenge days and divide by 10
       const result = await pool.query(`
         SELECT COALESCE(SUM(current_day), 0) as total_days
         FROM user_challenges
@@ -446,7 +444,7 @@ export function makeDashboardController(pool) {
    */
   async function calculateLevelProgress(userId) {
     try {
-      // BOLT: DB - Get total completed days for progress calculation
+      //  DB - Get total completed days for progress calculation
       const result = await pool.query(`
         SELECT COALESCE(SUM(current_day), 0) as total_days
         FROM user_challenges
@@ -469,7 +467,7 @@ export function makeDashboardController(pool) {
    */
   async function getUserBadges(userId) {
     try {
-      // BOLT: DB - Join user_badges with badges table
+      //  DB - Join user_badges with badges table
       const result = await pool.query(`
         SELECT b.id, b.name, b.description, b.icon, ub.earned_at
         FROM user_badges ub
@@ -492,7 +490,7 @@ export function makeDashboardController(pool) {
    */
   async function getActiveQuests(userId) {
     try {
-      // BOLT: DB - Get top 5 active quests with difficulty info
+      //  DB - Get top 5 active quests with difficulty info
       const result = await pool.query(`
         SELECT 
           q.id,
