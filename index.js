@@ -82,6 +82,7 @@ const GUEST_SYSTEM_PROMPT = `
 You are KAI, a warm, encouraging mattering coach helping people connect IRL and feel less lonely; you are not a clinician.
 Default to 30-60 words; structure: brief reflection -> one practical idea -> one inviting question.
 Use OARS, good listening with follow-ups, active-constructive responding, and NAN (Noticing–Affirming–Needing) when relevant.
+If the message includes "User Context:" followed by JSON, use it quietly for personalization (e.g., onboardingDraft fields) and do not repeat the raw context back.
 You cannot send nudges, emails, SMS, or perform account actions for guests.
 If asked to send anything, first say: "To send nudges or emails, please sign in." Then offer a copy-paste draft message.
 Be concise, human, non-judgmental; celebrate small wins and suggest Low/Medium/High effort options when helpful.
@@ -609,6 +610,36 @@ app.get('/profile', ensureAuthenticated, async (req, res) => {
     if (result.rows.length === 0) {
       return res.redirect('/login');
     }
+    const userRow = result.rows[0];
+
+    let topFriends = [];
+    try {
+      const { rows: friendRows } = await pool.query(
+        `SELECT name, score, archetype_primary, archetype_secondary
+           FROM public.friends
+          WHERE owner_user_id = $1
+          ORDER BY score DESC NULLS LAST, name ASC
+          LIMIT 3`,
+        [userRow.id]
+      );
+
+      topFriends = friendRows.map((row) => {
+        const score = Number.isFinite(row.score) ? Math.round(row.score) : null;
+        const type = [row.archetype_primary, row.archetype_secondary]
+          .map((value) => (typeof value === 'string' ? value.trim() : ''))
+          .find((value) => value.length);
+
+        return {
+          name: row.name || 'Friend',
+          score,
+          type: type || '—'
+        };
+      });
+    } catch (friendErr) {
+      console.warn('Profile top friends query failed:', friendErr.message || friendErr);
+      topFriends = [];
+    }
+
     // 2) Mirror your home/about/blog locals
     const success      = req.query.success === '1';   // registration alert
     const loginSuccess = req.query.login   === '1';   // login alert
@@ -616,7 +647,8 @@ app.get('/profile', ensureAuthenticated, async (req, res) => {
     // 3) Render profile.ejs with all flags + user data
     return res.render('profile', {
       title:        'User Profile',
-      user:         result.rows[0],
+      user:         userRow,
+      topFriends,
       success,
       loginSuccess,
       name
@@ -963,6 +995,7 @@ app.post('/api/chat/message', async (req, res) => {
     if (!msg) return res.status(400).json({ error: 'message (string) is required' });
 
     const isAuthed = !!(req.isAuthenticated && req.isAuthenticated());
+    const combinedContext = userContext || context || null;
 
     if (isAuthed) {
       // ==== TOOL-AWARE PATH (logged-in users only) ====
@@ -995,11 +1028,20 @@ app.post('/api/chat/message', async (req, res) => {
     }
 
     // ==== CHAT-ONLY PATH (guests) ====
+    let promptContent = msg;
+    if (combinedContext && typeof combinedContext === 'object' && Object.keys(combinedContext).length) {
+      try {
+        promptContent = `User Context: ${JSON.stringify(combinedContext)}\n\nUser Message: ${msg}`;
+      } catch (contextErr) {
+        console.error('Failed to serialize guest userContext:', contextErr);
+      }
+    }
+
     const completion = await openai.chat.completions.create({
       model: process.env.OPENAI_CHAT_MODEL || "gpt-4o-mini",
       messages: [
         { role: "system", content: GUEST_SYSTEM_PROMPT },
-        { role: "user", content: msg }
+        { role: "user", content: promptContent }
       ]
       // IMPORTANT: do NOT pass `functions` here (prevents the earlier `strict` error).
     });

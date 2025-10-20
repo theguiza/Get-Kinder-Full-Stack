@@ -745,6 +745,10 @@ export default function FriendChallenges(props = {}) {
     [arcs, selectedId]
   );
 
+  const removeArc = React.useCallback((id) => {
+    setArcs((prev) => prev.filter((arc) => arc.id !== id));
+  }, []);
+
   if (!arcs.length || !current) {
     return (
       <div className="min-h-[60vh] pb-24 bg-[var(--canvas)] text-slate-800">
@@ -838,22 +842,27 @@ export default function FriendChallenges(props = {}) {
 
       <main className="mx-auto max-w-screen-lg px-4 py-6 md:py-8 grid gap-6 md:gap-8">
 {/* Arc Switcher */}
-<nav aria-label="Your Arcs" role="tablist" className="flex gap-2 overflow-x-auto pb-1">
-  {arcs.map((a) => {
-    const isSelected = selectedId === a.id;
-    return (
+<div className="overflow-x-auto pb-1 pt-1">
+<nav aria-label="Your Arcs" role="tablist" className="flex gap-2">
+{arcs.map((a) => {
+  const isSelected = selectedId === a.id;
+  const handleRemove = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    removeArc(a.id);
+  };
+
+  return (
+    <div key={a.id} className="relative shrink-0 pr-2">
       <button
-        key={a.id}
         onClick={() => setSelectedId(a.id)}
         role="tab"
         aria-selected={isSelected}
         className={[
-          "shrink-0 px-3.5 py-2 rounded-full text-sm border transition-all",
+          "shrink-0 pr-7 pl-3.5 py-2 rounded-full text-sm border transition-all",
           isSelected
             ? "bg-[var(--ink)] text-white border-[var(--ink)] shadow-md"
             : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50",
-          // 👇 removed the coral ring entirely
-          // a.overdue && !isSelected ? "ring-2 ring-[var(--coral)]/40" : "",
           "focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[var(--ink)]"
         ].join(" ")}
       >
@@ -867,13 +876,21 @@ export default function FriendChallenges(props = {}) {
             {a.name?.[0] ?? "?"}
           </span>
           <span className={isSelected ? "font-semibold" : ""}>{a.name}</span>
-          {/* keep the small label, no ring */}
           {a.overdue && !isSelected && <Pill tone="coral">overdue</Pill>}
           {a.overdue && isSelected && <Pill tone="warn">overdue</Pill>}
         </span>
       </button>
-    );
-  })}
+      <button
+        type="button"
+        onClick={handleRemove}
+        aria-label={`Remove ${a.name}`}
+        className="absolute top-1 right-1 flex h-4 w-4 items-center justify-center rounded-full bg-[var(--coral)] text-white text-[10px] shadow hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--coral)]"
+      >
+        ×
+      </button>
+    </div>
+  );
+})}
   <a
     className="ml-1 shrink-0 px-3.5 py-2 rounded-full text-sm border border-dashed text-slate-600 hover:bg-slate-50"
     href="friendQuiz"
@@ -881,6 +898,7 @@ export default function FriendChallenges(props = {}) {
     + Add
   </a>
 </nav>
+</div>
         {/* Two-column layout: Left = 2/3, Right = 1/3 */}
         <div className="grid md:grid-cols-3 gap-6 md:gap-8 items-start">
           {/* LEFT COLUMN (2/3): Current Arc, Daily Surprise, Badges */}

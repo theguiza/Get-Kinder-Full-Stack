@@ -43,8 +43,6 @@
       <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
     </div>
   <% } %>
-
-  <section id="title">
   <header>
       <nav class="navbar fixed-top navbar-light bg-white navbar-expand-lg">
         <div class="container-fluid d-flex">
@@ -90,13 +88,16 @@
         </div>
       </nav>
     </header>
-      <section id="title">
-      <div class="container profile-page rounded bg-white mt-5 mb-5 px-3 pt-4">
+   <div> <br></div>
+      <div class="container profile-page rounded bg-white mt-5 px-3 pt-4">
+        <div class="text-center mb-3">
+          <h1 class="mt-3 mb-0" style="color: #455a7c;">Your Get Kinder Profile</h1>
+        </div>
         <form id="profile-form" action="/profile" method="POST" enctype="multipart/form-data">
       <div class="row">
         <!-- Left: Profile Picture -->
         <div class="col-md-3 border-right">
-          <div class="d-flex flex-column align-items-center text-center p-3 py-5">
+          <div class="d-flex flex-column align-items-center text-center ">
             <img id="profile-avatar" class="rounded-circle mt-5" width="150px" alt="Get Kinder User Profile Picture" src="<%= user.picture || '/images/nerdy-KAI.png' %>"> <br> 
             <strong><%= user.firstname + " " + user.lastname %></strong><br> 
             <span class="text-black-50"><%= user.email %></span>
@@ -109,11 +110,7 @@
         </div>
         <!-- Middle: Profile Form -->
         <div class="col-md-5 border-right">
-          <div class="p-3 py-5">
-            <div class="d-flex justify-content-between align-items-center mb-3">
-              <h1 class="text-right" style="color: #455a7c;">Your Get Kinder Profile</h1>
-            </div>
-
+          <div>
             <div class="row mt-2">
               <div class="col-md-6">
                 <label class="labels">First Name</label>
@@ -126,7 +123,7 @@
             </div>
 
             <div class="row mt-3">
-              <div class="col-md-12 mb-2">
+              <div class="col-md-12 mb-">
                 <label class="labels">Kindness Style</label>
                 <input name="kindness_style" type="text" class="form-control" placeholder="get this by doing the quiz with Kai" value="<%= user.kindness_style || '' %>">
               </div>
@@ -157,10 +154,6 @@
                 <input name="country" type="text" class="form-control" placeholder="enter country" value="<%= user.country || '' %>"><br> 
               </div>
             </div>
-
-    <div class="mt-4">
-    <h2 style="color: #455a7c;">UN Sustainable Development Goals</h2>
-
   <% const sdgOptions = [
     "1 – No Poverty", "2 – Zero Hunger", "3 – Good Health and Well-being",
     "4 – Quality Education", "5 – Gender Equality", "6 – Clean Water and Sanitation",
@@ -171,7 +164,7 @@
     "16 – Peace, Justice and Strong Institutions", "17 – Partnerships for the Goals"
   ]; %>
 
-  <!-- SDG 1 -->
+  <!-- SDG selectors temporarily disabled
   <div class="row align-items-center mb-3">
     <div class="col-auto">
       <% if (user.sdg1) { const number = user.sdg1.split(/\s*[-–—]\s*/)[0].trim(); %>
@@ -188,8 +181,7 @@
     </div>
   </div>
 
-  <!-- SDG 2 -->
- <div class="row align-items-center mb-3">
+  <div class="row align-items-center mb-3">
     <div class="col-auto">
       <% if (user.sdg2) { const number = user.sdg2.split(/\s*[-–—]\s*/)[0].trim(); %>
         <img src="/images/sdgs/goal_<%= number %>.png" alt="SDG <%= number %>" class="img-fluid" style="max-width: 60px;">
@@ -205,8 +197,7 @@
     </div>
   </div>
 
-  <!-- SDG 3 -->
- <div class="row align-items-center mb-3">
+  <div class="row align-items-center mb-3">
     <div class="col-auto">
       <% if (user.sdg3) { const number = user.sdg3.split(/\s*[-–—]\s*/)[0].trim(); %>
         <img src="/images/sdgs/goal_<%= number %>.png" alt="SDG <%= number %>" class="img-fluid" style="max-width: 60px;">
@@ -221,7 +212,7 @@
       </select>
     </div>
   </div>
-</div>
+  -->
             <div class="mt-4 text-center">
               <button class="btn btn-primary profile-button" type="submit">Save Profile</button>
             </div>
@@ -229,7 +220,6 @@
         </div>
         <!-- Right: Interests Column -->
         <div class="col-md-4">
-          <div class="p-3 py-5">
             <div class="d-flex justify-content-between align-items-center mb-3">
                 <h2 class="text-right" style="color: #455a7c; margin-top: 40px;">Your Interests</h2>
             </div>
@@ -248,13 +238,34 @@
             <div class="text-center">
               <button class="btn btn-outline-primary" type="submit">Update Interests</button>
             </div>
-          </div>
+
+            <% if (topFriends && topFriends.length) { %>
+              <div class="mt-3 mb-3">
+                <h2 class="text-right" style="color: #455a7c;">Top Friends</h2>
+                <ul class="list-group">
+                  <% topFriends.forEach((friend) => { %>
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                      <div>
+                        <div class="fw-semibold"><%= friend.name %></div>
+                        <div class="text-muted small"><%= friend.type %></div>
+                      </div>
+                      <span class="badge bg-primary rounded-pill">
+                        <%= friend.score !== null ? friend.score : '—' %>
+                      </span>
+                    </li>
+                  <% }) %>
+                </ul>
+              </div>
+            <% } else { %>
+              <div class="mt-5 text-muted small text-center">
+                Add friends via the Friend Quiz to see them here.
+              </div>
+            <% } %>
         </div>
 
       </div> <!-- end .row -->
     </form>
   </div>
-</section>
   <div class="modal fade" id="logoutModal" tabindex="-1" aria-labelledby="logoutModalLabel" aria-hidden="true">
     <div class="modal-dialog">
       <div class="modal-content">

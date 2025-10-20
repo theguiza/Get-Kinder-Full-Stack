@@ -35,6 +35,54 @@
   const input = document.getElementById('kaiChatInput');
   const messagesEl = document.getElementById('kaiChatMessages');
 
+  function readLocalOnboardingDraft() {
+    try {
+      const raw = localStorage.getItem('onboarding.draft');
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      return (parsed && parsed.answers) ? parsed.answers : null;
+    } catch (err) {
+      console.warn('Unable to read onboarding draft:', err);
+      return null;
+    }
+  }
+
+  function normalizeOnboardingAnswers(source, answers) {
+    if (!answers || typeof answers !== 'object') return null;
+    const interests = Array.isArray(answers.interests)
+      ? answers.interests.map(String).map(s => s.trim()).filter(Boolean)
+      : [];
+
+    const hours =
+      typeof answers.hours_per_week === 'number' ? answers.hours_per_week :
+      typeof answers.timeCommitment === 'number' ? answers.timeCommitment :
+      null;
+
+    return {
+      source,
+      why_friend:       answers.why_friend || answers.whyFriend || null,
+      known_connection: answers.known_connection || answers.knownConnection || null,
+      desired_outcome:  answers.desired_outcome || answers.outcome || null,
+      hours_per_week:   hours,
+      age_bracket:      answers.age_bracket || answers.age || null,
+      interests
+    };
+  }
+
+  function buildUserContext() {
+    const context = {};
+    const profile = (typeof window !== 'undefined' && window.__onboardingProfile) || null;
+    const draftAnswers = readLocalOnboardingDraft();
+
+    const normalizedProfile = profile ? normalizeOnboardingAnswers('profile', profile) : null;
+    const normalizedDraft   = draftAnswers ? normalizeOnboardingAnswers('local_draft', draftAnswers) : null;
+
+    if (normalizedProfile) context.onboarding_profile = normalizedProfile;
+    if (normalizedDraft) context.onboardingDraft = normalizedDraft;
+
+    return Object.keys(context).length ? context : null;
+  }
+
   function open() {
     panel.classList.add('active');
     toggleBtn.setAttribute('aria-expanded','true');
@@ -64,11 +112,18 @@
     messagesEl.scrollTop = messagesEl.scrollHeight;
 
     try {
+      const userContext = buildUserContext();
+      const payload = { message: text };
+      if (userContext) {
+        payload.userContext = userContext;
+        payload.context = userContext; // legacy key for older handlers
+      }
+
       const res = await fetch('/api/chat/message', {
         method: 'POST',
         headers: {'Content-Type':'application/json'},
         credentials: 'include',
-        body: JSON.stringify({ message: text })
+        body: JSON.stringify(payload)
       });
       const data = await res.json();
 

@@ -344,9 +344,26 @@ Get started making a new friend with a starter <em>Friend Arcs</em> . KAI will b
   <script src="/js/viewport-fix.js"></script>
 
   <!-- 2) If logged in, expose the user picture (keep this block if you need it) -->
-  <% if (typeof user !== 'undefined' && user) { %>
+  <% if (typeof user !== 'undefined' && user) { 
+       const profileInterests = [user.interest1, user.interest2, user.interest3]
+         .map(item => (item || '').toString().trim())
+         .filter(val => val.length > 0);
+       const normalizedHours = Number.isFinite(Number(user.hours_per_week))
+         ? Number(user.hours_per_week)
+         : null;
+       const onboardingProfile = {
+         source: 'profile',
+         why_friend: user.why_friend || null,
+         known_connection: user.known_connection || null,
+         desired_outcome: user.desired_outcome || null,
+         hours_per_week: normalizedHours,
+         age_bracket: user.age_bracket || null,
+         interests: profileInterests
+       };
+  %>
     <script>
       window.loggedInUserPicture = "<%= user.picture ? user.picture : '/images/nerdy-KAI.png' %>";
+      window.__onboardingProfile = "<%- JSON.stringify(onboardingProfile).replace(/</g, '\\u003c') %>;" 
     </script>
   <% } %>
 <% if (typeof user !== 'undefined' && user) { %>
@@ -417,13 +434,15 @@ Get started making a new friend with a starter <em>Friend Arcs</em> . KAI will b
     // starters -> chat input
     const chatInput = document.getElementById('chatInput');
     const sendBtn   = document.getElementById('sendBtn');
-    document.querySelectorAll('.starter-btn').forEach(btn =>
-      btn.addEventListener('click', () => {
-        chatInput.value = btn.dataset.prompt;
-        sendBtn.click();
-        chatInput.value = '';
-      })
-    );
+    if (chatInput && sendBtn) {
+      document.querySelectorAll('.starter-btn').forEach(btn =>
+        btn.addEventListener('click', () => {
+          chatInput.value = btn.dataset.prompt;
+          sendBtn.click();
+          chatInput.value = '';
+        })
+      );
+    }
   </script>
 
   <script>
@@ -440,9 +459,11 @@ Get started making a new friend with a starter <em>Friend Arcs</em> . KAI will b
         var targetY = paneTop - headerHeight - extra;
         window.scrollTo({ top: targetY, behavior: 'smooth' });
       }
-      tabEl.addEventListener('shown.bs.tab', function(e) {
-        scrollToPaneSelector(e.target.getAttribute('data-bs-target'));
-      });
+      if (tabEl) {
+        tabEl.addEventListener('shown.bs.tab', function(e) {
+          scrollToPaneSelector(e.target.getAttribute('data-bs-target'));
+        });
+      }
       var first = document.getElementById('start-tab');
       if (first) first.addEventListener('click', function() { scrollToPaneSelector('#start'); });
     });
