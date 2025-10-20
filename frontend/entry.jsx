@@ -46,7 +46,7 @@ function bootOnboarding() {
   root.render(
     <OnboardingCards
       steps={steps}
-      brand={{ productName: "Get Kinder AI", logoUrl: "/public/images/logo.png"}} 
+      brand={{ productName: "Get Kinder AI", logoUrl: "/images/logo.png"}} 
       // onComplete not required; component POSTs /api/onboarding/complete internally
     />
   );
