@@ -202,6 +202,251 @@ export const isMissingQuiz = (score, type) => {
   return !hasScore && !hasType;
 };
 
+const isPlainObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+const safeText = (value) => (typeof value === "string" ? value.trim() : "");
+const pickFinite = (...values) => {
+  for (const value of values) {
+    if (value === null || value === undefined) continue;
+    const num = Number(value);
+    if (Number.isFinite(num)) return num;
+  }
+  return null;
+};
+
+const normalizeSteps = (steps, friendName) => {
+  if (!Array.isArray(steps) || steps.length === 0) {
+    return {
+      steps: [
+        {
+          title: `Start a plan with ${friendName}`,
+          status: "todo",
+          meta: "Complete their Friend Quiz to unlock personalised steps.",
+        },
+      ],
+      hasStructuredSteps: false,
+    };
+  }
+
+  const coerced = steps.map((step, index) => {
+    if (typeof step === "string") {
+      return { title: step, status: "todo", meta: "" };
+    }
+    if (isPlainObject(step)) {
+      const title = safeText(step.title) || safeText(step.name) || `Step ${index + 1}`;
+      const status = safeText(step.status) || safeText(step.state) || "todo";
+      const meta = safeText(step.meta) || safeText(step.hint) || safeText(step.summary) || "";
+      return { title, status, meta };
+    }
+    return { title: `Step ${index + 1}`, status: "todo", meta: "" };
+  });
+
+  return { steps: coerced, hasStructuredSteps: true };
+};
+
+const normalizeChallenge = (challenge, fallbackName) => {
+  if (isPlainObject(challenge)) {
+    return {
+      title: safeText(challenge.title) || `Plan a kindness for ${fallbackName}`,
+      effort: safeText(challenge.effort) || safeText(challenge.level) || "Low",
+      estMinutes: pickFinite(challenge.estMinutes, challenge.estimate_minutes, challenge.minutes) ?? 5,
+      points: pickFinite(challenge.points, challenge.xp, challenge.reward_points) ?? 0,
+      swapsLeft: pickFinite(challenge.swapsLeft, challenge.swaps_left) ?? 0,
+      isFallback: false,
+    };
+  }
+
+  return {
+    title: `Choose a micro kindness for ${fallbackName}`,
+    effort: "Low",
+    estMinutes: 5,
+    points: 0,
+    swapsLeft: 0,
+    isFallback: true,
+  };
+};
+
+const normalizeLifetime = (lifetime) => {
+  if (!isPlainObject(lifetime)) {
+    return { xp: 0, streak: "—", drag: "0%" };
+  }
+
+  const xp = pickFinite(lifetime.xp, lifetime.points, lifetime.total_xp) ?? 0;
+  const streak = safeText(lifetime.streak) || `${pickFinite(lifetime.days, lifetime.streak_days) ?? 0} days`;
+  const dragValue = pickFinite(lifetime.drag_percent, lifetime.drag);
+  const drag = safeText(lifetime.drag) || (dragValue !== null ? `${dragValue}%` : "0%");
+
+  return {
+    xp,
+    streak,
+    drag,
+  };
+};
+
+const normalizeArc = (raw, index) => {
+  if (!raw) return null;
+  const snapshot = isPlainObject(raw.snapshot) ? raw.snapshot : {};
+  const metrics = isPlainObject(snapshot.metrics) ? snapshot.metrics : {};
+  const name = safeText(raw.name) || `Friend ${index + 1}`;
+
+  const percent = clampPct(
+    pickFinite(
+      raw.percent,
+      snapshot.percent,
+      snapshot.progress_percent,
+      snapshot.progressPercent,
+      snapshot.completion_percent,
+      snapshot.completionPercent,
+      metrics.progress_percent,
+      metrics.progressPercent
+    ) ?? 0
+  );
+
+  const day = pickFinite(
+    raw.day,
+    snapshot.day,
+    snapshot.current_day,
+    snapshot.currentDay,
+    metrics.current_day,
+    metrics.day
+  ) ?? 0;
+
+  const length = pickFinite(
+    raw.length,
+    snapshot.length,
+    snapshot.total_days,
+    snapshot.totalDays,
+    metrics.total_days,
+    metrics.length
+  ) ?? 0;
+
+  const pointsToday = pickFinite(
+    raw.pointsToday,
+    snapshot.points_today,
+    snapshot.pointsToday,
+    metrics.points_today
+  ) ?? 0;
+
+  const arcPoints = pickFinite(
+    raw.arcPoints,
+    snapshot.arc_points,
+    snapshot.arcPoints,
+    metrics.arc_points
+  ) ?? 0;
+
+  const nextThresholdRaw = pickFinite(
+    raw.nextThreshold,
+    snapshot.next_threshold,
+    snapshot.nextThreshold,
+    metrics.next_threshold
+  );
+  const nextThreshold = Number.isFinite(nextThresholdRaw) && nextThresholdRaw > 0 ? nextThresholdRaw : 100;
+
+  const friendScore = pickFinite(
+    raw.friendScore,
+    raw.friend_score,
+    snapshot.friend_score,
+    metrics.friend_score,
+    raw.score
+  );
+
+  const friendType =
+    safeText(raw.friendType) ||
+    safeText(raw.friend_type) ||
+    safeText(raw.archetype_primary) ||
+    safeText(raw.archetype_secondary) ||
+    safeText(snapshot.friend_type) ||
+    null;
+
+  const { steps, hasStructuredSteps } = normalizeSteps(
+    Array.isArray(raw.steps)
+      ? raw.steps
+      : Array.isArray(snapshot.steps)
+      ? snapshot.steps
+      : [],
+    name
+  );
+
+  const challenge = normalizeChallenge(
+    isPlainObject(raw.challenge)
+      ? raw.challenge
+      : isPlainObject(snapshot.challenge)
+      ? snapshot.challenge
+      : null,
+    name
+  );
+
+  const lifetime = normalizeLifetime(
+    isPlainObject(raw.lifetime)
+      ? raw.lifetime
+      : isPlainObject(snapshot.lifetime)
+      ? snapshot.lifetime
+      : null
+  );
+
+  const recent = Array.isArray(raw.recent)
+    ? raw.recent
+    : Array.isArray(snapshot.recent)
+    ? snapshot.recent
+    : [];
+
+  const badges = isPlainObject(raw.badges)
+    ? raw.badges
+    : isPlainObject(snapshot.badges)
+    ? snapshot.badges
+    : {};
+
+  const signals = Array.isArray(raw.signals)
+    ? raw.signals
+    : Array.isArray(snapshot.signals)
+    ? snapshot.signals
+    : [];
+
+  const redFlags = Array.isArray(raw.redFlags)
+    ? raw.redFlags
+    : Array.isArray(snapshot.red_flags)
+    ? snapshot.red_flags
+    : Array.isArray(raw.red_flags)
+    ? raw.red_flags
+    : [];
+
+  return {
+    id: String(raw.id ?? raw.friend_id ?? `friend-${index}`),
+    name,
+    overdue: Boolean(raw.overdue ?? snapshot.overdue ?? snapshot.is_overdue ?? false),
+    percent,
+    day,
+    length,
+    pointsToday,
+    friendScore: Number.isFinite(friendScore) ? friendScore : null,
+    friendType,
+    photoSrc: raw.photoSrc || raw.picture || snapshot.photo || null,
+    steps,
+    hasStructuredSteps,
+    challenge,
+    arcPoints,
+    nextThreshold,
+    lifetime,
+    recent,
+    badges,
+    signals,
+    redFlags,
+    meta: {
+      rawSnapshot: snapshot,
+      updatedAt: raw.updatedAt || snapshot.updated_at || null,
+      notes: safeText(raw.notes) || safeText(snapshot.notes) || null,
+      evidence: raw.evidence || snapshot.evidence || null,
+    },
+  };
+};
+
+const sanitizeArcs = (rawArcs) => {
+  if (!Array.isArray(rawArcs)) return [];
+  return rawArcs
+    .filter(Boolean)
+    .map((arc, index) => normalizeArc(arc, index))
+    .filter((arc) => arc && arc.id && arc.name);
+};
+
 const ProgressRing = ({ percent = 68, size = 112, label = "68%" }) => {
   const clamped = clampPct(percent);
   const stroke = makeConicStroke(clamped);
@@ -376,6 +621,8 @@ const INITIAL_ARCS = [
   },
 ];
 
+const INITIAL_ARCS_SANITISED = sanitizeArcs(INITIAL_ARCS);
+
 // -------------------------------
 // Dev checks (lightweight, non-blocking)
 // -------------------------------
@@ -449,17 +696,125 @@ if (__DEV__) {
 export default function FriendChallenges(props = {}) {
   const { arcs: arcsProp, initialArcId } = props;
 
-  const [arcs, setArcs] = useState(
-    Array.isArray(arcsProp) && arcsProp.length ? arcsProp : INITIAL_ARCS
-  );
-  const [selectedId, setSelectedId] = useState(
-    initialArcId || arcs[0]?.id || ""
+  const sanitizedPropArcs = React.useMemo(() => sanitizeArcs(arcsProp), [arcsProp]);
+  const hasServerArcs = sanitizedPropArcs.length > 0;
+
+  const [arcs, setArcs] = useState(() =>
+    hasServerArcs ? sanitizedPropArcs : __DEV__ ? INITIAL_ARCS_SANITISED : []
   );
 
+  const [selectedId, setSelectedId] = useState(() => {
+    if (hasServerArcs) {
+      if (
+        initialArcId &&
+        sanitizedPropArcs.some((arc) => arc.id === initialArcId)
+      ) {
+        return initialArcId;
+      }
+      return sanitizedPropArcs[0]?.id || "";
+    }
+    return (__DEV__ ? INITIAL_ARCS_SANITISED[0]?.id : "") || "";
+  });
+
+  React.useEffect(() => {
+    if (!hasServerArcs) return;
+    setArcs(sanitizedPropArcs);
+    setSelectedId((prev) => {
+      if (prev && sanitizedPropArcs.some((arc) => arc.id === prev)) {
+        return prev;
+      }
+      if (
+        initialArcId &&
+        sanitizedPropArcs.some((arc) => arc.id === initialArcId)
+      ) {
+        return initialArcId;
+      }
+      return sanitizedPropArcs[0]?.id || prev || "";
+    });
+  }, [hasServerArcs, sanitizedPropArcs, initialArcId]);
+
+  React.useEffect(() => {
+    if (!arcs.length) return;
+    if (!arcs.some((arc) => arc.id === selectedId)) {
+      setSelectedId(arcs[0].id);
+    }
+  }, [arcs, selectedId]);
+
   const current = React.useMemo(
-    () => arcs.find((a) => a.id === selectedId) || arcs[0] || INITIAL_ARCS[0],
+    () => arcs.find((a) => a.id === selectedId) || arcs[0] || null,
     [arcs, selectedId]
   );
+
+  if (!arcs.length || !current) {
+    return (
+      <div className="min-h-[60vh] pb-24 bg-[var(--canvas)] text-slate-800">
+        <style>{`
+        :root{ --ink:#455a7c; --coral:#ff5656; --mist:#b5bdcb; --canvas:#f4f4f4; }
+      `}</style>
+        <main className="mx-auto max-w-screen-md px-4 py-6 md:py-8 grid gap-6">
+          <SectionCard
+            title="Welcome to Friend Challenges"
+            subtitle="Add a friend to see personalised arcs and action steps"
+          >
+            <div className="grid gap-4 text-sm text-slate-600">
+              <p>
+                You haven't added any friends yet. Take the Friend Quiz to create
+                your first arc and unlock tailored steps, challenges, and badges.
+              </p>
+              <div className="flex flex-wrap gap-3">
+                <a
+                  href="friendQuiz"
+                  className="px-4 py-2 rounded-lg bg-[var(--coral)] text-white text-sm hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--coral)]"
+                >
+                  Take the Friend Quiz
+                </a>
+                <a
+                  href="/profile"
+                  className="px-4 py-2 rounded-lg bg-white text-[var(--ink)] border border-slate-200 text-sm hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--ink)]/40"
+                >
+                  Manage your friends
+                </a>
+              </div>
+              <p className="text-xs text-slate-500">
+                Tip: once you complete a friend's quiz, their arc will appear here
+                with personalised micro-actions and badges.
+              </p>
+            </div>
+          </SectionCard>
+        </main>
+      </div>
+    );
+  }
+
+  const challenge = current.challenge || normalizeChallenge(null, current.name);
+  const challengeDescription =
+    !challenge || challenge.isFallback
+      ? `Complete the Friend Quiz to unlock a personalised micro-action for ${current.name}.`
+      : safeText(challenge.description) ||
+        safeText(challenge.body) ||
+        safeText(challenge.summary) ||
+        `Keep up the momentum with ${current.name}.`;
+
+  const challengePrimaryCta = challenge.isFallback
+    ? { label: "Take the Friend Quiz", href: "friendQuiz" }
+    : { label: "Do it", href: "#" };
+  const swapsLeft = Number.isFinite(challenge.swapsLeft) ? challenge.swapsLeft : 0;
+
+  const lifetime = current.lifetime || { xp: 0, streak: "—", drag: "0%" };
+  const arcPoints = Number.isFinite(current.arcPoints) ? current.arcPoints : 0;
+  const nextThreshold = Number.isFinite(current.nextThreshold) && current.nextThreshold > 0 ? current.nextThreshold : 100;
+  const pointsToday = Number.isFinite(current.pointsToday) ? current.pointsToday : 0;
+  const day = Number.isFinite(current.day) ? current.day : 0;
+  const length = Number.isFinite(current.length) ? current.length : 0;
+  const progressLabel = `${Math.round(Number.isFinite(current.percent) ? current.percent : 0)}%`;
+  const dayLabel =
+    length > 0 && day > 0
+      ? `Day ${Math.min(day, length)} of ${length}`
+      : day > 0
+      ? `Day ${day}`
+      : "Day 1";
+  const pointsTodayLabel = pointsToday > 0 ? `+${pointsToday} XP today` : "0 XP logged today";
+  const showFallbackStepsNote = !current.hasStructuredSteps;
 
   // --- MVP: earned badge ids (optional; if ladder state alone drives visuals you can remove this) ---
   const [siteBadges, setSiteBadges] = useState([]);
@@ -470,10 +825,9 @@ export default function FriendChallenges(props = {}) {
     getLevelIconPure(level, state, earnedBadgeIds, siteBadges, LEVEL_TO_BADGE_SRC);
 
   const progressPct = React.useMemo(() => {
-    const denom = Number(current?.nextThreshold) || 0;
-    if (denom <= 0) return 0;
-    return Math.min(100, Math.max(0, Math.round((current.arcPoints / denom) * 100)));
-  }, [current.arcPoints, current.nextThreshold]);
+    if (nextThreshold <= 0) return 0;
+    return Math.min(100, Math.max(0, Math.round((arcPoints / nextThreshold) * 100)));
+  }, [arcPoints, nextThreshold]);
 
   return (
     <div className="min-h-[60vh] pb-24 bg-[var(--canvas)] text-slate-800">
@@ -520,9 +874,12 @@ export default function FriendChallenges(props = {}) {
       </button>
     );
   })}
-  <button className="ml-1 shrink-0 px-3.5 py-2 rounded-full text-sm border border-dashed text-slate-600">
+  <a
+    className="ml-1 shrink-0 px-3.5 py-2 rounded-full text-sm border border-dashed text-slate-600 hover:bg-slate-50"
+    href="friendQuiz"
+  >
     + Add
-  </button>
+  </a>
 </nav>
         {/* Two-column layout: Left = 2/3, Right = 1/3 */}
         <div className="grid md:grid-cols-3 gap-6 md:gap-8 items-start">
@@ -548,10 +905,10 @@ export default function FriendChallenges(props = {}) {
 
                 {/* Right 2/3: Progress ring + pills centered */}
                 <div className="grid md:col-span-2 place-items-center">
-                  <ProgressRing percent={current.percent} size={128} label={`${Math.round(current.percent)}%`} />
+                  <ProgressRing percent={current.percent} size={128} label={progressLabel} />
                   <div className="mt-3 flex items-center gap-2 text-xs">
-                    <Pill tone="ink">{`Day ${current.day} of ${current.length}`}</Pill>
-                    <Pill tone="coral">{`+${current.pointsToday} XP today`}</Pill>
+                    <Pill tone="ink">{dayLabel}</Pill>
+                    <Pill tone="coral">{pointsTodayLabel}</Pill>
                   </div>
                 </div>
 
@@ -568,6 +925,12 @@ export default function FriendChallenges(props = {}) {
                       </li>
                     ))}
                   </ul>
+
+                  {showFallbackStepsNote && (
+                    <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-xs text-slate-600">
+                      Complete this friend’s quiz to unlock a personalised daily plan.
+                    </div>
+                  )}
 
                   <div className="flex flex-wrap items-center gap-2 pt-2">
                     <button className="px-3 py-1.5 rounded-lg bg-[var(--ink)] text-white text-sm hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--ink)]">Extend</button>
@@ -589,23 +952,51 @@ export default function FriendChallenges(props = {}) {
             <SectionCard title={"Daily Surprise · " + current.name} subtitle="A tiny nudge for real-life progress">
               <div className="grid md:grid-cols-[1fr,auto] gap-4 items-start">
                 <div>
-                  <div className="text-[15px] font-semibold text-[var(--ink)]">{"🎯 " + current.challenge.title}</div>
-                  <p className="text-sm text-slate-600 mt-1">Tell {current.name} one thing that went better than expected. Keep it kind and specific.</p>
+                  <div className="text-[15px] font-semibold text-[var(--ink)]">{`🎯 ${challenge.title}`}</div>
+                  <p className="text-sm text-slate-600 mt-1">{challengeDescription}</p>
                   <div className="mt-3 flex items-center gap-2 text-xs">
-                    <Pill tone="muted">{"Effort: " + current.challenge.effort}</Pill>
-                    <Pill tone="muted">{"~" + current.challenge.estMinutes + " min"}</Pill>
-                    <Pill tone="coral">{"+" + current.challenge.points + " XP"}</Pill>
+                    <Pill tone="muted">{`Effort: ${challenge.effort}`}</Pill>
+                    <Pill tone="muted">{`~${challenge.estMinutes} min`}</Pill>
+                    <Pill tone="coral">{`+${challenge.points} XP`}</Pill>
                   </div>
                   <div className="mt-4 flex flex-wrap gap-2">
-                    <button className="px-3 py-2 rounded-lg bg-[var(--coral)] text-white text-sm hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--coral)]">Do it</button>
-                    <button className="px-3 py-2 rounded-lg bg-white text-[var(--ink)] border border-slate-200 text-sm hover:bg-slate-50">Swap</button>
-                    <button className="px-3 py-2 rounded-lg bg-white text-slate-700 border border-slate-200 text-sm hover:bg-slate-50">Save for later</button>
+                    {challengePrimaryCta.href === "#" ? (
+                      <button
+                        className="px-3 py-2 rounded-lg bg-[var(--coral)] text-white text-sm hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--coral)]"
+                        type="button"
+                      >
+                        {challengePrimaryCta.label}
+                      </button>
+                    ) : (
+                      <a
+                        className="px-3 py-2 rounded-lg bg-[var(--coral)] text-white text-sm hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--coral)]"
+                        href={challengePrimaryCta.href}
+                      >
+                        {challengePrimaryCta.label}
+                      </a>
+                    )}
+                    {!challenge.isFallback && (
+                      <>
+                        <button className="px-3 py-2 rounded-lg bg-white text-[var(--ink)] border border-slate-200 text-sm hover:bg-slate-50">Swap</button>
+                        <button className="px-3 py-2 rounded-lg bg-white text-slate-700 border border-slate-200 text-sm hover:bg-slate-50">Save for later</button>
+                      </>
+                    )}
                   </div>
-                  <div className="mt-3 text-xs text-slate-500">Stuck? <a href="#" className="text-[var(--ink)] underline">Open KAI’s script</a></div>
+                  <div className="mt-3 text-xs text-slate-500">
+                    Stuck?{" "}
+                    <a
+                      href={challenge.isFallback ? "friendQuiz" : "#"}
+                      className="text-[var(--ink)] underline"
+                    >
+                      {challenge.isFallback ? "Unlock ideas with the Friend Quiz" : "Open KAI’s script"}
+                    </a>
+                  </div>
                 </div>
-                <div className="justify-self-end">
-                  <Pill tone="warn">{"Swaps left: " + current.challenge.swapsLeft}</Pill>
-                </div>
+                {Number.isFinite(swapsLeft) && (
+                  <div className="justify-self-end">
+                    <Pill tone={swapsLeft > 0 ? "warn" : "muted"}>{`Swaps left: ${swapsLeft}`}</Pill>
+                  </div>
+                )}
               </div>
             </SectionCard>
 
@@ -674,7 +1065,7 @@ export default function FriendChallenges(props = {}) {
                   </div>
                   <div className="flex items-center justify-between text-sm">
                     <span>
-                      {current.arcPoints} / {current.nextThreshold} → Next reward
+                      {arcPoints} / {nextThreshold} → Next reward
                     </span>
                     <a href="#" className="inline-flex items-center gap-1 text-[var(--ink)] hover:underline">
                       View details <ChevronRight size={16} />
@@ -689,21 +1080,21 @@ export default function FriendChallenges(props = {}) {
     {/* Lifetime XP */}
     <div className="rounded-xl border border-slate-200 p-4 text-center flex flex-col items-center justify-center min-h-[112px]">
       <div className="text-xs text-slate-500">Lifetime XP</div>
-      <div className="text-lg font-semibold text-[var(--ink)] leading-tight">{current.lifetime.xp}</div>
+      <div className="text-lg font-semibold text-[var(--ink)] leading-tight">{lifetime.xp}</div>
     </div>
 
     {/* Current Streak */}
     <div className="rounded-xl border border-slate-200 p-4 text-center flex flex-col items-center justify-center min-h-[112px]">
       <div className="text-xs text-slate-500">Current Streak</div>
       <div className="text-lg font-semibold text-[var(--ink)] leading-tight whitespace-pre-line">
-        {current.lifetime.streak}
+        {lifetime.streak}
       </div>
     </div>
 
     {/* Drag this week */}
     <div className="rounded-xl border border-slate-200 p-4 text-center flex flex-col items-center justify-center min-h-[112px]">
       <div className="text-xs text-slate-500">Drag this week</div>
-      <div className="text-lg font-semibold text-[var(--coral)] leading-tight">{current.lifetime.drag}</div>
+      <div className="text-lg font-semibold text-[var(--coral)] leading-tight">{lifetime.drag}</div>
     </div>
   </div>
 

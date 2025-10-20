@@ -8,6 +8,42 @@
  * Handles all dashboard-related database operations and business logic
  */
 
+const isPlainObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+const trimOrEmpty = (value) => (typeof value === "string" ? value.trim() : "");
+const firstFiniteNumber = (...values) => {
+  for (const value of values) {
+    if (value === null || value === undefined) continue;
+    const num = Number(value);
+    if (Number.isFinite(num)) return num;
+  }
+  return null;
+};
+const clampNumber = (value, min = 0, max = 100) => {
+  if (!Number.isFinite(value)) return min;
+  return Math.max(min, Math.min(max, value));
+};
+
+const maskValue = (value = "", opts = { keepStart: 4, keepEnd: 2 }) => {
+  if (!value) return "";
+  const str = String(value);
+  const { keepStart = 4, keepEnd = 2 } = opts || {};
+  if (str.length <= keepStart + keepEnd) return "*".repeat(Math.max(3, str.length));
+  return `${str.slice(0, keepStart)}…${str.slice(-keepEnd)}`;
+};
+
+const formatDbUrl = (value) => {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    const maskedAuth = `${url.username || ""}:${maskValue(url.password || "")}`;
+    return `${url.protocol}//${maskedAuth}@${url.hostname}:${url.port || ""}${url.pathname || ""}`;
+  } catch (err) {
+    return maskValue(value, { keepStart: 6, keepEnd: 4 });
+  }
+};
+
+let envLogged = false;
+
 export function makeDashboardController(pool) {
   
   /**
@@ -46,6 +82,200 @@ export function makeDashboardController(pool) {
       //  DB - Get active quests for sidebar
       const quests = await getActiveQuests(userId);
       
+      // DB - Fetch friend arcs for dashboard React mount
+      // TODO: add smoke tests for dashboard friend arcs when test harness is available
+      let arcs = [];
+      let initialArcId = "";
+
+      if (!envLogged) {
+        envLogged = true;
+        console.log("[dashboard] DB env summary", {
+          DATABASE_URL: formatDbUrl(process.env.DATABASE_URL),
+          DB_HOST: process.env.DB_HOST || null,
+          DB_PORT: process.env.DB_PORT || null,
+          DB_NAME: process.env.DB_NAME || null,
+          DB_USER: process.env.DB_USER || null,
+          NODE_ENV: process.env.NODE_ENV || null
+        });
+      }
+
+      let dbContext = null;
+
+      try {
+        const { rows: ctxRows } = await pool.query(
+          `SELECT current_database() AS database,
+                  current_schema()   AS schema,
+                  current_user       AS user,
+                  current_setting('search_path') AS search_path`
+        );
+        dbContext = ctxRows[0] || null;
+        if (dbContext) {
+          console.log("[dashboard] DB context", dbContext);
+        }
+      } catch (ctxError) {
+        console.warn("[dashboard] unable to read DB context:", ctxError.message || ctxError);
+      }
+
+      try {
+        const friendsResult = await pool.query(
+          `SELECT
+              id::text       AS id,
+              name,
+              score,
+              archetype_primary,
+              archetype_secondary,
+              picture,
+              snapshot,
+              signals,
+              notes,
+              flags_count,
+              red_flags,
+              evidence_direct,
+              evidence_proxy,
+              updated_at
+           FROM public.friends
+          WHERE owner_user_id = $1
+          ORDER BY updated_at DESC NULLS LAST, name ASC`,
+          [userId]
+        );
+
+        arcs = (friendsResult.rows || []).map((row, index) => {
+          const snapshot = isPlainObject(row.snapshot) ? row.snapshot : {};
+          const metrics = isPlainObject(snapshot.metrics) ? snapshot.metrics : {};
+          const percent = clampNumber(
+            firstFiniteNumber(
+              row.percent,
+              snapshot.percent,
+              snapshot.progress_percent,
+              snapshot.progressPercent,
+              snapshot.completion_percent,
+              snapshot.completionPercent,
+              metrics.progress_percent,
+              metrics.progressPercent
+            ) ?? 0,
+            0,
+            100
+          );
+          const day = firstFiniteNumber(
+            row.day,
+            snapshot.day,
+            snapshot.current_day,
+            snapshot.currentDay,
+            metrics.current_day,
+            metrics.day
+          ) ?? 0;
+          const length = firstFiniteNumber(
+            row.length,
+            snapshot.length,
+            snapshot.total_days,
+            snapshot.totalDays,
+            metrics.total_days,
+            metrics.length
+          ) ?? 0;
+          const pointsToday = firstFiniteNumber(
+            row.pointsToday,
+            snapshot.points_today,
+            snapshot.pointsToday,
+            metrics.points_today
+          ) ?? 0;
+          const arcPoints = firstFiniteNumber(
+            row.arcPoints,
+            snapshot.arc_points,
+            snapshot.arcPoints,
+            metrics.arc_points
+          ) ?? 0;
+          const nextThreshold = firstFiniteNumber(
+            row.nextThreshold,
+            snapshot.next_threshold,
+            snapshot.nextThreshold,
+            metrics.next_threshold
+          ) ?? 0;
+
+          return {
+            id: String(row.id ?? `friend-${index}`),
+            name: trimOrEmpty(row.name) || `Friend ${index + 1}`,
+            overdue: Boolean(
+              typeof row.overdue === "boolean"
+                ? row.overdue
+                : snapshot.overdue ?? snapshot.is_overdue ?? false
+            ),
+            percent,
+            day,
+            length,
+            pointsToday,
+            friendScore: firstFiniteNumber(row.friendScore, row.score, snapshot.friend_score),
+            friendType:
+              trimOrEmpty(row.friendType) ||
+              trimOrEmpty(row.archetype_primary) ||
+              trimOrEmpty(row.archetype_secondary) ||
+              trimOrEmpty(snapshot.friend_type) ||
+              null,
+            photoSrc: row.picture || snapshot.photo || null,
+            steps: Array.isArray(row.steps)
+              ? row.steps
+              : Array.isArray(snapshot.steps)
+              ? snapshot.steps
+              : [],
+            challenge: isPlainObject(row.challenge)
+              ? row.challenge
+              : isPlainObject(snapshot.challenge)
+              ? snapshot.challenge
+              : null,
+            arcPoints,
+            nextThreshold,
+            lifetime: isPlainObject(row.lifetime)
+              ? row.lifetime
+              : isPlainObject(snapshot.lifetime)
+              ? snapshot.lifetime
+              : null,
+            recent: Array.isArray(row.recent)
+              ? row.recent
+              : Array.isArray(snapshot.recent)
+              ? snapshot.recent
+              : [],
+            badges: isPlainObject(row.badges)
+              ? row.badges
+              : isPlainObject(snapshot.badges)
+              ? snapshot.badges
+              : {},
+            signals: Array.isArray(row.signals)
+              ? row.signals
+              : Array.isArray(snapshot.signals)
+              ? snapshot.signals
+              : [],
+            redFlags: Array.isArray(row.red_flags)
+              ? row.red_flags
+              : Array.isArray(snapshot.red_flags)
+              ? snapshot.red_flags
+              : [],
+            evidence: {
+              direct: firstFiniteNumber(row.evidence_direct),
+              proxy: firstFiniteNumber(row.evidence_proxy)
+            },
+            flagsCount: firstFiniteNumber(row.flags_count) ?? 0,
+            notes: trimOrEmpty(row.notes),
+            updatedAt: row.updated_at || null,
+            snapshot
+          };
+        });
+
+        initialArcId = arcs[0]?.id || "";
+      } catch (friendError) {
+        if (friendError?.code === "42P01") {
+          console.warn(
+            "friends table not found in current database; skipping arc hydration (set DATABASE_URL to production to use live data).",
+            { dbContext }
+          );
+        } else if (friendError) {
+          console.warn(
+            "Dashboard friends query failed:",
+            friendError.code ? { code: friendError.code, message: friendError.message, dbContext } : friendError
+          );
+        }
+        arcs = [];
+        initialArcId = "";
+      }
+
       //  UI - Render dashboard with all data
       res.render('dashboard', {
         title: 'Kindness Challenge Dashboard',
@@ -56,6 +286,8 @@ export function makeDashboardController(pool) {
         levelProgress,
         userBadges,
         quests,
+        arcs,
+        initialArcId,
         success: req.query.success === '1',
         loginSuccess: req.query.login === '1',
         name: req.query.name || req.user.firstname || req.user.email
