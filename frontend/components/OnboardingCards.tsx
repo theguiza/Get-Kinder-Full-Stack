@@ -163,15 +163,15 @@ export function getDefaultSteps(): OnboardingStep[] {
     {
       id: "whyFriend",
       title: "Why are you looking for a friend?",
-      description: "Your 'why' helps KAI to focus on customizing your arc to achieve your goal.",
+      description: "This helps KAI focus on how to help you to achieve your goal.",
       type: "single",
       required: true,
       options: [
         { id: "move", label: "I moved" },
-        { id: "school", label: "I am at a new school" },
+        { id: "school", label: "I am at a new school / job" },
         { id: "break-up", label: "I recently ended a relationship" },
         { id: "goal", label: "New Years Resolution or life goal" },
-        { id: "specific", label: "I am looking for a partner for a specific activity" },
+        { id: "specific", label: "Seeking a partner for a specific activity" },
         { id: "lonely", label: "I just want a new friend" },
         { id: "other", label: "I have another reason" },
       ],
@@ -189,8 +189,8 @@ export function getDefaultSteps(): OnboardingStep[] {
     },
     {
       id: "outcome",
-      title: "What is your desired outcome you want?",
-      description: "Confirm with KAI what you would like to happen with your initial friend so he can help you get there.",
+      title: "What is your desired outcome?",
+      description: "Confirm with KAI your goal for your initial friend so he can help you achieve it.",
       type: "single",
       required: true,
       options: [
@@ -198,7 +198,7 @@ export function getDefaultSteps(): OnboardingStep[] {
         { id: "circle", label: "Expand my current friend circle" },
         { id: "casual", label: "Find someone to hang out with IRL" },
         { id: "lonely", label: "Feel less bored or lonely" },
-        { id: "activity", label: "Find a buddy/partner for a specific activity" },
+        { id: "activity", label: "Find partner for a specific activity" },
         { id: "another", label: "I have another desired outcome" },
       ],
     },
@@ -222,7 +222,7 @@ export function getDefaultSteps(): OnboardingStep[] {
     {
       id: "age",
       title: "How old are you?",
-      description: "Tell KAI how old you are and he will provide appropriate suggestions and activities based on your age. Log in now to save your answers",
+      description: "Tell KAI your age for age-appropriate suggestions and activities. Log in to save your answers.",
       type: "single",
       required: true,
       options: [

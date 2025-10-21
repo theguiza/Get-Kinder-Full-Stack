@@ -422,35 +422,25 @@ export default function BestieVibesQuiz(props = {}) {
   }, [score, primary?.name])
 
   const tests = useMemo(() => nextTests(answers, weights), [answers, weights])
-
-  return (
-    <div className="min-h-screen w-full bg-gradient-to-b from-violet-50 to-white text-[#455a7c] p-6">
-      <div className="max-w-4xl mx-auto">
-        <header className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-6">
-          <div>
-            <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight">Friendship Fit Quiz </h1>
-            <p className="text-[#455a7c] mt-1">Take this quiz for each current or potential friend to see who to prioritize.</p>
-            <ul className="text-[#455a7c] mt-1 list-disc list-inside space-y-1 text-sm">
-              <li>Speak with KAI about your friends to determine next steps and even ask KAI to contact them with plans if you provided their email!</li>
-              <li> A list of your friends and their score are at the bottom of the page for future reference. Refresh info as you have it</li>
-            </ul>
-          </div>
-          <div className="flex items-center gap-3 flex-wrap">
-            <input
-              value={candidateName}
-              onChange={(e) => setCandidateName(e.target.value)}
-              placeholder="Potential/Current Friend name"
-              className="px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#455a7c]"
-            />
-            <input
-              type="email"
-              value={friendEmail}
-              onChange={(e) => setFriendEmail(e.target.value)}
-              placeholder="Friend email & KAI can contact them for you"
-              className="px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#455a7c]"
-            />
-
-            {/* Mobile camera (capture) */}
+  const Sidebar = () => (
+    <aside className="order-2 lg:order-1 lg:col-start-2 lg:row-start-2 lg:sticky lg:top-28 space-y-4">
+      <div className="p-4 rounded-2xl bg-white shadow-sm border">
+        <h2 className="text-lg font-bold text-[#455a7c]">Friend Snapshot</h2>
+        <div className="mt-3 grid gap-3">
+          <input
+            value={candidateName}
+            onChange={(e) => setCandidateName(e.target.value)}
+            placeholder="Potential/Current Friend name"
+            className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#455a7c]"
+          />
+          <input
+            type="email"
+            value={friendEmail}
+            onChange={(e) => setFriendEmail(e.target.value)}
+            placeholder="Friend email & KAI can contact them for you"
+            className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#455a7c]"
+          />
+          <div className="flex flex-wrap gap-2">
             <label className="px-3 py-2 rounded-xl border bg-white cursor-pointer hover:bg-[#455a7c]/5 text-sm">
               <input
                 ref={camInputRef}
@@ -462,8 +452,6 @@ export default function BestieVibesQuiz(props = {}) {
               />
               📷 Camera
             </label>
-
-            {/* File upload */}
             <label className="px-3 py-2 rounded-xl border bg-white cursor-pointer hover:bg-[#455a7c]/5 text-sm">
               <input
                 ref={fileInputRef}
@@ -475,7 +463,7 @@ export default function BestieVibesQuiz(props = {}) {
               🖼️ Upload
             </label>
             {pictureData && (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 rounded-xl border bg-slate-50 px-3 py-2">
                 <img src={pictureData} alt="preview" className="h-10 w-10 rounded-xl object-cover border" />
                 <button
                   onClick={() => setPictureData(null)}
@@ -483,7 +471,8 @@ export default function BestieVibesQuiz(props = {}) {
                 >Clear</button>
               </div>
             )}
-
+          </div>
+          <div className="flex items-center gap-3 flex-wrap">
             <button
               onClick={saveCandidate}
               disabled={isSaving}
@@ -491,98 +480,112 @@ export default function BestieVibesQuiz(props = {}) {
             >{isSaving ? 'Saving…' : 'Save'}</button>
             <span className="text-xs text-[#455a7c]">{saveMsg}</span>
           </div>
-        </header>
+        </div>
+      </div>
 
-        {isAdminMode && (
-          <div className="flex items-center justify-end mb-4">
-            <button onClick={() => setShowConfig(v => !v)} className="px-3 py-1.5 rounded-xl border bg-white hover:bg-[#455a7c]/5 text-sm">⚙️ Scoring</button>
-          </div>
-        )}
-
-        {isAdminMode && showConfig && (
-          <div className="p-4 rounded-2xl bg-white shadow-sm border mb-6">
-            <div className="flex items-center justify-between">
-              <h2 className="font-semibold">Scoring Controls</h2>
-              <button onClick={() => { setWeights({ ...WEIGHTS }); setProxyFraction(DEFAULT_PROXY_FRACTION) }} className="px-3 py-1.5 rounded-xl border bg-white hover:bg-[#455a7c]/5 text-sm">Reset defaults</button>
+      <div className="p-4 rounded-2xl bg-white shadow-sm border">
+        <div className="text-lg font-bold text-[#455a7c]">Friendship Score</div>
+        <div className="mt-1 flex items-end gap-3">
+          <div className="text-4xl md:text-5xl font-extrabold">{dealbreakerCount >= 2 ? '🚫' : score}</div>
+          <div className="flex-1">
+            <div className="w-full h-3 rounded-full bg-slate-200 overflow-hidden">
+              <div
+                className={`h-full ${dealbreakerCount >= 2 ? 'bg-red-400' : 'bg-[#455a7c]'}`}
+                style={{ width: `${dealbreakerCount >= 2 ? 100 : score}%` }}
+              />
             </div>
-            <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-3 mt-3">
-              {Object.entries(weights).map(([k,v]) => (
-                <label key={k} className="text-sm">
-                  <div className="font-medium capitalize">{k}</div>
-                  <input type="range" min={0} max={5} step={1} value={v} onChange={(e)=> setWeights(prev => ({ ...prev, [k]: Number(e.target.value) }))} className="w-full" />
-                  <div className="text-xs text-slate-600">Weight: {v}</div>
-                </label>
-              ))}
-            </div>
-            <div className="mt-3">
-              <div className="font-medium text-sm">Proxy fraction</div>
-              <input type="range" min={0} max={1} step={0.05} value={proxyFraction} onChange={(e)=> setProxyFraction(Number(e.target.value))} className="w-full" />
-              <div className="text-xs text-slate-600">{Math.round(proxyFraction * 100)}% credit when using first‑meet signals as proxies</div>
-            </div>
-          </div>
-        )}
-
-        {/* Scoreboard */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-          {/* Score card */}
-          <div className="p-4 rounded-2xl bg-white shadow-sm border">
-            <div className="text-lg font-bold text-[#455a7c]">Friendship Score</div>
-            <div className="mt-1 flex items-end gap-3">
-              <div className="text-5xl font-extrabold">{dealbreakerCount >= 2 ? '🚫' : score}</div>
-              <div className="flex-1">
-                <div className="w-full h-3 rounded-full bg-slate-200 overflow-hidden">
-                  <div
-                    className={`h-full ${dealbreakerCount >= 2 ? 'bg-red-400' : 'bg-[#455a7c]'}`}
-                    style={{ width: `${dealbreakerCount >= 2 ? 100 : score}%` }}
-                  />
-                </div>
-                <div className="text-xs text-[#455a7c] mt-1">{dealbreakerCount >= 2 ? '2+ red flags = auto‑pass' : tier.name}</div>
-              </div>
-            </div>
-          </div>
-
-          {/* Evidence card */}
-          <div className="p-4 rounded-2xl bg-white shadow-sm border">
-            <div className="text-lg font-bold text-[#455a7c]">Evidence</div>
-            <div className="mt-2 space-y-1 text-sm">
-              <div className="flex items-center justify-between"><span>Direct</span><span className="font-semibold">{Math.round(ev.direct * 100)}%</span></div>
-              <div className="w-full h-2 rounded-full bg-slate-200 overflow-hidden">
-                <div className="h-full bg-emerald-500" style={{ width: `${ev.direct * 100}%` }} />
-              </div>
-              <div className="flex items-center justify-between mt-2"><span>Proxy</span><span className="font-semibold">{Math.round(ev.proxy * 100)}%</span></div>
-              <div className="w-full h-2 rounded-full bg-slate-200 overflow-hidden">
-                <div className="h-full bg-indigo-400" style={{ width: `${ev.proxy * 100}%` }} />
-              </div>
-            </div>
-            <div className="text-xs text-[#455a7c] mt-2">More direct answers = higher confidence and stronger tiers.</div>
-          </div>
-
-          {/* Archetype card */}
-          <div className="p-4 rounded-2xl bg-white shadow-sm border">
-            <div className="text-lg font-bold text-[#455a7c]">Friend Type</div>
-            <div className="mt-1 text-2xl font-bold">{primary?.emoji} {primary?.name}</div>
-            <div className="text-sm text-[#455a7c]">{primary?.desc}</div>
-            <div className="text-xs text-[#455a7c] mt-2">Secondary: <span className="font-medium">{secondary?.emoji} {secondary?.name}</span></div>
-          </div>
-
-          {/* Next move */}
-          <div className="p-4 rounded-2xl bg-white shadow-sm border">
-            <div className="text-lg font-bold text-[#455a7c]">Next Move</div>
-            <div className="mt-1 text-[#455a7c]">{suggestion}</div>
-            <div className="text-xs text-[#455a7c] mt-2">Top tests to run:</div>
-            <ul className="text-xs text-[#455a7c] list-disc list-inside mt-1 space-y-1">
-              {tests.map((t) => (<li key={t.k}><b>{t.k}</b>: {t.tip}</li>))}
-            </ul>
+            <div className="text-xs text-[#455a7c] mt-1">{dealbreakerCount >= 2 ? '2+ red flags = auto‑pass' : tier.name}</div>
           </div>
         </div>
+      </div>
 
-        <h2 className="text-xl md:text-2xl font-bold text-[#455a7c] mb-2">Quiz Starts Here:</h2>
+      <div className="p-4 rounded-2xl bg-white shadow-sm border">
+        <div className="text-lg font-bold text-[#455a7c]">Evidence</div>
+        <div className="mt-2 space-y-1 text-sm">
+          <div className="flex items-center justify-between"><span>Direct</span><span className="font-semibold">{Math.round(ev.direct * 100)}%</span></div>
+          <div className="w-full h-2 rounded-full bg-slate-200 overflow-hidden">
+            <div className="h-full bg-emerald-500" style={{ width: `${ev.direct * 100}%` }} />
+          </div>
+          <div className="flex items-center justify-between mt-2"><span>Proxy</span><span className="font-semibold">{Math.round(ev.proxy * 100)}%</span></div>
+          <div className="w-full h-2 rounded-full bg-slate-200 overflow-hidden">
+            <div className="h-full bg-indigo-400" style={{ width: `${ev.proxy * 100}%` }} />
+          </div>
+        </div>
+        <div className="text-xs text-[#455a7c] mt-2">More direct answers = higher confidence and stronger tiers.</div>
+      </div>
 
-        {/* Dealbreaker Bingo */}
-        <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 mb-6">
+      <div className="p-4 rounded-2xl bg-white shadow-sm border">
+        <div className="text-lg font-bold text-[#455a7c]">Friend Type</div>
+        <div className="mt-1 text-2xl font-bold">{primary?.emoji} {primary?.name}</div>
+        <div className="text-sm text-[#455a7c]">{primary?.desc}</div>
+        <div className="text-xs text-[#455a7c] mt-2">Secondary: <span className="font-medium">{secondary?.emoji} {secondary?.name}</span></div>
+      </div>
+
+      <div className="p-4 rounded-2xl bg-white shadow-sm border">
+        <div className="text-lg font-bold text-[#455a7c]">Next Move</div>
+        <div className="mt-1 text-[#455a7c]">{suggestion}</div>
+        <div className="text-xs text-[#455a7c] mt-2">Top tests to run:</div>
+        <ul className="text-xs text-[#455a7c] list-disc list-inside mt-1 space-y-1">
+          {tests.map((t) => (<li key={t.k}><b>{t.k}</b>: {t.tip}</li>))}
+        </ul>
+      </div>
+
+      <div className="p-4 rounded-2xl bg-white shadow-sm border">
+        <h3 className="text-lg font-bold text-[#455a7c]">Micro‑Challenges 🎯</h3>
+        <ul className="list-disc list-inside text-[#455a7c] mt-2 space-y-1 text-sm">
+          <li><b>Signal reliability:</b> set a plan in 2 taps; follow up next day with a meme or link.</li>
+          <li><b>Safety check:</b> share a medium‑vulnerable story; notice how they handle it.</li>
+          <li><b>Overlap test:</b> propose a repeating anchor (Thu walk / Sun coffee).</li>
+        </ul>
+      </div>
+
+      <div className="p-4 rounded-2xl bg-white shadow-sm border">
+        <h3 className="text-lg font-bold text-[#455a7c]">Invite Scripts 💬</h3>
+        <div className="text-[#455a7c] mt-2 space-y-2 text-sm">
+          <p>• “This week: coffee walk & catch‑up? Tue 6p or Sat 11a ☕🚶”</p>
+          <p>• “Paint night / bouldering / arcade run—feel like trying one? 🎨🧗 Sun 3p?”</p>
+          <p>• “Thu mini‑tradition: 30‑min walk & life debrief—down?”</p>
+        </div>
+      </div>
+    </aside>
+  )
+
+  const QuizSection = () => (
+    <section className="order-1 lg:order-1 lg:col-start-1 space-y-6">
+      {isAdminMode && (
+        <div className="flex items-center justify-end">
+          <button onClick={() => setShowConfig(v => !v)} className="px-3 py-1.5 rounded-xl border bg-white hover:bg-[#455a7c]/5 text-sm">⚙️ Scoring</button>
+        </div>
+      )}
+
+      {isAdminMode && showConfig && (
+        <div className="p-4 rounded-2xl bg-white shadow-sm border">
           <div className="flex items-center justify-between">
-            <h2 className="font-semibold text-rose-700">1.	Red‑Flag Bingo 🚩: select concerns with this person you have</h2>
-            <div className="text-sm text-rose-700">{dealbreakerCount} / 2 triggers auto‑pass</div>
+            <h2 className="font-semibold">Scoring Controls</h2>
+            <button onClick={() => { setWeights({ ...WEIGHTS }); setProxyFraction(DEFAULT_PROXY_FRACTION) }} className="px-3 py-1.5 rounded-xl border bg-white hover:bg-[#455a7c]/5 text-sm">Reset defaults</button>
+          </div>
+          <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-3 mt-3">
+            {Object.entries(weights).map(([k,v]) => (
+              <label key={k} className="text-sm">
+                <div className="font-medium capitalize">{k}</div>
+                <input type="range" min={0} max={5} step={1} value={v} onChange={(e)=> setWeights(prev => ({ ...prev, [k]: Number(e.target.value) }))} className="w-full" />
+                <div className="text-xs text-slate-600">Weight: {v}</div>
+              </label>
+            ))}
+          </div>
+          <div className="mt-3">
+            <div className="font-medium text-sm">Proxy fraction</div>
+            <input type="range" min={0} max={1} step={0.05} value={proxyFraction} onChange={(e)=> setProxyFraction(Number(e.target.value))} className="w-full" />
+            <div className="text-xs text-slate-600">{Math.round(proxyFraction * 100)}% credit when using first‑meet signals as proxies</div>
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-6">
+        <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="font-semibold text-rose-700">1. Red‑Flag Bingo 🚩: select concerns with this person you have</h2>
+            <div className="text-sm text-rose-700 whitespace-nowrap">{dealbreakerCount} / 2 triggers auto‑pass</div>
           </div>
           <div className="grid sm:grid-cols-5 gap-2 mt-3">
             {DEALBREAKERS.map((d) => (
@@ -602,22 +605,20 @@ export default function BestieVibesQuiz(props = {}) {
           )}
         </div>
 
-        {/* Round Navigator */}
-        <div className="flex items-center justify-between mb-3">
-          <div className="text-sm text-[#455a7c] font-bold">2. {ROUNDS[roundIndex]} {roundIndex + 1}/{ROUNDS.length}: Answer all of these to assess this person’s friend type and fit for you</div>
-          <div className="flex gap-2">
-            <button onClick={prevRound} className="px-3 py-1.5 rounded-xl border bg-white hover:bg-[#455a7c]/5 disabled:opacity-50" disabled={roundIndex === 0}>Back</button>
-            <button onClick={nextRound} className="px-3 py-1.5 rounded-xl border bg-white hover:bg-[#455a7c]/5 disabled:opacity-50" disabled={roundIndex === ROUNDS.length - 1}>Next</button>
-          </div>
-        </div>
+        <div className="text-sm text-[#455a7c] font-bold">2. {ROUNDS[roundIndex]} {roundIndex + 1}/{ROUNDS.length}: Answer all of these to assess this person’s friend type and fit for you</div>
 
-        {/* Questions */}
-        <div className="grid md:grid-cols-3 gap-4 mb-8">
-          {roundQuestions.map((q) => (
+        <div className="space-y-6">
+          {QUESTIONS.filter((q) => q.round === ROUNDS[roundIndex]).map((q) => (
             <div key={q.id} className="p-4 rounded-2xl bg-white shadow-sm border">
               <div className="flex items-center justify-between">
-                <h3 className="font-semibold">{q.emoji} {q.title}</h3>
-                <span className="text-xs text-[#455a7c]">{weights[q.weightKey] ? `×${weights[q.weightKey]}` : (q.id.startsWith('sig_') ? 'signal' : 'archetype')}</span>
+                <div>
+                  <div className="text-sm uppercase tracking-wide text-slate-500">{q.round}</div>
+                  <div className="text-xl font-bold text-[#455a7c]">{q.emoji} {q.title}</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-sm text-slate-500">Current: <span className="font-semibold">{answers[q.id] ?? '—'}</span></div>
+                  <span className="text-xs text-[#455a7c]">{weights[q.weightKey] ? `×${weights[q.weightKey]}` : (q.id.startsWith('sig_') ? 'signal' : 'archetype')}</span>
+                </div>
               </div>
               <div className="text-sm text-[#455a7c] mt-1">{q.hint}</div>
               <div className="mt-3 flex justify-between text-xs text-[#455a7c]">
@@ -640,88 +641,106 @@ export default function BestieVibesQuiz(props = {}) {
           ))}
         </div>
 
-        {/* Tips & micro-challenges */}
-        <div className="grid md:grid-cols-2 gap-4 mb-8">
-          <div className="p-4 rounded-2xl bg-white shadow-sm border">
-            <h3 className="text-lg font-bold text-[#455a7c]">Micro‑Challenges 🎯</h3>
-            <ul className="list-disc list-inside text-[#455a7c] mt-2 space-y-1">
-              <li><b>Signal reliability:</b> set a plan in 2 taps; follow up next day with a meme or link.</li>
-              <li><b>Safety check:</b> share a medium‑vulnerable story; notice how they handle it.</li>
-              <li><b>Overlap test:</b> propose a repeating anchor (Thu walk / Sun coffee).</li>
-            </ul>
-          </div>
-          <div className="p-4 rounded-2xl bg-white shadow-sm border">
-            <h3 className="text-lg font-bold text-[#455a7c]">Invite Scripts 💬</h3>
-            <div className="text-[#455a7c] mt-2 space-y-2">
-              <p>• “This week: coffee walk & catch‑up? Tue 6p or Sat 11a ☕🚶”</p>
-              <p>• “Paint night / bouldering / arcade run—feel like trying one? 🎨🧗 Sun 3p?”</p>
-              <p>• “Thu mini‑tradition: 30‑min walk & life debrief—down?”</p>
-            </div>
-          </div>
+        <div className="flex items-center justify-between gap-2 pt-2">
+          <button onClick={prevRound} className="px-3 py-1.5 rounded-xl border bg-white hover:bg-[#455a7c]/5 text-sm">⬅️ Previous</button>
+          <button onClick={nextRound} className="px-3 py-1.5 rounded-xl border bg-white hover:bg-[#455a7c]/5 text-sm">Next ➡️</button>
         </div>
+      </div>
+    </section>
+  )
 
-        {/* Archetype Library & Deep Dive */}
-        <div className="p-4 rounded-2xl bg-white shadow-sm border mb-8">
-          <h3 className="text-lg font-bold text-[#455a7c]">Friendship Types — Do you have them all? Which is most important to you?</h3>
-          <p className="text-sm text-[#455a7c] mt-2">This main types of friends are: <b>Depth</b> (Confidante, Caregiver), <b>Stability</b> (Anchor), <b>Novelty</b> (Adventurer), <b>Coordination</b> (Communicator, Connector), and <b>Growth</b> (Coach, Collaborator). Most close friends blend 2–3. Use the cards below to spot strengths, watch‑outs, and best micro‑plans.</p>
-
-          <div className="grid md:grid-cols-2 gap-3 mt-4">
-            {[
-              { key: 'Confidante', emoji: '🫶', title: 'Confidante', strengths: 'Listening, honesty, vulnerability, confidentiality.', plans: ['Tea walks', 'late‑night talks', 'journal/reading circle'], watch: 'Can tilt heavy; avoid turning every hang into therapy.', invest: 'Steady check‑ins, gentle truth‑telling, celebrate their wins too.' },
-              { key: 'Anchor', emoji: '🧱', title: 'Anchor', strengths: 'Reliability, routines, punctuality, calm.', plans: ['Weekly run', 'co‑working block', 'errand + lunch'], watch: 'Ruts and sameness; add tiny novelty.', invest: 'Honor time blocks, be on time, set traditions.' },
-              { key: 'Adventurer', emoji: '🧗', title: 'Adventurer', strengths: 'Novelty, momentum, courage to try stuff.', plans: ['New restaurant', 'day hike', 'class drop‑in'], watch: 'Over‑scheduling or flaking; add post‑hang debrief.', invest: 'Pre‑book dates, keep a shared “ideas” list.' },
-              { key: 'Communicator', emoji: '📣', title: 'Communicator', strengths: 'Smooth plans, conflict repair, vibe calibration.', plans: ['Voice‑note catch‑ups', 'plan‑jam session'], watch: 'Over‑planning; keep space for spontaneity.', invest: 'Share norms (text speed, cancel rules), say thanks for logistics labor.' },
-              { key: 'Connector', emoji: '🤝', title: 'Connector', strengths: 'Introductions, group glue, community builder.', plans: ['Bring‑a‑friend brunch', 'board‑game night'], watch: 'Surface‑level time only; protect 1:1s.', invest: 'Co‑host, help with invites, prioritize dedicated time.' },
-              { key: 'Coach', emoji: '📈', title: 'Coach', strengths: 'Accountability, feedback, goals, hype.', plans: ['Gym/accountability check‑ins', 'skill swaps'], watch: 'Unsolicited advice; ask consent.', invest: 'Define goals, celebrate wins, rotate whose goals get focus.' },
-              { key: 'Collaborator', emoji: '🎨', title: 'Collaborator', strengths: 'Make/learn things together; flow state.', plans: ['Build/record/paint session', 'hack day'], watch: 'Project drift causing friction.', invest: 'Set scope & roles, do small showcases.' },
-              { key: 'Caregiver', emoji: '🩹', title: 'Caregiver', strengths: 'Empathy, caretaking, steadying presence.', plans: ['Soup + movie', 'soft errands', 'quiet co‑time'], watch: 'Burnout or unequal caretaking.', invest: 'Reciprocate support, ask what helps, give them light, fun time too.' },
-            ].map((c) => (
-              <div key={c.key} className="p-3 rounded-xl border bg-white">
-                <div className="font-semibold">{c.emoji} {c.title}</div>
-                <div className="text-xs text-[#455a7c] mt-1"><b>Strengths:</b> {c.strengths}</div>
-                <div className="text-xs text-[#455a7c] mt-1"><b>Best micro‑plans:</b> {c.plans.join(', ')}.</div>
-                <div className="text-xs text-[#455a7c] mt-1"><b>Watch‑outs:</b> {c.watch}</div>
-                <div className="text-xs text-[#455a7c] mt-1"><b>Invest to thrive:</b> {c.invest}</div>
+  const ScoreboardSection = () => (
+    <section className="order-5 lg:order-3 lg:col-start-1">
+      <div className="p-4 rounded-2xl bg-white shadow-sm border">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-bold text-[#455a7c]">Scoreboard 📊</h3>
+          <button onClick={() => setSaved([])} className="text-sm text-[#455a7c] hover:underline">Clear</button>
+        </div>
+        {saved.length === 0 ? (
+          <div className="text-[#455a7c] text-sm mt-2">Save a few players to compare tiers.</div>
+        ) : (
+          <div className="mt-3 grid gap-2">
+            {saved.map((s) => (
+              <div key={s.id} className="flex items-center justify-between p-3 rounded-xl border">
+                <div className="flex items-center gap-3">
+                  <div className={`w-2 h-8 rounded ${s.flags >= 2 ? 'bg-rose-400' : 'bg-[#455a7c]'}`} />
+                  <div>
+                    <div className="font-semibold">{s.emoji} {s.name} — {s.score}</div>
+                    <div className="text-xs text-[#455a7c]">{s.tier} • {s.archEmoji} {s.arch} • Direct {Math.round((s.evidence?.direct||0)*100)}% / Proxy {Math.round((s.evidence?.proxy||0)*100)}%</div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {s.flags >= 2 && <span className="text-xs text-rose-600">{s.flags}🚩 auto‑pass</span>}
+                  <button
+                    onClick={() => setSaved((prev) => prev.filter((x) => x.id !== s.id))}
+                    className="px-2 py-1 rounded-lg border bg-white hover:bg-[#455a7c]/5 text-sm"
+                  >Remove</button>
+                </div>
               </div>
             ))}
           </div>
-        </div>
+        )}
+      </div>
+    </section>
+  )
 
-        {/* Saved candidates */}
-        <div className="p-4 rounded-2xl bg-white shadow-sm border">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-bold text-[#455a7c]">Scoreboard 📊</h3>
-            <button onClick={() => setSaved([])} className="text-sm text-[#455a7c] hover:underline">Clear</button>
-          </div>
-          {saved.length === 0 ? (
-            <div className="text-[#455a7c] text-sm mt-2">Save a few players to compare tiers.</div>
-          ) : (
-            <div className="mt-3 grid gap-2">
-              {saved.map((s) => (
-                <div key={s.id} className="flex items-center justify-between p-3 rounded-xl border">
-                  <div className="flex items-center gap-3">
-                    <div className={`w-2 h-8 rounded ${s.flags >= 2 ? 'bg-rose-400' : 'bg-[#455a7c]'}`} />
-                    <div>
-                      <div className="font-semibold">{s.emoji} {s.name} — {s.score}</div>
-                      <div className="text-xs text-[#455a7c]">{s.tier} • {s.archEmoji} {s.arch} • Direct {Math.round((s.evidence?.direct||0)*100)}% / Proxy {Math.round((s.evidence?.proxy||0)*100)}%</div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {s.flags >= 2 && <span className="text-xs text-rose-600">{s.flags}🚩 auto‑pass</span>}
-                    <button
-                      onClick={() => setSaved((prev) => prev.filter((x) => x.id !== s.id))}
-                      className="px-2 py-1 rounded-lg border bg-white hover:bg-[#455a7c]/5 text-sm"
-                    >Remove</button>
-                  </div>
-                </div>
-              ))}
+  const FriendshipTypesSection = () => (
+    <section className="order-6 lg:order-2 lg:col-start-1 lg:-mt-4">
+      <div className="p-4 rounded-2xl bg-white shadow-sm border">
+        <h3 className="text-lg font-bold text-[#455a7c]">Friendship Types — Do you have them all? Which is most important to you?</h3>
+        <p className="text-sm text-[#455a7c] mt-2">This main types of friends are: <b>Depth</b> (Confidante, Caregiver), <b>Stability</b> (Anchor), <b>Novelty</b> (Adventurer), <b>Coordination</b> (Communicator, Connector), and <b>Growth</b> (Coach, Collaborator). Most close friends blend 2–3. Use the cards below to spot strengths, watch‑outs, and best micro‑plans.</p>
+
+        <div className="grid md:grid-cols-2 gap-3 mt-4">
+          {[
+            { key: 'Confidante', emoji: '🫶', title: 'Confidante', strengths: 'Listening, honesty, vulnerability, confidentiality.', plans: ['Tea walks', 'late‑night talks', 'journal/reading circle'], watch: 'Can tilt heavy; avoid turning every hang into therapy.', invest: 'Steady check‑ins, gentle truth‑telling, celebrate their wins too.' },
+            { key: 'Anchor', emoji: '🧱', title: 'Anchor', strengths: 'Reliability, routines, punctuality, calm.', plans: ['Weekly run', 'co‑working block', 'errand + lunch'], watch: 'Ruts and sameness; add tiny novelty.', invest: 'Honor time blocks, be on time, set traditions.' },
+            { key: 'Adventurer', emoji: '🧗', title: 'Adventurer', strengths: 'Novelty, momentum, courage to try stuff.', plans: ['New restaurant', 'day hike', 'class drop‑in'], watch: 'Over‑scheduling or flaking; add post‑hang debrief.', invest: 'Pre‑book dates, keep a shared “ideas” list.' },
+            { key: 'Communicator', emoji: '📣', title: 'Communicator', strengths: 'Smooth plans, conflict repair, vibe calibration.', plans: ['Voice‑note catch‑ups', 'plan‑jam session'], watch: 'Over‑planning; keep space for spontaneity.', invest: 'Share norms (text speed, cancel rules), say thanks for logistics labor.' },
+            { key: 'Connector', emoji: '🤝', title: 'Connector', strengths: 'Introductions, group glue, community builder.', plans: ['Bring‑a‑friend brunch', 'board‑game night'], watch: 'Surface‑level time only; protect 1:1s.', invest: 'Co‑host, help with invites, prioritize dedicated time.' },
+            { key: 'Coach', emoji: '📈', title: 'Coach', strengths: 'Accountability, feedback, goals, hype.', plans: ['Gym/accountability check‑ins', 'skill swaps'], watch: 'Unsolicited advice; ask consent.', invest: 'Define goals, celebrate wins, rotate whose goals get focus.' },
+            { key: 'Collaborator', emoji: '🎨', title: 'Collaborator', strengths: 'Make/learn things together; flow state.', plans: ['Build/record/paint session', 'hack day'], watch: 'Project drift causing friction.', invest: 'Set scope & roles, do small showcases.' },
+            { key: 'Caregiver', emoji: '🩹', title: 'Caregiver', strengths: 'Empathy, caretaking, steadying presence.', plans: ['Soup + movie', 'soft errands', 'quiet co‑time'], watch: 'Burnout or unequal caretaking.', invest: 'Reciprocate support, ask what helps, give them light, fun time too.' },
+          ].map((c) => (
+            <div key={c.key} className="p-3 rounded-xl border bg-white">
+              <div className="font-semibold">{c.emoji} {c.title}</div>
+              <div className="text-xs text-[#455a7c] mt-1"><b>Strengths:</b> {c.strengths}</div>
+              <div className="text-xs text-[#455a7c] mt-1"><b>Best micro‑plans:</b> {c.plans.join(', ')}.</div>
+              <div className="text-xs text-[#455a7c] mt-1"><b>Watch‑outs:</b> {c.watch}</div>
+              <div className="text-xs text-[#455a7c] mt-1"><b>Invest to thrive:</b> {c.invest}</div>
             </div>
-          )}
+          ))}
         </div>
+      </div>
+    </section>
+  )
 
-        <footer className="text-center text-xs text-[#455a7c] mt-6">
-          Not a diagnosis—just a vibe compass. Thin-slice wisely: upgrade proxies to direct evidence over 2–3 micro‑hangs. 💜
-        </footer>
+  const FooterSection = () => (
+    <section className="order-7 lg:order-4 lg:col-start-1 space-y-6">
+      <footer className="text-center text-xs text-[#455a7c]">
+        Not a diagnosis—just a vibe compass. Thin-slice wisely: upgrade proxies to direct evidence over 2–3 micro‑hangs. 💜
+      </footer>
+    </section>
+  )
+
+  return (
+    <div className="min-h-screen w-full bg-gradient-to-b from-violet-50 to-white text-[#455a7c] p-6">
+      <div className="max-w-6xl mx-auto flex flex-col gap-6 lg:grid lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] lg:gap-6">
+        <section className="order-0 lg:order-0 lg:col-span-2 bg-white/80 backdrop-blur-sm border border-slate-200/70 rounded-3xl shadow-sm p-6">
+          <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight">Friendship Fit Quiz </h1>
+          <p className="text-[#455a7c] mt-1">Complete a quiz for 1-3 people you want to be better friends with so you can focus your time with the right ones.</p>
+          <ul className="text-[#455a7c] mt-1 list-disc list-inside space-y-1 text-sm">
+            <li>Press save Button after the quiz is completed.</li>
+            <li>Your friends and their scores are below, and can be found in your profile. </li>
+            <li>Re-do the quiz on your friends as required so KAI has current info. </li>
+            <li>After the quiz speak with KAI, check out the recommendations below, or start a Friend Arc!</li>
+          </ul>
+        </section>
+
+        <QuizSection />
+        <Sidebar />
+        <FriendshipTypesSection />
+        <ScoreboardSection />
+        <FooterSection />
       </div>
     </div>
   )
