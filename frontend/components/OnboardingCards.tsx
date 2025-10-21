@@ -170,7 +170,6 @@ export function getDefaultSteps(): OnboardingStep[] {
         { id: "move", label: "I moved" },
         { id: "school", label: "I am at a new school / job" },
         { id: "break-up", label: "I recently ended a relationship" },
-        { id: "goal", label: "New Years Resolution or life goal" },
         { id: "specific", label: "Seeking a partner for a specific activity" },
         { id: "lonely", label: "I just want a new friend" },
         { id: "other", label: "I have another reason" },
@@ -228,11 +227,10 @@ export function getDefaultSteps(): OnboardingStep[] {
       options: [
         { id: "youth", label: "Under 18" },
         { id: "18-24", label: "18-24" },
-        { id: "25-34", label: "25-34" },
-        { id: "35-44", label: "35-44" },
-        { id: "45-54", label: "45-54" },
-        { id: "55-64", label: "55-64" },
-        { id: "65+", label: "65+" },
+        { id: "25-39", label: "25-39" },
+        { id: "40-49", label: "40-49" },
+        { id: "50-59", label: "50-59" },
+        { id: "60+", label: "60+" },
       ],
     },
   ];
