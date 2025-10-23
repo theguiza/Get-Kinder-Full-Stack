@@ -35,6 +35,11 @@
   const input = document.getElementById('kaiChatInput');
   const messagesEl = document.getElementById('kaiChatMessages');
 
+  if (!panel || !toggleBtn || !input || !messagesEl) {
+    console.warn('[kai-chat] required chat elements are missing; skipping init');
+    return;
+  }
+
   function readLocalOnboardingDraft() {
     try {
       const raw = localStorage.getItem('onboarding.draft');

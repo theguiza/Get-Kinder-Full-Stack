@@ -4,6 +4,42 @@
 // Notes: Mid-fi mockup to visualize structure, hierarchy, copy, and friend switching.
 
 import React, { useState } from "react";
+import { progressPercent, clampPct, dayLabel as sharedDayLabel } from "../shared/metrics.js";
+
+const readCsrfToken = () => {
+  if (typeof document === "undefined") return null;
+  const meta = document.querySelector('meta[name="csrf-token"]');
+  return meta ? meta.getAttribute("content") : null;
+};
+
+async function postJSON(url, body = {}) {
+  const headers = {
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  };
+  const token = readCsrfToken();
+  if (token) headers["X-CSRF-Token"] = token;
+
+  const response = await fetch(url, {
+    method: "POST",
+    credentials: "include",
+    headers,
+    body: JSON.stringify(body),
+  });
+
+  const contentType = response.headers.get("Content-Type") || "";
+  const isJson = contentType.includes("application/json");
+  const payload = isJson ? await response.json() : null;
+
+  if (!response.ok) {
+    const message = payload?.error || payload?.message || `Request failed (${response.status})`;
+    const error = new Error(message);
+    error.status = response.status;
+    throw error;
+  }
+
+  return payload ?? {};
+}
 
 // Minimal inline icons (replaces lucide-react dependency)
 const Svg = ({ children, size = 20, className, ...rest }) => (
@@ -179,7 +215,6 @@ const BadgeArt = ({ state = "locked", label, src }) => {
 // -------------------------------
 // Progress ring utilities (fixes for inline style + tests)
 // -------------------------------
-const clampPct = (n) => Math.max(0, Math.min(100, n));
 export const makeConicStroke = (percent) => {
   const clamped = clampPct(percent);
   const endDeg = (clamped / 100) * 360; // numeric degrees
@@ -204,6 +239,10 @@ export const isMissingQuiz = (score, type) => {
 
 const isPlainObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const safeText = (value) => (typeof value === "string" ? value.trim() : "");
+const toIdString = (value) => {
+  if (value === null || value === undefined) return "";
+  return String(value).trim();
+};
 const pickFinite = (...values) => {
   for (const value of values) {
     if (value === null || value === undefined) continue;
@@ -213,11 +252,18 @@ const pickFinite = (...values) => {
   return null;
 };
 
+const toDomSafeId = (value, fallback = "item") => {
+  const str = String(value ?? "").trim();
+  const sanitized = str.replace(/[^a-zA-Z0-9_-]/g, "-");
+  return sanitized.length ? sanitized : fallback;
+};
+
 const normalizeSteps = (steps, friendName) => {
   if (!Array.isArray(steps) || steps.length === 0) {
     return {
       steps: [
         {
+          id: `step-${friendName ? toDomSafeId(friendName, "friend") : "friend"}-quiz`,
           title: `Start a plan with ${friendName}`,
           status: "todo",
           meta: "Complete their Friend Quiz to unlock personalised steps.",
@@ -229,15 +275,20 @@ const normalizeSteps = (steps, friendName) => {
 
   const coerced = steps.map((step, index) => {
     if (typeof step === "string") {
-      return { title: step, status: "todo", meta: "" };
+      return { id: `step-${index + 1}`, title: step, status: "todo", meta: "" };
     }
     if (isPlainObject(step)) {
+      const id =
+        toIdString(step.id) ||
+        toIdString(step.step_id) ||
+        toIdString(step.stepId) ||
+        `step-${index + 1}`;
       const title = safeText(step.title) || safeText(step.name) || `Step ${index + 1}`;
       const status = safeText(step.status) || safeText(step.state) || "todo";
       const meta = safeText(step.meta) || safeText(step.hint) || safeText(step.summary) || "";
-      return { title, status, meta };
+      return { id, title, status, meta };
     }
-    return { title: `Step ${index + 1}`, status: "todo", meta: "" };
+    return { id: `step-${index + 1}`, title: `Step ${index + 1}`, status: "todo", meta: "" };
   });
 
   return { steps: coerced, hasStructuredSteps: true };
@@ -245,8 +296,27 @@ const normalizeSteps = (steps, friendName) => {
 
 const normalizeChallenge = (challenge, fallbackName) => {
   if (isPlainObject(challenge)) {
+    const toIdString = (value) =>
+      value === null || value === undefined || value === ""
+        ? null
+        : String(value);
+    const id = toIdString(challenge.id ?? challenge.challenge_id ?? challenge.challengeId);
+    const templateId = toIdString(challenge.templateId ?? challenge.template_id ?? id);
+    const description =
+      safeText(challenge.description) ||
+      safeText(challenge.body) ||
+      safeText(challenge.summary) ||
+      "";
+    const channel = safeText(challenge.channel) || safeText(challenge.mode) || null;
+    const tags = Array.isArray(challenge.tags) ? challenge.tags : [];
+
     return {
+      id,
+      templateId,
       title: safeText(challenge.title) || `Plan a kindness for ${fallbackName}`,
+      description,
+      channel,
+      tags,
       effort: safeText(challenge.effort) || safeText(challenge.level) || "Low",
       estMinutes: pickFinite(challenge.estMinutes, challenge.estimate_minutes, challenge.minutes) ?? 5,
       points: pickFinite(challenge.points, challenge.xp, challenge.reward_points) ?? 0,
@@ -256,6 +326,8 @@ const normalizeChallenge = (challenge, fallbackName) => {
   }
 
   return {
+    id: null,
+    templateId: null,
     title: `Choose a micro kindness for ${fallbackName}`,
     effort: "Low",
     estMinutes: 5,
@@ -287,19 +359,7 @@ const normalizeArc = (raw, index) => {
   const snapshot = isPlainObject(raw.snapshot) ? raw.snapshot : {};
   const metrics = isPlainObject(snapshot.metrics) ? snapshot.metrics : {};
   const name = safeText(raw.name) || `Friend ${index + 1}`;
-
-  const percent = clampPct(
-    pickFinite(
-      raw.percent,
-      snapshot.percent,
-      snapshot.progress_percent,
-      snapshot.progressPercent,
-      snapshot.completion_percent,
-      snapshot.completionPercent,
-      metrics.progress_percent,
-      metrics.progressPercent
-    ) ?? 0
-  );
+  const domId = toDomSafeId(raw.id ?? raw.friend_id ?? index, `arc-${index}`);
 
   const day = pickFinite(
     raw.day,
@@ -340,6 +400,12 @@ const normalizeArc = (raw, index) => {
     metrics.next_threshold
   );
   const nextThreshold = Number.isFinite(nextThresholdRaw) && nextThresholdRaw > 0 ? nextThresholdRaw : 100;
+  const percentRaw = pickFinite(
+    raw.percent,
+    snapshot.percent,
+    metrics.percent
+  );
+  const percent = Number.isFinite(percentRaw) ? percentRaw : progressPercent(arcPoints, nextThreshold);
 
   const friendScore = pickFinite(
     raw.friendScore,
@@ -410,6 +476,7 @@ const normalizeArc = (raw, index) => {
     : [];
 
   return {
+    domId,
     id: String(raw.id ?? raw.friend_id ?? `friend-${index}`),
     name,
     overdue: Boolean(raw.overdue ?? snapshot.overdue ?? snapshot.is_overdue ?? false),
@@ -471,7 +538,15 @@ const ProgressRing = ({ percent = 68, size = 112, label = "68%" }) => {
   );
 };
 
-const StepRow = ({ state = "todo", title, meta }) => {
+const StepRow = ({
+  state = "todo",
+  title,
+  meta,
+  onStart,
+  onContinue,
+  startDisabled = false,
+  continueDisabled = false,
+}) => {
   const icon =
     state === "done" ? (
       <CheckCircle2 className="text-emerald-600" size={20} aria-hidden />
@@ -485,6 +560,9 @@ const StepRow = ({ state = "todo", title, meta }) => {
       <Circle className="text-slate-400" size={20} aria-hidden />
     );
   const tone = state === "overdue" ? "text-[var(--coral)]" : state === "frozen" ? "text-amber-700" : "text-slate-600";
+  const buttonBase =
+    "px-3 py-1.5 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-60 disabled:pointer-events-none";
+
   return (
     <div className="flex items-start gap-3 py-2">
       <div className="mt-0.5">{icon}</div>
@@ -493,9 +571,23 @@ const StepRow = ({ state = "todo", title, meta }) => {
         {meta && <div className={`text-xs ${tone}`}>{meta}</div>}
       </div>
       {state === "inProgress" ? (
-        <button className="px-3 py-1.5 rounded-lg bg-[var(--coral)] text-white text-sm hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--coral)]">Continue</button>
+        <button
+          type="button"
+          onClick={onContinue}
+          disabled={continueDisabled}
+          className={`${buttonBase} bg-[var(--coral)] text-white hover:opacity-90 focus:ring-[var(--coral)]`}
+        >
+          Continue
+        </button>
       ) : state === "todo" ? (
-        <button className="px-3 py-1.5 rounded-lg bg-[var(--ink)] text-white text-sm hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--ink)]">Start</button>
+        <button
+          type="button"
+          onClick={onStart}
+          disabled={startDisabled}
+          className={`${buttonBase} bg-[var(--ink)] text-white hover:opacity-90 focus:ring-[var(--ink)]`}
+        >
+          Start
+        </button>
       ) : null}
     </div>
   );
@@ -626,8 +718,12 @@ const INITIAL_ARCS_SANITISED = sanitizeArcs(INITIAL_ARCS);
 // -------------------------------
 // Dev checks (lightweight, non-blocking)
 // -------------------------------
-const __DEV__ = process.env.NODE_ENV !== "production";
-if (__DEV__) {
+const IS_DEV =
+  typeof process !== "undefined" &&
+  process.env &&
+  process.env.NODE_ENV !== "production";
+
+if (IS_DEV) {
   try {
     // 1) Ensure Pill can render text containing '>' without JSX parsing issues
     const t1 = React.createElement(Pill, { tone: "muted" }, "Quality > hours");
@@ -699,9 +795,13 @@ export default function FriendChallenges(props = {}) {
   const sanitizedPropArcs = React.useMemo(() => sanitizeArcs(arcsProp), [arcsProp]);
   const hasServerArcs = sanitizedPropArcs.length > 0;
 
-  const [arcs, setArcs] = useState(() =>
-    hasServerArcs ? sanitizedPropArcs : __DEV__ ? INITIAL_ARCS_SANITISED : []
-  );
+  const [arcs, setArcs] = useState(() => {
+    if (hasServerArcs) return sanitizedPropArcs;
+    if (IS_DEV && (!Array.isArray(arcsProp) || arcsProp.length === 0)) {
+      return INITIAL_ARCS_SANITISED;
+    }
+    return [];
+  });
 
   const [selectedId, setSelectedId] = useState(() => {
     if (hasServerArcs) {
@@ -713,7 +813,10 @@ export default function FriendChallenges(props = {}) {
       }
       return sanitizedPropArcs[0]?.id || "";
     }
-    return (__DEV__ ? INITIAL_ARCS_SANITISED[0]?.id : "") || "";
+    if (IS_DEV && (!Array.isArray(arcsProp) || arcsProp.length === 0)) {
+      return INITIAL_ARCS_SANITISED[0]?.id || "";
+    }
+    return "";
   });
 
   React.useEffect(() => {
@@ -743,6 +846,114 @@ export default function FriendChallenges(props = {}) {
   const current = React.useMemo(
     () => arcs.find((a) => a.id === selectedId) || arcs[0] || null,
     [arcs, selectedId]
+  );
+
+  const [loadingKey, setLoadingKey] = React.useState(null);
+  const [errorMessage, setErrorMessage] = React.useState(null);
+
+  const isLoadingAction = React.useCallback(
+    (key) => !!key && loadingKey === key,
+    [loadingKey]
+  );
+
+  React.useEffect(() => {
+    if (!errorMessage) return undefined;
+    const timer = setTimeout(() => setErrorMessage(null), 4000);
+    return () => clearTimeout(timer);
+  }, [errorMessage]);
+
+  const updateArcFromServer = React.useCallback(
+    (rawArc) => {
+      if (!rawArc) return;
+      setArcs((prev) => {
+        const next = Array.isArray(prev) ? [...prev] : [];
+        const idx = next.findIndex((arc) => arc.id === rawArc.id);
+        const normalized = normalizeArc(rawArc, idx === -1 ? next.length : idx);
+        if (idx === -1) {
+          next.push(normalized);
+        } else {
+          next[idx] = normalized;
+        }
+        return next;
+      });
+    },
+    [setArcs]
+  );
+
+  const mutateArc = React.useCallback(
+    async (key, url, body = {}) => {
+      setLoadingKey(key);
+      setErrorMessage(null);
+      try {
+        const payload = await postJSON(url, body);
+        if (!payload || !payload.arc) {
+          throw new Error("Server response missing arc payload");
+        }
+        updateArcFromServer(payload.arc);
+      } catch (err) {
+        console.error(err);
+        setErrorMessage(err.message || "Action failed. Please try again.");
+      } finally {
+        setLoadingKey(null);
+      }
+    },
+    [updateArcFromServer]
+  );
+
+  const handlePlanAction = React.useCallback(
+    (arc, action) => {
+      if (!arc || !arc.id) return;
+      const key = `plan-${action}:${arc.id}`;
+      const path = `/api/arcs/${encodeURIComponent(arc.id)}/steps/${action}`;
+      return mutateArc(key, path);
+    },
+    [mutateArc]
+  );
+
+  const handleStepStart = React.useCallback(
+    (arc, step) => {
+      if (!arc || !arc.id || !step || !step.id) return;
+      const key = `step-start:${arc.id}:${step.id}`;
+      const path = `/api/arcs/${encodeURIComponent(arc.id)}/steps/${encodeURIComponent(step.id)}/start`;
+      return mutateArc(key, path);
+    },
+    [mutateArc]
+  );
+
+  const handleStepComplete = React.useCallback(
+    (arc, step) => {
+      if (!arc || !arc.id || !step || !step.id) return;
+      const key = `step-complete:${arc.id}:${step.id}`;
+      const path = `/api/arcs/${encodeURIComponent(arc.id)}/steps/${encodeURIComponent(step.id)}/complete`;
+      return mutateArc(key, path);
+    },
+    [mutateArc]
+  );
+
+  const handleChallengeComplete = React.useCallback(
+    (arc) => {
+      const challenge = arc?.challenge;
+      if (!arc || !arc.id || !challenge || challenge.isFallback) return;
+      const challengeId = challenge.templateId || challenge.template_id || challenge.id;
+      if (!challengeId) return;
+      const key = `challenge-complete:${arc.id}`;
+      const path = `/api/arcs/${encodeURIComponent(arc.id)}/challenge/${encodeURIComponent(challengeId)}/complete`;
+      return mutateArc(key, path);
+    },
+    [mutateArc]
+  );
+
+  const handleChallengeSwap = React.useCallback(
+    (arc) => {
+      const challenge = arc?.challenge;
+      if (!arc || !arc.id || !challenge || challenge.isFallback) return;
+      const swapsRemaining = Number(challenge.swapsLeft ?? challenge.swaps_left ?? 0);
+      if (!Number.isFinite(swapsRemaining) || swapsRemaining <= 0) return;
+      const key = `challenge-swap:${arc.id}`;
+      const path = `/api/arcs/${encodeURIComponent(arc.id)}/challenge/swap`;
+      return mutateArc(key, path);
+    },
+    [mutateArc]
   );
 
   const removeArc = React.useCallback((id) => {
@@ -790,36 +1001,6 @@ export default function FriendChallenges(props = {}) {
     );
   }
 
-  const challenge = current.challenge || normalizeChallenge(null, current.name);
-  const challengeDescription =
-    !challenge || challenge.isFallback
-      ? `Complete the Friend Quiz to unlock a personalised micro-action for ${current.name}.`
-      : safeText(challenge.description) ||
-        safeText(challenge.body) ||
-        safeText(challenge.summary) ||
-        `Keep up the momentum with ${current.name}.`;
-
-  const challengePrimaryCta = challenge.isFallback
-    ? { label: "Take the Friend Quiz", href: "friendQuiz" }
-    : { label: "Do it", href: "#" };
-  const swapsLeft = Number.isFinite(challenge.swapsLeft) ? challenge.swapsLeft : 0;
-
-  const lifetime = current.lifetime || { xp: 0, streak: "—", drag: "0%" };
-  const arcPoints = Number.isFinite(current.arcPoints) ? current.arcPoints : 0;
-  const nextThreshold = Number.isFinite(current.nextThreshold) && current.nextThreshold > 0 ? current.nextThreshold : 100;
-  const pointsToday = Number.isFinite(current.pointsToday) ? current.pointsToday : 0;
-  const day = Number.isFinite(current.day) ? current.day : 0;
-  const length = Number.isFinite(current.length) ? current.length : 0;
-  const progressLabel = `${Math.round(Number.isFinite(current.percent) ? current.percent : 0)}%`;
-  const dayLabel =
-    length > 0 && day > 0
-      ? `Day ${Math.min(day, length)} of ${length}`
-      : day > 0
-      ? `Day ${day}`
-      : "Day 1";
-  const pointsTodayLabel = pointsToday > 0 ? `+${pointsToday} XP today` : "0 XP logged today";
-  const showFallbackStepsNote = !current.hasStructuredSteps;
-
   // --- MVP: earned badge ids (optional; if ladder state alone drives visuals you can remove this) ---
   const [siteBadges, setSiteBadges] = useState([]);
   const [earnedBadgeIds, setEarnedBadgeIds] = useState(new Set());
@@ -828,10 +1009,316 @@ export default function FriendChallenges(props = {}) {
   const getLevelIcon = (level, state) =>
     getLevelIconPure(level, state, earnedBadgeIds, siteBadges, LEVEL_TO_BADGE_SRC);
 
-  const progressPct = React.useMemo(() => {
-    if (nextThreshold <= 0) return 0;
-    return Math.min(100, Math.max(0, Math.round((arcPoints / nextThreshold) * 100)));
-  }, [arcPoints, nextThreshold]);
+  const renderArcPanelContent = (arc) => {
+    const challenge = arc.challenge || normalizeChallenge(null, arc.name);
+    const challengeDescription =
+      !challenge || challenge.isFallback
+        ? `Complete the Friend Quiz to unlock a personalised micro-action for ${arc.name}.`
+        : challenge.description || `Keep up the momentum with ${arc.name}.`;
+
+    const swapsLeft = Number.isFinite(challenge.swapsLeft) ? challenge.swapsLeft : 0;
+
+    const lifetime = arc.lifetime || { xp: 0, streak: "—", drag: "0%" };
+    const arcPoints = Number.isFinite(arc.arcPoints) ? arc.arcPoints : 0;
+    const nextThreshold =
+      Number.isFinite(arc.nextThreshold) && arc.nextThreshold > 0 ? arc.nextThreshold : 100;
+    const pointsToday = Number.isFinite(arc.pointsToday) ? arc.pointsToday : 0;
+    const day = Number.isFinite(arc.day) ? arc.day : 0;
+    const length = Number.isFinite(arc.length) ? arc.length : 0;
+    const progressPct = Number.isFinite(arc.percent)
+      ? arc.percent
+      : progressPercent(arcPoints, nextThreshold);
+    const progressLabel = `${clampPct(Number.isFinite(progressPct) ? progressPct : 0)}%`;
+    const dayLabel = sharedDayLabel(day, length);
+    const pointsTodayLabel = pointsToday > 0 ? `+${pointsToday} XP today` : "0 XP logged today";
+    const showFallbackStepsNote = !arc.hasStructuredSteps;
+    const progressBarWidth = `${clampPct(Number.isFinite(progressPct) ? progressPct : 0)}%`;
+    const planExtendKey = `plan-extend:${arc.id}`;
+    const planSnoozeKey = `plan-snooze:${arc.id}`;
+    const planFailKey = `plan-fail-forward:${arc.id}`;
+    const challengeCompleteKey = `challenge-complete:${arc.id}`;
+    const challengeSwapKey = `challenge-swap:${arc.id}`;
+
+    return (
+      <div className="grid md:grid-cols-3 gap-6 md:gap-8 items-start">
+        {/* LEFT COLUMN (2/3): Current Arc, Daily Surprise, Badges */}
+        <div className="grid gap-6 md:gap-8 md:col-span-2">
+          {/* Progress + Steps */}
+          <SectionCard>
+            <div className="grid gap-5 items-start md:grid-cols-3 md:items-center">
+              {/* Left 1/3: Friend photo centered */}
+              <div className="grid place-items-center gap-2 text-center">
+                <div className="text-sm font-semibold text-[var(--ink)]">{arc.name}</div>
+                <FriendPhoto name={arc.name} src={arc.photoSrc || undefined} />
+                <div className="grid gap-2 mt-1">
+                  <Pill tone="ink">{`Friend Score: ${formatFriendScore(arc.friendScore)}`}</Pill>
+                  <Pill>{`Friend Type: ${formatFriendType(arc.friendType)}`}</Pill>
+                  {isMissingQuiz(arc.friendScore, arc.friendType) && (
+                    <a
+                      href="friendQuiz"
+                      className="mt-2 px-3 py-2 rounded-lg bg-[var(--coral)] text-white text-sm inline-block"
+                      role="button"
+                    >
+                      Do the Friend Quiz Now
+                    </a>
+                  )}
+                </div>
+              </div>
+
+              {/* Right 2/3: Progress ring + pills centered */}
+              <div className="grid md:col-span-2 place-items-center">
+                <ProgressRing percent={progressPct} size={128} label={progressLabel} />
+                <div className="mt-3 flex items-center gap-2 text-xs">
+                  <Pill tone="ink">{dayLabel}</Pill>
+                  <Pill tone="coral">{pointsTodayLabel}</Pill>
+                </div>
+              </div>
+
+              {/* Steps and actions below (span full width) */}
+              <div className="grid gap-2 md:col-span-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-[var(--ink)] font-semibold">{`Today’s plan for ${arc.name}`}</h3>
+                  <Pill>{"Quality > hours"}</Pill>
+                </div>
+                <ul className="divide-y divide-slate-100">
+                  {arc.steps.map((s, idx) => {
+                    const startKey = `step-start:${arc.id}:${s.id}`;
+                    const completeKey = `step-complete:${arc.id}:${s.id}`;
+                    return (
+                      <li key={s.id || `${arc.id}-step-${idx}`}>
+                        <StepRow
+                          state={s.status}
+                          title={s.title}
+                          meta={s.meta}
+                          onStart={s.status === "todo" ? () => handleStepStart(arc, s) : undefined}
+                          onContinue={
+                            s.status === "inProgress" ? () => handleStepComplete(arc, s) : undefined
+                          }
+                          startDisabled={isLoadingAction(startKey)}
+                          continueDisabled={isLoadingAction(completeKey)}
+                        />
+                      </li>
+                    );
+                  })}
+                </ul>
+
+                {showFallbackStepsNote && (
+                  <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-xs text-slate-600">
+                    Complete this friend’s quiz to unlock a personalised daily plan.
+                  </div>
+                )}
+
+                <div className="flex flex-wrap items-center gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => handlePlanAction(arc, "extend")}
+                    disabled={isLoadingAction(planExtendKey)}
+                    className="px-3 py-1.5 rounded-lg bg-[var(--ink)] text-white text-sm hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--ink)] disabled:opacity-60 disabled:pointer-events-none"
+                  >
+                    Extend
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handlePlanAction(arc, "snooze")}
+                    disabled={isLoadingAction(planSnoozeKey)}
+                    className="px-3 py-1.5 rounded-lg bg-white text-[var(--ink)] border border-slate-200 text-sm hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--ink)]/40 disabled:opacity-60 disabled:pointer-events-none"
+                  >
+                    Snooze
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handlePlanAction(arc, "fail-forward")}
+                    disabled={isLoadingAction(planFailKey)}
+                    className="px-3 py-1.5 rounded-lg bg-white text-slate-700 border border-slate-200 text-sm hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-300 disabled:opacity-60 disabled:pointer-events-none"
+                  >
+                    Fail-forward
+                  </button>
+                  <span className="text-xs text-slate-500 ml-auto flex items-center gap-1">
+                    <Info size={14} /> Auto-advance in ~72h
+                  </span>
+                </div>
+
+                {/* Grind guard example */}
+                <div className="mt-2 hidden md:flex items-center gap-2 p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800">
+                  <Lock size={16} />
+                  <span className="text-sm">
+                    Freeze active — you’ve hit this week’s cap. Log a quick quality check to unlock bigger awards.
+                  </span>
+                </div>
+              </div>
+            </div>
+          </SectionCard>
+
+          {/* Daily Surprise Challenge */}
+          <SectionCard title={`Daily Surprise · ${arc.name}`} subtitle="A tiny nudge for real-life progress">
+            <div className="grid md:grid-cols-[1fr_auto] gap-4 items-start">
+              <div className="grid gap-3">
+                <h3 className="text-lg font-semibold text-[var(--ink)]">{challenge.title}</h3>
+                <p className="text-slate-600 text-sm leading-relaxed">{challengeDescription}</p>
+                <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
+                  <Pill tone="ink">{`${challenge.effort} effort`}</Pill>
+                  <Pill tone="coral">{`${challenge.estMinutes} min`}</Pill>
+                  <Pill tone="ok">{`+${challenge.points} XP`}</Pill>
+                  {challenge.isFallback && <Pill tone="warn">quiz required</Pill>}
+                </div>
+              </div>
+              <div className="grid gap-2 justify-items-end">
+                {challenge.isFallback ? (
+                  <>
+                    <a
+                      href="friendQuiz"
+                      className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--coral)] text-white text-sm hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--coral)]"
+                    >
+                      Take the Friend Quiz
+                      <ChevronRight size={16} aria-hidden />
+                    </a>
+                    <a
+                      href="friendQuiz"
+                      className="inline-flex items-center gap-2 text-xs text-[var(--ink)] hover:underline"
+                    >
+                      Unlock ideas with the Friend Quiz
+                    </a>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => handleChallengeComplete(arc)}
+                      disabled={isLoadingAction(challengeCompleteKey)}
+                      className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--coral)] text-white text-sm hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--coral)] disabled:opacity-60 disabled:pointer-events-none"
+                    >
+                      Do it
+                      <ChevronRight size={16} aria-hidden />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleChallengeSwap(arc)}
+                      disabled={swapsLeft <= 0 || isLoadingAction(challengeSwapKey)}
+                      className="inline-flex items-center gap-2 text-xs text-[var(--ink)] hover:underline disabled:opacity-60 disabled:pointer-events-none"
+                    >
+                      {swapsLeft > 0 ? "Swap this idea" : "No swaps left"}
+                    </button>
+                  </>
+                )}
+              </div>
+              {!challenge.isFallback && Number.isFinite(swapsLeft) && (
+                <div className="justify-self-end">
+                  <Pill tone={swapsLeft > 0 ? "warn" : "muted"}>{`Swaps left: ${swapsLeft}`}</Pill>
+                </div>
+              )}
+            </div>
+          </SectionCard>
+
+          {/* Badges */}
+          <SectionCard title="Badges" subtitle="Friendship levels + streak & pod-assist">
+            <div className="grid gap-4">
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                {LEVEL_LABELS.map((label) => {
+                  const st = (arc.badges || {})[label] || "locked";
+                  return (
+                    <div
+                      key={label}
+                      className={`rounded-xl border p-3 text-center flex flex-col items-center ${
+                        st === "done"
+                          ? "bg-emerald-50 border-emerald-200"
+                          : st === "inProgress"
+                          ? "bg-[var(--canvas)] border-slate-200"
+                          : "bg-white border-slate-200 opacity-70"
+                      }`}
+                    >
+                      <div className="grid place-items-center">
+                        <BadgeArt state={st} label={label} src={getLevelIcon(label, st)} />
+                      </div>
+                      <div className="mt-2 text-center font-medium text-[13px] md:text-sm leading-tight text-[var(--ink)] break-words">
+                        {label}
+                      </div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        {st === "done" ? "earned" : st === "inProgress" ? "2 steps to unlock" : "locked"}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="grid sm:grid-cols-2 gap-3">
+                <div className="rounded-xl border border-slate-200 p-3 flex items-center gap-3">
+                  <Flame className="text-[var(--coral)]" />
+                  <div>
+                    <div className="text-sm font-medium text-[var(--ink)]">7-Day Streak</div>
+                    <div className="text-xs text-slate-500">2/7 — keep your daily reps going</div>
+                  </div>
+                  <div className="ml-auto text-xs">
+                    <Pill tone="ink">{"+5% bonus"}</Pill>
+                  </div>
+                </div>
+                <div className="rounded-xl border border-slate-200 p-3 flex items-center gap-3">
+                  <Handshake className="text-[var(--ink)]" />
+                  <div>
+                    <div className="text-sm font-medium text-[var(--ink)]">Pod Assist</div>
+                    <div className="text-xs text-slate-500">Help 3 podmates complete a step • 1/3</div>
+                  </div>
+                  <div className="ml-auto text-xs">
+                    <Pill>{"accountability"}</Pill>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </SectionCard>
+        </div>
+
+        {/* RIGHT COLUMN (1/3): Points & Rewards */}
+        <div className="grid md:col-span-1 gap-6 md:gap-8 md:sticky md:top-6 self-start">
+          <SectionCard title="Points & Rewards" subtitle="Per-arc progress • Lifetime totals">
+            <div className="grid gap-6">
+              {/* Per-Arc */}
+              <div className="grid gap-3">
+                <div className="text-sm font-medium text-[var(--ink)]">{`Arc (${arc.name})`}</div>
+                <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
+                  <div className="h-3 rounded-full bg-[var(--coral)]" style={{ width: progressBarWidth }} />
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span>
+                    {arcPoints} / {nextThreshold} → Next reward
+                  </span>
+                  <a href="#" className="inline-flex items-center gap-1 text-[var(--ink)] hover:underline">
+                    View details <ChevronRight size={16} />
+                  </a>
+                </div>
+                <div className="text-xs text-slate-500">Quality checkpoint required for large awards.</div>
+              </div>
+
+              {/* Lifetime */}
+              <div className="grid gap-3">
+                <div className="grid grid-cols-3 gap-3">
+                  {/* Lifetime XP */}
+                  <div className="rounded-xl border border-slate-200 p-4 text-center flex flex-col items-center justify-center min-h-[112px]">
+                    <div className="text-xs text-slate-500">Lifetime XP</div>
+                    <div className="text-lg font-semibold text-[var(--ink)] leading-tight">{lifetime.xp}</div>
+                  </div>
+
+                  {/* Current Streak */}
+                  <div className="rounded-xl border border-slate-200 p-4 text-center flex flex-col items-center justify-center min-h-[112px]">
+                    <div className="text-xs text-slate-500">Current Streak</div>
+                    <div className="text-lg font-semibold text-[var(--ink)] leading-tight whitespace-pre-line">
+                      {lifetime.streak}
+                    </div>
+                  </div>
+
+                  {/* Drag this week */}
+                  <div className="rounded-xl border border-slate-200 p-4 text-center flex flex-col items-center justify-center min-h-[112px]">
+                    <div className="text-xs text-slate-500">Drag this week</div>
+                    <div className="text-lg font-semibold text-[var(--coral)] leading-tight">{lifetime.drag}</div>
+                  </div>
+                </div>
+
+                {/* (rest of the section unchanged) */}
+              </div>
+            </div>
+          </SectionCard>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="min-h-[60vh] pb-24 bg-[var(--canvas)] text-slate-800">
@@ -839,12 +1326,20 @@ export default function FriendChallenges(props = {}) {
       <style>{`
         :root{ --ink:#455a7c; --coral:#ff5656; --mist:#b5bdcb; --canvas:#f4f4f4; }
       `}</style>
+      {errorMessage && (
+        <div className="fixed bottom-4 right-4 z-50 rounded-md bg-[var(--ink)] text-white text-sm px-4 py-2 shadow-lg">
+          {errorMessage}
+        </div>
+      )}
 
       <main className="mx-auto max-w-screen-lg px-4 py-6 md:py-8 grid gap-6 md:gap-8">
 {/* Arc Switcher */}
 <div className="overflow-x-auto pb-1 pt-1">
 <nav aria-label="Your Arcs" role="tablist" className="flex gap-2">
-{arcs.map((a) => {
+{arcs.map((a, index) => {
+  const safeArcId = a.domId || toDomSafeId(a.id, `arc-${index}`);
+  const tabId = `arc-tab-${safeArcId}`;
+  const panelId = `arc-panel-${safeArcId}`;
   const isSelected = selectedId === a.id;
   const handleRemove = (event) => {
     event.preventDefault();
@@ -855,9 +1350,11 @@ export default function FriendChallenges(props = {}) {
   return (
     <div key={a.id} className="relative shrink-0 pr-2">
       <button
+        id={tabId}
         onClick={() => setSelectedId(a.id)}
         role="tab"
         aria-selected={isSelected}
+        aria-controls={panelId}
         className={[
           "shrink-0 pr-7 pl-3.5 py-2 rounded-full text-sm border transition-all",
           isSelected
@@ -899,230 +1396,24 @@ export default function FriendChallenges(props = {}) {
   </a>
 </nav>
 </div>
-        {/* Two-column layout: Left = 2/3, Right = 1/3 */}
-        <div className="grid md:grid-cols-3 gap-6 md:gap-8 items-start">
-          {/* LEFT COLUMN (2/3): Current Arc, Daily Surprise, Badges */}
-          <div className="grid gap-6 md:gap-8 md:col-span-2">
-            {/* Progress + Steps */}
-            <SectionCard>
-              <div className="grid gap-5 items-start md:grid-cols-3 md:items-center">
-                {/* Left 1/3: Friend photo centered */}
-                <div className="grid place-items-center gap-2 text-center">
-                  <div className="text-sm font-semibold text-[var(--ink)]">{current.name}</div>
-                  <FriendPhoto name={current.name} src={current.photoSrc || undefined} />
-                  <div className="grid gap-2 mt-1">
-                    <Pill tone="ink">{`Friend Score: ${formatFriendScore(current.friendScore)}`}</Pill>
-                    <Pill>{`Friend Type: ${formatFriendType(current.friendType)}`}</Pill>
-                    {isMissingQuiz(current.friendScore, current.friendType) && (
-                      <a href="friendQuiz" className="mt-2 px-3 py-2 rounded-lg bg-[var(--coral)] text-white text-sm inline-block" role="button">
-                        Do the Friend Quiz Now
-                      </a>
-                    )}
-                  </div>
-                </div>
-
-                {/* Right 2/3: Progress ring + pills centered */}
-                <div className="grid md:col-span-2 place-items-center">
-                  <ProgressRing percent={current.percent} size={128} label={progressLabel} />
-                  <div className="mt-3 flex items-center gap-2 text-xs">
-                    <Pill tone="ink">{dayLabel}</Pill>
-                    <Pill tone="coral">{pointsTodayLabel}</Pill>
-                  </div>
-                </div>
-
-                {/* Steps and actions below (span full width) */}
-                <div className="grid gap-2 md:col-span-3">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="text-[var(--ink)] font-semibold">{`Today’s plan for ${current.name}`}</h3>
-                    <Pill>{"Quality > hours"}</Pill>
-                  </div>
-                  <ul className="divide-y divide-slate-100">
-                    {current.steps.map((s) => (
-                      <li key={s.title}>
-                        <StepRow state={s.status} title={s.title} meta={s.meta} />
-                      </li>
-                    ))}
-                  </ul>
-
-                  {showFallbackStepsNote && (
-                    <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-xs text-slate-600">
-                      Complete this friend’s quiz to unlock a personalised daily plan.
-                    </div>
-                  )}
-
-                  <div className="flex flex-wrap items-center gap-2 pt-2">
-                    <button className="px-3 py-1.5 rounded-lg bg-[var(--ink)] text-white text-sm hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--ink)]">Extend</button>
-                    <button className="px-3 py-1.5 rounded-lg bg-white text-[var(--ink)] border border-slate-200 text-sm hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--ink)]/40">Snooze</button>
-                    <button className="px-3 py-1.5 rounded-lg bg-white text-slate-700 border border-slate-200 text-sm hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-300">Fail-forward</button>
-                    <span className="text-xs text-slate-500 ml-auto flex items-center gap-1"><Info size={14}/> Auto-advance in ~72h</span>
-                  </div>
-
-                  {/* Grind guard example */}
-                  <div className="mt-2 hidden md:flex items-center gap-2 p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800">
-                    <Lock size={16} />
-                    <span className="text-sm">Freeze active — you’ve hit this week’s cap. Log a quick quality check to unlock bigger awards.</span>
-                  </div>
-                </div>
-              </div>
-            </SectionCard>
-
-            {/* Daily Surprise Challenge */}
-            <SectionCard title={"Daily Surprise · " + current.name} subtitle="A tiny nudge for real-life progress">
-              <div className="grid md:grid-cols-[1fr,auto] gap-4 items-start">
-                <div>
-                  <div className="text-[15px] font-semibold text-[var(--ink)]">{`🎯 ${challenge.title}`}</div>
-                  <p className="text-sm text-slate-600 mt-1">{challengeDescription}</p>
-                  <div className="mt-3 flex items-center gap-2 text-xs">
-                    <Pill tone="muted">{`Effort: ${challenge.effort}`}</Pill>
-                    <Pill tone="muted">{`~${challenge.estMinutes} min`}</Pill>
-                    <Pill tone="coral">{`+${challenge.points} XP`}</Pill>
-                  </div>
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    {challengePrimaryCta.href === "#" ? (
-                      <button
-                        className="px-3 py-2 rounded-lg bg-[var(--coral)] text-white text-sm hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--coral)]"
-                        type="button"
-                      >
-                        {challengePrimaryCta.label}
-                      </button>
-                    ) : (
-                      <a
-                        className="px-3 py-2 rounded-lg bg-[var(--coral)] text-white text-sm hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--coral)]"
-                        href={challengePrimaryCta.href}
-                      >
-                        {challengePrimaryCta.label}
-                      </a>
-                    )}
-                    {!challenge.isFallback && (
-                      <>
-                        <button className="px-3 py-2 rounded-lg bg-white text-[var(--ink)] border border-slate-200 text-sm hover:bg-slate-50">Swap</button>
-                        <button className="px-3 py-2 rounded-lg bg-white text-slate-700 border border-slate-200 text-sm hover:bg-slate-50">Save for later</button>
-                      </>
-                    )}
-                  </div>
-                  <div className="mt-3 text-xs text-slate-500">
-                    Stuck?{" "}
-                    <a
-                      href={challenge.isFallback ? "friendQuiz" : "#"}
-                      className="text-[var(--ink)] underline"
-                    >
-                      {challenge.isFallback ? "Unlock ideas with the Friend Quiz" : "Open KAI’s script"}
-                    </a>
-                  </div>
-                </div>
-                {Number.isFinite(swapsLeft) && (
-                  <div className="justify-self-end">
-                    <Pill tone={swapsLeft > 0 ? "warn" : "muted"}>{`Swaps left: ${swapsLeft}`}</Pill>
-                  </div>
-                )}
-              </div>
-            </SectionCard>
-
-            {/* Badges */}
-            <SectionCard title="Badges" subtitle="Friendship levels + streak & pod-assist">
-              <div className="grid gap-4">
-                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-                  {LEVEL_LABELS.map((label) => {
-                    const st = (current.badges || {})[label] || "locked";
-                    return (
-                      <div
-                        key={label}
-                        className={`rounded-xl border p-3 text-center flex flex-col items-center ${
-                          st === "done"
-                            ? "bg-emerald-50 border-emerald-200"
-                            : st === "inProgress"
-                            ? "bg-[var(--canvas)] border-slate-200"
-                            : "bg-white border-slate-200 opacity-70"
-                        }`}
-                      >
-                        <div className="grid place-items-center">
-                          <BadgeArt state={st} label={label} src={getLevelIcon(label, st)} />
-                        </div>
-                        <div className="mt-2 text-center font-medium text-[13px] md:text-sm leading-tight text-[var(--ink)] break-words">{label}</div>
-                        <div className="mt-1 text-xs text-slate-500">{st === "done" ? "earned" : st === "inProgress" ? "2 steps to unlock" : "locked"}</div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                <div className="grid sm:grid-cols-2 gap-3">
-                  <div className="rounded-xl border border-slate-200 p-3 flex items-center gap-3">
-                    <Flame className="text-[var(--coral)]" />
-                    <div>
-                      <div className="text-sm font-medium text-[var(--ink)]">7-Day Streak</div>
-                      <div className="text-xs text-slate-500">2/7 — keep your daily reps going</div>
-                    </div>
-                    <div className="ml-auto text-xs">
-                      <Pill tone="ink">{"+5% bonus"}</Pill>
-                    </div>
-                  </div>
-                  <div className="rounded-xl border border-slate-200 p-3 flex items-center gap-3">
-                    <Handshake className="text-[var(--ink)]" />
-                    <div>
-                      <div className="text-sm font-medium text-[var(--ink)]">Pod Assist</div>
-                      <div className="text-xs text-slate-500">Help 3 podmates complete a step • 1/3</div>
-                    </div>
-                    <div className="ml-auto text-xs">
-                      <Pill>{"accountability"}</Pill>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </SectionCard>
-          </div>
-
-          {/* RIGHT COLUMN (1/3): Points & Rewards */}
-          <div className="grid md:col-span-1 gap-6 md:gap-8 md:sticky md:top-6 self-start">
-            <SectionCard title="Points & Rewards" subtitle="Per-arc progress • Lifetime totals">
-              <div className="grid gap-6">
-                {/* Per-Arc */}
-                <div className="grid gap-3">
-                  <div className="text-sm font-medium text-[var(--ink)]">{`Arc (${current.name})`}</div>
-                  <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
-                    <div className="h-3 rounded-full bg-[var(--coral)]" style={{ width: progressPct + "%" }} />
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span>
-                      {arcPoints} / {nextThreshold} → Next reward
-                    </span>
-                    <a href="#" className="inline-flex items-center gap-1 text-[var(--ink)] hover:underline">
-                      View details <ChevronRight size={16} />
-                    </a>
-                  </div>
-                  <div className="text-xs text-slate-500">Quality checkpoint required for large awards.</div>
-                </div>
-
-             {/* Lifetime */}
-<div className="grid gap-3">
-  <div className="grid grid-cols-3 gap-3">
-    {/* Lifetime XP */}
-    <div className="rounded-xl border border-slate-200 p-4 text-center flex flex-col items-center justify-center min-h-[112px]">
-      <div className="text-xs text-slate-500">Lifetime XP</div>
-      <div className="text-lg font-semibold text-[var(--ink)] leading-tight">{lifetime.xp}</div>
-    </div>
-
-    {/* Current Streak */}
-    <div className="rounded-xl border border-slate-200 p-4 text-center flex flex-col items-center justify-center min-h-[112px]">
-      <div className="text-xs text-slate-500">Current Streak</div>
-      <div className="text-lg font-semibold text-[var(--ink)] leading-tight whitespace-pre-line">
-        {lifetime.streak}
-      </div>
-    </div>
-
-    {/* Drag this week */}
-    <div className="rounded-xl border border-slate-200 p-4 text-center flex flex-col items-center justify-center min-h-[112px]">
-      <div className="text-xs text-slate-500">Drag this week</div>
-      <div className="text-lg font-semibold text-[var(--coral)] leading-tight">{lifetime.drag}</div>
-    </div>
-  </div>
-
-  {/* (rest of the section unchanged) */}
-</div>
-
-              </div>
-            </SectionCard>
-          </div>
-        </div>
+        {/* Arc panels */}
+        {arcs.map((arc, index) => {
+          const safeArcId = arc.domId || toDomSafeId(arc.id, `arc-${index}`);
+          const tabId = `arc-tab-${safeArcId}`;
+          const panelId = `arc-panel-${safeArcId}`;
+          const isSelected = selectedId === arc.id;
+          return (
+            <div
+              key={panelId}
+              role="tabpanel"
+              id={panelId}
+              aria-labelledby={tabId}
+              hidden={!isSelected}
+            >
+              {isSelected ? renderArcPanelContent(arc) : null}
+            </div>
+          );
+        })}
       </main>
     </div>
   );

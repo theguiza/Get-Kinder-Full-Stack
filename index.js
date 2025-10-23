@@ -26,6 +26,8 @@ import { deliverQueuedNudges } from './kindnessEmailer.js';
 const { fetchUserEmails, fetchKindnessPrompts, fetchEmailSubject } = await import("./fetchData.js");
 const { sendDailyKindnessPrompts } = await import("./kindnessEmailer.js");
 import cookieParser from "cookie-parser";
+import quizHooksRouter from "./routes/quizHooks.js";
+import arcsApiRouter from "./routes/arcsApi.js";
 
 // Reuse the same tool schema for Chat Completions (strip any nonstandard fields if needed)
 const CHAT_COMPLETIONS_TOOLS = DASHBOARD_TOOLS.map(t => ({ type: 'function', function: t.function }));
@@ -145,6 +147,8 @@ app.use(
 app.use(passport.initialize());
 app.use(passport.session());
 app.use(express.static(path.join(__dirname, "public")));
+app.use("/internal/quiz", quizHooksRouter);
+app.use(arcsApiRouter);
 
 // Make `user` available in all EJS templates
 app.use((req, res, next) => {
@@ -822,7 +826,7 @@ app.get(['/friend-quiz', '/friendQuiz'], (req, res) => {
 // Dashboard - Initialize dashboard controller with all functions
 const { getDashboard, getMorningPrompt, saveReflection, markDayDone, cancelChallenge } = makeDashboardController(pool);
 
-// BOLT: Dashboard - All dashboard routes
+// Dashboard - All dashboard routes
 app.get("/dashboard", ensureAuthenticated, getDashboard);
 app.get('/dashboard/morning-prompt', ensureAuthenticated, getMorningPrompt);
 app.post('/dashboard/reflect', ensureAuthenticated, saveReflection);

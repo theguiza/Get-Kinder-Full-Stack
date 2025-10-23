@@ -4,6 +4,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="csrf-token" content="<%= typeof csrfToken !== 'undefined' ? csrfToken : '' %>">
   <title>Kindness Challenge Dashboard</title>
 
   <link rel="stylesheet" href="./css/style.css" />
@@ -176,6 +177,25 @@
             <button type="submit" class="btn btn-danger">Log Out</button>
           </form>
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="morningPromptModal" class="modal" tabindex="-1" aria-hidden="true" style="display:none">
+    <div class="modal-dialog">
+      <div class="modal-content p-3">
+        <h5 id="dayTitle" class="modal-title"></h5>
+        <p id="principle"></p>
+        <div id="body"></div>
+        <ul id="suggestedActs"></ul>
+        <textarea id="reflection" class="form-control" rows="3" placeholder="Write your reflection..."></textarea>
+        <div class="mt-3 d-flex gap-2">
+          <button id="sendReflection" class="btn btn-primary">
+            <span class="btn-text">Send</span>
+            <span class="btn-loading visually-hidden">Saving…</span>
+          </button>
+          <button id="markDone" class="btn btn-success">Mark as Done</button>
         </div>
       </div>
     </div>
