@@ -1,19 +1,34 @@
 // Minimal shims so React and friends don’t choke in strict environments
-if (typeof window !== 'undefined') {
-  if (!window.process) window.process = { env: { NODE_ENV: 'production' } };
+if (typeof window !== "undefined") {
+  if (!window.process) window.process = { env: { NODE_ENV: "production" } };
   if (!window.global) window.global = window;
 }
 
+import React from "react";
 import ReactDOM from "react-dom/client";
 
 // ---- Friend Challenges (new)
 import FriendChallenges from "./friendChallenges.jsx";
 
 import BestieVibesQuiz from "./BestieVibesQuiz.jsx";
+
+const ROOTS = new WeakMap();
+
+// Reuse a single React root per element so auto-boot and manual calls never double-mount
+function getOrCreateRoot(el) {
+  if (!el) return null;
+  let root = ROOTS.get(el);
+  if (!root) {
+    root = ReactDOM.createRoot(el);
+    ROOTS.set(el, root);
+  }
+  return root;
+}
+
 window.renderBestieVibesQuiz = (selector, props = {}) => {
   const el = typeof selector === "string" ? document.querySelector(selector) : selector;
   if (!el) return;
-  const root = ReactDOM.createRoot(el);
+  const root = getOrCreateRoot(el);
   root.render(<BestieVibesQuiz {...props} />);
 };
 // ---- Friend Challenges (new)
@@ -21,20 +36,15 @@ window.renderFriendChallenges = (selector = "#friend-challenges-root", props = {
   const el = typeof selector === "string" ? document.querySelector(selector) : selector;
   if (!el) return;
   const root = getOrCreateRoot(el);
-  root.render(<FriendChallenges {...props} />);
+  root.render(
+    <React.StrictMode>
+      <FriendChallenges {...props} />
+    </React.StrictMode>
+  );
 };
 
 // ---- Onboarding
 import OnboardingCards, { getDefaultSteps } from "./components/OnboardingCards.tsx";
-
-// Reuse a single React root per element so auto-boot and manual calls never double-mount
-function getOrCreateRoot(el) {
-  if (!el) return null;
-  if (!el.__reactRoot) {
-    el.__reactRoot = ReactDOM.createRoot(el);
-  }
-  return el.__reactRoot;
-}
 
 // Auto-boot if the page includes <div id="onboarding-root"></div>
 function bootOnboarding() {
@@ -51,24 +61,13 @@ function bootOnboarding() {
     />
   );
 }
-function bootFriendChallenges() {
-  const el = document.getElementById("friend-challenges-root");
-  if (!el) return;
-
-  // Optional: allow server to pass initial props via a global
-  const props = (window && window.__friendChallengesProps) || {};
-  const root = getOrCreateRoot(el);
-  root.render(<FriendChallenges {...props} />);
-}
 
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", () => {
     bootOnboarding();
-    bootFriendChallenges();
   }, { once: true });
 } else {
   bootOnboarding();
-  bootFriendChallenges();
 }
 
 // Optional manual helper to mount anywhere (used by the EJS fallback injector, if present)

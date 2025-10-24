@@ -422,7 +422,7 @@ export default function BestieVibesQuiz(props = {}) {
   }, [score, primary?.name])
 
   const tests = useMemo(() => nextTests(answers, weights), [answers, weights])
-  const Sidebar = () => (
+  const sidebar = (
     <aside className="order-2 lg:order-1 lg:col-start-2 lg:row-start-2 lg:sticky lg:top-28 space-y-4">
       <div className="p-4 rounded-2xl bg-white shadow-sm border">
         <h2 className="text-lg font-bold text-[#455a7c]">Friend Snapshot</h2>
@@ -548,7 +548,7 @@ export default function BestieVibesQuiz(props = {}) {
         </div>
       </div>
     </aside>
-  )
+  );
 
   const QuizSection = () => (
     <section className="order-1 lg:order-1 lg:col-start-1 space-y-6">
@@ -737,7 +737,7 @@ export default function BestieVibesQuiz(props = {}) {
         </section>
 
         <QuizSection />
-        <Sidebar />
+        {sidebar}
         <FriendshipTypesSection />
         <ScoreboardSection />
         <FooterSection />
