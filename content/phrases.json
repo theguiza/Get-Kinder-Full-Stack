@@ -1,0 +1,36 @@
+{
+  "openers": {
+    "text": [
+      "Hey {{ friend_name }}, I just saw something that reminded me of your laugh—how have you been?",
+      "Hi {{ friend_name }}! It’s been a minute. Got time to catch up this week?",
+      "{{ friend_name }}, I keep thinking about our last hang. Want to plan the sequel?"
+    ],
+    "call": [
+      "Hey {{ friend_name }}, free for a quick call tonight? I’ve got a story with your name on it.",
+      "Hi {{ friend_name }}, I’d love to hear what you’ve been up to—can we hop on a call soon?"
+    ],
+    "email": [
+      "Subject: Catching up with {{ friend_name }}\n\nIt’s been too long! I’d love to hear what’s new on your side—want to trade updates?",
+      "Subject: A quick note for {{ friend_name }}\n\nThinking of you today and wanted to say hi. Let’s swap stories when you’re free!"
+    ],
+    "irl": [
+      "Hey {{ friend_name }}, want to grab coffee and catch up this weekend?",
+      "{{ friend_name }}! How about a walk and talk sometime soon?"
+    ]
+  },
+  "nudges": [
+    "Just popping in to say hi—how’s your week treating you, {{ friend_name }}?",
+    "Reminder that I still owe you a fun night out, {{ friend_name }}!",
+    "I saw something that screamed {{ friend_name }} today and had to share"
+  ],
+  "closers": [
+    "Let me know what works for you and we’ll make it happen!",
+    "No rush—just happy to reconnect when you are.",
+    "Talk soon? I miss our chats."
+  ],
+  "durations": {
+    "low": 5,
+    "medium": 15,
+    "high": 30
+  }
+}

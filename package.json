@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "start": "node index.js",
-    "build": "vite build"
+    "build": "vite build",
+    "seed:content": "node scripts/generateContentLibrary.js"
   },
   "repository": {
     "type": "git",
@@ -53,4 +54,5 @@
     "typescript": "^5.9.3",
     "vite": "^7.1.7"
   }
+
 }

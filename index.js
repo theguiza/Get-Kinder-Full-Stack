@@ -828,10 +828,10 @@ const { getDashboard, getMorningPrompt, saveReflection, markDayDone, cancelChall
 
 // Dashboard - All dashboard routes
 app.get("/dashboard", ensureAuthenticated, getDashboard);
-app.get('/dashboard/morning-prompt', ensureAuthenticated, getMorningPrompt);
-app.post('/dashboard/reflect', ensureAuthenticated, saveReflection);
-app.post('/dashboard/mark-done', ensureAuthenticated, markDayDone);
-app.post("/challenge/cancel", ensureAuthenticated, cancelChallenge);
+//app.get('/dashboard/morning-prompt', ensureAuthenticated, getMorningPrompt);
+//app.post('/dashboard/reflect', ensureAuthenticated, saveReflection);
+//app.post('/dashboard/mark-done', ensureAuthenticated, markDayDone);
+//app.post("/challenge/cancel", ensureAuthenticated, cancelChallenge);
 
 app.get("/about", (req, res) => {
   // mirror the same flags you use on your home route
