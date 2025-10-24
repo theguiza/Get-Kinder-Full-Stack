@@ -26,32 +26,27 @@ export function makeDashboardController(pool) {
           message: "Please sign in to view the dashboard.",
         });
       }
-
+      // Build arcs directly from completed Friend Quizzes stored in `friends`
       const { rows } = await pool.query(
         `
           SELECT
-            id,
-            user_id,
-            name,
-            day,
-            length,
-            arc_points,
-            next_threshold,
-            points_today,
-            friend_score,
-            friend_type,
-            lifetime,
-            steps,
-            challenge,
-            badges
-          FROM friend_arcs
-          WHERE user_id = $1
+            id   AS friend_id,
+            name AS friend_name,
+            score   AS friend_score,
+            archetype_primary AS friend_type
+          FROM public.friends
+          WHERE owner_user_id = $1
           ORDER BY name ASC NULLS LAST
         `,
         [userId]
       );
 
-      const arcs = (rows || []).map((row) => mapFriendArcRow(row));
+      const arcs = (rows || []).map((r, i) => ({
+        id: r.friend_id ?? r.id ?? `friend-${i + 1}`,
+        name: r.friend_name ?? r.name ?? `Friend ${i + 1}`,
+        friend_score: r.friend_score ?? null,
+        friend_type: r.friend_type ?? null
+      }));
 
       res.render("dashboard", {
         arcs,
