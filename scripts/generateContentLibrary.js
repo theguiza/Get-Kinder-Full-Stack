@@ -1,5 +1,5 @@
 // scripts/generateContentLibrary.js
-// ESM + TLS-friendly content library generator
+// ESM + TLS-friendly content library generator (+ idempotent Daily Surprise backfill to friend_arcs.challenge)
 
 import 'dotenv/config';
 import fs from 'fs';
@@ -30,6 +30,14 @@ function mustacheEst(str, vars) {
   return String(str ?? '').replace(/\{\{\s*est_minutes\s*\}\}/g, String(vars.est_minutes));
 }
 
+// Generic mustache for friend_name + est_minutes (used by backfill)
+function renderTemplate(str, vars) {
+  if (!str) return '';
+  return String(str)
+    .replace(/\{\{\s*friend_name\s*\}\}/gi, String(vars.friend_name ?? 'your friend'))
+    .replace(/\{\{\s*est_minutes\s*\}\}/gi, String(vars.est_minutes ?? 5));
+}
+
 // Map blueprint “family” to step_templates.channel (schema allows: text|call|irl)
 function familyToChannel(fam) {
   if (fam === 'text' || fam === 'call' || fam === 'irl') return fam;
@@ -44,6 +52,8 @@ function pickFirst(arr, fallback) {
 function ensureArray(x) {
   return Array.isArray(x) ? x : [];
 }
+
+const cap = (s) => (typeof s === 'string' && s ? s[0].toUpperCase() + s.slice(1) : s);
 
 // -------------------- load authoring files --------------------
 const phrasesPath = joinp('content', 'phrases.json');
@@ -101,6 +111,14 @@ try {
 }
 
 const client = new Client({ connectionString, ssl: sslOption });
+
+// -------------------- schema/shape guards --------------------
+async function ensureFriendArcsShape() {
+  // Ensure friend_arcs.challenge exists as JSONB
+  await client.query(`ALTER TABLE friend_arcs ADD COLUMN IF NOT EXISTS challenge JSONB`);
+  // Optional: GIN index for challenge lookups (safe if it already exists)
+  await client.query(`CREATE INDEX IF NOT EXISTS friend_arcs_challenge_gin ON friend_arcs USING GIN (challenge)`);
+}
 
 // -------------------- DDL helpers (make UPSERT safe) --------------------
 async function ensureIndexes() {
@@ -193,11 +211,82 @@ async function upsertChallenge(c) {
   ]);
 }
 
+// -------------------- Backfill: write friend_arcs.challenge for arcs missing one --------------------
+async function backfillDailySurprises() {
+  // Load active templates
+  const tmplRes = await client.query(`
+    SELECT id, title_template, description_template, effort, channel, est_minutes, points, swaps_allowed
+    FROM challenge_templates
+    WHERE is_active = TRUE
+    ORDER BY id ASC
+  `);
+  if (!tmplRes.rows.length) {
+    console.warn('! Backfill skipped: no active challenge_templates (run seed first).');
+    return { updated: 0 };
+  }
+
+  // Find arcs missing a real JSON challenge
+  const arcsRes = await client.query(`
+    SELECT id, name, challenge
+    FROM friend_arcs
+    WHERE challenge IS NULL
+       OR COALESCE(jsonb_typeof(challenge), 'null') <> 'object'
+  `);
+
+  if (!arcsRes.rows.length) {
+    console.log('ℹ︎ Backfill: no arcs needed challenge.');
+    return { updated: 0 };
+  }
+
+  const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+  let updated = 0;
+
+  for (const arc of arcsRes.rows) {
+    const friendName = (typeof arc.name === 'string' && arc.name.trim()) || 'your friend';
+    const tmpl = pick(tmplRes.rows);
+    if (!tmpl) break;
+
+    const est = Number(tmpl.est_minutes) || 5;
+
+    // Include camel and snake variants; your UI accepts either.
+    const challengeObj = {
+      id: tmpl.id,
+      templateId: tmpl.id,
+      template_id: tmpl.id,
+      channel: tmpl.channel || 'text',
+      title: renderTemplate(tmpl.title_template, { friend_name: friendName, est_minutes: est }),
+      description: renderTemplate(tmpl.description_template, { friend_name: friendName, est_minutes: est }),
+      effort: (tmpl.effort || 'low'), // keep lower-case; client can format for display
+      effortLabel: cap(tmpl.effort || 'low'),
+      estMinutes: est,
+      est_minutes: est,
+      points: Number(tmpl.points) || 0,
+      swapsLeft: Number(tmpl.swaps_allowed) || 0,
+      swaps_allowed: Number(tmpl.swaps_allowed) || 0,
+      isFallback: false
+    };
+
+    await client.query(
+      `
+      UPDATE friend_arcs
+      SET challenge = $1::jsonb,
+          updated_at = NOW()
+      WHERE id = $2
+      `,
+      [JSON.stringify(challengeObj), arc.id]
+    );
+    updated++;
+  }
+
+  return { updated };
+}
+
 // -------------------- main --------------------
 (async () => {
   await client.connect();
   try {
     await client.query('BEGIN');
+    await ensureFriendArcsShape();   // <-- ensure 'challenge' column exists
     await ensureIndexes();
 
     let planCount = 0;
@@ -281,8 +370,13 @@ async function upsertChallenge(c) {
       challengeCount++;
     }
 
+    // ------------ backfill missing friend_arcs.challenge ------------
+    const { updated: backfilled } = await backfillDailySurprises();
+
     await client.query('COMMIT');
-    console.log(`✅ Content library upserted: plans=${planCount}, steps=${stepCount}, challenges=${challengeCount}`);
+    console.log(
+      `✅ Content library upserted: plans=${planCount}, steps=${stepCount}, challenges=${challengeCount} • backfilled_arcs=${backfilled}`
+    );
     process.exitCode = 0;
   } catch (e) {
     await client.query('ROLLBACK');
@@ -292,4 +386,3 @@ async function upsertChallenge(c) {
     await client.end();
   }
 })();
-
