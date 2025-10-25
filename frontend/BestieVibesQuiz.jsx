@@ -242,6 +242,8 @@ export default function BestieVibesQuiz(props = {}) {
   const [pictureData, setPictureData] = useState(null)
   const camInputRef = useRef(null)
   const fileInputRef = useRef(null)
+  const roundTopRef = useRef(null)
+  const [shouldScrollToRoundTop, setShouldScrollToRoundTop] = useState(false)
 
   // Load config & draft on mount
   useEffect(() => {
@@ -317,6 +319,10 @@ export default function BestieVibesQuiz(props = {}) {
   const secondary = archetypes[1]
 
   const roundQuestions = QUESTIONS.filter((q) => q.round === ROUNDS[roundIndex])
+  const prefersReducedMotion = useMemo(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  }, [])
 
   const handleSet = (id, value) => setAnswers((prev) => ({ ...prev, [id]: value }))
 
@@ -410,6 +416,31 @@ export default function BestieVibesQuiz(props = {}) {
 
   const nextRound = () => setRoundIndex((i) => Math.min(i + 1, ROUNDS.length - 1))
   const prevRound = () => setRoundIndex((i) => Math.max(i - 1, 0))
+  const handleNextRound = () => {
+    if (roundIndex >= ROUNDS.length - 1) return
+    setShouldScrollToRoundTop(true)
+    nextRound()
+  }
+  const handlePrevRound = () => {
+    if (roundIndex <= 0) return
+    setShouldScrollToRoundTop(true)
+    prevRound()
+  }
+
+  useEffect(() => {
+    if (!shouldScrollToRoundTop) return
+    const target = roundTopRef.current
+    if (!target) {
+      setShouldScrollToRoundTop(false)
+      return
+    }
+    const behavior = prefersReducedMotion ? 'auto' : 'smooth'
+    target.scrollIntoView({ block: 'start', behavior })
+    if (typeof target.focus === 'function') {
+      target.focus({ preventScroll: true })
+    }
+    setShouldScrollToRoundTop(false)
+  }, [roundIndex, shouldScrollToRoundTop, prefersReducedMotion])
 
   const suggestion = useMemo(() => {
     const templates = [
@@ -605,7 +636,12 @@ export default function BestieVibesQuiz(props = {}) {
           )}
         </div>
 
-        <div className="text-sm text-[#455a7c] font-bold">2. {ROUNDS[roundIndex]} {roundIndex + 1}/{ROUNDS.length}: Answer all of these to assess this person’s friend type and fit for you</div>
+        <div
+          ref={roundTopRef}
+          id="round-top"
+          tabIndex={-1}
+          className="text-sm text-[#455a7c] font-bold scroll-mt-28"
+        >2. {ROUNDS[roundIndex]} {roundIndex + 1}/{ROUNDS.length}: Answer all of these to assess this person’s friend type and fit for you</div>
 
         <div className="space-y-6">
           {QUESTIONS.filter((q) => q.round === ROUNDS[roundIndex]).map((q) => (
@@ -642,8 +678,11 @@ export default function BestieVibesQuiz(props = {}) {
         </div>
 
         <div className="flex items-center justify-between gap-2 pt-2">
-          <button onClick={prevRound} className="px-3 py-1.5 rounded-xl border bg-white hover:bg-[#455a7c]/5 text-sm">⬅️ Previous</button>
-          <button onClick={nextRound} className="px-3 py-1.5 rounded-xl border bg-white hover:bg-[#455a7c]/5 text-sm">Next ➡️</button>
+          <button onClick={handlePrevRound} className="px-3 py-1.5 rounded-xl border bg-white hover:bg-[#455a7c]/5 text-sm">⬅️ Previous</button>
+          <button
+            onClick={handleNextRound}
+            className="px-4 py-2 rounded-xl border border-[#ff5656] bg-[#ff5656] hover:bg-[#ff5656]/90 text-white text-base"
+          >Next ➡️</button>
         </div>
       </div>
     </section>
