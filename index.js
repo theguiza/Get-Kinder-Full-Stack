@@ -448,7 +448,7 @@ app.post("/register", async (req, res, next) => {
     const newUser = result.rows[0];
     req.login(newUser, (err) => {
       if (err) return next(err);
-      res.redirect(`/?login=1&name=${encodeURIComponent(newUser.firstname)}`);
+      res.redirect("/dashboard");
     });
   } catch (err) {
     console.error("Registration error:", err);
@@ -476,7 +476,7 @@ app.post("/login", async (req, res, next) => {
     }
     req.login(user, (err) => {
       if (err) return next(err);
-      res.redirect(`/?login=1&name=${encodeURIComponent(user.firstname || user.email)}`);
+      res.redirect("/dashboard");
     });
   } catch (err) {
     console.error("Login error:", err);
@@ -861,58 +861,59 @@ app.get("/blog", (req, res) => {
     user:         req.user
   });
 });
+async function renderIndexPage(req, res, next) {
+  try {
+    const success      = req.query.success === "1";
+    const loginSuccess = req.query.login   === "1";
+    const name         = req.query.name   || "";
+    const title        = "Home";
+
+    let dbTime = null;
+    try {
+      const result = await pool.query("SELECT NOW()");
+      dbTime = result.rows[0].now;
+    } catch (dbErr) {
+      console.error("Error querying Postgres in GET '/' route:", dbErr);
+      dbTime = null;
+    }
+
+    let chatHistory = [];
+    if (req.session && req.session.threadId) {
+      const thread = await openai.beta.threads.retrieve(req.session.threadId);
+      chatHistory = Array.isArray(thread.messages) ? thread.messages : [];
+    }
+
+    const threadId = (req.session && req.session.threadId) || "";
+    const isNewUser = chatHistory.length === 0;
+    const onboardingDone = req.cookies && req.cookies.onboarding_done === "1";
+
+    return res.render("index", {
+      title,
+      success,
+      loginSuccess,
+      name,
+      chatHistory,
+      threadId,
+      dbTime,
+      isNewUser,
+      onboardingDone
+    });
+  } catch (err) {
+    return next(err);
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 15) Updated Home Route (with DB time check and chat-history logic)
 // ─────────────────────────────────────────────────────────────────────────────
 app.get("/", async (req, res, next) => {
-  try {
-    // A) Existing query-param logic
-    const success      = req.query.success === "1";   // registration success
-    const loginSuccess = req.query.login   === "1";   // login success
-    const name         = req.query.name   || "";      // user’s name/email
-     const title        = "Home";  // title for the EJS template
-    // B) Database connectivity check
-    let dbTime = null;
-    try {
-      const result = await pool.query("SELECT NOW()");
-      dbTime = result.rows[0].now; // e.g. "2025-05-31Txx:xx:xx.000Z"
-    } catch (dbErr) {
-      console.error("Error querying Postgres in GET '/' route:", dbErr);
-      dbTime = null; // or "unavailable"
-    }
-
-    // C) Chat-history logic (OpenAI threads)
-// C) Chat-history logic
-let chatHistory = [];
-if (req.session && req.session.threadId) {
-  const thread = await openai.beta.threads.retrieve(req.session.threadId);
-  chatHistory = Array.isArray(thread.messages) ? thread.messages : [];
-}
-const threadId = (req.session && req.session.threadId) || "";
-
-// NEW: are they new?
-const isNewUser = chatHistory.length === 0;
-
-// cookie gate for onboarding
-const onboardingDone = req.cookies && req.cookies.onboarding_done === "1";
-
-// D) Render index.ejs (pass the flag)
-return res.render("index", {
-  title:        "Home",
-  success,
-  loginSuccess,
-  name,
-  chatHistory,
-  threadId,
-  dbTime,
-  isNewUser,
-  onboardingDone
-});
-
-  } catch (err) {
-    return next(err);
+  if (req.isAuthenticated && req.isAuthenticated()) {
+    return res.redirect("/dashboard");
   }
+  return renderIndexPage(req, res, next);
 });
+
+app.get("/home", renderIndexPage);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 16) OAuth Callback Routes
