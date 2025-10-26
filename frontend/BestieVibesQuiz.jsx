@@ -319,6 +319,7 @@ export default function BestieVibesQuiz(props = {}) {
   const secondary = archetypes[1]
 
   const roundQuestions = QUESTIONS.filter((q) => q.round === ROUNDS[roundIndex])
+  const isLastRound = roundIndex === ROUNDS.length - 1
   const prefersReducedMotion = useMemo(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false
     return window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -425,6 +426,13 @@ export default function BestieVibesQuiz(props = {}) {
     if (roundIndex <= 0) return
     setShouldScrollToRoundTop(true)
     prevRound()
+  }
+  const handleDesktopNext = () => {
+    if (isLastRound) {
+      setShouldScrollToRoundTop(true)
+      return
+    }
+    handleNextRound()
   }
 
   useEffect(() => {
@@ -681,7 +689,11 @@ export default function BestieVibesQuiz(props = {}) {
           <button onClick={handlePrevRound} className="px-3 py-1.5 rounded-xl border bg-white hover:bg-[#455a7c]/5 text-sm">⬅️ Previous</button>
           <button
             onClick={handleNextRound}
-            className="px-4 py-2 rounded-xl border border-[#ff5656] bg-[#ff5656] hover:bg-[#ff5656]/90 text-white text-base"
+            className="inline-flex lg:hidden px-4 py-2 rounded-xl border border-[#ff5656] bg-[#ff5656] hover:bg-[#ff5656]/90 text-white text-base"
+          >Next ➡️</button>
+          <button
+            onClick={handleDesktopNext}
+            className="hidden lg:inline-flex px-4 py-2 rounded-xl border border-[#ff5656] bg-[#ff5656] hover:bg-[#ff5656]/90 text-white text-base"
           >Next ➡️</button>
         </div>
       </div>

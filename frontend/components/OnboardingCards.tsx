@@ -170,7 +170,7 @@ export function getDefaultSteps(): OnboardingStep[] {
         { id: "move", label: "I moved" },
         { id: "school", label: "I am at a new school / job" },
         { id: "break-up", label: "I recently ended a relationship" },
-        { id: "specific", label: "Seeking a partner for a specific activity" },
+        { id: "specific", label: "Find partner for specific activity" },
         { id: "lonely", label: "I just want a new friend" },
         { id: "other", label: "I have another reason" },
       ],
@@ -368,6 +368,13 @@ export default function OnboardingCards({
     }
   }
 
+  async function completeAndRedirectToLogin() {
+    await complete();
+    try {
+      window.location.href = "login";
+    } catch {}
+  }
+
   function next() {
     if (!current) return; // no-op if no steps
     if (isLast) return void complete();
@@ -475,11 +482,14 @@ export default function OnboardingCards({
                 className={`kai-btn ${isLast ? "kai-btn-outline" : "kai-btn-primary"}`}
               >{isLast ? "Finish" : "Continue"}</button>
               {isLast && (
-                <a
-                  href="login"
+                <button
+                  type="button"
+                  onClick={completeAndRedirectToLogin}
                   className="kai-btn kai-btn-primary"
                   data-testid="login-button"
-                >Log in</a>
+                >
+                  Log in
+                </button>
               )}
             </div>
           </footer>
