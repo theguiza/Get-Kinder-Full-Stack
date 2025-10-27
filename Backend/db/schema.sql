@@ -304,6 +304,7 @@ CREATE TABLE public.friend_arcs (
     points_today integer DEFAULT 0 NOT NULL,
     friend_score integer,
     friend_type text,
+    quiz_session_id text,
     lifetime jsonb DEFAULT '{}'::jsonb NOT NULL,
     steps jsonb DEFAULT '[]'::jsonb NOT NULL,
     challenge jsonb,
@@ -502,6 +503,8 @@ CREATE TABLE public.plan_templates (
     length_days integer NOT NULL,
     cadence_per_week integer NOT NULL,
     channel_variant text NOT NULL,
+    channel text DEFAULT 'mixed'::text,
+    effort text DEFAULT 'medium'::text,
     tags jsonb DEFAULT '[]'::jsonb NOT NULL,
     version integer DEFAULT 1 NOT NULL,
     is_active boolean DEFAULT true NOT NULL,
@@ -615,7 +618,9 @@ CREATE TABLE public.step_templates (
     plan_template_id bigint NOT NULL,
     day_number integer NOT NULL,
     title_template text NOT NULL,
+    title text,
     meta_template text,
+    meta text,
     channel text NOT NULL,
     effort text NOT NULL,
     tags jsonb DEFAULT '[]'::jsonb NOT NULL,
@@ -783,6 +788,7 @@ CREATE TABLE public.userdata (
     google_id character varying(255),
     facebook_id character varying(255),
     picture text,
+    has_seen_onboarding boolean DEFAULT false NOT NULL,
     created_at timestamp with time zone DEFAULT now(),
     why_friend text,
     known_connection text,
@@ -1229,6 +1235,27 @@ CREATE INDEX friend_arcs_user_idx ON public.friend_arcs USING btree (user_id);
 
 
 --
+-- Name: friend_arcs_user_quiz_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX friend_arcs_user_quiz_idx ON public.friend_arcs USING btree (user_id, quiz_session_id);
+
+
+--
+-- Name: plan_templates_channel_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX plan_templates_channel_idx ON public.plan_templates USING btree (channel);
+
+
+--
+-- Name: plan_templates_tier_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX plan_templates_tier_idx ON public.plan_templates USING btree (tier);
+
+
+--
 -- Name: idx_challenge_logs_day; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1655,4 +1682,3 @@ ALTER TABLE ONLY public.user_quests
 --
 
 \unrestrict u8bCMCrZSB4rAFSuzzDiyJ3T1GGLgjYQhvfvRux94WeRPnXWDYAcaMnzzuUjOu4
-

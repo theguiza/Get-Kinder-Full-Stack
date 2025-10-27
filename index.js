@@ -21,6 +21,7 @@ import multer from "multer";
 import cron from "node-cron";
 import { FUNCTIONS } from "./openaiFunctions.js";
 import { makeDashboardController } from "./Backend/dashboardController.js";
+import { generateArcForQuiz } from "./services/ArcGenerator.js";
 import { verify as neoVerify, run as neoRun, close as neoClose } from './Backend/db/neo4j.js';
 import { deliverQueuedNudges } from './kindnessEmailer.js';
 const { fetchUserEmails, fetchKindnessPrompts, fetchEmailSubject } = await import("./fetchData.js");
@@ -445,9 +446,31 @@ app.post("/register", async (req, res, next) => {
        RETURNING *`,
       [firstname, lastname, email, hashedPassword]
     );
-    const newUser = result.rows[0];
+    let newUser = result.rows[0];
+    const needsOnboarding = !newUser.has_seen_onboarding;
+    if (needsOnboarding) {
+      const { rows: [updatedUser] } = await pool.query(
+        "UPDATE userdata SET has_seen_onboarding = TRUE WHERE id = $1 RETURNING *",
+        [newUser.id]
+      );
+      if (updatedUser) {
+        newUser = updatedUser;
+      } else {
+        newUser.has_seen_onboarding = true;
+      }
+    }
     req.login(newUser, (err) => {
       if (err) return next(err);
+      if (needsOnboarding) {
+        const displayName = newUser.firstname || newUser.email;
+        if (req.session) {
+          req.session.showOnboarding = true;
+          return req.session.save(() =>
+            res.redirect(`/?login=1&name=${encodeURIComponent(displayName)}`)
+          );
+        }
+        return res.redirect(`/?login=1&name=${encodeURIComponent(displayName)}`);
+      }
       res.redirect("/dashboard");
     });
   } catch (err) {
@@ -469,13 +492,35 @@ app.post("/login", async (req, res, next) => {
         error: "No account found with that email.",
       });
     }
-    const user = result.rows[0];
+    let user = result.rows[0];
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       return res.status(401).send("Invalid password");
     }
+    const needsOnboarding = !user.has_seen_onboarding;
+    if (needsOnboarding) {
+      const { rows: [updatedUser] } = await pool.query(
+        "UPDATE userdata SET has_seen_onboarding = TRUE WHERE id = $1 RETURNING *",
+        [user.id]
+      );
+      if (updatedUser) {
+        user = updatedUser;
+      } else {
+        user.has_seen_onboarding = true;
+      }
+    }
     req.login(user, (err) => {
       if (err) return next(err);
+      if (needsOnboarding) {
+        const displayName = user.firstname || user.email;
+        if (req.session) {
+          req.session.showOnboarding = true;
+          return req.session.save(() =>
+            res.redirect(`/?login=1&name=${encodeURIComponent(displayName)}`)
+          );
+        }
+        return res.redirect(`/?login=1&name=${encodeURIComponent(displayName)}`);
+      }
       res.redirect("/dashboard");
     });
   } catch (err) {
@@ -747,7 +792,73 @@ app.get(['/friend-quiz', '/friendQuiz'], (req, res) => {
    });
 });
 
-  app.post("/api/friends", ensureAuthenticatedApi, async (req, res) => {
+const tierFromScore = (score) => {
+  const num = Number(score);
+  if (!Number.isFinite(num)) return null;
+  if (num >= 85) return "Bestie Material";
+  if (num >= 70) return "Strong Contender";
+  if (num >= 50) return "Potential Pal";
+  return "Acquaintance Energy";
+};
+
+const chooseTier = (explicitTier, score) => {
+  const tierCandidate =
+    typeof explicitTier === "string" && explicitTier.trim()
+      ? explicitTier.trim()
+      : null;
+  if (tierCandidate) {
+    return tierCandidate;
+  }
+  return tierFromScore(score) || "General";
+};
+
+const chooseChannelPref = (value) => {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  return "mixed";
+};
+
+const buildArcPayload = (ownerId, friend, body) => {
+  if (!ownerId || !friend?.id || !friend?.name) return null;
+  const tier = chooseTier(
+    body?.tier ?? body?.friend_tier ?? body?.friendTier,
+    friend?.score
+  );
+  const channelPref = chooseChannelPref(
+    body?.channel_pref ?? body?.channelPref ?? body?.preferred_channel
+  );
+  if (!tier || !channelPref) return null;
+
+  const payload = {
+    user_id: ownerId,
+    friend_id: friend.id,
+    friend_name: friend.name,
+    tier,
+    channel_pref: channelPref,
+    effort_capacity:
+      typeof body?.effort_capacity === "string" && body.effort_capacity.trim()
+        ? body.effort_capacity.trim()
+        : typeof body?.effortCapacity === "string" && body.effortCapacity.trim()
+        ? body.effortCapacity.trim()
+        : undefined,
+    goal: body?.goal ?? body?.goals,
+    availability: body?.availability,
+    quiz_session_id: body?.quiz_session_id ?? body?.quizSessionId ?? null,
+  };
+
+  if (payload.effort_capacity === undefined) {
+    delete payload.effort_capacity;
+  }
+  if (payload.goal === undefined) {
+    delete payload.goal;
+  }
+  if (payload.availability === undefined) {
+    delete payload.availability;
+  }
+
+  return payload;
+};
+
+app.post("/api/friends", ensureAuthenticatedApi, async (req, res) => {
   try {
     const { rows: [owner] } =
       await pool.query("SELECT id FROM public.userdata WHERE email=$1", [req.user.email]);
@@ -795,6 +906,20 @@ app.get(['/friend-quiz', '/friendQuiz'], (req, res) => {
       score, evidence_direct, evidence_proxy,
       flags_count, red_flags, snapshot, signals, notes, picture
     ]);
+
+    try {
+      const arcPayload = buildArcPayload(owner.id, friend, req.body);
+      if (arcPayload) {
+        await generateArcForQuiz(pool, arcPayload);
+      } else {
+        console.warn("Skipped arc generation: insufficient payload", {
+          ownerId: owner.id,
+          friendId: friend?.id || null,
+        });
+      }
+    } catch (arcErr) {
+      console.error("generateArcForQuiz failed (continuing):", arcErr);
+    }
 
     // Mirror to Neo4j (best-effort)
     try {
@@ -907,7 +1032,17 @@ async function renderIndexPage(req, res, next) {
 // 15) Updated Home Route (with DB time check and chat-history logic)
 // ─────────────────────────────────────────────────────────────────────────────
 app.get("/", async (req, res, next) => {
-  if (req.isAuthenticated && req.isAuthenticated()) {
+  const isAuthenticated = req.isAuthenticated && req.isAuthenticated();
+  if (isAuthenticated) {
+    const showOnboarding =
+      (req.session && req.session.showOnboarding) ||
+      (req.user && req.user.has_seen_onboarding === false);
+    if (showOnboarding) {
+      if (req.session) {
+        req.session.showOnboarding = false;
+      }
+      return renderIndexPage(req, res, next);
+    }
     return res.redirect("/dashboard");
   }
   return renderIndexPage(req, res, next);
@@ -921,16 +1056,68 @@ app.get("/home", renderIndexPage);
 app.get("/auth/google", passport.authenticate("google", { scope: ["profile", "email"] }));
 app.get("/auth/google/callback",
   passport.authenticate("google", { failureRedirect: "/login" }),
-  (req, res) => {
-    res.redirect(`/?login=1&name=${encodeURIComponent(req.user.firstname || req.user.email)}`);
+  async (req, res, next) => {
+    try {
+      const needsOnboarding = req.user && req.user.has_seen_onboarding === false;
+      if (needsOnboarding && req.user.id) {
+        const { rows: [updatedUser] } = await pool.query(
+          "UPDATE userdata SET has_seen_onboarding = TRUE WHERE id = $1 RETURNING *",
+          [req.user.id]
+        );
+        if (updatedUser) {
+          req.user = updatedUser;
+        } else if (req.user) {
+          req.user.has_seen_onboarding = true;
+        }
+        if (req.session) {
+          req.session.showOnboarding = true;
+        }
+      }
+      if (req.session && req.session.showOnboarding) {
+        const displayName =
+          (req.user && (req.user.firstname || req.user.email)) || "";
+        return req.session.save(() =>
+          res.redirect(`/?login=1&name=${encodeURIComponent(displayName)}`)
+        );
+      }
+      return res.redirect("/dashboard");
+    } catch (err) {
+      return next(err);
+    }
   }
 );
 
 app.get("/auth/facebook", passport.authenticate("facebook", { scope: ["email"] }));
 app.get("/auth/facebook/callback",
   passport.authenticate("facebook", { failureRedirect: "/login" }),
-  (req, res) => {
-    res.redirect(`/?login=1&name=${encodeURIComponent(req.user.firstname || req.user.email)}`);
+  async (req, res, next) => {
+    try {
+      const needsOnboarding = req.user && req.user.has_seen_onboarding === false;
+      if (needsOnboarding && req.user.id) {
+        const { rows: [updatedUser] } = await pool.query(
+          "UPDATE userdata SET has_seen_onboarding = TRUE WHERE id = $1 RETURNING *",
+          [req.user.id]
+        );
+        if (updatedUser) {
+          req.user = updatedUser;
+        } else if (req.user) {
+          req.user.has_seen_onboarding = true;
+        }
+        if (req.session) {
+          req.session.showOnboarding = true;
+        }
+      }
+      if (req.session && req.session.showOnboarding) {
+        const displayName =
+          (req.user && (req.user.firstname || req.user.email)) || "";
+        return req.session.save(() =>
+          res.redirect(`/?login=1&name=${encodeURIComponent(displayName)}`)
+        );
+      }
+      return res.redirect("/dashboard");
+    } catch (err) {
+      return next(err);
+    }
   }
 );
 // --- for mattering graph in neo4j: latest assessment per friend, ordered by score ---

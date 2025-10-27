@@ -48,6 +48,76 @@ const EFFORT_ORDER = {
  * @property {string|number|null} [quiz_session_id]
  */
 
+let ensureSchemaPromise = null;
+
+async function ensureArcGeneratorSchema(pool) {
+  if (ensureSchemaPromise) return ensureSchemaPromise;
+  ensureSchemaPromise = (async () => {
+    await pool.query(
+      `ALTER TABLE friend_arcs
+         ADD COLUMN IF NOT EXISTS quiz_session_id text`
+    );
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS friend_arcs_user_quiz_idx
+         ON friend_arcs (user_id, quiz_session_id)`
+    );
+    await pool.query(
+      `ALTER TABLE plan_templates
+         ADD COLUMN IF NOT EXISTS channel text`
+    );
+    await pool.query(
+      `ALTER TABLE plan_templates
+         ADD COLUMN IF NOT EXISTS effort text`
+    );
+    await pool.query(
+      `UPDATE plan_templates
+          SET channel = COALESCE(channel, channel_variant)
+        WHERE channel IS NULL`
+    );
+    await pool.query(
+      `UPDATE plan_templates
+          SET effort = COALESCE(effort, 'medium')
+        WHERE effort IS NULL`
+    );
+    await pool.query(
+      `ALTER TABLE plan_templates
+         ALTER COLUMN channel SET DEFAULT 'mixed'`
+    );
+    await pool.query(
+      `ALTER TABLE plan_templates
+         ALTER COLUMN effort SET DEFAULT 'medium'`
+    );
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS plan_templates_channel_idx
+         ON plan_templates (channel)`
+    );
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS plan_templates_tier_idx
+         ON plan_templates (tier)`
+    );
+    await pool.query(
+      `ALTER TABLE step_templates
+         ADD COLUMN IF NOT EXISTS title text`
+    );
+    await pool.query(
+      `ALTER TABLE step_templates
+         ADD COLUMN IF NOT EXISTS meta text`
+    );
+    await pool.query(
+      `UPDATE step_templates
+          SET title = COALESCE(title, title_template)`
+    );
+    await pool.query(
+      `UPDATE step_templates
+          SET meta = COALESCE(meta, meta_template)`
+    );
+  })().catch((err) => {
+    ensureSchemaPromise = null;
+    throw err;
+  });
+  return ensureSchemaPromise;
+}
+
 /**
  * Entry point to generate or fetch a friend arc for a quiz result.
  * @param {import("pg").Pool} pool
@@ -56,6 +126,7 @@ const EFFORT_ORDER = {
  */
 export async function generateArcForQuiz(pool, payload) {
   assertPool(pool);
+  await ensureArcGeneratorSchema(pool);
   const context = normalizePayload(payload);
 
   const existing = await findExistingArc(pool, context);
@@ -74,9 +145,7 @@ export async function generateArcForQuiz(pool, payload) {
   }
 
   const stepRows = await fetchPlanSteps(pool, planSelection.plan.id);
-  if (!stepRows.length) {
-    throw new Error("Selected plan template has no step templates");
-  }
+  const hasDbSteps = stepRows.length > 0;
 
   const challengeRows = await fetchActiveChallenges(pool, context);
   if (!challengeRows.length) {
@@ -91,7 +160,8 @@ export async function generateArcForQuiz(pool, payload) {
   const arcRecord = buildArcRecord({
     context,
     planSelection,
-    steps: stepRows,
+    steps: hasDbSteps ? stepRows : buildFallbackSteps(context, planSelection),
+    usingFallbackSteps: !hasDbSteps,
     challengeSelection,
   });
 
@@ -266,7 +336,12 @@ async function fetchActivePlans(pool) {
 async function fetchPlanSteps(pool, planId) {
   const { rows } = await pool.query(
     `
-      SELECT id, title, meta, channel, effort, day_number
+      SELECT id,
+             COALESCE(title, title_template) AS title,
+             COALESCE(meta, meta_template)   AS meta,
+             channel,
+             effort,
+             day_number
         FROM step_templates
        WHERE plan_template_id = $1
        ORDER BY day_number ASC NULLS LAST, id ASC
@@ -276,10 +351,54 @@ async function fetchPlanSteps(pool, planId) {
   return rows || [];
 }
 
+function buildFallbackSteps(context, planSelection) {
+  const friendName =
+    (context.friendName && String(context.friendName).trim()) || "your friend";
+  const friendId = String(context.friendId || "friend");
+  const planChannel =
+    planSelection?.plan?.channel || planSelection?.plan?.channel_variant;
+  const planEffort = planSelection?.plan?.effort;
+  const channel = normalizeChannel(planChannel, context.channel || DEFAULT_CHANNEL);
+  const effort = normalizeEffort(planEffort, context.effortCapacity || DEFAULT_EFFORT);
+
+  const templates = [
+    {
+      title: `Send ${friendName} a quick check-in`,
+      meta: "Kick off the arc with a warm message and ask how their week is going.",
+    },
+    {
+      title: `Share a micro-kindness idea with ${friendName}`,
+      meta: "Mention something you’d love to try together or a small favor you can offer.",
+    },
+    {
+      title: `Lock in a 10-minute catch-up`,
+      meta: "Suggest a short call or coffee to keep momentum going.",
+    },
+  ];
+
+  return templates.map((tpl, index) => ({
+    id: `${friendId}-fallback-${index + 1}`,
+    day_number: index + 1,
+    title: tpl.title,
+    meta: tpl.meta,
+    channel,
+    effort,
+    fallback: true,
+  }));
+}
+
 async function fetchActiveChallenges(pool) {
   const { rows } = await pool.query(
     `
-      SELECT id, title, description, channel, effort, tags, est_minutes, points, swaps_left
+      SELECT id,
+             title_template AS title,
+             description_template AS description,
+             channel,
+             effort,
+             tags,
+             est_minutes,
+             points,
+             swaps_allowed AS swaps_left
         FROM challenge_templates
        WHERE is_active = TRUE
     `
@@ -399,9 +518,11 @@ function renderTemplateValue(value, context) {
   return value;
 }
 
-function buildArcRecord({ context, planSelection, steps, challengeSelection }) {
+function buildArcRecord({ context, planSelection, steps, challengeSelection, usingFallbackSteps = false }) {
   const { plan } = planSelection;
-  const planLength = plan.lengthDays || DEFAULT_LENGTH_DAYS;
+  const planLength = usingFallbackSteps
+    ? Math.max(steps.length, plan.lengthDays || DEFAULT_LENGTH_DAYS)
+    : plan.lengthDays || DEFAULT_LENGTH_DAYS;
   const friendId = String(context.friendId);
 
   const renderedSteps = steps.map((step, index) => {
@@ -418,6 +539,7 @@ function buildArcRecord({ context, planSelection, steps, challengeSelection }) {
       channel: stepChannel,
       effort: stepEffort,
       day: dayNumber,
+      fallback: Boolean(step.fallback),
     };
   });
 

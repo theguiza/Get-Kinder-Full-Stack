@@ -360,6 +360,9 @@ export default function BestieVibesQuiz(props = {}) {
       snapshot: { ...answers },
       signals: Object.fromEntries(Object.entries(answers).filter(([k]) => k.startsWith('sig_'))),
       picture: pictureData,
+      tier: tier?.name || 'General',
+      channel_pref: 'mixed',
+      effort_capacity: 'medium',
     }
 
     setIsSaving(true); setSaveMsg('')
@@ -427,9 +430,21 @@ export default function BestieVibesQuiz(props = {}) {
     setShouldScrollToRoundTop(true)
     prevRound()
   }
-  const handleDesktopNext = () => {
+  const [isDesktop, setIsDesktop] = useState(() => {
+    if (typeof window === 'undefined') return false
+    return window.innerWidth >= 1024
+  })
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const onResize = () => setIsDesktop(window.innerWidth >= 1024)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+
+  const handleAdvance = () => {
     if (isLastRound) {
-      setShouldScrollToRoundTop(true)
+      if (isDesktop) setShouldScrollToRoundTop(true)
       return
     }
     handleNextRound()
@@ -623,7 +638,7 @@ export default function BestieVibesQuiz(props = {}) {
       <div className="space-y-6">
         <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200">
           <div className="flex items-center justify-between gap-2">
-            <h2 className="font-semibold text-rose-700">1. Red‑Flag Bingo 🚩: select concerns with this person you have</h2>
+            <h2 className="font-semibold text-rose-700">1. Red‑Flag Bingo: select concerns with this person you have</h2>
             <div className="text-sm text-rose-700 whitespace-nowrap">{dealbreakerCount} / 2 triggers auto‑pass</div>
           </div>
           <div className="grid sm:grid-cols-5 gap-2 mt-3">
@@ -640,7 +655,7 @@ export default function BestieVibesQuiz(props = {}) {
             ))}
           </div>
           {dealbreakerCount >= 2 && (
-            <div className="mt-3 text-sm text-rose-700">Kind to notice early. Lower investment; keep it casual.</div>
+            <div className="mt-3 text-sm text-rose-700">Good to notice early. Lower investment; keep it casual.</div>
           )}
         </div>
 
@@ -688,12 +703,8 @@ export default function BestieVibesQuiz(props = {}) {
         <div className="flex items-center justify-between gap-2 pt-2">
           <button onClick={handlePrevRound} className="px-3 py-1.5 rounded-xl border bg-white hover:bg-[#455a7c]/5 text-sm">⬅️ Previous</button>
           <button
-            onClick={handleNextRound}
-            className="inline-flex lg:hidden px-4 py-2 rounded-xl border border-[#ff5656] bg-[#ff5656] hover:bg-[#ff5656]/90 text-white text-base"
-          >Next ➡️</button>
-          <button
-            onClick={handleDesktopNext}
-            className="hidden lg:inline-flex px-4 py-2 rounded-xl border border-[#ff5656] bg-[#ff5656] hover:bg-[#ff5656]/90 text-white text-base"
+            onClick={handleAdvance}
+            className="inline-flex px-4 py-2 rounded-xl border border-[#ff5656] bg-[#ff5656] hover:bg-[#ff5656]/90 text-white text-base"
           >Next ➡️</button>
         </div>
       </div>
@@ -778,12 +789,13 @@ export default function BestieVibesQuiz(props = {}) {
       <div className="max-w-6xl mx-auto flex flex-col gap-6 lg:grid lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] lg:gap-6">
         <section className="order-0 lg:order-0 lg:col-span-2 bg-white/80 backdrop-blur-sm border border-slate-200/70 rounded-3xl shadow-sm p-6">
           <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight">Friendship Fit Quiz </h1>
-          <p className="text-[#455a7c] mt-1">Complete a quiz for 1-3 people you want to be better friends with so you can focus your time with the right ones.</p>
+          <p className="text-[#455a7c] mt-1">Complete a quiz for each person you want to be better friends with, and KAI gives you a fun Friend Arc to get closer to that person faster.</p>
           <ul className="text-[#455a7c] mt-1 list-disc list-inside space-y-1 text-sm">
+            <li>In the 1st section of the quiz more then 2 Red Flags means they are not friend material.</li>
+            <li>The 2nd section has 4 rounds of questions that determines your VIBES as friends.</li>
             <li>Press save Button after the quiz is completed.</li>
-            <li>Your friends and their scores are below, and can be found in your profile. </li>
-            <li>Re-do the quiz on your friends as required so KAI has current info. </li>
-            <li>After the quiz speak with KAI, check out the recommendations below, or start a Friend Arc!</li>
+            <li>Saved friends and their scores are below, and can be found in your profile. </li>
+            <li>After the quiz speak with KAI, or check out your Friend Arc!</li>
           </ul>
         </section>
 
