@@ -482,6 +482,20 @@ const normalizeArc = (raw, index) => {
     ? raw.red_flags
     : [];
 
+  const friendDetails = isPlainObject(raw.friend) ? raw.friend : {};
+  const photoSrc =
+    raw.photoSrc ||
+    raw.picture ||
+    raw.photo ||
+    raw.photo_url ||
+    friendDetails.photoSrc ||
+    friendDetails.picture ||
+    friendDetails.photo ||
+    friendDetails.photo_url ||
+    snapshot.photo ||
+    snapshot.picture ||
+    null;
+
   return {
     domId,
     id: String(raw.id ?? raw.friend_id ?? `friend-${index}`),
@@ -493,7 +507,7 @@ const normalizeArc = (raw, index) => {
     pointsToday,
     friendScore: Number.isFinite(friendScore) ? friendScore : null,
     friendType,
-    photoSrc: raw.photoSrc || raw.picture || snapshot.photo || null,
+    photoSrc,
     steps,
     hasStructuredSteps,
     challenge,

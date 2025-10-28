@@ -142,7 +142,7 @@ export function makeDashboardController(pool) {
           if (friendIds.length) {
             const { rows: friendRows } = await q(
               `
-              SELECT id::text AS id, name, score, archetype_primary
+              SELECT id::text AS id, name, score, archetype_primary, picture
                 FROM friends
                WHERE owner_user_id = $1
                  AND id::text = ANY($2::text[])
@@ -170,6 +170,13 @@ export function makeDashboardController(pool) {
               if (!next.archetype_primary && friend.archetype_primary) {
                 next.archetype_primary = friend.archetype_primary;
               }
+              if (!next.picture && friend.picture) {
+                next.picture = friend.picture;
+              }
+              if (!next.photoSrc && (next.picture || friend.picture)) {
+                next.photoSrc = next.picture || friend.picture;
+              }
+
               const baseSnapshot =
                 next.snapshot && typeof next.snapshot === 'object'
                   ? { ...next.snapshot }
@@ -182,6 +189,12 @@ export function makeDashboardController(pool) {
               }
               if (friend.archetype_primary && baseSnapshot.archetype_primary == null) {
                 baseSnapshot.archetype_primary = friend.archetype_primary;
+              }
+              if (friend.picture && baseSnapshot.photo == null) {
+                baseSnapshot.photo = friend.picture;
+              }
+              if (friend.picture && baseSnapshot.picture == null) {
+                baseSnapshot.picture = friend.picture;
               }
               next.snapshot = baseSnapshot;
               return next;
@@ -198,7 +211,7 @@ export function makeDashboardController(pool) {
         if (!arcsForRender.length) {
           const { rows: friendFallback } = await q(
             `
-            SELECT id::text AS id, name, score, archetype_primary
+            SELECT id::text AS id, name, score, archetype_primary, picture
               FROM friends
              WHERE owner_user_id = $1
              ORDER BY updated_at DESC
@@ -215,10 +228,14 @@ export function makeDashboardController(pool) {
             friend_type: friend.archetype_primary,
             friendType: friend.archetype_primary,
             archetype_primary: friend.archetype_primary,
+            picture: friend.picture,
+            photoSrc: friend.picture,
             snapshot: {
               score: friend.score,
               friend_type: friend.archetype_primary,
-              archetype_primary: friend.archetype_primary
+              archetype_primary: friend.archetype_primary,
+              photo: friend.picture,
+              picture: friend.picture
             }
           }));
         }
