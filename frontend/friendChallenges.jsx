@@ -410,17 +410,22 @@ const normalizeArc = (raw, index) => {
   const friendScore = pickFinite(
     raw.friendScore,
     raw.friend_score,
+    raw.score,
     snapshot.friend_score,
+    snapshot.score,
     metrics.friend_score,
-    raw.score
+    metrics.score
   );
 
   const friendType =
     safeText(raw.friendType) ||
     safeText(raw.friend_type) ||
     safeText(raw.archetype_primary) ||
+    safeText(raw.archetypePrimary) ||
     safeText(raw.archetype_secondary) ||
     safeText(snapshot.friend_type) ||
+    safeText(snapshot.archetype_primary) ||
+    safeText(snapshot.archetypePrimary) ||
     null;
 
   const { steps, hasStructuredSteps } = normalizeSteps(

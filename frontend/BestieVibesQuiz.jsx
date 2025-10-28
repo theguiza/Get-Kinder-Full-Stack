@@ -346,6 +346,9 @@ export default function BestieVibesQuiz(props = {}) {
 
   const saveCandidate = async () => {
     const name = candidateName.trim() || `Player ${saved.length + 1}`
+    const friendId = (typeof window !== 'undefined' && (window.__friendId || (document.getElementById('bestie-quiz-root')?.dataset?.friendId)))
+      ? String(window.__friendId || document.getElementById('bestie-quiz-root')?.dataset?.friendId)
+      : null
 
     const payload = {
       name,
@@ -363,6 +366,7 @@ export default function BestieVibesQuiz(props = {}) {
       tier: tier?.name || 'General',
       channel_pref: 'mixed',
       effort_capacity: 'medium',
+      id: friendId || undefined,
     }
 
     setIsSaving(true); setSaveMsg('')
@@ -372,10 +376,15 @@ export default function BestieVibesQuiz(props = {}) {
       } else if (typeof window !== 'undefined' && typeof window.__bestie_onSave === 'function') {
         await window.__bestie_onSave(payload)
       } else if (typeof fetch === 'function') {
-        const res = await fetch('/api/friends', {
+        const url = friendId ? `/api/friends?id=${encodeURIComponent(friendId)}` : '/api/friends'
+        const headers = { 'Content-Type': 'application/json' }
+        const meta = typeof document !== 'undefined' ? document.querySelector('meta[name="csrf-token"]') : null
+        const token = meta ? meta.getAttribute('content') : null
+        if (token) headers['X-CSRF-Token'] = token
+        const res = await fetch(url, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'same-origin',
+          headers,
+          credentials: 'include', // safe for cross-subdomain; harmless on same-origin
           body: JSON.stringify(payload),
         })
         if (res.status === 401) {

@@ -155,6 +155,12 @@ export default router;
 
 async function handleArcMutation(req, res, mutator) {
   try {
+    const expectedCsrf = req.session?.csrfToken;
+    const providedCsrf = req.get("X-CSRF-Token");
+    if (!expectedCsrf || !providedCsrf || providedCsrf !== expectedCsrf) {
+      return res.status(403).json({ error: "Invalid CSRF token" });
+    }
+
     const userId = req.user?.id;
     if (!userId) {
       return res.status(401).json({ error: "Unauthorized" });

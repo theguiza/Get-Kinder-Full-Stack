@@ -19,6 +19,7 @@ import OpenAI from "openai";
 import connectPgSimple from "connect-pg-simple";
 import multer from "multer";
 import cron from "node-cron";
+import crypto from "crypto";
 import { FUNCTIONS } from "./openaiFunctions.js";
 import { makeDashboardController } from "./Backend/dashboardController.js";
 import { generateArcForQuiz } from "./services/ArcGenerator.js";
@@ -154,6 +155,27 @@ app.use(arcsApiRouter);
 // Make `user` available in all EJS templates
 app.use((req, res, next) => {
   res.locals.user = req.user;
+  next();
+});
+
+const CSRF_HEADER_NAME = "X-CSRF-Token";
+
+app.use((req, res, next) => {
+  try {
+    if (req.session && typeof req.session === "object") {
+      if (!req.session.csrfToken) {
+        req.session.csrfToken = crypto.randomBytes(24).toString("hex");
+      }
+      req.csrfToken = () => req.session.csrfToken;
+    } else {
+      req.csrfToken = () => null;
+    }
+    res.locals.csrfToken = typeof req.csrfToken === "function" ? req.csrfToken() : null;
+  } catch (csrfErr) {
+    console.error("CSRF middleware error:", csrfErr);
+    req.csrfToken = () => null;
+    res.locals.csrfToken = null;
+  }
   next();
 });
 
@@ -788,7 +810,8 @@ app.get(['/friend-quiz', '/friendQuiz'], (req, res) => {
   const isAuthed = !!(req.isAuthenticated && req.isAuthenticated());
   res.render('friendQuiz', { 
     isAuthed,
-    assetTag: process.env.ASSET_TAG ?? Date.now().toString(36)
+    assetTag: process.env.ASSET_TAG ?? Date.now().toString(36),
+    csrfToken: typeof req.csrfToken === 'function' ? req.csrfToken() : null
    });
 });
 
@@ -834,6 +857,8 @@ const buildArcPayload = (ownerId, friend, body) => {
     friend_name: friend.name,
     tier,
     channel_pref: channelPref,
+    friend_score: friend?.score ?? null,
+    friend_type: friend?.archetype_primary ?? null,
     effort_capacity:
       typeof body?.effort_capacity === "string" && body.effort_capacity.trim()
         ? body.effort_capacity.trim()
@@ -860,6 +885,12 @@ const buildArcPayload = (ownerId, friend, body) => {
 
 app.post("/api/friends", ensureAuthenticatedApi, async (req, res) => {
   try {
+    const expectedCsrf = req.session?.csrfToken;
+    const providedCsrf = req.get(CSRF_HEADER_NAME);
+    if (!expectedCsrf || !providedCsrf || providedCsrf !== expectedCsrf) {
+      return res.status(403).json({ error: "invalid csrf token" });
+    }
+
     const { rows: [owner] } =
       await pool.query("SELECT id FROM public.userdata WHERE email=$1", [req.user.email]);
     if (!owner) return res.status(400).json({ error: "owner not found" });
@@ -875,37 +906,92 @@ app.post("/api/friends", ensureAuthenticatedApi, async (req, res) => {
     } = req.body;
 
     const name = (typeof rawName === 'string' ? rawName.trim() : 'Unknown');
+    const friendIdRaw = req.query.id ?? req.body.id ?? null;
+    const friendId = (typeof friendIdRaw === 'string' && friendIdRaw.trim().length > 0)
+      ? friendIdRaw.trim()
+      : friendIdRaw != null
+      ? String(friendIdRaw)
+      : null;
 
-    const { rows: [friend] } = await pool.query(`
-      INSERT INTO public.friends (
-        owner_user_id, name, email, phone,
+    let friend;
+
+    if (friendId) {
+      const { rows: [updated] } = await pool.query(`
+        UPDATE public.friends AS f
+           SET name               = $3,
+               email              = $4,
+               phone              = $5,
+               archetype_primary  = $6,
+               archetype_secondary= $7,
+               score              = $8,
+               evidence_direct    = $9,
+               evidence_proxy     = $10,
+               flags_count        = $11,
+               red_flags          = $12,
+               snapshot           = $13,
+               signals            = $14,
+               notes              = COALESCE(f.notes, $15),
+               picture            = COALESCE($16, f.picture),
+               updated_at         = now()
+         WHERE f.id = $1
+           AND f.owner_user_id = $2
+       RETURNING f.*;
+      `, [
+        friendId,
+        owner.id,
+        name,
+        email,
+        phone,
+        archetype_primary,
+        archetype_secondary,
+        score,
+        evidence_direct,
+        evidence_proxy,
+        flags_count,
+        red_flags,
+        snapshot,
+        signals,
+        notes,
+        picture
+      ]);
+
+      if (!updated) {
+        return res.status(404).json({ error: "friend not found" });
+      }
+      friend = updated;
+    } else {
+      const { rows: [inserted] } = await pool.query(`
+        INSERT INTO public.friends (
+          owner_user_id, name, email, phone,
+          archetype_primary, archetype_secondary,
+          score, evidence_direct, evidence_proxy,
+          flags_count, red_flags, snapshot, signals, notes, picture
+        )
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+        ON CONFLICT (owner_user_id, name) DO UPDATE SET
+          email               = EXCLUDED.email,
+          phone               = EXCLUDED.phone,
+          archetype_primary   = EXCLUDED.archetype_primary,
+          archetype_secondary = EXCLUDED.archetype_secondary,
+          score               = EXCLUDED.score,
+          evidence_direct     = EXCLUDED.evidence_direct,
+          evidence_proxy      = EXCLUDED.evidence_proxy,
+          flags_count         = EXCLUDED.flags_count,
+          red_flags           = EXCLUDED.red_flags,
+          snapshot            = EXCLUDED.snapshot,
+          signals             = EXCLUDED.signals,
+          notes               = COALESCE(public.friends.notes, EXCLUDED.notes),
+          picture             = COALESCE(EXCLUDED.picture, public.friends.picture),
+          updated_at          = now()
+        RETURNING *;
+      `, [
+        owner.id, name, email, phone,
         archetype_primary, archetype_secondary,
         score, evidence_direct, evidence_proxy,
         flags_count, red_flags, snapshot, signals, notes, picture
-      )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
-      ON CONFLICT (owner_user_id, name) DO UPDATE SET
-        email               = EXCLUDED.email,
-        phone               = EXCLUDED.phone,
-        archetype_primary   = EXCLUDED.archetype_primary,
-        archetype_secondary = EXCLUDED.archetype_secondary,
-        score               = EXCLUDED.score,
-        evidence_direct     = EXCLUDED.evidence_direct,
-        evidence_proxy      = EXCLUDED.evidence_proxy,
-        flags_count         = EXCLUDED.flags_count,
-        red_flags           = EXCLUDED.red_flags,
-        snapshot            = EXCLUDED.snapshot,
-        signals             = EXCLUDED.signals,
-        notes               = COALESCE(public.friends.notes, EXCLUDED.notes),
-        picture             = COALESCE(EXCLUDED.picture, public.friends.picture),
-        updated_at          = now()
-      RETURNING *;
-    `, [
-      owner.id, name, email, phone,
-      archetype_primary, archetype_secondary,
-      score, evidence_direct, evidence_proxy,
-      flags_count, red_flags, snapshot, signals, notes, picture
-    ]);
+      ]);
+      friend = inserted;
+    }
 
     try {
       const arcPayload = buildArcPayload(owner.id, friend, req.body);

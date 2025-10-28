@@ -4,6 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="csrf-token" content="<%= typeof csrfToken !== 'undefined' ? csrfToken : '' %>">
 <!-- Google tag (gtag.js) -->
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-893SDVT4YW"></script>
 <script>window.dataLayer = window.dataLayer || []; function gtag(){dataLayer.push(arguments);} gtag('js', new Date()); gtag('config', 'G-893SDVT4YW');</script>
@@ -159,11 +160,20 @@
   <script>
   // Public page: let anyone play. Saving requires login.
   window.__bestie_onSave = async (payload) => {
-    const res = await fetch("/api/friends", {
+    const id =
+      window.__friendId ||
+      document.getElementById('bestie-quiz-root')?.dataset?.friendId ||
+      null;
+    const url = id ? `/api/friends?id=${encodeURIComponent(id)}` : "/api/friends";
+    const headers = { "Content-Type": "application/json" };
+    const meta = document.querySelector('meta[name="csrf-token"]');
+    const token = meta ? meta.getAttribute('content') : null;
+    if (token) headers["X-CSRF-Token"] = token;
+    const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
-      body: JSON.stringify(payload),
+      headers,
+      credentials: "include",
+      body: JSON.stringify(id ? { ...payload, id } : payload),
     });
     if (res.status === 401) {
       const go = confirm("Please sign in to save your results. Go to login now?");
@@ -185,6 +195,17 @@
 
   <section id="quiz">
    <div id="bestie-quiz-root"></div>
+   <script>
+     (function () {
+       const qs = new URLSearchParams(window.location.search);
+       const root = document.getElementById('bestie-quiz-root');
+       window.__friendId =
+         qs.get('friendId') ||
+         qs.get('id') ||
+         root?.dataset?.friendId ||
+         null;
+     })();
+   </script>
 
 <!-- Bundle + mount -->
 <script src="/js/bundles/entry.js?<%= (typeof assetTag !== 'undefined' ? assetTag : '') %>"></script>

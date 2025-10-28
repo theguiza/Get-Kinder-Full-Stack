@@ -259,6 +259,26 @@ function normalizePayload(payload) {
   const friendId = payload.friend_id ?? payload.friendId;
   const friendNameRaw = payload.friend_name ?? payload.friendName;
   const tierRaw = payload.tier;
+  const friendScoreRaw =
+    payload.friend_score ??
+    payload.friendScore ??
+    payload.score ??
+    null;
+  const parsedScore = friendScoreRaw === null || friendScoreRaw === undefined
+    ? null
+    : Number(friendScoreRaw);
+  const friendScore = Number.isFinite(parsedScore) ? parsedScore : null;
+
+  const friendTypeRaw =
+    payload.friend_type ??
+    payload.friendType ??
+    payload.archetype_primary ??
+    payload.archetypePrimary ??
+    null;
+  const friendType =
+    typeof friendTypeRaw === "string" && friendTypeRaw.trim().length
+      ? friendTypeRaw.trim()
+      : null;
 
   if (!userId && userId !== 0) throw new Error("payload.user_id is required");
   if (!friendId && friendId !== 0) throw new Error("payload.friend_id is required");
@@ -289,6 +309,8 @@ function normalizePayload(payload) {
     capacityRank: effortRank(effortCapacity, DEFAULT_EFFORT),
     quizSessionId,
     tags: tagSet,
+    friendScore,
+    friendType,
   };
 }
 
@@ -502,7 +524,16 @@ function normalizeTagList(value) {
 function renderTemplateString(value, context) {
   if (typeof value !== "string") return value;
   if (!value.includes("{{")) return value;
-  return value.replace(/{{\s*friend_name\s*}}/gi, context.friendName);
+  const replacements = {
+    friend_name: context.friendName,
+    friend_type: context.friendType ?? context.tierRaw ?? "",
+    friend_score: context.friendScore ?? "",
+  };
+  return value.replace(/{{\s*(friend_name|friend_type|friend_score)\s*}}/gi, (_, key) => {
+    const normalizedKey = String(key).toLowerCase();
+    const replacement = replacements[normalizedKey];
+    return replacement == null ? "" : String(replacement);
+  });
 }
 
 function renderTemplateValue(value, context) {
@@ -563,8 +594,8 @@ function buildArcRecord({ context, planSelection, steps, challengeSelection, usi
     arcPoints: DEFAULT_ARC_POINTS,
     nextThreshold: DEFAULT_NEXT_THRESHOLD,
     pointsToday: DEFAULT_POINTS_TODAY,
-    friendScore: null,
-    friendType: context.tierRaw,
+    friendScore: context.friendScore ?? null,
+    friendType: context.friendType ?? context.tierRaw,
     lifetime: { ...DEFAULT_LIFETIME },
     steps: renderedSteps,
     challenge: renderedChallenge,

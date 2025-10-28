@@ -123,21 +123,110 @@ export function makeDashboardController(pool) {
         }
 
         // Keep your existing SELECT; log via q()
-        const { rows: arcs } = await q(
+        const { rows: arcRows } = await q(
           'select * from friend_arcs where user_id = $1 order by updated_at desc',
           [userId],
           'getDashboard.SELECT arcs'
         );
+        const arcs = Array.isArray(arcRows) ? arcRows : [];
+
+        let hydratedArcs = arcs;
+        if (arcs.length) {
+          const friendIds = Array.from(
+            new Set(
+              arcs
+                .map((row) => (row?.id != null ? String(row.id) : null))
+                .filter((id) => typeof id === 'string' && id.length > 0)
+            )
+          );
+          if (friendIds.length) {
+            const { rows: friendRows } = await q(
+              `
+              SELECT id::text AS id, name, score, archetype_primary
+                FROM friends
+               WHERE owner_user_id = $1
+                 AND id::text = ANY($2::text[])
+              `,
+              [userId, friendIds],
+              'getDashboard.SELECT friendsForArcs'
+            );
+            const friendMap = new Map(friendRows.map((f) => [f.id, f]));
+            hydratedArcs = arcs.map((arc) => {
+              const friend = friendMap.get(String(arc.id));
+              if (!friend) return arc;
+              const next = { ...arc };
+              if (next.friend_score == null && friend.score != null) {
+                next.friend_score = friend.score;
+              }
+              if (next.friendScore == null && next.friend_score != null) {
+                next.friendScore = next.friend_score;
+              }
+              if (!next.friend_type && friend.archetype_primary) {
+                next.friend_type = friend.archetype_primary;
+              }
+              if (!next.friendType && next.friend_type) {
+                next.friendType = next.friend_type;
+              }
+              if (!next.archetype_primary && friend.archetype_primary) {
+                next.archetype_primary = friend.archetype_primary;
+              }
+              const baseSnapshot =
+                next.snapshot && typeof next.snapshot === 'object'
+                  ? { ...next.snapshot }
+                  : {};
+              if (friend.score != null && baseSnapshot.score == null) {
+                baseSnapshot.score = friend.score;
+              }
+              if (friend.archetype_primary && baseSnapshot.friend_type == null) {
+                baseSnapshot.friend_type = friend.archetype_primary;
+              }
+              if (friend.archetype_primary && baseSnapshot.archetype_primary == null) {
+                baseSnapshot.archetype_primary = friend.archetype_primary;
+              }
+              next.snapshot = baseSnapshot;
+              return next;
+            });
+          }
+        }
 
         // Ensure each arc has a top-level challenge object before rendering.
-        for (const row of arcs) {
+        for (const row of hydratedArcs) {
           await ensureTopLevelChallenge(row);
+        }
+
+        let arcsForRender = hydratedArcs;
+        if (!arcsForRender.length) {
+          const { rows: friendFallback } = await q(
+            `
+            SELECT id::text AS id, name, score, archetype_primary
+              FROM friends
+             WHERE owner_user_id = $1
+             ORDER BY updated_at DESC
+            `,
+            [userId],
+            'getDashboard.SELECT friendsFallback'
+          );
+          arcsForRender = friendFallback.map((friend) => ({
+            id: friend.id,
+            name: friend.name,
+            friend_score: friend.score,
+            friendScore: friend.score,
+            score: friend.score,
+            friend_type: friend.archetype_primary,
+            friendType: friend.archetype_primary,
+            archetype_primary: friend.archetype_primary,
+            snapshot: {
+              score: friend.score,
+              friend_type: friend.archetype_primary,
+              archetype_primary: friend.archetype_primary
+            }
+          }));
         }
 
         // Keep your existing render
         res.render('dashboard', {
-          arcs,
-          initialArcId: arcs[0]?.id || null,
+          arcs: Array.isArray(arcsForRender) ? arcsForRender : [],
+          initialArcId: arcsForRender[0]?.id || null,
           csrfToken: typeof req.csrfToken === 'function' ? req.csrfToken() : null
         });
       } catch (error) {
