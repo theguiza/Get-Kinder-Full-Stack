@@ -122,14 +122,16 @@ const Award = (p) => (
 // Helpers
 // -------------------------------
 const SectionCard = ({ title, subtitle, children, className = "" }) => (
-  <section className={`bg-white/90 backdrop-blur rounded-2xl shadow-sm border border-slate-200 ${className}`}>
+  <section
+    className={`w-full max-w-full bg-white/90 backdrop-blur rounded-2xl shadow-sm border border-slate-200 overflow-hidden ${className}`}
+  >
     {(title || subtitle) && (
-      <header className="px-5 pt-4 pb-2 border-b border-slate-100">
-        <h2 className="text-[var(--ink)] text-lg md:text-xl font-semibold flex items-center gap-2">{title}</h2>
-        {subtitle && <p className="text-slate-500 text-sm mt-1">{subtitle}</p>}
+      <header className="px-3.5 pt-3 pb-1.5 md:px-5 md:pt-4 md:pb-2 border-b border-slate-100">
+        <h2 className="text-[var(--ink)] text-base md:text-xl font-semibold flex items-center gap-2">{title}</h2>
+        {subtitle && <p className="text-slate-500 text-xs md:text-sm mt-1">{subtitle}</p>}
       </header>
     )}
-    <div className="p-5">{children}</div>
+    <div className="p-4 md:p-5">{children}</div>
   </section>
 );
 
@@ -148,18 +150,18 @@ const Pill = ({ children, tone = "muted" }) => {
 };
 
 // Friend photo placeholder (shows camera icon until a photo is uploaded)
-const FriendPhoto = ({ src, name = "Friend", size = 72 }) => (
+const FriendPhoto = ({ src, name = "Friend", size = "clamp(56px, 14vw, 80px)" }) => (
   <div className="grid gap-1 place-items-center">
     {src ? (
       <img
         src={src}
         alt={`Photo of ${name}`}
-        className="w-[72px] h-[72px] md:w-[80px] md:h-[80px] object-cover rounded-full border border-slate-200"
+        className="object-cover rounded-full border border-slate-200"
         style={{ width: size, height: size }}
       />
     ) : (
       <div
-        className="w-[72px] h-[72px] md:w-[80px] md:h-[80px] rounded-full border-2 border-dashed border-slate-300 bg-slate-50 grid place-items-center text-slate-400"
+        className="rounded-full border-2 border-dashed border-slate-300 bg-slate-50 grid place-items-center text-slate-400"
         style={{ width: size, height: size }}
         aria-label={`Upload a photo of ${name}`}
       >
@@ -519,7 +521,7 @@ const sanitizeArcs = (rawArcs) => {
     .filter((arc) => arc && arc.id && arc.name);
 };
 
-const ProgressRing = ({ percent = 68, size = 112, label = "68%" }) => {
+const ProgressRing = ({ percent = 68, size = "clamp(96px, 30vw, 128px)", label = "68%" }) => {
   const clamped = clampPct(percent);
   const stroke = makeConicStroke(clamped);
   return (
@@ -967,11 +969,11 @@ export default function FriendChallenges(props = {}) {
 
   if (!arcs.length || !current) {
     return (
-      <div className="min-h-[60vh] pb-24 bg-[var(--canvas)] text-slate-800">
+      <div className="min-h-[60vh] pb-24 bg-[var(--canvas)] text-slate-800 overflow-x-hidden">
         <style>{`
         :root{ --ink:#455a7c; --coral:#ff5656; --mist:#b5bdcb; --canvas:#f4f4f4; }
       `}</style>
-        <main className="mx-auto max-w-screen-md px-4 py-6 md:py-8 grid gap-6">
+        <main className="mx-auto max-w-screen-md px-3 md:px-4 py-6 md:py-8 grid gap-6">
           <SectionCard
             title="Welcome to Friend Challenges"
             subtitle="Add a friend to see personalised arcs and action steps"
@@ -1072,7 +1074,11 @@ export default function FriendChallenges(props = {}) {
 
               {/* Right 2/3: Progress ring + pills centered */}
               <div className="grid md:col-span-2 place-items-center">
-                <ProgressRing percent={progressPct} size={128} label={progressLabel} />
+                <ProgressRing
+                  percent={progressPct}
+                  size={"clamp(96px, 28vw, 128px)"}
+                  label={progressLabel}
+                />
                 <div className="mt-3 flex items-center gap-2 text-xs">
                   <Pill tone="ink">{dayLabel}</Pill>
                   <Pill tone="coral">{pointsTodayLabel}</Pill>
@@ -1278,8 +1284,11 @@ export default function FriendChallenges(props = {}) {
               {/* Per-Arc */}
               <div className="grid gap-3">
                 <div className="text-sm font-medium text-[var(--ink)]">{`Arc (${arc.name})`}</div>
-                <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
-                  <div className="h-3 rounded-full bg-[var(--coral)]" style={{ width: progressBarWidth }} />
+                <div className="w-full bg-slate-100 rounded-full h-2.5 md:h-3 overflow-hidden">
+                  <div
+                    className="h-2.5 md:h-3 rounded-full bg-[var(--coral)]"
+                    style={{ width: progressBarWidth }}
+                  />
                 </div>
                 <div className="flex items-center justify-between text-sm">
                   <span>
@@ -1296,13 +1305,13 @@ export default function FriendChallenges(props = {}) {
               <div className="grid gap-3">
                 <div className="grid grid-cols-3 gap-3">
                   {/* Lifetime XP */}
-                  <div className="rounded-xl border border-slate-200 p-4 text-center flex flex-col items-center justify-center min-h-[112px]">
+                  <div className="rounded-xl border border-slate-200 p-4 text-center flex flex-col items-center justify-center min-h-[92px] md:min-h-[112px]">
                     <div className="text-xs text-slate-500">Lifetime XP</div>
                     <div className="text-lg font-semibold text-[var(--ink)] leading-tight">{lifetime.xp}</div>
                   </div>
 
                   {/* Current Streak */}
-                  <div className="rounded-xl border border-slate-200 p-4 text-center flex flex-col items-center justify-center min-h-[112px]">
+                  <div className="rounded-xl border border-slate-200 p-4 text-center flex flex-col items-center justify-center min-h-[92px] md:min-h-[112px]">
                     <div className="text-xs text-slate-500">Current Streak</div>
                     <div className="text-lg font-semibold text-[var(--ink)] leading-tight whitespace-pre-line">
                       {lifetime.streak}
@@ -1310,7 +1319,7 @@ export default function FriendChallenges(props = {}) {
                   </div>
 
                   {/* Drag this week */}
-                  <div className="rounded-xl border border-slate-200 p-4 text-center flex flex-col items-center justify-center min-h-[112px]">
+                  <div className="rounded-xl border border-slate-200 p-4 text-center flex flex-col items-center justify-center min-h-[92px] md:min-h-[112px]">
                     <div className="text-xs text-slate-500">Drag this week</div>
                     <div className="text-lg font-semibold text-[var(--coral)] leading-tight">{lifetime.drag}</div>
                   </div>
@@ -1326,7 +1335,7 @@ export default function FriendChallenges(props = {}) {
   };
 
   return (
-    <div className="min-h-[60vh] pb-24 bg-[var(--canvas)] text-slate-800">
+    <div className="min-h-[60vh] pb-24 bg-[var(--canvas)] text-slate-800 overflow-x-hidden">
       {/* Brand tokens */}
       <style>{`
         :root{ --ink:#455a7c; --coral:#ff5656; --mist:#b5bdcb; --canvas:#f4f4f4; }
@@ -1337,63 +1346,63 @@ export default function FriendChallenges(props = {}) {
         </div>
       )}
 
-      <main className="mx-auto max-w-screen-lg px-4 py-6 md:py-8 grid gap-6 md:gap-8">
-{/* Arc Switcher */}
-<div className="overflow-x-auto pb-1 pt-1">
-<nav aria-label="Your Arcs" role="tablist" className="flex gap-2">
-{arcs.map((a, index) => {
-  const safeArcId = a.domId || toDomSafeId(a.id, `arc-${index}`);
-  const tabId = `arc-tab-${safeArcId}`;
-  const panelId = `arc-panel-${safeArcId}`;
-  const isSelected = selectedId === a.id;
-  const handleRemove = (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    removeArc(a.id);
-  };
+      <main className="mx-auto max-w-screen-lg px-3 md:px-4 py-6 md:py-8 grid gap-6 md:gap-8">
+        {/* Arc Switcher */}
+        <div className="overflow-x-auto pb-1 pt-1">
+          <nav aria-label="Your Arcs" role="tablist" className="flex gap-2">
+            {arcs.map((a, index) => {
+              const safeArcId = a.domId || toDomSafeId(a.id, `arc-${index}`);
+              const tabId = `arc-tab-${safeArcId}`;
+              const panelId = `arc-panel-${safeArcId}`;
+              const isSelected = selectedId === a.id;
+              const handleRemove = (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                removeArc(a.id);
+              };
 
-  return (
-    <div key={a.id} className="relative shrink-0 pr-2">
-      <button
-        id={tabId}
-        onClick={() => setSelectedId(a.id)}
-        role="tab"
-        aria-selected={isSelected}
-        aria-controls={panelId}
-        className={[
-          "shrink-0 pr-7 pl-3.5 py-2 rounded-full text-sm border transition-all",
-          isSelected
-            ? "bg-[var(--ink)] text-white border-[var(--ink)] shadow-md"
-            : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50",
-          "focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[var(--ink)]"
-        ].join(" ")}
-      >
-        <span className="inline-flex items-center gap-2">
-          <span
-            className={[
-              "inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px]",
-              isSelected ? "bg-white text-[var(--ink)]" : "bg-[var(--ink)] text-white"
-            ].join(" ")}
-          >
-            {a.name?.[0] ?? "?"}
-          </span>
-          <span className={isSelected ? "font-semibold" : ""}>{a.name}</span>
-          {a.overdue && !isSelected && <Pill tone="coral">overdue</Pill>}
-          {a.overdue && isSelected && <Pill tone="warn">overdue</Pill>}
-        </span>
-      </button>
-      <button
-        type="button"
-        onClick={handleRemove}
-        aria-label={`Remove ${a.name}`}
-        className="absolute top-1 right-1 flex h-4 w-4 items-center justify-center rounded-full bg-[var(--coral)] text-white text-[10px] shadow hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--coral)]"
-      >
-        ×
-      </button>
-    </div>
-  );
-})}
-  <a
+              return (
+                <div key={a.id} className="relative shrink-0 pr-2">
+                  <button
+                    id={tabId}
+                    onClick={() => setSelectedId(a.id)}
+                    role="tab"
+                    aria-selected={isSelected}
+                    aria-controls={panelId}
+                    className={[
+                      "shrink-0 pr-7 pl-3.5 py-2 rounded-full text-sm border transition-all",
+                      isSelected
+                        ? "bg-[var(--ink)] text-white border-[var(--ink)] shadow-md"
+                        : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50",
+                      "focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[var(--ink)]",
+                    ].join(" ")}
+                  >
+                    <span className="inline-flex items-center gap-2">
+                      <span
+                        className={[
+                          "inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px]",
+                          isSelected ? "bg-white text-[var(--ink)]" : "bg-[var(--ink)] text-white",
+                        ].join(" ")}
+                      >
+                        {a.name?.[0] ?? "?"}
+                      </span>
+                      <span className={isSelected ? "font-semibold" : ""}>{a.name}</span>
+                      {a.overdue && !isSelected && <Pill tone="coral">overdue</Pill>}
+                      {a.overdue && isSelected && <Pill tone="warn">overdue</Pill>}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleRemove}
+                    aria-label={`Remove ${a.name}`}
+                    className="absolute top-1 right-1 flex h-4 w-4 items-center justify-center rounded-full bg-[var(--coral)] text-white text-[10px] shadow hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--coral)]"
+                  >
+                    ×
+                  </button>
+                </div>
+              );
+            })}
+            <a
     className="ml-1 shrink-0 px-3.5 py-2 rounded-full text-sm border border-dashed text-slate-600 hover:bg-slate-50"
     href="friendQuiz"
   >
