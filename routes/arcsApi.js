@@ -105,9 +105,17 @@ router.post("/api/arcs/:arcId/challenge/swap", (req, res) =>
 
     const { rows } = await pool.query(
       `
-        SELECT id, title, description, channel, effort, tags, est_minutes, points
-          FROM challenge_templates
-         WHERE is_active = TRUE
+        SELECT
+          id,
+          title_template       AS title,
+          description_template AS description,
+          channel,
+          effort,
+          tags,
+          est_minutes,
+          points
+        FROM challenge_templates
+        WHERE is_active = TRUE
       `
     );
 

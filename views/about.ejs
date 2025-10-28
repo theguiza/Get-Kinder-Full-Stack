@@ -57,8 +57,8 @@
           <a class="navbar-brand" href="/home"><img src="/images/logo.png" alt="Get Kinder logo" class="logo-img" height="80" width: auto;> </a>
           <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
             <span class="navbar-toggler-icon"></span></button>
-          <div class="collapse navbar-collapse justify-content-center" id="navbarNav">
-            <ul class="navbar-nav align-items-center">
+          <div class="collapse navbar-collapse" id="navbarNav">
+            <ul class="navbar-nav me-auto justify-content-center align-items-center">
              <li class="nav-item">
                 <a class="nav-link mx-1 font-hover" href="/home" style="font-size: 1.2rem; color: #455a7c; padding-right: 30px;">Home</a>
               </li>
@@ -71,28 +71,27 @@
                  <li class="nav-item">
                 <a class="nav-link mx-1 font-hover" href="profile" style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;">Profile</a>
               </li>
-               <li class="nav-item">
+              <li class="nav-item">
                 <a class="nav-link mx-1 font-hover" href="blog" style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;">Blog</a>
               </li>
-                <li class="nav-item">
-              <a class="btn btn-primary btn-lg" href="https://square.link/u/GjQpbcoi" style="font-size: 1.2rem; color:aliceblue; background-color: #ff5656; border-color: #ff5656;  "target="_blank" rel="noopener noreferrer">DONATE</a> </li>
-             </li>
-             </ul>
-              </div>
-              <div class="collapse navbar-collapse justify-content-end">
-                <ul class="navbar-nav d-flex align-items-center">              <% if (user) { %>
+              <li class="nav-item">
+                <a class="btn btn-primary btn-lg" href="https://square.link/u/GjQpbcoi" style="font-size: 1.2rem; color:aliceblue; background-color: #ff5656; border-color: #ff5656;" target="_blank" rel="noopener noreferrer">DONATE</a>
+              </li>
+            </ul>
+            <ul class="navbar-nav ms-auto d-flex align-items-center">
+              <% if (user) { %>
                 <li class="nav-item d-flex align-items-center me-3">
                   <span class="navbar-text fw-bold me-2" style="font-size: 1.1rem; color: #455a7c;"><%= user.firstname || user.email %></span>
                   <img src="<%= (user && user.picture) ? user.picture : '/images/nerdy-KAI.png' %>"  class="rounded-circle me-3" width="32" height="32" alt="Get Kinder User Avatar">
                   <button class="btn btn-outline-danger btn-sm" data-bs-toggle="modal" data-bs-target="#logoutModal">Log Out</button>
                 </li>
-                <% } else { %>
+              <% } else { %>
                 <li class="nav-item"><a class="btn btn-primary btn-lg" 
                   style="font-size: 1.2rem; color: white; text-decoration: none; width: 100%; min-width: 120px; text-align: center;" href="login" role="button">Log In</a>
                 </li>
-                <% } %>
-              </ul>
-            </div>
+              <% } %>
+            </ul>
+          </div>
         </div>
       </nav>
     </header>
