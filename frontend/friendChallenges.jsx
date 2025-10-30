@@ -6,11 +6,20 @@
 import React, { useState } from "react";
 import { progressPercent, clampPct, dayLabel as sharedDayLabel } from "../shared/metrics.js";
 
+const MAX_IMAGE_SIZE_BYTES = 2 * 1024 * 1024; // 2MB client-side guard
+
 const readCsrfToken = () => {
   if (typeof document === "undefined") return null;
   const meta = document.querySelector('meta[name="csrf-token"]');
   return meta ? meta.getAttribute("content") : null;
 };
+
+function makeIdempotencyKey() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `arc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
 
 async function postJSON(url, body = {}) {
   const headers = {
@@ -19,6 +28,7 @@ async function postJSON(url, body = {}) {
   };
   const token = readCsrfToken();
   if (token) headers["X-CSRF-Token"] = token;
+  headers["Idempotency-Key"] = makeIdempotencyKey();
 
   const response = await fetch(url, {
     method: "POST",
@@ -38,7 +48,20 @@ async function postJSON(url, body = {}) {
     throw error;
   }
 
-  return payload ?? {};
+  if (!payload) {
+    return {};
+  }
+
+  const arc = payload.arc;
+  if (arc && typeof arc === "object") {
+    const serverPercent = arc.percent;
+    const computedPercent = Number.isFinite(serverPercent)
+      ? clampPct(serverPercent)
+      : clampPct(progressPercent(arc.arcPoints, arc.nextThreshold));
+    payload.arc = { ...arc, percent: computedPercent };
+  }
+
+  return payload;
 }
 
 // Minimal inline icons (replaces lucide-react dependency)
@@ -150,27 +173,69 @@ const Pill = ({ children, tone = "muted" }) => {
 };
 
 // Friend photo placeholder (shows camera icon until a photo is uploaded)
-const FriendPhoto = ({ src, name = "Friend", size = "clamp(56px, 14vw, 80px)" }) => (
-  <div className="grid gap-1 place-items-center">
-    {src ? (
-      <img
-        src={src}
-        alt={`Photo of ${name}`}
-        className="object-cover rounded-full border border-slate-200"
-        style={{ width: size, height: size }}
-      />
-    ) : (
-      <div
-        className="rounded-full border-2 border-dashed border-slate-300 bg-slate-50 grid place-items-center text-slate-400"
-        style={{ width: size, height: size }}
-        aria-label={`Upload a photo of ${name}`}
+const FriendPhoto = ({
+  src,
+  name = "Friend",
+  size = "clamp(56px, 14vw, 80px)",
+  onPick,
+  loading = false,
+}) => {
+  const fileRef = React.useRef(null);
+  const openPicker = React.useCallback(() => {
+    if (loading) return;
+    fileRef.current?.click();
+  }, [loading]);
+
+  const handleChange = React.useCallback(
+    (event) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      onPick?.(file);
+      event.target.value = "";
+    },
+    [onPick]
+  );
+
+  const buttonLabel = loading ? "Uploading..." : src ? "Change photo" : "Add photo";
+
+  return (
+    <div className="grid gap-1 place-items-center">
+      {src ? (
+        <img
+          src={src}
+          alt={`Photo of ${name}`}
+          className="object-cover rounded-full border border-slate-200"
+          style={{ width: size, height: size }}
+        />
+      ) : (
+        <div
+          className="rounded-full border-2 border-dashed border-slate-300 bg-slate-50 grid place-items-center text-slate-400"
+          style={{ width: size, height: size }}
+          aria-label={`Upload a photo of ${name}`}
+        >
+          <Camera size={22} aria-hidden />
+        </div>
+      )}
+      <button
+        type="button"
+        onClick={openPicker}
+        disabled={loading}
+        className={`text-[11px] text-[var(--ink)] underline decoration-dotted underline-offset-2 ${
+          loading ? "opacity-60 cursor-not-allowed" : "hover:opacity-80"
+        }`}
       >
-        <Camera size={22} aria-hidden />
-      </div>
-    )}
-    <button className="text-[11px] text-[var(--ink)] underline decoration-dotted underline-offset-2">Add photo</button>
-  </div>
-);
+        {buttonLabel}
+      </button>
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        onChange={handleChange}
+        className="hidden"
+      />
+    </div>
+  );
+};
 
 // Level labels (order is important for the ladder)
 const LEVEL_LABELS = ["Acquaintance", "Casual Friend", "Friend", "Close Friend", "Best Friend"];
@@ -921,6 +986,35 @@ export default function FriendChallenges(props = {}) {
     [updateArcFromServer]
   );
 
+  const handlePhotoPick = React.useCallback(
+    (arc, file) => {
+      if (!arc || !arc.id || !file) return;
+      if (file.size > MAX_IMAGE_SIZE_BYTES) {
+        setErrorMessage("Please choose an image that is 2MB or smaller.");
+        return;
+      }
+      setErrorMessage(null);
+      const reader = new FileReader();
+      const key = `photo-upload:${arc.id}`;
+      reader.onload = () => {
+        const result = reader.result;
+        if (typeof result !== "string" || !result.startsWith("data:image/")) {
+          setErrorMessage("Unsupported image type. Please choose a PNG or JPG image.");
+          return;
+        }
+        mutateArc(key, `/api/arcs/${encodeURIComponent(arc.id)}/photo`, {
+          picture: result,
+        });
+      };
+      reader.onerror = () => {
+        console.error(reader.error);
+        setErrorMessage("Could not read image file. Please try again.");
+      };
+      reader.readAsDataURL(file);
+    },
+    [mutateArc, setErrorMessage]
+  );
+
   const handlePlanAction = React.useCallback(
     (arc, action) => {
       if (!arc || !arc.id) return;
@@ -1059,6 +1153,8 @@ export default function FriendChallenges(props = {}) {
     const planFailKey = `plan-fail-forward:${arc.id}`;
     const challengeCompleteKey = `challenge-complete:${arc.id}`;
     const challengeSwapKey = `challenge-swap:${arc.id}`;
+    const photoUploadKey = `photo-upload:${arc.id}`;
+    const photoUploading = isLoadingAction(photoUploadKey);
 
     return (
       <div className="grid md:grid-cols-3 gap-6 md:gap-8 items-start">
@@ -1070,7 +1166,12 @@ export default function FriendChallenges(props = {}) {
               {/* Left 1/3: Friend photo centered */}
               <div className="grid place-items-center gap-2 text-center">
                 <div className="text-sm font-semibold text-[var(--ink)]">{arc.name}</div>
-                <FriendPhoto name={arc.name} src={arc.photoSrc || undefined} />
+                <FriendPhoto
+                  name={arc.name}
+                  src={arc.photoSrc || undefined}
+                  loading={photoUploading}
+                  onPick={(file) => handlePhotoPick(arc, file)}
+                />
                 <div className="grid gap-2 mt-1">
                   <Pill tone="ink">{`Friend Score: ${formatFriendScore(arc.friendScore)}`}</Pill>
                   <Pill>{`Friend Type: ${formatFriendType(arc.friendType)}`}</Pill>

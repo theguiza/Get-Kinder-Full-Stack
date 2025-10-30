@@ -8,23 +8,16 @@
       "effort": "low",
       "length_days": 21,
       "cadence_per_week": 3,
-      "goal_tags": [
-        "reconnect",
-        "weeknights"
-      ],
+      "goal_tags": ["reconnect","weeknights"],
       "day_types": [
-        {
-          "day": 1,
-          "family": "text"
-        },
-        {
-          "day": 3,
-          "family": "text"
-        },
-        {
-          "day": 5,
-          "family": "text"
-        }
+        { "day": 1,  "family": "text" },
+        { "day": 2,  "family": "text" },
+        { "day": 3,  "family": "text" },
+        { "day": 4,  "family": "text" },
+        { "day": 5,  "family": "text" },
+        { "day": 7,  "family": "text" },
+        { "day": 14, "family": "text" },
+        { "day": 21, "family": "text" }
       ]
     },
     {
@@ -35,49 +28,128 @@
       "effort": "medium",
       "length_days": 14,
       "cadence_per_week": 2,
-      "goal_tags": [
-        "reconnect",
-        "deepen"
-      ],
+      "goal_tags": ["reconnect","deepen"],
       "day_types": [
-        {
-          "day": 2,
-          "family": "call"
-        },
-        {
-          "day": 5,
-          "family": "call"
-        },
-        {
-          "day": 10,
-          "family": "call"
-        }
+        { "day": 2,  "family": "call" },
+        { "day": 4,  "family": "call" },
+        { "day": 5,  "family": "call" },
+        { "day": 7,  "family": "call" },
+        { "day": 10, "family": "call" },
+        { "day": 14, "family": "call" }
+      ]
+    },
+    {
+      "slug": "acq-to-casual-text-first-21d",
+      "name": "Acquaintance → Casual (Text-First, 21d)",
+      "tier": "Casual Friend",
+      "channel_variant": "text",
+      "effort": "low",
+      "length_days": 21,
+      "cadence_per_week": 3,
+      "goal_tags": ["acquaintance-to-casual","text-first","low-effort","21d"],
+      "day_types": [
+        { "day": 1,  "family": "text" },
+        { "day": 2,  "family": "text" },
+        { "day": 3,  "family": "text" },
+        { "day": 4,  "family": "text" },
+        { "day": 5,  "family": "text" },
+        { "day": 7,  "family": "text" },
+        { "day": 8,  "family": "text" },
+        { "day": 12, "family": "text" },
+        { "day": 14, "family": "text" },
+        { "day": 16, "family": "text" },
+        { "day": 20, "family": "text" },
+        { "day": 21, "family": "text" }
+      ]
+    },
+    {
+      "slug": "casual-to-friend-mixed-28d",
+      "name": "Casual → Friend (Mixed, 28d)",
+      "tier": "Close Friend",
+      "channel_variant": "text",
+      "effort": "medium",
+      "length_days": 28,
+      "cadence_per_week": 4,
+      "goal_tags": ["casual-to-friend","mixed","medium-effort","28d"],
+      "day_types": [
+        { "day": 2,  "family": "text" },
+        { "day": 4,  "family": "text" },
+        { "day": 5,  "family": "text" },
+        { "day": 7,  "family": "text" },
+        { "day": 8,  "family": "text" },
+        { "day": 12, "family": "text" },
+        { "day": 14, "family": "text" },
+        { "day": 15, "family": "text" },
+        { "day": 21, "family": "text" },
+        { "day": 26, "family": "text" }
+      ]
+    },
+    {
+      "slug": "friend-to-close-hybrid-42d",
+      "name": "Friend → Close (Hybrid, 42d)",
+      "tier": "Close Friend",
+      "channel_variant": "text",
+      "effort": "medium",
+      "length_days": 42,
+      "cadence_per_week": 4,
+      "goal_tags": ["friend-to-close","shared-activity","ritual","42d"],
+      "day_types": [
+        { "day": 2,  "family": "text" },
+        { "day": 3,  "family": "text" },
+        { "day": 4,  "family": "text" },
+        { "day": 7,  "family": "text" },
+        { "day": 10, "family": "text" },
+        { "day": 14, "family": "text" },
+        { "day": 21, "family": "text" },
+        { "day": 28, "family": "text" },
+        { "day": 35, "family": "text" },
+        { "day": 40, "family": "text" }
+      ]
+    },
+    {
+      "slug": "close-to-best-ritual-56d",
+      "name": "Close → Best/Inner Circle (Ritual, 56d)",
+      "tier": "Close Friend",
+      "channel_variant": "text",
+      "effort": "high",
+      "length_days": 56,
+      "cadence_per_week": 3,
+      "goal_tags": ["close-to-best","co-ritual","high-effort","56d"],
+      "day_types": [
+        { "day": 2,  "family": "text" },
+        { "day": 4,  "family": "text" },
+        { "day": 7,  "family": "text" },
+        { "day": 14, "family": "text" },
+        { "day": 21, "family": "text" },
+        { "day": 28, "family": "text" },
+        { "day": 35, "family": "text" },
+        { "day": 42, "family": "text" },
+        { "day": 49, "family": "text" }
+      ]
+    },
+    {
+      "slug": "starter-arc-7d-daily",
+      "name": "One-Week Starter Arc (Daily)",
+      "tier": "Casual Friend",
+      "channel_variant": "text",
+      "effort": "low",
+      "length_days": 7,
+      "cadence_per_week": 7,
+      "goal_tags": ["starter","stranger-to-acquaintance","daily","7d"],
+      "day_types": [
+        { "day": 1, "family": "text" },
+        { "day": 2, "family": "text" },
+        { "day": 3, "family": "text" },
+        { "day": 4, "family": "text" },
+        { "day": 5, "family": "text" },
+        { "day": 6, "family": "text" },
+        { "day": 7, "family": "text" }
       ]
     }
   ],
   "daily_surprise": [
-    {
-      "channel": "text",
-      "effort": "low",
-      "goal_tags": [
-        "cheer",
-        "inside-joke"
-      ]
-    },
-    {
-      "channel": "call",
-      "effort": "medium",
-      "goal_tags": [
-        "support",
-        "motivate"
-      ]
-    },
-    {
-      "channel": "irl",
-      "effort": "high",
-      "goal_tags": [
-        "celebrate"
-      ]
-    }
+    { "channel": "text", "effort": "low", "goal_tags": ["cheer","inside-joke"] },
+    { "channel": "call", "effort": "medium", "goal_tags": ["support","motivate"] },
+    { "channel": "irl",  "effort": "high", "goal_tags": ["celebrate"] }
   ]
 }

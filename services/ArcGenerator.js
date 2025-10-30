@@ -1,5 +1,12 @@
 import { mapFriendArcRow } from "../Backend/lib/friendArcMapper.js";
 
+const STARTER_TAG = "starter";
+const STARTER_LENGTH_DAYS = 7;
+
+function isStarterFlagEnabled() {
+  return process.env.STARTER7_FIRST_PLAN === "1";
+}
+
 const DEFAULT_CHANNEL = "text";
 const DEFAULT_EFFORT = "low";
 const DEFAULT_LENGTH_DAYS = 3;
@@ -139,10 +146,19 @@ export async function generateArcForQuiz(pool, payload) {
     throw new Error("No active plan templates available");
   }
 
-  const planSelection = selectPlan(plans, context);
+  const starterFlagEnabled = isStarterFlagEnabled();
+  const starterSelection = starterFlagEnabled ? pickStarter7dPlan(plans, context) : null;
+  const planSelection = starterSelection ?? selectPlan(plans, context);
   if (!planSelection) {
     throw new Error("No plan template matched the quiz payload");
   }
+
+  console.info("[ArcGenerator] plan selected", {
+    planTemplateId: planSelection.plan?.id ?? null,
+    planName: planSelection.plan?.name ?? null,
+    forcedStarter7: Boolean(starterSelection),
+    starterFlag: starterFlagEnabled,
+  });
 
   const stepRows = await fetchPlanSteps(pool, planSelection.plan.id);
   const hasDbSteps = stepRows.length > 0;
@@ -163,6 +179,7 @@ export async function generateArcForQuiz(pool, payload) {
     steps: hasDbSteps ? stepRows : buildFallbackSteps(context, planSelection),
     usingFallbackSteps: !hasDbSteps,
     challengeSelection,
+    forcedStarterPlan: Boolean(starterSelection),
   });
 
   const inserted = await insertArc(pool, context, arcRecord);
@@ -464,6 +481,25 @@ function selectPlan(planRows, context) {
   return best;
 }
 
+function pickStarter7dPlan(planRows, context) {
+  if (!Array.isArray(planRows) || !planRows.length) return null;
+
+  const candidates = planRows.filter((row) => {
+    const length = Number(row.length_days ?? row.lengthDays ?? NaN);
+    if (!Number.isFinite(length) || length !== STARTER_LENGTH_DAYS) {
+      return false;
+    }
+    const tags = normalizeTagList(row.tags);
+    return tags.includes(STARTER_TAG);
+  });
+
+  if (!candidates.length) {
+    return null;
+  }
+
+  return selectPlan(candidates, context);
+}
+
 function selectChallenge(challengeRows, context) {
   const candidates = [];
   for (const row of challengeRows) {
@@ -549,7 +585,14 @@ function renderTemplateValue(value, context) {
   return value;
 }
 
-function buildArcRecord({ context, planSelection, steps, challengeSelection, usingFallbackSteps = false }) {
+function buildArcRecord({
+  context,
+  planSelection,
+  steps,
+  challengeSelection,
+  usingFallbackSteps = false,
+  forcedStarterPlan = false,
+}) {
   const { plan } = planSelection;
   const planLength = usingFallbackSteps
     ? Math.max(steps.length, plan.lengthDays || DEFAULT_LENGTH_DAYS)
@@ -587,6 +630,15 @@ function buildArcRecord({ context, planSelection, steps, challengeSelection, usi
     swapsLeft: toPositiveInteger(challenge.swaps_left, 0),
   };
 
+  const lifetimeState = {
+    ...DEFAULT_LIFETIME,
+    planTemplateId: plan.id,
+    planName: plan.name ?? null,
+  };
+  if (forcedStarterPlan) {
+    lifetimeState.starter7AutoSelected = true;
+  }
+
   return {
     name: context.friendName,
     day: 1,
@@ -596,7 +648,7 @@ function buildArcRecord({ context, planSelection, steps, challengeSelection, usi
     pointsToday: DEFAULT_POINTS_TODAY,
     friendScore: context.friendScore ?? null,
     friendType: context.friendType ?? context.tierRaw,
-    lifetime: { ...DEFAULT_LIFETIME },
+    lifetime: lifetimeState,
     steps: renderedSteps,
     challenge: renderedChallenge,
     badges: { ...DEFAULT_BADGE_STATE },
@@ -676,3 +728,8 @@ async function insertArc(pool, context, arcRecord) {
   );
   return rows[0];
 }
+
+export const __testables = {
+  pickStarter7dPlan,
+  normalizeTagList,
+};
