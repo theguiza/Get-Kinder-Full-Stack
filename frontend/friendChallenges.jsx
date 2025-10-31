@@ -1260,7 +1260,7 @@ export default function FriendChallenges(props = {}) {
                     Fail-forward
                   </button>
                   <span className="text-xs text-slate-500 ml-auto flex items-center gap-1">
-                    <Info size={14} /> Auto-advance in ~72h
+                    <Info size={14} /> Auto-advance in ~12h
                   </span>
                 </div>
 
