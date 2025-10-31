@@ -10,7 +10,7 @@ function isStarterFlagEnabled() {
 const DEFAULT_CHANNEL = "text";
 const DEFAULT_EFFORT = "low";
 const DEFAULT_LENGTH_DAYS = 3;
-const DEFAULT_NEXT_THRESHOLD = 500;
+const DEFAULT_NEXT_THRESHOLD = 100;
 const DEFAULT_ARC_POINTS = 0;
 const DEFAULT_POINTS_TODAY = 0;
 const DEFAULT_BADGE_STATE = { Acquaintance: "inProgress" };
@@ -184,6 +184,52 @@ export async function generateArcForQuiz(pool, payload) {
 
   const inserted = await insertArc(pool, context, arcRecord);
   return mapFriendArcRow(inserted);
+}
+
+export async function buildArcForSpecificPlan(pool, payload, planRow, options = {}) {
+  assertPool(pool);
+  if (!isPlainObject(planRow)) {
+    throw new TypeError("A plan template row object is required");
+  }
+  await ensureArcGeneratorSchema(pool);
+  const context = normalizePayload(payload);
+
+  const planSelection = {
+    plan: {
+      id: planRow.id,
+      name: planRow.name,
+      channel: normalizeChannel(planRow.channel, "mixed"),
+      effort: normalizeEffort(planRow.effort, "medium"),
+      tier: normalizeTier(planRow.tier),
+      lengthDays: toPositiveInteger(planRow.length_days, DEFAULT_LENGTH_DAYS),
+      tags: normalizeTagList(planRow.tags),
+    },
+    score: null,
+  };
+
+  const stepRows = await fetchPlanSteps(pool, planSelection.plan.id);
+  const hasDbSteps = stepRows.length > 0;
+
+  const challengeRows = await fetchActiveChallenges(pool, context);
+  if (!challengeRows.length) {
+    throw new Error("No active challenge templates available");
+  }
+
+  const challengeSelection = selectChallenge(challengeRows, context);
+  if (!challengeSelection) {
+    throw new Error("No active challenge template matched channel and effort constraints");
+  }
+
+  const arcRecord = buildArcRecord({
+    context,
+    planSelection,
+    steps: hasDbSteps ? stepRows : buildFallbackSteps(context, planSelection),
+    usingFallbackSteps: !hasDbSteps,
+    challengeSelection,
+    forcedStarterPlan: Boolean(options?.forcedStarterPlan),
+  });
+
+  return arcRecord;
 }
 
 function assertPool(pool) {
@@ -618,6 +664,12 @@ function buildArcRecord({
   });
 
   const { challenge, normalized } = challengeSelection;
+  const basePointsRaw = Number(challenge.points);
+  const basePoints = Number.isFinite(basePointsRaw) ? basePointsRaw : 100;
+  const normalizedEffort = normalizeEffort(normalized.effort, context.effortCapacity || DEFAULT_EFFORT);
+  const adjustedPoints =
+    normalizedEffort === "low" && basePoints <= 25 ? basePoints * 2 : basePoints;
+  const challengePoints = Math.max(0, Math.round(adjustedPoints));
   const renderedChallenge = {
     id: `${friendId}-first`,
     templateId: challenge.id,
@@ -626,7 +678,7 @@ function buildArcRecord({
     effort: normalized.effort || context.effortCapacity,
     channel: normalized.channel || context.channel,
     estMinutes: toPositiveInteger(challenge.est_minutes, 30),
-    points: Number.isFinite(Number(challenge.points)) ? Number(challenge.points) : 100,
+    points: challengePoints,
     swapsLeft: toPositiveInteger(challenge.swaps_left, 0),
   };
 

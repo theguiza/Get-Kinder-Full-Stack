@@ -4,13 +4,135 @@ import { mapFriendArcRow, toNumber, toSafeString } from "../Backend/lib/friendAr
 import { getCached, putCached } from "../repos/idempotencyRepo.js";
 import { awardAndMarkStepDone, awardChallengeAndClear } from "../services/pointsRepo.js";
 import { progressPercent } from "../shared/metrics.js";
+import { buildArcForSpecificPlan } from "../services/ArcGenerator.js";
 
 const router = express.Router();
 
 // TODO: plug in CSRF / allow-list middleware to restrict internal API access.
 
 const STEP_POINTS = 5;
-const DEFAULT_LIFETIME = { xp: 0, streak: "0 days", drag: "0%" };
+const DEFAULT_LIFETIME = {
+  xp: 0,
+  total_xp: 0,
+  totalXp: 0,
+  streak: "0 days",
+  streak_days: 0,
+  days: 0,
+  current_streak: 0,
+  currentStreak: 0,
+  drag: "0%",
+  drag_percent: 0,
+  dragPercent: 0,
+};
+
+const PLAN_PROMOTION_ORDER = [
+  "One-Week Starter Arc (Daily)",
+  "Acquaintance \u2192 Casual (Text-First, 21d)",
+  "Casual \u2192 Friend (Mixed, 28d)",
+  "Friend \u2192 Close (Hybrid, 42d)",
+  "Close \u2192 Best/Inner Circle (Ritual, 56d)",
+  "Three Week Text Reconnect",
+  "Two Week Catch-Up Calls",
+];
+
+function isPlainObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function formatStreakLabel(days) {
+  const safeDays = Math.max(0, Math.round(Number.isFinite(days) ? days : 0));
+  return `${safeDays} ${safeDays === 1 ? "day" : "days"}`;
+}
+
+function normalizeLifetimeSnapshot(input) {
+  const base = isPlainObject(input) ? deepClone(input) : {};
+  const xp = toNumber(
+    base.xp ?? base.points ?? base.total_xp ?? base.totalXp,
+    DEFAULT_LIFETIME.xp
+  );
+  let streakDays = toNumber(
+    base.streak_days ?? base.days ?? base.current_streak ?? base.currentStreak,
+    NaN
+  );
+  if (!Number.isFinite(streakDays)) {
+    const streakText = toSafeString(base.streak, "");
+    const match = streakText.match(/-?\d+/);
+    if (match) {
+      streakDays = Number(match[0]);
+    }
+  }
+  if (!Number.isFinite(streakDays)) {
+    streakDays = DEFAULT_LIFETIME.streak.startsWith("0") ? 0 : toNumber(DEFAULT_LIFETIME.streak, 0);
+  }
+
+  let dragPercent = toNumber(base.drag_percent ?? base.dragPercent, NaN);
+  const dragText = toSafeString(base.drag, "");
+  if (!Number.isFinite(dragPercent)) {
+    const dragMatch = dragText.match(/-?\d+(\.\d+)?/);
+    if (dragMatch) {
+      dragPercent = Number(dragMatch[0]);
+    }
+  }
+  const drag =
+    dragText ||
+    (Number.isFinite(dragPercent) ? `${dragPercent}%` : DEFAULT_LIFETIME.drag);
+
+  return {
+    source: base,
+    xp: Math.max(0, xp),
+    streakDays: Math.max(0, Math.round(streakDays)),
+    drag,
+    dragPercent: Number.isFinite(dragPercent) ? dragPercent : null,
+  };
+}
+
+function coerceLifetimeObject(input) {
+  const normalized = normalizeLifetimeSnapshot(input);
+  const baseSource = isPlainObject(normalized.source) ? normalized.source : {};
+  const result = { ...DEFAULT_LIFETIME, ...baseSource };
+  const xp = Math.max(0, Math.round(normalized.xp));
+  const streakDays = Math.max(0, Math.round(normalized.streakDays));
+
+  result.xp = xp;
+  result.total_xp = xp;
+  result.totalXp = xp;
+  result.streak_days = streakDays;
+  result.days = streakDays;
+  result.current_streak = streakDays;
+  result.currentStreak = streakDays;
+  result.streak = formatStreakLabel(streakDays);
+  result.drag = normalized.drag;
+  if (normalized.dragPercent !== null) {
+    result.drag_percent = normalized.dragPercent;
+    result.dragPercent = normalized.dragPercent;
+  }
+  if (!result.drag) {
+    result.drag = DEFAULT_LIFETIME.drag;
+  }
+  return result;
+}
+
+function applyLifetimeGain(lifetimeInput, delta, { incrementStreak } = {}) {
+  const normalized = normalizeLifetimeSnapshot(lifetimeInput);
+  const gain = Number.isFinite(delta) ? delta : 0;
+  const xp = Math.max(0, Math.round(normalized.xp + gain));
+  let streakDays = normalized.streakDays;
+  if (incrementStreak && gain > 0) {
+    streakDays += 1;
+  }
+
+  const result = coerceLifetimeObject(normalized.source);
+  result.xp = xp;
+  result.total_xp = xp;
+  result.totalXp = xp;
+  result.streak_days = streakDays;
+  result.days = streakDays;
+  result.current_streak = streakDays;
+  result.currentStreak = streakDays;
+  result.streak = formatStreakLabel(streakDays);
+
+  return result;
+}
 const MAX_IMAGE_SIZE_BYTES = 2 * 1024 * 1024;
 
 router.post("/api/arcs/:arcId/photo", (req, res) =>
@@ -89,18 +211,37 @@ router.post("/api/arcs/:arcId/steps/:stepId/complete", (req, res) =>
 
       const delta = STEP_POINTS;
       step.status = "done";
-      state.pointsToday += delta;
-      state.arcPoints += delta;
+      const previousPointsToday = Number.isFinite(state.pointsToday) ? state.pointsToday : 0;
+      state.pointsToday = previousPointsToday + delta;
+      state.arcPoints = (Number.isFinite(state.arcPoints) ? state.arcPoints : 0) + delta;
+      state.lifetime = applyLifetimeGain(state.lifetime, delta, {
+        incrementStreak: previousPointsToday <= 0,
+      });
 
       const { row, percent } = await awardAndMarkStepDone(client, {
         arcId,
         userId,
         delta,
         updatedSteps: state.steps,
+        nextLifetime: state.lifetime,
       });
 
-      const arc = mapFriendArcRow(row);
+      let arc = mapFriendArcRow(row);
       arc.percent = percent;
+
+      const promotedArc = await promoteArcIfEligible({
+        client,
+        arc,
+        userId,
+        previousPlanName: toSafeString(
+          arc?.lifetime?.planName ?? arc?.lifetime?.plan_name ?? "",
+          ""
+        ),
+      });
+
+      if (promotedArc) {
+        arc = promotedArc;
+      }
 
       return { changed: true, delta, persistedArc: arc };
     },
@@ -152,8 +293,12 @@ router.post("/api/arcs/:arcId/challenge/:challengeId/complete", (req, res) =>
       }
 
       const points = Math.max(0, toNumber(challenge.points, 0));
-      state.pointsToday += points;
-      state.arcPoints += points;
+      const previousPointsToday = Number.isFinite(state.pointsToday) ? state.pointsToday : 0;
+      state.pointsToday = previousPointsToday + points;
+      state.arcPoints = (Number.isFinite(state.arcPoints) ? state.arcPoints : 0) + points;
+      state.lifetime = applyLifetimeGain(state.lifetime, points, {
+        incrementStreak: previousPointsToday <= 0 && points > 0,
+      });
       state.challenge = null;
 
       const { row, percent } = await awardChallengeAndClear(client, {
@@ -161,6 +306,7 @@ router.post("/api/arcs/:arcId/challenge/:challengeId/complete", (req, res) =>
         userId,
         delta: points,
         nextChallenge: null,
+        nextLifetime: state.lifetime,
       });
 
       const arc = mapFriendArcRow(row);
@@ -439,7 +585,7 @@ async function handleArcMutation(req, res, mutator, options = {}) {
 }
 
 function buildStateFromRow(row) {
-  const lifetime = row.lifetime && typeof row.lifetime === "object" ? deepClone(row.lifetime) : { ...DEFAULT_LIFETIME };
+  const lifetime = coerceLifetimeObject(row.lifetime);
   const steps = Array.isArray(row.steps) ? deepClone(row.steps) : [];
   const challenge = row.challenge && typeof row.challenge === "object" ? deepClone(row.challenge) : null;
   const badges = row.badges && typeof row.badges === "object" ? deepClone(row.badges) : {};
@@ -475,7 +621,7 @@ function finalizeState(state) {
     state.friendScore = toNumber(state.friendScore, 0);
   }
 
-  state.lifetime = state.lifetime && typeof state.lifetime === "object" ? state.lifetime : { ...DEFAULT_LIFETIME };
+  state.lifetime = coerceLifetimeObject(state.lifetime);
   state.steps = Array.isArray(state.steps) ? state.steps.map(normalizeStep) : [];
   state.challenge = state.challenge && typeof state.challenge === "object" ? state.challenge : null;
   state.badges = state.badges && typeof state.badges === "object" ? state.badges : {};
@@ -551,6 +697,112 @@ async function updateArc(db, arcId, userId, state) {
   );
 
   return rows[0];
+}
+
+function getNextPlanName(currentName) {
+  if (!currentName) return null;
+  const index = PLAN_PROMOTION_ORDER.indexOf(currentName);
+  if (index === -1 || index + 1 >= PLAN_PROMOTION_ORDER.length) {
+    return null;
+  }
+  return PLAN_PROMOTION_ORDER[index + 1];
+}
+
+function stepsAreComplete(arc) {
+  if (!arc || !Array.isArray(arc.steps) || !arc.steps.length) return false;
+  return arc.steps.every((step) => {
+    const status = typeof step?.status === "string" ? step.status.trim().toLowerCase() : "";
+    return status === "done";
+  });
+}
+
+async function fetchPlanTemplateByName(db, name) {
+  if (!name) return null;
+  const { rows } = await db.query(
+    `
+      SELECT id,
+             name,
+             tier,
+             length_days,
+             cadence_per_week,
+             channel_variant,
+             channel,
+             effort,
+             tags
+        FROM plan_templates
+       WHERE is_active = TRUE
+         AND name = $1
+       LIMIT 1
+    `,
+    [name]
+  );
+  return rows[0] || null;
+}
+
+async function promoteArcIfEligible({ client, arc, userId, previousPlanName }) {
+  if (!client || !arc || !userId) return null;
+  if (!stepsAreComplete(arc)) return null;
+  if (arc.challenge && Object.keys(arc.challenge).length) return null;
+
+  const nextPlanName = getNextPlanName(previousPlanName);
+  if (!nextPlanName) return null;
+
+  const planRow = await fetchPlanTemplateByName(client, nextPlanName);
+  if (!planRow) {
+    console.warn("[arcsApi] promotion skipped: plan not found", { nextPlanName });
+    return null;
+  }
+
+  const payload = {
+    user_id: userId,
+    friend_id: arc.id,
+    friend_name: arc.name,
+    tier: planRow.tier || previousPlanName || "General",
+    channel_pref: toSafeString(planRow.channel, planRow.channel_variant || "") || "mixed",
+    effort_capacity: toSafeString(planRow.effort, "") || "medium",
+    friend_score: arc.friendScore ?? null,
+    friend_type: arc.friendType ?? null,
+  };
+
+  let arcRecord;
+  try {
+    arcRecord = await buildArcForSpecificPlan(client, payload, planRow);
+  } catch (error) {
+    console.error("[arcsApi] promotion failed while building next arc:", error);
+    return null;
+  }
+
+  const previousLifetime = isPlainObject(arc.lifetime) ? deepClone(arc.lifetime) : {};
+  const sequenceIndex = PLAN_PROMOTION_ORDER.indexOf(nextPlanName);
+  const promotionLifetime = {
+    ...previousLifetime,
+    ...deepClone(arcRecord.lifetime),
+    previousPlanName: previousPlanName || previousLifetime?.planName || null,
+    planSequenceIndex: sequenceIndex >= 0 ? sequenceIndex : null,
+  };
+
+  const promotionState = {
+    day: arcRecord.day,
+    length: arcRecord.length,
+    arcPoints: arcRecord.arcPoints,
+    nextThreshold: arcRecord.nextThreshold,
+    pointsToday: arcRecord.pointsToday,
+    friendScore: arcRecord.friendScore ?? arc.friendScore ?? null,
+    friendType: arcRecord.friendType ?? arc.friendType ?? null,
+    lifetime: promotionLifetime,
+    steps: arcRecord.steps,
+    challenge: arcRecord.challenge,
+    badges: arcRecord.badges,
+  };
+
+  const updatedRow = await updateArc(client, arc.id, userId, promotionState);
+  if (!updatedRow) {
+    return null;
+  }
+
+  const promotedArc = mapFriendArcRow(updatedRow);
+  promotedArc.percent = progressPercent(promotedArc.arcPoints, promotedArc.nextThreshold);
+  return promotedArc;
 }
 
 function normalizeTags(value) {

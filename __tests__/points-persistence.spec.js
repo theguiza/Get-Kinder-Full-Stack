@@ -10,6 +10,89 @@ const SELECT_ARC_FOR_UPDATE = "SELECT * FROM friend_arcs WHERE id = $1 AND user_
 
 const deepClone = (value) => JSON.parse(JSON.stringify(value));
 
+const DEFAULT_LIFETIME = {
+  xp: 0,
+  total_xp: 0,
+  totalXp: 0,
+  streak: "0 days",
+  streak_days: 0,
+  days: 0,
+  current_streak: 0,
+  currentStreak: 0,
+  drag: "0%",
+  drag_percent: 0,
+  dragPercent: 0,
+};
+
+const toFiniteNumber = (value, fallback = 0) => {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : fallback;
+};
+
+const formatStreak = (days) => {
+  const safe = Math.max(0, Math.round(days));
+  return `${safe} ${safe === 1 ? "day" : "days"}`;
+};
+
+const normalizeLifetime = (value) => {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return deepClone(value);
+  }
+  return deepClone(DEFAULT_LIFETIME);
+};
+
+const applyLifetimeGain = (lifetime, delta, { incrementStreak } = {}) => {
+  const next = normalizeLifetime(lifetime);
+  const xpPrev =
+    toFiniteNumber(next.xp, null) ??
+    toFiniteNumber(next.total_xp, null) ??
+    toFiniteNumber(next.totalXp, null) ??
+    0;
+  const xp = Math.max(0, Math.round(xpPrev + Math.max(0, delta)));
+
+  const currentDays =
+    toFiniteNumber(next.streak_days, null) ??
+    toFiniteNumber(next.days, null) ??
+    toFiniteNumber(next.current_streak, null) ??
+    toFiniteNumber(next.currentStreak, null) ??
+    (() => {
+      if (typeof next.streak === "string") {
+        const match = next.streak.match(/-?\d+/);
+        if (match) {
+          return Number(match[0]);
+        }
+      }
+      return 0;
+    })();
+
+  let days = Math.max(0, Math.round(currentDays));
+  if (incrementStreak && delta > 0) {
+    days += 1;
+  }
+
+  const dragPercent = toFiniteNumber(next.drag_percent, null) ?? toFiniteNumber(next.dragPercent, null);
+  const drag =
+    typeof next.drag === "string" && next.drag.trim()
+      ? next.drag
+      : dragPercent !== null
+      ? `${dragPercent}%`
+      : DEFAULT_LIFETIME.drag;
+
+  return {
+    ...next,
+    xp,
+    total_xp: xp,
+    totalXp: xp,
+    streak_days: days,
+    days,
+    current_streak: days,
+    currentStreak: days,
+    streak: formatStreak(days),
+    drag,
+    ...(dragPercent !== null ? { drag_percent: dragPercent, dragPercent } : {}),
+  };
+};
+
 class FakeArcStore {
   constructor(row) {
     this.arc = deepClone(row);
@@ -110,21 +193,31 @@ class FakeClient {
         return { rows: [] };
       }
 
+      const setsSteps = /\bsteps\s*=\s*\$\d+/i.test(trimmed);
+      const setsChallenge = /\bchallenge\s*=\s*\$\d+/i.test(trimmed);
+      const setsLifetime = /\blifetime\s*=\s*\$\d+/i.test(trimmed);
+
       const delta = Number(params[2] ?? 0);
       if (Number.isFinite(delta)) {
         target.arc_points += delta;
         target.points_today += delta;
       }
 
-      if (upper.includes("STEPS")) {
+      if (setsSteps) {
         const stepsJson = params[3];
         target.steps = typeof stepsJson === "string" ? JSON.parse(stepsJson) : deepClone(stepsJson ?? []);
       }
 
-      if (upper.includes("CHALLENGE")) {
+      if (setsChallenge) {
         const challengeJson = params[3];
         target.challenge =
           typeof challengeJson === "string" ? JSON.parse(challengeJson) : deepClone(challengeJson ?? null);
+      }
+
+      if (setsLifetime) {
+        const lifetimeJson = params[4];
+        target.lifetime =
+          typeof lifetimeJson === "string" ? JSON.parse(lifetimeJson) : deepClone(lifetimeJson ?? {});
       }
 
       target.updated_at = new Date().toISOString();
@@ -151,7 +244,19 @@ const createArcRow = (overrides = {}) => ({
   points_today: 0,
   friend_score: null,
   friend_type: null,
-  lifetime: { xp: 0, streak: "0 days", drag: "0%" },
+  lifetime: {
+    xp: 0,
+    total_xp: 0,
+    totalXp: 0,
+    streak: "0 days",
+    streak_days: 0,
+    days: 0,
+    current_streak: 0,
+    currentStreak: 0,
+    drag: "0%",
+    drag_percent: 0,
+    dragPercent: 0,
+  },
   steps: [
     { id: "step-1", status: "todo" },
     { id: "step-2", status: "todo" },
@@ -188,11 +293,15 @@ async function completeStep({ store, stepId, key }) {
 
       if (steps[index].status !== "done") {
         steps[index] = { ...steps[index], status: "done" };
+        const lifetimeAfterGain = applyLifetimeGain(row.lifetime, STEP_POINTS, {
+          incrementStreak: toFiniteNumber(row.points_today, 0) <= 0,
+        });
         const { row: updatedRow, percent } = await awardAndMarkStepDone(client, {
           arcId,
           userId,
           delta: STEP_POINTS,
           updatedSteps: steps,
+          nextLifetime: lifetimeAfterGain,
         });
         const arc = mapFriendArcRow(updatedRow);
         arc.percent = percent;
@@ -235,11 +344,15 @@ async function completeChallenge({ store, key }) {
       if (!rows.length) throw new Error("Arc not found");
       const row = rows[0];
       const points = Number(row.challenge?.points ?? 0);
+      const lifetimeAfterGain = applyLifetimeGain(row.lifetime, points, {
+        incrementStreak: toFiniteNumber(row.points_today, 0) <= 0 && points > 0,
+      });
       const { row: updatedRow, percent } = await awardChallengeAndClear(client, {
         arcId,
         userId,
         delta: points,
         nextChallenge: null,
+        nextLifetime: lifetimeAfterGain,
       });
       const arc = mapFriendArcRow(updatedRow);
       arc.percent = percent;
@@ -268,6 +381,10 @@ test("step completion with different idempotency keys preserves both updates", a
   assert.equal(first.arc.arcPoints, STEP_POINTS);
   assert.equal(second.arc.arcPoints, STEP_POINTS * 2);
   assert.equal(store.snapshot().arc_points, STEP_POINTS * 2);
+  assert.equal(store.snapshot().lifetime.xp, STEP_POINTS * 2);
+  assert.equal(first.arc.lifetime?.xp, STEP_POINTS);
+  assert.equal(first.arc.lifetime?.streak, "1 day");
+  assert.equal(second.arc.lifetime?.xp, STEP_POINTS * 2);
 });
 
 test("duplicate idempotency key returns cached payload without double awarding", async () => {
@@ -279,6 +396,7 @@ test("duplicate idempotency key returns cached payload without double awarding",
   assert.equal(first.arc.arcPoints, STEP_POINTS);
   assert.deepEqual(second.arc, first.arc);
   assert.equal(store.snapshot().arc_points, STEP_POINTS);
+  assert.equal(store.snapshot().lifetime.xp, STEP_POINTS);
 });
 
 test("arc reload matches mutation response percent and totals", async () => {
@@ -289,6 +407,7 @@ test("arc reload matches mutation response percent and totals", async () => {
   assert.equal(reloadedArc.arcPoints, result.arc.arcPoints);
   assert.equal(reloadedArc.pointsToday, result.arc.pointsToday);
   assert.equal(reloadedArc.percent, result.arc.percent);
+  assert.equal(reloadedArc.lifetime?.xp, result.arc.lifetime?.xp);
 });
 
 test("challenge completion clears challenge and clamps percent", async () => {
@@ -303,6 +422,7 @@ test("challenge completion clears challenge and clamps percent", async () => {
   const result = await completeChallenge({ store, key: "challenge-key" });
 
   assert.equal(result.arc.arcPoints, 15);
-  assert.equal(result.arc.percent, 0);
+  assert.equal(result.arc.percent, 15);
   assert.equal(result.arc.challenge, null);
+  assert.equal(result.arc.lifetime?.xp, 15);
 });

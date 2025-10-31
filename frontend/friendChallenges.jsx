@@ -406,18 +406,56 @@ const normalizeChallenge = (challenge, fallbackName) => {
 
 const normalizeLifetime = (lifetime) => {
   if (!isPlainObject(lifetime)) {
-    return { xp: 0, streak: "—", drag: "0%" };
+    return { xp: 0, streak: "—", streakDays: 0, drag: "0%", dragPercent: null };
   }
 
-  const xp = pickFinite(lifetime.xp, lifetime.points, lifetime.total_xp) ?? 0;
-  const streak = safeText(lifetime.streak) || `${pickFinite(lifetime.days, lifetime.streak_days) ?? 0} days`;
-  const dragValue = pickFinite(lifetime.drag_percent, lifetime.drag);
-  const drag = safeText(lifetime.drag) || (dragValue !== null ? `${dragValue}%` : "0%");
+  const rawXp = pickFinite(lifetime.xp, lifetime.points, lifetime.total_xp, lifetime.totalXp) ?? 0;
+  const xp = Math.max(0, Math.round(rawXp));
+
+  const streakLabel = safeText(lifetime.streak);
+  let streakDays =
+    pickFinite(
+      lifetime.streak_days,
+      lifetime.days,
+      lifetime.current_streak,
+      lifetime.currentStreak
+    ) ?? null;
+  if (streakDays === null && streakLabel) {
+    const match = streakLabel.match(/-?\d+/);
+    if (match) {
+      streakDays = Number(match[0]);
+    }
+  }
+  if (!Number.isFinite(streakDays)) {
+    streakDays = 0;
+  } else {
+    streakDays = Math.max(0, Math.round(streakDays));
+  }
+  const streak =
+    streakLabel ||
+    `${streakDays} ${streakDays === 1 ? "day" : "days"}`;
+
+  let dragPercent = pickFinite(lifetime.drag_percent, lifetime.dragPercent);
+  if (!Number.isFinite(dragPercent)) {
+    dragPercent = null;
+    if (typeof lifetime.drag === "string") {
+      const match = lifetime.drag.match(/-?\d+(\.\d+)?/);
+      if (match) {
+        const parsed = Number(match[0]);
+        if (Number.isFinite(parsed)) {
+          dragPercent = parsed;
+        }
+      }
+    }
+  }
+  const drag = safeText(lifetime.drag) || (dragPercent !== null ? `${dragPercent}%` : "0%");
 
   return {
     xp,
     streak,
+    streakDays,
     drag,
+    dragPercent: dragPercent !== null ? dragPercent : null,
   };
 };
 
@@ -1133,7 +1171,7 @@ export default function FriendChallenges(props = {}) {
 
     const swapsLeft = Number.isFinite(challenge.swapsLeft) ? challenge.swapsLeft : 0;
 
-    const lifetime = arc.lifetime || { xp: 0, streak: "—", drag: "0%" };
+    const lifetime = normalizeLifetime(arc.lifetime);
     const arcPoints = Number.isFinite(arc.arcPoints) ? arc.arcPoints : 0;
     const nextThreshold =
       Number.isFinite(arc.nextThreshold) && arc.nextThreshold > 0 ? arc.nextThreshold : 100;
@@ -1143,11 +1181,16 @@ export default function FriendChallenges(props = {}) {
     const progressPct = Number.isFinite(arc.percent)
       ? arc.percent
       : progressPercent(arcPoints, nextThreshold);
-    const progressLabel = `${clampPct(Number.isFinite(progressPct) ? progressPct : 0)}%`;
+    const safePercent = clampPct(Number.isFinite(progressPct) ? progressPct : 0);
+    const progressLabel = `${safePercent}%`;
     const dayLabel = sharedDayLabel(day, length);
     const pointsTodayLabel = pointsToday > 0 ? `+${pointsToday} XP today` : "0 XP logged today";
     const showFallbackStepsNote = !arc.hasStructuredSteps;
-    const progressBarWidth = `${clampPct(Number.isFinite(progressPct) ? progressPct : 0)}%`;
+    const progressBarWidth = `${safePercent}%`;
+    const displayArcPoints =
+      Number.isFinite(arcPoints) && arcPoints > 0
+        ? arcPoints
+        : Math.round((safePercent / 100) * nextThreshold);
     const planExtendKey = `plan-extend:${arc.id}`;
     const planSnoozeKey = `plan-snooze:${arc.id}`;
     const planFailKey = `plan-fail-forward:${arc.id}`;
@@ -1407,7 +1450,7 @@ export default function FriendChallenges(props = {}) {
                 </div>
                 <div className="flex items-center justify-between text-sm">
                   <span>
-                    {arcPoints} / {nextThreshold} → Next reward
+                    {displayArcPoints} / {nextThreshold} → Next reward
                   </span>
                   <a href="#" className="inline-flex items-center gap-1 text-[var(--ink)] hover:underline">
                     View details <ChevronRight size={16} />
