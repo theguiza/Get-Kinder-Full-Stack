@@ -397,7 +397,6 @@ async function handleArcMutation(req, res, mutator, options = {}) {
           responseArc.next_threshold = threshold;
         }
       }
-      }
 
       const payload = { arc: responseArc };
       await putCached(client, arcId, idempotencyKey, payload);
