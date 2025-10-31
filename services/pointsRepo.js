@@ -42,7 +42,9 @@ export async function awardAndMarkStepDone(client, { arcId, userId, delta, updat
     throw Object.assign(new Error("Arc not found after update"), { status: 404 });
   }
 
-  const percent = clampPercent(progressPercent(updated.arc_points, updated.next_threshold));
+  const rawThreshold = Number(updated.next_threshold);
+  const threshold = Number.isFinite(rawThreshold) && rawThreshold > 0 ? rawThreshold : 100;
+  const percent = clampPercent(progressPercent(updated.arc_points, threshold));
   return { row: updated, percent };
 }
 
@@ -80,6 +82,8 @@ export async function awardChallengeAndClear(client, { arcId, userId, delta, nex
     throw Object.assign(new Error("Arc not found after update"), { status: 404 });
   }
 
-  const percent = clampPercent(progressPercent(updated.arc_points, updated.next_threshold));
+  const rawThreshold = Number(updated.next_threshold);
+  const threshold = Number.isFinite(rawThreshold) && rawThreshold > 0 ? rawThreshold : 100;
+  const percent = clampPercent(progressPercent(updated.arc_points, threshold));
   return { row: updated, percent };
 }

@@ -1,3 +1,5 @@
+import { progressPercent } from '../shared/metrics.js';
+
 // Backend/dashboardController.js
 // No `snapshot` usage. Ensures a real top-level `challenge` on each arc before render.
 // Includes SQL logging with position marker if Postgres errors.
@@ -205,6 +207,15 @@ export function makeDashboardController(pool) {
         // Ensure each arc has a top-level challenge object before rendering.
         for (const row of hydratedArcs) {
           await ensureTopLevelChallenge(row);
+          const rawPoints = Number(row.arc_points ?? row.arcPoints);
+          const points = Number.isFinite(rawPoints) ? rawPoints : 0;
+          const rawThreshold = Number(row.next_threshold ?? row.nextThreshold);
+          const threshold = Number.isFinite(rawThreshold) && rawThreshold > 0 ? rawThreshold : 100;
+          row.next_threshold = threshold;
+          if (!Number.isFinite(Number(row.nextThreshold)) || Number(row.nextThreshold) <= 0) {
+            row.nextThreshold = threshold;
+          }
+          row.percent = progressPercent(points, threshold);
         }
 
         let arcsForRender = hydratedArcs;

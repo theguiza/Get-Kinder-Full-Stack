@@ -332,6 +332,20 @@ async function handleArcMutation(req, res, mutator, options = {}) {
       }
 
       const currentRow = arcRowResult.rows[0];
+      const thresholdValue = Number(currentRow.next_threshold);
+      if (!Number.isFinite(thresholdValue) || thresholdValue <= 0) {
+        await client.query(
+          `
+            UPDATE friend_arcs
+               SET next_threshold = 100,
+                   updated_at     = NOW()
+             WHERE id = $1
+               AND user_id = $2
+          `,
+          [arcId, userId]
+        );
+        currentRow.next_threshold = 100;
+      }
       const state = buildStateFromRow(currentRow);
 
       const context = {
@@ -370,11 +384,19 @@ async function handleArcMutation(req, res, mutator, options = {}) {
         }
       }
 
-      if (responseArc?.percent == null) {
-        responseArc.percent = progressPercent(
-          toNumber(responseArc?.arcPoints, 0),
-          toNumber(responseArc?.nextThreshold, responseArc?.next_threshold ?? 0)
-        );
+      {
+        const points = toNumber(responseArc?.arcPoints, 0);
+        const fallbackThreshold = toNumber(responseArc?.next_threshold, 0);
+        const incomingThreshold = toNumber(responseArc?.nextThreshold, fallbackThreshold);
+        const threshold = incomingThreshold > 0 ? incomingThreshold : 100;
+        responseArc.percent = progressPercent(points, threshold);
+        if (responseArc.nextThreshold !== undefined) {
+          responseArc.nextThreshold = threshold;
+        }
+        if (responseArc.next_threshold !== undefined) {
+          responseArc.next_threshold = threshold;
+        }
+      }
       }
 
       const payload = { arc: responseArc };
