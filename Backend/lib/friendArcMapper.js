@@ -139,5 +139,24 @@ export function mapFriendArcRow(row) {
 
   arc.percent = progressPercent(arc.arcPoints, arc.nextThreshold);
   arc.friend_id = arc.id; // temporary compatibility until UI stops referencing friend_id
+
+  const pendingDay = toFiniteNumber(arc.lifetime.pendingDay ?? arc.lifetime.pending_day);
+  const pendingDayUnlockAt = toSafeString(
+    arc.lifetime.pendingDayUnlockAt ?? arc.lifetime.pending_day_unlock_at,
+    null
+  );
+  if (pendingDay && pendingDay > 0) {
+    const unlockTimestamp = pendingDayUnlockAt ? Date.parse(pendingDayUnlockAt) : NaN;
+    if (!Number.isFinite(unlockTimestamp) || unlockTimestamp > Date.now()) {
+      arc.pendingDay = pendingDay;
+      if (pendingDayUnlockAt) {
+        arc.pendingDayUnlockAt = pendingDayUnlockAt;
+      }
+      arc.awaitingNextDay = true;
+    } else {
+      arc.day = Math.max(1, Math.round(pendingDay));
+    }
+  }
+
   return arc;
 }

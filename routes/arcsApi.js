@@ -239,6 +239,7 @@ router.post("/api/arcs/:arcId/steps/:stepId/complete", (req, res) =>
       const totalPoints = toNumber(arc.arcPoints, 0);
 
       let promotedArc = null;
+      let cycleReset = false;
       if (totalPoints >= threshold) {
         promotedArc = await promoteArcIfEligible({
           client,
@@ -261,6 +262,45 @@ router.post("/api/arcs/:arcId/steps/:stepId/complete", (req, res) =>
         });
         if (resetArc) {
           arc = resetArc;
+          cycleReset = true;
+        }
+      }
+
+      if (cycleReset && arc) {
+        const existingFlags = isPlainObject(arc.clientFlags) ? arc.clientFlags : {};
+        arc.clientFlags = {
+          ...existingFlags,
+          cycleReset: true,
+          cycleResetAt: new Date().toISOString(),
+        };
+      }
+      if (arc) {
+        const pendingDayFlag = toNumber(
+          arc.pendingDay ??
+            arc.pending_day ??
+            arc?.lifetime?.pendingDay ??
+            arc?.lifetime?.pending_day,
+          0
+        );
+        const pendingUnlockFlag =
+          toSafeString(
+            arc.pendingDayUnlockAt ??
+              arc.pending_day_unlock_at ??
+              arc?.lifetime?.pendingDayUnlockAt ??
+              arc?.lifetime?.pending_day_unlock_at,
+            ""
+          ) || null;
+        if (pendingDayFlag > 0) {
+          const existingFlags = isPlainObject(arc.clientFlags) ? arc.clientFlags : {};
+          arc.clientFlags = {
+            ...existingFlags,
+            awaitingNextDay: true,
+            pendingDay: pendingDayFlag,
+            pendingDayUnlockAt: pendingUnlockFlag,
+          };
+        } else if (isPlainObject(arc.clientFlags) && arc.clientFlags.awaitingNextDay) {
+          const { awaitingNextDay, pendingDay, pendingDayUnlockAt, ...rest } = arc.clientFlags;
+          arc.clientFlags = Object.keys(rest).length ? rest : null;
         }
       }
 
@@ -624,7 +664,18 @@ function buildStateFromRow(row) {
   const challenge = row.challenge && typeof row.challenge === "object" ? deepClone(row.challenge) : null;
   const badges = row.badges && typeof row.badges === "object" ? deepClone(row.badges) : {};
 
-  return {
+  const pendingDay =
+    toNumber(lifetime.pendingDay ?? lifetime.pending_day ?? row.pending_day ?? row.pendingDay, 0) || 0;
+  const pendingDayUnlockAt =
+    toSafeString(
+      lifetime.pendingDayUnlockAt ??
+        lifetime.pending_day_unlock_at ??
+        row.pendingDayUnlockAt ??
+        row.pending_day_unlock_at,
+      ""
+    ) || null;
+
+  const state = {
     id: row.id,
     friendId: row.id ?? null,
     name: toSafeString(row.name, `Friend ${row.id ?? ""}`),
@@ -639,7 +690,12 @@ function buildStateFromRow(row) {
     steps,
     challenge,
     badges,
+    pendingDay: pendingDay > 0 ? pendingDay : null,
+    pendingDayUnlockAt,
   };
+  const totalDays = Math.max(1, toNumber(state.length, 1));
+  resolvePendingDay(state, totalDays);
+  return state;
 }
 
 function finalizeState(state) {
@@ -660,6 +716,33 @@ function finalizeState(state) {
   state.challenge = state.challenge && typeof state.challenge === "object" ? state.challenge : null;
   state.badges = state.badges && typeof state.badges === "object" ? state.badges : {};
 
+  const pendingDay = toNumber(state.pendingDay ?? state.pending_day, 0);
+  const pendingDayUnlockAt = toSafeString(
+    state.pendingDayUnlockAt ?? state.pending_day_unlock_at,
+    ""
+  );
+  if (pendingDay > 0) {
+    state.pendingDay = pendingDay;
+    state.pending_day = pendingDay;
+    state.lifetime.pendingDay = pendingDay;
+    state.lifetime.pending_day = pendingDay;
+  } else {
+    delete state.pendingDay;
+    delete state.pending_day;
+    delete state.lifetime.pendingDay;
+    delete state.lifetime.pending_day;
+  }
+  if (pendingDayUnlockAt) {
+    state.pendingDayUnlockAt = pendingDayUnlockAt;
+    state.pending_day_unlock_at = pendingDayUnlockAt;
+    state.lifetime.pendingDayUnlockAt = pendingDayUnlockAt;
+    state.lifetime.pending_day_unlock_at = pendingDayUnlockAt;
+  } else {
+    delete state.pendingDayUnlockAt;
+    delete state.pending_day_unlock_at;
+    delete state.lifetime.pendingDayUnlockAt;
+    delete state.lifetime.pending_day_unlock_at;
+  }
 }
 
 function normalizeStep(step, index) {
@@ -888,6 +971,10 @@ async function resetArcStepsForAnotherCycle({ client, arc, userId }) {
   });
 
   const lifetime = isPlainObject(arc.lifetime) ? deepClone(arc.lifetime) : {};
+  delete lifetime.pendingDay;
+  delete lifetime.pending_day;
+  delete lifetime.pendingDayUnlockAt;
+  delete lifetime.pending_day_unlock_at;
   const cyclesCompleted = toNumber(
     lifetime?.cyclesCompleted ?? lifetime?.cycles_completed,
     0
@@ -910,12 +997,22 @@ async function resetArcStepsForAnotherCycle({ client, arc, userId }) {
     steps: resetSteps,
     challenge: arc.challenge ? deepClone(arc.challenge) : null,
     badges: arc.badges && typeof arc.badges === "object" ? deepClone(arc.badges) : {},
+    pendingDay: null,
+    pending_day: null,
+    pendingDayUnlockAt: null,
+    pending_day_unlock_at: null,
   };
 
   const updatedRow = await updateArc(client, arc.id, userId, resetState);
   if (!updatedRow) return null;
   const updatedArc = mapFriendArcRow(updatedRow);
   updatedArc.percent = progressPercent(updatedArc.arcPoints, updatedArc.nextThreshold);
+  const existingFlags = isPlainObject(updatedArc.clientFlags) ? updatedArc.clientFlags : {};
+  updatedArc.clientFlags = {
+    ...existingFlags,
+    cycleReset: true,
+    cycleResetAt: new Date().toISOString(),
+  };
   return updatedArc;
 }
 
@@ -945,23 +1042,101 @@ function findNextIncompleteDay(steps, minDay) {
   return candidate;
 }
 
+function computeNextDayUnlockAt(now = new Date()) {
+  const unlock = new Date(now);
+  unlock.setHours(24, 0, 0, 0);
+  return unlock.toISOString();
+}
+
+function clearPendingDay(state) {
+  if (!state) return;
+  const lifetime = state.lifetime && typeof state.lifetime === "object" ? state.lifetime : {};
+  delete state.pendingDay;
+  delete state.pending_day;
+  delete state.pendingDayUnlockAt;
+  delete state.pending_day_unlock_at;
+  delete lifetime.pendingDay;
+  delete lifetime.pending_day;
+  delete lifetime.pendingDayUnlockAt;
+  delete lifetime.pending_day_unlock_at;
+}
+
+function schedulePendingDay(state, targetDay, now = new Date()) {
+  if (!state || !targetDay) return;
+  const lifetime = state.lifetime && typeof state.lifetime === "object" ? state.lifetime : (state.lifetime = {});
+  const nextDay = Math.max(1, Math.round(targetDay));
+  state.pendingDay = nextDay;
+  state.pending_day = nextDay;
+  lifetime.pendingDay = nextDay;
+  lifetime.pending_day = nextDay;
+  const unlockIso = computeNextDayUnlockAt(now);
+  state.pendingDayUnlockAt = unlockIso;
+  state.pending_day_unlock_at = unlockIso;
+  lifetime.pendingDayUnlockAt = unlockIso;
+  lifetime.pending_day_unlock_at = unlockIso;
+}
+
+function resolvePendingDay(state, totalDays) {
+  if (!state) {
+    return { currentDay: 1, lifetime: {} };
+  }
+  const lifetime = state.lifetime && typeof state.lifetime === "object" ? state.lifetime : (state.lifetime = {});
+  let currentDay = toNumber(state.day, 1);
+  if (!Number.isFinite(currentDay) || currentDay < 1) currentDay = 1;
+
+  const pendingDayCandidate = toNumber(
+    state.pendingDay ?? state.pending_day ?? lifetime.pendingDay ?? lifetime.pending_day,
+    0
+  );
+  const pendingUnlockIso = toSafeString(
+    state.pendingDayUnlockAt ??
+      state.pending_day_unlock_at ??
+      lifetime.pendingDayUnlockAt ??
+      lifetime.pending_day_unlock_at,
+    ""
+  );
+
+  if (pendingDayCandidate > 0) {
+    const pendingUnlockTimestamp = pendingUnlockIso ? Date.parse(pendingUnlockIso) : NaN;
+    if (!Number.isFinite(pendingUnlockTimestamp) || pendingUnlockTimestamp <= Date.now()) {
+      const unlockedDay = Math.max(
+        1,
+        Math.min(totalDays, Math.round(pendingDayCandidate))
+      );
+      state.day = unlockedDay;
+      currentDay = unlockedDay;
+      clearPendingDay(state);
+    } else {
+      state.pendingDay = Math.max(1, Math.round(pendingDayCandidate));
+      state.pending_day = state.pendingDay;
+      lifetime.pendingDay = state.pendingDay;
+      lifetime.pending_day = state.pendingDay;
+      state.pendingDayUnlockAt = pendingUnlockIso;
+      state.pending_day_unlock_at = pendingUnlockIso;
+      lifetime.pendingDayUnlockAt = pendingUnlockIso;
+      lifetime.pending_day_unlock_at = pendingUnlockIso;
+    }
+  }
+
+  return { currentDay, lifetime };
+}
+
 function advanceArcDayAfterStepCompletion(state) {
   if (!state || !Array.isArray(state.steps)) return;
   const totalDays = Math.max(1, toNumber(state.length, 1));
-  let currentDay = toNumber(state.day, 1);
-  if (!Number.isFinite(currentDay) || currentDay < 1) currentDay = 1;
+  const { currentDay: resolvedDay } = resolvePendingDay(state, totalDays);
+  let currentDay = resolvedDay;
 
   const stepsForCurrentDay = state.steps.filter(
     (step) => extractStepDay(step, currentDay) === currentDay
   );
 
   if (!stepsForCurrentDay.length) {
-    const nextCandidate = findNextIncompleteDay(state.steps, 1);
-    if (nextCandidate !== null) {
-      state.day = nextCandidate;
-    } else {
-      state.day = currentDay;
+    const nextCandidate = findNextIncompleteDay(state.steps, currentDay + 1);
+    if (nextCandidate !== null && nextCandidate > currentDay) {
+      schedulePendingDay(state, nextCandidate);
     }
+    state.day = currentDay;
     return;
   }
 
@@ -972,11 +1147,19 @@ function advanceArcDayAfterStepCompletion(state) {
 
   if (!hasRemaining) {
     const nextCandidate = findNextIncompleteDay(state.steps, currentDay + 1);
+    let targetDay = null;
     if (nextCandidate !== null) {
-      state.day = nextCandidate;
+      targetDay = nextCandidate;
     } else if (currentDay < totalDays) {
-      state.day = Math.min(totalDays, currentDay + 1);
+      targetDay = Math.min(totalDays, currentDay + 1);
     }
+    if (targetDay && targetDay > currentDay) {
+      schedulePendingDay(state, targetDay);
+    } else {
+      clearPendingDay(state);
+    }
+  } else {
+    clearPendingDay(state);
   }
 
   const normalizedDay = toNumber(state.day, currentDay);

@@ -307,6 +307,17 @@ export const isMissingQuiz = (score, type) => {
 
 const isPlainObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const safeText = (value) => (typeof value === "string" ? value.trim() : "");
+
+const toBoolean = (value) => {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return Number.isFinite(value) ? value !== 0 : false;
+  if (typeof value === "string") {
+    const token = value.trim().toLowerCase();
+    if (!token) return false;
+    return token === "true" || token === "1" || token === "yes" || token === "y";
+  }
+  return false;
+};
 const toIdString = (value) => {
   if (value === null || value === undefined) return "";
   return String(value).trim();
@@ -678,6 +689,31 @@ const normalizeArc = (raw, index) => {
     safeText(snapshot.archetypePrimary) ||
     null;
 
+  const clientFlagsSource = isPlainObject(raw.clientFlags)
+    ? raw.clientFlags
+    : isPlainObject(snapshot.clientFlags)
+    ? snapshot.clientFlags
+    : {};
+  const cycleReset = toBoolean(
+    clientFlagsSource.cycleReset ??
+      clientFlagsSource.cycle_reset ??
+      raw.cycleReset ??
+      raw.cycle_reset ??
+      snapshot.cycleReset ??
+      snapshot.cycle_reset ??
+      false
+  );
+  const cycleResetAt =
+    safeText(
+      clientFlagsSource.cycleResetAt ??
+        clientFlagsSource.cycle_reset_at ??
+        raw.cycleResetAt ??
+        raw.cycle_reset_at ??
+        snapshot.cycleResetAt ??
+        snapshot.cycle_reset_at ??
+        null
+    ) || null;
+
   const { steps, hasStructuredSteps } = normalizeSteps(
     Array.isArray(raw.steps)
       ? raw.steps
@@ -703,6 +739,64 @@ const normalizeArc = (raw, index) => {
       ? snapshot.lifetime
       : null
   );
+  const lifetimePendingDay = pickFinite(lifetime.pendingDay, lifetime.pending_day);
+  const lifetimePendingUnlockAt =
+    safeText(lifetime.pendingDayUnlockAt ?? lifetime.pending_day_unlock_at ?? null) || null;
+  const pendingDayCandidate = pickFinite(
+    lifetimePendingDay,
+    raw.pendingDay,
+    raw.pending_day,
+    snapshot.pendingDay,
+    snapshot.pending_day,
+    clientFlagsSource.pendingDay,
+    clientFlagsSource.pending_day
+  );
+  const pendingDay =
+    Number.isFinite(pendingDayCandidate) && pendingDayCandidate > 0
+      ? Math.round(pendingDayCandidate)
+      : null;
+  const pendingDayUnlockAt =
+    lifetimePendingUnlockAt ||
+    safeText(
+      raw.pendingDayUnlockAt ??
+        raw.pending_day_unlock_at ??
+        snapshot.pendingDayUnlockAt ??
+        snapshot.pending_day_unlock_at ??
+        clientFlagsSource.pendingDayUnlockAt ??
+        clientFlagsSource.pending_day_unlock_at ??
+        null
+    ) ||
+    null;
+  const pendingUnlockTimestamp = pendingDayUnlockAt ? Date.parse(pendingDayUnlockAt) : NaN;
+  const awaitingNextDaySource = toBoolean(
+    clientFlagsSource.awaitingNextDay ??
+      clientFlagsSource.awaiting_next_day ??
+      raw.awaitingNextDay ??
+      raw.awaiting_next_day ??
+      snapshot.awaitingNextDay ??
+      snapshot.awaiting_next_day ??
+      false
+  );
+  const awaitingNextDay = awaitingNextDaySource ||
+    (Number.isFinite(pendingDay) &&
+      pendingDay > 0 &&
+      (
+        !pendingDayUnlockAt ||
+        Number.isNaN(pendingUnlockTimestamp) ||
+        pendingUnlockTimestamp > Date.now()
+      ));
+  const effectivePendingDay = awaitingNextDay ? pendingDay : null;
+  const effectivePendingUnlockAt = awaitingNextDay ? pendingDayUnlockAt : null;
+  const clientFlags = {};
+  if (cycleReset) clientFlags.cycleReset = true;
+  if (cycleResetAt) clientFlags.cycleResetAt = cycleResetAt;
+  if (awaitingNextDay) clientFlags.awaitingNextDay = true;
+  if (Number.isFinite(effectivePendingDay) && effectivePendingDay > 0) {
+    clientFlags.pendingDay = effectivePendingDay;
+  }
+  if (effectivePendingUnlockAt) {
+    clientFlags.pendingDayUnlockAt = effectivePendingUnlockAt;
+  }
 
   const recent = Array.isArray(raw.recent)
     ? raw.recent
@@ -766,6 +860,11 @@ const normalizeArc = (raw, index) => {
     badges,
     signals,
     redFlags,
+    cycleReset,
+    awaitingNextDay,
+    pendingDay: Number.isFinite(effectivePendingDay) && effectivePendingDay > 0 ? effectivePendingDay : null,
+    pendingDayUnlockAt: effectivePendingUnlockAt,
+    clientFlags: Object.keys(clientFlags).length ? clientFlags : null,
     meta: {
       rawSnapshot: snapshot,
       updatedAt: raw.updatedAt || snapshot.updated_at || null,
@@ -852,7 +951,7 @@ const StepRow = ({
           disabled={continueDisabled}
           className={`${buttonBase} bg-[var(--coral)] text-white hover:opacity-90 focus:ring-[var(--coral)]`}
         >
-          Continue
+          Completed
         </button>
       ) : canonicalState === "todo" ? (
         <button
@@ -1294,12 +1393,65 @@ export default function FriendChallenges(props = {}) {
       const serverId = toIdString(step?.serverId) || toIdString(step?.id) || null;
       const serverOrdinal = Number.isFinite(Number(step?.serverOrdinal)) ? Number(step.serverOrdinal) : 1;
       if (!arc || !arc.id || !serverId) return;
+      const arcId = String(arc.id);
       const stepKey = serverOrdinal > 1 ? `${serverId}__${serverOrdinal}` : serverId;
-      const key = `step-complete:${arc.id}:${stepKey}`;
-      const path = `/api/arcs/${encodeURIComponent(arc.id)}/steps/${encodeURIComponent(stepKey)}/complete`;
-      return mutateArc(key, path);
+      const previousStatus = normalizeStepStatusValue(step?.status ?? step?.state ?? "inProgress");
+      const optimistic = () => {
+        let applied = false;
+        let prevStatusValue = null;
+        let prevStateValue = null;
+        setArcs((prev) =>
+          prev.map((candidate) => {
+            if (!candidate || String(candidate.id) !== arcId) return candidate;
+            if (!Array.isArray(candidate.steps)) return candidate;
+            const nextSteps = candidate.steps.map((existing) => {
+              if (!existing) return existing;
+              const existingServerId = toIdString(existing.serverId) || toIdString(existing.id);
+              const existingOrdinal = Number.isFinite(Number(existing.serverOrdinal))
+                ? Number(existing.serverOrdinal)
+                : 1;
+              if (existingServerId !== serverId || existingOrdinal !== serverOrdinal) return existing;
+              applied = true;
+              prevStatusValue = existing.status ?? null;
+              prevStateValue = existing.state ?? null;
+              const currentStatus = normalizeStepStatusValue(existing.status ?? existing.state ?? "todo");
+              if (currentStatus === "done") {
+                return existing;
+              }
+              return { ...existing, status: "done", state: "done" };
+            });
+            return applied ? { ...candidate, steps: nextSteps } : candidate;
+          })
+        );
+        if (!applied) return null;
+        return () => {
+          setArcs((prev) =>
+            prev.map((candidate) => {
+              if (!candidate || String(candidate.id) !== arcId) return candidate;
+              if (!Array.isArray(candidate.steps)) return candidate;
+              const revertedSteps = candidate.steps.map((existing) => {
+                if (!existing) return existing;
+                const existingServerId = toIdString(existing.serverId) || toIdString(existing.id);
+                const existingOrdinal = Number.isFinite(Number(existing.serverOrdinal))
+                  ? Number(existing.serverOrdinal)
+                  : 1;
+                if (existingServerId !== serverId || existingOrdinal !== serverOrdinal) return existing;
+                return {
+                  ...existing,
+                  status: prevStatusValue ?? previousStatus,
+                  state: prevStateValue ?? previousStatus,
+                };
+              });
+              return { ...candidate, steps: revertedSteps };
+            })
+          );
+        };
+      };
+      const key = `step-complete:${arcId}:${stepKey}`;
+      const path = `/api/arcs/${encodeURIComponent(arcId)}/steps/${encodeURIComponent(stepKey)}/complete`;
+      return mutateArc(key, path, {}, { optimistic });
     },
-    [mutateArc]
+    [mutateArc, setArcs]
   );
 
   const handleChallengeComplete = React.useCallback(
@@ -1417,7 +1569,23 @@ export default function FriendChallenges(props = {}) {
     const progressLabel = `${safePercent}%`;
     const dayLabel = sharedDayLabel(day, length);
     const pointsTodayLabel = pointsToday > 0 ? `+${pointsToday} XP today` : "0 XP logged today";
-    const showFallbackStepsNote = !arc.hasStructuredSteps;
+    const activeDay = Math.max(1, Number.isFinite(day) && day > 0 ? Math.round(day) : 1);
+    const cycleReset = Boolean(arc.cycleReset || arc.clientFlags?.cycleReset);
+    const pendingDay = Number.isFinite(arc.pendingDay) ? Math.round(arc.pendingDay) : null;
+    const pendingDayUnlockAt =
+      safeText(
+        arc.pendingDayUnlockAt ??
+          arc.clientFlags?.pendingDayUnlockAt ??
+          arc.lifetime?.pendingDayUnlockAt ??
+          arc.lifetime?.pending_day_unlock_at ??
+          null
+      ) || null;
+    const awaitingNextDay = Boolean(
+      arc.awaitingNextDay ||
+        arc.clientFlags?.awaitingNextDay ||
+        (pendingDay && pendingDay > activeDay)
+    );
+    const showFallbackStepsNote = !arc.hasStructuredSteps && !cycleReset && !awaitingNextDay;
     const progressBarWidth = `${safePercent}%`;
     const displayArcPoints =
       Number.isFinite(arcPoints) && arcPoints > 0
@@ -1430,7 +1598,6 @@ export default function FriendChallenges(props = {}) {
     const challengeSwapKey = `challenge-swap:${arc.id}`;
     const photoUploadKey = `photo-upload:${arc.id}`;
     const photoUploading = isLoadingAction(photoUploadKey);
-    const activeDay = Math.max(1, Number.isFinite(day) && day > 0 ? Math.round(day) : 1);
     const visibleSteps = Array.isArray(arc.steps)
       ? arc.steps.filter((step, index) => {
           const fallbackDay = Math.floor(index / 2) + 1;
@@ -1446,8 +1613,29 @@ export default function FriendChallenges(props = {}) {
           return stepDay === activeDay;
         })
       : [];
-    const hasVisibleSteps = visibleSteps.length > 0;
-    const showAllCompleteMessage = arc.hasStructuredSteps && !hasVisibleSteps;
+    const hasVisibleSteps = !cycleReset && !awaitingNextDay && visibleSteps.length > 0;
+    const showAllCompleteMessage =
+      cycleReset || awaitingNextDay || (arc.hasStructuredSteps && !hasVisibleSteps);
+    const nextDayLabel = Number.isFinite(pendingDay) && pendingDay > 0 ? pendingDay : activeDay + 1;
+    const pendingUnlockDate = pendingDayUnlockAt ? new Date(pendingDayUnlockAt) : null;
+    const hasValidUnlock =
+      pendingUnlockDate && !Number.isNaN(pendingUnlockDate.getTime());
+    const unlockLabel = hasValidUnlock
+      ? pendingUnlockDate.toLocaleString(undefined, {
+          weekday: "short",
+          month: "short",
+          day: "numeric",
+          hour: "numeric",
+          minute: "2-digit",
+        })
+      : null;
+    const completionMessage = cycleReset
+      ? "Great job — today's actions are logged. Fresh prompts unlock once the next cycle opens."
+      : awaitingNextDay
+      ? unlockLabel
+        ? `Great job — Day ${nextDayLabel} unlocks ${unlockLabel}. Check back for new actions then.`
+        : "Great job — today's actions are logged. Check back tomorrow for new prompts."
+      : "All actions for today are complete. Check back tomorrow for two new prompts.";
 
     return (
       <div className="grid md:grid-cols-3 gap-6 md:gap-8 items-start">
@@ -1527,7 +1715,7 @@ export default function FriendChallenges(props = {}) {
                   </ul>
                 ) : showAllCompleteMessage ? (
                   <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
-                    All actions for today are complete. Check back tomorrow for two new prompts.
+                    {completionMessage}
                   </div>
                 ) : null}
 
