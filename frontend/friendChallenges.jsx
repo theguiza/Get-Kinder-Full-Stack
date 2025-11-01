@@ -7,6 +7,7 @@ import React, { useState } from "react";
 import { progressPercent, clampPct, dayLabel as sharedDayLabel } from "../shared/metrics.js";
 
 const MAX_IMAGE_SIZE_BYTES = 2 * 1024 * 1024; // 2MB client-side guard
+const DAILY_SURPRISE_LIMIT = 3;
 
 const readCsrfToken = () => {
   if (typeof document === "undefined") return null;
@@ -325,6 +326,45 @@ const toDomSafeId = (value, fallback = "item") => {
   return sanitized.length ? sanitized : fallback;
 };
 
+const normalizeStepStatusValue = (value) => {
+  const raw = safeText(value);
+  if (!raw) return "todo";
+  const token = raw.toLowerCase().replace(/[\s_-]+/g, "");
+  switch (token) {
+    case "todo":
+    case "notstarted":
+    case "pending":
+    case "ready":
+    case "queued":
+    case "queue":
+    case "idle":
+    case "available":
+    case "open":
+    case "new":
+      return "todo";
+    case "inprogress":
+    case "started":
+    case "active":
+    case "ongoing":
+      return "inProgress";
+    case "done":
+    case "complete":
+    case "completed":
+    case "finished":
+    case "resolved":
+      return "done";
+    case "overdue":
+    case "late":
+      return "overdue";
+    case "frozen":
+    case "paused":
+    case "blocked":
+      return "frozen";
+    default:
+      return "todo";
+  }
+};
+
 const normalizeSteps = (steps, friendName) => {
   if (!Array.isArray(steps) || steps.length === 0) {
     return {
@@ -340,22 +380,102 @@ const normalizeSteps = (steps, friendName) => {
     };
   }
 
+  const seenServerIds = new Map();
+  const makeClientKey = (serverId, index) => {
+    const base = toIdString(serverId) || `step-${index + 1}`;
+    const count = (seenServerIds.get(base) ?? 0) + 1;
+    seenServerIds.set(base, count);
+    const clientId = count === 1 ? base : `${base}__${count}`;
+    return { clientId, baseId: base, ordinal: count };
+  };
+
+  const inferStepDay = (step, index) => {
+    const fallbackDay = Math.floor(index / 2) + 1;
+    if (!isPlainObject(step)) return fallbackDay;
+    const candidates = [
+      step.day,
+      step.day_number,
+      step.dayNumber,
+      step.day_index,
+      step.dayIndex,
+      step.day_id,
+      step.dayId,
+    ];
+    for (const candidate of candidates) {
+      const numeric = Number(candidate);
+      if (Number.isFinite(numeric) && numeric > 0) {
+        return Math.max(1, Math.round(numeric));
+      }
+    }
+    return fallbackDay;
+  };
+
   const coerced = steps.map((step, index) => {
+    const combineStatus = (primary, secondary) => {
+      const canonicalPrimary = normalizeStepStatusValue(primary);
+      const canonicalSecondary = normalizeStepStatusValue(secondary);
+      if (canonicalPrimary === canonicalSecondary) return canonicalPrimary;
+      if (canonicalPrimary === "todo" && (canonicalSecondary === "inProgress" || canonicalSecondary === "done")) {
+        return canonicalSecondary;
+      }
+      if (canonicalPrimary === "inProgress" && canonicalSecondary === "done") {
+        return canonicalSecondary;
+      }
+      if (canonicalPrimary === "todo" && canonicalSecondary === "overdue") {
+        return canonicalSecondary;
+      }
+      return canonicalPrimary !== "todo" ? canonicalPrimary : canonicalSecondary;
+    };
+
     if (typeof step === "string") {
-      return { id: `step-${index + 1}`, title: step, status: "todo", meta: "" };
+      const fallbackDay = Math.floor(index / 2) + 1;
+      const { clientId, baseId, ordinal } = makeClientKey(null, index);
+      return {
+        id: clientId,
+        title: step,
+        status: "todo",
+        serverId: baseId,
+        serverOrdinal: ordinal,
+        meta: "",
+        day: fallbackDay,
+        dayNumber: fallbackDay,
+        day_number: fallbackDay,
+      };
     }
     if (isPlainObject(step)) {
-      const id =
-        toIdString(step.id) ||
-        toIdString(step.step_id) ||
-        toIdString(step.stepId) ||
-        `step-${index + 1}`;
+      const rawServerId = step.id ?? step.step_id ?? step.stepId ?? null;
+      const { clientId, baseId, ordinal } = makeClientKey(rawServerId, index);
       const title = safeText(step.title) || safeText(step.name) || `Step ${index + 1}`;
-      const status = safeText(step.status) || safeText(step.state) || "todo";
+      const status = combineStatus(step.status, step.state);
       const meta = safeText(step.meta) || safeText(step.hint) || safeText(step.summary) || "";
-      return { id, title, status, meta };
+      const inferredDay = inferStepDay(step, index);
+      return {
+        ...step,
+        id: clientId,
+        serverId: baseId,
+        serverOrdinal: ordinal,
+        title,
+        status,
+        state: status,
+        meta,
+        day: inferredDay,
+        dayNumber: inferredDay,
+        day_number: inferredDay,
+      };
     }
-    return { id: `step-${index + 1}`, title: `Step ${index + 1}`, status: "todo", meta: "" };
+    const fallbackDay = Math.floor(index / 2) + 1;
+    const { clientId, baseId, ordinal } = makeClientKey(null, index);
+    return {
+      id: clientId,
+      title: `Step ${index + 1}`,
+      status: "todo",
+      serverId: baseId,
+      serverOrdinal: ordinal,
+      meta: "",
+      day: fallbackDay,
+      dayNumber: fallbackDay,
+      day_number: fallbackDay,
+    };
   });
 
   return { steps: coerced, hasStructuredSteps: true };
@@ -395,7 +515,8 @@ const normalizeChallenge = (challenge, fallbackName) => {
   return {
     id: null,
     templateId: null,
-    title: `Choose a micro kindness for ${fallbackName}`,
+    title: `You're all caught up${fallbackName ? ` for ${fallbackName}` : ""}!`,
+    description: "New surprises unlock tomorrow. Keep streaking with your steps for now.",
     effort: "Low",
     estMinutes: 5,
     points: 0,
@@ -450,12 +571,36 @@ const normalizeLifetime = (lifetime) => {
   }
   const drag = safeText(lifetime.drag) || (dragPercent !== null ? `${dragPercent}%` : "0%");
 
+  const dailySurpriseDate =
+    safeText(lifetime.dailySurpriseDate ?? lifetime.daily_surprise_date) || null;
+  const dailySurpriseCountRaw = pickFinite(
+    lifetime.dailySurpriseCount,
+    lifetime.daily_surprise_count
+  );
+  const dailySurpriseLimitRaw = pickFinite(
+    lifetime.dailySurpriseLimit,
+    lifetime.daily_surprise_limit
+  );
+  const dailySurpriseCount = Math.max(
+    0,
+    Number.isFinite(dailySurpriseCountRaw) ? Math.round(dailySurpriseCountRaw) : 0
+  );
+  const dailySurpriseLimit = Math.max(
+    0,
+    Number.isFinite(dailySurpriseLimitRaw)
+      ? Math.round(dailySurpriseLimitRaw)
+      : DAILY_SURPRISE_LIMIT
+  );
+
   return {
     xp,
     streak,
     streakDays,
     drag,
     dragPercent: dragPercent !== null ? dragPercent : null,
+    dailySurpriseDate,
+    dailySurpriseCount,
+    dailySurpriseLimit,
   };
 };
 
@@ -671,19 +816,25 @@ const StepRow = ({
   startDisabled = false,
   continueDisabled = false,
 }) => {
+  const canonicalState = normalizeStepStatusValue(state);
   const icon =
-    state === "done" ? (
+    canonicalState === "done" ? (
       <CheckCircle2 className="text-emerald-600" size={20} aria-hidden />
-    ) : state === "inProgress" ? (
+    ) : canonicalState === "inProgress" ? (
       <Clock className="text-[var(--ink)]" size={20} aria-hidden />
-    ) : state === "frozen" ? (
+    ) : canonicalState === "frozen" ? (
       <Lock className="text-amber-600" size={20} aria-hidden />
-    ) : state === "overdue" ? (
+    ) : canonicalState === "overdue" ? (
       <Clock className="text-[var(--coral)]" size={20} aria-hidden />
     ) : (
       <Circle className="text-slate-400" size={20} aria-hidden />
     );
-  const tone = state === "overdue" ? "text-[var(--coral)]" : state === "frozen" ? "text-amber-700" : "text-slate-600";
+  const tone =
+    canonicalState === "overdue"
+      ? "text-[var(--coral)]"
+      : canonicalState === "frozen"
+      ? "text-amber-700"
+      : "text-slate-600";
   const buttonBase =
     "px-3 py-1.5 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-60 disabled:pointer-events-none";
 
@@ -694,7 +845,7 @@ const StepRow = ({
         <div className="text-[15px] text-[var(--ink)] font-medium">{title}</div>
         {meta && <div className={`text-xs ${tone}`}>{meta}</div>}
       </div>
-      {state === "inProgress" ? (
+      {canonicalState === "inProgress" ? (
         <button
           type="button"
           onClick={onContinue}
@@ -703,7 +854,7 @@ const StepRow = ({
         >
           Continue
         </button>
-      ) : state === "todo" ? (
+      ) : canonicalState === "todo" ? (
         <button
           type="button"
           onClick={onStart}
@@ -1005,18 +1156,35 @@ export default function FriendChallenges(props = {}) {
   );
 
   const mutateArc = React.useCallback(
-    async (key, url, body = {}) => {
+    async (key, url, body = {}, options = {}) => {
       setLoadingKey(key);
       setErrorMessage(null);
+      let rollback = null;
+      try {
+        if (typeof options.optimistic === "function") {
+          rollback = options.optimistic();
+        }
+      } catch (optimisticError) {
+        console.error(optimisticError);
+      }
       try {
         const payload = await postJSON(url, body);
         if (!payload || !payload.arc) {
           throw new Error("Server response missing arc payload");
         }
         updateArcFromServer(payload.arc);
+        return payload;
       } catch (err) {
+        if (typeof rollback === "function") {
+          try {
+            rollback();
+          } catch (rollbackError) {
+            console.error("Optimistic rollback failed", rollbackError);
+          }
+        }
         console.error(err);
         setErrorMessage(err.message || "Action failed. Please try again.");
+        return null;
       } finally {
         setLoadingKey(null);
       }
@@ -1065,19 +1233,70 @@ export default function FriendChallenges(props = {}) {
 
   const handleStepStart = React.useCallback(
     (arc, step) => {
-      if (!arc || !arc.id || !step || !step.id) return;
-      const key = `step-start:${arc.id}:${step.id}`;
-      const path = `/api/arcs/${encodeURIComponent(arc.id)}/steps/${encodeURIComponent(step.id)}/start`;
-      return mutateArc(key, path);
+      const serverId = toIdString(step?.serverId) || toIdString(step?.id) || null;
+      const serverOrdinal = Number.isFinite(Number(step?.serverOrdinal)) ? Number(step.serverOrdinal) : 1;
+      if (!arc || !arc.id || !serverId) return;
+      const arcId = String(arc.id);
+      const stepKey = serverOrdinal > 1 ? `${serverId}__${serverOrdinal}` : serverId;
+      const previousStatus = normalizeStepStatusValue(step.status ?? step.state ?? "todo");
+      const optimistic = () => {
+        let applied = false;
+        setArcs((prev) =>
+          prev.map((candidate) => {
+            if (!candidate || String(candidate.id) !== arcId) return candidate;
+            if (!Array.isArray(candidate.steps)) return candidate;
+            const nextSteps = candidate.steps.map((existing) => {
+              if (!existing) return existing;
+              const existingServerId = toIdString(existing.serverId) || toIdString(existing.id);
+              const existingOrdinal = Number.isFinite(Number(existing.serverOrdinal))
+                ? Number(existing.serverOrdinal)
+                : 1;
+              if (existingServerId !== serverId || existingOrdinal !== serverOrdinal) return existing;
+              applied = true;
+              const currentStatus = normalizeStepStatusValue(existing.status ?? existing.state ?? "todo");
+              if (currentStatus === "inProgress") {
+                return existing;
+              }
+              return { ...existing, status: "inProgress" };
+            });
+            return applied ? { ...candidate, steps: nextSteps } : candidate;
+          })
+        );
+        if (!applied) return null;
+        return () => {
+          setArcs((prev) =>
+            prev.map((candidate) => {
+              if (!candidate || String(candidate.id) !== arcId) return candidate;
+              if (!Array.isArray(candidate.steps)) return candidate;
+              const revertedSteps = candidate.steps.map((existing) => {
+                if (!existing) return existing;
+                const existingServerId = toIdString(existing.serverId) || toIdString(existing.id);
+                const existingOrdinal = Number.isFinite(Number(existing.serverOrdinal))
+                  ? Number(existing.serverOrdinal)
+                  : 1;
+                if (existingServerId !== serverId || existingOrdinal !== serverOrdinal) return existing;
+                return { ...existing, status: previousStatus };
+              });
+              return { ...candidate, steps: revertedSteps };
+            })
+          );
+        };
+      };
+      const key = `step-start:${arcId}:${stepKey}`;
+      const path = `/api/arcs/${encodeURIComponent(arcId)}/steps/${encodeURIComponent(stepKey)}/start`;
+      return mutateArc(key, path, {}, { optimistic });
     },
-    [mutateArc]
+    [mutateArc, setArcs]
   );
 
   const handleStepComplete = React.useCallback(
     (arc, step) => {
-      if (!arc || !arc.id || !step || !step.id) return;
-      const key = `step-complete:${arc.id}:${step.id}`;
-      const path = `/api/arcs/${encodeURIComponent(arc.id)}/steps/${encodeURIComponent(step.id)}/complete`;
+      const serverId = toIdString(step?.serverId) || toIdString(step?.id) || null;
+      const serverOrdinal = Number.isFinite(Number(step?.serverOrdinal)) ? Number(step.serverOrdinal) : 1;
+      if (!arc || !arc.id || !serverId) return;
+      const stepKey = serverOrdinal > 1 ? `${serverId}__${serverOrdinal}` : serverId;
+      const key = `step-complete:${arc.id}:${stepKey}`;
+      const path = `/api/arcs/${encodeURIComponent(arc.id)}/steps/${encodeURIComponent(stepKey)}/complete`;
       return mutateArc(key, path);
     },
     [mutateArc]
@@ -1164,14 +1383,27 @@ export default function FriendChallenges(props = {}) {
 
   const renderArcPanelContent = (arc) => {
     const challenge = arc.challenge || normalizeChallenge(null, arc.name);
-    const challengeDescription =
-      !challenge || challenge.isFallback
-        ? `Complete the Friend Quiz to unlock a personalised micro-action for ${arc.name}.`
-        : challenge.description || `Keep up the momentum with ${arc.name}.`;
+    const hasActiveChallenge = Boolean(challenge) && !challenge.isFallback;
+    const challengeDescription = hasActiveChallenge
+      ? challenge.description || `Keep up the momentum with ${arc.name}.`
+      : "You're all caught up for today. New surprises unlock tomorrow.";
 
-    const swapsLeft = Number.isFinite(challenge.swapsLeft) ? challenge.swapsLeft : 0;
+    const swapsLeft =
+      hasActiveChallenge && Number.isFinite(challenge.swapsLeft) ? challenge.swapsLeft : 0;
 
     const lifetime = normalizeLifetime(arc.lifetime);
+    const surpriseLimit =
+      Number.isFinite(lifetime.dailySurpriseLimit) && lifetime.dailySurpriseLimit > 0
+        ? lifetime.dailySurpriseLimit
+        : DAILY_SURPRISE_LIMIT;
+    const surprisesUsed = Number.isFinite(lifetime.dailySurpriseCount)
+      ? lifetime.dailySurpriseCount
+      : 0;
+    const surprisesRemaining = Math.max(surpriseLimit - surprisesUsed, 0);
+    const surprisePillLabel = `${surprisesRemaining} surprise${
+      surprisesRemaining === 1 ? "" : "s"
+    } left today`;
+
     const arcPoints = Number.isFinite(arc.arcPoints) ? arc.arcPoints : 0;
     const nextThreshold =
       Number.isFinite(arc.nextThreshold) && arc.nextThreshold > 0 ? arc.nextThreshold : 100;
@@ -1198,6 +1430,24 @@ export default function FriendChallenges(props = {}) {
     const challengeSwapKey = `challenge-swap:${arc.id}`;
     const photoUploadKey = `photo-upload:${arc.id}`;
     const photoUploading = isLoadingAction(photoUploadKey);
+    const activeDay = Math.max(1, Number.isFinite(day) && day > 0 ? Math.round(day) : 1);
+    const visibleSteps = Array.isArray(arc.steps)
+      ? arc.steps.filter((step, index) => {
+          const fallbackDay = Math.floor(index / 2) + 1;
+          const candidate = pickFinite(
+            step?.day,
+            step?.day_number,
+            step?.dayNumber,
+            step?.day_index,
+            step?.dayIndex
+          );
+          const normalized = Number.isFinite(candidate) && candidate > 0 ? candidate : fallbackDay;
+          const stepDay = Math.max(1, Math.round(normalized));
+          return stepDay === activeDay;
+        })
+      : [];
+    const hasVisibleSteps = visibleSteps.length > 0;
+    const showAllCompleteMessage = arc.hasStructuredSteps && !hasVisibleSteps;
 
     return (
       <div className="grid md:grid-cols-3 gap-6 md:gap-8 items-start">
@@ -1249,27 +1499,37 @@ export default function FriendChallenges(props = {}) {
                   <h3 className="text-[var(--ink)] font-semibold">{`Today’s plan for ${arc.name}`}</h3>
                   <Pill>{"Quality > hours"}</Pill>
                 </div>
-                <ul className="divide-y divide-slate-100">
-                  {arc.steps.map((s, idx) => {
-                    const startKey = `step-start:${arc.id}:${s.id}`;
-                    const completeKey = `step-complete:${arc.id}:${s.id}`;
-                    return (
-                      <li key={s.id || `${arc.id}-step-${idx}`}>
-                        <StepRow
-                          state={s.status}
-                          title={s.title}
-                          meta={s.meta}
-                          onStart={s.status === "todo" ? () => handleStepStart(arc, s) : undefined}
-                          onContinue={
-                            s.status === "inProgress" ? () => handleStepComplete(arc, s) : undefined
-                          }
-                          startDisabled={isLoadingAction(startKey)}
-                          continueDisabled={isLoadingAction(completeKey)}
-                        />
-                      </li>
-                    );
-                  })}
-                </ul>
+                {hasVisibleSteps ? (
+                  <ul className="divide-y divide-slate-100">
+                    {visibleSteps.map((s, idx) => {
+                      const serverId = toIdString(s.serverId) || toIdString(s.id);
+                      const serverOrdinal = Number.isFinite(Number(s.serverOrdinal)) ? Number(s.serverOrdinal) : 1;
+                      const actionKey = serverOrdinal > 1 ? `${serverId}__${serverOrdinal}` : serverId;
+                      const startKey = `step-start:${arc.id}:${actionKey}`;
+                      const completeKey = `step-complete:${arc.id}:${actionKey}`;
+                      const normalizedStatus = normalizeStepStatusValue(s.status ?? s.state);
+                      return (
+                        <li key={s.id || `${arc.id}-step-${idx}`}>
+                          <StepRow
+                            state={normalizedStatus}
+                            title={s.title}
+                            meta={s.meta}
+                            onStart={normalizedStatus === "todo" ? () => handleStepStart(arc, s) : undefined}
+                            onContinue={
+                              normalizedStatus === "inProgress" ? () => handleStepComplete(arc, s) : undefined
+                            }
+                            startDisabled={isLoadingAction(startKey)}
+                            continueDisabled={isLoadingAction(completeKey)}
+                          />
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : showAllCompleteMessage ? (
+                  <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+                    All actions for today are complete. Check back tomorrow for two new prompts.
+                  </div>
+                ) : null}
 
                 {showFallbackStepsNote && (
                   <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-xs text-slate-600">
@@ -1320,35 +1580,23 @@ export default function FriendChallenges(props = {}) {
 
           {/* Daily Surprise Challenge */}
           <SectionCard title={`Daily Surprise · ${arc.name}`} subtitle="A tiny nudge for real-life progress">
-            <div className="grid md:grid-cols-[1fr_auto] gap-4 items-start">
+              <div className="grid md:grid-cols-[1fr_auto] gap-4 items-start">
               <div className="grid gap-3">
                 <h3 className="text-lg font-semibold text-[var(--ink)]">{challenge.title}</h3>
                 <p className="text-slate-600 text-sm leading-relaxed">{challengeDescription}</p>
                 <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
-                  <Pill tone="ink">{`${challenge.effort} effort`}</Pill>
-                  <Pill tone="coral">{`${challenge.estMinutes} min`}</Pill>
-                  <Pill tone="ok">{`+${challenge.points} XP`}</Pill>
-                  {challenge.isFallback && <Pill tone="warn">quiz required</Pill>}
+                  {hasActiveChallenge && (
+                    <>
+                      <Pill tone="ink">{`${challenge.effort} effort`}</Pill>
+                      <Pill tone="coral">{`${challenge.estMinutes} min`}</Pill>
+                      <Pill tone="ok">{`+${challenge.points} XP`}</Pill>
+                    </>
+                  )}
+                  <Pill tone={surprisesRemaining > 0 ? "ok" : "muted"}>{surprisePillLabel}</Pill>
                 </div>
               </div>
               <div className="grid gap-2 justify-items-end">
-                {challenge.isFallback ? (
-                  <>
-                    <a
-                      href="friendQuiz"
-                      className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--coral)] text-white text-sm hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--coral)]"
-                    >
-                      Take the Friend Quiz
-                      <ChevronRight size={16} aria-hidden />
-                    </a>
-                    <a
-                      href="friendQuiz"
-                      className="inline-flex items-center gap-2 text-xs text-[var(--ink)] hover:underline"
-                    >
-                      Unlock ideas with the Friend Quiz
-                    </a>
-                  </>
-                ) : (
+                {hasActiveChallenge ? (
                   <>
                     <button
                       type="button"
@@ -1368,9 +1616,13 @@ export default function FriendChallenges(props = {}) {
                       {swapsLeft > 0 ? "Swap this idea" : "No swaps left"}
                     </button>
                   </>
+                ) : (
+                  <div className="text-xs text-slate-500 text-right max-w-[220px]">
+                    You're all caught up. KAI will drop fresh surprises tomorrow.
+                  </div>
                 )}
               </div>
-              {!challenge.isFallback && Number.isFinite(swapsLeft) && (
+              {hasActiveChallenge && Number.isFinite(swapsLeft) && (
                 <div className="justify-self-end">
                   <Pill tone={swapsLeft > 0 ? "warn" : "muted"}>{`Swaps left: ${swapsLeft}`}</Pill>
                 </div>
@@ -1450,13 +1702,10 @@ export default function FriendChallenges(props = {}) {
                 </div>
                 <div className="flex items-center justify-between text-sm">
                   <span>
-                    {displayArcPoints} / {nextThreshold} → Next reward
+                    {displayArcPoints} / {nextThreshold} → Next level
                   </span>
-                  <a href="#" className="inline-flex items-center gap-1 text-[var(--ink)] hover:underline">
-                    View details <ChevronRight size={16} />
-                  </a>
                 </div>
-                <div className="text-xs text-slate-500">Quality checkpoint required for large awards.</div>
+                <div className="text-xs text-slate-500">Earn XP to complete this friend arc.</div>
               </div>
 
               {/* Lifetime */}

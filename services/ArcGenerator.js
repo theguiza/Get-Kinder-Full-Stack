@@ -1,11 +1,27 @@
+import { readFileSync } from "node:fs";
+import { dirname, join as joinPath } from "node:path";
+import { fileURLToPath } from "node:url";
 import { mapFriendArcRow } from "../Backend/lib/friendArcMapper.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const phrasesPath = joinPath(__dirname, "../content/phrases.json");
+
+function loadPhrases() {
+  try {
+    const raw = readFileSync(phrasesPath, "utf8");
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (error) {
+    console.warn("[ArcGenerator] Failed to load phrases.json, using fallback", error.message);
+    return {};
+  }
+}
+
+const phrases = loadPhrases();
 
 const STARTER_TAG = "starter";
 const STARTER_LENGTH_DAYS = 7;
-
-function isStarterFlagEnabled() {
-  return process.env.STARTER7_FIRST_PLAN === "1";
-}
 
 const DEFAULT_CHANNEL = "text";
 const DEFAULT_EFFORT = "low";
@@ -146,8 +162,7 @@ export async function generateArcForQuiz(pool, payload) {
     throw new Error("No active plan templates available");
   }
 
-  const starterFlagEnabled = isStarterFlagEnabled();
-  const starterSelection = starterFlagEnabled ? pickStarter7dPlan(plans, context) : null;
+  const starterSelection = pickStarter7dPlan(plans, context);
   const planSelection = starterSelection ?? selectPlan(plans, context);
   if (!planSelection) {
     throw new Error("No plan template matched the quiz payload");
@@ -157,10 +172,16 @@ export async function generateArcForQuiz(pool, payload) {
     planTemplateId: planSelection.plan?.id ?? null,
     planName: planSelection.plan?.name ?? null,
     forcedStarter7: Boolean(starterSelection),
-    starterFlag: starterFlagEnabled,
+    starterFlag: true,
   });
 
-  const stepRows = await fetchPlanSteps(pool, planSelection.plan.id);
+  let stepRows = await fetchPlanSteps(pool, planSelection.plan.id);
+  if (starterSelection) {
+    const starterStepRows = buildStarterPlanSteps(planSelection.plan, stepRows);
+    if (starterStepRows.length) {
+      stepRows = starterStepRows;
+    }
+  }
   const hasDbSteps = stepRows.length > 0;
 
   const challengeRows = await fetchActiveChallenges(pool, context);
@@ -472,6 +493,47 @@ function buildFallbackSteps(context, planSelection) {
   }));
 }
 
+function buildStarterPlanSteps(plan, existingStepRows = []) {
+  const length = Math.max(1, Number(plan.lengthDays ?? plan.length_days ?? STARTER_LENGTH_DAYS));
+  const textOpeners = Array.isArray(phrases?.openers?.text) ? phrases.openers.text : [];
+  const defaultMeta =
+    existingStepRows.find((row) => typeof row?.meta === "string" && row.meta.trim())?.meta ||
+    "est=5m";
+  const defaultChannel =
+    existingStepRows.find((row) => row?.channel)?.channel ||
+    plan.channel ||
+    plan.channel_variant ||
+    "text";
+  const defaultEffort =
+    existingStepRows.find((row) => row?.effort)?.effort ||
+    plan.effort ||
+    "low";
+
+  const steps = [];
+  const phrasesLength = textOpeners.length;
+
+  for (let day = 1; day <= length; day += 1) {
+    for (let slot = 0; slot < 2; slot += 1) {
+      const phraseIndex = (day - 1) * 2 + slot;
+      const template =
+        phrasesLength > 0
+          ? textOpeners[phraseIndex % phrasesLength]
+          : `Reach out to {{ friend_name }} (step ${phraseIndex + 1})`;
+
+      steps.push({
+        id: `${plan.id}-d${day}-s${slot + 1}`,
+        day_number: day,
+        title: template,
+        meta: defaultMeta,
+        channel: defaultChannel,
+        effort: defaultEffort,
+      });
+    }
+  }
+
+  return steps;
+}
+
 async function fetchActiveChallenges(pool) {
   const { rows } = await pool.query(
     `
@@ -668,7 +730,7 @@ function buildArcRecord({
   const basePoints = Number.isFinite(basePointsRaw) ? basePointsRaw : 100;
   const normalizedEffort = normalizeEffort(normalized.effort, context.effortCapacity || DEFAULT_EFFORT);
   const adjustedPoints =
-    normalizedEffort === "low" && basePoints <= 25 ? basePoints * 2 : basePoints;
+    normalizedEffort === "low" ? 10 : basePoints;
   const challengePoints = Math.max(0, Math.round(adjustedPoints));
   const renderedChallenge = {
     id: `${friendId}-first`,

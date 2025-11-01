@@ -25,6 +25,8 @@ const DEFAULT_LIFETIME = {
   dragPercent: 0,
 };
 
+const DAILY_SURPRISE_LIMIT = 3;
+
 const PLAN_PROMOTION_ORDER = [
   "One-Week Starter Arc (Daily)",
   "Acquaintance \u2192 Casual (Text-First, 21d)",
@@ -217,6 +219,9 @@ router.post("/api/arcs/:arcId/steps/:stepId/complete", (req, res) =>
       state.lifetime = applyLifetimeGain(state.lifetime, delta, {
         incrementStreak: previousPointsToday <= 0,
       });
+      state.lifetime.dailySurpriseLimit = DAILY_SURPRISE_LIMIT;
+      state.lifetime.daily_surprise_limit = DAILY_SURPRISE_LIMIT;
+      advanceArcDayAfterStepCompletion(state);
 
       const { row, percent } = await awardAndMarkStepDone(client, {
         arcId,
@@ -224,23 +229,39 @@ router.post("/api/arcs/:arcId/steps/:stepId/complete", (req, res) =>
         delta,
         updatedSteps: state.steps,
         nextLifetime: state.lifetime,
+        nextDay: state.day,
       });
 
       let arc = mapFriendArcRow(row);
       arc.percent = percent;
 
-      const promotedArc = await promoteArcIfEligible({
-        client,
-        arc,
-        userId,
-        previousPlanName: toSafeString(
-          arc?.lifetime?.planName ?? arc?.lifetime?.plan_name ?? "",
-          ""
-        ),
-      });
+      const threshold = getArcThreshold(arc);
+      const totalPoints = toNumber(arc.arcPoints, 0);
+
+      let promotedArc = null;
+      if (totalPoints >= threshold) {
+        promotedArc = await promoteArcIfEligible({
+          client,
+          arc,
+          userId,
+          previousPlanName: toSafeString(
+            arc?.lifetime?.planName ?? arc?.lifetime?.plan_name ?? "",
+            ""
+          ),
+        });
+      }
 
       if (promotedArc) {
         arc = promotedArc;
+      } else if (stepsAreComplete(arc) && totalPoints < threshold) {
+        const resetArc = await resetArcStepsForAnotherCycle({
+          client,
+          arc,
+          userId,
+        });
+        if (resetArc) {
+          arc = resetArc;
+        }
       }
 
       return { changed: true, delta, persistedArc: arc };
@@ -299,18 +320,59 @@ router.post("/api/arcs/:arcId/challenge/:challengeId/complete", (req, res) =>
       state.lifetime = applyLifetimeGain(state.lifetime, points, {
         incrementStreak: previousPointsToday <= 0 && points > 0,
       });
+      state.lifetime.dailySurpriseLimit = DAILY_SURPRISE_LIMIT;
+      state.lifetime.daily_surprise_limit = DAILY_SURPRISE_LIMIT;
+      const tracker = getDailySurpriseTracker(state.lifetime);
+      const rawCompletedCount = tracker.count + 1;
+      const completedCount = rawCompletedCount > DAILY_SURPRISE_LIMIT ? DAILY_SURPRISE_LIMIT : rawCompletedCount;
+      state.lifetime.dailySurpriseDate = tracker.today;
+      state.lifetime.daily_surprise_date = tracker.today;
+      state.lifetime.dailySurpriseCount = completedCount;
+      state.lifetime.daily_surprise_count = completedCount;
       state.challenge = null;
+
+      let nextChallenge = null;
+      if (rawCompletedCount < DAILY_SURPRISE_LIMIT) {
+        nextChallenge = await selectNextDailyChallenge(client, {
+          arcId,
+          previousChallenge: challenge,
+          badges: state.badges,
+        });
+      }
+
+      const persistedChallenge = nextChallenge ? deepClone(nextChallenge) : null;
+      state.challenge = persistedChallenge;
 
       const { row, percent } = await awardChallengeAndClear(client, {
         arcId,
         userId,
         delta: points,
-        nextChallenge: null,
+        nextChallenge: persistedChallenge,
         nextLifetime: state.lifetime,
       });
 
-      const arc = mapFriendArcRow(row);
+      let arc = mapFriendArcRow(row);
       arc.percent = percent;
+
+      const threshold = getArcThreshold(arc);
+      const totalPoints = toNumber(arc.arcPoints, 0);
+
+      let promotedArc = null;
+      if (totalPoints >= threshold) {
+        promotedArc = await promoteArcIfEligible({
+          client,
+          arc,
+          userId,
+          previousPlanName: toSafeString(
+            arc?.lifetime?.planName ?? arc?.lifetime?.plan_name ?? "",
+            ""
+          ),
+        });
+      }
+
+      if (promotedArc) {
+        arc = promotedArc;
+      }
 
       return { changed: true, delta: points, persistedArc: arc };
     },
@@ -322,80 +384,52 @@ router.post("/api/arcs/:arcId/challenge/swap", (req, res) =>
   handleArcMutation(
     req,
     res,
-    async ({ state }) => {
+    async ({ state, client }) => {
       const currentChallenge = state.challenge;
       if (!currentChallenge) {
         throw httpError(404, "No active challenge to swap");
       }
 
-    const swapsRemaining = Number(currentChallenge.swapsLeft ?? currentChallenge.swaps_left ?? 0);
-    if (!Number.isFinite(swapsRemaining) || swapsRemaining <= 0) {
-      throw httpError(400, "No swaps remaining for this challenge");
-    }
+      const swapsRemaining = Number(currentChallenge.swapsLeft ?? currentChallenge.swaps_left ?? 0);
+      if (!Number.isFinite(swapsRemaining) || swapsRemaining <= 0) {
+        throw httpError(400, "No swaps remaining for this challenge");
+      }
 
-    const currentTemplateId = currentChallenge.templateId ?? currentChallenge.template_id ?? null;
+      const currentTemplateId = currentChallenge.templateId ?? currentChallenge.template_id ?? null;
 
-    const existingTags = new Set([
-      ...(Array.isArray(currentChallenge.tags) ? currentChallenge.tags : []),
-      ...(Array.isArray(state.badges?.tags) ? state.badges.tags : []),
-    ].map((tag) => String(tag).toLowerCase()));
+      const existingTags = [
+        ...(Array.isArray(currentChallenge.tags) ? currentChallenge.tags : []),
+        ...(Array.isArray(state.badges?.tags) ? state.badges.tags : []),
+      ];
 
-    const preferredChannel = toSafeString(currentChallenge.channel, state.challenge?.channel).toLowerCase();
-    const preferredEffort = toSafeString(currentChallenge.effort, state.challenge?.effort).toLowerCase();
+      const preferredChannel = toSafeString(currentChallenge.channel, state.challenge?.channel).toLowerCase();
+      const preferredEffort = toSafeString(currentChallenge.effort, state.challenge?.effort).toLowerCase();
 
-    const { rows } = await pool.query(
-      `
-        SELECT
-          id,
-          title_template       AS title,
-          description_template AS description,
-          channel,
-          effort,
-          tags,
-          est_minutes,
-          points
-        FROM challenge_templates
-        WHERE is_active = TRUE
-      `
-    );
+      const candidate = await pickChallengeTemplate(client, {
+        excludeTemplateIds: currentTemplateId ? [currentTemplateId] : [],
+        preferredChannel,
+        preferredEffort,
+        existingTags,
+      });
 
-    const candidates = rows
-      .filter((row) => String(row.id) !== String(currentTemplateId))
-      .map((row) => {
-        const tags = normalizeTags(row.tags);
-        const overlap = countOverlap(tags, existingTags);
-        const channelScore = scoreChannel(row.channel, preferredChannel);
-        const effortScore = scoreEffort(row.effort, preferredEffort);
-        const totalScore = overlap * 10 + channelScore + effortScore;
-        return { row, tags, overlap, totalScore };
-      })
-      .filter((candidate) => candidate.totalScore >= 0);
+      if (!candidate) {
+        throw httpError(404, "No alternative challenges available");
+      }
 
-    if (!candidates.length) {
-      throw httpError(404, "No alternative challenges available");
-    }
+      const swapsLeft = Math.max(0, swapsRemaining - 1);
+      state.challenge = buildChallengePayload(candidate.row, {
+        arcId: state.id ?? state.friendId ?? "friend",
+        tags: candidate.tags,
+        preferredChannel,
+        preferredEffort,
+        swapsLeft,
+        fallbackTitle: currentChallenge.title,
+        fallbackDescription: currentChallenge.description,
+        fallbackEstMinutes: currentChallenge.estMinutes,
+        fallbackPoints: currentChallenge.points,
+      });
 
-    candidates.sort((a, b) => {
-      if (b.totalScore !== a.totalScore) return b.totalScore - a.totalScore;
-      if (b.overlap !== a.overlap) return b.overlap - a.overlap;
-      return String(a.row.id).localeCompare(String(b.row.id));
-    });
-
-    const best = candidates[0];
-    state.challenge = {
-      id: `${state.id ?? state.friendId ?? "friend"}-challenge-${Date.now()}`,
-      templateId: best.row.id,
-      title: best.row.title,
-      description: best.row.description,
-      channel: toSafeString(best.row.channel, currentChallenge.channel),
-      effort: toSafeString(best.row.effort, currentChallenge.effort),
-      tags: best.tags,
-      estMinutes: Math.max(0, toNumber(best.row.est_minutes, currentChallenge.estMinutes ?? 15)),
-      points: Math.max(0, toNumber(best.row.points, currentChallenge.points ?? 0)),
-      swapsLeft: swapsRemaining - 1,
-    };
-
-    return { changed: true, delta: 0 };
+      return { changed: true, delta: 0 };
     },
     { action: "arc.challenge.swap" }
   )
@@ -645,12 +679,39 @@ function normalizeStep(step, index) {
   return clone;
 }
 
+function parseStepKey(rawId) {
+  const str = toSafeString(rawId, "");
+  if (!str) {
+    return { base: "", ordinal: 1, hasOrdinal: false };
+  }
+  const segments = str.split("__");
+  if (segments.length <= 1) {
+    return { base: str, ordinal: 1, hasOrdinal: false };
+  }
+  const possibleOrdinal = Number(segments[segments.length - 1]);
+  if (Number.isFinite(possibleOrdinal) && possibleOrdinal >= 1) {
+    return {
+      base: segments.slice(0, -1).join("__"),
+      ordinal: possibleOrdinal,
+      hasOrdinal: true,
+    };
+  }
+  return { base: str, ordinal: 1, hasOrdinal: false };
+}
+
 function findStepWithIndex(state, stepId) {
   if (!state?.steps || !Array.isArray(state.steps) || !stepId) return null;
-  const id = String(stepId);
+  const target = parseStepKey(stepId);
+  if (!target.base) return null;
+  let occurrence = 0;
   for (let index = 0; index < state.steps.length; index += 1) {
     const step = state.steps[index];
-    if (step && String(step.id ?? step.step_id ?? step.stepId) === id) {
+    if (!step) continue;
+    const candidateKey = parseStepKey(step.id ?? step.step_id ?? step.stepId);
+    if (!candidateKey.base || candidateKey.base !== target.base) continue;
+    occurrence += 1;
+    const candidateOrdinal = candidateKey.hasOrdinal ? candidateKey.ordinal : occurrence;
+    if (candidateOrdinal === target.ordinal) {
       return { step, index };
     }
   }
@@ -716,6 +777,14 @@ function stepsAreComplete(arc) {
   });
 }
 
+function getArcThreshold(arc) {
+  const threshold = toNumber(
+    arc?.nextThreshold ?? arc?.next_threshold,
+    0
+  );
+  return threshold > 0 ? threshold : 100;
+}
+
 async function fetchPlanTemplateByName(db, name) {
   if (!name) return null;
   const { rows } = await db.query(
@@ -741,8 +810,8 @@ async function fetchPlanTemplateByName(db, name) {
 
 async function promoteArcIfEligible({ client, arc, userId, previousPlanName }) {
   if (!client || !arc || !userId) return null;
-  if (!stepsAreComplete(arc)) return null;
-  if (arc.challenge && Object.keys(arc.challenge).length) return null;
+  const threshold = getArcThreshold(arc);
+  if (toNumber(arc.arcPoints, 0) < threshold) return null;
 
   const nextPlanName = getNextPlanName(previousPlanName);
   if (!nextPlanName) return null;
@@ -803,6 +872,308 @@ async function promoteArcIfEligible({ client, arc, userId, previousPlanName }) {
   const promotedArc = mapFriendArcRow(updatedRow);
   promotedArc.percent = progressPercent(promotedArc.arcPoints, promotedArc.nextThreshold);
   return promotedArc;
+}
+
+async function resetArcStepsForAnotherCycle({ client, arc, userId }) {
+  if (!client || !arc || !userId) return null;
+  if (!Array.isArray(arc.steps) || !arc.steps.length) return null;
+
+  const resetSteps = arc.steps.map((step, index) => {
+    const clone = deepClone(step) ?? {};
+    clone.status = "todo";
+    if (!clone.id) {
+      clone.id = `step-${index + 1}`;
+    }
+    return clone;
+  });
+
+  const lifetime = isPlainObject(arc.lifetime) ? deepClone(arc.lifetime) : {};
+  const cyclesCompleted = toNumber(
+    lifetime?.cyclesCompleted ?? lifetime?.cycles_completed,
+    0
+  ) + 1;
+  lifetime.cyclesCompleted = cyclesCompleted;
+  lifetime.cycles_completed = cyclesCompleted;
+  lifetime.dailySurpriseLimit = DAILY_SURPRISE_LIMIT;
+  lifetime.daily_surprise_limit = DAILY_SURPRISE_LIMIT;
+
+  const threshold = getArcThreshold(arc);
+  const resetState = {
+    day: 1,
+    length: toNumber(arc.length, resetSteps.length),
+    arcPoints: toNumber(arc.arcPoints, 0),
+    nextThreshold: threshold,
+    pointsToday: toNumber(arc.pointsToday, 0),
+    friendScore: arc.friendScore == null ? null : toNumber(arc.friendScore, 0),
+    friendType: arc.friendType ?? null,
+    lifetime,
+    steps: resetSteps,
+    challenge: arc.challenge ? deepClone(arc.challenge) : null,
+    badges: arc.badges && typeof arc.badges === "object" ? deepClone(arc.badges) : {},
+  };
+
+  const updatedRow = await updateArc(client, arc.id, userId, resetState);
+  if (!updatedRow) return null;
+  const updatedArc = mapFriendArcRow(updatedRow);
+  updatedArc.percent = progressPercent(updatedArc.arcPoints, updatedArc.nextThreshold);
+  return updatedArc;
+}
+
+function extractStepDay(step, fallback = 1) {
+  const rawDay =
+    step?.day ??
+    step?.day_number ??
+    step?.dayNumber ??
+    null;
+  const numeric = toNumber(rawDay, fallback);
+  if (!Number.isFinite(numeric)) return fallback;
+  const rounded = Math.round(numeric);
+  return rounded > 0 ? rounded : fallback;
+}
+
+function findNextIncompleteDay(steps, minDay) {
+  if (!Array.isArray(steps)) return null;
+  let candidate = null;
+  for (const step of steps) {
+    const status = toSafeString(step?.status, "todo").toLowerCase();
+    if (status === "done") continue;
+    const day = extractStepDay(step, minDay);
+    if (day >= minDay && (candidate === null || day < candidate)) {
+      candidate = day;
+    }
+  }
+  return candidate;
+}
+
+function advanceArcDayAfterStepCompletion(state) {
+  if (!state || !Array.isArray(state.steps)) return;
+  const totalDays = Math.max(1, toNumber(state.length, 1));
+  let currentDay = toNumber(state.day, 1);
+  if (!Number.isFinite(currentDay) || currentDay < 1) currentDay = 1;
+
+  const stepsForCurrentDay = state.steps.filter(
+    (step) => extractStepDay(step, currentDay) === currentDay
+  );
+
+  if (!stepsForCurrentDay.length) {
+    const nextCandidate = findNextIncompleteDay(state.steps, 1);
+    if (nextCandidate !== null) {
+      state.day = nextCandidate;
+    } else {
+      state.day = currentDay;
+    }
+    return;
+  }
+
+  const hasRemaining = stepsForCurrentDay.some((step) => {
+    const status = toSafeString(step?.status, "todo").toLowerCase();
+    return status !== "done";
+  });
+
+  if (!hasRemaining) {
+    const nextCandidate = findNextIncompleteDay(state.steps, currentDay + 1);
+    if (nextCandidate !== null) {
+      state.day = nextCandidate;
+    } else if (currentDay < totalDays) {
+      state.day = Math.min(totalDays, currentDay + 1);
+    }
+  }
+
+  const normalizedDay = toNumber(state.day, currentDay);
+  state.day = Math.max(
+    1,
+    Math.min(
+      totalDays,
+      Number.isFinite(normalizedDay) ? Math.round(normalizedDay) : currentDay
+    )
+  );
+}
+
+function todayKey() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function getDailySurpriseTracker(lifetime) {
+  const today = todayKey();
+  const storedDate = toSafeString(
+    lifetime?.dailySurpriseDate ?? lifetime?.daily_surprise_date,
+    ""
+  );
+  let count = toNumber(
+    lifetime?.dailySurpriseCount ?? lifetime?.daily_surprise_count,
+    0
+  );
+  if (storedDate !== today) {
+    count = 0;
+  }
+  return { today, count };
+}
+
+async function pickChallengeTemplate(client, {
+  excludeTemplateIds = [],
+  preferredChannel,
+  preferredEffort,
+  existingTags = [],
+}) {
+  const exclude = new Set(
+    (excludeTemplateIds || [])
+      .filter((value) => value !== null && value !== undefined)
+      .map((value) => String(value))
+  );
+
+  const normalizedExisting = new Set();
+  const tagSources = Array.isArray(existingTags)
+    ? existingTags
+    : existingTags instanceof Set
+    ? Array.from(existingTags)
+    : existingTags
+    ? [existingTags]
+    : [];
+  for (const tag of tagSources) {
+    const normalized = toSafeString(tag, "").toLowerCase();
+    if (normalized) normalizedExisting.add(normalized);
+  }
+
+  const { rows } = await client.query(
+    `
+      SELECT
+        id,
+        title_template       AS title,
+        description_template AS description,
+        channel,
+        effort,
+        tags,
+        est_minutes,
+        points,
+        swaps_allowed
+      FROM challenge_templates
+      WHERE is_active = TRUE
+    `
+  );
+
+  const candidates = rows
+    .filter((row) => !exclude.has(String(row.id)))
+    .map((row) => {
+      const tags = normalizeTags(row.tags);
+      const overlap = countOverlap(tags, normalizedExisting);
+      const channelScore = scoreChannel(row.channel, preferredChannel);
+      const effortScore = scoreEffort(row.effort, preferredEffort);
+      const totalScore = overlap * 10 + channelScore + effortScore;
+      return { row, tags, overlap, totalScore };
+    })
+    .filter((candidate) => candidate.totalScore >= 0);
+
+  if (!candidates.length) {
+    return null;
+  }
+
+  candidates.sort((a, b) => {
+    if (b.totalScore !== a.totalScore) return b.totalScore - a.totalScore;
+    if (b.overlap !== a.overlap) return b.overlap - a.overlap;
+    return String(a.row.id).localeCompare(String(b.row.id));
+  });
+
+  return candidates[0];
+}
+
+function buildChallengePayload(templateRow, {
+  arcId,
+  tags = [],
+  preferredChannel,
+  preferredEffort,
+  swapsLeft,
+  fallbackTitle,
+  fallbackDescription,
+  fallbackEstMinutes,
+  fallbackPoints,
+}) {
+  const arcKey = toSafeString(arcId, "friend");
+  const uniqueSuffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const channel = toSafeString(templateRow.channel, preferredChannel);
+  const effort = toSafeString(templateRow.effort, preferredEffort);
+  const estMinutes = Math.max(
+    0,
+    toNumber(templateRow.est_minutes, fallbackEstMinutes ?? 15)
+  );
+  const basePoints = Math.max(
+    0,
+    toNumber(templateRow.points, fallbackPoints ?? 0)
+  );
+  const normalizedEffort = (effort || (preferredEffort || "low")).toLowerCase();
+  const points = normalizedEffort === "low" ? 10 : basePoints;
+  const resolvedSwaps =
+    swapsLeft !== undefined && swapsLeft !== null
+      ? Math.max(0, Math.round(swapsLeft))
+      : Math.max(0, toNumber(templateRow.swaps_allowed, 1));
+
+  return {
+    id: `${arcKey}-challenge-${uniqueSuffix}`,
+    templateId: templateRow.id,
+    template_id: templateRow.id,
+    title: toSafeString(templateRow.title, fallbackTitle || "Daily surprise"),
+    description: toSafeString(templateRow.description, fallbackDescription || ""),
+    channel: channel || (preferredChannel || null),
+    effort: effort || (preferredEffort || "low"),
+    tags,
+    estMinutes,
+    est_minutes: estMinutes,
+    points,
+    swapsLeft: resolvedSwaps,
+    swaps_left: resolvedSwaps,
+    isFallback: false,
+  };
+}
+
+async function selectNextDailyChallenge(client, {
+  arcId,
+  previousChallenge,
+  badges,
+}) {
+  const excludeTemplateIds = [];
+  const previousTemplateId =
+    previousChallenge?.templateId ??
+    previousChallenge?.template_id ??
+    previousChallenge?.id ??
+    null;
+  if (previousTemplateId) {
+    excludeTemplateIds.push(previousTemplateId);
+  }
+
+  const preferredChannel = toSafeString(previousChallenge?.channel, "").toLowerCase();
+  const preferredEffort = toSafeString(previousChallenge?.effort, "").toLowerCase();
+
+  const existingTags = [
+    ...(Array.isArray(previousChallenge?.tags) ? previousChallenge.tags : []),
+    ...(Array.isArray(badges?.tags) ? badges.tags : []),
+  ];
+
+  const candidate = await pickChallengeTemplate(client, {
+    excludeTemplateIds,
+    preferredChannel,
+    preferredEffort,
+    existingTags,
+  });
+
+  if (!candidate) {
+    return null;
+  }
+
+  const resolvedSwapsAllowed = Math.max(
+    0,
+    toNumber(candidate.row.swaps_allowed, 1)
+  );
+
+  return buildChallengePayload(candidate.row, {
+    arcId,
+    tags: candidate.tags,
+    preferredChannel,
+    preferredEffort,
+    swapsLeft: resolvedSwapsAllowed,
+    fallbackTitle: previousChallenge?.title,
+    fallbackDescription: previousChallenge?.description,
+    fallbackEstMinutes: previousChallenge?.estMinutes,
+    fallbackPoints: previousChallenge?.points,
+  });
 }
 
 function normalizeTags(value) {

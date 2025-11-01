@@ -153,9 +153,7 @@ function suppressConsoleInfo(fn) {
   };
 }
 
-test("flag ON + first arc forces starter plan when available", suppressConsoleInfo(async (t) => {
-  process.env.STARTER7_FIRST_PLAN = "1";
-
+test("always forces starter plan when available", suppressConsoleInfo(async (t) => {
   const pool = createStubPool({
     planRows: [starterPlanRow, fallbackPlanRow],
     stepRows: defaultStepRows,
@@ -171,13 +169,9 @@ test("flag ON + first arc forces starter plan when available", suppressConsoleIn
   assert.equal(lifetime.planTemplateId, "starter-001");
   assert.equal(lifetime.planName, "Starter 7");
   assert.equal(lifetime.starter7AutoSelected, true);
-
-  delete process.env.STARTER7_FIRST_PLAN;
 }));
 
-test("flag ON + first arc without starter plan falls back to scorer", suppressConsoleInfo(async (t) => {
-  process.env.STARTER7_FIRST_PLAN = "1";
-
+test("falls back to scorer when starter plan unavailable", suppressConsoleInfo(async (t) => {
   const pool = createStubPool({
     planRows: [fallbackPlanRow],
     stepRows: defaultStepRows,
@@ -190,13 +184,9 @@ test("flag ON + first arc without starter plan falls back to scorer", suppressCo
   const lifetime = pool.lastInsert.row.lifetime;
   assert.equal(lifetime.planTemplateId, "plan-200");
   assert.equal(lifetime.starter7AutoSelected, undefined);
-
-  delete process.env.STARTER7_FIRST_PLAN;
 }));
 
-test("flag ON + existing arc returns existing without reselection", suppressConsoleInfo(async (t) => {
-  process.env.STARTER7_FIRST_PLAN = "1";
-
+test("existing arc returns existing without reselection", suppressConsoleInfo(async (t) => {
   const existingArc = {
     id: "friend-42",
     user_id: 42,
@@ -222,27 +212,6 @@ test("flag ON + existing arc returns existing without reselection", suppressCons
   assert.equal(arc.id, "friend-42");
   assert.equal(arc.name, "Existing Arc");
   assert.equal(pool.lastInsert, null, "should not insert a new arc");
-
-  delete process.env.STARTER7_FIRST_PLAN;
-}));
-
-test("flag OFF keeps default scorer behavior", suppressConsoleInfo(async (t) => {
-  process.env.STARTER7_FIRST_PLAN = "0";
-
-  const pool = createStubPool({
-    planRows: [starterPlanRow, fallbackPlanRow],
-    stepRows: defaultStepRows,
-    challengeRows: defaultChallengeRows,
-  });
-
-  await generateArcForQuiz(pool, buildPayload());
-
-  assert.ok(pool.lastInsert, "expected insert to occur");
-  const lifetime = pool.lastInsert.row.lifetime;
-  assert.equal(lifetime.planTemplateId, "plan-200");
-  assert.equal(lifetime.starter7AutoSelected, undefined);
-
-  delete process.env.STARTER7_FIRST_PLAN;
 }));
 
 test("normalizeTagList handles array, JSON, CSV, and scalar input", () => {

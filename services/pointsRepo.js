@@ -89,19 +89,23 @@ function clampPercent(pct) {
   return rounded;
 }
 
-export async function awardAndMarkStepDone(client, { arcId, userId, delta, updatedSteps, nextLifetime }) {
+export async function awardAndMarkStepDone(client, { arcId, userId, delta, updatedSteps, nextLifetime, nextDay }) {
   if (!client) throw new Error("Database client is required");
 
   const updateDelta = Number.isFinite(delta) ? delta : 0;
   const stepsJson = updatedSteps ?? [];
   const lifetimeJson = normalizeLifetimeForStorage(nextLifetime);
+  const resolvedDay = Number.isFinite(Number(nextDay))
+    ? Math.max(1, Math.round(Number(nextDay)))
+    : null;
 
   const { rows: [updated] = [] } = await client.query(
     `UPDATE friend_arcs
-        SET arc_points   = arc_points + $3,
-            points_today = points_today + $3,
-            steps        = $4::jsonb,
-            lifetime     = $5::jsonb,
+        SET day          = COALESCE($3, day),
+            arc_points   = arc_points + $4,
+            points_today = points_today + $4,
+            steps        = $5::jsonb,
+            lifetime     = $6::jsonb,
             updated_at   = NOW()
       WHERE id = $1 AND user_id = $2
       RETURNING id,
@@ -118,7 +122,14 @@ export async function awardAndMarkStepDone(client, { arcId, userId, delta, updat
                 steps,
                 challenge,
                 badges`,
-    [arcId, userId, updateDelta, JSON.stringify(stepsJson), JSON.stringify(lifetimeJson)]
+    [
+      arcId,
+      userId,
+      resolvedDay,
+      updateDelta,
+      JSON.stringify(stepsJson),
+      JSON.stringify(lifetimeJson),
+    ]
   );
 
   if (!updated) {

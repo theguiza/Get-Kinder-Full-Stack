@@ -352,7 +352,7 @@ async function backfillDailySurprises() {
       const description_template = `${mustacheEst(nudge, { est_minutes: est })} ${closer}`.trim();
 
       // respect schema: points 1..50
-      const points = effort === 'high' ? 50 : effort === 'medium' ? 35 : 40;
+      const points = effort === 'high' ? 50 : effort === 'medium' ? 35 : 10;
 
       // respect schema: swaps_allowed 0..5 (we use 0 or 1)
       const swaps_allowed = effort === 'high' ? 0 : 1;

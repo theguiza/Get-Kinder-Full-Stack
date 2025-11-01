@@ -9,6 +9,8 @@ export function makeDashboardController(pool) {
     throw new TypeError('A pg Pool instance is required');
   }
 
+  const DAILY_SURPRISE_LIMIT = 3;
+
   // --- identify the loaded file/version so you know THIS file is running
   console.log('[dashboardController] loaded -> Backend/dashboardController.js v3');
 
@@ -65,6 +67,59 @@ export function makeDashboardController(pool) {
     // If friend_arcs.challenge already exists and is a JSON object, keep it.
     if (isPlainObject(row.challenge)) return;
 
+    const lifetime = isPlainObject(row.lifetime) ? { ...row.lifetime } : {};
+    const today = new Date().toISOString().slice(0, 10);
+    let limit = Number(lifetime.dailySurpriseLimit ?? lifetime.daily_surprise_limit);
+    if (!Number.isFinite(limit) || limit <= 0) {
+      limit = DAILY_SURPRISE_LIMIT;
+    }
+    let count = Number(lifetime.dailySurpriseCount ?? lifetime.daily_surprise_count);
+    if (!Number.isFinite(count) || count < 0) {
+      count = 0;
+    }
+    const storedDateRaw =
+      typeof lifetime.dailySurpriseDate === 'string'
+        ? lifetime.dailySurpriseDate
+        : typeof lifetime.daily_surprise_date === 'string'
+        ? lifetime.daily_surprise_date
+        : null;
+    const storedDate = storedDateRaw && storedDateRaw.trim() ? storedDateRaw.trim() : null;
+
+    let lifetimeChanged = false;
+    if (storedDate !== today) {
+      count = 0;
+      lifetime.dailySurpriseDate = today;
+      lifetime.daily_surprise_date = today;
+      lifetimeChanged = true;
+    }
+    if ((lifetime.dailySurpriseLimit ?? lifetime.daily_surprise_limit) !== limit) {
+      lifetimeChanged = true;
+    }
+    lifetime.dailySurpriseLimit = limit;
+    lifetime.daily_surprise_limit = limit;
+    lifetime.dailySurpriseCount = count;
+    lifetime.daily_surprise_count = count;
+
+    if (limit > 0 && storedDate === today && count >= limit) {
+      if (lifetimeChanged) {
+        await q(
+          `
+          UPDATE friend_arcs
+             SET lifetime   = $1::jsonb,
+                 updated_at = NOW()
+           WHERE id = $2
+             AND user_id = $3
+          `,
+          [JSON.stringify(lifetime), row.id, row.user_id],
+          'ensureTopLevelChallenge.UPDATE lifetime (limit reached)'
+        );
+        row.lifetime = lifetime;
+      }
+      row.lifetime = lifetime;
+      row.challenge = null;
+      return;
+    }
+
     // Otherwise, pick a template and persist a personalized challenge.
     const tmpl = await pickOneActiveChallengeTemplate();
     if (!tmpl) {
@@ -98,14 +153,20 @@ export function makeDashboardController(pool) {
       isFallback: false
     };
 
+    lifetime.dailySurpriseLimit = limit;
+    lifetime.daily_surprise_limit = limit;
+    row.lifetime = lifetime;
+
     await q(
       `
       UPDATE friend_arcs
-      SET challenge = $1::jsonb,
-          updated_at = NOW()
-      WHERE id = $2
+      SET challenge   = $1::jsonb,
+          lifetime    = $2::jsonb,
+          updated_at  = NOW()
+      WHERE id = $3
+        AND user_id = $4
       `,
-      [JSON.stringify(challengeObj), row.id],
+      [JSON.stringify(challengeObj), JSON.stringify(lifetime), row.id, row.user_id],
       'ensureTopLevelChallenge.UPDATE friend_arcs'
     );
 
