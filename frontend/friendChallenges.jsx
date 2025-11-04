@@ -65,6 +65,35 @@ async function postJSON(url, body = {}) {
   return payload;
 }
 
+async function deleteArcRequest(arcId) {
+  if (!arcId) {
+    throw new Error("Arc identifier is required");
+  }
+
+  const headers = { Accept: "application/json" };
+  const token = readCsrfToken();
+  if (token) headers["X-CSRF-Token"] = token;
+
+  const response = await fetch(`/api/arcs/${encodeURIComponent(arcId)}`, {
+    method: "DELETE",
+    credentials: "include",
+    headers,
+  });
+
+  const contentType = response.headers.get("Content-Type") || "";
+  const isJson = contentType.includes("application/json");
+  const payload = isJson ? await response.json() : null;
+
+  if (!response.ok) {
+    const message = payload?.error || payload?.message || `Request failed (${response.status})`;
+    const error = new Error(message);
+    error.status = response.status;
+    throw error;
+  }
+
+  return payload || {};
+}
+
 // Minimal inline icons (replaces lucide-react dependency)
 const Svg = ({ children, size = 20, className, ...rest }) => (
   <svg
@@ -1224,6 +1253,9 @@ export default function FriendChallenges(props = {}) {
 
   const [loadingKey, setLoadingKey] = React.useState(null);
   const [errorMessage, setErrorMessage] = React.useState(null);
+  const [pendingDeleteArc, setPendingDeleteArc] = useState(null);
+  const [isDeletingArc, setIsDeletingArc] = useState(false);
+  const [deleteArcError, setDeleteArcError] = useState(null);
 
   const isLoadingAction = React.useCallback(
     (key) => !!key && loadingKey === key,
@@ -1235,6 +1267,42 @@ export default function FriendChallenges(props = {}) {
     const timer = setTimeout(() => setErrorMessage(null), 4000);
     return () => clearTimeout(timer);
   }, [errorMessage]);
+
+  const openDeleteDialog = React.useCallback((arc) => {
+    if (!arc) return;
+    setDeleteArcError(null);
+    setPendingDeleteArc(arc);
+  }, []);
+
+  const closeDeleteDialog = React.useCallback(() => {
+    if (isDeletingArc) return;
+    setPendingDeleteArc(null);
+    setDeleteArcError(null);
+  }, [isDeletingArc]);
+
+  const handleConfirmDeleteArc = React.useCallback(async () => {
+    if (!pendingDeleteArc || !pendingDeleteArc.id) return;
+    const arcId = String(pendingDeleteArc.id);
+    setIsDeletingArc(true);
+    setDeleteArcError(null);
+    try {
+      await deleteArcRequest(arcId);
+      setArcs((prev) => {
+        const next = prev.filter((arc) => String(arc.id) !== arcId);
+        setSelectedId((prevSelected) => {
+          if (prevSelected && prevSelected !== arcId) return prevSelected;
+          return next[0]?.id || "";
+        });
+        return next;
+      });
+      setPendingDeleteArc(null);
+    } catch (error) {
+      console.error("Failed to delete arc", error);
+      setDeleteArcError(error.message || "Unable to delete arc right now.");
+    } finally {
+      setIsDeletingArc(false);
+    }
+  }, [pendingDeleteArc, setArcs, setSelectedId]);
 
   const updateArcFromServer = React.useCallback(
     (rawArc) => {
@@ -1479,10 +1547,6 @@ export default function FriendChallenges(props = {}) {
     },
     [mutateArc]
   );
-
-  const removeArc = React.useCallback((id) => {
-    setArcs((prev) => prev.filter((arc) => arc.id !== id));
-  }, []);
 
   if (!arcs.length || !current) {
     return (
@@ -1940,6 +2004,49 @@ export default function FriendChallenges(props = {}) {
           {errorMessage}
         </div>
       )}
+      {pendingDeleteArc && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center px-4">
+          <div
+            className="absolute inset-0 bg-slate-900/40"
+            aria-hidden
+            onClick={closeDeleteDialog}
+          />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-arc-title"
+            className="relative z-10 w-full max-w-md rounded-2xl bg-white border border-slate-200 shadow-xl p-6"
+          >
+            <h3 id="delete-arc-title" className="text-lg font-semibold text-[var(--ink)] mb-2">
+              {`Delete ${pendingDeleteArc.name || "this arc"}?`}
+            </h3>
+            <p className="text-sm text-slate-600 mb-4">
+              Removing this friend pill deletes its progress, steps, and badges. This action cannot be undone.
+            </p>
+            {deleteArcError && (
+              <p className="text-sm text-[var(--coral)] mb-4">{deleteArcError}</p>
+            )}
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={closeDeleteDialog}
+                disabled={isDeletingArc}
+                className="px-4 py-2 rounded-lg border border-slate-200 text-sm text-[var(--ink)] hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-300 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteArc}
+                disabled={isDeletingArc}
+                className="px-4 py-2 rounded-lg bg-[var(--coral)] text-white text-sm shadow hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--coral)] disabled:opacity-60"
+              >
+                {isDeletingArc ? "Deleting…" : "Delete arc"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <main className="mx-auto max-w-screen-lg px-3 md:px-4 py-6 md:py-8 grid gap-6 md:gap-8">
         {/* Arc Switcher */}
@@ -1953,7 +2060,7 @@ export default function FriendChallenges(props = {}) {
               const handleRemove = (event) => {
                 event.preventDefault();
                 event.stopPropagation();
-                removeArc(a.id);
+                openDeleteDialog(a);
               };
 
               return (
@@ -1989,7 +2096,7 @@ export default function FriendChallenges(props = {}) {
                   <button
                     type="button"
                     onClick={handleRemove}
-                    aria-label={`Remove ${a.name}`}
+                    aria-label={`Delete ${a.name}`}
                     className="absolute top-1 right-1 flex h-4 w-4 items-center justify-center rounded-full bg-[var(--coral)] text-white text-[10px] shadow hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--coral)]"
                   >
                     ×

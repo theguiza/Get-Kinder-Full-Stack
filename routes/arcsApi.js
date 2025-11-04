@@ -475,6 +475,44 @@ router.post("/api/arcs/:arcId/challenge/swap", (req, res) =>
   )
 );
 
+router.delete("/api/arcs/:arcId", async (req, res) => {
+  try {
+    const expectedCsrf = req.session?.csrfToken;
+    const providedCsrf = req.get("X-CSRF-Token");
+    if (!expectedCsrf || !providedCsrf || providedCsrf !== expectedCsrf) {
+      return res.status(403).json({ error: "Invalid CSRF token" });
+    }
+
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const arcId = toSafeString(req.params.arcId, "");
+    if (!arcId) {
+      return res.status(400).json({ error: "Arc identifier is required" });
+    }
+
+    const { rowCount } = await pool.query(
+      `
+        DELETE FROM friend_arcs
+         WHERE user_id = $1
+           AND id::text = $2
+      `,
+      [userId, arcId]
+    );
+
+    if (!rowCount) {
+      return res.status(404).json({ error: "Arc not found" });
+    }
+
+    return res.json({ ok: true, deletedId: arcId });
+  } catch (error) {
+    console.error("[arcsApi] delete arc failed", error);
+    return res.status(500).json({ error: "Failed to delete arc" });
+  }
+});
+
 export default router;
 
 async function handleArcMutation(req, res, mutator, options = {}) {
