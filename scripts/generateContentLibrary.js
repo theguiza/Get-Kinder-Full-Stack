@@ -49,6 +49,12 @@ function pickFirst(arr, fallback) {
   return Array.isArray(arr) && arr.length ? arr[0] : fallback;
 }
 
+function pickRandom(arr, fallback) {
+  if (!Array.isArray(arr) || !arr.length) return fallback;
+  const index = Math.floor(Math.random() * arr.length);
+  return arr[index];
+}
+
 function ensureArray(x) {
   return Array.isArray(x) ? x : [];
 }
@@ -314,7 +320,7 @@ async function backfillDailySurprises() {
           (phrases.openers[family]) ||
           (family === 'email' ? phrases.openers.text : null) ||
           [];
-        const opener = pickFirst(openerList, 'Message {{ friend_name }} to say hi.');
+        const opener = pickRandom(openerList, pickFirst(openerList, 'Message {{ friend_name }} to say hi.'));
 
         const title_template = opener; // keep {{ friend_name }}
 
@@ -338,15 +344,15 @@ async function backfillDailySurprises() {
       const estRaw = durations[effort] ?? 5;
       const est = Math.max(1, Math.min(60, estRaw));
 
-      const nudge = pickFirst(phrases.nudges, 'Keep it short.');
-      const closer = pickFirst(phrases.closers, 'Hit send without overthinking.');
+      const nudge = pickRandom(phrases.nudges, pickFirst(phrases.nudges, 'Keep it short.'));
+      const closer = pickRandom(phrases.closers, pickFirst(phrases.closers, 'Hit send without overthinking.'));
       const chan = s?.channel || 'text'; // can be 'any'
 
       const openerList =
         (phrases.openers[chan]) ||
         (chan === 'any' ? phrases.openers.text : null) ||
         [];
-      const opener = pickFirst(openerList, 'Ping {{ friend_name }} with a quick hello.');
+      const opener = pickRandom(openerList, pickFirst(openerList, 'Ping {{ friend_name }} with a quick hello.'));
 
       const title_template = opener; // keep {{ friend_name }}
       const description_template = `${mustacheEst(nudge, { est_minutes: est })} ${closer}`.trim();

@@ -8,7 +8,19 @@
       "effort": "low",
       "length_days": 21,
       "cadence_per_week": 3,
-      "goal_tags": ["reconnect","weeknights"],
+      "goal_tags": [
+        "reconnect",
+        "weeknights",
+        "level:casual-maintain",
+        "cluster:steady",
+        "cluster:rhythm",
+        "type:confidante",
+        "type:caregiver",
+        "type:anchor",
+        "type:communicator",
+        "score:mid",
+        "channel:text"
+      ],
       "day_types": [
         { "day": 1,  "family": "text" },
         { "day": 2,  "family": "text" },
@@ -28,7 +40,20 @@
       "effort": "medium",
       "length_days": 14,
       "cadence_per_week": 2,
-      "goal_tags": ["reconnect","deepen"],
+      "goal_tags": [
+        "reconnect",
+        "deepen",
+        "level:friend-maintain",
+        "cluster:steady",
+        "cluster:rhythm",
+        "type:coach",
+        "type:confidante",
+        "type:anchor",
+        "type:communicator",
+        "score:mid",
+        "score:high",
+        "channel:call"
+      ],
       "day_types": [
         { "day": 2,  "family": "call" },
         { "day": 4,  "family": "call" },
@@ -46,7 +71,21 @@
       "effort": "low",
       "length_days": 21,
       "cadence_per_week": 3,
-      "goal_tags": ["acquaintance-to-casual","text-first","low-effort","21d"],
+      "goal_tags": [
+        "acquaintance-to-casual",
+        "text-first",
+        "low-effort",
+        "21d",
+        "level:acq-to-casual",
+        "cluster:explorer",
+        "cluster:rhythm",
+        "type:adventurer",
+        "type:collaborator",
+        "type:connector",
+        "score:low",
+        "score:mid",
+        "channel:text"
+      ],
       "day_types": [
         { "day": 1,  "family": "text" },
         { "day": 2,  "family": "text" },
@@ -70,7 +109,22 @@
       "effort": "medium",
       "length_days": 28,
       "cadence_per_week": 4,
-      "goal_tags": ["casual-to-friend","mixed","medium-effort","28d"],
+      "goal_tags": [
+        "casual-to-friend",
+        "mixed",
+        "medium-effort",
+        "28d",
+        "level:casual-to-friend",
+        "cluster:explorer",
+        "cluster:steady",
+        "type:adventurer",
+        "type:collaborator",
+        "type:confidante",
+        "type:caregiver",
+        "score:mid",
+        "score:high",
+        "channel:mixed"
+      ],
       "day_types": [
         { "day": 2,  "family": "text" },
         { "day": 4,  "family": "text" },
@@ -92,7 +146,22 @@
       "effort": "medium",
       "length_days": 42,
       "cadence_per_week": 4,
-      "goal_tags": ["friend-to-close","shared-activity","ritual","42d"],
+      "goal_tags": [
+        "friend-to-close",
+        "shared-activity",
+        "ritual",
+        "42d",
+        "level:friend-to-close",
+        "cluster:steady",
+        "cluster:rhythm",
+        "type:confidante",
+        "type:caregiver",
+        "type:anchor",
+        "type:communicator",
+        "score:mid",
+        "score:high",
+        "channel:mixed"
+      ],
       "day_types": [
         { "day": 2,  "family": "text" },
         { "day": 3,  "family": "text" },
@@ -114,7 +183,19 @@
       "effort": "high",
       "length_days": 56,
       "cadence_per_week": 3,
-      "goal_tags": ["close-to-best","co-ritual","high-effort","56d"],
+      "goal_tags": [
+        "close-to-best",
+        "co-ritual",
+        "high-effort",
+        "56d",
+        "level:close-to-best",
+        "cluster:steady",
+        "type:confidante",
+        "type:caregiver",
+        "type:coach",
+        "score:high",
+        "channel:mixed"
+      ],
       "day_types": [
         { "day": 2,  "family": "text" },
         { "day": 4,  "family": "text" },
@@ -135,7 +216,18 @@
       "effort": "low",
       "length_days": 7,
       "cadence_per_week": 7,
-      "goal_tags": ["starter","stranger-to-acquaintance","daily","7d"],
+      "goal_tags": [
+        "starter",
+        "stranger-to-acquaintance",
+        "daily",
+        "7d",
+        "level:starter",
+        "cluster:explorer",
+        "cluster:steady",
+        "cluster:rhythm",
+        "score:low",
+        "channel:text"
+      ],
       "day_types": [
         { "day": 1, "family": "text" },
         { "day": 2, "family": "text" },
@@ -144,6 +236,98 @@
         { "day": 5, "family": "text" },
         { "day": 6, "family": "text" },
         { "day": 7, "family": "text" }
+      ]
+    },
+    {
+      "slug": "starter-explorers-7d",
+      "name": "Starter Arc · Explorers (7d)",
+      "tier": "Casual Friend",
+      "channel_variant": "mixed",
+      "effort": "low",
+      "length_days": 7,
+      "cadence_per_week": 7,
+      "goal_tags": [
+        "starter",
+        "stranger-to-acquaintance",
+        "level:starter",
+        "cluster:explorer",
+        "explorer-cluster",
+        "type:adventurer",
+        "type:collaborator",
+        "score:low",
+        "score:mid",
+        "channel:mixed"
+      ],
+      "day_types": [
+        { "day": 1, "family": "text" },
+        { "day": 2, "family": "text" },
+        { "day": 3, "family": "irl" },
+        { "day": 4, "family": "text" },
+        { "day": 5, "family": "call" },
+        { "day": 6, "family": "irl" },
+        { "day": 7, "family": "text" }
+      ]
+    },
+    {
+      "slug": "starter-steady-support-7d",
+      "name": "Starter Arc · Steady Support (7d)",
+      "tier": "Casual Friend",
+      "channel_variant": "mixed",
+      "effort": "low",
+      "length_days": 7,
+      "cadence_per_week": 7,
+      "goal_tags": [
+        "starter",
+        "stranger-to-acquaintance",
+        "level:starter",
+        "cluster:steady",
+        "steady-cluster",
+        "type:confidante",
+        "type:caregiver",
+        "type:coach",
+        "score:low",
+        "score:mid",
+        "channel:mixed"
+      ],
+      "day_types": [
+        { "day": 1, "family": "text" },
+        { "day": 2, "family": "text" },
+        { "day": 3, "family": "call" },
+        { "day": 4, "family": "text" },
+        { "day": 5, "family": "call" },
+        { "day": 6, "family": "text" },
+        { "day": 7, "family": "call" }
+      ]
+    },
+    {
+      "slug": "starter-rhythm-makers-7d",
+      "name": "Starter Arc · Rhythm Makers (7d)",
+      "tier": "Casual Friend",
+      "channel_variant": "mixed",
+      "effort": "low",
+      "length_days": 7,
+      "cadence_per_week": 7,
+      "goal_tags": [
+        "starter",
+        "stranger-to-acquaintance",
+        "level:starter",
+        "cluster:rhythm",
+        "rhythm-cluster",
+        "type:anchor",
+        "type:communicator",
+        "type:connector",
+        "score:low",
+        "score:mid",
+        "channel:mixed"
+      ],
+      "day_types": [
+        { "day": 1, "family": "text" },
+        { "day": 2, "family": "text" },
+        { "day": 3, "family": "call" },
+        { "day": 4, "family": "text" },
+        { "day": 5, "family": "text" },
+        { "day": 6, "family": "irl" },
+        { "day": 7, "family": "call" }
       ]
     }
   ],

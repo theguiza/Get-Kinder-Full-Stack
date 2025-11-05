@@ -23,6 +23,29 @@ const phrases = loadPhrases();
 const STARTER_TAG = "starter";
 const STARTER_LENGTH_DAYS = 7;
 
+const FRIEND_TYPE_CLUSTERS = {
+  adventurer: "explorer",
+  collaborator: "explorer",
+  confidante: "steady",
+  caregiver: "steady",
+  coach: "steady",
+  anchor: "rhythm",
+  communicator: "rhythm",
+  connector: "rhythm",
+};
+
+const CLUSTER_TAGS = {
+  explorer: ["cluster:explorer", "explorer-cluster"],
+  steady: ["cluster:steady", "steady-cluster"],
+  rhythm: ["cluster:rhythm", "rhythm-cluster"],
+};
+
+const SCORE_BANDS = [
+  { name: "low", max: 40 },
+  { name: "mid", max: 70 },
+  { name: "high", max: Infinity },
+];
+
 const DEFAULT_CHANNEL = "text";
 const DEFAULT_EFFORT = "low";
 const DEFAULT_LENGTH_DAYS = 3;
@@ -57,6 +80,69 @@ const EFFORT_ORDER = {
   medium: 2,
   high: 3,
 };
+
+function normalizeFriendTypeValue(value) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim().toLowerCase();
+  return trimmed || null;
+}
+
+function clusterForFriendType(friendType) {
+  const normalized = normalizeFriendTypeValue(friendType);
+  if (!normalized) return null;
+  return FRIEND_TYPE_CLUSTERS[normalized] || null;
+}
+
+function clusterTagsForFriendType(friendType) {
+  const cluster = clusterForFriendType(friendType);
+  if (!cluster) return [];
+  return CLUSTER_TAGS[cluster] ?? [`cluster:${cluster}`];
+}
+
+function scoreBandForValue(score) {
+  if (!Number.isFinite(score)) return null;
+  for (const band of SCORE_BANDS) {
+    if (score <= band.max) {
+      return band.name;
+    }
+  }
+  return null;
+}
+
+function slugify(value) {
+  if (typeof value !== "string") return "";
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function levelTagFromTier(tier) {
+  const slug = slugify(tier);
+  return slug ? `level:${slug}` : null;
+}
+
+function hashString(str) {
+  let hash = 0;
+  const input = String(str ?? "");
+  for (let i = 0; i < input.length; i += 1) {
+    hash = (hash << 5) - hash + input.charCodeAt(i);
+    hash |= 0; // Convert to 32bit integer
+  }
+  return hash >>> 0;
+}
+
+function createSeededRandom(seed) {
+  let state = seed >>> 0;
+  if (state === 0) {
+    state = 0x1a2b3c4d;
+  }
+  return () => {
+    state = (1664525 * state + 1013904223) >>> 0;
+    return state / 0xffffffff;
+  };
+}
 
 /**
  * @typedef {object} QuizPayload
@@ -177,7 +263,7 @@ export async function generateArcForQuiz(pool, payload) {
 
   let stepRows = await fetchPlanSteps(pool, planSelection.plan.id);
   if (starterSelection) {
-    const starterStepRows = buildStarterPlanSteps(planSelection.plan, stepRows);
+    const starterStepRows = buildStarterPlanSteps(planSelection.plan, stepRows, context);
     if (starterStepRows.length) {
       stepRows = starterStepRows;
     }
@@ -382,6 +468,31 @@ function normalizePayload(payload) {
     ...toTagList(payload.availability),
   ]);
 
+  const priorityTags = new Set();
+  const normalizedFriendType = normalizeFriendTypeValue(friendType);
+  if (normalizedFriendType) {
+    const typeTag = `type:${normalizedFriendType}`;
+    tagSet.add(typeTag);
+    priorityTags.add(typeTag);
+    for (const tag of clusterTagsForFriendType(normalizedFriendType)) {
+      tagSet.add(tag);
+      priorityTags.add(tag);
+    }
+  }
+  if (friendScore !== null) {
+    const band = scoreBandForValue(friendScore);
+    if (band) {
+      const scoreTag = `score:${band}`;
+      tagSet.add(scoreTag);
+      priorityTags.add(scoreTag);
+    }
+  }
+  const levelTag = levelTagFromTier(tierRaw);
+  if (levelTag) {
+    tagSet.add(levelTag);
+    priorityTags.add(levelTag);
+  }
+
   return {
     userId,
     friendId,
@@ -393,8 +504,10 @@ function normalizePayload(payload) {
     capacityRank: effortRank(effortCapacity, DEFAULT_EFFORT),
     quizSessionId,
     tags: tagSet,
+    priorityTags,
     friendScore,
     friendType,
+    friendTypeNormalized: normalizedFriendType,
   };
 }
 
@@ -493,7 +606,7 @@ function buildFallbackSteps(context, planSelection) {
   }));
 }
 
-function buildStarterPlanSteps(plan, existingStepRows = []) {
+function buildStarterPlanSteps(plan, existingStepRows = [], context = {}) {
   const length = Math.max(1, Number(plan.lengthDays ?? plan.length_days ?? STARTER_LENGTH_DAYS));
   const textOpeners = Array.isArray(phrases?.openers?.text) ? phrases.openers.text : [];
   const defaultMeta =
@@ -511,13 +624,28 @@ function buildStarterPlanSteps(plan, existingStepRows = []) {
 
   const steps = [];
   const phrasesLength = textOpeners.length;
+  const friendId =
+    context.friendId ??
+    context.friend_id ??
+    context.friend ??
+    context.friendName ??
+    "friend";
+  const randomSeed =
+    phrasesLength > 0
+      ? hashString(
+          `${friendId}:${plan?.id ?? "plan"}:${context.friendScore ?? ""}:${context.friendType ?? ""}:${
+            context.quizSessionId ?? ""
+          }`
+        )
+      : null;
+  const randomFn = randomSeed !== null ? createSeededRandom(randomSeed) : null;
 
   for (let day = 1; day <= length; day += 1) {
     for (let slot = 0; slot < 2; slot += 1) {
       const phraseIndex = (day - 1) * 2 + slot;
       const template =
-        phrasesLength > 0
-          ? textOpeners[phraseIndex % phrasesLength]
+        phrasesLength > 0 && randomFn
+          ? textOpeners[Math.floor(randomFn() * phrasesLength)]
           : `Reach out to {{ friend_name }} (step ${phraseIndex + 1})`;
 
       steps.push({
@@ -554,7 +682,10 @@ async function fetchActiveChallenges(pool) {
 }
 
 function selectPlan(planRows, context) {
-  let best = null;
+  if (!Array.isArray(planRows) || !planRows.length) return null;
+  const scored = [];
+  const priorityTags = context.priorityTags instanceof Set ? context.priorityTags : new Set();
+
   for (const row of planRows) {
     const planChannel = normalizeChannel(row.channel, "mixed");
     const planEffort = normalizeEffort(row.effort, "medium");
@@ -564,48 +695,95 @@ function selectPlan(planRows, context) {
     const channelMatch = channelsCompatible(planChannel, context.channel);
     const effortOk = effortRank(planEffort, "medium") <= context.capacityRank;
     const overlap = countOverlap(planTags, context.tags);
+    const priorityOverlap = countOverlap(planTags, priorityTags);
 
     const score =
-      (tierMatch ? 100 : 0) +
-      (channelMatch ? 20 : 0) +
-      (effortOk ? 10 : 0) +
-      overlap * 2;
+      (tierMatch ? 80 : 0) +
+      (channelMatch ? 25 : 0) +
+      (effortOk ? 15 : 0) +
+      overlap * 4 +
+      priorityOverlap * 8;
 
-    if (!best || score > best.score || (score === best.score && compareIds(row.id, best.plan.id) < 0)) {
-      best = {
-        plan: {
-          id: row.id,
-          name: row.name,
-          channel: planChannel,
-          effort: planEffort,
-          tier: normalizeTier(row.tier),
-          lengthDays: toPositiveInteger(row.length_days, DEFAULT_LENGTH_DAYS),
-          tags: planTags,
-        },
-        score,
-      };
-    }
+    scored.push({
+      plan: {
+        id: row.id,
+        name: row.name,
+        channel: planChannel,
+        effort: planEffort,
+        tier: normalizeTier(row.tier),
+        lengthDays: toPositiveInteger(row.length_days, DEFAULT_LENGTH_DAYS),
+        tags: planTags,
+      },
+      score,
+    });
   }
-  return best;
+
+  if (!scored.length) return null;
+  scored.sort((a, b) => b.score - a.score || compareIds(a.plan.id, b.plan.id));
+  const topScore = scored[0].score;
+  const pool = scored.filter((entry) => entry.score >= topScore - 15 && entry.score > 0);
+  const selectionPool = pool.length ? pool : scored;
+  return weightedRandomSelect(selectionPool);
 }
 
 function pickStarter7dPlan(planRows, context) {
   if (!Array.isArray(planRows) || !planRows.length) return null;
 
-  const candidates = planRows.filter((row) => {
-    const length = Number(row.length_days ?? row.lengthDays ?? NaN);
-    if (!Number.isFinite(length) || length !== STARTER_LENGTH_DAYS) {
-      return false;
-    }
-    const tags = normalizeTagList(row.tags);
-    return tags.includes(STARTER_TAG);
-  });
+  const candidates = planRows
+    .map((row) => {
+      const length = Number(row.length_days ?? row.lengthDays ?? NaN);
+      if (!Number.isFinite(length) || length !== STARTER_LENGTH_DAYS) {
+        return null;
+      }
+      const tags = normalizeTagList(row.tags);
+      if (!tags.includes(STARTER_TAG)) {
+        return null;
+      }
+      return { row, tags };
+    })
+    .filter(Boolean);
 
   if (!candidates.length) {
     return null;
   }
 
-  return selectPlan(candidates, context);
+  const typeTags = starterTypeTagsFor(context.friendType);
+  const prioritized =
+    typeTags.length > 0
+      ? candidates.filter(({ tags }) => tags.some((tag) => typeTags.includes(tag)))
+      : [];
+  const pool = prioritized.length ? prioritized : candidates;
+
+  return selectPlan(
+    pool.map(({ row }) => row),
+    context
+  );
+}
+
+function starterTypeTagsFor(friendType) {
+  const normalized = normalizeFriendTypeValue(friendType);
+  if (!normalized) return [];
+  const tags = new Set([`type:${normalized}`]);
+  for (const tag of clusterTagsForFriendType(normalized)) {
+    tags.add(tag);
+  }
+  return Array.from(tags);
+}
+
+function weightedRandomSelect(entries) {
+  if (!Array.isArray(entries) || !entries.length) return null;
+  const total = entries.reduce((sum, entry) => sum + Math.max(1, entry.score), 0);
+  if (total <= 0) {
+    return entries[0];
+  }
+  let threshold = Math.random() * total;
+  for (const entry of entries) {
+    threshold -= Math.max(1, entry.score);
+    if (threshold <= 0) {
+      return entry;
+    }
+  }
+  return entries[entries.length - 1];
 }
 
 function selectChallenge(challengeRows, context) {
