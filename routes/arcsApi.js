@@ -310,12 +310,139 @@ router.post("/api/arcs/:arcId/steps/:stepId/complete", (req, res) =>
   )
 );
 
-router.post("/api/arcs/:arcId/steps/extend", (req, res) =>
-  handleArcMutation(req, res, () => ({ changed: false, delta: 0 }), { action: "arc.step.extend" })
-);
+router.post("/api/arcs/:arcId/steps/refresh", (req, res) =>
+  handleArcMutation(
+    req,
+    res,
+    async ({ state, client, arcId, userId }) => {
+      if (!state || !Array.isArray(state.steps) || !state.steps.length) {
+        return { changed: false, delta: 0 };
+      }
 
-router.post("/api/arcs/:arcId/steps/snooze", (req, res) =>
-  handleArcMutation(req, res, () => ({ changed: false, delta: 0 }), { action: "arc.step.snooze" })
+      const activeDay = Math.max(
+        1,
+        Number.isFinite(state.day) && state.day > 0 ? Math.round(state.day) : 1
+      );
+
+      const currentDayCompleted = state.steps.some((step, index) => {
+        const fallbackDay = Math.floor(index / 2) + 1;
+        const candidate = toNumber(
+          step?.day,
+          step?.day_number,
+          step?.dayNumber,
+          step?.day_index,
+          step?.dayIndex
+        );
+        const normalized = Number.isFinite(candidate) && candidate > 0 ? candidate : fallbackDay;
+        const stepDay = Math.max(1, Math.round(normalized));
+        if (stepDay !== activeDay) return false;
+        const status = toSafeString(step?.status ?? step?.state ?? "todo").toLowerCase();
+        return status === "done";
+      });
+
+      if (currentDayCompleted) {
+        return { changed: false, delta: 0 };
+      }
+
+      const planTemplateId = toNumber(
+        state?.lifetime?.planTemplateId ?? state?.lifetime?.plan_template_id,
+        0
+      );
+      if (!Number.isFinite(planTemplateId) || planTemplateId <= 0) {
+        return { changed: false, delta: 0 };
+      }
+
+      const planRow = await fetchPlanTemplateById(client, planTemplateId);
+      if (!planRow) {
+        return { changed: false, delta: 0 };
+      }
+
+      const payload = {
+        user_id: userId,
+        friend_id: arcId,
+        friend_name: state.name,
+        tier: planRow.tier || state?.lifetime?.planName || "General",
+        channel_pref: toSafeString(
+          planRow.channel ||
+            planRow.channel_variant ||
+            state.channel ||
+            state.lifetime?.channelVariant ||
+            "mixed",
+          "mixed"
+        ),
+        effort_capacity: toSafeString(
+          planRow.effort || state.effort_capacity || state.lifetime?.effort || "medium",
+          "medium"
+        ),
+        friend_score: state.friendScore ?? null,
+        friend_type: state.friendType ?? null,
+      };
+
+      let arcRecord;
+      try {
+        arcRecord = await buildArcForSpecificPlan(client, payload, planRow, {
+          forcedStarterPlan: Boolean(state?.lifetime?.starter7AutoSelected),
+        });
+      } catch (error) {
+        console.error("[arcsApi] refresh failed while rebuilding plan:", error);
+        return { changed: false, delta: 0 };
+      }
+
+      const freshSteps = Array.isArray(arcRecord?.steps)
+        ? arcRecord.steps.filter((step) => {
+            const candidate = toNumber(
+              step?.day,
+              step?.day_number,
+              step?.dayNumber,
+              step?.day_index,
+              step?.dayIndex
+            );
+            const normalized = Number.isFinite(candidate) && candidate > 0 ? candidate : 0;
+            const stepDay = Math.max(1, Math.round(normalized || 0));
+            return stepDay === activeDay;
+          })
+        : [];
+
+      if (!freshSteps.length) {
+        return { changed: false, delta: 0 };
+      }
+
+      let replacementIndex = 0;
+      const updatedSteps = state.steps.map((existing, index) => {
+        const fallbackDay = Math.floor(index / 2) + 1;
+        const candidate = toNumber(
+          existing?.day,
+          existing?.day_number,
+          existing?.dayNumber,
+          existing?.day_index,
+          existing?.dayIndex
+        );
+        const normalized = Number.isFinite(candidate) && candidate > 0 ? candidate : fallbackDay;
+        const stepDay = Math.max(1, Math.round(normalized));
+        if (stepDay !== activeDay) {
+          return existing;
+        }
+        const template = freshSteps[replacementIndex % freshSteps.length];
+        replacementIndex += 1;
+        return {
+          ...template,
+          status: "todo",
+          state: "todo",
+          serverId: template.id,
+          serverOrdinal: replacementIndex,
+        };
+      });
+
+      state.steps = updatedSteps;
+      state.clientFlags = {
+        ...(isPlainObject(state.clientFlags) ? state.clientFlags : {}),
+        refreshedAt: new Date().toISOString(),
+      };
+
+      return { changed: true, delta: 0 };
+    },
+    { action: "arc.step.refresh" }
+  )
 );
 
 router.post("/api/arcs/:arcId/steps/fail-forward", (req, res) =>
@@ -925,6 +1052,29 @@ async function fetchPlanTemplateByName(db, name) {
        LIMIT 1
     `,
     [name]
+  );
+  return rows[0] || null;
+}
+
+async function fetchPlanTemplateById(db, id) {
+  if (!id) return null;
+  const { rows } = await db.query(
+    `
+      SELECT id,
+             name,
+             tier,
+             length_days,
+             cadence_per_week,
+             channel_variant,
+             channel,
+             effort,
+             tags
+        FROM plan_templates
+       WHERE is_active = TRUE
+         AND id = $1
+       LIMIT 1
+    `,
+    [id]
   );
   return rows[0] || null;
 }

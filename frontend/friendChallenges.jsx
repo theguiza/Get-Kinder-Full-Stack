@@ -1398,6 +1398,29 @@ export default function FriendChallenges(props = {}) {
     [mutateArc]
   );
 
+  const hasCompletedStep = React.useCallback((arc) => {
+    if (!arc || !Array.isArray(arc.steps)) return false;
+    const activeDay = Math.max(
+      1,
+      Number.isFinite(arc.day) && arc.day > 0 ? Math.round(arc.day) : 1
+    );
+    return arc.steps.some((step, index) => {
+      const fallbackDay = Math.floor(index / 2) + 1;
+      const candidate = pickFinite(
+        step?.day,
+        step?.day_number,
+        step?.dayNumber,
+        step?.day_index,
+        step?.dayIndex
+      );
+      const normalized = Number.isFinite(candidate) && candidate > 0 ? candidate : fallbackDay;
+      const stepDay = Math.max(1, Math.round(normalized));
+      if (stepDay !== activeDay) return false;
+      const status = normalizeStepStatusValue(step?.status ?? step?.state ?? "todo");
+      return status === "done";
+    });
+  }, []);
+
   const handleStepStart = React.useCallback(
     (arc, step) => {
       const serverId = toIdString(step?.serverId) || toIdString(step?.id) || null;
@@ -1655,8 +1678,7 @@ export default function FriendChallenges(props = {}) {
       Number.isFinite(arcPoints) && arcPoints > 0
         ? arcPoints
         : Math.round((safePercent / 100) * nextThreshold);
-    const planExtendKey = `plan-extend:${arc.id}`;
-    const planSnoozeKey = `plan-snooze:${arc.id}`;
+    const planRefreshKey = `plan-refresh:${arc.id}`;
     const planFailKey = `plan-fail-forward:${arc.id}`;
     const challengeCompleteKey = `challenge-complete:${arc.id}`;
     const challengeSwapKey = `challenge-swap:${arc.id}`;
@@ -1792,19 +1814,11 @@ export default function FriendChallenges(props = {}) {
                 <div className="flex flex-wrap items-center gap-2 pt-2">
                   <button
                     type="button"
-                    onClick={() => handlePlanAction(arc, "extend")}
-                    disabled={isLoadingAction(planExtendKey)}
+                    onClick={() => handlePlanAction(arc, "refresh")}
+                    disabled={isLoadingAction(planRefreshKey) || hasCompletedStep(arc)}
                     className="px-3 py-1.5 rounded-lg bg-[var(--ink)] text-white text-sm hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--ink)] disabled:opacity-60 disabled:pointer-events-none"
                   >
-                    Extend
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handlePlanAction(arc, "snooze")}
-                    disabled={isLoadingAction(planSnoozeKey)}
-                    className="px-3 py-1.5 rounded-lg bg-white text-[var(--ink)] border border-slate-200 text-sm hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--ink)]/40 disabled:opacity-60 disabled:pointer-events-none"
-                  >
-                    Snooze
+                    Refresh
                   </button>
                   <button
                     type="button"
@@ -1812,7 +1826,7 @@ export default function FriendChallenges(props = {}) {
                     disabled={isLoadingAction(planFailKey)}
                     className="px-3 py-1.5 rounded-lg bg-white text-slate-700 border border-slate-200 text-sm hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-300 disabled:opacity-60 disabled:pointer-events-none"
                   >
-                    Fail-forward
+                    Skip to Tomorrow
                   </button>
                   <span className="text-xs text-slate-500 ml-auto flex items-center gap-1">
                     <Info size={14} /> Auto-advance in ~12h
