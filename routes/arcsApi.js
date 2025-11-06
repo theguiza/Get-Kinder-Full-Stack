@@ -747,12 +747,56 @@ async function handleArcMutation(req, res, mutator, options = {}) {
 
       const mutationResult = await mutator(context);
 
+      const normalizePendingDayValue = (value) => {
+        const numeric = toNumber(value, 0);
+        return Number.isFinite(numeric) && numeric > 0 ? Math.round(numeric) : null;
+      };
+      const normalizePendingUnlockValue = (value) => {
+        const text = toSafeString(value, "");
+        return text || null;
+      };
+      const originalLifetime = isPlainObject(currentRow.lifetime) ? currentRow.lifetime : {};
+      const stateLifetime = isPlainObject(state.lifetime) ? state.lifetime : {};
+      const persistedDay = Math.max(0, toNumber(currentRow.day, 0));
+      const resolvedDay = Math.max(0, toNumber(state.day, persistedDay));
+      const originalPendingDay = normalizePendingDayValue(
+        originalLifetime.pendingDay ?? originalLifetime.pending_day
+      );
+      const originalPendingUnlock = normalizePendingUnlockValue(
+        originalLifetime.pendingDayUnlockAt ?? originalLifetime.pending_day_unlock_at
+      );
+      const statePendingDay = normalizePendingDayValue(
+        state.pendingDay ??
+          state.pending_day ??
+          stateLifetime.pendingDay ??
+          stateLifetime.pending_day
+      );
+      const statePendingUnlock = normalizePendingUnlockValue(
+        state.pendingDayUnlockAt ??
+          state.pending_day_unlock_at ??
+          stateLifetime.pendingDayUnlockAt ??
+          stateLifetime.pending_day_unlock_at
+      );
+      const resolverTouchedState =
+        resolvedDay !== persistedDay ||
+        statePendingDay !== originalPendingDay ||
+        statePendingUnlock !== originalPendingUnlock;
+
       const changed = mutationResult?.changed !== false;
       let delta = Number.isFinite(mutationResult?.delta) ? Number(mutationResult.delta) : 0;
 
       let responseArc;
       if (!changed) {
-        responseArc = mutationResult?.overrideArc ?? mapFriendArcRow(currentRow);
+        if (resolverTouchedState) {
+          finalizeState(state);
+          const updatedRow = await updateArc(client, arcId, userId, state);
+          if (!updatedRow) {
+            throw httpError(404, "Arc not found after update");
+          }
+          responseArc = mapFriendArcRow(updatedRow);
+        } else {
+          responseArc = mutationResult?.overrideArc ?? mapFriendArcRow(currentRow);
+        }
       } else if (mutationResult?.persistedArc) {
         responseArc = mutationResult.persistedArc;
       } else if (mutationResult?.persistedRow) {
