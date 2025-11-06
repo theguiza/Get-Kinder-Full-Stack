@@ -14,6 +14,8 @@ export function setToolContext(ctx = {}) {
 const ASSISTANT_ID = process.env.OPENAI_ASSISTANT_ID;
 const API_KEY = process.env.OPENAI_API_KEY;
 
+const threadRunState = new Map();
+
 function getHeaders() {
   return {
     "Content-Type": "application/json",
@@ -89,6 +91,7 @@ export async function createThread() {
 }
 
 export async function createMessage(threadId, content) {
+  await ensureThreadIdle(threadId);
   const endpoint = `https://api.openai.com/v1/threads/${threadId}/messages`;
 
   const response = await fetch(endpoint, {
@@ -104,8 +107,102 @@ export async function createMessage(threadId, content) {
   return await response.json();
 }
 
+const ACTIVE_RUN_STATUSES = new Set(['queued', 'in_progress', 'requires_action', 'cancelling']);
+const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'cancelled', 'expired']);
+
+function markRunActive(threadId, runId, status = 'queued') {
+  threadRunState.set(threadId, { runId, status, startedAt: Date.now() });
+}
+
+function clearRunState(threadId) {
+  threadRunState.delete(threadId);
+}
+
+function updateRunStatus(threadId, status) {
+  const state = threadRunState.get(threadId);
+  if (!state) return;
+  state.status = status;
+  if (TERMINAL_RUN_STATUSES.has(status)) {
+    clearRunState(threadId);
+  }
+}
+
+async function ensureThreadIdle(threadId, { pollIntervalMs = 1000, timeoutMs = 30000 } = {}) {
+  let waited = 0;
+  while (true) {
+    let state = threadRunState.get(threadId);
+    if (!state) {
+      const existing = await findActiveRun(threadId);
+      if (!existing) return;
+      markRunActive(threadId, existing.id, existing.status ?? 'queued');
+      state = threadRunState.get(threadId);
+    }
+    const runEndpoint = `https://api.openai.com/v1/threads/${threadId}/runs/${state.runId}`;
+
+    const details = await fetch(runEndpoint, { method: 'GET', headers: getHeaders() });
+    if (!details.ok) {
+      console.warn('[OpenAI] Failed to inspect active run before posting message:', await details.text());
+      return;
+    }
+    const payload = await details.json();
+    updateRunStatus(threadId, payload.status);
+    if (!ACTIVE_RUN_STATUSES.has(payload.status)) {
+      return;
+    }
+
+    if (waited >= timeoutMs) {
+      await cancelRun(threadId, state.runId);
+      await waitForRunTerminalState(threadId, state.runId, { pollIntervalMs, timeoutMs: 15000 });
+      return;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+    waited += pollIntervalMs;
+  }
+}
+
+async function waitForRunTerminalState(threadId, runId, { pollIntervalMs = 1000, timeoutMs = 15000 } = {}) {
+  const runEndpoint = `https://api.openai.com/v1/threads/${threadId}/runs/${runId}`;
+  const startedAt = Date.now();
+  while (true) {
+    const res = await fetch(runEndpoint, { method: 'GET', headers: getHeaders() });
+    if (!res.ok) {
+      console.warn('[OpenAI] Failed to poll run after cancellation attempt:', await res.text());
+      return;
+    }
+    const payload = await res.json();
+    updateRunStatus(threadId, payload.status);
+    if (!ACTIVE_RUN_STATUSES.has(payload.status)) return;
+    if (Date.now() - startedAt >= timeoutMs) {
+      console.warn('[OpenAI] Run remained active after cancellation window');
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+  }
+}
+
+async function cancelRun(threadId, runId) {
+  const endpoint = `https://api.openai.com/v1/threads/${threadId}/runs/${runId}/cancel`;
+  const res = await fetch(endpoint, { method: 'POST', headers: getHeaders() });
+  if (!res.ok) {
+    console.warn('[OpenAI] Failed to cancel run:', await res.text());
+  }
+}
+
+async function findActiveRun(threadId) {
+  const endpoint = `https://api.openai.com/v1/threads/${threadId}/runs?order=desc&limit=10`;
+  const res = await fetch(endpoint, { method: 'GET', headers: getHeaders() });
+  if (!res.ok) {
+    console.warn('[OpenAI] Failed to list runs for thread', threadId, await res.text());
+    return null;
+  }
+  const payload = await res.json();
+  return (payload?.data ?? []).find((run) => ACTIVE_RUN_STATUSES.has(run.status)) ?? null;
+}
+
 //  KAI integration - Enhanced run creation with tool support for dashboard functions
 export async function createAndPollRun(threadId, tools = []) {
+  await ensureThreadIdle(threadId);
   const runEndpoint = `https://api.openai.com/v1/threads/${threadId}/runs`;
 
   const runPayload = {
@@ -125,6 +222,7 @@ export async function createAndPollRun(threadId, tools = []) {
 
   if (!runResponse.ok) throw new Error(await runResponse.text());
   const run = await runResponse.json();
+  markRunActive(threadId, run.id, run.status);
 
   let runStatus = run.status;
   let runResult = null;
@@ -141,6 +239,7 @@ export async function createAndPollRun(threadId, tools = []) {
     if (!statusCheck.ok) throw new Error(await statusCheck.text());
     runResult = await statusCheck.json();
     runStatus = runResult.status;
+    updateRunStatus(threadId, runStatus);
 
     // KAI integration - Handle tool calls if they occur
     if (runStatus === 'requires_action' && runResult.required_action) {
@@ -168,11 +267,13 @@ export async function createAndPollRun(threadId, tools = []) {
     }
   }
 
+  clearRunState(threadId);
   return runResult;
 }
 // Stream a run as SSE frames; auto-handle requires_action tool calls.
 // onEvent(evt) receives OpenAI event objects and internal 'tool.result' pings.
 export async function createAndStreamRun(threadId, tools = [], onEvent) {
+  await ensureThreadIdle(threadId);
   const runEndpoint = `https://api.openai.com/v1/threads/${threadId}/runs`;
   const payload = { assistant_id: ASSISTANT_ID };
   if (Array.isArray(tools) && tools.length) payload.tools = tools;
@@ -187,6 +288,7 @@ export async function createAndStreamRun(threadId, tools = [], onEvent) {
   const reader  = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  let activeRunId = null;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -204,12 +306,23 @@ export async function createAndStreamRun(threadId, tools = [], onEvent) {
         const data = line.slice(5).trim();
         if (!data || data === '[DONE]') {
           onEvent?.({ type: 'openai.done' });
+          if (activeRunId) clearRunState(threadId);
           continue;
         }
 
         let evt;
         try { evt = JSON.parse(data); } catch { continue; }
         onEvent?.(evt);
+
+        if (evt.type === 'thread.run.created') {
+          activeRunId = evt?.data?.id;
+          if (activeRunId) markRunActive(threadId, activeRunId, evt?.data?.status ?? 'queued');
+        } else if (evt.type === 'thread.run.step.completed' && evt?.data?.run_id) {
+          updateRunStatus(threadId, evt.data.status ?? 'in_progress');
+        } else if (evt.type?.startsWith('thread.run.')) {
+          const status = evt?.data?.status;
+          if (status) updateRunStatus(threadId, status);
+        }
 
         // Mid-stream tool calls
         if (evt.type === 'thread.run.requires_action') {
@@ -230,6 +343,10 @@ export async function createAndStreamRun(threadId, tools = [], onEvent) {
         }
       }
     }
+  }
+
+  if (activeRunId) {
+    clearRunState(threadId);
   }
 }
 

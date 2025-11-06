@@ -1,3 +1,6 @@
+# Updated Blueprints (Aligned) — 2025-11-05T21:20:56.334368Z
+
+```json
 {
   "plans": [
     {
@@ -59,14 +62,12 @@
         "purpose_priority": [
           "ritualize",
           "affirming",
-          "invite_leisure",
-          "striving_pivot",
-          "needing"
+          "invite_leisure"
         ],
         "mattering_quota": {
-          "Affirming": 1,
-          "Noticing": 0.67,
-          "Needing": 0.33
+          "Noticing": 0.3,
+          "Affirming": 0.5,
+          "Needing": 0.2
         }
       }
     },
@@ -121,14 +122,12 @@
       "selector_hints": {
         "purpose_priority": [
           "invite_leisure",
-          "affirming",
-          "striving_pivot",
-          "needing"
+          "affirming"
         ],
         "mattering_quota": {
-          "Affirming": 1,
-          "Noticing": 0.67,
-          "Needing": 0.33
+          "Noticing": 0.3,
+          "Affirming": 0.5,
+          "Needing": 0.2
         }
       }
     },
@@ -219,9 +218,9 @@
           "affirming"
         ],
         "mattering_quota": {
-          "Affirming": 1,
-          "Noticing": 0.67,
-          "Needing": 0.33
+          "Noticing": 0.3,
+          "Affirming": 0.5,
+          "Needing": 0.2
         }
       }
     },
@@ -313,9 +312,9 @@
           "affirming"
         ],
         "mattering_quota": {
-          "Affirming": 1,
-          "Noticing": 0.67,
-          "Needing": 0.33
+          "Noticing": 0.3,
+          "Affirming": 0.5,
+          "Needing": 0.2
         }
       }
     },
@@ -411,9 +410,9 @@
           "affirming"
         ],
         "mattering_quota": {
-          "Affirming": 1,
-          "Noticing": 0.67,
-          "Needing": 0.33
+          "Noticing": 0.3,
+          "Affirming": 0.5,
+          "Needing": 0.2
         }
       }
     },
@@ -493,13 +492,12 @@
           "invite_leisure",
           "ritualize",
           "needing",
-          "affirming",
-          "striving_pivot"
+          "affirming"
         ],
         "mattering_quota": {
-          "Affirming": 1,
-          "Noticing": 0.67,
-          "Needing": 0.33
+          "Noticing": 0.3,
+          "Affirming": 0.5,
+          "Needing": 0.2
         }
       }
     },
@@ -580,13 +578,12 @@
           "invite_leisure",
           "ritualize",
           "needing",
-          "affirming",
-          "striving_pivot"
+          "affirming"
         ],
         "mattering_quota": {
-          "Affirming": 1,
-          "Noticing": 0.67,
-          "Needing": 0.33
+          "Noticing": 0.3,
+          "Affirming": 0.5,
+          "Needing": 0.2
         }
       }
     },
@@ -667,13 +664,12 @@
           "invite_leisure",
           "ritualize",
           "needing",
-          "affirming",
-          "striving_pivot"
+          "affirming"
         ],
         "mattering_quota": {
-          "Affirming": 1,
-          "Noticing": 0.67,
-          "Needing": 0.33
+          "Noticing": 0.3,
+          "Affirming": 0.5,
+          "Needing": 0.2
         }
       }
     },
@@ -757,13 +753,12 @@
           "ritualize",
           "invite_leisure",
           "affirming",
-          "needing",
-          "striving_pivot"
+          "needing"
         ],
         "mattering_quota": {
-          "Affirming": 1,
-          "Noticing": 0.67,
-          "Needing": 0.33
+          "Noticing": 0.3,
+          "Affirming": 0.5,
+          "Needing": 0.2
         }
       }
     },
@@ -848,13 +843,12 @@
           "ritualize",
           "invite_leisure",
           "affirming",
-          "needing",
-          "striving_pivot"
+          "needing"
         ],
         "mattering_quota": {
-          "Affirming": 1,
-          "Noticing": 0.67,
-          "Needing": 0.33
+          "Noticing": 0.3,
+          "Affirming": 0.5,
+          "Needing": 0.2
         }
       }
     },
@@ -943,13 +937,12 @@
           "ritualize",
           "invite_leisure",
           "affirming",
-          "needing",
-          "striving_pivot"
+          "needing"
         ],
         "mattering_quota": {
-          "Affirming": 1,
-          "Noticing": 0.67,
-          "Needing": 0.33
+          "Noticing": 0.3,
+          "Affirming": 0.5,
+          "Needing": 0.2
         }
       }
     },
@@ -1035,14 +1028,12 @@
         "purpose_priority": [
           "ritualize",
           "affirming",
-          "needing",
-          "invite_leisure",
-          "striving_pivot"
+          "needing"
         ],
         "mattering_quota": {
-          "Affirming": 1,
-          "Noticing": 0.67,
-          "Needing": 0.33
+          "Noticing": 0.3,
+          "Affirming": 0.5,
+          "Needing": 0.2
         }
       }
     },
@@ -1129,14 +1120,12 @@
         "purpose_priority": [
           "ritualize",
           "affirming",
-          "needing",
-          "invite_leisure",
-          "striving_pivot"
+          "needing"
         ],
         "mattering_quota": {
-          "Affirming": 1,
-          "Noticing": 0.67,
-          "Needing": 0.33
+          "Noticing": 0.3,
+          "Affirming": 0.5,
+          "Needing": 0.2
         }
       }
     },
@@ -1223,14 +1212,12 @@
         "purpose_priority": [
           "ritualize",
           "affirming",
-          "needing",
-          "invite_leisure",
-          "striving_pivot"
+          "needing"
         ],
         "mattering_quota": {
-          "Affirming": 1,
-          "Noticing": 0.67,
-          "Needing": 0.33
+          "Noticing": 0.3,
+          "Affirming": 0.5,
+          "Needing": 0.2
         }
       }
     },
@@ -1292,9 +1279,9 @@
           "needing"
         ],
         "mattering_quota": {
-          "Affirming": 1,
-          "Noticing": 0.67,
-          "Needing": 0.33
+          "Noticing": 0.3,
+          "Affirming": 0.5,
+          "Needing": 0.2
         }
       }
     },
@@ -1356,9 +1343,9 @@
           "needing"
         ],
         "mattering_quota": {
-          "Affirming": 1,
-          "Noticing": 0.67,
-          "Needing": 0.33
+          "Noticing": 0.3,
+          "Affirming": 0.5,
+          "Needing": 0.2
         }
       }
     },
@@ -1421,9 +1408,9 @@
           "needing"
         ],
         "mattering_quota": {
-          "Affirming": 1,
-          "Noticing": 0.67,
-          "Needing": 0.33
+          "Noticing": 0.3,
+          "Affirming": 0.5,
+          "Needing": 0.2
         }
       }
     },
@@ -1486,9 +1473,9 @@
           "needing"
         ],
         "mattering_quota": {
-          "Affirming": 1,
-          "Noticing": 0.67,
-          "Needing": 0.33
+          "Noticing": 0.3,
+          "Affirming": 0.5,
+          "Needing": 0.2
         }
       }
     }
@@ -1517,5 +1504,29 @@
         "celebrate"
       ]
     }
-  ]
+  ],
+  "daily_surprise_selector": {
+    "map": {
+      "cheer": [
+        "Affirming"
+      ],
+      "inside-joke": [
+        "Affirming",
+        "Noticing"
+      ],
+      "support": [
+        "Needing",
+        "Affirming"
+      ],
+      "motivate": [
+        "Needing",
+        "Affirming"
+      ],
+      "celebrate": [
+        "Affirming",
+        "ritualize"
+      ]
+    }
+  }
 }
+```

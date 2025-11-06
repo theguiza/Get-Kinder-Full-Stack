@@ -2,10 +2,18 @@ import { readFileSync } from "node:fs";
 import { dirname, join as joinPath } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mapFriendArcRow } from "../Backend/lib/friendArcMapper.js";
+import {
+  selectOpenerPhrase,
+  loadBlueprintSelectorHints,
+  resolveSelectorHints,
+  extractPlanSlugFromTags,
+  normalizeTextKey
+} from "../shared/phraseSelector.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const phrasesPath = joinPath(__dirname, "../content/phrases.json");
+const blueprintsPath = joinPath(__dirname, "../content/blueprints.json");
 
 function loadPhrases() {
   try {
@@ -19,6 +27,7 @@ function loadPhrases() {
 }
 
 const phrases = loadPhrases();
+const selectorHintMap = loadBlueprintSelectorHints(blueprintsPath);
 
 const STARTER_TAG = "starter";
 const STARTER_LENGTH_DAYS = 7;
@@ -300,6 +309,9 @@ export async function buildArcForSpecificPlan(pool, payload, planRow, options = 
   }
   await ensureArcGeneratorSchema(pool);
   const context = normalizePayload(payload);
+  const planTags = normalizeTagList(planRow.tags);
+  const planSlug = extractPlanSlugFromTags(planTags);
+  const selectorHints = resolveSelectorHints(selectorHintMap, planTags);
 
   const planSelection = {
     plan: {
@@ -309,7 +321,10 @@ export async function buildArcForSpecificPlan(pool, payload, planRow, options = 
       effort: normalizeEffort(planRow.effort, "medium"),
       tier: normalizeTier(planRow.tier),
       lengthDays: toPositiveInteger(planRow.length_days, DEFAULT_LENGTH_DAYS),
-      tags: normalizeTagList(planRow.tags),
+      tags: planTags,
+      goalTags: planTags,
+      slug: planSlug,
+      selectorHints,
     },
     score: null,
   };
@@ -608,10 +623,8 @@ function buildFallbackSteps(context, planSelection) {
 
 function buildStarterPlanSteps(plan, existingStepRows = [], context = {}) {
   const length = Math.max(1, Number(plan.lengthDays ?? plan.length_days ?? STARTER_LENGTH_DAYS));
-  const textOpeners = Array.isArray(phrases?.openers?.text) ? phrases.openers.text : [];
   const defaultMeta =
-    existingStepRows.find((row) => typeof row?.meta === "string" && row.meta.trim())?.meta ||
-    "est=5m";
+    existingStepRows.find((row) => typeof row?.meta === "string" && row.meta.trim())?.meta || "est=5m";
   const defaultChannel =
     existingStepRows.find((row) => row?.channel)?.channel ||
     plan.channel ||
@@ -622,31 +635,38 @@ function buildStarterPlanSteps(plan, existingStepRows = [], context = {}) {
     plan.effort ||
     "low";
 
-  const steps = [];
-  const phrasesLength = textOpeners.length;
   const friendId =
     context.friendId ??
     context.friend_id ??
     context.friend ??
     context.friendName ??
     "friend";
-  const randomSeed =
-    phrasesLength > 0
-      ? hashString(
-          `${friendId}:${plan?.id ?? "plan"}:${context.friendScore ?? ""}:${context.friendType ?? ""}:${
-            context.quizSessionId ?? ""
-          }`
-        )
-      : null;
-  const randomFn = randomSeed !== null ? createSeededRandom(randomSeed) : null;
+  const goalTags = Array.isArray(plan.goalTags) ? plan.goalTags : normalizeTagList(plan.tags);
+  const selectorHints = plan.selectorHints ?? resolveSelectorHints(selectorHintMap, goalTags);
+  const seed = hashString(
+    `${friendId}:${plan?.id ?? "plan"}:${context.friendScore ?? ""}:${context.friendType ?? ""}:${
+      context.quizSessionId ?? ""
+    }`
+  );
+  const randomFn = createSeededRandom(seed);
+  const usedKeys = new Set();
+  const steps = [];
 
   for (let day = 1; day <= length; day += 1) {
     for (let slot = 0; slot < 2; slot += 1) {
       const phraseIndex = (day - 1) * 2 + slot;
+      const selection = selectOpenerPhrase({
+        library: phrases,
+        family: "text",
+        goalTags,
+        planEffort: defaultEffort,
+        selectorHints,
+        excludeKeys: usedKeys,
+        rng: randomFn
+      });
       const template =
-        phrasesLength > 0 && randomFn
-          ? textOpeners[Math.floor(randomFn() * phrasesLength)]
-          : `Reach out to {{ friend_name }} (step ${phraseIndex + 1})`;
+        selection.phrase?.text ?? `Reach out to {{ friend_name }} (step ${phraseIndex + 1})`;
+      usedKeys.add(normalizeTextKey(template));
 
       steps.push({
         id: `${plan.id}-d${day}-s${slot + 1}`,
@@ -690,6 +710,8 @@ function selectPlan(planRows, context) {
     const planChannel = normalizeChannel(row.channel, "mixed");
     const planEffort = normalizeEffort(row.effort, "medium");
     const planTags = normalizeTagList(row.tags);
+    const planSlug = extractPlanSlugFromTags(planTags);
+    const selectorHints = resolveSelectorHints(selectorHintMap, planTags);
 
     const tierMatch = normalizeTier(row.tier) === context.tier;
     const channelMatch = channelsCompatible(planChannel, context.channel);
@@ -713,6 +735,9 @@ function selectPlan(planRows, context) {
         tier: normalizeTier(row.tier),
         lengthDays: toPositiveInteger(row.length_days, DEFAULT_LENGTH_DAYS),
         tags: planTags,
+        goalTags: planTags,
+        slug: planSlug,
+        selectorHints,
       },
       score,
     });

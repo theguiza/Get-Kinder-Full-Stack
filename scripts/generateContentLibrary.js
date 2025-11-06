@@ -6,6 +6,10 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import pkg from 'pg';
+import {
+  selectOpenerPhrase,
+  dedupeTagsPreserveOrder
+} from '../shared/phraseSelector.js';
 
 const { Client } = pkg;
 
@@ -80,13 +84,21 @@ const blueprints = readJSON(blueprintsPath);
 // Basic validation
 const openers = phrases?.openers ?? {};
 const durations = phrases?.durations ?? {};
-if (
-  typeof openers !== 'object' ||
-  !openers.text || !openers.call || !openers.email || !openers.irl ||
-  typeof durations !== 'object' ||
-  durations.low == null || durations.medium == null || durations.high == null
-) {
-  console.error('✗ phrases.json must contain { openers: {text,call,email,irl}, durations: {low,medium,high} }');
+const hasOpeners =
+  typeof openers === 'object' &&
+  Array.isArray(openers.text) &&
+  Array.isArray(openers.call) &&
+  Array.isArray(openers.email) &&
+  Array.isArray(openers.irl);
+const hasDurations =
+  typeof durations === 'object' &&
+  durations.low != null &&
+  durations.medium != null &&
+  durations.high != null;
+if (!hasOpeners || !hasDurations) {
+  console.error(
+    '✗ phrases.json must contain enriched openers {text,call,email,irl} and durations {low,medium,high}'
+  );
   process.exit(1);
 }
 
@@ -306,7 +318,11 @@ async function backfillDailySurprises() {
         console.warn('! Skipping plan with missing required fields:', p);
         continue;
       }
-      const planId = await upsertPlan(p);
+      const planGoalTags = dedupeTagsPreserveOrder([
+        ...ensureArray(p.goal_tags),
+        p.slug ? `plan_slug:${String(p.slug).toLowerCase()}` : null
+      ].filter(Boolean));
+      const planId = await upsertPlan({ ...p, goal_tags: planGoalTags });
       planCount++;
 
       const effort = p.effort || 'low';
@@ -316,13 +332,16 @@ async function backfillDailySurprises() {
       for (const dt of ensureArray(p.day_types)) {
         const family = dt?.family || 'text';
         const chan = familyToChannel(family); // text|call|irl
-        const openerList =
-          (phrases.openers[family]) ||
-          (family === 'email' ? phrases.openers.text : null) ||
-          [];
-        const opener = pickRandom(openerList, pickFirst(openerList, 'Message {{ friend_name }} to say hi.'));
-
-        const title_template = opener; // keep {{ friend_name }}
+        const selection = selectOpenerPhrase({
+          library: phrases,
+          family,
+          goalTags: planGoalTags,
+          planEffort: effort,
+          selectorHints: p.selector_hints,
+          rng: Math.random
+        });
+        const title_template =
+          selection.phrase?.text ?? 'Message {{ friend_name }} to say hi and share one concrete idea.';
 
         await upsertStep(planId, {
           day_number: Number(dt.day || 0) || 1,
@@ -330,7 +349,7 @@ async function backfillDailySurprises() {
           meta_template,
           channel: chan,
           effort, // step_templates.effort is required
-          tags: ensureArray(p.goal_tags)
+          tags: planGoalTags
         });
         stepCount++;
       }
@@ -344,18 +363,31 @@ async function backfillDailySurprises() {
       const estRaw = durations[effort] ?? 5;
       const est = Math.max(1, Math.min(60, estRaw));
 
-      const nudge = pickRandom(phrases.nudges, pickFirst(phrases.nudges, 'Keep it short.'));
-      const closer = pickRandom(phrases.closers, pickFirst(phrases.closers, 'Hit send without overthinking.'));
+      const nudge = pickRandom(
+        phrases.nudges,
+        pickFirst(phrases.nudges, { text: 'Keep it short.' })
+      );
+      const closer = pickRandom(
+        phrases.closers,
+        pickFirst(phrases.closers, { text: 'Hit send without overthinking.' })
+      );
       const chan = s?.channel || 'text'; // can be 'any'
 
-      const openerList =
-        (phrases.openers[chan]) ||
-        (chan === 'any' ? phrases.openers.text : null) ||
-        [];
-      const opener = pickRandom(openerList, pickFirst(openerList, 'Ping {{ friend_name }} with a quick hello.'));
+      const family = chan === 'any' ? 'text' : chan;
+      const openerSelection = selectOpenerPhrase({
+        library: phrases,
+        family,
+        planEffort: effort,
+        selectorHints: null,
+        rng: Math.random
+      });
+      const opener =
+        openerSelection.phrase?.text ?? 'Ping {{ friend_name }} with a quick hello.';
 
       const title_template = opener; // keep {{ friend_name }}
-      const description_template = `${mustacheEst(nudge, { est_minutes: est })} ${closer}`.trim();
+      const description_template = `${mustacheEst(nudge?.text ?? 'Keep it tiny.', {
+        est_minutes: est
+      })} ${closer?.text ?? 'Hit send without overthinking.'}`.trim();
 
       // respect schema: points 1..50
       const points = effort === 'high' ? 50 : effort === 'medium' ? 35 : 10;

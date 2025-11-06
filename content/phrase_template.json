@@ -1,0 +1,28 @@
+{
+  "text": "Invite — Wed 5:40 or Thu 6:15 for a 20-min walk? I\u2019ll bring the goofy story.",
+  "family": "text",
+  "level": "acq-to-casual",
+  "cluster": [
+    "explorer",
+    "steady",
+    "rhythm"
+  ],
+  "types": [
+    "adventurer",
+    "collaborator",
+    "confidante",
+    "caregiver",
+    "coach",
+    "anchor",
+    "communicator",
+    "connector"
+  ],
+  "effort": "low",
+  "purpose": "invite_leisure",
+  "mattering": [
+    "Noticing",
+    "Affirming"
+  ],
+  "striving": true,
+  "timebox_minutes": 20
+}
