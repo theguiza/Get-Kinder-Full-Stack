@@ -13,6 +13,12 @@ export function setToolContext(ctx = {}) {
 
 const ASSISTANT_ID = process.env.OPENAI_ASSISTANT_ID;
 const API_KEY = process.env.OPENAI_API_KEY;
+const RUN_TRACE_ENABLED = process.env.KAI_TRACE_RUNS === 'true';
+
+function trace(...args) {
+  if (!RUN_TRACE_ENABLED) return;
+  console.log('[KAI trace]', ...args);
+}
 
 const threadRunState = new Map();
 
@@ -112,15 +118,23 @@ const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'cancelled', 'expi
 
 function markRunActive(threadId, runId, status = 'queued') {
   threadRunState.set(threadId, { runId, status, startedAt: Date.now() });
+  trace('markRunActive', { threadId, runId, status });
 }
 
 function clearRunState(threadId) {
+  const state = threadRunState.get(threadId);
   threadRunState.delete(threadId);
+  if (state) {
+    trace('clearRunState', { threadId, runId: state.runId, lastStatus: state.status });
+  }
 }
 
 function updateRunStatus(threadId, status) {
   const state = threadRunState.get(threadId);
   if (!state) return;
+  if (state.status !== status) {
+    trace('updateRunStatus', { threadId, runId: state.runId, from: state.status, to: status });
+  }
   state.status = status;
   if (TERMINAL_RUN_STATUSES.has(status)) {
     clearRunState(threadId);
@@ -129,11 +143,17 @@ function updateRunStatus(threadId, status) {
 
 async function ensureThreadIdle(threadId, { pollIntervalMs = 1000, timeoutMs = 30000 } = {}) {
   let waited = 0;
+  const waitStarted = Date.now();
   while (true) {
     let state = threadRunState.get(threadId);
     if (!state) {
       const existing = await findActiveRun(threadId);
-      if (!existing) return;
+      if (!existing) {
+        if (waited > 0) {
+          trace('ensureThreadIdle', { threadId, waitedMs: Date.now() - waitStarted, note: 'no active run' });
+        }
+        return;
+      }
       markRunActive(threadId, existing.id, existing.status ?? 'queued');
       state = threadRunState.get(threadId);
     }
@@ -145,12 +165,30 @@ async function ensureThreadIdle(threadId, { pollIntervalMs = 1000, timeoutMs = 3
       return;
     }
     const payload = await details.json();
+    trace('ensureThreadIdle.poll', {
+      threadId,
+      runId: state.runId,
+      status: payload.status,
+      waitedMs: Date.now() - waitStarted
+    });
     updateRunStatus(threadId, payload.status);
     if (!ACTIVE_RUN_STATUSES.has(payload.status)) {
+      trace('ensureThreadIdle.idle', {
+        threadId,
+        runId: state.runId,
+        totalWaitMs: Date.now() - waitStarted,
+        finalStatus: payload.status
+      });
       return;
     }
 
     if (waited >= timeoutMs) {
+      trace('ensureThreadIdle.timeout', {
+        threadId,
+        runId: state.runId,
+        timeoutMs,
+        waitedMs: waited
+      });
       await cancelRun(threadId, state.runId);
       await waitForRunTerminalState(threadId, state.runId, { pollIntervalMs, timeoutMs: 15000 });
       return;
@@ -171,6 +209,12 @@ async function waitForRunTerminalState(threadId, runId, { pollIntervalMs = 1000,
       return;
     }
     const payload = await res.json();
+    trace('waitForRunTerminalState.poll', {
+      threadId,
+      runId,
+      status: payload.status,
+      waitedMs: Date.now() - startedAt
+    });
     updateRunStatus(threadId, payload.status);
     if (!ACTIVE_RUN_STATUSES.has(payload.status)) return;
     if (Date.now() - startedAt >= timeoutMs) {
@@ -197,7 +241,11 @@ async function findActiveRun(threadId) {
     return null;
   }
   const payload = await res.json();
-  return (payload?.data ?? []).find((run) => ACTIVE_RUN_STATUSES.has(run.status)) ?? null;
+  const active = (payload?.data ?? []).find((run) => ACTIVE_RUN_STATUSES.has(run.status)) ?? null;
+  if (active) {
+    trace('findActiveRun', { threadId, runId: active.id, status: active.status });
+  }
+  return active;
 }
 
 //  KAI integration - Enhanced run creation with tool support for dashboard functions
@@ -223,9 +271,12 @@ export async function createAndPollRun(threadId, tools = []) {
   if (!runResponse.ok) throw new Error(await runResponse.text());
   const run = await runResponse.json();
   markRunActive(threadId, run.id, run.status);
+  const runStart = Date.now();
+  trace('run.created', { threadId, runId: run.id, status: run.status, toolCount: tools?.length || 0 });
 
   let runStatus = run.status;
   let runResult = null;
+  let lastLoggedStatus = runStatus;
   
   // KAI integration - Enhanced polling with tool call handling
   while (runStatus !== 'completed' && runStatus !== 'failed') {
@@ -240,11 +291,25 @@ export async function createAndPollRun(threadId, tools = []) {
     runResult = await statusCheck.json();
     runStatus = runResult.status;
     updateRunStatus(threadId, runStatus);
+    if (runStatus !== lastLoggedStatus) {
+      trace('run.status', {
+        threadId,
+        runId: run.id,
+        status: runStatus,
+        elapsedMs: Date.now() - runStart
+      });
+      lastLoggedStatus = runStatus;
+    }
 
     // KAI integration - Handle tool calls if they occur
     if (runStatus === 'requires_action' && runResult.required_action) {
       const toolCalls = runResult.required_action.submit_tool_outputs.tool_calls;
       const toolOutputs = [];
+      trace('run.requires_action', {
+        threadId,
+        runId: run.id,
+        pendingCalls: toolCalls.length
+      });
 
       for (const toolCall of toolCalls) {
         const output = await handleToolCall(toolCall);
@@ -268,6 +333,13 @@ export async function createAndPollRun(threadId, tools = []) {
   }
 
   clearRunState(threadId);
+  trace('run.finished', {
+    threadId,
+    runId: run.id,
+    status: runStatus,
+    durationMs: Date.now() - runStart,
+    usage: runResult?.usage || null
+  });
   return runResult;
 }
 // Stream a run as SSE frames; auto-handle requires_action tool calls.
@@ -362,40 +434,75 @@ export async function handleToolCall(toolCall) {
     return { error: `Invalid arguments for ${name}: ${e.message}` };
   }
 
-  switch (name) {
-    // --- NEW: Graph tools ---
-    case 'recommend_from_graph':
-      return await tool_recommend_from_graph(parsedArgs);
+  const toolStart = Date.now();
+  const argKeys = parsedArgs && typeof parsedArgs === 'object' ? Object.keys(parsedArgs) : [];
+  trace('tool.start', {
+    tool_call_id: toolCall.id,
+    name,
+    arg_keys: argKeys
+  });
 
-    case 'find_friend':
-      return await tool_find_friend(parsedArgs);
+  let result;
+  try {
+    switch (name) {
+      // --- NEW: Graph tools ---
+      case 'recommend_from_graph':
+        result = await tool_recommend_from_graph(parsedArgs);
+        break;
 
-    case 'get_friend_contacts':
-      return await tool_get_friend_contacts(parsedArgs);
+      case 'find_friend':
+        result = await tool_find_friend(parsedArgs);
+        break;
 
-    case 'mattering_suggestions':
-      // Reads Neo4j and returns latest-per-friend rows (optionally filtered)
-      return await tool_mattering_suggestions(parsedArgs);
+      case 'get_friend_contacts':
+        result = await tool_get_friend_contacts(parsedArgs);
+        break;
 
-    case 'log_interaction':
-      // Writes a minimal INTERACTION edge in Neo4j
-      return await tool_log_interaction(parsedArgs);
+      case 'mattering_suggestions':
+        // Reads Neo4j and returns latest-per-friend rows (optionally filtered)
+        result = await tool_mattering_suggestions(parsedArgs);
+        break;
 
-    // --- Existing tools (leave as-is) ---
-    case 'save_reflection':
-      return await saveReflectionToProfile(parsedArgs);
+      case 'log_interaction':
+        // Writes a minimal INTERACTION edge in Neo4j
+        result = await tool_log_interaction(parsedArgs);
+        break;
 
-    case 'generate_mystery_quest':
-      return await generateMysteryQuest(parsedArgs);
+      // --- Existing tools (leave as-is) ---
+      case 'save_reflection':
+        result = await saveReflectionToProfile(parsedArgs);
+        break;
 
-    case 'get_challenge_preview':
-      return await getChallengePreview(parsedArgs);
+      case 'generate_mystery_quest':
+        result = await generateMysteryQuest(parsedArgs);
+        break;
 
-    case 'queue_nudge':
-      return await tool_queue_nudge(parsedArgs);
+      case 'get_challenge_preview':
+        result = await getChallengePreview(parsedArgs);
+        break;
 
-    default:
-      return { error: `Unknown tool: ${name}` };
+      case 'queue_nudge':
+        result = await tool_queue_nudge(parsedArgs);
+        break;
+
+      default:
+        result = { error: `Unknown tool: ${name}` };
+    }
+    return result;
+  } catch (err) {
+    trace('tool.error', {
+      tool_call_id: toolCall.id,
+      name,
+      durationMs: Date.now() - toolStart,
+      error: err?.message || String(err)
+    });
+    throw err;
+  } finally {
+    trace('tool.end', {
+      tool_call_id: toolCall.id,
+      name,
+      durationMs: Date.now() - toolStart
+    });
   }
 }
 
