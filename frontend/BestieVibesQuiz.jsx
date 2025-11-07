@@ -3,7 +3,7 @@
 // New: "Signals Round" for low-context assessments, Unknown option, proxy scoring, and evidence meter.
 // Rounds: Signals, Vibes, Adulting, Values, Archetype + Red-Flag Bingo. Save multiple candidates.
 
-import { useMemo, useState, useRef, useEffect } from 'react'
+import { useMemo, useState, useRef, useEffect, useCallback } from 'react'
 import confetti from 'canvas-confetti'
 
 // ---------- Config ----------
@@ -239,6 +239,7 @@ export default function BestieVibesQuiz(props = {}) {
   const [saved, setSaved] = useState([])
   const [isSaving, setIsSaving] = useState(false)
   const [saveMsg, setSaveMsg] = useState('')
+  const [showCongratsModal, setShowCongratsModal] = useState(false)
   const [pictureData, setPictureData] = useState(null)
   const camInputRef = useRef(null)
   const fileInputRef = useRef(null)
@@ -294,6 +295,14 @@ export default function BestieVibesQuiz(props = {}) {
     } catch {}
   }, [saved])
 
+  const shootConfetti = useCallback((opts = {}) => {
+    try {
+      confetti({ disableForReducedMotion: false, useWorker: false, ...opts })
+    } catch (err) {
+      console.warn('Confetti launch failed', err)
+    }
+  }, [])
+
   const ev = useMemo(() => evidenceBreakdown(answers, weights, proxyFraction), [answers, weights, proxyFraction])
 
   // Dynamic normalization: denominator reflects direct + proxy contributions
@@ -342,6 +351,13 @@ export default function BestieVibesQuiz(props = {}) {
     setRoundIndex(0)
     setCandidateName('')
     setFriendEmail('')
+  }
+
+  const closeCongratsModal = () => setShowCongratsModal(false)
+  const goToFriendArc = () => {
+    if (typeof window !== 'undefined') {
+      window.location.assign('/dashboard')
+    }
   }
 
   const saveCandidate = async () => {
@@ -398,11 +414,12 @@ export default function BestieVibesQuiz(props = {}) {
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
       }
       setSaveMsg('Saved to friends ✓')
-      if (tier.name === 'Bestie Material' && dealbreakerCount < 2) {
-          confetti({ particleCount: 140, spread: 80, origin: { y: 0.6 } })
-          confetti({ particleCount: 80, angle: 60, spread: 55, origin: { x: 0 } })
-          confetti({ particleCount: 80, angle: 120, spread: 55, origin: { x: 1 } })
-        }
+      const shouldCelebrate = score >= 60 && dealbreakerCount < 2
+      if (shouldCelebrate) {
+        shootConfetti({ particleCount: 140, spread: 80, origin: { y: 0.6 } })
+        shootConfetti({ particleCount: 80, angle: 60, spread: 55, origin: { x: 0 } })
+        shootConfetti({ particleCount: 80, angle: 120, spread: 55, origin: { x: 1 } })
+      }
     } catch (err) {
       console.error('BestieVibes: save failed', err)
       setSaveMsg('Saved locally (API error)')
@@ -424,6 +441,7 @@ export default function BestieVibesQuiz(props = {}) {
     }
     setSaved((prev) => [entry, ...prev].slice(0, 8))
     resetQuiz()
+    setShowCongratsModal(true)
     setTimeout(() => setSaveMsg(''), 2000)
   }
 
@@ -814,6 +832,28 @@ export default function BestieVibesQuiz(props = {}) {
         <ScoreboardSection />
         <FooterSection />
       </div>
+
+      {showCongratsModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+          <div className="w-full max-w-md rounded-3xl bg-white p-6 text-center shadow-2xl border border-slate-100">
+            <div className="text-3xl mb-2">🎉</div>
+            <h2 className="text-2xl font-bold text-[#455a7c]">Congrats! You have completed a Friend Quiz!</h2>
+            <p className="mt-2 text-sm text-[#455a7c]">Would you like to see your new Friend Arc?</p>
+            <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+              <button
+                type="button"
+                onClick={closeCongratsModal}
+                className="flex-1 rounded-2xl border border-[#455a7c] px-4 py-2 text-[#455a7c] font-semibold hover:bg-[#455a7c]/5"
+              >Do Another Quiz</button>
+              <button
+                type="button"
+                onClick={goToFriendArc}
+                className="flex-1 rounded-2xl bg-[#ff5656] px-4 py-2 font-semibold text-white shadow hover:bg-[#ff5656]/90"
+              >Go to Friend Arc</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -1,4 +1,5 @@
 import { progressPercent } from '../shared/metrics.js';
+import { mapFriendArcRow } from './lib/friendArcMapper.js';
 
 // Backend/dashboardController.js
 // No `snapshot` usage. Ensures a real top-level `challenge` on each arc before render.
@@ -41,6 +42,53 @@ export function makeDashboardController(pool) {
   const MUSTACHE_MIN  = /\{\{\s*est_minutes\s*\}\}/gi;
 
   const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+  const ensureNormalizedArc = (row) => {
+    const normalized = mapFriendArcRow(row);
+    const merged = {
+      ...row,
+      ...normalized,
+      friend_score: normalized.friendScore ?? row.friend_score ?? null,
+      friendScore: normalized.friendScore ?? row.friendScore ?? null,
+      friend_type: normalized.friendType ?? row.friend_type ?? null,
+      friendType: normalized.friendType ?? row.friendType ?? null,
+      arc_points: normalized.arcPoints ?? row.arc_points ?? 0,
+      arcPoints: normalized.arcPoints ?? row.arcPoints ?? 0,
+      next_threshold: normalized.nextThreshold ?? row.next_threshold ?? 100,
+      nextThreshold: normalized.nextThreshold ?? row.nextThreshold ?? 100,
+      points_today: normalized.pointsToday ?? row.points_today ?? 0,
+      pointsToday: normalized.pointsToday ?? row.pointsToday ?? 0,
+      percent: normalized.percent ?? row.percent ?? 0,
+      lifetime: normalized.lifetime,
+      steps: normalized.steps,
+      challenge: normalized.challenge,
+      badges: normalized.badges,
+      friend_id: normalized.friend_id ?? row.friend_id ?? row.id
+    };
+
+    if (normalized.pendingDay) {
+      merged.pendingDay = normalized.pendingDay;
+      merged.pending_day = normalized.pendingDay;
+    } else {
+      delete merged.pendingDay;
+      delete merged.pending_day;
+    }
+
+    if (normalized.pendingDayUnlockAt) {
+      merged.pendingDayUnlockAt = normalized.pendingDayUnlockAt;
+      merged.pending_day_unlock_at = normalized.pendingDayUnlockAt;
+    } else {
+      delete merged.pendingDayUnlockAt;
+      delete merged.pending_day_unlock_at;
+    }
+
+    if (normalized.awaitingNextDay) {
+      merged.awaitingNextDay = true;
+    } else {
+      delete merged.awaitingNextDay;
+    }
+
+    return merged;
+  };
 
   function renderTemplate(str, vars) {
     if (!str) return '';
@@ -266,6 +314,7 @@ export function makeDashboardController(pool) {
         }
 
         // Ensure each arc has a top-level challenge object before rendering.
+        const normalizedArcs = [];
         for (const row of hydratedArcs) {
           await ensureTopLevelChallenge(row);
           const rawPoints = Number(row.arc_points ?? row.arcPoints);
@@ -277,9 +326,10 @@ export function makeDashboardController(pool) {
             row.nextThreshold = threshold;
           }
           row.percent = progressPercent(points, threshold);
+          normalizedArcs.push(ensureNormalizedArc(row));
         }
 
-        let arcsForRender = hydratedArcs;
+        let arcsForRender = normalizedArcs;
         if (!arcsForRender.length) {
           const { rows: friendFallback } = await q(
             `

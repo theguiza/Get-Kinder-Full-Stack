@@ -26,6 +26,7 @@ const DEFAULT_LIFETIME = {
 };
 
 const DAILY_SURPRISE_LIMIT = 3;
+const MAX_PENDING_DAY_DELAY_MS = 36 * 60 * 60 * 1000; // 36 hours
 
 const PLAN_PROMOTION_ORDER = [
   "One-Week Starter Arc (Daily)",
@@ -202,7 +203,7 @@ router.post("/api/arcs/:arcId/steps/:stepId/complete", (req, res) =>
   handleArcMutation(
     req,
     res,
-    async ({ state, stepId, client, arcId, userId }) => {
+    async ({ state, stepId, client, arcId, userId, trustedNow }) => {
       const located = findStepWithIndex(state, stepId);
       if (!located) throw httpError(404, "Step not found");
 
@@ -221,7 +222,8 @@ router.post("/api/arcs/:arcId/steps/:stepId/complete", (req, res) =>
       });
       state.lifetime.dailySurpriseLimit = DAILY_SURPRISE_LIMIT;
       state.lifetime.daily_surprise_limit = DAILY_SURPRISE_LIMIT;
-      advanceArcDayAfterStepCompletion(state);
+      advanceArcDayAfterStepCompletion(state, trustedNow);
+      const trustedIso = trustedNow instanceof Date && !Number.isNaN(trustedNow) ? trustedNow.toISOString() : new Date().toISOString();
 
       const { row, percent } = await awardAndMarkStepDone(client, {
         arcId,
@@ -259,6 +261,7 @@ router.post("/api/arcs/:arcId/steps/:stepId/complete", (req, res) =>
           client,
           arc,
           userId,
+          trustedNow,
         });
         if (resetArc) {
           arc = resetArc;
@@ -271,7 +274,7 @@ router.post("/api/arcs/:arcId/steps/:stepId/complete", (req, res) =>
         arc.clientFlags = {
           ...existingFlags,
           cycleReset: true,
-          cycleResetAt: new Date().toISOString(),
+          cycleResetAt: trustedIso,
         };
       }
       if (arc) {
@@ -314,7 +317,7 @@ router.post("/api/arcs/:arcId/steps/refresh", (req, res) =>
   handleArcMutation(
     req,
     res,
-    async ({ state, client, arcId, userId }) => {
+    async ({ state, client, arcId, userId, trustedNow }) => {
       if (!state || !Array.isArray(state.steps) || !state.steps.length) {
         return { changed: false, delta: 0 };
       }
@@ -434,9 +437,10 @@ router.post("/api/arcs/:arcId/steps/refresh", (req, res) =>
       });
 
       state.steps = updatedSteps;
+      const trustedIso = trustedNow instanceof Date && !Number.isNaN(trustedNow) ? trustedNow.toISOString() : new Date().toISOString();
       state.clientFlags = {
         ...(isPlainObject(state.clientFlags) ? state.clientFlags : {}),
-        refreshedAt: new Date().toISOString(),
+        refreshedAt: trustedIso,
       };
 
       return { changed: true, delta: 0 };
@@ -460,7 +464,7 @@ router.post("/api/arcs/:arcId/challenge/:challengeId/complete", (req, res) =>
   handleArcMutation(
     req,
     res,
-    async ({ state, challengeId, client, arcId, userId }) => {
+    async ({ state, challengeId, client, arcId, userId, trustedNow }) => {
       const challenge = state.challenge;
       if (!challenge) {
         return { changed: false, delta: 0 };
@@ -489,7 +493,7 @@ router.post("/api/arcs/:arcId/challenge/:challengeId/complete", (req, res) =>
       });
       state.lifetime.dailySurpriseLimit = DAILY_SURPRISE_LIMIT;
       state.lifetime.daily_surprise_limit = DAILY_SURPRISE_LIMIT;
-      const tracker = getDailySurpriseTracker(state.lifetime);
+      const tracker = getDailySurpriseTracker(state.lifetime, trustedNow);
       const rawCompletedCount = tracker.count + 1;
       const completedCount = rawCompletedCount > DAILY_SURPRISE_LIMIT ? DAILY_SURPRISE_LIMIT : rawCompletedCount;
       state.lifetime.dailySurpriseDate = tracker.today;
@@ -686,6 +690,11 @@ async function handleArcMutation(req, res, mutator, options = {}) {
 
       await client.query("BEGIN");
       inTransaction = true;
+      const trustedNow = await fetchTrustedNow(client);
+      const trustedIso =
+        trustedNow instanceof Date && !Number.isNaN(trustedNow)
+          ? trustedNow.toISOString()
+          : new Date().toISOString();
 
       const arcRowResult = await client.query(
         `
@@ -731,7 +740,7 @@ async function handleArcMutation(req, res, mutator, options = {}) {
         );
         currentRow.next_threshold = 100;
       }
-      const state = buildStateFromRow(currentRow);
+      const state = buildStateFromRow(currentRow, trustedNow);
 
       const context = {
         state,
@@ -743,6 +752,7 @@ async function handleArcMutation(req, res, mutator, options = {}) {
         currentRow,
         client,
         idempotencyKey,
+        trustedNow,
       };
 
       const mutationResult = await mutator(context);
@@ -840,7 +850,7 @@ async function handleArcMutation(req, res, mutator, options = {}) {
           idempotencyKey,
           delta: Number.isFinite(delta) ? delta : 0,
           newArcPoints: responseArc.arcPoints,
-          timestamp: new Date().toISOString(),
+          timestamp: trustedIso,
         })
       );
 
@@ -867,7 +877,25 @@ async function handleArcMutation(req, res, mutator, options = {}) {
   }
 }
 
-function buildStateFromRow(row) {
+async function fetchTrustedNow(db) {
+  try {
+    const { rows: [{ now }] = [{}] } = await db.query("SELECT NOW() AS now");
+    if (now instanceof Date && !Number.isNaN(now)) {
+      return now;
+    }
+    if (now) {
+      const parsed = new Date(now);
+      if (!Number.isNaN(parsed)) {
+        return parsed;
+      }
+    }
+  } catch (error) {
+    console.warn("[arcsApi] trusted time fallback -> local clock", error);
+  }
+  return new Date();
+}
+
+function buildStateFromRow(row, trustedNow) {
   const lifetime = coerceLifetimeObject(row.lifetime);
   const steps = Array.isArray(row.steps) ? deepClone(row.steps) : [];
   const challenge = row.challenge && typeof row.challenge === "object" ? deepClone(row.challenge) : null;
@@ -903,7 +931,7 @@ function buildStateFromRow(row) {
     pendingDayUnlockAt,
   };
   const totalDays = Math.max(1, toNumber(state.length, 1));
-  resolvePendingDay(state, totalDays);
+  resolvePendingDay(state, totalDays, trustedNow);
   return state;
 }
 
@@ -1189,7 +1217,7 @@ async function promoteArcIfEligible({ client, arc, userId, previousPlanName }) {
   return promotedArc;
 }
 
-async function resetArcStepsForAnotherCycle({ client, arc, userId }) {
+async function resetArcStepsForAnotherCycle({ client, arc, userId, trustedNow }) {
   if (!client || !arc || !userId) return null;
   if (!Array.isArray(arc.steps) || !arc.steps.length) return null;
 
@@ -1240,10 +1268,14 @@ async function resetArcStepsForAnotherCycle({ client, arc, userId }) {
   const updatedArc = mapFriendArcRow(updatedRow);
   updatedArc.percent = progressPercent(updatedArc.arcPoints, updatedArc.nextThreshold);
   const existingFlags = isPlainObject(updatedArc.clientFlags) ? updatedArc.clientFlags : {};
+  const isoNow =
+    trustedNow instanceof Date && !Number.isNaN(trustedNow)
+      ? trustedNow.toISOString()
+      : new Date().toISOString();
   updatedArc.clientFlags = {
     ...existingFlags,
     cycleReset: true,
-    cycleResetAt: new Date().toISOString(),
+    cycleResetAt: isoNow,
   };
   return updatedArc;
 }
@@ -1275,7 +1307,11 @@ function findNextIncompleteDay(steps, minDay) {
 }
 
 function computeNextDayUnlockAt(now = new Date()) {
-  const unlock = new Date(now);
+  const base =
+    now instanceof Date && !Number.isNaN(now)
+      ? new Date(now.getTime())
+      : new Date(now);
+  const unlock = new Date(base);
   unlock.setHours(24, 0, 0, 0);
   return unlock.toISOString();
 }
@@ -1308,7 +1344,7 @@ function schedulePendingDay(state, targetDay, now = new Date()) {
   lifetime.pending_day_unlock_at = unlockIso;
 }
 
-function resolvePendingDay(state, totalDays) {
+function resolvePendingDay(state, totalDays, now = new Date()) {
   if (!state) {
     return { currentDay: 1, lifetime: {} };
   }
@@ -1328,9 +1364,17 @@ function resolvePendingDay(state, totalDays) {
     ""
   );
 
+  const nowMs =
+    now instanceof Date && !Number.isNaN(now) ? now.getTime() : Date.now();
+
   if (pendingDayCandidate > 0) {
     const pendingUnlockTimestamp = pendingUnlockIso ? Date.parse(pendingUnlockIso) : NaN;
-    if (!Number.isFinite(pendingUnlockTimestamp) || pendingUnlockTimestamp <= Date.now()) {
+    const maxAllowedUnlock = nowMs + MAX_PENDING_DAY_DELAY_MS;
+    const unlockNow =
+      !Number.isFinite(pendingUnlockTimestamp) ||
+      pendingUnlockTimestamp <= nowMs ||
+      pendingUnlockTimestamp > maxAllowedUnlock;
+    if (unlockNow) {
       const unlockedDay = Math.max(
         1,
         Math.min(totalDays, Math.round(pendingDayCandidate))
@@ -1353,10 +1397,10 @@ function resolvePendingDay(state, totalDays) {
   return { currentDay, lifetime };
 }
 
-function advanceArcDayAfterStepCompletion(state) {
+function advanceArcDayAfterStepCompletion(state, now = new Date()) {
   if (!state || !Array.isArray(state.steps)) return;
   const totalDays = Math.max(1, toNumber(state.length, 1));
-  const { currentDay: resolvedDay } = resolvePendingDay(state, totalDays);
+  const { currentDay: resolvedDay } = resolvePendingDay(state, totalDays, now);
   let currentDay = resolvedDay;
 
   const stepsForCurrentDay = state.steps.filter(
@@ -1366,7 +1410,7 @@ function advanceArcDayAfterStepCompletion(state) {
   if (!stepsForCurrentDay.length) {
     const nextCandidate = findNextIncompleteDay(state.steps, currentDay + 1);
     if (nextCandidate !== null && nextCandidate > currentDay) {
-      schedulePendingDay(state, nextCandidate);
+      schedulePendingDay(state, nextCandidate, now);
     }
     state.day = currentDay;
     return;
@@ -1386,7 +1430,7 @@ function advanceArcDayAfterStepCompletion(state) {
       targetDay = Math.min(totalDays, currentDay + 1);
     }
     if (targetDay && targetDay > currentDay) {
-      schedulePendingDay(state, targetDay);
+      schedulePendingDay(state, targetDay, now);
     } else {
       clearPendingDay(state);
     }
@@ -1404,12 +1448,14 @@ function advanceArcDayAfterStepCompletion(state) {
   );
 }
 
-function todayKey() {
-  return new Date().toISOString().slice(0, 10);
+function todayKey(now = new Date()) {
+  const basis =
+    now instanceof Date && !Number.isNaN(now) ? new Date(now.getTime()) : new Date(now);
+  return basis.toISOString().slice(0, 10);
 }
 
-function getDailySurpriseTracker(lifetime) {
-  const today = todayKey();
+function getDailySurpriseTracker(lifetime, now = new Date()) {
+  const today = todayKey(now);
   const storedDate = toSafeString(
     lifetime?.dailySurpriseDate ?? lifetime?.daily_surprise_date,
     ""
