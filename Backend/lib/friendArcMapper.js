@@ -97,6 +97,20 @@ export const toArray = (value) => (Array.isArray(value) ? value : []);
 
 const toObjectOrNull = (value) => (value && typeof value === "object" ? value : null);
 
+function renderTemplateString(value, arc) {
+  if (typeof value !== "string" || !value.includes("{{")) return value;
+  const replacements = {
+    friend_name: arc?.name ?? "",
+    friend_type: arc?.friendType ?? "",
+    friend_score: arc?.friendScore ?? "",
+  };
+  return value.replace(/{{\s*(friend_name|friend_type|friend_score)\s*}}/gi, (_, key) => {
+    const normalized = String(key).toLowerCase();
+    const replacement = replacements[normalized];
+    return replacement == null ? "" : String(replacement);
+  });
+}
+
 export function mapFriendArcRow(row) {
   if (!row || typeof row !== "object") {
     return {
@@ -139,6 +153,14 @@ export function mapFriendArcRow(row) {
 
   arc.percent = progressPercent(arc.arcPoints, arc.nextThreshold);
   arc.friend_id = arc.id; // temporary compatibility until UI stops referencing friend_id
+
+  if (arc.challenge) {
+    arc.challenge = {
+      ...arc.challenge,
+      title: renderTemplateString(arc.challenge.title, arc),
+      description: renderTemplateString(arc.challenge.description, arc),
+    };
+  }
 
   const pendingDay = toFiniteNumber(arc.lifetime.pendingDay ?? arc.lifetime.pending_day);
   const pendingDayUnlockAt = toSafeString(
