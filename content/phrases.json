@@ -1322,6 +1322,622 @@
         ],
         "striving": true,
         "timebox_minutes": 2
+      },
+      {
+        "text": "Text {{ friend_name }} a quick hello.",
+        "family": "text",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "low",
+        "purpose": "invite_leisure",
+        "mattering": [
+          "Noticing"
+        ],
+        "striving": true,
+        "timebox_minutes": 5
+      },
+      {
+        "text": "Text {{ friend_name }} a quick hello and ask \"How did that thing you mentioned today go—what felt best about it?\"",
+        "family": "text",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "low",
+        "purpose": "invite_leisure",
+        "mattering": [
+          "Noticing"
+        ],
+        "striving": true,
+        "timebox_minutes": 5
+      },
+      {
+        "text": "Text {{ friend_name }} a quick hello and say \"Your tip lately saved me today—thank you!\"",
+        "family": "text",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "low",
+        "purpose": "affirming",
+        "mattering": [
+          "Affirming"
+        ],
+        "striving": true,
+        "timebox_minutes": 5
+      },
+      {
+        "text": "Text {{ friend_name }} a quick hello and invite \"Free for a 10-min phone-walk later today?\"",
+        "family": "text",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "low",
+        "purpose": "invite_leisure",
+        "mattering": [
+          "Noticing"
+        ],
+        "striving": true,
+        "timebox_minutes": 5
+      },
+      {
+        "text": "Text {{ friend_name }} a quick hello and ask \"What’s one small good thing from your day?\"",
+        "family": "text",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "low",
+        "purpose": "affirming",
+        "mattering": [
+          "Affirming"
+        ],
+        "striving": true,
+        "timebox_minutes": 5
+      },
+      {
+        "text": "Text {{ friend_name }} a quick hello and suggest \"Got 5 minutes later to catch up?\"",
+        "family": "text",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "low",
+        "purpose": "invite_leisure",
+        "mattering": [
+          "Noticing"
+        ],
+        "striving": true,
+        "timebox_minutes": 5
+      },
+      {
+        "text": "Text {{ friend_name }} a quick hello and share \"Tiny win on my end today—want to trade wins tonight?\"",
+        "family": "text",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "low",
+        "purpose": "affirming",
+        "mattering": [
+          "Affirming"
+        ],
+        "striving": true,
+        "timebox_minutes": 5
+      },
+      {
+        "text": "Text {{ friend_name }} a quick hello and say \"Cheering you on for that big thing this week—how can I back you up?\"",
+        "family": "text",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "low",
+        "purpose": "affirming",
+        "mattering": [
+          "Affirming"
+        ],
+        "striving": true,
+        "timebox_minutes": 5
+      },
+      {
+        "text": "Text {{ friend_name }} a quick hello and ask \"Quick gut check: option A or option B—what’s your pick?\"",
+        "family": "text",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "low",
+        "purpose": "needing",
+        "mattering": [
+          "Needing"
+        ],
+        "striving": true,
+        "timebox_minutes": 5
+      },
+      {
+        "text": "Text {{ friend_name }} a quick hello and say \"Thinking of that hilarious moment we shared—it made me smile; plan a 15-min catch-up?\"",
+        "family": "text",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "low",
+        "purpose": "invite_leisure",
+        "mattering": [
+          "Noticing"
+        ],
+        "striving": true,
+        "timebox_minutes": 5
+      },
+      {
+        "text": "Text {{ friend_name }} a quick hello and propose \"I’ll be near the park later—join me for a short walk?\"",
+        "family": "text",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "low",
+        "purpose": "invite_leisure",
+        "mattering": [
+          "Noticing"
+        ],
+        "striving": true,
+        "timebox_minutes": 5
+      },
+      {
+        "text": "Send {{ friend_name }} a meme that made you laugh.",
+        "family": "text",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "low",
+        "purpose": "invite_leisure",
+        "mattering": [
+          "Noticing"
+        ],
+        "striving": true,
+        "timebox_minutes": 5
+      },
+      {
+        "text": "Send {{ friend_name }} a meme that made you laugh and say \"This is so you—it shows off your best trait.\"",
+        "family": "text",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "low",
+        "purpose": "affirming",
+        "mattering": [
+          "Affirming"
+        ],
+        "striving": true,
+        "timebox_minutes": 5
+      },
+      {
+        "text": "Send {{ friend_name }} a meme that made you laugh and ask \"Caption this as us at our next hang?\"",
+        "family": "text",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "low",
+        "purpose": "invite_leisure",
+        "mattering": [
+          "Noticing"
+        ],
+        "striving": true,
+        "timebox_minutes": 5
+      },
+      {
+        "text": "Send {{ friend_name }} a meme that made you laugh and say \"Rate this 0–10; loser buys coffee.\"",
+        "family": "text",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "low",
+        "purpose": "invite_leisure",
+        "mattering": [
+          "Noticing"
+        ],
+        "striving": true,
+        "timebox_minutes": 5
+      },
+      {
+        "text": "Send {{ friend_name }} a meme that made you laugh and add \"Ok but this is you during that recurring situation—story time later?\"",
+        "family": "text",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "low",
+        "purpose": "invite_leisure",
+        "mattering": [
+          "Noticing"
+        ],
+        "striving": true,
+        "timebox_minutes": 5
+      },
+      {
+        "text": "Send {{ friend_name }} a meme that made you laugh and ask \"Reply with the most you meme today.\"",
+        "family": "text",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "low",
+        "purpose": "invite_leisure",
+        "mattering": [
+          "Needing"
+        ],
+        "striving": true,
+        "timebox_minutes": 5
+      },
+      {
+        "text": "Send {{ friend_name }} a meme that made you laugh and say \"This cheered me up—sending the lift your way; what’s something good on your side?\"",
+        "family": "text",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "low",
+        "purpose": "affirming",
+        "mattering": [
+          "Affirming"
+        ],
+        "striving": true,
+        "timebox_minutes": 5
+      },
+      {
+        "text": "Send {{ friend_name }} a meme that made you laugh and add \"Saving this for when we do that plan—still good for later?\"",
+        "family": "text",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "low",
+        "purpose": "invite_leisure",
+        "mattering": [
+          "Noticing"
+        ],
+        "striving": true,
+        "timebox_minutes": 5
+      },
+      {
+        "text": "Send {{ friend_name }} a meme that made you laugh and say \"Reminded me how well you handled that tough thing—still proud of you.\"",
+        "family": "text",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "low",
+        "purpose": "affirming",
+        "mattering": [
+          "Affirming"
+        ],
+        "striving": true,
+        "timebox_minutes": 5
+      },
+      {
+        "text": "Send {{ friend_name }} a meme that made you laugh and propose \"If you give this a 7 or higher, I owe you a quick call tonight.\"",
+        "family": "text",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "low",
+        "purpose": "invite_leisure",
+        "mattering": [
+          "Noticing"
+        ],
+        "striving": true,
+        "timebox_minutes": 5
+      },
+      {
+        "text": "Send {{ friend_name }} a meme that made you laugh and add \"Pairing this with our go-to inside joke—it never gets old.\"",
+        "family": "text",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "low",
+        "purpose": "invite_leisure",
+        "mattering": [
+          "Noticing"
+        ],
+        "striving": true,
+        "timebox_minutes": 5
       }
     ],
     "call": [
@@ -2566,6 +3182,622 @@
         ],
         "striving": true,
         "timebox_minutes": 15
+      },
+      {
+        "text": "Give {{ friend_name }} a quick call.",
+        "family": "call",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "medium",
+        "purpose": "invite_leisure",
+        "mattering": [
+          "Noticing"
+        ],
+        "striving": true,
+        "timebox_minutes": 10
+      },
+      {
+        "text": "Give {{ friend_name }} a quick call and open with \"I wanted to hear how that big thing today felt.\"",
+        "family": "call",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "medium",
+        "purpose": "invite_leisure",
+        "mattering": [
+          "Noticing"
+        ],
+        "striving": true,
+        "timebox_minutes": 10
+      },
+      {
+        "text": "Give {{ friend_name }} a quick call and say \"Your detail about that project stood out—what made it work?\"",
+        "family": "call",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "medium",
+        "purpose": "affirming",
+        "mattering": [
+          "Affirming"
+        ],
+        "striving": true,
+        "timebox_minutes": 10
+      },
+      {
+        "text": "Give {{ friend_name }} a quick call and share \"My 20-second win today made me think of you—what’s yours?\"",
+        "family": "call",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "medium",
+        "purpose": "affirming",
+        "mattering": [
+          "Affirming"
+        ],
+        "striving": true,
+        "timebox_minutes": 10
+      },
+      {
+        "text": "Give {{ friend_name }} a quick call and offer \"Want me to tackle one small thing for you before the deadline?\"",
+        "family": "call",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "medium",
+        "purpose": "needing",
+        "mattering": [
+          "Needing"
+        ],
+        "striving": true,
+        "timebox_minutes": 10
+      },
+      {
+        "text": "Give {{ friend_name }} a quick call and propose \"Walk-and-talk tomorrow at a time that works for you?\"",
+        "family": "call",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "medium",
+        "purpose": "invite_leisure",
+        "mattering": [
+          "Noticing"
+        ],
+        "striving": true,
+        "timebox_minutes": 10
+      },
+      {
+        "text": "Give {{ friend_name }} a quick call and ask \"What’s been energizing you lately?\"",
+        "family": "call",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "medium",
+        "purpose": "invite_leisure",
+        "mattering": [
+          "Noticing"
+        ],
+        "striving": true,
+        "timebox_minutes": 10
+      },
+      {
+        "text": "Give {{ friend_name }} a quick call and ask \"Funniest thing you saw this week?\"",
+        "family": "call",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "medium",
+        "purpose": "invite_leisure",
+        "mattering": [
+          "Noticing"
+        ],
+        "striving": true,
+        "timebox_minutes": 10
+      },
+      {
+        "text": "Give {{ friend_name }} a quick call and say \"Hearing your voice made my day; I value your take on this.\"",
+        "family": "call",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "medium",
+        "purpose": "affirming",
+        "mattering": [
+          "Affirming"
+        ],
+        "striving": true,
+        "timebox_minutes": 10
+      },
+      {
+        "text": "Give {{ friend_name }} a quick call and suggest \"Same time next week for a 10-minute catch-up?\"",
+        "family": "call",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "medium",
+        "purpose": "ritualize",
+        "mattering": [
+          "Affirming"
+        ],
+        "striving": true,
+        "timebox_minutes": 10
+      },
+      {
+        "text": "Give {{ friend_name }} a quick call and ask \"Quick A/B pick for me—option one or option two?\"",
+        "family": "call",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "medium",
+        "purpose": "needing",
+        "mattering": [
+          "Needing"
+        ],
+        "striving": true,
+        "timebox_minutes": 10
+      },
+      {
+        "text": "Leave a cheerful voicemail for {{ friend_name }}.",
+        "family": "call",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "medium",
+        "purpose": "invite_leisure",
+        "mattering": [
+          "Noticing"
+        ],
+        "striving": true,
+        "timebox_minutes": 10
+      },
+      {
+        "text": "Leave a cheerful voicemail for {{ friend_name }} and say \"Thinking of you because of that update; I admire how you handled it—can I get your take on something tiny this week?\"",
+        "family": "call",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "medium",
+        "purpose": "affirming",
+        "mattering": [
+          "Affirming"
+        ],
+        "striving": true,
+        "timebox_minutes": 10
+      },
+      {
+        "text": "Leave a cheerful voicemail for {{ friend_name }} and share \"Tiny win on my end today—what’s one good thing from yours?\"",
+        "family": "call",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "medium",
+        "purpose": "affirming",
+        "mattering": [
+          "Affirming"
+        ],
+        "striving": true,
+        "timebox_minutes": 10
+      },
+      {
+        "text": "Leave a cheerful voicemail for {{ friend_name }} and propose \"Two quick options for a call: later this afternoon or tomorrow morning—what works?\"",
+        "family": "call",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "medium",
+        "purpose": "invite_leisure",
+        "mattering": [
+          "Noticing"
+        ],
+        "striving": true,
+        "timebox_minutes": 10
+      },
+      {
+        "text": "Leave a cheerful voicemail for {{ friend_name }} and add \"This reminded me of that shared memory; still cracks me up.\"",
+        "family": "call",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "medium",
+        "purpose": "affirming",
+        "mattering": [
+          "Noticing"
+        ],
+        "striving": true,
+        "timebox_minutes": 10
+      },
+      {
+        "text": "Leave a cheerful voicemail for {{ friend_name }} and offer \"I can handle a small task by tomorrow if that helps.\"",
+        "family": "call",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "medium",
+        "purpose": "needing",
+        "mattering": [
+          "Needing"
+        ],
+        "striving": true,
+        "timebox_minutes": 10
+      },
+      {
+        "text": "Leave a cheerful voicemail for {{ friend_name }} and ask \"Are you still up for that plan we mentioned on the weekend?\"",
+        "family": "call",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "medium",
+        "purpose": "invite_leisure",
+        "mattering": [
+          "Noticing"
+        ],
+        "striving": true,
+        "timebox_minutes": 10
+      },
+      {
+        "text": "Leave a cheerful voicemail for {{ friend_name }} and say \"I appreciate how you always bring that signature strength—it rubs off on me.\"",
+        "family": "call",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "medium",
+        "purpose": "affirming",
+        "mattering": [
+          "Affirming"
+        ],
+        "striving": true,
+        "timebox_minutes": 10
+      },
+      {
+        "text": "Leave a cheerful voicemail for {{ friend_name }} and invite \"Free for a 10-min phone-walk at a time that suits you?\"",
+        "family": "call",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "medium",
+        "purpose": "invite_leisure",
+        "mattering": [
+          "Noticing"
+        ],
+        "striving": true,
+        "timebox_minutes": 10
+      },
+      {
+        "text": "Leave a cheerful voicemail for {{ friend_name }} and ask \"Could you pick between option A or B for my tiny decision?\"",
+        "family": "call",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "medium",
+        "purpose": "needing",
+        "mattering": [
+          "Needing"
+        ],
+        "striving": true,
+        "timebox_minutes": 10
+      },
+      {
+        "text": "Leave a cheerful voicemail for {{ friend_name }} and close with \"I’ll text two times we could connect—pick your favorite.\"",
+        "family": "call",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "medium",
+        "purpose": "ritualize",
+        "mattering": [
+          "Noticing"
+        ],
+        "striving": true,
+        "timebox_minutes": 10
       }
     ],
     "email": [
@@ -3243,6 +4475,622 @@
         ],
         "striving": true,
         "timebox_minutes": 15
+      },
+      {
+        "text": "Email {{ friend_name }} a short update.",
+        "family": "email",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "low",
+        "purpose": "invite_leisure",
+        "mattering": [
+          "Noticing"
+        ],
+        "striving": true,
+        "timebox_minutes": 10
+      },
+      {
+        "text": "Email {{ friend_name }} a short update and ask \"Tiny win + your advice? What would you tweak about this decision?\"",
+        "family": "email",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "low",
+        "purpose": "needing",
+        "mattering": [
+          "Needing"
+        ],
+        "striving": true,
+        "timebox_minutes": 10
+      },
+      {
+        "text": "Email {{ friend_name }} a short update and say \"Your note recently helped me nail the outcome—thank you.\"",
+        "family": "email",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "low",
+        "purpose": "affirming",
+        "mattering": [
+          "Affirming"
+        ],
+        "striving": true,
+        "timebox_minutes": 10
+      },
+      {
+        "text": "Email {{ friend_name }} a short update and propose \"15-min walk on Thursday at 12:30 near the park?\"",
+        "family": "email",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "low",
+        "purpose": "invite_leisure",
+        "mattering": [
+          "Noticing"
+        ],
+        "striving": true,
+        "timebox_minutes": 10
+      },
+      {
+        "text": "Email {{ friend_name }} a short update and ask \"What’s feeling exciting in your world this week?\"",
+        "family": "email",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "low",
+        "purpose": "invite_leisure",
+        "mattering": [
+          "Noticing"
+        ],
+        "striving": true,
+        "timebox_minutes": 10
+      },
+      {
+        "text": "Email {{ friend_name }} a short update and offer \"I can handle a quick task for you by Friday—want it?\"",
+        "family": "email",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "low",
+        "purpose": "needing",
+        "mattering": [
+          "Needing"
+        ],
+        "striving": true,
+        "timebox_minutes": 10
+      },
+      {
+        "text": "Email {{ friend_name }} a short update and invite \"Can we trade one highlight each on a quick call later today?\"",
+        "family": "email",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "low",
+        "purpose": "invite_leisure",
+        "mattering": [
+          "Affirming"
+        ],
+        "striving": true,
+        "timebox_minutes": 10
+      },
+      {
+        "text": "Email {{ friend_name }} a short update and ask \"Pick option A or B for my small decision so I can lock it in.\"",
+        "family": "email",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "low",
+        "purpose": "needing",
+        "mattering": [
+          "Needing"
+        ],
+        "striving": true,
+        "timebox_minutes": 10
+      },
+      {
+        "text": "Email {{ friend_name }} a short update and say \"I keep thinking about that shared memory—want to plan the 2.0 version?\"",
+        "family": "email",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "low",
+        "purpose": "invite_leisure",
+        "mattering": [
+          "Noticing"
+        ],
+        "striving": true,
+        "timebox_minutes": 10
+      },
+      {
+        "text": "Email {{ friend_name }} a short update and add \"I admire how you handled that challenge; it inspired me to take action.\"",
+        "family": "email",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "low",
+        "purpose": "affirming",
+        "mattering": [
+          "Affirming"
+        ],
+        "striving": true,
+        "timebox_minutes": 10
+      },
+      {
+        "text": "Email {{ friend_name }} a short update and close \"Two windows work for me—which fits you?\"",
+        "family": "email",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "low",
+        "purpose": "invite_leisure",
+        "mattering": [
+          "Noticing"
+        ],
+        "striving": true,
+        "timebox_minutes": 10
+      },
+      {
+        "text": "Forward something interesting to {{ friend_name }}.",
+        "family": "email",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "low",
+        "purpose": "invite_leisure",
+        "mattering": [
+          "Noticing"
+        ],
+        "striving": true,
+        "timebox_minutes": 10
+      },
+      {
+        "text": "Forward something interesting to {{ friend_name }} and ask \"Saw this for your goal—what would you keep or ditch?\"",
+        "family": "email",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "low",
+        "purpose": "needing",
+        "mattering": [
+          "Needing"
+        ],
+        "striving": true,
+        "timebox_minutes": 10
+      },
+      {
+        "text": "Forward something interesting to {{ friend_name }} and add \"Jump to the highlighted bit—it feels very you.\"",
+        "family": "email",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "low",
+        "purpose": "affirming",
+        "mattering": [
+          "Noticing"
+        ],
+        "striving": true,
+        "timebox_minutes": 10
+      },
+      {
+        "text": "Forward something interesting to {{ friend_name }} and propose \"Walk and debrief on Friday?\"",
+        "family": "email",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "low",
+        "purpose": "invite_leisure",
+        "mattering": [
+          "Noticing"
+        ],
+        "striving": true,
+        "timebox_minutes": 10
+      },
+      {
+        "text": "Forward something interesting to {{ friend_name }} and say \"You’re my go-to on this topic; what’s your quick take?\"",
+        "family": "email",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "low",
+        "purpose": "affirming",
+        "mattering": [
+          "Affirming"
+        ],
+        "striving": true,
+        "timebox_minutes": 10
+      },
+      {
+        "text": "Forward something interesting to {{ friend_name }} and ask \"Hit me with a two-emoji reaction.\"",
+        "family": "email",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "low",
+        "purpose": "invite_leisure",
+        "mattering": [
+          "Needing"
+        ],
+        "striving": true,
+        "timebox_minutes": 10
+      },
+      {
+        "text": "Forward something interesting to {{ friend_name }} and say \"If this sparks anything, I can help next week.\"",
+        "family": "email",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "low",
+        "purpose": "needing",
+        "mattering": [
+          "Needing"
+        ],
+        "striving": true,
+        "timebox_minutes": 10
+      },
+      {
+        "text": "Forward something interesting to {{ friend_name }} and offer \"Want an intro to someone related to this?\"",
+        "family": "email",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "low",
+        "purpose": "needing",
+        "mattering": [
+          "Affirming"
+        ],
+        "striving": true,
+        "timebox_minutes": 10
+      },
+      {
+        "text": "Forward something interesting to {{ friend_name }} and add \"This made me laugh out loud—send me your funniest find today.\"",
+        "family": "email",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "low",
+        "purpose": "invite_leisure",
+        "mattering": [
+          "Noticing"
+        ],
+        "striving": true,
+        "timebox_minutes": 10
+      },
+      {
+        "text": "Forward something interesting to {{ friend_name }} and propose \"Five-minute call later to swap takeaways?\"",
+        "family": "email",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "low",
+        "purpose": "invite_leisure",
+        "mattering": [
+          "Noticing"
+        ],
+        "striving": true,
+        "timebox_minutes": 10
+      },
+      {
+        "text": "Forward something interesting to {{ friend_name }} and ask \"Could you vote on option A or B for my tiny decision?\"",
+        "family": "email",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "low",
+        "purpose": "needing",
+        "mattering": [
+          "Needing"
+        ],
+        "striving": true,
+        "timebox_minutes": 10
       }
     ],
     "irl": [
@@ -4406,6 +6254,398 @@
         ],
         "striving": true,
         "timebox_minutes": 15
+      },
+      {
+        "text": "Plan a walk with {{ friend_name }}.",
+        "family": "irl",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "medium",
+        "purpose": "invite_leisure",
+        "mattering": [
+          "Noticing"
+        ],
+        "striving": true,
+        "timebox_minutes": 20
+      },
+      {
+        "text": "Plan a walk with {{ friend_name }} and offer \"Riverside loop later or the park path tomorrow—your pick?\"",
+        "family": "irl",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "medium",
+        "purpose": "invite_leisure",
+        "mattering": [
+          "Noticing"
+        ],
+        "striving": true,
+        "timebox_minutes": 20
+      },
+      {
+        "text": "Plan a walk with {{ friend_name }} and suggest \"No agenda; let’s each share one good thing from this week.\"",
+        "family": "irl",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "medium",
+        "purpose": "affirming",
+        "mattering": [
+          "Affirming"
+        ],
+        "striving": true,
+        "timebox_minutes": 20
+      },
+      {
+        "text": "Plan a walk with {{ friend_name }} and ask \"Teach me that skill you mentioned while we stroll?\"",
+        "family": "irl",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "medium",
+        "purpose": "needing",
+        "mattering": [
+          "Needing"
+        ],
+        "striving": true,
+        "timebox_minutes": 20
+      },
+      {
+        "text": "Plan a walk with {{ friend_name }} and propose \"If timing’s tight, want a phone-walk instead?\"",
+        "family": "irl",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "medium",
+        "purpose": "invite_leisure",
+        "mattering": [
+          "Noticing"
+        ],
+        "striving": true,
+        "timebox_minutes": 20
+      },
+      {
+        "text": "Plan a walk with {{ friend_name }} and add \"Bring one meme or story to swap mid-route.\"",
+        "family": "irl",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "medium",
+        "purpose": "invite_leisure",
+        "mattering": [
+          "Noticing"
+        ],
+        "striving": true,
+        "timebox_minutes": 20
+      },
+      {
+        "text": "Plan a walk with {{ friend_name }} and suggest \"Let’s start with a two-minute stretch and sync our steps.\"",
+        "family": "irl",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "medium",
+        "purpose": "invite_leisure",
+        "mattering": [
+          "Noticing"
+        ],
+        "striving": true,
+        "timebox_minutes": 20
+      },
+      {
+        "text": "Plan a walk with {{ friend_name }} and ask \"What wild idea has you curious lately?\"",
+        "family": "irl",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "medium",
+        "purpose": "invite_leisure",
+        "mattering": [
+          "Noticing"
+        ],
+        "striving": true,
+        "timebox_minutes": 20
+      },
+      {
+        "text": "Plan a walk with {{ friend_name }} and choose \"Green route by the park for fresh air—up for it?\"",
+        "family": "irl",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "medium",
+        "purpose": "invite_leisure",
+        "mattering": [
+          "Noticing"
+        ],
+        "striving": true,
+        "timebox_minutes": 20
+      },
+      {
+        "text": "Plan a walk with {{ friend_name }} and close \"Let’s put the next walk on the calendar before we part.\"",
+        "family": "irl",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "medium",
+        "purpose": "ritualize",
+        "mattering": [
+          "Affirming"
+        ],
+        "striving": true,
+        "timebox_minutes": 20
+      },
+      {
+        "text": "Plan a walk with {{ friend_name }} and follow up \"I’ll text a one-line thank-you with a highlight you shared.\"",
+        "family": "irl",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "medium",
+        "purpose": "affirming",
+        "mattering": [
+          "Affirming"
+        ],
+        "striving": true,
+        "timebox_minutes": 20
+      },
+      {
+        "text": "Drop a handwritten note for {{ friend_name }}.",
+        "family": "irl",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "medium",
+        "purpose": "affirming",
+        "mattering": [
+          "Affirming"
+        ],
+        "striving": true,
+        "timebox_minutes": 20
+      },
+      {
+        "text": "Drop a handwritten note for {{ friend_name }} and write \"I noticed how you showed up recently; that’s so you—short walk Friday?\"",
+        "family": "irl",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "medium",
+        "purpose": "invite_leisure",
+        "mattering": [
+          "Affirming"
+        ],
+        "striving": true,
+        "timebox_minutes": 20
+      },
+      {
+        "text": "Drop a handwritten note for {{ friend_name }} and write \"Because you did that thing, it made a real impact for me—thank you.\"",
+        "family": "irl",
+        "level": "starter",
+        "cluster": [
+          "explorer",
+          "steady",
+          "rhythm",
+          "quality>hours"
+        ],
+        "types": [
+          "adventurer",
+          "collaborator",
+          "confidante",
+          "caregiver",
+          "coach",
+          "anchor",
+          "communicator",
+          "connector"
+        ],
+        "effort": "medium",
+        "purpose": "affirming",
+        "mattering": [
+          "Affirming"
+        ],
+        "striving": true,
+        "timebox_minutes": 20
       }
     ]
   },
