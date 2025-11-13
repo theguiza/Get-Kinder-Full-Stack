@@ -102,6 +102,42 @@ export async function sendNudgeEmail({
   const info = await t.sendMail(mail);
   return { messageId: info.messageId };
 }
+
+export async function sendProspectInviteEmail({
+  to,
+  inviteeName,
+  hostName,
+  eventTitle,
+  eventLink,
+  joinLink,
+  subject,
+  text,
+  html,
+  sendByKai = false,
+}) {
+  const transport = getNudgesTransport();
+  const safeHost = hostName || "A friend";
+  const title = eventTitle || "a Get Kinder event";
+  const link = joinLink || eventLink || (process.env.APP_BASE_URL || "https://getkinder.ai");
+  const displayName = inviteeName ? inviteeName.split(/\s+/)[0] : "there";
+  const defaultSubject = `${safeHost} invited you to ${title}`;
+  const defaultText = `Hi ${displayName},\n\n${safeHost} just invited you to ${title}.\nJoin the event: ${eventLink || link}\nCreate your account: ${link}\n\nSee you soon!`;
+  const defaultHtml = `
+    <p>Hi ${displayName},</p>
+    <p><strong>${safeHost}</strong> just invited you to <strong>${title}</strong>.</p>
+    <p><a href="${eventLink || link}" target="_blank" rel="noopener">View the event details</a></p>
+    <p><a href="${link}" target="_blank" rel="noopener">Join Get Kinder to RSVP</a></p>
+    <p>Hope to see you there! 💛</p>
+  `;
+
+  await transport.sendMail({
+    to,
+    from: process.env.MAIL_FROM || `${sendByKai ? "KAI" : safeHost} via Get Kinder <${process.env.SMTP_USER}>`,
+    subject: subject?.trim() || defaultSubject,
+    text: text?.trim() || defaultText,
+    html: html?.trim() || defaultHtml,
+  });
+}
 // Core delivery worker for nudges_outbox
 // Core delivery worker for nudges_outbox (emails)
 export async function deliverQueuedNudges(pool, { max = 100 } = {}) {
@@ -203,4 +239,3 @@ export async function deliverQueuedNudges(pool, { max = 100 } = {}) {
     client.release();
   }
 }
-

@@ -1684,7 +1684,7 @@ export default function FriendChallenges(props = {}) {
     const challengeSwapKey = `challenge-swap:${arc.id}`;
     const photoUploadKey = `photo-upload:${arc.id}`;
     const photoUploading = isLoadingAction(photoUploadKey);
-    const visibleSteps = Array.isArray(arc.steps)
+    const activeSteps = Array.isArray(arc.steps)
       ? arc.steps.filter((step, index) => {
           const fallbackDay = Math.floor(index / 2) + 1;
           const candidate = pickFinite(
@@ -1699,7 +1699,10 @@ export default function FriendChallenges(props = {}) {
           return stepDay === activeDay;
         })
       : [];
-    const hasVisibleSteps = !cycleReset && !awaitingNextDay && visibleSteps.length > 0;
+    const pendingSteps = activeSteps.filter(
+      (step) => normalizeStepStatusValue(step?.status ?? step?.state) !== "done"
+    );
+    const hasVisibleSteps = !cycleReset && !awaitingNextDay && pendingSteps.length > 0;
     const showAllCompleteMessage =
       cycleReset || awaitingNextDay || (arc.hasStructuredSteps && !hasVisibleSteps);
     const nextDayLabel = Number.isFinite(pendingDay) && pendingDay > 0 ? pendingDay : activeDay + 1;
@@ -1775,7 +1778,7 @@ export default function FriendChallenges(props = {}) {
                 </div>
                 {hasVisibleSteps ? (
                   <ul className="divide-y divide-slate-100">
-                    {visibleSteps.map((s, idx) => {
+                    {pendingSteps.map((s, idx) => {
                       const serverId = toIdString(s.serverId) || toIdString(s.id);
                       const serverOrdinal = Number.isFinite(Number(s.serverOrdinal)) ? Number(s.serverOrdinal) : 1;
                       const actionKey = serverOrdinal > 1 ? `${serverId}__${serverOrdinal}` : serverId;

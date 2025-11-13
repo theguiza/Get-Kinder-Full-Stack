@@ -5,7 +5,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <meta name="csrf-token" content="<%= typeof csrfToken !== 'undefined' ? csrfToken : '' %>">
-  <title>Kindness Challenge Dashboard</title>
+  <title>Events — Get Kinder</title>
 
   <link rel="stylesheet" href="./css/style.css" />
   <link rel="icon" href="/images/favicon.png" sizes="32x32" type="image/png" />
@@ -89,8 +89,8 @@
               <li class="nav-item">
                 <a class="nav-link mx-1 font-hover" href="/home" style="font-size: 1.2rem; color: #455a7c; padding-right: 30px;">Home</a>
               </li>
-                 <li class="nav-item">
-                <a class="nav-link mx-1 font-hover active" href="/events" aria-current="page" style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;">Events</a>
+                <li class="nav-item">
+                <a class="nav-link mx-1 font-hover" href="dashboard" style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;">Friend arcs</a>
               </li>
               <li class="nav-item">
                 <a class="nav-link mx-1 font-hover" href="friendQuiz" style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;">Quiz</a>
@@ -133,35 +133,35 @@
       <% } else { %>
         <h1>Welcome!</h1>
       <% } %>
-      <p>Follow the Friends Arcs below and make more Friends</p>
+      <p>Discover upcoming community events and RSVP to keep your connections thriving.</p>
     </div>
 
-    <!-- Friend Challenges mount -->
-    <div id="friend-challenges-root" class="container my-4"></div>
+    <!-- Events React mount -->
+    <div id="events-root" class="container my-4"></div>
 
-    <!-- Friend Challenges props (JSON script => avoids EJS-in-JS linter errors) -->
-    <%
-      var __arcs = (typeof arcs !== 'undefined' && Array.isArray(arcs)) ? arcs : [];
-      var __initialArcId = (typeof initialArcId !== 'undefined') ? initialArcId : "";
-    %>
-    <script type="application/json" id="friend-challenges-props"><%- JSON.stringify({
-      arcs: __arcs,
-      initialArcId: __initialArcId
-    }).replace(/</g, '\\u003c') %></script>
+    <!-- Events props (JSON) -->
+    <script type="application/json" id="events-props"><%- JSON.stringify(props || {}).replace(/</g, '\\u003c') %></script>
     <script>
       (function () {
         try {
-          var el = document.getElementById('friend-challenges-props');
-          window.__friendChallengesProps = el ? JSON.parse(el.textContent) : {};
-        } catch (_) { window.__friendChallengesProps = {}; }
+          var el = document.getElementById('events-props');
+          window.__eventsProps = el ? JSON.parse(el.textContent) : {};
+        } catch (_) {
+          window.__eventsProps = {};
+        }
       }());
     </script>
 
     <!-- Bundle that contains entry.jsx -->
     <script src="/js/bundles/entry.js?<%= (typeof assetTag !== 'undefined' ? assetTag : '') %>"></script>
-    <!-- (Optional) hard-mount fallback -->
     <script>
-      window.renderFriendChallenges?.('#friend-challenges-root', window.__friendChallengesProps || {});
+      window.addEventListener('DOMContentLoaded', function () {
+        if (typeof window.renderEventsApp === 'function') {
+          window.renderEventsApp('#events-root', window.__eventsProps || {});
+        } else {
+          console.error('renderEventsApp not found on window. Complete the React wiring in Step 2.');
+        }
+      }, { once: true });
     </script>
   </div> <!-- CLOSES .dashboard-container -->
 

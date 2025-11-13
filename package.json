@@ -8,7 +8,8 @@
     "build": "vite build",
     "backfill:surprises": "node scripts/backfillDailySurprises.js",
     "prestart": "npm run backfill:surprises || true",
-    "seed:content": "node scripts/generateContentLibrary.js"
+    "seed:content": "node scripts/generateContentLibrary.js",
+    "seed:events": "node scripts/seedEvents.js"
   },
   "repository": {
     "type": "git",

@@ -11,6 +11,7 @@ import ReactDOM from "react-dom/client";
 import FriendChallenges from "./friendChallenges.jsx";
 
 import BestieVibesQuiz from "./BestieVibesQuiz.jsx";
+import { EventsApp } from "./events/App.jsx";
 
 const ROOTS = new WeakMap();
 
@@ -76,4 +77,26 @@ window.renderOnboarding = (selector = "#onboarding-root", props = {}) => {
   if (!el) return;
   const root = getOrCreateRoot(el);
   root.render(<OnboardingCards {...props} />);
+};
+
+function readPropsFromDom(id = "events-props") {
+  const el = document.getElementById(id);
+  if (!el) return {};
+  try {
+    return JSON.parse(el.textContent || "{}");
+  } catch {
+    return {};
+  }
+}
+
+window.renderEventsApp = (selector = "#events-root", props) => {
+  const el = typeof selector === "string" ? document.querySelector(selector) : selector;
+  if (!el) return;
+  const root = getOrCreateRoot(el);
+  const mergedProps = props && typeof props === "object" ? props : readPropsFromDom();
+  root.render(
+    <React.StrictMode>
+      <EventsApp {...mergedProps} />
+    </React.StrictMode>
+  );
 };

@@ -30,6 +30,11 @@ const { sendDailyKindnessPrompts } = await import("./kindnessEmailer.js");
 import cookieParser from "cookie-parser";
 import quizHooksRouter from "./routes/quizHooks.js";
 import arcsApiRouter from "./routes/arcsApi.js";
+import { getEventsPage } from "./routes/eventsPage.js";
+import eventsApiRouter from "./routes/eventsApi.js";
+import invitesApiRouter from "./routes/invitesApi.js";
+import meEventsRouter from "./routes/meEventsApi.js";
+import meContactsRouter from "./routes/meContactsApi.js";
 
 // Reuse the same tool schema for Chat Completions (strip any nonstandard fields if needed)
 const CHAT_COMPLETIONS_TOOLS = DASHBOARD_TOOLS.map(t => ({ type: 'function', function: t.function }));
@@ -145,6 +150,10 @@ app.use(passport.session());
 app.use(express.static(path.join(__dirname, "public")));
 app.use("/internal/quiz", quizHooksRouter);
 app.use(arcsApiRouter);
+app.use("/api/events", ensureAuthenticatedApi, eventsApiRouter);
+app.use("/api/invites", ensureAuthenticatedApi, invitesApiRouter);
+app.use("/api/me/events", ensureAuthenticatedApi, meEventsRouter);
+app.use("/api/me/contacts", ensureAuthenticatedApi, meContactsRouter);
 
 // Make `user` available in all EJS templates
 app.use((req, res, next) => {
@@ -1033,6 +1042,7 @@ const { getDashboard, getMorningPrompt, saveReflection, markDayDone, cancelChall
 
 // Dashboard - All dashboard routes
 app.get("/dashboard", ensureAuthenticated, getDashboard);
+app.get("/events", ensureAuthenticated, getEventsPage);
 //app.get('/dashboard/morning-prompt', ensureAuthenticated, getMorningPrompt);
 //app.post('/dashboard/reflect', ensureAuthenticated, saveReflection);
 //app.post('/dashboard/mark-done', ensureAuthenticated, markDayDone);

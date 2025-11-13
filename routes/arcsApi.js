@@ -28,15 +28,65 @@ const DEFAULT_LIFETIME = {
 const DAILY_SURPRISE_LIMIT = 3;
 const MAX_PENDING_DAY_DELAY_MS = 36 * 60 * 60 * 1000; // 36 hours
 
-const PLAN_PROMOTION_ORDER = [
-  "One-Week Starter Arc (Daily)",
-  "Acquaintance \u2192 Casual (Text-First, 21d)",
-  "Casual \u2192 Friend (Mixed, 28d)",
-  "Friend \u2192 Close (Hybrid, 42d)",
-  "Close \u2192 Best/Inner Circle (Ritual, 56d)",
-  "Three Week Text Reconnect",
-  "Two Week Catch-Up Calls",
+const FRIEND_TYPE_CLUSTER_MAP = {
+  adventurer: "explorers",
+  collaborator: "explorers",
+  confidante: "steady",
+  caregiver: "steady",
+  coach: "steady",
+  anchor: "rhythm",
+  communicator: "rhythm",
+  connector: "rhythm",
+};
+
+const UNIVERSAL_PROMOTION_SEQUENCE = ["Three Week Text Reconnect", "Two Week Catch-Up Calls"];
+
+const CLUSTER_PROMOTION_PATHS = {
+  explorers: [
+    "Starter Arc \u00b7 Explorers (7d)",
+    "Acquaintance \u2192 Casual \u00b7 Explorers (21d)",
+    "Casual \u2192 Friend \u00b7 Explorers (28d)",
+    "Friend \u2192 Close \u00b7 Explorers (42d)",
+    "Close \u2192 Best \u00b7 Explorers (56d)",
+    ...UNIVERSAL_PROMOTION_SEQUENCE,
+  ],
+  rhythm: [
+    "Starter Arc \u00b7 Rhythm Makers (7d)",
+    "Acquaintance \u2192 Casual \u00b7 Rhythm Makers (21d)",
+    "Casual \u2192 Friend \u00b7 Rhythm Makers (28d)",
+    "Friend \u2192 Close \u00b7 Rhythm Makers (42d)",
+    "Close \u2192 Best \u00b7 Rhythm Makers (56d)",
+    ...UNIVERSAL_PROMOTION_SEQUENCE,
+  ],
+  steady: [
+    "Starter Arc \u00b7 Steady Support (7d)",
+    "Acquaintance \u2192 Casual \u00b7 Steady Support (21d)",
+    "Casual \u2192 Friend \u00b7 Steady Support (28d)",
+    "Friend \u2192 Close \u00b7 Steady Support (42d)",
+    "Close \u2192 Best \u00b7 Steady Support (56d)",
+    ...UNIVERSAL_PROMOTION_SEQUENCE,
+  ],
+};
+
+const PLAN_PROMOTION_SEQUENCES = [
+  CLUSTER_PROMOTION_PATHS.explorers,
+  CLUSTER_PROMOTION_PATHS.rhythm,
+  CLUSTER_PROMOTION_PATHS.steady,
 ];
+
+const PLAN_PROMOTION_ORDER = Array.from(
+  new Set([].concat(...PLAN_PROMOTION_SEQUENCES))
+);
+
+const PLAN_PROMOTION_GRAPH = buildPlanPromotionGraph(PLAN_PROMOTION_SEQUENCES);
+
+const LEGACY_PLAN_STAGE_MAP = new Map([
+  ["One-Week Starter Arc (Daily)", 0],
+  ["Acquaintance \u2192 Casual (Text-First, 21d)", 1],
+  ["Casual \u2192 Friend (Mixed, 28d)", 2],
+  ["Friend \u2192 Close (Hybrid, 42d)", 3],
+  ["Close \u2192 Best/Inner Circle (Ritual, 56d)", 4],
+]);
 
 function isPlainObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -1080,13 +1130,25 @@ async function updateArc(db, arcId, userId, state) {
   return rows[0];
 }
 
-function getNextPlanName(currentName) {
-  if (!currentName) return null;
-  const index = PLAN_PROMOTION_ORDER.indexOf(currentName);
-  if (index === -1 || index + 1 >= PLAN_PROMOTION_ORDER.length) {
-    return null;
+function getNextPlanName(currentName, friendType) {
+  const normalizedName = toSafeString(currentName, "");
+  if (!normalizedName) return null;
+
+  const mapped = PLAN_PROMOTION_GRAPH.get(normalizedName);
+  if (mapped) {
+    return mapped;
   }
-  return PLAN_PROMOTION_ORDER[index + 1];
+
+  const legacyStageIndex = LEGACY_PLAN_STAGE_MAP.get(normalizedName);
+  if (legacyStageIndex !== undefined) {
+    const cluster = inferClusterFromFriendType(friendType) || "explorers";
+    const sequence = CLUSTER_PROMOTION_PATHS[cluster];
+    if (Array.isArray(sequence) && legacyStageIndex + 1 < sequence.length) {
+      return sequence[legacyStageIndex + 1];
+    }
+  }
+
+  return null;
 }
 
 function stepsAreComplete(arc) {
@@ -1156,7 +1218,10 @@ async function promoteArcIfEligible({ client, arc, userId, previousPlanName }) {
   const threshold = getArcThreshold(arc);
   if (toNumber(arc.arcPoints, 0) < threshold) return null;
 
-  const nextPlanName = getNextPlanName(previousPlanName);
+  const nextPlanName = getNextPlanName(
+    previousPlanName,
+    arc.friendType ?? arc.friend_type ?? arc?.lifetime?.friendType ?? arc?.lifetime?.friend_type
+  );
   if (!nextPlanName) return null;
 
   const planRow = await fetchPlanTemplateByName(client, nextPlanName);
@@ -1678,6 +1743,26 @@ function countOverlap(tags, tagSet) {
     if (tagSet.has(tag)) overlap += 1;
   }
   return overlap;
+}
+
+function buildPlanPromotionGraph(sequences) {
+  const graph = new Map();
+  for (const sequence of sequences) {
+    if (!Array.isArray(sequence) || sequence.length < 2) continue;
+    for (let i = 0; i < sequence.length - 1; i += 1) {
+      const current = toSafeString(sequence[i], "");
+      const next = toSafeString(sequence[i + 1], "");
+      if (!current || !next || graph.has(current)) continue;
+      graph.set(current, next);
+    }
+  }
+  return graph;
+}
+
+function inferClusterFromFriendType(friendType) {
+  const normalized = toSafeString(friendType, "").toLowerCase();
+  if (!normalized) return null;
+  return FRIEND_TYPE_CLUSTER_MAP[normalized] || null;
 }
 
 function scoreChannel(candidateChannel, preferredChannel) {

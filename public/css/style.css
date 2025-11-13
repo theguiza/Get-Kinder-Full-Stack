@@ -350,6 +350,15 @@ body {
   padding-top: 100px; /* desktop header height */
 }
 
+.about-page {
+  background-color: #f8f9fa;
+}
+
+.about-page #title,
+.about-page #about {
+  background-color: #f8f9fa;
+}
+
 @media (max-width: 767.98px) {
   /* phones & small tablets */
   body {
