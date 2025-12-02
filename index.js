@@ -687,12 +687,21 @@ app.get('/profile', ensureAuthenticated, async (req, res) => {
     const userRow = result.rows[0];
 
     let topFriends = [];
+    let friendPoints = { monthly: 0, total: 0, goal: 500 };
     try {
       const { rows: friendRows } = await pool.query(
-        `SELECT name, score, archetype_primary, archetype_secondary
-           FROM public.friends
-          WHERE owner_user_id = $1
-          ORDER BY score DESC NULLS LAST, name ASC
+        `SELECT
+             COALESCE(f.name, fa.name)               AS name,
+             COALESCE(f.score, fa.friend_score)      AS score,
+             COALESCE(f.archetype_primary, fa.friend_type) AS archetype_primary,
+             f.archetype_secondary
+          FROM public.friend_arcs fa
+          LEFT JOIN public.friends f
+            ON f.id::text = fa.id::text
+           AND f.owner_user_id = fa.user_id
+         WHERE fa.user_id = $1
+         ORDER BY COALESCE(f.score, fa.friend_score) DESC NULLS LAST,
+                  COALESCE(f.name, fa.name) ASC
           LIMIT 3`,
         [userRow.id]
       );
@@ -714,6 +723,30 @@ app.get('/profile', ensureAuthenticated, async (req, res) => {
       topFriends = [];
     }
 
+    try {
+      const { rows: [pointsRow] = [] } = await pool.query(
+        `
+        SELECT
+          COALESCE(SUM(arc_points), 0)   AS total_points,
+          COALESCE(SUM(points_today), 0) AS today_points
+          FROM friend_arcs
+         WHERE user_id = $1
+        `,
+        [userRow.id]
+      );
+
+      const total = Number(pointsRow?.total_points) || 0;
+      const monthly = Number(pointsRow?.today_points) || 0; // fallback until monthly tracking exists
+      friendPoints = {
+        monthly,
+        total,
+        goal: 500
+      };
+    } catch (pointsErr) {
+      console.warn('Profile friend points query failed:', pointsErr.message || pointsErr);
+      friendPoints = { monthly: 0, total: 0, goal: 500 };
+    }
+
     // 2) Mirror your home/about/blog locals
     const success      = req.query.success === '1';   // registration alert
     const loginSuccess = req.query.login   === '1';   // login alert
@@ -723,6 +756,7 @@ app.get('/profile', ensureAuthenticated, async (req, res) => {
       title:        'User Profile',
       user:         userRow,
       topFriends,
+      friendPoints,
       success,
       loginSuccess,
       name

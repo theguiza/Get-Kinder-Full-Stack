@@ -1310,7 +1310,40 @@ export default function FriendChallenges(props = {}) {
       setArcs((prev) => {
         const next = Array.isArray(prev) ? [...prev] : [];
         const idx = next.findIndex((arc) => arc.id === rawArc.id);
-        const normalized = normalizeArc(rawArc, idx === -1 ? next.length : idx);
+        const existing = idx === -1 ? null : next[idx];
+
+        // Preserve client-only fields (e.g., uploaded photo) that the server
+        // does not return on non-photo mutations.
+        let enrichedArc = rawArc;
+        if (existing) {
+          const existingPhoto =
+            existing.photoSrc ||
+            existing.picture ||
+            existing.photo ||
+            existing.meta?.rawSnapshot?.photo ||
+            existing.meta?.rawSnapshot?.picture ||
+            existing.meta?.rawSnapshot?.photo_url ||
+            null;
+
+          if (!rawArc.photoSrc && !rawArc.picture && !rawArc.photo && existingPhoto) {
+            const snapshot =
+              rawArc.snapshot && typeof rawArc.snapshot === "object"
+                ? { ...rawArc.snapshot }
+                : {};
+            if (!snapshot.photo) snapshot.photo = existingPhoto;
+            if (!snapshot.picture) snapshot.picture = existingPhoto;
+            if (!snapshot.photo_url) snapshot.photo_url = existingPhoto;
+            enrichedArc = {
+              ...rawArc,
+              photoSrc: existingPhoto,
+              picture: rawArc.picture || existingPhoto,
+              photo: rawArc.photo || existingPhoto,
+              snapshot,
+            };
+          }
+        }
+
+        const normalized = normalizeArc(enrichedArc, idx === -1 ? next.length : idx);
         if (idx === -1) {
           next.push(normalized);
         } else {
@@ -1655,7 +1688,7 @@ export default function FriendChallenges(props = {}) {
     const safePercent = clampPct(Number.isFinite(progressPct) ? progressPct : 0);
     const progressLabel = `${safePercent}%`;
     const dayLabel = sharedDayLabel(day, length);
-    const pointsTodayLabel = pointsToday > 0 ? `+${pointsToday} XP today` : "0 XP logged today";
+    const pointsTodayLabel = pointsToday > 0 ? `+${pointsToday} FP today` : "0 FP logged today";
     const activeDay = Math.max(1, Number.isFinite(day) && day > 0 ? Math.round(day) : 1);
     const cycleReset = Boolean(arc.cycleReset || arc.clientFlags?.cycleReset);
     const pendingDay = Number.isFinite(arc.pendingDay) ? Math.round(arc.pendingDay) : null;
@@ -1858,7 +1891,7 @@ export default function FriendChallenges(props = {}) {
                     <>
                       <Pill tone="ink">{`${challenge.effort} effort`}</Pill>
                       <Pill tone="coral">{`${challenge.estMinutes} min`}</Pill>
-                      <Pill tone="ok">{`+${challenge.points} XP`}</Pill>
+                  <Pill tone="ok">{`+${challenge.points} FP`}</Pill>
                     </>
                   )}
                   <Pill tone={surprisesRemaining > 0 ? "ok" : "muted"}>{surprisePillLabel}</Pill>
@@ -1974,15 +2007,17 @@ export default function FriendChallenges(props = {}) {
                     {displayArcPoints} / {nextThreshold} → Next level
                   </span>
                 </div>
-                <div className="text-xs text-slate-500">Earn XP to complete this friend arc.</div>
+                <div className="text-xs text-slate-500">
+                  Complete this Friend Arc to Earn Friend Points (FP)
+                </div>
               </div>
 
               {/* Lifetime */}
               <div className="grid gap-3">
                 <div className="grid grid-cols-3 gap-3">
-                  {/* Lifetime XP */}
+                  {/* Lifetime FP */}
                   <div className="rounded-xl border border-slate-200 p-4 text-center flex flex-col items-center justify-center min-h-[92px] md:min-h-[112px]">
-                    <div className="text-xs text-slate-500">Lifetime XP</div>
+                    <div className="text-xs text-slate-500">Lifetime FP</div>
                     <div className="text-lg font-semibold text-[var(--ink)] leading-tight">{lifetime.xp}</div>
                   </div>
 
