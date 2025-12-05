@@ -950,6 +950,7 @@ function buildStateFromRow(row, trustedNow) {
   const steps = Array.isArray(row.steps) ? deepClone(row.steps) : [];
   const challenge = row.challenge && typeof row.challenge === "object" ? deepClone(row.challenge) : null;
   const badges = row.badges && typeof row.badges === "object" ? deepClone(row.badges) : {};
+  const priorDay = Math.max(1, toNumber(row.day, 1));
 
   const pendingDay =
     toNumber(lifetime.pendingDay ?? lifetime.pending_day ?? row.pending_day ?? row.pendingDay, 0) || 0;
@@ -982,6 +983,16 @@ function buildStateFromRow(row, trustedNow) {
   };
   const totalDays = Math.max(1, toNumber(state.length, 1));
   resolvePendingDay(state, totalDays, trustedNow);
+  const advancedDay = Number.isFinite(state.day) && state.day > priorDay;
+  if (advancedDay) {
+    // New day unlocked → reset per-day counters so streak can advance again
+    state.pointsToday = 0;
+    const today = todayKey(trustedNow);
+    state.lifetime.dailySurpriseDate = today;
+    state.lifetime.daily_surprise_date = today;
+    state.lifetime.dailySurpriseCount = 0;
+    state.lifetime.daily_surprise_count = 0;
+  }
   return state;
 }
 
