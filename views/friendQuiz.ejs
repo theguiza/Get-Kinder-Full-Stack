@@ -159,60 +159,11 @@
       </nav>
     </header>
   <!-- Quiz section -->
-  <script>
-  // Public page: let anyone play. Saving requires login.
-  window.__bestie_onSave = async (payload) => {
-    const id =
-      window.__friendId ||
-      document.getElementById('bestie-quiz-root')?.dataset?.friendId ||
-      null;
-    const url = id ? `/api/friends?id=${encodeURIComponent(id)}` : "/api/friends";
-    const headers = { "Content-Type": "application/json" };
-    const meta = document.querySelector('meta[name="csrf-token"]');
-    const token = meta ? meta.getAttribute('content') : null;
-    if (token) headers["X-CSRF-Token"] = token;
-    const res = await fetch(url, {
-      method: "POST",
-      headers,
-      credentials: "include",
-      body: JSON.stringify(id ? { ...payload, id } : payload),
-    });
-    if (res.status === 401) {
-      const go = confirm("Please sign in to save your results. Go to login now?");
-      if (go) location.href = "/login?next=/friend-quiz";
-      throw new Error("Unauthorized");
-    }
-    if (!res.ok) throw new Error(`Save failed: ${res.status} ${await res.text()}`);
-  };
-</script>
-
-  <main class="py-4">
-    <!-- ✅ PLACE THE BANNER HERE (outside the React root) -->
-    <% if (!isAuthed) { %>
-      <div class="max-w-4xl mx-auto my-3 px-3 py-2 rounded-lg border text-[#455a7c]">
-        You can try the quiz without signing in.
-        <a href="/login?next=/friend-quiz" class="underline">Sign in</a> to save friends.
-      </div>
-    <% } %>
-
-  <section id="quiz">
-   <div id="bestie-quiz-root"></div>
-   <script>
-     (function () {
-       const qs = new URLSearchParams(window.location.search);
-       const root = document.getElementById('bestie-quiz-root');
-       window.__friendId =
-         qs.get('friendId') ||
-         qs.get('id') ||
-         root?.dataset?.friendId ||
-         null;
-     })();
-   </script>
-
-<!-- Bundle + mount -->
-<script src="/js/bundles/entry.js?<%= (typeof assetTag !== 'undefined' ? assetTag : '') %>"></script>
-<script>window.renderBestieVibesQuiz('#bestie-quiz-root');</script>
-    </section>
+  <main class="py-4 py-md-5">
+    <div class="container">
+      <div id="friend-quizzes-root" data-user-id="<%= user && user.id ? user.id : '' %>"></div>
+    </div>
+  </main>
   <section id="footer" class="gradient-background">
   <div class="container">
     <footer class="row align-items-center py-5 mt-5 border-top text-body-secondary">
@@ -292,10 +243,22 @@
     btn.addEventListener('click', () => window.askKAI(btn.dataset.prompt));
   });
 </script>
-
   <!-- Start of HubSpot Embed Code -->
 <script type="text/javascript" id="hs-script-loader" async defer src="//js-na3.hs-scripts.com/342094649.js"></script>
 <!-- End of HubSpot Embed Code -->
+
+<!-- Bundle + mount -->
+<script src="/js/bundles/entry.js"></script>
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    var root = document.getElementById("friend-quizzes-root");
+    if (root && window.renderFriendQuizzesPage) {
+      window.renderFriendQuizzesPage(root, {
+        userId: root.dataset.userId || null,
+      });
+    }
+  });
+</script>
 
 
 </body>

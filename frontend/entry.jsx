@@ -12,6 +12,7 @@ import FriendChallenges from "./friendChallenges.jsx";
 
 import BestieVibesQuiz from "./BestieVibesQuiz.jsx";
 import { EventsApp } from "./events/App.jsx";
+import FriendQuizzesPage from "./FriendQuizzesPage.jsx";
 
 const ROOTS = new WeakMap();
 
@@ -31,6 +32,12 @@ window.renderBestieVibesQuiz = (selector, props = {}) => {
   if (!el) return;
   const root = getOrCreateRoot(el);
   root.render(<BestieVibesQuiz {...props} />);
+};
+window.renderFriendQuizzesPage = (selector, props = {}) => {
+  const el = typeof selector === "string" ? document.querySelector(selector) : selector;
+  if (!el) return;
+  const root = getOrCreateRoot(el);
+  root.render(<FriendQuizzesPage {...props} />);
 };
 // ---- Friend Challenges (new)
 window.renderFriendChallenges = (selector = "#friend-challenges-root", props = {}) => {

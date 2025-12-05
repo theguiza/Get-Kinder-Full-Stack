@@ -1855,6 +1855,109 @@ app.post("/api/onboarding/complete", async (req, res) => {
   }
 });
 
+// Friendship Energy self-assessment
+app.post("/api/friendship-energy", ensureAuthenticatedApi, async (req, res) => {
+  try {
+    const expectedCsrf = req.session?.csrfToken;
+    const providedCsrf = req.get(CSRF_HEADER_NAME);
+    if (!expectedCsrf || !providedCsrf || providedCsrf !== expectedCsrf) {
+      return res.status(403).json({ ok: false, error: "invalid csrf token" });
+    }
+
+    const email = req.user?.email;
+    if (!email) return res.status(401).json({ ok: false, error: "not authenticated" });
+
+    const { rows: [userRow] } = await pool.query(
+      "SELECT id FROM public.userdata WHERE email=$1",
+      [email]
+    );
+    if (!userRow) return res.status(400).json({ ok: false, error: "user not found" });
+    const userId = userRow.id;
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS public.friendship_energy (
+        id serial PRIMARY KEY,
+        user_id integer REFERENCES public.userdata(id) ON DELETE CASCADE,
+        answers jsonb,
+        skills jsonb,
+        archetypes jsonb,
+        ladder jsonb,
+        growth_edges jsonb,
+        strengths jsonb,
+        stuck_transitions jsonb,
+        completed_at timestamptz DEFAULT now()
+      );
+    `);
+
+    const body = (req.body && typeof req.body === "object") ? req.body : {};
+    const completedAt = body.completedAt && typeof body.completedAt === "string"
+      ? body.completedAt
+      : new Date().toISOString();
+
+    // Ensure all JSON payloads are valid JSON (strip functions/undefined)
+    const toJson = (val, fallback) => {
+      try {
+        const clean = JSON.parse(JSON.stringify(val ?? fallback));
+        return clean;
+      } catch {
+        return fallback;
+      }
+    };
+    const answers = toJson(body.answers, {});
+    const skillsPayload = toJson(body.skills, {});
+    const archetypesPayload = toJson(body.archetypes, {});
+    const ladderPayload = toJson(body.ladderSnapshot, {});
+    const growthPayload = toJson(body.growthEdges, []);
+    const strengthsPayload = toJson(body.strengths, []);
+    const stuckPayload = toJson(body.stuckTransitions, []);
+
+    const insert = await pool.query(
+      `
+      INSERT INTO public.friendship_energy
+        (user_id, answers, skills, archetypes, ladder, growth_edges, strengths, stuck_transitions, completed_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      RETURNING id;
+      `,
+      [
+        userId,
+        JSON.stringify(answers),
+        JSON.stringify(skillsPayload),
+        JSON.stringify(archetypesPayload),
+        JSON.stringify(ladderPayload),
+        JSON.stringify(growthPayload),
+        JSON.stringify(strengthsPayload),
+        JSON.stringify(stuckPayload),
+        completedAt,
+      ]
+    );
+
+    // Update profile "friendship type" using the primary archetype label from payload
+    const primaryArchetype =
+      Array.isArray(body?.archetypes?.main) && body.archetypes.main.length
+        ? body.archetypes.main[0]
+        : null;
+    const primaryLabel =
+      (primaryArchetype && typeof primaryArchetype.label === "string" && primaryArchetype.label.trim()) ||
+      (primaryArchetype && typeof primaryArchetype.code === "string" && primaryArchetype.code.trim()) ||
+      null;
+    if (primaryLabel) {
+      try {
+        await pool.query(
+          `UPDATE userdata SET kindness_style = $1 WHERE id = $2`,
+          [primaryLabel, userId]
+        );
+      } catch (updateErr) {
+        console.warn("Could not update friendship type on profile:", updateErr.message || updateErr);
+      }
+    }
+
+    return res.json({ ok: true, id: insert.rows[0].id });
+  } catch (e) {
+    console.error("POST /api/friendship-energy error:", e);
+    return res.status(500).json({ ok: false, error: "server_error" });
+  }
+});
+
 
 app.listen(port, () => {
   console.log(`App running on port ${port}`);
