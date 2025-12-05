@@ -7,7 +7,7 @@ function TabButton({ active, label, sublabel, onClick }) {
     <button
       type="button"
       onClick={onClick}
-      className={`flex flex-col items-start gap-1 px-4 py-3 rounded-2xl border transition ${
+      className={`flex flex-col items-center text-center gap-1 px-4 py-3 rounded-2xl border transition ${
         active
           ? "border-[#ff5656] bg-[#ff5656]/10 text-[#455a7c] shadow-sm"
           : "border-slate-200 bg-white hover:border-slate-300 text-[#455a7c]"
@@ -41,16 +41,15 @@ export default function FriendQuizzesPage({ userId }) {
           </span>
           <div className="space-y-2">
             <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight">
-              Upgrade your friendships
+              Upgrade Your Friend Circle
             </h1>
-            <p className="text-lg md:text-xl text-slate-600">
-              (without being weird about it)
-            </p>
           </div>
           <p className="max-w-3xl mx-auto text-slate-600 text-sm md:text-base">
-            Run a quick vibe check on a specific friend, or see your own
-            friendship superpowers. KAI turns your answers into tiny, non-cringe
-            experiments you can actually try this week.
+            Take 2 minutes to complete a Friend Check quiz on a friend and find out what type of friend they are and KAI will create a Friend Arc - small simple actions you can take to connect with that person more!
+            <br />
+            or
+            <br />
+            Complete a My Friendship Energy quiz to discover your friendship superpowers and learn how you can be a better friend.
           </p>
         </header>
 

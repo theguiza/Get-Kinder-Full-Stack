@@ -1,4 +1,5 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import confetti from "canvas-confetti";
 
 const LIKERT_LABELS = {
   1: "lol nope",
@@ -172,6 +173,16 @@ export default function MyFriendshipEnergyQuiz({ userId, onScore, onAfterResult 
   const [result, setResult] = useState(null);
   const [status, setStatus] = useState({ state: "idle", message: "" });
   const [errors, setErrors] = useState([]);
+  const [showCelebrate, setShowCelebrate] = useState(false);
+
+  useEffect(() => {
+    if (!showCelebrate) return;
+    try {
+      confetti({ particleCount: 160, spread: 70, origin: { y: 0.6 } });
+    } catch (e) {
+      console.warn("confetti failed", e);
+    }
+  }, [showCelebrate]);
 
   const completion = useMemo(() => {
     const skillAnswered = Object.values(skillsRaw).filter((v) => Number.isFinite(v)).length;
@@ -256,6 +267,7 @@ export default function MyFriendshipEnergyQuiz({ userId, onScore, onAfterResult 
       }
       setStatus({ state: "saved", message: "Saved ✓" });
       onAfterResult?.();
+      setTimeout(() => setShowCelebrate(true), 300);
     } catch (e) {
       setStatus({ state: "error", message: e.message || "Save failed" });
     }
@@ -270,6 +282,34 @@ export default function MyFriendshipEnergyQuiz({ userId, onScore, onAfterResult 
           This quiz is about <strong>you</strong>, not any one friend. Think about the last 2–3 months. For each line, slide from “lol nope” → “big yes” to show how true it feels.
         </div>
       </div>
+
+      {showCelebrate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+          <div className="w-full max-w-md rounded-3xl bg-white p-6 text-center shadow-2xl border border-slate-100">
+            <div className="text-3xl mb-2">🎉</div>
+            <h2 className="text-2xl font-bold text-[#455a7c]">Saved!</h2>
+            <p className="mt-2 text-sm text-[#455a7c]">
+              Your Friendship Energy quiz was saved. Keep building those superpowers!
+            </p>
+            <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+              <button
+                type="button"
+                onClick={() => setShowCelebrate(false)}
+                className="flex-1 rounded-2xl border border-[#455a7c] px-4 py-2 text-[#455a7c] font-semibold hover:bg-[#455a7c]/5"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowCelebrate(false)}
+                className="flex-1 rounded-2xl bg-[#ff5656] px-4 py-2 font-semibold text-white shadow hover:bg-[#ff5656]/90"
+              >
+                Great!
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="rounded-2xl border border-slate-200 bg-white p-4 md:p-5 space-y-4">
         <div>
