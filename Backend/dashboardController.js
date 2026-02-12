@@ -1,5 +1,6 @@
 import { progressPercent } from '../shared/metrics.js';
 import { mapFriendArcRow } from './lib/friendArcMapper.js';
+import { getVolunteerStats, resolveUserIdFromRequest } from '../services/profileService.js';
 
 // Backend/dashboardController.js
 // No `snapshot` usage. Ensures a real top-level `challenge` on each arc before render.
@@ -225,7 +226,8 @@ export function makeDashboardController(pool) {
   return {
     async getDashboard(req, res) {
       try {
-        const userId = req?.user?.id;
+        const resolvedUserId = await resolveUserIdFromRequest(req);
+        const userId = resolvedUserId || req?.user?.id;
         if (!userId) {
           return res.status(401).render('error', {
             title: 'Unauthorized',
@@ -363,10 +365,29 @@ export function makeDashboardController(pool) {
         }
 
         // Keep your existing render
+        let volunteerStats = null;
+        try {
+          volunteerStats = await getVolunteerStats(userId);
+        } catch (statsErr) {
+          console.warn('[dashboardController] volunteer stats failed:', statsErr.message || statsErr);
+          volunteerStats = null;
+        }
+        const showStatsDebug = process.env.NODE_ENV !== "production" || Boolean(process.env.DEBUG);
+        if (showStatsDebug) {
+          console.log("[dashboard] req.user:", {
+            id: req.user?.id,
+            email: req.user?.email,
+          });
+          console.log("[dashboard] stats_user_id:", userId, "volunteerStats:", volunteerStats);
+        }
+
         res.render('dashboard', {
           arcs: Array.isArray(arcsForRender) ? arcsForRender : [],
           initialArcId: arcsForRender[0]?.id || null,
-          csrfToken: typeof req.csrfToken === 'function' ? req.csrfToken() : null
+          csrfToken: typeof req.csrfToken === 'function' ? req.csrfToken() : null,
+          volunteerStats,
+          debugStatsUserId: showStatsDebug ? String(userId) : null,
+          showStatsDebug
         });
       } catch (error) {
         console.error('dashboardController.getDashboard error:', error);

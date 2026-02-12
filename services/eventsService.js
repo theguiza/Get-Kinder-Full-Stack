@@ -23,6 +23,19 @@ function mapEventRow(row = {}) {
     end_at: row.end_at || null,
     tz: row.tz || null,
     location_text: row.location_text || null,
+    org_name: row.org_name || null,
+    community_tag: row.community_tag || null,
+    cause_tags: normalizeTextArray(row.cause_tags),
+    requirements: row.requirements || null,
+    verification_method: row.verification_method || "host_attest",
+    impact_credits_base:
+      row.impact_credits_base !== null && row.impact_credits_base !== undefined
+        ? Number(row.impact_credits_base)
+        : 25,
+    reliability_weight:
+      row.reliability_weight !== null && row.reliability_weight !== undefined
+        ? Number(row.reliability_weight)
+        : 1,
     capacity: typeof row.capacity === "number" ? row.capacity : null,
     rsvp_counts: {
       accepted: Number(row.rsvp_accepted) || 0,
@@ -47,9 +60,37 @@ function safeParseJsonArray(value) {
   }
 }
 
-export async function fetchEvents({ limit, offset } = {}) {
+function normalizeTextArray(value) {
+  if (Array.isArray(value)) return value.filter((item) => typeof item === "string" && item.trim());
+  if (!value) return [];
+  if (typeof value === "string") {
+    return value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
+export async function fetchEvents({ limit, offset, communityTag, causeTag } = {}) {
   const clampedLimit = clampLimit(limit);
   const clampedOffset = clampOffset(offset);
+  const filters = [];
+  const values = [];
+  const normalizedCommunity = typeof communityTag === "string" ? communityTag.trim() : "";
+  const normalizedCause = typeof causeTag === "string" ? causeTag.trim() : "";
+  if (normalizedCommunity) {
+    values.push(normalizedCommunity);
+    filters.push(`e.community_tag = $${values.length}`);
+  }
+  if (normalizedCause) {
+    values.push(normalizedCause);
+    filters.push(`$${values.length} = ANY(e.cause_tags)`);
+  }
+  values.push(clampedLimit);
+  values.push(clampedOffset);
+  const limitParam = values.length - 1;
+  const offsetParam = values.length;
   const { rows } = await pool.query(
     `
       SELECT e.id,
@@ -59,6 +100,13 @@ export async function fetchEvents({ limit, offset } = {}) {
              e.end_at,
              e.tz,
              e.location_text,
+             e.org_name,
+             e.community_tag,
+             e.cause_tags,
+             e.requirements,
+             e.verification_method,
+             e.impact_credits_base,
+             e.reliability_weight,
              e.capacity,
              e.cover_url,
              e.attendance_methods,
@@ -72,10 +120,11 @@ export async function fetchEvents({ limit, offset } = {}) {
             FROM event_rsvps
         GROUP BY event_id
         ) r ON r.event_id = e.id
+      ${filters.length ? `WHERE ${filters.join(" AND ")}` : ""}
        ORDER BY e.start_at ASC NULLS LAST, e.id ASC
-       LIMIT $1 OFFSET $2
+       LIMIT $${limitParam} OFFSET $${offsetParam}
     `,
-    [clampedLimit, clampedOffset]
+    values
   );
   return rows.map((row) => {
     const mapped = mapEventRow(row);
@@ -95,6 +144,13 @@ export async function fetchEventById(id) {
              e.end_at,
              e.tz,
              e.location_text,
+             e.org_name,
+             e.community_tag,
+             e.cause_tags,
+             e.requirements,
+             e.verification_method,
+             e.impact_credits_base,
+             e.reliability_weight,
              e.capacity,
              e.cover_url,
              e.attendance_methods,
@@ -115,4 +171,86 @@ export async function fetchEventById(id) {
   );
   if (!rows[0]) return null;
   return mapEventRow(rows[0]);
+}
+
+export async function getEventByIdForVerify(client, eventId) {
+  const runner = client?.query ? client : pool;
+  const id = client?.query ? eventId : client;
+  const { rows } = await runner.query(
+    `
+      SELECT id,
+             creator_user_id,
+             start_at,
+             end_at,
+             impact_credits_base
+        FROM events
+       WHERE id = $1
+       LIMIT 1
+    `,
+    [id]
+  );
+  return rows[0] || null;
+}
+
+export async function getRsvpForUpdate(client, eventId, attendeeUserId) {
+  const runner = client || pool;
+  const { rows } = await runner.query(
+    `
+      SELECT id,
+             event_id,
+             attendee_user_id,
+             status,
+             verification_status,
+             attended_minutes
+        FROM event_rsvps
+       WHERE event_id = $1
+         AND attendee_user_id = $2
+       FOR UPDATE
+    `,
+    [eventId, attendeeUserId]
+  );
+  return rows[0] || null;
+}
+
+export async function countVerifiedShifts(client, attendeeUserId) {
+  const runner = client || pool;
+  const { rows } = await runner.query(
+    `
+      SELECT COUNT(*)::int AS total
+        FROM event_rsvps
+       WHERE attendee_user_id = $1
+         AND verification_status = 'verified'
+    `,
+    [attendeeUserId]
+  );
+  return Number(rows?.[0]?.total) || 0;
+}
+
+export async function updateEventRsvpVerification(
+  client,
+  { eventId, attendeeUserId, decision, attendedMinutes, notes }
+) {
+  const runner = client || pool;
+  const sets = [
+    "verification_status = $1",
+    "attended_minutes = $2",
+    "verified_at = NOW()",
+  ];
+  const values = [decision, attendedMinutes];
+  if (notes) {
+    sets.push(`notes = $${values.length + 1}`);
+    values.push(notes);
+  }
+  values.push(eventId, attendeeUserId);
+  const { rows } = await runner.query(
+    `
+      UPDATE event_rsvps
+         SET ${sets.join(", ")}
+       WHERE event_id = $${values.length - 1}
+         AND attendee_user_id = $${values.length}
+       RETURNING verification_status, attended_minutes
+    `,
+    values
+  );
+  return rows[0] || null;
 }

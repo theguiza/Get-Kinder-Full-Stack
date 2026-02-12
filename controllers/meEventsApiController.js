@@ -86,6 +86,13 @@ export async function listMyEvents(req, res) {
              e.end_at,
              e.tz,
              e.location_text,
+             e.org_name,
+             e.community_tag,
+             e.cause_tags,
+             e.requirements,
+             e.verification_method,
+             e.impact_credits_base,
+             e.reliability_weight,
              e.visibility,
              e.capacity,
              e.status,
@@ -123,6 +130,19 @@ export async function listMyEvents(req, res) {
       end_at: row.end_at,
       tz: row.tz,
       location_text: row.location_text,
+      org_name: row.org_name || null,
+      community_tag: row.community_tag || null,
+      cause_tags: Array.isArray(row.cause_tags) ? row.cause_tags : [],
+      requirements: row.requirements || null,
+      verification_method: row.verification_method || "host_attest",
+      impact_credits_base:
+        row.impact_credits_base !== null && row.impact_credits_base !== undefined
+          ? Number(row.impact_credits_base)
+          : 25,
+      reliability_weight:
+        row.reliability_weight !== null && row.reliability_weight !== undefined
+          ? Number(row.reliability_weight)
+          : 1,
       visibility: row.visibility,
       capacity: row.capacity,
       status: row.status,

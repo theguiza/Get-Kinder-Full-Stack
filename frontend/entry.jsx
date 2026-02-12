@@ -7,12 +7,14 @@ if (typeof window !== "undefined") {
 import React from "react";
 import ReactDOM from "react-dom/client";
 
-// ---- Friend Challenges (new)
-import FriendChallenges from "./friendChallenges.jsx";
-
 import BestieVibesQuiz from "./BestieVibesQuiz.jsx";
 import { EventsApp } from "./events/App.jsx";
 import FriendQuizzesPage from "./FriendQuizzesPage.jsx";
+import ImpactHero from "./impactHero.jsx";
+import KinderCrewCarousel from "./kinderCrewCarousel.jsx";
+import WeeksPlan from "./weeksPlan.jsx";
+import DonorDashboard from "./donorDashboard.jsx";
+import DonatePage from "./donate.jsx";
 
 const ROOTS = new WeakMap();
 
@@ -39,14 +41,60 @@ window.renderFriendQuizzesPage = (selector, props = {}) => {
   const root = getOrCreateRoot(el);
   root.render(<FriendQuizzesPage {...props} />);
 };
-// ---- Friend Challenges (new)
-window.renderFriendChallenges = (selector = "#friend-challenges-root", props = {}) => {
+// ---- Impact Hero
+window.renderImpactHero = (selector = "#impact-hero-root", props = {}) => {
   const el = typeof selector === "string" ? document.querySelector(selector) : selector;
   if (!el) return;
   const root = getOrCreateRoot(el);
   root.render(
     <React.StrictMode>
-      <FriendChallenges {...props} />
+      <ImpactHero {...props} />
+    </React.StrictMode>
+  );
+};
+
+// ---- Kinder Crew Carousel
+window.renderKinderCrewCarousel = (selector = "#kinder-crew-carousel-root", props = {}) => {
+  const el = typeof selector === "string" ? document.querySelector(selector) : selector;
+  if (!el) return;
+  const root = getOrCreateRoot(el);
+  root.render(
+    <React.StrictMode>
+      <KinderCrewCarousel {...props} />
+    </React.StrictMode>
+  );
+};
+
+// ---- Weeks Plan
+window.renderWeeksPlan = (selector = "#weeks-plan-root", props = {}) => {
+  const el = typeof selector === "string" ? document.querySelector(selector) : selector;
+  if (!el) return;
+  const root = getOrCreateRoot(el);
+  root.render(
+    <React.StrictMode>
+      <WeeksPlan {...props} />
+    </React.StrictMode>
+  );
+};
+
+window.renderDonorDashboard = (selector = "#donor-dashboard-root", props = {}) => {
+  const el = typeof selector === "string" ? document.querySelector(selector) : selector;
+  if (!el) return;
+  const root = getOrCreateRoot(el);
+  root.render(
+    <React.StrictMode>
+      <DonorDashboard {...props} />
+    </React.StrictMode>
+  );
+};
+
+window.renderDonatePage = (selector = "#donate-root", props = {}) => {
+  const el = typeof selector === "string" ? document.querySelector(selector) : selector;
+  if (!el) return;
+  const root = getOrCreateRoot(el);
+  root.render(
+    <React.StrictMode>
+      <DonatePage {...props} />
     </React.StrictMode>
   );
 };

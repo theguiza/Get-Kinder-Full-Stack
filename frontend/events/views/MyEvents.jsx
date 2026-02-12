@@ -142,6 +142,15 @@ export function MyEvents() {
       <div className="action-row">
         {!isDraft && !isCancelled && (
           <>
+            <button
+              type="button"
+              className="btn secondary"
+              onClick={() => {
+                window.location.hash = `#/events/${event.id}`;
+              }}
+            >
+              Open Roster
+            </button>
             <button type="button" className="btn secondary" onClick={() => copyLink(event.id)}>
               Copy Link
             </button>

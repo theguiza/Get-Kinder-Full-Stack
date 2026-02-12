@@ -25,6 +25,11 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-SgOJa3DmI69IUzQ2PVdRZhwQ+dy64/BUtbMJw1MZ8t5HZApcHrRKUc4W0kG879m7" crossorigin="anonymous">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
   <link rel="stylesheet" href="./css/style.css">
+  <style>
+    .profile-tabs .nav-link { border-radius: 999px; }
+    .profile-panel { display: none; }
+    .profile-panel[data-tab="overview"] { display: block; }
+  </style>
 </head>
 <body >
 <!-- Google Tag Manager (noscript) -->
@@ -55,13 +60,10 @@
                 <a class="nav-link mx-1 font-hover" href="/home" style="font-size: 1.2rem; color: #455a7c; padding-right: 30px;">Home</a>
               </li>
                  <li class="nav-item">
-                <a class="nav-link mx-1 font-hover active" href="/events" aria-current="page" style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;">Events</a>
+                <a class="nav-link mx-1 font-hover active" href="/events" aria-current="page" style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;">Volunteer Opportunities</a>
               </li>
                <li class="nav-item">
-                <a class="nav-link mx-1 font-hover" href="dashboard" style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;">Friend Arcs</a>
-              </li>
-                 <li class="nav-item">
-                <a class="nav-link mx-1 font-hover" href="friendQuiz" style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;">Quiz</a>
+                <a class="nav-link mx-1 font-hover" href="dashboard" style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;">My Impact Plan</a>
               </li>
                <li class="nav-item">
                 <a class="nav-link mx-1 font-hover" href="blog" style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;">Blog</a>
@@ -89,224 +91,425 @@
           </div>
         </div>
       </nav>
-    </header>
+   </header>
    <div> <br></div>
       <div class="container profile-page rounded bg-white mt-5 px-3 pt-4">
         <div class="text-center mb-3">
-          <h1 class="mt-3 mb-0" style="color: #455a7c;">Your Get Kinder Profile</h1>
+          <h1 class="mt-3 mb-0" style="color: #455a7c;">Your Impact Profile</h1>
         </div>
+        <nav class="mt-3">
+          <ul class="nav nav-pills gap-2 profile-tabs" id="profileTabs" role="tablist">
+            <li class="nav-item"><button type="button" class="nav-link active" data-tab-target="overview">Overview</button></li>
+            <li class="nav-item"><button type="button" class="nav-link" data-tab-target="portfolio">Portfolio</button></li>
+            <li class="nav-item"><button type="button" class="nav-link" data-tab-target="skills">Skills</button></li>
+            <li class="nav-item"><button type="button" class="nav-link" data-tab-target="preferences">Preferences</button></li>
+            <li class="nav-item"><button type="button" class="nav-link" data-tab-target="account">Account</button></li>
+          </ul>
+        </nav>
+
         <form id="profile-form" action="/profile" method="POST" enctype="multipart/form-data">
-      <div class="row">
-        <!-- Left: Profile Picture -->
-        <div class="col-md-3 border-right">
-          <div class="card shadow-sm border-0 mb-4" style="border-radius: 18px; background: #f7f9fc;">
-            <div class="card-body d-flex flex-column align-items-center text-center">
-              <img id="profile-avatar" class="rounded-circle mt-2" width="150px" alt="Get Kinder User Profile Picture" src="<%= user.picture || '/images/nerdy-KAI.png' %>"> <br> 
-              <strong class="mt-1" style="color: #455a7c;"><%= user.firstname + " " + user.lastname %></strong><br> 
-              <span class="text-black-50"><%= user.email %></span>
-              <!-- file‐input for new picture -->
-              <div class="mt-3 w-100">
-                <input type="file" name="picture" accept="image/*" class="form-control form-control-sm"/>
-                <small class="form-text text-muted">Upload a new profile image (max 2 MB)</small>
-              </div>
-            </div>
-          </div>
+          <% const sdgOptions = [
+            "1 – No Poverty", "2 – Zero Hunger", "3 – Good Health and Well-being",
+            "4 – Quality Education", "5 – Gender Equality", "6 – Clean Water and Sanitation",
+            "7 – Affordable and Clean Energy", "8 – Decent Work and Economic Growth",
+            "9 – Industry, Innovation and Infrastructure", "10 – Reduced Inequality",
+            "11 – Sustainable Cities and Communities", "12 – Responsible Consumption and Production",
+            "13 – Climate Action", "14 – Life Below Water", "15 – Life on Land",
+            "16 – Peace, Justice and Strong Institutions", "17 – Partnerships for the Goals"
+          ]; %>
 
-         <% const fpMonthly = (friendPoints && Number.isFinite(friendPoints.monthly)) ? friendPoints.monthly : 0;
-            const fpTotal   = (friendPoints && Number.isFinite(friendPoints.total)) ? friendPoints.total : 0;
-            const fpGoal    = (friendPoints && Number.isFinite(friendPoints.goal) && friendPoints.goal > 0) ? friendPoints.goal : 500;
-            const fpPercent = Math.min(100, Math.round((fpTotal / fpGoal) * 100));
-         %>
-         <div class="card shadow-sm border-0 mt-4 w-100" style="border-radius: 18px; background: #f7f9fc;">
-           <div class="card-body text-center">
-             <h4 class="fw-bold text-center" style="color: #455a7c;">Friend Points</h4>
-             <div class="mt-2 text-muted text-nowrap text-center" style="font-size: 14px;">Points earned this month</div>
-             <div class="display-6 fw-semibold text-center" style="color: #ff5656;"><%= fpMonthly %></div>
+          <div class="profile-panel mt-3" data-tab="overview">
+            <div class="row">
+              <div class="col-md-4 border-right">
+                <div class="card shadow-sm border-0 mb-4" style="border-radius: 18px; background: #f7f9fc;">
+                  <div class="card-body d-flex flex-column align-items-center text-center">
+                    <img id="profile-avatar" class="rounded-circle mt-2" width="150px" alt="Get Kinder User Profile Picture" src="<%= user.picture || '/images/nerdy-KAI.png' %>"> <br>
+                    <strong class="mt-1" style="color: #455a7c;"><%= user.firstname + " " + user.lastname %></strong><br>
+                    <span class="text-black-50"><%= user.email %></span>
+                    <div class="mt-3 w-100">
+                      <input type="file" name="picture" accept="image/*" class="form-control form-control-sm"/>
+                      <small class="form-text text-muted">Upload a new profile image (max 2 MB)</small>
+                    </div>
+                  </div>
+                </div>
 
-             <div class="mt-3 text-muted text-nowrap text-center" style="font-size: 14px;">Total points earned</div>
-             <div class="display-6 fw-semibold text-center" style="color: #ff5656;"><%= fpTotal %></div>
+                <% const fpMonthly = (friendPoints && Number.isFinite(friendPoints.monthly)) ? friendPoints.monthly : 0;
+                  const fpTotal   = (friendPoints && Number.isFinite(friendPoints.total)) ? friendPoints.total : 0;
+                  const fpGoal    = (friendPoints && Number.isFinite(friendPoints.goal) && friendPoints.goal > 0) ? friendPoints.goal : 500;
+                  const fpPercent = Math.min(100, Math.round((fpTotal / fpGoal) * 100));
+                  const stats = volunteerStats || {};
+                  const impactBalance = Number(stats.impact_credits_balance) || 0;
+                  const verifiedHours = Number(stats.verified_hours_total) || 0;
+                  const streakWeeks = Number(stats.streak_weeks) || 0;
+                  const reliabilityScore = Number(stats.reliability_score) || 0;
+                  const priorityTier = stats.priority_tier || "Bronze";
+                  const verifiedShifts = Number(stats.verified_shifts_total) || 0;
+                %>
+                <div class="card shadow-sm border-0 mt-4 w-100" style="border-radius: 18px; background: #f7f9fc;">
+                  <div class="card-body text-center">
+                    <h4 class="fw-bold text-center" style="color: #455a7c;">Impact Credits</h4>
+                    <div class="mt-2 text-muted text-nowrap text-center" style="font-size: 14px;">Current balance</div>
+                    <div class="display-6 fw-semibold text-center" style="color: #ff5656;"><%= impactBalance %></div>
 
-             <div class="mt-3">
-               <div class="progress" style="height: 12px; background-color: #e0e4ea;">
-                 <div
-                   class="progress-bar"
-                   role="progressbar"
-                   style="width: <%= fpPercent %>%; background-color: #7bb2ff;"
-                   aria-valuenow="<%= fpPercent %>"
-                   aria-valuemin="0"
-                   aria-valuemax="100"
-                 ></div>
-               </div>
-               <div class="d-flex justify-content-between mt-1 text-muted small">
-                 <span><%= fpPercent %>%</span>
-                 <span><%= fpGoal %></span>
-               </div>
-             </div>
+                    <div class="mt-3 text-muted text-nowrap text-center" style="font-size: 14px;">Verified shifts</div>
+                    <div class="h5 fw-semibold text-center" style="color: #ff5656;"><%= verifiedShifts %></div>
+                    <% if (showStatsDebug && debugStatsUserId) { %>
+                      <div class="mt-2 text-muted" style="font-size: 12px;">stats_user_id=<%= debugStatsUserId %></div>
+                    <% } %>
 
-             <p class="mt-3 mb-0" style="color: #2c3e50; font-size: 14px;">
-               Complete more Friend Arc actions to earn more points and rewards.
-             </p>
-           </div>
-         </div>
-        </div>
-        <!-- Middle: Profile Form -->
-        <div class="col-md-5 border-right">
-          <div>
-            <div class="row mt-2">
-              <div class="col-md-6">
-                <label class="labels">First Name</label>
-                <input name="firstname" type="text" class="form-control" placeholder="first name" value="<%= user.firstname || '' %>">
-              </div>
-              <div class="col-md-6">
-                <label class="labels">Last Name</label>
-                <input name="lastname" type="text" class="form-control" placeholder="last name" value="<%= user.lastname || '' %>">
-              </div>
-            </div>
+                    <p class="mt-3 mb-0" style="color: #2c3e50; font-size: 14px;">
+                      Verify volunteer shifts to grow Impact Credits, streaks, and reliability toward priority access and impact grants.
+                    </p>
+                  </div>
+                </div>
 
-            <div class="row mt-3">
-              <div class="col-md-12 mb-">
-                <label class="labels">My Friendship Type</label>
-                <input name="kindness_style" type="text" class="form-control" placeholder="Saved from your friendship quiz" value="<%= user.kindness_style || '' %>">
-              </div>
-              <div class="col-md-12 mb-2">
-                <label class="labels">Email</label>
-                <input name="email" type="email" class="form-control" placeholder="enter email" value="<%= user.email || '' %>">
-              </div>
-              <div class="col-md-12 mb-2">
-                <label class="labels">Mobile Number</label>
-                <input name="phone" type="text" class="form-control" placeholder="enter phone number" value="<%= user.phone || '' %>">
-              </div>
-              <div class="col-md-12 mb-2">
-                <label class="labels">Address Line 1</label>
-                <input name="address1" type="text" class="form-control" placeholder="enter address line 1" value="<%= user.address1 || '' %>">
-              </div>
-              <div class="col-md-12 mb-2">
-                <label class="labels">City</label>
-                <input name="city" type="text" class="form-control" placeholder="enter city" value="<%= user.city || '' %>">
-              </div>
-            </div>
-            <div class="row mt-2">
-              <div class="col-md-6">
-                <label class="labels">State or Province</label>
-                <input name="state" type="text" class="form-control" placeholder="enter state or province" value="<%= user.state || '' %>">
-              </div>
-              <div class="col-md-6">
-                <label class="labels">Country</label>
-                <input name="country" type="text" class="form-control" placeholder="enter country" value="<%= user.country || '' %>"><br> 
-              </div>
-            </div>
-  <% const sdgOptions = [
-    "1 – No Poverty", "2 – Zero Hunger", "3 – Good Health and Well-being",
-    "4 – Quality Education", "5 – Gender Equality", "6 – Clean Water and Sanitation",
-    "7 – Affordable and Clean Energy", "8 – Decent Work and Economic Growth",
-    "9 – Industry, Innovation and Infrastructure", "10 – Reduced Inequality",
-    "11 – Sustainable Cities and Communities", "12 – Responsible Consumption and Production",
-    "13 – Climate Action", "14 – Life Below Water", "15 – Life on Land",
-    "16 – Peace, Justice and Strong Institutions", "17 – Partnerships for the Goals"
-  ]; %>
-
-  <!-- SDG selectors temporarily disabled
-  <div class="row align-items-center mb-3">
-    <div class="col-auto">
-      <% if (user.sdg1) { const number = user.sdg1.split(/\s*[-–—]\s*/)[0].trim(); %>
-        <img src="/images/sdgs/goal_<%= number %>.png" alt="SDG <%= number %>" class="img-fluid" style="max-width: 60px;">
-      <% } %>
-    </div>
-    <div class="col">
-      <select name="sdg1" class="form-select">
-        <option value="">Select your first SDG</option>
-        <% sdgOptions.forEach((option) => { %>
-          <option value="<%= option %>" <%= user.sdg1 === option ? 'selected' : '' %>><%= option %></option>
-        <% }); %>
-      </select>
-    </div>
-  </div>
-
-  <div class="row align-items-center mb-3">
-    <div class="col-auto">
-      <% if (user.sdg2) { const number = user.sdg2.split(/\s*[-–—]\s*/)[0].trim(); %>
-        <img src="/images/sdgs/goal_<%= number %>.png" alt="SDG <%= number %>" class="img-fluid" style="max-width: 60px;">
-      <% } %>
-    </div>
-    <div class="col">
-      <select name="sdg2" class="form-select">
-        <option value="">Select your second SDG</option>
-        <% sdgOptions.forEach((option) => { %>
-          <option value="<%= option %>" <%= user.sdg2 === option ? 'selected' : '' %>><%= option %></option>
-        <% }); %>
-      </select>
-    </div>
-  </div>
-
-  <div class="row align-items-center mb-3">
-    <div class="col-auto">
-      <% if (user.sdg3) { const number = user.sdg3.split(/\s*[-–—]\s*/)[0].trim(); %>
-        <img src="/images/sdgs/goal_<%= number %>.png" alt="SDG <%= number %>" class="img-fluid" style="max-width: 60px;">
-      <% } %>
-    </div>
-    <div class="col">
-      <select name="sdg3" class="form-select">
-        <option value="">Select your third SDG</option>
-        <% sdgOptions.forEach((option) => { %>
-          <option value="<%= option %>" <%= user.sdg3 === option ? 'selected' : '' %>><%= option %></option>
-        <% }); %>
-      </select>
-    </div>
-  </div>
-  -->
-            <div class="mt-4 text-center">
-              <button class="btn btn-primary profile-button" type="submit">Save Profile</button>
-            </div>
-          </div>
-        </div>
-        <!-- Right: Interests Column -->
-        <div class="col-md-4">
-            <div class="d-flex justify-content-between align-items-center mb-3">
-                <h2 class="text-right" style="color: #455a7c; margin-top: 40px;">Your Interests</h2>
-            </div>
-            <div class="form-group mb-3">
-              <label class="labels">Interest 1</label>
-              <input type="text" name="interest1" class="form-control" placeholder="Enter your interest 1" value="<%= user.interest1 || '' %>">
-            </div>
-            <div class="form-group mb-3">
-              <label class="labels">Interest 2</label>
-              <input type="text" name="interest2" class="form-control" placeholder="Enter your interest 2" value="<%= user.interest2 || '' %>">
-            </div>
-            <div class="form-group mb-3">
-              <label class="labels">Interest 2</label>
-              <input type="text" name="interest3" class="form-control" placeholder="Enter your interest 3" value="<%= user.interest3 || '' %>">
-            </div>
-            <div class="text-center">
-              <button class="btn btn-outline-primary" type="submit">Update Interests</button>
-            </div>
-
-            <% if (topFriends && topFriends.length) { %>
-              <div class="mt-3 mb-3">
-                <h2 class="text-right" style="color: #455a7c;">Top Friends</h2>
-                <ul class="list-group">
-                  <% topFriends.forEach((friend) => { %>
-                    <li class="list-group-item d-flex justify-content-between align-items-center">
-                      <div>
-                        <div class="fw-semibold"><%= friend.name %></div>
-                        <div class="text-muted small"><%= friend.type %></div>
+                <div class="card shadow-sm border-0 mt-4 w-100" style="border-radius: 18px; background: #f7f9fc;">
+                  <div class="card-body">
+                    <h4 class="fw-bold text-center" style="color: #455a7c;">Volunteer Progress</h4>
+                    <div class="row text-center mt-3">
+                      <div class="col-6 mb-3">
+                        <div class="text-muted small">Impact Credits</div>
+                        <div class="h3 mb-0" style="color:#ff5656;"><%= impactBalance %></div>
                       </div>
-                      <span class="badge rounded-pill" style="background-color: #ff5656;">
-                        <%= friend.score !== null ? friend.score : '—' %>
-                      </span>
-                    </li>
-                  <% }) %>
-                </ul>
+                      <div class="col-6 mb-3">
+                        <div class="text-muted small">Verified Hours</div>
+                        <div class="h3 mb-0" style="color:#ff5656;"><%= verifiedHours.toFixed(1) %></div>
+                      </div>
+                      <div class="col-6">
+                        <div class="text-muted small">Streak Weeks</div>
+                        <div class="h4 mb-0"><%= streakWeeks %></div>
+                      </div>
+                      <div class="col-6">
+                        <div class="text-muted small">Reliability</div>
+                        <div class="h4 mb-0"><%= reliabilityScore %></div>
+                      </div>
+                    </div>
+                    <div class="text-center mt-3">
+                      <span class="badge rounded-pill" style="background-color:#7bb2ff;">Priority Tier: <%= priorityTier %></span>
+                    </div>
+                    <% if (!verifiedShifts) { %>
+                      <p class="mt-3 mb-0 text-muted text-center" style="font-size: 14px;">
+                        Complete your first verified shift to start earning Impact Credits and unlock priority access.
+                      </p>
+                    <% } %>
+                  </div>
+                </div>
+              </div>
+
+              <div class="col-md-8">
+                <div class="mt-4">
+                  <h2 class="text-right" style="color: #455a7c;">Upcoming opportunities</h2>
+                  <% const upcoming = (stats.upcoming || []); %>
+                  <% if (!upcoming.length) { %>
+                    <div class="text-muted small">No upcoming opportunities yet.</div>
+                  <% } else { %>
+                    <ul class="list-group">
+                      <% upcoming.forEach((item) => { %>
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                          <div>
+                            <div class="fw-semibold"><%= item.title || 'Untitled' %></div>
+                            <div class="text-muted small">
+                              <%= item.org_name || 'Independent organizer' %>
+                              <% if (item.community_tag) { %> • <%= item.community_tag %><% } %>
+                            </div>
+                          </div>
+                          <span class="text-muted small"><%= item.start_at ? new Date(item.start_at).toLocaleDateString() : 'Date TBD' %></span>
+                        </li>
+                      <% }) %>
+                    </ul>
+                  <% } %>
+                </div>
+
+                <div class="mt-4">
+                  <h2 class="text-right" style="color: #455a7c;">Recent volunteering</h2>
+                  <% const recentHistory = (stats.recent_history || []); %>
+                  <% if (!recentHistory.length) { %>
+                    <div class="text-muted small">No completed opportunities yet.</div>
+                  <% } else { %>
+                    <ul class="list-group">
+                      <% recentHistory.forEach((item) => { %>
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                          <div>
+                            <div class="fw-semibold"><%= item.title || 'Untitled' %></div>
+                            <div class="text-muted small">
+                              <%= item.verification_status || 'pending' %>
+                              <% if (item.attended_minutes) { %> • <%= item.attended_minutes %> mins<% } %>
+                            </div>
+                          </div>
+                          <span class="text-muted small"><%= item.start_at ? new Date(item.start_at).toLocaleDateString() : 'Date TBD' %></span>
+                        </li>
+                      <% }) %>
+                    </ul>
+                  <% } %>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="profile-panel mt-3" data-tab="portfolio" style="display:none">
+            <div class="card shadow-sm border-0 mb-3" style="border-radius: 18px; background: #f7f9fc;">
+              <div class="card-body d-flex flex-wrap gap-3">
+                <div><strong>Verified serves:</strong> <%= portfolioSummary?.total_serves_verified || 0 %></div>
+                <div><strong>Hours served:</strong> <%= (portfolioSummary?.total_hours_verified || 0).toFixed(1) %></div>
+                <div><strong>Estimated $KIND earned:</strong> <%= portfolioSummary?.total_kind_est_earned || 0 %></div>
+              </div>
+            </div>
+
+            <% const upcomingRows = (portfolioRows || []).filter(r => r.is_upcoming).slice(0, 5); %>
+            <% const pastRows = (portfolioRows || []).filter(r => !r.is_upcoming).slice(0, 10); %>
+
+            <% if ((portfolioRows || []).length === 0) { %>
+              <div class="card shadow-sm border-0" style="border-radius: 18px; background: #f7f9fc;">
+                <div class="card-body text-center">
+                  <p class="mb-3">You haven’t RSVP’d to any opportunities yet.</p>
+                  <a class="btn btn-primary" href="/events">Find opportunities</a>
+                </div>
               </div>
             <% } else { %>
-              <div class="mt-5 text-muted small text-center">
-                Add friends via the Friend Quiz to see them here.
+              <div class="card shadow-sm border-0 mb-3" style="border-radius: 18px; background: #f7f9fc;">
+                <div class="card-body">
+                  <h4 class="fw-bold mb-3" style="color: #455a7c;">Upcoming commitments</h4>
+                  <% if (!upcomingRows.length) { %>
+                    <div class="text-muted">No upcoming commitments.</div>
+                  <% } else { %>
+                    <div class="list-group">
+                      <% upcomingRows.forEach((row) => { %>
+                        <div class="list-group-item d-flex flex-column flex-md-row justify-content-between align-items-start gap-2">
+                          <div>
+                            <div class="fw-semibold"><%= row.title || 'Untitled event' %></div>
+                            <div class="text-muted small"><%= row.start_at ? row.start_at.toLocaleString() : 'Date TBD' %> • <%= row.location_text || 'Location TBD' %></div>
+                          </div>
+                          <div class="d-flex flex-column text-end">
+                            <span class="badge rounded-pill <%= ['accepted','checked_in'].includes(row.rsvp_status) ? 'text-bg-success' : 'text-bg-secondary' %>">
+                              <%= ['accepted','checked_in'].includes(row.rsvp_status) ? 'Approved' : 'Awaiting' %>
+                            </span>
+                            <small class="text-muted mt-1">+<%= row.kind_estimate_per_user || 0 %> $KIND (est.)</small>
+                          </div>
+                        </div>
+                      <% }); %>
+                    </div>
+                  <% } %>
+                </div>
+              </div>
+
+              <div class="card shadow-sm border-0" style="border-radius: 18px; background: #f7f9fc;">
+                <div class="card-body">
+                  <h4 class="fw-bold mb-3" style="color: #455a7c;">Recent impact</h4>
+                  <% if (!pastRows.length) { %>
+                    <div class="text-muted">No past events yet.</div>
+                  <% } else { %>
+                    <div class="list-group">
+                      <% pastRows.forEach((row) => { %>
+                        <div class="list-group-item d-flex flex-column flex-md-row justify-content-between align-items-start gap-2">
+                          <div>
+                            <div class="fw-semibold">
+                              <span class="<%= row.is_verified ? 'text-success' : 'text-warning' %>"><%= row.is_verified ? 'Verified ✓' : 'Unverified ⏳' %></span>
+                              &nbsp;<%= row.title || 'Untitled event' %>
+                            </div>
+                            <div class="text-muted small">
+                              <%= (row.duration_hours || 0).toFixed(1) %> hrs • +<%= row.kind_estimate_per_user || 0 %> $KIND (est.)
+                              <% if (row.category) { %> • <%= row.category %><% } %>
+                            </div>
+                            <% if (!row.is_verified) { %>
+                              <div class="text-muted small">Check-in required for verification</div>
+                            <% } %>
+                          </div>
+                          <div class="text-end text-muted small">
+                            <%= row.start_at ? row.start_at.toLocaleDateString() : 'Date TBD' %>
+                          </div>
+                        </div>
+                      <% }); %>
+                    </div>
+                  <% } %>
+                </div>
               </div>
             <% } %>
-        </div>
+          </div>
 
-      </div> <!-- end .row -->
-    </form>
-  </div>
+          <div class="profile-panel mt-3" data-tab="skills" style="display:none">
+            <div class="card shadow-sm border-0 mb-3" style="border-radius: 18px; background: #f7f9fc;">
+              <div class="card-body">
+                <h4 class="fw-bold" style="color: #455a7c;">Verified Skills</h4>
+                <% const topCats = (skillsBreakdown && skillsBreakdown.topCategories) || []; %>
+                <% const recentCats = (skillsBreakdown && skillsBreakdown.recentCategories) || []; %>
+                <% if (!topCats.length && !recentCats.length) { %>
+                  <p class="mb-0 text-muted">No verified skills yet. Complete opportunities to build your skills.</p>
+                <% } else { %>
+                  <div class="row">
+                    <div class="col-md-6">
+                      <h6 class="fw-semibold">Top categories by hours</h6>
+                      <% if (!topCats.length) { %>
+                        <div class="text-muted small">No data yet.</div>
+                      <% } else { %>
+                        <ul class="list-group list-group-flush">
+                          <% topCats.forEach((cat) => { %>
+                            <li class="list-group-item d-flex justify-content-between align-items-center px-0">
+                              <span><%= cat.category %></span>
+                              <span class="text-muted"><%= cat.hours.toFixed(1) %> hrs</span>
+                            </li>
+                          <% }); %>
+                        </ul>
+                      <% } %>
+                    </div>
+                    <div class="col-md-6">
+                      <h6 class="fw-semibold">Most recent categories</h6>
+                      <% if (!recentCats.length) { %>
+                        <div class="text-muted small">No data yet.</div>
+                      <% } else { %>
+                        <div class="d-flex flex-wrap gap-2">
+                          <% recentCats.forEach((cat) => { %>
+                            <span class="badge rounded-pill text-bg-light border"><%= cat %></span>
+                          <% }); %>
+                        </div>
+                      <% } %>
+                    </div>
+                  </div>
+                <% } %>
+              </div>
+            </div>
+          </div>
+
+          <div class="profile-panel mt-3" data-tab="preferences" style="display:none">
+            <div class="row">
+              <div class="col-lg-8 col-xl-7">
+                <div class="card shadow-sm border-0 mb-3" style="border-radius:18px; background:#f7f9fc;">
+                  <div class="card-body">
+                    <h2 style="color:#455a7c;" class="mb-1">Preferences</h2>
+                    <p class="text-muted small mb-3">These settings help Get Kinder recommend the right volunteer opportunities for you.</p>
+                    <div class="form-group mb-3">
+                      <label class="labels">Cause / community I care about</label>
+                      <input type="text" name="interest1" class="form-control" placeholder="e.g., unhoused support, food security, park cleanups" value="<%= user.interest1 || '' %>">
+                    </div>
+                    <div class="form-group mb-3">
+                      <label class="labels">Skills I want to build</label>
+                      <input type="text" name="interest2" class="form-control" placeholder="e.g., outreach, meal prep, logistics, stewardship" value="<%= user.interest2 || '' %>">
+                    </div>
+                    <div class="form-group mb-3">
+                      <label class="labels">Preferred type of serve</label>
+                      <input type="text" name="interest3" class="form-control" placeholder="e.g., outdoors, food sorting, outreach, admin support" value="<%= user.interest3 || '' %>">
+                    </div>
+                    <div class="text-center">
+                      <button class="btn btn-outline-primary" type="submit">Save preferences</button>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="card shadow-sm border-0" style="border-radius:18px; background:#f7f9fc;">
+                  <div class="card-body">
+                    <h5 class="fw-bold" style="color:#455a7c;">UN SDG Goals (pick up to 3)</h5>
+                    <p class="text-muted small mb-3">Align your volunteering with the global goals you care about most.</p>
+
+                    <div class="row align-items-center mb-3">
+                      <div class="col-auto">
+                        <% if (user.sdg1) { const number = user.sdg1.split(/\s*[-–—]\s*/)[0].trim(); %>
+                          <img src="/images/sdgs/goal_<%= number %>.png" alt="SDG <%= number %>" class="img-fluid" style="max-width: 60px;">
+                        <% } %>
+                      </div>
+                      <div class="col">
+                        <select name="sdg1" class="form-select">
+                          <option value="">Select your first SDG</option>
+                          <% sdgOptions.forEach((option) => { %>
+                            <option value="<%= option %>" <%= user.sdg1 === option ? 'selected' : '' %>><%= option %></option>
+                          <% }); %>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div class="row align-items-center mb-3">
+                      <div class="col-auto">
+                        <% if (user.sdg2) { const number = user.sdg2.split(/\s*[-–—]\s*/)[0].trim(); %>
+                          <img src="/images/sdgs/goal_<%= number %>.png" alt="SDG <%= number %>" class="img-fluid" style="max-width: 60px;">
+                        <% } %>
+                      </div>
+                      <div class="col">
+                        <select name="sdg2" class="form-select">
+                          <option value="">Select your second SDG</option>
+                          <% sdgOptions.forEach((option) => { %>
+                            <option value="<%= option %>" <%= user.sdg2 === option ? 'selected' : '' %>><%= option %></option>
+                          <% }); %>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div class="row align-items-center mb-3">
+                      <div class="col-auto">
+                        <% if (user.sdg3) { const number = user.sdg3.split(/\s*[-–—]\s*/)[0].trim(); %>
+                          <img src="/images/sdgs/goal_<%= number %>.png" alt="SDG <%= number %>" class="img-fluid" style="max-width: 60px;">
+                        <% } %>
+                      </div>
+                      <div class="col">
+                        <select name="sdg3" class="form-select">
+                          <option value="">Select your third SDG</option>
+                          <% sdgOptions.forEach((option) => { %>
+                            <option value="<%= option %>" <%= user.sdg3 === option ? 'selected' : '' %>><%= option %></option>
+                          <% }); %>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="profile-panel mt-3" data-tab="account" style="display:none">
+            <div class="row">
+              <div class="col-md-10 col-lg-8">
+                <div class="card shadow-sm border-0" style="border-radius: 18px; background: #f7f9fc;">
+                  <div class="card-body">
+                    <div class="row mt-2">
+                      <div class="col-md-6">
+                        <label class="labels">First Name</label>
+                        <input name="firstname" type="text" class="form-control" placeholder="first name" value="<%= user.firstname || '' %>">
+                      </div>
+                      <div class="col-md-6">
+                        <label class="labels">Last Name</label>
+                        <input name="lastname" type="text" class="form-control" placeholder="last name" value="<%= user.lastname || '' %>">
+                      </div>
+                    </div>
+
+                    <div class="row mt-3">
+                      <div class="col-md-12 mb-">
+                        <label class="labels">My Friendship Type</label>
+                        <input name="kindness_style" type="text" class="form-control" placeholder="Saved from your friendship quiz" value="<%= user.kindness_style || '' %>">
+                      </div>
+                      <div class="col-md-12 mb-2">
+                        <label class="labels">Email</label>
+                        <input name="email" type="email" class="form-control" placeholder="enter email" value="<%= user.email || '' %>">
+                      </div>
+                      <div class="col-md-12 mb-2">
+                        <label class="labels">Mobile Number</label>
+                        <input name="phone" type="text" class="form-control" placeholder="enter phone number" value="<%= user.phone || '' %>">
+                      </div>
+                      <div class="col-md-12 mb-2">
+                        <label class="labels">Address Line 1</label>
+                        <input name="address1" type="text" class="form-control" placeholder="enter address line 1" value="<%= user.address1 || '' %>">
+                      </div>
+                      <div class="col-md-12 mb-2">
+                        <label class="labels">City</label>
+                        <input name="city" type="text" class="form-control" placeholder="enter city" value="<%= user.city || '' %>">
+                      </div>
+                    </div>
+                    <div class="row mt-2">
+                      <div class="col-md-6">
+                        <label class="labels">State or Province</label>
+                        <input name="state" type="text" class="form-control" placeholder="enter state or province" value="<%= user.state || '' %>">
+                      </div>
+                      <div class="col-md-6">
+                        <label class="labels">Country</label>
+                        <input name="country" type="text" class="form-control" placeholder="enter country" value="<%= user.country || '' %>"><br>
+                      </div>
+                    </div>
+                    <div class="mt-4 text-center">
+                      <button class="btn btn-primary profile-button" type="submit">Save Profile</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </form>
+      </div>
   <div class="modal fade" id="logoutModal" tabindex="-1" aria-labelledby="logoutModalLabel" aria-hidden="true">
     <div class="modal-dialog">
       <div class="modal-content">
@@ -392,6 +595,42 @@
       }
     });
   });
+</script>
+<script>
+  (function () {
+    function setActiveTab(key) {
+      var targetPanel = document.querySelector('.profile-panel[data-tab="' + key + '"]');
+      if (!targetPanel) {
+        console.warn('Missing panel for tab:', key);
+        key = 'overview';
+        targetPanel = document.querySelector('.profile-panel[data-tab="overview"]');
+      }
+      document.querySelectorAll('.profile-panel[data-tab]').forEach(function (p) {
+        p.style.display = (p.getAttribute('data-tab') === key) ? 'block' : 'none';
+      });
+      document.querySelectorAll('#profileTabs .nav-link').forEach(function (b) {
+        b.classList.toggle('active', b.getAttribute('data-tab-target') === key);
+      });
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+      var tabs = document.getElementById('profileTabs');
+      if (!tabs) return;
+
+      console.log('[profile] panels:', [...document.querySelectorAll(".profile-panel[data-tab]")].map(p => p.getAttribute("data-tab")));
+
+      tabs.addEventListener('click', function (e) {
+        var btn = e.target.closest('button[data-tab-target]');
+        if (!btn) return;
+        e.preventDefault();
+        var target = btn.getAttribute('data-tab-target');
+        setActiveTab(target);
+      });
+
+      // default
+      setActiveTab('overview');
+    });
+  })();
 </script>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/js/bootstrap.bundle.min.js" integrity="sha384-k6d4wzSIapyDyv1kpU366/PK5hCdSbCRGRCMv+eplOQJWyd1fbcAu9OCUj5zNLiq" crossorigin="anonymous"></script>
 <!-- Start of HubSpot Embed Code -->

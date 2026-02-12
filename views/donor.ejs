@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Donor Dashboard</title>
+  <link rel="stylesheet" href="/css/style.css" />
+  <link rel="icon" href="/images/favicon.png" sizes="32x32" type="image/png" />
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-SgOJa3DmI69IUzQ2PVdRZhwQ+dy64/BUtbMJw1MZ8t5HZApcHrRKUc4W0kG879m7" crossorigin="anonymous"/>
+</head>
+<body style="background:#f5f7fb;">
+  <nav class="navbar navbar-light bg-white navbar-expand-lg shadow-sm" style="position:sticky; top:0; z-index:10;">
+    <div class="container-fluid d-flex">
+      <a class="navbar-brand" href="/home"><img src="/images/logo.png" alt="Get Kinder logo" class="logo-img" height="56"></a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div class="collapse navbar-collapse justify-content-center" id="navbarNav">
+        <ul class="navbar-nav me-auto justify-content-center align-items-center">
+          <li class="nav-item"><a class="nav-link mx-2 font-hover" href="/home" style="color:#455a7c;">Home</a></li>
+          <li class="nav-item"><a class="nav-link mx-2 font-hover" href="/events" style="color:#455a7c;">Volunteer Opportunities</a></li>
+          <li class="nav-item"><a class="nav-link mx-2 font-hover" href="/profile" style="color:#455a7c;">Impact Profile</a></li>
+          <li class="nav-item"><a class="nav-link mx-2 font-hover active" href="/donor" aria-current="page" style="color:#455a7c;">Donor Dashboard</a></li>
+          <li class="nav-item"><a class="btn btn-primary btn-lg" href="https://square.link/u/GjQpbcoi" style="font-size: 1.1rem; color:aliceblue; background-color: #ff5656; border-color: #ff5656;" target="_blank" rel="noopener noreferrer">Donate</a></li>
+        </ul>
+      </div>
+    </div>
+  </nav>
+
+  <main class="container py-4">
+    <div id="donor-dashboard-root"></div>
+  </main>
+
+  <script src="/js/bundles/entry.js?<%= (typeof assetTag !== 'undefined' ? assetTag : '') %>"></script>
+  <script>
+    window.renderDonorDashboard && window.renderDonorDashboard("#donor-dashboard-root", {});
+  </script>
+</body>
+</html>

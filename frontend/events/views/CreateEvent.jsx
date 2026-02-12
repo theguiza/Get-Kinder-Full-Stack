@@ -71,7 +71,29 @@ function normalizeAttendanceArray(value) {
   return ["host_code", "social_proof"];
 }
 
+function normalizeCauseTagsInput(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => (typeof item === "string" ? item.trim() : ""))
+      .filter(Boolean);
+  }
+  if (typeof value === "string") {
+    return value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
+function normalizeVerificationMethod(value) {
+  return ["host_attest", "qr_stub", "social_proof"].includes(value)
+    ? value
+    : "host_attest";
+}
+
 function eventToFormState(event = {}) {
+  const causeTags = Array.isArray(event.cause_tags) ? event.cause_tags : [];
   return {
     title: event.title || "",
     category: event.category || "",
@@ -87,6 +109,19 @@ function eventToFormState(event = {}) {
     waitlist_enabled: event.waitlist_enabled !== false,
     cover_url: event.cover_url || "",
     description: event.description || "",
+    org_name: event.org_name || "",
+    community_tag: event.community_tag || "",
+    cause_tags: causeTags.join(", "),
+    requirements: event.requirements || "",
+    verification_method: normalizeVerificationMethod(event.verification_method),
+    impact_credits_base:
+      event.impact_credits_base === null || event.impact_credits_base === undefined
+        ? "25"
+        : String(event.impact_credits_base),
+    reliability_weight:
+      event.reliability_weight === null || event.reliability_weight === undefined
+        ? "1"
+        : String(event.reliability_weight),
     reward_pool_kind:
       event.reward_pool_kind === null || event.reward_pool_kind === undefined
         ? 0
@@ -108,6 +143,13 @@ const INITIAL_STATE = {
   waitlist_enabled: true,
   cover_url: "",
   description: "",
+  org_name: "",
+  community_tag: "",
+  cause_tags: "",
+  requirements: "",
+  verification_method: "host_attest",
+  impact_credits_base: "25",
+  reliability_weight: "1",
   reward_pool_kind: 0,
   attendance_methods: ["host_code", "social_proof"],
   safety_notes: "",
@@ -612,6 +654,47 @@ export function CreateEvent({ brand = DEFAULT_BRAND, geoCheckinEnabled = false }
             </Field>
           </div>
 
+          <div className="grid two">
+            <Field label="Organization">
+              <input
+                type="text"
+                name="org_name"
+                placeholder="e.g., Vancouver Green Crew"
+                value={form.org_name}
+                onChange={(e) => updateField("org_name", e.target.value)}
+              />
+            </Field>
+            <Field label="Community tag">
+              <input
+                type="text"
+                name="community_tag"
+                placeholder="e.g., vancouver"
+                value={form.community_tag}
+                onChange={(e) => updateField("community_tag", e.target.value)}
+              />
+            </Field>
+          </div>
+
+          <Field label="Cause tags">
+            <input
+              type="text"
+              name="cause_tags"
+              placeholder="Hunger, Seniors, Environment"
+              value={form.cause_tags}
+              onChange={(e) => updateField("cause_tags", e.target.value)}
+            />
+          </Field>
+
+          <Field label="Requirements">
+            <textarea
+              name="requirements"
+              rows={3}
+              placeholder="e.g., Closed-toe shoes, arrive 10 minutes early."
+              value={form.requirements}
+              onChange={(e) => updateField("requirements", e.target.value)}
+            />
+          </Field>
+
           <Field label="Visibility" required error={errors.visibility}>
             <div className="pill-row">
               {VISIBILITY_OPTIONS.map((option) => (
@@ -702,6 +785,38 @@ export function CreateEvent({ brand = DEFAULT_BRAND, geoCheckinEnabled = false }
               onChange={(e) => updateField("description", e.target.value)}
             />
           </Field>
+
+          <div className="grid three">
+            <Field label="Verification method">
+              <select
+                name="verification_method"
+                value={form.verification_method}
+                onChange={(e) => updateField("verification_method", e.target.value)}
+              >
+                <option value="host_attest">Host attestation</option>
+                <option value="qr_stub">QR check-in (stub)</option>
+                <option value="social_proof">Social proof</option>
+              </select>
+            </Field>
+            <Field label="Impact Credits (base)">
+              <input
+                type="number"
+                min="0"
+                name="impact_credits_base"
+                value={form.impact_credits_base}
+                onChange={(e) => updateField("impact_credits_base", e.target.value)}
+              />
+            </Field>
+            <Field label="Reliability weight">
+              <input
+                type="number"
+                min="0"
+                name="reliability_weight"
+                value={form.reliability_weight}
+                onChange={(e) => updateField("reliability_weight", e.target.value)}
+              />
+            </Field>
+          </div>
 
           <div className="grid two">
             <Field label="Reward Pool ($KIND)">
@@ -831,6 +946,24 @@ function Field({ label, children, required, error }) {
 }
 
 function buildPayload(form, status) {
+  const causeTags = normalizeCauseTagsInput(form.cause_tags);
+  const verificationMethod = normalizeVerificationMethod(form.verification_method);
+  const impactCreditsInput = typeof form.impact_credits_base === "string"
+    ? form.impact_credits_base.trim()
+    : form.impact_credits_base;
+  const reliabilityWeightInput = typeof form.reliability_weight === "string"
+    ? form.reliability_weight.trim()
+    : form.reliability_weight;
+  const impactCreditsBaseRaw =
+    impactCreditsInput === "" || impactCreditsInput === null || impactCreditsInput === undefined
+      ? NaN
+      : Number(impactCreditsInput);
+  const reliabilityWeightRaw =
+    reliabilityWeightInput === "" || reliabilityWeightInput === null || reliabilityWeightInput === undefined
+      ? NaN
+      : Number(reliabilityWeightInput);
+  const impactCreditsBase = Number.isFinite(impactCreditsBaseRaw) ? impactCreditsBaseRaw : 25;
+  const reliabilityWeight = Number.isFinite(reliabilityWeightRaw) ? reliabilityWeightRaw : 1;
   return {
     title: form.title?.trim(),
     category: form.category?.trim() || null,
@@ -843,6 +976,13 @@ function buildPayload(form, status) {
     waitlist_enabled: Boolean(form.waitlist_enabled),
     cover_url: form.cover_url?.trim() || null,
     description: form.description?.trim() || null,
+    org_name: form.org_name?.trim() || null,
+    community_tag: form.community_tag?.trim() || null,
+    cause_tags: causeTags,
+    requirements: form.requirements?.trim() || null,
+    verification_method: verificationMethod,
+    impact_credits_base: impactCreditsBase,
+    reliability_weight: reliabilityWeight,
     reward_pool_kind: Number(form.reward_pool_kind) || 0,
     attendance_methods: form.attendance_methods,
     safety_notes: form.safety_notes?.trim() || null,

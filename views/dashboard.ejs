@@ -5,7 +5,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <meta name="csrf-token" content="<%= typeof csrfToken !== 'undefined' ? csrfToken : '' %>">
-  <title>Kindness Challenge Dashboard</title>
+  <title>Volunteer Impact Dashboard</title>
 
   <link rel="stylesheet" href="./css/style.css" />
   <link rel="icon" href="/images/favicon.png" sizes="32x32" type="image/png" />
@@ -90,13 +90,13 @@
                 <a class="nav-link mx-1 font-hover" href="/home" style="font-size: 1.2rem; color: #455a7c; padding-right: 30px;">Home</a>
               </li>
                  <li class="nav-item">
-                <a class="nav-link mx-1 font-hover active" href="/events" aria-current="page" style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;">Events</a>
-              </li>
-              <li class="nav-item">
-                <a class="nav-link mx-1 font-hover" href="friendQuiz" style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;">Quiz</a>
+                <a class="nav-link mx-1 font-hover active" href="/events" aria-current="page" style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;">Volunteer Events</a>
               </li>
               <li class="nav-item">
                 <a class="nav-link mx-1 font-hover" href="profile" style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;">Profile</a>
+              </li>
+              <li class="nav-item">
+                <a class="nav-link mx-1 font-hover" href="donor" style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;">Donor Dashboard</a>
               </li>
               <li class="nav-item">
                 <a class="nav-link mx-1 font-hover" href="blog" style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;">Blog</a>
@@ -105,7 +105,7 @@
                 <a class="nav-link mx-1 font-hover" href="about" style="font-size: 1.1rem; color: #455a7c; padding-right: 40px;">About</a>
               </li>
               <li class="nav-item">
-                <a class="btn btn-primary btn-lg" href="https://square.link/u/GjQpbcoi" style="font-size: 1.2rem; color:aliceblue; background-color: #ff5656; border-color: #ff5656;" target="_blank" rel="noopener noreferrer">DONATE</a>
+                <a class="btn btn-primary btn-lg" href="donate" style="font-size: 1.2rem; color:aliceblue; background-color: #ff5656; border-color: #ff5656;">DONATE</a>
               </li>
             </ul>
             <ul class="navbar-nav ms-auto d-flex align-items-center">
@@ -133,35 +133,84 @@
       <% } else { %>
         <h1>Welcome!</h1>
       <% } %>
-      <p>Follow the Friends Arcs below and make more Friends</p>
+      <p>Track your volunteering streak, verified hours, and reliability to unlock priority access and sponsor-backed impact grants.</p>
     </div>
 
-    <!-- Friend Challenges mount -->
-    <div id="friend-challenges-root" class="container my-4"></div>
+    <% const dashStats = volunteerStats || {}; %>
+    <div class="container my-3">
+      <div class="card shadow-sm border-0" style="border-radius: 18px; background: #f7f9fc;">
+        <div class="card-body d-flex flex-column flex-md-row align-items-center justify-content-between gap-3">
+          <div class="d-flex flex-wrap gap-4">
+            <div>
+              <div class="text-muted small">Impact Credits</div>
+              <div class="h4 mb-0"><%= Number(dashStats.impact_credits_balance) || 0 %></div>
+            </div>
+            <div>
+              <div class="text-muted small">Streak Weeks</div>
+              <div class="h4 mb-0"><%= Number(dashStats.streak_weeks) || 0 %></div>
+            </div>
+            <div>
+              <div class="text-muted small">Priority Tier</div>
+              <div class="h4 mb-0"><%= dashStats.priority_tier || 'Bronze' %></div>
+            </div>
+          </div>
+          <a class="btn btn-primary" href="/profile">View my volunteer profile</a>
+        </div>
+      </div>
+    </div>
 
-    <!-- Friend Challenges props (JSON script => avoids EJS-in-JS linter errors) -->
-    <%
-      var __arcs = (typeof arcs !== 'undefined' && Array.isArray(arcs)) ? arcs : [];
-      var __initialArcId = (typeof initialArcId !== 'undefined') ? initialArcId : "";
-    %>
-    <script type="application/json" id="friend-challenges-props"><%- JSON.stringify({
-      arcs: __arcs,
-      initialArcId: __initialArcId
+    <!-- Kinder Crew Carousel mount -->
+    <div id="kinder-crew-carousel-root" class="container my-4 mb-4"></div>
+    <!-- This Week's Plan mount -->
+    <div id="weeks-plan-root" class="container my-4 mb-4"></div>
+    <!-- Impact Hero mount -->
+    <div id="impact-hero-root" class="container my-4 mb-4"></div>
+
+    <!-- Carousel props -->
+    <script type="application/json" id="kinder-crew-carousel-props"><%- JSON.stringify({
+      city: null,
+      crewLabel: null
     }).replace(/</g, '\\u003c') %></script>
     <script>
       (function () {
         try {
-          var el = document.getElementById('friend-challenges-props');
-          window.__friendChallengesProps = el ? JSON.parse(el.textContent) : {};
-        } catch (_) { window.__friendChallengesProps = {}; }
+          var el = document.getElementById('kinder-crew-carousel-props');
+          window.__kinderCrewCarouselProps = el ? JSON.parse(el.textContent) : {};
+        } catch (_) { window.__kinderCrewCarouselProps = {}; }
+      }());
+    </script>
+
+    <!-- Impact Hero props -->
+    <script type="application/json" id="impact-hero-props"><%- JSON.stringify({
+      userName: (typeof user !== 'undefined' && user && (user.firstname || user.email)) ? (user.firstname || user.email) : null
+    }).replace(/</g, '\\u003c') %></script>
+    <script>
+      (function () {
+        try {
+          var el = document.getElementById('impact-hero-props');
+          window.__impactHeroProps = el ? JSON.parse(el.textContent) : {};
+        } catch (_) { window.__impactHeroProps = {}; }
       }());
     </script>
 
     <!-- Bundle that contains entry.jsx -->
     <script src="/js/bundles/entry.js?<%= (typeof assetTag !== 'undefined' ? assetTag : '') %>"></script>
-    <!-- (Optional) hard-mount fallback -->
+    <!-- Mount dashboard React widgets -->
     <script>
-      window.renderFriendChallenges?.('#friend-challenges-root', window.__friendChallengesProps || {});
+      (function () {
+        var carouselEl = document.getElementById('kinder-crew-carousel-root');
+        if (carouselEl && window.renderKinderCrewCarousel) {
+          window.renderKinderCrewCarousel(carouselEl, window.__kinderCrewCarouselProps || {});
+        }
+        var weeksPlanEl = document.getElementById('weeks-plan-root');
+        if (weeksPlanEl && window.renderWeeksPlan) {
+          window.renderWeeksPlan(weeksPlanEl, window.__weeksPlanProps || {});
+        }
+        var heroEl = document.getElementById('impact-hero-root');
+        if (heroEl && window.renderImpactHero) {
+          window.renderImpactHero(heroEl, window.__impactHeroProps || {});
+        }
+      }());
     </script>
   </div> <!-- CLOSES .dashboard-container -->
 
@@ -291,6 +340,6 @@
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/js/bootstrap.bundle.min.js" integrity="sha384-k6d4wzSIapyDyv1kpU366/PK5hCdSbCRGRCMv+eplOQJWyd1fbcAu9OCUj5zNLiq" crossorigin="anonymous"></script>
   <script src="/js/dashboard.js"></script>
-  <%- include('partials/kai-chat-floating', { greetText: "👋 Hi! I’m KAI. How can I help you matter today?" }) %>
+  <%- include('partials/kai-chat-floating', { greetText: "👋 Hello! I’m KAI, how can I help you make an impact today?" }) %>
 </body>
 </html>

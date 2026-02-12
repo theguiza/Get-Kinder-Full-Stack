@@ -28,6 +28,21 @@ p {
     line-height: 24px;
 }
 
+.hero-img-wrap {
+  height: clamp(200px, 32vh, 280px);
+}
+
+.hero-img {
+  height: 100%;
+  object-fit: cover;
+}
+
+@media (max-width: 991.98px) {
+  .hero-img-wrap {
+    height: clamp(180px, 35vh, 260px);
+  }
+}
+
 .icon-square {
   width: 3rem;
   height: 3rem;
@@ -539,6 +554,11 @@ html, body, #app, .page, .chat-page, .full-height {
         .dashboard-container {
             max-width: 1200px;
             margin: 0 auto;
+        }
+
+        /* Keep dashboard React mounts transparent so they inherit the page background */
+        #impact-hero-root > div {
+            background: transparent !important;
         }
 
         .dashboard-header {

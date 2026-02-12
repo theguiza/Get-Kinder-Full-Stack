@@ -1,5 +1,13 @@
 import pool from "../Backend/db/pg.js";
-import { fetchEvents, fetchEventById } from "../services/eventsService.js";
+import {
+  fetchEvents,
+  fetchEventById,
+  getEventByIdForVerify,
+  getRsvpForUpdate,
+  countVerifiedShifts,
+  updateEventRsvpVerification,
+} from "../services/eventsService.js";
+import { processVerifiedEarnShift } from "../services/earnShiftFundingService.js";
 import { sendProspectInviteEmail } from "../kindnessEmailer.js";
 
 const DEFAULT_LIMIT = 20;
@@ -7,6 +15,7 @@ const MAX_LIMIT = 100;
 const VISIBILITY_SET = new Set(["public", "fof", "private"]);
 const STATUS_SET = new Set(["draft", "published"]);
 const ATTENDANCE_SET = new Set(["host_code", "social_proof", "geo"]);
+const VERIFICATION_METHOD_SET = new Set(["host_attest", "qr_stub", "social_proof"]);
 const HOST_INVITE_ALLOWED_STATUSES = new Set(["published", "draft"]);
 const EDITABLE_STATUS_SET = new Set(["draft", "published"]);
 const RSVP_ACTION_TO_STATUS = new Map([
@@ -42,6 +51,21 @@ function clampOffset(value) {
 
 function sanitizeString(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizeCauseTags(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map((tag) => (typeof tag === "string" ? tag.trim() : ""))
+      .filter(Boolean);
+  }
+  if (typeof value === "string") {
+    return value
+      .split(",")
+      .map((tag) => tag.trim())
+      .filter(Boolean);
+  }
+  return [];
 }
 
 function parseTimeRangeInput(value) {
@@ -114,6 +138,15 @@ function mapEventRowForEdit(row) {
         ? 0
         : Number(row.reward_pool_kind),
     attendance_methods: attendance,
+    cause_tags: normalizeCauseTags(row.cause_tags),
+    impact_credits_base:
+      row.impact_credits_base === null || row.impact_credits_base === undefined
+        ? 25
+        : Number(row.impact_credits_base),
+    reliability_weight:
+      row.reliability_weight === null || row.reliability_weight === undefined
+        ? 1
+        : Number(row.reliability_weight),
     cover_url: row.cover_url || "",
   };
 }
@@ -122,7 +155,9 @@ export async function listEvents(req, res) {
   try {
     const limit = clampLimit(req.query.limit);
     const offset = clampOffset(req.query.offset);
-    const data = await fetchEvents({ limit, offset });
+    const communityTag = typeof req.query.community_tag === "string" ? req.query.community_tag : "";
+    const causeTag = typeof req.query.cause_tag === "string" ? req.query.cause_tag : "";
+    const data = await fetchEvents({ limit, offset, communityTag, causeTag });
     return res.json({
       ok: true,
       data,
@@ -512,6 +547,167 @@ export async function checkInToEvent(req, res) {
   }
 }
 
+export async function listEventRoster(req, res) {
+  try {
+    const hostId = await resolveUserId(req);
+    const eventId = req.params.id;
+    const { rows: [eventRow] } = await pool.query(
+      `SELECT id, creator_user_id FROM events WHERE id=$1 LIMIT 1`,
+      [eventId]
+    );
+    if (!eventRow) {
+      return res.status(404).json({ ok: false, error: "Event not found" });
+    }
+    if (String(eventRow.creator_user_id) !== String(hostId)) {
+      return res.status(403).json({ ok: false, error: "Forbidden" });
+    }
+
+    const { rows } = await pool.query(
+      `
+        SELECT r.attendee_user_id,
+               r.status,
+               r.verification_status,
+               r.attended_minutes,
+               r.checked_in_at,
+               u.firstname,
+               u.lastname,
+               u.email
+          FROM event_rsvps r
+          JOIN userdata u ON u.id = r.attendee_user_id
+         WHERE r.event_id = $1
+         ORDER BY r.created_at ASC
+      `,
+      [eventId]
+    );
+
+    return res.json({ ok: true, data: rows });
+  } catch (error) {
+    console.error("[eventsApi] listEventRoster error:", error);
+    return res.status(500).json({ ok: false, error: "Unable to load roster" });
+  }
+}
+
+export async function verifyEventRsvp(req, res) {
+  const userId = await resolveUserId(req);
+  if (!userId) {
+    return res.status(401).json({ ok: false, error: "Unauthorized" });
+  }
+
+  const eventId = req.params.id;
+  const attendeeUserIdRaw = req.body?.attendee_user_id;
+  const attendeeUserId = attendeeUserIdRaw ? String(attendeeUserIdRaw).trim() : "";
+  if (!attendeeUserId) {
+    return res.status(400).json({ ok: false, error: "attendee_user_id is required" });
+  }
+
+  const decisionRaw = sanitizeString(req.body?.decision).toLowerCase();
+  const decision = decisionRaw === "rejected" ? "rejected" : "verified";
+  const notes = sanitizeString(req.body?.notes) || null;
+  const attendedMinutesRaw = req.body?.attended_minutes;
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const eventRow = await getEventByIdForVerify(client, eventId);
+    if (!eventRow) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ ok: false, error: "Event not found" });
+    }
+    if (String(eventRow.creator_user_id) !== String(userId)) {
+      await client.query("ROLLBACK");
+      return res.status(403).json({ ok: false, error: "Forbidden" });
+    }
+
+    const rsvpRow = await getRsvpForUpdate(client, eventId, attendeeUserId);
+    if (!rsvpRow) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ ok: false, error: "RSVP not found" });
+    }
+
+    if (rsvpRow.verification_status === "verified") {
+      const totalVerified = await countVerifiedShifts(client, attendeeUserId);
+      const funding = await processVerifiedEarnShift({
+        client,
+        attendeeUserId,
+        eventId,
+      });
+      await client.query("COMMIT");
+      return res.json({
+        ok: true,
+        already_verified: true,
+        verification_status: "verified",
+        attended_minutes: rsvpRow.attended_minutes ?? null,
+        impact_credits_awarded: funding?.amount || 0,
+        unlocked_after_3: totalVerified >= 3,
+        total_verified_shifts: totalVerified,
+      });
+    }
+
+    let attendedMinutes = null;
+    if (attendedMinutesRaw !== undefined && attendedMinutesRaw !== null && attendedMinutesRaw !== "") {
+      const parsed = Number(attendedMinutesRaw);
+      if (Number.isFinite(parsed)) {
+        attendedMinutes = Math.trunc(parsed);
+      }
+    }
+    if (!Number.isFinite(attendedMinutes)) {
+      if (eventRow.start_at && eventRow.end_at) {
+        const start = new Date(eventRow.start_at);
+        const end = new Date(eventRow.end_at);
+        const diffMinutes = Math.round((end.getTime() - start.getTime()) / 60000);
+        attendedMinutes = diffMinutes;
+      } else {
+        attendedMinutes = 60;
+      }
+    }
+    attendedMinutes = Math.min(480, Math.max(15, attendedMinutes));
+
+    await updateEventRsvpVerification(client, {
+      eventId,
+      attendeeUserId,
+      decision,
+      attendedMinutes,
+      notes,
+    });
+
+    if (decision === "rejected") {
+      const totalVerified = await countVerifiedShifts(client, attendeeUserId);
+      await client.query("COMMIT");
+      return res.json({
+        ok: true,
+        verification_status: "rejected",
+        attended_minutes: attendedMinutes,
+        impact_credits_awarded: 0,
+        unlocked_after_3: totalVerified >= 3,
+        total_verified_shifts: totalVerified,
+      });
+    }
+
+    const funding = await processVerifiedEarnShift({
+      client,
+      attendeeUserId,
+      eventId,
+    });
+
+    const totalVerifiedAfter = await countVerifiedShifts(client, attendeeUserId);
+    await client.query("COMMIT");
+    return res.json({
+      ok: true,
+      verification_status: "verified",
+      attended_minutes: attendedMinutes,
+      impact_credits_awarded: funding?.amount || 0,
+      unlocked_after_3: totalVerifiedAfter >= 3,
+      total_verified_shifts: totalVerifiedAfter,
+    });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("[eventsApi] verifyEventRsvp error:", error);
+    return res.status(500).json({ ok: false, error: "Unable to verify attendance" });
+  } finally {
+    client.release();
+  }
+}
+
 export async function updateEvent(req, res) {
   try {
     const hostId = await resolveUserId(req);
@@ -549,17 +745,24 @@ export async function updateEvent(req, res) {
                end_at=$4,
                tz=$5,
                location_text=$6,
-               visibility=$7,
-               capacity=$8,
-               waitlist_enabled=$9,
-               cover_url=$10,
-               description=$11,
-               reward_pool_kind=$12,
-               attendance_methods=$13,
-               safety_notes=$14,
-               status=$15,
+               org_name=$7,
+               community_tag=$8,
+               cause_tags=$9::text[],
+               requirements=$10,
+               verification_method=$11,
+               impact_credits_base=$12,
+               reliability_weight=$13,
+               visibility=$14,
+               capacity=$15,
+               waitlist_enabled=$16,
+               cover_url=$17,
+               description=$18,
+               reward_pool_kind=$19,
+               attendance_methods=$20,
+               safety_notes=$21,
+               status=$22,
                updated_at = NOW()
-         WHERE id = $16
+         WHERE id = $23
       `,
       [
         payload.title,
@@ -568,6 +771,13 @@ export async function updateEvent(req, res) {
         payload.end_at,
         payload.tz,
         payload.location_text,
+        payload.org_name,
+        payload.community_tag,
+        payload.cause_tags,
+        payload.requirements,
+        payload.verification_method,
+        payload.impact_credits_base,
+        payload.reliability_weight,
         payload.visibility,
         payload.capacity,
         payload.waitlist_enabled,
@@ -808,6 +1018,23 @@ async function buildEventPayload(body, { strict = false, fallback = {} } = {}) {
   const rewardPool = Number.isFinite(Number(rewardPoolRaw)) ? Math.max(0, Number(rewardPoolRaw)) : 0;
   const safetyNotes = sanitizeString(body.safety_notes ?? base.safety_notes) || null;
   const category = sanitizeString(body.category ?? base.category) || null;
+  const orgName = sanitizeString(body.org_name ?? base.org_name) || null;
+  const communityTag = sanitizeString(body.community_tag ?? base.community_tag) || null;
+  const requirements = sanitizeString(body.requirements ?? base.requirements) || null;
+  const causeTagsInput = body.cause_tags ?? base.cause_tags;
+  const causeTags = normalizeCauseTags(causeTagsInput);
+  const verificationMethodInput = sanitizeString(body.verification_method ?? base.verification_method);
+  const verificationMethod = VERIFICATION_METHOD_SET.has(verificationMethodInput)
+    ? verificationMethodInput
+    : "host_attest";
+  const impactCreditsRaw = body.impact_credits_base ?? base.impact_credits_base ?? 25;
+  const impactCreditsBase = Number.isFinite(Number(impactCreditsRaw))
+    ? Math.max(0, Math.trunc(Number(impactCreditsRaw)))
+    : 25;
+  const reliabilityRaw = body.reliability_weight ?? base.reliability_weight ?? 1;
+  const reliabilityWeight = Number.isFinite(Number(reliabilityRaw))
+    ? Math.max(0, Math.trunc(Number(reliabilityRaw)))
+    : 1;
 
   const attendanceInput = Array.isArray(body.attendance_methods)
     ? body.attendance_methods
@@ -841,6 +1068,13 @@ async function buildEventPayload(body, { strict = false, fallback = {} } = {}) {
     end_at: endAtIso,
     tz,
     location_text: locationText || "",
+    org_name: orgName,
+    community_tag: communityTag,
+    cause_tags: causeTags,
+    requirements,
+    verification_method: verificationMethod,
+    impact_credits_base: impactCreditsBase,
+    reliability_weight: reliabilityWeight,
     visibility,
     capacity,
     waitlist_enabled: waitlistEnabled,
@@ -871,6 +1105,13 @@ export async function createEvent(req, res) {
           end_at,
           tz,
           location_text,
+          org_name,
+          community_tag,
+          cause_tags,
+          requirements,
+          verification_method,
+          impact_credits_base,
+          reliability_weight,
           visibility,
           capacity,
           waitlist_enabled,
@@ -881,7 +1122,7 @@ export async function createEvent(req, res) {
           safety_notes,
           status
         ) VALUES (
-          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16
+          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10::text[],$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23
         )
         RETURNING id, status
       `,
@@ -893,6 +1134,13 @@ export async function createEvent(req, res) {
         payload.end_at,
         payload.tz,
         payload.location_text,
+        payload.org_name,
+        payload.community_tag,
+        payload.cause_tags,
+        payload.requirements,
+        payload.verification_method,
+        payload.impact_credits_base,
+        payload.reliability_weight,
         payload.visibility,
         payload.capacity,
         payload.waitlist_enabled,

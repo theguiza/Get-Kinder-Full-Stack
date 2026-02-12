@@ -9,6 +9,7 @@ import path from "path";
 import { dirname } from "path";
 import { fileURLToPath } from "url";
 import pool from "./Backend/db/pg.js";
+import { fetchVolunteerPortfolio, getVolunteerStats, resolveUserIdFromRequest } from "./services/profileService.js";
 import bcrypt from "bcrypt";
 import session from "express-session";
 import passport from "passport";
@@ -35,6 +36,13 @@ import eventsApiRouter from "./routes/eventsApi.js";
 import invitesApiRouter from "./routes/invitesApi.js";
 import meEventsRouter from "./routes/meEventsApi.js";
 import meContactsRouter from "./routes/meContactsApi.js";
+import carouselApiRouter from "./routes/carouselApi.js";
+import walletApiRouter from "./routes/walletApi.js";
+import ratingsApiRouter from "./routes/ratingsApi.js";
+import redemptionsApiRouter from "./routes/redemptionsApi.js";
+import donationsApiRouter from "./routes/donationsApi.js";
+import donorApiRouter from "./routes/donorApi.js";
+import squareWebhooksApiRouter from "./routes/squareWebhooksApi.js";
 
 // Reuse the same tool schema for Chat Completions (strip any nonstandard fields if needed)
 const CHAT_COMPLETIONS_TOOLS = DASHBOARD_TOOLS.map(t => ({ type: 'function', function: t.function }));
@@ -121,7 +129,13 @@ const PgSession = connectPgSimple(session);
 app.use(cookieParser());
 app.use(cors());
 app.use(cors());
-app.use(express.json({ limit: "5mb" }));
+app.use(express.json({
+  limit: "5mb",
+  verify: (req, res, buf) => {
+    // Keep a copy of the raw body for signature verification (e.g., Square webhooks)
+    req.rawBody = buf;
+  },
+}));
 //app.use(express.urlencoded({ extended: true }));
 app.use(express.urlencoded({ extended: false }));
 app.use(
@@ -150,10 +164,17 @@ app.use(passport.session());
 app.use(express.static(path.join(__dirname, "public")));
 app.use("/internal/quiz", quizHooksRouter);
 app.use(arcsApiRouter);
+app.use("/api/webhooks", squareWebhooksApiRouter);
 app.use("/api/events", ensureAuthenticatedApi, eventsApiRouter);
 app.use("/api/invites", ensureAuthenticatedApi, invitesApiRouter);
 app.use("/api/me/events", ensureAuthenticatedApi, meEventsRouter);
 app.use("/api/me/contacts", ensureAuthenticatedApi, meContactsRouter);
+app.use("/api/carousel", ensureAuthenticatedApi, carouselApiRouter);
+app.use("/api/wallet", ensureAuthenticatedApi, walletApiRouter);
+app.use("/api/ratings", ensureAuthenticatedApi, ratingsApiRouter);
+app.use("/api/redemptions", ensureAuthenticatedApi, redemptionsApiRouter);
+app.use("/api/donations", ensureAuthenticatedApi, donationsApiRouter);
+app.use("/api/donor", ensureAuthenticatedApi, donorApiRouter);
 
 // Make `user` available in all EJS templates
 app.use((req, res, next) => {
@@ -685,6 +706,8 @@ app.get('/profile', ensureAuthenticated, async (req, res) => {
       return res.redirect('/login');
     }
     const userRow = result.rows[0];
+    const statsUserId = (await resolveUserIdFromRequest(req)) || String(userRow.id);
+    const showStatsDebug = process.env.NODE_ENV !== "production" || Boolean(process.env.DEBUG);
 
     let topFriends = [];
     let friendPoints = { monthly: 0, total: 0, goal: 500 };
@@ -703,7 +726,7 @@ app.get('/profile', ensureAuthenticated, async (req, res) => {
          ORDER BY COALESCE(f.score, fa.friend_score) DESC NULLS LAST,
                   COALESCE(f.name, fa.name) ASC
           LIMIT 3`,
-        [userRow.id]
+        [statsUserId]
       );
 
       topFriends = friendRows.map((row) => {
@@ -732,7 +755,7 @@ app.get('/profile', ensureAuthenticated, async (req, res) => {
           FROM friend_arcs
          WHERE user_id = $1
         `,
-        [userRow.id]
+        [statsUserId]
       );
 
       const total = Number(pointsRow?.total_points) || 0;
@@ -751,12 +774,100 @@ app.get('/profile', ensureAuthenticated, async (req, res) => {
     const success      = req.query.success === '1';   // registration alert
     const loginSuccess = req.query.login   === '1';   // login alert
     const name         = req.query.name    || '';     // firstname/email
-    // 3) Render profile.ejs with all flags + user data
+    // 3) Portfolio + derived skills/hours
+    let portfolioRows = [];
+    let portfolioSummary = { total_serves_verified: 0, total_hours_verified: 0, total_kind_est_earned: 0 };
+    let skillsBreakdown = { topCategories: [], recentCategories: [] };
+
+    try {
+      const rawRows = await fetchVolunteerPortfolio({ userId: statsUserId, limit: 40 });
+      const now = new Date();
+
+      portfolioRows = rawRows.map((row) => {
+        const startAt = row.start_at ? new Date(row.start_at) : null;
+        const endAt = row.end_at ? new Date(row.end_at) : null;
+        const ms = (startAt && endAt) ? Math.max(0, endAt - startAt) : 0;
+        const duration_hours = ms > 0 ? Math.round((ms / 36e5) * 10) / 10 : 0;
+        const is_upcoming = !!(startAt && startAt > now && ['published', 'scheduled'].includes(row.event_status));
+        const is_verified = row.verification_status === "verified";
+        const acceptedCount = Number(row.accepted_count) || 0;
+        const poolKind = row.reward_pool_kind != null ? Number(row.reward_pool_kind) : 0;
+        const safePoolKind = Number.isFinite(poolKind) ? poolKind : 0;
+        const kind_estimate_per_user = Math.floor(safePoolKind / Math.max(acceptedCount, 1));
+
+        return {
+          ...row,
+          start_at: startAt,
+          end_at: endAt,
+          duration_hours,
+          is_upcoming,
+          is_verified,
+          kind_estimate_per_user,
+          accepted_count: acceptedCount
+        };
+      });
+
+      portfolioSummary = portfolioRows.reduce(
+        (acc, row) => {
+          if (row.is_verified) {
+            acc.total_serves_verified += 1;
+            acc.total_hours_verified += row.duration_hours || 0;
+            acc.total_kind_est_earned += row.kind_estimate_per_user || 0;
+          }
+          return acc;
+        },
+        { total_serves_verified: 0, total_hours_verified: 0, total_kind_est_earned: 0 }
+      );
+
+      const categoryHours = new Map();
+      portfolioRows.forEach((row) => {
+        const cat = (row.category && String(row.category).trim()) || 'General Service';
+        categoryHours.set(cat, (categoryHours.get(cat) || 0) + (row.duration_hours || 0));
+      });
+      const topCategories = Array.from(categoryHours.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([category, hours]) => ({ category, hours: Math.round(hours * 10) / 10 }));
+
+      const recentCategories = [];
+      for (const row of portfolioRows) {
+        const cat = (row.category && String(row.category).trim()) || 'General Service';
+        if (!recentCategories.includes(cat)) recentCategories.push(cat);
+        if (recentCategories.length >= 6) break;
+      }
+      skillsBreakdown = { topCategories, recentCategories };
+    } catch (portfolioErr) {
+      console.warn('Profile portfolio query failed:', portfolioErr.message || portfolioErr);
+      portfolioRows = [];
+    }
+
+    let volunteerStats;
+    try {
+      volunteerStats = await getVolunteerStats(statsUserId);
+    } catch (statsErr) {
+      console.warn("Volunteer stats query failed:", statsErr.message || statsErr);
+      volunteerStats = null;
+    }
+    if (showStatsDebug) {
+      console.log("[profile] req.user:", {
+        id: req.user?.id,
+        email: req.user?.email,
+      });
+      console.log("[profile] stats_user_id:", statsUserId, "volunteerStats:", volunteerStats);
+    }
+
+    // 4) Render profile.ejs with all flags + user data
     return res.render('profile', {
       title:        'User Profile',
       user:         userRow,
       topFriends,
       friendPoints,
+      portfolioRows,
+      portfolioSummary,
+      skillsBreakdown,
+      volunteerStats,
+      debugStatsUserId: showStatsDebug ? statsUserId : null,
+      showStatsDebug,
       success,
       loginSuccess,
       name
@@ -1095,6 +1206,16 @@ app.get("/about", (req, res) => {
     name,
     user:         req.user
   });
+});
+
+app.get("/donor", ensureAuthenticated, (req, res) => {
+  const assetTag = process.env.ASSET_TAG ?? Date.now().toString(36);
+  res.render("donor", { title: "Donor Dashboard", assetTag });
+});
+
+app.get("/donate", ensureAuthenticated, (req, res) => {
+  const assetTag = process.env.ASSET_TAG ?? Date.now().toString(36);
+  res.render("donate", { title: "Donate", assetTag });
 });
 
 app.get("/blog", (req, res) => {
