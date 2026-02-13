@@ -161,67 +161,82 @@ function clampIndexForSteps(idx: number, stepsLen: number) {
 export function getDefaultSteps(): OnboardingStep[] {
   return [
     {
-      id: "whyFriend",
-      title: "Why are you looking for a friend?",
-      description: "This helps KAI focus on how to help you to achieve your goal.",
+      id: "whyHere",
+      title: "What brings you to Get Kinder today?",
+      description: "This helps us focus on how to help you make the biggest impact.",
       type: "single",
       required: true,
       options: [
-        { id: "move", label: "I moved" },
-        { id: "school", label: "I am at a new school / job" },
-        { id: "break-up", label: "I recently ended a relationship" },
-        { id: "specific", label: "Find partner for specific activity" },
-        { id: "lonely", label: "I just want a new friend" },
-        { id: "other", label: "I have another reason" },
+        { id: "volunteer", label: "I want to contribute my time and skills to causes I care about" },
+        { id: "donor", label: "I'm looking to donate and see real impact from my contributions" },
+        { id: "organization", label: "I represent a charity/organization seeking volunteers and funding" },
+        { id: "referred", label: "Someone referred me and I want to learn more" },
+        { id: "unsure", label: "I am not sure yet" },
       ],
     },
     {
-      id: "knownConnection",
-      title: "Do you have some people in mind that you would like to connect with?",
-      description: "If you do the best place to start is with the friendship quiz so KAI can customize your approach to making them your new best friend.",
+      id: "experienceLevel",
+      title: "How would you describe your current involvement in community impact?",
+      description: "Where you are at in your impact journey helps use tailor suggestions for you.",
       type: "single",
       required: true,
       options: [
-        { id: "yes", label: "Yes" },
-        { id: "no", label: "No" },
+        { id: "new", label: "I'm brand new to volunteering/donating" },
+        { id: "occasional", label: "I volunteer or donate occasionally (few times a year)" },
+        { id: "regular", label: "I'm regularly active with causes I support (monthly+)" },
+        { id: "active", label: "I'm deeply involved across multiple organizations" },
+        { id: "returning", label: "I used to be active but I have taken a break" },
       ],
     },
     {
       id: "outcome",
-      title: "What is your desired outcome?",
-      description: "Confirm with KAI your goal for your initial friend so he can help you achieve it.",
+      title: "Which causes or areas are you most passionate about?",
+      description: "The more we know about your goals, the better we can help you achieve them.",
       type: "single",
       required: true,
       options: [
-        { id: "bestie", label: "Find my next best friend" },
-        { id: "circle", label: "Expand my current friend circle" },
-        { id: "casual", label: "Find someone to hang out with IRL" },
-        { id: "lonely", label: "Feel less bored or lonely" },
-        { id: "activity", label: "Find partner for a specific activity" },
-        { id: "another", label: "I have another desired outcome" },
+        { id: "youth", label: "Education & Youth Development" },
+        { id: "environment", label: "Environmental & Sustainability" },
+        { id: "hunger", label: "Poverty & Hunger Relief" },
+        { id: "animals", label: "Animal Welfare" },
+        { id: "seniors", label: "Seniors & Elderly Care" },
+        { id: "housing", label: "Community Development & Housing" },
+        { id: "open", label: "I'm open to exploring different causes" },
       ],
     },
     {
       id: "timeCommitment",
-      title: "How many hours per week do you plan to spend on making your new friend?",
-      description: "Making friends just got easier, but it does take time. The more quality time you spend together the better!",
-      type: "range",
+      title: "How many hours per week do you plan to spend on volunteering?",
+      description: "No pressure to do a lot, we just want to help you find opportunities that works for you!",
+      type: "single",
       required: true,
-      min: 0,
-      max: 10,
+      options: [
+        { id: "monthly", label: "A few hours per month (flexible schedule)" },
+        { id: "Weekly", label: "Weekly commitment (1-4 hours/week)" },
+        { id: "ongoing", label: "Regular ongoing commitment (4+ hours/week)" },
+        { id: "One-time", label: "One-time events or projects when they fit my schedule" },
+        { id: "flexible", label: "My availability varies a lot—I need flexible options" },
+      ],
     },
     {
       id: "interests",
-      title: "What are your main interests?",
-      description: "Tell KAI what your interests are so he can find the right activities for you and your new best friend.",
-      type: "text",
-      placeholders: ["Your interest 1", "Your interest 2", "Your interest 3"],
-      required: false,
+      title: "What skills or interests would you like to contribute?",
+      type: "single",
+      required: true,
+      options: [
+        { id: "work", label: "Hands-on work (building, sorting, outdoor projects)" },
+        { id: "people", label: "Working directly with people (mentoring, teaching, helping)" },
+        { id: "Professional", label: "Professional skills (marketing, finance, legal, tech, design)" },
+        { id: "Administrative", label: "Administrative & organizational support" },
+        { id: "community", label: "Advocacy & community organizing" },
+        { id: "discovering", label: "I'm still discovering what I have to offer" },
+      ],
     },
     {
+
       id: "age",
       title: "How old are you?",
-      description: "Tell KAI your age for age-appropriate suggestions and activities. Log in to save your answers.",
+      description: "This helps us provide age-appropriate suggestions and activities. Please log in to save your answers.",
       type: "single",
       required: true,
       options: [
@@ -668,11 +683,18 @@ if (typeof window !== "undefined" && isDebug()) {
   const r2 = resolveSteps([{ id: "x", title: "X", type: "text" } as OnboardingStep], []);
   assert("resolveSteps uses provided steps when present", r2.steps[0].id === "x" && r2.usingFallback === false);
 
-  // Test that default steps include interests with 3 placeholders
+  // Test that default steps include interests with options
   const defaults = getDefaultSteps();
   const interest = defaults.find((s) => s.id === "interests");
   assert("default interests step exists", !!interest);
-  assert("interests step has 3 placeholders", Array.isArray(interest?.placeholders) && (interest?.placeholders?.length || 0) === 3);
+  assert("interests step has options", Array.isArray(interest?.options) && (interest?.options?.length || 0) >= 3);
+  if (Array.isArray(interest?.options)) {
+    const ids = interest.options.map((opt) => opt.id);
+    const hasEmptyId = ids.some((id) => !id);
+    const uniqueIds = new Set(ids);
+    assert("interests option ids are non-empty", !hasEmptyId);
+    assert("interests option ids are unique", uniqueIds.size === ids.length);
+  }
   assert("default steps count is 6", defaults.length === 6);
   assert("6th step is 'age'", defaults[5].id === "age");
 
