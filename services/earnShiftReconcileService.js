@@ -7,6 +7,22 @@ const toNumber = (value, fallback = 0) => {
   return Number.isFinite(num) ? num : fallback;
 };
 
+const DEFAULT_POOL_SLUG = "general";
+const POOL_SLUG_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+const POOL_SCOPE_SEP = "__";
+
+const normalizePoolSlug = (value) => {
+  const slug = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (!slug) return DEFAULT_POOL_SLUG;
+  return POOL_SLUG_RE.test(slug) ? slug : DEFAULT_POOL_SLUG;
+};
+
+const buildScopedPoolSlug = (ownerUserId, poolSlug) => {
+  const owner = String(ownerUserId || "").trim();
+  if (!owner) return poolSlug;
+  return `u${owner}${POOL_SCOPE_SEP}${poolSlug}`;
+};
+
 export async function reconcileEarnShiftCredits({ limit = 200, dryRun = false } = {}) {
   const safeLimit = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 1000) : 200;
 
@@ -19,6 +35,8 @@ export async function reconcileEarnShiftCredits({ limit = 200, dryRun = false } 
         r.verified_at,
         e.reward_pool_kind,
         e.capacity,
+        e.funding_pool_slug,
+        e.creator_user_id,
         e.title
       FROM event_rsvps r
       JOIN events e ON e.id = r.event_id
@@ -78,7 +96,7 @@ export async function reconcileEarnShiftCredits({ limit = 200, dryRun = false } 
 
       await fundEarnShiftFromPool({
         client,
-        poolSlug: "general",
+        poolSlug: buildScopedPoolSlug(row.creator_user_id, normalizePoolSlug(row.funding_pool_slug)),
         eventId: row.event_id,
         volunteerUserId: row.attendee_user_id,
         walletTxId: walletTxId,

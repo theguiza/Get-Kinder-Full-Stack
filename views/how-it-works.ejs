@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>How It Works | Get Kinder</title>
+  <meta name="description" content="Learn how volunteers, organizations, and donors use Get Kinder to create verified impact and earn Impact Credits.">
+  <meta property="og:title" content="How It Works | Get Kinder">
+  <meta property="og:description" content="See how the Get Kinder platform works for volunteers, organizations, and donors.">
+  <meta property="og:url" content="https://getkinder.ai/how-it-works">
+  <meta property="og:type" content="website">
+  <link rel="icon" href="/images/favicon.png" sizes="32x32" type="image/png">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-SgOJa3DmI69IUzQ2PVdRZhwQ+dy64/BUtbMJw1MZ8t5HZApcHrRKUc4W0kG879m7" crossorigin="anonymous">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="/css/style.css">
+  <link rel="stylesheet" href="/css/how-it-works.css?<%= (typeof assetTag !== 'undefined' ? assetTag : '') %>">
+</head>
+<body>
+  <section id="title">
+    <header>
+      <nav class="navbar fixed-top navbar-light bg-white navbar-expand-lg">
+        <div class="container-fluid d-flex">
+          <a class="navbar-brand" href="/home"><img src="/images/logo.png" alt="Get Kinder logo" class="logo-img" height="80" width: auto;> </a>
+          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+            <span class="navbar-toggler-icon"></span></button>
+          <div class="collapse navbar-collapse justify-content-center" id="navbarNav">
+            <ul class="navbar-nav me-auto justify-content-center align-items-center">
+               <li class="nav-item">
+                <a class="nav-link mx-1 font-hover active" href="/events" aria-current="page" style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;">Volunteer Events</a>
+              </li>
+               <li class="nav-item">
+                <a class="nav-link mx-1 font-hover" href="dashboard" style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;">My Progress</a>
+              </li>
+              <li class="nav-item">
+                <a class="nav-link mx-1 font-hover" href="profile" style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;">Profile</a>
+              </li>
+               <li class="nav-item">
+                <a class="nav-link mx-1 font-hover" href="blog" style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;">Blog</a>
+              </li>
+                 <!-- AOS (Animate On Scroll) <li class="nav-item">
+                <a class="nav-link mx-1 font-hover" href="friendQuiz" style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;">Friend Quiz</a>
+              </li>-->
+              <li class="nav-item">
+                <a class="nav-link mx-1 font-hover" href="about" style="font-size: 1.1rem; color: #455a7c; padding-right: 40px;">About</a>
+              </li>
+              <li class="nav-item">
+                <a class="btn btn-primary btn-lg" href="donate" style="font-size: 1.2rem; color:aliceblue; background-color: #ff5656; border-color: #ff5656;">DONATE</a>
+              </li>
+            </ul>
+            <ul class="navbar-nav ms-auto d-flex align-items-center">
+              <% if (user) { %>
+                <li class="nav-item d-flex align-items-center me-3">
+                  <span class="navbar-text fw-bold me-2" style="font-size: 1.1rem; color: #455a7c;"><%= user.firstname || user.email %></span>
+                  <img src="<%= (user && user.picture) ? user.picture : '/images/nerdy-KAI.png' %>"  class="rounded-circle me-3" width="32" height="32" alt="Get Kinder User Avatar">
+                  <button class="btn btn-outline-danger btn-sm" data-bs-toggle="modal" data-bs-target="#logoutModal">Log Out</button>
+                </li>
+              <% } else { %>
+                <li class="nav-item"><a class="btn btn-primary btn-lg"
+                  style="font-size: 1.2rem; color: white; text-decoration: none; width: 100%; min-width: 120px; text-align: center;" href="login" role="button">Log In</a>
+                </li>
+              <% } %>
+            </ul>
+          </div>
+        </div>
+      </nav>
+    </header>
+  </section>
+
+  <main class="how-it-works-page">
+    <section id="top" class="how-section how-hero">
+      <div class="container">
+        <div class="row g-4 align-items-center">
+          <div class="col-12 col-lg-6 d-flex flex-column">
+            <h1 class="order-1">When we show up together, our communities get better.</h1>
+            <p class="lead-text order-2">
+              Get Kinder connects volunteers, organizations, and donors in one transparent loop. Verified attendance and funding attribution work together so impact is trust-first, visible, and accountable.
+            </p>
+            <div class="loop-card d-md-none order-3 hero-mobile-visual">
+              <svg viewBox="0 0 520 360" role="img" aria-label="Platform loop: donors, organizations, volunteers">
+                <defs>
+                  <marker id="arrowHeadMobile" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                    <path d="M 0 0 L 10 5 L 0 10 z" fill="#ff5656"></path>
+                  </marker>
+                </defs>
+
+                <rect x="36" y="40" width="140" height="74" rx="14" class="node"></rect>
+                <text x="106" y="84" text-anchor="middle" class="node-label">Donors</text>
+
+                <rect x="344" y="40" width="140" height="74" rx="14" class="node"></rect>
+                <text x="414" y="84" text-anchor="middle" class="node-label">Organizations</text>
+
+                <rect x="190" y="248" width="140" height="74" rx="14" class="node"></rect>
+                <text x="260" y="292" text-anchor="middle" class="node-label">Volunteers</text>
+
+                <path d="M 184 77 C 226 48, 294 48, 336 77" class="loop-line-mobile"></path>
+                <path d="M 392 116 C 420 162, 384 224, 324 254" class="loop-line-mobile"></path>
+                <path d="M 196 254 C 136 224, 100 162, 128 116" class="loop-line-mobile"></path>
+
+                <text x="260" y="164" text-anchor="middle" class="center-label">Verified attendance</text>
+                <text x="260" y="192" text-anchor="middle" class="center-label">Transparent funding</text>
+              </svg>
+              <p class="loop-note">Verification is required to earn.</p>
+            </div>
+            <p class="hero-microcopy order-4 order-md-4">
+              RSVP is "Pending Approval". Impact Credits are earned when an organizer verifies attendance.
+            </p>
+            <div class="cta-row order-5 order-md-3">
+              <% if (user) { %>
+                <a class="btn btn-primary btn-lg" href="/events">Volunteer</a>
+              <% } else { %>
+                <a class="btn btn-primary btn-lg" href="events">Volunteer</a>
+              <% } %>
+              <a class="btn btn-outline-secondary btn-lg" href="/events#/create">Host an opportunity</a>
+              <a class="btn btn-outline-dark btn-lg" href="/donate">Donate</a>
+            </div>
+          </div>
+          <div class="col-12 col-lg-6 d-none d-md-block">
+            <div class="loop-card">
+              <svg viewBox="0 0 520 360" role="img" aria-label="Platform loop: donors, organizations, volunteers">
+                <defs>
+                  <marker id="arrowHead" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                    <path d="M 0 0 L 10 5 L 0 10 z" fill="#ff5656"></path>
+                  </marker>
+                </defs>
+
+                <rect x="36" y="40" width="140" height="74" rx="14" class="node"></rect>
+                <text x="106" y="84" text-anchor="middle" class="node-label">Donors</text>
+
+                <rect x="344" y="40" width="140" height="74" rx="14" class="node"></rect>
+                <text x="414" y="84" text-anchor="middle" class="node-label">Organizations</text>
+
+                <rect x="190" y="248" width="140" height="74" rx="14" class="node"></rect>
+                <text x="260" y="292" text-anchor="middle" class="node-label">Volunteers</text>
+
+                <path d="M 184 77 C 226 48, 294 48, 336 77" class="loop-line"></path>
+                <path d="M 392 116 C 420 162, 384 224, 324 254" class="loop-line"></path>
+                <path d="M 196 254 C 136 224, 100 162, 128 116" class="loop-line"></path>
+
+                <text x="260" y="164" text-anchor="middle" class="center-label">Verified attendance</text>
+                <text x="260" y="192" text-anchor="middle" class="center-label">Transparent funding</text>
+              </svg>
+              <p class="loop-note">Verification is required to earn.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="sticky-jump-nav" aria-label="Section navigation">
+      <div class="container d-none d-md-flex flex-wrap gap-2">
+        <a class="jump-pill" href="#the-loop">The Loop</a>
+        <a class="jump-pill" href="#volunteers">Volunteers</a>
+        <a class="jump-pill" href="#organizations">Organizations</a>
+        <a class="jump-pill" href="#donors">Donors</a>
+        <a class="jump-pill" href="#our-magic">Our Magic</a>
+        <a class="jump-pill" href="#credits">Impact Credits</a>
+        <a class="jump-pill" href="#transparency">Transparency</a>
+        <a class="jump-pill" href="#trust">Trust</a>
+        <a class="jump-pill" href="#faq">FAQ</a>
+      </div>
+      <div class="container d-md-none">
+        <label class="jump-label" for="jumpToSection">Jump to…</label>
+        <select id="jumpToSection" class="form-select jump-select" aria-label="Jump to section">
+          <option value="">Jump to…</option>
+          <option value="#the-loop">The Loop</option>
+          <option value="#volunteers">Volunteers</option>
+          <option value="#organizations">Organizations</option>
+          <option value="#donors">Donors</option>
+          <option value="#our-magic">Our Magic</option>
+          <option value="#credits">Impact Credits</option>
+          <option value="#transparency">Transparency</option>
+          <option value="#trust">Trust</option>
+          <option value="#faq">FAQ</option>
+        </select>
+      </div>
+    </section>
+
+    <section id="the-loop" class="how-section">
+      <div class="container">
+        <h2>How it works, end-to-end</h2>
+        <div class="row g-3 mt-1">
+          <div class="col-12 col-md-6 col-lg-4">
+            <article class="step-card">
+              <p class="step-number">Step 1</p>
+              <h3>Donate (or fund)</h3>
+              <p>Donations add credits to a community funding pool.</p>
+            </article>
+          </div>
+          <div class="col-12 col-md-6 col-lg-4">
+            <article class="step-card">
+              <p class="step-number">Step 2</p>
+              <h3>Organizations post opportunities</h3>
+              <p>Needs, skills, capacity, and verification method are defined.</p>
+            </article>
+          </div>
+          <div class="col-12 col-md-6 col-lg-4">
+            <article class="step-card">
+              <p class="step-number">Step 3</p>
+              <h3>Volunteers match + RSVP</h3>
+              <p>RSVP is “Pending Approval”—it reserves a spot, not a reward.</p>
+            </article>
+          </div>
+          <div class="col-12 col-md-6 col-lg-4">
+            <article class="step-card">
+              <p class="step-number">Step 4</p>
+              <h3>Attend + check in</h3>
+              <p>Simple check-in methods; attendance is recorded.</p>
+            </article>
+          </div>
+          <div class="col-12 col-lg-8">
+            <article class="step-card">
+              <p class="step-number">Step 5</p>
+              <h3>Host verifies attendance</h3>
+              <p>Verification triggers Impact Credits for volunteers AND updates donor attribution/receipts for the funded portion (may be pending if pool is low).</p>
+            </article>
+          </div>
+        </div>
+        <p class="loop-note-under">Verification is required to earn.</p>
+
+        <div class="trust-strip">
+          <div class="trust-item"><i class="fas fa-check-circle" aria-hidden="true"></i> Verified attendance</div>
+          <div class="trust-item"><i class="fas fa-user-shield" aria-hidden="true"></i> Anonymized donor reporting</div>
+          <div class="trust-item"><i class="fas fa-layer-group" aria-hidden="true"></i> No double-counting for the same shift</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="value" class="how-section">
+      <div class="container">
+        <h2>Value for everyone in the loop</h2>
+        <p class="section-subhead">Each side gets something real—so participation compounds.</p>
+        <div class="row g-3 mt-1 role-grid">
+          <div class="col-12 col-lg-4">
+            <article id="volunteers" class="role-card">
+              <h3>Volunteers</h3>
+              <p class="role-tagline">Utility + meaning.</p>
+              <ul class="role-list">
+                <li>Find local opportunities that fit your schedule + interests</li>
+                <li>Earn Impact Credits after verified attendance (not on RSVP)</li>
+                <li>Build a shareable impact profile (skills, hours, causes)</li>
+                <li>Redeem in-app perks (MVP catalog)</li>
+              </ul>
+              <p class="proof-microline">RSVP is Pending Approval. You earn when an organizer verifies attendance.</p>
+            </article>
+          </div>
+          <div class="col-12 col-lg-4">
+            <article id="organizations" class="role-card">
+              <h3>Organizations</h3>
+              <p class="role-tagline">Reliable help, less admin.</p>
+              <ul class="role-list">
+                <li>Post opportunities with capacity + skills</li>
+                <li>Manage RSVPs with clear statuses</li>
+                <li>Verify attendance quickly (Verify action)</li>
+                <li>Verified participation triggers volunteer credits + donor-auditable trail</li>
+              </ul>
+              <p class="proof-microline">Verification is the gate that turns participation into trackable outcomes.</p>
+            </article>
+          </div>
+          <div class="col-12 col-lg-4">
+            <article id="donors" class="role-card">
+              <h3>Donors</h3>
+              <p class="role-tagline">Fund verified impact you can follow.</p>
+              <ul class="role-list">
+                <li>Donations add credits to a pool that funds verified shifts</li>
+                <li>Attribution/receipts show funded outcomes (anonymized)</li>
+                <li>See funded vs pending when pool is temporarily low</li>
+                <li>Support local needs with transparency</li>
+              </ul>
+              <p class="proof-microline">Donor attribution updates when volunteers are verified (receipts).</p>
+            </article>
+          </div>
+        </div>
+        <p class="alignment-strip">
+          <i class="fas fa-link" aria-hidden="true"></i>
+          Volunteers show up. Orgs verify. Donors fund verified outcomes. Everyone can see the loop.
+        </p>
+      </div>
+    </section>
+
+    <section id="our-magic" class="how-section">
+      <div class="container">
+        <h2>What makes it work</h2>
+        <p class="section-subhead">A few simple mechanics that turn goodwill into repeatable impact.</p>
+        <div class="row g-3 mt-1">
+          <div class="col-12 col-md-6">
+            <article class="magic-feature">
+              <div class="magic-icon" aria-hidden="true"><i class="fas fa-compass"></i></div>
+              <div>
+                <h3>Matching</h3>
+                <p>Better matching as you share preferences (causes, skills, availability).</p>
+              </div>
+            </article>
+          </div>
+          <div class="col-12 col-md-6">
+            <article class="magic-feature">
+              <div class="magic-icon" aria-hidden="true"><i class="fas fa-award"></i></div>
+              <div>
+                <h3>Recognition loop</h3>
+                <p>Verified attendance → Impact Credits + progress you can see.</p>
+              </div>
+            </article>
+          </div>
+          <div class="col-12 col-md-6">
+            <article class="magic-feature">
+              <div class="magic-icon" aria-hidden="true"><i class="fas fa-receipt"></i></div>
+              <div>
+                <h3>Traceability</h3>
+                <p>Donations → pool credits → funded verified outcomes (with receipts).</p>
+              </div>
+            </article>
+          </div>
+          <div class="col-12 col-md-6">
+            <article class="magic-feature">
+              <div class="magic-icon" aria-hidden="true"><i class="fas fa-id-card"></i></div>
+              <div>
+                <h3>Shareable impact profile</h3>
+                <p>Build an impact profile you can share (schools, employers, friends).</p>
+              </div>
+            </article>
+          </div>
+        </div>
+        <p class="roadmap-note">Roadmap: deeper coordination tools for organizations (without changing the verification gate).</p>
+      </div>
+    </section>
+
+    <section id="credits" class="how-section">
+      <div class="container">
+        <h2>Impact Credits</h2>
+        <p class="section-subhead">A simple way to recognize verified help—without turning volunteering into wages.</p>
+        <div class="row g-3 mt-1 credits-grid">
+          <div class="col-12 col-lg-6">
+            <article class="credit-card">
+              <h3>What they are</h3>
+              <ul class="role-list">
+                <li>Earned when an organizer verifies attendance (not on RSVP)</li>
+                <li>Stored in your in-app wallet</li>
+                <li>Redeemable for in-app perks (MVP)</li>
+              </ul>
+            </article>
+          </div>
+          <div class="col-12 col-lg-6">
+            <article class="credit-card">
+              <h3>What they are not</h3>
+              <ul class="role-list">
+                <li>Not wages</li>
+                <li>No guaranteed cash value</li>
+                <li>Not a promise of crypto conversion (future plans TBD)</li>
+              </ul>
+            </article>
+          </div>
+        </div>
+        <p class="credits-disclaimer credits-disclaimer-prominent">“Impact Credits are not wages and have no guaranteed cash value.”</p>
+        <p class="proof-microline">RSVP is ‘Pending Approval’. Verification is required to earn.</p>
+      </div>
+    </section>
+
+    <section id="transparency" class="how-section">
+      <div class="container">
+        <h2>Transparent funding you can follow</h2>
+        <div class="row g-3 mt-1 align-items-stretch">
+          <div class="col-12 col-lg-6">
+            <article class="transparency-card">
+              <ul class="role-list">
+                <li>Donations add credits to a funding pool</li>
+                <li>When a volunteer is verified, the system attempts to fund that verified outcome from the pool</li>
+                <li>Donor attribution/receipts update for the funded portion (donors are attributed)</li>
+                <li>If the pool is temporarily low, funding can be partially funded or pending until more credits are added</li>
+              </ul>
+              <p class="proof-microline">Donor receipts do not include volunteer personal information.</p>
+            </article>
+          </div>
+          <div class="col-12 col-lg-6">
+            <article class="receipt-card">
+              <div class="receipt-header">
+                <h3>Sample Receipt (Example)</h3>
+                <span class="receipt-badge partial">Partially funded</span>
+              </div>
+              <div class="receipt-row"><span>Event</span><strong>Neighborhood Food Drive</strong></div>
+              <div class="receipt-row"><span>Verified minutes</span><strong>120 min</strong></div>
+              <div class="receipt-row"><span>Credits funded</span><strong>80</strong></div>
+              <div class="receipt-row"><span>Pending credits</span><strong>20</strong></div>
+              <div class="receipt-status-options">
+                <span class="receipt-badge funded">Funded</span>
+                <span class="receipt-badge partial">Partially funded</span>
+                <span class="receipt-badge pending">Pending</span>
+              </div>
+              <p class="receipt-note">Example receipt shown. Volunteers are anonymized.</p>
+            </article>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="trust" class="how-section">
+      <div class="container">
+        <h2>Built for trust</h2>
+        <div class="row g-3 mt-1">
+          <div class="col-12 col-sm-6 col-xl-3">
+            <article class="trust-proof-card">
+              <div class="trust-proof-icon" aria-hidden="true"><i class="fas fa-circle-check"></i></div>
+              <h3>Verification required</h3>
+              <p>RSVP is not verification. Credits post only after Verify.</p>
+            </article>
+          </div>
+          <div class="col-12 col-sm-6 col-xl-3">
+            <article class="trust-proof-card">
+              <div class="trust-proof-icon" aria-hidden="true"><i class="fas fa-layer-group"></i></div>
+              <h3>No double counting</h3>
+              <p>One verified shift = one earn.</p>
+            </article>
+          </div>
+          <div class="col-12 col-sm-6 col-xl-3">
+            <article class="trust-proof-card">
+              <div class="trust-proof-icon" aria-hidden="true"><i class="fas fa-user-shield"></i></div>
+              <h3>Anonymized reporting</h3>
+              <p>Donors see outcomes, not volunteer identities.</p>
+            </article>
+          </div>
+          <div class="col-12 col-sm-6 col-xl-3">
+            <article class="trust-proof-card">
+              <div class="trust-proof-icon" aria-hidden="true"><i class="fas fa-list-check"></i></div>
+              <h3>Explainable pool history</h3>
+              <p>Pool balance changes are tied to clear funding actions.</p>
+            </article>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="faq" class="how-section">
+      <div class="container">
+        <h2>FAQ</h2>
+        <div class="accordion faq-accordion mt-3" id="hiwFaqAccordion">
+          <div class="accordion-item">
+            <h3 class="accordion-header" id="hiwFaqHeadingOne">
+              <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#hiwFaqCollapseOne" aria-expanded="true" aria-controls="hiwFaqCollapseOne">
+                <i class="fas fa-coins" aria-hidden="true"></i>
+                <span>When do I earn Impact Credits?</span>
+              </button>
+            </h3>
+            <div id="hiwFaqCollapseOne" class="accordion-collapse collapse show" aria-labelledby="hiwFaqHeadingOne" data-bs-parent="#hiwFaqAccordion">
+              <div class="accordion-body">
+                When an organizer verifies your attendance after the event. RSVP alone does not earn credits.
+              </div>
+            </div>
+          </div>
+
+          <div class="accordion-item">
+            <h3 class="accordion-header" id="hiwFaqHeadingTwo">
+              <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hiwFaqCollapseTwo" aria-expanded="false" aria-controls="hiwFaqCollapseTwo">
+                <i class="fas fa-hourglass-half" aria-hidden="true"></i>
+                <span>Does RSVP earn credits?</span>
+              </button>
+            </h3>
+            <div id="hiwFaqCollapseTwo" class="accordion-collapse collapse" aria-labelledby="hiwFaqHeadingTwo" data-bs-parent="#hiwFaqAccordion">
+              <div class="accordion-body">
+                No. RSVP is a join request (shown as ‘Pending Approval’) and does not confirm attendance.
+              </div>
+            </div>
+          </div>
+
+          <div class="accordion-item">
+            <h3 class="accordion-header" id="hiwFaqHeadingThree">
+              <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hiwFaqCollapseThree" aria-expanded="false" aria-controls="hiwFaqCollapseThree">
+                <i class="fas fa-user-check" aria-hidden="true"></i>
+                <span>How does verification work?</span>
+              </button>
+            </h3>
+            <div id="hiwFaqCollapseThree" class="accordion-collapse collapse" aria-labelledby="hiwFaqHeadingThree" data-bs-parent="#hiwFaqAccordion">
+              <div class="accordion-body">
+                After the event, the host confirms who attended using the Verify action. Verification is required to earn.
+              </div>
+            </div>
+          </div>
+
+          <div class="accordion-item">
+            <h3 class="accordion-header" id="hiwFaqHeadingFour">
+              <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hiwFaqCollapseFour" aria-expanded="false" aria-controls="hiwFaqCollapseFour">
+                <i class="fas fa-gift" aria-hidden="true"></i>
+                <span>What can I redeem credits for?</span>
+              </button>
+            </h3>
+            <div id="hiwFaqCollapseFour" class="accordion-collapse collapse" aria-labelledby="hiwFaqHeadingFour" data-bs-parent="#hiwFaqAccordion">
+              <div class="accordion-body">
+                In the MVP, credits can be redeemed in-app for a small catalog of perks (subject to change).
+              </div>
+            </div>
+          </div>
+
+          <div class="accordion-item">
+            <h3 class="accordion-header" id="hiwFaqHeadingFive">
+              <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hiwFaqCollapseFive" aria-expanded="false" aria-controls="hiwFaqCollapseFive">
+                <i class="fas fa-user-secret" aria-hidden="true"></i>
+                <span>Will donors see my identity?</span>
+              </button>
+            </h3>
+            <div id="hiwFaqCollapseFive" class="accordion-collapse collapse" aria-labelledby="hiwFaqHeadingFive" data-bs-parent="#hiwFaqAccordion">
+              <div class="accordion-body">
+                No. Donor receipts show outcomes funded, but do not include volunteer personal information.
+              </div>
+            </div>
+          </div>
+
+          <div class="accordion-item">
+            <h3 class="accordion-header" id="hiwFaqHeadingSix">
+              <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hiwFaqCollapseSix" aria-expanded="false" aria-controls="hiwFaqCollapseSix">
+                <i class="fas fa-scale-balanced" aria-hidden="true"></i>
+                <span>What if funding is low when I’m verified?</span>
+              </button>
+            </h3>
+            <div id="hiwFaqCollapseSix" class="accordion-collapse collapse" aria-labelledby="hiwFaqHeadingSix" data-bs-parent="#hiwFaqAccordion">
+              <div class="accordion-body">
+                You can still earn credits when verified. Donor attribution/receipts may show partial or pending funding until the pool is topped up.
+              </div>
+            </div>
+          </div>
+
+          <div class="accordion-item">
+            <h3 class="accordion-header" id="hiwFaqHeadingSeven">
+              <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hiwFaqCollapseSeven" aria-expanded="false" aria-controls="hiwFaqCollapseSeven">
+                <i class="fas fa-wallet" aria-hidden="true"></i>
+                <span>Can I cash out or convert credits to crypto?</span>
+              </button>
+            </h3>
+            <div id="hiwFaqCollapseSeven" class="accordion-collapse collapse" aria-labelledby="hiwFaqHeadingSeven" data-bs-parent="#hiwFaqAccordion">
+              <div class="accordion-body">
+                Not in the MVP. Any future conversion options are TBD.
+              </div>
+            </div>
+          </div>
+
+          <div class="accordion-item">
+            <h3 class="accordion-header" id="hiwFaqHeadingEight">
+              <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hiwFaqCollapseEight" aria-expanded="false" aria-controls="hiwFaqCollapseEight">
+                <i class="fas fa-pen-to-square" aria-hidden="true"></i>
+                <span>What if a verification was made by mistake?</span>
+              </button>
+            </h3>
+            <div id="hiwFaqCollapseEight" class="accordion-collapse collapse" aria-labelledby="hiwFaqHeadingEight" data-bs-parent="#hiwFaqAccordion">
+              <div class="accordion-body">
+                We’re building clear review and correction workflows. Specific reversal policies are still being finalized (TBD).
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="how-section how-bottom-cta">
+      <div class="container">
+        <div class="cta-strip-card">
+          <h2>Ready to join the loop?</h2>
+          <div class="cta-strip-actions">
+            <% if (user) { %>
+              <a class="btn btn-primary btn-lg" href="/events">Volunteer</a>
+            <% } else { %>
+              <a class="btn btn-primary btn-lg" href="events">Volunteer</a>
+            <% } %>
+            <a class="btn btn-outline-secondary btn-lg" href="/events#/create">Host an opportunity</a>
+            <a class="btn btn-outline-dark btn-lg" href="/donate">Donate</a>
+          </div>
+          <p class="cta-strip-microcopy">Verified attendance. Transparent funding. Real community outcomes.</p>
+          <a class="back-to-top-link" href="#top">
+            <i class="fas fa-arrow-up" aria-hidden="true"></i>
+            <span>Back to top</span>
+          </a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div class="modal fade" id="logoutModal" tabindex="-1" aria-labelledby="logoutModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Confirm Logout</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          Are you sure you want to log out?
+        </div>
+        <div class="modal-footer">
+          <form action="/logout" method="GET">
+            <button type="submit" class="btn btn-danger">Log Out</button>
+          </form>
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- navigation footer section-->
+  <section id="footer" class="gradient-background">
+  <div class="container">
+    <footer class="row align-items-center py-5 mt-5 border-top text-body-secondary">
+      <!-- 1) Logo: centered on xs, left on md+ -->
+      <div class="col-12 col-md-4 mb-4 mb-md-0 text-center text-md-start">
+        <a href="#">
+          <img src="./images/heart3D.png" alt="Get Kinder Heart" height="150">
+        </a>
+        <p class="mt-2">
+          &copy;
+          <a href="https://getkindr.com/" target="_blank" rel="noopener noreferrer"
+             class="text-body-secondary text-decoration-underline">
+            Get Kindr Foundation
+          </a>
+        </p>
+      </div>
+      <!-- 2) Social Icons: always centered -->
+      <div class="col-12 col-md-4 mb-4 mb-md-0 d-flex justify-content-center">
+        <a class="btn btn-floating m-1 text-white" style="background-color: #3b5998;"
+           href="https://www.facebook.com/profile.php?id=61576860759313" role="button" target="_blank" rel="noopener noreferrer">
+          <i class="fab fa-facebook-f"></i>
+        </a>
+        <a class="btn btn-floating m-1 text-white" style="background-color: #ac2bac;"
+           href="https://www.instagram.com/getkinder/" role="button" target="_blank" rel="noopener noreferrer">
+          <i class="fab fa-instagram"></i>
+        </a>
+        <a class="btn btn-floating m-1 text-white" style="background-color: #0082ca;"
+           href="https://www.linkedin.com/company/getkindrfoundation/" role="button" target="_blank" rel="noopener noreferrer">
+          <i class="fab fa-linkedin-in"></i>
+        </a>
+        <a class="btn btn-floating m-1 text-white" style="background-color: #c8232c;"
+           href="https://ca.pinterest.com/getkindr/" role="button" target="_blank" rel="noopener noreferrer">
+          <i class="fab fa-pinterest"></i>
+        </a>
+      </div>
+      <!-- 3) More About: centered on xs, right on md+ -->
+      <div class="col-12 col-md-4 mb-4 mb-md-0 text-center text-md-end">
+        <h5>More About Get Kinder</h5>
+        <ul class="nav flex-column">
+          <li class="nav-item mb-2"><a href="#"            class="nav-link p-0 text-body-secondary">Home</a></li>
+          <li class="nav-item mb-2"><a href="about" class="nav-link p-0 text-body-secondary">About</a></li>
+          <li class="nav-item mb-2"><a href="contact"     class="nav-link p-0 text-body-secondary">Contact</a></li>
+          <li class="nav-item mb-2"><a href="privacy"     class="nav-link p-0 text-body-secondary">Privacy</a></li>
+          <li class="nav-item mb-2"><a href="terms"       class="nav-link p-0 text-body-secondary">Terms</a></li>
+          <li class="nav-item mb-2"><a href="accessability" class="nav-link p-0 text-body-secondary">Accessibility</a></li>
+        </ul>
+      </div>
+    </footer>
+  </div>
+</section>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/js/bootstrap.bundle.min.js" integrity="sha384-k6d4wzSIapyDyv1kpU366/PK5hCdSbCRGRCMv+eplOQJWyd1fbcAu9OCUj5zNLiq" crossorigin="anonymous"></script>
+  <script>
+    (function () {
+      var jumpSelect = document.getElementById("jumpToSection");
+      var jumpLinks = Array.prototype.slice.call(document.querySelectorAll(".sticky-jump-nav .jump-pill[href^='#']"));
+      var sectionIds = jumpLinks.map(function (link) { return link.getAttribute("href"); });
+      var sections = sectionIds.map(function (id) { return document.querySelector(id); }).filter(Boolean);
+
+      function setActiveAnchor(anchor) {
+        jumpLinks.forEach(function (link) {
+          link.classList.toggle("is-active", link.getAttribute("href") === anchor);
+        });
+        if (jumpSelect) jumpSelect.value = anchor;
+      }
+
+      if (jumpSelect) {
+        jumpSelect.addEventListener("change", function (event) {
+          var target = event.target.value;
+          if (!target) return;
+          var section = document.querySelector(target);
+          if (!section) return;
+          section.scrollIntoView({ behavior: "smooth", block: "start" });
+          setActiveAnchor(target);
+        });
+      }
+
+      jumpLinks.forEach(function (link) {
+        link.addEventListener("click", function () {
+          setActiveAnchor(link.getAttribute("href"));
+        });
+      });
+
+      if ("IntersectionObserver" in window && sections.length) {
+        var observer = new IntersectionObserver(function (entries) {
+          entries.forEach(function (entry) {
+            if (!entry.isIntersecting) return;
+            var id = "#" + entry.target.id;
+            if (sectionIds.indexOf(id) !== -1) setActiveAnchor(id);
+          });
+        }, { rootMargin: "-45% 0px -45% 0px", threshold: 0.01 });
+        sections.forEach(function (section) { observer.observe(section); });
+      } else if (sectionIds.length) {
+        setActiveAnchor(sectionIds[0]);
+      }
+    }());
+  </script>
+</body>
+</html>

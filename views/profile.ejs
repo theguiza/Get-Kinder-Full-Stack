@@ -281,7 +281,7 @@
                           </div>
                           <div class="d-flex flex-column text-end">
                             <span class="badge rounded-pill <%= ['accepted','checked_in'].includes(row.rsvp_status) ? 'text-bg-success' : 'text-bg-secondary' %>">
-                              <%= ['accepted','checked_in'].includes(row.rsvp_status) ? 'Approved' : 'Awaiting' %>
+                              <%= ['accepted','checked_in'].includes(row.rsvp_status) ? 'Pending Approval' : 'Awaiting' %>
                             </span>
                             <small class="text-muted mt-1">+<%= row.kind_estimate_per_user || 0 %> $KIND (est.)</small>
                           </div>

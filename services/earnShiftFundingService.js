@@ -22,6 +22,22 @@ const computeCreditAmount = (rewardPoolKind, capacity) => {
   return Math.floor(poolValue / Math.max(1, cap));
 };
 
+const DEFAULT_POOL_SLUG = "general";
+const POOL_SLUG_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+const POOL_SCOPE_SEP = "__";
+
+const normalizePoolSlug = (value) => {
+  const slug = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (!slug) return DEFAULT_POOL_SLUG;
+  return POOL_SLUG_RE.test(slug) ? slug : DEFAULT_POOL_SLUG;
+};
+
+const buildScopedPoolSlug = (ownerUserId, poolSlug) => {
+  const owner = String(ownerUserId || "").trim();
+  if (!owner) return poolSlug;
+  return `u${owner}${POOL_SCOPE_SEP}${poolSlug}`;
+};
+
 async function fetchVerifiedRsvp(client, eventId, attendeeUserId) {
   const { rows } = await client.query(
     `
@@ -32,6 +48,8 @@ async function fetchVerifiedRsvp(client, eventId, attendeeUserId) {
         r.verification_status,
         e.reward_pool_kind,
         e.capacity,
+        e.funding_pool_slug,
+        e.creator_user_id,
         e.start_at,
         e.end_at
       FROM event_rsvps r
@@ -161,18 +179,20 @@ export async function processVerifiedEarnShift({ client, attendeeUserId, eventId
 
     const existingFunding = await fetchExistingFunding(runner, walletTxId);
 
-    const poolId = await resolvePoolId({ client: runner, poolSlug: "general" });
+    const poolSlug = normalizePoolSlug(rsvp.funding_pool_slug);
+    const scopedPoolSlug = buildScopedPoolSlug(rsvp.creator_user_id, poolSlug);
+    const poolId = await resolvePoolId({ client: runner, poolSlug: scopedPoolSlug });
     const poolBalance = await getPoolBalance(runner, poolId);
     const poolDebited = Math.min(amount, Math.max(0, poolBalance));
 
-    const donationCandidate = await findNextDonationWithRemaining({ client: runner, poolId, poolSlug: "general" });
+    const donationCandidate = await findNextDonationWithRemaining({ client: runner, poolId, poolSlug: scopedPoolSlug });
     const donationDebited =
       donationCandidate?.donationId && donationCandidate.donationRemainingCredits > 0
         ? Math.min(poolDebited, donationCandidate.donationRemainingCredits)
         : 0;
     const donationIdForRecord =
-      donationDebited > 0 ? donationCandidate?.donationId : existingFunding.poolTx?.donation_id || null;
-    let deficit = Math.max(0, amount - donationDebited);
+      donationDebited > 0 ? donationCandidate?.donationId : null;
+    let deficit = Math.max(0, amount - poolDebited);
     const minutesValue = minutes ?? null;
     const alreadyFunded =
       Boolean(existingFunding.receipt?.donation_id) || (existingFunding.receipt?.credits_funded || 0) > 0;
@@ -187,7 +207,7 @@ export async function processVerifiedEarnShift({ client, attendeeUserId, eventId
           DO UPDATE SET donation_id = EXCLUDED.donation_id, amount_credits = EXCLUDED.amount_credits
             WHERE (pool_transactions.donation_id IS NULL OR pool_transactions.amount_credits = 0)
         `,
-        [poolId, donationDebited, donationIdForRecord, rsvp.event_id, walletTxId]
+        [poolId, poolDebited, donationIdForRecord, rsvp.event_id, walletTxId]
       );
     } catch (err) {
       err.stage = "pool_debit";
@@ -215,7 +235,7 @@ export async function processVerifiedEarnShift({ client, attendeeUserId, eventId
             minutes_verified = COALESCE(donor_receipts.minutes_verified, EXCLUDED.minutes_verified)
           WHERE donor_receipts.donation_id IS NULL AND donor_receipts.credits_funded = 0
         `,
-        [donationIdForRecord, rsvp.event_id, rsvp.attendee_user_id, walletTxId, donationDebited, minutesValue]
+        [donationIdForRecord, rsvp.event_id, rsvp.attendee_user_id, walletTxId, poolDebited, minutesValue]
       );
     } catch (err) {
       err.stage = "donor_receipt";
@@ -258,7 +278,7 @@ export async function processVerifiedEarnShift({ client, attendeeUserId, eventId
       walletTxId,
       amount,
       funded,
-      donationDebited: funded,
+      donationDebited,
       deficit,
       alreadyFunded,
       inserted,

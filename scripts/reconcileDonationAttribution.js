@@ -2,6 +2,15 @@
 import pool from "../Backend/db/pg.js";
 import { resolvePoolId, findNextDonationWithRemaining } from "../services/donationAttributionService.js";
 
+const DEFAULT_POOL_SLUG = "general";
+const POOL_SLUG_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+
+function normalizePoolSlug(value) {
+  const slug = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (!slug) return DEFAULT_POOL_SLUG;
+  return POOL_SLUG_RE.test(slug) ? slug : DEFAULT_POOL_SLUG;
+}
+
 function parseArgs() {
   const argMap = new Map();
   for (const arg of process.argv.slice(2)) {
@@ -33,7 +42,7 @@ const advisoryLock = async (client, walletTxId) => {
   await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [walletTxId]);
 };
 
-async function processReceipt({ client, receiptId, walletTxId, poolId, dryRun }) {
+async function processReceipt({ client, receiptId, walletTxId, poolIdBySlug, dryRun }) {
   await advisoryLock(client, String(walletTxId));
 
   const { rows: [receipt] = [] } = await client.query(
@@ -46,9 +55,21 @@ async function processReceipt({ client, receiptId, walletTxId, poolId, dryRun })
         dr.minutes_verified,
         dr.event_id,
         dr.volunteer_user_id,
-        wt.kind_amount AS wallet_amount
+        wt.kind_amount AS wallet_amount,
+        pt.pool_id,
+        e.funding_pool_slug
       FROM donor_receipts dr
       JOIN wallet_transactions wt ON wt.id = dr.wallet_tx_id
+      LEFT JOIN LATERAL (
+        SELECT pool_id
+          FROM pool_transactions
+         WHERE wallet_tx_id = dr.wallet_tx_id
+           AND reason = 'shift_out'
+           AND direction = 'debit'
+         ORDER BY created_at DESC, id DESC
+         LIMIT 1
+      ) pt ON TRUE
+      LEFT JOIN events e ON e.id = dr.event_id
      WHERE dr.id = $1
      FOR UPDATE
     `,
@@ -68,7 +89,16 @@ async function processReceipt({ client, receiptId, walletTxId, poolId, dryRun })
     return { status: "skipped_zero" };
   }
 
-  const donationCandidate = await findNextDonationWithRemaining({ client, poolId, poolSlug: "general" });
+  const poolSlug = normalizePoolSlug(receipt.funding_pool_slug);
+  const existingPoolId = Number(receipt.pool_id);
+  const poolId = Number.isFinite(existingPoolId) && existingPoolId > 0
+    ? existingPoolId
+    : poolIdBySlug.has(poolSlug)
+      ? poolIdBySlug.get(poolSlug)
+      : await resolvePoolId({ client, poolSlug });
+  if (!poolIdBySlug.has(poolSlug)) poolIdBySlug.set(poolSlug, poolId);
+
+  const donationCandidate = await findNextDonationWithRemaining({ client, poolId, poolSlug });
   const donationRemaining = donationCandidate?.donationRemainingCredits || 0;
   const amountToAttribute =
     donationCandidate?.donationId && donationRemaining > 0 ? Math.min(creditAmount, donationRemaining) : 0;
@@ -146,7 +176,7 @@ async function run() {
 
   const client = await pool.connect();
   try {
-    const poolId = await resolvePoolId({ client, poolSlug: "general" });
+    const poolIdBySlug = new Map();
 
     for (const candidate of candidates) {
       await client.query("BEGIN");
@@ -154,7 +184,7 @@ async function run() {
         const result = await processReceipt({
           client,
           receiptId: candidate.id,
-          poolId,
+          poolIdBySlug,
           walletTxId: candidate.wallet_tx_id,
           dryRun,
         });

@@ -16,8 +16,10 @@ export async function squareWebhookHandler(req, res) {
   const logEntry = {
     signature_ok: false,
     event_type: null,
+    funding_action: null,
     payment_id: null,
     donation_id: null,
+    topup_id: null,
     credits_added: 0,
     error: null,
   };
@@ -62,8 +64,10 @@ export async function squareWebhookHandler(req, res) {
 
     const result = await processSquareWebhookEvent({ event, centsPerCredit });
     logEntry.event_type = result?.eventType || logEntry.event_type;
+    logEntry.funding_action = result?.fundingAction || null;
     logEntry.payment_id = result?.paymentId || logEntry.payment_id;
     logEntry.donation_id = result?.donationId || null;
+    logEntry.topup_id = result?.topupId || null;
     logEntry.credits_added = result?.creditsAdded ?? 0;
     if (result?.error) logEntry.error = result.error;
 

@@ -3,6 +3,15 @@
 import pool from "../Backend/db/pg.js";
 import { findNextDonationWithRemaining, resolvePoolId } from "../services/donationAttributionService.js";
 
+const DEFAULT_POOL_SLUG = "general";
+const POOL_SLUG_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+
+function normalizePoolSlug(value) {
+  const slug = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (!slug) return DEFAULT_POOL_SLUG;
+  return POOL_SLUG_RE.test(slug) ? slug : DEFAULT_POOL_SLUG;
+}
+
 function parseArgs() {
   const argMap = new Map();
   for (const arg of process.argv.slice(2)) {
@@ -26,19 +35,27 @@ async function fetchDeficitCandidates(limit) {
         wt.kind_amount AS wallet_amount,
         wt.created_at AS wallet_created_at,
         pt.id AS pool_tx_id,
+        pt.pool_id,
         pt.donation_id AS pool_donation_id,
         pt.amount_credits AS pool_funded,
         dr.id AS receipt_id,
         dr.donation_id AS receipt_donation_id,
         dr.credits_funded AS receipt_funded,
-        dr.minutes_verified AS receipt_minutes
+        dr.minutes_verified AS receipt_minutes,
+        e.funding_pool_slug
       FROM wallet_transactions wt
-      LEFT JOIN pool_transactions pt
-        ON pt.wallet_tx_id = wt.id
-       AND pt.reason = 'shift_out'
-       AND pt.direction = 'debit'
+      LEFT JOIN LATERAL (
+        SELECT id, pool_id, donation_id, amount_credits
+          FROM pool_transactions
+         WHERE wallet_tx_id = wt.id
+           AND reason = 'shift_out'
+           AND direction = 'debit'
+         ORDER BY created_at DESC, id DESC
+         LIMIT 1
+      ) pt ON TRUE
       LEFT JOIN donor_receipts dr
         ON dr.wallet_tx_id = wt.id
+      LEFT JOIN events e ON e.id = wt.event_id
      WHERE wt.reason = 'earn_shift'
        AND wt.direction = 'credit'
        AND COALESCE(dr.credits_funded, pt.amount_credits, 0) < wt.kind_amount
@@ -201,7 +218,7 @@ async function run() {
 
   const client = await pool.connect();
   try {
-    const poolId = await resolvePoolId({ client, poolSlug: "general" });
+    const poolIdBySlug = new Map();
     for (const c of candidates) {
       await client.query("BEGIN");
       try {
@@ -211,6 +228,15 @@ async function run() {
           await client.query("ROLLBACK");
           continue;
         }
+
+        const poolSlug = normalizePoolSlug(c.funding_pool_slug);
+        const existingPoolId = Number(c.pool_id);
+        const poolId = Number.isFinite(existingPoolId) && existingPoolId > 0
+          ? existingPoolId
+          : poolIdBySlug.has(poolSlug)
+            ? poolIdBySlug.get(poolSlug)
+            : await resolvePoolId({ client, poolSlug });
+        if (!poolIdBySlug.has(poolSlug)) poolIdBySlug.set(poolSlug, poolId);
 
         const result = await processCandidate({ client, candidate: c, poolId, dryRun });
         if (result.skipped && result.reason === "no_deficit") {

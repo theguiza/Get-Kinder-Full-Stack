@@ -36,6 +36,7 @@ function mapEventRow(row = {}) {
       row.reliability_weight !== null && row.reliability_weight !== undefined
         ? Number(row.reliability_weight)
         : 1,
+    funding_pool_slug: row.funding_pool_slug || "general",
     capacity: typeof row.capacity === "number" ? row.capacity : null,
     rsvp_counts: {
       accepted: Number(row.rsvp_accepted) || 0,
@@ -107,6 +108,7 @@ export async function fetchEvents({ limit, offset, communityTag, causeTag } = {}
              e.verification_method,
              e.impact_credits_base,
              e.reliability_weight,
+             e.funding_pool_slug,
              e.capacity,
              e.cover_url,
              e.attendance_methods,
@@ -151,6 +153,7 @@ export async function fetchEventById(id) {
              e.verification_method,
              e.impact_credits_base,
              e.reliability_weight,
+             e.funding_pool_slug,
              e.capacity,
              e.cover_url,
              e.attendance_methods,
@@ -182,7 +185,8 @@ export async function getEventByIdForVerify(client, eventId) {
              creator_user_id,
              start_at,
              end_at,
-             impact_credits_base
+             impact_credits_base,
+             funding_pool_slug
         FROM events
        WHERE id = $1
        LIMIT 1

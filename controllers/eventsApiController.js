@@ -38,6 +38,9 @@ const INVITE_TONES = {
   }
 };
 
+const DEFAULT_FUNDING_POOL_SLUG = "general";
+const FUNDING_POOL_SLUG_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+
 function clampLimit(value) {
   const num = Number(value);
   const fallback = Number.isFinite(num) ? num : DEFAULT_LIMIT;
@@ -51,6 +54,20 @@ function clampOffset(value) {
 
 function sanitizeString(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizeFundingPoolSlug(value, fallback = DEFAULT_FUNDING_POOL_SLUG) {
+  const fallbackSlug = typeof fallback === "string" && fallback.trim()
+    ? fallback.trim().toLowerCase()
+    : DEFAULT_FUNDING_POOL_SLUG;
+  const slug = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (!slug) return fallbackSlug;
+  if (!FUNDING_POOL_SLUG_RE.test(slug)) {
+    throw buildValidationError(
+      "Funding pool slug must be lowercase letters/numbers and may include - or _ (max 64 chars)."
+    );
+  }
+  return slug;
 }
 
 function normalizeCauseTags(value) {
@@ -147,6 +164,7 @@ function mapEventRowForEdit(row) {
       row.reliability_weight === null || row.reliability_weight === undefined
         ? 1
         : Number(row.reliability_weight),
+    funding_pool_slug: row.funding_pool_slug || DEFAULT_FUNDING_POOL_SLUG,
     cover_url: row.cover_url || "",
   };
 }
@@ -758,11 +776,12 @@ export async function updateEvent(req, res) {
                cover_url=$17,
                description=$18,
                reward_pool_kind=$19,
-               attendance_methods=$20,
-               safety_notes=$21,
-               status=$22,
+               funding_pool_slug=$20,
+               attendance_methods=$21,
+               safety_notes=$22,
+               status=$23,
                updated_at = NOW()
-         WHERE id = $23
+         WHERE id = $24
       `,
       [
         payload.title,
@@ -784,6 +803,7 @@ export async function updateEvent(req, res) {
         payload.cover_url,
         payload.description,
         payload.reward_pool_kind,
+        payload.funding_pool_slug,
         JSON.stringify(payload.attendance_methods),
         payload.safety_notes,
         finalStatus,
@@ -1035,6 +1055,10 @@ async function buildEventPayload(body, { strict = false, fallback = {} } = {}) {
   const reliabilityWeight = Number.isFinite(Number(reliabilityRaw))
     ? Math.max(0, Math.trunc(Number(reliabilityRaw)))
     : 1;
+  const fundingPoolSlug = normalizeFundingPoolSlug(
+    body.funding_pool_slug ?? base.funding_pool_slug,
+    DEFAULT_FUNDING_POOL_SLUG
+  );
 
   const attendanceInput = Array.isArray(body.attendance_methods)
     ? body.attendance_methods
@@ -1081,6 +1105,7 @@ async function buildEventPayload(body, { strict = false, fallback = {} } = {}) {
     cover_url: coverUrl,
     description,
     reward_pool_kind: rewardPool,
+    funding_pool_slug: fundingPoolSlug,
     attendance_methods: attendanceMethods,
     safety_notes: safetyNotes,
   };
@@ -1118,11 +1143,12 @@ export async function createEvent(req, res) {
           cover_url,
           description,
           reward_pool_kind,
+          funding_pool_slug,
           attendance_methods,
           safety_notes,
           status
         ) VALUES (
-          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10::text[],$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23
+          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10::text[],$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24
         )
         RETURNING id, status
       `,
@@ -1147,6 +1173,7 @@ export async function createEvent(req, res) {
         payload.cover_url,
         payload.description,
         payload.reward_pool_kind,
+        payload.funding_pool_slug,
         JSON.stringify(payload.attendance_methods),
         payload.safety_notes,
         status,

@@ -12,6 +12,7 @@ const ATTENDANCE_BASE = [
   { value: "geo", label: "Geo Check-in", requiresGeo: true },
 ];
 const MAX_COVER_SIZE = 2 * 1024 * 1024; // 2MB
+const FUNDING_POOL_SLUG_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
 function getEditIdFromHash() {
   if (typeof window === "undefined") return null;
@@ -126,6 +127,7 @@ function eventToFormState(event = {}) {
       event.reward_pool_kind === null || event.reward_pool_kind === undefined
         ? 0
         : Number(event.reward_pool_kind),
+    funding_pool_slug: (event.funding_pool_slug || "general").toLowerCase(),
     attendance_methods: normalizeAttendanceArray(event.attendance_methods),
     safety_notes: event.safety_notes || "",
   };
@@ -151,6 +153,7 @@ const INITIAL_STATE = {
   impact_credits_base: "25",
   reliability_weight: "1",
   reward_pool_kind: 0,
+  funding_pool_slug: "general",
   attendance_methods: ["host_code", "social_proof"],
   safety_notes: "",
 };
@@ -818,7 +821,7 @@ export function CreateEvent({ brand = DEFAULT_BRAND, geoCheckinEnabled = false }
             </Field>
           </div>
 
-          <div className="grid two">
+          <div className="grid three">
             <Field label="Reward Pool ($KIND)">
               <input
                 type="number"
@@ -828,6 +831,17 @@ export function CreateEvent({ brand = DEFAULT_BRAND, geoCheckinEnabled = false }
                 onChange={(e) =>
                   updateField("reward_pool_kind", Number(e.target.value) || 0)
                 }
+              />
+            </Field>
+            <Field label="Funding pool slug" error={errors.funding_pool_slug}>
+              <input
+                type="text"
+                name="funding_pool_slug"
+                value={form.funding_pool_slug}
+                onChange={(e) =>
+                  updateField("funding_pool_slug", (e.target.value || "").toLowerCase())
+                }
+                placeholder="general"
               />
             </Field>
             <Field label="Boost visibility">
@@ -964,6 +978,7 @@ function buildPayload(form, status) {
       : Number(reliabilityWeightInput);
   const impactCreditsBase = Number.isFinite(impactCreditsBaseRaw) ? impactCreditsBaseRaw : 25;
   const reliabilityWeight = Number.isFinite(reliabilityWeightRaw) ? reliabilityWeightRaw : 1;
+  const fundingPoolSlug = (form.funding_pool_slug || "").trim().toLowerCase() || "general";
   return {
     title: form.title?.trim(),
     category: form.category?.trim() || null,
@@ -984,6 +999,7 @@ function buildPayload(form, status) {
     impact_credits_base: impactCreditsBase,
     reliability_weight: reliabilityWeight,
     reward_pool_kind: Number(form.reward_pool_kind) || 0,
+    funding_pool_slug: fundingPoolSlug,
     attendance_methods: form.attendance_methods,
     safety_notes: form.safety_notes?.trim() || null,
     status,
@@ -1020,6 +1036,12 @@ function validateForm(form, { strict = false } = {}) {
   }
   if (form.capacity && Number(form.capacity) < 1) {
     errs.capacity = "Capacity must be at least 1.";
+  }
+  const fundingPoolSlug = (form.funding_pool_slug || "").trim().toLowerCase();
+  if (!fundingPoolSlug) {
+    errs.funding_pool_slug = "Funding pool slug is required.";
+  } else if (!FUNDING_POOL_SLUG_RE.test(fundingPoolSlug)) {
+    errs.funding_pool_slug = "Use lowercase letters/numbers plus - or _.";
   }
   if (!form.attendance_methods || form.attendance_methods.length === 0) {
     errs.attendance_methods = "Select at least one method.";

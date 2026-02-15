@@ -71,7 +71,7 @@ function statusTone(status) {
 }
 
 function statusLabel(status) {
-  if (status === "accepted" || status === "checked_in") return "Approved";
+  if (status === "accepted" || status === "checked_in") return "Pending Approval";
   if (status === "interested" || status === "waitlisted") return "Awaiting approval";
   return "Not requested";
 }

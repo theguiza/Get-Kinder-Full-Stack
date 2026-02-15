@@ -1231,6 +1231,12 @@ app.get("/blog", (req, res) => {
     user:         req.user
   });
 });
+
+app.get("/how-it-works", (req, res) => {
+  const assetTag = process.env.ASSET_TAG ?? Date.now().toString(36);
+  res.render("how-it-works", { assetTag });
+});
+
 async function renderIndexPage(req, res, next) {
   try {
     const success      = req.query.success === "1";

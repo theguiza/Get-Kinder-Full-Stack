@@ -86,7 +86,7 @@ function statusPill(eventDetail, baseEvent) {
   if (baseEvent.status === "completed") return { label: "Finished", tone: "finished" };
   const viewerStatus = eventDetail?.viewer_rsvp_status;
   if (viewerStatus === "accepted" || viewerStatus === "checked_in") {
-    return { label: "Approved", tone: "approved" };
+    return { label: "Pending Approval", tone: "approved" };
   }
   if (viewerStatus === "interested" || viewerStatus === "waitlisted") {
     return { label: "Awaiting approval", tone: "awaiting" };
