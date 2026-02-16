@@ -94,6 +94,7 @@ export default function DonatePage() {
       <p className="muted">Tip: After confirmation, visit your Donor Dashboard to see updated totals.</p>
 
       <style>{`
+        .donate-page { --kinder-coral: #ff5656; }
         .donate-page { max-width: 720px; margin: 0 auto; padding: 24px 16px 48px; color: #233048; }
         .title { margin: 0 0 6px; color: #455a7c; }
         .sub { margin: 0 0 18px; color: #556; }
@@ -101,9 +102,10 @@ export default function DonatePage() {
         .label { font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; color: #6c7a93; margin-bottom: 6px; }
         .pill-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
         .pill { border: 1px solid #c7d0e4; background: #fff; color: #233048; border-radius: 999px; padding: 8px 12px; cursor: pointer; font-weight: 600; }
-        .pill.active { background: #455a7c; color: #fff; border-color: #455a7c; }
+        .pill.active { background: var(--kinder-coral); color: #fff; border-color: var(--kinder-coral); }
         .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: none; border-radius: 10px; padding: 10px 14px; font-weight: 700; cursor: pointer; text-decoration: none; }
-        .btn.primary { background: #455a7c; color: #fff; }
+        .btn.primary { background: var(--kinder-coral); color: #fff; }
+        .btn.primary:hover { filter: brightness(0.96); }
         .btn:disabled { opacity: 0.6; cursor: not-allowed; }
         .input { width: 100%; border: 1px solid #d6ddea; border-radius: 10px; padding: 10px; margin: 6px 0 10px; }
         .muted { color: #6c7a93; font-size: 13px; }

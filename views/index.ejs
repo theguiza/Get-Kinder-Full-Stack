@@ -33,7 +33,7 @@
   <meta name="google-site-verification" content="5P6KC5fl0v3t5zQrKy3RvlK5c0yeXKpRUb4FbhkF0eY" />
 </head>
 
-<body>
+<body class="home-page">
  <!-- Google Tag Manager (noscript) -->
   <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-5NMWPW33"
   height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
@@ -51,95 +51,47 @@
     </div>
   <% } %>
   <section id="title">
-    <header>
-      <nav class="navbar fixed-top navbar-light bg-white navbar-expand-lg">
-        <div class="container-fluid d-flex">
-          <a class="navbar-brand" href="/home"><img src="/images/logo.png" alt="Get Kinder logo" class="logo-img" height="80" width: auto;> </a>
-          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
-            <span class="navbar-toggler-icon"></span></button>
-          <div class="collapse navbar-collapse justify-content-center" id="navbarNav">
-            <ul class="navbar-nav me-auto justify-content-center align-items-center">
-               <li class="nav-item">
-                <a class="nav-link mx-1 font-hover active" href="/events" aria-current="page" style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;">Volunteer Events</a>
-              </li>
-               <li class="nav-item">
-                <a class="nav-link mx-1 font-hover" href="dashboard" style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;">My Progress</a>
-              </li>
-              <li class="nav-item">
-                <a class="nav-link mx-1 font-hover" href="profile" style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;">Profile</a>
-              </li>
-               <li class="nav-item">
-                <a class="nav-link mx-1 font-hover" href="blog" style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;">Blog</a>
-              </li>
-                 <!-- AOS (Animate On Scroll) <li class="nav-item">
-                <a class="nav-link mx-1 font-hover" href="friendQuiz" style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;">Friend Quiz</a>
-              </li>-->
-              <li class="nav-item">
-                <a class="nav-link mx-1 font-hover" href="about" style="font-size: 1.1rem; color: #455a7c; padding-right: 40px;">About</a>
-              </li>
-              <li class="nav-item">
-                <a class="btn btn-primary btn-lg" href="donate" style="font-size: 1.2rem; color:aliceblue; background-color: #ff5656; border-color: #ff5656;">DONATE</a>
-              </li>
-            </ul>
-            <ul class="navbar-nav ms-auto d-flex align-items-center">
-              <% if (user) { %>
-                <li class="nav-item d-flex align-items-center me-3">
-                  <span class="navbar-text fw-bold me-2" style="font-size: 1.1rem; color: #455a7c;"><%= user.firstname || user.email %></span>
-                  <img src="<%= (user && user.picture) ? user.picture : '/images/nerdy-KAI.png' %>"  class="rounded-circle me-3" width="32" height="32" alt="Get Kinder User Avatar">
-                  <button class="btn btn-outline-danger btn-sm" data-bs-toggle="modal" data-bs-target="#logoutModal">Log Out</button>
-                </li>
-              <% } else { %>
-                <li class="nav-item"><a class="btn btn-primary btn-lg" 
-                  style="font-size: 1.2rem; color: white; text-decoration: none; width: 100%; min-width: 120px; text-align: center;" href="login" role="button">Log In</a>
-                </li>
-              <% } %>
-            </ul>
+    <%- include("partials/site-header", { currentPage: "home" }) %>
+<!-- Hero Section -->
+<section class="home-hero py-5 pb-0">
+  <div class="container">
+    <div class="row g-4 align-items-center">
+      <div class="col-12 col-lg-6 d-flex flex-column">
+        <h1 class="display-6 fw-bold lh-1 mb-3 order-1" style="color: #ff5656;" data-aos="fade-up">
+          One Platform. Two Ways to Contribute. Infinite Impact. You Give, We Reward.
+        </h1>
+        <p class="mb-3 fs-5 order-2" style="color: #455a7c;" data-aos="fade-up" data-aos-delay="100">
+          Join us to find your cause, amplify your impact, and earn rewards for making your community better.
+        </p>
+        <p class="mb-0 fs-5 order-2" style="color: #455a7c;" data-aos="fade-up" data-aos-delay="120">
+          Volunteers easily find opportunities, donors see their impact, and charities easily connect with both to build something bigger than themselves.
+        </p>
+        <div class="d-md-none order-3 mt-3" data-aos="zoom-out">
+          <div class="hero-img-wrap w-100 overflow-hidden">
+            <img
+              src="/images/happyGirls.jpeg"
+              alt="Happy girls volunteering"
+              class="img-fluid rounded-4 shadow-sm w-100"
+              style="object-fit: cover; display: block;"
+              loading="lazy"
+            />
           </div>
         </div>
-      </nav>
-    </header>
-<!-- Hero Section -->
-<section class="py-5 pb-0">
-  <div class="container">
-    <!-- Full-width headline -->
-    <div class="text-center">
-      <h1 class="display-3 mb-3 pt-5" style="color: #ff5656" data-aos="fade-up">
-        One Platform. Three Ways to Contribute. Infinite Impact. You Give, We Reward.
-      </h1>
-    </div>
-    <!-- Two columns beneath headline -->
-    <div class="row gx-4 align-items-stretch">
-      <!-- Left column (1/3) -->
-      <div class="col-12 col-lg-4 d-flex flex-column justify-content-center">
-        <p class="mb-4" style="color: #455a7c; font-size: 1.2rem;" data-aos="fade-up" data-aos-delay="100">
-          Join us to find your cause, amplify your impact, and earn the rewards you deserve for making your community better.</p>
-        <p class="mb-4" style="color: #455a7c; font-size: 1.2rem;" data-aos="fade-up" data-aos-delay="100">
-          Volunteers easily find opportunities, donors see their impact, and charities easily connect with both to build something
-          bigger than themselves.</p>
-        <div class="d-flex flex-column align-items-center gap-2" data-aos="fade-up" data-aos-delay="150">
-          <a
-            class="btn btn-primary2 custom-hover fw-bold p-2"
-            href="/how-it-works"
-            style="font-size: 1.3rem; color: aliceblue; width: 300px;"
-          >
+        <div class="d-flex flex-wrap gap-2 mt-3 order-5 order-md-3" data-aos="fade-up" data-aos-delay="150">
+          <a class="btn btn-primary2 custom-hover fw-bold p-2" href="/how-it-works" style="font-size: 1.1rem; color: aliceblue;">
             See How it Works
           </a>
-          <a
-            class="btn btn-primary2 custom-hover fw-bold p-2"
-            href="events"
-            style="font-size: 1.3rem; color: aliceblue; width: 300px;"
-          >
+          <a class="btn btn-primary2 custom-hover fw-bold p-2" href="/events" style="font-size: 1.1rem; color: aliceblue;">
             Make an impact now
           </a>
         </div>
       </div>
-      <!-- Right column (2/3) - image fills all available space -->
-      <div class="col-12 col-lg-8 mt-4 mt-lg-0 d-flex">
-        <div class="hero-img-wrap w-100 h-100 overflow-hidden" data-aos="zoom-out">
+      <div class="col-12 col-lg-6 d-none d-md-block">
+        <div class="hero-img-wrap w-100 overflow-hidden" data-aos="zoom-out">
           <img
             src="/images/happyGirls.jpeg"
             alt="Happy girls volunteering"
-            class="img-fluid rounded-4 shadow-sm"
+            class="img-fluid rounded-4 shadow-sm w-100"
             style="object-fit: cover; display: block;"
             loading="lazy"
           />
@@ -153,7 +105,7 @@
   <div class="row gx-4 gy-4">
   <div class="modern-tabs">
      <div class="col-12 text-center">
-      <h2 class="display-4 mb-3" style="color: #ff5656;">Find Out More About How You Can Contribute</h2>
+      <h2 class="display-4 mb-3" style="color: #ff5656;">Find Your Purpose, Make Your Impact, Earn Your Rewards</h2>
     </div>
    <!-- tab 1 - contributor -->
     <section id="quiz" class="py-5">
@@ -165,8 +117,8 @@
       </div>
       <!-- Text -->
       <div class="col-12 col-lg-6">
-        <h3 class="fw-semibold mb-2" style="color:#ff5656;" data-aos="fade-up">Find Your Purpose, Make Your Impact, Earn Your Rewards</h3>
-        <h2 class="h2 fw-bold mb-3" data-aos="fade-up" data-aos-delay="80" style="color:#455a7c;">You're Not Just a Volunteer. You're a Community Contributor.</h2>
+        <h3 class="fw-semibold mb-2" style="color:#ff5656;" data-aos="fade-up">Your Time and Skills Are Valuable</h3>
+        <h2 class="h2 fw-bold mb-3" data-aos="fade-up" data-aos-delay="80" style="color:#455a7c;">You're Not Just Volunteering Your Time; You're a Community Contributor.</h2>
         <p class="text-secondary mb-4" data-aos="fade-up" data-aos-delay="140">
           Discover volunteering opportunities that match your passion, skills, interests, and most importantly, your life! Track your impact, connect with causes you care about, and get rewarded for every hour you contribute. Your time creates real change—and real community
         </p>
@@ -337,11 +289,12 @@ Every skill you share, every project you complete, every donation you make earns
         </a>
       </div>
       <!-- 3) More About: centered on xs, right on md+ -->
-      <div class="col-12 col-md-4 mb-4 mb-md-0 text-center text-md-end">
+      <div class="col-12 col-md-4 mb-4 mb-md-0 text-center text-md-end footer-links-col">
         <h5>More About Get Kinder</h5>
         <ul class="nav flex-column">
           <li class="nav-item mb-2"><a href="#"            class="nav-link p-0 text-body-secondary">Home</a></li>
           <li class="nav-item mb-2"><a href="about" class="nav-link p-0 text-body-secondary">About</a></li>
+          <li class="nav-item mb-2"><a href="blog" class="nav-link p-0 text-body-secondary">Blog</a></li>
           <li class="nav-item mb-2"><a href="contact"     class="nav-link p-0 text-body-secondary">Contact</a></li>
           <li class="nav-item mb-2"><a href="privacy"     class="nav-link p-0 text-body-secondary">Privacy</a></li>
           <li class="nav-item mb-2"><a href="terms"       class="nav-link p-0 text-body-secondary">Terms</a></li>

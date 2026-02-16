@@ -1,0 +1,71 @@
+<%
+  const cp = typeof currentPage === "string" ? currentPage : "other";
+  const homeHref = "/home";
+  const currentUser = (typeof user !== "undefined" && user) ? user : null;
+
+  const navItems = [
+    { key: "how-it-works", label: "How This Works", href: "/how-it-works" },
+    { key: "events", label: "Volunteer Events", href: "/events" },
+    { key: "dashboard", label: "My Progress", href: "/dashboard" },
+    { key: "profile", label: "Profile", href: "/profile" },
+    { key: "donor", label: "Donor Dashboard", href: "/donor" }
+  ];
+
+  const renderedNavItems = navItems.map((item) => {
+    if (cp !== "home" && cp === item.key) {
+      return { ...item, label: "Home", href: homeHref, swapped: true };
+    }
+    return { ...item, swapped: false };
+  });
+  const navItemsWithDonateHome = cp === "donate"
+    ? [{ key: "home-link", label: "Home", href: homeHref, swapped: false }, ...renderedNavItems]
+    : renderedNavItems;
+
+  const donateHref = "/donate";
+  const donateLabel = "DONATE";
+  const showDonateCta = cp !== "donate";
+%>
+<header>
+  <nav class="navbar fixed-top navbar-light bg-white navbar-expand-lg">
+    <div class="container-fluid d-flex">
+      <a class="navbar-brand" href="<%= homeHref %>"><img src="/images/logo.png" alt="Get Kinder logo" class="logo-img" height="80"></a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#siteHeaderNav" aria-controls="siteHeaderNav" aria-expanded="false" aria-label="Toggle navigation">
+          <span class="navbar-toggler-icon"></span>
+        </button>
+      <div class="collapse navbar-collapse" id="siteHeaderNav">
+        <ul class="navbar-nav flex-lg-grow-1 justify-content-lg-center align-items-lg-center">
+          <% navItemsWithDonateHome.forEach((item) => { %>
+            <li class="nav-item">
+              <a
+                class="nav-link mx-1 font-hover<%= (!item.swapped && cp === item.key) ? " active" : "" %>"
+                href="<%= item.href %>"
+                <%= (!item.swapped && cp === item.key) ? 'aria-current="page"' : "" %>
+                style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;"
+              ><%= item.label %></a>
+            </li>
+          <% }) %>
+          <% if (showDonateCta) { %>
+            <li class="nav-item">
+              <a class="btn btn-primary btn-lg" href="<%= donateHref %>" style="font-size: 1.2rem; color:aliceblue; background-color: #ff5656; border-color: #ff5656;"><%= donateLabel %></a>
+            </li>
+          <% } %>
+        </ul>
+        <ul class="navbar-nav d-flex align-items-lg-center mt-3 mt-lg-0">
+          <% if (currentUser) { %>
+            <li class="nav-item d-flex align-items-center me-3">
+              <span class="navbar-text fw-bold me-2" style="font-size: 1.1rem; color: #455a7c;"><%= currentUser.firstname || currentUser.email %></span>
+              <img src="<%= currentUser.picture ? currentUser.picture : '/images/nerdy-KAI.png' %>" class="rounded-circle me-3" width="32" height="32" alt="Get Kinder User Avatar">
+              <form action="/logout" method="GET" class="d-inline m-0">
+                <button type="submit" class="btn btn-outline-danger btn-sm">Log Out</button>
+              </form>
+            </li>
+          <% } else { %>
+            <li class="nav-item">
+              <a class="btn btn-primary btn-lg" style="font-size: 1.2rem; color: white; text-decoration: none; width: 100%; min-width: 120px; text-align: center;" href="/login" role="button">Log In</a>
+            </li>
+          <% } %>
+        </ul>
+      </div>
+    </div>
+  </nav>
+</header>

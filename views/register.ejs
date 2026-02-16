@@ -38,22 +38,7 @@
   <!-- End Google Tag Manager (noscript) -->
   <section id="title"> 
     <body class="gradient-background">  
-<header>
-  <nav class="navbar navbar-light bg-white navbar-expand-lg ">
-    <div class="container-fluid d-flex">
-      <a class="navbar-brand" href="/home">
-        <img src="./images/logo.png" alt="Get Kinder logo" height="80">
-      </a>
-      </div>
-    </div>
-<% if (typeof error !== "undefined") { %>
-  <div class="alert alert-danger alert-dismissible fade show" role="alert">
-    <%= error %>
-    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-  </div>
-<% } %>
-  </nav>
-</header>
+<%- include("partials/site-header", { currentPage: "other" }) %>
     <div class="container mt-5">
       <div class="row align-items-center">
     <!-- Login Form Left -->

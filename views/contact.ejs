@@ -39,45 +39,7 @@
   height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
   <!-- End Google Tag Manager (noscript) -->
   <section id="title" class="gradient-background"> <!-- Create a white header using Bootstrap classes. Include an image aligned to the left and a navigation bar aligned to the right with 4 options and a "Sign Up" button. Use 'navbar', 'navbar-light', 'bg-white', 'navbar-expand-lg', and 'd-flex' classes for layout. -->
-   <header>
-      <nav class="navbar fixed-top navbar-light bg-white navbar-expand-lg">
-        <div class="container-fluid d-flex">
-          <a class="navbar-brand" href="/home"><img src="/images/logo.png" alt="Get Kinder logo" height="80"> </a>
-          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
-            <span class="navbar-toggler-icon"></span>
-          </button>
-          <div class="collapse navbar-collapse justify-content-center" id="navbarNav">
-            <ul class="navbar-nav align-items-center">
-              <li class="nav-item">
-                <a class="btn btn-outline-primary btn-lg custom-hover" href="/#chat2" style="font-size: 1.2rem; color: #455a7c; margin-right: 30px; margin-left: 10px; padding-left: 10px;"><img src="/images/kai-real.png" alt="real Kindness AI Companion Kai" width="35" height="35" class="me-2">Chat with Kai Now</a>
-              </li>
-              <li class="nav-item">
-                <a class="nav-link mx-1 font-hover" href="blog" style="font-size: 1.2rem; color: #455a7c; padding-right: 30px;">Blog</a>
-              </li>
-              <li class="nav-item">
-                <a class="nav-link mx-1 font-hover" href="profile" style="font-size: 1.2rem; color: #455a7c; padding-right: 30px;">Profile</a>
-              </li>
-              <li class="nav-item">
-                <a class="nav-link mx-1 font-hover" href="/home" style="font-size: 1.2rem; color: #455a7c; padding-right: 30px;">Home</a>
-              </li>
-              </ul>
-            </div>
-              <div class="collapse navbar-collapse justify-content-end" id="navbarNav">
-                <ul class="navbar-nav d-flex align-items-center">              <% if (user) { %>
-                <li class="nav-item d-flex align-items-center me-3">
-                  <span class="navbar-text fw-bold me-2" style="font-size: 1.2rem; color: #455a7c;"><%= user.firstname || user.email %></span>
-                  <img src="<%= user.picture ? user.picture : '/images/nerdy-KAI.png' %>" class="rounded-circle me-3" width="32" height="32" alt="Get Kinder User Avatar">
-                  <button class="btn btn-outline-danger btn-sm" data-bs-toggle="modal" data-bs-target="#logoutModal">Log Out</button>
-                </li>
-              <% } else { %>
-                <li class="nav-item"><a class="btn btn-primary btn-lg" 
-                  style="font-size: 1.2rem; color: white; text-decoration: none; width: 100%; min-width: 120px; text-align: center;" href="login" role="button">Log In</a>
-                </li>
-              <% } %>
-            </ul>
-            </div>
-        </div>
-      </nav>
+   <%- include("partials/site-header", { currentPage: "other" }) %>
     <div class="container col-xxl-8 px-4 ">
       <div class="row flex-lg-row-reverse align-items-center g-5 pt-3 mt-1">
         <div class="col-10 col-sm-8 col-lg-6">

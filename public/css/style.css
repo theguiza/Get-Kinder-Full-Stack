@@ -43,6 +43,26 @@ p {
   }
 }
 
+/* Home hero: keep clear space below fixed header and avoid forced crop */
+.home-page .home-hero {
+  margin-top: clamp(28px, 5vw, 64px);
+}
+
+@media (max-width: 767.98px) {
+  .home-page .home-hero {
+    margin-top: clamp(44px, 12vw, 72px);
+  }
+}
+
+.home-page .home-hero .hero-img-wrap {
+  height: auto;
+  max-height: none;
+}
+
+.home-page .home-hero img {
+  height: auto;
+}
+
 .icon-square {
   width: 3rem;
   height: 3rem;
@@ -961,7 +981,7 @@ html, body, #app, .page, .chat-page, .full-height {
             }
         }
 
-        /* Alert styling with brand colors */
+/* Alert styling with brand colors */
         .alert-success {
             background-color: #d4edda;
             border-color: #c3e6cb;
@@ -973,3 +993,16 @@ html, body, #app, .page, .chat-page, .full-height {
             border-color: #bee5eb;
             color: #0c5460;
         }
+
+/* Footer right-column spacing to avoid overlap with floating KAI button */
+@media (max-width: 1399.98px) and (min-width: 768px) {
+  #footer .footer-links-col {
+    padding-right: clamp(4.5rem, 9vw, 8rem);
+  }
+}
+
+@media (max-width: 991.98px) and (min-width: 768px) {
+  #footer .footer-links-col {
+    padding-right: clamp(5.5rem, 12vw, 9rem);
+  }
+}
