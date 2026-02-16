@@ -39,7 +39,7 @@
 }
 
 .how-it-works-page .lead-text {
-  color: var(--how-ink);
+  color: #455a7c;
   font-size: clamp(1rem, 1.9vw, 1.2rem);
   max-width: 680px;
 }
@@ -69,6 +69,13 @@
   width: 100%;
   height: auto;
   display: block;
+}
+
+.how-it-works-page .impact-loop-image {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 14px;
 }
 
 .how-it-works-page .loop-card .node {
