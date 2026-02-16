@@ -54,7 +54,7 @@
   </g>
   <text x="400" y="253" text-anchor="middle" class="node-label">Donors</text>
 
-  <g transform="translate(550.4 439.4) scale(0.42)">
+  <g transform="translate(550.4 446.4) scale(0.42)">
     <circle cx="80" cy="80" r="20" fill="#ff5656" opacity="0.9"/>
     <line x1="80" y1="80" x2="80" y2="25" stroke="#ff5656" stroke-width="2" opacity="0.4"/>
     <line x1="80" y1="80" x2="135" y2="80" stroke="#ff5656" stroke-width="2" opacity="0.4"/>
@@ -79,7 +79,7 @@
   </g>
   <text x="584" y="540" text-anchor="middle" class="node-label">Organizations</text>
 
-  <g transform="translate(182.4 439.4) scale(0.42)">
+  <g transform="translate(182.4 446.4) scale(0.42)">
     <g opacity="0.5">
       <line x1="80" y1="80" x2="80" y2="20" stroke="#FFB84D" stroke-width="3" stroke-linecap="round"/>
       <line x1="80" y1="80" x2="120" y2="40" stroke="#FFB84D" stroke-width="2.5" stroke-linecap="round"/>
