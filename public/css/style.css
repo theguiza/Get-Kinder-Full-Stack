@@ -405,6 +405,18 @@ body {
   padding-top: 0px; /* desktop header height */
 }
 
+@media (max-width: 767.98px) {
+  .login-signin-offset {
+    margin-top: 1.5rem;
+  }
+}
+
+@media (min-width: 768px) {
+  .register-signin-offset {
+    margin-top: 2rem;
+  }
+}
+
 /* Modern Filled Tabs */
 .modern-tabs {
     background: white;
