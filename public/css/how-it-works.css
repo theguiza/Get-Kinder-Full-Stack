@@ -51,6 +51,19 @@
   margin-top: 20px;
 }
 
+.how-it-works-page .how-hero .cta-row .btn {
+  background: var(--how-brand-coral);
+  border-color: var(--how-brand-coral);
+  color: #ffffff;
+}
+
+.how-it-works-page .how-hero .cta-row .btn:hover,
+.how-it-works-page .how-hero .cta-row .btn:focus {
+  background: #e24f4f;
+  border-color: #e24f4f;
+  color: #ffffff;
+}
+
 .how-it-works-page .hero-microcopy {
   margin-top: 12px;
   color: #4f678f;
@@ -573,6 +586,28 @@
   .how-it-works-page .hero-mobile-visual {
     margin-top: 10px;
     margin-bottom: 2px;
+  }
+
+  .how-it-works-page .how-hero .cta-row {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    width: 100%;
+  }
+
+  .how-it-works-page .how-hero .cta-row .btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-height: 42px;
+    white-space: nowrap;
+    font-size: clamp(0.58rem, 2.6vw, 0.78rem);
+    line-height: 1.05;
+    padding: 0.45rem 0.4rem;
+    text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .how-it-works-page .receipt-header {

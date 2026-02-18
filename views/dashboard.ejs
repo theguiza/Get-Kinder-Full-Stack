@@ -55,7 +55,8 @@
   </script>
   <!-- End Google Tag Manager -->
 </head>
-<body>
+<body class="dashboard-page">
+  <a class="dash-skip-link" href="#dash-main">Skip to main content</a>
   <!-- Google Tag Manager (noscript) -->
   <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-5NMWPW33" height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
   <!-- Alerts -->
@@ -81,44 +82,318 @@
    <%- include("partials/site-header", { currentPage: "dashboard" }) %>
   <!-- Main container -->
   <div class="dashboard-container">
-    <div class="dashboard-header container py-3">
-      <% if (typeof user !== 'undefined' && user && user.firstname) { %>
-        <h1>Welcome back, <%= user.firstname %>! 👋</h1>
-      <% } else { %>
-        <h1>Welcome!</h1>
-      <% } %>
-      <p>Track your volunteering streak, verified hours, and reliability to unlock priority access and sponsor-backed impact grants.</p>
-    </div>
-
     <% const dashStats = volunteerStats || {}; %>
-    <div class="container my-3">
-      <div class="card shadow-sm border-0" style="border-radius: 18px; background: #f7f9fc;">
-        <div class="card-body d-flex flex-column flex-md-row align-items-center justify-content-between gap-3">
-          <div class="d-flex flex-wrap gap-4">
-            <div>
-              <div class="text-muted small">Impact Credits</div>
-              <div class="h4 mb-0"><%= Number(dashStats.impact_credits_balance) || 0 %></div>
+    <% const rawTier = (dashStats.priority_tier || 'Bronze'); %>
+    <% const tierLabel = (typeof rawTier === 'string' && rawTier.length)
+      ? rawTier.charAt(0).toUpperCase() + rawTier.slice(1).toLowerCase()
+      : 'Bronze'; %>
+    <% const currentUser = (typeof user !== 'undefined' && user) ? user : null; %>
+    <% const profileName = (currentUser && currentUser.firstname) ? currentUser.firstname : 'Volunteer'; %>
+    <% const rawProfilePhoto = (currentUser && (currentUser.picture || currentUser.profile_photo_url || currentUser.avatar_url || currentUser.photo_url))
+      ? (currentUser.picture || currentUser.profile_photo_url || currentUser.avatar_url || currentUser.photo_url)
+      : null; %>
+    <% const profilePhoto = (typeof rawProfilePhoto === 'string')
+      ? rawProfilePhoto.replace(/^http:\/\//i, 'https://')
+      : rawProfilePhoto; %>
+    <% const dashRoutes = {
+      dashboard: '/dashboard',
+      opportunities: '/events',
+      impact: '#',
+      rewards: '#',
+      crew: '#',
+      settings: '#',
+      faq: '/how-it-works#faq',
+      feedback: '/contact'
+    }; %>
+    <div class="container-fluid my-4">
+      <div class="dash-grid">
+        <aside class="dash-left d-none d-lg-block">
+          <div class="dash-sidebar-shell">
+            <div class="card dash-card shadow-sm border-0">
+              <div class="card-body">
+                <div class="d-flex align-items-center gap-3 mb-3">
+                  <div class="dash-avatar">
+                    <% if (profilePhoto) { %>
+                      <img src="<%= profilePhoto %>" alt="<%= profileName %> profile photo" loading="lazy">
+                    <% } else { %>
+                      <i class="fa-solid fa-hand-holding-heart"></i>
+                    <% } %>
+                  </div>
+                  <div>
+                    <div class="dash-profile-name"><%= profileName %></div>
+                    <div class="dash-meta-row">
+                      <i class="fa-solid fa-medal" aria-hidden="true"></i>
+                      <span>Tier: <strong><%= tierLabel %></strong></span>
+                    </div>
+                    <div class="dash-meta-row">
+                      <i class="fa-solid fa-fire-flame-curved" aria-hidden="true"></i>
+                      <span>Streak: <strong><%= Number(dashStats.streak_weeks) || 0 %> weeks</strong></span>
+                    </div>
+                  </div>
+                </div>
+                <a class="btn dash-btn-ink w-100" href="/profile">View profile</a>
+              </div>
             </div>
-            <div>
-              <div class="text-muted small">Streak Weeks</div>
-              <div class="h4 mb-0"><%= Number(dashStats.streak_weeks) || 0 %></div>
+
+            <div class="card dash-card shadow-sm border-0">
+              <div class="card-body">
+                <div class="small text-uppercase text-muted fw-semibold mb-2">Navigation</div>
+                <nav aria-label="Dashboard navigation">
+                  <ul class="dash-nav list-unstyled mb-0">
+                    <li><a href="<%= dashRoutes.opportunities %>"><i class="fa-solid fa-compass"></i>Find Opportunities</a></li>
+                    <li><a href="<%= dashRoutes.rewards %>"><i class="fa-solid fa-gift"></i>Rewards</a></li>
+                    <li><a href="<%= dashRoutes.crew %>"><i class="fa-solid fa-users"></i>My Crew</a></li>
+                    <li><a href="<%= dashRoutes.settings %>"><i class="fa-solid fa-gear"></i>Settings</a></li>
+                  </ul>
+                </nav>
+              </div>
             </div>
-            <div>
-              <div class="text-muted small">Priority Tier</div>
-              <div class="h4 mb-0"><%= dashStats.priority_tier || 'Bronze' %></div>
+
+            <div class="card dash-card dash-sidebar-foot shadow-sm border-0">
+              <div class="card-body">
+                <div class="small text-uppercase text-muted fw-semibold mb-2">Support</div>
+                <ul class="dash-secondary-links list-unstyled mb-0">
+                  <li><a href="<%= dashRoutes.faq %>"><i class="fa-regular fa-circle-question"></i>FAQ</a></li>
+                  <li><a href="<%= dashRoutes.feedback %>"><i class="fa-regular fa-comment-dots"></i>Feedback/Help</a></li>
+                </ul>
+              </div>
             </div>
           </div>
-          <a class="btn btn-primary" href="/profile">View my volunteer profile</a>
+        </aside>
+
+        <main class="dash-center" id="dash-main">
+          <div class="dash-center-inner">
+            <div class="d-lg-none mb-3">
+              <button
+                class="btn btn-outline-secondary btn-sm dash-menu-btn"
+                type="button"
+                data-bs-toggle="offcanvas"
+                data-bs-target="#dashboardNavOffcanvas"
+                aria-controls="dashboardNavOffcanvas"
+                aria-label="Open dashboard menu"
+              >
+                <span aria-hidden="true">☰</span> Menu
+              </button>
+            </div>
+
+            <div class="card dash-card shadow-sm border-0 mb-3">
+              <div class="card-body">
+                <h1 class="h4 mb-1 dash-welcome-title">Welcome back, <%= (typeof user !== 'undefined' && user && user.firstname) ? user.firstname : 'Volunteer' %></h1>
+                <p class="mb-0 text-muted">Your Impact Journey shows what is complete, what is next, and where your crew can help.</p>
+              </div>
+            </div>
+
+            <h2 class="h5 mb-3 dash-ink-title dash-impact-title">Impact Journey</h2>
+            <section class="journey" aria-label="Impact Journey">
+              <div class="journey-item journey-item-next">
+                <div class="journey-marker" aria-hidden="true"></div>
+                <article class="journey-content card dash-card shadow-sm border-0">
+                  <div class="card-body">
+                    <span class="chip chip-next">NEXT UP</span>
+                    <h3 class="h5 mt-2 mb-2 dash-ink-title dash-impact-title">Next up</h3>
+                    <p class="mb-3 text-muted">Choose a verified service event this week to protect your streak and grow your impact access.</p>
+                    <div class="d-flex flex-wrap gap-2">
+                      <a class="btn dash-btn-coral btn-sm" href="/events" aria-label="Find opportunities">Find opportunities</a>
+                    </div>
+                  </div>
+                </article>
+              </div>
+
+              <div class="journey-item journey-item-week">
+                <div class="journey-marker" aria-hidden="true"></div>
+                <article class="journey-content card dash-card shadow-sm border-0">
+                  <div class="card-body">
+                    <span class="chip chip-week">THIS WEEK</span>
+                    <div id="weeks-plan-root"></div>
+                  </div>
+                </article>
+              </div>
+
+              <div class="journey-item journey-item-collapsed">
+                <div class="journey-marker" aria-hidden="true"></div>
+                <article class="journey-content card dash-card shadow-sm border-0">
+                  <div class="card-body">
+                    <div class="d-flex align-items-center justify-content-between gap-2 mb-2">
+                      <span class="chip chip-completed">COMPLETED</span>
+                      <a href="#" class="small text-decoration-none">View history</a>
+                    </div>
+                    <p class="mb-0">You&apos;re building momentum&#8212;keep going.</p>
+                  </div>
+                </article>
+              </div>
+
+              <div class="journey-item journey-item-collapsed">
+                <div class="journey-marker" aria-hidden="true"></div>
+                <article class="journey-content card dash-card shadow-sm border-0">
+                  <div class="card-body">
+                    <span class="chip chip-upcoming">UPCOMING</span>
+                    <ul class="journey-mini-list mb-0 mt-2">
+                      <li>Crew sync and shift confirmation.</li>
+                      <li>New mission unlock based on this week&apos;s streak.</li>
+                    </ul>
+                  </div>
+                </article>
+              </div>
+            </section>
+
+            <section class="journey-recs mt-4" aria-label="Recommended opportunities">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <h2 class="h6 mb-0 dash-ink-title dash-impact-title">Recommended opportunities</h2>
+                <a href="/events" class="small text-decoration-none">Browse all</a>
+              </div>
+              <div class="row g-3">
+                <div class="col-12 col-sm-6 col-xl-4">
+                  <article class="card dash-card shadow-sm border-0 rec-card h-100">
+                    <div class="card-body">
+                      <h4 class="h6 mb-1">Community Food Sort</h4>
+                      <p class="mb-2 text-muted small">Sort and pack essential items for families near you.</p>
+                      <a href="#" class="small text-decoration-none">See details</a>
+                    </div>
+                  </article>
+                </div>
+                <div class="col-12 col-sm-6 col-xl-4">
+                  <article class="card dash-card shadow-sm border-0 rec-card h-100">
+                    <div class="card-body">
+                      <h4 class="h6 mb-1">Neighborhood Cleanup</h4>
+                      <p class="mb-2 text-muted small">Join a weekend crew to restore local parks and pathways.</p>
+                      <a href="#" class="small text-decoration-none">See details</a>
+                    </div>
+                  </article>
+                </div>
+                <div class="col-12 col-sm-6 col-xl-4">
+                  <article class="card dash-card shadow-sm border-0 rec-card h-100">
+                    <div class="card-body">
+                      <h4 class="h6 mb-1">Youth Mentorship Hour</h4>
+                      <p class="mb-2 text-muted small">Support students with reading, confidence, and goals.</p>
+                      <a href="#" class="small text-decoration-none">See details</a>
+                    </div>
+                  </article>
+                </div>
+              </div>
+            </section>
+          </div>
+        </main>
+
+        <aside class="dash-right">
+          <div class="card dash-card shadow-sm border-0 mb-3">
+            <div class="card-body">
+              <h2 class="small text-uppercase text-muted fw-semibold mb-2">IMPACT SUMMARY</h2>
+              <div class="dash-metrics">
+                <div class="dash-metric">
+                  <span class="dash-metric-label">Impact Credits</span>
+                  <strong class="dash-metric-value"><%= Number(dashStats.impact_credits_balance) || 0 %></strong>
+                </div>
+                <div class="dash-metric">
+                  <span class="dash-metric-label">Streak Weeks</span>
+                  <strong class="dash-metric-value"><%= Number(dashStats.streak_weeks) || 0 %></strong>
+                </div>
+                <div class="dash-metric">
+                  <span class="dash-metric-label">Priority Tier</span>
+                  <strong class="dash-metric-value"><%= tierLabel %></strong>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card dash-card shadow-sm border-0 mb-3">
+            <div class="card-body">
+              <h2 class="small text-uppercase text-muted fw-semibold mb-2">QUICK ACTIONS</h2>
+              <div class="dash-actions-grid">
+                <a class="btn dash-btn-ink btn-sm" href="<%= dashRoutes.opportunities %>">Find opportunities</a>
+                <a class="btn dash-btn-ink btn-sm" href="/profile">View profile</a>
+                <a class="btn dash-btn-ink btn-sm" href="/donor">Donor dashboard</a>
+              </div>
+            </div>
+          </div>
+
+          <div class="card dash-card shadow-sm border-0 mb-3">
+            <div class="card-body">
+              <h2 class="small text-uppercase text-muted fw-semibold mb-2">BADGES EARNED</h2>
+              <div class="d-flex flex-wrap gap-2">
+                <span class="badge text-bg-light border">Rising Star</span>
+                <span class="badge text-bg-light border">Week 1</span>
+                <span class="badge text-bg-light border">Reliable</span>
+                <span class="badge text-bg-light border">Team Player</span>
+                <span class="badge text-bg-light border">Silver Tier</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="card dash-card shadow-sm border-0 mb-3">
+            <div class="card-body">
+              <h2 class="small text-uppercase text-muted fw-semibold mb-2">OPPORTUNITY HIGHLIGHTS</h2>
+              <div class="dash-crew-scroll">
+                <div class="dash-crew-shell dash-card">
+                  <div id="kinder-crew-carousel-root" class="dash-crew-root"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </aside>
+      </div>
+
+    </div>
+
+    <div
+      class="offcanvas offcanvas-start d-lg-none"
+      tabindex="-1"
+      id="dashboardNavOffcanvas"
+      aria-labelledby="dashboardNavOffcanvasLabel"
+    >
+      <div class="offcanvas-header">
+        <h5 class="offcanvas-title" id="dashboardNavOffcanvasLabel">Dashboard Menu</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+      </div>
+      <div class="offcanvas-body">
+        <div class="card dash-card shadow-sm border-0 mb-3">
+          <div class="card-body">
+            <div class="d-flex align-items-center gap-3 mb-3">
+              <div class="dash-avatar">
+                <% if (profilePhoto) { %>
+                  <img src="<%= profilePhoto %>" alt="<%= profileName %> profile photo" loading="lazy">
+                <% } else { %>
+                  <i class="fa-solid fa-hand-holding-heart"></i>
+                <% } %>
+              </div>
+              <div>
+                <div class="dash-profile-name"><%= profileName %></div>
+                <div class="dash-meta-row">
+                  <i class="fa-solid fa-medal" aria-hidden="true"></i>
+                  <span>Tier: <strong><%= tierLabel %></strong></span>
+                </div>
+                <div class="dash-meta-row">
+                  <i class="fa-solid fa-fire-flame-curved" aria-hidden="true"></i>
+                  <span>Streak: <strong><%= Number(dashStats.streak_weeks) || 0 %> weeks</strong></span>
+                </div>
+              </div>
+            </div>
+            <a class="btn dash-btn-ink w-100" href="/profile">View profile</a>
+          </div>
+        </div>
+        <div class="card dash-card shadow-sm border-0 mb-3">
+          <div class="card-body">
+            <div class="small text-uppercase text-muted fw-semibold mb-2">Navigation</div>
+            <nav aria-label="Dashboard navigation">
+              <ul class="dash-nav list-unstyled mb-0">
+                <li><a href="<%= dashRoutes.opportunities %>"><i class="fa-solid fa-compass"></i>Find Opportunities</a></li>
+                <li><a href="<%= dashRoutes.rewards %>"><i class="fa-solid fa-gift"></i>Rewards</a></li>
+                <li><a href="<%= dashRoutes.crew %>"><i class="fa-solid fa-users"></i>My Crew</a></li>
+                <li><a href="<%= dashRoutes.settings %>"><i class="fa-solid fa-gear"></i>Settings</a></li>
+              </ul>
+            </nav>
+          </div>
+        </div>
+        <div class="card dash-card shadow-sm border-0">
+          <div class="card-body">
+            <div class="small text-uppercase text-muted fw-semibold mb-2">Support</div>
+            <ul class="dash-secondary-links list-unstyled mb-0">
+              <li><a href="<%= dashRoutes.faq %>"><i class="fa-regular fa-circle-question"></i>FAQ</a></li>
+              <li><a href="<%= dashRoutes.feedback %>"><i class="fa-regular fa-comment-dots"></i>Feedback/Help</a></li>
+            </ul>
+          </div>
         </div>
       </div>
     </div>
-
-    <!-- Kinder Crew Carousel mount -->
-    <div id="kinder-crew-carousel-root" class="container my-4 mb-4"></div>
-    <!-- This Week's Plan mount -->
-    <div id="weeks-plan-root" class="container my-4 mb-4"></div>
-    <!-- Impact Hero mount -->
-    <div id="impact-hero-root" class="container my-4 mb-4"></div>
 
     <!-- Carousel props -->
     <script type="application/json" id="kinder-crew-carousel-props"><%- JSON.stringify({
@@ -134,19 +409,6 @@
       }());
     </script>
 
-    <!-- Impact Hero props -->
-    <script type="application/json" id="impact-hero-props"><%- JSON.stringify({
-      userName: (typeof user !== 'undefined' && user && (user.firstname || user.email)) ? (user.firstname || user.email) : null
-    }).replace(/</g, '\\u003c') %></script>
-    <script>
-      (function () {
-        try {
-          var el = document.getElementById('impact-hero-props');
-          window.__impactHeroProps = el ? JSON.parse(el.textContent) : {};
-        } catch (_) { window.__impactHeroProps = {}; }
-      }());
-    </script>
-
     <!-- Bundle that contains entry.jsx -->
     <script src="/js/bundles/entry.js?<%= (typeof assetTag !== 'undefined' ? assetTag : '') %>"></script>
     <!-- Mount dashboard React widgets -->
@@ -159,10 +421,6 @@
         var weeksPlanEl = document.getElementById('weeks-plan-root');
         if (weeksPlanEl && window.renderWeeksPlan) {
           window.renderWeeksPlan(weeksPlanEl, window.__weeksPlanProps || {});
-        }
-        var heroEl = document.getElementById('impact-hero-root');
-        if (heroEl && window.renderImpactHero) {
-          window.renderImpactHero(heroEl, window.__impactHeroProps || {});
         }
       }());
     </script>

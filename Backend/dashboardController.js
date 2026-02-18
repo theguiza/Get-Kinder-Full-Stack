@@ -12,6 +12,9 @@ export function makeDashboardController(pool) {
   }
 
   const DAILY_SURPRISE_LIMIT = 3;
+  const isProduction = process.env.NODE_ENV === 'production';
+  let hasLoggedStatsFallbackWarning = false;
+  let hasLoggedDashboardFallbackWarning = false;
 
   // --- identify the loaded file/version so you know THIS file is running
   console.log('[dashboardController] loaded -> Backend/dashboardController.js v3');
@@ -225,6 +228,14 @@ export function makeDashboardController(pool) {
 
   return {
     async getDashboard(req, res) {
+      const templateUser = req?.user || res?.locals?.user || null;
+      const baseViewLocals = {
+        user: templateUser,
+        name: templateUser?.firstname || templateUser?.email || null,
+        success: typeof res?.locals?.success !== 'undefined' ? res.locals.success : false,
+        loginSuccess: typeof res?.locals?.loginSuccess !== 'undefined' ? res.locals.loginSuccess : false
+      };
+
       try {
         const resolvedUserId = await resolveUserIdFromRequest(req);
         const userId = resolvedUserId || req?.user?.id;
@@ -369,8 +380,23 @@ export function makeDashboardController(pool) {
         try {
           volunteerStats = await getVolunteerStats(userId);
         } catch (statsErr) {
-          console.warn('[dashboardController] volunteer stats failed:', statsErr.message || statsErr);
-          volunteerStats = null;
+          if (!isProduction) {
+            if (!hasLoggedStatsFallbackWarning) {
+              console.warn(
+                '[dashboardController] DB unavailable in dev; using dashboard stats fallback for UI QA.',
+                statsErr.message || statsErr
+              );
+              hasLoggedStatsFallbackWarning = true;
+            }
+            volunteerStats = {
+              impact_credits_balance: 0,
+              streak_weeks: 0,
+              priority_tier: 'Bronze'
+            };
+          } else {
+            console.warn('[dashboardController] volunteer stats failed:', statsErr.message || statsErr);
+            volunteerStats = null;
+          }
         }
         const showStatsDebug = process.env.NODE_ENV !== "production" || Boolean(process.env.DEBUG);
         if (showStatsDebug) {
@@ -382,6 +408,7 @@ export function makeDashboardController(pool) {
         }
 
         res.render('dashboard', {
+          ...baseViewLocals,
           arcs: Array.isArray(arcsForRender) ? arcsForRender : [],
           initialArcId: arcsForRender[0]?.id || null,
           csrfToken: typeof req.csrfToken === 'function' ? req.csrfToken() : null,
@@ -390,6 +417,30 @@ export function makeDashboardController(pool) {
           showStatsDebug
         });
       } catch (error) {
+        if (!isProduction) {
+          if (!hasLoggedDashboardFallbackWarning) {
+            console.warn(
+              '[dashboardController] Falling back to dev dashboard UI stub because DB queries failed.',
+              error?.message || error
+            );
+            hasLoggedDashboardFallbackWarning = true;
+          }
+
+          return res.render('dashboard', {
+            ...baseViewLocals,
+            arcs: [],
+            initialArcId: null,
+            csrfToken: typeof req.csrfToken === 'function' ? req.csrfToken() : null,
+            volunteerStats: {
+              impact_credits_balance: 0,
+              streak_weeks: 0,
+              priority_tier: 'Bronze'
+            },
+            debugStatsUserId: null,
+            showStatsDebug: false
+          });
+        }
+
         console.error('dashboardController.getDashboard error:', error);
         res.status(500).render('error', {
           title: 'Dashboard Error',

@@ -10,7 +10,6 @@ import ReactDOM from "react-dom/client";
 import BestieVibesQuiz from "./BestieVibesQuiz.jsx";
 import { EventsApp } from "./events/App.jsx";
 import FriendQuizzesPage from "./FriendQuizzesPage.jsx";
-import ImpactHero from "./impactHero.jsx";
 import KinderCrewCarousel from "./kinderCrewCarousel.jsx";
 import WeeksPlan from "./weeksPlan.jsx";
 import DonorDashboard from "./donorDashboard.jsx";
@@ -40,17 +39,6 @@ window.renderFriendQuizzesPage = (selector, props = {}) => {
   if (!el) return;
   const root = getOrCreateRoot(el);
   root.render(<FriendQuizzesPage {...props} />);
-};
-// ---- Impact Hero
-window.renderImpactHero = (selector = "#impact-hero-root", props = {}) => {
-  const el = typeof selector === "string" ? document.querySelector(selector) : selector;
-  if (!el) return;
-  const root = getOrCreateRoot(el);
-  root.render(
-    <React.StrictMode>
-      <ImpactHero {...props} />
-    </React.StrictMode>
-  );
 };
 
 // ---- Kinder Crew Carousel
