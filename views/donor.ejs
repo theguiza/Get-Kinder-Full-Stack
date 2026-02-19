@@ -67,8 +67,20 @@
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/js/bootstrap.bundle.min.js" integrity="sha384-k6d4wzSIapyDyv1kpU366/PK5hCdSbCRGRCMv+eplOQJWyd1fbcAu9OCUj5zNLiq" crossorigin="anonymous"></script>
   <script src="/js/bundles/entry.js?<%= (typeof assetTag !== 'undefined' ? assetTag : '') %>"></script>
+  <script type="application/json" id="donor-props"><%- JSON.stringify({
+    donorProfile: (typeof donorProfile !== "undefined" && donorProfile) ? donorProfile : {}
+  }).replace(/</g, '\\u003c') %></script>
   <script>
-    window.renderDonorDashboard && window.renderDonorDashboard("#donor-dashboard-root", {});
+    (function () {
+      var props = {};
+      try {
+        var el = document.getElementById("donor-props");
+        props = el ? JSON.parse(el.textContent || "{}") : {};
+      } catch (err) {
+        props = {};
+      }
+      window.renderDonorDashboard && window.renderDonorDashboard("#donor-dashboard-root", props);
+    })();
   </script>
 </body>
 </html>

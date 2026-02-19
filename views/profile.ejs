@@ -26,9 +26,219 @@
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
   <link rel="stylesheet" href="./css/style.css">
   <style>
-    .profile-tabs .nav-link { border-radius: 999px; }
-    .profile-panel { display: none; }
-    .profile-panel[data-tab="overview"] { display: block; }
+    /* Tab pills */
+    .profile-page .profile-tabs .nav-link {
+      border-radius: 999px;
+      color: #455a7c;
+      font-weight: 500;
+    }
+    .profile-page .profile-tabs .nav-link.active {
+      background-color: #455a7c;
+      color: #fff;
+    }
+
+    .profile-page-shell {
+      margin-top: 4rem;
+    }
+
+    /* Hero strip */
+    .profile-page .profile-hero {
+      background: #fff;
+      border: 1px solid #dfe8f5;
+      box-shadow: var(--bs-box-shadow-sm);
+      border-radius: 18px;
+      padding: 2rem;
+    }
+    .profile-page .profile-hero .stat-label {
+      font-size: 0.75rem;
+      color: #6c757d;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .profile-page .profile-hero .stat-value {
+      font-size: 1.75rem;
+      font-weight: 700;
+      color: #ff5656;
+      line-height: 1.1;
+    }
+
+    /* Panels */
+    .profile-page .profile-panel { display: none; }
+    .profile-page .profile-panel.active { display: block; }
+
+    /* Avatar ring */
+    .profile-page .avatar-ring {
+      border: 3px solid #455a7c;
+      padding: 3px;
+      border-radius: 50%;
+    }
+
+    .profile-page .empty-state {
+      text-align: center;
+      padding: 2.5rem 1rem;
+      color: #6c757d;
+    }
+    .profile-page .empty-state .empty-icon {
+      font-size: 2.5rem;
+      margin-bottom: 0.75rem;
+      display: block;
+    }
+    .profile-page .empty-state .empty-title {
+      font-weight: 600;
+      color: #455a7c;
+      margin-bottom: 0.35rem;
+      font-size: 1rem;
+    }
+    .profile-page .empty-state .empty-body {
+      font-size: 0.875rem;
+      max-width: 280px;
+      margin: 0 auto 1rem;
+    }
+
+    /* Visible focus rings for keyboard users */
+    .profile-page .nav-link:focus-visible {
+      outline: 3px solid #ff5656;
+      outline-offset: 2px;
+    }
+    .profile-page .form-control:focus,
+    .profile-page .form-select:focus {
+      border-color: #455a7c;
+      box-shadow: 0 0 0 0.2rem rgba(69, 90, 124, 0.25);
+    }
+
+    /* Ensure all labels have sufficient weight */
+    .profile-page .labels,
+    .profile-page label {
+      font-weight: 500;
+      color: #2c3e50;
+      margin-bottom: 0.35rem;
+      display: block;
+    }
+
+    .profile-page .tier-badge { font-size: 0.8rem; padding: 0.35em 0.85em; }
+    .profile-page .tier-bronze { background-color: #cd7f32; color: #fff; }
+    .profile-page .tier-silver { background-color: #9e9e9e; color: #fff; }
+    .profile-page .tier-gold { background-color: #f5b942; color: #fff; }
+    .profile-page .tier-platinum { background: linear-gradient(135deg, #a8c0ff, #3f2b96); color: #fff; }
+
+    /* Match dashboard card system */
+    .profile-page .card:not(.profile-nudge-banner) {
+      border: 1px solid #dfe8f5 !important;
+      border-radius: 18px !important;
+      box-shadow: var(--bs-box-shadow-sm) !important;
+      background: #fff;
+    }
+    .profile-page .card:not(.profile-nudge-banner).shadow-sm {
+      box-shadow: var(--bs-box-shadow-sm) !important;
+    }
+    .profile-page .card:not(.profile-nudge-banner) .card-body {
+      padding: 1rem;
+    }
+
+    .profile-page .profile-nudge-banner {
+      border: 1px solid #dfe8f5 !important;
+      border-radius: 18px !important;
+      box-shadow: var(--bs-box-shadow-sm) !important;
+      background: #fff !important;
+    }
+
+    /* Profile picture dialog (match dashboard modal treatment) */
+    .profile-page #profilePictureModal .modal-content {
+      border: 1px solid #dfe8f5;
+      border-radius: 16px;
+    }
+    .profile-page #profilePictureModal .modal-header {
+      border-bottom: 1px solid #e8eef7;
+      align-items: center;
+    }
+    .profile-page #profilePictureModal .profile-picture-title-wrap {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.6rem;
+    }
+    .profile-page #profilePictureModal .profile-picture-logo {
+      width: 34px;
+      height: 34px;
+      border-radius: 6px;
+      object-fit: cover;
+    }
+    .profile-page #profilePictureModalLabel {
+      margin: 0;
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: #ff5656;
+      line-height: 1.2;
+    }
+    .profile-page .set-profile-picture-btn {
+      display: block;
+      margin: 0.6rem auto 0;
+    }
+    .profile-page #profilePictureModal .profile-picture-close {
+      background: #ff5656;
+      border-color: #ff5656;
+      color: #fff;
+    }
+    .profile-page #profilePictureModal .profile-picture-close:hover,
+    .profile-page #profilePictureModal .profile-picture-close:focus {
+      background: #f04c4c;
+      border-color: #f04c4c;
+      color: #fff;
+    }
+
+    .profile-page .nudge-chip:hover {
+      background: #f0f4ff !important;
+      border-color: #455a7c !important;
+    }
+    .profile-page .nudge-chip:focus-visible {
+      outline: 3px solid #ff5656;
+      outline-offset: 2px;
+    }
+
+    .print-header { display: none; }
+
+    /* Mobile: scrollable tab strip */
+    @media (max-width: 575.98px) {
+      .profile-page #profileTabs {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        padding-bottom: 4px;
+        justify-content: flex-start !important;
+      }
+      .profile-page #profileTabs::-webkit-scrollbar {
+        display: none;
+      }
+      .profile-page #profileTabs .nav-link {
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+      .profile-page .profile-hero .stat-value {
+        font-size: 1.35rem;
+      }
+      .profile-page .profile-hero .sdg-goals {
+        justify-content: center;
+      }
+      .profile-page-shell {
+        margin-top: 2.75rem;
+      }
+    }
+
+    @media print {
+      body > *:not(.profile-page) { display: none !important; }
+      .profile-page .profile-hero,
+      .profile-page nav,
+      .profile-page #profileNudgeBanner,
+      .profile-page .profile-panel:not([data-tab="portfolio"]) { display: none !important; }
+      .profile-page .profile-panel[data-tab="portfolio"] { display: block !important; }
+      .print-header { display: block !important; }
+      .profile-page .card { border: 1px solid #dee2e6 !important; box-shadow: none !important; break-inside: avoid; }
+      .profile-page .list-group-item { break-inside: avoid; }
+      #exportPortfolioBtn { display: none !important; }
+      body { font-size: 11pt; color: #000; }
+      .profile-page .card-body { padding: 12pt; }
+      @page { margin: 1.5cm; size: A4 portrait; }
+    }
   </style>
 </head>
 <body >
@@ -48,23 +258,37 @@
       <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
     </div>
   <% } %>
+  <% const safeUploadError = (typeof uploadError !== 'undefined' && uploadError) ? uploadError : ''; %>
   <%- include("partials/site-header", { currentPage: "profile" }) %>
-   <div> <br></div>
-      <div class="container profile-page rounded bg-white mt-5 px-3 pt-4">
-        <div class="text-center mb-3">
-          <h1 class="mt-3 mb-0" style="color: #455a7c;">Your Impact Profile</h1>
-        </div>
-        <nav class="mt-3">
-          <ul class="nav nav-pills gap-2 profile-tabs" id="profileTabs" role="tablist">
-            <li class="nav-item"><button type="button" class="nav-link active" data-tab-target="overview">Overview</button></li>
-            <li class="nav-item"><button type="button" class="nav-link" data-tab-target="portfolio">Portfolio</button></li>
-            <li class="nav-item"><button type="button" class="nav-link" data-tab-target="skills">Skills</button></li>
-            <li class="nav-item"><button type="button" class="nav-link" data-tab-target="preferences">Preferences</button></li>
-            <li class="nav-item"><button type="button" class="nav-link" data-tab-target="account">Account</button></li>
-          </ul>
-        </nav>
-
+  <div> <br></div>
+      <div class="container profile-page profile-page-shell rounded bg-white px-3 pt-4">
         <form id="profile-form" action="/profile" method="POST" enctype="multipart/form-data">
+          <% const fpMonthly = (friendPoints && Number.isFinite(friendPoints.monthly)) ? friendPoints.monthly : 0;
+            const fpTotal   = (friendPoints && Number.isFinite(friendPoints.total)) ? friendPoints.total : 0;
+            const fpGoal    = (friendPoints && Number.isFinite(friendPoints.goal) && friendPoints.goal > 0) ? friendPoints.goal : 500;
+            const fpPercent = Math.min(100, Math.round((fpTotal / fpGoal) * 100));
+            const stats = volunteerStats || {};
+            const impactBalance = Number(stats.impact_credits_balance) || 0;
+            const verifiedHours = Number(stats.verified_hours_total) || 0;
+            const streakWeeks = Number(stats.streak_weeks) || 0;
+            const reliabilityScore = Number(stats.reliability_score) || 0;
+            const priorityTier = stats.priority_tier || "Bronze";
+            const verifiedShifts = Number(stats.verified_shifts_total) || 0;
+          %>
+
+          <%
+            const completionItems = [
+              { done: !!user.picture, label: "Add a profile photo", tab: "overview", icon: "fa-camera" },
+              { done: !!user.interest1, label: "Set your volunteer preferences", tab: "preferences", icon: "fa-sliders" },
+              { done: !!user.sdg1, label: "Choose your SDG goals", tab: "preferences", icon: "fa-globe" },
+              { done: !!user.phone, label: "Add your phone number", tab: "account", icon: "fa-phone" },
+              { done: !!user.city, label: "Add your city", tab: "account", icon: "fa-location-dot" },
+            ];
+            const incomplete = completionItems.filter(i => !i.done);
+            const completionPct = Math.round(((completionItems.length - incomplete.length) / completionItems.length) * 100);
+            const profileComplete = incomplete.length === 0;
+          %>
+
           <% const sdgOptions = [
             "1 – No Poverty", "2 – Zero Hunger", "3 – Good Health and Well-being",
             "4 – Quality Education", "5 – Gender Equality", "6 – Clean Water and Sanitation",
@@ -75,135 +299,287 @@
             "16 – Peace, Justice and Strong Institutions", "17 – Partnerships for the Goals"
           ]; %>
 
-          <div class="profile-panel mt-3" data-tab="overview">
-            <div class="row">
-              <div class="col-md-4 border-right">
-                <div class="card shadow-sm border-0 mb-4" style="border-radius: 18px; background: #f7f9fc;">
-                  <div class="card-body d-flex flex-column align-items-center text-center">
-                    <img id="profile-avatar" class="rounded-circle mt-2" width="150px" alt="Get Kinder User Profile Picture" src="<%= user.picture || '/images/nerdy-KAI.png' %>"> <br>
-                    <strong class="mt-1" style="color: #455a7c;"><%= user.firstname + " " + user.lastname %></strong><br>
-                    <span class="text-black-50"><%= user.email %></span>
-                    <div class="mt-3 w-100">
-                      <input type="file" name="picture" accept="image/*" class="form-control form-control-sm"/>
-                      <small class="form-text text-muted">Upload a new profile image (max 2 MB)</small>
-                    </div>
-                  </div>
-                </div>
-
-                <% const fpMonthly = (friendPoints && Number.isFinite(friendPoints.monthly)) ? friendPoints.monthly : 0;
-                  const fpTotal   = (friendPoints && Number.isFinite(friendPoints.total)) ? friendPoints.total : 0;
-                  const fpGoal    = (friendPoints && Number.isFinite(friendPoints.goal) && friendPoints.goal > 0) ? friendPoints.goal : 500;
-                  const fpPercent = Math.min(100, Math.round((fpTotal / fpGoal) * 100));
-                  const stats = volunteerStats || {};
-                  const impactBalance = Number(stats.impact_credits_balance) || 0;
-                  const verifiedHours = Number(stats.verified_hours_total) || 0;
-                  const streakWeeks = Number(stats.streak_weeks) || 0;
-                  const reliabilityScore = Number(stats.reliability_score) || 0;
-                  const priorityTier = stats.priority_tier || "Bronze";
-                  const verifiedShifts = Number(stats.verified_shifts_total) || 0;
-                %>
-                <div class="card shadow-sm border-0 mt-4 w-100" style="border-radius: 18px; background: #f7f9fc;">
-                  <div class="card-body text-center">
-                    <h4 class="fw-bold text-center" style="color: #455a7c;">Impact Credits</h4>
-                    <div class="mt-2 text-muted text-nowrap text-center" style="font-size: 14px;">Current balance</div>
-                    <div class="display-6 fw-semibold text-center" style="color: #ff5656;"><%= impactBalance %></div>
-
-                    <div class="mt-3 text-muted text-nowrap text-center" style="font-size: 14px;">Verified shifts</div>
-                    <div class="h5 fw-semibold text-center" style="color: #ff5656;"><%= verifiedShifts %></div>
-                    <% if (showStatsDebug && debugStatsUserId) { %>
-                    <% } %>
-
-                    <p class="mt-3 mb-0" style="color: #2c3e50; font-size: 14px;">
-                      Verify volunteer shifts to grow Impact Credits, streaks, and reliability toward priority access and impact grants.
-                    </p>
-                  </div>
-                </div>
-
-                <div class="card shadow-sm border-0 mt-4 w-100" style="border-radius: 18px; background: #f7f9fc;">
-                  <div class="card-body">
-                    <h4 class="fw-bold text-center" style="color: #455a7c;">Volunteer Progress</h4>
-                    <div class="row text-center mt-3">
-                      <div class="col-6 mb-3">
-                        <div class="text-muted small">Impact Credits</div>
-                        <div class="h3 mb-0" style="color:#ff5656;"><%= impactBalance %></div>
-                      </div>
-                      <div class="col-6 mb-3">
-                        <div class="text-muted small">Verified Hours</div>
-                        <div class="h3 mb-0" style="color:#ff5656;"><%= verifiedHours.toFixed(1) %></div>
-                      </div>
-                      <div class="col-6">
-                        <div class="text-muted small">Streak Weeks</div>
-                        <div class="h4 mb-0"><%= streakWeeks %></div>
-                      </div>
-                      <div class="col-6">
-                        <div class="text-muted small">Reliability</div>
-                        <div class="h4 mb-0"><%= reliabilityScore %></div>
-                      </div>
-                    </div>
-                    <div class="text-center mt-3">
-                      <span class="badge rounded-pill" style="background-color:#7bb2ff;">Priority Tier: <%= priorityTier %></span>
-                    </div>
-                    <% if (!verifiedShifts) { %>
-                      <p class="mt-3 mb-0 text-muted text-center" style="font-size: 14px;">
-                        Complete your first verified shift to start earning Impact Credits and unlock priority access.
-                      </p>
-                    <% } %>
-                  </div>
-                </div>
+          <div class="profile-hero">
+            <div class="row g-4 align-items-center">
+              <div class="col-12 col-md-3 text-center">
+                <img id="profile-avatar" class="avatar-ring rounded-circle" width="140" height="140" alt="Profile photo of <%= user.firstname %> <%= user.lastname %>" src="<%= user.picture || '/images/nerdy-KAI.png' %>">
+                <button
+                  type="button"
+                  class="btn btn-sm btn-outline-secondary set-profile-picture-btn"
+                  data-bs-toggle="modal"
+                  data-bs-target="#profilePictureModal"
+                  aria-label="Set your profile picture">
+                  Set your profile picture
+                </button>
               </div>
-
-              <div class="col-md-8">
-                <div class="mt-4">
-                  <h2 class="text-right" style="color: #455a7c;">Upcoming opportunities</h2>
-                  <% const upcoming = (stats.upcoming || []); %>
-                  <% if (!upcoming.length) { %>
-                    <div class="text-muted small">No upcoming opportunities yet.</div>
-                  <% } else { %>
-                    <ul class="list-group">
-                      <% upcoming.forEach((item) => { %>
-                        <li class="list-group-item d-flex justify-content-between align-items-center">
-                          <div>
-                            <div class="fw-semibold"><%= item.title || 'Untitled' %></div>
-                            <div class="text-muted small">
-                              <%= item.org_name || 'Independent organizer' %>
-                              <% if (item.community_tag) { %> • <%= item.community_tag %><% } %>
-                            </div>
-                          </div>
-                          <span class="text-muted small"><%= item.start_at ? new Date(item.start_at).toLocaleDateString() : 'Date TBD' %></span>
-                        </li>
-                      <% }) %>
-                    </ul>
-                  <% } %>
-                </div>
-
-                <div class="mt-4">
-                  <h2 class="text-right" style="color: #455a7c;">Recent volunteering</h2>
-                  <% const recentHistory = (stats.recent_history || []); %>
-                  <% if (!recentHistory.length) { %>
-                    <div class="text-muted small">No completed opportunities yet.</div>
-                  <% } else { %>
-                    <ul class="list-group">
-                      <% recentHistory.forEach((item) => { %>
-                        <li class="list-group-item d-flex justify-content-between align-items-center">
-                          <div>
-                            <div class="fw-semibold"><%= item.title || 'Untitled' %></div>
-                            <div class="text-muted small">
-                              <%= item.verification_status || 'pending' %>
-                              <% if (item.attended_minutes) { %> • <%= item.attended_minutes %> mins<% } %>
-                            </div>
-                          </div>
-                          <span class="text-muted small"><%= item.start_at ? new Date(item.start_at).toLocaleDateString() : 'Date TBD' %></span>
-                        </li>
-                      <% }) %>
-                    </ul>
-                  <% } %>
+              <div class="col-12 col-md-5 text-center text-md-start">
+                <h1 style="color: #455a7c; font-size: 1.5rem; font-weight: 700; margin-bottom: 0.25rem;"><%= user.firstname %> <%= user.lastname %></h1>
+                <div class="text-muted small"><%= user.email %></div>
+                <%
+                  const tierKey = (priorityTier || 'bronze').toLowerCase();
+                  const tierClass = ['bronze','silver','gold','platinum'].includes(tierKey)
+                    ? 'tier-' + tierKey
+                    : 'tier-bronze';
+                %>
+                <span class="badge rounded-pill tier-badge <%= tierClass %> mt-2">
+                  Priority Tier: <%= priorityTier %>
+                </span>
+                <% if (user.kindness_style) { %><div class="mt-2 text-muted small"><i class="fas fa-heart me-1" style="color:#ff5656;"></i><%= user.kindness_style %></div><% } %>
+                <% if (user.sdg1 || user.sdg2 || user.sdg3) { %>
+                  <div class="d-flex flex-wrap gap-2 mt-2 align-items-center sdg-goals">
+                    <span class="stat-label me-1">SDG Goals:</span>
+                    <% [user.sdg1, user.sdg2, user.sdg3].forEach(function(sdg) { %>
+                      <% if (sdg) {
+                           const num = sdg.split(/\s*[-–—]\s*/)[0].trim(); %>
+                        <img
+                          src="/images/sdgs/goal_<%= num %>.png"
+                          alt="<%= sdg %>"
+                          title="<%= sdg %>"
+                          width="36"
+                          height="36"
+                          style="border-radius: 6px;"
+                          loading="lazy">
+                      <% } %>
+                    <% }); %>
+                  </div>
+                <% } %>
+              </div>
+              <div class="col-12 col-md-4">
+                <div class="row g-3">
+                  <div class="col-6 text-center">
+                    <div class="stat-value count-up" data-count="<%= impactBalance %>" data-decimals="0">0</div>
+                    <div class="stat-label">Impact Credits</div>
+                  </div>
+                  <div class="col-6 text-center">
+                    <div class="stat-value count-up" data-count="<%= verifiedHours %>" data-decimals="1">0</div>
+                    <div class="stat-label">Verified Hours</div>
+                  </div>
+                  <div class="col-6 text-center">
+                    <div class="stat-value count-up" data-count="<%= reliabilityScore %>" data-decimals="0">0</div>
+                    <div class="stat-label">Reliability</div>
+                  </div>
+                  <div class="col-6 text-center">
+                    <div class="stat-value count-up" data-count="<%= streakWeeks %>" data-decimals="0">0</div>
+                    <div class="stat-label">Streak Weeks</div>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
 
-          <div class="profile-panel mt-3" data-tab="portfolio" style="display:none">
-            <div class="card shadow-sm border-0 mb-3" style="border-radius: 18px; background: #f7f9fc;">
+          <div class="modal fade" id="profilePictureModal" tabindex="-1" aria-labelledby="profilePictureModalLabel" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered">
+              <div class="modal-content">
+                <div class="modal-header">
+                  <div class="profile-picture-title-wrap">
+                    <img src="/images/favicon.png" alt="Get Kinder logo" class="profile-picture-logo" loading="lazy">
+                    <h5 class="modal-title" id="profilePictureModalLabel">Set your profile picture</h5>
+                  </div>
+                  <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                  <% if (safeUploadError === 'fileTooLarge') { %>
+                    <div class="alert alert-danger mb-3" role="alert">
+                      Sorry, that image is too big. Please choose one under 2 MB.
+                    </div>
+                  <% } else if (safeUploadError === 'uploadFailed') { %>
+                    <div class="alert alert-danger mb-3" role="alert">
+                      Sorry, we couldn't upload that image. Please try again.
+                    </div>
+                  <% } %>
+                  <div id="profile-picture-client-error" class="alert alert-danger mb-3 d-none" role="alert"></div>
+                  <p class="mb-2">Set your profile picture</p>
+                  <input
+                    id="profile-picture-input"
+                    type="file"
+                    name="picture"
+                    accept="image/*"
+                    class="form-control"
+                    aria-label="Upload your profile picture">
+                  <small class="text-muted d-block mt-2">Upload a new photo (max 2 MB)</small>
+                </div>
+                <div class="modal-footer">
+                  <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                  <button type="submit" class="btn profile-picture-close">Save photo</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <% if (!profileComplete) { %>
+          <div class="profile-nudge-banner card border-0 shadow-sm mb-3 mt-3"
+               id="profileNudgeBanner"
+               role="region"
+               aria-label="Profile completion suggestions">
+            <div class="card-body py-3 px-4">
+              <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+                <div class="flex-grow-1">
+                  <div class="d-flex align-items-center gap-2 mb-2">
+                    <i class="fas fa-circle-exclamation" style="color:#ff5656;"></i>
+                    <span class="fw-semibold" style="color:#455a7c;">
+                      Your profile is <%= completionPct %>% complete
+                    </span>
+                  </div>
+
+                  <div class="progress mb-3" style="height: 6px; border-radius: 999px;">
+                    <div class="progress-bar"
+                         role="progressbar"
+                         style="width: <%= completionPct %>%; background-color: #ff5656; border-radius: 999px;"
+                         aria-valuenow="<%= completionPct %>"
+                         aria-valuemin="0"
+                         aria-valuemax="100"></div>
+                  </div>
+
+                  <div class="d-flex flex-wrap gap-2">
+                    <% incomplete.forEach(function(item) { %>
+                      <button type="button"
+                              class="btn btn-sm nudge-chip"
+                              data-tab-target="<%= item.tab %>"
+                              aria-label="Go to <%= item.tab %> tab to <%= item.label.toLowerCase() %>"
+                              style="background:#fff; border: 1px solid #dee2e6; border-radius: 999px;
+                                     color: #455a7c; font-size: 0.8rem; padding: 0.25rem 0.75rem;">
+                        <i class="fas <%= item.icon %> me-1" style="color:#ff5656;"></i>
+                        <%= item.label %>
+                      </button>
+                    <% }); %>
+                  </div>
+                </div>
+
+                <button type="button"
+                        class="btn-close flex-shrink-0"
+                        id="dismissNudge"
+                        aria-label="Dismiss profile completion suggestions"></button>
+              </div>
+            </div>
+          </div>
+          <% } %>
+
+          <nav class="mt-4 mb-2" aria-label="Profile sections">
+            <ul class="nav nav-pills gap-2 profile-tabs justify-content-center" id="profileTabs" role="tablist">
+              <li class="nav-item" role="presentation">
+                <button type="button" class="nav-link active" id="tab-overview" role="tab" aria-controls="panel-overview" aria-selected="true" data-tab-target="overview">Overview</button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button type="button" class="nav-link" id="tab-portfolio" role="tab" aria-controls="panel-portfolio" aria-selected="false" data-tab-target="portfolio">Portfolio</button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button type="button" class="nav-link" id="tab-skills" role="tab" aria-controls="panel-skills" aria-selected="false" data-tab-target="skills">Skills</button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button type="button" class="nav-link" id="tab-preferences" role="tab" aria-controls="panel-preferences" aria-selected="false" data-tab-target="preferences">Preferences</button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button type="button" class="nav-link" id="tab-account" role="tab" aria-controls="panel-account" aria-selected="false" data-tab-target="account">Account</button>
+              </li>
+            </ul>
+          </nav>
+
+          <div class="profile-panel mt-3 active" data-tab="overview" id="panel-overview" role="tabpanel" aria-labelledby="tab-overview" aria-hidden="false">
+            <div class="card shadow-sm border-0 mb-4">
+              <div class="card-body">
+                <h2 style="color:#455a7c;">Upcoming Opportunities</h2>
+                <% const upcoming = (stats.upcoming || []); %>
+                <% if (!upcoming.length) { %>
+                  <div class="empty-state">
+                    <span class="empty-icon">📅</span>
+                    <div class="empty-title">No upcoming opportunities yet</div>
+                    <div class="empty-body">Browse open shifts and RSVP to start building your impact.</div>
+                    <a href="/events" class="btn btn-sm btn-primary">Find Opportunities</a>
+                  </div>
+                <% } else { %>
+                  <ul class="list-group">
+                    <% upcoming.forEach((item) => { %>
+                      <li class="list-group-item d-flex justify-content-between align-items-center">
+                        <div>
+                          <div class="fw-semibold"><%= item.title || 'Untitled' %></div>
+                          <div class="text-muted small">
+                            <%= item.org_name || 'Independent organizer' %>
+                            <% if (item.community_tag) { %> • <%= item.community_tag %><% } %>
+                          </div>
+                        </div>
+                        <span class="text-muted small"><%= item.start_at ? new Date(item.start_at).toLocaleDateString() : 'Date TBD' %></span>
+                      </li>
+                    <% }) %>
+                  </ul>
+                <% } %>
+              </div>
+            </div>
+
+            <div class="card shadow-sm border-0">
+              <div class="card-body">
+                <h2 style="color:#455a7c;">Recent Volunteering</h2>
+                <div class="row g-4">
+                  <div class="col-md-6">
+                    <% const recentHistory = (stats.recent_history || []); %>
+                    <% if (!recentHistory.length) { %>
+                      <div class="empty-state">
+                        <span class="empty-icon">⏱️</span>
+                        <div class="empty-title">No completed shifts yet</div>
+                        <div class="empty-body">Your verified volunteering history will appear here.</div>
+                      </div>
+                    <% } else { %>
+                      <ul class="list-group">
+                        <% recentHistory.forEach((item) => { %>
+                          <li class="list-group-item d-flex justify-content-between align-items-center">
+                            <div>
+                              <div class="fw-semibold"><%= item.title || 'Untitled' %></div>
+                              <div class="text-muted small">
+                                <%= item.verification_status || 'pending' %>
+                                <% if (item.attended_minutes) { %> • <%= item.attended_minutes %> mins<% } %>
+                              </div>
+                            </div>
+                            <span class="text-muted small"><%= item.start_at ? new Date(item.start_at).toLocaleDateString() : 'Date TBD' %></span>
+                          </li>
+                        <% }) %>
+                      </ul>
+                    <% } %>
+                  </div>
+                  <div class="col-md-6">
+                    <p class="text-muted small">Skills breakdown and badges coming soon.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="profile-panel mt-3" data-tab="portfolio" id="panel-portfolio" role="tabpanel" aria-labelledby="tab-portfolio" aria-hidden="true">
+            <div class="print-header d-none">
+              <div style="display:flex; justify-content:space-between; align-items:center;
+                          border-bottom: 2px solid #455a7c; padding-bottom: 12pt; margin-bottom: 16pt;">
+                <div>
+                  <div style="font-size:18pt; font-weight:700; color:#455a7c;">
+                    <%= user.firstname %> <%= user.lastname %>
+                  </div>
+                  <div style="font-size:10pt; color:#6c757d;"><%= user.email %></div>
+                  <% if (user.city) { %>
+                    <div style="font-size:10pt; color:#6c757d;"><%= user.city %><% if (user.state) { %>, <%= user.state %><% } %></div>
+                  <% } %>
+                </div>
+                <div style="text-align:right;">
+                  <div style="font-size:10pt; color:#6c757d;">GetKinder.ai Volunteer Portfolio</div>
+                  <div style="font-size:9pt; color:#aaa;">Generated <%= new Date().toLocaleDateString('en-US', {year:'numeric',month:'long',day:'numeric'}) %></div>
+                </div>
+              </div>
+
+              <div style="display:flex; gap:24pt; margin-bottom:16pt;">
+                <div><strong>Verified Serves:</strong> <%= portfolioSummary?.total_serves_verified || 0 %></div>
+                <div><strong>Hours Served:</strong> <%= (portfolioSummary?.total_hours_verified || 0).toFixed(1) %></div>
+                <div><strong>Est. $KIND Earned:</strong> <%= portfolioSummary?.total_kind_est_earned || 0 %></div>
+                <div><strong>Priority Tier:</strong> <%= priorityTier %></div>
+              </div>
+            </div>
+
+            <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+              <h2 class="mb-0" style="color:#455a7c;">My Portfolio</h2>
+              <button type="button"
+                      id="exportPortfolioBtn"
+                      class="btn btn-sm btn-outline-secondary d-print-none"
+                      aria-label="Export portfolio as PDF">
+                <i class="fas fa-file-export me-1"></i> Export PDF
+              </button>
+            </div>
+
+            <div class="card shadow-sm border-0 mb-3">
               <div class="card-body d-flex flex-wrap gap-3">
                 <div><strong>Verified serves:</strong> <%= portfolioSummary?.total_serves_verified || 0 %></div>
                 <div><strong>Hours served:</strong> <%= (portfolioSummary?.total_hours_verified || 0).toFixed(1) %></div>
@@ -215,14 +591,18 @@
             <% const pastRows = (portfolioRows || []).filter(r => !r.is_upcoming).slice(0, 10); %>
 
             <% if ((portfolioRows || []).length === 0) { %>
-              <div class="card shadow-sm border-0" style="border-radius: 18px; background: #f7f9fc;">
-                <div class="card-body text-center">
-                  <p class="mb-3">You haven’t RSVP’d to any opportunities yet.</p>
-                  <a class="btn btn-primary" href="/events">Find opportunities</a>
+              <div class="card shadow-sm border-0">
+                <div class="card-body">
+                  <div class="empty-state">
+                    <span class="empty-icon">🌱</span>
+                    <div class="empty-title">Your portfolio is just getting started</div>
+                    <div class="empty-body">RSVP to your first opportunity to begin tracking your impact and earning $KIND.</div>
+                    <a href="/events" class="btn btn-sm btn-primary">Find Opportunities</a>
+                  </div>
                 </div>
               </div>
             <% } else { %>
-              <div class="card shadow-sm border-0 mb-3" style="border-radius: 18px; background: #f7f9fc;">
+              <div class="card shadow-sm border-0 mb-3">
                 <div class="card-body">
                   <h4 class="fw-bold mb-3" style="color: #455a7c;">Upcoming commitments</h4>
                   <% if (!upcomingRows.length) { %>
@@ -248,7 +628,7 @@
                 </div>
               </div>
 
-              <div class="card shadow-sm border-0" style="border-radius: 18px; background: #f7f9fc;">
+              <div class="card shadow-sm border-0">
                 <div class="card-body">
                   <h4 class="fw-bold mb-3" style="color: #455a7c;">Recent impact</h4>
                   <% if (!pastRows.length) { %>
@@ -282,14 +662,18 @@
             <% } %>
           </div>
 
-          <div class="profile-panel mt-3" data-tab="skills" style="display:none">
-            <div class="card shadow-sm border-0 mb-3" style="border-radius: 18px; background: #f7f9fc;">
+          <div class="profile-panel mt-3" data-tab="skills" id="panel-skills" role="tabpanel" aria-labelledby="tab-skills" aria-hidden="true">
+            <div class="card shadow-sm border-0 mb-3">
               <div class="card-body">
                 <h4 class="fw-bold" style="color: #455a7c;">Verified Skills</h4>
                 <% const topCats = (skillsBreakdown && skillsBreakdown.topCategories) || []; %>
                 <% const recentCats = (skillsBreakdown && skillsBreakdown.recentCategories) || []; %>
                 <% if (!topCats.length && !recentCats.length) { %>
-                  <p class="mb-0 text-muted">No verified skills yet. Complete opportunities to build your skills.</p>
+                  <div class="empty-state">
+                    <span class="empty-icon">🛠️</span>
+                    <div class="empty-title">No verified skills yet</div>
+                    <div class="empty-body">Complete verified shifts to build your skills profile across cause categories.</div>
+                  </div>
                 <% } else { %>
                   <div class="row">
                     <div class="col-md-6">
@@ -325,10 +709,10 @@
             </div>
           </div>
 
-          <div class="profile-panel mt-3" data-tab="preferences" style="display:none">
-            <div class="row">
+          <div class="profile-panel mt-3" data-tab="preferences" id="panel-preferences" role="tabpanel" aria-labelledby="tab-preferences" aria-hidden="true">
+            <div class="row justify-content-center">
               <div class="col-lg-8 col-xl-7">
-                <div class="card shadow-sm border-0 mb-3" style="border-radius:18px; background:#f7f9fc;">
+                <div class="card shadow-sm border-0 mb-3">
                   <div class="card-body">
                     <h2 style="color:#455a7c;" class="mb-1">Preferences</h2>
                     <p class="text-muted small mb-3">These settings help Get Kinder recommend the right volunteer opportunities for you.</p>
@@ -350,7 +734,7 @@
                   </div>
                 </div>
 
-                <div class="card shadow-sm border-0" style="border-radius:18px; background:#f7f9fc;">
+                <div class="card shadow-sm border-0">
                   <div class="card-body">
                     <h5 class="fw-bold" style="color:#455a7c;">UN SDG Goals (pick up to 3)</h5>
                     <p class="text-muted small mb-3">Align your volunteering with the global goals you care about most.</p>
@@ -408,10 +792,10 @@
             </div>
           </div>
 
-          <div class="profile-panel mt-3" data-tab="account" style="display:none">
-            <div class="row">
+          <div class="profile-panel mt-3" data-tab="account" id="panel-account" role="tabpanel" aria-labelledby="tab-account" aria-hidden="true">
+            <div class="row justify-content-center">
               <div class="col-md-10 col-lg-8">
-                <div class="card shadow-sm border-0" style="border-radius: 18px; background: #f7f9fc;">
+                <div class="card shadow-sm border-0">
                   <div class="card-body">
                     <div class="row mt-2">
                       <div class="col-md-6">
@@ -536,55 +920,197 @@
   </div>
 </section>
 <script>
-  // Optional preview: show the chosen image before saving
   document.addEventListener('DOMContentLoaded', () => {
-    const fileInput = document.querySelector('input[name="picture"]');
+    const fileInput = document.getElementById('profile-picture-input');
     const avatarImg = document.getElementById('profile-avatar');
-    fileInput.addEventListener('change', () => {
-      const file = fileInput.files[0];
-      if (file && file.type.startsWith('image/')) {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          avatarImg.src = e.target.result; // a "data:image/…;base64,…" preview
-        };
-        reader.readAsDataURL(file);
-      }
-    });
+    const clientError = document.getElementById('profile-picture-client-error');
+    const uploadError = '<%= safeUploadError %>';
+    const pictureModalEl = document.getElementById('profilePictureModal');
+
+    function showClientError(message) {
+      if (!clientError) return;
+      clientError.textContent = message;
+      clientError.classList.remove('d-none');
+    }
+
+    function clearClientError() {
+      if (!clientError) return;
+      clientError.textContent = '';
+      clientError.classList.add('d-none');
+    }
+
+    if (uploadError && pictureModalEl && window.bootstrap && window.bootstrap.Modal) {
+      const pictureModal = new window.bootstrap.Modal(pictureModalEl);
+      pictureModal.show();
+    }
+
+    if (fileInput && avatarImg) {
+      fileInput.addEventListener('change', () => {
+        clearClientError();
+        const file = fileInput.files[0];
+        if (!file) return;
+        if (file.size > 2 * 1024 * 1024) {
+          showClientError('Sorry, that image is too big. Please choose one under 2 MB.');
+          fileInput.value = '';
+          return;
+        }
+        if (file && file.type.startsWith('image/')) {
+          const reader = new FileReader();
+          reader.onload = (e) => { avatarImg.src = e.target.result; };
+          reader.readAsDataURL(file);
+        } else {
+          showClientError('Please choose a valid image file.');
+          fileInput.value = '';
+        }
+      });
+    }
   });
-</script>
-<script>
+
   (function () {
     function setActiveTab(key) {
-      var targetPanel = document.querySelector('.profile-panel[data-tab="' + key + '"]');
-      if (!targetPanel) {
-        console.warn('Missing panel for tab:', key);
-        key = 'overview';
-        targetPanel = document.querySelector('.profile-panel[data-tab="overview"]');
-      }
-      document.querySelectorAll('.profile-panel[data-tab]').forEach(function (p) {
-        p.style.display = (p.getAttribute('data-tab') === key) ? 'block' : 'none';
+      const panels = document.querySelectorAll('.profile-panel[data-tab]');
+      const buttons = document.querySelectorAll('#profileTabs [role="tab"]');
+      let found = false;
+      panels.forEach(p => {
+        const match = p.getAttribute('data-tab') === key;
+        p.classList.toggle('active', match);
+        p.setAttribute('aria-hidden', match ? 'false' : 'true');
+        if (match) found = true;
       });
-      document.querySelectorAll('#profileTabs .nav-link').forEach(function (b) {
-        b.classList.toggle('active', b.getAttribute('data-tab-target') === key);
+      if (!found) {
+        const fallback = document.querySelector('.profile-panel[data-tab="overview"]');
+        if (fallback) { fallback.classList.add('active'); fallback.setAttribute('aria-hidden', 'false'); }
+        key = 'overview';
+      }
+      buttons.forEach(b => {
+        const isActive = b.getAttribute('data-tab-target') === key;
+        b.classList.toggle('active', isActive);
+        b.setAttribute('aria-selected', isActive ? 'true' : 'false');
       });
     }
 
+    function initCounters() {
+      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        document.querySelectorAll('.count-up').forEach(el => {
+          const target = parseFloat(el.getAttribute('data-count')) || 0;
+          const decimals = parseInt(el.getAttribute('data-decimals'), 10) || 0;
+          el.textContent = target.toFixed(decimals);
+        });
+        return;
+      }
+
+      const counters = document.querySelectorAll('.count-up');
+      if (!counters.length) return;
+
+      const DURATION = 1200;
+
+      function animateCounter(el) {
+        const target = parseFloat(el.getAttribute('data-count')) || 0;
+        const decimals = parseInt(el.getAttribute('data-decimals'), 10) || 0;
+        if (target === 0) { el.textContent = (0).toFixed(decimals); return; }
+
+        const start = performance.now();
+
+        function tick(now) {
+          const elapsed = now - start;
+          const progress = Math.min(elapsed / DURATION, 1);
+          const eased = 1 - Math.pow(1 - progress, 3);
+          const current = eased * target;
+          el.textContent = current.toFixed(decimals);
+          if (progress < 1) requestAnimationFrame(tick);
+          else el.textContent = target.toFixed(decimals);
+        }
+
+        requestAnimationFrame(tick);
+      }
+
+      const hero = document.querySelector('.profile-hero');
+      if (!hero || !('IntersectionObserver' in window)) {
+        counters.forEach(animateCounter);
+        return;
+      }
+
+      const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            counters.forEach(animateCounter);
+            observer.disconnect();
+          }
+        });
+      }, { threshold: 0.3 });
+
+      observer.observe(hero);
+    }
+
     document.addEventListener('DOMContentLoaded', function () {
-      var tabs = document.getElementById('profileTabs');
+      const tabs = document.getElementById('profileTabs');
       if (!tabs) return;
 
-      console.log('[profile] panels:', [...document.querySelectorAll(".profile-panel[data-tab]")].map(p => p.getAttribute("data-tab")));
+      const getButtons = () => [...tabs.querySelectorAll('[role="tab"]')];
 
       tabs.addEventListener('click', function (e) {
-        var btn = e.target.closest('button[data-tab-target]');
+        const btn = e.target.closest('button[data-tab-target]');
         if (!btn) return;
         e.preventDefault();
-        var target = btn.getAttribute('data-tab-target');
-        setActiveTab(target);
+        setActiveTab(btn.getAttribute('data-tab-target'));
       });
 
-      // default
+      tabs.addEventListener('keydown', function (e) {
+        const buttons = getButtons();
+        const current = document.activeElement;
+        const idx = buttons.indexOf(current);
+        if (idx === -1) return;
+
+        if (e.key === 'ArrowRight') {
+          e.preventDefault();
+          const next = buttons[(idx + 1) % buttons.length];
+          next.focus();
+          setActiveTab(next.getAttribute('data-tab-target'));
+        } else if (e.key === 'ArrowLeft') {
+          e.preventDefault();
+          const prev = buttons[(idx - 1 + buttons.length) % buttons.length];
+          prev.focus();
+          setActiveTab(prev.getAttribute('data-tab-target'));
+        } else if (e.key === 'Home') {
+          e.preventDefault();
+          buttons[0].focus();
+          setActiveTab(buttons[0].getAttribute('data-tab-target'));
+        } else if (e.key === 'End') {
+          e.preventDefault();
+          buttons[buttons.length - 1].focus();
+          setActiveTab(buttons[buttons.length - 1].getAttribute('data-tab-target'));
+        }
+      });
+
+      document.querySelectorAll('.nudge-chip[data-tab-target]').forEach(function(chip) {
+        chip.addEventListener('click', function() {
+          const target = chip.getAttribute('data-tab-target');
+          setActiveTab(target);
+          const tabNav = document.getElementById('profileTabs');
+          if (tabNav) tabNav.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+      });
+
+      const dismissBtn = document.getElementById('dismissNudge');
+      const nudgeBanner = document.getElementById('profileNudgeBanner');
+      if (dismissBtn && nudgeBanner) {
+        dismissBtn.addEventListener('click', function() {
+          nudgeBanner.style.transition = 'opacity 0.3s ease';
+          nudgeBanner.style.opacity = '0';
+          setTimeout(function() { nudgeBanner.style.display = 'none'; }, 300);
+        });
+      }
+
+      const exportBtn = document.getElementById('exportPortfolioBtn');
+      if (exportBtn) {
+        exportBtn.addEventListener('click', function () {
+          setActiveTab('portfolio');
+          setTimeout(function () { window.print(); }, 150);
+        });
+      }
+
       setActiveTab('overview');
+      initCounters();
     });
   })();
 </script>

@@ -44,6 +44,49 @@
     max-height: 120px;
     width: auto !important;
   }
+
+  /* Coming soon modal branding */
+  #comingSoonModal .modal-content {
+    border: 1px solid #dfe8f5;
+    border-radius: 16px;
+  }
+  #comingSoonModal .modal-header {
+    border-bottom: 1px solid #e8eef7;
+    align-items: center;
+  }
+  #comingSoonModal .dash-coming-soon-title-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+  }
+  #comingSoonModal .dash-coming-soon-logo {
+    width: 34px;
+    height: 34px;
+    border-radius: 6px;
+    object-fit: cover;
+  }
+  #comingSoonModal #comingSoonModalLabel {
+    margin: 0;
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: #ff5656;
+    line-height: 1.2;
+  }
+  #comingSoonModal #comingSoonModalBody {
+    color: #455a7c;
+    font-size: 1rem;
+  }
+  #comingSoonModal .dash-coming-soon-close {
+    background: #ff5656;
+    border-color: #ff5656;
+    color: #fff;
+  }
+  #comingSoonModal .dash-coming-soon-close:hover,
+  #comingSoonModal .dash-coming-soon-close:focus {
+    background: #f04c4c;
+    border-color: #f04c4c;
+    color: #fff;
+  }
 </style>
   <!-- Google Tag Manager -->
   <script>
@@ -143,9 +186,9 @@
                 <nav aria-label="Dashboard navigation">
                   <ul class="dash-nav list-unstyled mb-0">
                     <li><a href="<%= dashRoutes.opportunities %>"><i class="fa-solid fa-compass"></i>Find Opportunities</a></li>
-                    <li><a href="<%= dashRoutes.rewards %>"><i class="fa-solid fa-gift"></i>Rewards</a></li>
-                    <li><a href="<%= dashRoutes.crew %>"><i class="fa-solid fa-users"></i>My Crew</a></li>
-                    <li><a href="<%= dashRoutes.settings %>"><i class="fa-solid fa-gear"></i>Settings</a></li>
+                    <li><a href="#" class="dash-coming-soon" data-title="Rewards" data-message="This functionality is in development! Check back soon to see the page with the rewards you can avail with your Impact Points."><i class="fa-solid fa-gift"></i>Rewards</a></li>
+                    <li><a href="#" class="dash-coming-soon" data-title="My Crew" data-message="This functionality is in development and coming soon! Volunteering with your Crew is the best and we want to help make that happen."><i class="fa-solid fa-users"></i>My Crew</a></li>
+                    <li><a href="#" class="dash-coming-soon" data-title="Settings" data-message="This functionality is in development and coming soon!"><i class="fa-solid fa-gear"></i>Settings</a></li>
                   </ul>
                 </nav>
               </div>
@@ -187,7 +230,7 @@
 
             <h2 class="h5 mb-3 dash-ink-title dash-impact-title">Impact Journey</h2>
             <section class="journey" aria-label="Impact Journey">
-              <div class="journey-item journey-item-next">
+              <div class="journey-item journey-item-next is-active">
                 <div class="journey-marker" aria-hidden="true"></div>
                 <article class="journey-content card dash-card shadow-sm border-0">
                   <div class="card-body">
@@ -396,9 +439,9 @@
             <nav aria-label="Dashboard navigation">
               <ul class="dash-nav list-unstyled mb-0">
                 <li><a href="<%= dashRoutes.opportunities %>"><i class="fa-solid fa-compass"></i>Find Opportunities</a></li>
-                <li><a href="<%= dashRoutes.rewards %>"><i class="fa-solid fa-gift"></i>Rewards</a></li>
-                <li><a href="<%= dashRoutes.crew %>"><i class="fa-solid fa-users"></i>My Crew</a></li>
-                <li><a href="<%= dashRoutes.settings %>"><i class="fa-solid fa-gear"></i>Settings</a></li>
+                <li><a href="#" class="dash-coming-soon" data-title="Rewards" data-message="This functionality is in development! Check back soon to see the page with the rewards you can avail with your Impact Points."><i class="fa-solid fa-gift"></i>Rewards</a></li>
+                <li><a href="#" class="dash-coming-soon" data-title="My Crew" data-message="This functionality is in development and coming soon! Volunteering with your Crew is the best and we want to help make that happen."><i class="fa-solid fa-users"></i>My Crew</a></li>
+                <li><a href="#" class="dash-coming-soon" data-title="Settings" data-message="This functionality is in development and coming soon!"><i class="fa-solid fa-gear"></i>Settings</a></li>
               </ul>
             </nav>
           </div>
@@ -460,6 +503,24 @@
             <button type="submit" class="btn btn-danger">Log Out</button>
           </form>
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="comingSoonModal" tabindex="-1" aria-labelledby="comingSoonModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <div class="dash-coming-soon-title-wrap">
+            <img src="/images/favicon.png" alt="Get Kinder logo" class="dash-coming-soon-logo" loading="lazy">
+            <h5 class="modal-title" id="comingSoonModalLabel">Coming soon</h5>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body" id="comingSoonModalBody"></div>
+        <div class="modal-footer">
+          <button type="button" class="btn dash-coming-soon-close" data-bs-dismiss="modal">Close</button>
         </div>
       </div>
     </div>

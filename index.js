@@ -593,7 +593,16 @@ function ensureAuthenticated(req, res, next) {
 app.post(
   '/profile',
   ensureAuthenticated,
-  uploadAvatar.single('picture'),
+  (req, res, next) => {
+    uploadAvatar.single('picture')(req, res, (err) => {
+      if (!err) return next();
+      if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
+        return res.redirect('/profile?uploadError=fileTooLarge');
+      }
+      console.error('Profile upload error:', err);
+      return res.redirect('/profile?uploadError=uploadFailed');
+    });
+  },
   async (req, res) => {
     // 1) Extract text fields from req.body
     const {
@@ -774,6 +783,7 @@ app.get('/profile', ensureAuthenticated, async (req, res) => {
     const success      = req.query.success === '1';   // registration alert
     const loginSuccess = req.query.login   === '1';   // login alert
     const name         = req.query.name    || '';     // firstname/email
+    const uploadError  = req.query.uploadError || '';
     // 3) Portfolio + derived skills/hours
     let portfolioRows = [];
     let portfolioSummary = { total_serves_verified: 0, total_hours_verified: 0, total_kind_est_earned: 0 };
@@ -870,7 +880,8 @@ app.get('/profile', ensureAuthenticated, async (req, res) => {
       showStatsDebug,
       success,
       loginSuccess,
-      name
+      name,
+      uploadError
     });
   } catch (err) {
     console.error('Profile DB error:', err);
@@ -1208,9 +1219,36 @@ app.get("/about", (req, res) => {
   });
 });
 
-app.get("/donor", ensureAuthenticated, (req, res) => {
+app.get("/donor", ensureAuthenticated, async (req, res) => {
   const assetTag = process.env.ASSET_TAG ?? Date.now().toString(36);
-  res.render("donor", { title: "Donor Dashboard", assetTag });
+  let donorRow = null;
+  try {
+    if (req.user?.id) {
+      const byId = await pool.query(
+        "SELECT firstname, lastname, email, picture FROM public.userdata WHERE id = $1 LIMIT 1",
+        [req.user.id]
+      );
+      donorRow = byId.rows[0] || null;
+    }
+    if (!donorRow && req.user?.email) {
+      const byEmail = await pool.query(
+        "SELECT firstname, lastname, email, picture FROM public.userdata WHERE email = $1 LIMIT 1",
+        [req.user.email]
+      );
+      donorRow = byEmail.rows[0] || null;
+    }
+  } catch (err) {
+    console.error("GET /donor profile load error:", err);
+  }
+
+  const donorProfile = {
+    firstname: donorRow?.firstname || req.user?.firstname || req.user?.first_name || "",
+    lastname: donorRow?.lastname || req.user?.lastname || req.user?.last_name || "",
+    name: req.user?.name || req.user?.displayName || "",
+    email: donorRow?.email || req.user?.email || "",
+    picture: donorRow?.picture || req.user?.picture || req.user?.avatar || req.user?.photo || "",
+  };
+  res.render("donor", { title: "Donor Dashboard", assetTag, donorProfile });
 });
 
 app.get("/donate", ensureAuthenticated, (req, res) => {

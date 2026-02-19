@@ -340,6 +340,84 @@ document.addEventListener('DOMContentLoaded', function() {
             bar.style.width = width;
         }, 500);
     });
+
+    // Journey timeline - Move active marker to the card nearest the viewport focus point
+    const journeyItems = [...document.querySelectorAll('.dashboard-container .journey .journey-item')];
+    if (journeyItems.length) {
+        const setActiveJourneyItem = (nextIndex) => {
+            journeyItems.forEach((item, index) => {
+                item.classList.toggle('is-active', index === nextIndex);
+            });
+        };
+
+        const updateActiveJourneyItem = () => {
+            const viewportFocusY = window.innerHeight * 0.45;
+            let closestIndex = -1;
+            let closestDistance = Number.POSITIVE_INFINITY;
+
+            journeyItems.forEach((item, index) => {
+                const rect = item.getBoundingClientRect();
+                if (rect.bottom <= 0 || rect.top >= window.innerHeight) return;
+                const itemCenterY = rect.top + (rect.height / 2);
+                const distance = Math.abs(itemCenterY - viewportFocusY);
+                if (distance < closestDistance) {
+                    closestDistance = distance;
+                    closestIndex = index;
+                }
+            });
+
+            if (closestIndex === -1) {
+                const firstRect = journeyItems[0].getBoundingClientRect();
+                closestIndex = firstRect.top > viewportFocusY ? 0 : (journeyItems.length - 1);
+            }
+
+            setActiveJourneyItem(closestIndex);
+        };
+
+        let isJourneyTicking = false;
+        const queueJourneyUpdate = () => {
+            if (isJourneyTicking) return;
+            isJourneyTicking = true;
+            requestAnimationFrame(() => {
+                isJourneyTicking = false;
+                updateActiveJourneyItem();
+            });
+        };
+
+        window.addEventListener('scroll', queueJourneyUpdate, { passive: true });
+        window.addEventListener('resize', queueJourneyUpdate);
+        queueJourneyUpdate();
+        setTimeout(queueJourneyUpdate, 250);
+        setTimeout(queueJourneyUpdate, 800);
+    }
+
+    // Dashboard nav - Show "coming soon" modal for placeholder links
+    const comingSoonLinks = document.querySelectorAll('.dash-coming-soon');
+    const comingSoonModalEl = document.getElementById('comingSoonModal');
+    const comingSoonTitleEl = document.getElementById('comingSoonModalLabel');
+    const comingSoonBodyEl = document.getElementById('comingSoonModalBody');
+
+    if (
+        comingSoonLinks.length &&
+        comingSoonModalEl &&
+        comingSoonTitleEl &&
+        comingSoonBodyEl &&
+        window.bootstrap &&
+        bootstrap.Modal
+    ) {
+        const comingSoonModal = bootstrap.Modal.getOrCreateInstance(comingSoonModalEl);
+
+        comingSoonLinks.forEach(link => {
+            link.addEventListener('click', function(event) {
+                event.preventDefault();
+                const title = (link.dataset.title || 'Coming soon').trim();
+                const message = (link.dataset.message || 'This functionality is in development and coming soon!').trim();
+                comingSoonTitleEl.textContent = `${title} - Coming soon`;
+                comingSoonBodyEl.textContent = message;
+                comingSoonModal.show();
+            });
+        });
+    }
 });
 
 /**

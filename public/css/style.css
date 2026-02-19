@@ -1123,24 +1123,31 @@ html, body, #app, .page, .chat-page, .full-height {
 
 .dashboard-container .journey-item {
   position: relative;
+  --journey-marker-size: 16px;
 }
 
 .dashboard-container .journey-marker {
   position: absolute;
-  left: -1.9rem;
-  top: 1.15rem;
-  width: 14px;
-  height: 14px;
+  left: calc(-1.8rem - (var(--journey-marker-size) / 2));
+  top: 1.1rem;
+  width: var(--journey-marker-size);
+  height: var(--journey-marker-size);
   border-radius: 999px;
   background: var(--dash-surface);
   border: 2px solid rgba(63, 95, 148, 0.32);
   box-shadow: 0 0 0 3px var(--dash-bg);
+  transition: background-color 180ms ease, border-color 180ms ease, box-shadow 180ms ease, width 180ms ease, height 180ms ease, left 180ms ease;
 }
 
 .dashboard-container .journey-item-next .journey-marker {
-  left: -2.04rem;
-  width: 18px;
-  height: 18px;
+  top: 0.95rem;
+}
+
+.dashboard-container .journey-item.is-active {
+  --journey-marker-size: 22px;
+}
+
+.dashboard-container .journey-item.is-active .journey-marker {
   background: var(--dash-accent);
   border-color: var(--dash-accent);
   box-shadow: 0 0 0 4px rgba(63, 95, 148, 0.2);
@@ -1451,15 +1458,12 @@ html, body, #app, .page, .chat-page, .full-height {
   }
 
   .dashboard-container .journey-marker {
-    left: -1.33rem;
-  }
-
-  .dashboard-container .journey-item-next .journey-marker {
-    left: -1.47rem;
+    left: calc(-1.47rem - (var(--journey-marker-size) / 2));
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .dashboard-container .journey-marker,
   .dashboard-container .journey-content,
   .dashboard-container .rec-card,
   .dashboard-container .dash-card,
