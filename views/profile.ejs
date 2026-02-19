@@ -33,7 +33,7 @@
       font-weight: 500;
     }
     .profile-page .profile-tabs .nav-link.active {
-      background-color: #455a7c;
+      background-color: #ff5656;
       color: #fff;
     }
 
@@ -327,7 +327,7 @@
                 <% if (user.kindness_style) { %><div class="mt-2 text-muted small"><i class="fas fa-heart me-1" style="color:#ff5656;"></i><%= user.kindness_style %></div><% } %>
                 <% if (user.sdg1 || user.sdg2 || user.sdg3) { %>
                   <div class="d-flex flex-wrap gap-2 mt-2 align-items-center sdg-goals">
-                    <span class="stat-label me-1">SDG Goals:</span>
+                    <span class="stat-label me-1" style="color:#455a7c;">MY SDG GOALS:</span>
                     <% [user.sdg1, user.sdg2, user.sdg3].forEach(function(sdg) { %>
                       <% if (sdg) {
                            const num = sdg.split(/\s*[-–—]\s*/)[0].trim(); %>

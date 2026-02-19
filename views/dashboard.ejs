@@ -87,6 +87,15 @@
     border-color: #f04c4c;
     color: #fff;
   }
+
+  .dash-side-card-title {
+    color: #ff5656 !important;
+  }
+
+  .dashboard-container .dash-nav a,
+  .dashboard-container .dash-nav a.is-active {
+    color: #455a7c;
+  }
 </style>
   <!-- Google Tag Manager -->
   <script>
@@ -182,7 +191,7 @@
 
             <div class="card dash-card shadow-sm border-0">
               <div class="card-body">
-                <div class="small text-uppercase text-muted fw-semibold mb-2">Navigation</div>
+                <div class="small text-uppercase fw-semibold mb-2 dash-side-card-title">Navigation</div>
                 <nav aria-label="Dashboard navigation">
                   <ul class="dash-nav list-unstyled mb-0">
                     <li><a href="<%= dashRoutes.opportunities %>"><i class="fa-solid fa-compass"></i>Find Opportunities</a></li>
@@ -196,7 +205,7 @@
 
             <div class="card dash-card dash-sidebar-foot shadow-sm border-0">
               <div class="card-body">
-                <div class="small text-uppercase text-muted fw-semibold mb-2">Support</div>
+                <div class="small text-uppercase fw-semibold mb-2 dash-side-card-title">Support</div>
                 <ul class="dash-secondary-links list-unstyled mb-0">
                   <li><a href="<%= dashRoutes.faq %>"><i class="fa-regular fa-circle-question"></i>FAQ</a></li>
                   <li><a href="<%= dashRoutes.feedback %>"><i class="fa-regular fa-comment-dots"></i>Feedback/Help</a></li>
@@ -340,7 +349,7 @@
         <aside class="dash-right">
           <div class="card dash-card shadow-sm border-0 mb-3">
             <div class="card-body">
-              <h2 class="small text-uppercase text-muted fw-semibold mb-2">IMPACT SUMMARY</h2>
+              <h2 class="small text-uppercase fw-semibold mb-2 dash-side-card-title">IMPACT SUMMARY</h2>
               <div class="dash-metrics">
                 <div class="dash-metric">
                   <span class="dash-metric-label">Impact Credits</span>
@@ -360,7 +369,7 @@
 
           <div class="card dash-card shadow-sm border-0 mb-3">
             <div class="card-body">
-              <h2 class="small text-uppercase text-muted fw-semibold mb-2">QUICK ACTIONS</h2>
+              <h2 class="small text-uppercase fw-semibold mb-2 dash-side-card-title">QUICK ACTIONS</h2>
               <div class="dash-actions-grid">
                 <a class="btn dash-btn-ink btn-sm" href="<%= dashRoutes.opportunities %>">Find opportunities</a>
                 <a class="btn dash-btn-ink btn-sm" href="/profile">View profile</a>
@@ -371,7 +380,7 @@
 
           <div class="card dash-card shadow-sm border-0 mb-3">
             <div class="card-body">
-              <h2 class="small text-uppercase text-muted fw-semibold mb-2">BADGES EARNED</h2>
+              <h2 class="small text-uppercase fw-semibold mb-2 dash-side-card-title">BADGES EARNED</h2>
               <div class="d-flex flex-wrap gap-2">
                 <span class="badge text-bg-light border">Rising Star</span>
                 <span class="badge text-bg-light border">Week 1</span>
@@ -384,7 +393,7 @@
 
           <div class="card dash-card shadow-sm border-0 mb-3">
             <div class="card-body">
-              <h2 class="small text-uppercase text-muted fw-semibold mb-2">OPPORTUNITY HIGHLIGHTS</h2>
+              <h2 class="small text-uppercase fw-semibold mb-2 dash-side-card-title">OPPORTUNITY HIGHLIGHTS</h2>
               <div class="dash-crew-scroll">
                 <div class="dash-crew-shell dash-card">
                   <div id="kinder-crew-carousel-root" class="dash-crew-root"></div>
@@ -435,7 +444,7 @@
         </div>
         <div class="card dash-card shadow-sm border-0 mb-3">
           <div class="card-body">
-            <div class="small text-uppercase text-muted fw-semibold mb-2">Navigation</div>
+            <div class="small text-uppercase fw-semibold mb-2 dash-side-card-title">Navigation</div>
             <nav aria-label="Dashboard navigation">
               <ul class="dash-nav list-unstyled mb-0">
                 <li><a href="<%= dashRoutes.opportunities %>"><i class="fa-solid fa-compass"></i>Find Opportunities</a></li>
@@ -448,7 +457,7 @@
         </div>
         <div class="card dash-card shadow-sm border-0">
           <div class="card-body">
-            <div class="small text-uppercase text-muted fw-semibold mb-2">Support</div>
+            <div class="small text-uppercase fw-semibold mb-2 dash-side-card-title">Support</div>
             <ul class="dash-secondary-links list-unstyled mb-0">
               <li><a href="<%= dashRoutes.faq %>"><i class="fa-regular fa-circle-question"></i>FAQ</a></li>
               <li><a href="<%= dashRoutes.feedback %>"><i class="fa-regular fa-comment-dots"></i>Feedback/Help</a></li>
