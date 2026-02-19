@@ -105,6 +105,8 @@
       faq: '/how-it-works#faq',
       feedback: '/contact'
     }; %>
+    <% const completedEvent = (typeof dashboardCompletedEvent !== 'undefined') ? dashboardCompletedEvent : null; %>
+    <% const upcomingEvent = (typeof dashboardUpcomingEvent !== 'undefined') ? dashboardUpcomingEvent : null; %>
     <div class="container-fluid my-4">
       <div class="dash-grid">
         <aside class="dash-left d-none d-lg-block">
@@ -215,9 +217,17 @@
                   <div class="card-body">
                     <div class="d-flex align-items-center justify-content-between gap-2 mb-2">
                       <span class="chip chip-completed">COMPLETED</span>
-                      <a href="#" class="small text-decoration-none">View history</a>
+                      <a href="/profile" class="small text-decoration-none">View history</a>
                     </div>
-                    <p class="mb-0">You&apos;re building momentum&#8212;keep going.</p>
+                    <% if (completedEvent) { %>
+                      <div class="fw-semibold"><%= completedEvent.title || 'Untitled event' %></div>
+                      <p class="mb-0 text-muted small">
+                        <%= completedEvent.start_at ? completedEvent.start_at.toLocaleDateString() : 'Date TBD' %> • <%= completedEvent.location_text || 'Location TBD' %>
+                        <% if (typeof completedEvent.duration_hours === 'number' && completedEvent.duration_hours > 0) { %> • <%= completedEvent.duration_hours.toFixed(1) %> hrs<% } %>
+                      </p>
+                    <% } else { %>
+                      <p class="mb-0">No completed events yet. After your first verified serve, your latest impact will appear here.</p>
+                    <% } %>
                   </div>
                 </article>
               </div>
@@ -227,10 +237,20 @@
                 <article class="journey-content card dash-card shadow-sm border-0">
                   <div class="card-body">
                     <span class="chip chip-upcoming">UPCOMING</span>
-                    <ul class="journey-mini-list mb-0 mt-2">
-                      <li>Crew sync and shift confirmation.</li>
-                      <li>New mission unlock based on this week&apos;s streak.</li>
-                    </ul>
+                    <% if (upcomingEvent) { %>
+                      <ul class="journey-mini-list mb-0 mt-2">
+                        <li><strong><%= upcomingEvent.title || 'Untitled event' %></strong></li>
+                        <li><%= upcomingEvent.start_at ? upcomingEvent.start_at.toLocaleString() : 'Date TBD' %> • <%= upcomingEvent.location_text || 'Location TBD' %></li>
+                        <% if ((upcomingEvent.kind_estimate_per_user || 0) > 0) { %>
+                          <li>Estimated reward: +<%= upcomingEvent.kind_estimate_per_user %> $KIND</li>
+                        <% } %>
+                      </ul>
+                    <% } else { %>
+                      <ul class="journey-mini-list mb-0 mt-2">
+                        <li>No upcoming commitments yet.</li>
+                        <li><a class="text-decoration-none" href="/events">Find opportunities to keep your streak active.</a></li>
+                      </ul>
+                    <% } %>
                   </div>
                 </article>
               </div>
