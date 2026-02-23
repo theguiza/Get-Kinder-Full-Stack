@@ -1,0 +1,224 @@
+.org-portal-page {
+  background: #f5f7fb;
+}
+
+.org-portal-nav-spacer {
+  height: clamp(72px, 11vw, 96px);
+}
+
+@media (min-width: 768px) {
+  .org-portal-nav-spacer {
+    height: 108px;
+  }
+}
+
+.org-portal-main {
+  padding-bottom: 2rem;
+}
+
+.org-hero {
+  margin-top: 0.75rem;
+}
+
+.org-hero-card {
+  background: #fff;
+  border: 1px solid #dfe8f5;
+  box-shadow: 0 4px 14px rgba(26, 39, 68, 0.08);
+  border-radius: 18px;
+  padding: 1.75rem;
+}
+
+.org-hero-avatar {
+  border: 3px solid #455a7c;
+  padding: 3px;
+  object-fit: cover;
+}
+
+.org-hero-name {
+  color: #455a7c;
+  font-size: 1.4rem;
+  font-weight: 700;
+  margin-bottom: 0;
+}
+
+.org-hero-org {
+  color: #ff5656;
+  font-size: 1.75rem;
+  font-weight: 700;
+  line-height: 1.15;
+  margin-bottom: 0.2rem;
+}
+
+.org-hero-sdg {
+  color: #455a7c;
+  font-size: 0.88rem;
+}
+
+.org-hero-sdg-label {
+  color: #455a7c;
+  font-weight: 700;
+}
+
+.org-hero-kpi .card-body {
+  padding: 0.8rem;
+}
+
+.org-kpi-card {
+  border: 1px solid #dfe8f5;
+  border-top: 3px solid #ff5656;
+  border-radius: 18px;
+  box-shadow: 0 4px 14px rgba(26, 39, 68, 0.08);
+  background: #fff;
+}
+
+.org-kpi-label {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #6c757d;
+}
+
+.org-kpi-icon {
+  color: #ff5656;
+}
+
+.org-kpi-value {
+  font-size: 1.8rem;
+  line-height: 1.1;
+  font-weight: 700;
+  color: #455a7c;
+  margin-top: 0.35rem;
+}
+
+.org-kpi-sub {
+  color: #6c757d;
+  font-size: 0.88rem;
+  margin-top: 0.3rem;
+}
+
+.org-split-shell {
+  border: 1px solid #dfe8f5;
+  border-radius: 16px;
+  box-shadow: var(--bs-box-shadow-sm);
+  background: #fff;
+  padding: 1rem;
+}
+
+.org-split-shell .orgp-root > section[aria-label="Organization KPIs (React)"] {
+  display: none !important;
+}
+
+.org-tabs .nav-link {
+  border-radius: 999px;
+  color: #455a7c;
+  border: 1px solid #dfe8f5;
+  font-weight: 600;
+  margin-right: 0.4rem;
+}
+
+.org-tabs .nav-link.active {
+  background: #ff5656;
+  border-color: #ff5656;
+  color: #fff;
+}
+
+.org-panel {
+  border: 1px solid #dfe8f5;
+  border-radius: 14px;
+  box-shadow: var(--bs-box-shadow-sm);
+}
+
+.org-panel-title {
+  color: #ff5656;
+  font-size: 1.05rem;
+  font-weight: 700;
+  margin-bottom: 0.3rem;
+}
+
+.org-panel-subtitle {
+  color: #455a7c;
+  font-size: 0.9rem;
+  margin-bottom: 0.85rem;
+}
+
+.org-queue-list .list-group-item {
+  border: 1px solid #e7edf8;
+  margin-bottom: 0.5rem;
+  border-radius: 10px;
+}
+
+.org-queue-list .list-group-item.active {
+  background: #ff5656;
+  border-color: #ff5656;
+  color: #fff;
+}
+
+.org-queue-title {
+  font-weight: 600;
+  color: inherit;
+}
+
+.org-queue-meta {
+  font-size: 0.84rem;
+  color: inherit;
+  opacity: 0.9;
+}
+
+.org-detail-title {
+  color: #455a7c;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.org-detail-meta {
+  color: #5f6f8a;
+}
+
+.org-status-pill {
+  background: #455a7c;
+  color: #fff;
+}
+
+.org-detail-note {
+  color: #455a7c;
+  background: #f8fbff;
+  border: 1px dashed #d5e3fa;
+  border-radius: 10px;
+  padding: 0.8rem;
+}
+
+.org-placeholder {
+  border: 1px dashed #dfe8f5;
+  border-radius: 12px;
+  padding: 1rem;
+  color: #455a7c;
+  background: #fbfdff;
+}
+
+.org-placeholder h3 {
+  color: #ff5656;
+  font-size: 1.05rem;
+  margin-bottom: 0.35rem;
+}
+
+@media (max-width: 767.98px) {
+  .org-portal-nav-spacer {
+    height: 128px;
+  }
+
+  .org-hero {
+    margin-top: 0.75rem;
+  }
+
+  .org-hero-card {
+    padding: 1.25rem;
+  }
+
+  .org-hero-name,
+  .org-kpi-value {
+    font-size: 1.55rem;
+  }
+}

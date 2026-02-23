@@ -14,6 +14,7 @@ import KinderCrewCarousel from "./kinderCrewCarousel.jsx";
 import WeeksPlan from "./weeksPlan.jsx";
 import DonorDashboard from "./donorDashboard.jsx";
 import DonatePage from "./donate.jsx";
+import { renderOrgPortal, renderKpiStrip } from "./orgPortal.jsx";
 
 const ROOTS = new WeakMap();
 
@@ -86,6 +87,9 @@ window.renderDonatePage = (selector = "#donate-root", props = {}) => {
     </React.StrictMode>
   );
 };
+
+window.renderOrgPortal = renderOrgPortal;
+window.renderKpiStrip = renderKpiStrip;
 
 // ---- Onboarding
 import OnboardingCards, { getDefaultSteps } from "./components/OnboardingCards.tsx";

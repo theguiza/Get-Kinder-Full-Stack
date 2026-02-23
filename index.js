@@ -42,7 +42,10 @@ import ratingsApiRouter from "./routes/ratingsApi.js";
 import redemptionsApiRouter from "./routes/redemptionsApi.js";
 import donationsApiRouter from "./routes/donationsApi.js";
 import donorApiRouter from "./routes/donorApi.js";
+import orgPortalRouter from "./routes/orgPortalApi.js";
+import orgApplyRouter from "./routes/orgApplyApi.js";
 import squareWebhooksApiRouter from "./routes/squareWebhooksApi.js";
+import { ensureOrgRepPage } from "./middleware/ensureOrgRep.js";
 
 // Reuse the same tool schema for Chat Completions (strip any nonstandard fields if needed)
 const CHAT_COMPLETIONS_TOOLS = DASHBOARD_TOOLS.map(t => ({ type: 'function', function: t.function }));
@@ -175,6 +178,8 @@ app.use("/api/ratings", ensureAuthenticatedApi, ratingsApiRouter);
 app.use("/api/redemptions", ensureAuthenticatedApi, redemptionsApiRouter);
 app.use("/api/donations", ensureAuthenticatedApi, donationsApiRouter);
 app.use("/api/donor", ensureAuthenticatedApi, donorApiRouter);
+app.use("/api/org", ensureAuthenticatedApi, orgPortalRouter);
+app.use("/", orgApplyRouter);
 
 // Make `user` available in all EJS templates
 app.use((req, res, next) => {
@@ -1199,6 +1204,16 @@ const { getDashboard, getMorningPrompt, saveReflection, markDayDone, cancelChall
 // Dashboard - All dashboard routes
 app.get("/dashboard", ensureAuthenticated, getDashboard);
 app.get("/events", ensureAuthenticated, getEventsPage);
+app.get("/checkin/:eventId", ensureAuthenticated, (req, res) => {
+  const assetTag = process.env.ASSET_TAG ?? Date.now().toString(36);
+  const eventId = String(req.params.eventId || "").trim();
+  res.render("checkin", {
+    title: "Event Check-In",
+    assetTag,
+    eventId,
+    csrfToken: typeof req.csrfToken === "function" ? req.csrfToken() : null,
+  });
+});
 //app.get('/dashboard/morning-prompt', ensureAuthenticated, getMorningPrompt);
 //app.post('/dashboard/reflect', ensureAuthenticated, saveReflection);
 //app.post('/dashboard/mark-done', ensureAuthenticated, markDayDone);
@@ -1249,6 +1264,11 @@ app.get("/donor", ensureAuthenticated, async (req, res) => {
     picture: donorRow?.picture || req.user?.picture || req.user?.avatar || req.user?.photo || "",
   };
   res.render("donor", { title: "Donor Dashboard", assetTag, donorProfile });
+});
+
+app.get("/org-portal", ensureOrgRepPage, (req, res) => {
+  const assetTag = Date.now();
+  res.render("org-portal", { assetTag, user: req.user });
 });
 
 app.get("/donate", ensureAuthenticated, (req, res) => {

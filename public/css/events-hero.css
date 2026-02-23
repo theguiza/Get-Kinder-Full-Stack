@@ -1,0 +1,126 @@
+/* Hero */
+.events-hero {
+  background: #ffffff;
+  padding: 48px 0 32px;
+}
+
+.events-hero-title {
+  font-size: 2.2rem;
+  font-weight: 700;
+  color: #455a7c;
+  line-height: 1.2;
+  margin-bottom: 16px;
+}
+
+.events-hero-location {
+  color: #455a7c;
+}
+
+.events-hero-location-change {
+  font-size: 0.85rem;
+  color: #ff5656;
+  text-decoration: none;
+  margin-left: 8px;
+  font-weight: 400;
+  vertical-align: middle;
+}
+
+.events-hero-location-change:hover {
+  text-decoration: underline;
+}
+
+.events-hero-sub {
+  font-size: 1rem;
+  color: #6c757d;
+  max-width: 440px;
+  line-height: 1.6;
+}
+
+.events-hero-photo-wrap {
+  border-radius: 24px;
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(69, 90, 124, 0.12);
+  height: 320px;
+  background: #f0f4f8;
+}
+
+.events-hero-photo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Chip bar */
+.events-chip-bar {
+  background: #f8f9fa;
+  padding: 20px 0;
+  border-top: 1px solid #eee;
+  border-bottom: 1px solid #eee;
+  margin-bottom: 8px;
+}
+
+.events-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.events-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 18px;
+  border-radius: 999px;
+  border: 1.5px solid #455a7c;
+  background: #ffffff;
+  color: #455a7c;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.events-chip:hover {
+  background: #f0f4f8;
+}
+
+.events-chip.active {
+  background: #ff5656;
+  border-color: #ff5656;
+  color: #ffffff;
+}
+
+/* Mobile */
+@media (max-width: 767px) {
+  .events-hero {
+    padding: 24px 0 20px;
+  }
+
+  .events-hero-title {
+    font-size: 1.5rem;
+  }
+
+  .events-hero .col-12:last-child {
+    order: -1;
+  }
+
+  .events-hero-photo-wrap {
+    height: 200px;
+    border-radius: 16px;
+  }
+
+  .events-chip-row {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 4px;
+  }
+
+  .events-chip-row::-webkit-scrollbar {
+    display: none;
+  }
+}

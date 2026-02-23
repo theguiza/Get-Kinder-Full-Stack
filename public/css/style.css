@@ -50,7 +50,7 @@ p {
 
 @media (max-width: 767.98px) {
   .home-page .home-hero {
-    margin-top: clamp(44px, 12vw, 72px);
+    margin-top: clamp(64px, 16vw, 104px);
   }
 }
 

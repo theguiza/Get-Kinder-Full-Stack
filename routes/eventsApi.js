@@ -2,11 +2,12 @@ import express from "express";
 import { listEvents, getEventById, createEvent, createInvite, updateEvent, draftInviteCopy, downloadEventCalendar, respondToEventRsvp, checkInToEvent, verifyEventRsvp, listEventRoster } from "../controllers/eventsApiController.js";
 import { submitEventRating } from "../controllers/eventsRatingsController.js";
 import { cancelEvent, completeEvent, deleteDraftEvent } from "../controllers/meEventsApiController.js";
+import { ensureOrgRep } from "../middleware/ensureOrgRep.js";
 
 const eventsApiRouter = express.Router();
 
 eventsApiRouter.get("/", listEvents);
-eventsApiRouter.post("/", createEvent);
+eventsApiRouter.post("/", ensureOrgRep, createEvent);
 eventsApiRouter.post("/:id/cancel", cancelEvent);
 eventsApiRouter.post("/:id/complete", completeEvent);
 eventsApiRouter.post("/:id/invites", createInvite);
@@ -18,7 +19,7 @@ eventsApiRouter.post("/:id/verify", verifyEventRsvp);
 eventsApiRouter.post("/:id/ratings", submitEventRating);
 eventsApiRouter.get("/:id/calendar.ics", downloadEventCalendar);
 eventsApiRouter.get("/:id", getEventById);
-eventsApiRouter.patch("/:id", updateEvent);
-eventsApiRouter.delete("/:id", deleteDraftEvent);
+eventsApiRouter.patch("/:id", ensureOrgRep, updateEvent);
+eventsApiRouter.delete("/:id", ensureOrgRep, deleteDraftEvent);
 
 export default eventsApiRouter;

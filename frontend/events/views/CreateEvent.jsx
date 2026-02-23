@@ -158,7 +158,14 @@ const INITIAL_STATE = {
   safety_notes: "",
 };
 
-export function CreateEvent({ brand = DEFAULT_BRAND, geoCheckinEnabled = false }) {
+export function CreateEvent({
+  brand = DEFAULT_BRAND,
+  geoCheckinEnabled = false,
+  embedded = false,
+  initialEditId = null,
+  onSaved,
+  onCancel,
+}) {
   const [form, setForm] = useState(INITIAL_STATE);
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
@@ -167,13 +174,15 @@ export function CreateEvent({ brand = DEFAULT_BRAND, geoCheckinEnabled = false }
   const [coverPreview, setCoverPreview] = useState("");
   const [coverError, setCoverError] = useState(null);
   const coverInputRef = useRef(null);
-  const [editId, setEditId] = useState(() =>
-    typeof window === "undefined" ? null : getEditIdFromHash()
-  );
+  const [editId, setEditId] = useState(() => {
+    if (initialEditId) return String(initialEditId);
+    return typeof window === "undefined" ? null : getEditIdFromHash();
+  });
   const [editingMeta, setEditingMeta] = useState(null);
-  const [editLoading, setEditLoading] = useState(() =>
-    typeof window === "undefined" ? false : Boolean(getEditIdFromHash())
-  );
+  const [editLoading, setEditLoading] = useState(() => {
+    if (initialEditId) return true;
+    return typeof window === "undefined" ? false : Boolean(getEditIdFromHash());
+  });
   const [editError, setEditError] = useState(null);
   const [editReloadKey, setEditReloadKey] = useState(0);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -214,11 +223,17 @@ export function CreateEvent({ brand = DEFAULT_BRAND, geoCheckinEnabled = false }
   }, [canDeleteDraft]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return () => {};
+    if (embedded || typeof window === "undefined") return () => {};
     const handleHash = () => setEditId(getEditIdFromHash());
     window.addEventListener("hashchange", handleHash);
     return () => window.removeEventListener("hashchange", handleHash);
-  }, []);
+  }, [embedded]);
+
+  useEffect(() => {
+    if (!embedded) return;
+    const normalized = initialEditId ? String(initialEditId) : null;
+    setEditId(normalized);
+  }, [embedded, initialEditId]);
 
   useEffect(() => {
     let aborted = false;
@@ -274,9 +289,13 @@ export function CreateEvent({ brand = DEFAULT_BRAND, geoCheckinEnabled = false }
   }, []);
 
   const exitEditMode = useCallback(() => {
+    if (embedded) {
+      onCancel?.();
+      return;
+    }
     if (typeof window === "undefined") return;
     window.location.hash = "#/create";
-  }, []);
+  }, [embedded, onCancel]);
 
   const rememberDraftHighlight = useCallback((id, title) => {
     if (typeof window === "undefined" || !id) return;
@@ -412,6 +431,19 @@ export function CreateEvent({ brand = DEFAULT_BRAND, geoCheckinEnabled = false }
       }
 
       if (!isEditing) {
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(
+            new CustomEvent("orgPortalEventCreated", {
+              detail: data?.data || null,
+            })
+          );
+        }
+
+        if (embedded) {
+          onSaved?.(data?.data || null);
+          return;
+        }
+
         if (targetStatus === "draft") {
           rememberDraftHighlight(savedId, titleLabel);
           window.location.hash = "#/my";
@@ -425,6 +457,11 @@ export function CreateEvent({ brand = DEFAULT_BRAND, geoCheckinEnabled = false }
             window.location.hash = `#/events/${savedId}`;
           }, 300);
         }
+        return;
+      }
+
+      if (embedded) {
+        onSaved?.(data?.data || null);
         return;
       }
 

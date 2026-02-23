@@ -8,10 +8,13 @@
     { key: "events", label: "Volunteer Events", href: "/events" },
     { key: "dashboard", label: "My Progress", href: "/dashboard" },
     { key: "profile", label: "Profile", href: "/profile" },
-    { key: "donor", label: "Donor Dashboard", href: "/donor" }
+    { key: "donor", label: "Donor Dashboard", href: "/donor" },
+    { key: "org-portal", label: "Org Portal", href: "/org-portal", authOnly: true }
   ];
 
-  const renderedNavItems = navItems.map((item) => {
+  const visibleNavItems = navItems.filter((item) => !(item.authOnly && !currentUser));
+
+  const renderedNavItems = visibleNavItems.map((item) => {
     if (cp !== "home" && cp === item.key) {
       return { ...item, label: "Home", href: homeHref, swapped: true };
     }

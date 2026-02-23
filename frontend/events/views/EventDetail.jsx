@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
 import { InviteModal } from "../components/InviteModal.jsx";
-import { fetchRoster, verifyRsvp } from "../api.js";
 
 export function EventDetail({ eventId }) {
   const [state, setState] = useState({ loading: false, data: null, error: null });
@@ -9,8 +8,7 @@ export function EventDetail({ eventId }) {
   const [calendarLoading, setCalendarLoading] = useState(false);
   const [rsvpAction, setRsvpAction] = useState(null);
   const [checkInAction, setCheckInAction] = useState(null);
-  const [rosterState, setRosterState] = useState({ loading: false, data: [], error: null, hidden: true });
-  const [verifyAction, setVerifyAction] = useState(null);
+  const [cancelRequestDialogOpen, setCancelRequestDialogOpen] = useState(false);
   const toastTimerRef = useRef(null);
 
   useEffect(() => {
@@ -46,34 +44,6 @@ export function EventDetail({ eventId }) {
     };
   }, []);
 
-  useEffect(() => {
-    if (!eventId) {
-      setRosterState({ loading: false, data: [], error: null, hidden: true });
-      return;
-    }
-    let alive = true;
-    const controller = new AbortController();
-    setRosterState({ loading: true, data: [], error: null, hidden: false });
-    fetchRoster(eventId, { signal: controller.signal })
-      .then((data) => {
-        if (!alive) return;
-        setRosterState({ loading: false, data, error: null, hidden: false });
-      })
-      .catch((err) => {
-        if (err?.name === "AbortError" || !alive) return;
-        const message = err?.message || "Unable to load roster";
-        if (message === "Forbidden") {
-          setRosterState({ loading: false, data: [], error: null, hidden: true });
-          return;
-        }
-        setRosterState({ loading: false, data: [], error: message, hidden: false });
-      });
-    return () => {
-      alive = false;
-      controller.abort();
-    };
-  }, [eventId]);
-
   if (!eventId) {
     return <p className="muted">Select an event to see details.</p>;
   }
@@ -99,46 +69,6 @@ export function EventDetail({ eventId }) {
   const evt = state.data;
   if (!evt) {
     return <p className="muted">Event not found.</p>;
-  }
-
-  async function handleVerify(attendee, decision) {
-    const attendeeId = attendee?.attendee_user_id || attendee?.id || attendee;
-    if (!attendeeId || verifyAction) return;
-    setVerifyAction(`${attendeeId}:${decision}`);
-    try {
-      const payload = {
-        attendee_user_id: attendeeId,
-        decision,
-      };
-      if (decision === "verified") {
-        payload.attended_minutes = attendee?.attended_minutes || 90;
-      }
-      const json = await verifyRsvp(eventId, payload);
-      setRosterState((prev) => ({
-        ...prev,
-        data: (prev.data || []).map((row) =>
-          row.attendee_user_id === attendeeId
-            ? {
-                ...row,
-                verification_status: json.verification_status || decision,
-                attended_minutes: json.attended_minutes ?? row.attended_minutes,
-              }
-            : row
-        ),
-      }));
-      const credits = json?.impact_credits_awarded || 0;
-      const message =
-        decision === "rejected"
-          ? "Marked as rejected."
-          : json?.already_verified
-          ? `Already verified. Credits: ${credits}`
-          : `Verified. Credits awarded: ${credits}`;
-      showToast({ message, type: "success" });
-    } catch (err) {
-      showToast({ message: err.message || "Unable to verify attendee.", type: "error" });
-    } finally {
-      setVerifyAction(null);
-    }
   }
 
   async function handleAddToCalendar() {
@@ -175,7 +105,7 @@ export function EventDetail({ eventId }) {
     });
   }
 
-  async function handleRsvp(action) {
+  async function handleRsvp(action, options = {}) {
     if (rsvpAction) return;
     setRsvpAction(action);
     try {
@@ -194,12 +124,19 @@ export function EventDetail({ eventId }) {
         viewer_check_in_method: null,
         viewer_checked_in_at: null,
       });
+      const successMessage = typeof options.successMessage === "string" && options.successMessage.trim()
+        ? options.successMessage
+        : action === "accept"
+          ? "You're marked as going."
+          : "Invite declined.";
       showToast({
-        message: action === "accept" ? "You're marked as going." : "Invite declined.",
+        message: successMessage,
         type: "success",
       });
+      return true;
     } catch (err) {
       showToast({ message: err.message || "Unable to update RSVP.", type: "error" });
+      return false;
     } finally {
       setRsvpAction(null);
     }
@@ -238,8 +175,8 @@ export function EventDetail({ eventId }) {
 
   return (
     <div>
-      <h2 style={{ marginTop: 0 }}>{evt.title || "Event Detail"}</h2>
-      <div className="muted">{evt.location_text || "Location TBD"}</div>
+      <h2 className="event-detail-title">{evt.title || "Event Detail"}</h2>
+      <div className="event-detail-subheader">{evt.location_text || "Location TBD"}</div>
       {evt.cover_url && (
         <div className="detail-cover">
           <img src={evt.cover_url} alt="Event cover" />
@@ -269,46 +206,76 @@ export function EventDetail({ eventId }) {
           )}
         </div>
       )}
+      {!evt.viewer_is_host && (
+        <div className="card rsvp-card">
+          <div>
+            <strong className="rsvp-card__title">Request Attendance</strong>
+            <p className="muted mb-0">Send a request to join this event, and you will hear back on your approval shortly</p>
+          </div>
+          <div className="rsvp-actions">
+            {evt.viewer_rsvp_status === "accepted" ? (
+              <button
+                type="button"
+                className="btn secondary"
+                onClick={() => setCancelRequestDialogOpen(true)}
+                disabled={Boolean(rsvpAction)}
+              >
+                {rsvpAction === "decline" ? "Canceling…" : "Cancel request"}
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="btn"
+                onClick={() => handleRsvp("accept")}
+                disabled={rsvpAction === "accept" || evt.viewer_rsvp_status === "checked_in"}
+              >
+                {rsvpAction === "accept" ? "Saving…" : "Request"}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+      {cancelRequestDialogOpen && (
+        <div className="dialog-backdrop" role="presentation">
+          <div className="dialog-card" role="dialog" aria-modal="true" aria-labelledby="cancel-request-title">
+            <h4 id="cancel-request-title" className="dialog-title">Are you sure you want to cancel your request?</h4>
+            <div className="dialog-actions">
+              <button
+                type="button"
+                className="btn secondary"
+                onClick={() => setCancelRequestDialogOpen(false)}
+                disabled={Boolean(rsvpAction)}
+              >
+                Return
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={async () => {
+                  const ok = await handleRsvp("decline", { successMessage: "Request cancelled." });
+                  if (ok) setCancelRequestDialogOpen(false);
+                }}
+                disabled={Boolean(rsvpAction)}
+              >
+                {rsvpAction === "decline" ? "Canceling…" : "Cancel"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="row" style={{ gap: 8, margin: "12px 0", flexWrap: "wrap" }}>
         <button
-          className="btn secondary"
+          className="btn secondary event-action-btn"
           type="button"
           onClick={handleAddToCalendar}
           disabled={calendarLoading}
         >
           {calendarLoading ? "Preparing…" : "Add to Calendar"}
         </button>
-        <button className="btn secondary" type="button" onClick={() => setInviteOpen(true)}>
-          Invite
+        <button className="btn secondary event-action-btn" type="button" onClick={() => setInviteOpen(true)}>
+          Invite a Friend to Join
         </button>
       </div>
-
-      {!evt.viewer_is_host && evt.status === "published" && (
-        <div className="card rsvp-card">
-          <div>
-            <strong>{evt.viewer_rsvp_status === "accepted" ? "You're going" : evt.viewer_rsvp_status === "checked_in" ? "Checked in" : "RSVP"}</strong>
-            <p className="muted mb-0">Let the host know if you're attending.</p>
-          </div>
-          <div className="rsvp-actions">
-            <button
-              type="button"
-              className={`btn ${evt.viewer_rsvp_status === "accepted" || evt.viewer_rsvp_status === "checked_in" ? "primary" : "secondary"}`}
-              onClick={() => handleRsvp("accept")}
-              disabled={rsvpAction === "accept" || evt.viewer_rsvp_status === "checked_in"}
-            >
-              {rsvpAction === "accept" ? "Saving…" : evt.viewer_rsvp_status === "accepted" || evt.viewer_rsvp_status === "checked_in" ? "Going" : "Accept"}
-            </button>
-            <button
-              type="button"
-              className="btn tertiary"
-              onClick={() => handleRsvp("decline")}
-              disabled={rsvpAction === "decline"}
-            >
-              {rsvpAction === "decline" ? "Saving…" : "Decline"}
-            </button>
-          </div>
-        </div>
-      )}
 
       {!evt.viewer_is_host && evt.viewer_rsvp_status === "accepted" && Array.isArray(evt.attendance_methods) && evt.attendance_methods.length > 0 && (
         <div className="card checkin-card">
@@ -357,6 +324,9 @@ export function EventDetail({ eventId }) {
       </div>
 
       <div className="card info-card">
+        <div className="info-card__header">
+          <strong>Event Details</strong>
+        </div>
         <div className="info-grid">
           <div>
             <span className="label">Organization</span>
@@ -398,82 +368,10 @@ export function EventDetail({ eventId }) {
       <h3>After the event</h3>
       <div className="grid">
         <div className="box">
-          <strong>Enter 6-digit code</strong>
-          <p className="muted mb-0">Hosts can share a quick check-in code.</p>
-        </div>
-        <div className="box">
           <strong>Paste public social URL</strong>
           <p className="muted mb-0">Drop proof from Instagram, TikTok, etc.</p>
         </div>
       </div>
-
-      {!rosterState.hidden && (
-        <div className="card roster-card">
-          <div className="roster-head">
-            <strong>Organizer roster</strong>
-            <span className="muted">{rosterState.data?.length || 0} RSVPs</span>
-          </div>
-          {rosterState.loading && <div className="muted">Loading roster…</div>}
-          {rosterState.error && <div className="text-danger">{rosterState.error}</div>}
-          {!rosterState.loading && !rosterState.error && rosterState.data.length === 0 && (
-            <div className="muted">No RSVPs yet.</div>
-          )}
-          {!rosterState.loading && !rosterState.error && rosterState.data.length > 0 && (
-            <div className="roster-list">
-              {rosterState.data.map((row) => {
-                const displayName =
-                  [row.firstname, row.lastname].filter(Boolean).join(" ") ||
-                  row.email ||
-                  row.attendee_user_id;
-                const isVerified = row.verification_status === "verified";
-                const isRejected = row.verification_status === "rejected";
-                const actionKey = `${row.attendee_user_id}:${isRejected ? "rejected" : "verified"}`;
-                return (
-                  <div className="roster-row" key={row.attendee_user_id}>
-                    <div>
-                      <div className="roster-name">{displayName}</div>
-                      <div className="muted small">
-                        Status: {row.status || "unknown"} • Verification: {row.verification_status || "pending"}
-                        {Number.isFinite(Number(row.attended_minutes))
-                          ? ` • ${row.attended_minutes} mins`
-                          : ""}
-                      </div>
-                    </div>
-                    <div className="roster-actions">
-                      <button
-                        type="button"
-                        className="btn secondary"
-                        onClick={() => handleVerify(row, "verified")}
-                        disabled={isVerified || verifyAction === `${row.attendee_user_id}:verified`}
-                      >
-                        {isVerified ? "Verified" : verifyAction === `${row.attendee_user_id}:verified` ? "Verifying…" : "Verify"}
-                      </button>
-                      <button
-                        type="button"
-                        className="btn tertiary"
-                        onClick={() => handleVerify(row, "rejected")}
-                        disabled={isRejected || verifyAction === `${row.attendee_user_id}:rejected`}
-                      >
-                        {isRejected ? "Rejected" : verifyAction === `${row.attendee_user_id}:rejected` ? "Rejecting…" : "Reject"}
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
-
-      <div className="card row" style={{ justifyContent: "space-between", gap: 12 }}>
-        <strong>Host tools</strong>
-        <button className="btn" type="button">
-          Show QR / Code
-        </button>
-      </div>
-      <button className="btn secondary w-100" type="button">
-        Mark Completed
-      </button>
       <button
         className="btn tertiary w-100 mt-2"
         type="button"
@@ -510,31 +408,90 @@ export function EventDetail({ eventId }) {
 }
 
 const detailStyles = `
+  .event-detail-title{
+    margin:0;
+    color:#ff5656;
+    font-size:clamp(1.75rem,4.4vw,2.15rem);
+    line-height:1.15;
+    font-weight:800
+  }
+  .event-detail-subheader{
+    margin-top:4px;
+    color:#455a7c;
+    font-size:clamp(1.1rem,3.2vw,1.35rem);
+    line-height:1.3;
+    font-weight:600
+  }
   .row{display:flex;align-items:center}
-  .card{border:1px solid #e5e7eb;border-radius:16px;padding:16px;background:#fff;margin:12px 0}
-  .rsvp-card{display:flex;flex-direction:column;gap:12px}
+  .card{border:none;border-radius:18px;padding:20px;background:#fff;margin:12px 0;box-shadow:0 2px 12px rgba(69, 90, 124, 0.08)}
+  .rsvp-card{display:flex;flex-direction:column;gap:8px;padding:14px 16px}
+  .rsvp-card > div:first-child{text-align:center}
+  .rsvp-card__title{display:block;font-size:1.2rem;line-height:1.2;color:#ff5656;font-weight:700}
   .rsvp-actions{display:flex;gap:12px;flex-wrap:wrap}
+  .dialog-backdrop{
+    position:fixed;
+    inset:0;
+    background:rgba(17,24,39,0.45);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:16px;
+    z-index:2000
+  }
+  .dialog-card{
+    width:min(460px,100%);
+    background:#fff;
+    border-radius:14px;
+    box-shadow:0 16px 40px rgba(17,24,39,0.22);
+    padding:18px
+  }
+  .dialog-title{
+    margin:0 0 14px;
+    color:#1f2937;
+    font-size:1.05rem;
+    line-height:1.4;
+    font-weight:700
+  }
+  .dialog-actions{
+    display:flex;
+    justify-content:flex-end;
+    gap:10px;
+    flex-wrap:wrap
+  }
   .checkin-card{display:flex;flex-direction:column;gap:12px}
   .checkin-buttons{display:flex;flex-wrap:wrap;gap:10px}
   .rsvp-stats{margin-top:8px;color:#6b7280;font-size:0.9rem}
-  .when-card__body{display:flex;gap:16px;flex-wrap:wrap;margin-top:12px}
+  .when-card{display:grid;grid-template-columns:1fr 2fr;column-gap:20px;align-items:start}
+  .when-card__header{margin:0;padding:0 16px 0 0;border-bottom:none;border-right:2px solid #ff5656;min-height:100%}
+  .when-card__header strong{font-size:0.75rem;text-transform:uppercase;letter-spacing:0.1em;color:#455a7c;font-weight:700}
+  .when-card__body{display:flex;gap:16px;flex-wrap:wrap;margin-top:0}
   .when-card__col{flex:1 1 100%;min-width:0}
   .when-card__col.meta{flex:0 0 auto;min-width:140px}
-  .when-card__col .label{display:block;font-size:0.8rem;text-transform:uppercase;letter-spacing:0.08em;color:#94a3b8;margin-bottom:4px}
-  .when-card__col .value{margin:0 0 12px;font-weight:600;color:#1f2937;word-break:break-word}
-  .when-card__col.meta .value{font-size:1.1rem}
-  .info-card{display:flex;flex-direction:column;gap:12px}
-  .info-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}
+  .when-card__col .label{display:block;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.09em;color:#6c757d;margin-bottom:2px;font-weight:600}
+  .when-card__col:not(.meta) .value{margin:0 0 8px;font-weight:600;color:#455a7c;word-break:break-word}
+  .when-card__col:not(.meta) .value:last-of-type{margin-bottom:0}
+  .when-card__col.meta{display:flex;flex-direction:column;gap:8px}
+  .when-card__col.meta .value{margin:0;font-size:1.1rem;font-weight:600;color:#455a7c;word-break:break-word}
+  .info-card{display:grid;grid-template-columns:1fr 2fr;column-gap:20px;align-items:start}
+  .info-card__header{margin:0;padding:0 16px 0 0;border-bottom:none;border-right:2px solid #ff5656;min-height:100%;grid-column:1;grid-row:1 / span 3}
+  .info-card__header strong{font-size:0.75rem;text-transform:uppercase;letter-spacing:0.1em;color:#455a7c;font-weight:700}
+  .info-card .label{display:block;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.09em;color:#6c757d;margin-bottom:4px;font-weight:600}
+  .info-card .value{margin:0 0 4px;font-weight:600;color:#455a7c;word-break:break-word}
+  .info-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;grid-column:2}
+  .info-tags{grid-column:2}
+  .info-reqs{grid-column:2}
   .info-tags .tag-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
-  .tag{background:#f3f4f6;border:1px solid #e5e7eb;border-radius:999px;padding:4px 10px;font-size:0.85rem}
+  .tag{display:inline-flex;align-items:center;padding:4px 12px;border-radius:999px;border:1.5px solid #455a7c;background:#ffffff;color:#455a7c;font-size:0.78rem;font-weight:500;margin:2px 4px 2px 0;transition:all 0.15s ease}
+  .tag:hover{background:#ff5656;border-color:#ff5656;color:#ffffff}
   .info-reqs .value{margin-top:4px}
   .card p{margin:6px 0 0}
-  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px}
+  .grid{display:grid;grid-template-columns:1fr;gap:12px;margin-bottom:16px}
   .box{background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;padding:16px}
   .detail-cover{margin:12px 0}
   .detail-cover img{width:100%;max-height:240px;object-fit:cover;border-radius:16px;border:1px solid #e5e7eb}
   .btn{background:#ff5656;border:none;color:#fff;padding:10px 16px;border-radius:10px;font-weight:700;cursor:pointer}
   .btn.secondary{background:#fff;border:1px solid #e5e7eb;color:#1f2937}
+  .btn.secondary.event-action-btn{color:#455a7c}
   .btn.tertiary{background:transparent;border:1px dashed #d1d5db;color:#4b5563}
   .mt-2{margin-top:0.5rem}
   .invite-toast{margin:0 0 8px;font-size:0.95rem;display:flex;align-items:center;gap:12px;padding:10px 14px;border-radius:12px}
@@ -542,6 +499,7 @@ const detailStyles = `
   .invite-toast.error{background:#fef2f2;color:#b91c1c}
   .invite-toast button{border:none;background:#fff;color:#455a7c;font-weight:600;border-radius:999px;padding:4px 10px;cursor:pointer}
   .muted{color:#6b7280}
+  .muted.small{color:#6c757d;font-size:0.82rem;margin:0}
   .roster-card{display:flex;flex-direction:column;gap:12px}
   .roster-head{display:flex;justify-content:space-between;align-items:center}
   .roster-list{display:flex;flex-direction:column;gap:10px}
@@ -551,6 +509,16 @@ const detailStyles = `
   .small{font-size:0.85rem}
   .w-100{width:100%}
   h3{margin-top:24px}
+  @media (max-width: 768px){
+    .when-card{grid-template-columns:1fr}
+    .when-card__header{padding:0 0 12px;border-right:none;border-bottom:2px solid #ff5656;margin-bottom:12px}
+    .info-card{grid-template-columns:1fr}
+    .info-card__header{padding:0 0 12px;border-right:none;border-bottom:2px solid #ff5656;margin-bottom:12px;grid-column:1;grid-row:auto}
+    .info-grid,.info-tags,.info-reqs{grid-column:1}
+  }
+  @media (max-width: 480px){
+    .info-grid{grid-template-columns:1fr}
+  }
 `;
 
 function formatEventDate(iso, tz) {

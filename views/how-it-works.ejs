@@ -52,16 +52,18 @@
     </section>
 
     <section class="sticky-jump-nav" aria-label="Section navigation">
-      <div class="container d-none d-md-flex flex-wrap gap-2">
-        <a class="jump-pill" href="#the-loop">The Loop</a>
-        <a class="jump-pill" href="#volunteers">Volunteers</a>
-        <a class="jump-pill" href="#organizations">Organizations</a>
-        <a class="jump-pill" href="#donors">Donors</a>
-        <a class="jump-pill" href="#our-magic">Our Magic</a>
-        <a class="jump-pill" href="#credits">Impact Credits</a>
-        <a class="jump-pill" href="#transparency">Transparency</a>
-        <a class="jump-pill" href="#trust">Trust</a>
-        <a class="jump-pill" href="#faq">FAQ</a>
+      <div class="container d-none d-md-block">
+        <nav class="nav nav-tabs hiw-jump-tabs" role="tablist" aria-label="How it works sections">
+          <a class="nav-link jump-tab" href="#the-loop" role="tab">The Loop</a>
+          <a class="nav-link jump-tab" href="#volunteers" role="tab">Volunteers</a>
+          <a class="nav-link jump-tab" href="#organizations" role="tab">Organizations</a>
+          <a class="nav-link jump-tab" href="#donors" role="tab">Donors</a>
+          <a class="nav-link jump-tab" href="#our-magic" role="tab">Our Magic</a>
+          <a class="nav-link jump-tab" href="#credits" role="tab">Impact Credits</a>
+          <a class="nav-link jump-tab" href="#transparency" role="tab">Transparency</a>
+          <a class="nav-link jump-tab" href="#trust" role="tab">Trust</a>
+          <a class="nav-link jump-tab" href="#faq" role="tab">FAQ</a>
+        </nav>
       </div>
       <div class="container d-md-none">
         <label class="jump-label" for="jumpToSection">Jump to…</label>
@@ -548,13 +550,13 @@
   <script>
     (function () {
       var jumpSelect = document.getElementById("jumpToSection");
-      var jumpLinks = Array.prototype.slice.call(document.querySelectorAll(".sticky-jump-nav .jump-pill[href^='#']"));
+      var jumpLinks = Array.prototype.slice.call(document.querySelectorAll(".sticky-jump-nav .jump-tab[href^='#']"));
       var sectionIds = jumpLinks.map(function (link) { return link.getAttribute("href"); });
       var sections = sectionIds.map(function (id) { return document.querySelector(id); }).filter(Boolean);
 
       function setActiveAnchor(anchor) {
         jumpLinks.forEach(function (link) {
-          link.classList.toggle("is-active", link.getAttribute("href") === anchor);
+          link.classList.toggle("active", link.getAttribute("href") === anchor);
         });
         if (jumpSelect) jumpSelect.value = anchor;
       }

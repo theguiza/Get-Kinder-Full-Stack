@@ -16,10 +16,13 @@ const computeDurationMinutes = (startAt, endAt) => {
   return diff > 0 ? diff : null;
 };
 
-const computeCreditAmount = (rewardPoolKind, capacity) => {
+const computeCreditAmount = (rewardPoolKind, capacity, impactCreditsBase) => {
   const poolValue = Number(rewardPoolKind) || 0;
   const cap = Number.isFinite(Number(capacity)) && Number(capacity) > 0 ? Number(capacity) : 1;
-  return Math.floor(poolValue / Math.max(1, cap));
+  const pooledCredits = Math.floor(poolValue / Math.max(1, cap));
+  if (Number.isFinite(pooledCredits) && pooledCredits > 0) return pooledCredits;
+  const baseCredits = Math.floor(Number(impactCreditsBase) || 0);
+  return baseCredits > 0 ? baseCredits : 0;
 };
 
 const DEFAULT_POOL_SLUG = "general";
@@ -47,6 +50,7 @@ async function fetchVerifiedRsvp(client, eventId, attendeeUserId) {
         r.attended_minutes,
         r.verification_status,
         e.reward_pool_kind,
+        e.impact_credits_base,
         e.capacity,
         e.funding_pool_slug,
         e.creator_user_id,
@@ -162,7 +166,11 @@ export async function processVerifiedEarnShift({ client, attendeeUserId, eventId
     const minutes = clampMinutes(
       rsvp.attended_minutes != null ? rsvp.attended_minutes : computeDurationMinutes(rsvp.start_at, rsvp.end_at)
     );
-    const creditAmount = computeCreditAmount(rsvp.reward_pool_kind, rsvp.capacity);
+    const creditAmount = computeCreditAmount(
+      rsvp.reward_pool_kind,
+      rsvp.capacity,
+      rsvp.impact_credits_base
+    );
     if (!Number.isFinite(creditAmount) || creditAmount <= 0) {
       return { skipped: true, reason: "zero_credit" };
     }

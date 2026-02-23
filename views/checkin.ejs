@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="csrf-token" content="<%= typeof csrfToken !== 'undefined' ? csrfToken : '' %>">
+  <title><%= typeof title !== 'undefined' ? title : 'Event Check-In' %></title>
+  <link rel="stylesheet" href="/css/style.css" />
+  <link rel="icon" href="/images/favicon.png" sizes="32x32" type="image/png" />
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-SgOJa3DmI69IUzQ2PVdRZhwQ+dy64/BUtbMJw1MZ8t5HZApcHrRKUc4W0kG879m7" crossorigin="anonymous" />
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet" />
+  <style>
+    .checkin-nav-spacer {
+      height: 6.25rem;
+    }
+    .checkin-shell {
+      max-width: 860px;
+    }
+    .checkin-card {
+      border: 1px solid #dfe8f5;
+      border-radius: 18px;
+      box-shadow: var(--bs-box-shadow-sm);
+      background: #fff;
+    }
+    .checkin-title {
+      color: #455a7c;
+      font-weight: 700;
+    }
+    .checkin-method {
+      background: #ff5656;
+      color: #fff;
+      border-radius: 999px;
+      padding: 0.35rem 0.75rem;
+      font-size: 0.8rem;
+      font-weight: 600;
+      display: inline-block;
+    }
+    .checkin-video-wrap {
+      border: 1px solid #dfe8f5;
+      border-radius: 14px;
+      background: #f8fbff;
+      min-height: 280px;
+      position: relative;
+      overflow: hidden;
+    }
+    .checkin-video {
+      width: 100%;
+      max-height: 420px;
+      object-fit: cover;
+      display: block;
+      background: #111827;
+    }
+    .checkin-overlay {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .checkin-overlay::before {
+      content: "";
+      width: min(72vw, 320px);
+      height: min(72vw, 320px);
+      border: 3px solid rgba(255, 86, 86, 0.8);
+      border-radius: 16px;
+      box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.2);
+    }
+    .checkin-placeholder {
+      min-height: 280px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #6c757d;
+      text-align: center;
+      padding: 1rem;
+    }
+    .checkin-muted {
+      color: #6c757d;
+    }
+    .checkin-inline-error {
+      font-size: 0.875rem;
+      color: #b42318;
+      margin-top: 0.35rem;
+    }
+    .checkin-page .btn-coral {
+      background: #ff5656;
+      border-color: #ff5656;
+      color: #fff;
+    }
+    .checkin-page .btn-coral:hover,
+    .checkin-page .btn-coral:focus {
+      background: #f04c4c;
+      border-color: #f04c4c;
+      color: #fff;
+    }
+    .checkin-page .btn-ink {
+      border-color: #455a7c;
+      color: #455a7c;
+    }
+    .checkin-page .btn-ink:hover,
+    .checkin-page .btn-ink:focus {
+      background: #455a7c;
+      border-color: #455a7c;
+      color: #fff;
+    }
+    @media (max-width: 767.98px) {
+      .checkin-nav-spacer {
+        height: 5.5rem;
+      }
+    }
+  </style>
+</head>
+<body class="checkin-page">
+  <%- include("partials/site-header", { currentPage: "other" }) %>
+
+  <div class="checkin-nav-spacer" aria-hidden="true"></div>
+
+  <main class="container checkin-shell mb-5" data-event-id="<%= eventId %>">
+    <section class="checkin-card p-3 p-md-4">
+      <div class="d-flex flex-wrap justify-content-between align-items-start gap-3">
+        <div>
+          <h1 class="checkin-title mb-1"><i class="fas fa-qrcode me-2" style="color:#ff5656;" aria-hidden="true"></i>Volunteer Check-In</h1>
+          <p id="eventMeta" class="checkin-muted mb-0">Loading event details...</p>
+        </div>
+        <span id="checkinMethodBadge" class="checkin-method d-none"></span>
+      </div>
+
+      <div id="checkinAlert" class="mt-3"></div>
+
+      <div class="mt-3 d-flex flex-wrap gap-2">
+        <button id="startScannerBtn" type="button" class="btn btn-coral">
+          <i class="fas fa-camera me-1" aria-hidden="true"></i> Start Camera Scanner
+        </button>
+        <button id="stopScannerBtn" type="button" class="btn btn-outline-secondary d-none">
+          Stop Scanner
+        </button>
+      </div>
+
+      <div class="checkin-video-wrap mt-3">
+        <video id="scannerVideo" class="checkin-video d-none" autoplay playsinline muted></video>
+        <div id="checkinOverlay" class="checkin-overlay d-none" aria-hidden="true"></div>
+        <div id="scannerPlaceholder" class="checkin-placeholder">
+          <div>
+            <i class="fas fa-camera fa-2x mb-2" aria-hidden="true" style="color:#455a7c;"></i>
+            <div>Open your camera and point it at the event QR code.</div>
+            <small class="checkin-muted d-block mt-1">If camera scanning is not supported, paste the QR text below.</small>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-3">
+        <label for="manualQrInput" class="form-label fw-semibold">Manual fallback</label>
+        <div class="input-group">
+          <input id="manualQrInput" type="text" class="form-control" placeholder="Paste QR text or check-in URL" />
+          <button id="manualSubmitBtn" type="button" class="btn btn-ink">Check In</button>
+        </div>
+        <div id="manualError" class="checkin-inline-error d-none"></div>
+      </div>
+
+      <div class="mt-3">
+        <small id="scannerStatus" class="checkin-muted">Waiting to start scanner.</small>
+      </div>
+    </section>
+  </main>
+
+  <section id="footer" class="gradient-background">
+    <div class="container">
+      <footer class="row align-items-center py-5 mt-5 border-top text-body-secondary">
+        <div class="col-12 col-md-4 mb-4 mb-md-0 text-center text-md-start">
+          <a href="#">
+            <img src="/images/heart3D.png" alt="Get Kinder Heart" height="150">
+          </a>
+          <p class="mt-2">
+            &copy;
+            <a href="https://getkindr.com/" target="_blank" rel="noopener noreferrer" class="text-body-secondary text-decoration-underline">
+              Get Kindr Foundation
+            </a>
+          </p>
+        </div>
+        <div class="col-12 col-md-4 mb-4 mb-md-0 d-flex justify-content-center">
+          <a class="btn btn-floating m-1 text-white" style="background-color: #3b5998;" href="https://www.facebook.com/profile.php?id=61576860759313" role="button" target="_blank" rel="noopener noreferrer">
+            <i class="fab fa-facebook-f"></i>
+          </a>
+          <a class="btn btn-floating m-1 text-white" style="background-color: #ac2bac;" href="https://www.instagram.com/getkinder/" role="button" target="_blank" rel="noopener noreferrer">
+            <i class="fab fa-instagram"></i>
+          </a>
+          <a class="btn btn-floating m-1 text-white" style="background-color: #0082ca;" href="https://www.linkedin.com/company/getkindrfoundation/" role="button" target="_blank" rel="noopener noreferrer">
+            <i class="fab fa-linkedin-in"></i>
+          </a>
+          <a class="btn btn-floating m-1 text-white" style="background-color: #c8232c;" href="https://ca.pinterest.com/getkindr/" role="button" target="_blank" rel="noopener noreferrer">
+            <i class="fab fa-pinterest"></i>
+          </a>
+        </div>
+        <div class="col-12 col-md-4 mb-4 mb-md-0 text-center text-md-end">
+          <h5>More About Get Kinder</h5>
+          <ul class="nav flex-column">
+            <li class="nav-item mb-2"><a href="/home" class="nav-link p-0 text-body-secondary">Home</a></li>
+            <li class="nav-item mb-2"><a href="/about" class="nav-link p-0 text-body-secondary">About</a></li>
+            <li class="nav-item mb-2"><a href="/contact" class="nav-link p-0 text-body-secondary">Contact</a></li>
+            <li class="nav-item mb-2"><a href="/privacy" class="nav-link p-0 text-body-secondary">Privacy</a></li>
+            <li class="nav-item mb-2"><a href="/terms" class="nav-link p-0 text-body-secondary">Terms</a></li>
+            <li class="nav-item mb-2"><a href="/accessability" class="nav-link p-0 text-body-secondary">Accessibility</a></li>
+          </ul>
+        </div>
+      </footer>
+    </div>
+  </section>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/js/bootstrap.bundle.min.js" integrity="sha384-k6d4wzSIapyDyv1kpU366/PK5hCdSbCRGRCMv+eplOQJWyd1fbcAu9OCUj5zNLiq" crossorigin="anonymous"></script>
+  <script>
+    (function () {
+      const root = document.querySelector("main[data-event-id]");
+      const eventId = root ? String(root.getAttribute("data-event-id") || "").trim() : "";
+      const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute("content") || "";
+
+      const eventMeta = document.getElementById("eventMeta");
+      const methodBadge = document.getElementById("checkinMethodBadge");
+      const checkinAlert = document.getElementById("checkinAlert");
+      const startScannerBtn = document.getElementById("startScannerBtn");
+      const stopScannerBtn = document.getElementById("stopScannerBtn");
+      const scannerVideo = document.getElementById("scannerVideo");
+      const scannerOverlay = document.getElementById("checkinOverlay");
+      const scannerPlaceholder = document.getElementById("scannerPlaceholder");
+      const scannerStatus = document.getElementById("scannerStatus");
+      const manualQrInput = document.getElementById("manualQrInput");
+      const manualSubmitBtn = document.getElementById("manualSubmitBtn");
+      const manualError = document.getElementById("manualError");
+
+      const METHOD_LABELS = {
+        host_code: "Host Code",
+        social_proof: "Social Proof",
+        geo: "Geo Check-in",
+      };
+
+      let preferredMethod = null;
+      let isSubmitting = false;
+      let scannerBusy = false;
+      let scanLoopId = null;
+      let cameraStream = null;
+      let detector = null;
+      let canCheckIn = true;
+
+      function setScannerStatus(message) {
+        scannerStatus.textContent = message;
+      }
+
+      function showAlert(type, message) {
+        checkinAlert.innerHTML = '<div class="alert alert-' + type + ' mb-0" role="alert">' + message + "</div>";
+      }
+
+      function clearAlert() {
+        checkinAlert.innerHTML = "";
+      }
+
+      function showManualError(message) {
+        manualError.textContent = message;
+        manualError.classList.remove("d-none");
+      }
+
+      function clearManualError() {
+        manualError.textContent = "";
+        manualError.classList.add("d-none");
+      }
+
+      function normalizeEventId(value) {
+        return String(value || "").trim().toLowerCase();
+      }
+
+      function isSameEventId(a, b) {
+        return normalizeEventId(a) === normalizeEventId(b);
+      }
+
+      function formatMethod(method) {
+        return METHOD_LABELS[method] || method;
+      }
+
+      function formatDateTime(iso, timeZone) {
+        if (!iso) return "Time TBD";
+        try {
+          return new Date(iso).toLocaleString("en-US", {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+            hour: "numeric",
+            minute: "2-digit",
+            timeZone: timeZone || "UTC",
+          });
+        } catch (_) {
+          return iso;
+        }
+      }
+
+      function chooseMethod(methods) {
+        if (!Array.isArray(methods) || methods.length === 0) return null;
+        const order = ["host_code", "geo", "social_proof"];
+        for (let i = 0; i < order.length; i += 1) {
+          if (methods.includes(order[i])) return order[i];
+        }
+        return methods[0];
+      }
+
+      function parseEventIdFromQrText(rawValue) {
+        const text = String(rawValue || "").trim();
+        if (!text) return null;
+        const directCheckinMatch = text.match(/\/checkin\/([^/?#]+)/i);
+        if (directCheckinMatch && directCheckinMatch[1]) {
+          return decodeURIComponent(directCheckinMatch[1]);
+        }
+        const apiCheckinMatch = text.match(/\/api\/events\/([^/?#]+)\/checkins/i);
+        if (apiCheckinMatch && apiCheckinMatch[1]) {
+          return decodeURIComponent(apiCheckinMatch[1]);
+        }
+        if (/^[a-z0-9-]+$/i.test(text)) {
+          return text;
+        }
+        return null;
+      }
+
+      function setScannerUiActive(active) {
+        scannerVideo.classList.toggle("d-none", !active);
+        scannerOverlay.classList.toggle("d-none", !active);
+        scannerPlaceholder.classList.toggle("d-none", active);
+        stopScannerBtn.classList.toggle("d-none", !active);
+      }
+
+      async function stopScanner() {
+        if (scanLoopId) {
+          cancelAnimationFrame(scanLoopId);
+          scanLoopId = null;
+        }
+        if (cameraStream) {
+          cameraStream.getTracks().forEach((track) => track.stop());
+          cameraStream = null;
+        }
+        setScannerUiActive(false);
+      }
+
+      async function submitCheckin() {
+        if (isSubmitting || !canCheckIn) return;
+        if (!preferredMethod) {
+          showAlert("danger", "This event has no enabled check-in methods.");
+          return;
+        }
+        isSubmitting = true;
+        clearAlert();
+        setScannerStatus("Submitting check-in...");
+        startScannerBtn.disabled = true;
+        manualSubmitBtn.disabled = true;
+
+        try {
+          const response = await fetch("/api/events/" + encodeURIComponent(eventId) + "/checkins", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-CSRF-Token": csrfToken,
+            },
+            body: JSON.stringify({ method: preferredMethod }),
+          });
+          const json = await response.json().catch(() => ({}));
+          if (!response.ok || !json?.ok) {
+            throw new Error(json?.error || "Unable to check in");
+          }
+
+          const checkedAt = json?.data?.checked_in_at
+            ? formatDateTime(json.data.checked_in_at)
+            : "now";
+          showAlert("success", "Checked in successfully at " + checkedAt + ".");
+          setScannerStatus("You are checked in.");
+          canCheckIn = false;
+          await stopScanner();
+        } catch (error) {
+          showAlert("danger", error.message || "Unable to check in. Please try again.");
+          setScannerStatus("Check-in failed. Try scanning again.");
+          startScannerBtn.disabled = false;
+          manualSubmitBtn.disabled = false;
+        } finally {
+          isSubmitting = false;
+        }
+      }
+
+      async function handleQrMatch(scannedText) {
+        if (!canCheckIn) return;
+        const scannedEventId = parseEventIdFromQrText(scannedText);
+        if (!scannedEventId) {
+          setScannerStatus("QR code detected, but not a valid Get Kinder check-in code.");
+          return;
+        }
+        if (!isSameEventId(scannedEventId, eventId)) {
+          setScannerStatus("That QR belongs to another event.");
+          showAlert("warning", "This QR code belongs to a different event. Please scan the correct event QR.");
+          return;
+        }
+        setScannerStatus("QR code matched. Completing check-in...");
+        await submitCheckin();
+      }
+
+      async function scanFrame() {
+        if (!detector || !scannerVideo || scannerVideo.readyState < 2 || scannerBusy) {
+          scanLoopId = requestAnimationFrame(scanFrame);
+          return;
+        }
+        scannerBusy = true;
+        try {
+          const codes = await detector.detect(scannerVideo);
+          if (Array.isArray(codes) && codes.length > 0) {
+            const value = codes[0]?.rawValue || "";
+            if (value) {
+              await handleQrMatch(value);
+            }
+          }
+        } catch (error) {
+          setScannerStatus("Scanning error. Keep camera open or use manual fallback.");
+        } finally {
+          scannerBusy = false;
+          if (cameraStream && canCheckIn) {
+            scanLoopId = requestAnimationFrame(scanFrame);
+          }
+        }
+      }
+
+      async function startScanner() {
+        clearManualError();
+        clearAlert();
+        if (!canCheckIn) return;
+
+        if (typeof window.BarcodeDetector !== "function") {
+          setScannerStatus("Camera QR scanning is not supported in this browser. Use manual fallback.");
+          showAlert("warning", "Camera scanning is not supported here. Paste the QR text in the manual field.");
+          return;
+        }
+
+        try {
+          detector = new window.BarcodeDetector({ formats: ["qr_code"] });
+          cameraStream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: { ideal: "environment" } },
+            audio: false,
+          });
+          scannerVideo.srcObject = cameraStream;
+          await scannerVideo.play();
+          setScannerUiActive(true);
+          setScannerStatus("Scanner active. Point camera at QR code.");
+          scanLoopId = requestAnimationFrame(scanFrame);
+        } catch (error) {
+          setScannerStatus("Could not access camera. Use manual fallback.");
+          showAlert("danger", "Camera access was denied or unavailable.");
+          await stopScanner();
+        }
+      }
+
+      async function loadEvent() {
+        if (!eventId) {
+          showAlert("danger", "Missing event id.");
+          startScannerBtn.disabled = true;
+          manualSubmitBtn.disabled = true;
+          return;
+        }
+        try {
+          const response = await fetch("/api/events/" + encodeURIComponent(eventId));
+          const json = await response.json().catch(() => ({}));
+          if (!response.ok || !json?.data) {
+            throw new Error("Could not load this event.");
+          }
+          const event = json.data;
+          const eventTitle = event.title || "Untitled event";
+          const eventWhen = formatDateTime(event.start_at, event.tz);
+          eventMeta.textContent = eventTitle + " • " + eventWhen;
+
+          preferredMethod = chooseMethod(event.attendance_methods);
+          if (preferredMethod) {
+            methodBadge.textContent = "Method: " + formatMethod(preferredMethod);
+            methodBadge.classList.remove("d-none");
+          } else {
+            canCheckIn = false;
+            startScannerBtn.disabled = true;
+            manualSubmitBtn.disabled = true;
+            showAlert("danger", "No check-in methods are enabled for this event.");
+            setScannerStatus("This event has no check-in methods.");
+            return;
+          }
+
+          if (event.viewer_is_host) {
+            canCheckIn = false;
+            startScannerBtn.disabled = true;
+            manualSubmitBtn.disabled = true;
+            showAlert("warning", "Hosts do not check in as attendees.");
+            setScannerStatus("Host account detected.");
+            return;
+          }
+
+          if (event.viewer_rsvp_status === "checked_in") {
+            canCheckIn = false;
+            startScannerBtn.disabled = true;
+            manualSubmitBtn.disabled = true;
+            showAlert("success", "You are already checked in for this event.");
+            setScannerStatus("Already checked in.");
+            return;
+          }
+
+          if (!["accepted", "checked_in"].includes(event.viewer_rsvp_status)) {
+            canCheckIn = false;
+            startScannerBtn.disabled = true;
+            manualSubmitBtn.disabled = true;
+            showAlert("warning", "Please accept the invite on the event page before check-in.");
+            setScannerStatus("RSVP must be accepted first.");
+            return;
+          }
+        } catch (error) {
+          canCheckIn = false;
+          startScannerBtn.disabled = true;
+          manualSubmitBtn.disabled = true;
+          showAlert("danger", error.message || "Unable to load event.");
+          setScannerStatus("Unable to load event data.");
+        }
+      }
+
+      startScannerBtn.addEventListener("click", startScanner);
+      stopScannerBtn.addEventListener("click", async function () {
+        await stopScanner();
+        if (canCheckIn) setScannerStatus("Scanner stopped.");
+      });
+
+      manualSubmitBtn.addEventListener("click", async function () {
+        clearManualError();
+        clearAlert();
+        if (!canCheckIn) return;
+        const rawInput = manualQrInput.value.trim();
+        const parsed = parseEventIdFromQrText(rawInput);
+        if (!parsed) {
+          showManualError("Please paste a valid check-in QR text or URL.");
+          return;
+        }
+        if (!isSameEventId(parsed, eventId)) {
+          showManualError("That code belongs to a different event.");
+          return;
+        }
+        setScannerStatus("QR text matched. Completing check-in...");
+        await submitCheckin();
+      });
+
+      window.addEventListener("beforeunload", function () {
+        stopScanner();
+      });
+
+      loadEvent();
+    })();
+  </script>
+</body>
+</html>

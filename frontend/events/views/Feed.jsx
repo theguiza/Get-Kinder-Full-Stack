@@ -1,9 +1,23 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { fetchEventsList } from "../api.js";
 
 export function Feed({ feed = [], setFeed, pagination }) {
   const [communityTag, setCommunityTag] = useState("");
   const [causeTag, setCauseTag] = useState("");
+
+  useEffect(() => {
+    function handleChipFilter(e) {
+      setCauseTag(e?.detail?.causeTag || "");
+    }
+    if (typeof window !== "undefined") {
+      window.addEventListener("getkinder:causeFilter", handleChipFilter);
+    }
+    return () => {
+      if (typeof window !== "undefined") {
+        window.removeEventListener("getkinder:causeFilter", handleChipFilter);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (typeof fetch !== "function") return undefined;
@@ -32,7 +46,32 @@ export function Feed({ feed = [], setFeed, pagination }) {
     };
   }, [communityTag, causeTag, pagination?.limit, setFeed]);
 
-  const hasEvents = Array.isArray(feed) && feed.length > 0;
+  const sortedFeed = useMemo(() => {
+    if (!Array.isArray(feed)) return [];
+    const now = Date.now();
+    return [...feed].sort((a, b) => {
+      const aStart = Date.parse(a?.start_at || "");
+      const bStart = Date.parse(b?.start_at || "");
+      const aValid = Number.isFinite(aStart);
+      const bValid = Number.isFinite(bStart);
+
+      if (!aValid && !bValid) return 0;
+      if (!aValid) return 1;
+      if (!bValid) return -1;
+
+      const aFuture = aStart >= now;
+      const bFuture = bStart >= now;
+
+      // Upcoming events first, nearest start time at the top.
+      if (aFuture && bFuture) return aStart - bStart;
+      if (aFuture !== bFuture) return aFuture ? -1 : 1;
+
+      // Past events follow, newest past first.
+      return bStart - aStart;
+    });
+  }, [feed]);
+
+  const hasEvents = sortedFeed.length > 0;
 
   return (
     <section className="events-feed">
@@ -55,6 +94,7 @@ export function Feed({ feed = [], setFeed, pagination }) {
               value={causeTag}
               onChange={(e) => setCauseTag(e.target.value)}
               placeholder="e.g., Environment"
+              style={{ display: "none" }}
             />
           </label>
           <button
@@ -79,7 +119,7 @@ export function Feed({ feed = [], setFeed, pagination }) {
 
       <div className="cards">
         {hasEvents &&
-          feed.map((evt) => {
+          sortedFeed.map((evt) => {
             const hasCover = Boolean(evt.cover_url);
             const orgName = evt.org_name || "Independent organizer";
             const communityTagLabel = evt.community_tag || "";
@@ -155,9 +195,6 @@ export function Feed({ feed = [], setFeed, pagination }) {
                     onClick={() => (window.location.hash = `#/events/${evt.id}`)}
                   >
                     {ctaLabel}
-                  </button>
-                  <button className="btn secondary" type="button">
-                    Save
                   </button>
                 </div>
               </article>

@@ -226,7 +226,7 @@ export default function WeeksPlan() {
       <div className="flex flex-col gap-3">
         <div>
           <h2 className="text-xl md:text-2xl font-semibold text-[var(--ink)]">This Week&apos;s Plan</h2>
-          <p className="text-sm text-slate-600">Your plan: help to earn amd build verified skills.</p>
+          <p className="text-sm text-slate-600">Your plan: help to earn and build verified skills.</p>
         </div>
 
         <style>{`.no-scrollbar::-webkit-scrollbar{display:none}.no-scrollbar{-ms-overflow-style:none;scrollbar-width:none}`}</style>

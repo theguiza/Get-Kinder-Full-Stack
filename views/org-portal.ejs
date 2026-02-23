@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="csrf-token" content="<%= typeof csrfToken !== 'undefined' ? csrfToken : '' %>">
+  <title>Organization Portal</title>
+  <link rel="stylesheet" href="/css/style.css" />
+  <link rel="stylesheet" href="/css/org-portal.css?<%= assetTag %>" />
+  <link rel="icon" href="/images/favicon.png" sizes="32x32" type="image/png" />
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-SgOJa3DmI69IUzQ2PVdRZhwQ+dy64/BUtbMJw1MZ8t5HZApcHrRKUc4W0kG879m7" crossorigin="anonymous" />
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet" />
+</head>
+<body class="org-portal-page">
+  <%- include("partials/site-header", { currentPage: "org-portal" }) %>
+
+  <div class="org-portal-nav-spacer" aria-hidden="true"></div>
+
+  <main class="org-portal-main container">
+    <%
+      const fullName = `${user?.firstname || ""} ${user?.lastname || ""}`.trim() || user?.name || "Organization Lead";
+      const organizationName = user?.organization_name || user?.organization || user?.org_name || "Get Kinder Organization";
+      const profilePicture = user?.picture || "/images/nerdy-KAI.png";
+    %>
+    <section class="org-hero mb-3" aria-label="Organization profile hero">
+      <div class="org-hero-card">
+        <div class="row g-4 align-items-center">
+          <div class="col-12 col-md-3 text-center">
+            <img
+              class="org-hero-avatar rounded-circle"
+              width="140"
+              height="140"
+              alt="Profile photo of <%= fullName %>"
+              src="<%= profilePicture %>">
+          </div>
+          <div class="col-12 col-md-5 text-center text-md-start">
+            <div class="org-hero-org"><%= organizationName %></div>
+            <h1 class="org-hero-name"><%= fullName %></h1>
+          </div>
+          <div class="col-12 col-md-4">
+            <div id="org-portal-kpis"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="org-split-shell mb-4" aria-label="Organization workspace">
+      <div id="org-portal-root"></div>
+    </section>
+  </main>
+
+  <section id="footer" class="gradient-background">
+  <div class="container">
+    <footer class="row align-items-center py-5 mt-5 border-top text-body-secondary">
+      <!-- 1) Logo: centered on xs, left on md+ -->
+      <div class="col-12 col-md-4 mb-4 mb-md-0 text-center text-md-start">
+        <a href="#">
+          <img src="./images/heart3D.png" alt="Get Kinder Heart" height="150">
+        </a>
+        <p class="mt-2">
+          &copy;
+          <a href="https://getkindr.com/" target="_blank" rel="noopener noreferrer"
+             class="text-body-secondary text-decoration-underline">
+            Get Kindr Foundation
+          </a>
+        </p>
+      </div>
+      <!-- 2) Social Icons: always centered -->
+      <div class="col-12 col-md-4 mb-4 mb-md-0 d-flex justify-content-center">
+        <a class="btn btn-floating m-1 text-white" style="background-color: #3b5998;"
+           href="https://www.facebook.com/profile.php?id=61576860759313" role="button" target="_blank" rel="noopener noreferrer">
+          <i class="fab fa-facebook-f"></i>
+        </a>
+        <a class="btn btn-floating m-1 text-white" style="background-color: #ac2bac;"
+           href="https://www.instagram.com/getkinder/" role="button" target="_blank" rel="noopener noreferrer">
+          <i class="fab fa-instagram"></i>
+        </a>
+        <a class="btn btn-floating m-1 text-white" style="background-color: #0082ca;"
+           href="https://www.linkedin.com/company/getkindrfoundation/" role="button" target="_blank" rel="noopener noreferrer">
+          <i class="fab fa-linkedin-in"></i>
+        </a>
+        <a class="btn btn-floating m-1 text-white" style="background-color: #c8232c;"
+           href="https://ca.pinterest.com/getkindr/" role="button" target="_blank" rel="noopener noreferrer">
+          <i class="fab fa-pinterest"></i>
+        </a>
+      </div>
+      <!-- 3) More About: centered on xs, right on md+ -->
+      <div class="col-12 col-md-4 mb-4 mb-md-0 text-center text-md-end">
+        <h5>More About Get Kinder</h5>
+        <ul class="nav flex-column">
+          <li class="nav-item mb-2"><a href="/home"        class="nav-link p-0 text-body-secondary">Home</a></li>
+          <li class="nav-item mb-2"><a href="about" class="nav-link p-0 text-body-secondary">About</a></li>
+          <li class="nav-item mb-2"><a href="contact"     class="nav-link p-0 text-body-secondary">Contact</a></li>
+          <li class="nav-item mb-2"><a href="privacy"     class="nav-link p-0 text-body-secondary">Privacy</a></li>
+          <li class="nav-item mb-2"><a href="terms"       class="nav-link p-0 text-body-secondary">Terms</a></li>
+          <li class="nav-item mb-2"><a href="accessability" class="nav-link p-0 text-body-secondary">Accessibility</a></li>
+        </ul>
+      </div>
+    </footer>
+  </div>
+</section>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/js/bootstrap.bundle.min.js" integrity="sha384-k6d4wzSIapyDyv1kpU366/PK5hCdSbCRGRCMv+eplOQJWyd1fbcAu9OCUj5zNLiq" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <script src="/js/bundles/entry.js?<%= assetTag %>"></script>
+  <script>
+    window.renderOrgPortal("#org-portal-root", { csrfToken: "<%= csrfToken %>", userId: "<%= user.id %>" });
+    window.renderKpiStrip("#org-portal-kpis", { csrfToken: "<%= csrfToken %>" });
+  </script>
+</body>
+</html>

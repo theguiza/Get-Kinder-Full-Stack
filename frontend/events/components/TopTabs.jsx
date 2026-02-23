@@ -14,8 +14,6 @@ export function TopTabs({ route }) {
 
   const items = [
     { href: "#/events", label: "Events" },
-    { href: "#/create", label: "Create" },
-    { href: "#/my", label: "My Events" },
     { href: "#/invites", label: "Invites" },
   ];
 

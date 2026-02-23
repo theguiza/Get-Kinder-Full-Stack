@@ -3,8 +3,6 @@ import { EventsRouter } from "./router.js";
 import { Drawer } from "./components/Drawer.jsx";
 import { TopTabs } from "./components/TopTabs.jsx";
 import { Feed } from "./views/Feed.jsx";
-import { CreateEvent } from "./views/CreateEvent.jsx";
-import { MyEvents } from "./views/MyEvents.jsx";
 import { Invites } from "./views/Invites.jsx";
 import { MyInvites } from "./views/MyInvites.jsx";
 import { EventDetail } from "./views/EventDetail.jsx";
@@ -79,8 +77,6 @@ export function EventsApp(props = {}) {
         onSelectEvent={handleSelectEvent}
       >
         <Feed path="#/events" />
-        <CreateEvent path="#/create" />
-        <MyEvents path="#/my" />
         <Invites path="#/invites" />
         <MyInvites path="#/my-invites" />
       </EventsRouter>

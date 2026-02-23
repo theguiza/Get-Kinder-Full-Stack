@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="csrf-token" content="<%= typeof csrfToken !== 'undefined' ? csrfToken : '' %>">
+  <title>Admin | Pending Org Applications</title>
+  <link rel="icon" href="/images/favicon.png" sizes="32x32" type="image/png">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-SgOJa3DmI69IUzQ2PVdRZhwQ+dy64/BUtbMJw1MZ8t5HZApcHrRKUc4W0kG879m7" crossorigin="anonymous">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="/css/style.css">
+  <style>
+    .admin-org-top-spacer {
+      height: 132px;
+    }
+    @media (max-width: 767.98px) {
+      .admin-org-top-spacer {
+        height: 112px;
+      }
+    }
+    .admin-org-card {
+      border: 1px solid #dfe8f5;
+      border-radius: 18px;
+      box-shadow: var(--bs-box-shadow-sm);
+      background: #fff;
+      padding: 24px;
+      margin-bottom: 16px;
+    }
+    .admin-org-name {
+      color: #455a7c;
+      font-weight: 700;
+      font-size: 1.25rem;
+      line-height: 1.2;
+      margin-bottom: 0.35rem;
+    }
+    .admin-org-desc {
+      color: #455a7c;
+      font-size: 0.95rem;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      margin: 0;
+    }
+    .admin-org-approve {
+      background: #ff5656;
+      border-color: #ff5656;
+      color: #fff;
+      width: 100%;
+    }
+    .admin-org-approve:hover,
+    .admin-org-approve:focus {
+      background: #f04c4c;
+      border-color: #f04c4c;
+      color: #fff;
+    }
+  </style>
+</head>
+<body>
+  <%- include("partials/site-header", { currentPage: "other" }) %>
+  <div class="admin-org-top-spacer" aria-hidden="true"></div>
+
+  <main class="container pb-4">
+    <header class="mb-4">
+      <h1 class="display-6 fw-bold mb-1" style="color:#455a7c;">Pending Org Applications</h1>
+      <p class="text-muted mb-0">
+        <span id="pendingCount"><%= (applications || []).length %></span> pending
+      </p>
+    </header>
+
+    <% if (!applications || applications.length === 0) { %>
+      <div class="card border-0 shadow-sm text-center p-5" style="border-radius:18px;">
+        <i class="fas fa-inbox mb-3" style="font-size:2rem; color:#6c757d;"></i>
+        <div class="text-muted">No pending applications</div>
+      </div>
+    <% } else { %>
+      <section id="applicationsList">
+        <% applications.forEach((app) => { %>
+          <article class="admin-org-card" id="app-card-<%= app.id %>">
+            <div class="row g-3 align-items-start">
+              <div class="col-12 col-md-8">
+                <h2 class="admin-org-name"><%= app.org_name %></h2>
+                <div class="text-muted mb-1">
+                  Applicant: <%= app.firstname %> <%= app.lastname %> · <%= app.email %>
+                </div>
+                <div class="text-muted fst-italic mb-2">
+                  Role: <%= app.rep_role || "Not provided" %>
+                </div>
+                <div class="mb-2">
+                  <% if (app.org_website) { %>
+                    <a href="<%= app.org_website %>" target="_blank" rel="noopener noreferrer"><%= app.org_website %></a>
+                  <% } else { %>
+                    <span class="text-muted">No website provided</span>
+                  <% } %>
+                </div>
+                <p class="admin-org-desc mb-2"><%= app.org_description || "No description provided." %></p>
+                <div class="text-muted small">
+                  <%
+                    let appliedLabel = "Unknown";
+                    if (app.submitted_at) {
+                      const submittedDate = new Date(app.submitted_at);
+                      const datePart = submittedDate.toLocaleDateString("en-US", {
+                        month: "short",
+                        day: "numeric",
+                        year: "numeric"
+                      });
+                      const timePart = submittedDate.toLocaleTimeString("en-US", {
+                        hour: "numeric",
+                        minute: "2-digit"
+                      });
+                      appliedLabel = `${datePart} at ${timePart}`;
+                    }
+                  %>
+                  Applied: <%= appliedLabel %>
+                </div>
+              </div>
+              <div class="col-12 col-md-4">
+                <button
+                  type="button"
+                  class="btn admin-org-approve js-admin-action"
+                  data-id="<%= app.id %>"
+                  data-action="approve">
+                  ✓ Approve
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-outline-danger w-100 mt-2 js-admin-action"
+                  data-id="<%= app.id %>"
+                  data-action="decline">
+                  ✗ Decline
+                </button>
+                <div class="alert alert-danger py-2 px-3 mt-2 mb-0 d-none app-inline-error" role="alert"></div>
+              </div>
+            </div>
+          </article>
+        <% }); %>
+      </section>
+    <% } %>
+  </main>
+
+  <section id="footer" class="gradient-background">
+    <div class="container">
+      <footer class="row align-items-center py-5 mt-5 border-top text-body-secondary">
+        <div class="col-12 col-md-4 mb-4 mb-md-0 text-center text-md-start">
+          <a href="#">
+            <img src="./images/heart3D.png" alt="Get Kinder Heart" height="150">
+          </a>
+          <p class="mt-2">
+            &copy;
+            <a href="https://getkindr.com/" target="_blank" rel="noopener noreferrer"
+               class="text-body-secondary text-decoration-underline">
+              Get Kindr Foundation
+            </a>
+          </p>
+        </div>
+        <div class="col-12 col-md-4 mb-4 mb-md-0 d-flex justify-content-center">
+          <a class="btn btn-floating m-1 text-white" style="background-color: #3b5998;"
+             href="https://www.facebook.com/profile.php?id=61576860759313" role="button" target="_blank" rel="noopener noreferrer">
+            <i class="fab fa-facebook-f"></i>
+          </a>
+          <a class="btn btn-floating m-1 text-white" style="background-color: #ac2bac;"
+             href="https://www.instagram.com/getkinder/" role="button" target="_blank" rel="noopener noreferrer">
+            <i class="fab fa-instagram"></i>
+          </a>
+          <a class="btn btn-floating m-1 text-white" style="background-color: #0082ca;"
+             href="https://www.linkedin.com/company/getkindrfoundation/" role="button" target="_blank" rel="noopener noreferrer">
+            <i class="fab fa-linkedin-in"></i>
+          </a>
+          <a class="btn btn-floating m-1 text-white" style="background-color: #c8232c;"
+             href="https://ca.pinterest.com/getkindr/" role="button" target="_blank" rel="noopener noreferrer">
+            <i class="fab fa-pinterest"></i>
+          </a>
+        </div>
+        <div class="col-12 col-md-4 mb-4 mb-md-0 text-center text-md-end">
+          <h5>More About Get Kinder</h5>
+          <ul class="nav flex-column">
+            <li class="nav-item mb-2"><a href="/home" class="nav-link p-0 text-body-secondary">Home</a></li>
+            <li class="nav-item mb-2"><a href="about" class="nav-link p-0 text-body-secondary">About</a></li>
+            <li class="nav-item mb-2"><a href="contact" class="nav-link p-0 text-body-secondary">Contact</a></li>
+            <li class="nav-item mb-2"><a href="privacy" class="nav-link p-0 text-body-secondary">Privacy</a></li>
+            <li class="nav-item mb-2"><a href="terms" class="nav-link p-0 text-body-secondary">Terms</a></li>
+            <li class="nav-item mb-2"><a href="accessability" class="nav-link p-0 text-body-secondary">Accessibility</a></li>
+          </ul>
+        </div>
+      </footer>
+    </div>
+  </section>
+
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      const csrfMeta = document.querySelector('meta[name="csrf-token"]');
+      const csrf = csrfMeta ? csrfMeta.getAttribute("content") : "";
+      const pendingCountEl = document.getElementById("pendingCount");
+      const listEl = document.getElementById("applicationsList");
+
+      function decrementCount() {
+        if (!pendingCountEl) return;
+        const current = Number.parseInt(pendingCountEl.textContent || "0", 10);
+        pendingCountEl.textContent = Math.max(0, current - 1);
+      }
+
+      function showEmptyStateIfNeeded() {
+        if (!listEl) return;
+        if (listEl.querySelectorAll("[id^='app-card-']").length > 0) return;
+        const container = document.createElement("div");
+        container.className = "card border-0 shadow-sm text-center p-5";
+        container.style.borderRadius = "18px";
+        container.innerHTML = '<i class="fas fa-inbox mb-3" style="font-size:2rem; color:#6c757d;"></i><div class="text-muted">No pending applications</div>';
+        listEl.replaceWith(container);
+      }
+
+      document.querySelectorAll(".js-admin-action").forEach(function (button) {
+        button.addEventListener("click", async function () {
+          const action = button.getAttribute("data-action");
+          const appId = button.getAttribute("data-id");
+          if (!action || !appId) return;
+
+          const card = document.getElementById("app-card-" + appId);
+          if (!card) return;
+          const errorEl = card.querySelector(".app-inline-error");
+          if (errorEl) {
+            errorEl.classList.add("d-none");
+            errorEl.textContent = "";
+          }
+
+          card.querySelectorAll(".js-admin-action").forEach(function (btn) {
+            btn.disabled = true;
+          });
+
+          try {
+            const response = await fetch("/admin/org-applications/" + appId + "/" + action, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-CSRF-Token": csrf
+              }
+            });
+            if (!response.ok) throw new Error("request failed");
+            card.remove();
+            decrementCount();
+            showEmptyStateIfNeeded();
+          } catch (error) {
+            card.querySelectorAll(".js-admin-action").forEach(function (btn) {
+              btn.disabled = false;
+            });
+            if (errorEl) {
+              errorEl.textContent = "Action failed. Please try again.";
+              errorEl.classList.remove("d-none");
+            }
+          }
+        });
+      });
+    });
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/js/bootstrap.bundle.min.js" integrity="sha384-k6d4wzSIapyDyv1kpU366/PK5hCdSbCRGRCMv+eplOQJWyd1fbcAu9OCUj5zNLiq" crossorigin="anonymous"></script>
+</body>
+</html>

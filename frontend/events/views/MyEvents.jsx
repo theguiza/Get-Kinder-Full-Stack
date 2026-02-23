@@ -319,15 +319,6 @@ export function MyEvents() {
             </button>
           </>
         )}
-        <button
-          type="button"
-          className="btn secondary"
-          onClick={() => {
-            window.location.hash = `#/create?edit=${event.id}`;
-          }}
-        >
-          Edit
-        </button>
         {!isDraft && !isCancelled && inFuture && (
           <button type="button" className="btn tertiary" onClick={() => cancelEvent(event.id)}>
             Cancel Event
@@ -496,12 +487,9 @@ export function MyEvents() {
         <button
           type="button"
           className="btn secondary"
-          onClick={() => {
-            setHighlightDraft(null);
-            window.location.hash = "#/create";
-          }}
+          onClick={() => setHighlightDraft(null)}
         >
-          Continue Editing
+          Dismiss
         </button>
       </div>
       )}
@@ -522,7 +510,7 @@ export function MyEvents() {
               {fundingFilter !== ANY_FUNDING_FILTER
                 ? "No events match the active funding filter."
                 : tab === "drafts"
-                ? "No drafts yet — save from Create to pick up later."
+                ? "No drafts yet."
                 : tab === "past"
                 ? "No past hosted events yet."
                 : "You haven’t published any upcoming events yet."}

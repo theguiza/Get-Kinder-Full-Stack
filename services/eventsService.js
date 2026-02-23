@@ -14,6 +14,13 @@ function clampOffset(value) {
   return Math.max(Number.isFinite(num) ? num : 0, 0);
 }
 
+function normalizeFilterToken(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+}
+
 function mapEventRow(row = {}) {
   return {
     id: row.id != null ? String(row.id) : null,
@@ -76,17 +83,33 @@ function normalizeTextArray(value) {
 export async function fetchEvents({ limit, offset, communityTag, causeTag } = {}) {
   const clampedLimit = clampLimit(limit);
   const clampedOffset = clampOffset(offset);
-  const filters = [];
+  const filters = ["e.status = 'published'"];
   const values = [];
-  const normalizedCommunity = typeof communityTag === "string" ? communityTag.trim() : "";
-  const normalizedCause = typeof causeTag === "string" ? causeTag.trim() : "";
+  const normalizedCommunity = typeof communityTag === "string" ? communityTag.trim().toLowerCase() : "";
+  const normalizedCause = normalizeFilterToken(causeTag);
   if (normalizedCommunity) {
     values.push(normalizedCommunity);
-    filters.push(`e.community_tag = $${values.length}`);
+    filters.push(`LOWER(TRIM(COALESCE(e.community_tag, ''))) = $${values.length}`);
   }
   if (normalizedCause) {
     values.push(normalizedCause);
-    filters.push(`$${values.length} = ANY(e.cause_tags)`);
+    const causeParam = values.length;
+    // Match case-insensitively and ignore punctuation/spaces so chip filters
+    // still match tags like "Animals", "Arts & Culture", etc.
+    filters.push(`
+      (
+        EXISTS (
+          SELECT 1
+          FROM unnest(COALESCE(e.cause_tags, ARRAY[]::text[])) AS cause_tag
+          WHERE REGEXP_REPLACE(LOWER(TRIM(cause_tag)), '[^a-z0-9]+', '', 'g') = $${causeParam}
+             OR REGEXP_REPLACE(LOWER(TRIM(cause_tag)), '[^a-z0-9]+', '', 'g') LIKE $${causeParam} || '%'
+             OR $${causeParam} LIKE REGEXP_REPLACE(LOWER(TRIM(cause_tag)), '[^a-z0-9]+', '', 'g') || '%'
+        )
+        OR REGEXP_REPLACE(LOWER(TRIM(COALESCE(e.category, ''))), '[^a-z0-9]+', '', 'g') = $${causeParam}
+        OR REGEXP_REPLACE(LOWER(TRIM(COALESCE(e.category, ''))), '[^a-z0-9]+', '', 'g') LIKE $${causeParam} || '%'
+        OR $${causeParam} LIKE REGEXP_REPLACE(LOWER(TRIM(COALESCE(e.category, ''))), '[^a-z0-9]+', '', 'g') || '%'
+      )
+    `);
   }
   values.push(clampedLimit);
   values.push(clampedOffset);

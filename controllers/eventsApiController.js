@@ -113,16 +113,65 @@ function zonedTimeToUtc(dateStr, time, tz) {
   if (!dateStr || !time || !tz) return null;
   const [year, month, day] = dateStr.split("-").map((part) => Number(part));
   if (![year, month, day].every(Number.isFinite)) return null;
-  const utcDate = new Date(Date.UTC(year, month - 1, day, time.hour, time.minute));
-  let localeDate;
-  try {
-    const localeString = utcDate.toLocaleString("en-US", { timeZone: tz });
-    localeDate = new Date(localeString);
-  } catch (err) {
-    return null;
+  if (!Number.isFinite(time.hour) || !Number.isFinite(time.minute)) return null;
+
+  function getPartsInZone(date, timeZone) {
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      hour12: false,
+      hourCycle: "h23",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+    const parts = formatter.formatToParts(date);
+    const byType = Object.fromEntries(parts.map((p) => [p.type, p.value]));
+    return {
+      year: Number(byType.year),
+      month: Number(byType.month),
+      day: Number(byType.day),
+      hour: Number(byType.hour),
+      minute: Number(byType.minute),
+      second: Number(byType.second),
+    };
   }
-  const diff = utcDate.getTime() - localeDate.getTime();
-  return new Date(utcDate.getTime() + diff);
+
+  // Start with a UTC guess and iteratively correct it until the wall time in the target zone matches.
+  let guess = new Date(Date.UTC(year, month - 1, day, time.hour, time.minute, 0));
+  const targetWallUtc = Date.UTC(year, month - 1, day, time.hour, time.minute, 0);
+
+  for (let i = 0; i < 4; i += 1) {
+    let zoned;
+    try {
+      zoned = getPartsInZone(guess, tz);
+    } catch (err) {
+      return null;
+    }
+
+    if (
+      ![zoned.year, zoned.month, zoned.day, zoned.hour, zoned.minute, zoned.second]
+        .every(Number.isFinite)
+    ) {
+      return null;
+    }
+
+    const zonedAsUtc = Date.UTC(
+      zoned.year,
+      zoned.month - 1,
+      zoned.day,
+      zoned.hour,
+      zoned.minute,
+      zoned.second
+    );
+    const deltaMs = targetWallUtc - zonedAsUtc;
+    if (deltaMs === 0) break;
+    guess = new Date(guess.getTime() + deltaMs);
+  }
+
+  return guess;
 }
 
 async function resolveUserId(req) {
@@ -509,15 +558,19 @@ export async function respondToEventRsvp(req, res) {
 
 export async function checkInToEvent(req, res) {
   try {
-    const attendeeId = await resolveUserId(req);
-    const eventId = req.params.id;
-    const method = (req.body?.method || "").toLowerCase();
-    if (!CHECKIN_METHOD_SET.has(method)) {
-      return res.status(400).json({ ok: false, error: "Invalid check-in method" });
+    const requesterId = await resolveUserId(req);
+    if (!requesterId) {
+      return res.status(401).json({ ok: false, error: "Unauthorized" });
     }
+    const eventId = req.params.id;
+    const requestedMethod = sanitizeString(req.body?.method).toLowerCase();
+    const requestedAttendeeRaw = req.body?.attendee_user_id ?? req.body?.userId;
+    const requestedAttendeeId = requestedAttendeeRaw === undefined || requestedAttendeeRaw === null
+      ? null
+      : String(requestedAttendeeRaw).trim();
 
     const { rows: [eventRow] } = await pool.query(
-      `SELECT id, attendance_methods, status FROM events WHERE id=$1 LIMIT 1`,
+      `SELECT id, creator_user_id, attendance_methods, status FROM events WHERE id=$1 LIMIT 1`,
       [eventId]
     );
     if (!eventRow) {
@@ -527,6 +580,24 @@ export async function checkInToEvent(req, res) {
       return res.status(409).json({ ok: false, error: "Event has been cancelled" });
     }
     const allowed = ensureArrayValue(eventRow.attendance_methods);
+
+    const isHostOverride =
+      requestedAttendeeId &&
+      String(eventRow.creator_user_id) === String(requesterId) &&
+      String(requestedAttendeeId) !== String(requesterId);
+    const attendeeId = isHostOverride ? requestedAttendeeId : requesterId;
+
+    let method = CHECKIN_METHOD_SET.has(requestedMethod) ? requestedMethod : "";
+    if (!method) {
+      // Host/manual check-in defaults to host_code when available, otherwise first allowed method.
+      if (allowed.includes("host_code")) method = "host_code";
+      else if (allowed.length > 0 && CHECKIN_METHOD_SET.has(String(allowed[0]).toLowerCase())) {
+        method = String(allowed[0]).toLowerCase();
+      }
+    }
+    if (!CHECKIN_METHOD_SET.has(method)) {
+      return res.status(400).json({ ok: false, error: "Invalid check-in method" });
+    }
     if (!allowed.includes(method)) {
       return res.status(400).json({ ok: false, error: "This event does not use that check-in method" });
     }
