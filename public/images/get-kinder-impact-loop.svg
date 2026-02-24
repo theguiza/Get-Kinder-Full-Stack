@@ -45,37 +45,37 @@
   </g>
 
   <g transform="translate(366.4 174.4) scale(0.336)">
-    <circle cx="100" cy="100" r="90" fill="none" stroke="#455a7c" stroke-width="1" opacity="0.15"/>
-    <circle cx="100" cy="100" r="70" fill="none" stroke="#455a7c" stroke-width="1.5" opacity="0.25"/>
-    <circle cx="100" cy="100" r="52" fill="none" stroke="#455a7c" stroke-width="2" opacity="0.35"/>
-    <circle cx="100" cy="100" r="40" fill="none" stroke="#455a7c" stroke-width="2" opacity="0.45"/>
-    <circle cx="100" cy="100" r="28" fill="#455a7c"/>
+    <circle cx="100" cy="100" r="90" fill="none" stroke="#ff5656" stroke-width="1" opacity="0.15"/>
+    <circle cx="100" cy="100" r="70" fill="none" stroke="#ff5656" stroke-width="1.5" opacity="0.25"/>
+    <circle cx="100" cy="100" r="52" fill="none" stroke="#ff5656" stroke-width="2" opacity="0.35"/>
+    <circle cx="100" cy="100" r="40" fill="none" stroke="#ff5656" stroke-width="2" opacity="0.45"/>
+    <circle cx="100" cy="100" r="28" fill="#ff5656"/>
     <path d="M 100 92 C 100 92, 93 85, 88 85 C 82 85, 78 89, 78 95 C 78 104, 100 115, 100 115 C 100 115, 122 104, 122 95 C 122 89, 118 85, 112 85 C 107 85, 100 92, 100 92 Z" fill="#ffffff"/>
   </g>
   <text x="400" y="253" text-anchor="middle" class="node-label">Donors</text>
 
   <g transform="translate(550.4 446.4) scale(0.42)">
-    <circle cx="80" cy="80" r="20" fill="#ff5656" opacity="0.9"/>
-    <line x1="80" y1="80" x2="80" y2="25" stroke="#ff5656" stroke-width="2" opacity="0.4"/>
-    <line x1="80" y1="80" x2="135" y2="80" stroke="#ff5656" stroke-width="2" opacity="0.4"/>
-    <line x1="80" y1="80" x2="80" y2="135" stroke="#ff5656" stroke-width="2" opacity="0.4"/>
-    <line x1="80" y1="80" x2="25" y2="80" stroke="#ff5656" stroke-width="2" opacity="0.4"/>
-    <line x1="80" y1="80" x2="115" y2="45" stroke="#ff5656" stroke-width="2" opacity="0.4"/>
-    <line x1="80" y1="80" x2="115" y2="115" stroke="#ff5656" stroke-width="2" opacity="0.4"/>
-    <line x1="80" y1="80" x2="45" y2="115" stroke="#ff5656" stroke-width="2" opacity="0.4"/>
-    <line x1="80" y1="80" x2="45" y2="45" stroke="#ff5656" stroke-width="2" opacity="0.4"/>
-    <circle cx="80" cy="25" r="10" fill="#ff5656"/>
-    <circle cx="135" cy="80" r="10" fill="#ff5656"/>
-    <circle cx="80" cy="135" r="10" fill="#ff5656"/>
-    <circle cx="25" cy="80" r="10" fill="#ff5656"/>
-    <circle cx="115" cy="45" r="8" fill="#ff5656" opacity="0.8"/>
-    <circle cx="115" cy="115" r="8" fill="#ff5656" opacity="0.8"/>
-    <circle cx="45" cy="115" r="8" fill="#ff5656" opacity="0.8"/>
-    <circle cx="45" cy="45" r="8" fill="#ff5656" opacity="0.8"/>
+    <circle cx="80" cy="80" r="20" fill="#455a7c" opacity="0.9"/>
+    <line x1="80" y1="80" x2="80" y2="25" stroke="#455a7c" stroke-width="2" opacity="0.4"/>
+    <line x1="80" y1="80" x2="135" y2="80" stroke="#455a7c" stroke-width="2" opacity="0.4"/>
+    <line x1="80" y1="80" x2="80" y2="135" stroke="#455a7c" stroke-width="2" opacity="0.4"/>
+    <line x1="80" y1="80" x2="25" y2="80" stroke="#455a7c" stroke-width="2" opacity="0.4"/>
+    <line x1="80" y1="80" x2="115" y2="45" stroke="#455a7c" stroke-width="2" opacity="0.4"/>
+    <line x1="80" y1="80" x2="115" y2="115" stroke="#455a7c" stroke-width="2" opacity="0.4"/>
+    <line x1="80" y1="80" x2="45" y2="115" stroke="#455a7c" stroke-width="2" opacity="0.4"/>
+    <line x1="80" y1="80" x2="45" y2="45" stroke="#455a7c" stroke-width="2" opacity="0.4"/>
+    <circle cx="80" cy="25" r="10" fill="#455a7c"/>
+    <circle cx="135" cy="80" r="10" fill="#455a7c"/>
+    <circle cx="80" cy="135" r="10" fill="#455a7c"/>
+    <circle cx="25" cy="80" r="10" fill="#455a7c"/>
+    <circle cx="115" cy="45" r="8" fill="#455a7c" opacity="0.8"/>
+    <circle cx="115" cy="115" r="8" fill="#455a7c" opacity="0.8"/>
+    <circle cx="45" cy="115" r="8" fill="#455a7c" opacity="0.8"/>
+    <circle cx="45" cy="45" r="8" fill="#455a7c" opacity="0.8"/>
     <rect x="72" y="72" width="16" height="16" fill="#ffffff" opacity="0.9" rx="2"/>
-    <line x1="74" y1="76" x2="86" y2="76" stroke="#ff5656" stroke-width="1"/>
-    <line x1="74" y1="80" x2="86" y2="80" stroke="#ff5656" stroke-width="1"/>
-    <line x1="74" y1="84" x2="86" y2="84" stroke="#ff5656" stroke-width="1"/>
+    <line x1="74" y1="76" x2="86" y2="76" stroke="#455a7c" stroke-width="1"/>
+    <line x1="74" y1="80" x2="86" y2="80" stroke="#455a7c" stroke-width="1"/>
+    <line x1="74" y1="84" x2="86" y2="84" stroke="#455a7c" stroke-width="1"/>
   </g>
   <text x="584" y="540" text-anchor="middle" class="node-label">Organizations</text>
 
