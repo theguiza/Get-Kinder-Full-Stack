@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 
 const TONES = [
   { value: "friendly", label: "Friendly" },
@@ -155,7 +156,7 @@ export function InviteModal({ open, onClose, eventId, eventTitle, onSent }) {
     setMessage(buildDefaultMessage(eventTitle));
   }
 
-  return (
+  const modalMarkup = (
     <div className="invite-modal" role="dialog" aria-modal="true">
       <div className="invite-backdrop" onClick={onClose} />
       <div className="invite-panel">
@@ -263,7 +264,7 @@ export function InviteModal({ open, onClose, eventId, eventTitle, onSent }) {
           display: flex;
           align-items: center;
           justify-content: center;
-          z-index: 1100;
+          z-index: 2000;
         }
         .invite-backdrop {
           position: absolute;
@@ -327,7 +328,6 @@ export function InviteModal({ open, onClose, eventId, eventTitle, onSent }) {
           cursor: pointer;
           color: #111827;
         }
-    NEW
         .pill.active {
           background: #ffebeb;
           border-color: #ff5656;
@@ -408,4 +408,9 @@ export function InviteModal({ open, onClose, eventId, eventTitle, onSent }) {
       `}</style>
     </div>
   );
+
+  if (typeof document === "undefined" || !document.body) {
+    return modalMarkup;
+  }
+  return createPortal(modalMarkup, document.body);
 }

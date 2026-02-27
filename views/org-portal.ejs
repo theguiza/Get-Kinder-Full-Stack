@@ -19,7 +19,7 @@
   <main class="org-portal-main container">
     <%
       const fullName = `${user?.firstname || ""} ${user?.lastname || ""}`.trim() || user?.name || "Organization Lead";
-      const organizationName = user?.organization_name || user?.organization || user?.org_name || "Get Kinder Organization";
+      const organizationName = user?.organization_name || user?.organization || user?.org_name || "Get Kinder";
       const profilePicture = user?.picture || "/images/nerdy-KAI.png";
     %>
     <section class="org-hero mb-3" aria-label="Organization profile hero">
@@ -104,7 +104,11 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
   <script src="/js/bundles/entry.js?<%= assetTag %>"></script>
   <script>
-    window.renderOrgPortal("#org-portal-root", { csrfToken: "<%= csrfToken %>", userId: "<%= user.id %>" });
+    window.renderOrgPortal("#org-portal-root", {
+      csrfToken: "<%= csrfToken %>",
+      userId: "<%= user.id %>",
+      orgName: <%- JSON.stringify(organizationName) %>
+    });
     window.renderKpiStrip("#org-portal-kpis", { csrfToken: "<%= csrfToken %>" });
   </script>
 </body>

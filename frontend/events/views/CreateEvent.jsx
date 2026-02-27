@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { InviteModal } from "../components/InviteModal.jsx";
 
 const DEFAULT_BRAND = { primary: "#ff5656", ink: "#455a7c" };
 const VISIBILITY_OPTIONS = [
@@ -6,13 +7,71 @@ const VISIBILITY_OPTIONS = [
   { value: "fof", label: "Friends-of-friends" },
   { value: "private", label: "Private link" },
 ];
-const ATTENDANCE_BASE = [
-  { value: "host_code", label: "Host Code", always: true },
-  { value: "social_proof", label: "Social Proof", always: true },
-  { value: "geo", label: "Geo Check-in", requiresGeo: true },
+const CAUSE_TAG_OPTIONS = [
+  { value: "Outdoors", label: "🌿 Outdoors" },
+  { value: "Food & Hunger", label: "🍎 Food & Hunger" },
+  { value: "Education", label: "📚 Education" },
+  { value: "Community", label: "🏘 Community" },
+  { value: "Health", label: "💊 Health" },
+  { value: "Arts & Culture", label: "🎨 Arts & Culture" },
+  { value: "Sports", label: "🏅 Sports" },
+  { value: "Animals", label: "🐾 Animals" },
+  { value: "Environment", label: "♻️ Environment" },
+  { value: "Other", label: "Other" },
 ];
 const MAX_COVER_SIZE = 2 * 1024 * 1024; // 2MB
 const FUNDING_POOL_SLUG_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+const DEFAULT_MAP_CENTER = { lat: 49.2827, lng: -123.1207 };
+
+let leafletAssetsPromise = null;
+
+function formatCoordinate(value) {
+  return Number(value).toFixed(3);
+}
+
+function loadLeafletAssets() {
+  if (typeof window === "undefined") {
+    return Promise.reject(new Error("Map is unavailable on the server."));
+  }
+  if (window.L) return Promise.resolve(window.L);
+  if (leafletAssetsPromise) return leafletAssetsPromise;
+
+  leafletAssetsPromise = new Promise((resolve, reject) => {
+    if (!document.querySelector('link[data-leaflet="1"]')) {
+      const link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+      link.setAttribute("data-leaflet", "1");
+      document.head.appendChild(link);
+    }
+
+    if (document.querySelector('script[data-leaflet="1"]')) {
+      const tick = () => {
+        if (window.L) return resolve(window.L);
+        setTimeout(tick, 30);
+      };
+      tick();
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+    script.async = true;
+    script.defer = true;
+    script.setAttribute("data-leaflet", "1");
+    script.onload = () => {
+      if (!window.L) {
+        reject(new Error("Leaflet failed to load."));
+        return;
+      }
+      resolve(window.L);
+    };
+    script.onerror = () => reject(new Error("Unable to load map assets."));
+    document.body.appendChild(script);
+  });
+
+  return leafletAssetsPromise;
+}
 
 function getEditIdFromHash() {
   if (typeof window === "undefined") return null;
@@ -69,7 +128,7 @@ function normalizeAttendanceArray(value) {
     } catch {}
   }
   if (value && Array.isArray(value)) return value;
-  return ["host_code", "social_proof"];
+  return ["social_proof"];
 }
 
 function normalizeCauseTagsInput(value) {
@@ -87,14 +146,19 @@ function normalizeCauseTagsInput(value) {
   return [];
 }
 
-function normalizeVerificationMethod(value) {
-  return ["host_attest", "qr_stub", "social_proof"].includes(value)
-    ? value
-    : "host_attest";
+function isPresetCauseTag(value) {
+  return CAUSE_TAG_OPTIONS.some((option) => option.value !== "Other" && option.value === value);
 }
 
 function eventToFormState(event = {}) {
   const causeTags = Array.isArray(event.cause_tags) ? event.cause_tags : [];
+  const primaryCauseTag = typeof causeTags[0] === "string" ? causeTags[0].trim() : "";
+  const causeTagSelection = isPresetCauseTag(primaryCauseTag)
+    ? primaryCauseTag
+    : primaryCauseTag
+      ? "Other"
+      : "";
+  const causeTagOther = causeTagSelection === "Other" ? primaryCauseTag : "";
   return {
     title: event.title || "",
     category: event.category || "",
@@ -112,17 +176,9 @@ function eventToFormState(event = {}) {
     description: event.description || "",
     org_name: event.org_name || "",
     community_tag: event.community_tag || "",
-    cause_tags: causeTags.join(", "),
+    cause_tags: causeTagSelection,
+    cause_tag_other: causeTagOther,
     requirements: event.requirements || "",
-    verification_method: normalizeVerificationMethod(event.verification_method),
-    impact_credits_base:
-      event.impact_credits_base === null || event.impact_credits_base === undefined
-        ? "25"
-        : String(event.impact_credits_base),
-    reliability_weight:
-      event.reliability_weight === null || event.reliability_weight === undefined
-        ? "1"
-        : String(event.reliability_weight),
     reward_pool_kind:
       event.reward_pool_kind === null || event.reward_pool_kind === undefined
         ? 0
@@ -133,40 +189,41 @@ function eventToFormState(event = {}) {
   };
 }
 
-const INITIAL_STATE = {
-  title: "",
-  category: "",
-  date: "",
-  time: "",
-  tz: "America/Vancouver",
-  location_text: "",
-  visibility: "public",
-  capacity: "",
-  waitlist_enabled: true,
-  cover_url: "",
-  description: "",
-  org_name: "",
-  community_tag: "",
-  cause_tags: "",
-  requirements: "",
-  verification_method: "host_attest",
-  impact_credits_base: "25",
-  reliability_weight: "1",
-  reward_pool_kind: 0,
-  funding_pool_slug: "general",
-  attendance_methods: ["host_code", "social_proof"],
-  safety_notes: "",
-};
+function createInitialState(defaultOrgName = "") {
+  return {
+    title: "",
+    category: "",
+    date: "",
+    time: "",
+    tz: "America/Vancouver",
+    location_text: "",
+    visibility: "public",
+    capacity: "",
+    waitlist_enabled: true,
+    cover_url: "",
+    description: "",
+    org_name: defaultOrgName || "",
+    community_tag: "",
+    cause_tags: "",
+    cause_tag_other: "",
+    requirements: "",
+    reward_pool_kind: 0,
+    funding_pool_slug: "general",
+    attendance_methods: ["social_proof"],
+    safety_notes: "",
+  };
+}
 
 export function CreateEvent({
   brand = DEFAULT_BRAND,
   geoCheckinEnabled = false,
   embedded = false,
   initialEditId = null,
+  defaultOrgName = "",
   onSaved,
   onCancel,
 }) {
-  const [form, setForm] = useState(INITIAL_STATE);
+  const [form, setForm] = useState(() => createInitialState(defaultOrgName));
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [toast, setToast] = useState(null);
@@ -188,6 +245,18 @@ export function CreateEvent({
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState(null);
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [invitePreparing, setInvitePreparing] = useState(false);
+  const [locationQuery, setLocationQuery] = useState("");
+  const [locationStatus, setLocationStatus] = useState(null);
+  const [locationFinding, setLocationFinding] = useState(false);
+  const [locationCurrentBusy, setLocationCurrentBusy] = useState(false);
+  const [locationModalOpen, setLocationModalOpen] = useState(false);
+  const [locationDraft, setLocationDraft] = useState(null);
+  const mapContainerRef = useRef(null);
+  const mapInstanceRef = useRef(null);
+  const markerRef = useRef(null);
+  const reverseLookupTokenRef = useRef(0);
 
   const publishErrors = useMemo(
     () => validateForm(form, { strict: true, requireAttendance: true }),
@@ -197,18 +266,142 @@ export function CreateEvent({
   const editingStatus = editingMeta?.status || (isEditing ? "draft" : null);
   const isPublishDisabled =
     submitting || editLoading || Object.keys(publishErrors).length > 0;
-  const isFieldsetDisabled = submitting || editLoading;
+  const isFieldsetDisabled = submitting || editLoading || invitePreparing;
   const isEditingPublished = isEditing && editingStatus === "published";
   const secondaryLabel = isEditingPublished ? "Save Changes" : "Save Draft";
   const primaryLabel = isEditingPublished ? "Update & Publish" : "Publish";
   const primaryBusyLabel = isEditingPublished ? "Updating…" : "Publishing…";
   const canDeleteDraft = isEditing && editingStatus === "draft" && !editLoading && !editError;
+  const inviteTargetId = editingMeta?.id || editId || null;
+
+  const setLocationMessage = useCallback((message, type = "info") => {
+    if (!message) {
+      setLocationStatus(null);
+      return;
+    }
+    setLocationStatus({ message, type });
+  }, []);
+
+  const reverseLookupLocation = useCallback(async (lat, lng) => {
+    const token = ++reverseLookupTokenRef.current;
+    try {
+      const response = await fetch(
+        `/api/geo/reverse?lat=${encodeURIComponent(String(lat))}&lng=${encodeURIComponent(
+          String(lng)
+        )}`
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload?.ok || token !== reverseLookupTokenRef.current) {
+        return;
+      }
+      const label = typeof payload?.data?.label === "string" ? payload.data.label.trim() : "";
+      if (!label) return;
+      setLocationDraft((prev) => (prev ? { ...prev, label } : prev));
+    } catch {
+      // Reverse lookup is optional in the picker.
+    }
+  }, []);
+
+  const ensureLocationMapReady = useCallback(async () => {
+    if (!mapContainerRef.current) {
+      throw new Error("Map container not ready.");
+    }
+    const L = await loadLeafletAssets();
+    if (!mapInstanceRef.current) {
+      const map = L.map(mapContainerRef.current, { zoomControl: true });
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+        attribution: "&copy; OpenStreetMap contributors",
+      }).addTo(map);
+
+      const marker = L.marker([DEFAULT_MAP_CENTER.lat, DEFAULT_MAP_CENTER.lng], {
+        draggable: true,
+      }).addTo(map);
+
+      marker.on("dragend", () => {
+        const pos = marker.getLatLng();
+        setLocationDraft((prev) => ({
+          lat: pos.lat,
+          lng: pos.lng,
+          label: prev?.label || "",
+          source: "pin",
+        }));
+        reverseLookupLocation(pos.lat, pos.lng);
+      });
+
+      map.on("click", (event) => {
+        marker.setLatLng(event.latlng);
+        setLocationDraft((prev) => ({
+          lat: event.latlng.lat,
+          lng: event.latlng.lng,
+          label: prev?.label || "",
+          source: "pin",
+        }));
+        reverseLookupLocation(event.latlng.lat, event.latlng.lng);
+      });
+
+      mapInstanceRef.current = map;
+      markerRef.current = marker;
+    }
+    return { map: mapInstanceRef.current, marker: markerRef.current };
+  }, [reverseLookupLocation]);
+
+  useEffect(() => {
+    const lat = Number(locationDraft?.lat);
+    const lng = Number(locationDraft?.lng);
+    if (!locationModalOpen || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const { map, marker } = await ensureLocationMapReady();
+        if (cancelled) return;
+        marker.setLatLng([lat, lng]);
+        map.setView([lat, lng], 14, { animate: false });
+        requestAnimationFrame(() => map.invalidateSize({ pan: false }));
+        setTimeout(() => map.invalidateSize({ pan: false }), 120);
+        setTimeout(() => map.invalidateSize({ pan: false }), 280);
+      } catch (error) {
+        if (cancelled) return;
+        setLocationMessage(error?.message || "Unable to load map.", "error");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [ensureLocationMapReady, locationDraft?.lat, locationDraft?.lng, locationModalOpen, setLocationMessage]);
+
+  useEffect(() => {
+    if (locationModalOpen) return;
+    if (mapInstanceRef.current) {
+      mapInstanceRef.current.remove();
+      mapInstanceRef.current = null;
+      markerRef.current = null;
+    }
+  }, [locationModalOpen]);
+
+  useEffect(() => {
+    return () => {
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.remove();
+        mapInstanceRef.current = null;
+      }
+      markerRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     if (!toast) return undefined;
     const id = setTimeout(() => setToast(null), 4000);
     return () => clearTimeout(id);
   }, [toast]);
+
+  useEffect(() => {
+    if (!inviteTargetId) {
+      setInviteOpen(false);
+    }
+  }, [inviteTargetId]);
 
   useEffect(() => {
     setCoverPreview(form.cover_url || "");
@@ -251,6 +444,7 @@ export function CreateEvent({
         if (aborted) return;
         const nextForm = eventToFormState(json.data || {});
         setForm(nextForm);
+        setLocationQuery(nextForm.location_text || "");
         setErrors({});
         setEditingMeta({
           id: json.data?.id || editId,
@@ -269,7 +463,8 @@ export function CreateEvent({
       setEditingMeta(null);
       setEditError(null);
       setEditLoading(false);
-      setForm({ ...INITIAL_STATE });
+      setForm(createInitialState(defaultOrgName));
+      setLocationQuery("");
       setErrors({});
       return () => {};
     }
@@ -278,11 +473,7 @@ export function CreateEvent({
     return () => {
       aborted = true;
     };
-  }, [editId, editReloadKey]);
-
-  const attendanceOptions = ATTENDANCE_BASE.filter(
-    (opt) => !opt.requiresGeo || geoCheckinEnabled
-  );
+  }, [defaultOrgName, editId, editReloadKey]);
 
   const reloadEditEvent = useCallback(() => {
     setEditReloadKey((key) => key + 1);
@@ -347,35 +538,169 @@ export function CreateEvent({
     setForm((prev) => ({ ...prev, waitlist_enabled: enabled }));
   }
 
-  function toggleAttendance(value) {
-    setForm((prev) => {
-      const exists = prev.attendance_methods.includes(value);
-      let next;
-      if (exists) {
-        next = prev.attendance_methods.filter((item) => item !== value);
-      } else {
-        next = [...prev.attendance_methods, value];
-      }
-      if (next.length === 0) next = [];
-      return { ...prev, attendance_methods: next };
+  function openLocationPicker(nextDraft) {
+    setLocationDraft({
+      lat: Number(nextDraft.lat),
+      lng: Number(nextDraft.lng),
+      label: (nextDraft.label || "").trim(),
+      source: nextDraft.source || "address",
     });
+    setLocationModalOpen(true);
   }
 
-  function handleGetMapLink() {
-    const link = window.prompt("Paste a Google or Apple Maps link");
-    if (typeof link === "string" && link.trim()) {
-      const value = link.trim();
-      setForm((prev) => ({
-        ...prev,
-        location_text: prev.location_text
-          ? `${prev.location_text}\n${value}`
-          : value,
-      }));
+  async function handleFindLocationOnMap() {
+    const query = locationQuery.trim();
+    if (query.length < 3) {
+      setLocationMessage("Enter at least 3 characters to search.", "error");
+      return;
     }
+    setLocationFinding(true);
+    setLocationMessage("Finding location…", "info");
+    try {
+      const response = await fetch(`/api/geo/geocode?q=${encodeURIComponent(query)}`);
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload?.ok || !payload?.data) {
+        throw new Error(payload?.error || "Unable to find that location.");
+      }
+      const lat = Number(payload.data.lat);
+      const lng = Number(payload.data.lng);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        throw new Error("Geocoder returned invalid coordinates.");
+      }
+      const label = typeof payload.data.label === "string" ? payload.data.label.trim() : "";
+      openLocationPicker({
+        lat,
+        lng,
+        label: label || `Near ${formatCoordinate(lat)}, ${formatCoordinate(lng)}`,
+        source: "address",
+      });
+      setLocationMessage("Confirm your location on the map.", "success");
+    } catch (error) {
+      setLocationMessage(error?.message || "Unable to find that location.", "error");
+    } finally {
+      setLocationFinding(false);
+    }
+  }
+
+  async function handleUseCurrentLocation() {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      setLocationMessage("Geolocation is not available in this browser.", "error");
+      return;
+    }
+    setLocationCurrentBusy(true);
+    setLocationMessage("Getting your current location…", "info");
+    try {
+      const position = await new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 60000,
+        });
+      });
+      const lat = Number(position?.coords?.latitude);
+      const lng = Number(position?.coords?.longitude);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        throw new Error("Unable to read your coordinates.");
+      }
+      openLocationPicker({
+        lat,
+        lng,
+        label: `Near ${formatCoordinate(lat)}, ${formatCoordinate(lng)}`,
+        source: "device",
+      });
+      reverseLookupLocation(lat, lng);
+      setLocationMessage("Confirm your location on the map.", "success");
+    } catch (error) {
+      const errCode = Number(error?.code);
+      if (errCode === 1) {
+        setLocationMessage("Location access was denied.", "error");
+      } else if (errCode === 2) {
+        setLocationMessage("Unable to determine your current location.", "error");
+      } else if (errCode === 3) {
+        setLocationMessage("Location request timed out.", "error");
+      } else {
+        setLocationMessage(error?.message || "Unable to get current location.", "error");
+      }
+    } finally {
+      setLocationCurrentBusy(false);
+    }
+  }
+
+  function handleConfirmLocation() {
+    if (!locationDraft) return;
+    const label =
+      locationDraft.label?.trim()
+      || `Near ${formatCoordinate(locationDraft.lat)}, ${formatCoordinate(locationDraft.lng)}`;
+    setForm((prev) => ({ ...prev, location_text: label }));
+    setLocationQuery(label);
+    setErrors((prev) => {
+      if (!prev?.location_text) return prev;
+      const next = { ...prev };
+      delete next.location_text;
+      return next;
+    });
+    setLocationModalOpen(false);
+    setLocationMessage("Location selected.", "success");
   }
 
   function showToast(message, type = "info", actionLabel, onAction) {
     setToast({ message, type, actionLabel, onAction });
+  }
+
+  function handleOpenInvitePeople() {
+    if (invitePreparing || submitting || editLoading) return;
+    if (inviteTargetId) {
+      setInviteOpen(true);
+      return;
+    }
+    void prepareDraftForInvites();
+  }
+
+  async function prepareDraftForInvites() {
+    const inviteDraftForm = form.title?.trim()
+      ? form
+      : { ...form, title: "Untitled Event" };
+    const nextErrors = validateForm(inviteDraftForm, { strict: false });
+    const hasErrors = Object.keys(nextErrors).length > 0;
+    if (hasErrors) {
+      setErrors(nextErrors);
+      showToast("Add the required fields before inviting people.", "error");
+      return;
+    }
+
+    setInvitePreparing(true);
+    try {
+      if (!form.title?.trim()) {
+        setForm((prev) => ({ ...prev, title: "Untitled Event" }));
+      }
+      const payload = buildPayload(inviteDraftForm, "draft");
+      const res = await fetch("/api/events", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error || "Unable to save draft before inviting.");
+      }
+      const savedId = data?.data?.id ? String(data.data.id) : "";
+      if (!savedId) {
+        throw new Error("Draft saved but missing event id.");
+      }
+      const nextTitle = inviteDraftForm.title?.trim() || "Untitled Event";
+      setEditId(savedId);
+      setEditingMeta({
+        id: savedId,
+        title: nextTitle,
+        status: "draft",
+      });
+      showToast("Draft saved. You can now send invites.", "success");
+      setInviteOpen(true);
+    } catch (error) {
+      showToast(error?.message || "Unable to prepare invites.", "error");
+    } finally {
+      setInvitePreparing(false);
+    }
   }
 
   async function handleSubmit(intent) {
@@ -672,24 +997,39 @@ export function CreateEvent({
               />
             </Field>
             <Field label="Location" required error={errors.location_text}>
-              <textarea
-                name="location_text"
-                placeholder="123 Main St, Vancouver — or paste a map link"
-                value={form.location_text}
-                onChange={(e) => updateField("location_text", e.target.value)}
-                rows={3}
+              <input
+                type="text"
+                name="location_query"
+                placeholder="Postal code or address"
+                value={locationQuery}
+                onChange={(e) => setLocationQuery(e.target.value)}
               />
               <div className="helper-row">
                 <button
                   type="button"
                   className="btn tiny"
-                  onClick={handleGetMapLink}
+                  onClick={handleFindLocationOnMap}
+                  disabled={locationFinding || locationCurrentBusy}
                 >
-                  Get Map Link
+                  {locationFinding ? "Finding…" : "Find on map"}
                 </button>
-                <span className="muted small">
-                  Add a Google/Apple Maps URL to help people find you.
+                <button
+                  type="button"
+                  className="btn tiny secondary"
+                  onClick={handleUseCurrentLocation}
+                  disabled={locationFinding || locationCurrentBusy}
+                >
+                  {locationCurrentBusy ? "Locating…" : "Use current location"}
+                </button>
+              </div>
+              {locationStatus?.message && (
+                <span className={`location-status ${locationStatus.type || "info"}`}>
+                  {locationStatus.message}
                 </span>
+              )}
+              <div className="location-selected">
+                <span className="muted small">Selected location</span>
+                <strong>{form.location_text || "No location selected yet."}</strong>
               </div>
             </Field>
           </div>
@@ -716,13 +1056,34 @@ export function CreateEvent({
           </div>
 
           <Field label="Cause tags">
-            <input
-              type="text"
+            <select
               name="cause_tags"
-              placeholder="Hunger, Seniors, Environment"
               value={form.cause_tags}
-              onChange={(e) => updateField("cause_tags", e.target.value)}
-            />
+              onChange={(e) => {
+                const next = e.target.value;
+                setForm((prev) => ({
+                  ...prev,
+                  cause_tags: next,
+                  cause_tag_other: next === "Other" ? prev.cause_tag_other : "",
+                }));
+              }}
+            >
+              <option value="">Select cause tag</option>
+              {CAUSE_TAG_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            {form.cause_tags === "Other" && (
+              <input
+                type="text"
+                name="cause_tag_other"
+                placeholder="Enter custom cause tag"
+                value={form.cause_tag_other || ""}
+                onChange={(e) => updateField("cause_tag_other", e.target.value)}
+              />
+            )}
           </Field>
 
           <Field label="Requirements">
@@ -827,38 +1188,6 @@ export function CreateEvent({
           </Field>
 
           <div className="grid three">
-            <Field label="Verification method">
-              <select
-                name="verification_method"
-                value={form.verification_method}
-                onChange={(e) => updateField("verification_method", e.target.value)}
-              >
-                <option value="host_attest">Host attestation</option>
-                <option value="qr_stub">QR check-in (stub)</option>
-                <option value="social_proof">Social proof</option>
-              </select>
-            </Field>
-            <Field label="Impact Credits (base)">
-              <input
-                type="number"
-                min="0"
-                name="impact_credits_base"
-                value={form.impact_credits_base}
-                onChange={(e) => updateField("impact_credits_base", e.target.value)}
-              />
-            </Field>
-            <Field label="Reliability weight">
-              <input
-                type="number"
-                min="0"
-                name="reliability_weight"
-                value={form.reliability_weight}
-                onChange={(e) => updateField("reliability_weight", e.target.value)}
-              />
-            </Field>
-          </div>
-
-          <div className="grid three">
             <Field label="Reward Pool ($KIND)">
               <input
                 type="number"
@@ -870,7 +1199,7 @@ export function CreateEvent({
                 }
               />
             </Field>
-            <Field label="Funding pool slug" error={errors.funding_pool_slug}>
+            <Field label="Funding pool" error={errors.funding_pool_slug}>
               <input
                 type="text"
                 name="funding_pool_slug"
@@ -892,27 +1221,6 @@ export function CreateEvent({
             </Field>
           </div>
 
-          <Field
-            label="Attendance methods"
-            required
-            error={errors.attendance_methods}
-          >
-            <div className="pill-row wrap">
-              {attendanceOptions.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  className={`pill${
-                    form.attendance_methods.includes(option.value) ? " active" : ""
-                  }`}
-                  onClick={() => toggleAttendance(option.value)}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-          </Field>
-
           <Field label="Safety notes">
             <textarea
               name="safety_notes"
@@ -924,11 +1232,13 @@ export function CreateEvent({
           </Field>
 
           <div className="cta-row">
-            <button type="button" className="btn secondary" onClick={() => showToast("Invites coming soon.", "info")}>
-              Invite People
-            </button>
-            <button type="button" className="btn secondary" onClick={() => showToast("Private links coming soon.", "info")}>
-              Share Private Link
+            <button
+              type="button"
+              className="btn secondary"
+              onClick={handleOpenInvitePeople}
+              disabled={invitePreparing || submitting || editLoading}
+            >
+              {invitePreparing ? "Preparing invites…" : "Invite People"}
             </button>
           </div>
 
@@ -938,6 +1248,36 @@ export function CreateEvent({
           </p>
         </fieldset>
       </form>
+
+      {locationModalOpen && (
+        <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="Confirm location">
+          <div className="location-modal" role="document">
+            <h2>Confirm event location</h2>
+            <p className="muted">
+              Drag the pin to fine-tune the spot, or click directly on the map.
+            </p>
+            <div ref={mapContainerRef} className="location-map" />
+            <p className="location-draft-line">
+              {locationDraft?.label
+                || (locationDraft
+                  ? `Near ${formatCoordinate(locationDraft.lat)}, ${formatCoordinate(locationDraft.lng)}`
+                  : "No location selected")}
+            </p>
+            <div className="modal-actions">
+              <button type="button" className="btn" onClick={handleConfirmLocation}>
+                Use this location
+              </button>
+              <button
+                type="button"
+                className="btn secondary"
+                onClick={() => setLocationModalOpen(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {canDeleteDraft && (
         <div className="draft-delete-zone">
@@ -979,6 +1319,20 @@ export function CreateEvent({
         </div>
       )}
 
+      <InviteModal
+        open={inviteOpen}
+        onClose={() => setInviteOpen(false)}
+        eventId={inviteTargetId}
+        eventTitle={form.title || editingMeta?.title || "This event"}
+        onSent={(data) => {
+          setInviteOpen(false);
+          showToast(
+            `Invite sent to ${data?.invitee_name || data?.invitee_email}.`,
+            "success"
+          );
+        }}
+      />
+
       <style>{styles}</style>
     </section>
   );
@@ -997,25 +1351,16 @@ function Field({ label, children, required, error }) {
 }
 
 function buildPayload(form, status) {
-  const causeTags = normalizeCauseTagsInput(form.cause_tags);
-  const verificationMethod = normalizeVerificationMethod(form.verification_method);
-  const impactCreditsInput = typeof form.impact_credits_base === "string"
-    ? form.impact_credits_base.trim()
-    : form.impact_credits_base;
-  const reliabilityWeightInput = typeof form.reliability_weight === "string"
-    ? form.reliability_weight.trim()
-    : form.reliability_weight;
-  const impactCreditsBaseRaw =
-    impactCreditsInput === "" || impactCreditsInput === null || impactCreditsInput === undefined
-      ? NaN
-      : Number(impactCreditsInput);
-  const reliabilityWeightRaw =
-    reliabilityWeightInput === "" || reliabilityWeightInput === null || reliabilityWeightInput === undefined
-      ? NaN
-      : Number(reliabilityWeightInput);
-  const impactCreditsBase = Number.isFinite(impactCreditsBaseRaw) ? impactCreditsBaseRaw : 25;
-  const reliabilityWeight = Number.isFinite(reliabilityWeightRaw) ? reliabilityWeightRaw : 1;
+  const selectedCause = typeof form.cause_tags === "string" ? form.cause_tags.trim() : "";
+  const otherCause = typeof form.cause_tag_other === "string" ? form.cause_tag_other.trim() : "";
+  const causeTags = selectedCause === "Other"
+    ? (otherCause ? [otherCause] : [])
+    : (selectedCause ? [selectedCause] : []);
   const fundingPoolSlug = (form.funding_pool_slug || "").trim().toLowerCase() || "general";
+  const attendanceMethods =
+    Array.isArray(form.attendance_methods) && form.attendance_methods.length > 0
+      ? form.attendance_methods
+      : ["social_proof"];
   return {
     title: form.title?.trim(),
     category: form.category?.trim() || null,
@@ -1032,12 +1377,9 @@ function buildPayload(form, status) {
     community_tag: form.community_tag?.trim() || null,
     cause_tags: causeTags,
     requirements: form.requirements?.trim() || null,
-    verification_method: verificationMethod,
-    impact_credits_base: impactCreditsBase,
-    reliability_weight: reliabilityWeight,
     reward_pool_kind: Number(form.reward_pool_kind) || 0,
     funding_pool_slug: fundingPoolSlug,
-    attendance_methods: form.attendance_methods,
+    attendance_methods: attendanceMethods,
     safety_notes: form.safety_notes?.trim() || null,
     status,
   };
@@ -1076,12 +1418,9 @@ function validateForm(form, { strict = false } = {}) {
   }
   const fundingPoolSlug = (form.funding_pool_slug || "").trim().toLowerCase();
   if (!fundingPoolSlug) {
-    errs.funding_pool_slug = "Funding pool slug is required.";
+    errs.funding_pool_slug = "Funding pool is required.";
   } else if (!FUNDING_POOL_SLUG_RE.test(fundingPoolSlug)) {
     errs.funding_pool_slug = "Use lowercase letters/numbers plus - or _.";
-  }
-  if (!form.attendance_methods || form.attendance_methods.length === 0) {
-    errs.attendance_methods = "Select at least one method.";
   }
   return errs;
 }
@@ -1299,6 +1638,35 @@ const styles = `
     align-items:center;
     flex-wrap:wrap;
   }
+  .location-status {
+    font-size:0.85rem;
+    font-weight:600;
+  }
+  .location-status.info {
+    color:#2563eb;
+  }
+  .location-status.success {
+    color:#15803d;
+  }
+  .location-status.error {
+    color:#b91c1c;
+  }
+  .location-selected {
+    border:1px solid #e5e7eb;
+    background:#f8fafc;
+    border-radius:12px;
+    padding:10px 12px;
+    display:flex;
+    flex-direction:column;
+    gap:4px;
+  }
+  .location-selected strong {
+    color:#111827;
+    font-size:0.95rem;
+    line-height:1.35;
+    white-space:pre-wrap;
+    word-break:break-word;
+  }
   .muted {
     color:#6b7280;
   }
@@ -1417,6 +1785,32 @@ const styles = `
   .delete-modal p {
     margin:0;
     color:#4b5563;
+  }
+  .location-modal {
+    background:#fff;
+    border-radius:16px;
+    padding:24px;
+    width:100%;
+    max-width:640px;
+    box-shadow:0 32px 60px rgba(15,23,42,0.2);
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+  }
+  .location-modal h2 {
+    margin:0;
+  }
+  .location-map {
+    width:100%;
+    min-height:320px;
+    border-radius:12px;
+    border:1px solid #e5e7eb;
+  }
+  .location-draft-line {
+    margin:0;
+    color:#111827;
+    font-weight:600;
+    line-height:1.4;
   }
   .modal-actions {
     margin-top:20px;

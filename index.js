@@ -10,6 +10,7 @@ import { dirname } from "path";
 import { fileURLToPath } from "url";
 import pool from "./Backend/db/pg.js";
 import { fetchVolunteerPortfolio, getVolunteerStats, resolveUserIdFromRequest } from "./services/profileService.js";
+import { getSummary as getRatingsSummary } from "./services/ratingsService.js";
 import bcrypt from "bcrypt";
 import session from "express-session";
 import passport from "passport";
@@ -595,6 +596,341 @@ function ensureAuthenticated(req, res, next) {
   }
   return res.redirect("/login");
 }
+
+const AVAILABILITY_DAY_SET = new Set(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]);
+const AVAILABILITY_TIME_OF_DAY_SET = new Set(["morning", "afternoon", "evening"]);
+const AVAILABILITY_FREQUENCY_SET = new Set(["1w", "2w", "flex"]);
+const AVAILABILITY_NOTICE_SET = new Set(["same_day", "24h", "48h"]);
+const DEFAULT_AVAILABILITY_TIMEZONE = "America/Vancouver";
+const LOCATION_SOURCE_SET = new Set(["address", "pin", "gps"]);
+const TRAVEL_MODE_SET = new Set(["walk", "bike", "transit", "drive"]);
+
+function safeParseJsonValue(value, fallback) {
+  if (value == null || value === "") return fallback;
+  if (typeof value === "object") return value;
+  if (typeof value !== "string") return fallback;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+}
+
+function parseRequiredJsonString(rawValue, fieldName) {
+  if (typeof rawValue !== "string") {
+    throw new Error(`${fieldName} must be a JSON string.`);
+  }
+  try {
+    return JSON.parse(rawValue);
+  } catch {
+    throw new Error(`${fieldName} is not valid JSON.`);
+  }
+}
+
+function isPlausibleIanaTimezone(value) {
+  if (typeof value !== "string") return false;
+  const tz = value.trim();
+  if (!tz || !/^[A-Za-z0-9_+\-]+(?:\/[A-Za-z0-9_+\-]+)*$/.test(tz)) return false;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function normalizeTimezone(value, fallback = DEFAULT_AVAILABILITY_TIMEZONE) {
+  if (isPlausibleIanaTimezone(value)) return String(value).trim();
+  if (isPlausibleIanaTimezone(fallback)) return String(fallback).trim();
+  return DEFAULT_AVAILABILITY_TIMEZONE;
+}
+
+function normalizeOptionalString(value, maxLen = 255) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return trimmed.slice(0, maxLen);
+}
+
+function parseCoordinate(value, kind) {
+  if (value == null || value === "") return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    throw new Error(`${kind} must be a valid number.`);
+  }
+  const limit = kind === "latitude" ? 90 : 180;
+  if (parsed < -limit || parsed > limit) {
+    throw new Error(`${kind} is out of range.`);
+  }
+  return Math.round(parsed * 1000) / 1000;
+}
+
+function parseTravelRadiusKm(value, fallback = 5, { strict = false } = {}) {
+  if (value == null || value === "") return fallback;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    if (strict) throw new Error("travel_radius_km must be a number.");
+    return fallback;
+  }
+  const rounded = Math.round(parsed);
+  if (rounded < 1 || rounded > 25) {
+    if (strict) throw new Error("travel_radius_km must be between 1 and 25.");
+    return fallback;
+  }
+  return rounded;
+}
+
+function normalizeTravelMode(value, fallback = "transit", { strict = false } = {}) {
+  const mode = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (TRAVEL_MODE_SET.has(mode)) return mode;
+  if (strict && value != null && value !== "") {
+    throw new Error("travel_mode must be one of walk, bike, transit, drive.");
+  }
+  return TRAVEL_MODE_SET.has(fallback) ? fallback : "transit";
+}
+
+function normalizeLocationSource(value, fallback = null, { strict = false } = {}) {
+  const source = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (LOCATION_SOURCE_SET.has(source)) return source;
+  if (strict && value != null && value !== "") {
+    throw new Error("home_base_source must be one of address, pin, gps.");
+  }
+  return LOCATION_SOURCE_SET.has(fallback) ? fallback : null;
+}
+
+function normalizeDayToken(value) {
+  if (value == null) return null;
+  const token = String(value).trim().toLowerCase().slice(0, 3);
+  return AVAILABILITY_DAY_SET.has(token) ? token : null;
+}
+
+function normalizeTimeValue(value) {
+  if (typeof value !== "string") return null;
+  const v = value.trim();
+  return /^([01]\d|2[0-3]):([0-5]\d)$/.test(v) ? v : null;
+}
+
+function isValidDateOnly(value) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const d = new Date(`${value}T00:00:00.000Z`);
+  if (Number.isNaN(d.getTime())) return false;
+  return d.toISOString().slice(0, 10) === value;
+}
+
+function normalizeWeeklyAvailability(raw, fallbackTimezone, { strict = false } = {}) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const timezone = normalizeTimezone(source.timezone, fallbackTimezone);
+
+  const days = Array.isArray(source.days)
+    ? [...new Set(source.days.map(normalizeDayToken).filter(Boolean))]
+    : [];
+
+  const timeOfDay = Array.isArray(source.time_of_day)
+    ? [...new Set(
+        source.time_of_day
+          .map((value) => String(value || "").trim().toLowerCase())
+          .filter((value) => AVAILABILITY_TIME_OF_DAY_SET.has(value))
+      )]
+    : [];
+
+  const frequency = AVAILABILITY_FREQUENCY_SET.has(String(source.frequency || ""))
+    ? String(source.frequency)
+    : "flex";
+  const notice = AVAILABILITY_NOTICE_SET.has(String(source.notice || ""))
+    ? String(source.notice)
+    : "24h";
+
+  let earliest = normalizeTimeValue(source.earliest_time);
+  let latest = normalizeTimeValue(source.latest_time);
+  if (earliest && latest && earliest >= latest) {
+    if (strict) {
+      throw new Error("Weekly earliest_time must be before latest_time.");
+    }
+    earliest = null;
+    latest = null;
+  }
+
+  return {
+    days,
+    time_of_day: timeOfDay,
+    earliest_time: earliest,
+    latest_time: latest,
+    frequency,
+    notice,
+    timezone,
+  };
+}
+
+function normalizeAvailabilityExceptions(raw, fallbackTimezone, { strict = false } = {}) {
+  const source = Array.isArray(raw) ? raw : [];
+  if (strict && source.length > 10) {
+    throw new Error("You can add up to 10 availability exceptions.");
+  }
+
+  const perDateCounts = new Map();
+  const normalized = [];
+  const list = strict ? source : source.slice(0, 10);
+
+  for (const entry of list) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      if (strict) throw new Error("Each availability exception must be an object.");
+      continue;
+    }
+
+    const date = typeof entry.date === "string" ? entry.date.trim() : "";
+    const start = normalizeTimeValue(entry.start);
+    const end = normalizeTimeValue(entry.end);
+    const timezone = normalizeTimezone(entry.timezone, fallbackTimezone);
+
+    if (!isValidDateOnly(date)) {
+      if (strict) throw new Error("Each availability exception needs a valid date.");
+      continue;
+    }
+    if (!start || !end) {
+      if (strict) throw new Error("Each availability exception needs start and end times.");
+      continue;
+    }
+    if (start >= end) {
+      if (strict) throw new Error("Availability exception start must be before end.");
+      continue;
+    }
+
+    const nextForDate = (perDateCounts.get(date) || 0) + 1;
+    if (nextForDate > 3) {
+      if (strict) throw new Error("You can add up to 3 exception windows per date.");
+      continue;
+    }
+    perDateCounts.set(date, nextForDate);
+
+    normalized.push({ date, start, end, timezone });
+    if (!strict && normalized.length >= 10) break;
+  }
+
+  normalized.sort((a, b) => {
+    if (a.date !== b.date) return a.date.localeCompare(b.date);
+    if (a.start !== b.start) return a.start.localeCompare(b.start);
+    return a.end.localeCompare(b.end);
+  });
+  return normalized;
+}
+
+function buildAvailabilityStateForProfile(userRow = {}) {
+  const parsedWeekly = safeParseJsonValue(userRow.availability_weekly, {});
+  const timezone = normalizeTimezone(
+    userRow.timezone,
+    parsedWeekly && typeof parsedWeekly === "object" ? parsedWeekly.timezone : DEFAULT_AVAILABILITY_TIMEZONE
+  );
+  const weekly = normalizeWeeklyAvailability(parsedWeekly, timezone, { strict: false });
+  const parsedExceptions = safeParseJsonValue(userRow.specfifc_availability, []);
+  const exceptions = normalizeAvailabilityExceptions(parsedExceptions, weekly.timezone, { strict: false });
+  return {
+    weekly,
+    exceptions,
+    timezone: weekly.timezone,
+  };
+}
+
+function parseAvailabilityFromRequestBody(body, existingUserRow = {}) {
+  const existing = buildAvailabilityStateForProfile(existingUserRow);
+  const requestedTimezone = normalizeTimezone(
+    body.timezone || body.availability_timezone,
+    existing.timezone
+  );
+
+  const weeklyRaw = (typeof body.availability_weekly_json === "string" && body.availability_weekly_json.trim())
+    ? parseRequiredJsonString(body.availability_weekly_json, "availability_weekly_json")
+    : existing.weekly;
+  const weekly = normalizeWeeklyAvailability(weeklyRaw, requestedTimezone, { strict: true });
+
+  const exceptionsRaw = (typeof body.availability_exceptions_json === "string" && body.availability_exceptions_json.trim())
+    ? parseRequiredJsonString(body.availability_exceptions_json, "availability_exceptions_json")
+    : existing.exceptions;
+  const exceptions = normalizeAvailabilityExceptions(exceptionsRaw, weekly.timezone, { strict: true });
+
+  return {
+    weekly,
+    exceptions,
+    timezone: weekly.timezone,
+  };
+}
+
+function buildLocationStateForProfile(userRow = {}) {
+  const lat = userRow.home_base_lat == null ? null : Number(userRow.home_base_lat);
+  const lng = userRow.home_base_lng == null ? null : Number(userRow.home_base_lng);
+  const hasValidCoords = Number.isFinite(lat) && Number.isFinite(lng);
+  const timezone = normalizeTimezone(userRow.timezone, DEFAULT_AVAILABILITY_TIMEZONE);
+
+  return {
+    lat: hasValidCoords ? Math.round(lat * 1000) / 1000 : null,
+    lng: hasValidCoords ? Math.round(lng * 1000) / 1000 : null,
+    label: normalizeOptionalString(userRow.home_base_label, 255),
+    source: normalizeLocationSource(userRow.home_base_source),
+    travel_radius_km: parseTravelRadiusKm(userRow.travel_radius_km, 5),
+    travel_mode: normalizeTravelMode(userRow.travel_mode, "transit"),
+    timezone,
+  };
+}
+
+function parseLocationFromRequestBody(body, existingUserRow = {}) {
+  const existing = buildLocationStateForProfile(existingUserRow);
+  const timezone = normalizeTimezone(body.timezone || body.availability_timezone, existing.timezone);
+  const latProvided = Object.prototype.hasOwnProperty.call(body, "home_base_lat");
+  const lngProvided = Object.prototype.hasOwnProperty.call(body, "home_base_lng");
+  const latRaw = latProvided ? body.home_base_lat : existing.lat;
+  const lngRaw = lngProvided ? body.home_base_lng : existing.lng;
+  const lat = parseCoordinate(latRaw, "latitude");
+  const lng = parseCoordinate(lngRaw, "longitude");
+
+  if ((lat == null) !== (lng == null)) {
+    throw new Error("Both home_base_lat and home_base_lng are required.");
+  }
+
+  const explicitClear = latProvided && lngProvided && (body.home_base_lat === "" || body.home_base_lng === "");
+  const hasCoords = !explicitClear && lat != null && lng != null;
+
+  const travelRadius = parseTravelRadiusKm(
+    body.travel_radius_km,
+    existing.travel_radius_km,
+    { strict: true }
+  );
+  const travelMode = normalizeTravelMode(
+    body.travel_mode,
+    existing.travel_mode,
+    { strict: true }
+  );
+
+  if (!hasCoords) {
+    return {
+      lat: null,
+      lng: null,
+      label: null,
+      source: null,
+      travel_radius_km: travelRadius,
+      travel_mode: travelMode,
+      timezone,
+    };
+  }
+
+  const label = normalizeOptionalString(body.home_base_label, 255)
+    || existing.label
+    || `Near ${lat.toFixed(3)}, ${lng.toFixed(3)}`;
+  const source = normalizeLocationSource(
+    body.home_base_source,
+    existing.source || "address",
+    { strict: true }
+  ) || "address";
+
+  return {
+    lat,
+    lng,
+    label,
+    source,
+    travel_radius_km: travelRadius,
+    travel_mode: travelMode,
+    timezone,
+  };
+}
+
 app.post(
   '/profile',
   ensureAuthenticated,
@@ -610,13 +946,12 @@ app.post(
   },
   async (req, res) => {
     // 1) Extract text fields from req.body
-    const {
+    let {
       firstname,
       lastname,
       email,
       phone,
       address1,
-      kindness_style,
       city,
       state,
       country,
@@ -637,8 +972,56 @@ app.post(
     }
 
     try {
+      const authUserId = Number(req.user?.id);
+      const existingResult = Number.isFinite(authUserId)
+        ? await pool.query(
+            `SELECT id, email, availability_weekly, specfifc_availability, timezone,
+                    home_base_lat, home_base_lng, home_base_label, home_base_source,
+                    travel_radius_km, travel_mode
+               FROM userdata
+              WHERE id = $1
+              LIMIT 1`,
+            [authUserId]
+          )
+        : await pool.query(
+            `SELECT id, email, availability_weekly, specfifc_availability, timezone,
+                    home_base_lat, home_base_lng, home_base_label, home_base_source,
+                    travel_radius_km, travel_mode
+               FROM userdata
+              WHERE email = $1
+              LIMIT 1`,
+            [req.user.email]
+          );
+      const existingUserRow = existingResult.rows[0] || {};
+      if (!existingUserRow.id) {
+        return res.status(404).send('Profile record not found.');
+      }
+
+      if (typeof email !== "string" || !email.trim()) {
+        email = existingUserRow.email;
+      } else {
+        email = email.trim();
+      }
+
+      let locationPrefs;
+      try {
+        locationPrefs = parseLocationFromRequestBody(req.body || {}, existingUserRow);
+      } catch (validationErr) {
+        return res.status(400).send(`Invalid location settings: ${validationErr.message}`);
+      }
+
+      let availability;
+      try {
+        availability = parseAvailabilityFromRequestBody(
+          { ...(req.body || {}), timezone: locationPrefs.timezone },
+          existingUserRow
+        );
+      } catch (validationErr) {
+        return res.status(400).send(`Invalid availability settings: ${validationErr.message}`);
+      }
+
       // 3) Update all fields, including picture (TEXT column)
-      await pool.query(
+      const updateResult = await pool.query(
         `
         UPDATE userdata
            SET
@@ -647,18 +1030,29 @@ app.post(
              email     = $3,
              phone     = $4,
              address1  = $5,
-             kindness_style  = $6,
-             city      = $7,
-             state     = $8,
-             country   = $9,
-             interest1 = $10,
-             interest2 = $11,
-             interest3 = $12,
-             sdg1      = $13,
-             sdg2      = $14,
-             sdg3      = $15,
-             picture   = $16
-         WHERE email = $3
+             city      = $6,
+             state     = $7,
+             country   = $8,
+             interest1 = $9,
+             interest2 = $10,
+             interest3 = $11,
+             sdg1      = $12,
+             sdg2      = $13,
+             sdg3      = $14,
+             availability_weekly = $15::jsonb,
+             specfifc_availability = $16::jsonb,
+             home_base_lat = $17,
+             home_base_lng = $18,
+             home_base_label = $19,
+             home_base_source = $20,
+             travel_radius_km = $21,
+             travel_mode = $22,
+             timezone = $23,
+             picture   = $24
+         WHERE id = $25
+         RETURNING id, email, availability_weekly, specfifc_availability, timezone,
+                   home_base_lat, home_base_lng, home_base_label, home_base_source,
+                   travel_radius_km, travel_mode
         `,
         [
           firstname,
@@ -666,7 +1060,6 @@ app.post(
           email,
           phone,
           address1,
-          kindness_style,
           city,
           state,
           country,
@@ -676,9 +1069,22 @@ app.post(
           sdg1,
           sdg2,
           sdg3,
+          JSON.stringify(availability.weekly),
+          JSON.stringify(availability.exceptions),
+          locationPrefs.lat,
+          locationPrefs.lng,
+          locationPrefs.label,
+          locationPrefs.source,
+          locationPrefs.travel_radius_km,
+          locationPrefs.travel_mode,
+          locationPrefs.timezone,
           newPictureData,
+          existingUserRow.id,
         ]
       );
+      if (!updateResult.rowCount) {
+        return res.status(500).send('Profile update did not persist.');
+      }
 
       // 4) Update req.user so EJS picks up new picture immediately
       req.user = {
@@ -688,7 +1094,6 @@ app.post(
         email,
         phone,
         address1,
-        kindness_style,
         city,
         state,
         country,
@@ -698,12 +1103,24 @@ app.post(
         sdg1,
         sdg2,
         sdg3,
+        availability_weekly: availability.weekly,
+        specfifc_availability: availability.exceptions,
+        home_base_lat: locationPrefs.lat,
+        home_base_lng: locationPrefs.lng,
+        home_base_label: locationPrefs.label,
+        home_base_source: locationPrefs.source,
+        travel_radius_km: locationPrefs.travel_radius_km,
+        travel_mode: locationPrefs.travel_mode,
+        timezone: locationPrefs.timezone,
         picture: newPictureData,
       };
 
       return res.redirect('/profile');
     } catch (err) {
       console.error('Error updating profile:', err);
+      if (err && err.code === '42703') {
+        return res.status(500).send('Profile preference columns are missing. Run profile migrations in scripts/migrations.');
+      }
       return res.status(500).send('Error updating profile');
     }
   }
@@ -720,6 +1137,8 @@ app.get('/profile', ensureAuthenticated, async (req, res) => {
       return res.redirect('/login');
     }
     const userRow = result.rows[0];
+    const availabilityInitial = buildAvailabilityStateForProfile(userRow);
+    const locationInitial = buildLocationStateForProfile(userRow);
     const statsUserId = (await resolveUserIdFromRequest(req)) || String(userRow.id);
     const showStatsDebug = process.env.NODE_ENV !== "production" || Boolean(process.env.DEBUG);
 
@@ -863,12 +1282,27 @@ app.get('/profile', ensureAuthenticated, async (req, res) => {
       console.warn("Volunteer stats query failed:", statsErr.message || statsErr);
       volunteerStats = null;
     }
+
+    let volunteerRating = { value: 5, count: 0, hasRatings: false, starsFilled: 5 };
+    try {
+      const summary = await getRatingsSummary({ userId: statsUserId, limit: 20 });
+      const count = Number(summary?.sampleSize) || 0;
+      const hasRatings = count > 0 && Number.isFinite(Number(summary?.kindnessRating));
+      const value = hasRatings ? Number(summary.kindnessRating) : 5;
+      const starsFilled = Math.max(1, Math.min(5, Math.round(value)));
+      volunteerRating = { value, count, hasRatings, starsFilled };
+    } catch (ratingErr) {
+      if (ratingErr?.code !== "42P01") {
+        console.warn("Volunteer rating query failed:", ratingErr.message || ratingErr);
+      }
+    }
     if (showStatsDebug) {
       console.log("[profile] req.user:", {
         id: req.user?.id,
         email: req.user?.email,
       });
       console.log("[profile] stats_user_id:", statsUserId, "volunteerStats:", volunteerStats);
+      console.log("[profile] volunteer_rating:", volunteerRating);
     }
 
     // 4) Render profile.ejs with all flags + user data
@@ -881,12 +1315,15 @@ app.get('/profile', ensureAuthenticated, async (req, res) => {
       portfolioSummary,
       skillsBreakdown,
       volunteerStats,
+      volunteerRating,
       debugStatsUserId: showStatsDebug ? statsUserId : null,
       showStatsDebug,
       success,
       loginSuccess,
       name,
-      uploadError
+      uploadError,
+      availabilityInitial,
+      locationInitial
     });
   } catch (err) {
     console.error('Profile DB error:', err);
@@ -909,6 +1346,117 @@ function ensureAuthenticatedApi(req, res, next) {
   if (req.isAuthenticated && req.isAuthenticated()) return next();
   return res.status(401).json({ error: "unauthorized" });
 }
+
+function normalizeGeoQuery(value) {
+  if (typeof value !== "string") return "";
+  return value.trim().slice(0, 200);
+}
+
+function withVancouverBias(query) {
+  if (!query) return query;
+  return /(vancouver|british columbia|,\s*bc\b|canada)/i.test(query)
+    ? query
+    : `${query}, Vancouver, BC, Canada`;
+}
+
+async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 8000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    return response;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+app.get('/api/geo/geocode', ensureAuthenticatedApi, async (req, res) => {
+  const rawQuery = normalizeGeoQuery(req.query.q);
+  if (!rawQuery || rawQuery.length < 3) {
+    return res.status(400).json({ ok: false, error: "Query must be at least 3 characters." });
+  }
+
+  try {
+    const searchUrl = new URL("https://nominatim.openstreetmap.org/search");
+    searchUrl.searchParams.set("q", withVancouverBias(rawQuery));
+    searchUrl.searchParams.set("format", "jsonv2");
+    searchUrl.searchParams.set("limit", "1");
+    searchUrl.searchParams.set("addressdetails", "1");
+
+    const response = await fetchJsonWithTimeout(searchUrl, {
+      headers: {
+        "User-Agent": process.env.GEO_USER_AGENT || "GetKinder.ai/1.0 (profile geocoder)",
+        "Accept-Language": "en"
+      }
+    });
+    if (!response.ok) {
+      return res.status(502).json({ ok: false, error: "Geocoding provider error." });
+    }
+
+    const payload = await response.json();
+    const first = Array.isArray(payload) ? payload[0] : null;
+    if (!first) {
+      return res.status(404).json({ ok: false, error: "No matching location found." });
+    }
+
+    const lat = Number(first.lat);
+    const lng = Number(first.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return res.status(502).json({ ok: false, error: "Geocoding provider returned invalid coordinates." });
+    }
+
+    const label = normalizeOptionalString(first.display_name, 255)
+      || `Near ${lat.toFixed(3)}, ${lng.toFixed(3)}`;
+
+    return res.json({
+      ok: true,
+      data: {
+        lat,
+        lng,
+        label,
+      }
+    });
+  } catch (err) {
+    console.error("GET /api/geo/geocode error:", err);
+    return res.status(500).json({ ok: false, error: "Unable to geocode location right now." });
+  }
+});
+
+app.get('/api/geo/reverse', ensureAuthenticatedApi, async (req, res) => {
+  const lat = Number(req.query.lat);
+  const lng = Number(req.query.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+    return res.status(400).json({ ok: false, error: "Valid lat/lng are required." });
+  }
+
+  try {
+    const reverseUrl = new URL("https://nominatim.openstreetmap.org/reverse");
+    reverseUrl.searchParams.set("lat", String(lat));
+    reverseUrl.searchParams.set("lon", String(lng));
+    reverseUrl.searchParams.set("format", "jsonv2");
+    reverseUrl.searchParams.set("zoom", "16");
+
+    const response = await fetchJsonWithTimeout(reverseUrl, {
+      headers: {
+        "User-Agent": process.env.GEO_USER_AGENT || "GetKinder.ai/1.0 (profile geocoder)",
+        "Accept-Language": "en"
+      }
+    });
+    if (!response.ok) {
+      return res.status(502).json({ ok: false, error: "Reverse geocoding provider error." });
+    }
+
+    const payload = await response.json();
+    const label = normalizeOptionalString(payload?.display_name, 255)
+      || `Near ${lat.toFixed(3)}, ${lng.toFixed(3)}`;
+
+    return res.json({ ok: true, data: { label } });
+  } catch (err) {
+    console.error("GET /api/geo/reverse error:", err);
+    return res.status(500).json({ ok: false, error: "Unable to reverse geocode right now." });
+  }
+});
+
 function ensureAdmin(req, res, next) {
   const list = (process.env.ADMIN_EMAILS || '')
     .split(',')

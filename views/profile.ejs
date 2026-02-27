@@ -61,6 +61,17 @@
       color: #ff5656;
       line-height: 1.1;
     }
+    .profile-page .profile-hero .stat-value.rating-stars {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.16rem;
+      font-size: 1.25rem;
+      color: #d9e3f4;
+      line-height: 1;
+    }
+    .profile-page .profile-hero .stat-value.rating-stars .is-filled {
+      color: #ff5656;
+    }
 
     /* Panels */
     .profile-page .profile-panel { display: none; }
@@ -115,6 +126,81 @@
       display: block;
     }
 
+    .profile-page .availability-chip {
+      border: 1px solid #d4dfef;
+      background: #f7faff;
+      color: #455a7c;
+      border-radius: 999px;
+      padding: 0.3rem 0.7rem;
+      font-size: 0.82rem;
+      line-height: 1.2;
+      transition: all 0.15s ease;
+    }
+    .profile-page .availability-chip:hover {
+      border-color: #455a7c;
+      background: #edf3ff;
+    }
+    .profile-page .availability-chip.is-active {
+      background: #455a7c;
+      color: #fff;
+      border-color: #455a7c;
+    }
+    .profile-page .availability-control-label {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: #6c757d;
+      margin-bottom: 0.35rem;
+    }
+    .profile-page .availability-summary {
+      font-size: 0.85rem;
+      color: #6c757d;
+    }
+    .profile-page .availability-exception-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      border: 1px solid #d9e3f4;
+      border-radius: 999px;
+      padding: 0.25rem 0.65rem;
+      font-size: 0.82rem;
+      background: #f8fbff;
+      color: #455a7c;
+    }
+    .profile-page .availability-exception-chip button {
+      border: 0;
+      background: transparent;
+      color: #455a7c;
+      font-size: 0.95rem;
+      line-height: 1;
+      padding: 0;
+    }
+    .profile-page .location-helper {
+      font-size: 0.82rem;
+      color: #6c757d;
+    }
+    .profile-page .location-summary {
+      font-size: 0.85rem;
+      color: #455a7c;
+      background: #f8fbff;
+      border: 1px solid #d9e3f4;
+      border-radius: 12px;
+      padding: 0.45rem 0.65rem;
+    }
+    .profile-page .location-mode .btn {
+      min-width: 88px;
+    }
+    .profile-page .location-map {
+      height: 360px;
+      border: 1px solid #d9e3f4;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .profile-page .location-coord {
+      font-size: 0.8rem;
+      color: #6c757d;
+    }
+
     .profile-page .tier-badge { font-size: 0.8rem; padding: 0.35em 0.85em; }
     .profile-page .tier-bronze { background-color: #cd7f32; color: #fff; }
     .profile-page .tier-silver { background-color: #9e9e9e; color: #fff; }
@@ -145,6 +231,9 @@
       width: 0;
       background-color: #ff5656;
       border-radius: 999px;
+      height: 100% !important;
+      margin: 0 !important;
+      flex: 0 0 auto;
     }
 
     /* Profile picture dialog (match dashboard modal treatment) */
@@ -275,17 +364,38 @@
             const stats = volunteerStats || {};
             const impactBalance = Number(stats.impact_credits_balance) || 0;
             const verifiedHours = Number(stats.verified_hours_total) || 0;
-            const streakWeeks = Number(stats.streak_weeks) || 0;
             const reliabilityScore = Number(stats.reliability_score) || 0;
+            const ratingInfo = (typeof volunteerRating !== 'undefined' && volunteerRating) ? volunteerRating : {};
+            const ratingValue = Number.isFinite(Number(ratingInfo.value)) ? Number(ratingInfo.value) : 5;
+            const ratingStarsFilled = Number.isFinite(Number(ratingInfo.starsFilled))
+              ? Math.max(1, Math.min(5, Number(ratingInfo.starsFilled)))
+              : 5;
             const priorityTier = stats.priority_tier || "Bronze";
             const verifiedShifts = Number(stats.verified_shifts_total) || 0;
+            const availabilitySeed = availabilityInitial || { weekly: {}, exceptions: [], timezone: 'America/Vancouver' };
+            const availabilitySeedJson = JSON.stringify(availabilitySeed).replace(/</g, '\\u003c');
+            const locationSeed = locationInitial || { lat: null, lng: null, label: null, source: null, travel_radius_km: 5, travel_mode: 'transit', timezone: 'America/Vancouver' };
+            const locationSeedJson = JSON.stringify(locationSeed).replace(/</g, '\\u003c');
           %>
 
           <%
+            const weeklyAvailability = availabilitySeed.weekly || {};
+            const hasAvailability =
+              (Array.isArray(weeklyAvailability.days) && weeklyAvailability.days.length > 0) ||
+              (Array.isArray(weeklyAvailability.time_of_day) && weeklyAvailability.time_of_day.length > 0) ||
+              Boolean(weeklyAvailability.earliest_time || weeklyAvailability.latest_time) ||
+              (Array.isArray(availabilitySeed.exceptions) && availabilitySeed.exceptions.length > 0);
+            const hasLocation =
+              Number.isFinite(Number(locationSeed.lat)) &&
+              Number.isFinite(Number(locationSeed.lng)) ||
+              (typeof locationSeed.label === 'string' && locationSeed.label.trim().length > 0);
+            const hasSdgGoals = Boolean(user.sdg1 || user.sdg2 || user.sdg3);
             const completionItems = [
               { done: !!user.picture, label: "Add a profile photo", tab: "overview", icon: "fa-camera" },
               { done: !!user.interest1, label: "Set your volunteer preferences", tab: "preferences", icon: "fa-sliders" },
-              { done: !!user.sdg1, label: "Choose your SDG goals", tab: "preferences", icon: "fa-globe" },
+              { done: hasAvailability, label: "Set your availability", tab: "preferences", icon: "fa-calendar-days" },
+              { done: hasLocation, label: "Set your location", tab: "preferences", icon: "fa-location-dot" },
+              { done: hasSdgGoals, label: "Choose your SDG goals", tab: "preferences", icon: "fa-globe" },
               { done: !!user.phone, label: "Add your phone number", tab: "account", icon: "fa-phone" },
               { done: !!user.city, label: "Add your city", tab: "account", icon: "fa-location-dot" },
             ];
@@ -329,7 +439,6 @@
                 <span class="badge rounded-pill tier-badge <%= tierClass %> mt-2">
                   Priority Tier: <%= priorityTier %>
                 </span>
-                <% if (user.kindness_style) { %><div class="mt-2 text-muted small"><i class="fas fa-heart me-1" style="color:#ff5656;"></i><%= user.kindness_style %></div><% } %>
                 <% if (user.sdg1 || user.sdg2 || user.sdg3) { %>
                   <div class="d-flex flex-wrap gap-2 mt-2 align-items-center sdg-goals">
                     <span class="stat-label me-1" style="color:#455a7c;">MY SDG GOALS:</span>
@@ -364,8 +473,12 @@
                     <div class="stat-label">Reliability</div>
                   </div>
                   <div class="col-6 text-center">
-                    <div class="stat-value count-up" data-count="<%= streakWeeks %>" data-decimals="0">0</div>
-                    <div class="stat-label">Streak Weeks</div>
+                    <div class="stat-value rating-stars" role="img" aria-label="Volunteer rating <%= ratingValue.toFixed(1) %> out of 5 stars">
+                      <% for (let i = 1; i <= 5; i++) { %>
+                        <i class="fa-solid fa-star <%= i <= ratingStarsFilled ? 'is-filled' : '' %>" aria-hidden="true"></i>
+                      <% } %>
+                    </div>
+                    <div class="stat-label">Rating</div>
                   </div>
                 </div>
               </div>
@@ -429,6 +542,7 @@
                   <div class="progress mb-3" style="height: 6px; border-radius: 999px;">
                     <div class="progress-bar profile-nudge-progress-bar"
                          role="progressbar"
+                         style="width:<%= completionPct %>%; min-width:<%= completionPct > 0 ? 6 : 0 %>px;"
                          data-completion="<%= completionPct %>"
                          aria-valuenow="<%= completionPct %>"
                          aria-valuemin="0"
@@ -474,7 +588,7 @@
                 <button type="button" class="nav-link" id="tab-preferences" role="tab" aria-controls="panel-preferences" aria-selected="false" data-tab-target="preferences">Preferences</button>
               </li>
               <li class="nav-item" role="presentation">
-                <button type="button" class="nav-link" id="tab-account" role="tab" aria-controls="panel-account" aria-selected="false" data-tab-target="account">Account</button>
+                <button type="button" class="nav-link" id="tab-account" role="tab" aria-controls="panel-account" aria-selected="false" data-tab-target="account">My Details</button>
               </li>
             </ul>
           </nav>
@@ -719,18 +833,18 @@
               <div class="col-lg-8 col-xl-7">
                 <div class="card shadow-sm border-0 mb-3">
                   <div class="card-body">
-                    <h2 style="color:#455a7c;" class="mb-1">Preferences</h2>
+                    <h5 class="fw-bold" style="color:#455a7c;">Preferences</h5>
                     <p class="text-muted small mb-3">These settings help Get Kinder recommend the right volunteer opportunities for you.</p>
                     <div class="form-group mb-3">
                       <label class="labels">Cause / community I care about</label>
                       <input type="text" name="interest1" class="form-control" placeholder="e.g., unhoused support, food security, park cleanups" value="<%= user.interest1 || '' %>">
                     </div>
                     <div class="form-group mb-3">
-                      <label class="labels">Skills I want to build</label>
+                      <label class="labels">Skills I want to build and/or use to help organizations with</label>
                       <input type="text" name="interest2" class="form-control" placeholder="e.g., outreach, meal prep, logistics, stewardship" value="<%= user.interest2 || '' %>">
                     </div>
                     <div class="form-group mb-3">
-                      <label class="labels">Preferred type of serve</label>
+                      <label class="labels">Preferred type of Volunteering</label>
                       <input type="text" name="interest3" class="form-control" placeholder="e.g., outdoors, food sorting, outreach, admin support" value="<%= user.interest3 || '' %>">
                     </div>
                     <div class="text-center">
@@ -738,6 +852,157 @@
                     </div>
                   </div>
                 </div>
+
+                <div class="card shadow-sm border-0 mb-3">
+                  <div class="card-body">
+                    <h5 class="fw-bold" style="color:#455a7c;">Availability</h5>
+                    <p class="text-muted small mb-3">These settings help us recommend opportunities that fit your schedule.</p>
+
+                    <div class="mb-3">
+                      <div class="availability-control-label">Days available</div>
+                      <div class="d-flex flex-wrap gap-2" id="availability-days">
+                        <button type="button" class="availability-chip" data-availability-day="mon" aria-pressed="false">Mon</button>
+                        <button type="button" class="availability-chip" data-availability-day="tue" aria-pressed="false">Tue</button>
+                        <button type="button" class="availability-chip" data-availability-day="wed" aria-pressed="false">Wed</button>
+                        <button type="button" class="availability-chip" data-availability-day="thu" aria-pressed="false">Thu</button>
+                        <button type="button" class="availability-chip" data-availability-day="fri" aria-pressed="false">Fri</button>
+                        <button type="button" class="availability-chip" data-availability-day="sat" aria-pressed="false">Sat</button>
+                        <button type="button" class="availability-chip" data-availability-day="sun" aria-pressed="false">Sun</button>
+                      </div>
+                    </div>
+
+                    <div class="mb-3">
+                      <div class="availability-control-label">Time of day</div>
+                      <div class="d-flex flex-wrap gap-2" id="availability-time-of-day">
+                        <button type="button" class="availability-chip" data-availability-tod="morning" aria-pressed="false">Morning</button>
+                        <button type="button" class="availability-chip" data-availability-tod="afternoon" aria-pressed="false">Afternoon</button>
+                        <button type="button" class="availability-chip" data-availability-tod="evening" aria-pressed="false">Evening</button>
+                      </div>
+                    </div>
+
+                    <div class="row g-2 mb-2">
+                      <div class="col-sm-6">
+                        <label class="labels" for="availability-frequency">Frequency</label>
+                        <select id="availability-frequency" class="form-select form-select-sm">
+                          <option value="1w">1x/week</option>
+                          <option value="2w">2x/week</option>
+                          <option value="flex">Flexible</option>
+                        </select>
+                      </div>
+                      <div class="col-sm-6">
+                        <label class="labels" for="availability-notice">Notice</label>
+                        <select id="availability-notice" class="form-select form-select-sm">
+                          <option value="same_day">Same-day</option>
+                          <option value="24h">24 hours</option>
+                          <option value="48h">48 hours</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <a class="small text-decoration-none" data-bs-toggle="collapse" href="#availabilityAdvanced" role="button" aria-expanded="false" aria-controls="availabilityAdvanced">
+                      Advanced time window
+                    </a>
+                    <div class="collapse mt-2" id="availabilityAdvanced">
+                      <div class="row g-2">
+                        <div class="col-sm-6">
+                          <label class="labels" for="availability-earliest">Earliest time</label>
+                          <input type="time" id="availability-earliest" class="form-control form-control-sm">
+                        </div>
+                        <div class="col-sm-6">
+                          <label class="labels" for="availability-latest">Latest time</label>
+                          <input type="time" id="availability-latest" class="form-control form-control-sm">
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="small text-muted mt-2">Current selection</div>
+                    <div class="availability-summary" id="availability-summary">Flexible availability</div>
+                    <div class="availability-summary" id="availability-timezone"></div>
+                    <hr>
+
+                    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+                      <div class="fw-semibold" style="color:#455a7c;">Specific date/time of Availabilty</div>
+                      <button
+                        type="button"
+                        class="btn btn-outline-primary btn-sm"
+                        id="availability-add-exception-btn"
+                        data-bs-toggle="modal"
+                        data-bs-target="#availabilityExceptionModal"
+                      >
+                        Add specific date/time
+                      </button>
+                    </div>
+                    <div class="text-muted small mb-2">Add one-off windows when you are available. Maximum 10 total, up to 3 per date.</div>
+                    <div id="availability-exception-list" class="d-flex flex-wrap gap-2"></div>
+                    <button type="button" class="btn btn-link btn-sm p-0 mt-1 d-none" id="availability-exception-toggle"></button>
+                    <div class="small text-muted mt-2 d-none" id="availability-exception-limit-note">Maximum of 10 exceptions reached.</div>
+                    <div class="text-center mt-3">
+                      <button class="btn btn-outline-primary" type="submit">Save preferences</button>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="card shadow-sm border-0 mb-3">
+                  <div class="card-body">
+                    <h5 class="fw-bold" style="color:#455a7c;">Location for recommendations</h5>
+                    <p class="text-muted small mb-3">Used to recommend volunteer opportunities near you. Saved as an approximate area.</p>
+
+                    <div class="row g-2 align-items-end">
+                      <div class="col-md-8">
+                        <label class="labels" for="location_query">Postal code or address</label>
+                        <input
+                          type="text"
+                          id="location_query"
+                          class="form-control"
+                          placeholder="e.g., V6B 1A1 or 123 Main St, Vancouver"
+                        >
+                      </div>
+                      <div class="col-md-4 d-grid">
+                        <button type="button" class="btn btn-outline-primary" id="location-find-btn">Find on map</button>
+                      </div>
+                    </div>
+
+                    <div class="mt-2 d-flex flex-wrap align-items-center gap-3">
+                      <button type="button" class="btn btn-link btn-sm p-0" id="location-use-current-btn">Use my current location</button>
+                      <button type="button" class="btn btn-link btn-sm p-0 d-none" id="location-edit-btn">Edit</button>
+                    </div>
+                    <div class="location-helper mt-1" id="location-status-line"></div>
+                    <div class="location-summary mt-2" id="location-saved-summary">No saved location yet.</div>
+
+                    <div class="mt-3">
+                      <div class="d-flex justify-content-between align-items-center">
+                        <label class="labels mb-0" for="location-radius-range">Travel radius</label>
+                        <span class="small text-muted"><span id="location-radius-value">5</span> km</span>
+                      </div>
+                      <input type="range" min="1" max="25" step="1" value="5" class="form-range" id="location-radius-range">
+                    </div>
+
+                    <div class="location-mode mt-2">
+                      <label class="labels mb-1">Travel mode</label>
+                      <div class="btn-group btn-group-sm flex-wrap gap-2 d-flex" role="group" aria-label="Travel mode">
+                        <button type="button" class="btn btn-outline-primary" data-travel-mode="walk">Walk</button>
+                        <button type="button" class="btn btn-outline-primary" data-travel-mode="bike">Bike</button>
+                        <button type="button" class="btn btn-outline-primary" data-travel-mode="transit">Transit</button>
+                        <button type="button" class="btn btn-outline-primary" data-travel-mode="drive">Drive</button>
+                      </div>
+                    </div>
+
+                    <div class="text-center mt-3">
+                      <button class="btn btn-outline-primary" type="submit">Save preferences</button>
+                    </div>
+                  </div>
+                </div>
+
+                <input type="hidden" name="availability_weekly_json" id="availability_weekly_json">
+                <input type="hidden" name="availability_exceptions_json" id="availability_exceptions_json">
+                <input type="hidden" name="availability_timezone" id="availability_timezone">
+                <input type="hidden" name="home_base_lat" id="home_base_lat" value="<%= locationSeed.lat != null ? Number(locationSeed.lat).toFixed(3) : '' %>">
+                <input type="hidden" name="home_base_lng" id="home_base_lng" value="<%= locationSeed.lng != null ? Number(locationSeed.lng).toFixed(3) : '' %>">
+                <input type="hidden" name="home_base_label" id="home_base_label" value="<%= locationSeed.label || '' %>">
+                <input type="hidden" name="home_base_source" id="home_base_source" value="<%= locationSeed.source || '' %>">
+                <input type="hidden" name="travel_radius_km" id="travel_radius_km" value="<%= locationSeed.travel_radius_km || 5 %>">
+                <input type="hidden" name="travel_mode" id="travel_mode" value="<%= locationSeed.travel_mode || 'transit' %>">
+                <input type="hidden" name="timezone" id="timezone" value="<%= locationSeed.timezone || 'America/Vancouver' %>">
 
                 <div class="card shadow-sm border-0">
                   <div class="card-body">
@@ -791,7 +1056,61 @@
                         </select>
                       </div>
                     </div>
+                    <div class="text-center mt-2">
+                      <button class="btn btn-outline-primary" type="submit">Save preferences</button>
+                    </div>
                   </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="modal fade" id="availabilityExceptionModal" tabindex="-1" aria-labelledby="availabilityExceptionModalLabel" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered">
+              <div class="modal-content">
+                <div class="modal-header">
+                  <h5 class="modal-title" id="availabilityExceptionModalLabel">Add specific availability</h5>
+                  <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                  <div class="mb-3">
+                    <label class="labels" for="availability-exception-date">Date</label>
+                    <input type="date" id="availability-exception-date" class="form-control">
+                  </div>
+                  <div class="row g-2">
+                    <div class="col-6">
+                      <label class="labels" for="availability-exception-start">Start time</label>
+                      <input type="time" id="availability-exception-start" class="form-control">
+                    </div>
+                    <div class="col-6">
+                      <label class="labels" for="availability-exception-end">End time</label>
+                      <input type="time" id="availability-exception-end" class="form-control">
+                    </div>
+                  </div>
+                  <div id="availability-exception-error" class="small text-danger mt-2 d-none"></div>
+                </div>
+                <div class="modal-footer">
+                  <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                  <button type="button" class="btn btn-primary" id="availability-exception-add-btn">Add</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="modal fade" id="locationPickerModal" tabindex="-1" aria-labelledby="locationPickerModalLabel" aria-hidden="true">
+            <div class="modal-dialog modal-lg modal-dialog-centered">
+              <div class="modal-content">
+                <div class="modal-header">
+                  <h5 class="modal-title" id="locationPickerModalLabel">Confirm your location</h5>
+                  <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                  <div class="location-map" id="location-map"></div>
+                  <div class="location-coord mt-2" id="location-selected-line">Drag the pin to fine-tune your location.</div>
+                </div>
+                <div class="modal-footer">
+                  <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                  <button type="button" class="btn btn-primary" id="location-modal-save-btn">Save location</button>
                 </div>
               </div>
             </div>
@@ -814,10 +1133,6 @@
                     </div>
 
                     <div class="row mt-3">
-                      <div class="col-md-12 mb-">
-                        <label class="labels">My Friendship Type</label>
-                        <input name="kindness_style" type="text" class="form-control" placeholder="Saved from your friendship quiz" value="<%= user.kindness_style || '' %>">
-                      </div>
                       <div class="col-md-12 mb-2">
                         <label class="labels">Email</label>
                         <input name="email" type="email" class="form-control" placeholder="enter email" value="<%= user.email || '' %>">
@@ -924,6 +1239,8 @@
     </footer>
   </div>
 </section>
+<script type="application/json" id="availability-initial"><%- availabilitySeedJson %></script>
+<script type="application/json" id="location-initial"><%- locationSeedJson %></script>
 <script>
   document.addEventListener('DOMContentLoaded', () => {
     const fileInput = document.getElementById('profile-picture-input');
@@ -1107,6 +1424,18 @@
         });
       });
 
+      function resolveInitialTab() {
+        const validTabs = new Set(['overview', 'portfolio', 'skills', 'preferences', 'account']);
+        try {
+          const params = new URLSearchParams(window.location.search || '');
+          const fromQuery = String(params.get('tab') || '').trim().toLowerCase();
+          if (validTabs.has(fromQuery)) return fromQuery;
+        } catch (_) {}
+        const fromHash = String((window.location.hash || '').replace(/^#/, '')).trim().toLowerCase();
+        if (validTabs.has(fromHash)) return fromHash;
+        return 'overview';
+      }
+
       const dismissBtn = document.getElementById('dismissNudge');
       const nudgeBanner = document.getElementById('profileNudgeBanner');
       if (dismissBtn && nudgeBanner) {
@@ -1125,12 +1454,14 @@
         });
       }
 
-      setActiveTab('overview');
+      setActiveTab(resolveInitialTab());
       initCounters();
     });
   })();
 </script>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/js/bootstrap.bundle.min.js" integrity="sha384-k6d4wzSIapyDyv1kpU366/PK5hCdSbCRGRCMv+eplOQJWyd1fbcAu9OCUj5zNLiq" crossorigin="anonymous"></script>
+  <script src="/js/profileAvailability.js"></script>
+  <script src="/js/profileLocation.js"></script>
 <!-- Start of HubSpot Embed Code -->
 <script type="text/javascript" id="hs-script-loader" async defer src="//js-na3.hs-scripts.com/342094649.js"></script>
 <!-- End of HubSpot Embed Code -->

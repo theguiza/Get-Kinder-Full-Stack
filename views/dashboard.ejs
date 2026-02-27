@@ -88,6 +88,59 @@
     color: #fff;
   }
 
+  /* Profile completion modal */
+  #profileCompletionModal .modal-content {
+    border: 1px solid #dfe8f5;
+    border-radius: 16px;
+  }
+  #profileCompletionModal .modal-header {
+    border-bottom: 1px solid #e8eef7;
+  }
+  #profileCompletionModal .profile-progress-title {
+    color: #455a7c;
+    font-weight: 700;
+    font-size: 1.2rem;
+    line-height: 1.2;
+  }
+  #profileCompletionModal .profile-progress-track {
+    height: 6px;
+    border-radius: 999px;
+    background: #e9eef6;
+    overflow: hidden;
+  }
+  #profileCompletionModal .profile-progress-bar {
+    background: #ff5656;
+    border-radius: 999px;
+    height: 100% !important;
+    margin: 0 !important;
+    flex: 0 0 auto;
+  }
+  #profileCompletionModal .profile-progress-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    background: #fff;
+    border: 1px solid #d7e2f3;
+    border-radius: 999px;
+    color: #455a7c;
+    font-size: 0.85rem;
+    padding: 0.3rem 0.78rem;
+  }
+  #profileCompletionModal .profile-progress-chip i {
+    color: #ff5656;
+  }
+  #profileCompletionModal .profile-progress-btn {
+    background: #ff5656;
+    border-color: #ff5656;
+    color: #fff;
+  }
+  #profileCompletionModal .profile-progress-btn:hover,
+  #profileCompletionModal .profile-progress-btn:focus {
+    background: #f04c4c;
+    border-color: #f04c4c;
+    color: #fff;
+  }
+
   .dash-side-card-title {
     color: #ff5656 !important;
   }
@@ -135,11 +188,55 @@
   <!-- Main container -->
   <div class="dashboard-container">
     <% const dashStats = volunteerStats || {}; %>
+    <% const ratingInfo = (typeof volunteerRating !== 'undefined' && volunteerRating) ? volunteerRating : {}; %>
+    <% const dashRatingValue = Number.isFinite(Number(ratingInfo.value)) ? Number(ratingInfo.value) : 5; %>
+    <% const dashRatingStarsFilled = Number.isFinite(Number(ratingInfo.starsFilled))
+      ? Math.max(1, Math.min(5, Number(ratingInfo.starsFilled)))
+      : 5; %>
+    <% const dashVerifiedHours = Number(dashStats.verified_hours_total) || 0; %>
+    <% const dashReliability = Number.isFinite(Number(dashStats.reliability_score))
+      ? Number(dashStats.reliability_score)
+      : 50; %>
     <% const rawTier = (dashStats.priority_tier || 'Bronze'); %>
     <% const tierLabel = (typeof rawTier === 'string' && rawTier.length)
       ? rawTier.charAt(0).toUpperCase() + rawTier.slice(1).toLowerCase()
       : 'Bronze'; %>
     <% const currentUser = (typeof user !== 'undefined' && user) ? user : null; %>
+    <% const parseDashboardJson = function (value, fallback) {
+      if (value == null || value === '') return fallback;
+      if (typeof value === 'object') return value;
+      if (typeof value !== 'string') return fallback;
+      try { return JSON.parse(value); } catch (_) { return fallback; }
+    }; %>
+    <% const dashWeeklyAvailability = parseDashboardJson(
+      currentUser && (currentUser.availability_weekly ?? currentUser.weekly_availability_json),
+      {}
+    ); %>
+    <% const dashAvailabilityExceptions = parseDashboardJson(
+      currentUser && (currentUser.specfifc_availability ?? currentUser.availability_exceptions_json),
+      []
+    ); %>
+    <% const dashHasAvailability =
+      (Array.isArray(dashWeeklyAvailability.days) && dashWeeklyAvailability.days.length > 0) ||
+      (Array.isArray(dashWeeklyAvailability.time_of_day) && dashWeeklyAvailability.time_of_day.length > 0) ||
+      Boolean(dashWeeklyAvailability.earliest_time || dashWeeklyAvailability.latest_time) ||
+      (Array.isArray(dashAvailabilityExceptions) && dashAvailabilityExceptions.length > 0); %>
+    <% const dashHasLocation =
+      (Number.isFinite(Number(currentUser && currentUser.home_base_lat)) &&
+      Number.isFinite(Number(currentUser && currentUser.home_base_lng))) ||
+      (typeof (currentUser && currentUser.home_base_label) === 'string' && currentUser.home_base_label.trim().length > 0); %>
+    <% const dashHasSdgGoals = Boolean(currentUser && (currentUser.sdg1 || currentUser.sdg2 || currentUser.sdg3)); %>
+    <% const dashCompletionItems = [
+      { done: !!(currentUser && currentUser.picture), label: "Add a profile photo", icon: "fa-camera", tab: "overview" },
+      { done: !!(currentUser && currentUser.interest1), label: "Set your volunteer preferences", icon: "fa-sliders", tab: "preferences" },
+      { done: dashHasAvailability, label: "Set your availability", icon: "fa-calendar-days", tab: "preferences" },
+      { done: dashHasLocation, label: "Set your location", icon: "fa-location-dot", tab: "preferences" },
+      { done: dashHasSdgGoals, label: "Choose your SDG goals", icon: "fa-globe", tab: "preferences" },
+      { done: !!(currentUser && currentUser.phone), label: "Add your phone number", icon: "fa-phone", tab: "account" },
+      { done: !!(currentUser && currentUser.city), label: "Add your city", icon: "fa-location-dot", tab: "account" }
+    ]; %>
+    <% const dashIncompleteItems = dashCompletionItems.filter(function(item) { return !item.done; }); %>
+    <% const dashProfileCompletionPct = Math.round(((dashCompletionItems.length - dashIncompleteItems.length) / dashCompletionItems.length) * 100); %>
     <% const profileName = (currentUser && currentUser.firstname) ? currentUser.firstname : 'Volunteer'; %>
     <% const rawProfilePhoto = (currentUser && (currentUser.picture || currentUser.profile_photo_url || currentUser.avatar_url || currentUser.photo_url))
       ? (currentUser.picture || currentUser.profile_photo_url || currentUser.avatar_url || currentUser.photo_url)
@@ -347,7 +444,7 @@
         </main>
 
         <aside class="dash-right">
-          <div class="card dash-card shadow-sm border-0 mb-3">
+          <div class="card dash-card dash-impact-summary shadow-sm border-0 mb-3">
             <div class="card-body">
               <h2 class="small text-uppercase fw-semibold mb-2 dash-side-card-title">IMPACT SUMMARY</h2>
               <div class="dash-metrics">
@@ -356,12 +453,20 @@
                   <strong class="dash-metric-value"><%= Number(dashStats.impact_credits_balance) || 0 %></strong>
                 </div>
                 <div class="dash-metric">
-                  <span class="dash-metric-label">Streak Weeks</span>
-                  <strong class="dash-metric-value"><%= Number(dashStats.streak_weeks) || 0 %></strong>
+                  <span class="dash-metric-label">Verified Hours</span>
+                  <strong class="dash-metric-value"><%= dashVerifiedHours.toFixed(1) %></strong>
                 </div>
                 <div class="dash-metric">
-                  <span class="dash-metric-label">Priority Tier</span>
-                  <strong class="dash-metric-value"><%= tierLabel %></strong>
+                  <span class="dash-metric-label">Reliability</span>
+                  <strong class="dash-metric-value"><%= Math.round(dashReliability) %></strong>
+                </div>
+                <div class="dash-metric">
+                  <span class="dash-metric-label">Rating</span>
+                  <strong class="dash-metric-value dash-rating-stars" role="img" aria-label="Volunteer rating <%= dashRatingValue.toFixed(1) %> out of 5 stars">
+                    <% for (let i = 1; i <= 5; i++) { %>
+                      <i class="fa-solid fa-star <%= i <= dashRatingStarsFilled ? 'is-filled' : '' %>" aria-hidden="true"></i>
+                    <% } %>
+                  </strong>
                 </div>
               </div>
             </div>
@@ -372,7 +477,14 @@
               <h2 class="small text-uppercase fw-semibold mb-2 dash-side-card-title">QUICK ACTIONS</h2>
               <div class="dash-actions-grid">
                 <a class="btn dash-btn-ink btn-sm" href="<%= dashRoutes.opportunities %>">Find opportunities</a>
-                <a class="btn dash-btn-ink btn-sm" href="/profile">View profile</a>
+                <button
+                  type="button"
+                  class="btn dash-btn-ink btn-sm"
+                  data-bs-toggle="modal"
+                  data-bs-target="#profileCompletionModal"
+                >
+                  Update profile
+                </button>
                 <a class="btn dash-btn-ink btn-sm" href="/donor">Donor dashboard</a>
               </div>
             </div>
@@ -530,6 +642,49 @@
         <div class="modal-body" id="comingSoonModalBody"></div>
         <div class="modal-footer">
           <button type="button" class="btn dash-coming-soon-close" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="profileCompletionModal" tabindex="-1" aria-labelledby="profileCompletionModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="profileCompletionModalLabel">Profile update</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <i class="fas fa-circle-exclamation" style="color:#ff5656;" aria-hidden="true"></i>
+            <div class="profile-progress-title">Your profile is <%= dashProfileCompletionPct %>% complete</div>
+          </div>
+          <div class="progress profile-progress-track mb-3">
+            <div
+              class="progress-bar profile-progress-bar"
+              role="progressbar"
+              style="width:<%= dashProfileCompletionPct %>%; min-width:<%= dashProfileCompletionPct > 0 ? 6 : 0 %>px;"
+              aria-valuenow="<%= dashProfileCompletionPct %>"
+              aria-valuemin="0"
+              aria-valuemax="100"
+            ></div>
+          </div>
+          <% if (dashIncompleteItems.length) { %>
+            <div class="d-flex flex-wrap gap-2">
+              <% dashIncompleteItems.forEach(function(item) { %>
+                <a class="profile-progress-chip text-decoration-none" href="/profile?tab=<%= encodeURIComponent(item.tab || 'overview') %>">
+                  <i class="fas <%= item.icon %>" aria-hidden="true"></i>
+                  <%= item.label %>
+                </a>
+              <% }); %>
+            </div>
+          <% } else { %>
+            <p class="mb-0 text-muted small">Your profile is fully complete.</p>
+          <% } %>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn profile-progress-btn" data-bs-dismiss="modal">Exit</button>
+          <a href="/profile" class="btn profile-progress-btn">Go to profile</a>
         </div>
       </div>
     </div>

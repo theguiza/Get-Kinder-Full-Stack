@@ -1,6 +1,7 @@
 import { progressPercent } from '../shared/metrics.js';
 import { mapFriendArcRow } from './lib/friendArcMapper.js';
 import { fetchVolunteerPortfolio, getVolunteerStats, resolveUserIdFromRequest } from '../services/profileService.js';
+import { getSummary as getRatingsSummary } from '../services/ratingsService.js';
 
 // Backend/dashboardController.js
 // No `snapshot` usage. Ensures a real top-level `challenge` on each arc before render.
@@ -427,12 +428,28 @@ export function makeDashboardController(pool) {
             }
             volunteerStats = {
               impact_credits_balance: 0,
+              verified_hours_total: 0,
+              reliability_score: 50,
               streak_weeks: 0,
               priority_tier: 'Bronze'
             };
           } else {
             console.warn('[dashboardController] volunteer stats failed:', statsErr.message || statsErr);
             volunteerStats = null;
+          }
+        }
+
+        let volunteerRating = { value: 5, count: 0, hasRatings: false, starsFilled: 5 };
+        try {
+          const summary = await getRatingsSummary({ userId, limit: 20 });
+          const count = Number(summary?.sampleSize) || 0;
+          const hasRatings = count > 0 && Number.isFinite(Number(summary?.kindnessRating));
+          const value = hasRatings ? Number(summary.kindnessRating) : 5;
+          const starsFilled = Math.max(1, Math.min(5, Math.round(value)));
+          volunteerRating = { value, count, hasRatings, starsFilled };
+        } catch (ratingErr) {
+          if (ratingErr?.code !== '42P01') {
+            console.warn('[dashboardController] volunteer rating failed:', ratingErr.message || ratingErr);
           }
         }
         const showStatsDebug = process.env.NODE_ENV !== "production" || Boolean(process.env.DEBUG);
@@ -442,6 +459,7 @@ export function makeDashboardController(pool) {
             email: req.user?.email,
           });
           console.log("[dashboard] stats_user_id:", userId, "volunteerStats:", volunteerStats);
+          console.log("[dashboard] volunteer_rating:", volunteerRating);
         }
 
         res.render('dashboard', {
@@ -450,6 +468,7 @@ export function makeDashboardController(pool) {
           initialArcId: arcsForRender[0]?.id || null,
           csrfToken: typeof req.csrfToken === 'function' ? req.csrfToken() : null,
           volunteerStats,
+          volunteerRating,
           dashboardCompletedEvent,
           dashboardUpcomingEvent,
           debugStatsUserId: showStatsDebug ? String(userId) : null,
@@ -472,8 +491,16 @@ export function makeDashboardController(pool) {
             csrfToken: typeof req.csrfToken === 'function' ? req.csrfToken() : null,
             volunteerStats: {
               impact_credits_balance: 0,
+              verified_hours_total: 0,
+              reliability_score: 50,
               streak_weeks: 0,
               priority_tier: 'Bronze'
+            },
+            volunteerRating: {
+              value: 5,
+              count: 0,
+              hasRatings: false,
+              starsFilled: 5
             },
             dashboardCompletedEvent: null,
             dashboardUpcomingEvent: null,

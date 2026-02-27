@@ -19,13 +19,40 @@ export async function getRatingsSummary(req, res) {
   try {
     const userId = await resolveUserId(req);
     if (!userId) return res.status(401).json({ ok: false, error: "NOT_ALLOWED", message: "Unauthorized." });
-    const summary = await getSummary({ userId, limit: 20 });
+
+    const scope = String(req.query?.scope || "user").toLowerCase();
+    let summary;
+    let orgId = null;
+    if (scope === "organization") {
+      const { rows } = await pool.query(
+        "SELECT org_id FROM public.userdata WHERE id = $1 LIMIT 1",
+        [userId]
+      );
+      orgId = rows?.[0]?.org_id != null ? Number(rows[0].org_id) : null;
+      if (!orgId) {
+        return res.json({
+          ok: true,
+          data: {
+            kindness_rating: null,
+            rating_count: 0,
+            scope: "organization",
+            org_id: null,
+          },
+        });
+      }
+      summary = await getSummary({ orgId, limit: 20 });
+    } else {
+      summary = await getSummary({ userId, limit: 20 });
+    }
+
     const sampleSize = summary.sampleSize || 0;
     return res.json({
       ok: true,
       data: {
         kindness_rating: sampleSize ? summary.kindnessRating : null,
         rating_count: sampleSize,
+        scope: scope === "organization" ? "organization" : "user",
+        org_id: orgId,
       },
     });
   } catch (err) {

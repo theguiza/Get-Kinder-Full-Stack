@@ -290,6 +290,7 @@ function normalizeQueuePayload(payload) {
     needsAttention: Array.isArray(payload?.needsAttention) ? payload.needsAttention : [],
     upcoming: Array.isArray(payload?.upcoming) ? payload.upcoming : [],
     active: Array.isArray(payload?.active) ? payload.active : [],
+    drafts: Array.isArray(payload?.drafts) ? payload.drafts : [],
     completed: Array.isArray(payload?.completed) ? payload.completed : [],
     cancelled: Array.isArray(payload?.cancelled) ? payload.cancelled : [],
     hasOpportunities: Boolean(payload?.hasOpportunities),
@@ -483,7 +484,7 @@ function OrgPortalKpiStrip() {
   );
 }
 
-function OrgPortal({ csrfToken = "", userId = "" }) {
+function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
   const [activeTab, setActiveTab] = useState("opportunities");
   const [selectedQueueItem, setSelectedQueueItem] = useState(null);
   const [completedExpanded, setCompletedExpanded] = useState(false);
@@ -536,6 +537,7 @@ function OrgPortal({ csrfToken = "", userId = "" }) {
   const [rosterError, setRosterError] = useState(false);
   const [markPresentByUser, setMarkPresentByUser] = useState({});
   const [verifyAttendanceByUser, setVerifyAttendanceByUser] = useState({});
+  const [rateVolunteerByUser, setRateVolunteerByUser] = useState({});
   const [verifyAllAttendanceLoading, setVerifyAllAttendanceLoading] = useState(false);
   const [creditsQueue, setCreditsQueue] = useState(null);
   const [creditsLoading, setCreditsLoading] = useState(false);
@@ -827,6 +829,7 @@ function OrgPortal({ csrfToken = "", userId = "" }) {
     setRosterError(false);
     setMarkPresentByUser({});
     setVerifyAttendanceByUser({});
+    setRateVolunteerByUser({});
     setVerifyAllAttendanceLoading(false);
     setCreditsQueue(null);
     setCreditsLoading(false);
@@ -896,6 +899,8 @@ function OrgPortal({ csrfToken = "", userId = "" }) {
               ? "fa-calendar"
               : section === "active"
                 ? "fa-circle"
+                : section === "drafts"
+                  ? "fa-file"
                 : section === "cancelled"
                   ? "fa-ban"
                   : "fa-check-circle",
@@ -911,6 +916,7 @@ function OrgPortal({ csrfToken = "", userId = "" }) {
       needsAttention: mapRows(queue?.needsAttention || [], "needsAttention"),
       upcoming: mapRows(queue?.upcoming || [], "upcoming"),
       active: mapRows(queue?.active || [], "active"),
+      drafts: mapRows(queue?.drafts || [], "drafts"),
       completed: mapRows(queue?.completed || [], "completed"),
       cancelled: mapRows(queue?.cancelled || [], "cancelled"),
     };
@@ -1256,6 +1262,7 @@ function OrgPortal({ csrfToken = "", userId = "" }) {
       setRosterError(false);
       setMarkPresentByUser({});
       setVerifyAttendanceByUser({});
+      setRateVolunteerByUser({});
       setVerifyAllAttendanceLoading(false);
     }
   }, [activeTab, selectedCheckinEventId, selectedCheckinStartTime]);
@@ -1824,6 +1831,112 @@ function OrgPortal({ csrfToken = "", userId = "" }) {
     }
   }
 
+  async function handleRateVolunteer(row) {
+    const attendeeUserId = String(row?.attendeeUserId || "").trim();
+    if (!selectedCheckinEventId || !attendeeUserId) return;
+
+    const starsInput = window.prompt(`Rate ${row?.name || "this volunteer"} (1-5 stars)`, "5");
+    if (starsInput === null) return;
+    const stars = Number(starsInput);
+    if (!Number.isInteger(stars) || stars < 1 || stars > 5) {
+      setRoster((prev) =>
+        prev.map((entry) =>
+          entry.id === row.id
+            ? {
+                ...entry,
+                rowError: "Enter a whole number from 1 to 5.",
+              }
+            : entry
+        )
+      );
+      return;
+    }
+
+    const noteInput = window.prompt("Optional note (max 280 chars)", "");
+    const note = noteInput == null ? "" : String(noteInput).trim().slice(0, 280);
+
+    setRateVolunteerByUser((prev) => ({
+      ...prev,
+      [attendeeUserId]: {
+        ...(prev[attendeeUserId] || {}),
+        submitting: true,
+        error: "",
+      },
+    }));
+
+    try {
+      const response = await fetch(`/api/events/${encodeURIComponent(selectedCheckinEventId)}/ratings`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "X-CSRF-Token": csrfToken,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          target_user_id: attendeeUserId,
+          stars,
+          ...(note ? { note } : {}),
+        }),
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (response.status === 409 || payload?.error === "DUPLICATE_RATING") {
+        setRateVolunteerByUser((prev) => ({
+          ...prev,
+          [attendeeUserId]: {
+            ...(prev[attendeeUserId] || {}),
+            submitting: false,
+            rated: true,
+            error: "",
+          },
+        }));
+        return;
+      }
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.message || payload?.error || "rating_failed");
+      }
+
+      setRateVolunteerByUser((prev) => ({
+        ...prev,
+        [attendeeUserId]: {
+          submitting: false,
+          rated: true,
+          stars,
+          error: "",
+        },
+      }));
+      setRoster((prev) =>
+        prev.map((entry) =>
+          entry.id === row.id
+            ? {
+                ...entry,
+                rowError: "",
+              }
+            : entry
+        )
+      );
+    } catch (error) {
+      setRateVolunteerByUser((prev) => ({
+        ...prev,
+        [attendeeUserId]: {
+          ...(prev[attendeeUserId] || {}),
+          submitting: false,
+          error: error?.message || "Unable to rate volunteer.",
+        },
+      }));
+      setRoster((prev) =>
+        prev.map((entry) =>
+          entry.id === row.id
+            ? {
+                ...entry,
+                rowError: "Failed to submit rating.",
+              }
+            : entry
+        )
+      );
+    }
+  }
+
   async function handleVerifyAllCheckedIn() {
     if (verifyAllAttendanceLoading || !selectedCheckinEventId) return;
     const targets = roster.filter(
@@ -2089,6 +2202,7 @@ function OrgPortal({ csrfToken = "", userId = "" }) {
         needsAttention: updateRows(prev.needsAttention),
         upcoming: updateRows(prev.upcoming),
         active: updateRows(prev.active),
+        drafts: updateRows(prev.drafts),
         completed: updateRows(prev.completed),
         cancelled: updateRows(prev.cancelled),
       };
@@ -2184,6 +2298,7 @@ function OrgPortal({ csrfToken = "", userId = "" }) {
           needsAttention: removeEvent(prev.needsAttention),
           upcoming: removeEvent(prev.upcoming),
           active: removeEvent(prev.active),
+          drafts: removeEvent(prev.drafts),
           completed: removeEvent(prev.completed),
           cancelled: [cancelledItem, ...remainingCancelled],
           hasOpportunities: true,
@@ -2930,6 +3045,18 @@ function OrgPortal({ csrfToken = "", userId = "" }) {
           </div>
         ) : null}
 
+        {sections.drafts.length ? (
+          <div className="mb-3">
+            <div className="orgp-group-label">
+              <span className="orgp-dot orgp-dot-week" aria-hidden="true"></span>
+              DRAFT
+            </div>
+            <div className="list-group orgp-queue-list">
+              {sections.drafts.map((item) => renderQueueItem(item))}
+            </div>
+          </div>
+        ) : null}
+
         {sections.active.length ? (
           <div className="mb-3">
             <div className="orgp-group-label">
@@ -3352,6 +3479,9 @@ function OrgPortal({ csrfToken = "", userId = "" }) {
                     const isNoShow = row.status === "no-show";
                     const rowSaving = Boolean(markPresentByUser[row.id]);
                     const rowVerifying = Boolean(verifyAttendanceByUser[row.id]);
+                    const ratingMeta = rateVolunteerByUser[String(row.attendeeUserId || "")] || {};
+                    const rowRatingSubmitting = Boolean(ratingMeta.submitting);
+                    const rowAlreadyRated = Boolean(ratingMeta.rated);
                     const isAcceptedRsvp = ["accepted", "checked_in"].includes(
                       String(row.statusRaw || "").toLowerCase()
                     );
@@ -3359,6 +3489,7 @@ function OrgPortal({ csrfToken = "", userId = "" }) {
                       String(row.verificationStatus || "").toLowerCase() === "verified" || row.attendedMinutes != null;
                     const disableMark = isChecked || isNoShow || rowSaving || !isAcceptedRsvp || isCheckoutPhase;
                     const disableVerify = !isChecked || isNoShow || rowVerifying || isAttendanceVerified;
+                    const disableRate = !isAcceptedRsvp || isNoShow || rowRatingSubmitting || rowAlreadyRated;
                     return (
                       <tr key={row.id}>
                         <td>{row.name}</td>
@@ -3400,6 +3531,20 @@ function OrgPortal({ csrfToken = "", userId = "" }) {
                               {rowSaving ? "Saving..." : <><i className="fas fa-check me-1" aria-hidden="true"></i>Mark Present</>}
                             </button>
                           )}
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-outline-dark ms-1"
+                            onClick={() => handleRateVolunteer(row)}
+                            disabled={disableRate}
+                            title={rowAlreadyRated ? "Already rated" : ""}
+                          >
+                            {rowRatingSubmitting
+                              ? "Saving..."
+                              : rowAlreadyRated
+                                ? `Rated${ratingMeta.stars ? ` (${ratingMeta.stars}★)` : ""}`
+                                : "Rate Volunteer"}
+                          </button>
+                          {ratingMeta.error ? <div className="small text-danger mt-1">{ratingMeta.error}</div> : null}
                           {row.rowError ? <div className="small text-danger mt-1">{row.rowError}</div> : null}
                         </td>
                       </tr>
@@ -4254,6 +4399,7 @@ function OrgPortal({ csrfToken = "", userId = "" }) {
                 <CreateEvent
                   embedded
                   initialEditId={editingOpportunityId}
+                  defaultOrgName={orgName}
                   onSaved={() => {
                     setShowCreateModal(false);
                     setEditingOpportunityId(null);

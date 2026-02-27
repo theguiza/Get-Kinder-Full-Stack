@@ -9,6 +9,9 @@ export function EventDetail({ eventId }) {
   const [rsvpAction, setRsvpAction] = useState(null);
   const [checkInAction, setCheckInAction] = useState(null);
   const [cancelRequestDialogOpen, setCancelRequestDialogOpen] = useState(false);
+  const [ratingState, setRatingState] = useState({ loading: false, data: null, error: null });
+  const [ratingForm, setRatingForm] = useState({ stars: 0, note: "" });
+  const [ratingSubmitting, setRatingSubmitting] = useState(false);
   const toastTimerRef = useRef(null);
 
   useEffect(() => {
@@ -44,6 +47,47 @@ export function EventDetail({ eventId }) {
     };
   }, []);
 
+  useEffect(() => {
+    const eventData = state.data;
+    if (!eventId || !eventData || eventData.viewer_is_host) {
+      setRatingState({ loading: false, data: null, error: null });
+      setRatingForm({ stars: 0, note: "" });
+      setRatingSubmitting(false);
+      return;
+    }
+
+    let alive = true;
+    setRatingState({ loading: true, data: null, error: null });
+    setRatingForm({ stars: 0, note: "" });
+
+    fetch(`/api/events/${encodeURIComponent(eventId)}/ratings/status`, { credentials: "include" })
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error("Unable to load rating status"))))
+      .then((json) => {
+        if (!alive) return;
+        const payload = json?.data || null;
+        const myRating = payload?.my_rating || null;
+        setRatingState({ loading: false, data: payload, error: null });
+        if (myRating) {
+          setRatingForm({
+            stars: Number(myRating.stars) || 0,
+            note: typeof myRating.note === "string" ? myRating.note : "",
+          });
+        }
+      })
+      .catch((err) => {
+        if (!alive) return;
+        setRatingState({
+          loading: false,
+          data: null,
+          error: err?.message || "Unable to load rating status",
+        });
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, [eventId, state.data?.id, state.data?.viewer_is_host]);
+
   if (!eventId) {
     return <p className="muted">Select an event to see details.</p>;
   }
@@ -70,6 +114,10 @@ export function EventDetail({ eventId }) {
   if (!evt) {
     return <p className="muted">Event not found.</p>;
   }
+
+  const ratingData = ratingState.data || null;
+  const myRating = ratingData?.my_rating || null;
+  const canRateNow = Boolean(ratingData?.can_rate);
 
   async function handleAddToCalendar() {
     if (calendarLoading) return;
@@ -170,6 +218,50 @@ export function EventDetail({ eventId }) {
       showToast({ message: err.message || "Unable to check in.", type: "error" });
     } finally {
       setCheckInAction(null);
+    }
+  }
+
+  async function handleSubmitRating(event) {
+    event.preventDefault();
+    if (ratingSubmitting) return;
+    const stars = Number(ratingForm.stars);
+    if (!Number.isInteger(stars) || stars < 1 || stars > 5) {
+      showToast({ message: "Please choose a rating from 1 to 5 stars.", type: "error" });
+      return;
+    }
+
+    setRatingSubmitting(true);
+    try {
+      const payload = {
+        stars,
+      };
+      const trimmedNote = String(ratingForm.note || "").trim();
+      if (trimmedNote) payload.note = trimmedNote.slice(0, 280);
+
+      const res = await fetch(`/api/events/${encodeURIComponent(eventId)}/ratings`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.ok) {
+        throw new Error(json?.message || json?.error || "Unable to submit rating");
+      }
+
+      const statusRes = await fetch(`/api/events/${encodeURIComponent(eventId)}/ratings/status`, {
+        credentials: "include",
+      });
+      const statusJson = await statusRes.json().catch(() => ({}));
+      if (statusRes.ok && statusJson?.ok) {
+        setRatingState({ loading: false, data: statusJson.data || null, error: null });
+      }
+
+      showToast({ message: "Thanks for rating this experience.", type: "success" });
+    } catch (err) {
+      showToast({ message: err?.message || "Unable to submit rating.", type: "error" });
+    } finally {
+      setRatingSubmitting(false);
     }
   }
 
@@ -365,6 +457,61 @@ export function EventDetail({ eventId }) {
         )}
       </div>
 
+      {!evt.viewer_is_host && (
+        <div className="card rating-card">
+          <strong>Rate this experience</strong>
+          {ratingState.loading ? (
+            <p className="muted mb-0">Checking rating status…</p>
+          ) : ratingState.error ? (
+            <p className="muted mb-0">{ratingState.error}</p>
+          ) : myRating ? (
+            <>
+              <p className="mb-0">
+                You rated this event <span className="rating-inline-stars">{renderStars(myRating.stars)}</span>
+              </p>
+              {myRating.note ? <p className="muted mb-0">“{myRating.note}”</p> : null}
+              {ratingData?.other_rating_exists ? (
+                <p className="muted mb-0">
+                  {ratingData?.revealed
+                    ? "Mutual rating submitted."
+                    : "The host has submitted their rating too; reveal pending."}
+                </p>
+              ) : (
+                <p className="muted mb-0">Waiting for the host's rating.</p>
+              )}
+            </>
+          ) : canRateNow ? (
+            <form onSubmit={handleSubmitRating} className="rating-form">
+              <div className="rating-stars" role="group" aria-label="Rate this event from 1 to 5 stars">
+                {[1, 2, 3, 4, 5].map((star) => (
+                  <button
+                    key={star}
+                    type="button"
+                    className={`rating-star ${ratingForm.stars >= star ? "active" : ""}`}
+                    onClick={() => setRatingForm((prev) => ({ ...prev, stars: star }))}
+                    aria-label={`${star} star${star === 1 ? "" : "s"}`}
+                  >
+                    ★
+                  </button>
+                ))}
+              </div>
+              <textarea
+                className="rating-note"
+                value={ratingForm.note}
+                maxLength={280}
+                onChange={(e) => setRatingForm((prev) => ({ ...prev, note: e.target.value }))}
+                placeholder="Optional note (max 280 characters)"
+              />
+              <button type="submit" className="btn" disabled={ratingSubmitting}>
+                {ratingSubmitting ? "Submitting…" : "Submit Rating"}
+              </button>
+            </form>
+          ) : (
+            <p className="muted mb-0">{formatRatingBlockedMessage(ratingData?.reason)}</p>
+          )}
+        </div>
+      )}
+
       <h3>After the event</h3>
       <div className="grid">
         <div className="box">
@@ -460,6 +607,32 @@ const detailStyles = `
   }
   .checkin-card{display:flex;flex-direction:column;gap:12px}
   .checkin-buttons{display:flex;flex-wrap:wrap;gap:10px}
+  .rating-card{display:flex;flex-direction:column;gap:10px}
+  .rating-form{display:flex;flex-direction:column;gap:10px}
+  .rating-stars{display:flex;gap:8px;flex-wrap:wrap}
+  .rating-star{
+    border:1px solid #e5e7eb;
+    background:#fff;
+    color:#c4cad3;
+    border-radius:10px;
+    width:40px;
+    height:40px;
+    font-size:1.3rem;
+    line-height:1;
+    cursor:pointer
+  }
+  .rating-star.active{color:#ff5656;border-color:#ff5656;background:#fff5f5}
+  .rating-inline-stars{color:#ff5656;font-weight:700}
+  .rating-note{
+    border:1px solid #e5e7eb;
+    border-radius:10px;
+    min-height:90px;
+    padding:10px 12px;
+    resize:vertical;
+    font:inherit;
+    color:#1f2937;
+    background:#fff
+  }
   .rsvp-stats{margin-top:8px;color:#6b7280;font-size:0.9rem}
   .when-card{display:grid;grid-template-columns:1fr 2fr;column-gap:20px;align-items:start}
   .when-card__header{margin:0;padding:0 16px 0 0;border-bottom:none;border-right:2px solid #ff5656;min-height:100%}
@@ -560,5 +733,27 @@ function formatVerificationLabel(method) {
       return "Social proof";
     default:
       return "Host attestation";
+  }
+}
+
+function renderStars(starsValue) {
+  const stars = Math.max(1, Math.min(5, Number(starsValue) || 0));
+  return "★★★★★".slice(0, stars) + "☆☆☆☆☆".slice(0, 5 - stars);
+}
+
+function formatRatingBlockedMessage(reason) {
+  switch (String(reason || "").toUpperCase()) {
+    case "EVENT_NOT_RATEABLE":
+      return "Rating opens after the event is completed.";
+    case "RSVP_REQUIRED":
+      return "You can only rate events you accepted or checked into.";
+    case "ORG_NOT_CONFIGURED":
+      return "This event is missing organization setup for ratings.";
+    case "TARGET_USER_REQUIRED":
+      return "Select a volunteer first.";
+    case "ALREADY_RATED":
+      return "You already submitted a rating.";
+    default:
+      return "Rating is not available right now.";
   }
 }

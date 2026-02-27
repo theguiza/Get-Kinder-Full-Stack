@@ -592,7 +592,7 @@ orgPortalRouter.get("/queue", async (req, res) => {
         FROM events e
         LEFT JOIN event_rsvps r ON r.event_id = e.id
         WHERE e.creator_user_id::text = ANY($1::text[])
-          AND COALESCE(e.status, 'published') <> 'cancelled'
+          AND COALESCE(e.status, 'published') NOT IN ('cancelled', 'draft')
           AND (e.start_at > NOW() OR e.start_at IS NULL)
         GROUP BY e.id
         HAVING COUNT(*) FILTER (WHERE r.status = 'accepted' AND r.verification_status = 'pending') > 0
@@ -614,7 +614,7 @@ orgPortalRouter.get("/queue", async (req, res) => {
         FROM events e
         LEFT JOIN event_rsvps r ON r.event_id = e.id
         WHERE e.creator_user_id::text = ANY($1::text[])
-          AND COALESCE(e.status, 'published') <> 'cancelled'
+          AND COALESCE(e.status, 'published') NOT IN ('cancelled', 'draft')
           AND (e.start_at > NOW() OR e.start_at IS NULL)
         GROUP BY e.id
         HAVING COUNT(*) FILTER (WHERE r.verification_status = 'pending') = 0
@@ -635,11 +635,31 @@ orgPortalRouter.get("/queue", async (req, res) => {
         FROM events e
         LEFT JOIN event_rsvps r ON r.event_id = e.id
         WHERE e.creator_user_id::text = ANY($1::text[])
-          AND COALESCE(e.status, 'published') <> 'cancelled'
+          AND COALESCE(e.status, 'published') NOT IN ('cancelled', 'draft')
           AND e.start_at <= NOW()
           AND (e.end_at >= NOW() OR e.end_at IS NULL)
         GROUP BY e.id
         ORDER BY e.start_at DESC
+      `,
+      [coordinatorUserIds]
+    );
+
+    const { rows: draftRows } = await pool.query(
+      `
+        SELECT
+          e.id AS event_id,
+          e.title AS event_title,
+          e.start_at,
+          e.end_at,
+          e.tz,
+          e.capacity,
+          COUNT(*) FILTER (WHERE r.status = 'accepted')::int AS approved_count
+        FROM events e
+        LEFT JOIN event_rsvps r ON r.event_id = e.id
+        WHERE e.creator_user_id::text = ANY($1::text[])
+          AND COALESCE(e.status, 'published') = 'draft'
+        GROUP BY e.id
+        ORDER BY e.updated_at DESC NULLS LAST, e.start_at ASC NULLS LAST
       `,
       [coordinatorUserIds]
     );
@@ -654,7 +674,7 @@ orgPortalRouter.get("/queue", async (req, res) => {
           e.tz
         FROM events e
         WHERE e.creator_user_id::text = ANY($1::text[])
-          AND COALESCE(e.status, 'published') <> 'cancelled'
+          AND COALESCE(e.status, 'published') NOT IN ('cancelled', 'draft')
           AND e.end_at < NOW()
         ORDER BY e.end_at DESC
         LIMIT 5
@@ -718,6 +738,19 @@ orgPortalRouter.get("/queue", async (req, res) => {
       startTz: row.tz || null,
     }));
 
+    const drafts = draftRows.map((row) => ({
+      id: `draft-${row.event_id}`,
+      type: "opp-draft",
+      label: `${row.event_title}`,
+      opportunityId: String(row.event_id),
+      opportunityName: row.event_title,
+      approvedCount: Number(row.approved_count) || 0,
+      capacity: row.capacity == null ? null : Number(row.capacity),
+      startTime: row.start_at,
+      endTime: row.end_at,
+      startTz: row.tz || null,
+    }));
+
     const completed = completedRows.map((row) => ({
       id: `completed-${row.event_id}`,
       type: "opp-completed",
@@ -744,6 +777,7 @@ orgPortalRouter.get("/queue", async (req, res) => {
       needsAttention,
       upcoming,
       active,
+      drafts,
       completed,
       cancelled,
       hasOpportunities,

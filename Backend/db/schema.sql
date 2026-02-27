@@ -1678,6 +1678,45 @@ ALTER TABLE ONLY public.user_quests
 
 
 --
+-- Name: event_ratings; Type: TABLE; Schema: public; Owner: -
+-- Supplemental runtime table definition (managed by migrations)
+--
+
+CREATE TABLE IF NOT EXISTS public.event_ratings (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    event_id uuid NOT NULL,
+    rater_user_id integer NOT NULL,
+    ratee_user_id integer,
+    ratee_org_id integer,
+    rater_role text NOT NULL,
+    ratee_role text NOT NULL,
+    stars smallint NOT NULL,
+    tags text[],
+    note text,
+    revealed_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT event_ratings_pkey PRIMARY KEY (id),
+    CONSTRAINT event_ratings_rater_role_check CHECK ((rater_role = ANY (ARRAY['volunteer'::text, 'host'::text]))),
+    CONSTRAINT event_ratings_ratee_role_check CHECK ((ratee_role = ANY (ARRAY['volunteer'::text, 'host'::text, 'organization'::text]))),
+    CONSTRAINT event_ratings_ratee_target_check CHECK ((((ratee_role = 'organization'::text) AND (ratee_org_id IS NOT NULL) AND (ratee_user_id IS NULL)) OR ((ratee_role = ANY (ARRAY['volunteer'::text, 'host'::text])) AND (ratee_user_id IS NOT NULL) AND (ratee_org_id IS NULL)))),
+    CONSTRAINT event_ratings_stars_check CHECK (((stars >= 1) AND (stars <= 5)))
+);
+
+ALTER TABLE ONLY public.event_ratings
+    DROP CONSTRAINT IF EXISTS event_ratings_event_id_fkey;
+ALTER TABLE ONLY public.event_ratings
+    ADD CONSTRAINT event_ratings_event_id_fkey FOREIGN KEY (event_id) REFERENCES public.events(id) ON DELETE CASCADE;
+ALTER TABLE ONLY public.event_ratings
+    DROP CONSTRAINT IF EXISTS event_ratings_ratee_org_id_fkey;
+ALTER TABLE ONLY public.event_ratings
+    ADD CONSTRAINT event_ratings_ratee_org_id_fkey FOREIGN KEY (ratee_org_id) REFERENCES public.organizations(id) ON DELETE CASCADE;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_event_ratings_pair ON public.event_ratings USING btree (event_id, rater_user_id, rater_role, ratee_role, COALESCE(ratee_user_id, (-1)), COALESCE(ratee_org_id, (-1)));
+CREATE INDEX IF NOT EXISTS idx_event_ratings_event ON public.event_ratings USING btree (event_id);
+CREATE INDEX IF NOT EXISTS idx_event_ratings_ratee_created ON public.event_ratings USING btree (ratee_user_id, created_at DESC);
+
+
+--
 -- PostgreSQL database dump complete
 --
 

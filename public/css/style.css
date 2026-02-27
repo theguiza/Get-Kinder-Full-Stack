@@ -553,7 +553,8 @@ html, body, #app, .page, .chat-page, .full-height {
 }
 /* START OF DASHBOARD & KAI CHAT STYLING */
 
-        .progress-bar {
+        /* Legacy custom progress track (do not target Bootstrap `.progress-bar`) */
+        .legacy-progress-track {
             width: 100%;
             height: 8px;
             background: #e2e8f0;
@@ -1291,6 +1292,57 @@ html, body, #app, .page, .chat-page, .full-height {
   font-size: 1.2rem;
   font-weight: 700;
   line-height: 1.1;
+}
+
+.dashboard-container .dash-impact-summary .dash-metrics {
+  gap: 0.6rem;
+}
+
+.dashboard-container .dash-impact-summary .dash-metric {
+  min-height: 82px;
+  align-items: center;
+  justify-items: center;
+  text-align: center;
+  padding: 0.55rem 0.45rem;
+  container-type: inline-size;
+}
+
+.dashboard-container .dash-impact-summary .dash-metric-label {
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.75rem;
+}
+
+.dashboard-container .dash-impact-summary .dash-metric-value {
+  color: #ff5656;
+  font-size: 2rem;
+}
+
+.dashboard-container .dash-impact-summary .dash-rating-stars {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.12rem;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  justify-items: center;
+  /* Fallback size when container query units are unavailable */
+  font-size: clamp(0.92rem, 2.1vw, 1.45rem);
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  color: #d9e3f4;
+}
+
+@supports (font-size: 1cqw) {
+  .dashboard-container .dash-impact-summary .dash-rating-stars {
+    /* True dynamic sizing from card width so all 5 stars always fit */
+    font-size: clamp(0.92rem, calc((100cqw - 0.48rem) / 5), 1.45rem);
+  }
+}
+
+.dashboard-container .dash-impact-summary .dash-rating-stars .is-filled {
+  color: #ff5656;
 }
 
 .dashboard-container .dash-actions-grid {

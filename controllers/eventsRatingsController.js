@@ -1,5 +1,5 @@
 import pool from "../Backend/db/pg.js";
-import { submitRating, RatingsServiceError } from "../services/ratingsService.js";
+import { submitRating, getPairRatingStatus, RatingsServiceError } from "../services/ratingsService.js";
 
 async function resolveUserId(req) {
   if (req.user?.id) return String(req.user.id);
@@ -21,6 +21,140 @@ const isPastEnd = (endAt) => {
   if (Number.isNaN(date.getTime())) return false;
   return date.getTime() < Date.now();
 };
+
+export async function getEventRatingStatus(req, res) {
+  try {
+    const eventId = req.params.id;
+    const targetUserIdRaw = req.query?.target_user_id;
+    const targetUserId = targetUserIdRaw ? String(targetUserIdRaw).trim() : "";
+    const raterUserId = await resolveUserId(req);
+
+    const { rows: eventRows } = await pool.query(
+      `
+        SELECT e.id, e.creator_user_id, e.status, e.end_at, u.org_id AS creator_org_id
+        FROM events e
+        LEFT JOIN userdata u ON u.id = e.creator_user_id
+        WHERE e.id = $1
+        LIMIT 1
+      `,
+      [eventId]
+    );
+    if (!eventRows[0]) {
+      return res.status(404).json({
+        ok: false,
+        error: "NOT_FOUND",
+        message: "Event not found.",
+      });
+    }
+
+    const event = eventRows[0];
+    const eventCreatorId = String(event.creator_user_id);
+    const creatorOrgId = event.creator_org_id == null ? null : Number(event.creator_org_id);
+    const isHost = String(raterUserId) === eventCreatorId;
+    let raterRole = isHost ? "host" : "volunteer";
+    let rateeRole = isHost ? "volunteer" : "organization";
+    let rateeUserId = isHost ? targetUserId : eventCreatorId;
+    let rateeOrgId = null;
+    let canRate = false;
+    let reason = null;
+
+    if (isHost) {
+      if (!rateeUserId) {
+        reason = "TARGET_USER_REQUIRED";
+      } else {
+        const { rows: rsvpRows } = await pool.query(
+          `
+            SELECT 1
+            FROM event_rsvps
+            WHERE event_id = $1
+              AND attendee_user_id = $2
+              AND status IN ('accepted','checked_in')
+            LIMIT 1
+          `,
+          [eventId, rateeUserId]
+        );
+        if (!rsvpRows[0]) {
+          reason = "RSVP_REQUIRED";
+        } else {
+          canRate = true;
+        }
+      }
+    } else {
+      if (!(event.status === "completed" || isPastEnd(event.end_at))) {
+        reason = "EVENT_NOT_RATEABLE";
+      } else if (!creatorOrgId) {
+        reason = "ORG_NOT_CONFIGURED";
+      } else {
+        const { rows: rsvpRows } = await pool.query(
+          `
+            SELECT 1
+            FROM event_rsvps
+            WHERE event_id = $1
+              AND attendee_user_id = $2
+              AND status IN ('accepted','checked_in')
+            LIMIT 1
+          `,
+          [eventId, raterUserId]
+        );
+        if (!rsvpRows[0]) {
+          reason = "RSVP_REQUIRED";
+        } else {
+          rateeUserId = null;
+          rateeOrgId = creatorOrgId;
+          canRate = true;
+        }
+      }
+    }
+
+    let myRating = null;
+    let otherRatingExists = false;
+    let revealed = false;
+
+    if (rateeUserId || rateeOrgId) {
+      const pairStatus = await getPairRatingStatus({
+        eventId,
+        raterUserId,
+        rateeUserId,
+        rateeOrgId,
+        raterRole,
+        rateeRole,
+        organizationId: creatorOrgId,
+      });
+      myRating = pairStatus.myRating;
+      otherRatingExists = pairStatus.otherRatingExists;
+      revealed = pairStatus.revealed;
+    }
+
+    if (myRating) {
+      canRate = false;
+      reason = "ALREADY_RATED";
+    }
+
+    return res.json({
+      ok: true,
+      data: {
+        event_id: String(eventId),
+        is_host: isHost,
+        rater_role: raterRole,
+        ratee_role: rateeRole,
+        ratee_user_id: rateeUserId || null,
+        ratee_org_id: rateeOrgId,
+        can_rate: canRate,
+        reason,
+        my_rating: myRating,
+        other_rating_exists: otherRatingExists,
+        revealed,
+      },
+    });
+  } catch (err) {
+    console.error("GET /api/events/:id/ratings/status error:", err);
+    return res.status(500).json({
+      ok: false,
+      error: "SERVER_ERROR",
+      message: "Unable to load rating status.",
+    });
+  }
+}
 
 export async function submitEventRating(req, res) {
   try {
@@ -58,9 +192,10 @@ export async function submitEventRating(req, res) {
 
     const { rows: eventRows } = await pool.query(
       `
-        SELECT id, creator_user_id, status, end_at
-        FROM events
-        WHERE id = $1
+        SELECT e.id, e.creator_user_id, e.status, e.end_at, u.org_id AS creator_org_id
+        FROM events e
+        LEFT JOIN userdata u ON u.id = e.creator_user_id
+        WHERE e.id = $1
         LIMIT 1
       `,
       [eventId]
@@ -74,8 +209,10 @@ export async function submitEventRating(req, res) {
     }
     const event = eventRows[0];
     const eventCreatorId = String(event.creator_user_id);
+    const creatorOrgId = event.creator_org_id == null ? null : Number(event.creator_org_id);
     const isHost = String(raterUserId) === eventCreatorId;
     let rateeUserId;
+    let rateeOrgId = null;
     let raterRole;
     let rateeRole;
 
@@ -135,20 +272,30 @@ export async function submitEventRating(req, res) {
           message: "You must RSVP before rating this event.",
         });
       }
-      rateeUserId = eventCreatorId;
+      if (!creatorOrgId) {
+        return res.status(400).json({
+          ok: false,
+          error: "ORG_NOT_CONFIGURED",
+          message: "This event is missing organization setup.",
+        });
+      }
+      rateeUserId = null;
+      rateeOrgId = creatorOrgId;
       raterRole = "volunteer";
-      rateeRole = "host";
+      rateeRole = "organization";
     }
 
     const { ratingId, revealed } = await submitRating({
       eventId,
       raterUserId,
       rateeUserId,
+      rateeOrgId,
       raterRole,
       rateeRole,
       stars,
       tags: tags?.length ? tags : null,
       note: note?.trim() || null,
+      organizationId: creatorOrgId,
     });
 
     return res.json({
