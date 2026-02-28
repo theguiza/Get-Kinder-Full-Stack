@@ -4,7 +4,6 @@ import { Drawer } from "./components/Drawer.jsx";
 import { TopTabs } from "./components/TopTabs.jsx";
 import { Feed } from "./views/Feed.jsx";
 import { Invites } from "./views/Invites.jsx";
-import { MyInvites } from "./views/MyInvites.jsx";
 import { EventDetail } from "./views/EventDetail.jsx";
 
 export function EventsApp(props = {}) {
@@ -78,7 +77,6 @@ export function EventsApp(props = {}) {
       >
         <Feed path="#/events" />
         <Invites path="#/invites" />
-        <MyInvites path="#/my-invites" />
       </EventsRouter>
 
       <Drawer open={Boolean(drawerId)} onClose={handleCloseDrawer}>

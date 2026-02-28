@@ -574,9 +574,9 @@ export function MyEvents() {
           setToast({
             type: "success",
             message: `Invite sent to ${data?.invitee_name || data?.invitee_email}.`,
-            actionLabel: "View in My Invites",
+            actionLabel: "View in Invites",
             onAction: () => {
-              window.location.hash = "#/my-invites";
+              window.location.hash = "#/invites";
             },
           });
         }}

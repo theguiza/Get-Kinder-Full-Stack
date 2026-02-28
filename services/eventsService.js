@@ -2,6 +2,7 @@ import pool from "../Backend/db/pg.js";
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function clampLimit(value) {
   const num = Number(value);
@@ -9,9 +10,22 @@ function clampLimit(value) {
   return Math.min(Math.max(fallback, 1), MAX_LIMIT);
 }
 
-function clampOffset(value) {
-  const num = Number(value);
-  return Math.max(Number.isFinite(num) ? num : 0, 0);
+function normalizeView(value) {
+  return value === "archive" ? "archive" : "upcoming";
+}
+
+function normalizeCursorTimestamp(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
+function normalizeCursorId(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  return UUID_RE.test(raw) ? raw : null;
 }
 
 function normalizeFilterToken(value) {
@@ -80,13 +94,36 @@ function normalizeTextArray(value) {
   return [];
 }
 
-export async function fetchEvents({ limit, offset, communityTag, causeTag } = {}) {
+export async function fetchEvents({
+  limit,
+  view,
+  cursor,
+  communityTag,
+  causeTag,
+  community_tag,
+  cause_tag,
+  after_start_at,
+  after_id,
+  before_start_at,
+  before_id,
+} = {}) {
   const clampedLimit = clampLimit(limit);
-  const clampedOffset = clampOffset(offset);
+  const normalizedView = normalizeView(view);
   const filters = ["e.status = 'published'"];
+  filters.push(
+    normalizedView === "archive"
+      ? "COALESCE(e.end_at, e.start_at) < NOW() - INTERVAL '2 hours'"
+      : "COALESCE(e.end_at, e.start_at) >= NOW() - INTERVAL '2 hours'"
+  );
   const values = [];
-  const normalizedCommunity = typeof communityTag === "string" ? communityTag.trim().toLowerCase() : "";
-  const normalizedCause = normalizeFilterToken(causeTag);
+  const normalizedCommunity = typeof community_tag === "string"
+    ? community_tag.trim().toLowerCase()
+    : typeof communityTag === "string"
+      ? communityTag.trim().toLowerCase()
+      : "";
+  const normalizedCause = normalizeFilterToken(
+    typeof cause_tag === "string" ? cause_tag : causeTag
+  );
   if (normalizedCommunity) {
     values.push(normalizedCommunity);
     filters.push(`LOWER(TRIM(COALESCE(e.community_tag, ''))) = $${values.length}`);
@@ -111,10 +148,34 @@ export async function fetchEvents({ limit, offset, communityTag, causeTag } = {}
       )
     `);
   }
-  values.push(clampedLimit);
-  values.push(clampedOffset);
-  const limitParam = values.length - 1;
-  const offsetParam = values.length;
+  const cursorInput = cursor || {};
+  const afterStartAt = normalizeCursorTimestamp(cursorInput.after_start_at ?? after_start_at);
+  const afterId = normalizeCursorId(cursorInput.after_id ?? after_id);
+  const beforeStartAt = normalizeCursorTimestamp(cursorInput.before_start_at ?? before_start_at);
+  const beforeId = normalizeCursorId(cursorInput.before_id ?? before_id);
+
+  const sortStartExpr = normalizedView === "archive"
+    ? "COALESCE(e.start_at, '-infinity'::timestamptz)"
+    : "COALESCE(e.start_at, 'infinity'::timestamptz)";
+  const cursorStartAt = normalizedView === "archive" ? beforeStartAt : afterStartAt;
+  const cursorId = normalizedView === "archive" ? beforeId : afterId;
+
+  if (cursorId) {
+    values.push(cursorStartAt);
+    const cursorStartParam = values.length;
+    values.push(cursorId);
+    const cursorIdParam = values.length;
+    const cursorFallback = normalizedView === "archive"
+      ? "'-infinity'::timestamptz"
+      : "'infinity'::timestamptz";
+    const cursorOperator = normalizedView === "archive" ? "<" : ">";
+    filters.push(
+      `(${sortStartExpr}, e.id) ${cursorOperator} (COALESCE($${cursorStartParam}::timestamptz, ${cursorFallback}), $${cursorIdParam}::uuid)`
+    );
+  }
+
+  values.push(clampedLimit + 1);
+  const limitParam = values.length;
   const { rows } = await pool.query(
     `
       SELECT e.id,
@@ -146,16 +207,33 @@ export async function fetchEvents({ limit, offset, communityTag, causeTag } = {}
         GROUP BY event_id
         ) r ON r.event_id = e.id
       ${filters.length ? `WHERE ${filters.join(" AND ")}` : ""}
-       ORDER BY e.start_at ASC NULLS LAST, e.id ASC
-       LIMIT $${limitParam} OFFSET $${offsetParam}
+       ORDER BY ${sortStartExpr} ${normalizedView === "archive" ? "DESC" : "ASC"},
+                e.id ${normalizedView === "archive" ? "DESC" : "ASC"}
+       LIMIT $${limitParam}
     `,
     values
   );
-  return rows.map((row) => {
+
+  const hasMore = rows.length > clampedLimit;
+  const pageRows = hasMore ? rows.slice(0, clampedLimit) : rows;
+  const events = pageRows.map((row) => {
     const mapped = mapEventRow(row);
     delete mapped.description;
     return mapped;
   });
+  const last = pageRows[pageRows.length - 1];
+  const lastStartAt = last?.start_at ? new Date(last.start_at).toISOString() : null;
+  const nextCursor = hasMore && last
+    ? normalizedView === "archive"
+      ? { before_start_at: lastStartAt, before_id: String(last.id) }
+      : { after_start_at: lastStartAt, after_id: String(last.id) }
+    : null;
+
+  return {
+    events,
+    nextCursor,
+    view: normalizedView,
+  };
 }
 
 export async function fetchEventById(id) {

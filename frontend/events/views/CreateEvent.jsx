@@ -951,7 +951,7 @@ export function CreateEvent({
             <input
               type="text"
               name="title"
-              placeholder="e.g., Coffee & Co-work at Main Street"
+              placeholder="e.g. Spring Food Drive – Apr 5 | Helping Hands Network"
               value={form.title}
               onChange={(e) => updateField("title", e.target.value)}
             />

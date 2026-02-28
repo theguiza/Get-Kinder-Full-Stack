@@ -19,7 +19,7 @@ const VERIFICATION_METHOD_SET = new Set(["host_attest", "qr_stub", "social_proof
 const HOST_INVITE_ALLOWED_STATUSES = new Set(["published", "draft"]);
 const EDITABLE_STATUS_SET = new Set(["draft", "published"]);
 const RSVP_ACTION_TO_STATUS = new Map([
-  ["accept", "accepted"],
+  ["accept", "pending"],
   ["decline", "declined"],
 ]);
 const CHECKIN_METHOD_SET = new Set(["host_code", "social_proof", "geo"]);
@@ -45,11 +45,6 @@ function clampLimit(value) {
   const num = Number(value);
   const fallback = Number.isFinite(num) ? num : DEFAULT_LIMIT;
   return Math.min(Math.max(fallback, 1), MAX_LIMIT);
-}
-
-function clampOffset(value) {
-  const num = Number(value);
-  return Math.max(Number.isFinite(num) ? num : 0, 0);
 }
 
 function sanitizeString(value) {
@@ -221,16 +216,36 @@ function mapEventRowForEdit(row) {
 export async function listEvents(req, res) {
   try {
     const limit = clampLimit(req.query.limit);
-    const offset = clampOffset(req.query.offset);
+    const view = req.query.view === "archive" ? "archive" : "upcoming";
     const communityTag = typeof req.query.community_tag === "string" ? req.query.community_tag : "";
     const causeTag = typeof req.query.cause_tag === "string" ? req.query.cause_tag : "";
-    const data = await fetchEvents({ limit, offset, communityTag, causeTag });
+    const cursor = view === "archive"
+      ? {
+          before_start_at:
+            typeof req.query.before_start_at === "string" ? req.query.before_start_at : null,
+          before_id: typeof req.query.before_id === "string" ? req.query.before_id : null,
+        }
+      : {
+          after_start_at:
+            typeof req.query.after_start_at === "string" ? req.query.after_start_at : null,
+          after_id: typeof req.query.after_id === "string" ? req.query.after_id : null,
+        };
+    const result = await fetchEvents({
+      limit,
+      view,
+      cursor,
+      communityTag,
+      causeTag,
+    });
+    const data = Array.isArray(result?.events) ? result.events : [];
+    const nextCursor = result?.nextCursor || null;
     return res.json({
       ok: true,
       data,
       paging: {
         limit,
-        offset,
+        view,
+        next_cursor: nextCursor,
         count: data.length,
       },
     });

@@ -291,6 +291,26 @@
         }
       }
 
+      function normalizeRsvpStatus(value) {
+        return typeof value === "string" ? value.trim().toLowerCase() : "";
+      }
+
+      function extractViewerRsvpStatus(eventData) {
+        if (!eventData || typeof eventData !== "object") return "";
+        const candidates = [
+          eventData.viewer_rsvp_status,
+          eventData.viewerRsvpStatus,
+          eventData.viewer && eventData.viewer.status,
+          eventData.rsvp_status,
+          eventData.rsvpStatus,
+        ];
+        for (let i = 0; i < candidates.length; i += 1) {
+          const normalized = normalizeRsvpStatus(candidates[i]);
+          if (normalized) return normalized;
+        }
+        return "";
+      }
+
       function chooseMethod(methods) {
         if (!Array.isArray(methods) || methods.length === 0) return null;
         const order = ["host_code", "geo", "social_proof"];
@@ -365,7 +385,7 @@
           const checkedAt = json?.data?.checked_in_at
             ? formatDateTime(json.data.checked_in_at)
             : "now";
-          showAlert("success", "Checked in successfully at " + checkedAt + ".");
+          showAlert("success", "You are checked in! Checked in at " + checkedAt + ".");
           setScannerStatus("You are checked in.");
           canCheckIn = false;
           await stopScanner();
@@ -462,6 +482,7 @@
             throw new Error("Could not load this event.");
           }
           const event = json.data;
+          const viewerRsvpStatus = extractViewerRsvpStatus(event);
           const eventTitle = event.title || "Untitled event";
           const eventWhen = formatDateTime(event.start_at, event.tz);
           eventMeta.textContent = eventTitle + " • " + eventWhen;
@@ -488,7 +509,7 @@
             return;
           }
 
-          if (event.viewer_rsvp_status === "checked_in") {
+          if (viewerRsvpStatus === "checked_in") {
             canCheckIn = false;
             startScannerBtn.disabled = true;
             manualSubmitBtn.disabled = true;
@@ -497,12 +518,30 @@
             return;
           }
 
-          if (!["accepted", "checked_in"].includes(event.viewer_rsvp_status)) {
+          if (viewerRsvpStatus === "pending") {
             canCheckIn = false;
             startScannerBtn.disabled = true;
             manualSubmitBtn.disabled = true;
-            showAlert("warning", "Please accept the invite on the event page before check-in.");
-            setScannerStatus("RSVP must be accepted first.");
+            showAlert("warning", "Your join request is pending host approval before check-in.");
+            setScannerStatus("RSVP is pending host approval.");
+            return;
+          }
+
+          if (viewerRsvpStatus === "declined") {
+            canCheckIn = false;
+            startScannerBtn.disabled = true;
+            manualSubmitBtn.disabled = true;
+            showAlert("warning", "Your RSVP is declined. Re-request attendance from the event page before check-in.");
+            setScannerStatus("RSVP is declined.");
+            return;
+          }
+
+          if (!["accepted", "checked_in"].includes(viewerRsvpStatus)) {
+            canCheckIn = false;
+            startScannerBtn.disabled = true;
+            manualSubmitBtn.disabled = true;
+            showAlert("warning", "We could not confirm your RSVP status. Please request attendance from the event page before check-in.");
+            setScannerStatus("Unable to confirm RSVP status.");
             return;
           }
         } catch (error) {

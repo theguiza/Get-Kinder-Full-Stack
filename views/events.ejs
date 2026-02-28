@@ -107,8 +107,8 @@
               </a>
             </h1>
             <p class="events-hero-sub">
-              Every hour you give earns impact credits that fund
-              the causes you care about most.
+              Every hour you give earns impact credits that you can turn into rewards,
+              or pay them forward to fund the causes you care about most.
             </p>
           </div>
           <div class="col-12 col-md-6">
@@ -126,36 +126,61 @@
     </section>
 
     <section class="events-chip-bar">
+      <%
+        const eventsPagePagination = (props && props.pagination) || {};
+        const eventsPageView = eventsPagePagination.view === 'archive' ? 'archive' : 'upcoming';
+        const eventsPageCauseTagRaw = typeof eventsPagePagination.cause_tag === 'string'
+          ? eventsPagePagination.cause_tag.trim()
+          : '';
+        const eventsPageCauseTag = eventsPageCauseTagRaw.toLowerCase();
+        const eventsPageCommunityTag = typeof eventsPagePagination.community_tag === 'string'
+          ? eventsPagePagination.community_tag.trim()
+          : '';
+        const eventsPageLimitNum = Number(eventsPagePagination.limit);
+        const eventsPageLimit = Number.isFinite(eventsPageLimitNum)
+          ? Math.min(Math.max(eventsPageLimitNum, 1), 50)
+          : 20;
+        const eventsPageCursor = eventsPagePagination.cursor && typeof eventsPagePagination.cursor === 'object'
+          ? eventsPagePagination.cursor
+          : null;
+        const eventsPageFilters = {
+          view: eventsPageView,
+          cause_tag: eventsPageCauseTagRaw || null,
+          community_tag: eventsPageCommunityTag || null,
+          limit: eventsPageLimit,
+          cursor: eventsPageCursor
+        };
+      %>
       <div class="container">
         <div class="events-chip-row" id="events-chip-row">
-          <button class="events-chip active" data-cause="">
+          <button class="events-chip <%= !eventsPageCauseTag ? 'active' : '' %>" data-cause="">
             🌟 All
           </button>
-          <button class="events-chip" data-cause="outdoors">
+          <button class="events-chip <%= eventsPageCauseTag === 'outdoors' ? 'active' : '' %>" data-cause="outdoors">
             🌿 Outdoors
           </button>
-          <button class="events-chip" data-cause="food">
+          <button class="events-chip <%= eventsPageCauseTag === 'food' ? 'active' : '' %>" data-cause="food">
             🍎 Food & Hunger
           </button>
-          <button class="events-chip" data-cause="education">
+          <button class="events-chip <%= eventsPageCauseTag === 'education' ? 'active' : '' %>" data-cause="education">
             📚 Education
           </button>
-          <button class="events-chip" data-cause="community">
+          <button class="events-chip <%= eventsPageCauseTag === 'community' ? 'active' : '' %>" data-cause="community">
             🏘 Community
           </button>
-          <button class="events-chip" data-cause="health">
+          <button class="events-chip <%= eventsPageCauseTag === 'health' ? 'active' : '' %>" data-cause="health">
             💊 Health
           </button>
-          <button class="events-chip" data-cause="arts">
+          <button class="events-chip <%= eventsPageCauseTag === 'arts' ? 'active' : '' %>" data-cause="arts">
             🎨 Arts & Culture
           </button>
-          <button class="events-chip" data-cause="sports">
+          <button class="events-chip <%= eventsPageCauseTag === 'sports' ? 'active' : '' %>" data-cause="sports">
             🏅 Sports
           </button>
-          <button class="events-chip" data-cause="animals">
+          <button class="events-chip <%= eventsPageCauseTag === 'animals' ? 'active' : '' %>" data-cause="animals">
             🐾 Animals
           </button>
-          <button class="events-chip" data-cause="environment">
+          <button class="events-chip <%= eventsPageCauseTag === 'environment' ? 'active' : '' %>" data-cause="environment">
             ♻️ Environment
           </button>
         </div>
@@ -172,6 +197,30 @@
             chip.classList.add('active');
 
             const cause = chip.getAttribute('data-cause');
+            try {
+              const url = new URL(window.location.href);
+              if (cause) {
+                url.searchParams.set('cause_tag', cause);
+              } else {
+                url.searchParams.delete('cause_tag');
+              }
+              // Reset keyset cursor when changing filters.
+              url.searchParams.delete('after_start_at');
+              url.searchParams.delete('after_id');
+              url.searchParams.delete('before_start_at');
+              url.searchParams.delete('before_id');
+
+              const current = window.location.pathname + window.location.search + window.location.hash;
+              const next = url.pathname + url.search + (url.hash || '');
+              if (next !== current) {
+                window.__eventsFilterNavigationPending = true;
+                window.location.assign(next);
+                return;
+              }
+            } catch (_) {
+              // Keep client-side filter fallback if URL parsing/navigation fails.
+            }
+
             window.dispatchEvent(new CustomEvent('getkinder:causeFilter', {
               detail: { causeTag: cause }
             }));
@@ -180,10 +229,100 @@
       });
     </script>
 
+    <%
+      const currentView = eventsPageView;
+      const currentLimitNum = Number(eventsPagePagination.limit);
+      const currentLimit = Number.isFinite(currentLimitNum) ? Math.min(Math.max(currentLimitNum, 1), 50) : 20;
+      const currentCommunityTag = eventsPageCommunityTag;
+      const currentCauseTag = eventsPageCauseTagRaw;
+      const nextCursor = eventsPagePagination.nextCursor && typeof eventsPagePagination.nextCursor === 'object'
+        ? eventsPagePagination.nextCursor
+        : null;
+
+      function buildEventsHref(overrides) {
+        const params = {
+          limit: currentLimit,
+          view: currentView === 'archive' ? 'archive' : null,
+          community_tag: currentCommunityTag || null,
+          cause_tag: currentCauseTag || null,
+          after_start_at: null,
+          after_id: null,
+          before_start_at: null,
+          before_id: null,
+          ...(overrides || {}),
+        };
+        const pairs = Object.entries(params)
+          .filter(([, value]) => value !== null && value !== undefined && value !== '')
+          .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`);
+        return pairs.length ? `/events?${pairs.join('&')}` : '/events';
+      }
+
+      const upcomingHref = buildEventsHref({
+        view: null,
+        after_start_at: null,
+        after_id: null,
+        before_start_at: null,
+        before_id: null,
+      });
+      const archiveHref = buildEventsHref({
+        view: 'archive',
+        after_start_at: null,
+        after_id: null,
+        before_start_at: null,
+        before_id: null,
+      });
+
+      let loadMoreHref = null;
+      if (nextCursor) {
+        if (currentView === 'archive' && nextCursor.before_id) {
+          loadMoreHref = buildEventsHref({
+            view: 'archive',
+            before_start_at: nextCursor.before_start_at || null,
+            before_id: nextCursor.before_id || null,
+          });
+        } else if (currentView === 'upcoming' && nextCursor.after_id) {
+          loadMoreHref = buildEventsHref({
+            view: null,
+            after_start_at: nextCursor.after_start_at || null,
+            after_id: nextCursor.after_id || null,
+          });
+        }
+      }
+    %>
+
+    <section class="container mt-3">
+      <div class="d-flex align-items-center justify-content-between gap-2 flex-wrap">
+        <div class="btn-group" role="group" aria-label="Events view toggle">
+          <a
+            href="<%= upcomingHref %>"
+            class="btn btn-sm <%= currentView === 'upcoming' ? 'btn-primary' : 'btn-outline-primary' %>"
+          >Upcoming</a>
+          <a
+            href="<%= archiveHref %>"
+            class="btn btn-sm <%= currentView === 'archive' ? 'btn-primary' : 'btn-outline-primary' %>"
+          >Archive</a>
+        </div>
+        <small class="text-muted">
+          <%= currentView === 'archive' ? 'Showing past events' : 'Showing upcoming and ongoing events' %>
+        </small>
+      </div>
+    </section>
+
     <!-- Events React mount -->
     <div id="events-root" class="container my-4"></div>
 
+    <% if (loadMoreHref) { %>
+      <section class="container mb-2">
+        <div class="d-flex justify-content-center">
+          <a href="<%= loadMoreHref %>" class="btn btn-outline-primary btn-sm">
+            Load more
+          </a>
+        </div>
+      </section>
+    <% } %>
+
     <!-- Events props (JSON) -->
+    <script type="application/json" id="events-page-filters"><%- JSON.stringify(eventsPageFilters).replace(/</g, '\\u003c') %></script>
     <script type="application/json" id="events-props"><%- JSON.stringify(props || {}).replace(/</g, '\\u003c') %></script>
     <script>
       (function () {

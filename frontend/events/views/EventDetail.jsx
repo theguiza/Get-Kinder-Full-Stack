@@ -192,10 +192,6 @@ export function EventDetail({ eventId }) {
 
   async function handleCheckIn(method) {
     if (checkInAction) return;
-    if (method === "host_code") {
-      const code = window.prompt("Enter the 6-digit host code");
-      if (!code) return;
-    }
     setCheckInAction(method);
     try {
       const res = await fetch(`/api/events/${encodeURIComponent(eventId)}/checkins`, {
@@ -540,9 +536,9 @@ export function EventDetail({ eventId }) {
           setInviteOpen(false);
           showToast({
             message: "Invite sent!",
-            actionLabel: "View in My Invites",
+            actionLabel: "View in Invites",
             onAction: () => {
-              window.location.hash = "#/my-invites";
+              window.location.hash = "#/invites";
             },
             type: "success",
           });
@@ -713,7 +709,7 @@ function formatEventDate(iso, tz) {
 function formatMethodLabel(method) {
   switch (method) {
     case "host_code":
-      return "Host Code";
+      return "Manual Check-in";
     case "social_proof":
       return "Social Proof";
     case "geo":

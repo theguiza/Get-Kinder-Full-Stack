@@ -1,12 +1,87 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { fetchEventsList } from "../api.js";
 
+function clampLimit(value, fallback = 20) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return fallback;
+  return Math.min(Math.max(Math.trunc(num), 1), 50);
+}
+
+function normalizeView(value) {
+  return value === "archive" ? "archive" : "upcoming";
+}
+
+function parsePageFiltersFromDom() {
+  if (typeof document === "undefined") return null;
+  const node = document.getElementById("events-page-filters");
+  if (!node) return null;
+  try {
+    const parsed = JSON.parse(node.textContent || "{}");
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function readInitialFilterState(pagination = {}) {
+  const dom = parsePageFiltersFromDom() || {};
+  const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+
+  const view = normalizeView(
+    (params && params.get("view")) || dom.view || pagination?.view
+  );
+  const causeTag = String(
+    (params && params.get("cause_tag")) ?? dom.cause_tag ?? pagination?.cause_tag ?? ""
+  ).trim();
+  const communityTag = String(
+    (params && params.get("community_tag")) ?? dom.community_tag ?? pagination?.community_tag ?? ""
+  ).trim();
+  const limit = clampLimit(
+    (params && params.get("limit")) ?? dom.limit ?? pagination?.limit ?? 20,
+    20
+  );
+
+  const cursorFromUrl = view === "archive"
+    ? {
+        before_start_at: (params && params.get("before_start_at")) || null,
+        before_id: (params && params.get("before_id")) || null,
+      }
+    : {
+        after_start_at: (params && params.get("after_start_at")) || null,
+        after_id: (params && params.get("after_id")) || null,
+      };
+  const hasCursorInUrl = view === "archive"
+    ? Boolean(cursorFromUrl.before_id)
+    : Boolean(cursorFromUrl.after_id);
+  const cursorFromSsr = (dom.cursor && typeof dom.cursor === "object")
+    ? dom.cursor
+    : (pagination?.cursor && typeof pagination.cursor === "object" ? pagination.cursor : null);
+
+  return {
+    view,
+    causeTag,
+    communityTag,
+    limit,
+    cursor: hasCursorInUrl ? cursorFromUrl : cursorFromSsr,
+  };
+}
+
 export function Feed({ feed = [], setFeed, pagination }) {
-  const [communityTag, setCommunityTag] = useState("");
-  const [causeTag, setCauseTag] = useState("");
+  const initialFiltersRef = useRef(null);
+  if (!initialFiltersRef.current) {
+    initialFiltersRef.current = readInitialFilterState(pagination);
+  }
+  const initialFilters = initialFiltersRef.current;
+  const [communityTag, setCommunityTag] = useState(initialFilters.communityTag);
+  const [causeTag, setCauseTag] = useState(initialFilters.causeTag);
+  const [view] = useState(initialFilters.view);
+  const [limit] = useState(initialFilters.limit);
+  const [cursor] = useState(initialFilters.cursor);
+  const hasHydratedRef = useRef(false);
 
   useEffect(() => {
     function handleChipFilter(e) {
+      if (typeof window !== "undefined" && window.__eventsFilterNavigationPending) return;
       setCauseTag(e?.detail?.causeTag || "");
     }
     if (typeof window !== "undefined") {
@@ -21,12 +96,23 @@ export function Feed({ feed = [], setFeed, pagination }) {
 
   useEffect(() => {
     if (typeof fetch !== "function") return undefined;
+    if (!hasHydratedRef.current) {
+      hasHydratedRef.current = true;
+      return undefined;
+    }
     let alive = true;
     const controller = new AbortController();
-    const limit = pagination?.limit || 20;
     const timer = setTimeout(() => {
+      const hasActiveFilters = Boolean(
+        String(communityTag || "").trim() || String(causeTag || "").trim()
+      );
+      const nextCursor = !hasActiveFilters && cursor && typeof cursor === "object"
+        ? cursor
+        : undefined;
       fetchEventsList({
         limit,
+        view,
+        cursor: nextCursor,
         communityTag,
         causeTag,
         signal: controller.signal,
@@ -44,7 +130,17 @@ export function Feed({ feed = [], setFeed, pagination }) {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [communityTag, causeTag, pagination?.limit, setFeed]);
+  }, [
+    communityTag,
+    causeTag,
+    limit,
+    view,
+    cursor?.after_start_at,
+    cursor?.after_id,
+    cursor?.before_start_at,
+    cursor?.before_id,
+    setFeed,
+  ]);
 
   const sortedFeed = useMemo(() => {
     if (!Array.isArray(feed)) return [];

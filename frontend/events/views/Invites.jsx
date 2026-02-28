@@ -124,9 +124,6 @@ export function Invites() {
           <p className="eyebrow">Your connections</p>
           <h1>Invites</h1>
         </div>
-        <a className="ghost-link" href="#/my-invites">
-          View only my sent invites →
-        </a>
       </header>
 
       <div className="invites-grid">

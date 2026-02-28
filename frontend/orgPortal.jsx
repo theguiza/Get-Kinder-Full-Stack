@@ -22,7 +22,6 @@ const KPI_CARDS = [
   { key: "impactCredits", label: "Impact Credits", icon: "fa-coins" },
   { key: "noShowRate", label: "No-Show Rate", icon: "fa-user-slash" },
 ];
-const ORG_PORTAL_APPLICANT_DECISIONS_KEY = "orgPortalApplicantDecisions";
 const MY_EVENTS_ZERO_SUMMARY = {
   events_count: 0,
   funded_credits_total: 0,
@@ -35,6 +34,14 @@ const MY_EVENTS_STATUS_BADGE = {
   cancelled: "Cancelled",
   completed: "Completed",
 };
+const ZERO_PENDING_ACTION_COUNTS = Object.freeze({
+  pendingJoinCount: 0,
+  pendingVerifyCount: 0,
+  pendingActionsCount: 0,
+  approvedCount: 0,
+  checkedInCount: 0,
+  totalCount: 0,
+});
 
 function getCommsTemplate(itemType) {
   if (itemType === "thankyou" || itemType === "comms-thankyou") {
@@ -130,6 +137,26 @@ function safeNumber(value, fallback = 0) {
   return Number.isFinite(num) ? num : fallback;
 }
 
+function normalizePendingActionCounts(rawCounts) {
+  return {
+    pendingJoinCount: safeNumber(
+      rawCounts?.pendingJoinCount ?? rawCounts?.pending_join_count,
+      0
+    ),
+    pendingVerifyCount: safeNumber(
+      rawCounts?.pendingVerifyCount ?? rawCounts?.pending_verify_count,
+      0
+    ),
+    pendingActionsCount: safeNumber(
+      rawCounts?.pendingActionsCount ?? rawCounts?.pending_actions_count,
+      0
+    ),
+    approvedCount: safeNumber(rawCounts?.approvedCount ?? rawCounts?.approved_count, 0),
+    checkedInCount: safeNumber(rawCounts?.checkedInCount ?? rawCounts?.checked_in_count, 0),
+    totalCount: safeNumber(rawCounts?.totalCount ?? rawCounts?.total_count, 0),
+  };
+}
+
 function formatShortDate(iso) {
   if (!iso) return "Date TBD";
   const dt = new Date(iso);
@@ -220,7 +247,10 @@ function isSameCalendarDay(isoValue, now = new Date()) {
 }
 
 function pendingLabel(opportunity) {
-  return `${opportunity.name} - ${opportunity.shortDate} - ${opportunity.pendingCount} pending approvals`;
+  const pendingCount = safeNumber(opportunity?.pendingCount, 0);
+  return pendingCount > 0
+    ? `${opportunity.name} - ${opportunity.shortDate} - ${pendingCount} pending approvals`
+    : `${opportunity.name} - ${opportunity.shortDate}`;
 }
 
 function upcomingLabel(opportunity) {
@@ -518,16 +548,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
   const [approveAllLoading, setApproveAllLoading] = useState(false);
   const [approveAllProgress, setApproveAllProgress] = useState({ current: 0, total: 0 });
   const [actionError, setActionError] = useState("");
-  const [applicantDecisionsByEvent, setApplicantDecisionsByEvent] = useState(() => {
-    if (typeof window === "undefined") return {};
-    try {
-      const raw = window.sessionStorage.getItem(ORG_PORTAL_APPLICANT_DECISIONS_KEY);
-      const parsed = raw ? JSON.parse(raw) : {};
-      return parsed && typeof parsed === "object" ? parsed : {};
-    } catch {
-      return {};
-    }
-  });
+  const [applicantCounts, setApplicantCounts] = useState(ZERO_PENDING_ACTION_COUNTS);
 
   const [checkinQueueItems, setCheckinQueueItems] = useState([]);
   const [checkinQueueLoading, setCheckinQueueLoading] = useState(false);
@@ -819,6 +840,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
     setCompletedExpanded(false);
     setCancelledExpanded(false);
     setApplicants(null);
+    setApplicantCounts(ZERO_PENDING_ACTION_COUNTS);
     setDetailError("");
     setActionError("");
     setActionLoadingByUser({});
@@ -873,19 +895,10 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
     setMyEventsToast(null);
   }, [activeTab]);
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      window.sessionStorage.setItem(
-        ORG_PORTAL_APPLICANT_DECISIONS_KEY,
-        JSON.stringify(applicantDecisionsByEvent || {})
-      );
-    } catch {}
-  }, [applicantDecisionsByEvent]);
-
   const opportunitiesQueueSections = useMemo(() => {
     const mapRows = (rows, section) =>
       rows.map((row, idx) => ({
+        ...normalizePendingActionCounts(row),
         id: String(row?.id || `${section}-${idx}`),
         tab: "opportunities",
         type: row?.type || `opp-${section}`,
@@ -907,7 +920,10 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
         startTime: row?.startTime || row?.start_at || null,
         endTime: row?.endTime || row?.end_at || null,
         timeZone: row?.startTz || row?.timeZone || row?.tz || "America/Vancouver",
-        pendingCount: safeNumber(row?.pendingCount, 0),
+        pendingCount: safeNumber(
+          row?.pendingCount ?? row?.pendingActionsCount ?? row?.pending_actions_count,
+          0
+        ),
         approvedCount: safeNumber(row?.approvedCount, 0),
         capacity: row?.capacity == null ? null : safeNumber(row?.capacity, null),
       }));
@@ -927,40 +943,79 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
   const hasOpportunities = Boolean(queue?.hasOpportunities);
   const selectedOpportunity = selectedQueueItem?.tab === "opportunities" ? selectedQueueItem : null;
 
-  useEffect(() => {
-    let mounted = true;
+  const parseApplicantsPayload = useCallback((payload) => {
+    const applicantRows = Array.isArray(payload)
+      ? payload
+      : Array.isArray(payload?.applicants)
+        ? payload.applicants
+        : [];
+    const parsedCounts = payload && !Array.isArray(payload)
+      ? normalizePendingActionCounts(payload?.counts)
+      : null;
+    const fallbackCounts = {
+      pendingJoinCount: applicantRows.filter(
+        (row) => String(row?.status || row?.rsvpStatus || row?.rsvp_status || "").toLowerCase() === "pending"
+      ).length,
+      pendingVerifyCount: applicantRows.filter((row) => {
+        const status = String(row?.status || row?.rsvpStatus || row?.rsvp_status || "").toLowerCase();
+        const verificationStatus = String(
+          row?.verification_status ?? row?.verificationStatus ?? "pending"
+        ).toLowerCase();
+        return ["accepted", "checked_in"].includes(status) && verificationStatus === "pending";
+      }).length,
+      pendingActionsCount: 0,
+      approvedCount: applicantRows.filter(
+        (row) => String(row?.status || row?.rsvpStatus || row?.rsvp_status || "").toLowerCase() === "accepted"
+      ).length,
+      checkedInCount: applicantRows.filter(
+        (row) => String(row?.status || row?.rsvpStatus || row?.rsvp_status || "").toLowerCase() === "checked_in"
+      ).length,
+      totalCount: applicantRows.length,
+    };
+    fallbackCounts.pendingActionsCount = fallbackCounts.pendingJoinCount + fallbackCounts.pendingVerifyCount;
+    return {
+      applicants: applicantRows,
+      counts: parsedCounts || fallbackCounts,
+    };
+  }, []);
 
-    async function fetchApplicants() {
-      if (!selectedOpportunityId || activeTab !== "opportunities") return;
-
-      setApplicantsLoading(true);
+  const fetchApplicantsForOpportunity = useCallback(
+    async (opportunityId, { showLoading = true } = {}) => {
+      if (!opportunityId) return;
+      if (showLoading) {
+        setApplicantsLoading(true);
+        setApplicantCounts(ZERO_PENDING_ACTION_COUNTS);
+      }
       setDetailError("");
       setActionError("");
 
       try {
         const response = await fetch(
-          `/api/org/opportunities/${encodeURIComponent(selectedOpportunityId)}/applicants`,
+          `/api/org/opportunities/${encodeURIComponent(opportunityId)}/applicants`,
           { credentials: "include" }
         );
-
         if (!response.ok) throw new Error("applicants_failed");
         const payload = await response.json();
-
-        if (!mounted) return;
-        setApplicants(Array.isArray(payload) ? payload : []);
+        const parsed = parseApplicantsPayload(payload);
+        setApplicants(parsed.applicants);
+        setApplicantCounts(parsed.counts);
       } catch (_) {
-        if (!mounted) return;
         setApplicants(null);
+        setApplicantCounts(ZERO_PENDING_ACTION_COUNTS);
         setDetailError("Could not load applicants.");
       } finally {
-        if (mounted) setApplicantsLoading(false);
+        if (showLoading) setApplicantsLoading(false);
       }
-    }
+    },
+    [parseApplicantsPayload]
+  );
 
+  useEffect(() => {
     if (activeTab === "opportunities" && selectedOpportunityId) {
-      fetchApplicants();
+      fetchApplicantsForOpportunity(selectedOpportunityId, { showLoading: true });
     } else {
       setApplicants(null);
+      setApplicantCounts(ZERO_PENDING_ACTION_COUNTS);
       setApplicantsLoading(false);
       setDetailError("");
       setActionError("");
@@ -968,11 +1023,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
       setApproveAllLoading(false);
       setApproveAllProgress({ current: 0, total: 0 });
     }
-
-    return () => {
-      mounted = false;
-    };
-  }, [activeTab, selectedOpportunityId]);
+  }, [activeTab, selectedOpportunityId, fetchApplicantsForOpportunity]);
 
   const selectedCheckinEventId =
     selectedQueueItem?.tab === "checkin" ? String(selectedQueueItem.opportunityId || "") : "";
@@ -1074,115 +1125,117 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
     }
   }, [activeTab, selectedCommsItemId, commsItemsById]);
 
-  useEffect(() => {
-    if (activeTab !== "checkin") return undefined;
-    let mounted = true;
-
-    setCheckinQueueLoading(true);
+  const fetchCheckinQueue = useCallback(async ({ showLoading = true } = {}) => {
+    if (showLoading) setCheckinQueueLoading(true);
     setCheckinQueueError(false);
 
-    fetch("/api/org/opportunities", { credentials: "include" })
-      .then((res) => {
-        if (!res.ok) throw new Error("checkin_queue_failed");
-        return res.json();
-      })
-      .then((rows) => {
-        if (!mounted) return;
-        const now = new Date();
-        const soonLimit = new Date(now.getTime() + 4 * 60 * 60 * 1000);
-        const items = (Array.isArray(rows) ? rows : [])
-          .map((row) => {
-            const id = String(row?.id || "").trim();
-            const status = String(row?.status || "").toLowerCase();
-            if (status === "cancelled") return null;
-            const startAt = row?.start_at ? new Date(row.start_at) : null;
-            const endAt = row?.end_at ? new Date(row.end_at) : null;
-            if (!id) return null;
-            const validStart = startAt && !Number.isNaN(startAt.getTime()) ? startAt : null;
-            const validEnd = endAt && !Number.isNaN(endAt.getTime()) ? endAt : null;
-            const fallbackEnd =
-              validStart && !validEnd ? new Date(validStart.getTime() + 3 * 60 * 60 * 1000) : null;
-            const effectiveEnd = validEnd || fallbackEnd;
-            const checkedInCount = safeNumber(row?.checked_in, 0);
+    try {
+      const res = await fetch("/api/org/opportunities", { credentials: "include" });
+      if (!res.ok) throw new Error("checkin_queue_failed");
+      const rows = await res.json();
 
-            let queueGroup = null;
-            if (validStart && effectiveEnd && validStart <= now && effectiveEnd >= now) {
-              queueGroup = "activeNow";
-            } else if (validStart && validStart > now && validStart <= soonLimit) {
-              queueGroup = "startingSoon";
-            } else if (validStart && validStart > now && isSameCalendarDay(validStart, now)) {
-              queueGroup = "laterToday";
-            } else if (effectiveEnd && effectiveEnd < now && checkedInCount > 0) {
-              queueGroup = "checkoutPending";
-            } else if (!validStart) {
-              queueGroup = "startingSoon";
-            }
+      const now = new Date();
+      const soonLimit = new Date(now.getTime() + 4 * 60 * 60 * 1000);
+      const items = (Array.isArray(rows) ? rows : [])
+        .map((row) => {
+          const id = String(row?.id || "").trim();
+          const status = String(row?.status || "").toLowerCase();
+          if (status === "cancelled") return null;
+          const startAt = row?.start_at ? new Date(row.start_at) : null;
+          const endAt = row?.end_at ? new Date(row.end_at) : null;
+          if (!id) return null;
+          const validStart = startAt && !Number.isNaN(startAt.getTime()) ? startAt : null;
+          const validEnd = endAt && !Number.isNaN(endAt.getTime()) ? endAt : null;
+          const fallbackEnd =
+            validStart && !validEnd ? new Date(validStart.getTime() + 3 * 60 * 60 * 1000) : null;
+          const effectiveEnd = validEnd || fallbackEnd;
+          const checkedInCount = safeNumber(row?.checked_in, 0);
+          const pendingVerifyCount = safeNumber(
+            row?.pending_verify_count ?? row?.pendingVerifyCount,
+            0
+          );
 
-            if (!queueGroup) return null;
-            const fallbackExpected = Math.max(
-              checkedInCount,
-              safeNumber(row?.approved, 0),
-              safeNumber(row?.total, 0)
-            );
-            const expectedCount =
-              row?.capacity == null ? fallbackExpected : Math.max(fallbackExpected, safeNumber(row.capacity, 0));
-            const startLabel = validStart
-              ? validStart.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
-              : "Time TBD";
-            const dateLabel = validStart
-              ? validStart.toLocaleDateString("en-US", {
-                  month: "short",
-                  day: "numeric",
-                  year: "numeric",
-                })
-              : "Date TBD";
-            const endLabel = effectiveEnd
-              ? effectiveEnd.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
-              : "Time TBD";
+          let queueGroup = null;
+          if (validStart && effectiveEnd && validStart <= now && effectiveEnd >= now) {
+            queueGroup = "activeNow";
+          } else if (validStart && validStart > now && validStart <= soonLimit) {
+            queueGroup = "startingSoon";
+          } else if (validStart && validStart > now && isSameCalendarDay(validStart, now)) {
+            queueGroup = "laterToday";
+          } else if (effectiveEnd && effectiveEnd < now && pendingVerifyCount > 0) {
+            queueGroup = "checkoutPending";
+          } else if (!validStart) {
+            queueGroup = "startingSoon";
+          }
 
-            return {
-              id: `checkin-${id}`,
-              tab: "checkin",
-              opportunityId: id,
-              icon:
-                queueGroup === "activeNow"
-                  ? "fa-qrcode"
-                  : queueGroup === "startingSoon"
-                    ? "fa-clock"
-                    : queueGroup === "laterToday"
-                      ? "fa-calendar-day"
-                      : "fa-clipboard-check",
-              iconColor: queueGroup === "activeNow" ? "coral" : "",
-              queueGroup,
-              label:
-                queueGroup === "checkoutPending"
-                  ? `${row?.title || "Untitled event"} · ended ${endLabel} — ${checkedInCount} awaiting verification`
-                  : `${row?.title || "Untitled event"} · ${startLabel} — ${checkedInCount} checked / ${expectedCount} expected`,
-              detailName: row?.title || "Untitled event",
-              detailDateTime: `${dateLabel} · ${startLabel} – ${endLabel}`,
-              summaryChecked: checkedInCount,
-              summaryExpected: expectedCount,
-              startTime: validStart ? validStart.toISOString() : null,
-              endTime: effectiveEnd ? effectiveEnd.toISOString() : null,
-              timeZone: row?.tz || "America/Vancouver",
-            };
-          })
-          .filter(Boolean);
+          if (!queueGroup) return null;
+          const fallbackExpected = Math.max(
+            checkedInCount,
+            safeNumber(row?.approved, 0),
+            safeNumber(row?.total, 0)
+          );
+          const expectedCount =
+            row?.capacity == null ? fallbackExpected : Math.max(fallbackExpected, safeNumber(row.capacity, 0));
+          const startLabel = validStart
+            ? validStart.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
+            : "Time TBD";
+          const dateLabel = validStart
+            ? validStart.toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+              })
+            : "Date TBD";
+          const endLabel = effectiveEnd
+            ? effectiveEnd.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
+            : "Time TBD";
 
-        setCheckinQueueItems(items);
-        setCheckinQueueLoading(false);
-      })
-      .catch(() => {
-        if (!mounted) return;
-        setCheckinQueueError(true);
-        setCheckinQueueItems([]);
-        setCheckinQueueLoading(false);
-      });
+          return {
+            id: `checkin-${id}`,
+            tab: "checkin",
+            opportunityId: id,
+            icon:
+              queueGroup === "activeNow"
+                ? "fa-qrcode"
+                : queueGroup === "startingSoon"
+                  ? "fa-clock"
+                  : queueGroup === "laterToday"
+                    ? "fa-calendar-day"
+                    : "fa-clipboard-check",
+            iconColor: queueGroup === "activeNow" ? "coral" : "",
+            queueGroup,
+            label:
+              queueGroup === "checkoutPending"
+                ? `${row?.title || "Untitled event"} · ended ${endLabel} — ${pendingVerifyCount} awaiting verification`
+                : `${row?.title || "Untitled event"} · ${startLabel} — ${checkedInCount} checked / ${expectedCount} expected`,
+            detailName: row?.title || "Untitled event",
+            detailDateTime: `${dateLabel} · ${startLabel} – ${endLabel}`,
+            summaryChecked: checkedInCount,
+            summaryExpected: expectedCount,
+            startTime: validStart ? validStart.toISOString() : null,
+            endTime: effectiveEnd ? effectiveEnd.toISOString() : null,
+            timeZone: row?.tz || "America/Vancouver",
+          };
+        })
+        .filter(Boolean);
 
-    return () => {
-      mounted = false;
-    };
-  }, [activeTab]);
+      setCheckinQueueItems(items);
+      setCheckinQueueLoading(false);
+    } catch {
+      setCheckinQueueError(true);
+      setCheckinQueueItems([]);
+      setCheckinQueueLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab !== "checkin") return undefined;
+    fetchCheckinQueue({ showLoading: true });
+    const intervalId = setInterval(() => {
+      fetchCheckinQueue({ showLoading: false });
+    }, 30000);
+    return () => clearInterval(intervalId);
+  }, [activeTab, fetchCheckinQueue]);
 
   const checkinQueueSections = useMemo(
     () => ({
@@ -1378,7 +1431,12 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
       })
       .then((payload) => {
         if (!mounted) return;
-        const recipients = (Array.isArray(payload) ? payload : [])
+        const applicantRows = Array.isArray(payload)
+          ? payload
+          : Array.isArray(payload?.applicants)
+            ? payload.applicants
+            : [];
+        const recipients = applicantRows
           .map((row) => {
             const userId = String(row?.userId || row?.user_id || row?.attendee_user_id || "").trim();
             if (!userId) return null;
@@ -1401,7 +1459,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
 
         const fallbackRecipients = recipients.length
           ? recipients
-          : (Array.isArray(payload) ? payload : [])
+          : applicantRows
               .map((row) => {
                 const userId = String(row?.userId || row?.user_id || row?.attendee_user_id || "").trim();
                 if (!userId) return null;
@@ -1759,7 +1817,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
     return Math.max(15, Math.round((endTs - startTs) / 60000));
   }
 
-  async function handleVerifyAttendance(rowId) {
+  async function handleVerifyAttendance(rowId, { refreshQueue = true } = {}) {
     const target = roster.find((entry) => entry.id === rowId);
     if (!selectedCheckinEventId || !target?.attendeeUserId) return;
 
@@ -1811,6 +1869,9 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
             : entry
         )
       );
+      if (refreshQueue) {
+        void fetchCheckinQueue({ showLoading: false });
+      }
     } catch (_) {
       setRoster((prev) =>
         prev.map((entry) =>
@@ -1953,8 +2014,9 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
       // Run sequentially to keep server-side host verification consistent and predictable.
       for (const row of targets) {
         // eslint-disable-next-line no-await-in-loop
-        await handleVerifyAttendance(row.id);
+        await handleVerifyAttendance(row.id, { refreshQueue: false });
       }
+      await fetchCheckinQueue({ showLoading: false });
     } finally {
       setVerifyAllAttendanceLoading(false);
     }
@@ -2138,37 +2200,39 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
     () =>
       (Array.isArray(applicants) ? applicants : []).map((applicant) => {
         const userId = String(applicant?.userId || applicant?.user_id || "");
-        let status = String(applicant?.status || applicant?.rsvpStatus || "").toLowerCase();
-        let verificationStatus = String(
-          applicant?.verification_status || applicant?.verificationStatus || ""
+        const rsvpStatus = String(
+          applicant?.rsvpStatus || applicant?.rsvp_status || applicant?.status || ""
         ).toLowerCase();
-        const eventDecisions = applicantDecisionsByEvent?.[String(selectedOpportunityId || "")] || {};
-        const localDecision = eventDecisions[userId];
-        if (localDecision === "approve") {
-          status = "accepted";
-          verificationStatus = "verified";
-        } else if (localDecision === "decline") {
-          status = "declined";
-        }
+        const verificationStatus = String(
+          applicant?.verification_status ?? applicant?.verificationStatus ?? "pending"
+        ).toLowerCase();
         const firstName = applicant?.firstname || applicant?.first_name || "";
         const lastName = applicant?.lastname || applicant?.last_name || "";
         const fullName = `${firstName} ${lastName}`.trim();
         return {
           ...applicant,
           userId,
-          status,
+          rsvpStatus,
+          status: rsvpStatus,
           verificationStatus,
           displayName: fullName || applicant?.name || applicant?.email || "Volunteer",
           pastCredits: safeNumber(applicant?.pastCredits ?? applicant?.past_credits, 0),
         };
       }),
-    [applicants, applicantDecisionsByEvent, selectedOpportunityId]
+    [applicants]
   );
 
-  const pendingApplicants = useMemo(
+  const pendingJoinApplicants = useMemo(
+    () => normalizedApplicants.filter((applicant) => applicant.rsvpStatus === "pending"),
+    [normalizedApplicants]
+  );
+
+  const pendingVerifyApplicants = useMemo(
     () =>
       normalizedApplicants.filter(
-        (applicant) => applicant.status === "accepted" && applicant.verificationStatus === "pending"
+        (applicant) =>
+          ["accepted", "checked_in"].includes(applicant.rsvpStatus)
+          && applicant.verificationStatus === "pending"
       ),
     [normalizedApplicants]
   );
@@ -2176,62 +2240,22 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
   const approvedApplicants = useMemo(
     () =>
       normalizedApplicants.filter((applicant) => {
-        const isPendingAccepted =
-          applicant.status === "accepted" && applicant.verificationStatus === "pending";
-        if (isPendingAccepted) return false;
-        return applicant.verificationStatus === "verified" || applicant.status === "accepted";
+        if (applicant.rsvpStatus === "pending" || applicant.rsvpStatus === "declined") return false;
+        return (
+          applicant.rsvpStatus === "accepted" ||
+          applicant.rsvpStatus === "checked_in" ||
+          applicant.verificationStatus === "verified"
+        );
       }),
     [normalizedApplicants]
   );
 
-  function updateQueueCounts(opportunityId, pendingDelta, approvedDelta) {
-    const updateRows = (rows = []) =>
-      rows.map((row) => {
-        if (String(row?.opportunityId || "") !== String(opportunityId)) return row;
-        return {
-          ...row,
-          pendingCount: Math.max(0, safeNumber(row?.pendingCount, 0) + pendingDelta),
-          approvedCount: Math.max(0, safeNumber(row?.approvedCount, 0) + approvedDelta),
-        };
-      });
-
-    setQueue((prev) => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        needsAttention: updateRows(prev.needsAttention),
-        upcoming: updateRows(prev.upcoming),
-        active: updateRows(prev.active),
-        drafts: updateRows(prev.drafts),
-        completed: updateRows(prev.completed),
-        cancelled: updateRows(prev.cancelled),
-      };
-    });
-
-    setSelectedQueueItem((prev) => {
-      if (!prev || prev.tab !== "opportunities") return prev;
-      if (String(prev.opportunityId || "") !== String(opportunityId)) return prev;
-      return {
-        ...prev,
-        pendingCount: Math.max(0, safeNumber(prev.pendingCount, 0) + pendingDelta),
-        approvedCount: Math.max(0, safeNumber(prev.approvedCount, 0) + approvedDelta),
-      };
-    });
-  }
-
-  function rememberApplicantDecision(eventId, userId, decision) {
-    if (!eventId || !userId) return;
-    setApplicantDecisionsByEvent((prev) => {
-      const eventKey = String(eventId);
-      const userKey = String(userId);
-      return {
-        ...prev,
-        [eventKey]: {
-          ...(prev[eventKey] || {}),
-          [userKey]: decision,
-        },
-      };
-    });
+  async function refreshOpportunityQueueAndDetail(opportunityId = selectedOpportunityId) {
+    if (!opportunityId) return;
+    await Promise.all([
+      fetchQueue(),
+      fetchApplicantsForOpportunity(opportunityId, { showLoading: false }),
+    ]);
   }
 
   function openCreateOpportunityModal() {
@@ -2344,32 +2368,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
       if (!response.ok) throw new Error("action_failed");
       await response.json().catch(() => ({}));
 
-      if (action === "approve") {
-        setApplicants((prev) =>
-          (Array.isArray(prev) ? prev : []).map((applicant) => {
-            const applicantUserId = String(applicant?.userId || applicant?.user_id || "");
-            if (applicantUserId !== String(userId)) return applicant;
-            return {
-              ...applicant,
-              status: "accepted",
-              rsvpStatus: "accepted",
-              verificationStatus: "verified",
-              verification_status: "verified",
-            };
-          })
-        );
-        rememberApplicantDecision(selectedOpportunityId, userId, "approve");
-        updateQueueCounts(selectedOpportunityId, -1, 1);
-      } else {
-        setApplicants((prev) =>
-          (Array.isArray(prev) ? prev : []).filter((applicant) => {
-            const applicantUserId = String(applicant?.userId || applicant?.user_id || "");
-            return applicantUserId !== String(userId);
-          })
-        );
-        rememberApplicantDecision(selectedOpportunityId, userId, "decline");
-        updateQueueCounts(selectedOpportunityId, -1, 0);
-      }
+      await refreshOpportunityQueueAndDetail(selectedOpportunityId);
     } catch (_) {
       setActionError("Failed. Try again.");
     } finally {
@@ -2382,13 +2381,13 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
   }
 
   async function handleApproveAll() {
-    if (!selectedOpportunityId || !pendingApplicants.length) return;
+    if (!selectedOpportunityId || !pendingJoinApplicants.length) return;
 
     setApproveAllLoading(true);
     setActionError("");
-    setApproveAllProgress({ current: 0, total: pendingApplicants.length });
+    setApproveAllProgress({ current: 0, total: pendingJoinApplicants.length });
 
-    const pendingIds = pendingApplicants.map((applicant) => String(applicant.userId));
+    const pendingIds = pendingJoinApplicants.map((applicant) => String(applicant.userId));
     const loadingMap = {};
     pendingIds.forEach((id) => {
       loadingMap[id] = true;
@@ -2424,26 +2423,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
         succeeded.push(userId);
       }
 
-      if (succeeded.length) {
-        const succeededSet = new Set(succeeded.map((id) => String(id)));
-        setApplicants((prev) =>
-          (Array.isArray(prev) ? prev : []).map((applicant) => {
-            const applicantUserId = String(applicant?.userId || applicant?.user_id || "");
-            if (!succeededSet.has(applicantUserId)) return applicant;
-            return {
-              ...applicant,
-              status: "accepted",
-              rsvpStatus: "accepted",
-              verificationStatus: "verified",
-              verification_status: "verified",
-            };
-          })
-        );
-        succeeded.forEach((resolvedUserId) => {
-          rememberApplicantDecision(selectedOpportunityId, resolvedUserId, "approve");
-        });
-        updateQueueCounts(selectedOpportunityId, -succeeded.length, succeeded.length);
-      }
+      await refreshOpportunityQueueAndDetail(selectedOpportunityId);
     } catch (_) {
       setActionError("Failed. Try again.");
     } finally {
@@ -2461,6 +2441,16 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
       hour: "numeric",
       minute: "2-digit",
     });
+  }
+
+  function formatLocationShort(locationText) {
+    if (!locationText || typeof locationText !== "string") return "Location TBD";
+    const parts = locationText
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean);
+    if (!parts.length) return "Location TBD";
+    return parts.slice(0, 2).join(", ");
   }
 
   function selectMyEvent(eventRow) {
@@ -2650,10 +2640,10 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
               onClick={() => selectMyEvent(eventRow)}
             >
               <div className="d-flex justify-content-between gap-2">
-                <div className="text-start flex-grow-1">
+                <div className="text-start flex-grow-1 orgp-truncate-wrap">
                   <div className="fw-semibold text-truncate">{eventRow.title || "Untitled event"}</div>
                   <div className="small text-muted text-truncate">
-                    {formatMyEventsListDate(eventRow.start_at, eventRow.tz)} · {eventRow.location_text || "Location TBD"}
+                    {formatMyEventsListDate(eventRow.start_at, eventRow.tz)} · {formatLocationShort(eventRow.location_text)}
                   </div>
                 </div>
                 <div className="text-end">
@@ -2780,7 +2770,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
     const capacity = eventRow?.capacity == null ? null : safeNumber(eventRow.capacity, null);
     const fillPct = capacity == null ? 0 : fillPercent(acceptedCount, capacity);
     const eventDateLine = formatEventDateTime(eventRow.start_at, eventRow.end_at, eventRow.tz);
-    const locationLine = eventRow.location_text || "Location TBD";
+    const locationLine = formatLocationShort(eventRow.location_text);
     const statusKey = String(eventRow.status || "").toLowerCase();
     const isDraft = statusKey === "draft";
     const isCancelled = statusKey === "cancelled";
@@ -2969,6 +2959,10 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
     const iconClass = item.icon === "fa-circle" ? "fas fa-circle text-success" : `fas ${item.icon}`;
     const iconColorClass = item.iconColor === "coral" ? "orgp-item-icon-coral" : "";
     const iconToneClass = item.iconTone ? `orgp-item-icon-${item.iconTone}` : "";
+    const pendingActionsCount = safeNumber(item?.pendingActionsCount ?? item?.pendingCount, 0);
+    const queueLabel = item.tab === "opportunities"
+      ? (item.opportunityName || item.label || "Opportunity")
+      : item.label;
 
     return (
       <button
@@ -2979,9 +2973,9 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
       >
         <div className="d-flex align-items-center gap-2">
           <i className={`${iconClass} orgp-item-icon ${iconColorClass} ${iconToneClass}`} aria-hidden="true"></i>
-          <span className="flex-grow-1">{item.label}</span>
-          {item.tab === "opportunities" && safeNumber(item.pendingCount, 0) > 0 ? (
-            <span className="badge text-bg-warning">{safeNumber(item.pendingCount, 0)}</span>
+          <span className="flex-grow-1">{queueLabel}</span>
+          {item.tab === "opportunities" && pendingActionsCount > 0 ? (
+            <span className="badge text-bg-warning">{pendingActionsCount}</span>
           ) : null}
         </div>
       </button>
@@ -3115,8 +3109,22 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
     }
     if (!selectedOpportunity) return <EmptySelectionDetail />;
 
-    const approvedCount = safeNumber(selectedOpportunity.approvedCount, 0);
-    const pendingCount = safeNumber(selectedOpportunity.pendingCount, 0);
+    const approvedCount = safeNumber(
+      applicantCounts?.approvedCount,
+      safeNumber(selectedOpportunity.approvedCount, 0)
+    );
+    const pendingJoinCount = safeNumber(
+      applicantCounts?.pendingJoinCount,
+      pendingJoinApplicants.length
+    );
+    const pendingVerifyCount = safeNumber(
+      applicantCounts?.pendingVerifyCount,
+      pendingVerifyApplicants.length
+    );
+    const pendingActionsCount = safeNumber(
+      applicantCounts?.pendingActionsCount,
+      pendingJoinCount + pendingVerifyCount
+    );
     const capacity =
       selectedOpportunity.capacity == null ? null : safeNumber(selectedOpportunity.capacity, null);
     const fillPct = capacity == null ? 0 : fillPercent(approvedCount, capacity);
@@ -3181,7 +3189,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
           <button type="button" className="btn btn-outline-secondary btn-sm">+ Invite Volunteers</button>
         </div>
 
-        <div className="orgp-section-label">PENDING APPROVALS ({pendingApplicants.length})</div>
+        <div className="orgp-section-label">PENDING APPROVALS ({pendingJoinCount})</div>
         <div className="mb-3">
           {applicantsLoading ? (
             <LoadingSpinner text="Loading applicants..." />
@@ -3189,9 +3197,9 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
             <div className="alert alert-warning py-2 mb-0" role="alert">
               {detailError}
             </div>
-          ) : pendingApplicants.length ? (
+          ) : pendingJoinApplicants.length ? (
             <>
-              {pendingApplicants.map((applicant) => {
+              {pendingJoinApplicants.map((applicant) => {
                 const userId = String(applicant.userId);
                 const saving = Boolean(actionLoadingByUser[userId]);
                 return (
@@ -3200,7 +3208,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
                       <div className="fw-semibold">{applicant.displayName}</div>
                       <div className="small text-muted">
                         <span className="badge text-bg-secondary me-2">
-                          {applicant.verificationStatus || "pending"}
+                          pending join
                         </span>
                         {safeNumber(applicant.pastCredits, 0)} credits prev
                       </div>
@@ -3231,7 +3239,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
                 type="button"
                 className="btn btn-outline-secondary w-100 mt-2"
                 onClick={handleApproveAll}
-                disabled={approveAllLoading || !pendingApplicants.length}
+                disabled={approveAllLoading || !pendingJoinApplicants.length}
               >
                 {approveAllLoading
                   ? `Approving ${approveAllProgress.current} of ${approveAllProgress.total}...`
@@ -3247,6 +3255,30 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
               {actionError}
             </div>
           ) : null}
+        </div>
+
+        <div className="orgp-section-label">PENDING VERIFICATION ({pendingVerifyCount})</div>
+        <div className="orgp-block mb-3">
+          {applicantsLoading ? (
+            <LoadingSpinner text="Loading applicants..." />
+          ) : pendingVerifyApplicants.length ? (
+            <ul className="list-group list-group-flush">
+              {pendingVerifyApplicants.map((applicant) => (
+                <li
+                  key={`verify-${applicant.userId}`}
+                  className="list-group-item px-0 d-flex justify-content-between align-items-center"
+                >
+                  <span>{applicant.displayName}</span>
+                  <span className="small text-muted">
+                    <span className="badge text-bg-warning me-2">Pending verification</span>
+                    {safeNumber(applicant.pastCredits, 0)} credits prev
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="text-muted small">No pending verification.</div>
+          )}
         </div>
 
         <div className="orgp-section-label">APPROVED VOLUNTEERS ({approvedApplicants.length})</div>
@@ -3277,7 +3309,9 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
 
         <details className="orgp-block">
           <summary className="orgp-section-label orgp-summary">OPPORTUNITY DETAILS</summary>
-          <div className="small text-muted mt-2">Pending approvals: {pendingCount}</div>
+          <div className="small text-muted mt-2">Pending approvals: {pendingJoinCount}</div>
+          <div className="small text-muted">Pending verification: {pendingVerifyCount}</div>
+          <div className="small text-muted">Pending actions: {pendingActionsCount}</div>
           <div className="small text-muted">Approved volunteers: {approvedCount}</div>
           <div className="small text-muted">Capacity: {capacity == null ? "No cap set" : capacity}</div>
         </details>
@@ -4637,6 +4671,11 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
           margin-bottom: 0.35rem;
           border-radius: 10px;
           color: #2f3f58;
+        }
+
+        .orgp-truncate-wrap {
+          min-width: 0;
+          overflow: hidden;
         }
 
         .orgp-queue-item.active {

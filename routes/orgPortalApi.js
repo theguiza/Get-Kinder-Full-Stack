@@ -57,6 +57,68 @@ function requireCsrf(req, res) {
   return true;
 }
 
+const ZERO_PENDING_ACTION_COUNTS = Object.freeze({
+  pending_join_count: 0,
+  pending_verify_count: 0,
+  pending_actions_count: 0,
+  approved_count: 0,
+  checked_in_count: 0,
+  total_count: 0,
+});
+
+function normalizePendingActionCounts(row = {}) {
+  return {
+    pending_join_count: Number(row?.pending_join_count) || 0,
+    pending_verify_count: Number(row?.pending_verify_count) || 0,
+    pending_actions_count: Number(row?.pending_actions_count) || 0,
+    approved_count: Number(row?.approved_count) || 0,
+    checked_in_count: Number(row?.checked_in_count) || 0,
+    total_count: Number(row?.total_count) || 0,
+  };
+}
+
+async function fetchPendingActionCountsByEventIds(eventIds = []) {
+  const normalizedIds = [...new Set(
+    (Array.isArray(eventIds) ? eventIds : [])
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+  )];
+
+  if (!normalizedIds.length) return new Map();
+
+  const { rows } = await pool.query(
+    `
+      SELECT
+        r.event_id::text AS event_id,
+        COUNT(*)::int AS total_count,
+        COUNT(*) FILTER (WHERE r.status = 'pending')::int AS pending_join_count,
+        COUNT(*) FILTER (
+          WHERE r.status IN ('accepted', 'checked_in')
+            AND COALESCE(r.verification_status, 'pending') = 'pending'
+        )::int AS pending_verify_count,
+        (
+          COUNT(*) FILTER (WHERE r.status = 'pending')
+          + COUNT(*) FILTER (
+            WHERE r.status IN ('accepted', 'checked_in')
+              AND COALESCE(r.verification_status, 'pending') = 'pending'
+          )
+        )::int AS pending_actions_count,
+        COUNT(*) FILTER (WHERE r.status = 'accepted')::int AS approved_count,
+        COUNT(*) FILTER (WHERE r.checked_in_at IS NOT NULL)::int AS checked_in_count
+      FROM event_rsvps r
+      WHERE r.event_id::text = ANY($1::text[])
+      GROUP BY r.event_id
+    `,
+    [normalizedIds]
+  );
+
+  const countsByEventId = new Map();
+  rows.forEach((row) => {
+    countsByEventId.set(String(row.event_id || "").trim(), normalizePendingActionCounts(row));
+  });
+  return countsByEventId;
+}
+
 async function getNudgesOutboxColumnSet() {
   const { rows } = await pool.query(
     `
@@ -577,7 +639,7 @@ orgPortalRouter.get("/queue", async (req, res) => {
     );
     const hasOpportunities = Number(countRow?.total || 0) > 0;
 
-    const { rows: needsAttentionRows } = await pool.query(
+    const { rows: upcomingCandidateRows } = await pool.query(
       `
         SELECT
           e.id AS event_id,
@@ -585,42 +647,17 @@ orgPortalRouter.get("/queue", async (req, res) => {
           e.start_at,
           e.end_at,
           e.tz,
-          e.capacity,
-          COUNT(*) FILTER (WHERE r.verification_status = 'pending')::int AS pending_count,
-          COUNT(*) FILTER (WHERE r.status = 'accepted')::int AS approved_count,
-          COUNT(*) FILTER (WHERE r.status = 'accepted' AND r.verification_status = 'pending')::int AS pending_accepted_count
+          e.capacity
         FROM events e
-        LEFT JOIN event_rsvps r ON r.event_id = e.id
         WHERE e.creator_user_id::text = ANY($1::text[])
           AND COALESCE(e.status, 'published') NOT IN ('cancelled', 'draft')
           AND (e.start_at > NOW() OR e.start_at IS NULL)
-        GROUP BY e.id
-        HAVING COUNT(*) FILTER (WHERE r.status = 'accepted' AND r.verification_status = 'pending') > 0
         ORDER BY e.start_at ASC NULLS LAST
       `,
       [coordinatorUserIds]
     );
-
-    const { rows: upcomingRows } = await pool.query(
-      `
-        SELECT
-          e.id AS event_id,
-          e.title AS event_title,
-          e.start_at,
-          e.end_at,
-          e.tz,
-          e.capacity,
-          COUNT(*) FILTER (WHERE r.status = 'accepted')::int AS approved_count
-        FROM events e
-        LEFT JOIN event_rsvps r ON r.event_id = e.id
-        WHERE e.creator_user_id::text = ANY($1::text[])
-          AND COALESCE(e.status, 'published') NOT IN ('cancelled', 'draft')
-          AND (e.start_at > NOW() OR e.start_at IS NULL)
-        GROUP BY e.id
-        HAVING COUNT(*) FILTER (WHERE r.verification_status = 'pending') = 0
-        ORDER BY e.start_at ASC NULLS LAST
-      `,
-      [coordinatorUserIds]
+    const pendingCountsByEventId = await fetchPendingActionCountsByEventIds(
+      upcomingCandidateRows.map((row) => row.event_id)
     );
 
     const { rows: activeRows } = await pool.query(
@@ -699,32 +736,30 @@ orgPortalRouter.get("/queue", async (req, res) => {
       [coordinatorUserIds]
     );
 
-    const needsAttention = needsAttentionRows.map((row) => ({
-      id: `needs-attention-${row.event_id}`,
-      type: "opp-approval",
-      label: `${row.event_title} — ${Number(row.pending_count) || 0} pending`,
-      opportunityId: String(row.event_id),
-      opportunityName: row.event_title,
-      pendingCount: Number(row.pending_count) || 0,
-      approvedCount: Number(row.approved_count) || 0,
-      capacity: row.capacity == null ? null : Number(row.capacity),
-      startTime: row.start_at,
-      endTime: row.end_at,
-      startTz: row.tz || null,
-    }));
-
-    const upcoming = upcomingRows.map((row) => ({
-      id: `upcoming-${row.event_id}`,
-      type: "opp-upcoming",
-      label: `${row.event_title}`,
-      opportunityId: String(row.event_id),
-      opportunityName: row.event_title,
-      approvedCount: Number(row.approved_count) || 0,
-      capacity: row.capacity == null ? null : Number(row.capacity),
-      startTime: row.start_at,
-      endTime: row.end_at,
-      startTz: row.tz || null,
-    }));
+    const needsAttention = [];
+    const upcoming = [];
+    upcomingCandidateRows.forEach((row) => {
+      const eventId = String(row.event_id || "").trim();
+      const counts = pendingCountsByEventId.get(eventId) || ZERO_PENDING_ACTION_COUNTS;
+      const payload = {
+        id: `${counts.pending_actions_count > 0 ? "needs-attention" : "upcoming"}-${eventId}`,
+        type: counts.pending_actions_count > 0 ? "opp-approval" : "opp-upcoming",
+        label: `${row.event_title}`,
+        opportunityId: eventId,
+        opportunityName: row.event_title,
+        pendingCount: counts.pending_actions_count,
+        pendingJoinCount: counts.pending_join_count,
+        pendingVerifyCount: counts.pending_verify_count,
+        pendingActionsCount: counts.pending_actions_count,
+        approvedCount: counts.approved_count,
+        capacity: row.capacity == null ? null : Number(row.capacity),
+        startTime: row.start_at,
+        endTime: row.end_at,
+        startTz: row.tz || null,
+      };
+      if (counts.pending_actions_count > 0) needsAttention.push(payload);
+      else upcoming.push(payload);
+    });
 
     const active = activeRows.map((row) => ({
       id: `active-${row.event_id}`,
@@ -800,21 +835,17 @@ orgPortalRouter.get("/opportunities", async (req, res) => {
           e.end_at,
           e.tz,
           e.status,
-          e.capacity,
-          COUNT(r.*)::int AS total_applicants,
-          COUNT(*) FILTER (WHERE r.status = 'accepted' AND COALESCE(r.verification_status, 'pending') = 'pending')::int AS pending_applicants,
-          COUNT(*) FILTER (WHERE r.status = 'accepted')::int AS approved_applicants,
-          COUNT(*) FILTER (WHERE r.checked_in_at IS NOT NULL)::int AS checked_in_applicants
+          e.capacity
         FROM events e
-        LEFT JOIN event_rsvps r ON r.event_id = e.id
         WHERE e.creator_user_id::text = ANY($1::text[])
-        GROUP BY e.id
         ORDER BY e.start_at DESC NULLS LAST, e.id DESC
       `,
       [hostUserIds]
     );
+    const pendingCountsByEventId = await fetchPendingActionCountsByEventIds(rows.map((row) => row.id));
 
     const data = rows.map((row) => ({
+      ...(pendingCountsByEventId.get(String(row.id)) || ZERO_PENDING_ACTION_COUNTS),
       id: String(row.id),
       title: row.title,
       start_at: row.start_at,
@@ -822,10 +853,10 @@ orgPortalRouter.get("/opportunities", async (req, res) => {
       tz: row.tz || null,
       status: row.status,
       capacity: row.capacity != null ? Number(row.capacity) : null,
-      total: Number(row.total_applicants) || 0,
-      pending: Number(row.pending_applicants) || 0,
-      approved: Number(row.approved_applicants) || 0,
-      checked_in: Number(row.checked_in_applicants) || 0,
+      total: (pendingCountsByEventId.get(String(row.id)) || ZERO_PENDING_ACTION_COUNTS).total_count,
+      pending: (pendingCountsByEventId.get(String(row.id)) || ZERO_PENDING_ACTION_COUNTS).pending_actions_count,
+      approved: (pendingCountsByEventId.get(String(row.id)) || ZERO_PENDING_ACTION_COUNTS).approved_count,
+      checked_in: (pendingCountsByEventId.get(String(row.id)) || ZERO_PENDING_ACTION_COUNTS).checked_in_count,
     }));
 
     return res.json(data);
@@ -843,21 +874,27 @@ orgPortalRouter.get("/opportunities/:eventId/applicants", async (req, res) => {
 
     const hostCheck = await ensureHostOwnsEvent(eventId, hostUserIds);
     if (!hostCheck.ok) return res.status(hostCheck.status).json({ error: hostCheck.error });
+    const pendingCountsByEventId = await fetchPendingActionCountsByEventIds([eventId]);
+    const counts = pendingCountsByEventId.get(String(eventId)) || ZERO_PENDING_ACTION_COUNTS;
 
     const { rows } = await pool.query(
       `
         SELECT
           r.attendee_user_id AS user_id,
-          COALESCE(NULLIF(TRIM(u.firstname || ' ' || COALESCE(u.lastname, '')), ''), u.email) AS name,
+          COALESCE(
+            NULLIF(TRIM(COALESCE(u.firstname, '') || ' ' || COALESCE(u.lastname, '')), ''),
+            u.email,
+            'Volunteer #' || r.attendee_user_id::text
+          ) AS name,
           u.email,
           r.status AS rsvp_status,
           r.attended_minutes,
-          r.verification_status,
+          COALESCE(r.verification_status, 'pending') AS verification_status,
           r.checked_in_at,
           COALESCE(tx.past_shifts, 0)::int AS past_shifts,
           COALESCE(tx.past_credits, 0)::numeric AS past_credits
         FROM event_rsvps r
-        JOIN userdata u ON u.id = r.attendee_user_id
+        LEFT JOIN userdata u ON u.id = r.attendee_user_id
         LEFT JOIN (
           SELECT
             wt.user_id,
@@ -885,7 +922,7 @@ orgPortalRouter.get("/opportunities/:eventId/applicants", async (req, res) => {
       pastCredits: Number(row.past_credits) || 0,
     }));
 
-    return res.json(data);
+    return res.json({ applicants: data, counts });
   } catch (error) {
     console.error("[orgPortalApi] GET /opportunities/:eventId/applicants error:", error);
     return res.status(500).json({ error: "Unable to load applicants" });
