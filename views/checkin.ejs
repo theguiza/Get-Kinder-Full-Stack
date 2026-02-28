@@ -132,6 +132,9 @@
         <button id="startScannerBtn" type="button" class="btn btn-coral">
           <i class="fas fa-camera me-1" aria-hidden="true"></i> Start Camera Scanner
         </button>
+        <button id="confirmCheckinBtn" type="button" class="btn btn-coral d-none">
+          <i class="fas fa-check me-1" aria-hidden="true"></i> Confirm Check-In
+        </button>
         <button id="stopScannerBtn" type="button" class="btn btn-outline-secondary d-none">
           Stop Scanner
         </button>
@@ -218,6 +221,7 @@
       const methodBadge = document.getElementById("checkinMethodBadge");
       const checkinAlert = document.getElementById("checkinAlert");
       const startScannerBtn = document.getElementById("startScannerBtn");
+      const confirmCheckinBtn = document.getElementById("confirmCheckinBtn");
       const stopScannerBtn = document.getElementById("stopScannerBtn");
       const scannerVideo = document.getElementById("scannerVideo");
       const scannerOverlay = document.getElementById("checkinOverlay");
@@ -240,6 +244,7 @@
       let cameraStream = null;
       let detector = null;
       let canCheckIn = true;
+      let autoCheckinAttempted = false;
 
       function setScannerStatus(message) {
         scannerStatus.textContent = message;
@@ -366,6 +371,7 @@
         clearAlert();
         setScannerStatus("Submitting check-in...");
         startScannerBtn.disabled = true;
+        confirmCheckinBtn.disabled = true;
         manualSubmitBtn.disabled = true;
 
         try {
@@ -388,11 +394,13 @@
           showAlert("success", "You are checked in! Checked in at " + checkedAt + ".");
           setScannerStatus("You are checked in.");
           canCheckIn = false;
+          confirmCheckinBtn.classList.add("d-none");
           await stopScanner();
         } catch (error) {
           showAlert("danger", error.message || "Unable to check in. Please try again.");
           setScannerStatus("Check-in failed. Try scanning again.");
           startScannerBtn.disabled = false;
+          confirmCheckinBtn.disabled = false;
           manualSubmitBtn.disabled = false;
         } finally {
           isSubmitting = false;
@@ -445,8 +453,9 @@
         if (!canCheckIn) return;
 
         if (typeof window.BarcodeDetector !== "function") {
-          setScannerStatus("Camera QR scanning is not supported in this browser. Use manual fallback.");
-          showAlert("warning", "Camera scanning is not supported here. Paste the QR text in the manual field.");
+          setScannerStatus("Camera scanning is not supported here. Completing check-in directly...");
+          showAlert("warning", "Camera scanning is not supported here. Continuing with direct check-in.");
+          await submitCheckin();
           return;
         }
 
@@ -469,9 +478,13 @@
       }
 
       async function loadEvent() {
+        confirmCheckinBtn.classList.add("d-none");
+        confirmCheckinBtn.disabled = true;
+        autoCheckinAttempted = false;
         if (!eventId) {
           showAlert("danger", "Missing event id.");
           startScannerBtn.disabled = true;
+          confirmCheckinBtn.disabled = true;
           manualSubmitBtn.disabled = true;
           return;
         }
@@ -494,6 +507,7 @@
           } else {
             canCheckIn = false;
             startScannerBtn.disabled = true;
+            confirmCheckinBtn.disabled = true;
             manualSubmitBtn.disabled = true;
             showAlert("danger", "No check-in methods are enabled for this event.");
             setScannerStatus("This event has no check-in methods.");
@@ -503,6 +517,7 @@
           if (event.viewer_is_host) {
             canCheckIn = false;
             startScannerBtn.disabled = true;
+            confirmCheckinBtn.disabled = true;
             manualSubmitBtn.disabled = true;
             showAlert("warning", "Hosts do not check in as attendees.");
             setScannerStatus("Host account detected.");
@@ -512,7 +527,9 @@
           if (viewerRsvpStatus === "checked_in") {
             canCheckIn = false;
             startScannerBtn.disabled = true;
+            confirmCheckinBtn.disabled = true;
             manualSubmitBtn.disabled = true;
+            confirmCheckinBtn.classList.add("d-none");
             showAlert("success", "You are already checked in for this event.");
             setScannerStatus("Already checked in.");
             return;
@@ -521,6 +538,7 @@
           if (viewerRsvpStatus === "pending") {
             canCheckIn = false;
             startScannerBtn.disabled = true;
+            confirmCheckinBtn.disabled = true;
             manualSubmitBtn.disabled = true;
             showAlert("warning", "Your join request is pending host approval before check-in.");
             setScannerStatus("RSVP is pending host approval.");
@@ -530,6 +548,7 @@
           if (viewerRsvpStatus === "declined") {
             canCheckIn = false;
             startScannerBtn.disabled = true;
+            confirmCheckinBtn.disabled = true;
             manualSubmitBtn.disabled = true;
             showAlert("warning", "Your RSVP is declined. Re-request attendance from the event page before check-in.");
             setScannerStatus("RSVP is declined.");
@@ -539,14 +558,24 @@
           if (!["accepted", "checked_in"].includes(viewerRsvpStatus)) {
             canCheckIn = false;
             startScannerBtn.disabled = true;
+            confirmCheckinBtn.disabled = true;
             manualSubmitBtn.disabled = true;
             showAlert("warning", "We could not confirm your RSVP status. Please request attendance from the event page before check-in.");
             setScannerStatus("Unable to confirm RSVP status.");
             return;
           }
+
+          confirmCheckinBtn.classList.remove("d-none");
+          confirmCheckinBtn.disabled = false;
+          setScannerStatus("Ready to check in. Completing check-in...");
+          if (!autoCheckinAttempted) {
+            autoCheckinAttempted = true;
+            await submitCheckin();
+          }
         } catch (error) {
           canCheckIn = false;
           startScannerBtn.disabled = true;
+          confirmCheckinBtn.disabled = true;
           manualSubmitBtn.disabled = true;
           showAlert("danger", error.message || "Unable to load event.");
           setScannerStatus("Unable to load event data.");
@@ -554,6 +583,12 @@
       }
 
       startScannerBtn.addEventListener("click", startScanner);
+      confirmCheckinBtn.addEventListener("click", async function () {
+        clearManualError();
+        clearAlert();
+        if (!canCheckIn) return;
+        await submitCheckin();
+      });
       stopScannerBtn.addEventListener("click", async function () {
         await stopScanner();
         if (canCheckIn) setScannerStatus("Scanner stopped.");
