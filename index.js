@@ -1814,9 +1814,62 @@ app.get("/donor", ensureAuthenticated, async (req, res) => {
   res.render("donor", { title: "Donor Dashboard", assetTag, donorProfile });
 });
 
-app.get("/org-portal", ensureOrgRepPage, (req, res) => {
+app.get("/org-portal", ensureOrgRepPage, async (req, res) => {
   const assetTag = Date.now();
-  res.render("org-portal", { assetTag, user: req.user });
+  const orgRating = {
+    orgId: null,
+    value: null,
+    count: 0,
+    hasRatings: false,
+    starsFilled: 0,
+  };
+
+  try {
+    const numericSessionId = Number(req.user?.id);
+    let resolvedUserId = Number.isInteger(numericSessionId) ? String(numericSessionId) : null;
+    let orgId = req.user?.org_id != null ? Number(req.user.org_id) : null;
+
+    if (req.user?.email) {
+      const byEmail = await pool.query(
+        "SELECT id, org_id FROM public.userdata WHERE email = $1 LIMIT 1",
+        [req.user.email]
+      );
+      if (byEmail.rows[0]?.id != null) {
+        resolvedUserId = String(byEmail.rows[0].id);
+      }
+      if (byEmail.rows[0]?.org_id != null) {
+        orgId = Number(byEmail.rows[0].org_id);
+      }
+    }
+
+    if (orgId == null && resolvedUserId) {
+      const byId = await pool.query(
+        "SELECT org_id FROM public.userdata WHERE id = $1 LIMIT 1",
+        [resolvedUserId]
+      );
+      if (byId.rows[0]?.org_id != null) {
+        orgId = Number(byId.rows[0].org_id);
+      }
+    }
+
+    if (orgId != null && Number.isFinite(orgId)) {
+      const summary = await getRatingsSummary({ orgId, limit: 20 });
+      const count = Number(summary?.sampleSize) || 0;
+      const value = count > 0 && Number.isFinite(Number(summary?.kindnessRating))
+        ? Number(summary.kindnessRating)
+        : null;
+      const starsFilled = value == null ? 0 : Math.max(1, Math.min(5, Math.round(value)));
+      orgRating.orgId = orgId;
+      orgRating.value = value;
+      orgRating.count = count;
+      orgRating.hasRatings = Boolean(value != null && count > 0);
+      orgRating.starsFilled = starsFilled;
+    }
+  } catch (error) {
+    console.warn("[org-portal] org rating summary lookup failed:", error?.message || error);
+  }
+
+  res.render("org-portal", { assetTag, user: req.user, orgRating });
 });
 
 app.get("/donate", ensureAuthenticated, (req, res) => {

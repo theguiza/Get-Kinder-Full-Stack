@@ -140,6 +140,76 @@
     border-color: #f04c4c;
     color: #fff;
   }
+  #dashboardRateModal .modal-content {
+    border: 1px solid #dfe8f5;
+    border-radius: 16px;
+  }
+  #dashboardRateModal .modal-header {
+    border-bottom: 1px solid #e8eef7;
+  }
+  #dashboardRateModal .dash-rate-title {
+    margin: 0;
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: #1f2937;
+  }
+  #dashboardRateModal .dash-rate-stars {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin: 0 0 12px;
+  }
+  #dashboardRateModal .dash-rate-star {
+    width: 58px;
+    height: 58px;
+    border: 2px solid #d9dee8;
+    border-radius: 14px;
+    background: #fff;
+    color: #c4cad3;
+    font-size: 1.8rem;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+  }
+  #dashboardRateModal .dash-rate-star.is-active {
+    color: #ff5656;
+    border-color: #ff5656;
+    background: #fff5f5;
+  }
+  #dashboardRateModal .dash-rate-note {
+    border: 2px solid #d9dee8;
+    border-radius: 14px;
+    min-height: 120px;
+    padding: 12px 14px;
+    resize: vertical;
+  }
+  #dashboardRateModal .dash-rate-submit {
+    background: #ff5656;
+    border-color: #ff5656;
+    color: #fff;
+    min-width: 170px;
+  }
+  #dashboardRateModal .dash-rate-submit:hover,
+  #dashboardRateModal .dash-rate-submit:focus {
+    background: #f04c4c;
+    border-color: #f04c4c;
+    color: #fff;
+  }
+  .journey-completed-item {
+    display: flex;
+    gap: 10px;
+    justify-content: space-between;
+    align-items: flex-start;
+  }
+  .journey-completed-main {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+  .dash-rate-btn {
+    white-space: nowrap;
+  }
 
   .dash-side-card-title {
     color: #ff5656 !important;
@@ -148,6 +218,9 @@
   .dashboard-container .dash-nav a,
   .dashboard-container .dash-nav a.is-active {
     color: #455a7c;
+  }
+  #journey-completed-card {
+    scroll-margin-top: calc(var(--navbar-height) + 24px);
   }
 </style>
   <!-- Google Tag Manager -->
@@ -255,7 +328,32 @@
       feedback: '/contact'
     }; %>
     <% const completedEvent = (typeof dashboardCompletedEvent !== 'undefined') ? dashboardCompletedEvent : null; %>
+    <% const completedEvents = Array.isArray(dashboardCompletedEvents)
+      ? dashboardCompletedEvents
+      : (completedEvent ? [completedEvent] : []); %>
     <% const upcomingEvent = (typeof dashboardUpcomingEvent !== 'undefined') ? dashboardUpcomingEvent : null; %>
+    <% const formatDashboardEventLine = function(eventItem) {
+      const fallbackZone = 'America/Vancouver';
+      const zone = (eventItem && eventItem.tz) ? eventItem.tz : fallbackZone;
+      let whenLabel = 'Date TBD';
+      if (eventItem && eventItem.start_at) {
+        try {
+          const start = (eventItem.start_at instanceof Date) ? eventItem.start_at : new Date(eventItem.start_at);
+          if (!Number.isNaN(start.getTime())) {
+            whenLabel = start.toLocaleString('en-US', {
+              month: 'short',
+              day: 'numeric',
+              year: 'numeric',
+              hour: 'numeric',
+              minute: '2-digit',
+              timeZone: zone
+            });
+          }
+        } catch (_) {}
+      }
+      const location = (eventItem && eventItem.location_text) ? eventItem.location_text : 'Location TBD';
+      return `${whenLabel} • ${location}`;
+    }; %>
     <div class="container-fluid my-4">
       <div class="dash-grid">
         <aside class="dash-left d-none d-lg-block">
@@ -345,6 +443,7 @@
                     <p class="mb-3 text-muted">Choose a verified service event this week to protect your streak and grow your impact access.</p>
                     <div class="d-flex flex-wrap gap-2">
                       <a class="btn dash-btn-coral btn-sm" href="/events" aria-label="Find opportunities">Find opportunities</a>
+                      <a class="btn dash-btn-ink btn-sm" href="#journey-completed-card" aria-label="Rate opportunities">Rate opportunities</a>
                     </div>
                   </div>
                 </article>
@@ -362,18 +461,37 @@
 
               <div class="journey-item journey-item-collapsed">
                 <div class="journey-marker" aria-hidden="true"></div>
-                <article class="journey-content card dash-card shadow-sm border-0">
+                <article id="journey-completed-card" class="journey-content card dash-card shadow-sm border-0">
                   <div class="card-body">
                     <div class="d-flex align-items-center justify-content-between gap-2 mb-2">
                       <span class="chip chip-completed">COMPLETED</span>
                       <a href="/profile" class="small text-decoration-none">View history</a>
                     </div>
-                    <% if (completedEvent) { %>
-                      <div class="fw-semibold"><%= completedEvent.title || 'Untitled event' %></div>
-                      <p class="mb-0 text-muted small">
-                        <%= completedEvent.start_at ? completedEvent.start_at.toLocaleDateString() : 'Date TBD' %> • <%= completedEvent.location_text || 'Location TBD' %>
-                        <% if (typeof completedEvent.duration_hours === 'number' && completedEvent.duration_hours > 0) { %> • <%= completedEvent.duration_hours.toFixed(1) %> hrs<% } %>
-                      </p>
+                    <% if (completedEvents.length > 0) { %>
+                      <ul class="journey-mini-list mb-0 mt-2">
+                        <% completedEvents.forEach(function(eventItem) { %>
+                          <% const dashEventId = eventItem && eventItem.id ? String(eventItem.id) : ''; %>
+                          <li class="journey-completed-item" data-event-id="<%= dashEventId %>">
+                            <div class="journey-completed-main">
+                              <strong><%= eventItem.title || 'Untitled event' %></strong>
+                              <div class="text-muted small">
+                                <%= formatDashboardEventLine(eventItem) %>
+                                <% if (typeof eventItem.duration_hours === 'number' && eventItem.duration_hours > 0) { %> • <%= eventItem.duration_hours.toFixed(1) %> hrs<% } %>
+                              </div>
+                            </div>
+                            <% if (dashEventId) { %>
+                              <button
+                                type="button"
+                                class="btn dash-btn-coral btn-sm dash-rate-btn d-none"
+                                data-event-id="<%= dashEventId %>"
+                                data-event-title="<%= eventItem.title || 'Untitled event' %>"
+                              >
+                                Rate
+                              </button>
+                            <% } %>
+                          </li>
+                        <% }); %>
+                      </ul>
                     <% } else { %>
                       <p class="mb-0">No completed events yet. After your first verified serve, your latest impact will appear here.</p>
                     <% } %>
@@ -389,7 +507,7 @@
                     <% if (upcomingEvent) { %>
                       <ul class="journey-mini-list mb-0 mt-2">
                         <li><strong><%= upcomingEvent.title || 'Untitled event' %></strong></li>
-                        <li><%= upcomingEvent.start_at ? upcomingEvent.start_at.toLocaleString() : 'Date TBD' %> • <%= upcomingEvent.location_text || 'Location TBD' %></li>
+                        <li><%= formatDashboardEventLine(upcomingEvent) %></li>
                         <% if ((upcomingEvent.kind_estimate_per_user || 0) > 0) { %>
                           <li>Estimated reward: +<%= upcomingEvent.kind_estimate_per_user %> $KIND</li>
                         <% } %>
@@ -685,6 +803,33 @@
         <div class="modal-footer">
           <button type="button" class="btn profile-progress-btn" data-bs-dismiss="modal">Exit</button>
           <a href="/profile" class="btn profile-progress-btn">Go to profile</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="dashboardRateModal" tabindex="-1" aria-labelledby="dashboardRateModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="dash-rate-title" id="dashboardRateModalLabel">Rate this experience</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p id="dashboardRateEventTitle" class="text-muted small mb-2"></p>
+          <div class="dash-rate-stars" role="group" aria-label="Rate this event from 1 to 5 stars">
+            <button type="button" class="dash-rate-star" data-stars="1" aria-label="1 star">&#9733;</button>
+            <button type="button" class="dash-rate-star" data-stars="2" aria-label="2 stars">&#9733;</button>
+            <button type="button" class="dash-rate-star" data-stars="3" aria-label="3 stars">&#9733;</button>
+            <button type="button" class="dash-rate-star" data-stars="4" aria-label="4 stars">&#9733;</button>
+            <button type="button" class="dash-rate-star" data-stars="5" aria-label="5 stars">&#9733;</button>
+          </div>
+          <textarea id="dashboardRateNote" class="form-control dash-rate-note" maxlength="280" placeholder="Optional note (max 280 characters)"></textarea>
+          <p id="dashboardRateError" class="text-danger small mt-2 mb-0 d-none"></p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" id="dashboardRateSubmit" class="btn dash-rate-submit">Submit Rating</button>
         </div>
       </div>
     </div>

@@ -49,6 +49,40 @@
   margin-bottom: 0.2rem;
 }
 
+.org-hero-rating {
+  margin-top: 0.35rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.org-hero-rating-stars {
+  position: relative;
+  display: inline-block;
+  font-size: 1rem;
+  line-height: 1;
+  letter-spacing: 0.08em;
+}
+
+.org-hero-rating-stars-base {
+  color: #d2d9e6;
+}
+
+.org-hero-rating-stars-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  color: #ff5656;
+}
+
+.org-hero-rating-text {
+  color: #455a7c;
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
 .org-hero-sdg {
   color: #455a7c;
   font-size: 0.88rem;

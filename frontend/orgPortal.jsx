@@ -2002,8 +2002,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
     if (verifyAllAttendanceLoading || !selectedCheckinEventId) return;
     const targets = roster.filter(
       (row) =>
-        row.status === "checked-in" &&
-        row.attendedMinutes == null &&
+        ["accepted", "checked_in"].includes(String(row.statusRaw || "").toLowerCase()) &&
         String(row.verificationStatus || "").toLowerCase() !== "verified" &&
         Boolean(row.attendeeUserId)
     );
@@ -3326,13 +3325,16 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
 
     return roster
       .filter((row) => {
-        if (row.status !== "checked-in") return false;
-        if (row.attendedMinutes != null) return false;
-        return true;
+        const rsvpStatus = String(row.statusRaw || "").toLowerCase();
+        const verificationStatus = String(row.verificationStatus || "").toLowerCase();
+        return ["accepted", "checked_in"].includes(rsvpStatus) && verificationStatus !== "verified";
       })
       .map((row) => ({
         id: row.id,
-        label: `${row.name} — checked in since ${row.time}`,
+        label:
+          row.status === "checked-in"
+            ? `${row.name} — checked in since ${row.time}`
+            : `${row.name} — awaiting verification`,
       }));
   }, [roster, selectedCheckinEndTime]);
 
@@ -3412,7 +3414,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
         ) : null}
 
         <div className="orgp-block">
-          <div className="orgp-section-label mb-2">CHECK-OUT PENDING ({checkoutPendingRows.length})</div>
+          <div className="orgp-section-label mb-2">PENDING VERIFICATION ({checkoutPendingRows.length})</div>
           <ul className="list-group list-group-flush mb-2">
             {checkoutPendingRows.length ? (
               checkoutPendingRows.map((row) => (
@@ -3433,7 +3435,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
             {isCheckoutPhase
               ? verifyAllAttendanceLoading
                 ? "Verifying..."
-                : "Verify All Checked-In"
+                : "Verify All Pending"
               : "Check Out All"}
           </button>
         </div>
@@ -3520,9 +3522,9 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
                       String(row.statusRaw || "").toLowerCase()
                     );
                     const isAttendanceVerified =
-                      String(row.verificationStatus || "").toLowerCase() === "verified" || row.attendedMinutes != null;
+                      String(row.verificationStatus || "").toLowerCase() === "verified";
                     const disableMark = isChecked || isNoShow || rowSaving || !isAcceptedRsvp || isCheckoutPhase;
-                    const disableVerify = !isChecked || isNoShow || rowVerifying || isAttendanceVerified;
+                    const disableVerify = isNoShow || rowVerifying || isAttendanceVerified || !isAcceptedRsvp;
                     const disableRate = !isAcceptedRsvp || isNoShow || rowRatingSubmitting || rowAlreadyRated;
                     return (
                       <tr key={row.id}>
@@ -3546,7 +3548,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
                               className="btn btn-sm btn-outline-primary"
                               onClick={() => handleVerifyAttendance(row.id)}
                               disabled={disableVerify}
-                              title={isAttendanceVerified ? "Already verified" : !isChecked ? "Must be checked in first" : ""}
+                              title={isAttendanceVerified ? "Already verified" : !isAcceptedRsvp ? "Volunteer must be approved first" : ""}
                             >
                               {rowVerifying
                                 ? "Verifying..."
@@ -3598,7 +3600,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
                 disabled={verifyAllAttendanceLoading}
               >
                 <i className="fas fa-check-circle me-1" aria-hidden="true"></i>
-                {verifyAllAttendanceLoading ? "Verifying..." : "Verify All Checked-In"}
+                {verifyAllAttendanceLoading ? "Verifying..." : "Verify All Pending"}
               </button>
             ) : (
               <button type="button" className="btn btn-outline-success btn-sm" onClick={handleMarkAllPresent}>

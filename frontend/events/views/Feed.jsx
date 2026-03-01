@@ -259,9 +259,7 @@ export function Feed({ feed = [], setFeed, pagination }) {
                   <span className="org-name">{orgName}</span>
                   {communityTagLabel && <span className="community-pill">{communityTagLabel}</span>}
                 </div>
-                <div className="sub">
-                  {fmt(evt.start_at, evt.end_at, evt.tz)} • {evt.location_text || "Location TBD"}
-                </div>
+                <div className="sub">{fmt(evt.start_at, evt.end_at, evt.tz)} • {evt.location_text || "Location TBD"}</div>
                 {(capacityLabel || filledLabel) && (
                   <div className="capacity-row">
                     {capacityLabel && <span>{capacityLabel}</span>}
@@ -310,9 +308,9 @@ function fmt(start, end, tz) {
     const startDate = new Date(start);
     const endDate = end ? new Date(end) : null;
     const base = startDate.toLocaleString("en-US", {
-      weekday: "short",
       month: "short",
       day: "numeric",
+      year: "numeric",
       hour: "numeric",
       minute: "2-digit",
       timeZone: tz || "UTC",
@@ -323,11 +321,11 @@ function fmt(start, end, tz) {
         minute: "2-digit",
         timeZone: tz || "UTC",
       });
-      return `When • ${base}–${endLabel}`;
+      return `${base} - ${endLabel} (${tz || "UTC"})`;
     }
-    return `When • ${base}`;
+    return `${base} (${tz || "UTC"})`;
   } catch {
-    return `When • ${start}`;
+    return `${start}`;
   }
 }
 
@@ -370,7 +368,7 @@ const styles = `
   .meta-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
   .meta-pill{background:#fff;border:1px dashed #d1d5db;border-radius:999px;padding:3px 10px;font-size:11px;color:#4b5563}
   .capacity-row{display:flex;gap:10px;font-size:12px;color:#6b7280;margin-top:4px}
-  .actions{display:flex;gap:8px;justify-content:flex-end}
+  .actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
   .btn{background:#ff5656;border:none;color:#fff;padding:10px 16px;border-radius:10px;font-weight:700;cursor:pointer}
   .btn.secondary{background:#fff;border:1px solid #e5e7eb;color:#1f2937}
 `;

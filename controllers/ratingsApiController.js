@@ -2,17 +2,19 @@ import pool from "../Backend/db/pg.js";
 import { getSummary } from "../services/ratingsService.js";
 
 async function resolveUserId(req) {
+  if (req.user?.email) {
+    const { rows } = await pool.query(
+      "SELECT id FROM public.userdata WHERE email=$1 LIMIT 1",
+      [req.user.email]
+    );
+    if (rows[0]?.id != null) {
+      return String(rows[0].id);
+    }
+  }
+
   if (req.user?.id) return String(req.user.id);
   if (req.user?.user_id) return String(req.user.user_id);
-  if (!req.user?.email) throw new Error("Missing authenticated user email.");
-  const { rows } = await pool.query(
-    "SELECT id FROM public.userdata WHERE email=$1 LIMIT 1",
-    [req.user.email]
-  );
-  if (!rows[0]) {
-    throw new Error("User record not found.");
-  }
-  return String(rows[0].id);
+  throw new Error("User record not found.");
 }
 
 export async function getRatingsSummary(req, res) {

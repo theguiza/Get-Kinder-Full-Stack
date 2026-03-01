@@ -21,6 +21,15 @@
       const fullName = `${user?.firstname || ""} ${user?.lastname || ""}`.trim() || user?.name || "Organization Lead";
       const organizationName = user?.organization_name || user?.organization || user?.org_name || "Get Kinder";
       const profilePicture = user?.picture || "/images/nerdy-KAI.png";
+      const orgRatingData = (typeof orgRating !== "undefined" && orgRating) ? orgRating : {};
+      const orgRatingCount = Number(orgRatingData.count) || 0;
+      const orgRatingValue = Number.isFinite(Number(orgRatingData.value))
+        ? Number(orgRatingData.value)
+        : null;
+      const orgRatingHasValue = Boolean(orgRatingCount > 0 && orgRatingValue != null);
+      const orgRatingPercent = orgRatingHasValue
+        ? Math.max(0, Math.min(100, (orgRatingValue / 5) * 100))
+        : 0;
     %>
     <section class="org-hero mb-3" aria-label="Organization profile hero">
       <div class="org-hero-card">
@@ -36,6 +45,19 @@
           <div class="col-12 col-md-5 text-center text-md-start">
             <div class="org-hero-org"><%= organizationName %></div>
             <h1 class="org-hero-name"><%= fullName %></h1>
+            <div
+              class="org-hero-rating"
+              role="img"
+              aria-label="<%= orgRatingHasValue ? `Organization rating ${orgRatingValue.toFixed(1)} out of 5 stars from ${orgRatingCount} ratings` : 'Organization has no ratings yet' %>"
+            >
+              <span class="org-hero-rating-stars" aria-hidden="true">
+                <span class="org-hero-rating-stars-base">&#9733;&#9733;&#9733;&#9733;&#9733;</span>
+                <span class="org-hero-rating-stars-fill" style="width:<%= orgRatingPercent.toFixed(1) %>%;">&#9733;&#9733;&#9733;&#9733;&#9733;</span>
+              </span>
+              <span class="org-hero-rating-text">
+                <%= orgRatingHasValue ? `${orgRatingValue.toFixed(1)} (${orgRatingCount})` : "No ratings yet" %>
+              </span>
+            </div>
           </div>
           <div class="col-12 col-md-4">
             <div id="org-portal-kpis"></div>

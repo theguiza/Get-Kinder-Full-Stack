@@ -248,6 +248,7 @@ export function makeDashboardController(pool) {
         }
 
         let dashboardCompletedEvent = null;
+        let dashboardCompletedEvents = [];
         let dashboardUpcomingEvent = null;
         try {
           const rawPortfolioRows = await fetchVolunteerPortfolio({ userId, limit: 40 });
@@ -259,6 +260,8 @@ export function makeDashboardController(pool) {
             const duration_hours = ms > 0 ? Math.round((ms / 36e5) * 10) / 10 : 0;
             const is_upcoming = !!(startAt && startAt > now && ['published', 'scheduled'].includes(row.event_status));
             const is_verified = row.verification_status === 'verified';
+            const completed_at = endAt || startAt || null;
+            const is_completed = !!(completed_at && completed_at <= now);
             const acceptedCount = Number(row.accepted_count) || 0;
             const poolKind = row.reward_pool_kind != null ? Number(row.reward_pool_kind) : 0;
             const safePoolKind = Number.isFinite(poolKind) ? poolKind : 0;
@@ -271,15 +274,24 @@ export function makeDashboardController(pool) {
               duration_hours,
               is_upcoming,
               is_verified,
+              is_completed,
+              completed_at,
               kind_estimate_per_user,
               accepted_count: acceptedCount
             };
           });
 
           const upcomingRows = portfolioRows.filter((row) => row.is_upcoming);
-          const completedRows = portfolioRows.filter((row) => !row.is_upcoming);
+          const completedRows = portfolioRows
+            .filter((row) => row.is_completed && row.is_verified)
+            .sort((a, b) => {
+              const aTime = a.completed_at ? a.completed_at.getTime() : 0;
+              const bTime = b.completed_at ? b.completed_at.getTime() : 0;
+              return bTime - aTime;
+            });
           dashboardUpcomingEvent = upcomingRows[0] || null;
-          dashboardCompletedEvent = completedRows[0] || null;
+          dashboardCompletedEvents = completedRows.slice(0, 3);
+          dashboardCompletedEvent = dashboardCompletedEvents[0] || null;
         } catch (portfolioErr) {
           console.warn('[dashboardController] dashboard portfolio query failed:', portfolioErr.message || portfolioErr);
         }
@@ -470,6 +482,7 @@ export function makeDashboardController(pool) {
           volunteerStats,
           volunteerRating,
           dashboardCompletedEvent,
+          dashboardCompletedEvents,
           dashboardUpcomingEvent,
           debugStatsUserId: showStatsDebug ? String(userId) : null,
           showStatsDebug
@@ -503,6 +516,7 @@ export function makeDashboardController(pool) {
               starsFilled: 5
             },
             dashboardCompletedEvent: null,
+            dashboardCompletedEvents: [],
             dashboardUpcomingEvent: null,
             debugStatsUserId: null,
             showStatsDebug: false

@@ -418,6 +418,173 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         });
     }
+
+    // Dashboard completed events - load rating status and allow rating from modal
+    const rateButtons = [...document.querySelectorAll('.dash-rate-btn[data-event-id]')];
+    const rateModalEl = document.getElementById('dashboardRateModal');
+    const rateEventTitleEl = document.getElementById('dashboardRateEventTitle');
+    const rateNoteEl = document.getElementById('dashboardRateNote');
+    const rateErrorEl = document.getElementById('dashboardRateError');
+    const rateSubmitEl = document.getElementById('dashboardRateSubmit');
+    const rateStarEls = [...document.querySelectorAll('#dashboardRateModal .dash-rate-star[data-stars]')];
+
+    if (
+        rateButtons.length &&
+        rateModalEl &&
+        rateEventTitleEl &&
+        rateNoteEl &&
+        rateErrorEl &&
+        rateSubmitEl &&
+        rateStarEls.length &&
+        window.bootstrap &&
+        bootstrap.Modal
+    ) {
+        const rateModal = bootstrap.Modal.getOrCreateInstance(rateModalEl);
+        const buttonByEventId = new Map();
+        rateButtons.forEach((btn) => {
+            const eventId = String(btn.dataset.eventId || '').trim();
+            if (eventId) buttonByEventId.set(eventId, btn);
+        });
+
+        let activeEventId = '';
+        let activeStars = 0;
+        let isSubmittingRating = false;
+
+        const setRateError = (message) => {
+            const msg = String(message || '').trim();
+            if (!msg) {
+                rateErrorEl.textContent = '';
+                rateErrorEl.classList.add('d-none');
+                return;
+            }
+            rateErrorEl.textContent = msg;
+            rateErrorEl.classList.remove('d-none');
+        };
+
+        const paintStars = () => {
+            rateStarEls.forEach((starBtn) => {
+                const starValue = Number(starBtn.dataset.stars);
+                const active = Number.isFinite(starValue) && starValue <= activeStars;
+                starBtn.classList.toggle('is-active', active);
+            });
+            rateSubmitEl.disabled = isSubmittingRating || activeStars < 1;
+        };
+
+        const resetRateModalState = () => {
+            activeEventId = '';
+            activeStars = 0;
+            isSubmittingRating = false;
+            rateEventTitleEl.textContent = '';
+            rateNoteEl.value = '';
+            setRateError('');
+            rateSubmitEl.textContent = 'Submit Rating';
+            paintStars();
+        };
+
+        rateStarEls.forEach((starBtn) => {
+            starBtn.addEventListener('click', () => {
+                const next = Number(starBtn.dataset.stars);
+                if (!Number.isInteger(next) || next < 1 || next > 5) return;
+                activeStars = next;
+                setRateError('');
+                paintStars();
+            });
+        });
+
+        rateButtons.forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const eventId = String(btn.dataset.eventId || '').trim();
+                if (!eventId) return;
+                activeEventId = eventId;
+                activeStars = 0;
+                isSubmittingRating = false;
+                rateNoteEl.value = '';
+                setRateError('');
+                rateSubmitEl.textContent = 'Submit Rating';
+                rateEventTitleEl.textContent = btn.dataset.eventTitle || 'Untitled event';
+                paintStars();
+                rateModal.show();
+            });
+        });
+
+        rateSubmitEl.addEventListener('click', async () => {
+            if (!activeEventId || isSubmittingRating) return;
+            if (!Number.isInteger(activeStars) || activeStars < 1 || activeStars > 5) {
+                setRateError('Please choose a rating from 1 to 5 stars.');
+                return;
+            }
+
+            isSubmittingRating = true;
+            setRateError('');
+            rateSubmitEl.textContent = 'Submitting...';
+            paintStars();
+
+            try {
+                const payload = { stars: activeStars };
+                const note = String(rateNoteEl.value || '').trim();
+                if (note) payload.note = note.slice(0, 280);
+                const response = await fetch(`/api/events/${encodeURIComponent(activeEventId)}/ratings`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...(CSRF_TOKEN ? { 'X-CSRF-Token': CSRF_TOKEN } : {})
+                    },
+                    credentials: 'include',
+                    body: JSON.stringify(payload)
+                });
+                const result = await response.json().catch(() => ({}));
+                if (!response.ok || !result?.ok) {
+                    throw new Error(result?.message || result?.error || 'Unable to submit rating.');
+                }
+
+                const sourceBtn = buttonByEventId.get(activeEventId);
+                if (sourceBtn) {
+                    sourceBtn.classList.add('d-none');
+                    sourceBtn.disabled = true;
+                }
+                rateModal.hide();
+                showNotification('Rating submitted. Thank you for the feedback.', 'success');
+            } catch (error) {
+                setRateError(error?.message || 'Unable to submit rating.');
+            } finally {
+                isSubmittingRating = false;
+                rateSubmitEl.textContent = 'Submit Rating';
+                paintStars();
+            }
+        });
+
+        rateModalEl.addEventListener('hidden.bs.modal', () => {
+            resetRateModalState();
+        });
+
+        const completedEventIds = [...new Set(
+            rateButtons
+                .map((btn) => String(btn.dataset.eventId || '').trim())
+                .filter(Boolean)
+        )];
+
+        Promise.all(
+            completedEventIds.map(async (eventId) => {
+                try {
+                    const response = await fetch(`/api/events/${encodeURIComponent(eventId)}/ratings/status`, {
+                        credentials: 'include'
+                    });
+                    const result = await response.json().catch(() => ({}));
+                    if (!response.ok || !result?.ok) return { eventId, show: false };
+                    const data = result?.data || {};
+                    return { eventId, show: Boolean(data?.can_rate && !data?.my_rating) };
+                } catch (_) {
+                    return { eventId, show: false };
+                }
+            })
+        ).then((rows) => {
+            rows.forEach((row) => {
+                const btn = buttonByEventId.get(row.eventId);
+                if (!btn) return;
+                btn.classList.toggle('d-none', !row.show);
+            });
+        });
+    }
 });
 
 /**
