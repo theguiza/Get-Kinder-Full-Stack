@@ -16,7 +16,14 @@ const VISIBILITY_SET = new Set(["public", "fof", "private"]);
 const STATUS_SET = new Set(["draft", "published"]);
 const ATTENDANCE_SET = new Set(["host_code", "social_proof", "geo"]);
 const VERIFICATION_METHOD_SET = new Set(["host_attest", "qr_stub", "social_proof"]);
-const HOST_INVITE_ALLOWED_STATUSES = new Set(["published", "draft"]);
+const INVITE_ALLOWED_EVENT_STATUSES = new Set(["published", "draft"]);
+const INVITE_ELIGIBLE_STATUSES = new Set(["accepted", "checked_in"]);
+const INVITE_APPROVAL_REQUIRED_MESSAGE = "You can send this message after you have been approved";
+const INVITE_SENDER_HOURLY_LIMIT = 12;
+const INVITE_SENDER_DAILY_LIMIT = 40;
+const INVITE_RECIPIENT_COOLDOWN_HOURS = 24;
+const INVITE_DUPLICATE_WINDOW_HOURS = 24 * 30;
+const INVITE_PER_EVENT_SENDER_CAP = 3;
 const EDITABLE_STATUS_SET = new Set(["draft", "published"]);
 const RSVP_ACTION_TO_STATUS = new Map([
   ["accept", "pending"],
@@ -25,7 +32,7 @@ const RSVP_ACTION_TO_STATUS = new Map([
 const CHECKIN_METHOD_SET = new Set(["host_code", "social_proof", "geo"]);
 const INVITE_TONES = {
   friendly: {
-    subject: "{{hostName}} invited you to {{eventTitle}}",
+    subject: "{{senderName}} invited you to {{eventTitle}}",
     body: `I'd love for you to join me for {{eventTitle}}. It's happening {{eventSummary}} at {{eventLocation}}. Tap the link so we can plan together!`
   },
   hype: {
@@ -33,7 +40,7 @@ const INVITE_TONES = {
     body: `I just locked in {{eventTitle}} and it would be way more fun if you came. {{eventSummary}} · {{eventLocation}}. Grab your spot and let's make it happen.`
   },
   thoughtful: {
-    subject: "An invite from {{hostName}}",
+    subject: "An invite from {{senderName}}",
     body: `I've been thinking of you and hope you can make {{eventTitle}}. We're meeting {{eventSummary}} at {{eventLocation}}. RSVP if you can join—would mean a lot to see you there.`
   }
 };
@@ -307,34 +314,42 @@ export async function getEventById(req, res) {
 
 export async function createInvite(req, res) {
   try {
-    const hostId = await resolveUserId(req);
+    const senderId = await resolveUserId(req);
     const eventId = req.params.id;
     const rawEmail = typeof req.body?.invitee_email === "string" ? req.body.invitee_email : req.body?.email;
     const inviteeEmail = rawEmail ? rawEmail.trim().toLowerCase() : "";
     const inviteeName = typeof req.body?.invitee_name === "string" ? req.body.invitee_name.trim() : "";
     const tone = sanitizeTone(req.body?.tone) || "friendly";
     const sendByKai = Boolean(req.body?.send_by_kai);
-    const customSubject = sendByKai ? "" : sanitizeString(req.body?.subject);
-    const customMessage = sendByKai ? "" : sanitizeMultiline(req.body?.message);
 
     if (!inviteeEmail) {
       return res.status(400).json({ ok: false, error: "Invitee email is required" });
     }
 
-    const { rows: [eventRow] } = await pool.query(
-      `SELECT id, creator_user_id, status, title, start_at FROM events WHERE id = $1 LIMIT 1`,
-      [eventId]
-    );
-
-    if (!eventRow) {
+    const senderContext = await resolveInviteSenderContext({
+      senderId,
+      eventId,
+      senderEmail: req.user?.email || null,
+    });
+    if (senderContext.errorCode === "EVENT_NOT_FOUND") {
       return res.status(404).json({ ok: false, error: "Event not found" });
     }
-    if (String(eventRow.creator_user_id) !== hostId) {
-      return res.status(403).json({ ok: false, error: "Only the host can send invites" });
+    if (senderContext.errorCode === "INVITE_APPROVAL_REQUIRED") {
+      return res.status(403).json({
+        ok: false,
+        code: "INVITE_APPROVAL_REQUIRED",
+        error: INVITE_APPROVAL_REQUIRED_MESSAGE,
+      });
     }
-    if (!HOST_INVITE_ALLOWED_STATUSES.has(eventRow.status)) {
-      return res.status(409).json({ ok: false, error: "Invites can only be sent for draft or published events" });
+    if (senderContext.errorCode === "INVITE_EVENT_STATUS_INVALID") {
+      return res.status(409).json({
+        ok: false,
+        code: "INVITE_EVENT_STATUS_INVALID",
+        error: "Invites can only be sent for draft or published events",
+      });
     }
+
+    const { eventRow, senderName, senderEmail } = senderContext;
 
     const { rows: [recipient] } = await pool.query(
       `SELECT id, firstname, lastname, email
@@ -344,54 +359,146 @@ export async function createInvite(req, res) {
       [inviteeEmail]
     );
 
-    if (recipient && String(recipient.id) === hostId) {
+    if (recipient && String(recipient.id) === senderId) {
       return res.status(400).json({ ok: false, error: "You cannot invite yourself" });
     }
 
+    const recipientUserId = recipient ? String(recipient.id) : null;
+    const blockedByRecipient = await recipientHasBlockedSender({
+      recipientUserId,
+      senderUserId: senderId,
+    });
+    if (blockedByRecipient) {
+      await logInviteModeration({
+        senderUserId: senderId,
+        recipientUserId,
+        eventId,
+        action: "invite_blocked",
+        reason: "recipient_blocked_sender",
+        metadata: { inviteeEmail },
+      });
+      return res.status(403).json({
+        ok: false,
+        code: "INVITE_BLOCKED_BY_RECIPIENT",
+        error: "This recipient is not accepting invites from you.",
+      });
+    }
+
+    const senderLimitViolation = await checkSenderRateLimits(senderId);
+    if (senderLimitViolation) {
+      await logInviteModeration({
+        senderUserId: senderId,
+        recipientUserId,
+        eventId,
+        action: "invite_blocked",
+        reason: senderLimitViolation,
+        metadata: { inviteeEmail },
+      });
+      return res.status(429).json({
+        ok: false,
+        code: "INVITE_RATE_LIMITED",
+        error: "You have reached your invite limit. Please try again later.",
+      });
+    }
+
+    const perEventCount = await countSenderEventInvites({ senderUserId: senderId, eventId });
+    if (perEventCount >= INVITE_PER_EVENT_SENDER_CAP) {
+      await logInviteModeration({
+        senderUserId: senderId,
+        recipientUserId,
+        eventId,
+        action: "invite_blocked",
+        reason: "event_sender_cap_reached",
+        metadata: { inviteeEmail, perEventCount },
+      });
+      return res.status(409).json({
+        ok: false,
+        code: "INVITE_EVENT_CAP_REACHED",
+        error: "You can send up to 3 invites for this event.",
+      });
+    }
+
+    const recentForRecipient = await hasRecipientCooldown({
+      senderUserId: senderId,
+      inviteeEmail,
+    });
+    if (recentForRecipient) {
+      await logInviteModeration({
+        senderUserId: senderId,
+        recipientUserId,
+        eventId,
+        action: "invite_blocked",
+        reason: "recipient_cooldown_active",
+        metadata: { inviteeEmail },
+      });
+      return res.status(429).json({
+        ok: false,
+        code: "INVITE_RECIPIENT_COOLDOWN",
+        error: "Please wait before sending another invite to this person.",
+      });
+    }
+
+    const duplicateInvite = await findDuplicateInviteInWindow({
+      eventId,
+      recipientUserId,
+      inviteeEmail,
+    });
+    if (duplicateInvite) {
+      await logInviteModeration({
+        senderUserId: senderId,
+        recipientUserId,
+        eventId,
+        inviteId: duplicateInvite.id,
+        action: "invite_blocked",
+        reason: "duplicate_invite_window",
+        metadata: { inviteeEmail },
+      });
+      return res.status(409).json({
+        ok: false,
+        code: "INVITE_DUPLICATE",
+        error: "An invite for this person already exists for this event.",
+      });
+    }
+
     const baseUrl = process.env.APP_BASE_URL || "https://getkinder.ai";
-    const hostName = req.user?.firstname?.trim() || req.user?.email?.split("@")[0] || "A friend";
     const eventLink = `${baseUrl}/events#/events/${eventId}`;
     const joinLink = `${baseUrl}/register?event=${eventId}`;
-    let finalInviteeName = inviteeName;
-    let inviteRecord;
+    const finalInviteeName = recipient
+      ? inviteeName || [recipient.firstname, recipient.lastname].filter(Boolean).join(" ") || recipient.email
+      : inviteeName || inviteeEmail;
 
-    if (recipient) {
-      const fullName = inviteeName || [recipient.firstname, recipient.lastname].filter(Boolean).join(" ") || recipient.email;
-      finalInviteeName = fullName;
-      const { rows } = await pool.query(
-        `
-          INSERT INTO invites (event_id, sender_user_id, recipient_user_id, invitee_email, invitee_name, status)
-          VALUES ($1, $2, $3, $4, $5, 'pending')
-          ON CONFLICT (event_id, recipient_user_id)
-          DO UPDATE SET status='pending', responded_at=NULL, invitee_email=EXCLUDED.invitee_email, invitee_name=EXCLUDED.invitee_name
-          RETURNING id, status, invitee_email, invitee_name
-        `,
-        [eventId, hostId, recipient.id, inviteeEmail, fullName]
-      );
-      inviteRecord = rows[0];
-    } else {
-      const { rows } = await pool.query(
-        `
-          INSERT INTO invites (event_id, sender_user_id, recipient_user_id, invitee_email, invitee_name, status)
-          VALUES ($1, $2, NULL, $3, $4, 'pending')
-          ON CONFLICT (event_id, invitee_email)
-          DO UPDATE SET status='pending', responded_at=NULL, invitee_name=COALESCE(EXCLUDED.invitee_name, invites.invitee_name)
-          RETURNING id, status, invitee_email, invitee_name
-        `,
-        [eventId, hostId, inviteeEmail, inviteeName || null]
-      );
-      inviteRecord = rows[0];
-      if (!finalInviteeName) {
-        finalInviteeName = inviteRecord?.invitee_name || inviteeEmail;
-      }
+    let inviteRecord;
+    const { rows } = await pool.query(
+      `
+        INSERT INTO invites (event_id, sender_user_id, recipient_user_id, invitee_email, invitee_name, status)
+        VALUES ($1, $2, $3, $4, $5, 'pending')
+        ON CONFLICT DO NOTHING
+        RETURNING id, status, invitee_email, invitee_name
+      `,
+      [eventId, senderId, recipient?.id || null, inviteeEmail, finalInviteeName]
+    );
+    inviteRecord = rows[0];
+    if (!inviteRecord) {
+      await logInviteModeration({
+        senderUserId: senderId,
+        recipientUserId,
+        eventId,
+        action: "invite_blocked",
+        reason: "duplicate_invite_conflict",
+        metadata: { inviteeEmail },
+      });
+      return res.status(409).json({
+        ok: false,
+        code: "INVITE_DUPLICATE",
+        error: "An invite for this person already exists for this event.",
+      });
     }
 
     const emailCopy = buildInviteEmailCopy({
       eventRow,
-      hostName,
+      senderName,
+      senderEmail,
       inviteeName: finalInviteeName,
-      customSubject: customSubject || null,
-      customBody: customMessage || null,
       tone,
       eventLink,
       joinLink,
@@ -400,7 +507,7 @@ export async function createInvite(req, res) {
       await sendProspectInviteEmail({
         to: inviteeEmail,
         inviteeName: finalInviteeName,
-        hostName,
+        hostName: senderName,
         eventTitle: eventRow.title,
         eventLink,
         joinLink,
@@ -408,24 +515,53 @@ export async function createInvite(req, res) {
         html: emailCopy.html,
         text: emailCopy.text,
         sendByKai,
+        replyTo: senderEmail || null,
       });
     } catch (mailErr) {
       console.error("[eventsApi] invite email failed:", mailErr);
+      await logInviteModeration({
+        senderUserId: senderId,
+        recipientUserId,
+        eventId,
+        inviteId: inviteRecord.id,
+        action: "invite_email_failed",
+        reason: "mailer_error",
+        metadata: { message: mailErr?.message || "unknown" },
+      });
+    }
+
+    await logInviteModeration({
+      senderUserId: senderId,
+      recipientUserId,
+      eventId,
+      inviteId: inviteRecord.id,
+      action: "invite_sent",
+      reason: "ok",
+      metadata: {
+        tone,
+        sendByKai,
+        inviteeEmail: inviteRecord.invitee_email,
+      },
+    });
+
+    const payload = {
+      id: inviteRecord.id,
+      event_id: eventId,
+      event_title: eventRow.title,
+      event_starts_at: eventRow.start_at,
+      invitee_name: inviteRecord.invitee_name || inviteRecord.invitee_email,
+      invitee_email: inviteRecord.invitee_email,
+      status: inviteRecord.status,
+      subject: emailCopy.subject,
+      body: emailCopy.body,
+    };
+    if (senderEmail) {
+      payload.sender_email = senderEmail;
     }
 
     return res.status(201).json({
       ok: true,
-      data: {
-        id: inviteRecord.id,
-        event_id: eventId,
-        event_title: eventRow.title,
-        event_starts_at: eventRow.start_at,
-        invitee_name: inviteRecord.invitee_name || inviteRecord.invitee_email,
-        invitee_email: inviteRecord.invitee_email,
-        status: inviteRecord.status,
-        subject: emailCopy.subject,
-        body: emailCopy.body,
-      }
+      data: payload,
     });
   } catch (error) {
     console.error("[eventsApi] createInvite error:", error);
@@ -435,29 +571,51 @@ export async function createInvite(req, res) {
 
 export async function draftInviteCopy(req, res) {
   try {
-    const hostId = await resolveUserId(req);
+    const senderId = await resolveUserId(req);
     const eventId = req.params.id;
     const tone = sanitizeTone(req.body?.tone) || "friendly";
 
-    const { rows: [eventRow] } = await pool.query(
-      `SELECT * FROM events WHERE id = $1 AND creator_user_id = $2 LIMIT 1`,
-      [eventId, hostId]
-    );
-
-    if (!eventRow) {
+    const senderContext = await resolveInviteSenderContext({
+      senderId,
+      eventId,
+      senderEmail: req.user?.email || null,
+    });
+    if (senderContext.errorCode === "EVENT_NOT_FOUND") {
       return res.status(404).json({ ok: false, error: "Event not found" });
     }
+    if (senderContext.errorCode === "INVITE_APPROVAL_REQUIRED") {
+      return res.status(403).json({
+        ok: false,
+        code: "INVITE_APPROVAL_REQUIRED",
+        error: INVITE_APPROVAL_REQUIRED_MESSAGE,
+      });
+    }
+    if (senderContext.errorCode === "INVITE_EVENT_STATUS_INVALID") {
+      return res.status(409).json({
+        ok: false,
+        code: "INVITE_EVENT_STATUS_INVALID",
+        error: "Invites can only be sent for draft or published events",
+      });
+    }
 
-    const hostName = req.user?.firstname?.trim() || req.user?.email?.split("@")[0] || "A friend";
+    const { eventRow, senderName, senderEmail } = senderContext;
     const draft = generateInviteDraft({
       tone,
-      hostName,
+      senderName,
       eventTitle: eventRow.title || "an event",
       eventLocation: sanitizeString(eventRow.location_text) || "Location TBD",
       eventSummary: formatEventSummaryForInvite(eventRow),
     });
 
-    return res.json({ ok: true, data: { tone, ...draft } });
+    return res.json({
+      ok: true,
+      data: {
+        tone,
+        ...draft,
+        sender_name: senderName,
+        sender_email: senderEmail || null,
+      },
+    });
   } catch (error) {
     console.error("[eventsApi] draftInviteCopy error:", error);
     return res.status(500).json({ ok: false, error: "Unable to generate copy" });
@@ -943,11 +1101,6 @@ function ensureArrayValue(value) {
   }
 }
 
-function sanitizeMultiline(value) {
-  if (typeof value !== "string") return "";
-  return value.replace(/\r\n/g, "\n").trim();
-}
-
 function sanitizeTone(value) {
   if (!value) return null;
   const tone = value.toLowerCase();
@@ -986,10 +1139,10 @@ function applyTemplate(template, tokens) {
   return template.replace(/\{\{(.*?)\}\}/g, (_, key) => tokens[key.trim()] || "");
 }
 
-function generateInviteDraft({ tone, hostName, eventTitle, eventLocation, eventSummary }) {
+function generateInviteDraft({ tone, senderName, eventTitle, eventLocation, eventSummary }) {
   const template = INVITE_TONES[tone] || INVITE_TONES.friendly;
   const tokens = {
-    hostName,
+    senderName,
     eventTitle,
     eventLocation,
     eventSummary,
@@ -1009,12 +1162,210 @@ function createMessageHtml(body) {
   return paragraphs.join("\n");
 }
 
+function formatSenderName(senderRow, fallbackEmail) {
+  const first = sanitizeString(senderRow?.firstname);
+  const last = sanitizeString(senderRow?.lastname);
+  const full = `${first} ${last}`.trim();
+  if (full) return full;
+  const email = sanitizeString(senderRow?.email || fallbackEmail);
+  if (!email.includes("@")) return "A friend";
+  return email.split("@")[0].replace(/[._-]+/g, " ").trim() || "A friend";
+}
+
+async function resolveInviteSenderContext({ senderId, eventId, senderEmail }) {
+  const { rows: [eventRow] } = await pool.query(
+    `SELECT id, creator_user_id, status, title, start_at, tz, location_text
+       FROM events
+      WHERE id = $1
+      LIMIT 1`,
+    [eventId]
+  );
+  if (!eventRow) {
+    return { errorCode: "EVENT_NOT_FOUND" };
+  }
+  if (!INVITE_ALLOWED_EVENT_STATUSES.has(eventRow.status)) {
+    return { errorCode: "INVITE_EVENT_STATUS_INVALID" };
+  }
+
+  const { rows: [senderRow] } = await pool.query(
+    `SELECT u.id,
+            u.firstname,
+            u.lastname,
+            u.email,
+            r.status AS rsvp_status
+       FROM userdata u
+  LEFT JOIN event_rsvps r
+         ON r.event_id = $2
+        AND r.attendee_user_id = u.id
+      WHERE u.id = $1
+      LIMIT 1`,
+    [senderId, eventId]
+  );
+
+  const isHost = String(eventRow.creator_user_id) === String(senderId);
+  const senderRsvpStatus = sanitizeString(senderRow?.rsvp_status).toLowerCase();
+  const isEligible = isHost || INVITE_ELIGIBLE_STATUSES.has(senderRsvpStatus);
+  if (!isEligible) {
+    return { errorCode: "INVITE_APPROVAL_REQUIRED" };
+  }
+
+  const resolvedEmail = sanitizeString(senderRow?.email || senderEmail).toLowerCase() || null;
+  return {
+    eventRow,
+    senderName: formatSenderName(senderRow, resolvedEmail),
+    senderEmail: resolvedEmail,
+    isHost,
+  };
+}
+
+async function checkSenderRateLimits(senderUserId) {
+  try {
+    const { rows: [counts] } = await pool.query(
+      `
+        SELECT
+          COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '1 hour') AS hourly_count,
+          COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '1 day') AS daily_count
+        FROM invites
+        WHERE sender_user_id = $1
+      `,
+      [senderUserId]
+    );
+    const hourlyCount = Number(counts?.hourly_count) || 0;
+    const dailyCount = Number(counts?.daily_count) || 0;
+    if (hourlyCount >= INVITE_SENDER_HOURLY_LIMIT) return "sender_hourly_limit";
+    if (dailyCount >= INVITE_SENDER_DAILY_LIMIT) return "sender_daily_limit";
+    return null;
+  } catch (error) {
+    if (error?.code === "42P01") return null;
+    throw error;
+  }
+}
+
+async function countSenderEventInvites({ senderUserId, eventId }) {
+  try {
+    const { rows: [row] } = await pool.query(
+      `
+        SELECT COUNT(*)::int AS total
+        FROM invites
+        WHERE sender_user_id = $1
+          AND event_id = $2
+      `,
+      [senderUserId, eventId]
+    );
+    return Number(row?.total) || 0;
+  } catch (error) {
+    if (error?.code === "42P01") return 0;
+    throw error;
+  }
+}
+
+async function hasRecipientCooldown({ senderUserId, inviteeEmail }) {
+  try {
+    const { rows } = await pool.query(
+      `
+        SELECT id
+        FROM invites
+        WHERE sender_user_id = $1
+          AND LOWER(invitee_email) = LOWER($2)
+          AND created_at >= NOW() - make_interval(hours => $3)
+        LIMIT 1
+      `,
+      [senderUserId, inviteeEmail, INVITE_RECIPIENT_COOLDOWN_HOURS]
+    );
+    return Boolean(rows[0]);
+  } catch (error) {
+    if (error?.code === "42P01") return false;
+    throw error;
+  }
+}
+
+async function findDuplicateInviteInWindow({ eventId, recipientUserId, inviteeEmail }) {
+  try {
+    const { rows } = await pool.query(
+      `
+        SELECT id
+        FROM invites
+        WHERE event_id = $1
+          AND (
+            ($2::text IS NOT NULL AND recipient_user_id::text = $2::text)
+            OR LOWER(invitee_email) = LOWER($3)
+          )
+          AND created_at >= NOW() - make_interval(hours => $4)
+        LIMIT 1
+      `,
+      [eventId, recipientUserId, inviteeEmail, INVITE_DUPLICATE_WINDOW_HOURS]
+    );
+    return rows[0] || null;
+  } catch (error) {
+    if (error?.code === "42P01") return null;
+    throw error;
+  }
+}
+
+async function recipientHasBlockedSender({ recipientUserId, senderUserId }) {
+  if (!recipientUserId) return false;
+  try {
+    const { rows } = await pool.query(
+      `
+        SELECT 1
+        FROM invite_sender_blocks
+        WHERE blocker_user_id = $1
+          AND blocked_user_id = $2
+        LIMIT 1
+      `,
+      [recipientUserId, senderUserId]
+    );
+    return Boolean(rows[0]);
+  } catch (error) {
+    if (error?.code === "42P01") return false;
+    throw error;
+  }
+}
+
+async function logInviteModeration({
+  eventId,
+  inviteId = null,
+  senderUserId = null,
+  recipientUserId = null,
+  action,
+  reason,
+  metadata = {},
+}) {
+  try {
+    await pool.query(
+      `
+        INSERT INTO invite_moderation_logs (
+          event_id,
+          invite_id,
+          sender_user_id,
+          recipient_user_id,
+          action,
+          reason,
+          metadata
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+      `,
+      [
+        eventId || null,
+        inviteId || null,
+        senderUserId || null,
+        recipientUserId || null,
+        action || "unknown",
+        reason || null,
+        JSON.stringify(metadata || {}),
+      ]
+    );
+  } catch (error) {
+    if (error?.code === "42P01") return;
+    console.error("[eventsApi] invite moderation log failed:", error);
+  }
+}
+
 function buildInviteEmailCopy({
   eventRow,
-  hostName,
+  senderName,
+  senderEmail,
   inviteeName,
-  customSubject,
-  customBody,
   tone,
   eventLink,
   joinLink,
@@ -1024,27 +1375,32 @@ function buildInviteEmailCopy({
   const eventSummary = formatEventSummaryForInvite(eventRow);
   const draft = generateInviteDraft({
     tone: tone || "friendly",
-    hostName: hostName || "A friend",
+    senderName: senderName || "A friend",
     eventTitle,
     eventLocation,
     eventSummary,
   });
-  const subject = customSubject?.trim() ? customSubject.trim() : draft.subject;
-  const body = customBody?.trim() ? customBody.trim() : draft.body;
+  const subject = draft.subject;
+  const body = draft.body;
   const greetingName = inviteeName?.split(/\s+/)[0] || "there";
   const messageHtml = createMessageHtml(body) || `<p>${escapeHtml(body)}</p>`;
   const detailsHtml = `<p><strong>Event:</strong> ${escapeHtml(eventTitle)}<br/>${escapeHtml(eventSummary)}<br/>${escapeHtml(eventLocation)}</p>`;
   const eventHref = eventLink || joinLink || (process.env.APP_BASE_URL || "https://getkinder.ai");
   const joinHref = joinLink || eventHref;
+  const replyHtml = senderEmail
+    ? `<p style="color:#475569;font-size:0.95rem">Reply directly to ${escapeHtml(senderEmail)}.</p>`
+    : "";
+  const replyText = senderEmail ? `Reply directly to: ${senderEmail}\n` : "";
   const html = `
     <p>Hi ${escapeHtml(greetingName)},</p>
     ${messageHtml}
     ${detailsHtml}
     <p><a href="${eventHref}" target="_blank" rel="noopener">View event details</a></p>
     <p><a href="${joinHref}" target="_blank" rel="noopener">Join Get Kinder to RSVP</a></p>
+    ${replyHtml}
     <p>See you there! 💛</p>
   `;
-  const text = `Hi ${greetingName},\n\n${body}\n\nEvent: ${eventTitle}\nWhen: ${eventSummary}\nWhere: ${eventLocation}\n\nView: ${eventHref}\nJoin: ${joinHref}\n`;
+  const text = `Hi ${greetingName},\n\n${body}\n\nEvent: ${eventTitle}\nWhen: ${eventSummary}\nWhere: ${eventLocation}\n\nView: ${eventHref}\nJoin: ${joinHref}\n${replyText}`;
   return { subject, html, text, body }; // body returned for drafts
 }
 

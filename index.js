@@ -1818,10 +1818,10 @@ app.get("/org-portal", ensureOrgRepPage, async (req, res) => {
   const assetTag = Date.now();
   const orgRating = {
     orgId: null,
-    value: null,
+    value: 5,
     count: 0,
     hasRatings: false,
-    starsFilled: 0,
+    starsFilled: 5,
   };
 
   try {
@@ -1855,14 +1855,13 @@ app.get("/org-portal", ensureOrgRepPage, async (req, res) => {
     if (orgId != null && Number.isFinite(orgId)) {
       const summary = await getRatingsSummary({ orgId, limit: 20 });
       const count = Number(summary?.sampleSize) || 0;
-      const value = count > 0 && Number.isFinite(Number(summary?.kindnessRating))
-        ? Number(summary.kindnessRating)
-        : null;
-      const starsFilled = value == null ? 0 : Math.max(1, Math.min(5, Math.round(value)));
+      const hasRatings = count > 0 && Number.isFinite(Number(summary?.kindnessRating));
+      const value = hasRatings ? Number(summary.kindnessRating) : 5;
+      const starsFilled = Math.max(1, Math.min(5, Math.round(value)));
       orgRating.orgId = orgId;
       orgRating.value = value;
       orgRating.count = count;
-      orgRating.hasRatings = Boolean(value != null && count > 0);
+      orgRating.hasRatings = hasRatings;
       orgRating.starsFilled = starsFilled;
     }
   } catch (error) {

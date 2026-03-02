@@ -540,6 +540,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelLoading, setCancelLoading] = useState(false);
   const [cancelError, setCancelError] = useState("");
+  const [cancelModalTarget, setCancelModalTarget] = useState(null);
 
   const [applicants, setApplicants] = useState(null);
   const [applicantsLoading, setApplicantsLoading] = useState(false);
@@ -881,6 +882,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
     setShowCancelModal(false);
     setCancelLoading(false);
     setCancelError("");
+    setCancelModalTarget(null);
     setMyEventsPoolSummary(null);
     setMyEventsPoolLoading(false);
     setMyEvents([]);
@@ -2270,75 +2272,161 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
 
   function openCancelOpportunityModal() {
     if (!selectedOpportunityId) return;
+    const isDraftOpportunity = String(selectedOpportunity?.type || "").toLowerCase() === "opp-draft";
+    setCancelModalTarget({
+      source: "opportunities",
+      eventId: String(selectedOpportunityId),
+      isDraft: isDraftOpportunity,
+      title: selectedOpportunity?.opportunityName || "Opportunity",
+      opportunity: selectedOpportunity ? { ...selectedOpportunity } : null,
+    });
     setCancelError("");
     setShowCancelModal(true);
   }
 
   async function confirmCancelOpportunity() {
-    if (!selectedOpportunityId) return;
+    const target = cancelModalTarget;
+    if (!target?.eventId) return;
+    const targetEventId = String(target.eventId);
+    const isDraftOpportunity = Boolean(target.isDraft);
     setCancelLoading(true);
     setCancelError("");
 
     try {
-      const response = await fetch(`/api/events/${encodeURIComponent(selectedOpportunityId)}/cancel`, {
-        method: "POST",
+      const endpoint = isDraftOpportunity
+        ? `/api/events/${encodeURIComponent(targetEventId)}`
+        : `/api/events/${encodeURIComponent(targetEventId)}/cancel`;
+      const response = await fetch(endpoint, {
+        method: isDraftOpportunity ? "DELETE" : "POST",
         credentials: "include",
         headers: {
-          "Content-Type": "application/json",
+          ...(isDraftOpportunity ? {} : { "Content-Type": "application/json" }),
           "X-CSRF-Token": csrfToken,
         },
-        body: JSON.stringify({}),
+        ...(isDraftOpportunity ? {} : { body: JSON.stringify({}) }),
       });
 
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || payload?.ok === false) {
-        throw new Error(payload?.error || "Unable to cancel event.");
+        throw new Error(
+          payload?.error || (isDraftOpportunity ? "Unable to delete draft." : "Unable to cancel event.")
+        );
+      }
+
+      if (isDraftOpportunity) {
+        if (target.source === "opportunities") {
+          setQueue((prev) => {
+            if (!prev) return prev;
+            const removeEvent = (rows = []) =>
+              rows.filter((row) => String(row?.opportunityId || "") !== targetEventId);
+            const nextQueue = {
+              ...prev,
+              needsAttention: removeEvent(prev.needsAttention),
+              upcoming: removeEvent(prev.upcoming),
+              active: removeEvent(prev.active),
+              drafts: removeEvent(prev.drafts),
+              completed: removeEvent(prev.completed),
+              cancelled: removeEvent(prev.cancelled),
+            };
+            const remainingCount =
+              nextQueue.needsAttention.length +
+              nextQueue.upcoming.length +
+              nextQueue.active.length +
+              nextQueue.drafts.length +
+              nextQueue.completed.length +
+              nextQueue.cancelled.length;
+            nextQueue.hasOpportunities = remainingCount > 0;
+            return nextQueue;
+          });
+
+          setCheckinQueueItems((prev) =>
+            (Array.isArray(prev) ? prev : []).filter(
+              (item) => String(item?.opportunityId || "") !== targetEventId
+            )
+          );
+
+          setSelectedQueueItem(null);
+          setApplicants(null);
+          setApplicantCounts(ZERO_PENDING_ACTION_COUNTS);
+          setDetailError("");
+          setActionError("");
+          setShowCancelModal(false);
+          setCancelModalTarget(null);
+          return;
+        }
+
+        if (target.source === "myevents") {
+          if (String(selectedMyEvent?.id || "") === targetEventId) {
+            setSelectedMyEvent(null);
+          }
+          setMyEventsToast({ type: "success", message: "Draft deleted." });
+          await refreshMyEventsData();
+          void fetchQueue();
+          setShowCancelModal(false);
+          setCancelModalTarget(null);
+          return;
+        }
       }
 
       const cancelledItem = {
-        id: `cancelled-${selectedOpportunityId}`,
+        id: `cancelled-${targetEventId}`,
         tab: "opportunities",
         type: "opp-cancelled",
-        opportunityId: String(selectedOpportunityId),
-        opportunityName: selectedOpportunity?.opportunityName || "Cancelled event",
-        label: selectedOpportunity?.opportunityName || "Cancelled event",
+        opportunityId: targetEventId,
+        opportunityName: target?.opportunity?.opportunityName || target?.title || "Cancelled event",
+        label: target?.opportunity?.opportunityName || target?.title || "Cancelled event",
         icon: "fa-ban",
-        startTime: selectedOpportunity?.startTime || null,
-        endTime: selectedOpportunity?.endTime || null,
-        timeZone: selectedOpportunity?.timeZone || "America/Vancouver",
+        startTime: target?.opportunity?.startTime || null,
+        endTime: target?.opportunity?.endTime || null,
+        timeZone: target?.opportunity?.timeZone || "America/Vancouver",
         pendingCount: 0,
-        approvedCount: safeNumber(selectedOpportunity?.approvedCount, 0),
-        capacity: selectedOpportunity?.capacity == null ? null : safeNumber(selectedOpportunity?.capacity, null),
+        approvedCount: safeNumber(target?.opportunity?.approvedCount, 0),
+        capacity: target?.opportunity?.capacity == null ? null : safeNumber(target?.opportunity?.capacity, null),
       };
 
-      setQueue((prev) => {
-        if (!prev) return prev;
-        const removeEvent = (rows = []) =>
-          rows.filter((row) => String(row?.opportunityId || "") !== String(selectedOpportunityId));
-        const remainingCancelled = removeEvent(prev.cancelled || []);
-        return {
-          ...prev,
-          needsAttention: removeEvent(prev.needsAttention),
-          upcoming: removeEvent(prev.upcoming),
-          active: removeEvent(prev.active),
-          drafts: removeEvent(prev.drafts),
-          completed: removeEvent(prev.completed),
-          cancelled: [cancelledItem, ...remainingCancelled],
-          hasOpportunities: true,
-        };
-      });
+      if (target.source === "opportunities") {
+        setQueue((prev) => {
+          if (!prev) return prev;
+          const removeEvent = (rows = []) =>
+            rows.filter((row) => String(row?.opportunityId || "") !== targetEventId);
+          const remainingCancelled = removeEvent(prev.cancelled || []);
+          return {
+            ...prev,
+            needsAttention: removeEvent(prev.needsAttention),
+            upcoming: removeEvent(prev.upcoming),
+            active: removeEvent(prev.active),
+            drafts: removeEvent(prev.drafts),
+            completed: removeEvent(prev.completed),
+            cancelled: [cancelledItem, ...remainingCancelled],
+            hasOpportunities: true,
+          };
+        });
 
-      setCheckinQueueItems((prev) =>
-        (Array.isArray(prev) ? prev : []).filter(
-          (item) => String(item?.opportunityId || "") !== String(selectedOpportunityId)
-        )
-      );
+        setCheckinQueueItems((prev) =>
+          (Array.isArray(prev) ? prev : []).filter(
+            (item) => String(item?.opportunityId || "") !== targetEventId
+          )
+        );
 
-      setSelectedQueueItem(cancelledItem);
-      setShowCancelModal(false);
-      setCancelledExpanded(true);
+        setSelectedQueueItem(cancelledItem);
+        setShowCancelModal(false);
+        setCancelModalTarget(null);
+        setCancelledExpanded(true);
+        return;
+      }
+
+      if (target.source === "myevents") {
+        if (String(selectedMyEvent?.id || "") === targetEventId) {
+          setSelectedMyEvent(null);
+        }
+        setMyEventsToast({ type: "success", message: "Event cancelled." });
+        await refreshMyEventsData();
+        void fetchQueue();
+        setShowCancelModal(false);
+        setCancelModalTarget(null);
+      }
     } catch (error) {
-      setCancelError(error?.message || "Unable to cancel event.");
+      setCancelError(error?.message || (isDraftOpportunity ? "Unable to delete draft." : "Unable to cancel event."));
     } finally {
       setCancelLoading(false);
     }
@@ -2504,25 +2592,16 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
 
   async function handleMyEventCancel(eventRow) {
     if (!eventRow?.id) return;
-    try {
-      const response = await fetch(`/api/events/${encodeURIComponent(eventRow.id)}/cancel`, {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-          "X-CSRF-Token": csrfToken,
-        },
-        body: JSON.stringify({}),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || payload?.ok === false) {
-        throw new Error(payload?.error || "Unable to cancel event.");
-      }
-      setMyEventsToast({ type: "success", message: "Event cancelled." });
-      await refreshMyEventsData();
-    } catch (error) {
-      setMyEventsToast({ type: "error", message: error?.message || "Unable to cancel event." });
-    }
+    const isDraftEvent = String(eventRow?.status || "").toLowerCase() === "draft";
+    setCancelModalTarget({
+      source: "myevents",
+      eventId: String(eventRow.id),
+      isDraft: isDraftEvent,
+      title: eventRow?.title || "Event",
+      event: eventRow,
+    });
+    setCancelError("");
+    setShowCancelModal(true);
   }
 
   async function handleMyEventComplete(eventRow) {
@@ -2801,13 +2880,13 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
             >
               <i className="fas fa-pen me-1" aria-hidden="true"></i>Edit
             </button>
-            {isUpcoming && !isCancelled ? (
+            {(isDraft || isUpcoming) && !isCancelled ? (
               <button
                 type="button"
                 className="btn btn-link btn-sm p-0 text-danger"
                 onClick={() => handleMyEventCancel(eventRow)}
               >
-                <i className="fas fa-trash me-1" aria-hidden="true"></i>Cancel
+                <i className="fas fa-trash me-1" aria-hidden="true"></i>{isDraft ? "Delete Draft" : "Cancel"}
               </button>
             ) : null}
           </div>
@@ -3128,6 +3207,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
       selectedOpportunity.capacity == null ? null : safeNumber(selectedOpportunity.capacity, null);
     const fillPct = capacity == null ? 0 : fillPercent(approvedCount, capacity);
     const isCancelledOpportunity = String(selectedOpportunity.type || "") === "opp-cancelled";
+    const isDraftOpportunity = String(selectedOpportunity.type || "") === "opp-draft";
     const eventDateTimeLabel = formatEventDateTime(
       selectedOpportunity.startTime,
       selectedOpportunity.endTime,
@@ -3156,7 +3236,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
               onClick={openCancelOpportunityModal}
               disabled={isCancelledOpportunity}
             >
-              <i className="fas fa-trash me-1" aria-hidden="true"></i>Cancel
+              <i className="fas fa-trash me-1" aria-hidden="true"></i>{isDraftOpportunity ? "Delete Draft" : "Cancel"}
             </button>
           </div>
         </div>
@@ -4343,6 +4423,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
   const rightColumnClass = isReportsTab ? "col-12 col-md-9" : "col-12 col-md-8";
   const leftPanelTitle = isReportsTab ? "Filters" : activeTab === "myevents" ? "Event Queue" : "Ops Queue";
   const rightPanelTitle = isReportsTab ? "Reports Dashboard" : activeTab === "myevents" ? "Funding Detail" : "Detail Panel";
+  const isDraftCancelIntent = Boolean(cancelModalTarget?.isDraft);
 
   return (
     <div className="orgp-root">
@@ -4461,13 +4542,16 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
             if (e.target === e.currentTarget && !cancelLoading) {
               setShowCancelModal(false);
               setCancelError("");
+              setCancelModalTarget(null);
             }
           }}
         >
           <div className="modal-dialog modal-dialog-centered">
             <div className="modal-content" style={{ borderRadius: "16px" }}>
               <div className="modal-header">
-                <h5 className="modal-title">Cancel opportunity?</h5>
+                <h5 className="modal-title">
+                  {isDraftCancelIntent ? "Delete draft opportunity?" : "Cancel opportunity?"}
+                </h5>
                 <button
                   type="button"
                   className="btn-close"
@@ -4476,11 +4560,14 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
                     if (cancelLoading) return;
                     setShowCancelModal(false);
                     setCancelError("");
+                    setCancelModalTarget(null);
                   }}
                 ></button>
               </div>
               <div className="modal-body">
-                This will cancel this opportunity and move it to the Cancelled section.
+                {isDraftCancelIntent
+                  ? "This will permanently delete this draft. It will be removed from the Draft section and cannot be undone."
+                  : "This will cancel this opportunity and move it to the Cancelled section."}
               </div>
               <div className="modal-footer">
                 <button
@@ -4490,10 +4577,11 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
                     if (cancelLoading) return;
                     setShowCancelModal(false);
                     setCancelError("");
+                    setCancelModalTarget(null);
                   }}
                   disabled={cancelLoading}
                 >
-                  Keep Event
+                  {isDraftCancelIntent ? "Keep Draft" : "Keep Event"}
                 </button>
                 <button
                   type="button"
@@ -4501,7 +4589,13 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
                   onClick={confirmCancelOpportunity}
                   disabled={cancelLoading}
                 >
-                  {cancelLoading ? "Cancelling..." : "Yes, Cancel Event"}
+                  {cancelLoading
+                    ? isDraftCancelIntent
+                      ? "Deleting..."
+                      : "Cancelling..."
+                    : isDraftCancelIntent
+                      ? "Yes, Delete Draft"
+                      : "Yes, Cancel Event"}
                 </button>
               </div>
               {cancelError ? (

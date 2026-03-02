@@ -7,25 +7,18 @@ const TONES = [
   { value: "thoughtful", label: "Thoughtful" },
 ];
 
-function buildDefaultSubject(eventTitle) {
-  return eventTitle ? `Come to ${eventTitle}` : "Join me for this event";
-}
-
-function buildDefaultMessage(eventTitle) {
-  return eventTitle
-    ? `I’d love for you to join me for ${eventTitle}.` + "\n\nLet me know if you can make it!"
-    : "I’d love for you to join. Let me know if you can make it!";
-}
+const APPROVAL_REQUIRED_MESSAGE = "You can send this message after you have been approved";
 
 export function InviteModal({ open, onClose, eventId, eventTitle, onSent }) {
   const [inviteeEmail, setInviteeEmail] = useState("");
   const [inviteeName, setInviteeName] = useState("");
   const [tone, setTone] = useState("friendly");
-  const [subject, setSubject] = useState(buildDefaultSubject(eventTitle));
-  const [message, setMessage] = useState(buildDefaultMessage(eventTitle));
+  const [subjectPreview, setSubjectPreview] = useState("");
+  const [messagePreview, setMessagePreview] = useState("");
+  const [senderLabel, setSenderLabel] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [kaiSending, setKaiSending] = useState(false);
-  const [drafting, setDrafting] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
   const [error, setError] = useState(null);
   const [contacts, setContacts] = useState([]);
   const [loadedContacts, setLoadedContacts] = useState(false);
@@ -60,9 +53,52 @@ export function InviteModal({ open, onClose, eventId, eventTitle, onSent }) {
     if (!open) return;
     setError(null);
     setTone("friendly");
-    setSubject(buildDefaultSubject(eventTitle));
-    setMessage(buildDefaultMessage(eventTitle));
+    setSubjectPreview("");
+    setMessagePreview("");
+    setSenderLabel("");
   }, [open, eventTitle]);
+
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    setPreviewLoading(true);
+    setError(null);
+
+    fetch(`/api/events/${eventId}/invite-copy`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tone }),
+    })
+      .then(async (res) => {
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || !json?.ok) {
+          const err = new Error(json?.error || "Unable to draft copy");
+          err.code = json?.code;
+          throw err;
+        }
+        if (!alive) return;
+        setSubjectPreview(json.data?.subject || "");
+        setMessagePreview((json.data?.body || "").trim());
+        const senderName = typeof json.data?.sender_name === "string" ? json.data.sender_name.trim() : "";
+        const senderEmail = typeof json.data?.sender_email === "string" ? json.data.sender_email.trim() : "";
+        const label = senderEmail ? `${senderName || "A friend"} (${senderEmail})` : senderName;
+        setSenderLabel(label);
+      })
+      .catch((err) => {
+        if (!alive) return;
+        if (err?.code === "INVITE_APPROVAL_REQUIRED") {
+          window.alert(APPROVAL_REQUIRED_MESSAGE);
+        }
+        setError(err.message || "Unable to draft copy");
+      })
+      .finally(() => {
+        if (alive) setPreviewLoading(false);
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, [open, tone, eventId]);
 
   if (!open) return null;
 
@@ -71,89 +107,55 @@ export function InviteModal({ open, onClose, eventId, eventTitle, onSent }) {
       invitee_email: inviteeEmail.trim(),
       invitee_name: inviteeName.trim(),
       tone,
-      subject: sendByKai ? undefined : subject,
-      message: sendByKai ? undefined : message,
       send_by_kai: sendByKai,
     };
   }
 
+  async function handleInvite(sendByKai = false) {
+    if (!emailValid || submitting || kaiSending) return;
+    setError(null);
+    if (sendByKai) {
+      setKaiSending(true);
+    } else {
+      setSubmitting(true);
+    }
+    try {
+      const res = await fetch(`/api/events/${eventId}/invites`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildPayload(sendByKai)),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.ok) {
+        const err = new Error(json?.error || "Unable to send invite");
+        err.code = json?.code;
+        throw err;
+      }
+      resetFields();
+      window.dispatchEvent(new CustomEvent("gk:invite-sent", { detail: json.data }));
+      onSent?.(json.data);
+    } catch (err) {
+      if (err?.code === "INVITE_APPROVAL_REQUIRED") {
+        window.alert(APPROVAL_REQUIRED_MESSAGE);
+      }
+      setError(err.message || "Unable to send invite");
+    } finally {
+      if (sendByKai) {
+        setKaiSending(false);
+      } else {
+        setSubmitting(false);
+      }
+    }
+  }
+
   async function handleSubmit(e) {
     e?.preventDefault();
-    if (!emailValid || submitting) return;
-    setSubmitting(true);
-    setError(null);
-    try {
-      const res = await fetch(`/api/events/${eventId}/invites`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(buildPayload(false)),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json?.ok) {
-        throw new Error(json?.error || "Unable to send invite");
-      }
-      resetFields();
-      window.dispatchEvent(new CustomEvent("gk:invite-sent", { detail: json.data }));
-      onSent?.(json.data);
-    } catch (err) {
-      setError(err.message || "Unable to send invite");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  async function handleKaiSend() {
-    if (!emailValid || kaiSending) return;
-    setKaiSending(true);
-    setError(null);
-    try {
-      const res = await fetch(`/api/events/${eventId}/invites`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(buildPayload(true)),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json?.ok) {
-        throw new Error(json?.error || "Unable to send invite");
-      }
-      resetFields();
-      window.dispatchEvent(new CustomEvent("gk:invite-sent", { detail: json.data }));
-      onSent?.(json.data);
-    } catch (err) {
-      setError(err.message || "Unable to send invite");
-    } finally {
-      setKaiSending(false);
-    }
-  }
-
-  async function handleKaiDraft() {
-    if (drafting) return;
-    setDrafting(true);
-    setError(null);
-    try {
-      const res = await fetch(`/api/events/${eventId}/invite-copy`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tone }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json?.ok) {
-        throw new Error(json?.error || "Unable to draft copy");
-      }
-      setSubject(json.data?.subject || buildDefaultSubject(eventTitle));
-      setMessage((json.data?.body || buildDefaultMessage(eventTitle)).trim());
-    } catch (err) {
-      setError(err.message || "Unable to draft copy");
-    } finally {
-      setDrafting(false);
-    }
+    await handleInvite(false);
   }
 
   function resetFields() {
     setInviteeEmail("");
     setInviteeName("");
-    setSubject(buildDefaultSubject(eventTitle));
-    setMessage(buildDefaultMessage(eventTitle));
   }
 
   const modalMarkup = (
@@ -199,6 +201,7 @@ export function InviteModal({ open, onClose, eventId, eventTitle, onSent }) {
               placeholder="Friend's name"
             />
           </label>
+
           <div className="tone-row">
             <span>Tone</span>
             <div className="tone-pills">
@@ -214,31 +217,27 @@ export function InviteModal({ open, onClose, eventId, eventTitle, onSent }) {
               ))}
             </div>
           </div>
-          <div className="draft-row">
-            <button type="button" className="btn ghost" onClick={handleKaiDraft} disabled={drafting}>
-              {drafting ? "Drafting…" : "Draft with KAI"}
-            </button>
-            <small className="muted">KAI will pre-fill the message</small>
+
+          <div className="locked-note">
+            Message content is fixed by tone for safety and moderation.
           </div>
-          <label>
-            <span>Subject</span>
-            <input
-              type="text"
-              value={subject}
-              onChange={(e) => setSubject(e.target.value)}
-              placeholder={buildDefaultSubject(eventTitle)}
-            />
-          </label>
-          <label>
-            <span>Message</span>
-            <textarea
-              rows={4}
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              placeholder="Add a quick personal note"
-            />
-          </label>
+
+          <div className="preview-group" aria-live="polite">
+            <div className="preview-field">
+              <span>Subject</span>
+              <div className="preview-box">{previewLoading ? "Generating…" : subjectPreview || "-"}</div>
+            </div>
+            <div className="preview-field">
+              <span>Message</span>
+              <div className="preview-box multiline">{previewLoading ? "Generating…" : messagePreview || "-"}</div>
+            </div>
+            {!!senderLabel && (
+              <p className="preview-sender">Sender: {senderLabel}</p>
+            )}
+          </div>
+
           {error && <p className="error-text">{error}</p>}
+
           <div className="invite-actions">
             <button type="button" className="btn secondary" onClick={onClose} disabled={submitting || kaiSending}>
               Close
@@ -251,7 +250,7 @@ export function InviteModal({ open, onClose, eventId, eventTitle, onSent }) {
             type="button"
             className="btn full kai"
             disabled={!emailValid || kaiSending}
-            onClick={handleKaiSend}
+            onClick={() => handleInvite(true)}
           >
             {kaiSending ? "KAI is sending…" : "KAI Sends Email"}
           </button>
@@ -276,8 +275,8 @@ export function InviteModal({ open, onClose, eventId, eventTitle, onSent }) {
           background: #fff;
           border-radius: 16px;
           padding: 24px;
-          max-width: 460px;
-          width: 90%;
+          max-width: 520px;
+          width: 92%;
           box-shadow: 0 30px 80px rgba(15, 23, 42, 0.25);
         }
         .invite-panel h3 {
@@ -299,15 +298,11 @@ export function InviteModal({ open, onClose, eventId, eventTitle, onSent }) {
           font-weight: 600;
           color: #111827;
         }
-        label input,
-        label textarea {
+        label input {
           border: 1px solid #d1d5db;
           border-radius: 10px;
           padding: 10px 12px;
           font-size: 1rem;
-        }
-        label textarea {
-          resize: vertical;
         }
         .tone-row {
           display: flex;
@@ -333,11 +328,48 @@ export function InviteModal({ open, onClose, eventId, eventTitle, onSent }) {
           border-color: #ff5656;
           color: #c01f1f;
         }
-        .draft-row {
+        .locked-note {
+          font-size: 0.85rem;
+          color: #4b5563;
+          border: 1px solid #e5e7eb;
+          border-radius: 10px;
+          padding: 8px 10px;
+          background: #f8fafc;
+        }
+        .preview-group {
+          border: 1px solid #e5e7eb;
+          border-radius: 12px;
+          padding: 12px;
           display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 8px;
+          flex-direction: column;
+          gap: 10px;
+          background: #fff;
+        }
+        .preview-field {
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+        }
+        .preview-field > span {
+          font-weight: 600;
+          color: #111827;
+        }
+        .preview-box {
+          border: 1px solid #d1d5db;
+          border-radius: 10px;
+          padding: 10px 12px;
+          background: #f9fafb;
+          color: #111827;
+          min-height: 44px;
+        }
+        .preview-box.multiline {
+          white-space: pre-wrap;
+          min-height: 96px;
+        }
+        .preview-sender {
+          margin: 0;
+          font-size: 0.85rem;
+          color: #475569;
         }
         .error-text {
           color: #b91c1c;
@@ -364,11 +396,6 @@ export function InviteModal({ open, onClose, eventId, eventTitle, onSent }) {
         }
         .btn.secondary {
           background: #fff;
-        }
-        .btn.ghost {
-          border-color: #cbd5f5;
-          color: #455a7c;
-          background: #f8fafc;
         }
         .btn.full {
           width: 100%;

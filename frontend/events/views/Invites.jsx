@@ -22,6 +22,7 @@ export function Invites() {
   const [incoming, setIncoming] = useState(initialListState);
   const [outgoing, setOutgoing] = useState(initialListState);
   const [toast, setToast] = useState(null);
+  const [pendingActions, setPendingActions] = useState({});
 
   useEffect(() => {
     loadInvites("incoming");
@@ -82,8 +83,18 @@ export function Invites() {
   };
 
   const handleAction = async (inviteId, action) => {
+    const actionKey = `${inviteId}:${action}`;
+    if (pendingActions[actionKey]) return;
+    setPendingActions((prev) => ({ ...prev, [actionKey]: true }));
     const optimisticIndex = incoming.items.findIndex((invite) => invite.id === inviteId);
-    if (optimisticIndex === -1) return;
+    if (optimisticIndex === -1) {
+      setPendingActions((prev) => {
+        const next = { ...prev };
+        delete next[actionKey];
+        return next;
+      });
+      return;
+    }
     const removed = incoming.items[optimisticIndex];
     setIncoming((prev) => ({
       ...prev,
@@ -105,6 +116,85 @@ export function Invites() {
         items: [removed, ...prev.items],
       }));
       setToast({ type: "error", message: error.message || "Unable to update invite." });
+    } finally {
+      setPendingActions((prev) => {
+        const next = { ...prev };
+        delete next[actionKey];
+        return next;
+      });
+    }
+  };
+
+  const handleReport = async (inviteId) => {
+    const actionKey = `${inviteId}:report`;
+    if (pendingActions[actionKey]) return;
+    setPendingActions((prev) => ({ ...prev, [actionKey]: true }));
+    try {
+      const res = await fetch(`/api/invites/${inviteId}/report`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: "harassment_or_abuse" }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.ok) {
+        throw new Error(json?.error || "Unable to report invite");
+      }
+      setToast({ type: "success", message: "Invite reported. Our team will review it." });
+    } catch (error) {
+      console.error("Report invite failed:", error);
+      setToast({ type: "error", message: error.message || "Unable to report invite." });
+    } finally {
+      setPendingActions((prev) => {
+        const next = { ...prev };
+        delete next[actionKey];
+        return next;
+      });
+    }
+  };
+
+  const handleBlock = async (inviteId) => {
+    const actionKey = `${inviteId}:block`;
+    if (pendingActions[actionKey]) return;
+    setPendingActions((prev) => ({ ...prev, [actionKey]: true }));
+
+    const optimisticIndex = incoming.items.findIndex((invite) => invite.id === inviteId);
+    if (optimisticIndex === -1) {
+      setPendingActions((prev) => {
+        const next = { ...prev };
+        delete next[actionKey];
+        return next;
+      });
+      return;
+    }
+    const removed = incoming.items[optimisticIndex];
+    setIncoming((prev) => ({
+      ...prev,
+      items: prev.items.filter((invite) => invite.id !== inviteId),
+    }));
+
+    try {
+      const res = await fetch(`/api/invites/${inviteId}/block`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.ok) {
+        throw new Error(json?.error || "Unable to block sender");
+      }
+      setToast({ type: "success", message: "Sender blocked." });
+    } catch (error) {
+      console.error("Block sender failed:", error);
+      setIncoming((prev) => ({
+        ...prev,
+        items: [removed, ...prev.items],
+      }));
+      setToast({ type: "error", message: error.message || "Unable to block sender." });
+    } finally {
+      setPendingActions((prev) => {
+        const next = { ...prev };
+        delete next[actionKey];
+        return next;
+      });
     }
   };
 
@@ -137,6 +227,9 @@ export function Invites() {
             onLoadMore={() => loadInvites("incoming", true)}
             onAccept={(id) => handleAction(id, "accept")}
             onDecline={(id) => handleAction(id, "decline")}
+            onReport={handleReport}
+            onBlock={handleBlock}
+            pendingActions={pendingActions}
           />
         </section>
 
@@ -157,7 +250,7 @@ export function Invites() {
   );
 }
 
-function InviteList({ type, data, onLoadMore, onAccept, onDecline }) {
+function InviteList({ type, data, onLoadMore, onAccept, onDecline, onReport, onBlock, pendingActions = {} }) {
   const { items, loading, error, hasMore } = data;
   const isIncoming = type === "incoming";
 
@@ -222,11 +315,37 @@ function InviteList({ type, data, onLoadMore, onAccept, onDecline }) {
             <div className="actions">
               {isIncoming ? (
                 <>
-                  <button type="button" className="btn secondary" onClick={() => onDecline(invite.id)}>
+                  <button
+                    type="button"
+                    className="btn secondary"
+                    onClick={() => onDecline(invite.id)}
+                    disabled={Boolean(pendingActions[`${invite.id}:decline`])}
+                  >
                     Decline
                   </button>
-                  <button type="button" className="btn primary" onClick={() => onAccept(invite.id)}>
+                  <button
+                    type="button"
+                    className="btn primary"
+                    onClick={() => onAccept(invite.id)}
+                    disabled={Boolean(pendingActions[`${invite.id}:accept`])}
+                  >
                     Accept
+                  </button>
+                  <button
+                    type="button"
+                    className="btn subtle"
+                    onClick={() => onReport(invite.id)}
+                    disabled={Boolean(pendingActions[`${invite.id}:report`])}
+                  >
+                    Report
+                  </button>
+                  <button
+                    type="button"
+                    className="btn subtle"
+                    onClick={() => onBlock(invite.id)}
+                    disabled={Boolean(pendingActions[`${invite.id}:block`])}
+                  >
+                    Block sender
                   </button>
                 </>
               ) : (
@@ -371,6 +490,16 @@ const styles = `
   .btn.secondary {
     background:#fff;
     color:#111827;
+  }
+  .btn.subtle {
+    background:transparent;
+    border-color:transparent;
+    color:#64748b;
+    padding:6px 8px;
+  }
+  .btn.subtle:hover {
+    color:#334155;
+    text-decoration:underline;
   }
   .btn.block {
     width:100%;

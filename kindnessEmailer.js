@@ -114,6 +114,7 @@ export async function sendProspectInviteEmail({
   text,
   html,
   sendByKai = false,
+  replyTo,
 }) {
   const transport = getNudgesTransport();
   const safeHost = hostName || "A friend";
@@ -130,13 +131,17 @@ export async function sendProspectInviteEmail({
     <p>Hope to see you there! 💛</p>
   `;
 
-  await transport.sendMail({
+  const mail = {
     to,
     from: process.env.MAIL_FROM || `${sendByKai ? "KAI" : safeHost} via Get Kinder <${process.env.SMTP_USER}>`,
     subject: subject?.trim() || defaultSubject,
     text: text?.trim() || defaultText,
     html: html?.trim() || defaultHtml,
-  });
+  };
+  if (replyTo) {
+    mail.replyTo = replyTo;
+  }
+  await transport.sendMail(mail);
 }
 // Core delivery worker for nudges_outbox
 // Core delivery worker for nudges_outbox (emails)

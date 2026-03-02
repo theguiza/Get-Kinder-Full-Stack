@@ -175,6 +175,15 @@ export function EventDetail({ eventId }) {
     }
   }
 
+  function handleOpenInviteModal() {
+    const canInvite = evt.viewer_is_host || evt.viewer_rsvp_status === "accepted" || evt.viewer_rsvp_status === "checked_in";
+    if (!canInvite) {
+      window.alert("You can send this message after you have been approved");
+      return;
+    }
+    setInviteOpen(true);
+  }
+
   return (
     <div className="event-detail-panel">
       <button
@@ -284,7 +293,7 @@ export function EventDetail({ eventId }) {
         >
           {calendarLoading ? "Preparing…" : "Add to Calendar"}
         </button>
-        <button className="btn secondary event-action-btn" type="button" onClick={() => setInviteOpen(true)}>
+        <button className="btn secondary event-action-btn" type="button" onClick={handleOpenInviteModal}>
           Invite a Friend to Join
         </button>
       </div>
