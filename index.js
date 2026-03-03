@@ -26,7 +26,7 @@ import { FUNCTIONS } from "./openaiFunctions.js";
 import { makeDashboardController } from "./Backend/dashboardController.js";
 import { generateArcForQuiz } from "./services/ArcGenerator.js";
 import { verify as neoVerify, run as neoRun, close as neoClose } from './Backend/db/neo4j.js';
-import { deliverQueuedNudges } from './kindnessEmailer.js';
+import { deliverQueuedNudges, sendNudgeEmail } from './kindnessEmailer.js';
 const { fetchUserEmails, fetchKindnessPrompts, fetchEmailSubject } = await import("./fetchData.js");
 const { sendDailyKindnessPrompts } = await import("./kindnessEmailer.js");
 import cookieParser from "cookie-parser";
@@ -119,6 +119,44 @@ try {
 } catch (err) {
   console.error("‼️  Error connecting to Postgres:", err);
 }
+
+const PASSWORD_RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
+const PASSWORD_RESET_RESEND_WINDOW_MINUTES = 2;
+const MIN_PASSWORD_LENGTH = 8;
+
+function normalizeEmail(rawEmail) {
+  return typeof rawEmail === "string" ? rawEmail.trim().toLowerCase() : "";
+}
+
+function hashPasswordResetToken(token) {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
+
+function getAppBaseUrl(req) {
+  if (process.env.APP_BASE_URL) return process.env.APP_BASE_URL.replace(/\/+$/, "");
+  const host = req.get("host");
+  return `${req.protocol}://${host}`;
+}
+
+const FORGOT_PASSWORD_SUCCESS_MESSAGE =
+  "If an account exists for that email, we sent password reset instructions.";
+
+async function ensurePasswordResetColumns() {
+  await pool.query(`
+    ALTER TABLE public.userdata
+      ADD COLUMN IF NOT EXISTS reset_password_token_hash text,
+      ADD COLUMN IF NOT EXISTS reset_password_expires_at timestamptz,
+      ADD COLUMN IF NOT EXISTS reset_password_sent_at timestamptz;
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_userdata_reset_password_token_hash
+      ON public.userdata (reset_password_token_hash);
+  `);
+}
+
+ensurePasswordResetColumns()
+  .then(() => console.log("Password reset columns ready."))
+  .catch((err) => console.error("Could not initialize password reset columns:", err));
 
 
 // 7) Compute rootPath if needed for static files
@@ -578,6 +616,197 @@ app.post("/login", async (req, res, next) => {
   } catch (err) {
     console.error("Login error:", err);
     res.status(500).send("Internal server error");
+  }
+});
+app.get("/forgot-password", (req, res) => {
+  return res.render("forgot-password", { title: "Forgot Password", message: null, messageType: null });
+});
+
+app.post("/forgot-password", async (req, res) => {
+  const submittedEmail = normalizeEmail(req.body?.email);
+
+  try {
+    if (submittedEmail) {
+      const token = crypto.randomBytes(32).toString("hex");
+      const tokenHash = hashPasswordResetToken(token);
+      const expiresAt = new Date(Date.now() + PASSWORD_RESET_TOKEN_TTL_MS);
+
+      const { rows: [user] } = await pool.query(
+        `UPDATE public.userdata
+            SET reset_password_token_hash = $1,
+                reset_password_expires_at = $2,
+                reset_password_sent_at = NOW()
+          WHERE LOWER(email) = LOWER($3)
+            AND (
+              reset_password_sent_at IS NULL
+              OR reset_password_sent_at <= NOW() - ($4::int * INTERVAL '1 minute')
+            )
+          RETURNING firstname, email`,
+        [tokenHash, expiresAt, submittedEmail, PASSWORD_RESET_RESEND_WINDOW_MINUTES]
+      );
+
+      if (user) {
+        const resetUrl = `${getAppBaseUrl(req)}/reset-password?token=${encodeURIComponent(token)}`;
+        const firstName = (user.firstname || "there").trim() || "there";
+        const subject = "Reset your Get Kinder password";
+        const text = `Hi ${firstName},
+
+We received a request to reset your Get Kinder password.
+Reset it here: ${resetUrl}
+
+This link expires in 1 hour.
+If you did not request this, you can ignore this email.`;
+        const html = `
+          <p>Hi ${firstName},</p>
+          <p>We received a request to reset your Get Kinder password.</p>
+          <p><a href="${resetUrl}" target="_blank" rel="noopener">Reset your password</a></p>
+          <p>This link expires in 1 hour.</p>
+          <p>If you did not request this, you can ignore this email.</p>
+        `;
+
+        try {
+          await sendNudgeEmail({
+            to: user.email,
+            subject,
+            text,
+            html,
+            fromName: "Get Kinder"
+          });
+        } catch (mailErr) {
+          console.error("Forgot-password email failed:", mailErr);
+        }
+      }
+    }
+  } catch (err) {
+    console.error("Forgot-password flow error:", err);
+  }
+
+  return res.render("forgot-password", {
+    title: "Forgot Password",
+    message: FORGOT_PASSWORD_SUCCESS_MESSAGE,
+    messageType: "success",
+  });
+});
+
+app.get("/reset-password", async (req, res) => {
+  const token = typeof req.query?.token === "string" ? req.query.token.trim() : "";
+  if (!token) {
+    return res.status(400).render("reset-password", {
+      title: "Reset Password",
+      isValidToken: false,
+      token: "",
+      error: "This reset link is invalid or has expired.",
+    });
+  }
+
+  try {
+    const tokenHash = hashPasswordResetToken(token);
+    const { rows: [user] } = await pool.query(
+      `SELECT id
+         FROM public.userdata
+        WHERE reset_password_token_hash = $1
+          AND reset_password_expires_at > NOW()
+        LIMIT 1`,
+      [tokenHash]
+    );
+
+    if (!user) {
+      return res.status(400).render("reset-password", {
+        title: "Reset Password",
+        isValidToken: false,
+        token: "",
+        error: "This reset link is invalid or has expired.",
+      });
+    }
+
+    return res.render("reset-password", {
+      title: "Reset Password",
+      isValidToken: true,
+      token,
+      error: null,
+    });
+  } catch (err) {
+    console.error("Reset-password token validation failed:", err);
+    return res.status(500).render("reset-password", {
+      title: "Reset Password",
+      isValidToken: false,
+      token: "",
+      error: "Could not validate this link. Please request a new reset email.",
+    });
+  }
+});
+
+app.post("/reset-password", async (req, res) => {
+  const token = typeof req.body?.token === "string" ? req.body.token.trim() : "";
+  const password = typeof req.body?.password === "string" ? req.body.password : "";
+  const confirmPassword = typeof req.body?.confirmPassword === "string" ? req.body.confirmPassword : "";
+
+  if (!token) {
+    return res.status(400).render("reset-password", {
+      title: "Reset Password",
+      isValidToken: false,
+      token: "",
+      error: "This reset link is invalid or has expired.",
+    });
+  }
+
+  if (password.length < MIN_PASSWORD_LENGTH) {
+    return res.status(400).render("reset-password", {
+      title: "Reset Password",
+      isValidToken: true,
+      token,
+      error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`,
+    });
+  }
+
+  if (password !== confirmPassword) {
+    return res.status(400).render("reset-password", {
+      title: "Reset Password",
+      isValidToken: true,
+      token,
+      error: "Passwords do not match.",
+    });
+  }
+
+  try {
+    const tokenHash = hashPasswordResetToken(token);
+    const { rows: [user] } = await pool.query(
+      `SELECT id
+         FROM public.userdata
+        WHERE reset_password_token_hash = $1
+          AND reset_password_expires_at > NOW()
+        LIMIT 1`,
+      [tokenHash]
+    );
+
+    if (!user) {
+      return res.status(400).render("reset-password", {
+        title: "Reset Password",
+        isValidToken: false,
+        token: "",
+        error: "This reset link is invalid or has expired.",
+      });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    await pool.query(
+      `UPDATE public.userdata
+          SET password = $1,
+              reset_password_token_hash = NULL,
+              reset_password_expires_at = NULL
+        WHERE id = $2`,
+      [hashedPassword, user.id]
+    );
+
+    return res.redirect("/login?reset=1");
+  } catch (err) {
+    console.error("Reset-password submit failed:", err);
+    return res.status(500).render("reset-password", {
+      title: "Reset Password",
+      isValidToken: true,
+      token,
+      error: "Something went wrong while resetting your password. Please try again.",
+    });
   }
 });
 // 12.3) Logout Route
@@ -1337,7 +1566,14 @@ app.get("/accessability", (req, res) => res.render("accessability", { title: "Ac
 app.get("/privacy",      (req, res) => res.render("privacy",      { title: "Privacy Policy" }));
 app.get("/terms",        (req, res) => res.render("terms",        { title: "Terms of Service" }));
 // 14.1) Login and Register pages (GET)
-app.get("/login",    (req, res) => res.render("login",    { title: "Log In",     facebookAppId: process.env.FACEBOOK_APP_ID }));
+app.get("/login", (req, res) => {
+  const passwordResetSuccess = req.query.reset === "1";
+  return res.render("login", {
+    title: "Log In",
+    facebookAppId: process.env.FACEBOOK_APP_ID,
+    success: passwordResetSuccess ? "Password updated. You can log in now." : null,
+  });
+});
 app.get("/register", (req, res) => res.render("register", { title: "Sign Up" }));
 app.get("/404", (req, res) => res.render("404", { title: "404 ERROR" }));
 app.get("/error", (req, res) => res.render("error", { title: "500 ERROR" }));

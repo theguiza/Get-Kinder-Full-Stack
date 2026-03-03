@@ -42,6 +42,12 @@
     <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
   </div>
 <% } %>
+<% if (typeof success !== "undefined" && success) { %>
+  <div class="alert alert-success alert-dismissible fade show auto-dismiss" role="alert">
+    <%= success %>
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+  </div>
+<% } %>
   <section id="title"> 
     <body class="gradient-background">  
 <%- include("partials/site-header", { currentPage: "other" }) %>
@@ -74,7 +80,7 @@
             <input type="password" name="password" class="form-control" required placeholder="Password *">
           </div>
           <div class="login_remember_box mt-3 d-flex justify-content-end">
-            <a href="#" class="forget_password">Forgot Password</a>
+            <a href="/forgot-password" class="forget_password">Forgot Password</a>
           </div>
           <div class="login_btn_wrapper mt-4">
             <button type="submit" class="btn btn-primary w-100">Login</button>

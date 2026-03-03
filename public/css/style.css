@@ -389,15 +389,35 @@ background: #eee;
   padding-top: 0px; /* desktop header height */
 }
 
+.profile-body.forgot-password-page {
+  padding-top: 96px;
+}
+
+.forgot-password-wrapper {
+  padding-top: 1rem;
+}
+
 @media (max-width: 767.98px) {
   .login-signin-offset {
     margin-top: 1.5rem;
+  }
+
+  .profile-body.forgot-password-page {
+    padding-top: 88px;
   }
 }
 
 @media (min-width: 768px) {
   .register-signin-offset {
     margin-top: 2rem;
+  }
+
+  .profile-body.forgot-password-page {
+    padding-top: 112px;
+  }
+
+  .forgot-password-wrapper {
+    padding-top: 1.5rem;
   }
 }
 

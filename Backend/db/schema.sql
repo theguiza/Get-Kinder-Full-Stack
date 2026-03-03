@@ -794,7 +794,10 @@ CREATE TABLE public.userdata (
     known_connection text,
     desired_outcome text,
     hours_per_week integer,
-    age_bracket text
+    age_bracket text,
+    reset_password_token_hash text,
+    reset_password_expires_at timestamp with time zone,
+    reset_password_sent_at timestamp with time zone
 );
 
 
