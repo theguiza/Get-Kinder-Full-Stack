@@ -1,0 +1,25 @@
+<svg width="160" height="160" viewBox="0 0 160 160" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <title>Impact Credits</title>
+  <!-- Outer circle -->
+  <circle cx="80" cy="80" r="76" fill="white" stroke="#00ffab" stroke-width="3"/>
+  <!-- Coin 3 — back (bottom of stack) -->
+  <ellipse cx="80" cy="108" rx="34" ry="10" fill="#00b87a"/>
+  <rect x="46" y="96" width="68" height="12" fill="#00c98a"/>
+  <ellipse cx="80" cy="96" rx="34" ry="10" fill="#00ffab"/>
+  <ellipse cx="80" cy="96" rx="26" ry="7.5" fill="none" stroke="#00d99a" stroke-width="1.2" opacity="0.55"/>
+  <!-- Coin 2 — middle -->
+  <ellipse cx="80" cy="92" rx="34" ry="10" fill="#00c98a"/>
+  <rect x="46" y="80" width="68" height="12" fill="#00d99a"/>
+  <ellipse cx="80" cy="80" rx="34" ry="10" fill="#00ffab"/>
+  <ellipse cx="80" cy="80" rx="26" ry="7.5" fill="none" stroke="#00d99a" stroke-width="1.2" opacity="0.55"/>
+  <!-- Coin 1 — front (top of stack) -->
+  <ellipse cx="80" cy="76" rx="34" ry="10" fill="#00d99a"/>
+  <rect x="46" y="64" width="68" height="12" fill="#00e8a0"/>
+  <ellipse cx="80" cy="64" rx="34" ry="10" fill="#00ffab"/>
+  <ellipse cx="80" cy="64" rx="26" ry="7.5" fill="none" stroke="#00d99a" stroke-width="1.2" opacity="0.55"/>
+  <!-- K on top face -->
+  <text x="80" y="68.5"
+    text-anchor="middle"
+    font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif"
+    font-size="13" font-weight="800" fill="#007a52" opacity="0.85">K</text>
+</svg>

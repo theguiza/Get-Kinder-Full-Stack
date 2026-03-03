@@ -2,595 +2,664 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>How It Works | Get Kinder</title>
-  <meta name="description" content="Learn how volunteers, organizations, and donors use Get Kinder to create verified impact and earn Impact Credits.">
-  <meta property="og:title" content="How It Works | Get Kinder">
-  <meta property="og:description" content="See how the Get Kinder platform works for volunteers, organizations, and donors.">
-  <meta property="og:url" content="https://getkinder.ai/how-it-works">
-  <meta property="og:type" content="website">
-  <link rel="icon" href="/images/favicon.png" sizes="32x32" type="image/png">
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-SgOJa3DmI69IUzQ2PVdRZhwQ+dy64/BUtbMJw1MZ8t5HZApcHrRKUc4W0kG879m7" crossorigin="anonymous">
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
+  <!-- Bootstrap CDN -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+  <!-- Font Awesome CDN -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- Shared styles -->
   <link rel="stylesheet" href="/css/style.css">
-  <link rel="stylesheet" href="/css/how-it-works.css?<%= (typeof assetTag !== 'undefined' ? assetTag : '') %>">
+  <!-- Page styles -->
+  <link rel="stylesheet" href="/css/how-it-works.css?<%= assetTag %>">
 </head>
-<body>
-  <section id="title">
-    <%- include("partials/site-header", { currentPage: "how-it-works" }) %>
-  </section>
+<body class="hiw-page" style="padding-top: 96px;">
 
-  <main class="how-it-works-page">
-    <section id="top" class="how-section how-hero">
-      <div class="container">
-        <div class="row g-4 align-items-center">
-          <div class="col-12 col-lg-6 d-flex flex-column">
-            <h1 class="order-1" style="color:#ff5656;">One Platform. Two Ways to Contribute. Infinite Impact. You Give, We Reward. </h1>
-            <p class="lead-text order-2">
-              Get Kinder connects volunteers, organizations, and donors in one transparent loop. Verified attendance and funding attribution work together so impact is trust-first, visible, and rewarded.
-            </p>
-            <div class="loop-card d-md-none order-3 hero-mobile-visual">
-              <img src="/images/get-kinder-impact-loop.svg" class="impact-loop-image" alt="The Get Kinder Impact Loop connecting donors, organizations, and volunteers">
-            </div>
-            <div class="cta-row order-5 order-md-3">
-              <% if (user) { %>
-                <a class="btn btn-primary btn-lg" href="/events">Volunteer</a>
-              <% } else { %>
-                <a class="btn btn-primary btn-lg" href="events">Volunteer</a>
-              <% } %>
-              <a class="btn btn-outline-secondary btn-lg" href="org-portal">Host an opportunity</a>
-              <a class="btn btn-outline-dark btn-lg" href="/donate">Donate</a>
-            </div>
-          </div>
-          <div class="col-12 col-lg-6 d-none d-md-block">
-            <div class="loop-card">
-              <img src="/images/get-kinder-impact-loop.svg" class="impact-loop-image" alt="The Get Kinder Impact Loop connecting donors, organizations, and volunteers">
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
+  <%- include("partials/site-header", { currentPage: "how-it-works" }) %>
 
-    <section class="sticky-jump-nav" aria-label="Section navigation">
-      <div class="container d-none d-md-block">
-        <nav class="nav nav-tabs hiw-jump-tabs" role="tablist" aria-label="How it works sections">
-          <a class="nav-link jump-tab" href="#the-loop" role="tab">The Loop</a>
-          <a class="nav-link jump-tab" href="#volunteers" role="tab">Volunteers</a>
-          <a class="nav-link jump-tab" href="#organizations" role="tab">Organizations</a>
-          <a class="nav-link jump-tab" href="#donors" role="tab">Donors</a>
-          <a class="nav-link jump-tab" href="#our-magic" role="tab">Our Magic</a>
-          <a class="nav-link jump-tab" href="#credits" role="tab">Impact Credits</a>
-          <a class="nav-link jump-tab" href="#transparency" role="tab">Transparency</a>
-          <a class="nav-link jump-tab" href="#trust" role="tab">Trust</a>
-          <a class="nav-link jump-tab" href="#faq" role="tab">FAQ</a>
-        </nav>
-      </div>
-      <div class="container d-md-none">
-        <label class="jump-label" for="jumpToSection">Jump to…</label>
-        <select id="jumpToSection" class="form-select jump-select" aria-label="Jump to section">
-          <option value="">Jump to…</option>
-          <option value="#the-loop">The Loop</option>
-          <option value="#volunteers">Volunteers</option>
-          <option value="#organizations">Organizations</option>
-          <option value="#donors">Donors</option>
-          <option value="#our-magic">Our Magic</option>
-          <option value="#credits">Impact Credits</option>
-          <option value="#transparency">Transparency</option>
-          <option value="#trust">Trust</option>
-          <option value="#faq">FAQ</option>
-        </select>
-      </div>
-    </section>
-
-    <section id="the-loop" class="how-section">
-      <div class="container">
-        <h2>How it works, end-to-end</h2>
-        <div class="row g-3 mt-1">
-          <div class="col-12 col-md-6 col-lg-4">
-            <article class="step-card">
-              <p class="step-number">Step 1</p>
-              <h3>Donate (or fund)</h3>
-              <p>Donations add credits to a community funding pool.</p>
-            </article>
-          </div>
-          <div class="col-12 col-md-6 col-lg-4">
-            <article class="step-card">
-              <p class="step-number">Step 2</p>
-              <h3>Organizations post opportunities</h3>
-              <p>Needs, skills, capacity, and verification method are defined.</p>
-            </article>
-          </div>
-          <div class="col-12 col-md-6 col-lg-4">
-            <article class="step-card">
-              <p class="step-number">Step 3</p>
-              <h3>Volunteers match + RSVP</h3>
-              <p>RSVP is “Pending Approval”—it reserves a spot, not a reward.</p>
-            </article>
-          </div>
-          <div class="col-12 col-md-6 col-lg-4">
-            <article class="step-card">
-              <p class="step-number">Step 4</p>
-              <h3>Attend + check in</h3>
-              <p>Simple check-in methods; attendance is recorded.</p>
-            </article>
-          </div>
-          <div class="col-12 col-lg-8">
-            <article class="step-card">
-              <p class="step-number">Step 5</p>
-              <h3>Host verifies attendance</h3>
-              <p>Verification triggers Impact Credits for volunteers AND updates donor attribution/receipts for the funded portion (may be pending if pool is low).</p>
-            </article>
-          </div>
-        </div>
-        <div class="trust-strip">
-          <div class="trust-item"><i class="fas fa-check-circle" aria-hidden="true"></i> Verified attendance</div>
-          <div class="trust-item"><i class="fas fa-user-shield" aria-hidden="true"></i> Anonymized donor reporting</div>
-          <div class="trust-item"><i class="fas fa-layer-group" aria-hidden="true"></i> No double-counting for the same shift</div>
-        </div>
-      </div>
-    </section>
-
-    <section id="value" class="how-section">
-      <div class="container">
-        <h2>Value for everyone in the loop</h2>
-        <p class="section-subhead">Each side gets something real—so participation compounds.</p>
-        <div class="row g-3 mt-1 role-grid">
-          <div class="col-12 col-lg-4">
-            <article id="volunteers" class="role-card">
-              <h3>Volunteers</h3>
-              <p class="role-tagline">Utility + meaning.</p>
-              <ul class="role-list">
-                <li>Find local opportunities that fit your schedule + interests</li>
-                <li>Earn Impact Credits after verified attendance (not on RSVP)</li>
-                <li>Build a shareable impact profile (skills, hours, causes)</li>
-                <li>Redeem in-app perks (MVP catalog)</li>
-              </ul>
-              <p class="proof-microline">RSVP is Pending Approval. You earn when an organizer verifies attendance.</p>
-            </article>
-          </div>
-          <div class="col-12 col-lg-4">
-            <article id="organizations" class="role-card">
-              <h3>Organizations</h3>
-              <p class="role-tagline">Reliable help, less admin.</p>
-              <ul class="role-list">
-                <li>Post opportunities with capacity + skills</li>
-                <li>Manage RSVPs with clear statuses</li>
-                <li>Verify attendance quickly (Verify action)</li>
-                <li>Verified participation triggers volunteer credits + donor-auditable trail</li>
-              </ul>
-              <p class="proof-microline">Verification is the gate that turns participation into trackable outcomes.</p>
-            </article>
-          </div>
-          <div class="col-12 col-lg-4">
-            <article id="donors" class="role-card">
-              <h3>Donors</h3>
-              <p class="role-tagline">Fund verified impact you can follow.</p>
-              <ul class="role-list">
-                <li>Donations add credits to a pool that funds verified shifts</li>
-                <li>Attribution/receipts show funded outcomes (anonymized)</li>
-                <li>See funded vs pending when pool is temporarily low</li>
-                <li>Support local needs with transparency</li>
-              </ul>
-              <p class="proof-microline">Donor attribution updates when volunteers are verified (receipts).</p>
-            </article>
-          </div>
-        </div>
-        <p class="alignment-strip">
-          <i class="fas fa-link" aria-hidden="true"></i>
-          Volunteers show up. Orgs verify. Donors fund verified outcomes. Everyone can see the loop.
+  <!-- ═══ HERO ═══════════════════════════════════ -->
+  <div style="border-bottom: 1px solid #e2dcd4;">
+    <div class="hiw-hero">
+      <div>
+        <p class="hiw-hero__eyebrow">How It Works</p>
+        <h1 class="hiw-hero__h1">
+          You're ready to help.<br>
+          <em>Here's exactly how.</em>
+        </h1>
+        <p class="hiw-hero__sub">
+          Get Kinder connects volunteers, organizations, and donors in
+          one transparent loop. Your time, your money, and your cause
+          are finally connected to each other creating more impact than ever before, and it is more rewarding.
         </p>
-      </div>
-    </section>
-
-    <section id="our-magic" class="how-section">
-      <div class="container">
-        <h2>What makes it work</h2>
-        <p class="section-subhead">A few simple mechanics that turn goodwill into repeatable impact.</p>
-        <div class="row g-3 mt-1">
-          <div class="col-12 col-md-6">
-            <article class="magic-feature">
-              <div class="magic-icon" aria-hidden="true"><i class="fas fa-compass"></i></div>
-              <div>
-                <h3>Matching</h3>
-                <p>Better matching as you share preferences (causes, skills, availability).</p>
-              </div>
-            </article>
-          </div>
-          <div class="col-12 col-md-6">
-            <article class="magic-feature">
-              <div class="magic-icon" aria-hidden="true"><i class="fas fa-award"></i></div>
-              <div>
-                <h3>Recognition loop</h3>
-                <p>Verified attendance → Impact Credits + progress you can see.</p>
-              </div>
-            </article>
-          </div>
-          <div class="col-12 col-md-6">
-            <article class="magic-feature">
-              <div class="magic-icon" aria-hidden="true"><i class="fas fa-receipt"></i></div>
-              <div>
-                <h3>Traceability</h3>
-                <p>Donations → pool credits → funded verified outcomes (with receipts).</p>
-              </div>
-            </article>
-          </div>
-          <div class="col-12 col-md-6">
-            <article class="magic-feature">
-              <div class="magic-icon" aria-hidden="true"><i class="fas fa-id-card"></i></div>
-              <div>
-                <h3>Shareable impact profile</h3>
-                <p>Build an impact profile you can share (schools, employers, friends).</p>
-              </div>
-            </article>
-          </div>
-        </div>
-        <p class="roadmap-note">Roadmap: deeper coordination tools for organizations (without changing the verification gate).</p>
-      </div>
-    </section>
-
-    <section id="credits" class="how-section">
-      <div class="container">
-        <h2>Impact Credits</h2>
-        <p class="section-subhead">A simple way to recognize verified help—without turning volunteering into wages.</p>
-        <div class="row g-3 mt-1 credits-grid">
-          <div class="col-12 col-lg-6">
-            <article class="credit-card">
-              <h3>What they are</h3>
-              <ul class="role-list">
-                <li>Earned when an organizer verifies attendance (not on RSVP)</li>
-                <li>Stored in your in-app wallet</li>
-                <li>Redeemable for in-app perks (MVP)</li>
-              </ul>
-            </article>
-          </div>
-          <div class="col-12 col-lg-6">
-            <article class="credit-card">
-              <h3>What they are not</h3>
-              <ul class="role-list">
-                <li>Not wages</li>
-                <li>No guaranteed cash value</li>
-                <li>Not a promise of crypto conversion (future plans TBD)</li>
-              </ul>
-            </article>
-          </div>
-        </div>
-        <p class="credits-disclaimer credits-disclaimer-prominent">“Impact Credits are not wages and have no guaranteed cash value.”</p>
-        <p class="proof-microline">RSVP is ‘Pending Approval’.</p>
-      </div>
-    </section>
-
-    <section id="transparency" class="how-section">
-      <div class="container">
-        <h2>Transparent funding you can follow</h2>
-        <div class="row g-3 mt-1 align-items-stretch">
-          <div class="col-12 col-lg-6">
-            <article class="transparency-card">
-              <ul class="role-list">
-                <li>Donations add credits to a funding pool</li>
-                <li>When a volunteer is verified, the system attempts to fund that verified outcome from the pool</li>
-                <li>Donor attribution/receipts update for the funded portion (donors are attributed)</li>
-                <li>If the pool is temporarily low, funding can be partially funded or pending until more credits are added</li>
-              </ul>
-              <p class="proof-microline">Donor receipts do not include volunteer personal information.</p>
-            </article>
-          </div>
-          <div class="col-12 col-lg-6">
-            <article class="receipt-card">
-              <div class="receipt-header">
-                <h3>Sample Receipt (Example)</h3>
-                <span class="receipt-badge partial">Partially funded</span>
-              </div>
-              <div class="receipt-row"><span>Event</span><strong>Neighborhood Food Drive</strong></div>
-              <div class="receipt-row"><span>Verified minutes</span><strong>120 min</strong></div>
-              <div class="receipt-row"><span>Credits funded</span><strong>80</strong></div>
-              <div class="receipt-row"><span>Pending credits</span><strong>20</strong></div>
-              <div class="receipt-status-options">
-                <span class="receipt-badge funded">Funded</span>
-                <span class="receipt-badge partial">Partially funded</span>
-                <span class="receipt-badge pending">Pending</span>
-              </div>
-              <p class="receipt-note">Example receipt shown. Volunteers are anonymized.</p>
-            </article>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section id="trust" class="how-section">
-      <div class="container">
-        <h2>Built for trust</h2>
-        <div class="row g-3 mt-1">
-          <div class="col-12 col-sm-6 col-xl-3">
-            <article class="trust-proof-card">
-              <div class="trust-proof-icon" aria-hidden="true"><i class="fas fa-circle-check"></i></div>
-              <h3>Verification required</h3>
-              <p>RSVP is not verification. Credits post only after Verify.</p>
-            </article>
-          </div>
-          <div class="col-12 col-sm-6 col-xl-3">
-            <article class="trust-proof-card">
-              <div class="trust-proof-icon" aria-hidden="true"><i class="fas fa-layer-group"></i></div>
-              <h3>No double counting</h3>
-              <p>One verified shift = one earn.</p>
-            </article>
-          </div>
-          <div class="col-12 col-sm-6 col-xl-3">
-            <article class="trust-proof-card">
-              <div class="trust-proof-icon" aria-hidden="true"><i class="fas fa-user-shield"></i></div>
-              <h3>Anonymized reporting</h3>
-              <p>Donors see outcomes, not volunteer identities.</p>
-            </article>
-          </div>
-          <div class="col-12 col-sm-6 col-xl-3">
-            <article class="trust-proof-card">
-              <div class="trust-proof-icon" aria-hidden="true"><i class="fas fa-list-check"></i></div>
-              <h3>Explainable pool history</h3>
-              <p>Pool balance changes are tied to clear funding actions.</p>
-            </article>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section id="faq" class="how-section">
-      <div class="container">
-        <h2>FAQ</h2>
-        <div class="accordion faq-accordion mt-3" id="hiwFaqAccordion">
-          <div class="accordion-item">
-            <h3 class="accordion-header" id="hiwFaqHeadingOne">
-              <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#hiwFaqCollapseOne" aria-expanded="true" aria-controls="hiwFaqCollapseOne">
-                <i class="fas fa-coins" aria-hidden="true"></i>
-                <span>When do I earn Impact Credits?</span>
-              </button>
-            </h3>
-            <div id="hiwFaqCollapseOne" class="accordion-collapse collapse show" aria-labelledby="hiwFaqHeadingOne" data-bs-parent="#hiwFaqAccordion">
-              <div class="accordion-body">
-                When an organizer verifies your attendance after the event. RSVP alone does not earn credits.
-              </div>
-            </div>
-          </div>
-
-          <div class="accordion-item">
-            <h3 class="accordion-header" id="hiwFaqHeadingTwo">
-              <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hiwFaqCollapseTwo" aria-expanded="false" aria-controls="hiwFaqCollapseTwo">
-                <i class="fas fa-hourglass-half" aria-hidden="true"></i>
-                <span>Does RSVP earn credits?</span>
-              </button>
-            </h3>
-            <div id="hiwFaqCollapseTwo" class="accordion-collapse collapse" aria-labelledby="hiwFaqHeadingTwo" data-bs-parent="#hiwFaqAccordion">
-              <div class="accordion-body">
-                No. RSVP is a join request (shown as ‘Pending Approval’) and does not confirm attendance.
-              </div>
-            </div>
-          </div>
-
-          <div class="accordion-item">
-            <h3 class="accordion-header" id="hiwFaqHeadingThree">
-              <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hiwFaqCollapseThree" aria-expanded="false" aria-controls="hiwFaqCollapseThree">
-                <i class="fas fa-user-check" aria-hidden="true"></i>
-                <span>How does verification work?</span>
-              </button>
-            </h3>
-            <div id="hiwFaqCollapseThree" class="accordion-collapse collapse" aria-labelledby="hiwFaqHeadingThree" data-bs-parent="#hiwFaqAccordion">
-              <div class="accordion-body">
-                After the event, the host confirms who attended using the Verify action.
-              </div>
-            </div>
-          </div>
-
-          <div class="accordion-item">
-            <h3 class="accordion-header" id="hiwFaqHeadingFour">
-              <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hiwFaqCollapseFour" aria-expanded="false" aria-controls="hiwFaqCollapseFour">
-                <i class="fas fa-gift" aria-hidden="true"></i>
-                <span>What can I redeem credits for?</span>
-              </button>
-            </h3>
-            <div id="hiwFaqCollapseFour" class="accordion-collapse collapse" aria-labelledby="hiwFaqHeadingFour" data-bs-parent="#hiwFaqAccordion">
-              <div class="accordion-body">
-                In the MVP, credits can be redeemed in-app for a small catalog of perks (subject to change).
-              </div>
-            </div>
-          </div>
-
-          <div class="accordion-item">
-            <h3 class="accordion-header" id="hiwFaqHeadingFive">
-              <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hiwFaqCollapseFive" aria-expanded="false" aria-controls="hiwFaqCollapseFive">
-                <i class="fas fa-user-secret" aria-hidden="true"></i>
-                <span>Will donors see my identity?</span>
-              </button>
-            </h3>
-            <div id="hiwFaqCollapseFive" class="accordion-collapse collapse" aria-labelledby="hiwFaqHeadingFive" data-bs-parent="#hiwFaqAccordion">
-              <div class="accordion-body">
-                No. Donor receipts show outcomes funded, but do not include volunteer personal information.
-              </div>
-            </div>
-          </div>
-
-          <div class="accordion-item">
-            <h3 class="accordion-header" id="hiwFaqHeadingSix">
-              <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hiwFaqCollapseSix" aria-expanded="false" aria-controls="hiwFaqCollapseSix">
-                <i class="fas fa-scale-balanced" aria-hidden="true"></i>
-                <span>What if funding is low when I’m verified?</span>
-              </button>
-            </h3>
-            <div id="hiwFaqCollapseSix" class="accordion-collapse collapse" aria-labelledby="hiwFaqHeadingSix" data-bs-parent="#hiwFaqAccordion">
-              <div class="accordion-body">
-                You can still earn credits when verified. Donor attribution/receipts may show partial or pending funding until the pool is topped up.
-              </div>
-            </div>
-          </div>
-
-          <div class="accordion-item">
-            <h3 class="accordion-header" id="hiwFaqHeadingSeven">
-              <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hiwFaqCollapseSeven" aria-expanded="false" aria-controls="hiwFaqCollapseSeven">
-                <i class="fas fa-wallet" aria-hidden="true"></i>
-                <span>Can I cash out or convert credits to crypto?</span>
-              </button>
-            </h3>
-            <div id="hiwFaqCollapseSeven" class="accordion-collapse collapse" aria-labelledby="hiwFaqHeadingSeven" data-bs-parent="#hiwFaqAccordion">
-              <div class="accordion-body">
-                Not in the MVP. Any future conversion options are TBD.
-              </div>
-            </div>
-          </div>
-
-          <div class="accordion-item">
-            <h3 class="accordion-header" id="hiwFaqHeadingEight">
-              <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#hiwFaqCollapseEight" aria-expanded="false" aria-controls="hiwFaqCollapseEight">
-                <i class="fas fa-pen-to-square" aria-hidden="true"></i>
-                <span>What if a verification was made by mistake?</span>
-              </button>
-            </h3>
-            <div id="hiwFaqCollapseEight" class="accordion-collapse collapse" aria-labelledby="hiwFaqHeadingEight" data-bs-parent="#hiwFaqAccordion">
-              <div class="accordion-body">
-                We’re building clear review and correction workflows. Specific reversal policies are still being finalized (TBD).
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="how-section how-bottom-cta">
-      <div class="container">
-        <div class="cta-strip-card">
-          <h2>Ready to join the loop?</h2>
-          <div class="cta-strip-actions">
-            <% if (user) { %>
-              <a class="btn btn-primary btn-lg" href="/events">Volunteer</a>
-            <% } else { %>
-              <a class="btn btn-primary btn-lg" href="events">Volunteer</a>
-            <% } %>
-            <a class="btn btn-outline-secondary btn-lg" href="org-portal">Host an opportunity</a>
-            <a class="btn btn-outline-dark btn-lg" href="/donate">Donate</a>
-          </div>
-          <p class="cta-strip-microcopy">Verified attendance. Transparent funding. Real community outcomes.</p>
-          <a class="back-to-top-link" href="#top">
-            <i class="fas fa-arrow-up" aria-hidden="true"></i>
-            <span>Back to top</span>
+        <p class="hiw-hero__find-label">Find your place in the loop</p>
+        <div class="hiw-audience-pills">
+          <a href="#volunteers" class="hiw-audience-pill">
+            <span class="hiw-audience-pill__dot" style="background:#FFAA00;"></span>
+            I want to volunteer my time &amp; skills
+            <span class="hiw-audience-pill__arrow">→</span>
+          </a>
+          <a href="#organizations" class="hiw-audience-pill">
+            <span class="hiw-audience-pill__dot" style="background:#455a7c;"></span>
+            I run an organization or cause
+            <span class="hiw-audience-pill__arrow">→</span>
+          </a>
+          <a href="#donors" class="hiw-audience-pill">
+            <span class="hiw-audience-pill__dot" style="background:#ff5656;"></span>
+            I want to fund verified impact
+            <span class="hiw-audience-pill__arrow">→</span>
           </a>
         </div>
       </div>
-    </section>
-  </main>
+      <div class="hiw-hero__svg-wrap">
+        <img
+          src="/images/get-kinder-impact-loop.svg"
+          alt="The Get Kinder Impact Loop connecting donors, organizations, and volunteers"
+        >
+      </div>
+    </div>
+  </div>
 
-  <div class="modal fade" id="logoutModal" tabindex="-1" aria-labelledby="logoutModalLabel" aria-hidden="true">
-    <div class="modal-dialog">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h5 class="modal-title">Confirm Logout</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+  <!-- ═══ JUMP NAV ════════════════════════════════ -->
+  <nav class="hiw-jump-nav" aria-label="Page sections">
+    <a href="#loop">The Loop</a>
+    <a href="#volunteers">Volunteers</a>
+    <a href="#organizations">Organizations</a>
+    <a href="#donors">Donors</a>
+    <a href="#credits">Impact Credits</a>
+    <a href="#trust">Trust</a>
+    <a href="#faq">FAQ</a>
+  </nav>
+
+  <!-- ═══ 5-STEP LOOP ═════════════════════════════ -->
+  <section id="loop" class="hiw-section">
+    <p class="hiw-eyebrow">End-to-End</p>
+    <h2 class="hiw-h2">One loop. Three sides. Every action makes the next one possible.</h2>
+    <p class="hiw-lead">
+      Each participant gets something real — and gives something real.
+      That's not charity. That's a system that sustains itself.
+    </p>
+    <div class="hiw-steps-grid">
+      <div class="hiw-step">
+        <p class="hiw-step__num">01</p>
+        <span class="hiw-step__icon" aria-hidden="true">
+          <svg width="38" height="38" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" style="display:block;">
+            <circle cx="100" cy="100" r="90" fill="none" stroke="#ff5656" stroke-width="1" opacity="0.15"/>
+            <circle cx="100" cy="100" r="70" fill="none" stroke="#ff5656" stroke-width="1.5" opacity="0.25"/>
+            <circle cx="100" cy="100" r="52" fill="none" stroke="#ff5656" stroke-width="2" opacity="0.35"/>
+            <circle cx="100" cy="100" r="40" fill="none" stroke="#ff5656" stroke-width="2" opacity="0.45"/>
+            <circle cx="100" cy="100" r="28" fill="#ff5656"/>
+            <path d="M 100 92 C 100 92, 93 85, 88 85 C 82 85, 78 89, 78 95 C 78 104, 100 115, 100 115 C 100 115, 122 104, 122 95 C 122 89, 118 85, 112 85 C 107 85, 100 92, 100 92 Z" fill="#ffffff"/>
+          </svg>
+        </span>
+        <p class="hiw-step__title">Donors fund the pool</p>
+        <p class="hiw-step__desc">
+          Every donation adds to a community funding pool. Your money
+          waits to be paired with verified impact — nothing disappears.
+        </p>
+        <div class="hiw-step__connector">→</div>
+      </div>
+      <div class="hiw-step">
+        <p class="hiw-step__num">02</p>
+        <span class="hiw-step__icon" aria-hidden="true">
+          <svg width="38" height="38" viewBox="0 0 160 160" xmlns="http://www.w3.org/2000/svg" style="display:block;">
+            <circle cx="80" cy="80" r="20" fill="#455a7c" opacity="0.9"/>
+            <line x1="80" y1="80" x2="80" y2="25" stroke="#455a7c" stroke-width="2" opacity="0.4"/>
+            <line x1="80" y1="80" x2="135" y2="80" stroke="#455a7c" stroke-width="2" opacity="0.4"/>
+            <line x1="80" y1="80" x2="80" y2="135" stroke="#455a7c" stroke-width="2" opacity="0.4"/>
+            <line x1="80" y1="80" x2="25" y2="80" stroke="#455a7c" stroke-width="2" opacity="0.4"/>
+            <line x1="80" y1="80" x2="115" y2="45" stroke="#455a7c" stroke-width="2" opacity="0.4"/>
+            <line x1="80" y1="80" x2="115" y2="115" stroke="#455a7c" stroke-width="2" opacity="0.4"/>
+            <line x1="80" y1="80" x2="45" y2="115" stroke="#455a7c" stroke-width="2" opacity="0.4"/>
+            <line x1="80" y1="80" x2="45" y2="45" stroke="#455a7c" stroke-width="2" opacity="0.4"/>
+            <circle cx="80" cy="25" r="10" fill="#455a7c"/>
+            <circle cx="135" cy="80" r="10" fill="#455a7c"/>
+            <circle cx="80" cy="135" r="10" fill="#455a7c"/>
+            <circle cx="25" cy="80" r="10" fill="#455a7c"/>
+            <circle cx="115" cy="45" r="8" fill="#455a7c" opacity="0.8"/>
+            <circle cx="115" cy="115" r="8" fill="#455a7c" opacity="0.8"/>
+            <circle cx="45" cy="115" r="8" fill="#455a7c" opacity="0.8"/>
+            <circle cx="45" cy="45" r="8" fill="#455a7c" opacity="0.8"/>
+            <rect x="72" y="72" width="16" height="16" fill="#ffffff" opacity="0.9" rx="2"/>
+            <line x1="74" y1="76" x2="86" y2="76" stroke="#455a7c" stroke-width="1"/>
+            <line x1="74" y1="80" x2="86" y2="80" stroke="#455a7c" stroke-width="1"/>
+            <line x1="74" y1="84" x2="86" y2="84" stroke="#455a7c" stroke-width="1"/>
+          </svg>
+        </span>
+        <p class="hiw-step__title">Organizations post opportunities</p>
+        <p class="hiw-step__desc">
+          Clear role descriptions, skills needed, and availability
+          windows. No vague listings. No wasted trips.
+        </p>
+        <div class="hiw-step__connector">→</div>
+      </div>
+      <div class="hiw-step">
+        <p class="hiw-step__num">03</p>
+        <span class="hiw-step__icon" aria-hidden="true">
+          <svg width="34" height="34" viewBox="0 0 160 160" xmlns="http://www.w3.org/2000/svg" style="display:block;">
+            <g opacity="0.5">
+              <line x1="80" y1="80" x2="80" y2="20" stroke="#FFB84D" stroke-width="3" stroke-linecap="round"/>
+              <line x1="80" y1="80" x2="120" y2="40" stroke="#FFB84D" stroke-width="2.5" stroke-linecap="round"/>
+              <line x1="80" y1="80" x2="140" y2="80" stroke="#FFB84D" stroke-width="3" stroke-linecap="round"/>
+              <line x1="80" y1="80" x2="120" y2="120" stroke="#FFB84D" stroke-width="2.5" stroke-linecap="round"/>
+              <line x1="80" y1="80" x2="80" y2="140" stroke="#FFB84D" stroke-width="3" stroke-linecap="round"/>
+              <line x1="80" y1="80" x2="40" y2="120" stroke="#FFB84D" stroke-width="2.5" stroke-linecap="round"/>
+              <line x1="80" y1="80" x2="20" y2="80" stroke="#FFB84D" stroke-width="3" stroke-linecap="round"/>
+              <line x1="80" y1="80" x2="40" y2="40" stroke="#FFB84D" stroke-width="2.5" stroke-linecap="round"/>
+            </g>
+            <circle cx="80" cy="80" r="45" fill="#FFB84D" opacity="0.15"/>
+            <circle cx="80" cy="80" r="35" fill="#FFB84D" opacity="0.2"/>
+            <circle cx="80" cy="65" r="12" fill="#FFB84D"/>
+            <path d="M 80 77 L 80 105" stroke="#FFB84D" stroke-width="8" stroke-linecap="round"/>
+            <path d="M 80 82 L 65 70" stroke="#FFB84D" stroke-width="6" stroke-linecap="round"/>
+            <path d="M 80 82 L 95 70" stroke="#FFB84D" stroke-width="6" stroke-linecap="round"/>
+            <path d="M 80 105 L 70 125" stroke="#FFB84D" stroke-width="6" stroke-linecap="round"/>
+            <path d="M 80 105 L 90 125" stroke="#FFB84D" stroke-width="6" stroke-linecap="round"/>
+            <g transform="translate(80, 45)">
+              <polygon points="0,-8 2,-3 8,-3 3,1 5,7 0,3 -5,7 -3,1 -8,-3 -2,-3" fill="#FFB84D"/>
+              <polygon points="0,-6 1.5,-2 6,-2 2,0.5 3.5,5 0,2 -3.5,5 -2,0.5 -6,-2 -1.5,-2" fill="#ffffff" opacity="0.8"/>
+            </g>
+            <circle cx="95" cy="55" r="2" fill="#FFB84D" opacity="0.8"/>
+            <circle cx="105" cy="75" r="2.5" fill="#FFB84D" opacity="0.8"/>
+            <circle cx="65" cy="55" r="2" fill="#FFB84D" opacity="0.8"/>
+            <circle cx="55" cy="75" r="2.5" fill="#FFB84D" opacity="0.8"/>
+          </svg>
+        </span>
+        <p class="hiw-step__title">Volunteers match &amp; RSVP</p>
+        <p class="hiw-step__desc">Browse by cause, skill, and schedule. RSVP to reserve your spot.</p>
+        <span class="hiw-step__tag">Pending Approval — credits earned after verified attendance</span>
+        <div class="hiw-step__connector">→</div>
+      </div>
+      <div class="hiw-step">
+        <p class="hiw-step__num">04</p>
+        <span class="hiw-step__icon">
+          <img src="/images/checkin.svg" alt="" aria-hidden="true" style="width: 30px; height: 30px; display: block;">
+        </span>
+        <p class="hiw-step__title">Show up. Check in.</p>
+        <p class="hiw-step__desc">
+          Simple QR code scan to check-in on arrival. Your contribution goes on record.
+          The organizer knows you're there.
+        </p>
+        <div class="hiw-step__connector">→</div>
+      </div>
+      <div class="hiw-step hiw-step--final">
+        <p class="hiw-step__num">05</p>
+        <span class="hiw-step__icon">
+          <img src="/images/impact-credits.svg" alt="" aria-hidden="true" style="width: 30px; height: 30px; display: block;">
+        </span>
+        <p class="hiw-step__title">Verification closes the loop</p>
+        <p class="hiw-step__desc">
+          One organizer tap: Impact Credits post to volunteer wallet.
+          Donor attribution receipt updates. Impact report logs
+          automatically.
+        </p>
+        <span class="hiw-step__tag">This is the moment everything connects</span>
+      </div>
+    </div>
+    <div class="hiw-pullquote">
+      <p>One tap. Verified. Everyone knows what happened — for the first time.</p>
+    </div>
+  </section>
+
+  <!-- ═══ VOLUNTEERS ═══════════════════════════════ -->
+  <div id="volunteers" class="hiw-section--white">
+    <div class="hiw-section__inner">
+      <p class="hiw-eyebrow">For Volunteers</p>
+      <div class="hiw-audience-grid">
+        <div>
+          <div class="hiw-heading-with-icon">
+            <span class="hiw-heading-icon" aria-hidden="true">
+              <svg viewBox="0 0 160 160" xmlns="http://www.w3.org/2000/svg">
+                <g opacity="0.5">
+                  <line x1="80" y1="80" x2="80" y2="20" stroke="#FFB84D" stroke-width="3" stroke-linecap="round"/>
+                  <line x1="80" y1="80" x2="120" y2="40" stroke="#FFB84D" stroke-width="2.5" stroke-linecap="round"/>
+                  <line x1="80" y1="80" x2="140" y2="80" stroke="#FFB84D" stroke-width="3" stroke-linecap="round"/>
+                  <line x1="80" y1="80" x2="120" y2="120" stroke="#FFB84D" stroke-width="2.5" stroke-linecap="round"/>
+                  <line x1="80" y1="80" x2="80" y2="140" stroke="#FFB84D" stroke-width="3" stroke-linecap="round"/>
+                  <line x1="80" y1="80" x2="40" y2="120" stroke="#FFB84D" stroke-width="2.5" stroke-linecap="round"/>
+                  <line x1="80" y1="80" x2="20" y2="80" stroke="#FFB84D" stroke-width="3" stroke-linecap="round"/>
+                  <line x1="80" y1="80" x2="40" y2="40" stroke="#FFB84D" stroke-width="2.5" stroke-linecap="round"/>
+                </g>
+                <circle cx="80" cy="80" r="45" fill="#FFB84D" opacity="0.15"/>
+                <circle cx="80" cy="80" r="35" fill="#FFB84D" opacity="0.2"/>
+                <circle cx="80" cy="65" r="12" fill="#FFB84D"/>
+                <path d="M 80 77 L 80 105" stroke="#FFB84D" stroke-width="8" stroke-linecap="round"/>
+                <path d="M 80 82 L 65 70" stroke="#FFB84D" stroke-width="6" stroke-linecap="round"/>
+                <path d="M 80 82 L 95 70" stroke="#FFB84D" stroke-width="6" stroke-linecap="round"/>
+                <path d="M 80 105 L 70 125" stroke="#FFB84D" stroke-width="6" stroke-linecap="round"/>
+                <path d="M 80 105 L 90 125" stroke="#FFB84D" stroke-width="6" stroke-linecap="round"/>
+                <g transform="translate(80, 45)">
+                  <polygon points="0,-8 2,-3 8,-3 3,1 5,7 0,3 -5,7 -3,1 -8,-3 -2,-3" fill="#FFB84D"/>
+                  <polygon points="0,-6 1.5,-2 6,-2 2,0.5 3.5,5 0,2 -3.5,5 -2,0.5 -6,-2 -1.5,-2" fill="#ffffff" opacity="0.8"/>
+                </g>
+                <circle cx="95" cy="55" r="2" fill="#FFB84D" opacity="0.8"/>
+                <circle cx="105" cy="75" r="2.5" fill="#FFB84D" opacity="0.8"/>
+                <circle cx="65" cy="55" r="2" fill="#FFB84D" opacity="0.8"/>
+                <circle cx="55" cy="75" r="2.5" fill="#FFB84D" opacity="0.8"/>
+              </svg>
+            </span>
+            <h2 class="hiw-h2">Show up. Get seen. Matter more.</h2>
+          </div>
+          <p class="hiw-lead" style="margin-bottom:20px;">
+            Your time, your skills, and your presence have real value.
+            For the first time, a platform is built around recognizing that.
+          </p>
+          <div class="hiw-bc-callout">
+            <span class="hiw-bc-callout__icon">🎓</span>
+            <div class="hiw-bc-callout__text">
+              <strong>BC High School Students</strong>
+              Get Kinder provides verified documentation for your graduation
+              volunteer hour requirements — exportable directly from your
+              impact profile.
+            </div>
+          </div>
+          <a href="/events" class="hiw-btn">Find an opportunity near you →</a>
         </div>
-        <div class="modal-body">
-          Are you sure you want to log out?
-        </div>
-        <div class="modal-footer">
-          <form action="/logout" method="GET">
-            <button type="submit" class="btn btn-danger">Log Out</button>
-          </form>
-          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <div class="hiw-feature-card">
+          <div class="hiw-card-header">
+            <p class="hiw-card-eyebrow">What you get</p>
+            <p class="hiw-card-title">Your experience on Get Kinder</p>
+          </div>
+          <div class="hiw-feature-item">
+            <span class="hiw-feature-check">✓</span>
+            <span class="hiw-feature-text">Browse verified, well-organized opportunities filtered by cause, skill, location &amp; schedule</span>
+          </div>
+          <div class="hiw-feature-item">
+            <span class="hiw-feature-check">✓</span>
+            <span class="hiw-feature-text">RSVP with confidence — role descriptions mean you know what to expect before you arrive</span>
+          </div>
+          <div class="hiw-feature-item">
+            <span class="hiw-feature-check">✓</span>
+            <span class="hiw-feature-text">Check in on arrival — your contribution goes on the record immediately</span>
+          </div>
+          <div class="hiw-feature-item">
+            <span class="hiw-feature-check">✓</span>
+            <span class="hiw-feature-text">Earn Impact Credits after verified attendance — redeemable for real partner rewards</span>
+          </div>
+          <div class="hiw-feature-item" style="border-bottom:none;">
+            <span class="hiw-feature-check">✓</span>
+            <span class="hiw-feature-text">Build a shareable impact profile — proof of what you've given, for schools, employers &amp; your community</span>
+          </div>
+          <div class="hiw-card-footer">
+            <p class="hiw-card-note">RSVP is Pending Approval. Impact Credits are earned after an organizer verifies your attendance — not before.</p>
+          </div>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- navigation footer section-->
-  <section id="footer" class="gradient-background">
-  <div class="container">
-    <footer class="row align-items-center py-5 mt-5 border-top text-body-secondary">
-      <!-- 1) Logo: centered on xs, left on md+ -->
-      <div class="col-12 col-md-4 mb-4 mb-md-0 text-center text-md-start">
-        <a href="#">
-          <img src="./images/heart3D.png" alt="Get Kinder Heart" height="150">
+  <!-- ═══ ORGANIZATIONS ════════════════════════════ -->
+  <div id="organizations" class="hiw-section--white" style="background: #f7f3ed;">
+    <div class="hiw-section__inner">
+      <p class="hiw-eyebrow">For Organizations</p>
+      <div class="hiw-audience-grid">
+        <div class="hiw-feature-card">
+          <div class="hiw-card-header">
+            <p class="hiw-card-eyebrow">What you get</p>
+            <p class="hiw-card-title">Your command center</p>
+          </div>
+          <div class="hiw-feature-item">
+            <span class="hiw-feature-check hiw-feature-check--slate">✓</span>
+            <span class="hiw-feature-text">Post structured opportunities with role descriptions — volunteers arrive prepared, not confused</span>
+          </div>
+          <div class="hiw-feature-item">
+            <span class="hiw-feature-check hiw-feature-check--slate">✓</span>
+            <span class="hiw-feature-text">Match with volunteers who fit your cause, capacity, and skill requirements</span>
+          </div>
+          <div class="hiw-feature-item">
+            <span class="hiw-feature-check hiw-feature-check--slate">✓</span>
+            <span class="hiw-feature-text">Track RSVPs with clear status — no more chasing confirmations by email</span>
+          </div>
+          <div class="hiw-feature-item">
+            <span class="hiw-feature-check hiw-feature-check--slate">✓</span>
+            <span class="hiw-feature-text">Verify attendance in one tap — triggers Impact Credits &amp; donor receipts automatically</span>
+          </div>
+          <div class="hiw-feature-item" style="border-bottom:none;">
+            <span class="hiw-feature-check hiw-feature-check--slate">✓</span>
+            <span class="hiw-feature-text">Dashboard: attendance records, impact metrics, and auto-generated reports your funders actually want</span>
+          </div>
+          <div class="hiw-card-footer">
+            <p class="hiw-card-note">Verification is the gate that makes everything work — for volunteers, donors, and your reporting. One tap does it all.</p>
+          </div>
+        </div>
+        <div>
+          <div class="hiw-heading-with-icon">
+            <span class="hiw-heading-icon" aria-hidden="true">
+              <svg viewBox="0 0 160 160" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="80" cy="80" r="20" fill="#455a7c" opacity="0.9"/>
+                <line x1="80" y1="80" x2="80" y2="25" stroke="#455a7c" stroke-width="2" opacity="0.4"/>
+                <line x1="80" y1="80" x2="135" y2="80" stroke="#455a7c" stroke-width="2" opacity="0.4"/>
+                <line x1="80" y1="80" x2="80" y2="135" stroke="#455a7c" stroke-width="2" opacity="0.4"/>
+                <line x1="80" y1="80" x2="25" y2="80" stroke="#455a7c" stroke-width="2" opacity="0.4"/>
+                <line x1="80" y1="80" x2="115" y2="45" stroke="#455a7c" stroke-width="2" opacity="0.4"/>
+                <line x1="80" y1="80" x2="115" y2="115" stroke="#455a7c" stroke-width="2" opacity="0.4"/>
+                <line x1="80" y1="80" x2="45" y2="115" stroke="#455a7c" stroke-width="2" opacity="0.4"/>
+                <line x1="80" y1="80" x2="45" y2="45" stroke="#455a7c" stroke-width="2" opacity="0.4"/>
+                <circle cx="80" cy="25" r="10" fill="#455a7c"/>
+                <circle cx="135" cy="80" r="10" fill="#455a7c"/>
+                <circle cx="80" cy="135" r="10" fill="#455a7c"/>
+                <circle cx="25" cy="80" r="10" fill="#455a7c"/>
+                <circle cx="115" cy="45" r="8" fill="#455a7c" opacity="0.8"/>
+                <circle cx="115" cy="115" r="8" fill="#455a7c" opacity="0.8"/>
+                <circle cx="45" cy="115" r="8" fill="#455a7c" opacity="0.8"/>
+                <circle cx="45" cy="45" r="8" fill="#455a7c" opacity="0.8"/>
+                <rect x="72" y="72" width="16" height="16" fill="#ffffff" opacity="0.9" rx="2"/>
+                <line x1="74" y1="76" x2="86" y2="76" stroke="#455a7c" stroke-width="1"/>
+                <line x1="74" y1="80" x2="86" y2="80" stroke="#455a7c" stroke-width="1"/>
+                <line x1="74" y1="84" x2="86" y2="84" stroke="#455a7c" stroke-width="1"/>
+              </svg>
+            </span>
+            <h2 class="hiw-h2">The admin work is handled. You just need to show up too.</h2>
+          </div>
+          <p class="hiw-lead" style="margin-bottom:0;">
+            You're doing incredible work. But you spend too much time
+            chasing volunteers, managing no-shows, and building reports
+            in spreadsheets at midnight. Get Kinder gives you the
+            infrastructure you've been trying to build yourself — for free.
+          </p>
+          <a href="/events" class="hiw-btn hiw-btn--slate">Post your first opportunity — free →</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ DONORS ═══════════════════════════════════ -->
+  <div id="donors" class="hiw-section--white">
+    <div class="hiw-section__inner">
+      <p class="hiw-eyebrow">For Donors</p>
+      <div class="hiw-audience-grid">
+        <div>
+          <div class="hiw-heading-with-icon">
+            <span class="hiw-heading-icon" aria-hidden="true">
+              <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="100" cy="100" r="90" fill="none" stroke="#ff5656" stroke-width="1" opacity="0.15"/>
+                <circle cx="100" cy="100" r="70" fill="none" stroke="#ff5656" stroke-width="1.5" opacity="0.25"/>
+                <circle cx="100" cy="100" r="52" fill="none" stroke="#ff5656" stroke-width="2" opacity="0.35"/>
+                <circle cx="100" cy="100" r="40" fill="none" stroke="#ff5656" stroke-width="2" opacity="0.45"/>
+                <circle cx="100" cy="100" r="28" fill="#ff5656"/>
+                <path d="M 100 92 C 100 92, 93 85, 88 85 C 82 85, 78 89, 78 95 C 78 104, 100 115, 100 115 C 100 115, 122 104, 122 95 C 122 89, 118 85, 112 85 C 107 85, 100 92, 100 92 Z" fill="#ffffff"/>
+              </svg>
+            </span>
+            <h2 class="hiw-h2">Your money is doing something real. Here's the proof.</h2>
+          </div>
+          <p class="hiw-lead" style="margin-bottom:0;">
+            When you donate on Get Kinder, your contribution enters a
+            community funding pool. When a verified shift happens, you
+            receive an attribution receipt showing exactly what your
+            donation supported.
+          </p>
+          <div class="hiw-pullquote" style="margin-top:28px;">
+            <p>No more black holes. No more guessing. Just proof.</p>
+          </div>
+          <a href="/donate" class="hiw-btn" style="margin-top:28px;">Make an impact donation →</a>
+        </div>
+        <div class="hiw-feature-card">
+          <div class="hiw-card-header">
+            <p class="hiw-card-eyebrow">Sample Donor Receipt</p>
+            <p class="hiw-card-title">What you see after a shift is verified</p>
+          </div>
+          <div style="padding:24px;">
+            <div class="hiw-receipt">
+              <div class="hiw-receipt__row">
+                <span class="hiw-receipt__label">Event</span>
+                <span class="hiw-receipt__val">Neighbourhood Food Drive</span>
+              </div>
+              <div class="hiw-receipt__row">
+                <span class="hiw-receipt__label">Verified minutes</span>
+                <span class="hiw-receipt__val">120 min</span>
+              </div>
+              <div class="hiw-receipt__row">
+                <span class="hiw-receipt__label">Credits funded</span>
+                <span class="hiw-receipt__val hiw-receipt__val--funded">80 credits</span>
+              </div>
+              <div class="hiw-receipt__row">
+                <span class="hiw-receipt__label">Status</span>
+                <span class="hiw-receipt__badge">Funded ✓</span>
+              </div>
+            </div>
+            <p class="hiw-receipt__anon-note">
+              Volunteer identities are always anonymized.<br>
+              You see outcomes, not individuals.
+            </p>
+          </div>
+          <div class="hiw-feature-item">
+            <span class="hiw-feature-check">✓</span>
+            <span class="hiw-feature-text">Donations add to the pool — ready to fund verified community shifts</span>
+          </div>
+          <div class="hiw-feature-item">
+            <span class="hiw-feature-check">✓</span>
+            <span class="hiw-feature-text">Every funded shift is real — verified by a human, not an algorithm</span>
+          </div>
+          <div class="hiw-feature-item" style="border-bottom:none;">
+            <span class="hiw-feature-check">✓</span>
+            <span class="hiw-feature-text">Watch your local community grow in real time — supported by your contribution</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ IMPACT CREDITS ═══════════════════════════ -->
+  <section id="credits" class="hiw-section">
+    <p class="hiw-eyebrow">Impact Credits</p>
+    <div class="hiw-heading-with-icon">
+      <span class="hiw-heading-icon" aria-hidden="true">
+        <img src="/images/impact-credits.svg" alt="">
+      </span>
+      <h2 class="hiw-h2">What you earn. What they're worth. What they're not.</h2>
+    </div>
+    <p class="hiw-lead">
+      Impact Credits are how Get Kinder says thank you — in a way that
+      actually means something. Recognition that your time has genuine worth.
+    </p>
+    <div class="hiw-credits-grid">
+      <div class="hiw-credits-card">
+        <p class="hiw-credits-card__title">✓ What they are</p>
+        <div class="hiw-credits-item">
+          <span class="hiw-credits-item__sym">🏅</span>
+          Earned when an organizer verifies your attendance — not on RSVP
+        </div>
+        <div class="hiw-credits-item">
+          <span class="hiw-credits-item__sym">👛</span>
+          Stored in your in-app wallet, building with every verified shift
+        </div>
+        <div class="hiw-credits-item" style="border-bottom:none;">
+          <span class="hiw-credits-item__sym">🎁</span>
+          Redeemable for partner rewards and discounts — coming soon
+        </div>
+      </div>
+      <div class="hiw-credits-card hiw-credits-card--muted">
+        <p class="hiw-credits-card__title hiw-credits-card__title--muted">✕ What they're not</p>
+        <div class="hiw-credits-item hiw-credits-item--muted">
+          <span class="hiw-credits-item__sym">🚫</span>
+          Not wages or employment compensation
+        </div>
+        <div class="hiw-credits-item hiw-credits-item--muted" style="border-bottom:none;">
+          <span class="hiw-credits-item__sym">🚫</span>
+          No guaranteed cash value
+        </div>
+      </div>
+      <p class="hiw-credits-disclaimer">
+        Impact Credits are not wages and carry no guaranteed cash value.
+        Reward partner details to be announced. Be a founding contributor
+        to get first access when the rewards catalog launches.
+      </p>
+    </div>
+  </section>
+
+  <!-- ═══ TRUST ════════════════════════════════════ -->
+  <div id="trust" class="hiw-section--white">
+    <div class="hiw-section__inner">
+      <p class="hiw-eyebrow">Built for Trust</p>
+      <div class="hiw-heading-with-icon">
+        <span class="hiw-heading-icon" aria-hidden="true">
+          <img src="/images/checkin.svg" alt="">
+        </span>
+        <h2 class="hiw-h2">Why verification is everything.</h2>
+      </div>
+      <p class="hiw-lead">
+        Get Kinder's loop only works because verification is real. Every
+        reward, every receipt, every report traces back to a human
+        confirming something actually happened.
+      </p>
+      <div class="hiw-trust-grid">
+        <div class="hiw-trust-item">
+          <p class="hiw-trust-icon">🔒</p>
+          <p class="hiw-trust-title">Verification required</p>
+          <p class="hiw-trust-desc">RSVP is not verification. Impact Credits post only after an organizer confirms attendance. No shortcuts.</p>
+        </div>
+        <div class="hiw-trust-item">
+          <p class="hiw-trust-icon">⚖️</p>
+          <p class="hiw-trust-title">No double counting</p>
+          <p class="hiw-trust-desc">One verified shift. One earn. The same contribution can never be credited twice — for anyone in the loop.</p>
+        </div>
+        <div class="hiw-trust-item">
+          <p class="hiw-trust-icon">🫥</p>
+          <p class="hiw-trust-title">Anonymized reporting</p>
+          <p class="hiw-trust-desc">Donors see verified outcomes — verified minutes, funded credits, event names. Never volunteer identities.</p>
+        </div>
+        <div class="hiw-trust-item">
+          <p class="hiw-trust-icon">📊</p>
+          <p class="hiw-trust-title">Transparent pool history</p>
+          <p class="hiw-trust-desc">Every pool balance change is tied to a clear funding action. Your money's journey is always traceable.</p>
+        </div>
+        <div class="hiw-trust-item">
+          <p class="hiw-trust-icon">🤝</p>
+          <p class="hiw-trust-title">Direct donor–org connection</p>
+          <p class="hiw-trust-desc">Donors build real relationships with the organizations their funding supports — not a faceless charity portal.</p>
+        </div>
+        <div class="hiw-trust-item hiw-trust-item--highlight">
+          <p class="hiw-trust-icon">💚</p>
+          <p class="hiw-trust-title">Built by people who lived it</p>
+          <p class="hiw-trust-desc">Built by founders who ran community services, struggled to find volunteers, and donated money into black holes. They know what broken feels like.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ FAQ ══════════════════════════════════════ -->
+  <section id="faq" class="hiw-section">
+    <p class="hiw-eyebrow">FAQ</p>
+    <h2 class="hiw-h2">Quick answers.</h2>
+    <div class="hiw-faq-grid">
+      <div>
+        <div class="hiw-faq-item">
+          <div class="hiw-faq-q">When do I earn Impact Credits? <span class="hiw-faq-toggle">−</span></div>
+          <p class="hiw-faq-a">When an organizer verifies your attendance after the event. RSVP alone does not earn credits.</p>
+        </div>
+        <div class="hiw-faq-item">
+          <div class="hiw-faq-q">What does RSVP actually mean? <span class="hiw-faq-toggle">+</span></div>
+          <p class="hiw-faq-a">RSVP shows as Pending Approval — it reserves a spot, not a reward. Organizations confirm based on capacity and fit.</p>
+        </div>
+        <div class="hiw-faq-item">
+          <div class="hiw-faq-q">What can I redeem credits for? <span class="hiw-faq-toggle">+</span></div>
+          <p class="hiw-faq-a">Partner rewards and discounts — coming soon. Founding contributors get first access when the catalog launches.</p>
+          <span class="hiw-faq-tag">⭐ Be a founding contributor</span>
+        </div>
+        <div class="hiw-faq-item" style="border-bottom:none;">
+          <div class="hiw-faq-q">Will donors see who I am? <span class="hiw-faq-toggle">+</span></div>
+          <p class="hiw-faq-a">Never. Donor receipts show verified outcomes. Your identity is always anonymized.</p>
+        </div>
+      </div>
+      <div>
+        <div class="hiw-faq-item">
+          <div class="hiw-faq-q">What if the pool is low when I'm verified? <span class="hiw-faq-toggle">+</span></div>
+          <p class="hiw-faq-a">You still earn your Impact Credits. Donor attribution receipts may show partial or pending funding until the pool is topped up — it catches up automatically.</p>
+        </div>
+        <div class="hiw-faq-item">
+          <div class="hiw-faq-q">I'm a BC high school student — does this count for graduation hours? <span class="hiw-faq-toggle">+</span></div>
+          <p class="hiw-faq-a">Yes. Get Kinder provides verified attendance documentation for BC Ministry of Education volunteer hour requirements. Export directly from your impact profile.</p>
+          <span class="hiw-faq-tag">🎓 BC graduation hours supported</span>
+        </div>
+        <div class="hiw-faq-item">
+          <div class="hiw-faq-q">How does verification work for organizations? <span class="hiw-faq-toggle">+</span></div>
+          <p class="hiw-faq-a">After the event, the host confirms attendance using the Verify action in the dashboard. One tap triggers credits, receipts, and reporting simultaneously.</p>
+        </div>
+        <div class="hiw-faq-item" style="border-bottom:none;">
+          <div class="hiw-faq-q">Can a verification be reversed? <span class="hiw-faq-toggle">+</span></div>
+          <p class="hiw-faq-a">We're building clear review and correction workflows. Specific reversal policies are being finalized.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ CLOSING ══════════════════════════════════ -->
+  <div class="hiw-closing">
+    <div class="hiw-closing__inner">
+      <div>
+        <h2 class="hiw-closing__h2">You're not at the edge anymore. You're in.</h2>
+        <p class="hiw-closing__sub">You know how it works. Now make it work. Pick your place in the loop and start today.</p>
+      </div>
+      <div class="hiw-closing__ctas">
+        <a href="/events" class="hiw-closing__cta-item">
+          <span class="hiw-closing__cta-icon">🙋</span>
+          Start volunteering
+          <span class="hiw-closing__cta-arrow">→</span>
         </a>
-        <p class="mt-2">
-          &copy;
-          <a href="https://getkindr.com/" target="_blank" rel="noopener noreferrer"
-             class="text-body-secondary text-decoration-underline">
-            Get Kindr Foundation
-          </a>
+        <a href="/events" class="hiw-closing__cta-item">
+          <span class="hiw-closing__cta-icon">🏢</span>
+          Post an opportunity
+          <span class="hiw-closing__cta-arrow">→</span>
+        </a>
+        <a href="/donate" class="hiw-closing__cta-item">
+          <span class="hiw-closing__cta-icon">💰</span>
+          Fund verified impact
+          <span class="hiw-closing__cta-arrow">→</span>
+        </a>
+      </div>
+      <div class="hiw-closing__tagline">
+        <p>
+          Verified attendance. Transparent funding. Real community outcomes.<br>
+          The world gets kinder when you do.
         </p>
       </div>
-      <!-- 2) Social Icons: always centered -->
-      <div class="col-12 col-md-4 mb-4 mb-md-0 d-flex justify-content-center">
-        <a class="btn btn-floating m-1 text-white" style="background-color: #3b5998;"
-           href="https://www.facebook.com/profile.php?id=61576860759313" role="button" target="_blank" rel="noopener noreferrer">
-          <i class="fab fa-facebook-f"></i>
-        </a>
-        <a class="btn btn-floating m-1 text-white" style="background-color: #ac2bac;"
-           href="https://www.instagram.com/getkinder/" role="button" target="_blank" rel="noopener noreferrer">
-          <i class="fab fa-instagram"></i>
-        </a>
-        <a class="btn btn-floating m-1 text-white" style="background-color: #0082ca;"
-           href="https://www.linkedin.com/company/getkindrfoundation/" role="button" target="_blank" rel="noopener noreferrer">
-          <i class="fab fa-linkedin-in"></i>
-        </a>
-        <a class="btn btn-floating m-1 text-white" style="background-color: #c8232c;"
-           href="https://ca.pinterest.com/getkindr/" role="button" target="_blank" rel="noopener noreferrer">
-          <i class="fab fa-pinterest"></i>
-        </a>
-      </div>
-      <!-- 3) More About: centered on xs, right on md+ -->
-      <div class="col-12 col-md-4 mb-4 mb-md-0 text-center text-md-end">
-        <h5>More About Get Kinder</h5>
-        <ul class="nav flex-column">
-          <li class="nav-item mb-2"><a href="#"            class="nav-link p-0 text-body-secondary">Home</a></li>
-          <li class="nav-item mb-2"><a href="about" class="nav-link p-0 text-body-secondary">About</a></li>
-          <li class="nav-item mb-2"><a href="contact"     class="nav-link p-0 text-body-secondary">Contact</a></li>
-          <li class="nav-item mb-2"><a href="privacy"     class="nav-link p-0 text-body-secondary">Privacy</a></li>
-          <li class="nav-item mb-2"><a href="terms"       class="nav-link p-0 text-body-secondary">Terms</a></li>
-          <li class="nav-item mb-2"><a href="accessability" class="nav-link p-0 text-body-secondary">Accessibility</a></li>
-        </ul>
-      </div>
-    </footer>
+    </div>
   </div>
-</section>
 
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/js/bootstrap.bundle.min.js" integrity="sha384-k6d4wzSIapyDyv1kpU366/PK5hCdSbCRGRCMv+eplOQJWyd1fbcAu9OCUj5zNLiq" crossorigin="anonymous"></script>
-  <script>
-    (function () {
-      var jumpSelect = document.getElementById("jumpToSection");
-      var jumpLinks = Array.prototype.slice.call(document.querySelectorAll(".sticky-jump-nav .jump-tab[href^='#']"));
-      var sectionIds = jumpLinks.map(function (link) { return link.getAttribute("href"); });
-      var sections = sectionIds.map(function (id) { return document.querySelector(id); }).filter(Boolean);
+  <section id="footer" class="gradient-background">
+    <div class="container">
+      <footer class="row align-items-center py-5 mt-5 border-top text-body-secondary">
+        <div class="col-12 col-md-4 mb-4 mb-md-0 text-center text-md-start">
+          <a href="#">
+            <img src="./images/heart3D.png" alt="Get Kinder Heart" height="150">
+          </a>
+          <p class="mt-2">
+            &copy;
+            <a href="https://getkindr.com/" target="_blank" rel="noopener noreferrer" class="text-body-secondary text-decoration-underline">
+              Get Kindr Foundation
+            </a>
+          </p>
+        </div>
+        <div class="col-12 col-md-4 mb-4 mb-md-0 d-flex justify-content-center">
+          <a class="btn btn-floating m-1 text-white" style="background-color: #3b5998;" href="https://www.facebook.com/profile.php?id=61576860759313" role="button" target="_blank" rel="noopener noreferrer">
+            <i class="fab fa-facebook-f"></i>
+          </a>
+          <a class="btn btn-floating m-1 text-white" style="background-color: #ac2bac;" href="https://www.instagram.com/getkinder/" role="button" target="_blank" rel="noopener noreferrer">
+            <i class="fab fa-instagram"></i>
+          </a>
+          <a class="btn btn-floating m-1 text-white" style="background-color: #0082ca;" href="https://www.linkedin.com/company/getkindrfoundation/" role="button" target="_blank" rel="noopener noreferrer">
+            <i class="fab fa-linkedin-in"></i>
+          </a>
+          <a class="btn btn-floating m-1 text-white" style="background-color: #c8232c;" href="https://ca.pinterest.com/getkindr/" role="button" target="_blank" rel="noopener noreferrer">
+            <i class="fab fa-pinterest"></i>
+          </a>
+        </div>
+        <div class="col-12 col-md-4 mb-4 mb-md-0 text-center text-md-end">
+          <h5>More About Get Kinder</h5>
+          <ul class="nav flex-column">
+            <li class="nav-item mb-2"><a href="/home" class="nav-link p-0 text-body-secondary">Home</a></li>
+            <li class="nav-item mb-2"><a href="about" class="nav-link p-0 text-body-secondary">About</a></li>
+            <li class="nav-item mb-2"><a href="contact" class="nav-link p-0 text-body-secondary">Contact</a></li>
+            <li class="nav-item mb-2"><a href="privacy" class="nav-link p-0 text-body-secondary">Privacy</a></li>
+            <li class="nav-item mb-2"><a href="terms" class="nav-link p-0 text-body-secondary">Terms</a></li>
+            <li class="nav-item mb-2"><a href="accessability" class="nav-link p-0 text-body-secondary">Accessibility</a></li>
+          </ul>
+        </div>
+      </footer>
+    </div>
+  </section>
 
-      function setActiveAnchor(anchor) {
-        jumpLinks.forEach(function (link) {
-          link.classList.toggle("active", link.getAttribute("href") === anchor);
-        });
-        if (jumpSelect) jumpSelect.value = anchor;
-      }
+  <!-- Bootstrap JS -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 
-      if (jumpSelect) {
-        jumpSelect.addEventListener("change", function (event) {
-          var target = event.target.value;
-          if (!target) return;
-          var section = document.querySelector(target);
-          if (!section) return;
-          section.scrollIntoView({ behavior: "smooth", block: "start" });
-          setActiveAnchor(target);
-        });
-      }
-
-      jumpLinks.forEach(function (link) {
-        link.addEventListener("click", function () {
-          setActiveAnchor(link.getAttribute("href"));
-        });
-      });
-
-      if ("IntersectionObserver" in window && sections.length) {
-        var observer = new IntersectionObserver(function (entries) {
-          entries.forEach(function (entry) {
-            if (!entry.isIntersecting) return;
-            var id = "#" + entry.target.id;
-            if (sectionIds.indexOf(id) !== -1) setActiveAnchor(id);
-          });
-        }, { rootMargin: "-45% 0px -45% 0px", threshold: 0.01 });
-        sections.forEach(function (section) { observer.observe(section); });
-      } else if (sectionIds.length) {
-        setActiveAnchor(sectionIds[0]);
-      }
-    }());
-  </script>
 </body>
 </html>
