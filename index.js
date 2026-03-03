@@ -140,6 +140,7 @@ function getAppBaseUrl(req) {
 
 const FORGOT_PASSWORD_SUCCESS_MESSAGE =
   "If an account exists for that email, we sent password reset instructions.";
+const AUTH_PAGE_PATHS = new Set(["/login", "/register", "/forgot-password", "/reset-password"]);
 
 async function ensurePasswordResetColumns() {
   await pool.query(`
@@ -171,6 +172,20 @@ const PgSession = connectPgSimple(session);
 app.use(cookieParser());
 app.use(cors());
 app.use(cors());
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  if (process.env.NODE_ENV === "production") {
+    res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  }
+  if (AUTH_PAGE_PATHS.has(req.path)) {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+    res.setHeader("Referrer-Policy", "no-referrer");
+  }
+  next();
+});
 app.use(express.json({
   limit: "5mb",
   verify: (req, res, buf) => {
@@ -266,11 +281,11 @@ passport.use(
     async (accessToken, refreshToken, profile, done) => {
       try {
         // 1) Extract the user’s email
-        const email = profile.emails[0].value;
+        const email = normalizeEmail(profile.emails[0].value);
 
         // 2) Try to find an existing row by email
         const result = await pool.query(
-          "SELECT * FROM userdata WHERE email = $1",
+          "SELECT * FROM userdata WHERE LOWER(email) = LOWER($1) ORDER BY id DESC LIMIT 1",
           [email]
         );
         if (result.rows.length) {
@@ -328,7 +343,7 @@ passport.use(
       try {
         // 1) Pull the user’s email (Facebook may not always return one, but if it does…)
         const email = Array.isArray(profile.emails) && profile.emails.length
-          ? profile.emails[0].value
+          ? normalizeEmail(profile.emails[0].value)
           : null;
         if (!email) {
           return cb(new Error("Facebook profile did not return an email"), null);
@@ -336,7 +351,7 @@ passport.use(
 
         // 2) See if this email already exists in userdata
         const result = await pool.query(
-          "SELECT * FROM userdata WHERE email = $1",
+          "SELECT * FROM userdata WHERE LOWER(email) = LOWER($1) ORDER BY id DESC LIMIT 1",
           [email]
         );
         if (result.rows.length) {
@@ -389,7 +404,7 @@ passport.serializeUser((user, done) => {
 passport.deserializeUser(async (email, done) => {
   try {
     const result = await pool.query(
-      "SELECT * FROM userdata WHERE email = $1",
+      "SELECT * FROM userdata WHERE LOWER(email) = LOWER($1) ORDER BY id DESC LIMIT 1",
       [email]
     );
     const user = result.rows[0] || false;
@@ -525,8 +540,14 @@ async function mirrorAssessmentToGraph({
 // ─────────────────────────────────────────────────────────────────────────────
 // 12.1) Signup Route
 app.post("/register", async (req, res, next) => {
-  const { firstname, lastname, email, password } = req.body;
+  const firstname = typeof req.body?.firstname === "string" ? req.body.firstname : "";
+  const lastname = typeof req.body?.lastname === "string" ? req.body.lastname : "";
+  const email = normalizeEmail(req.body?.email);
+  const password = typeof req.body?.password === "string" ? req.body.password : "";
   try {
+    if (!firstname.trim() || !lastname.trim() || !email || !password) {
+      return res.status(400).send("Missing required fields.");
+    }
     const hashedPassword = await bcrypt.hash(password, 10);
     const result = await pool.query(
       `INSERT INTO userdata 
@@ -582,7 +603,7 @@ app.post("/login", async (req, res, next) => {
     }
 
     const result = await pool.query(
-      "SELECT * FROM userdata WHERE LOWER(email) = LOWER($1) ORDER BY id DESC LIMIT 1",
+      "SELECT * FROM userdata WHERE LOWER(email) = LOWER($1) ORDER BY (password IS NULL), id DESC LIMIT 1",
       [submittedEmail]
     );
     if (result.rows.length === 0) {
@@ -664,6 +685,23 @@ app.post("/forgot-password", async (req, res) => {
 
   try {
     if (submittedEmail) {
+      const { rows: [candidate] } = await pool.query(
+        `SELECT id, firstname, email
+           FROM public.userdata
+          WHERE LOWER(email) = LOWER($1)
+          ORDER BY (password IS NULL), id DESC
+          LIMIT 1`,
+        [submittedEmail]
+      );
+
+      if (!candidate) {
+        return res.render("forgot-password", {
+          title: "Forgot Password",
+          message: FORGOT_PASSWORD_SUCCESS_MESSAGE,
+          messageType: "success",
+        });
+      }
+
       const token = crypto.randomBytes(32).toString("hex");
       const tokenHash = hashPasswordResetToken(token);
       const expiresAt = new Date(Date.now() + PASSWORD_RESET_TOKEN_TTL_MS);
@@ -673,13 +711,13 @@ app.post("/forgot-password", async (req, res) => {
             SET reset_password_token_hash = $1,
                 reset_password_expires_at = $2,
                 reset_password_sent_at = NOW()
-          WHERE LOWER(email) = LOWER($3)
+          WHERE id = $3
             AND (
               reset_password_sent_at IS NULL
               OR reset_password_sent_at <= NOW() - ($4::int * INTERVAL '1 minute')
             )
           RETURNING firstname, email`,
-        [tokenHash, expiresAt, submittedEmail, PASSWORD_RESET_RESEND_WINDOW_MINUTES]
+        [tokenHash, expiresAt, candidate.id, PASSWORD_RESET_RESEND_WINDOW_MINUTES]
       );
 
       if (user) {
@@ -743,6 +781,7 @@ app.get("/reset-password", async (req, res) => {
          FROM public.userdata
         WHERE reset_password_token_hash = $1
           AND reset_password_expires_at > NOW()
+        ORDER BY id DESC
         LIMIT 1`,
       [tokenHash]
     );
@@ -808,10 +847,11 @@ app.post("/reset-password", async (req, res) => {
   try {
     const tokenHash = hashPasswordResetToken(token);
     const { rows: [user] } = await pool.query(
-      `SELECT id
+      `SELECT id, email
          FROM public.userdata
         WHERE reset_password_token_hash = $1
           AND reset_password_expires_at > NOW()
+        ORDER BY id DESC
         LIMIT 1`,
       [tokenHash]
     );
@@ -830,9 +870,10 @@ app.post("/reset-password", async (req, res) => {
       `UPDATE public.userdata
           SET password = $1,
               reset_password_token_hash = NULL,
-              reset_password_expires_at = NULL
-        WHERE id = $2`,
-      [hashedPassword, user.id]
+              reset_password_expires_at = NULL,
+              reset_password_sent_at = NULL
+        WHERE LOWER(email) = LOWER($2)`,
+      [hashedPassword, user.email]
     );
 
     return res.redirect("/login?reset=1");
