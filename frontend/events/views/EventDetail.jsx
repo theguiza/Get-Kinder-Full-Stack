@@ -386,13 +386,6 @@ export function EventDetail({ eventId }) {
         )}
       </div>
 
-      <h3>After the event</h3>
-      <div className="grid">
-        <div className="box">
-          <strong>Paste public social URL</strong>
-          <p className="muted mb-0">Drop proof from Instagram, TikTok, etc.</p>
-        </div>
-      </div>
       <button
         className="btn tertiary w-100 mt-2"
         type="button"
@@ -530,8 +523,6 @@ const detailStyles = `
   .tag:hover{background:#ff5656;border-color:#ff5656;color:#ffffff}
   .info-reqs .value{margin-top:4px}
   .card p{margin:6px 0 0}
-  .grid{display:grid;grid-template-columns:1fr;gap:12px;margin-bottom:16px}
-  .box{background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;padding:16px}
   .detail-cover{margin:12px 0}
   .detail-cover img{width:100%;max-height:240px;object-fit:cover;border-radius:16px;border:1px solid #e5e7eb}
   .btn{background:#ff5656;border:none;color:#fff;padding:10px 16px;border-radius:10px;font-weight:700;cursor:pointer}
@@ -553,7 +544,6 @@ const detailStyles = `
   .roster-actions{display:flex;gap:8px;flex-wrap:wrap}
   .small{font-size:0.85rem}
   .w-100{width:100%}
-  h3{margin-top:24px}
   @media (max-width: 768px){
     .when-card{grid-template-columns:1fr}
     .when-card__header{padding:0 0 12px;border-right:none;border-bottom:2px solid #ff5656;margin-bottom:12px}

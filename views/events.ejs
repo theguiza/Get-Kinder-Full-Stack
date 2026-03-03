@@ -213,12 +213,10 @@
               const current = window.location.pathname + window.location.search + window.location.hash;
               const next = url.pathname + url.search + (url.hash || '');
               if (next !== current) {
-                window.__eventsFilterNavigationPending = true;
-                window.location.assign(next);
-                return;
+                window.history.replaceState({}, '', next);
               }
             } catch (_) {
-              // Keep client-side filter fallback if URL parsing/navigation fails.
+              // Keep client-side filter behavior if URL mutation fails.
             }
 
             window.dispatchEvent(new CustomEvent('getkinder:causeFilter', {

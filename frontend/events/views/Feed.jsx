@@ -11,6 +11,29 @@ function normalizeView(value) {
   return value === "archive" ? "archive" : "upcoming";
 }
 
+function normalizeFilterToken(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function matchesCauseSelection(evt, selectedToken) {
+  if (!selectedToken) return true;
+  const tagTokens = Array.isArray(evt?.cause_tags)
+    ? evt.cause_tags.map((tag) => normalizeFilterToken(tag)).filter(Boolean)
+    : [];
+  const categoryToken = normalizeFilterToken(evt?.category);
+  const tokens = [...tagTokens, categoryToken].filter(Boolean);
+  if (!tokens.length) return false;
+  return tokens.some(
+    (token) =>
+      token === selectedToken ||
+      token.startsWith(selectedToken) ||
+      selectedToken.startsWith(token)
+  );
+}
+
 function parsePageFiltersFromDom() {
   if (typeof document === "undefined") return null;
   const node = document.getElementById("events-page-filters");
@@ -77,11 +100,13 @@ export function Feed({ feed = [], setFeed, pagination }) {
   const [view] = useState(initialFilters.view);
   const [limit] = useState(initialFilters.limit);
   const [cursor] = useState(initialFilters.cursor);
+  const [searchInput, setSearchInput] = useState("");
+  const [searchTerm, setSearchTerm] = useState("");
   const hasHydratedRef = useRef(false);
+  const listRef = useRef(null);
 
   useEffect(() => {
     function handleChipFilter(e) {
-      if (typeof window !== "undefined" && window.__eventsFilterNavigationPending) return;
       setCauseTag(e?.detail?.causeTag || "");
     }
     if (typeof window !== "undefined") {
@@ -167,12 +192,66 @@ export function Feed({ feed = [], setFeed, pagination }) {
     });
   }, [feed]);
 
-  const hasEvents = sortedFeed.length > 0;
+  const visibleFeed = useMemo(() => {
+    const selectedCause = normalizeFilterToken(causeTag);
+    const term = String(searchTerm || "").trim().toLowerCase();
+    return sortedFeed.filter((evt) => {
+      if (!matchesCauseSelection(evt, selectedCause)) return false;
+      if (!term) return true;
+      const searchable = [
+        evt?.title,
+        evt?.org_name,
+        evt?.location_text,
+        evt?.community_tag,
+        evt?.requirements,
+        evt?.category,
+        ...(Array.isArray(evt?.cause_tags) ? evt.cause_tags : []),
+      ]
+        .filter((value) => typeof value === "string" && value.trim())
+        .join(" ")
+        .toLowerCase();
+      return searchable.includes(term);
+    });
+  }, [sortedFeed, causeTag, searchTerm]);
+
+  const hasEvents = visibleFeed.length > 0;
+
+  function handleSearchSubmit(event) {
+    event.preventDefault();
+    const nextTerm = String(searchInput || "").trim();
+    setSearchTerm(nextTerm);
+    if (typeof window !== "undefined" && listRef.current) {
+      window.requestAnimationFrame(() => {
+        const rootStyles = window.getComputedStyle(document.documentElement);
+        const navHeight = Number.parseFloat(rootStyles.getPropertyValue("--navbar-height")) || 86;
+        const top =
+          listRef.current.getBoundingClientRect().top +
+          window.scrollY -
+          navHeight -
+          16;
+        window.scrollTo({
+          top: Math.max(0, top),
+          behavior: "smooth",
+        });
+      });
+    }
+  }
 
   return (
     <section className="events-feed">
       <header className="feed-head">
-        <input className="search" placeholder="Search events, people, places…" />
+        <form className="search-row" onSubmit={handleSearchSubmit}>
+          <input
+            type="search"
+            className="search"
+            placeholder="Search events, people, places…"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+          />
+          <button type="submit" className="btn secondary search-submit">
+            Search
+          </button>
+        </form>
         <div className="pills">
           <label className="pill-input">
             Community tag
@@ -183,39 +262,15 @@ export function Feed({ feed = [], setFeed, pagination }) {
               placeholder="e.g., vancouver"
             />
           </label>
-          <label className="pill-input">
-            Cause tag
-            <input
-              type="text"
-              value={causeTag}
-              onChange={(e) => setCauseTag(e.target.value)}
-              placeholder="e.g., Environment"
-              style={{ display: "none" }}
-            />
-          </label>
-          <button
-            type="button"
-            className="pill clear"
-            onClick={() => {
-              setCommunityTag("");
-              setCauseTag("");
-            }}
-            disabled={!communityTag && !causeTag}
-          >
-            Clear filters
-          </button>
           <span className="muted" style={{ marginLeft: "auto" }}>
             Sort: {pagination?.sort || "relevance"} ▾
           </span>
         </div>
-        <div className="helper-text">
-          Filters apply within your current community. Clear to see all.
-        </div>
       </header>
 
-      <div className="cards">
+      <div className="cards" ref={listRef}>
         {hasEvents &&
-          sortedFeed.map((evt) => {
+          visibleFeed.map((evt) => {
             const hasCover = Boolean(evt.cover_url);
             const orgName = evt.org_name || "Independent organizer";
             const communityTagLabel = evt.community_tag || "";
@@ -294,7 +349,11 @@ export function Feed({ feed = [], setFeed, pagination }) {
               </article>
             );
           })}
-        {!hasEvents && <div className="muted">No events yet.</div>}
+        {!hasEvents && (
+          <div className="muted">
+            {String(searchTerm || "").trim() ? "No events match your search." : "No events yet."}
+          </div>
+        )}
       </div>
 
       <style>{styles}</style>
@@ -344,13 +403,12 @@ function formatVerificationLabel(method) {
 
 const styles = `
   .feed-head{margin-bottom:12px}
-  .search{width:100%;padding:10px;border:1px solid #e5e7eb;border-radius:12px}
+  .search-row{display:flex;align-items:center;gap:10px;max-width:760px}
+  .search{flex:1 1 auto;width:auto;padding:10px;border:1px solid #e5e7eb;border-radius:12px}
+  .search-submit{padding:10px 16px;border-radius:12px;white-space:nowrap}
   .pills{display:flex;gap:12px;align-items:center;margin:12px 0;flex-wrap:wrap}
-  .pill{background:#f3f4f6;border:1px solid #e5e7eb;padding:6px 12px;border-radius:16px;font-size:12px}
-  .pill.clear{background:#fff}
   .pill-input{display:flex;align-items:center;gap:8px;background:#f3f4f6;border:1px solid #e5e7eb;padding:6px 12px;border-radius:16px;font-size:12px}
   .pill-input input{border:none;background:transparent;min-width:120px;outline:none}
-  .helper-text{font-size:12px;color:#6b7280;margin-top:-4px}
   .muted{color:#6b7280;font-size:12px}
   .cards{display:flex;flex-direction:column;gap:16px}
   .card{display:grid;grid-template-columns:180px 1fr 220px;gap:16px;align-items:center;border:1px solid #e5e7eb;border-radius:16px;padding:16px;background:#fff}
@@ -371,4 +429,7 @@ const styles = `
   .actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
   .btn{background:#ff5656;border:none;color:#fff;padding:10px 16px;border-radius:10px;font-weight:700;cursor:pointer}
   .btn.secondary{background:#fff;border:1px solid #e5e7eb;color:#1f2937}
+  @media (max-width: 640px){
+    .search-row{max-width:100%}
+  }
 `;
