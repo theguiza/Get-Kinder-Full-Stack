@@ -19,7 +19,12 @@
   <main class="org-portal-main container">
     <%
       const fullName = `${user?.firstname || ""} ${user?.lastname || ""}`.trim() || user?.name || "Organization Lead";
-      const organizationName = user?.organization_name || user?.organization || user?.org_name || "Get Kinder";
+      const resolvedOrganizationName =
+        (typeof organizationName === "string" && organizationName.trim())
+        || user?.organization_name
+        || user?.organization
+        || user?.org_name
+        || "Get Kinder";
       const profilePicture = user?.picture || "/images/nerdy-KAI.png";
       const orgRatingData = (typeof orgRating !== "undefined" && orgRating) ? orgRating : {};
       const orgRatingCount = Number(orgRatingData.count) || 0;
@@ -40,7 +45,7 @@
               src="<%= profilePicture %>">
           </div>
           <div class="col-12 col-md-5 text-center text-md-start">
-            <div class="org-hero-org"><%= organizationName %></div>
+            <div class="org-hero-org"><%= resolvedOrganizationName %></div>
             <h1 class="org-hero-name"><%= fullName %></h1>
             <div
               class="org-hero-rating"
@@ -126,7 +131,7 @@
     window.renderOrgPortal("#org-portal-root", {
       csrfToken: "<%= csrfToken %>",
       userId: "<%= user.id %>",
-      orgName: <%- JSON.stringify(organizationName) %>
+      orgName: <%- JSON.stringify(resolvedOrganizationName) %>
     });
     window.renderKpiStrip("#org-portal-kpis", { csrfToken: "<%= csrfToken %>" });
   </script>

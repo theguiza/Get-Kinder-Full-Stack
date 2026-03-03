@@ -2137,6 +2137,7 @@ app.get("/org-portal", ensureOrgRepPage, async (req, res) => {
     hasRatings: false,
     starsFilled: 5,
   };
+  let organizationName = "";
 
   try {
     const numericSessionId = Number(req.user?.id);
@@ -2167,6 +2168,14 @@ app.get("/org-portal", ensureOrgRepPage, async (req, res) => {
     }
 
     if (orgId != null && Number.isFinite(orgId)) {
+      const { rows: [orgRow] } = await pool.query(
+        "SELECT name FROM public.organizations WHERE id = $1 LIMIT 1",
+        [orgId]
+      );
+      if (typeof orgRow?.name === "string" && orgRow.name.trim()) {
+        organizationName = orgRow.name.trim();
+      }
+
       const summary = await getRatingsSummary({ orgId, limit: 20 });
       const count = Number(summary?.sampleSize) || 0;
       const hasRatings = count > 0 && Number.isFinite(Number(summary?.kindnessRating));
@@ -2179,10 +2188,10 @@ app.get("/org-portal", ensureOrgRepPage, async (req, res) => {
       orgRating.starsFilled = starsFilled;
     }
   } catch (error) {
-    console.warn("[org-portal] org rating summary lookup failed:", error?.message || error);
+    console.warn("[org-portal] org context lookup failed:", error?.message || error);
   }
 
-  res.render("org-portal", { assetTag, user: req.user, orgRating });
+  res.render("org-portal", { assetTag, user: req.user, orgRating, organizationName });
 });
 
 app.get("/donate", ensureAuthenticated, (req, res) => {
