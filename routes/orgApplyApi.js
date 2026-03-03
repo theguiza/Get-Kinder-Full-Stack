@@ -38,8 +38,14 @@ function getAdminEmails() {
     .filter(Boolean);
 }
 
-function appBaseUrl() {
+function appBaseUrl(req) {
   if (process.env.APP_URL) return process.env.APP_URL.replace(/\/$/, "");
+  const forwardedProto = String(req?.headers?.["x-forwarded-proto"] || "")
+    .split(",")[0]
+    .trim();
+  const protocol = forwardedProto || req?.protocol || "http";
+  const host = req?.get?.("x-forwarded-host") || req?.get?.("host");
+  if (host) return `${protocol}://${host}`;
   const port = process.env.PORT ? Number(process.env.PORT) : 5001;
   return `http://localhost:${port}`;
 }
@@ -82,7 +88,7 @@ orgApplyRouter.post("/org-apply", ensureAuthenticated, async (req, res) => {
     );
 
     const adminEmails = getAdminEmails();
-    const reviewUrl = `${appBaseUrl()}/admin/org-applications`;
+    const reviewUrl = `${appBaseUrl(req)}/admin/org-applications`;
     const applicantName = `${req.user?.firstname || ""} ${req.user?.lastname || ""}`.trim() || "Unknown";
     const applicantEmail = req.user?.email || "";
     const textBody = [
@@ -220,7 +226,7 @@ orgApplyRouter.post("/admin/org-applications/:id/approve", ensureAuthenticated, 
 
     await client.query("COMMIT");
 
-    const baseUrl = appBaseUrl();
+    const baseUrl = appBaseUrl(req);
     await sendNudgeEmail({
       to: application.email,
       subject: "You're approved as an Organization Representative on GetKinder!",
