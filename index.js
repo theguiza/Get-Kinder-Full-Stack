@@ -570,22 +570,55 @@ app.post("/register", async (req, res, next) => {
 });
 // 12.2) Login Route
 app.post("/login", async (req, res, next) => {
-  const { email, password } = req.body;
+  const submittedEmail = normalizeEmail(req.body?.email);
+  const password = typeof req.body?.password === "string" ? req.body.password : "";
   try {
+    if (!submittedEmail || !password) {
+      return res.status(400).render("login", {
+        title: "Log In",
+        facebookAppId: process.env.FACEBOOK_APP_ID,
+        error: "Email and password are required.",
+      });
+    }
+
     const result = await pool.query(
-      "SELECT * FROM userdata WHERE email = $1",
-      [email]
+      "SELECT * FROM userdata WHERE LOWER(email) = LOWER($1) ORDER BY id DESC LIMIT 1",
+      [submittedEmail]
     );
     if (result.rows.length === 0) {
-      return res.render("login", {
+      return res.status(401).render("login", {
         title: "Log In",
+        facebookAppId: process.env.FACEBOOK_APP_ID,
         error: "No account found with that email.",
       });
     }
     let user = result.rows[0];
-    const isMatch = await bcrypt.compare(password, user.password);
+    if (typeof user.password !== "string" || !user.password.trim()) {
+      return res.status(401).render("login", {
+        title: "Log In",
+        facebookAppId: process.env.FACEBOOK_APP_ID,
+        error: "This account does not have a password set. Use Forgot Password to create one.",
+      });
+    }
+
+    let isMatch = false;
+    try {
+      isMatch = await bcrypt.compare(password, user.password);
+    } catch (compareErr) {
+      console.error("Login compare error:", compareErr);
+      return res.status(401).render("login", {
+        title: "Log In",
+        facebookAppId: process.env.FACEBOOK_APP_ID,
+        error: "Invalid email or password.",
+      });
+    }
+
     if (!isMatch) {
-      return res.status(401).send("Invalid password");
+      return res.status(401).render("login", {
+        title: "Log In",
+        facebookAppId: process.env.FACEBOOK_APP_ID,
+        error: "Invalid email or password.",
+      });
     }
     const needsOnboarding = !user.has_seen_onboarding;
     if (needsOnboarding) {
@@ -615,7 +648,11 @@ app.post("/login", async (req, res, next) => {
     });
   } catch (err) {
     console.error("Login error:", err);
-    res.status(500).send("Internal server error");
+    return res.status(500).render("login", {
+      title: "Log In",
+      facebookAppId: process.env.FACEBOOK_APP_ID,
+      error: "Login is temporarily unavailable. Please try again in a minute.",
+    });
   }
 });
 app.get("/forgot-password", (req, res) => {
