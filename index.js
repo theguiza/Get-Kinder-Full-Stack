@@ -1666,11 +1666,26 @@ function normalizeGeoQuery(value) {
   return value.trim().slice(0, 200);
 }
 
-function withVancouverBias(query) {
-  if (!query) return query;
-  return /(vancouver|british columbia|,\s*bc\b|canada)/i.test(query)
-    ? query
-    : `${query}, Vancouver, BC, Canada`;
+function hasExplicitGeoContext(query) {
+  if (!query) return false;
+  if (query.includes(",")) return true;
+  return /\b(vancouver|victoria|burnaby|surrey|richmond|coquitlam|langley|nanaimo|kelowna|abbotsford|whistler|british columbia|\bbc\b|canada|usa|united states)\b/i.test(query);
+}
+
+function buildGeocodeQueryCandidates(query) {
+  const normalized = normalizeGeoQuery(query);
+  if (!normalized) return [];
+  const candidates = hasExplicitGeoContext(normalized)
+    ? [normalized, `${normalized}, BC, Canada`, `${normalized}, Canada`]
+    : [`${normalized}, Vancouver, BC, Canada`, `${normalized}, BC, Canada`, `${normalized}, Canada`, normalized];
+
+  const seen = new Set();
+  return candidates.filter((candidate) => {
+    const key = candidate.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 8000) {
@@ -1691,45 +1706,65 @@ app.get('/api/geo/geocode', ensureAuthenticatedApi, async (req, res) => {
   }
 
   try {
-    const searchUrl = new URL("https://nominatim.openstreetmap.org/search");
-    searchUrl.searchParams.set("q", withVancouverBias(rawQuery));
-    searchUrl.searchParams.set("format", "jsonv2");
-    searchUrl.searchParams.set("limit", "1");
-    searchUrl.searchParams.set("addressdetails", "1");
+    const queryCandidates = buildGeocodeQueryCandidates(rawQuery);
+    let sawProviderError = false;
+    let sawOkResponse = false;
+    let sawInvalidCoordinates = false;
 
-    const response = await fetchJsonWithTimeout(searchUrl, {
-      headers: {
-        "User-Agent": process.env.GEO_USER_AGENT || "GetKinder.ai/1.0 (profile geocoder)",
-        "Accept-Language": "en"
+    for (const candidate of queryCandidates) {
+      const searchUrl = new URL("https://nominatim.openstreetmap.org/search");
+      searchUrl.searchParams.set("q", candidate);
+      searchUrl.searchParams.set("format", "jsonv2");
+      searchUrl.searchParams.set("limit", "1");
+      searchUrl.searchParams.set("addressdetails", "1");
+
+      const response = await fetchJsonWithTimeout(searchUrl, {
+        headers: {
+          "User-Agent": process.env.GEO_USER_AGENT || "GetKinder.ai/1.0 (profile geocoder)",
+          "Accept-Language": "en"
+        }
+      });
+      if (!response.ok) {
+        sawProviderError = true;
+        continue;
       }
-    });
-    if (!response.ok) {
+
+      sawOkResponse = true;
+      const payload = await response.json();
+      const first = Array.isArray(payload) ? payload[0] : null;
+      if (!first) {
+        continue;
+      }
+
+      const lat = Number(first.lat);
+      const lng = Number(first.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        sawInvalidCoordinates = true;
+        continue;
+      }
+
+      const label = normalizeOptionalString(first.display_name, 255)
+        || `Near ${lat.toFixed(3)}, ${lng.toFixed(3)}`;
+
+      return res.json({
+        ok: true,
+        data: {
+          lat,
+          lng,
+          label,
+        }
+      });
+    }
+
+    if (!sawOkResponse && sawProviderError) {
       return res.status(502).json({ ok: false, error: "Geocoding provider error." });
     }
 
-    const payload = await response.json();
-    const first = Array.isArray(payload) ? payload[0] : null;
-    if (!first) {
-      return res.status(404).json({ ok: false, error: "No matching location found." });
-    }
-
-    const lat = Number(first.lat);
-    const lng = Number(first.lon);
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    if (sawInvalidCoordinates) {
       return res.status(502).json({ ok: false, error: "Geocoding provider returned invalid coordinates." });
     }
 
-    const label = normalizeOptionalString(first.display_name, 255)
-      || `Near ${lat.toFixed(3)}, ${lng.toFixed(3)}`;
-
-    return res.json({
-      ok: true,
-      data: {
-        lat,
-        lng,
-        label,
-      }
-    });
+    return res.status(404).json({ ok: false, error: "No matching location found." });
   } catch (err) {
     console.error("GET /api/geo/geocode error:", err);
     return res.status(500).json({ ok: false, error: "Unable to geocode location right now." });
