@@ -216,11 +216,7 @@ export async function fetchEvents({
 
   const hasMore = rows.length > clampedLimit;
   const pageRows = hasMore ? rows.slice(0, clampedLimit) : rows;
-  const events = pageRows.map((row) => {
-    const mapped = mapEventRow(row);
-    delete mapped.description;
-    return mapped;
-  });
+  const events = pageRows.map((row) => mapEventRow(row));
   const last = pageRows[pageRows.length - 1];
   const lastStartAt = last?.start_at ? new Date(last.start_at).toISOString() : null;
   const nextCursor = hasMore && last

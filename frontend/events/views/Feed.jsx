@@ -277,9 +277,9 @@ export function Feed({ feed = [], setFeed, pagination }) {
             const causeTags = Array.isArray(evt.cause_tags) ? evt.cause_tags.filter(Boolean) : [];
             const causePreview = causeTags.slice(0, 3);
             const extraTagCount = causeTags.length - causePreview.length;
-            const requirements = typeof evt.requirements === "string" ? evt.requirements.trim() : "";
-            const requirementsPreview =
-              requirements.length > 90 ? `${requirements.slice(0, 90)}…` : requirements;
+            const description = typeof evt.description === "string" ? evt.description.trim() : "";
+            const descriptionPreview =
+              description.length > 90 ? `${description.slice(0, 90)}…` : description;
             const verificationLabel = formatVerificationLabel(evt.verification_method);
             const credits = Number.isFinite(Number(evt.impact_credits_base))
               ? Number(evt.impact_credits_base)
@@ -329,8 +329,8 @@ export function Feed({ feed = [], setFeed, pagination }) {
                     {extraTagCount > 0 && <span className="tag">+{extraTagCount}</span>}
                   </div>
                 )}
-                {requirementsPreview && (
-                  <div className="requirements">{requirementsPreview}</div>
+                {descriptionPreview && (
+                  <div className="requirements">{descriptionPreview}</div>
                 )}
                 <div className="meta-row">
                   <span className="meta-pill">{verificationLabel}</span>
@@ -388,17 +388,8 @@ function fmt(start, end, tz) {
   }
 }
 
-function formatVerificationLabel(method) {
-  switch (method) {
-    case "host_attest":
-      return "Host attestation";
-    case "qr_stub":
-      return "QR check-in (stub)";
-    case "social_proof":
-      return "Social proof";
-    default:
-      return "Host attestation";
-  }
+function formatVerificationLabel() {
+  return "Scan QR Code";
 }
 
 const styles = `
@@ -431,5 +422,7 @@ const styles = `
   .btn.secondary{background:#fff;border:1px solid #e5e7eb;color:#1f2937}
   @media (max-width: 640px){
     .search-row{max-width:100%}
+    .actions{width:100%;justify-content:stretch}
+    .actions .btn{width:100%}
   }
 `;

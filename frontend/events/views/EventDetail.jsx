@@ -203,12 +203,26 @@ export function EventDetail({ eventId }) {
           <img src={evt.cover_url} alt="Event cover" />
         </div>
       )}
-
-      <div className="rsvp-stats">
-        <span>
-          RSVP'd: {evt?.rsvp_counts?.accepted ?? 0}
-          {evt.capacity ? ` / ${evt.capacity}` : ""}
-        </span>
+      <div className="detail-meta-row">
+        <div className="detail-cause-tags">
+          <span className="label">Cause tags</span>
+          {Array.isArray(evt.cause_tags) && evt.cause_tags.length > 0 ? (
+            <div className="tag-row">
+              {evt.cause_tags.map((tag) => (
+                <span className="tag" key={tag}>{tag}</span>
+              ))}
+            </div>
+          ) : (
+            <p className="muted small">No cause tags yet.</p>
+          )}
+        </div>
+        <div className="rsvp-stats">
+          <span className="label">RSVP'd</span>
+          <span className="tag">
+            {evt?.rsvp_counts?.accepted ?? 0}
+            {evt.capacity ? ` / ${evt.capacity}` : ""}
+          </span>
+        </div>
       </div>
 
       {inviteToast && (
@@ -318,6 +332,42 @@ export function EventDetail({ eventId }) {
         </div>
       )}
 
+      <div className="card info-card">
+        <div className="info-card__header">
+          <strong>Event Details</strong>
+        </div>
+        <div className="info-grid">
+          <div>
+            <span className="label">Organization</span>
+            <p className="value">{evt.org_name || "Independent organizer"}</p>
+          </div>
+          <div>
+            <span className="label">Community tag</span>
+            <p className="value">{evt.community_tag || "General"}</p>
+          </div>
+          <div>
+            <span className="label">Verification</span>
+            <p className="value">{formatVerificationLabel(evt.verification_method)}</p>
+          </div>
+          <div>
+            <span className="label">Impact Credits</span>
+            <p className="value">{Number.isFinite(Number(evt.impact_credits_base)) ? Number(evt.impact_credits_base) : 25}</p>
+          </div>
+        </div>
+        {typeof evt.description === "string" && evt.description.trim() && (
+          <div className="info-reqs">
+            <span className="label">Description</span>
+            <p className="value" style={{ whiteSpace: "pre-wrap" }}>{evt.description}</p>
+          </div>
+        )}
+        {evt.requirements && (
+          <div className="info-reqs">
+            <span className="label">Requirements</span>
+            <p className="value" style={{ whiteSpace: "pre-wrap" }}>{evt.requirements}</p>
+          </div>
+        )}
+      </div>
+
       <div className="card when-card">
         <div className="when-card__header">
           <strong>When / Where</strong>
@@ -342,48 +392,6 @@ export function EventDetail({ eventId }) {
             </div>
           </div>
         </div>
-      </div>
-
-      <div className="card info-card">
-        <div className="info-card__header">
-          <strong>Event Details</strong>
-        </div>
-        <div className="info-grid">
-          <div>
-            <span className="label">Organization</span>
-            <p className="value">{evt.org_name || "Independent organizer"}</p>
-          </div>
-          <div>
-            <span className="label">Community tag</span>
-            <p className="value">{evt.community_tag || "General"}</p>
-          </div>
-          <div>
-            <span className="label">Verification</span>
-            <p className="value">{formatVerificationLabel(evt.verification_method)}</p>
-          </div>
-          <div>
-            <span className="label">Impact Credits on verification</span>
-            <p className="value">{Number.isFinite(Number(evt.impact_credits_base)) ? Number(evt.impact_credits_base) : 25}</p>
-          </div>
-        </div>
-        <div className="info-tags">
-          <span className="label">Cause tags</span>
-          {Array.isArray(evt.cause_tags) && evt.cause_tags.length > 0 ? (
-            <div className="tag-row">
-              {evt.cause_tags.map((tag) => (
-                <span className="tag" key={tag}>{tag}</span>
-              ))}
-            </div>
-          ) : (
-            <p className="muted small">No cause tags yet.</p>
-          )}
-        </div>
-        {evt.requirements && (
-          <div className="info-reqs">
-            <span className="label">Requirements</span>
-            <p className="value" style={{ whiteSpace: "pre-wrap" }}>{evt.requirements}</p>
-          </div>
-        )}
       </div>
 
       <button
@@ -419,8 +427,7 @@ export function EventDetail({ eventId }) {
 
 const detailStyles = `
   .event-detail-panel{
-    position:relative;
-    padding-right:44px
+    position:relative
   }
   .event-detail-close{
     position:absolute;
@@ -449,16 +456,18 @@ const detailStyles = `
   .event-detail-title{
     margin:0;
     color:#ff5656;
-    font-size:clamp(1.75rem,4.4vw,2.15rem);
+    font-size:clamp(1.35rem,3.2vw,1.7rem);
     line-height:1.15;
-    font-weight:800
+    font-weight:800;
+    padding-right:44px
   }
   .event-detail-subheader{
     margin-top:4px;
     color:#455a7c;
-    font-size:clamp(1.1rem,3.2vw,1.35rem);
+    font-size:clamp(0.95rem,2.6vw,1.15rem);
     line-height:1.3;
-    font-weight:600
+    font-weight:600;
+    padding-right:44px
   }
   .row{display:flex;align-items:center}
   .card{border:none;border-radius:18px;padding:20px;background:#fff;margin:12px 0;box-shadow:0 2px 12px rgba(69, 90, 124, 0.08)}
@@ -498,8 +507,12 @@ const detailStyles = `
   }
   .checkin-card{display:flex;flex-direction:column;gap:12px}
   .checkin-buttons{display:flex;flex-wrap:wrap;gap:10px}
-  .rsvp-stats{margin-top:8px;color:#6b7280;font-size:0.9rem}
-  .when-card{display:grid;grid-template-columns:1fr 2fr;column-gap:20px;align-items:start}
+  .detail-meta-row{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:8px 0 4px}
+  .detail-cause-tags{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0;flex:1 1 220px}
+  .detail-meta-row .label{display:inline-flex;margin-bottom:0;color:#6c757d;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.09em;font-weight:600}
+  .detail-cause-tags .tag-row{display:flex;flex-wrap:wrap;gap:8px;margin:0}
+  .rsvp-stats{margin:0 0 0 auto;display:flex;align-items:center;gap:8px;white-space:nowrap}
+  .when-card{display:grid;grid-template-columns:0.68fr 2.32fr;column-gap:18px;align-items:start}
   .when-card__header{margin:0;padding:0 16px 0 0;border-bottom:none;border-right:2px solid #ff5656;min-height:100%}
   .when-card__header strong{font-size:0.75rem;text-transform:uppercase;letter-spacing:0.1em;color:#455a7c;font-weight:700}
   .when-card__body{display:flex;gap:16px;flex-wrap:wrap;margin-top:0}
@@ -508,20 +521,20 @@ const detailStyles = `
   .when-card__col .label{display:block;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.09em;color:#6c757d;margin-bottom:2px;font-weight:600}
   .when-card__col:not(.meta) .value{margin:0 0 8px;font-weight:600;color:#455a7c;word-break:break-word}
   .when-card__col:not(.meta) .value:last-of-type{margin-bottom:0}
-  .when-card__col.meta{display:flex;flex-direction:column;gap:8px}
+  .when-card__col.meta{display:flex;flex-direction:row;gap:16px;align-items:flex-start;flex-wrap:wrap}
+  .when-card__col.meta > div{min-width:96px}
   .when-card__col.meta .value{margin:0;font-size:1.1rem;font-weight:600;color:#455a7c;word-break:break-word}
-  .info-card{display:grid;grid-template-columns:1fr 2fr;column-gap:20px;align-items:start}
+  .info-card{display:grid;grid-template-columns:0.68fr 2.32fr;column-gap:18px;align-items:start}
   .info-card__header{margin:0;padding:0 16px 0 0;border-bottom:none;border-right:2px solid #ff5656;min-height:100%;grid-column:1;grid-row:1 / span 3}
   .info-card__header strong{font-size:0.75rem;text-transform:uppercase;letter-spacing:0.1em;color:#455a7c;font-weight:700}
   .info-card .label{display:block;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.09em;color:#6c757d;margin-bottom:4px;font-weight:600}
   .info-card .value{margin:0 0 4px;font-weight:600;color:#455a7c;word-break:break-word}
-  .info-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;grid-column:2}
-  .info-tags{grid-column:2}
+  .info-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:8px;grid-column:2}
+  .info-grid > div{display:flex;flex-direction:column;align-items:flex-start}
   .info-reqs{grid-column:2}
-  .info-tags .tag-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
   .tag{display:inline-flex;align-items:center;padding:4px 12px;border-radius:999px;border:1.5px solid #455a7c;background:#ffffff;color:#455a7c;font-size:0.78rem;font-weight:500;margin:2px 4px 2px 0;transition:all 0.15s ease}
   .tag:hover{background:#ff5656;border-color:#ff5656;color:#ffffff}
-  .info-reqs .value{margin-top:4px}
+  .info-reqs .value{margin-top:4px;font-weight:400;font-size:0.92rem;line-height:1.4}
   .card p{margin:6px 0 0}
   .detail-cover{margin:12px 0}
   .detail-cover img{width:100%;max-height:240px;object-fit:cover;border-radius:16px;border:1px solid #e5e7eb}
@@ -549,10 +562,10 @@ const detailStyles = `
     .when-card__header{padding:0 0 12px;border-right:none;border-bottom:2px solid #ff5656;margin-bottom:12px}
     .info-card{grid-template-columns:1fr}
     .info-card__header{padding:0 0 12px;border-right:none;border-bottom:2px solid #ff5656;margin-bottom:12px;grid-column:1;grid-row:auto}
-    .info-grid,.info-tags,.info-reqs{grid-column:1}
+    .info-grid,.info-reqs{grid-column:1}
   }
   @media (max-width: 480px){
-    .info-grid{grid-template-columns:1fr}
+    .info-grid{grid-template-columns:1fr 1fr}
   }
 `;
 
@@ -595,7 +608,7 @@ function formatEventSummaryLine(startAt, endAt, tz, locationText) {
           timeZone: zone,
         }).format(end)
       : "Time TBD";
-    return `${startLabel} - ${endLabel} (${zone}) · ${location}`;
+    return `${startLabel} - ${endLabel} · ${location}`;
   } catch {
     return location;
   }
@@ -614,15 +627,6 @@ function formatMethodLabel(method) {
   }
 }
 
-function formatVerificationLabel(method) {
-  switch (method) {
-    case "host_attest":
-      return "Host attestation";
-    case "qr_stub":
-      return "QR check-in (stub)";
-    case "social_proof":
-      return "Social proof";
-    default:
-      return "Host attestation";
-  }
+function formatVerificationLabel() {
+  return "Scan QR Code";
 }
