@@ -58,6 +58,17 @@ function sanitizeString(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function truncateLocationForStorage(value, maxParts = 3) {
+  const normalized = sanitizeString(value);
+  if (!normalized) return "";
+  const parts = normalized
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (!parts.length) return "";
+  return parts.slice(0, maxParts).join(", ");
+}
+
 function normalizeFundingPoolSlug(value, fallback = DEFAULT_FUNDING_POOL_SLUG) {
   const fallbackSlug = typeof fallback === "string" && fallback.trim()
     ? fallback.trim().toLowerCase()
@@ -1453,7 +1464,7 @@ async function buildEventPayload(body, { strict = false, fallback = {} } = {}) {
   if (!title) throw buildValidationError("Title is required.");
 
   const tz = sanitizeString(body.tz ?? base.tz) || "America/Vancouver";
-  const locationText = sanitizeString(body.location_text ?? base.location_text);
+  const locationText = truncateLocationForStorage(body.location_text ?? base.location_text);
   if (strict && !locationText) throw buildValidationError("Location is required to publish.");
 
   const visibility = VISIBILITY_SET.has(body.visibility) ? body.visibility : base.visibility || "public";

@@ -6,6 +6,7 @@ import { PoolLedgerModal } from "./events/components/PoolLedgerModal.jsx";
 import { TopUpPoolModal } from "./events/components/TopUpPoolModal.jsx";
 
 const ROOTS = new WeakMap();
+const KPI_REFRESH_EVENT = "orgportal:kpis:refresh";
 
 const TABS = [
   { key: "opportunities", label: "Opportunities" },
@@ -19,7 +20,7 @@ const TABS = [
 const KPI_CARDS = [
   { key: "totalHours", label: "Total Hours", icon: "fa-clock" },
   { key: "fillRate", label: "Fill Rate", icon: "fa-bullseye" },
-  { key: "impactCredits", label: "Impact Credits", icon: "fa-coins" },
+  { key: "impactCredits", label: "Impacts Credits Avail", icon: "fa-coins" },
   { key: "noShowRate", label: "No-Show Rate", icon: "fa-user-slash" },
 ];
 const MY_EVENTS_ZERO_SUMMARY = {
@@ -449,7 +450,7 @@ function KpiValue({ cardKey, kpis, kpisLoading }) {
     const value = safeNumber(kpis.impactCredits, 0);
     return (
       <>
-        <div className="org-kpi-value">{`${value} pts`}</div>
+        <div className="org-kpi-value">{value}</div>
         <div className="org-kpi-sub">{`$${(value * 0.5).toFixed(0)} est. value`}</div>
       </>
     );
@@ -471,25 +472,32 @@ function OrgPortalKpiStrip() {
   useEffect(() => {
     let mounted = true;
 
-    setKpisLoading(true);
-    fetch("/api/org/kpis", { credentials: "include" })
-      .then((res) => {
-        if (!res.ok) throw new Error("kpi_failed");
-        return res.json();
-      })
-      .then((data) => {
-        if (!mounted) return;
-        setKpis(data || {});
-        setKpisLoading(false);
-      })
-      .catch(() => {
-        if (!mounted) return;
-        setKpis(null);
-        setKpisLoading(false);
-      });
+    const loadKpis = () => {
+      setKpisLoading(true);
+      fetch("/api/org/kpis", { credentials: "include" })
+        .then((res) => {
+          if (!res.ok) throw new Error("kpi_failed");
+          return res.json();
+        })
+        .then((data) => {
+          if (!mounted) return;
+          setKpis(data || {});
+          setKpisLoading(false);
+        })
+        .catch(() => {
+          if (!mounted) return;
+          setKpis(null);
+          setKpisLoading(false);
+        });
+    };
+
+    const handleRefresh = () => loadKpis();
+    window.addEventListener(KPI_REFRESH_EVENT, handleRefresh);
+    loadKpis();
 
     return () => {
       mounted = false;
+      window.removeEventListener(KPI_REFRESH_EVENT, handleRefresh);
     };
   }, []);
 
@@ -2588,6 +2596,9 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
       message: `Added ${amountCredits} credits to ${targetPoolSlug}.`,
     });
     await refreshMyEventsData();
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent(KPI_REFRESH_EVENT));
+    }
   }
 
   async function handleMyEventCancel(eventRow) {

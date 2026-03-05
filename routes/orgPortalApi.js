@@ -4,6 +4,7 @@ import { sendNudgeEmail } from "../kindnessEmailer.js";
 
 const orgPortalRouter = express.Router();
 const CSRF_HEADER_NAME = "X-CSRF-Token";
+const POOL_SCOPE_SEP = "__";
 
 async function resolveUserId(req) {
   if (req.user?.id) return String(req.user.id);
@@ -1442,16 +1443,25 @@ orgPortalRouter.get("/kpis", async (req, res) => {
       [hostUserId]
     );
 
+    const scopedPoolPrefix = `u${hostUserId}${POOL_SCOPE_SEP}`;
     const { rows: [creditsRow] = [] } = await pool.query(
       `
-        SELECT COALESCE(SUM(wt.kind_amount), 0)::numeric AS impact_credits
-        FROM wallet_transactions wt
-        JOIN events e ON e.id = wt.event_id
-        WHERE e.creator_user_id = $1
-          AND wt.reason = 'earn_shift'
-          AND wt.direction = 'credit'
+        SELECT
+          COALESCE(
+            SUM(
+              CASE
+                WHEN pt.direction = 'credit' THEN pt.amount_credits
+                WHEN pt.direction = 'debit' THEN -pt.amount_credits
+                ELSE 0
+              END
+            ),
+            0
+          )::numeric AS impact_credits
+        FROM funding_pools fp
+        LEFT JOIN pool_transactions pt ON pt.pool_id = fp.id
+        WHERE LEFT(fp.slug, LENGTH($1)) = $1
       `,
-      [hostUserId]
+      [scopedPoolPrefix]
     );
 
     const { rows: [noShowRow] = [] } = await pool.query(
