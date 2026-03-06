@@ -22,6 +22,7 @@ import connectPgSimple from "connect-pg-simple";
 import multer from "multer";
 import cron from "node-cron";
 import crypto from "crypto";
+import rateLimit from "express-rate-limit";
 import { FUNCTIONS } from "./openaiFunctions.js";
 import { makeDashboardController } from "./Backend/dashboardController.js";
 import { generateArcForQuiz } from "./services/ArcGenerator.js";
@@ -142,7 +143,28 @@ function getAppBaseUrl(req) {
 
 const FORGOT_PASSWORD_SUCCESS_MESSAGE =
   "If an account exists for that email, we sent password reset instructions.";
+const INVALID_VERIFICATION_LINK_MESSAGE = "Invalid verification link.";
+const EXPIRED_VERIFICATION_LINK_MESSAGE = "This verification link is invalid or has expired.";
+const EMAIL_VERIFIED_SUCCESS_MESSAGE = "Your email has been verified!";
+const VERIFY_PENDING_MESSAGE =
+  "Thanks for signing up! Please check your email and click the verification link to activate your account.";
+const VERIFY_REQUIRED_MESSAGE =
+  "Please verify your email before signing in. Check your inbox for the verification link.";
 const AUTH_PAGE_PATHS = new Set(["/login", "/register", "/forgot-password", "/reset-password"]);
+const registerLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  message: "Too many accounts created from this IP, please try again later.",
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+const forgotPasswordLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  message: "Too many password reset requests, please try again later.",
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 async function ensurePasswordResetColumns() {
   await pool.query(`
@@ -542,7 +564,7 @@ async function mirrorAssessmentToGraph({
 // 12) Signup & Login Routes
 // ─────────────────────────────────────────────────────────────────────────────
 // 12.1) Signup Route
-app.post("/register", async (req, res, next) => {
+app.post("/register", registerLimiter, async (req, res, next) => {
   const firstname = typeof req.body?.firstname === "string" ? req.body.firstname : "";
   const lastname = typeof req.body?.lastname === "string" ? req.body.lastname : "";
   const email = normalizeEmail(req.body?.email);
@@ -561,33 +583,42 @@ app.post("/register", async (req, res, next) => {
       [firstname, lastname, email, hashedPassword]
     );
     let newUser = result.rows[0];
-    const needsOnboarding = !newUser.has_seen_onboarding;
-    if (needsOnboarding) {
-      const { rows: [updatedUser] } = await pool.query(
-        "UPDATE userdata SET has_seen_onboarding = TRUE WHERE id = $1 RETURNING *",
-        [newUser.id]
-      );
-      if (updatedUser) {
-        newUser = updatedUser;
-      } else {
-        newUser.has_seen_onboarding = true;
-      }
+    const verificationToken = crypto.randomBytes(32).toString("hex");
+    const verificationTokenHash = crypto
+      .createHash("sha256")
+      .update(verificationToken)
+      .digest("hex");
+    const { rows: [verificationUpdatedUser] } = await pool.query(
+      `UPDATE public.userdata
+          SET email_verification_token_hash = $1,
+              email_verification_expires_at = NOW() + INTERVAL '24 hours'
+        WHERE id = $2
+        RETURNING *`,
+      [verificationTokenHash, newUser.id]
+    );
+    if (verificationUpdatedUser) {
+      newUser = verificationUpdatedUser;
     }
-    req.login(newUser, (err) => {
-      if (err) return next(err);
-      if (needsOnboarding) {
-        const displayName = newUser.firstname || newUser.email;
-        if (req.session) {
-          req.session.showOnboarding = true;
-          return req.session.save(() =>
-            res.redirect(`/?login=1&name=${encodeURIComponent(displayName)}`)
-          );
-        }
-        return res.redirect(`/?login=1&name=${encodeURIComponent(displayName)}`);
-      }
-      res.redirect("/dashboard");
-    });
+    const verificationBaseUrl = (process.env.BASE_URL || getAppBaseUrl(req)).replace(/\/+$/, "");
+    const verificationUrl = `${verificationBaseUrl}/verify-email?token=${encodeURIComponent(verificationToken)}`;
+    try {
+      await sendNudgeEmail({
+        to: newUser.email,
+        subject: "Verify your Get Kinder email",
+        text: `Hi ${newUser.firstname},\n\nPlease verify your email address by clicking the link below:\n\n${verificationUrl}\n\nThis link expires in 24 hours.\n\nIf you did not create this account, you can ignore this email.`,
+        html: `<p>Hi ${newUser.firstname},</p><p>Please verify your email address by clicking the link below:</p><p><a href="${verificationUrl}">Verify your email</a></p><p>This link expires in 24 hours.</p><p>If you did not create this account, you can ignore this email.</p>`,
+        fromName: "Get Kinder"
+      });
+    } catch (mailErr) {
+      console.error("Verification email send failed:", mailErr);
+    }
+    return res.redirect("/login?verify=pending");
   } catch (err) {
+    if (err?.code === "23505" && err?.constraint === "userdata_email_key") {
+      return res
+        .status(409)
+        .send("An account with that email already exists. Please log in or use Forgot Password.");
+    }
     console.error("Registration error:", err);
     res.status(500).send("Error registering user");
   }
@@ -644,7 +675,10 @@ app.post("/login", async (req, res, next) => {
         error: "Invalid email or password.",
       });
     }
-    const needsOnboarding = !user.has_seen_onboarding;
+    if (user?.email_verified !== true) {
+      return res.redirect("/login?verify=required");
+    }
+    const needsOnboarding = user?.has_seen_onboarding === false;
     if (needsOnboarding) {
       const { rows: [updatedUser] } = await pool.query(
         "UPDATE userdata SET has_seen_onboarding = TRUE WHERE id = $1 RETURNING *",
@@ -683,13 +717,13 @@ app.get("/forgot-password", (req, res) => {
   return res.render("forgot-password", { title: "Forgot Password", message: null, messageType: null });
 });
 
-app.post("/forgot-password", async (req, res) => {
+app.post("/forgot-password", forgotPasswordLimiter, async (req, res) => {
   const submittedEmail = normalizeEmail(req.body?.email);
 
   try {
     if (submittedEmail) {
       const { rows: [candidate] } = await pool.query(
-        `SELECT id, firstname, email
+        `SELECT id, firstname, email, email_verified
            FROM public.userdata
           WHERE LOWER(email) = LOWER($1)
           ORDER BY (password IS NULL), id DESC
@@ -697,7 +731,7 @@ app.post("/forgot-password", async (req, res) => {
         [submittedEmail]
       );
 
-      if (!candidate) {
+      if (!candidate || candidate.email_verified !== true) {
         return res.render("forgot-password", {
           title: "Forgot Password",
           message: FORGOT_PASSWORD_SUCCESS_MESSAGE,
@@ -888,6 +922,47 @@ app.post("/reset-password", async (req, res) => {
       token,
       error: "Something went wrong while resetting your password. Please try again.",
     });
+  }
+});
+
+app.get("/verify-email", async (req, res) => {
+  const token = typeof req.query?.token === "string" ? req.query.token.trim() : "";
+  if (!token) {
+    return res.redirect(`/login?error=${encodeURIComponent(INVALID_VERIFICATION_LINK_MESSAGE)}`);
+  }
+
+  try {
+    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+    const { rows: [user] } = await pool.query(
+      `SELECT id
+         FROM public.userdata
+        WHERE email_verification_token_hash = $1
+          AND email_verification_expires_at > NOW()
+        ORDER BY id DESC
+        LIMIT 1`,
+      [tokenHash]
+    );
+
+    if (!user) {
+      return res.redirect(`/login?error=${encodeURIComponent(EXPIRED_VERIFICATION_LINK_MESSAGE)}`);
+    }
+
+    await pool.query(
+      `UPDATE public.userdata
+          SET email_verified = TRUE,
+              email_verification_token_hash = NULL,
+              email_verification_expires_at = NULL
+        WHERE id = $1`,
+      [user.id]
+    );
+
+    if (req.isAuthenticated && req.isAuthenticated()) {
+      return res.redirect("/dashboard?verified=1");
+    }
+    return res.redirect("/login?verified=1");
+  } catch (err) {
+    console.error("Verify-email flow error:", err);
+    return res.redirect(`/login?error=${encodeURIComponent(EXPIRED_VERIFICATION_LINK_MESSAGE)}`);
   }
 });
 // 12.3) Logout Route
@@ -1661,10 +1736,23 @@ app.get("/terms",        (req, res) => res.render("terms",        { title: "Term
 // 14.1) Login and Register pages (GET)
 app.get("/login", (req, res) => {
   const passwordResetSuccess = req.query.reset === "1";
+  const emailVerifiedSuccess = req.query.verified === "1";
+  const verifyPending = req.query.verify === "pending";
+  const verifyRequired = req.query.verify === "required";
+  const verificationError = typeof req.query.error === "string" ? req.query.error.trim() : "";
+  const successMessage = verifyPending
+    ? VERIFY_PENDING_MESSAGE
+    : emailVerifiedSuccess
+    ? EMAIL_VERIFIED_SUCCESS_MESSAGE
+    : passwordResetSuccess
+    ? "Password updated. You can log in now."
+    : null;
+  const verifyRequiredError = verifyRequired ? VERIFY_REQUIRED_MESSAGE : "";
   return res.render("login", {
     title: "Log In",
     facebookAppId: process.env.FACEBOOK_APP_ID,
-    success: passwordResetSuccess ? "Password updated. You can log in now." : null,
+    success: successMessage,
+    error: verifyRequiredError || verificationError || null,
   });
 });
 app.get("/register", (req, res) => res.render("register", { title: "Sign Up" }));

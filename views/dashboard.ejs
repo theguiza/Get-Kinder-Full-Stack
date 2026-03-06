@@ -250,6 +250,12 @@
       <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
     </div>
   <% } %>
+  <% if (typeof req !== 'undefined' && req.query && req.query.verified === '1') { %>
+    <div class="alert alert-success alert-dismissible fade show auto-dismiss" role="alert">
+      Your email has been verified!
+      <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+  <% } %>
   <% if (typeof req !== 'undefined' && req.query && req.query.cancelled === '1') { %>
     <div class="alert alert-info alert-dismissible fade show auto-dismiss" role="alert">
       Challenge cancelled successfully. You can start a new one anytime!
