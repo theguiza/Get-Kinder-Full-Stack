@@ -1,14 +1,7 @@
 import pool from "../Backend/db/pg.js";
 import { recordDonation } from "../services/donationsService.js";
 import { fetchSquarePayment, parsePaymentAmount } from "../services/squareService.js";
-
-function isAdminEmail(email) {
-  const list = (process.env.ADMIN_EMAILS || "")
-    .split(",")
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
-  return email && list.includes(email.toLowerCase());
-}
+import { isAdminRequest } from "../Backend/middleware/ensureAdmin.js";
 
 async function resolveUserId(req) {
   if (req.user?.id) return String(req.user.id);
@@ -29,8 +22,7 @@ export async function createManualDonation(req, res) {
     const resolvedUserId = await resolveUserId(req);
     if (!resolvedUserId) return res.status(401).json({ ok: false, error: "unauthorized" });
 
-    const userEmail = req.user?.email || "";
-    if (process.env.NODE_ENV === "production" && !isAdminEmail(userEmail)) {
+    if (process.env.NODE_ENV === "production" && !isAdminRequest(req)) {
       return res.status(403).json({ ok: false, error: "forbidden", message: "Admin access required in production." });
     }
 

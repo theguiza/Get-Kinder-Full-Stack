@@ -1,0 +1,2 @@
+ALTER TABLE userdata
+  ADD COLUMN IF NOT EXISTS is_suspended BOOLEAN NOT NULL DEFAULT false;

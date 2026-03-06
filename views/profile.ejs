@@ -480,6 +480,13 @@
                     </div>
                     <div class="stat-label">Rating</div>
                   </div>
+                  <% if (Number(user.id) === 4 || Number(user.id) === 6) { %>
+                    <div class="col-12 text-center mt-1">
+                      <a href="/admin" class="btn btn-sm" style="background:#455a7c;color:#fff;border-color:#455a7c;">
+                        Open Admin Dashboard
+                      </a>
+                    </div>
+                  <% } %>
                 </div>
               </div>
             </div>

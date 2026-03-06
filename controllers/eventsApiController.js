@@ -904,13 +904,17 @@ export async function verifyEventRsvp(req, res) {
         attendeeUserId,
         eventId,
       });
+      const pendingCredits = funding?.pending ? Number(funding?.amount) || 0 : 0;
+      const awardedCredits = funding?.pending ? 0 : Number(funding?.amount) || 0;
       await client.query("COMMIT");
       return res.json({
         ok: true,
         already_verified: true,
         verification_status: "verified",
         attended_minutes: rsvpRow.attended_minutes ?? null,
-        impact_credits_awarded: funding?.amount || 0,
+        impact_credits_awarded: awardedCredits,
+        impact_credits_pending: pendingCredits,
+        credit_request_status: funding?.pending ? "pending" : funding?.already_awarded ? "approved" : null,
         unlocked_after_3: totalVerified >= 3,
         total_verified_shifts: totalVerified,
       });
@@ -951,6 +955,8 @@ export async function verifyEventRsvp(req, res) {
         verification_status: "rejected",
         attended_minutes: attendedMinutes,
         impact_credits_awarded: 0,
+        impact_credits_pending: 0,
+        credit_request_status: null,
         unlocked_after_3: totalVerified >= 3,
         total_verified_shifts: totalVerified,
       });
@@ -961,6 +967,8 @@ export async function verifyEventRsvp(req, res) {
       attendeeUserId,
       eventId,
     });
+    const pendingCredits = funding?.pending ? Number(funding?.amount) || 0 : 0;
+    const awardedCredits = funding?.pending ? 0 : Number(funding?.amount) || 0;
 
     const totalVerifiedAfter = await countVerifiedShifts(client, attendeeUserId);
     await client.query("COMMIT");
@@ -968,7 +976,9 @@ export async function verifyEventRsvp(req, res) {
       ok: true,
       verification_status: "verified",
       attended_minutes: attendedMinutes,
-      impact_credits_awarded: funding?.amount || 0,
+      impact_credits_awarded: awardedCredits,
+      impact_credits_pending: pendingCredits,
+      credit_request_status: funding?.pending ? "pending" : funding?.already_awarded ? "approved" : null,
       unlocked_after_3: totalVerifiedAfter >= 3,
       total_verified_shifts: totalVerifiedAfter,
     });

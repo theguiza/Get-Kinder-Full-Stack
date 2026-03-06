@@ -1,22 +1,13 @@
 import express from "express";
 import pool from "../Backend/db/pg.js";
 import { sendNudgeEmail } from "../kindnessEmailer.js";
+import { ensureAdmin } from "../Backend/middleware/ensureAdmin.js";
 
 const orgApplyRouter = express.Router();
 
 function ensureAuthenticated(req, res, next) {
   if (req.isAuthenticated && req.isAuthenticated()) return next();
   return res.redirect("/login");
-}
-
-function ensureAdmin(req, res, next) {
-  const list = (process.env.ADMIN_EMAILS || "")
-    .split(",")
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
-  const userEmail = String(req.user?.email || "").toLowerCase();
-  if (list.includes(userEmail)) return next();
-  return res.status(403).send("Forbidden");
 }
 
 async function resolveUserId(req) {

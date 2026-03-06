@@ -14,6 +14,7 @@ import KinderCrewCarousel from "./kinderCrewCarousel.jsx";
 import WeeksPlan from "./weeksPlan.jsx";
 import DonorDashboard from "./donorDashboard.jsx";
 import DonatePage from "./donate.jsx";
+import AdminDashboard from "./adminDashboard.jsx";
 import { renderOrgPortal, renderKpiStrip } from "./orgPortal.jsx";
 
 const ROOTS = new WeakMap();
@@ -84,6 +85,17 @@ window.renderDonatePage = (selector = "#donate-root", props = {}) => {
   root.render(
     <React.StrictMode>
       <DonatePage {...props} />
+    </React.StrictMode>
+  );
+};
+
+window.renderAdmin = (selector = "#admin-root", props = {}) => {
+  const el = typeof selector === "string" ? document.querySelector(selector) : selector;
+  if (!el) return;
+  const root = getOrCreateRoot(el);
+  root.render(
+    <React.StrictMode>
+      <AdminDashboard {...props} />
     </React.StrictMode>
   );
 };

@@ -1,4 +1,5 @@
 import pool from "../Backend/db/pg.js";
+import { isAdminRequest } from "../Backend/middleware/ensureAdmin.js";
 
 const TAB_QUERY = {
   upcoming: {
@@ -135,14 +136,6 @@ function normalizeTxReasonFilter(value) {
   const reason = typeof value === "string" ? value.trim().toLowerCase() : "";
   if (!reason || reason === "all") return "all";
   return TX_REASON_SET.has(reason) ? reason : "all";
-}
-
-function isAdminEmail(email) {
-  const list = (process.env.ADMIN_EMAILS || "")
-    .split(",")
-    .map((item) => item.trim().toLowerCase())
-    .filter(Boolean);
-  return Boolean(email) && list.includes(String(email).toLowerCase());
 }
 
 function buildScopedPoolSlug(userId, poolSlug) {
@@ -636,8 +629,7 @@ export async function topUpMyPool(req, res) {
     const source = normalizeTopupSource(req.body?.source);
     const reason = TOPUP_SOURCE_REASON[source] || "org_topup";
 
-    const userEmail = req.user?.email || "";
-    const isAdmin = isAdminEmail(userEmail);
+    const isAdmin = isAdminRequest(req);
     if (!isAdmin && poolSlug !== DEFAULT_POOL_SLUG) {
       const { rows: [hostPoolEvent] = [] } = await pool.query(
         `

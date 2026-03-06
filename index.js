@@ -45,8 +45,10 @@ import donationsApiRouter from "./routes/donationsApi.js";
 import donorApiRouter from "./routes/donorApi.js";
 import orgPortalRouter from "./routes/orgPortalApi.js";
 import orgApplyRouter from "./routes/orgApplyApi.js";
+import adminApiRouter from "./routes/adminApi.js";
 import squareWebhooksApiRouter from "./routes/squareWebhooksApi.js";
 import { ensureOrgRepPage } from "./middleware/ensureOrgRep.js";
+import { ensureAdmin, ensureAdminApi } from "./Backend/middleware/ensureAdmin.js";
 
 // Reuse the same tool schema for Chat Completions (strip any nonstandard fields if needed)
 const CHAT_COMPLETIONS_TOOLS = DASHBOARD_TOOLS.map(t => ({ type: 'function', function: t.function }));
@@ -232,6 +234,7 @@ app.use("/api/ratings", ensureAuthenticatedApi, ratingsApiRouter);
 app.use("/api/redemptions", ensureAuthenticatedApi, redemptionsApiRouter);
 app.use("/api/donations", ensureAuthenticatedApi, donationsApiRouter);
 app.use("/api/donor", ensureAuthenticatedApi, donorApiRouter);
+app.use("/api/admin", ensureAuthenticated, adminApiRouter);
 app.use("/api/org", ensureAuthenticatedApi, orgPortalRouter);
 app.use("/", orgApplyRouter);
 
@@ -899,6 +902,18 @@ app.get("/logout", (req, res, next) => {
 // ─────────────────────────────────────────────────────────────────────────────
 function ensureAuthenticated(req, res, next) {
   if (req.isAuthenticated && req.isAuthenticated()) {
+    if (req.user?.is_suspended) {
+      req.logout((err) => {
+        if (err) {
+          console.error("Suspended-user logout failed:", err);
+        }
+        if (typeof req.flash === "function") {
+          req.flash("error", "Your account has been suspended. Please contact support.");
+        }
+        return res.redirect("/login");
+      });
+      return;
+    }
     return next();
   }
   return res.redirect("/login");
@@ -1657,7 +1672,12 @@ app.get("/404", (req, res) => res.render("404", { title: "404 ERROR" }));
 app.get("/error", (req, res) => res.render("error", { title: "500 ERROR" }));
 // Middleware to ensure authentication for API routes
 function ensureAuthenticatedApi(req, res, next) {
-  if (req.isAuthenticated && req.isAuthenticated()) return next();
+  if (req.isAuthenticated && req.isAuthenticated()) {
+    if (req.user?.is_suspended) {
+      return res.status(403).json({ error: "account_suspended" });
+    }
+    return next();
+  }
   return res.status(401).json({ error: "unauthorized" });
 }
 
@@ -1806,16 +1826,6 @@ app.get('/api/geo/reverse', ensureAuthenticatedApi, async (req, res) => {
   }
 });
 
-function ensureAdmin(req, res, next) {
-  const list = (process.env.ADMIN_EMAILS || '')
-    .split(',')
-    .map(s => s.trim().toLowerCase())
-    .filter(Boolean);
-
-  const userEmail = (req.user?.email || '').toLowerCase();
-  if (list.includes(userEmail)) return next();
-  return res.status(403).json({ error: 'forbidden' });
-}
 async function resolveOwnerId(req, pool) {
   // Prefer the authenticated id if present
   if (req.user?.id) return String(req.user.id);
@@ -2161,6 +2171,15 @@ app.get("/donor", ensureAuthenticated, async (req, res) => {
     picture: donorRow?.picture || req.user?.picture || req.user?.avatar || req.user?.photo || "",
   };
   res.render("donor", { title: "Donor Dashboard", assetTag, donorProfile });
+});
+
+app.get("/admin", ensureAuthenticated, ensureAdmin, (req, res) => {
+  const assetTag = Date.now();
+  res.render("admin", {
+    assetTag,
+    user: req.user,
+    csrfToken: req.session.csrfToken,
+  });
 });
 
 app.get("/org-portal", ensureOrgRepPage, async (req, res) => {
@@ -2700,7 +2719,7 @@ app.post('/kai-chat', ensureAuthenticatedApi, async (req, res) => {
 // Admin-only: update OpenAI Assistant instructions from our canonical string
 app.post("/admin/assistant-instructions/update",
   ensureAuthenticatedApi,
-  ensureAdmin,
+  ensureAdminApi,
   async (req, res) => {
     try {
       const text = (req.body && typeof req.body.instructions === 'string')
@@ -2722,7 +2741,7 @@ app.post("/admin/assistant-instructions/update",
 // Admin: deliver any queued nudges now (safe for prod)
 app.post('/admin/nudges/deliver-now',
   ensureAuthenticatedApi,
-  ensureAdmin,
+  ensureAdminApi,
   async (req, res) => {
     try {
       const { max = 50 } = req.body || {};
@@ -2833,7 +2852,7 @@ if (process.env.NODE_ENV !== 'production') {
   });
 }
 // ADMIN: backfill Neo4j from existing Postgres friends (prod-safe)
-app.post('/admin/graph/backfill', ensureAuthenticatedApi, ensureAdmin, async (req, res) => {
+app.post('/admin/graph/backfill', ensureAuthenticatedApi, ensureAdminApi, async (req, res) => {
   try {
     const ownerId = await resolveOwnerId(req, pool);
     const { limit = 200, offset = 0, dry = true } = req.body || {};
