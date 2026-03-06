@@ -40,6 +40,13 @@ function formatDateTime(value) {
   return dt.toLocaleString();
 }
 
+function formatMonthShort(value) {
+  if (!value) return "";
+  const dt = new Date(`${String(value).slice(0, 7)}-01T00:00:00Z`);
+  if (Number.isNaN(dt.getTime())) return String(value);
+  return dt.toLocaleString("en-US", { month: "short", timeZone: "UTC" });
+}
+
 function normalizeStatus(value) {
   return String(value || "").trim().toLowerCase();
 }
@@ -82,52 +89,146 @@ function useToastQueue() {
   return { toasts, pushToast, dismissToast };
 }
 
-function SparklineArea({ points = [], stroke = "#455a7c", fill = "rgba(69,90,124,0.18)", height = 170 }) {
+function getNiceMax(rawMax) {
+  const value = safeNumber(rawMax, 0);
+  if (value <= 0) return 1;
+  const magnitude = 10 ** Math.floor(Math.log10(value));
+  const normalized = value / magnitude;
+  if (normalized <= 1) return magnitude;
+  if (normalized <= 2) return 2 * magnitude;
+  if (normalized <= 5) return 5 * magnitude;
+  return 10 * magnitude;
+}
+
+function getTickValues(maxValue, tickCount = 4) {
+  const max = Math.max(1, safeNumber(maxValue, 1));
+  return Array.from({ length: tickCount + 1 }, (_, idx) => ((tickCount - idx) / tickCount) * max);
+}
+
+function SparklineArea({
+  points = [],
+  xLabels = [],
+  stroke = "#455a7c",
+  fill = "rgba(69,90,124,0.18)",
+  height = 170,
+  yMax,
+}) {
   const width = 520;
   const normalized = Array.isArray(points) ? points.map((point) => safeNumber(point, 0)) : [];
   if (normalized.length < 2) {
     return <div className="small text-muted">Not enough data.</div>;
   }
-  const max = Math.max(...normalized, 1);
-  const min = Math.min(...normalized, 0);
-  const span = Math.max(1, max - min);
-  const stepX = width / Math.max(1, normalized.length - 1);
+  const leftPad = 42;
+  const rightPad = 8;
+  const topPad = 10;
+  const bottomPad = 28;
+  const plotWidth = width - leftPad - rightPad;
+  const plotHeight = height - topPad - bottomPad;
+  const max = yMax != null ? Math.max(1, safeNumber(yMax, 1)) : getNiceMax(Math.max(...normalized, 0));
+  const stepX = plotWidth / Math.max(1, normalized.length - 1);
+  const yTicks = getTickValues(max, 4);
+  const labels = xLabels.length === normalized.length ? xLabels : normalized.map((_, idx) => String(idx + 1));
+
   const coords = normalized.map((value, idx) => {
-    const x = idx * stepX;
-    const y = height - ((value - min) / span) * (height - 18) - 9;
+    const x = leftPad + idx * stepX;
+    const y = topPad + plotHeight - (Math.max(0, value) / max) * plotHeight;
     return [x, y];
   });
   const linePoints = coords.map(([x, y]) => `${x},${y}`).join(" ");
-  const areaPoints = `0,${height} ${linePoints} ${width},${height}`;
+  const areaPoints = `${leftPad},${topPad + plotHeight} ${linePoints} ${leftPad + plotWidth},${topPad + plotHeight}`;
 
   return (
     <svg viewBox={`0 0 ${width} ${height}`} className="admin-chart-svg" role="img" aria-label="Area chart">
+      {yTicks.map((tick) => {
+        const y = topPad + plotHeight - (tick / max) * plotHeight;
+        return (
+          <g key={`tick-${tick}`}>
+            <line x1={leftPad} y1={y} x2={leftPad + plotWidth} y2={y} stroke="#d7dde7" strokeWidth="1" />
+            <text x={leftPad - 8} y={y + 4} textAnchor="end" className="admin-chart-axis-label">
+              {Number.isInteger(tick) ? tick : tick.toFixed(1)}
+            </text>
+          </g>
+        );
+      })}
+      <line x1={leftPad} y1={topPad} x2={leftPad} y2={topPad + plotHeight} stroke="#c8d0dc" strokeWidth="1" />
+      <line
+        x1={leftPad}
+        y1={topPad + plotHeight}
+        x2={leftPad + plotWidth}
+        y2={topPad + plotHeight}
+        stroke="#c8d0dc"
+        strokeWidth="1"
+      />
       <polygon points={areaPoints} fill={fill} />
       <polyline points={linePoints} fill="none" stroke={stroke} strokeWidth="3" strokeLinejoin="round" />
       {coords.map(([x, y], idx) => (
         <circle key={`pt-${idx}`} cx={x} cy={y} r="2.5" fill={stroke} />
       ))}
+      {labels.map((label, idx) => {
+        const x = leftPad + idx * stepX;
+        return (
+          <text key={`xlabel-${idx}`} x={x} y={height - 8} textAnchor="middle" className="admin-chart-axis-label">
+            {label}
+          </text>
+        );
+      })}
     </svg>
   );
 }
 
-function SimpleBarChart({ points = [], color = "#ff5656", height = 170 }) {
+function SimpleBarChart({ points = [], xLabels = [], color = "#ff5656", height = 170 }) {
   const width = 520;
   const normalized = Array.isArray(points) ? points.map((point) => safeNumber(point, 0)) : [];
   if (!normalized.length) {
     return <div className="small text-muted">Not enough data.</div>;
   }
-  const max = Math.max(...normalized, 1);
+  const leftPad = 42;
+  const rightPad = 8;
+  const topPad = 10;
+  const bottomPad = 28;
+  const plotWidth = width - leftPad - rightPad;
+  const plotHeight = height - topPad - bottomPad;
+  const max = getNiceMax(Math.max(...normalized, 0));
+  const yTicks = getTickValues(max, 4);
+  const labels = xLabels.length === normalized.length ? xLabels : normalized.map((_, idx) => String(idx + 1));
   const gap = 12;
-  const barWidth = Math.max(8, (width - gap * (normalized.length + 1)) / normalized.length);
+  const barWidth = Math.max(8, (plotWidth - gap * (normalized.length + 1)) / normalized.length);
 
   return (
     <svg viewBox={`0 0 ${width} ${height}`} className="admin-chart-svg" role="img" aria-label="Bar chart">
+      {yTicks.map((tick) => {
+        const y = topPad + plotHeight - (tick / max) * plotHeight;
+        return (
+          <g key={`bar-tick-${tick}`}>
+            <line x1={leftPad} y1={y} x2={leftPad + plotWidth} y2={y} stroke="#d7dde7" strokeWidth="1" />
+            <text x={leftPad - 8} y={y + 4} textAnchor="end" className="admin-chart-axis-label">
+              {Number.isInteger(tick) ? tick : tick.toFixed(1)}
+            </text>
+          </g>
+        );
+      })}
+      <line x1={leftPad} y1={topPad} x2={leftPad} y2={topPad + plotHeight} stroke="#c8d0dc" strokeWidth="1" />
+      <line
+        x1={leftPad}
+        y1={topPad + plotHeight}
+        x2={leftPad + plotWidth}
+        y2={topPad + plotHeight}
+        stroke="#c8d0dc"
+        strokeWidth="1"
+      />
       {normalized.map((value, idx) => {
-        const h = (value / max) * (height - 20);
-        const x = gap + idx * (barWidth + gap);
-        const y = height - h;
+        const h = (Math.max(0, value) / max) * plotHeight;
+        const x = leftPad + gap + idx * (barWidth + gap);
+        const y = topPad + plotHeight - h;
         return <rect key={`bar-${idx}`} x={x} y={y} width={barWidth} height={h} rx="4" fill={color} opacity="0.9" />;
+      })}
+      {labels.map((label, idx) => {
+        const x = leftPad + gap + idx * (barWidth + gap) + barWidth / 2;
+        return (
+          <text key={`bar-xlabel-${idx}`} x={x} y={height - 8} textAnchor="middle" className="admin-chart-axis-label">
+            {label}
+          </text>
+        );
       })}
     </svg>
   );
@@ -440,7 +541,7 @@ export default function AdminDashboard() {
     try {
       const [monthlyPayload, volunteersPayload, organizationsPayload] = await Promise.all([
         requestJson("/api/admin/stats/monthly"),
-        requestJson("/api/admin/volunteers?page=1&limit=100"),
+        requestJson("/api/admin/volunteers?page=1&limit=100&sort=credits_desc"),
         requestJson("/api/admin/organizations?page=1&limit=100"),
       ]);
       const volunteersPaged = unpackPagedResponse(volunteersPayload);
@@ -695,6 +796,11 @@ export default function AdminDashboard() {
     };
   }, [monthlyPoints]);
 
+  const reportXAxisLabels = useMemo(
+    () => reportingSeries.points.map((point) => formatMonthShort(point.month)),
+    [reportingSeries.points]
+  );
+
   const heroTrends = useMemo(() => {
     const p = reportingSeries.points;
     const last = p[p.length - 1] || { volunteers: 0, donations: 0, credits: 0 };
@@ -708,10 +814,18 @@ export default function AdminDashboard() {
   }, [reportingSeries.points]);
 
   const topVolunteers = useMemo(
-    () =>
-      [...volunteerState.items]
-        .sort((a, b) => safeNumber(b.total_credits, 0) - safeNumber(a.total_credits, 0))
-        .slice(0, 5),
+    () => {
+      const sorted = [...volunteerState.items].sort(
+        (a, b) =>
+          safeNumber(b.total_credits, 0) - safeNumber(a.total_credits, 0) ||
+          safeNumber(b.event_count, 0) - safeNumber(a.event_count, 0)
+      );
+      const hasPositiveCredits = sorted.some((row) => safeNumber(row.total_credits, 0) > 0);
+      return (hasPositiveCredits
+        ? sorted.filter((row) => safeNumber(row.total_credits, 0) > 0)
+        : sorted
+      ).slice(0, 5);
+    },
     [volunteerState.items]
   );
 
@@ -1092,22 +1206,53 @@ export default function AdminDashboard() {
 
               <div className="row g-3 mb-3">
                 <div className="col-12 col-xl-6">
-                  <div className="admin-card"><h6>Hours Trend</h6><SparklineArea points={reportingSeries.hoursTrend} stroke="#455a7c" fill="rgba(69,90,124,0.17)" /></div>
+                  <div className="admin-card">
+                    <h6>Hours Trend</h6>
+                    <SparklineArea
+                      points={reportingSeries.hoursTrend}
+                      xLabels={reportXAxisLabels}
+                      stroke="#455a7c"
+                      fill="rgba(69,90,124,0.17)"
+                    />
+                  </div>
                 </div>
                 <div className="col-12 col-xl-6">
-                  <div className="admin-card"><h6>Fill Rate</h6><SparklineArea points={reportingSeries.fillRateTrend} stroke="#ff5656" fill="rgba(255,86,86,0.16)" /></div>
+                  <div className="admin-card">
+                    <h6>Fill Rate</h6>
+                    <SparklineArea
+                      points={reportingSeries.fillRateTrend}
+                      xLabels={reportXAxisLabels}
+                      stroke="#ff5656"
+                      fill="rgba(255,86,86,0.16)"
+                      yMax={100}
+                    />
+                  </div>
                 </div>
                 <div className="col-12 col-md-6 col-xl-4">
                   <div className="admin-card"><h6>No-show Rate</h6><DonutChart value={reportingSeries.noShowRate} total={100} label="No-show" /></div>
                 </div>
                 <div className="col-12 col-md-6 col-xl-4">
-                  <div className="admin-card"><h6>Credits Awarded</h6><SimpleBarChart points={reportingSeries.creditsTrend} color="#3f8f63" /></div>
+                  <div className="admin-card">
+                    <h6>Credits Awarded</h6>
+                    <SimpleBarChart points={reportingSeries.creditsTrend} xLabels={reportXAxisLabels} color="#3f8f63" />
+                  </div>
                 </div>
                 <div className="col-12 col-md-6 col-xl-4">
-                  <div className="admin-card"><h6>Volunteer Growth</h6><SparklineArea points={reportingSeries.volunteerTrend} stroke="#3f8f63" fill="rgba(63,143,99,0.15)" /></div>
+                  <div className="admin-card">
+                    <h6>Volunteer Growth</h6>
+                    <SparklineArea
+                      points={reportingSeries.volunteerTrend}
+                      xLabels={reportXAxisLabels}
+                      stroke="#3f8f63"
+                      fill="rgba(63,143,99,0.15)"
+                    />
+                  </div>
                 </div>
                 <div className="col-12">
-                  <div className="admin-card"><h6>Donation Trend</h6><SimpleBarChart points={reportingSeries.donationTrend} color="#455a7c" /></div>
+                  <div className="admin-card">
+                    <h6>Donation Trend</h6>
+                    <SimpleBarChart points={reportingSeries.donationTrend} xLabels={reportXAxisLabels} color="#455a7c" />
+                  </div>
                 </div>
               </div>
 
@@ -1937,6 +2082,11 @@ export default function AdminDashboard() {
         }
         .admin-table tbody tr:hover { background: rgba(69, 90, 124, 0.04); }
         .admin-chart-svg { width: 100%; height: 170px; display: block; }
+        .admin-chart-axis-label {
+          fill: #6b778d;
+          font-size: 11px;
+          font-weight: 500;
+        }
         .admin-badge {
           display: inline-flex;
           align-items: center;

@@ -530,9 +530,15 @@ adminApiRouter.get("/volunteers", async (req, res) => {
     const { page, limit, offset } = parsePagination(req.query);
     const search = String(req.query.search || "").trim();
     const status = String(req.query.status || "").trim().toLowerCase();
+    const sort = String(req.query.sort || "").trim().toLowerCase();
     const suspended = parseOptionalBoolean(req.query.suspended);
     const conditions = [];
     const params = [];
+    let orderBy = "u.created_at DESC NULLS LAST, u.id DESC";
+
+    if (sort === "credits_desc") {
+      orderBy = "COALESCE(wt.total_credits, 0) DESC, COALESCE(er.event_count, 0) DESC, u.created_at DESC NULLS LAST, u.id DESC";
+    }
 
     if (search) {
       params.push(`%${search}%`);
@@ -593,7 +599,7 @@ adminApiRouter.get("/volunteers", async (req, res) => {
           GROUP BY user_id
         ) wt ON wt.user_id = u.id
         ${whereClause}
-        ORDER BY u.created_at DESC NULLS LAST, u.id DESC
+        ORDER BY ${orderBy}
         LIMIT $${dataParams.length - 1}
         OFFSET $${dataParams.length}
       `,
