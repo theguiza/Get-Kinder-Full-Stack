@@ -143,13 +143,13 @@ function getAppBaseUrl(req) {
 
 async function verifyRecaptchaToken(token, remoteIp) {
   if (typeof token !== "string" || !token.trim()) return false;
-  if (!process.env.RECAPTCHA_SECRET_KEY) {
+  if (!RECAPTCHA_SECRET_KEY) {
     console.error("RECAPTCHA_SECRET_KEY is missing.");
     return false;
   }
   const verifyUrl = "https://www.google.com/recaptcha/api/siteverify";
   const body = new URLSearchParams({
-    secret: process.env.RECAPTCHA_SECRET_KEY,
+    secret: RECAPTCHA_SECRET_KEY,
     response: token.trim(),
   });
   if (remoteIp) {
@@ -174,7 +174,16 @@ const VERIFY_PENDING_MESSAGE =
   "Thanks for signing up! Please check your email and click the verification link to activate your account.";
 const VERIFY_REQUIRED_MESSAGE =
   "Please verify your email before signing in. Check your inbox for the verification link.";
-const RECAPTCHA_SITE_KEY = process.env.RECAPTCHA_SITE_KEY || "";
+const RECAPTCHA_SITE_KEY =
+  process.env.RECAPTCHA_SITE_KEY
+  || process.env.RECAPTCHA_SITEKEY
+  || process.env.GOOGLE_RECAPTCHA_SITE_KEY
+  || "";
+const RECAPTCHA_SECRET_KEY =
+  process.env.RECAPTCHA_SECRET_KEY
+  || process.env.RECAPTCHA_SECRET
+  || process.env.GOOGLE_RECAPTCHA_SECRET_KEY
+  || "";
 const AUTH_PAGE_PATHS = new Set(["/login", "/register", "/forgot-password", "/reset-password"]);
 const registerLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -288,6 +297,7 @@ app.use("/", orgApplyRouter);
 // Make `user` available in all EJS templates
 app.use((req, res, next) => {
   res.locals.user = req.user;
+  res.locals.recaptchaSiteKey = RECAPTCHA_SITE_KEY;
   next();
 });
 
