@@ -174,6 +174,7 @@ const VERIFY_PENDING_MESSAGE =
   "Thanks for signing up! Please check your email and click the verification link to activate your account.";
 const VERIFY_REQUIRED_MESSAGE =
   "Please verify your email before signing in. Check your inbox for the verification link.";
+const RECAPTCHA_SITE_KEY = process.env.RECAPTCHA_SITE_KEY || "";
 const AUTH_PAGE_PATHS = new Set(["/login", "/register", "/forgot-password", "/reset-password"]);
 const registerLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -598,6 +599,7 @@ app.post("/register", registerLimiter, async (req, res, next) => {
     if (!recaptchaResponse) {
       return res.status(400).render("register", {
         title: "Sign Up",
+        recaptchaSiteKey: RECAPTCHA_SITE_KEY,
         error: "Please complete the CAPTCHA.",
       });
     }
@@ -606,6 +608,7 @@ app.post("/register", registerLimiter, async (req, res, next) => {
       console.log("[RECAPTCHA BLOCKED]", email || req.body?.email || "");
       return res.status(400).render("register", {
         title: "Sign Up",
+        recaptchaSiteKey: RECAPTCHA_SITE_KEY,
         error: "CAPTCHA verification failed. Please try again.",
       });
     }
@@ -753,7 +756,12 @@ app.post("/login", async (req, res, next) => {
   }
 });
 app.get("/forgot-password", (req, res) => {
-  return res.render("forgot-password", { title: "Forgot Password", message: null, messageType: null });
+  return res.render("forgot-password", {
+    title: "Forgot Password",
+    recaptchaSiteKey: RECAPTCHA_SITE_KEY,
+    message: null,
+    messageType: null
+  });
 });
 
 app.post("/forgot-password", forgotPasswordLimiter, async (req, res) => {
@@ -764,6 +772,7 @@ app.post("/forgot-password", forgotPasswordLimiter, async (req, res) => {
     if (!recaptchaResponse) {
       return res.status(400).render("forgot-password", {
         title: "Forgot Password",
+        recaptchaSiteKey: RECAPTCHA_SITE_KEY,
         message: "Please complete the CAPTCHA.",
         messageType: "error",
       });
@@ -773,6 +782,7 @@ app.post("/forgot-password", forgotPasswordLimiter, async (req, res) => {
       console.log("[RECAPTCHA BLOCKED]", submittedEmail || req.body?.email || "");
       return res.status(400).render("forgot-password", {
         title: "Forgot Password",
+        recaptchaSiteKey: RECAPTCHA_SITE_KEY,
         message: "CAPTCHA verification failed. Please try again.",
         messageType: "error",
       });
@@ -790,6 +800,7 @@ app.post("/forgot-password", forgotPasswordLimiter, async (req, res) => {
       if (!candidate || candidate.email_verified !== true) {
         return res.render("forgot-password", {
           title: "Forgot Password",
+          recaptchaSiteKey: RECAPTCHA_SITE_KEY,
           message: FORGOT_PASSWORD_SUCCESS_MESSAGE,
           messageType: "success",
         });
@@ -852,6 +863,7 @@ If you did not request this, you can ignore this email.`;
 
   return res.render("forgot-password", {
     title: "Forgot Password",
+    recaptchaSiteKey: RECAPTCHA_SITE_KEY,
     message: FORGOT_PASSWORD_SUCCESS_MESSAGE,
     messageType: "success",
   });
@@ -1812,7 +1824,10 @@ app.get("/login", (req, res) => {
     error: verifyRequiredError || verificationError || null,
   });
 });
-app.get("/register", (req, res) => res.render("register", { title: "Sign Up" }));
+app.get("/register", (req, res) => res.render("register", {
+  title: "Sign Up",
+  recaptchaSiteKey: RECAPTCHA_SITE_KEY,
+}));
 app.get("/404", (req, res) => res.render("404", { title: "404 ERROR" }));
 app.get("/error", (req, res) => res.render("error", { title: "500 ERROR" }));
 // Middleware to ensure authentication for API routes
