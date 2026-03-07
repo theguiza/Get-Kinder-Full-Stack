@@ -141,6 +141,30 @@ function getAppBaseUrl(req) {
   return `${req.protocol}://${host}`;
 }
 
+async function verifyRecaptchaToken(token, remoteIp) {
+  if (typeof token !== "string" || !token.trim()) return false;
+  if (!process.env.RECAPTCHA_SECRET_KEY) {
+    console.error("RECAPTCHA_SECRET_KEY is missing.");
+    return false;
+  }
+  const verifyUrl = "https://www.google.com/recaptcha/api/siteverify";
+  const body = new URLSearchParams({
+    secret: process.env.RECAPTCHA_SECRET_KEY,
+    response: token.trim(),
+  });
+  if (remoteIp) {
+    body.set("remoteip", String(remoteIp));
+  }
+  const verifyRes = await fetch(verifyUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: body.toString(),
+  });
+  if (!verifyRes.ok) return false;
+  const verifyResult = await verifyRes.json();
+  return verifyResult?.success === true;
+}
+
 const FORGOT_PASSWORD_SUCCESS_MESSAGE =
   "If an account exists for that email, we sent password reset instructions.";
 const INVALID_VERIFICATION_LINK_MESSAGE = "Invalid verification link.";
@@ -570,6 +594,21 @@ app.post("/register", registerLimiter, async (req, res, next) => {
   const email = normalizeEmail(req.body?.email);
   const password = typeof req.body?.password === "string" ? req.body.password : "";
   try {
+    const recaptchaResponse = req.body["g-recaptcha-response"];
+    if (!recaptchaResponse) {
+      return res.status(400).render("register", {
+        title: "Sign Up",
+        error: "Please complete the CAPTCHA.",
+      });
+    }
+    const recaptchaPassed = await verifyRecaptchaToken(recaptchaResponse, req.ip);
+    if (!recaptchaPassed) {
+      console.log("[RECAPTCHA BLOCKED]", email || req.body?.email || "");
+      return res.status(400).render("register", {
+        title: "Sign Up",
+        error: "CAPTCHA verification failed. Please try again.",
+      });
+    }
     if (!firstname.trim() || !lastname.trim() || !email || !password) {
       return res.status(400).send("Missing required fields.");
     }
@@ -721,6 +760,23 @@ app.post("/forgot-password", forgotPasswordLimiter, async (req, res) => {
   const submittedEmail = normalizeEmail(req.body?.email);
 
   try {
+    const recaptchaResponse = req.body["g-recaptcha-response"];
+    if (!recaptchaResponse) {
+      return res.status(400).render("forgot-password", {
+        title: "Forgot Password",
+        message: "Please complete the CAPTCHA.",
+        messageType: "error",
+      });
+    }
+    const recaptchaPassed = await verifyRecaptchaToken(recaptchaResponse, req.ip);
+    if (!recaptchaPassed) {
+      console.log("[RECAPTCHA BLOCKED]", submittedEmail || req.body?.email || "");
+      return res.status(400).render("forgot-password", {
+        title: "Forgot Password",
+        message: "CAPTCHA verification failed. Please try again.",
+        messageType: "error",
+      });
+    }
     if (submittedEmail) {
       const { rows: [candidate] } = await pool.query(
         `SELECT id, firstname, email, email_verified
@@ -749,6 +805,7 @@ app.post("/forgot-password", forgotPasswordLimiter, async (req, res) => {
                 reset_password_expires_at = $2,
                 reset_password_sent_at = NOW()
           WHERE id = $3
+            AND email_verified = TRUE
             AND (
               reset_password_sent_at IS NULL
               OR reset_password_sent_at <= NOW() - ($4::int * INTERVAL '1 minute')
