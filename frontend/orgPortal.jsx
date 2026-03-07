@@ -3,7 +3,6 @@ import ReactDOM from "react-dom/client";
 import { CreateEvent } from "./events/views/CreateEvent.jsx";
 import { InviteModal } from "./events/components/InviteModal.jsx";
 import { PoolLedgerModal } from "./events/components/PoolLedgerModal.jsx";
-import { TopUpPoolModal } from "./events/components/TopUpPoolModal.jsx";
 
 const ROOTS = new WeakMap();
 const KPI_REFRESH_EVENT = "orgportal:kpis:refresh";
@@ -539,7 +538,6 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
   const [myEventsPoolFilter, setMyEventsPoolFilter] = useState("");
   const [selectedMyEvent, setSelectedMyEvent] = useState(null);
   const [myEventsLedgerPreview, setMyEventsLedgerPreview] = useState([]);
-  const [myEventsTopUpModal, setMyEventsTopUpModal] = useState({ open: false, poolSlug: "" });
   const [myEventsLedgerOpen, setMyEventsLedgerOpen] = useState(false);
   const [myEventsInviteModal, setMyEventsInviteModal] = useState({ open: false, event: null });
   const [myEventsToast, setMyEventsToast] = useState(null);
@@ -899,7 +897,6 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
     setMyEventsPoolFilter("");
     setSelectedMyEvent(null);
     setMyEventsLedgerPreview([]);
-    setMyEventsTopUpModal({ open: false, poolSlug: "" });
     setMyEventsLedgerOpen(false);
     setMyEventsInviteModal({ open: false, event: null });
     setMyEventsToast(null);
@@ -2565,42 +2562,6 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
     setMyEventsInviteModal({ open: true, event: eventRow });
   }
 
-  function openMyEventsTopUp(poolSlug) {
-    setMyEventsTopUpModal({
-      open: true,
-      poolSlug: String(poolSlug || myEventsPoolFilter || "general"),
-    });
-  }
-
-  async function submitMyEventsTopUp({ amountCredits, source }) {
-    const targetPoolSlug = myEventsTopUpModal.poolSlug || selectedMyEvent?.funding_pool_slug || "general";
-    const response = await fetch("/api/me/events/pools/topups", {
-      method: "POST",
-      credentials: "include",
-      headers: {
-        "Content-Type": "application/json",
-        "X-CSRF-Token": csrfToken,
-      },
-      body: JSON.stringify({
-        funding_pool_slug: targetPoolSlug,
-        amount_credits: amountCredits,
-        source,
-      }),
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok || !payload?.ok) {
-      throw new Error(payload?.error || "Unable to add pool credits.");
-    }
-    setMyEventsToast({
-      type: "success",
-      message: `Added ${amountCredits} credits to ${targetPoolSlug}.`,
-    });
-    await refreshMyEventsData();
-    if (typeof window !== "undefined") {
-      window.dispatchEvent(new CustomEvent(KPI_REFRESH_EVENT));
-    }
-  }
-
   async function handleMyEventCancel(eventRow) {
     if (!eventRow?.id) return;
     const isDraftEvent = String(eventRow?.status || "").toLowerCase() === "draft";
@@ -2775,13 +2736,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
             >
               View Ledger
             </button>
-            <button
-              type="button"
-              className="btn btn-sm orgp-btn-coral"
-              onClick={() => openMyEventsTopUp(selectedMyEvent?.funding_pool_slug || myEventsPoolFilter || "general")}
-            >
-              + Add Credits
-            </button>
+            <span className="small text-muted align-self-center">Pool top-ups are admin-managed.</span>
           </div>
         </div>
 
@@ -2831,19 +2786,13 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
         <div className="d-flex gap-2 flex-wrap justify-content-center">
           <button
             type="button"
-            className="btn orgp-btn-coral"
-            onClick={() => openMyEventsTopUp(myEventsPoolFilter || "general")}
-          >
-            + Add Credits
-          </button>
-          <button
-            type="button"
             className="btn orgp-btn-ink-outline"
             onClick={() => setMyEventsLedgerOpen(true)}
           >
             View Pool Ledger
           </button>
         </div>
+        <p className="text-muted small mb-0">Pool top-ups are admin-managed.</p>
         <p className="text-muted small mb-0">
           Select an event from the queue to see its funding detail and manage volunteers.
         </p>
@@ -2956,13 +2905,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
         <div className="small text-muted mb-3">
           Pool: <strong>{eventRow.funding_pool_slug || "general"}</strong>
         </div>
-        <button
-          type="button"
-          className="btn btn-sm btn-outline-danger mb-3"
-          onClick={() => openMyEventsTopUp(eventRow.funding_pool_slug || "general")}
-        >
-          + Add Credits to Pool
-        </button>
+        <div className="small text-muted mb-3">Pool top-ups are admin-managed.</div>
 
         <div className="orgp-section-label">ACTIONS</div>
         <div className="d-flex gap-2 flex-wrap mb-3">
@@ -4620,13 +4563,6 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
           </div>
         </div>
       ) : null}
-
-      <TopUpPoolModal
-        open={activeTab === "myevents" && myEventsTopUpModal.open}
-        poolSlug={myEventsTopUpModal.poolSlug || "general"}
-        onClose={() => setMyEventsTopUpModal({ open: false, poolSlug: "" })}
-        onSubmit={submitMyEventsTopUp}
-      />
 
       <PoolLedgerModal
         open={activeTab === "myevents" && myEventsLedgerOpen}

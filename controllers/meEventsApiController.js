@@ -621,6 +621,12 @@ export async function getMyPoolTransactions(req, res) {
 }
 
 export async function topUpMyPool(req, res) {
+  return res.status(403).json({
+    ok: false,
+    error: "pool_topup_admin_only",
+    message: "Pool top-ups must be done by an administrator",
+  });
+
   const client = await pool.connect();
   try {
     const userId = await resolveUserId(req);

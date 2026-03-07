@@ -9,6 +9,22 @@ const EVENT_STATUS_SET = new Set(["draft", "published", "cancelled", "completed"
 const EVENT_VISIBILITY_SET = new Set(["public", "fof", "private"]);
 const ORG_STATUS_SET = new Set(["approved", "suspended", "rejected"]);
 const WALLET_REASON_SET = new Set(["earn", "donate", "adjustment", "earn_shift", "redeem"]);
+const ADMIN_POOL_TOPUP_REASON_SET = new Set(["admin_allocation", "adjustment", "bonus"]);
+const ADMIN_POOL_TOPUP_REASON_LEGACY_MAP = {
+  admin_allocation: "org_topup",
+  adjustment: "manual_adjust",
+  bonus: "org_topup",
+};
+const ORG_POOL_HISTORY_REASON_SET = [
+  "admin_allocation",
+  "adjustment",
+  "bonus",
+  "org_topup",
+  "manual_adjust",
+  "subscription_credit",
+  "subscription_topup",
+  "donation_in",
+];
 
 function requireCsrf(req, res) {
   const expectedCsrf = req.session?.csrfToken;
@@ -33,11 +49,14 @@ function parsePositiveInt(value) {
   return Number.isInteger(num) && num > 0 ? num : null;
 }
 
-function parsePagination(query) {
+function parsePagination(query, options = {}) {
+  const defaultPage = parsePositiveInt(options.defaultPage) || 1;
+  const defaultLimit = parsePositiveInt(options.defaultLimit) || 50;
+  const maxLimit = parsePositiveInt(options.maxLimit) || 100;
   const rawPage = Number.parseInt(String(query?.page || ""), 10);
   const rawLimit = Number.parseInt(String(query?.limit || ""), 10);
-  const page = Math.max(1, Number.isInteger(rawPage) ? rawPage : 1);
-  const limit = Math.min(100, Math.max(1, Number.isInteger(rawLimit) ? rawLimit : 50));
+  const page = Math.max(1, Number.isInteger(rawPage) ? rawPage : defaultPage);
+  const limit = Math.min(maxLimit, Math.max(1, Number.isInteger(rawLimit) ? rawLimit : defaultLimit));
   const offset = (page - 1) * limit;
   return { page, limit, offset };
 }
@@ -50,6 +69,71 @@ function buildPagination(page, limit, totalRows) {
     totalRows: safeTotalRows,
     totalPages: Math.ceil(safeTotalRows / limit),
   };
+}
+
+function buildScopedPoolPrefix(ownerUserId) {
+  const id = parsePositiveInt(ownerUserId);
+  if (!id) return null;
+  return `u${id}__`;
+}
+
+async function insertOrgPoolTopupTx({ client, poolId, amount, requestedReason, notes }) {
+  const fallbackReason = ADMIN_POOL_TOPUP_REASON_LEGACY_MAP[requestedReason] || requestedReason;
+  const reasonCandidates = Array.from(new Set([requestedReason, fallbackReason, "manual_adjust"]));
+  let lastError = null;
+  let savepointSeq = 0;
+
+  for (const reason of reasonCandidates) {
+    for (const includeNotes of [true, false]) {
+      savepointSeq += 1;
+      const savepointName = `org_pool_topup_sp_${savepointSeq}`;
+      await client.query(`SAVEPOINT ${savepointName}`);
+      try {
+        if (includeNotes) {
+          const { rows: [txRow] = [] } = await client.query(
+            `
+              INSERT INTO pool_transactions
+                (pool_id, direction, amount_credits, reason, donation_id, event_id, wallet_tx_id, notes)
+              VALUES
+                ($1, 'credit', $2, $3, NULL, NULL, NULL, $4)
+              RETURNING id, pool_id, amount_credits, reason, created_at, notes
+            `,
+            [poolId, amount, reason, notes]
+          );
+          await client.query(`RELEASE SAVEPOINT ${savepointName}`);
+          return { txRow, persistedReason: reason, notesStored: true };
+        }
+
+        const { rows: [txRow] = [] } = await client.query(
+          `
+            INSERT INTO pool_transactions
+              (pool_id, direction, amount_credits, reason, donation_id, event_id, wallet_tx_id)
+            VALUES
+              ($1, 'credit', $2, $3, NULL, NULL, NULL)
+            RETURNING id, pool_id, amount_credits, reason, created_at, NULL::text AS notes
+          `,
+          [poolId, amount, reason]
+        );
+        await client.query(`RELEASE SAVEPOINT ${savepointName}`);
+        return { txRow, persistedReason: reason, notesStored: false };
+      } catch (err) {
+        lastError = err;
+        try {
+          await client.query(`ROLLBACK TO SAVEPOINT ${savepointName}`);
+          await client.query(`RELEASE SAVEPOINT ${savepointName}`);
+        } catch (_) {}
+        if (err?.code === "42703" && includeNotes) {
+          continue;
+        }
+        if (err?.code === "23514") {
+          break;
+        }
+        throw err;
+      }
+    }
+  }
+
+  throw lastError || new Error("pool_topup_insert_failed");
 }
 
 adminApiRouter.use(ensureAdminApi);
@@ -228,6 +312,279 @@ adminApiRouter.get("/organizations", async (req, res) => {
   } catch (err) {
     console.error("GET /api/admin/organizations error:", err);
     return res.status(500).json({ error: "server_error" });
+  }
+});
+
+adminApiRouter.get("/org-pools", async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `
+        SELECT
+          o.id,
+          o.name,
+          o.status,
+          fp_pick.pool_id,
+          COALESCE(pool_balance.current_balance, 0)::bigint AS current_balance
+        FROM organizations o
+        LEFT JOIN LATERAL (
+          SELECT fp.id AS pool_id
+          FROM funding_pools fp
+          WHERE o.rep_user_id IS NOT NULL
+            AND LEFT(fp.slug, LENGTH('u' || o.rep_user_id::text || '__')) = ('u' || o.rep_user_id::text || '__')
+          ORDER BY
+            CASE WHEN fp.slug = ('u' || o.rep_user_id::text || '__general') THEN 0 ELSE 1 END,
+            fp.id ASC
+          LIMIT 1
+        ) fp_pick ON true
+        LEFT JOIN LATERAL (
+          SELECT
+            COALESCE(
+              SUM(
+                CASE
+                  WHEN pt.direction = 'credit' THEN pt.amount_credits
+                  WHEN pt.direction = 'debit' THEN -pt.amount_credits
+                  ELSE 0
+                END
+              ),
+              0
+            ) AS current_balance
+          FROM funding_pools fp
+          LEFT JOIN pool_transactions pt ON pt.pool_id = fp.id
+          WHERE o.rep_user_id IS NOT NULL
+            AND LEFT(fp.slug, LENGTH('u' || o.rep_user_id::text || '__')) = ('u' || o.rep_user_id::text || '__')
+        ) pool_balance ON true
+        WHERE o.status = 'approved'
+        ORDER BY o.name ASC, o.id ASC
+      `
+    );
+
+    return res.json({
+      data: rows.map((row) => ({
+        id: Number(row.id),
+        name: row.name,
+        status: row.status,
+        pool_id: row.pool_id != null ? Number(row.pool_id) : null,
+        current_balance: Number(row.current_balance) || 0,
+      })),
+    });
+  } catch (err) {
+    console.error("GET /api/admin/org-pools error:", err);
+    return res.status(500).json({ error: "server_error" });
+  }
+});
+
+adminApiRouter.get("/org-pools/:orgId/history", async (req, res) => {
+  const orgId = parsePositiveInt(req.params.orgId);
+  if (!orgId) return res.status(400).json({ error: "invalid_request" });
+
+  try {
+    const { page, limit, offset } = parsePagination(req.query, { defaultLimit: 20, maxLimit: 100 });
+    const { rows: [org] = [] } = await pool.query(
+      `
+        SELECT id, rep_user_id
+        FROM organizations
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [orgId]
+    );
+    if (!org) return res.status(404).json({ error: "not_found" });
+
+    const scopedPrefix = buildScopedPoolPrefix(org.rep_user_id);
+    if (!scopedPrefix) {
+      return res.json({
+        data: [],
+        pagination: buildPagination(page, limit, 0),
+      });
+    }
+
+    const baseParams = [scopedPrefix, ORG_POOL_HISTORY_REASON_SET];
+    const { rows: [countRow] = [] } = await pool.query(
+      `
+        SELECT COUNT(*)::int AS total
+        FROM pool_transactions pt
+        JOIN funding_pools fp ON fp.id = pt.pool_id
+        WHERE LEFT(fp.slug, LENGTH($1)) = $1
+          AND pt.reason = ANY($2::text[])
+      `,
+      baseParams
+    );
+    const totalRows = Number(countRow?.total) || 0;
+
+    const dataParams = [...baseParams, limit, offset];
+    let rows = [];
+    try {
+      const result = await pool.query(
+        `
+          SELECT
+            pt.id,
+            pt.amount_credits AS amount,
+            pt.reason,
+            pt.created_at,
+            pt.notes
+          FROM pool_transactions pt
+          JOIN funding_pools fp ON fp.id = pt.pool_id
+          WHERE LEFT(fp.slug, LENGTH($1)) = $1
+            AND pt.reason = ANY($2::text[])
+          ORDER BY pt.created_at DESC, pt.id DESC
+          LIMIT $3
+          OFFSET $4
+        `,
+        dataParams
+      );
+      rows = result.rows || [];
+    } catch (err) {
+      if (err?.code !== "42703") throw err;
+      const fallback = await pool.query(
+        `
+          SELECT
+            pt.id,
+            pt.amount_credits AS amount,
+            pt.reason,
+            pt.created_at,
+            NULL::text AS notes
+          FROM pool_transactions pt
+          JOIN funding_pools fp ON fp.id = pt.pool_id
+          WHERE LEFT(fp.slug, LENGTH($1)) = $1
+            AND pt.reason = ANY($2::text[])
+          ORDER BY pt.created_at DESC, pt.id DESC
+          LIMIT $3
+          OFFSET $4
+        `,
+        dataParams
+      );
+      rows = fallback.rows || [];
+    }
+
+    return res.json({
+      data: rows.map((row) => ({
+        id: Number(row.id),
+        amount: Number(row.amount) || 0,
+        reason: row.reason || "",
+        created_at: row.created_at || null,
+        notes: row.notes || "",
+      })),
+      pagination: buildPagination(page, limit, totalRows),
+    });
+  } catch (err) {
+    console.error("GET /api/admin/org-pools/:orgId/history error:", err);
+    return res.status(500).json({ error: "server_error" });
+  }
+});
+
+adminApiRouter.post("/org-pools/:orgId/topup", async (req, res) => {
+  if (!requireCsrf(req, res)) return;
+  const orgId = parsePositiveInt(req.params.orgId);
+  const amount = parsePositiveInt(req.body?.amount);
+  const reason = String(req.body?.reason || "").trim().toLowerCase();
+  const notes =
+    typeof req.body?.notes === "string" && req.body.notes.trim()
+      ? req.body.notes.trim()
+      : null;
+
+  if (!orgId || !amount || !ADMIN_POOL_TOPUP_REASON_SET.has(reason)) {
+    return res.status(400).json({ error: "invalid_request" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const { rows: [org] = [] } = await client.query(
+      `
+        SELECT id, name, status, rep_user_id
+        FROM organizations
+        WHERE id = $1
+        FOR UPDATE
+      `,
+      [orgId]
+    );
+
+    if (!org) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "not_found" });
+    }
+    if (org.status !== "approved") {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "org_not_approved" });
+    }
+
+    const scopedPrefix = buildScopedPoolPrefix(org.rep_user_id);
+    if (!scopedPrefix) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "org_missing_rep_user" });
+    }
+
+    const scopedPoolSlug = `${scopedPrefix}general`;
+    const poolName = "General Pool";
+
+    const { rows: [poolRow] = [] } = await client.query(
+      `
+        INSERT INTO funding_pools (slug, name)
+        VALUES ($1, $2)
+        ON CONFLICT (slug) DO UPDATE SET name = funding_pools.name
+        RETURNING id, slug
+      `,
+      [scopedPoolSlug, poolName]
+    );
+    const poolId = Number(poolRow?.id);
+    if (!Number.isFinite(poolId) || poolId <= 0) {
+      throw new Error("unable_to_resolve_pool");
+    }
+
+    const { txRow, persistedReason, notesStored } = await insertOrgPoolTopupTx({
+      client,
+      poolId,
+      amount,
+      requestedReason: reason,
+      notes,
+    });
+
+    const { rows: [balanceRow] = [] } = await client.query(
+      `
+        SELECT
+          COALESCE(SUM(CASE WHEN direction = 'credit' THEN amount_credits ELSE 0 END), 0) AS credits_in,
+          COALESCE(SUM(CASE WHEN direction = 'debit' THEN amount_credits ELSE 0 END), 0) AS credits_out
+        FROM pool_transactions
+        WHERE pool_id = $1
+      `,
+      [poolId]
+    );
+    const creditsIn = Number(balanceRow?.credits_in) || 0;
+    const creditsOut = Number(balanceRow?.credits_out) || 0;
+    const currentBalance = Math.max(0, creditsIn - creditsOut);
+
+    await client.query("COMMIT");
+
+    return res.status(201).json({
+      success: true,
+      org_id: orgId,
+      org_name: org.name,
+      pool_id: poolId,
+      current_balance: currentBalance,
+      transaction: {
+        id: Number(txRow?.id) || null,
+        pool_id: Number(txRow?.pool_id) || poolId,
+        amount: Number(txRow?.amount_credits) || amount,
+        reason: reason,
+        db_reason: txRow?.reason || persistedReason || reason,
+        created_at: txRow?.created_at || null,
+        notes: txRow?.notes || notes || "",
+        notes_stored: notesStored,
+      },
+    });
+  } catch (err) {
+    try { await client.query("ROLLBACK"); } catch (_) {}
+    console.error("POST /api/admin/org-pools/:orgId/topup error:", err);
+    if (err?.code === "23514") {
+      return res.status(500).json({
+        error: "pool_reason_not_enabled",
+        message: "Pool top-up reason is not enabled in database constraints. Please run latest migrations.",
+      });
+    }
+    return res.status(500).json({ error: "server_error" });
+  } finally {
+    client.release();
   }
 });
 

@@ -11,6 +11,11 @@ const NAV_ITEMS = [
 ];
 
 const CREDIT_REASON_OPTIONS = ["adjustment", "earn", "earn_shift", "donate", "redeem"];
+const ORG_POOL_TOPUP_REASON_OPTIONS = [
+  { value: "admin_allocation", label: "Admin Allocation" },
+  { value: "adjustment", label: "Adjustment" },
+  { value: "bonus", label: "Bonus" },
+];
 const ADMIN_TABLE_LIMIT = 50;
 
 function safeNumber(value, fallback = 0) {
@@ -38,6 +43,16 @@ function formatDateTime(value) {
   const dt = new Date(value);
   if (Number.isNaN(dt.getTime())) return "—";
   return dt.toLocaleString();
+}
+
+function formatPoolReason(reason) {
+  const normalized = String(reason || "").trim().toLowerCase();
+  if (normalized === "admin_allocation" || normalized === "org_topup") return "Admin Allocation";
+  if (normalized === "adjustment" || normalized === "manual_adjust") return "Adjustment";
+  if (normalized === "bonus") return "Bonus";
+  if (normalized === "subscription_credit" || normalized === "subscription_topup") return "Subscription Credit";
+  if (normalized === "donation_in") return "Donation In";
+  return normalized || "—";
 }
 
 function formatMonthShort(value) {
@@ -411,6 +426,8 @@ export default function AdminDashboard() {
   const [transactionState, setTransactionState] = useState({ loading: false, error: "", items: [] });
   const [creditState, setCreditState] = useState({ loading: false, error: "", items: [] });
   const [creditLogState, setCreditLogState] = useState({ loading: false, error: "", items: [] });
+  const [orgPoolState, setOrgPoolState] = useState({ loading: false, error: "", items: [] });
+  const [orgPoolHistoryState, setOrgPoolHistoryState] = useState({ loading: false, error: "", items: [] });
   const [volunteerDetailState, setVolunteerDetailState] = useState({ loading: false, error: "", data: null, open: false });
 
   const [orgSearch, setOrgSearch] = useState("");
@@ -440,6 +457,16 @@ export default function AdminDashboard() {
   const [pendingCreditsPage, setPendingCreditsPage] = useState(1);
   const [pendingCreditsTotalRows, setPendingCreditsTotalRows] = useState(0);
   const [pendingCreditsTotalPages, setPendingCreditsTotalPages] = useState(0);
+  const [orgPoolHistoryPage, setOrgPoolHistoryPage] = useState(1);
+  const [orgPoolHistoryTotalRows, setOrgPoolHistoryTotalRows] = useState(0);
+  const [orgPoolHistoryTotalPages, setOrgPoolHistoryTotalPages] = useState(0);
+  const [selectedOrgPoolId, setSelectedOrgPoolId] = useState("");
+  const [orgPoolTopupForm, setOrgPoolTopupForm] = useState({
+    amount: "",
+    reason: "admin_allocation",
+    notes: "",
+    submitting: false,
+  });
 
   const [eventEdit, setEventEdit] = useState(null);
   const [volunteerEdit, setVolunteerEdit] = useState(null);
@@ -650,29 +677,79 @@ export default function AdminDashboard() {
     }
   }, [transactionPage, requestJson, unpackPagedResponse]);
 
+  const loadOrgPools = useCallback(async () => {
+    setOrgPoolState((curr) => ({ ...curr, loading: true, error: "" }));
+    try {
+      const payload = await requestJson("/api/admin/org-pools");
+      const items = Array.isArray(payload?.data) ? payload.data : [];
+      setOrgPoolState({ loading: false, error: "", items });
+      setSelectedOrgPoolId((curr) => {
+        if (curr && items.some((row) => String(row.id) === String(curr))) return String(curr);
+        if (items.length) return String(items[0].id);
+        return "";
+      });
+    } catch (err) {
+      setOrgPoolState((curr) => ({ ...curr, loading: false, error: err?.message || "Unable to load org pools" }));
+    }
+  }, [requestJson]);
+
+  const loadOrgPoolHistory = useCallback(async (targetPage = orgPoolHistoryPage) => {
+    if (!selectedOrgPoolId) {
+      setOrgPoolHistoryState({ loading: false, error: "", items: [] });
+      setOrgPoolHistoryTotalRows(0);
+      setOrgPoolHistoryTotalPages(0);
+      return;
+    }
+    setOrgPoolHistoryState((curr) => ({ ...curr, loading: true, error: "" }));
+    try {
+      const qs = new URLSearchParams({
+        page: String(targetPage),
+        limit: "20",
+      });
+      const payload = await requestJson(`/api/admin/org-pools/${selectedOrgPoolId}/history?${qs.toString()}`);
+      const paged = unpackPagedResponse(payload);
+      setOrgPoolHistoryState({ loading: false, error: "", items: paged.data });
+      setOrgPoolHistoryPage(paged.pagination.page);
+      setOrgPoolHistoryTotalRows(paged.pagination.totalRows);
+      setOrgPoolHistoryTotalPages(paged.pagination.totalPages);
+    } catch (err) {
+      setOrgPoolHistoryState((curr) => ({ ...curr, loading: false, error: err?.message || "Unable to load top-up history" }));
+    }
+  }, [orgPoolHistoryPage, requestJson, selectedOrgPoolId, unpackPagedResponse]);
+
   const loadCredits = useCallback(async () => {
     setCreditState((curr) => ({ ...curr, loading: true, error: "" }));
+    setOrgPoolState((curr) => ({ ...curr, loading: true, error: "" }));
     try {
       const pendingQs = new URLSearchParams({
         page: String(pendingCreditsPage),
         limit: String(ADMIN_TABLE_LIMIT),
       });
-      const [creditsPayload, volunteersPayload, organizationsPayload] = await Promise.all([
+      const [creditsPayload, volunteersPayload, organizationsPayload, orgPoolsPayload] = await Promise.all([
         requestJson(`/api/admin/credits/pending?${pendingQs.toString()}`),
         requestJson("/api/admin/volunteers?page=1&limit=100"),
         requestJson("/api/admin/organizations?page=1&limit=100"),
+        requestJson("/api/admin/org-pools"),
       ]);
       const creditsPaged = unpackPagedResponse(creditsPayload);
       const volunteersPaged = unpackPagedResponse(volunteersPayload);
       const organizationsPaged = unpackPagedResponse(organizationsPayload);
+      const orgPoolItems = Array.isArray(orgPoolsPayload?.data) ? orgPoolsPayload.data : [];
       setCreditState({ loading: false, error: "", items: creditsPaged.data });
       setPendingCreditsPage(creditsPaged.pagination.page);
       setPendingCreditsTotalRows(creditsPaged.pagination.totalRows);
       setPendingCreditsTotalPages(creditsPaged.pagination.totalPages);
       setVolunteerState({ loading: false, error: "", items: volunteersPaged.data });
       setOrgState({ loading: false, error: "", items: organizationsPaged.data });
+      setOrgPoolState({ loading: false, error: "", items: orgPoolItems });
+      setSelectedOrgPoolId((curr) => {
+        if (curr && orgPoolItems.some((row) => String(row.id) === String(curr))) return String(curr);
+        if (orgPoolItems.length) return String(orgPoolItems[0].id);
+        return "";
+      });
     } catch (err) {
       setCreditState((curr) => ({ ...curr, loading: false, error: err?.message || "Unable to load credits" }));
+      setOrgPoolState((curr) => ({ ...curr, loading: false, error: err?.message || "Unable to load org pools" }));
     }
   }, [pendingCreditsPage, requestJson, unpackPagedResponse]);
 
@@ -706,6 +783,11 @@ export default function AdminDashboard() {
   }, [activeSection, loadCredits]);
 
   useEffect(() => {
+    if (activeSection !== "impactCredits") return;
+    loadOrgPoolHistory();
+  }, [activeSection, loadOrgPoolHistory]);
+
+  useEffect(() => {
     if (activeSection === "organizations") loadOrganizations();
   }, [activeSection, loadOrganizations]);
 
@@ -733,6 +815,7 @@ export default function AdminDashboard() {
     setTransactionPage(1);
     setCreditLogPage(1);
     setPendingCreditsPage(1);
+    setOrgPoolHistoryPage(1);
   }, []);
 
   const openConfirm = useCallback((config, action) => {
@@ -958,6 +1041,34 @@ export default function AdminDashboard() {
     }
   }, [creditForm, loadCredits, mutateJson, pushToast]);
 
+  const submitOrgPoolTopup = useCallback(async () => {
+    if (!selectedOrgPoolId || !orgPoolTopupForm.amount || orgPoolTopupForm.submitting) {
+      pushToast("Select an organization and enter a valid amount.", "error");
+      return;
+    }
+    const amount = Number(orgPoolTopupForm.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      pushToast("Amount must be a positive number.", "error");
+      return;
+    }
+
+    setOrgPoolTopupForm((curr) => ({ ...curr, submitting: true }));
+    try {
+      await mutateJson(`/api/admin/org-pools/${selectedOrgPoolId}/topup`, "POST", {
+        amount: Math.floor(amount),
+        reason: orgPoolTopupForm.reason,
+        notes: orgPoolTopupForm.notes || "",
+      });
+      pushToast("Organization pool topped up successfully.", "success");
+      setOrgPoolTopupForm((curr) => ({ ...curr, amount: "", notes: "", submitting: false }));
+      await loadOrgPools();
+      await loadOrgPoolHistory(1);
+    } catch (err) {
+      pushToast(err?.message || "Pool top-up failed.", "error");
+      setOrgPoolTopupForm((curr) => ({ ...curr, submitting: false }));
+    }
+  }, [selectedOrgPoolId, orgPoolTopupForm, mutateJson, pushToast, loadOrgPools, loadOrgPoolHistory]);
+
   const selectedPendingRequestIds = useMemo(
     () => Object.keys(selectedCreditRequests).filter((id) => selectedCreditRequests[id]).map((id) => Number(id)),
     [selectedCreditRequests]
@@ -1049,6 +1160,11 @@ export default function AdminDashboard() {
     if (!hasOrgKey) return volunteerState.items;
     return volunteerState.items.filter((user) => safeNumber(user.org_id, -1) === selectedOrgId);
   }, [creditForm.org_id, volunteerState.items]);
+
+  const selectedOrgPool = useMemo(
+    () => orgPoolState.items.find((row) => String(row.id) === String(selectedOrgPoolId)) || null,
+    [orgPoolState.items, selectedOrgPoolId]
+  );
 
   const stats = statsState.data || {};
 
@@ -1483,6 +1599,127 @@ export default function AdminDashboard() {
                         </button>
                       </div>
                     </div>
+                  </div>
+
+                  <div className="admin-card mt-3">
+                    <h6>Organization Pool Top-Up</h6>
+                    {orgPoolState.error ? <div className="text-danger small mb-2">{orgPoolState.error}</div> : null}
+                    <div className="mb-3">
+                      <label className="form-label small">Organization</label>
+                      <select
+                        className="form-select form-select-sm"
+                        value={selectedOrgPoolId}
+                        onChange={(e) => {
+                          setSelectedOrgPoolId(e.target.value || "");
+                          setOrgPoolHistoryPage(1);
+                        }}
+                        disabled={orgPoolState.loading}
+                      >
+                        {orgPoolState.items.length ? null : <option value="">No approved organizations</option>}
+                        {orgPoolState.items.map((orgPool) => (
+                          <option key={`org-pool-${orgPool.id}`} value={String(orgPool.id)}>
+                            {`${orgPool.name} (Balance: ${formatInteger(orgPool.current_balance)})`}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {selectedOrgPool ? (
+                      <>
+                        <div className="admin-pool-balance-wrap mb-3">
+                          <div className="admin-pool-balance-value">+{formatInteger(selectedOrgPool.current_balance)}</div>
+                          <div className="admin-pool-balance-label">Current Pool Balance</div>
+                        </div>
+
+                        <div className="row g-2 mb-3">
+                          <div className="col-6">
+                            <label className="form-label small">Amount</label>
+                            <input
+                              type="number"
+                              min="1"
+                              className="form-control form-control-sm"
+                              value={orgPoolTopupForm.amount}
+                              onChange={(e) => setOrgPoolTopupForm((curr) => ({ ...curr, amount: e.target.value }))}
+                            />
+                          </div>
+                          <div className="col-6">
+                            <label className="form-label small">Reason</label>
+                            <select
+                              className="form-select form-select-sm"
+                              value={orgPoolTopupForm.reason}
+                              onChange={(e) => setOrgPoolTopupForm((curr) => ({ ...curr, reason: e.target.value }))}
+                            >
+                              {ORG_POOL_TOPUP_REASON_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="col-12">
+                            <label className="form-label small">Notes (optional)</label>
+                            <textarea
+                              rows="2"
+                              className="form-control form-control-sm"
+                              placeholder="e.g., Q1 allocation for verified event completions"
+                              value={orgPoolTopupForm.notes}
+                              onChange={(e) => setOrgPoolTopupForm((curr) => ({ ...curr, notes: e.target.value }))}
+                            />
+                          </div>
+                          <div className="col-12">
+                            <button
+                              type="button"
+                              className="btn btn-sm admin-btn-green w-100"
+                              disabled={orgPoolTopupForm.submitting || orgPoolState.loading}
+                              onClick={submitOrgPoolTopup}
+                            >
+                              {orgPoolTopupForm.submitting ? "Topping up..." : "Top Up Pool"}
+                            </button>
+                          </div>
+                        </div>
+
+                        <h6 className="mb-2">Top-Up History</h6>
+                        {orgPoolHistoryState.error ? <div className="text-danger small mb-2">{orgPoolHistoryState.error}</div> : null}
+                        <div
+                          className="table-responsive"
+                          style={{ opacity: orgPoolHistoryState.loading ? 0.5 : 1, transition: "opacity 140ms ease" }}
+                        >
+                          <table className="table table-hover admin-table mb-0">
+                            <thead>
+                              <tr>
+                                <th>Date</th>
+                                <th>Amount</th>
+                                <th>Reason</th>
+                                <th>Notes</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {orgPoolHistoryState.items.map((row) => (
+                                <tr key={`org-pool-history-${row.id}`}>
+                                  <td>{formatDateTime(row.created_at)}</td>
+                                  <td className="admin-pool-credit-cell">+{formatInteger(row.amount)}</td>
+                                  <td>{formatPoolReason(row.reason)}</td>
+                                  <td>{row.notes || "—"}</td>
+                                </tr>
+                              ))}
+                              {!orgPoolHistoryState.items.length ? (
+                                <tr><td colSpan="4" className="text-muted">No top-up history for this organization.</td></tr>
+                              ) : null}
+                            </tbody>
+                          </table>
+                        </div>
+                        <Pagination
+                          page={orgPoolHistoryPage}
+                          totalPages={orgPoolHistoryTotalPages}
+                          totalRows={orgPoolHistoryTotalRows}
+                          limit={20}
+                          onPageChange={setOrgPoolHistoryPage}
+                          disabled={orgPoolHistoryState.loading}
+                        />
+                      </>
+                    ) : (
+                      <div className="text-muted small">Select an organization to manage pool top-ups.</div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -2224,6 +2461,41 @@ export default function AdminDashboard() {
           background: #f24a4a;
           border-color: #f24a4a;
           color: #fff;
+        }
+        .admin-btn-green {
+          background: #00c978;
+          border-color: #00c978;
+          color: #fff;
+        }
+        .admin-btn-green:hover,
+        .admin-btn-green:focus {
+          background: #00b76d;
+          border-color: #00b76d;
+          color: #fff;
+        }
+        .admin-pool-balance-wrap {
+          border: 1px solid #d9f5e8;
+          border-radius: 12px;
+          background: #f5fff9;
+          padding: 0.9rem 1rem;
+          text-align: center;
+        }
+        .admin-pool-balance-value {
+          color: #00a862;
+          font-size: 2rem;
+          font-weight: 700;
+          line-height: 1.1;
+        }
+        .admin-pool-balance-label {
+          color: #5e6b7f;
+          font-size: 0.82rem;
+          letter-spacing: 0.02em;
+          text-transform: uppercase;
+          font-weight: 600;
+        }
+        .admin-pool-credit-cell {
+          color: #149a5a;
+          font-weight: 700;
         }
         .admin-donut-value {
           font-size: 1.22rem;

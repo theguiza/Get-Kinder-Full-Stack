@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { InviteModal } from "../components/InviteModal.jsx";
 import { PoolLedgerModal } from "../components/PoolLedgerModal.jsx";
-import { TopUpPoolModal } from "../components/TopUpPoolModal.jsx";
 
 const PAGE_SIZE = 20;
 const ALL_POOLS_FILTER = "all";
@@ -54,7 +53,6 @@ export function MyEvents() {
   });
   const [toast, setToast] = useState(null);
   const [ledgerModalOpen, setLedgerModalOpen] = useState(false);
-  const [topUpModal, setTopUpModal] = useState({ open: false, poolSlug: DEFAULT_POOL_SLUG });
   const [inviteModal, setInviteModal] = useState({ open: false, event: null });
   const [highlightDraft, setHighlightDraft] = useState(() => {
     const id = sessionStorage.getItem("gkLastDraftId");
@@ -194,40 +192,6 @@ export function MyEvents() {
     if (targetTab) setTab(targetTab);
     setFundingFilter(normalized);
     setOffset(0);
-  }
-
-  function openTopUpModal() {
-    if (poolFilter === ALL_POOLS_FILTER) {
-      setToast({ type: "error", message: "Choose a specific funding pool first." });
-      return;
-    }
-    setTopUpModal({ open: true, poolSlug: poolFilter || DEFAULT_POOL_SLUG });
-  }
-
-  async function submitPoolTopUp({ amountCredits, source }) {
-    const targetSlug = topUpModal.poolSlug || poolFilter || DEFAULT_POOL_SLUG;
-    const res = await fetch("/api/me/events/pools/topups", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        funding_pool_slug: targetSlug,
-        amount_credits: amountCredits,
-        source,
-      }),
-    });
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok || !json?.ok) {
-      throw new Error(json?.error || "Unable to add pool credits");
-    }
-    const remaining = Number(json?.data?.pool_credits_remaining) || 0;
-    setToast({
-      type: "success",
-      message: `Added ${amountCredits} credits to "${targetSlug}". Balance: ${remaining}.`,
-    });
-    await Promise.all([
-      fetchPoolSummary({ includeSlug: targetSlug }),
-      fetchEvents(false),
-    ]);
   }
 
   async function cancelEvent(id) {
@@ -413,15 +377,7 @@ export function MyEvents() {
           >
             View Pool Ledger
           </button>
-          <button
-            type="button"
-            className="btn primary"
-            onClick={openTopUpModal}
-            disabled={poolFilter === ALL_POOLS_FILTER}
-            title={poolFilter === ALL_POOLS_FILTER ? "Select a pool to top up" : "Add pool credits"}
-          >
-            Add Credits
-          </button>
+          <span className="muted">Pool top-ups are admin-managed.</span>
         </div>
       </div>
 
@@ -580,12 +536,6 @@ export function MyEvents() {
             },
           });
         }}
-      />
-      <TopUpPoolModal
-        open={topUpModal.open}
-        poolSlug={topUpModal.poolSlug}
-        onClose={() => setTopUpModal((prev) => ({ ...prev, open: false }))}
-        onSubmit={submitPoolTopUp}
       />
       <PoolLedgerModal
         open={ledgerModalOpen}
