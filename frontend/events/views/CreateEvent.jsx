@@ -1041,15 +1041,36 @@ export function CreateEvent({
             />
           </Field>
 
-          <div className="grid three">
-            <Field label="Category">
-              <input
-                type="text"
-                name="category"
-                placeholder="Select category"
-                value={form.category}
-                onChange={(e) => updateField("category", e.target.value)}
-              />
+          <div className="top-meta-grid">
+            <Field label="Cause tags" required error={errors.cause_tags}>
+              <select
+                name="cause_tags"
+                value={form.cause_tags}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setForm((prev) => ({
+                    ...prev,
+                    cause_tags: next,
+                    cause_tag_other: next === "Other" ? prev.cause_tag_other : "",
+                  }));
+                }}
+              >
+                <option value="">Select cause tag</option>
+                {CAUSE_TAG_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              {form.cause_tags === "Other" && (
+                <input
+                  type="text"
+                  name="cause_tag_other"
+                  placeholder="Enter custom cause tag"
+                  value={form.cause_tag_other || ""}
+                  onChange={(e) => updateField("cause_tag_other", e.target.value)}
+                />
+              )}
             </Field>
             <Field label="Date" required error={errors.date}>
               <input
@@ -1068,10 +1089,7 @@ export function CreateEvent({
                 onChange={(e) => updateField("time", e.target.value)}
               />
             </Field>
-          </div>
-
-          <div className="grid two">
-            <Field label="Timezone" required error={errors.tz}>
+            <Field label="Timezone">
               <input
                 type="text"
                 name="tz"
@@ -1080,6 +1098,29 @@ export function CreateEvent({
                 onChange={(e) => updateField("tz", e.target.value)}
               />
             </Field>
+          </div>
+
+          <div className="org-location-grid">
+            <div className="org-location-left">
+              <Field label="Organization" required error={errors.org_name}>
+                <input
+                  type="text"
+                  name="org_name"
+                  placeholder="e.g., Vancouver Green Crew"
+                  value={form.org_name}
+                  onChange={(e) => updateField("org_name", e.target.value)}
+                />
+              </Field>
+              <Field label="Community tag">
+                <input
+                  type="text"
+                  name="community_tag"
+                  placeholder="e.g., vancouver"
+                  value={form.community_tag}
+                  onChange={(e) => updateField("community_tag", e.target.value)}
+                />
+              </Field>
+            </div>
             <Field label="Location" required error={errors.location_text}>
               <input
                 type="text"
@@ -1118,56 +1159,14 @@ export function CreateEvent({
             </Field>
           </div>
 
-          <div className="grid two">
-            <Field label="Organization">
-              <input
-                type="text"
-                name="org_name"
-                placeholder="e.g., Vancouver Green Crew"
-                value={form.org_name}
-                onChange={(e) => updateField("org_name", e.target.value)}
-              />
-            </Field>
-            <Field label="Community tag">
-              <input
-                type="text"
-                name="community_tag"
-                placeholder="e.g., vancouver"
-                value={form.community_tag}
-                onChange={(e) => updateField("community_tag", e.target.value)}
-              />
-            </Field>
-          </div>
-
-          <Field label="Cause tags">
-            <select
-              name="cause_tags"
-              value={form.cause_tags}
-              onChange={(e) => {
-                const next = e.target.value;
-                setForm((prev) => ({
-                  ...prev,
-                  cause_tags: next,
-                  cause_tag_other: next === "Other" ? prev.cause_tag_other : "",
-                }));
-              }}
-            >
-              <option value="">Select cause tag</option>
-              {CAUSE_TAG_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-            {form.cause_tags === "Other" && (
-              <input
-                type="text"
-                name="cause_tag_other"
-                placeholder="Enter custom cause tag"
-                value={form.cause_tag_other || ""}
-                onChange={(e) => updateField("cause_tag_other", e.target.value)}
-              />
-            )}
+          <Field label="Description">
+            <textarea
+              name="description"
+              rows={5}
+              placeholder="Tell folks what to expect, what to bring, and why it matters."
+              value={form.description}
+              onChange={(e) => updateField("description", e.target.value)}
+            />
           </Field>
 
           <Field label="Requirements">
@@ -1180,22 +1179,17 @@ export function CreateEvent({
             />
           </Field>
 
-          <Field label="Visibility" required error={errors.visibility}>
-            <div className="pill-row">
-              {VISIBILITY_OPTIONS.map((option) => (
-                <button
-                  type="button"
-                  key={option.value}
-                  className={`pill${form.visibility === option.value ? " active" : ""}`}
-                  onClick={() => updateField("visibility", option.value)}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
+          <Field label="Safety notes">
+            <textarea
+              name="safety_notes"
+              rows={4}
+              placeholder="Share any accessibility notes, safety reminders, or special instructions."
+              value={form.safety_notes}
+              onChange={(e) => updateField("safety_notes", e.target.value)}
+            />
           </Field>
 
-          <div className="grid two">
+          <div className="grid three">
             <Field label="Capacity" error={errors.capacity}>
               <input
                 type="number"
@@ -1223,6 +1217,16 @@ export function CreateEvent({
                   Disabled
                 </button>
               </div>
+            </Field>
+            <Field label="Invite People">
+              <button
+                type="button"
+                className="btn secondary"
+                onClick={handleOpenInvitePeople}
+                disabled={invitePreparing || submitting || editLoading}
+              >
+                {invitePreparing ? "Preparing invites…" : "Invite People"}
+              </button>
             </Field>
           </div>
 
@@ -1261,16 +1265,6 @@ export function CreateEvent({
           </div>
         </Field>
 
-          <Field label="Description">
-            <textarea
-              name="description"
-              rows={5}
-              placeholder="Tell folks what to expect, what to bring, and why it matters."
-              value={form.description}
-              onChange={(e) => updateField("description", e.target.value)}
-            />
-          </Field>
-
           <div className="grid three">
             <Field label="Reward Pool ($KIND)">
               <input
@@ -1305,26 +1299,20 @@ export function CreateEvent({
             </Field>
           </div>
 
-          <Field label="Safety notes">
-            <textarea
-              name="safety_notes"
-              rows={4}
-              placeholder="Share any accessibility notes, safety reminders, or special instructions."
-              value={form.safety_notes}
-              onChange={(e) => updateField("safety_notes", e.target.value)}
-            />
+          <Field label="Visibility">
+            <div className="pill-row">
+              {VISIBILITY_OPTIONS.map((option) => (
+                <button
+                  type="button"
+                  key={option.value}
+                  className={`pill${form.visibility === option.value ? " active" : ""}`}
+                  onClick={() => updateField("visibility", option.value)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
           </Field>
-
-          <div className="cta-row">
-            <button
-              type="button"
-              className="btn secondary"
-              onClick={handleOpenInvitePeople}
-              disabled={invitePreparing || submitting || editLoading}
-            >
-              {invitePreparing ? "Preparing invites…" : "Invite People"}
-            </button>
-          </div>
 
           <p className="legal-note">
             By publishing, you agree to Get Kinder’s Community Guidelines and assume responsibility for event safety and
@@ -1447,7 +1435,7 @@ function buildPayload(form, status) {
       : ["social_proof"];
   return {
     title: form.title?.trim(),
-    category: form.category?.trim() || null,
+    category: causeTags[0] || null,
     date: form.date || null,
     time_range: form.time || null,
     tz: form.tz?.trim() || "America/Vancouver",
@@ -1488,14 +1476,17 @@ function validateForm(form, { strict = false } = {}) {
       errs.time = "End time must be after start time.";
     }
   }
-  if (strict && !form.tz?.trim()) {
-    errs.tz = "Timezone required.";
-  }
   if (strict && !form.location_text?.trim()) {
     errs.location_text = "Location required.";
   }
-  if (!form.visibility) {
-    errs.visibility = "Choose a visibility.";
+  if (!form.org_name?.trim()) {
+    errs.org_name = "Organization is required.";
+  }
+  const selectedCause = typeof form.cause_tags === "string" ? form.cause_tags.trim() : "";
+  if (!selectedCause) {
+    errs.cause_tags = "Cause tag is required.";
+  } else if (selectedCause === "Other" && !form.cause_tag_other?.trim()) {
+    errs.cause_tags = "Enter a custom cause tag.";
   }
   if (form.capacity && Number(form.capacity) < 1) {
     errs.capacity = "Capacity must be at least 1.";
@@ -1662,6 +1653,23 @@ const styles = `
   }
   .grid.three {
     grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+  }
+  .top-meta-grid {
+    display:grid;
+    gap:18px;
+    grid-template-columns:repeat(4,minmax(0,1fr));
+    align-items:start;
+  }
+  .org-location-grid {
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:18px;
+    align-items:start;
+  }
+  .org-location-left {
+    display:grid;
+    gap:18px;
+    align-content:start;
   }
   .field {
     display:flex;
@@ -1901,5 +1909,13 @@ const styles = `
     display:flex;
     gap:12px;
     justify-content:flex-end;
+  }
+  @media (max-width: 900px) {
+    .top-meta-grid {
+      grid-template-columns:repeat(2,minmax(0,1fr));
+    }
+    .org-location-grid {
+      grid-template-columns:1fr;
+    }
   }
 `;

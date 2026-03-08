@@ -1505,12 +1505,14 @@ async function buildEventPayload(body, { strict = false, fallback = {} } = {}) {
   const rewardPoolRaw = body.reward_pool_kind ?? base.reward_pool_kind ?? 0;
   const rewardPool = Number.isFinite(Number(rewardPoolRaw)) ? Math.max(0, Number(rewardPoolRaw)) : 0;
   const safetyNotes = sanitizeString(body.safety_notes ?? base.safety_notes) || null;
-  const category = sanitizeString(body.category ?? base.category) || null;
   const orgName = sanitizeString(body.org_name ?? base.org_name) || null;
+  if (!orgName) throw buildValidationError("Organization is required.");
   const communityTag = sanitizeString(body.community_tag ?? base.community_tag) || null;
   const requirements = sanitizeString(body.requirements ?? base.requirements) || null;
   const causeTagsInput = body.cause_tags ?? base.cause_tags;
   const causeTags = normalizeCauseTags(causeTagsInput);
+  if (!causeTags.length) throw buildValidationError("Cause tag is required.");
+  const category = sanitizeString(body.category ?? base.category) || causeTags[0] || null;
   const verificationMethodInput = sanitizeString(body.verification_method ?? base.verification_method);
   const verificationMethod = VERIFICATION_METHOD_SET.has(verificationMethodInput)
     ? verificationMethodInput

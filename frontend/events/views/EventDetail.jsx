@@ -1,6 +1,17 @@
 import React, { useEffect, useRef, useState } from "react";
 import { InviteModal } from "../components/InviteModal.jsx";
 
+function getSafetyNotesText(eventData) {
+  const candidates = [
+    eventData?.safety_notes,
+    eventData?.safetyNotes,
+    eventData?.safety_note,
+    eventData?.safetyNote,
+  ];
+  const hit = candidates.find((value) => typeof value === "string" && value.trim());
+  return hit ? String(hit).trim() : "";
+}
+
 export function EventDetail({ eventId, isAuthenticated = false }) {
   const [state, setState] = useState({ loading: false, data: null, error: null });
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -10,6 +21,7 @@ export function EventDetail({ eventId, isAuthenticated = false }) {
   const [checkInAction, setCheckInAction] = useState(null);
   const [cancelRequestDialogOpen, setCancelRequestDialogOpen] = useState(false);
   const [loginRequiredDialogOpen, setLoginRequiredDialogOpen] = useState(false);
+  const [safetyDialogOpen, setSafetyDialogOpen] = useState(false);
   const toastTimerRef = useRef(null);
 
   useEffect(() => {
@@ -36,6 +48,37 @@ export function EventDetail({ eventId, isAuthenticated = false }) {
       controller.abort();
     };
   }, [eventId]);
+
+  useEffect(() => {
+    if (!eventId || !isAuthenticated) return;
+    if (!state?.data || state.loading) return;
+    if (getSafetyNotesText(state.data)) return;
+
+    let alive = true;
+    const controller = new AbortController();
+    fetch(`/api/events/${encodeURIComponent(eventId)}?mode=edit`, {
+      signal: controller.signal,
+      credentials: "include",
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json) => {
+        if (!alive || !json?.data) return;
+        const notes = getSafetyNotesText(json.data);
+        if (!notes) return;
+        setState((prev) => {
+          if (!prev?.data) return prev;
+          return { ...prev, data: { ...prev.data, safety_notes: notes } };
+        });
+      })
+      .catch((err) => {
+        if (err?.name === "AbortError") return;
+      });
+
+    return () => {
+      alive = false;
+      controller.abort();
+    };
+  }, [eventId, isAuthenticated, state?.data, state.loading]);
 
   useEffect(() => {
     return () => {
@@ -71,6 +114,7 @@ export function EventDetail({ eventId, isAuthenticated = false }) {
   if (!evt) {
     return <p className="muted">Event not found.</p>;
   }
+  const safetyNotesText = getSafetyNotesText(evt);
 
   async function handleAddToCalendar() {
     if (calendarLoading) return;
@@ -408,6 +452,15 @@ export function EventDetail({ eventId, isAuthenticated = false }) {
             <p className="value" style={{ whiteSpace: "pre-wrap" }}>{evt.requirements}</p>
           </div>
         )}
+        <div className="info-actions">
+          <button
+            type="button"
+            className="btn secondary safety-notes-btn"
+            onClick={() => setSafetyDialogOpen(true)}
+          >
+            Click Here for Safety Notes
+          </button>
+        </div>
       </div>
 
       <div className="card when-card">
@@ -443,6 +496,28 @@ export function EventDetail({ eventId, isAuthenticated = false }) {
       >
         Back to Events
       </button>
+
+      {safetyDialogOpen && (
+        <div className="dialog-backdrop" role="presentation">
+          <div className="dialog-card" role="dialog" aria-modal="true" aria-labelledby="safety-notes-title">
+            <h4 id="safety-notes-title" className="dialog-title">Safety Notes</h4>
+            <p className="dialog-body">
+              {safetyNotesText
+                ? safetyNotesText
+                : "No safety notes have been provided for this event."}
+            </p>
+            <div className="dialog-actions">
+              <button
+                type="button"
+                className="btn secondary"
+                onClick={() => setSafetyDialogOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <InviteModal
         open={inviteOpen}
@@ -541,6 +616,12 @@ const detailStyles = `
     line-height:1.4;
     font-weight:700
   }
+  .dialog-body{
+    margin:0 0 16px;
+    color:#374151;
+    white-space:pre-wrap;
+    line-height:1.5
+  }
   .dialog-actions{
     display:flex;
     justify-content:flex-end;
@@ -574,6 +655,8 @@ const detailStyles = `
   .info-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:8px;grid-column:2}
   .info-grid > div{display:flex;flex-direction:column;align-items:flex-start}
   .info-reqs{grid-column:2}
+  .info-actions{grid-column:2;display:flex;justify-content:stretch;margin-top:4px}
+  .safety-notes-btn{width:100%;display:inline-flex;justify-content:center}
   .tag{display:inline-flex;align-items:center;padding:4px 12px;border-radius:999px;border:1.5px solid #455a7c;background:#ffffff;color:#455a7c;font-size:0.78rem;font-weight:500;margin:2px 4px 2px 0;transition:all 0.15s ease}
   .tag:hover{background:#ff5656;border-color:#ff5656;color:#ffffff}
   .info-reqs .value{margin-top:4px;font-weight:400;font-size:0.92rem;line-height:1.4}
@@ -582,6 +665,7 @@ const detailStyles = `
   .detail-cover img{width:100%;max-height:240px;object-fit:cover;border-radius:16px;border:1px solid #e5e7eb}
   .btn{background:#ff5656;border:none;color:#fff;padding:10px 16px;border-radius:10px;font-weight:700;cursor:pointer}
   .btn.secondary{background:#fff;border:1px solid #e5e7eb;color:#1f2937}
+  .btn.secondary.safety-notes-btn{color:#ff5656}
   .btn.secondary.event-action-btn{color:#455a7c}
   .btn.tertiary{background:transparent;border:1px dashed #d1d5db;color:#4b5563}
   .mt-2{margin-top:0.5rem}
