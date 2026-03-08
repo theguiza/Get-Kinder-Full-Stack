@@ -100,11 +100,16 @@
             <h1 class="events-hero-title">
               Volunteer opportunities<br>
               near <span class="events-hero-location">
-                Vancouver, BC
+                Vancouver and Victoria BC
               </span>
-              <a href="#" class="events-hero-location-change">
+              <button
+                type="button"
+                class="events-hero-location-change"
+                data-bs-toggle="modal"
+                data-bs-target="#cityChangeModal"
+              >
                 <i class="fas fa-map-marker-alt"></i> change
-              </a>
+              </button>
             </h1>
             <p class="events-hero-sub">
               Every hour you give earns impact credits that you can turn into rewards,
@@ -360,6 +365,24 @@
             <button type="submit" class="btn btn-danger">Log Out</button>
           </form>
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="cityChangeModal" tabindex="-1" aria-labelledby="cityChangeModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="cityChangeModalLabel">City Availability</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          Move Cities will be Getting Kinder soon! Send us a message to tell us why your city should be next
+        </div>
+        <div class="modal-footer">
+          <a href="/contact" class="btn btn-primary">Contact Us</a>
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
         </div>
       </div>
     </div>

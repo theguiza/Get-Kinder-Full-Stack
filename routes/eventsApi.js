@@ -6,7 +6,21 @@ import { ensureOrgRep } from "../middleware/ensureOrgRep.js";
 
 const eventsApiRouter = express.Router();
 
+function requireAuthenticatedApi(req, res, next) {
+  if (req.isAuthenticated && req.isAuthenticated()) {
+    if (req.user?.is_suspended) {
+      return res.status(403).json({ error: "account_suspended" });
+    }
+    return next();
+  }
+  return res.status(401).json({ error: "unauthorized" });
+}
+
 eventsApiRouter.get("/", listEvents);
+eventsApiRouter.get("/:id", getEventById);
+
+eventsApiRouter.use(requireAuthenticatedApi);
+
 eventsApiRouter.post("/", ensureOrgRep, createEvent);
 eventsApiRouter.post("/:id/cancel", cancelEvent);
 eventsApiRouter.post("/:id/complete", completeEvent);
@@ -19,7 +33,6 @@ eventsApiRouter.post("/:id/verify", verifyEventRsvp);
 eventsApiRouter.post("/:id/ratings", submitEventRating);
 eventsApiRouter.get("/:id/ratings/status", getEventRatingStatus);
 eventsApiRouter.get("/:id/calendar.ics", downloadEventCalendar);
-eventsApiRouter.get("/:id", getEventById);
 eventsApiRouter.patch("/:id", ensureOrgRep, updateEvent);
 eventsApiRouter.delete("/:id", ensureOrgRep, deleteDraftEvent);
 

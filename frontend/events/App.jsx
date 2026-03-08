@@ -10,6 +10,7 @@ export function EventsApp(props = {}) {
   const {
     initialRoute = "events",
     initialFeed = [],
+    isAuthenticated = false,
     pagination = { limit: 20, sort: "relevance" },
     brand = { primary: "#ff5656", ink: "#455a7c" },
     geoCheckinEnabled = false,
@@ -80,7 +81,7 @@ export function EventsApp(props = {}) {
       </EventsRouter>
 
       <Drawer open={Boolean(drawerId)} onClose={handleCloseDrawer}>
-        {drawerId ? <EventDetail eventId={drawerId} /> : null}
+        {drawerId ? <EventDetail eventId={drawerId} isAuthenticated={isAuthenticated} /> : null}
       </Drawer>
 
     </div>

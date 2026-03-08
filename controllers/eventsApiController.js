@@ -282,6 +282,9 @@ export async function getEventById(req, res) {
     }
     const mode = (req.query.mode || "").toLowerCase();
     if (mode === "edit") {
+      if (!(req.isAuthenticated && req.isAuthenticated())) {
+        return res.status(401).json({ ok: false, error: "unauthorized" });
+      }
       try {
         const hostId = await resolveUserId(req);
         const { rows } = await pool.query(
@@ -297,26 +300,28 @@ export async function getEventById(req, res) {
         return res.status(500).json({ ok: false, error: "Unable to load event for editing" });
       }
     }
-    try {
-      const viewerId = await resolveUserId(req);
-      const viewerIsHost = event.creator_user_id && viewerId
-        ? String(event.creator_user_id) === String(viewerId)
-        : false;
-      const snapshot = await getEventRsvpSnapshot(event.id, viewerId);
-      return res.json({
-        ok: true,
-        data: {
-          ...event,
-          viewer_is_host: viewerIsHost,
-          viewer_rsvp_status: snapshot.viewer?.status || null,
-          viewer_check_in_method: snapshot.viewer?.check_in_method || null,
-          viewer_checked_in_at: snapshot.viewer?.checked_in_at || null,
-        },
-      });
-    } catch (viewerErr) {
-      console.error("[eventsApi] getEventById viewer context error:", viewerErr);
-      return res.json({ ok: true, data: event });
+    if (req.isAuthenticated && req.isAuthenticated()) {
+      try {
+        const viewerId = await resolveUserId(req);
+        const viewerIsHost = event.creator_user_id && viewerId
+          ? String(event.creator_user_id) === String(viewerId)
+          : false;
+        const snapshot = await getEventRsvpSnapshot(event.id, viewerId);
+        return res.json({
+          ok: true,
+          data: {
+            ...event,
+            viewer_is_host: viewerIsHost,
+            viewer_rsvp_status: snapshot.viewer?.status || null,
+            viewer_check_in_method: snapshot.viewer?.check_in_method || null,
+            viewer_checked_in_at: snapshot.viewer?.checked_in_at || null,
+          },
+        });
+      } catch (viewerErr) {
+        console.error("[eventsApi] getEventById viewer context error:", viewerErr);
+      }
     }
+    return res.json({ ok: true, data: event });
   } catch (error) {
     console.error("[eventsApi] getEventById error:", error);
     return res.status(500).json({ ok: false, error: "Unable to load event" });

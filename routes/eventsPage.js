@@ -53,6 +53,7 @@ export async function getEventsPage(req, res) {
   const props = {
     initialRoute,
     initialFeed,
+    isAuthenticated: Boolean(user),
     pagination: {
       limit,
       sort: "relevance",

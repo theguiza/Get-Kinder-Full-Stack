@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { InviteModal } from "../components/InviteModal.jsx";
 
-export function EventDetail({ eventId }) {
+export function EventDetail({ eventId, isAuthenticated = false }) {
   const [state, setState] = useState({ loading: false, data: null, error: null });
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteToast, setInviteToast] = useState(null);
@@ -9,6 +9,7 @@ export function EventDetail({ eventId }) {
   const [rsvpAction, setRsvpAction] = useState(null);
   const [checkInAction, setCheckInAction] = useState(null);
   const [cancelRequestDialogOpen, setCancelRequestDialogOpen] = useState(false);
+  const [loginRequiredDialogOpen, setLoginRequiredDialogOpen] = useState(false);
   const toastTimerRef = useRef(null);
 
   useEffect(() => {
@@ -115,6 +116,10 @@ export function EventDetail({ eventId }) {
         body: JSON.stringify({ action }),
       });
       const json = await res.json().catch(() => ({}));
+      if (res.status === 401) {
+        setLoginRequiredDialogOpen(true);
+        return false;
+      }
       if (!res.ok || !json?.ok) {
         throw new Error(json?.error || "Unable to update RSVP");
       }
@@ -182,6 +187,20 @@ export function EventDetail({ eventId }) {
       return;
     }
     setInviteOpen(true);
+  }
+
+  function handleRequestAttendance() {
+    if (!isAuthenticated) {
+      setLoginRequiredDialogOpen(true);
+      return;
+    }
+    handleRsvp("accept");
+  }
+
+  function handleGoToRegister() {
+    if (typeof window !== "undefined") {
+      window.location.href = "/register";
+    }
   }
 
   return (
@@ -261,7 +280,7 @@ export function EventDetail({ eventId }) {
               <button
                 type="button"
                 className="btn"
-                onClick={() => handleRsvp("accept")}
+                onClick={handleRequestAttendance}
                 disabled={rsvpAction === "accept" || evt.viewer_rsvp_status === "checked_in"}
               >
                 {rsvpAction === "accept" ? "Saving…" : "Request"}
@@ -293,6 +312,29 @@ export function EventDetail({ eventId }) {
                 disabled={Boolean(rsvpAction)}
               >
                 {rsvpAction === "decline" ? "Canceling…" : "Cancel"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {loginRequiredDialogOpen && (
+        <div className="dialog-backdrop" role="presentation">
+          <div className="dialog-card" role="dialog" aria-modal="true" aria-labelledby="login-required-title">
+            <h4 id="login-required-title" className="dialog-title">You have to be logged in to request attendance</h4>
+            <div className="dialog-actions">
+              <button
+                type="button"
+                className="btn secondary"
+                onClick={() => setLoginRequiredDialogOpen(false)}
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={handleGoToRegister}
+              >
+                Register
               </button>
             </div>
           </div>

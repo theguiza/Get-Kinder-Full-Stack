@@ -280,7 +280,7 @@ app.use(express.static(path.join(__dirname, "public")));
 app.use("/internal/quiz", quizHooksRouter);
 app.use(arcsApiRouter);
 app.use("/api/webhooks", squareWebhooksApiRouter);
-app.use("/api/events", ensureAuthenticatedApi, eventsApiRouter);
+app.use("/api/events", eventsApiRouter);
 app.use("/api/invites", ensureAuthenticatedApi, invitesApiRouter);
 app.use("/api/me/events", ensureAuthenticatedApi, meEventsRouter);
 app.use("/api/me/contacts", ensureAuthenticatedApi, meContactsRouter);
@@ -2280,7 +2280,7 @@ const { getDashboard, getMorningPrompt, saveReflection, markDayDone, cancelChall
 
 // Dashboard - All dashboard routes
 app.get("/dashboard", ensureAuthenticated, getDashboard);
-app.get("/events", ensureAuthenticated, getEventsPage);
+app.get("/events", getEventsPage);
 app.get("/checkin/:eventId", ensureAuthenticated, (req, res) => {
   const assetTag = process.env.ASSET_TAG ?? Date.now().toString(36);
   const eventId = String(req.params.eventId || "").trim();
