@@ -184,6 +184,7 @@ const RECAPTCHA_SECRET_KEY =
   || process.env.RECAPTCHA_SECRET
   || process.env.GOOGLE_RECAPTCHA_SECRET_KEY
   || "";
+const RECAPTCHA_ENABLED = Boolean(RECAPTCHA_SITE_KEY && RECAPTCHA_SECRET_KEY);
 const AUTH_PAGE_PATHS = new Set(["/login", "/register", "/forgot-password", "/reset-password"]);
 const registerLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -605,22 +606,24 @@ app.post("/register", registerLimiter, async (req, res, next) => {
   const email = normalizeEmail(req.body?.email);
   const password = typeof req.body?.password === "string" ? req.body.password : "";
   try {
-    const recaptchaResponse = req.body["g-recaptcha-response"];
-    if (!recaptchaResponse) {
-      return res.status(400).render("register", {
-        title: "Sign Up",
-        recaptchaSiteKey: RECAPTCHA_SITE_KEY,
-        error: "Please complete the CAPTCHA.",
-      });
-    }
-    const recaptchaPassed = await verifyRecaptchaToken(recaptchaResponse, req.ip);
-    if (!recaptchaPassed) {
-      console.log("[RECAPTCHA BLOCKED]", email || req.body?.email || "");
-      return res.status(400).render("register", {
-        title: "Sign Up",
-        recaptchaSiteKey: RECAPTCHA_SITE_KEY,
-        error: "CAPTCHA verification failed. Please try again.",
-      });
+    if (RECAPTCHA_ENABLED) {
+      const recaptchaResponse = req.body["g-recaptcha-response"];
+      if (!recaptchaResponse) {
+        return res.status(400).render("register", {
+          title: "Sign Up",
+          recaptchaSiteKey: RECAPTCHA_SITE_KEY,
+          error: "Please complete the CAPTCHA.",
+        });
+      }
+      const recaptchaPassed = await verifyRecaptchaToken(recaptchaResponse, req.ip);
+      if (!recaptchaPassed) {
+        console.log("[RECAPTCHA BLOCKED]", email || req.body?.email || "");
+        return res.status(400).render("register", {
+          title: "Sign Up",
+          recaptchaSiteKey: RECAPTCHA_SITE_KEY,
+          error: "CAPTCHA verification failed. Please try again.",
+        });
+      }
     }
     if (!firstname.trim() || !lastname.trim() || !email || !password) {
       return res.status(400).send("Missing required fields.");
@@ -778,24 +781,26 @@ app.post("/forgot-password", forgotPasswordLimiter, async (req, res) => {
   const submittedEmail = normalizeEmail(req.body?.email);
 
   try {
-    const recaptchaResponse = req.body["g-recaptcha-response"];
-    if (!recaptchaResponse) {
-      return res.status(400).render("forgot-password", {
-        title: "Forgot Password",
-        recaptchaSiteKey: RECAPTCHA_SITE_KEY,
-        message: "Please complete the CAPTCHA.",
-        messageType: "error",
-      });
-    }
-    const recaptchaPassed = await verifyRecaptchaToken(recaptchaResponse, req.ip);
-    if (!recaptchaPassed) {
-      console.log("[RECAPTCHA BLOCKED]", submittedEmail || req.body?.email || "");
-      return res.status(400).render("forgot-password", {
-        title: "Forgot Password",
-        recaptchaSiteKey: RECAPTCHA_SITE_KEY,
-        message: "CAPTCHA verification failed. Please try again.",
-        messageType: "error",
-      });
+    if (RECAPTCHA_ENABLED) {
+      const recaptchaResponse = req.body["g-recaptcha-response"];
+      if (!recaptchaResponse) {
+        return res.status(400).render("forgot-password", {
+          title: "Forgot Password",
+          recaptchaSiteKey: RECAPTCHA_SITE_KEY,
+          message: "Please complete the CAPTCHA.",
+          messageType: "error",
+        });
+      }
+      const recaptchaPassed = await verifyRecaptchaToken(recaptchaResponse, req.ip);
+      if (!recaptchaPassed) {
+        console.log("[RECAPTCHA BLOCKED]", submittedEmail || req.body?.email || "");
+        return res.status(400).render("forgot-password", {
+          title: "Forgot Password",
+          recaptchaSiteKey: RECAPTCHA_SITE_KEY,
+          message: "CAPTCHA verification failed. Please try again.",
+          messageType: "error",
+        });
+      }
     }
     if (submittedEmail) {
       const { rows: [candidate] } = await pool.query(
