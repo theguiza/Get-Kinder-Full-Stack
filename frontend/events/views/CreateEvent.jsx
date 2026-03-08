@@ -548,6 +548,100 @@ export function CreateEvent({
     setLocationModalOpen(true);
   }
 
+  async function geocodeViaBackend(query) {
+    const response = await fetch(`/api/geo/geocode?q=${encodeURIComponent(query)}`);
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload?.ok || !payload?.data) {
+      const details = Array.isArray(payload?.details) ? payload.details.join(", ") : "";
+      const message = payload?.error || "Unable to find that location.";
+      throw new Error(details ? `${message} (${details})` : message);
+    }
+    const lat = Number(payload.data.lat);
+    const lng = Number(payload.data.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      throw new Error("Geocoder returned invalid coordinates.");
+    }
+    const label = typeof payload.data.label === "string" ? payload.data.label.trim() : "";
+    return {
+      lat,
+      lng,
+      label: label || `Near ${formatCoordinate(lat)}, ${formatCoordinate(lng)}`,
+      source: "address",
+      usedFallback: false,
+    };
+  }
+
+  async function geocodeViaPublicFallback(query) {
+    const candidateQueries = Array.from(new Set([
+      query,
+      `${query}, BC, Canada`,
+      `${query}, Canada`,
+    ]));
+
+    for (const candidate of candidateQueries) {
+      const searchUrl = new URL("https://nominatim.openstreetmap.org/search");
+      searchUrl.searchParams.set("q", candidate);
+      searchUrl.searchParams.set("format", "jsonv2");
+      searchUrl.searchParams.set("limit", "1");
+      searchUrl.searchParams.set("addressdetails", "1");
+      const response = await fetch(searchUrl.toString(), {
+        headers: { "Accept-Language": "en" },
+      });
+      if (!response.ok) continue;
+      const payload = await response.json().catch(() => []);
+      const first = Array.isArray(payload) ? payload[0] : null;
+      if (!first) continue;
+      const lat = Number(first.lat);
+      const lng = Number(first.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+      const label = typeof first.display_name === "string" ? first.display_name.trim() : "";
+      return {
+        lat,
+        lng,
+        label: label || `Near ${formatCoordinate(lat)}, ${formatCoordinate(lng)}`,
+        source: "address",
+        usedFallback: true,
+      };
+    }
+
+    const photonUrl = new URL("https://photon.komoot.io/api/");
+    photonUrl.searchParams.set("q", query);
+    photonUrl.searchParams.set("limit", "1");
+    photonUrl.searchParams.set("lang", "en");
+    const photonResponse = await fetch(photonUrl.toString(), {
+      headers: { "Accept-Language": "en" },
+    });
+    if (!photonResponse.ok) {
+      throw new Error("Backup geocoder unavailable.");
+    }
+    const photonPayload = await photonResponse.json().catch(() => ({}));
+    const feature = Array.isArray(photonPayload?.features) ? photonPayload.features[0] : null;
+    const coords = Array.isArray(feature?.geometry?.coordinates) ? feature.geometry.coordinates : null;
+    const lng = Number(coords?.[0]);
+    const lat = Number(coords?.[1]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      throw new Error("Backup geocoder returned invalid coordinates.");
+    }
+    const props = feature?.properties || {};
+    const parts = [props.name, props.district || props.suburb, props.city || props.town || props.village]
+      .map((part) => (typeof part === "string" ? part.trim() : ""))
+      .filter(Boolean);
+    const label = parts.length
+      ? parts.slice(0, 3).join(", ")
+      : `Near ${formatCoordinate(lat)}, ${formatCoordinate(lng)}`;
+    return { lat, lng, label, source: "address", usedFallback: true };
+  }
+
+  async function geocodeWithFallback(query) {
+    try {
+      return await geocodeViaBackend(query);
+    } catch (backendError) {
+      const backupResult = await geocodeViaPublicFallback(query).catch(() => null);
+      if (backupResult) return backupResult;
+      throw backendError;
+    }
+  }
+
   async function handleFindLocationOnMap() {
     const query = locationQuery.trim();
     if (query.length < 3) {
@@ -557,24 +651,14 @@ export function CreateEvent({
     setLocationFinding(true);
     setLocationMessage("Finding location…", "info");
     try {
-      const response = await fetch(`/api/geo/geocode?q=${encodeURIComponent(query)}`);
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload?.ok || !payload?.data) {
-        throw new Error(payload?.error || "Unable to find that location.");
-      }
-      const lat = Number(payload.data.lat);
-      const lng = Number(payload.data.lng);
-      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-        throw new Error("Geocoder returned invalid coordinates.");
-      }
-      const label = typeof payload.data.label === "string" ? payload.data.label.trim() : "";
-      openLocationPicker({
-        lat,
-        lng,
-        label: label || `Near ${formatCoordinate(lat)}, ${formatCoordinate(lng)}`,
-        source: "address",
-      });
-      setLocationMessage("Confirm your location on the map.", "success");
+      const result = await geocodeWithFallback(query);
+      openLocationPicker(result);
+      setLocationMessage(
+        result.usedFallback
+          ? "Backup geocoder used. Confirm your location on the map."
+          : "Confirm your location on the map.",
+        "success"
+      );
     } catch (error) {
       setLocationMessage(error?.message || "Unable to find that location.", "error");
     } finally {
