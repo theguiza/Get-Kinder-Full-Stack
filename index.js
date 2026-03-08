@@ -185,7 +185,14 @@ const RECAPTCHA_SECRET_KEY =
   || process.env.GOOGLE_RECAPTCHA_SECRET_KEY
   || "";
 const RECAPTCHA_ENABLED = Boolean(RECAPTCHA_SITE_KEY && RECAPTCHA_SECRET_KEY);
+const RECAPTCHA_ENFORCE = /^(1|true|yes)$/i.test(String(process.env.RECAPTCHA_ENFORCE || "").trim());
 const AUTH_PAGE_PATHS = new Set(["/login", "/register", "/forgot-password", "/reset-password"]);
+console.log("[recaptcha] config", {
+  enabled: RECAPTCHA_ENABLED,
+  enforce: RECAPTCHA_ENFORCE,
+  siteKeyLength: RECAPTCHA_SITE_KEY.length,
+  secretKeyLength: RECAPTCHA_SECRET_KEY.length,
+});
 const registerLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 5,
@@ -606,7 +613,7 @@ app.post("/register", registerLimiter, async (req, res, next) => {
   const email = normalizeEmail(req.body?.email);
   const password = typeof req.body?.password === "string" ? req.body.password : "";
   try {
-    if (RECAPTCHA_ENABLED) {
+    if (RECAPTCHA_ENABLED && RECAPTCHA_ENFORCE) {
       const recaptchaResponse = req.body["g-recaptcha-response"];
       if (!recaptchaResponse) {
         return res.status(400).render("register", {
@@ -781,7 +788,7 @@ app.post("/forgot-password", forgotPasswordLimiter, async (req, res) => {
   const submittedEmail = normalizeEmail(req.body?.email);
 
   try {
-    if (RECAPTCHA_ENABLED) {
+    if (RECAPTCHA_ENABLED && RECAPTCHA_ENFORCE) {
       const recaptchaResponse = req.body["g-recaptcha-response"];
       if (!recaptchaResponse) {
         return res.status(400).render("forgot-password", {
