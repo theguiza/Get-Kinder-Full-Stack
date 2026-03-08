@@ -171,9 +171,9 @@ const INVALID_VERIFICATION_LINK_MESSAGE = "Invalid verification link.";
 const EXPIRED_VERIFICATION_LINK_MESSAGE = "This verification link is invalid or has expired.";
 const EMAIL_VERIFIED_SUCCESS_MESSAGE = "Your email has been verified!";
 const VERIFY_PENDING_MESSAGE =
-  "Thanks for signing up! Please check your email and click the verification link to activate your account.";
+  "Thanks for signing up! We've sent a verification email to the address you provided. Please click the link in that email to activate your account. If you don't see it in your inbox within a few minutes, check your Spam or Junk folder and mark it as 'Not Junk'.";
 const VERIFY_REQUIRED_MESSAGE =
-  "Please verify your email before signing in. Check your inbox for the verification link.";
+  "Please verify your email before signing in. We sent a verification link when you signed up. If you can't find it, check your Spam or Junk folder.";
 const RECAPTCHA_SITE_KEY =
   process.env.RECAPTCHA_SITE_KEY
   || process.env.RECAPTCHA_SITEKEY
@@ -1866,6 +1866,41 @@ function normalizeGeoQuery(value) {
   return value.trim().slice(0, 200);
 }
 
+function buildGeoContactEmail() {
+  return normalizeOptionalString(process.env.GEO_CONTACT_EMAIL, 160) || "support@getkinder.ai";
+}
+
+function buildGeoUserAgent() {
+  const configured = normalizeOptionalString(process.env.GEO_USER_AGENT, 255);
+  const contactEmail = buildGeoContactEmail();
+  if (!configured) return `GetKinder.ai/1.0 (${contactEmail})`;
+  return /@/.test(configured) ? configured : `${configured} (${contactEmail})`;
+}
+
+function buildGeoHeaders() {
+  return {
+    "User-Agent": buildGeoUserAgent(),
+    "Accept-Language": "en"
+  };
+}
+
+function buildPhotonLabel(properties = {}, lat, lng) {
+  const parts = [
+    normalizeOptionalString(properties?.name, 120),
+    normalizeOptionalString(properties?.district, 120) || normalizeOptionalString(properties?.suburb, 120),
+    normalizeOptionalString(properties?.city, 120)
+      || normalizeOptionalString(properties?.town, 120)
+      || normalizeOptionalString(properties?.village, 120),
+  ].filter(Boolean);
+  const deduped = [];
+  for (const part of parts) {
+    const key = part.toLowerCase();
+    if (!deduped.some((item) => item.toLowerCase() === key)) deduped.push(part);
+  }
+  return normalizeOptionalString(deduped.slice(0, 3).join(", "), 255)
+    || `Near ${lat.toFixed(3)}, ${lng.toFixed(3)}`;
+}
+
 function hasExplicitGeoContext(query) {
   if (!query) return false;
   if (query.includes(",")) return true;
@@ -1907,9 +1942,7 @@ app.get('/api/geo/geocode', ensureAuthenticatedApi, async (req, res) => {
 
   try {
     const queryCandidates = buildGeocodeQueryCandidates(rawQuery);
-    let sawProviderError = false;
-    let sawOkResponse = false;
-    let sawInvalidCoordinates = false;
+    const providerErrors = [];
 
     for (const candidate of queryCandidates) {
       const searchUrl = new URL("https://nominatim.openstreetmap.org/search");
@@ -1917,19 +1950,17 @@ app.get('/api/geo/geocode', ensureAuthenticatedApi, async (req, res) => {
       searchUrl.searchParams.set("format", "jsonv2");
       searchUrl.searchParams.set("limit", "1");
       searchUrl.searchParams.set("addressdetails", "1");
+      searchUrl.searchParams.set("email", buildGeoContactEmail());
 
       const response = await fetchJsonWithTimeout(searchUrl, {
-        headers: {
-          "User-Agent": process.env.GEO_USER_AGENT || "GetKinder.ai/1.0 (profile geocoder)",
-          "Accept-Language": "en"
-        }
+        headers: buildGeoHeaders()
       });
       if (!response.ok) {
-        sawProviderError = true;
+        console.warn("GET /api/geo/geocode nominatim non-ok:", response.status, { candidate });
+        providerErrors.push(`nominatim:${response.status}`);
         continue;
       }
 
-      sawOkResponse = true;
       const payload = await response.json();
       const first = Array.isArray(payload) ? payload[0] : null;
       if (!first) {
@@ -1939,7 +1970,7 @@ app.get('/api/geo/geocode', ensureAuthenticatedApi, async (req, res) => {
       const lat = Number(first.lat);
       const lng = Number(first.lon);
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-        sawInvalidCoordinates = true;
+        providerErrors.push("nominatim:invalid_coordinates");
         continue;
       }
 
@@ -1956,12 +1987,41 @@ app.get('/api/geo/geocode', ensureAuthenticatedApi, async (req, res) => {
       });
     }
 
-    if (!sawOkResponse && sawProviderError) {
-      return res.status(502).json({ ok: false, error: "Geocoding provider error." });
+    // Fallback provider if Nominatim yields no result or rejects the request.
+    try {
+      const fallbackUrl = new URL("https://photon.komoot.io/api/");
+      fallbackUrl.searchParams.set("q", rawQuery);
+      fallbackUrl.searchParams.set("limit", "1");
+      fallbackUrl.searchParams.set("lang", "en");
+
+      const fallbackResponse = await fetchJsonWithTimeout(fallbackUrl, {
+        headers: { "Accept-Language": "en" }
+      });
+      if (fallbackResponse.ok) {
+        const payload = await fallbackResponse.json().catch(() => ({}));
+        const first = Array.isArray(payload?.features) ? payload.features[0] : null;
+        const coords = Array.isArray(first?.geometry?.coordinates) ? first.geometry.coordinates : null;
+        const lng = Number(coords?.[0]);
+        const lat = Number(coords?.[1]);
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          const label = buildPhotonLabel(first?.properties || {}, lat, lng);
+          return res.json({ ok: true, data: { lat, lng, label } });
+        }
+        providerErrors.push("photon:invalid_coordinates");
+      } else {
+        providerErrors.push(`photon:${fallbackResponse.status}`);
+      }
+    } catch (fallbackErr) {
+      providerErrors.push("photon:exception");
+      console.error("GET /api/geo/geocode photon fallback error:", fallbackErr);
     }
 
-    if (sawInvalidCoordinates) {
-      return res.status(502).json({ ok: false, error: "Geocoding provider returned invalid coordinates." });
+    if (providerErrors.length) {
+      return res.status(502).json({
+        ok: false,
+        error: "Geocoding provider error.",
+        details: providerErrors.slice(0, 5),
+      });
     }
 
     return res.status(404).json({ ok: false, error: "No matching location found." });
@@ -1984,12 +2044,10 @@ app.get('/api/geo/reverse', ensureAuthenticatedApi, async (req, res) => {
     reverseUrl.searchParams.set("lon", String(lng));
     reverseUrl.searchParams.set("format", "jsonv2");
     reverseUrl.searchParams.set("zoom", "16");
+    reverseUrl.searchParams.set("email", buildGeoContactEmail());
 
     const response = await fetchJsonWithTimeout(reverseUrl, {
-      headers: {
-        "User-Agent": process.env.GEO_USER_AGENT || "GetKinder.ai/1.0 (profile geocoder)",
-        "Accept-Language": "en"
-      }
+      headers: buildGeoHeaders()
     });
     if (!response.ok) {
       return res.status(502).json({ ok: false, error: "Reverse geocoding provider error." });
