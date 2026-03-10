@@ -1,5 +1,6 @@
 import pool from "../Backend/db/pg.js";
 import { isAdminRequest } from "../Backend/middleware/ensureAdmin.js";
+import { resolveOrgScope } from "../services/orgScopeService.js";
 
 const TAB_QUERY = {
   upcoming: {
@@ -144,29 +145,28 @@ function buildScopedPoolSlug(userId, poolSlug) {
   return `u${owner}${POOL_SCOPE_SEP}${poolSlug}`;
 }
 
-async function resolveUserId(req) {
-  if (req.user?.id) return String(req.user.id);
-  if (req.user?.user_id) return String(req.user.user_id);
-  if (!req.user?.email) throw new Error("Missing authenticated user email.");
-  const { rows } = await pool.query(
-    "SELECT id FROM public.userdata WHERE email=$1 LIMIT 1",
-    [req.user.email]
-  );
-  if (!rows[0]) throw new Error("User record not found.");
-  return String(rows[0].id);
+async function getEventScope(req) {
+  if (!req._meEventsScopePromise) {
+    req._meEventsScopePromise = resolveOrgScope(req, {
+      allowAdminPreview: true,
+      includeOrgMembersForOrgRep: true,
+    });
+  }
+  return req._meEventsScopePromise;
 }
 
 export async function listMyEvents(req, res) {
   try {
-    const userId = await resolveUserId(req);
+    const scope = await getEventScope(req);
+    const hostUserIds = scope.memberUserIds;
     const tab = (req.query.tab || "upcoming").toLowerCase();
     const limit = clampLimit(req.query.limit);
     const offset = clampOffset(req.query.offset);
     const poolFilter = normalizeFundingPoolSlug(req.query.funding_pool_slug, { allowAll: true });
     const fundingState = normalizeFundingState(req.query.funding_state);
     const { filter, order } = TAB_QUERY[tab] || TAB_QUERY.upcoming;
-    const whereParts = ["e.creator_user_id = $1"];
-    const sqlParams = [userId];
+    const whereParts = ["e.creator_user_id::text = ANY($1::text[])"];
+    const sqlParams = [hostUserIds];
 
     if (poolFilter !== ALL_POOLS_FILTER) {
       sqlParams.push(poolFilter);
@@ -311,15 +311,16 @@ export async function listMyEvents(req, res) {
 
 export async function getMyPoolSummary(req, res) {
   try {
-    const userId = await resolveUserId(req);
-    const scopedPrefix = `u${userId}${POOL_SCOPE_SEP}`;
+    const scope = await getEventScope(req);
+    const hostUserIds = scope.memberUserIds;
+    const scopedPrefixes = hostUserIds.map((id) => `u${id}${POOL_SCOPE_SEP}`);
     const includePoolSlugRaw = typeof req.query?.include_pool_slug === "string"
       ? req.query.include_pool_slug
       : "";
     const includePoolSlug = includePoolSlugRaw
       ? parseFundingPoolSlugForWrite(includePoolSlugRaw)
       : null;
-    const sqlParams = [userId, scopedPrefix];
+    const sqlParams = [hostUserIds, scopedPrefixes];
     const includeSlugUnion = includePoolSlug
       ? `\n            UNION\n            SELECT $${sqlParams.push(includePoolSlug)}::text AS funding_pool_slug`
       : "";
@@ -335,7 +336,7 @@ export async function getMyPoolSummary(req, res) {
               COALESCE(e.reward_pool_kind, 0) AS reward_pool_kind,
               e.status
             FROM events e
-            WHERE e.creator_user_id = $1
+            WHERE e.creator_user_id::text = ANY($1::text[])
           ),
           event_rollup AS (
             SELECT
@@ -363,17 +364,19 @@ export async function getMyPoolSummary(req, res) {
           pool_ledger AS (
             SELECT
               CASE
-                WHEN LEFT(fp.slug, LENGTH($2)) = $2 THEN SUBSTRING(fp.slug FROM LENGTH($2) + 1)
+                WHEN pref.prefix IS NOT NULL THEN SUBSTRING(fp.slug FROM LENGTH(pref.prefix) + 1)
                 ELSE fp.slug
               END AS funding_pool_slug,
               COALESCE(SUM(CASE WHEN pt.direction = 'credit' THEN pt.amount_credits ELSE 0 END), 0) AS pool_credits_in_total,
               COALESCE(SUM(CASE WHEN pt.direction = 'debit' THEN pt.amount_credits ELSE 0 END), 0) AS pool_credits_out_total
             FROM funding_pools fp
+            JOIN UNNEST($2::text[]) pref(prefix)
+              ON LEFT(fp.slug, LENGTH(pref.prefix)) = pref.prefix
             LEFT JOIN pool_transactions pt ON pt.pool_id = fp.id
-            WHERE LEFT(fp.slug, LENGTH($2)) = $2
+            WHERE pref.prefix IS NOT NULL
             GROUP BY
               CASE
-                WHEN LEFT(fp.slug, LENGTH($2)) = $2 THEN SUBSTRING(fp.slug FROM LENGTH($2) + 1)
+                WHEN pref.prefix IS NOT NULL THEN SUBSTRING(fp.slug FROM LENGTH(pref.prefix) + 1)
                 ELSE fp.slug
               END
           ),
@@ -470,8 +473,9 @@ export async function getMyPoolSummary(req, res) {
 
 export async function getMyPoolTransactions(req, res) {
   try {
-    const userId = await resolveUserId(req);
-    const scopedPrefix = `u${userId}${POOL_SCOPE_SEP}`;
+    const scope = await getEventScope(req);
+    const hostUserIds = scope.memberUserIds;
+    const scopedPrefixes = hostUserIds.map((id) => `u${id}${POOL_SCOPE_SEP}`);
     const poolFilter = normalizeFundingPoolSlug(
       req.query.pool_slug ?? req.query.funding_pool_slug,
       { allowAll: true }
@@ -480,12 +484,12 @@ export async function getMyPoolTransactions(req, res) {
     const limit = clampLimit(req.query.limit ?? 25);
     const offset = clampOffset(req.query.offset);
 
-    const whereParts = ["LEFT(fp.slug, LENGTH($1)) = $1"];
-    const sqlParams = [scopedPrefix];
+    const whereParts = ["pref.prefix IS NOT NULL"];
+    const sqlParams = [scopedPrefixes];
 
     if (poolFilter !== ALL_POOLS_FILTER) {
       sqlParams.push(poolFilter);
-      whereParts.push(`SUBSTRING(fp.slug FROM LENGTH($1) + 1) = $${sqlParams.length}`);
+      whereParts.push(`SUBSTRING(fp.slug FROM LENGTH(pref.prefix) + 1) = $${sqlParams.length}`);
     }
     if (reasonFilter !== "all") {
       sqlParams.push(reasonFilter);
@@ -503,7 +507,7 @@ export async function getMyPoolTransactions(req, res) {
         `
           SELECT
             pt.id,
-            SUBSTRING(fp.slug FROM LENGTH($1) + 1) AS funding_pool_slug,
+            SUBSTRING(fp.slug FROM LENGTH(pref.prefix) + 1) AS funding_pool_slug,
             pt.direction,
             pt.amount_credits,
             pt.reason,
@@ -517,6 +521,8 @@ export async function getMyPoolTransactions(req, res) {
             d.currency AS donation_currency
           FROM pool_transactions pt
           JOIN funding_pools fp ON fp.id = pt.pool_id
+          JOIN UNNEST($1::text[]) pref(prefix)
+            ON LEFT(fp.slug, LENGTH(pref.prefix)) = pref.prefix
           LEFT JOIN events e ON e.id = pt.event_id
           LEFT JOIN donations d ON d.id = pt.donation_id
           WHERE ${whereParts.join("\n            AND ")}
@@ -561,13 +567,14 @@ export async function getMyPoolTransactions(req, res) {
             SELECT DISTINCT
               COALESCE(NULLIF(LOWER(BTRIM(e.funding_pool_slug)), ''), 'general') AS funding_pool_slug
             FROM events e
-            WHERE e.creator_user_id = $1
+            WHERE e.creator_user_id::text = ANY($1::text[])
           ),
           scoped_pools AS (
             SELECT DISTINCT
-              SUBSTRING(fp.slug FROM LENGTH($2) + 1) AS funding_pool_slug
+              SUBSTRING(fp.slug FROM LENGTH(pref.prefix) + 1) AS funding_pool_slug
             FROM funding_pools fp
-            WHERE LEFT(fp.slug, LENGTH($2)) = $2
+            JOIN UNNEST($2::text[]) pref(prefix)
+              ON LEFT(fp.slug, LENGTH(pref.prefix)) = pref.prefix
           )
           SELECT DISTINCT funding_pool_slug
           FROM (
@@ -578,7 +585,7 @@ export async function getMyPoolTransactions(req, res) {
           WHERE funding_pool_slug IS NOT NULL AND funding_pool_slug <> ''
           ORDER BY funding_pool_slug ASC
         `,
-        [userId, scopedPrefix]
+        [hostUserIds, scopedPrefixes]
       );
       const unique = Array.from(
         new Set(
@@ -629,7 +636,8 @@ export async function topUpMyPool(req, res) {
 
   const client = await pool.connect();
   try {
-    const userId = await resolveUserId(req);
+    const scope = await getEventScope(req);
+    const userId = scope.actorUserId;
     const poolSlug = parseFundingPoolSlugForWrite(req.body?.funding_pool_slug ?? req.body?.pool_slug);
     const amountCredits = parseTopupAmount(req.body?.amount_credits);
     const source = normalizeTopupSource(req.body?.source);
@@ -740,7 +748,8 @@ export async function topUpMyPool(req, res) {
 
 export async function cancelEvent(req, res) {
   try {
-    const userId = await resolveUserId(req);
+    const scope = await getEventScope(req);
+    const hostUserIds = scope.memberUserIds;
     const eventId = req.params.id;
     let eventRow;
     try {
@@ -763,7 +772,7 @@ export async function cancelEvent(req, res) {
     if (!eventRow) {
       return res.status(404).json({ ok: false, error: "Event not found" });
     }
-    if (String(eventRow.creator_user_id) !== userId) {
+    if (!hostUserIds.includes(String(eventRow.creator_user_id))) {
       return res.status(403).json({ ok: false, error: "Forbidden" });
     }
     if (eventRow.status !== "published") {
@@ -783,7 +792,8 @@ export async function cancelEvent(req, res) {
 
 export async function completeEvent(req, res) {
   try {
-    const userId = await resolveUserId(req);
+    const scope = await getEventScope(req);
+    const hostUserIds = scope.memberUserIds;
     const eventId = req.params.id;
 
     let eventRow;
@@ -807,7 +817,7 @@ export async function completeEvent(req, res) {
     if (!eventRow) {
       return res.status(404).json({ ok: false, error: "Event not found" });
     }
-    if (String(eventRow.creator_user_id) !== userId) {
+    if (!hostUserIds.includes(String(eventRow.creator_user_id))) {
       return res.status(403).json({ ok: false, error: "Forbidden" });
     }
     if (eventRow.status === "cancelled") {
@@ -827,7 +837,8 @@ export async function completeEvent(req, res) {
 
 export async function deleteDraftEvent(req, res) {
   try {
-    const userId = await resolveUserId(req);
+    const scope = await getEventScope(req);
+    const hostUserIds = scope.memberUserIds;
     const eventId = req.params.id;
     let eventRow;
     try {
@@ -850,7 +861,7 @@ export async function deleteDraftEvent(req, res) {
     if (!eventRow) {
       return res.status(404).json({ ok: false, error: "Event not found" });
     }
-    if (String(eventRow.creator_user_id) !== userId) {
+    if (!hostUserIds.includes(String(eventRow.creator_user_id))) {
       return res.status(403).json({ ok: false, error: "Forbidden" });
     }
     if (eventRow.status !== "draft") {

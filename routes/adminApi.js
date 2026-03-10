@@ -2,6 +2,7 @@ import express from "express";
 import pool from "../Backend/db/pg.js";
 import { ensureAdminApi } from "../Backend/middleware/ensureAdmin.js";
 import { approvePendingCreditRequest, rejectPendingCreditRequest } from "../services/earnShiftFundingService.js";
+import { hasUserOrgMembershipTable } from "../services/orgScopeService.js";
 
 const adminApiRouter = express.Router();
 const CSRF_HEADER_NAME = "X-CSRF-Token";
@@ -75,6 +76,50 @@ function buildScopedPoolPrefix(ownerUserId) {
   const id = parsePositiveInt(ownerUserId);
   if (!id) return null;
   return `u${id}__`;
+}
+
+async function syncLegacyOrgAccessForUser(client, userId) {
+  const numericUserId = parsePositiveInt(userId);
+  if (!numericUserId) return;
+
+  if (!(await hasUserOrgMembershipTable())) {
+    return;
+  }
+
+  const { rows: [membership] = [] } = await client.query(
+    `
+      SELECT org_id
+      FROM public.user_org_memberships
+      WHERE user_id = $1
+        AND COALESCE(is_active, true) = true
+      ORDER BY org_id ASC
+      LIMIT 1
+    `,
+    [numericUserId]
+  );
+
+  if (membership?.org_id != null) {
+    await client.query(
+      `
+        UPDATE public.userdata
+        SET org_rep = true,
+            org_id = $1
+        WHERE id = $2
+      `,
+      [Number(membership.org_id), numericUserId]
+    );
+    return;
+  }
+
+  await client.query(
+    `
+      UPDATE public.userdata
+      SET org_rep = false,
+          org_id = NULL
+      WHERE id = $1
+    `,
+    [numericUserId]
+  );
 }
 
 async function insertOrgPoolTopupTx({ client, poolId, amount, requestedReason, notes }) {
@@ -635,7 +680,7 @@ adminApiRouter.patch("/organizations/:id/status", async (req, res) => {
       updated = row;
     }
 
-    if (status === "suspended" && org.rep_user_id != null) {
+    if (status === "suspended" && org.rep_user_id != null && !(await hasUserOrgMembershipTable())) {
       await client.query(
         "UPDATE userdata SET org_rep = false WHERE id = $1",
         [org.rep_user_id]
@@ -653,6 +698,140 @@ adminApiRouter.patch("/organizations/:id/status", async (req, res) => {
   }
 });
 
+adminApiRouter.post("/organizations/:id/admins", async (req, res) => {
+  if (!requireCsrf(req, res)) return;
+
+  const orgId = parsePositiveInt(req.params.id);
+  const email = String(req.body?.email || "").trim().toLowerCase();
+  if (!orgId || !email || !email.includes("@")) {
+    return res.status(400).json({ error: "invalid_request" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const membershipEnabled = await hasUserOrgMembershipTable();
+    const addedByUserId = parsePositiveInt(req.user?.id || req.user?.user_id);
+
+    const { rows: [org] = [] } = await client.query(
+      `
+        SELECT id, name, rep_user_id
+        FROM organizations
+        WHERE id = $1
+        FOR UPDATE
+      `,
+      [orgId]
+    );
+    if (!org) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "organization_not_found" });
+    }
+
+    const { rows: [member] = [] } = await client.query(
+      `
+        SELECT id, email, firstname, lastname, org_id, org_rep
+        FROM userdata
+        WHERE LOWER(TRIM(email)) = $1
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [email]
+    );
+    if (!member) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "user_not_found" });
+    }
+
+    let alreadyAssigned = false;
+    if (membershipEnabled) {
+      const { rows: [existingMembership] = [] } = await client.query(
+        `
+          SELECT id, COALESCE(is_active, true) AS is_active
+          FROM public.user_org_memberships
+          WHERE user_id = $1
+            AND org_id = $2
+          LIMIT 1
+          FOR UPDATE
+        `,
+        [member.id, orgId]
+      );
+      alreadyAssigned = Boolean(existingMembership) && existingMembership.is_active !== false;
+
+      await client.query(
+        `
+          INSERT INTO public.user_org_memberships
+            (user_id, org_id, role, is_active, added_by_user_id)
+          VALUES
+            ($1, $2, 'admin', true, $3)
+          ON CONFLICT (user_id, org_id)
+          DO UPDATE SET
+            role = 'admin',
+            is_active = true,
+            added_by_user_id = COALESCE(EXCLUDED.added_by_user_id, public.user_org_memberships.added_by_user_id)
+        `,
+        [member.id, orgId, addedByUserId]
+      );
+
+      await client.query(
+        `
+          UPDATE public.userdata
+          SET org_rep = true,
+              org_id = CASE WHEN org_id IS NULL THEN $1 ELSE org_id END
+          WHERE id = $2
+        `,
+        [orgId, member.id]
+      );
+    } else {
+      const currentOrgId = member.org_id != null ? Number(member.org_id) : null;
+      alreadyAssigned = currentOrgId === Number(orgId) && member.org_rep === true;
+      await client.query(
+        `
+          UPDATE public.userdata
+          SET org_rep = true,
+              org_id = $1
+          WHERE id = $2
+        `,
+        [orgId, member.id]
+      );
+    }
+
+    if (org.rep_user_id == null) {
+      await client.query(
+        `
+          UPDATE organizations
+          SET rep_user_id = $1
+          WHERE id = $2
+        `,
+      [member.id, orgId]
+      );
+    }
+
+    await client.query("COMMIT");
+
+    return res.json({
+      success: true,
+      already_assigned: alreadyAssigned,
+      membership_mode: membershipEnabled ? "multi_org" : "legacy_single_org",
+      organization: {
+        id: Number(org.id),
+        name: org.name || "",
+      },
+      member: {
+        id: Number(member.id),
+        email: member.email || "",
+        firstname: member.firstname || "",
+        lastname: member.lastname || "",
+      },
+    });
+  } catch (err) {
+    try { await client.query("ROLLBACK"); } catch (_) {}
+    console.error("POST /api/admin/organizations/:id/admins error:", err);
+    return res.status(500).json({ error: "server_error" });
+  } finally {
+    client.release();
+  }
+});
+
 adminApiRouter.delete("/organizations/:id", async (req, res) => {
   if (!requireCsrf(req, res)) return;
   const orgId = parsePositiveInt(req.params.id);
@@ -661,6 +840,7 @@ adminApiRouter.delete("/organizations/:id", async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    const membershipEnabled = await hasUserOrgMembershipTable();
     const { rows: [org] = [] } = await client.query(
       "SELECT id, rep_user_id FROM organizations WHERE id = $1 FOR UPDATE",
       [orgId]
@@ -670,24 +850,52 @@ adminApiRouter.delete("/organizations/:id", async (req, res) => {
       return res.status(404).json({ error: "not_found" });
     }
 
-    if (org.rep_user_id != null) {
+    const affectedUserIds = new Set();
+    if (membershipEnabled) {
+      const { rows } = await client.query(
+        `
+          SELECT user_id
+          FROM public.user_org_memberships
+          WHERE org_id = $1
+          FOR UPDATE
+        `,
+        [orgId]
+      );
+      rows.forEach((row) => {
+        const numericUserId = parsePositiveInt(row?.user_id);
+        if (numericUserId) affectedUserIds.add(numericUserId);
+      });
+    }
+
+    const numericRepUserId = parsePositiveInt(org.rep_user_id);
+    if (numericRepUserId) {
+      affectedUserIds.add(numericRepUserId);
+      await client.query(
+        "DELETE FROM events WHERE creator_user_id = $1",
+        [numericRepUserId]
+      );
+    }
+
+    if (!membershipEnabled && numericRepUserId) {
       await client.query(
         `
-          UPDATE userdata
+          UPDATE public.userdata
           SET org_rep = false,
               org_id = NULL
           WHERE id = $1
         `,
-        [org.rep_user_id]
-      );
-
-      await client.query(
-        "DELETE FROM events WHERE creator_user_id = $1",
-        [org.rep_user_id]
+        [numericRepUserId]
       );
     }
 
     await client.query("DELETE FROM organizations WHERE id = $1", [orgId]);
+
+    if (membershipEnabled && affectedUserIds.size) {
+      for (const userId of affectedUserIds) {
+        await syncLegacyOrgAccessForUser(client, userId);
+      }
+    }
+
     await client.query("COMMIT");
     return res.json({ success: true });
   } catch (err) {

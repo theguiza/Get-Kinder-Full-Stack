@@ -16,7 +16,12 @@
 
   <div class="org-portal-nav-spacer" aria-hidden="true"></div>
 
-  <main class="org-portal-main container">
+  <%
+    const activeOrgStatusValue = String(activeOrgStatus || "").trim().toLowerCase();
+    const orgIsSuspended = activeOrgStatusValue === "suspended";
+  %>
+
+  <main class="org-portal-main container <%= orgIsSuspended ? 'org-portal-content-ghosted' : '' %>">
     <%
       const fullName = `${user?.firstname || ""} ${user?.lastname || ""}`.trim() || user?.name || "Organization Lead";
       const resolvedOrganizationName =
@@ -32,6 +37,16 @@
         ? Number(orgRatingData.value)
         : 5;
       const orgRatingPercent = Math.max(0, Math.min(100, (orgRatingValue / 5) * 100));
+      const normalizedActiveOrgId = Number.isInteger(Number(activeOrgId)) ? Number(activeOrgId) : null;
+      const membershipOptions = Array.isArray(orgMemberships)
+        ? orgMemberships
+            .map((entry) => ({
+              orgId: Number(entry?.orgId),
+              name: String(entry?.name || "").trim(),
+            }))
+            .filter((entry) => Number.isInteger(entry.orgId) && entry.orgId > 0)
+        : [];
+      const canSwitchOrganizations = membershipOptions.length > 1;
     %>
     <section class="org-hero mb-3" aria-label="Organization profile hero">
       <div class="org-hero-card">
@@ -47,19 +62,43 @@
           <div class="col-12 col-md-5 text-center text-md-start">
             <div class="org-hero-org"><%= resolvedOrganizationName %></div>
             <h1 class="org-hero-name"><%= fullName %></h1>
-            <div
-              class="org-hero-rating"
-              role="img"
-              aria-label="Organization rating <%= orgRatingValue.toFixed(1) %> out of 5 stars from <%= orgRatingCount %> ratings"
-            >
-              <span class="org-hero-rating-stars" aria-hidden="true">
-                <span class="org-hero-rating-stars-base">&#9733;&#9733;&#9733;&#9733;&#9733;</span>
-                <span class="org-hero-rating-stars-fill" style="width:<%= orgRatingPercent.toFixed(1) %>%;">&#9733;&#9733;&#9733;&#9733;&#9733;</span>
-              </span>
-              <span class="org-hero-rating-text">
-                <%= `${orgRatingValue.toFixed(1)} (${orgRatingCount})` %>
-              </span>
+            <div class="org-hero-rating-stack">
+              <div
+                class="org-hero-rating"
+                role="img"
+                aria-label="Organization rating <%= orgRatingValue.toFixed(1) %> out of 5 stars from <%= orgRatingCount %> ratings"
+              >
+                <span class="org-hero-rating-stars" aria-hidden="true">
+                  <span class="org-hero-rating-stars-base">&#9733;&#9733;&#9733;&#9733;&#9733;</span>
+                  <span class="org-hero-rating-stars-fill" style="width:<%= orgRatingPercent.toFixed(1) %>%;">&#9733;&#9733;&#9733;&#9733;&#9733;</span>
+                </span>
+                <span class="org-hero-rating-text">
+                  <%= `${orgRatingValue.toFixed(1)} (${orgRatingCount})` %>
+                </span>
+              </div>
+              <div class="org-admin-cta-wrap">
+                <button type="button" id="org-request-admin-btn" class="btn btn-sm org-btn-ink">
+                  Add Admin
+                </button>
+              </div>
             </div>
+            <% if (canSwitchOrganizations) { %>
+              <div class="mt-3">
+                <label for="org-active-switch" class="form-label mb-1 fw-semibold small text-uppercase text-muted">
+                  Active Organization
+                </label>
+                <select id="org-active-switch" class="form-select form-select-sm">
+                  <% membershipOptions.forEach((option) => { %>
+                    <option
+                      value="<%= option.orgId %>"
+                      <%= option.orgId === normalizedActiveOrgId ? "selected" : "" %>
+                    >
+                      <%= option.name || `Organization #${option.orgId}` %>
+                    </option>
+                  <% }) %>
+                </select>
+              </div>
+            <% } %>
           </div>
           <div class="col-12 col-md-4">
             <div id="org-portal-kpis"></div>
@@ -73,7 +112,50 @@
     </section>
   </main>
 
-  <section id="footer" class="gradient-background">
+  <% if (orgIsSuspended) { %>
+    <div class="org-suspended-overlay" role="dialog" aria-modal="true" aria-labelledby="org-suspended-title">
+      <div class="org-suspended-dialog">
+        <h2 id="org-suspended-title">Organization Access Suspended</h2>
+        <p class="mb-0">
+          You have been suspended please send a message to
+          <a href="mailto:kai@getkinder.ai">kai@getkinder.ai</a>
+          to request being unsuspended.
+        </p>
+      </div>
+    </div>
+  <% } %>
+
+  <div
+    id="org-admin-request-modal"
+    class="org-admin-request-backdrop"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="org-admin-request-title"
+    style="display:none;"
+  >
+    <div class="org-admin-request-card shadow">
+      <div class="org-admin-request-header">
+        <div class="org-admin-request-title-wrap">
+          <span class="org-admin-request-mark" aria-hidden="true">k</span>
+          <h5 id="org-admin-request-title" class="mb-0">Add Admin</h5>
+        </div>
+        <button type="button" id="org-admin-request-close-x" class="org-admin-request-close-x" aria-label="Close">
+          &times;
+        </button>
+      </div>
+      <div class="org-admin-request-body">
+        To request another admin for your organization send a request to
+        <a href="mailto:kai@getkinder.ai">kai@getkinder.ai</a>
+      </div>
+      <div class="org-admin-request-footer">
+        <button type="button" id="org-admin-request-close" class="btn btn-sm org-admin-request-close-btn">
+          Close
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <section id="footer" class="gradient-background <%= orgIsSuspended ? 'org-portal-content-ghosted' : '' %>">
   <div class="container">
     <footer class="row align-items-center py-5 mt-5 border-top text-body-secondary">
       <!-- 1) Logo: centered on xs, left on md+ -->
@@ -128,12 +210,71 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
   <script src="/js/bundles/entry.js?<%= assetTag %>"></script>
   <script>
-    window.renderOrgPortal("#org-portal-root", {
-      csrfToken: "<%= csrfToken %>",
-      userId: "<%= user.id %>",
-      orgName: <%- JSON.stringify(resolvedOrganizationName) %>
-    });
-    window.renderKpiStrip("#org-portal-kpis", { csrfToken: "<%= csrfToken %>" });
+    const orgPortalSuspended = <%= orgIsSuspended ? "true" : "false" %>;
+
+    (function () {
+      const orgSwitch = document.getElementById("org-active-switch");
+      if (!orgSwitch) return;
+
+      const csrfToken = <%- JSON.stringify(csrfToken || "") %>;
+      orgSwitch.addEventListener("change", async () => {
+        const nextOrgId = String(orgSwitch.value || "").trim();
+        if (!/^\d+$/.test(nextOrgId)) return;
+        orgSwitch.disabled = true;
+        try {
+          const response = await fetch("/api/org/active-org", {
+            method: "POST",
+            credentials: "include",
+            headers: {
+              "Content-Type": "application/json",
+              "X-CSRF-Token": csrfToken,
+            },
+            body: JSON.stringify({ org_id: Number(nextOrgId) }),
+          });
+          if (!response.ok) throw new Error("switch_failed");
+          window.location.reload();
+        } catch (_) {
+          orgSwitch.disabled = false;
+          window.alert("Could not switch organizations. Please try again.");
+        }
+      });
+    })();
+
+    (function () {
+      const requestAdminButton = document.getElementById("org-request-admin-btn");
+      const requestAdminModal = document.getElementById("org-admin-request-modal");
+      const requestAdminClose = document.getElementById("org-admin-request-close");
+      const requestAdminCloseX = document.getElementById("org-admin-request-close-x");
+      if (!requestAdminButton || !requestAdminModal || !requestAdminClose || !requestAdminCloseX) return;
+
+      const openModal = () => {
+        requestAdminModal.style.display = "flex";
+      };
+      const closeModal = () => {
+        requestAdminModal.style.display = "none";
+      };
+
+      requestAdminButton.addEventListener("click", openModal);
+      requestAdminClose.addEventListener("click", closeModal);
+      requestAdminCloseX.addEventListener("click", closeModal);
+      requestAdminModal.addEventListener("click", (event) => {
+        if (event.target === requestAdminModal) closeModal();
+      });
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && requestAdminModal.style.display !== "none") {
+          closeModal();
+        }
+      });
+    })();
+
+    if (!orgPortalSuspended) {
+      window.renderOrgPortal("#org-portal-root", {
+        csrfToken: "<%= csrfToken %>",
+        userId: "<%= user.id %>",
+        orgName: <%- JSON.stringify(resolvedOrganizationName) %>
+      });
+      window.renderKpiStrip("#org-portal-kpis", { csrfToken: "<%= csrfToken %>" });
+    }
   </script>
 </body>
 </html>

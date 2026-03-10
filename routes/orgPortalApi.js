@@ -1,51 +1,43 @@
 import express from "express";
 import pool from "../Backend/db/pg.js";
 import { sendNudgeEmail } from "../kindnessEmailer.js";
+import { resolveOrgScope, setSessionActiveOrg } from "../services/orgScopeService.js";
 
 const orgPortalRouter = express.Router();
 const CSRF_HEADER_NAME = "X-CSRF-Token";
 const POOL_SCOPE_SEP = "__";
 
+async function getPortalScope(req) {
+  if (!req._orgPortalScopePromise) {
+    req._orgPortalScopePromise = resolveOrgScope(req, {
+      allowAdminPreview: true,
+      includeOrgMembersForOrgRep: true,
+    });
+  }
+  return req._orgPortalScopePromise;
+}
+
 async function resolveUserId(req) {
-  if (req.user?.id) return String(req.user.id);
-  if (req.user?.user_id) return String(req.user.user_id);
-  if (!req.user?.email) throw new Error("Missing authenticated user email.");
-  const { rows } = await pool.query(
-    "SELECT id FROM public.userdata WHERE email=$1 LIMIT 1",
-    [req.user.email]
-  );
-  if (!rows[0]) throw new Error("User record not found.");
-  return String(rows[0].id);
+  const scope = await getPortalScope(req);
+  return scope.actorUserId;
 }
 
 async function resolveUserIdCandidates(req) {
-  const candidateSet = new Set();
+  const scope = await getPortalScope(req);
+  return scope.memberUserIds;
+}
 
-  if (req.user?.id !== undefined && req.user?.id !== null) {
-    const raw = String(req.user.id).trim();
-    if (raw) candidateSet.add(raw);
-  }
-
-  if (req.user?.user_id !== undefined && req.user?.user_id !== null) {
-    const raw = String(req.user.user_id).trim();
-    if (raw) candidateSet.add(raw);
-  }
-
-  if (req.user?.email) {
-    const { rows } = await pool.query(
-      "SELECT id FROM public.userdata WHERE email=$1 LIMIT 1",
-      [req.user.email]
-    );
-    if (rows[0]?.id !== undefined && rows[0]?.id !== null) {
-      candidateSet.add(String(rows[0].id));
-    }
-  }
-
-  const candidates = [...candidateSet].filter(Boolean);
-  if (!candidates.length) {
-    throw new Error("Missing authenticated user identifier.");
-  }
-  return candidates;
+function mapMembershipRows(scope) {
+  return Array.isArray(scope?.memberships)
+    ? scope.memberships
+        .map((entry) => ({
+          org_id: Number(entry?.orgId),
+          org_name: entry?.org_name || "",
+          org_status: entry?.org_status || "",
+          role: entry?.role || "admin",
+        }))
+        .filter((entry) => Number.isInteger(entry.org_id) && entry.org_id > 0)
+    : [];
 }
 
 function requireCsrf(req, res) {
@@ -57,6 +49,73 @@ function requireCsrf(req, res) {
   }
   return true;
 }
+
+orgPortalRouter.use(async (req, res, next) => {
+  try {
+    const scope = await getPortalScope(req);
+    if (!scope?.hasOrgRepAccess || !scope?.orgId) {
+      return res.status(403).json({ error: "forbidden" });
+    }
+
+    const activeMembership = Array.isArray(scope?.memberships)
+      ? scope.memberships.find((entry) => Number(entry?.orgId) === Number(scope.orgId))
+      : null;
+    const activeOrgStatus = String(activeMembership?.org_status || "").trim().toLowerCase();
+    const isSuspendedOrg = activeOrgStatus === "suspended";
+    const allowDuringSuspension =
+      (req.method === "GET" && req.path === "/context") ||
+      (req.method === "POST" && req.path === "/active-org");
+    if (isSuspendedOrg && !allowDuringSuspension) {
+      return res.status(403).json({
+        error: "org_suspended",
+        message: "Organization access is suspended. Please contact kai@getkinder.ai.",
+      });
+    }
+
+    return next();
+  } catch (error) {
+    console.error("[orgPortal] scope middleware error:", error);
+    return res.status(500).json({ error: "server_error" });
+  }
+});
+
+orgPortalRouter.get("/context", async (req, res) => {
+  try {
+    const scope = await getPortalScope(req);
+    return res.json({
+      ok: true,
+      active_org_id: scope.orgId != null ? Number(scope.orgId) : null,
+      memberships: mapMembershipRows(scope),
+      preview_user_id: scope.previewUserId || null,
+    });
+  } catch (error) {
+    console.error("GET /api/org/context error:", error);
+    return res.status(500).json({ error: "server_error" });
+  }
+});
+
+orgPortalRouter.post("/active-org", async (req, res) => {
+  if (!requireCsrf(req, res)) return;
+  try {
+    const orgIdRaw = req.body?.org_id ?? req.body?.orgId;
+    const switched = await setSessionActiveOrg(req, orgIdRaw, { allowAdminPreview: true });
+    if (!switched?.ok) {
+      const status = switched?.error === "invalid_org_id" ? 400 : 403;
+      return res.status(status).json({ error: switched?.error || "forbidden" });
+    }
+
+    delete req._orgPortalScopePromise;
+    const scope = await getPortalScope(req);
+    return res.json({
+      ok: true,
+      active_org_id: scope.orgId != null ? Number(scope.orgId) : null,
+      memberships: mapMembershipRows(scope),
+    });
+  } catch (error) {
+    console.error("POST /api/org/active-org error:", error);
+    return res.status(500).json({ error: "server_error" });
+  }
+});
 
 const ZERO_PENDING_ACTION_COUNTS = Object.freeze({
   pending_join_count: 0,
@@ -294,7 +353,7 @@ async function ensureHostOwnsEvent(eventId, hostUserId) {
 
 orgPortalRouter.get("/comms/queue", async (req, res) => {
   try {
-    const coordinatorUserId = await resolveUserId(req);
+    const coordinatorUserIds = await resolveUserIdCandidates(req);
     const outboxColumns = await getNudgesOutboxColumnSet();
     const ownerColumn = pickFirstColumn(outboxColumns, [
       "owner_user_id",
@@ -306,10 +365,10 @@ orgPortalRouter.get("/comms/queue", async (req, res) => {
     const outboxEventExpr = buildOutboxEventExpr(outboxColumns, "n");
     const outboxTypeExpr = buildOutboxTypeExpr(outboxColumns, "n");
 
-    const ownerExistsFilter = ownerColumn ? `AND n.${ownerColumn}::text = $1::text` : "";
+    const ownerExistsFilter = ownerColumn ? `AND n.${ownerColumn}::text = ANY($1::text[])` : "";
     const ownerHistoryFilter = ownerColumn
-      ? `n.${ownerColumn}::text = $1::text`
-      : `e.creator_user_id::text = $1::text`;
+      ? `n.${ownerColumn}::text = ANY($1::text[])`
+      : `e.creator_user_id::text = ANY($1::text[])`;
     const statusFilter = outboxColumns.has("status") ? "AND COALESCE(n.status, 'sent') <> 'failed'" : "";
     const sentAtExpr = sentAtColumn ? `n.${sentAtColumn}` : "NOW()";
     const subjectExpr = outboxColumns.has("subject") ? "n.subject" : "NULL";
@@ -331,7 +390,7 @@ orgPortalRouter.get("/comms/queue", async (req, res) => {
         JOIN event_rsvps r
           ON r.event_id = e.id
          AND r.status = 'accepted'
-        WHERE e.creator_user_id = $1
+        WHERE e.creator_user_id::text = ANY($1::text[])
           AND e.end_at < NOW()
           AND NOT EXISTS (
             SELECT 1
@@ -344,7 +403,7 @@ orgPortalRouter.get("/comms/queue", async (req, res) => {
         GROUP BY e.id, e.title, e.start_at, e.end_at
         ORDER BY e.end_at DESC
       `,
-      [coordinatorUserId]
+      [coordinatorUserIds]
     );
 
     const { rows: dueSoonRows } = await pool.query(
@@ -359,7 +418,7 @@ orgPortalRouter.get("/comms/queue", async (req, res) => {
         JOIN event_rsvps r
           ON r.event_id = e.id
          AND r.status = 'accepted'
-        WHERE e.creator_user_id = $1
+        WHERE e.creator_user_id::text = ANY($1::text[])
           AND e.start_at BETWEEN NOW() AND NOW() + INTERVAL '24 hours'
           AND NOT EXISTS (
             SELECT 1
@@ -372,7 +431,7 @@ orgPortalRouter.get("/comms/queue", async (req, res) => {
         GROUP BY e.id, e.title, e.start_at, e.end_at
         ORDER BY e.start_at ASC
       `,
-      [coordinatorUserId]
+      [coordinatorUserIds]
     );
 
     const { rows: upcomingRows } = await pool.query(
@@ -387,7 +446,7 @@ orgPortalRouter.get("/comms/queue", async (req, res) => {
         JOIN event_rsvps r
           ON r.event_id = e.id
          AND r.status = 'accepted'
-        WHERE e.creator_user_id = $1
+        WHERE e.creator_user_id::text = ANY($1::text[])
           AND e.start_at > NOW() + INTERVAL '2 days'
           AND e.start_at <= NOW() + INTERVAL '5 days'
           AND NOT EXISTS (
@@ -401,7 +460,7 @@ orgPortalRouter.get("/comms/queue", async (req, res) => {
         GROUP BY e.id, e.title, e.start_at, e.end_at
         ORDER BY e.start_at ASC
       `,
-      [coordinatorUserId]
+      [coordinatorUserIds]
     );
 
     const { rows: sentRows } = await pool.query(
@@ -421,7 +480,7 @@ orgPortalRouter.get("/comms/queue", async (req, res) => {
         ORDER BY ${sentAtExpr} DESC NULLS LAST, n.id DESC
         LIMIT 10
       `,
-      [coordinatorUserId]
+      [coordinatorUserIds]
     );
 
     const mapSuggestion = (row, commsType) => ({
@@ -994,7 +1053,7 @@ orgPortalRouter.post("/opportunities/:eventId/applicants/:userId/decline", async
 
 orgPortalRouter.get("/credits", async (req, res) => {
   try {
-    const hostUserId = await resolveUserId(req);
+    const hostUserIds = await resolveUserIdCandidates(req);
 
     const { rows: pendingRows } = await pool.query(
       `
@@ -1010,11 +1069,11 @@ orgPortalRouter.get("/credits", async (req, res) => {
           ON r.event_id = e.id
          AND r.status = 'accepted'
          AND r.verification_status = 'pending'
-        WHERE e.creator_user_id = $1
+        WHERE e.creator_user_id::text = ANY($1::text[])
         GROUP BY e.id, e.title, e.start_at
         ORDER BY e.start_at DESC NULLS LAST
       `,
-      [hostUserId]
+      [hostUserIds]
     );
 
     const { rows: reconciledRows } = await pool.query(
@@ -1031,7 +1090,7 @@ orgPortalRouter.get("/credits", async (req, res) => {
             ON r.event_id = e.id
            AND r.status = 'accepted'
            AND r.verification_status = 'verified'
-          WHERE e.creator_user_id = $1
+          WHERE e.creator_user_id::text = ANY($1::text[])
           GROUP BY e.id, e.title, e.start_at
         ),
         credits_by_event AS (
@@ -1040,7 +1099,7 @@ orgPortalRouter.get("/credits", async (req, res) => {
             COALESCE(SUM(w.kind_amount), 0)::numeric AS actual_credits
           FROM wallet_transactions w
           JOIN events e ON e.id = w.event_id
-          WHERE e.creator_user_id = $1
+          WHERE e.creator_user_id::text = ANY($1::text[])
             AND w.reason = 'earn_shift'
             AND w.direction = 'credit'
           GROUP BY w.event_id
@@ -1056,7 +1115,7 @@ orgPortalRouter.get("/credits", async (req, res) => {
         LEFT JOIN credits_by_event cbe ON cbe.event_id = ve.id
         ORDER BY ve.start_at DESC NULLS LAST
       `,
-      [hostUserId]
+      [hostUserIds]
     );
 
     const { rows: volunteerRows } = await pool.query(
@@ -1070,13 +1129,13 @@ orgPortalRouter.get("/credits", async (req, res) => {
         FROM wallet_transactions w
         JOIN userdata u ON u.id = w.user_id
         JOIN events e ON e.id = w.event_id
-        WHERE e.creator_user_id = $1
+        WHERE e.creator_user_id::text = ANY($1::text[])
           AND w.reason = 'earn_shift'
           AND w.direction = 'credit'
         GROUP BY u.id, u.firstname, u.lastname
         ORDER BY lifetime_credits DESC
       `,
-      [hostUserId]
+      [hostUserIds]
     );
 
     return res.json({
@@ -1162,7 +1221,7 @@ orgPortalRouter.get("/credits/:eventId", async (req, res) => {
 
 orgPortalRouter.get("/reports", async (req, res) => {
   try {
-    const hostUserId = await resolveUserId(req);
+    const hostUserIds = await resolveUserIdCandidates(req);
     const rawRange = String(req.query?.range || "30").trim();
     const rangeDays = [7, 30, 90].includes(Number(rawRange)) ? Number(rawRange) : 30;
     const opportunityId = String(req.query?.opportunityId || "all").trim();
@@ -1183,7 +1242,7 @@ orgPortalRouter.get("/reports", async (req, res) => {
             COALESCE(SUM(COALESCE(r.attended_minutes, 0)) / 60.0, 0)::numeric AS hours
           FROM events e
           JOIN event_rsvps r ON r.event_id = e.id
-          WHERE e.creator_user_id = $1
+          WHERE e.creator_user_id::text = ANY($1::text[])
             AND e.start_at >= date_trunc('month', NOW()) - INTERVAL '3 months'
             AND e.start_at < date_trunc('month', NOW())
             AND r.verification_status = 'verified'
@@ -1196,7 +1255,7 @@ orgPortalRouter.get("/reports", async (req, res) => {
         LEFT JOIN hours_by_month h ON h.month_start = m.month_start
         ORDER BY m.month_start
       `,
-      [hostUserId]
+      [hostUserIds]
     );
 
     const { rows: fillRows } = await pool.query(
@@ -1216,7 +1275,7 @@ orgPortalRouter.get("/reports", async (req, res) => {
             COUNT(r.id) FILTER (WHERE r.status = 'accepted')::numeric AS accepted_count
           FROM events e
           LEFT JOIN event_rsvps r ON r.event_id = e.id
-          WHERE e.creator_user_id = $1
+          WHERE e.creator_user_id::text = ANY($1::text[])
             AND e.start_at >= date_trunc('month', NOW()) - INTERVAL '3 months'
             AND e.start_at < date_trunc('month', NOW())
             AND e.capacity IS NOT NULL
@@ -1237,7 +1296,7 @@ orgPortalRouter.get("/reports", async (req, res) => {
         LEFT JOIN fill_by_month f ON f.month_start = m.month_start
         ORDER BY m.month_start
       `,
-      [hostUserId]
+      [hostUserIds]
     );
 
     const { rows: impactRows } = await pool.query(
@@ -1258,7 +1317,7 @@ orgPortalRouter.get("/reports", async (req, res) => {
             ON w.event_id = e.id
            AND w.reason = 'earn_shift'
            AND w.direction = 'credit'
-          WHERE e.creator_user_id = $1
+          WHERE e.creator_user_id::text = ANY($1::text[])
             AND e.start_at >= date_trunc('month', NOW()) - INTERVAL '3 months'
             AND e.start_at < date_trunc('month', NOW())
           GROUP BY date_trunc('month', e.start_at)
@@ -1270,7 +1329,7 @@ orgPortalRouter.get("/reports", async (req, res) => {
         LEFT JOIN impact_by_month i ON i.month_start = m.month_start
         ORDER BY m.month_start
       `,
-      [hostUserId]
+      [hostUserIds]
     );
 
     const { rows: [noShowRow] = [] } = await pool.query(
@@ -1282,7 +1341,7 @@ orgPortalRouter.get("/reports", async (req, res) => {
             COUNT(*) FILTER (WHERE r.status = 'accepted')::numeric AS accepted_count
           FROM events e
           LEFT JOIN event_rsvps r ON r.event_id = e.id
-          WHERE e.creator_user_id = $1
+          WHERE e.creator_user_id::text = ANY($1::text[])
             AND e.start_at >= NOW() - ($2 * INTERVAL '1 day')
           GROUP BY e.id
         )
@@ -1294,12 +1353,12 @@ orgPortalRouter.get("/reports", async (req, res) => {
           END::numeric AS no_show_rate
         FROM per_event
       `,
-      [hostUserId, rangeDays]
+      [hostUserIds, rangeDays]
     );
 
-    const topVolParams = [hostUserId, rangeDays];
+    const topVolParams = [hostUserIds, rangeDays];
     const topVolWhere = [
-      "e.creator_user_id = $1",
+      "e.creator_user_id::text = ANY($1::text[])",
       "e.start_at >= NOW() - ($2 * INTERVAL '1 day')",
       "r.status = 'accepted'",
     ];
@@ -1348,10 +1407,10 @@ orgPortalRouter.get("/reports", async (req, res) => {
       `
         SELECT id, title
         FROM events
-        WHERE creator_user_id = $1
+        WHERE creator_user_id::text = ANY($1::text[])
         ORDER BY start_at DESC NULLS LAST, id DESC
       `,
-      [hostUserId]
+      [hostUserIds]
     );
 
     const { rows: volunteerRows } = await pool.query(
@@ -1363,10 +1422,10 @@ orgPortalRouter.get("/reports", async (req, res) => {
         FROM event_rsvps r
         JOIN events e ON e.id = r.event_id
         JOIN userdata u ON u.id = r.attendee_user_id
-        WHERE e.creator_user_id = $1
+        WHERE e.creator_user_id::text = ANY($1::text[])
         ORDER BY u.firstname ASC, u.lastname ASC
       `,
-      [hostUserId]
+      [hostUserIds]
     );
 
     return res.json({
@@ -1408,17 +1467,17 @@ orgPortalRouter.get("/reports", async (req, res) => {
 
 orgPortalRouter.get("/kpis", async (req, res) => {
   try {
-    const hostUserId = await resolveUserId(req);
+    const hostUserIds = await resolveUserIdCandidates(req);
 
     const { rows: [hoursRow] = [] } = await pool.query(
       `
         SELECT COALESCE(SUM(COALESCE(r.attended_minutes, 0)), 0)::numeric / 60.0 AS total_hours
         FROM event_rsvps r
         JOIN events e ON e.id = r.event_id
-        WHERE e.creator_user_id = $1
+        WHERE e.creator_user_id::text = ANY($1::text[])
           AND r.verification_status = 'verified'
       `,
-      [hostUserId]
+      [hostUserIds]
     );
 
     const { rows: [fillRow] = [] } = await pool.query(
@@ -1432,7 +1491,7 @@ orgPortalRouter.get("/kpis", async (req, res) => {
           LEFT JOIN event_rsvps r
             ON r.event_id = e.id
            AND r.status = 'accepted'
-          WHERE e.creator_user_id = $1
+          WHERE e.creator_user_id::text = ANY($1::text[])
             AND e.capacity IS NOT NULL
             AND e.capacity > 0
           GROUP BY e.id, e.capacity
@@ -1440,10 +1499,10 @@ orgPortalRouter.get("/kpis", async (req, res) => {
         SELECT COALESCE(ROUND(AVG(LEAST(1.0, accepted_count / capacity)) * 100, 1), 0)::numeric AS fill_rate
         FROM per_event
       `,
-      [hostUserId]
+      [hostUserIds]
     );
 
-    const scopedPoolPrefix = `u${hostUserId}${POOL_SCOPE_SEP}`;
+    const scopedPoolPrefixes = hostUserIds.map((id) => `u${id}${POOL_SCOPE_SEP}`);
     const { rows: [creditsRow] = [] } = await pool.query(
       `
         SELECT
@@ -1458,10 +1517,11 @@ orgPortalRouter.get("/kpis", async (req, res) => {
             0
           )::numeric AS impact_credits
         FROM funding_pools fp
+        JOIN UNNEST($1::text[]) pref(prefix)
+          ON LEFT(fp.slug, LENGTH(pref.prefix)) = pref.prefix
         LEFT JOIN pool_transactions pt ON pt.pool_id = fp.id
-        WHERE LEFT(fp.slug, LENGTH($1)) = $1
       `,
-      [scopedPoolPrefix]
+      [scopedPoolPrefixes]
     );
 
     const { rows: [noShowRow] = [] } = await pool.query(
@@ -1473,7 +1533,7 @@ orgPortalRouter.get("/kpis", async (req, res) => {
             COUNT(*) FILTER (WHERE r.status = 'accepted')::numeric AS accepted_count
           FROM events e
           LEFT JOIN event_rsvps r ON r.event_id = e.id
-          WHERE e.creator_user_id = $1
+          WHERE e.creator_user_id::text = ANY($1::text[])
           GROUP BY e.id
         )
         SELECT
@@ -1484,29 +1544,29 @@ orgPortalRouter.get("/kpis", async (req, res) => {
           END::numeric AS no_show_rate
         FROM per_event
       `,
-      [hostUserId]
+      [hostUserIds]
     );
 
     const { rows: [lastEventCountRow] = [] } = await pool.query(
       `
         SELECT COUNT(*)::int AS event_count
         FROM events
-        WHERE creator_user_id = $1
+        WHERE creator_user_id::text = ANY($1::text[])
           AND start_at >= NOW() - INTERVAL '30 days'
           AND start_at < NOW()
       `,
-      [hostUserId]
+      [hostUserIds]
     );
 
     const { rows: [prevEventCountRow] = [] } = await pool.query(
       `
         SELECT COUNT(*)::int AS event_count
         FROM events
-        WHERE creator_user_id = $1
+        WHERE creator_user_id::text = ANY($1::text[])
           AND start_at >= NOW() - INTERVAL '60 days'
           AND start_at < NOW() - INTERVAL '30 days'
       `,
-      [hostUserId]
+      [hostUserIds]
     );
 
     const { rows: [lastHoursRow] = [] } = await pool.query(
@@ -1514,12 +1574,12 @@ orgPortalRouter.get("/kpis", async (req, res) => {
         SELECT COALESCE(SUM(COALESCE(r.attended_minutes, 0)), 0)::numeric / 60.0 AS hours
         FROM event_rsvps r
         JOIN events e ON e.id = r.event_id
-        WHERE e.creator_user_id = $1
+        WHERE e.creator_user_id::text = ANY($1::text[])
           AND e.start_at >= NOW() - INTERVAL '30 days'
           AND e.start_at < NOW()
           AND r.verification_status = 'verified'
       `,
-      [hostUserId]
+      [hostUserIds]
     );
 
     const { rows: [prevHoursRow] = [] } = await pool.query(
@@ -1527,12 +1587,12 @@ orgPortalRouter.get("/kpis", async (req, res) => {
         SELECT COALESCE(SUM(COALESCE(r.attended_minutes, 0)), 0)::numeric / 60.0 AS hours
         FROM event_rsvps r
         JOIN events e ON e.id = r.event_id
-        WHERE e.creator_user_id = $1
+        WHERE e.creator_user_id::text = ANY($1::text[])
           AND e.start_at >= NOW() - INTERVAL '60 days'
           AND e.start_at < NOW() - INTERVAL '30 days'
           AND r.verification_status = 'verified'
       `,
-      [hostUserId]
+      [hostUserIds]
     );
 
     const { rows: [lastFillRow] = [] } = await pool.query(
@@ -1546,7 +1606,7 @@ orgPortalRouter.get("/kpis", async (req, res) => {
           LEFT JOIN event_rsvps r
             ON r.event_id = e.id
            AND r.status = 'accepted'
-          WHERE e.creator_user_id = $1
+          WHERE e.creator_user_id::text = ANY($1::text[])
             AND e.start_at >= NOW() - INTERVAL '30 days'
             AND e.start_at < NOW()
             AND e.capacity IS NOT NULL
@@ -1556,7 +1616,7 @@ orgPortalRouter.get("/kpis", async (req, res) => {
         SELECT COALESCE(ROUND(AVG(LEAST(1.0, accepted_count / capacity)) * 100, 1), 0)::numeric AS fill_rate
         FROM per_event
       `,
-      [hostUserId]
+      [hostUserIds]
     );
 
     const { rows: [prevFillRow] = [] } = await pool.query(
@@ -1570,7 +1630,7 @@ orgPortalRouter.get("/kpis", async (req, res) => {
           LEFT JOIN event_rsvps r
             ON r.event_id = e.id
            AND r.status = 'accepted'
-          WHERE e.creator_user_id = $1
+          WHERE e.creator_user_id::text = ANY($1::text[])
             AND e.start_at >= NOW() - INTERVAL '60 days'
             AND e.start_at < NOW() - INTERVAL '30 days'
             AND e.capacity IS NOT NULL
@@ -1580,7 +1640,7 @@ orgPortalRouter.get("/kpis", async (req, res) => {
         SELECT COALESCE(ROUND(AVG(LEAST(1.0, accepted_count / capacity)) * 100, 1), 0)::numeric AS fill_rate
         FROM per_event
       `,
-      [hostUserId]
+      [hostUserIds]
     );
 
     const totalHours = Number(hoursRow?.total_hours) || 0;

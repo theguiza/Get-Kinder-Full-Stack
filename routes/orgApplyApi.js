@@ -2,6 +2,7 @@ import express from "express";
 import pool from "../Backend/db/pg.js";
 import { sendNudgeEmail } from "../kindnessEmailer.js";
 import { ensureAdmin } from "../Backend/middleware/ensureAdmin.js";
+import { hasUserOrgMembershipTable, resolveOrgScope } from "../services/orgScopeService.js";
 
 const orgApplyRouter = express.Router();
 
@@ -43,7 +44,11 @@ function appBaseUrl(req) {
 
 orgApplyRouter.get("/org-apply", ensureAuthenticated, async (req, res) => {
   try {
-    if (req.user?.org_rep) return res.redirect("/org-portal");
+    const scope = await resolveOrgScope(req, {
+      allowAdminPreview: false,
+      includeOrgMembersForOrgRep: false,
+    }).catch(() => null);
+    if (scope?.hasOrgRepAccess && scope?.orgId) return res.redirect("/org-portal");
     const assetTag = Date.now();
     const submitted = req.query.submitted === "true";
     const error = req.query.error === "true";
@@ -203,6 +208,23 @@ orgApplyRouter.post("/admin/org-applications/:id/approve", ensureAuthenticated, 
       `,
       [approvedOrgId, application.user_id]
     );
+
+    if (await hasUserOrgMembershipTable()) {
+      await client.query(
+        `
+          INSERT INTO public.user_org_memberships
+            (user_id, org_id, role, is_active, added_by_user_id)
+          VALUES
+            ($1, $2, 'admin', true, $3)
+          ON CONFLICT (user_id, org_id)
+          DO UPDATE SET
+            role = 'admin',
+            is_active = true,
+            added_by_user_id = COALESCE(EXCLUDED.added_by_user_id, public.user_org_memberships.added_by_user_id)
+        `,
+        [application.user_id, approvedOrgId, req.user?.id || null]
+      );
+    }
 
     await client.query(
       `

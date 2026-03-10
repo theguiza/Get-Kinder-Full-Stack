@@ -9,6 +9,7 @@ import {
 } from "../services/eventsService.js";
 import { processVerifiedEarnShift } from "../services/earnShiftFundingService.js";
 import { sendProspectInviteEmail } from "../kindnessEmailer.js";
+import { resolveOrgScope } from "../services/orgScopeService.js";
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
@@ -187,18 +188,29 @@ function zonedTimeToUtc(dateStr, time, tz) {
   return guess;
 }
 
-async function resolveUserId(req) {
-  if (req.user?.id) return String(req.user.id);
-  if (req.user?.user_id) return String(req.user.user_id);
-  if (!req.user?.email) throw new Error("Missing authenticated user email.");
-  const { rows } = await pool.query(
-    "SELECT id FROM public.userdata WHERE email=$1 LIMIT 1",
-    [req.user.email]
-  );
-  if (!rows[0]) {
-    throw new Error("User record not found.");
+async function getHostScope(req) {
+  if (!req._eventsHostScopePromise) {
+    req._eventsHostScopePromise = resolveOrgScope(req, {
+      allowAdminPreview: false,
+      includeOrgMembersForOrgRep: true,
+    });
   }
-  return String(rows[0].id);
+  return req._eventsHostScopePromise;
+}
+
+async function resolveUserId(req) {
+  const scope = await getHostScope(req);
+  return scope.actorUserId;
+}
+
+async function resolveHostUserIds(req) {
+  const scope = await getHostScope(req);
+  return scope.memberUserIds;
+}
+
+function eventIsOwnedByHostScope(eventRow, hostUserIds) {
+  if (!eventRow?.creator_user_id) return false;
+  return hostUserIds.includes(String(eventRow.creator_user_id));
 }
 
 function mapEventRowForEdit(row) {
@@ -286,12 +298,12 @@ export async function getEventById(req, res) {
         return res.status(401).json({ ok: false, error: "unauthorized" });
       }
       try {
-        const hostId = await resolveUserId(req);
+        const hostUserIds = await resolveHostUserIds(req);
         const { rows } = await pool.query(
-          `SELECT * FROM events WHERE id = $1 AND creator_user_id = $2 LIMIT 1`,
-          [id, hostId]
+          `SELECT * FROM events WHERE id = $1 LIMIT 1`,
+          [id]
         );
-        if (!rows[0]) {
+        if (!rows[0] || !eventIsOwnedByHostScope(rows[0], hostUserIds)) {
           return res.status(403).json({ ok: false, error: "Only the host can edit this event" });
         }
         return res.json({ ok: true, data: mapEventRowForEdit(rows[0]) });
@@ -303,8 +315,9 @@ export async function getEventById(req, res) {
     if (req.isAuthenticated && req.isAuthenticated()) {
       try {
         const viewerId = await resolveUserId(req);
+        const viewerHostUserIds = await resolveHostUserIds(req);
         const viewerIsHost = event.creator_user_id && viewerId
-          ? String(event.creator_user_id) === String(viewerId)
+          ? viewerHostUserIds.includes(String(event.creator_user_id))
           : false;
         const snapshot = await getEventRsvpSnapshot(event.id, viewerId);
         return res.json({
@@ -331,6 +344,7 @@ export async function getEventById(req, res) {
 export async function createInvite(req, res) {
   try {
     const senderId = await resolveUserId(req);
+    const senderHostUserIds = await resolveHostUserIds(req);
     const eventId = req.params.id;
     const rawEmail = typeof req.body?.invitee_email === "string" ? req.body.invitee_email : req.body?.email;
     const inviteeEmail = rawEmail ? rawEmail.trim().toLowerCase() : "";
@@ -344,6 +358,7 @@ export async function createInvite(req, res) {
 
     const senderContext = await resolveInviteSenderContext({
       senderId,
+      senderHostUserIds,
       eventId,
       senderEmail: req.user?.email || null,
     });
@@ -588,11 +603,13 @@ export async function createInvite(req, res) {
 export async function draftInviteCopy(req, res) {
   try {
     const senderId = await resolveUserId(req);
+    const senderHostUserIds = await resolveHostUserIds(req);
     const eventId = req.params.id;
     const tone = sanitizeTone(req.body?.tone) || "friendly";
 
     const senderContext = await resolveInviteSenderContext({
       senderId,
+      senderHostUserIds,
       eventId,
       senderEmail: req.user?.email || null,
     });
@@ -640,7 +657,6 @@ export async function draftInviteCopy(req, res) {
 
 export async function downloadEventCalendar(req, res) {
   try {
-    const hostId = await resolveUserId(req);
     const eventId = req.params.id;
     const { rows: [eventRow] } = await pool.query(
       `SELECT id, creator_user_id, title, description, start_at, end_at, tz, location_text
@@ -702,6 +718,7 @@ export async function downloadEventCalendar(req, res) {
 export async function respondToEventRsvp(req, res) {
   try {
     const attendeeId = await resolveUserId(req);
+    const hostUserIds = await resolveHostUserIds(req);
     const eventId = req.params.id;
     const action = (req.body?.action || "").toLowerCase();
     const targetStatus = RSVP_ACTION_TO_STATUS.get(action);
@@ -716,7 +733,7 @@ export async function respondToEventRsvp(req, res) {
     if (!eventRow) {
       return res.status(404).json({ ok: false, error: "Event not found" });
     }
-    if (String(eventRow.creator_user_id) === attendeeId) {
+    if (eventIsOwnedByHostScope(eventRow, hostUserIds)) {
       return res.status(400).json({ ok: false, error: "Hosts do not need to RSVP" });
     }
     if (eventRow.status === "cancelled") {
@@ -748,6 +765,7 @@ export async function respondToEventRsvp(req, res) {
 export async function checkInToEvent(req, res) {
   try {
     const requesterId = await resolveUserId(req);
+    const hostUserIds = await resolveHostUserIds(req);
     if (!requesterId) {
       return res.status(401).json({ ok: false, error: "Unauthorized" });
     }
@@ -772,7 +790,7 @@ export async function checkInToEvent(req, res) {
 
     const isHostOverride =
       requestedAttendeeId &&
-      String(eventRow.creator_user_id) === String(requesterId) &&
+      eventIsOwnedByHostScope(eventRow, hostUserIds) &&
       String(requestedAttendeeId) !== String(requesterId);
     const attendeeId = isHostOverride ? requestedAttendeeId : requesterId;
 
@@ -827,7 +845,7 @@ export async function checkInToEvent(req, res) {
 
 export async function listEventRoster(req, res) {
   try {
-    const hostId = await resolveUserId(req);
+    const hostUserIds = await resolveHostUserIds(req);
     const eventId = req.params.id;
     const { rows: [eventRow] } = await pool.query(
       `SELECT id, creator_user_id FROM events WHERE id=$1 LIMIT 1`,
@@ -836,7 +854,7 @@ export async function listEventRoster(req, res) {
     if (!eventRow) {
       return res.status(404).json({ ok: false, error: "Event not found" });
     }
-    if (String(eventRow.creator_user_id) !== String(hostId)) {
+    if (!eventIsOwnedByHostScope(eventRow, hostUserIds)) {
       return res.status(403).json({ ok: false, error: "Forbidden" });
     }
 
@@ -867,6 +885,7 @@ export async function listEventRoster(req, res) {
 
 export async function verifyEventRsvp(req, res) {
   const userId = await resolveUserId(req);
+  const hostUserIds = await resolveHostUserIds(req);
   if (!userId) {
     return res.status(401).json({ ok: false, error: "Unauthorized" });
   }
@@ -891,7 +910,7 @@ export async function verifyEventRsvp(req, res) {
       await client.query("ROLLBACK");
       return res.status(404).json({ ok: false, error: "Event not found" });
     }
-    if (String(eventRow.creator_user_id) !== String(userId)) {
+    if (!eventIsOwnedByHostScope(eventRow, hostUserIds)) {
       await client.query("ROLLBACK");
       return res.status(403).json({ ok: false, error: "Forbidden" });
     }
@@ -998,7 +1017,7 @@ export async function verifyEventRsvp(req, res) {
 
 export async function updateEvent(req, res) {
   try {
-    const hostId = await resolveUserId(req);
+    const hostUserIds = await resolveHostUserIds(req);
     const eventId = req.params.id;
     const body = req.body || {};
 
@@ -1009,7 +1028,7 @@ export async function updateEvent(req, res) {
     if (!existing) {
       return res.status(404).json({ ok: false, error: "Event not found" });
     }
-    if (String(existing.creator_user_id) !== hostId) {
+    if (!eventIsOwnedByHostScope(existing, hostUserIds)) {
       return res.status(403).json({ ok: false, error: "Only the host can edit this event" });
     }
 
@@ -1198,7 +1217,7 @@ function formatSenderName(senderRow, fallbackEmail) {
   return email.split("@")[0].replace(/[._-]+/g, " ").trim() || "A friend";
 }
 
-async function resolveInviteSenderContext({ senderId, eventId, senderEmail }) {
+async function resolveInviteSenderContext({ senderId, senderHostUserIds = [], eventId, senderEmail }) {
   const { rows: [eventRow] } = await pool.query(
     `SELECT id, creator_user_id, status, title, start_at, tz, location_text
        FROM events
@@ -1228,7 +1247,10 @@ async function resolveInviteSenderContext({ senderId, eventId, senderEmail }) {
     [senderId, eventId]
   );
 
-  const isHost = String(eventRow.creator_user_id) === String(senderId);
+  const normalizedHostIds = Array.isArray(senderHostUserIds)
+    ? senderHostUserIds.map((value) => String(value))
+    : [];
+  const isHost = normalizedHostIds.includes(String(eventRow.creator_user_id));
   const senderRsvpStatus = sanitizeString(senderRow?.rsvp_status).toLowerCase();
   const isEligible = isHost || INVITE_ELIGIBLE_STATUSES.has(senderRsvpStatus);
   if (!isEligible) {

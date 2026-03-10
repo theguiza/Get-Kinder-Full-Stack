@@ -49,7 +49,12 @@ import orgApplyRouter from "./routes/orgApplyApi.js";
 import adminApiRouter from "./routes/adminApi.js";
 import squareWebhooksApiRouter from "./routes/squareWebhooksApi.js";
 import { ensureOrgRepPage } from "./middleware/ensureOrgRep.js";
-import { ensureAdmin, ensureAdminApi } from "./Backend/middleware/ensureAdmin.js";
+import { ensureAdmin, ensureAdminApi, isAdminRequest } from "./Backend/middleware/ensureAdmin.js";
+import {
+  resolveOrgScope,
+  ADMIN_ORG_PORTAL_PREVIEW_USER_ID_KEY,
+  ADMIN_ORG_PORTAL_PREVIEW_ORG_ID_KEY,
+} from "./services/orgScopeService.js";
 
 // Reuse the same tool schema for Chat Completions (strip any nonstandard fields if needed)
 const CHAT_COMPLETIONS_TOOLS = DASHBOARD_TOOLS.map(t => ({ type: 'function', function: t.function }));
@@ -2422,6 +2427,12 @@ app.get("/admin", ensureAuthenticated, ensureAdmin, (req, res) => {
 
 app.get("/org-portal", ensureOrgRepPage, async (req, res) => {
   const assetTag = Date.now();
+  const isAdminViewer = isAdminRequest(req);
+  const rawPreviewOrgId = isAdminViewer
+    ? String(req.query.orgId || req.query.org_id || "").trim()
+    : "";
+  const previewOrgId = /^\d+$/.test(rawPreviewOrgId) ? Number(rawPreviewOrgId) : null;
+  const previewRequested = Number.isInteger(previewOrgId) && previewOrgId > 0;
   const orgRating = {
     orgId: null,
     value: 5,
@@ -2430,50 +2441,94 @@ app.get("/org-portal", ensureOrgRepPage, async (req, res) => {
     starsFilled: 5,
   };
   let organizationName = "";
+  let orgMemberships = [];
+  let activeOrgId = null;
+  let activeOrgStatus = "";
 
   try {
-    const numericSessionId = Number(req.user?.id);
-    let resolvedUserId = Number.isInteger(numericSessionId) ? String(numericSessionId) : null;
-    let orgId = req.user?.org_id != null ? Number(req.user.org_id) : null;
-
-    if (req.user?.email) {
-      const byEmail = await pool.query(
-        "SELECT id, org_id FROM public.userdata WHERE email = $1 LIMIT 1",
-        [req.user.email]
-      );
-      if (byEmail.rows[0]?.id != null) {
-        resolvedUserId = String(byEmail.rows[0].id);
-      }
-      if (byEmail.rows[0]?.org_id != null) {
-        orgId = Number(byEmail.rows[0].org_id);
+    if (isAdminViewer) {
+      if (previewRequested) {
+        const { rows: [previewOrgRow] = [] } = await pool.query(
+          `
+            SELECT id, name, rep_user_id
+            FROM public.organizations
+            WHERE id = $1
+            LIMIT 1
+          `,
+          [previewOrgId]
+        );
+        if (previewOrgRow) {
+          if (typeof previewOrgRow.name === "string" && previewOrgRow.name.trim()) {
+            organizationName = previewOrgRow.name.trim();
+          }
+          const previewUserId = Number(previewOrgRow.rep_user_id);
+          if (req.session) {
+            req.session[ADMIN_ORG_PORTAL_PREVIEW_ORG_ID_KEY] = String(previewOrgRow.id);
+            if (Number.isInteger(previewUserId) && previewUserId > 0) {
+              req.session[ADMIN_ORG_PORTAL_PREVIEW_USER_ID_KEY] = String(previewUserId);
+            } else {
+              delete req.session[ADMIN_ORG_PORTAL_PREVIEW_USER_ID_KEY];
+            }
+          }
+        } else if (req.session) {
+          delete req.session[ADMIN_ORG_PORTAL_PREVIEW_USER_ID_KEY];
+          delete req.session[ADMIN_ORG_PORTAL_PREVIEW_ORG_ID_KEY];
+        }
+      } else if (req.session) {
+        delete req.session[ADMIN_ORG_PORTAL_PREVIEW_USER_ID_KEY];
+        delete req.session[ADMIN_ORG_PORTAL_PREVIEW_ORG_ID_KEY];
       }
     }
 
-    if (orgId == null && resolvedUserId) {
-      const byId = await pool.query(
-        "SELECT org_id FROM public.userdata WHERE id = $1 LIMIT 1",
-        [resolvedUserId]
-      );
-      if (byId.rows[0]?.org_id != null) {
-        orgId = Number(byId.rows[0].org_id);
-      }
+    const scope = await resolveOrgScope(req, {
+      allowAdminPreview: true,
+      includeOrgMembersForOrgRep: false,
+    });
+    activeOrgId = scope?.orgId != null ? Number(scope.orgId) : null;
+    orgMemberships = Array.isArray(scope?.memberships)
+      ? scope.memberships
+          .map((entry) => ({
+            orgId: Number(entry?.orgId),
+            name: entry?.org_name || "",
+            status: entry?.org_status || "",
+          }))
+          .filter((entry) => Number.isInteger(entry.orgId) && entry.orgId > 0)
+      : [];
+
+    if ((!scope?.hasOrgRepAccess || !activeOrgId) && isAdminViewer) {
+      return res.redirect("/admin");
+    }
+    if (!scope?.hasOrgRepAccess || !activeOrgId) {
+      return res.redirect("/org-apply");
     }
 
-    if (orgId != null && Number.isFinite(orgId)) {
-      const { rows: [orgRow] } = await pool.query(
-        "SELECT name FROM public.organizations WHERE id = $1 LIMIT 1",
-        [orgId]
+    const selectedMembership = orgMemberships.find((entry) => entry.orgId === activeOrgId);
+    if (!organizationName && selectedMembership?.name) {
+      organizationName = selectedMembership.name;
+    }
+    if (selectedMembership?.status) {
+      activeOrgStatus = String(selectedMembership.status || "").trim().toLowerCase();
+    }
+    if (!organizationName) {
+      const { rows: [orgRow] = [] } = await pool.query(
+        "SELECT name, status FROM public.organizations WHERE id = $1 LIMIT 1",
+        [activeOrgId]
       );
       if (typeof orgRow?.name === "string" && orgRow.name.trim()) {
         organizationName = orgRow.name.trim();
       }
+      if (!activeOrgStatus && typeof orgRow?.status === "string") {
+        activeOrgStatus = orgRow.status.trim().toLowerCase();
+      }
+    }
 
-      const summary = await getRatingsSummary({ orgId, limit: 20 });
+    if (activeOrgId != null && Number.isFinite(activeOrgId)) {
+      const summary = await getRatingsSummary({ orgId: activeOrgId, limit: 20 });
       const count = Number(summary?.sampleSize) || 0;
       const hasRatings = count > 0 && Number.isFinite(Number(summary?.kindnessRating));
       const value = hasRatings ? Number(summary.kindnessRating) : 5;
       const starsFilled = Math.max(1, Math.min(5, Math.round(value)));
-      orgRating.orgId = orgId;
+      orgRating.orgId = activeOrgId;
       orgRating.value = value;
       orgRating.count = count;
       orgRating.hasRatings = hasRatings;
@@ -2481,9 +2536,18 @@ app.get("/org-portal", ensureOrgRepPage, async (req, res) => {
     }
   } catch (error) {
     console.warn("[org-portal] org context lookup failed:", error?.message || error);
+    if (!isAdminViewer) return res.redirect("/org-apply");
   }
 
-  res.render("org-portal", { assetTag, user: req.user, orgRating, organizationName });
+  res.render("org-portal", {
+    assetTag,
+    user: req.user,
+    orgRating,
+    organizationName,
+    orgMemberships,
+    activeOrgId,
+    activeOrgStatus,
+  });
 });
 
 app.get("/donate", ensureAuthenticated, (req, res) => {

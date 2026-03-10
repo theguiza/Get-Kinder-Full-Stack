@@ -921,6 +921,78 @@ export default function AdminDashboard() {
     [loadOrganizations, mutateJson, pushToast]
   );
 
+  const runOrgAddAdmin = useCallback(
+    async (org) => {
+      const rawEmail = window.prompt(`Grant org panel access for "${org.name}" to which user email?`);
+      const email = String(rawEmail || "").trim().toLowerCase();
+      if (!email) return;
+
+      const assignOrgAdmin = async (payload) => {
+        const response = await fetch(`/api/admin/organizations/${org.id}/admins`, {
+          method: "POST",
+          credentials: "same-origin",
+          headers: {
+            "Content-Type": "application/json",
+            "X-CSRF-Token": csrfToken || "",
+          },
+          body: JSON.stringify(payload || {}),
+        });
+        const raw = await response.text();
+        let body = null;
+        try {
+          body = raw ? JSON.parse(raw) : null;
+        } catch {
+          body = null;
+        }
+        return { ok: response.ok, status: response.status, body };
+      };
+
+      const result = await assignOrgAdmin({ email });
+      if (!result.ok) {
+        const message = result.body?.message || result.body?.error || `Request failed (${result.status})`;
+        throw new Error(message);
+      }
+
+      if (result.body?.already_assigned) {
+        pushToast(`${email} already has admin access to ${org.name}.`, "info");
+      } else {
+        pushToast(`Granted org access to ${email}.`, "success");
+      }
+      loadOrganizations();
+    },
+    [csrfToken, loadOrganizations, pushToast]
+  );
+
+  const runOrgSuspendToggle = useCallback(
+    (org) => {
+      const currentlySuspended = normalizeStatus(org?.status) === "suspended";
+      const nextStatus = currentlySuspended ? "approved" : "suspended";
+      const actionLabel = currentlySuspended ? "Unsuspend" : "Suspend";
+      const orgName = org?.name || "this organization";
+
+      openConfirm(
+        {
+          title: `${actionLabel} ${orgName}?`,
+          body: currentlySuspended
+            ? `Unsuspending will restore ${orgName}'s access to the org portal. Are you sure you want to continue?`
+            : `Suspending will block ${orgName}'s access to the org portal until an admin unsuspends them. Are you sure you want to continue?`,
+          confirmLabel: currentlySuspended ? "Unsuspend organization" : "Suspend organization",
+        },
+        async () => {
+          await mutateJson(`/api/admin/organizations/${org.id}/status`, "PATCH", { status: nextStatus });
+          pushToast(
+            currentlySuspended
+              ? `${orgName} has been unsuspended.`
+              : `${orgName} has been suspended.`,
+            "success"
+          );
+          loadOrganizations();
+        }
+      );
+    },
+    [loadOrganizations, mutateJson, openConfirm, pushToast]
+  );
+
   const runOrgRemove = useCallback(
     (org) =>
       openConfirm(
@@ -1775,7 +1847,23 @@ export default function AdminDashboard() {
                           <td>{formatDateTime(org.applied_at || org.created_at)}</td>
                           <td>
                             <div className="btn-group btn-group-sm">
-                              <button type="button" className="btn btn-outline-secondary" onClick={() => pushToast(`Viewing ${org.name}`, "info")}>View</button>
+                              <button
+                                type="button"
+                                className="btn btn-outline-dark"
+                                onClick={() => runOrgAddAdmin(org)}
+                              >
+                                +Admin
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-outline-secondary"
+                                onClick={() => {
+                                  const targetUrl = `/org-portal?orgId=${encodeURIComponent(String(org.id))}`;
+                                  window.open(targetUrl, "_blank", "noopener,noreferrer");
+                                }}
+                              >
+                                View
+                              </button>
                               <button
                                 type="button"
                                 className="btn btn-outline-primary"
@@ -1786,9 +1874,16 @@ export default function AdminDashboard() {
                               >
                                 Allocate
                               </button>
-                              {normalizeStatus(org.status) !== "approved" ? (
+                              {normalizeStatus(org.status) !== "approved" && normalizeStatus(org.status) !== "suspended" ? (
                                 <button type="button" className="btn btn-outline-success" onClick={() => runOrgApprove(org.id)}>Approve</button>
                               ) : null}
+                              <button
+                                type="button"
+                                className={`btn ${normalizeStatus(org.status) === "suspended" ? "btn-outline-success" : "btn-outline-warning"}`}
+                                onClick={() => runOrgSuspendToggle(org)}
+                              >
+                                {normalizeStatus(org.status) === "suspended" ? "Unsuspend" : "Suspend"}
+                              </button>
                               <button type="button" className="btn btn-outline-danger" onClick={() => runOrgRemove(org)}>Remove</button>
                             </div>
                           </td>
