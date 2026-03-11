@@ -1,10 +1,16 @@
+let currentConversationId = null;
 
 document.addEventListener('DOMContentLoaded', () => {
   const sendBtn = document.getElementById('sendBtn');
   const input = document.getElementById('chatInput');
   const chatBody = document.getElementById('chatBody');
   const typingTpl = document.getElementById('typingIndicatorTemplate')?.content;
-  const threadInput = document.getElementById('threadId');
+  const isAuthenticated = Boolean(
+    (typeof window !== 'undefined' && window.currentUserId) ||
+    (typeof window !== 'undefined' && Object.prototype.hasOwnProperty.call(window, 'loggedInUserPicture'))
+  );
+
+  if (!sendBtn || !input || !chatBody) return;
 
   // ---- Keyboard / viewport resize fix (mobile safe) ----
 (function installKeyboardResizeFix() {
@@ -46,13 +52,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Send button
   sendBtn.addEventListener('click', async () => {
-    // build UI context
-    const userContext = {
-      userId: window.currentUserId || null,
-      currentPage: window.location.pathname,
-      activeChallenge: window.activeChallenge || null
-    };
-
     const userMessage = input.value.trim();
     if (!userMessage) return;
 
@@ -73,32 +72,43 @@ document.addEventListener('DOMContentLoaded', () => {
     chatBody.scrollTop = chatBody.scrollHeight;
 
     try {
-      const response = await fetch('/api/chat/message', {
+      const endpoint = isAuthenticated ? '/api/kai/message' : '/api/kai/guest';
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: userMessage,
-          userContext,               // <— added
-          context: userContext       // <— keep for backward compatibility
+          conversationId: currentConversationId
         }),
         credentials: 'include'
       });
 
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
       if (typingIndicator) typingIndicator.remove();
 
-      // Always render something (no silent failure if server returns {error} or no reply)
-      if (!response.ok || !data?.reply) {
-        appendAssistantBubble(data?.error || `HTTP ${response.status}`);
+      if (response.status === 429 || data?.rateLimited === true) {
+        const limitMessage =
+          (typeof data?.error === 'string' && data.error.trim()) ||
+          "You've reached your daily message limit. Upgrade for unlimited KAI access.";
+        appendAssistantBubble(`${limitMessage} (Upgrade for unlimited access.)`);
+      } else if (!response.ok || data?.success === false || !data?.message) {
+        appendAssistantBubble("KAI is having trouble right now. Please try again in a moment.");
       } else {
-        appendAssistantBubble(data.reply);
+        appendAssistantBubble(data.message);
+        currentConversationId = data.conversationId || currentConversationId;
       }
     } catch (err) {
       console.error('💥 Chat error:', err);
       if (typingIndicator) typingIndicator.remove();
-      appendAssistantBubble("Sorry, I'm having trouble connecting right now. Please try again later.");
+      appendAssistantBubble("KAI is having trouble right now. Please try again in a moment.");
     }
   });
+
+  if (typeof window !== 'undefined') {
+    window.startNewKaiConversation = function startNewKaiConversation() {
+      currentConversationId = null;
+    };
+  }
 });
 
 // Assistant bubble (deterministic: binds container locally)

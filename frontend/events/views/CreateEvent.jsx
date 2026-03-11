@@ -159,6 +159,8 @@ function eventToFormState(event = {}) {
       ? "Other"
       : "";
   const causeTagOther = causeTagSelection === "Other" ? primaryCauseTag : "";
+  const locationLat = Number(event.location_lat);
+  const locationLng = Number(event.location_lng);
   return {
     title: event.title || "",
     category: event.category || "",
@@ -166,6 +168,8 @@ function eventToFormState(event = {}) {
     time: formatTimeRangeFromIso(event.start_at, event.end_at, event.tz || event.timezone || "UTC"),
     tz: event.tz || "America/Vancouver",
     location_text: event.location_text || "",
+    location_lat: Number.isFinite(locationLat) ? locationLat : null,
+    location_lng: Number.isFinite(locationLng) ? locationLng : null,
     visibility: event.visibility || "public",
     capacity:
       event.capacity === null || event.capacity === undefined
@@ -197,6 +201,8 @@ function createInitialState(defaultOrgName = "") {
     time: "",
     tz: "America/Vancouver",
     location_text: "",
+    location_lat: null,
+    location_lng: null,
     visibility: "public",
     capacity: "",
     waitlist_enabled: true,
@@ -715,7 +721,14 @@ export function CreateEvent({
     const label =
       locationDraft.label?.trim()
       || `Near ${formatCoordinate(locationDraft.lat)}, ${formatCoordinate(locationDraft.lng)}`;
-    setForm((prev) => ({ ...prev, location_text: label }));
+    const lat = Number(locationDraft.lat);
+    const lng = Number(locationDraft.lng);
+    setForm((prev) => ({
+      ...prev,
+      location_text: label,
+      location_lat: Number.isFinite(lat) ? lat : null,
+      location_lng: Number.isFinite(lng) ? lng : null,
+    }));
     setLocationQuery(label);
     setErrors((prev) => {
       if (!prev?.location_text) return prev;
@@ -1440,6 +1453,8 @@ function buildPayload(form, status) {
     time_range: form.time || null,
     tz: form.tz?.trim() || "America/Vancouver",
     location_text: form.location_text?.trim() || "",
+    location_lat: Number.isFinite(Number(form.location_lat)) ? Number(form.location_lat) : null,
+    location_lng: Number.isFinite(Number(form.location_lng)) ? Number(form.location_lng) : null,
     visibility: form.visibility,
     capacity: form.capacity ? Number(form.capacity) : null,
     waitlist_enabled: Boolean(form.waitlist_enabled),

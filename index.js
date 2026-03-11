@@ -48,6 +48,7 @@ import orgPortalRouter from "./routes/orgPortalApi.js";
 import orgApplyRouter from "./routes/orgApplyApi.js";
 import adminApiRouter from "./routes/adminApi.js";
 import squareWebhooksApiRouter from "./routes/squareWebhooksApi.js";
+import kaiRouter from "./Backend/routes/kaiApi.js";
 import { ensureOrgRepPage } from "./middleware/ensureOrgRep.js";
 import { ensureAdmin, ensureAdminApi, isAdminRequest } from "./Backend/middleware/ensureAdmin.js";
 import {
@@ -291,6 +292,7 @@ app.use(express.static(path.join(__dirname, "public")));
 app.use("/internal/quiz", quizHooksRouter);
 app.use(arcsApiRouter);
 app.use("/api/webhooks", squareWebhooksApiRouter);
+app.use("/api/kai", kaiRouter);
 app.use("/api/events", eventsApiRouter);
 app.use("/api/invites", ensureAuthenticatedApi, invitesApiRouter);
 app.use("/api/me/events", ensureAuthenticatedApi, meEventsRouter);
@@ -1164,8 +1166,8 @@ function parseTravelRadiusKm(value, fallback = 5, { strict = false } = {}) {
     return fallback;
   }
   const rounded = Math.round(parsed);
-  if (rounded < 1 || rounded > 25) {
-    if (strict) throw new Error("travel_radius_km must be between 1 and 25.");
+  if (rounded < 1 || rounded > 50) {
+    if (strict) throw new Error("travel_radius_km must be between 1 and 50.");
     return fallback;
   }
   return rounded;
@@ -1494,21 +1496,34 @@ app.post(
         email = email.trim();
       }
 
+      const profileAction = typeof req.body?.profile_action === "string"
+        ? req.body.profile_action.trim().toLowerCase()
+        : "";
+      const shouldPersistPreferenceSettings = profileAction === "save_preferences";
+
       let locationPrefs;
-      try {
-        locationPrefs = parseLocationFromRequestBody(req.body || {}, existingUserRow);
-      } catch (validationErr) {
-        return res.status(400).send(`Invalid location settings: ${validationErr.message}`);
+      if (shouldPersistPreferenceSettings) {
+        try {
+          locationPrefs = parseLocationFromRequestBody(req.body || {}, existingUserRow);
+        } catch (validationErr) {
+          return res.status(400).send(`Invalid location settings: ${validationErr.message}`);
+        }
+      } else {
+        locationPrefs = buildLocationStateForProfile(existingUserRow);
       }
 
       let availability;
-      try {
-        availability = parseAvailabilityFromRequestBody(
-          { ...(req.body || {}), timezone: locationPrefs.timezone },
-          existingUserRow
-        );
-      } catch (validationErr) {
-        return res.status(400).send(`Invalid availability settings: ${validationErr.message}`);
+      if (shouldPersistPreferenceSettings) {
+        try {
+          availability = parseAvailabilityFromRequestBody(
+            { ...(req.body || {}), timezone: locationPrefs.timezone },
+            existingUserRow
+          );
+        } catch (validationErr) {
+          return res.status(400).send(`Invalid availability settings: ${validationErr.message}`);
+        }
+      } else {
+        availability = buildAvailabilityStateForProfile(existingUserRow);
       }
 
       // 3) Update all fields, including picture (TEXT column)

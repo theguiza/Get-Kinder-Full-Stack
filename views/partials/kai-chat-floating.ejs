@@ -34,6 +34,8 @@
   const toggleBtn = document.getElementById('kaiChatToggle');
   const input = document.getElementById('kaiChatInput');
   const messagesEl = document.getElementById('kaiChatMessages');
+  const isAuthenticated = <%= (typeof user !== 'undefined' && user) ? 'true' : 'false' %>;
+  let currentConversationId = null;
 
   if (!panel || !toggleBtn || !input || !messagesEl) {
     console.warn('[kai-chat] required chat elements are missing; skipping init');
@@ -117,28 +119,38 @@
     messagesEl.scrollTop = messagesEl.scrollHeight;
 
     try {
-      const userContext = buildUserContext();
-      const payload = { message: text };
-      if (userContext) {
-        payload.userContext = userContext;
-        payload.context = userContext; // legacy key for older handlers
-      }
+      const endpoint = isAuthenticated ? '/api/kai/message' : '/api/kai/guest';
+      const payload = {
+        message: text,
+        conversationId: currentConversationId
+      };
 
-      const res = await fetch('/api/chat/message', {
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: {'Content-Type':'application/json'},
         credentials: 'include',
         body: JSON.stringify(payload)
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
 
       messagesEl.removeChild(messagesEl.lastElementChild);
       messagesEl.insertAdjacentHTML('beforeend', '<div class="message assistant"></div>');
-      messagesEl.lastElementChild.textContent = data.reply || "Sorry, I couldn't process that request.";
+
+      if (res.status === 429 || data?.rateLimited === true) {
+        const limitMessage =
+          (typeof data?.error === 'string' && data.error.trim()) ||
+          "You've reached your daily message limit. Upgrade for unlimited KAI access.";
+        messagesEl.lastElementChild.textContent = `${limitMessage} (Upgrade for unlimited access.)`;
+      } else if (!res.ok || data?.success === false || !data?.message) {
+        messagesEl.lastElementChild.textContent = "KAI is having trouble right now. Please try again in a moment.";
+      } else {
+        messagesEl.lastElementChild.textContent = data.message;
+        currentConversationId = data.conversationId || currentConversationId;
+      }
     } catch (err) {
       console.error('Chat error:', err);
       messagesEl.removeChild(messagesEl.lastElementChild);
-      messagesEl.insertAdjacentHTML('beforeend', '<div class="message assistant">Sorry, I\'m having trouble connecting right now. Please try again later.</div>');
+      messagesEl.insertAdjacentHTML('beforeend', '<div class="message assistant">KAI is having trouble right now. Please try again in a moment.</div>');
     }
 
     messagesEl.scrollTop = messagesEl.scrollHeight;
@@ -146,5 +158,6 @@
 
   // Global helper so other buttons/links can open the chat with a preset message
   window.askKAI = function(msg) { open(); if (msg) { input.value = msg; send(msg); } };
+  window.startNewKaiConversation = function startNewKaiConversation() { currentConversationId = null; };
 })();
 </script>

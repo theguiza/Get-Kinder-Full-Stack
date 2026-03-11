@@ -182,23 +182,61 @@
     .profile-page .location-summary {
       font-size: 0.85rem;
       color: #455a7c;
-      background: #f8fbff;
-      border: 1px solid #d9e3f4;
+      background: #fff;
+      border: 1px solid #e7ddcf;
       border-radius: 12px;
       padding: 0.45rem 0.65rem;
+    }
+    .profile-page .home-base-card {
+      background: #f7f3ed;
+      border: 1px solid #eadfce;
+      border-radius: 14px;
+      padding: 0.9rem;
+    }
+    .profile-page .home-base-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem;
+      align-items: center;
+    }
+    .profile-page .btn-location-primary {
+      background: #ff5656;
+      border-color: #ff5656;
+      color: #fff;
+    }
+    .profile-page .btn-location-primary:hover,
+    .profile-page .btn-location-primary:focus {
+      background: #eb4f4f;
+      border-color: #eb4f4f;
+      color: #fff;
+    }
+    .profile-page .location-selected {
+      font-size: 0.84rem;
+      color: #455a7c;
+      background: #fff;
+      border: 1px solid #e7ddcf;
+      border-radius: 12px;
+      padding: 0.5rem 0.65rem;
+    }
+    .profile-page .location-selected strong {
+      display: block;
+      margin-top: 0.15rem;
+      color: #455a7c;
+      font-weight: 600;
     }
     .profile-page .location-mode .btn {
       min-width: 88px;
     }
     .profile-page .location-map {
-      height: 360px;
-      border: 1px solid #d9e3f4;
+      height: 320px;
+      border: 1px solid #e7ddcf;
       border-radius: 12px;
       overflow: hidden;
+      background: #fff;
     }
     .profile-page .location-coord {
       font-size: 0.8rem;
-      color: #6c757d;
+      color: #455a7c;
     }
 
     .profile-page .tier-badge { font-size: 0.8rem; padding: 0.35em 0.85em; }
@@ -219,6 +257,139 @@
     }
     .profile-page .card:not(.profile-nudge-banner) .card-body {
       padding: 1rem;
+    }
+    .profile-page .portfolio-summary-card .card-body {
+      min-height: 128px;
+      padding: 1.15rem 1.1rem;
+      gap: 0.7rem !important;
+      align-items: center;
+    }
+    .profile-page .portfolio-summary-metric {
+      font-size: 1.1rem;
+      line-height: 1.35;
+      color: #455a7c;
+      font-weight: 600;
+    }
+    .profile-page .portfolio-summary-metric strong {
+      font-size: 1.15rem;
+      color: #ff5656;
+    }
+    .profile-page .portfolio-summary-value {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: #455a7c;
+    }
+    .profile-page .profile-pref-card-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 0.75rem;
+    }
+    .profile-page .profile-pref-card-content {
+      margin-top: 1rem;
+    }
+    .profile-page .profile-pref-card-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      align-self: flex-start;
+    }
+    .profile-page .profile-pref-toggle {
+      white-space: nowrap;
+      min-width: 118px;
+    }
+    .profile-page .profile-pref-close {
+      width: 34px;
+      min-width: 34px;
+      padding: 0.25rem 0;
+      line-height: 1;
+      font-weight: 700;
+    }
+    .profile-page .recent-impact-list {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .profile-page .recent-impact-item {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      border: 1px solid #e5e7eb;
+      border-radius: 16px;
+      padding: 16px;
+      background: #fff;
+    }
+    .profile-page .recent-impact-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      align-items: flex-start;
+    }
+    .profile-page .recent-impact-view-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: #ff5656;
+      border: none;
+      color: #fff;
+      padding: 10px 16px;
+      border-radius: 10px;
+      font-weight: 700;
+      font-size: 0.9rem;
+      line-height: 1;
+      text-decoration: none;
+    }
+    .profile-page .recent-impact-view-btn:hover,
+    .profile-page .recent-impact-view-btn:focus {
+      background: #f04c4c;
+      color: #fff;
+      text-decoration: none;
+    }
+    .profile-page #profileEventDetailModal .modal-content {
+      border: 1px solid #dfe8f5;
+      border-radius: 16px;
+    }
+    .profile-page #profileEventDetailModal .modal-header {
+      border-bottom: 1px solid #e8eef7;
+    }
+    .profile-page .profile-event-detail-title {
+      color: #455a7c;
+      font-weight: 700;
+      margin-bottom: 0.35rem;
+    }
+    .profile-page .profile-event-detail-meta {
+      color: #6c757d;
+      font-size: 0.9rem;
+      margin-bottom: 0.6rem;
+    }
+    .profile-page .profile-event-detail-copy {
+      color: #455a7c;
+      margin-bottom: 0.6rem;
+      white-space: pre-wrap;
+    }
+    .profile-page .profile-event-detail-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-top: 0.35rem;
+    }
+    .profile-page .profile-event-detail-chip {
+      background: #fff;
+      border: 1px dashed #d1d5db;
+      border-radius: 999px;
+      padding: 0.2rem 0.65rem;
+      font-size: 0.78rem;
+      color: #4b5563;
+    }
+    @media (min-width: 768px) {
+      .profile-page .recent-impact-item {
+        flex-direction: row;
+        justify-content: space-between;
+        align-items: flex-start;
+      }
+      .profile-page .recent-impact-actions {
+        align-items: flex-end;
+      }
     }
 
     .profile-page .profile-nudge-banner {
@@ -313,6 +484,24 @@
       .profile-page .profile-hero .sdg-goals {
         justify-content: center;
       }
+      .profile-page .profile-pref-card-head {
+        flex-direction: column;
+      }
+      .profile-page .profile-pref-card-actions {
+        align-self: flex-start;
+      }
+      .profile-page .portfolio-summary-card .card-body {
+        min-height: 0;
+      }
+      .profile-page .portfolio-summary-metric {
+        font-size: 1rem;
+      }
+      .profile-page .portfolio-summary-metric strong {
+        font-size: 1.03rem;
+      }
+      .profile-page .portfolio-summary-value {
+        font-size: 1.12rem;
+      }
       .profile-page-shell {
         margin-top: 2.75rem;
       }
@@ -391,7 +580,7 @@
               (typeof locationSeed.label === 'string' && locationSeed.label.trim().length > 0);
             const hasSdgGoals = Boolean(user.sdg1 || user.sdg2 || user.sdg3);
             const completionItems = [
-              { done: !!user.picture, label: "Add a profile photo", tab: "overview", icon: "fa-camera" },
+              { done: !!user.picture, label: "Add a profile photo", tab: "portfolio", icon: "fa-camera" },
               { done: !!user.interest1, label: "Set your volunteer preferences", tab: "preferences", icon: "fa-sliders" },
               { done: hasAvailability, label: "Set your availability", tab: "preferences", icon: "fa-calendar-days" },
               { done: hasLocation, label: "Set your location", tab: "preferences", icon: "fa-location-dot" },
@@ -583,10 +772,7 @@
           <nav class="mt-4 mb-2" aria-label="Profile sections">
             <ul class="nav nav-pills gap-2 profile-tabs justify-content-center" id="profileTabs" role="tablist">
               <li class="nav-item" role="presentation">
-                <button type="button" class="nav-link active" id="tab-overview" role="tab" aria-controls="panel-overview" aria-selected="true" data-tab-target="overview">Overview</button>
-              </li>
-              <li class="nav-item" role="presentation">
-                <button type="button" class="nav-link" id="tab-portfolio" role="tab" aria-controls="panel-portfolio" aria-selected="false" data-tab-target="portfolio">Portfolio</button>
+                <button type="button" class="nav-link active" id="tab-portfolio" role="tab" aria-controls="panel-portfolio" aria-selected="true" data-tab-target="portfolio">Portfolio</button>
               </li>
               <li class="nav-item" role="presentation">
                 <button type="button" class="nav-link" id="tab-skills" role="tab" aria-controls="panel-skills" aria-selected="false" data-tab-target="skills">Skills</button>
@@ -600,75 +786,7 @@
             </ul>
           </nav>
 
-          <div class="profile-panel mt-3 active" data-tab="overview" id="panel-overview" role="tabpanel" aria-labelledby="tab-overview" aria-hidden="false">
-            <div class="card shadow-sm border-0 mb-4">
-              <div class="card-body">
-                <h2 style="color:#455a7c;">Upcoming Opportunities</h2>
-                <% const upcoming = (stats.upcoming || []); %>
-                <% if (!upcoming.length) { %>
-                  <div class="empty-state">
-                    <span class="empty-icon">📅</span>
-                    <div class="empty-title">No upcoming opportunities yet</div>
-                    <div class="empty-body">Browse open shifts and RSVP to start building your impact.</div>
-                    <a href="/events" class="btn btn-sm btn-primary">Find Opportunities</a>
-                  </div>
-                <% } else { %>
-                  <ul class="list-group">
-                    <% upcoming.forEach((item) => { %>
-                      <li class="list-group-item d-flex justify-content-between align-items-center">
-                        <div>
-                          <div class="fw-semibold"><%= item.title || 'Untitled' %></div>
-                          <div class="text-muted small">
-                            <%= item.org_name || 'Independent organizer' %>
-                            <% if (item.community_tag) { %> • <%= item.community_tag %><% } %>
-                          </div>
-                        </div>
-                        <span class="text-muted small"><%= item.start_at ? new Date(item.start_at).toLocaleDateString() : 'Date TBD' %></span>
-                      </li>
-                    <% }) %>
-                  </ul>
-                <% } %>
-              </div>
-            </div>
-
-            <div class="card shadow-sm border-0">
-              <div class="card-body">
-                <h2 style="color:#455a7c;">Recent Volunteering</h2>
-                <div class="row g-4">
-                  <div class="col-md-6">
-                    <% const recentHistory = (stats.recent_history || []); %>
-                    <% if (!recentHistory.length) { %>
-                      <div class="empty-state">
-                        <span class="empty-icon">⏱️</span>
-                        <div class="empty-title">No completed shifts yet</div>
-                        <div class="empty-body">Your verified volunteering history will appear here.</div>
-                      </div>
-                    <% } else { %>
-                      <ul class="list-group">
-                        <% recentHistory.forEach((item) => { %>
-                          <li class="list-group-item d-flex justify-content-between align-items-center">
-                            <div>
-                              <div class="fw-semibold"><%= item.title || 'Untitled' %></div>
-                              <div class="text-muted small">
-                                <%= item.verification_status || 'pending' %>
-                                <% if (item.attended_minutes) { %> • <%= item.attended_minutes %> mins<% } %>
-                              </div>
-                            </div>
-                            <span class="text-muted small"><%= item.start_at ? new Date(item.start_at).toLocaleDateString() : 'Date TBD' %></span>
-                          </li>
-                        <% }) %>
-                      </ul>
-                    <% } %>
-                  </div>
-                  <div class="col-md-6">
-                    <p class="text-muted small">Skills breakdown and badges coming soon.</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="profile-panel mt-3" data-tab="portfolio" id="panel-portfolio" role="tabpanel" aria-labelledby="tab-portfolio" aria-hidden="true">
+          <div class="profile-panel mt-3 active" data-tab="portfolio" id="panel-portfolio" role="tabpanel" aria-labelledby="tab-portfolio" aria-hidden="false">
             <div class="print-header d-none">
               <div style="display:flex; justify-content:space-between; align-items:center;
                           border-bottom: 2px solid #455a7c; padding-bottom: 12pt; margin-bottom: 16pt;">
@@ -688,9 +806,9 @@
               </div>
 
               <div style="display:flex; gap:24pt; margin-bottom:16pt;">
-                <div><strong>Verified Serves:</strong> <%= portfolioSummary?.total_serves_verified || 0 %></div>
-                <div><strong>Hours Served:</strong> <%= (portfolioSummary?.total_hours_verified || 0).toFixed(1) %></div>
-                <div><strong>Est. $KIND Earned:</strong> <%= portfolioSummary?.total_kind_est_earned || 0 %></div>
+                <div><strong style="color:#ff5656;">Verified Serves:</strong> <%= portfolioSummary?.total_serves_verified || 0 %></div>
+                <div><strong style="color:#ff5656;">Hours Served:</strong> <%= (portfolioSummary?.total_hours_verified || 0).toFixed(1) %></div>
+                <div><strong style="color:#ff5656;">Est. $KIND Earned:</strong> <%= portfolioSummary?.total_kind_est_earned || 0 %></div>
                 <div><strong>Priority Tier:</strong> <%= priorityTier %></div>
               </div>
             </div>
@@ -705,11 +823,11 @@
               </button>
             </div>
 
-            <div class="card shadow-sm border-0 mb-3">
+            <div class="card shadow-sm border-0 mb-3 portfolio-summary-card">
               <div class="card-body d-flex flex-wrap gap-3">
-                <div><strong>Verified serves:</strong> <%= portfolioSummary?.total_serves_verified || 0 %></div>
-                <div><strong>Hours served:</strong> <%= (portfolioSummary?.total_hours_verified || 0).toFixed(1) %></div>
-                <div><strong>Estimated $KIND earned:</strong> <%= portfolioSummary?.total_kind_est_earned || 0 %></div>
+                <div class="portfolio-summary-metric"><strong>Verified serves:</strong> <span class="portfolio-summary-value"><%= portfolioSummary?.total_serves_verified || 0 %></span></div>
+                <div class="portfolio-summary-metric"><strong>Hours served:</strong> <span class="portfolio-summary-value"><%= (portfolioSummary?.total_hours_verified || 0).toFixed(1) %></span></div>
+                <div class="portfolio-summary-metric"><strong>Estimated $KIND earned:</strong> <span class="portfolio-summary-value"><%= portfolioSummary?.total_kind_est_earned || 0 %></span></div>
               </div>
             </div>
 
@@ -734,9 +852,9 @@
                   <% if (!upcomingRows.length) { %>
                     <div class="text-muted">No upcoming commitments.</div>
                   <% } else { %>
-                    <div class="list-group">
+                    <div class="recent-impact-list">
                       <% upcomingRows.forEach((row) => { %>
-                        <div class="list-group-item d-flex flex-column flex-md-row justify-content-between align-items-start gap-2">
+                        <article class="recent-impact-item">
                           <div>
                             <div class="fw-semibold"><%= row.title || 'Untitled event' %></div>
                             <div class="text-muted small"><%= row.start_at ? row.start_at.toLocaleString() : 'Date TBD' %> • <%= row.location_text || 'Location TBD' %></div>
@@ -747,7 +865,7 @@
                             </span>
                             <small class="text-muted mt-1">+<%= row.kind_estimate_per_user || 0 %> $KIND (est.)</small>
                           </div>
-                        </div>
+                        </article>
                       <% }); %>
                     </div>
                   <% } %>
@@ -760,9 +878,9 @@
                   <% if (!pastRows.length) { %>
                     <div class="text-muted">No past events yet.</div>
                   <% } else { %>
-                    <div class="list-group">
+                    <div class="recent-impact-list">
                       <% pastRows.forEach((row) => { %>
-                        <div class="list-group-item d-flex flex-column flex-md-row justify-content-between align-items-start gap-2">
+                        <article class="recent-impact-item">
                           <div>
                             <div class="fw-semibold">
                               <span class="<%= row.is_verified ? 'text-success' : 'text-warning' %>"><%= row.is_verified ? 'Verified ✓' : 'Unverified ⏳' %></span>
@@ -776,10 +894,15 @@
                               <div class="text-muted small">Check-in required for verification</div>
                             <% } %>
                           </div>
-                          <div class="text-end text-muted small">
-                            <%= row.start_at ? row.start_at.toLocaleDateString() : 'Date TBD' %>
+                          <div class="recent-impact-actions">
+                            <div class="text-end text-muted small">
+                              <%= row.start_at ? row.start_at.toLocaleDateString() : 'Date TBD' %>
+                            </div>
+                            <% if (row.id) { %>
+                              <button type="button" class="recent-impact-view-btn js-profile-event-detail-btn" data-event-id="<%= String(row.id) %>">View Event</button>
+                            <% } %>
                           </div>
-                        </div>
+                        </article>
                       <% }); %>
                     </div>
                   <% } %>
@@ -839,163 +962,182 @@
             <div class="row justify-content-center">
               <div class="col-lg-8 col-xl-7">
                 <div class="card shadow-sm border-0 mb-3">
-                  <div class="card-body">
-                    <h5 class="fw-bold" style="color:#455a7c;">Preferences</h5>
-                    <p class="text-muted small mb-3">These settings help Get Kinder recommend the right volunteer opportunities for you.</p>
-                    <div class="form-group mb-3">
-                      <label class="labels">Cause / community I care about</label>
-                      <input type="text" name="interest1" class="form-control" placeholder="e.g., unhoused support, food security, park cleanups" value="<%= user.interest1 || '' %>">
+                  <div class="card-body profile-pref-card-body is-collapsed" data-pref-card>
+                    <div class="profile-pref-card-head">
+                      <div>
+                        <h5 class="fw-bold mb-1" style="color:#455a7c;">Preferences</h5>
+                        <p class="text-muted small mb-0">These settings help Get Kinder recommend the right volunteer opportunities for you.</p>
+                      </div>
+                      <div class="profile-pref-card-actions">
+                        <button class="btn btn-outline-primary btn-sm profile-pref-toggle" type="button" data-pref-toggle data-collapsed-label="Expand" data-expanded-label="Save preferences" aria-expanded="false">Expand</button>
+                        <button class="btn btn-outline-secondary btn-sm profile-pref-close" type="button" data-pref-collapse aria-label="Collapse this card">X</button>
+                      </div>
                     </div>
-                    <div class="form-group mb-3">
-                      <label class="labels">Skills I want to build and/or use to help organizations with</label>
-                      <input type="text" name="interest2" class="form-control" placeholder="e.g., outreach, meal prep, logistics, stewardship" value="<%= user.interest2 || '' %>">
-                    </div>
-                    <div class="form-group mb-3">
-                      <label class="labels">Preferred type of Volunteering</label>
-                      <input type="text" name="interest3" class="form-control" placeholder="e.g., outdoors, food sorting, outreach, admin support" value="<%= user.interest3 || '' %>">
-                    </div>
-                    <div class="text-center">
-                      <button class="btn btn-outline-primary" type="submit">Save preferences</button>
+                    <div class="profile-pref-card-content" data-pref-content hidden>
+                      <div class="form-group mb-3">
+                        <label class="labels">Cause / community I care about</label>
+                        <input type="text" name="interest1" class="form-control" placeholder="e.g., unhoused support, food security, park cleanups" value="<%= user.interest1 || '' %>">
+                      </div>
+                      <div class="form-group mb-3">
+                        <label class="labels">Skills I want to build and/or use to help organizations with</label>
+                        <input type="text" name="interest2" class="form-control" placeholder="e.g., outreach, meal prep, logistics, stewardship" value="<%= user.interest2 || '' %>">
+                      </div>
+                      <div class="form-group mb-3">
+                        <label class="labels">Preferred type of Volunteering</label>
+                        <input type="text" name="interest3" class="form-control" placeholder="e.g., outdoors, food sorting, outreach, admin support" value="<%= user.interest3 || '' %>">
+                      </div>
                     </div>
                   </div>
                 </div>
 
                 <div class="card shadow-sm border-0 mb-3">
-                  <div class="card-body">
-                    <h5 class="fw-bold" style="color:#455a7c;">Availability</h5>
-                    <p class="text-muted small mb-3">These settings help us recommend opportunities that fit your schedule.</p>
-
-                    <div class="mb-3">
-                      <div class="availability-control-label">Days available</div>
-                      <div class="d-flex flex-wrap gap-2" id="availability-days">
-                        <button type="button" class="availability-chip" data-availability-day="mon" aria-pressed="false">Mon</button>
-                        <button type="button" class="availability-chip" data-availability-day="tue" aria-pressed="false">Tue</button>
-                        <button type="button" class="availability-chip" data-availability-day="wed" aria-pressed="false">Wed</button>
-                        <button type="button" class="availability-chip" data-availability-day="thu" aria-pressed="false">Thu</button>
-                        <button type="button" class="availability-chip" data-availability-day="fri" aria-pressed="false">Fri</button>
-                        <button type="button" class="availability-chip" data-availability-day="sat" aria-pressed="false">Sat</button>
-                        <button type="button" class="availability-chip" data-availability-day="sun" aria-pressed="false">Sun</button>
+                  <div class="card-body profile-pref-card-body is-collapsed" data-pref-card>
+                    <div class="profile-pref-card-head">
+                      <div>
+                        <h5 class="fw-bold mb-1" style="color:#455a7c;">Availability</h5>
+                        <p class="text-muted small mb-0">These settings help us recommend opportunities that fit your schedule.</p>
+                      </div>
+                      <div class="profile-pref-card-actions">
+                        <button class="btn btn-outline-primary btn-sm profile-pref-toggle" type="button" data-pref-toggle data-collapsed-label="Expand" data-expanded-label="Save preferences" aria-expanded="false">Expand</button>
+                        <button class="btn btn-outline-secondary btn-sm profile-pref-close" type="button" data-pref-collapse aria-label="Collapse this card">X</button>
                       </div>
                     </div>
 
-                    <div class="mb-3">
-                      <div class="availability-control-label">Time of day</div>
-                      <div class="d-flex flex-wrap gap-2" id="availability-time-of-day">
-                        <button type="button" class="availability-chip" data-availability-tod="morning" aria-pressed="false">Morning</button>
-                        <button type="button" class="availability-chip" data-availability-tod="afternoon" aria-pressed="false">Afternoon</button>
-                        <button type="button" class="availability-chip" data-availability-tod="evening" aria-pressed="false">Evening</button>
-                      </div>
-                    </div>
-
-                    <div class="row g-2 mb-2">
-                      <div class="col-sm-6">
-                        <label class="labels" for="availability-frequency">Frequency</label>
-                        <select id="availability-frequency" class="form-select form-select-sm">
-                          <option value="1w">1x/week</option>
-                          <option value="2w">2x/week</option>
-                          <option value="flex">Flexible</option>
-                        </select>
-                      </div>
-                      <div class="col-sm-6">
-                        <label class="labels" for="availability-notice">Notice</label>
-                        <select id="availability-notice" class="form-select form-select-sm">
-                          <option value="same_day">Same-day</option>
-                          <option value="24h">24 hours</option>
-                          <option value="48h">48 hours</option>
-                        </select>
-                      </div>
-                    </div>
-
-                    <a class="small text-decoration-none" data-bs-toggle="collapse" href="#availabilityAdvanced" role="button" aria-expanded="false" aria-controls="availabilityAdvanced">
-                      Advanced time window
-                    </a>
-                    <div class="collapse mt-2" id="availabilityAdvanced">
-                      <div class="row g-2">
-                        <div class="col-sm-6">
-                          <label class="labels" for="availability-earliest">Earliest time</label>
-                          <input type="time" id="availability-earliest" class="form-control form-control-sm">
-                        </div>
-                        <div class="col-sm-6">
-                          <label class="labels" for="availability-latest">Latest time</label>
-                          <input type="time" id="availability-latest" class="form-control form-control-sm">
+                    <div class="profile-pref-card-content" data-pref-content hidden>
+                      <div class="mb-3">
+                        <div class="availability-control-label">Days available</div>
+                        <div class="d-flex flex-wrap gap-2" id="availability-days">
+                          <button type="button" class="availability-chip" data-availability-day="mon" aria-pressed="false">Mon</button>
+                          <button type="button" class="availability-chip" data-availability-day="tue" aria-pressed="false">Tue</button>
+                          <button type="button" class="availability-chip" data-availability-day="wed" aria-pressed="false">Wed</button>
+                          <button type="button" class="availability-chip" data-availability-day="thu" aria-pressed="false">Thu</button>
+                          <button type="button" class="availability-chip" data-availability-day="fri" aria-pressed="false">Fri</button>
+                          <button type="button" class="availability-chip" data-availability-day="sat" aria-pressed="false">Sat</button>
+                          <button type="button" class="availability-chip" data-availability-day="sun" aria-pressed="false">Sun</button>
                         </div>
                       </div>
-                    </div>
 
-                    <div class="small text-muted mt-2">Current selection</div>
-                    <div class="availability-summary" id="availability-summary">Flexible availability</div>
-                    <div class="availability-summary" id="availability-timezone"></div>
-                    <hr>
+                      <div class="mb-3">
+                        <div class="availability-control-label">Time of day</div>
+                        <div class="d-flex flex-wrap gap-2" id="availability-time-of-day">
+                          <button type="button" class="availability-chip" data-availability-tod="morning" aria-pressed="false">Morning</button>
+                          <button type="button" class="availability-chip" data-availability-tod="afternoon" aria-pressed="false">Afternoon</button>
+                          <button type="button" class="availability-chip" data-availability-tod="evening" aria-pressed="false">Evening</button>
+                        </div>
+                      </div>
 
-                    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
-                      <div class="fw-semibold" style="color:#455a7c;">Specific date/time of Availabilty</div>
-                      <button
-                        type="button"
-                        class="btn btn-outline-primary btn-sm"
-                        id="availability-add-exception-btn"
-                        data-bs-toggle="modal"
-                        data-bs-target="#availabilityExceptionModal"
-                      >
-                        Add specific date/time
-                      </button>
-                    </div>
-                    <div class="text-muted small mb-2">Add one-off windows when you are available. Maximum 10 total, up to 3 per date.</div>
-                    <div id="availability-exception-list" class="d-flex flex-wrap gap-2"></div>
-                    <button type="button" class="btn btn-link btn-sm p-0 mt-1 d-none" id="availability-exception-toggle"></button>
-                    <div class="small text-muted mt-2 d-none" id="availability-exception-limit-note">Maximum of 10 exceptions reached.</div>
-                    <div class="text-center mt-3">
-                      <button class="btn btn-outline-primary" type="submit">Save preferences</button>
-                    </div>
-                  </div>
-                </div>
+                      <div class="row g-2 mb-2">
+                        <div class="col-sm-6">
+                          <label class="labels" for="availability-frequency">Frequency</label>
+                          <select id="availability-frequency" class="form-select form-select-sm">
+                            <option value="1w">1x/week</option>
+                            <option value="2w">2x/week</option>
+                            <option value="flex">Flexible</option>
+                          </select>
+                        </div>
+                        <div class="col-sm-6">
+                          <label class="labels" for="availability-notice">Notice</label>
+                          <select id="availability-notice" class="form-select form-select-sm">
+                            <option value="same_day">Same-day</option>
+                            <option value="24h">24 hours</option>
+                            <option value="48h">48 hours</option>
+                          </select>
+                        </div>
+                      </div>
 
-                <div class="card shadow-sm border-0 mb-3">
-                  <div class="card-body">
-                    <h5 class="fw-bold" style="color:#455a7c;">Location for recommendations</h5>
-                    <p class="text-muted small mb-3">Used to recommend volunteer opportunities near you. Saved as an approximate area.</p>
+                      <a class="small text-decoration-none" data-bs-toggle="collapse" href="#availabilityAdvanced" role="button" aria-expanded="false" aria-controls="availabilityAdvanced">
+                        Advanced time window
+                      </a>
+                      <div class="collapse mt-2" id="availabilityAdvanced">
+                        <div class="row g-2">
+                          <div class="col-sm-6">
+                            <label class="labels" for="availability-earliest">Earliest time</label>
+                            <input type="time" id="availability-earliest" class="form-control form-control-sm">
+                          </div>
+                          <div class="col-sm-6">
+                            <label class="labels" for="availability-latest">Latest time</label>
+                            <input type="time" id="availability-latest" class="form-control form-control-sm">
+                          </div>
+                        </div>
+                      </div>
 
-                    <div class="row g-2 align-items-end">
-                      <div class="col-md-8">
-                        <label class="labels" for="location_query">Postal code or address</label>
-                        <input
-                          type="text"
-                          id="location_query"
-                          class="form-control"
-                          placeholder="e.g., V6B 1A1 or 123 Main St, Vancouver"
+                      <div class="small text-muted mt-2">Current selection</div>
+                      <div class="availability-summary" id="availability-summary">Flexible availability</div>
+                      <div class="availability-summary" id="availability-timezone"></div>
+                      <hr>
+
+                      <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+                        <div class="fw-semibold" style="color:#455a7c;">Specific date/time of Availabilty</div>
+                        <button
+                          type="button"
+                          class="btn btn-outline-primary btn-sm"
+                          id="availability-add-exception-btn"
+                          data-bs-toggle="modal"
+                          data-bs-target="#availabilityExceptionModal"
                         >
+                          Add specific date/time
+                        </button>
                       </div>
-                      <div class="col-md-4 d-grid">
-                        <button type="button" class="btn btn-outline-primary" id="location-find-btn">Find on map</button>
+                      <div class="text-muted small mb-2">Add one-off windows when you are available. Maximum 10 total, up to 3 per date.</div>
+                      <div id="availability-exception-list" class="d-flex flex-wrap gap-2"></div>
+                      <button type="button" class="btn btn-link btn-sm p-0 mt-1 d-none" id="availability-exception-toggle"></button>
+                      <div class="small text-muted mt-2 d-none" id="availability-exception-limit-note">Maximum of 10 exceptions reached.</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="card shadow-sm border-0 mb-3">
+                  <div class="card-body profile-pref-card-body is-collapsed" data-pref-card>
+                    <div class="profile-pref-card-head">
+                      <div>
+                        <h5 class="fw-bold mb-1" style="color:#455a7c;">Your Home Base</h5>
+                        <p class="text-muted small mb-0">Choose the area you usually volunteer from so we can match opportunities nearby.</p>
                       </div>
-                    </div>
-
-                    <div class="mt-2 d-flex flex-wrap align-items-center gap-3">
-                      <button type="button" class="btn btn-link btn-sm p-0" id="location-use-current-btn">Use my current location</button>
-                      <button type="button" class="btn btn-link btn-sm p-0 d-none" id="location-edit-btn">Edit</button>
-                    </div>
-                    <div class="location-helper mt-1" id="location-status-line"></div>
-                    <div class="location-summary mt-2" id="location-saved-summary">No saved location yet.</div>
-
-                    <div class="mt-3">
-                      <div class="d-flex justify-content-between align-items-center">
-                        <label class="labels mb-0" for="location-radius-range">Travel radius</label>
-                        <span class="small text-muted"><span id="location-radius-value">5</span> km</span>
-                      </div>
-                      <input type="range" min="1" max="25" step="1" value="5" class="form-range" id="location-radius-range">
-                    </div>
-
-                    <div class="location-mode mt-2">
-                      <label class="labels mb-1">Travel mode</label>
-                      <div class="btn-group btn-group-sm flex-wrap gap-2 d-flex" role="group" aria-label="Travel mode">
-                        <button type="button" class="btn btn-outline-primary" data-travel-mode="walk">Walk</button>
-                        <button type="button" class="btn btn-outline-primary" data-travel-mode="bike">Bike</button>
-                        <button type="button" class="btn btn-outline-primary" data-travel-mode="transit">Transit</button>
-                        <button type="button" class="btn btn-outline-primary" data-travel-mode="drive">Drive</button>
+                      <div class="profile-pref-card-actions">
+                        <button class="btn btn-outline-primary btn-sm profile-pref-toggle" type="button" data-pref-toggle data-collapsed-label="Expand" data-expanded-label="Save preferences" aria-expanded="false">Expand</button>
+                        <button class="btn btn-outline-secondary btn-sm profile-pref-close" type="button" data-pref-collapse aria-label="Collapse this card">X</button>
                       </div>
                     </div>
 
-                    <div class="text-center mt-3">
-                      <button class="btn btn-outline-primary" type="submit">Save preferences</button>
+                    <div class="profile-pref-card-content" data-pref-content hidden>
+                      <div class="home-base-card">
+                        <div class="row g-2 align-items-end">
+                          <div class="col-md-8">
+                            <label class="labels" for="location_query">Address or city</label>
+                            <input
+                              type="text"
+                              id="location_query"
+                              class="form-control"
+                              placeholder="e.g., Vancouver, BC or 123 Main St"
+                            >
+                          </div>
+                          <div class="col-md-4 d-grid">
+                            <button type="button" class="btn btn-location-primary" id="location-find-btn">Find on map</button>
+                          </div>
+                        </div>
+
+                        <div class="home-base-actions mt-2">
+                          <button type="button" class="btn btn-outline-secondary btn-sm" id="location-use-current-btn">Use my current location</button>
+                          <div class="location-helper" id="location-status-line"></div>
+                        </div>
+
+                        <div class="location-map mt-3" id="location-map"></div>
+                        <div class="location-selected mt-2" id="location-selected-line">
+                          <span class="text-muted small">Selected map point</span>
+                          <strong>No location selected yet.</strong>
+                        </div>
+                        <div class="location-summary mt-2" id="location-saved-summary">No saved location yet.</div>
+
+                        <div class="mt-3">
+                          <label class="labels mb-1" for="location-radius-select">Travel radius</label>
+                          <select id="location-radius-select" class="form-select">
+                            <option value="5">5 km</option>
+                            <option value="10">10 km</option>
+                            <option value="25">25 km</option>
+                            <option value="50">50 km</option>
+                          </select>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1012,59 +1154,66 @@
                 <input type="hidden" name="timezone" id="timezone" value="<%= locationSeed.timezone || 'America/Vancouver' %>">
 
                 <div class="card shadow-sm border-0">
-                  <div class="card-body">
-                    <h5 class="fw-bold" style="color:#455a7c;">UN SDG Goals (pick up to 3)</h5>
-                    <p class="text-muted small mb-3">Align your volunteering with the global goals you care about most.</p>
-
-                    <div class="row align-items-center mb-3">
-                      <div class="col-auto">
-                        <% if (user.sdg1) { const number = user.sdg1.split(/\s*[-–—]\s*/)[0].trim(); %>
-                          <img src="/images/sdgs/goal_<%= number %>.png" alt="SDG <%= number %>" class="img-fluid" style="max-width: 60px;">
-                        <% } %>
+                  <div class="card-body profile-pref-card-body is-collapsed" data-pref-card>
+                    <div class="profile-pref-card-head">
+                      <div>
+                        <h5 class="fw-bold mb-1" style="color:#455a7c;">UN SDG Goals (pick up to 3)</h5>
+                        <p class="text-muted small mb-0">Align your volunteering with the global goals you care about most.</p>
                       </div>
-                      <div class="col">
-                        <select name="sdg1" class="form-select">
-                          <option value="">Select your first SDG</option>
-                          <% sdgOptions.forEach((option) => { %>
-                            <option value="<%= option %>" <%= user.sdg1 === option ? 'selected' : '' %>><%= option %></option>
-                          <% }); %>
-                        </select>
+                      <div class="profile-pref-card-actions">
+                        <button class="btn btn-outline-primary btn-sm profile-pref-toggle" type="button" data-pref-toggle data-collapsed-label="Expand" data-expanded-label="Save preferences" aria-expanded="false">Expand</button>
+                        <button class="btn btn-outline-secondary btn-sm profile-pref-close" type="button" data-pref-collapse aria-label="Collapse this card">X</button>
                       </div>
                     </div>
 
-                    <div class="row align-items-center mb-3">
-                      <div class="col-auto">
-                        <% if (user.sdg2) { const number = user.sdg2.split(/\s*[-–—]\s*/)[0].trim(); %>
-                          <img src="/images/sdgs/goal_<%= number %>.png" alt="SDG <%= number %>" class="img-fluid" style="max-width: 60px;">
-                        <% } %>
+                    <div class="profile-pref-card-content" data-pref-content hidden>
+                      <div class="row align-items-center mb-3">
+                        <div class="col-auto">
+                          <% if (user.sdg1) { const number = user.sdg1.split(/\s*[-–—]\s*/)[0].trim(); %>
+                            <img src="/images/sdgs/goal_<%= number %>.png" alt="SDG <%= number %>" class="img-fluid" style="max-width: 60px;">
+                          <% } %>
+                        </div>
+                        <div class="col">
+                          <select name="sdg1" class="form-select">
+                            <option value="">Select your first SDG</option>
+                            <% sdgOptions.forEach((option) => { %>
+                              <option value="<%= option %>" <%= user.sdg1 === option ? 'selected' : '' %>><%= option %></option>
+                            <% }); %>
+                          </select>
+                        </div>
                       </div>
-                      <div class="col">
-                        <select name="sdg2" class="form-select">
-                          <option value="">Select your second SDG</option>
-                          <% sdgOptions.forEach((option) => { %>
-                            <option value="<%= option %>" <%= user.sdg2 === option ? 'selected' : '' %>><%= option %></option>
-                          <% }); %>
-                        </select>
-                      </div>
-                    </div>
 
-                    <div class="row align-items-center mb-3">
-                      <div class="col-auto">
-                        <% if (user.sdg3) { const number = user.sdg3.split(/\s*[-–—]\s*/)[0].trim(); %>
-                          <img src="/images/sdgs/goal_<%= number %>.png" alt="SDG <%= number %>" class="img-fluid" style="max-width: 60px;">
-                        <% } %>
+                      <div class="row align-items-center mb-3">
+                        <div class="col-auto">
+                          <% if (user.sdg2) { const number = user.sdg2.split(/\s*[-–—]\s*/)[0].trim(); %>
+                            <img src="/images/sdgs/goal_<%= number %>.png" alt="SDG <%= number %>" class="img-fluid" style="max-width: 60px;">
+                          <% } %>
+                        </div>
+                        <div class="col">
+                          <select name="sdg2" class="form-select">
+                            <option value="">Select your second SDG</option>
+                            <% sdgOptions.forEach((option) => { %>
+                              <option value="<%= option %>" <%= user.sdg2 === option ? 'selected' : '' %>><%= option %></option>
+                            <% }); %>
+                          </select>
+                        </div>
                       </div>
-                      <div class="col">
-                        <select name="sdg3" class="form-select">
-                          <option value="">Select your third SDG</option>
-                          <% sdgOptions.forEach((option) => { %>
-                            <option value="<%= option %>" <%= user.sdg3 === option ? 'selected' : '' %>><%= option %></option>
-                          <% }); %>
-                        </select>
+
+                      <div class="row align-items-center mb-3">
+                        <div class="col-auto">
+                          <% if (user.sdg3) { const number = user.sdg3.split(/\s*[-–—]\s*/)[0].trim(); %>
+                            <img src="/images/sdgs/goal_<%= number %>.png" alt="SDG <%= number %>" class="img-fluid" style="max-width: 60px;">
+                          <% } %>
+                        </div>
+                        <div class="col">
+                          <select name="sdg3" class="form-select">
+                            <option value="">Select your third SDG</option>
+                            <% sdgOptions.forEach((option) => { %>
+                              <option value="<%= option %>" <%= user.sdg3 === option ? 'selected' : '' %>><%= option %></option>
+                            <% }); %>
+                          </select>
+                        </div>
                       </div>
-                    </div>
-                    <div class="text-center mt-2">
-                      <button class="btn btn-outline-primary" type="submit">Save preferences</button>
                     </div>
                   </div>
                 </div>
@@ -1104,20 +1253,32 @@
             </div>
           </div>
 
-          <div class="modal fade" id="locationPickerModal" tabindex="-1" aria-labelledby="locationPickerModalLabel" aria-hidden="true">
+          <div class="modal fade" id="profileEventDetailModal" tabindex="-1" aria-labelledby="profileEventDetailModalLabel" aria-hidden="true">
             <div class="modal-dialog modal-lg modal-dialog-centered">
               <div class="modal-content">
                 <div class="modal-header">
-                  <h5 class="modal-title" id="locationPickerModalLabel">Confirm your location</h5>
+                  <h5 class="modal-title" id="profileEventDetailModalLabel">Event details</h5>
                   <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
-                  <div class="location-map" id="location-map"></div>
-                  <div class="location-coord mt-2" id="location-selected-line">Drag the pin to fine-tune your location.</div>
+                  <div id="profile-event-detail-loading" class="text-muted">Loading event details…</div>
+                  <div id="profile-event-detail-error" class="alert alert-danger py-2 px-3 d-none mb-0" role="alert"></div>
+                  <div id="profile-event-detail-content" class="d-none">
+                    <h4 id="profile-event-detail-title" class="profile-event-detail-title"></h4>
+                    <div id="profile-event-detail-when" class="profile-event-detail-meta"></div>
+                    <div id="profile-event-detail-where" class="profile-event-detail-meta"></div>
+                    <div id="profile-event-detail-who" class="profile-event-detail-meta"></div>
+                    <p id="profile-event-detail-description" class="profile-event-detail-copy mb-1"></p>
+                    <p id="profile-event-detail-requirements" class="profile-event-detail-copy mb-0"></p>
+                    <div class="profile-event-detail-chips">
+                      <span id="profile-event-detail-credits" class="profile-event-detail-chip"></span>
+                      <span id="profile-event-detail-verification" class="profile-event-detail-chip"></span>
+                      <span id="profile-event-detail-status" class="profile-event-detail-chip"></span>
+                    </div>
+                  </div>
                 </div>
                 <div class="modal-footer">
-                  <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                  <button type="button" class="btn btn-primary" id="location-modal-save-btn">Save location</button>
+                  <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
                 </div>
               </div>
             </div>
@@ -1295,8 +1456,14 @@
     }
   });
 
-  (function () {
+      (function () {
+    function normalizeTabKey(key) {
+      if (key === 'overview') return 'portfolio';
+      return key;
+    }
+
     function setActiveTab(key) {
+      key = normalizeTabKey(key);
       const panels = document.querySelectorAll('.profile-panel[data-tab]');
       const buttons = document.querySelectorAll('#profileTabs [role="tab"]');
       let found = false;
@@ -1307,9 +1474,9 @@
         if (match) found = true;
       });
       if (!found) {
-        const fallback = document.querySelector('.profile-panel[data-tab="overview"]');
+        const fallback = document.querySelector('.profile-panel[data-tab="portfolio"]');
         if (fallback) { fallback.classList.add('active'); fallback.setAttribute('aria-hidden', 'false'); }
-        key = 'overview';
+        key = 'portfolio';
       }
       buttons.forEach(b => {
         const isActive = b.getAttribute('data-tab-target') === key;
@@ -1380,8 +1547,187 @@
       });
     }
 
+    function initPreferenceCardCollapses() {
+      const cards = document.querySelectorAll('#panel-preferences .profile-pref-card-body[data-pref-card]');
+      cards.forEach((card) => {
+        const toggleBtn = card.querySelector('[data-pref-toggle]');
+        const closeBtn = card.querySelector('[data-pref-collapse]');
+        const content = card.querySelector('[data-pref-content]');
+        if (!toggleBtn || !content) return;
+
+        const collapsedLabel = toggleBtn.getAttribute('data-collapsed-label') || 'Expand';
+        const expandedLabel = toggleBtn.getAttribute('data-expanded-label') || 'Save preferences';
+
+        function setCollapsed(collapsed) {
+          card.classList.toggle('is-collapsed', collapsed);
+          content.hidden = collapsed;
+          toggleBtn.textContent = collapsed ? collapsedLabel : expandedLabel;
+          toggleBtn.type = collapsed ? 'button' : 'submit';
+          if (collapsed) {
+            toggleBtn.removeAttribute('name');
+            toggleBtn.removeAttribute('value');
+          } else {
+            toggleBtn.setAttribute('name', 'profile_action');
+            toggleBtn.setAttribute('value', 'save_preferences');
+          }
+          toggleBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+          if (closeBtn) closeBtn.hidden = collapsed;
+        }
+
+        setCollapsed(true);
+        toggleBtn.addEventListener('click', function (e) {
+          if (!card.classList.contains('is-collapsed')) return;
+          e.preventDefault();
+          setCollapsed(false);
+          document.dispatchEvent(new CustomEvent('profile:preferences-card-expanded'));
+          const firstField = content.querySelector('input, select, textarea, button:not([type="submit"])');
+          if (firstField && typeof firstField.focus === 'function') firstField.focus();
+        });
+
+        if (closeBtn) {
+          closeBtn.addEventListener('click', function (e) {
+            e.preventDefault();
+            setCollapsed(true);
+          });
+        }
+      });
+    }
+
+    function formatEventDateRange(startAt, endAt, tz) {
+      if (!startAt) return 'When: Date TBD';
+      try {
+        const start = new Date(startAt);
+        if (Number.isNaN(start.getTime())) return 'When: Date TBD';
+        const options = {
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit',
+          timeZone: tz || undefined
+        };
+        const startLabel = start.toLocaleString('en-US', options);
+        if (!endAt) return `When: ${startLabel}${tz ? ` (${tz})` : ''}`;
+        const end = new Date(endAt);
+        if (Number.isNaN(end.getTime())) return `When: ${startLabel}${tz ? ` (${tz})` : ''}`;
+        const endLabel = end.toLocaleTimeString('en-US', {
+          hour: 'numeric',
+          minute: '2-digit',
+          timeZone: tz || undefined
+        });
+        return `When: ${startLabel} - ${endLabel}${tz ? ` (${tz})` : ''}`;
+      } catch (_) {
+        return 'When: Date TBD';
+      }
+    }
+
+    function initProfileEventDetailModal() {
+      const modalEl = document.getElementById('profileEventDetailModal');
+      if (!modalEl || !window.bootstrap || !window.bootstrap.Modal) return;
+
+      const loadingEl = document.getElementById('profile-event-detail-loading');
+      const errorEl = document.getElementById('profile-event-detail-error');
+      const contentEl = document.getElementById('profile-event-detail-content');
+      const titleEl = document.getElementById('profile-event-detail-title');
+      const whenEl = document.getElementById('profile-event-detail-when');
+      const whereEl = document.getElementById('profile-event-detail-where');
+      const whoEl = document.getElementById('profile-event-detail-who');
+      const descriptionEl = document.getElementById('profile-event-detail-description');
+      const requirementsEl = document.getElementById('profile-event-detail-requirements');
+      const creditsEl = document.getElementById('profile-event-detail-credits');
+      const verificationEl = document.getElementById('profile-event-detail-verification');
+      const statusEl = document.getElementById('profile-event-detail-status');
+      const modal = new window.bootstrap.Modal(modalEl);
+      let latestRequest = 0;
+
+      function setLoadingState() {
+        if (loadingEl) loadingEl.classList.remove('d-none');
+        if (errorEl) {
+          errorEl.classList.add('d-none');
+          errorEl.textContent = '';
+        }
+        if (contentEl) contentEl.classList.add('d-none');
+      }
+
+      function setErrorState(message) {
+        if (loadingEl) loadingEl.classList.add('d-none');
+        if (contentEl) contentEl.classList.add('d-none');
+        if (errorEl) {
+          errorEl.textContent = message || 'Unable to load event details.';
+          errorEl.classList.remove('d-none');
+        }
+      }
+
+      function setContentState(evt) {
+        if (!evt || typeof evt !== 'object') {
+          setErrorState('Unable to load event details.');
+          return;
+        }
+        if (loadingEl) loadingEl.classList.add('d-none');
+        if (errorEl) {
+          errorEl.classList.add('d-none');
+          errorEl.textContent = '';
+        }
+        if (contentEl) contentEl.classList.remove('d-none');
+
+        const orgName = (typeof evt.org_name === 'string' && evt.org_name.trim()) ? evt.org_name.trim() : 'Independent organizer';
+        const communityTag = (typeof evt.community_tag === 'string' && evt.community_tag.trim()) ? evt.community_tag.trim() : '';
+        const description = (typeof evt.description === 'string' && evt.description.trim()) ? evt.description.trim() : 'No description provided.';
+        const requirements = (typeof evt.requirements === 'string' && evt.requirements.trim()) ? evt.requirements.trim() : 'No specific requirements listed.';
+        const impactCredits = Number.isFinite(Number(evt.impact_credits_base)) ? Number(evt.impact_credits_base) : 25;
+        const status = (typeof evt.status === 'string' && evt.status.trim()) ? evt.status.trim() : 'unknown';
+        const verificationMethod = (typeof evt.verification_method === 'string' && evt.verification_method.trim())
+          ? evt.verification_method.replace(/_/g, ' ')
+          : 'host attest';
+
+        if (titleEl) titleEl.textContent = evt.title || 'Untitled Event';
+        if (whenEl) whenEl.textContent = formatEventDateRange(evt.start_at, evt.end_at, evt.tz);
+        if (whereEl) whereEl.textContent = `Where: ${evt.location_text || 'Location TBD'}`;
+        if (whoEl) whoEl.textContent = communityTag ? `Host: ${orgName} • ${communityTag}` : `Host: ${orgName}`;
+        if (descriptionEl) descriptionEl.textContent = description;
+        if (requirementsEl) requirementsEl.textContent = `Requirements: ${requirements}`;
+        if (creditsEl) creditsEl.textContent = `Earn: ${impactCredits} Impact Credits`;
+        if (verificationEl) verificationEl.textContent = `Verification: ${verificationMethod}`;
+        if (statusEl) statusEl.textContent = `Status: ${status}`;
+      }
+
+      async function openEventDetail(eventId) {
+        const id = String(eventId || '').trim();
+        if (!id) return;
+        latestRequest += 1;
+        const requestId = latestRequest;
+        setLoadingState();
+        modal.show();
+        try {
+          const response = await fetch(`/api/events/${encodeURIComponent(id)}`, { credentials: 'include' });
+          const payload = await response.json().catch(() => ({}));
+          if (requestId !== latestRequest) return;
+          if (!response.ok || !payload?.ok || !payload?.data) {
+            throw new Error(payload?.error || 'Unable to load event details.');
+          }
+          setContentState(payload.data);
+        } catch (error) {
+          if (requestId !== latestRequest) return;
+          setErrorState(error?.message || 'Unable to load event details.');
+        }
+      }
+
+      document.querySelectorAll('.js-profile-event-detail-btn[data-event-id]').forEach((btn) => {
+        btn.addEventListener('click', function () {
+          openEventDetail(btn.getAttribute('data-event-id'));
+        });
+      });
+
+      modalEl.addEventListener('hidden.bs.modal', function () {
+        latestRequest += 1;
+        setLoadingState();
+      });
+    }
+
     document.addEventListener('DOMContentLoaded', function () {
       initNudgeProgressBars();
+      initPreferenceCardCollapses();
+      initProfileEventDetailModal();
 
       const tabs = document.getElementById('profileTabs');
       if (!tabs) return;
@@ -1432,15 +1778,15 @@
       });
 
       function resolveInitialTab() {
-        const validTabs = new Set(['overview', 'portfolio', 'skills', 'preferences', 'account']);
+        const validTabs = new Set(['portfolio', 'skills', 'preferences', 'account']);
         try {
           const params = new URLSearchParams(window.location.search || '');
-          const fromQuery = String(params.get('tab') || '').trim().toLowerCase();
+          const fromQuery = normalizeTabKey(String(params.get('tab') || '').trim().toLowerCase());
           if (validTabs.has(fromQuery)) return fromQuery;
         } catch (_) {}
-        const fromHash = String((window.location.hash || '').replace(/^#/, '')).trim().toLowerCase();
+        const fromHash = normalizeTabKey(String((window.location.hash || '').replace(/^#/, '')).trim().toLowerCase());
         if (validTabs.has(fromHash)) return fromHash;
-        return 'overview';
+        return 'portfolio';
       }
 
       const dismissBtn = document.getElementById('dismissNudge');

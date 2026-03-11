@@ -1042,6 +1042,8 @@ export async function updateEvent(req, res) {
 
     const payload = await buildEventPayload(body, { strict, fallback: existing });
     const finalStatus = targetStatus;
+    const locationLat = parseFloat(body.location_lat) || null;
+    const locationLng = parseFloat(body.location_lng) || null;
 
     await pool.query(
       `
@@ -1052,25 +1054,27 @@ export async function updateEvent(req, res) {
                end_at=$4,
                tz=$5,
                location_text=$6,
-               org_name=$7,
-               community_tag=$8,
-               cause_tags=$9::text[],
-               requirements=$10,
-               verification_method=$11,
-               impact_credits_base=$12,
-               reliability_weight=$13,
-               visibility=$14,
-               capacity=$15,
-               waitlist_enabled=$16,
-               cover_url=$17,
-               description=$18,
-               reward_pool_kind=$19,
-               funding_pool_slug=$20,
-               attendance_methods=$21,
-               safety_notes=$22,
-               status=$23,
+               location_lat=$7,
+               location_lng=$8,
+               org_name=$9,
+               community_tag=$10,
+               cause_tags=$11::text[],
+               requirements=$12,
+               verification_method=$13,
+               impact_credits_base=$14,
+               reliability_weight=$15,
+               visibility=$16,
+               capacity=$17,
+               waitlist_enabled=$18,
+               cover_url=$19,
+               description=$20,
+               reward_pool_kind=$21,
+               funding_pool_slug=$22,
+               attendance_methods=$23,
+               safety_notes=$24,
+               status=$25,
                updated_at = NOW()
-         WHERE id = $24
+         WHERE id = $26
       `,
       [
         payload.title,
@@ -1079,6 +1083,8 @@ export async function updateEvent(req, res) {
         payload.end_at,
         payload.tz,
         payload.location_text,
+        locationLat,
+        locationLng,
         payload.org_name,
         payload.community_tag,
         payload.cause_tags,
@@ -1611,6 +1617,8 @@ export async function createEvent(req, res) {
     const strict = status === "published";
 
     const payload = await buildEventPayload(body, { strict });
+    const locationLat = parseFloat(body.location_lat) || null;
+    const locationLng = parseFloat(body.location_lng) || null;
 
     const { rows } = await pool.query(
       `
@@ -1622,6 +1630,8 @@ export async function createEvent(req, res) {
           end_at,
           tz,
           location_text,
+          location_lat,
+          location_lng,
           org_name,
           community_tag,
           cause_tags,
@@ -1640,7 +1650,7 @@ export async function createEvent(req, res) {
           safety_notes,
           status
         ) VALUES (
-          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10::text[],$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24
+          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::text[],$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26
         )
         RETURNING id, status
       `,
@@ -1652,6 +1662,8 @@ export async function createEvent(req, res) {
         payload.end_at,
         payload.tz,
         payload.location_text,
+        locationLat,
+        locationLng,
         payload.org_name,
         payload.community_tag,
         payload.cause_tags,
