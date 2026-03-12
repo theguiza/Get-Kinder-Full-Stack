@@ -114,6 +114,9 @@ export function EventDetail({ eventId, isAuthenticated = false }) {
   if (!evt) {
     return <p className="muted">Event not found.</p>;
   }
+  const attendanceRequested = ["pending", "accepted", "checked_in"].includes(
+    String(evt.viewer_rsvp_status || "").toLowerCase()
+  );
   const safetyNotesText = getSafetyNotesText(evt);
 
   async function handleAddToCalendar() {
@@ -176,7 +179,7 @@ export function EventDetail({ eventId, isAuthenticated = false }) {
       const successMessage = typeof options.successMessage === "string" && options.successMessage.trim()
         ? options.successMessage
         : action === "accept"
-          ? "You're marked as going."
+          ? "Your request has been sent"
           : "Invite declined.";
       showToast({
         message: successMessage,
@@ -308,19 +311,14 @@ export function EventDetail({ eventId, isAuthenticated = false }) {
         <div className="card rsvp-card">
           <div>
             <strong className="rsvp-card__title">Request Attendance</strong>
-            <p className="muted mb-0">Send a request to join this event, and you will hear back on your approval shortly</p>
+            <p className="muted mb-0">
+              {attendanceRequested
+                ? "You have requested attending this event"
+                : "Send a request to join this event, and you will hear back on your approval shortly"}
+            </p>
           </div>
-          <div className="rsvp-actions">
-            {evt.viewer_rsvp_status === "accepted" ? (
-              <button
-                type="button"
-                className="btn secondary"
-                onClick={() => setCancelRequestDialogOpen(true)}
-                disabled={Boolean(rsvpAction)}
-              >
-                {rsvpAction === "decline" ? "Canceling…" : "Cancel request"}
-              </button>
-            ) : (
+          {!attendanceRequested && (
+            <div className="rsvp-actions">
               <button
                 type="button"
                 className="btn"
@@ -329,8 +327,8 @@ export function EventDetail({ eventId, isAuthenticated = false }) {
               >
                 {rsvpAction === "accept" ? "Saving…" : "Request"}
               </button>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       )}
       {cancelRequestDialogOpen && (

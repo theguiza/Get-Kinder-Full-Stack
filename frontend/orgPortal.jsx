@@ -137,6 +137,11 @@ function safeNumber(value, fallback = 0) {
   return Number.isFinite(num) ? num : fallback;
 }
 
+function parseSdgGoalNumber(goalLabel) {
+  if (!goalLabel || typeof goalLabel !== "string") return "";
+  return String(goalLabel).split(/\s*[-–—]\s*/)[0].trim();
+}
+
 function normalizePendingActionCounts(rawCounts) {
   return {
     pendingJoinCount: safeNumber(
@@ -556,6 +561,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
   const [approveAllProgress, setApproveAllProgress] = useState({ current: 0, total: 0 });
   const [actionError, setActionError] = useState("");
   const [applicantCounts, setApplicantCounts] = useState(ZERO_PENDING_ACTION_COUNTS);
+  const [applicantProfileModal, setApplicantProfileModal] = useState({ open: false, applicant: null });
 
   const [checkinQueueItems, setCheckinQueueItems] = useState([]);
   const [checkinQueueLoading, setCheckinQueueLoading] = useState(false);
@@ -593,6 +599,8 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
   const commsConfirmModalInstanceRef = useRef(null);
   const commsToastRef = useRef(null);
   const commsToastInstanceRef = useRef(null);
+  const detailPanelRef = useRef(null);
+  const opportunityDetailTopRef = useRef(null);
 
   const [commsQueue, setCommsQueue] = useState(null);
   const [commsLoading, setCommsLoading] = useState(false);
@@ -612,6 +620,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [showToast, setShowToast] = useState(false);
+  const [pendingDetailScroll, setPendingDetailScroll] = useState(false);
 
   const fetchQueue = useCallback(() => {
     setQueueLoading(true);
@@ -950,6 +959,19 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
   const hasOpportunities = Boolean(queue?.hasOpportunities);
   const selectedOpportunity = selectedQueueItem?.tab === "opportunities" ? selectedQueueItem : null;
 
+  const scrollToOpportunityDetailTop = useCallback(() => {
+    if (typeof window === "undefined") return;
+    const target = opportunityDetailTopRef.current || detailPanelRef.current;
+    if (!target) return;
+    const navEl = document.querySelector(".navbar");
+    const navHeight = navEl ? Math.max(0, Math.round(navEl.getBoundingClientRect().height)) : 0;
+    const isDesktop = window.matchMedia("(min-width: 768px)").matches;
+    const extraReveal = isDesktop ? 84 : 24;
+    const targetTop = target.getBoundingClientRect().top + window.pageYOffset;
+    const top = Math.max(0, targetTop - navHeight - extraReveal);
+    window.scrollTo({ top, behavior: "smooth" });
+  }, []);
+
   const parseApplicantsPayload = useCallback((payload) => {
     const applicantRows = Array.isArray(payload)
       ? payload
@@ -1029,8 +1051,27 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
       setActionLoadingByUser({});
       setApproveAllLoading(false);
       setApproveAllProgress({ current: 0, total: 0 });
+      setApplicantProfileModal({ open: false, applicant: null });
     }
   }, [activeTab, selectedOpportunityId, fetchApplicantsForOpportunity]);
+
+  useEffect(() => {
+    if (!pendingDetailScroll) return;
+    if (activeTab !== "opportunities" || !selectedOpportunityId) {
+      setPendingDetailScroll(false);
+      return;
+    }
+    if (typeof window === "undefined") {
+      setPendingDetailScroll(false);
+      return;
+    }
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        scrollToOpportunityDetailTop();
+        setPendingDetailScroll(false);
+      });
+    });
+  }, [pendingDetailScroll, activeTab, selectedOpportunityId, scrollToOpportunityDetailTop]);
 
   const selectedCheckinEventId =
     selectedQueueItem?.tab === "checkin" ? String(selectedQueueItem.opportunityId || "") : "";
@@ -2215,13 +2256,61 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
         const firstName = applicant?.firstname || applicant?.first_name || "";
         const lastName = applicant?.lastname || applicant?.last_name || "";
         const fullName = `${firstName} ${lastName}`.trim();
+        const picture = typeof applicant?.picture === "string" && applicant.picture.trim()
+          ? applicant.picture.trim()
+          : typeof applicant?.avatar === "string" && applicant.avatar.trim()
+            ? applicant.avatar.trim()
+            : typeof applicant?.photo === "string" && applicant.photo.trim()
+              ? applicant.photo.trim()
+              : "";
+        const ratingValueRaw = Number(applicant?.ratingValue ?? applicant?.rating_value);
+        const ratingValue = Number.isFinite(ratingValueRaw) ? ratingValueRaw : 5;
+        const ratingCount = safeNumber(applicant?.ratingCount ?? applicant?.rating_count, 0);
+        const ratingStarsFilled = Math.max(
+          1,
+          Math.min(5, safeNumber(applicant?.ratingStarsFilled ?? applicant?.rating_stars_filled, Math.round(ratingValue)))
+        );
+        const priorityTier = String(applicant?.priorityTier || applicant?.priority_tier || "Bronze").trim() || "Bronze";
+        const sdgGoals = Array.from(
+          new Set(
+            [
+              applicant?.sdg1,
+              applicant?.sdg2,
+              applicant?.sdg3,
+              ...(Array.isArray(applicant?.sdgGoals) ? applicant.sdgGoals : []),
+            ]
+              .map((value) => String(value || "").trim())
+              .filter(Boolean)
+          )
+        );
+        const locationLabel = String(
+          applicant?.locationLabel
+          || applicant?.location_label
+          || applicant?.homeBaseLabel
+          || applicant?.home_base_label
+          || applicant?.city
+          || ""
+        ).trim() || "Location not set";
         return {
           ...applicant,
           userId,
           rsvpStatus,
           status: rsvpStatus,
           verificationStatus,
+          firstName,
+          lastName,
+          picture,
+          avatarUrl: picture || "/images/nerdy-KAI.png",
           displayName: fullName || applicant?.name || applicant?.email || "Volunteer",
+          locationLabel,
+          priorityTier,
+          sdgGoals,
+          reliabilityScore: safeNumber(applicant?.reliabilityScore ?? applicant?.reliability_score, 0),
+          verifiedHours: safeNumber(applicant?.verifiedHours ?? applicant?.verified_hours_total, 0),
+          ratingValue,
+          ratingCount,
+          ratingStarsFilled,
+          pastShifts: safeNumber(applicant?.pastShifts ?? applicant?.past_shifts, 0),
           pastCredits: safeNumber(applicant?.pastCredits ?? applicant?.past_credits, 0),
         };
       }),
@@ -2523,6 +2612,15 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
       setApproveAllProgress({ current: 0, total: 0 });
       setActionLoadingByUser({});
     }
+  }
+
+  function openApplicantProfileModal(applicant) {
+    if (!applicant) return;
+    setApplicantProfileModal({ open: true, applicant });
+  }
+
+  function closeApplicantProfileModal() {
+    setApplicantProfileModal({ open: false, applicant: null });
   }
 
   function formatMyEventsListDate(startAt, timeZone) {
@@ -2996,12 +3094,19 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
       ? (item.opportunityName || item.label || "Opportunity")
       : item.label;
 
+    const handleQueueSelect = () => {
+      setSelectedQueueItem(item);
+      if (activeTab === "opportunities" && item.tab === "opportunities") {
+        setPendingDetailScroll(true);
+      }
+    };
+
     return (
       <button
         key={`${item.tab}-${item.id}`}
         type="button"
         className={`list-group-item list-group-item-action orgp-queue-item ${isActive ? "active" : ""}`}
-        onClick={() => setSelectedQueueItem(item)}
+        onClick={handleQueueSelect}
       >
         <div className="d-flex align-items-center gap-2">
           <i className={`${iconClass} orgp-item-icon ${iconColorClass} ${iconToneClass}`} aria-hidden="true"></i>
@@ -3169,7 +3274,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
     );
 
     return (
-      <div>
+      <div ref={opportunityDetailTopRef}>
         <div className="d-flex justify-content-between align-items-start gap-2 mb-3">
           <div>
             <h3 className="orgp-opp-title">{selectedOpportunity.opportunityName || "Opportunity"}</h3>
@@ -3245,7 +3350,13 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
                         </span>
                         {safeNumber(applicant.pastCredits, 0)} credits prev
                       </div>
-                      <button type="button" className="btn btn-link btn-sm p-0 orgp-link-btn">Profile</button>
+                      <button
+                        type="button"
+                        className="btn btn-sm org-btn-ink mt-2"
+                        onClick={() => openApplicantProfileModal(applicant)}
+                      >
+                        Profile
+                      </button>
                     </div>
                     <div className="d-flex gap-2 align-items-start">
                       <button
@@ -4378,6 +4489,24 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
   const leftPanelTitle = isReportsTab ? "Filters" : activeTab === "myevents" ? "Event Queue" : "Ops Queue";
   const rightPanelTitle = isReportsTab ? "Reports Dashboard" : activeTab === "myevents" ? "Funding Detail" : "Detail Panel";
   const isDraftCancelIntent = Boolean(cancelModalTarget?.isDraft);
+  const profileApplicant = applicantProfileModal.applicant;
+  const profileApplicantName = profileApplicant?.displayName || "Volunteer";
+  const profileApplicantEmail = profileApplicant?.email || "No email on file";
+  const profilePictureUrl = profileApplicant?.avatarUrl || "/images/nerdy-KAI.png";
+  const profileLocation = profileApplicant?.locationLabel || "Location not set";
+  const profilePriorityTier = String(profileApplicant?.priorityTier || "Bronze").trim() || "Bronze";
+  const profilePriorityTierKey = String(profilePriorityTier).toLowerCase();
+  const profileTierClass = `orgp-tier-${
+    ["bronze", "silver", "gold", "platinum"].includes(profilePriorityTierKey)
+      ? profilePriorityTierKey
+      : "bronze"
+  }`;
+  const profileSdgGoals = Array.isArray(profileApplicant?.sdgGoals) ? profileApplicant.sdgGoals : [];
+  const profileVerifiedHours = safeNumber(profileApplicant?.verifiedHours, 0).toFixed(1);
+  const profileReliability = safeNumber(profileApplicant?.reliabilityScore, 0);
+  const profileRatingValue = safeNumber(profileApplicant?.ratingValue, 5).toFixed(1);
+  const profileRatingCount = safeNumber(profileApplicant?.ratingCount, 0);
+  const profileRatingStarsFilled = Math.max(1, Math.min(5, safeNumber(profileApplicant?.ratingStarsFilled, 5)));
 
   return (
     <div className="orgp-root">
@@ -4406,7 +4535,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
         </div>
 
         <div className={rightColumnClass}>
-          <section className="orgp-panel orgp-detail-panel">
+          <section className="orgp-panel orgp-detail-panel" ref={detailPanelRef}>
             <h2 className="orgp-panel-title">{rightPanelTitle}</h2>
             {renderRightPanel()}
           </section>
@@ -4433,6 +4562,117 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
                 aria-label="Dismiss"
                 onClick={() => setMyEventsToast(null)}
               ></button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {applicantProfileModal.open && profileApplicant ? (
+        <div
+          className="modal fade show d-block"
+          tabIndex="-1"
+          style={{ backgroundColor: "rgba(0,0,0,0.5)" }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="orgpApplicantProfileTitle"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) closeApplicantProfileModal();
+          }}
+        >
+          <div className="modal-dialog modal-dialog-centered modal-lg">
+            <div className="modal-content orgp-applicant-modal-content">
+              <div className="modal-header">
+                <h5 className="modal-title" id="orgpApplicantProfileTitle">
+                  Volunteer Profile
+                </h5>
+                <button
+                  type="button"
+                  className="btn-close"
+                  aria-label="Close"
+                  onClick={closeApplicantProfileModal}
+                ></button>
+              </div>
+              <div className="modal-body">
+                <div className="orgp-applicant-hero">
+                  <img
+                    className="orgp-applicant-hero-avatar rounded-circle"
+                    src={profilePictureUrl}
+                    alt={`Profile photo of ${profileApplicantName}`}
+                    onError={(event) => {
+                      event.currentTarget.src = "/images/nerdy-KAI.png";
+                    }}
+                  />
+                  <div>
+                    <div className="orgp-applicant-hero-kicker">Volunteer</div>
+                    <h4 className="orgp-applicant-hero-name">{profileApplicantName}</h4>
+                    <div className="small text-muted">{profileApplicantEmail}</div>
+                    <div className="small text-muted mt-1">
+                      <i className="fas fa-location-dot me-1" aria-hidden="true"></i>
+                      {profileLocation}
+                    </div>
+                    <span className={`badge rounded-pill orgp-tier-badge mt-2 ${profileTierClass}`}>
+                      Priority Tier: {profilePriorityTier}
+                    </span>
+                    <div className="d-flex flex-wrap gap-2 mt-2 align-items-center orgp-applicant-sdgs">
+                      <span className="orgp-applicant-hero-stat-label mb-0">MY SDG GOALS:</span>
+                      {profileSdgGoals.length ? (
+                        profileSdgGoals.map((sdgGoal) => {
+                          const goalNumber = parseSdgGoalNumber(sdgGoal);
+                          if (!goalNumber) return null;
+                          return (
+                            <img
+                              key={`${profileApplicant?.userId || "applicant"}-${goalNumber}`}
+                              src={`/images/sdgs/goal_${goalNumber}.png`}
+                              alt={sdgGoal}
+                              title={sdgGoal}
+                              width="32"
+                              height="32"
+                              className="orgp-applicant-sdg-icon"
+                              loading="lazy"
+                            />
+                          );
+                        })
+                      ) : (
+                        <span className="small text-muted">Not set</span>
+                      )}
+                    </div>
+                    <div className="orgp-applicant-hero-stats mt-3">
+                      <div className="orgp-applicant-hero-stat">
+                        <div className="orgp-applicant-hero-stat-label">Reliability</div>
+                        <div className="orgp-applicant-hero-stat-value">{profileReliability}</div>
+                      </div>
+                      <div className="orgp-applicant-hero-stat">
+                        <div className="orgp-applicant-hero-stat-label">Verified Hours</div>
+                        <div className="orgp-applicant-hero-stat-value">{profileVerifiedHours}</div>
+                      </div>
+                      <div className="orgp-applicant-hero-stat orgp-applicant-hero-stat-full">
+                        <div className="orgp-applicant-hero-stat-label">Rating</div>
+                        <div
+                          className="orgp-applicant-hero-rating-stars"
+                          role="img"
+                          aria-label={`Volunteer rating ${profileRatingValue} out of 5 stars`}
+                        >
+                          {Array.from({ length: 5 }).map((_, starIndex) => (
+                            <i
+                              key={`rating-star-${starIndex + 1}`}
+                              className={`fa-solid fa-star ${starIndex + 1 <= profileRatingStarsFilled ? "is-filled" : ""}`}
+                              aria-hidden="true"
+                            ></i>
+                          ))}
+                        </div>
+                        <div className="small text-muted mt-1">
+                          {profileRatingValue} ({profileRatingCount})
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="modal-footer">
+                <button type="button" className="btn btn-outline-secondary" onClick={closeApplicantProfileModal}>
+                  Close
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -4976,6 +5216,125 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
           background: #fff;
         }
 
+        .orgp-applicant-modal-content {
+          border-radius: 16px;
+          border: 1px solid #dfe8f5;
+          overflow: hidden;
+        }
+
+        .orgp-applicant-hero {
+          border: 1px solid #e8eef8;
+          border-radius: 14px;
+          background: linear-gradient(180deg, #f7faff 0%, #ffffff 100%);
+          padding: 14px;
+          display: grid;
+          grid-template-columns: 112px minmax(0, 1fr);
+          gap: 14px;
+          align-items: center;
+        }
+
+        .orgp-applicant-hero-avatar {
+          width: 112px;
+          height: 112px;
+          object-fit: cover;
+          border: 3px solid #455a7c;
+          background: #fff;
+        }
+
+        .orgp-applicant-hero-kicker {
+          font-size: 0.73rem;
+          letter-spacing: 0.09em;
+          color: #6c757d;
+          font-weight: 700;
+          text-transform: uppercase;
+        }
+
+        .orgp-applicant-hero-name {
+          margin: 0.1rem 0 0;
+          color: #455a7c;
+          font-weight: 700;
+          font-size: 1.35rem;
+        }
+
+        .orgp-tier-badge {
+          font-weight: 600;
+          border: 1px solid transparent;
+        }
+
+        .orgp-tier-bronze {
+          color: #6b4f2a;
+          background: #f6eadf;
+          border-color: #e8d3bd;
+        }
+
+        .orgp-tier-silver {
+          color: #495464;
+          background: #edf2f8;
+          border-color: #d6e0eb;
+        }
+
+        .orgp-tier-gold {
+          color: #72520f;
+          background: #fff3d6;
+          border-color: #f1dfad;
+        }
+
+        .orgp-tier-platinum {
+          color: #2f3f58;
+          background: #eef0ff;
+          border-color: #d9defa;
+        }
+
+        .orgp-applicant-sdgs {
+          min-height: 34px;
+        }
+
+        .orgp-applicant-sdg-icon {
+          border-radius: 6px;
+        }
+
+        .orgp-applicant-hero-stats {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 8px;
+        }
+
+        .orgp-applicant-hero-stat {
+          border: 1px solid #e8eef8;
+          border-radius: 12px;
+          background: #fff;
+          padding: 9px 10px;
+        }
+
+        .orgp-applicant-hero-stat-label {
+          font-size: 0.7rem;
+          text-transform: uppercase;
+          letter-spacing: 0.07em;
+          color: #6c757d;
+          font-weight: 700;
+          margin-bottom: 0.1rem;
+        }
+
+        .orgp-applicant-hero-stat-value {
+          color: #455a7c;
+          font-weight: 700;
+          font-size: 1.12rem;
+          line-height: 1.1;
+        }
+
+        .orgp-applicant-hero-stat-full {
+          grid-column: 1 / -1;
+        }
+
+        .orgp-applicant-hero-rating-stars {
+          color: #d2d9e6;
+          letter-spacing: 0.08em;
+        }
+
+        .orgp-applicant-hero-rating-stars .is-filled {
+          color: #ff5656;
+        }
+
         .orgp-checkin-qr-wrap {
           border: 1px solid #e8eef8;
           border-radius: 12px;
@@ -5226,6 +5585,16 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
 
           .orgp-applicant-row {
             flex-direction: column;
+          }
+
+          .orgp-applicant-hero {
+            grid-template-columns: 1fr;
+            justify-items: center;
+            text-align: center;
+          }
+
+          .orgp-applicant-hero-stats {
+            grid-template-columns: 1fr;
           }
         }
       `}</style>

@@ -2,6 +2,8 @@ import express from "express";
 import pool from "../Backend/db/pg.js";
 import { sendNudgeEmail } from "../kindnessEmailer.js";
 import { resolveOrgScope, setSessionActiveOrg } from "../services/orgScopeService.js";
+import { getVolunteerStats } from "../services/profileService.js";
+import { getSummary as getRatingsSummary } from "../services/ratingsService.js";
 
 const orgPortalRouter = express.Router();
 const CSRF_HEADER_NAME = "X-CSRF-Token";
@@ -941,6 +943,15 @@ orgPortalRouter.get("/opportunities/:eventId/applicants", async (req, res) => {
       `
         SELECT
           r.attendee_user_id AS user_id,
+          u.firstname,
+          u.lastname,
+          u.picture AS picture,
+          u.sdg1,
+          u.sdg2,
+          u.sdg3,
+          u.home_base_label,
+          u.city,
+          u.state,
           COALESCE(
             NULLIF(TRIM(COALESCE(u.firstname, '') || ' ' || COALESCE(u.lastname, '')), ''),
             u.email,
@@ -970,8 +981,17 @@ orgPortalRouter.get("/opportunities/:eventId/applicants", async (req, res) => {
       [eventId]
     );
 
-    const data = rows.map((row) => ({
+    const baseData = rows.map((row) => ({
       userId: String(row.user_id),
+      firstname: row.firstname || "",
+      lastname: row.lastname || "",
+      picture: row.picture || "",
+      sdg1: row.sdg1 || "",
+      sdg2: row.sdg2 || "",
+      sdg3: row.sdg3 || "",
+      homeBaseLabel: row.home_base_label || "",
+      city: row.city || "",
+      state: row.state || "",
       name: row.name,
       email: row.email,
       rsvpStatus: row.rsvp_status,
@@ -980,6 +1000,53 @@ orgPortalRouter.get("/opportunities/:eventId/applicants", async (req, res) => {
       checkedInAt: row.checked_in_at,
       pastShifts: Number(row.past_shifts) || 0,
       pastCredits: Number(row.past_credits) || 0,
+    }));
+
+    const data = await Promise.all(baseData.map(async (applicant) => {
+      const locationParts = [applicant.city, applicant.state]
+        .map((value) => String(value || "").trim())
+        .filter(Boolean);
+      const locationLabel = String(applicant.homeBaseLabel || "").trim()
+        || (locationParts.length ? locationParts.join(", ") : "");
+
+      let volunteerStats = {
+        reliability_score: 0,
+        verified_hours_total: 0,
+        priority_tier: "Bronze",
+      };
+      try {
+        volunteerStats = await getVolunteerStats(applicant.userId);
+      } catch (error) {
+        console.warn("[orgPortalApi] getVolunteerStats failed:", error?.message || error);
+      }
+
+      let ratingValue = 5;
+      let ratingCount = 0;
+      let ratingStarsFilled = 5;
+      try {
+        const summary = await getRatingsSummary({ userId: applicant.userId, limit: 20 });
+        const count = Number(summary?.sampleSize) || 0;
+        const hasRatings = count > 0 && Number.isFinite(Number(summary?.kindnessRating));
+        const value = hasRatings ? Number(summary.kindnessRating) : 5;
+        ratingValue = value;
+        ratingCount = count;
+        ratingStarsFilled = Math.max(1, Math.min(5, Math.round(value)));
+      } catch (error) {
+        if (error?.code !== "42P01") {
+          console.warn("[orgPortalApi] ratings summary failed:", error?.message || error);
+        }
+      }
+
+      return {
+        ...applicant,
+        reliabilityScore: Number(volunteerStats?.reliability_score) || 0,
+        verifiedHours: Number(volunteerStats?.verified_hours_total) || 0,
+        priorityTier: String(volunteerStats?.priority_tier || "Bronze"),
+        ratingValue,
+        ratingCount,
+        ratingStarsFilled,
+        locationLabel,
+      };
     }));
 
     return res.json({ applicants: data, counts });
