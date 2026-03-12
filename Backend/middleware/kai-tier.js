@@ -12,9 +12,12 @@ const PLUS_TOOLS = [...FREE_TOOLS, "get_matched_events", "get_weekly_digest", "r
 
 const PRO_TOOLS = [...PLUS_TOOLS, "get_earning_optimization", "manage_schedule"];
 
+// Org reps are also volunteers — they need personal tools (profile, IC balance, RSVP) alongside org management tools
 const ORG_GROWTH_TOOLS = [
   "search_events",
   "get_event_details",
+  "get_user_profile",
+  "get_ic_balance",
   "platform_faq",
   "draft_event_listing",
   "get_matched_volunteers",
@@ -46,15 +49,20 @@ const ALL_TOOLS = [
 export function determineKaiTier(user) {
   if (!user) return "guest";
 
+  // PRE-LAUNCH TIER OVERRIDE
+  // All users get 'pro' tier (full KAI experience) during pre-launch to build traction and test features.
+  // User ID 4 (Mike) gets 'agent' tier for testing autonomous actions.
+  // Org reps keep 'org_growth' (includes volunteer + org tools).
+  // TODO: Replace with actual subscription tier lookup when payments are wired.
+  if (user.id === 4) {
+    return "agent";
+  }
+
   if (user.org_rep === true) {
-    // TODO: Replace with organization subscription lookup once billing/subscriptions are wired.
-    // TODO: Return org_growth/org_enterprise based on org plan from persistent subscription source.
     return "org_growth";
   }
 
-  // TODO: Replace this default with user subscription lookup once personal plans are wired.
-  // TODO: Return free/plus/pro/agent based on the user's active subscription tier.
-  return "free";
+  return "pro";
 }
 
 export function getAvailableTools(tier) {

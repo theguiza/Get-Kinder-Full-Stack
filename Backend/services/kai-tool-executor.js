@@ -248,8 +248,11 @@ async function handleGetEventDetails(toolInput = {}) {
     const eventId = normalizeString(toolInput.event_id);
     if (!eventId) return { status: "error", message: "event_id is required." };
 
-    const { rows: eventRows } = await pool.query("SELECT * FROM events WHERE id = $1 LIMIT 1", [eventId]);
-    const event = eventRows?.[0];
+    const { rows: eventRows } = await pool.query(
+      "SELECT to_jsonb(e) - 'cover_url' AS event FROM events e WHERE id = $1 LIMIT 1",
+      [eventId]
+    );
+    const event = eventRows?.[0]?.event;
     if (!event) {
       return { status: "not_found", message: "Event not found." };
     }
