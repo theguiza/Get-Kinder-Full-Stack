@@ -78,6 +78,7 @@ export async function sendNudgeEmail({
   subject,
   text,
   html,
+  from,
   // default BCC -> env overrideable; falls back to your SMTP user
   bcc = process.env.BCC_EMAIL || process.env.SMTP_USER || 'kai@getkinder.ai',
   // new:
@@ -86,11 +87,13 @@ export async function sendNudgeEmail({
 }) {
   const t = getNudgesTransport();
   // "Michael via Kinder <kai@getkinder.ai>"
-  const from = process.env.MAIL_FROM
+  const fromAddress = from
+    ? from
+    : process.env.MAIL_FROM
     ? process.env.MAIL_FROM
     : `${fromName || 'Via Get Kinder'} <${process.env.SMTP_USER}>`;
   const mail = {
-    from,
+    from: fromAddress,
     to,
     subject: subject || 'A quick nudge ✉️', // deliverQueuedNudges supplies personalized default
     text: text || undefined,

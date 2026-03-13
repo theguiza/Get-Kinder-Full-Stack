@@ -674,6 +674,7 @@ app.post("/register", registerLimiter, async (req, res, next) => {
         subject: "Verify your Get Kinder email",
         text: `Hi ${newUser.firstname},\n\nPlease verify your email address by clicking the link below:\n\n${verificationUrl}\n\nThis link expires in 24 hours.\n\nIf you did not create this account, you can ignore this email.`,
         html: `<p>Hi ${newUser.firstname},</p><p>Please verify your email address by clicking the link below:</p><p><a href="${verificationUrl}">Verify your email</a></p><p>This link expires in 24 hours.</p><p>If you did not create this account, you can ignore this email.</p>`,
+        from: "Get Kinder <hello@getkindr.com>",
         fromName: "Get Kinder"
       });
     } catch (mailErr) {
