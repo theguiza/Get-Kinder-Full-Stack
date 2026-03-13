@@ -5,36 +5,77 @@
   </span>
 </button>
 
-<div class="chat-panel" id="kaiChatPanel" aria-hidden="true">
-  <div class="chat-header">
-    <h3>Chat with KAI Now</h3>
+<div
+  class="chat-panel"
+  id="kaiChatPanel"
+  aria-hidden="true"
+  data-authenticated="<%= (typeof user !== 'undefined' && user) ? 'true' : 'false' %>"
+>
+  <div class="chat-header" style="display:flex;align-items:center;justify-content:space-between;">
+    <h3 style="margin:0;">Chat with KAI Now</h3>
+    <button id="kaiCloseBtn" type="button" aria-label="Close chat" style="background:none;border:none;color:white;font-size:20px;cursor:pointer;line-height:1;padding:0 0 0 8px;">&times;</button>
   </div>
 
   <div class="chat-messages" id="kaiChatMessages">
-    <div class="message assistant">
-      <%= typeof greetText !== 'undefined'
-        ? greetText
-        : "Hello! I’m KAI, how can I help you make an impact today?" %>
+    <div class="kai-empty-state" id="kaiEmptyState">
+      <div class="kai-empty-greeting">Hi, I'm KAI</div>
+      <div class="kai-empty-sub">I can help you find volunteer events by cause, city, or date — or answer questions about the platform.</div>
+      <div class="kai-chips" id="kaiChips">
+        <button class="kai-chip" type="button">Events this weekend</button>
+        <button class="kai-chip" type="button">Family-friendly events</button>
+        <button class="kai-chip" type="button">Environmental causes</button>
+        <button class="kai-chip" type="button">How do Impact Credits work?</button>
+      </div>
     </div>
   </div>
 
   <div class="chat-input-container">
-    <textarea
-      class="chat-input"
-      id="kaiChatInput"
-      placeholder="Ask KAI anything about your impact journey..."
-      rows="2"
-    ></textarea>
+    <div style="display:flex;gap:8px;align-items:flex-end;">
+      <textarea
+        class="chat-input"
+        id="kaiChatInput"
+        placeholder="Ask KAI anything about your impact journey..."
+        rows="2"
+        style="flex:1;min-width:0;"
+      ></textarea>
+      <button
+        id="kaiSendBtn"
+        type="button"
+        style="flex-shrink:0;padding:10px 16px;background:#ff5656;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:500;cursor:pointer;align-self:flex-end;"
+      >Send</button>
+    </div>
   </div>
 </div>
+
+<style>
+.kai-event-results { display: flex; flex-direction: column; gap: 8px; max-width: 92%; }
+.kai-results-intro { font-size: 13px; color: #455a7c; margin: 0 0 4px; }
+.kai-event-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; }
+a.kai-event-card { text-decoration: none; color: inherit; }
+a.kai-event-card:hover { border-color: #ff5656; background: #fff8f8; }
+.kai-event-title { font-size: 13px; font-weight: 600; color: #2d3748; }
+.kai-event-org { font-size: 11px; color: #718096; margin: 1px 0 3px; }
+.kai-event-meta { display: flex; flex-wrap: wrap; gap: 8px; font-size: 12px; color: #718096; }
+.kai-event-category { font-size: 10px; padding: 1px 7px; border-radius: 20px; background: #faece7; color: #993c1d; font-weight: 500; }
+.kai-event-cta { font-size: 12px; font-weight: 600; color: #ff5656; text-decoration: none; margin-top: 2px; }
+.kai-event-cta:hover { text-decoration: underline; }
+.kai-empty-state { padding: 16px 4px 8px; display: flex; flex-direction: column; gap: 10px; }
+.kai-empty-greeting { font-size: 16px; font-weight: 600; color: #455a7c; }
+.kai-empty-sub { font-size: 13px; color: #718096; line-height: 1.6; }
+.kai-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.kai-chip { font-size: 12px; padding: 6px 12px; border: 1px solid #cbd5e0; border-radius: 20px; background: #fff; color: #455a7c; cursor: pointer; transition: all 0.15s ease; }
+.kai-chip:hover { background: #455a7c; color: #fff; border-color: #455a7c; }
+</style>
 
 <script>
 (() => {
   const panel = document.getElementById('kaiChatPanel');
   const toggleBtn = document.getElementById('kaiChatToggle');
   const input = document.getElementById('kaiChatInput');
+  const sendBtn = document.getElementById('kaiSendBtn');
   const messagesEl = document.getElementById('kaiChatMessages');
-  const isAuthenticated = <%= (typeof user !== 'undefined' && user) ? 'true' : 'false' %>;
+  const emptyState = document.getElementById('kaiEmptyState');
+  const isAuthenticated = panel?.dataset.authenticated === 'true';
   let currentConversationId = null;
 
   if (!panel || !toggleBtn || !input || !messagesEl) {
@@ -106,9 +147,99 @@
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
   });
+  if (sendBtn) sendBtn.addEventListener('click', () => send());
+  const closeBtn = document.getElementById('kaiCloseBtn');
+  if (closeBtn) closeBtn.addEventListener('click', close);
+  document.querySelectorAll('.kai-chip').forEach(chip => {
+    chip.addEventListener('click', () => send(chip.textContent.trim()));
+  });
+
+  function renderMessageText(el, text) {
+    const escaped = text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+    el.innerHTML = escaped.replace(/\n/g, '<br>');
+  }
+
+  function renderStructuredEvents(data) {
+    const events = Array.isArray(data?.events) ? data.events
+      : Array.isArray(data?.results) ? data.results
+      : Array.isArray(data) ? data
+      : null;
+
+    if (!events || events.length === 0) return null;
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'message assistant kai-event-results';
+
+    if (data.intro || data.message) {
+      const intro = document.createElement('p');
+      intro.className = 'kai-results-intro';
+      intro.textContent = data.intro || data.message;
+      wrapper.appendChild(intro);
+    }
+
+    events.forEach(ev => {
+      const eventUrl = ev.id ? `/events#/events/${ev.id}` : null;
+      const card = eventUrl ? document.createElement('a') : document.createElement('div');
+      card.className = 'kai-event-card';
+      if (eventUrl) {
+        card.href = eventUrl;
+        card.target = '_blank';
+        card.rel = 'noopener noreferrer';
+      }
+
+      const title = document.createElement('div');
+      title.className = 'kai-event-title';
+      title.textContent = ev.title || 'Untitled event';
+      card.appendChild(title);
+
+      if (ev.org_name) {
+        const org = document.createElement('div');
+        org.className = 'kai-event-org';
+        org.textContent = ev.org_name;
+        card.appendChild(org);
+      }
+
+      const meta = document.createElement('div');
+      meta.className = 'kai-event-meta';
+
+      if (ev.start_at) {
+        const dateSpan = document.createElement('span');
+        const d = new Date(ev.start_at);
+        dateSpan.textContent = d.toLocaleDateString('en-CA', {
+          weekday: 'short', month: 'short', day: 'numeric',
+          hour: 'numeric', minute: '2-digit'
+        });
+        meta.appendChild(dateSpan);
+      }
+
+      if (ev.location_text) {
+        const locSpan = document.createElement('span');
+        locSpan.textContent = ev.location_text;
+        meta.appendChild(locSpan);
+      }
+
+      if (ev.category) {
+        const catSpan = document.createElement('span');
+        catSpan.className = 'kai-event-category';
+        catSpan.textContent = ev.category;
+        meta.appendChild(catSpan);
+      }
+
+      card.appendChild(meta);
+      wrapper.appendChild(card);
+    });
+
+    return wrapper;
+  }
 
   async function send(messageOpt) {
     const text = (messageOpt ?? input.value).trim();
+    if (emptyState) emptyState.style.display = 'none';
     if (!text) return;
 
     messagesEl.insertAdjacentHTML('beforeend', '<div class="message user"></div>');
@@ -140,11 +271,20 @@
         const limitMessage =
           (typeof data?.error === 'string' && data.error.trim()) ||
           "You've reached your daily message limit. Upgrade for unlimited KAI access.";
-        messagesEl.lastElementChild.textContent = `${limitMessage} (Upgrade for unlimited access.)`;
+        renderMessageText(messagesEl.lastElementChild, `${limitMessage} (Upgrade for unlimited access.)`);
       } else if (!res.ok || data?.success === false || !data?.message) {
-        messagesEl.lastElementChild.textContent = "KAI is having trouble right now. Please try again in a moment.";
+        renderMessageText(messagesEl.lastElementChild, "KAI is having trouble right now. Please try again in a moment.");
       } else {
-        messagesEl.lastElementChild.textContent = data.message;
+        const structuredEl = data.structuredEvents
+          ? renderStructuredEvents(data.structuredEvents)
+          : null;
+
+        if (structuredEl) {
+          messagesEl.removeChild(messagesEl.lastElementChild);
+          messagesEl.appendChild(structuredEl);
+        } else {
+          renderMessageText(messagesEl.lastElementChild, data.message);
+        }
         currentConversationId = data.conversationId || currentConversationId;
       }
     } catch (err) {

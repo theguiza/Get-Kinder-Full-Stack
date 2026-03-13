@@ -271,6 +271,7 @@ export async function handleKaiMessage({ userId, userMessage, conversationId, ti
 
     let response;
     let loopCount = 0;
+    let structuredEvents = null;
 
     do {
       try {
@@ -301,6 +302,9 @@ export async function handleKaiMessage({ userId, userMessage, conversationId, ti
       const toolResults = [];
       for (const toolUse of toolUseBlocks) {
         const result = await executeToolCall(toolUse.name, toolUse.input, userId ?? null);
+        if (toolUse.name === "search_events" && result && typeof result === "object") {
+          structuredEvents = result;
+        }
         toolResults.push({
           type: "tool_result",
           tool_use_id: toolUse.id,
@@ -328,6 +332,7 @@ export async function handleKaiMessage({ userId, userMessage, conversationId, ti
       message: finalText,
       conversationId: resolvedConversationId,
       tokensUsed: response?.usage || null,
+      structuredEvents,
     };
   } catch (error) {
     if (error?._kaiSource === "anthropic") {

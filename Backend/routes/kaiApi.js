@@ -81,6 +81,7 @@ router.post("/message", async (req, res) => {
       success: true,
       message: result.message,
       conversationId: result.conversationId,
+      structuredEvents: result.structuredEvents ?? null,
     });
   } catch (error) {
     console.error("[kaiApi] POST /message error:", error);
@@ -123,6 +124,8 @@ router.post("/guest", async (req, res) => {
     return res.json({
       success: true,
       message: result.message,
+      conversationId: result.conversationId,
+      structuredEvents: result.structuredEvents ?? null,
     });
   } catch (error) {
     console.error("[kaiApi] POST /guest error:", error);
@@ -162,4 +165,3 @@ router.post("/new", (req, res) => {
 });
 
 export default router;
-
