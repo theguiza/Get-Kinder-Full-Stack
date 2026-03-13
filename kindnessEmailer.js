@@ -80,13 +80,13 @@ export async function sendNudgeEmail({
   html,
   from,
   // default BCC -> env overrideable; falls back to your SMTP user
-  bcc = process.env.BCC_EMAIL || process.env.SMTP_USER || 'kai@getkinder.ai',
+  bcc = process.env.BCC_EMAIL || process.env.SMTP_USER || 'hello@getkindr.com',
   // new:
   fromName,
   replyTo
 }) {
   const t = getNudgesTransport();
-  // "Michael via Kinder <kai@getkinder.ai>"
+  // "Michael via Kinder <hello@getkindr.com>"
   const fromAddress = from
     ? from
     : process.env.MAIL_FROM

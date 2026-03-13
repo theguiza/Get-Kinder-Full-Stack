@@ -17,21 +17,52 @@
   <link rel="icon" href="/images/favicon.png" sizes="32x32" type="image/png">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-SgOJa3DmI69IUzQ2PVdRZhwQ+dy64/BUtbMJw1MZ8t5HZApcHrRKUc4W0kG879m7" crossorigin="anonymous">
   <link rel="stylesheet" href="./css/style.css">
+  <style>
+    .login-feedback-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 2000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+      pointer-events: none;
+    }
+
+    .login-feedback-stack {
+      width: min(680px, 100%);
+      display: grid;
+      gap: 0.75rem;
+    }
+
+    .login-feedback-stack .alert {
+      margin: 0;
+      pointer-events: auto;
+      box-shadow: 0 12px 32px rgba(20, 36, 64, 0.2);
+    }
+
+  </style>
 </head>
 
 <body class="profile-body">
-   <% if (typeof error !== "undefined") { %>
-  <div class="alert alert-danger alert-dismissible fade show auto-dismiss" role="alert">
-    <%= error %>
-    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-  </div>
-<% } %>
-<% if (typeof success !== "undefined" && success) { %>
-  <div class="alert alert-success alert-dismissible fade show auto-dismiss" role="alert">
-    <%= success %>
-    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-  </div>
-<% } %>
+  <% if ((typeof error !== "undefined" && error) || (typeof success !== "undefined" && success)) { %>
+    <div class="login-feedback-overlay" aria-live="polite">
+      <div class="login-feedback-stack">
+        <% if (typeof error !== "undefined" && error) { %>
+          <div class="alert alert-danger alert-dismissible fade show auto-dismiss" role="alert">
+            <%= error %>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+          </div>
+        <% } %>
+        <% if (typeof success !== "undefined" && success) { %>
+          <div class="alert alert-success alert-dismissible fade show auto-dismiss" role="alert">
+            <%= success %>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+          </div>
+        <% } %>
+      </div>
+    </div>
+  <% } %>
   <section id="title"> 
     <body class="gradient-background">  
 <%- include("partials/site-header", { currentPage: "other" }) %>
@@ -116,6 +147,46 @@
     });
   })();
 </script>
+  <script>
+  (function () {
+    function maybeRemoveOverlay(overlay) {
+      if (!overlay) return;
+      if (overlay.querySelectorAll(".alert").length === 0) {
+        overlay.remove();
+      }
+    }
+
+    function closeAlert(alertEl) {
+      if (!alertEl || !alertEl.isConnected) return;
+      if (window.bootstrap?.Alert) {
+        window.bootstrap.Alert.getOrCreateInstance(alertEl).close();
+        return;
+      }
+      alertEl.classList.remove("show");
+      setTimeout(function () {
+        alertEl.remove();
+      }, 180);
+    }
+
+    window.addEventListener("DOMContentLoaded", function () {
+      const overlay = document.querySelector(".login-feedback-overlay");
+      if (!overlay) return;
+
+      const alerts = overlay.querySelectorAll(".alert.auto-dismiss");
+      alerts.forEach(function (alertEl) {
+        alertEl.addEventListener("closed.bs.alert", function () {
+          maybeRemoveOverlay(overlay);
+        });
+        setTimeout(function () {
+          closeAlert(alertEl);
+          setTimeout(function () {
+            maybeRemoveOverlay(overlay);
+          }, 220);
+        }, 7000);
+      });
+    });
+  })();
+  </script>
   <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script> 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/js/bootstrap.bundle.min.js" integrity="sha384-k6d4wzSIapyDyv1kpU366/PK5hCdSbCRGRCMv+eplOQJWyd1fbcAu9OCUj5zNLiq" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>

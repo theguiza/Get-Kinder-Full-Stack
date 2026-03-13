@@ -641,40 +641,30 @@ app.post("/register", registerLimiter, async (req, res, next) => {
       return res.status(400).send("Missing required fields.");
     }
     const hashedPassword = await bcrypt.hash(password, 10);
-    const result = await pool.query(
-      `INSERT INTO userdata 
-         (firstname, lastname, email, password) 
-       VALUES 
-         ($1, $2, $3, $4) 
-       RETURNING *`,
-      [firstname, lastname, email, hashedPassword]
-    );
-    let newUser = result.rows[0];
     const verificationToken = crypto.randomBytes(32).toString("hex");
     const verificationTokenHash = crypto
       .createHash("sha256")
       .update(verificationToken)
       .digest("hex");
-    const { rows: [verificationUpdatedUser] } = await pool.query(
-      `UPDATE public.userdata
-          SET email_verification_token_hash = $1,
-              email_verification_expires_at = NOW() + INTERVAL '24 hours'
-        WHERE id = $2
-        RETURNING *`,
-      [verificationTokenHash, newUser.id]
+    const result = await pool.query(
+      `INSERT INTO userdata 
+         (firstname, lastname, email, password,
+          email_verification_token_hash, email_verification_expires_at) 
+       VALUES 
+         ($1, $2, $3, $4, $5, NOW() + INTERVAL '24 hours') 
+       RETURNING *`,
+      [firstname, lastname, email, hashedPassword, verificationTokenHash]
     );
-    if (verificationUpdatedUser) {
-      newUser = verificationUpdatedUser;
-    }
+    const newUser = result.rows[0];
     const verificationBaseUrl = (process.env.BASE_URL || getAppBaseUrl(req)).replace(/\/+$/, "");
     const verificationUrl = `${verificationBaseUrl}/verify-email?token=${encodeURIComponent(verificationToken)}`;
     try {
       await sendNudgeEmail({
         to: newUser.email,
-        subject: "Verify your Get Kinder email",
-        text: `Hi ${newUser.firstname},\n\nPlease verify your email address by clicking the link below:\n\n${verificationUrl}\n\nThis link expires in 24 hours.\n\nIf you did not create this account, you can ignore this email.`,
-        html: `<p>Hi ${newUser.firstname},</p><p>Please verify your email address by clicking the link below:</p><p><a href="${verificationUrl}">Verify your email</a></p><p>This link expires in 24 hours.</p><p>If you did not create this account, you can ignore this email.</p>`,
-        from: "Get Kinder <hello@getkindr.com>",
+        subject: "Verify your Get Kinder registration",
+        text: `Hi ${newUser.firstname},\n\nPlease verify your email address to complete the registration process by clicking the link below:\n\n${verificationUrl}\n\nThis link expires in 24 hours.\n\nIf you did not create this account, you can ignore this email.\n\nThanks,\n\nKAI\n\nGet Kinder`,
+        html: `<p>Hi ${newUser.firstname},</p><p>Please verify your email address to complete the registration process by clicking the link below:</p><p><a href="${verificationUrl}">Verify your email</a></p><p>This link expires in 24 hours.</p><p>If you did not create this account, you can ignore this email.</p><p>Thanks,</p><p>KAI</p><p>Get Kinder</p>`,
+        from: "Get Kinder <kai@getkinder.ai>",
         fromName: "Get Kinder"
       });
     } catch (mailErr) {
