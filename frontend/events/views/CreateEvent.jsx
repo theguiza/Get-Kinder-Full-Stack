@@ -2,11 +2,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { InviteModal } from "../components/InviteModal.jsx";
 
 const DEFAULT_BRAND = { primary: "#ff5656", ink: "#455a7c" };
-const VISIBILITY_OPTIONS = [
-  { value: "public", label: "Public" },
-  { value: "fof", label: "Friends-of-friends" },
-  { value: "private", label: "Private link" },
-];
 const CAUSE_TAG_OPTIONS = [
   { value: "Outdoors", label: "🌿 Outdoors" },
   { value: "Food & Hunger", label: "🍎 Food & Hunger" },
@@ -22,8 +17,97 @@ const CAUSE_TAG_OPTIONS = [
 const MAX_COVER_SIZE = 2 * 1024 * 1024; // 2MB
 const FUNDING_POOL_SLUG_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const DEFAULT_MAP_CENTER = { lat: 49.2827, lng: -123.1207 };
+const TIME_PICKER_STEP_MINUTES = 15;
+const TIMEZONE_OPTIONS = [
+  { value: "America/Vancouver", label: "Pacific Time - Vancouver" },
+  { value: "America/Los_Angeles", label: "Pacific Time - Los Angeles" },
+  { value: "America/Denver", label: "Mountain Time - Denver" },
+  { value: "America/Phoenix", label: "Mountain Time - Phoenix" },
+  { value: "America/Chicago", label: "Central Time - Chicago" },
+  { value: "America/New_York", label: "Eastern Time - New York" },
+  { value: "America/Toronto", label: "Eastern Time - Toronto" },
+  { value: "America/Halifax", label: "Atlantic Time - Halifax" },
+  { value: "America/St_Johns", label: "Newfoundland Time - St. John's" },
+  { value: "UTC", label: "UTC" },
+];
+const ROLE_TIER_RATE_OPTIONS = [
+  {
+    value: "standard",
+    label: "Helper — 10 IC/hr",
+    description: "Show up and lend a hand",
+  },
+  {
+    value: "skilled",
+    label: "Skilled — 15 IC/hr",
+    description: "Bring a specific talent or trade",
+  },
+  {
+    value: "specialist",
+    label: "Specialist — 20 IC/hr",
+    description: "Deep expertise, trusted to lead tasks",
+  },
+  {
+    value: "leadership",
+    label: "Lead — 30 IC/hr",
+    description: "Own the room, guide the team",
+  },
+];
 
 let leafletAssetsPromise = null;
+
+const TIME_PICKER_VALUES = buildTimePickerValues(TIME_PICKER_STEP_MINUTES);
+
+function pad2(value) {
+  return String(value).padStart(2, "0");
+}
+
+function buildTimePickerValues(stepMinutes = 15) {
+  const step = Number.isFinite(Number(stepMinutes)) && Number(stepMinutes) > 0
+    ? Math.trunc(Number(stepMinutes))
+    : 15;
+  const values = [];
+  for (let minuteOfDay = 0; minuteOfDay < 24 * 60; minuteOfDay += step) {
+    const hour = Math.floor(minuteOfDay / 60);
+    const minute = minuteOfDay % 60;
+    values.push(`${pad2(hour)}:${pad2(minute)}`);
+  }
+  return values;
+}
+
+function formatTimePickerLabel(value) {
+  const parsed = parseTime(value);
+  if (!parsed) return value;
+  const meridiem = parsed.hour >= 12 ? "PM" : "AM";
+  const hour12 = parsed.hour % 12 === 0 ? 12 : parsed.hour % 12;
+  return `${hour12}:${pad2(parsed.minute)} ${meridiem}`;
+}
+
+function normalizeTimePickerValue(value) {
+  if (typeof value !== "string") return "";
+  const parsed = parseTime(value.trim());
+  if (!parsed) return "";
+  return `${pad2(parsed.hour)}:${pad2(parsed.minute)}`;
+}
+
+function getTimePickerValues(selectedValue) {
+  const normalizedSelected = normalizeTimePickerValue(selectedValue);
+  if (!normalizedSelected) return TIME_PICKER_VALUES;
+  if (TIME_PICKER_VALUES.includes(normalizedSelected)) return TIME_PICKER_VALUES;
+  return [...TIME_PICKER_VALUES, normalizedSelected].sort((a, b) => {
+    const parsedA = parseTime(a);
+    const parsedB = parseTime(b);
+    const totalA = parsedA ? parsedA.hour * 60 + parsedA.minute : 0;
+    const totalB = parsedB ? parsedB.hour * 60 + parsedB.minute : 0;
+    return totalA - totalB;
+  });
+}
+
+function getTimezoneOptions(selectedValue) {
+  const normalized = typeof selectedValue === "string" ? selectedValue.trim() : "";
+  if (!normalized) return TIMEZONE_OPTIONS;
+  if (TIMEZONE_OPTIONS.some((option) => option.value === normalized)) return TIMEZONE_OPTIONS;
+  return [{ value: normalized, label: normalized }, ...TIMEZONE_OPTIONS];
+}
 
 function formatCoordinate(value) {
   return Number(value).toFixed(3);
@@ -102,8 +186,8 @@ function formatDateInput(iso, tz) {
   }
 }
 
-function formatTimeRangeFromIso(startIso, endIso, tz) {
-  if (!startIso || !endIso) return "";
+function formatTimeInputFromIso(iso, tz) {
+  if (!iso) return "";
   try {
     const formatter = new Intl.DateTimeFormat("en-GB", {
       timeZone: tz || "UTC",
@@ -111,9 +195,7 @@ function formatTimeRangeFromIso(startIso, endIso, tz) {
       hour: "2-digit",
       minute: "2-digit",
     });
-    const start = formatter.format(new Date(startIso));
-    const end = formatter.format(new Date(endIso));
-    return `${start}–${end}`;
+    return formatter.format(new Date(iso));
   } catch {
     return "";
   }
@@ -165,12 +247,12 @@ function eventToFormState(event = {}) {
     title: event.title || "",
     category: event.category || "",
     date: formatDateInput(event.start_at, event.tz || event.timezone || "UTC"),
-    time: formatTimeRangeFromIso(event.start_at, event.end_at, event.tz || event.timezone || "UTC"),
+    start_time: formatTimeInputFromIso(event.start_at, event.tz || event.timezone || "UTC"),
+    end_time: formatTimeInputFromIso(event.end_at, event.tz || event.timezone || "UTC"),
     tz: event.tz || "America/Vancouver",
     location_text: event.location_text || "",
     location_lat: Number.isFinite(locationLat) ? locationLat : null,
     location_lng: Number.isFinite(locationLng) ? locationLng : null,
-    visibility: event.visibility || "public",
     capacity:
       event.capacity === null || event.capacity === undefined
         ? ""
@@ -180,6 +262,7 @@ function eventToFormState(event = {}) {
     description: event.description || "",
     org_name: event.org_name || "",
     community_tag: event.community_tag || "",
+    tier_rate_profile: "helper",
     cause_tags: causeTagSelection,
     cause_tag_other: causeTagOther,
     requirements: event.requirements || "",
@@ -198,18 +281,19 @@ function createInitialState(defaultOrgName = "") {
     title: "",
     category: "",
     date: "",
-    time: "",
+    start_time: "",
+    end_time: "",
     tz: "America/Vancouver",
     location_text: "",
     location_lat: null,
     location_lng: null,
-    visibility: "public",
     capacity: "",
     waitlist_enabled: true,
     cover_url: "",
     description: "",
     org_name: defaultOrgName || "",
     community_tag: "",
+    tier_rate_profile: "helper",
     cause_tags: "",
     cause_tag_other: "",
     requirements: "",
@@ -272,6 +356,12 @@ export function CreateEvent({
   const editingStatus = editingMeta?.status || (isEditing ? "draft" : null);
   const isPublishDisabled =
     submitting || editLoading || Object.keys(publishErrors).length > 0;
+  const selectedTierRateOption = useMemo(
+    () =>
+      ROLE_TIER_RATE_OPTIONS.find((option) => option.value === form.tier_rate_profile)
+      || ROLE_TIER_RATE_OPTIONS[0],
+    [form.tier_rate_profile]
+  );
   const isFieldsetDisabled = submitting || editLoading || invitePreparing;
   const isEditingPublished = isEditing && editingStatus === "published";
   const secondaryLabel = isEditingPublished ? "Save Changes" : "Save Draft";
@@ -1093,23 +1183,46 @@ export function CreateEvent({
                 onChange={(e) => updateField("date", e.target.value)}
               />
             </Field>
-            <Field label="Time" required error={errors.time}>
-              <input
-                type="text"
-                name="time"
-                placeholder="10:00–12:00"
-                value={form.time}
-                onChange={(e) => updateField("time", e.target.value)}
-              />
+            <Field label="Start time" required error={errors.start_time}>
+              <select
+                name="start_time"
+                value={form.start_time}
+                onChange={(e) => updateField("start_time", e.target.value)}
+              >
+                <option value="">Select start time</option>
+                {getTimePickerValues(form.start_time).map((timeValue) => (
+                  <option key={`start-${timeValue}`} value={timeValue}>
+                    {formatTimePickerLabel(timeValue)}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="End time" required error={errors.end_time}>
+              <select
+                name="end_time"
+                value={form.end_time}
+                onChange={(e) => updateField("end_time", e.target.value)}
+              >
+                <option value="">Select end time</option>
+                {getTimePickerValues(form.end_time).map((timeValue) => (
+                  <option key={`end-${timeValue}`} value={timeValue}>
+                    {formatTimePickerLabel(timeValue)}
+                  </option>
+                ))}
+              </select>
             </Field>
             <Field label="Timezone">
-              <input
-                type="text"
+              <select
                 name="tz"
-                placeholder="America/Vancouver"
                 value={form.tz}
                 onChange={(e) => updateField("tz", e.target.value)}
-              />
+              >
+                {getTimezoneOptions(form.tz).map((option) => (
+                  <option key={`tz-${option.value}`} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
             </Field>
           </div>
 
@@ -1132,6 +1245,20 @@ export function CreateEvent({
                   value={form.community_tag}
                   onChange={(e) => updateField("community_tag", e.target.value)}
                 />
+              </Field>
+              <Field className="tier-rate-field" label="Volunteer contribution level">
+                <select
+                  name="tier_rate_profile"
+                  value={form.tier_rate_profile}
+                  onChange={(e) => updateField("tier_rate_profile", e.target.value)}
+                >
+                  {ROLE_TIER_RATE_OPTIONS.map((option) => (
+                    <option key={`tier-rate-${option.value}`} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <span className="tier-rate-note">{selectedTierRateOption?.description || ""}</span>
               </Field>
             </div>
             <Field label="Location" required error={errors.location_text}>
@@ -1278,55 +1405,6 @@ export function CreateEvent({
           </div>
         </Field>
 
-          <div className="grid three">
-            <Field label="Reward Pool ($KIND)">
-              <input
-                type="number"
-                min="0"
-                name="reward_pool_kind"
-                value={form.reward_pool_kind}
-                onChange={(e) =>
-                  updateField("reward_pool_kind", Number(e.target.value) || 0)
-                }
-              />
-            </Field>
-            <Field label="Funding pool" error={errors.funding_pool_slug}>
-              <input
-                type="text"
-                name="funding_pool_slug"
-                value={form.funding_pool_slug}
-                onChange={(e) =>
-                  updateField("funding_pool_slug", (e.target.value || "").toLowerCase())
-                }
-                placeholder="general"
-              />
-            </Field>
-            <Field label="Boost visibility">
-              <button
-                type="button"
-                className="btn secondary"
-                onClick={() => showToast("Boosting with $KIND coming soon.", "info")}
-              >
-                Boost with $KIND
-              </button>
-            </Field>
-          </div>
-
-          <Field label="Visibility">
-            <div className="pill-row">
-              {VISIBILITY_OPTIONS.map((option) => (
-                <button
-                  type="button"
-                  key={option.value}
-                  className={`pill${form.visibility === option.value ? " active" : ""}`}
-                  onClick={() => updateField("visibility", option.value)}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-          </Field>
-
           <p className="legal-note">
             By publishing, you agree to Get Kinder’s Community Guidelines and assume responsibility for event safety and
             compliance with local laws.
@@ -1423,9 +1501,10 @@ export function CreateEvent({
   );
 }
 
-function Field({ label, children, required, error }) {
+function Field({ label, children, required, error, className = "" }) {
+  const classes = ["field", error ? "has-error" : "", className].filter(Boolean).join(" ");
   return (
-    <label className={`field ${error ? "has-error" : ""}`}>
+    <label className={classes}>
       <span className="label">
         {label} {required && <span className="required">*</span>}
       </span>
@@ -1446,16 +1525,18 @@ function buildPayload(form, status) {
     Array.isArray(form.attendance_methods) && form.attendance_methods.length > 0
       ? form.attendance_methods
       : ["social_proof"];
+  const startTime = typeof form.start_time === "string" ? form.start_time.trim() : "";
+  const endTime = typeof form.end_time === "string" ? form.end_time.trim() : "";
+  const timeRange = startTime && endTime ? `${startTime}-${endTime}` : null;
   return {
     title: form.title?.trim(),
     category: causeTags[0] || null,
     date: form.date || null,
-    time_range: form.time || null,
+    time_range: timeRange,
     tz: form.tz?.trim() || "America/Vancouver",
     location_text: form.location_text?.trim() || "",
     location_lat: Number.isFinite(Number(form.location_lat)) ? Number(form.location_lat) : null,
     location_lng: Number.isFinite(Number(form.location_lng)) ? Number(form.location_lng) : null,
-    visibility: form.visibility,
     capacity: form.capacity ? Number(form.capacity) : null,
     waitlist_enabled: Boolean(form.waitlist_enabled),
     cover_url: form.cover_url?.trim() || null,
@@ -1481,14 +1562,33 @@ function validateForm(form, { strict = false } = {}) {
   if (strict && !form.date) {
     errs.date = "Date is required.";
   }
-  if (strict && !form.time?.trim()) {
-    errs.time = "Time range is required.";
-  } else if (form.time?.trim()) {
-    const parsed = parseTimeRange(form.time);
-    if (!parsed) {
-      errs.time = "Use format HH:mm–HH:mm.";
-    } else if (parsed.endTotal <= parsed.startTotal) {
-      errs.time = "End time must be after start time.";
+  const startTime = typeof form.start_time === "string" ? form.start_time.trim() : "";
+  const endTime = typeof form.end_time === "string" ? form.end_time.trim() : "";
+  if (strict && !startTime) {
+    errs.start_time = "Start time is required.";
+  }
+  if (strict && !endTime) {
+    errs.end_time = "End time is required.";
+  }
+  if (startTime || endTime) {
+    if (!startTime) {
+      errs.start_time = "Start time is required when end time is set.";
+    } else if (!parseTime(startTime)) {
+      errs.start_time = "Use HH:mm.";
+    }
+    if (!endTime) {
+      errs.end_time = "End time is required when start time is set.";
+    } else if (!parseTime(endTime)) {
+      errs.end_time = "Use HH:mm.";
+    }
+    const parsedStart = parseTime(startTime);
+    const parsedEnd = parseTime(endTime);
+    if (parsedStart && parsedEnd) {
+      const startTotal = parsedStart.hour * 60 + parsedStart.minute;
+      const endTotal = parsedEnd.hour * 60 + parsedEnd.minute;
+      if (endTotal <= startTotal) {
+        errs.end_time = "End time must be after start time.";
+      }
     }
   }
   if (strict && !form.location_text?.trim()) {
@@ -1513,22 +1613,6 @@ function validateForm(form, { strict = false } = {}) {
     errs.funding_pool_slug = "Use lowercase letters/numbers plus - or _.";
   }
   return errs;
-}
-
-function parseTimeRange(value) {
-  if (typeof value !== "string") return null;
-  const delimiter = value.includes("–") ? "–" : "-";
-  const [startRaw, endRaw] = value.split(delimiter).map((part) => part?.trim());
-  if (!startRaw || !endRaw) return null;
-  const start = parseTime(startRaw);
-  const end = parseTime(endRaw);
-  if (!start || !end) return null;
-  return {
-    start,
-    end,
-    startTotal: start.hour * 60 + start.minute,
-    endTotal: end.hour * 60 + end.minute,
-  };
 }
 
 function parseTime(value) {
@@ -1671,9 +1755,16 @@ const styles = `
   }
   .top-meta-grid {
     display:grid;
-    gap:18px;
-    grid-template-columns:repeat(4,minmax(0,1fr));
+    gap:12px;
+    grid-template-columns:minmax(160px,1.5fr) repeat(3,minmax(110px,0.9fr)) minmax(140px,1.1fr);
     align-items:start;
+  }
+  .top-meta-grid .field {
+    gap:6px;
+  }
+  .top-meta-grid .label {
+    font-size:0.84rem;
+    line-height:1.2;
   }
   .org-location-grid {
     display:grid;
@@ -1683,13 +1774,18 @@ const styles = `
   }
   .org-location-left {
     display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
     gap:18px;
     align-content:start;
+  }
+  .org-location-left .tier-rate-field {
+    grid-column:1 / -1;
   }
   .field {
     display:flex;
     flex-direction:column;
     gap:8px;
+    min-width:0;
   }
   .label {
     font-weight:600;
@@ -1699,6 +1795,7 @@ const styles = `
     color:#ff5656;
   }
   .field input,
+  .field select,
   .field textarea {
     border:1px solid #d1d5db;
     border-radius:12px;
@@ -1706,17 +1803,39 @@ const styles = `
     font-size:1rem;
     font-family:inherit;
     resize:vertical;
+    width:100%;
+    min-width:0;
+    max-width:100%;
+    box-sizing:border-box;
+  }
+  .field select {
+    text-overflow:ellipsis;
+    background:#fff !important;
+    color:#111827;
+    -webkit-text-fill-color:#111827;
+  }
+  .top-meta-grid .field input,
+  .top-meta-grid .field select {
+    padding:9px 10px;
+    font-size:0.92rem;
+    border-radius:10px;
   }
   .field textarea {
     min-height:160px;
   }
   .field.has-error input,
+  .field.has-error select,
   .field.has-error textarea {
     border-color:#f87171;
   }
   .error-text {
     color:#b91c1c;
     font-size:0.85rem;
+  }
+  .tier-rate-note {
+    font-size:0.83rem;
+    color:#6b7280;
+    line-height:1.35;
   }
   .pill-row {
     display:flex;
@@ -1930,6 +2049,9 @@ const styles = `
       grid-template-columns:repeat(2,minmax(0,1fr));
     }
     .org-location-grid {
+      grid-template-columns:1fr;
+    }
+    .org-location-left {
       grid-template-columns:1fr;
     }
   }

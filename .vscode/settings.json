@@ -4,6 +4,7 @@
     "cSpell.words": [
         "arche",
         "asec",
+        "checkin",
         "checkins",
         "creds",
         "fafafa",
@@ -13,17 +14,23 @@
         "Harbaugh",
         "ILIKE",
         "Journaling",
+        "jsonv",
         "Kindr",
         "klass",
         "lastname",
         "mesolimbic",
         "Neighbourhood",
         "NMWPW",
+        "nominatim",
+        "noopener",
+        "nosniff",
         "personalised",
         "podmates",
+        "Prefs",
         "prestart",
         "priya",
         "Psychoneuroendocrinology",
+        "remoteip",
         "replyto",
         "rsvps",
         "SANITISED",
@@ -33,6 +40,7 @@
         "timestamptz",
         "topups",
         "UCSF",
-        "undistracted"
+        "undistracted",
+        "unsuspended"
     ]
 }

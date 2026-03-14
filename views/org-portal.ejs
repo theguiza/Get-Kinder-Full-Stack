@@ -70,7 +70,10 @@
               >
                 <span class="org-hero-rating-stars" aria-hidden="true">
                   <span class="org-hero-rating-stars-base">&#9733;&#9733;&#9733;&#9733;&#9733;</span>
-                  <span class="org-hero-rating-stars-fill" style="width:<%= orgRatingPercent.toFixed(1) %>%;">&#9733;&#9733;&#9733;&#9733;&#9733;</span>
+                  <span
+                    class="org-hero-rating-stars-fill"
+                    data-rating-width="<%= orgRatingPercent.toFixed(1) %>"
+                  >&#9733;&#9733;&#9733;&#9733;&#9733;</span>
                 </span>
                 <span class="org-hero-rating-text">
                   <%= `${orgRatingValue.toFixed(1)} (${orgRatingCount})` %>
@@ -203,20 +206,36 @@
         </ul>
       </div>
     </footer>
-  </div>
-</section>
+	  </div>
+	</section>
 
+  <script id="org-portal-config" type="application/json"><%- JSON.stringify({
+    orgPortalSuspended: orgIsSuspended,
+    csrfToken: csrfToken || "",
+    userId: user?.id || "",
+    orgName: resolvedOrganizationName,
+  }).replace(/</g, "\\u003c") %></script>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/js/bootstrap.bundle.min.js" integrity="sha384-k6d4wzSIapyDyv1kpU366/PK5hCdSbCRGRCMv+eplOQJWyd1fbcAu9OCUj5zNLiq" crossorigin="anonymous"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
   <script src="/js/bundles/entry.js?<%= assetTag %>"></script>
   <script>
-    const orgPortalSuspended = <%= orgIsSuspended ? "true" : "false" %>;
+    const orgPortalConfigNode = document.getElementById("org-portal-config");
+    const orgPortalConfig = orgPortalConfigNode ? JSON.parse(orgPortalConfigNode.textContent || "{}") : {};
+    const orgPortalSuspended = Boolean(orgPortalConfig.orgPortalSuspended);
+
+    (function () {
+      const ratingFill = document.querySelector(".org-hero-rating-stars-fill");
+      if (!ratingFill) return;
+
+      const ratingWidth = Number.parseFloat(ratingFill.dataset.ratingWidth || "");
+      ratingFill.style.width = `${Number.isFinite(ratingWidth) ? ratingWidth : 0}%`;
+    })();
 
     (function () {
       const orgSwitch = document.getElementById("org-active-switch");
       if (!orgSwitch) return;
 
-      const csrfToken = <%- JSON.stringify(csrfToken || "") %>;
+      const csrfToken = String(orgPortalConfig.csrfToken || "");
       orgSwitch.addEventListener("change", async () => {
         const nextOrgId = String(orgSwitch.value || "").trim();
         if (!/^\d+$/.test(nextOrgId)) return;
@@ -269,11 +288,13 @@
 
     if (!orgPortalSuspended) {
       window.renderOrgPortal("#org-portal-root", {
-        csrfToken: "<%= csrfToken %>",
-        userId: "<%= user.id %>",
-        orgName: <%- JSON.stringify(resolvedOrganizationName) %>
+        csrfToken: String(orgPortalConfig.csrfToken || ""),
+        userId: String(orgPortalConfig.userId || ""),
+        orgName: String(orgPortalConfig.orgName || "")
       });
-      window.renderKpiStrip("#org-portal-kpis", { csrfToken: "<%= csrfToken %>" });
+      window.renderKpiStrip("#org-portal-kpis", {
+        csrfToken: String(orgPortalConfig.csrfToken || ""),
+      });
     }
   </script>
 </body>

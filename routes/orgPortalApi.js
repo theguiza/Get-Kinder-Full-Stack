@@ -4,6 +4,8 @@ import { sendNudgeEmail } from "../kindnessEmailer.js";
 import { resolveOrgScope, setSessionActiveOrg } from "../services/orgScopeService.js";
 import { getVolunteerStats } from "../services/profileService.js";
 import { getSummary as getRatingsSummary } from "../services/ratingsService.js";
+import { isSeatTakingStatus, promoteWaitlistedAttendees } from "../services/waitlistService.js";
+import { awardIcForRsvp } from "../Backend/services/icService.js";
 
 const orgPortalRouter = express.Router();
 const CSRF_HEADER_NAME = "X-CSRF-Token";
@@ -1057,6 +1059,7 @@ orgPortalRouter.get("/opportunities/:eventId/applicants", async (req, res) => {
 });
 
 orgPortalRouter.post("/opportunities/:eventId/applicants/:userId/approve", async (req, res) => {
+  let client = null;
   try {
     if (!requireCsrf(req, res)) return;
     const hostUserIds = await resolveUserIdCandidates(req);
@@ -1067,7 +1070,68 @@ orgPortalRouter.post("/opportunities/:eventId/applicants/:userId/approve", async
     const hostCheck = await ensureHostOwnsEvent(eventId, hostUserIds);
     if (!hostCheck.ok) return res.status(hostCheck.status).json({ error: hostCheck.error });
 
-    const { rows } = await pool.query(
+    client = await pool.connect();
+    await client.query("BEGIN");
+
+    const { rows: [eventRow] } = await client.query(
+      `
+        SELECT id, status, capacity
+          FROM events
+         WHERE id = $1
+         LIMIT 1
+         FOR UPDATE
+      `,
+      [eventId]
+    );
+    if (!eventRow) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "event not found" });
+    }
+    if (String(eventRow.status || "").toLowerCase() === "cancelled") {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ error: "event_cancelled" });
+    }
+
+    const { rows: [applicantRow] } = await client.query(
+      `
+        SELECT status
+          FROM event_rsvps
+         WHERE event_id = $1
+           AND attendee_user_id = $2
+         LIMIT 1
+         FOR UPDATE
+      `,
+      [eventId, userId]
+    );
+    if (!applicantRow) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "applicant not found" });
+    }
+    const currentStatus = String(applicantRow.status || "").toLowerCase();
+    if (currentStatus === "accepted" || currentStatus === "checked_in") {
+      await client.query("COMMIT");
+      return res.json({ success: true, rsvpStatus: applicantRow.status });
+    }
+
+    const capacity = Number(eventRow.capacity);
+    const hasCapacityLimit = Number.isFinite(capacity) && capacity > 0;
+    if (hasCapacityLimit) {
+      const { rows: [countRow] } = await client.query(
+        `
+          SELECT COUNT(*) FILTER (WHERE status IN ('accepted', 'checked_in'))::int AS accepted_count
+            FROM event_rsvps
+           WHERE event_id = $1
+        `,
+        [eventId]
+      );
+      const acceptedCount = Number(countRow?.accepted_count) || 0;
+      if (acceptedCount >= capacity) {
+        await client.query("ROLLBACK");
+        return res.status(409).json({ error: "event_full" });
+      }
+    }
+
+    const { rows } = await client.query(
       `
         UPDATE event_rsvps
            SET status = 'accepted',
@@ -1079,15 +1143,25 @@ orgPortalRouter.post("/opportunities/:eventId/applicants/:userId/approve", async
       [eventId, userId]
     );
 
-    if (!rows[0]) return res.status(404).json({ error: "applicant not found" });
+    if (!rows[0]) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "applicant not found" });
+    }
+    await client.query("COMMIT");
     return res.json({ success: true, rsvpStatus: rows[0].status });
   } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch {}
     console.error("[orgPortalApi] POST approve error:", error);
     return res.status(500).json({ error: "Unable to approve applicant" });
+  } finally {
+    if (client) client.release();
   }
 });
 
 orgPortalRouter.post("/opportunities/:eventId/applicants/:userId/decline", async (req, res) => {
+  let client = null;
   try {
     if (!requireCsrf(req, res)) return;
     const hostUserIds = await resolveUserIdCandidates(req);
@@ -1098,7 +1172,41 @@ orgPortalRouter.post("/opportunities/:eventId/applicants/:userId/decline", async
     const hostCheck = await ensureHostOwnsEvent(eventId, hostUserIds);
     if (!hostCheck.ok) return res.status(hostCheck.status).json({ error: hostCheck.error });
 
-    const { rows } = await pool.query(
+    client = await pool.connect();
+    await client.query("BEGIN");
+
+    const { rows: eventRows } = await client.query(
+      `
+        SELECT id
+          FROM events
+         WHERE id = $1
+         LIMIT 1
+         FOR UPDATE
+      `,
+      [eventId]
+    );
+    if (!eventRows[0]) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "event not found" });
+    }
+
+    const { rows: [applicantRow] } = await client.query(
+      `
+        SELECT status
+          FROM event_rsvps
+         WHERE event_id = $1
+           AND attendee_user_id = $2
+         LIMIT 1
+         FOR UPDATE
+      `,
+      [eventId, userId]
+    );
+    if (!applicantRow) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "applicant not found" });
+    }
+
+    const { rows } = await client.query(
       `
         UPDATE event_rsvps
            SET status = 'declined',
@@ -1110,11 +1218,53 @@ orgPortalRouter.post("/opportunities/:eventId/applicants/:userId/decline", async
       [eventId, userId]
     );
 
-    if (!rows[0]) return res.status(404).json({ error: "applicant not found" });
+    if (!rows[0]) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "applicant not found" });
+    }
+
+    if (isSeatTakingStatus(applicantRow.status)) {
+      await promoteWaitlistedAttendees({ runner: client, eventId });
+    }
+
+    await client.query("COMMIT");
     return res.json({ success: true, rsvpStatus: rows[0].status });
   } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch {}
     console.error("[orgPortalApi] POST decline error:", error);
     return res.status(500).json({ error: "Unable to decline applicant" });
+  } finally {
+    if (client) client.release();
+  }
+});
+
+orgPortalRouter.post("/opportunities/:eventId/applicants/:userId/verify", async (req, res) => {
+  let client = null;
+  try {
+    if (!requireCsrf(req, res)) return;
+    const hostUserIds = await resolveUserIdCandidates(req);
+    const eventId = String(req.params.eventId || "").trim();
+    const userId = String(req.params.userId || "").trim();
+    if (!eventId || !userId) return res.status(400).json({ error: "eventId and userId are required" });
+
+    const hostCheck = await ensureHostOwnsEvent(eventId, hostUserIds);
+    if (!hostCheck.ok) return res.status(hostCheck.status).json({ error: hostCheck.error });
+
+    const result = await awardIcForRsvp(pool, { userId: Number(userId), eventId });
+
+    return res.json({ success: true, ...result });
+  } catch (error) {
+    if (client) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {}
+    }
+    console.error("[orgPortalApi] POST verify error:", error);
+    return res.status(500).json({ error: "Unable to verify attendance" });
+  } finally {
+    if (client) client.release();
   }
 });
 

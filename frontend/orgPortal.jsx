@@ -1883,22 +1883,17 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
 
     try {
       const attendedMinutes = computeSelectedEventAttendedMinutes();
-      const body = {
-        attendee_user_id: target.attendeeUserId,
-        decision: "verified",
-      };
-      if (Number.isFinite(attendedMinutes)) {
-        body.attended_minutes = attendedMinutes;
-      }
-
-      const response = await fetch(`/api/events/${encodeURIComponent(selectedCheckinEventId)}/verify`, {
+      const response = await fetch(`/api/kai/verify-attendance`, {
         method: "POST",
         credentials: "include",
         headers: {
           "X-CSRF-Token": csrfToken,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          user_id: target.attendeeUserId,
+          event_id: selectedCheckinEventId,
+        }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || payload?.ok === false) {
@@ -2547,8 +2542,11 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
       );
 
       if (!response.ok) throw new Error("action_failed");
-      await response.json().catch(() => ({}));
-
+      const payload = await response.json().catch(() => ({}));
+      if (payload.skipped === true) {
+        setActionError("This volunteer's attendance was already verified. No IC was awarded.");
+        return;
+      }
       await refreshOpportunityQueueAndDetail(selectedOpportunityId);
     } catch (_) {
       setActionError("Failed. Try again.");
@@ -3407,18 +3405,32 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
             <LoadingSpinner text="Loading applicants..." />
           ) : pendingVerifyApplicants.length ? (
             <ul className="list-group list-group-flush">
-              {pendingVerifyApplicants.map((applicant) => (
-                <li
-                  key={`verify-${applicant.userId}`}
-                  className="list-group-item px-0 d-flex justify-content-between align-items-center"
-                >
-                  <span>{applicant.displayName}</span>
-                  <span className="small text-muted">
-                    <span className="badge text-bg-warning me-2">Pending verification</span>
-                    {safeNumber(applicant.pastCredits, 0)} credits prev
-                  </span>
-                </li>
-              ))}
+              {pendingVerifyApplicants.map((applicant) => {
+                const userId = String(applicant.userId);
+                const saving = Boolean(actionLoadingByUser[userId]);
+                return (
+                  <li
+                    key={`verify-${userId}`}
+                    className="list-group-item px-0 d-flex justify-content-between align-items-center"
+                  >
+                    <span>{applicant.displayName}</span>
+                    <div className="d-flex align-items-center gap-2">
+                      <span className="small text-muted">
+                        <span className="badge text-bg-warning me-2">Pending verification</span>
+                        {safeNumber(applicant.pastCredits, 0)} credits prev
+                      </span>
+                      <button
+                        type="button"
+                        className="btn btn-sm orgp-btn-coral"
+                        disabled={saving}
+                        onClick={() => handleApplicantAction(userId, "verify")}
+                      >
+                        {saving ? "Saving..." : <><i className="fas fa-check me-1" aria-hidden="true"></i>Verify</>}
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
           ) : (
             <div className="text-muted small">No pending verification.</div>

@@ -10,6 +10,7 @@ import {
 import { processVerifiedEarnShift } from "../services/earnShiftFundingService.js";
 import { sendProspectInviteEmail } from "../kindnessEmailer.js";
 import { resolveOrgScope } from "../services/orgScopeService.js";
+import { isSeatTakingStatus, promoteWaitlistedAttendees } from "../services/waitlistService.js";
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
@@ -27,7 +28,7 @@ const INVITE_DUPLICATE_WINDOW_HOURS = 24 * 30;
 const INVITE_PER_EVENT_SENDER_CAP = 3;
 const EDITABLE_STATUS_SET = new Set(["draft", "published"]);
 const RSVP_ACTION_TO_STATUS = new Map([
-  ["accept", "pending"],
+  ["accept", "accepted"],
   ["decline", "declined"],
 ]);
 const CHECKIN_METHOD_SET = new Set(["host_code", "social_proof", "geo"]);
@@ -658,7 +659,7 @@ export async function draftInviteCopy(req, res) {
 export async function downloadEventCalendar(req, res) {
   try {
     const eventId = req.params.id;
-    const { rows: [eventRow] } = await pool.query(
+    const { rows: [eventRow] } = await client.query(
       `SELECT id, creator_user_id, title, description, start_at, end_at, tz, location_text
          FROM events
         WHERE id = $1
@@ -716,31 +717,97 @@ export async function downloadEventCalendar(req, res) {
 }
 
 export async function respondToEventRsvp(req, res) {
+  const client = await pool.connect();
   try {
+    await client.query("BEGIN");
     const attendeeId = await resolveUserId(req);
     const hostUserIds = await resolveHostUserIds(req);
     const eventId = req.params.id;
     const action = (req.body?.action || "").toLowerCase();
-    const targetStatus = RSVP_ACTION_TO_STATUS.get(action);
+    let targetStatus = RSVP_ACTION_TO_STATUS.get(action);
     if (!targetStatus) {
+      await client.query("ROLLBACK");
       return res.status(400).json({ ok: false, error: "Invalid RSVP action" });
     }
 
-    const { rows: [eventRow] } = await pool.query(
-      `SELECT id, creator_user_id, status FROM events WHERE id=$1 LIMIT 1`,
+    const { rows: [eventRow] } = await client.query(
+      `SELECT id, creator_user_id, status, capacity, waitlist_enabled
+         FROM events
+        WHERE id=$1
+        LIMIT 1
+        FOR UPDATE`,
       [eventId]
     );
     if (!eventRow) {
+      await client.query("ROLLBACK");
       return res.status(404).json({ ok: false, error: "Event not found" });
     }
     if (eventIsOwnedByHostScope(eventRow, hostUserIds)) {
+      await client.query("ROLLBACK");
       return res.status(400).json({ ok: false, error: "Hosts do not need to RSVP" });
     }
     if (eventRow.status === "cancelled") {
+      await client.query("ROLLBACK");
       return res.status(409).json({ ok: false, error: "Event has been cancelled" });
     }
 
-    await pool.query(
+    const { rows: [existingRsvp] } = await client.query(
+      `SELECT status
+         FROM event_rsvps
+        WHERE event_id=$1
+          AND attendee_user_id=$2
+        LIMIT 1
+        FOR UPDATE`,
+      [eventId, attendeeId]
+    );
+    const existingStatus = sanitizeString(existingRsvp?.status).toLowerCase();
+    const seatReleased = action === "decline" && isSeatTakingStatus(existingStatus);
+
+    if (action === "accept") {
+      // Treat repeated accept as idempotent for approved/checked-in attendees.
+      if (existingStatus === "accepted" || existingStatus === "checked_in") {
+        const snapshot = await getEventRsvpSnapshot(eventId, attendeeId, { runner: client });
+        await client.query("COMMIT");
+        return res.json({
+          ok: true,
+          data: {
+            status: snapshot.viewer?.status || existingStatus,
+            rsvp_counts: snapshot.counts,
+          },
+        });
+      }
+
+      const capacity = Number(eventRow.capacity);
+      const hasCapacityLimit = Number.isFinite(capacity) && capacity > 0;
+      if (hasCapacityLimit) {
+        const { rows: [countRow] } = await client.query(
+          `
+            SELECT COUNT(*) FILTER (WHERE status IN ('accepted','checked_in'))::int AS accepted_count
+              FROM event_rsvps
+             WHERE event_id = $1
+          `,
+          [eventId]
+        );
+        const acceptedCount = Number(countRow?.accepted_count) || 0;
+        if (acceptedCount >= capacity) {
+          if (eventRow.waitlist_enabled === false) {
+            await client.query("ROLLBACK");
+            return res.status(409).json({
+              ok: false,
+              code: "EVENT_FULL",
+              error: "This event is full and waitlist is disabled.",
+            });
+          }
+          targetStatus = "waitlisted";
+        } else {
+          targetStatus = "accepted";
+        }
+      } else {
+        targetStatus = "accepted";
+      }
+    }
+
+    await client.query(
       `INSERT INTO event_rsvps (event_id, attendee_user_id, status)
          VALUES ($1, $2, $3)
        ON CONFLICT (event_id, attendee_user_id)
@@ -748,17 +815,32 @@ export async function respondToEventRsvp(req, res) {
       [eventId, attendeeId, targetStatus]
     );
 
-    const snapshot = await getEventRsvpSnapshot(eventId, attendeeId);
+    if (seatReleased) {
+      await promoteWaitlistedAttendees({ runner: client, eventId });
+    }
+
+    const snapshot = await getEventRsvpSnapshot(eventId, attendeeId, { runner: client });
+    await client.query("COMMIT");
+    const nextStatus = snapshot.viewer?.status || targetStatus;
+    const message = action === "accept" && nextStatus === "waitlisted"
+      ? "Event is full. You have been added to the waitlist."
+      : null;
     return res.json({
       ok: true,
       data: {
-        status: snapshot.viewer?.status || targetStatus,
+        status: nextStatus,
         rsvp_counts: snapshot.counts,
+        ...(message ? { message } : {}),
       },
     });
   } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch {}
     console.error("[eventsApi] respondToEventRsvp error:", error);
     return res.status(500).json({ ok: false, error: "Unable to update RSVP" });
+  } finally {
+    client.release();
   }
 }
 
@@ -1016,23 +1098,28 @@ export async function verifyEventRsvp(req, res) {
 }
 
 export async function updateEvent(req, res) {
+  const client = await pool.connect();
   try {
+    await client.query("BEGIN");
     const hostUserIds = await resolveHostUserIds(req);
     const eventId = req.params.id;
     const body = req.body || {};
 
-    const { rows: [existing] } = await pool.query(
-      `SELECT * FROM events WHERE id = $1 LIMIT 1`,
+    const { rows: [existing] } = await client.query(
+      `SELECT * FROM events WHERE id = $1 LIMIT 1 FOR UPDATE`,
       [eventId]
     );
     if (!existing) {
+      await client.query("ROLLBACK");
       return res.status(404).json({ ok: false, error: "Event not found" });
     }
     if (!eventIsOwnedByHostScope(existing, hostUserIds)) {
+      await client.query("ROLLBACK");
       return res.status(403).json({ ok: false, error: "Only the host can edit this event" });
     }
 
     if (!EDITABLE_STATUS_SET.has(existing.status)) {
+      await client.query("ROLLBACK");
       return res.status(409).json({ ok: false, error: "Only draft or published events can be edited" });
     }
 
@@ -1045,7 +1132,7 @@ export async function updateEvent(req, res) {
     const locationLat = parseFloat(body.location_lat) || null;
     const locationLng = parseFloat(body.location_lng) || null;
 
-    await pool.query(
+    await client.query(
       `
         UPDATE events
            SET title=$1,
@@ -1106,13 +1193,20 @@ export async function updateEvent(req, res) {
       ]
     );
 
+    await promoteWaitlistedAttendees({ runner: client, eventId });
+    await client.query("COMMIT");
     return res.json({ ok: true, data: { id: eventId, status: finalStatus } });
   } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch {}
     console.error("[eventsApi] updateEvent error:", error);
     if (error?.statusCode === 400) {
       return res.status(400).json({ ok: false, error: error.message });
     }
     return res.status(500).json({ ok: false, error: "Unable to update event" });
+  } finally {
+    client.release();
   }
 }
 
@@ -1458,16 +1552,16 @@ function buildInviteEmailCopy({
   return { subject, html, text, body }; // body returned for drafts
 }
 
-async function getEventRsvpSnapshot(eventId, userId) {
+async function getEventRsvpSnapshot(eventId, userId, { runner = pool } = {}) {
   const [{ rows: [viewer] }, { rows: [counts] }] = await Promise.all([
-    pool.query(
+    runner.query(
       `SELECT status, check_in_method, checked_in_at
          FROM event_rsvps
         WHERE event_id=$1 AND attendee_user_id=$2
         LIMIT 1`,
       [eventId, userId]
     ),
-    pool.query(
+    runner.query(
       `SELECT
           COUNT(*) FILTER (WHERE status IN ('accepted','checked_in')) AS accepted
          FROM event_rsvps
@@ -1650,7 +1744,7 @@ export async function createEvent(req, res) {
           safety_notes,
           status
         ) VALUES (
-          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::text[],$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26
+          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::text[],$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26
         )
         RETURNING id, status
       `,

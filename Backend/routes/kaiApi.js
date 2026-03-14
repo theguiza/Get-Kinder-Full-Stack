@@ -1,6 +1,8 @@
 import express from "express";
 import { handleKaiMessage, getConversationHistory } from "../services/kai.js";
 import { determineKaiTier } from "../middleware/kai-tier.js";
+import pool from "../db/pg.js";
+import { awardIcForRsvp } from "../services/icService.js";
 
 const router = express.Router();
 
@@ -162,6 +164,44 @@ router.post("/new", (req, res) => {
     return res.status(401).json({ success: false, error: "Unauthorized" });
   }
   return res.json({ success: true, conversationId: null });
+});
+
+// POST /api/kai/verify-attendance
+// Marks an RSVP as verified and awards IC to the volunteer
+router.post("/verify-attendance", async (req, res) => {
+  if (!req.isAuthenticated || !req.isAuthenticated()) {
+    return res.status(401).json({ success: false, error: "Not authenticated" });
+  }
+
+  const { user_id, event_id } = req.body;
+
+  if (!user_id || !event_id) {
+    return res.status(400).json({ success: false, error: "user_id and event_id are required" });
+  }
+
+  try {
+    const result = await awardIcForRsvp(pool, {
+      userId: user_id,
+      eventId: event_id,
+    });
+
+    if (result.skipped) {
+      return res.json({ success: true, skipped: true, reason: result.reason });
+    }
+
+    return res.json({
+      success: true,
+      icAmount: result.icAmount,
+      tier: result.tier,
+      durationHours: result.durationHours,
+    });
+  } catch (err) {
+    console.error("[kai/verify-attendance] error:", err);
+    if (err.message === "rsvp_not_found") {
+      return res.status(404).json({ success: false, error: "RSVP not found" });
+    }
+    return res.status(500).json({ success: false, error: "Failed to verify attendance" });
+  }
 });
 
 export default router;

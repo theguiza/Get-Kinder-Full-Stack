@@ -180,6 +180,18 @@ const VERIFY_PENDING_MESSAGE =
   "Thanks for signing up! We've sent a verification email to the address you provided. Please click the link in that email to activate your account. If you don't see it in your inbox within a few minutes, check your Spam or Junk folder and mark it as 'Not Junk'.";
 const VERIFY_REQUIRED_MESSAGE =
   "Please verify your email before signing in. We sent a verification link when you signed up. If you can't find it, check your Spam or Junk folder.";
+
+function buildRegistrationVerificationEmailPayload(firstname, verificationUrl) {
+  const safeFirstName = (typeof firstname === "string" ? firstname.trim() : "") || "there";
+  return {
+    subject: "Verify your Get Kinder registration",
+    text: `Hi ${safeFirstName},\n\nPlease verify your email address to complete the registration process by clicking the link below:\n\n${verificationUrl}\n\nThis link expires in 24 hours.\n\nIf you did not create this account, you can ignore this email.\n\nThanks,\n\nKAI\n\nGet Kinder`,
+    html: `<p>Hi ${safeFirstName},</p><p>Please verify your email address to complete the registration process by clicking the link below:</p><p><a href="${verificationUrl}">Verify your email</a></p><p>This link expires in 24 hours.</p><p>If you did not create this account, you can ignore this email.</p><p>Thanks,</p><p>KAI</p><p>Get Kinder</p>`,
+    from: "Get Kinder <kai@getkinder.ai>",
+    fromName: "Get Kinder",
+  };
+}
+
 const RECAPTCHA_SITE_KEY =
   process.env.RECAPTCHA_SITE_KEY
   || process.env.RECAPTCHA_SITEKEY
@@ -208,6 +220,13 @@ const forgotPasswordLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 5,
   message: "Too many password reset requests, please try again later.",
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+const resendLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 3,
+  message: "Too many resend requests, please try again later.",
   standardHeaders: true,
   legacyHeaders: false,
 });
@@ -661,11 +680,7 @@ app.post("/register", registerLimiter, async (req, res, next) => {
     try {
       await sendNudgeEmail({
         to: newUser.email,
-        subject: "Verify your Get Kinder registration",
-        text: `Hi ${newUser.firstname},\n\nPlease verify your email address to complete the registration process by clicking the link below:\n\n${verificationUrl}\n\nThis link expires in 24 hours.\n\nIf you did not create this account, you can ignore this email.\n\nThanks,\n\nKAI\n\nGet Kinder`,
-        html: `<p>Hi ${newUser.firstname},</p><p>Please verify your email address to complete the registration process by clicking the link below:</p><p><a href="${verificationUrl}">Verify your email</a></p><p>This link expires in 24 hours.</p><p>If you did not create this account, you can ignore this email.</p><p>Thanks,</p><p>KAI</p><p>Get Kinder</p>`,
-        from: "Get Kinder <kai@getkinder.ai>",
-        fromName: "Get Kinder"
+        ...buildRegistrationVerificationEmailPayload(newUser.firstname, verificationUrl)
       });
     } catch (mailErr) {
       console.error("Verification email send failed:", mailErr);
@@ -679,6 +694,60 @@ app.post("/register", registerLimiter, async (req, res, next) => {
     }
     console.error("Registration error:", err);
     res.status(500).send("Error registering user");
+  }
+});
+// 12.1a) Resend verification route
+app.post("/resend-verification", resendLimiter, async (req, res, next) => {
+  const email = normalizeEmail(req.body?.email);
+  if (!email) {
+    return res.redirect("/login?verify=pending");
+  }
+
+  try {
+    const { rows: [user] } = await pool.query(
+      `SELECT id, firstname, email
+         FROM public.userdata
+        WHERE LOWER(email) = LOWER($1)
+          AND email_verified = FALSE
+        ORDER BY id DESC
+        LIMIT 1`,
+      [email]
+    );
+
+    if (!user) {
+      return res.redirect("/login?verify=pending");
+    }
+
+    const verificationToken = crypto.randomBytes(32).toString("hex");
+    const verificationTokenHash = crypto
+      .createHash("sha256")
+      .update(verificationToken)
+      .digest("hex");
+
+    await pool.query(
+      `UPDATE public.userdata
+          SET email_verification_token_hash = $1,
+              email_verification_expires_at = NOW() + INTERVAL '24 hours'
+        WHERE id = $2`,
+      [verificationTokenHash, user.id]
+    );
+
+    const verificationBaseUrl = (process.env.BASE_URL || getAppBaseUrl(req)).replace(/\/+$/, "");
+    const verificationUrl = `${verificationBaseUrl}/verify-email?token=${encodeURIComponent(verificationToken)}`;
+
+    try {
+      await sendNudgeEmail({
+        to: user.email,
+        ...buildRegistrationVerificationEmailPayload(user.firstname, verificationUrl)
+      });
+    } catch (mailErr) {
+      console.error("Resend verification email failed:", mailErr);
+    }
+
+    return res.redirect("/login?verify=pending");
+  } catch (err) {
+    console.error("Resend verification route error:", err);
+    return res.redirect("/login?verify=pending");
   }
 });
 // 12.2) Login Route
@@ -1036,9 +1105,7 @@ app.get("/verify-email", async (req, res) => {
 
     await pool.query(
       `UPDATE public.userdata
-          SET email_verified = TRUE,
-              email_verification_token_hash = NULL,
-              email_verification_expires_at = NULL
+          SET email_verified = TRUE
         WHERE id = $1`,
       [user.id]
     );
@@ -1848,11 +1915,14 @@ app.get("/login", (req, res) => {
     ? "Password updated. You can log in now."
     : null;
   const verifyRequiredError = verifyRequired ? VERIFY_REQUIRED_MESSAGE : "";
+  const errorMessage = verifyRequiredError || verificationError || null;
+  const showResendVerification = verifyPending || errorMessage === VERIFY_REQUIRED_MESSAGE;
   return res.render("login", {
     title: "Log In",
     facebookAppId: process.env.FACEBOOK_APP_ID,
     success: successMessage,
-    error: verifyRequiredError || verificationError || null,
+    error: errorMessage,
+    showResendVerification,
   });
 });
 app.get("/register", (req, res) => res.render("register", {

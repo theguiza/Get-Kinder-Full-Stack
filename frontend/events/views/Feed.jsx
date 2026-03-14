@@ -274,8 +274,13 @@ export function Feed({ feed = [], setFeed, pagination }) {
             const hasCover = Boolean(evt.cover_url);
             const orgName = evt.org_name || "Independent organizer";
             const communityTagLabel = evt.community_tag || "";
+            const orgRatingValue = Number.isFinite(Number(evt.org_rating_value))
+              ? Number(evt.org_rating_value)
+              : null;
+            const orgRatingCount = Number(evt.org_rating_count) || 0;
             const causeTags = Array.isArray(evt.cause_tags) ? evt.cause_tags.filter(Boolean) : [];
-            const causePreview = causeTags.slice(0, 3);
+            const primaryCauseTag = causeTags[0] || "";
+            const causePreview = causeTags.slice(1, 4);
             const extraTagCount = causeTags.length - causePreview.length;
             const description = typeof evt.description === "string" ? evt.description.trim() : "";
             const descriptionPreview =
@@ -308,35 +313,41 @@ export function Feed({ feed = [], setFeed, pagination }) {
                   aria-hidden
                   style={hasCover ? { backgroundImage: `url(${evt.cover_url})` } : undefined}
                 />
-              <div className="meta">
-                <div className="title">{evt.title || "Untitled Event"}</div>
-                <div className="org-row">
-                  <span className="org-name">{orgName}</span>
-                  {communityTagLabel && <span className="community-pill">{communityTagLabel}</span>}
-                </div>
-                <div className="sub">{fmt(evt.start_at, evt.end_at, evt.tz)} • {evt.location_text || "Location TBD"}</div>
-                {(capacityLabel || filledLabel) && (
-                  <div className="capacity-row">
-                    {capacityLabel && <span>{capacityLabel}</span>}
-                    {filledLabel && <span>{filledLabel}</span>}
+                <div className="meta">
+                  <div className="title">{evt.title || "Untitled Event"}</div>
+                  <div className="org-row">
+                    <span className="org-name">{orgName}</span>
+                    {orgRatingValue !== null && (
+                      <OrgRatingInline value={orgRatingValue} count={orgRatingCount} />
+                    )}
+                    {communityTagLabel && <span className="community-pill">{communityTagLabel}</span>}
+                    {primaryCauseTag && <span className="tag cause-pill">{primaryCauseTag}</span>}
                   </div>
-                )}
-                {causePreview.length > 0 && (
-                  <div className="tag-row">
-                    {causePreview.map((tag) => (
-                      <span className="tag" key={tag}>{tag}</span>
-                    ))}
-                    {extraTagCount > 0 && <span className="tag">+{extraTagCount}</span>}
+                  <div className="sub">
+                    {fmt(evt.start_at, evt.end_at, evt.tz)} • {evt.location_text || "Location TBD"}
                   </div>
-                )}
-                {descriptionPreview && (
-                  <div className="requirements">{descriptionPreview}</div>
-                )}
-                <div className="meta-row">
-                  <span className="meta-pill">{verificationLabel}</span>
-                  <span className="meta-pill">Earn: {credits} Impact Credits</span>
+                  {(capacityLabel || filledLabel) && (
+                    <div className="capacity-row">
+                      {capacityLabel && <span>{capacityLabel}</span>}
+                      {filledLabel && <span>{filledLabel}</span>}
+                    </div>
+                  )}
+                  {causePreview.length > 0 && (
+                    <div className="tag-row">
+                      {causePreview.map((tag) => (
+                        <span className="tag" key={tag}>{tag}</span>
+                      ))}
+                      {extraTagCount > 0 && <span className="tag">+{extraTagCount}</span>}
+                    </div>
+                  )}
+                  {descriptionPreview && (
+                    <div className="requirements">{descriptionPreview}</div>
+                  )}
+                  <div className="meta-row">
+                    <span className="meta-pill">{verificationLabel}</span>
+                    <span className="meta-pill">Earn: {credits} Impact Credits</span>
+                  </div>
                 </div>
-              </div>
                 <div className="actions">
                   <button
                     className="btn"
@@ -358,6 +369,30 @@ export function Feed({ feed = [], setFeed, pagination }) {
 
       <style>{styles}</style>
     </section>
+  );
+}
+
+function OrgRatingInline({ value, count }) {
+  const ratingValue = Number.isFinite(Number(value)) ? Number(value) : 5;
+  const ratingCount = Number(count) || 0;
+  const ratingPercent = Math.max(0, Math.min(100, (ratingValue / 5) * 100));
+
+  return (
+    <span
+      className="org-rating-inline"
+      role="img"
+      aria-label={`Organization rating ${ratingValue.toFixed(1)} out of 5 stars from ${ratingCount} ratings`}
+    >
+      <span className="org-rating-inline-stars" aria-hidden="true">
+        <span className="org-rating-inline-stars-base">&#9733;&#9733;&#9733;&#9733;&#9733;</span>
+        <span className="org-rating-inline-stars-fill" style={{ width: `${ratingPercent}%` }}>
+          &#9733;&#9733;&#9733;&#9733;&#9733;
+        </span>
+      </span>
+      <span className="org-rating-inline-text">
+        {ratingValue.toFixed(1)} ({ratingCount})
+      </span>
+    </span>
   );
 }
 
@@ -389,7 +424,7 @@ function fmt(start, end, tz) {
 }
 
 function formatVerificationLabel() {
-  return "Scan QR Code";
+  return "Check-in: Scan QR Code";
 }
 
 const styles = `
@@ -410,6 +445,11 @@ const styles = `
   .sub{color:#6b7280;font-size:13px}
   .org-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:4px}
   .org-name{font-weight:600;color:#1f2937}
+  .org-rating-inline{display:inline-flex;align-items:center;gap:0.45rem}
+  .org-rating-inline-stars{position:relative;display:inline-block;font-size:0.9rem;line-height:1;letter-spacing:0.08em}
+  .org-rating-inline-stars-base{color:#d2d9e6}
+  .org-rating-inline-stars-fill{position:absolute;left:0;top:0;overflow:hidden;white-space:nowrap;color:#ff5656}
+  .org-rating-inline-text{color:#455a7c;font-size:0.82rem;font-weight:600}
   .community-pill{background:#fff;border:1px solid #e5e7eb;border-radius:999px;padding:3px 10px;font-size:11px;color:#1f2937}
   .tag-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
   .tag{background:#f3f4f6;border:1px solid #e5e7eb;border-radius:999px;padding:3px 10px;font-size:11px;color:#374151}

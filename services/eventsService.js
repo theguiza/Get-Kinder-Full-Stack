@@ -35,7 +35,25 @@ function normalizeFilterToken(value) {
     .replace(/[^a-z0-9]+/g, "");
 }
 
+function roundToTenth(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return null;
+  return Math.round(num * 10) / 10;
+}
+
 function mapEventRow(row = {}) {
+  const orgId = row.org_id !== null && row.org_id !== undefined
+    ? Number(row.org_id)
+    : null;
+  const orgRatingCount = Number(row.org_rating_count) || 0;
+  const orgRatingValueRaw = Number(row.org_rating_value);
+  const orgRatingValue = Number.isInteger(orgId) && orgId > 0
+    ? (
+      orgRatingCount > 0 && Number.isFinite(orgRatingValueRaw)
+        ? roundToTenth(orgRatingValueRaw)
+        : 5
+    )
+    : null;
   return {
     id: row.id != null ? String(row.id) : null,
     title: row.title || "Untitled Event",
@@ -60,6 +78,7 @@ function mapEventRow(row = {}) {
         : 1,
     funding_pool_slug: row.funding_pool_slug || "general",
     capacity: typeof row.capacity === "number" ? row.capacity : null,
+    waitlist_enabled: row.waitlist_enabled !== false,
     rsvp_counts: {
       accepted: Number(row.rsvp_accepted) || 0,
     },
@@ -69,6 +88,8 @@ function mapEventRow(row = {}) {
     status: row.status || null,
     creator_user_id: row.creator_user_id ? String(row.creator_user_id) : null,
     cover_url: row.cover_url || null,
+    org_rating_value: orgRatingValue,
+    org_rating_count: Number.isInteger(orgId) && orgId > 0 ? orgRatingCount : 0,
   };
 }
 
@@ -196,18 +217,42 @@ export async function fetchEvents({
              e.reliability_weight,
              e.funding_pool_slug,
              e.capacity,
+             e.waitlist_enabled,
              e.cover_url,
              e.attendance_methods,
              e.status,
              e.creator_user_id,
+             creator.org_id,
+             org_rating.avg AS org_rating_value,
+             COALESCE(org_rating.cnt, 0) AS org_rating_count,
              COALESCE(r.accepted, 0) AS rsvp_accepted
         FROM events e
+   LEFT JOIN userdata creator
+          ON creator.id = e.creator_user_id
    LEFT JOIN (
           SELECT event_id,
                  COUNT(*) FILTER (WHERE status IN ('accepted','checked_in')) AS accepted
             FROM event_rsvps
         GROUP BY event_id
         ) r ON r.event_id = e.id
+   LEFT JOIN LATERAL (
+          SELECT AVG(recent.stars)::float AS avg,
+                 COUNT(*)::int AS cnt
+            FROM (
+                  SELECT er.stars
+                    FROM event_ratings er
+               LEFT JOIN userdata hu
+                      ON hu.id = er.ratee_user_id
+                   WHERE creator.org_id IS NOT NULL
+                     AND (
+                       (er.ratee_role = 'organization' AND er.ratee_org_id = creator.org_id)
+                       OR
+                       (er.ratee_role = 'host' AND hu.org_id = creator.org_id)
+                     )
+                ORDER BY er.created_at DESC
+                   LIMIT 20
+                 ) recent
+        ) org_rating ON creator.org_id IS NOT NULL
       ${filters.length ? `WHERE ${filters.join(" AND ")}` : ""}
        ORDER BY ${sortStartExpr} ${normalizedView === "archive" ? "DESC" : "ASC"},
                 e.id ${normalizedView === "archive" ? "DESC" : "ASC"}
@@ -255,18 +300,42 @@ export async function fetchEventById(id) {
              e.reliability_weight,
              e.funding_pool_slug,
              e.capacity,
+             e.waitlist_enabled,
              e.cover_url,
              e.attendance_methods,
              e.status,
              e.creator_user_id,
+             creator.org_id,
+             org_rating.avg AS org_rating_value,
+             COALESCE(org_rating.cnt, 0) AS org_rating_count,
              COALESCE(r.accepted, 0) AS rsvp_accepted
         FROM events e
+   LEFT JOIN userdata creator
+          ON creator.id = e.creator_user_id
    LEFT JOIN (
           SELECT event_id,
                  COUNT(*) FILTER (WHERE status IN ('accepted','checked_in')) AS accepted
             FROM event_rsvps
         GROUP BY event_id
         ) r ON r.event_id = e.id
+   LEFT JOIN LATERAL (
+          SELECT AVG(recent.stars)::float AS avg,
+                 COUNT(*)::int AS cnt
+            FROM (
+                  SELECT er.stars
+                    FROM event_ratings er
+               LEFT JOIN userdata hu
+                      ON hu.id = er.ratee_user_id
+                   WHERE creator.org_id IS NOT NULL
+                     AND (
+                       (er.ratee_role = 'organization' AND er.ratee_org_id = creator.org_id)
+                       OR
+                       (er.ratee_role = 'host' AND hu.org_id = creator.org_id)
+                     )
+                ORDER BY er.created_at DESC
+                   LIMIT 20
+                 ) recent
+        ) org_rating ON creator.org_id IS NOT NULL
        WHERE e.id = $1
        LIMIT 1
     `,

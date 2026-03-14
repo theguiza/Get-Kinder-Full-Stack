@@ -114,9 +114,14 @@ export function EventDetail({ eventId, isAuthenticated = false }) {
   if (!evt) {
     return <p className="muted">Event not found.</p>;
   }
-  const attendanceRequested = ["pending", "accepted", "checked_in"].includes(
-    String(evt.viewer_rsvp_status || "").toLowerCase()
+  const viewerRsvpStatus = String(evt.viewer_rsvp_status || "").toLowerCase();
+  const attendanceRequested = ["pending", "accepted", "checked_in", "waitlisted"].includes(
+    viewerRsvpStatus
   );
+  const capacityValue = Number(evt?.capacity);
+  const acceptedCount = Number(evt?.rsvp_counts?.accepted) || 0;
+  const eventAtCapacity = Number.isFinite(capacityValue) && capacityValue > 0 && acceptedCount >= capacityValue;
+  const waitlistEnabled = evt.waitlist_enabled !== false;
   const safetyNotesText = getSafetyNotesText(evt);
 
   async function handleAddToCalendar() {
@@ -176,11 +181,13 @@ export function EventDetail({ eventId, isAuthenticated = false }) {
         viewer_check_in_method: null,
         viewer_checked_in_at: null,
       });
+      const serverMessage = typeof json?.data?.message === "string" ? json.data.message.trim() : "";
       const successMessage = typeof options.successMessage === "string" && options.successMessage.trim()
         ? options.successMessage
-        : action === "accept"
-          ? "Your request has been sent"
-          : "Invite declined.";
+        : (
+          serverMessage
+          || (action === "accept" ? "Your request has been sent" : "Invite declined.")
+        );
       showToast({
         message: successMessage,
         type: "success",
@@ -312,8 +319,14 @@ export function EventDetail({ eventId, isAuthenticated = false }) {
           <div>
             <strong className="rsvp-card__title">Request Attendance</strong>
             <p className="muted mb-0">
-              {attendanceRequested
+              {viewerRsvpStatus === "waitlisted"
+                ? "You're on the waitlist for this event. We'll let you know if a spot opens."
+                : attendanceRequested
                 ? "You have requested attending this event"
+                : eventAtCapacity && waitlistEnabled
+                  ? "This event is currently full. Join the waitlist and we'll notify you if a spot opens."
+                  : eventAtCapacity && !waitlistEnabled
+                    ? "This event is currently full."
                 : "Send a request to join this event, and you will hear back on your approval shortly"}
             </p>
           </div>
@@ -323,9 +336,17 @@ export function EventDetail({ eventId, isAuthenticated = false }) {
                 type="button"
                 className="btn"
                 onClick={handleRequestAttendance}
-                disabled={rsvpAction === "accept" || evt.viewer_rsvp_status === "checked_in"}
+                disabled={
+                  rsvpAction === "accept"
+                  || viewerRsvpStatus === "checked_in"
+                  || (eventAtCapacity && !waitlistEnabled)
+                }
               >
-                {rsvpAction === "accept" ? "Saving…" : "Request"}
+                {rsvpAction === "accept"
+                  ? "Saving…"
+                  : eventAtCapacity && waitlistEnabled
+                    ? "Join Waitlist"
+                    : "Request"}
               </button>
             </div>
           )}

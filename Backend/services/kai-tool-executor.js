@@ -1,5 +1,12 @@
 import pool from "../db/pg.js";
 
+const IC_RATE_BY_TIER = {
+  standard: 10,
+  skilled: 15,
+  specialist: 20,
+  leadership: 30,
+};
+
 const DEFAULT_EVENTS_DAYS_AHEAD = 90;
 const DEFAULT_EVENTS_LIMIT = 5;
 const DEFAULT_HISTORY_LIMIT = 5;

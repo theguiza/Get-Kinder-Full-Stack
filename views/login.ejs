@@ -41,6 +41,21 @@
       box-shadow: 0 12px 32px rgba(20, 36, 64, 0.2);
     }
 
+    .resend-verification {
+      margin-top: 1rem;
+      margin-bottom: 1rem;
+      padding: 0.85rem;
+      border: 1px solid #d7e2f1;
+      border-radius: 0.65rem;
+      background: #f7faff;
+    }
+
+    .resend-verification p {
+      margin: 0 0 0.5rem 0;
+      color: #455a7c;
+      font-weight: 600;
+    }
+
   </style>
 </head>
 
@@ -85,8 +100,30 @@
                   </div>
                 </div>
                 </div>
-							</div>
+								</div>
         <h2>or</h2>
+        <% if (typeof showResendVerification !== "undefined" && showResendVerification) { %>
+        <div class="resend-verification">
+          <p>Didn't get the email or link expired?</p>
+          <form method="POST" action="/resend-verification">
+            <div class="form-group">
+              <input
+                type="email"
+                name="email"
+                class="form-control"
+                placeholder="Your email address"
+                required
+                autocomplete="username"
+                autocapitalize="none"
+                spellcheck="false"
+              >
+            </div>
+            <div class="login_btn_wrapper mt-2">
+              <button type="submit" class="btn btn-primary w-100">Resend verification email</button>
+            </div>
+          </form>
+        </div>
+        <% } %>
         <form id="login-form" action="/login" method="POST" autocomplete="off">
           <div class="form-group">
             <input type="email" name="email" class="form-control" required placeholder="Email Address *" autocomplete="off" autocapitalize="none" spellcheck="false">
