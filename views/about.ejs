@@ -47,92 +47,236 @@
     </div>
   <% } %>
       <%- include("partials/site-header", { currentPage: "other" }) %>
-  <section id="title" >
-    <div class="container py-5">
-        <h1 class="display-1 my-5 text-center" style="color: #ff5656">About Get Kinder</h1>
-      <h2 class="display-4 mb-3 text-center" style="color: #455a7c;">Who We Are</h2>
-        <div class="row g-4 row-cols-1 row-cols-md-3">
-          <div class="col text-center">
-            <div class="profile-card p-3"> 
-            <img class="bd-placeholder-img rounded-circle mb-3" width="140" height="140" src="./images/michael.png" alt="Michael Wozney"></img>
-            <h2 class="display-7 lh-1 fw-bold" style="width: 100%; text-align: center; color: aliceblue; text-shadow: 2px 2px 3px rgba(0,0,0,0.8); z-index: 2; margin-bottom: 1rem;"> Michael Wozney </h2>
-            <h5 class="fw-bold" style="color: #ff5656; padding-bottom: 10px;"><em>Co-Founder & CEO</em></h5>
-            <p style="color: #455a7c; font-size: 1.1rem;">Michael’s lifelong journey of helping others began with a degree in psychology and working with individuals with special needs — leading to founding a community services organization. </p>
-            <p style="color:  #455a7c; font-size: 1.1rem;">With an MBA and over 15 years guiding leaders to be more kind, effective, and values-driven, he has shaped positive workplace cultures across healthcare and global multinationals.</p>
-            <p style="color:  #455a7c; font-size: 1.1rem;">Today, he’s uniquely equipped to scale that impact globally—bringing the power of kindness to people and communities around the world. </p>
-          </div><!-- <p><a class="btn btn-secondary" href="#">View details »</a></p>  -->
-          </div>
+<!-- ══ HERO ══ -->
+<section class="about-hero">
+  <div class="container">
+    <div class="row align-items-center g-5">
 
-          <div class="col text-center">
-            <div class="profile-card p-3"> 
-            <img class="bd-placeholder-img rounded-circle mb-3" width="140" height="140" src="./images/erin.png" alt="Michael Wozney"></img>
-           <h2 class="display-7 lh-1 fw-bold" style="width: 100%; text-align: center; color: aliceblue; text-shadow: 2px 2px 3px rgba(0,0,0,0.8); z-index: 2; margin-bottom: 1rem;"> Erin Gray </h2>
-            <h5 class="fw-bold" style="color:  #ff5656; padding-bottom: 10px;"><em>Co-Founder & COO</em></h5>
-            <p style="color:  #455a7c; font-size: 1.1rem;">From an early age, Erin has been an active member of her community, shaped by her family’s dedication to volunteering and helping neighbours.</p>
-            <p style="color:  #455a7c;font-size: 1.1rem;">She earned her master’s degree in London and went on to close multimillion-dollar deals in Dubai and across the Middle East.</p> 
-            <p style="color:  #455a7c; font-size: 1.1rem;">Now, she’s bringing these global skills and leadership experience back to what matters most to her—making the world a better place through Kinder AI™.</p>    
-          </div>
-        </div>
-          <div class="col text-center">
-            <div class="profile-card p-3"> 
-            <img class="bd-placeholder-img rounded-circle mb-3" width="140" height="140" src="./images/tate.png" alt="Michael Wozney"></img>
-           <h2 class="display-7 lh-1 fw-bold" style="width: 100%; text-align: center; color: aliceblue; text-shadow: 2px 2px 3px rgba(0,0,0,0.8); z-index: 2; margin-bottom: 1rem;"> Tate Wozney </h2>
-            <h5 class="fw-bold" style="color:  #ff5656; padding-bottom: 10px;"><em>Co-Founder</em></h5>
-            <p style="color:  #455a7c; font-size: 1.1rem;">Being kind is baked into Tate's being, and despite being the youngest member of the team he already brings a long history and passion for helping others! Including volunteering with many organizations.</p>
-            <p style="color:  #455a7c;font-size: 1.1rem;">Combine that with his critically important perspective of the younger generation, and he is perfectly positioned to ensure Get Kinder is impactful and resonates with everyone.</p>
-          </div>
-        </div><!-- /.col-lg-4 -->
-        </div><!-- /.row -->
+      <div class="col-lg-7 about-fade">
+        <span class="about-section-label">About Get Kinder</span>
+        <h1 class="about-hero__headline">
+          What if kindness<br>was <em>contagious?</em>
+        </h1>
+        <p class="about-hero__sub">
+          We're a registered nonprofit using technology as a force for good —
+          connecting volunteers, organizations, and donors in one transparent loop
+          that makes showing up easier, and showing it counts.
+        </p>
+        <a href="/events" class="about-hero__cta">Find an opportunity near you →</a>
       </div>
-  </section>
-  <!-- About section -->
-  <section id="about">
-    <div class="container py-5">
-            <h2 class="display-4 mb-3 text-center" style="color: #ff5656;">What We Stand For</h2>
-      <div class="row gy-4 row-cols-1 row-cols-md-3">
-        
-        <div class="col text-center">
-          <div class="profile-card m-3">
-            <div class="text-center mb-3">
-              <img src="./images/heart-in-hands-3D.png" alt="Hand Heart Icon" style="height: 150px; width: auto;">
-            </div>
-            <div>
-            
-             <h3 class="display-6 lh-1 fw-bold" style="width: 100%; text-align: center; color: #ff5656; text-shadow: 2px 2px 3px rgba(0,0,0,0.8); z-index: 2; margin-bottom: 2rem;"> Our Story. </h3>
-                <p style="font-size: 1.2rem;"><strong>Get Kinder</strong> is a registered nonprofit dedicated to using technology for social good. Inspired by the simple question: <strong>What if kindness was contagious? </strong>We use <strong>Kinder AI™ </strong>and innovative <strong>AI for Good</strong> strategies to make it easy to start kindness habits and share, celebrate, and inspire kindness in others. </p>
-                <p style="font-size: 1.2rem;">We use technology as a force for good to help create meaningful connections, support emotional well-being, and reduce loneliness. We ensure that every act of kindness contributes to a more just, connected, and sustainable world.</p>
-            </div>
-          </div>
-        </div>
-  
-        <div class="col text-center">
-          <div class="profile-card m-3">
-            <div class="d-inline-flex align-items-center justify-content-center flex-shrink-0 me-3">
-              <img src="./images/chatheart-3D.png" alt="Hand Heart Icon" style="height: 150px; width: auto;">
-            </div>
-            <div>
-            <h3 class="display-6 lh-1 fw-bold" style="width: 100%; text-align: center; color: #ff5656; text-shadow: 2px 2px 3px rgba(0,0,0,0.8); z-index: 2; margin-bottom: 2rem;"> Mission. </h3>
-              <p style="font-size: 1.2rem;"> At <strong>Get Kinder</strong> our mission is to make kindness effortless and impactful, transforming individual actions into global change making the world kinder and happier. <strong>Kinder AI™</strong> supports people in creating daily kindness habits that improve emotional well-being, build community connections, and align with the <strong> <a href="https://sdgs.un.org/goals" target="_blank">United Nations’ 17 Sustainable Development Goals (SDGs)</a></strong></p>
-              <p style="font-size: 1.2rem;"> We do this by making it easy to be kind, as this doesn’t just <strong>brighten someone else’s day — it transforms yours! </strong></p>
-            </div>
-          </div>
-        </div>
-  
-        <div class="col text-center">
-          <div class="profile-card m-3">
-            <div class="d-inline-flex align-items-center justify-content-center flex-shrink-0 me-3">
-              <img src="./images/heart-megaphone-3d.png" alt="Hand Heart Icon" style="height: 150px; width: auto;">
-            </div>
-            <div>
-                <h3 class="display-6 lh-1 fw-bold" style="width: 100%; text-align: center; color: #ff5656; text-shadow: 2px 2px 3px rgba(0,0,0,0.8); z-index: 2; margin-bottom: 2rem;"> Vision. </h3>
-              <p style="font-size: 1.2rem;">As part of the <a href="https://getkindr.com/" target="_blank" rel="noopener noreferrer">Get Kindr Foundation</a> we envision a kinder, more compassionate world driven by innovative <strong> AI for Good </strong> solutions. By harnessing <strong>Kinder AI™</strong>  and aligning with the <strong>UN's 17 Sustainable Development Goals</strong>, we aim to foster resilience, strengthen communities, and amplify global happiness—one intentional act of kindness at a time.</p>
-              <p style="font-size: 1.2rem;"><strong>Get Kinder, doing good feels good.</strong> </p>
-            </div>
-          </div>
-        </div>
+
+      <div class="col-lg-5 text-center about-fade" style="transition-delay:0.15s">
+        <img src="./images/heart3D.png" alt="Get Kinder Heart" class="about-hero__visual" style="width:200px;">
       </div>
+
     </div>
-  </section>
+  </div>
+</section>
+
+<!-- ══ STORY ══ -->
+<section class="about-story">
+  <div class="container">
+    <div class="row g-5 align-items-start">
+
+      <div class="col-lg-5 about-fade">
+        <span class="about-section-label">Our Story</span>
+        <p class="about-story__pull">
+          Built by people who lived<br>the <em>broken system</em><br>firsthand.
+        </p>
+        <p class="about-story__attribution">Vancouver, BC · Est. 2024</p>
+      </div>
+
+      <div class="col-lg-7 about-story__body about-fade" style="transition-delay:0.1s">
+        <p>
+          <strong>Get Kinder started with a frustration.</strong> Our founders spent years on
+          both sides of the community table — running organizations that struggled to find
+          reliable volunteers, donating money into black holes with no proof of impact, and
+          watching talented, willing people give up because the process was too hard.
+        </p>
+        <p>
+          The tools didn't exist. Organizations coordinated in spreadsheets. Volunteers had
+          no record of what they'd contributed. Donors had no idea where their money went.
+          The system was broken — and everyone inside it knew it.
+        </p>
+        <p>
+          So we built the infrastructure that should have existed all along: a verified impact
+          loop where every shift is recorded, every dollar is traced, and every act of kindness
+          leaves a real mark on a real community.
+        </p>
+        <p>
+          <strong>Kinder AI™</strong> — trademarked in Canada — makes it effortless.
+          Not just good intentions. <em>Verified impact.</em>
+        </p>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ══ BELIEF STRIP ══ -->
+<div class="about-belief">
+  <div class="container">
+    <p class="about-belief__text about-fade">
+      "Doing good <em>feels good.</em> We just make it easier to do —
+      and impossible to ignore when you do."
+    </p>
+  </div>
+</div>
+
+<!-- ══ PILLARS ══ -->
+<section class="about-pillars">
+  <div class="container">
+
+    <div class="text-center mb-5 about-fade">
+      <span class="about-section-label" style="color:rgba(255,255,255,0.5)">What We Stand For</span>
+      <h2 class="about-pillars__headline">Purpose. Mission. Vision.</h2>
+    </div>
+
+    <div class="row g-4">
+
+      <div class="col-lg-4 about-fade">
+        <div class="about-pillar">
+          <img class="about-pillar__icon" src="./images/heart-in-hands-3D.png" alt="">
+          <p class="about-pillar__label">Purpose</p>
+          <h3 class="about-pillar__title">Our Story</h3>
+          <p class="about-pillar__body">
+            Inspired by the simple question: <em>What if kindness was contagious?</em>
+            We use Kinder AI™ and innovative AI for Good strategies to make it easy to
+            start kindness habits — and share, celebrate, and inspire kindness in others.
+          </p>
+        </div>
+      </div>
+
+      <div class="col-lg-4 about-fade" style="transition-delay:0.1s">
+        <div class="about-pillar">
+          <img class="about-pillar__icon" src="./images/chatheart-3D.png" alt="">
+          <p class="about-pillar__label">Mission</p>
+          <h3 class="about-pillar__title">Make Kindness Effortless</h3>
+          <p class="about-pillar__body">
+            Transforming individual actions into global change — making the world kinder
+            and happier. Kinder AI™ supports daily kindness habits that improve well-being,
+            build community, and align with the
+            <a href="https://sdgs.un.org/goals" target="_blank">UN's 17 SDGs</a>.
+          </p>
+        </div>
+      </div>
+
+      <div class="col-lg-4 about-fade" style="transition-delay:0.2s">
+        <div class="about-pillar">
+          <img class="about-pillar__icon" src="./images/heart-megaphone-3d.png" alt="">
+          <p class="about-pillar__label">Vision</p>
+          <h3 class="about-pillar__title">A Kinder World</h3>
+          <p class="about-pillar__body">
+            As part of the <a href="https://getkindr.com/" target="_blank">Get Kindr Foundation</a>,
+            we envision a kinder, more compassionate world driven by AI for Good — fostering
+            resilience, strengthening communities, and amplifying global happiness, one
+            intentional act at a time.
+          </p>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ══ TEAM ══ -->
+<section class="about-team">
+  <div class="container">
+
+    <div class="mb-5 about-fade">
+      <span class="about-section-label">The Founders</span>
+      <h2 class="about-team__headline">
+        People who chose to<br><em>do something about it.</em>
+      </h2>
+    </div>
+
+    <div class="row g-4">
+
+      <div class="col-lg-4 about-fade">
+        <div class="about-founder">
+          <div class="about-founder__photo-wrap">
+            <img src="./images/erin.png" alt="Erin Gray">
+          </div>
+          <div class="about-founder__body">
+            <p class="about-founder__role">Co-Founder & CEO</p>
+            <h3 class="about-founder__name">Erin Gray</h3>
+            <blockquote class="about-founder__quote">
+              "I've closed deals worth millions. The most meaningful thing I've ever done is show up for my community."
+            </blockquote>
+            <p class="about-founder__bio">
+              Shaped by a family culture of volunteering, Erin earned her master's in London and went on to
+              build commercial relationships across Dubai and the Middle East. She brings that global expertise
+              back to what matters most — infrastructure that actually works for people running our communities.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-lg-4 about-fade" style="transition-delay:0.1s">
+        <div class="about-founder">
+          <div class="about-founder__photo-wrap">
+            <img src="./images/michael.png" alt="Michael Wozney">
+          </div>
+          <div class="about-founder__body">
+            <p class="about-founder__role">Co-Founder & COO</p>
+            <h3 class="about-founder__name">Michael Wozney</h3>
+            <blockquote class="about-founder__quote">
+              "Kindness isn't soft — it's the most effective leadership strategy I've ever seen."
+            </blockquote>
+            <p class="about-founder__bio">
+              A psychology degree and years running a community services organization gave Michael a
+              ground-floor view of what broken infrastructure costs volunteers and communities. An MBA
+              and 15+ years coaching leaders in healthcare and global multinationals taught him how to
+              scale culture. Now he's doing both at once.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-lg-4 about-fade" style="transition-delay:0.2s">
+        <div class="about-founder">
+          <div class="about-founder__photo-wrap">
+            <img src="./images/tate.png" alt="Tate Wozney">
+          </div>
+          <div class="about-founder__body">
+            <p class="about-founder__role">Co-Founder</p>
+            <h3 class="about-founder__name">Tate Wozney</h3>
+            <blockquote class="about-founder__quote">
+              "If it doesn't feel natural to someone my age, we haven't finished building it."
+            </blockquote>
+            <p class="about-founder__bio">
+              The youngest — and the most important voice in the room for a platform built to resonate with
+              the next generation. Tate brings genuine passion for volunteering and the critically honest
+              perspective of someone who will actually live in the world Get Kinder is trying to build.
+            </p>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ══ CLOSING CTA ══ -->
+<section class="about-closing">
+  <div class="container">
+    <p class="about-closing__eyebrow">Ready to do something real?</p>
+    <h2 class="about-closing__headline">
+      The world gets kinder<br>when <em>you</em> do.
+    </h2>
+    <p class="about-closing__sub">
+      Join the loop. Volunteer your time, fund verified impact,
+      or bring your organization onto the platform — for free.
+    </p>
+    <div class="d-flex justify-content-center gap-3 flex-wrap">
+      <a href="/events" class="about-btn-primary">🙋 Start volunteering →</a>
+      <a href="/donate" class="about-btn-secondary">💚 Fund verified impact →</a>
+    </div>
+    <p class="about-closing__caption">
+      Verified attendance. Transparent funding. Real community outcomes.
+    </p>
+  </div>
+</section>
   <section id="footer" class="gradient-background">
   <div class="container">
     <footer class="row align-items-center py-5 mt-5 border-top text-body-secondary">
@@ -199,9 +343,20 @@
           </form>
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
         </div>
-      </div>
-    </div>
   </div>
+  </div>
+  </div>
+  <script>
+    const _aboutObserver = new IntersectionObserver((entries) => {
+      entries.forEach(e => {
+        if (e.isIntersecting) {
+          e.target.classList.add('visible');
+          _aboutObserver.unobserve(e.target);
+        }
+      });
+    }, { threshold: 0.1 });
+    document.querySelectorAll('.about-fade').forEach(el => _aboutObserver.observe(el));
+  </script>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/js/bootstrap.bundle.min.js" integrity="sha384-k6d4wzSIapyDyv1kpU366/PK5hCdSbCRGRCMv+eplOQJWyd1fbcAu9OCUj5zNLiq" crossorigin="anonymous"></script>
 <!-- Start of HubSpot Embed Code -->
 <script type="text/javascript" id="hs-script-loader" async defer src="//js-na3.hs-scripts.com/342094649.js"></script>

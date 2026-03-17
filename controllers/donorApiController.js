@@ -21,63 +21,81 @@ export async function getDonorSummary(req, res) {
 
     const { rows: [row] = [] } = await pool.query(
       `
-        WITH my_donations AS (
-          SELECT id, amount_cents, currency
-            FROM donations
-           WHERE donor_user_id = $1
-             AND status = 'captured'
-        ),
-        credits_in AS (
-          SELECT donation_id, SUM(amount_credits) AS credits_in
-            FROM pool_transactions
-           WHERE direction = 'credit'
-             AND reason = 'donation_in'
-             AND donation_id IN (SELECT id FROM my_donations)
-           GROUP BY donation_id
-        ),
-        credits_out AS (
-          SELECT donation_id, SUM(amount_credits) AS credits_out
-            FROM pool_transactions
-           WHERE direction = 'debit'
-             AND reason = 'shift_out'
-             AND donation_id IN (SELECT id FROM my_donations)
-           GROUP BY donation_id
-        ),
-        receipts AS (
-          SELECT donation_id,
-                 SUM(credits_funded)     AS credits_funded,
-                 SUM(minutes_verified)    AS minutes_funded
-            FROM donor_receipts
-           WHERE donation_id IN (SELECT id FROM my_donations)
-           GROUP BY donation_id
-        ),
-        deficit AS (
-          SELECT
-            SUM(GREATEST(wt.kind_amount - COALESCE(dr.credits_funded, 0), 0)) AS deficit_credits,
-            SUM(
-              CASE WHEN wt.kind_amount - COALESCE(dr.credits_funded, 0) > 0
-                   THEN COALESCE(dr.minutes_verified, 0)
-                   ELSE 0 END
-            ) AS deficit_minutes
+      WITH my_donations AS (
+        SELECT id, amount_cents, currency
+          FROM donations
+         WHERE donor_user_id = $1
+           AND status = 'captured'
+      ),
+      credits_in AS (
+        SELECT donation_id, SUM(amount_credits) AS credits_in
+          FROM pool_transactions
+         WHERE direction = 'credit'
+           AND reason = 'donation_in'
+           AND donation_id IN (SELECT id FROM my_donations)
+         GROUP BY donation_id
+      ),
+      credits_out AS (
+        SELECT donation_id, SUM(amount_credits) AS credits_out
+          FROM pool_transactions
+         WHERE direction = 'debit'
+           AND reason = 'shift_out'
+           AND donation_id IN (SELECT id FROM my_donations)
+         GROUP BY donation_id
+      ),
+      receipts AS (
+        SELECT donation_id,
+               SUM(credits_funded) AS credits_funded,
+               SUM(minutes_verified) AS minutes_funded
+          FROM donor_receipts
+         WHERE donation_id IN (SELECT id FROM my_donations)
+         GROUP BY donation_id
+      ),
+      deficit AS (
+        SELECT
+          SUM(GREATEST(wt.kind_amount - COALESCE(dr.credits_funded, 0), 0)) AS deficit_credits,
+          SUM(
+            CASE WHEN wt.kind_amount - COALESCE(dr.credits_funded, 0) > 0
+                 THEN COALESCE(dr.minutes_verified, 0)
+                 ELSE 0 END
+          ) AS deficit_minutes
           FROM donor_receipts dr
           JOIN donations d ON d.id = dr.donation_id
           JOIN wallet_transactions wt ON wt.id = dr.wallet_tx_id
          WHERE d.donor_user_id = $1
            AND wt.reason = 'earn_shift'
            AND wt.direction = 'credit'
-        )
-        SELECT
-          (SELECT COALESCE(SUM(amount_cents), 0) FROM my_donations) AS donated_lifetime_cents,
-          (SELECT COUNT(*) FROM my_donations) AS donations_count,
-          (SELECT COALESCE(SUM(credits_funded), 0) FROM receipts) AS credits_funded_lifetime,
-          (SELECT COALESCE(SUM(minutes_funded), 0) FROM receipts) AS minutes_funded_lifetime,
-          (SELECT COALESCE(SUM(credits_in), 0) FROM credits_in) AS credits_in_total,
-          (SELECT COALESCE(SUM(credits_out), 0) FROM credits_out) AS credits_out_total,
-          (SELECT COALESCE(deficit_credits, 0) FROM deficit) AS deficit_credits_total,
-          (SELECT COALESCE(deficit_minutes, 0) FROM deficit) AS deficit_minutes_total
+      ),
+      ic AS (
+        SELECT COALESCE(SUM(ic_amount), 0) AS ic_balance
+          FROM donor_ic_ledger
+         WHERE donor_user_id = $1
+           AND expires_at > NOW()
+      ),
+      profile AS (
+        SELECT donor_tier, created_at AS member_since
+          FROM userdata
+         WHERE id = $1
+         LIMIT 1
+      )
+      SELECT
+        (SELECT COALESCE(SUM(amount_cents), 0) FROM my_donations)          AS donated_lifetime_cents,
+        (SELECT COUNT(*) FROM my_donations)                                 AS donations_count,
+        (SELECT COALESCE(SUM(credits_funded), 0) FROM receipts)            AS credits_funded_lifetime,
+        (SELECT COALESCE(SUM(minutes_funded), 0) FROM receipts)            AS minutes_funded_lifetime,
+        (SELECT COALESCE(SUM(credits_in), 0) FROM credits_in)              AS credits_in_total,
+        (SELECT COALESCE(SUM(credits_out), 0) FROM credits_out)            AS credits_out_total,
+        (SELECT COALESCE(deficit_credits, 0) FROM deficit)                 AS deficit_credits_total,
+        (SELECT COALESCE(deficit_minutes, 0) FROM deficit)                 AS deficit_minutes_total,
+        (SELECT ic_balance FROM ic)                                         AS ic_balance,
+        (SELECT donor_tier FROM profile)                                    AS donor_tier,
+        (SELECT member_since FROM profile)                                  AS member_since
       `,
       [userId]
     );
+
+    const IC_RATES = { casual: 5, impact: 7, champion: 10 };
+    const MILESTONE_TARGET_HOURS = 50;
 
     const donatedCents = Number(row?.donated_lifetime_cents) || 0;
     const donationsCount = Number(row?.donations_count) || 0;
@@ -88,10 +106,21 @@ export async function getDonorSummary(req, res) {
     const hoursFunded = Math.round((minutesFunded / 60) * 10) / 10;
     const deficitCredits = Number(row?.deficit_credits_total) || 0;
     const deficitHours = Math.round(((Number(row?.deficit_minutes_total) || 0) / 60) * 10) / 10;
+    const icBalance = Number(row?.ic_balance) || 0;
+    const donorTier = row?.donor_tier || "casual";
+    const icRate = IC_RATES[donorTier] ?? 5;
+    const memberSince = row?.member_since || null;
 
     return res.json({
       ok: true,
       data: {
+        donor_tier: donorTier,
+        ic_rate: icRate,
+        ic_balance: icBalance,
+        kinder_balance: null,
+        member_since: memberSince,
+        milestone_target_hours: MILESTONE_TARGET_HOURS,
+        milestone_progress_hours: hoursFunded,
         donated_cents_total: donatedCents,
         donation_count: donationsCount,
         credits_funded_total: creditsFunded,
@@ -99,7 +128,6 @@ export async function getDonorSummary(req, res) {
         remaining_pool_credits: creditsRemaining,
         pending_deficit_credits_total: deficitCredits,
         pending_deficit_hours_total: deficitHours,
-        // legacy keys preserved for backward compatibility
         donated_lifetime_cents: donatedCents,
         donations_count: donationsCount,
         credits_funded_lifetime: creditsFunded,
@@ -127,24 +155,27 @@ export async function getDonorReceipts(req, res) {
     const { rows } = await pool.query(
       `
         SELECT
-          dr.id AS receipt_id,
+          dr.id               AS receipt_id,
           dr.donation_id,
           d.amount_cents,
           d.currency,
-          wt.kind_amount AS wallet_amount,
+          d.created_at        AS donation_created_at,
+          wt.kind_amount      AS wallet_amount,
           dr.event_id,
-          e.title AS event_title,
-          e.end_at AS event_end_at,
-          e.start_at AS event_start_at,
+          e.title             AS event_title,
+          e.end_at            AS event_end_at,
+          e.start_at          AS event_start_at,
           dr.wallet_tx_id,
           dr.volunteer_user_id,
           dr.credits_funded,
           dr.minutes_verified,
-          dr.created_at
+          dr.created_at,
+          COALESCE(il.ic_amount, 0) AS ic_earned
         FROM donor_receipts dr
         JOIN donations d ON d.id = dr.donation_id
         LEFT JOIN wallet_transactions wt ON wt.id = dr.wallet_tx_id
         LEFT JOIN events e ON e.id = dr.event_id
+        LEFT JOIN donor_ic_ledger il ON il.donation_id = dr.donation_id
         WHERE d.donor_user_id = $1
         ORDER BY dr.created_at DESC
         LIMIT $2 OFFSET $3
@@ -157,6 +188,7 @@ export async function getDonorReceipts(req, res) {
       donation_id: row.donation_id,
       amount_cents: Number(row.amount_cents) || 0,
       currency: row.currency || "CAD",
+      donation_date: row.donation_created_at || row.created_at,
       event_id: row.event_id,
       event_title: row.event_title || null,
       event_start_at: row.event_start_at || null,
@@ -166,6 +198,8 @@ export async function getDonorReceipts(req, res) {
       credits_funded: Number(row.credits_funded) || 0,
       credits_deficit: Math.max(0, (Number(row.wallet_amount) || 0) - (Number(row.credits_funded) || 0)),
       minutes_verified: row.minutes_verified != null ? Number(row.minutes_verified) || 0 : null,
+      ic_earned: Number(row.ic_earned) || 0,
+      status: row.minutes_verified != null ? "funded" : "pending",
       created_at: row.created_at,
     }));
 

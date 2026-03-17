@@ -2440,10 +2440,6 @@ app.get("/checkin/:eventId", ensureAuthenticated, (req, res) => {
     csrfToken: typeof req.csrfToken === "function" ? req.csrfToken() : null,
   });
 });
-//app.get('/dashboard/morning-prompt', ensureAuthenticated, getMorningPrompt);
-//app.post('/dashboard/reflect', ensureAuthenticated, saveReflection);
-//app.post('/dashboard/mark-done', ensureAuthenticated, markDayDone);
-//app.post("/challenge/cancel", ensureAuthenticated, cancelChallenge);
 
 app.get("/about", (req, res) => {
   // mirror the same flags you use on your home route
@@ -2466,14 +2462,14 @@ app.get("/donor", ensureAuthenticated, async (req, res) => {
   try {
     if (req.user?.id) {
       const byId = await pool.query(
-        "SELECT firstname, lastname, email, picture FROM public.userdata WHERE id = $1 LIMIT 1",
+        "SELECT firstname, lastname, email, picture, created_at, donor_tier FROM public.userdata WHERE id = $1 LIMIT 1",
         [req.user.id]
       );
       donorRow = byId.rows[0] || null;
     }
     if (!donorRow && req.user?.email) {
       const byEmail = await pool.query(
-        "SELECT firstname, lastname, email, picture FROM public.userdata WHERE email = $1 LIMIT 1",
+        "SELECT firstname, lastname, email, picture, created_at, donor_tier FROM public.userdata WHERE email = $1 LIMIT 1",
         [req.user.email]
       );
       donorRow = byEmail.rows[0] || null;
@@ -2482,13 +2478,16 @@ app.get("/donor", ensureAuthenticated, async (req, res) => {
     console.error("GET /donor profile load error:", err);
   }
 
-  const donorProfile = {
-    firstname: donorRow?.firstname || req.user?.firstname || req.user?.first_name || "",
-    lastname: donorRow?.lastname || req.user?.lastname || req.user?.last_name || "",
-    name: req.user?.name || req.user?.displayName || "",
-    email: donorRow?.email || req.user?.email || "",
-    picture: donorRow?.picture || req.user?.picture || req.user?.avatar || req.user?.photo || "",
-  };
+  const donorProfile = donorRow
+    ? {
+        firstname: donorRow.firstname,
+        lastname: donorRow.lastname,
+        email: donorRow.email,
+        picture: donorRow.picture,
+        member_since: donorRow.created_at,
+        donor_tier: donorRow.donor_tier || "casual",
+      }
+    : {};
   res.render("donor", { title: "Donor Dashboard", assetTag, donorProfile });
 });
 
