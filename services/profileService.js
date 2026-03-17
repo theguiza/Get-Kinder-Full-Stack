@@ -65,6 +65,52 @@ export async function resolveUserIdFromRequest(req) {
   return fallback;
 }
 
+export async function getVolunteerPreferenceSignals(userId) {
+  if (!userId) {
+    return {
+      interests: [],
+      home_base_label: null,
+    };
+  }
+
+  try {
+    const { rows } = await pool.query(
+      `
+        SELECT
+          interest1,
+          interest2,
+          interest3,
+          home_base_label
+        FROM userdata
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [userId]
+    );
+    const row = rows?.[0] || null;
+    if (!row) {
+      return {
+        interests: [],
+        home_base_label: null,
+      };
+    }
+
+    return {
+      interests: [row.interest1, row.interest2, row.interest3]
+        .filter((value) => value !== null && value !== undefined)
+        .map((value) => String(value).trim())
+        .filter(Boolean),
+      home_base_label: row.home_base_label ? String(row.home_base_label).trim() : null,
+    };
+  } catch (error) {
+    console.error("[profileService] getVolunteerPreferenceSignals error:", error);
+    return {
+      interests: [],
+      home_base_label: null,
+    };
+  }
+}
+
 function clampMinutes(value) {
   const num = Number(value);
   if (!Number.isFinite(num)) return 0;

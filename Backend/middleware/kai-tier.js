@@ -1,4 +1,4 @@
-const GUEST_TOOLS = ["platform_faq"];
+const GUEST_TOOLS = ["search_events"];
 
 const FREE_TOOLS = [
   "search_events",
@@ -18,6 +18,7 @@ const ORG_GROWTH_TOOLS = [
   "get_event_details",
   "get_user_profile",
   "get_ic_balance",
+  "get_matched_events",
   "platform_faq",
   "draft_event_listing",
   "get_matched_volunteers",

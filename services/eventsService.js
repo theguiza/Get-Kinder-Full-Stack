@@ -57,6 +57,7 @@ function mapEventRow(row = {}) {
   return {
     id: row.id != null ? String(row.id) : null,
     title: row.title || "Untitled Event",
+    category: row.category || null,
     description: row.description || null,
     safety_notes: row.safety_notes || null,
     start_at: row.start_at || null,
@@ -202,6 +203,7 @@ export async function fetchEvents({
     `
       SELECT e.id,
              e.title,
+             e.category,
              e.description,
              e.safety_notes,
              e.start_at,
@@ -285,6 +287,7 @@ export async function fetchEventById(id) {
     `
       SELECT e.id,
              e.title,
+             e.category,
              e.description,
              e.safety_notes,
              e.start_at,

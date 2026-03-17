@@ -65,7 +65,8 @@ export const TOOL_DEFINITIONS = {
   },
   get_matched_events: {
     name: "get_matched_events",
-    description: "Smart matching: find best events for this volunteer using a 7-signal matching engine.",
+    description:
+      "Rank the best upcoming events for the current volunteer using saved interests, recent volunteering history, location text, timing, capacity, and existing RSVP state. If personal signals are weak, fall back honestly to broader upcoming suggestions.",
     input_schema: {
       type: "object",
       properties: {

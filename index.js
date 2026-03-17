@@ -17,13 +17,11 @@ import passport from "passport";
 import cors from "cors";
 import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import { Strategy as FacebookStrategy } from "passport-facebook";
-import OpenAI from "openai";
 import connectPgSimple from "connect-pg-simple";
 import multer from "multer";
 import cron from "node-cron";
 import crypto from "crypto";
 import rateLimit from "express-rate-limit";
-import { FUNCTIONS } from "./openaiFunctions.js";
 import { makeDashboardController } from "./Backend/dashboardController.js";
 import { generateArcForQuiz } from "./services/ArcGenerator.js";
 import { verify as neoVerify, run as neoRun, close as neoClose } from './Backend/db/neo4j.js';
@@ -49,6 +47,10 @@ import orgApplyRouter from "./routes/orgApplyApi.js";
 import adminApiRouter from "./routes/adminApi.js";
 import squareWebhooksApiRouter from "./routes/squareWebhooksApi.js";
 import kaiRouter from "./Backend/routes/kaiApi.js";
+import {
+  legacyKaiDeprecatedJson,
+  legacyKaiDeprecatedSse,
+} from "./Backend/legacyOpenAiQuarantine.js";
 import { ensureOrgRepPage } from "./middleware/ensureOrgRep.js";
 import { ensureAdmin, ensureAdminApi, isAdminRequest } from "./Backend/middleware/ensureAdmin.js";
 import {
@@ -56,9 +58,6 @@ import {
   ADMIN_ORG_PORTAL_PREVIEW_USER_ID_KEY,
   ADMIN_ORG_PORTAL_PREVIEW_ORG_ID_KEY,
 } from "./services/orgScopeService.js";
-
-// Reuse the same tool schema for Chat Completions (strip any nonstandard fields if needed)
-const CHAT_COMPLETIONS_TOOLS = DASHBOARD_TOOLS.map(t => ({ type: 'function', function: t.function }));
 // ─────────────────────────────────────────────────────────────────────────────
 neoVerify()
   .then(() => console.log('Neo4j connected ✅'))
@@ -77,40 +76,6 @@ const uploadAvatar = multer({
     cb(null, true);
   },
 });
-// Map legacy FUNCTIONS → Chat Completions tools
-const TOOLS = Array.isArray(FUNCTIONS)
-  ? FUNCTIONS.map(fn => ({
-      type: "function",
-      function: {
-        name: fn.name,
-        description: fn.description,
-        parameters: fn.parameters
-      },
-      ...(fn.strict !== undefined ? { strict: !!fn.strict } : {})
-    }))
-  : [];
-
-// KAI (Assistants API) plumbing
-import {
-  // chat endpoints need these
-  createThread,
-  createMessage,
-  createAndPollRun,
-  createAndStreamRun,
-  listMessages,
-  // tool-aware / dashboard bits
-  DASHBOARD_TOOLS,
-  setToolContext,
-  getOrCreateThread,
-  createDashboardMessage,
-  updateAssistantInstructions,
-  KAI_ASSISTANT_INSTRUCTIONS
-} from './Backend/assistant.js';
-
-// === 6-line guest system prompt (used in Chat Completions path for guests) ===
-const GUEST_SYSTEM_PROMPT = `
-You are KAI, a warm mattering coach helping people connect offline. You’re not a clinician—never diagnose or give medical/legal advice. Replies should be 30–60 words and follow this structure: empathic reflection → one concrete idea (offer Low/Medium/High effort options when useful) → one inviting question. Celebrate small wins, stay specific, human, and non-judgmental. Use OARS, active-constructive listening, and NAN (Noticing → Affirming → Needing) when relevant. If a message includes "User Context: {...}" followed by "User Message:", use the context silently and never quote the raw JSON. Prefer attached knowledge; otherwise rely on core coaching methods and don’t invent sources. You cannot send nudges, emails, SMS, reminders, or other account actions for guests. If asked, say "To send nudges or emails, please sign in." and provide a copy-paste draft instead. For imminent risk: "If you're in immediate danger, call your local emergency number now. US/Canada: call or text 988 (Suicide & Crisis Lifeline). UK & ROI: Samaritans 116 123. If you're elsewhere, contact local emergency services." Offer help drafting a message to a trusted person. Stay reality-grounded and practical.
-`.trim();
 
 // 3) Compute __dirname for ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -253,8 +218,6 @@ ensurePasswordResetColumns()
 //const rootPath = __dirname;
 //const rootPath = path.join(__dirname, "../");
 app.set("trust proxy", 1);
-// 8) Initialize OpenAI client
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const PgSession = connectPgSimple(session);
 
 // 9) Middleware setup
@@ -2665,14 +2628,6 @@ async function renderIndexPage(req, res, next) {
       dbTime = null;
     }
 
-    let chatHistory = [];
-    if (req.session && req.session.threadId) {
-      const thread = await openai.beta.threads.retrieve(req.session.threadId);
-      chatHistory = Array.isArray(thread.messages) ? thread.messages : [];
-    }
-
-    const threadId = (req.session && req.session.threadId) || "";
-    const isNewUser = chatHistory.length === 0;
     const onboardingDone = req.cookies && req.cookies.onboarding_done === "1";
 
     return res.render("index", {
@@ -2680,10 +2635,7 @@ async function renderIndexPage(req, res, next) {
       success,
       loginSuccess,
       name,
-      chatHistory,
-      threadId,
       dbTime,
-      isNewUser,
       onboardingDone
     });
   } catch (err) {
@@ -2830,289 +2782,18 @@ LIMIT $limit
   }
 });
 // ─────────────────────────────────────────────────────────────────────────────
-// 17) Chat API Endpoints (assistant functionality)
+// 17) Legacy OpenAI KAI Endpoints (quarantined)
 // ─────────────────────────────────────────────────────────────────────────────
-app.get('/api/chat/init', async (req, res) => {
-  try {
-    const thread = await createThread();
-    req.session.threadId = thread.id;
-    res.json({ thread_id: thread.id });
-  } catch (err) {
-    console.error("Error initializing chat:", err);
-    res.status(500).json({ error: "Unable to initialize chat." });
-  }
-});
-// Unified public chat endpoint: tools when authed, plain model otherwise
-app.post('/api/chat/message', async (req, res) => {
-  try {
-    const { message, userContext, context } = req.body || {};
-    const msg = (message ?? '').toString().trim();
-    if (!msg) return res.status(400).json({ error: 'message (string) is required' });
-
-    const isAuthed = !!(req.isAuthenticated && req.isAuthenticated());
-    const combinedContext = userContext || context || null;
-
-    if (isAuthed) {
-      // ==== TOOL-AWARE PATH (logged-in users only) ====
-      const ownerId = await resolveOwnerId(req, pool);
-      setToolContext({ ownerId, pool });
-
-      const threadId = await getOrCreateThread(req);
-
-      const ctx = userContext || context || {
-        user_email: req.user?.email || null,
-        user_name:  req.user?.firstname || req.user?.name || null
-      };
-
-      await createDashboardMessage(threadId, msg, ctx);
-      await createAndPollRun(threadId, DASHBOARD_TOOLS);
-
-      const msgList = await listMessages(threadId);
-      const assistantMsgs = (msgList?.data || [])
-        .filter(m => m.role === 'assistant')
-        .sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
-      const latest = assistantMsgs[0];
-
-      const reply = (latest?.content || [])
-        .map(c => c?.text?.value)
-        .filter(Boolean)
-        .join('\n')
-        .trim() || '(No reply)';
-
-      return res.json({ reply }); // chat.js expects { reply }
-    }
-
-    // ==== CHAT-ONLY PATH (guests) ====
-    let promptContent = msg;
-    if (combinedContext && typeof combinedContext === 'object' && Object.keys(combinedContext).length) {
-      try {
-        promptContent = `User Context: ${JSON.stringify(combinedContext)}\n\nUser Message: ${msg}`;
-      } catch (contextErr) {
-        console.error('Failed to serialize guest userContext:', contextErr);
-      }
-    }
-
-    const completion = await openai.chat.completions.create({
-      model: process.env.OPENAI_CHAT_MODEL || "gpt-4o-mini",
-      messages: [
-        { role: "system", content: GUEST_SYSTEM_PROMPT },
-        { role: "user", content: promptContent }
-      ]
-      // IMPORTANT: do NOT pass `functions` here (prevents the earlier `strict` error).
-    });
-
-    const m = completion.choices[0].message;
-    const reply = (m?.content || '').toString().trim() || "I’m here to help!";
-    return res.json({ reply });
-  } catch (err) {
-    console.error('Error in /api/chat/message:', err?.stack || err);
-return res.status(500).json({
-  error: 'assistant_run_failed',
-  details: typeof err?.message === 'string' ? err.message : String(err)
-});
-  }
-});
-
-// On-demand function-call endpoint
-app.post("/chat", async (req, res) => {
-  try {
-    const { message } = req.body;
-       const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: GUEST_SYSTEM_PROMPT },
-        { role: "user",   content: message }
-      ],
-      tools:       CHAT_COMPLETIONS_TOOLS, // unified tool schema
-      tool_choice: "auto"      // let the model decide if/when to call
-    });
-    const msg = completion.choices[0].message;
-    // Tools path: model decided to call one or more functions
-    if (msg.finish_reason === "tool_calls" && Array.isArray(msg.tool_calls) && msg.tool_calls.length) {
-      for (const call of msg.tool_calls) {
-        const name   = call?.function?.name;
-        const argStr = call?.function?.arguments || "{}";
-        let args = {};
-        try { args = JSON.parse(argStr); } catch {} // tolerate minor JSON issues
-
-        if (name === "send_daily_kindness_prompts") {
-          await sendDailyKindnessPrompts(args);
-          return res.json({ role: "assistant", content: "✅ Prompts sent!" });
-        }
-        // add more handlers here if you later expose more tools via TOOLS
-      }
-    }
-    // fallback to normal chat response
-    res.json({
-      role:    msg.role,
-      content: msg.content
-    });
-  } catch (err) {
-    console.error("Error in /chat:", err);
-    res.status(500).json({
-      role:    "assistant",
-      content: `❌ ${err.message}`
-    });
-  }
-});
-// Streaming Assistants route (SSE): best UX for authed users
-app.post('/kai-chat/stream', ensureAuthenticatedApi, async (req, res) => {
-  // 1) SSE headers
-  res.setHeader('Content-Type',  'text/event-stream; charset=utf-8');
-  res.setHeader('Cache-Control', 'no-cache, no-transform');
-  res.setHeader('Connection',    'keep-alive');
-  res.flushHeaders?.();
-
-  // tiny helper
-  const send = (event, payload) => {
-    res.write(`event: ${event}\n`);
-    res.write(`data: ${JSON.stringify(payload || {})}\n\n`);
-  };
-
-  // 2) Heartbeat to keep the connection open (Heroku/Render/CDN friendly)
-  const heartbeat = setInterval(() => send('ping', { t: Date.now() }), 15000);
-
-  try {
-    // 3) Resolve owner + tool context (graph/DB/email)
-    const ownerId = await resolveOwnerId(req, pool);
-    setToolContext({ ownerId, pool });
-
-    // 4) Thread management (reuse if present)
-    const threadId = await getOrCreateThread(req);
-
-    // 5) Add user message (+ optional context) to the thread
-    const { message, userContext } = req.body || {};
-    if (typeof message !== 'string' || !message.trim()) {
-      send('error', { message: 'message (string) is required' });
-      return res.end();
-    }
-    const ctx = userContext || {
-      user_email: req.user?.email || null,
-      user_name:  req.user?.firstname || req.user?.name || null
-    };
-    await createDashboardMessage(threadId, message, ctx);
-
-    // 6) Stream the run (pass your server tools)
-    await createAndStreamRun(threadId, DASHBOARD_TOOLS, (evt) => {
-      // Forward useful events to the browser
-      switch (evt.type) {
-        case 'thread.message.delta': {
-          // accumulate token text
-          const chunk = (evt.data?.delta?.content || [])
-            .map(c => c?.text?.value || '')
-            .join('');
-          if (chunk) send('delta', { text: chunk });
-          break;
-        }
-        case 'thread.message.completed': {
-          const full = (evt.data?.content || [])
-            .map(c => c?.text?.value || '')
-            .join('');
-          send('message_completed', { text: full });
-          break;
-        }
-        case 'thread.run.requires_action': {
-          const calls = evt.data?.required_action?.submit_tool_outputs?.tool_calls || [];
-          send('requires_action', {
-            run_id: evt.data?.id,
-            tool_calls: calls.map(c => ({ id: c.id, name: c.function?.name }))
-          });
-          break;
-        }
-        case 'tool.result': {
-          send('tool_result', {
-            name: evt.call?.function?.name,
-            output: evt.data
-          });
-          break;
-        }
-        case 'openai.done':
-          // run is finished
-          send('done', { thread_id: threadId });
-          res.end();
-          break;
-        default:
-          // optional: forward raw event types for debugging
-          // send('debug', evt);
-          break;
-      }
-    });
-  } catch (e) {
-    console.error('SSE /kai-chat/stream error:', e);
-    send('error', { message: e.message });
-    res.end();
-  } finally {
-    clearInterval(heartbeat);
-  }
-});
-
-// Tool-aware Assistants route (uses DASHBOARD_TOOLS and sets tool context)
-app.post('/kai-chat', ensureAuthenticatedApi, async (req, res) => {
-  try {
-    const { message, userContext } = req.body || {};
-    if (typeof message !== 'string' || !message.trim()) {
-      return res.status(400).json({ error: 'message (string) is required' });
-    }
-    // 1) Resolve who this request is for (tools use this)
-    const ownerId = await resolveOwnerId(req, pool);
-    // 2) Make ownerId and pool available to tools (graph + DB tools)
-    setToolContext({ ownerId, pool });
-    // 3) Thread management (persist per session)
-    if (!req.session.threadId) {
-      const thread = await createThread();
-      req.session.threadId = thread.id;
-    }
-    const threadId = req.session.threadId;
-    // 4) Add message; include optional user context for KAI to read
-    const contextForKai = userContext || {
-      user_email: req.user?.email || null,
-      user_name:  req.user?.firstname || req.user?.name || null
-    };
-    await createDashboardMessage(threadId, message, contextForKai);
-    // 5) Run the assistant WITH tools (Assistants API v2)
-    const run = await createAndPollRun(threadId, DASHBOARD_TOOLS);
-    // 6) Fetch latest assistant reply
-    const msgList = await listMessages(threadId);
-    const assistantMsgs = (msgList?.data || [])
-      .filter(m => m.role === 'assistant')
-      .sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
-    const latest = assistantMsgs[0];
-
-    const textParts = (latest?.content || [])
-      .map(c => c?.text?.value)
-      .filter(Boolean);
-    const reply = textParts.join('\n').trim() || '(No reply)';
-    return res.json({
-      ok: true,
-      thread_id: threadId,
-      reply,
-      run_status: run?.status || null
-    });
-  } catch (e) {
-    console.error('POST /kai-chat error:', e);
-    return res.status(500).json({ ok: false, error: e.message });
-  }
-});
-// Admin-only: update OpenAI Assistant instructions from our canonical string
-app.post("/admin/assistant-instructions/update",
+app.get("/api/chat/init", legacyKaiDeprecatedJson("/api/chat/init"));
+app.post("/api/chat/message", legacyKaiDeprecatedJson("/api/chat/message"));
+app.post("/chat", legacyKaiDeprecatedJson("/chat"));
+app.post("/kai-chat/stream", ensureAuthenticatedApi, legacyKaiDeprecatedSse("/kai-chat/stream"));
+app.post("/kai-chat", ensureAuthenticatedApi, legacyKaiDeprecatedJson("/kai-chat"));
+app.post(
+  "/admin/assistant-instructions/update",
   ensureAuthenticatedApi,
   ensureAdminApi,
-  async (req, res) => {
-    try {
-      const text = (req.body && typeof req.body.instructions === 'string')
-        ? req.body.instructions
-        : KAI_ASSISTANT_INSTRUCTIONS;
-      const r = await updateAssistantInstructions(text);
-      return res.json({
-        ok: true,
-        assistant_id: r.id,
-        instructions_preview: (r.instructions || '').slice(0, 180) + '...'
-      });
-    } catch (e) {
-      console.error("Assistant update error:", e);
-      return res.status(500).json({ error: e.message });
-    }
-  }
+  legacyKaiDeprecatedJson("/admin/assistant-instructions/update")
 );
 
 // Admin: deliver any queued nudges now (safe for prod)

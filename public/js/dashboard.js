@@ -586,20 +586,3 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 });
-
-/**
- * KAI integration - Enhanced askKAI function for dashboard context
- * @param {string} message - Message to send to KAI
- */
-function askKAI(message) {
-    // KAI integration - Add challenge context if available
-    let contextualMessage = message;
-    if (morningPromptData) {
-        contextualMessage = `Context: I'm on Day ${morningPromptData.dayNumber} of my challenge "${morningPromptData.challengeName}". ${message}`;
-    }
-    
-    // KAI integration - Open chat and send message
-    if (!chatOpen) toggleChat();
-    document.getElementById('chatInput').value = contextualMessage;
-    sendMessage();
-}

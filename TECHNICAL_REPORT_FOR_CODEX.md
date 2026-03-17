@@ -11,7 +11,7 @@ Get Kinder is a Node/Express monolith that serves:
 - JSON APIs for product features
 - React "islands" mounted inside selected EJS pages via a single Vite bundle
 - Session-based auth (Passport + PostgreSQL session store)
-- AI chat endpoints (OpenAI Chat Completions + Assistants API)
+- AI chat endpoints on Anthropic-backed `/api/kai/*`, with legacy OpenAI KAI endpoints quarantined
 - Event verification and donor-attribution flows tied to wallet/funding-pool ledgers
 
 Primary runtime entrypoint:
@@ -38,7 +38,8 @@ Frontend:
 
 Core third-party integrations:
 
-- OpenAI (`index.js`, `Backend/assistant.js`)
+- Anthropic for current KAI chat (`Backend/routes/kaiApi.js`, `Backend/services/kai.js`)
+- OpenAI for non-KAI features elsewhere in the repo
 - Square payments/webhooks (`controllers/squareWebhooksController.js`, `services/*square*`)
 - SMTP email sending (`kindnessEmailer.js`)
 - Bootstrap + Font Awesome loaded via CDN in most views
@@ -162,7 +163,8 @@ Mounted in `index.js`:
 - `/api/donations` (auth)
 - `/api/donor` (auth) -> summary + receipts
 - `/api/webhooks/square` (public webhook endpoint)
-- `/api/chat/*` and `/kai-chat*` (chat endpoints)
+- `/api/kai/*` (current KAI chat endpoints)
+- `/api/chat/*`, `/kai-chat*`, `/chat` (legacy KAI endpoints retained only as quarantined deprecated surfaces)
 - `/api/friends`, `/api/arcs/*`, `/api/friendship-energy`, onboarding endpoints
 
 ## 8) Core Product Flows
@@ -219,23 +221,31 @@ Main files:
 
 ### 8.4 AI chat flow
 
-Public unified endpoint:
+Current website flow:
 
+- Floating KAI UI partial rendered into `index`, `dashboard`, `events`, and `friendQuiz`
+- `POST /api/kai/message` for authenticated users
+- `POST /api/kai/guest` for guest users
+- Anthropic tool loop with current server-side tool execution and conversation persistence
+
+Legacy quarantined endpoints:
+
+- `GET /api/chat/init`
 - `POST /api/chat/message`
-- Authed users: Assistants API + server tools
-- Guests: Chat Completions with constrained system prompt
-
-Additional endpoints:
-
 - `POST /kai-chat` (auth)
 - `POST /kai-chat/stream` (auth, SSE)
-- `POST /chat` (tool-call path for legacy function schema)
+- `POST /chat`
+
+These legacy endpoints no longer back the current website flow and now return controlled deprecated responses.
 
 Main files:
 
 - `index.js`
-- `Backend/assistant.js`
-- `openaiFunctions.js`
+- `Backend/routes/kaiApi.js`
+- `Backend/services/kai.js`
+- `Backend/services/kai-tool-definitions.js`
+- `Backend/services/kai-tool-executor.js`
+- `Backend/legacyOpenAiQuarantine.js`
 
 ## 9) Data Stores and Key Tables in Active Use
 
@@ -299,11 +309,10 @@ Containerization:
 
 ## 12) Known Implementation Gaps / Risks (Important for Accurate Prompting)
 
-1. `index.js` references `DASHBOARD_TOOLS` before import when defining `CHAT_COMPLETIONS_TOOLS`; this is fragile and should be reviewed.
-2. Duplicate middleware call `app.use(cors())`.
-3. Onboarding insert path has a typo `normalized.interment1` (likely intended `interest1`) in `/api/onboarding/complete`.
-4. Mixed legacy and current client scripts exist (`public/js/dashboard.js` references endpoints currently commented out in server).
-5. Some templates use relative links (`href="events"`) while others use absolute (`/events`).
+1. Duplicate middleware call `app.use(cors())`.
+2. Onboarding insert path has a typo `normalized.interment1` (likely intended `interest1`) in `/api/onboarding/complete`.
+3. Legacy OpenAI KAI routes remain mounted only as quarantined deprecated endpoints in case of out-of-repo callers.
+4. Some templates use relative links (`href="events"`) while others use absolute (`/events`).
 
 These are existing code realities; do not "normalize away" in generated changes unless explicitly requested.
 
@@ -378,4 +387,3 @@ Deliverables:
 - If React island is used: mount function exists on `window` and runs once
 - Any POST endpoint uses auth + CSRF where applicable
 - `npm run build` succeeds if frontend changed
-

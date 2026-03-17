@@ -254,3 +254,106 @@ export async function resolveOrgScope(
     memberships,
   };
 }
+
+export async function resolveOrgScopeForUserId(
+  userId,
+  { includeOrgMembersForOrgRep = true } = {}
+) {
+  const normalizedUserId = normalizeUserId(userId);
+  const fallbackUserId = String(userId ?? "").trim();
+  if (!normalizedUserId) {
+    return {
+      actorUserId: fallbackUserId,
+      previewUserId: null,
+      orgId: null,
+      activeOrgId: null,
+      hasOrgRepAccess: false,
+      memberUserIds: fallbackUserId ? [fallbackUserId] : [],
+      memberships: [],
+    };
+  }
+
+  const { rows: [userRow] = [] } = await pool.query(
+    "SELECT id, org_id, org_rep FROM public.userdata WHERE id = $1 LIMIT 1",
+    [normalizedUserId]
+  );
+  if (!userRow?.id) {
+    return {
+      actorUserId: String(normalizedUserId),
+      previewUserId: null,
+      orgId: null,
+      activeOrgId: null,
+      hasOrgRepAccess: false,
+      memberUserIds: [String(normalizedUserId)],
+      memberships: [],
+    };
+  }
+
+  const legacyOrgId = normalizeOrgId(userRow?.org_id);
+  const memberships = await loadMembershipsForUser(normalizedUserId, { legacyOrgId });
+  const orgId = pickActiveOrgId({
+    memberships,
+    previewOrgId: null,
+    sessionActiveOrgId: null,
+    legacyOrgId,
+  });
+
+  const hasOrg = orgId != null;
+  const hasOrgRepAccess = memberships.length > 0 || userRow?.org_rep === true;
+  const canExpandToOrgMembers = includeOrgMembersForOrgRep && hasOrg && hasOrgRepAccess;
+
+  let memberUserIds = [String(normalizedUserId)];
+  if (canExpandToOrgMembers) {
+    let ids = [];
+    if (await hasUserOrgMembershipTable()) {
+      const { rows } = await pool.query(
+        `
+          SELECT user_id AS id
+          FROM public.user_org_memberships
+          WHERE org_id = $1
+            AND COALESCE(is_active, true) = true
+          ORDER BY user_id ASC
+        `,
+        [orgId]
+      );
+      ids = rows.map((row) => String(row.id || "").trim()).filter(Boolean);
+    } else {
+      const { rows } = await pool.query(
+        `
+          SELECT id
+          FROM public.userdata
+          WHERE org_id = $1
+          ORDER BY id ASC
+        `,
+        [orgId]
+      );
+      ids = rows.map((row) => String(row.id || "").trim()).filter(Boolean);
+    }
+
+    if (ids.length) {
+      memberUserIds = Array.from(new Set(ids));
+    }
+  }
+
+  return {
+    actorUserId: String(normalizedUserId),
+    previewUserId: null,
+    orgId: orgId != null ? Number(orgId) : null,
+    activeOrgId: orgId != null ? Number(orgId) : null,
+    hasOrgRepAccess,
+    memberUserIds,
+    memberships,
+  };
+}
+
+export async function resolveHostUserIdsForUserId(
+  userId,
+  options = {}
+) {
+  const scope = await resolveOrgScopeForUserId(userId, options);
+  if (Array.isArray(scope.memberUserIds) && scope.memberUserIds.length > 0) {
+    return scope.memberUserIds;
+  }
+  const fallback = String(userId ?? "").trim();
+  return fallback ? [fallback] : [];
+}

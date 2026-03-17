@@ -443,47 +443,6 @@
 
   <!-- Scripts -->
   <script>
-    // Chat toggle
-    let chatOpen = false;
-    function toggleChat() {
-      const panel = document.getElementById('chatPanel');
-      chatOpen = !chatOpen;
-      panel.classList.toggle('active', chatOpen);
-    }
-    function handleChatKeyPress(event) {
-      if (event.key === 'Enter' && !event.shiftKey) {
-        event.preventDefault(); sendMessage();
-      }
-    }
-    function askKAI(message) {
-      if (!chatOpen) toggleChat();
-      document.getElementById('chatInput').value = message; sendMessage();
-    }
-    async function sendMessage() {
-      const input = document.getElementById('chatInput');
-      const messages = document.getElementById('chatMessages');
-      const message = input.value.trim();
-      if (!message) return;
-      const userMessage = document.createElement('div');
-      userMessage.className = 'message user'; userMessage.textContent = message; messages.appendChild(userMessage);
-      input.value = '';
-      const loadingMessage = document.createElement('div');
-      loadingMessage.className = 'message assistant'; loadingMessage.textContent = 'KAI is thinking...'; messages.appendChild(loadingMessage);
-      messages.scrollTop = messages.scrollHeight;
-      try {
-        const response = await fetch('/api/chat/message', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ message }), credentials:'include' });
-        const data = await response.json();
-        messages.removeChild(loadingMessage);
-        const assistantMessage = document.createElement('div');
-        assistantMessage.className = 'message assistant'; assistantMessage.textContent = data.reply || 'Sorry, I couldn\'t process that request.'; messages.appendChild(assistantMessage);
-      } catch (error) {
-        console.error('Chat error:', error);
-        messages.removeChild(loadingMessage);
-        const errorMessage = document.createElement('div');
-        errorMessage.className = 'message assistant'; errorMessage.textContent = 'Sorry, I\'m having trouble connecting right now. Please try again later.'; messages.appendChild(errorMessage);
-      }
-      messages.scrollTop = messages.scrollHeight;
-    }
     // Auto-dismiss alerts after 5s
     document.addEventListener('DOMContentLoaded', function() {
       const alerts = document.querySelectorAll('.alert.auto-dismiss');

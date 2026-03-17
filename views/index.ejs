@@ -302,7 +302,7 @@ Every skill you share, every project you complete, every donation you make earns
   <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script> 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/js/bootstrap.bundle.min.js" integrity="sha384-k6d4wzSIapyDyv1kpU366/PK5hCdSbCRGRCMv+eplOQJWyd1fbcAu9OCUj5zNLiq" crossorigin="anonymous"></script>
 
-  <!-- 1) NEW: keep the visible viewport in sync (must come before chat.js) -->
+  <!-- keep the visible viewport in sync for mobile keyboards -->
   <script src="/js/viewport-fix.js"></script>
 
   <!-- 2) If logged in, expose the user picture (keep this block if you need it) -->
@@ -379,7 +379,6 @@ Every skill you share, every project you complete, every donation you make earns
 </script>
 <% } %>
 
-  <!-- your existing inline scripts that use #chatInput, #sendBtn, tabs, etc. -->
   <script>
     window.addEventListener('DOMContentLoaded', () => {
       const alerts = document.querySelectorAll('.auto-dismiss');
@@ -390,21 +389,6 @@ Every skill you share, every project you complete, every donation you make earns
         }, 5000); 
       });
     });
-  </script>
-
-  <script>
-    // starters -> chat input
-    const chatInput = document.getElementById('chatInput');
-    const sendBtn   = document.getElementById('sendBtn');
-    if (chatInput && sendBtn) {
-      document.querySelectorAll('.starter-btn').forEach(btn =>
-        btn.addEventListener('click', () => {
-          chatInput.value = btn.dataset.prompt;
-          sendBtn.click();
-          chatInput.value = '';
-        })
-      );
-    }
   </script>
 
   <script>

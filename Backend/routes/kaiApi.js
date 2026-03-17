@@ -3,6 +3,11 @@ import { handleKaiMessage, getConversationHistory } from "../services/kai.js";
 import { determineKaiTier } from "../middleware/kai-tier.js";
 import pool from "../db/pg.js";
 import { awardIcForRsvp } from "../services/icService.js";
+import {
+  bucketResultCount,
+  classifyGuestDiscoveryQuery,
+  emitGuestDiscoveryTelemetry,
+} from "../services/kai-guest-telemetry.js";
 
 const router = express.Router();
 
@@ -106,8 +111,29 @@ router.post("/guest", async (req, res) => {
     }
 
     const tier = "guest";
+    const queryType = classifyGuestDiscoveryQuery(validation.value);
     const rateLimitKey = `ip:${req.ip || "unknown"}`;
-    if (hitRateLimitIfNeeded({ key: rateLimitKey, tier, res })) return;
+    if (hitRateLimitIfNeeded({ key: rateLimitKey, tier, res })) {
+      emitGuestDiscoveryTelemetry("guest_kai_rate_limited", {
+        query_type: queryType,
+      });
+      return;
+    }
+
+    emitGuestDiscoveryTelemetry("guest_kai_message_sent", {
+      query_type: queryType,
+    });
+
+    if (queryType === "restricted_action" || queryType === "account_request") {
+      emitGuestDiscoveryTelemetry("guest_kai_restricted_intent", {
+        query_type: queryType,
+      });
+    }
+    if (queryType === "login_intent") {
+      emitGuestDiscoveryTelemetry("guest_kai_login_intent_message", {
+        query_type: queryType,
+      });
+    }
 
     const result = await handleKaiMessage({
       userId: null,
@@ -121,6 +147,42 @@ router.post("/guest", async (req, res) => {
         success: false,
         error: "KAI is having trouble right now. Please try again.",
       });
+    }
+
+    const structuredEvents = result?.structuredEvents;
+    if (structuredEvents && typeof structuredEvents === "object") {
+      const events = Array.isArray(structuredEvents?.events) ? structuredEvents.events : [];
+      const searchContext = structuredEvents?.search_context || {};
+
+      emitGuestDiscoveryTelemetry("guest_kai_search_executed", {
+        query_type: queryType,
+        result_count_bucket: bucketResultCount(events.length),
+        broad_search: searchContext?.broad_search === true,
+        needs_location_hint: searchContext?.needs_location_hint === true,
+      });
+
+      emitGuestDiscoveryTelemetry(
+        events.length > 0 ? "guest_kai_search_results" : "guest_kai_search_no_results",
+        {
+          query_type: queryType,
+          result_count_bucket: bucketResultCount(events.length),
+          broad_search: searchContext?.broad_search === true,
+          needs_location_hint: searchContext?.needs_location_hint === true,
+          structured_results: true,
+        },
+      );
+
+      if (searchContext?.broad_search === true) {
+        emitGuestDiscoveryTelemetry("guest_kai_vague_fallback", {
+          query_type: queryType,
+        });
+      }
+
+      if (searchContext?.needs_location_hint === true) {
+        emitGuestDiscoveryTelemetry("guest_kai_near_me_without_location", {
+          query_type: queryType,
+        });
+      }
     }
 
     return res.json({
@@ -205,3 +267,9 @@ router.post("/verify-attendance", async (req, res) => {
 });
 
 export default router;
+
+export const __testables = {
+  resetUsageForTests() {
+    usageByKey.clear();
+  },
+};

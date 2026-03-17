@@ -6,9 +6,15 @@ import { executeToolCall } from "./kai-tool-executor.js";
 import { determineKaiTier, getModelForTier } from "../middleware/kai-tier.js";
 
 const anthropic = new Anthropic();
+const GUEST_TOOL_ALLOWLIST = new Set(["search_events"]);
+let anthropicCreateImpl = (payload) => anthropic.messages.create(payload);
 
 const MAX_HISTORY_MESSAGES = 40;
 const MAX_LOOPS = 10;
+const MAX_REQUEST_CONTEXT_TOKENS = 80000;
+const MAX_TEXT_BLOCK_CHARS = 12000;
+const MAX_TOOL_RESULT_BLOCK_CHARS = 16000;
+const MAX_TOOL_INPUT_JSON_CHARS = 4000;
 const ANTHROPIC_FAILURE_MESSAGE =
   "I'm having trouble connecting right now. Please try again in a moment.";
 
@@ -48,6 +54,113 @@ function groupConsecutiveRoles(messages = []) {
   }
 
   return grouped;
+}
+
+function safeJsonStringify(value, fallback = "{}") {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return fallback;
+  }
+}
+
+function truncateMiddleText(value, maxChars) {
+  const text = typeof value === "string" ? value : String(value ?? "");
+  if (!maxChars || text.length <= maxChars) return text;
+  if (maxChars <= 32) return text.slice(0, maxChars);
+  const marker = "\n...[truncated]...\n";
+  const remaining = maxChars - marker.length;
+  const head = Math.ceil(remaining * 0.7);
+  const tail = Math.max(0, remaining - head);
+  return text.slice(0, head) + marker + text.slice(text.length - tail);
+}
+
+function compactContentBlockForAnthropic(block) {
+  if (!block || typeof block !== "object") return block;
+
+  if (block.type === "text") {
+    return {
+      ...block,
+      text: truncateMiddleText(block.text ?? "", MAX_TEXT_BLOCK_CHARS),
+    };
+  }
+
+  if (block.type === "tool_result") {
+    const content = typeof block.content === "string"
+      ? block.content
+      : safeJsonStringify(block.content, "[]");
+    return {
+      ...block,
+      content: truncateMiddleText(content, MAX_TOOL_RESULT_BLOCK_CHARS),
+    };
+  }
+
+  if (block.type === "tool_use") {
+    const inputJson = safeJsonStringify(block.input ?? {}, "{}");
+    if (inputJson.length <= MAX_TOOL_INPUT_JSON_CHARS) {
+      return block;
+    }
+    return {
+      ...block,
+      input: {
+        _truncated: true,
+        preview: truncateMiddleText(inputJson, MAX_TOOL_INPUT_JSON_CHARS),
+      },
+    };
+  }
+
+  return block;
+}
+
+function compactMessageForAnthropic(message) {
+  if (!message || typeof message !== "object") return message;
+  const content = Array.isArray(message.content)
+    ? message.content.map(compactContentBlockForAnthropic)
+    : truncateMiddleText(message.content ?? "", MAX_TEXT_BLOCK_CHARS);
+  return {
+    ...message,
+    content,
+  };
+}
+
+function estimateContentTokens(content) {
+  if (Array.isArray(content)) {
+    return content.reduce((sum, block) => sum + estimateContentTokens(block), 0);
+  }
+  if (content && typeof content === "object") {
+    return Math.ceil(safeJsonStringify(content, "{}").length / 4);
+  }
+  return Math.ceil(String(content ?? "").length / 4);
+}
+
+function estimateMessageTokens(message) {
+  if (!message) return 0;
+  return estimateContentTokens(message.content) + 12;
+}
+
+function prepareMessagesForAnthropic(messages = []) {
+  const grouped = groupConsecutiveRoles(messages);
+  const compacted = grouped.map(compactMessageForAnthropic);
+  const limited = compacted.length > MAX_HISTORY_MESSAGES
+    ? compacted.slice(-MAX_HISTORY_MESSAGES)
+    : compacted;
+
+  const kept = [];
+  let tokenCount = 0;
+  for (let index = limited.length - 1; index >= 0; index -= 1) {
+    const message = limited[index];
+    const nextTokens = estimateMessageTokens(message);
+    if (kept.length > 0 && tokenCount + nextTokens > MAX_REQUEST_CONTEXT_TOKENS) {
+      continue;
+    }
+    kept.unshift(message);
+    tokenCount += nextTokens;
+  }
+
+  if (kept.length === 0 && limited.length > 0) {
+    return [limited[limited.length - 1]];
+  }
+  return kept;
 }
 
 function rowsToClaudeMessages(rows = []) {
@@ -193,29 +306,100 @@ function extractFinalText(response) {
   return textBlocks.join("\n").trim();
 }
 
-function enrichMessageForClaude(userMessage) {
-  const lower = userMessage.toLowerCase();
-  const hints = [];
+function countPatternMatches(text, patterns = []) {
+  return patterns.reduce((count, pattern) => count + (pattern.test(text) ? 1 : 0), 0);
+}
 
-  if (/\b(my profile|my stats|my rating|my score|about me|my account|my info|show me my)\b/.test(lower)) {
+function selectDiscoveryToolHint(userMessage, allowedTools = new Set()) {
+  const lower = normalizeStringForRouting(userMessage);
+  if (!lower) return null;
+
+  const allowMatched = allowedTools.has("get_matched_events");
+  const allowSearch = allowedTools.has("search_events");
+  if (!allowMatched && !allowSearch) return null;
+
+  const recommendationPatterns = [
+    /\b(recommend|recommendation|recommended)\b/,
+    /\b(best events?|best opportunities|best fit)\b/,
+    /\b(events? for me|opportunities for me|match me)\b/,
+    /\b(personalized|tailored)\b/,
+    /\b(what should i do|where should i help|what should i volunteer for)\b/,
+  ];
+  const explicitSearchPatterns = [
+    /\b(find|search|show|list|browse|look for)\b/,
+    /\b(near me|nearby|in [a-z])/,
+    /\b(this weekend|this week|today|tomorrow|tonight)\b/,
+    /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/,
+    /\b(cause|category|city|location|date)\b/,
+  ];
+
+  const recommendationCount = countPatternMatches(lower, recommendationPatterns);
+  const explicitSearchCount = countPatternMatches(lower, explicitSearchPatterns);
+
+  if (allowMatched && recommendationCount > 0 && explicitSearchCount === 0) {
+    return {
+      toolName: "get_matched_events",
+      instruction:
+        "Use the get_matched_events tool for a personalized recommendation. If the tool says personalization is weak, say that plainly and present the results as broader upcoming suggestions.",
+    };
+  }
+
+  if (allowSearch && explicitSearchCount > 0) {
+    return {
+      toolName: "search_events",
+      instruction:
+        "Use the search_events tool for explicit discovery by cause, city, date, or general browsing filters.",
+    };
+  }
+
+  if (allowMatched && recommendationCount > 0) {
+    return {
+      toolName: "get_matched_events",
+      instruction:
+        "Use the get_matched_events tool for an explainable recommendation, and stay honest if the result is only lightly personalized.",
+    };
+  }
+
+  return null;
+}
+
+function normalizeStringForRouting(value) {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function enrichMessageForClaude(userMessage, tier = null) {
+  const lower = normalizeStringForRouting(userMessage);
+  const hints = [];
+  const allowedTools = new Set(getToolDefinitionsForTier(tier || "guest").map((tool) => tool?.name).filter(Boolean));
+  const allow = (toolName) => allowedTools.has(toolName);
+  const discoveryHint = selectDiscoveryToolHint(userMessage, allowedTools);
+
+  if (discoveryHint) {
+    hints.push(discoveryHint.instruction);
+  }
+
+  if (allow("get_user_profile") && /\b(my profile|my stats|my rating|my score|about me|my account|my info|show me my)\b/.test(lower)) {
     hints.push('Use the get_user_profile tool to retrieve the user\'s full profile data.');
   }
-  if (/\b(my balance|my credits|my ic|impact credits|how many credits|how much.*earned)\b/.test(lower)) {
+  if (allow("get_ic_balance") && /\b(my balance|my credits|my ic|impact credits|how many credits|how much.*earned)\b/.test(lower)) {
     hints.push('Use the get_ic_balance tool to retrieve the user\'s IC balance.');
   }
-  if (/\b(events?|opportunities|volunteer.*near|what.*coming up|find.*volunteer|search)\b/.test(lower)) {
+  if (!discoveryHint && allow("search_events") && /\b(events?|opportunities|volunteer.*near|what.*coming up|find.*volunteer|search)\b/.test(lower)) {
     hints.push('Use the search_events tool to find events.');
   }
-  if (/\b(rsvp|sign me up|register me|sign up for)\b/.test(lower)) {
+  if (!discoveryHint && allow("get_matched_events") && /\b(recommend|recommendation|matched|match me|best events|best opportunities|events for me|personalized)\b/.test(lower)) {
+    hints.push('Use the get_matched_events tool to rank the best-fit events for this user.');
+  }
+  if (allow("rsvp_to_event") && /\b(rsvp|sign me up|register me|sign up for)\b/.test(lower)) {
     hints.push('Use the rsvp_to_event tool for this request.');
   }
-  if (/\b(cancel.*rsvp|cancel.*registration|withdraw|pull out)\b/.test(lower)) {
+  if (allow("cancel_rsvp") && /\b(cancel.*rsvp|cancel.*registration|withdraw|pull out)\b/.test(lower)) {
     hints.push('Use the cancel_rsvp tool for this request.');
   }
-  if (/\b(my schedule|my upcoming|my events|what.*signed up|my rsvp)\b/.test(lower)) {
+  if (allow("manage_schedule") && /\b(my schedule|my upcoming|my events|what.*signed up|my rsvp)\b/.test(lower)) {
     hints.push('Use the manage_schedule tool to check the user\'s schedule.');
   }
-  if (/\b(how does|how do|what is|what are|explain|tell me about.*platform|tell me about.*ic|tell me about.*credit|tell me about.*reliab)\b/.test(lower)) {
+  if (allow("platform_faq") && /\b(how does|how do|what is|what are|explain|tell me about.*platform|tell me about.*ic|tell me about.*credit|tell me about.*reliab)\b/.test(lower)) {
     hints.push('Use the platform_faq tool to answer platform questions.');
   }
 
@@ -258,15 +442,16 @@ export async function handleKaiMessage({ userId, userMessage, conversationId, ti
       resolvedConversationId = null;
     }
 
-    messages.push({ role: "user", content: enrichMessageForClaude(rawUserMessage) });
+    messages.push({ role: "user", content: enrichMessageForClaude(rawUserMessage, resolvedTier) });
     messages = groupConsecutiveRoles(messages);
 
     const systemPrompt = isGuest
       ? getGuestSystemPrompt()
       : getSystemPrompt(resolvedTier, user);
 
-    const toolDefinitions =
-      resolvedTier === "guest" ? [] : getToolDefinitionsForTier(resolvedTier);
+    const toolDefinitions = getToolDefinitionsForTier(resolvedTier).filter(
+      (tool) => resolvedTier !== "guest" || GUEST_TOOL_ALLOWLIST.has(tool?.name)
+    );
     const model = getModelForTier(resolvedTier);
 
     let response;
@@ -274,8 +459,10 @@ export async function handleKaiMessage({ userId, userMessage, conversationId, ti
     let structuredEvents = null;
 
     do {
+      messages = prepareMessagesForAnthropic(messages);
+
       try {
-        response = await anthropic.messages.create({
+        response = await anthropicCreateImpl({
           model,
           max_tokens: 1024,
           system: systemPrompt,
@@ -302,7 +489,7 @@ export async function handleKaiMessage({ userId, userMessage, conversationId, ti
       const toolResults = [];
       for (const toolUse of toolUseBlocks) {
         const result = await executeToolCall(toolUse.name, toolUse.input, userId ?? null);
-        if (toolUse.name === "search_events" && result && typeof result === "object") {
+        if ((toolUse.name === "search_events" || toolUse.name === "get_matched_events") && result && typeof result === "object") {
           structuredEvents = result;
         }
         toolResults.push({
@@ -348,6 +535,19 @@ export async function handleKaiMessage({ userId, userMessage, conversationId, ti
     };
   }
 }
+
+export const __testables = {
+  MAX_REQUEST_CONTEXT_TOKENS,
+  estimateMessageTokens,
+  prepareMessagesForAnthropic,
+  selectDiscoveryToolHint,
+  setAnthropicCreateForTests(fn) {
+    anthropicCreateImpl = typeof fn === "function" ? fn : anthropicCreateImpl;
+  },
+  resetAnthropicCreateForTests() {
+    anthropicCreateImpl = (payload) => anthropic.messages.create(payload);
+  },
+};
 
 export async function getConversationHistory(conversationId, userId) {
   if (!conversationId || !userId) return [];
