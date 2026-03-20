@@ -2,6 +2,7 @@ import { progressPercent } from '../shared/metrics.js';
 import { mapFriendArcRow } from './lib/friendArcMapper.js';
 import { fetchVolunteerPortfolio, getVolunteerStats, resolveUserIdFromRequest } from '../services/profileService.js';
 import { getSummary as getRatingsSummary } from '../services/ratingsService.js';
+import { getMatchedEventsForUser } from '../services/eventMatchingService.js';
 
 // Backend/dashboardController.js
 // No `snapshot` usage. Ensures a real top-level `challenge` on each arc before render.
@@ -250,6 +251,9 @@ export function makeDashboardController(pool) {
         let dashboardCompletedEvent = null;
         let dashboardCompletedEvents = [];
         let dashboardUpcomingEvent = null;
+        let dashboardRecommendedEvents = [];
+        let dashboardRecommendationsSummary = "";
+        let dashboardRecommendationsFallbackMode = null;
         try {
           const rawPortfolioRows = await fetchVolunteerPortfolio({ userId, limit: 40 });
           const now = new Date();
@@ -294,6 +298,22 @@ export function makeDashboardController(pool) {
           dashboardCompletedEvent = dashboardCompletedEvents[0] || null;
         } catch (portfolioErr) {
           console.warn('[dashboardController] dashboard portfolio query failed:', portfolioErr.message || portfolioErr);
+        }
+
+        try {
+          const matched = await getMatchedEventsForUser({
+            userId,
+            daysAhead: 35,
+            limit: 3,
+            minScore: 25,
+          });
+          if (matched?.status === 'success') {
+            dashboardRecommendedEvents = Array.isArray(matched.events) ? matched.events.slice(0, 3) : [];
+            dashboardRecommendationsSummary = typeof matched.summary === 'string' ? matched.summary : "";
+            dashboardRecommendationsFallbackMode = matched.fallback_mode || null;
+          }
+        } catch (recommendationErr) {
+          console.warn('[dashboardController] dashboard recommendations failed:', recommendationErr.message || recommendationErr);
         }
 
         // Keep your existing SELECT; log via q()
@@ -484,6 +504,9 @@ export function makeDashboardController(pool) {
           dashboardCompletedEvent,
           dashboardCompletedEvents,
           dashboardUpcomingEvent,
+          dashboardRecommendedEvents,
+          dashboardRecommendationsSummary,
+          dashboardRecommendationsFallbackMode,
           debugStatsUserId: showStatsDebug ? String(userId) : null,
           showStatsDebug
         });
@@ -518,6 +541,9 @@ export function makeDashboardController(pool) {
             dashboardCompletedEvent: null,
             dashboardCompletedEvents: [],
             dashboardUpcomingEvent: null,
+            dashboardRecommendedEvents: [],
+            dashboardRecommendationsSummary: "",
+            dashboardRecommendationsFallbackMode: null,
             debugStatsUserId: null,
             showStatsDebug: false
           });

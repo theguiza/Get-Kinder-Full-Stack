@@ -208,9 +208,28 @@
   }
   #dashboardEventDetailModal .modal-header {
     border-bottom: 1px solid #e8eef7;
+    align-items: center;
   }
   #dashboardEventDetailModal .modal-footer {
     border-top: 1px solid #e8eef7;
+  }
+  #dashboardEventDetailModal .dash-event-detail-title-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+  }
+  #dashboardEventDetailModal .dash-event-detail-logo {
+    width: 34px;
+    height: 34px;
+    border-radius: 6px;
+    object-fit: cover;
+  }
+  #dashboardEventDetailModal #dashboardEventDetailModalLabel {
+    margin: 0;
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: #ff5656;
+    line-height: 1.2;
   }
   .dash-event-detail-title {
     color: #455a7c;
@@ -242,14 +261,36 @@
     color: #4b5563;
   }
   .dash-event-detail-close {
-    background: #ff5656;
-    border-color: #ff5656;
+    background: #455a7c;
+    border-color: #455a7c;
     color: #fff;
   }
   .dash-event-detail-close:hover,
   .dash-event-detail-close:focus {
+    background: #3c4f6d;
+    border-color: #3c4f6d;
+    color: #fff;
+  }
+  .dash-event-detail-register {
+    background: #ff5656;
+    border-color: #ff5656;
+    color: #fff;
+  }
+  .dash-event-detail-register:hover,
+  .dash-event-detail-register:focus {
     background: #f04c4c;
     border-color: #f04c4c;
+    color: #fff;
+  }
+  .dashboard-container .dash-btn-ink-solid {
+    background: #455a7c;
+    border-color: #455a7c;
+    color: #fff;
+  }
+  .dashboard-container .dash-btn-ink-solid:hover,
+  .dashboard-container .dash-btn-ink-solid:focus {
+    background: #3c4f6d;
+    border-color: #3c4f6d;
     color: #fff;
   }
   .journey-completed-item {
@@ -261,6 +302,10 @@
   .journey-completed-main {
     min-width: 0;
     flex: 1 1 auto;
+  }
+  .journey-event-title {
+    color: #455a7c;
+    font-weight: 700;
   }
   .dash-rate-btn {
     white-space: nowrap;
@@ -275,6 +320,9 @@
     color: #455a7c;
   }
   #journey-completed-card {
+    scroll-margin-top: calc(var(--navbar-height) + 24px);
+  }
+  #recommended-opportunities-section {
     scroll-margin-top: calc(var(--navbar-height) + 24px);
   }
 </style>
@@ -384,6 +432,9 @@
       ? dashboardCompletedEvents
       : (completedEvent ? [completedEvent] : []); %>
     <% const upcomingEvent = (typeof dashboardUpcomingEvent !== 'undefined') ? dashboardUpcomingEvent : null; %>
+    <% const recommendedEvents = (typeof dashboardRecommendedEvents !== 'undefined' && Array.isArray(dashboardRecommendedEvents)) ? dashboardRecommendedEvents : []; %>
+    <% const recommendationsSummary = (typeof dashboardRecommendationsSummary !== 'undefined' && typeof dashboardRecommendationsSummary === 'string') ? dashboardRecommendationsSummary : ''; %>
+    <% const recommendationsFallbackMode = (typeof dashboardRecommendationsFallbackMode !== 'undefined' && typeof dashboardRecommendationsFallbackMode === 'string') ? dashboardRecommendationsFallbackMode : null; %>
     <% const formatDashboardEventLine = function(eventItem) {
       const fallbackZone = 'America/Vancouver';
       const zone = (eventItem && eventItem.tz) ? eventItem.tz : fallbackZone;
@@ -405,6 +456,13 @@
       }
       const location = (eventItem && eventItem.location_text) ? eventItem.location_text : 'Location TBD';
       return `${whenLabel} • ${location}`;
+    }; %>
+    <% const truncateDashboardCopy = function(value, maxLength) {
+      const raw = typeof value === 'string' ? value.trim() : '';
+      const safeMax = Number(maxLength) > 0 ? Number(maxLength) : 140;
+      if (!raw) return 'No description yet. Open the event to review the details.';
+      if (raw.length <= safeMax) return raw;
+      return `${raw.slice(0, safeMax - 1).trimEnd()}…`;
     }; %>
     <div class="container-fluid my-4">
       <div class="dash-grid">
@@ -496,6 +554,7 @@
                     <div class="d-flex flex-wrap gap-2">
                       <a class="btn dash-btn-coral btn-sm" href="/events" aria-label="Find opportunities">Find opportunities</a>
                       <a class="btn dash-btn-ink btn-sm" href="#journey-completed-card" aria-label="Rate opportunities">Rate opportunities</a>
+                      <a class="btn dash-btn-ink-solid btn-sm" href="#recommended-opportunities-section" aria-label="Recommended opportunities">Recommended Opportunities</a>
                     </div>
                   </div>
                 </article>
@@ -519,21 +578,27 @@
                     <% if (upcomingEvent) { %>
                       <% const dashUpcomingEventId = upcomingEvent && upcomingEvent.id ? String(upcomingEvent.id) : ''; %>
                       <ul class="journey-mini-list mb-0 mt-2">
-                        <li><strong><%= upcomingEvent.title || 'Untitled event' %></strong></li>
-                        <li><%= formatDashboardEventLine(upcomingEvent) %></li>
-                        <% if ((upcomingEvent.kind_estimate_per_user || 0) > 0) { %>
-                          <li>Estimated reward: +<%= upcomingEvent.kind_estimate_per_user %> $KIND</li>
-                        <% } %>
+                        <li class="journey-completed-item">
+                          <div class="journey-completed-main">
+                            <strong class="journey-event-title"><%= upcomingEvent.title || 'Untitled event' %></strong>
+                            <div class="text-muted small">
+                              <%= formatDashboardEventLine(upcomingEvent) %>
+                              <% if ((upcomingEvent.kind_estimate_per_user || 0) > 0) { %>
+                                • Estimated reward: +<%= upcomingEvent.kind_estimate_per_user %> $KIND
+                              <% } %>
+                            </div>
+                          </div>
+                          <% if (dashUpcomingEventId) { %>
+                            <button
+                              type="button"
+                              class="btn dash-btn-coral btn-sm js-dashboard-event-detail-btn"
+                              data-event-id="<%= dashUpcomingEventId %>"
+                            >
+                              View event
+                            </button>
+                          <% } %>
+                        </li>
                       </ul>
-                      <% if (dashUpcomingEventId) { %>
-                        <button
-                          type="button"
-                          class="btn dash-btn-ink btn-sm mt-3 js-dashboard-event-detail-btn"
-                          data-event-id="<%= dashUpcomingEventId %>"
-                        >
-                          View event
-                        </button>
-                      <% } %>
                     <% } else { %>
                       <ul class="journey-mini-list mb-0 mt-2">
                         <li>No upcoming commitments yet.</li>
@@ -558,7 +623,7 @@
                           <% const dashEventId = eventItem && eventItem.id ? String(eventItem.id) : ''; %>
                           <li class="journey-completed-item" data-event-id="<%= dashEventId %>">
                             <div class="journey-completed-main">
-                              <strong><%= eventItem.title || 'Untitled event' %></strong>
+                              <strong class="journey-event-title"><%= eventItem.title || 'Untitled event' %></strong>
                               <div class="text-muted small">
                                 <%= formatDashboardEventLine(eventItem) %>
                                 <% if (typeof eventItem.duration_hours === 'number' && eventItem.duration_hours > 0) { %> • <%= eventItem.duration_hours.toFixed(1) %> hrs<% } %>
@@ -585,40 +650,63 @@
               </div>
             </section>
 
-            <section class="journey-recs mt-4" aria-label="Recommended opportunities">
+            <section id="recommended-opportunities-section" class="journey-recs mt-4" aria-label="Recommended opportunities">
               <div class="d-flex justify-content-between align-items-center mb-2">
-                <h2 class="h6 mb-0 dash-ink-title dash-impact-title">Recommended opportunities</h2>
+                <h2 class="h6 mb-0 dash-ink-title dash-impact-title">Recommended Opportunities</h2>
                 <a href="/events" class="small text-decoration-none">Browse all</a>
               </div>
-              <div class="row g-3">
-                <div class="col-12 col-sm-6 col-xl-4">
-                  <article class="card dash-card shadow-sm border-0 rec-card h-100">
-                    <div class="card-body">
-                      <h4 class="h6 mb-1">Community Food Sort</h4>
-                      <p class="mb-2 text-muted small">Sort and pack essential items for families near you.</p>
-                      <a href="#" class="small text-decoration-none">See details</a>
+              <% if (recommendationsSummary) { %>
+                <p class="text-muted small mb-3">
+                  <%= recommendationsSummary %>
+                  <% if (recommendationsFallbackMode === 'broad_upcoming') { %>
+                    <span class="d-inline-block mt-1">Showing broader upcoming options until we have stronger preference signals.</span>
+                  <% } %>
+                </p>
+              <% } %>
+              <% if (recommendedEvents.length > 0) { %>
+                <div class="row g-3">
+                  <% recommendedEvents.forEach(function(eventItem, idx) { %>
+                    <% const dashRecommendedId = eventItem && eventItem.id ? String(eventItem.id) : ''; %>
+                    <% const recommendationReasons = Array.isArray(eventItem.match_reasons) ? eventItem.match_reasons.slice(0, 2) : []; %>
+                    <div class="col-12 col-sm-6 col-xl-4">
+                      <article class="card dash-card shadow-sm border-0 rec-card h-100">
+                        <div class="card-body d-flex flex-column">
+                          <div class="d-flex align-items-center justify-content-between gap-2 mb-2">
+                            <span class="chip chip-upcoming">RECOMMENDED</span>
+                            <span class="text-muted small">#<%= idx + 1 %></span>
+                          </div>
+                          <h4 class="h6 mb-1"><%= eventItem.title || 'Untitled event' %></h4>
+                          <p class="mb-2 text-muted small"><%= formatDashboardEventLine(eventItem) %></p>
+                          <p class="mb-2 text-muted small"><%= truncateDashboardCopy(eventItem.description, 130) %></p>
+                          <p class="mb-2 text-muted small">Earn <%= Number(eventItem.impact_credits_base) || 25 %> Impact Credits</p>
+                          <% if (recommendationReasons.length > 0) { %>
+                            <p class="mb-3 text-muted small">Why this fits: <%= recommendationReasons.join(' • ') %></p>
+                          <% } %>
+                          <div class="mt-auto d-flex flex-wrap align-items-center justify-content-between gap-2">
+                            <a href="/events" class="small text-decoration-none">Browse all</a>
+                            <% if (dashRecommendedId) { %>
+                              <button
+                                type="button"
+                                class="btn dash-btn-coral btn-sm js-dashboard-event-detail-btn"
+                                data-event-id="<%= dashRecommendedId %>"
+                              >
+                                View event
+                              </button>
+                            <% } %>
+                          </div>
+                        </div>
+                      </article>
                     </div>
-                  </article>
+                  <% }); %>
                 </div>
-                <div class="col-12 col-sm-6 col-xl-4">
-                  <article class="card dash-card shadow-sm border-0 rec-card h-100">
-                    <div class="card-body">
-                      <h4 class="h6 mb-1">Neighborhood Cleanup</h4>
-                      <p class="mb-2 text-muted small">Join a weekend crew to restore local parks and pathways.</p>
-                      <a href="#" class="small text-decoration-none">See details</a>
-                    </div>
-                  </article>
+              <% } else { %>
+                <div class="card dash-card shadow-sm border-0">
+                  <div class="card-body">
+                    <p class="mb-2 text-muted">No recommended opportunities are available right now.</p>
+                    <a href="/events" class="small text-decoration-none">Browse all opportunities</a>
+                  </div>
                 </div>
-                <div class="col-12 col-sm-6 col-xl-4">
-                  <article class="card dash-card shadow-sm border-0 rec-card h-100">
-                    <div class="card-body">
-                      <h4 class="h6 mb-1">Youth Mentorship Hour</h4>
-                      <p class="mb-2 text-muted small">Support students with reading, confidence, and goals.</p>
-                      <a href="#" class="small text-decoration-none">See details</a>
-                    </div>
-                  </article>
-                </div>
-              </div>
+              <% } %>
             </section>
           </div>
         </main>
@@ -903,7 +991,10 @@
     <div class="modal-dialog modal-lg modal-dialog-centered">
       <div class="modal-content">
         <div class="modal-header">
-          <h5 class="modal-title" id="dashboardEventDetailModalLabel">Event details</h5>
+          <div class="dash-event-detail-title-wrap">
+            <img src="/images/favicon.png" alt="Get Kinder logo" class="dash-event-detail-logo" loading="lazy">
+            <h5 class="modal-title" id="dashboardEventDetailModalLabel">Event details</h5>
+          </div>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body">
@@ -925,6 +1016,7 @@
         </div>
         <div class="modal-footer">
           <button type="button" class="btn dash-event-detail-close" data-bs-dismiss="modal">Close</button>
+          <a id="dashboard-event-detail-register" href="/events" class="btn dash-event-detail-register">Register</a>
         </div>
       </div>
     </div>

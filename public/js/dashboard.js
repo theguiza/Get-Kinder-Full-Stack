@@ -628,6 +628,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const detailCreditsEl = document.getElementById('dashboard-event-detail-credits');
     const detailVerificationEl = document.getElementById('dashboard-event-detail-verification');
     const detailStatusEl = document.getElementById('dashboard-event-detail-status');
+    const detailRegisterEl = document.getElementById('dashboard-event-detail-register');
 
     if (
         detailButtons.length &&
@@ -644,11 +645,13 @@ document.addEventListener('DOMContentLoaded', function() {
         detailCreditsEl &&
         detailVerificationEl &&
         detailStatusEl &&
+        detailRegisterEl &&
         window.bootstrap &&
         bootstrap.Modal
     ) {
         const detailModal = bootstrap.Modal.getOrCreateInstance(detailModalEl);
         let latestDetailRequest = 0;
+        let activeDetailEventId = '';
 
         const setDetailLoadingState = () => {
             detailLoadingEl.classList.remove('d-none');
@@ -699,6 +702,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const openDashboardEventDetail = async (eventId) => {
             const id = String(eventId || '').trim();
             if (!id) return;
+            activeDetailEventId = id;
+            detailRegisterEl.setAttribute('href', `/events#/events/${encodeURIComponent(id)}`);
             latestDetailRequest += 1;
             const requestId = latestDetailRequest;
             setDetailLoadingState();
@@ -727,7 +732,9 @@ document.addEventListener('DOMContentLoaded', function() {
         });
 
         detailModalEl.addEventListener('hidden.bs.modal', () => {
+            activeDetailEventId = '';
             latestDetailRequest += 1;
+            detailRegisterEl.setAttribute('href', '/events');
             setDetailLoadingState();
         });
     }

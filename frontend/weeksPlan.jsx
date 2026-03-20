@@ -225,7 +225,7 @@ export default function WeeksPlan() {
       <style>{BRAND_VARS}</style>
       <div className="flex flex-col gap-3">
         <div>
-          <h2 className="text-xl md:text-2xl font-semibold text-[var(--ink)]">This Week&apos;s Plan</h2>
+          <h2 className="dash-ink-title dash-impact-title">This Week&apos;s Plan</h2>
           <p className="text-sm text-slate-600">Your plan: help to earn and build verified skills.</p>
         </div>
 

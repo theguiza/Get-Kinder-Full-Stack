@@ -7,6 +7,37 @@ const DEFAULT_MIN_SCORE = 30;
 const MAX_EVENT_CANDIDATES = 100;
 const MAX_CONTEXT_ITEMS = 3;
 
+export const DASHBOARD_RECOMMENDATION_SPEC = Object.freeze({
+  version: "dashboard-v1",
+  eligibility: Object.freeze({
+    event_status: "published",
+    exclude_already_committed: true,
+    exclude_past_events: true,
+    exclude_full_when_waitlist_closed: true,
+  }),
+  weights: Object.freeze({
+    base_discoverability: 15,
+    exact_interest_match: 30,
+    extra_interest_match: 5,
+    keyword_overlap_per_token: 10,
+    keyword_overlap_max: 20,
+    home_base_overlap: 12,
+    recent_community_overlap: 10,
+    this_week_momentum: 8,
+    happening_now: 14,
+    starts_within_3_days: 15,
+    starts_within_14_days: 10,
+    starts_within_30_days: 5,
+    spots_available: 8,
+    waitlist_penalty: -8,
+  }),
+  notes: [
+    "Prioritize interest fit, local relevance, and near-term timing.",
+    "Prefer events with available spots.",
+    "When personalization signals are weak, fall back honestly to broader upcoming opportunities.",
+  ],
+});
+
 function clampNumber(value, fallback, { min = Number.NEGATIVE_INFINITY, max = Number.POSITIVE_INFINITY } = {}) {
   const num = Number(value);
   const normalized = Number.isFinite(num) ? num : fallback;
@@ -76,6 +107,8 @@ function buildMatchContext({ preferences = {}, volunteerStats = {} } = {}) {
     recentCommunities,
     recentCommunityTokens,
     committedEventIds,
+    hasPersonalSignals: interestPhrases.length > 0 || homeBaseTokens.length > 0 || recentCommunityTokens.length > 0,
+    streakWeeks: Number(volunteerStats?.streak_weeks) || 0,
   };
 }
 
@@ -148,6 +181,7 @@ function buildEventSignals(event) {
 export function scoreMatchedEvent(event, context, now = Date.now()) {
   const details = [];
   const eventSignals = buildEventSignals(event);
+  const weights = DASHBOARD_RECOMMENDATION_SPEC.weights;
   const endOrStartAt = event?.end_at || event?.start_at;
   const endOrStartMs = endOrStartAt ? new Date(endOrStartAt).getTime() : Number.NaN;
   const startMs = event?.start_at ? new Date(event.start_at).getTime() : Number.NaN;
@@ -156,6 +190,7 @@ export function scoreMatchedEvent(event, context, now = Date.now()) {
   const hasCapacity = Number.isFinite(capacity) && capacity > 0;
   const isFull = hasCapacity && acceptedCount >= capacity;
   const alreadyCommitted = context.committedEventIds.has(String(event?.id || ""));
+  const commitmentCount = context?.committedEventIds instanceof Set ? context.committedEventIds.size : 0;
 
   if (alreadyCommitted) {
     return {
@@ -184,24 +219,25 @@ export function scoreMatchedEvent(event, context, now = Date.now()) {
     };
   }
 
-  let score = 15;
+  let score = weights.base_discoverability;
 
   const matchedInterests = context.interestPhrases.filter((phrase) =>
     includesNormalized(eventSignals.eventSearchText, phrase) ||
     eventSignals.eventTags.some((tag) => includesNormalized(tag, phrase))
   );
   if (matchedInterests.length > 0) {
-    score += 30 + Math.min(2, matchedInterests.length - 1) * 5;
+    score += weights.exact_interest_match + Math.min(2, matchedInterests.length - 1) * weights.extra_interest_match;
     details.push({
-      weight: 35,
+      weight: weights.exact_interest_match + Math.min(2, matchedInterests.length - 1) * weights.extra_interest_match,
       text: `Matches your saved interests: ${matchedInterests.slice(0, 2).join(", ")}`,
     });
   } else {
     const tokenOverlap = countTokenOverlap(context.interestTokens, eventSignals.eventTagTokens);
     if (tokenOverlap > 0) {
-      score += Math.min(20, tokenOverlap * 10);
+      const interestOverlapScore = Math.min(weights.keyword_overlap_max, tokenOverlap * weights.keyword_overlap_per_token);
+      score += interestOverlapScore;
       details.push({
-        weight: 20,
+        weight: interestOverlapScore,
         text: "Overlaps with your saved interest keywords",
       });
     }
@@ -209,47 +245,54 @@ export function scoreMatchedEvent(event, context, now = Date.now()) {
 
   const locationOverlap = countTokenOverlap(context.homeBaseTokens, eventSignals.eventLocationTokens);
   if (locationOverlap > 0 && context.homeBaseLabel) {
-    score += 12;
+    score += weights.home_base_overlap;
     details.push({
-      weight: 12,
+      weight: weights.home_base_overlap,
       text: `Near your home base: ${context.homeBaseLabel}`,
     });
   }
 
   const communityOverlap = countTokenOverlap(context.recentCommunityTokens, eventSignals.eventLocationTokens);
   if (communityOverlap > 0) {
-    score += 10;
+    score += weights.recent_community_overlap;
     details.push({
-      weight: 10,
+      weight: weights.recent_community_overlap,
       text: "Similar community to places you've volunteered recently",
     });
   }
 
   if (Number.isFinite(startMs)) {
     if (startMs <= now) {
-      score += 14;
-      details.push({ weight: 14, text: "Already underway or starting now" });
+      score += weights.happening_now;
+      details.push({ weight: weights.happening_now, text: "Already underway or starting now" });
     } else {
       const daysUntilStart = (startMs - now) / (24 * 60 * 60 * 1000);
+      if (commitmentCount === 0 && daysUntilStart <= 7 && (context.hasPersonalSignals || context.streakWeeks > 0)) {
+        score += weights.this_week_momentum;
+        details.push({
+          weight: weights.this_week_momentum,
+          text: "Good fit for your next commitment this week",
+        });
+      }
       if (daysUntilStart <= 3) {
-        score += 15;
-        details.push({ weight: 15, text: "Happening soon" });
+        score += weights.starts_within_3_days;
+        details.push({ weight: weights.starts_within_3_days, text: "Happening soon" });
       } else if (daysUntilStart <= 14) {
-        score += 10;
-        details.push({ weight: 10, text: "Coming up in the next two weeks" });
+        score += weights.starts_within_14_days;
+        details.push({ weight: weights.starts_within_14_days, text: "Coming up in the next two weeks" });
       } else if (daysUntilStart <= 30) {
-        score += 5;
-        details.push({ weight: 5, text: "Upcoming this month" });
+        score += weights.starts_within_30_days;
+        details.push({ weight: weights.starts_within_30_days, text: "Upcoming this month" });
       }
     }
   }
 
   if (isFull && event?.waitlist_enabled !== false) {
-    score -= 8;
+    score += weights.waitlist_penalty;
     details.push({ weight: 2, text: "Currently full, but waitlist is open" });
   } else {
-    score += 8;
-    details.push({ weight: 8, text: "Spots available" });
+    score += weights.spots_available;
+    details.push({ weight: weights.spots_available, text: "Spots available" });
   }
 
   let reasons = details
@@ -353,6 +396,8 @@ export async function getMatchedEventsForUser({
     status: "success",
     summary,
     intro: summary,
+    spec_version: DASHBOARD_RECOMMENDATION_SPEC.version,
+    scoring_spec: DASHBOARD_RECOMMENDATION_SPEC,
     signals_used: signalsUsed,
     personalization,
     fallback_mode: fallbackMode,
