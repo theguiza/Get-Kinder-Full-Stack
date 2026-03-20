@@ -305,6 +305,34 @@ function showNotification(message, type = 'info') {
     }, 4000);
 }
 
+function formatDashboardEventDateRange(startAt, endAt, tz) {
+    if (!startAt) return 'When: Date TBD';
+    try {
+        const start = new Date(startAt);
+        if (Number.isNaN(start.getTime())) return 'When: Date TBD';
+        const options = {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
+            timeZone: tz || undefined
+        };
+        const startLabel = start.toLocaleString('en-US', options);
+        if (!endAt) return `When: ${startLabel}${tz ? ` (${tz})` : ''}`;
+        const end = new Date(endAt);
+        if (Number.isNaN(end.getTime())) return `When: ${startLabel}${tz ? ` (${tz})` : ''}`;
+        const endLabel = end.toLocaleTimeString('en-US', {
+            hour: 'numeric',
+            minute: '2-digit',
+            timeZone: tz || undefined
+        });
+        return `When: ${startLabel} - ${endLabel}${tz ? ` (${tz})` : ''}`;
+    } catch (_) {
+        return 'When: Date TBD';
+    }
+}
+
 /**
  * UI change - Initialize dashboard functionality when DOM loads
  */
@@ -583,6 +611,124 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (!btn) return;
                 btn.classList.toggle('d-none', !row.show);
             });
+        });
+    }
+
+    const detailButtons = [...document.querySelectorAll('.js-dashboard-event-detail-btn[data-event-id]')];
+    const detailModalEl = document.getElementById('dashboardEventDetailModal');
+    const detailLoadingEl = document.getElementById('dashboard-event-detail-loading');
+    const detailErrorEl = document.getElementById('dashboard-event-detail-error');
+    const detailContentEl = document.getElementById('dashboard-event-detail-content');
+    const detailTitleEl = document.getElementById('dashboard-event-detail-title');
+    const detailWhenEl = document.getElementById('dashboard-event-detail-when');
+    const detailWhereEl = document.getElementById('dashboard-event-detail-where');
+    const detailWhoEl = document.getElementById('dashboard-event-detail-who');
+    const detailDescriptionEl = document.getElementById('dashboard-event-detail-description');
+    const detailRequirementsEl = document.getElementById('dashboard-event-detail-requirements');
+    const detailCreditsEl = document.getElementById('dashboard-event-detail-credits');
+    const detailVerificationEl = document.getElementById('dashboard-event-detail-verification');
+    const detailStatusEl = document.getElementById('dashboard-event-detail-status');
+
+    if (
+        detailButtons.length &&
+        detailModalEl &&
+        detailLoadingEl &&
+        detailErrorEl &&
+        detailContentEl &&
+        detailTitleEl &&
+        detailWhenEl &&
+        detailWhereEl &&
+        detailWhoEl &&
+        detailDescriptionEl &&
+        detailRequirementsEl &&
+        detailCreditsEl &&
+        detailVerificationEl &&
+        detailStatusEl &&
+        window.bootstrap &&
+        bootstrap.Modal
+    ) {
+        const detailModal = bootstrap.Modal.getOrCreateInstance(detailModalEl);
+        let latestDetailRequest = 0;
+
+        const setDetailLoadingState = () => {
+            detailLoadingEl.classList.remove('d-none');
+            detailContentEl.classList.add('d-none');
+            detailErrorEl.classList.add('d-none');
+            detailErrorEl.textContent = '';
+        };
+
+        const setDetailErrorState = (message) => {
+            detailLoadingEl.classList.add('d-none');
+            detailContentEl.classList.add('d-none');
+            detailErrorEl.textContent = message || 'Unable to load event details.';
+            detailErrorEl.classList.remove('d-none');
+        };
+
+        const setDetailContentState = (evt) => {
+            if (!evt || typeof evt !== 'object') {
+                setDetailErrorState('Unable to load event details.');
+                return;
+            }
+
+            const orgName = (typeof evt.org_name === 'string' && evt.org_name.trim()) ? evt.org_name.trim() : 'Independent organizer';
+            const communityTag = (typeof evt.community_tag === 'string' && evt.community_tag.trim()) ? evt.community_tag.trim() : '';
+            const description = (typeof evt.description === 'string' && evt.description.trim()) ? evt.description.trim() : 'No description provided.';
+            const requirements = (typeof evt.requirements === 'string' && evt.requirements.trim()) ? evt.requirements.trim() : 'No specific requirements listed.';
+            const impactCredits = Number.isFinite(Number(evt.impact_credits_base)) ? Number(evt.impact_credits_base) : 25;
+            const status = (typeof evt.status === 'string' && evt.status.trim()) ? evt.status.trim() : 'unknown';
+            const verificationMethod = (typeof evt.verification_method === 'string' && evt.verification_method.trim())
+                ? evt.verification_method.replace(/_/g, ' ')
+                : 'host attest';
+
+            detailTitleEl.textContent = evt.title || 'Untitled Event';
+            detailWhenEl.textContent = formatDashboardEventDateRange(evt.start_at, evt.end_at, evt.tz);
+            detailWhereEl.textContent = `Where: ${evt.location_text || 'Location TBD'}`;
+            detailWhoEl.textContent = communityTag ? `Host: ${orgName} • ${communityTag}` : `Host: ${orgName}`;
+            detailDescriptionEl.textContent = description;
+            detailRequirementsEl.textContent = `Requirements: ${requirements}`;
+            detailCreditsEl.textContent = `Earn: ${impactCredits} Impact Credits`;
+            detailVerificationEl.textContent = `Verification: ${verificationMethod}`;
+            detailStatusEl.textContent = `Status: ${status}`;
+
+            detailLoadingEl.classList.add('d-none');
+            detailErrorEl.classList.add('d-none');
+            detailErrorEl.textContent = '';
+            detailContentEl.classList.remove('d-none');
+        };
+
+        const openDashboardEventDetail = async (eventId) => {
+            const id = String(eventId || '').trim();
+            if (!id) return;
+            latestDetailRequest += 1;
+            const requestId = latestDetailRequest;
+            setDetailLoadingState();
+            detailModal.show();
+
+            try {
+                const response = await fetch(`/api/events/${encodeURIComponent(id)}`, {
+                    credentials: 'include'
+                });
+                const payload = await response.json().catch(() => ({}));
+                if (requestId !== latestDetailRequest) return;
+                if (!response.ok || !payload?.ok || !payload?.data) {
+                    throw new Error(payload?.error || 'Unable to load event details.');
+                }
+                setDetailContentState(payload.data);
+            } catch (error) {
+                if (requestId !== latestDetailRequest) return;
+                setDetailErrorState(error?.message || 'Unable to load event details.');
+            }
+        };
+
+        detailButtons.forEach((btn) => {
+            btn.addEventListener('click', () => {
+                openDashboardEventDetail(btn.getAttribute('data-event-id'));
+            });
+        });
+
+        detailModalEl.addEventListener('hidden.bs.modal', () => {
+            latestDetailRequest += 1;
+            setDetailLoadingState();
         });
     }
 });
