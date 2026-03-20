@@ -356,6 +356,28 @@
     }
     .profile-page #profileEventDetailModal .modal-header {
       border-bottom: 1px solid #e8eef7;
+      align-items: center;
+    }
+    .profile-page #profileEventDetailModal .modal-footer {
+      border-top: 1px solid #e8eef7;
+    }
+    .profile-page #profileEventDetailModal .dash-event-detail-title-wrap {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.6rem;
+    }
+    .profile-page #profileEventDetailModal .dash-event-detail-logo {
+      width: 34px;
+      height: 34px;
+      border-radius: 6px;
+      object-fit: cover;
+    }
+    .profile-page #profileEventDetailModal #profileEventDetailModalLabel {
+      margin: 0;
+      font-size: 1.35rem;
+      font-weight: 700;
+      color: #ff5656;
+      line-height: 1.2;
     }
     .profile-page .profile-event-detail-title {
       color: #455a7c;
@@ -385,6 +407,17 @@
       padding: 0.2rem 0.65rem;
       font-size: 0.78rem;
       color: #4b5563;
+    }
+    .profile-page .profile-event-detail-close {
+      background: #455a7c;
+      border-color: #455a7c;
+      color: #fff;
+    }
+    .profile-page .profile-event-detail-close:hover,
+    .profile-page .profile-event-detail-close:focus {
+      background: #3c4f6d;
+      border-color: #3c4f6d;
+      color: #fff;
     }
     @media (min-width: 768px) {
       .profile-page .recent-impact-item {
@@ -886,10 +919,10 @@
                   <% if (!upcomingRows.length) { %>
                     <div class="text-muted">No upcoming commitments.</div>
                   <% } else { %>
-                    <div class="recent-impact-list">
-                      <% upcomingRows.forEach((row) => { %>
+                    <div class="recent-impact-list" data-pagination-list data-initial-visible="5" data-page-size="5">
+                      <% upcomingRows.forEach((row, index) => { %>
                         <% const upcomingStatus = upcomingStatusMeta[row.rsvp_status] || { label: 'Unknown', badgeClass: 'text-bg-secondary' }; %>
-                        <article class="recent-impact-item">
+                        <article class="recent-impact-item" data-pagination-item <%= index >= 5 ? 'hidden' : '' %>>
                           <div>
                             <div class="fw-semibold" style="color: #455a7c;"><%= row.title || 'Untitled event' %></div>
                             <div class="text-muted small"><%= formatUpcomingEventDateTime(row.start_at, row.end_at) %> • <%= row.location_text || 'Location TBD' %></div>
@@ -907,6 +940,11 @@
                         </article>
                       <% }); %>
                     </div>
+                    <% if (upcomingRows.length > 5) { %>
+                      <div class="recent-impact-pagination">
+                        <button type="button" class="btn btn-outline-secondary btn-sm" data-pagination-next>+5</button>
+                      </div>
+                    <% } %>
                   <% } %>
                 </div>
               </div>
@@ -917,9 +955,9 @@
                   <% if (!pastRows.length) { %>
                     <div class="text-muted">No past events yet.</div>
                   <% } else { %>
-                    <div class="recent-impact-list" data-recent-impact-list data-initial-visible="5" data-page-size="5">
+                    <div class="recent-impact-list" data-pagination-list data-initial-visible="5" data-page-size="5">
                       <% pastRows.forEach((row, index) => { %>
-                        <article class="recent-impact-item" data-recent-impact-item <%= index >= 5 ? 'hidden' : '' %>>
+                        <article class="recent-impact-item" data-pagination-item <%= index >= 5 ? 'hidden' : '' %>>
                           <div>
                             <div class="fw-semibold" style="color: #455a7c;">
                               <span class="<%= row.is_verified ? 'text-success' : 'text-warning' %>"><%= row.is_verified ? 'Verified ✓' : 'Unverified ⏳' %></span>
@@ -946,7 +984,7 @@
                     </div>
                     <% if (pastRows.length > 5) { %>
                       <div class="recent-impact-pagination">
-                        <button type="button" class="btn btn-outline-secondary btn-sm" data-recent-impact-next>Next 5</button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" data-pagination-next>Next 5</button>
                       </div>
                     <% } %>
                   <% } %>
@@ -1301,7 +1339,10 @@
             <div class="modal-dialog modal-lg modal-dialog-centered">
               <div class="modal-content">
                 <div class="modal-header">
-                  <h5 class="modal-title" id="profileEventDetailModalLabel">Event details</h5>
+                  <div class="dash-event-detail-title-wrap">
+                    <img src="/images/favicon.png" alt="Get Kinder logo" class="dash-event-detail-logo" loading="lazy">
+                    <h5 class="modal-title" id="profileEventDetailModalLabel">Event details</h5>
+                  </div>
                   <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
@@ -1322,7 +1363,7 @@
                   </div>
                 </div>
                 <div class="modal-footer">
-                  <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                  <button type="button" class="btn profile-event-detail-close" data-bs-dismiss="modal">Close</button>
                 </div>
               </div>
             </div>
@@ -1769,33 +1810,35 @@
     }
 
     function initRecentImpactPagination() {
-      const list = document.querySelector('[data-recent-impact-list]');
-      const nextBtn = document.querySelector('[data-recent-impact-next]');
-      if (!list || !nextBtn) return;
+      document.querySelectorAll('[data-pagination-list]').forEach(function (list) {
+        const paginationWrap = list.nextElementSibling;
+        const nextBtn = paginationWrap && paginationWrap.querySelector('[data-pagination-next]');
+        if (!nextBtn) return;
 
-      const items = Array.from(list.querySelectorAll('[data-recent-impact-item]'));
-      if (!items.length) {
-        nextBtn.hidden = true;
-        return;
-      }
+        const items = Array.from(list.querySelectorAll('[data-pagination-item]'));
+        if (!items.length) {
+          nextBtn.hidden = true;
+          return;
+        }
 
-      const initialVisible = Number(list.getAttribute('data-initial-visible')) || 5;
-      const pageSize = Number(list.getAttribute('data-page-size')) || 5;
-      let visibleCount = Math.max(0, initialVisible);
+        const initialVisible = Number(list.getAttribute('data-initial-visible')) || 5;
+        const pageSize = Number(list.getAttribute('data-page-size')) || 5;
+        let visibleCount = Math.max(0, initialVisible);
 
-      function render() {
-        items.forEach((item, index) => {
-          item.hidden = index >= visibleCount;
+        function render() {
+          items.forEach((item, index) => {
+            item.hidden = index >= visibleCount;
+          });
+          nextBtn.hidden = visibleCount >= items.length;
+        }
+
+        nextBtn.addEventListener('click', function () {
+          visibleCount = Math.min(items.length, visibleCount + pageSize);
+          render();
         });
-        nextBtn.hidden = visibleCount >= items.length;
-      }
 
-      nextBtn.addEventListener('click', function () {
-        visibleCount = Math.min(items.length, visibleCount + pageSize);
         render();
       });
-
-      render();
     }
 
     document.addEventListener('DOMContentLoaded', function () {
