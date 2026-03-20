@@ -6,6 +6,7 @@ import { getSummary as getRatingsSummary } from "../../services/ratingsService.j
 import { getWalletSummary } from "../../services/walletService.js";
 import { fetchEventById, fetchEvents } from "../../services/eventsService.js";
 import { getMatchedEventsForUser } from "../../services/eventMatchingService.js";
+import { sendNudgeEmail } from "../../kindnessEmailer.js";
 
 const IC_RATE_BY_TIER = {
   standard: 10,
@@ -339,10 +340,69 @@ async function handleSearchEvents(toolInput = {}) {
     const causeTags = normalizeStringArray(toolInput.cause_tags);
     const daysAhead = parseInteger(toolInput.days_ahead, DEFAULT_EVENTS_DAYS_AHEAD, { min: 1, max: 365 });
     const limit = parseInteger(toolInput.limit, DEFAULT_EVENTS_LIMIT, { min: 1, max: 50 });
-    const canonicalFeed = await fetchEvents({
-      view: "upcoming",
-      limit: 100,
-    });
+    const searchWords = normalizedSearch.normalizedQuery
+      .split(/\s+/)
+      .map((word) => word.trim())
+      .filter((word) => word.length > 1);
+    const countValues = [];
+    const countFilters = [
+      "e.status = 'published'",
+      "COALESCE(e.end_at, e.start_at) >= NOW() - INTERVAL '2 hours'",
+      "e.start_at IS NOT NULL",
+    ];
+
+    countValues.push(daysAhead);
+    countFilters.push(`e.start_at <= NOW() + ($${countValues.length}::int * INTERVAL '1 day')`);
+
+    if (searchWords.length > 0) {
+      countValues.push(searchWords);
+      countFilters.push(
+        `
+          EXISTS (
+            SELECT 1
+            FROM unnest($${countValues.length}::text[]) AS word
+            WHERE LOWER(COALESCE(e.title, '')) LIKE '%' || word || '%'
+               OR LOWER(COALESCE(e.description, '')) LIKE '%' || word || '%'
+               OR LOWER(COALESCE(e.location_text, '')) LIKE '%' || word || '%'
+               OR LOWER(COALESCE(e.community_tag, '')) LIKE '%' || word || '%'
+               OR LOWER(COALESCE(e.org_name, '')) LIKE '%' || word || '%'
+          )
+        `
+      );
+    }
+
+    if (category) {
+      countValues.push(category);
+      countFilters.push(`BTRIM(COALESCE(e.category, '')) = $${countValues.length}`);
+    }
+
+    if (causeTags.length > 0) {
+      countValues.push(causeTags.map((tag) => tag.toLowerCase()));
+      countFilters.push(
+        `
+          EXISTS (
+            SELECT 1
+            FROM unnest(COALESCE(e.cause_tags, ARRAY[]::text[])) AS cause_tag
+            WHERE LOWER(BTRIM(cause_tag)) = ANY($${countValues.length}::text[])
+          )
+        `
+      );
+    }
+
+    const [{ rows: countRows }, canonicalFeed] = await Promise.all([
+      pool.query(
+        `
+          SELECT COUNT(*)::int AS total_matching
+          FROM events e
+          WHERE ${countFilters.join(" AND ")}
+        `,
+        countValues
+      ),
+      fetchEvents({
+        view: "upcoming",
+        limit: 100,
+      }),
+    ]);
     const events = (Array.isArray(canonicalFeed?.events) ? canonicalFeed.events : [])
       .filter((event) => eventStartsWithinDays(event, daysAhead))
       .filter((event) => matchesEventSearchQuery(event, normalizedSearch.normalizedQuery))
@@ -363,6 +423,9 @@ async function handleSearchEvents(toolInput = {}) {
         needs_location_hint: normalizedSearch.needsLocationHint,
       },
       events,
+      total_returned: events.length,
+      limit_applied: limit,
+      total_matching: Number(countRows?.[0]?.total_matching) || 0,
     };
   } catch (error) {
     console.error("[kai-tool-executor] search_events error:", error);
@@ -724,60 +787,489 @@ async function handleAutoFindAndRsvp() {
   }
 }
 
-async function handleDraftEventListing() {
+async function handleDraftEventListing(toolInput = {}, _userId, orgId) {
   try {
-    // TODO: Convert natural language into a structured draft event listing.
-    return { ...DEFAULT_NOT_IMPLEMENTED_RESPONSE };
+    if (orgId === null || orgId === undefined) {
+      return { error: true, message: "Event creation requires an org rep account." };
+    }
+
+    const description = normalizeString(toolInput.description);
+    const date = normalizeString(toolInput.date);
+    const location = normalizeString(toolInput.location);
+    const volunteerCountRaw = parseInteger(toolInput.volunteer_count, null, { min: 1 });
+
+    const { rows } = await pool.query(
+      "SELECT name FROM organizations WHERE id = $1",
+      [orgId]
+    );
+    const orgName = rows?.[0]?.name ?? null;
+
+    return {
+      draft: {
+        org_name: orgName,
+        title: null,
+        description,
+        location_text: location || null,
+        start_at: date || null,
+        capacity: volunteerCountRaw,
+        status: "draft",
+        visibility: "public",
+        verification_method: "host_attest",
+        impact_credits_base: 25,
+        waitlist_enabled: true,
+        cause_tags: [],
+        attendance_methods: [],
+      },
+      next_step: "Review this draft and complete missing fields (title, exact date/time, cause tags) in the event editor before publishing.",
+    };
   } catch (error) {
     console.error("[kai-tool-executor] draft_event_listing error:", error);
     return GENERIC_ERROR_RESPONSE;
   }
 }
 
-async function handleGetMatchedVolunteers() {
+async function handleGetMatchedVolunteers(toolInput = {}, _userId, orgId) {
   try {
-    // TODO: Rank volunteers by fit for a target event and role.
-    return { ...DEFAULT_NOT_IMPLEMENTED_RESPONSE };
+    const eventId = normalizeString(toolInput.event_id);
+    const roleId = normalizeString(toolInput.role_id);
+    const limit = parseInteger(toolInput.limit, 10, { min: 1, max: 100 });
+    const minReliability = normalizeString(toolInput.min_reliability).toLowerCase() || "any";
+
+    const reliabilityRank = (tier) => {
+      const normalizedTier = normalizeString(tier).toLowerCase();
+      if (normalizedTier === "super") return 3;
+      if (normalizedTier === "high") return 2;
+      if (normalizedTier === "standard") return 1;
+      return 0;
+    };
+
+    const { rows: eventRows } = await pool.query(
+      `
+        SELECT e.id
+        FROM events e
+        JOIN userdata u ON u.id = e.creator_user_id
+        WHERE e.id = $1 AND u.org_id = $2
+      `,
+      [eventId, orgId]
+    );
+    if (!eventRows?.[0]?.id) {
+      return { error: true, message: "Event not found or access denied." };
+    }
+
+    let requiredSkillIds = [];
+    if (roleId) {
+      const { rows: roleSkillRows } = await pool.query(
+        "SELECT skill_id, required FROM event_role_skills WHERE role_id = $1",
+        [roleId]
+      );
+      requiredSkillIds = (roleSkillRows || [])
+        .filter((row) => row?.required === true)
+        .map((row) => row.skill_id)
+        .filter((skillId) => skillId !== null && skillId !== undefined);
+    }
+
+    const { rows: candidateRows } = await pool.query(
+      `
+        SELECT u.id, u.firstname, u.lastname, u.reliability_tier, u.reliability_score,
+               u.home_base_label
+        FROM userdata u
+        WHERE u.id NOT IN (
+          SELECT attendee_user_id FROM event_rsvps
+          WHERE event_id = $1 AND status IN ('accepted','checked_in')
+        )
+        AND u.is_suspended = false
+        AND u.email_verified = true
+        LIMIT 100
+      `,
+      [eventId]
+    );
+
+    let matchedSkillsByUserId = new Map();
+    if (requiredSkillIds.length > 0 && candidateRows.length > 0) {
+      const candidateIds = candidateRows.map((row) => row.id);
+      const { rows: skillMatchRows } = await pool.query(
+        `
+          SELECT vs.user_id, COUNT(*)::int AS matched_skills
+          FROM volunteer_skills vs
+          WHERE vs.user_id = ANY($1::int[])
+            AND vs.skill_id = ANY($2::int[])
+            AND (vs.verified = true OR vs.self_reported = true)
+          GROUP BY vs.user_id
+        `,
+        [candidateIds, requiredSkillIds]
+      );
+      matchedSkillsByUserId = new Map(
+        (skillMatchRows || []).map((row) => [row.user_id, Number(row.matched_skills) || 0])
+      );
+    }
+
+    const minReliabilityRank = reliabilityRank(minReliability);
+    const matches = (candidateRows || [])
+      .map((candidate) => {
+        const reliabilityScore = Number(candidate.reliability_score) || 0;
+        const matchedSkills = matchedSkillsByUserId.get(candidate.id) || 0;
+        const score = matchedSkills * 10 + reliabilityScore;
+        return {
+          user_id: candidate.id,
+          name: [candidate.firstname, candidate.lastname].filter(Boolean).join(" ").trim(),
+          reliability_tier: candidate.reliability_tier ?? null,
+          reliability_score: reliabilityScore,
+          home_base_label: candidate.home_base_label ?? null,
+          matched_skills: matchedSkills,
+          score,
+        };
+      })
+      .filter((candidate) => reliabilityRank(candidate.reliability_tier) >= minReliabilityRank)
+      .sort((left, right) => right.score - left.score)
+      .slice(0, limit);
+
+    return {
+      event_id: eventId,
+      role_id: roleId || null,
+      matches,
+    };
   } catch (error) {
     console.error("[kai-tool-executor] get_matched_volunteers error:", error);
     return GENERIC_ERROR_RESPONSE;
   }
 }
 
-async function handleFlagNoshowRisk() {
+async function handleFlagNoshowRisk(toolInput = {}, _userId, orgId) {
   try {
-    // TODO: Score RSVPs for no-show probability and return high-risk flags.
-    return { ...DEFAULT_NOT_IMPLEMENTED_RESPONSE };
+    const eventId = normalizeString(toolInput.event_id);
+
+    const { rows: eventRows } = await pool.query(
+      `
+        SELECT e.id, e.title, e.start_at FROM events e
+        JOIN userdata u ON u.id = e.creator_user_id
+        WHERE e.id = $1 AND u.org_id = $2
+      `,
+      [eventId, orgId]
+    );
+    const event = eventRows?.[0];
+    if (!event) {
+      return { error: true, message: "Event not found or access denied." };
+    }
+
+    const { rows: rsvpRows } = await pool.query(
+      `
+        SELECT r.attendee_user_id, r.role_id, r.created_at as rsvp_created_at,
+               u.firstname, u.lastname, u.reliability_tier, u.reliability_score
+        FROM event_rsvps r
+        JOIN userdata u ON u.id = r.attendee_user_id
+        WHERE r.event_id = $1
+        AND r.status = 'accepted'
+      `,
+      [eventId]
+    );
+
+    const eventStartTime = event.start_at ? new Date(event.start_at).getTime() : Number.NaN;
+    const flagged = (rsvpRows || [])
+      .map((row) => {
+        let riskScore = 0;
+        const reliabilityTier = normalizeString(row.reliability_tier).toLowerCase() || null;
+        const reliabilityScore =
+          row.reliability_score === null || row.reliability_score === undefined
+            ? null
+            : Number(row.reliability_score);
+
+        if (reliabilityTier === null || reliabilityTier === "new") {
+          riskScore += 40;
+        } else if (reliabilityTier === "standard") {
+          riskScore += 20;
+        } else if (reliabilityTier === "high") {
+          riskScore += 5;
+        }
+
+        if (reliabilityScore !== null && reliabilityScore < 60) {
+          riskScore += 20;
+        }
+        if (reliabilityScore !== null && reliabilityScore < 40) {
+          riskScore += 20;
+        }
+
+        const rsvpCreatedAtTime = row.rsvp_created_at ? new Date(row.rsvp_created_at).getTime() : Number.NaN;
+        const leadTimeMs = eventStartTime - rsvpCreatedAtTime;
+        if (
+          Number.isFinite(eventStartTime) &&
+          Number.isFinite(rsvpCreatedAtTime) &&
+          leadTimeMs >= 0 &&
+          leadTimeMs <= 24 * 60 * 60 * 1000
+        ) {
+          riskScore += 15;
+        }
+
+        return {
+          user_id: row.attendee_user_id,
+          name: [row.firstname, row.lastname].filter(Boolean).join(" ").trim(),
+          reliability_tier: row.reliability_tier ?? null,
+          reliability_score: reliabilityScore,
+          risk_score: riskScore,
+          rsvp_created_at: row.rsvp_created_at ?? null,
+        };
+      })
+      .filter((row) => row.risk_score >= 50)
+      .sort((left, right) => right.risk_score - left.risk_score);
+
+    return {
+      event_id: event.id,
+      title: event.title ?? null,
+      start_at: event.start_at ?? null,
+      total_accepted: rsvpRows?.length || 0,
+      high_risk_count: flagged.length,
+      flagged,
+    };
   } catch (error) {
     console.error("[kai-tool-executor] flag_noshow_risk error:", error);
     return GENERIC_ERROR_RESPONSE;
   }
 }
 
-async function handleSendVolunteerReminder() {
+async function handleSendVolunteerReminder(toolInput = {}, _userId, orgId) {
   try {
-    // TODO: Deliver reminder messages to selected RSVP volunteers.
-    return { ...DEFAULT_NOT_IMPLEMENTED_RESPONSE };
+    const eventId = normalizeString(toolInput.event_id);
+    const message = normalizeString(toolInput.message);
+    const volunteerIds = Array.isArray(toolInput.volunteer_ids)
+      ? toolInput.volunteer_ids
+          .map((value) => parseInteger(value, Number.NaN))
+          .filter((value) => Number.isInteger(value))
+      : [];
+
+    if (!eventId) {
+      return { error: true, message: "event_id is required." };
+    }
+    if (!message) {
+      return { error: true, message: "message is required." };
+    }
+
+    const { rows: eventRows } = await pool.query(
+      `
+        SELECT e.id, e.title, e.start_at FROM events e
+        JOIN userdata u ON u.id = e.creator_user_id
+        WHERE e.id = $1 AND u.org_id = $2
+      `,
+      [eventId, orgId]
+    );
+    const event = eventRows?.[0];
+    if (!event) {
+      return { error: true, message: "Event not found or access denied." };
+    }
+
+    const recipientQuery = volunteerIds.length > 0
+      ? `
+          SELECT u.id, u.firstname, u.email FROM userdata u
+          JOIN event_rsvps r ON r.attendee_user_id = u.id
+          WHERE r.event_id = $1
+          AND r.status IN ('accepted','checked_in')
+          AND u.id = ANY($2::int[])
+          AND u.email_verified = true
+          AND u.is_suspended = false
+        `
+      : `
+          SELECT u.id, u.firstname, u.email FROM userdata u
+          JOIN event_rsvps r ON r.attendee_user_id = u.id
+          WHERE r.event_id = $1
+          AND r.status IN ('accepted','checked_in')
+          AND u.email_verified = true
+          AND u.is_suspended = false
+        `;
+    const recipientParams = volunteerIds.length > 0 ? [eventId, volunteerIds] : [eventId];
+    const { rows: recipientRows } = await pool.query(recipientQuery, recipientParams);
+
+    if (!recipientRows?.length) {
+      return { sent: 0, message: "No eligible recipients found." };
+    }
+
+    const sendResults = await Promise.allSettled(
+      recipientRows.map((recipient) =>
+        sendNudgeEmail({
+          to: recipient.email,
+          subject: `Reminder: ${event.title}`,
+          text: message,
+          html: `<p>${message}</p>`,
+          fromName: "KAI via Get Kinder",
+          sendByKai: true,
+        })
+      )
+    );
+
+    const sent = sendResults.filter((result) => result.status === "fulfilled").length;
+    const failed = sendResults.filter((result) => result.status === "rejected").length;
+
+    return {
+      sent,
+      failed,
+      event_id: event.id,
+      title: event.title ?? null,
+    };
   } catch (error) {
     console.error("[kai-tool-executor] send_volunteer_reminder error:", error);
     return GENERIC_ERROR_RESPONSE;
   }
 }
 
-async function handleAutoStaffEvent() {
+async function handleAutoStaffEvent(toolInput = {}, _userId, orgId) {
   try {
-    // TODO: Autonomously source, invite, and manage staffing for an event.
-    return { ...DEFAULT_NOT_IMPLEMENTED_RESPONSE };
+    const eventId = normalizeString(toolInput.event_id);
+    const requestedStrategy = normalizeString(toolInput.strategy).toLowerCase();
+    const strategy = ["conservative", "balanced", "aggressive"].includes(requestedStrategy)
+      ? requestedStrategy
+      : "balanced";
+
+    const { rows: eventRows } = await pool.query(
+      `
+        SELECT e.id
+        FROM events e
+        JOIN userdata u ON u.id = e.creator_user_id
+        WHERE e.id = $1 AND u.org_id = $2
+      `,
+      [eventId, orgId]
+    );
+    if (!eventRows?.[0]?.id) {
+      return { error: true, message: "Event not found or access denied." };
+    }
+
+    const { rows: roleRows } = await pool.query(
+      `
+        SELECT id, title, spots_needed, spots_filled, tier
+        FROM event_roles
+        WHERE event_id = $1
+        AND spots_filled < spots_needed
+      `,
+      [eventId]
+    );
+
+    const minReliabilityByStrategy = {
+      conservative: "high",
+      balanced: "standard",
+      aggressive: "any",
+    };
+
+    const roles = await Promise.all(
+      (roleRows || []).map(async (role) => {
+        const spotsOpen = Math.max(0, (Number(role.spots_needed) || 0) - (Number(role.spots_filled) || 0));
+        const candidatesResult = await handleGetMatchedVolunteers(
+          {
+            event_id: eventId,
+            role_id: role.id,
+            limit: spotsOpen * 2,
+            min_reliability: minReliabilityByStrategy[strategy],
+          },
+          _userId,
+          orgId
+        );
+
+        return {
+          role_id: role.id,
+          title: role.title ?? null,
+          spots_open: spotsOpen,
+          candidates: Array.isArray(candidatesResult?.matches) ? candidatesResult.matches : [],
+        };
+      })
+    );
+
+    return {
+      event_id: eventId,
+      strategy,
+      roles,
+      next_step: "Review these candidates and use send_volunteer_reminder to reach out, or invite them directly through the event roster.",
+    };
   } catch (error) {
     console.error("[kai-tool-executor] auto_staff_event error:", error);
     return GENERIC_ERROR_RESPONSE;
   }
 }
 
-async function handleGeneratePostEventReport() {
+async function handleGeneratePostEventReport(toolInput = {}, _userId, orgId) {
   try {
-    // TODO: Build a post-event attendance and impact report for organizers.
-    return { ...DEFAULT_NOT_IMPLEMENTED_RESPONSE };
+    const eventId = normalizeString(toolInput.event_id);
+
+    const { rows: eventRows } = await pool.query(
+      `
+        SELECT e.id, e.title, e.start_at, e.capacity FROM events e
+        JOIN userdata u ON u.id = e.creator_user_id
+        WHERE e.id = $1 AND u.org_id = $2
+      `,
+      [eventId, orgId]
+    );
+    const event = eventRows?.[0];
+    if (!event) {
+      return { error: true, message: "Event not found or access denied." };
+    }
+
+    const [
+      { rows: summaryRows },
+      { rows: rosterRows },
+      { rows: creditRows },
+      { rows: noShowRows },
+    ] = await Promise.all([
+      pool.query(
+        `
+          SELECT status, COUNT(*) as count
+          FROM event_rsvps
+          WHERE event_id = $1
+          GROUP BY status
+        `,
+        [eventId]
+      ),
+      pool.query(
+        `
+          SELECT u.id, u.firstname, u.lastname, r.role_id,
+                 r.verified_at, r.no_show, r.attended_minutes
+          FROM event_rsvps r
+          JOIN userdata u ON u.id = r.attendee_user_id
+          WHERE r.event_id = $1
+          AND r.status = 'checked_in'
+        `,
+        [eventId]
+      ),
+      pool.query(
+        `
+          SELECT COUNT(*) as pending_count, COALESCE(SUM(amount),0) as total_ic
+          FROM pending_credit_requests
+          WHERE event_id = $1 AND status = 'pending'
+        `,
+        [eventId]
+      ),
+      pool.query(
+        `
+          SELECT COUNT(*) AS no_show_count
+          FROM event_rsvps
+          WHERE event_id = $1 AND no_show = true
+        `,
+        [eventId]
+      ),
+    ]);
+
+    const summaryCounts = new Map(
+      (summaryRows || []).map((row) => [normalizeString(row.status).toLowerCase(), Number(row.count) || 0])
+    );
+    const creditSummary = creditRows?.[0] || {};
+
+    return {
+      event_id: event.id,
+      title: event.title ?? null,
+      start_at: event.start_at ?? null,
+      capacity: event.capacity ?? null,
+      summary: {
+        accepted: summaryCounts.get("accepted") || 0,
+        checked_in: summaryCounts.get("checked_in") || 0,
+        declined: summaryCounts.get("declined") || 0,
+        waitlisted: summaryCounts.get("waitlisted") || 0,
+        no_show_count: Number(noShowRows?.[0]?.no_show_count) || 0,
+      },
+      roster: (rosterRows || []).map((row) => ({
+        user_id: row.id,
+        name: [row.firstname, row.lastname].filter(Boolean).join(" ").trim(),
+        role_id: row.role_id ?? null,
+        verified_at: row.verified_at ?? null,
+        attended_minutes: Number(row.attended_minutes) || 0,
+      })),
+      credits: {
+        pending_requests: Number(creditSummary.pending_count) || 0,
+        total_ic_pending: Number(creditSummary.total_ic) || 0,
+      },
+    };
   } catch (error) {
     console.error("[kai-tool-executor] generate_post_event_report error:", error);
     return GENERIC_ERROR_RESPONSE;
@@ -797,15 +1289,15 @@ const TOOL_HANDLERS = {
   get_earning_optimization: handleGetEarningOptimization,
   manage_schedule: handleManageSchedule,
   auto_find_and_rsvp: handleAutoFindAndRsvp,
-  draft_event_listing: handleDraftEventListing,
-  get_matched_volunteers: handleGetMatchedVolunteers,
-  flag_noshow_risk: handleFlagNoshowRisk,
-  send_volunteer_reminder: handleSendVolunteerReminder,
-  auto_staff_event: handleAutoStaffEvent,
-  generate_post_event_report: handleGeneratePostEventReport,
+  draft_event_listing: (toolInput, userId, orgId) => handleDraftEventListing(toolInput, userId, orgId),
+  get_matched_volunteers: (toolInput, userId, orgId) => handleGetMatchedVolunteers(toolInput, userId, orgId),
+  flag_noshow_risk: (toolInput, userId, orgId) => handleFlagNoshowRisk(toolInput, userId, orgId),
+  send_volunteer_reminder: (toolInput, userId, orgId) => handleSendVolunteerReminder(toolInput, userId, orgId),
+  auto_staff_event: (toolInput, userId, orgId) => handleAutoStaffEvent(toolInput, userId, orgId),
+  generate_post_event_report: (toolInput, userId, orgId) => handleGeneratePostEventReport(toolInput, userId, orgId),
 };
 
-export async function executeToolCall(toolName, toolInput = {}, userId) {
+export async function executeToolCall(toolName, toolInput = {}, userId, orgId) {
   if ((userId === null || userId === undefined) && !GUEST_TOOL_ALLOWLIST.has(toolName)) {
     return {
       status: "error",
@@ -820,7 +1312,7 @@ export async function executeToolCall(toolName, toolInput = {}, userId) {
       message: `Unknown tool: ${toolName}`,
     };
   }
-  return handler(toolInput || {}, userId);
+  return handler(toolInput || {}, userId, orgId);
 }
 
 export const __testables = {

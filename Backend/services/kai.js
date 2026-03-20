@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import pool from "../db/pg.js";
-import { getSystemPrompt, getGuestSystemPrompt } from "./kai-prompts.js";
+import { getSystemPrompt, getGuestSystemPrompt, getOrgSystemPrompt } from "./kai-prompts.js";
 import { getToolDefinitionsForTier } from "./kai-tool-definitions.js";
 import { executeToolCall } from "./kai-tool-executor.js";
 import { determineKaiTier, getModelForTier } from "../middleware/kai-tier.js";
@@ -210,6 +210,26 @@ async function getUserRow(userId) {
   if (!userId) return null;
   const { rows } = await pool.query("SELECT * FROM userdata WHERE id = $1 LIMIT 1", [userId]);
   return rows?.[0] || null;
+}
+
+async function getOrgContextForUser(userId) {
+  if (!userId) return null;
+  const { rows } = await pool.query(
+    `
+      SELECT o.id, o.name
+      FROM organizations o
+      JOIN userdata u ON u.org_id = o.id
+      WHERE u.id = $1
+      LIMIT 1
+    `,
+    [userId]
+  );
+  const orgRow = rows?.[0];
+  if (!orgRow) return null;
+  return {
+    orgId: orgRow.id,
+    orgName: orgRow.name,
+  };
 }
 
 async function resolveConversationIdForUser(userId, conversationId) {
@@ -423,11 +443,15 @@ export async function handleKaiMessage({ userId, userMessage, conversationId, ti
 
     const isGuest = userId === null || userId === undefined;
     let user = null;
+    let orgContext = null;
     let resolvedTier = isGuest ? "guest" : tier;
     let messages = [];
 
     if (!isGuest) {
       user = await getUserRow(userId);
+      if (user?.org_rep === true) {
+        orgContext = await getOrgContextForUser(userId);
+      }
       if (!resolvedTier) {
         resolvedTier = determineKaiTier(user);
       }
@@ -447,7 +471,9 @@ export async function handleKaiMessage({ userId, userMessage, conversationId, ti
 
     const systemPrompt = isGuest
       ? getGuestSystemPrompt()
-      : getSystemPrompt(resolvedTier, user);
+      : resolvedTier === "org_growth" || resolvedTier === "org_enterprise"
+        ? getOrgSystemPrompt(resolvedTier, user, orgContext)
+        : getSystemPrompt(resolvedTier, user);
 
     const toolDefinitions = getToolDefinitionsForTier(resolvedTier).filter(
       (tool) => resolvedTier !== "guest" || GUEST_TOOL_ALLOWLIST.has(tool?.name)
@@ -488,7 +514,12 @@ export async function handleKaiMessage({ userId, userMessage, conversationId, ti
 
       const toolResults = [];
       for (const toolUse of toolUseBlocks) {
-        const result = await executeToolCall(toolUse.name, toolUse.input, userId ?? null);
+        const result = await executeToolCall(
+          toolUse.name,
+          toolUse.input,
+          userId ?? null,
+          orgContext?.orgId ?? null
+        );
         if ((toolUse.name === "search_events" || toolUse.name === "get_matched_events") && result && typeof result === "object") {
           structuredEvents = result;
         }

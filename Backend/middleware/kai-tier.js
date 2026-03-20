@@ -14,16 +14,13 @@ const PRO_TOOLS = [...PLUS_TOOLS, "get_earning_optimization", "manage_schedule"]
 
 // Org reps are also volunteers — they need personal tools (profile, IC balance, RSVP) alongside org management tools
 const ORG_GROWTH_TOOLS = [
-  "search_events",
-  "get_event_details",
-  "get_user_profile",
-  "get_ic_balance",
-  "get_matched_events",
-  "platform_faq",
+  ...PRO_TOOLS,
   "draft_event_listing",
   "get_matched_volunteers",
   "flag_noshow_risk",
   "send_volunteer_reminder",
+  "auto_staff_event",
+  "generate_post_event_report",
 ];
 
 const ALL_TOOLS = [
