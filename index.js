@@ -1741,7 +1741,7 @@ app.get('/profile', ensureAuthenticated, async (req, res) => {
     let skillsBreakdown = { topCategories: [], recentCategories: [] };
 
     try {
-      const rawRows = await fetchVolunteerPortfolio({ userId: statsUserId, limit: 40 });
+      const rawRows = await fetchVolunteerPortfolio({ userId: statsUserId, limit: 100 });
       const now = new Date();
 
       portfolioRows = rawRows.map((row) => {

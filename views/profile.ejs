@@ -345,6 +345,11 @@
       color: #fff;
       text-decoration: none;
     }
+    .profile-page .recent-impact-pagination {
+      margin-top: 16px;
+      display: flex;
+      justify-content: center;
+    }
     .profile-page #profileEventDetailModal .modal-content {
       border: 1px solid #dfe8f5;
       border-radius: 16px;
@@ -832,7 +837,7 @@
             </div>
 
             <% const upcomingRows = (portfolioRows || []).filter(r => r.is_upcoming).slice(0, 5); %>
-            <% const pastRows = (portfolioRows || []).filter(r => !r.is_upcoming).slice(0, 10); %>
+            <% const pastRows = (portfolioRows || []).filter(r => !r.is_upcoming); %>
 
             <% if ((portfolioRows || []).length === 0) { %>
               <div class="card shadow-sm border-0">
@@ -848,7 +853,7 @@
             <% } else { %>
               <div class="card shadow-sm border-0 mb-3">
                 <div class="card-body">
-                  <h4 class="fw-bold mb-3" style="color: #455a7c;">Upcoming commitments</h4>
+                  <h4 class="fw-bold mb-3" style="color: #455a7c;">Upcoming Event Status</h4>
                   <% if (!upcomingRows.length) { %>
                     <div class="text-muted">No upcoming commitments.</div>
                   <% } else { %>
@@ -856,14 +861,21 @@
                       <% upcomingRows.forEach((row) => { %>
                         <article class="recent-impact-item">
                           <div>
-                            <div class="fw-semibold"><%= row.title || 'Untitled event' %></div>
+                            <div class="fw-semibold" style="color: #455a7c;"><%= row.title || 'Untitled event' %></div>
                             <div class="text-muted small"><%= row.start_at ? row.start_at.toLocaleString() : 'Date TBD' %> • <%= row.location_text || 'Location TBD' %></div>
+                            <div class="mt-2">
+                              <span class="badge rounded-pill <%= ['accepted','checked_in'].includes(row.rsvp_status) ? 'text-bg-success' : 'text-bg-secondary' %>">
+                                <%= ['accepted','checked_in'].includes(row.rsvp_status) ? 'Pending Approval' : 'Awaiting' %>
+                              </span>
+                            </div>
                           </div>
-                          <div class="d-flex flex-column text-end">
-                            <span class="badge rounded-pill <%= ['accepted','checked_in'].includes(row.rsvp_status) ? 'text-bg-success' : 'text-bg-secondary' %>">
-                              <%= ['accepted','checked_in'].includes(row.rsvp_status) ? 'Pending Approval' : 'Awaiting' %>
-                            </span>
-                            <small class="text-muted mt-1">+<%= row.kind_estimate_per_user || 0 %> $KIND (est.)</small>
+                          <div class="recent-impact-actions">
+                            <div class="text-end text-muted small">
+                              <%= row.start_at ? row.start_at.toLocaleDateString() : 'Date TBD' %>
+                            </div>
+                            <% if (row.id) { %>
+                              <button type="button" class="recent-impact-view-btn js-profile-event-detail-btn" data-event-id="<%= String(row.id) %>">View Event</button>
+                            <% } %>
                           </div>
                         </article>
                       <% }); %>
@@ -874,15 +886,15 @@
 
               <div class="card shadow-sm border-0">
                 <div class="card-body">
-                  <h4 class="fw-bold mb-3" style="color: #455a7c;">Recent impact</h4>
+                  <h4 class="fw-bold mb-3" style="color: #455a7c;">Recent Impact</h4>
                   <% if (!pastRows.length) { %>
                     <div class="text-muted">No past events yet.</div>
                   <% } else { %>
-                    <div class="recent-impact-list">
-                      <% pastRows.forEach((row) => { %>
-                        <article class="recent-impact-item">
+                    <div class="recent-impact-list" data-recent-impact-list data-initial-visible="5" data-page-size="5">
+                      <% pastRows.forEach((row, index) => { %>
+                        <article class="recent-impact-item" data-recent-impact-item <%= index >= 5 ? 'hidden' : '' %>>
                           <div>
-                            <div class="fw-semibold">
+                            <div class="fw-semibold" style="color: #455a7c;">
                               <span class="<%= row.is_verified ? 'text-success' : 'text-warning' %>"><%= row.is_verified ? 'Verified ✓' : 'Unverified ⏳' %></span>
                               &nbsp;<%= row.title || 'Untitled event' %>
                             </div>
@@ -905,6 +917,11 @@
                         </article>
                       <% }); %>
                     </div>
+                    <% if (pastRows.length > 5) { %>
+                      <div class="recent-impact-pagination">
+                        <button type="button" class="btn btn-outline-secondary btn-sm" data-recent-impact-next>Next 5</button>
+                      </div>
+                    <% } %>
                   <% } %>
                 </div>
               </div>
@@ -1724,9 +1741,40 @@
       });
     }
 
+    function initRecentImpactPagination() {
+      const list = document.querySelector('[data-recent-impact-list]');
+      const nextBtn = document.querySelector('[data-recent-impact-next]');
+      if (!list || !nextBtn) return;
+
+      const items = Array.from(list.querySelectorAll('[data-recent-impact-item]'));
+      if (!items.length) {
+        nextBtn.hidden = true;
+        return;
+      }
+
+      const initialVisible = Number(list.getAttribute('data-initial-visible')) || 5;
+      const pageSize = Number(list.getAttribute('data-page-size')) || 5;
+      let visibleCount = Math.max(0, initialVisible);
+
+      function render() {
+        items.forEach((item, index) => {
+          item.hidden = index >= visibleCount;
+        });
+        nextBtn.hidden = visibleCount >= items.length;
+      }
+
+      nextBtn.addEventListener('click', function () {
+        visibleCount = Math.min(items.length, visibleCount + pageSize);
+        render();
+      });
+
+      render();
+    }
+
     document.addEventListener('DOMContentLoaded', function () {
       initNudgeProgressBars();
       initPreferenceCardCollapses();
+      initRecentImpactPagination();
       initProfileEventDetailModal();
 
       const tabs = document.getElementById('profileTabs');
