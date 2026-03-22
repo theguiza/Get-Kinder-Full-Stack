@@ -5,6 +5,7 @@
 import dotenv from "dotenv";
 dotenv.config();
 import express from "express";
+import fs from "fs";
 import path from "path";
 import { dirname } from "path";
 import { fileURLToPath } from "url";
@@ -110,6 +111,137 @@ function getAppBaseUrl(req) {
   if (process.env.APP_BASE_URL) return process.env.APP_BASE_URL.replace(/\/+$/, "");
   const host = req.get("host");
   return `${req.protocol}://${host}`;
+}
+
+const SITEMAP_ROUTES = [
+  {
+    path: "/",
+    priority: "1.0",
+    changefreq: "weekly",
+    sourceFiles: ["views/index.ejs"],
+  },
+  {
+    path: "/how-it-works",
+    priority: "0.9",
+    changefreq: "monthly",
+    sourceFiles: ["views/how-it-works.ejs"],
+  },
+  {
+    path: "/events",
+    priority: "0.9",
+    changefreq: "daily",
+    sourceFiles: ["routes/eventsPage.js", "views/events.ejs"],
+  },
+  {
+    path: "/about",
+    priority: "0.8",
+    changefreq: "monthly",
+    sourceFiles: ["views/about.ejs"],
+  },
+  {
+    path: "/contact",
+    priority: "0.6",
+    changefreq: "yearly",
+    sourceFiles: ["views/contact.ejs"],
+  },
+  {
+    path: "/privacy",
+    priority: "0.3",
+    changefreq: "yearly",
+    sourceFiles: ["views/privacy.ejs"],
+  },
+  {
+    path: "/terms",
+    priority: "0.3",
+    changefreq: "yearly",
+    sourceFiles: ["views/terms.ejs"],
+  },
+  {
+    path: "/accessibility",
+    priority: "0.3",
+    changefreq: "yearly",
+    sourceFiles: ["views/accessibility.ejs"],
+  },
+];
+
+const NOINDEX_EXACT_PATHS = new Set([
+  "/login",
+  "/register",
+  "/forgot-password",
+  "/reset-password",
+  "/verify-email",
+  "/logout",
+  "/dashboard",
+  "/profile",
+  "/donor",
+  "/admin",
+  "/org-portal",
+  "/donate",
+  "/friend-quiz",
+  "/friendQuiz",
+  "/404",
+  "/error",
+]);
+
+const NOINDEX_PREFIXES = [
+  "/auth/",
+  "/checkin/",
+];
+
+function escapeXml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function getLatestMtimeDate(relativePaths = []) {
+  const latestMtimeMs = relativePaths.reduce((latest, relativePath) => {
+    try {
+      const absolutePath = path.join(__dirname, relativePath);
+      const { mtimeMs } = fs.statSync(absolutePath);
+      return Math.max(latest, mtimeMs);
+    } catch {
+      return latest;
+    }
+  }, 0);
+
+  if (!latestMtimeMs) return null;
+  return new Date(latestMtimeMs).toISOString().slice(0, 10);
+}
+
+function buildSitemapXml(baseUrl) {
+  const normalizedBaseUrl = baseUrl.replace(/\/+$/, "");
+  const urls = SITEMAP_ROUTES.map((entry) => {
+    const absoluteUrl = `${normalizedBaseUrl}${entry.path === "/" ? "" : entry.path}`;
+    const lastmod = getLatestMtimeDate(entry.sourceFiles);
+    const lines = [
+      "  <url>",
+      `    <loc>${escapeXml(absoluteUrl)}</loc>`,
+      `    <changefreq>${entry.changefreq}</changefreq>`,
+      `    <priority>${entry.priority}</priority>`,
+    ];
+    if (lastmod) {
+      lines.splice(2, 0, `    <lastmod>${lastmod}</lastmod>`);
+    }
+    lines.push("  </url>");
+    return lines.join("\n");
+  });
+
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+    ...urls,
+    "</urlset>",
+    "",
+  ].join("\n");
+}
+
+function shouldNoindexPath(pathname) {
+  return NOINDEX_EXACT_PATHS.has(pathname)
+    || NOINDEX_PREFIXES.some((prefix) => pathname.startsWith(prefix));
 }
 
 async function verifyRecaptchaToken(token, remoteIp) {
@@ -238,6 +370,12 @@ app.use((req, res, next) => {
   }
   next();
 });
+app.use((req, res, next) => {
+  if (shouldNoindexPath(req.path)) {
+    res.setHeader("X-Robots-Tag", "noindex, nofollow");
+  }
+  next();
+});
 app.use(express.json({
   limit: "5mb",
   verify: (req, res, buf) => {
@@ -270,6 +408,12 @@ app.use(
 );
 app.use(passport.initialize());
 app.use(passport.session());
+app.get("/sitemap.xml", (req, res) => {
+  const xml = buildSitemapXml(getAppBaseUrl(req));
+  res.setHeader("Content-Type", "application/xml; charset=utf-8");
+  res.setHeader("Cache-Control", "public, max-age=3600, s-maxage=3600");
+  return res.send(xml);
+});
 app.use(express.static(path.join(__dirname, "public")));
 app.use("/internal/quiz", quizHooksRouter);
 app.use(arcsApiRouter);
@@ -2649,7 +2793,7 @@ app.get("/", async (req, res, next) => {
   return renderIndexPage(req, res, next);
 });
 
-app.get("/home", renderIndexPage);
+app.get("/home", (req, res) => res.redirect(301, "/"));
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 16) OAuth Callback Routes

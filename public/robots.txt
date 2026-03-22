@@ -13,6 +13,8 @@ Disallow: /reset-password
 Disallow: /verify-email
 Disallow: /logout
 Disallow: /checkin
+Disallow: /friend-quiz
+Disallow: /friendQuiz
 Allow: /css/
 Allow: /js/
 Allow: /images/
