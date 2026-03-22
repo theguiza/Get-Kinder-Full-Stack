@@ -1860,7 +1860,7 @@ app.get('/profile', ensureAuthenticated, async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // 14) Static Content Pages
 app.get("/contact", (req, res) => res.render("contact", { title: "Contact Us" }));
-app.get("/accessability", (req, res) => res.render("accessability", { title: "Accessibility" }));
+app.get("/accessibility", (req, res) => res.render("accessibility", { title: "Accessibility" }));
 app.get("/privacy",      (req, res) => res.render("privacy",      { title: "Privacy Policy" }));
 app.get("/terms",        (req, res) => res.render("terms",        { title: "Terms of Service" }));
 // 14.1) Login and Register pages (GET)
