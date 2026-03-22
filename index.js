@@ -1730,7 +1730,7 @@ app.get('/profile', ensureAuthenticated, async (req, res) => {
       friendPoints = { monthly: 0, total: 0, goal: 500 };
     }
 
-    // 2) Mirror your home/about/blog locals
+    // 2) Mirror your home/about locals
     const success      = req.query.success === '1';   // registration alert
     const loginSuccess = req.query.login   === '1';   // login alert
     const name         = req.query.name    || '';     // firstname/email
@@ -2591,20 +2591,6 @@ app.get("/org-portal", ensureOrgRepPage, async (req, res) => {
 app.get("/donate", ensureAuthenticated, (req, res) => {
   const assetTag = process.env.ASSET_TAG ?? Date.now().toString(36);
   res.render("donate", { title: "Donate", assetTag });
-});
-
-app.get("/blog", (req, res) => {
-  const success      = req.query.success === "1";
-  const loginSuccess = req.query.login   === "1";
-  const name         = req.query.name    || "";
-
-  res.render("blog", {
-    title:        "Kinder Blog",
-    success,
-    loginSuccess,
-    name,
-    user:         req.user
-  });
 });
 
 app.get("/how-it-works", (req, res) => {

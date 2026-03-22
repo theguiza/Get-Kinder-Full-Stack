@@ -261,6 +261,35 @@ async function loadConversationRows(conversationId) {
   return rows || [];
 }
 
+async function getMostRecentSummaryForUser(userId) {
+  if (!userId) return null;
+  const { rows } = await pool.query(
+    `
+      SELECT summary
+      FROM kai_conversations
+      WHERE user_id = $1
+        AND summary IS NOT NULL
+        AND summary != ''
+      ORDER BY last_msg_at DESC
+      LIMIT 1
+    `,
+    [userId]
+  );
+  return rows?.[0]?.summary || null;
+}
+
+async function saveConversationSummary(conversationId, summary) {
+  if (!conversationId) return;
+  await pool.query(
+    `
+      UPDATE kai_conversations
+      SET summary = $1
+      WHERE id = $2
+    `,
+    [summary, conversationId]
+  );
+}
+
 async function saveUserMessage(conversationId, content) {
   await pool.query(
     "INSERT INTO kai_messages (conversation_id, role, content) VALUES ($1, 'user', $2)",
@@ -324,6 +353,43 @@ function extractFinalText(response) {
     .map((block) => (typeof block?.text === "string" ? block.text : ""))
     .filter(Boolean);
   return textBlocks.join("\n").trim();
+}
+
+async function generateAndSaveSummary(conversationId, userId, messages) {
+  if (!conversationId || !userId || !Array.isArray(messages) || messages.length < 6) return;
+
+  const textOnlyMessages = messages
+    .map((msg) => {
+      if (typeof msg.content === "string") return msg;
+      if (Array.isArray(msg.content)) {
+        const textParts = msg.content.filter((block) => block.type === "text");
+        if (textParts.length === 0) return null;
+        return { role: msg.role, content: textParts };
+      }
+      return null;
+    })
+    .filter(Boolean);
+
+  if (textOnlyMessages.length < 4) return;
+
+  try {
+    const response = await anthropicCreateImpl({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 200,
+      system: [
+        "Summarize this KAI conversation in 3-5 sentences.",
+        "Focus on: what the user was trying to do, what actions were taken,",
+        "and any unresolved items. Be specific about event names, org names,",
+        "or volunteer roles if they appeared. Keep it under 120 words.",
+      ].join(" "),
+      messages: textOnlyMessages,
+    });
+    const summary = extractFinalText(response);
+    if (!summary) return;
+    await saveConversationSummary(conversationId, summary);
+  } catch (error) {
+    console.error("[kai] generateAndSaveSummary error:", error);
+  }
 }
 
 function countPatternMatches(text, patterns = []) {
@@ -446,6 +512,7 @@ export async function handleKaiMessage({ userId, userMessage, conversationId, ti
     let orgContext = null;
     let resolvedTier = isGuest ? "guest" : tier;
     let messages = [];
+    let isNewConversation = false;
 
     if (!isGuest) {
       user = await getUserRow(userId);
@@ -456,7 +523,17 @@ export async function handleKaiMessage({ userId, userMessage, conversationId, ti
         resolvedTier = determineKaiTier(user);
       }
 
+      let existingConversationId = null;
+      if (conversationId) {
+        const { rows } = await pool.query(
+          "SELECT id FROM kai_conversations WHERE id = $1 AND user_id = $2 LIMIT 1",
+          [conversationId, userId]
+        );
+        existingConversationId = rows?.[0]?.id || null;
+      }
+
       resolvedConversationId = await resolveConversationIdForUser(userId, conversationId);
+      isNewConversation = Boolean(resolvedConversationId) && !existingConversationId;
       const historyRows = await loadConversationRows(resolvedConversationId);
       messages = rowsToClaudeMessages(historyRows);
 
@@ -469,11 +546,18 @@ export async function handleKaiMessage({ userId, userMessage, conversationId, ti
     messages.push({ role: "user", content: enrichMessageForClaude(rawUserMessage, resolvedTier) });
     messages = groupConsecutiveRoles(messages);
 
-    const systemPrompt = isGuest
+    let systemPrompt = isGuest
       ? getGuestSystemPrompt()
       : resolvedTier === "org_growth" || resolvedTier === "org_enterprise"
         ? getOrgSystemPrompt(resolvedTier, user, orgContext)
         : getSystemPrompt(resolvedTier, user);
+    if (!isGuest && isNewConversation) {
+      const previousSummary = await getMostRecentSummaryForUser(userId);
+      if (previousSummary) {
+        systemPrompt +=
+          "\n\nPrevious session context (do not repeat this to the user unless asked):\n" + previousSummary;
+      }
+    }
 
     const toolDefinitions = getToolDefinitionsForTier(resolvedTier).filter(
       (tool) => resolvedTier !== "guest" || GUEST_TOOL_ALLOWLIST.has(tool?.name)
@@ -488,13 +572,34 @@ export async function handleKaiMessage({ userId, userMessage, conversationId, ti
       messages = prepareMessagesForAnthropic(messages);
 
       try {
-        response = await anthropicCreateImpl({
+        const requestPayload = {
           model,
           max_tokens: 1024,
           system: systemPrompt,
           messages,
           tools: toolDefinitions.length > 0 ? toolDefinitions : undefined,
-        });
+        };
+        let lastError = null;
+
+        for (let attempt = 1; attempt <= 3; attempt += 1) {
+          try {
+            response = await anthropicCreateImpl(requestPayload);
+            lastError = null;
+            break;
+          } catch (error) {
+            lastError = error;
+            const status = error?.status;
+            const shouldRetry =
+              status === 529 || status === 500 || status === 502 || status === 503 || status === 504;
+
+            if (!shouldRetry || attempt === 3) break;
+
+            const delayMs = attempt === 1 ? 1000 : 2000;
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
+          }
+        }
+
+        if (lastError) throw lastError;
       } catch (error) {
         error._kaiSource = "anthropic";
         throw error;
@@ -540,10 +645,13 @@ export async function handleKaiMessage({ userId, userMessage, conversationId, ti
     } while (response.stop_reason === "tool_use" && loopCount < MAX_LOOPS);
 
     const finalText = extractFinalText(response) || "I'm here and ready to help with your next step.";
+    messages.push({ role: "assistant", content: response?.content || finalText });
+    messages = groupConsecutiveRoles(messages);
 
     if (!isGuest && resolvedConversationId) {
       await saveAssistantMessage(resolvedConversationId, finalText, response?.usage);
       await touchConversation(resolvedConversationId);
+      void generateAndSaveSummary(resolvedConversationId, userId, messages);
     }
 
     return {

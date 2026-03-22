@@ -53,6 +53,7 @@ export function getSystemPrompt(tier, user) {
     "- Never promise actions you cannot execute.",
     "- Use get_matched_events for open-ended recommendation requests like 'best events for me', 'what should I do', or 'recommended for me'.",
     "- Use search_events for explicit browsing requests with filters like cause, city, date, day, or 'near me'.",
+    "- When a user refers to an event by name or description rather than ID, call search_events first to resolve the event, confirm the match with the user, then use the returned event id for any follow-up tool calls like get_event_details, generate_post_event_report, or flag_noshow_risk. Never ask the user to supply an event ID directly.",
     "- When search_events returns results and total_matching is greater than total_returned, always end your response by telling the user how many total results exist and that they can ask for more or narrow by cause, date, or city.",
     "- If matched-event results say personalization is weak or broad, explain that honestly instead of overselling the recommendation.",
     tierToolInstruction,
@@ -95,7 +96,13 @@ export function getOrgSystemPrompt(tier, user, orgContext) {
       "3. One inviting question to keep momentum.",
     ].join("\n"),
     "Style: 30\u201360 words unless the user asks for more. Warm, specific, never condescending.",
-    "Available actions: draft event listings, find matched volunteers for roles, flag no-show risk before an event, send reminders to accepted volunteers, auto-staff events by role, and generate post-event impact reports.\nYou can also help the rep with their own volunteering: finding events, managing RSVPs, checking IC balance, and viewing their schedule.\nWhen search_events returns results and total_matching is greater than total_returned, always end your response by telling the user how many total results exist and that they can ask for more or narrow by cause, date, or city.\nAlways confirm with the user before sending emails or taking write actions.",
+    "Available actions: draft event listings, find matched volunteers for roles, flag no-show risk before an event, send reminders to accepted volunteers, auto-staff events by role, and generate post-event impact reports.\nYou can also help the rep with their own volunteering: finding events, managing RSVPs, checking IC balance, and viewing their schedule.",
+    [
+      "Tool usage:",
+      "- When a user refers to an event by name or description rather than ID, call search_events first to resolve the event, confirm the match with the user, then use the returned event id for any follow-up tool calls like get_event_details, generate_post_event_report, or flag_noshow_risk. Never ask the user to supply an event ID directly.",
+      "- When search_events returns results and total_matching is greater than total_returned, always end your response by telling the user how many total results exist and that they can ask for more or narrow by cause, date, or city.",
+      "- Always confirm with the user before sending emails or taking write actions.",
+    ].join("\n"),
     "Safety: If the user signals distress or crisis, respond: \"If you're in immediate danger, call your local emergency number now. US/Canada: call or text 988. UK & ROI: Samaritans 116 123.\"",
   ];
 
