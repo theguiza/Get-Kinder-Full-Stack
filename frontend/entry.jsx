@@ -30,6 +30,22 @@ function getOrCreateRoot(el) {
   return root;
 }
 
+function renderIntoRoot(el, node, { hydrate = false } = {}) {
+  if (!el) return null;
+  let root = ROOTS.get(el);
+  if (!root) {
+    if (hydrate) {
+      root = ReactDOM.hydrateRoot(el, node);
+      ROOTS.set(el, root);
+      return root;
+    }
+    root = ReactDOM.createRoot(el);
+    ROOTS.set(el, root);
+  }
+  root.render(node);
+  return root;
+}
+
 window.renderBestieVibesQuiz = (selector, props = {}) => {
   const el = typeof selector === "string" ? document.querySelector(selector) : selector;
   if (!el) return;
@@ -151,11 +167,14 @@ function readPropsFromDom(id = "events-props") {
 window.renderEventsApp = (selector = "#events-root", props) => {
   const el = typeof selector === "string" ? document.querySelector(selector) : selector;
   if (!el) return;
-  const root = getOrCreateRoot(el);
   const mergedProps = props && typeof props === "object" ? props : readPropsFromDom();
-  root.render(
+  const node = (
     <React.StrictMode>
       <EventsApp {...mergedProps} />
     </React.StrictMode>
   );
+  const shouldHydrate = Boolean(
+    el.firstElementChild && el.firstElementChild.classList.contains("events-ssr-shell")
+  );
+  renderIntoRoot(el, node, { hydrate: shouldHydrate });
 };

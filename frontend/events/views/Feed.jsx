@@ -89,7 +89,7 @@ function readInitialFilterState(pagination = {}) {
   };
 }
 
-export function Feed({ feed = [], setFeed, pagination }) {
+export function Feed({ feed = [], setFeed, pagination, onSelectEvent }) {
   const initialFiltersRef = useRef(null);
   if (!initialFiltersRef.current) {
     initialFiltersRef.current = readInitialFilterState(pagination);
@@ -352,7 +352,13 @@ export function Feed({ feed = [], setFeed, pagination }) {
                   <button
                     className="btn"
                     type="button"
-                    onClick={() => (window.location.hash = `#/events/${evt.id}`)}
+                    onClick={() => {
+                      if (typeof onSelectEvent === "function") {
+                        onSelectEvent(evt.id);
+                        return;
+                      }
+                      window.location.href = `/events/${encodeURIComponent(evt.id)}`;
+                    }}
                   >
                     {ctaLabel}
                   </button>

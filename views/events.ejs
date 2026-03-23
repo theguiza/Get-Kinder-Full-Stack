@@ -8,10 +8,10 @@
   <title>Volunteer Opportunities — Get Kinder</title>
   <meta name="description" content="Browse verified volunteer opportunities on Get Kinder, discover community causes near you, and build a trusted record of your real-world impact.">
   <meta name="robots" content="index, follow">
-  <link rel="canonical" href="https://getkinder.ai/events">
+  <link rel="canonical" href="<%= canonicalUrl || 'https://getkinder.ai/events' %>">
   <meta property="og:title" content="Volunteer Opportunities — Get Kinder">
   <meta property="og:description" content="Browse verified volunteer opportunities on Get Kinder, discover community causes near you, and build a trusted record of your real-world impact.">
-  <meta property="og:url" content="https://getkinder.ai/events">
+  <meta property="og:url" content="<%= ogUrl || canonicalUrl || 'https://getkinder.ai/events' %>">
   <meta property="og:type" content="website">
 
   <link rel="stylesheet" href="./css/style.css" />
@@ -318,8 +318,151 @@
       </div>
     </section>
 
+    <style>
+      .events-ssr-shell {
+        display: grid;
+        gap: 24px;
+      }
+      .events-ssr-detail,
+      .events-ssr-card,
+      .events-ssr-empty {
+        border: 1px solid #d6deeb;
+        border-radius: 20px;
+        background: #fff;
+        box-shadow: 0 14px 34px rgba(15, 23, 42, 0.08);
+      }
+      .events-ssr-detail {
+        padding: 24px;
+      }
+      .events-ssr-detail-eyebrow,
+      .events-ssr-detail-label {
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        font-size: 0.72rem;
+        color: #6b7280;
+      }
+      .events-ssr-detail-title,
+      .events-ssr-feed-title,
+      .events-ssr-card-title {
+        color: #20304d;
+      }
+      .events-ssr-detail-title {
+        margin: 8px 0 10px;
+        font-size: 2rem;
+      }
+      .events-ssr-detail-summary,
+      .events-ssr-feed-copy,
+      .events-ssr-card-meta,
+      .events-ssr-card-description {
+        color: #455a7c;
+      }
+      .events-ssr-detail-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 16px;
+        margin: 18px 0;
+      }
+      .events-ssr-detail-grid p,
+      .events-ssr-detail-copy p,
+      .events-ssr-card-title,
+      .events-ssr-card-meta,
+      .events-ssr-card-description {
+        margin: 0;
+      }
+      .events-ssr-detail-copy {
+        margin-top: 16px;
+      }
+      .events-ssr-detail-link {
+        margin: 18px 0 0;
+      }
+      .events-ssr-feed-head {
+        margin-bottom: 12px;
+      }
+      .events-ssr-feed-title {
+        margin: 0 0 4px;
+        font-size: 1.6rem;
+      }
+      .events-ssr-feed-copy {
+        margin: 0;
+      }
+      .events-ssr-feed-grid {
+        display: grid;
+        gap: 16px;
+      }
+      .events-ssr-card {
+        display: grid;
+        grid-template-columns: minmax(0, 180px) minmax(0, 1fr);
+        overflow: hidden;
+      }
+      .events-ssr-card.is-selected {
+        border-color: #ff5656;
+        box-shadow: 0 18px 42px rgba(255, 86, 86, 0.18);
+      }
+      .events-ssr-card-cover {
+        min-height: 180px;
+        background: linear-gradient(135deg, #ffe4e1, #f5f8ff);
+      }
+      .events-ssr-card-cover img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+      }
+      .events-ssr-card-body {
+        padding: 20px 22px;
+        display: grid;
+        gap: 10px;
+      }
+      .events-ssr-card-kicker {
+        color: #6b7280;
+        font-size: 0.86rem;
+      }
+      .events-ssr-card-title {
+        font-size: 1.25rem;
+      }
+      .events-ssr-card-title a,
+      .events-ssr-detail-link a {
+        color: inherit;
+        text-decoration: none;
+      }
+      .events-ssr-card-title a:hover,
+      .events-ssr-detail-link a:hover {
+        text-decoration: underline;
+      }
+      .events-ssr-tag-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .events-ssr-tag,
+      .events-ssr-chip {
+        display: inline-flex;
+        align-items: center;
+        border-radius: 999px;
+        padding: 4px 10px;
+        background: #f5f8ff;
+        color: #455a7c;
+        font-size: 0.82rem;
+      }
+      .events-ssr-empty {
+        padding: 24px;
+        color: #455a7c;
+      }
+      @media (max-width: 767.98px) {
+        .events-ssr-card {
+          grid-template-columns: 1fr;
+        }
+        .events-ssr-card-cover {
+          min-height: 140px;
+        }
+        .events-ssr-detail-title {
+          font-size: 1.6rem;
+        }
+      }
+    </style>
+
     <!-- Events React mount -->
-    <div id="events-root" class="container my-4"></div>
+    <div id="events-root" class="container my-4"><% if (ssrPreviewHtml) { %><div class="events-ssr-shell"><%- ssrPreviewHtml %></div><% } %></div>
 
     <% if (loadMoreHref) { %>
       <section class="container mb-2">

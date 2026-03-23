@@ -215,7 +215,7 @@ a.kai-event-card:hover { border-color: #ff5656; background: #fff8f8; }
     }
 
     events.forEach(ev => {
-      const eventUrl = ev.id ? `/events#/events/${ev.id}` : null;
+      const eventUrl = ev.id ? `/events/${encodeURIComponent(ev.id)}` : null;
       const card = eventUrl ? document.createElement('a') : document.createElement('div');
       card.className = 'kai-event-card';
       if (eventUrl) {

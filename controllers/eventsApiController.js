@@ -490,7 +490,7 @@ export async function createInvite(req, res) {
     }
 
     const baseUrl = process.env.APP_BASE_URL || "https://getkinder.ai";
-    const eventLink = `${baseUrl}/events#/events/${eventId}`;
+    const eventLink = `${baseUrl}/events/${encodeURIComponent(eventId)}`;
     const joinLink = `${baseUrl}/register?event=${eventId}`;
     const finalInviteeName = recipient
       ? inviteeName || [recipient.firstname, recipient.lastname].filter(Boolean).join(" ") || recipient.email
@@ -680,7 +680,7 @@ export async function downloadEventCalendar(req, res) {
     const location = eventRow.location_text || "";
     const now = formatIcsDate(new Date());
     const baseUrl = process.env.APP_BASE_URL || "https://getkinder.ai";
-    const eventLink = `${baseUrl}/events#/events/${eventId}`;
+    const eventLink = `${baseUrl}/events/${encodeURIComponent(eventId)}`;
     const uid = `${eventRow.id}@getkinder.ai`;
 
     const icsLines = [

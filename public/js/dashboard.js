@@ -703,7 +703,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const id = String(eventId || '').trim();
             if (!id) return;
             activeDetailEventId = id;
-            detailRegisterEl.setAttribute('href', `/events#/events/${encodeURIComponent(id)}`);
+            detailRegisterEl.setAttribute('href', `/events/${encodeURIComponent(id)}`);
             latestDetailRequest += 1;
             const requestId = latestDetailRequest;
             setDetailLoadingState();

@@ -2698,7 +2698,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
   async function copyMyEventLink(eventRow) {
     if (!eventRow?.id) return;
     try {
-      const url = `${window.location.origin}/events#/events/${eventRow.id}`;
+      const url = `${window.location.origin}/events/${encodeURIComponent(eventRow.id)}`;
       await navigator?.clipboard?.writeText(url);
       setMyEventsToast({ type: "success", message: "Event link copied." });
     } catch {

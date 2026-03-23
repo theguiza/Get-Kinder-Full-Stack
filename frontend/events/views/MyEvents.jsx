@@ -236,7 +236,7 @@ export function MyEvents() {
 
   async function copyLink(id) {
     try {
-      const url = `${window.location.origin}/events#/events/${id}`;
+      const url = `${window.location.origin}/events/${encodeURIComponent(id)}`;
       await navigator?.clipboard?.writeText(url);
       setToast({ type: "success", message: "Event link copied." });
     } catch {
@@ -259,7 +259,7 @@ export function MyEvents() {
               type="button"
               className="btn secondary"
               onClick={() => {
-                window.location.hash = `#/events/${event.id}`;
+                window.location.href = `/events/${encodeURIComponent(event.id)}`;
               }}
             >
               Open Roster

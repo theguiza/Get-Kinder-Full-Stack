@@ -2537,6 +2537,7 @@ const { getDashboard, getMorningPrompt, saveReflection, markDayDone, cancelChall
 // Dashboard - All dashboard routes
 app.get("/dashboard", ensureAuthenticated, getDashboard);
 app.get("/events", getEventsPage);
+app.get("/events/:id", getEventsPage);
 app.get("/checkin/:eventId", ensureAuthenticated, (req, res) => {
   const assetTag = process.env.ASSET_TAG ?? Date.now().toString(36);
   const eventId = String(req.params.eventId || "").trim();

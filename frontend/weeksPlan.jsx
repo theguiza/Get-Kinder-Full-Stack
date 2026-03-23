@@ -323,7 +323,7 @@ export default function WeeksPlan() {
                         <button
                           type="button"
                           className="px-3 py-1.5 rounded-lg border border-slate-200 text-[var(--ink)] text-xs font-semibold bg-white hover:bg-slate-50"
-                          onClick={() => { window.location = `/events#/events/${evt.id}`; }}
+                          onClick={() => { window.location = `/events/${encodeURIComponent(evt.id)}`; }}
                         >
                           Add to calendar
                         </button>
@@ -356,7 +356,7 @@ export default function WeeksPlan() {
                           {rsvpLoading[evt.id] ? "Joining…" : "Join"}
                         </button>
                         <a
-                          href={`/events#/events/${evt.id}`}
+                          href={`/events/${encodeURIComponent(evt.id)}`}
                           className="px-3 py-1.5 rounded-lg border border-slate-200 text-[var(--ink)] text-xs font-semibold bg-white hover:bg-slate-50"
                         >
                           Details

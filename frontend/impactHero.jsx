@@ -454,7 +454,7 @@ export default function ImpactHero(props = {}) {
 
   const handleDetails = () => {
     if (!nextEvent) return;
-    window.location = `/events#/events/${nextEvent.id}`;
+    window.location = `/events/${encodeURIComponent(nextEvent.id)}`;
   };
 
   const pill = statusPill(detail, nextEvent);
@@ -894,7 +894,7 @@ function ImpactPortfolioCard({ items = [], loading, empty }) {
                 <button
                   type="button"
                   className="px-3 py-1.5 rounded-lg bg-[var(--coral)] text-white text-xs font-semibold hover:opacity-90"
-                  onClick={() => { window.location = `/events#/events/${evt.id}`; }}
+                  onClick={() => { window.location = `/events/${encodeURIComponent(evt.id)}`; }}
                 >
                   Rate now
                 </button>

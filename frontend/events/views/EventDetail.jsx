@@ -12,8 +12,26 @@ function getSafetyNotesText(eventData) {
   return hit ? String(hit).trim() : "";
 }
 
-export function EventDetail({ eventId, isAuthenticated = false }) {
-  const [state, setState] = useState({ loading: false, data: null, error: null });
+function buildInitialState(eventId, initialEventData, isAuthenticated) {
+  if (
+    !isAuthenticated
+    && eventId
+    && initialEventData
+    && String(initialEventData.id || "") === String(eventId)
+  ) {
+    return { loading: false, data: initialEventData, error: null };
+  }
+  return { loading: false, data: null, error: null };
+}
+
+export function EventDetail({
+  eventId,
+  isAuthenticated = false,
+  initialEventData = null,
+  onCloseDetail,
+  onNavigateToInvites,
+}) {
+  const [state, setState] = useState(() => buildInitialState(eventId, initialEventData, isAuthenticated));
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteToast, setInviteToast] = useState(null);
   const [calendarLoading, setCalendarLoading] = useState(false);
@@ -31,7 +49,12 @@ export function EventDetail({ eventId, isAuthenticated = false }) {
     }
     let alive = true;
     const controller = new AbortController();
-    setState({ loading: true, data: null, error: null });
+    const seededState = buildInitialState(eventId, initialEventData, isAuthenticated);
+    setState((prev) => ({
+      loading: !seededState.data,
+      data: seededState.data || prev?.data || null,
+      error: null,
+    }));
     fetch(`/api/events/${encodeURIComponent(eventId)}`, { signal: controller.signal })
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error("Failed to load event"))))
       .then((json) => {
@@ -47,7 +70,7 @@ export function EventDetail({ eventId, isAuthenticated = false }) {
       alive = false;
       controller.abort();
     };
-  }, [eventId]);
+  }, [eventId, initialEventData, isAuthenticated]);
 
   useEffect(() => {
     if (!eventId || !isAuthenticated) return;
@@ -229,8 +252,12 @@ export function EventDetail({ eventId, isAuthenticated = false }) {
   }
 
   function goBackToEvents() {
+    if (typeof onCloseDetail === "function") {
+      onCloseDetail();
+      return;
+    }
     if (typeof window !== "undefined") {
-      window.location.hash = "#/events";
+      window.location.href = "/events";
     }
   }
 
@@ -549,7 +576,11 @@ export function EventDetail({ eventId, isAuthenticated = false }) {
             message: "Invite sent!",
             actionLabel: "View in Invites",
             onAction: () => {
-              window.location.hash = "#/invites";
+              if (typeof onNavigateToInvites === "function") {
+                onNavigateToInvites();
+                return;
+              }
+              window.location.href = "/events?route=invites";
             },
             type: "success",
           });

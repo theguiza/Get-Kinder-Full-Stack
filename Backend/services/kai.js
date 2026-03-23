@@ -546,9 +546,10 @@ export async function handleKaiMessage({ userId, userMessage, conversationId, ti
     messages.push({ role: "user", content: enrichMessageForClaude(rawUserMessage, resolvedTier) });
     messages = groupConsecutiveRoles(messages);
 
+    const isOrgRep = user?.org_rep === true;
     let systemPrompt = isGuest
       ? getGuestSystemPrompt()
-      : resolvedTier === "org_growth" || resolvedTier === "org_enterprise"
+      : resolvedTier === "org_growth" || resolvedTier === "org_enterprise" || (resolvedTier === "agent" && isOrgRep)
         ? getOrgSystemPrompt(resolvedTier, user, orgContext)
         : getSystemPrompt(resolvedTier, user);
     if (!isGuest && isNewConversation) {

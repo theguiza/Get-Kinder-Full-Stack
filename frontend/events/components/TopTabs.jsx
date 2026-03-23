@@ -1,20 +1,17 @@
 import React, { useEffect, useState } from "react";
+import { buildEventsTabUrl, normalizeEventsRoute } from "../router.js";
 
-function normalize(hash) {
-  const h = (hash || "#/events").split("?")[0];
-  return h.startsWith("#/events/") ? "#/events" : h;
-}
-
-export function TopTabs({ route }) {
-  const [active, setActive] = useState(normalize(route));
+export function TopTabs({ route, onNavigate }) {
+  const [active, setActive] = useState(normalizeEventsRoute(route));
 
   useEffect(() => {
-    setActive(normalize(route));
+    setActive(normalizeEventsRoute(route));
   }, [route]);
 
+  const search = typeof window !== "undefined" ? window.location.search || "" : "";
   const items = [
-    { href: "#/events", label: "Events" },
-    { href: "#/invites", label: "Invites" },
+    { href: buildEventsTabUrl("/events", search), route: "/events", label: "Events" },
+    { href: buildEventsTabUrl("/invites", search), route: "/invites", label: "Invites" },
   ];
 
   return (
@@ -23,8 +20,13 @@ export function TopTabs({ route }) {
         <a
           key={item.href}
           href={item.href}
-          className={`tab-link${active === item.href ? " active" : ""}`}
-          aria-current={active === item.href ? "page" : undefined}
+          className={`tab-link${active === item.route ? " active" : ""}`}
+          aria-current={active === item.route ? "page" : undefined}
+          onClick={(event) => {
+            if (typeof onNavigate !== "function") return;
+            event.preventDefault();
+            onNavigate(item.route);
+          }}
         >
           {item.label}
         </a>

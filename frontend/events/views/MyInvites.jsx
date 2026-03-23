@@ -124,7 +124,7 @@ export function MyInvites() {
   async function copyLink(eventId) {
     try {
       const base = window.location.origin;
-      const url = `${base}/events#/events/${eventId}`;
+      const url = `${base}/events/${encodeURIComponent(eventId)}`;
       await navigator?.clipboard?.writeText(url);
       setToast({ type: "success", message: "Invite link copied." });
     } catch {
