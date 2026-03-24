@@ -306,24 +306,6 @@
       }
     %>
 
-    <section class="container mt-3">
-      <div class="d-flex align-items-center justify-content-between gap-2 flex-wrap">
-        <div class="btn-group" role="group" aria-label="Events view toggle">
-          <a
-            href="<%= upcomingHref %>"
-            class="btn btn-sm <%= currentView === 'upcoming' ? 'btn-primary' : 'btn-outline-primary' %>"
-          >Upcoming</a>
-          <a
-            href="<%= archiveHref %>"
-            class="btn btn-sm <%= currentView === 'archive' ? 'btn-primary' : 'btn-outline-primary' %>"
-          >Archive</a>
-        </div>
-        <small class="text-muted">
-          <%= currentView === 'archive' ? 'Showing past events' : 'Showing upcoming and ongoing events' %>
-        </small>
-      </div>
-    </section>
-
     <style>
       .events-ssr-shell {
         display: grid;
@@ -479,6 +461,24 @@
         </div>
       </section>
     <% } %>
+
+    <section class="container mt-4">
+      <div class="d-flex align-items-center justify-content-between gap-2 flex-wrap">
+        <div class="btn-group" role="group" aria-label="Events view toggle">
+          <a
+            href="<%= upcomingHref %>"
+            class="btn btn-sm <%= currentView === 'upcoming' ? 'btn-primary' : 'btn-outline-primary' %>"
+          >Upcoming</a>
+          <a
+            href="<%= archiveHref %>"
+            class="btn btn-sm <%= currentView === 'archive' ? 'btn-primary' : 'btn-outline-primary' %>"
+          >Archive</a>
+        </div>
+        <small class="text-muted">
+          <%= currentView === 'archive' ? 'Showing past events' : 'Showing upcoming and ongoing events' %>
+        </small>
+      </div>
+    </section>
 
     <!-- Events props (JSON) -->
     <script type="application/json" id="events-page-filters"><%- JSON.stringify(eventsPageFilters).replace(/</g, '\\u003c') %></script>

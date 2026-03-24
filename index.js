@@ -32,7 +32,7 @@ const { sendDailyKindnessPrompts } = await import("./kindnessEmailer.js");
 import cookieParser from "cookie-parser";
 import quizHooksRouter from "./routes/quizHooks.js";
 import arcsApiRouter from "./routes/arcsApi.js";
-import { getEventsPage } from "./routes/eventsPage.js";
+import { getEventsPage, getEventRsvpThanksPage } from "./routes/eventsPage.js";
 import eventsApiRouter from "./routes/eventsApi.js";
 import invitesApiRouter from "./routes/invitesApi.js";
 import meEventsRouter from "./routes/meEventsApi.js";
@@ -2537,6 +2537,8 @@ const { getDashboard, getMorningPrompt, saveReflection, markDayDone, cancelChall
 // Dashboard - All dashboard routes
 app.get("/dashboard", ensureAuthenticated, getDashboard);
 app.get("/events", getEventsPage);
+app.get("/event-rsvp-thanks", getEventRsvpThanksPage);
+app.get("/events/:id/rsvp/thanks", (req, res) => res.redirect(302, "/event-rsvp-thanks"));
 app.get("/events/:id", getEventsPage);
 app.get("/checkin/:eventId", ensureAuthenticated, (req, res) => {
   const assetTag = process.env.ASSET_TAG ?? Date.now().toString(36);

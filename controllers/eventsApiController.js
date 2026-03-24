@@ -29,6 +29,7 @@ const INVITE_DUPLICATE_WINDOW_HOURS = 24 * 30;
 const INVITE_PER_EVENT_SENDER_CAP = 3;
 const EDITABLE_STATUS_SET = new Set(["draft", "published"]);
 const CHECKIN_METHOD_SET = new Set(["host_code", "social_proof", "geo"]);
+const RSVP_THANKS_SESSION_KEY = "eventRsvpThanks";
 const INVITE_TONES = {
   friendly: {
     subject: "{{senderName}} invited you to {{eventTitle}}",
@@ -55,6 +56,34 @@ function clampLimit(value) {
 
 function sanitizeString(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function sanitizeInternalPath(value, fallback = "/events") {
+  const rawValue = sanitizeString(value);
+  if (!rawValue || !rawValue.startsWith("/") || rawValue.startsWith("//")) return fallback;
+
+  try {
+    const appBaseUrl = (process.env.APP_BASE_URL || "https://getkinder.ai").replace(/\/+$/, "");
+    const candidate = new URL(rawValue, `${appBaseUrl}/`);
+    const appOrigin = new URL(appBaseUrl).origin;
+    if (candidate.origin !== appOrigin) return fallback;
+    return `${candidate.pathname}${candidate.search}${candidate.hash}`;
+  } catch {
+    return fallback;
+  }
+}
+
+async function persistRsvpThanksContext(req, payload) {
+  if (!req.session || typeof req.session !== "object") return;
+  req.session[RSVP_THANKS_SESSION_KEY] = payload;
+  if (typeof req.session.save === "function") {
+    await new Promise((resolve, reject) => {
+      req.session.save((error) => {
+        if (error) reject(error);
+        else resolve();
+      });
+    });
+  }
 }
 
 function truncateLocationForStorage(value, maxParts = 3) {
@@ -730,6 +759,16 @@ export async function respondToEventRsvp(req, res) {
         ok: false,
         ...(result.code ? { code: result.code } : {}),
         error: result.error,
+      });
+    }
+
+    if (action === "accept") {
+      const defaultReturnTo = eventId ? `/events/${encodeURIComponent(eventId)}` : "/events";
+      const returnToHref = sanitizeInternalPath(req.body?.return_to, defaultReturnTo);
+      await persistRsvpThanksContext(req, {
+        returnToHref,
+        eventId: eventId ? String(eventId) : null,
+        savedAt: new Date().toISOString(),
       });
     }
 

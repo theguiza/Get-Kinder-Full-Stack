@@ -181,6 +181,17 @@ export function EventDetail({
     });
   }
 
+  function getRsvpThanksHref() {
+    return "/event-rsvp-thanks";
+  }
+
+  function getCurrentEventHref() {
+    if (typeof window === "undefined") {
+      return eventId ? `/events/${encodeURIComponent(eventId)}` : "/events";
+    }
+    return `${window.location.pathname}${window.location.search || ""}`;
+  }
+
   async function handleRsvp(action, options = {}) {
     if (rsvpAction) return;
     setRsvpAction(action);
@@ -188,7 +199,10 @@ export function EventDetail({
       const res = await fetch(`/api/events/${encodeURIComponent(eventId)}/rsvp`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action }),
+        body: JSON.stringify({
+          action,
+          return_to: getCurrentEventHref(),
+        }),
       });
       const json = await res.json().catch(() => ({}));
       if (res.status === 401) {
@@ -204,6 +218,10 @@ export function EventDetail({
         viewer_check_in_method: null,
         viewer_checked_in_at: null,
       });
+      if (action === "accept" && typeof window !== "undefined") {
+        window.location.assign(getRsvpThanksHref());
+        return true;
+      }
       const serverMessage = typeof json?.data?.message === "string" ? json.data.message.trim() : "";
       const successMessage = typeof options.successMessage === "string" && options.successMessage.trim()
         ? options.successMessage

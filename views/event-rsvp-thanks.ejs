@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Request Received — Get Kinder</title>
+  <meta name="description" content="Your volunteer request has been received by Get Kinder." />
+  <meta name="robots" content="noindex, nofollow" />
+  <link rel="canonical" href="<%= canonicalUrl || 'https://getkinder.ai/events' %>">
+  <meta property="og:title" content="Request Received — Get Kinder">
+  <meta property="og:description" content="Your volunteer request has been received by Get Kinder.">
+  <meta property="og:url" content="<%= ogUrl || canonicalUrl || 'https://getkinder.ai/events' %>">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="https://getkinder.ai/images/logo.png">
+  <meta property="og:locale" content="en_CA">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Request Received — Get Kinder">
+  <meta name="twitter:description" content="Your volunteer request has been received by Get Kinder.">
+  <meta name="twitter:image" content="https://getkinder.ai/images/logo.png">
+
+  <link rel="stylesheet" href="/css/style.css" />
+  <link rel="icon" href="/images/favicon.png" sizes="32x32" type="image/png" />
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-SgOJa3DmI69IUzQ2PVdRZhwQ+dy64/BUtbMJw1MZ8t5HZApcHrRKUc4W0kG879m7" crossorigin="anonymous"/>
+  <style>
+    :root { --navbar-height: 86px; }
+    body {
+      padding-top: var(--navbar-height);
+      background:
+        radial-gradient(circle at top left, rgba(255, 86, 86, 0.16), transparent 34%),
+        linear-gradient(180deg, #fffaf5 0%, #ffffff 48%, #f6fbff 100%);
+      min-height: 100vh;
+      color: #27364f;
+    }
+    @media (max-width: 991.98px) { :root { --navbar-height: 72px; } }
+    @media (min-width: 992px) {
+      .navbar-expand-lg .navbar-collapse { display: flex !important; }
+    }
+    .navbar .collapse { visibility: visible !important; }
+    .navbar-brand img {
+      height: 56px;
+      max-height: 56px;
+      width: auto !important;
+    }
+    .thanks-shell {
+      padding: 48px 0 72px;
+    }
+    .thanks-card {
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 40px 32px;
+      border-radius: 28px;
+      background: rgba(255, 255, 255, 0.94);
+      border: 1px solid rgba(69, 90, 124, 0.08);
+      box-shadow: 0 24px 60px rgba(39, 54, 79, 0.12);
+    }
+    .thanks-kicker {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 14px;
+      border-radius: 999px;
+      background: #fff1ef;
+      color: #d84f4f;
+      font-size: 0.9rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .thanks-title {
+      margin: 18px 0 12px;
+      font-size: clamp(2rem, 5vw, 3.4rem);
+      line-height: 1.05;
+      color: #24324a;
+    }
+    .thanks-copy {
+      font-size: 1.08rem;
+      line-height: 1.7;
+      color: #4b5d7b;
+      max-width: 44rem;
+    }
+    .thanks-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 28px;
+    }
+    .thanks-actions .btn {
+      min-width: 190px;
+      border-radius: 999px;
+      padding: 12px 18px;
+      font-weight: 600;
+    }
+    .thanks-note {
+      margin-top: 18px;
+      font-size: 0.95rem;
+      color: #6f7f98;
+    }
+    @media (max-width: 575.98px) {
+      .thanks-card {
+        padding: 28px 22px;
+        border-radius: 22px;
+      }
+      .thanks-actions .btn {
+        width: 100%;
+      }
+    }
+  </style>
+  <script>
+    (function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+    new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+    j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+    'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+    })(window,document,'script','dataLayer','GTM-5NMWPW33');
+  </script>
+</head>
+<body>
+  <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-5NMWPW33" height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+  <%- include("partials/site-header", { currentPage: "events", user }) %>
+
+  <main class="container thanks-shell">
+    <section class="thanks-card">
+      <div class="thanks-kicker">Request Received</div>
+      <h1 class="thanks-title">Thanks. Your request to attend has been submitted.</h1>
+      <p class="thanks-copy">
+        We’ve sent your RSVP to the event organizer. You’ll hear back once your request is reviewed.
+      </p>
+
+      <div class="thanks-actions">
+        <% if (returnToHref) { %>
+          <a class="btn btn-primary" href="<%= returnToHref %>">Back to Event</a>
+        <% } %>
+        <a class="btn btn-outline-secondary" href="/events">Browse More Events</a>
+      </div>
+
+      <p class="thanks-note">
+        Approval and timing are still handled the same way as before. This page only confirms that your request was received.
+      </p>
+    </section>
+  </main>
+</body>
+</html>

@@ -3,11 +3,30 @@ import { renderEventsSsrPreview } from "../services/eventsSsrPreview.js";
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 50;
+const RSVP_THANKS_SESSION_KEY = "eventRsvpThanks";
 
 function clampLimit(value) {
   const num = Number(value);
   const fallback = Number.isFinite(num) ? num : DEFAULT_LIMIT;
   return Math.min(Math.max(fallback, 1), MAX_LIMIT);
+}
+
+function buildAppBaseUrl() {
+  return (process.env.APP_BASE_URL || "https://getkinder.ai").replace(/\/+$/, "");
+}
+
+function sanitizeInternalPath(value, fallback = "/events") {
+  const rawValue = typeof value === "string" ? value.trim() : "";
+  if (!rawValue || !rawValue.startsWith("/") || rawValue.startsWith("//")) return fallback;
+
+  try {
+    const candidate = new URL(rawValue, `${buildAppBaseUrl()}/`);
+    const appOrigin = new URL(buildAppBaseUrl()).origin;
+    if (candidate.origin !== appOrigin) return fallback;
+    return `${candidate.pathname}${candidate.search}${candidate.hash}`;
+  } catch {
+    return fallback;
+  }
 }
 
 export async function getEventsPage(req, res) {
@@ -38,7 +57,7 @@ export async function getEventsPage(req, res) {
         ? initialRouteRaw
         : "events"
     );
-  const appBaseUrl = (process.env.APP_BASE_URL || "https://getkinder.ai").replace(/\/+$/, "");
+  const appBaseUrl = buildAppBaseUrl();
   const canonicalUrl = initialEventId
     ? `${appBaseUrl}/events/${encodeURIComponent(initialEventId)}`
     : `${appBaseUrl}/events`;
@@ -106,5 +125,21 @@ export async function getEventsPage(req, res) {
     ogUrl: canonicalUrl,
     ssrPreviewHtml,
     csrfToken: typeof req.csrfToken === "function" ? req.csrfToken() : null,
+  });
+}
+
+export async function getEventRsvpThanksPage(req, res) {
+  const user = req.user ?? null;
+  const assetTag = process.env.ASSET_TAG ?? Date.now().toString(36);
+  const sessionContext = req.session?.[RSVP_THANKS_SESSION_KEY];
+  const returnToHref = sanitizeInternalPath(sessionContext?.returnToHref, "");
+  const canonicalUrl = `${buildAppBaseUrl()}/event-rsvp-thanks`;
+
+  return res.render("event-rsvp-thanks", {
+    user,
+    assetTag,
+    returnToHref: returnToHref || null,
+    canonicalUrl,
+    ogUrl: canonicalUrl,
   });
 }

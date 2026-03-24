@@ -126,6 +126,8 @@ function createEventRow(overrides = {}) {
     safety_notes: overrides.safety_notes ?? null,
     start_at: overrides.start_at,
     end_at: overrides.end_at ?? null,
+    recurrence_rule: overrides.recurrence_rule ?? null,
+    is_recurring: overrides.is_recurring ?? false,
     tz: overrides.tz ?? "America/Vancouver",
     location_text: overrides.location_text ?? null,
     org_name: overrides.org_name ?? null,
@@ -211,6 +213,50 @@ test("KAI search_events uses canonical upcoming visibility semantics", async () 
       "future-published",
     ]);
     assert.ok(result.events.every((event) => event.status === "published"));
+  } finally {
+    harness.restore();
+  }
+});
+
+test("fetchEvents derives event_type for recurring, multi-day, and one-time events", async () => {
+  const now = Date.now();
+  const harness = createEventReadHarness({
+    events: [
+      createEventRow({
+        id: "evt-recurring-rule",
+        start_at: new Date(now + 24 * 60 * 60 * 1000).toISOString(),
+        end_at: new Date(now + 25 * 60 * 60 * 1000).toISOString(),
+        recurrence_rule: "FREQ=WEEKLY;BYDAY=MO",
+      }),
+      createEventRow({
+        id: "evt-recurring-flag",
+        start_at: new Date(now + 48 * 60 * 60 * 1000).toISOString(),
+        end_at: new Date(now + 72 * 60 * 60 * 1000).toISOString(),
+        is_recurring: true,
+      }),
+      createEventRow({
+        id: "evt-multi-day",
+        start_at: new Date(now + 96 * 60 * 60 * 1000).toISOString(),
+        end_at: new Date(now + 121 * 60 * 60 * 1000).toISOString(),
+      }),
+      createEventRow({
+        id: "evt-one-time",
+        start_at: new Date(now + 144 * 60 * 60 * 1000).toISOString(),
+        end_at: new Date(now + 146 * 60 * 60 * 1000).toISOString(),
+      }),
+    ],
+  });
+
+  try {
+    const result = await fetchEvents({ view: "upcoming", limit: 10 });
+    const eventTypes = Object.fromEntries(
+      result.events.map((event) => [event.id, event.event_type]),
+    );
+
+    assert.equal(eventTypes["evt-recurring-rule"], "recurring");
+    assert.equal(eventTypes["evt-recurring-flag"], "recurring");
+    assert.equal(eventTypes["evt-multi-day"], "multi_day");
+    assert.equal(eventTypes["evt-one-time"], "one_time");
   } finally {
     harness.restore();
   }

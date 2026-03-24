@@ -41,6 +41,31 @@ function roundToTenth(value) {
   return Math.round(num * 10) / 10;
 }
 
+function parseBooleanish(value) {
+  if (typeof value === "boolean") return value;
+  if (typeof value !== "string") return false;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return false;
+  return normalized === "true" || normalized === "t" || normalized === "1";
+}
+
+function deriveEventType(row = {}) {
+  const recurrenceRule = typeof row.recurrence_rule === "string"
+    ? row.recurrence_rule.trim()
+    : "";
+  if (recurrenceRule || parseBooleanish(row.is_recurring)) {
+    return "recurring";
+  }
+
+  const startMs = row.start_at ? new Date(row.start_at).getTime() : Number.NaN;
+  const endMs = row.end_at ? new Date(row.end_at).getTime() : Number.NaN;
+  if (Number.isFinite(startMs) && Number.isFinite(endMs) && endMs - startMs > 20 * 60 * 60 * 1000) {
+    return "multi_day";
+  }
+
+  return "one_time";
+}
+
 function mapEventRow(row = {}) {
   const orgId = row.org_id !== null && row.org_id !== undefined
     ? Number(row.org_id)
@@ -91,6 +116,7 @@ function mapEventRow(row = {}) {
     cover_url: row.cover_url || null,
     org_rating_value: orgRatingValue,
     org_rating_count: Number.isInteger(orgId) && orgId > 0 ? orgRatingCount : 0,
+    event_type: deriveEventType(row),
   };
 }
 
@@ -208,6 +234,8 @@ export async function fetchEvents({
              e.safety_notes,
              e.start_at,
              e.end_at,
+             NULLIF(BTRIM(COALESCE(to_jsonb(e) ->> 'recurrence_rule', '')), '') AS recurrence_rule,
+             COALESCE((to_jsonb(e) ->> 'is_recurring')::boolean, FALSE) AS is_recurring,
              e.tz,
              e.location_text,
              e.org_name,
@@ -292,6 +320,8 @@ export async function fetchEventById(id) {
              e.safety_notes,
              e.start_at,
              e.end_at,
+             NULLIF(BTRIM(COALESCE(to_jsonb(e) ->> 'recurrence_rule', '')), '') AS recurrence_rule,
+             COALESCE((to_jsonb(e) ->> 'is_recurring')::boolean, FALSE) AS is_recurring,
              e.tz,
              e.location_text,
              e.org_name,
