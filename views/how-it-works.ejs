@@ -19,6 +19,12 @@
   <meta property="og:description" content="See how Get Kinder connects volunteers, organizations, and donors in one verified impact loop with transparent rewards, funding, and measurable community impact.">
   <meta property="og:url" content="https://getkinder.ai/how-it-works">
   <meta property="og:type" content="website">
+  <meta property="og:image" content="https://getkinder.ai/images/logo.png">
+  <meta property="og:locale" content="en_CA">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="How Get Kinder Works | Volunteers, Organizations & Donors in One Verified Loop">
+  <meta name="twitter:description" content="See how Get Kinder connects volunteers, organizations, and donors with verified impact, transparent funding, and real community outcomes.">
+  <meta name="twitter:image" content="https://getkinder.ai/images/logo.png">
   <link rel="icon" href="/images/favicon.png" sizes="32x32" type="image/png">
   <!-- Bootstrap CDN -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
@@ -52,19 +58,19 @@
         </p>
         <p class="hiw-hero__find-label">Find your place in the loop</p>
         <div class="hiw-audience-pills">
-          <a href="#volunteers" class="hiw-audience-pill">
+          <a href="/how-it-works/volunteers" class="hiw-audience-pill">
             <span class="hiw-audience-pill__dot" style="background:#FFAA00;"></span>
             I want to volunteer my time &amp; skills
             <span class="hiw-audience-pill__arrow">→</span>
           </a>
-          <a href="#organizations" class="hiw-audience-pill">
+          <a href="/how-it-works/organizations" class="hiw-audience-pill">
             <span class="hiw-audience-pill__dot" style="background:#455a7c;"></span>
-            I run an organization or cause
+            I need volunteers for my event or cause
             <span class="hiw-audience-pill__arrow">→</span>
           </a>
-          <a href="#donors" class="hiw-audience-pill">
+          <a href="/how-it-works/donors" class="hiw-audience-pill">
             <span class="hiw-audience-pill__dot" style="background:#ff5656;"></span>
-            I want to fund verified impact
+            I want to donate with verified impact
             <span class="hiw-audience-pill__arrow">→</span>
           </a>
         </div>
@@ -80,13 +86,13 @@
 
   <!-- ═══ JUMP NAV ════════════════════════════════ -->
   <nav class="hiw-jump-nav" aria-label="Page sections">
-    <a href="#loop">The Loop</a>
-    <a href="#volunteers">Volunteers</a>
-    <a href="#organizations">Organizations</a>
-    <a href="#donors">Donors</a>
-    <a href="#credits">Impact Credits</a>
-    <a href="#trust">Trust</a>
-    <a href="#faq">FAQ</a>
+    <a href="/how-it-works/loop">The Loop</a>
+    <a href="/how-it-works/volunteers">Volunteers</a>
+    <a href="/how-it-works/organizations">Organizations</a>
+    <a href="/how-it-works/donors">Donors</a>
+    <a href="/how-it-works/credits">Impact Credits</a>
+    <a href="/how-it-works/trust">Trust</a>
+    <a href="/how-it-works/faq">FAQ</a>
   </nav>
 
   <!-- ═══ 5-STEP LOOP ═════════════════════════════ -->
@@ -331,7 +337,11 @@
         <div class="hiw-feature-card">
           <div class="hiw-card-header">
             <p class="hiw-card-eyebrow">What you get</p>
-            <p class="hiw-card-title">Your command center</p>
+            <p class="hiw-card-title">Your Admin &amp; Volunteering Command Center run by KAI!</p>
+          </div>
+          <div class="hiw-feature-item">
+            <span class="hiw-feature-check hiw-feature-check--slate">✓</span>
+            <span class="hiw-feature-text">KAI handles the admin &amp; find volunteers — so you don't have to. From drafting event listings to finding volunteer , KAI (Kind Artificial Intelligence™) is your operations assistant. Tell KAI what you need — he handles the rest.</span>
           </div>
           <div class="hiw-feature-item">
             <span class="hiw-feature-check hiw-feature-check--slate">✓</span>
@@ -349,13 +359,9 @@
             <span class="hiw-feature-check hiw-feature-check--slate">✓</span>
             <span class="hiw-feature-text">Verify attendance in one tap — QR check-in and one-tap verification triggers Impact Credits, donor receipts, and impact reports simultaneously.</span>
           </div>
-          <div class="hiw-feature-item">
-            <span class="hiw-feature-check hiw-feature-check--slate">✓</span>
-            <span class="hiw-feature-text">Dashboard with reports your funders want — attendance records, impact metrics, and auto-generated reports. No more midnight spreadsheets.</span>
-          </div>
           <div class="hiw-feature-item" style="border-bottom:none;">
             <span class="hiw-feature-check hiw-feature-check--slate">✓</span>
-            <span class="hiw-feature-text">KAI handles the admin — so you don't have to. From drafting event listings to sending volunteer reminders, KAI (Kind Artificial Intelligence™) is your operations assistant. Tell KAI what you need — it handles the rest.</span>
+            <span class="hiw-feature-text">Dashboard with reports your funders want — attendance records, impact metrics, and auto-generated reports. No more midnight spreadsheets.</span>
           </div>
           <div class="hiw-card-footer">
             <p class="hiw-card-note">Verification is the gate that makes everything work — for volunteers, donors, and your reporting. One tap does it all.</p>
@@ -388,7 +394,7 @@
                 <line x1="74" y1="84" x2="86" y2="84" stroke="#455a7c" stroke-width="1"/>
               </svg>
             </span>
-            <h2 class="hiw-h2">The admin work is handled. Now you can focus on your mission.</h2>
+            <h2 class="hiw-h2">Finding volunteers is easy. Your admin work is handled.</h2>
           </div>
           <p class="hiw-lead" style="margin-bottom:0;">
             Finding reliable volunteers shouldn't be harder than the work
@@ -763,6 +769,38 @@
 
   <!-- Bootstrap JS -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+  <% if (typeof scrollToSection !== "undefined" && scrollToSection) { %>
+  <script>
+    (function () {
+      var sectionId = "<%= scrollToSection %>";
+      var section = document.getElementById(sectionId);
+      if (!section) return;
+
+      var target =
+        section.querySelector(".hiw-section__inner") ||
+        section.querySelector(".hiw-eyebrow") ||
+        section;
+
+      function scrollToEl() {
+        var header = document.querySelector(".navbar.fixed-top, .navbar.sticky-top");
+        var headerHeight = header ? header.getBoundingClientRect().height : 0;
+        var extraOffset = 16;
+        var elementPosition = target.getBoundingClientRect().top + window.pageYOffset;
+        var top = Math.max(elementPosition - headerHeight - extraOffset, 0);
+        window.scrollTo({ top: top, behavior: "smooth" });
+      }
+
+      if (document.readyState === "complete") {
+        requestAnimationFrame(scrollToEl);
+      } else {
+        window.addEventListener("load", function () {
+          requestAnimationFrame(scrollToEl);
+        });
+      }
+    })();
+  </script>
+  <% } %>
 
 </body>
 </html>

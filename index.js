@@ -2738,9 +2738,19 @@ app.get("/donate", ensureAuthenticated, (req, res) => {
   res.render("donate", { title: "Donate", assetTag });
 });
 
-app.get("/how-it-works", (req, res) => {
+app.get(["/how-it-works", "/how-it-works/:section"], (req, res) => {
+  const VALID_SECTIONS = ["loop", "volunteers", "organizations", "donors", "credits", "trust", "faq"];
   const assetTag = process.env.ASSET_TAG ?? Date.now().toString(36);
-  res.render("how-it-works", { assetTag });
+  const sectionParam = (req.params.section || "").toLowerCase().trim();
+
+  if (sectionParam && !VALID_SECTIONS.includes(sectionParam)) {
+    return res.redirect(301, "/how-it-works");
+  }
+
+  res.render("how-it-works", {
+    assetTag,
+    scrollToSection: sectionParam || null,
+  });
 });
 
 async function renderIndexPage(req, res, next) {
