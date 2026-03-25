@@ -244,6 +244,7 @@ export async function applyEventRsvpAction({
           ok: true,
           data: {
             status: snapshot.viewer?.status || existingStatus,
+            previous_status: existingStatus || null,
             counts: snapshot.counts,
             message: null,
             event: {
@@ -338,6 +339,7 @@ export async function applyEventRsvpAction({
       ok: true,
       data: {
         status: nextStatus,
+        previous_status: existingStatus || null,
         counts: snapshot.counts,
         message: normalizedAction === "accept" && nextStatus === "waitlisted"
           ? "Event is full. You have been added to the waitlist."

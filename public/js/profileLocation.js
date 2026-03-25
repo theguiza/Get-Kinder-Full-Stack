@@ -118,7 +118,7 @@
   }
 
   document.addEventListener("DOMContentLoaded", function () {
-    const profileForm = document.getElementById("profile-form");
+    const profileForm = document.getElementById("profile-preferences-form") || document.getElementById("profile-form");
     if (!profileForm) return;
 
     const refs = {
@@ -262,13 +262,13 @@
         marker.on("dragend", function () {
           const pos = marker.getLatLng();
           applyLocation(pos.lat, pos.lng, { source: "pin", center: false, reverseLookup: true });
-          setStatus("Map pin updated. Save your profile to persist.", "success");
+          setStatus("Map pin updated. Save preferences to persist.", "success");
         });
 
         map.on("click", function (event) {
           marker.setLatLng(event.latlng);
           applyLocation(event.latlng.lat, event.latlng.lng, { source: "pin", center: false, reverseLookup: true });
-          setStatus("Map pin updated. Save your profile to persist.", "success");
+          setStatus("Map pin updated. Save preferences to persist.", "success");
         });
 
         map.setView([initialLat, initialLng], state.lat != null && state.lng != null ? 14 : 11, { animate: false });
@@ -305,7 +305,7 @@
             reverseLookup: false,
           });
           refs.queryInput.value = buildLabel(state);
-          setStatus("Location selected. Save your profile to persist.", "success");
+          setStatus("Location selected. Save preferences to persist.", "success");
         } catch (err) {
           setStatus(err.message || "Unable to find that location.", "error");
         } finally {
@@ -337,7 +337,7 @@
                 reverseLookup: true,
               });
               if (refs.queryInput) refs.queryInput.value = buildLabel(state);
-              setStatus("Current location selected. Save your profile to persist.", "success");
+              setStatus("Current location selected. Save preferences to persist.", "success");
             } catch (err) {
               setStatus(err.message || "Unable to use current location.", "error");
             }

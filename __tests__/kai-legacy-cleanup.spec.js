@@ -24,7 +24,6 @@ test("current KAI pages still include the floating /api/kai partial", () => {
     "views/index.ejs",
     "views/dashboard.ejs",
     "views/events.ejs",
-    "views/friendQuiz.ejs",
   ];
 
   for (const pagePath of pagePaths) {
@@ -58,6 +57,7 @@ test("legacy OpenAI KAI modules and asset were removed", () => {
   assert.equal(repoPathExists("Backend/assistant.js"), false, "Backend/assistant.js should be removed");
   assert.equal(repoPathExists("openaiFunctions.js"), false, "openaiFunctions.js should be removed");
   assert.equal(repoPathExists("public/js/chat.js"), false, "public/js/chat.js should be removed");
+  assert.equal(repoPathExists("views/friendQuiz.ejs"), false, "views/friendQuiz.ejs should be removed");
 });
 
 test("index.js keeps the current /api/kai router and quarantines legacy KAI routes", () => {

@@ -176,7 +176,7 @@
   }
 
   document.addEventListener('DOMContentLoaded', function () {
-    const form = document.getElementById('profile-form');
+    const form = document.getElementById('profile-preferences-form') || document.getElementById('profile-form');
     const weeklyInput = document.getElementById('availability_weekly_json');
     const exceptionsInput = document.getElementById('availability_exceptions_json');
     const timezoneInput = document.getElementById('availability_timezone');

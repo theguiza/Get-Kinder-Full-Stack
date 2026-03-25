@@ -517,9 +517,15 @@ box-shadow: inset 0px 0px 0px 1px transparent;
   border-color: #e24f4f;
 }
 
-.font-hover:hover{
+.font-hover{
+  transition: color 0.2s ease, transform 0.2s ease;
+}
+
+.font-hover:hover,
+.font-hover:focus{
   color: #ff5656 !important;
   font-weight: bold;
+  transform: translateY(-1px);
 }
 
 /* make every LI in a .list-unstyled a 2-column grid */

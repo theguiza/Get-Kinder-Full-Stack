@@ -375,41 +375,9 @@
       ? rawTier.charAt(0).toUpperCase() + rawTier.slice(1).toLowerCase()
       : 'Bronze'; %>
     <% const currentUser = (typeof user !== 'undefined' && user) ? user : null; %>
-    <% const parseDashboardJson = function (value, fallback) {
-      if (value == null || value === '') return fallback;
-      if (typeof value === 'object') return value;
-      if (typeof value !== 'string') return fallback;
-      try { return JSON.parse(value); } catch (_) { return fallback; }
-    }; %>
-    <% const dashWeeklyAvailability = parseDashboardJson(
-      currentUser && (currentUser.availability_weekly ?? currentUser.weekly_availability_json),
-      {}
-    ); %>
-    <% const dashAvailabilityExceptions = parseDashboardJson(
-      currentUser && (currentUser.specfifc_availability ?? currentUser.availability_exceptions_json),
-      []
-    ); %>
-    <% const dashHasAvailability =
-      (Array.isArray(dashWeeklyAvailability.days) && dashWeeklyAvailability.days.length > 0) ||
-      (Array.isArray(dashWeeklyAvailability.time_of_day) && dashWeeklyAvailability.time_of_day.length > 0) ||
-      Boolean(dashWeeklyAvailability.earliest_time || dashWeeklyAvailability.latest_time) ||
-      (Array.isArray(dashAvailabilityExceptions) && dashAvailabilityExceptions.length > 0); %>
-    <% const dashHasLocation =
-      (Number.isFinite(Number(currentUser && currentUser.home_base_lat)) &&
-      Number.isFinite(Number(currentUser && currentUser.home_base_lng))) ||
-      (typeof (currentUser && currentUser.home_base_label) === 'string' && currentUser.home_base_label.trim().length > 0); %>
-    <% const dashHasSdgGoals = Boolean(currentUser && (currentUser.sdg1 || currentUser.sdg2 || currentUser.sdg3)); %>
-    <% const dashCompletionItems = [
-      { done: !!(currentUser && currentUser.picture), label: "Add a profile photo", icon: "fa-camera", tab: "overview" },
-      { done: !!(currentUser && currentUser.interest1), label: "Set your volunteer preferences", icon: "fa-sliders", tab: "preferences" },
-      { done: dashHasAvailability, label: "Set your availability", icon: "fa-calendar-days", tab: "preferences" },
-      { done: dashHasLocation, label: "Set your location", icon: "fa-location-dot", tab: "preferences" },
-      { done: dashHasSdgGoals, label: "Choose your SDG goals", icon: "fa-globe", tab: "preferences" },
-      { done: !!(currentUser && currentUser.phone), label: "Add your phone number", icon: "fa-phone", tab: "account" },
-      { done: !!(currentUser && currentUser.city), label: "Add your city", icon: "fa-location-dot", tab: "account" }
-    ]; %>
-    <% const dashIncompleteItems = dashCompletionItems.filter(function(item) { return !item.done; }); %>
-    <% const dashProfileCompletionPct = Math.round(((dashCompletionItems.length - dashIncompleteItems.length) / dashCompletionItems.length) * 100); %>
+    <% const dashCompletionState = profileCompletion || { incompleteItems: [], completionPct: 0 }; %>
+    <% const dashIncompleteItems = Array.isArray(dashCompletionState.incompleteItems) ? dashCompletionState.incompleteItems : []; %>
+    <% const dashProfileCompletionPct = Number.isFinite(Number(dashCompletionState.completionPct)) ? Number(dashCompletionState.completionPct) : 0; %>
     <% const profileName = (currentUser && currentUser.firstname) ? currentUser.firstname : 'Volunteer'; %>
     <% const rawProfilePhoto = (currentUser && (currentUser.picture || currentUser.profile_photo_url || currentUser.avatar_url || currentUser.photo_url))
       ? (currentUser.picture || currentUser.profile_photo_url || currentUser.avatar_url || currentUser.photo_url)
@@ -942,7 +910,12 @@
           <% if (dashIncompleteItems.length) { %>
             <div class="d-flex flex-wrap gap-2">
               <% dashIncompleteItems.forEach(function(item) { %>
-                <a class="profile-progress-chip text-decoration-none" href="/profile?tab=<%= encodeURIComponent(item.tab || 'overview') %>">
+                <% const dashTargetParams = new URLSearchParams(); %>
+                <% dashTargetParams.set('tab', item.tab || 'portfolio'); %>
+                <% if (item.card) { dashTargetParams.set('card', item.card); } %>
+                <% if (item.focusId) { dashTargetParams.set('focus', item.focusId); } %>
+                <% if (item.modal) { dashTargetParams.set('modal', item.modal); } %>
+                <a class="profile-progress-chip text-decoration-none" href="/profile?<%= dashTargetParams.toString() %>">
                   <i class="fas <%= item.icon %>" aria-hidden="true"></i>
                   <%= item.label %>
                 </a>

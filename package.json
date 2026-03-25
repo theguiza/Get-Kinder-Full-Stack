@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node index.js",
     "build": "vite build",
+    "test": "node --test __tests__/*.spec.js",
     "backfill:surprises": "node scripts/backfillDailySurprises.js",
     "prestart": "npm run backfill:surprises || true",
     "seed:content": "node scripts/generateContentLibrary.js",

@@ -1,6 +1,13 @@
 import { progressPercent } from '../shared/metrics.js';
 import { mapFriendArcRow } from './lib/friendArcMapper.js';
-import { fetchVolunteerPortfolio, getVolunteerStats, resolveUserIdFromRequest } from '../services/profileService.js';
+import {
+  fetchVolunteerPortfolio,
+  getVolunteerStats,
+  normalizeVolunteerPortfolioRows,
+  resolveUserIdFromRequest,
+  sortVolunteerPortfolioRows,
+} from '../services/profileService.js';
+import { buildProfileCompletion } from '../services/profileCompletionService.js';
 import { getSummary as getRatingsSummary } from '../services/ratingsService.js';
 import { getMatchedEventsForUser } from '../services/eventMatchingService.js';
 
@@ -257,33 +264,9 @@ export function makeDashboardController(pool) {
         try {
           const rawPortfolioRows = await fetchVolunteerPortfolio({ userId, limit: 40 });
           const now = new Date();
-          const portfolioRows = rawPortfolioRows.map((row) => {
-            const startAt = row.start_at ? new Date(row.start_at) : null;
-            const endAt = row.end_at ? new Date(row.end_at) : null;
-            const ms = (startAt && endAt) ? Math.max(0, endAt - startAt) : 0;
-            const duration_hours = ms > 0 ? Math.round((ms / 36e5) * 10) / 10 : 0;
-            const is_upcoming = !!(startAt && startAt > now && ['published', 'scheduled'].includes(row.event_status));
-            const is_verified = row.verification_status === 'verified';
-            const completed_at = endAt || startAt || null;
-            const is_completed = !!(completed_at && completed_at <= now);
-            const acceptedCount = Number(row.accepted_count) || 0;
-            const poolKind = row.reward_pool_kind != null ? Number(row.reward_pool_kind) : 0;
-            const safePoolKind = Number.isFinite(poolKind) ? poolKind : 0;
-            const kind_estimate_per_user = Math.floor(safePoolKind / Math.max(acceptedCount, 1));
-
-            return {
-              ...row,
-              start_at: startAt,
-              end_at: endAt,
-              duration_hours,
-              is_upcoming,
-              is_verified,
-              is_completed,
-              completed_at,
-              kind_estimate_per_user,
-              accepted_count: acceptedCount
-            };
-          });
+          const portfolioRows = sortVolunteerPortfolioRows(
+            normalizeVolunteerPortfolioRows(rawPortfolioRows, { now })
+          );
 
           const upcomingRows = portfolioRows.filter((row) => row.is_upcoming);
           const completedRows = portfolioRows
@@ -507,6 +490,7 @@ export function makeDashboardController(pool) {
           dashboardRecommendedEvents,
           dashboardRecommendationsSummary,
           dashboardRecommendationsFallbackMode,
+          profileCompletion: buildProfileCompletion({ user: templateUser }),
           debugStatsUserId: showStatsDebug ? String(userId) : null,
           showStatsDebug
         });
@@ -538,6 +522,7 @@ export function makeDashboardController(pool) {
               hasRatings: false,
               starsFilled: 5
             },
+            profileCompletion: buildProfileCompletion({ user: templateUser }),
             dashboardCompletedEvent: null,
             dashboardCompletedEvents: [],
             dashboardUpcomingEvent: null,

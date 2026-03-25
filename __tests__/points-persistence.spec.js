@@ -196,15 +196,23 @@ class FakeClient {
       const setsSteps = /\bsteps\s*=\s*\$\d+/i.test(trimmed);
       const setsChallenge = /\bchallenge\s*=\s*\$\d+/i.test(trimmed);
       const setsLifetime = /\blifetime\s*=\s*\$\d+/i.test(trimmed);
+      const setsDay = /\bday\s*=\s*COALESCE\(\$\d+,\s*day\)/i.test(trimmed);
 
-      const delta = Number(params[2] ?? 0);
+      const delta = Number(params[setsSteps ? 3 : 2] ?? 0);
       if (Number.isFinite(delta)) {
         target.arc_points += delta;
         target.points_today += delta;
       }
 
+      if (setsDay) {
+        const nextDay = Number(params[2]);
+        if (Number.isFinite(nextDay) && nextDay > 0) {
+          target.day = Math.round(nextDay);
+        }
+      }
+
       if (setsSteps) {
-        const stepsJson = params[3];
+        const stepsJson = params[4];
         target.steps = typeof stepsJson === "string" ? JSON.parse(stepsJson) : deepClone(stepsJson ?? []);
       }
 
@@ -215,7 +223,7 @@ class FakeClient {
       }
 
       if (setsLifetime) {
-        const lifetimeJson = params[4];
+        const lifetimeJson = params[setsSteps ? 5 : 4];
         target.lifetime =
           typeof lifetimeJson === "string" ? JSON.parse(lifetimeJson) : deepClone(lifetimeJson ?? {});
       }
@@ -394,7 +402,12 @@ test("duplicate idempotency key returns cached payload without double awarding",
   const second = await completeStep({ store, stepId: "step-1", key: "dupe-key" });
 
   assert.equal(first.arc.arcPoints, STEP_POINTS);
-  assert.deepEqual(second.arc, first.arc);
+  assert.equal(second.fromCache, true);
+  assert.equal(second.arc.arcPoints, first.arc.arcPoints);
+  assert.equal(second.arc.pointsToday, first.arc.pointsToday);
+  assert.equal(second.arc.percent, first.arc.percent);
+  assert.deepEqual(second.arc.steps, first.arc.steps);
+  assert.equal(second.arc.lifetime?.xp, first.arc.lifetime?.xp);
   assert.equal(store.snapshot().arc_points, STEP_POINTS);
   assert.equal(store.snapshot().lifetime.xp, STEP_POINTS);
 });

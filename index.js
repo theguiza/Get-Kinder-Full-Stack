@@ -10,7 +10,13 @@ import path from "path";
 import { dirname } from "path";
 import { fileURLToPath } from "url";
 import pool from "./Backend/db/pg.js";
-import { fetchVolunteerPortfolio, getVolunteerStats, resolveUserIdFromRequest } from "./services/profileService.js";
+import {
+  fetchVolunteerPortfolio,
+  getVolunteerStats,
+  normalizeVolunteerPortfolioRows,
+  resolveUserIdFromRequest,
+  sortVolunteerPortfolioRows,
+} from "./services/profileService.js";
 import { getSummary as getRatingsSummary } from "./services/ratingsService.js";
 import bcrypt from "bcrypt";
 import session from "express-session";
@@ -24,7 +30,14 @@ import cron from "node-cron";
 import crypto from "crypto";
 import rateLimit from "express-rate-limit";
 import { makeDashboardController } from "./Backend/dashboardController.js";
+import { makeProfileController } from "./Backend/profileController.js";
 import { generateArcForQuiz } from "./services/ArcGenerator.js";
+import { buildProfileCompletion } from "./services/profileCompletionService.js";
+import {
+  buildProfileFieldUpdates,
+  buildProfileRedirectParams,
+  resolveProfileSaveAction,
+} from "./services/profileSaveService.js";
 import { verify as neoVerify, run as neoRun, close as neoClose } from './Backend/db/neo4j.js';
 import { deliverQueuedNudges, sendNudgeEmail } from './kindnessEmailer.js';
 const { fetchUserEmails, fetchKindnessPrompts, fetchEmailSubject } = await import("./fetchData.js");
@@ -177,8 +190,6 @@ const NOINDEX_EXACT_PATHS = new Set([
   "/admin",
   "/org-portal",
   "/donate",
-  "/friend-quiz",
-  "/friendQuiz",
   "/404",
   "/error",
 ]);
@@ -1589,213 +1600,75 @@ function parseLocationFromRequestBody(body, existingUserRow = {}) {
   };
 }
 
+function buildProfileRedirectPath(params = {}) {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value == null) return;
+    const trimmed = typeof value === "string" ? value.trim() : String(value);
+    if (!trimmed) return;
+    search.set(key, trimmed);
+  });
+  const suffix = search.toString();
+  return suffix ? `/profile?${suffix}` : "/profile";
+}
+
+async function fetchExistingProfileUserRow(req) {
+  const authUserId = Number(req.user?.id);
+  const existingResult = Number.isFinite(authUserId)
+    ? await pool.query(
+        `SELECT *
+           FROM userdata
+          WHERE id = $1
+          LIMIT 1`,
+        [authUserId]
+      )
+    : await pool.query(
+        `SELECT *
+           FROM userdata
+          WHERE email = $1
+          LIMIT 1`,
+        [req.user.email]
+      );
+  return existingResult.rows[0] || null;
+}
+
+const { postPhoto, postAccount, postPreferences } = makeProfileController({
+  pool,
+  fetchExistingProfileUserRow,
+  buildProfileRedirectPath,
+  buildProfileFieldUpdates,
+  buildProfileRedirectParams,
+  resolveProfileSaveAction,
+  parseLocationFromRequestBody,
+  parseAvailabilityFromRequestBody,
+});
+
 app.post(
-  '/profile',
+  '/profile/photo',
   ensureAuthenticated,
   (req, res, next) => {
     uploadAvatar.single('picture')(req, res, (err) => {
       if (!err) return next();
       if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
-        return res.redirect('/profile?uploadError=fileTooLarge');
+        return res.redirect(buildProfileRedirectPath({
+          tab: 'portfolio',
+          uploadError: 'fileTooLarge'
+        }));
       }
       console.error('Profile upload error:', err);
-      return res.redirect('/profile?uploadError=uploadFailed');
+      return res.redirect(buildProfileRedirectPath({
+        tab: 'portfolio',
+        uploadError: 'uploadFailed'
+      }));
     });
   },
-  async (req, res) => {
-    // 1) Extract text fields from req.body
-    let {
-      firstname,
-      lastname,
-      email,
-      phone,
-      address1,
-      city,
-      state,
-      country,
-      interest1,
-      interest2,
-      interest3,
-      sdg1,
-      sdg2,
-      sdg3,
-    } = req.body;
-
-    // 2) Build Base64‐encoded data URI if a file was uploaded; otherwise keep existing
-    let newPictureData = req.user.picture || null;
-    if (req.file) {
-      const mimeType = req.file.mimetype; // e.g. "image/png"
-      const base64str = req.file.buffer.toString('base64');
-      newPictureData = `data:${mimeType};base64,${base64str}`;
-    }
-
-    try {
-      const authUserId = Number(req.user?.id);
-      const existingResult = Number.isFinite(authUserId)
-        ? await pool.query(
-            `SELECT id, email, availability_weekly, specfifc_availability, timezone,
-                    home_base_lat, home_base_lng, home_base_label, home_base_source,
-                    travel_radius_km, travel_mode
-               FROM userdata
-              WHERE id = $1
-              LIMIT 1`,
-            [authUserId]
-          )
-        : await pool.query(
-            `SELECT id, email, availability_weekly, specfifc_availability, timezone,
-                    home_base_lat, home_base_lng, home_base_label, home_base_source,
-                    travel_radius_km, travel_mode
-               FROM userdata
-              WHERE email = $1
-              LIMIT 1`,
-            [req.user.email]
-          );
-      const existingUserRow = existingResult.rows[0] || {};
-      if (!existingUserRow.id) {
-        return res.status(404).send('Profile record not found.');
-      }
-
-      if (typeof email !== "string" || !email.trim()) {
-        email = existingUserRow.email;
-      } else {
-        email = email.trim();
-      }
-
-      const profileAction = typeof req.body?.profile_action === "string"
-        ? req.body.profile_action.trim().toLowerCase()
-        : "";
-      const shouldPersistPreferenceSettings = profileAction === "save_preferences";
-
-      let locationPrefs;
-      if (shouldPersistPreferenceSettings) {
-        try {
-          locationPrefs = parseLocationFromRequestBody(req.body || {}, existingUserRow);
-        } catch (validationErr) {
-          return res.status(400).send(`Invalid location settings: ${validationErr.message}`);
-        }
-      } else {
-        locationPrefs = buildLocationStateForProfile(existingUserRow);
-      }
-
-      let availability;
-      if (shouldPersistPreferenceSettings) {
-        try {
-          availability = parseAvailabilityFromRequestBody(
-            { ...(req.body || {}), timezone: locationPrefs.timezone },
-            existingUserRow
-          );
-        } catch (validationErr) {
-          return res.status(400).send(`Invalid availability settings: ${validationErr.message}`);
-        }
-      } else {
-        availability = buildAvailabilityStateForProfile(existingUserRow);
-      }
-
-      // 3) Update all fields, including picture (TEXT column)
-      const updateResult = await pool.query(
-        `
-        UPDATE userdata
-           SET
-             firstname = $1,
-             lastname  = $2,
-             email     = $3,
-             phone     = $4,
-             address1  = $5,
-             city      = $6,
-             state     = $7,
-             country   = $8,
-             interest1 = $9,
-             interest2 = $10,
-             interest3 = $11,
-             sdg1      = $12,
-             sdg2      = $13,
-             sdg3      = $14,
-             availability_weekly = $15::jsonb,
-             specfifc_availability = $16::jsonb,
-             home_base_lat = $17,
-             home_base_lng = $18,
-             home_base_label = $19,
-             home_base_source = $20,
-             travel_radius_km = $21,
-             travel_mode = $22,
-             timezone = $23,
-             picture   = $24
-         WHERE id = $25
-         RETURNING id, email, availability_weekly, specfifc_availability, timezone,
-                   home_base_lat, home_base_lng, home_base_label, home_base_source,
-                   travel_radius_km, travel_mode
-        `,
-        [
-          firstname,
-          lastname,
-          email,
-          phone,
-          address1,
-          city,
-          state,
-          country,
-          interest1,
-          interest2,
-          interest3,
-          sdg1,
-          sdg2,
-          sdg3,
-          JSON.stringify(availability.weekly),
-          JSON.stringify(availability.exceptions),
-          locationPrefs.lat,
-          locationPrefs.lng,
-          locationPrefs.label,
-          locationPrefs.source,
-          locationPrefs.travel_radius_km,
-          locationPrefs.travel_mode,
-          locationPrefs.timezone,
-          newPictureData,
-          existingUserRow.id,
-        ]
-      );
-      if (!updateResult.rowCount) {
-        return res.status(500).send('Profile update did not persist.');
-      }
-
-      // 4) Update req.user so EJS picks up new picture immediately
-      req.user = {
-        ...req.user,
-        firstname,
-        lastname,
-        email,
-        phone,
-        address1,
-        city,
-        state,
-        country,
-        interest1,
-        interest2,
-        interest3,
-        sdg1,
-        sdg2,
-        sdg3,
-        availability_weekly: availability.weekly,
-        specfifc_availability: availability.exceptions,
-        home_base_lat: locationPrefs.lat,
-        home_base_lng: locationPrefs.lng,
-        home_base_label: locationPrefs.label,
-        home_base_source: locationPrefs.source,
-        travel_radius_km: locationPrefs.travel_radius_km,
-        travel_mode: locationPrefs.travel_mode,
-        timezone: locationPrefs.timezone,
-        picture: newPictureData,
-      };
-
-      return res.redirect('/profile');
-    } catch (err) {
-      console.error('Error updating profile:', err);
-      if (err && err.code === '42703') {
-        return res.status(500).send('Profile preference columns are missing. Run profile migrations in scripts/migrations.');
-      }
-      return res.status(500).send('Error updating profile');
-    }
-  }
+  postPhoto
 );
+
+app.post('/profile/account', ensureAuthenticated, postAccount);
+
+app.post('/profile/preferences', ensureAuthenticated, postPreferences);
+
 // 13.4) View Profile Route
 app.get('/profile', ensureAuthenticated, async (req, res) => {
   try {
@@ -1879,6 +1752,7 @@ app.get('/profile', ensureAuthenticated, async (req, res) => {
     const loginSuccess = req.query.login   === '1';   // login alert
     const name         = req.query.name    || '';     // firstname/email
     const uploadError  = req.query.uploadError || '';
+    const saved        = normalizeOptionalString(req.query.saved, 40) || '';
     // 3) Portfolio + derived skills/hours
     let portfolioRows = [];
     let portfolioSummary = { total_serves_verified: 0, total_hours_verified: 0, total_kind_est_earned: 0 };
@@ -1887,32 +1761,9 @@ app.get('/profile', ensureAuthenticated, async (req, res) => {
     try {
       const rawRows = await fetchVolunteerPortfolio({ userId: statsUserId, limit: 100 });
       const now = new Date();
+      const normalizedPortfolioRows = normalizeVolunteerPortfolioRows(rawRows, { now });
 
-      portfolioRows = rawRows.map((row) => {
-        const startAt = row.start_at ? new Date(row.start_at) : null;
-        const endAt = row.end_at ? new Date(row.end_at) : null;
-        const ms = (startAt && endAt) ? Math.max(0, endAt - startAt) : 0;
-        const duration_hours = ms > 0 ? Math.round((ms / 36e5) * 10) / 10 : 0;
-        const is_upcoming = !!(startAt && startAt > now && ['published', 'scheduled'].includes(row.event_status));
-        const is_verified = row.verification_status === "verified";
-        const acceptedCount = Number(row.accepted_count) || 0;
-        const poolKind = row.reward_pool_kind != null ? Number(row.reward_pool_kind) : 0;
-        const safePoolKind = Number.isFinite(poolKind) ? poolKind : 0;
-        const kind_estimate_per_user = Math.floor(safePoolKind / Math.max(acceptedCount, 1));
-
-        return {
-          ...row,
-          start_at: startAt,
-          end_at: endAt,
-          duration_hours,
-          is_upcoming,
-          is_verified,
-          kind_estimate_per_user,
-          accepted_count: acceptedCount
-        };
-      });
-
-      portfolioSummary = portfolioRows.reduce(
+      portfolioSummary = normalizedPortfolioRows.reduce(
         (acc, row) => {
           if (row.is_verified) {
             acc.total_serves_verified += 1;
@@ -1925,7 +1776,7 @@ app.get('/profile', ensureAuthenticated, async (req, res) => {
       );
 
       const categoryHours = new Map();
-      portfolioRows.forEach((row) => {
+      normalizedPortfolioRows.forEach((row) => {
         const cat = (row.category && String(row.category).trim()) || 'General Service';
         categoryHours.set(cat, (categoryHours.get(cat) || 0) + (row.duration_hours || 0));
       });
@@ -1935,12 +1786,13 @@ app.get('/profile', ensureAuthenticated, async (req, res) => {
         .map(([category, hours]) => ({ category, hours: Math.round(hours * 10) / 10 }));
 
       const recentCategories = [];
-      for (const row of portfolioRows) {
+      for (const row of normalizedPortfolioRows) {
         const cat = (row.category && String(row.category).trim()) || 'General Service';
         if (!recentCategories.includes(cat)) recentCategories.push(cat);
         if (recentCategories.length >= 6) break;
       }
       skillsBreakdown = { topCategories, recentCategories };
+      portfolioRows = sortVolunteerPortfolioRows(normalizedPortfolioRows);
     } catch (portfolioErr) {
       console.warn('Profile portfolio query failed:', portfolioErr.message || portfolioErr);
       portfolioRows = [];
@@ -1975,6 +1827,11 @@ app.get('/profile', ensureAuthenticated, async (req, res) => {
       console.log("[profile] stats_user_id:", statsUserId, "volunteerStats:", volunteerStats);
       console.log("[profile] volunteer_rating:", volunteerRating);
     }
+    const profileCompletion = buildProfileCompletion({
+      user: userRow,
+      availability: availabilityInitial,
+      location: locationInitial
+    });
 
     // 4) Render profile.ejs with all flags + user data
     return res.render('profile', {
@@ -1992,9 +1849,11 @@ app.get('/profile', ensureAuthenticated, async (req, res) => {
       success,
       loginSuccess,
       name,
+      saved,
       uploadError,
       availabilityInitial,
-      locationInitial
+      locationInitial,
+      profileCompletion
     });
   } catch (err) {
     console.error('Profile DB error:', err);
@@ -2301,15 +2160,6 @@ app.get('/api/graph/friends/latest', ensureAuthenticatedApi, async (req, res) =>
     console.error('GET /api/graph/friends/latest error:', e);
     res.status(500).json({ error: 'graph query failed' });
   }
-});
-
-app.get(['/friend-quiz', '/friendQuiz'], (req, res) => {
-  const isAuthed = !!(req.isAuthenticated && req.isAuthenticated());
-  res.render('friendQuiz', { 
-    isAuthed,
-    assetTag: process.env.ASSET_TAG ?? Date.now().toString(36),
-    csrfToken: typeof req.csrfToken === 'function' ? req.csrfToken() : null
-   });
 });
 
 const tierFromScore = (score) => {

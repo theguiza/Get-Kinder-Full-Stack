@@ -777,11 +777,15 @@ export async function respondToEventRsvp(req, res) {
     const hostUserIds = await resolveHostUserIds(req);
     const eventId = req.params.id;
     const action = (req.body?.action || "").toLowerCase();
+    const reason = sanitizeString(req.body?.reason) || null;
+    const requireExistingForDecline = req.body?.require_existing === true;
     const result = await applyEventRsvpAction({
       eventId,
       attendeeId,
       action,
       hostUserIds,
+      reason,
+      requireExistingForDecline,
     });
     if (!result.ok) {
       return res.status(result.statusCode).json({
@@ -809,6 +813,16 @@ export async function respondToEventRsvp(req, res) {
         } catch (notificationError) {
           console.error("[eventsApi] pending approval notification failed:", notificationError);
         }
+      }
+    } else if (action === "decline" && result.data?.previous_status && result.data.previous_status !== "declined") {
+      try {
+        await sendRsvpCancellationNotifications({
+          eventId,
+          attendeeId,
+          previousStatus: result.data.previous_status,
+        });
+      } catch (notificationError) {
+        console.error("[eventsApi] RSVP cancellation notification failed:", notificationError);
       }
     }
 
@@ -1610,10 +1624,12 @@ function buildPendingApprovalEmailCopy({
   };
 }
 
-async function sendPendingApprovalNotifications({ eventId, attendeeId }) {
+async function getRsvpNotificationContext(eventId, attendeeId) {
   const normalizedEventId = String(eventId || "").trim();
   const normalizedAttendeeId = String(attendeeId || "").trim();
-  if (!normalizedEventId || !normalizedAttendeeId) return;
+  if (!normalizedEventId || !normalizedAttendeeId) {
+    return { eventRow: null, attendeeRow: null, normalizedEventId, normalizedAttendeeId };
+  }
 
   const [{ rows: [eventRow] = [] }, { rows: [attendeeRow] = [] }] = await Promise.all([
     pool.query(
@@ -1650,8 +1666,15 @@ async function sendPendingApprovalNotifications({ eventId, attendeeId }) {
     ),
   ]);
 
-  if (!eventRow) return;
+  return {
+    eventRow: eventRow || null,
+    attendeeRow: attendeeRow || null,
+    normalizedEventId,
+    normalizedAttendeeId,
+  };
+}
 
+async function getEventNotificationRecipients(eventRow) {
   const recipients = [];
   const seenEmails = new Set();
   const orgId = Number(eventRow.creator_org_id);
@@ -1715,6 +1738,76 @@ async function sendPendingApprovalNotifications({ eventId, attendeeId }) {
     });
   }
 
+  return recipients;
+}
+
+function buildRsvpCancellationEmailCopy({
+  adminFirstName,
+  attendeeName,
+  attendeeEmail,
+  eventId,
+  eventTitle,
+  startAt,
+  endAt,
+  timeZone,
+  locationText,
+  previousStatus,
+} = {}) {
+  const greetingName = sanitizeString(adminFirstName) || "there";
+  const safeTitle = eventTitle || "Get Kinder opportunity";
+  const safeLocation = sanitizeString(locationText) || "Location TBD";
+  const whenLabel = formatInviteEventDateTime(startAt, endAt, timeZone);
+  const baseUrl = buildAppBaseUrl();
+  const eventHref = `${baseUrl}/events/${encodeURIComponent(String(eventId || ""))}`;
+  const orgPortalHref = `${baseUrl}/org-portal`;
+  const attendeeLabel = sanitizeString(attendeeName) || attendeeEmail || "A volunteer";
+  const attendeeLine = attendeeEmail && attendeeEmail !== attendeeLabel
+    ? `${attendeeLabel} (${attendeeEmail})`
+    : attendeeLabel;
+  const priorLabel = sanitizeString(previousStatus).replace(/_/g, " ") || "active RSVP";
+
+  const html = `
+    <div style="font-family:Arial,sans-serif;color:#1f2937;line-height:1.5">
+      <p>Hi ${escapeHtml(greetingName)},</p>
+      <p><strong>${escapeHtml(attendeeLine)}</strong> cancelled their attendance for <strong>${escapeHtml(safeTitle)}</strong>.</p>
+      <p style="margin:0 0 16px">
+        <strong>Previous status:</strong> ${escapeHtml(priorLabel)}<br/>
+        <strong>When:</strong> ${escapeHtml(whenLabel)}<br/>
+        <strong>Where:</strong> ${escapeHtml(safeLocation)}
+      </p>
+      <p style="margin:0 0 16px">
+        <a href="${orgPortalHref}" target="_blank" rel="noopener" style="display:inline-block;padding:10px 16px;border-radius:999px;background:#455a7c;color:#ffffff;text-decoration:none;font-weight:700;margin-right:8px">Open Org Portal</a>
+        <a href="${eventHref}" target="_blank" rel="noopener" style="display:inline-block;padding:10px 16px;border-radius:999px;background:#ff5656;color:#ffffff;text-decoration:none;font-weight:700">View Event</a>
+      </p>
+      <p>The volunteer is no longer attending this event.</p>
+    </div>
+  `;
+  const text = [
+    `Hi ${greetingName},`,
+    "",
+    `${attendeeLine} cancelled their attendance for ${safeTitle}.`,
+    `Previous status: ${priorLabel}`,
+    `When: ${whenLabel}`,
+    `Where: ${safeLocation}`,
+    "",
+    `Open Org Portal: ${orgPortalHref}`,
+    `View event: ${eventHref}`,
+    "",
+    "The volunteer is no longer attending this event.",
+  ].filter(Boolean).join("\n");
+
+  return {
+    subject: `Attendance cancelled for ${safeTitle}`,
+    html,
+    text,
+  };
+}
+
+async function sendPendingApprovalNotifications({ eventId, attendeeId }) {
+  const { eventRow, attendeeRow, normalizedEventId } = await getRsvpNotificationContext(eventId, attendeeId);
+  if (!eventRow) return;
+
+  const recipients = await getEventNotificationRecipients(eventRow);
   if (!recipients.length) return;
 
   const attendeeName = [attendeeRow?.firstname, attendeeRow?.lastname]
@@ -1750,6 +1843,54 @@ async function sendPendingApprovalNotifications({ eventId, attendeeId }) {
   deliveryResults.forEach((result, index) => {
     if (result.status === "rejected") {
       console.error("[eventsApi] pending approval email failed:", {
+        eventId: normalizedEventId,
+        recipient: recipients[index]?.email || null,
+        error: result.reason?.message || result.reason,
+      });
+    }
+  });
+}
+
+async function sendRsvpCancellationNotifications({ eventId, attendeeId, previousStatus }) {
+  const { eventRow, attendeeRow, normalizedEventId } = await getRsvpNotificationContext(eventId, attendeeId);
+  if (!eventRow) return;
+
+  const recipients = await getEventNotificationRecipients(eventRow);
+  if (!recipients.length) return;
+
+  const attendeeName = [attendeeRow?.firstname, attendeeRow?.lastname]
+    .map((value) => sanitizeString(value))
+    .filter(Boolean)
+    .join(" ");
+  const attendeeEmail = sanitizeString(attendeeRow?.email);
+
+  const deliveryResults = await Promise.allSettled(
+    recipients.map((recipient) => {
+      const emailCopy = buildRsvpCancellationEmailCopy({
+        adminFirstName: recipient.firstName,
+        attendeeName,
+        attendeeEmail,
+        eventId: eventRow.id,
+        eventTitle: eventRow.title,
+        startAt: eventRow.start_at,
+        endAt: eventRow.end_at,
+        timeZone: eventRow.tz,
+        locationText: eventRow.location_text,
+        previousStatus,
+      });
+      return sendNudgeEmail({
+        to: recipient.email,
+        subject: emailCopy.subject,
+        text: emailCopy.text,
+        html: emailCopy.html,
+        fromName: "Get Kinder",
+      });
+    })
+  );
+
+  deliveryResults.forEach((result, index) => {
+    if (result.status === "rejected") {
+      console.error("[eventsApi] RSVP cancellation email failed:", {
         eventId: normalizedEventId,
         recipient: recipients[index]?.email || null,
         error: result.reason?.message || result.reason,

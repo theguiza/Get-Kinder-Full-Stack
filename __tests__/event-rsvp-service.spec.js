@@ -32,6 +32,22 @@ function createRsvpServiceHarness({
       }
 
       if (
+        trimmed.startsWith("SELECT id, capacity, status") &&
+        trimmed.includes("FROM events")
+      ) {
+        return {
+          rows: state.event
+            ? [{
+                id: state.event.id,
+                capacity: state.event.capacity,
+                status: state.event.status,
+              }]
+            : [],
+          rowCount: state.event ? 1 : 0,
+        };
+      }
+
+      if (
         trimmed.includes("SELECT status") &&
         trimmed.includes("FROM event_rsvps") &&
         trimmed.includes("FOR UPDATE")
@@ -124,6 +140,26 @@ function createRsvpServiceHarness({
         return { rows: [{ accepted, accepted_count: accepted }], rowCount: 1 };
       }
 
+      if (
+        trimmed.includes("COUNT(*) FILTER (WHERE status = 'waitlisted')::int AS waitlisted_count") &&
+        trimmed.includes("FROM event_rsvps")
+      ) {
+        const [eventId] = params;
+        const accepted = state.rsvps.filter(
+          (row) =>
+            String(row.event_id) === String(eventId) &&
+            (row.status === "accepted" || row.status === "checked_in"),
+        ).length;
+        const waitlisted = state.rsvps.filter(
+          (row) => String(row.event_id) === String(eventId) && row.status === "waitlisted",
+        ).length;
+        return { rows: [{ accepted_count: accepted, waitlisted_count: waitlisted }], rowCount: 1 };
+      }
+
+      if (trimmed.startsWith("WITH candidates AS (") && trimmed.includes("UPDATE event_rsvps r")) {
+        return { rows: [], rowCount: 0 };
+      }
+
       throw new Error(`Unhandled client query: ${trimmed}`);
     },
     release() {
@@ -214,10 +250,49 @@ test("shared RSVP service preserves canonical decline behavior when no RSVP exis
     });
     assert.equal(result.ok, true);
     assert.equal(result.data.status, "declined");
+    assert.equal(result.data.previous_status, null);
 
     const [rsvp] = harness.state.rsvps;
     assert.equal(rsvp.status, "declined");
     assert.equal(rsvp.notes, "Cannot make it");
+  } finally {
+    harness.restore();
+  }
+});
+
+test("shared RSVP service reports the previous status when cancelling an existing RSVP", async () => {
+  const harness = createRsvpServiceHarness({
+    event: {
+      id: "evt-service-2b",
+      creator_user_id: "host-9",
+      title: "Food Drive",
+      start_at: "2026-05-11T18:00:00.000Z",
+      status: "published",
+      capacity: 10,
+      waitlist_enabled: true,
+    },
+    rsvps: [
+      {
+        event_id: "evt-service-2b",
+        attendee_user_id: "user-2b",
+        status: "accepted",
+        check_in_method: null,
+        checked_in_at: null,
+      },
+    ],
+  });
+
+  try {
+    const result = await applyEventRsvpAction({
+      eventId: "evt-service-2b",
+      attendeeId: "user-2b",
+      action: "decline",
+      hostUserIds: [],
+      requireExistingForDecline: true,
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.data.status, "declined");
+    assert.equal(result.data.previous_status, "accepted");
   } finally {
     harness.restore();
   }

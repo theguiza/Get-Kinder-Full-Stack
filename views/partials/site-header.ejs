@@ -5,10 +5,9 @@
 
   const navItems = [
     { key: "how-it-works", label: "How This Works", href: "/how-it-works" },
-    { key: "events", label: "Volunteer Events", href: "/events" },
+    { key: "events", label: "Volunteering", href: "/events" },
     { key: "dashboard", label: "My Progress", href: "/dashboard" },
-    { key: "profile", label: "Profile", href: "/profile" },
-    { key: "donor", label: "Donor Dashboard", href: "/donor" },
+    { key: "donor", label: "Donors", href: "/donor" },
     { key: "org-portal", label: "Org Portal", href: "/org-portal", authOnly: true }
   ];
 
@@ -56,8 +55,10 @@
         <ul class="navbar-nav d-flex align-items-lg-center mt-3 mt-lg-0">
           <% if (currentUser) { %>
             <li class="nav-item d-flex align-items-center me-3">
-              <span class="navbar-text fw-bold me-2" style="font-size: 1.1rem; color: #455a7c;"><%= currentUser.firstname || currentUser.email %></span>
-              <img src="<%= currentUser.picture ? currentUser.picture : '/images/nerdy-KAI.png' %>" class="rounded-circle me-3" width="32" height="32" alt="Get Kinder User Avatar">
+              <a href="/profile" class="d-flex align-items-center text-decoration-none me-3 font-hover" aria-label="View profile" style="color: #455a7c;">
+                <span class="fw-bold me-2" style="font-size: 1.1rem; color: inherit;"><%= currentUser.firstname || currentUser.email %></span>
+                <img src="<%= currentUser.picture ? currentUser.picture : '/images/nerdy-KAI.png' %>" class="rounded-circle" width="32" height="32" alt="Get Kinder User Avatar">
+              </a>
               <form action="/logout" method="GET" class="d-inline m-0">
                 <button type="submit" class="btn btn-outline-danger btn-sm">Log Out</button>
               </form>

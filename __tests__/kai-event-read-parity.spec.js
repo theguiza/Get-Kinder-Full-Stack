@@ -52,6 +52,23 @@ function createEventReadHarness({
     }
 
     if (
+      trimmed.includes("SELECT COUNT(*)::int AS total_matching") &&
+      trimmed.includes("FROM events e")
+    ) {
+      const now = Date.now();
+      const matched = events
+        .filter((event) => event.status === "published")
+        .filter((event) => {
+          const endOrStart = event.end_at || event.start_at;
+          return new Date(endOrStart).getTime() >= now - 2 * 60 * 60 * 1000;
+        });
+      return {
+        rows: [{ total_matching: matched.length }],
+        rowCount: 1,
+      };
+    }
+
+    if (
       trimmed.includes("FROM events e") &&
       trimmed.includes("WHERE e.id = $1")
     ) {

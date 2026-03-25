@@ -2,11 +2,100 @@ import pool from "../Backend/db/pg.js";
 
 const DEFAULT_LIMIT = 30;
 const MAX_LIMIT = 100;
+const LIVE_EVENT_STATUSES = new Set(["published", "scheduled"]);
+const UPCOMING_RSVP_STATUSES = new Set(["pending", "accepted", "waitlisted"]);
 
 function clampLimit(value) {
   const num = Number(value);
   const fallback = Number.isFinite(num) ? num : DEFAULT_LIMIT;
   return Math.min(Math.max(fallback, 1), MAX_LIMIT);
+}
+
+function normalizePortfolioStatus(value) {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function parsePortfolioDate(value) {
+  if (!value) return null;
+  const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function calculateDurationHours(startAt, endAt) {
+  const start = parsePortfolioDate(startAt);
+  const end = parsePortfolioDate(endAt);
+  if (!start || !end) return 0;
+  const ms = Math.max(0, end.getTime() - start.getTime());
+  return ms > 0 ? Math.round((ms / 36e5) * 10) / 10 : 0;
+}
+
+function getPortfolioSortTimestamp(row) {
+  const primaryDate = row?.is_upcoming
+    ? row.start_at || row.completed_at
+    : row.completed_at || row.start_at;
+  const time = primaryDate instanceof Date ? primaryDate.getTime() : NaN;
+  return Number.isFinite(time)
+    ? time
+    : row?.is_upcoming
+      ? Number.MAX_SAFE_INTEGER
+      : 0;
+}
+
+export function normalizeVolunteerPortfolioRows(rawRows, { now = new Date() } = {}) {
+  const currentTime = parsePortfolioDate(now) || new Date();
+  const sourceRows = Array.isArray(rawRows) ? rawRows : [];
+
+  return sourceRows.map((row) => {
+    const startAt = parsePortfolioDate(row?.start_at);
+    const endAt = parsePortfolioDate(row?.end_at);
+    const completedAt = endAt || startAt || null;
+    const eventStatus = normalizePortfolioStatus(row?.event_status);
+    const rsvpStatus = normalizePortfolioStatus(row?.rsvp_status);
+    const verificationStatus = normalizePortfolioStatus(row?.verification_status);
+    const acceptedCount = Number(row?.accepted_count) || 0;
+    const poolKind = row?.reward_pool_kind != null ? Number(row.reward_pool_kind) : 0;
+    const safePoolKind = Number.isFinite(poolKind) ? poolKind : 0;
+    const startsInFuture = !!(startAt && startAt > currentTime);
+    const isVerified = verificationStatus === "verified";
+    const isCompleted = !!(completedAt && completedAt <= currentTime);
+    const isUpcoming =
+      startsInFuture &&
+      LIVE_EVENT_STATUSES.has(eventStatus) &&
+      UPCOMING_RSVP_STATUSES.has(rsvpStatus);
+
+    return {
+      ...row,
+      start_at: startAt,
+      end_at: endAt,
+      duration_hours: calculateDurationHours(startAt, endAt),
+      is_upcoming: isUpcoming,
+      is_verified: isVerified,
+      is_completed: isCompleted,
+      is_recent_impact: isVerified || isCompleted,
+      completed_at: completedAt,
+      kind_estimate_per_user: Math.floor(safePoolKind / Math.max(acceptedCount, 1)),
+      accepted_count: acceptedCount,
+    };
+  });
+}
+
+export function sortVolunteerPortfolioRows(rows = []) {
+  const sourceRows = Array.isArray(rows) ? rows : [];
+  return [...sourceRows].sort((left, right) => {
+    if (Boolean(left?.is_upcoming) !== Boolean(right?.is_upcoming)) {
+      return left?.is_upcoming ? -1 : 1;
+    }
+
+    const leftTime = getPortfolioSortTimestamp(left);
+    const rightTime = getPortfolioSortTimestamp(right);
+    if (leftTime !== rightTime) {
+      return left?.is_upcoming ? leftTime - rightTime : rightTime - leftTime;
+    }
+
+    const leftId = String(left?.id || left?.event_id || "");
+    const rightId = String(right?.id || right?.event_id || "");
+    return leftId.localeCompare(rightId);
+  });
 }
 
 export async function fetchVolunteerPortfolio({ userId, limit } = {}) {
@@ -273,6 +362,9 @@ export async function getVolunteerStats(userId) {
         attended_minutes: safeMinutes,
       };
     });
+    const normalizedPortfolioRows = sortVolunteerPortfolioRows(
+      normalizeVolunteerPortfolioRows(normalizedRows, { now })
+    );
 
     const verifiedHoursTotal = Math.round((verifiedMinutesTotal / 60) * 10) / 10;
     const streakWeeks = computeStreakWeeks(verifiedDates);
@@ -285,8 +377,8 @@ export async function getVolunteerStats(userId) {
       priorityTier = "Silver";
     }
 
-    const upcoming = normalizedRows
-      .filter((row) => row.start_at && new Date(row.start_at) > now)
+    const upcoming = normalizedPortfolioRows
+      .filter((row) => row.is_upcoming)
       .slice(0, 10)
       .map((row) => ({
         event_id: row.event_id,
@@ -296,10 +388,11 @@ export async function getVolunteerStats(userId) {
         org_name: row.org_name,
         community_tag: row.community_tag,
         status: row.status,
+        rsvp_status: row.rsvp_status,
       }));
 
-    const recentHistory = normalizedRows
-      .filter((row) => !row.start_at || new Date(row.start_at) <= now)
+    const recentHistory = normalizedPortfolioRows
+      .filter((row) => row.is_recent_impact)
       .slice(0, 10)
       .map((row) => ({
         event_id: row.event_id,

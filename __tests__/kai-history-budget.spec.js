@@ -51,6 +51,14 @@ test("handleKaiMessage trims oversized stored history before the Anthropic call"
       return { rows: [], rowCount: 1 };
     }
 
+    if (
+      trimmed.includes("UPDATE kai_conversations") &&
+      trimmed.includes("SET summary = $1") &&
+      trimmed.includes("WHERE id = $2")
+    ) {
+      return { rows: [], rowCount: 1 };
+    }
+
     throw new Error(`Unhandled kai history budget query: ${trimmed}`);
   };
 
@@ -72,7 +80,7 @@ test("handleKaiMessage trims oversized stored history before the Anthropic call"
     });
 
     assert.equal(result.error, undefined);
-    assert.equal(capturedPayloads.length, 1);
+    assert.equal(capturedPayloads.length, 2);
 
     const payload = capturedPayloads[0];
     const estimatedTokens = payload.messages.reduce(
@@ -84,6 +92,7 @@ test("handleKaiMessage trims oversized stored history before the Anthropic call"
     const serialized = JSON.stringify(payload.messages);
     assert.match(serialized, /history-59-assistant/);
     assert.doesNotMatch(serialized, /history-0-user/);
+    assert.match(String(capturedPayloads[1]?.system || ""), /Summarize this KAI conversation/i);
   } finally {
     pool.query = originalQuery;
     kaiServiceTestables.resetAnthropicCreateForTests();
