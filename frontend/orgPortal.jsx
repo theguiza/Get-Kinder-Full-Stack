@@ -956,16 +956,26 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
         endTime: row?.endTime || row?.end_at || null,
         timeZone: row?.startTz || row?.timeZone || row?.tz || "America/Vancouver",
         pendingCount: safeNumber(
-          row?.pendingCount ?? row?.pendingActionsCount ?? row?.pending_actions_count,
+          row?.pendingJoinCount ?? row?.pending_join_count ?? row?.pendingCount ?? row?.pendingActionsCount ?? row?.pending_actions_count,
           0
         ),
         approvedCount: safeNumber(row?.approvedCount, 0),
         capacity: row?.capacity == null ? null : safeNumber(row?.capacity, null),
       }));
 
+    const queueNeedsAttention = mapRows(queue?.needsAttention || [], "needsAttention");
+    const queueUpcoming = mapRows(queue?.upcoming || [], "upcoming");
+    const normalizedUpcomingCandidates = [...queueNeedsAttention, ...queueUpcoming].map((item) => ({
+      ...item,
+      type: item.pendingCount > 0 ? "opp-approval" : "opp-upcoming",
+      icon: item.pendingCount > 0 ? "fa-user-check" : "fa-calendar",
+    }));
+    const needsAttention = normalizedUpcomingCandidates.filter((item) => item.pendingCount > 0);
+    const upcoming = normalizedUpcomingCandidates.filter((item) => item.pendingCount <= 0);
+
     return {
-      needsAttention: mapRows(queue?.needsAttention || [], "needsAttention"),
-      upcoming: mapRows(queue?.upcoming || [], "upcoming"),
+      needsAttention,
+      upcoming,
       active: mapRows(queue?.active || [], "active"),
       drafts: mapRows(queue?.drafts || [], "drafts"),
       completed: mapRows(queue?.completed || [], "completed"),
@@ -3237,7 +3247,17 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
     const iconClass = item.icon === "fa-circle" ? "fas fa-circle text-success" : `fas ${item.icon}`;
     const iconColorClass = item.iconColor === "coral" ? "orgp-item-icon-coral" : "";
     const iconToneClass = item.iconTone ? `orgp-item-icon-${item.iconTone}` : "";
-    const pendingActionsCount = safeNumber(item?.pendingActionsCount ?? item?.pendingCount, 0);
+    const pendingApprovalCount = safeNumber(
+      item?.pendingJoinCount ?? item?.pending_join_count ?? item?.pendingCount,
+      0
+    );
+    const approvedCount = safeNumber(item?.approvedCount ?? item?.approved_count, 0);
+    const capacity = item?.capacity == null ? null : safeNumber(item?.capacity, null);
+    const showUpcomingFillBadge =
+      item.tab === "opportunities" &&
+      String(item?.type || "") === "opp-upcoming" &&
+      capacity != null &&
+      capacity > 0;
     const queueLabel = item.tab === "opportunities"
       ? (item.opportunityName || item.label || "Opportunity")
       : item.label;
@@ -3259,8 +3279,10 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
         <div className="d-flex align-items-center gap-2">
           <i className={`${iconClass} orgp-item-icon ${iconColorClass} ${iconToneClass}`} aria-hidden="true"></i>
           <span className="flex-grow-1">{queueLabel}</span>
-          {item.tab === "opportunities" && pendingActionsCount > 0 ? (
-            <span className="badge text-bg-warning">{pendingActionsCount}</span>
+          {item.tab === "opportunities" && pendingApprovalCount > 0 ? (
+            <span className="badge text-bg-warning">{pendingApprovalCount}</span>
+          ) : showUpcomingFillBadge ? (
+            <span className="badge text-bg-light border">{`${approvedCount}/${capacity}`}</span>
           ) : null}
         </div>
       </button>

@@ -903,13 +903,14 @@ orgPortalRouter.get("/queue", async (req, res) => {
     upcomingCandidateRows.forEach((row) => {
       const eventId = String(row.event_id || "").trim();
       const counts = pendingCountsByEventId.get(eventId) || ZERO_PENDING_ACTION_COUNTS;
+      const pendingApprovalCount = Number(counts.pending_join_count) || 0;
       const payload = {
-        id: `${counts.pending_actions_count > 0 ? "needs-attention" : "upcoming"}-${eventId}`,
-        type: counts.pending_actions_count > 0 ? "opp-approval" : "opp-upcoming",
+        id: `${pendingApprovalCount > 0 ? "needs-attention" : "upcoming"}-${eventId}`,
+        type: pendingApprovalCount > 0 ? "opp-approval" : "opp-upcoming",
         label: `${row.event_title}`,
         opportunityId: eventId,
         opportunityName: row.event_title,
-        pendingCount: counts.pending_actions_count,
+        pendingCount: pendingApprovalCount,
         pendingJoinCount: counts.pending_join_count,
         pendingVerifyCount: counts.pending_verify_count,
         pendingActionsCount: counts.pending_actions_count,
@@ -919,7 +920,7 @@ orgPortalRouter.get("/queue", async (req, res) => {
         endTime: row.end_at,
         startTz: row.tz || null,
       };
-      if (counts.pending_actions_count > 0) needsAttention.push(payload);
+      if (pendingApprovalCount > 0) needsAttention.push(payload);
       else upcoming.push(payload);
     });
 

@@ -9,7 +9,7 @@ import {
 } from "../services/eventsService.js";
 import { processVerifiedEarnShift } from "../services/earnShiftFundingService.js";
 import { sendProspectInviteEmail, sendNudgeEmail } from "../kindnessEmailer.js";
-import { resolveOrgScope } from "../services/orgScopeService.js";
+import { hasUserOrgMembershipTable, resolveOrgScope } from "../services/orgScopeService.js";
 import { promoteWaitlistedAttendees } from "../services/waitlistService.js";
 import { applyEventRsvpAction, getEventRsvpSnapshot } from "../services/eventRsvpService.js";
 import { buildEventCalendarInvite } from "../services/eventCalendarService.js";
@@ -799,6 +799,17 @@ export async function respondToEventRsvp(req, res) {
         eventId: eventId ? String(eventId) : null,
         savedAt: new Date().toISOString(),
       });
+
+      if (result.data?.status === "pending") {
+        try {
+          await sendPendingApprovalNotifications({
+            eventId,
+            attendeeId,
+          });
+        } catch (notificationError) {
+          console.error("[eventsApi] pending approval notification failed:", notificationError);
+        }
+      }
     }
 
     return res.json({
@@ -1535,6 +1546,216 @@ function formatInviteEventDateTime(startAt, endAt, timeZone) {
       }).format(end)
     : null;
   return endLabel ? `${startLabel} - ${endLabel} (${tz})` : `${startLabel} (${tz})`;
+}
+
+function buildPendingApprovalEmailCopy({
+  adminFirstName,
+  attendeeName,
+  attendeeEmail,
+  eventId,
+  eventTitle,
+  description,
+  startAt,
+  endAt,
+  timeZone,
+  locationText,
+} = {}) {
+  const greetingName = sanitizeString(adminFirstName) || "there";
+  const safeTitle = eventTitle || "Get Kinder opportunity";
+  const safeLocation = sanitizeString(locationText) || "Location TBD";
+  const safeDescription = sanitizeString(description);
+  const whenLabel = formatInviteEventDateTime(startAt, endAt, timeZone);
+  const baseUrl = buildAppBaseUrl();
+  const eventHref = `${baseUrl}/events/${encodeURIComponent(String(eventId || ""))}`;
+  const orgPortalHref = `${baseUrl}/org-portal`;
+  const attendeeLabel = sanitizeString(attendeeName) || attendeeEmail || "A volunteer";
+  const attendeeLine = attendeeEmail && attendeeEmail !== attendeeLabel
+    ? `${attendeeLabel} (${attendeeEmail})`
+    : attendeeLabel;
+
+  const html = `
+    <div style="font-family:Arial,sans-serif;color:#1f2937;line-height:1.5">
+      <p>Hi ${escapeHtml(greetingName)},</p>
+      <p><strong>${escapeHtml(attendeeLine)}</strong> has requested approval for <strong>${escapeHtml(safeTitle)}</strong>.</p>
+      <p style="margin:0 0 16px">
+        <strong>When:</strong> ${escapeHtml(whenLabel)}<br/>
+        <strong>Where:</strong> ${escapeHtml(safeLocation)}
+      </p>
+      ${safeDescription ? `<p style="margin:0 0 16px">${escapeHtml(safeDescription)}</p>` : ""}
+      <p style="margin:0 0 16px">
+        <a href="${orgPortalHref}" target="_blank" rel="noopener" style="display:inline-block;padding:10px 16px;border-radius:999px;background:#455a7c;color:#ffffff;text-decoration:none;font-weight:700;margin-right:8px">Review in Org Portal</a>
+        <a href="${eventHref}" target="_blank" rel="noopener" style="display:inline-block;padding:10px 16px;border-radius:999px;background:#ff5656;color:#ffffff;text-decoration:none;font-weight:700">View Event</a>
+      </p>
+      <p>There is now a pending approval waiting in your organization queue.</p>
+    </div>
+  `;
+  const text = [
+    `Hi ${greetingName},`,
+    "",
+    `${attendeeLine} has requested approval for ${safeTitle}.`,
+    `When: ${whenLabel}`,
+    `Where: ${safeLocation}`,
+    safeDescription ? `Details: ${safeDescription}` : "",
+    "",
+    `Review in Org Portal: ${orgPortalHref}`,
+    `View event: ${eventHref}`,
+    "",
+    "There is now a pending approval waiting in your organization queue.",
+  ].filter(Boolean).join("\n");
+
+  return {
+    subject: `Pending approval for ${safeTitle}`,
+    html,
+    text,
+  };
+}
+
+async function sendPendingApprovalNotifications({ eventId, attendeeId }) {
+  const normalizedEventId = String(eventId || "").trim();
+  const normalizedAttendeeId = String(attendeeId || "").trim();
+  if (!normalizedEventId || !normalizedAttendeeId) return;
+
+  const [{ rows: [eventRow] = [] }, { rows: [attendeeRow] = [] }] = await Promise.all([
+    pool.query(
+      `
+        SELECT
+          e.id,
+          e.title,
+          e.description,
+          e.start_at,
+          e.end_at,
+          e.tz,
+          e.location_text,
+          e.creator_user_id,
+          creator.firstname AS creator_firstname,
+          creator.lastname AS creator_lastname,
+          creator.email AS creator_email,
+          creator.org_id AS creator_org_id
+        FROM events e
+        LEFT JOIN userdata creator
+          ON creator.id = e.creator_user_id
+        WHERE e.id = $1
+        LIMIT 1
+      `,
+      [normalizedEventId]
+    ),
+    pool.query(
+      `
+        SELECT firstname, lastname, email
+        FROM userdata
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [normalizedAttendeeId]
+    ),
+  ]);
+
+  if (!eventRow) return;
+
+  const recipients = [];
+  const seenEmails = new Set();
+  const orgId = Number(eventRow.creator_org_id);
+  if (Number.isInteger(orgId) && orgId > 0 && await hasUserOrgMembershipTable()) {
+    const { rows } = await pool.query(
+      `
+        SELECT DISTINCT
+          u.firstname,
+          u.lastname,
+          u.email
+        FROM public.user_org_memberships m
+        JOIN public.userdata u
+          ON u.id = m.user_id
+        WHERE m.org_id = $1
+          AND COALESCE(m.is_active, true) = true
+          AND LOWER(COALESCE(m.role, 'admin')) = 'admin'
+          AND u.email IS NOT NULL
+        ORDER BY u.email
+      `,
+      [orgId]
+    );
+    rows.forEach((row) => {
+      const email = sanitizeString(row.email).toLowerCase();
+      if (!email || seenEmails.has(email)) return;
+      seenEmails.add(email);
+      recipients.push({
+        firstName: sanitizeString(row.firstname),
+        email,
+      });
+    });
+  }
+
+  if (Number.isInteger(orgId) && orgId > 0) {
+    const { rows } = await pool.query(
+      `
+        SELECT DISTINCT firstname, lastname, email
+        FROM public.userdata
+        WHERE org_id = $1
+          AND org_rep = true
+          AND email IS NOT NULL
+        ORDER BY email
+      `,
+      [orgId]
+    );
+    rows.forEach((row) => {
+      const email = sanitizeString(row.email).toLowerCase();
+      if (!email || seenEmails.has(email)) return;
+      seenEmails.add(email);
+      recipients.push({
+        firstName: sanitizeString(row.firstname),
+        email,
+      });
+    });
+  }
+
+  const creatorEmail = sanitizeString(eventRow.creator_email).toLowerCase();
+  if (!recipients.length && creatorEmail) {
+    recipients.push({
+      firstName: sanitizeString(eventRow.creator_firstname),
+      email: creatorEmail,
+    });
+  }
+
+  if (!recipients.length) return;
+
+  const attendeeName = [attendeeRow?.firstname, attendeeRow?.lastname]
+    .map((value) => sanitizeString(value))
+    .filter(Boolean)
+    .join(" ");
+  const attendeeEmail = sanitizeString(attendeeRow?.email);
+
+  const deliveryResults = await Promise.allSettled(
+    recipients.map((recipient) => {
+      const emailCopy = buildPendingApprovalEmailCopy({
+        adminFirstName: recipient.firstName,
+        attendeeName,
+        attendeeEmail,
+        eventId: eventRow.id,
+        eventTitle: eventRow.title,
+        description: eventRow.description,
+        startAt: eventRow.start_at,
+        endAt: eventRow.end_at,
+        timeZone: eventRow.tz,
+        locationText: eventRow.location_text,
+      });
+      return sendNudgeEmail({
+        to: recipient.email,
+        subject: emailCopy.subject,
+        text: emailCopy.text,
+        html: emailCopy.html,
+        fromName: "Get Kinder",
+      });
+    })
+  );
+
+  deliveryResults.forEach((result, index) => {
+    if (result.status === "rejected") {
+      console.error("[eventsApi] pending approval email failed:", {
+        eventId: normalizedEventId,
+        recipient: recipients[index]?.email || null,
+        error: result.reason?.message || result.reason,
+      });
+    }
+  });
 }
 
 function buildCoordinatorInviteEmailCopy({
