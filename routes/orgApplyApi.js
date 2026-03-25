@@ -42,6 +42,10 @@ function appBaseUrl(req) {
   return `http://localhost:${port}`;
 }
 
+function normalizeOrganizationName(value) {
+  return String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
 orgApplyRouter.get("/org-apply", ensureAuthenticated, async (req, res) => {
   try {
     const scope = await resolveOrgScope(req, {
@@ -179,25 +183,46 @@ orgApplyRouter.post("/admin/org-applications/:id/approve", ensureAuthenticated, 
 
     await client.query("BEGIN");
 
-    const { rows: [organization] } = await client.query(
-      `
-        INSERT INTO organizations
-          (name, description, website, rep_user_id, rep_role, status, approved_at, approved_by)
-        VALUES
-          ($1, $2, $3, $4, $5, 'approved', NOW(), $6)
-        RETURNING id
-      `,
-      [
-        application.org_name,
-        application.org_description,
-        application.org_website,
-        application.user_id,
-        application.rep_role,
-        req.user?.email || "",
-      ]
-    );
+    const normalizedOrgName = normalizeOrganizationName(application.org_name);
+    let approvedOrgId = null;
 
-    const approvedOrgId = Number(organization.id);
+    if (normalizedOrgName) {
+      const { rows: [existingOrganization] } = await client.query(
+        `
+          SELECT id, rep_user_id
+          FROM organizations
+          WHERE LOWER(REGEXP_REPLACE(TRIM(name), '\s+', ' ', 'g')) = $1
+          ORDER BY id ASC
+          LIMIT 1
+          FOR UPDATE
+        `,
+        [normalizedOrgName]
+      );
+      if (existingOrganization?.id != null) {
+        approvedOrgId = Number(existingOrganization.id);
+      }
+    }
+
+    if (!approvedOrgId) {
+      const { rows: [organization] } = await client.query(
+        `
+          INSERT INTO organizations
+            (name, description, website, rep_user_id, rep_role, status, approved_at, approved_by)
+          VALUES
+            ($1, $2, $3, $4, $5, 'approved', NOW(), $6)
+          RETURNING id
+        `,
+        [
+          application.org_name,
+          application.org_description,
+          application.org_website,
+          application.user_id,
+          application.rep_role,
+          req.user?.email || "",
+        ]
+      );
+      approvedOrgId = Number(organization.id);
+    }
 
     await client.query(
       `
