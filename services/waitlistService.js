@@ -62,7 +62,7 @@ export async function promoteWaitlistedAttendees({ runner, eventId }) {
         LIMIT $2
       )
       UPDATE event_rsvps r
-         SET status = 'accepted',
+         SET status = 'pending',
              updated_at = NOW(),
              check_in_method = NULL,
              checked_in_at = NULL

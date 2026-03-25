@@ -127,13 +127,13 @@ function createPoolHarness({
         };
       }
 
-      if (trimmed.includes("UPDATE event_rsvps r") && trimmed.includes("SET status = 'accepted'")) {
+      if (trimmed.includes("UPDATE event_rsvps r") && trimmed.includes("SET status = 'pending'")) {
         const [eventId] = params;
         const match = state.rsvps.find(
           (row) => String(row.event_id) === String(eventId) && row.status === "waitlisted",
         );
         if (!match) return { rows: [], rowCount: 0 };
-        match.status = "accepted";
+        match.status = "pending";
         match.check_in_method = null;
         match.checked_in_at = null;
         return {
@@ -287,7 +287,7 @@ test("KAI cancel_rsvp clears stale check-in metadata on checked-in RSVP", async 
   }
 });
 
-test("KAI cancel_rsvp still promotes waitlisted attendees after a seat is released", async () => {
+test("KAI cancel_rsvp moves waitlisted attendees back into pending approval when a seat is released", async () => {
   const harness = createPoolHarness({
     event: {
       id: "evt-3",
@@ -325,7 +325,7 @@ test("KAI cancel_rsvp still promotes waitlisted attendees after a seat is releas
     assert.equal(cancelled.status, "declined");
     assert.equal(cancelled.check_in_method, null);
     assert.equal(cancelled.checked_in_at, null);
-    assert.equal(promoted.status, "accepted");
+    assert.equal(promoted.status, "pending");
     assert.equal(promoted.check_in_method, null);
     assert.equal(promoted.checked_in_at, null);
   } finally {

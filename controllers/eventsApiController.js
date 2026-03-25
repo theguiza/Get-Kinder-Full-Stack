@@ -8,10 +8,11 @@ import {
   updateEventRsvpVerification,
 } from "../services/eventsService.js";
 import { processVerifiedEarnShift } from "../services/earnShiftFundingService.js";
-import { sendProspectInviteEmail } from "../kindnessEmailer.js";
+import { sendProspectInviteEmail, sendNudgeEmail } from "../kindnessEmailer.js";
 import { resolveOrgScope } from "../services/orgScopeService.js";
 import { promoteWaitlistedAttendees } from "../services/waitlistService.js";
 import { applyEventRsvpAction, getEventRsvpSnapshot } from "../services/eventRsvpService.js";
+import { buildEventCalendarInvite } from "../services/eventCalendarService.js";
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
@@ -56,6 +57,19 @@ function clampLimit(value) {
 
 function sanitizeString(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function buildAppBaseUrl() {
+  return (process.env.APP_BASE_URL || "https://getkinder.ai").replace(/\/+$/, "");
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function sanitizeInternalPath(value, fallback = "/events") {
@@ -378,6 +392,8 @@ export async function createInvite(req, res) {
     const inviteeName = typeof req.body?.invitee_name === "string" ? req.body.invitee_name.trim() : "";
     const tone = sanitizeTone(req.body?.tone) || "friendly";
     const sendByKai = Boolean(req.body?.send_by_kai);
+    const inviteStyle = sanitizeString(req.body?.invite_style).toLowerCase();
+    const useCoordinatorInviteStyle = inviteStyle === "org_portal";
 
     if (!inviteeEmail) {
       return res.status(400).json({ ok: false, error: "Invitee email is required" });
@@ -552,29 +568,65 @@ export async function createInvite(req, res) {
       });
     }
 
-    const emailCopy = buildInviteEmailCopy({
-      eventRow,
-      senderName,
-      senderEmail,
-      inviteeName: finalInviteeName,
-      tone,
-      eventLink,
-      joinLink,
-    });
+    const emailCopy = useCoordinatorInviteStyle
+      ? buildCoordinatorInviteEmailCopy({
+          eventId,
+          eventRow,
+          senderName,
+          inviteeName: finalInviteeName,
+        })
+      : buildInviteEmailCopy({
+          eventRow,
+          senderName,
+          senderEmail,
+          inviteeName: finalInviteeName,
+          tone,
+          eventLink,
+          joinLink,
+        });
+    const calendarInvite = useCoordinatorInviteStyle
+      ? buildEventCalendarInvite({
+          eventId,
+          title: eventRow.title,
+          description: eventRow.description,
+          startAt: eventRow.start_at,
+          endAt: eventRow.end_at,
+          locationText: eventRow.location_text,
+          baseUrl,
+        })
+      : null;
     try {
-      await sendProspectInviteEmail({
-        to: inviteeEmail,
-        inviteeName: finalInviteeName,
-        hostName: senderName,
-        eventTitle: eventRow.title,
-        eventLink,
-        joinLink,
-        subject: emailCopy.subject,
-        html: emailCopy.html,
-        text: emailCopy.text,
-        sendByKai,
-        replyTo: senderEmail || null,
-      });
+      if (useCoordinatorInviteStyle) {
+        await sendNudgeEmail({
+          to: inviteeEmail,
+          subject: emailCopy.subject,
+          text: emailCopy.text,
+          html: emailCopy.html,
+          fromName: senderName || "Get Kinder",
+          replyTo: senderEmail || null,
+          attachments: calendarInvite
+            ? [{
+                filename: calendarInvite.fileName,
+                content: calendarInvite.content,
+                contentType: "text/calendar; charset=utf-8",
+              }]
+            : undefined,
+        });
+      } else {
+        await sendProspectInviteEmail({
+          to: inviteeEmail,
+          inviteeName: finalInviteeName,
+          hostName: senderName,
+          eventTitle: eventRow.title,
+          eventLink,
+          joinLink,
+          subject: emailCopy.subject,
+          html: emailCopy.html,
+          text: emailCopy.text,
+          sendByKai,
+          replyTo: senderEmail || null,
+        });
+      }
     } catch (mailErr) {
       console.error("[eventsApi] invite email failed:", mailErr);
       await logInviteModeration({
@@ -598,6 +650,7 @@ export async function createInvite(req, res) {
       metadata: {
         tone,
         sendByKai,
+        inviteStyle: useCoordinatorInviteStyle ? "org_portal" : "default",
         inviteeEmail: inviteRecord.invitee_email,
       },
     });
@@ -685,57 +738,33 @@ export async function draftInviteCopy(req, res) {
 export async function downloadEventCalendar(req, res) {
   try {
     const eventId = req.params.id;
-    const { rows: [eventRow] } = await client.query(
-      `SELECT id, creator_user_id, title, description, start_at, end_at, tz, location_text
+    const { rows: [eventRow] } = await pool.query(
+      `SELECT id, title, description, start_at, end_at, tz, location_text, status
          FROM events
         WHERE id = $1
         LIMIT 1`,
       [eventId]
     );
 
-    if (!eventRow) {
+    if (!eventRow || String(eventRow.status || "").toLowerCase() !== "published") {
       return res.status(404).json({ ok: false, error: "Event not found" });
     }
 
-    // Allow any authenticated viewer; we just ensure the request is authed via middleware.
-    const start = formatIcsDate(eventRow.start_at);
-    const end = formatIcsDate(eventRow.end_at || eventRow.start_at);
-    if (!start || !end) {
+    const calendarInvite = buildEventCalendarInvite({
+      eventId: eventRow.id,
+      title: eventRow.title,
+      description: eventRow.description,
+      startAt: eventRow.start_at,
+      endAt: eventRow.end_at,
+      locationText: eventRow.location_text,
+    });
+    if (!calendarInvite) {
       return res.status(400).json({ ok: false, error: "Event is missing start/end time" });
     }
 
-    const summary = eventRow.title || "Get Kinder Event";
-    const description = eventRow.description || "";
-    const location = eventRow.location_text || "";
-    const now = formatIcsDate(new Date());
-    const baseUrl = process.env.APP_BASE_URL || "https://getkinder.ai";
-    const eventLink = `${baseUrl}/events/${encodeURIComponent(eventId)}`;
-    const uid = `${eventRow.id}@getkinder.ai`;
-
-    const icsLines = [
-      "BEGIN:VCALENDAR",
-      "VERSION:2.0",
-      "PRODID:-//Get Kinder//Events//EN",
-      "CALSCALE:GREGORIAN",
-      "BEGIN:VEVENT",
-      `UID:${uid}`,
-      `DTSTAMP:${now}`,
-      `DTSTART:${start}`,
-      `DTEND:${end}`,
-      `SUMMARY:${escapeIcsText(summary)}`,
-      description ? `DESCRIPTION:${escapeIcsText(description)}\\n${escapeIcsText(eventLink)}` : `DESCRIPTION:${escapeIcsText(eventLink)}`,
-      location ? `LOCATION:${escapeIcsText(location)}` : "",
-      `URL:${escapeIcsText(eventLink)}`,
-      "END:VEVENT",
-      "END:VCALENDAR",
-    ].filter(Boolean);
-
-    const icsContent = icsLines.join("\r\n");
-    const fileName = `${summary.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || "event"}.ics`;
-
     res.setHeader("Content-Type", "text/calendar; charset=utf-8");
-    res.setHeader("Content-Disposition", `attachment; filename=\"${fileName}\"`);
-    return res.send(icsContent);
+    res.setHeader("Content-Disposition", `attachment; filename=\"${calendarInvite.fileName}\"`);
+    return res.send(calendarInvite.content);
   } catch (error) {
     console.error("[eventsApi] downloadEventCalendar error:", error);
     return res.status(500).json({ ok: false, error: "Unable to generate calendar invite" });
@@ -1194,16 +1223,6 @@ function sanitizeTone(value) {
   return INVITE_TONES[tone] ? tone : null;
 }
 
-function escapeHtml(value) {
-  if (typeof value !== "string") return "";
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
 function formatEventSummaryForInvite(eventRow) {
   if (!eventRow?.start_at) return "soon";
   try {
@@ -1261,7 +1280,7 @@ function formatSenderName(senderRow, fallbackEmail) {
 
 async function resolveInviteSenderContext({ senderId, senderHostUserIds = [], eventId, senderEmail }) {
   const { rows: [eventRow] } = await pool.query(
-    `SELECT id, creator_user_id, status, title, start_at, tz, location_text
+    `SELECT id, creator_user_id, status, title, description, start_at, end_at, tz, location_text
        FROM events
       WHERE id = $1
       LIMIT 1`,
@@ -1494,21 +1513,86 @@ function buildInviteEmailCopy({
   return { subject, html, text, body }; // body returned for drafts
 }
 
-function formatIcsDate(value) {
-  if (!value) return null;
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  const iso = date.toISOString().replace(/[-:]/g, "").split(".")[0];
-  return `${iso}Z`;
+function formatInviteEventDateTime(startAt, endAt, timeZone) {
+  if (!startAt) return "Date TBD";
+  const start = new Date(startAt);
+  if (Number.isNaN(start.getTime())) return "Date TBD";
+  const end = endAt ? new Date(endAt) : null;
+  const tz = String(timeZone || "America/Vancouver");
+  const startLabel = new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: tz,
+  }).format(start);
+  const endLabel = end && !Number.isNaN(end.getTime())
+    ? new Intl.DateTimeFormat("en-US", {
+        hour: "numeric",
+        minute: "2-digit",
+        timeZone: tz,
+      }).format(end)
+    : null;
+  return endLabel ? `${startLabel} - ${endLabel} (${tz})` : `${startLabel} (${tz})`;
 }
 
-function escapeIcsText(value) {
-  if (!value) return "";
-  return value
-    .replace(/\\/g, "\\\\")
-    .replace(/\n/g, "\\n")
-    .replace(/,/g, "\\,")
-    .replace(/;/g, "\\;");
+function buildCoordinatorInviteEmailCopy({
+  eventId,
+  eventRow,
+  senderName,
+  inviteeName,
+}) {
+  const greetingName = inviteeName?.split(/\s+/)[0] || "there";
+  const safeTitle = eventRow?.title || "a Get Kinder opportunity";
+  const safeLocation = sanitizeString(eventRow?.location_text) || "Location TBD";
+  const safeDescription = sanitizeString(eventRow?.description);
+  const coordinatorName = sanitizeString(senderName) || "Our coordinator";
+  const whenLabel = formatInviteEventDateTime(eventRow?.start_at, eventRow?.end_at, eventRow?.tz);
+  const baseUrl = buildAppBaseUrl();
+  const publishedEvent = String(eventRow?.status || "").toLowerCase() === "published";
+  const eventHref = publishedEvent
+    ? `${baseUrl}/events/${encodeURIComponent(String(eventId || ""))}`
+    : `${baseUrl}/register?event=${encodeURIComponent(String(eventId || ""))}`;
+  const calendarHref = `${baseUrl}/api/events/${encodeURIComponent(String(eventId || ""))}/calendar.ics`;
+  const html = `
+    <div style="font-family:Arial,sans-serif;color:#1f2937;line-height:1.5">
+      <p>Hi ${escapeHtml(greetingName)},</p>
+      <p>${escapeHtml(coordinatorName)} thinks you would be a great fit for <strong>${escapeHtml(safeTitle)}</strong>.</p>
+      <p>We would love to invite you to join this opportunity.</p>
+      <p style="margin:0 0 16px">
+        <strong>When:</strong> ${escapeHtml(whenLabel)}<br/>
+        <strong>Where:</strong> ${escapeHtml(safeLocation)}
+      </p>
+      ${safeDescription ? `<p style="margin:0 0 16px">${escapeHtml(safeDescription)}</p>` : ""}
+      <p style="margin:0 0 16px">
+        <a href="${eventHref}" target="_blank" rel="noopener" style="display:inline-block;padding:10px 16px;border-radius:999px;background:#455a7c;color:#ffffff;text-decoration:none;font-weight:700;margin-right:8px">View Event Details</a>
+        <a href="${calendarHref}" target="_blank" rel="noopener" style="display:inline-block;padding:10px 16px;border-radius:999px;background:#ff5656;color:#ffffff;text-decoration:none;font-weight:700">Add to Calendar</a>
+      </p>
+      <p>You can also use the attached calendar invite file.</p>
+      <p>If this feels like a fit, we would love to have you with us.</p>
+    </div>
+  `;
+  const text = [
+    `Hi ${greetingName},`,
+    "",
+    `${coordinatorName} thinks you would be a great fit for ${safeTitle}.`,
+    "We would love to invite you to join this opportunity.",
+    `When: ${whenLabel}`,
+    `Where: ${safeLocation}`,
+    safeDescription ? `Details: ${safeDescription}` : "",
+    "",
+    `View event details: ${eventHref}`,
+    `Add to calendar: ${calendarHref}`,
+    "",
+    "A calendar invite is also attached.",
+    "If this feels like a fit, we would love to have you with us.",
+  ].filter(Boolean).join("\n");
+  return {
+    subject: `${coordinatorName} invited you to ${safeTitle}`,
+    html,
+    text,
+  };
 }
 
 async function buildEventPayload(body, { strict = false, fallback = {} } = {}) {

@@ -83,7 +83,8 @@ export async function sendNudgeEmail({
   bcc = process.env.BCC_EMAIL || process.env.SMTP_USER || 'hello@getkindr.com',
   // new:
   fromName,
-  replyTo
+  replyTo,
+  attachments
 }) {
   const t = getNudgesTransport();
   // "Michael via Kinder <hello@getkindr.com>"
@@ -97,7 +98,8 @@ export async function sendNudgeEmail({
     to,
     subject: subject || 'A quick nudge ✉️', // deliverQueuedNudges supplies personalized default
     text: text || undefined,
-    html: html || undefined
+    html: html || undefined,
+    attachments: Array.isArray(attachments) && attachments.length ? attachments : undefined,
   };
   if (replyTo) mail.replyTo = replyTo;
   if (bcc) mail.bcc = bcc;

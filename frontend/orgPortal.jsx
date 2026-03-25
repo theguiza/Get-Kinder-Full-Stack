@@ -213,6 +213,10 @@ function formatEventDateTime(startIso, endIso, eventTz) {
   return `${eventStart} - ${eventEnd} (${savedTimeZone})`;
 }
 
+function hasDisplayText(value) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
 function formatCommsDate(iso) {
   if (!iso) return "Date TBD";
   const dt = new Date(iso);
@@ -560,8 +564,21 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
   const [approveAllLoading, setApproveAllLoading] = useState(false);
   const [approveAllProgress, setApproveAllProgress] = useState({ current: 0, total: 0 });
   const [actionError, setActionError] = useState("");
+  const [opportunityInviteModal, setOpportunityInviteModal] = useState({
+    open: false,
+    email: "",
+    name: "",
+    sending: false,
+    error: "",
+  });
+  const [opportunityInviteNotice, setOpportunityInviteNotice] = useState(null);
   const [applicantCounts, setApplicantCounts] = useState(ZERO_PENDING_ACTION_COUNTS);
+  const [selectedOpportunityDetail, setSelectedOpportunityDetail] = useState(null);
+  const [selectedOpportunityDetailLoading, setSelectedOpportunityDetailLoading] = useState(false);
+  const [selectedOpportunityDetailError, setSelectedOpportunityDetailError] = useState("");
   const [applicantProfileModal, setApplicantProfileModal] = useState({ open: false, applicant: null });
+  const [approvedDeclineModal, setApprovedDeclineModal] = useState({ open: false, applicant: null });
+  const [approveAllConfirmOpen, setApproveAllConfirmOpen] = useState(false);
 
   const [checkinQueueItems, setCheckinQueueItems] = useState([]);
   const [checkinQueueLoading, setCheckinQueueLoading] = useState(false);
@@ -860,6 +877,8 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
     setDetailError("");
     setActionError("");
     setActionLoadingByUser({});
+    setApprovedDeclineModal({ open: false, applicant: null });
+    setApproveAllConfirmOpen(false);
     setApproveAllLoading(false);
     setApproveAllProgress({ current: 0, total: 0 });
     setRoster([]);
@@ -1048,12 +1067,55 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
       setApplicantsLoading(false);
       setDetailError("");
       setActionError("");
+      setOpportunityInviteModal({
+        open: false,
+        email: "",
+        name: "",
+        sending: false,
+        error: "",
+      });
+      setOpportunityInviteNotice(null);
+      setSelectedOpportunityDetail(null);
+      setSelectedOpportunityDetailLoading(false);
+      setSelectedOpportunityDetailError("");
       setActionLoadingByUser({});
       setApproveAllLoading(false);
       setApproveAllProgress({ current: 0, total: 0 });
       setApplicantProfileModal({ open: false, applicant: null });
     }
   }, [activeTab, selectedOpportunityId, fetchApplicantsForOpportunity]);
+
+  const fetchOpportunityDetail = useCallback(async (opportunityId, { showLoading = true } = {}) => {
+    if (!opportunityId) return;
+    if (showLoading) setSelectedOpportunityDetailLoading(true);
+    setSelectedOpportunityDetailError("");
+
+    try {
+      const response = await fetch(`/api/events/${encodeURIComponent(opportunityId)}`, {
+        credentials: "include",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.error || "event_details_failed");
+      }
+      setSelectedOpportunityDetail(payload?.data || null);
+    } catch (_) {
+      setSelectedOpportunityDetail(null);
+      setSelectedOpportunityDetailError("Could not load event details.");
+    } finally {
+      if (showLoading) setSelectedOpportunityDetailLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === "opportunities" && selectedOpportunityId) {
+      fetchOpportunityDetail(selectedOpportunityId, { showLoading: true });
+    } else {
+      setSelectedOpportunityDetail(null);
+      setSelectedOpportunityDetailLoading(false);
+      setSelectedOpportunityDetailError("");
+    }
+  }, [activeTab, selectedOpportunityId, fetchOpportunityDetail]);
 
   useEffect(() => {
     if (!pendingDetailScroll) return;
@@ -2317,16 +2379,6 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
     [normalizedApplicants]
   );
 
-  const pendingVerifyApplicants = useMemo(
-    () =>
-      normalizedApplicants.filter(
-        (applicant) =>
-          ["accepted", "checked_in"].includes(applicant.rsvpStatus)
-          && applicant.verificationStatus === "pending"
-      ),
-    [normalizedApplicants]
-  );
-
   const approvedApplicants = useMemo(
     () =>
       normalizedApplicants.filter((applicant) => {
@@ -2345,12 +2397,38 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
     await Promise.all([
       fetchQueue(),
       fetchApplicantsForOpportunity(opportunityId, { showLoading: false }),
+      fetchOpportunityDetail(opportunityId, { showLoading: false }),
     ]);
   }
 
   function openCreateOpportunityModal() {
     setEditingOpportunityId(null);
     setShowCreateModal(true);
+  }
+
+  function openOpportunityInviteModal() {
+    if (!selectedOpportunityId) return;
+    setOpportunityInviteModal({
+      open: true,
+      email: "",
+      name: "",
+      sending: false,
+      error: "",
+    });
+  }
+
+  function closeOpportunityInviteModal() {
+    setOpportunityInviteModal((prev) => (
+      prev.sending
+        ? prev
+        : {
+            open: false,
+            email: "",
+            name: "",
+            sending: false,
+            error: "",
+          }
+    ));
   }
 
   function openEditOpportunityModal(opportunityId) {
@@ -2521,8 +2599,59 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
     }
   }
 
+  async function submitOpportunityInvite(event) {
+    event?.preventDefault?.();
+    const inviteEmail = String(opportunityInviteModal.email || "").trim();
+    const inviteName = String(opportunityInviteModal.name || "").trim();
+    const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(inviteEmail);
+
+    if (!selectedOpportunityId || !emailValid || opportunityInviteModal.sending) {
+      setOpportunityInviteModal((prev) => ({
+        ...prev,
+        error: emailValid ? prev.error : "Enter a valid email address.",
+      }));
+      return;
+    }
+
+    setOpportunityInviteModal((prev) => ({ ...prev, sending: true, error: "" }));
+
+    try {
+      const response = await fetch(`/api/events/${encodeURIComponent(selectedOpportunityId)}/invites`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          invitee_email: inviteEmail,
+          invitee_name: inviteName,
+          invite_style: "org_portal",
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.error || "Unable to send invite.");
+      }
+      const recipientLabel = payload?.data?.invitee_name || payload?.data?.invitee_email || inviteEmail;
+      setOpportunityInviteNotice({ type: "success", message: `Invite sent to ${recipientLabel}.` });
+      setOpportunityInviteModal({
+        open: false,
+        email: "",
+        name: "",
+        sending: false,
+        error: "",
+      });
+    } catch (error) {
+      setOpportunityInviteModal((prev) => ({
+        ...prev,
+        sending: false,
+        error: error?.message || "Unable to send invite.",
+      }));
+    }
+  }
+
   async function handleApplicantAction(userId, action) {
-    if (!selectedOpportunityId || !userId) return;
+    if (!selectedOpportunityId || !userId) return false;
 
     setActionLoadingByUser((prev) => ({ ...prev, [userId]: true }));
     setActionError("");
@@ -2545,17 +2674,33 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
       const payload = await response.json().catch(() => ({}));
       if (payload.skipped === true) {
         setActionError("This volunteer's attendance was already verified. No IC was awarded.");
-        return;
+        return false;
       }
       await refreshOpportunityQueueAndDetail(selectedOpportunityId);
+      return true;
     } catch (_) {
       setActionError("Failed. Try again.");
+      return false;
     } finally {
       setActionLoadingByUser((prev) => {
         const next = { ...prev };
         delete next[userId];
         return next;
       });
+    }
+  }
+
+  function openApprovedDeclineModal(applicant) {
+    setActionError("");
+    setApprovedDeclineModal({ open: true, applicant });
+  }
+
+  async function confirmApprovedVolunteerDecline() {
+    const targetUserId = String(approvedDeclineModal?.applicant?.userId || "");
+    if (!targetUserId) return;
+    const ok = await handleApplicantAction(targetUserId, "decline");
+    if (ok) {
+      setApprovedDeclineModal({ open: false, applicant: null });
     }
   }
 
@@ -2610,6 +2755,11 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
       setApproveAllProgress({ current: 0, total: 0 });
       setActionLoadingByUser({});
     }
+  }
+
+  function openApproveAllConfirm() {
+    setActionError("");
+    setApproveAllConfirmOpen(true);
   }
 
   function openApplicantProfileModal(applicant) {
@@ -3252,24 +3402,22 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
       applicantCounts?.pendingJoinCount,
       pendingJoinApplicants.length
     );
-    const pendingVerifyCount = safeNumber(
-      applicantCounts?.pendingVerifyCount,
-      pendingVerifyApplicants.length
-    );
-    const pendingActionsCount = safeNumber(
-      applicantCounts?.pendingActionsCount,
-      pendingJoinCount + pendingVerifyCount
-    );
     const capacity =
       selectedOpportunity.capacity == null ? null : safeNumber(selectedOpportunity.capacity, null);
     const fillPct = capacity == null ? 0 : fillPercent(approvedCount, capacity);
     const isCancelledOpportunity = String(selectedOpportunity.type || "") === "opp-cancelled";
     const isDraftOpportunity = String(selectedOpportunity.type || "") === "opp-draft";
     const eventDateTimeLabel = formatEventDateTime(
-      selectedOpportunity.startTime,
-      selectedOpportunity.endTime,
-      selectedOpportunity.timeZone
+      selectedOpportunityDetail?.start_at || selectedOpportunity.startTime,
+      selectedOpportunityDetail?.end_at || selectedOpportunity.endTime,
+      selectedOpportunityDetail?.tz || selectedOpportunity.timeZone
     );
+    const descriptionText = hasDisplayText(selectedOpportunityDetail?.description)
+      ? selectedOpportunityDetail.description.trim()
+      : "";
+    const requirementsText = hasDisplayText(selectedOpportunityDetail?.requirements)
+      ? selectedOpportunityDetail.requirements.trim()
+      : "";
 
     return (
       <div ref={opportunityDetailTopRef}>
@@ -3322,7 +3470,19 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
               </div>
             </>
           )}
-          <button type="button" className="btn btn-outline-secondary btn-sm">+ Invite Volunteers</button>
+          <button
+            type="button"
+            className="btn btn-outline-secondary btn-sm"
+            onClick={openOpportunityInviteModal}
+            disabled={isCancelledOpportunity}
+          >
+            + Invite Volunteers
+          </button>
+          {opportunityInviteNotice ? (
+            <div className="alert alert-success py-2 mt-2 mb-0" role="status">
+              {opportunityInviteNotice.message}
+            </div>
+          ) : null}
         </div>
 
         <div className="orgp-section-label">PENDING APPROVALS ({pendingJoinCount})</div>
@@ -3380,7 +3540,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
               <button
                 type="button"
                 className="btn btn-outline-secondary w-100 mt-2"
-                onClick={handleApproveAll}
+                onClick={openApproveAllConfirm}
                 disabled={approveAllLoading || !pendingJoinApplicants.length}
               >
                 {approveAllLoading
@@ -3399,33 +3559,35 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
           ) : null}
         </div>
 
-        <div className="orgp-section-label">PENDING VERIFICATION ({pendingVerifyCount})</div>
+        <div className="orgp-section-label">APPROVED VOLUNTEERS ({approvedApplicants.length})</div>
         <div className="orgp-block mb-3">
           {applicantsLoading ? (
             <LoadingSpinner text="Loading applicants..." />
-          ) : pendingVerifyApplicants.length ? (
+          ) : approvedApplicants.length ? (
             <ul className="list-group list-group-flush">
-              {pendingVerifyApplicants.map((applicant) => {
+              {approvedApplicants.map((applicant) => {
                 const userId = String(applicant.userId);
                 const saving = Boolean(actionLoadingByUser[userId]);
                 return (
                   <li
-                    key={`verify-${userId}`}
-                    className="list-group-item px-0 d-flex justify-content-between align-items-center"
+                    key={`approved-${applicant.userId}`}
+                    className="list-group-item px-0 d-flex justify-content-between align-items-center gap-2 flex-wrap"
                   >
                     <span>{applicant.displayName}</span>
-                    <div className="d-flex align-items-center gap-2">
+                    <div className="d-flex align-items-center gap-2 flex-wrap justify-content-end">
                       <span className="small text-muted">
-                        <span className="badge text-bg-warning me-2">Pending verification</span>
+                        <span className="badge text-bg-success me-2">
+                          {applicant.verificationStatus === "verified" ? "Verified" : "Approved"}
+                        </span>
                         {safeNumber(applicant.pastCredits, 0)} credits prev
                       </span>
                       <button
                         type="button"
-                        className="btn btn-sm orgp-btn-coral"
+                        className="btn btn-sm btn-outline-danger"
                         disabled={saving}
-                        onClick={() => handleApplicantAction(userId, "verify")}
+                        onClick={() => openApprovedDeclineModal(applicant)}
                       >
-                        {saving ? "Saving..." : <><i className="fas fa-check me-1" aria-hidden="true"></i>Verify</>}
+                        Decline
                       </button>
                     </div>
                   </li>
@@ -3433,44 +3595,44 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
               })}
             </ul>
           ) : (
-            <div className="text-muted small">No pending verification.</div>
-          )}
-        </div>
-
-        <div className="orgp-section-label">APPROVED VOLUNTEERS ({approvedApplicants.length})</div>
-        <div className="orgp-block mb-3">
-          {applicantsLoading ? (
-            <LoadingSpinner text="Loading applicants..." />
-          ) : approvedApplicants.length ? (
-            <ul className="list-group list-group-flush">
-              {approvedApplicants.map((applicant) => (
-                <li
-                  key={`approved-${applicant.userId}`}
-                  className="list-group-item px-0 d-flex justify-content-between align-items-center"
-                >
-                  <span>{applicant.displayName}</span>
-                  <span className="small text-muted">
-                    <span className="badge text-bg-success me-2">
-                      {applicant.verificationStatus === "verified" ? "Verified" : "Approved"}
-                    </span>
-                    {safeNumber(applicant.pastCredits, 0)} credits prev
-                  </span>
-                </li>
-              ))}
-            </ul>
-          ) : (
             <div className="text-muted small">No approved volunteers yet.</div>
           )}
         </div>
 
-        <details className="orgp-block">
-          <summary className="orgp-section-label orgp-summary">OPPORTUNITY DETAILS</summary>
-          <div className="small text-muted mt-2">Pending approvals: {pendingJoinCount}</div>
-          <div className="small text-muted">Pending verification: {pendingVerifyCount}</div>
-          <div className="small text-muted">Pending actions: {pendingActionsCount}</div>
-          <div className="small text-muted">Approved volunteers: {approvedCount}</div>
-          <div className="small text-muted">Capacity: {capacity == null ? "No cap set" : capacity}</div>
-        </details>
+        <div className="orgp-block">
+          <div className="orgp-section-label">OPPORTUNITY DETAILS</div>
+          {selectedOpportunityDetailLoading ? (
+            <div className="mt-2">
+              <LoadingSpinner text="Loading event details..." />
+            </div>
+          ) : selectedOpportunityDetailError ? (
+            <div className="alert alert-warning py-2 mt-2 mb-0" role="alert">
+              {selectedOpportunityDetailError}
+            </div>
+          ) : (
+            <div className="orgp-opportunity-details">
+              <div className="orgp-opportunity-detail-copy">
+                <div className="orgp-opportunity-detail-label">Description</div>
+                <div className="orgp-opportunity-detail-copy-value">
+                  {descriptionText || "No description has been added yet."}
+                </div>
+              </div>
+
+              {requirementsText ? (
+                <div className="orgp-opportunity-detail-copy">
+                  <div className="orgp-opportunity-detail-label">Requirements</div>
+                  <div className="orgp-opportunity-detail-copy-value">{requirementsText}</div>
+                </div>
+              ) : null}
+
+              {!descriptionText ? (
+                <div className="orgp-opportunity-detail-empty">
+                  Add details to the event description to show them here.
+                </div>
+              ) : null}
+            </div>
+          )}
+        </div>
       </div>
     );
   }
@@ -4816,6 +4978,108 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
         </div>
       ) : null}
 
+      {approvedDeclineModal.open ? (
+        <div
+          className="orgp-confirm-backdrop"
+          role="presentation"
+          onClick={(e) => {
+            const saving = Boolean(actionLoadingByUser[String(approvedDeclineModal?.applicant?.userId || "")]);
+            if (e.target === e.currentTarget && !saving) {
+              setApprovedDeclineModal({ open: false, applicant: null });
+            }
+          }}
+        >
+          <div
+            className="orgp-confirm-card shadow"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="orgpApprovedDeclineTitle"
+          >
+            <h5 className="mb-2" id="orgpApprovedDeclineTitle">Decline approved volunteer?</h5>
+            <p className="text-muted mb-3">
+              {approvedDeclineModal?.applicant?.displayName || "This volunteer"} will be removed from Approved Volunteers and their RSVP will be marked declined.
+            </p>
+            {actionError ? (
+              <div className="alert alert-warning py-2 mb-3" role="alert">
+                {actionError}
+              </div>
+            ) : null}
+            <div className="d-flex justify-content-end gap-2">
+              <button
+                type="button"
+                className="btn btn-outline-secondary btn-sm"
+                onClick={() => setApprovedDeclineModal({ open: false, applicant: null })}
+                disabled={Boolean(actionLoadingByUser[String(approvedDeclineModal?.applicant?.userId || "")])}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger btn-sm"
+                onClick={confirmApprovedVolunteerDecline}
+                disabled={Boolean(actionLoadingByUser[String(approvedDeclineModal?.applicant?.userId || "")])}
+              >
+                {Boolean(actionLoadingByUser[String(approvedDeclineModal?.applicant?.userId || "")])
+                  ? "Declining..."
+                  : "Yes, Decline Volunteer"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {approveAllConfirmOpen ? (
+        <div
+          className="orgp-confirm-backdrop"
+          role="presentation"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !approveAllLoading) {
+              setApproveAllConfirmOpen(false);
+            }
+          }}
+        >
+          <div
+            className="orgp-confirm-card shadow"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="orgpApproveAllTitle"
+          >
+            <h5 className="mb-2" id="orgpApproveAllTitle">Approve all pending volunteers?</h5>
+            <p className="text-muted mb-3">
+              This will approve {pendingJoinApplicants.length} pending {pendingJoinApplicants.length === 1 ? "volunteer" : "volunteers"} for this opportunity and send approval emails to each person.
+            </p>
+            {actionError ? (
+              <div className="alert alert-warning py-2 mb-3" role="alert">
+                {actionError}
+              </div>
+            ) : null}
+            <div className="d-flex justify-content-end gap-2">
+              <button
+                type="button"
+                className="btn btn-outline-secondary btn-sm"
+                onClick={() => setApproveAllConfirmOpen(false)}
+                disabled={approveAllLoading}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn orgp-btn-coral btn-sm"
+                onClick={async () => {
+                  await handleApproveAll();
+                  setApproveAllConfirmOpen(false);
+                }}
+                disabled={approveAllLoading}
+              >
+                {approveAllLoading
+                  ? `Approving ${approveAllProgress.current} of ${approveAllProgress.total}...`
+                  : "Yes, Approve All"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <PoolLedgerModal
         open={activeTab === "myevents" && myEventsLedgerOpen}
         initialPoolSlug={selectedMyEvent?.funding_pool_slug || myEventsPoolFilter || "all"}
@@ -4833,6 +5097,93 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
           setMyEventsToast({ type: "success", message: `Invite sent to ${recipientLabel}.` });
         }}
       />
+
+      {activeTab === "opportunities" && opportunityInviteModal.open ? (
+        <div className="orgp-confirm-backdrop" role="dialog" aria-modal="true" aria-labelledby="orgpInviteModalTitle">
+          <div className="orgp-confirm-card orgp-invite-card">
+            <div className="d-flex justify-content-between align-items-start gap-3">
+              <div>
+                <h4 className="orgp-invite-title" id="orgpInviteModalTitle">Invite Volunteer</h4>
+                <p className="orgp-invite-subtitle mb-0">
+                  Send a direct invite because the coordinator thinks this person would be a great fit for{" "}
+                  <strong>{selectedOpportunity?.opportunityName || "this opportunity"}</strong>.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="btn btn-link btn-sm p-0 text-muted"
+                onClick={closeOpportunityInviteModal}
+                disabled={opportunityInviteModal.sending}
+                aria-label="Close invite form"
+              >
+                <i className="fas fa-xmark" aria-hidden="true"></i>
+              </button>
+            </div>
+
+            <form className="orgp-invite-form" onSubmit={submitOpportunityInvite}>
+              <label className="orgp-invite-field">
+                <span>Email</span>
+                <input
+                  type="email"
+                  className="form-control"
+                  value={opportunityInviteModal.email}
+                  onChange={(event) => setOpportunityInviteModal((prev) => ({
+                    ...prev,
+                    email: event.target.value,
+                    error: "",
+                  }))}
+                  placeholder="volunteer@example.com"
+                  required
+                  autoFocus
+                />
+              </label>
+
+              <label className="orgp-invite-field">
+                <span>Name</span>
+                <input
+                  type="text"
+                  className="form-control"
+                  value={opportunityInviteModal.name}
+                  onChange={(event) => setOpportunityInviteModal((prev) => ({
+                    ...prev,
+                    name: event.target.value,
+                    error: "",
+                  }))}
+                  placeholder="Optional"
+                />
+              </label>
+
+              <div className="orgp-invite-note">
+                The email includes the opportunity details, a calendar button, and language centered on the coordinator personally inviting them.
+              </div>
+
+              {opportunityInviteModal.error ? (
+                <div className="alert alert-warning py-2 mb-0" role="alert">
+                  {opportunityInviteModal.error}
+                </div>
+              ) : null}
+
+              <div className="d-flex justify-content-end gap-2 mt-3">
+                <button
+                  type="button"
+                  className="btn btn-outline-secondary"
+                  onClick={closeOpportunityInviteModal}
+                  disabled={opportunityInviteModal.sending}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn org-admin-request-close-btn"
+                  disabled={opportunityInviteModal.sending}
+                >
+                  {opportunityInviteModal.sending ? "Sending..." : "Send Invite"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
 
       <div
         className="modal fade"

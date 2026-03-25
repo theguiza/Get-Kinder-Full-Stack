@@ -113,7 +113,7 @@ export function resolveAcceptedRsvpStatus(eventRow, acceptedCount) {
   const capacity = Number(eventRow?.capacity);
   const hasCapacityLimit = Number.isFinite(capacity) && capacity > 0;
   if (!hasCapacityLimit) {
-    return { status: "accepted" };
+    return { status: "pending" };
   }
   if (acceptedCount >= capacity) {
     if (eventRow?.waitlist_enabled === false) {
@@ -127,7 +127,7 @@ export function resolveAcceptedRsvpStatus(eventRow, acceptedCount) {
       message: "Event is full. You have been added to the waitlist.",
     };
   }
-  return { status: "accepted" };
+  return { status: "pending" };
 }
 
 export async function getEventRsvpSnapshot(eventId, userId, { runner = pool } = {}) {

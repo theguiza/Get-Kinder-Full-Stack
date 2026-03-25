@@ -208,13 +208,13 @@ function createKaiWriteHarness({
         return { rows: state.event ? [{ ...state.event }] : [], rowCount: state.event ? 1 : 0 };
       }
 
-      if (trimmed.includes("UPDATE event_rsvps r") && trimmed.includes("SET status = 'accepted'")) {
+      if (trimmed.includes("UPDATE event_rsvps r") && trimmed.includes("SET status = 'pending'")) {
         const [eventId] = params;
         const match = state.rsvps.find(
           (row) => String(row.event_id) === String(eventId) && row.status === "waitlisted",
         );
         if (!match) return { rows: [], rowCount: 0 };
-        match.status = "accepted";
+        match.status = "pending";
         match.check_in_method = null;
         match.checked_in_at = null;
         return {
@@ -504,9 +504,10 @@ test("KAI persists a valid same-event role_id", async () => {
       "user-3",
     );
     assert.equal(result.status, "success");
+    assert.equal(result.rsvp_status, "pending");
 
     const [rsvp] = harness.state.rsvps;
-    assert.equal(rsvp.status, "accepted");
+    assert.equal(rsvp.status, "pending");
     assert.equal(rsvp.role_id, "role-same");
   } finally {
     harness.restore();
@@ -529,9 +530,10 @@ test("KAI RSVP success path still works without role_id", async () => {
   try {
     const result = await executeToolCall("rsvp_to_event", { event_id: "evt-r4" }, "user-4");
     assert.equal(result.status, "success");
+    assert.equal(result.rsvp_status, "pending");
 
     const [rsvp] = harness.state.rsvps;
-    assert.equal(rsvp.status, "accepted");
+    assert.equal(rsvp.status, "pending");
     assert.equal(rsvp.role_id, null);
   } finally {
     harness.restore();

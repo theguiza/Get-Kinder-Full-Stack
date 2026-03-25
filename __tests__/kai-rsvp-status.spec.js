@@ -10,14 +10,14 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "..");
 
-test("resolveAcceptedRsvpStatus accepts when capacity is open or unlimited", () => {
+test("resolveAcceptedRsvpStatus creates pending approval rows when capacity is open or unlimited", () => {
   assert.deepEqual(
     __testables.resolveAcceptedRsvpStatus({ capacity: null, waitlist_enabled: false }, 99),
-    { status: "accepted" },
+    { status: "pending" },
   );
   assert.deepEqual(
     __testables.resolveAcceptedRsvpStatus({ capacity: 10, waitlist_enabled: true }, 4),
-    { status: "accepted" },
+    { status: "pending" },
   );
 });
 
@@ -41,16 +41,16 @@ test("resolveAcceptedRsvpStatus blocks when full and waitlist is disabled", () =
   );
 });
 
-test("KAI RSVP tool source no longer writes pending RSVP statuses", () => {
+test("KAI RSVP tool source still supports pending approval RSVP statuses", () => {
   const source = fs.readFileSync(
     path.join(repoRoot, "Backend/services/kai-tool-executor.js"),
     "utf8",
   );
 
-  assert.doesNotMatch(
+  assert.match(
     source,
-    /INSERT INTO event_rsvps[\s\S]*VALUES \(\$1, \$2, 'pending'/,
-    "KAI RSVP tool should not insert invalid pending event_rsvps statuses",
+    /applyEventRsvpAction/,
+    "KAI RSVP tool should use the shared RSVP service so manual approval rules stay consistent",
   );
   assert.doesNotMatch(
     source,

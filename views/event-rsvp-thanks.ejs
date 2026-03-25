@@ -70,7 +70,7 @@
       margin: 18px 0 12px;
       font-size: clamp(2rem, 5vw, 3.4rem);
       line-height: 1.05;
-      color: #24324a;
+      color: #ff5656;
     }
     .thanks-copy {
       font-size: 1.08rem;
@@ -89,6 +89,17 @@
       border-radius: 999px;
       padding: 12px 18px;
       font-weight: 600;
+    }
+    .thanks-actions .btn-back {
+      background: #455a7c;
+      border-color: #455a7c;
+      color: #fff;
+    }
+    .thanks-actions .btn-back:hover,
+    .thanks-actions .btn-back:focus {
+      background: #364866;
+      border-color: #364866;
+      color: #fff;
     }
     .thanks-note {
       margin-top: 18px;
@@ -127,13 +138,13 @@
 
       <div class="thanks-actions">
         <% if (returnToHref) { %>
-          <a class="btn btn-primary" href="<%= returnToHref %>">Back to Event</a>
+          <a class="btn btn-back" href="<%= returnToHref %>">Back to Event</a>
         <% } %>
         <a class="btn btn-outline-secondary" href="/events">Browse More Events</a>
       </div>
 
       <p class="thanks-note">
-        Approval and timing are still handled the same way as before. This page only confirms that your request was received.
+        This page only confirms that your request was received. You will receive an email if you are approved to attend.
       </p>
     </section>
   </main>

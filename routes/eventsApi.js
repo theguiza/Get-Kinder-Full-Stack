@@ -18,6 +18,7 @@ function requireAuthenticatedApi(req, res, next) {
 
 eventsApiRouter.get("/", listEvents);
 eventsApiRouter.get("/:id", getEventById);
+eventsApiRouter.get("/:id/calendar.ics", downloadEventCalendar);
 
 eventsApiRouter.use(requireAuthenticatedApi);
 
@@ -32,7 +33,6 @@ eventsApiRouter.get("/:id/roster", listEventRoster);
 eventsApiRouter.post("/:id/verify", verifyEventRsvp);
 eventsApiRouter.post("/:id/ratings", submitEventRating);
 eventsApiRouter.get("/:id/ratings/status", getEventRatingStatus);
-eventsApiRouter.get("/:id/calendar.ics", downloadEventCalendar);
 eventsApiRouter.patch("/:id", ensureOrgRep, updateEvent);
 eventsApiRouter.delete("/:id", ensureOrgRep, deleteDraftEvent);
 

@@ -133,6 +133,72 @@
   justify-content: flex-end;
 }
 
+.orgp-confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(14, 22, 34, 0.54);
+  z-index: 1070;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.orgp-confirm-card {
+  width: min(560px, 100%);
+  background: #fff;
+  border-radius: 14px;
+  padding: 1rem;
+  border: 1px solid #e3e8f2;
+}
+
+.orgp-invite-card {
+  width: min(620px, 100%);
+}
+
+.orgp-invite-title {
+  color: #455a7c;
+  font-size: 1.2rem;
+  font-weight: 700;
+  margin: 0;
+}
+
+.orgp-invite-subtitle {
+  color: #5f6f8a;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  margin-top: 0.35rem;
+}
+
+.orgp-invite-form {
+  margin-top: 1rem;
+}
+
+.orgp-invite-field {
+  display: block;
+  margin-bottom: 0.9rem;
+}
+
+.orgp-invite-field span {
+  display: block;
+  color: #455a7c;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-bottom: 0.35rem;
+}
+
+.orgp-invite-note {
+  color: #5f6f8a;
+  font-size: 0.92rem;
+  line-height: 1.5;
+  background: #f7f9fc;
+  border: 1px solid #e3e8f2;
+  border-radius: 10px;
+  padding: 0.75rem 0.85rem;
+}
+
 .org-portal-page .org-admin-request-close-btn.btn {
   background: #ff5656 !important;
   border-color: #ff5656 !important;
@@ -338,6 +404,55 @@
   margin-bottom: 0.85rem;
 }
 
+.orgp-opportunity-details {
+  margin-top: 0.75rem;
+}
+
+.orgp-opportunity-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.orgp-opportunity-detail-item {
+  padding: 0 0 0.35rem;
+  border-bottom: 1px solid #e8edf5;
+}
+
+.orgp-opportunity-detail-label {
+  color: #6b778c;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 0.32rem;
+}
+
+.orgp-opportunity-detail-value {
+  color: #324766;
+  font-size: 0.96rem;
+  line-height: 1.45;
+}
+
+.orgp-opportunity-detail-copy {
+  margin-top: 0.85rem;
+  border-top: 1px solid #e8edf5;
+  padding-top: 0.85rem;
+}
+
+.orgp-opportunity-detail-copy-value {
+  color: #324766;
+  font-size: 0.96rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.orgp-opportunity-detail-empty {
+  margin-top: 0.85rem;
+  color: #6b778c;
+  font-size: 0.92rem;
+}
+
 .org-queue-list .list-group-item {
   border: 1px solid #e7edf8;
   margin-bottom: 0.5rem;
@@ -414,5 +529,9 @@
   .org-hero-name,
   .org-kpi-value {
     font-size: 1.55rem;
+  }
+
+  .orgp-opportunity-detail-grid {
+    grid-template-columns: 1fr;
   }
 }

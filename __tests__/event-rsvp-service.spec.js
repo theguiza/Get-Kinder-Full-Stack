@@ -66,6 +66,28 @@ function createRsvpServiceHarness({
         return { rows: [], rowCount: 1 };
       }
 
+      if (trimmed.startsWith("INSERT INTO event_rsvps") && !trimmed.includes("notes")) {
+        const [eventId, attendeeId, status] = params;
+        const match = state.rsvps.find(
+          (row) => String(row.event_id) === String(eventId) && String(row.attendee_user_id) === String(attendeeId),
+        );
+        if (match) {
+          match.status = status;
+          match.check_in_method = null;
+          match.checked_in_at = null;
+        } else {
+          state.rsvps.push({
+            event_id: eventId,
+            attendee_user_id: attendeeId,
+            status,
+            notes: null,
+            check_in_method: null,
+            checked_in_at: null,
+          });
+        }
+        return { rows: [], rowCount: 1 };
+      }
+
       if (
         trimmed.startsWith("SELECT status, check_in_method, checked_in_at") &&
         trimmed.includes("FROM event_rsvps")
@@ -87,7 +109,10 @@ function createRsvpServiceHarness({
       }
 
       if (
-        trimmed.includes("COUNT(*) FILTER (WHERE status IN ('accepted','checked_in')) AS accepted") &&
+        (
+          trimmed.includes("COUNT(*) FILTER (WHERE status IN ('accepted','checked_in')) AS accepted")
+          || trimmed.includes("COUNT(*) FILTER (WHERE status IN ('accepted','checked_in'))::int AS accepted_count")
+        ) &&
         trimmed.includes("FROM event_rsvps")
       ) {
         const [eventId] = params;
@@ -96,7 +121,7 @@ function createRsvpServiceHarness({
             String(row.event_id) === String(eventId) &&
             (row.status === "accepted" || row.status === "checked_in"),
         ).length;
-        return { rows: [{ accepted }], rowCount: 1 };
+        return { rows: [{ accepted, accepted_count: accepted }], rowCount: 1 };
       }
 
       throw new Error(`Unhandled client query: ${trimmed}`);
@@ -193,6 +218,75 @@ test("shared RSVP service preserves canonical decline behavior when no RSVP exis
     const [rsvp] = harness.state.rsvps;
     assert.equal(rsvp.status, "declined");
     assert.equal(rsvp.notes, "Cannot make it");
+  } finally {
+    harness.restore();
+  }
+});
+
+test("shared RSVP service creates pending RSVPs until an org approves them", async () => {
+  const harness = createRsvpServiceHarness({
+    event: {
+      id: "evt-service-3",
+      creator_user_id: "host-3",
+      title: "River Cleanup",
+      start_at: "2026-05-12T18:00:00.000Z",
+      status: "published",
+      capacity: 10,
+      waitlist_enabled: true,
+    },
+  });
+
+  try {
+    const result = await applyEventRsvpAction({
+      eventId: "evt-service-3",
+      attendeeId: "user-3",
+      action: "accept",
+      hostUserIds: [],
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.data.status, "pending");
+
+    const [rsvp] = harness.state.rsvps;
+    assert.equal(rsvp.status, "pending");
+  } finally {
+    harness.restore();
+  }
+});
+
+test("shared RSVP service still waitlists when the event is full", async () => {
+  const harness = createRsvpServiceHarness({
+    event: {
+      id: "evt-service-4",
+      creator_user_id: "host-4",
+      title: "Food Rescue",
+      start_at: "2026-05-13T18:00:00.000Z",
+      status: "published",
+      capacity: 1,
+      waitlist_enabled: true,
+    },
+    rsvps: [
+      {
+        event_id: "evt-service-4",
+        attendee_user_id: "user-accepted",
+        status: "accepted",
+        check_in_method: null,
+        checked_in_at: null,
+      },
+    ],
+  });
+
+  try {
+    const result = await applyEventRsvpAction({
+      eventId: "evt-service-4",
+      attendeeId: "user-4",
+      action: "accept",
+      hostUserIds: [],
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.data.status, "waitlisted");
+
+    const inserted = harness.state.rsvps.find((row) => row.attendee_user_id === "user-4");
+    assert.equal(inserted?.status, "waitlisted");
   } finally {
     harness.restore();
   }

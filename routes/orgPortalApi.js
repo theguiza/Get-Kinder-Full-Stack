@@ -6,6 +6,7 @@ import { getVolunteerStats } from "../services/profileService.js";
 import { getSummary as getRatingsSummary } from "../services/ratingsService.js";
 import { isSeatTakingStatus, promoteWaitlistedAttendees } from "../services/waitlistService.js";
 import { awardIcForRsvp } from "../Backend/services/icService.js";
+import { buildEventCalendarInvite } from "../services/eventCalendarService.js";
 
 const orgPortalRouter = express.Router();
 const CSRF_HEADER_NAME = "X-CSRF-Token";
@@ -233,6 +234,103 @@ function formatCommsTime(isoValue) {
   const dt = new Date(isoValue);
   if (Number.isNaN(dt.getTime())) return "Time TBD";
   return dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+}
+
+function buildAppBaseUrl() {
+  return (process.env.APP_BASE_URL || "https://getkinder.ai").replace(/\/+$/, "");
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function formatApprovalEventDateTime(startAt, endAt, timeZone) {
+  if (!startAt) return "Date TBD";
+  const start = new Date(startAt);
+  if (Number.isNaN(start.getTime())) return "Date TBD";
+  const end = endAt ? new Date(endAt) : null;
+  const tz = String(timeZone || "America/Vancouver");
+  const startLabel = new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: tz,
+  }).format(start);
+  const endLabel = end && !Number.isNaN(end.getTime())
+    ? new Intl.DateTimeFormat("en-US", {
+        hour: "numeric",
+        minute: "2-digit",
+        timeZone: tz,
+      }).format(end)
+    : null;
+  return endLabel ? `${startLabel} - ${endLabel} (${tz})` : `${startLabel} (${tz})`;
+}
+
+function buildVolunteerApprovedEmail({
+  firstName,
+  eventId,
+  eventTitle,
+  description,
+  startAt,
+  endAt,
+  timeZone,
+  locationText,
+} = {}) {
+  const greetingName = String(firstName || "").trim() || "there";
+  const safeTitle = eventTitle || "Get Kinder opportunity";
+  const safeLocation = String(locationText || "").trim() || "Location TBD";
+  const whenLabel = formatApprovalEventDateTime(startAt, endAt, timeZone);
+  const baseUrl = buildAppBaseUrl();
+  const eventHref = `${baseUrl}/events/${encodeURIComponent(String(eventId || ""))}`;
+  const calendarHref = `${baseUrl}/api/events/${encodeURIComponent(String(eventId || ""))}/calendar.ics`;
+  const safeDescription = String(description || "").trim();
+  const html = `
+    <div style="font-family:Arial,sans-serif;color:#1f2937;line-height:1.5">
+      <p>Hi ${escapeHtml(greetingName)},</p>
+      <p>You have been approved for <strong>${escapeHtml(safeTitle)}</strong>.</p>
+      <p style="margin:0 0 16px">
+        <strong>When:</strong> ${escapeHtml(whenLabel)}<br/>
+        <strong>Where:</strong> ${escapeHtml(safeLocation)}
+      </p>
+      ${safeDescription ? `<p style="margin:0 0 16px">${escapeHtml(safeDescription)}</p>` : ""}
+      <p style="margin:0 0 16px">
+        <a href="${eventHref}" target="_blank" rel="noopener" style="display:inline-block;padding:10px 16px;border-radius:999px;background:#455a7c;color:#ffffff;text-decoration:none;font-weight:700;margin-right:8px">View Event Details</a>
+        <a href="${calendarHref}" target="_blank" rel="noopener" style="display:inline-block;padding:10px 16px;border-radius:999px;background:#ff5656;color:#ffffff;text-decoration:none;font-weight:700">Add to Calendar</a>
+      </p>
+      <p>You can also use the attached calendar invite file.</p>
+      <p>Please remember to check in with the coordinator and scan the QR code to verify attendance.</p>
+      <p>We are going to have a great time!</p>
+    </div>
+  `;
+  const text = [
+    `Hi ${greetingName},`,
+    "",
+    `You have been approved for ${safeTitle}.`,
+    `When: ${whenLabel}`,
+    `Where: ${safeLocation}`,
+    safeDescription ? `Details: ${safeDescription}` : "",
+    "",
+    `View event details: ${eventHref}`,
+    `Add to calendar: ${calendarHref}`,
+    "",
+    "A calendar invite is also attached.",
+    "Please remember to check in with the coordinator and scan the QR code to verify attendance.",
+    "We are going to have a great time!",
+  ].filter(Boolean).join("\n");
+  return {
+    subject: `You're approved for ${safeTitle}`,
+    html,
+    text,
+    eventHref,
+    calendarHref,
+  };
 }
 
 function replaceCommsMergeFields(sourceText, context) {
@@ -1075,7 +1173,7 @@ orgPortalRouter.post("/opportunities/:eventId/applicants/:userId/approve", async
 
     const { rows: [eventRow] } = await client.query(
       `
-        SELECT id, status, capacity
+        SELECT id, status, capacity, title, description, start_at, end_at, tz, location_text
           FROM events
          WHERE id = $1
          LIMIT 1
@@ -1147,7 +1245,59 @@ orgPortalRouter.post("/opportunities/:eventId/applicants/:userId/approve", async
       await client.query("ROLLBACK");
       return res.status(404).json({ error: "applicant not found" });
     }
+
+    const { rows: [recipientRow] } = await client.query(
+      `
+        SELECT firstname, lastname, email
+          FROM userdata
+         WHERE id = $1
+         LIMIT 1
+      `,
+      [userId]
+    );
+
     await client.query("COMMIT");
+
+    if (recipientRow?.email) {
+      const emailCopy = buildVolunteerApprovedEmail({
+        firstName: recipientRow.firstname,
+        eventId,
+        eventTitle: eventRow.title,
+        description: eventRow.description,
+        startAt: eventRow.start_at,
+        endAt: eventRow.end_at,
+        timeZone: eventRow.tz,
+        locationText: eventRow.location_text,
+      });
+      const calendarInvite = buildEventCalendarInvite({
+        eventId,
+        title: eventRow.title,
+        description: eventRow.description,
+        startAt: eventRow.start_at,
+        endAt: eventRow.end_at,
+        locationText: eventRow.location_text,
+        baseUrl: buildAppBaseUrl(),
+      });
+      try {
+        await sendNudgeEmail({
+          to: recipientRow.email,
+          subject: emailCopy.subject,
+          text: emailCopy.text,
+          html: emailCopy.html,
+          fromName: "Get Kinder",
+          attachments: calendarInvite
+            ? [{
+                filename: calendarInvite.fileName,
+                content: calendarInvite.content,
+                contentType: "text/calendar; charset=utf-8",
+              }]
+            : undefined,
+        });
+      } catch (emailError) {
+        console.error("[orgPortalApi] approve email send failed:", emailError);
+      }
+    }
+
     return res.json({ success: true, rsvpStatus: rows[0].status });
   } catch (error) {
     try {
