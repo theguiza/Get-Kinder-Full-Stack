@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 
-const PAGE_BACKGROUND = "#f7f3ed";
+const PAGE_BACKGROUND = "#fff";
 const CARD_BACKGROUND = "#fff";
 const CARD_BORDER = "0.5px solid #d6deeb";
 const EXPANDED_BORDER = "1px solid #455a7c";
