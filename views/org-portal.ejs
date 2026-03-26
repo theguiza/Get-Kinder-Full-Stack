@@ -30,7 +30,13 @@
         || user?.organization
         || user?.org_name
         || "Get Kinder";
-      const profilePicture = user?.picture || "/images/nerdy-KAI.png";
+      const orgLogoUrl =
+        (typeof organizationLogoUrl === "string" && organizationLogoUrl.trim())
+        || "/images/favicon.png";
+      const safeLogoUploadError = (typeof logoUploadError !== "undefined" && logoUploadError) ? logoUploadError : "";
+      const safeDescription = (typeof organizationDescription === "string" && organizationDescription) ? organizationDescription : "";
+      const safeDescriptionError = (typeof descriptionError !== "undefined" && descriptionError) ? descriptionError : "";
+      const showDescriptionSaved = descriptionSaved === true;
       const orgRatingData = (typeof orgRating !== "undefined" && orgRating) ? orgRating : {};
       const orgRatingCount = Number(orgRatingData.count) || 0;
       const orgRatingValue = Number.isFinite(Number(orgRatingData.value))
@@ -51,15 +57,26 @@
     <section class="org-hero mb-3" aria-label="Organization profile hero">
       <div class="org-hero-card">
         <div class="row g-4 align-items-center">
-          <div class="col-12 col-md-3 text-center">
+          <div class="col-12 col-md-3 text-center org-hero-logo-col">
             <img
+              id="org-hero-logo"
               class="org-hero-avatar rounded-circle"
               width="140"
               height="140"
-              alt="Profile photo of <%= fullName %>"
-              src="<%= profilePicture %>">
+              alt="Logo for <%= resolvedOrganizationName %>"
+              src="<%= orgLogoUrl %>">
+            <% if (!orgIsSuspended) { %>
+              <button
+                type="button"
+                class="btn btn-sm btn-outline-secondary org-logo-trigger"
+                data-bs-toggle="modal"
+                data-bs-target="#orgLogoModal"
+                aria-label="Set organization logo">
+                Save Your Logo
+              </button>
+            <% } %>
           </div>
-          <div class="col-12 col-md-5 text-center text-md-start">
+          <div class="col-12 col-md-5 text-center text-md-start org-hero-summary-col">
             <div class="org-hero-org"><%= resolvedOrganizationName %></div>
             <h1 class="org-hero-name"><%= fullName %></h1>
             <div class="org-hero-rating-stack">
@@ -84,6 +101,41 @@
                   Add Admin
                 </button>
               </div>
+              <% if (!orgIsSuspended) { %>
+                <form method="POST" action="/org-portal/description" class="org-description-form">
+                  <label for="org-description-input" class="org-description-label">Organization Description</label>
+                  <% if (showDescriptionSaved) { %>
+                    <div class="alert alert-success org-description-alert" role="status">
+                      Organization description saved.
+                    </div>
+                  <% } %>
+                  <% if (safeDescriptionError === "tooLong") { %>
+                    <div class="alert alert-danger org-description-alert" role="alert">
+                      Keep the description under 2000 characters.
+                    </div>
+                  <% } else if (safeDescriptionError === "saveFailed") { %>
+                    <div class="alert alert-danger org-description-alert" role="alert">
+                      We couldn't save the description. Please try again.
+                    </div>
+                  <% } else if (safeDescriptionError === "forbidden") { %>
+                    <div class="alert alert-danger org-description-alert" role="alert">
+                      Only organization admins can update the description.
+                    </div>
+                  <% } %>
+                  <textarea
+                    id="org-description-input"
+                    name="orgDescription"
+                    class="form-control org-description-input"
+                    rows="4"
+                    maxlength="2000"
+                    placeholder="Add a short description of your organization."><%= safeDescription %></textarea>
+                  <div class="org-description-actions">
+                    <button type="submit" class="btn btn-sm org-description-save-btn">Save description</button>
+                  </div>
+                </form>
+              <% } else if (safeDescription) { %>
+                <div class="org-description-static"><%= safeDescription %></div>
+              <% } %>
             </div>
             <% if (canSwitchOrganizations) { %>
               <div class="mt-3">
@@ -103,12 +155,59 @@
               </div>
             <% } %>
           </div>
-          <div class="col-12 col-md-4">
+          <div class="col-12 col-md-4 org-hero-kpi-col">
             <div id="org-portal-kpis"></div>
           </div>
         </div>
       </div>
     </section>
+
+    <% if (!orgIsSuspended) { %>
+      <form id="org-logo-form" action="/org-portal/logo" method="POST" enctype="multipart/form-data">
+        <div class="modal fade" id="orgLogoModal" tabindex="-1" aria-labelledby="orgLogoModalLabel" aria-hidden="true">
+          <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+              <div class="modal-header">
+                <div class="org-logo-title-wrap">
+                  <img src="/images/favicon.png" alt="Get Kinder logo" class="org-logo-modal-mark" loading="lazy">
+                  <h5 class="modal-title" id="orgLogoModalLabel">Set your organization logo</h5>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+              </div>
+              <div class="modal-body">
+                <% if (safeLogoUploadError === 'fileTooLarge') { %>
+                  <div class="alert alert-danger mb-3" role="alert">
+                    Sorry, that image is too big. Please choose one under 2 MB.
+                  </div>
+                <% } else if (safeLogoUploadError === 'noFileSelected') { %>
+                  <div class="alert alert-danger mb-3" role="alert">
+                    Choose a logo before saving.
+                  </div>
+                <% } else if (safeLogoUploadError === 'uploadFailed') { %>
+                  <div class="alert alert-danger mb-3" role="alert">
+                    Sorry, we couldn't upload that logo. Please try again.
+                  </div>
+                <% } %>
+                <div id="org-logo-client-error" class="alert alert-danger mb-3 d-none" role="alert"></div>
+                <p class="mb-2">Set your organization logo</p>
+                <input
+                  id="org-logo-input"
+                  type="file"
+                  name="logo"
+                  accept="image/*"
+                  class="form-control"
+                  aria-label="Upload your organization logo">
+                <small class="text-muted d-block mt-2">Upload a new logo (max 2 MB)</small>
+              </div>
+              <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="submit" class="btn org-logo-save-btn" name="org_action" value="save_logo">Save logo</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </form>
+    <% } %>
 
     <section class="org-split-shell mb-4" aria-label="Organization workspace">
       <div id="org-portal-root"></div>
@@ -230,6 +329,66 @@
 
       const ratingWidth = Number.parseFloat(ratingFill.dataset.ratingWidth || "");
       ratingFill.style.width = `${Number.isFinite(ratingWidth) ? ratingWidth : 0}%`;
+    })();
+
+    (function () {
+      const fileInput = document.getElementById("org-logo-input");
+      const logoImg = document.getElementById("org-hero-logo");
+      const clientError = document.getElementById("org-logo-client-error");
+      const uploadError = "<%= safeLogoUploadError %>";
+      const logoModalEl = document.getElementById("orgLogoModal");
+      const logoSaveBtn = logoModalEl
+        ? logoModalEl.querySelector('button[name="org_action"][value="save_logo"]')
+        : null;
+
+      function showClientError(message) {
+        if (!clientError) return;
+        clientError.textContent = message;
+        clientError.classList.remove("d-none");
+      }
+
+      function clearClientError() {
+        if (!clientError) return;
+        clientError.textContent = "";
+        clientError.classList.add("d-none");
+      }
+
+      if (uploadError && logoModalEl && window.bootstrap && window.bootstrap.Modal) {
+        const logoModal = new window.bootstrap.Modal(logoModalEl);
+        logoModal.show();
+      }
+
+      if (fileInput && logoImg) {
+        fileInput.addEventListener("change", () => {
+          clearClientError();
+          const file = fileInput.files[0];
+          if (!file) return;
+          if (file.size > 2 * 1024 * 1024) {
+            showClientError("Sorry, that image is too big. Please choose one under 2 MB.");
+            fileInput.value = "";
+            return;
+          }
+          if (file.type.startsWith("image/")) {
+            const reader = new FileReader();
+            reader.onload = (event) => { logoImg.src = event.target.result; };
+            reader.readAsDataURL(file);
+          } else {
+            showClientError("Please choose a valid image file.");
+            fileInput.value = "";
+          }
+        });
+      }
+
+      if (logoSaveBtn && fileInput) {
+        logoSaveBtn.addEventListener("click", (event) => {
+          clearClientError();
+          const file = fileInput.files && fileInput.files[0] ? fileInput.files[0] : null;
+          if (file) return;
+          event.preventDefault();
+          showClientError("Choose a logo before saving.");
+          fileInput.focus();
+        });
+      }
     })();
 
     (function () {

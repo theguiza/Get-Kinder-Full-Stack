@@ -1,5 +1,4 @@
 import React, { useEffect, useRef, useState } from "react";
-import { InviteModal } from "../components/InviteModal.jsx";
 
 function getSafetyNotesText(eventData) {
   const candidates = [
@@ -29,10 +28,8 @@ export function EventDetail({
   isAuthenticated = false,
   initialEventData = null,
   onCloseDetail,
-  onNavigateToInvites,
 }) {
   const [state, setState] = useState(() => buildInitialState(eventId, initialEventData, isAuthenticated));
-  const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteToast, setInviteToast] = useState(null);
   const [calendarLoading, setCalendarLoading] = useState(false);
   const [rsvpAction, setRsvpAction] = useState(null);
@@ -279,15 +276,6 @@ export function EventDetail({
     }
   }
 
-  function handleOpenInviteModal() {
-    const canInvite = evt.viewer_is_host || evt.viewer_rsvp_status === "accepted" || evt.viewer_rsvp_status === "checked_in";
-    if (!canInvite) {
-      window.alert("You can send this message after you have been approved");
-      return;
-    }
-    setInviteOpen(true);
-  }
-
   function handleRequestAttendance() {
     if (!isAuthenticated) {
       setLoginRequiredDialogOpen(true);
@@ -457,9 +445,6 @@ export function EventDetail({
         >
           {calendarLoading ? "Preparing…" : "Add to Calendar"}
         </button>
-        <button className="btn secondary event-action-btn" type="button" onClick={handleOpenInviteModal}>
-          Invite a Friend to Join
-        </button>
       </div>
 
       {!evt.viewer_is_host && evt.viewer_rsvp_status === "accepted" && Array.isArray(evt.attendance_methods) && evt.attendance_methods.length > 0 && (
@@ -582,29 +567,6 @@ export function EventDetail({
           </div>
         </div>
       )}
-
-      <InviteModal
-        open={inviteOpen}
-        onClose={() => setInviteOpen(false)}
-        eventId={eventId}
-        eventTitle={evt.title}
-        onSent={() => {
-          setInviteOpen(false);
-          showToast({
-            message: "Invite sent!",
-            actionLabel: "View in Invites",
-            onAction: () => {
-              if (typeof onNavigateToInvites === "function") {
-                onNavigateToInvites();
-                return;
-              }
-              window.location.href = "/events?route=invites";
-            },
-            type: "success",
-          });
-        }}
-      />
-
       <style>{detailStyles}</style>
     </div>
   );

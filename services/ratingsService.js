@@ -7,11 +7,17 @@ class RatingsServiceError extends Error {
   }
 }
 
+const DEFAULT_KINDNESS_RATING = 5;
+
 const roundToTenth = (value) => {
   const num = Number(value);
   if (!Number.isFinite(num)) return null;
   return Math.round(num * 10) / 10;
 };
+
+function resolveKindnessRating(avg, count) {
+  return count > 0 ? roundToTenth(avg) : DEFAULT_KINDNESS_RATING;
+}
 
 export async function getSummary({ userId, orgId, limit = 20 }) {
   const safeLimit = Number.isFinite(Number(limit)) ? Math.max(1, Number(limit)) : 20;
@@ -58,7 +64,7 @@ export async function getSummary({ userId, orgId, limit = 20 }) {
   const avg = rows?.[0]?.avg ?? null;
   const cnt = Number(rows?.[0]?.cnt) || 0;
   return {
-    kindnessRating: cnt ? roundToTenth(avg) : null,
+    kindnessRating: resolveKindnessRating(avg, cnt),
     sampleSize: cnt,
     limit: safeLimit,
   };

@@ -690,8 +690,8 @@ function EventCard({ evt, onSelectEvent }) {
 }
 
 function OrgRatingInline({ value, count }) {
-  const ratingValue = Number.isFinite(Number(value)) ? Number(value) : 5;
   const ratingCount = Number(count) || 0;
+  const ratingValue = ratingCount > 0 && Number.isFinite(Number(value)) ? Number(value) : 5;
   const ratingPercent = Math.max(0, Math.min(100, (ratingValue / 5) * 100));
 
   return (

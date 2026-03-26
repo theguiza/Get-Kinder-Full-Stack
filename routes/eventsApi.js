@@ -3,8 +3,10 @@ import { listEvents, getEventById, createEvent, createInvite, updateEvent, draft
 import { getEventRatingStatus, submitEventRating } from "../controllers/eventsRatingsController.js";
 import { cancelEvent, completeEvent, deleteDraftEvent } from "../controllers/meEventsApiController.js";
 import { ensureOrgRep } from "../middleware/ensureOrgRep.js";
+import { fetchEventsByOrg, fetchOrganizations } from "../services/eventsService.js";
 
 const eventsApiRouter = express.Router();
+const organizationsApiRouter = express.Router();
 
 function requireAuthenticatedApi(req, res, next) {
   if (req.isAuthenticated && req.isAuthenticated()) {
@@ -15,6 +17,31 @@ function requireAuthenticatedApi(req, res, next) {
   }
   return res.status(401).json({ error: "unauthorized" });
 }
+
+organizationsApiRouter.get("/", async (req, res) => {
+  try {
+    const organizations = await fetchOrganizations();
+    return res.json({ organizations });
+  } catch (error) {
+    console.error("[eventsApi] listOrganizations error:", error);
+    return res.status(500).json({ error: "internal_error" });
+  }
+});
+
+organizationsApiRouter.get("/:orgId/events", async (req, res) => {
+  const orgId = Number(req.params.orgId);
+  if (!Number.isInteger(orgId) || orgId <= 0) {
+    return res.status(400).json({ error: "invalid_org_id" });
+  }
+
+  try {
+    const events = await fetchEventsByOrg(orgId);
+    return res.json({ events });
+  } catch (error) {
+    console.error("[eventsApi] listEventsByOrganization error:", error);
+    return res.status(500).json({ error: "internal_error" });
+  }
+});
 
 eventsApiRouter.get("/", listEvents);
 eventsApiRouter.get("/:id", getEventById);
@@ -37,3 +64,4 @@ eventsApiRouter.patch("/:id", ensureOrgRep, updateEvent);
 eventsApiRouter.delete("/:id", ensureOrgRep, deleteDraftEvent);
 
 export default eventsApiRouter;
+export { organizationsApiRouter };

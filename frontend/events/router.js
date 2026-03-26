@@ -12,7 +12,6 @@ function normalizeRouteCandidate(value, fallback = "/events") {
 
   if (!raw) return fallback;
   if (raw === "/events" || raw === "/events/") return "/events";
-  if (raw === "/invites" || raw === "/invites/") return "/invites";
 
   const match = raw.match(/^\/events\/([^/?#]+)/);
   if (!match) return fallback;
@@ -42,17 +41,13 @@ export function normalizeEventsRoute(route) {
 
 export function buildEventsTabUrl(route, search = "") {
   const params = new URLSearchParams(search || "");
-  if (route === "/invites") {
-    params.set("route", "invites");
-  } else {
-    params.delete("route");
-  }
+  params.delete("route");
   const query = params.toString();
   return `/events${query ? `?${query}` : ""}`;
 }
 
 export function parseEventsLocation(locationLike, initialRoute = "events") {
-  const fallbackRoute = initialRoute === "invites" ? "/invites" : "/events";
+  const fallbackRoute = "/events";
   const pathname = String(locationLike?.pathname || "");
   const search = String(locationLike?.search || "");
   const hash = String(locationLike?.hash || "");

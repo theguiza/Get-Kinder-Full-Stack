@@ -230,6 +230,63 @@
   border: 3px solid #455a7c;
   padding: 3px;
   object-fit: cover;
+  background: #fff;
+}
+
+.org-hero-logo-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.org-logo-trigger {
+  display: block;
+  margin: 0.6rem auto 0;
+  white-space: normal;
+}
+
+.org-portal-page #orgLogoModal .modal-content {
+  border: 1px solid #dfe8f5;
+  border-radius: 16px;
+}
+
+.org-portal-page #orgLogoModal .modal-header {
+  border-bottom: 1px solid #e8eef7;
+  align-items: center;
+}
+
+.org-portal-page .org-logo-title-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.org-portal-page .org-logo-modal-mark {
+  width: 34px;
+  height: 34px;
+  border-radius: 6px;
+  object-fit: cover;
+}
+
+.org-portal-page #orgLogoModalLabel {
+  margin: 0;
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #ff5656;
+  line-height: 1.2;
+}
+
+.org-portal-page .org-logo-save-btn {
+  background: #ff5656;
+  border-color: #ff5656;
+  color: #fff;
+}
+
+.org-portal-page .org-logo-save-btn:hover,
+.org-portal-page .org-logo-save-btn:focus {
+  background: #f04c4c;
+  border-color: #f04c4c;
+  color: #fff;
 }
 
 .org-hero-name {
@@ -255,8 +312,10 @@
 }
 
 .org-hero-rating-stack {
-  display: inline-flex;
+  display: flex;
   flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
 }
 
 .org-hero-rating-stars {
@@ -290,6 +349,76 @@
   display: flex;
   justify-content: center;
   margin-top: 0.55rem;
+}
+
+.org-description-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin-top: 0.85rem;
+  width: 100%;
+  max-width: 100%;
+}
+
+.org-description-label {
+  color: #455a7c;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  text-align: left;
+  align-self: flex-start;
+}
+
+.org-description-alert {
+  margin: 0;
+  padding: 0.6rem 0.8rem;
+  font-size: 0.88rem;
+}
+
+.org-description-input.form-control {
+  min-height: 112px;
+  border: 1px solid #dfe8f5;
+  border-radius: 14px;
+  color: #455a7c;
+  resize: vertical;
+  box-shadow: none;
+}
+
+.org-description-input.form-control:focus {
+  border-color: #455a7c;
+  box-shadow: 0 0 0 0.18rem rgba(69, 90, 124, 0.12);
+}
+
+.org-description-actions {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.org-description-save-btn.btn {
+  background: #ff5656;
+  border-color: #ff5656;
+  color: #fff;
+  font-weight: 600;
+}
+
+.org-description-save-btn.btn:hover,
+.org-description-save-btn.btn:focus,
+.org-description-save-btn.btn:focus-visible,
+.org-description-save-btn.btn:active {
+  background: #f04c4c;
+  border-color: #f04c4c;
+  color: #fff;
+}
+
+.org-description-static {
+  margin-top: 0.85rem;
+  width: 100%;
+  max-width: 100%;
+  color: #455a7c;
+  font-size: 0.96rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
 }
 
 .org-portal-page .org-btn-ink.btn {
@@ -526,9 +655,124 @@
     padding: 1.25rem;
   }
 
+  .org-hero-card > .row {
+    --bs-gutter-x: 0;
+    --bs-gutter-y: 0.9rem;
+    display: grid;
+    grid-template-columns: 132px minmax(0, 1fr);
+    grid-template-areas:
+      "logo summary"
+      "kpi kpi";
+    column-gap: 1rem;
+    row-gap: 0.9rem;
+    align-items: flex-start !important;
+  }
+
+  .org-hero-card > .row > .org-hero-logo-col,
+  .org-hero-card > .row > .org-hero-summary-col,
+  .org-hero-card > .row > .org-hero-kpi-col {
+    width: auto;
+    max-width: none;
+    padding-left: 0;
+    padding-right: 0;
+    margin-top: 0;
+  }
+
+  .org-hero-logo-col {
+    grid-area: logo;
+    text-align: center !important;
+  }
+
+  .org-hero-logo-col .org-hero-avatar {
+    width: 96px;
+    height: 96px;
+  }
+
+  .org-hero-logo-col .org-logo-trigger {
+    width: 120px;
+    margin: 0.5rem auto 0;
+    padding-left: 0.35rem;
+    padding-right: 0.35rem;
+    font-size: 0.75rem;
+    line-height: 1.25;
+    white-space: nowrap;
+  }
+
+  .org-hero-summary-col {
+    grid-area: summary;
+    text-align: center !important;
+  }
+
+  .org-hero-summary-col .org-hero-rating-stack {
+    align-items: center;
+  }
+
+  .org-hero-summary-col .org-hero-rating {
+    justify-content: center;
+  }
+
+  .org-hero-summary-col .org-admin-cta-wrap {
+    justify-content: center;
+    width: 100%;
+  }
+
+  .org-hero-summary-col .org-description-form,
+  .org-hero-summary-col .org-description-static {
+    width: calc(100% + 132px + 1rem);
+    max-width: calc(100% + 132px + 1rem);
+    margin-left: calc(-132px - 1rem);
+  }
+
+  .org-hero-summary-col .org-description-label {
+    text-align: left;
+  }
+
+  .org-hero-summary-col .org-description-input.form-control {
+    width: 100%;
+  }
+
+  .org-hero-kpi-col {
+    grid-area: kpi;
+  }
+
+  .org-hero-kpi-col .row {
+    --bs-gutter-x: 0;
+    --bs-gutter-y: 0;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.85rem;
+  }
+
+  .org-hero-kpi-col .row > [class*="col-"] {
+    width: auto;
+    max-width: none;
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .org-hero-kpi-col .org-kpi-card {
+    height: 100%;
+  }
+
+  .org-hero-kpi-col .org-kpi-card .card-body {
+    min-height: 138px;
+    display: flex;
+    flex-direction: column;
+  }
+
   .org-hero-name,
   .org-kpi-value {
     font-size: 1.55rem;
+  }
+
+  .org-description-form,
+  .org-description-static {
+    width: 100%;
+    max-width: none;
+  }
+
+  .org-description-actions {
+    justify-content: center;
   }
 
   .orgp-opportunity-detail-grid {

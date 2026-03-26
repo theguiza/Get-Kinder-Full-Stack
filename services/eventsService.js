@@ -90,6 +90,9 @@ function mapEventRow(row = {}) {
     tz: row.tz || null,
     location_text: row.location_text || null,
     org_name: row.org_name || null,
+    org_id: row.org_id !== null && row.org_id !== undefined
+      ? Number(row.org_id)
+      : null,
     community_tag: row.community_tag || null,
     cause_tags: normalizeTextArray(row.cause_tags),
     requirements: row.requirements || null,
@@ -307,6 +310,137 @@ export async function fetchEvents({
     nextCursor,
     view: normalizedView,
   };
+}
+
+export async function fetchOrganizations() {
+  const { rows } = await pool.query(
+    `
+      SELECT 
+        o.id,
+        o.name,
+        o.description,
+        o.logo_url,
+        o.website,
+        COALESCE(event_stats.upcoming_event_count, 0) AS upcoming_event_count,
+        event_stats.next_event_at,
+        COALESCE(rating_summary.rating_value, 5)::float AS rating_value,
+        COALESCE(rating_summary.rating_count, 0)::int AS rating_count
+      FROM organizations o
+ LEFT JOIN LATERAL (
+        SELECT COUNT(DISTINCT e.id) FILTER (
+                 WHERE e.status = 'published'
+                   AND e.start_at > NOW()
+               ) AS upcoming_event_count,
+               MIN(e.start_at) FILTER (
+                 WHERE e.status = 'published'
+                   AND e.start_at > NOW()
+               ) AS next_event_at
+          FROM userdata u
+     LEFT JOIN events e
+            ON e.creator_user_id = u.id
+         WHERE u.org_id = o.id
+      ) event_stats ON TRUE
+ LEFT JOIN LATERAL (
+        SELECT COALESCE(AVG(recent.stars)::float, 5) AS rating_value,
+               COUNT(*)::int AS rating_count
+          FROM (
+                SELECT er.stars
+                  FROM event_ratings er
+             LEFT JOIN userdata hu
+                    ON hu.id = er.ratee_user_id
+                 WHERE (er.ratee_role = 'organization' AND er.ratee_org_id = o.id)
+                    OR (er.ratee_role = 'host' AND hu.org_id = o.id)
+              ORDER BY er.created_at DESC
+                 LIMIT 20
+               ) recent
+      ) rating_summary ON TRUE
+      WHERE o.status = 'approved'
+      ORDER BY COALESCE(event_stats.upcoming_event_count, 0) DESC, o.name ASC;
+    `
+  );
+
+  return rows.map((row) => ({
+    id: row.id !== null && row.id !== undefined ? Number(row.id) : null,
+    name: row.name || null,
+    description: row.description || null,
+    logo_url: row.logo_url || null,
+    website: row.website || null,
+    upcoming_event_count: Number(row.upcoming_event_count) || 0,
+    next_event_at: row.next_event_at || null,
+    rating_value: Number.isFinite(Number(row.rating_value)) ? Number(row.rating_value) : 5,
+    rating_count: Number(row.rating_count) || 0,
+  }));
+}
+
+export async function fetchEventsByOrg(orgId) {
+  const { rows } = await pool.query(
+    `
+      SELECT e.id,
+             e.title,
+             e.category,
+             e.description,
+             e.safety_notes,
+             e.start_at,
+             e.end_at,
+             NULLIF(BTRIM(COALESCE(to_jsonb(e) ->> 'recurrence_rule', '')), '') AS recurrence_rule,
+             COALESCE((to_jsonb(e) ->> 'is_recurring')::boolean, FALSE) AS is_recurring,
+             e.tz,
+             e.location_text,
+             e.org_name,
+             e.community_tag,
+             e.cause_tags,
+             e.requirements,
+             e.verification_method,
+             e.impact_credits_base,
+             e.reliability_weight,
+             e.funding_pool_slug,
+             e.capacity,
+             e.waitlist_enabled,
+             e.cover_url,
+             e.attendance_methods,
+             e.status,
+             e.creator_user_id,
+             creator.org_id,
+             org_rating.avg AS org_rating_value,
+             COALESCE(org_rating.cnt, 0) AS org_rating_count,
+             COALESCE(r.accepted, 0) AS rsvp_accepted
+        FROM events e
+   LEFT JOIN userdata creator
+          ON creator.id = e.creator_user_id
+   LEFT JOIN (
+          SELECT event_id,
+                 COUNT(*) FILTER (WHERE status IN ('accepted','checked_in')) AS accepted
+            FROM event_rsvps
+        GROUP BY event_id
+        ) r ON r.event_id = e.id
+   LEFT JOIN LATERAL (
+          SELECT AVG(recent.stars)::float AS avg,
+                 COUNT(*)::int AS cnt
+            FROM (
+                  SELECT er.stars
+                    FROM event_ratings er
+               LEFT JOIN userdata hu
+                      ON hu.id = er.ratee_user_id
+                   WHERE creator.org_id IS NOT NULL
+                     AND (
+                       (er.ratee_role = 'organization' AND er.ratee_org_id = creator.org_id)
+                       OR
+                       (er.ratee_role = 'host' AND hu.org_id = creator.org_id)
+                     )
+                ORDER BY er.created_at DESC
+                   LIMIT 20
+                 ) recent
+        ) org_rating ON creator.org_id IS NOT NULL
+       WHERE e.status = 'published'
+         AND e.start_at > NOW()
+         AND creator.org_id = $1
+       ORDER BY COALESCE(e.start_at, 'infinity'::timestamptz) ASC,
+                e.id ASC
+    `,
+    [orgId]
+  );
+
+  return rows.map((row) => mapEventRow(row));
 }
 
 export async function fetchEventById(id) {

@@ -1127,11 +1127,10 @@ orgPortalRouter.get("/opportunities/:eventId/applicants", async (req, res) => {
       try {
         const summary = await getRatingsSummary({ userId: applicant.userId, limit: 20 });
         const count = Number(summary?.sampleSize) || 0;
-        const hasRatings = count > 0 && Number.isFinite(Number(summary?.kindnessRating));
-        const value = hasRatings ? Number(summary.kindnessRating) : 5;
-        ratingValue = value;
+        const value = Number(summary?.kindnessRating);
+        ratingValue = Number.isFinite(value) ? value : 5;
         ratingCount = count;
-        ratingStarsFilled = Math.max(1, Math.min(5, Math.round(value)));
+        ratingStarsFilled = Math.max(1, Math.min(5, Math.round(ratingValue)));
       } catch (error) {
         if (error?.code !== "42P01") {
           console.warn("[orgPortalApi] ratings summary failed:", error?.message || error);

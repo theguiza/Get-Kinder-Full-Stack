@@ -1,16 +1,17 @@
 import React, { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   buildEventsTabUrl,
   EventsRouter,
   getEventDetailPath,
   getEventIdFromRoute,
+  normalizeEventsRoute,
   parseEventsLocation,
 } from "./router.js";
 import { Drawer } from "./components/Drawer.jsx";
-import { TopTabs } from "./components/TopTabs.jsx";
 import { Feed } from "./views/Feed.jsx";
-import { Invites } from "./views/Invites.jsx";
 import { EventDetail } from "./views/EventDetail.jsx";
+import OrgTab from "./views/OrgTab.jsx";
 
 function readInitialPreviewHtml() {
   if (typeof document === "undefined") return "";
@@ -20,7 +21,7 @@ function readInitialPreviewHtml() {
 
 function resolveInitialRoute(initialRoute) {
   if (typeof window === "undefined") {
-    return initialRoute === "invites" ? "/invites" : "/events";
+    return "/events";
   }
   return parseEventsLocation(window.location, initialRoute).route;
 }
@@ -39,6 +40,7 @@ export function EventsApp(props = {}) {
   const [interactiveReady, setInteractiveReady] = useState(() => !ssrPreviewHtml);
   const [route, setRoute] = useState(() => resolveInitialRoute(initialRoute));
   const [drawerId, setDrawerId] = useState(() => getEventIdFromRoute(resolveInitialRoute(initialRoute)));
+  const [activeTab, setActiveTab] = useState("orgs");
 
   const [feed, setFeed] = useState(Array.isArray(initialFeed) ? initialFeed : []);
 
@@ -93,10 +95,59 @@ export function EventsApp(props = {}) {
     navigate(`${detailPath}${window.location.search || ""}`, detailPath);
   };
 
-  const handleNavigate = (nextRoute) => {
-    if (typeof window === "undefined") return;
-    navigate(buildEventsTabUrl(nextRoute, window.location.search || ""), nextRoute);
-  };
+  const normalizedRoute = normalizeEventsRoute(route);
+  const showDiscoveryTabs = normalizedRoute === "/events";
+  const discoveryTabMount = typeof document !== "undefined"
+    ? document.getElementById("events-discovery-tabs-root")
+    : null;
+  const discoveryTabs = showDiscoveryTabs ? (
+    <div
+      style={{
+        background: "#fff",
+        borderBottom: "0.5px solid #d6deeb",
+      }}
+    >
+      <div
+        style={{
+          maxWidth: 1120,
+          margin: "0 auto",
+          padding: "0 1.5rem",
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          overflowX: "auto",
+        }}
+      >
+        {[
+          { value: "orgs", label: "Opportunities by Organization" },
+          { value: "browse", label: "Browse Opportunities" },
+        ].map((item) => {
+          const isActive = activeTab === item.value;
+          return (
+            <button
+              key={item.value}
+              type="button"
+              onClick={() => setActiveTab(item.value)}
+              style={{
+                appearance: "none",
+                border: 0,
+                borderBottom: isActive ? "2px solid #ff5656" : "2px solid transparent",
+                background: "transparent",
+                color: isActive ? "#455a7c" : "#6b7280",
+                fontSize: 15,
+                fontWeight: 700,
+                padding: "12px 20px",
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {item.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  ) : null;
 
   return (
     <div
@@ -106,7 +157,7 @@ export function EventsApp(props = {}) {
         "--events-ink": brand.ink,
       }}
     >
-      <TopTabs route={route} onNavigate={handleNavigate} />
+      {discoveryTabMount ? createPortal(discoveryTabs, discoveryTabMount) : discoveryTabs}
 
       <EventsRouter
         route={route}
@@ -117,8 +168,7 @@ export function EventsApp(props = {}) {
         brand={brand}
         onSelectEvent={handleSelectEvent}
       >
-        <Feed path="/events" />
-        <Invites path="/invites" />
+        {activeTab === "orgs" ? <OrgTab path="/events" /> : <Feed path="/events" />}
       </EventsRouter>
 
       <Drawer open={Boolean(drawerId)} onClose={handleCloseDrawer}>
@@ -128,7 +178,6 @@ export function EventsApp(props = {}) {
             isAuthenticated={isAuthenticated}
             initialEventData={initialEventData}
             onCloseDetail={handleCloseDrawer}
-            onNavigateToInvites={() => handleNavigate("/invites")}
           />
         ) : null}
       </Drawer>

@@ -46,7 +46,7 @@ import cookieParser from "cookie-parser";
 import quizHooksRouter from "./routes/quizHooks.js";
 import arcsApiRouter from "./routes/arcsApi.js";
 import { getEventsPage, getEventRsvpThanksPage } from "./routes/eventsPage.js";
-import eventsApiRouter from "./routes/eventsApi.js";
+import eventsApiRouter, { organizationsApiRouter } from "./routes/eventsApi.js";
 import invitesApiRouter from "./routes/invitesApi.js";
 import meEventsRouter from "./routes/meEventsApi.js";
 import meContactsRouter from "./routes/meContactsApi.js";
@@ -430,6 +430,7 @@ app.use("/internal/quiz", quizHooksRouter);
 app.use(arcsApiRouter);
 app.use("/api/webhooks", squareWebhooksApiRouter);
 app.use("/api/kai", kaiRouter);
+app.use("/api/organizations", organizationsApiRouter);
 app.use("/api/events", eventsApiRouter);
 app.use("/api/invites", ensureAuthenticatedApi, invitesApiRouter);
 app.use("/api/me/events", ensureAuthenticatedApi, meEventsRouter);
@@ -1612,6 +1613,30 @@ function buildProfileRedirectPath(params = {}) {
   return suffix ? `/profile?${suffix}` : "/profile";
 }
 
+function buildOrgPortalRedirectPath({ logoUploadError = "" } = {}) {
+  const search = new URLSearchParams();
+  if (logoUploadError) {
+    search.set("logoUploadError", String(logoUploadError).trim());
+  }
+  const suffix = search.toString();
+  return suffix ? `/org-portal?${suffix}` : "/org-portal";
+}
+
+function buildOrgPortalDescriptionRedirectPath({
+  descriptionSaved = false,
+  descriptionError = "",
+} = {}) {
+  const search = new URLSearchParams();
+  if (descriptionSaved) {
+    search.set("descriptionSaved", "1");
+  }
+  if (descriptionError) {
+    search.set("descriptionError", String(descriptionError).trim());
+  }
+  const suffix = search.toString();
+  return suffix ? `/org-portal?${suffix}` : "/org-portal";
+}
+
 async function fetchExistingProfileUserRow(req) {
   const authUserId = Number(req.user?.id);
   const existingResult = Number.isFinite(authUserId)
@@ -1668,6 +1693,134 @@ app.post(
 app.post('/profile/account', ensureAuthenticated, postAccount);
 
 app.post('/profile/preferences', ensureAuthenticated, postPreferences);
+
+app.post(
+  "/org-portal/logo",
+  ensureAuthenticated,
+  (req, res, next) => {
+    uploadAvatar.single("logo")(req, res, (err) => {
+      if (!err) return next();
+      if (err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE") {
+        return res.redirect(buildOrgPortalRedirectPath({
+          logoUploadError: "fileTooLarge",
+        }));
+      }
+      console.error("Organization logo upload error:", err);
+      return res.redirect(buildOrgPortalRedirectPath({
+        logoUploadError: "uploadFailed",
+      }));
+    });
+  },
+  async (req, res) => {
+    try {
+      const scope = await resolveOrgScope(req, {
+        allowAdminPreview: true,
+        includeOrgMembersForOrgRep: false,
+      });
+      const activeOrgId = scope?.orgId != null ? Number(scope.orgId) : null;
+      if (!scope?.hasOrgRepAccess || !Number.isInteger(activeOrgId) || activeOrgId <= 0) {
+        return res.redirect(isAdminRequest(req) ? "/admin" : "/org-apply");
+      }
+
+      const activeMembership = Array.isArray(scope?.memberships)
+        ? scope.memberships.find((entry) => Number(entry?.orgId) === activeOrgId)
+        : null;
+      const activeOrgStatus = String(activeMembership?.org_status || "").trim().toLowerCase();
+      if (activeOrgStatus === "suspended") {
+        return res.redirect("/org-portal");
+      }
+
+      if (!req.file) {
+        return res.redirect(buildOrgPortalRedirectPath({
+          logoUploadError: "noFileSelected",
+        }));
+      }
+
+      const mimeType = req.file.mimetype;
+      const base64str = req.file.buffer.toString("base64");
+      const logoUrl = `data:${mimeType};base64,${base64str}`;
+
+      const updateResult = await pool.query(
+        `
+          UPDATE public.organizations
+             SET logo_url = $1
+           WHERE id = $2
+           RETURNING id, logo_url
+        `,
+        [logoUrl, activeOrgId]
+      );
+      if (!updateResult.rowCount) {
+        return res.status(500).send("Organization logo did not persist.");
+      }
+
+      return res.redirect(buildOrgPortalRedirectPath());
+    } catch (error) {
+      console.error("Error updating organization logo:", error);
+      return res.redirect(buildOrgPortalRedirectPath({
+        logoUploadError: "uploadFailed",
+      }));
+    }
+  }
+);
+
+app.post("/org-portal/description", ensureAuthenticated, async (req, res) => {
+  try {
+    const scope = await resolveOrgScope(req, {
+      allowAdminPreview: true,
+      includeOrgMembersForOrgRep: false,
+    });
+    const activeOrgId = scope?.orgId != null ? Number(scope.orgId) : null;
+    if (!scope?.hasOrgRepAccess || !Number.isInteger(activeOrgId) || activeOrgId <= 0) {
+      return res.redirect(isAdminRequest(req) ? "/admin" : "/org-apply");
+    }
+
+    const activeMembership = Array.isArray(scope?.memberships)
+      ? scope.memberships.find((entry) => Number(entry?.orgId) === activeOrgId)
+      : null;
+    const activeOrgStatus = String(activeMembership?.org_status || "").trim().toLowerCase();
+    const activeOrgRole = String(activeMembership?.role || "").trim().toLowerCase();
+    const isAdminViewer = isAdminRequest(req);
+    const canEditDescription = isAdminViewer || activeOrgRole === "admin" || !activeOrgRole;
+
+    if (activeOrgStatus === "suspended") {
+      return res.redirect("/org-portal");
+    }
+    if (!canEditDescription) {
+      return res.redirect(buildOrgPortalDescriptionRedirectPath({
+        descriptionError: "forbidden",
+      }));
+    }
+
+    const nextDescription = String(req.body?.orgDescription || "").trim();
+    if (nextDescription.length > 2000) {
+      return res.redirect(buildOrgPortalDescriptionRedirectPath({
+        descriptionError: "tooLong",
+      }));
+    }
+
+    const updateResult = await pool.query(
+      `
+        UPDATE public.organizations
+           SET description = $1
+         WHERE id = $2
+         RETURNING id, description
+      `,
+      [nextDescription || null, activeOrgId]
+    );
+    if (!updateResult.rowCount) {
+      return res.status(500).send("Organization description did not persist.");
+    }
+
+    return res.redirect(buildOrgPortalDescriptionRedirectPath({
+      descriptionSaved: true,
+    }));
+  } catch (error) {
+    console.error("Error updating organization description:", error);
+    return res.redirect(buildOrgPortalDescriptionRedirectPath({
+      descriptionError: "saveFailed",
+    }));
+  }
+});
 
 // 13.4) View Profile Route
 app.get('/profile', ensureAuthenticated, async (req, res) => {
@@ -2476,6 +2629,8 @@ app.get("/org-portal", ensureOrgRepPage, async (req, res) => {
     starsFilled: 5,
   };
   let organizationName = "";
+  let organizationDescription = "";
+  let organizationLogoUrl = "";
   let orgMemberships = [];
   let activeOrgId = null;
   let activeOrgStatus = "";
@@ -2544,16 +2699,22 @@ app.get("/org-portal", ensureOrgRepPage, async (req, res) => {
     if (selectedMembership?.status) {
       activeOrgStatus = String(selectedMembership.status || "").trim().toLowerCase();
     }
-    if (!organizationName) {
+    if (activeOrgId != null && Number.isFinite(activeOrgId)) {
       const { rows: [orgRow] = [] } = await pool.query(
-        "SELECT name, status FROM public.organizations WHERE id = $1 LIMIT 1",
+        "SELECT name, description, status, logo_url FROM public.organizations WHERE id = $1 LIMIT 1",
         [activeOrgId]
       );
-      if (typeof orgRow?.name === "string" && orgRow.name.trim()) {
+      if (!organizationName && typeof orgRow?.name === "string" && orgRow.name.trim()) {
         organizationName = orgRow.name.trim();
+      }
+      if (typeof orgRow?.description === "string" && orgRow.description.trim()) {
+        organizationDescription = orgRow.description.trim();
       }
       if (!activeOrgStatus && typeof orgRow?.status === "string") {
         activeOrgStatus = orgRow.status.trim().toLowerCase();
+      }
+      if (typeof orgRow?.logo_url === "string" && orgRow.logo_url.trim()) {
+        organizationLogoUrl = orgRow.logo_url.trim();
       }
     }
 
@@ -2579,9 +2740,14 @@ app.get("/org-portal", ensureOrgRepPage, async (req, res) => {
     user: req.user,
     orgRating,
     organizationName,
+    organizationDescription,
+    organizationLogoUrl,
     orgMemberships,
     activeOrgId,
     activeOrgStatus,
+    logoUploadError: req.query.logoUploadError || "",
+    descriptionSaved: req.query.descriptionSaved === "1",
+    descriptionError: req.query.descriptionError || "",
   });
 });
 

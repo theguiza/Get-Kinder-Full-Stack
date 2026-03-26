@@ -469,7 +469,8 @@ export default function ImpactHero(props = {}) {
     ? `+${Math.max(0, Number(walletSummary.earnable_this_week) || 0)} $KIND`
     : "—";
   const ratingsSampleSize = Number(ratingsSummary?.rating_count) || 0;
-  const ratingsValue = ratingsSampleSize ? `${ratingsSummary?.kindness_rating}★` : "—";
+  const ratingsDisplayValue = Number(ratingsSummary?.kindness_rating);
+  const ratingsValue = Number.isFinite(ratingsDisplayValue) ? `${ratingsDisplayValue}★` : "—";
   const ratingsMeta = ratingsLoading
     ? "Loading rating…"
     : ratingsSampleSize

@@ -51,7 +51,7 @@ export async function getRatingsSummary(req, res) {
     return res.json({
       ok: true,
       data: {
-        kindness_rating: sampleSize ? summary.kindnessRating : null,
+        kindness_rating: summary.kindnessRating,
         rating_count: sampleSize,
         scope: scope === "organization" ? "organization" : "user",
         org_id: orgId,
