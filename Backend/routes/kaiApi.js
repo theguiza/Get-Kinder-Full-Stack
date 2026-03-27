@@ -2,6 +2,7 @@ import express from "express";
 import { handleKaiMessage, getConversationHistory } from "../services/kai.js";
 import { determineKaiTier } from "../middleware/kai-tier.js";
 import pool from "../db/pg.js";
+import { getBearerToken, verifyBearerToken } from "../../middleware/auth.js";
 import { awardIcForRsvp } from "../services/icService.js";
 import {
   bucketResultCount,
@@ -51,9 +52,41 @@ function validateIncomingMessage(message) {
   return { valid: true, value: trimmed };
 }
 
+async function resolveAuthenticatedKaiUser(req) {
+  if (req.isAuthenticated && req.isAuthenticated()) {
+    return req.user || null;
+  }
+
+  const token = getBearerToken(req);
+  const verification = verifyBearerToken(token);
+  if (!verification.ok) {
+    return null;
+  }
+
+  const userId = Number(verification.decoded?.id ?? verification.decoded?.sub);
+  if (!Number.isInteger(userId)) {
+    return null;
+  }
+
+  const { rows } = await pool.query(
+    "SELECT * FROM userdata WHERE id = $1 LIMIT 1",
+    [userId]
+  );
+  const user = rows?.[0] || null;
+  if (!user) {
+    return null;
+  }
+
+  req.auth = verification.decoded;
+  req.jwtUser = verification.decoded;
+  req.user = user;
+  return user;
+}
+
 router.post("/message", async (req, res) => {
   try {
-    if (!req.isAuthenticated || !req.isAuthenticated()) {
+    const authenticatedUser = await resolveAuthenticatedKaiUser(req);
+    if (!authenticatedUser) {
       return res.status(401).json({ success: false, error: "Unauthorized" });
     }
 

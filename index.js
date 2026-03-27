@@ -19,6 +19,8 @@ import {
 } from "./services/profileService.js";
 import { getSummary as getRatingsSummary } from "./services/ratingsService.js";
 import bcrypt from "bcrypt";
+import { OAuth2Client } from "google-auth-library";
+import jwt from "jsonwebtoken";
 import session from "express-session";
 import passport from "passport";
 import cors from "cors";
@@ -65,6 +67,7 @@ import {
   legacyKaiDeprecatedJson,
   legacyKaiDeprecatedSse,
 } from "./Backend/legacyOpenAiQuarantine.js";
+import { verifyToken } from "./middleware/auth.js";
 import { ensureOrgRepPage } from "./middleware/ensureOrgRep.js";
 import { ensureAdmin, ensureAdminApi, isAdminRequest } from "./Backend/middleware/ensureAdmin.js";
 import {
@@ -111,9 +114,39 @@ try {
 const PASSWORD_RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
 const PASSWORD_RESET_RESEND_WINDOW_MINUTES = 2;
 const MIN_PASSWORD_LENGTH = 8;
+const MOBILE_JWT_EXPIRES_IN = "30d";
 
 function normalizeEmail(rawEmail) {
   return typeof rawEmail === "string" ? rawEmail.trim().toLowerCase() : "";
+}
+
+function buildMobileAuthUser(user) {
+  return {
+    id: user.id,
+    name: `${user.firstname || ""} ${user.lastname || ""}`.trim() || user.email,
+    email: user.email,
+    org_rep: user.org_rep === true,
+    is_admin: user.is_admin === true,
+  };
+}
+
+function signMobileAuthToken(user) {
+  const jwtSecret = String(process.env.JWT_SECRET || "").trim();
+  if (!jwtSecret) {
+    throw new Error("JWT_SECRET is not configured.");
+  }
+
+  return jwt.sign(
+    {
+      sub: String(user.id),
+      id: user.id,
+      email: user.email,
+      org_rep: user.org_rep === true,
+      is_admin: user.is_admin === true,
+    },
+    jwtSecret,
+    { expiresIn: MOBILE_JWT_EXPIRES_IN }
+  );
 }
 
 function hashPasswordResetToken(token) {
@@ -957,6 +990,173 @@ app.post("/login", async (req, res, next) => {
       facebookAppId: process.env.FACEBOOK_APP_ID,
       error: "Login is temporarily unavailable. Please try again in a minute.",
     });
+  }
+});
+app.post("/api/auth/mobile-login", async (req, res) => {
+  const submittedEmail = normalizeEmail(req.body?.email);
+  const password = typeof req.body?.password === "string" ? req.body.password : "";
+
+  try {
+    if (!submittedEmail || !password) {
+      return res.status(400).json({ error: "email_and_password_required" });
+    }
+
+    if (!process.env.JWT_SECRET || !String(process.env.JWT_SECRET).trim()) {
+      console.error("Mobile login error: JWT_SECRET is not configured.");
+      return res.status(500).json({ error: "jwt_secret_not_configured" });
+    }
+
+    const result = await pool.query(
+      "SELECT * FROM userdata WHERE LOWER(email) = LOWER($1) ORDER BY (password IS NULL), id DESC LIMIT 1",
+      [submittedEmail]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(401).json({ error: "invalid_email_or_password" });
+    }
+
+    const user = result.rows[0];
+    if (typeof user.password !== "string" || !user.password.trim()) {
+      return res.status(401).json({ error: "password_not_set" });
+    }
+
+    let isMatch = false;
+    try {
+      isMatch = await bcrypt.compare(password, user.password);
+    } catch (compareErr) {
+      console.error("Mobile login compare error:", compareErr);
+      return res.status(401).json({ error: "invalid_email_or_password" });
+    }
+
+    if (!isMatch) {
+      return res.status(401).json({ error: "invalid_email_or_password" });
+    }
+
+    if (user?.email_verified !== true) {
+      return res.status(403).json({ error: "email_verification_required" });
+    }
+
+    if (user?.is_suspended === true) {
+      return res.status(403).json({ error: "account_suspended" });
+    }
+
+    const token = signMobileAuthToken(user);
+
+    return res.json({
+      token,
+      user: buildMobileAuthUser(user),
+    });
+  } catch (err) {
+    console.error("Mobile login error:", err);
+    return res.status(500).json({ error: "mobile_login_unavailable" });
+  }
+});
+app.post("/api/auth/mobile-google", async (req, res) => {
+  const idToken = typeof req.body?.idToken === "string" ? req.body.idToken.trim() : "";
+  const googleClientId = String(process.env.GOOGLE_CLIENT_ID || "").trim();
+
+  try {
+    if (!idToken) {
+      return res.status(400).json({ error: "id_token_required" });
+    }
+
+    if (!googleClientId) {
+      console.error("Mobile Google login error: GOOGLE_CLIENT_ID is not configured.");
+      return res.status(500).json({ error: "google_client_id_not_configured" });
+    }
+
+    if (!process.env.JWT_SECRET || !String(process.env.JWT_SECRET).trim()) {
+      console.error("Mobile Google login error: JWT_SECRET is not configured.");
+      return res.status(500).json({ error: "jwt_secret_not_configured" });
+    }
+
+    const googleClient = new OAuth2Client(googleClientId);
+    const iosClientId = String(process.env.IOS_CLIENT_ID || "").trim();
+    const validAudiences = [googleClientId, iosClientId].filter(Boolean);
+    let payload;
+    try {
+      const ticket = await googleClient.verifyIdToken({
+        idToken,
+        audience: validAudiences,
+      });
+      payload = ticket.getPayload();
+    } catch (verifyErr) {
+      console.error("Mobile Google token verification error:", verifyErr);
+      return res.status(401).json({ error: "invalid_google_token" });
+    }
+    const email = normalizeEmail(payload?.email);
+
+    if (!email) {
+      return res.status(400).json({ error: "google_email_missing" });
+    }
+
+    if (payload?.email_verified === false) {
+      return res.status(403).json({ error: "google_email_not_verified" });
+    }
+
+    const result = await pool.query(
+      "SELECT * FROM userdata WHERE LOWER(email) = LOWER($1) ORDER BY id DESC LIMIT 1",
+      [email]
+    );
+
+    let user = result.rows[0];
+    if (!user) {
+      const inserted = await pool.query(
+        `INSERT INTO userdata 
+           (firstname, lastname, email, password, google_id, picture)
+         VALUES
+           ($1,       $2,       $3,    $4,       $5,        $6)
+         RETURNING *`,
+        [
+          payload?.given_name || "",
+          payload?.family_name || "",
+          email,
+          null,
+          payload?.sub || null,
+          payload?.picture || null,
+        ]
+      );
+      user = inserted.rows[0];
+    }
+
+    if (user?.is_suspended === true) {
+      return res.status(403).json({ error: "account_suspended" });
+    }
+
+    const token = signMobileAuthToken(user);
+    return res.json({
+      token,
+      user: buildMobileAuthUser(user),
+    });
+  } catch (err) {
+    console.error("Mobile Google login error:", err);
+    return res.status(500).json({ error: "mobile_google_login_unavailable" });
+  }
+});
+app.get("/api/auth/mobile-me", verifyToken, async (req, res) => {
+  try {
+    const userId = Number(req.auth?.id ?? req.jwtUser?.id ?? req.auth?.sub);
+    if (!Number.isInteger(userId)) {
+      return res.status(401).json({ error: "invalid_token" });
+    }
+
+    const result = await pool.query(
+      "SELECT * FROM userdata WHERE id = $1 LIMIT 1",
+      [userId]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "user_not_found" });
+    }
+
+    const user = result.rows[0];
+    if (user?.is_suspended === true) {
+      return res.status(403).json({ error: "account_suspended" });
+    }
+
+    return res.json({ user: buildMobileAuthUser(user) });
+  } catch (err) {
+    console.error("Mobile auth lookup error:", err);
+    return res.status(500).json({ error: "mobile_auth_lookup_failed" });
   }
 });
 app.get("/forgot-password", (req, res) => {
@@ -2815,9 +3015,7 @@ app.get("/", async (req, res, next) => {
       if (req.session) {
         req.session.showOnboarding = false;
       }
-      return renderIndexPage(req, res, next);
     }
-    return res.redirect("/dashboard");
   }
   return renderIndexPage(req, res, next);
 });
