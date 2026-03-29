@@ -69,7 +69,7 @@ function OrgPortalTabIcon({color}) {
 }
 
 function ProfileTabIcon({color}) {
-  return <TabIcon label="👤" color={color} />;
+  return <TabIcon label="🤝" color={color} />;
 }
 
 function EventsNavigator() {
@@ -168,6 +168,7 @@ function MainTabs() {
         name="Profile"
         component={ProfileScreen}
         options={{
+          tabBarLabel: 'Donor',
           tabBarIcon: ProfileTabIcon,
         }}
       />

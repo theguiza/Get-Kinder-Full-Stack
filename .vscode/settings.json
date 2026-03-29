@@ -36,6 +36,7 @@
         "Psychoneuroendocrinology",
         "remoteip",
         "replyto",
+        "reqs",
         "rsvps",
         "SANITISED",
         "SDVT",
@@ -45,6 +46,7 @@
         "topups",
         "UCSF",
         "undistracted",
-        "unsuspended"
+        "unsuspended",
+        "waitlisted"
     ]
 }

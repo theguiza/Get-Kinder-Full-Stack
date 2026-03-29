@@ -46,6 +46,8 @@ function mapMembershipRows(scope) {
 }
 
 function requireCsrf(req, res) {
+  // Mobile JWT requests have no session - skip CSRF entirely
+  if (req.headers?.authorization?.startsWith('Bearer ')) return true;
   const expectedCsrf = req.session?.csrfToken;
   const providedCsrf = req.get(CSRF_HEADER_NAME);
   if (!expectedCsrf || !providedCsrf || providedCsrf !== expectedCsrf) {

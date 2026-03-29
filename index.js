@@ -466,6 +466,20 @@ app.use("/api/kai", kaiRouter);
 app.use("/api/organizations", organizationsApiRouter);
 app.use("/api/events", eventsApiRouter);
 app.use("/api/invites", ensureAuthenticatedApi, invitesApiRouter);
+app.get("/api/me/dashboard", ensureAuthenticatedApi, async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ ok: false, error: "unauthorized" });
+    }
+    const { getVolunteerStats } = await import('./services/profileService.js');
+    const stats = await getVolunteerStats(userId);
+    return res.json({ ok: true, data: stats });
+  } catch (error) {
+    console.error("[api/me/dashboard] error:", error);
+    return res.status(500).json({ ok: false, error: "Unable to load dashboard" });
+  }
+});
 app.use("/api/me/events", ensureAuthenticatedApi, meEventsRouter);
 app.use("/api/me/contacts", ensureAuthenticatedApi, meContactsRouter);
 app.use("/api/carousel", ensureAuthenticatedApi, carouselApiRouter);
@@ -976,10 +990,10 @@ app.post("/login", async (req, res, next) => {
         if (req.session) {
           req.session.showOnboarding = true;
           return req.session.save(() =>
-            res.redirect(`/?login=1&name=${encodeURIComponent(displayName)}`)
+            res.redirect(`/home?login=1&name=${encodeURIComponent(displayName)}`)
           );
         }
-        return res.redirect(`/?login=1&name=${encodeURIComponent(displayName)}`);
+        return res.redirect(`/home?login=1&name=${encodeURIComponent(displayName)}`);
       }
       res.redirect("/dashboard");
     });
@@ -2251,14 +2265,41 @@ app.get("/register", (req, res) => res.render("register", {
 app.get("/404", (req, res) => res.render("404", { title: "404 ERROR" }));
 app.get("/error", (req, res) => res.render("error", { title: "500 ERROR" }));
 // Middleware to ensure authentication for API routes
-function ensureAuthenticatedApi(req, res, next) {
+async function ensureAuthenticatedApi(req, res, next) {
   if (req.isAuthenticated && req.isAuthenticated()) {
     if (req.user?.is_suspended) {
       return res.status(403).json({ error: "account_suspended" });
     }
     return next();
   }
-  return res.status(401).json({ error: "unauthorized" });
+
+  const { getBearerToken, verifyBearerToken } = await import('./middleware/auth.js');
+  const token = getBearerToken(req);
+  const verification = verifyBearerToken(token);
+  if (!verification.ok) {
+    return res.status(401).json({ error: "unauthorized" });
+  }
+
+  const userId = Number(verification.decoded?.id ?? verification.decoded?.sub);
+  if (!Number.isInteger(userId)) {
+    return res.status(401).json({ error: "unauthorized" });
+  }
+
+  const { rows } = await pool.query(
+    "SELECT * FROM userdata WHERE id = $1 LIMIT 1",
+    [userId]
+  );
+  const user = rows?.[0] || null;
+  if (!user) {
+    return res.status(401).json({ error: "unauthorized" });
+  }
+
+  if (user.is_suspended) {
+    return res.status(403).json({ error: "account_suspended" });
+  }
+
+  req.user = user;
+  return next();
 }
 
 function normalizeGeoQuery(value) {
@@ -3015,12 +3056,14 @@ app.get("/", async (req, res, next) => {
       if (req.session) {
         req.session.showOnboarding = false;
       }
+      return renderIndexPage(req, res, next);
     }
+    return res.redirect("/dashboard");
   }
   return renderIndexPage(req, res, next);
 });
 
-app.get("/home", (req, res) => res.redirect(301, "/"));
+app.get("/home", renderIndexPage);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 16) OAuth Callback Routes
@@ -3049,7 +3092,7 @@ app.get("/auth/google/callback",
         const displayName =
           (req.user && (req.user.firstname || req.user.email)) || "";
         return req.session.save(() =>
-          res.redirect(`/?login=1&name=${encodeURIComponent(displayName)}`)
+          res.redirect(`/home?login=1&name=${encodeURIComponent(displayName)}`)
         );
       }
       return res.redirect("/dashboard");
@@ -3083,7 +3126,7 @@ app.get("/auth/facebook/callback",
         const displayName =
           (req.user && (req.user.firstname || req.user.email)) || "";
         return req.session.save(() =>
-          res.redirect(`/?login=1&name=${encodeURIComponent(displayName)}`)
+          res.redirect(`/home?login=1&name=${encodeURIComponent(displayName)}`)
         );
       }
       return res.redirect("/dashboard");

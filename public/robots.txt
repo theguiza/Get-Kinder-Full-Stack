@@ -5,7 +5,6 @@ Disallow: /admin
 Disallow: /org-portal
 Disallow: /dashboard
 Disallow: /profile
-Disallow: /donor
 Disallow: /login
 Disallow: /register
 Disallow: /forgot-password
