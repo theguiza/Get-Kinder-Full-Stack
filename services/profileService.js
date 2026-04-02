@@ -356,6 +356,7 @@ export async function getVolunteerStats(userId) {
         location_text: row.location_text,
         org_name: row.org_name,
         community_tag: row.community_tag,
+        event_status: row.event_status,
         status: row.event_status,
         rsvp_status: row.rsvp_status,
         verification_status: row.verification_status,

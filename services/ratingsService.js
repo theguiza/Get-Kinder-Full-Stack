@@ -7,8 +7,6 @@ class RatingsServiceError extends Error {
   }
 }
 
-const DEFAULT_KINDNESS_RATING = 5;
-
 const roundToTenth = (value) => {
   const num = Number(value);
   if (!Number.isFinite(num)) return null;
@@ -16,7 +14,7 @@ const roundToTenth = (value) => {
 };
 
 function resolveKindnessRating(avg, count) {
-  return count > 0 ? roundToTenth(avg) : DEFAULT_KINDNESS_RATING;
+  return count > 0 ? roundToTenth(avg) : null;
 }
 
 export async function getSummary({ userId, orgId, limit = 20 }) {

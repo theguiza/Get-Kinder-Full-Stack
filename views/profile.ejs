@@ -665,11 +665,7 @@
   <%- include("partials/site-header", { currentPage: "profile" }) %>
   <div> <br></div>
       <div class="container profile-page profile-page-shell rounded bg-white px-3 pt-4">
-          <% const fpMonthly = (friendPoints && Number.isFinite(friendPoints.monthly)) ? friendPoints.monthly : 0;
-            const fpTotal   = (friendPoints && Number.isFinite(friendPoints.total)) ? friendPoints.total : 0;
-            const fpGoal    = (friendPoints && Number.isFinite(friendPoints.goal) && friendPoints.goal > 0) ? friendPoints.goal : 500;
-            const fpPercent = Math.min(100, Math.round((fpTotal / fpGoal) * 100));
-            const stats = volunteerStats || {};
+          <% const stats = volunteerStats || {};
             const impactBalance = Number(stats.impact_credits_balance) || 0;
             const verifiedHours = Number(stats.verified_hours_total) || 0;
             const reliabilityScore = Number(stats.reliability_score) || 0;

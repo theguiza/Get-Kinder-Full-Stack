@@ -7,9 +7,7 @@ if (typeof window !== "undefined") {
 import React from "react";
 import ReactDOM from "react-dom/client";
 
-import BestieVibesQuiz from "./BestieVibesQuiz.jsx";
 import { EventsApp } from "./events/App.jsx";
-import FriendQuizzesPage from "./FriendQuizzesPage.jsx";
 import KinderCrewCarousel from "./kinderCrewCarousel.jsx";
 import WeeksPlan from "./weeksPlan.jsx";
 import DonorDashboard from "./donorDashboard.jsx";
@@ -45,19 +43,6 @@ function renderIntoRoot(el, node, { hydrate = false } = {}) {
   root.render(node);
   return root;
 }
-
-window.renderBestieVibesQuiz = (selector, props = {}) => {
-  const el = typeof selector === "string" ? document.querySelector(selector) : selector;
-  if (!el) return;
-  const root = getOrCreateRoot(el);
-  root.render(<BestieVibesQuiz {...props} />);
-};
-window.renderFriendQuizzesPage = (selector, props = {}) => {
-  const el = typeof selector === "string" ? document.querySelector(selector) : selector;
-  if (!el) return;
-  const root = getOrCreateRoot(el);
-  root.render(<FriendQuizzesPage {...props} />);
-};
 
 // ---- Kinder Crew Carousel
 window.renderKinderCrewCarousel = (selector = "#kinder-crew-carousel-root", props = {}) => {

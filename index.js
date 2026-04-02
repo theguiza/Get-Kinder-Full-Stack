@@ -33,7 +33,6 @@ import crypto from "crypto";
 import rateLimit from "express-rate-limit";
 import { makeDashboardController } from "./Backend/dashboardController.js";
 import { makeProfileController } from "./Backend/profileController.js";
-import { generateArcForQuiz } from "./services/ArcGenerator.js";
 import { buildProfileCompletion } from "./services/profileCompletionService.js";
 import {
   buildProfileFieldUpdates,
@@ -45,8 +44,6 @@ import { deliverQueuedNudges, sendNudgeEmail } from './kindnessEmailer.js';
 const { fetchUserEmails, fetchKindnessPrompts, fetchEmailSubject } = await import("./fetchData.js");
 const { sendDailyKindnessPrompts } = await import("./kindnessEmailer.js");
 import cookieParser from "cookie-parser";
-import quizHooksRouter from "./routes/quizHooks.js";
-import arcsApiRouter from "./routes/arcsApi.js";
 import { getEventsPage, getEventRsvpThanksPage } from "./routes/eventsPage.js";
 import eventsApiRouter, { organizationsApiRouter } from "./routes/eventsApi.js";
 import invitesApiRouter from "./routes/invitesApi.js";
@@ -459,8 +456,6 @@ app.get("/sitemap.xml", (req, res) => {
   return res.send(xml);
 });
 app.use(express.static(path.join(__dirname, "public")));
-app.use("/internal/quiz", quizHooksRouter);
-app.use(arcsApiRouter);
 app.use("/api/webhooks", squareWebhooksApiRouter);
 app.use("/api/kai", kaiRouter);
 app.use("/api/organizations", organizationsApiRouter);
@@ -2053,67 +2048,6 @@ app.get('/profile', ensureAuthenticated, async (req, res) => {
     const statsUserId = (await resolveUserIdFromRequest(req)) || String(userRow.id);
     const showStatsDebug = process.env.NODE_ENV !== "production" || Boolean(process.env.DEBUG);
 
-    let topFriends = [];
-    let friendPoints = { monthly: 0, total: 0, goal: 500 };
-    try {
-      const { rows: friendRows } = await pool.query(
-        `SELECT
-             COALESCE(f.name, fa.name)               AS name,
-             COALESCE(f.score, fa.friend_score)      AS score,
-             COALESCE(f.archetype_primary, fa.friend_type) AS archetype_primary,
-             f.archetype_secondary
-          FROM public.friend_arcs fa
-          LEFT JOIN public.friends f
-            ON f.id::text = fa.id::text
-           AND f.owner_user_id = fa.user_id
-         WHERE fa.user_id = $1
-         ORDER BY COALESCE(f.score, fa.friend_score) DESC NULLS LAST,
-                  COALESCE(f.name, fa.name) ASC
-          LIMIT 3`,
-        [statsUserId]
-      );
-
-      topFriends = friendRows.map((row) => {
-        const score = Number.isFinite(row.score) ? Math.round(row.score) : null;
-        const type = [row.archetype_primary, row.archetype_secondary]
-          .map((value) => (typeof value === 'string' ? value.trim() : ''))
-          .find((value) => value.length);
-
-        return {
-          name: row.name || 'Friend',
-          score,
-          type: type || '—'
-        };
-      });
-    } catch (friendErr) {
-      console.warn('Profile top friends query failed:', friendErr.message || friendErr);
-      topFriends = [];
-    }
-
-    try {
-      const { rows: [pointsRow] = [] } = await pool.query(
-        `
-        SELECT
-          COALESCE(SUM(arc_points), 0)   AS total_points,
-          COALESCE(SUM(points_today), 0) AS today_points
-          FROM friend_arcs
-         WHERE user_id = $1
-        `,
-        [statsUserId]
-      );
-
-      const total = Number(pointsRow?.total_points) || 0;
-      const monthly = Number(pointsRow?.today_points) || 0; // fallback until monthly tracking exists
-      friendPoints = {
-        monthly,
-        total,
-        goal: 500
-      };
-    } catch (pointsErr) {
-      console.warn('Profile friend points query failed:', pointsErr.message || pointsErr);
-      friendPoints = { monthly: 0, total: 0, goal: 500 };
-    }
-
     // 2) Mirror your home/about locals
     const success      = req.query.success === '1';   // registration alert
     const loginSuccess = req.query.login   === '1';   // login alert
@@ -2204,8 +2138,6 @@ app.get('/profile', ensureAuthenticated, async (req, res) => {
     return res.render('profile', {
       title:        'User Profile',
       user:         userRow,
-      topFriends,
-      friendPoints,
       portfolioRows,
       portfolioSummary,
       skillsBreakdown,
@@ -2556,74 +2488,6 @@ app.get('/api/graph/friends/latest', ensureAuthenticatedApi, async (req, res) =>
   }
 });
 
-const tierFromScore = (score) => {
-  const num = Number(score);
-  if (!Number.isFinite(num)) return null;
-  if (num >= 85) return "Bestie Material";
-  if (num >= 70) return "Strong Contender";
-  if (num >= 50) return "Potential Pal";
-  return "Acquaintance Energy";
-};
-
-const chooseTier = (explicitTier, score) => {
-  const tierCandidate =
-    typeof explicitTier === "string" && explicitTier.trim()
-      ? explicitTier.trim()
-      : null;
-  if (tierCandidate) {
-    return tierCandidate;
-  }
-  return tierFromScore(score) || "General";
-};
-
-const chooseChannelPref = (value) => {
-  if (typeof value === "string" && value.trim()) return value.trim();
-  return "mixed";
-};
-
-const buildArcPayload = (ownerId, friend, body) => {
-  if (!ownerId || !friend?.id || !friend?.name) return null;
-  const tier = chooseTier(
-    body?.tier ?? body?.friend_tier ?? body?.friendTier,
-    friend?.score
-  );
-  const channelPref = chooseChannelPref(
-    body?.channel_pref ?? body?.channelPref ?? body?.preferred_channel
-  );
-  if (!tier || !channelPref) return null;
-
-  const payload = {
-    user_id: ownerId,
-    friend_id: friend.id,
-    friend_name: friend.name,
-    tier,
-    channel_pref: channelPref,
-    friend_score: friend?.score ?? null,
-    friend_type: friend?.archetype_primary ?? null,
-    effort_capacity:
-      typeof body?.effort_capacity === "string" && body.effort_capacity.trim()
-        ? body.effort_capacity.trim()
-        : typeof body?.effortCapacity === "string" && body.effortCapacity.trim()
-        ? body.effortCapacity.trim()
-        : undefined,
-    goal: body?.goal ?? body?.goals,
-    availability: body?.availability,
-    quiz_session_id: body?.quiz_session_id ?? body?.quizSessionId ?? null,
-  };
-
-  if (payload.effort_capacity === undefined) {
-    delete payload.effort_capacity;
-  }
-  if (payload.goal === undefined) {
-    delete payload.goal;
-  }
-  if (payload.availability === undefined) {
-    delete payload.availability;
-  }
-
-  return payload;
-};
-
 app.post("/api/friends", ensureAuthenticatedApi, async (req, res) => {
   try {
     const expectedCsrf = req.session?.csrfToken;
@@ -2732,20 +2596,6 @@ app.post("/api/friends", ensureAuthenticatedApi, async (req, res) => {
         flags_count, red_flags, snapshot, signals, notes, picture
       ]);
       friend = inserted;
-    }
-
-    try {
-      const arcPayload = buildArcPayload(owner.id, friend, req.body);
-      if (arcPayload) {
-        await generateArcForQuiz(pool, arcPayload);
-      } else {
-        console.warn("Skipped arc generation: insufficient payload", {
-          ownerId: owner.id,
-          friendId: friend?.id || null,
-        });
-      }
-    } catch (arcErr) {
-      console.error("generateArcForQuiz failed (continuing):", arcErr);
     }
 
     // Mirror to Neo4j (best-effort)
@@ -3474,110 +3324,6 @@ app.post("/api/onboarding/complete", async (req, res) => {
     return res.status(500).json({ ok: false, error: "persist_failed" });
   }
 });
-
-// Friendship Energy self-assessment
-app.post("/api/friendship-energy", ensureAuthenticatedApi, async (req, res) => {
-  try {
-    const expectedCsrf = req.session?.csrfToken;
-    const providedCsrf = req.get(CSRF_HEADER_NAME);
-    if (!expectedCsrf || !providedCsrf || providedCsrf !== expectedCsrf) {
-      return res.status(403).json({ ok: false, error: "invalid csrf token" });
-    }
-
-    const email = req.user?.email;
-    if (!email) return res.status(401).json({ ok: false, error: "not authenticated" });
-
-    const { rows: [userRow] } = await pool.query(
-      "SELECT id FROM public.userdata WHERE email=$1",
-      [email]
-    );
-    if (!userRow) return res.status(400).json({ ok: false, error: "user not found" });
-    const userId = userRow.id;
-
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS public.friendship_energy (
-        id serial PRIMARY KEY,
-        user_id integer REFERENCES public.userdata(id) ON DELETE CASCADE,
-        answers jsonb,
-        skills jsonb,
-        archetypes jsonb,
-        ladder jsonb,
-        growth_edges jsonb,
-        strengths jsonb,
-        stuck_transitions jsonb,
-        completed_at timestamptz DEFAULT now()
-      );
-    `);
-
-    const body = (req.body && typeof req.body === "object") ? req.body : {};
-    const completedAt = body.completedAt && typeof body.completedAt === "string"
-      ? body.completedAt
-      : new Date().toISOString();
-
-    // Ensure all JSON payloads are valid JSON (strip functions/undefined)
-    const toJson = (val, fallback) => {
-      try {
-        const clean = JSON.parse(JSON.stringify(val ?? fallback));
-        return clean;
-      } catch {
-        return fallback;
-      }
-    };
-    const answers = toJson(body.answers, {});
-    const skillsPayload = toJson(body.skills, {});
-    const archetypesPayload = toJson(body.archetypes, {});
-    const ladderPayload = toJson(body.ladderSnapshot, {});
-    const growthPayload = toJson(body.growthEdges, []);
-    const strengthsPayload = toJson(body.strengths, []);
-    const stuckPayload = toJson(body.stuckTransitions, []);
-
-    const insert = await pool.query(
-      `
-      INSERT INTO public.friendship_energy
-        (user_id, answers, skills, archetypes, ladder, growth_edges, strengths, stuck_transitions, completed_at)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-      RETURNING id;
-      `,
-      [
-        userId,
-        JSON.stringify(answers),
-        JSON.stringify(skillsPayload),
-        JSON.stringify(archetypesPayload),
-        JSON.stringify(ladderPayload),
-        JSON.stringify(growthPayload),
-        JSON.stringify(strengthsPayload),
-        JSON.stringify(stuckPayload),
-        completedAt,
-      ]
-    );
-
-    // Update profile "friendship type" using the primary archetype label from payload
-    const primaryArchetype =
-      Array.isArray(body?.archetypes?.main) && body.archetypes.main.length
-        ? body.archetypes.main[0]
-        : null;
-    const primaryLabel =
-      (primaryArchetype && typeof primaryArchetype.label === "string" && primaryArchetype.label.trim()) ||
-      (primaryArchetype && typeof primaryArchetype.code === "string" && primaryArchetype.code.trim()) ||
-      null;
-    if (primaryLabel) {
-      try {
-        await pool.query(
-          `UPDATE userdata SET kindness_style = $1 WHERE id = $2`,
-          [primaryLabel, userId]
-        );
-      } catch (updateErr) {
-        console.warn("Could not update friendship type on profile:", updateErr.message || updateErr);
-      }
-    }
-
-    return res.json({ ok: true, id: insert.rows[0].id });
-  } catch (e) {
-    console.error("POST /api/friendship-energy error:", e);
-    return res.status(500).json({ ok: false, error: "server_error" });
-  }
-});
-
 
 app.listen(port, () => {
   console.log(`App running on port ${port}`);

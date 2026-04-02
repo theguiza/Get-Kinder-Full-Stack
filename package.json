@@ -9,7 +9,6 @@
     "test": "node --test __tests__/*.spec.js",
     "backfill:surprises": "node scripts/backfillDailySurprises.js",
     "prestart": "npm run backfill:surprises || true",
-    "seed:content": "node scripts/generateContentLibrary.js",
     "seed:events": "node scripts/seedEvents.js"
   },
   "repository": {
