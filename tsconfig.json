@@ -15,7 +15,8 @@
     "resolveJsonModule": true,
     "esModuleInterop": true,
     "allowJs": true,
-    "baseUrl": "."
+    "baseUrl": ".",
+    "ignoreDeprecations": "6.0"
   },
   "include": [
     "**/*.ts",

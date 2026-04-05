@@ -2,12 +2,14 @@ import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   Animated,
   FlatList,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TouchableOpacity,
   View,
 } from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
@@ -135,13 +137,6 @@ export default function KAIScreen() {
     }
   }, [isLoading, messages, scrollToBottom]);
 
-  const handleNewChat = useCallback(() => {
-    setMessages([]);
-    setConversationId(null);
-    setInputText('');
-    setIsLoading(false);
-  }, []);
-
   const handleSend = useCallback(
     async presetText => {
       const outgoingText = String(presetText ?? inputText).trim();
@@ -234,25 +229,76 @@ export default function KAIScreen() {
             <Text style={styles.title}>KAI</Text>
             <Text style={styles.subtitle}>Kind AI Assistant</Text>
           </View>
-          <Pressable onPress={handleNewChat} style={styles.newChatButton}>
-            <Text style={styles.newChatLabel}>New Chat</Text>
-          </Pressable>
         </View>
 
         {messages.length === 0 ? (
           <ScrollView
-            contentContainerStyle={styles.chipsContent}
-            horizontal={true}
-            showsHorizontalScrollIndicator={false}
-            style={styles.chipsScroll}>
-            {STARTER_CHIPS.map(chip => (
-              <Pressable
-                key={chip}
-                onPress={() => handleSend(chip)}
-                style={styles.chip}>
-                <Text style={styles.chipLabel}>{chip}</Text>
-              </Pressable>
-            ))}
+            contentContainerStyle={styles.welcomeScrollContent}
+            showsVerticalScrollIndicator={false}
+            style={styles.welcomeScroll}>
+            <View style={styles.avatarRing}>
+              <Image
+                source={require('../assets/kai-real.png')}
+                style={styles.avatar}
+              />
+            </View>
+
+            <Text style={styles.greetingText}>
+              Hey {user?.name || user?.firstname || 'there'}!
+            </Text>
+            <Text style={styles.greetingSubtext}>
+              I'm KAI, your Kind AI Assistant
+            </Text>
+
+            <View style={styles.cardGrid}>
+              <View style={styles.cardRow}>
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onPress={() => handleSend('Find volunteer events near me')}
+                  style={styles.actionCard}>
+                  <Text style={styles.cardIcon}>🔍</Text>
+                  <Text style={styles.cardTitle}>Find events</Text>
+                  <Text style={styles.cardSubtitle}>
+                    Volunteer opportunities near you
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onPress={() => handleSend('Show me my impact stats')}
+                  style={styles.actionCard}>
+                  <Text style={styles.cardIcon}>⭐</Text>
+                  <Text style={styles.cardTitle}>My impact</Text>
+                  <Text style={styles.cardSubtitle}>
+                    Hours, credits & milestones
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.cardRow}>
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onPress={() => handleSend('Help me find a cause I care about')}
+                  style={styles.actionCard}>
+                  <Text style={styles.cardIcon}>💬</Text>
+                  <Text style={styles.cardTitle}>Get advice</Text>
+                  <Text style={styles.cardSubtitle}>
+                    Roles, orgs, or scheduling help
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onPress={() => handleSend('How does Get Kinder work?')}
+                  style={styles.actionCard}>
+                  <Text style={styles.cardIcon}>🚀</Text>
+                  <Text style={styles.cardTitle}>How it works</Text>
+                  <Text style={styles.cardSubtitle}>
+                    Get Kinder & Impact Credits
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
           </ScrollView>
         ) : null}
 
@@ -281,6 +327,48 @@ export default function KAIScreen() {
 }
 
 const styles = StyleSheet.create({
+  actionCard: {
+    backgroundColor: theme.white,
+    borderRadius: 14,
+    flex: 1,
+    marginBottom: 12,
+    marginHorizontal: 6,
+    padding: 16,
+  },
+  avatar: {
+    borderRadius: 50,
+    height: 100,
+    width: 100,
+  },
+  avatarRing: {
+    borderColor: theme.coral,
+    borderRadius: 56,
+    borderWidth: 3,
+    padding: 3,
+  },
+  cardGrid: {
+    alignSelf: 'stretch',
+    marginTop: 24,
+  },
+  cardIcon: {
+    fontSize: 24,
+  },
+  cardRow: {
+    alignSelf: 'stretch',
+    flexDirection: 'row',
+    marginHorizontal: -6,
+  },
+  cardSubtitle: {
+    color: '#8d9099',
+    fontSize: 12,
+    marginTop: 4,
+  },
+  cardTitle: {
+    color: theme.slate,
+    fontSize: 15,
+    fontWeight: '700',
+    marginTop: 8,
+  },
   chip: {
     backgroundColor: theme.background,
     borderColor: theme.slate,
@@ -310,6 +398,17 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     paddingBottom: 14,
   },
+  greetingSubtext: {
+    color: '#8d9099',
+    fontSize: 15,
+    marginTop: 4,
+  },
+  greetingText: {
+    color: theme.slate,
+    fontSize: 22,
+    fontWeight: '800',
+    marginTop: 14,
+  },
   keyboardAvoidingView: {
     backgroundColor: theme.background,
     flex: 1,
@@ -322,19 +421,6 @@ const styles = StyleSheet.create({
   },
   messagesList: {
     flex: 1,
-  },
-  newChatButton: {
-    backgroundColor: theme.white,
-    borderColor: '#e2dbd1',
-    borderRadius: 999,
-    borderWidth: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-  },
-  newChatLabel: {
-    color: theme.slate,
-    fontSize: 13,
-    fontWeight: '700',
   },
   safeArea: {
     backgroundColor: theme.background,
@@ -374,5 +460,16 @@ const styles = StyleSheet.create({
     minHeight: 42,
     paddingHorizontal: 16,
     paddingBottom: 4,
+  },
+  welcomeScroll: {
+    flexGrow: 0,
+    marginBottom: 8,
+  },
+  welcomeScrollContent: {
+    alignItems: 'center',
+    flexGrow: 1,
+    paddingBottom: 20,
+    paddingHorizontal: 24,
+    paddingTop: 16,
   },
 });

@@ -2,21 +2,12 @@ import express from "express";
 import { listEvents, getEventById, createEvent, createInvite, updateEvent, draftInviteCopy, downloadEventCalendar, respondToEventRsvp, checkInToEvent, verifyEventRsvp, listEventRoster } from "../controllers/eventsApiController.js";
 import { getEventRatingStatus, submitEventRating } from "../controllers/eventsRatingsController.js";
 import { cancelEvent, completeEvent, deleteDraftEvent } from "../controllers/meEventsApiController.js";
+import { ensureAuthenticatedApi } from "../middleware/auth.js";
 import { ensureOrgRep } from "../middleware/ensureOrgRep.js";
 import { fetchEventsByOrg, fetchOrganizations } from "../services/eventsService.js";
 
 const eventsApiRouter = express.Router();
 const organizationsApiRouter = express.Router();
-
-function requireAuthenticatedApi(req, res, next) {
-  if (req.isAuthenticated && req.isAuthenticated()) {
-    if (req.user?.is_suspended) {
-      return res.status(403).json({ error: "account_suspended" });
-    }
-    return next();
-  }
-  return res.status(401).json({ error: "unauthorized" });
-}
 
 organizationsApiRouter.get("/", async (req, res) => {
   try {
@@ -47,7 +38,7 @@ eventsApiRouter.get("/", listEvents);
 eventsApiRouter.get("/:id", getEventById);
 eventsApiRouter.get("/:id/calendar.ics", downloadEventCalendar);
 
-eventsApiRouter.use(requireAuthenticatedApi);
+eventsApiRouter.use(ensureAuthenticatedApi);
 
 eventsApiRouter.post("/", ensureOrgRep, createEvent);
 eventsApiRouter.post("/:id/cancel", cancelEvent);

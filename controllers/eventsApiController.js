@@ -328,6 +328,29 @@ export async function listEvents(req, res) {
 
 export async function getEventById(req, res) {
   try {
+    if (!req.user && !req.isAuthenticated?.()) {
+      try {
+        const { getBearerToken, verifyBearerToken } = await import('../middleware/auth.js');
+        const bearerToken = getBearerToken(req);
+        if (bearerToken) {
+          const verification = verifyBearerToken(bearerToken);
+          if (verification.ok) {
+            const userId = Number(verification.decoded?.id ?? verification.decoded?.sub);
+            if (Number.isInteger(userId)) {
+              const { rows } = await pool.query(
+                'SELECT * FROM userdata WHERE id = $1 LIMIT 1',
+                [userId]
+              );
+              if (rows?.[0]) {
+                req.user = rows[0];
+              }
+            }
+          }
+        }
+      } catch (_bearerErr) {
+        // silent — proceed as unauthenticated
+      }
+    }
     const id = req.params.id;
     const event = await fetchEventById(id);
     if (!event) {
@@ -353,7 +376,7 @@ export async function getEventById(req, res) {
         return res.status(500).json({ ok: false, error: "Unable to load event for editing" });
       }
     }
-    if (req.isAuthenticated && req.isAuthenticated()) {
+    if ((req.isAuthenticated && req.isAuthenticated()) || req.user) {
       try {
         const viewerId = await resolveUserId(req);
         const viewerHostUserIds = await resolveHostUserIds(req);

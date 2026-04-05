@@ -4,6 +4,7 @@ import {
   Alert,
   Image,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   Pressable,
   SafeAreaView,
@@ -169,7 +170,10 @@ export default function LoginScreen() {
             )}
           </Pressable>
 
-          <TouchableOpacity activeOpacity={0.7} style={styles.signUpLink}>
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={() => Linking.openURL('https://getkinder.ai/register').catch(() => {})}
+            style={styles.signUpLink}>
             <Text style={styles.signUpText}>
               Don't have an account? Sign up
             </Text>

@@ -259,6 +259,8 @@ export default function EventDetailScreen() {
   if (viewerRsvpStatus === 'waitlisted') {
     rsvpStatusText =
       "You're on the waitlist. We'll notify you if a spot opens.";
+  } else if (viewerRsvpStatus === 'pending') {
+    rsvpStatusText = 'You have requested attending this event.';
   } else if (attendanceRequested) {
     rsvpStatusText = "You're signed up for this event.";
   } else if (eventAtCapacity && waitlistEnabled) {

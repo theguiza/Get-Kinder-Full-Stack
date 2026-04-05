@@ -2,6 +2,7 @@ import React, {useCallback, useEffect, useState} from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Linking,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -432,6 +433,12 @@ export default function OrgPortalScreen() {
             <Text style={styles.emptySubtitle}>
               Create opportunities on the web portal.
             </Text>
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => Linking.openURL('https://getkinder.ai/org-portal').catch(() => {})}
+              style={styles.emptyWebButton}>
+              <Text style={styles.emptyWebButtonText}>Open Web Portal</Text>
+            </TouchableOpacity>
           </View>
         ) : null}
 
@@ -578,6 +585,18 @@ const styles = StyleSheet.create({
     color: '#8d9099',
     fontSize: 13,
     textAlign: 'center',
+  },
+  emptyWebButton: {
+    backgroundColor: theme.coral,
+    borderRadius: 10,
+    marginTop: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+  },
+  emptyWebButtonText: {
+    color: theme.white,
+    fontSize: 14,
+    fontWeight: '700',
   },
   emptyTitle: {
     color: theme.slate,

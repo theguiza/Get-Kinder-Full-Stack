@@ -220,7 +220,7 @@ Every skill you share, every project you complete, every donation you make earns
           <div class="d-flex align-items-center justify-content-center profile-card m-3 gap-3">  
             <div
               class="icon-square text-body-emphasis bg-body-secondary d-inline-flex align-items-center justify-content-center fs-4 flex-shrink-0 me-3">
-              <img src="./images/google.svg" alt="Google Logo">
+              <img src="/images/google.svg" alt="Google Logo">
             </div>
             <div>
               <h3 class="fs-2" style="color: #455a7c;">Google.</h3>
@@ -232,7 +232,7 @@ Every skill you share, every project you complete, every donation you make earns
           <div class="d-flex align-items-center justify-content-center profile-card m-3 gap-3">  
             <div
               class="icon-square text-body-emphasis bg-body-secondary d-inline-flex align-items-center justify-content-center fs-4 flex-shrink-0 me-3">
-              <img src="./images/openai.svg" alt="OpenAI Logo" height="20">
+              <img src="/images/openai.svg" alt="OpenAI Logo" height="20">
             </div>
             <div>
               <h3 class="fs-2" style="color: #455a7c;">OpenAI.</h3>
@@ -244,7 +244,7 @@ Every skill you share, every project you complete, every donation you make earns
           <div class="d-flex align-items-center justify-content-center profile-card m-3 gap-3">  
             <div
               class="icon-square text-body-emphasis bg-body-secondary d-inline-flex align-items-center justify-content-center fs-4 flex-shrink-0 me-3">
-              <img src="./images/microsoft.svg" alt="Microsoft Logo">
+              <img src="/images/microsoft.svg" alt="Microsoft Logo">
             </div>
             <div>
               <h3 class="fs-2" style="color: #455a7c;">Microsoft.</h3>
@@ -282,7 +282,7 @@ Every skill you share, every project you complete, every donation you make earns
       <!-- 1) Logo: centered on xs, left on md+ -->
       <div class="col-12 col-md-4 mb-4 mb-md-0 text-center text-md-start">
         <a href="#">
-          <img src="./images/heart3D.png" alt="Get Kinder Heart" height="150">
+          <img src="/images/heart3D.png" alt="Get Kinder Heart" height="150">
         </a>
         <p class="mt-2">
           &copy;
@@ -351,9 +351,12 @@ Every skill you share, every project you complete, every donation you make earns
          interests: profileInterests
        };
   %>
+    <script type="application/json" id="onboarding-profile-data"><%- JSON.stringify(onboardingProfile).replace(/</g, '\\u003c') %></script>
     <script>
-      window.loggedInUserPicture = "<%= user.picture ? user.picture : '/images/nerdy-KAI.png' %>";
-      window.__onboardingProfile = "<%- JSON.stringify(onboardingProfile).replace(/</g, '\\u003c') %>;" 
+      window.loggedInUserPicture = "<%= (typeof resolveUserPictureUrl === 'function') ? resolveUserPictureUrl(user) : (user.picture ? user.picture : '/images/nerdy-KAI.png') %>";
+      window.__onboardingProfile = JSON.parse(
+        document.getElementById('onboarding-profile-data')?.textContent || '{}'
+      );
     </script>
   <% } %>
 <% if (typeof user !== 'undefined' && user) { %>
@@ -496,7 +499,42 @@ Every skill you share, every project you complete, every donation you make earns
   <!-- AOS (Animate On Scroll) -->
   <script src="https://unpkg.com/aos@2.3.1/dist/aos.js"></script>
   <script>
-    AOS.init({ duration: 600, easing: "ease", once: true, anchorPlacement: "top-bottom" });
+    (function initHomeAos() {
+      const animatedNodes = Array.from(document.querySelectorAll('[data-aos]'));
+
+      function revealAllAnimatedNodes() {
+        animatedNodes.forEach((node) => {
+          node.classList.add('aos-animate');
+          node.style.opacity = '1';
+          node.style.transform = 'none';
+        });
+      }
+
+      function startAos() {
+        if (window.AOS && typeof window.AOS.init === 'function') {
+          window.AOS.init({
+            duration: 600,
+            easing: 'ease',
+            once: true,
+            anchorPlacement: 'top-bottom'
+          });
+          return;
+        }
+        revealAllAnimatedNodes();
+      }
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', startAos, { once: true });
+      } else {
+        startAos();
+      }
+
+      window.addEventListener('load', () => {
+        if (!(window.AOS && typeof window.AOS.init === 'function')) {
+          revealAllAnimatedNodes();
+        }
+      }, { once: true });
+    })();
   </script>
 </body>
 </html>

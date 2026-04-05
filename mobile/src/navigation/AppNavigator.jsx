@@ -4,7 +4,7 @@ import {
   NavigationContainer,
   getFocusedRouteNameFromRoute,
 } from '@react-navigation/native';
-import {StyleSheet, Text} from 'react-native';
+import {Pressable, StyleSheet, Text} from 'react-native';
 import {createBottomTabNavigator} from '@react-navigation/bottom-tabs';
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
 import DashboardScreen from '../screens/DashboardScreen';
@@ -84,7 +84,24 @@ function EventsNavigator() {
       <EventsStack.Screen
         name="EventDetail"
         component={EventDetailScreen}
-        options={{title: 'Event Detail'}}
+        options={({navigation}) => ({
+          title: 'Event Detail',
+          headerLeft: () => (
+            <Pressable
+              onPress={() => {
+                if (navigation.canGoBack()) {
+                  navigation.goBack();
+                } else {
+                  navigation.navigate('EventsList');
+                }
+              }}
+              style={{paddingRight: 12}}>
+              <Text style={{color: theme.slate, fontSize: 16, fontWeight: '600'}}>
+                ← Back
+              </Text>
+            </Pressable>
+          ),
+        })}
       />
     </EventsStack.Navigator>
   );

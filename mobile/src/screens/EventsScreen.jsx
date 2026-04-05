@@ -1,23 +1,33 @@
-import React, {useCallback, useEffect, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
-import {useNavigation} from '@react-navigation/native';
+import {useFocusEffect, useNavigation} from '@react-navigation/native';
 import {API_BASE_URL} from '@env';
 import {fetchEvents} from '../api/events';
 import theme from '../constants/theme';
 
-const FILTER_OPTIONS = [
-  {label: 'Upcoming', value: 'upcoming'},
-  {label: 'Past', value: 'archive'},
+const CAUSE_FILTERS = [
+  'All',
+  'Outdoors',
+  'Food & Hunger',
+  'Education',
+  'Community',
+  'Health',
+  'Arts & Culture',
+  'Sports',
+  'Animals',
+  'Environment',
 ];
 
 function getEventTypeBadge(eventType) {
@@ -98,13 +108,43 @@ function EventCard({event, onPress}) {
 
 export default function EventsScreen() {
   const navigation = useNavigation();
-  const [view, setView] = useState('upcoming');
+  const [view] = useState('upcoming');
+  const [activeCause, setActiveCause] = useState('All');
+  const [searchText, setSearchText] = useState('');
   const [events, setEvents] = useState([]);
   const [nextCursor, setNextCursor] = useState(null);
   const [initialLoading, setInitialLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState('');
+
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        setSearchText('');
+      };
+    }, []),
+  );
+
+  const filteredEvents = useMemo(() => {
+    const trimmed = searchText.trim().toLowerCase();
+    if (!trimmed) {
+      return events;
+    }
+    const results = events.filter(event => {
+      const fields = [
+        event.title,
+        event.org_name,
+        event.location_text,
+        event.description,
+        event.community_tag,
+      ];
+      return fields.some(
+        field => typeof field === 'string' && field.toLowerCase().includes(trimmed),
+      );
+    });
+    return results;
+  }, [events, searchText]);
 
   const loadEvents = useCallback(
     async ({reset = false, cursor = null, mode = 'initial'} = {}) => {
@@ -118,6 +158,7 @@ export default function EventsScreen() {
           view,
           limit: 20,
           cursor,
+          cause_tag: activeCause === 'All' ? undefined : activeCause,
         });
 
         const nextPageCursor = json?.paging?.next_cursor ?? null;
@@ -143,7 +184,7 @@ export default function EventsScreen() {
         }
       }
     },
-    [view],
+    [activeCause, view],
   );
 
   useEffect(() => {
@@ -151,7 +192,7 @@ export default function EventsScreen() {
     setNextCursor(null);
     setInitialLoading(true);
     loadEvents({reset: true, cursor: null, mode: 'initial'});
-  }, [loadEvents]);
+  }, [activeCause, loadEvents]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -167,15 +208,7 @@ export default function EventsScreen() {
     loadEvents({reset: false, cursor: nextCursor, mode: 'more'});
   }, [initialLoading, loadEvents, loadingMore, nextCursor, refreshing]);
 
-  const onSelectView = useCallback(
-    nextView => {
-      if (nextView === view) {
-        return;
-      }
-      setView(nextView);
-    },
-    [view],
-  );
+  useCallback(() => {}, []);
 
   const renderItem = useCallback(
     ({item}) => (
@@ -213,10 +246,14 @@ export default function EventsScreen() {
 
     return (
       <View style={styles.emptyState}>
-        <Text style={styles.emptyText}>No events found</Text>
+        <Text style={styles.emptyText}>
+          {searchText.trim().length > 0
+            ? 'No events match your search.'
+            : 'No events found'}
+        </Text>
       </View>
     );
-  }, [initialLoading]);
+  }, [initialLoading, searchText]);
 
   if (initialLoading) {
     return (
@@ -239,44 +276,54 @@ export default function EventsScreen() {
       <View style={styles.container}>
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Volunteer Events</Text>
+        </View>
+
+        <TextInput
+          placeholder="Search events..."
+          placeholderTextColor="#8d9099"
+          value={searchText}
+          onChangeText={setSearchText}
+          autoCapitalize="none"
+          autoCorrect={false}
+          clearButtonMode="while-editing"
+          style={styles.searchInput}
+        />
+
+        <View style={styles.filterScroll}>
           <ScrollView
-            horizontal
+            horizontal={true}
             showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.filtersContent}
-            style={styles.filtersScroll}>
-            {FILTER_OPTIONS.map(option => {
-              const isActive = option.value === view;
+            contentContainerStyle={styles.filterScrollContent}>
+            {CAUSE_FILTERS.map(cause => {
+              const isActive = activeCause === cause;
               return (
-                <TouchableOpacity
-                  key={option.value}
-                  activeOpacity={0.9}
-                  onPress={() => onSelectView(option.value)}
+                <Pressable
+                  key={cause}
+                  onPress={() => setActiveCause(cause)}
                   style={[
                     styles.filterPill,
-                    isActive ? styles.filterPillActive : styles.filterPillInactive,
+                    isActive ? styles.filterPillActive : null,
                   ]}>
                   <Text
                     style={[
                       styles.filterPillText,
-                      isActive
-                        ? styles.filterPillTextActive
-                        : styles.filterPillTextInactive,
+                      isActive ? styles.filterPillTextActive : null,
                     ]}>
-                    {option.label}
+                    {cause}
                   </Text>
-                </TouchableOpacity>
+                </Pressable>
               );
             })}
           </ScrollView>
         </View>
 
         <FlatList
-          data={events}
+          data={filteredEvents}
           keyExtractor={keyExtractor}
           renderItem={renderItem}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={
-            events.length > 0 ? styles.listContent : styles.listContentEmpty
+            filteredEvents.length > 0 ? styles.listContent : styles.listContentEmpty
           }
           refreshControl={
             <RefreshControl
@@ -321,6 +368,35 @@ const styles = StyleSheet.create({
   errorText: {
     color: '#c8342f',
     fontSize: 14,
+  },
+  filterPill: {
+    backgroundColor: theme.white,
+    borderColor: theme.slate,
+    borderRadius: 999,
+    borderWidth: 1,
+    marginRight: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  filterPillActive: {
+    backgroundColor: theme.coral,
+    borderColor: theme.coral,
+  },
+  filterPillText: {
+    color: theme.slate,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  filterPillTextActive: {
+    color: theme.white,
+  },
+  filterScroll: {
+    marginBottom: 12,
+    marginHorizontal: -16,
+    paddingHorizontal: 16,
+  },
+  filterScrollContent: {
+    paddingRight: 8,
   },
   eventCard: {
     backgroundColor: theme.white,
@@ -384,35 +460,6 @@ const styles = StyleSheet.create({
   eventTypeRecurringText: {
     color: '#92400e',
   },
-  filterPill: {
-    borderRadius: 999,
-    marginRight: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-  },
-  filterPillActive: {
-    backgroundColor: '#ff5656',
-  },
-  filterPillInactive: {
-    backgroundColor: theme.white,
-  },
-  filterPillText: {
-    fontSize: 13,
-  },
-  filterPillTextActive: {
-    color: theme.white,
-    fontWeight: '700',
-  },
-  filterPillTextInactive: {
-    color: '#455a7c',
-    fontWeight: '600',
-  },
-  filtersContent: {
-    paddingRight: 8,
-  },
-  filtersScroll: {
-    marginBottom: 12,
-  },
   footerLoader: {
     paddingVertical: 12,
   },
@@ -435,5 +482,17 @@ const styles = StyleSheet.create({
   safeArea: {
     backgroundColor: theme.background,
     flex: 1,
+  },
+  searchInput: {
+    backgroundColor: theme.white,
+    borderColor: '#d7dbe3',
+    borderRadius: 12,
+    borderWidth: 1,
+    color: theme.text,
+    fontSize: 15,
+    height: 42,
+    marginBottom: 10,
+    marginHorizontal: -16,
+    paddingHorizontal: 14,
   },
 });

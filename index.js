@@ -64,7 +64,7 @@ import {
   legacyKaiDeprecatedJson,
   legacyKaiDeprecatedSse,
 } from "./Backend/legacyOpenAiQuarantine.js";
-import { verifyToken } from "./middleware/auth.js";
+import { verifyToken, ensureAuthenticatedApi } from "./middleware/auth.js";
 import { ensureOrgRepPage } from "./middleware/ensureOrgRep.js";
 import { ensureAdmin, ensureAdminApi, isAdminRequest } from "./Backend/middleware/ensureAdmin.js";
 import {
@@ -154,6 +154,32 @@ function getAppBaseUrl(req) {
   if (process.env.APP_BASE_URL) return process.env.APP_BASE_URL.replace(/\/+$/, "");
   const host = req.get("host");
   return `${req.protocol}://${host}`;
+}
+
+function resolveUserPictureUrl(user, fallback = "/images/nerdy-KAI.png") {
+  const rawPicture = user?.picture || user?.profile_photo_url || user?.avatar_url || user?.photo_url;
+  if (typeof rawPicture !== "string") return fallback;
+
+  const trimmedPicture = rawPicture.trim();
+  if (!trimmedPicture) return fallback;
+
+  if (/^data:image\//i.test(trimmedPicture)) {
+    const userId = Number(user?.id);
+    if (Number.isInteger(userId) && userId > 0) {
+      return `/users/${userId}/picture`;
+    }
+    return fallback;
+  }
+
+  if (/^http:\/\//i.test(trimmedPicture)) {
+    return trimmedPicture.replace(/^http:\/\//i, "https://");
+  }
+
+  if (/^https:\/\//i.test(trimmedPicture) || trimmedPicture.startsWith("/")) {
+    return trimmedPicture;
+  }
+
+  return fallback;
 }
 
 const SITEMAP_ROUTES = [
@@ -468,8 +494,33 @@ app.get("/api/me/dashboard", ensureAuthenticatedApi, async (req, res) => {
       return res.status(401).json({ ok: false, error: "unauthorized" });
     }
     const { getVolunteerStats } = await import('./services/profileService.js');
+    const { getSummary: getRatingsSummary } = await import('./services/ratingsService.js');
     const stats = await getVolunteerStats(userId);
-    return res.json({ ok: true, data: stats });
+
+    let rating = { value: 5, count: 0, hasRatings: false, starsFilled: 5 };
+    try {
+      const summary = await getRatingsSummary({ userId, limit: 20 });
+      const count = Number(summary?.sampleSize) || 0;
+      const hasRatings = count > 0 && Number.isFinite(Number(summary?.kindnessRating));
+      const value = hasRatings ? Number(summary.kindnessRating) : 5;
+      const starsFilled = Math.max(1, Math.min(5, Math.round(value)));
+      rating = { value, count, hasRatings, starsFilled };
+    } catch (ratingError) {
+      if (ratingError?.code !== "42P01") {
+        console.warn("[api/me/dashboard] rating error:", ratingError);
+      }
+    }
+
+    return res.json({
+      ok: true,
+      data: {
+        ...stats,
+        rating_value: rating.value,
+        rating_count: rating.count,
+        rating_has_ratings: rating.hasRatings,
+        rating_stars_filled: rating.starsFilled,
+      },
+    });
   } catch (error) {
     console.error("[api/me/dashboard] error:", error);
     return res.status(500).json({ ok: false, error: "Unable to load dashboard" });
@@ -491,6 +542,7 @@ app.use("/", orgApplyRouter);
 app.use((req, res, next) => {
   res.locals.user = req.user;
   res.locals.recaptchaSiteKey = RECAPTCHA_SITE_KEY;
+  res.locals.resolveUserPictureUrl = resolveUserPictureUrl;
   next();
 });
 
@@ -2159,6 +2211,39 @@ app.get('/profile', ensureAuthenticated, async (req, res) => {
     return res.status(500).send('Error loading profile.');
   }
 });
+
+app.get("/users/:userId/picture", async (req, res) => {
+  try {
+    const userId = Number(req.params.userId);
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(404).end();
+    }
+
+    const { rows } = await pool.query(
+      "SELECT picture FROM public.userdata WHERE id = $1 LIMIT 1",
+      [userId]
+    );
+    const picture = typeof rows?.[0]?.picture === "string" ? rows[0].picture.trim() : "";
+    const match = picture.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,([A-Za-z0-9+/=\r\n]+)$/);
+    if (!match) {
+      return res.status(404).end();
+    }
+
+    const [, mimeType, encoded] = match;
+    const imageBuffer = Buffer.from(encoded.replace(/\s+/g, ""), "base64");
+    if (!imageBuffer.length) {
+      return res.status(404).end();
+    }
+
+    res.setHeader("Content-Type", mimeType);
+    res.setHeader("Content-Length", String(imageBuffer.length));
+    res.setHeader("Cache-Control", "private, max-age=300");
+    return res.send(imageBuffer);
+  } catch (error) {
+    console.error("Error serving user profile picture:", error);
+    return res.status(500).end();
+  }
+});
 // ─────────────────────────────────────────────────────────────────────────────
 // 14) Static Content Pages
 app.get("/contact", (req, res) => res.render("contact", { title: "Contact Us" }));
@@ -2196,44 +2281,6 @@ app.get("/register", (req, res) => res.render("register", {
 }));
 app.get("/404", (req, res) => res.render("404", { title: "404 ERROR" }));
 app.get("/error", (req, res) => res.render("error", { title: "500 ERROR" }));
-// Middleware to ensure authentication for API routes
-async function ensureAuthenticatedApi(req, res, next) {
-  if (req.isAuthenticated && req.isAuthenticated()) {
-    if (req.user?.is_suspended) {
-      return res.status(403).json({ error: "account_suspended" });
-    }
-    return next();
-  }
-
-  const { getBearerToken, verifyBearerToken } = await import('./middleware/auth.js');
-  const token = getBearerToken(req);
-  const verification = verifyBearerToken(token);
-  if (!verification.ok) {
-    return res.status(401).json({ error: "unauthorized" });
-  }
-
-  const userId = Number(verification.decoded?.id ?? verification.decoded?.sub);
-  if (!Number.isInteger(userId)) {
-    return res.status(401).json({ error: "unauthorized" });
-  }
-
-  const { rows } = await pool.query(
-    "SELECT * FROM userdata WHERE id = $1 LIMIT 1",
-    [userId]
-  );
-  const user = rows?.[0] || null;
-  if (!user) {
-    return res.status(401).json({ error: "unauthorized" });
-  }
-
-  if (user.is_suspended) {
-    return res.status(403).json({ error: "account_suspended" });
-  }
-
-  req.user = user;
-  return next();
-}
-
 function normalizeGeoQuery(value) {
   if (typeof value !== "string") return "";
   return value.trim().slice(0, 200);
@@ -2842,7 +2889,7 @@ app.get("/org-portal", ensureOrgRepPage, async (req, res) => {
   });
 });
 
-app.get("/donate", ensureAuthenticated, (req, res) => {
+app.get("/donate", (req, res) => {
   const assetTag = process.env.ASSET_TAG ?? Date.now().toString(36);
   res.render("donate", { title: "Donate", assetTag });
 });

@@ -6,9 +6,11 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TouchableOpacity,
   View,
 } from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
+import {useNavigation} from '@react-navigation/native';
 import {API_BASE_URL} from '@env';
 import {useAuth} from '../context/AuthContext';
 import theme from '../constants/theme';
@@ -22,24 +24,15 @@ function StatCard({label, value}) {
   );
 }
 
-function ReliabilityRow({score}) {
-  // Map score (0-100) to stars (0-5):
-  // 0-19   -> 0 stars
-  // 20-39  -> 1 star
-  // 40-59  -> 2 stars
-  // 60-74  -> 3 stars
-  // 75-89  -> 4 stars
-  // 90-100 -> 5 stars
+function ReliabilityRow({score, ratingStarsFilled}) {
   const safeScore = Math.max(0, Math.min(100, Number(score) || 0));
-  let stars = 0;
-  if (safeScore >= 90) { stars = 5; }
-  else if (safeScore >= 75) { stars = 4; }
-  else if (safeScore >= 60) { stars = 3; }
-  else if (safeScore >= 40) { stars = 2; }
-  else if (safeScore >= 20) { stars = 1; }
+  const safeRatingStars = Math.max(
+    1,
+    Math.min(5, Number(ratingStarsFilled) || 5),
+  );
 
   const starDisplay = Array.from({length: 5}, (_, i) =>
-    i < stars ? '★' : '☆'
+    i < safeRatingStars ? '★' : '☆'
   ).join('');
 
   return (
@@ -98,6 +91,7 @@ function EventRow({event, isPast}) {
 }
 
 export default function DashboardScreen() {
+  const navigation = useNavigation();
   const {token, user} = useAuth();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -189,19 +183,32 @@ export default function DashboardScreen() {
           <Text style={styles.tierValue}>{data?.priority_tier ?? 'Bronze'}</Text>
         </View>
 
-        <ReliabilityRow score={data?.reliability_score ?? 0} />
+        <ReliabilityRow
+          score={data?.reliability_score ?? 0}
+          ratingStarsFilled={data?.rating_stars_filled ?? 5}
+        />
 
         {Array.isArray(data?.upcoming) && data.upcoming.length > 0 ? (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Upcoming Shifts</Text>
+            <Text style={styles.sectionTitle}>Upcoming Opportunities</Text>
             {data.upcoming.map(event => (
-              <EventRow key={event.event_id} event={event} isPast={false} />
+              <TouchableOpacity
+                key={event.event_id}
+                activeOpacity={0.85}
+                onPress={() =>
+                  navigation.navigate('Events', {
+                    screen: 'EventDetail',
+                    params: {eventId: event.event_id},
+                  })
+                }>
+                <EventRow event={event} isPast={false} />
+              </TouchableOpacity>
             ))}
           </View>
         ) : (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Upcoming Shifts</Text>
-            <Text style={styles.emptyText}>No upcoming shifts. Browse events to sign up.</Text>
+            <Text style={styles.sectionTitle}>Upcoming Opportunities</Text>
+            <Text style={styles.emptyText}>No upcoming opportunities. Browse events to sign up.</Text>
           </View>
         )}
 

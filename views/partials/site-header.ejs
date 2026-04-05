@@ -12,6 +12,9 @@
   ];
 
   const visibleNavItems = navItems.filter((item) => !(item.authOnly && !currentUser));
+  const headerAvatarSrc = (typeof resolveUserPictureUrl === "function")
+    ? resolveUserPictureUrl(currentUser)
+    : (currentUser?.picture || "/images/nerdy-KAI.png");
 
   const renderedNavItems = visibleNavItems.map((item) => {
     if (cp !== "home" && cp === item.key) {
@@ -57,7 +60,7 @@
             <li class="nav-item d-flex align-items-center me-3">
               <a href="/profile" class="d-flex align-items-center text-decoration-none me-3 font-hover" aria-label="View profile" style="color: #455a7c;">
                 <span class="fw-bold me-2" style="font-size: 1.1rem; color: inherit;"><%= currentUser.firstname || currentUser.email %></span>
-                <img src="<%= currentUser.picture ? currentUser.picture : '/images/nerdy-KAI.png' %>" class="rounded-circle" width="32" height="32" alt="Get Kinder User Avatar">
+                <img src="<%= headerAvatarSrc %>" class="rounded-circle" width="32" height="32" alt="Get Kinder User Avatar">
               </a>
               <form action="/logout" method="GET" class="d-inline m-0">
                 <button type="submit" class="btn btn-outline-danger btn-sm">Log Out</button>

@@ -379,12 +379,9 @@
     <% const dashIncompleteItems = Array.isArray(dashCompletionState.incompleteItems) ? dashCompletionState.incompleteItems : []; %>
     <% const dashProfileCompletionPct = Number.isFinite(Number(dashCompletionState.completionPct)) ? Number(dashCompletionState.completionPct) : 0; %>
     <% const profileName = (currentUser && currentUser.firstname) ? currentUser.firstname : 'Volunteer'; %>
-    <% const rawProfilePhoto = (currentUser && (currentUser.picture || currentUser.profile_photo_url || currentUser.avatar_url || currentUser.photo_url))
-      ? (currentUser.picture || currentUser.profile_photo_url || currentUser.avatar_url || currentUser.photo_url)
+    <% const profilePhoto = (typeof resolveUserPictureUrl === 'function')
+      ? resolveUserPictureUrl(currentUser, null)
       : null; %>
-    <% const profilePhoto = (typeof rawProfilePhoto === 'string')
-      ? rawProfilePhoto.replace(/^http:\/\//i, 'https://')
-      : rawProfilePhoto; %>
     <% const dashRoutes = {
       dashboard: '/dashboard',
       opportunities: '/events',

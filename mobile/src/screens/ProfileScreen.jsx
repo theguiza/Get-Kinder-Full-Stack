@@ -196,7 +196,7 @@ export default function ProfileScreen() {
   }, [fetchReceipts, fetchSummary]);
 
   const handleDonate = useCallback(() => {
-    Linking.openURL(DONATE_URL);
+    Linking.openURL(DONATE_URL).catch(() => {});
   }, []);
 
   const handleLogout = useCallback(() => {
