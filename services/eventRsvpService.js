@@ -141,9 +141,11 @@ export async function getEventRsvpSnapshot(eventId, userId, { runner = pool } = 
     ),
     runner.query(
       `SELECT
-          COUNT(*) FILTER (WHERE status IN ('accepted','checked_in')) AS accepted
-         FROM event_rsvps
-        WHERE event_id=$1`,
+          COUNT(*) FILTER (WHERE r.status IN ('accepted','checked_in')) AS accepted
+         FROM event_rsvps r
+         JOIN events e ON e.id = r.event_id
+        WHERE r.event_id=$1
+          AND r.attendee_user_id::text <> e.creator_user_id::text`,
       [eventId]
     ),
   ]);
@@ -258,9 +260,11 @@ export async function applyEventRsvpAction({
 
       const { rows: [countRow] } = await client.query(
         `
-          SELECT COUNT(*) FILTER (WHERE status IN ('accepted','checked_in'))::int AS accepted_count
-          FROM event_rsvps
-          WHERE event_id = $1
+          SELECT COUNT(*) FILTER (WHERE r.status IN ('accepted','checked_in'))::int AS accepted_count
+          FROM event_rsvps r
+          JOIN events e ON e.id = r.event_id
+          WHERE r.event_id = $1
+            AND r.attendee_user_id::text <> e.creator_user_id::text
         `,
         [normalizedEventId]
       );

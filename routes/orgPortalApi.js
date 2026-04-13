@@ -11,6 +11,7 @@ import { buildEventCalendarInvite } from "../services/eventCalendarService.js";
 const orgPortalRouter = express.Router();
 const CSRF_HEADER_NAME = "X-CSRF-Token";
 const POOL_SCOPE_SEP = "__";
+const EXCLUDE_HOST_SELF_RSVP_SQL = "r.attendee_user_id::text <> e.creator_user_id::text";
 
 async function getPortalScope(req) {
   if (!req._orgPortalScopePromise) {
@@ -55,6 +56,11 @@ function requireCsrf(req, res) {
     return false;
   }
   return true;
+}
+
+function isHostSelfRsvp(eventRow, attendeeUserId) {
+  if (!eventRow?.creator_user_id || attendeeUserId == null) return false;
+  return String(eventRow.creator_user_id) === String(attendeeUserId).trim();
 }
 
 orgPortalRouter.use(async (req, res, next) => {
@@ -156,25 +162,30 @@ async function fetchPendingActionCountsByEventIds(eventIds = []) {
   const { rows } = await pool.query(
     `
       SELECT
-        r.event_id::text AS event_id,
-        COUNT(*)::int AS total_count,
+        e.id::text AS event_id,
+        COUNT(r.id)::int AS total_count,
         COUNT(*) FILTER (WHERE r.status = 'pending')::int AS pending_join_count,
         COUNT(*) FILTER (
           WHERE r.status IN ('accepted', 'checked_in')
+            AND COALESCE(r.no_show, false) = false
             AND COALESCE(r.verification_status, 'pending') = 'pending'
         )::int AS pending_verify_count,
         (
           COUNT(*) FILTER (WHERE r.status = 'pending')
           + COUNT(*) FILTER (
             WHERE r.status IN ('accepted', 'checked_in')
+              AND COALESCE(r.no_show, false) = false
               AND COALESCE(r.verification_status, 'pending') = 'pending'
           )
         )::int AS pending_actions_count,
         COUNT(*) FILTER (WHERE r.status = 'accepted')::int AS approved_count,
         COUNT(*) FILTER (WHERE r.checked_in_at IS NOT NULL)::int AS checked_in_count
-      FROM event_rsvps r
-      WHERE r.event_id::text = ANY($1::text[])
-      GROUP BY r.event_id
+      FROM events e
+      LEFT JOIN event_rsvps r
+        ON r.event_id = e.id
+       AND ${EXCLUDE_HOST_SELF_RSVP_SQL}
+      WHERE e.id::text = ANY($1::text[])
+      GROUP BY e.id
     `,
     [normalizedIds]
   );
@@ -494,6 +505,7 @@ orgPortalRouter.get("/comms/queue", async (req, res) => {
         JOIN event_rsvps r
           ON r.event_id = e.id
          AND r.status = 'accepted'
+         AND ${EXCLUDE_HOST_SELF_RSVP_SQL}
         WHERE e.creator_user_id::text = ANY($1::text[])
           AND e.end_at < NOW()
           AND NOT EXISTS (
@@ -522,6 +534,7 @@ orgPortalRouter.get("/comms/queue", async (req, res) => {
         JOIN event_rsvps r
           ON r.event_id = e.id
          AND r.status = 'accepted'
+         AND ${EXCLUDE_HOST_SELF_RSVP_SQL}
         WHERE e.creator_user_id::text = ANY($1::text[])
           AND e.start_at BETWEEN NOW() AND NOW() + INTERVAL '24 hours'
           AND NOT EXISTS (
@@ -550,6 +563,7 @@ orgPortalRouter.get("/comms/queue", async (req, res) => {
         JOIN event_rsvps r
           ON r.event_id = e.id
          AND r.status = 'accepted'
+         AND ${EXCLUDE_HOST_SELF_RSVP_SQL}
         WHERE e.creator_user_id::text = ANY($1::text[])
           AND e.start_at > NOW() + INTERVAL '2 days'
           AND e.start_at <= NOW() + INTERVAL '5 days'
@@ -834,7 +848,9 @@ orgPortalRouter.get("/queue", async (req, res) => {
           e.tz,
           COUNT(*) FILTER (WHERE r.status = 'accepted')::int AS active_volunteers
         FROM events e
-        LEFT JOIN event_rsvps r ON r.event_id = e.id
+        LEFT JOIN event_rsvps r
+          ON r.event_id = e.id
+         AND ${EXCLUDE_HOST_SELF_RSVP_SQL}
         WHERE e.creator_user_id::text = ANY($1::text[])
           AND COALESCE(e.status, 'published') NOT IN ('cancelled', 'draft')
           AND e.start_at <= NOW()
@@ -856,7 +872,9 @@ orgPortalRouter.get("/queue", async (req, res) => {
           e.capacity,
           COUNT(*) FILTER (WHERE r.status = 'accepted')::int AS approved_count
         FROM events e
-        LEFT JOIN event_rsvps r ON r.event_id = e.id
+        LEFT JOIN event_rsvps r
+          ON r.event_id = e.id
+         AND ${EXCLUDE_HOST_SELF_RSVP_SQL}
         WHERE e.creator_user_id::text = ANY($1::text[])
           AND COALESCE(e.status, 'published') = 'draft'
         GROUP BY e.id
@@ -1079,9 +1097,10 @@ orgPortalRouter.get("/opportunities/:eventId/applicants", async (req, res) => {
           GROUP BY wt.user_id
         ) tx ON tx.user_id = r.attendee_user_id
         WHERE r.event_id = $1
+          AND r.attendee_user_id::text <> $2::text
         ORDER BY r.created_at ASC
       `,
-      [eventId]
+      [eventId, hostCheck.event.creator_user_id]
     );
 
     const baseData = rows.map((row) => ({
@@ -1207,6 +1226,10 @@ orgPortalRouter.post("/opportunities/:eventId/applicants/:userId/approve", async
       await client.query("ROLLBACK");
       return res.status(404).json({ error: "applicant not found" });
     }
+    if (isHostSelfRsvp(eventRow, userId)) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ error: "host_rsvp_not_allowed" });
+    }
     const currentStatus = String(applicantRow.status || "").toLowerCase();
     if (currentStatus === "accepted" || currentStatus === "checked_in") {
       await client.query("COMMIT");
@@ -1329,7 +1352,7 @@ orgPortalRouter.post("/opportunities/:eventId/applicants/:userId/decline", async
 
     const { rows: eventRows } = await client.query(
       `
-        SELECT id
+        SELECT id, creator_user_id
           FROM events
          WHERE id = $1
          LIMIT 1
@@ -1340,6 +1363,10 @@ orgPortalRouter.post("/opportunities/:eventId/applicants/:userId/decline", async
     if (!eventRows[0]) {
       await client.query("ROLLBACK");
       return res.status(404).json({ error: "event not found" });
+    }
+    if (isHostSelfRsvp(eventRows[0], userId)) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ error: "host_rsvp_not_allowed" });
     }
 
     const { rows: [applicantRow] } = await client.query(
@@ -1403,6 +1430,9 @@ orgPortalRouter.post("/opportunities/:eventId/applicants/:userId/verify", async 
 
     const hostCheck = await ensureHostOwnsEvent(eventId, hostUserIds);
     if (!hostCheck.ok) return res.status(hostCheck.status).json({ error: hostCheck.error });
+    if (isHostSelfRsvp(hostCheck.event, userId)) {
+      return res.status(409).json({ error: "host_rsvp_not_allowed" });
+    }
 
     const result = await awardIcForRsvp(pool, { userId: Number(userId), eventId });
 
@@ -1438,6 +1468,7 @@ orgPortalRouter.get("/credits", async (req, res) => {
           ON r.event_id = e.id
          AND r.status = 'accepted'
          AND r.verification_status = 'pending'
+         AND ${EXCLUDE_HOST_SELF_RSVP_SQL}
         WHERE e.creator_user_id::text = ANY($1::text[])
         GROUP BY e.id, e.title, e.start_at
         ORDER BY e.start_at DESC NULLS LAST
@@ -1459,6 +1490,7 @@ orgPortalRouter.get("/credits", async (req, res) => {
             ON r.event_id = e.id
            AND r.status = 'accepted'
            AND r.verification_status = 'verified'
+           AND ${EXCLUDE_HOST_SELF_RSVP_SQL}
           WHERE e.creator_user_id::text = ANY($1::text[])
           GROUP BY e.id, e.title, e.start_at
         ),
@@ -1553,8 +1585,9 @@ orgPortalRouter.get("/credits/:eventId", async (req, res) => {
           u.id,
           u.firstname,
           u.lastname,
+          r.status AS rsvp_status,
           r.attended_minutes,
-          r.verification_status,
+          COALESCE(r.verification_status, 'pending') AS verification_status,
           COALESCE(SUM(w.kind_amount), 0)::numeric AS credits_earned
         FROM event_rsvps r
         JOIN userdata u ON u.id = r.attendee_user_id
@@ -1564,11 +1597,12 @@ orgPortalRouter.get("/credits/:eventId", async (req, res) => {
          AND w.reason = 'earn_shift'
          AND w.direction = 'credit'
         WHERE r.event_id = $1
-          AND r.status = 'accepted'
-        GROUP BY u.id, u.firstname, u.lastname, r.attended_minutes, r.verification_status
+          AND r.status IN ('accepted', 'checked_in')
+          AND r.attendee_user_id::text <> $2::text
+        GROUP BY u.id, u.firstname, u.lastname, r.status, r.attended_minutes, r.verification_status
         ORDER BY u.firstname ASC, u.lastname ASC
       `,
-      [eventId]
+      [eventId, hostCheck.event.creator_user_id]
     );
 
     return res.json({
@@ -1577,6 +1611,7 @@ orgPortalRouter.get("/credits/:eventId", async (req, res) => {
         id: String(row.id),
         firstname: row.firstname || "",
         lastname: row.lastname || "",
+        rsvp_status: row.rsvp_status || "accepted",
         attended_minutes: row.attended_minutes == null ? null : Number(row.attended_minutes),
         verification_status: row.verification_status || "pending",
         credits_earned: Number(row.credits_earned) || 0,
@@ -1610,7 +1645,9 @@ orgPortalRouter.get("/reports", async (req, res) => {
             date_trunc('month', e.start_at) AS month_start,
             COALESCE(SUM(COALESCE(r.attended_minutes, 0)) / 60.0, 0)::numeric AS hours
           FROM events e
-          JOIN event_rsvps r ON r.event_id = e.id
+          JOIN event_rsvps r
+            ON r.event_id = e.id
+           AND ${EXCLUDE_HOST_SELF_RSVP_SQL}
           WHERE e.creator_user_id::text = ANY($1::text[])
             AND e.start_at >= date_trunc('month', NOW()) - INTERVAL '3 months'
             AND e.start_at < date_trunc('month', NOW())
@@ -1643,7 +1680,9 @@ orgPortalRouter.get("/reports", async (req, res) => {
             e.capacity::numeric AS capacity,
             COUNT(r.id) FILTER (WHERE r.status = 'accepted')::numeric AS accepted_count
           FROM events e
-          LEFT JOIN event_rsvps r ON r.event_id = e.id
+          LEFT JOIN event_rsvps r
+            ON r.event_id = e.id
+           AND ${EXCLUDE_HOST_SELF_RSVP_SQL}
           WHERE e.creator_user_id::text = ANY($1::text[])
             AND e.start_at >= date_trunc('month', NOW()) - INTERVAL '3 months'
             AND e.start_at < date_trunc('month', NOW())
@@ -1707,17 +1746,22 @@ orgPortalRouter.get("/reports", async (req, res) => {
           SELECT
             e.id,
             COUNT(*) FILTER (WHERE r.no_show = true)::numeric AS no_show_count,
-            COUNT(*) FILTER (WHERE r.status = 'accepted')::numeric AS accepted_count
+            COUNT(*) FILTER (
+              WHERE r.status IN ('accepted', 'checked_in')
+                 OR r.no_show = true
+            )::numeric AS approved_attendance_count
           FROM events e
-          LEFT JOIN event_rsvps r ON r.event_id = e.id
+          LEFT JOIN event_rsvps r
+            ON r.event_id = e.id
+           AND ${EXCLUDE_HOST_SELF_RSVP_SQL}
           WHERE e.creator_user_id::text = ANY($1::text[])
             AND e.start_at >= NOW() - ($2 * INTERVAL '1 day')
           GROUP BY e.id
         )
         SELECT
           CASE
-            WHEN COALESCE(SUM(accepted_count), 0) > 0
-              THEN ROUND((SUM(no_show_count) / SUM(accepted_count)) * 100, 1)
+            WHEN COALESCE(SUM(approved_attendance_count), 0) > 0
+              THEN ROUND((SUM(no_show_count) / SUM(approved_attendance_count)) * 100, 1)
             ELSE 0
           END::numeric AS no_show_rate
         FROM per_event
@@ -1729,6 +1773,7 @@ orgPortalRouter.get("/reports", async (req, res) => {
     const topVolWhere = [
       "e.creator_user_id::text = ANY($1::text[])",
       "e.start_at >= NOW() - ($2 * INTERVAL '1 day')",
+      EXCLUDE_HOST_SELF_RSVP_SQL,
       "r.status = 'accepted'",
     ];
     if (opportunityId !== "all") {
@@ -1792,6 +1837,7 @@ orgPortalRouter.get("/reports", async (req, res) => {
         JOIN events e ON e.id = r.event_id
         JOIN userdata u ON u.id = r.attendee_user_id
         WHERE e.creator_user_id::text = ANY($1::text[])
+          AND ${EXCLUDE_HOST_SELF_RSVP_SQL}
         ORDER BY u.firstname ASC, u.lastname ASC
       `,
       [hostUserIds]
@@ -1844,6 +1890,7 @@ orgPortalRouter.get("/kpis", async (req, res) => {
         FROM event_rsvps r
         JOIN events e ON e.id = r.event_id
         WHERE e.creator_user_id::text = ANY($1::text[])
+          AND ${EXCLUDE_HOST_SELF_RSVP_SQL}
           AND r.verification_status = 'verified'
       `,
       [hostUserIds]
@@ -1860,6 +1907,7 @@ orgPortalRouter.get("/kpis", async (req, res) => {
           LEFT JOIN event_rsvps r
             ON r.event_id = e.id
            AND r.status = 'accepted'
+           AND ${EXCLUDE_HOST_SELF_RSVP_SQL}
           WHERE e.creator_user_id::text = ANY($1::text[])
             AND e.capacity IS NOT NULL
             AND e.capacity > 0
@@ -1899,16 +1947,21 @@ orgPortalRouter.get("/kpis", async (req, res) => {
           SELECT
             e.id,
             COUNT(*) FILTER (WHERE r.no_show = true)::numeric AS no_show_count,
-            COUNT(*) FILTER (WHERE r.status = 'accepted')::numeric AS accepted_count
+            COUNT(*) FILTER (
+              WHERE r.status IN ('accepted', 'checked_in')
+                 OR r.no_show = true
+            )::numeric AS approved_attendance_count
           FROM events e
-          LEFT JOIN event_rsvps r ON r.event_id = e.id
+          LEFT JOIN event_rsvps r
+            ON r.event_id = e.id
+           AND ${EXCLUDE_HOST_SELF_RSVP_SQL}
           WHERE e.creator_user_id::text = ANY($1::text[])
           GROUP BY e.id
         )
         SELECT
           CASE
-            WHEN COALESCE(SUM(accepted_count), 0) > 0
-              THEN ROUND((SUM(no_show_count) / SUM(accepted_count)) * 100, 1)
+            WHEN COALESCE(SUM(approved_attendance_count), 0) > 0
+              THEN ROUND((SUM(no_show_count) / SUM(approved_attendance_count)) * 100, 1)
             ELSE 0
           END::numeric AS no_show_rate
         FROM per_event
@@ -1944,6 +1997,7 @@ orgPortalRouter.get("/kpis", async (req, res) => {
         FROM event_rsvps r
         JOIN events e ON e.id = r.event_id
         WHERE e.creator_user_id::text = ANY($1::text[])
+          AND ${EXCLUDE_HOST_SELF_RSVP_SQL}
           AND e.start_at >= NOW() - INTERVAL '30 days'
           AND e.start_at < NOW()
           AND r.verification_status = 'verified'
@@ -1957,6 +2011,7 @@ orgPortalRouter.get("/kpis", async (req, res) => {
         FROM event_rsvps r
         JOIN events e ON e.id = r.event_id
         WHERE e.creator_user_id::text = ANY($1::text[])
+          AND ${EXCLUDE_HOST_SELF_RSVP_SQL}
           AND e.start_at >= NOW() - INTERVAL '60 days'
           AND e.start_at < NOW() - INTERVAL '30 days'
           AND r.verification_status = 'verified'
@@ -1975,6 +2030,7 @@ orgPortalRouter.get("/kpis", async (req, res) => {
           LEFT JOIN event_rsvps r
             ON r.event_id = e.id
            AND r.status = 'accepted'
+           AND ${EXCLUDE_HOST_SELF_RSVP_SQL}
           WHERE e.creator_user_id::text = ANY($1::text[])
             AND e.start_at >= NOW() - INTERVAL '30 days'
             AND e.start_at < NOW()
@@ -1999,6 +2055,7 @@ orgPortalRouter.get("/kpis", async (req, res) => {
           LEFT JOIN event_rsvps r
             ON r.event_id = e.id
            AND r.status = 'accepted'
+           AND ${EXCLUDE_HOST_SELF_RSVP_SQL}
           WHERE e.creator_user_id::text = ANY($1::text[])
             AND e.start_at >= NOW() - INTERVAL '60 days'
             AND e.start_at < NOW() - INTERVAL '30 days'

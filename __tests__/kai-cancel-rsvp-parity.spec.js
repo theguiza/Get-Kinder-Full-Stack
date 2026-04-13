@@ -109,13 +109,15 @@ function createPoolHarness({
       }
 
       if (
-        trimmed.includes("COUNT(*) FILTER (WHERE status IN ('accepted','checked_in'))::int AS accepted_count") &&
-        trimmed.includes("COUNT(*) FILTER (WHERE status = 'waitlisted')::int AS waitlisted_count")
+        trimmed.includes("accepted_count") &&
+        trimmed.includes("waitlisted_count") &&
+        trimmed.includes("FROM event_rsvps")
       ) {
         const [eventId] = params;
         const acceptedCount = state.rsvps.filter(
           (row) =>
             String(row.event_id) === String(eventId) &&
+            String(row.attendee_user_id) !== String(state.event?.creator_user_id) &&
             (row.status === "accepted" || row.status === "checked_in"),
         ).length;
         const waitlistedCount = state.rsvps.filter(
@@ -163,13 +165,18 @@ function createPoolHarness({
       }
 
       if (
-        trimmed.includes("COUNT(*) FILTER (WHERE status IN ('accepted','checked_in')) AS accepted") &&
+        (
+          trimmed.includes("COUNT(*) FILTER (WHERE status IN ('accepted','checked_in')) AS accepted")
+          || trimmed.includes("COUNT(*) FILTER (WHERE r.status IN ('accepted','checked_in')) AS accepted")
+          || trimmed.includes("COUNT(*) FILTER (WHERE r.status IN ('accepted','checked_in'))::int AS accepted_count")
+        ) &&
         trimmed.includes("FROM event_rsvps")
       ) {
         const [eventId] = params;
         const accepted = state.rsvps.filter(
           (row) =>
             String(row.event_id) === String(eventId) &&
+            String(row.attendee_user_id) !== String(state.event?.creator_user_id) &&
             (row.status === "accepted" || row.status === "checked_in"),
         ).length;
         return { rows: [{ accepted }], rowCount: 1 };

@@ -16,7 +16,7 @@ export async function promoteWaitlistedAttendees({ runner, eventId }) {
 
   const { rows: [eventRow] } = await runner.query(
     `
-      SELECT id, capacity, status
+      SELECT id, capacity, status, creator_user_id
         FROM events
        WHERE id = $1
        LIMIT 1
@@ -32,12 +32,15 @@ export async function promoteWaitlistedAttendees({ runner, eventId }) {
   const { rows: [countsRow] } = await runner.query(
     `
       SELECT
-        COUNT(*) FILTER (WHERE status IN ('accepted','checked_in'))::int AS accepted_count,
+        COUNT(*) FILTER (
+          WHERE status IN ('accepted','checked_in')
+            AND attendee_user_id::text <> $2::text
+        )::int AS accepted_count,
         COUNT(*) FILTER (WHERE status = 'waitlisted')::int AS waitlisted_count
       FROM event_rsvps
       WHERE event_id = $1
     `,
-    [normalizedEventId]
+    [normalizedEventId, eventRow.creator_user_id]
   );
   const acceptedCount = Number(countsRow?.accepted_count) || 0;
   const waitlistedCount = Number(countsRow?.waitlisted_count) || 0;

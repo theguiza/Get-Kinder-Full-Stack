@@ -213,10 +213,12 @@ export async function listMyEvents(req, res) {
              COALESCE(r.accepted, 0) AS rsvp_accepted
         FROM events e
    LEFT JOIN (
-          SELECT event_id,
-                 COUNT(*) FILTER (WHERE status IN ('accepted','checked_in')) AS accepted
-            FROM event_rsvps
-        GROUP BY event_id
+          SELECT r.event_id,
+                 COUNT(*) FILTER (WHERE r.status IN ('accepted','checked_in')) AS accepted
+            FROM event_rsvps r
+            JOIN events e2 ON e2.id = r.event_id
+           WHERE r.attendee_user_id::text <> e2.creator_user_id::text
+        GROUP BY r.event_id
         ) r ON r.event_id = e.id
    LEFT JOIN (
           SELECT

@@ -127,7 +127,9 @@ function createRsvpServiceHarness({
       if (
         (
           trimmed.includes("COUNT(*) FILTER (WHERE status IN ('accepted','checked_in')) AS accepted")
+          || trimmed.includes("COUNT(*) FILTER (WHERE r.status IN ('accepted','checked_in')) AS accepted")
           || trimmed.includes("COUNT(*) FILTER (WHERE status IN ('accepted','checked_in'))::int AS accepted_count")
+          || trimmed.includes("COUNT(*) FILTER (WHERE r.status IN ('accepted','checked_in'))::int AS accepted_count")
         ) &&
         trimmed.includes("FROM event_rsvps")
       ) {
@@ -135,6 +137,7 @@ function createRsvpServiceHarness({
         const accepted = state.rsvps.filter(
           (row) =>
             String(row.event_id) === String(eventId) &&
+            String(row.attendee_user_id) !== String(state.event?.creator_user_id) &&
             (row.status === "accepted" || row.status === "checked_in"),
         ).length;
         return { rows: [{ accepted, accepted_count: accepted }], rowCount: 1 };
@@ -148,6 +151,7 @@ function createRsvpServiceHarness({
         const accepted = state.rsvps.filter(
           (row) =>
             String(row.event_id) === String(eventId) &&
+            String(row.attendee_user_id) !== String(state.event?.creator_user_id) &&
             (row.status === "accepted" || row.status === "checked_in"),
         ).length;
         const waitlisted = state.rsvps.filter(

@@ -587,6 +587,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
   const [rosterLoading, setRosterLoading] = useState(false);
   const [rosterError, setRosterError] = useState(false);
   const [markPresentByUser, setMarkPresentByUser] = useState({});
+  const [noShowByUser, setNoShowByUser] = useState({});
   const [verifyAttendanceByUser, setVerifyAttendanceByUser] = useState({});
   const [rateVolunteerByUser, setRateVolunteerByUser] = useState({});
   const [verifyAllAttendanceLoading, setVerifyAllAttendanceLoading] = useState(false);
@@ -1274,6 +1275,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
             row?.pending_verify_count ?? row?.pendingVerifyCount,
             0
           );
+          const approvedAttendanceCount = safeNumber(row?.approved, 0) + checkedInCount;
 
           let queueGroup = null;
           if (validStart && effectiveEnd && validStart <= now && effectiveEnd >= now) {
@@ -1289,13 +1291,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
           }
 
           if (!queueGroup) return null;
-          const fallbackExpected = Math.max(
-            checkedInCount,
-            safeNumber(row?.approved, 0),
-            safeNumber(row?.total, 0)
-          );
-          const expectedCount =
-            row?.capacity == null ? fallbackExpected : Math.max(fallbackExpected, safeNumber(row.capacity, 0));
+          const expectedCount = Math.max(approvedAttendanceCount, checkedInCount);
           const startLabel = validStart
             ? validStart.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
             : "Time TBD";
@@ -1327,7 +1323,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
             label:
               queueGroup === "checkoutPending"
                 ? `${row?.title || "Untitled event"} · ended ${endLabel} — ${pendingVerifyCount} awaiting verification`
-                : `${row?.title || "Untitled event"} · ${startLabel} — ${checkedInCount} checked / ${expectedCount} expected`,
+                : `${row?.title || "Untitled event"} · ${startLabel} — ${checkedInCount} checked / ${expectedCount} approved`,
             detailName: row?.title || "Untitled event",
             detailDateTime: `${dateLabel} · ${startLabel} – ${endLabel}`,
             summaryChecked: checkedInCount,
@@ -1407,6 +1403,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
           id: `${eventId}-${attendeeUserId || idx}`,
           attendeeUserId,
           name: `${row?.firstname || ""} ${row?.lastname || ""}`.trim() || row?.email || "Volunteer",
+          noShow: isNoShow,
           status,
           time: formatCheckinTime(checkedInAt),
           checkedInAt,
@@ -1434,6 +1431,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
       setRosterLoading(false);
       setRosterError(false);
       setMarkPresentByUser({});
+      setNoShowByUser({});
       setVerifyAttendanceByUser({});
       setRateVolunteerByUser({});
       setVerifyAllAttendanceLoading(false);
@@ -1858,9 +1856,9 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
     };
   }, [activeTab, reportData]);
 
-  async function handleMarkPresent(rowId) {
+  async function handleMarkPresent(rowId, { refreshQueue = false } = {}) {
     const target = roster.find((entry) => entry.id === rowId);
-    if (!selectedCheckinEventId || !target?.attendeeUserId) return;
+    if (!selectedCheckinEventId || !target?.attendeeUserId) return false;
 
     setMarkPresentByUser((prev) => ({ ...prev, [rowId]: true }));
     setRoster((prev) =>
@@ -1890,9 +1888,8 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
         throw new Error(payload?.error || "mark_present_failed");
       }
 
-      const now = new Date();
-      const nowIso = now.toISOString();
-      const nowLabel = now.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+      const checkedInAt = payload?.data?.checked_in_at || new Date().toISOString();
+      const checkedInLabel = formatCheckinTime(checkedInAt);
 
       setRoster((prev) =>
         prev.map((entry) =>
@@ -1900,13 +1897,19 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
             ? {
                 ...entry,
                 status: "checked-in",
-                time: nowLabel,
-                checkedInAt: nowIso,
+                statusRaw: "checked_in",
+                noShow: false,
+                time: checkedInLabel,
+                checkedInAt,
                 rowError: "",
               }
             : entry
         )
       );
+      if (refreshQueue) {
+        await fetchCheckinQueue({ showLoading: false });
+      }
+      return true;
     } catch (error) {
       setRoster((prev) =>
         prev.map((entry) =>
@@ -1921,8 +1924,85 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
             : entry
         )
       );
+      return false;
     } finally {
       setMarkPresentByUser((prev) => {
+        const next = { ...prev };
+        delete next[rowId];
+        return next;
+      });
+    }
+  }
+
+  async function handleMarkNoShow(rowId, { refreshQueue = true } = {}) {
+    const target = roster.find((entry) => entry.id === rowId);
+    if (!selectedCheckinEventId || !target?.attendeeUserId) return false;
+
+    setNoShowByUser((prev) => ({ ...prev, [rowId]: true }));
+    setRoster((prev) =>
+      prev.map((entry) =>
+        entry.id === rowId
+          ? {
+              ...entry,
+              rowError: "",
+            }
+          : entry
+      )
+    );
+
+    try {
+      const response = await fetch(`/api/events/${encodeURIComponent(selectedCheckinEventId)}/no-show`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "X-CSRF-Token": csrfToken,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ attendee_user_id: target.attendeeUserId }),
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.error || "mark_no_show_failed");
+      }
+
+      setRoster((prev) =>
+        prev.map((entry) =>
+          entry.id === rowId
+            ? {
+                ...entry,
+                noShow: true,
+                status: "no-show",
+                time: "—",
+                checkedInAt: null,
+                verificationStatus: "pending",
+                attendedMinutes: null,
+                rowError: "",
+              }
+            : entry
+        )
+      );
+      if (refreshQueue) {
+        await fetchCheckinQueue({ showLoading: false });
+      }
+      return true;
+    } catch (error) {
+      setRoster((prev) =>
+        prev.map((entry) =>
+          entry.id === rowId
+            ? {
+                ...entry,
+                rowError:
+                  error?.message === "No-show can only be marked after the shift ends"
+                    ? "You can mark no-show after the shift ends."
+                    : "Failed. Try again.",
+              }
+            : entry
+        )
+      );
+      return false;
+    } finally {
+      setNoShowByUser((prev) => {
         const next = { ...prev };
         delete next[rowId];
         return next;
@@ -1955,17 +2035,22 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
 
     try {
       const attendedMinutes = computeSelectedEventAttendedMinutes();
-      const response = await fetch(`/api/kai/verify-attendance`, {
+      const requestBody = {
+        attendee_user_id: target.attendeeUserId,
+        decision: "verified",
+      };
+      if (Number.isFinite(attendedMinutes)) {
+        requestBody.attended_minutes = attendedMinutes;
+      }
+
+      const response = await fetch(`/api/events/${encodeURIComponent(selectedCheckinEventId)}/verify`, {
         method: "POST",
         credentials: "include",
         headers: {
           "X-CSRF-Token": csrfToken,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          user_id: target.attendeeUserId,
-          event_id: selectedCheckinEventId,
-        }),
+        body: JSON.stringify(requestBody),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || payload?.ok === false) {
@@ -2136,21 +2221,26 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
     }
   }
 
-  function handleMarkAllPresent() {
-    const nowDate = new Date();
-    const now = nowDate.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-    const nowIso = nowDate.toISOString();
-    setRoster((prev) =>
-      prev.map((entry) =>
-        entry.status === "expected" || entry.status === "late"
-          ? { ...entry, status: "checked-in", time: now, checkedInAt: nowIso }
-          : entry
-      )
-    );
+  async function handleMarkAllPresent() {
+    const targets = roster.filter((entry) => {
+      const rsvpStatus = String(entry.statusRaw || "").toLowerCase();
+      return (
+        ["accepted", "checked_in"].includes(rsvpStatus) &&
+        (entry.status === "expected" || entry.status === "late")
+      );
+    });
+    if (!targets.length) return;
+
+    for (const row of targets) {
+      // eslint-disable-next-line no-await-in-loop
+      await handleMarkPresent(row.id, { refreshQueue: false });
+    }
+    await fetchCheckinQueue({ showLoading: false });
+    await fetchRoster(selectedCheckinEventId, selectedCheckinStartTime);
   }
 
   async function handleVerifyAllCreditsPending() {
-    if (creditsVerifyAllLoading || !selectedCreditsItem || selectedCreditsItem.type !== "credits-pending") return;
+    if (creditsVerifyAllLoading || !selectedCreditsItem || selectedCreditsItem.type === "credits-volunteer") return;
     const eventId = String(selectedCreditsItem.opportunityId || "").trim();
     const detailRows = Array.isArray(creditDetail) ? creditDetail : [];
     const pendingRows = detailRows.filter(
@@ -2182,13 +2272,15 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
         }
       }
 
-      setCreditDetail((prev) =>
-        (Array.isArray(prev) ? prev : []).map((row) => ({
-          ...row,
-          verification_status: "verified",
-        }))
-      );
       await fetchCreditsQueue();
+      const detailResponse = await fetch(`/api/org/credits/${encodeURIComponent(eventId)}`, {
+        credentials: "include",
+      });
+      const detailPayload = await detailResponse.json().catch(() => ({}));
+      if (!detailResponse.ok) {
+        throw new Error("credit_detail_refresh_failed");
+      }
+      setCreditDetail(Array.isArray(detailPayload?.data) ? detailPayload.data : []);
     } catch (_) {
       setCreditsActionError("Failed. Try again.");
     } finally {
@@ -3668,7 +3760,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
       .filter((row) => {
         const rsvpStatus = String(row.statusRaw || "").toLowerCase();
         const verificationStatus = String(row.verificationStatus || "").toLowerCase();
-        return ["accepted", "checked_in"].includes(rsvpStatus) && verificationStatus !== "verified";
+        return ["accepted", "checked_in"].includes(rsvpStatus) && row.noShow !== true && verificationStatus !== "verified";
       })
       .map((row) => ({
         id: row.id,
@@ -3767,18 +3859,18 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
               <li className="list-group-item px-0 py-1 small text-muted">No pending check-outs.</li>
             )}
           </ul>
-          <button
-            type="button"
-            className="btn orgp-btn-ink-outline btn-sm w-100"
-            onClick={isCheckoutPhase ? handleVerifyAllCheckedIn : () => console.log("checkout all")}
-            disabled={isCheckoutPhase && verifyAllAttendanceLoading}
-          >
-            {isCheckoutPhase
-              ? verifyAllAttendanceLoading
-                ? "Verifying..."
-                : "Verify All Pending"
-              : "Check Out All"}
-          </button>
+          {isCheckoutPhase ? (
+            <button
+              type="button"
+              className="btn orgp-btn-ink-outline btn-sm w-100"
+              onClick={handleVerifyAllCheckedIn}
+              disabled={verifyAllAttendanceLoading}
+            >
+              {verifyAllAttendanceLoading ? "Verifying..." : "Verify All Pending"}
+            </button>
+          ) : (
+            <div className="small text-muted">Checkout verification becomes available after the shift ends.</div>
+          )}
         </div>
       </>
     );
@@ -3855,6 +3947,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
                     const isLate = row.status === "late";
                     const isNoShow = row.status === "no-show";
                     const rowSaving = Boolean(markPresentByUser[row.id]);
+                    const rowMarkingNoShow = Boolean(noShowByUser[row.id]);
                     const rowVerifying = Boolean(verifyAttendanceByUser[row.id]);
                     const ratingMeta = rateVolunteerByUser[String(row.attendeeUserId || "")] || {};
                     const rowRatingSubmitting = Boolean(ratingMeta.submitting);
@@ -3865,7 +3958,8 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
                     const isAttendanceVerified =
                       String(row.verificationStatus || "").toLowerCase() === "verified";
                     const disableMark = isChecked || isNoShow || rowSaving || !isAcceptedRsvp || isCheckoutPhase;
-                    const disableVerify = isNoShow || rowVerifying || isAttendanceVerified || !isAcceptedRsvp;
+                    const disableVerify = isNoShow || rowVerifying || rowMarkingNoShow || isAttendanceVerified || !isAcceptedRsvp;
+                    const disableNoShow = rowMarkingNoShow || rowVerifying || isAttendanceVerified || isNoShow || !isAcceptedRsvp;
                     const disableRate = !isAcceptedRsvp || isNoShow || rowRatingSubmitting || rowAlreadyRated;
                     return (
                       <tr key={row.id}>
@@ -3884,19 +3978,34 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
                         <td>{row.time}</td>
                         <td>
                           {isCheckoutPhase ? (
-                            <button
-                              type="button"
-                              className="btn btn-sm btn-outline-primary"
-                              onClick={() => handleVerifyAttendance(row.id)}
-                              disabled={disableVerify}
-                              title={isAttendanceVerified ? "Already verified" : !isAcceptedRsvp ? "Volunteer must be approved first" : ""}
-                            >
-                              {rowVerifying
-                                ? "Verifying..."
-                                : isAttendanceVerified
-                                  ? "Verified"
-                                  : <><i className="fas fa-check-circle me-1" aria-hidden="true"></i>Verify</>}
-                            </button>
+                            <>
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-outline-primary"
+                                onClick={() => handleVerifyAttendance(row.id)}
+                                disabled={disableVerify}
+                                title={isAttendanceVerified ? "Already verified" : !isAcceptedRsvp ? "Volunteer must be approved first" : ""}
+                              >
+                                {rowVerifying
+                                  ? "Verifying..."
+                                  : isAttendanceVerified
+                                    ? "Verified"
+                                    : <><i className="fas fa-check-circle me-1" aria-hidden="true"></i>Verify</>}
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-outline-warning ms-1"
+                                onClick={() => handleMarkNoShow(row.id)}
+                                disabled={disableNoShow}
+                                title={isNoShow ? "Already marked no-show" : !isAcceptedRsvp ? "Volunteer must be approved first" : ""}
+                              >
+                                {rowMarkingNoShow
+                                  ? "Saving..."
+                                  : isNoShow
+                                    ? "No-show"
+                                    : "Mark No-Show"}
+                              </button>
+                            </>
                           ) : (
                             <button
                               type="button"
@@ -3980,7 +4089,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
       fundedCredits: safeNumber(row.funded_credits_total, 0),
       deficitCredits: safeNumber(row.deficit_credits_total, 0),
       poolSlug: row.funding_pool_slug || "general",
-      label: `${row.title || "Untitled event"} · ${formatShortDate(row.start_at)} — ${safeNumber(row.verified_credits_total, 0)} verified · ${safeNumber(row.funded_credits_total, 0)} funded · deficit ${safeNumber(row.deficit_credits_total, 0)}`,
+      label: `${row.title || "Untitled event"} · ${formatShortDate(row.start_at)} — ${safeNumber(row.verified_credits_total, 0)} awarded · ${safeNumber(row.funded_credits_total, 0)} funded · deficit ${safeNumber(row.deficit_credits_total, 0)}`,
     }));
 
     const reconciledItems = (creditsQueue?.reconciled || []).map((row) => ({
@@ -3997,7 +4106,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
       fundedCredits: safeNumber(row.funded_credits_total, 0),
       deficitCredits: safeNumber(row.deficit_credits_total, 0),
       poolSlug: row.funding_pool_slug || "general",
-      label: `${row.title || "Untitled event"} · ${formatShortDate(row.start_at)} — ${safeNumber(row.funded_credits_total, 0)} funded · deficit ${safeNumber(row.deficit_credits_total, 0)}`,
+      label: `${row.title || "Untitled event"} · ${formatShortDate(row.start_at)} — ${safeNumber(row.verified_credits_total, 0)} awarded · ${safeNumber(row.funded_credits_total, 0)} funded · deficit ${safeNumber(row.deficit_credits_total, 0)}`,
     }));
 
     const volunteerItems = (creditsQueue?.volunteerSummary || []).map((row) => {
@@ -4027,7 +4136,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
         </div>
 
         <div className="mb-3">
-          <div className="orgp-section-label orgp-credits-heading-pending">PENDING RECONCILE</div>
+          <div className="orgp-section-label orgp-credits-heading-pending">NEEDS FUNDING</div>
           <div className="list-group orgp-queue-list">
             {pendingItems.length
               ? pendingItems.map((item) => renderQueueItem(item))
@@ -4036,7 +4145,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
         </div>
 
         <div className="mb-2">
-          <div className="orgp-section-label">RECONCILED</div>
+          <div className="orgp-section-label">FUNDING RECONCILED</div>
           <div className="list-group orgp-queue-list">
             {reconciledItems.length
               ? reconciledItems.map((item) => renderQueueItem(item))
@@ -4056,18 +4165,23 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
     );
   }
 
-  function renderCreditsStatusBadge(status) {
-    if (String(status || "").toLowerCase() === "verified") {
-      return <span className="badge bg-success">✅ Verified</span>;
+  function renderAttendanceStatusBadge(verificationStatus, rsvpStatus) {
+    const normalizedVerification = String(verificationStatus || "").toLowerCase();
+    const normalizedRsvp = String(rsvpStatus || "").toLowerCase();
+
+    if (normalizedVerification === "verified") {
+      return <span className="badge bg-success">Attendance Verified</span>;
     }
-    return <span className="badge bg-secondary">⏳ Pending</span>;
+    if (normalizedRsvp === "checked_in") {
+      return <span className="badge bg-warning text-dark">Checked In · Awaiting Verify</span>;
+    }
+    return <span className="badge bg-secondary">Approved · Awaiting Verify</span>;
   }
 
   function renderCreditsOpportunityDetail(item) {
     const detailRows = Array.isArray(creditDetail) ? creditDetail : [];
     const pendingRows = detailRows.filter((row) => String(row?.verification_status || "").toLowerCase() !== "verified");
-    const verifyDisabled =
-      creditsVerifyAllLoading || !pendingRows.length || item.type !== "credits-pending";
+    const verifyDisabled = creditsVerifyAllLoading || !pendingRows.length;
 
     return (
       <div>
@@ -4077,7 +4191,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
         <div className="row g-2 mb-3">
           <div className="col-12 col-md-6">
             <div className="orgp-credit-tile">
-              <div className="orgp-credit-tile-label">Verified Credits</div>
+              <div className="orgp-credit-tile-label">Awarded Credits</div>
               <div className="orgp-credit-tile-value">{safeNumber(item.verifiedCredits, 0)} credits</div>
               <div className="text-muted small">
                 {safeNumber(item.fundedCredits, 0)} funded · deficit {safeNumber(item.deficitCredits, 0)}
@@ -4088,12 +4202,12 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
             <div className="orgp-credit-tile">
               <div className="orgp-credit-tile-label">Funding Pool</div>
               <div className="orgp-credit-tile-value">{item.poolSlug || "general"}</div>
-              <div className="text-muted small">{safeNumber(item.volunteerCount, 0)} accepted RSVPs</div>
+              <div className="text-muted small">{safeNumber(item.volunteerCount, 0)} approved/check-in RSVPs</div>
             </div>
           </div>
         </div>
 
-        <div className="orgp-section-label">VOLUNTEER BREAKDOWN</div>
+        <div className="orgp-section-label">ATTENDANCE & CREDITS</div>
         {creditDetailLoading ? (
           <LoadingSpinner text="Loading credit detail..." />
         ) : (
@@ -4104,7 +4218,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
                   <th scope="col" className="orgp-roster-head">Name</th>
                   <th scope="col" className="orgp-roster-head">Hrs</th>
                   <th scope="col" className="orgp-roster-head">Credits</th>
-                  <th scope="col" className="orgp-roster-head">Status</th>
+                  <th scope="col" className="orgp-roster-head">Attendance</th>
                 </tr>
               </thead>
               <tbody>
@@ -4116,13 +4230,13 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
                         <td>{fullName}</td>
                         <td>{(safeNumber(row.attended_minutes, 0) / 60).toFixed(1)}</td>
                         <td>{safeNumber(row.credits_earned, 0)}</td>
-                        <td>{renderCreditsStatusBadge(row.verification_status)}</td>
+                        <td>{renderAttendanceStatusBadge(row.verification_status, row.rsvp_status)}</td>
                       </tr>
                     );
                   })
                 ) : (
                   <tr>
-                    <td colSpan="4" className="text-muted small">No accepted volunteers yet.</td>
+                    <td colSpan="4" className="text-muted small">No approved or checked-in volunteers yet.</td>
                   </tr>
                 )}
               </tbody>
@@ -4136,7 +4250,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
           disabled={verifyDisabled}
           onClick={handleVerifyAllCreditsPending}
         >
-          {creditsVerifyAllLoading ? "Verifying..." : "✓ Verify All Pending"}
+          {creditsVerifyAllLoading ? "Verifying..." : "Verify Pending Attendance"}
         </button>
         {creditsActionError ? (
           <div className="small text-danger mt-2">{creditsActionError}</div>

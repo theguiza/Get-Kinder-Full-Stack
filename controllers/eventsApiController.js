@@ -6,6 +6,7 @@ import {
   getRsvpForUpdate,
   countVerifiedShifts,
   updateEventRsvpVerification,
+  hasEventRsvpNoShowColumn,
 } from "../services/eventsService.js";
 import { processVerifiedEarnShift } from "../services/earnShiftFundingService.js";
 import { sendProspectInviteEmail, sendNudgeEmail } from "../kindnessEmailer.js";
@@ -289,6 +290,11 @@ async function attachViewerRsvpStatuses(req, events) {
 function eventIsOwnedByHostScope(eventRow, hostUserIds) {
   if (!eventRow?.creator_user_id) return false;
   return hostUserIds.includes(String(eventRow.creator_user_id));
+}
+
+function isHostSelfRsvp(eventRow, attendeeUserId) {
+  if (!eventRow?.creator_user_id || attendeeUserId == null) return false;
+  return String(eventRow.creator_user_id) === String(attendeeUserId).trim();
 }
 
 function mapEventRowForEdit(row) {
@@ -932,6 +938,9 @@ export async function checkInToEvent(req, res) {
       eventIsOwnedByHostScope(eventRow, hostUserIds) &&
       String(requestedAttendeeId) !== String(requesterId);
     const attendeeId = isHostOverride ? requestedAttendeeId : requesterId;
+    if (isHostSelfRsvp(eventRow, attendeeId)) {
+      return res.status(409).json({ ok: false, error: "Hosts do not need to check in" });
+    }
 
     let method = CHECKIN_METHOD_SET.has(requestedMethod) ? requestedMethod : "";
     if (!method) {
@@ -956,11 +965,13 @@ export async function checkInToEvent(req, res) {
       return res.status(409).json({ ok: false, error: "Accept the invite before checking in" });
     }
 
+    const hasNoShow = await hasEventRsvpNoShowColumn();
     await pool.query(
       `UPDATE event_rsvps
           SET status='checked_in',
               check_in_method=$1,
               checked_in_at=NOW(),
+              ${hasNoShow ? "no_show=FALSE," : ""}
               updated_at=NOW()
         WHERE event_id=$2 AND attendee_user_id=$3`,
       [method, eventId, attendeeId]
@@ -986,6 +997,8 @@ export async function listEventRoster(req, res) {
   try {
     const hostUserIds = await resolveHostUserIds(req);
     const eventId = req.params.id;
+    const hasNoShow = await hasEventRsvpNoShowColumn();
+    const noShowSelect = hasNoShow ? "r.no_show" : "NULL::boolean AS no_show";
     const { rows: [eventRow] } = await pool.query(
       `SELECT id, creator_user_id FROM events WHERE id=$1 LIMIT 1`,
       [eventId]
@@ -1004,21 +1017,117 @@ export async function listEventRoster(req, res) {
                r.verification_status,
                r.attended_minutes,
                r.checked_in_at,
+               ${noShowSelect},
                u.firstname,
                u.lastname,
                u.email
-          FROM event_rsvps r
-          JOIN userdata u ON u.id = r.attendee_user_id
+         FROM event_rsvps r
+         JOIN userdata u ON u.id = r.attendee_user_id
          WHERE r.event_id = $1
+           AND r.attendee_user_id::text <> $2::text
+           AND r.status IN ('accepted', 'checked_in')
          ORDER BY r.created_at ASC
       `,
-      [eventId]
+      [eventId, eventRow.creator_user_id]
     );
 
     return res.json({ ok: true, data: rows });
   } catch (error) {
     console.error("[eventsApi] listEventRoster error:", error);
     return res.status(500).json({ ok: false, error: "Unable to load roster" });
+  }
+}
+
+export async function markEventNoShow(req, res) {
+  const userId = await resolveUserId(req);
+  const hostUserIds = await resolveHostUserIds(req);
+  if (!userId) {
+    return res.status(401).json({ ok: false, error: "Unauthorized" });
+  }
+
+  const eventId = req.params.id;
+  const attendeeUserIdRaw = req.body?.attendee_user_id;
+  const attendeeUserId = attendeeUserIdRaw ? String(attendeeUserIdRaw).trim() : "";
+  if (!attendeeUserId) {
+    return res.status(400).json({ ok: false, error: "attendee_user_id is required" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const hasNoShow = await hasEventRsvpNoShowColumn(client);
+    if (!hasNoShow) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ ok: false, error: "No-show tracking is unavailable" });
+    }
+
+    const eventRow = await getEventByIdForVerify(client, eventId);
+    if (!eventRow) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ ok: false, error: "Event not found" });
+    }
+    if (!eventIsOwnedByHostScope(eventRow, hostUserIds)) {
+      await client.query("ROLLBACK");
+      return res.status(403).json({ ok: false, error: "Forbidden" });
+    }
+
+    const eventEnd = eventRow.end_at ? new Date(eventRow.end_at) : null;
+    if (eventEnd && !Number.isNaN(eventEnd.getTime()) && eventEnd.getTime() > Date.now()) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ ok: false, error: "No-show can only be marked after the shift ends" });
+    }
+
+    const rsvpRow = await getRsvpForUpdate(client, eventId, attendeeUserId);
+    if (!rsvpRow) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ ok: false, error: "RSVP not found" });
+    }
+    if (isHostSelfRsvp(eventRow, attendeeUserId)) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ ok: false, error: "Hosts cannot be marked as no-show" });
+    }
+    if (!["accepted", "checked_in"].includes(String(rsvpRow.status || "").toLowerCase())) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ ok: false, error: "RSVP must be approved before marking no-show" });
+    }
+    if (rsvpRow.verification_status === "verified") {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ ok: false, error: "Verified attendance cannot be marked as no-show" });
+    }
+
+    await client.query(
+      `
+        UPDATE event_rsvps
+           SET no_show = TRUE,
+               status = 'accepted',
+               check_in_method = NULL,
+               checked_in_at = NULL,
+               verification_status = 'pending',
+               attended_minutes = NULL,
+               verified_at = NULL,
+               updated_at = NOW()
+         WHERE event_id = $1
+           AND attendee_user_id = $2
+      `,
+      [eventId, attendeeUserId]
+    );
+
+    await client.query("COMMIT");
+    return res.json({
+      ok: true,
+      data: {
+        attendee_user_id: attendeeUserId,
+        no_show: true,
+        status: "accepted",
+        verification_status: "pending",
+      },
+    });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("[eventsApi] markEventNoShow error:", error);
+    return res.status(500).json({ ok: false, error: "Unable to mark no-show" });
+  } finally {
+    client.release();
   }
 }
 
@@ -1053,11 +1162,24 @@ export async function verifyEventRsvp(req, res) {
       await client.query("ROLLBACK");
       return res.status(403).json({ ok: false, error: "Forbidden" });
     }
+    if (isHostSelfRsvp(eventRow, attendeeUserId)) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ ok: false, error: "Hosts do not need attendance verification" });
+    }
 
     const rsvpRow = await getRsvpForUpdate(client, eventId, attendeeUserId);
     if (!rsvpRow) {
       await client.query("ROLLBACK");
       return res.status(404).json({ ok: false, error: "RSVP not found" });
+    }
+
+    if (!["accepted", "checked_in"].includes(String(rsvpRow.status || "").toLowerCase())) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ ok: false, error: "RSVP must be approved before verification" });
+    }
+    if (rsvpRow.no_show === true) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ ok: false, error: "No-show RSVP cannot be verified" });
     }
 
     if (rsvpRow.verification_status === "verified") {

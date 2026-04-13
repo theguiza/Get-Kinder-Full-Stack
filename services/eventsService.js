@@ -147,6 +147,28 @@ function normalizeTextArray(value) {
   return [];
 }
 
+let hasEventRsvpNoShowColumnPromise = null;
+
+export async function hasEventRsvpNoShowColumn(client = null) {
+  if (!hasEventRsvpNoShowColumnPromise) {
+    const runner = client || pool;
+    hasEventRsvpNoShowColumnPromise = runner
+      .query(
+        `
+          SELECT 1
+            FROM information_schema.columns
+           WHERE table_schema = 'public'
+             AND table_name = 'event_rsvps'
+             AND column_name = 'no_show'
+           LIMIT 1
+        `
+      )
+      .then((result) => Array.isArray(result?.rows) && result.rows.length > 0)
+      .catch(() => false);
+  }
+  return hasEventRsvpNoShowColumnPromise;
+}
+
 export async function fetchEvents({
   limit,
   view,
@@ -264,10 +286,12 @@ export async function fetchEvents({
    LEFT JOIN userdata creator
           ON creator.id = e.creator_user_id
    LEFT JOIN (
-          SELECT event_id,
-                 COUNT(*) FILTER (WHERE status IN ('accepted','checked_in')) AS accepted
-            FROM event_rsvps
-        GROUP BY event_id
+          SELECT r.event_id,
+                 COUNT(*) FILTER (WHERE r.status IN ('accepted','checked_in')) AS accepted
+            FROM event_rsvps r
+            JOIN events e ON e.id = r.event_id
+           WHERE r.attendee_user_id::text <> e.creator_user_id::text
+        GROUP BY r.event_id
         ) r ON r.event_id = e.id
    LEFT JOIN LATERAL (
           SELECT AVG(recent.stars)::float AS avg,
@@ -409,10 +433,12 @@ export async function fetchEventsByOrg(orgId) {
    LEFT JOIN userdata creator
           ON creator.id = e.creator_user_id
    LEFT JOIN (
-          SELECT event_id,
-                 COUNT(*) FILTER (WHERE status IN ('accepted','checked_in')) AS accepted
-            FROM event_rsvps
-        GROUP BY event_id
+          SELECT r.event_id,
+                 COUNT(*) FILTER (WHERE r.status IN ('accepted','checked_in')) AS accepted
+            FROM event_rsvps r
+            JOIN events e ON e.id = r.event_id
+           WHERE r.attendee_user_id::text <> e.creator_user_id::text
+        GROUP BY r.event_id
         ) r ON r.event_id = e.id
    LEFT JOIN LATERAL (
           SELECT AVG(recent.stars)::float AS avg,
@@ -481,10 +507,12 @@ export async function fetchEventById(id) {
    LEFT JOIN userdata creator
           ON creator.id = e.creator_user_id
    LEFT JOIN (
-          SELECT event_id,
-                 COUNT(*) FILTER (WHERE status IN ('accepted','checked_in')) AS accepted
-            FROM event_rsvps
-        GROUP BY event_id
+          SELECT r.event_id,
+                 COUNT(*) FILTER (WHERE r.status IN ('accepted','checked_in')) AS accepted
+            FROM event_rsvps r
+            JOIN events e ON e.id = r.event_id
+           WHERE r.attendee_user_id::text <> e.creator_user_id::text
+        GROUP BY r.event_id
         ) r ON r.event_id = e.id
    LEFT JOIN LATERAL (
           SELECT AVG(recent.stars)::float AS avg,
@@ -535,6 +563,8 @@ export async function getEventByIdForVerify(client, eventId) {
 
 export async function getRsvpForUpdate(client, eventId, attendeeUserId) {
   const runner = client || pool;
+  const hasNoShow = await hasEventRsvpNoShowColumn(runner);
+  const noShowSelect = hasNoShow ? "no_show" : "NULL::boolean AS no_show";
   const { rows } = await runner.query(
     `
       SELECT id,
@@ -542,7 +572,8 @@ export async function getRsvpForUpdate(client, eventId, attendeeUserId) {
              attendee_user_id,
              status,
              verification_status,
-             attended_minutes
+             attended_minutes,
+             ${noShowSelect}
         FROM event_rsvps
        WHERE event_id = $1
          AND attendee_user_id = $2
