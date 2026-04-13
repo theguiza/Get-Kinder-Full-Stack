@@ -600,9 +600,14 @@ function EventCard({ evt, onSelectEvent }) {
   const descriptionPreview =
     description.length > 90 ? `${description.slice(0, 90)}…` : description;
   const verificationLabel = formatVerificationLabel(evt.verification_method);
-  const credits = Number.isFinite(Number(evt.impact_credits_base))
-    ? Number(evt.impact_credits_base)
-    : 25;
+  const impactCreditsRate = Number.isFinite(Number(evt.impact_credits_rate))
+    ? Number(evt.impact_credits_rate)
+    : Number.isFinite(Number(evt.impact_credits_base))
+      ? Number(evt.impact_credits_base)
+      : 10;
+  const impactCreditsEstimate = Number.isFinite(Number(evt.impact_credits_estimate))
+    ? Number(evt.impact_credits_estimate)
+    : impactCreditsRate;
   const hasCapacity = evt.capacity !== null && evt.capacity !== undefined;
   const capacityValue = hasCapacity ? evt.capacity : "∞";
   const capacityLabel = `Capacity: ${capacityValue}`;
@@ -667,7 +672,8 @@ function EventCard({ evt, onSelectEvent }) {
         )}
         <div className="meta-row">
           <span className="meta-pill">{verificationLabel}</span>
-          <span className="meta-pill">Earn: {credits} Impact Credits</span>
+          <span className="meta-pill">Reward: {impactCreditsRate} IC/hr</span>
+          <span className="meta-pill">Est: {impactCreditsEstimate} IC</span>
         </div>
       </div>
       <div className="actions">

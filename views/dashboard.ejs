@@ -548,8 +548,8 @@
                             <strong class="journey-event-title"><%= upcomingEvent.title || 'Untitled event' %></strong>
                             <div class="text-muted small">
                               <%= formatDashboardEventLine(upcomingEvent) %>
-                              <% if ((upcomingEvent.kind_estimate_per_user || 0) > 0) { %>
-                                • Estimated reward: +<%= upcomingEvent.kind_estimate_per_user %> $KIND
+                              <% if ((upcomingEvent.impact_credits_base || 0) > 0) { %>
+                                • Reward: +<%= upcomingEvent.impact_credits_base %> IC
                               <% } %>
                             </div>
                           </div>
@@ -643,7 +643,11 @@
                           <h4 class="h6 mb-1"><%= eventItem.title || 'Untitled event' %></h4>
                           <p class="mb-2 text-muted small"><%= formatDashboardEventLine(eventItem) %></p>
                           <p class="mb-2 text-muted small"><%= truncateDashboardCopy(eventItem.description, 130) %></p>
-                          <p class="mb-2 text-muted small">Earn <%= Number(eventItem.impact_credits_base) || 25 %> Impact Credits</p>
+                          <% if ((Number(eventItem.impact_credits_base) || 0) > 0) { %>
+                          <p class="mb-2 text-muted small">
+                            Reward: +<%= Number(eventItem.impact_credits_base) %> IC
+                          </p>
+                          <% } %>
                           <% if (recommendationReasons.length > 0) { %>
                             <p class="mb-3 text-muted small">Why this fits: <%= recommendationReasons.join(' • ') %></p>
                           <% } %>
@@ -817,12 +821,19 @@
       city: null,
       crewLabel: null
     }).replace(/</g, '\\u003c') %></script>
+    <script type="application/json" id="weeks-plan-props"><%- JSON.stringify({
+      initialItems: Array.isArray(dashboardWeekPlanEvents) ? dashboardWeekPlanEvents : []
+    }).replace(/</g, '\\u003c') %></script>
     <script>
       (function () {
         try {
           var el = document.getElementById('kinder-crew-carousel-props');
           window.__kinderCrewCarouselProps = el ? JSON.parse(el.textContent) : {};
         } catch (_) { window.__kinderCrewCarouselProps = {}; }
+        try {
+          var weeksPlanPropsEl = document.getElementById('weeks-plan-props');
+          window.__weeksPlanProps = weeksPlanPropsEl ? JSON.parse(weeksPlanPropsEl.textContent) : {};
+        } catch (_) { window.__weeksPlanProps = {}; }
       }());
     </script>
 

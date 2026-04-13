@@ -134,9 +134,14 @@ function renderSelectedEvent(event) {
   const requirements = String(event.requirements || "").trim();
   const safetyNotes = String(event.safety_notes || "").trim();
   const orgName = event.org_name || "Independent organizer";
-  const credits = Number.isFinite(Number(event.impact_credits_base))
-    ? Number(event.impact_credits_base)
-    : 25;
+  const impactCreditsRate = Number.isFinite(Number(event.impact_credits_rate))
+    ? Number(event.impact_credits_rate)
+    : Number.isFinite(Number(event.impact_credits_base))
+      ? Number(event.impact_credits_base)
+      : 10;
+  const impactCreditsEstimate = Number.isFinite(Number(event.impact_credits_estimate))
+    ? Number(event.impact_credits_estimate)
+    : impactCreditsRate;
 
   return `
     <section class="events-ssr-detail" aria-label="Selected event">
@@ -158,7 +163,7 @@ function renderSelectedEvent(event) {
         </div>
         <div>
           <span class="events-ssr-detail-label">Impact Credits</span>
-          <p>${escapeHtml(String(credits))}</p>
+          <p>${escapeHtml(`${impactCreditsRate} IC/hr · ~${impactCreditsEstimate} IC estimated`)}</p>
         </div>
         <div>
           <span class="events-ssr-detail-label">Date</span>

@@ -1,26 +1,13 @@
 import pool from "../Backend/db/pg.js";
 import { insertEarnShiftTx } from "./walletService.js";
+import { buildFundingPolicyProfile } from "./fundingAllocationService.js";
 import { fundEarnShiftFromPool } from "./poolFundingService.js";
+import { normalizePoolSlug } from "./poolRoutingService.js";
+import { computeVolunteerReward } from "./volunteerRewardService.js";
 
 const toNumber = (value, fallback = 0) => {
   const num = Number(value);
   return Number.isFinite(num) ? num : fallback;
-};
-
-const DEFAULT_POOL_SLUG = "general";
-const POOL_SLUG_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
-const POOL_SCOPE_SEP = "__";
-
-const normalizePoolSlug = (value) => {
-  const slug = typeof value === "string" ? value.trim().toLowerCase() : "";
-  if (!slug) return DEFAULT_POOL_SLUG;
-  return POOL_SLUG_RE.test(slug) ? slug : DEFAULT_POOL_SLUG;
-};
-
-const buildScopedPoolSlug = (ownerUserId, poolSlug) => {
-  const owner = String(ownerUserId || "").trim();
-  if (!owner) return poolSlug;
-  return `u${owner}${POOL_SCOPE_SEP}${poolSlug}`;
 };
 
 export async function reconcileEarnShiftCredits({ limit = 200, dryRun = false } = {}) {
@@ -34,12 +21,27 @@ export async function reconcileEarnShiftCredits({ limit = 200, dryRun = false } 
         r.attended_minutes,
         r.verified_at,
         e.reward_pool_kind,
-        e.capacity,
+        e.impact_credits_base,
         e.funding_pool_slug,
+        e.funding_class_override,
+        e.subsidy_eligible_override,
+        e.subsidy_cap_percent_override,
         e.creator_user_id,
-        e.title
+        e.title,
+        e.start_at,
+        e.end_at,
+        COALESCE(er.tier, NULL) AS role_tier,
+        COALESCE(primary_org.id, rep_org.id) AS host_org_id,
+        COALESCE(primary_org.status, rep_org.status) AS host_org_status,
+        COALESCE(primary_org.funding_class, rep_org.funding_class, 'mixed') AS host_org_funding_class,
+        COALESCE(primary_org.subsidy_eligible, rep_org.subsidy_eligible, false) AS host_org_subsidy_eligible,
+        COALESCE(primary_org.manual_override_only, rep_org.manual_override_only, false) AS host_org_manual_override_only
       FROM event_rsvps r
       JOIN events e ON e.id = r.event_id
+      LEFT JOIN event_roles er ON er.id = r.role_id
+      LEFT JOIN userdata host ON host.id = e.creator_user_id
+      LEFT JOIN organizations primary_org ON primary_org.id = host.org_id
+      LEFT JOIN organizations rep_org ON rep_org.rep_user_id = e.creator_user_id
       WHERE r.verification_status = 'verified'
       ORDER BY r.verified_at NULLS LAST, r.created_at ASC
       LIMIT $1
@@ -57,9 +59,14 @@ export async function reconcileEarnShiftCredits({ limit = 200, dryRun = false } 
   };
 
   for (const row of rows) {
-    const rewardPool = toNumber(row.reward_pool_kind);
-    const capacity = Math.max(1, toNumber(row.capacity, 1));
-    const creditsToAward = Math.floor(rewardPool / capacity);
+    const reward = computeVolunteerReward({
+      roleTier: row.role_tier,
+      impactCreditsBase: row.impact_credits_base,
+      attendedMinutes: row.attended_minutes,
+      startAt: row.start_at,
+      endAt: row.end_at,
+    });
+    const creditsToAward = reward.impact_credits_award;
 
     if (!Number.isFinite(creditsToAward) || creditsToAward <= 0) {
       summary.skippedZero += 1;
@@ -96,12 +103,23 @@ export async function reconcileEarnShiftCredits({ limit = 200, dryRun = false } 
 
       await fundEarnShiftFromPool({
         client,
-        poolSlug: buildScopedPoolSlug(row.creator_user_id, normalizePoolSlug(row.funding_pool_slug)),
+        ownerUserId: row.creator_user_id,
+        poolSlug: normalizePoolSlug(row.funding_pool_slug),
         eventId: row.event_id,
+        organizationId: row.host_org_id,
         volunteerUserId: row.attendee_user_id,
         walletTxId: walletTxId,
         creditsToFund: amount,
         minutesVerified: row.attended_minutes ?? null,
+        policyProfile: buildFundingPolicyProfile({
+          funding_class_override: row.funding_class_override,
+          subsidy_eligible_override: row.subsidy_eligible_override,
+          subsidy_cap_percent_override: row.subsidy_cap_percent_override,
+          organization_status: row.host_org_status,
+          org_funding_class: row.host_org_funding_class,
+          org_subsidy_eligible: row.host_org_subsidy_eligible,
+          org_manual_override_only: row.host_org_manual_override_only,
+        }),
       });
 
       await client.query("COMMIT");

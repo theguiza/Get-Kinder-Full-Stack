@@ -1,6 +1,7 @@
 import pool from "../Backend/db/pg.js";
 import { resolvePoolId } from "./donationAttributionService.js";
 import { computeCreditsFromDonation } from "./donationsService.js";
+import { createFundingCreditFromSubscriptionTopup } from "./fundingCreditService.js";
 
 const DEFAULT_POOL_SLUG = "general";
 const POOL_SCOPE_SEP = "__";
@@ -180,6 +181,21 @@ export async function recordSubscriptionTopupFromSquarePayment({
       poolTransactionId = existingTopup?.pool_transaction_id || null;
       creditsIssued = Number(existingTopup?.amount_credits) || creditsToIssue;
       createdAt = existingTopup?.created_at || null;
+    }
+
+    if (topupId && poolTransactionId) {
+      await createFundingCreditFromSubscriptionTopup(client, {
+        poolId,
+        originPoolTransactionId: poolTransactionId,
+        subscriptionTopupId: topupId,
+        ownerUserId: normalizedOwnerUserId,
+        amountIc: creditsIssued,
+        metadata: {
+          pool_slug: normalizedPoolSlug,
+          provider_subscription_id: normalizedProviderSubscriptionId,
+          stage: "stage1_shadow_write",
+        },
+      });
     }
 
     const { rows: [balanceRow] = [] } = await client.query(

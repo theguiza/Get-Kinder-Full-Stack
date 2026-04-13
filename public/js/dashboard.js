@@ -677,7 +677,14 @@ document.addEventListener('DOMContentLoaded', function() {
             const communityTag = (typeof evt.community_tag === 'string' && evt.community_tag.trim()) ? evt.community_tag.trim() : '';
             const description = (typeof evt.description === 'string' && evt.description.trim()) ? evt.description.trim() : 'No description provided.';
             const requirements = (typeof evt.requirements === 'string' && evt.requirements.trim()) ? evt.requirements.trim() : 'No specific requirements listed.';
-            const impactCredits = Number.isFinite(Number(evt.impact_credits_base)) ? Number(evt.impact_credits_base) : 25;
+            const impactCreditsRate = Number.isFinite(Number(evt.impact_credits_rate))
+                ? Number(evt.impact_credits_rate)
+                : Number.isFinite(Number(evt.impact_credits_base))
+                    ? Number(evt.impact_credits_base)
+                    : 10;
+            const impactCreditsEstimate = Number.isFinite(Number(evt.impact_credits_estimate))
+                ? Number(evt.impact_credits_estimate)
+                : impactCreditsRate;
             const status = (typeof evt.status === 'string' && evt.status.trim()) ? evt.status.trim() : 'unknown';
             const verificationMethod = (typeof evt.verification_method === 'string' && evt.verification_method.trim())
                 ? evt.verification_method.replace(/_/g, ' ')
@@ -689,7 +696,7 @@ document.addEventListener('DOMContentLoaded', function() {
             detailWhoEl.textContent = communityTag ? `Host: ${orgName} • ${communityTag}` : `Host: ${orgName}`;
             detailDescriptionEl.textContent = description;
             detailRequirementsEl.textContent = `Requirements: ${requirements}`;
-            detailCreditsEl.textContent = `Earn: ${impactCredits} Impact Credits`;
+            detailCreditsEl.textContent = `Reward: ${impactCreditsRate} IC/hr • ~${impactCreditsEstimate} IC estimated`;
             detailVerificationEl.textContent = `Verification: ${verificationMethod}`;
             detailStatusEl.textContent = `Status: ${status}`;
 

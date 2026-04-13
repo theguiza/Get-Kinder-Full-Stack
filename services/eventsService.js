@@ -1,4 +1,5 @@
 import pool from "../Backend/db/pg.js";
+import { addRewardPresentation } from "./volunteerRewardService.js";
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
@@ -79,7 +80,7 @@ function mapEventRow(row = {}) {
         : 5
     )
     : null;
-  return {
+  return addRewardPresentation({
     id: row.id != null ? String(row.id) : null,
     title: row.title || "Untitled Event",
     category: row.category || null,
@@ -100,7 +101,7 @@ function mapEventRow(row = {}) {
     impact_credits_base:
       row.impact_credits_base !== null && row.impact_credits_base !== undefined
         ? Number(row.impact_credits_base)
-        : 25,
+        : 10,
     reliability_weight:
       row.reliability_weight !== null && row.reliability_weight !== undefined
         ? Number(row.reliability_weight)
@@ -120,7 +121,7 @@ function mapEventRow(row = {}) {
     org_rating_value: orgRatingValue,
     org_rating_count: Number.isInteger(orgId) && orgId > 0 ? orgRatingCount : 0,
     event_type: deriveEventType(row),
-  };
+  });
 }
 
 function safeParseJsonArray(value) {

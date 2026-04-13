@@ -65,6 +65,7 @@ export function normalizeVolunteerPortfolioRows(rawRows, { now = new Date() } = 
 
     return {
       ...row,
+      status: eventStatus,
       start_at: startAt,
       end_at: endAt,
       duration_hours: calculateDurationHours(startAt, endAt),
@@ -111,6 +112,9 @@ export async function fetchVolunteerPortfolio({ userId, limit } = {}) {
         e.end_at,
         e.tz,
         e.location_text,
+        e.org_name,
+        e.capacity,
+        e.impact_credits_base,
         e.status AS event_status,
         e.reward_pool_kind,
         r.status AS rsvp_status,

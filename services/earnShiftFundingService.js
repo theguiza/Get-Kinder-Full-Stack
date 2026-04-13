@@ -1,5 +1,12 @@
 import pool from "../Backend/db/pg.js";
 import { resolvePoolId, findNextDonationWithRemaining } from "./donationAttributionService.js";
+import {
+  applySemanticFundingPlan,
+  buildFundingPolicyProfile,
+  resolveSemanticFundingPlan,
+} from "./fundingAllocationService.js";
+import { buildFundingPoolCandidates, pickBestFundingPool } from "./poolRoutingService.js";
+import { computeVolunteerReward } from "./volunteerRewardService.js";
 
 const clampMinutes = (value) => {
   if (!Number.isFinite(Number(value))) return null;
@@ -16,31 +23,6 @@ const computeDurationMinutes = (startAt, endAt) => {
   return diff > 0 ? diff : null;
 };
 
-const computeCreditAmount = (rewardPoolKind, capacity, impactCreditsBase) => {
-  const poolValue = Number(rewardPoolKind) || 0;
-  const cap = Number.isFinite(Number(capacity)) && Number(capacity) > 0 ? Number(capacity) : 1;
-  const pooledCredits = Math.floor(poolValue / Math.max(1, cap));
-  if (Number.isFinite(pooledCredits) && pooledCredits > 0) return pooledCredits;
-  const baseCredits = Math.floor(Number(impactCreditsBase) || 0);
-  return baseCredits > 0 ? baseCredits : 0;
-};
-
-const DEFAULT_POOL_SLUG = "general";
-const POOL_SLUG_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
-const POOL_SCOPE_SEP = "__";
-
-const normalizePoolSlug = (value) => {
-  const slug = typeof value === "string" ? value.trim().toLowerCase() : "";
-  if (!slug) return DEFAULT_POOL_SLUG;
-  return POOL_SLUG_RE.test(slug) ? slug : DEFAULT_POOL_SLUG;
-};
-
-const buildScopedPoolSlug = (ownerUserId, poolSlug) => {
-  const owner = String(ownerUserId || "").trim();
-  if (!owner) return poolSlug;
-  return `u${owner}${POOL_SCOPE_SEP}${poolSlug}`;
-};
-
 async function fetchVerifiedRsvp(client, eventId, attendeeUserId) {
   const { rows } = await client.query(
     `
@@ -48,18 +30,30 @@ async function fetchVerifiedRsvp(client, eventId, attendeeUserId) {
         r.event_id,
         r.attendee_user_id,
         r.attended_minutes,
+        r.role_id,
         r.verification_status,
         e.reward_pool_kind,
         e.impact_credits_base,
         e.capacity,
         e.funding_pool_slug,
+        e.funding_class_override,
+        e.subsidy_eligible_override,
+        e.subsidy_cap_percent_override,
         e.creator_user_id,
         e.start_at,
         e.end_at,
-        host.org_id AS host_org_id
+        COALESCE(er.tier, NULL) AS role_tier,
+        COALESCE(primary_org.id, rep_org.id) AS host_org_id,
+        COALESCE(primary_org.status, rep_org.status) AS host_org_status,
+        COALESCE(primary_org.funding_class, rep_org.funding_class, 'mixed') AS host_org_funding_class,
+        COALESCE(primary_org.subsidy_eligible, rep_org.subsidy_eligible, false) AS host_org_subsidy_eligible,
+        COALESCE(primary_org.manual_override_only, rep_org.manual_override_only, false) AS host_org_manual_override_only
       FROM event_rsvps r
       JOIN events e ON e.id = r.event_id
+      LEFT JOIN event_roles er ON er.id = r.role_id
       LEFT JOIN userdata host ON host.id = e.creator_user_id
+      LEFT JOIN organizations primary_org ON primary_org.id = host.org_id
+      LEFT JOIN organizations rep_org ON rep_org.rep_user_id = e.creator_user_id
      WHERE r.event_id = $1
        AND r.attendee_user_id = $2
      LIMIT 1
@@ -210,6 +204,23 @@ async function getPoolBalance(client, poolId) {
   return creditsIn - creditsOut;
 }
 
+async function resolveFundingPoolSelection(client, { ownerUserId, poolSlug, creditsToFund }) {
+  const candidatePoolSlugs = buildFundingPoolCandidates({ ownerUserId, poolSlug });
+  const candidates = [];
+
+  for (const candidatePoolSlug of candidatePoolSlugs) {
+    const poolId = await resolvePoolId({ client, poolSlug: candidatePoolSlug });
+    const poolBalance = await getPoolBalance(client, poolId);
+    candidates.push({
+      poolId,
+      poolSlug: candidatePoolSlug,
+      poolBalance,
+    });
+  }
+
+  return pickBestFundingPool(candidates, creditsToFund);
+}
+
 const advisoryLock = async (client, userId, eventId) => {
   const key = `${userId}:${eventId}`;
   await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [key]);
@@ -257,14 +268,85 @@ async function applyEarnShiftCreditAward(client, rsvp, creditAmount) {
   }
 
   const existingFunding = await fetchExistingFunding(client, walletTxId);
+  const policyProfile = buildFundingPolicyProfile({
+    funding_class_override: rsvp.funding_class_override,
+    subsidy_eligible_override: rsvp.subsidy_eligible_override,
+    subsidy_cap_percent_override: rsvp.subsidy_cap_percent_override,
+    organization_status: rsvp.host_org_status,
+    org_funding_class: rsvp.host_org_funding_class,
+    org_subsidy_eligible: rsvp.host_org_subsidy_eligible,
+    org_manual_override_only: rsvp.host_org_manual_override_only,
+  });
+  const semanticResolution = await resolveSemanticFundingPlan({
+    client,
+    ownerUserId: rsvp.creator_user_id,
+    poolSlug: rsvp.funding_pool_slug,
+    eventId: rsvp.event_id,
+    organizationId: rsvp.host_org_id,
+    creditsToFund: amount,
+    policyProfile,
+  });
 
-  const poolSlug = normalizePoolSlug(rsvp.funding_pool_slug);
-  const scopedPoolSlug = buildScopedPoolSlug(rsvp.creator_user_id, poolSlug);
-  const poolId = await resolvePoolId({ client, poolSlug: scopedPoolSlug });
-  const poolBalance = await getPoolBalance(client, poolId);
+  if (semanticResolution.mode === "semantic" && semanticResolution.selectedPlan?.allocations?.length) {
+    const applied = await applySemanticFundingPlan({
+      client,
+      selectedPlan: semanticResolution.selectedPlan,
+      walletTxId,
+      eventId: rsvp.event_id,
+      organizationId: rsvp.host_org_id,
+      volunteerUserId: rsvp.attendee_user_id,
+      minutesVerified: minutes,
+    });
+
+    const funded = Number(applied.fundedAmount) || 0;
+    const deficit = Math.max(0, amount - funded);
+    const donationDebited = semanticResolution.selectedPlan.allocations
+      .filter((allocation) => allocation.donationId)
+      .reduce((sum, allocation) => sum + (Number(allocation.amountIc) || 0), 0);
+
+    if (deficit > 0) {
+      console.warn(
+        JSON.stringify({
+          type: "POOL_DEFICIT",
+          event_id: rsvp.event_id,
+          user_id: rsvp.attendee_user_id,
+          pool_slug: semanticResolution.selectedPlan.poolSlug || null,
+          deficit,
+          funded,
+          allocation_mode: "semantic",
+        })
+      );
+    }
+
+    return {
+      skipped: false,
+      walletTxId,
+      amount,
+      funded,
+      donationDebited,
+      deficit,
+      alreadyFunded: Boolean(existingFunding.receipt?.donation_id) || (existingFunding.receipt?.credits_funded || 0) > 0,
+      inserted,
+      donationId: applied.aggregateDonationId,
+      poolSlug: semanticResolution.selectedPlan.poolSlug || null,
+      allocationMode: "semantic",
+    };
+  }
+
+  const selectedPool = await resolveFundingPoolSelection(client, {
+    ownerUserId: rsvp.creator_user_id,
+    poolSlug: rsvp.funding_pool_slug,
+    creditsToFund: amount,
+  });
+  const poolId = selectedPool?.poolId;
+  const poolBalance = selectedPool?.poolBalance || 0;
   const poolDebited = Math.min(amount, Math.max(0, poolBalance));
 
-  const donationCandidate = await findNextDonationWithRemaining({ client, poolId, poolSlug: scopedPoolSlug });
+  const donationCandidate = await findNextDonationWithRemaining({
+    client,
+    poolId,
+    poolSlug: selectedPool?.poolSlug,
+  });
   const donationDebited =
     donationCandidate?.donationId && donationCandidate.donationRemainingCredits > 0
       ? Math.min(poolDebited, donationCandidate.donationRemainingCredits)
@@ -345,6 +427,7 @@ async function applyEarnShiftCreditAward(client, rsvp, creditAmount) {
         type: "POOL_DEFICIT",
         event_id: rsvp.event_id,
         user_id: rsvp.attendee_user_id,
+        pool_slug: selectedPool?.poolSlug || null,
         deficit,
         funded,
       })
@@ -361,6 +444,7 @@ async function applyEarnShiftCreditAward(client, rsvp, creditAmount) {
     alreadyFunded,
     inserted,
     donationId: resolvedDonationId,
+    poolSlug: selectedPool?.poolSlug || null,
   };
 }
 
@@ -399,11 +483,14 @@ export async function processVerifiedEarnShift({ client, attendeeUserId, eventId
       return { skipped: true, reason: "not_verified" };
     }
 
-    const creditAmount = computeCreditAmount(
-      rsvp.reward_pool_kind,
-      rsvp.capacity,
-      rsvp.impact_credits_base
-    );
+    const reward = computeVolunteerReward({
+      roleTier: rsvp.role_tier,
+      impactCreditsBase: rsvp.impact_credits_base,
+      attendedMinutes: rsvp.attended_minutes,
+      startAt: rsvp.start_at,
+      endAt: rsvp.end_at,
+    });
+    const creditAmount = reward.impact_credits_award;
     if (!Number.isFinite(creditAmount) || creditAmount <= 0) {
       return { skipped: true, reason: "zero_credit" };
     }
@@ -430,6 +517,8 @@ export async function processVerifiedEarnShift({ client, attendeeUserId, eventId
       requestId: request.requestId,
       amount: request.amount,
       status: request.status,
+      reward_tier: reward.reward_tier,
+      impact_credits_rate: reward.impact_credits_rate,
     };
   } finally {
     if (releaseNeeded) {

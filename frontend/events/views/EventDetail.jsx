@@ -290,6 +290,15 @@ export function EventDetail({
     }
   }
 
+  const impactCreditsRate = Number.isFinite(Number(evt?.impact_credits_rate))
+    ? Number(evt.impact_credits_rate)
+    : Number.isFinite(Number(evt?.impact_credits_base))
+      ? Number(evt.impact_credits_base)
+      : 10;
+  const impactCreditsEstimate = Number.isFinite(Number(evt?.impact_credits_estimate))
+    ? Number(evt.impact_credits_estimate)
+    : impactCreditsRate;
+
   return (
     <div className="event-detail-panel">
       <button
@@ -486,7 +495,8 @@ export function EventDetail({
           </div>
           <div>
             <span className="label">Impact Credits</span>
-            <p className="value">{Number.isFinite(Number(evt.impact_credits_base)) ? Number(evt.impact_credits_base) : 25}</p>
+            <p className="value">{impactCreditsRate} IC/hr</p>
+            <p className="value muted">~{impactCreditsEstimate} IC estimated</p>
           </div>
         </div>
         {typeof evt.description === "string" && evt.description.trim() && (

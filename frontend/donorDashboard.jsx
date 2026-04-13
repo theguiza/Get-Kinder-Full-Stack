@@ -26,6 +26,13 @@ const formatMemberSince = (iso) => {
 const TIER_LABELS = { casual: "Casual donor", impact: "Impact Donor", champion: "Champion Donor" };
 const TIER_COLORS = { casual: "#6b7f9e", impact: "#455a7c", champion: "#ff5656" };
 const DONATE_URL = "https://checkout.square.site/merchant/ML7WXHMB2XEJD/checkout/WBQKBZNKKR4Z5GRIZ42LCYFQ";
+const DONATION_STATUS_META = {
+  pending_review: { border: "#f5a623", bg: "#fff7ec", text: "#8c5a00", badgeBg: "#fff1da", badgeBorder: "#ffd9a8" },
+  allocated: { border: "#455a7c", bg: "#f3f6fb", text: "#33425f", badgeBg: "#edf1f8", badgeBorder: "#d5dfef" },
+  impact_underway: { border: "#3d8bfd", bg: "#eef5ff", text: "#1f5fb7", badgeBg: "#e3efff", badgeBorder: "#c8ddff" },
+  impact_funded: { border: "#2db36f", bg: "#eafaf2", text: "#1a7f4b", badgeBg: "#eafaf2", badgeBorder: "#b7e0c1" },
+  received: { border: "#7b879b", bg: "#f7f8fb", text: "#57667f", badgeBg: "#f0f2f7", badgeBorder: "#dde3ee" },
+};
 
 // ── Subcomponents ─────────────────────────────────────────────────────────────
 
@@ -63,38 +70,112 @@ function MilestoneBar({ progressHours, targetHours }) {
 }
 
 function TimelineCard({ item }) {
-  const isFunded = item.status === "funded";
+  const statusMeta = DONATION_STATUS_META[item.status] || DONATION_STATUS_META.received;
   const hours = item.minutes_verified != null ? formatHours(item.minutes_verified) : null;
   const donationDate = formatDate(item.donation_date || item.created_at);
   const amountLabel = item.amount_cents ? formatCurrency(item.amount_cents) : null;
-  const eventLabel = item.event_title || `Donation #${item.donation_id}`;
+  const title = item.headline || item.event_title || `Donation #${item.donation_id}`;
+  const allocationTargetLabel = item.allocation_target_label || null;
+  const creditsRemaining = Number(item.credits_remaining) || 0;
+
+  let detailText = "Donation received.";
+  if (item.status === "pending_review") {
+    detailText = item.review_due_at
+      ? `Awaiting manual allocation review until ${formatDate(item.review_due_at)}.`
+      : "Awaiting manual allocation review.";
+  } else if (item.status === "allocated") {
+    detailText = allocationTargetLabel
+      ? `Allocated to ${allocationTargetLabel}. Waiting for verified volunteer impact.`
+      : "Allocated and waiting for verified volunteer impact.";
+  } else if (item.status === "impact_underway") {
+    detailText = allocationTargetLabel
+      ? `Funding is now being used through ${allocationTargetLabel}.`
+      : "Funding is now being used on verified volunteer work.";
+  } else if (item.status === "impact_funded") {
+    detailText = allocationTargetLabel
+      ? `Fully translated into verified impact through ${allocationTargetLabel}.`
+      : "Fully translated into verified volunteer impact.";
+  }
 
   return (
-    <div style={{ ...styles.timelineCard, borderLeftColor: isFunded ? "#2db36f" : "#f5a623" }}>
+    <div style={{ ...styles.timelineCard, borderLeftColor: statusMeta.border, background: statusMeta.bg }}>
       <div style={styles.timelineTop}>
-        <div style={styles.timelineTitle}>{eventLabel}</div>
-        <span style={{ ...styles.statusBadge, background: isFunded ? "#eafaf2" : "#fff7ec", color: isFunded ? "#1a7f4b" : "#8c5a00", border: `1px solid ${isFunded ? "#b7e0c1" : "#ffd9a8"}` }}>
-          {isFunded ? "Funded ✓" : "Pending"}
+        <div style={styles.timelineTitle}>{title}</div>
+        <span style={{ ...styles.statusBadge, background: statusMeta.badgeBg, color: statusMeta.text, border: `1px solid ${statusMeta.badgeBorder}` }}>
+          {item.status_label || "Donation received"}
         </span>
       </div>
       <div style={styles.timelineMeta}>
         {donationDate} {amountLabel && <>· <strong>{amountLabel}</strong> donated</>}
       </div>
+      <div style={{ ...styles.timelineDetail, color: statusMeta.text }}>
+        {detailText}
+      </div>
       <div style={styles.timelineStats}>
-        {isFunded ? (
+        {item.status === "impact_funded" || item.status === "impact_underway" ? (
           <>
             <span>{hours} hrs verified</span>
             <span>·</span>
             <span>{item.credits_funded} IC funded</span>
-            <span>·</span>
-            <span style={{ color: "#2db36f", fontWeight: 700 }}>+{item.ic_earned} IC earned</span>
+            {item.status === "impact_underway" && (
+              <>
+                <span>·</span>
+                <span>{creditsRemaining} IC still available</span>
+              </>
+            )}
+            {item.ic_earned > 0 && (
+              <>
+                <span>·</span>
+                <span style={{ color: "#2db36f", fontWeight: 700 }}>+{item.ic_earned} IC earned</span>
+              </>
+            )}
+          </>
+        ) : item.status === "allocated" ? (
+          <>
+            <span>{item.credits_issued || 0} IC ready to fund</span>
+            {allocationTargetLabel && (
+              <>
+                <span>·</span>
+                <span>{allocationTargetLabel}</span>
+              </>
+            )}
+          </>
+        ) : item.status === "pending_review" ? (
+          <>
+            <span>{item.credits_issued || 0} funding IC minted</span>
+            {item.review_due_at && (
+              <>
+                <span>·</span>
+                <span>Review due {formatDate(item.review_due_at)}</span>
+              </>
+            )}
           </>
         ) : (
-          <span style={{ color: "#8c5a00" }}>
-            {hours != null ? `${hours} hrs estimated` : "Hours pending"} · Awaiting verification
+          <span style={{ color: statusMeta.text }}>
+            {item.credits_issued || 0} funding IC recorded
           </span>
         )}
       </div>
+    </div>
+  );
+}
+
+function StatusFlowStrip({ summary }) {
+  const cards = [
+    { key: "pending", value: Number(summary.pending_review_count) || 0, label: "Pending review", color: "#f5a623", bg: "#fff7ec" },
+    { key: "allocated", value: Number(summary.allocated_count) || 0, label: "Allocated", color: "#455a7c", bg: "#f3f6fb" },
+    { key: "underway", value: Number(summary.impact_underway_count) || 0, label: "Impact underway", color: "#3d8bfd", bg: "#eef5ff" },
+    { key: "funded", value: Number(summary.impact_funded_count) || 0, label: "Impact funded", color: "#2db36f", bg: "#eafaf2" },
+  ];
+
+  return (
+    <div style={styles.statusFlowGrid}>
+      {cards.map((card) => (
+        <div key={card.key} style={{ ...styles.statusFlowCard, background: card.bg }}>
+          <div style={{ ...styles.statusFlowValue, color: card.color }}>{card.value}</div>
+          <div style={styles.statusFlowLabel}>{card.label}</div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -316,12 +397,14 @@ export default function DonorDashboard({ donorProfile = {} }) {
             </button>
           </div>
 
+          <StatusFlowStrip summary={d} />
+
           {/* Impact timeline */}
           <div style={styles.timelineSection}>
             <div style={styles.sectionHead}>
               <div>
                 <div style={styles.sectionLabel}>Impact Timeline</div>
-                <div style={styles.sectionSub}>Your donation → event → verified volunteer hours. Volunteers remain anonymous.</div>
+                <div style={styles.sectionSub}>Your donation moves from review to allocation to verified community impact. Volunteers remain anonymous.</div>
               </div>
               <button style={styles.btnSecondary} onClick={() => loadReceipts({ append: false, offsetOverride: 0 })} disabled={receipts.loading}>
                 Refresh
@@ -330,11 +413,11 @@ export default function DonorDashboard({ donorProfile = {} }) {
             {receipts.loading && receipts.items.length === 0 && <div style={styles.muted}>Loading…</div>}
             {receipts.error && <div style={styles.alertBox}>{receipts.error}</div>}
             {!receipts.loading && !receipts.error && receipts.items.length === 0 && (
-              <div style={styles.muted}>No receipts yet — receipts appear once your donation is attributed to a volunteer shift.</div>
+              <div style={styles.muted}>No donation activity yet. Claimed donations will appear here as they move through review, allocation, and funded impact.</div>
             )}
             <div style={styles.timelineList}>
               {receipts.items.map((item) => (
-                <TimelineCard key={item.id || item.donation_id} item={item} />
+                <TimelineCard key={item.donation_id} item={item} />
               ))}
             </div>
             {receipts.hasMore && !receipts.loading && (
@@ -456,6 +539,10 @@ const styles = {
   btnOutline: { background: "#fff", color: "#455a7c", border: "1px solid #c7d0e4", borderRadius: 10, padding: "10px 20px", fontWeight: 600, cursor: "pointer", fontSize: "0.9rem", opacity: 0.7 },
   btnSecondary: { background: "#fff", color: "#455a7c", border: "1px solid #c7d0e4", borderRadius: 8, padding: "7px 14px", fontWeight: 600, cursor: "pointer", fontSize: "0.85rem" },
   comingSoon: { background: "#f0f4ff", color: "#455a7c", borderRadius: 999, padding: "1px 7px", fontSize: "0.72rem", fontWeight: 700, marginLeft: 6 },
+  statusFlowGrid: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 20 },
+  statusFlowCard: { border: "1px solid #e2dcd4", borderRadius: 12, padding: "14px 16px" },
+  statusFlowValue: { fontSize: "1.6rem", fontWeight: 700, lineHeight: 1.1, marginBottom: 4 },
+  statusFlowLabel: { fontSize: "0.78rem", textTransform: "uppercase", letterSpacing: "0.06em", color: "#6b7f9e" },
   // Timeline
   timelineSection: { background: "#fff", border: "1px solid #e2dcd4", borderRadius: 14, padding: "20px", marginBottom: 20 },
   sectionHead: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 },
@@ -467,6 +554,7 @@ const styles = {
   timelineTitle: { fontWeight: 700, color: "#2a2a2a", fontSize: "0.95rem" },
   statusBadge: { borderRadius: 999, padding: "2px 10px", fontSize: "0.78rem", fontWeight: 700, whiteSpace: "nowrap" },
   timelineMeta: { fontSize: "0.82rem", color: "#6b7f9e" },
+  timelineDetail: { fontSize: "0.84rem", fontWeight: 600 },
   timelineStats: { display: "flex", gap: 8, fontSize: "0.85rem", color: "#455a7c", flexWrap: "wrap" },
   muted: { color: "#6b7f9e", fontSize: "0.9rem", padding: "12px 0" },
   alertBox: { background: "#fff5f5", border: "1px solid #f2c6c6", color: "#7a1f1f", borderRadius: 8, padding: "10px 12px", fontSize: "0.875rem", marginTop: 8 },

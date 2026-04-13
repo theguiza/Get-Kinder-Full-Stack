@@ -2,6 +2,11 @@ import express from "express";
 import pool from "../Backend/db/pg.js";
 import { ensureAdminApi } from "../Backend/middleware/ensureAdmin.js";
 import { approvePendingCreditRequest, rejectPendingCreditRequest } from "../services/earnShiftFundingService.js";
+import {
+  applyManualDonationAllocation,
+  runDueDonationPolicyAllocations,
+} from "../services/donationAllocationService.js";
+import { createFundingCreditFromAdminTopup } from "../services/fundingCreditService.js";
 import { hasUserOrgMembershipTable } from "../services/orgScopeService.js";
 
 const adminApiRouter = express.Router();
@@ -11,6 +16,7 @@ const EVENT_VISIBILITY_SET = new Set(["public", "fof", "private"]);
 const ORG_STATUS_SET = new Set(["approved", "suspended", "rejected"]);
 const WALLET_REASON_SET = new Set(["earn", "donate", "adjustment", "earn_shift", "redeem"]);
 const ADMIN_POOL_TOPUP_REASON_SET = new Set(["admin_allocation", "adjustment", "bonus"]);
+const FUNDING_CLASS_SET = new Set(["commercial", "mixed", "mission_priority"]);
 const ADMIN_POOL_TOPUP_REASON_LEGACY_MAP = {
   admin_allocation: "org_topup",
   adjustment: "manual_adjust",
@@ -38,6 +44,11 @@ function requireCsrf(req, res) {
 }
 
 function parseOptionalBoolean(value) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
   if (typeof value !== "string") return null;
   const normalized = value.trim().toLowerCase();
   if (["true", "1", "yes"].includes(normalized)) return true;
@@ -48,6 +59,18 @@ function parseOptionalBoolean(value) {
 function parsePositiveInt(value) {
   const num = Number.parseInt(String(value || ""), 10);
   return Number.isInteger(num) && num > 0 ? num : null;
+}
+
+function parseNullablePercent(value) {
+  if (value == null || value === "") return null;
+  const num = Number(value);
+  if (!Number.isInteger(num) || num < 0 || num > 100) return null;
+  return num;
+}
+
+function parseFundingClass(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return FUNDING_CLASS_SET.has(normalized) ? normalized : null;
 }
 
 function parsePagination(query, options = {}) {
@@ -328,6 +351,11 @@ adminApiRouter.get("/organizations", async (req, res) => {
           o.website,
           o.applied_at,
           o.approved_at,
+          o.funding_class,
+          o.subsidy_eligible,
+          o.subsidy_cap_percent,
+          o.manual_override_only,
+          o.funding_notes,
           u.email AS rep_email,
           u.firstname AS rep_firstname,
           u.lastname AS rep_lastname
@@ -349,6 +377,11 @@ adminApiRouter.get("/organizations", async (req, res) => {
       website: row.website,
       applied_at: row.applied_at,
       approved_at: row.approved_at,
+      funding_class: row.funding_class || "mixed",
+      subsidy_eligible: row.subsidy_eligible === true,
+      subsidy_cap_percent: row.subsidy_cap_percent != null ? Number(row.subsidy_cap_percent) : null,
+      manual_override_only: row.manual_override_only === true,
+      funding_notes: row.funding_notes || "",
       rep_email: row.rep_email,
       rep_name: `${row.rep_firstname || ""} ${row.rep_lastname || ""}`.trim(),
       })),
@@ -414,6 +447,264 @@ adminApiRouter.get("/org-pools", async (req, res) => {
     });
   } catch (err) {
     console.error("GET /api/admin/org-pools error:", err);
+    return res.status(500).json({ error: "server_error" });
+  }
+});
+
+adminApiRouter.get("/funding/credits", async (req, res) => {
+  try {
+    const { page, limit, offset } = parsePagination(req.query);
+    const sourceType = String(req.query.source_type || "").trim().toLowerCase();
+    const scopeType = String(req.query.scope_type || "").trim().toLowerCase();
+    const allocationStatus = String(req.query.allocation_status || "").trim().toLowerCase();
+    const organizationId = parsePositiveInt(req.query.organization_id);
+    const eventId = String(req.query.event_id || "").trim();
+    const conditions = [];
+    const params = [];
+
+    if (sourceType) {
+      params.push(sourceType);
+      conditions.push(`fc.source_type = $${params.length}`);
+    }
+    if (scopeType) {
+      params.push(scopeType);
+      conditions.push(`fc.scope_type = $${params.length}`);
+    }
+    if (allocationStatus) {
+      params.push(allocationStatus);
+      conditions.push(`fc.allocation_status = $${params.length}`);
+    }
+    if (organizationId) {
+      params.push(organizationId);
+      conditions.push(`fc.organization_id = $${params.length}`);
+    }
+    if (eventId) {
+      params.push(eventId);
+      conditions.push(`fc.event_id = $${params.length}`);
+    }
+
+    const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+    const countParams = [...params];
+    const { rows: [countRow] = [] } = await pool.query(
+      `
+        SELECT COUNT(*)::int AS total
+        FROM public.funding_credits fc
+        ${whereClause}
+      `,
+      countParams
+    );
+    const totalRows = Number(countRow?.total) || 0;
+
+    const dataParams = [...params, limit, offset];
+    const { rows } = await pool.query(
+      `
+        SELECT
+          fc.*,
+          fp.slug AS pool_slug,
+          o.name AS organization_name,
+          e.title AS event_title
+        FROM public.funding_credits fc
+        LEFT JOIN public.funding_pools fp ON fp.id = fc.pool_id
+        LEFT JOIN public.organizations o ON o.id = fc.organization_id
+        LEFT JOIN public.events e ON e.id = fc.event_id
+        ${whereClause}
+        ORDER BY fc.created_at DESC, fc.id DESC
+        LIMIT $${dataParams.length - 1}
+        OFFSET $${dataParams.length}
+      `,
+      dataParams
+    );
+
+    return res.json({
+      data: rows.map((row) => ({
+        id: Number(row.id),
+        pool_id: Number(row.pool_id),
+        pool_slug: row.pool_slug || "",
+        origin_pool_transaction_id: Number(row.origin_pool_transaction_id),
+        source_type: row.source_type,
+        scope_type: row.scope_type,
+        organization_id: row.organization_id != null ? Number(row.organization_id) : null,
+        organization_name: row.organization_name || "",
+        event_id: row.event_id || null,
+        event_title: row.event_title || "",
+        donation_id: row.donation_id != null ? Number(row.donation_id) : null,
+        subscription_topup_id: row.subscription_topup_id != null ? Number(row.subscription_topup_id) : null,
+        amount_ic: Number(row.amount_ic) || 0,
+        remaining_ic: Number(row.remaining_ic) || 0,
+        allocation_status: row.allocation_status,
+        expires_at: row.expires_at,
+        created_by_user_id: row.created_by_user_id != null ? Number(row.created_by_user_id) : null,
+        metadata: row.metadata || {},
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+      })),
+      pagination: buildPagination(page, limit, totalRows),
+    });
+  } catch (err) {
+    console.error("GET /api/admin/funding/credits error:", err);
+    return res.status(500).json({ error: "server_error" });
+  }
+});
+
+adminApiRouter.get("/donations/reviews", async (req, res) => {
+  try {
+    const { page, limit, offset } = parsePagination(req.query);
+    const status = String(req.query.status || "").trim().toLowerCase();
+    const conditions = [];
+    const params = [];
+
+    if (status) {
+      params.push(status);
+      conditions.push(`dar.status = $${params.length}`);
+    }
+
+    const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+    const countParams = [...params];
+    const { rows: [countRow] = [] } = await pool.query(
+      `
+        SELECT COUNT(*)::int AS total
+        FROM public.donation_allocation_reviews dar
+        ${whereClause}
+      `,
+      countParams
+    );
+    const totalRows = Number(countRow?.total) || 0;
+
+    const dataParams = [...params, limit, offset];
+    const { rows } = await pool.query(
+      `
+        SELECT
+          dar.*,
+          d.amount_cents,
+          d.currency,
+          d.status AS donation_status,
+          d.created_at AS donation_created_at,
+          donor.email AS donor_email,
+          o.name AS manual_target_org_name,
+          e.title AS manual_target_event_title
+        FROM public.donation_allocation_reviews dar
+        LEFT JOIN public.donations d ON d.id = dar.donation_id
+        LEFT JOIN public.userdata donor ON donor.id = d.donor_user_id
+        LEFT JOIN public.organizations o ON o.id = dar.manual_target_org_id
+        LEFT JOIN public.events e ON e.id = dar.manual_target_event_id
+        ${whereClause}
+        ORDER BY dar.created_at DESC, dar.id DESC
+        LIMIT $${dataParams.length - 1}
+        OFFSET $${dataParams.length}
+      `,
+      dataParams
+    );
+
+    return res.json({
+      data: rows.map((row) => ({
+        id: Number(row.id),
+        donation_id: Number(row.donation_id),
+        status: row.status,
+        review_due_at: row.review_due_at,
+        manual_target_type: row.manual_target_type || null,
+        manual_target_org_id: row.manual_target_org_id != null ? Number(row.manual_target_org_id) : null,
+        manual_target_org_name: row.manual_target_org_name || "",
+        manual_target_event_id: row.manual_target_event_id || null,
+        manual_target_event_title: row.manual_target_event_title || "",
+        reviewed_by_user_id: row.reviewed_by_user_id != null ? Number(row.reviewed_by_user_id) : null,
+        reviewed_at: row.reviewed_at,
+        notification_sent_at: row.notification_sent_at || null,
+        notification_sent_to: row.notification_sent_to || "",
+        last_notification_error: row.last_notification_error || "",
+        policy_reason_code: row.policy_reason_code || "",
+        notes: row.notes || "",
+        metadata: row.metadata || {},
+        amount_cents: Number(row.amount_cents) || 0,
+        currency: row.currency || "CAD",
+        donation_status: row.donation_status || "",
+        donation_created_at: row.donation_created_at,
+        donor_email: row.donor_email || "",
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+      })),
+      pagination: buildPagination(page, limit, totalRows),
+    });
+  } catch (err) {
+    console.error("GET /api/admin/donations/reviews error:", err);
+    return res.status(500).json({ error: "server_error" });
+  }
+});
+
+adminApiRouter.patch("/donations/reviews/:id/manual-allocation", async (req, res) => {
+  if (!requireCsrf(req, res)) return;
+
+  const reviewId = parsePositiveInt(req.params.id);
+  if (!reviewId) return res.status(400).json({ error: "invalid_request" });
+
+  const targetType = String(req.body?.target_type || "").trim().toLowerCase();
+  const targetOrgId = parsePositiveInt(req.body?.target_org_id);
+  const targetEventId =
+    typeof req.body?.target_event_id === "string" && req.body.target_event_id.trim()
+      ? req.body.target_event_id.trim()
+      : null;
+  const notes =
+    typeof req.body?.notes === "string" && req.body.notes.trim()
+      ? req.body.notes.trim()
+      : null;
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await applyManualDonationAllocation(client, {
+      reviewId,
+      targetType,
+      targetOrgId,
+      targetEventId,
+      reviewedByUserId: req.user?.id || req.user?.user_id || null,
+      notes,
+    });
+    await client.query("COMMIT");
+
+    return res.json({
+      success: true,
+      review: result.review,
+      updated_funding_credits: result.updatedFundingCredits,
+      target: result.target,
+    });
+  } catch (err) {
+    try { await client.query("ROLLBACK"); } catch (_) {}
+    console.error("PATCH /api/admin/donations/reviews/:id/manual-allocation error:", err);
+    if (err?.message === "review_not_found") {
+      return res.status(404).json({ error: "not_found" });
+    }
+    if (
+      [
+        "invalid_target_type",
+        "invalid_target_org_id",
+        "invalid_target_event_id",
+        "target_org_not_found",
+        "target_event_not_found",
+        "review_not_allocatable",
+      ].includes(err?.message)
+    ) {
+      return res.status(400).json({ error: err.message });
+    }
+    return res.status(500).json({ error: "server_error" });
+  } finally {
+    client.release();
+  }
+});
+
+adminApiRouter.post("/donations/reviews/run-policy", async (req, res) => {
+  if (!requireCsrf(req, res)) return;
+
+  try {
+    const limit = parsePositiveInt(req.body?.limit) || 50;
+    const result = await runDueDonationPolicyAllocations({ limit });
+    return res.json({
+      success: true,
+      processed_count: result.processedCount || 0,
+      processed: result.processed || [],
+      skipped_count: result.skippedCount || 0,
+      skipped: result.skipped || [],
+    });
+  } catch (err) {
+    console.error("POST /api/admin/donations/reviews/run-policy error:", err);
     return res.status(500).json({ error: "server_error" });
   }
 });
@@ -585,6 +876,22 @@ adminApiRouter.post("/org-pools/:orgId/topup", async (req, res) => {
       notes,
     });
 
+    if (txRow?.id) {
+      await createFundingCreditFromAdminTopup(client, {
+        poolId,
+        originPoolTransactionId: txRow.id,
+        organizationId: orgId,
+        amountIc: txRow.amount_credits,
+        createdByUserId: req.user?.id,
+        metadata: {
+          legacy_reason: reason,
+          db_reason: txRow.reason || persistedReason || reason,
+          notes: txRow.notes || notes || null,
+          stage: "stage1_shadow_write",
+        },
+      });
+    }
+
     const { rows: [balanceRow] = [] } = await client.query(
       `
         SELECT
@@ -695,6 +1002,76 @@ adminApiRouter.patch("/organizations/:id/status", async (req, res) => {
     return res.status(500).json({ error: "server_error" });
   } finally {
     client.release();
+  }
+});
+
+adminApiRouter.patch("/organizations/:id/funding-policy", async (req, res) => {
+  if (!requireCsrf(req, res)) return;
+  const orgId = parsePositiveInt(req.params.id);
+  if (!orgId) return res.status(400).json({ error: "invalid_request" });
+
+  const body = req.body || {};
+  const updates = [];
+  const params = [];
+  const pushUpdate = (column, value) => {
+    params.push(value);
+    updates.push(`${column} = $${params.length}`);
+  };
+
+  if (Object.prototype.hasOwnProperty.call(body, "funding_class")) {
+    const fundingClass = parseFundingClass(body.funding_class);
+    if (!fundingClass) return res.status(400).json({ error: "invalid_funding_class" });
+    pushUpdate("funding_class", fundingClass);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, "subsidy_eligible")) {
+    const subsidyEligible = parseOptionalBoolean(body.subsidy_eligible);
+    if (subsidyEligible == null) return res.status(400).json({ error: "invalid_subsidy_eligible" });
+    pushUpdate("subsidy_eligible", subsidyEligible);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, "manual_override_only")) {
+    const manualOverrideOnly = parseOptionalBoolean(body.manual_override_only);
+    if (manualOverrideOnly == null) return res.status(400).json({ error: "invalid_manual_override_only" });
+    pushUpdate("manual_override_only", manualOverrideOnly);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, "subsidy_cap_percent")) {
+    const subsidyCapPercent = parseNullablePercent(body.subsidy_cap_percent);
+    if (body.subsidy_cap_percent !== null && body.subsidy_cap_percent !== "" && subsidyCapPercent == null) {
+      return res.status(400).json({ error: "invalid_subsidy_cap_percent" });
+    }
+    pushUpdate("subsidy_cap_percent", subsidyCapPercent);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, "funding_notes")) {
+    pushUpdate("funding_notes", body.funding_notes == null ? null : String(body.funding_notes).trim());
+  }
+
+  if (!updates.length) {
+    return res.status(400).json({ error: "no_fields_to_update" });
+  }
+
+  params.push(orgId);
+  try {
+    const { rows: [organization] = [] } = await pool.query(
+      `
+        UPDATE organizations
+        SET ${updates.join(", ")}
+        WHERE id = $${params.length}
+        RETURNING *
+      `,
+      params
+    );
+
+    if (!organization) {
+      return res.status(404).json({ error: "not_found" });
+    }
+
+    return res.json({ success: true, organization });
+  } catch (err) {
+    console.error("PATCH /api/admin/organizations/:id/funding-policy error:", err);
+    return res.status(500).json({ error: "server_error" });
   }
 });
 
@@ -959,6 +1336,11 @@ adminApiRouter.get("/events", async (req, res) => {
           e.end_at,
           e.status,
           e.capacity,
+          e.funding_class_override,
+          e.subsidy_eligible_override,
+          e.subsidy_cap_percent_override,
+          e.event_package_locked,
+          e.event_package_expires_at,
           u.id AS host_id,
           u.firstname AS host_firstname,
           u.lastname AS host_lastname,
@@ -985,6 +1367,13 @@ adminApiRouter.get("/events", async (req, res) => {
       end_at: row.end_at,
       status: row.status,
       capacity: Number(row.capacity) || 0,
+      funding_class_override: row.funding_class_override || null,
+      subsidy_eligible_override:
+        row.subsidy_eligible_override == null ? null : row.subsidy_eligible_override === true,
+      subsidy_cap_percent_override:
+        row.subsidy_cap_percent_override != null ? Number(row.subsidy_cap_percent_override) : null,
+      event_package_locked: row.event_package_locked === true,
+      event_package_expires_at: row.event_package_expires_at || null,
       host_id: row.host_id,
       host_name: `${row.host_firstname || ""} ${row.host_lastname || ""}`.trim(),
       volunteer_count: Number(row.volunteer_count) || 0,
@@ -1058,6 +1447,90 @@ adminApiRouter.patch("/events/:id", async (req, res) => {
     return res.json({ success: true, event });
   } catch (err) {
     console.error("PATCH /api/admin/events/:id error:", err);
+    return res.status(500).json({ error: "server_error" });
+  }
+});
+
+adminApiRouter.patch("/events/:id/funding-policy", async (req, res) => {
+  if (!requireCsrf(req, res)) return;
+  const eventId = String(req.params.id || "").trim();
+  if (!eventId) return res.status(400).json({ error: "invalid_request" });
+
+  const body = req.body || {};
+  const updates = [];
+  const params = [];
+  const pushUpdate = (column, value) => {
+    params.push(value);
+    updates.push(`${column} = $${params.length}`);
+  };
+
+  if (Object.prototype.hasOwnProperty.call(body, "funding_class_override")) {
+    if (body.funding_class_override == null || body.funding_class_override === "") {
+      pushUpdate("funding_class_override", null);
+    } else {
+      const fundingClass = parseFundingClass(body.funding_class_override);
+      if (!fundingClass) return res.status(400).json({ error: "invalid_funding_class_override" });
+      pushUpdate("funding_class_override", fundingClass);
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, "subsidy_eligible_override")) {
+    if (body.subsidy_eligible_override == null || body.subsidy_eligible_override === "") {
+      pushUpdate("subsidy_eligible_override", null);
+    } else {
+      const subsidyEligibleOverride = parseOptionalBoolean(body.subsidy_eligible_override);
+      if (subsidyEligibleOverride == null) {
+        return res.status(400).json({ error: "invalid_subsidy_eligible_override" });
+      }
+      pushUpdate("subsidy_eligible_override", subsidyEligibleOverride);
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, "subsidy_cap_percent_override")) {
+    if (body.subsidy_cap_percent_override == null || body.subsidy_cap_percent_override === "") {
+      pushUpdate("subsidy_cap_percent_override", null);
+    } else {
+      const subsidyCapPercentOverride = parseNullablePercent(body.subsidy_cap_percent_override);
+      if (subsidyCapPercentOverride == null) {
+        return res.status(400).json({ error: "invalid_subsidy_cap_percent_override" });
+      }
+      pushUpdate("subsidy_cap_percent_override", subsidyCapPercentOverride);
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, "event_package_locked")) {
+    const eventPackageLocked = parseOptionalBoolean(body.event_package_locked);
+    if (eventPackageLocked == null) return res.status(400).json({ error: "invalid_event_package_locked" });
+    pushUpdate("event_package_locked", eventPackageLocked);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, "event_package_expires_at")) {
+    pushUpdate("event_package_expires_at", body.event_package_expires_at || null);
+  }
+
+  if (!updates.length) {
+    return res.status(400).json({ error: "no_fields_to_update" });
+  }
+
+  params.push(eventId);
+  try {
+    const { rows: [event] = [] } = await pool.query(
+      `
+        UPDATE events
+        SET ${updates.join(", ")}
+        WHERE id = $${params.length}
+        RETURNING *
+      `,
+      params
+    );
+
+    if (!event) {
+      return res.status(404).json({ error: "not_found" });
+    }
+
+    return res.json({ success: true, event });
+  } catch (err) {
+    console.error("PATCH /api/admin/events/:id/funding-policy error:", err);
     return res.status(500).json({ error: "server_error" });
   }
 });

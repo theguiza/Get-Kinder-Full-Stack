@@ -1,32 +1,17 @@
-import pool from "../Backend/db/pg.js";
+import { findNextDonationWithRemaining, resolvePoolId } from "./donationAttributionService.js";
+import {
+  applySemanticFundingPlan,
+  resolveSemanticFundingPlan,
+} from "./fundingAllocationService.js";
+import { buildFundingPoolCandidates, pickBestFundingPool } from "./poolRoutingService.js";
 
 const toNumber = (value, fallback = 0) => {
   const num = Number(value);
   return Number.isFinite(num) ? num : fallback;
 };
 
-async function ensurePool({ client, poolSlug }) {
-  const name = poolSlug === "general" ? "General Pool" : poolSlug;
-  const { rows } = await client.query(
-    `
-      INSERT INTO funding_pools (slug, name)
-      VALUES ($1, $2)
-      ON CONFLICT (slug) DO UPDATE SET name = funding_pools.name
-      RETURNING id
-    `,
-    [poolSlug, name]
-  );
-  return rows?.[0]?.id;
-}
-
-export async function fundEarnShiftFromPool({ client, poolSlug = "general", eventId, volunteerUserId, walletTxId, creditsToFund, minutesVerified = null }) {
-  if (!client) throw new Error("client required");
-  const amount = toNumber(creditsToFund);
-  if (amount <= 0) throw new Error("Invalid creditsToFund");
-
-  const poolId = await ensurePool({ client, poolSlug });
-
-  const { rows: [bal] } = await client.query(
+async function getPoolBalance({ client, poolId }) {
+  const { rows: [bal] = [] } = await client.query(
     `
       SELECT
         COALESCE(SUM(CASE WHEN direction = 'credit' THEN amount_credits ELSE 0 END), 0) AS credits_in,
@@ -36,8 +21,86 @@ export async function fundEarnShiftFromPool({ client, poolSlug = "general", even
     `,
     [poolId]
   );
-  const poolBalance = toNumber(bal?.credits_in) - toNumber(bal?.credits_out);
+  return toNumber(bal?.credits_in) - toNumber(bal?.credits_out);
+}
+
+async function resolveFundingPoolSelection({ client, ownerUserId = null, poolSlug = "general", creditsToFund }) {
+  const candidatePoolSlugs = buildFundingPoolCandidates({ ownerUserId, poolSlug });
+  const candidates = [];
+
+  for (const candidatePoolSlug of candidatePoolSlugs) {
+    const poolId = await resolvePoolId({ client, poolSlug: candidatePoolSlug });
+    const poolBalance = await getPoolBalance({ client, poolId });
+    candidates.push({
+      poolId,
+      poolSlug: candidatePoolSlug,
+      poolBalance,
+    });
+  }
+
+  return pickBestFundingPool(candidates, creditsToFund);
+}
+
+export async function fundEarnShiftFromPool({
+  client,
+  ownerUserId = null,
+  poolSlug = "general",
+  eventId,
+  organizationId = null,
+  volunteerUserId,
+  walletTxId,
+  creditsToFund,
+  minutesVerified = null,
+  policyProfile = null,
+}) {
+  if (!client) throw new Error("client required");
+  const amount = toNumber(creditsToFund);
+  if (amount <= 0) throw new Error("Invalid creditsToFund");
+
+  const semanticResolution = await resolveSemanticFundingPlan({
+    client,
+    ownerUserId,
+    poolSlug,
+    eventId,
+    organizationId,
+    creditsToFund: amount,
+    policyProfile,
+  });
+
+  if (semanticResolution.mode === "semantic" && semanticResolution.selectedPlan?.allocations?.length) {
+    if ((semanticResolution.selectedPlan.fundedAmount || 0) < amount) {
+      throw new Error("INSUFFICIENT_POOL");
+    }
+    const applied = await applySemanticFundingPlan({
+      client,
+      selectedPlan: semanticResolution.selectedPlan,
+      walletTxId,
+      eventId,
+      organizationId,
+      volunteerUserId,
+      minutesVerified,
+    });
+    return {
+      poolId: applied.poolId,
+      poolSlug: applied.poolSlug || poolSlug,
+      amountFunded: applied.fundedAmount,
+      allocationMode: "semantic",
+    };
+  }
+
+  const selectedPool = await resolveFundingPoolSelection({ client, ownerUserId, poolSlug, creditsToFund: amount });
+  const poolId = selectedPool?.poolId;
+  const poolBalance = toNumber(selectedPool?.poolBalance);
   if (poolBalance < amount) {
+    throw new Error("INSUFFICIENT_POOL");
+  }
+
+  const donationSeed = await findNextDonationWithRemaining({
+    client,
+    poolId,
+    poolSlug: selectedPool?.poolSlug,
+  });
+  if (!donationSeed?.donationId) {
     throw new Error("INSUFFICIENT_POOL");
   }
 
@@ -94,5 +157,5 @@ export async function fundEarnShiftFromPool({ client, poolSlug = "general", even
     throw new Error("INSUFFICIENT_POOL");
   }
 
-  return { poolId, amountFunded: amount };
+  return { poolId, poolSlug: selectedPool?.poolSlug || poolSlug, amountFunded: amount };
 }

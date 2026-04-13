@@ -16,7 +16,38 @@ const ORG_POOL_TOPUP_REASON_OPTIONS = [
   { value: "adjustment", label: "Adjustment" },
   { value: "bonus", label: "Bonus" },
 ];
+const FUNDING_CLASS_OPTIONS = [
+  { value: "mission_priority", label: "Mission Priority" },
+  { value: "mixed", label: "Mixed" },
+  { value: "commercial", label: "Commercial" },
+];
+const OVERRIDE_BOOLEAN_OPTIONS = [
+  { value: "", label: "Inherit" },
+  { value: "true", label: "Yes" },
+  { value: "false", label: "No" },
+];
 const ADMIN_TABLE_LIMIT = 50;
+
+function readWindowSearchParam(name) {
+  if (typeof window === "undefined") return null;
+  try {
+    return new URLSearchParams(window.location.search).get(name);
+  } catch {
+    return null;
+  }
+}
+
+function resolveInitialAdminSection() {
+  const tab = String(readWindowSearchParam("tab") || "").trim().toLowerCase();
+  if (tab === "donations" || tab === "donors" || tab === "donationreviews") return "donors";
+  if (NAV_ITEMS.some((item) => item.key.toLowerCase() === tab)) return tab;
+  return "overview";
+}
+
+function resolveHighlightedDonationReviewId() {
+  const reviewId = Number(readWindowSearchParam("review"));
+  return Number.isInteger(reviewId) && reviewId > 0 ? reviewId : null;
+}
 
 function safeNumber(value, fallback = 0) {
   const num = Number(value);
@@ -38,11 +69,29 @@ function formatCurrencyFromCents(cents = 0) {
   );
 }
 
+function formatMoneyFromCents(cents = 0, currency = "CAD") {
+  return new Intl.NumberFormat("en-CA", {
+    style: "currency",
+    currency: currency || "CAD",
+    maximumFractionDigits: 2,
+  }).format(safeNumber(cents, 0) / 100);
+}
+
 function formatDateTime(value) {
   if (!value) return "—";
   const dt = new Date(value);
   if (Number.isNaN(dt.getTime())) return "—";
   return dt.toLocaleString();
+}
+
+function getDateTimeParts(value) {
+  if (!value) return { date: "—", time: "" };
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return { date: "—", time: "" };
+  return {
+    date: dt.toLocaleDateString("en-CA"),
+    time: dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+  };
 }
 
 function formatPoolReason(reason) {
@@ -53,6 +102,25 @@ function formatPoolReason(reason) {
   if (normalized === "subscription_credit" || normalized === "subscription_topup") return "Subscription Credit";
   if (normalized === "donation_in") return "Donation In";
   return normalized || "—";
+}
+
+function formatFundingClass(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "mission_priority") return "Mission Priority";
+  if (normalized === "commercial") return "Commercial";
+  return "Mixed";
+}
+
+function booleanOverrideToSelectValue(value) {
+  if (value === true) return "true";
+  if (value === false) return "false";
+  return "";
+}
+
+function selectValueToBooleanOverride(value) {
+  if (value === "true") return true;
+  if (value === "false") return false;
+  return null;
 }
 
 function formatMonthShort(value) {
@@ -413,7 +481,9 @@ export default function AdminDashboard() {
       document.querySelector('meta[name="csrf-token"]')?.getAttribute("content")) ||
     "";
 
-  const [activeSection, setActiveSection] = useState("overview");
+  const highlightedDonationReviewId = useMemo(() => resolveHighlightedDonationReviewId(), []);
+
+  const [activeSection, setActiveSection] = useState(() => resolveInitialAdminSection());
   const [rangeFilter, setRangeFilter] = useState("90d");
   const [orgFilter, setOrgFilter] = useState("all");
 
@@ -423,6 +493,7 @@ export default function AdminDashboard() {
   const [eventState, setEventState] = useState({ loading: false, error: "", items: [] });
   const [volunteerState, setVolunteerState] = useState({ loading: false, error: "", items: [] });
   const [donorState, setDonorState] = useState({ loading: false, error: "", items: [] });
+  const [donationReviewState, setDonationReviewState] = useState({ loading: false, error: "", items: [] });
   const [transactionState, setTransactionState] = useState({ loading: false, error: "", items: [] });
   const [creditState, setCreditState] = useState({ loading: false, error: "", items: [] });
   const [creditLogState, setCreditLogState] = useState({ loading: false, error: "", items: [] });
@@ -435,6 +506,9 @@ export default function AdminDashboard() {
   const [volunteerSearch, setVolunteerSearch] = useState("");
   const [volunteerStatusFilter, setVolunteerStatusFilter] = useState("all");
   const [donorSearch, setDonorSearch] = useState("");
+  const [donationReviewStatusFilter, setDonationReviewStatusFilter] = useState(
+    () => (highlightedDonationReviewId ? "all" : "pending_manual_review")
+  );
 
   const [orgPage, setOrgPage] = useState(1);
   const [orgTotalRows, setOrgTotalRows] = useState(0);
@@ -448,6 +522,9 @@ export default function AdminDashboard() {
   const [donorPage, setDonorPage] = useState(1);
   const [donorTotalRows, setDonorTotalRows] = useState(0);
   const [donorTotalPages, setDonorTotalPages] = useState(0);
+  const [donationReviewPage, setDonationReviewPage] = useState(1);
+  const [donationReviewTotalRows, setDonationReviewTotalRows] = useState(0);
+  const [donationReviewTotalPages, setDonationReviewTotalPages] = useState(0);
   const [transactionPage, setTransactionPage] = useState(1);
   const [transactionTotalRows, setTransactionTotalRows] = useState(0);
   const [transactionTotalPages, setTransactionTotalPages] = useState(0);
@@ -464,6 +541,22 @@ export default function AdminDashboard() {
   const [orgPoolTopupForm, setOrgPoolTopupForm] = useState({
     amount: "",
     reason: "admin_allocation",
+    notes: "",
+    submitting: false,
+  });
+  const [orgPolicyDrafts, setOrgPolicyDrafts] = useState({});
+  const [eventPolicyDrafts, setEventPolicyDrafts] = useState({});
+  const [orgPolicySavingId, setOrgPolicySavingId] = useState(null);
+  const [eventPolicySavingId, setEventPolicySavingId] = useState(null);
+  const [donationReviewPolicyRunning, setDonationReviewPolicyRunning] = useState(false);
+  const [allocationOrgOptions, setAllocationOrgOptions] = useState([]);
+  const [allocationEventOptions, setAllocationEventOptions] = useState([]);
+  const [donationAllocationModal, setDonationAllocationModal] = useState({
+    open: false,
+    review: null,
+    targetType: "org",
+    targetOrgId: "",
+    targetEventId: "",
     notes: "",
     submitting: false,
   });
@@ -519,6 +612,29 @@ export default function AdminDashboard() {
         body: JSON.stringify(body || {}),
       }),
     [requestJson, csrfToken]
+  );
+
+  const getOrgPolicyDraft = useCallback(
+    (org) =>
+      orgPolicyDrafts[org.id] || {
+        funding_class: org.funding_class || "mixed",
+        subsidy_eligible: org.subsidy_eligible === true,
+        manual_override_only: org.manual_override_only === true,
+        subsidy_cap_percent: org.subsidy_cap_percent != null ? String(org.subsidy_cap_percent) : "",
+      },
+    [orgPolicyDrafts]
+  );
+
+  const getEventPolicyDraft = useCallback(
+    (event) =>
+      eventPolicyDrafts[event.id] || {
+        funding_class_override: event.funding_class_override || "",
+        subsidy_eligible_override: booleanOverrideToSelectValue(event.subsidy_eligible_override),
+        subsidy_cap_percent_override:
+          event.subsidy_cap_percent_override != null ? String(event.subsidy_cap_percent_override) : "",
+        event_package_locked: event.event_package_locked === true,
+      },
+    [eventPolicyDrafts]
   );
 
   const unpackPagedResponse = useCallback((payload) => {
@@ -659,6 +775,46 @@ export default function AdminDashboard() {
     }
   }, [donorPage, donorSearch, requestJson, unpackPagedResponse]);
 
+  const loadDonationReviews = useCallback(async () => {
+    setDonationReviewState((curr) => ({ ...curr, loading: true, error: "" }));
+    try {
+      const qs = new URLSearchParams({
+        page: String(donationReviewPage),
+        limit: String(ADMIN_TABLE_LIMIT),
+      });
+      if (donationReviewStatusFilter !== "all") {
+        qs.set("status", donationReviewStatusFilter);
+      }
+      const payload = await requestJson(`/api/admin/donations/reviews?${qs.toString()}`);
+      const paged = unpackPagedResponse(payload);
+      setDonationReviewState({ loading: false, error: "", items: paged.data });
+      setDonationReviewPage(paged.pagination.page);
+      setDonationReviewTotalRows(paged.pagination.totalRows);
+      setDonationReviewTotalPages(paged.pagination.totalPages);
+    } catch (err) {
+      setDonationReviewState((curr) => ({
+        ...curr,
+        loading: false,
+        error: err?.message || "Unable to load donation reviews",
+      }));
+    }
+  }, [donationReviewPage, donationReviewStatusFilter, requestJson, unpackPagedResponse]);
+
+  const loadDonationAllocationOptions = useCallback(async () => {
+    try {
+      const [organizationsPayload, eventsPayload] = await Promise.all([
+        requestJson("/api/admin/organizations?page=1&limit=100"),
+        requestJson("/api/admin/events?page=1&limit=100"),
+      ]);
+      const organizationsPaged = unpackPagedResponse(organizationsPayload);
+      const eventsPaged = unpackPagedResponse(eventsPayload);
+      setAllocationOrgOptions(organizationsPaged.data);
+      setAllocationEventOptions(eventsPaged.data);
+    } catch (err) {
+      pushToast(err?.message || "Unable to load donation allocation options", "error");
+    }
+  }, [pushToast, requestJson, unpackPagedResponse]);
+
   const loadTransactions = useCallback(async () => {
     setTransactionState((curr) => ({ ...curr, loading: true, error: "" }));
     try {
@@ -676,6 +832,94 @@ export default function AdminDashboard() {
       setTransactionState((curr) => ({ ...curr, loading: false, error: err?.message || "Unable to load transactions" }));
     }
   }, [transactionPage, requestJson, unpackPagedResponse]);
+
+  const openDonationAllocationModal = useCallback(
+    (review, targetType = "org") => {
+      if (!review) return;
+      if (!allocationOrgOptions.length || !allocationEventOptions.length) {
+        loadDonationAllocationOptions();
+      }
+      setDonationAllocationModal({
+        open: true,
+        review,
+        targetType: review.manual_target_type || targetType,
+        targetOrgId: review.manual_target_org_id ? String(review.manual_target_org_id) : "",
+        targetEventId: review.manual_target_event_id || "",
+        notes: review.notes || "",
+        submitting: false,
+      });
+    },
+    [allocationEventOptions.length, allocationOrgOptions.length, loadDonationAllocationOptions]
+  );
+
+  const closeDonationAllocationModal = useCallback(() => {
+    setDonationAllocationModal({
+      open: false,
+      review: null,
+      targetType: "org",
+      targetOrgId: "",
+      targetEventId: "",
+      notes: "",
+      submitting: false,
+    });
+  }, []);
+
+  const submitDonationManualAllocation = useCallback(async () => {
+    const review = donationAllocationModal.review;
+    if (!review?.id || donationAllocationModal.submitting) return;
+
+    if (donationAllocationModal.targetType === "org" && !donationAllocationModal.targetOrgId) {
+      pushToast("Select an organization for this manual allocation.", "error");
+      return;
+    }
+
+    if (donationAllocationModal.targetType === "event" && !donationAllocationModal.targetEventId) {
+      pushToast("Select an event for this manual allocation.", "error");
+      return;
+    }
+
+    setDonationAllocationModal((curr) => ({ ...curr, submitting: true }));
+    try {
+      await mutateJson(`/api/admin/donations/reviews/${review.id}/manual-allocation`, "PATCH", {
+        target_type: donationAllocationModal.targetType,
+        target_org_id:
+          donationAllocationModal.targetType === "org"
+            ? Number(donationAllocationModal.targetOrgId)
+            : null,
+        target_event_id:
+          donationAllocationModal.targetType === "event"
+            ? donationAllocationModal.targetEventId
+            : null,
+        notes: donationAllocationModal.notes || "",
+      });
+      pushToast(`Donation #${review.donation_id} allocated successfully.`, "success");
+      closeDonationAllocationModal();
+      loadDonationReviews();
+    } catch (err) {
+      pushToast(err?.message || "Manual donation allocation failed.", "error");
+      setDonationAllocationModal((curr) => ({ ...curr, submitting: false }));
+    }
+  }, [closeDonationAllocationModal, donationAllocationModal, loadDonationReviews, mutateJson, pushToast]);
+
+  const runDonationPolicyFallback = useCallback(async () => {
+    if (donationReviewPolicyRunning) return;
+    setDonationReviewPolicyRunning(true);
+    try {
+      const payload = await mutateJson("/api/admin/donations/reviews/run-policy", "POST", { limit: 100 });
+      const processedCount = safeNumber(payload?.processed_count, 0);
+      pushToast(
+        processedCount > 0
+          ? `Policy-allocated ${processedCount} donation review${processedCount === 1 ? "" : "s"}.`
+          : "No donation reviews were due for policy allocation.",
+        processedCount > 0 ? "success" : "info"
+      );
+      loadDonationReviews();
+    } catch (err) {
+      pushToast(err?.message || "Donation policy fallback failed.", "error");
+    } finally {
+      setDonationReviewPolicyRunning(false);
+    }
+  }, [donationReviewPolicyRunning, loadDonationReviews, mutateJson, pushToast]);
 
   const loadOrgPools = useCallback(async () => {
     setOrgPoolState((curr) => ({ ...curr, loading: true, error: "" }));
@@ -802,9 +1046,11 @@ export default function AdminDashboard() {
   useEffect(() => {
     if (activeSection === "donors") {
       loadDonors();
+      loadDonationReviews();
+      loadDonationAllocationOptions();
       loadTransactions();
     }
-  }, [activeSection, loadDonors, loadTransactions]);
+  }, [activeSection, loadDonors, loadDonationAllocationOptions, loadDonationReviews, loadTransactions]);
 
   const handleSectionChange = useCallback((sectionKey) => {
     setActiveSection(sectionKey);
@@ -812,6 +1058,7 @@ export default function AdminDashboard() {
     setEventPage(1);
     setVolunteerPage(1);
     setDonorPage(1);
+    setDonationReviewPage(1);
     setTransactionPage(1);
     setCreditLogPage(1);
     setPendingCreditsPage(1);
@@ -993,6 +1240,47 @@ export default function AdminDashboard() {
     [loadOrganizations, mutateJson, openConfirm, pushToast]
   );
 
+  const updateOrgPolicyDraft = useCallback((org, patch) => {
+    setOrgPolicyDrafts((curr) => ({
+      ...curr,
+      [org.id]: {
+        ...(
+          curr[org.id] || {
+            funding_class: org.funding_class || "mixed",
+            subsidy_eligible: org.subsidy_eligible === true,
+            manual_override_only: org.manual_override_only === true,
+            subsidy_cap_percent: org.subsidy_cap_percent != null ? String(org.subsidy_cap_percent) : "",
+          }
+        ),
+        ...patch,
+      },
+    }));
+  }, []);
+
+  const saveOrgFundingPolicy = useCallback(async (org) => {
+    const draft = getOrgPolicyDraft(org);
+    setOrgPolicySavingId(org.id);
+    try {
+      await mutateJson(`/api/admin/organizations/${org.id}/funding-policy`, "PATCH", {
+        funding_class: draft.funding_class,
+        subsidy_eligible: draft.subsidy_eligible,
+        manual_override_only: draft.manual_override_only,
+        subsidy_cap_percent: draft.subsidy_cap_percent === "" ? null : Number(draft.subsidy_cap_percent),
+      });
+      pushToast(`Updated funding policy for ${org.name}.`, "success");
+      setOrgPolicyDrafts((curr) => {
+        const next = { ...curr };
+        delete next[org.id];
+        return next;
+      });
+      loadOrganizations();
+    } catch (err) {
+      pushToast(err?.message || "Unable to update organization funding policy", "error");
+    } finally {
+      setOrgPolicySavingId(null);
+    }
+  }, [getOrgPolicyDraft, loadOrganizations, mutateJson, pushToast]);
+
   const runOrgRemove = useCallback(
     (org) =>
       openConfirm(
@@ -1009,6 +1297,49 @@ export default function AdminDashboard() {
       ),
     [loadOrganizations, mutateJson, openConfirm, pushToast]
   );
+
+  const updateEventPolicyDraft = useCallback((event, patch) => {
+    setEventPolicyDrafts((curr) => ({
+      ...curr,
+      [event.id]: {
+        ...(
+          curr[event.id] || {
+            funding_class_override: event.funding_class_override || "",
+            subsidy_eligible_override: booleanOverrideToSelectValue(event.subsidy_eligible_override),
+            subsidy_cap_percent_override:
+              event.subsidy_cap_percent_override != null ? String(event.subsidy_cap_percent_override) : "",
+            event_package_locked: event.event_package_locked === true,
+          }
+        ),
+        ...patch,
+      },
+    }));
+  }, []);
+
+  const saveEventFundingPolicy = useCallback(async (event) => {
+    const draft = getEventPolicyDraft(event);
+    setEventPolicySavingId(event.id);
+    try {
+      await mutateJson(`/api/admin/events/${event.id}/funding-policy`, "PATCH", {
+        funding_class_override: draft.funding_class_override || null,
+        subsidy_eligible_override: selectValueToBooleanOverride(draft.subsidy_eligible_override),
+        subsidy_cap_percent_override:
+          draft.subsidy_cap_percent_override === "" ? null : Number(draft.subsidy_cap_percent_override),
+        event_package_locked: draft.event_package_locked,
+      });
+      pushToast(`Updated funding policy for ${event.title}.`, "success");
+      setEventPolicyDrafts((curr) => {
+        const next = { ...curr };
+        delete next[event.id];
+        return next;
+      });
+      loadEvents();
+    } catch (err) {
+      pushToast(err?.message || "Unable to update event funding policy", "error");
+    } finally {
+      setEventPolicySavingId(null);
+    }
+  }, [getEventPolicyDraft, loadEvents, mutateJson, pushToast]);
 
   const runEventRemove = useCallback(
     (event) =>
@@ -1818,14 +2149,16 @@ export default function AdminDashboard() {
                   <button type="button" className="btn btn-sm btn-outline-secondary" onClick={loadOrganizations}>Refresh</button>
                 </div>
                 <div
-                  className="table-responsive"
+                  className="table-responsive admin-policy-table-wrap"
                   style={{ opacity: orgState.loading ? 0.5 : 1, transition: "opacity 140ms ease" }}
                 >
-                  <table className="table table-hover admin-table mb-0">
+                  <table className="table table-hover admin-table admin-policy-table mb-0">
                     <thead>
                       <tr>
                         <th>Name</th>
                         <th>Status</th>
+                        <th>Funding Policy</th>
+                        <th>Subsidy</th>
                         <th>Credits</th>
                         <th>Events</th>
                         <th>Volunteers</th>
@@ -1834,62 +2167,123 @@ export default function AdminDashboard() {
                       </tr>
                     </thead>
                     <tbody>
-                      {orgState.items.map((org) => (
-                        <tr key={org.id} className={normalizeStatus(org.status) === "suspended" ? "table-danger" : ""}>
-                          <td>
-                            <div className="fw-semibold">{org.name}</div>
-                            <div className="small text-muted">{org.rep_name || org.rep_email || "No rep"}</div>
-                          </td>
-                          <td><span className={statusClass(org.status)}>{org.status}</span></td>
-                          <td>{formatInteger(org.credits_total || 0)}</td>
-                          <td>{formatInteger(org.events_count || 0)}</td>
-                          <td>{formatInteger(org.volunteers_count || 0)}</td>
-                          <td>{formatDateTime(org.applied_at || org.created_at)}</td>
-                          <td>
-                            <div className="btn-group btn-group-sm">
-                              <button
-                                type="button"
-                                className="btn btn-outline-dark"
-                                onClick={() => runOrgAddAdmin(org)}
+                      {orgState.items.map((org) => {
+                        const policyDraft = getOrgPolicyDraft(org);
+                        const joinedAtParts = getDateTimeParts(org.applied_at || org.created_at);
+                        return (
+                          <tr key={org.id} className={normalizeStatus(org.status) === "suspended" ? "table-danger" : ""}>
+                            <td>
+                              <div className="fw-semibold">{org.name}</div>
+                              <div className="small text-muted">{org.rep_name || org.rep_email || "No rep"}</div>
+                            </td>
+                            <td><span className={statusClass(org.status)}>{org.status}</span></td>
+                            <td style={{ minWidth: 200 }}>
+                              <select
+                                className="form-select form-select-sm mb-1"
+                                value={policyDraft.funding_class}
+                                onChange={(e) => updateOrgPolicyDraft(org, { funding_class: e.target.value })}
                               >
-                                +Admin
-                              </button>
-                              <button
-                                type="button"
-                                className="btn btn-outline-secondary"
-                                onClick={() => {
-                                  const targetUrl = `/org-portal?orgId=${encodeURIComponent(String(org.id))}`;
-                                  window.open(targetUrl, "_blank", "noopener,noreferrer");
-                                }}
-                              >
-                                View
-                              </button>
-                              <button
-                                type="button"
-                                className="btn btn-outline-primary"
-                                onClick={() => {
-                                  handleSectionChange("impactCredits");
-                                  setCreditForm((curr) => ({ ...curr, org_id: String(org.id) }));
-                                }}
-                              >
-                                Allocate
-                              </button>
-                              {normalizeStatus(org.status) !== "approved" && normalizeStatus(org.status) !== "suspended" ? (
-                                <button type="button" className="btn btn-outline-success" onClick={() => runOrgApprove(org.id)}>Approve</button>
-                              ) : null}
-                              <button
-                                type="button"
-                                className={`btn ${normalizeStatus(org.status) === "suspended" ? "btn-outline-success" : "btn-outline-warning"}`}
-                                onClick={() => runOrgSuspendToggle(org)}
-                              >
-                                {normalizeStatus(org.status) === "suspended" ? "Unsuspend" : "Suspend"}
-                              </button>
-                              <button type="button" className="btn btn-outline-danger" onClick={() => runOrgRemove(org)}>Remove</button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                      {!orgState.items.length ? <tr><td colSpan="7" className="text-muted">No organizations found.</td></tr> : null}
+                                {FUNDING_CLASS_OPTIONS.map((option) => (
+                                  <option key={`org-policy-${org.id}-${option.value}`} value={option.value}>
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </select>
+                              <div className="small text-muted">Live: {formatFundingClass(org.funding_class)}</div>
+                            </td>
+                            <td style={{ minWidth: 220 }}>
+                              <div className="form-check form-switch mb-1">
+                                <input
+                                  className="form-check-input"
+                                  type="checkbox"
+                                  checked={policyDraft.subsidy_eligible}
+                                  onChange={(e) => updateOrgPolicyDraft(org, { subsidy_eligible: e.target.checked })}
+                                />
+                                <label className="form-check-label small">Subsidy eligible</label>
+                              </div>
+                              <div className="form-check form-switch mb-2">
+                                <input
+                                  className="form-check-input"
+                                  type="checkbox"
+                                  checked={policyDraft.manual_override_only}
+                                  onChange={(e) => updateOrgPolicyDraft(org, { manual_override_only: e.target.checked })}
+                                />
+                                <label className="form-check-label small">Manual override only</label>
+                              </div>
+                              <input
+                                type="number"
+                                min="0"
+                                max="100"
+                                className="form-control form-control-sm"
+                                placeholder="Cap %"
+                                value={policyDraft.subsidy_cap_percent}
+                                onChange={(e) => updateOrgPolicyDraft(org, { subsidy_cap_percent: e.target.value })}
+                              />
+                              <div className="small text-muted mt-1">
+                                {org.subsidy_cap_percent != null ? `Live cap: ${org.subsidy_cap_percent}%` : "Live cap: none"}
+                              </div>
+                            </td>
+                            <td>{formatInteger(org.credits_total || 0)}</td>
+                            <td>{formatInteger(org.events_count || 0)}</td>
+                            <td>{formatInteger(org.volunteers_count || 0)}</td>
+                            <td className="admin-date-cell">
+                              <div>{joinedAtParts.date}</div>
+                              <div className="small text-muted">{joinedAtParts.time}</div>
+                            </td>
+                            <td className="admin-actions-cell">
+                              <div className="admin-table-actions">
+                                <button
+                                  type="button"
+                                  className="btn btn-outline-success btn-sm"
+                                  disabled={orgPolicySavingId === org.id}
+                                  onClick={() => saveOrgFundingPolicy(org)}
+                                >
+                                  {orgPolicySavingId === org.id ? "Saving…" : "Save Policy"}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn-outline-dark btn-sm"
+                                  onClick={() => runOrgAddAdmin(org)}
+                                >
+                                  +Admin
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn-outline-secondary btn-sm"
+                                  onClick={() => {
+                                    const targetUrl = `/org-portal?orgId=${encodeURIComponent(String(org.id))}`;
+                                    window.open(targetUrl, "_blank", "noopener,noreferrer");
+                                  }}
+                                >
+                                  View
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn-outline-primary btn-sm"
+                                  onClick={() => {
+                                    handleSectionChange("impactCredits");
+                                    setCreditForm((curr) => ({ ...curr, org_id: String(org.id) }));
+                                  }}
+                                >
+                                  Allocate
+                                </button>
+                                {normalizeStatus(org.status) !== "approved" && normalizeStatus(org.status) !== "suspended" ? (
+                                  <button type="button" className="btn btn-outline-success btn-sm" onClick={() => runOrgApprove(org.id)}>Approve</button>
+                                ) : null}
+                                <button
+                                  type="button"
+                                  className={`btn btn-sm ${normalizeStatus(org.status) === "suspended" ? "btn-outline-success" : "btn-outline-warning"}`}
+                                  onClick={() => runOrgSuspendToggle(org)}
+                                >
+                                  {normalizeStatus(org.status) === "suspended" ? "Unsuspend" : "Suspend"}
+                                </button>
+                                <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => runOrgRemove(org)}>Remove</button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {!orgState.items.length ? <tr><td colSpan="9" className="text-muted">No organizations found.</td></tr> : null}
                     </tbody>
                   </table>
                 </div>
@@ -1925,15 +2319,17 @@ export default function AdminDashboard() {
                   <button type="button" className="btn btn-sm btn-outline-secondary" onClick={loadEvents}>Refresh</button>
                 </div>
                 <div
-                  className="table-responsive"
+                  className="table-responsive admin-policy-table-wrap"
                   style={{ opacity: eventState.loading ? 0.5 : 1, transition: "opacity 140ms ease" }}
                 >
-                  <table className="table table-hover admin-table mb-0">
+                  <table className="table table-hover admin-table admin-policy-table mb-0">
                     <thead>
                       <tr>
                         <th>Title</th>
                         <th>Org/Host</th>
                         <th>Date</th>
+                        <th>Funding Policy</th>
+                        <th>Subsidy</th>
                         <th>Volunteers</th>
                         <th>Credits</th>
                         <th>Status</th>
@@ -1941,39 +2337,102 @@ export default function AdminDashboard() {
                       </tr>
                     </thead>
                     <tbody>
-                      {eventState.items.map((event) => (
-                        <tr key={event.id}>
-                          <td>{event.title}</td>
-                          <td>{event.org_name || event.host_name || "—"}</td>
-                          <td>{formatDateTime(event.start_at)}</td>
-                          <td>{formatInteger(event.volunteer_count)} / {formatInteger(event.capacity)}</td>
-                          <td>{formatInteger(event.credits_total || 0)}</td>
-                          <td><span className={statusClass(event.status)}>{event.status}</span></td>
-                          <td>
-                            <div className="btn-group btn-group-sm">
-                              <button type="button" className="btn btn-outline-secondary" onClick={() => pushToast(`Viewing event ${event.title}`, "info")}>View</button>
-                              <button
-                                type="button"
-                                className="btn btn-outline-primary"
-                                onClick={() => setEventEdit({
-                                  id: event.id,
-                                  title: event.title || "",
-                                  description: event.description || "",
-                                  start_at: event.start_at || "",
-                                  end_at: event.end_at || "",
-                                  capacity: event.capacity || "",
-                                  status: event.status || "draft",
-                                  visibility: event.visibility || "public",
-                                })}
+                      {eventState.items.map((event) => {
+                        const policyDraft = getEventPolicyDraft(event);
+                        const startAtParts = getDateTimeParts(event.start_at);
+                        return (
+                          <tr key={event.id}>
+                            <td className="admin-table-title-cell">{event.title}</td>
+                            <td>{event.org_name || event.host_name || "—"}</td>
+                            <td className="admin-date-cell">
+                              <div>{startAtParts.date}</div>
+                              <div className="small text-muted">{startAtParts.time}</div>
+                            </td>
+                            <td style={{ minWidth: 200 }}>
+                              <select
+                                className="form-select form-select-sm mb-1"
+                                value={policyDraft.funding_class_override}
+                                onChange={(e) => updateEventPolicyDraft(event, { funding_class_override: e.target.value })}
                               >
-                                Edit
-                              </button>
-                              <button type="button" className="btn btn-outline-danger" onClick={() => runEventRemove(event)}>Remove</button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                      {!eventState.items.length ? <tr><td colSpan="7" className="text-muted">No events found.</td></tr> : null}
+                                <option value="">Inherit org</option>
+                                {FUNDING_CLASS_OPTIONS.map((option) => (
+                                  <option key={`event-policy-${event.id}-${option.value}`} value={option.value}>
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </select>
+                              <div className="small text-muted">
+                                {event.funding_class_override ? `Live: ${formatFundingClass(event.funding_class_override)}` : "Live: inherit"}
+                              </div>
+                            </td>
+                            <td style={{ minWidth: 210 }}>
+                              <select
+                                className="form-select form-select-sm mb-1"
+                                value={policyDraft.subsidy_eligible_override}
+                                onChange={(e) => updateEventPolicyDraft(event, { subsidy_eligible_override: e.target.value })}
+                              >
+                                {OVERRIDE_BOOLEAN_OPTIONS.map((option) => (
+                                  <option key={`event-subsidy-${event.id}-${option.value || "inherit"}`} value={option.value}>
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </select>
+                              <input
+                                type="number"
+                                min="0"
+                                max="100"
+                                className="form-control form-control-sm mb-1"
+                                placeholder="Cap %"
+                                value={policyDraft.subsidy_cap_percent_override}
+                                onChange={(e) => updateEventPolicyDraft(event, { subsidy_cap_percent_override: e.target.value })}
+                              />
+                              <div className="form-check form-switch">
+                                <input
+                                  className="form-check-input"
+                                  type="checkbox"
+                                  checked={policyDraft.event_package_locked}
+                                  onChange={(e) => updateEventPolicyDraft(event, { event_package_locked: e.target.checked })}
+                                />
+                                <label className="form-check-label small">Event package locked</label>
+                              </div>
+                            </td>
+                            <td>{formatInteger(event.volunteer_count)} / {formatInteger(event.capacity)}</td>
+                            <td>{formatInteger(event.credits_total || 0)}</td>
+                            <td><span className={statusClass(event.status)}>{event.status}</span></td>
+                            <td className="admin-actions-cell">
+                              <div className="admin-table-actions">
+                                <button
+                                  type="button"
+                                  className="btn btn-outline-success btn-sm"
+                                  disabled={eventPolicySavingId === event.id}
+                                  onClick={() => saveEventFundingPolicy(event)}
+                                >
+                                  {eventPolicySavingId === event.id ? "Saving…" : "Save Policy"}
+                                </button>
+                                <button type="button" className="btn btn-outline-secondary btn-sm" onClick={() => pushToast(`Viewing event ${event.title}`, "info")}>View</button>
+                                <button
+                                  type="button"
+                                  className="btn btn-outline-primary btn-sm"
+                                  onClick={() => setEventEdit({
+                                    id: event.id,
+                                    title: event.title || "",
+                                    description: event.description || "",
+                                    start_at: event.start_at || "",
+                                    end_at: event.end_at || "",
+                                    capacity: event.capacity || "",
+                                    status: event.status || "draft",
+                                    visibility: event.visibility || "public",
+                                  })}
+                                >
+                                  Edit
+                                </button>
+                                <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => runEventRemove(event)}>Remove</button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {!eventState.items.length ? <tr><td colSpan="9" className="text-muted">No events found.</td></tr> : null}
                     </tbody>
                   </table>
                 </div>
@@ -2099,11 +2558,143 @@ export default function AdminDashboard() {
           {activeSection === "donors" && (
             <section>
               <h1 className="admin-title mb-3">Donors</h1>
-              {donorState.loading || transactionState.loading ? (
-                <div className="text-muted mb-2">Loading donor and transaction data…</div>
+              {donorState.loading || donationReviewState.loading || transactionState.loading ? (
+                <div className="text-muted mb-2">Loading donor and donation review data…</div>
               ) : null}
               {donorState.error ? <div className="text-danger small mb-2">{donorState.error}</div> : null}
+              {donationReviewState.error ? <div className="text-danger small mb-2">{donationReviewState.error}</div> : null}
               {transactionState.error ? <div className="text-danger small mb-2">{transactionState.error}</div> : null}
+
+              <div className="admin-card mb-3">
+                <div className="d-flex flex-column flex-lg-row justify-content-between gap-2 mb-2">
+                  <div>
+                    <h6 className="mb-1">Donation Review Queue</h6>
+                    <div className="small text-muted">Manual allocation first, then policy fallback if untouched after the review window.</div>
+                  </div>
+                  <div className="d-flex flex-wrap gap-2">
+                    <select
+                      className="form-select form-select-sm"
+                      style={{ minWidth: "220px" }}
+                      value={donationReviewStatusFilter}
+                      onChange={(e) => {
+                        setDonationReviewStatusFilter(e.target.value);
+                        setDonationReviewPage(1);
+                      }}
+                    >
+                      <option value="pending_manual_review">Pending manual review</option>
+                      <option value="manually_allocated">Manually allocated</option>
+                      <option value="policy_allocated">Policy allocated</option>
+                      <option value="cancelled">Cancelled</option>
+                      <option value="all">All statuses</option>
+                    </select>
+                    <button type="button" className="btn btn-sm btn-outline-secondary" onClick={loadDonationReviews}>
+                      Refresh
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline-primary"
+                      disabled={donationReviewPolicyRunning}
+                      onClick={runDonationPolicyFallback}
+                    >
+                      {donationReviewPolicyRunning ? "Running…" : "Run Policy Fallback"}
+                    </button>
+                  </div>
+                </div>
+                <div
+                  className="table-responsive"
+                  style={{ opacity: donationReviewState.loading ? 0.5 : 1, transition: "opacity 140ms ease" }}
+                >
+                  <table className="table table-hover admin-table mb-0">
+                    <thead>
+                      <tr>
+                        <th>Donation</th>
+                        <th>Donor</th>
+                        <th>Amount</th>
+                        <th>Review Due</th>
+                        <th>Target</th>
+                        <th>Status</th>
+                        <th>Notification</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {donationReviewState.items.map((review) => {
+                        const targetLabel =
+                          review.manual_target_type === "org"
+                            ? review.manual_target_org_name || `Org #${review.manual_target_org_id}`
+                            : review.manual_target_type === "event"
+                              ? review.manual_target_event_title || review.manual_target_event_id || "Selected event"
+                              : review.manual_target_type === "unrestricted"
+                                ? "Unrestricted"
+                                : "—";
+                        const isHighlighted = highlightedDonationReviewId === Number(review.id);
+                        return (
+                          <tr
+                            key={review.id}
+                            className={isHighlighted ? "admin-row-highlight" : ""}
+                          >
+                            <td>
+                              <div className="fw-semibold">#{review.donation_id}</div>
+                              <div className="small text-muted">{formatDateTime(review.donation_created_at)}</div>
+                            </td>
+                            <td>{review.donor_email || "Guest / unclaimed donor"}</td>
+                            <td>{formatMoneyFromCents(review.amount_cents, review.currency)}</td>
+                            <td>{formatDateTime(review.review_due_at)}</td>
+                            <td>{targetLabel}</td>
+                            <td><span className={statusClass(review.status)}>{review.status}</span></td>
+                            <td>
+                              {review.notification_sent_at ? (
+                                <div>
+                                  <div className="small">{review.notification_sent_to || "Sent"}</div>
+                                  <div className="small text-muted">{formatDateTime(review.notification_sent_at)}</div>
+                                </div>
+                              ) : review.last_notification_error ? (
+                                <span className="text-danger small">{review.last_notification_error}</span>
+                              ) : (
+                                <span className="text-muted small">Pending</span>
+                              )}
+                            </td>
+                            <td>
+                              {review.status === "pending_manual_review" ? (
+                                <div className="btn-group btn-group-sm">
+                                  <button
+                                    type="button"
+                                    className="btn btn-outline-primary"
+                                    onClick={() => openDonationAllocationModal(review, "org")}
+                                  >
+                                    Allocate
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="btn btn-outline-secondary"
+                                    onClick={() => openDonationAllocationModal(review, "unrestricted")}
+                                  >
+                                    Release
+                                  </button>
+                                </div>
+                              ) : (
+                                <span className="text-muted small">Reviewed</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {!donationReviewState.items.length ? (
+                        <tr><td colSpan="8" className="text-muted">No donation reviews found.</td></tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
+                <Pagination
+                  page={donationReviewPage}
+                  totalPages={donationReviewTotalPages}
+                  totalRows={donationReviewTotalRows}
+                  limit={ADMIN_TABLE_LIMIT}
+                  onPageChange={setDonationReviewPage}
+                  disabled={donationReviewState.loading}
+                />
+              </div>
+
               <div className="admin-card mb-3">
                 <div className="d-flex flex-column flex-md-row justify-content-between gap-2 mb-2">
                   <input
@@ -2322,6 +2913,110 @@ export default function AdminDashboard() {
         </div>
       ) : null}
 
+      {donationAllocationModal.open ? (
+        <div className="admin-edit-backdrop">
+          <div className="admin-edit-card">
+            <div className="d-flex justify-content-between align-items-start mb-2">
+              <div>
+                <h5 className="mb-1">Allocate Donation #{donationAllocationModal.review?.donation_id}</h5>
+                <div className="small text-muted">
+                  {formatMoneyFromCents(
+                    donationAllocationModal.review?.amount_cents,
+                    donationAllocationModal.review?.currency || "CAD"
+                  )}{" "}
+                  from {donationAllocationModal.review?.donor_email || "guest / unclaimed donor"}
+                </div>
+              </div>
+              <button type="button" className="btn-close" onClick={closeDonationAllocationModal} />
+            </div>
+            <div className="row g-2">
+              <div className="col-12">
+                <label className="form-label small">Allocation target</label>
+                <select
+                  className="form-select form-select-sm"
+                  value={donationAllocationModal.targetType}
+                  onChange={(e) =>
+                    setDonationAllocationModal((curr) => ({
+                      ...curr,
+                      targetType: e.target.value,
+                      targetOrgId: e.target.value === "org" ? curr.targetOrgId : "",
+                      targetEventId: e.target.value === "event" ? curr.targetEventId : "",
+                    }))
+                  }
+                >
+                  <option value="org">Organization</option>
+                  <option value="event">Event</option>
+                  <option value="unrestricted">Unrestricted</option>
+                </select>
+              </div>
+              {donationAllocationModal.targetType === "org" ? (
+                <div className="col-12">
+                  <label className="form-label small">Organization</label>
+                  <select
+                    className="form-select form-select-sm"
+                    value={donationAllocationModal.targetOrgId}
+                    onChange={(e) =>
+                      setDonationAllocationModal((curr) => ({ ...curr, targetOrgId: e.target.value }))
+                    }
+                  >
+                    <option value="">Select organization</option>
+                    {allocationOrgOptions.map((org) => (
+                      <option key={`donation-org-${org.id}`} value={String(org.id)}>
+                        {org.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : null}
+              {donationAllocationModal.targetType === "event" ? (
+                <div className="col-12">
+                  <label className="form-label small">Event</label>
+                  <select
+                    className="form-select form-select-sm"
+                    value={donationAllocationModal.targetEventId}
+                    onChange={(e) =>
+                      setDonationAllocationModal((curr) => ({ ...curr, targetEventId: e.target.value }))
+                    }
+                  >
+                    <option value="">Select event</option>
+                    {allocationEventOptions.map((event) => (
+                      <option key={`donation-event-${event.id}`} value={event.id}>
+                        {event.title}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : null}
+              <div className="col-12">
+                <label className="form-label small">Notes</label>
+                <textarea
+                  rows="3"
+                  className="form-control form-control-sm"
+                  placeholder="Optional review notes"
+                  value={donationAllocationModal.notes}
+                  onChange={(e) =>
+                    setDonationAllocationModal((curr) => ({ ...curr, notes: e.target.value }))
+                  }
+                />
+              </div>
+            </div>
+            <div className="d-flex justify-content-end gap-2 mt-3">
+              <button type="button" className="btn btn-outline-secondary btn-sm" onClick={closeDonationAllocationModal}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                disabled={donationAllocationModal.submitting}
+                onClick={submitDonationManualAllocation}
+              >
+                {donationAllocationModal.submitting ? "Saving…" : "Save allocation"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <div className="admin-toast-stack">
         {toasts.map((toast) => (
           <div key={toast.id} className={`admin-toast admin-toast-${toast.type}`}>
@@ -2413,6 +3108,50 @@ export default function AdminDashboard() {
           font-size: 0.89rem;
         }
         .admin-table tbody tr:hover { background: rgba(69, 90, 124, 0.04); }
+        .admin-policy-table-wrap {
+          overflow-x: auto;
+          overflow-y: hidden;
+        }
+        .admin-policy-table {
+          min-width: 1240px;
+        }
+        .admin-policy-table th,
+        .admin-policy-table td {
+          white-space: normal;
+        }
+        .admin-policy-table .admin-table-title-cell {
+          min-width: 240px;
+          max-width: 320px;
+          overflow-wrap: anywhere;
+        }
+        .admin-policy-table td:nth-child(2) {
+          min-width: 120px;
+        }
+        .admin-policy-table .admin-date-cell {
+          min-width: 128px;
+          white-space: nowrap;
+        }
+        .admin-policy-table td:nth-child(3) {
+          min-width: 128px;
+        }
+        .admin-policy-table td:nth-child(4) {
+          min-width: 210px;
+        }
+        .admin-actions-cell {
+          min-width: 122px;
+        }
+        .admin-table-actions {
+          display: grid;
+          gap: 0.35rem;
+          min-width: 110px;
+        }
+        .admin-table-actions .btn {
+          width: 100%;
+          white-space: nowrap;
+        }
+        .admin-row-highlight {
+          background: rgba(255, 86, 86, 0.08);
+        }
         .admin-chart-svg { width: 100%; height: 170px; display: block; }
         .admin-chart-axis-label {
           fill: #6b778d;
@@ -2607,6 +3346,11 @@ export default function AdminDashboard() {
           .admin-nav-btn { padding: 0.5rem 0.62rem; font-size: 0.9rem; }
           .admin-stat-value { font-size: 1.55rem; }
           .admin-main { padding-bottom: 5rem !important; }
+        }
+        @media (max-width: 1399.98px) {
+          .admin-policy-table {
+            min-width: 1320px;
+          }
         }
       `}</style>
     </div>

@@ -72,7 +72,7 @@ const PLATFORM_FAQ_KB = {
     key: "ic",
     title: "How IC works",
     answer:
-      "Impact Credits (IC) are earned from verified volunteering. The base is 25 IC per verified event, with reliability multipliers increasing rewards for consistent follow-through.",
+      "Impact Credits (IC) are earned from verified volunteering based on role complexity and verified time. Current tiers are 10, 15, 20, and 30 IC per hour for helper, skilled, specialist, and leadership roles.",
   },
   subscriptions: {
     key: "subscriptions",
@@ -815,7 +815,7 @@ async function handleDraftEventListing(toolInput = {}, _userId, orgId) {
         status: "draft",
         visibility: "public",
         verification_method: "host_attest",
-        impact_credits_base: 25,
+        impact_credits_base: 10,
         waitlist_enabled: true,
         cause_tags: [],
         attendance_methods: [],

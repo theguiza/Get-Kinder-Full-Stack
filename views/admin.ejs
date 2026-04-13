@@ -17,12 +17,21 @@
     .admin-shell-subheading {
       color: #455a7c;
     }
+    .admin-shell-container {
+      width: min(1680px, calc(100vw - 32px));
+      margin: 0 auto;
+    }
+    @media (max-width: 991.98px) {
+      .admin-shell-container {
+        width: min(100%, calc(100vw - 24px));
+      }
+    }
   </style>
 </head>
 <body style="background:#f5f7fb; padding-top: clamp(88px, 14vw, 112px);">
   <%- include("partials/site-header", { currentPage: "admin" }) %>
 
-  <main class="container py-4">
+  <main class="container-fluid admin-shell-container py-4 px-0">
     <header class="mb-3">
       <h1 class="admin-shell-heading mb-1">Admin Dashboard</h1>
       <p class="admin-shell-subheading mb-0">Platform controls and approvals.</p>

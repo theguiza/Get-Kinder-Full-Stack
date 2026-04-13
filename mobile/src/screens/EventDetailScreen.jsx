@@ -272,10 +272,16 @@ export default function EventDetailScreen() {
   const spotsValue = `${acceptedCount} / ${
     Number.isFinite(capacity) && capacity > 0 ? capacity : '∞'
   }`;
-  const impactCreditsValue =
-    evt.impact_credits_base !== null && evt.impact_credits_base !== undefined
-      ? evt.impact_credits_base
-      : 25;
+  const impactCreditsRate =
+    evt.impact_credits_rate !== null && evt.impact_credits_rate !== undefined
+      ? evt.impact_credits_rate
+      : evt.impact_credits_base !== null && evt.impact_credits_base !== undefined
+        ? evt.impact_credits_base
+        : 10;
+  const impactCreditsEstimate =
+    evt.impact_credits_estimate !== null && evt.impact_credits_estimate !== undefined
+      ? evt.impact_credits_estimate
+      : impactCreditsRate;
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
@@ -372,7 +378,7 @@ export default function EventDetailScreen() {
             <View style={styles.detailsColumnRight}>
               <DetailField
                 label="Impact Credits"
-                value={String(impactCreditsValue)}
+                value={`${impactCreditsRate} IC/hr · ~${impactCreditsEstimate} IC`}
               />
               <DetailField label="Spots" value={spotsValue} />
             </View>

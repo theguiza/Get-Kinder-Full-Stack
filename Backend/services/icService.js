@@ -1,15 +1,19 @@
 // Backend/services/icService.js
 // Awards IC to a volunteer after attendance is verified.
 
+import { computeVolunteerReward } from "../../services/volunteerRewardService.js";
+
 export async function awardIcForRsvp(pool, { userId, eventId }) {
   // Fetch the RSVP, joined to the event and role
   const { rows } = await pool.query(
     `SELECT
        r.id                  AS rsvp_id,
        r.role_id,
+       r.attended_minutes,
        r.verification_status,
        e.start_at,
        e.end_at,
+       e.impact_credits_base,
        COALESCE(er.tier, 'standard') AS tier
      FROM event_rsvps r
      JOIN events e ON e.id = r.event_id
@@ -29,24 +33,14 @@ export async function awardIcForRsvp(pool, { userId, eventId }) {
     return { skipped: true, reason: 'already_verified' };
   }
 
-  // Calculate duration in hours, minimum 0
-  const startAt = rsvp.start_at ? new Date(rsvp.start_at) : null;
-  const endAt   = rsvp.end_at   ? new Date(rsvp.end_at)   : null;
-
-  let durationHours = 0;
-  if (startAt && endAt && endAt > startAt) {
-    durationHours = (endAt - startAt) / (1000 * 60 * 60);
-  }
-
-  const IC_RATE_BY_TIER = {
-    standard:   10,
-    skilled:    15,
-    specialist: 20,
-    leadership: 30,
-  };
-
-  const rate    = IC_RATE_BY_TIER[rsvp.tier] ?? 10;
-  const icAmount = Math.max(1, Math.round(durationHours * rate));
+  const reward = computeVolunteerReward({
+    roleTier: rsvp.tier,
+    impactCreditsBase: rsvp.impact_credits_base,
+    attendedMinutes: rsvp.attended_minutes,
+    startAt: rsvp.start_at,
+    endAt: rsvp.end_at,
+  });
+  const icAmount = reward.impact_credits_award;
 
   // Mark RSVP verified and insert IC credit in one transaction
   const client = await pool.connect();
@@ -73,5 +67,11 @@ export async function awardIcForRsvp(pool, { userId, eventId }) {
     client.release();
   }
 
-  return { awarded: true, icAmount, tier: rsvp.tier, durationHours };
+  return {
+    awarded: true,
+    icAmount,
+    tier: reward.reward_tier || rsvp.tier,
+    durationHours: reward.duration_hours,
+    hourlyRate: reward.impact_credits_rate,
+  };
 }

@@ -278,7 +278,7 @@ export async function listMyEvents(req, res) {
       impact_credits_base:
         row.impact_credits_base !== null && row.impact_credits_base !== undefined
           ? Number(row.impact_credits_base)
-          : 25,
+          : 10,
       reliability_weight:
         row.reliability_weight !== null && row.reliability_weight !== undefined
           ? Number(row.reliability_weight)

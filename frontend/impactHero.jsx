@@ -95,11 +95,11 @@ function statusPill(eventDetail, baseEvent) {
 }
 
 function estimateKind(detail) {
-  const rewardPool = Number(detail?.reward_pool_kind) || 0;
-  const accepted = Number(detail?.rsvp_counts?.accepted) || 0;
-  const capacity = detail?.capacity != null ? Number(detail.capacity) : null;
-  const denom = Math.max(1, capacity || accepted || 1);
-  return Math.floor(rewardPool / denom);
+  const estimate = Number(detail?.impact_credits_estimate);
+  if (Number.isFinite(estimate) && estimate > 0) return Math.trunc(estimate);
+  const rate = Number(detail?.impact_credits_rate ?? detail?.impact_credits_base);
+  if (Number.isFinite(rate) && rate > 0) return Math.trunc(rate);
+  return 0;
 }
 
 export default function ImpactHero(props = {}) {

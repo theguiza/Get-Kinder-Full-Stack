@@ -5,7 +5,7 @@ const BRAND_VARS = `
 `;
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const RSVP_PRIORITY = new Set(["accepted", "checked_in", "interested", "waitlisted"]);
+const APPROVED_RSVP_STATUSES = new Set(["accepted", "checked_in"]);
 
 const SKILL_MAP = {
   cleanup: ["Stewardship", "Safety"],
@@ -53,37 +53,50 @@ function withinNext7Days(startAt) {
   return start >= now && start <= seven;
 }
 
-function estimateKindPerPerson(evt = {}) {
-  const reward = Number(evt.reward_pool_kind) || 0;
-  const capacity = evt.capacity != null ? Number(evt.capacity) : null;
-  const denom = Math.max(1, capacity || 1);
-  return Math.floor(reward / denom);
+function getEventImpactCredits(evt = {}) {
+  const base = Number(evt.impact_credits_base);
+  return Number.isFinite(base) && base > 0 ? Math.trunc(base) : 0;
 }
 
 function buildHostLabel(evt) {
-  return evt?.creator_user_id ? "Get Kinder-led" : "Partner Org";
+  const orgName = typeof evt?.org_name === "string" ? evt.org_name.trim() : "";
+  if (orgName) {
+    return /get\s*kinder|get\s*kindr/i.test(orgName) ? "Get Kinder" : orgName;
+  }
+  return "Independent organizer";
 }
 
 function statusTone(status) {
   if (status === "accepted" || status === "checked_in") return "text-emerald-700 bg-emerald-50 border border-emerald-200";
-  if (status === "interested" || status === "waitlisted") return "text-amber-700 bg-amber-50 border border-amber-200";
+  if (status === "pending" || status === "interested") return "text-amber-700 bg-amber-50 border border-amber-200";
+  if (status === "waitlisted") return "text-orange-700 bg-orange-50 border border-orange-200";
+  if (status === "declined") return "text-rose-700 bg-rose-50 border border-rose-200";
   return "text-slate-600 bg-slate-100 border border-slate-200";
 }
 
 function statusLabel(status) {
-  if (status === "accepted" || status === "checked_in") return "Pending Approval";
-  if (status === "interested" || status === "waitlisted") return "Awaiting approval";
+  if (status === "accepted" || status === "checked_in") return "Approved";
+  if (status === "pending" || status === "interested") return "Pending approval";
+  if (status === "waitlisted") return "Waitlisted";
+  if (status === "declined") return "Declined";
   return "Not requested";
 }
 
-function useEventPlan() {
-  const [events, setEvents] = useState([]);
+function useEventPlan(initialItems = []) {
+  const hasInitialItems = Array.isArray(initialItems) && initialItems.length > 0;
+  const [events, setEvents] = useState(() => (hasInitialItems ? initialItems : []));
   const [details, setDetails] = useState({});
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!hasInitialItems);
   const [error, setError] = useState(null);
   const [rsvpLoading, setRsvpLoading] = useState({});
 
   useEffect(() => {
+    if (hasInitialItems) {
+      setEvents(initialItems);
+      setLoading(false);
+      setError(null);
+      return;
+    }
     let alive = true;
     setLoading(true);
     setError(null);
@@ -105,10 +118,10 @@ function useEventPlan() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [hasInitialItems, initialItems]);
 
   const upcoming = useMemo(
-    () => (events || []).filter((evt) => evt?.status === "published" && withinNext7Days(evt.start_at)).sort((a, b) => {
+    () => (events || []).filter((evt) => withinNext7Days(evt.start_at)).sort((a, b) => {
       const aTime = new Date(a.start_at || 0).getTime();
       const bTime = new Date(b.start_at || 0).getTime();
       return aTime - bTime;
@@ -150,30 +163,34 @@ function useEventPlan() {
   const planItems = useMemo(() => {
     const enriched = upcoming.map((evt) => {
       const detail = details[evt.id] || {};
-      const viewerStatus = detail.viewer_rsvp_status || evt.viewer_rsvp_status || null;
+      const viewerStatus =
+        detail.viewer_rsvp_status ||
+        evt.viewer_rsvp_status ||
+        evt.rsvp_status ||
+        null;
       const capacity = evt.capacity != null ? evt.capacity : detail.capacity;
-      const accepted = detail?.rsvp_counts?.accepted ?? evt?.rsvp_counts?.accepted ?? 0;
+      const accepted = detail?.rsvp_counts?.accepted ?? evt?.rsvp_counts?.accepted ?? evt?.accepted_count ?? 0;
       const hasCapacity = capacity == null ? true : accepted < capacity;
-      const perUser = estimateKindPerPerson({ reward_pool_kind: evt.reward_pool_kind, capacity });
+      const impactCredits = getEventImpactCredits(evt);
       return {
         ...evt,
+        org_name: detail.org_name || evt.org_name || null,
         viewerStatus,
         capacity,
         accepted,
         hasCapacity,
-        perUser,
+        impactCredits,
       };
     });
 
-    const prioritized = enriched.filter((evt) => RSVP_PRIORITY.has(evt.viewerStatus));
-    const remaining = enriched.filter((evt) => !RSVP_PRIORITY.has(evt.viewerStatus) && evt.hasCapacity);
-
-    return [...prioritized, ...remaining].slice(0, 3);
+    return enriched
+      .filter((evt) => APPROVED_RSVP_STATUSES.has(String(evt.viewerStatus || "").trim().toLowerCase()))
+      .slice(0, 3);
   }, [upcoming, details]);
 
   const totals = useMemo(() => {
     const planned = planItems.length;
-    const earnable = planItems.reduce((sum, evt) => sum + (Number(evt.perUser) || 0), 0);
+    const earnable = planItems.reduce((sum, evt) => sum + (Number(evt.impactCredits) || 0), 0);
     const skillSet = new Set();
     planItems.forEach((evt) => mapSkills(evt.category).forEach((s) => skillSet.add(s)));
     return { planned, earnable, skills: skillSet.size || 0 };
@@ -211,8 +228,9 @@ function useEventPlan() {
   return { loading, error, planItems, totals, setError, setLoading, refetch: () => {}, handleRsvp, rsvpLoading };
 }
 
-export default function WeeksPlan() {
-  const { loading, error, planItems, totals, handleRsvp, rsvpLoading } = useEventPlan();
+export default function WeeksPlan(props = {}) {
+  const { initialItems = [] } = props;
+  const { loading, error, planItems, totals, handleRsvp, rsvpLoading } = useEventPlan(initialItems);
   const todayIdx = useMemo(() => {
     const isoDay = new Date().getDay(); // 0-6, Sun=0
     return isoDay === 0 ? 6 : isoDay - 1;
@@ -263,12 +281,12 @@ export default function WeeksPlan() {
             </div>
           ) : empty ? (
             <div className="rounded-lg border border-dashed border-slate-200 bg-white px-4 py-3">
-              <p className="text-sm text-slate-700">No upcoming serves planned. Browse opportunities.</p>
+              <p className="text-sm text-slate-700">No approved opportunities are scheduled for this week.</p>
               <a
                 href="/events"
                 className="inline-flex items-center mt-2 px-3 py-2 rounded-lg bg-[var(--ink)] text-white text-sm font-semibold hover:opacity-90"
               >
-                Browse opportunities
+                Find opportunities
               </a>
             </div>
           ) : (
@@ -276,9 +294,9 @@ export default function WeeksPlan() {
               const dayLabel = formatDay(evt.start_at, evt.tz);
               const timeLabel = formatTimeRange(evt.start_at, evt.end_at, evt.tz);
               const skills = mapSkills(evt.category);
-              const orgKindness = "Org Kindness: — (no ratings yet)";
               const statusClass = statusTone(evt.viewerStatus);
               const status = statusLabel(evt.viewerStatus);
+              const isApproved = evt.viewerStatus === "accepted" || evt.viewerStatus === "checked_in";
               return (
                 <div
                   key={evt.id}
@@ -304,22 +322,14 @@ export default function WeeksPlan() {
                   </div>
 
                   <div className="mt-3 grid gap-1 text-sm text-slate-600">
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-[var(--ink)]">+{evt.perUser || 0} $KIND</span>
-                      <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
-                        Capacity: {evt.accepted || 0}/{evt.capacity || "∞"}
-                      </span>
-                    </div>
-                    <div>Skills: {skills.join(", ")}</div>
-                    <div>{orgKindness}</div>
-                  </div>
-
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {evt.viewerStatus === "accepted" || evt.viewerStatus === "checked_in" ? (
-                      <>
-                        <button type="button" className="px-3 py-1.5 rounded-lg bg-[var(--ink)] text-white text-xs font-semibold hover:opacity-90">
-                          Checklist
-                        </button>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-semibold text-[var(--ink)]">+{evt.impactCredits || 0} IC</span>
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
+                          Capacity: {evt.accepted || 0}/{evt.capacity || "∞"}
+                        </span>
+                      </div>
+                      {isApproved ? (
                         <button
                           type="button"
                           className="px-3 py-1.5 rounded-lg border border-slate-200 text-[var(--ink)] text-xs font-semibold bg-white hover:bg-slate-50"
@@ -327,25 +337,46 @@ export default function WeeksPlan() {
                         >
                           Add to calendar
                         </button>
-                      </>
-                    ) : evt.viewerStatus === "interested" || evt.viewerStatus === "waitlisted" ? (
+                      ) : null}
+                    </div>
+                    <div>Skills: {skills.join(", ")}</div>
+                  </div>
+
+                  {!isApproved ? (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {evt.viewerStatus === "pending" || evt.viewerStatus === "interested" ? (
                       <>
                         <button
                           type="button"
-                          disabled={rsvpLoading[evt.id]}
-                          className="px-3 py-1.5 rounded-lg bg-[var(--coral)] text-white text-xs font-semibold hover:opacity-90 disabled:opacity-60"
-                          onClick={() => handleRsvp(evt.id, "accept")}
+                          disabled
+                          className="px-3 py-1.5 rounded-lg bg-amber-100 text-amber-800 text-xs font-semibold cursor-default"
                         >
-                          {rsvpLoading[evt.id] ? "Saving…" : "Request approval"}
+                          Pending approval
                         </button>
-                        <button
-                          type="button"
+                        <a
+                          href={`/events/${encodeURIComponent(evt.id)}`}
                           className="px-3 py-1.5 rounded-lg border border-slate-200 text-[var(--ink)] text-xs font-semibold bg-white hover:bg-slate-50"
                         >
-                          Choose backup shift
-                        </button>
+                          Details
+                        </a>
                       </>
-                    ) : (
+                      ) : evt.viewerStatus === "waitlisted" ? (
+                      <>
+                        <button
+                          type="button"
+                          disabled
+                          className="px-3 py-1.5 rounded-lg bg-orange-100 text-orange-800 text-xs font-semibold cursor-default"
+                        >
+                          Waitlisted
+                        </button>
+                        <a
+                          href={`/events/${encodeURIComponent(evt.id)}`}
+                          className="px-3 py-1.5 rounded-lg border border-slate-200 text-[var(--ink)] text-xs font-semibold bg-white hover:bg-slate-50"
+                        >
+                          Details
+                        </a>
+                      </>
+                      ) : (
                       <>
                         <button
                           type="button"
@@ -362,8 +393,9 @@ export default function WeeksPlan() {
                           Details
                         </a>
                       </>
-                    )}
-                  </div>
+                      )}
+                    </div>
+                  ) : null}
                 </div>
               );
             })
@@ -375,7 +407,7 @@ export default function WeeksPlan() {
           data-testid="weeks-plan-totals"
         >
           <div><span className="font-semibold text-[var(--ink)]">{totals.planned}</span> planned</div>
-          <div><span className="font-semibold text-[var(--ink)]">+{totals.earnable}</span> $KIND earnable</div>
+          <div><span className="font-semibold text-[var(--ink)]">+{totals.earnable}</span> IC earnable</div>
           <div><span className="font-semibold text-[var(--ink)]">{totals.skills}</span> skills</div>
           <div><span className="font-semibold text-[var(--ink)]">—</span> rating trend</div>
         </div>

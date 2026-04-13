@@ -9,6 +9,8 @@ import { buildProfileCompletion } from '../services/profileCompletionService.js'
 import { getSummary as getRatingsSummary } from '../services/ratingsService.js';
 import { getMatchedEventsForUser } from '../services/eventMatchingService.js';
 
+const APPROVED_RSVP_STATUSES = new Set(['accepted', 'checked_in']);
+
 export function makeDashboardController(pool) {
   if (!pool || typeof pool.query !== 'function') {
     throw new TypeError('A pg Pool instance is required');
@@ -43,6 +45,7 @@ export function makeDashboardController(pool) {
         let dashboardCompletedEvent = null;
         let dashboardCompletedEvents = [];
         let dashboardUpcomingEvent = null;
+        let dashboardWeekPlanEvents = [];
         let dashboardRecommendedEvents = [];
         let dashboardRecommendationsSummary = "";
         let dashboardRecommendationsFallbackMode = null;
@@ -61,7 +64,14 @@ export function makeDashboardController(pool) {
               const bTime = b.completed_at ? b.completed_at.getTime() : 0;
               return bTime - aTime;
             });
+          const approvedUpcomingRows = upcomingRows.filter((row) =>
+            APPROVED_RSVP_STATUSES.has(String(row?.rsvp_status || '').trim().toLowerCase())
+          );
           dashboardUpcomingEvent = upcomingRows[0] || null;
+          dashboardWeekPlanEvents = approvedUpcomingRows.slice(0, 3);
+          console.log('[dashboard] upcomingRows count:', upcomingRows.length);
+          console.log('[dashboard] approvedUpcomingRows count:', approvedUpcomingRows.length);
+          console.log('[dashboard] weekPlanEvents:', JSON.stringify(dashboardWeekPlanEvents.map(r => ({ id: r.id, title: r.title, status: r.status, event_status: r.event_status, rsvp_status: r.rsvp_status, is_upcoming: r.is_upcoming, start_at: r.start_at }))));
           dashboardCompletedEvents = completedRows.slice(0, 3);
           dashboardCompletedEvent = dashboardCompletedEvents[0] || null;
         } catch (portfolioErr) {
@@ -140,6 +150,7 @@ export function makeDashboardController(pool) {
           dashboardCompletedEvent,
           dashboardCompletedEvents,
           dashboardUpcomingEvent,
+          dashboardWeekPlanEvents,
           dashboardRecommendedEvents,
           dashboardRecommendationsSummary,
           dashboardRecommendationsFallbackMode,
@@ -177,6 +188,7 @@ export function makeDashboardController(pool) {
             dashboardCompletedEvent: null,
             dashboardCompletedEvents: [],
             dashboardUpcomingEvent: null,
+            dashboardWeekPlanEvents: [],
             dashboardRecommendedEvents: [],
             dashboardRecommendationsSummary: "",
             dashboardRecommendationsFallbackMode: null,

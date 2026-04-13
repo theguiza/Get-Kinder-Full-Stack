@@ -249,6 +249,43 @@ async function resolveHostUserIds(req) {
   return scope.memberUserIds;
 }
 
+async function attachViewerRsvpStatuses(req, events) {
+  const rows = Array.isArray(events) ? events : [];
+  if (!rows.length) return rows;
+
+  let viewerId = null;
+  try {
+    viewerId = await resolveUserId(req);
+  } catch {
+    viewerId = null;
+  }
+  if (!viewerId) return rows;
+
+  const eventIds = rows
+    .map((eventItem) => String(eventItem?.id || "").trim())
+    .filter(Boolean);
+  if (!eventIds.length) return rows;
+
+  const { rows: rsvpRows } = await pool.query(
+    `
+      SELECT event_id::text AS event_id, status
+      FROM event_rsvps
+      WHERE attendee_user_id = $1
+        AND event_id::text = ANY($2::text[])
+    `,
+    [viewerId, eventIds]
+  );
+
+  const statusByEventId = new Map(
+    (Array.isArray(rsvpRows) ? rsvpRows : []).map((row) => [String(row.event_id), row.status || null])
+  );
+
+  return rows.map((eventItem) => ({
+    ...eventItem,
+    viewer_rsvp_status: statusByEventId.get(String(eventItem?.id || "")) || eventItem?.viewer_rsvp_status || null,
+  }));
+}
+
 function eventIsOwnedByHostScope(eventRow, hostUserIds) {
   if (!eventRow?.creator_user_id) return false;
   return hostUserIds.includes(String(eventRow.creator_user_id));
@@ -273,7 +310,7 @@ function mapEventRowForEdit(row) {
     cause_tags: normalizeCauseTags(row.cause_tags),
     impact_credits_base:
       row.impact_credits_base === null || row.impact_credits_base === undefined
-        ? 25
+        ? 10
         : Number(row.impact_credits_base),
     reliability_weight:
       row.reliability_weight === null || row.reliability_weight === undefined
@@ -308,7 +345,8 @@ export async function listEvents(req, res) {
       communityTag,
       causeTag,
     });
-    const data = Array.isArray(result?.events) ? result.events : [];
+    const baseData = Array.isArray(result?.events) ? result.events : [];
+    const data = await attachViewerRsvpStatuses(req, baseData);
     const nextCursor = result?.nextCursor || null;
     return res.json({
       ok: true,
@@ -2024,10 +2062,10 @@ async function buildEventPayload(body, { strict = false, fallback = {} } = {}) {
   const verificationMethod = VERIFICATION_METHOD_SET.has(verificationMethodInput)
     ? verificationMethodInput
     : "host_attest";
-  const impactCreditsRaw = body.impact_credits_base ?? base.impact_credits_base ?? 25;
+  const impactCreditsRaw = body.impact_credits_base ?? base.impact_credits_base ?? 10;
   const impactCreditsBase = Number.isFinite(Number(impactCreditsRaw))
     ? Math.max(0, Math.trunc(Number(impactCreditsRaw)))
-    : 25;
+    : 10;
   const reliabilityRaw = body.reliability_weight ?? base.reliability_weight ?? 1;
   const reliabilityWeight = Number.isFinite(Number(reliabilityRaw))
     ? Math.max(0, Math.trunc(Number(reliabilityRaw)))

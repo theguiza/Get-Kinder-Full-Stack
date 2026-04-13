@@ -72,6 +72,7 @@ import {
   ADMIN_ORG_PORTAL_PREVIEW_USER_ID_KEY,
   ADMIN_ORG_PORTAL_PREVIEW_ORG_ID_KEY,
 } from "./services/orgScopeService.js";
+import { runDueDonationPolicyAllocations } from "./services/donationAllocationService.js";
 // ─────────────────────────────────────────────────────────────────────────────
 neoVerify()
   .then(() => console.log('Neo4j connected ✅'))
@@ -3123,6 +3124,23 @@ if (process.env.NODE_ENV === 'production') {
       }
     },
     { timezone: 'America/Vancouver' }
+  );
+}
+
+if (process.env.NODE_ENV === "production" && process.env.ENABLE_DONATION_POLICY_CRON !== "false") {
+  cron.schedule(
+    "*/15 * * * *",
+    async () => {
+      try {
+        const result = await runDueDonationPolicyAllocations({ limit: 100 });
+        if (result?.processedCount) {
+          console.log(`[donation-policy] processed=${result.processedCount}`);
+        }
+      } catch (e) {
+        console.error("[donation-policy] cron failed:", e);
+      }
+    },
+    { timezone: "America/Vancouver" }
   );
 }
 // Cron: run every day at KINDNESS_SEND_TIME (HH:MM, Vancouver)

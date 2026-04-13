@@ -76,6 +76,11 @@ export async function createManualDonation(req, res) {
           currency,
           pool_slug: poolSlug,
         },
+        review: {
+          id: result?.reviewId || null,
+          status: result?.reviewStatus || "pending_manual_review",
+          due_at: result?.reviewDueAt || null,
+        },
         pool_tx: {
           pool_id: result?.poolId || null,
         },
@@ -139,6 +144,11 @@ export async function confirmSquareDonation(req, res) {
         credits_added: result?.creditsIssued ?? null,
         pool_slug: poolSlug,
         status: "captured",
+        review: {
+          id: result?.reviewId || null,
+          status: result?.reviewStatus || "pending_manual_review",
+          due_at: result?.reviewDueAt || null,
+        },
       },
     });
   } catch (err) {

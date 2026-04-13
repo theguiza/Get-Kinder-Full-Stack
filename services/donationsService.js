@@ -1,4 +1,7 @@
 import pool from "../Backend/db/pg.js";
+import { sendDonationReviewNotification } from "./donationAllocationService.js";
+import { openDonationAllocationReview } from "./donationReviewService.js";
+import { createFundingCreditFromDonation } from "./fundingCreditService.js";
 
 export function computeCreditsFromDonation(amountCents, centsPerCredit = null) {
   const cents = Number(amountCents);
@@ -29,6 +32,7 @@ export async function recordDonation({
   try {
     client = await pool.connect();
     await client.query("BEGIN");
+    let donationReviewResult = null;
 
     if (squarePaymentId) {
       const { rows } = await client.query(
@@ -99,12 +103,64 @@ export async function recordDonation({
       creditsInserted = creditsIssued;
     }
 
+    const { rows: [creditTxRow] = [] } = await client.query(
+      `
+        SELECT id, amount_credits
+        FROM pool_transactions
+        WHERE pool_id = $1
+          AND donation_id = $2
+          AND direction = 'credit'
+          AND reason = 'donation_in'
+        ORDER BY created_at ASC, id ASC
+        LIMIT 1
+      `,
+      [poolId, donationId]
+    );
+
+    if (creditTxRow?.id) {
+      await createFundingCreditFromDonation(client, {
+        poolId,
+        originPoolTransactionId: creditTxRow.id,
+        donationId,
+        amountIc: creditTxRow.amount_credits,
+        createdByUserId: donorUserId,
+        metadata: {
+          pool_slug: poolSlug,
+          stage: "stage1_shadow_write",
+        },
+      });
+    }
+
+    donationReviewResult = await openDonationAllocationReview(client, {
+      donationId,
+      metadata: {
+        pool_slug: poolSlug,
+        source: "donation",
+        stage: "stage1_shadow_write",
+      },
+    });
+
     await client.query("COMMIT");
+
+    if (donationReviewResult?.created) {
+      try {
+        await sendDonationReviewNotification({
+          reviewId: donationReviewResult?.row?.id || null,
+          donationId,
+        });
+      } catch (notificationError) {
+        console.error("Donation review notification error:", notificationError);
+      }
+    }
+
     return {
       donationId,
       poolId,
       creditsIssued: issuedForReturn || creditsIssued,
       creditsInserted,
+      reviewId: donationReviewResult?.row?.id || null,
+      reviewStatus: donationReviewResult?.row?.status || "pending_manual_review",
+      reviewDueAt: donationReviewResult?.row?.review_due_at || null,
     };
   } catch (err) {
     if (client) {

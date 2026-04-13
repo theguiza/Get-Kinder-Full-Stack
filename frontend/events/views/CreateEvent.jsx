@@ -52,6 +52,12 @@ const ROLE_TIER_RATE_OPTIONS = [
     description: "Own the room, guide the team",
   },
 ];
+const ROLE_TIER_TO_RATE = {
+  standard: 10,
+  skilled: 15,
+  specialist: 20,
+  leadership: 30,
+};
 
 let leafletAssetsPromise = null;
 
@@ -107,6 +113,13 @@ function getTimezoneOptions(selectedValue) {
   if (!normalized) return TIMEZONE_OPTIONS;
   if (TIMEZONE_OPTIONS.some((option) => option.value === normalized)) return TIMEZONE_OPTIONS;
   return [{ value: normalized, label: normalized }, ...TIMEZONE_OPTIONS];
+}
+
+function deriveTierRateProfileFromImpactCredits(value) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return "standard";
+  const match = Object.entries(ROLE_TIER_TO_RATE).find(([, rate]) => rate === Math.trunc(amount));
+  return match?.[0] || "standard";
 }
 
 function formatCoordinate(value) {
@@ -262,7 +275,11 @@ function eventToFormState(event = {}) {
     description: event.description || "",
     org_name: event.org_name || "",
     community_tag: event.community_tag || "",
-    tier_rate_profile: "helper",
+    tier_rate_profile: deriveTierRateProfileFromImpactCredits(event.impact_credits_base),
+    impact_credits_base:
+      event.impact_credits_base === null || event.impact_credits_base === undefined
+        ? ROLE_TIER_TO_RATE.standard
+        : Number(event.impact_credits_base),
     cause_tags: causeTagSelection,
     cause_tag_other: causeTagOther,
     requirements: event.requirements || "",
@@ -293,7 +310,8 @@ function createInitialState(defaultOrgName = "") {
     description: "",
     org_name: defaultOrgName || "",
     community_tag: "",
-    tier_rate_profile: "helper",
+    tier_rate_profile: "standard",
+    impact_credits_base: ROLE_TIER_TO_RATE.standard,
     cause_tags: "",
     cause_tag_other: "",
     requirements: "",
@@ -1250,7 +1268,14 @@ export function CreateEvent({
                 <select
                   name="tier_rate_profile"
                   value={form.tier_rate_profile}
-                  onChange={(e) => updateField("tier_rate_profile", e.target.value)}
+                  onChange={(e) => {
+                    const nextTier = e.target.value;
+                    setForm((current) => ({
+                      ...current,
+                      tier_rate_profile: nextTier,
+                      impact_credits_base: ROLE_TIER_TO_RATE[nextTier] || ROLE_TIER_TO_RATE.standard,
+                    }));
+                  }}
                 >
                   {ROLE_TIER_RATE_OPTIONS.map((option) => (
                     <option key={`tier-rate-${option.value}`} value={option.value}>
@@ -1525,6 +1550,9 @@ function buildPayload(form, status) {
     Array.isArray(form.attendance_methods) && form.attendance_methods.length > 0
       ? form.attendance_methods
       : ["social_proof"];
+  const impactCreditsBase = Number.isFinite(Number(form.impact_credits_base))
+    ? Number(form.impact_credits_base)
+    : (ROLE_TIER_TO_RATE[form.tier_rate_profile] || ROLE_TIER_TO_RATE.standard);
   const startTime = typeof form.start_time === "string" ? form.start_time.trim() : "";
   const endTime = typeof form.end_time === "string" ? form.end_time.trim() : "";
   const timeRange = startTime && endTime ? `${startTime}-${endTime}` : null;
@@ -1543,6 +1571,7 @@ function buildPayload(form, status) {
     description: form.description?.trim() || null,
     org_name: form.org_name?.trim() || null,
     community_tag: form.community_tag?.trim() || null,
+    impact_credits_base: impactCreditsBase,
     cause_tags: causeTags,
     requirements: form.requirements?.trim() || null,
     reward_pool_kind: Number(form.reward_pool_kind) || 0,

@@ -83,7 +83,12 @@
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/js/bootstrap.bundle.min.js" integrity="sha384-k6d4wzSIapyDyv1kpU366/PK5hCdSbCRGRCMv+eplOQJWyd1fbcAu9OCUj5zNLiq" crossorigin="anonymous"></script>
   <script src="/js/bundles/entry.js?<%= (typeof assetTag !== 'undefined' ? assetTag : '') %>"></script>
   <script>
-    window.renderDonatePage && window.renderDonatePage("#donate-root", {});
+    window.renderDonatePage && window.renderDonatePage("#donate-root", {
+      isAuthenticated: <%= user ? "true" : "false" %>,
+      donorDashboardUrl: "/donor",
+      loginUrl: "/login",
+      supportEmail: "kai@getkinder.ai"
+    });
   </script>
 </body>
 </html>

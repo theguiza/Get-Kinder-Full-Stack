@@ -65,7 +65,8 @@ function formatEventMeta(event) {
 function EventCard({event, onPress}) {
   const badge = getEventTypeBadge(event?.event_type);
   const metaText = formatEventMeta(event);
-  const impactCredits = Number(event?.impact_credits_base) || 0;
+  const impactCreditsRate = Number(event?.impact_credits_rate || event?.impact_credits_base) || 0;
+  const impactCreditsEstimate = Number(event?.impact_credits_estimate) || impactCreditsRate;
 
   return (
     <TouchableOpacity
@@ -97,9 +98,9 @@ function EventCard({event, onPress}) {
         </Text>
       ) : null}
 
-      {impactCredits > 0 ? (
+      {impactCreditsRate > 0 ? (
         <Text style={styles.eventCredits}>
-          🌟 {impactCredits} Impact Credits
+          🌟 {impactCreditsRate} IC/hr · ~{impactCreditsEstimate} IC
         </Text>
       ) : null}
     </TouchableOpacity>
