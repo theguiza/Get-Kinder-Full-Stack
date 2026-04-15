@@ -1279,23 +1279,23 @@ app.post("/forgot-password", forgotPasswordLimiter, async (req, res) => {
   const submittedEmail = normalizeEmail(req.body?.email);
 
   try {
-    if (RECAPTCHA_ENABLED) {
-      const recaptchaResponse = req.body["g-recaptcha-response"];
-      if (!recaptchaResponse) {
+    if (TURNSTILE_ENABLED) {
+      const turnstileResponse = req.body["cf-turnstile-response"];
+      if (!turnstileResponse) {
         return res.status(400).render("forgot-password", {
           title: "Forgot Password",
-          recaptchaSiteKey: RECAPTCHA_SITE_KEY,
-          message: "Please complete the CAPTCHA.",
+          turnstileSiteKey: TURNSTILE_SITE_KEY,
+          message: "Please complete the challenge.",
           messageType: "error",
         });
       }
-      const recaptchaPassed = await verifyRecaptchaToken(recaptchaResponse, req.ip);
-      if (!recaptchaPassed) {
-        console.log("[RECAPTCHA BLOCKED]", submittedEmail || req.body?.email || "");
+      const turnstilePassed = await verifyTurnstileToken(turnstileResponse, req.ip);
+      if (!turnstilePassed) {
+        console.log("[TURNSTILE BLOCKED]", submittedEmail || req.body?.email || "");
         return res.status(400).render("forgot-password", {
           title: "Forgot Password",
-          recaptchaSiteKey: RECAPTCHA_SITE_KEY,
-          message: "CAPTCHA verification failed. Please try again.",
+          turnstileSiteKey: TURNSTILE_SITE_KEY,
+          message: "Verification failed. Please try again.",
           messageType: "error",
         });
       }
@@ -1313,7 +1313,7 @@ app.post("/forgot-password", forgotPasswordLimiter, async (req, res) => {
       if (!candidate || candidate.email_verified !== true) {
         return res.render("forgot-password", {
           title: "Forgot Password",
-          recaptchaSiteKey: RECAPTCHA_SITE_KEY,
+          turnstileSiteKey: TURNSTILE_SITE_KEY,
           message: FORGOT_PASSWORD_SUCCESS_MESSAGE,
           messageType: "success",
         });
@@ -1376,7 +1376,7 @@ If you did not request this, you can ignore this email.`;
 
   return res.render("forgot-password", {
     title: "Forgot Password",
-    recaptchaSiteKey: RECAPTCHA_SITE_KEY,
+    turnstileSiteKey: TURNSTILE_SITE_KEY,
     message: FORGOT_PASSWORD_SUCCESS_MESSAGE,
     messageType: "success",
   });
