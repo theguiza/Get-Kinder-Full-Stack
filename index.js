@@ -336,6 +336,27 @@ async function verifyRecaptchaToken(token, remoteIp) {
   return verifyResult?.success === true;
 }
 
+async function verifyTurnstileToken(token, remoteIp) {
+  if (typeof token !== "string" || !token.trim()) return false;
+  if (!TURNSTILE_SECRET_KEY) {
+    console.error("TURNSTILE_SECRET_KEY is missing.");
+    return false;
+  }
+  const body = new URLSearchParams({
+    secret: TURNSTILE_SECRET_KEY,
+    response: token.trim(),
+  });
+  if (remoteIp) body.set("remoteip", String(remoteIp));
+  const res = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: body.toString(),
+  });
+  if (!res.ok) return false;
+  const json = await res.json();
+  return json?.success === true;
+}
+
 const FORGOT_PASSWORD_SUCCESS_MESSAGE =
   "If an account exists for that email, we sent password reset instructions.";
 const INVALID_VERIFICATION_LINK_MESSAGE = "Invalid verification link.";
@@ -367,6 +388,9 @@ const RECAPTCHA_SECRET_KEY =
   || process.env.RECAPTCHA_SECRET
   || process.env.GOOGLE_RECAPTCHA_SECRET_KEY
   || "";
+const TURNSTILE_SITE_KEY = process.env.TURNSTILE_SITE_KEY || "";
+const TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY || "";
+const TURNSTILE_ENABLED = Boolean(TURNSTILE_SITE_KEY && TURNSTILE_SECRET_KEY);
 const RECAPTCHA_ENABLED = Boolean(RECAPTCHA_SITE_KEY && RECAPTCHA_SECRET_KEY);
 const AUTH_PAGE_PATHS = new Set(["/login", "/register", "/forgot-password", "/reset-password"]);
 console.log("[recaptcha] config", {
@@ -595,8 +619,15 @@ passport.use(
           [email]
         );
         if (result.rows.length) {
-          // If user already exists, return that row (including google_id & picture)
-          return done(null, result.rows[0]);
+          const existingUser = result.rows[0];
+          if (!existingUser.email_verified) {
+            await pool.query(
+              "UPDATE userdata SET email_verified = TRUE WHERE id = $1",
+              [existingUser.id]
+            );
+            existingUser.email_verified = true;
+          }
+          return done(null, existingUser);
         } else {
           // 3) This is a brand-new OAuth signup → extract Google ID + profile picture URL
           const googleId = profile.id || null;
@@ -609,9 +640,9 @@ passport.use(
           // 4) Insert all required columns + google_id + picture
           const insert = await pool.query(
             `INSERT INTO userdata 
-               (firstname, lastname, email, password, google_id, picture)
+               (firstname, lastname, email, password, google_id, picture, email_verified)
              VALUES
-               ($1,       $2,       $3,    $4,       $5,        $6)
+               ($1,       $2,       $3,    $4,       $5,        $6,      TRUE)
              RETURNING *`,
             [
               profile.name?.givenName || "",
@@ -851,22 +882,29 @@ app.post("/register", registerLimiter, async (req, res, next) => {
   const email = normalizeEmail(req.body?.email);
   const password = typeof req.body?.password === "string" ? req.body.password : "";
   try {
-    if (RECAPTCHA_ENABLED) {
-      const recaptchaResponse = req.body["g-recaptcha-response"];
-      if (!recaptchaResponse) {
+    // Honeypot check
+    if (req.body?.website) {
+      console.log("[HONEYPOT BLOCKED]", email || req.body?.email || "");
+      return res.redirect("/login?verify=pending"); // silent fake success
+    }
+
+    // Turnstile check
+    if (TURNSTILE_ENABLED) {
+      const turnstileResponse = req.body["cf-turnstile-response"];
+      if (!turnstileResponse) {
         return res.status(400).render("register", {
           title: "Sign Up",
-          recaptchaSiteKey: RECAPTCHA_SITE_KEY,
-          error: "Please complete the CAPTCHA.",
+          turnstileSiteKey: TURNSTILE_SITE_KEY,
+          error: "Please complete the challenge.",
         });
       }
-      const recaptchaPassed = await verifyRecaptchaToken(recaptchaResponse, req.ip);
-      if (!recaptchaPassed) {
-        console.log("[RECAPTCHA BLOCKED]", email || req.body?.email || "");
+      const turnstilePassed = await verifyTurnstileToken(turnstileResponse, req.ip);
+      if (!turnstilePassed) {
+        console.log("[TURNSTILE BLOCKED]", email || req.body?.email || "");
         return res.status(400).render("register", {
           title: "Sign Up",
-          recaptchaSiteKey: RECAPTCHA_SITE_KEY,
-          error: "CAPTCHA verification failed. Please try again.",
+          turnstileSiteKey: TURNSTILE_SITE_KEY,
+          error: "Verification failed. Please try again.",
         });
       }
     }
@@ -1165,9 +1203,9 @@ app.post("/api/auth/mobile-google", async (req, res) => {
     if (!user) {
       const inserted = await pool.query(
         `INSERT INTO userdata 
-           (firstname, lastname, email, password, google_id, picture)
+           (firstname, lastname, email, password, google_id, picture, email_verified)
          VALUES
-           ($1,       $2,       $3,    $4,       $5,        $6)
+           ($1,       $2,       $3,    $4,       $5,        $6,      TRUE)
          RETURNING *`,
         [
           payload?.given_name || "",
@@ -1179,6 +1217,13 @@ app.post("/api/auth/mobile-google", async (req, res) => {
         ]
       );
       user = inserted.rows[0];
+    }
+    if (user && !user.email_verified) {
+      await pool.query(
+        "UPDATE userdata SET email_verified = TRUE WHERE id = $1",
+        [user.id]
+      );
+      user.email_verified = true;
     }
 
     if (user?.is_suspended === true) {
@@ -2278,7 +2323,7 @@ app.get("/login", (req, res) => {
 });
 app.get("/register", (req, res) => res.render("register", {
   title: "Sign Up",
-  recaptchaSiteKey: RECAPTCHA_SITE_KEY,
+  turnstileSiteKey: TURNSTILE_SITE_KEY,
 }));
 app.get("/404", (req, res) => res.render("404", { title: "404 ERROR" }));
 app.get("/error", (req, res) => res.render("error", { title: "500 ERROR" }));
