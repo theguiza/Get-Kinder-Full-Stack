@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import pool from "../Backend/db/pg.js";
 import {
   fetchEvents,
@@ -243,6 +244,18 @@ async function getHostScope(req) {
 async function resolveUserId(req) {
   const scope = await getHostScope(req);
   return scope.actorUserId;
+}
+
+async function resolveSessionUserId(req) {
+  const directId = String(req.user?.id ?? req.user?.user_id ?? "").trim();
+  if (/^\d+$/.test(directId)) return directId;
+  if (!req.user?.email) throw new Error("Missing authenticated user email.");
+  const { rows: [userRow] = [] } = await pool.query(
+    "SELECT id FROM public.userdata WHERE email = $1 LIMIT 1",
+    [req.user.email]
+  );
+  if (!userRow?.id) throw new Error("User record not found.");
+  return String(userRow.id);
 }
 
 async function resolveHostUserIds(req) {
@@ -745,6 +758,290 @@ export async function createInvite(req, res) {
     console.error("[eventsApi] createInvite error:", error);
     return res.status(500).json({ ok: false, error: "Unable to send invite" });
   }
+}
+
+export async function createAdminSignup(req, res) {
+  const client = await pool.connect();
+  let responsePayload = null;
+  let emailPayload = null;
+
+  try {
+    const scope = await resolveOrgScope(req, {
+      allowAdminPreview: true,
+      includeOrgMembersForOrgRep: true,
+    });
+    const sessionUserId = await resolveSessionUserId(req);
+    const isAdmin = req.user?.is_admin === true;
+    if (!isAdmin && !scope?.hasOrgRepAccess) {
+      return res.status(403).json({ ok: false, error: "Forbidden" });
+    }
+
+    const eventId = String(req.params.id || "").trim();
+    const inviteeName = sanitizeString(req.body?.invitee_name);
+    const rawEmail = sanitizeString(req.body?.invitee_email ?? req.body?.email).toLowerCase();
+    const inviteeEmail = rawEmail || "";
+    const sendEmail = Boolean(req.body?.send_email);
+    if (!inviteeName) {
+      return res.status(400).json({ ok: false, error: "Invitee name is required" });
+    }
+    if (inviteeEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(inviteeEmail)) {
+      return res.status(400).json({ ok: false, error: "Enter a valid email address" });
+    }
+
+    await client.query("BEGIN");
+
+    const { rows: [eventRow] = [] } = await client.query(
+      `
+        SELECT id, creator_user_id, status, title, description, start_at, end_at, tz, location_text
+        FROM events
+        WHERE id = $1
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [eventId]
+    );
+    if (!eventRow) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ ok: false, error: "Event not found" });
+    }
+    if (String(eventRow.status || "").toLowerCase() === "cancelled") {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ ok: false, error: "Cancelled events cannot accept admin signups" });
+    }
+    if (!isAdmin && !eventIsOwnedByHostScope(eventRow, scope?.memberUserIds || [])) {
+      await client.query("ROLLBACK");
+      return res.status(403).json({ ok: false, error: "Forbidden" });
+    }
+
+    const { rows: [senderRow] = [] } = await client.query(
+      `
+        SELECT id, firstname, lastname, email
+        FROM userdata
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [sessionUserId]
+    );
+
+    const senderName = formatSenderName(senderRow, req.user?.email || null);
+    const senderEmail = sanitizeString(senderRow?.email || req.user?.email).toLowerCase() || null;
+    const nameParts = inviteeName.split(/\s+/).filter(Boolean);
+    const firstName = nameParts[0] || inviteeName;
+    const lastName = nameParts.slice(1).join(" ");
+
+    let existingUser = null;
+    if (inviteeEmail) {
+      const { rows: [userRow] = [] } = await client.query(
+        `
+          SELECT id, email, COALESCE(account_status, 'active') AS account_status
+          FROM userdata
+          WHERE LOWER(email) = LOWER($1)
+          LIMIT 1
+          FOR UPDATE
+        `,
+        [inviteeEmail]
+      );
+      existingUser = userRow || null;
+    }
+
+    const existingAccountStatus = String(existingUser?.account_status || "active").toLowerCase();
+    const hasExistingRealUser = Boolean(
+      existingUser && !["ghost", "pending_claim"].includes(existingAccountStatus)
+    );
+
+    let attendeeUserId = null;
+    let rawClaimToken = null;
+
+    if (hasExistingRealUser) {
+      attendeeUserId = String(existingUser.id);
+    } else if (existingUser) {
+      attendeeUserId = String(existingUser.id);
+      if (inviteeEmail) {
+        rawClaimToken = crypto.randomBytes(32).toString("hex");
+      }
+      await client.query(
+        `
+          UPDATE userdata
+          SET firstname = $1,
+              lastname = $2,
+              account_status = 'ghost',
+              ghost_added_by = COALESCE(ghost_added_by, $3),
+              claim_token = $4,
+              claim_token_expires_at = CASE
+                WHEN $4 IS NOT NULL THEN NOW() + INTERVAL '7 days'
+                ELSE claim_token_expires_at
+              END,
+              claimed_at = CASE
+                WHEN $4 IS NOT NULL THEN NULL
+                ELSE claimed_at
+              END
+          WHERE id = $5
+        `,
+        [
+          firstName,
+          lastName,
+          sessionUserId,
+          rawClaimToken
+            ? crypto.createHash("sha256").update(rawClaimToken).digest("hex")
+            : null,
+          attendeeUserId,
+        ]
+      );
+    } else {
+      if (inviteeEmail) {
+        rawClaimToken = crypto.randomBytes(32).toString("hex");
+      }
+      const { rows: [ghostUser] = [] } = await client.query(
+        `
+          INSERT INTO userdata (
+            firstname,
+            lastname,
+            email,
+            password,
+            org_rep,
+            is_admin,
+            is_suspended,
+            email_verified,
+            donor_tier,
+            travel_radius_km,
+            travel_mode,
+            account_status,
+            ghost_added_by,
+            claim_token,
+            claim_token_expires_at,
+            claimed_at
+          )
+          VALUES (
+            $1,
+            $2,
+            COALESCE($3, CONCAT('ghost_', gen_random_uuid()::text, '@ghost.getkinder.ai')),
+            NULL,
+            false,
+            false,
+            false,
+            false,
+            'casual',
+            5,
+            'transit',
+            'ghost',
+            $4,
+            $5,
+            CASE WHEN $3 IS NOT NULL THEN NOW() + INTERVAL '7 days' ELSE NULL END,
+            NULL
+          )
+          RETURNING id
+        `,
+        [
+          firstName,
+          lastName,
+          inviteeEmail || null,
+          sessionUserId,
+          rawClaimToken
+            ? crypto.createHash("sha256").update(rawClaimToken).digest("hex")
+            : null,
+        ]
+      );
+      attendeeUserId = String(ghostUser?.id || "");
+    }
+
+    if (!attendeeUserId) {
+      throw new Error("Unable to create volunteer account");
+    }
+
+    const { rows: [existingRsvp] = [] } = await client.query(
+      `
+        SELECT id
+        FROM event_rsvps
+        WHERE event_id = $1
+          AND attendee_user_id = $2
+        LIMIT 1
+      `,
+      [eventId, attendeeUserId]
+    );
+    if (existingRsvp?.id) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ ok: false, error: "This volunteer is already signed up for the event" });
+    }
+
+    const { rows: [rsvpRow] = [] } = await client.query(
+      `
+        INSERT INTO event_rsvps (event_id, attendee_user_id, status, verification_status)
+        VALUES ($1, $2, 'accepted', 'pending')
+        RETURNING id
+      `,
+      [eventId, attendeeUserId]
+    );
+
+    await client.query("COMMIT");
+
+    responsePayload = {
+      ghost_user_id: Number(attendeeUserId),
+      rsvp_id: rsvpRow?.id || null,
+      emailed: false,
+    };
+
+    if (sendEmail && inviteeEmail) {
+      emailPayload = {
+        to: inviteeEmail,
+        inviteeName,
+        senderName,
+        senderEmail,
+        eventId,
+        eventRow,
+        claimHref: rawClaimToken
+          ? `https://getkindr.com/claim/${encodeURIComponent(rawClaimToken)}`
+          : null,
+      };
+    }
+  } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch {}
+    console.error("[eventsApi] createAdminSignup error:", error);
+    return res.status(500).json({ ok: false, error: "Unable to sign up volunteer" });
+  } finally {
+    client.release();
+  }
+
+  if (emailPayload) {
+    try {
+      const emailCopy = buildAdminSignupEmailCopy(emailPayload);
+      const calendarInvite = buildEventCalendarInvite({
+        eventId: emailPayload.eventId,
+        title: emailPayload.eventRow?.title,
+        description: emailPayload.eventRow?.description,
+        startAt: emailPayload.eventRow?.start_at,
+        endAt: emailPayload.eventRow?.end_at,
+        locationText: emailPayload.eventRow?.location_text,
+        baseUrl: buildAppBaseUrl(),
+      });
+      await sendNudgeEmail({
+        to: emailPayload.to,
+        subject: emailCopy.subject,
+        text: emailCopy.text,
+        html: emailCopy.html,
+        fromName: emailPayload.senderName || "Get Kinder",
+        replyTo: emailPayload.senderEmail || null,
+        attachments: calendarInvite
+          ? [{
+              filename: calendarInvite.fileName,
+              content: calendarInvite.content,
+              contentType: "text/calendar; charset=utf-8",
+            }]
+          : undefined,
+      });
+      if (responsePayload) {
+        responsePayload.emailed = true;
+      }
+    } catch (mailError) {
+      console.error("[eventsApi] admin signup email failed:", mailError);
+    }
+  }
+
+  return res.status(201).json({
+    ok: true,
+    data: responsePayload,
+  });
 }
 
 export async function draftInviteCopy(req, res) {
@@ -1719,6 +2016,74 @@ function buildInviteEmailCopy({
   `;
   const text = `Hi ${greetingName},\n\n${body}\n\nEvent: ${eventTitle}\nWhen: ${eventSummary}\nWhere: ${eventLocation}\n\nView: ${eventHref}\nJoin: ${joinHref}\n${replyText}`;
   return { subject, html, text, body }; // body returned for drafts
+}
+
+function buildAdminSignupEmailCopy({
+  inviteeName,
+  senderName,
+  eventId,
+  eventRow,
+  claimHref,
+}) {
+  const greetingName = inviteeName?.split(/\s+/)[0] || "there";
+  const safeTitle = eventRow?.title || "Get Kinder opportunity";
+  const safeLocation = sanitizeString(eventRow?.location_text) || "Location TBD";
+  const safeDescription = sanitizeString(eventRow?.description);
+  const coordinatorName = sanitizeString(senderName) || "Get Kinder";
+  const whenLabel = formatInviteEventDateTime(eventRow?.start_at, eventRow?.end_at, eventRow?.tz);
+  const baseUrl = buildAppBaseUrl();
+  const eventHref = `${baseUrl}/events/${encodeURIComponent(String(eventId || ""))}`;
+  const claimHtml = claimHref
+    ? `
+      <p style="margin:0 0 16px">
+        <a href="${claimHref}" target="_blank" rel="noopener" style="display:inline-block;padding:10px 16px;border-radius:999px;background:#455a7c;color:#ffffff;text-decoration:none;font-weight:700">Claim Your Account</a>
+      </p>
+      <p style="margin:0 0 16px">Use the claim link above to finish setting up your Get Kinder account.</p>
+    `
+    : "";
+  const claimText = claimHref
+    ? [
+        "",
+        `Claim your account: ${claimHref}`,
+        "Use the claim link above to finish setting up your Get Kinder account.",
+      ].join("\n")
+    : "";
+
+  const html = `
+    <div style="font-family:Arial,sans-serif;color:#1f2937;line-height:1.5">
+      <p>Hi ${escapeHtml(greetingName)},</p>
+      <p>${escapeHtml(coordinatorName)} has signed you up to volunteer for <strong>${escapeHtml(safeTitle)}</strong>.</p>
+      <p style="margin:0 0 16px">
+        <strong>When:</strong> ${escapeHtml(whenLabel)}<br/>
+        <strong>Where:</strong> ${escapeHtml(safeLocation)}
+      </p>
+      ${safeDescription ? `<p style="margin:0 0 16px">${escapeHtml(safeDescription)}</p>` : ""}
+      ${claimHtml}
+      <p style="margin:0 0 16px">
+        <a href="${eventHref}" target="_blank" rel="noopener" style="display:inline-block;padding:10px 16px;border-radius:999px;background:#ff5656;color:#ffffff;text-decoration:none;font-weight:700">View Event Details</a>
+      </p>
+      <p>A calendar invite is attached to this email.</p>
+    </div>
+  `;
+  const text = [
+    `Hi ${greetingName},`,
+    "",
+    `${coordinatorName} has signed you up to volunteer for ${safeTitle}.`,
+    `When: ${whenLabel}`,
+    `Where: ${safeLocation}`,
+    safeDescription ? `Details: ${safeDescription}` : "",
+    claimText,
+    "",
+    `View event details: ${eventHref}`,
+    "",
+    "A calendar invite is attached to this email.",
+  ].filter(Boolean).join("\n");
+
+  return {
+    subject: `You've been signed up to volunteer — ${safeTitle}`,
+    html,
+    text,
+  };
 }
 
 function formatInviteEventDateTime(startAt, endAt, timeZone) {

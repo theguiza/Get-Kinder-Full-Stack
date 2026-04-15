@@ -1285,8 +1285,8 @@ app.post("/forgot-password", forgotPasswordLimiter, async (req, res) => {
         return res.status(400).render("forgot-password", {
           title: "Forgot Password",
           turnstileSiteKey: TURNSTILE_SITE_KEY,
-          message: "Please complete the challenge.",
-          messageType: "error",
+          message: null,
+          messageType: null,
         });
       }
       const turnstilePassed = await verifyTurnstileToken(turnstileResponse, req.ip);

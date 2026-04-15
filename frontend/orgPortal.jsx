@@ -571,6 +571,14 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
     sending: false,
     error: "",
   });
+  const [adminSignupModal, setAdminSignupModal] = useState({
+    open: false,
+    name: "",
+    email: "",
+    sendEmail: true,
+    sending: false,
+    error: null,
+  });
   const [opportunityInviteNotice, setOpportunityInviteNotice] = useState(null);
   const [applicantCounts, setApplicantCounts] = useState(ZERO_PENDING_ACTION_COUNTS);
   const [selectedOpportunityDetail, setSelectedOpportunityDetail] = useState(null);
@@ -1084,6 +1092,14 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
         name: "",
         sending: false,
         error: "",
+      });
+      setAdminSignupModal({
+        open: false,
+        name: "",
+        email: "",
+        sendEmail: true,
+        sending: false,
+        error: null,
       });
       setOpportunityInviteNotice(null);
       setSelectedOpportunityDetail(null);
@@ -2519,6 +2535,18 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
     });
   }
 
+  function openAdminSignupModal() {
+    if (!selectedOpportunityId) return;
+    setAdminSignupModal({
+      open: true,
+      name: "",
+      email: "",
+      sendEmail: true,
+      sending: false,
+      error: null,
+    });
+  }
+
   function closeOpportunityInviteModal() {
     setOpportunityInviteModal((prev) => (
       prev.sending
@@ -2529,6 +2557,21 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
             name: "",
             sending: false,
             error: "",
+        }
+    ));
+  }
+
+  function closeAdminSignupModal() {
+    setAdminSignupModal((prev) => (
+      prev.sending
+        ? prev
+        : {
+            open: false,
+            name: "",
+            email: "",
+            sendEmail: true,
+            sending: false,
+            error: null,
           }
     ));
   }
@@ -2748,6 +2791,67 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
         ...prev,
         sending: false,
         error: error?.message || "Unable to send invite.",
+      }));
+    }
+  }
+
+  async function submitAdminSignup(event) {
+    event?.preventDefault?.();
+    const signupName = String(adminSignupModal.name || "").trim();
+    const signupEmail = String(adminSignupModal.email || "").trim();
+    const emailValid = !signupEmail || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(signupEmail);
+
+    if (!selectedOpportunityId || !signupName || !emailValid || adminSignupModal.sending) {
+      setAdminSignupModal((prev) => ({
+        ...prev,
+        error: !signupName
+          ? "Enter the volunteer's name."
+          : emailValid
+            ? prev.error
+            : "Enter a valid email address.",
+      }));
+      return;
+    }
+
+    setAdminSignupModal((prev) => ({ ...prev, sending: true, error: null }));
+
+    try {
+      const body = {
+        invitee_name: signupName,
+        send_email: Boolean(signupEmail) && Boolean(adminSignupModal.sendEmail),
+      };
+      if (signupEmail) {
+        body.invitee_email = signupEmail;
+      }
+
+      const response = await fetch(`/api/events/${encodeURIComponent(selectedOpportunityId)}/admin-signup`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.error || "Unable to sign up volunteer.");
+      }
+
+      await refreshOpportunityQueueAndDetail(selectedOpportunityId);
+      setOpportunityInviteNotice({ type: "success", message: "Volunteer signed up successfully." });
+      setAdminSignupModal({
+        open: false,
+        name: "",
+        email: "",
+        sendEmail: true,
+        sending: false,
+        error: null,
+      });
+    } catch (error) {
+      setAdminSignupModal((prev) => ({
+        ...prev,
+        sending: false,
+        error: error?.message || "Unable to sign up volunteer.",
       }));
     }
   }
@@ -3591,6 +3695,14 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
             disabled={isCancelledOpportunity}
           >
             + Invite Volunteers
+          </button>
+          <button
+            type="button"
+            className="btn btn-outline-secondary btn-sm ms-2"
+            onClick={openAdminSignupModal}
+            disabled={isCancelledOpportunity}
+          >
+            + Sign Up Volunteer
           </button>
           {opportunityInviteNotice ? (
             <div className="alert alert-success py-2 mt-2 mb-0" role="status">
@@ -5314,6 +5426,108 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
                   disabled={opportunityInviteModal.sending}
                 >
                   {opportunityInviteModal.sending ? "Sending..." : "Send Invite"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+
+      {activeTab === "opportunities" && adminSignupModal.open ? (
+        <div className="orgp-confirm-backdrop" role="dialog" aria-modal="true" aria-labelledby="orgpAdminSignupModalTitle">
+          <div className="orgp-confirm-card orgp-invite-card">
+            <div className="d-flex justify-content-between align-items-start gap-3">
+              <div>
+                <h4 className="orgp-invite-title" id="orgpAdminSignupModalTitle">Sign Up Volunteer</h4>
+                <p className="orgp-invite-subtitle mb-0">
+                  Directly register someone for{" "}
+                  <strong>{selectedOpportunity?.opportunityName || "this opportunity"}</strong>. They don't need a Get Kinder account.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="btn btn-link btn-sm p-0 text-muted"
+                onClick={closeAdminSignupModal}
+                disabled={adminSignupModal.sending}
+                aria-label="Close signup form"
+              >
+                <i className="fas fa-xmark" aria-hidden="true"></i>
+              </button>
+            </div>
+
+            <form className="orgp-invite-form" onSubmit={submitAdminSignup}>
+              <label className="orgp-invite-field">
+                <span>Name</span>
+                <input
+                  type="text"
+                  className="form-control"
+                  value={adminSignupModal.name}
+                  onChange={(event) => setAdminSignupModal((prev) => ({
+                    ...prev,
+                    name: event.target.value,
+                    error: null,
+                  }))}
+                  placeholder="Volunteer name"
+                  required
+                  autoFocus
+                />
+              </label>
+
+              <label className="orgp-invite-field">
+                <span>Email</span>
+                <input
+                  type="email"
+                  className="form-control"
+                  value={adminSignupModal.email}
+                  onChange={(event) => setAdminSignupModal((prev) => ({
+                    ...prev,
+                    email: event.target.value,
+                    error: null,
+                  }))}
+                  placeholder="volunteer@example.com (optional)"
+                />
+              </label>
+
+              {String(adminSignupModal.email || "").trim() ? (
+                <label className="form-check mb-0">
+                  <input
+                    type="checkbox"
+                    className="form-check-input"
+                    checked={adminSignupModal.sendEmail}
+                    onChange={(event) => setAdminSignupModal((prev) => ({
+                      ...prev,
+                      sendEmail: event.target.checked,
+                    }))}
+                  />
+                  <span className="form-check-label">Send confirmation email</span>
+                </label>
+              ) : null}
+
+              <div className="orgp-invite-note">
+                No email? This person will appear as unverified until they claim their account.
+              </div>
+
+              {adminSignupModal.error ? (
+                <div className="alert alert-warning py-2 mb-0" role="alert">
+                  {adminSignupModal.error}
+                </div>
+              ) : null}
+
+              <div className="d-flex justify-content-end gap-2 mt-3">
+                <button
+                  type="button"
+                  className="btn btn-outline-secondary"
+                  onClick={closeAdminSignupModal}
+                  disabled={adminSignupModal.sending}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn org-admin-request-close-btn"
+                  disabled={adminSignupModal.sending}
+                >
+                  {adminSignupModal.sending ? "Signing Up..." : "Sign Up"}
                 </button>
               </div>
             </form>

@@ -1,5 +1,5 @@
 import express from "express";
-import { listEvents, getEventById, createEvent, createInvite, updateEvent, draftInviteCopy, downloadEventCalendar, respondToEventRsvp, checkInToEvent, verifyEventRsvp, listEventRoster, markEventNoShow } from "../controllers/eventsApiController.js";
+import { listEvents, getEventById, createEvent, createInvite, createAdminSignup, updateEvent, draftInviteCopy, downloadEventCalendar, respondToEventRsvp, checkInToEvent, verifyEventRsvp, listEventRoster, markEventNoShow } from "../controllers/eventsApiController.js";
 import { getEventRatingStatus, submitEventRating } from "../controllers/eventsRatingsController.js";
 import { cancelEvent, completeEvent, deleteDraftEvent } from "../controllers/meEventsApiController.js";
 import { ensureAuthenticatedApi } from "../middleware/auth.js";
@@ -44,6 +44,7 @@ eventsApiRouter.post("/", ensureOrgRep, createEvent);
 eventsApiRouter.post("/:id/cancel", cancelEvent);
 eventsApiRouter.post("/:id/complete", completeEvent);
 eventsApiRouter.post("/:id/invites", createInvite);
+eventsApiRouter.post("/:id/admin-signup", createAdminSignup);
 eventsApiRouter.post("/:id/invite-copy", draftInviteCopy);
 eventsApiRouter.post("/:id/rsvp", respondToEventRsvp);
 eventsApiRouter.post("/:id/checkins", checkInToEvent);
