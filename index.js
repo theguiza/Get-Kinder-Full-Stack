@@ -620,6 +620,27 @@ passport.use(
         );
         if (result.rows.length) {
           const existingUser = result.rows[0];
+          if (existingUser.account_status === 'ghost') {
+            const googleId = profile.id || null;
+            const photoUrl = Array.isArray(profile.photos) && profile.photos.length
+              ? profile.photos[0].value : null;
+            const { rows: [merged] } = await pool.query(
+              `UPDATE userdata SET
+                firstname = $1,
+                lastname = $2,
+                google_id = $3,
+                picture = $4,
+                email_verified = TRUE,
+                account_status = 'active',
+                claimed_at = NOW(),
+                claim_token = NULL,
+                claim_token_expires_at = NULL
+               WHERE id = $5
+               RETURNING *`,
+              [profile.name.givenName, profile.name.familyName, googleId, photoUrl, existingUser.id]
+            );
+            return done(null, merged);
+          }
           if (!existingUser.email_verified) {
             await pool.query(
               "UPDATE userdata SET email_verified = TRUE WHERE id = $1",
@@ -910,6 +931,42 @@ app.post("/register", registerLimiter, async (req, res, next) => {
     }
     if (!firstname.trim() || !lastname.trim() || !email || !password) {
       return res.status(400).send("Missing required fields.");
+    }
+    const { rows: [ghostCheck] } = await pool.query(
+      `SELECT id, account_status FROM userdata WHERE LOWER(email) = LOWER($1) LIMIT 1`,
+      [email]
+    );
+
+    if (ghostCheck && ghostCheck.account_status === 'ghost') {
+      const hashedPassword = await bcrypt.hash(password, 10);
+      const verificationToken = crypto.randomBytes(32).toString("hex");
+      const verificationTokenHash = crypto.createHash("sha256").update(verificationToken).digest("hex");
+      await pool.query(
+        `UPDATE userdata SET
+          firstname = $1,
+          lastname = $2,
+          password = $3,
+          email_verified = false,
+          email_verification_token_hash = $4,
+          email_verification_expires_at = NOW() + INTERVAL '24 hours',
+          account_status = 'pending_claim',
+          claimed_at = NOW(),
+          claim_token = NULL,
+          claim_token_expires_at = NULL
+         WHERE id = $5`,
+        [firstname.trim(), lastname.trim(), hashedPassword, verificationTokenHash, ghostCheck.id]
+      );
+      const verificationBaseUrl = (process.env.BASE_URL || getAppBaseUrl(req)).replace(/\/+$/, "");
+      const verificationUrl = `${verificationBaseUrl}/verify-email?token=${encodeURIComponent(verificationToken)}`;
+      try {
+        await sendNudgeEmail({
+          to: email,
+          ...buildRegistrationVerificationEmailPayload(firstname.trim(), verificationUrl)
+        });
+      } catch (mailErr) {
+        console.error("Verification email send failed (ghost merge):", mailErr);
+      }
+      return res.redirect("/login?verify=pending");
     }
     const hashedPassword = await bcrypt.hash(password, 10);
     const verificationToken = crypto.randomBytes(32).toString("hex");
@@ -1217,6 +1274,29 @@ app.post("/api/auth/mobile-google", async (req, res) => {
         ]
       );
       user = inserted.rows[0];
+    } else if (user.account_status === 'ghost') {
+      const { rows: [merged] } = await pool.query(
+        `UPDATE userdata SET
+          firstname = $1,
+          lastname = $2,
+          google_id = $3,
+          picture = $4,
+          email_verified = TRUE,
+          account_status = 'active',
+          claimed_at = NOW(),
+          claim_token = NULL,
+          claim_token_expires_at = NULL
+         WHERE id = $5
+         RETURNING *`,
+        [
+          payload?.given_name || "",
+          payload?.family_name || "",
+          payload?.sub || null,
+          payload?.picture || null,
+          user.id
+        ]
+      );
+      user = merged;
     }
     if (user && !user.email_verified) {
       await pool.query(
@@ -1531,7 +1611,11 @@ app.get("/verify-email", async (req, res) => {
 
     await pool.query(
       `UPDATE public.userdata
-          SET email_verified = TRUE
+          SET email_verified = TRUE,
+              account_status = CASE
+                WHEN account_status = 'pending_claim' THEN 'active'
+                ELSE account_status
+              END
         WHERE id = $1`,
       [user.id]
     );
