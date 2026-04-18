@@ -866,13 +866,13 @@ export async function createAdminSignup(req, res) {
               lastname = $2,
               account_status = 'ghost',
               ghost_added_by = COALESCE(ghost_added_by, $3),
-              claim_token = $4,
+              claim_token = $4::text,
               claim_token_expires_at = CASE
-                WHEN $4 IS NOT NULL THEN NOW() + INTERVAL '7 days'
+                WHEN $4::text IS NOT NULL THEN NOW() + INTERVAL '7 days'
                 ELSE claim_token_expires_at
               END,
               claimed_at = CASE
-                WHEN $4 IS NOT NULL THEN NULL
+                WHEN $4::text IS NOT NULL THEN NULL
                 ELSE claimed_at
               END
           WHERE id = $5
