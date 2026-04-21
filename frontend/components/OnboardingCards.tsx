@@ -106,6 +106,8 @@ function ensureOnboardingStyles() {
   .kai-btn-primary:disabled { opacity: .4; cursor: not-allowed; }
   .kai-btn-outline { border: 1px solid #e5e7eb; color: #455a7c; background: #fff; }
   .kai-btn-outline:hover { background: #f9fafb; }
+  .kai-close-btn { position: absolute; top: 16px; right: 16px; width: 36px; height: 36px; border: 1px solid #e5e7eb; border-radius: 999px; background: #fff; color: #455a7c; font-size: 20px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+  .kai-close-btn:hover { background: #f9fafb; }
 
   .kai-range { width: 100%; }
   .kai-range::-webkit-slider-runnable-track { height: 4px; background: #e5e7eb; border-radius: 999px; }
@@ -390,6 +392,14 @@ export default function OnboardingCards({
     } catch {}
   }
 
+  function dismiss() {
+    setClientCookie(cookieName, "1");
+    clearDraft(storageKey);
+    track("onboarding_dismiss", { step: current?.id, index });
+    setDismissed(true);
+    onClose?.();
+  }
+
   function next() {
     if (!current) return; // no-op if no steps
     if (isLast) return void complete();
@@ -450,7 +460,16 @@ export default function OnboardingCards({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 kai-onboarding" style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.4)', padding: '16px' }}>
       <div className="relative w-full max-w-2xl">
         <div className="rounded-2xl bg-white p-6 shadow-2xl" style={{ background: '#fff', borderRadius: '16px', padding: '24px', boxShadow: '0 20px 50px rgba(0,0,0,0.18)' }}>
-          <header className="mb-4 flex items-center gap-3">
+          <button
+            type="button"
+            onClick={dismiss}
+            className="kai-close-btn"
+            aria-label="Dismiss onboarding"
+          >
+            &times;
+          </button>
+
+          <header className="mb-4 flex items-center gap-3" style={{ paddingRight: "56px" }}>
             {
               // eslint-disable-next-line @next/next/no-img-element
               <img
