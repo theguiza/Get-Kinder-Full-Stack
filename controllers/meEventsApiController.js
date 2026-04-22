@@ -221,16 +221,48 @@ export async function listMyEvents(req, res) {
         GROUP BY r.event_id
         ) r ON r.event_id = e.id
    LEFT JOIN (
+          WITH wallet_by_volunteer AS (
+            SELECT
+              wt.event_id,
+              wt.user_id,
+              COALESCE(SUM(wt.kind_amount), 0) AS awarded_credits_total,
+              COALESCE(SUM(COALESCE(dr.credits_funded, 0)), 0) AS funded_credits_total
+            FROM wallet_transactions wt
+            LEFT JOIN donor_receipts dr ON dr.wallet_tx_id = wt.id
+            WHERE wt.reason = 'earn_shift'
+              AND wt.direction = 'credit'
+            GROUP BY wt.event_id, wt.user_id
+          ),
+          request_by_volunteer AS (
+            SELECT
+              p.event_id,
+              p.volunteer_user_id AS user_id,
+              COALESCE(MAX(p.amount) FILTER (WHERE p.status IN ('pending', 'approved')), 0) AS requested_credits_total
+            FROM pending_credit_requests p
+            WHERE p.reason = 'earn_shift'
+            GROUP BY p.event_id, p.volunteer_user_id
+          ),
+          funding_by_volunteer AS (
+            SELECT
+              COALESCE(w.event_id, p.event_id) AS event_id,
+              COALESCE(w.user_id, p.user_id) AS user_id,
+              CASE
+                WHEN COALESCE(w.awarded_credits_total, 0) > 0 THEN COALESCE(w.awarded_credits_total, 0)
+                ELSE COALESCE(p.requested_credits_total, 0)
+              END AS verified_credits_total,
+              COALESCE(w.funded_credits_total, 0) AS funded_credits_total
+            FROM wallet_by_volunteer w
+            FULL OUTER JOIN request_by_volunteer p
+              ON p.event_id = w.event_id
+             AND p.user_id = w.user_id
+          )
           SELECT
-            wt.event_id,
-            COALESCE(SUM(wt.kind_amount), 0) AS verified_credits_total,
-            COALESCE(SUM(COALESCE(dr.credits_funded, 0)), 0) AS funded_credits_total,
-            COALESCE(SUM(GREATEST(wt.kind_amount - COALESCE(dr.credits_funded, 0), 0)), 0) AS deficit_credits_total
-          FROM wallet_transactions wt
-          LEFT JOIN donor_receipts dr ON dr.wallet_tx_id = wt.id
-          WHERE wt.reason = 'earn_shift'
-            AND wt.direction = 'credit'
-          GROUP BY wt.event_id
+            event_id,
+            COALESCE(SUM(verified_credits_total), 0) AS verified_credits_total,
+            COALESCE(SUM(funded_credits_total), 0) AS funded_credits_total,
+            COALESCE(SUM(GREATEST(verified_credits_total - funded_credits_total, 0)), 0) AS deficit_credits_total
+          FROM funding_by_volunteer
+          GROUP BY event_id
         ) fs ON fs.event_id = e.id
        WHERE ${whereParts.join("\n         AND ")}
          ${filter}
@@ -350,18 +382,56 @@ export async function getMyPoolSummary(req, res) {
             GROUP BY funding_pool_slug
           ),
           wallet_rollup AS (
+            WITH wallet_by_volunteer AS (
+              SELECT
+                he.funding_pool_slug,
+                wt.event_id,
+                wt.user_id,
+                COALESCE(SUM(wt.kind_amount), 0) AS awarded_credits_total,
+                COALESCE(SUM(COALESCE(dr.credits_funded, 0)), 0) AS funded_credits_total
+              FROM host_events he
+              JOIN wallet_transactions wt
+                ON wt.event_id = he.id
+               AND wt.reason = 'earn_shift'
+               AND wt.direction = 'credit'
+              LEFT JOIN donor_receipts dr ON dr.wallet_tx_id = wt.id
+              GROUP BY he.funding_pool_slug, wt.event_id, wt.user_id
+            ),
+            request_by_volunteer AS (
+              SELECT
+                he.funding_pool_slug,
+                p.event_id,
+                p.volunteer_user_id AS user_id,
+                COALESCE(MAX(p.amount) FILTER (WHERE p.status IN ('pending', 'approved')), 0) AS requested_credits_total
+              FROM host_events he
+              JOIN pending_credit_requests p
+                ON p.event_id = he.id
+               AND p.reason = 'earn_shift'
+              GROUP BY he.funding_pool_slug, p.event_id, p.volunteer_user_id
+            ),
+            funding_by_volunteer AS (
+              SELECT
+                COALESCE(w.funding_pool_slug, p.funding_pool_slug) AS funding_pool_slug,
+                COALESCE(w.event_id, p.event_id) AS event_id,
+                COALESCE(w.user_id, p.user_id) AS user_id,
+                CASE
+                  WHEN COALESCE(w.awarded_credits_total, 0) > 0 THEN COALESCE(w.awarded_credits_total, 0)
+                  ELSE COALESCE(p.requested_credits_total, 0)
+                END AS verified_credits_total,
+                COALESCE(w.funded_credits_total, 0) AS funded_credits_total
+              FROM wallet_by_volunteer w
+              FULL OUTER JOIN request_by_volunteer p
+                ON p.funding_pool_slug = w.funding_pool_slug
+               AND p.event_id = w.event_id
+               AND p.user_id = w.user_id
+            )
             SELECT
-              he.funding_pool_slug,
-              COALESCE(SUM(wt.kind_amount), 0) AS verified_credits_total,
-              COALESCE(SUM(COALESCE(dr.credits_funded, 0)), 0) AS funded_credits_total,
-              COALESCE(SUM(GREATEST(wt.kind_amount - COALESCE(dr.credits_funded, 0), 0)), 0) AS deficit_credits_total
-            FROM host_events he
-            JOIN wallet_transactions wt
-              ON wt.event_id = he.id
-             AND wt.reason = 'earn_shift'
-             AND wt.direction = 'credit'
-            LEFT JOIN donor_receipts dr ON dr.wallet_tx_id = wt.id
-            GROUP BY he.funding_pool_slug
+              funding_pool_slug,
+              COALESCE(SUM(verified_credits_total), 0) AS verified_credits_total,
+              COALESCE(SUM(funded_credits_total), 0) AS funded_credits_total,
+              COALESCE(SUM(GREATEST(verified_credits_total - funded_credits_total, 0)), 0) AS deficit_credits_total
+            FROM funding_by_volunteer
+            GROUP BY funding_pool_slug
           ),
           pool_ledger AS (
             SELECT

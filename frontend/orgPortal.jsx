@@ -169,6 +169,18 @@ function formatShortDate(iso) {
   return dt.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
+function buildReportFallbackLabels(rangeDays) {
+  const days = Math.max(1, safeNumber(rangeDays, 30));
+  const end = new Date();
+  end.setHours(0, 0, 0, 0);
+
+  return Array.from({ length: days }, (_, index) => {
+    const dt = new Date(end);
+    dt.setDate(end.getDate() - (days - 1 - index));
+    return dt.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  });
+}
+
 function formatTime(iso) {
   if (!iso) return "Time TBD";
   const dt = new Date(iso);
@@ -1771,26 +1783,38 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
     const hoursByMonth = Array.isArray(reportData?.hoursByMonth) ? reportData.hoursByMonth : [];
     const fillRateByMonth = Array.isArray(reportData?.fillRateByMonth) ? reportData.fillRateByMonth : [];
     const impactByMonth = Array.isArray(reportData?.impactByMonth) ? reportData.impactByMonth : [];
-    const monthLabels = (hoursByMonth.length ? hoursByMonth : fillRateByMonth.length ? fillRateByMonth : impactByMonth)
-      .map((row) => row.month);
+    const fallbackLabels = buildReportFallbackLabels(reportFilters.range);
+    const periodLabels = (hoursByMonth.length ? hoursByMonth : fillRateByMonth.length ? fillRateByMonth : impactByMonth)
+      .map((row) => row.label || row.month || "")
+      .filter(Boolean);
+    const chartLabels = periodLabels.length ? periodLabels : fallbackLabels;
+    const maxTicksLimit = Number(reportFilters.range) === 7 ? 7 : Number(reportFilters.range) === 30 ? 6 : 8;
+    const commonXAxis = {
+      grid: { display: false },
+      ticks: {
+        autoSkip: true,
+        maxTicksLimit,
+      },
+    };
 
     if (hoursChartCanvasRef.current) {
       hoursChartRef.current = new Chart(hoursChartCanvasRef.current, {
         type: "bar",
         data: {
-          labels: monthLabels.length ? monthLabels : ["Jan", "Feb", "Mar"],
+          labels: chartLabels,
           datasets: [
             {
-              data: (hoursByMonth.length ? hoursByMonth.map((row) => safeNumber(row.hours, 0)) : [0, 0, 0]),
+              data: (hoursByMonth.length ? hoursByMonth.map((row) => safeNumber(row.hours, 0)) : chartLabels.map(() => 0)),
               backgroundColor: "#455a7c",
               borderRadius: 6,
+              maxBarThickness: 18,
             },
           ],
         },
         options: {
           ...baseOptions,
           scales: {
-            x: { grid: { display: false } },
+            x: commonXAxis,
             y: { beginAtZero: true, ticks: { precision: 0 } },
           },
         },
@@ -1801,10 +1825,10 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
       fillRateChartRef.current = new Chart(fillRateChartCanvasRef.current, {
         type: "line",
         data: {
-          labels: monthLabels.length ? monthLabels : ["Jan", "Feb", "Mar"],
+          labels: chartLabels,
           datasets: [
             {
-              data: (fillRateByMonth.length ? fillRateByMonth.map((row) => safeNumber(row.rate, 0)) : [0, 0, 0]),
+              data: (fillRateByMonth.length ? fillRateByMonth.map((row) => safeNumber(row.rate, 0)) : chartLabels.map(() => 0)),
               borderColor: "#ff5656",
               backgroundColor: "#ff5656",
               fill: false,
@@ -1816,7 +1840,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
         options: {
           ...baseOptions,
           scales: {
-            x: { grid: { display: false } },
+            x: commonXAxis,
             y: { beginAtZero: true, max: 100 },
           },
         },
@@ -1848,19 +1872,20 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
       impactChartRef.current = new Chart(impactChartCanvasRef.current, {
         type: "bar",
         data: {
-          labels: monthLabels.length ? monthLabels : ["Jan", "Feb", "Mar"],
+          labels: chartLabels,
           datasets: [
             {
-              data: (impactByMonth.length ? impactByMonth.map((row) => safeNumber(row.value, 0)) : [0, 0, 0]),
+              data: (impactByMonth.length ? impactByMonth.map((row) => safeNumber(row.value, 0)) : chartLabels.map(() => 0)),
               backgroundColor: "#28a745",
               borderRadius: 6,
+              maxBarThickness: 18,
             },
           ],
         },
         options: {
           ...baseOptions,
           scales: {
-            x: { grid: { display: false } },
+            x: commonXAxis,
             y: { beginAtZero: true, ticks: { precision: 0 } },
           },
         },
@@ -1870,7 +1895,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
     return () => {
       destroyReportsCharts();
     };
-  }, [activeTab, reportData]);
+  }, [activeTab, reportData, reportFilters.range]);
 
   async function handleMarkPresent(rowId, { refreshQueue = false } = {}) {
     const target = roster.find((entry) => entry.id === rowId);
@@ -4201,7 +4226,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
       fundedCredits: safeNumber(row.funded_credits_total, 0),
       deficitCredits: safeNumber(row.deficit_credits_total, 0),
       poolSlug: row.funding_pool_slug || "general",
-      label: `${row.title || "Untitled event"} · ${formatShortDate(row.start_at)} — ${safeNumber(row.verified_credits_total, 0)} awarded · ${safeNumber(row.funded_credits_total, 0)} funded · deficit ${safeNumber(row.deficit_credits_total, 0)}`,
+      label: `${row.title || "Untitled event"} · ${formatShortDate(row.start_at)} — ${safeNumber(row.verified_credits_total, 0)} verified · ${safeNumber(row.funded_credits_total, 0)} funded · deficit ${safeNumber(row.deficit_credits_total, 0)}`,
     }));
 
     const reconciledItems = (creditsQueue?.reconciled || []).map((row) => ({
@@ -4218,7 +4243,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
       fundedCredits: safeNumber(row.funded_credits_total, 0),
       deficitCredits: safeNumber(row.deficit_credits_total, 0),
       poolSlug: row.funding_pool_slug || "general",
-      label: `${row.title || "Untitled event"} · ${formatShortDate(row.start_at)} — ${safeNumber(row.verified_credits_total, 0)} awarded · ${safeNumber(row.funded_credits_total, 0)} funded · deficit ${safeNumber(row.deficit_credits_total, 0)}`,
+      label: `${row.title || "Untitled event"} · ${formatShortDate(row.start_at)} — ${safeNumber(row.verified_credits_total, 0)} verified · ${safeNumber(row.funded_credits_total, 0)} funded · deficit ${safeNumber(row.deficit_credits_total, 0)}`,
     }));
 
     const volunteerItems = (creditsQueue?.volunteerSummary || []).map((row) => {
@@ -4303,7 +4328,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
         <div className="row g-2 mb-3">
           <div className="col-12 col-md-6">
             <div className="orgp-credit-tile">
-              <div className="orgp-credit-tile-label">Awarded Credits</div>
+              <div className="orgp-credit-tile-label">Verified Credits</div>
               <div className="orgp-credit-tile-value">{safeNumber(item.verifiedCredits, 0)} credits</div>
               <div className="text-muted small">
                 {safeNumber(item.fundedCredits, 0)} funded · deficit {safeNumber(item.deficitCredits, 0)}
@@ -4337,11 +4362,17 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
                 {detailRows.length ? (
                   detailRows.map((row) => {
                     const fullName = `${row.firstname || ""} ${row.lastname || ""}`.trim() || "Volunteer";
+                    const awardedCredits = safeNumber(row.credits_earned, 0);
+                    const pendingCredits = safeNumber(row.credits_pending, 0);
+                    const creditsText =
+                      pendingCredits > 0
+                        ? `${pendingCredits} pending`
+                        : `${awardedCredits}`;
                     return (
                       <tr key={`credit-row-${row.id}`}>
                         <td>{fullName}</td>
                         <td>{(safeNumber(row.attended_minutes, 0) / 60).toFixed(1)}</td>
-                        <td>{safeNumber(row.credits_earned, 0)}</td>
+                        <td>{creditsText}</td>
                         <td>{renderAttendanceStatusBadge(row.verification_status, row.rsvp_status)}</td>
                       </tr>
                     );
@@ -4562,7 +4593,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
                   <div className="small text-muted">no-show rate</div>
                 </div>
               </div>
-              <div className="small text-muted">↓ improving vs last period</div>
+              <div className="small text-muted">{`based on the last ${reportFilters.range} days`}</div>
             </div>
           </div>
           <div className="col-12 col-md-6">
@@ -4572,7 +4603,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
               <div className="orgp-report-canvas-wrap">
                 <canvas id="impactChart" ref={impactChartCanvasRef} style={{ height: "180px" }}></canvas>
               </div>
-              <div className="small text-muted">{`$${Math.round(totalImpact).toLocaleString()} est. value`}</div>
+              <div className="small text-muted">{`$${Math.round(totalImpact).toLocaleString()} est. value · last ${reportFilters.range} days`}</div>
             </div>
           </div>
         </div>

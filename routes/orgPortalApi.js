@@ -896,7 +896,6 @@ orgPortalRouter.get("/queue", async (req, res) => {
           AND COALESCE(e.status, 'published') NOT IN ('cancelled', 'draft')
           AND e.end_at < NOW()
         ORDER BY e.end_at DESC
-        LIMIT 5
       `,
       [coordinatorUserIds]
     );
@@ -1588,18 +1587,45 @@ orgPortalRouter.get("/credits/:eventId", async (req, res) => {
           r.status AS rsvp_status,
           r.attended_minutes,
           COALESCE(r.verification_status, 'pending') AS verification_status,
-          COALESCE(SUM(w.kind_amount), 0)::numeric AS credits_earned
+          COALESCE(wallet_rollup.credits_awarded, 0)::numeric AS credits_earned,
+          COALESCE(
+            CASE
+              WHEN COALESCE(wallet_rollup.credits_awarded, 0) > 0 THEN 0
+              ELSE request_rollup.credits_requested
+            END,
+            0
+          )::numeric AS credits_pending,
+          CASE
+            WHEN COALESCE(wallet_rollup.credits_awarded, 0) > 0 THEN 'approved'
+            WHEN COALESCE(request_rollup.credits_requested, 0) > 0 THEN request_rollup.latest_status
+            ELSE NULL
+          END AS credit_request_status
         FROM event_rsvps r
         JOIN userdata u ON u.id = r.attendee_user_id
-        LEFT JOIN wallet_transactions w
-          ON w.user_id = r.attendee_user_id
-         AND w.event_id = r.event_id
-         AND w.reason = 'earn_shift'
-         AND w.direction = 'credit'
+        LEFT JOIN LATERAL (
+          SELECT
+            COALESCE(SUM(w.kind_amount), 0)::numeric AS credits_awarded
+          FROM wallet_transactions w
+          WHERE w.user_id = r.attendee_user_id
+            AND w.event_id = r.event_id
+            AND w.reason = 'earn_shift'
+            AND w.direction = 'credit'
+        ) wallet_rollup ON TRUE
+        LEFT JOIN LATERAL (
+          SELECT
+            COALESCE(MAX(p.amount) FILTER (WHERE p.status IN ('pending', 'approved')), 0)::numeric AS credits_requested,
+            (
+              ARRAY_AGG(p.status ORDER BY p.created_at DESC, p.id DESC)
+              FILTER (WHERE p.status IN ('pending', 'approved'))
+            )[1] AS latest_status
+          FROM pending_credit_requests p
+          WHERE p.event_id = r.event_id
+            AND p.volunteer_user_id = r.attendee_user_id
+            AND p.reason = 'earn_shift'
+        ) request_rollup ON TRUE
         WHERE r.event_id = $1
           AND r.status IN ('accepted', 'checked_in')
           AND r.attendee_user_id::text <> $2::text
-        GROUP BY u.id, u.firstname, u.lastname, r.status, r.attended_minutes, r.verification_status
         ORDER BY u.firstname ASC, u.lastname ASC
       `,
       [eventId, hostCheck.event.creator_user_id]
@@ -1615,6 +1641,8 @@ orgPortalRouter.get("/credits/:eventId", async (req, res) => {
         attended_minutes: row.attended_minutes == null ? null : Number(row.attended_minutes),
         verification_status: row.verification_status || "pending",
         credits_earned: Number(row.credits_earned) || 0,
+        credits_pending: Number(row.credits_pending) || 0,
+        credit_request_status: row.credit_request_status || null,
       })),
     });
   } catch (error) {
@@ -1633,49 +1661,49 @@ orgPortalRouter.get("/reports", async (req, res) => {
 
     const { rows: hoursRows } = await pool.query(
       `
-        WITH months AS (
+        WITH days AS (
           SELECT generate_series(
-            date_trunc('month', NOW()) - INTERVAL '3 months',
-            date_trunc('month', NOW()) - INTERVAL '1 month',
-            INTERVAL '1 month'
-          ) AS month_start
+            CURRENT_DATE - ($2::int - 1),
+            CURRENT_DATE,
+            INTERVAL '1 day'
+          )::date AS day_start
         ),
-        hours_by_month AS (
+        hours_by_day AS (
           SELECT
-            date_trunc('month', e.start_at) AS month_start,
+            date_trunc('day', e.start_at)::date AS day_start,
             COALESCE(SUM(COALESCE(r.attended_minutes, 0)) / 60.0, 0)::numeric AS hours
           FROM events e
           JOIN event_rsvps r
             ON r.event_id = e.id
            AND ${EXCLUDE_HOST_SELF_RSVP_SQL}
           WHERE e.creator_user_id::text = ANY($1::text[])
-            AND e.start_at >= date_trunc('month', NOW()) - INTERVAL '3 months'
-            AND e.start_at < date_trunc('month', NOW())
+            AND e.start_at >= CURRENT_DATE - ($2::int - 1)
+            AND e.start_at < CURRENT_DATE + INTERVAL '1 day'
             AND r.verification_status = 'verified'
-          GROUP BY date_trunc('month', e.start_at)
+          GROUP BY date_trunc('day', e.start_at)::date
         )
         SELECT
-          to_char(m.month_start, 'Mon') AS month,
+          to_char(d.day_start, 'Mon FMDD') AS label,
           COALESCE(h.hours, 0)::numeric AS hours
-        FROM months m
-        LEFT JOIN hours_by_month h ON h.month_start = m.month_start
-        ORDER BY m.month_start
+        FROM days d
+        LEFT JOIN hours_by_day h ON h.day_start = d.day_start
+        ORDER BY d.day_start
       `,
-      [hostUserIds]
+      [hostUserIds, rangeDays]
     );
 
     const { rows: fillRows } = await pool.query(
       `
-        WITH months AS (
+        WITH days AS (
           SELECT generate_series(
-            date_trunc('month', NOW()) - INTERVAL '3 months',
-            date_trunc('month', NOW()) - INTERVAL '1 month',
-            INTERVAL '1 month'
-          ) AS month_start
+            CURRENT_DATE - ($2::int - 1),
+            CURRENT_DATE,
+            INTERVAL '1 day'
+          )::date AS day_start
         ),
         per_event AS (
           SELECT
-            date_trunc('month', e.start_at) AS month_start,
+            date_trunc('day', e.start_at)::date AS day_start,
             e.id,
             e.capacity::numeric AS capacity,
             COUNT(r.id) FILTER (WHERE r.status = 'accepted')::numeric AS accepted_count
@@ -1684,41 +1712,41 @@ orgPortalRouter.get("/reports", async (req, res) => {
             ON r.event_id = e.id
            AND ${EXCLUDE_HOST_SELF_RSVP_SQL}
           WHERE e.creator_user_id::text = ANY($1::text[])
-            AND e.start_at >= date_trunc('month', NOW()) - INTERVAL '3 months'
-            AND e.start_at < date_trunc('month', NOW())
+            AND e.start_at >= CURRENT_DATE - ($2::int - 1)
+            AND e.start_at < CURRENT_DATE + INTERVAL '1 day'
             AND e.capacity IS NOT NULL
             AND e.capacity > 0
-          GROUP BY date_trunc('month', e.start_at), e.id, e.capacity
+          GROUP BY date_trunc('day', e.start_at)::date, e.id, e.capacity
         ),
-        fill_by_month AS (
+        fill_by_day AS (
           SELECT
-            month_start,
+            day_start,
             COALESCE(AVG(LEAST(1.0, accepted_count / capacity)) * 100, 0)::numeric AS rate
           FROM per_event
-          GROUP BY month_start
+          GROUP BY day_start
         )
         SELECT
-          to_char(m.month_start, 'Mon') AS month,
+          to_char(d.day_start, 'Mon FMDD') AS label,
           COALESCE(f.rate, 0)::numeric AS rate
-        FROM months m
-        LEFT JOIN fill_by_month f ON f.month_start = m.month_start
-        ORDER BY m.month_start
+        FROM days d
+        LEFT JOIN fill_by_day f ON f.day_start = d.day_start
+        ORDER BY d.day_start
       `,
-      [hostUserIds]
+      [hostUserIds, rangeDays]
     );
 
     const { rows: impactRows } = await pool.query(
       `
-        WITH months AS (
+        WITH days AS (
           SELECT generate_series(
-            date_trunc('month', NOW()) - INTERVAL '3 months',
-            date_trunc('month', NOW()) - INTERVAL '1 month',
-            INTERVAL '1 month'
-          ) AS month_start
+            CURRENT_DATE - ($2::int - 1),
+            CURRENT_DATE,
+            INTERVAL '1 day'
+          )::date AS day_start
         ),
-        impact_by_month AS (
+        impact_by_day AS (
           SELECT
-            date_trunc('month', e.start_at) AS month_start,
+            date_trunc('day', e.start_at)::date AS day_start,
             COALESCE(SUM(w.kind_amount), 0)::numeric AS value
           FROM events e
           LEFT JOIN wallet_transactions w
@@ -1726,18 +1754,18 @@ orgPortalRouter.get("/reports", async (req, res) => {
            AND w.reason = 'earn_shift'
            AND w.direction = 'credit'
           WHERE e.creator_user_id::text = ANY($1::text[])
-            AND e.start_at >= date_trunc('month', NOW()) - INTERVAL '3 months'
-            AND e.start_at < date_trunc('month', NOW())
-          GROUP BY date_trunc('month', e.start_at)
+            AND e.start_at >= CURRENT_DATE - ($2::int - 1)
+            AND e.start_at < CURRENT_DATE + INTERVAL '1 day'
+          GROUP BY date_trunc('day', e.start_at)::date
         )
         SELECT
-          to_char(m.month_start, 'Mon') AS month,
+          to_char(d.day_start, 'Mon FMDD') AS label,
           COALESCE(i.value, 0)::numeric AS value
-        FROM months m
-        LEFT JOIN impact_by_month i ON i.month_start = m.month_start
-        ORDER BY m.month_start
+        FROM days d
+        LEFT JOIN impact_by_day i ON i.day_start = d.day_start
+        ORDER BY d.day_start
       `,
-      [hostUserIds]
+      [hostUserIds, rangeDays]
     );
 
     const { rows: [noShowRow] = [] } = await pool.query(
@@ -1755,7 +1783,8 @@ orgPortalRouter.get("/reports", async (req, res) => {
             ON r.event_id = e.id
            AND ${EXCLUDE_HOST_SELF_RSVP_SQL}
           WHERE e.creator_user_id::text = ANY($1::text[])
-            AND e.start_at >= NOW() - ($2 * INTERVAL '1 day')
+            AND e.start_at >= CURRENT_DATE - ($2::int - 1)
+            AND e.start_at < CURRENT_DATE + INTERVAL '1 day'
           GROUP BY e.id
         )
         SELECT
@@ -1772,7 +1801,8 @@ orgPortalRouter.get("/reports", async (req, res) => {
     const topVolParams = [hostUserIds, rangeDays];
     const topVolWhere = [
       "e.creator_user_id::text = ANY($1::text[])",
-      "e.start_at >= NOW() - ($2 * INTERVAL '1 day')",
+      "e.start_at >= CURRENT_DATE - ($2::int - 1)",
+      "e.start_at < CURRENT_DATE + INTERVAL '1 day'",
       EXCLUDE_HOST_SELF_RSVP_SQL,
       "r.status = 'accepted'",
     ];
@@ -1845,16 +1875,16 @@ orgPortalRouter.get("/reports", async (req, res) => {
 
     return res.json({
       hoursByMonth: hoursRows.map((row) => ({
-        month: row.month,
+        label: row.label,
         hours: Number(row.hours) || 0,
       })),
       fillRateByMonth: fillRows.map((row) => ({
-        month: row.month,
+        label: row.label,
         rate: Number(row.rate) || 0,
       })),
       noShowRate: Number(noShowRow?.no_show_rate) || 0,
       impactByMonth: impactRows.map((row) => ({
-        month: row.month,
+        label: row.label,
         value: Number(row.value) || 0,
       })),
       topVolunteers: topVolRows.map((row) => ({
