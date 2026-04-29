@@ -2837,6 +2837,25 @@ app.get("/about", (req, res) => {
   });
 });
 
+app.get("/fund-kai", (req, res) => {
+  const assetTag = process.env.ASSET_TAG ?? Date.now().toString(36);
+  res.render("fund-kai", {
+    title: "Help KAI Grow Up — Get Kinder Foundation",
+    assetTag,
+    user: req.user || null
+  });
+});
+
+app.get("/api/campaign-totals", (req, res) => {
+  res.json({
+    chuffed: 0,
+    fundrazr: 0,
+    combined: 0,
+    backers: 0,
+    daysRemaining: 62
+  });
+});
+
 app.get("/donor", ensureAuthenticated, async (req, res) => {
   const assetTag = process.env.ASSET_TAG ?? Date.now().toString(36);
   let donorRow = null;

@@ -8,6 +8,7 @@
     "cSpell.words": [
         "arche",
         "asec",
+        "Cadborosaurus",
         "checkin",
         "checkins",
         "creds",
@@ -48,5 +49,6 @@
         "undistracted",
         "unsuspended",
         "waitlisted"
-    ]
+    ],
+    "java.compile.nullAnalysis.mode": "disabled"
 }

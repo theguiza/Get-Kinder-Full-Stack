@@ -7,6 +7,7 @@ if (typeof window !== "undefined") {
 import React from "react";
 import ReactDOM from "react-dom/client";
 
+import FundKaiThermometer from "./fundKaiThermometer.jsx";
 import { EventsApp } from "./events/App.jsx";
 import KinderCrewCarousel from "./kinderCrewCarousel.jsx";
 import WeeksPlan from "./weeksPlan.jsx";
@@ -86,6 +87,17 @@ window.renderDonatePage = (selector = "#donate-root", props = {}) => {
   root.render(
     <React.StrictMode>
       <DonatePage {...props} />
+    </React.StrictMode>
+  );
+};
+
+window.renderFundKaiThermometer = (selector = "#fund-kai-thermometer-root", props = {}) => {
+  const el = typeof selector === "string" ? document.querySelector(selector) : selector;
+  if (!el) return;
+  const root = getOrCreateRoot(el);
+  root.render(
+    <React.StrictMode>
+      <FundKaiThermometer {...props} />
     </React.StrictMode>
   );
 };

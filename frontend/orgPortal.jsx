@@ -9,6 +9,7 @@ const KPI_REFRESH_EVENT = "orgportal:kpis:refresh";
 
 const TABS = [
   { key: "opportunities", label: "Opportunities" },
+  { key: "schedule", label: "Schedule" },
   { key: "checkin", label: "Check-in & Check-Out" },
   { key: "credits", label: "Reconcile" },
   { key: "comms", label: "Comms" },
@@ -242,11 +243,88 @@ function formatScheduleLine(opportunity) {
   return `${dateLabel} - ${timeLabel} - ${opportunity.locationText || "Location TBD"}`;
 }
 
+const SCHEDULE_PROBLEM_LABELS = {
+  open_capacity: "Open capacity",
+  pending_approvals: "Pending approvals",
+  no_shows: "No-shows",
+  pending_verification: "Pending verification",
+  missing_location: "Missing location",
+  missing_start_time: "Missing start time",
+  missing_capacity: "Missing capacity",
+};
+
+function formatScheduleYmd(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function getScheduleTodayYmd() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return formatScheduleYmd(today);
+}
+
+function addDaysToScheduleYmd(ymd, days) {
+  const [year, month, day] = String(ymd || getScheduleTodayYmd()).split("-").map((part) => Number(part));
+  const dt = new Date(year, month - 1, day);
+  if (Number.isNaN(dt.getTime())) return getScheduleTodayYmd();
+  dt.setDate(dt.getDate() + days);
+  return formatScheduleYmd(dt);
+}
+
+function buildScheduleWeekRange(startYmd) {
+  const start = startYmd || getScheduleTodayYmd();
+  return {
+    start,
+    end: addDaysToScheduleYmd(start, 7),
+    endExclusive: true,
+  };
+}
+
 function fillPercent(approvedCount, capacity) {
   const approved = safeNumber(approvedCount, 0);
   const cap = safeNumber(capacity, 0);
   if (!cap || cap <= 0) return 0;
   return Math.max(0, Math.min(100, Math.round((approved / cap) * 100)));
+}
+
+function formatScheduleDateLabel(dateValue) {
+  if (!dateValue) return "Date not set";
+  const dt = new Date(`${dateValue}T00:00:00`);
+  if (Number.isNaN(dt.getTime())) return String(dateValue);
+  return dt.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+}
+
+function formatScheduleRangeLabel(range) {
+  if (!range?.start || !range?.end) return "Next 7 days";
+  if (!range.endExclusive) {
+    return `${formatScheduleDateLabel(range.start)} - ${formatScheduleDateLabel(range.end)}`;
+  }
+  const inclusiveEnd = addDaysToScheduleYmd(range.end, -1);
+  return `${formatScheduleDateLabel(range.start)} - ${formatScheduleDateLabel(inclusiveEnd)} (end exclusive ${formatScheduleDateLabel(range.end)})`;
+}
+
+function formatScheduleTimeRange(startAt, endAt, eventTz) {
+  if (!startAt) return "Time not set";
+  const startLabel = eventTz ? formatTimeInZone(startAt, eventTz) : formatTime(startAt);
+  const endLabel = endAt ? (eventTz ? formatTimeInZone(endAt, eventTz) : formatTime(endAt)) : "Time TBD";
+  return `${startLabel} - ${endLabel}`;
+}
+
+function formatScheduleCount(value, fallback = "0") {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return fallback;
+  return String(num);
+}
+
+function formatScheduleCapacity(capacity) {
+  return capacity == null ? "No cap" : formatScheduleCount(capacity);
+}
+
+function formatScheduleOpenSpots(openSpots) {
+  return openSpots == null ? "—" : formatScheduleCount(openSpots);
 }
 
 function formatCheckinTime(isoValue) {
@@ -551,6 +629,10 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
   const [queue, setQueue] = useState(null);
   const [queueLoading, setQueueLoading] = useState(true);
   const [queueError, setQueueError] = useState(false);
+  const [scheduleData, setScheduleData] = useState(null);
+  const [scheduleLoading, setScheduleLoading] = useState(false);
+  const [scheduleError, setScheduleError] = useState("");
+  const [scheduleRangeOverride, setScheduleRangeOverride] = useState(null);
   const [myEventsPoolSummary, setMyEventsPoolSummary] = useState(null);
   const [myEventsPoolLoading, setMyEventsPoolLoading] = useState(false);
   const [myEvents, setMyEvents] = useState([]);
@@ -568,6 +650,8 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
   const [cancelLoading, setCancelLoading] = useState(false);
   const [cancelError, setCancelError] = useState("");
   const [cancelModalTarget, setCancelModalTarget] = useState(null);
+  const [forceCancelMode, setForceCancelMode] = useState(false);
+  const [forceCancelConfirmed, setForceCancelConfirmed] = useState(false);
 
   const [applicants, setApplicants] = useState(null);
   const [applicantsLoading, setApplicantsLoading] = useState(false);
@@ -639,6 +723,8 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
   const commsToastInstanceRef = useRef(null);
   const detailPanelRef = useRef(null);
   const opportunityDetailTopRef = useRef(null);
+  const pendingScheduleNavigationRef = useRef(null);
+  const scheduleRequestIdRef = useRef(0);
 
   const [commsQueue, setCommsQueue] = useState(null);
   const [commsLoading, setCommsLoading] = useState(false);
@@ -658,7 +744,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [showToast, setShowToast] = useState(false);
-  const [pendingDetailScroll, setPendingDetailScroll] = useState(false);
+  const [pendingDetailScroll, setPendingDetailScroll] = useState(null);
 
   const fetchQueue = useCallback(() => {
     setQueueLoading(true);
@@ -678,6 +764,37 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
         setQueueLoading(false);
       });
   }, []);
+
+  const fetchSchedule = useCallback(async () => {
+    const requestId = scheduleRequestIdRef.current + 1;
+    scheduleRequestIdRef.current = requestId;
+    setScheduleLoading(true);
+    setScheduleError("");
+
+    try {
+      const params = new URLSearchParams();
+      if (scheduleRangeOverride?.start && scheduleRangeOverride?.end) {
+        params.set("start", scheduleRangeOverride.start);
+        params.set("end", scheduleRangeOverride.end);
+      }
+      const query = params.toString();
+      const response = await fetch(`/api/org/schedule${query ? `?${query}` : ""}`, { credentials: "include" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.error || "schedule_failed");
+      }
+      if (requestId !== scheduleRequestIdRef.current) return;
+      setScheduleData(payload);
+    } catch (_) {
+      if (requestId !== scheduleRequestIdRef.current) return;
+      setScheduleData(null);
+      setScheduleError("Could not load schedule. Please refresh.");
+    } finally {
+      if (requestId === scheduleRequestIdRef.current) {
+        setScheduleLoading(false);
+      }
+    }
+  }, [scheduleRangeOverride?.end, scheduleRangeOverride?.start]);
 
   const myEventsSummary = useMemo(() => {
     const totals = myEventsPoolSummary?.totals || {};
@@ -891,6 +1008,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
 
   useEffect(() => {
     setSelectedQueueItem(null);
+    scheduleRequestIdRef.current += 1;
     setCompletedExpanded(false);
     setCancelledExpanded(false);
     setApplicants(null);
@@ -898,6 +1016,9 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
     setDetailError("");
     setActionError("");
     setActionLoadingByUser({});
+    setScheduleData(null);
+    setScheduleLoading(false);
+    setScheduleError("");
     setApprovedDeclineModal({ open: false, applicant: null });
     setApproveAllConfirmOpen(false);
     setApproveAllLoading(false);
@@ -949,6 +1070,25 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
     setMyEventsLedgerOpen(false);
     setMyEventsInviteModal({ open: false, event: null });
     setMyEventsToast(null);
+  }, [activeTab]);
+
+  useEffect(() => {
+    const pendingNavigation = pendingScheduleNavigationRef.current;
+    if (!pendingNavigation) return;
+    if (pendingNavigation.activeTab !== activeTab) {
+      if (activeTab !== "schedule") {
+        pendingScheduleNavigationRef.current = null;
+      }
+      return;
+    }
+    pendingScheduleNavigationRef.current = null;
+
+    if (pendingNavigation.selectedQueueItem) {
+      setSelectedQueueItem(pendingNavigation.selectedQueueItem);
+    }
+    if (pendingNavigation.scrollToDetail) {
+      setPendingDetailScroll("tabs");
+    }
   }, [activeTab]);
 
   const opportunitiesQueueSections = useMemo(() => {
@@ -1009,14 +1149,20 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
   const hasOpportunities = Boolean(queue?.hasOpportunities);
   const selectedOpportunity = selectedQueueItem?.tab === "opportunities" ? selectedQueueItem : null;
 
-  const scrollToOpportunityDetailTop = useCallback(() => {
+  const scrollToOpportunityDetailTop = useCallback((showTabs = false) => {
     if (typeof window === "undefined") return;
-    const target = opportunityDetailTopRef.current || detailPanelRef.current;
-    if (!target) return;
     const navEl = document.querySelector(".navbar");
     const navHeight = navEl ? Math.max(0, Math.round(navEl.getBoundingClientRect().height)) : 0;
-    const isDesktop = window.matchMedia("(min-width: 768px)").matches;
-    const extraReveal = isDesktop ? 84 : 24;
+    let target, extraReveal;
+    if (showTabs) {
+      target = document.querySelector(".orgp-tabs") || opportunityDetailTopRef.current || detailPanelRef.current;
+      extraReveal = 8;
+    } else {
+      target = opportunityDetailTopRef.current || detailPanelRef.current;
+      const isDesktop = window.matchMedia("(min-width: 768px)").matches;
+      extraReveal = isDesktop ? 84 : 24;
+    }
+    if (!target) return;
     const targetTop = target.getBoundingClientRect().top + window.pageYOffset;
     const top = Math.max(0, targetTop - navHeight - extraReveal);
     window.scrollTo({ top, behavior: "smooth" });
@@ -1159,17 +1305,18 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
   useEffect(() => {
     if (!pendingDetailScroll) return;
     if (activeTab !== "opportunities" || !selectedOpportunityId) {
-      setPendingDetailScroll(false);
+      setPendingDetailScroll(null);
       return;
     }
     if (typeof window === "undefined") {
-      setPendingDetailScroll(false);
+      setPendingDetailScroll(null);
       return;
     }
+    const showTabs = pendingDetailScroll === "tabs";
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => {
-        scrollToOpportunityDetailTop();
-        setPendingDetailScroll(false);
+        scrollToOpportunityDetailTop(showTabs);
+        setPendingDetailScroll(null);
       });
     });
   }, [pendingDetailScroll, activeTab, selectedOpportunityId, scrollToOpportunityDetailTop]);
@@ -1473,6 +1620,11 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
     }, 30000);
     return () => clearInterval(intervalId);
   }, [activeTab, selectedCheckinEventId, selectedCheckinStartTime]);
+
+  useEffect(() => {
+    if (activeTab !== "schedule") return;
+    fetchSchedule();
+  }, [activeTab, fetchSchedule]);
 
   useEffect(() => {
     if (activeTab !== "credits") return;
@@ -2618,6 +2770,8 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
       opportunity: selectedOpportunity ? { ...selectedOpportunity } : null,
     });
     setCancelError("");
+    setForceCancelMode(false);
+    setForceCancelConfirmed(false);
     setShowCancelModal(true);
   }
 
@@ -2763,7 +2917,99 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
         setCancelModalTarget(null);
       }
     } catch (error) {
-      setCancelError(error?.message || (isDraftOpportunity ? "Unable to delete draft." : "Unable to cancel event."));
+      const msg = error?.message || (isDraftOpportunity ? "Unable to delete draft." : "Unable to cancel event.");
+      if (msg === "Event already started or past") {
+        setForceCancelMode(true);
+        setCancelError("");
+      } else {
+        setCancelError(msg);
+      }
+    } finally {
+      setCancelLoading(false);
+    }
+  }
+
+  async function confirmForceCancelOpportunity() {
+    const target = cancelModalTarget;
+    if (!target?.eventId) return;
+    const targetEventId = String(target.eventId);
+    setCancelLoading(true);
+    setCancelError("");
+
+    try {
+      const response = await fetch(`/api/events/${encodeURIComponent(targetEventId)}/force-cancel`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
+        body: JSON.stringify({}),
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.error || "Unable to force cancel event.");
+      }
+
+      const cancelledItem = {
+        id: `cancelled-${targetEventId}`,
+        tab: "opportunities",
+        type: "opp-cancelled",
+        opportunityId: targetEventId,
+        opportunityName: target?.opportunity?.opportunityName || target?.title || "Cancelled event",
+        label: target?.opportunity?.opportunityName || target?.title || "Cancelled event",
+        icon: "fa-ban",
+        startTime: target?.opportunity?.startTime || null,
+        endTime: target?.opportunity?.endTime || null,
+        timeZone: target?.opportunity?.timeZone || "America/Vancouver",
+        pendingCount: 0,
+        approvedCount: safeNumber(target?.opportunity?.approvedCount, 0),
+        capacity: target?.opportunity?.capacity == null ? null : safeNumber(target?.opportunity?.capacity, null),
+      };
+
+      if (target.source === "opportunities") {
+        setQueue((prev) => {
+          if (!prev) return prev;
+          const removeEvent = (rows = []) =>
+            rows.filter((row) => String(row?.opportunityId || "") !== targetEventId);
+          const remainingCancelled = removeEvent(prev.cancelled || []);
+          return {
+            ...prev,
+            needsAttention: removeEvent(prev.needsAttention),
+            upcoming: removeEvent(prev.upcoming),
+            active: removeEvent(prev.active),
+            drafts: removeEvent(prev.drafts),
+            completed: removeEvent(prev.completed),
+            cancelled: [cancelledItem, ...remainingCancelled],
+            hasOpportunities: true,
+          };
+        });
+        setCheckinQueueItems((prev) =>
+          (Array.isArray(prev) ? prev : []).filter(
+            (item) => String(item?.opportunityId || "") !== targetEventId
+          )
+        );
+        setSelectedQueueItem(cancelledItem);
+        setShowCancelModal(false);
+        setCancelModalTarget(null);
+        setForceCancelMode(false);
+        setForceCancelConfirmed(false);
+        setCancelledExpanded(true);
+        return;
+      }
+
+      if (target.source === "myevents") {
+        if (String(selectedMyEvent?.id || "") === targetEventId) {
+          setSelectedMyEvent(null);
+        }
+        setMyEventsToast({ type: "success", message: "Event cancelled." });
+        await refreshMyEventsData();
+        void fetchQueue();
+        setShowCancelModal(false);
+        setCancelModalTarget(null);
+        setForceCancelMode(false);
+        setForceCancelConfirmed(false);
+      }
+    } catch (error) {
+      setCancelError(error?.message || "Unable to force cancel event.");
     } finally {
       setCancelLoading(false);
     }
@@ -3050,6 +3296,8 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
       event: eventRow,
     });
     setCancelError("");
+    setForceCancelMode(false);
+    setForceCancelConfirmed(false);
     setShowCancelModal(true);
   }
 
@@ -3486,7 +3734,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
     const handleQueueSelect = () => {
       setSelectedQueueItem(item);
       if (activeTab === "opportunities" && item.tab === "opportunities") {
-        setPendingDetailScroll(true);
+        setPendingDetailScroll("detail");
       }
     };
 
@@ -3888,6 +4136,496 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
     );
   }
 
+  function renderScheduleOverview() {
+    if (scheduleLoading) {
+      return (
+        <div className="d-flex justify-content-center py-4">
+          <div className="spinner-border" role="status" aria-label="Loading schedule"></div>
+        </div>
+      );
+    }
+
+    if (scheduleError) {
+      return (
+        <div className="text-muted text-center py-4">
+          {scheduleError}
+          <button type="button" className="btn btn-link btn-sm orgp-link-btn d-block mx-auto mt-2" onClick={fetchSchedule}>
+            Retry
+          </button>
+        </div>
+      );
+    }
+
+    const locations = Array.isArray(scheduleData?.locations) ? scheduleData.locations : [];
+    const problemLocations = locations.filter((location) => location?.hasProblems);
+
+    if (!scheduleData) {
+      return <div className="text-muted text-center py-4">Schedule not loaded.</div>;
+    }
+
+    return (
+      <div>
+        <div className="orgp-block mb-3">
+          <div className="orgp-section-label">RANGE</div>
+          <div className="fw-semibold" style={{ color: "#455a7c" }}>
+            {formatScheduleRangeLabel(scheduleData.range)}
+          </div>
+          <div className="small text-muted mt-1">
+            {formatScheduleCount(scheduleData?.totals?.opportunities)} opportunities
+          </div>
+        </div>
+
+        <div className="orgp-section-label">PROBLEM LOCATIONS</div>
+        <div className="list-group orgp-queue-list">
+          {problemLocations.length ? (
+            problemLocations.map((location) => (
+              <div key={`schedule-problem-${location.locationText}`} className="list-group-item orgp-queue-item">
+                <div className="d-flex align-items-center gap-2">
+                  <i className="fas fa-triangle-exclamation orgp-item-icon orgp-item-icon-warning" aria-hidden="true"></i>
+                  <span className="flex-grow-1">{location.locationText}</span>
+                  <span className="badge text-bg-warning">
+                    {formatScheduleCount(location?.totals?.opportunities)}
+                  </span>
+                </div>
+              </div>
+            ))
+          ) : (
+            <div className="text-muted small">No problem locations in this range.</div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  function renderScheduleMetric(label, value) {
+    return (
+      <div className="orgp-schedule-metric" key={label}>
+        <div className="orgp-schedule-metric-label">{label}</div>
+        <div className="orgp-schedule-metric-value">{value}</div>
+      </div>
+    );
+  }
+
+  function goToPreviousScheduleRange() {
+    const currentRange = scheduleRangeOverride || scheduleData?.range;
+    if (!currentRange?.start) return;
+    setScheduleData(null);
+    setScheduleRangeOverride(buildScheduleWeekRange(addDaysToScheduleYmd(currentRange.start, -7)));
+  }
+
+  function goToNextScheduleRange() {
+    const currentRange = scheduleRangeOverride || scheduleData?.range;
+    if (!currentRange?.start) return;
+    setScheduleData(null);
+    setScheduleRangeOverride(buildScheduleWeekRange(addDaysToScheduleYmd(currentRange.start, 7)));
+  }
+
+  function goToTodayScheduleRange() {
+    setScheduleData(null);
+    if (!scheduleRangeOverride) {
+      fetchSchedule();
+      return;
+    }
+    setScheduleRangeOverride(null);
+  }
+
+  function renderScheduleDateControls(activeRange) {
+    const rangeForDisplay = activeRange || null;
+    const canShiftRange = Boolean(rangeForDisplay?.start);
+
+    return (
+      <div className="d-flex flex-column align-items-start align-items-md-end gap-2">
+        <div className="text-md-end">
+          <div className="orgp-section-label mb-1">ACTIVE RANGE</div>
+          <div className="fw-semibold" style={{ color: "#455a7c" }}>
+            {formatScheduleRangeLabel(rangeForDisplay)}
+          </div>
+        </div>
+        <div className="d-flex flex-wrap gap-2 justify-content-md-end">
+          <div className="btn-group btn-group-sm" role="group" aria-label="Schedule view">
+            <button type="button" className="btn btn-sm orgp-btn-ink-outline active" aria-pressed="true">
+              Week
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm btn-outline-secondary"
+              disabled
+              title="Month view is coming next"
+            >
+              Month
+            </button>
+          </div>
+          <div className="btn-group btn-group-sm" role="group" aria-label="Schedule date navigation">
+            <button type="button" className="btn btn-sm btn-outline-secondary" onClick={goToPreviousScheduleRange} disabled={!canShiftRange}>
+              <i className="fas fa-chevron-left me-1" aria-hidden="true"></i>
+              Previous
+            </button>
+            <button type="button" className="btn btn-sm btn-outline-secondary" onClick={goToTodayScheduleRange}>
+              Today
+            </button>
+            <button type="button" className="btn btn-sm btn-outline-secondary" onClick={goToNextScheduleRange} disabled={!canShiftRange}>
+              Next
+              <i className="fas fa-chevron-right ms-1" aria-hidden="true"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function findScheduleOpportunityQueueItem(opportunityId) {
+    const eventId = String(opportunityId || "").trim();
+    if (!eventId) return null;
+    const sections = opportunitiesQueueSections || {};
+    return [
+      ...(sections.needsAttention || []),
+      ...(sections.upcoming || []),
+      ...(sections.active || []),
+      ...(sections.drafts || []),
+      ...(sections.completed || []),
+      ...(sections.cancelled || []),
+    ].find((item) => String(item?.opportunityId || "") === eventId) || null;
+  }
+
+  function buildScheduleOpportunityQueueItem(opportunity) {
+    const eventId = String(opportunity?.id || "").trim();
+    const existingItem = findScheduleOpportunityQueueItem(eventId);
+    if (existingItem) return existingItem;
+
+    const pendingJoinCount = safeNumber(opportunity?.pendingCount, 0);
+    const pendingVerifyCount = safeNumber(opportunity?.pendingVerificationCount, 0);
+    const status = String(opportunity?.status || "").toLowerCase();
+    const type =
+      status === "cancelled"
+        ? "opp-cancelled"
+        : status === "completed"
+          ? "opp-completed"
+          : status === "draft"
+            ? "opp-draft"
+            : pendingJoinCount > 0
+              ? "opp-approval"
+              : status === "active"
+                ? "opp-active"
+                : "opp-upcoming";
+    const icon =
+      type === "opp-approval"
+        ? "fa-user-check"
+        : type === "opp-active"
+          ? "fa-circle"
+          : type === "opp-draft"
+            ? "fa-file"
+            : type === "opp-cancelled"
+              ? "fa-ban"
+              : type === "opp-completed"
+                ? "fa-check-circle"
+                : "fa-calendar";
+
+    return {
+      id: `schedule-opportunity-${eventId}`,
+      tab: "opportunities",
+      type,
+      opportunityId: eventId,
+      opportunityName: opportunity?.title || "Untitled opportunity",
+      label: opportunity?.title || "Untitled opportunity",
+      icon,
+      startTime: opportunity?.startAt || null,
+      endTime: opportunity?.endAt || null,
+      timeZone: opportunity?.tz || "America/Vancouver",
+      pendingCount: pendingJoinCount,
+      pendingJoinCount,
+      pendingVerifyCount,
+      pendingActionsCount: pendingJoinCount + pendingVerifyCount,
+      approvedCount: safeNumber(opportunity?.acceptedCount, 0),
+      checkedInCount: safeNumber(opportunity?.checkedInCount, 0),
+      capacity: opportunity?.capacity == null ? null : safeNumber(opportunity.capacity, null),
+    };
+  }
+
+  function resolveScheduleCheckinQueueGroup(opportunity) {
+    const status = String(opportunity?.status || "").toLowerCase();
+    if (status === "cancelled") return null;
+
+    const now = new Date();
+    const soonLimit = new Date(now.getTime() + 4 * 60 * 60 * 1000);
+    const startAt = opportunity?.startAt ? new Date(opportunity.startAt) : null;
+    const endAt = opportunity?.endAt ? new Date(opportunity.endAt) : null;
+    const validStart = startAt && !Number.isNaN(startAt.getTime()) ? startAt : null;
+    const validEnd = endAt && !Number.isNaN(endAt.getTime()) ? endAt : null;
+    const fallbackEnd =
+      validStart && !validEnd ? new Date(validStart.getTime() + 3 * 60 * 60 * 1000) : null;
+    const effectiveEnd = validEnd || fallbackEnd;
+    const pendingVerifyCount = safeNumber(opportunity?.pendingVerificationCount, 0);
+
+    if (validStart && effectiveEnd && validStart <= now && effectiveEnd >= now) return "activeNow";
+    if (validStart && validStart > now && validStart <= soonLimit) return "startingSoon";
+    if (validStart && validStart > now && isSameCalendarDay(validStart, now)) return "laterToday";
+    if (effectiveEnd && effectiveEnd < now && pendingVerifyCount > 0) return "checkoutPending";
+    if (!validStart) return "startingSoon";
+    return null;
+  }
+
+  function buildScheduleCheckinQueueItem(opportunity) {
+    const eventId = String(opportunity?.id || "").trim();
+    const existingItem = checkinQueueItems.find((item) => String(item?.opportunityId || "") === eventId);
+    if (existingItem) return existingItem;
+
+    const checkedInCount = safeNumber(opportunity?.checkedInCount, 0);
+    const pendingVerifyCount = safeNumber(opportunity?.pendingVerificationCount, 0);
+    const noShowCount = safeNumber(opportunity?.noShowCount, 0);
+    const expectedCount = Math.max(safeNumber(opportunity?.acceptedCount, 0) + checkedInCount, checkedInCount);
+    const startLabel = opportunity?.startAt
+      ? formatTimeInZone(opportunity.startAt, opportunity?.tz || "America/Vancouver")
+      : "Time TBD";
+    const dateLabel = opportunity?.date ? formatScheduleDateLabel(opportunity.date) : "Date TBD";
+    const endLabel = opportunity?.endAt
+      ? formatTimeInZone(opportunity.endAt, opportunity?.tz || "America/Vancouver")
+      : "Time TBD";
+    const queueGroup = resolveScheduleCheckinQueueGroup(opportunity);
+
+    return {
+      id: `schedule-checkin-${eventId}`,
+      tab: "checkin",
+      opportunityId: eventId,
+      icon: "fa-clipboard-check",
+      iconTone: pendingVerifyCount > 0 || noShowCount > 0 ? "warning" : "",
+      queueGroup: queueGroup || "scheduleRoster",
+      openedFromSchedule: true,
+      outsideCheckinWindow: !queueGroup,
+      label: `${opportunity?.title || "Untitled opportunity"} · ${checkedInCount} checked / ${expectedCount} expected`,
+      detailName: opportunity?.title || "Untitled opportunity",
+      detailDateTime: `${dateLabel} · ${startLabel} - ${endLabel}`,
+      summaryChecked: checkedInCount,
+      summaryExpected: expectedCount,
+      startTime: opportunity?.startAt || null,
+      endTime: opportunity?.endAt || null,
+      timeZone: opportunity?.tz || "America/Vancouver",
+    };
+  }
+
+  function navigateFromSchedule(activeTabKey, selectedItem, options = {}) {
+    if (!selectedItem?.opportunityId) return;
+    if (activeTab === activeTabKey) {
+      setSelectedQueueItem(selectedItem);
+      if (options.scrollToDetail) setPendingDetailScroll("tabs");
+      return;
+    }
+
+    pendingScheduleNavigationRef.current = {
+      activeTab: activeTabKey,
+      selectedQueueItem: selectedItem,
+      scrollToDetail: Boolean(options.scrollToDetail),
+    };
+    setActiveTab(activeTabKey);
+  }
+
+  function navigateScheduleToOpportunity(opportunity) {
+    navigateFromSchedule("opportunities", buildScheduleOpportunityQueueItem(opportunity), {
+      scrollToDetail: true,
+    });
+  }
+
+  function navigateScheduleToCheckin(opportunity) {
+    navigateFromSchedule("checkin", buildScheduleCheckinQueueItem(opportunity));
+  }
+
+  function renderScheduleOpportunityCard(opportunity) {
+    const statusLabel = opportunity?.status || "Status not set";
+    const reasons = Array.isArray(opportunity?.problemReasons) ? opportunity.problemReasons : [];
+    const pendingApprovalCount = safeNumber(opportunity?.pendingCount, 0);
+    const pendingVerificationCount = safeNumber(opportunity?.pendingVerificationCount, 0);
+    const noShowCount = safeNumber(opportunity?.noShowCount, 0);
+    const showRosterNavigation = pendingVerificationCount > 0 || noShowCount > 0;
+
+    return (
+      <div key={`schedule-opportunity-${opportunity.id}`} className="orgp-schedule-card">
+        <div className="d-flex justify-content-between align-items-start gap-2 flex-wrap">
+          <div className="orgp-truncate-wrap">
+            <h4 className="orgp-schedule-card-title">{opportunity.title || "Untitled opportunity"}</h4>
+            <div className="small text-muted">
+              {formatScheduleTimeRange(opportunity.startAt, opportunity.endAt, opportunity.tz)}
+              {opportunity.tz ? ` (${opportunity.tz})` : ""}
+            </div>
+          </div>
+          <span className="badge text-bg-light border text-capitalize">{statusLabel}</span>
+        </div>
+
+        <div className="small text-muted mt-2">
+          <i className="fas fa-location-dot me-1" aria-hidden="true"></i>
+          {opportunity.locationText || "Location not set"}
+        </div>
+
+        <div className="orgp-schedule-metric-grid mt-2">
+          {renderScheduleMetric("Capacity", formatScheduleCapacity(opportunity.capacity))}
+          {renderScheduleMetric("Accepted", formatScheduleCount(opportunity.acceptedCount))}
+          {renderScheduleMetric("Pending", formatScheduleCount(opportunity.pendingCount))}
+          {renderScheduleMetric("Checked-in", formatScheduleCount(opportunity.checkedInCount))}
+          {renderScheduleMetric("Verified", formatScheduleCount(opportunity.verifiedCount))}
+          {renderScheduleMetric("No-show", formatScheduleCount(opportunity.noShowCount))}
+          {renderScheduleMetric("Open spots", formatScheduleOpenSpots(opportunity.openSpots))}
+        </div>
+
+        {reasons.length ? (
+          <div className="d-flex flex-wrap gap-1 mt-2">
+            {reasons.map((reason) => (
+              <span key={`${opportunity.id}-${reason}`} className="badge text-bg-warning">
+                {SCHEDULE_PROBLEM_LABELS[reason] || reason}
+              </span>
+            ))}
+          </div>
+        ) : null}
+
+        <div className="d-flex flex-wrap gap-2 mt-3">
+          <button
+            type="button"
+            className="btn btn-sm btn-outline-secondary"
+            onClick={() => navigateScheduleToOpportunity(opportunity)}
+          >
+            <i className="fas fa-arrow-up-right-from-square me-1" aria-hidden="true"></i>
+            {pendingApprovalCount > 0 ? "Review approvals" : "Open details"}
+          </button>
+          {showRosterNavigation ? (
+            <button
+              type="button"
+              className="btn btn-sm btn-outline-secondary"
+              onClick={() => navigateScheduleToCheckin(opportunity)}
+            >
+              <i className="fas fa-clipboard-check me-1" aria-hidden="true"></i>
+              Open roster
+            </button>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
+
+  function renderScheduleDashboard() {
+    const activeRange = scheduleRangeOverride || scheduleData?.range || null;
+    const scheduleHeader = (
+      <div className="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+        <div>
+          <h3 className="orgp-opp-title mb-1">Schedule</h3>
+          <p className="text-muted mb-0">
+            Upcoming volunteer coverage by location, date, and opportunity.
+          </p>
+        </div>
+        {renderScheduleDateControls(activeRange)}
+      </div>
+    );
+
+    if (scheduleLoading) {
+      return (
+        <div>
+          {scheduleHeader}
+          <div className="d-flex justify-content-center py-4">
+            <div className="spinner-border" role="status" aria-label="Loading schedule"></div>
+          </div>
+        </div>
+      );
+    }
+
+    if (scheduleError) {
+      return (
+        <div>
+          {scheduleHeader}
+          <div className="alert alert-warning py-2" role="alert">
+            {scheduleError}
+            <button type="button" className="btn btn-link btn-sm p-0 ms-2 orgp-link-btn" onClick={fetchSchedule}>
+              Retry
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    const locations = Array.isArray(scheduleData?.locations) ? scheduleData.locations : [];
+    const totals = scheduleData?.totals || {};
+
+    if (!scheduleData || !locations.length) {
+      return (
+        <div>
+          {scheduleHeader}
+          <div className="orgp-empty-detail orgp-empty-detail-lg">
+            <i className="fas fa-calendar-days" aria-hidden="true"></i>
+            <h3 className="orgp-detail-heading mb-1">No scheduled opportunities</h3>
+            <p className="text-muted mb-0 text-center">No opportunities were found in the selected range.</p>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div>
+        {scheduleHeader}
+        <div className="d-flex justify-content-end mb-3">
+          <span className="badge rounded-pill orgp-ink-pill">
+            {formatScheduleCount(totals.problemLocations)} problem locations
+          </span>
+        </div>
+
+        <div className="orgp-schedule-summary-grid mb-3">
+          {renderScheduleMetric("Opportunities", formatScheduleCount(totals.opportunities))}
+          {renderScheduleMetric("Accepted", formatScheduleCount(totals.accepted))}
+          {renderScheduleMetric("Pending", formatScheduleCount(totals.pending))}
+          {renderScheduleMetric("Checked-in", formatScheduleCount(totals.checkedIn))}
+          {renderScheduleMetric("Verified", formatScheduleCount(totals.verified))}
+          {renderScheduleMetric("No-show", formatScheduleCount(totals.noShow))}
+          {renderScheduleMetric("Open spots", formatScheduleCount(totals.openSpots))}
+        </div>
+
+        <div className="orgp-schedule-accordion">
+          {locations.map((location) => {
+            const reasons = Array.isArray(location?.problemReasons) ? location.problemReasons : [];
+            const dates = Array.isArray(location?.dates) ? location.dates : [];
+            return (
+              <details
+                key={`schedule-location-${location.locationText}`}
+                className={`orgp-schedule-location ${location.hasProblems ? "has-problems" : ""}`}
+                open={Boolean(location.hasProblems)}
+              >
+                <summary className="orgp-summary orgp-schedule-summary">
+                  <div className="d-flex justify-content-between align-items-center gap-2 flex-wrap">
+                    <div>
+                      <div className="fw-semibold">{location.locationText || "Location not set"}</div>
+                      <div className="small text-muted">
+                        {formatScheduleCount(location?.totals?.opportunities)} opportunities · {formatScheduleCount(location?.totals?.openSpots)} open spots
+                      </div>
+                    </div>
+                    <div className="d-flex gap-1 flex-wrap justify-content-end">
+                      {reasons.length ? (
+                        reasons.map((reason) => (
+                          <span key={`${location.locationText}-${reason}`} className="badge text-bg-warning">
+                            {SCHEDULE_PROBLEM_LABELS[reason] || reason}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="badge text-bg-success">Healthy</span>
+                      )}
+                    </div>
+                  </div>
+                </summary>
+
+                <div className="orgp-schedule-location-body">
+                  {dates.map((dateGroup) => (
+                    <div key={`${location.locationText}-${dateGroup.date || "date-not-set"}`} className="orgp-schedule-date-group">
+                      <div className="orgp-section-label mb-2">
+                        {formatScheduleDateLabel(dateGroup.date)}
+                      </div>
+                      <div className="d-grid gap-2">
+                        {(Array.isArray(dateGroup.opportunities) ? dateGroup.opportunities : []).map((opportunity) =>
+                          renderScheduleOpportunityCard(opportunity)
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
   const checkoutPendingRows = useMemo(() => {
     const endTs = selectedCheckinEndTime ? new Date(selectedCheckinEndTime).getTime() : NaN;
     const now = Date.now();
@@ -4036,6 +4774,12 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
       <div>
         <h3 className="orgp-opp-title mb-1">{selectedShift?.detailName || "Opportunity"}</h3>
         <div className="text-muted small mb-3">{checkinDateTimeLabel}</div>
+
+        {selectedShift?.openedFromSchedule && selectedShift?.outsideCheckinWindow ? (
+          <div className="alert alert-info py-2 small" role="status">
+            Opened from Schedule. Schedule navigation is read-only, and this event is outside the current check-in queue window; the selected roster is shown here for review.
+          </div>
+        ) : null}
 
         <div className="orgp-checkin-qr-wrap mb-3">
           <img
@@ -4918,6 +5662,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
 
   function renderLeftPanel() {
     if (activeTab === "opportunities") return renderOpportunitiesQueue();
+    if (activeTab === "schedule") return renderScheduleOverview();
     if (activeTab === "myevents") return renderMyEventsQueuePanel();
     if (activeTab === "checkin") return renderCheckinQueue();
     if (activeTab === "credits") return renderCreditsQueue();
@@ -4928,6 +5673,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
 
   function renderRightPanel() {
     if (activeTab === "opportunities") return renderOpportunityDetail();
+    if (activeTab === "schedule") return renderScheduleDashboard();
     if (activeTab === "myevents") return renderMyEventsDetail();
     if (activeTab === "checkin") return renderCheckinDetail();
     if (activeTab === "credits") return renderCreditsDetail();
@@ -4939,9 +5685,22 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
   const isReportsTab = activeTab === "reports";
   const leftColumnClass = isReportsTab ? "col-12 col-md-3" : "col-12 col-md-4";
   const rightColumnClass = isReportsTab ? "col-12 col-md-9" : "col-12 col-md-8";
-  const leftPanelTitle = isReportsTab ? "Filters" : activeTab === "myevents" ? "Event Queue" : "Ops Queue";
-  const rightPanelTitle = isReportsTab ? "Reports Dashboard" : activeTab === "myevents" ? "Funding Detail" : "Detail Panel";
+  const leftPanelTitle = isReportsTab
+    ? "Filters"
+    : activeTab === "schedule"
+      ? "Schedule"
+      : activeTab === "myevents"
+        ? "Event Queue"
+        : "Ops Queue";
+  const rightPanelTitle = isReportsTab
+    ? "Reports Dashboard"
+    : activeTab === "schedule"
+      ? "Coverage"
+      : activeTab === "myevents"
+        ? "Funding Detail"
+        : "Detail Panel";
   const isDraftCancelIntent = Boolean(cancelModalTarget?.isDraft);
+  const isForceCancelMode = forceCancelMode && !isDraftCancelIntent;
   const profileApplicant = applicantProfileModal.applicant;
   const profileApplicantName = profileApplicant?.displayName || "Volunteer";
   const profileApplicantEmail = profileApplicant?.email || "No email on file";
@@ -5190,6 +5949,8 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
               setShowCancelModal(false);
               setCancelError("");
               setCancelModalTarget(null);
+              setForceCancelMode(false);
+              setForceCancelConfirmed(false);
             }
           }}
         >
@@ -5197,7 +5958,11 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
             <div className="modal-content" style={{ borderRadius: "16px" }}>
               <div className="modal-header">
                 <h5 className="modal-title">
-                  {isDraftCancelIntent ? "Delete draft opportunity?" : "Cancel opportunity?"}
+                  {isDraftCancelIntent
+                    ? "Delete draft opportunity?"
+                    : isForceCancelMode
+                      ? "Force cancel this event?"
+                      : "Cancel opportunity?"}
                 </h5>
                 <button
                   type="button"
@@ -5208,13 +5973,36 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
                     setShowCancelModal(false);
                     setCancelError("");
                     setCancelModalTarget(null);
+                    setForceCancelMode(false);
+                    setForceCancelConfirmed(false);
                   }}
                 ></button>
               </div>
               <div className="modal-body">
                 {isDraftCancelIntent
                   ? "This will permanently delete this draft. It will be removed from the Draft section and cannot be undone."
-                  : "This will cancel this opportunity and move it to the Cancelled section."}
+                  : isForceCancelMode
+                    ? (
+                      <div>
+                        <div className="alert alert-danger mb-3" role="alert">
+                          <strong>Warning:</strong> This event has already started or occurred. Cancelling it now will affect any volunteers who signed up or attended.
+                        </div>
+                        <div className="form-check">
+                          <input
+                            className="form-check-input"
+                            type="checkbox"
+                            id="forceCancelConfirmCheck"
+                            checked={forceCancelConfirmed}
+                            onChange={(e) => setForceCancelConfirmed(e.target.checked)}
+                            disabled={cancelLoading}
+                          />
+                          <label className="form-check-label" htmlFor="forceCancelConfirmCheck">
+                            I understand this event has started or already occurred
+                          </label>
+                        </div>
+                      </div>
+                    )
+                    : "This will cancel this opportunity and move it to the Cancelled section."}
               </div>
               <div className="modal-footer">
                 <button
@@ -5225,6 +6013,8 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
                     setShowCancelModal(false);
                     setCancelError("");
                     setCancelModalTarget(null);
+                    setForceCancelMode(false);
+                    setForceCancelConfirmed(false);
                   }}
                   disabled={cancelLoading}
                 >
@@ -5232,9 +6022,9 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
                 </button>
                 <button
                   type="button"
-                  className="btn btn-danger"
-                  onClick={confirmCancelOpportunity}
-                  disabled={cancelLoading}
+                  className={isForceCancelMode ? "btn btn-outline-danger" : "btn btn-danger"}
+                  onClick={isForceCancelMode ? confirmForceCancelOpportunity : confirmCancelOpportunity}
+                  disabled={cancelLoading || (isForceCancelMode && !forceCancelConfirmed)}
                 >
                   {cancelLoading
                     ? isDraftCancelIntent
@@ -5242,7 +6032,9 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
                       : "Cancelling..."
                     : isDraftCancelIntent
                       ? "Yes, Delete Draft"
-                      : "Yes, Cancel Event"}
+                      : isForceCancelMode
+                        ? "Force Cancel Event"
+                        : "Yes, Cancel Event"}
                 </button>
               </div>
               {cancelError ? (
@@ -5794,6 +6586,93 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
           border-radius: 12px;
           padding: 12px;
           background: #fff;
+        }
+
+        .orgp-schedule-summary-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+          gap: 8px;
+        }
+
+        .orgp-schedule-metric {
+          min-width: 0;
+        }
+
+        .orgp-schedule-summary-grid .orgp-schedule-metric {
+          border: 1px solid #e8eef8;
+          border-radius: 10px;
+          background: #f9fbff;
+          padding: 10px;
+        }
+
+        .orgp-schedule-metric-label {
+          color: #6c757d;
+          font-size: 0.68rem;
+          font-weight: 700;
+          letter-spacing: 0.08em;
+          line-height: 1.2;
+          text-transform: uppercase;
+        }
+
+        .orgp-schedule-metric-value {
+          color: #455a7c;
+          font-size: 1rem;
+          font-weight: 700;
+          line-height: 1.25;
+          margin-top: 2px;
+        }
+
+        .orgp-schedule-accordion {
+          display: grid;
+          gap: 10px;
+        }
+
+        .orgp-schedule-location {
+          border: 1px solid #e8eef8;
+          border-radius: 12px;
+          background: #fff;
+          overflow: hidden;
+        }
+
+        .orgp-schedule-location.has-problems {
+          border-left: 4px solid #ffc107;
+        }
+
+        .orgp-schedule-summary {
+          padding: 12px;
+          color: #2f3f58;
+        }
+
+        .orgp-schedule-location-body {
+          border-top: 1px solid #e8eef8;
+          padding: 12px;
+        }
+
+        .orgp-schedule-date-group + .orgp-schedule-date-group {
+          margin-top: 14px;
+        }
+
+        .orgp-schedule-card {
+          border: 1px solid #e8eef8;
+          border-radius: 10px;
+          background: #fff;
+          padding: 12px;
+        }
+
+        .orgp-schedule-card-title {
+          color: #455a7c;
+          font-size: 1rem;
+          font-weight: 700;
+          line-height: 1.25;
+          margin: 0;
+        }
+
+        .orgp-schedule-metric-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
+          gap: 8px 12px;
+          border-top: 1px solid #eef3fb;
+          padding-top: 10px;
         }
 
         .orgp-my-strip {

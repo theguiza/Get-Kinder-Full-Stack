@@ -12,6 +12,19 @@ const orgPortalRouter = express.Router();
 const CSRF_HEADER_NAME = "X-CSRF-Token";
 const POOL_SCOPE_SEP = "__";
 const EXCLUDE_HOST_SELF_RSVP_SQL = "r.attendee_user_id::text <> e.creator_user_id::text";
+const SCHEDULE_LOCATION_FALLBACK = "Location not set";
+const SCHEDULE_DATE_FALLBACK = "Date not set";
+// Existing event publish validation allows missing capacity, so it is not a schedule problem.
+const SCHEDULE_CAPACITY_REQUIRED = false;
+const SCHEDULE_PROBLEM_REASON_ORDER = [
+  "open_capacity",
+  "pending_approvals",
+  "no_shows",
+  "pending_verification",
+  "missing_location",
+  "missing_start_time",
+  "missing_capacity",
+];
 
 async function getPortalScope(req) {
   if (!req._orgPortalScopePromise) {
@@ -61,6 +74,64 @@ function requireCsrf(req, res) {
 function isHostSelfRsvp(eventRow, attendeeUserId) {
   if (!eventRow?.creator_user_id || attendeeUserId == null) return false;
   return String(eventRow.creator_user_id) === String(attendeeUserId).trim();
+}
+
+function isYmdDate(value) {
+  const raw = String(value || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return false;
+  const parsed = new Date(`${raw}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === raw;
+}
+
+function formatLocalYmd(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function addDaysToYmd(ymd, days) {
+  const [year, month, day] = String(ymd).split("-").map((part) => Number(part));
+  const dt = new Date(Date.UTC(year, month - 1, day));
+  dt.setUTCDate(dt.getUTCDate() + days);
+  return dt.toISOString().slice(0, 10);
+}
+
+function resolveScheduleRange(query = {}) {
+  const startParam = typeof query.start === "string" ? query.start.trim() : "";
+  const endParam = typeof query.end === "string" ? query.end.trim() : "";
+  if (startParam && !isYmdDate(startParam)) return { ok: false, error: "invalid_start" };
+  if (endParam && !isYmdDate(endParam)) return { ok: false, error: "invalid_end" };
+
+  // No organization timezone is currently stored or wired into org portal scope.
+  // When the client omits start/end, the backend owns the default rolling week
+  // using the Node/server local calendar date, then returns the resolved range.
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const start = startParam || formatLocalYmd(today);
+  const end = endParam || addDaysToYmd(start, 7);
+  if (end <= start) return { ok: false, error: "invalid_range" };
+
+  return {
+    ok: true,
+    start,
+    end,
+    endExclusive: true,
+  };
+}
+
+function scheduleNumber(value) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : 0;
+}
+
+function scheduleCapacity(value) {
+  const num = Number(value);
+  return Number.isFinite(num) && num > 0 ? num : null;
+}
+
+function stableScheduleReasons(reasonSet) {
+  return SCHEDULE_PROBLEM_REASON_ORDER.filter((reason) => reasonSet.has(reason));
 }
 
 orgPortalRouter.use(async (req, res, next) => {
@@ -1045,6 +1116,226 @@ orgPortalRouter.get("/opportunities", async (req, res) => {
   } catch (error) {
     console.error("[orgPortalApi] GET /opportunities error:", error);
     return res.status(500).json({ error: "Unable to load opportunities" });
+  }
+});
+
+orgPortalRouter.get("/schedule", async (req, res) => {
+  try {
+    const scope = await getPortalScope(req);
+    const hostUserIds = await resolveUserIdCandidates(req);
+    const range = resolveScheduleRange(req.query || {});
+    if (!range.ok) {
+      return res.status(400).json({ error: "invalid_date_range", detail: range.error });
+    }
+    const responseRange = {
+      start: range.start,
+      end: range.end,
+      endExclusive: true,
+    };
+
+    if (!Array.isArray(hostUserIds) || !hostUserIds.length) {
+      return res.json({
+        ok: true,
+        orgId: scope.orgId != null ? Number(scope.orgId) : null,
+        range: responseRange,
+        totals: {
+          locations: 0,
+          problemLocations: 0,
+          opportunities: 0,
+          capacity: 0,
+          accepted: 0,
+          pending: 0,
+          checkedIn: 0,
+          verified: 0,
+          noShow: 0,
+          openSpots: 0,
+        },
+        locations: [],
+      });
+    }
+
+    const { rows } = await pool.query(
+      `
+        SELECT
+          e.id::text AS id,
+          e.title,
+          e.start_at,
+          e.end_at,
+          e.tz,
+          e.status,
+          e.capacity,
+          e.location_text,
+          e.start_at::date::text AS start_date,
+          -- accepted_count follows org portal RSVP semantics: accepted RSVP status only.
+          COUNT(r.id) FILTER (WHERE r.status = 'accepted')::int AS accepted_count,
+          COUNT(r.id) FILTER (WHERE r.status = 'pending')::int AS pending_count,
+          -- checked_in_count uses the current check-in queue fields: checked_in status or checked_in_at.
+          COUNT(r.id) FILTER (
+            WHERE r.status = 'checked_in'
+               OR r.checked_in_at IS NOT NULL
+          )::int AS checked_in_count,
+          COUNT(r.id) FILTER (WHERE COALESCE(r.verification_status, 'pending') = 'verified')::int AS verified_count,
+          COUNT(r.id) FILTER (WHERE COALESCE(r.no_show, false) = true)::int AS no_show_count,
+          COUNT(r.id) FILTER (
+            WHERE r.status IN ('accepted', 'checked_in')
+              AND COALESCE(r.no_show, false) = false
+              AND COALESCE(r.verification_status, 'pending') = 'pending'
+          )::int AS pending_verification_count,
+          -- Open spots use the same seat-taking statuses as org approval capacity checks.
+          COUNT(r.id) FILTER (WHERE r.status IN ('accepted', 'checked_in'))::int AS seat_taking_count
+        FROM events e
+        LEFT JOIN event_rsvps r
+          ON r.event_id = e.id
+         AND ${EXCLUDE_HOST_SELF_RSVP_SQL}
+        WHERE e.creator_user_id::text = ANY($1::text[])
+          AND (
+            (e.start_at >= $2::date AND e.start_at < $3::date)
+            OR (
+              e.start_at IS NULL
+              AND COALESCE(e.status, 'published') NOT IN ('cancelled', 'completed')
+            )
+          )
+        GROUP BY e.id
+        ORDER BY
+          NULLIF(TRIM(COALESCE(e.location_text, '')), '') ASC NULLS LAST,
+          e.start_at ASC NULLS LAST,
+          LOWER(COALESCE(e.title, '')) ASC,
+          e.id ASC
+      `,
+      [hostUserIds, range.start, range.end]
+    );
+
+    const locationsByText = new Map();
+    const totals = {
+      locations: 0,
+      problemLocations: 0,
+      opportunities: 0,
+      capacity: 0,
+      accepted: 0,
+      pending: 0,
+      checkedIn: 0,
+      verified: 0,
+      noShow: 0,
+      openSpots: 0,
+    };
+
+    rows.forEach((row) => {
+      const rawLocation = String(row.location_text || "");
+      const hasLocation = rawLocation.trim().length > 0;
+      const locationText = hasLocation ? rawLocation.trim() : SCHEDULE_LOCATION_FALLBACK;
+      const startDate = row.start_date || null;
+      const capacity = scheduleCapacity(row.capacity);
+      const acceptedCount = scheduleNumber(row.accepted_count);
+      const pendingCount = scheduleNumber(row.pending_count);
+      const checkedInCount = scheduleNumber(row.checked_in_count);
+      const verifiedCount = scheduleNumber(row.verified_count);
+      const noShowCount = scheduleNumber(row.no_show_count);
+      const pendingVerificationCount = scheduleNumber(row.pending_verification_count);
+      const seatTakingCount = scheduleNumber(row.seat_taking_count);
+      const openSpots = capacity == null ? null : Math.max(0, capacity - seatTakingCount);
+      const opportunityProblemReasons = new Set();
+
+      if (openSpots != null && openSpots > 0) opportunityProblemReasons.add("open_capacity");
+      if (pendingCount > 0) opportunityProblemReasons.add("pending_approvals");
+      if (noShowCount > 0) opportunityProblemReasons.add("no_shows");
+      if (pendingVerificationCount > 0) opportunityProblemReasons.add("pending_verification");
+      if (!hasLocation) opportunityProblemReasons.add("missing_location");
+      if (!row.start_at) opportunityProblemReasons.add("missing_start_time");
+      if (SCHEDULE_CAPACITY_REQUIRED && capacity == null) opportunityProblemReasons.add("missing_capacity");
+
+      const opportunity = {
+        id: String(row.id),
+        title: row.title || "Untitled opportunity",
+        startAt: row.start_at || null,
+        endAt: row.end_at || null,
+        tz: row.tz || null,
+        date: startDate,
+        locationText,
+        status: row.status || null,
+        capacity,
+        acceptedCount,
+        pendingCount,
+        checkedInCount,
+        verifiedCount,
+        noShowCount,
+        pendingVerificationCount,
+        openSpots,
+        problemReasons: stableScheduleReasons(opportunityProblemReasons),
+      };
+
+      if (!locationsByText.has(locationText)) {
+        locationsByText.set(locationText, {
+          locationText,
+          hasProblems: false,
+          problemReasons: new Set(),
+          totals: {
+            opportunities: 0,
+            capacity: 0,
+            accepted: 0,
+            pending: 0,
+            checkedIn: 0,
+            verified: 0,
+            noShow: 0,
+            openSpots: 0,
+          },
+          datesByKey: new Map(),
+        });
+      }
+
+      const locationGroup = locationsByText.get(locationText);
+      opportunityProblemReasons.forEach((reason) => locationGroup.problemReasons.add(reason));
+      locationGroup.hasProblems = locationGroup.problemReasons.size > 0;
+
+      const dateKey = startDate || SCHEDULE_DATE_FALLBACK;
+      if (!locationGroup.datesByKey.has(dateKey)) {
+        locationGroup.datesByKey.set(dateKey, {
+          date: startDate,
+          label: startDate || SCHEDULE_DATE_FALLBACK,
+          opportunities: [],
+        });
+      }
+      locationGroup.datesByKey.get(dateKey).opportunities.push(opportunity);
+
+      totals.opportunities += 1;
+      totals.capacity += capacity == null ? 0 : capacity;
+      totals.accepted += acceptedCount;
+      totals.pending += pendingCount;
+      totals.checkedIn += checkedInCount;
+      totals.verified += verifiedCount;
+      totals.noShow += noShowCount;
+      totals.openSpots += openSpots == null ? 0 : openSpots;
+
+      locationGroup.totals.opportunities += 1;
+      locationGroup.totals.capacity += capacity == null ? 0 : capacity;
+      locationGroup.totals.accepted += acceptedCount;
+      locationGroup.totals.pending += pendingCount;
+      locationGroup.totals.checkedIn += checkedInCount;
+      locationGroup.totals.verified += verifiedCount;
+      locationGroup.totals.noShow += noShowCount;
+      locationGroup.totals.openSpots += openSpots == null ? 0 : openSpots;
+    });
+
+    const locations = Array.from(locationsByText.values()).map((locationGroup) => ({
+      locationText: locationGroup.locationText,
+      hasProblems: locationGroup.hasProblems,
+      problemReasons: stableScheduleReasons(locationGroup.problemReasons),
+      totals: locationGroup.totals,
+      dates: Array.from(locationGroup.datesByKey.values()),
+    }));
+
+    totals.locations = locations.length;
+    totals.problemLocations = locations.filter((location) => location.hasProblems).length;
+
+    return res.json({
+      ok: true,
+      orgId: scope.orgId != null ? Number(scope.orgId) : null,
+      range: responseRange,
+      totals,
+      locations,
+    });
+  } catch (error) {
+    console.error("[orgPortalApi] GET /schedule error:", error);
+    return res.status(500).json({ error: "Unable to load schedule" });
   }
 });
 

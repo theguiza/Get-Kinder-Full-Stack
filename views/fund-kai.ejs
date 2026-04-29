@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<!-- Google Tag Manager -->
+<script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+  new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+  j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+  'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+  })(window,document,'script','dataLayer','GTM-5NMWPW33');</script>
+  <%#End Google Tag Manager %>
+  <title><%= title %></title>
+  <meta name="description" content="Help KAI grow into a fully autonomous volunteer coordination agent for Canadian nonprofits and community organizations.">
+  <meta name="author" content="Get Kindr Foundation">
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href="https://getkinder.ai/fund-kai">
+  <meta property="og:title" content="Help KAI Grow Up — Get Kinder Foundation">
+  <meta property="og:description" content="Fund KAI's next stage: a free AI agent that helps nonprofits recruit, match, schedule, verify, and thank volunteers.">
+  <meta property="og:url" content="https://getkinder.ai/fund-kai">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="https://getkinder.ai/images/logo.png">
+  <meta property="og:locale" content="en_CA">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Help KAI Grow Up — Get Kinder Foundation">
+  <meta name="twitter:description" content="Help KAI grow from a promising teenager into a fully autonomous volunteer coordination agent.">
+  <meta name="twitter:image" content="https://getkinder.ai/images/logo.png">
+
+  <link rel="icon" href="/images/favicon.png" sizes="32x32" type="image/png">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-SgOJa3DmI69IUzQ2PVdRZhwQ+dy64/BUtbMJw1MZ8t5HZApcHrRKUc4W0kG879m7" crossorigin="anonymous">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+
+<body class="about-page fund-kai-page">
+<!-- Google Tag Manager (noscript) -->
+<noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-5NMWPW33"
+  height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+  <!-- End Google Tag Manager (noscript) -->
+    <% if (typeof success !== "undefined" && success) { %>
+    <div class="alert alert-success alert-dismissible fade show auto-dismiss" role="alert">
+      Registration successful! Welcome to Get Kinder 🌟
+      <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+  <% } %>
+
+  <% if (typeof loginSuccess !== "undefined" && loginSuccess && typeof name !== "undefined" && name) { %>
+    <div class="alert alert-success alert-dismissible fade show auto-dismiss" role="alert">
+      Welcome back, <%= name %>! 🎉
+      <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+  <% } %>
+      <%- include("partials/site-header", { currentPage: "other" }) %>
+
+<!-- ══ HERO ══ -->
+<section class="fk-hero">
+  <div class="container">
+    <div class="row align-items-center g-5">
+      <div class="col-lg-7 fk-fade">
+        <span class="fk-section-label">Get Kinder Foundation</span>
+        <h1>Help KAI Grow Up</h1>
+        <p style="color: white;">Every community depends on people who show up. We built the AI that helps them — and now we need your help to finish him.</p>
+        <p style="color: white;">KAI is Kind Artificial Intelligence™ — AI power that helps any nonprofit recruit, match, schedule, verify, and reward volunteers. He just ran his first real pilot. Now we're raising funds to help him grow from a promising teenager into a fully autonomous agent that any community organization can use to focus on delivering their impact in your community.</p>
+      </div>
+      <div class="col-lg-5 text-center fk-fade" style="transition-delay:0.15s">
+        <img src="/images/regatta-photo-with-logo.jpg" alt="OARCA Cadborosaurus Coastal Rowing Regatta — KAI's first real pilot" class="fk-hero__photo">
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══ PROOF ══ -->
+<section class="fk-proof">
+  <div class="container">
+    <div class="row align-items-center g-5">
+      <div class="col-lg-5 fk-fade">
+        <img src="/images/regatta-photo-2-with-logo(2).jpg" alt="Volunteers at the Cadborosaurus Coastal Rowing Regatta" class="fk-proof__photo">
+      </div>
+      <div class="col-lg-7">
+        <div class="fk-fade">
+          <h2>He Already Works.</h2>
+          <p>On April 19, 2026, KAI ran his first real-world pilot at the Cadborosaurus Coastal Rowing Regatta, organized by OARCA in partnership with Rowing Canada Aviron.</p>
+        </div>
+        <div class="row g-4 text-center mt-4">
+          <div class="col-md-4 fk-fade">
+            <span class="fk-stat-number">150</span>
+            <span class="fk-stat-label">volunteer hours coordinated</span>
+          </div>
+          <div class="col-md-4 fk-fade" style="transition-delay:0.1s">
+            <span class="fk-stat-number">90%</span>
+            <span class="fk-stat-label">role fill rate</span>
+          </div>
+          <div class="col-md-4 fk-fade" style="transition-delay:0.2s">
+            <span class="fk-stat-number">10+</span>
+            <span class="fk-stat-label">specialized roles staffed</span>
+          </div>
+        </div>
+        <blockquote class="fk-quote fk-fade">
+          "I was blown away by how well things came together, and it was felt by the participants as I was told the regatta was fabulous, wonderful, and a memorable highlight of their rowing experience."
+          <footer>— Local Rowing Guru</footer>
+        </blockquote>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══ WHAT WE'RE BUILDING ══ -->
+<section class="fk-build">
+  <div class="container">
+    <div class="fk-fade">
+      <h2>But KAI Is Still a Teenager.</h2>
+      <p>Right now KAI handles parts of the volunteer lifecycle. What this campaign funds is the jump to full autonomy — an AI agent that runs the entire program for any organization, end to end.</p>
+    </div>
+    <div class="row g-4 mt-4">
+      <div class="col-md-6 fk-fade">
+        <div class="fk-cost-card">
+          <span class="fk-cost-amount">$25</span> — funds one hour of KAI engineering
+        </div>
+      </div>
+      <div class="col-md-6 fk-fade" style="transition-delay:0.1s">
+        <div class="fk-cost-card">
+          <span class="fk-cost-amount">$100</span> — gives KAI the knowledge to coordinate a complete volunteer role
+        </div>
+      </div>
+      <div class="col-md-6 fk-fade">
+        <div class="fk-cost-card">
+          <span class="fk-cost-amount">$500</span> — completes a full agent skill, like autonomous shift scheduling
+        </div>
+      </div>
+      <div class="col-md-6 fk-fade" style="transition-delay:0.1s">
+        <div class="fk-cost-card">
+          <span class="fk-cost-amount">$1,000</span> — funds a full week of core development
+        </div>
+      </div>
+    </div>
+    <p class="mt-4 fk-fade">Every dollar goes directly into development. We're a two-founder team building this ourselves.</p>
+  </div>
+</section>
+
+<!-- ══ TWO WAYS TO HELP ══ -->
+<section class="fk-paths">
+  <div class="container">
+    <h2 class="text-center fk-fade">Pick Your Path.</h2>
+    <p class="text-center fk-fade">We're running two campaigns simultaneously. Same mission, different models.</p>
+    <div class="row g-4">
+      <div class="col-md-6 fk-fade">
+        <div class="fk-path-card fk-path-donate">
+          <p class="fk-path-label">Just Want to Donate?</p>
+          <p style="color: white;">Give any amount, no tiers, no obligations. Every dollar lands directly in KAI's development fund. You'll receive Impact Credits — our in-app currency — as a thank-you.</p>
+          <ul>
+            <li>Impact Credits (1 IC per $1 donated)</li>
+            <li>Name on the founding backers page for gifts $100+</li>
+            <li>Keep-what-we-raise — every dollar counts</li>
+          </ul>
+          <a class="fk-path-btn" href="https://chuffed.org/project/get-kinder-fund-kai" target="_blank" rel="noopener noreferrer">Donate on Chuffed →</a>
+          <small>Funds go directly to KAI development.</small>
+        </div>
+      </div>
+      <div class="col-md-6 fk-fade" style="transition-delay:0.1s">
+        <div class="fk-path-card fk-path-rewards">
+          <p class="fk-path-label">Want Something Back?</p>
+          <p style="color: white;">Six reward tiers from $25 to $1,000 CAD. Physical rewards, Impact Credits, and a permanent place in KAI's story.</p>
+          <ul>
+            <li>The First Shift — $25</li>
+            <li>The Regular — $50</li>
+            <li>The Backbone — $100</li>
+            <li>The Regatta Crew — $250</li>
+            <li>The Founding Circle — $500 (50 spots)</li>
+            <li>Community Champion — $1,000 (20 spots)</li>
+          </ul>
+          <a class="fk-path-btn" href="https://fundrazr.com/get-kinder-fund-KAI" target="_blank" rel="noopener noreferrer">Back Us on FundRazr →</a>
+          <small>Rewards ship August 2026.</small>
+        </div>
+      </div>
+    </div>
+    <p class="fk-tertiary fk-fade">Not ready to give? <a href="/events">Join as a volunteer</a> or <a href="/org-apply">bring your organization</a> onto the platform — for free.</p>
+  </div>
+</section>
+
+<!-- ══ THERMOMETER ══ -->
+<section class="fk-progress">
+  <div class="container">
+    <h2 class="fk-fade">Together So Far</h2>
+    <div id="fund-kai-thermometer-root" class="fk-fade"></div>
+    <p class="mt-3 fk-fade">Combined total across both campaigns.</p>
+  </div>
+</section>
+
+<!-- ══ WHO WE ARE ══ -->
+<section class="fk-team">
+  <div class="container">
+    <div class="fk-fade">
+      <h2>Built by People Who've Been There.</h2>
+      <p>Get Kinder was built by people who spent years on both sides of the community table — running organizations that struggled to find reliable volunteers, and watching talented, willing people give up because the process was too hard. So we brought AI to the problem.</p>
+    </div>
+    <div class="row g-4 mt-4">
+      <div class="col-md-6 fk-fade">
+        <div class="fk-founder-card">
+          <img src="/images/michael.png" alt="Michael Wozney">
+          <h3>Michael Wozney</h3>
+          <p class="fk-founder-role">Co-Founder & COO</p>
+          <blockquote>"Kindness isn't soft — it's the most effective leadership strategy I've ever seen."</blockquote>
+        </div>
+      </div>
+      <div class="col-md-6 fk-fade" style="transition-delay:0.1s">
+        <div class="fk-founder-card">
+          <img src="/images/erin.png" alt="Erin Gray">
+          <h3>Erin Gray</h3>
+          <p class="fk-founder-role">Co-Founder & CEO</p>
+          <blockquote>"I've closed deals worth millions. The most meaningful thing I've ever done is show up for my community."</blockquote>
+        </div>
+      </div>
+    </div>
+    <p class="text-center mt-4 fk-fade"><a href="/about">Meet the full team →</a></p>
+    <p class="fk-legal-note fk-fade">Get Kinder Foundation is a registered BC Nonprofit Society. We are not a registered charity and cannot issue tax receipts. Your contribution is a donation to our mission.</p>
+  </div>
+</section>
+
+<!-- ══ FAQ ══ -->
+<section class="fk-faq">
+  <div class="container">
+    <h2 class="text-center fk-fade">Questions Worth Asking</h2>
+    <div class="accordion fk-fade" id="fkFaq">
+      <div class="accordion-item">
+        <h3 class="accordion-header" id="fkFaqHeadingOne">
+          <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#fkFaqCollapseOne" aria-expanded="false" aria-controls="fkFaqCollapseOne">
+            Why are there two campaigns?
+          </button>
+        </h3>
+        <div id="fkFaqCollapseOne" class="accordion-collapse collapse" aria-labelledby="fkFaqHeadingOne" data-bs-parent="#fkFaq">
+          <div class="accordion-body">Different people give differently. Some want to donate freely with no strings attached — that's Chuffed. Some want a specific reward tier and something tangible back — that's FundRazr. Same mission, two paths.</div>
+        </div>
+      </div>
+      <div class="accordion-item">
+        <h3 class="accordion-header" id="fkFaqHeadingTwo">
+          <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#fkFaqCollapseTwo" aria-expanded="false" aria-controls="fkFaqCollapseTwo">
+            Can I get a tax receipt?
+          </button>
+        </h3>
+        <div id="fkFaqCollapseTwo" class="accordion-collapse collapse" aria-labelledby="fkFaqHeadingTwo" data-bs-parent="#fkFaq">
+          <div class="accordion-body">No. We're a registered BC Nonprofit Society but not a registered charity, so we cannot issue tax receipts. Your contribution is a donation to our mission, not a tax-deductible gift.</div>
+        </div>
+      </div>
+      <div class="accordion-item">
+        <h3 class="accordion-header" id="fkFaqHeadingThree">
+          <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#fkFaqCollapseThree" aria-expanded="false" aria-controls="fkFaqCollapseThree">
+            What are Impact Credits?
+          </button>
+        </h3>
+        <div id="fkFaqCollapseThree" class="accordion-collapse collapse" aria-labelledby="fkFaqHeadingThree" data-bs-parent="#fkFaq">
+          <div class="accordion-body">Impact Credits are KAI's in-platform currency. Use them inside the Get Kinder app to boost your profile, unlock priority volunteer matching, and redeem perks with our partner organizations. They have no cash value, are not an investment, and are not tradeable for money.</div>
+        </div>
+      </div>
+      <div class="accordion-item">
+        <h3 class="accordion-header" id="fkFaqHeadingFour">
+          <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#fkFaqCollapseFour" aria-expanded="false" aria-controls="fkFaqCollapseFour">
+            When do FundRazr rewards ship?
+          </button>
+        </h3>
+        <div id="fkFaqCollapseFour" class="accordion-collapse collapse" aria-labelledby="fkFaqHeadingFour" data-bs-parent="#fkFaq">
+          <div class="accordion-body">Physical rewards — t-shirts, sticker packs, the OARCA commemorative print — are targeted for August 2026. We'll tell you honestly if anything changes.</div>
+        </div>
+      </div>
+      <div class="accordion-item">
+        <h3 class="accordion-header" id="fkFaqHeadingFive">
+          <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#fkFaqCollapseFive" aria-expanded="false" aria-controls="fkFaqCollapseFive">
+            What happens if a campaign doesn't hit its goal?
+          </button>
+        </h3>
+        <div id="fkFaqCollapseFive" class="accordion-collapse collapse" aria-labelledby="fkFaqHeadingFive" data-bs-parent="#fkFaq">
+          <div class="accordion-body">Both campaigns are keep-what-we-raise — every dollar donated is kept and goes directly into KAI's development regardless of the final total.</div>
+        </div>
+      </div>
+      <div class="accordion-item">
+        <h3 class="accordion-header" id="fkFaqHeadingSix">
+          <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#fkFaqCollapseSix" aria-expanded="false" aria-controls="fkFaqCollapseSix">
+            Who built KAI?
+          </button>
+        </h3>
+        <div id="fkFaqCollapseSix" class="accordion-collapse collapse" aria-labelledby="fkFaqHeadingSix" data-bs-parent="#fkFaq">
+          <div class="accordion-body">Mike and a small development team, built on Anthropic's Claude API. KAI is not a generic chatbot — he's purpose-built for volunteer coordination, with tools and memory designed specifically for the nonprofit sector.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+  <section id="footer" class="gradient-background">
+  <div class="container">
+    <footer class="row align-items-center py-5 mt-5 border-top text-body-secondary">
+      <!-- 1) Logo: centered on xs, left on md+ -->
+      <div class="col-12 col-md-4 mb-4 mb-md-0 text-center text-md-start">
+        <a href="#">
+          <img src="./images/heart3D.png" alt="Get Kinder Heart" height="150">
+        </a>
+        <p class="mt-2">
+          &copy;
+          <a href="https://getkindr.com/" target="_blank" rel="noopener noreferrer"
+             class="text-body-secondary text-decoration-underline">
+            Get Kindr Foundation
+          </a>
+        </p>
+      </div>
+      <!-- 2) Social Icons: always centered -->
+      <div class="col-12 col-md-4 mb-4 mb-md-0 d-flex justify-content-center">
+        <a class="btn btn-floating m-1 text-white" style="background-color: #3b5998;"
+           href="https://www.facebook.com/profile.php?id=61576860759313" role="button" target="_blank" rel="noopener noreferrer">
+          <i class="fab fa-facebook-f"></i>
+        </a>
+        <a class="btn btn-floating m-1 text-white" style="background-color: #ac2bac;"
+           href="https://www.instagram.com/getkinder/" role="button" target="_blank" rel="noopener noreferrer">
+          <i class="fab fa-instagram"></i>
+        </a>
+        <a class="btn btn-floating m-1 text-white" style="background-color: #0082ca;"
+           href="https://www.linkedin.com/company/getkindrfoundation/" role="button" target="_blank" rel="noopener noreferrer">
+          <i class="fab fa-linkedin-in"></i>
+        </a>
+        <a class="btn btn-floating m-1 text-white" style="background-color: #c8232c;"
+           href="https://ca.pinterest.com/getkindr/" role="button" target="_blank" rel="noopener noreferrer">
+          <i class="fab fa-pinterest"></i>
+        </a>
+      </div>
+      <!-- 3) More About: centered on xs, right on md+ -->
+      <div class="col-12 col-md-4 mb-4 mb-md-0 text-center text-md-end">
+        <h5>More About Get Kinder</h5>
+        <ul class="nav flex-column">
+          <li class="nav-item mb-2"><a href="/home"        class="nav-link p-0 text-body-secondary">Home</a></li>
+          <li class="nav-item mb-2"><a href="about" class="nav-link p-0 text-body-secondary">About</a></li>
+          <li class="nav-item mb-2"><a href="contact"     class="nav-link p-0 text-body-secondary">Contact</a></li>
+          <li class="nav-item mb-2"><a href="privacy"     class="nav-link p-0 text-body-secondary">Privacy</a></li>
+          <li class="nav-item mb-2"><a href="terms"       class="nav-link p-0 text-body-secondary">Terms</a></li>
+          <li class="nav-item mb-2"><a href="accessibility" class="nav-link p-0 text-body-secondary">Accessibility</a></li>
+        </ul>
+      </div>
+    </footer>
+  </div>
+</section>
+   <div class="modal fade" id="logoutModal" tabindex="-1" aria-labelledby="logoutModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Confirm Logout</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="https://www.gravatar.com/avatar/1a5cfe35718514d764a42484a0fb0830?s=64&d=robohashmodal-body">
+          Are you sure you want to log out?
+        </div>
+        <div class="modal-footer">
+          <form action="/logout" method="GET">
+            <button type="submit" class="btn btn-danger">Log Out</button>
+          </form>
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        </div>
+  </div>
+  </div>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/js/bootstrap.bundle.min.js" integrity="sha384-k6d4wzSIapyDyv1kpU366/PK5hCdSbCRGRCMv+eplOQJWyd1fbcAu9OCUj5zNLiq" crossorigin="anonymous"></script>
+  <script src="/js/bundles/entry.js?<%= assetTag %>"></script>
+  <script>
+    window.renderFundKaiThermometer && window.renderFundKaiThermometer("#fund-kai-thermometer-root");
+  </script>
+  <script>
+    const _fkObserver = new IntersectionObserver((entries) => {
+      entries.forEach(e => {
+        if (e.isIntersecting) {
+          e.target.classList.add('visible');
+          _fkObserver.unobserve(e.target);
+        }
+      });
+    }, { threshold: 0.1 });
+    document.querySelectorAll('.fk-fade').forEach(el => _fkObserver.observe(el));
+  </script>
+</body>
+</html>

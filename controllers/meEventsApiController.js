@@ -862,6 +862,64 @@ export async function cancelEvent(req, res) {
   }
 }
 
+export async function forceCancelEvent(req, res) {
+  try {
+    const scope = await getEventScope(req);
+    const hostUserIds = scope.memberUserIds;
+    const actingUserId = req.user?.id;
+    const eventId = req.params.id;
+
+    let eventRow;
+    try {
+      const { rows } = await pool.query(
+        `SELECT id, title, creator_user_id, status, start_at FROM events WHERE id = $1`,
+        [eventId]
+      );
+      eventRow = rows[0];
+    } catch (error) {
+      if (error?.code === "42P01") {
+        return res.status(500).json({ ok: false, error: "Events table missing. Please run migrations." });
+      }
+      throw error;
+    }
+
+    if (!eventRow) {
+      return res.status(404).json({ ok: false, error: "Event not found" });
+    }
+    if (!hostUserIds.includes(String(eventRow.creator_user_id))) {
+      return res.status(403).json({ ok: false, error: "Forbidden" });
+    }
+    if (eventRow.status !== "published") {
+      return res.status(409).json({ ok: false, error: "Only published events can be force cancelled" });
+    }
+
+    await pool.query("UPDATE events SET status='cancelled' WHERE id=$1", [eventId]);
+
+    try {
+      await pool.query(
+        `INSERT INTO admin_audit_log (admin_user_id, action, target_type, target_id, details)
+         VALUES ($1, 'force_cancel', 'event', $2, $3)`,
+        [
+          actingUserId,
+          String(eventId),
+          JSON.stringify({
+            event_title: eventRow.title || null,
+            event_status_before: eventRow.status,
+            event_start_at: eventRow.start_at || null,
+          }),
+        ]
+      );
+    } catch (auditErr) {
+      console.error("[meEvents] forceCancelEvent audit log error:", auditErr);
+    }
+
+    return res.json({ ok: true, data: { id: eventId, status: "cancelled" } });
+  } catch (error) {
+    console.error("[meEvents] forceCancelEvent error:", error);
+    return res.status(500).json({ ok: false, error: "Unable to force cancel event" });
+  }
+}
+
 export async function completeEvent(req, res) {
   try {
     const scope = await getEventScope(req);
