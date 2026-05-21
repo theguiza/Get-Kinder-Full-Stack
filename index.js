@@ -191,12 +191,6 @@ const SITEMAP_ROUTES = [
     sourceFiles: ["views/index.ejs"],
   },
   {
-    path: "/how-it-works",
-    priority: "0.9",
-    changefreq: "monthly",
-    sourceFiles: ["views/how-it-works.ejs"],
-  },
-  {
     path: "/events",
     priority: "0.9",
     changefreq: "daily",
@@ -1114,31 +1108,12 @@ app.post("/login", async (req, res, next) => {
     if (user?.email_verified !== true) {
       return res.redirect("/login?verify=required");
     }
-    const needsOnboarding = user?.has_seen_onboarding === false;
-    if (needsOnboarding) {
-      const { rows: [updatedUser] } = await pool.query(
-        "UPDATE userdata SET has_seen_onboarding = TRUE WHERE id = $1 RETURNING *",
-        [user.id]
-      );
-      if (updatedUser) {
-        user = updatedUser;
-      } else {
-        user.has_seen_onboarding = true;
-      }
-    }
     req.login(user, (err) => {
       if (err) return next(err);
-      if (needsOnboarding) {
-        const displayName = user.firstname || user.email;
-        if (req.session) {
-          req.session.showOnboarding = true;
-          return req.session.save(() =>
-            res.redirect(`/home?login=1&name=${encodeURIComponent(displayName)}`)
-          );
-        }
-        return res.redirect(`/home?login=1&name=${encodeURIComponent(displayName)}`);
+      if (req.session) {
+        delete req.session.showOnboarding;
       }
-      res.redirect("/dashboard");
+      res.redirect("/home");
     });
   } catch (err) {
     console.error("Login error:", err);
@@ -1621,7 +1596,7 @@ app.get("/verify-email", async (req, res) => {
     );
 
     if (req.isAuthenticated && req.isAuthenticated()) {
-      return res.redirect("/dashboard?verified=1");
+      return res.redirect("/home?verified=1");
     }
     return res.redirect("/login?verified=1");
   } catch (err) {
@@ -2005,27 +1980,14 @@ function buildProfileRedirectPath(params = {}) {
 }
 
 function buildOrgPortalRedirectPath({ logoUploadError = "" } = {}) {
-  const search = new URLSearchParams();
-  if (logoUploadError) {
-    search.set("logoUploadError", String(logoUploadError).trim());
-  }
-  const suffix = search.toString();
-  return suffix ? `/org-portal?${suffix}` : "/org-portal";
+  return "/home";
 }
 
 function buildOrgPortalDescriptionRedirectPath({
   descriptionSaved = false,
   descriptionError = "",
 } = {}) {
-  const search = new URLSearchParams();
-  if (descriptionSaved) {
-    search.set("descriptionSaved", "1");
-  }
-  if (descriptionError) {
-    search.set("descriptionError", String(descriptionError).trim());
-  }
-  const suffix = search.toString();
-  return suffix ? `/org-portal?${suffix}` : "/org-portal";
+  return "/home";
 }
 
 async function fetchExistingProfileUserRow(req) {
@@ -2118,7 +2080,7 @@ app.post(
         : null;
       const activeOrgStatus = String(activeMembership?.org_status || "").trim().toLowerCase();
       if (activeOrgStatus === "suspended") {
-        return res.redirect("/org-portal");
+        return res.redirect("/home");
       }
 
       if (!req.file) {
@@ -2174,7 +2136,7 @@ app.post("/org-portal/description", ensureAuthenticated, async (req, res) => {
     const canEditDescription = isAdminViewer || activeOrgRole === "admin" || !activeOrgRole;
 
     if (activeOrgStatus === "suspended") {
-      return res.redirect("/org-portal");
+      return res.redirect("/home");
     }
     if (!canEditDescription) {
       return res.redirect(buildOrgPortalDescriptionRedirectPath({
@@ -2805,8 +2767,12 @@ app.post("/api/friends", ensureAuthenticatedApi, async (req, res) => {
 // Dashboard - Initialize dashboard controller with all functions
 const { getDashboard, getMorningPrompt, saveReflection, markDayDone, cancelChallenge } = makeDashboardController(pool);
 
-// Dashboard - All dashboard routes
-app.get("/dashboard", ensureAuthenticated, getDashboard);
+// Retired pivot routes stay preserved on archive-pre-pivot-pages and redirect in production.
+app.get("/dashboard", (req, res) => res.redirect(302, "/home"));
+app.use("/org-portal", (req, res, next) => {
+  if (req.method === "GET") return res.redirect(302, "/home");
+  return next();
+});
 app.get("/events", getEventsPage);
 app.get("/event-rsvp-thanks", getEventRsvpThanksPage);
 app.get("/events/:id/rsvp/thanks", (req, res) => res.redirect(302, "/event-rsvp-thanks"));
@@ -2897,6 +2863,293 @@ app.get("/admin", ensureAuthenticated, ensureAdmin, (req, res) => {
     assetTag,
     user: req.user,
     csrfToken: req.session.csrfToken,
+  });
+});
+
+app.get("/admin/event-assignment", ensureAuthenticated, ensureAdmin, (req, res) => {
+  const assetTag = Date.now();
+  res.render("admin-event-assignment", {
+    assetTag,
+    user: req.user,
+    csrfToken: typeof req.csrfToken === "function" ? req.csrfToken() : req.session?.csrfToken || "",
+  });
+});
+
+app.get("/org-portal/workspace/events/:eventId", ensureOrgRepPage, async (req, res) => {
+  const assetTag = Date.now();
+  const isAdminViewer = isAdminRequest(req);
+  const rawPreviewOrgId = isAdminViewer
+    ? String(req.query.orgId || req.query.org_id || "").trim()
+    : "";
+  const previewOrgId = /^\d+$/.test(rawPreviewOrgId) ? Number(rawPreviewOrgId) : null;
+  const previewRequested = Number.isInteger(previewOrgId) && previewOrgId > 0;
+  const orgRating = {
+    orgId: null,
+    value: 5,
+    count: 0,
+    hasRatings: false,
+    starsFilled: 5,
+  };
+  let organizationName = "";
+  let organizationDescription = "";
+  let organizationLogoUrl = "";
+  let orgMemberships = [];
+  let activeOrgId = null;
+  let activeOrgStatus = "";
+
+  try {
+    if (isAdminViewer) {
+      if (previewRequested) {
+        const { rows: [previewOrgRow] = [] } = await pool.query(
+          `
+            SELECT id, name, rep_user_id
+            FROM public.organizations
+            WHERE id = $1
+            LIMIT 1
+          `,
+          [previewOrgId]
+        );
+        if (previewOrgRow) {
+          if (typeof previewOrgRow.name === "string" && previewOrgRow.name.trim()) {
+            organizationName = previewOrgRow.name.trim();
+          }
+          const previewUserId = Number(previewOrgRow.rep_user_id);
+          if (req.session) {
+            req.session[ADMIN_ORG_PORTAL_PREVIEW_ORG_ID_KEY] = String(previewOrgRow.id);
+            if (Number.isInteger(previewUserId) && previewUserId > 0) {
+              req.session[ADMIN_ORG_PORTAL_PREVIEW_USER_ID_KEY] = String(previewUserId);
+            } else {
+              delete req.session[ADMIN_ORG_PORTAL_PREVIEW_USER_ID_KEY];
+            }
+          }
+        } else if (req.session) {
+          delete req.session[ADMIN_ORG_PORTAL_PREVIEW_USER_ID_KEY];
+          delete req.session[ADMIN_ORG_PORTAL_PREVIEW_ORG_ID_KEY];
+        }
+      } else if (req.session) {
+        delete req.session[ADMIN_ORG_PORTAL_PREVIEW_USER_ID_KEY];
+        delete req.session[ADMIN_ORG_PORTAL_PREVIEW_ORG_ID_KEY];
+      }
+    }
+
+    const scope = await resolveOrgScope(req, {
+      allowAdminPreview: true,
+      includeOrgMembersForOrgRep: false,
+    });
+    activeOrgId = scope?.orgId != null ? Number(scope.orgId) : null;
+    orgMemberships = Array.isArray(scope?.memberships)
+      ? scope.memberships
+          .map((entry) => ({
+            orgId: Number(entry?.orgId),
+            name: entry?.org_name || "",
+            status: entry?.org_status || "",
+          }))
+          .filter((entry) => Number.isInteger(entry.orgId) && entry.orgId > 0)
+      : [];
+
+    if ((!scope?.hasOrgRepAccess || !activeOrgId) && isAdminViewer) {
+      return res.redirect("/admin");
+    }
+    if (!scope?.hasOrgRepAccess || !activeOrgId) {
+      return res.redirect("/org-apply");
+    }
+
+    const selectedMembership = orgMemberships.find((entry) => entry.orgId === activeOrgId);
+    if (!organizationName && selectedMembership?.name) {
+      organizationName = selectedMembership.name;
+    }
+    if (selectedMembership?.status) {
+      activeOrgStatus = String(selectedMembership.status || "").trim().toLowerCase();
+    }
+    if (activeOrgId != null && Number.isFinite(activeOrgId)) {
+      const { rows: [orgRow] = [] } = await pool.query(
+        "SELECT name, description, status, logo_url FROM public.organizations WHERE id = $1 LIMIT 1",
+        [activeOrgId]
+      );
+      if (!organizationName && typeof orgRow?.name === "string" && orgRow.name.trim()) {
+        organizationName = orgRow.name.trim();
+      }
+      if (typeof orgRow?.description === "string" && orgRow.description.trim()) {
+        organizationDescription = orgRow.description.trim();
+      }
+      if (!activeOrgStatus && typeof orgRow?.status === "string") {
+        activeOrgStatus = orgRow.status.trim().toLowerCase();
+      }
+      if (typeof orgRow?.logo_url === "string" && orgRow.logo_url.trim()) {
+        organizationLogoUrl = orgRow.logo_url.trim();
+      }
+    }
+
+    if (activeOrgId != null && Number.isFinite(activeOrgId)) {
+      const summary = await getRatingsSummary({ orgId: activeOrgId, limit: 20 });
+      const count = Number(summary?.sampleSize) || 0;
+      const hasRatings = count > 0 && Number.isFinite(Number(summary?.kindnessRating));
+      const value = hasRatings ? Number(summary.kindnessRating) : 5;
+      const starsFilled = Math.max(1, Math.min(5, Math.round(value)));
+      orgRating.orgId = activeOrgId;
+      orgRating.value = value;
+      orgRating.count = count;
+      orgRating.hasRatings = hasRatings;
+      orgRating.starsFilled = starsFilled;
+    }
+  } catch (error) {
+    console.warn("[org-portal] org context lookup failed:", error?.message || error);
+    if (!isAdminViewer) return res.redirect("/org-apply");
+  }
+
+  res.render("org-portal-workspace", {
+    assetTag,
+    user: req.user,
+    orgRating,
+    organizationName,
+    organizationDescription,
+    organizationLogoUrl,
+    orgMemberships,
+    activeOrgId,
+    activeOrgStatus,
+    logoUploadError: req.query.logoUploadError || "",
+    descriptionSaved: req.query.descriptionSaved === "1",
+    descriptionError: req.query.descriptionError || "",
+    eventId: req.params.eventId,
+  });
+});
+
+app.get("/org-portal/workspace", ensureOrgRepPage, async (req, res) => {
+  const assetTag = Date.now();
+  const isAdminViewer = isAdminRequest(req);
+  const rawPreviewOrgId = isAdminViewer
+    ? String(req.query.orgId || req.query.org_id || "").trim()
+    : "";
+  const previewOrgId = /^\d+$/.test(rawPreviewOrgId) ? Number(rawPreviewOrgId) : null;
+  const previewRequested = Number.isInteger(previewOrgId) && previewOrgId > 0;
+  const orgRating = {
+    orgId: null,
+    value: 5,
+    count: 0,
+    hasRatings: false,
+    starsFilled: 5,
+  };
+  let organizationName = "";
+  let organizationDescription = "";
+  let organizationLogoUrl = "";
+  let orgMemberships = [];
+  let activeOrgId = null;
+  let activeOrgStatus = "";
+
+  try {
+    if (isAdminViewer) {
+      if (previewRequested) {
+        const { rows: [previewOrgRow] = [] } = await pool.query(
+          `
+            SELECT id, name, rep_user_id
+            FROM public.organizations
+            WHERE id = $1
+            LIMIT 1
+          `,
+          [previewOrgId]
+        );
+        if (previewOrgRow) {
+          if (typeof previewOrgRow.name === "string" && previewOrgRow.name.trim()) {
+            organizationName = previewOrgRow.name.trim();
+          }
+          const previewUserId = Number(previewOrgRow.rep_user_id);
+          if (req.session) {
+            req.session[ADMIN_ORG_PORTAL_PREVIEW_ORG_ID_KEY] = String(previewOrgRow.id);
+            if (Number.isInteger(previewUserId) && previewUserId > 0) {
+              req.session[ADMIN_ORG_PORTAL_PREVIEW_USER_ID_KEY] = String(previewUserId);
+            } else {
+              delete req.session[ADMIN_ORG_PORTAL_PREVIEW_USER_ID_KEY];
+            }
+          }
+        } else if (req.session) {
+          delete req.session[ADMIN_ORG_PORTAL_PREVIEW_USER_ID_KEY];
+          delete req.session[ADMIN_ORG_PORTAL_PREVIEW_ORG_ID_KEY];
+        }
+      } else if (req.session) {
+        delete req.session[ADMIN_ORG_PORTAL_PREVIEW_USER_ID_KEY];
+        delete req.session[ADMIN_ORG_PORTAL_PREVIEW_ORG_ID_KEY];
+      }
+    }
+
+    const scope = await resolveOrgScope(req, {
+      allowAdminPreview: true,
+      includeOrgMembersForOrgRep: false,
+    });
+    activeOrgId = scope?.orgId != null ? Number(scope.orgId) : null;
+    orgMemberships = Array.isArray(scope?.memberships)
+      ? scope.memberships
+          .map((entry) => ({
+            orgId: Number(entry?.orgId),
+            name: entry?.org_name || "",
+            status: entry?.org_status || "",
+          }))
+          .filter((entry) => Number.isInteger(entry.orgId) && entry.orgId > 0)
+      : [];
+
+    if ((!scope?.hasOrgRepAccess || !activeOrgId) && isAdminViewer) {
+      return res.redirect("/admin");
+    }
+    if (!scope?.hasOrgRepAccess || !activeOrgId) {
+      return res.redirect("/org-apply");
+    }
+
+    const selectedMembership = orgMemberships.find((entry) => entry.orgId === activeOrgId);
+    if (!organizationName && selectedMembership?.name) {
+      organizationName = selectedMembership.name;
+    }
+    if (selectedMembership?.status) {
+      activeOrgStatus = String(selectedMembership.status || "").trim().toLowerCase();
+    }
+    if (activeOrgId != null && Number.isFinite(activeOrgId)) {
+      const { rows: [orgRow] = [] } = await pool.query(
+        "SELECT name, description, status, logo_url FROM public.organizations WHERE id = $1 LIMIT 1",
+        [activeOrgId]
+      );
+      if (!organizationName && typeof orgRow?.name === "string" && orgRow.name.trim()) {
+        organizationName = orgRow.name.trim();
+      }
+      if (typeof orgRow?.description === "string" && orgRow.description.trim()) {
+        organizationDescription = orgRow.description.trim();
+      }
+      if (!activeOrgStatus && typeof orgRow?.status === "string") {
+        activeOrgStatus = orgRow.status.trim().toLowerCase();
+      }
+      if (typeof orgRow?.logo_url === "string" && orgRow.logo_url.trim()) {
+        organizationLogoUrl = orgRow.logo_url.trim();
+      }
+    }
+
+    if (activeOrgId != null && Number.isFinite(activeOrgId)) {
+      const summary = await getRatingsSummary({ orgId: activeOrgId, limit: 20 });
+      const count = Number(summary?.sampleSize) || 0;
+      const hasRatings = count > 0 && Number.isFinite(Number(summary?.kindnessRating));
+      const value = hasRatings ? Number(summary.kindnessRating) : 5;
+      const starsFilled = Math.max(1, Math.min(5, Math.round(value)));
+      orgRating.orgId = activeOrgId;
+      orgRating.value = value;
+      orgRating.count = count;
+      orgRating.hasRatings = hasRatings;
+      orgRating.starsFilled = starsFilled;
+    }
+  } catch (error) {
+    console.warn("[org-portal] org context lookup failed:", error?.message || error);
+    if (!isAdminViewer) return res.redirect("/org-apply");
+  }
+
+  res.render("org-portal-workspace", {
+    assetTag,
+    user: req.user,
+    orgRating,
+    organizationName,
+    organizationDescription,
+    organizationLogoUrl,
+    orgMemberships,
+    activeOrgId,
+    activeOrgStatus,
+    logoUploadError: req.query.logoUploadError || "",
+    descriptionSaved: req.query.descriptionSaved === "1",
+    descriptionError: req.query.descriptionError || "",
+    eventId: null,
   });
 });
 
@@ -3044,18 +3297,7 @@ app.get("/donate", (req, res) => {
 });
 
 app.get(["/how-it-works", "/how-it-works/:section"], (req, res) => {
-  const VALID_SECTIONS = ["loop", "volunteers", "organizations", "donors", "credits", "trust", "faq"];
-  const assetTag = process.env.ASSET_TAG ?? Date.now().toString(36);
-  const sectionParam = (req.params.section || "").toLowerCase().trim();
-
-  if (sectionParam && !VALID_SECTIONS.includes(sectionParam)) {
-    return res.redirect(301, "/how-it-works");
-  }
-
-  res.render("how-it-works", {
-    assetTag,
-    scrollToSection: sectionParam || null,
-  });
+  res.redirect(302, "/home");
 });
 
 async function renderIndexPage(req, res, next) {
@@ -3095,16 +3337,9 @@ async function renderIndexPage(req, res, next) {
 app.get("/", async (req, res, next) => {
   const isAuthenticated = req.isAuthenticated && req.isAuthenticated();
   if (isAuthenticated) {
-    const showOnboarding =
-      (req.session && req.session.showOnboarding) ||
-      (req.user && req.user.has_seen_onboarding === false);
-    if (showOnboarding) {
-      if (req.session) {
-        req.session.showOnboarding = false;
-      }
-      return renderIndexPage(req, res, next);
+    if (req.session) {
+      delete req.session.showOnboarding;
     }
-    return res.redirect("/dashboard");
   }
   return renderIndexPage(req, res, next);
 });
@@ -3119,29 +3354,10 @@ app.get("/auth/google/callback",
   passport.authenticate("google", { failureRedirect: "/login" }),
   async (req, res, next) => {
     try {
-      const needsOnboarding = req.user && req.user.has_seen_onboarding === false;
-      if (needsOnboarding && req.user.id) {
-        const { rows: [updatedUser] } = await pool.query(
-          "UPDATE userdata SET has_seen_onboarding = TRUE WHERE id = $1 RETURNING *",
-          [req.user.id]
-        );
-        if (updatedUser) {
-          req.user = updatedUser;
-        } else if (req.user) {
-          req.user.has_seen_onboarding = true;
-        }
-        if (req.session) {
-          req.session.showOnboarding = true;
-        }
+      if (req.session) {
+        delete req.session.showOnboarding;
       }
-      if (req.session && req.session.showOnboarding) {
-        const displayName =
-          (req.user && (req.user.firstname || req.user.email)) || "";
-        return req.session.save(() =>
-          res.redirect(`/home?login=1&name=${encodeURIComponent(displayName)}`)
-        );
-      }
-      return res.redirect("/dashboard");
+      return res.redirect("/home");
     } catch (err) {
       return next(err);
     }
@@ -3153,29 +3369,10 @@ app.get("/auth/facebook/callback",
   passport.authenticate("facebook", { failureRedirect: "/login" }),
   async (req, res, next) => {
     try {
-      const needsOnboarding = req.user && req.user.has_seen_onboarding === false;
-      if (needsOnboarding && req.user.id) {
-        const { rows: [updatedUser] } = await pool.query(
-          "UPDATE userdata SET has_seen_onboarding = TRUE WHERE id = $1 RETURNING *",
-          [req.user.id]
-        );
-        if (updatedUser) {
-          req.user = updatedUser;
-        } else if (req.user) {
-          req.user.has_seen_onboarding = true;
-        }
-        if (req.session) {
-          req.session.showOnboarding = true;
-        }
+      if (req.session) {
+        delete req.session.showOnboarding;
       }
-      if (req.session && req.session.showOnboarding) {
-        const displayName =
-          (req.user && (req.user.firstname || req.user.email)) || "";
-        return req.session.save(() =>
-          res.redirect(`/home?login=1&name=${encodeURIComponent(displayName)}`)
-        );
-      }
-      return res.redirect("/dashboard");
+      return res.redirect("/home");
     } catch (err) {
       return next(err);
     }

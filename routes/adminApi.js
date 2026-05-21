@@ -6,6 +6,8 @@ import {
   applyManualDonationAllocation,
   runDueDonationPolicyAllocations,
 } from "../services/donationAllocationService.js";
+import { createProgram } from "../Backend/services/programsService.js";
+import { createProject } from "../Backend/services/projectsService.js";
 import { createFundingCreditFromAdminTopup } from "../services/fundingCreditService.js";
 import { hasUserOrgMembershipTable } from "../services/orgScopeService.js";
 
@@ -22,6 +24,8 @@ const ADMIN_POOL_TOPUP_REASON_LEGACY_MAP = {
   adjustment: "manual_adjust",
   bonus: "org_topup",
 };
+const PROGRAM_PROJECT_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const EVENT_ASSIGNMENT_MAX_EVENTS = 500;
 const ORG_POOL_HISTORY_REASON_SET = [
   "admin_allocation",
   "adjustment",
@@ -59,6 +63,248 @@ function parseOptionalBoolean(value) {
 function parsePositiveInt(value) {
   const num = Number.parseInt(String(value || ""), 10);
   return Number.isInteger(num) && num > 0 ? num : null;
+}
+
+function parseRequiredUuid(value) {
+  const raw = String(value || "").trim();
+  return PROGRAM_PROJECT_UUID_RE.test(raw) ? raw : null;
+}
+
+function parseNullableUuid(value) {
+  if (value === null || value === undefined || value === "") return null;
+  return parseRequiredUuid(value);
+}
+
+function getActorUserId(req) {
+  return parsePositiveInt(req.user?.id) || parsePositiveInt(req.user?.user_id);
+}
+
+function normalizeEventIds(value) {
+  if (!Array.isArray(value)) {
+    return { error: "event_ids_required", eventIds: [] };
+  }
+
+  const eventIds = Array.from(
+    new Set(value.map((id) => String(id || "").trim()).filter(Boolean))
+  );
+
+  if (!eventIds.length) {
+    return { error: "event_ids_required", eventIds: [] };
+  }
+  if (eventIds.length > EVENT_ASSIGNMENT_MAX_EVENTS) {
+    return { error: "too_many_events", eventIds: [] };
+  }
+
+  return { eventIds };
+}
+
+async function requireOrganization(orgId) {
+  const { rows: [organization] = [] } = await pool.query(
+    `
+      SELECT id, name, status
+      FROM public.organizations
+      WHERE id = $1
+      LIMIT 1
+    `,
+    [orgId]
+  );
+  return organization || null;
+}
+
+async function getEventAssignmentOrganizations() {
+  const { rows } = await pool.query(
+    `
+      WITH event_orgs AS (
+        SELECT
+          e.id,
+          e.project_id,
+          COALESCE(host_org.id, rep_org.id) AS organization_id
+        FROM public.events e
+        LEFT JOIN public.userdata host
+          ON host.id = e.creator_user_id
+        LEFT JOIN public.organizations host_org
+          ON host_org.id = host.org_id
+        LEFT JOIN LATERAL (
+          SELECT o.id
+          FROM public.organizations o
+          WHERE host_org.id IS NULL
+            AND o.rep_user_id = e.creator_user_id
+          ORDER BY o.id ASC
+          LIMIT 1
+        ) rep_org ON true
+      )
+      SELECT
+        o.id,
+        o.name,
+        o.status,
+        COUNT(DISTINCT eo.id)::int AS event_count,
+        COUNT(DISTINCT eo.id) FILTER (WHERE eo.project_id IS NULL)::int AS unassigned_event_count,
+        COUNT(DISTINCT p.id)::int AS program_count,
+        COUNT(DISTINCT pr.id)::int AS project_count
+      FROM public.organizations o
+      LEFT JOIN event_orgs eo
+        ON eo.organization_id = o.id
+      LEFT JOIN public.programs p
+        ON p.organization_id = o.id
+      LEFT JOIN public.projects pr
+        ON pr.organization_id = o.id
+      GROUP BY o.id, o.name, o.status
+      ORDER BY
+        COUNT(DISTINCT eo.id) FILTER (WHERE eo.project_id IS NULL) DESC,
+        COUNT(DISTINCT eo.id) DESC,
+        LOWER(o.name) ASC,
+        o.id ASC
+    `
+  );
+
+  return rows.map((row) => ({
+    id: Number(row.id),
+    name: row.name || "",
+    status: row.status || "",
+    event_count: Number(row.event_count) || 0,
+    unassigned_event_count: Number(row.unassigned_event_count) || 0,
+    program_count: Number(row.program_count) || 0,
+    project_count: Number(row.project_count) || 0,
+  }));
+}
+
+async function getEventAssignmentData(orgId) {
+  const [programsResult, projectsResult, eventsResult] = await Promise.all([
+    pool.query(
+      `
+        SELECT
+          p.*,
+          COUNT(pr.id)::int AS project_count
+        FROM public.programs p
+        LEFT JOIN public.projects pr
+          ON pr.program_id = p.id
+        WHERE p.organization_id = $1
+        GROUP BY p.id
+        ORDER BY
+          CASE p.status WHEN 'active' THEN 0 WHEN 'completed' THEN 1 ELSE 2 END,
+          p.created_at DESC
+      `,
+      [orgId]
+    ),
+    pool.query(
+      `
+        SELECT
+          pr.*,
+          p.name AS program_name,
+          COUNT(e.id)::int AS event_count
+        FROM public.projects pr
+        LEFT JOIN public.programs p
+          ON p.id = pr.program_id
+        LEFT JOIN public.events e
+          ON e.project_id = pr.id
+        WHERE pr.organization_id = $1
+        GROUP BY pr.id, p.name
+        ORDER BY
+          CASE pr.lifecycle_stage
+            WHEN 'draft' THEN 0
+            WHEN 'recruiting' THEN 1
+            WHEN 'live' THEN 2
+            WHEN 'closing_out' THEN 3
+            ELSE 4
+          END,
+          pr.start_date DESC NULLS LAST,
+          pr.created_at DESC
+      `,
+      [orgId]
+    ),
+    pool.query(
+      `
+        WITH event_rows AS (
+          SELECT
+            e.id,
+            e.title,
+            e.status,
+            e.visibility,
+            e.start_at,
+            e.end_at,
+            e.tz,
+            e.location_text,
+            e.capacity,
+            e.project_id,
+            e.created_at,
+            e.updated_at,
+            e.creator_user_id,
+            host.firstname AS host_firstname,
+            host.lastname AS host_lastname,
+            host.email AS host_email,
+            COALESCE(host_org.id, rep_org.id) AS organization_id,
+            COALESCE(host_org.name, rep_org.name, e.org_name, 'Independent organizer') AS organization_name
+          FROM public.events e
+          LEFT JOIN public.userdata host
+            ON host.id = e.creator_user_id
+          LEFT JOIN public.organizations host_org
+            ON host_org.id = host.org_id
+          LEFT JOIN LATERAL (
+            SELECT o.id, o.name
+            FROM public.organizations o
+            WHERE host_org.id IS NULL
+              AND o.rep_user_id = e.creator_user_id
+            ORDER BY o.id ASC
+            LIMIT 1
+          ) rep_org ON true
+        )
+        SELECT
+          er.*,
+          p.name AS project_name,
+          p.program_id,
+          pg.name AS program_name,
+          COALESCE(rsvp_counts.volunteer_count, 0)::int AS volunteer_count
+        FROM event_rows er
+        LEFT JOIN public.projects p
+          ON p.id = er.project_id
+        LEFT JOIN public.programs pg
+          ON pg.id = p.program_id
+        LEFT JOIN LATERAL (
+          SELECT COUNT(*)::int AS volunteer_count
+          FROM public.event_rsvps r
+          WHERE r.event_id = er.id
+            AND r.status IN ('accepted', 'checked_in', 'pending')
+        ) rsvp_counts ON true
+        WHERE er.organization_id = $1
+        ORDER BY er.start_at ASC NULLS LAST, er.created_at ASC NULLS LAST, er.title ASC
+      `,
+      [orgId]
+    ),
+  ]);
+
+  return {
+    programs: programsResult.rows.map((row) => ({
+      ...row,
+      project_count: Number(row.project_count) || 0,
+    })),
+    projects: projectsResult.rows.map((row) => ({
+      ...row,
+      event_count: Number(row.event_count) || 0,
+    })),
+    events: eventsResult.rows.map((row) => ({
+      id: row.id,
+      title: row.title || "Untitled event",
+      status: row.status || "",
+      visibility: row.visibility || "",
+      start_at: row.start_at || null,
+      end_at: row.end_at || null,
+      tz: row.tz || "",
+      location_text: row.location_text || "",
+      capacity: row.capacity != null ? Number(row.capacity) : null,
+      project_id: row.project_id || null,
+      project_name: row.project_name || "",
+      program_id: row.program_id || null,
+      program_name: row.program_name || "",
+      organization_id: row.organization_id != null ? Number(row.organization_id) : null,
+      organization_name: row.organization_name || "",
+      creator_user_id: row.creator_user_id != null ? Number(row.creator_user_id) : null,
+      host_name: `${row.host_firstname || ""} ${row.host_lastname || ""}`.trim(),
+      host_email: row.host_email || "",
+      volunteer_count: Number(row.volunteer_count) || 0,
+      created_at: row.created_at || null,
+      updated_at: row.updated_at || null,
+    })),
+  };
 }
 
 function parseNullablePercent(value) {
@@ -205,6 +451,256 @@ async function insertOrgPoolTopupTx({ client, poolId, amount, requestedReason, n
 }
 
 adminApiRouter.use(ensureAdminApi);
+
+adminApiRouter.get("/event-assignment", async (req, res) => {
+  try {
+    const requestedOrgId =
+      req.query.org_id !== undefined || req.query.orgId !== undefined
+        ? parsePositiveInt(req.query.org_id ?? req.query.orgId)
+        : null;
+    if ((req.query.org_id !== undefined || req.query.orgId !== undefined) && !requestedOrgId) {
+      return res.status(400).json({ error: "invalid_org_id" });
+    }
+
+    const organizations = await getEventAssignmentOrganizations();
+    let selectedOrgId = requestedOrgId;
+    if (selectedOrgId) {
+      const hasOrganization = organizations.some((org) => Number(org.id) === Number(selectedOrgId));
+      if (!hasOrganization) return res.status(404).json({ error: "organization_not_found" });
+    } else {
+      const defaultOrg =
+        organizations.find((org) => Number(org.unassigned_event_count) > 0)
+        || organizations.find((org) => Number(org.event_count) > 0)
+        || organizations[0]
+        || null;
+      selectedOrgId = defaultOrg?.id || null;
+    }
+
+    const selectedOrganization = selectedOrgId
+      ? organizations.find((org) => Number(org.id) === Number(selectedOrgId)) || null
+      : null;
+    const assignmentData = selectedOrgId
+      ? await getEventAssignmentData(selectedOrgId)
+      : { programs: [], projects: [], events: [] };
+    const assignedEvents = assignmentData.events.filter((event) => event.project_id).length;
+
+    return res.json({
+      success: true,
+      organizations,
+      selected_org_id: selectedOrgId,
+      selected_organization: selectedOrganization,
+      programs: assignmentData.programs,
+      projects: assignmentData.projects,
+      events: assignmentData.events,
+      totals: {
+        events: assignmentData.events.length,
+        assigned_events: assignedEvents,
+        unassigned_events: assignmentData.events.length - assignedEvents,
+      },
+    });
+  } catch (err) {
+    console.error("GET /api/admin/event-assignment error:", err);
+    return res.status(500).json({ error: "server_error" });
+  }
+});
+
+adminApiRouter.post("/event-assignment/programs", async (req, res) => {
+  if (!requireCsrf(req, res)) return;
+
+  const orgId = parsePositiveInt(req.body?.org_id ?? req.body?.orgId);
+  const actorUserId = getActorUserId(req);
+  if (!orgId || !actorUserId) return res.status(400).json({ error: "invalid_request" });
+
+  try {
+    const organization = await requireOrganization(orgId);
+    if (!organization) return res.status(404).json({ error: "organization_not_found" });
+
+    const program = await createProgram(pool, {
+      organizationId: orgId,
+      name: req.body?.name,
+      description: req.body?.description,
+      funder: req.body?.funder,
+      reportingPeriodStart: req.body?.reportingPeriodStart ?? req.body?.reporting_period_start,
+      reportingPeriodEnd: req.body?.reportingPeriodEnd ?? req.body?.reporting_period_end,
+      intendedEquityGroups: Array.isArray(req.body?.intendedEquityGroups)
+        ? req.body.intendedEquityGroups
+        : [],
+      proposalText: req.body?.proposalText ?? req.body?.proposal_text,
+      createdByUserId: actorUserId,
+    });
+
+    return res.status(201).json({ success: true, program });
+  } catch (err) {
+    console.error("POST /api/admin/event-assignment/programs error:", err);
+    if (/name is required|must be a valid date|must be an array/i.test(err?.message || "")) {
+      return res.status(400).json({ error: err.message });
+    }
+    return res.status(500).json({ error: "server_error" });
+  }
+});
+
+adminApiRouter.post("/event-assignment/projects", async (req, res) => {
+  if (!requireCsrf(req, res)) return;
+
+  const orgId = parsePositiveInt(req.body?.org_id ?? req.body?.orgId);
+  const actorUserId = getActorUserId(req);
+  const programId = parseNullableUuid(req.body?.program_id ?? req.body?.programId);
+  if (!orgId || !actorUserId) return res.status(400).json({ error: "invalid_request" });
+  if ((req.body?.program_id ?? req.body?.programId) && !programId) {
+    return res.status(400).json({ error: "invalid_program_id" });
+  }
+
+  try {
+    const organization = await requireOrganization(orgId);
+    if (!organization) return res.status(404).json({ error: "organization_not_found" });
+
+    if (programId) {
+      const { rows: [program] = [] } = await pool.query(
+        `
+          SELECT id
+          FROM public.programs
+          WHERE id = $1
+            AND organization_id = $2
+          LIMIT 1
+        `,
+        [programId, orgId]
+      );
+      if (!program) return res.status(404).json({ error: "program_not_found" });
+    }
+
+    const project = await createProject(pool, {
+      organizationId: orgId,
+      programId,
+      name: req.body?.name,
+      description: req.body?.description,
+      startDate: req.body?.startDate ?? req.body?.start_date,
+      endDate: req.body?.endDate ?? req.body?.end_date,
+      languages: Array.isArray(req.body?.languages) ? req.body.languages : [],
+      partnerOrgIds: Array.isArray(req.body?.partnerOrgIds) ? req.body.partnerOrgIds : [],
+      createdByUserId: actorUserId,
+    });
+
+    return res.status(201).json({ success: true, project });
+  } catch (err) {
+    console.error("POST /api/admin/event-assignment/projects error:", err);
+    if (/name is required|must be a valid date|must be an array|must be a valid UUID/i.test(err?.message || "")) {
+      return res.status(400).json({ error: err.message });
+    }
+    return res.status(500).json({ error: "server_error" });
+  }
+});
+
+adminApiRouter.post("/event-assignment/bulk-assign", async (req, res) => {
+  if (!requireCsrf(req, res)) return;
+
+  const orgId = parsePositiveInt(req.body?.org_id ?? req.body?.orgId);
+  const projectId = parseRequiredUuid(req.body?.project_id ?? req.body?.projectId);
+  const { eventIds, error } = normalizeEventIds(req.body?.event_ids ?? req.body?.eventIds);
+
+  if (!orgId || !projectId) return res.status(400).json({ error: "invalid_request" });
+  if (error) return res.status(400).json({ error });
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const { rows: [project] = [] } = await client.query(
+      `
+        SELECT id, name, organization_id
+        FROM public.projects
+        WHERE id = $1
+          AND organization_id = $2
+        LIMIT 1
+        FOR SHARE
+      `,
+      [projectId, orgId]
+    );
+    if (!project) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "project_not_found" });
+    }
+
+    const { rows: eventCheckRows } = await client.query(
+      `
+        WITH requested AS (
+          SELECT DISTINCT unnest($1::text[]) AS id
+        ),
+        event_orgs AS (
+          SELECT
+            e.id::text AS id,
+            COALESCE(host_org.id, rep_org.id) AS organization_id
+          FROM public.events e
+          LEFT JOIN public.userdata host
+            ON host.id = e.creator_user_id
+          LEFT JOIN public.organizations host_org
+            ON host_org.id = host.org_id
+          LEFT JOIN LATERAL (
+            SELECT o.id
+            FROM public.organizations o
+            WHERE host_org.id IS NULL
+              AND o.rep_user_id = e.creator_user_id
+            ORDER BY o.id ASC
+            LIMIT 1
+          ) rep_org ON true
+          WHERE e.id::text IN (SELECT id FROM requested)
+        )
+        SELECT
+          requested.id,
+          event_orgs.organization_id
+        FROM requested
+        LEFT JOIN event_orgs
+          ON event_orgs.id = requested.id
+        ORDER BY requested.id ASC
+      `,
+      [eventIds]
+    );
+
+    const missingEventIds = eventCheckRows
+      .filter((row) => row.organization_id == null)
+      .map((row) => row.id);
+    const outOfScopeEventIds = eventCheckRows
+      .filter((row) => row.organization_id != null && Number(row.organization_id) !== Number(orgId))
+      .map((row) => row.id);
+
+    if (missingEventIds.length || outOfScopeEventIds.length) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({
+        error: "invalid_event_scope",
+        missing_event_ids: missingEventIds,
+        out_of_scope_event_ids: outOfScopeEventIds,
+      });
+    }
+
+    const { rows: updatedEvents } = await client.query(
+      `
+        UPDATE public.events
+           SET project_id = $1,
+               updated_at = NOW()
+         WHERE id::text = ANY($2::text[])
+        RETURNING id
+      `,
+      [projectId, eventIds]
+    );
+
+    await client.query("COMMIT");
+    return res.json({
+      success: true,
+      assigned_count: updatedEvents.length,
+      project: {
+        id: project.id,
+        name: project.name,
+        organization_id: Number(project.organization_id),
+      },
+      event_ids: updatedEvents.map((row) => row.id),
+    });
+  } catch (err) {
+    try { await client.query("ROLLBACK"); } catch (_) {}
+    console.error("POST /api/admin/event-assignment/bulk-assign error:", err);
+    return res.status(500).json({ error: "server_error" });
+  } finally {
+    client.release();
+  }
+});
 
 adminApiRouter.get("/stats", async (req, res) => {
   try {

@@ -101,8 +101,8 @@ export default function DonatePage({
               <a className="donate-btn donate-btn-primary" href={checkoutUrl} target="_blank" rel="noopener noreferrer">
                 Open Square Checkout
               </a>
-              <a className="donate-btn donate-btn-secondary" href="/how-it-works">
-                See How Funding Works
+              <a className="donate-btn donate-btn-secondary" href="/events">
+                Browse Opportunities
               </a>
             </div>
           </div>

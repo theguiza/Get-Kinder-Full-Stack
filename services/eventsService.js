@@ -571,6 +571,7 @@ export async function getRsvpForUpdate(client, eventId, attendeeUserId) {
              event_id,
              attendee_user_id,
              status,
+             role_id,
              verification_status,
              attended_minutes,
              ${noShowSelect}

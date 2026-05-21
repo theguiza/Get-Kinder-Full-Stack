@@ -52,7 +52,7 @@ orgApplyRouter.get("/org-apply", ensureAuthenticated, async (req, res) => {
       allowAdminPreview: false,
       includeOrgMembersForOrgRep: false,
     }).catch(() => null);
-    if (scope?.hasOrgRepAccess && scope?.orgId) return res.redirect("/org-portal");
+    if (scope?.hasOrgRepAccess && scope?.orgId) return res.redirect("/home");
     const assetTag = Date.now();
     const submitted = req.query.submitted === "true";
     const error = req.query.error === "true";
@@ -268,7 +268,7 @@ orgApplyRouter.post("/admin/org-applications/:id/approve", ensureAuthenticated, 
     await sendNudgeEmail({
       to: application.email,
       subject: "You're approved as an Organization Representative on GetKinder!",
-      text: `Hi ${application.firstname || "there"}, your organization ${application.org_name} has been approved.\nYou can now access the Organization Portal at ${baseUrl}/org-portal.\nWelcome aboard! — The GetKinder Team`,
+      text: `Hi ${application.firstname || "there"}, your organization ${application.org_name} has been approved.\nPlease sign in at ${baseUrl}/home for the current GetKinder experience.\nWelcome aboard! — The GetKinder Team`,
     });
 
     return res.json({ success: true });

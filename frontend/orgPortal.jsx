@@ -14,6 +14,7 @@ const TABS = [
   { key: "credits", label: "Reconcile" },
   { key: "comms", label: "Comms" },
   { key: "myevents", label: "Funding & Events" },
+  { key: "programsProjects", label: "Programs & Projects" },
   { key: "reports", label: "Reports" },
 ];
 
@@ -34,6 +35,46 @@ const MY_EVENTS_STATUS_BADGE = {
   published: "Published",
   cancelled: "Cancelled",
   completed: "Completed",
+};
+const PROGRAM_STATUS_LABELS = {
+  active: "Active",
+  completed: "Completed",
+  archived: "Archived",
+};
+const PROJECT_LIFECYCLE_STAGES = ["draft", "recruiting", "live", "closing_out", "reported"];
+const PROJECT_LIFECYCLE_LABELS = {
+  draft: "Draft",
+  recruiting: "Recruiting",
+  live: "Live",
+  closing_out: "Closing out",
+  reported: "Reported",
+};
+const PROGRAM_EQUITY_GROUPS = [
+  "women & girls",
+  "Indigenous peoples",
+  "racialized communities",
+  "persons with disabilities",
+  "2SLGBTQI+",
+  "newcomers",
+  "low-income",
+];
+const PROJECT_LANGUAGE_OPTIONS = ["English", "French", "Other"];
+const PROGRAM_FORM_EMPTY = {
+  name: "",
+  description: "",
+  funder: "",
+  reportingPeriodStart: "",
+  reportingPeriodEnd: "",
+  intendedEquityGroups: [],
+};
+const PROJECT_FORM_EMPTY = {
+  name: "",
+  programId: "",
+  description: "",
+  startDate: "",
+  endDate: "",
+  languages: [],
+  partnerOrgNames: "",
 };
 const ZERO_PENDING_ACTION_COUNTS = Object.freeze({
   pendingJoinCount: 0,
@@ -131,6 +172,99 @@ function titleCaseCommsType(typeValue) {
   if (normalized === "thankyou") return "Thank-You";
   if (normalized === "feedback") return "Feedback";
   return "Reminder";
+}
+
+function toDateInputValue(value) {
+  if (!value) return "";
+  if (typeof value === "string") return value.slice(0, 10);
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? "" : parsed.toISOString().slice(0, 10);
+}
+
+function formatProgramProjectDate(value) {
+  if (!value) return "";
+  const input = typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value)
+    ? `${value.slice(0, 10)}T00:00:00`
+    : value;
+  const parsed = new Date(input);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return parsed.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+function formatProjectDateRange(project) {
+  const start = formatProgramProjectDate(project?.start_date);
+  const end = formatProgramProjectDate(project?.end_date);
+  if (start && end) return `${start} - ${end}`;
+  if (start) return `${start} - No end date`;
+  if (end) return `Until ${end}`;
+  return "No dates set";
+}
+
+function pluralizeProgramProject(count, singular, plural = `${singular}s`) {
+  const total = safeNumber(count, 0);
+  return `${total} ${total === 1 ? singular : plural}`;
+}
+
+function programToForm(program) {
+  return {
+    name: program?.name || "",
+    description: program?.description || "",
+    funder: program?.funder || "",
+    reportingPeriodStart: toDateInputValue(program?.reporting_period_start),
+    reportingPeriodEnd: toDateInputValue(program?.reporting_period_end),
+    intendedEquityGroups: Array.isArray(program?.intended_equity_groups) ? program.intended_equity_groups : [],
+  };
+}
+
+function projectToForm(project) {
+  return {
+    name: project?.name || "",
+    programId: project?.program_id || "",
+    description: project?.description || "",
+    startDate: toDateInputValue(project?.start_date),
+    endDate: toDateInputValue(project?.end_date),
+    languages: Array.isArray(project?.languages) ? project.languages : [],
+    partnerOrgNames: "",
+  };
+}
+
+async function parseOrgPortalApiError(response, fallback) {
+  const payload = await response.json().catch(() => ({}));
+  return payload?.message || payload?.error || fallback;
+}
+
+function formatEventDateRange(startIso, endIso) {
+  if (!startIso) return "Date TBD";
+  const start = new Date(startIso);
+  if (Number.isNaN(start.getTime())) return "Date TBD";
+  const startLabel = start.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  if (!endIso) return startLabel;
+  const end = new Date(endIso);
+  if (Number.isNaN(end.getTime())) return startLabel;
+  const endLabel = end.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  if (startLabel === endLabel) return startLabel;
+  return `${startLabel} – ${endLabel}`;
+}
+
+function formatDaysAway(startIso) {
+  if (!startIso) return "";
+  const start = new Date(startIso);
+  if (Number.isNaN(start.getTime())) return "";
+  const diffMs = start.getTime() - Date.now();
+  const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+  if (diffDays < 0) {
+    const ago = Math.abs(diffDays);
+    return ago === 0 ? "Today" : `${ago}d ago`;
+  }
+  if (diffDays === 0) return "Today";
+  return `${diffDays}d away`;
+}
+
+function fillBarClass(pct, capacity) {
+  if (!capacity) return "";
+  if (pct >= 100) return "full";
+  if (pct < 30) return "urgent";
+  return "";
 }
 
 function safeNumber(value, fallback = 0) {
@@ -644,6 +778,41 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
   const [myEventsLedgerOpen, setMyEventsLedgerOpen] = useState(false);
   const [myEventsInviteModal, setMyEventsInviteModal] = useState({ open: false, event: null });
   const [myEventsToast, setMyEventsToast] = useState(null);
+  const [eventsListFilter, setEventsListFilter] = useState({ status: "all", projectId: "all" });
+  const [eventsListData, setEventsListData] = useState(null);
+  const [eventsListLoading, setEventsListLoading] = useState(false);
+  const [workspaceSubNav, setWorkspaceSubNav] = useState("overview");
+  const CLOSEOUT_EMPTY = {
+    step: 1,
+    beneficiaryCount: "",
+    confidence: "Estimated",
+    equityRows: [
+      { group: "women & girls", checked: false, pct: "" },
+      { group: "Indigenous peoples", checked: false, pct: "" },
+      { group: "racialized communities", checked: false, pct: "" },
+      { group: "persons with disabilities", checked: false, pct: "" },
+      { group: "2SLGBTQI+", checked: false, pct: "" },
+      { group: "newcomers", checked: false, pct: "" },
+      { group: "low-income", checked: false, pct: "" },
+    ],
+    methodology: "",
+    saving: false,
+    error: "",
+  };
+  const [closeoutModal, setCloseoutModal] = useState({ open: false, ...CLOSEOUT_EMPTY });
+  const [programs, setPrograms] = useState([]);
+  const [projects, setProjects] = useState([]);
+  const [projectMetricsById, setProjectMetricsById] = useState({});
+  const [programsProjectsLoading, setProgramsProjectsLoading] = useState(false);
+  const [programsProjectsError, setProgramsProjectsError] = useState("");
+  const [selectedProgramId, setSelectedProgramId] = useState("");
+  const [programFormModal, setProgramFormModal] = useState({ open: false, mode: "create", program: null, values: PROGRAM_FORM_EMPTY, error: "", saving: false });
+  const [projectFormModal, setProjectFormModal] = useState({ open: false, mode: "create", project: null, values: PROJECT_FORM_EMPTY, error: "", saving: false });
+  const [programsProjectsToast, setProgramsProjectsToast] = useState(null);
+  const [programsProjectsConfirm, setProgramsProjectsConfirm] = useState({ open: false, type: "", item: null, error: "", saving: false });
+  const [projectLifecycleModal, setProjectLifecycleModal] = useState({ open: false, project: null, error: "", savingStage: "" });
+  const [programMenuId, setProgramMenuId] = useState("");
+  const [projectMenuId, setProjectMenuId] = useState("");
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingOpportunityId, setEditingOpportunityId] = useState(null);
   const [showCancelModal, setShowCancelModal] = useState(false);
@@ -954,6 +1123,24 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
   }, [fetchQueue]);
 
   useEffect(() => {
+    if (activeTab !== "opportunities") return;
+    setEventsListLoading(true);
+    fetch("/api/org/opportunities", { credentials: "include" })
+      .then((res) => {
+        if (!res.ok) throw new Error("opportunities_failed");
+        return res.json();
+      })
+      .then((data) => {
+        setEventsListData(Array.isArray(data) ? data : []);
+        setEventsListLoading(false);
+      })
+      .catch(() => {
+        setEventsListData([]);
+        setEventsListLoading(false);
+      });
+  }, [activeTab]);
+
+  useEffect(() => {
     if (activeTab !== "myevents") return;
     fetchMyEventsPoolSummary();
   }, [activeTab, fetchMyEventsPoolSummary]);
@@ -990,6 +1177,12 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
     const timerId = window.setTimeout(() => setMyEventsToast(null), 3200);
     return () => window.clearTimeout(timerId);
   }, [myEventsToast]);
+
+  useEffect(() => {
+    if (!programsProjectsToast) return undefined;
+    const timerId = window.setTimeout(() => setProgramsProjectsToast(null), 3600);
+    return () => window.clearTimeout(timerId);
+  }, [programsProjectsToast]);
 
   useEffect(() => {
     function handleOrgPortalEventCreated() {
@@ -2759,6 +2952,141 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
     setShowCreateModal(true);
   }
 
+  function getNextAction(stage, detail) {
+    const approved = safeNumber(detail?.approved_count ?? applicantCounts?.approvedCount, 0);
+    const capacity = detail?.capacity != null ? safeNumber(detail.capacity, 0) : null;
+    const pending = safeNumber(applicantCounts?.pendingJoinCount, 0);
+
+    if (stage === "draft") {
+      return {
+        label: "NEXT ACTION",
+        title: "Finish drafting this event",
+        body: "Complete event details and add roles before publishing.",
+        cta: "Continue draft",
+        ctaAction: () => openEditOpportunityModal(selectedOpportunityId),
+      };
+    }
+    if (stage === "recruiting") {
+      if (pending > 0) {
+        return {
+          label: "NEXT ACTION",
+          title: `Recruit ${pending} pending volunteer${pending !== 1 ? "s" : ""}`,
+          body: `${pending} application${pending !== 1 ? "s" : ""} waiting for approval.`,
+          cta: "Review now",
+          ctaAction: null,
+        };
+      }
+      return {
+        label: "NEXT ACTION",
+        title: "Keep recruiting",
+        body: capacity ? `${approved} of ${capacity} spots filled.` : "No capacity set.",
+        cta: "Invite volunteers",
+        ctaAction: openOpportunityInviteModal,
+      };
+    }
+    if (stage === "live") {
+      return {
+        label: "NEXT ACTION",
+        title: "Event is live",
+        body: "Check in volunteers as they arrive.",
+        cta: "Open check-in",
+        ctaAction: null,
+      };
+    }
+    if (stage === "closing_out") {
+      return {
+        label: "NEXT ACTION",
+        title: "Capture beneficiary reach",
+        body: "Enter total participants and equity-group estimates.",
+        cta: "Start close-out",
+        ctaAction: () => setCloseoutModal((prev) => ({ ...prev, open: true })),
+      };
+    }
+    if (stage === "reported") {
+      return {
+        label: "NEXT ACTION",
+        title: "Report submitted",
+        body: "Final report has been submitted.",
+        cta: "View report",
+        ctaAction: null,
+      };
+    }
+    return {
+      label: "NEXT ACTION",
+      title: "No action required",
+      body: "",
+      cta: null,
+      ctaAction: null,
+    };
+  }
+
+  async function submitCloseout() {
+    const projectId = selectedOpportunityDetail?.project_id;
+    if (!projectId) {
+      setCloseoutModal((prev) => ({
+        ...prev,
+        error: "This event is not linked to a project. Assign it to a project before closing out.",
+      }));
+      return;
+    }
+
+    setCloseoutModal((prev) => ({ ...prev, saving: true, error: "" }));
+
+    const equityBreakdown = closeoutModal.equityRows
+      .filter((row) => row.checked)
+      .reduce((acc, row) => {
+        acc[row.group] = row.pct ? Number(row.pct) : null;
+        return acc;
+      }, {});
+
+    try {
+      const patchRes = await fetch(`/api/org/projects/${encodeURIComponent(projectId)}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": csrfToken,
+        },
+        body: JSON.stringify({
+          beneficiaryCount: closeoutModal.beneficiaryCount
+            ? Number(closeoutModal.beneficiaryCount)
+            : null,
+          beneficiaryEquityBreakdown: equityBreakdown,
+        }),
+      });
+      if (!patchRes.ok) {
+        throw new Error(await parseOrgPortalApiError(patchRes, "Could not save beneficiary data."));
+      }
+
+      const lifecycleRes = await fetch(
+        `/api/org/projects/${encodeURIComponent(projectId)}/lifecycle`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+            "X-CSRF-Token": csrfToken,
+          },
+          body: JSON.stringify({ stage: "reported" }),
+        }
+      );
+      if (!lifecycleRes.ok) {
+        throw new Error(
+          await parseOrgPortalApiError(lifecycleRes, "Could not transition lifecycle.")
+        );
+      }
+
+      setCloseoutModal({ open: false, ...CLOSEOUT_EMPTY });
+      await fetchOpportunityDetail(selectedOpportunityId, { showLoading: false });
+    } catch (error) {
+      setCloseoutModal((prev) => ({
+        ...prev,
+        saving: false,
+        error: error?.message || "Close-out failed. Please try again.",
+      }));
+    }
+  }
+
   function openCancelOpportunityModal() {
     if (!selectedOpportunityId) return;
     const isDraftOpportunity = String(selectedOpportunity?.type || "").toLowerCase() === "opp-draft";
@@ -3246,6 +3574,549 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
 
   function closeApplicantProfileModal() {
     setApplicantProfileModal({ open: false, applicant: null });
+  }
+
+  const fetchProgramsProjects = useCallback(async () => {
+    setProgramsProjectsLoading(true);
+    setProgramsProjectsError("");
+    try {
+      const [programsResponse, projectsResponse] = await Promise.all([
+        fetch("/api/org/programs?limit=100", { credentials: "include" }),
+        fetch("/api/org/projects?limit=100", { credentials: "include" }),
+      ]);
+      if (!programsResponse.ok) {
+        throw new Error(await parseOrgPortalApiError(programsResponse, "Could not load programs."));
+      }
+      if (!projectsResponse.ok) {
+        throw new Error(await parseOrgPortalApiError(projectsResponse, "Could not load projects."));
+      }
+      const [programsPayload, projectsPayload] = await Promise.all([
+        programsResponse.json(),
+        projectsResponse.json(),
+      ]);
+      const nextPrograms = Array.isArray(programsPayload?.programs) ? programsPayload.programs : [];
+      const nextProjects = Array.isArray(projectsPayload?.projects) ? projectsPayload.projects : [];
+      setPrograms(nextPrograms);
+      setProjects(nextProjects);
+      setSelectedProgramId((current) => (
+        current && !nextPrograms.some((program) => String(program.id) === String(current)) ? "" : current
+      ));
+
+      const metricsEntries = await Promise.all(
+        nextProjects.map(async (project) => {
+          if (!project?.id) return null;
+          const response = await fetch(`/api/org/projects/${encodeURIComponent(project.id)}/metrics`, {
+            credentials: "include",
+          });
+          if (!response.ok) return [String(project.id), null];
+          const payload = await response.json().catch(() => ({}));
+          return [String(project.id), payload?.metrics || null];
+        })
+      );
+      setProjectMetricsById(Object.fromEntries(metricsEntries.filter(Boolean)));
+    } catch (error) {
+      setPrograms([]);
+      setProjects([]);
+      setProjectMetricsById({});
+      setProgramsProjectsError(error?.message || "Could not load programs and projects.");
+    } finally {
+      setProgramsProjectsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab !== "programsProjects") return;
+    fetchProgramsProjects();
+  }, [activeTab, fetchProgramsProjects]);
+
+  function showProgramsProjectsToast(type, message) {
+    setProgramsProjectsToast({ type, message });
+  }
+
+  function closeProgramFormModal() {
+    if (programFormModal.saving) return;
+    setProgramFormModal({ open: false, mode: "create", program: null, values: PROGRAM_FORM_EMPTY, error: "", saving: false });
+  }
+
+  function closeProjectFormModal() {
+    if (projectFormModal.saving) return;
+    setProjectFormModal({ open: false, mode: "create", project: null, values: PROJECT_FORM_EMPTY, error: "", saving: false });
+  }
+
+  function openCreateProgramModal() {
+    setProgramMenuId("");
+    setProgramFormModal({ open: true, mode: "create", program: null, values: PROGRAM_FORM_EMPTY, error: "", saving: false });
+  }
+
+  function openEditProgramModal(program) {
+    if (!program) return;
+    setProgramMenuId("");
+    setProgramFormModal({ open: true, mode: "edit", program, values: programToForm(program), error: "", saving: false });
+  }
+
+  function openCreateProjectModal() {
+    setProjectMenuId("");
+    setProjectFormModal({
+      open: true,
+      mode: "create",
+      project: null,
+      values: { ...PROJECT_FORM_EMPTY, programId: selectedProgramId || "" },
+      error: "",
+      saving: false,
+    });
+  }
+
+  function openEditProjectModal(project) {
+    if (!project) return;
+    setProjectMenuId("");
+    setProjectFormModal({ open: true, mode: "edit", project, values: projectToForm(project), error: "", saving: false });
+  }
+
+  function updateProgramFormValue(key, value) {
+    setProgramFormModal((prev) => ({
+      ...prev,
+      error: "",
+      values: { ...prev.values, [key]: value },
+    }));
+  }
+
+  function updateProjectFormValue(key, value) {
+    setProjectFormModal((prev) => ({
+      ...prev,
+      error: "",
+      values: { ...prev.values, [key]: value },
+    }));
+  }
+
+  function toggleProgramEquityGroup(group) {
+    setProgramFormModal((prev) => {
+      const current = Array.isArray(prev.values.intendedEquityGroups) ? prev.values.intendedEquityGroups : [];
+      const nextGroups = current.includes(group)
+        ? current.filter((item) => item !== group)
+        : [...current, group];
+      return { ...prev, error: "", values: { ...prev.values, intendedEquityGroups: nextGroups } };
+    });
+  }
+
+  function toggleProjectLanguage(language) {
+    setProjectFormModal((prev) => {
+      const current = Array.isArray(prev.values.languages) ? prev.values.languages : [];
+      const nextLanguages = current.includes(language)
+        ? current.filter((item) => item !== language)
+        : [...current, language];
+      return { ...prev, error: "", values: { ...prev.values, languages: nextLanguages } };
+    });
+  }
+
+  async function submitProgramForm(event) {
+    event.preventDefault();
+    const values = programFormModal.values || PROGRAM_FORM_EMPTY;
+    if (!String(values.name || "").trim()) {
+      setProgramFormModal((prev) => ({ ...prev, error: "Name is required." }));
+      return;
+    }
+
+    setProgramFormModal((prev) => ({ ...prev, saving: true, error: "" }));
+    const body = {
+      name: values.name.trim(),
+      description: values.description || null,
+      funder: values.funder || null,
+      reportingPeriodStart: values.reportingPeriodStart || null,
+      reportingPeriodEnd: values.reportingPeriodEnd || null,
+      intendedEquityGroups: Array.isArray(values.intendedEquityGroups) ? values.intendedEquityGroups : [],
+    };
+    const isEdit = programFormModal.mode === "edit" && programFormModal.program?.id;
+    try {
+      const response = await fetch(isEdit
+        ? `/api/org/programs/${encodeURIComponent(programFormModal.program.id)}`
+        : "/api/org/programs", {
+        method: isEdit ? "PATCH" : "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": csrfToken,
+        },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) {
+        throw new Error(await parseOrgPortalApiError(response, "Program could not be saved."));
+      }
+      closeProgramFormModal();
+      showProgramsProjectsToast("success", isEdit ? "Program saved." : "Program created.");
+      await fetchProgramsProjects();
+    } catch (error) {
+      setProgramFormModal((prev) => ({ ...prev, saving: false, error: error?.message || "Program could not be saved." }));
+    }
+  }
+
+  async function submitProjectForm(event) {
+    event.preventDefault();
+    const values = projectFormModal.values || PROJECT_FORM_EMPTY;
+    if (!String(values.name || "").trim()) {
+      setProjectFormModal((prev) => ({ ...prev, error: "Name is required." }));
+      return;
+    }
+
+    setProjectFormModal((prev) => ({ ...prev, saving: true, error: "" }));
+    const body = {
+      name: values.name.trim(),
+      programId: values.programId || null,
+      description: values.description || null,
+      startDate: values.startDate || null,
+      endDate: values.endDate || null,
+      languages: Array.isArray(values.languages) ? values.languages : [],
+      partnerOrgIds: [],
+    };
+    const isEdit = projectFormModal.mode === "edit" && projectFormModal.project?.id;
+    try {
+      const response = await fetch(isEdit
+        ? `/api/org/projects/${encodeURIComponent(projectFormModal.project.id)}`
+        : "/api/org/projects", {
+        method: isEdit ? "PATCH" : "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": csrfToken,
+        },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) {
+        throw new Error(await parseOrgPortalApiError(response, "Project could not be saved."));
+      }
+      closeProjectFormModal();
+      showProgramsProjectsToast("success", isEdit ? "Project saved." : "Project created.");
+      await fetchProgramsProjects();
+    } catch (error) {
+      setProjectFormModal((prev) => ({ ...prev, saving: false, error: error?.message || "Project could not be saved." }));
+    }
+  }
+
+  async function archiveProgram(program) {
+    if (!program?.id) return;
+    setProgramMenuId("");
+    try {
+      const response = await fetch(`/api/org/programs/${encodeURIComponent(program.id)}/archive`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": csrfToken,
+        },
+        body: JSON.stringify({}),
+      });
+      if (!response.ok) {
+        throw new Error(await parseOrgPortalApiError(response, "Program could not be archived."));
+      }
+      showProgramsProjectsToast("success", "Program archived.");
+      await fetchProgramsProjects();
+    } catch (error) {
+      showProgramsProjectsToast("error", error?.message || "Program could not be archived.");
+    }
+  }
+
+  function openProgramDeleteConfirm(program) {
+    setProgramMenuId("");
+    setProgramsProjectsConfirm({ open: true, type: "program-delete", item: program, error: "", saving: false });
+  }
+
+  function openProjectDeleteConfirm(project) {
+    setProjectMenuId("");
+    setProgramsProjectsConfirm({ open: true, type: "project-delete", item: project, error: "", saving: false });
+  }
+
+  async function confirmProgramsProjectsDelete() {
+    const target = programsProjectsConfirm.item;
+    if (!target?.id) return;
+    const isProgram = programsProjectsConfirm.type === "program-delete";
+    setProgramsProjectsConfirm((prev) => ({ ...prev, saving: true, error: "" }));
+    try {
+      const response = await fetch(`/api/org/${isProgram ? "programs" : "projects"}/${encodeURIComponent(target.id)}`, {
+        method: "DELETE",
+        credentials: "include",
+        headers: { "X-CSRF-Token": csrfToken },
+      });
+      if (!response.ok) {
+        if (response.status === 409) {
+          throw new Error(isProgram
+            ? "Cannot delete this program while projects are linked. Move or delete the projects first."
+            : "Cannot delete this project while events or roles are linked. Reassign or delete them first.");
+        }
+        throw new Error(await parseOrgPortalApiError(response, `${isProgram ? "Program" : "Project"} could not be deleted.`));
+      }
+      setProgramsProjectsConfirm({ open: false, type: "", item: null, error: "", saving: false });
+      if (isProgram && String(selectedProgramId) === String(target.id)) {
+        setSelectedProgramId("");
+      }
+      showProgramsProjectsToast("success", `${isProgram ? "Program" : "Project"} deleted.`);
+      await fetchProgramsProjects();
+    } catch (error) {
+      setProgramsProjectsConfirm((prev) => ({ ...prev, saving: false, error: error?.message || "Delete failed." }));
+    }
+  }
+
+  function openLifecycleModal(project) {
+    if (!project) return;
+    setProjectMenuId("");
+    setProjectLifecycleModal({ open: true, project, error: "", savingStage: "" });
+  }
+
+  async function transitionProjectLifecycle(stage) {
+    const project = projectLifecycleModal.project;
+    if (!project?.id || !stage) return;
+    setProjectLifecycleModal((prev) => ({ ...prev, error: "", savingStage: stage }));
+    try {
+      const response = await fetch(`/api/org/projects/${encodeURIComponent(project.id)}/lifecycle`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": csrfToken,
+        },
+        body: JSON.stringify({ stage }),
+      });
+      if (!response.ok) {
+        throw new Error(await parseOrgPortalApiError(response, "Lifecycle could not be updated."));
+      }
+      setProjectLifecycleModal({ open: false, project: null, error: "", savingStage: "" });
+      showProgramsProjectsToast("success", "Project lifecycle updated.");
+      await fetchProgramsProjects();
+    } catch (error) {
+      setProjectLifecycleModal((prev) => ({
+        ...prev,
+        savingStage: "",
+        error: error?.message || "Lifecycle could not be updated.",
+      }));
+    }
+  }
+
+  function showProjectComingSoon(project) {
+    showProgramsProjectsToast("info", `${project?.name || "Project"} detail coming soon.`);
+  }
+
+  function getProgramProjectCount(programId) {
+    return projects.filter((project) => String(project?.program_id || "") === String(programId || "")).length;
+  }
+
+  function getProgramName(programId) {
+    if (!programId) return "";
+    return programs.find((program) => String(program.id) === String(programId))?.name || "";
+  }
+
+  function renderProgramStatusBadge(status) {
+    const key = String(status || "active").toLowerCase();
+    return (
+      <span className={`gk-program-status-pill gk-program-${key}`}>{PROGRAM_STATUS_LABELS[key] || key}</span>
+    );
+  }
+
+  function renderProjectLifecycleBadge(stage) {
+    const key = String(stage || "draft").toLowerCase();
+    return (
+      <span className={`gk-stage-pill gk-stage-${key}`}>{PROJECT_LIFECYCLE_LABELS[key] || key}</span>
+    );
+  }
+
+  function renderProgramActions(program) {
+    const isOpen = String(programMenuId) === String(program.id);
+    return (
+      <div className="gk-action-menu-wrap" onClick={(event) => event.stopPropagation()}>
+        <button
+          type="button"
+          className="btn btn-sm btn-link text-muted p-0"
+          style={{ width: 30, height: 30, lineHeight: 1, textDecoration: "none" }}
+          aria-label={`Actions for ${program.name || "program"}`}
+          onClick={() => setProgramMenuId(isOpen ? "" : String(program.id))}
+        >
+          <i className="fas fa-ellipsis-vertical" aria-hidden="true"></i>
+        </button>
+        {isOpen ? (
+          <div className="gk-action-menu">
+            <button type="button" onClick={() => openEditProgramModal(program)}>Edit</button>
+            <button type="button" onClick={() => archiveProgram(program)}>Archive</button>
+            <button type="button" className="text-danger" onClick={() => openProgramDeleteConfirm(program)}>Delete</button>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  function renderProjectActions(project) {
+    const isOpen = String(projectMenuId) === String(project.id);
+    return (
+      <div className="gk-action-menu-wrap" onClick={(event) => event.stopPropagation()}>
+        <button
+          type="button"
+          className="btn btn-sm btn-link text-muted p-0"
+          style={{ width: 30, height: 30, lineHeight: 1, textDecoration: "none" }}
+          aria-label={`Actions for ${project.name || "project"}`}
+          onClick={() => setProjectMenuId(isOpen ? "" : String(project.id))}
+        >
+          <i className="fas fa-ellipsis-vertical" aria-hidden="true"></i>
+        </button>
+        {isOpen ? (
+          <div className="gk-action-menu">
+            <button type="button" onClick={() => openEditProjectModal(project)}>Edit</button>
+            <button type="button" onClick={() => openLifecycleModal(project)}>Transition lifecycle</button>
+            <button type="button" className="text-danger" onClick={() => openProjectDeleteConfirm(project)}>Delete</button>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  function renderProgramsPanel() {
+    if (programsProjectsLoading && !programs.length && !projects.length) {
+      return (
+        <div className="d-flex justify-content-center py-4">
+          <div className="spinner-border" role="status" aria-label="Loading programs and projects"></div>
+        </div>
+      );
+    }
+
+    return (
+      <div>
+        <div className="d-flex justify-content-between align-items-center gap-2 mb-3">
+          <h3 className="orgp-opp-title mb-0">Programs</h3>
+          <button type="button" className="btn btn-sm gk-btn-coral" onClick={openCreateProgramModal}>
+            + New program
+          </button>
+        </div>
+
+        {programsProjectsError ? (
+          <div className="alert alert-warning py-2 small" role="alert">
+            {programsProjectsError}
+            <button type="button" className="btn btn-link btn-sm p-0 ms-2 orgp-link-btn" onClick={fetchProgramsProjects}>
+              Retry
+            </button>
+          </div>
+        ) : null}
+
+        {!programs.length && !programsProjectsLoading ? (
+          <div className="gk-empty py-4">
+            <p className="text-muted small mb-0">
+              No programs yet. Create one to bundle related projects under a grant or initiative.
+            </p>
+          </div>
+        ) : (
+          <div>
+            {programs.map((program) => {
+              const isSelected = String(selectedProgramId) === String(program.id);
+              return (
+                <div
+                  key={`program-${program.id}`}
+                  className="gk-card"
+                  style={isSelected ? { borderLeft: "3px solid var(--gk-coral)", background: "#fff9f9" } : undefined}
+                >
+                  <div className="d-flex justify-content-between align-items-start gap-2">
+                    <button
+                      type="button"
+                      className="btn btn-link p-0 text-start fw-bold"
+                      style={{ color: "var(--gk-slate)" }}
+                      onClick={() => setSelectedProgramId(isSelected ? "" : String(program.id))}
+                    >
+                      {program.name || "Untitled program"}
+                    </button>
+                    {renderProgramActions(program)}
+                  </div>
+                  <div className="d-flex align-items-center gap-2 flex-wrap mt-2">
+                    {renderProgramStatusBadge(program.status)}
+                    <span className="small text-muted">{pluralizeProgramProject(getProgramProjectCount(program.id), "project")}</span>
+                  </div>
+                  {program.funder ? (
+                    <div className="small text-muted mt-1">
+                      Funder: <strong>{program.funder}</strong>
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function renderProjectsPanel() {
+    const selectedProgram = selectedProgramId
+      ? programs.find((program) => String(program.id) === String(selectedProgramId))
+      : null;
+    const visibleProjects = selectedProgramId
+      ? projects.filter((project) => String(project?.program_id || "") === String(selectedProgramId))
+      : projects;
+    const emptyText = selectedProgram
+      ? "No projects under this program yet."
+      : "No projects yet. Create your first project to start organizing events.";
+
+    if (programsProjectsLoading && !programs.length && !projects.length) {
+      return (
+        <div className="d-flex justify-content-center py-4">
+          <div className="spinner-border" role="status" aria-label="Loading projects"></div>
+        </div>
+      );
+    }
+
+    return (
+      <div>
+        <div className="d-flex justify-content-between align-items-start gap-2 mb-3">
+          <div>
+            <h3 className="orgp-opp-title mb-0">
+              {selectedProgram ? `Projects in ${selectedProgram.name}` : "Projects"}
+            </h3>
+            {selectedProgram ? (
+              <button
+                type="button"
+                className="btn btn-link btn-sm p-0"
+                style={{ color: "var(--gk-slate)" }}
+                onClick={() => setSelectedProgramId("")}
+              >
+                Show all projects
+              </button>
+            ) : null}
+          </div>
+          <button type="button" className="btn btn-sm gk-btn-coral" onClick={openCreateProjectModal}>
+            + New project
+          </button>
+        </div>
+
+        {!visibleProjects.length && !programsProjectsLoading ? (
+          <div className="gk-empty py-4">
+            <p className="text-muted small mb-0">{emptyText}</p>
+          </div>
+        ) : (
+          <div className="d-grid gap-2">
+            {visibleProjects.map((project) => {
+              const metrics = projectMetricsById[String(project.id)] || {};
+              const programName = getProgramName(project.program_id);
+              return (
+                <div key={`project-${project.id}`} className="gk-card mb-2">
+                  <div className="d-flex justify-content-between align-items-start gap-2">
+                    <div className="min-w-0">
+                      <button
+                        type="button"
+                        className="btn btn-link p-0 text-start fw-bold"
+                        style={{ color: "var(--gk-slate)" }}
+                        onClick={() => showProjectComingSoon(project)}
+                      >
+                        {project.name || "Untitled project"}
+                      </button>
+                      <div className="d-flex align-items-center gap-2 flex-wrap mt-1">
+                        {renderProjectLifecycleBadge(project.lifecycle_stage)}
+                        {programName ? <span className="badge text-bg-light border">{programName}</span> : null}
+                      </div>
+                    </div>
+                    {renderProjectActions(project)}
+                  </div>
+                  <div className="small text-muted mt-2">{formatProjectDateRange(project)}</div>
+                  <div className="small text-muted mt-1">
+                    {safeNumber(metrics.total_events, 0)} events · {safeNumber(metrics.total_verified_hours, 0)} verified hours
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
   }
 
   function formatMyEventsListDate(startAt, timeZone) {
@@ -3876,6 +4747,773 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
           </div>
         ) : null}
       </>
+    );
+  }
+
+  function renderEventsListView() {
+    const allEvents = Array.isArray(eventsListData) ? eventsListData : [];
+
+    const projectOptions = [...new Map(
+      allEvents
+        .map((row) => {
+          const id = row?.project_id ?? row?.projectId;
+          const name = row?.project_name ?? row?.projectName;
+          return id && name ? [String(id), String(name)] : null;
+        })
+        .filter(Boolean)
+    ).entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    const filtered = allEvents.filter((row) => {
+      const statusKey = String(row.status || "").toLowerCase();
+      if (eventsListFilter.status !== "all" && statusKey !== eventsListFilter.status) return false;
+      if (eventsListFilter.projectId !== "all") {
+        const projectId = row?.project_id ?? row?.projectId;
+        if (String(projectId || "") !== eventsListFilter.projectId) return false;
+      }
+      return true;
+    });
+
+    const active = filtered.filter((row) =>
+      ["published", "active"].includes(String(row.status || "").toLowerCase())
+    );
+    const drafts = filtered.filter((row) =>
+      String(row.status || "").toLowerCase() === "draft"
+    );
+    const reported = filtered.filter((row) =>
+      ["completed", "cancelled", "reported"].includes(String(row.status || "").toLowerCase())
+    );
+
+    const statusOptions = [...new Set(allEvents.map((row) => String(row.status || "").toLowerCase()).filter(Boolean))].sort();
+
+    function renderRow(row) {
+      const approved = safeNumber(row.approved, 0);
+      const capacity = row.capacity != null ? safeNumber(row.capacity, 0) : null;
+      const pct = capacity ? Math.min(100, Math.round((approved / capacity) * 100)) : 0;
+      const pending = safeNumber(row.pending, 0);
+      const statusKey = String(row.status || "").toLowerCase();
+      const dateRange = formatEventDateRange(row.start_at, row.end_at);
+      const daysAway = formatDaysAway(row.start_at);
+      const barClass = fillBarClass(pct, capacity);
+      const projectName = row?.project_name || row?.projectName || "";
+      const locationLabel = row?.location || row?.location_name || row?.venue || row?.address || row?.tz || "Location TBD";
+
+      const queueItem = {
+        id: `opp-list-${row.id}`,
+        tab: "opportunities",
+        type: pending > 0 ? "opp-approval" : statusKey === "draft" ? "opp-draft" : "opp-upcoming",
+        opportunityId: String(row.id),
+        opportunityName: row.title || "Untitled event",
+        label: row.title || "Untitled event",
+        icon: pending > 0 ? "fa-user-check" : "fa-calendar",
+        startTime: row.start_at || null,
+        endTime: row.end_at || null,
+        timeZone: row.tz || "America/Vancouver",
+        pendingCount: pending,
+        pendingJoinCount: pending,
+        approvedCount: approved,
+        capacity,
+      };
+
+      const selectRow = () => {
+        setSelectedQueueItem(queueItem);
+        setPendingDetailScroll("tabs");
+      };
+
+      return (
+        <div
+          key={`evlist-${row.id}`}
+          className="gk-event-row"
+          role="button"
+          tabIndex={0}
+          onClick={selectRow}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              selectRow();
+            }
+          }}
+        >
+          <div>
+            <div className="gk-event-row-title">
+              {row.title || "Untitled event"}
+              {pending > 0 ? (
+                <span className="gk-urgent-badge ms-2">{pending} URGENT</span>
+              ) : null}
+            </div>
+            <div className="gk-event-row-meta">
+              {locationLabel}
+            </div>
+            {projectName ? <span className="gk-event-row-badge">{projectName}</span> : null}
+          </div>
+          <div className="gk-event-status-col">
+            <span className={`gk-stage-pill gk-stage-${statusKey}`}>
+              {statusKey.charAt(0).toUpperCase() + statusKey.slice(1).replace("_", " ")}
+            </span>
+          </div>
+          <div className="gk-event-dates-col">
+            <div>{dateRange}</div>
+            <div className="gk-event-dates-away">{daysAway}</div>
+          </div>
+          <div className="gk-fill-col">
+            {capacity != null ? (
+              <>
+                <div className="gk-fill-bar-wrap">
+                  <div className={`gk-fill-bar ${barClass}`} style={{ width: `${pct}%` }} />
+                </div>
+                <div className="gk-fill-fraction">{approved}/{capacity}</div>
+              </>
+            ) : (
+              <div className="gk-fill-fraction text-muted">No cap</div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    function renderSection(label, rows) {
+      if (!rows.length) return null;
+      return (
+        <div key={`evlist-section-${label}`} className="mb-3">
+          <div className="gk-events-section-label">{label} {rows.length}</div>
+          {rows.map((row) => renderRow(row))}
+        </div>
+      );
+    }
+
+    return (
+      <div>
+        <div className="gk-events-list-header">
+          <span className="gk-events-list-count">{filtered.length}</span>
+          <span className="gk-events-list-count-of">of {allEvents.length}</span>
+        </div>
+        <div className="gk-events-list-subtitle">
+          Every volunteer-facing thing happening across your projects
+        </div>
+
+        <div className="gk-events-filter-bar">
+          <select
+            className="form-select form-select-sm"
+            value={eventsListFilter.status}
+            onChange={(e) => setEventsListFilter((prev) => ({ ...prev, status: e.target.value }))}
+          >
+            <option value="all">Status</option>
+            {statusOptions.map((s) => (
+              <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
+            ))}
+          </select>
+
+          <select
+            className="form-select form-select-sm"
+            value={eventsListFilter.projectId}
+            onChange={(e) => setEventsListFilter((prev) => ({ ...prev, projectId: e.target.value }))}
+            disabled={!projectOptions.length}
+          >
+            <option value="all">Project</option>
+            {projectOptions.map((project) => (
+              <option key={project.id} value={project.id}>{project.name}</option>
+            ))}
+          </select>
+
+          <select className="form-select form-select-sm" value="all" disabled>
+            <option value="all">Date</option>
+          </select>
+
+          <div className="gk-events-view-toggle">
+            <button type="button" className="btn btn-sm gk-btn-coral">List</button>
+            <button type="button" className="btn btn-sm btn-outline-secondary" disabled>Calendar</button>
+          </div>
+        </div>
+
+        {eventsListLoading ? (
+          <div className="d-flex justify-content-center py-4">
+            <div className="spinner-border" role="status" aria-label="Loading events"></div>
+          </div>
+        ) : !allEvents.length ? (
+          <div className="gk-empty py-4">
+            <i className="fas fa-calendar-days" aria-hidden="true"></i>
+            <p className="mb-0">No events yet. Create your first opportunity.</p>
+            <button type="button" className="btn btn-sm gk-btn-coral mt-2" onClick={openCreateOpportunityModal}>
+              + New Opportunity
+            </button>
+          </div>
+        ) : (
+          <>
+            {renderSection("ACTIVE", active)}
+            {renderSection("DRAFTS", drafts)}
+            {renderSection("REPORTED", reported)}
+          </>
+        )}
+      </div>
+    );
+  }
+
+  function renderCloseoutModal() {
+    if (!closeoutModal.open) return null;
+    const { step, beneficiaryCount, confidence, equityRows, methodology, saving, error } = closeoutModal;
+    const eventTitle = selectedOpportunityDetail?.title || "Event";
+    const STEPS = ["Total reach", "Equity breakdown", "Methodology"];
+
+    return (
+      <div
+        className="modal fade show d-block gk-closeout-modal"
+        tabIndex="-1"
+        style={{ backgroundColor: "rgba(0,0,0,0.5)" }}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="gkCloseoutTitle"
+      >
+        <div className="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+          <div className="modal-content">
+            <div className="modal-header">
+              <div>
+                <div className="gk-closeout-modal-kicker">Close-out</div>
+                <h5 className="gk-closeout-modal-title" id="gkCloseoutTitle">{eventTitle}</h5>
+              </div>
+              <button
+                type="button"
+                className="btn-close"
+                aria-label="Close"
+                onClick={() => setCloseoutModal({ open: false, ...CLOSEOUT_EMPTY })}
+                disabled={saving}
+              />
+            </div>
+
+            <div className="modal-body">
+              <div className="gk-closeout-step-indicator">
+                {STEPS.map((label, idx) => {
+                  const stepNum = idx + 1;
+                  const isDone = step > stepNum;
+                  const isActive = step === stepNum;
+                  return (
+                    <React.Fragment key={label}>
+                      <div className={`gk-closeout-step${isDone ? " is-done" : ""}${isActive ? " is-active" : ""}`}>
+                        <div className="gk-closeout-step-num">
+                          {isDone ? <i className="fas fa-check" aria-hidden="true" /> : stepNum}
+                        </div>
+                        <div className="gk-closeout-step-label">{label}</div>
+                      </div>
+                      {idx < STEPS.length - 1 ? (
+                        <div className="gk-closeout-step-divider" aria-hidden="true" />
+                      ) : null}
+                    </React.Fragment>
+                  );
+                })}
+              </div>
+
+              {step === 1 ? (
+                <div>
+                  <h6 className="fw-bold mb-1" style={{ color: "var(--gk-slate)" }}>
+                    How many people did this event reach?
+                  </h6>
+                  <p className="small text-muted mb-3">
+                    Count beneficiaries — the participants this event served — not volunteers.
+                    Best estimate is fine if exact numbers are not available.
+                  </p>
+                  <label className="gk-section-label" htmlFor="gkCloseoutCount">
+                    Total beneficiary count
+                  </label>
+                  <div className="d-flex align-items-center gap-2 mb-3">
+                    <input
+                      id="gkCloseoutCount"
+                      type="number"
+                      min="0"
+                      className="form-control"
+                      style={{ maxWidth: 120 }}
+                      value={beneficiaryCount}
+                      onChange={(e) =>
+                        setCloseoutModal((prev) => ({ ...prev, beneficiaryCount: e.target.value }))
+                      }
+                    />
+                    <span className="small text-muted">people reached</span>
+                  </div>
+                  <div className="gk-section-label mb-1">Confidence</div>
+                  <div className="gk-confidence-grid">
+                    {[
+                      { key: "Counted", sub: "Sign-in / registration" },
+                      { key: "Estimated", sub: "Best informed guess" },
+                      { key: "Sampled", sub: "Extrapolated from survey" },
+                    ].map(({ key, sub }) => (
+                      <button
+                        key={key}
+                        type="button"
+                        className={`gk-confidence-btn${confidence === key ? " selected" : ""}`}
+                        onClick={() =>
+                          setCloseoutModal((prev) => ({ ...prev, confidence: key }))
+                        }
+                      >
+                        <div className="gk-confidence-btn-label">{key}</div>
+                        <div className="gk-confidence-btn-sub">{sub}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : step === 2 ? (
+                <div>
+                  <h6 className="fw-bold mb-1" style={{ color: "var(--gk-slate)" }}>
+                    Equity-deserving group breakdown
+                  </h6>
+                  <p className="small text-muted mb-3">
+                    Check any groups represented and optionally enter an estimated percentage.
+                  </p>
+                  {equityRows.map((row, idx) => (
+                    <div key={row.group} className="gk-equity-row">
+                      <input
+                        type="checkbox"
+                        className="form-check-input"
+                        id={`gk-equity-${idx}`}
+                        checked={row.checked}
+                        onChange={(e) =>
+                          setCloseoutModal((prev) => ({
+                            ...prev,
+                            equityRows: prev.equityRows.map((r, i) =>
+                              i === idx ? { ...r, checked: e.target.checked } : r
+                            ),
+                          }))
+                        }
+                      />
+                      <label className="gk-equity-label" htmlFor={`gk-equity-${idx}`}>
+                        {row.group}
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        className="form-control form-control-sm gk-equity-pct-input"
+                        placeholder="%"
+                        value={row.pct}
+                        disabled={!row.checked}
+                        onChange={(e) =>
+                          setCloseoutModal((prev) => ({
+                            ...prev,
+                            equityRows: prev.equityRows.map((r, i) =>
+                              i === idx ? { ...r, pct: e.target.value } : r
+                            ),
+                          }))
+                        }
+                      />
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div>
+                  <h6 className="fw-bold mb-1" style={{ color: "var(--gk-slate)" }}>
+                    Methodology notes
+                  </h6>
+                  <p className="small text-muted mb-3">
+                    Optional. Describe how you counted or estimated reach.
+                  </p>
+                  <textarea
+                    className="form-control"
+                    rows={5}
+                    value={methodology}
+                    onChange={(e) =>
+                      setCloseoutModal((prev) => ({ ...prev, methodology: e.target.value }))
+                    }
+                    placeholder="e.g. Attendance counted via sign-in sheet at registration desk."
+                  />
+                </div>
+              )}
+
+              {error ? (
+                <div className="alert alert-warning py-2 mt-3 mb-0" role="alert">{error}</div>
+              ) : null}
+            </div>
+
+            <div className="modal-footer">
+              <button
+                type="button"
+                className="btn btn-outline-secondary"
+                onClick={() => {
+                  if (step > 1) {
+                    setCloseoutModal((prev) => ({ ...prev, step: prev.step - 1, error: "" }));
+                  } else {
+                    setCloseoutModal({ open: false, ...CLOSEOUT_EMPTY });
+                  }
+                }}
+                disabled={saving}
+              >
+                {step === 1 ? "Cancel" : "Back"}
+              </button>
+              {step < 3 ? (
+                <button
+                  type="button"
+                  className="btn gk-btn-coral"
+                  onClick={() =>
+                    setCloseoutModal((prev) => ({ ...prev, step: prev.step + 1, error: "" }))
+                  }
+                  disabled={saving}
+                >
+                  Continue <i className="fas fa-arrow-right ms-1" aria-hidden="true" />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn gk-btn-coral"
+                  onClick={submitCloseout}
+                  disabled={saving}
+                >
+                  {saving ? "Submitting..." : "Submit close-out"}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function renderEventWorkspace() {
+    const detail = selectedOpportunityDetail;
+    const loading = selectedOpportunityDetailLoading;
+    const eventTitle = detail?.title || selectedOpportunity?.opportunityName || "Event";
+    const roles = Array.isArray(detail?.roles) ? detail.roles : [];
+    const approved = safeNumber(applicantCounts?.approvedCount, 0);
+    const capacity = detail?.capacity != null ? safeNumber(detail.capacity, 0) : null;
+    const fillPct = capacity ? Math.min(100, Math.round((approved / capacity) * 100)) : 0;
+    const verifiedHours = safeNumber(detail?.verified_hours, 0);
+    const stage = String(
+      detail?.lifecycle_stage ||
+      selectedOpportunity?.type?.replace("opp-", "") ||
+      "draft"
+    ).toLowerCase();
+    const LIFECYCLE_STAGES = ["draft","recruiting","live","closing_out","reported"];
+    const LIFECYCLE_LABELS = {
+      draft: "Draft",
+      recruiting: "Recruiting",
+      live: "Live",
+      closing_out: "Closing out",
+      reported: "Reported",
+    };
+    const normalizedStage = LIFECYCLE_STAGES.includes(stage) ? stage : "draft";
+    const currentStageIndex = LIFECYCLE_STAGES.indexOf(normalizedStage);
+    const nextAction = getNextAction(normalizedStage, detail);
+    const dateRange = formatEventDateRange(detail?.start_at, detail?.end_at);
+    const locationCount = Array.isArray(detail?.locations) ? detail.locations.length : 0;
+    const subtitleParts = [
+      dateRange,
+      detail?.duration_days ? `${detail.duration_days} days` : null,
+      locationCount > 0 ? `${locationCount} location${locationCount !== 1 ? "s" : ""}` : null,
+    ].filter(Boolean);
+    const SUBNAV_TABS = ["Overview","Roster","Schedule","Comms","Check-in","Close-out","Reports"];
+
+    return (
+      <div>
+        <button
+          type="button"
+          className="gk-workspace-back-btn"
+          onClick={() => {
+            setSelectedQueueItem(null);
+            setWorkspaceSubNav("overview");
+          }}
+        >
+          <i className="fas fa-chevron-left" aria-hidden="true"></i>
+          Back to events
+        </button>
+
+        <div className="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+          <div>
+            <div className="gk-workspace-breadcrumb">
+              <span>{detail?.program_name || "Events"}</span>
+              <i className="fas fa-chevron-right" style={{ fontSize: "0.65rem" }} aria-hidden="true"></i>
+              <span>Events</span>
+              <i className="fas fa-chevron-right" style={{ fontSize: "0.65rem" }} aria-hidden="true"></i>
+              <span>{eventTitle}</span>
+            </div>
+            <h2 className="gk-workspace-title">{eventTitle}</h2>
+            <div className="gk-workspace-subtitle">{subtitleParts.join(" · ")}</div>
+          </div>
+          <div className="gk-workspace-actions">
+            <button type="button" className="btn btn-sm btn-outline-secondary">
+              <i className="fas fa-envelope me-1" aria-hidden="true"></i>
+              Message volunteers
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm gk-btn-coral"
+              onClick={openCreateOpportunityModal}
+            >
+              + Add opportunity
+            </button>
+          </div>
+        </div>
+
+        <div className="gk-lifecycle-bar" role="list" aria-label="Lifecycle stages">
+          {LIFECYCLE_STAGES.map((s, idx) => {
+            const isDone = idx < currentStageIndex;
+            const isCurrent = idx === currentStageIndex;
+            return (
+              <div
+                key={s}
+                className={`gk-lifecycle-stage${isDone ? " is-done" : ""}${isCurrent ? " is-current" : ""}`}
+                role="listitem"
+              >
+                {isDone ? <i className="fas fa-check me-1" aria-hidden="true"></i> : null}
+                {LIFECYCLE_LABELS[s]}
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="gk-workspace-subnav" role="tablist">
+          {SUBNAV_TABS.map((tab) => {
+            const key = tab.toLowerCase().replace(/[^a-z]/g, "");
+            return (
+              <button
+                key={tab}
+                type="button"
+                role="tab"
+                aria-selected={workspaceSubNav === key}
+                className={`gk-workspace-subnav-btn${workspaceSubNav === key ? " active" : ""}`}
+                onClick={() => setWorkspaceSubNav(key)}
+              >
+                {tab}
+              </button>
+            );
+          })}
+        </div>
+
+        {loading ? (
+          <div className="d-flex justify-content-center py-4">
+            <div className="spinner-border" role="status" aria-label="Loading event"></div>
+          </div>
+        ) : workspaceSubNav !== "overview" ? (
+          <div className="gk-empty py-4">
+            <i className="fas fa-hard-hat" aria-hidden="true"></i>
+            <p className="mb-0">
+              {SUBNAV_TABS.find((t) => t.toLowerCase().replace(/[^a-z]/g, "") === workspaceSubNav) || "This"} tab coming soon.
+            </p>
+          </div>
+        ) : (
+          <div className="gk-workspace-root">
+            <div>
+              <div className="gk-metric-grid">
+                <div className="gk-metric-card">
+                  <div className="gk-metric-label">
+                    {normalizedStage === "live"
+                      ? "Spots Filled"
+                      : normalizedStage === "reported"
+                        ? "Spots Filled (Final)"
+                        : "Spots Planned"}
+                  </div>
+                  <div className="gk-metric-value-fraction">
+                    {capacity != null ? `${approved}/${capacity}` : "—"}
+                    {capacity != null ? (
+                      <span className="ms-2" style={{ fontSize: "0.9rem", color: "var(--gk-text-muted)" }}>
+                        {fillPct}%
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="gk-metric-sub">
+                    {normalizedStage === "recruiting"
+                      ? `${safeNumber(applicantCounts?.pendingJoinCount, 0)} urgent`
+                      : ""}
+                  </div>
+                </div>
+
+                <div className="gk-metric-card">
+                  <div className="gk-metric-label">Verified Hours</div>
+                  <div className="gk-metric-value">{verifiedHours > 0 ? verifiedHours : "—"}</div>
+                  <div className="gk-metric-sub">Logged at check-out</div>
+                </div>
+
+                <div className="gk-metric-card">
+                  <div className="gk-metric-label">
+                    {normalizedStage === "live" ? "Currently on Site" : "Beneficiary Reach"}
+                  </div>
+                  <div className="gk-metric-value">
+                    {normalizedStage === "live"
+                      ? safeNumber(applicantCounts?.checkedInCount, 0) || "—"
+                      : safeNumber(detail?.beneficiary_count, 0) || "—"}
+                  </div>
+                  <div className="gk-metric-sub">
+                    {normalizedStage === "live"
+                      ? `Of ${approved} expected`
+                      : normalizedStage === "reported"
+                        ? `${safeNumber(detail?.beneficiary_equity_pct, 0)}% equity-deserving`
+                        : "Captured at close-out"}
+                  </div>
+                </div>
+              </div>
+
+              <div className={`gk-next-action-card stage-${normalizedStage}`}>
+                <div className="gk-next-action-icon">
+                  <i className="fas fa-star" aria-hidden="true"></i>
+                </div>
+                <div className="flex-grow-1">
+                  <div className="gk-next-action-label">{nextAction.label}</div>
+                  <div className="gk-next-action-title">{nextAction.title}</div>
+                  {nextAction.body ? (
+                    <div className="gk-next-action-body">{nextAction.body}</div>
+                  ) : null}
+                  {nextAction.cta ? (
+                    <div className="gk-next-action-btns">
+                      <button
+                        type="button"
+                        className={`btn btn-sm${normalizedStage === "recruiting" ? " gk-btn-coral" : " btn-outline-secondary"}`}
+                        onClick={nextAction.ctaAction || (() => {})}
+                      >
+                        {nextAction.cta}
+                        <i className="fas fa-arrow-right ms-1" aria-hidden="true"></i>
+                      </button>
+                      <button type="button" className="btn btn-sm btn-outline-secondary">
+                        Snooze
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="gk-opps-section">
+                <div className="gk-opps-header">
+                  <div>
+                    <span className="gk-opps-header-title">Opportunities</span>
+                    {roles.length > 0 ? (
+                      <span className="gk-opps-header-meta ms-2">
+                        {roles.length} role{roles.length !== 1 ? "s" : ""}
+                      </span>
+                    ) : null}
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-link p-0"
+                    style={{ color: "var(--gk-slate)" }}
+                    onClick={openCreateOpportunityModal}
+                  >
+                    + Add
+                  </button>
+                </div>
+
+                {roles.length === 0 ? (
+                  <div className="gk-empty py-3">
+                    <p className="mb-0 small">No roles yet. Add an opportunity to get started.</p>
+                  </div>
+                ) : (
+                  roles.map((role) => {
+                    const spotsFilled = safeNumber(role.spots_filled, 0);
+                    const spotsNeeded = safeNumber(role.spots_needed, 0);
+                    const dots = spotsNeeded > 0 ? Math.min(spotsNeeded, 6) : 4;
+                    const filledDots = spotsNeeded > 0
+                      ? Math.round((spotsFilled / spotsNeeded) * dots)
+                      : 0;
+                    const isFull = spotsNeeded > 0 && spotsFilled >= spotsNeeded;
+                    const isPartial = !isFull && filledDots > 0 && filledDots < dots;
+                    return (
+                      <div key={`role-${role.id}`} className="gk-role-row">
+                        <div className="flex-grow-1 min-w-0">
+                          <div className="gk-role-name">{role.title || "Untitled role"}</div>
+                          {role.requirements ? (
+                            <div className="gk-role-sub">{role.requirements}</div>
+                          ) : null}
+                        </div>
+                        <div className="gk-dot-row">
+                          {Array.from({ length: dots }).map((_, dotIdx) => {
+                            const isFilled = dotIdx < filledDots;
+                            const dotClass = isFilled
+                              ? isFull ? "filled full" : isPartial ? "filled partial" : "filled"
+                              : "";
+                            return <div key={dotIdx} className={`gk-dot${dotClass ? ` ${dotClass}` : ""}`} />;
+                          })}
+                        </div>
+                        <div className="gk-role-fraction">{spotsFilled}/{spotsNeeded}</div>
+                        <i
+                          className="fas fa-chevron-right"
+                          style={{ color: "var(--gk-text-muted)", fontSize: "0.8rem" }}
+                          aria-hidden="true"
+                        ></i>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            <div>
+              <div className="gk-card">
+                <div className="gk-workspace-sidebar-section">
+                  <div className="gk-workspace-sidebar-label">
+                    <i className="fas fa-circle-info" aria-hidden="true"></i> ABOUT
+                  </div>
+                  <div className="gk-sidebar-text">
+                    {detail?.description || "No description added yet."}
+                  </div>
+                </div>
+
+                {detail?.project_name ? (
+                  <div className="gk-workspace-sidebar-section">
+                    <div className="gk-workspace-sidebar-label">
+                      <i className="fas fa-folder" aria-hidden="true"></i> PARENT PROJECT
+                    </div>
+                    <div className="gk-card" style={{ background: "#f5f7fb" }}>
+                      <div className="fw-semibold" style={{ color: "var(--gk-slate)", fontSize: "0.9rem" }}>
+                        {detail.project_name}
+                      </div>
+                      {detail.program_name ? (
+                        <div className="small text-muted">{detail.program_name}</div>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+
+                {Array.isArray(detail?.languages) && detail.languages.length > 0 ? (
+                  <div className="gk-workspace-sidebar-section">
+                    <div className="gk-workspace-sidebar-label">
+                      <i className="fas fa-language" aria-hidden="true"></i> LANGUAGES
+                    </div>
+                    <div className="d-flex gap-2 flex-wrap">
+                      {detail.languages.map((lang) => (
+                        <span key={lang} className="badge text-bg-light border">{lang}</span>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
+                {Array.isArray(detail?.locations) && detail.locations.length > 0 ? (
+                  <div className="gk-workspace-sidebar-section">
+                    <div className="gk-workspace-sidebar-label">
+                      <i className="fas fa-location-dot" aria-hidden="true"></i> LOCATIONS
+                    </div>
+                    {detail.locations.map((loc, idx) => (
+                      <div key={idx} className="gk-sidebar-location-row">
+                        <span className="gk-sidebar-location-num">{idx + 1}</span>
+                        <span>{loc.name || loc.text || loc}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+
+                {Array.isArray(detail?.recent_activity) && detail.recent_activity.length > 0 ? (
+                  <div className="gk-workspace-sidebar-section">
+                    <div className="gk-workspace-sidebar-label">
+                      <i className="fas fa-clock-rotate-left" aria-hidden="true"></i> RECENT ACTIVITY
+                    </div>
+                    {detail.recent_activity.slice(0, 5).map((act, idx) => {
+                      const initials = String(act.name || "?")
+                        .split(" ")
+                        .map((w) => w[0])
+                        .join("")
+                        .slice(0, 2)
+                        .toUpperCase();
+                      return (
+                        <div key={idx} className="gk-sidebar-activity-row">
+                          <div className="gk-sidebar-activity-avatar">{initials}</div>
+                          <div>
+                            <div className="gk-sidebar-activity-text">
+                              {act.text || act.description || ""}
+                            </div>
+                            <div className="gk-sidebar-activity-time">{act.time_ago || ""}</div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
     );
   }
 
@@ -5664,6 +7302,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
     if (activeTab === "opportunities") return renderOpportunitiesQueue();
     if (activeTab === "schedule") return renderScheduleOverview();
     if (activeTab === "myevents") return renderMyEventsQueuePanel();
+    if (activeTab === "programsProjects") return renderProgramsPanel();
     if (activeTab === "checkin") return renderCheckinQueue();
     if (activeTab === "credits") return renderCreditsQueue();
     if (activeTab === "reports") return renderReportsFilters();
@@ -5672,9 +7311,13 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
   }
 
   function renderRightPanel() {
-    if (activeTab === "opportunities") return renderOpportunityDetail();
+    if (activeTab === "opportunities") {
+      if (selectedQueueItem) return renderEventWorkspace();
+      return renderEventsListView();
+    }
     if (activeTab === "schedule") return renderScheduleDashboard();
     if (activeTab === "myevents") return renderMyEventsDetail();
+    if (activeTab === "programsProjects") return renderProjectsPanel();
     if (activeTab === "checkin") return renderCheckinDetail();
     if (activeTab === "credits") return renderCreditsDetail();
     if (activeTab === "reports") return renderReportsDashboard();
@@ -5683,14 +7326,18 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
   }
 
   const isReportsTab = activeTab === "reports";
-  const leftColumnClass = isReportsTab ? "col-12 col-md-3" : "col-12 col-md-4";
-  const rightColumnClass = isReportsTab ? "col-12 col-md-9" : "col-12 col-md-8";
+  const isEventsListTab = activeTab === "opportunities" && !selectedQueueItem;
+  const isWorkspaceTab = activeTab === "opportunities" && Boolean(selectedQueueItem);
+  const leftColumnClass = isReportsTab ? "col-12 col-md-3" : (isEventsListTab || isWorkspaceTab) ? "d-none" : "col-12 col-md-4";
+  const rightColumnClass = isReportsTab ? "col-12 col-md-9" : (isEventsListTab || isWorkspaceTab) ? "col-12" : "col-12 col-md-8";
   const leftPanelTitle = isReportsTab
     ? "Filters"
     : activeTab === "schedule"
       ? "Schedule"
       : activeTab === "myevents"
         ? "Event Queue"
+        : activeTab === "programsProjects"
+          ? "Programs"
         : "Ops Queue";
   const rightPanelTitle = isReportsTab
     ? "Reports Dashboard"
@@ -5698,6 +7345,8 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
       ? "Coverage"
       : activeTab === "myevents"
         ? "Funding Detail"
+        : activeTab === "programsProjects"
+          ? "Projects"
         : "Detail Panel";
   const isDraftCancelIntent = Boolean(cancelModalTarget?.isDraft);
   const isForceCancelMode = forceCancelMode && !isDraftCancelIntent;
@@ -5738,7 +7387,7 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
       <div className="row g-3">
         <div className={leftColumnClass}>
           <section className="orgp-panel orgp-queue-panel">
-            <div className="d-flex align-items-center justify-content-between mb-2">
+            <div className={`d-flex align-items-center justify-content-between mb-2 ${activeTab === "programsProjects" ? "d-none" : ""}`}>
               <h2 className="orgp-panel-title mb-0">{leftPanelTitle}</h2>
               <div className="d-none" data-user-id={userId} data-csrf-token={csrfToken}></div>
             </div>
@@ -5748,7 +7397,21 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
 
         <div className={rightColumnClass}>
           <section className="orgp-panel orgp-detail-panel" ref={detailPanelRef}>
-            <h2 className="orgp-panel-title">{rightPanelTitle}</h2>
+            {activeTab === "programsProjects" ? null : (
+              <div className="orgp-panel-header">
+                <h2 className="orgp-panel-title mb-0">{rightPanelTitle}</h2>
+                {activeTab === "opportunities" ? (
+                  <button
+                    type="button"
+                    className="btn btn-sm orgp-btn-coral orgp-panel-action"
+                    onClick={openCreateOpportunityModal}
+                  >
+                    <i className="fas fa-plus me-1" aria-hidden="true"></i>
+                    New Opportunity
+                  </button>
+                ) : null}
+              </div>
+            )}
             {renderRightPanel()}
           </section>
         </div>
@@ -5774,6 +7437,295 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
                 aria-label="Dismiss"
                 onClick={() => setMyEventsToast(null)}
               ></button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {programsProjectsToast ? (
+        <div className="orgp-inline-toast-wrap">
+          <div
+            className={`alert py-2 px-3 mb-0 ${
+              programsProjectsToast.type === "success"
+                ? "alert-success"
+                : programsProjectsToast.type === "info"
+                  ? "alert-info"
+                  : "alert-warning"
+            }`}
+            role="status"
+          >
+            <div className="d-flex align-items-center justify-content-between gap-2">
+              <span>{programsProjectsToast.message}</span>
+              <button
+                type="button"
+                className="btn-close"
+                aria-label="Dismiss"
+                onClick={() => setProgramsProjectsToast(null)}
+              ></button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {programFormModal.open ? (
+        <div className="modal fade show d-block" tabIndex="-1" style={{ backgroundColor: "rgba(0,0,0,0.5)" }} role="dialog" aria-modal="true">
+          <div className="modal-dialog modal-lg modal-dialog-scrollable">
+            <form className="modal-content orgp-program-project-modal" onSubmit={submitProgramForm}>
+              <div className="modal-header">
+                <h5 className="modal-title">{programFormModal.mode === "edit" ? "Edit program" : "New program"}</h5>
+                <button type="button" className="btn-close" aria-label="Close" onClick={closeProgramFormModal} disabled={programFormModal.saving}></button>
+              </div>
+              <div className="modal-body">
+                <label className="form-label w-100">
+                  Name
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={programFormModal.values.name}
+                    onChange={(event) => updateProgramFormValue("name", event.target.value)}
+                    required
+                    autoFocus
+                  />
+                </label>
+                <label className="form-label w-100">
+                  Description
+                  <textarea
+                    className="form-control"
+                    rows="3"
+                    value={programFormModal.values.description}
+                    onChange={(event) => updateProgramFormValue("description", event.target.value)}
+                  ></textarea>
+                </label>
+                <label className="form-label w-100">
+                  Funder
+                  <input
+                    type="text"
+                    className="form-control"
+                    list="orgpProgramFunders"
+                    value={programFormModal.values.funder}
+                    onChange={(event) => updateProgramFormValue("funder", event.target.value)}
+                  />
+                </label>
+                <datalist id="orgpProgramFunders">
+                  {[...new Set(programs.map((program) => program.funder).filter(Boolean))].map((funder) => (
+                    <option key={`funder-${funder}`} value={funder} />
+                  ))}
+                </datalist>
+                <div className="row g-2">
+                  <div className="col-12 col-md-6">
+                    <label className="form-label w-100">
+                      Reporting period start
+                      <input
+                        type="date"
+                        className="form-control"
+                        value={programFormModal.values.reportingPeriodStart}
+                        onChange={(event) => updateProgramFormValue("reportingPeriodStart", event.target.value)}
+                      />
+                    </label>
+                  </div>
+                  <div className="col-12 col-md-6">
+                    <label className="form-label w-100">
+                      Reporting period end
+                      <input
+                        type="date"
+                        className="form-control"
+                        value={programFormModal.values.reportingPeriodEnd}
+                        onChange={(event) => updateProgramFormValue("reportingPeriodEnd", event.target.value)}
+                      />
+                    </label>
+                  </div>
+                </div>
+                <div className="orgp-section-label mt-2">Intended equity-deserving groups</div>
+                <div className="orgp-chip-grid">
+                  {PROGRAM_EQUITY_GROUPS.map((group) => (
+                    <label key={`equity-${group}`} className="orgp-check-chip">
+                      <input
+                        type="checkbox"
+                        checked={(programFormModal.values.intendedEquityGroups || []).includes(group)}
+                        onChange={() => toggleProgramEquityGroup(group)}
+                      />
+                      <span>{group}</span>
+                    </label>
+                  ))}
+                </div>
+                {programFormModal.error ? <div className="alert alert-warning py-2 mt-3 mb-0">{programFormModal.error}</div> : null}
+              </div>
+              <div className="modal-footer">
+                <button type="button" className="btn btn-outline-secondary" onClick={closeProgramFormModal} disabled={programFormModal.saving}>Cancel</button>
+                <button type="submit" className="btn orgp-btn-coral" disabled={programFormModal.saving}>
+                  {programFormModal.saving ? "Saving..." : "Save program"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+
+      {projectFormModal.open ? (
+        <div className="modal fade show d-block" tabIndex="-1" style={{ backgroundColor: "rgba(0,0,0,0.5)" }} role="dialog" aria-modal="true">
+          <div className="modal-dialog modal-lg modal-dialog-scrollable">
+            <form className="modal-content orgp-program-project-modal" onSubmit={submitProjectForm}>
+              <div className="modal-header">
+                <h5 className="modal-title">{projectFormModal.mode === "edit" ? "Edit project" : "New project"}</h5>
+                <button type="button" className="btn-close" aria-label="Close" onClick={closeProjectFormModal} disabled={projectFormModal.saving}></button>
+              </div>
+              <div className="modal-body">
+                <label className="form-label w-100">
+                  Name
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={projectFormModal.values.name}
+                    onChange={(event) => updateProjectFormValue("name", event.target.value)}
+                    required
+                    autoFocus
+                  />
+                </label>
+                <label className="form-label w-100">
+                  Program
+                  <select
+                    className="form-select"
+                    value={projectFormModal.values.programId}
+                    onChange={(event) => updateProjectFormValue("programId", event.target.value)}
+                  >
+                    <option value="">(no program)</option>
+                    {programs.map((program) => (
+                      <option key={`project-program-${program.id}`} value={program.id}>
+                        {program.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="form-label w-100">
+                  Description
+                  <textarea
+                    className="form-control"
+                    rows="3"
+                    value={projectFormModal.values.description}
+                    onChange={(event) => updateProjectFormValue("description", event.target.value)}
+                  ></textarea>
+                </label>
+                <div className="row g-2">
+                  <div className="col-12 col-md-6">
+                    <label className="form-label w-100">
+                      Start date
+                      <input
+                        type="date"
+                        className="form-control"
+                        value={projectFormModal.values.startDate}
+                        onChange={(event) => updateProjectFormValue("startDate", event.target.value)}
+                      />
+                    </label>
+                  </div>
+                  <div className="col-12 col-md-6">
+                    <label className="form-label w-100">
+                      End date
+                      <input
+                        type="date"
+                        className="form-control"
+                        value={projectFormModal.values.endDate}
+                        onChange={(event) => updateProjectFormValue("endDate", event.target.value)}
+                      />
+                    </label>
+                  </div>
+                </div>
+                <div className="orgp-section-label mt-2">Languages</div>
+                <div className="orgp-chip-grid mb-3">
+                  {PROJECT_LANGUAGE_OPTIONS.map((language) => (
+                    <label key={`language-${language}`} className="orgp-check-chip">
+                      <input
+                        type="checkbox"
+                        checked={(projectFormModal.values.languages || []).includes(language)}
+                        onChange={() => toggleProjectLanguage(language)}
+                      />
+                      <span>{language}</span>
+                    </label>
+                  ))}
+                </div>
+                <label className="form-label w-100">
+                  Partner organizations
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={projectFormModal.values.partnerOrgNames}
+                    onChange={(event) => updateProjectFormValue("partnerOrgNames", event.target.value)}
+                    placeholder="Comma-separated organization names"
+                  />
+                </label>
+                {projectFormModal.error ? <div className="alert alert-warning py-2 mt-3 mb-0">{projectFormModal.error}</div> : null}
+              </div>
+              <div className="modal-footer">
+                <button type="button" className="btn btn-outline-secondary" onClick={closeProjectFormModal} disabled={projectFormModal.saving}>Cancel</button>
+                <button type="submit" className="btn orgp-btn-coral" disabled={projectFormModal.saving}>
+                  {projectFormModal.saving ? "Saving..." : "Save project"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+
+      {projectLifecycleModal.open && projectLifecycleModal.project ? (
+        <div className="orgp-confirm-backdrop" role="presentation">
+          <div className="orgp-confirm-card shadow" role="dialog" aria-modal="true" aria-labelledby="orgpLifecycleTitle">
+            <h5 className="mb-2" id="orgpLifecycleTitle">Move {projectLifecycleModal.project.name || "project"} to which stage?</h5>
+            <div className="d-grid gap-2 my-3">
+              {PROJECT_LIFECYCLE_STAGES
+                .filter((stage) => stage !== projectLifecycleModal.project.lifecycle_stage)
+                .map((stage) => (
+                  <button
+                    key={`stage-option-${stage}`}
+                    type="button"
+                    className="btn btn-outline-secondary text-start"
+                    onClick={() => transitionProjectLifecycle(stage)}
+                    disabled={Boolean(projectLifecycleModal.savingStage)}
+                  >
+                    {projectLifecycleModal.savingStage === stage ? "Moving..." : PROJECT_LIFECYCLE_LABELS[stage]}
+                  </button>
+                ))}
+            </div>
+            {projectLifecycleModal.error ? <div className="alert alert-warning py-2 mb-3">{projectLifecycleModal.error}</div> : null}
+            <div className="d-flex justify-content-end">
+              <button
+                type="button"
+                className="btn btn-outline-secondary btn-sm"
+                onClick={() => setProjectLifecycleModal({ open: false, project: null, error: "", savingStage: "" })}
+                disabled={Boolean(projectLifecycleModal.savingStage)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {programsProjectsConfirm.open ? (
+        <div className="orgp-confirm-backdrop" role="presentation">
+          <div className="orgp-confirm-card shadow" role="dialog" aria-modal="true" aria-labelledby="orgpProgramsProjectsConfirmTitle">
+            <h5 className="mb-2" id="orgpProgramsProjectsConfirmTitle">
+              {programsProjectsConfirm.type === "program-delete"
+                ? `Delete program ${programsProjectsConfirm.item?.name || ""}?`
+                : `Delete project ${programsProjectsConfirm.item?.name || ""}?`}
+            </h5>
+            <p className="text-muted mb-3">This cannot be undone.</p>
+            {programsProjectsConfirm.error ? <div className="alert alert-warning py-2 mb-3">{programsProjectsConfirm.error}</div> : null}
+            <div className="d-flex justify-content-end gap-2">
+              <button
+                type="button"
+                className="btn btn-outline-secondary btn-sm"
+                onClick={() => setProgramsProjectsConfirm({ open: false, type: "", item: null, error: "", saving: false })}
+                disabled={programsProjectsConfirm.saving}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger btn-sm"
+                onClick={confirmProgramsProjectsDelete}
+                disabled={programsProjectsConfirm.saving}
+              >
+                {programsProjectsConfirm.saving ? "Deleting..." : "Delete"}
+              </button>
             </div>
           </div>
         </div>
@@ -6358,6 +8310,8 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
         </div>
       ) : null}
 
+      {renderCloseoutModal()}
+
       <div
         className="modal fade"
         id="orgpCommsConfirmModal"
@@ -6424,6 +8378,19 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
           font-size: 1.05rem;
           font-weight: 700;
           margin-bottom: 0.9rem;
+        }
+
+        .orgp-panel-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 0.75rem;
+          margin-bottom: 0.9rem;
+        }
+
+        .orgp-panel-action {
+          flex: 0 0 auto;
+          white-space: nowrap;
         }
 
         .orgp-tabs .nav-link {
@@ -6813,6 +8780,29 @@ function OrgPortal({ csrfToken = "", userId = "", orgName = "" }) {
 
         .orgp-my-ledger-amount.debit {
           color: #ff5656;
+        }
+
+        .orgp-chip-grid {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+        }
+
+        .orgp-check-chip {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          border: 1px solid #dfe8f5;
+          border-radius: 999px;
+          background: #fff;
+          color: #455a7c;
+          font-size: 0.9rem;
+          font-weight: 600;
+          padding: 7px 10px;
+        }
+
+        .orgp-check-chip input {
+          accent-color: #ff5656;
         }
 
         .orgp-inline-toast-wrap {

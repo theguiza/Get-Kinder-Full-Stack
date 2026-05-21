@@ -15,6 +15,7 @@ import DonorDashboard from "./donorDashboard.jsx";
 import DonatePage from "./donate.jsx";
 import AdminDashboard from "./adminDashboard.jsx";
 import { renderOrgPortal, renderKpiStrip } from "./orgPortal.jsx";
+import { renderOrgWorkspace } from "./orgWorkspace.jsx";
 
 const ROOTS = new WeakMap();
 
@@ -115,41 +116,7 @@ window.renderAdmin = (selector = "#admin-root", props = {}) => {
 
 window.renderOrgPortal = renderOrgPortal;
 window.renderKpiStrip = renderKpiStrip;
-
-// ---- Onboarding
-import OnboardingCards, { getDefaultSteps } from "./components/OnboardingCards.tsx";
-
-// Auto-boot if the page includes <div id="onboarding-root"></div>
-function bootOnboarding() {
-  const el = document.getElementById("onboarding-root");
-  if (!el) return;
-
-  const steps = getDefaultSteps(); // or load your own steps
-  const root = getOrCreateRoot(el);
-  root.render(
-    <OnboardingCards
-      steps={steps}
-      brand={{ productName: "Get Kinder AI", logoUrl: "/images/logo.png"}} 
-      // onComplete not required; component POSTs /api/onboarding/complete internally
-    />
-  );
-}
-
-if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", () => {
-    bootOnboarding();
-  }, { once: true });
-} else {
-  bootOnboarding();
-}
-
-// Optional manual helper to mount anywhere (used by the EJS fallback injector, if present)
-window.renderOnboarding = (selector = "#onboarding-root", props = {}) => {
-  const el = typeof selector === "string" ? document.querySelector(selector) : selector;
-  if (!el) return;
-  const root = getOrCreateRoot(el);
-  root.render(<OnboardingCards {...props} />);
-};
+window.renderOrgWorkspace = renderOrgWorkspace;
 
 function readPropsFromDom(id = "events-props") {
   const el = document.getElementById(id);

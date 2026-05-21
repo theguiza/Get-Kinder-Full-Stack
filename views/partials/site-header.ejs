@@ -4,11 +4,8 @@
   const currentUser = (typeof user !== "undefined" && user) ? user : null;
 
   const navItems = [
-    { key: "how-it-works", label: "How This Works", href: "/how-it-works" },
     { key: "events", label: "Volunteering", href: "/events" },
-    { key: "dashboard", label: "My Progress", href: "/dashboard" },
-    { key: "donor", label: "Donors", href: "/donor" },
-    { key: "org-portal", label: "Org Portal", href: "/org-portal", authOnly: true }
+    { key: "donor", label: "Donors", href: "/donor" }
   ];
 
   const visibleNavItems = navItems.filter((item) => !(item.authOnly && !currentUser));

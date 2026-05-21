@@ -58,11 +58,6 @@ async function columnExists(tableName, columnName) {
 }
 
 async function validateRoleAssignment({ client, eventId, roleId }) {
-  const normalizedRoleId = normalizeString(roleId);
-  if (!normalizedRoleId) {
-    return { roleId: null };
-  }
-
   const [supportsRoleId, hasRolesTable] = await Promise.all([
     columnExists("event_rsvps", "role_id"),
     tableExists("event_roles"),
@@ -77,9 +72,49 @@ async function validateRoleAssignment({ client, eventId, roleId }) {
     };
   }
 
+  const { rows: eventRoles } = await client.query(
+    `
+      SELECT id, event_id, spots_needed, spots_filled
+      FROM event_roles
+      WHERE event_id = $1
+      ORDER BY created_at ASC, id ASC
+      FOR UPDATE
+    `,
+    [eventId]
+  );
+  if (!eventRoles.length) {
+    return {
+      error: {
+        statusCode: 400,
+        code: "legacy_event_signups_closed",
+        error: "This event is not currently accepting new signups. Contact the organizer if you believe this is an error.",
+      },
+    };
+  }
+
+  const normalizedRoleId = normalizeString(roleId);
+  if (!normalizedRoleId) {
+    if (eventRoles.length === 1) {
+      // Single-role events can infer the role to keep the volunteer RSVP flow lightweight.
+      return { role: eventRoles[0], roleId: String(eventRoles[0].id) };
+    }
+    return {
+      error: {
+        statusCode: 400,
+        code: "role_id_required",
+        error: "This event has multiple roles. Please specify which role you're signing up for.",
+      },
+    };
+  }
+
+  const matchingRole = eventRoles.find((row) => String(row.id) === normalizedRoleId);
+  if (matchingRole) {
+    return { role: matchingRole, roleId: normalizedRoleId };
+  }
+
   const { rows: [roleRow] } = await client.query(
     `
-      SELECT id, event_id
+      SELECT id, event_id, spots_needed, spots_filled
       FROM event_roles
       WHERE id = $1
       LIMIT 1
@@ -106,7 +141,7 @@ async function validateRoleAssignment({ client, eventId, roleId }) {
     };
   }
 
-  return { roleId: normalizedRoleId };
+  return { role: roleRow, roleId: normalizedRoleId };
 }
 
 export function resolveAcceptedRsvpStatus(eventRow, acceptedCount) {
@@ -167,6 +202,30 @@ function mapServiceError({ statusCode, code = null, error }) {
   };
 }
 
+function shouldCountRoleSignup(status, noShow = false) {
+  const normalized = normalizeString(status).toLowerCase();
+  if (noShow === true) return false;
+  return normalized === "pending" || normalized === "accepted" || normalized === "checked_in" || normalized === "waitlisted";
+}
+
+async function incrementRoleSignup(client, roleId) {
+  if (!roleId) return null;
+  const { rows: [row] = [] } = await client.query(
+    "UPDATE event_roles SET spots_filled = spots_filled + 1 WHERE id = $1 RETURNING spots_filled",
+    [roleId]
+  );
+  return row?.spots_filled ?? null;
+}
+
+async function decrementRoleSignup(client, roleId) {
+  if (!roleId) return null;
+  const { rows: [row] = [] } = await client.query(
+    "UPDATE event_roles SET spots_filled = GREATEST(spots_filled - 1, 0) WHERE id = $1 RETURNING spots_filled",
+    [roleId]
+  );
+  return row?.spots_filled ?? null;
+}
+
 export async function applyEventRsvpAction({
   eventId,
   attendeeId,
@@ -216,18 +275,21 @@ export async function applyEventRsvpAction({
       return mapServiceError({ statusCode: 409, error: "Event has been cancelled" });
     }
 
-    const roleValidation = await validateRoleAssignment({
-      client,
-      eventId: normalizedEventId,
-      roleId,
-    });
-    if (roleValidation.error) {
-      await client.query("ROLLBACK");
-      return mapServiceError(roleValidation.error);
+    let roleValidation = { roleId: null, role: null };
+    if (normalizedAction === "accept") {
+      roleValidation = await validateRoleAssignment({
+        client,
+        eventId: normalizedEventId,
+        roleId,
+      });
+      if (roleValidation.error) {
+        await client.query("ROLLBACK");
+        return mapServiceError(roleValidation.error);
+      }
     }
-
+    const hasNoShow = await columnExists("event_rsvps", "no_show");
     const { rows: [existingRsvp] } = await client.query(
-      `SELECT status
+      `SELECT status, role_id${hasNoShow ? ", no_show" : ", FALSE AS no_show"}
          FROM event_rsvps
         WHERE event_id=$1
           AND attendee_user_id=$2
@@ -236,6 +298,8 @@ export async function applyEventRsvpAction({
       [normalizedEventId, normalizedAttendeeId]
     );
     const existingStatus = normalizeString(existingRsvp?.status).toLowerCase();
+    const existingRoleId = existingRsvp?.role_id ? String(existingRsvp.role_id) : null;
+    const existingRoleCounted = shouldCountRoleSignup(existingStatus, existingRsvp?.no_show === true);
     const seatReleased = normalizedAction === "decline" && isSeatTakingStatus(existingStatus);
 
     if (normalizedAction === "accept") {
@@ -271,14 +335,25 @@ export async function applyEventRsvpAction({
       const acceptedCount = Number(countRow?.accepted_count) || 0;
       const resolvedStatus = resolveAcceptedRsvpStatus(eventRow, acceptedCount);
       if (resolvedStatus.error) {
-        await client.query("ROLLBACK");
-        return mapServiceError({
-          statusCode: 409,
-          code: resolvedStatus.error,
-          error: resolvedStatus.message,
-        });
+        if (roleValidation.roleId) {
+          targetStatus = "pending";
+        } else {
+          await client.query("ROLLBACK");
+          return mapServiceError({
+            statusCode: 409,
+            code: resolvedStatus.error,
+            error: resolvedStatus.message,
+          });
+        }
+      } else {
+        targetStatus = resolvedStatus.status;
       }
-      targetStatus = resolvedStatus.status;
+      const roleIsFull = Number(roleValidation.role?.spots_filled) >= Number(roleValidation.role?.spots_needed);
+      let waitlistMessage = null;
+      if (roleIsFull) {
+        targetStatus = "pending";
+        waitlistMessage = "Role is full. You have been added to the waitlist.";
+      }
 
       if (roleValidation.roleId) {
         await client.query(
@@ -301,6 +376,15 @@ export async function applyEventRsvpAction({
           [normalizedEventId, normalizedAttendeeId, targetStatus]
         );
       }
+      const nextRoleCounted = shouldCountRoleSignup(targetStatus, false);
+      const nextRoleId = roleValidation.roleId || existingRoleId;
+      if (existingRoleCounted && existingRoleId && existingRoleId !== nextRoleId) {
+        await decrementRoleSignup(client, existingRoleId);
+      }
+      if (nextRoleCounted && nextRoleId && (!existingRoleCounted || existingRoleId !== nextRoleId)) {
+        await incrementRoleSignup(client, nextRoleId);
+      }
+      roleValidation.message = waitlistMessage;
     } else {
       if (requireExistingForDecline && !existingStatus) {
         await client.query("ROLLBACK");
@@ -329,6 +413,9 @@ export async function applyEventRsvpAction({
           [normalizedEventId, normalizedAttendeeId]
         );
       }
+      if (existingRoleCounted && existingRoleId) {
+        await decrementRoleSignup(client, existingRoleId);
+      }
     }
 
     if (seatReleased) {
@@ -347,7 +434,8 @@ export async function applyEventRsvpAction({
         counts: snapshot.counts,
         message: normalizedAction === "accept" && nextStatus === "waitlisted"
           ? "Event is full. You have been added to the waitlist."
-          : null,
+          : roleValidation.message || null,
+        role_id: roleValidation.roleId || existingRoleId || null,
         event: {
           id: eventRow.id,
           title: eventRow.title,

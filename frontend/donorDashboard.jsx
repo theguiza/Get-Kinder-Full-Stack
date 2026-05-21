@@ -210,7 +210,7 @@ function EmptyState() {
       </a>
       <div style={styles.emptyLinks}>
         <a href="/events" style={styles.emptyLink}>Browse events</a>
-        <a href="/how-it-works" style={styles.emptyLink}>How it works</a>
+        <a href="/home" style={styles.emptyLink}>Home</a>
         <span
           style={{ ...styles.emptyLink, cursor: "pointer" }}
           onClick={() => document.getElementById("gk-claim-section")?.scrollIntoView({ behavior: "smooth" })}

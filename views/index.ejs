@@ -104,8 +104,8 @@ Sign up today to be a founding contributor: get first access, exclusive rewards,
           <a class="btn btn-primary2 custom-hover fw-bold p-2" href="/login" style="font-size: 1.1rem; color: aliceblue;">
             Sign Up Now
           </a>
-          <a class="btn btn-primary2 custom-hover fw-bold p-2" href="/how-it-works" style="font-size: 1.1rem; color: aliceblue;">
-            See How it Works
+          <a class="btn btn-primary2 custom-hover fw-bold p-2" href="/events" style="font-size: 1.1rem; color: aliceblue;">
+            Find Opportunities
           </a>
         </div>
       </div>
@@ -198,7 +198,7 @@ Post your opportunity, match with verified volunteers, and confirm attendance in
         <h2 class="h2 fw-bold mb-3" data-aos="fade-up" data-aos-delay="80" style="color:#455a7c;">Your time and money builds your communities—that impact deserves rewards & recognition.</h2>
         <p class="text-secondary mb-4" data-aos="fade-up" data-aos-delay="140">
 Every skill you share, every project you complete, every donation you make earns you rewards and recognition. Track your contribution streak, level up your impact profile, and access exclusive experiences, rewards, and partnerships. The more you invest in your community, the more your community invests in you—with rewards that actually matter.</p>
-        <a href="/how-it-works" class="btn btn-primary2 custom-hover" data-aos="fade-up" data-aos-delay="200">See How It Works</a>
+        <a href="/events" class="btn btn-primary2 custom-hover" data-aos="fade-up" data-aos-delay="200">Find Opportunities</a>
       </div>
     </div>
   </div>
@@ -458,43 +458,6 @@ Every skill you share, every project you complete, every donation you make earns
   <!-- HubSpot (can stay last) -->
   <script type="text/javascript" id="hs-script-loader" async defer src="//js-na3.hs-scripts.com/342094649.js">
   </script>
-
-<% if (!onboardingDone) { %>
-  <div id="onboarding-root"></div>
-  <script>
-    (function () {
-      // If the bundle tag isn't on the page, inject it and mount on load.
-      var hasBundle = Array.prototype.some.call(document.scripts, function (s) {
-        return (s.src || '').indexOf('/js/bundles/entry.js') !== -1;
-      });
-
-      function mount() {
-        if (window.renderOnboarding) {
-          // If helper exists, mount explicitly
-          window.renderOnboarding('#onboarding-root');
-        }
-        // If there’s auto-boot code in the bundle, it will mount on its own.
-      }
-
-      if (!hasBundle) {
-        var s = document.createElement('script');
-        s.src = '/js/bundles/entry.js?v=' + Date.now(); // cache bust
-        s.defer = true;
-        s.onload = mount;
-        s.onerror = function () {
-          console.error('Onboarding bundle failed to load:', s.src);
-        };
-        document.body.appendChild(s);
-      } else {
-        if (document.readyState === 'loading') {
-          document.addEventListener('DOMContentLoaded', mount, { once: true });
-        } else {
-          mount();
-        }
-      }
-    })();
-  </script>
-<% } %>
 
   <!-- AOS (Animate On Scroll) -->
   <script src="https://unpkg.com/aos@2.3.1/dist/aos.js"></script>

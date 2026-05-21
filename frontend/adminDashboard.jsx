@@ -2251,8 +2251,7 @@ export default function AdminDashboard() {
                                   type="button"
                                   className="btn btn-outline-secondary btn-sm"
                                   onClick={() => {
-                                    const targetUrl = `/org-portal?orgId=${encodeURIComponent(String(org.id))}`;
-                                    window.open(targetUrl, "_blank", "noopener,noreferrer");
+                                    window.open("/home", "_blank", "noopener,noreferrer");
                                   }}
                                 >
                                   View
