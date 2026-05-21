@@ -15,6 +15,7 @@ import { hasUserOrgMembershipTable, resolveOrgScope } from "../services/orgScope
 import { promoteWaitlistedAttendees } from "../services/waitlistService.js";
 import { applyEventRsvpAction, getEventRsvpSnapshot } from "../services/eventRsvpService.js";
 import { buildEventCalendarInvite } from "../services/eventCalendarService.js";
+import { isAdminRequest } from "../Backend/middleware/ensureAdmin.js";
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
@@ -22,6 +23,7 @@ const VISIBILITY_SET = new Set(["public", "fof", "private"]);
 const STATUS_SET = new Set(["draft", "published"]);
 const ATTENDANCE_SET = new Set(["host_code", "social_proof", "geo"]);
 const VERIFICATION_METHOD_SET = new Set(["host_attest", "qr_stub", "social_proof"]);
+const ROLE_TIER_SET = new Set(["standard", "skilled", "specialist", "leadership"]);
 const INVITE_ALLOWED_EVENT_STATUSES = new Set(["published", "draft"]);
 const INVITE_ELIGIBLE_STATUSES = new Set(["accepted", "checked_in"]);
 const INVITE_APPROVAL_REQUIRED_MESSAGE = "You can send this message after you have been approved";
@@ -261,6 +263,68 @@ async function resolveSessionUserId(req) {
 async function resolveHostUserIds(req) {
   const scope = await getHostScope(req);
   return scope.memberUserIds;
+}
+
+async function resolveEventCreatorContext(req, body = {}) {
+  const userId = await resolveUserId(req);
+  if (!userId) {
+    return { error: { statusCode: 401, message: "Unauthorized" } };
+  }
+
+  const { rows: [userRow] = [] } = await pool.query(
+    "SELECT id, org_id, org_rep, is_admin FROM public.userdata WHERE id = $1 LIMIT 1",
+    [userId]
+  );
+  const isAdmin = userRow?.is_admin === true || isAdminRequest(req);
+  const isOrgRep = userRow?.org_rep === true;
+
+  if (isAdmin) {
+    const organizationIdRaw = body.organizationId ?? body.organization_id ?? body.orgId ?? body.org_id;
+    const organizationId = Number(organizationIdRaw);
+    if (!Number.isInteger(organizationId) || organizationId <= 0) {
+      return { error: { statusCode: 400, message: "organizationId is required when an admin creates an event." } };
+    }
+    const { rows: [orgRow] = [] } = await pool.query(
+      "SELECT id, name, rep_user_id FROM public.organizations WHERE id = $1 LIMIT 1",
+      [organizationId]
+    );
+    if (!orgRow) {
+      return { error: { statusCode: 404, message: "Organization not found." } };
+    }
+    if (!orgRow.rep_user_id) {
+      return { error: { statusCode: 400, message: "Organization is missing a representative user." } };
+    }
+    return {
+      creatorUserId: String(orgRow.rep_user_id),
+      organizationId: Number(orgRow.id),
+      orgName: orgRow.name || null,
+    };
+  }
+
+  if (!isOrgRep) {
+    return { error: { statusCode: 403, message: "Organization representative access required." } };
+  }
+
+  const scope = await resolveOrgScope(req, {
+    allowAdminPreview: false,
+    includeOrgMembersForOrgRep: false,
+  });
+  const orgId = scope?.orgId || userRow?.org_id;
+  if (!orgId) {
+    return { error: { statusCode: 400, message: "Event creation requires an organization context." } };
+  }
+  const { rows: [orgRow] = [] } = await pool.query(
+    "SELECT id, name FROM public.organizations WHERE id = $1 LIMIT 1",
+    [orgId]
+  );
+  if (!orgRow) {
+    return { error: { statusCode: 404, message: "Organization not found." } };
+  }
+  return {
+    creatorUserId: String(userId),
+    organizationId: Number(orgRow.id),
+    orgName: orgRow.name || null,
+  };
 }
 
 async function attachViewerRsvpStatuses(req, events) {
@@ -1142,12 +1206,14 @@ export async function respondToEventRsvp(req, res) {
     const eventId = req.params.id;
     const action = (req.body?.action || "").toLowerCase();
     const reason = sanitizeString(req.body?.reason) || null;
+    const roleId = req.body?.roleId ?? req.body?.role_id ?? null;
     const requireExistingForDecline = req.body?.require_existing === true;
     const result = await applyEventRsvpAction({
       eventId,
       attendeeId,
       action,
       hostUserIds,
+      roleId,
       reason,
       requireExistingForDecline,
     });
@@ -1194,6 +1260,7 @@ export async function respondToEventRsvp(req, res) {
       ok: true,
       data: {
         status: result.data.status,
+        ...(result.data.role_id ? { role_id: result.data.role_id } : {}),
         rsvp_counts: result.data.counts,
         ...(result.data.message ? { message: result.data.message } : {}),
       },
@@ -1408,6 +1475,12 @@ export async function markEventNoShow(req, res) {
       `,
       [eventId, attendeeUserId]
     );
+    if (rsvpRow.role_id) {
+      await client.query(
+        "UPDATE public.event_roles SET spots_filled = GREATEST(spots_filled - 1, 0) WHERE id = $1 RETURNING spots_filled",
+        [rsvpRow.role_id]
+      );
+    }
 
     await client.query("COMMIT");
     return res.json({
@@ -2537,6 +2610,7 @@ async function buildEventPayload(body, { strict = false, fallback = {} } = {}) {
   const rewardPoolRaw = body.reward_pool_kind ?? base.reward_pool_kind ?? 0;
   const rewardPool = Number.isFinite(Number(rewardPoolRaw)) ? Math.max(0, Number(rewardPoolRaw)) : 0;
   const safetyNotes = sanitizeString(body.safety_notes ?? base.safety_notes) || null;
+  const projectId = sanitizeString(body.project_id ?? body.projectId ?? base.project_id) || null;
   const orgName = sanitizeString(body.org_name ?? base.org_name) || null;
   if (!orgName) throw buildValidationError("Organization is required.");
   const communityTag = sanitizeString(body.community_tag ?? base.community_tag) || null;
@@ -2610,21 +2684,73 @@ async function buildEventPayload(body, { strict = false, fallback = {} } = {}) {
     funding_pool_slug: fundingPoolSlug,
     attendance_methods: attendanceMethods,
     safety_notes: safetyNotes,
+    project_id: projectId,
   };
 }
 
+function normalizeEventRoles(rawRoles) {
+  if (!Array.isArray(rawRoles)) {
+    throw buildValidationError("At least one role is required.");
+  }
+  if (!rawRoles.length) {
+    throw buildValidationError("At least one role is required.");
+  }
+
+  return rawRoles.map((role, index) => {
+    const title = sanitizeString(role?.title);
+    if (!title) {
+      throw buildValidationError(`Role ${index + 1} title is required.`);
+    }
+
+    const spotsNeeded = Number(role?.spotsNeeded ?? role?.spots_needed);
+    if (!Number.isInteger(spotsNeeded) || spotsNeeded < 1) {
+      throw buildValidationError(`Role ${index + 1} spotsNeeded must be at least 1.`);
+    }
+
+    const tierInput = sanitizeString(role?.tier).toLowerCase();
+    return {
+      title,
+      description: sanitizeString(role?.description) || null,
+      spots_needed: spotsNeeded,
+      tier: ROLE_TIER_SET.has(tierInput) ? tierInput : "standard",
+      requirements: sanitizeString(role?.requirements) || null,
+      safety_notes: sanitizeString(role?.safetyNotes ?? role?.safety_notes) || null,
+    };
+  });
+}
+
 export async function createEvent(req, res) {
+  let client = null;
   try {
-    const ownerId = await resolveUserId(req);
     const body = req.body || {};
     const status = STATUS_SET.has(body.status) ? body.status : "draft";
     const strict = status === "published";
+    const creatorContext = await resolveEventCreatorContext(req, body);
+    if (creatorContext.error) {
+      return res.status(creatorContext.error.statusCode).json({
+        ok: false,
+        error: creatorContext.error.message,
+      });
+    }
 
-    const payload = await buildEventPayload(body, { strict });
+    const roles = normalizeEventRoles(body.roles);
+    const roleCapacity = roles.reduce((sum, role) => sum + role.spots_needed, 0);
+    const payload = await buildEventPayload(
+      {
+        ...body,
+        org_name: body.org_name ?? creatorContext.orgName,
+        capacity: roleCapacity,
+      },
+      { strict }
+    );
+    // Capacity is derived from role demand so org reps do not have to keep two fields in sync.
+    payload.capacity = roleCapacity;
     const locationLat = parseFloat(body.location_lat) || null;
     const locationLng = parseFloat(body.location_lng) || null;
 
-    const { rows } = await pool.query(
+    client = await pool.connect();
+    await client.query("BEGIN");
+    const { rows } = await client.query(
       `
         INSERT INTO events (
           creator_user_id,
@@ -2652,14 +2778,15 @@ export async function createEvent(req, res) {
           funding_pool_slug,
           attendance_methods,
           safety_notes,
+          project_id,
           status
         ) VALUES (
-          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::text[],$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26
+          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::text[],$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27
         )
-        RETURNING id, status
+        RETURNING id, creator_user_id, title, status, capacity, project_id
       `,
       [
-        ownerId,
+        creatorContext.creatorUserId,
         payload.title,
         payload.category,
         payload.start_at,
@@ -2684,11 +2811,53 @@ export async function createEvent(req, res) {
         payload.funding_pool_slug,
         JSON.stringify(payload.attendance_methods),
         payload.safety_notes,
+        payload.project_id,
         status,
       ]
     );
-    return res.status(201).json({ ok: true, data: rows[0] });
+
+    const eventRow = rows[0];
+    const createdRoles = [];
+    for (const role of roles) {
+      const { rows: [roleRow] = [] } = await client.query(
+        `
+          INSERT INTO public.event_roles (
+            event_id,
+            project_id,
+            title,
+            description,
+            tier,
+            spots_needed,
+            spots_filled,
+            requirements,
+            safety_notes
+          ) VALUES (
+            $1,$2,$3,$4,$5,$6,0,$7,$8
+          )
+          RETURNING id, event_id, project_id, title, description, tier, spots_needed, spots_filled, requirements, safety_notes
+        `,
+        [
+          eventRow.id,
+          eventRow.project_id,
+          role.title,
+          role.description,
+          role.tier,
+          role.spots_needed,
+          role.requirements,
+          role.safety_notes,
+        ]
+      );
+      createdRoles.push(roleRow);
+    }
+
+    await client.query("COMMIT");
+    return res.status(201).json({ ok: true, data: { event: eventRow, roles: createdRoles } });
   } catch (error) {
+    if (client) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {}
+    }
     console.error("[eventsApi] createEvent error:", error);
     if (error?.statusCode === 400) {
       return res.status(400).json({ ok: false, error: error.message });
@@ -2699,5 +2868,7 @@ export async function createEvent(req, res) {
         .json({ ok: false, error: "Events table is missing. Please run migrations." });
     }
     return res.status(500).json({ ok: false, error: "Unable to create event" });
+  } finally {
+    if (client) client.release();
   }
 }

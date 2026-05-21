@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="csrf-token" content="<%= typeof csrfToken !== 'undefined' ? csrfToken : '' %>">
+  <title>Admin | Event Assignment</title>
+  <link rel="icon" href="/images/favicon.png" sizes="32x32" type="image/png">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-SgOJa3DmI69IUzQ2PVdRZhwQ+dy64/BUtbMJw1MZ8t5HZApcHrRKUc4W0kG879m7" crossorigin="anonymous">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="/css/style.css">
+  <style>
+    body {
+      background: #f5f7fb;
+      color: #26364f;
+      padding-top: clamp(88px, 14vw, 112px);
+    }
+    .event-assignment-shell {
+      width: min(1500px, calc(100vw - 32px));
+      margin: 0 auto;
+    }
+    .event-assignment-heading {
+      color: #455a7c;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+    .assignment-panel {
+      background: #fff;
+      border: 1px solid #dfe8f5;
+      border-radius: 8px;
+      box-shadow: 0 1px 2px rgba(38, 54, 79, 0.06);
+    }
+    .assignment-panel-header {
+      border-bottom: 1px solid #edf2f8;
+      padding: 14px 16px;
+    }
+    .assignment-panel-body {
+      padding: 16px;
+    }
+    .assignment-label {
+      color: #455a7c;
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .assignment-stat-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .assignment-stat {
+      border: 1px solid #edf2f8;
+      border-radius: 8px;
+      padding: 10px;
+      min-height: 74px;
+      background: #fafcff;
+    }
+    .assignment-stat-value {
+      color: #ff5656;
+      font-weight: 700;
+      font-size: 1.25rem;
+      line-height: 1.1;
+    }
+    .assignment-stat-label {
+      color: #5d6f8b;
+      font-size: 0.82rem;
+      margin-top: 4px;
+    }
+    .assignment-btn-primary {
+      background: #ff5656;
+      border-color: #ff5656;
+      color: #fff;
+    }
+    .assignment-btn-primary:hover,
+    .assignment-btn-primary:focus {
+      background: #f04c4c;
+      border-color: #f04c4c;
+      color: #fff;
+    }
+    .assignment-toolbar {
+      display: grid;
+      grid-template-columns: minmax(220px, 1.3fr) minmax(220px, 1fr) auto auto;
+      gap: 10px;
+      align-items: end;
+    }
+    .assignment-table-wrap {
+      max-height: 68vh;
+      overflow: auto;
+    }
+    .assignment-table {
+      min-width: 980px;
+    }
+    .assignment-table th {
+      background: #f8fbff;
+      color: #455a7c;
+      font-size: 0.78rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+    .assignment-table td,
+    .assignment-table th {
+      vertical-align: middle;
+    }
+    .assignment-table .event-title {
+      color: #26364f;
+      font-weight: 700;
+      text-decoration: none;
+    }
+    .assignment-table .event-title:hover,
+    .assignment-link:hover {
+      color: #ff5656;
+    }
+    .assignment-row-selected {
+      background: #fff7f7;
+    }
+    .assignment-project-pill {
+      display: inline-flex;
+      align-items: center;
+      max-width: 260px;
+      border: 1px solid #dfe8f5;
+      border-radius: 999px;
+      padding: 3px 9px;
+      color: #455a7c;
+      background: #fff;
+      font-size: 0.84rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .assignment-project-pill.unassigned {
+      border-color: #f1d5d5;
+      color: #9a4444;
+      background: #fff7f7;
+    }
+    .assignment-empty {
+      padding: 40px 16px;
+      text-align: center;
+      color: #5d6f8b;
+    }
+    .assignment-inline-meta {
+      color: #6b7b94;
+      font-size: 0.88rem;
+    }
+    .assignment-selected-count {
+      min-width: 128px;
+      color: #455a7c;
+      font-weight: 700;
+      text-align: right;
+    }
+    @media (max-width: 991.98px) {
+      .event-assignment-shell {
+        width: min(100%, calc(100vw - 24px));
+      }
+      .assignment-toolbar {
+        grid-template-columns: 1fr;
+      }
+      .assignment-selected-count {
+        text-align: left;
+      }
+    }
+    @media (max-width: 767.98px) {
+      .assignment-stat-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <%- include("partials/site-header", { currentPage: "admin" }) %>
+
+  <main class="event-assignment-shell py-4">
+    <header class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+      <div>
+        <h1 class="event-assignment-heading mb-1">Event Assignment</h1>
+        <p class="text-muted mb-0">Create program/project records and bulk-assign existing organization events.</p>
+      </div>
+      <a class="btn btn-outline-secondary" href="/admin">
+        <i class="fas fa-arrow-left me-1" aria-hidden="true"></i>
+        Admin
+      </a>
+    </header>
+
+    <div id="assignmentAlert" class="alert d-none" role="alert"></div>
+
+    <section class="row g-3 mb-3" aria-label="Assignment setup">
+      <div class="col-12 col-xl-4">
+        <div class="assignment-panel h-100">
+          <div class="assignment-panel-header">
+            <div class="assignment-label">Organization</div>
+          </div>
+          <div class="assignment-panel-body">
+            <label class="form-label" for="orgSelect">Filter events by organization</label>
+            <select id="orgSelect" class="form-select"></select>
+            <div id="orgSummary" class="assignment-inline-meta mt-2"></div>
+            <div class="assignment-stat-grid mt-3">
+              <div class="assignment-stat">
+                <div id="statEvents" class="assignment-stat-value">0</div>
+                <div class="assignment-stat-label">Events</div>
+              </div>
+              <div class="assignment-stat">
+                <div id="statUnassigned" class="assignment-stat-value">0</div>
+                <div class="assignment-stat-label">Unassigned</div>
+              </div>
+              <div class="assignment-stat">
+                <div id="statProjects" class="assignment-stat-value">0</div>
+                <div class="assignment-stat-label">Projects</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-12 col-xl-4">
+        <form id="programForm" class="assignment-panel h-100">
+          <div class="assignment-panel-header">
+            <div class="assignment-label">Create Program</div>
+          </div>
+          <div class="assignment-panel-body">
+            <label class="form-label" for="programName">Program name</label>
+            <input id="programName" class="form-control mb-2" name="name" type="text" maxlength="255" placeholder="OARCA 2026 Season" required>
+            <label class="form-label" for="programFunder">Funder</label>
+            <input id="programFunder" class="form-control mb-2" name="funder" type="text" maxlength="255">
+            <div class="row g-2 mb-3">
+              <div class="col-6">
+                <label class="form-label" for="programStart">Reporting start</label>
+                <input id="programStart" class="form-control" name="reportingPeriodStart" type="date">
+              </div>
+              <div class="col-6">
+                <label class="form-label" for="programEnd">Reporting end</label>
+                <input id="programEnd" class="form-control" name="reportingPeriodEnd" type="date">
+              </div>
+            </div>
+            <button id="createProgramBtn" class="btn assignment-btn-primary w-100" type="submit">
+              <i class="fas fa-plus me-1" aria-hidden="true"></i>
+              Create Program
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <div class="col-12 col-xl-4">
+        <form id="projectForm" class="assignment-panel h-100">
+          <div class="assignment-panel-header">
+            <div class="assignment-label">Create Project</div>
+          </div>
+          <div class="assignment-panel-body">
+            <label class="form-label" for="projectProgram">Program</label>
+            <select id="projectProgram" class="form-select mb-2" name="programId"></select>
+            <label class="form-label" for="projectName">Project name</label>
+            <input id="projectName" class="form-control mb-2" name="name" type="text" maxlength="255" placeholder="Cadborosaurus Coastal Endurance Regatta" required>
+            <div class="row g-2 mb-3">
+              <div class="col-6">
+                <label class="form-label" for="projectStart">Start</label>
+                <input id="projectStart" class="form-control" name="startDate" type="date">
+              </div>
+              <div class="col-6">
+                <label class="form-label" for="projectEnd">End</label>
+                <input id="projectEnd" class="form-control" name="endDate" type="date">
+              </div>
+            </div>
+            <button id="createProjectBtn" class="btn assignment-btn-primary w-100" type="submit">
+              <i class="fas fa-folder-plus me-1" aria-hidden="true"></i>
+              Create Project
+            </button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <section class="assignment-panel mb-3" aria-label="Bulk assignment controls">
+      <div class="assignment-panel-body">
+        <div class="assignment-toolbar">
+          <div>
+            <label class="form-label" for="eventSearch">Search events</label>
+            <input id="eventSearch" class="form-control" type="search" placeholder="Title, host, location, project">
+          </div>
+          <div>
+            <label class="form-label" for="assignmentProject">Assign selected to project</label>
+            <select id="assignmentProject" class="form-select"></select>
+          </div>
+          <div class="form-check mb-2">
+            <input id="unassignedOnly" class="form-check-input" type="checkbox">
+            <label class="form-check-label" for="unassignedOnly">Unassigned only</label>
+          </div>
+          <div class="d-flex align-items-center justify-content-between gap-3">
+            <div id="selectedCount" class="assignment-selected-count">0 selected</div>
+            <button id="assignBtn" class="btn assignment-btn-primary" type="button">
+              <i class="fas fa-link me-1" aria-hidden="true"></i>
+              Assign
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="assignment-panel" aria-label="Existing events">
+      <div class="assignment-panel-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <div>
+          <div class="assignment-label">Existing Events</div>
+          <div id="eventListSummary" class="assignment-inline-meta"></div>
+        </div>
+        <button id="refreshBtn" class="btn btn-outline-secondary btn-sm" type="button">
+          <i class="fas fa-sync-alt me-1" aria-hidden="true"></i>
+          Refresh
+        </button>
+      </div>
+      <div class="assignment-table-wrap">
+        <table class="table table-hover align-middle mb-0 assignment-table">
+          <thead>
+            <tr>
+              <th scope="col" style="width:48px;">
+                <input id="selectVisible" class="form-check-input" type="checkbox" aria-label="Select visible events">
+              </th>
+              <th scope="col">Event</th>
+              <th scope="col">Date</th>
+              <th scope="col">Current Project</th>
+              <th scope="col">Host</th>
+              <th scope="col">Volunteers</th>
+            </tr>
+          </thead>
+          <tbody id="eventsBody">
+            <tr>
+              <td colspan="6" class="assignment-empty">Loading events...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <section id="footer" class="gradient-background">
+    <div class="container">
+      <footer class="row align-items-center py-5 mt-5 border-top text-body-secondary">
+        <div class="col-12 col-md-4 mb-4 mb-md-0 text-center text-md-start">
+          <a href="/home">
+            <img src="/images/heart3D.png" alt="Get Kinder Heart" height="150">
+          </a>
+          <p class="mt-2">
+            &copy;
+            <a href="https://getkindr.com/" target="_blank" rel="noopener noreferrer" class="text-body-secondary text-decoration-underline">
+              Get Kindr Foundation
+            </a>
+          </p>
+        </div>
+        <div class="col-12 col-md-4 mb-4 mb-md-0 d-flex justify-content-center">
+          <a class="btn btn-floating m-1 text-white" style="background-color: #3b5998;" href="https://www.facebook.com/profile.php?id=61576860759313" role="button" target="_blank" rel="noopener noreferrer">
+            <i class="fab fa-facebook-f"></i>
+          </a>
+          <a class="btn btn-floating m-1 text-white" style="background-color: #ac2bac;" href="https://www.instagram.com/getkinder/" role="button" target="_blank" rel="noopener noreferrer">
+            <i class="fab fa-instagram"></i>
+          </a>
+          <a class="btn btn-floating m-1 text-white" style="background-color: #0082ca;" href="https://www.linkedin.com/company/getkindrfoundation/" role="button" target="_blank" rel="noopener noreferrer">
+            <i class="fab fa-linkedin-in"></i>
+          </a>
+          <a class="btn btn-floating m-1 text-white" style="background-color: #c8232c;" href="https://ca.pinterest.com/getkindr/" role="button" target="_blank" rel="noopener noreferrer">
+            <i class="fab fa-pinterest"></i>
+          </a>
+        </div>
+        <div class="col-12 col-md-4 mb-4 mb-md-0 text-center text-md-end">
+          <h5>More About Get Kinder</h5>
+          <ul class="nav flex-column">
+            <li class="nav-item mb-2"><a href="/home" class="nav-link p-0 text-body-secondary">Home</a></li>
+            <li class="nav-item mb-2"><a href="/about" class="nav-link p-0 text-body-secondary">About</a></li>
+            <li class="nav-item mb-2"><a href="/contact" class="nav-link p-0 text-body-secondary">Contact</a></li>
+            <li class="nav-item mb-2"><a href="/privacy" class="nav-link p-0 text-body-secondary">Privacy</a></li>
+            <li class="nav-item mb-2"><a href="/terms" class="nav-link p-0 text-body-secondary">Terms</a></li>
+            <li class="nav-item mb-2"><a href="/accessibility" class="nav-link p-0 text-body-secondary">Accessibility</a></li>
+          </ul>
+        </div>
+      </footer>
+    </div>
+  </section>
+
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute("content") || "";
+      const state = {
+        organizations: [],
+        selectedOrgId: null,
+        programs: [],
+        projects: [],
+        events: [],
+        selectedEventIds: new Set(),
+        assignmentProjectId: "",
+        projectProgramId: "",
+        search: "",
+        unassignedOnly: false
+      };
+
+      const els = {
+        alert: document.getElementById("assignmentAlert"),
+        orgSelect: document.getElementById("orgSelect"),
+        orgSummary: document.getElementById("orgSummary"),
+        statEvents: document.getElementById("statEvents"),
+        statUnassigned: document.getElementById("statUnassigned"),
+        statProjects: document.getElementById("statProjects"),
+        programForm: document.getElementById("programForm"),
+        projectForm: document.getElementById("projectForm"),
+        projectProgram: document.getElementById("projectProgram"),
+        assignmentProject: document.getElementById("assignmentProject"),
+        eventSearch: document.getElementById("eventSearch"),
+        unassignedOnly: document.getElementById("unassignedOnly"),
+        selectedCount: document.getElementById("selectedCount"),
+        assignBtn: document.getElementById("assignBtn"),
+        refreshBtn: document.getElementById("refreshBtn"),
+        selectVisible: document.getElementById("selectVisible"),
+        eventsBody: document.getElementById("eventsBody"),
+        eventListSummary: document.getElementById("eventListSummary"),
+        createProgramBtn: document.getElementById("createProgramBtn"),
+        createProjectBtn: document.getElementById("createProjectBtn")
+      };
+
+      function escapeHtml(value) {
+        return String(value ?? "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      }
+
+      function showAlert(type, message) {
+        els.alert.className = "alert alert-" + type;
+        els.alert.textContent = message;
+        els.alert.classList.remove("d-none");
+      }
+
+      function hideAlert() {
+        els.alert.classList.add("d-none");
+        els.alert.textContent = "";
+      }
+
+      function formatDate(value) {
+        if (!value) return "Date not set";
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return "Date not set";
+        return date.toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+          hour: "numeric",
+          minute: "2-digit"
+        });
+      }
+
+      function projectLabel(project) {
+        const programName = project.program_name ? project.program_name + " / " : "";
+        const count = Number(project.event_count) || 0;
+        return programName + (project.name || "Untitled project") + " (" + count + " events)";
+      }
+
+      function eventSearchText(event) {
+        return [
+          event.title,
+          event.status,
+          event.location_text,
+          event.project_name,
+          event.program_name,
+          event.host_name,
+          event.host_email
+        ].join(" ").toLowerCase();
+      }
+
+      function visibleEvents() {
+        const needle = state.search.trim().toLowerCase();
+        return state.events.filter(function (event) {
+          if (state.unassignedOnly && event.project_id) return false;
+          if (!needle) return true;
+          return eventSearchText(event).includes(needle);
+        });
+      }
+
+      async function requestJson(path, options) {
+        const response = await fetch(path, {
+          credentials: "include",
+          ...options,
+          headers: {
+            "Content-Type": "application/json",
+            "X-CSRF-Token": csrfToken,
+            ...(options && options.headers ? options.headers : {})
+          }
+        });
+        const data = await response.json().catch(function () { return {}; });
+        if (!response.ok) {
+          const error = new Error(data.error || "request_failed");
+          error.payload = data;
+          throw error;
+        }
+        return data;
+      }
+
+      function renderOrganizationSelect() {
+        if (!state.organizations.length) {
+          els.orgSelect.innerHTML = '<option value="">No organizations found</option>';
+          els.orgSelect.disabled = true;
+          return;
+        }
+
+        els.orgSelect.disabled = false;
+        els.orgSelect.innerHTML = state.organizations.map(function (org) {
+          const selected = Number(org.id) === Number(state.selectedOrgId) ? " selected" : "";
+          const label = org.name + " - " + org.event_count + " events, " + org.unassigned_event_count + " unassigned";
+          return '<option value="' + escapeHtml(org.id) + '"' + selected + '>' + escapeHtml(label) + '</option>';
+        }).join("");
+      }
+
+      function renderStats(totals) {
+        const selectedOrg = state.organizations.find(function (org) {
+          return Number(org.id) === Number(state.selectedOrgId);
+        });
+        els.orgSummary.textContent = selectedOrg
+          ? (selectedOrg.status || "unknown") + " organization, " + selectedOrg.program_count + " programs"
+          : "";
+        els.statEvents.textContent = String(totals?.events || 0);
+        els.statUnassigned.textContent = String(totals?.unassigned_events || 0);
+        els.statProjects.textContent = String(state.projects.length);
+      }
+
+      function renderProgramSelects() {
+        const programOptions = ['<option value="">No program / unlinked project</option>'].concat(
+          state.programs.map(function (program) {
+            const selected = program.id === state.projectProgramId ? " selected" : "";
+            const status = program.status ? " [" + program.status + "]" : "";
+            return '<option value="' + escapeHtml(program.id) + '"' + selected + '>' +
+              escapeHtml((program.name || "Untitled program") + status) +
+              '</option>';
+          })
+        );
+        els.projectProgram.innerHTML = programOptions.join("");
+      }
+
+      function renderProjectSelect() {
+        const currentProjectStillExists = state.projects.some(function (project) {
+          return project.id === state.assignmentProjectId;
+        });
+        if (!currentProjectStillExists) state.assignmentProjectId = "";
+
+        els.assignmentProject.innerHTML = ['<option value="">Choose a project</option>'].concat(
+          state.projects.map(function (project) {
+            const selected = project.id === state.assignmentProjectId ? " selected" : "";
+            return '<option value="' + escapeHtml(project.id) + '"' + selected + '>' +
+              escapeHtml(projectLabel(project)) +
+              '</option>';
+          })
+        ).join("");
+        els.assignmentProject.disabled = state.projects.length === 0;
+      }
+
+      function renderSelectionState() {
+        const filtered = visibleEvents();
+        const selectedVisibleCount = filtered.filter(function (event) {
+          return state.selectedEventIds.has(String(event.id));
+        }).length;
+        els.selectedCount.textContent = state.selectedEventIds.size + " selected";
+        els.assignBtn.disabled = state.selectedEventIds.size === 0 || !state.assignmentProjectId;
+        els.selectVisible.checked = filtered.length > 0 && selectedVisibleCount === filtered.length;
+        els.selectVisible.indeterminate = selectedVisibleCount > 0 && selectedVisibleCount < filtered.length;
+      }
+
+      function renderEvents() {
+        const filtered = visibleEvents();
+        els.eventListSummary.textContent = filtered.length + " visible of " + state.events.length + " loaded";
+        if (!filtered.length) {
+          els.eventsBody.innerHTML = '<tr><td colspan="6" class="assignment-empty">No events match the current filters.</td></tr>';
+          renderSelectionState();
+          return;
+        }
+
+        els.eventsBody.innerHTML = filtered.map(function (event) {
+          const eventId = String(event.id);
+          const checked = state.selectedEventIds.has(eventId) ? " checked" : "";
+          const selectedClass = checked ? " assignment-row-selected" : "";
+          const projectName = event.project_name
+            ? '<span class="assignment-project-pill" title="' + escapeHtml(event.program_name || "") + '">' + escapeHtml(event.project_name) + '</span>'
+            : '<span class="assignment-project-pill unassigned">Unassigned</span>';
+          const host = event.host_name || event.host_email || "Unknown host";
+          const meta = [event.status || "unknown", event.location_text || "Location not set"].filter(Boolean).join(" / ");
+          return (
+            '<tr class="' + selectedClass + '">' +
+              '<td><input class="form-check-input js-event-check" type="checkbox" data-id="' + escapeHtml(eventId) + '"' + checked + ' aria-label="Select event"></td>' +
+              '<td>' +
+                '<a class="event-title" href="/events/' + encodeURIComponent(eventId) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(event.title || "Untitled event") + '</a>' +
+                '<div class="assignment-inline-meta">' + escapeHtml(meta) + '</div>' +
+              '</td>' +
+              '<td>' + escapeHtml(formatDate(event.start_at)) + '</td>' +
+              '<td>' + projectName + (event.program_name ? '<div class="assignment-inline-meta mt-1">' + escapeHtml(event.program_name) + '</div>' : '') + '</td>' +
+              '<td>' + escapeHtml(host) + (event.host_email && host !== event.host_email ? '<div class="assignment-inline-meta">' + escapeHtml(event.host_email) + '</div>' : '') + '</td>' +
+              '<td>' + escapeHtml(event.volunteer_count) + '</td>' +
+            '</tr>'
+          );
+        }).join("");
+        renderSelectionState();
+      }
+
+      function pruneSelectionToLoadedEvents() {
+        const loadedIds = new Set(state.events.map(function (event) { return String(event.id); }));
+        state.selectedEventIds.forEach(function (id) {
+          if (!loadedIds.has(id)) state.selectedEventIds.delete(id);
+        });
+      }
+
+      function render(data) {
+        state.organizations = data.organizations || [];
+        state.selectedOrgId = data.selected_org_id || null;
+        state.programs = data.programs || [];
+        state.projects = data.projects || [];
+        state.events = data.events || [];
+        pruneSelectionToLoadedEvents();
+        renderOrganizationSelect();
+        renderStats(data.totals || {});
+        renderProgramSelects();
+        renderProjectSelect();
+        renderEvents();
+      }
+
+      async function loadData(orgId) {
+        hideAlert();
+        els.eventsBody.innerHTML = '<tr><td colspan="6" class="assignment-empty">Loading events...</td></tr>';
+        const params = new URLSearchParams();
+        if (orgId) params.set("org_id", orgId);
+        const data = await requestJson("/api/admin/event-assignment" + (params.toString() ? "?" + params.toString() : ""), {
+          method: "GET"
+        });
+        render(data);
+        if (state.selectedOrgId) {
+          const url = new URL(window.location.href);
+          url.searchParams.set("org_id", state.selectedOrgId);
+          window.history.replaceState({}, "", url.toString());
+        }
+      }
+
+      els.orgSelect.addEventListener("change", function () {
+        state.selectedEventIds.clear();
+        state.assignmentProjectId = "";
+        loadData(els.orgSelect.value).catch(function (error) {
+          showAlert("danger", "Could not load organization events: " + error.message);
+        });
+      });
+
+      els.eventSearch.addEventListener("input", function () {
+        state.search = els.eventSearch.value || "";
+        renderEvents();
+      });
+
+      els.unassignedOnly.addEventListener("change", function () {
+        state.unassignedOnly = els.unassignedOnly.checked;
+        renderEvents();
+      });
+
+      els.assignmentProject.addEventListener("change", function () {
+        state.assignmentProjectId = els.assignmentProject.value || "";
+        renderSelectionState();
+      });
+
+      els.projectProgram.addEventListener("change", function () {
+        state.projectProgramId = els.projectProgram.value || "";
+      });
+
+      els.eventsBody.addEventListener("change", function (event) {
+        if (!event.target.classList.contains("js-event-check")) return;
+        const id = String(event.target.getAttribute("data-id") || "");
+        if (!id) return;
+        if (event.target.checked) state.selectedEventIds.add(id);
+        else state.selectedEventIds.delete(id);
+        renderEvents();
+      });
+
+      els.selectVisible.addEventListener("change", function () {
+        const filtered = visibleEvents();
+        filtered.forEach(function (event) {
+          const id = String(event.id);
+          if (els.selectVisible.checked) state.selectedEventIds.add(id);
+          else state.selectedEventIds.delete(id);
+        });
+        renderEvents();
+      });
+
+      els.programForm.addEventListener("submit", async function (event) {
+        event.preventDefault();
+        if (!state.selectedOrgId) return;
+        els.createProgramBtn.disabled = true;
+        try {
+          const body = {
+            org_id: state.selectedOrgId,
+            name: document.getElementById("programName").value,
+            funder: document.getElementById("programFunder").value,
+            reportingPeriodStart: document.getElementById("programStart").value,
+            reportingPeriodEnd: document.getElementById("programEnd").value
+          };
+          const result = await requestJson("/api/admin/event-assignment/programs", {
+            method: "POST",
+            body: JSON.stringify(body)
+          });
+          state.projectProgramId = result.program?.id || "";
+          els.programForm.reset();
+          await loadData(state.selectedOrgId);
+          showAlert("success", "Program created.");
+        } catch (error) {
+          showAlert("danger", "Could not create program: " + error.message);
+        } finally {
+          els.createProgramBtn.disabled = false;
+        }
+      });
+
+      els.projectForm.addEventListener("submit", async function (event) {
+        event.preventDefault();
+        if (!state.selectedOrgId) return;
+        els.createProjectBtn.disabled = true;
+        try {
+          const body = {
+            org_id: state.selectedOrgId,
+            programId: els.projectProgram.value || null,
+            name: document.getElementById("projectName").value,
+            startDate: document.getElementById("projectStart").value,
+            endDate: document.getElementById("projectEnd").value
+          };
+          const result = await requestJson("/api/admin/event-assignment/projects", {
+            method: "POST",
+            body: JSON.stringify(body)
+          });
+          state.assignmentProjectId = result.project?.id || "";
+          state.projectProgramId = body.programId || "";
+          els.projectForm.reset();
+          await loadData(state.selectedOrgId);
+          showAlert("success", "Project created.");
+        } catch (error) {
+          showAlert("danger", "Could not create project: " + error.message);
+        } finally {
+          els.createProjectBtn.disabled = false;
+        }
+      });
+
+      els.assignBtn.addEventListener("click", async function () {
+        if (!state.selectedEventIds.size || !state.assignmentProjectId) return;
+        els.assignBtn.disabled = true;
+        try {
+          const result = await requestJson("/api/admin/event-assignment/bulk-assign", {
+            method: "POST",
+            body: JSON.stringify({
+              org_id: state.selectedOrgId,
+              project_id: state.assignmentProjectId,
+              event_ids: Array.from(state.selectedEventIds)
+            })
+          });
+          const assignedCount = Number(result.assigned_count) || 0;
+          state.selectedEventIds.clear();
+          await loadData(state.selectedOrgId);
+          showAlert("success", "Assigned " + assignedCount + " events to " + (result.project?.name || "the selected project") + ".");
+        } catch (error) {
+          showAlert("danger", "Assignment failed: " + error.message);
+        } finally {
+          els.assignBtn.disabled = false;
+          renderSelectionState();
+        }
+      });
+
+      els.refreshBtn.addEventListener("click", function () {
+        loadData(state.selectedOrgId).catch(function (error) {
+          showAlert("danger", "Refresh failed: " + error.message);
+        });
+      });
+
+      const initialOrgId = new URLSearchParams(window.location.search).get("org_id");
+      loadData(initialOrgId).catch(function (error) {
+        showAlert("danger", "Could not load event assignment data: " + error.message);
+        els.eventsBody.innerHTML = '<tr><td colspan="6" class="assignment-empty">Unable to load events.</td></tr>';
+      });
+    });
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/js/bootstrap.bundle.min.js" integrity="sha384-k6d4wzSIapyDyv1kpU366/PK5hCdSbCRGRCMv+eplOQJWyd1fbcAu9OCUj5zNLiq" crossorigin="anonymous"></script>
+</body>
+</html>

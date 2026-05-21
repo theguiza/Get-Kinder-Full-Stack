@@ -40,7 +40,7 @@ eventsApiRouter.get("/:id/calendar.ics", downloadEventCalendar);
 
 eventsApiRouter.use(ensureAuthenticatedApi);
 
-eventsApiRouter.post("/", ensureOrgRep, createEvent);
+eventsApiRouter.post("/", createEvent);
 eventsApiRouter.post("/:id/cancel", cancelEvent);
 eventsApiRouter.post("/:id/force-cancel", forceCancelEvent);
 eventsApiRouter.post("/:id/complete", completeEvent);

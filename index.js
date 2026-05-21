@@ -2900,6 +2900,293 @@ app.get("/admin", ensureAuthenticated, ensureAdmin, (req, res) => {
   });
 });
 
+app.get("/admin/event-assignment", ensureAuthenticated, ensureAdmin, (req, res) => {
+  const assetTag = Date.now();
+  res.render("admin-event-assignment", {
+    assetTag,
+    user: req.user,
+    csrfToken: typeof req.csrfToken === "function" ? req.csrfToken() : req.session?.csrfToken || "",
+  });
+});
+
+app.get("/org-portal/workspace/events/:eventId", ensureOrgRepPage, async (req, res) => {
+  const assetTag = Date.now();
+  const isAdminViewer = isAdminRequest(req);
+  const rawPreviewOrgId = isAdminViewer
+    ? String(req.query.orgId || req.query.org_id || "").trim()
+    : "";
+  const previewOrgId = /^\d+$/.test(rawPreviewOrgId) ? Number(rawPreviewOrgId) : null;
+  const previewRequested = Number.isInteger(previewOrgId) && previewOrgId > 0;
+  const orgRating = {
+    orgId: null,
+    value: 5,
+    count: 0,
+    hasRatings: false,
+    starsFilled: 5,
+  };
+  let organizationName = "";
+  let organizationDescription = "";
+  let organizationLogoUrl = "";
+  let orgMemberships = [];
+  let activeOrgId = null;
+  let activeOrgStatus = "";
+
+  try {
+    if (isAdminViewer) {
+      if (previewRequested) {
+        const { rows: [previewOrgRow] = [] } = await pool.query(
+          `
+            SELECT id, name, rep_user_id
+            FROM public.organizations
+            WHERE id = $1
+            LIMIT 1
+          `,
+          [previewOrgId]
+        );
+        if (previewOrgRow) {
+          if (typeof previewOrgRow.name === "string" && previewOrgRow.name.trim()) {
+            organizationName = previewOrgRow.name.trim();
+          }
+          const previewUserId = Number(previewOrgRow.rep_user_id);
+          if (req.session) {
+            req.session[ADMIN_ORG_PORTAL_PREVIEW_ORG_ID_KEY] = String(previewOrgRow.id);
+            if (Number.isInteger(previewUserId) && previewUserId > 0) {
+              req.session[ADMIN_ORG_PORTAL_PREVIEW_USER_ID_KEY] = String(previewUserId);
+            } else {
+              delete req.session[ADMIN_ORG_PORTAL_PREVIEW_USER_ID_KEY];
+            }
+          }
+        } else if (req.session) {
+          delete req.session[ADMIN_ORG_PORTAL_PREVIEW_USER_ID_KEY];
+          delete req.session[ADMIN_ORG_PORTAL_PREVIEW_ORG_ID_KEY];
+        }
+      } else if (req.session) {
+        delete req.session[ADMIN_ORG_PORTAL_PREVIEW_USER_ID_KEY];
+        delete req.session[ADMIN_ORG_PORTAL_PREVIEW_ORG_ID_KEY];
+      }
+    }
+
+    const scope = await resolveOrgScope(req, {
+      allowAdminPreview: true,
+      includeOrgMembersForOrgRep: false,
+    });
+    activeOrgId = scope?.orgId != null ? Number(scope.orgId) : null;
+    orgMemberships = Array.isArray(scope?.memberships)
+      ? scope.memberships
+          .map((entry) => ({
+            orgId: Number(entry?.orgId),
+            name: entry?.org_name || "",
+            status: entry?.org_status || "",
+          }))
+          .filter((entry) => Number.isInteger(entry.orgId) && entry.orgId > 0)
+      : [];
+
+    if ((!scope?.hasOrgRepAccess || !activeOrgId) && isAdminViewer) {
+      return res.redirect("/admin");
+    }
+    if (!scope?.hasOrgRepAccess || !activeOrgId) {
+      return res.redirect("/org-apply");
+    }
+
+    const selectedMembership = orgMemberships.find((entry) => entry.orgId === activeOrgId);
+    if (!organizationName && selectedMembership?.name) {
+      organizationName = selectedMembership.name;
+    }
+    if (selectedMembership?.status) {
+      activeOrgStatus = String(selectedMembership.status || "").trim().toLowerCase();
+    }
+    if (activeOrgId != null && Number.isFinite(activeOrgId)) {
+      const { rows: [orgRow] = [] } = await pool.query(
+        "SELECT name, description, status, logo_url FROM public.organizations WHERE id = $1 LIMIT 1",
+        [activeOrgId]
+      );
+      if (!organizationName && typeof orgRow?.name === "string" && orgRow.name.trim()) {
+        organizationName = orgRow.name.trim();
+      }
+      if (typeof orgRow?.description === "string" && orgRow.description.trim()) {
+        organizationDescription = orgRow.description.trim();
+      }
+      if (!activeOrgStatus && typeof orgRow?.status === "string") {
+        activeOrgStatus = orgRow.status.trim().toLowerCase();
+      }
+      if (typeof orgRow?.logo_url === "string" && orgRow.logo_url.trim()) {
+        organizationLogoUrl = orgRow.logo_url.trim();
+      }
+    }
+
+    if (activeOrgId != null && Number.isFinite(activeOrgId)) {
+      const summary = await getRatingsSummary({ orgId: activeOrgId, limit: 20 });
+      const count = Number(summary?.sampleSize) || 0;
+      const hasRatings = count > 0 && Number.isFinite(Number(summary?.kindnessRating));
+      const value = hasRatings ? Number(summary.kindnessRating) : 5;
+      const starsFilled = Math.max(1, Math.min(5, Math.round(value)));
+      orgRating.orgId = activeOrgId;
+      orgRating.value = value;
+      orgRating.count = count;
+      orgRating.hasRatings = hasRatings;
+      orgRating.starsFilled = starsFilled;
+    }
+  } catch (error) {
+    console.warn("[org-portal] org context lookup failed:", error?.message || error);
+    if (!isAdminViewer) return res.redirect("/org-apply");
+  }
+
+  res.render("org-portal-workspace", {
+    assetTag,
+    user: req.user,
+    orgRating,
+    organizationName,
+    organizationDescription,
+    organizationLogoUrl,
+    orgMemberships,
+    activeOrgId,
+    activeOrgStatus,
+    logoUploadError: req.query.logoUploadError || "",
+    descriptionSaved: req.query.descriptionSaved === "1",
+    descriptionError: req.query.descriptionError || "",
+    eventId: req.params.eventId,
+  });
+});
+
+app.get("/org-portal/workspace", ensureOrgRepPage, async (req, res) => {
+  const assetTag = Date.now();
+  const isAdminViewer = isAdminRequest(req);
+  const rawPreviewOrgId = isAdminViewer
+    ? String(req.query.orgId || req.query.org_id || "").trim()
+    : "";
+  const previewOrgId = /^\d+$/.test(rawPreviewOrgId) ? Number(rawPreviewOrgId) : null;
+  const previewRequested = Number.isInteger(previewOrgId) && previewOrgId > 0;
+  const orgRating = {
+    orgId: null,
+    value: 5,
+    count: 0,
+    hasRatings: false,
+    starsFilled: 5,
+  };
+  let organizationName = "";
+  let organizationDescription = "";
+  let organizationLogoUrl = "";
+  let orgMemberships = [];
+  let activeOrgId = null;
+  let activeOrgStatus = "";
+
+  try {
+    if (isAdminViewer) {
+      if (previewRequested) {
+        const { rows: [previewOrgRow] = [] } = await pool.query(
+          `
+            SELECT id, name, rep_user_id
+            FROM public.organizations
+            WHERE id = $1
+            LIMIT 1
+          `,
+          [previewOrgId]
+        );
+        if (previewOrgRow) {
+          if (typeof previewOrgRow.name === "string" && previewOrgRow.name.trim()) {
+            organizationName = previewOrgRow.name.trim();
+          }
+          const previewUserId = Number(previewOrgRow.rep_user_id);
+          if (req.session) {
+            req.session[ADMIN_ORG_PORTAL_PREVIEW_ORG_ID_KEY] = String(previewOrgRow.id);
+            if (Number.isInteger(previewUserId) && previewUserId > 0) {
+              req.session[ADMIN_ORG_PORTAL_PREVIEW_USER_ID_KEY] = String(previewUserId);
+            } else {
+              delete req.session[ADMIN_ORG_PORTAL_PREVIEW_USER_ID_KEY];
+            }
+          }
+        } else if (req.session) {
+          delete req.session[ADMIN_ORG_PORTAL_PREVIEW_USER_ID_KEY];
+          delete req.session[ADMIN_ORG_PORTAL_PREVIEW_ORG_ID_KEY];
+        }
+      } else if (req.session) {
+        delete req.session[ADMIN_ORG_PORTAL_PREVIEW_USER_ID_KEY];
+        delete req.session[ADMIN_ORG_PORTAL_PREVIEW_ORG_ID_KEY];
+      }
+    }
+
+    const scope = await resolveOrgScope(req, {
+      allowAdminPreview: true,
+      includeOrgMembersForOrgRep: false,
+    });
+    activeOrgId = scope?.orgId != null ? Number(scope.orgId) : null;
+    orgMemberships = Array.isArray(scope?.memberships)
+      ? scope.memberships
+          .map((entry) => ({
+            orgId: Number(entry?.orgId),
+            name: entry?.org_name || "",
+            status: entry?.org_status || "",
+          }))
+          .filter((entry) => Number.isInteger(entry.orgId) && entry.orgId > 0)
+      : [];
+
+    if ((!scope?.hasOrgRepAccess || !activeOrgId) && isAdminViewer) {
+      return res.redirect("/admin");
+    }
+    if (!scope?.hasOrgRepAccess || !activeOrgId) {
+      return res.redirect("/org-apply");
+    }
+
+    const selectedMembership = orgMemberships.find((entry) => entry.orgId === activeOrgId);
+    if (!organizationName && selectedMembership?.name) {
+      organizationName = selectedMembership.name;
+    }
+    if (selectedMembership?.status) {
+      activeOrgStatus = String(selectedMembership.status || "").trim().toLowerCase();
+    }
+    if (activeOrgId != null && Number.isFinite(activeOrgId)) {
+      const { rows: [orgRow] = [] } = await pool.query(
+        "SELECT name, description, status, logo_url FROM public.organizations WHERE id = $1 LIMIT 1",
+        [activeOrgId]
+      );
+      if (!organizationName && typeof orgRow?.name === "string" && orgRow.name.trim()) {
+        organizationName = orgRow.name.trim();
+      }
+      if (typeof orgRow?.description === "string" && orgRow.description.trim()) {
+        organizationDescription = orgRow.description.trim();
+      }
+      if (!activeOrgStatus && typeof orgRow?.status === "string") {
+        activeOrgStatus = orgRow.status.trim().toLowerCase();
+      }
+      if (typeof orgRow?.logo_url === "string" && orgRow.logo_url.trim()) {
+        organizationLogoUrl = orgRow.logo_url.trim();
+      }
+    }
+
+    if (activeOrgId != null && Number.isFinite(activeOrgId)) {
+      const summary = await getRatingsSummary({ orgId: activeOrgId, limit: 20 });
+      const count = Number(summary?.sampleSize) || 0;
+      const hasRatings = count > 0 && Number.isFinite(Number(summary?.kindnessRating));
+      const value = hasRatings ? Number(summary.kindnessRating) : 5;
+      const starsFilled = Math.max(1, Math.min(5, Math.round(value)));
+      orgRating.orgId = activeOrgId;
+      orgRating.value = value;
+      orgRating.count = count;
+      orgRating.hasRatings = hasRatings;
+      orgRating.starsFilled = starsFilled;
+    }
+  } catch (error) {
+    console.warn("[org-portal] org context lookup failed:", error?.message || error);
+    if (!isAdminViewer) return res.redirect("/org-apply");
+  }
+
+  res.render("org-portal-workspace", {
+    assetTag,
+    user: req.user,
+    orgRating,
+    organizationName,
+    organizationDescription,
+    organizationLogoUrl,
+    orgMemberships,
+    activeOrgId,
+    activeOrgStatus,
+    logoUploadError: req.query.logoUploadError || "",
+    descriptionSaved: req.query.descriptionSaved === "1",
+    descriptionError: req.query.descriptionError || "",
+    eventId: null,
+  });
+});
+
 app.get("/org-portal", ensureOrgRepPage, async (req, res) => {
   const assetTag = Date.now();
   const isAdminViewer = isAdminRequest(req);

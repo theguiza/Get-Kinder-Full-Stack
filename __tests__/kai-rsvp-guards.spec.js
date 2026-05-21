@@ -51,15 +51,41 @@ function createKaiWriteHarness({
       }
 
       if (
+        trimmed.includes("SELECT id, event_id, spots_needed, spots_filled") &&
+        trimmed.includes("FROM event_roles") &&
+        trimmed.includes("WHERE event_id = $1")
+      ) {
+        const [eventId] = params;
+        const rows = state.roles
+          .filter((row) => String(row.event_id) === String(eventId))
+          .map((row) => ({ spots_needed: 10, spots_filled: 0, ...row }));
+        return { rows, rowCount: rows.length };
+      }
+
+      if (
         trimmed.includes("SELECT id, event_id") &&
         trimmed.includes("FROM event_roles")
       ) {
         const [roleId] = params;
         const match = state.roles.find((row) => String(row.id) === String(roleId));
         return {
-          rows: match ? [{ id: match.id, event_id: match.event_id }] : [],
+          rows: match ? [{ spots_needed: 10, spots_filled: 0, ...match }] : [],
           rowCount: match ? 1 : 0,
         };
+      }
+
+      if (trimmed.startsWith("UPDATE event_roles SET spots_filled = spots_filled + 1")) {
+        const [roleId] = params;
+        const match = state.roles.find((row) => String(row.id) === String(roleId));
+        if (match) match.spots_filled = Number(match.spots_filled || 0) + 1;
+        return { rows: match ? [{ spots_filled: match.spots_filled }] : [], rowCount: match ? 1 : 0 };
+      }
+
+      if (trimmed.startsWith("UPDATE event_roles SET spots_filled = GREATEST")) {
+        const [roleId] = params;
+        const match = state.roles.find((row) => String(row.id) === String(roleId));
+        if (match) match.spots_filled = Math.max(Number(match.spots_filled || 0) - 1, 0);
+        return { rows: match ? [{ spots_filled: match.spots_filled }] : [], rowCount: match ? 1 : 0 };
       }
 
       if (
@@ -71,7 +97,14 @@ function createKaiWriteHarness({
         const match = state.rsvps.find(
           (row) => String(row.event_id) === String(eventId) && String(row.attendee_user_id) === String(userId),
         );
-        return { rows: match ? [{ status: match.status }] : [], rowCount: match ? 1 : 0 };
+        return {
+          rows: match ? [{
+            status: match.status,
+            role_id: match.role_id ?? null,
+            no_show: match.no_show === true,
+          }] : [],
+          rowCount: match ? 1 : 0,
+        };
       }
 
       if (
@@ -346,6 +379,8 @@ function createKaiWriteHarness({
             ? hasNotes
             : columnName === "role_id"
               ? hasRoleIdColumn
+              : columnName === "no_show"
+                ? true
               : false;
       return { rows: [{ exists }], rowCount: 1 };
     }
@@ -442,6 +477,7 @@ test("KAI rejects role_id from another event", async () => {
       creator_user_id: "host-2",
     },
     roles: [
+      { id: "role-same-r1", event_id: "evt-r1" },
       { id: "role-other", event_id: "evt-other" },
     ],
   });
@@ -474,7 +510,9 @@ test("KAI rejects nonexistent role_id", async () => {
       waitlist_enabled: true,
       creator_user_id: "host-3",
     },
-    roles: [],
+    roles: [
+      { id: "role-same-r2", event_id: "evt-r2" },
+    ],
   });
 
   try {
@@ -527,7 +565,7 @@ test("KAI persists a valid same-event role_id", async () => {
   }
 });
 
-test("KAI RSVP success path still works without role_id", async () => {
+test("KAI RSVP success path auto-fills the sole role without role_id", async () => {
   const harness = createKaiWriteHarness({
     event: {
       id: "evt-r4",
@@ -538,6 +576,9 @@ test("KAI RSVP success path still works without role_id", async () => {
       waitlist_enabled: true,
       creator_user_id: "host-5",
     },
+    roles: [
+      { id: "role-same-r4", event_id: "evt-r4" },
+    ],
   });
 
   try {
@@ -547,7 +588,7 @@ test("KAI RSVP success path still works without role_id", async () => {
 
     const [rsvp] = harness.state.rsvps;
     assert.equal(rsvp.status, "pending");
-    assert.equal(rsvp.role_id, null);
+    assert.equal(rsvp.role_id, "role-same-r4");
   } finally {
     harness.restore();
   }

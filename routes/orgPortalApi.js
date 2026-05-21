@@ -7,6 +7,23 @@ import { getSummary as getRatingsSummary } from "../services/ratingsService.js";
 import { isSeatTakingStatus, promoteWaitlistedAttendees } from "../services/waitlistService.js";
 import { awardIcForRsvp } from "../Backend/services/icService.js";
 import { buildEventCalendarInvite } from "../services/eventCalendarService.js";
+import {
+  archiveProgram,
+  createProgram,
+  deleteProgram,
+  getProgramById,
+  listProgramsForOrg,
+  updateProgram,
+} from "../Backend/services/programsService.js";
+import {
+  createProject,
+  deleteProject,
+  getProjectById,
+  getProjectMetrics,
+  listProjectsForOrg,
+  transitionLifecycleStage,
+  updateProject,
+} from "../Backend/services/projectsService.js";
 
 const orgPortalRouter = express.Router();
 const CSRF_HEADER_NAME = "X-CSRF-Token";
@@ -25,6 +42,33 @@ const SCHEDULE_PROBLEM_REASON_ORDER = [
   "missing_start_time",
   "missing_capacity",
 ];
+const PROGRAM_PROJECT_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const PROGRAM_STATUSES = new Set(["active", "completed", "archived"]);
+const PROJECT_LIFECYCLE_STAGES = new Set(["draft", "recruiting", "live", "closing_out", "reported"]);
+const PROGRAM_FORBIDDEN_UPDATE_FIELDS = new Set(["id", "organization_id", "created_by_user_id", "created_at"]);
+const PROJECT_FORBIDDEN_UPDATE_FIELDS = new Set(["id", "organization_id", "created_by_user_id", "created_at"]);
+const PROGRAM_UPDATE_FIELDS = new Set([
+  "name",
+  "description",
+  "funder",
+  "reportingPeriodStart",
+  "reportingPeriodEnd",
+  "intendedEquityGroups",
+  "proposalText",
+  "status",
+]);
+const PROJECT_UPDATE_FIELDS = new Set([
+  "programId",
+  "name",
+  "description",
+  "startDate",
+  "endDate",
+  "languages",
+  "partnerOrgIds",
+  "beneficiaryCount",
+  "beneficiaryEquityBreakdown",
+  "lifecycleStage",
+]);
 
 async function getPortalScope(req) {
   if (!req._orgPortalScopePromise) {
@@ -134,6 +178,108 @@ function stableScheduleReasons(reasonSet) {
   return SCHEDULE_PROBLEM_REASON_ORDER.filter((reason) => reasonSet.has(reason));
 }
 
+function isProgramProjectUuid(value) {
+  return PROGRAM_PROJECT_UUID_RE.test(String(value || "").trim());
+}
+
+function normalizePaginationQuery(query = {}) {
+  const rawLimit = Number(query.limit);
+  const rawOffset = Number(query.offset);
+  const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(Math.trunc(rawLimit), 1), 100) : 50;
+  const offset = Number.isFinite(rawOffset) ? Math.max(Math.trunc(rawOffset), 0) : 0;
+  return { limit, offset };
+}
+
+function isValidIsoDateInput(value) {
+  if (value === undefined || value === null || value === "") return true;
+  if (typeof value !== "string") return false;
+  const raw = value.trim();
+  if (!raw) return true;
+  const parsed = new Date(raw);
+  return !Number.isNaN(parsed.getTime());
+}
+
+function validateRequiredName(body = {}) {
+  if (typeof body.name !== "string" || !body.name.trim()) {
+    return "name is required";
+  }
+  return null;
+}
+
+function validateDateFields(body = {}, fields = []) {
+  for (const field of fields) {
+    if (!isValidIsoDateInput(body[field])) {
+      return `${field} must be a valid ISO date string`;
+    }
+  }
+  return null;
+}
+
+function validateArrayField(body = {}, field) {
+  if (body[field] !== undefined && body[field] !== null && !Array.isArray(body[field])) {
+    return `${field} must be an array`;
+  }
+  return null;
+}
+
+function validateUpdatePayload(body = {}, { allowedFields, forbiddenFields }) {
+  const keys = Object.keys(body || {});
+  if (!keys.length) return "Update payload is required";
+  for (const key of keys) {
+    if (forbiddenFields.has(key)) return `${key} cannot be updated`;
+    if (!allowedFields.has(key)) return `${key} is not an allowed update field`;
+  }
+  return null;
+}
+
+function isSameOrg(row, orgId) {
+  return Number(row?.organization_id) === Number(orgId);
+}
+
+async function requireActiveProgram(programId, orgId) {
+  if (!isProgramProjectUuid(programId)) {
+    return { status: 400, error: "programId must be a valid UUID" };
+  }
+  const program = await getProgramById(pool, programId);
+  if (!program || !isSameOrg(program, orgId)) {
+    return { status: 404, error: "program not found" };
+  }
+  return { program };
+}
+
+async function requireActiveProject(projectId, orgId) {
+  if (!isProgramProjectUuid(projectId)) {
+    return { status: 400, error: "projectId must be a valid UUID" };
+  }
+  const project = await getProjectById(pool, projectId);
+  if (!project || !isSameOrg(project, orgId)) {
+    return { status: 404, error: "project not found" };
+  }
+  return { project };
+}
+
+async function requireProgramForProjectLink(programId, orgId) {
+  if (programId === null || programId === undefined || programId === "") {
+    return { programId: null };
+  }
+  if (!isProgramProjectUuid(programId)) {
+    return { status: 400, error: "programId must be a valid UUID" };
+  }
+  const program = await getProgramById(pool, programId);
+  if (!program || !isSameOrg(program, orgId)) {
+    return { status: 404, error: "program not found" };
+  }
+  return { programId: String(programId).trim() };
+}
+
+function handleProgramProjectError(res, routeLabel, error, conflictMessage) {
+  if (error?.message === conflictMessage) {
+    return res.status(409).json({ error: error.message });
+  }
+  console.error(`[orgPortalApi] ${routeLabel} error:`, error);
+  return res.status(500).json({ error: "Internal server error" });
+}
+
 orgPortalRouter.use(async (req, res, next) => {
   try {
     const scope = await getPortalScope(req);
@@ -198,6 +344,310 @@ orgPortalRouter.post("/active-org", async (req, res) => {
   } catch (error) {
     console.error("POST /api/org/active-org error:", error);
     return res.status(500).json({ error: "server_error" });
+  }
+});
+
+orgPortalRouter.get("/programs", async (req, res) => {
+  try {
+    const scope = await getPortalScope(req);
+    const { limit, offset } = normalizePaginationQuery(req.query || {});
+    const status = req.query?.status ? String(req.query.status).trim() : null;
+    if (status && !PROGRAM_STATUSES.has(status)) {
+      return res.status(400).json({ error: "status must be one of: active, completed, archived" });
+    }
+
+    const programs = await listProgramsForOrg(pool, scope.orgId, { status, limit, offset });
+    return res.json({
+      programs,
+      pagination: { limit, offset, returned: programs.length },
+    });
+  } catch (error) {
+    console.error("[orgPortalApi] GET /programs error:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+orgPortalRouter.get("/programs/:programId", async (req, res) => {
+  try {
+    const scope = await getPortalScope(req);
+    const programCheck = await requireActiveProgram(req.params.programId, scope.orgId);
+    if (!programCheck.program) return res.status(programCheck.status).json({ error: programCheck.error });
+    return res.json({ program: programCheck.program });
+  } catch (error) {
+    console.error("[orgPortalApi] GET /programs/:programId error:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+orgPortalRouter.post("/programs", async (req, res) => {
+  if (!requireCsrf(req, res)) return;
+  try {
+    const scope = await getPortalScope(req);
+    const body = req.body || {};
+    const nameError = validateRequiredName(body);
+    if (nameError) return res.status(400).json({ error: nameError });
+    const dateError = validateDateFields(body, ["reportingPeriodStart", "reportingPeriodEnd"]);
+    if (dateError) return res.status(400).json({ error: dateError });
+    const arrayError = validateArrayField(body, "intendedEquityGroups");
+    if (arrayError) return res.status(400).json({ error: arrayError });
+
+    const program = await createProgram(pool, {
+      organizationId: scope.orgId,
+      name: body.name,
+      description: body.description,
+      funder: body.funder,
+      reportingPeriodStart: body.reportingPeriodStart,
+      reportingPeriodEnd: body.reportingPeriodEnd,
+      intendedEquityGroups: body.intendedEquityGroups,
+      proposalText: body.proposalText,
+      createdByUserId: Number(scope.actorUserId),
+    });
+
+    return res.status(201).json({ program });
+  } catch (error) {
+    console.error("[orgPortalApi] POST /programs error:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+orgPortalRouter.patch("/programs/:programId", async (req, res) => {
+  if (!requireCsrf(req, res)) return;
+  try {
+    const scope = await getPortalScope(req);
+    const programCheck = await requireActiveProgram(req.params.programId, scope.orgId);
+    if (!programCheck.program) return res.status(programCheck.status).json({ error: programCheck.error });
+
+    const body = req.body || {};
+    const updateError = validateUpdatePayload(body, {
+      allowedFields: PROGRAM_UPDATE_FIELDS,
+      forbiddenFields: PROGRAM_FORBIDDEN_UPDATE_FIELDS,
+    });
+    if (updateError) return res.status(400).json({ error: updateError });
+    if (body.name !== undefined) {
+      const nameError = validateRequiredName(body);
+      if (nameError) return res.status(400).json({ error: nameError });
+    }
+    const dateError = validateDateFields(body, ["reportingPeriodStart", "reportingPeriodEnd"]);
+    if (dateError) return res.status(400).json({ error: dateError });
+    const arrayError = validateArrayField(body, "intendedEquityGroups");
+    if (arrayError) return res.status(400).json({ error: arrayError });
+    if (body.status !== undefined && !PROGRAM_STATUSES.has(String(body.status || "").trim())) {
+      return res.status(400).json({ error: "status must be one of: active, completed, archived" });
+    }
+
+    const program = await updateProgram(pool, req.params.programId, body);
+    return res.json({ program });
+  } catch (error) {
+    console.error("[orgPortalApi] PATCH /programs/:programId error:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+orgPortalRouter.post("/programs/:programId/archive", async (req, res) => {
+  if (!requireCsrf(req, res)) return;
+  try {
+    const scope = await getPortalScope(req);
+    const programCheck = await requireActiveProgram(req.params.programId, scope.orgId);
+    if (!programCheck.program) return res.status(programCheck.status).json({ error: programCheck.error });
+
+    const program = await archiveProgram(pool, req.params.programId);
+    return res.json({ program });
+  } catch (error) {
+    console.error("[orgPortalApi] POST /programs/:programId/archive error:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+orgPortalRouter.delete("/programs/:programId", async (req, res) => {
+  if (!requireCsrf(req, res)) return;
+  try {
+    const scope = await getPortalScope(req);
+    const programCheck = await requireActiveProgram(req.params.programId, scope.orgId);
+    if (!programCheck.program) return res.status(programCheck.status).json({ error: programCheck.error });
+
+    const result = await deleteProgram(pool, req.params.programId);
+    return res.json(result);
+  } catch (error) {
+    return handleProgramProjectError(
+      res,
+      "DELETE /programs/:programId",
+      error,
+      "Cannot delete program while projects are linked"
+    );
+  }
+});
+
+orgPortalRouter.get("/projects", async (req, res) => {
+  try {
+    const scope = await getPortalScope(req);
+    const { limit, offset } = normalizePaginationQuery(req.query || {});
+    const lifecycleStage = req.query?.lifecycleStage ? String(req.query.lifecycleStage).trim() : null;
+    if (lifecycleStage && !PROJECT_LIFECYCLE_STAGES.has(lifecycleStage)) {
+      return res.status(400).json({ error: "lifecycleStage must be one of: draft, recruiting, live, closing_out, reported" });
+    }
+
+    const filters = { lifecycleStage, limit, offset };
+    if (Object.prototype.hasOwnProperty.call(req.query || {}, "programId")) {
+      const rawProgramId = String(req.query.programId || "").trim();
+      if (rawProgramId.toLowerCase() === "null") {
+        filters.programId = null;
+      } else {
+        const programCheck = await requireProgramForProjectLink(rawProgramId, scope.orgId);
+        if (programCheck.error) return res.status(programCheck.status).json({ error: programCheck.error });
+        filters.programId = programCheck.programId;
+      }
+    }
+
+    const projects = await listProjectsForOrg(pool, scope.orgId, filters);
+    return res.json({
+      projects,
+      pagination: { limit, offset, returned: projects.length },
+    });
+  } catch (error) {
+    console.error("[orgPortalApi] GET /projects error:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+orgPortalRouter.get("/projects/:projectId", async (req, res) => {
+  try {
+    const scope = await getPortalScope(req);
+    const projectCheck = await requireActiveProject(req.params.projectId, scope.orgId);
+    if (!projectCheck.project) return res.status(projectCheck.status).json({ error: projectCheck.error });
+    return res.json({ project: projectCheck.project });
+  } catch (error) {
+    console.error("[orgPortalApi] GET /projects/:projectId error:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+orgPortalRouter.get("/projects/:projectId/metrics", async (req, res) => {
+  try {
+    const scope = await getPortalScope(req);
+    const projectCheck = await requireActiveProject(req.params.projectId, scope.orgId);
+    if (!projectCheck.project) return res.status(projectCheck.status).json({ error: projectCheck.error });
+
+    const metrics = await getProjectMetrics(pool, req.params.projectId);
+    return res.json({ metrics });
+  } catch (error) {
+    console.error("[orgPortalApi] GET /projects/:projectId/metrics error:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+orgPortalRouter.post("/projects", async (req, res) => {
+  if (!requireCsrf(req, res)) return;
+  try {
+    const scope = await getPortalScope(req);
+    const body = req.body || {};
+    const nameError = validateRequiredName(body);
+    if (nameError) return res.status(400).json({ error: nameError });
+    const dateError = validateDateFields(body, ["startDate", "endDate"]);
+    if (dateError) return res.status(400).json({ error: dateError });
+    const languagesError = validateArrayField(body, "languages");
+    if (languagesError) return res.status(400).json({ error: languagesError });
+    const partnerOrgIdsError = validateArrayField(body, "partnerOrgIds");
+    if (partnerOrgIdsError) return res.status(400).json({ error: partnerOrgIdsError });
+
+    const programCheck = await requireProgramForProjectLink(body.programId, scope.orgId);
+    if (programCheck.error) return res.status(programCheck.status).json({ error: programCheck.error });
+
+    const project = await createProject(pool, {
+      organizationId: scope.orgId,
+      programId: programCheck.programId,
+      name: body.name,
+      description: body.description,
+      startDate: body.startDate,
+      endDate: body.endDate,
+      languages: body.languages,
+      partnerOrgIds: body.partnerOrgIds,
+      createdByUserId: Number(scope.actorUserId),
+    });
+
+    return res.status(201).json({ project });
+  } catch (error) {
+    console.error("[orgPortalApi] POST /projects error:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+orgPortalRouter.patch("/projects/:projectId", async (req, res) => {
+  if (!requireCsrf(req, res)) return;
+  try {
+    const scope = await getPortalScope(req);
+    const projectCheck = await requireActiveProject(req.params.projectId, scope.orgId);
+    if (!projectCheck.project) return res.status(projectCheck.status).json({ error: projectCheck.error });
+
+    const body = { ...(req.body || {}) };
+    const updateError = validateUpdatePayload(body, {
+      allowedFields: PROJECT_UPDATE_FIELDS,
+      forbiddenFields: PROJECT_FORBIDDEN_UPDATE_FIELDS,
+    });
+    if (updateError) return res.status(400).json({ error: updateError });
+    if (body.name !== undefined) {
+      const nameError = validateRequiredName(body);
+      if (nameError) return res.status(400).json({ error: nameError });
+    }
+    const dateError = validateDateFields(body, ["startDate", "endDate"]);
+    if (dateError) return res.status(400).json({ error: dateError });
+    const languagesError = validateArrayField(body, "languages");
+    if (languagesError) return res.status(400).json({ error: languagesError });
+    const partnerOrgIdsError = validateArrayField(body, "partnerOrgIds");
+    if (partnerOrgIdsError) return res.status(400).json({ error: partnerOrgIdsError });
+    if (body.lifecycleStage !== undefined && !PROJECT_LIFECYCLE_STAGES.has(String(body.lifecycleStage || "").trim())) {
+      return res.status(400).json({ error: "lifecycleStage must be one of: draft, recruiting, live, closing_out, reported" });
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body, "programId")) {
+      const programCheck = await requireProgramForProjectLink(body.programId, scope.orgId);
+      if (programCheck.error) return res.status(programCheck.status).json({ error: programCheck.error });
+      body.programId = programCheck.programId;
+    }
+
+    const project = await updateProject(pool, req.params.projectId, body);
+    return res.json({ project });
+  } catch (error) {
+    console.error("[orgPortalApi] PATCH /projects/:projectId error:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+orgPortalRouter.post("/projects/:projectId/lifecycle", async (req, res) => {
+  if (!requireCsrf(req, res)) return;
+  try {
+    const scope = await getPortalScope(req);
+    const stage = String(req.body?.stage || "").trim();
+    if (!PROJECT_LIFECYCLE_STAGES.has(stage)) {
+      return res.status(400).json({ error: "stage must be one of: draft, recruiting, live, closing_out, reported" });
+    }
+
+    const projectCheck = await requireActiveProject(req.params.projectId, scope.orgId);
+    if (!projectCheck.project) return res.status(projectCheck.status).json({ error: projectCheck.error });
+
+    const project = await transitionLifecycleStage(pool, req.params.projectId, stage);
+    return res.json({ project });
+  } catch (error) {
+    console.error("[orgPortalApi] POST /projects/:projectId/lifecycle error:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+orgPortalRouter.delete("/projects/:projectId", async (req, res) => {
+  if (!requireCsrf(req, res)) return;
+  try {
+    const scope = await getPortalScope(req);
+    const projectCheck = await requireActiveProject(req.params.projectId, scope.orgId);
+    if (!projectCheck.project) return res.status(projectCheck.status).json({ error: projectCheck.error });
+
+    const result = await deleteProject(pool, req.params.projectId);
+    return res.json(result);
+  } catch (error) {
+    return handleProgramProjectError(
+      res,
+      "DELETE /projects/:projectId",
+      error,
+      "Cannot delete project while events or event roles reference it"
+    );
   }
 });
 
@@ -1503,7 +1953,7 @@ orgPortalRouter.post("/opportunities/:eventId/applicants/:userId/approve", async
 
     const { rows: [applicantRow] } = await client.query(
       `
-        SELECT status
+        SELECT status, role_id, COALESCE(no_show, false) AS no_show
           FROM event_rsvps
          WHERE event_id = $1
            AND attendee_user_id = $2
@@ -1661,7 +2111,7 @@ orgPortalRouter.post("/opportunities/:eventId/applicants/:userId/decline", async
 
     const { rows: [applicantRow] } = await client.query(
       `
-        SELECT status
+        SELECT status, role_id, COALESCE(no_show, false) AS no_show
           FROM event_rsvps
          WHERE event_id = $1
            AND attendee_user_id = $2
@@ -1690,6 +2140,14 @@ orgPortalRouter.post("/opportunities/:eventId/applicants/:userId/decline", async
     if (!rows[0]) {
       await client.query("ROLLBACK");
       return res.status(404).json({ error: "applicant not found" });
+    }
+
+    const roleCountedStatus = ["pending", "accepted", "checked_in", "waitlisted"].includes(String(applicantRow.status || "").toLowerCase());
+    if (roleCountedStatus && applicantRow.role_id && applicantRow.no_show !== true) {
+      await client.query(
+        "UPDATE public.event_roles SET spots_filled = GREATEST(spots_filled - 1, 0) WHERE id = $1 RETURNING spots_filled",
+        [applicantRow.role_id]
+      );
     }
 
     if (isSeatTakingStatus(applicantRow.status)) {

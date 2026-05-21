@@ -15,7 +15,6 @@ import DonorDashboard from "./donorDashboard.jsx";
 import DonatePage from "./donate.jsx";
 import AdminDashboard from "./adminDashboard.jsx";
 import { renderOrgPortal, renderKpiStrip } from "./orgPortal.jsx";
-import { renderOrgWorkspace } from "./orgWorkspace.jsx";
 
 const ROOTS = new WeakMap();
 
@@ -116,7 +115,6 @@ window.renderAdmin = (selector = "#admin-root", props = {}) => {
 
 window.renderOrgPortal = renderOrgPortal;
 window.renderKpiStrip = renderKpiStrip;
-window.renderOrgWorkspace = renderOrgWorkspace;
 
 // ---- Onboarding
 import OnboardingCards, { getDefaultSteps } from "./components/OnboardingCards.tsx";

@@ -7,11 +7,13 @@ import { applyEventRsvpAction } from "../services/eventRsvpService.js";
 function createRsvpServiceHarness({
   event,
   rsvps = [],
+  roles = [],
   hasNotes = true,
 }) {
   const state = {
     event: event ? { ...event } : null,
     rsvps: Array.isArray(rsvps) ? rsvps.map((row) => ({ ...row })) : [],
+    roles: Array.isArray(roles) ? roles.map((row) => ({ spots_needed: 10, spots_filled: 0, ...row })) : [],
   };
 
   const runner = {
@@ -56,7 +58,72 @@ function createRsvpServiceHarness({
         const match = state.rsvps.find(
           (row) => String(row.event_id) === String(eventId) && String(row.attendee_user_id) === String(attendeeId),
         );
-        return { rows: match ? [{ status: match.status }] : [], rowCount: match ? 1 : 0 };
+        return {
+          rows: match ? [{
+            status: match.status,
+            role_id: match.role_id ?? null,
+            no_show: match.no_show === true,
+          }] : [],
+          rowCount: match ? 1 : 0,
+        };
+      }
+
+      if (
+        trimmed.includes("SELECT id, event_id, spots_needed, spots_filled") &&
+        trimmed.includes("FROM event_roles") &&
+        trimmed.includes("WHERE event_id = $1")
+      ) {
+        const [eventId] = params;
+        const rows = state.roles.filter((row) => String(row.event_id) === String(eventId));
+        return { rows: rows.map((row) => ({ ...row })), rowCount: rows.length };
+      }
+
+      if (
+        trimmed.includes("SELECT id, event_id, spots_needed, spots_filled") &&
+        trimmed.includes("FROM event_roles") &&
+        trimmed.includes("WHERE id = $1")
+      ) {
+        const [roleId] = params;
+        const match = state.roles.find((row) => String(row.id) === String(roleId));
+        return { rows: match ? [{ ...match }] : [], rowCount: match ? 1 : 0 };
+      }
+
+      if (trimmed.startsWith("UPDATE event_roles SET spots_filled = spots_filled + 1")) {
+        const [roleId] = params;
+        const match = state.roles.find((row) => String(row.id) === String(roleId));
+        if (match) match.spots_filled = Number(match.spots_filled) + 1;
+        return { rows: match ? [{ spots_filled: match.spots_filled }] : [], rowCount: match ? 1 : 0 };
+      }
+
+      if (trimmed.startsWith("UPDATE event_roles SET spots_filled = GREATEST")) {
+        const [roleId] = params;
+        const match = state.roles.find((row) => String(row.id) === String(roleId));
+        if (match) match.spots_filled = Math.max(Number(match.spots_filled) - 1, 0);
+        return { rows: match ? [{ spots_filled: match.spots_filled }] : [], rowCount: match ? 1 : 0 };
+      }
+
+      if (trimmed.startsWith("INSERT INTO event_rsvps") && trimmed.includes("role_id")) {
+        const [eventId, attendeeId, status, roleId] = params;
+        const match = state.rsvps.find(
+          (row) => String(row.event_id) === String(eventId) && String(row.attendee_user_id) === String(attendeeId),
+        );
+        if (match) {
+          match.status = status;
+          match.role_id = roleId;
+          match.check_in_method = null;
+          match.checked_in_at = null;
+        } else {
+          state.rsvps.push({
+            event_id: eventId,
+            attendee_user_id: attendeeId,
+            status,
+            role_id: roleId,
+            notes: null,
+            check_in_method: null,
+            checked_in_at: null,
+          });
+        }
+        return { rows: [], rowCount: 1 };
       }
 
       if (trimmed.startsWith("INSERT INTO event_rsvps") && trimmed.includes("notes")) {
@@ -181,11 +248,17 @@ function createRsvpServiceHarness({
 
     if (trimmed.includes("FROM information_schema.columns")) {
       const columnName = String(params?.[1] || "");
-      return { rows: [{ exists: columnName === "notes" ? hasNotes : false }], rowCount: 1 };
+      return {
+        rows: [{
+          exists: columnName === "notes" ? hasNotes : columnName === "role_id" || columnName === "no_show",
+        }],
+        rowCount: 1,
+      };
     }
 
     if (trimmed.startsWith("SELECT to_regclass")) {
-      return { rows: [{ table_name: null }], rowCount: 1 };
+      const tableName = String(params?.[0] || "");
+      return { rows: [{ table_name: tableName === "public.event_roles" ? "event_roles" : null }], rowCount: 1 };
     }
 
     throw new Error(`Unhandled pool query: ${trimmed}`);
@@ -275,11 +348,15 @@ test("shared RSVP service reports the previous status when cancelling an existin
       capacity: 10,
       waitlist_enabled: true,
     },
+    roles: [
+      { id: "role-service-2b", event_id: "evt-service-2b", spots_needed: 10, spots_filled: 1 },
+    ],
     rsvps: [
       {
         event_id: "evt-service-2b",
         attendee_user_id: "user-2b",
         status: "accepted",
+        role_id: "role-service-2b",
         check_in_method: null,
         checked_in_at: null,
       },
@@ -313,6 +390,9 @@ test("shared RSVP service creates pending RSVPs until an org approves them", asy
       capacity: 10,
       waitlist_enabled: true,
     },
+    roles: [
+      { id: "role-service-3", event_id: "evt-service-3", spots_needed: 10, spots_filled: 0 },
+    ],
   });
 
   try {
@@ -327,6 +407,8 @@ test("shared RSVP service creates pending RSVPs until an org approves them", asy
 
     const [rsvp] = harness.state.rsvps;
     assert.equal(rsvp.status, "pending");
+    assert.equal(rsvp.role_id, "role-service-3");
+    assert.equal(harness.state.roles[0].spots_filled, 1);
   } finally {
     harness.restore();
   }
@@ -343,11 +425,15 @@ test("shared RSVP service still waitlists when the event is full", async () => {
       capacity: 1,
       waitlist_enabled: true,
     },
+    roles: [
+      { id: "role-service-4", event_id: "evt-service-4", spots_needed: 10, spots_filled: 1 },
+    ],
     rsvps: [
       {
         event_id: "evt-service-4",
         attendee_user_id: "user-accepted",
         status: "accepted",
+        role_id: "role-service-4",
         check_in_method: null,
         checked_in_at: null,
       },

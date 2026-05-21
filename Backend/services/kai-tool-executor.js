@@ -796,7 +796,25 @@ async function handleDraftEventListing(toolInput = {}, _userId, orgId) {
     const description = normalizeString(toolInput.description);
     const date = normalizeString(toolInput.date);
     const location = normalizeString(toolInput.location);
-    const volunteerCountRaw = parseInteger(toolInput.volunteer_count, null, { min: 1 });
+    const roles = Array.isArray(toolInput.roles)
+      ? toolInput.roles
+          .map((role) => {
+            const title = normalizeString(role?.title);
+            const spotsNeeded = parseInteger(role?.spots_needed ?? role?.spotsNeeded, null, { min: 1 });
+            if (!title || !Number.isInteger(spotsNeeded) || spotsNeeded < 1) return null;
+            return {
+              title,
+              description: normalizeString(role?.description) || null,
+              spotsNeeded,
+              tier: "standard",
+            };
+          })
+          .filter(Boolean)
+      : [];
+    if (!description || !date || roles.length < 1) {
+      return { error: true, message: "Draft event listings require description, date, and at least one role." };
+    }
+    const capacity = roles.reduce((sum, role) => sum + role.spotsNeeded, 0);
 
     const { rows } = await pool.query(
       "SELECT name FROM organizations WHERE id = $1",
@@ -811,7 +829,8 @@ async function handleDraftEventListing(toolInput = {}, _userId, orgId) {
         description,
         location_text: location || null,
         start_at: date || null,
-        capacity: volunteerCountRaw,
+        capacity,
+        roles,
         status: "draft",
         visibility: "public",
         verification_method: "host_attest",

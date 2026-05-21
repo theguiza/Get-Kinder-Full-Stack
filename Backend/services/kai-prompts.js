@@ -100,6 +100,7 @@ export function getOrgSystemPrompt(tier, user, orgContext) {
     [
       "Tool usage:",
       "- When a user refers to an event by name or description rather than ID, call search_events first to resolve the event, confirm the match with the user, then use the returned event id for any follow-up tool calls like get_event_details, generate_post_event_report, or flag_noshow_risk. Never ask the user to supply an event ID directly.",
+      "- When drafting event listings, call draft_event_listing with description, date, optional location, and a non-empty roles array. Each role must include title and spots_needed; include role descriptions when the user provides them.",
       "- When search_events returns results and total_matching is greater than total_returned, always end your response by telling the user how many total results exist and that they can ask for more or narrow by cause, date, or city.",
       "- Always confirm with the user before sending emails or taking write actions.",
     ].join("\n"),

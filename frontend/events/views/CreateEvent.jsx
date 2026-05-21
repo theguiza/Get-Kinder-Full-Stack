@@ -319,6 +319,7 @@ function createInitialState(defaultOrgName = "") {
     funding_pool_slug: "general",
     attendance_methods: ["social_proof"],
     safety_notes: "",
+    roles: [{ title: "Volunteer", spotsNeeded: 1 }],
   };
 }
 
@@ -888,7 +889,8 @@ export function CreateEvent({
       if (!res.ok || !data?.ok) {
         throw new Error(data?.error || "Unable to save draft before inviting.");
       }
-      const savedId = data?.data?.id ? String(data.data.id) : "";
+      const savedEvent = data?.data?.event || data?.data || {};
+      const savedId = savedEvent?.id ? String(savedEvent.id) : "";
       if (!savedId) {
         throw new Error("Draft saved but missing event id.");
       }
@@ -949,7 +951,8 @@ export function CreateEvent({
         throw new Error(data?.error || "Unable to save event");
       }
 
-      const savedId = data?.data?.id || editId;
+      const savedEvent = data?.data?.event || data?.data || {};
+      const savedId = savedEvent?.id || editId;
       const titleLabel = form.title || editingMeta?.title || "Untitled Event";
       const savingPublishedViaSecondary = isEditingPublished && !intentIsPublish;
 
@@ -964,7 +967,7 @@ export function CreateEvent({
         if (typeof window !== "undefined") {
           window.dispatchEvent(
             new CustomEvent("orgPortalEventCreated", {
-              detail: data?.data || null,
+              detail: savedEvent || null,
             })
           );
         }
@@ -1556,6 +1559,10 @@ function buildPayload(form, status) {
   const startTime = typeof form.start_time === "string" ? form.start_time.trim() : "";
   const endTime = typeof form.end_time === "string" ? form.end_time.trim() : "";
   const timeRange = startTime && endTime ? `${startTime}-${endTime}` : null;
+  const capacityValue = form.capacity ? Number(form.capacity) : 1;
+  const roles = Array.isArray(form.roles) && form.roles.length > 0
+    ? form.roles
+    : [{ title: "Volunteer", spotsNeeded: Number.isFinite(capacityValue) && capacityValue > 0 ? capacityValue : 1 }];
   return {
     title: form.title?.trim(),
     category: causeTags[0] || null,
@@ -1578,6 +1585,16 @@ function buildPayload(form, status) {
     funding_pool_slug: fundingPoolSlug,
     attendance_methods: attendanceMethods,
     safety_notes: form.safety_notes?.trim() || null,
+    roles: roles.map((role, index) => ({
+      title: role?.title?.trim() || "Volunteer",
+      description: role?.description?.trim() || null,
+      spotsNeeded: index === 0 && roles.length === 1 && (!role?.spotsNeeded || Number(role.spotsNeeded) === 1)
+        ? (Number.isFinite(capacityValue) && capacityValue > 0 ? capacityValue : 1)
+        : Number(role?.spotsNeeded ?? role?.spots_needed) || 1,
+      tier: role?.tier || "standard",
+      requirements: role?.requirements?.trim() || null,
+      safetyNotes: role?.safetyNotes?.trim() || null,
+    })),
     status,
   };
 }
