@@ -118,6 +118,209 @@
       .gk-section { padding: 56px 0; } .gk-sh-title { font-size: 26px; }
       .gk-del-sm, .gk-del-lg { grid-column: span 6; }
     }
+
+    /* ── Reporting Readiness Application Modal ──────────────── */
+    #rrModal .modal-dialog { max-width: 800px; }
+    #rrModal .modal-content {
+      border-radius: 20px; border: 1px solid #e3e4e8;
+      box-shadow: 0 8px 40px rgba(31,38,48,.14), 0 2px 8px rgba(31,38,48,.06);
+      overflow: hidden;
+    }
+    .rrm-header {
+      background: #fff; border-bottom: 1px solid #ececec;
+      padding: 22px 28px 0; flex-direction: column; align-items: stretch; gap: 0;
+    }
+    .rrm-header-top {
+      display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px;
+    }
+    .rrm-close-btn {
+      background: none; border: none; cursor: pointer; padding: 4px; color: #9a9ea7;
+      transition: color 120ms; flex-shrink: 0; margin-top: -4px;
+    }
+    .rrm-close-btn:hover { color: #283853; }
+    .rrm-title {
+      font-family: 'Poppins', sans-serif; font-weight: 600; font-size: 21px;
+      color: #283853; letter-spacing: -0.01em; margin: 0 0 7px; line-height: 1.2;
+    }
+    .rrm-intro { font-family: 'Roboto', sans-serif; font-size: 14px; color: #4d525e; line-height: 1.55; margin: 0 0 6px; }
+    .rrm-microcopy { font-family: 'Roboto', sans-serif; font-size: 12.5px; color: #6e7280; line-height: 1.4; margin: 0; }
+    .rrm-progress {
+      display: flex; align-items: stretch; border-top: 1px solid #f0f1f4; margin: 0 -28px;
+    }
+    .rrm-progress-step {
+      display: flex; align-items: center; gap: 8px; flex: 1; padding: 13px 14px;
+      border-bottom: 3px solid #e3e4e8; transition: border-color 200ms; min-width: 0;
+    }
+    .rrm-progress-step.is-active { border-bottom-color: #FF5656; }
+    .rrm-progress-step.is-done   { border-bottom-color: #0f8e72; }
+    .rrm-progress-step-num {
+      width: 22px; height: 22px; border-radius: 50%; background: #e3e4e8; color: #6e7280;
+      font-family: 'Roboto', sans-serif; font-size: 11px; font-weight: 700;
+      display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+      transition: background 200ms, color 200ms;
+    }
+    .rrm-progress-step.is-active .rrm-progress-step-num { background: #FF5656; color: #fff; }
+    .rrm-progress-step.is-done   .rrm-progress-step-num { background: #0f8e72; color: #fff; }
+    .rrm-progress-step-label {
+      font-family: 'Roboto', sans-serif; font-size: 12px; color: #9a9ea7; font-weight: 500;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .rrm-progress-step.is-active .rrm-progress-step-label { color: #283853; font-weight: 600; }
+    .rrm-progress-step.is-done   .rrm-progress-step-label { color: #0f8e72; }
+    .rrm-body { padding: 30px 28px; background: #fff; }
+    .rrm-step-heading {
+      font-family: 'Poppins', sans-serif; font-weight: 600; font-size: 19px;
+      color: #283853; margin: 0 0 5px; letter-spacing: -0.01em;
+    }
+    .rrm-step-desc {
+      font-family: 'Roboto', sans-serif; font-size: 14px; color: #4d525e;
+      line-height: 1.55; margin: 0 0 24px;
+    }
+    .rrm-field { margin-bottom: 18px; }
+    .rrm-label {
+      display: block; font-family: 'Roboto', sans-serif; font-size: 13.5px;
+      font-weight: 500; color: #283853; margin-bottom: 6px;
+    }
+    .rrm-req { color: #FF5656; margin-left: 2px; }
+    .rrm-input, .rrm-select, .rrm-textarea {
+      width: 100%; font-family: 'Roboto', sans-serif; font-size: 14px; color: #283853;
+      background: #fff; border: 1px solid #dfe3ec; border-radius: 10px; padding: 10px 14px;
+      transition: border-color 140ms, box-shadow 140ms; outline: none;
+      appearance: none; -webkit-appearance: none; box-sizing: border-box;
+    }
+    .rrm-input:focus, .rrm-select:focus, .rrm-textarea:focus {
+      border-color: #455A7C; box-shadow: 0 0 0 3px rgba(69,90,124,0.1);
+    }
+    .rrm-input.is-invalid, .rrm-select.is-invalid, .rrm-textarea.is-invalid {
+      border-color: #b8443c; box-shadow: 0 0 0 3px rgba(184,68,60,0.08);
+    }
+    .rrm-select {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236e7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+      background-repeat: no-repeat; background-position: right 14px center; padding-right: 36px; cursor: pointer;
+    }
+    .rrm-textarea { resize: vertical; min-height: 90px; line-height: 1.55; }
+    .rrm-err {
+      display: none; font-family: 'Roboto', sans-serif; font-size: 12px;
+      color: #b8443c; margin-top: 4px;
+    }
+    .rrm-err.visible { display: block; }
+    .rrm-helper {
+      font-family: 'Roboto', sans-serif; font-size: 12px; color: #6e7280; margin-top: 4px; line-height: 1.4;
+    }
+    .rrm-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .rrm-chk-group {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 6px;
+    }
+    .rrm-chk-item {
+      display: flex; align-items: flex-start; gap: 9px; padding: 9px 12px;
+      background: #fafafa; border: 1px solid #e3e4e8; border-radius: 8px;
+      cursor: pointer; transition: background 100ms, border-color 100ms; user-select: none;
+    }
+    .rrm-chk-item:hover { background: #f5f7fb; border-color: #c4c8d4; }
+    .rrm-chk-item.is-on { background: #fff1f0; border-color: #FF5656; }
+    .rrm-chk-item input[type="checkbox"] { margin-top: 2px; flex-shrink: 0; accent-color: #FF5656; cursor: pointer; }
+    .rrm-chk-lbl { font-family: 'Roboto', sans-serif; font-size: 13px; color: #283853; line-height: 1.4; cursor: pointer; }
+    .rrm-scale-grp { display: flex; gap: 7px; flex-wrap: nowrap; margin-top: 6px; }
+    .rrm-scale-btn {
+      flex: 1; background: #fafafa; border: 1px solid #e3e4e8; border-radius: 10px;
+      padding: 11px 6px; text-align: center; cursor: pointer;
+      transition: background 100ms, border-color 100ms;
+      font-family: 'Roboto', sans-serif; font-size: 15px; font-weight: 600;
+      color: #283853; user-select: none; display: flex; flex-direction: column; align-items: center; gap: 3px;
+    }
+    .rrm-scale-btn:hover { background: #f5f7fb; border-color: #c4c8d4; }
+    .rrm-scale-btn.is-on { background: #FF5656; border-color: #FF5656; color: #fff; }
+    .rrm-scale-sub { font-size: 10px; font-weight: 400; opacity: 0.78; line-height: 1.2; }
+    .rrm-consent-wrap {
+      display: flex; align-items: flex-start; gap: 12px; background: #f9fafb;
+      border: 1px solid #e3e4e8; border-radius: 10px; padding: 14px 16px;
+      cursor: pointer; user-select: none;
+    }
+    .rrm-consent-wrap.is-invalid { border-color: #b8443c; background: #fff9f9; }
+    .rrm-consent-wrap input[type="checkbox"] { margin-top: 2px; flex-shrink: 0; accent-color: #FF5656; width: 17px; height: 17px; cursor: pointer; }
+    .rrm-consent-lbl { font-family: 'Roboto', sans-serif; font-size: 13px; color: #283853; line-height: 1.5; cursor: pointer; }
+    .rrm-trust {
+      font-family: 'Roboto', sans-serif; font-size: 11.5px; color: #9a9ea7;
+      text-align: center; line-height: 1.5; padding-top: 14px; border-top: 1px solid #f0f1f4; margin-top: 6px;
+    }
+    .rrm-footer {
+      border-top: 1px solid #ececec; padding: 15px 28px; background: #fff;
+      display: flex; align-items: center; gap: 10px; justify-content: flex-end; flex-shrink: 0;
+    }
+    .rrm-btn-back {
+      background: none; border: 1px solid #dcdde0; border-radius: 10px; padding: 10px 18px;
+      font-family: 'Roboto', sans-serif; font-size: 14px; font-weight: 500; color: #455A7C;
+      cursor: pointer; transition: background 120ms; margin-right: auto;
+      display: inline-flex; align-items: center; gap: 6px;
+    }
+    .rrm-btn-back:hover { background: #f5f7fb; }
+    .rrm-btn-next, .rrm-btn-submit {
+      display: inline-flex; align-items: center; gap: 7px; background: #FF5656;
+      color: #fff; border: none; border-radius: 10px; padding: 11px 20px;
+      font-family: 'Roboto', sans-serif; font-size: 14px; font-weight: 500; cursor: pointer;
+      transition: transform 140ms, box-shadow 140ms;
+      box-shadow: 0 1px 2px rgba(31,38,48,.06), 0 2px 6px rgba(255,86,86,.18);
+    }
+    .rrm-btn-next:hover, .rrm-btn-submit:hover {
+      transform: translateY(-1px); box-shadow: 0 2px 4px rgba(31,38,48,.06), 0 8px 18px rgba(255,86,86,.24);
+    }
+    .rrm-btn-next:disabled, .rrm-btn-submit:disabled { opacity: 0.65; cursor: not-allowed; transform: none; }
+    .rrm-btn-close-final, .rrm-btn-return {
+      background: none; border: 1px solid #dcdde0; border-radius: 10px; padding: 10px 18px;
+      font-family: 'Roboto', sans-serif; font-size: 14px; font-weight: 500;
+      color: #455A7C; cursor: pointer; transition: background 120ms;
+    }
+    .rrm-btn-close-final:hover, .rrm-btn-return:hover { background: #f5f7fb; }
+    .rrm-btn-return { border-color: transparent; color: #FF5656; margin-right: auto; padding-left: 0; }
+    .rrm-btn-return:hover { background: none; text-decoration: underline; }
+    .rrm-confirm-icon {
+      width: 58px; height: 58px; border-radius: 50%; background: #ecf8f5;
+      display: flex; align-items: center; justify-content: center; margin-bottom: 20px;
+    }
+    .rrm-confirm-title {
+      font-family: 'Poppins', sans-serif; font-weight: 600; font-size: 22px; color: #283853;
+      letter-spacing: -0.01em; margin: 0 0 14px; line-height: 1.2;
+    }
+    .rrm-confirm-body {
+      font-family: 'Roboto', sans-serif; font-size: 15px; color: #4d525e; line-height: 1.65; margin-bottom: 22px;
+    }
+    .rrm-confirm-next {
+      background: #f9fafb; border: 1px solid #e3e4e8; border-radius: 12px; padding: 20px 22px; margin-bottom: 22px;
+    }
+    .rrm-confirm-step {
+      display: flex; align-items: flex-start; gap: 13px; margin-bottom: 14px;
+    }
+    .rrm-confirm-step:last-child { margin-bottom: 0; }
+    .rrm-confirm-step-num {
+      width: 24px; height: 24px; border-radius: 50%; background: #283853; color: #fff;
+      font-family: 'Roboto', sans-serif; font-size: 11px; font-weight: 700;
+      display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px;
+    }
+    .rrm-confirm-step-text { font-family: 'Roboto', sans-serif; font-size: 14px; color: #4d525e; line-height: 1.5; }
+    .rrm-submit-error {
+      background: #fff9f9; border: 1px solid #ffd6d6; border-radius: 8px; padding: 11px 14px;
+      margin-bottom: 14px; font-family: 'Roboto', sans-serif; font-size: 13px; color: #b8443c;
+      display: flex; align-items: center; gap: 9px;
+    }
+    @media (max-width: 767.98px) {
+      #rrModal .modal-dialog { margin: 0; max-width: 100%; min-height: 100%; }
+      #rrModal .modal-dialog-scrollable { height: 100%; }
+      #rrModal .modal-content { border-radius: 0; min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; }
+      #rrModal .modal-body.rrm-body { flex: 1 1 auto; padding: 22px 18px; }
+      .rrm-header { padding: 16px 18px 0; }
+      .rrm-footer { padding: 12px 18px; position: sticky; bottom: 0; background: #fff; border-top: 1px solid #ececec; z-index: 2; }
+      .rrm-row { grid-template-columns: 1fr; gap: 0; }
+      .rrm-chk-group { grid-template-columns: 1fr; }
+      .rrm-scale-grp { gap: 5px; }
+      .rrm-scale-btn { padding: 10px 4px; font-size: 14px; }
+      .rrm-progress-step { padding: 11px 10px; gap: 6px; }
+      .rrm-progress-step-label { display: none; }
+      .rrm-title { font-size: 18px; }
+    }
+    @media (min-width: 768px) {
+      #rrModal .modal-dialog { margin: 2rem auto; }
+      #rrModal .modal-dialog-scrollable .modal-content { max-height: calc(100vh - 4rem); }
+    }
   </style>
 </head>
 <body class="home-page">
@@ -937,6 +1140,376 @@
     </div>
   </footer>
 
+  <!-- ═══════════════════════════════════════════════════
+       REPORTING READINESS APPLICATION MODAL
+  ═══════════════════════════════════════════════════════ -->
+  <div class="modal fade" id="rrModal" tabindex="-1" role="dialog"
+       aria-labelledby="rrModalTitle" aria-modal="true" aria-describedby="rrModalDesc">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content">
+
+        <!-- HEADER -->
+        <div class="modal-header rrm-header">
+          <div class="rrm-header-top">
+            <div style="flex:1;min-width:0;">
+              <div class="gk-eyebrow" style="margin-bottom:8px;">Design partner application</div>
+              <h2 class="rrm-title" id="rrModalTitle">Apply for a Reporting Readiness Call</h2>
+              <p class="rrm-intro" id="rrModalDesc">We're selecting 5 nonprofit design partners for a free Impact Reporting &amp; Data Readiness Assessment. Answer a few questions so we can understand your reporting needs and confirm whether the assessment is a strong fit.</p>
+              <p class="rrm-microcopy">Selected nonprofits receive a 1–2 week review, a 10–15 page assessment, and a 60-minute readout presentation. The call confirms fit before any materials are reviewed.</p>
+            </div>
+            <button class="rrm-close-btn" id="rrCloseBtn" type="button" aria-label="Close application form">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+          <!-- Progress indicator -->
+          <div class="rrm-progress" role="group" aria-label="Application steps">
+            <div class="rrm-progress-step is-active" id="rrProg1">
+              <span class="rrm-progress-step-num" aria-hidden="true">1</span>
+              <span class="rrm-progress-step-label">Organization fit</span>
+            </div>
+            <div class="rrm-progress-step" id="rrProg2">
+              <span class="rrm-progress-step-num" aria-hidden="true">2</span>
+              <span class="rrm-progress-step-label">Reporting pressure</span>
+            </div>
+            <div class="rrm-progress-step" id="rrProg3">
+              <span class="rrm-progress-step-num" aria-hidden="true">3</span>
+              <span class="rrm-progress-step-label">Data readiness</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- BODY -->
+        <div class="modal-body rrm-body">
+
+          <!-- ── STEP 1 ── -->
+          <div id="rrStep1">
+            <h3 class="rrm-step-heading">Tell us about your organization</h3>
+            <p class="rrm-step-desc">First, we'll confirm basic fit for the design partner cohort.</p>
+
+            <div class="rrm-row">
+              <div class="rrm-field">
+                <label class="rrm-label" for="rrOrgName">Organization name <span class="rrm-req" aria-label="required">*</span></label>
+                <input class="rrm-input" type="text" id="rrOrgName" placeholder="Organization name" autocomplete="organization">
+                <div class="rrm-err" id="rrOrgNameErr">Please enter your organization name.</div>
+              </div>
+              <div class="rrm-field">
+                <label class="rrm-label" for="rrWebsite">Website <span class="rrm-req" aria-label="required">*</span></label>
+                <input class="rrm-input" type="text" id="rrWebsite" placeholder="https://yourorganization.org" autocomplete="url">
+                <div class="rrm-err" id="rrWebsiteErr">Please enter a valid website URL.</div>
+              </div>
+            </div>
+
+            <div class="rrm-row">
+              <div class="rrm-field">
+                <label class="rrm-label" for="rrContactName">Your name <span class="rrm-req" aria-label="required">*</span></label>
+                <input class="rrm-input" type="text" id="rrContactName" placeholder="Full name" autocomplete="name">
+                <div class="rrm-err" id="rrContactNameErr">Please enter your full name.</div>
+              </div>
+              <div class="rrm-field">
+                <label class="rrm-label" for="rrRole">Your role <span class="rrm-req" aria-label="required">*</span></label>
+                <select class="rrm-select" id="rrRole">
+                  <option value="" disabled selected>Select your role</option>
+                  <option>Executive Director / CEO</option>
+                  <option>Development / Fundraising</option>
+                  <option>Programs</option>
+                  <option>Operations</option>
+                  <option>Finance</option>
+                  <option>Evaluation / Impact</option>
+                  <option>Board member</option>
+                  <option>Other</option>
+                </select>
+                <div class="rrm-err" id="rrRoleErr">Please select your role.</div>
+              </div>
+            </div>
+
+            <div class="rrm-field" id="rrRoleOtherWrap" style="display:none;">
+              <label class="rrm-label" for="rrRoleOther">Please specify your role <span class="rrm-req" aria-label="required">*</span></label>
+              <input class="rrm-input" type="text" id="rrRoleOther" placeholder="Your role">
+              <div class="rrm-err" id="rrRoleOtherErr">Please specify your role.</div>
+            </div>
+
+            <div class="rrm-row">
+              <div class="rrm-field">
+                <label class="rrm-label" for="rrEmail">Email <span class="rrm-req" aria-label="required">*</span></label>
+                <input class="rrm-input" type="email" id="rrEmail" placeholder="name@organization.org" autocomplete="email">
+                <div class="rrm-err" id="rrEmailErr">Please enter a valid email address.</div>
+              </div>
+              <div class="rrm-field">
+                <label class="rrm-label" for="rrPhone">Phone number</label>
+                <input class="rrm-input" type="tel" id="rrPhone" placeholder="Optional" autocomplete="tel">
+              </div>
+            </div>
+
+            <div class="rrm-row">
+              <div class="rrm-field">
+                <label class="rrm-label" for="rrBudget">Annual operating budget <span class="rrm-req" aria-label="required">*</span></label>
+                <select class="rrm-select" id="rrBudget">
+                  <option value="" disabled selected>Select budget range</option>
+                  <option>Under $250K</option>
+                  <option>$250K–$500K</option>
+                  <option>$500K–$1M</option>
+                  <option>$1M–$2M</option>
+                  <option>$2M–$5M</option>
+                  <option>$5M+</option>
+                  <option>Not sure</option>
+                </select>
+                <div class="rrm-err" id="rrBudgetErr">Please select a budget range.</div>
+              </div>
+              <div class="rrm-field">
+                <label class="rrm-label" for="rrProgramArea">Primary program area <span class="rrm-req" aria-label="required">*</span></label>
+                <select class="rrm-select" id="rrProgramArea">
+                  <option value="" disabled selected>Select primary area</option>
+                  <option>Social services</option>
+                  <option>Health</option>
+                  <option>Housing / community development</option>
+                  <option>Food security</option>
+                  <option>Youth / children</option>
+                  <option>Seniors</option>
+                  <option>Newcomer / settlement</option>
+                  <option>Disability</option>
+                  <option>Arts / culture</option>
+                  <option>Environment</option>
+                  <option>Education</option>
+                  <option>Other</option>
+                </select>
+                <div class="rrm-err" id="rrProgramAreaErr">Please select a program area.</div>
+              </div>
+            </div>
+
+            <div class="rrm-field" id="rrProgAreaOtherWrap" style="display:none;">
+              <label class="rrm-label" for="rrProgAreaOther">Please specify your primary program area <span class="rrm-req" aria-label="required">*</span></label>
+              <input class="rrm-input" type="text" id="rrProgAreaOther" placeholder="Primary program area">
+              <div class="rrm-err" id="rrProgAreaOtherErr">Please specify your program area.</div>
+            </div>
+          </div><!-- /#rrStep1 -->
+
+          <!-- ── STEP 2 ── -->
+          <div id="rrStep2" style="display:none;">
+            <h3 class="rrm-step-heading">What reporting pressure are you facing?</h3>
+            <p class="rrm-step-desc">The assessment is designed for nonprofits with real funder reporting needs, upcoming renewals, or difficulty proving impact clearly.</p>
+
+            <div class="rrm-field">
+              <label class="rrm-label" for="rrFundingStatus">Do you currently receive grant, foundation, government, or institutional funding? <span class="rrm-req" aria-label="required">*</span></label>
+              <select class="rrm-select" id="rrFundingStatus">
+                <option value="" disabled selected>Select one</option>
+                <option>Yes</option>
+                <option>No</option>
+                <option>Applying now</option>
+                <option>Not sure</option>
+              </select>
+              <div class="rrm-err" id="rrFundingStatusErr">Please select an option.</div>
+            </div>
+
+            <div class="rrm-field">
+              <label class="rrm-label" for="rrFundersList">Which funders do you currently report to or hope to report to?</label>
+              <textarea class="rrm-textarea" id="rrFundersList" rows="3" placeholder="Examples: Vancouver Foundation, United Way, City of Vancouver, BC Government, family foundations, corporate funders."></textarea>
+              <p class="rrm-helper">This helps us understand the type of reporting evidence your organization may need.</p>
+            </div>
+
+            <div class="rrm-field">
+              <label class="rrm-label" id="rrChalLbl">What best describes your current reporting challenge? <span class="rrm-req" aria-label="required">*</span></label>
+              <p class="rrm-helper" style="margin-bottom:8px;">Select all that apply.</p>
+              <div class="rrm-chk-group" id="rrChalGroup" role="group" aria-labelledby="rrChalLbl">
+                <label class="rrm-chk-item"><input type="checkbox" name="challenges" value="We spend too much time preparing funder reports"><span class="rrm-chk-lbl">We spend too much time preparing funder reports</span></label>
+                <label class="rrm-chk-item"><input type="checkbox" name="challenges" value="Our impact data is spread across too many places"><span class="rrm-chk-lbl">Our impact data is spread across too many places</span></label>
+                <label class="rrm-chk-item"><input type="checkbox" name="challenges" value="We struggle to prove outcomes, not just activities"><span class="rrm-chk-lbl">We struggle to prove outcomes, not just activities</span></label>
+                <label class="rrm-chk-item"><input type="checkbox" name="challenges" value="Program staff are constantly asked to find numbers/stories"><span class="rrm-chk-lbl">Program staff are constantly asked to find numbers/stories</span></label>
+                <label class="rrm-chk-item"><input type="checkbox" name="challenges" value="We do not have a dedicated data or evaluation person"><span class="rrm-chk-lbl">We do not have a dedicated data or evaluation person</span></label>
+                <label class="rrm-chk-item"><input type="checkbox" name="challenges" value="We are preparing for a grant renewal or larger funding ask"><span class="rrm-chk-lbl">We are preparing for a grant renewal or larger funding ask</span></label>
+                <label class="rrm-chk-item"><input type="checkbox" name="challenges" value="We are not confident our reports reflect our true impact"><span class="rrm-chk-lbl">We are not confident our reports reflect our true impact</span></label>
+                <label class="rrm-chk-item"><input type="checkbox" name="challenges" value="We are unsure what funders expect to see"><span class="rrm-chk-lbl">We are unsure what funders expect to see</span></label>
+                <label class="rrm-chk-item"><input type="checkbox" name="challenges" value="We have useful stories but they are not connected to data"><span class="rrm-chk-lbl">We have useful stories but they are not connected to data</span></label>
+                <label class="rrm-chk-item"><input type="checkbox" name="challenges" value="We track activity, but not outcomes"><span class="rrm-chk-lbl">We track activity, but not outcomes</span></label>
+                <label class="rrm-chk-item"><input type="checkbox" name="challenges" value="Other"><span class="rrm-chk-lbl">Other</span></label>
+              </div>
+              <div class="rrm-err" id="rrChalErr">Please select at least one option.</div>
+            </div>
+
+            <div class="rrm-field" id="rrChalOtherWrap" style="display:none;">
+              <label class="rrm-label" for="rrChalOther">Please describe your reporting challenge <span class="rrm-req" aria-label="required">*</span></label>
+              <textarea class="rrm-textarea" id="rrChalOther" rows="3" placeholder="Describe your reporting challenge"></textarea>
+              <div class="rrm-err" id="rrChalOtherErr">Please describe your reporting challenge.</div>
+            </div>
+
+            <div class="rrm-field">
+              <label class="rrm-label" for="rrDeadline">Do you have a funder report, renewal, or major application coming up in the next 3–6 months? <span class="rrm-req" aria-label="required">*</span></label>
+              <select class="rrm-select" id="rrDeadline">
+                <option value="" disabled selected>Select one</option>
+                <option>Yes, within 30 days</option>
+                <option>Yes, within 1–3 months</option>
+                <option>Yes, within 3–6 months</option>
+                <option>Not currently</option>
+                <option>Not sure</option>
+              </select>
+              <div class="rrm-err" id="rrDeadlineErr">Please select an option.</div>
+            </div>
+
+            <div class="rrm-field">
+              <label class="rrm-label" id="rrConfLbl">How confident are you that your current data can support funder-grade impact reporting? <span class="rrm-req" aria-label="required">*</span></label>
+              <div class="rrm-scale-grp" role="group" aria-labelledby="rrConfLbl">
+                <button type="button" class="rrm-scale-btn" data-val="1" aria-pressed="false">1<span class="rrm-scale-sub">Not confident</span></button>
+                <button type="button" class="rrm-scale-btn" data-val="2" aria-pressed="false">2<span class="rrm-scale-sub">Slightly</span></button>
+                <button type="button" class="rrm-scale-btn" data-val="3" aria-pressed="false">3<span class="rrm-scale-sub">Somewhat</span></button>
+                <button type="button" class="rrm-scale-btn" data-val="4" aria-pressed="false">4<span class="rrm-scale-sub">Confident</span></button>
+                <button type="button" class="rrm-scale-btn" data-val="5" aria-pressed="false">5<span class="rrm-scale-sub">Very confident</span></button>
+              </div>
+              <input type="hidden" id="rrConf">
+              <div class="rrm-err" id="rrConfErr">Please select a confidence level.</div>
+            </div>
+
+            <div class="rrm-field">
+              <label class="rrm-label" for="rrFunderUnderstanding">What is the biggest thing you wish funders understood about your impact? <span class="rrm-req" aria-label="required">*</span></label>
+              <textarea class="rrm-textarea" id="rrFunderUnderstanding" rows="4" placeholder="Tell us what your organization does that funders may not fully see or understand today."></textarea>
+              <div class="rrm-err" id="rrFunderUnderstandingErr">Please share what you wish funders understood.</div>
+            </div>
+          </div><!-- /#rrStep2 -->
+
+          <!-- ── STEP 3 ── -->
+          <div id="rrStep3" style="display:none;">
+            <h3 class="rrm-step-heading">What materials could we review if selected?</h3>
+            <p class="rrm-step-desc">We do not need perfect data. The assessment is designed to understand where your evidence lives today, what is missing, and what would make your reporting stronger.</p>
+
+            <div class="rrm-field">
+              <label class="rrm-label" id="rrDataLocLbl">Where does your impact/program data currently live? <span class="rrm-req" aria-label="required">*</span></label>
+              <p class="rrm-helper" style="margin-bottom:8px;">Select all that apply.</p>
+              <div class="rrm-chk-group" id="rrDataLocGroup" role="group" aria-labelledby="rrDataLocLbl">
+                <label class="rrm-chk-item"><input type="checkbox" name="dataLoc" value="Spreadsheets"><span class="rrm-chk-lbl">Spreadsheets</span></label>
+                <label class="rrm-chk-item"><input type="checkbox" name="dataLoc" value="Google Drive / SharePoint / Dropbox"><span class="rrm-chk-lbl">Google Drive / SharePoint / Dropbox</span></label>
+                <label class="rrm-chk-item"><input type="checkbox" name="dataLoc" value="Paper forms"><span class="rrm-chk-lbl">Paper forms</span></label>
+                <label class="rrm-chk-item"><input type="checkbox" name="dataLoc" value="Email threads"><span class="rrm-chk-lbl">Email threads</span></label>
+                <label class="rrm-chk-item"><input type="checkbox" name="dataLoc" value="CRM"><span class="rrm-chk-lbl">CRM</span></label>
+                <label class="rrm-chk-item"><input type="checkbox" name="dataLoc" value="Case management system"><span class="rrm-chk-lbl">Case management system</span></label>
+                <label class="rrm-chk-item"><input type="checkbox" name="dataLoc" value="Survey tools"><span class="rrm-chk-lbl">Survey tools</span></label>
+                <label class="rrm-chk-item"><input type="checkbox" name="dataLoc" value="Accounting system"><span class="rrm-chk-lbl">Accounting system</span></label>
+                <label class="rrm-chk-item"><input type="checkbox" name="dataLoc" value="Volunteer management system"><span class="rrm-chk-lbl">Volunteer management system</span></label>
+                <label class="rrm-chk-item"><input type="checkbox" name="dataLoc" value="Past grant reports"><span class="rrm-chk-lbl">Past grant reports</span></label>
+                <label class="rrm-chk-item"><input type="checkbox" name="dataLoc" value="Program calendars"><span class="rrm-chk-lbl">Program calendars</span></label>
+                <label class="rrm-chk-item"><input type="checkbox" name="dataLoc" value="Intake forms"><span class="rrm-chk-lbl">Intake forms</span></label>
+                <label class="rrm-chk-item"><input type="checkbox" name="dataLoc" value="Staff notes"><span class="rrm-chk-lbl">Staff notes</span></label>
+                <label class="rrm-chk-item"><input type="checkbox" name="dataLoc" value="Staff memory"><span class="rrm-chk-lbl">Staff memory</span></label>
+                <label class="rrm-chk-item"><input type="checkbox" name="dataLoc" value="Board reports or board decks"><span class="rrm-chk-lbl">Board reports or board decks</span></label>
+                <label class="rrm-chk-item"><input type="checkbox" name="dataLoc" value="Annual reports"><span class="rrm-chk-lbl">Annual reports</span></label>
+                <label class="rrm-chk-item"><input type="checkbox" name="dataLoc" value="Other"><span class="rrm-chk-lbl">Other</span></label>
+              </div>
+              <div class="rrm-err" id="rrDataLocErr">Please select at least one option.</div>
+            </div>
+
+            <div class="rrm-field" id="rrDataLocOtherWrap" style="display:none;">
+              <label class="rrm-label" for="rrDataLocOther">Please specify <span class="rrm-req" aria-label="required">*</span></label>
+              <input class="rrm-input" type="text" id="rrDataLocOther" placeholder="Where else does your data live?">
+              <div class="rrm-err" id="rrDataLocOtherErr">Please specify other data locations.</div>
+            </div>
+
+            <div class="rrm-field">
+              <label class="rrm-label" id="rrShareLbl">Would you be able to share sample reporting materials if selected? <span class="rrm-req" aria-label="required">*</span></label>
+              <p class="rrm-helper" style="margin-bottom:8px;">Select all that apply.</p>
+              <div class="rrm-chk-group" id="rrShareGroup" role="group" aria-labelledby="rrShareLbl">
+                <label class="rrm-chk-item"><input type="checkbox" name="shareable" value="Past grant reports"><span class="rrm-chk-lbl">Past grant reports</span></label>
+                <label class="rrm-chk-item"><input type="checkbox" name="shareable" value="Funder reporting templates"><span class="rrm-chk-lbl">Funder reporting templates</span></label>
+                <label class="rrm-chk-item"><input type="checkbox" name="shareable" value="Program spreadsheets"><span class="rrm-chk-lbl">Program spreadsheets</span></label>
+                <label class="rrm-chk-item"><input type="checkbox" name="shareable" value="Survey summaries"><span class="rrm-chk-lbl">Survey summaries</span></label>
+                <label class="rrm-chk-item"><input type="checkbox" name="shareable" value="Anonymized stories/testimonials"><span class="rrm-chk-lbl">Anonymized stories/testimonials</span></label>
+                <label class="rrm-chk-item"><input type="checkbox" name="shareable" value="Program descriptions"><span class="rrm-chk-lbl">Program descriptions</span></label>
+                <label class="rrm-chk-item"><input type="checkbox" name="shareable" value="Data flow/process examples"><span class="rrm-chk-lbl">Data flow/process examples</span></label>
+                <label class="rrm-chk-item"><input type="checkbox" name="shareable" value="Board reports or annual reports"><span class="rrm-chk-lbl">Board reports or annual reports</span></label>
+                <label class="rrm-chk-item"><input type="checkbox" name="shareable" value="We need to discuss privacy first"><span class="rrm-chk-lbl">We need to discuss privacy first</span></label>
+                <label class="rrm-chk-item"><input type="checkbox" name="shareable" value="Not sure"><span class="rrm-chk-lbl">Not sure</span></label>
+              </div>
+              <div class="rrm-err" id="rrShareErr">Please select at least one option.</div>
+            </div>
+
+            <div class="rrm-row">
+              <div class="rrm-field">
+                <label class="rrm-label" for="rrSensitive">Handle sensitive beneficiary/client data? <span class="rrm-req" aria-label="required">*</span></label>
+                <select class="rrm-select" id="rrSensitive">
+                  <option value="" disabled selected>Select one</option>
+                  <option>Yes</option>
+                  <option>No</option>
+                  <option>Not sure</option>
+                </select>
+                <div class="rrm-err" id="rrSensitiveErr">Please select an option.</div>
+              </div>
+              <div class="rrm-field">
+                <label class="rrm-label" for="rrAnonLearnings">Open to sharing anonymized learnings? <span class="rrm-req" aria-label="required">*</span></label>
+                <select class="rrm-select" id="rrAnonLearnings">
+                  <option value="" disabled selected>Select one</option>
+                  <option>Yes</option>
+                  <option>Yes, with review/approval first</option>
+                  <option>No</option>
+                  <option>Not sure</option>
+                </select>
+                <div class="rrm-err" id="rrAnonLearningsErr">Please select an option.</div>
+                <p class="rrm-helper">We would not publish identifiable information without permission.</p>
+              </div>
+            </div>
+
+            <div class="rrm-field">
+              <label class="rrm-label" for="rrAssessValue">What would make this assessment valuable for your organization? <span class="rrm-req" aria-label="required">*</span></label>
+              <textarea class="rrm-textarea" id="rrAssessValue" rows="4" placeholder="Examples: reducing reporting burden, preparing for a renewal, understanding data gaps, building a stronger funding case, organizing stories and outcomes."></textarea>
+              <div class="rrm-err" id="rrAssessValueErr">Please describe what would make the assessment valuable.</div>
+            </div>
+
+            <div class="rrm-field">
+              <label class="rrm-label" for="rrNotes">Anything else we should know before the call?</label>
+              <textarea class="rrm-textarea" id="rrNotes" rows="3" placeholder="Optional"></textarea>
+            </div>
+
+            <!-- Consent -->
+            <div class="rrm-field">
+              <label class="rrm-consent-wrap" id="rrConsentWrap" for="rrConsent">
+                <input type="checkbox" id="rrConsent">
+                <span class="rrm-consent-lbl">I understand this form is used to assess fit for the design partner cohort and that selected nonprofits will complete a data handling agreement before sharing materials.</span>
+              </label>
+              <div class="rrm-err" id="rrConsentErr">You must confirm this before submitting.</div>
+            </div>
+
+            <!-- Trust line -->
+            <div class="rrm-trust">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              Your data stays yours. We do not use your data to train AI models. Selected nonprofits complete a data handling agreement before sharing assessment materials.
+            </div>
+          </div><!-- /#rrStep3 -->
+
+          <!-- ── CONFIRMATION ── -->
+          <div id="rrConfirm" style="display:none;">
+            <div class="rrm-confirm-icon">
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#0f8e72" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            </div>
+            <h3 class="rrm-confirm-title">Thank you — we'll review your fit for the design partner cohort.</h3>
+            <p class="rrm-confirm-body">If your organization appears aligned with the Impact Reporting &amp; Data Readiness Assessment, we'll invite you to book a 30-minute Reporting Readiness Call. The call is used to understand your reporting needs, confirm data handling expectations, and decide whether to proceed with the free assessment.</p>
+            <div class="rrm-confirm-next">
+              <div style="font-family:'Roboto',sans-serif;font-size:11px;color:#6e7280;letter-spacing:0.1em;text-transform:uppercase;font-weight:600;margin-bottom:16px;">What happens next</div>
+              <div class="rrm-confirm-step"><div class="rrm-confirm-step-num">1</div><div class="rrm-confirm-step-text">We review your responses.</div></div>
+              <div class="rrm-confirm-step"><div class="rrm-confirm-step-num">2</div><div class="rrm-confirm-step-text">If there is a strong fit, we send a link to book a 30-minute Reporting Readiness Call.</div></div>
+              <div class="rrm-confirm-step"><div class="rrm-confirm-step-num">3</div><div class="rrm-confirm-step-text">If both teams decide to proceed, we complete a data handling agreement before any materials are reviewed.</div></div>
+              <div class="rrm-confirm-step"><div class="rrm-confirm-step-num">4</div><div class="rrm-confirm-step-text">Selected design partners receive a free 1–2 week assessment and a 60-minute readout presentation.</div></div>
+            </div>
+          </div><!-- /#rrConfirm -->
+
+        </div><!-- /.modal-body -->
+
+        <!-- FOOTER -->
+        <div class="modal-footer rrm-footer">
+          <button type="button" class="rrm-btn-back" id="rrBtnBack" style="display:none;" aria-label="Go back to previous step">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+            Back
+          </button>
+          <button type="button" class="rrm-btn-next" id="rrBtnNext">
+            Next: Reporting needs
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
+          <button type="button" class="rrm-btn-submit" id="rrBtnSubmit" style="display:none;">
+            Submit Application
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
+          <button type="button" class="rrm-btn-return" id="rrBtnReturn" style="display:none;">Return to homepage</button>
+          <button type="button" class="rrm-btn-close-final" id="rrBtnCloseFinal" style="display:none;">Close</button>
+        </div>
+
+      </div><!-- /.modal-content -->
+    </div><!-- /.modal-dialog -->
+  </div><!-- /#rrModal -->
+
   <!-- Logout modal (preserved) -->
   <div class="modal fade" id="logoutModal" tabindex="-1" aria-labelledby="logoutModalLabel" aria-hidden="true">
     <div class="modal-dialog">
@@ -1012,6 +1585,10 @@
     });
   </script>
 
+  <script type="application/json" id="home-scroll-config"><%- JSON.stringify({
+    initialSection: (typeof scrollToSection !== "undefined" && scrollToSection) ? scrollToSection : null
+  }).replace(/</g, '\\u003c') %></script>
+
   <script>
   (function () {
     var sectionPaths = {
@@ -1021,7 +1598,14 @@
       "/home/faq": "faq",
       "/home/book": "book"
     };
-    var initialSection = <% if (typeof scrollToSection !== "undefined" && scrollToSection) { %>"<%= scrollToSection %>"<% } else { %>null<% } %>;
+    var scrollConfig = {};
+    var scrollConfigEl = document.getElementById("home-scroll-config");
+    if (scrollConfigEl) {
+      try {
+        scrollConfig = JSON.parse(scrollConfigEl.textContent || "{}");
+      } catch (e) {}
+    }
+    var initialSection = scrollConfig.initialSection || null;
 
     function scrollToHomeSection(sectionId, behavior) {
       var section = document.getElementById(sectionId);
@@ -1051,6 +1635,16 @@
       }
 
       if (url.origin !== window.location.origin) return;
+
+      /* Intercept /home/book → open qualification modal */
+      if (url.pathname === "/home/book") {
+        event.preventDefault();
+        if (typeof window.openReportingReadinessModal === "function") {
+          window.openReportingReadinessModal();
+        }
+        return;
+      }
+
       var sectionId = sectionFromPath(url.pathname);
       if (!sectionId) return;
 
@@ -1117,6 +1711,340 @@
     window.addEventListener('load', function() {
       if (window.lucide) window.lucide.createIcons();
     });
+  </script>
+
+  <!-- Reporting Readiness Modal -->
+  <script>
+  (function () {
+    'use strict';
+
+    var rrStep = 1;
+    var rrDirty = false;
+    var rrDone = false;
+    var rrModal = null;
+
+    /* ── helpers ─────────────────────────────────────── */
+    function q(id) { return document.getElementById(id); }
+    function v(id) { var el = q(id); return el ? el.value.trim() : ''; }
+    function checked(sel) {
+      var out = [];
+      document.querySelectorAll(sel + ':checked').forEach(function(cb) { out.push(cb.value); });
+      return out;
+    }
+    function styleChkGroup(group) {
+      group.querySelectorAll('.rrm-chk-item').forEach(function(item) {
+        item.classList.toggle('is-on', !!(item.querySelector('input[type=checkbox]') || {checked:false}).checked);
+      });
+    }
+    function showErr(id) { var e = q(id); if (e) e.classList.add('visible'); }
+    function hideErr(id) { var e = q(id); if (e) e.classList.remove('visible'); }
+    function markInvalid(id, isInvalid) { var el = q(id); if (el) el.classList.toggle('is-invalid', isInvalid); }
+
+    /* ── init ────────────────────────────────────────── */
+    function rrInit() {
+      var modalEl = q('rrModal');
+      if (!modalEl || !window.bootstrap) return;
+
+      rrModal = new bootstrap.Modal(modalEl, { backdrop: 'static', keyboard: false });
+
+      q('rrCloseBtn').addEventListener('click', rrClose);
+      q('rrBtnBack').addEventListener('click', function() { rrGo(rrStep - 1); });
+      q('rrBtnNext').addEventListener('click', rrNext);
+      q('rrBtnSubmit').addEventListener('click', rrSubmit);
+      q('rrBtnCloseFinal').addEventListener('click', function() { rrModal.hide(); rrReset(); });
+      q('rrBtnReturn').addEventListener('click', function() {
+        rrModal.hide(); rrReset();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      });
+
+      /* Escape key */
+      modalEl.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') rrClose();
+      });
+
+      /* Focus first field on open */
+      modalEl.addEventListener('shown.bs.modal', function() {
+        var first = modalEl.querySelector('#rrStep1 input, #rrStep1 select');
+        if (first) first.focus();
+      });
+
+      /* Conditional: Role Other */
+      q('rrRole').addEventListener('change', function() {
+        var show = this.value === 'Other';
+        q('rrRoleOtherWrap').style.display = show ? 'block' : 'none';
+        if (!show) { q('rrRoleOther').value = ''; markInvalid('rrRoleOther', false); hideErr('rrRoleOtherErr'); }
+        rrDirty = true;
+      });
+
+      /* Conditional: Program area Other */
+      q('rrProgramArea').addEventListener('change', function() {
+        var show = this.value === 'Other';
+        q('rrProgAreaOtherWrap').style.display = show ? 'block' : 'none';
+        if (!show) { q('rrProgAreaOther').value = ''; markInvalid('rrProgAreaOther', false); hideErr('rrProgAreaOtherErr'); }
+        rrDirty = true;
+      });
+
+      /* Checkbox groups */
+      q('rrChalGroup').addEventListener('change', function(e) {
+        styleChkGroup(this);
+        var hasOther = !!this.querySelector('[value=Other]:checked');
+        q('rrChalOtherWrap').style.display = hasOther ? 'block' : 'none';
+        if (!hasOther) { q('rrChalOther').value = ''; markInvalid('rrChalOther', false); hideErr('rrChalOtherErr'); }
+        if (checked('#rrChalGroup input[type=checkbox]').length) hideErr('rrChalErr');
+        rrDirty = true;
+      });
+
+      q('rrDataLocGroup').addEventListener('change', function() {
+        styleChkGroup(this);
+        var hasOther = !!this.querySelector('[value=Other]:checked');
+        q('rrDataLocOtherWrap').style.display = hasOther ? 'block' : 'none';
+        if (!hasOther) { q('rrDataLocOther').value = ''; markInvalid('rrDataLocOther', false); hideErr('rrDataLocOtherErr'); }
+        if (checked('#rrDataLocGroup input[type=checkbox]').length) hideErr('rrDataLocErr');
+        rrDirty = true;
+      });
+
+      q('rrShareGroup').addEventListener('change', function() {
+        styleChkGroup(this);
+        if (checked('#rrShareGroup input[type=checkbox]').length) hideErr('rrShareErr');
+        rrDirty = true;
+      });
+
+      /* Scale buttons */
+      document.querySelectorAll('.rrm-scale-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          document.querySelectorAll('.rrm-scale-btn').forEach(function(b) {
+            b.classList.remove('is-on'); b.setAttribute('aria-pressed', 'false');
+          });
+          this.classList.add('is-on'); this.setAttribute('aria-pressed', 'true');
+          q('rrConf').value = this.dataset.val;
+          hideErr('rrConfErr');
+          rrDirty = true;
+        });
+      });
+
+      /* Consent */
+      q('rrConsent').addEventListener('change', function() {
+        q('rrConsentWrap').classList.toggle('is-invalid', !this.checked);
+        if (this.checked) hideErr('rrConsentErr');
+        rrDirty = true;
+      });
+
+      /* Mark dirty on any input */
+      modalEl.querySelectorAll('input, select, textarea').forEach(function(el) {
+        el.addEventListener('input', function() { rrDirty = true; });
+      });
+    }
+
+    /* ── close with guard ────────────────────────────── */
+    function rrClose() {
+      if (rrDirty && !rrDone) {
+        if (!confirm('You have started filling out the application. Close and lose your progress?')) return;
+      }
+      rrModal.hide();
+      setTimeout(rrReset, 350);
+    }
+
+    /* ── reset ───────────────────────────────────────── */
+    function rrReset() {
+      rrStep = 1; rrDirty = false; rrDone = false;
+      var modalEl = q('rrModal');
+      if (!modalEl) return;
+      modalEl.querySelectorAll('input, select, textarea').forEach(function(el) {
+        if (el.type === 'checkbox') el.checked = false;
+        else el.value = '';
+      });
+      document.querySelectorAll('.rrm-scale-btn').forEach(function(b) {
+        b.classList.remove('is-on'); b.setAttribute('aria-pressed', 'false');
+      });
+      document.querySelectorAll('.rrm-chk-item').forEach(function(i) { i.classList.remove('is-on'); });
+      document.querySelectorAll('.rrm-err').forEach(function(e) { e.classList.remove('visible'); });
+      document.querySelectorAll('.rrm-input,.rrm-select,.rrm-textarea').forEach(function(e) { e.classList.remove('is-invalid'); });
+      var cw = q('rrConsentWrap'); if (cw) cw.classList.remove('is-invalid');
+      ['rrRoleOtherWrap','rrProgAreaOtherWrap','rrChalOtherWrap','rrDataLocOtherWrap'].forEach(function(id) {
+        var el = q(id); if (el) el.style.display = 'none';
+      });
+      var se = q('rrStep3') && q('rrStep3').querySelector('.rrm-submit-error');
+      if (se) se.remove();
+      rrGo(1, true);
+    }
+
+    /* ── navigate steps ──────────────────────────────── */
+    function rrGo(step, silent) {
+      ['rrStep1','rrStep2','rrStep3','rrConfirm'].forEach(function(id) {
+        var el = q(id); if (el) el.style.display = 'none';
+      });
+      [1,2,3].forEach(function(n) {
+        var ps = q('rrProg' + n);
+        if (!ps) return;
+        ps.classList.remove('is-active','is-done');
+        if (step > 3) ps.classList.add('is-done');
+        else if (n < step) ps.classList.add('is-done');
+        else if (n === step) ps.classList.add('is-active');
+      });
+      if (step <= 3) { var panel = q('rrStep' + step); if (panel) panel.style.display = 'block'; }
+      else { var c = q('rrConfirm'); if (c) c.style.display = 'block'; }
+
+      var back = q('rrBtnBack'), next = q('rrBtnNext'), sub = q('rrBtnSubmit');
+      var ret = q('rrBtnReturn'), cls = q('rrBtnCloseFinal');
+      back.style.display  = (step > 1 && step <= 3) ? 'inline-flex' : 'none';
+      next.style.display  = (step <= 2) ? 'inline-flex' : 'none';
+      sub.style.display   = (step === 3) ? 'inline-flex' : 'none';
+      ret.style.display   = (step > 3) ? 'inline-flex' : 'none';
+      cls.style.display   = (step > 3) ? 'inline-flex' : 'none';
+
+      if (step === 1) next.innerHTML = 'Next: Reporting needs <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>';
+      if (step === 2) next.innerHTML = 'Next: Data readiness <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>';
+
+      rrStep = step;
+      var body = document.querySelector('#rrModal .modal-body');
+      if (body) body.scrollTop = 0;
+
+      if (!silent) {
+        setTimeout(function() {
+          var panel = (step <= 3 ? q('rrStep' + step) : q('rrConfirm'));
+          if (panel) { var f = panel.querySelector('input,select,textarea,button'); if (f) f.focus(); }
+        }, 60);
+      }
+    }
+
+    /* ── validate ────────────────────────────────────── */
+    function vReq(fid, eid) {
+      var el = q(fid), ok = el && el.value.trim().length > 0;
+      markInvalid(fid, !ok);
+      ok ? hideErr(eid) : showErr(eid);
+      if (ok && el) el.addEventListener('input', function() { markInvalid(fid, false); hideErr(eid); }, { once: true });
+      return ok;
+    }
+    function vEmail(fid, eid) {
+      var el = q(fid), ok = el && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(el.value.trim());
+      markInvalid(fid, !ok); ok ? hideErr(eid) : showErr(eid);
+      if (ok && el) el.addEventListener('input', function() { markInvalid(fid, false); hideErr(eid); }, { once: true });
+      return ok;
+    }
+    function vUrl(fid, eid) {
+      var el = q(fid);
+      if (!el) return false;
+      var val = el.value.trim();
+      if (!val) { markInvalid(fid, true); showErr(eid); return false; }
+      if (!/^https?:\/\//i.test(val)) { el.value = 'https://' + val; val = el.value; }
+      var ok = /^https?:\/\/.+\..+/.test(val);
+      markInvalid(fid, !ok); ok ? hideErr(eid) : showErr(eid);
+      if (ok) el.addEventListener('input', function() { markInvalid(fid, false); hideErr(eid); }, { once: true });
+      return ok;
+    }
+    function vChk(sel, eid) {
+      var ok = checked(sel).length > 0;
+      ok ? hideErr(eid) : showErr(eid);
+      return ok;
+    }
+    function vHidden(fid, eid) {
+      var el = q(fid), ok = el && el.value.length > 0;
+      ok ? hideErr(eid) : showErr(eid);
+      return ok;
+    }
+
+    function rrValidate(step) {
+      var ok = true;
+      if (step === 1) {
+        ok = vReq('rrOrgName','rrOrgNameErr') & ok;
+        ok = vUrl('rrWebsite','rrWebsiteErr') & ok;
+        ok = vReq('rrContactName','rrContactNameErr') & ok;
+        ok = vReq('rrRole','rrRoleErr') & ok;
+        if (v('rrRole') === 'Other') ok = vReq('rrRoleOther','rrRoleOtherErr') & ok;
+        ok = vEmail('rrEmail','rrEmailErr') & ok;
+        ok = vReq('rrBudget','rrBudgetErr') & ok;
+        ok = vReq('rrProgramArea','rrProgramAreaErr') & ok;
+        if (v('rrProgramArea') === 'Other') ok = vReq('rrProgAreaOther','rrProgAreaOtherErr') & ok;
+      }
+      if (step === 2) {
+        ok = vReq('rrFundingStatus','rrFundingStatusErr') & ok;
+        ok = vChk('#rrChalGroup input[type=checkbox]','rrChalErr') & ok;
+        if (!!q('rrChalGroup').querySelector('[value=Other]:checked')) ok = vReq('rrChalOther','rrChalOtherErr') & ok;
+        ok = vReq('rrDeadline','rrDeadlineErr') & ok;
+        ok = vHidden('rrConf','rrConfErr') & ok;
+        ok = vReq('rrFunderUnderstanding','rrFunderUnderstandingErr') & ok;
+      }
+      if (step === 3) {
+        ok = vChk('#rrDataLocGroup input[type=checkbox]','rrDataLocErr') & ok;
+        if (!!q('rrDataLocGroup').querySelector('[value=Other]:checked')) ok = vReq('rrDataLocOther','rrDataLocOtherErr') & ok;
+        ok = vChk('#rrShareGroup input[type=checkbox]','rrShareErr') & ok;
+        ok = vReq('rrSensitive','rrSensitiveErr') & ok;
+        ok = vReq('rrAnonLearnings','rrAnonLearningsErr') & ok;
+        ok = vReq('rrAssessValue','rrAssessValueErr') & ok;
+        var consent = q('rrConsent').checked;
+        q('rrConsentWrap').classList.toggle('is-invalid', !consent);
+        consent ? hideErr('rrConsentErr') : showErr('rrConsentErr');
+        ok = consent & ok;
+      }
+      if (!ok) {
+        setTimeout(function() {
+          var first = document.querySelector('#rrModal .rrm-err.visible');
+          if (first) first.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 40);
+      }
+      return !!ok;
+    }
+
+    /* ── next ────────────────────────────────────────── */
+    function rrNext() { if (rrValidate(rrStep)) rrGo(rrStep + 1); }
+
+    /* ── submit ──────────────────────────────────────── */
+    async function rrSubmit() {
+      if (!rrValidate(3)) return;
+      var btn = q('rrBtnSubmit');
+      btn.disabled = true;
+      btn.innerHTML = 'Submitting…';
+
+      var data = {
+        org_name: v('rrOrgName'), website: v('rrWebsite'),
+        contact_name: v('rrContactName'), role: v('rrRole'), role_other: v('rrRoleOther'),
+        email: v('rrEmail'), phone: v('rrPhone'),
+        budget_range: v('rrBudget'), program_area: v('rrProgramArea'), program_area_other: v('rrProgAreaOther'),
+        funding_status: v('rrFundingStatus'), funders_list: v('rrFundersList'),
+        reporting_challenges: checked('#rrChalGroup input[type=checkbox]'),
+        reporting_challenge_other: v('rrChalOther'),
+        upcoming_deadline: v('rrDeadline'),
+        confidence_rating: parseInt(v('rrConf'), 10) || null,
+        funder_understanding: v('rrFunderUnderstanding'),
+        data_locations: checked('#rrDataLocGroup input[type=checkbox]'),
+        data_locations_other: v('rrDataLocOther'),
+        shareable_materials: checked('#rrShareGroup input[type=checkbox]'),
+        sensitive_data: v('rrSensitive'), anonymized_learnings: v('rrAnonLearnings'),
+        assessment_value: v('rrAssessValue'), additional_notes: v('rrNotes'),
+        consent: q('rrConsent').checked
+      };
+
+      try {
+        var res = await fetch('/api/reporting-readiness/apply', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
+        });
+        var json = await res.json().catch(function() { return {}; });
+        if (!res.ok) throw new Error(json.message || 'Submission failed. Please try again.');
+        rrDone = true;
+        rrGo(4);
+      } catch (err) {
+        btn.disabled = false;
+        btn.innerHTML = 'Submit Application <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>';
+        var prev = q('rrStep3').querySelector('.rrm-submit-error');
+        if (prev) prev.remove();
+        var errDiv = document.createElement('div');
+        errDiv.className = 'rrm-submit-error';
+        errDiv.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg> ' + err.message;
+        q('rrStep3').insertBefore(errDiv, q('rrStep3').firstChild);
+        q('rrModal').querySelector('.modal-body').scrollTop = 0;
+      }
+    }
+
+    /* ── public open function ────────────────────────── */
+    window.openReportingReadinessModal = function () {
+      if (!rrModal) rrInit();
+      if (rrModal) rrModal.show();
+    };
+
+    document.addEventListener('DOMContentLoaded', rrInit);
+  })();
   </script>
 
   <%- include('partials/kai-chat-floating', {

@@ -3763,6 +3763,83 @@ app.post("/api/onboarding/complete", async (req, res) => {
   }
 });
 
+// ── Reporting Readiness Application ───────────────────────────────────────────
+app.post("/api/reporting-readiness/apply", async (req, res) => {
+  try {
+    const d = req.body;
+
+    // Minimal server-side validation of required fields
+    const required = [
+      "org_name", "website", "contact_name", "role", "email",
+      "budget_range", "program_area", "funding_status",
+      "upcoming_deadline", "funder_understanding",
+      "sensitive_data", "anonymized_learnings", "assessment_value",
+    ];
+    for (const field of required) {
+      if (!d[field] || String(d[field]).trim() === "") {
+        return res.status(422).json({ ok: false, message: `Missing required field: ${field}` });
+      }
+    }
+    if (!d.consent) {
+      return res.status(422).json({ ok: false, message: "Consent is required." });
+    }
+    if (!Array.isArray(d.reporting_challenges) || d.reporting_challenges.length === 0) {
+      return res.status(422).json({ ok: false, message: "Please select at least one reporting challenge." });
+    }
+    if (!Array.isArray(d.data_locations) || d.data_locations.length === 0) {
+      return res.status(422).json({ ok: false, message: "Please select at least one data location." });
+    }
+    if (!Array.isArray(d.shareable_materials) || d.shareable_materials.length === 0) {
+      return res.status(422).json({ ok: false, message: "Please select at least one shareable material." });
+    }
+
+    await pool.query(
+      `INSERT INTO public.reporting_readiness_applications (
+         org_name, website, contact_name, role, role_other, email, phone,
+         budget_range, program_area, program_area_other,
+         funding_status, funders_list, reporting_challenges, reporting_challenge_other,
+         upcoming_deadline, confidence_rating, funder_understanding,
+         data_locations, data_locations_other, shareable_materials,
+         sensitive_data, anonymized_learnings, assessment_value, additional_notes,
+         consent
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)`,
+      [
+        d.org_name?.trim(),
+        d.website?.trim(),
+        d.contact_name?.trim(),
+        d.role?.trim(),
+        d.role_other?.trim() || null,
+        d.email?.trim().toLowerCase(),
+        d.phone?.trim() || null,
+        d.budget_range,
+        d.program_area,
+        d.program_area_other?.trim() || null,
+        d.funding_status,
+        d.funders_list?.trim() || null,
+        d.reporting_challenges,
+        d.reporting_challenge_other?.trim() || null,
+        d.upcoming_deadline,
+        d.confidence_rating ? parseInt(d.confidence_rating, 10) : null,
+        d.funder_understanding?.trim(),
+        d.data_locations,
+        d.data_locations_other?.trim() || null,
+        d.shareable_materials,
+        d.sensitive_data,
+        d.anonymized_learnings,
+        d.assessment_value?.trim(),
+        d.additional_notes?.trim() || null,
+        !!d.consent,
+      ]
+    );
+
+    console.log(`[reporting-readiness] New application from ${d.email} (${d.org_name})`);
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("POST /api/reporting-readiness/apply error:", err);
+    return res.status(500).json({ ok: false, message: "Something went wrong. Please try again." });
+  }
+});
+
 app.listen(port, () => {
   console.log(`App running on port ${port}`);
 });
