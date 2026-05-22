@@ -1,38 +1,37 @@
-
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<!-- Google Tag Manager -->  
-<script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+  <!-- Google Tag Manager -->
+  <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
   new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
   j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
   'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
   })(window,document,'script','dataLayer','GTM-5NMWPW33');</script>
-  <%#End Google Tag Manager %>
-  <title>Get Kinder | Volunteer Opportunities in BC — Verified Impact & Rewards</title>
-  <meta name="description" content="Find volunteer opportunities near you, get verified for your service, and earn Impact Credits. Organizations post roles free. Donors fund verified community impact.">
+  <%# End Google Tag Manager %>
+  <title>Get Kinder.ai · Impact Reporting & Data Readiness for Nonprofits</title>
+  <meta name="description" content="Convert scattered reports, spreadsheets, and stories into funder-ready evidence — without hiring a data team. Free Impact Reporting & Data Readiness Assessment for nonprofits.">
   <meta name="author" content="Get Kindr Foundation">
   <meta name="robots" content="index, follow">
   <link rel="canonical" href="https://getkinder.ai/">
-  <meta property="og:title" content="Get Kinder | Volunteer Opportunities in BC — Verified Impact & Rewards">
-  <meta property="og:description" content="Find volunteer opportunities near you, get verified for your service, and earn Impact Credits. Organizations post roles free. Donors fund verified community impact.">
+  <meta property="og:title" content="Get Kinder.ai · Impact Reporting & Data Readiness for Nonprofits">
+  <meta property="og:description" content="Convert scattered reports, spreadsheets, and stories into funder-ready evidence — without hiring a data team.">
   <meta property="og:url" content="https://getkinder.ai/">
   <meta property="og:type" content="website">
   <meta property="og:image" content="https://getkinder.ai/images/logo.png">
   <meta property="og:locale" content="en_CA">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Get Kinder | Volunteer Opportunities in BC — Verified Impact & Rewards">
-  <meta name="twitter:description" content="Find volunteer opportunities near you, get verified for your service, and earn Impact Credits.">
+  <meta name="twitter:title" content="Get Kinder.ai · Impact Reporting & Data Readiness for Nonprofits">
+  <meta name="twitter:description" content="Convert scattered reports, spreadsheets, and stories into funder-ready evidence.">
   <meta name="twitter:image" content="https://getkinder.ai/images/logo.png">
   <link rel="icon" href="/images/favicon.png" sizes="32x32" type="image/png">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-SgOJa3DmI69IUzQ2PVdRZhwQ+dy64/BUtbMJw1MZ8t5HZApcHrRKUc4W0kG879m7" crossorigin="anonymous">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
   <link rel="stylesheet" href="/css/style.css">
-  <!-- AOS (Animate On Scroll) -->
-  <link href="https://unpkg.com/aos@2.3.1/dist/aos.css" rel="stylesheet"> 
+  <link href="https://unpkg.com/aos@2.3.1/dist/aos.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Lora:ital,wght@1,400;1,500&family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/lucide@latest"></script>
   <meta name="google-site-verification" content="5P6KC5fl0v3t5zQrKy3RvlK5c0yeXKpRUb4FbhkF0eY" />
   <script type="application/ld+json">
   {
@@ -42,11 +41,8 @@
     "alternateName": "Get Kinder",
     "url": "https://getkinder.ai",
     "logo": "https://getkinder.ai/images/logo.png",
-    "description": "A BC-registered nonprofit building a verified volunteer marketplace connecting volunteers, organizations, and donors through Impact Credits.",
-    "areaServed": {
-      "@type": "AdministrativeArea",
-      "name": "British Columbia, Canada"
-    },
+    "description": "A BC-registered nonprofit helping organizations convert scattered reports into funder-ready impact evidence.",
+    "areaServed": { "@type": "AdministrativeArea", "name": "British Columbia, Canada" },
     "sameAs": [
       "https://www.facebook.com/profile.php?id=61576860759313",
       "https://www.instagram.com/getkinder/",
@@ -55,12 +51,80 @@
     ]
   }
   </script>
+  <style>
+    /* ── Impact Reporting Homepage ─────────────────────── */
+    [data-lucide] { display: inline-flex; vertical-align: middle; flex-shrink: 0; }
+    .gk-eyebrow {
+      display: inline-flex; align-items: center; gap: 8px;
+      font-family: 'Roboto', sans-serif; font-size: 11px; letter-spacing: 0.12em;
+      text-transform: uppercase; color: #FF5656; font-weight: 600; margin-bottom: 14px;
+    }
+    .gk-eyebrow::before { content: ''; display: inline-block; width: 18px; height: 1px; background: #FF5656; opacity: 0.8; }
+    .gk-eyebrow-dark { color: #ff8c83; }
+    .gk-eyebrow-dark::before { background: #ff8c83; }
+    .gk-section { padding: 112px 0; }
+    .gk-section-sm { padding: 80px 0; }
+    .gk-cta-primary {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: #FF5656; color: #fff !important; border-radius: 10px; padding: 13px 22px;
+      font-family: 'Roboto', sans-serif; font-size: 15px; font-weight: 500;
+      text-decoration: none; white-space: nowrap;
+      box-shadow: 0 1px 2px rgba(31,38,48,.06), 0 2px 6px rgba(255,86,86,.18);
+      transition: transform 160ms ease, box-shadow 160ms ease;
+    }
+    .gk-cta-primary:hover { transform: translateY(-1px); box-shadow: 0 2px 4px rgba(31,38,48,.06), 0 8px 18px rgba(255,86,86,.24); }
+    .gk-cta-primary-lg { padding: 15px 24px; font-size: 16px; }
+    .gk-cta-secondary {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: #fff; color: #283853 !important; border: 1px solid #dcdde0;
+      border-radius: 10px; padding: 13px 22px;
+      font-family: 'Roboto', sans-serif; font-size: 15px; font-weight: 500;
+      text-decoration: none; white-space: nowrap; transition: background 160ms;
+    }
+    .gk-cta-secondary:hover { background: #fafafa; }
+    .gk-sh-title {
+      font-family: 'Poppins', sans-serif; font-weight: 600; font-size: 38px;
+      letter-spacing: -0.02em; color: #283853; margin: 0; line-height: 1.15;
+    }
+    .gk-sh-body { margin-top: 18px; font-family: 'Roboto', sans-serif; font-size: 17px; color: #4d525e; line-height: 1.6; }
+    .gk-card { background: #fff; border: 1px solid #e3e4e8; border-radius: 14px; padding: 28px; }
+    .gk-hero-nav-link {
+      font-family: 'Roboto', sans-serif; font-size: 14px; color: #455A7C;
+      text-decoration: none; font-weight: 500; transition: color 140ms;
+    }
+    .gk-hero-nav-link:hover { color: #FF5656; }
+    .gk-faq-btn {
+      background: transparent; border: none; width: 100%; text-align: left; cursor: pointer;
+      padding: 22px 4px; display: flex; align-items: center; justify-content: space-between; gap: 16px;
+      font-family: 'Poppins', sans-serif; font-weight: 500; font-size: 17px; color: #283853;
+    }
+    .gk-faq-icon {
+      width: 28px; height: 28px; border-radius: 999px; display: flex;
+      align-items: center; justify-content: center; transition: background 160ms; flex-shrink: 0;
+    }
+    .gk-faq-body {
+      overflow: hidden; transition: max-height 280ms cubic-bezier(0.2,0.7,0.2,1);
+      font-family: 'Roboto', sans-serif; font-size: 15px; color: #4d525e; line-height: 1.65;
+    }
+    .gk-faq-body-inner { padding: 0 4px 22px 46px; }
+    .gk-del-grid { display: grid; grid-template-columns: repeat(6,1fr); gap: 20px; }
+    .gk-del-sm { grid-column: span 2; }
+    .gk-del-lg { grid-column: span 3; }
+    @media (max-width: 991px) {
+      .gk-section { padding: 72px 0; } .gk-sh-title { font-size: 30px; }
+      .gk-del-sm, .gk-del-lg { grid-column: span 3; }
+    }
+    @media (max-width: 767px) {
+      .gk-section { padding: 56px 0; } .gk-sh-title { font-size: 26px; }
+      .gk-del-sm, .gk-del-lg { grid-column: span 6; }
+    }
+  </style>
 </head>
 <body class="home-page">
- <!-- Google Tag Manager (noscript) -->
-  <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-5NMWPW33"
-  height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+  <!-- Google Tag Manager (noscript) -->
+  <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-5NMWPW33" height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
   <!-- End Google Tag Manager (noscript) -->
+
   <% if (success) { %>
     <div class="alert alert-success alert-dismissible fade show auto-dismiss" role="alert">
       Registration successful! Welcome to Get Kinder 🌟
@@ -73,189 +137,804 @@
       <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
     </div>
   <% } %>
+
   <section id="title">
     <%- include("partials/site-header", { currentPage: "home" }) %>
-<!-- Hero Section -->
-<section class="home-hero py-5 pb-0">
-  <div class="container">
-    <div class="row g-4 align-items-center">
-      <div class="col-12 col-lg-6 d-flex flex-column">
-        <h1 class="display-6 fw-bold lh-1 mb-3 order-1" style="color: #ff5656;" data-aos="fade-up">
-          When we show up together, our communities get better.
-        </h1>
-        <p class="mb-3 fs-5 order-2" style="color: #455a7c;" data-aos="fade-up" data-aos-delay="100">
-Get Kinder connects volunteers, organizations, and donors in one transparent, verified loop — so impact is real, rewarded, and traceable.
-        </p>
-             <p class="mb-3 fs-5 order-2" style="color: #455a7c;" data-aos="fade-up" data-aos-delay="100">
-Sign up today to be a founding contributor: get first access, exclusive rewards, and be part of creating better communities together
-        </p>
-        <div class="d-md-none order-3 mt-3" data-aos="zoom-out">
-          <div class="hero-img-wrap w-100 overflow-hidden">
-            <img
-              src="/images/happyGirls.jpeg"
-              alt="Happy girls volunteering"
-              class="img-fluid rounded-4 shadow-sm w-100"
-              style="object-fit: cover; display: block;"
-              loading="lazy"
-            />
-          </div>
-        </div>
-        <div class="d-flex flex-wrap gap-2 mt-3 order-5 order-md-3" data-aos="fade-up" data-aos-delay="150">
-          <a class="btn btn-primary2 custom-hover fw-bold p-2" href="/login" style="font-size: 1.1rem; color: aliceblue;">
-            Sign Up Now
-          </a>
-          <a class="btn btn-primary2 custom-hover fw-bold p-2" href="/events" style="font-size: 1.1rem; color: aliceblue;">
-            Find Opportunities
-          </a>
-        </div>
-      </div>
-      <div class="col-12 col-lg-6 d-none d-md-block">
-        <div class="hero-img-wrap w-100 overflow-hidden" data-aos="zoom-out">
-          <img
-            src="/images/happyGirls.jpeg"
-            alt="Happy girls volunteering"
-            class="img-fluid rounded-4 shadow-sm w-100"
-            style="object-fit: cover; display: block;"
-            loading="lazy"
-          />
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
-<!-- NAV TABS: FOUR CARDS -->
-<div id="custom-cards" class="container-fluid px-0.5 px-md-4 pt-3 pb-5">
-  <div class="row gx-4 gy-4">
-  <div class="modern-tabs">
-     <div class="col-12 text-center">
-      <h2 class="display-6 mb-3" style="color: #ff5656;">The World Gets Kinder When You Do.</h2>
-    </div>
-   <!-- tab 1 - contributor -->
-    <section id="quiz" class="py-5">
-  <div class="container">
-    <div class="row align-items-center gy-5">
-      <!-- Image -->
-      <div class="col-12 col-lg-6 text-center" data-aos="zoom-out" data-aos-delay="150">
-        <img src="/images/hands_in.jpg" class="img-fluid rounded-4 shadow-sm" alt="About Get Kinder">
-      </div>
-      <!-- Text -->
-      <div class="col-12 col-lg-6">
-        <h3 class="fw-semibold mb-2" style="color:#ff5656;" data-aos="fade-up">Your Time and Skills Are Valuable</h3>
-        <h2 class="h2 fw-bold mb-3" data-aos="fade-up" data-aos-delay="80" style="color:#455a7c;">You're Not Just Volunteering Your Time; You're a Community Contributor.</h2>
-        <p class="text-secondary mb-4" data-aos="fade-up" data-aos-delay="140">
-          Discover volunteering opportunities that match your passion, skills, interests, and most importantly, your life! Track your impact, connect with causes you care about, and get rewarded for every hour you contribute. Your time creates real change—and real community
-        </p>
-        <a href="events" class="btn btn-primary2 custom-hover" data-aos="fade-up" data-aos-delay="200">Find an Impact Opportunity</a>
-      </div>
-    </div>
-  </div>
-</section>
-   <!-- tab 2 - Donors -->
-<section id="arcs" class="py-5">
-  <div class="container">
-    <div class="row align-items-center gy-5">
-      <div class="col-12 col-lg-6 order-lg-2 text-center" data-aos="zoom-out" data-aos-delay="150">
-        <img src="/images/friendsOnBeach.jpg" class="img-fluid rounded-4 shadow-sm" alt="About Get Kinder">
-      </div>
-      <div class="col-12 col-lg-6 order-lg-1">
-        <h3 class="fw-semibold mb-2" style="color:#ff5656;" data-aos="fade-up">See Exactly How Your Donations Make an Impact</h3>
-        <h2 class="h2 fw-bold mb-3" data-aos="fade-up" data-aos-delay="80" style="color:#455a7c;">Frustrated not knowing how Your Money makes an impact. No longer.</h2>
-        <p class="text-secondary mb-4" data-aos="fade-up" data-aos-delay="140">
-      See the impact you are making knowing which volunteers your donation supports, watch charities expand their reach in real-time, and discover how your resources create a cascade of opportunity that reaches far beyond the initial gift.</p>
-        <a href="donate" class="btn btn-primary2 custom-hover" data-aos="fade-up" data-aos-delay="200">Make an Impact Donation</a>
-      </div>
-    </div>
-  </div>
-</section>
-  <!-- tab 3 - charities -->
-   <section id="about" class="py-5">
-  <div class="container">
-    <div class="row align-items-center gy-5">
-      <!-- Image -->
-      <div class="col-12 col-lg-6 text-center" data-aos="zoom-out" data-aos-delay="150">
-        <img src="/images/volunteer_coordinator.jpg" class="img-fluid rounded-4 shadow-sm" alt="About Get Kinder">
-      </div>
-      <!-- Text -->
-      <div class="col-12 col-lg-6">
-        <h3 class="fw-semibold mb-2" style="color:#ff5656;" data-aos="fade-up">Reliable volunteers. Less admin. Easy Reporting.</h3>
-        <h2 class="h2 fw-bold mb-3" data-aos="fade-up" data-aos-delay="80" style="color:#455a7c;">We make it easy to find the best people to give time, money, and impact.</h2>
-        <p class="text-secondary mb-4" data-aos="fade-up" data-aos-delay="140">
-Post your opportunity, match with verified volunteers, and confirm attendance in seconds. Get Kinder handles the rest — including the impact reports your funders want. Stop juggling multiple platforms and fragmented relationships to build deeper partnerships and grow your mission with people who truly support your cause.</p>
-        <a href="events" class="btn btn-primary2 custom-hover" data-aos="fade-up" data-aos-delay="200">Create an Opportunity FREE</a>
-      </div>
-    </div>
-  </div>
-</section>
- <!-- tab 4 - rewards -->
-<section id="about" class="py-5">
-  <div class="container">
-    <div class="row align-items-center gy-5">
-      <div class="col-12 col-lg-6 order-lg-2 text-center" data-aos="zoom-out" data-aos-delay="150">
-        <img src="/images/friendsHavingLunch.jpg" class="img-fluid rounded-4 shadow-sm" alt="About Get Kinder">
-      </div>
-      <div class="col-12 col-lg-6 order-lg-1">
-        <h3 class="fw-semibold mb-2" style="color:#ff5656;" data-aos="fade-up">Get Rewarded for Every Hour and Dollar You Contribute</h3>
-        <h2 class="h2 fw-bold mb-3" data-aos="fade-up" data-aos-delay="80" style="color:#455a7c;">Your time and money builds your communities—that impact deserves rewards & recognition.</h2>
-        <p class="text-secondary mb-4" data-aos="fade-up" data-aos-delay="140">
-Every skill you share, every project you complete, every donation you make earns you rewards and recognition. Track your contribution streak, level up your impact profile, and access exclusive experiences, rewards, and partnerships. The more you invest in your community, the more your community invests in you—with rewards that actually matter.</p>
-        <a href="/events" class="btn btn-primary2 custom-hover" data-aos="fade-up" data-aos-delay="200">Find Opportunities</a>
-      </div>
-    </div>
-  </div>
-</section>
-      <div class="col-12 text-center mt-2 mb-2"> <p class="mb-0" style="color:#455a7c;"> Remember KAI can make mistakes and does not provide mental health advice</p></div>
-</div>
-        </div>
-      </div>
-    </div> <!-- /.row -->
-  </div> <!-- /.modern-tabs -->
-</div> <!-- /#custom-cards -->
-</div>
-  <!-- nonprofit support section-->
-  <section id="supporters" >
-    <div class="container-fluid px-0.5 px-md-4 pt-1 pb-1"> <div class="modern-tabs">
-          <h3 class="display-4 mb-3; text-center" style="color: #ff5656;">Kinder AI™ Made Possible By</h3>
-      <div class="row gy-4 row-cols-1 row-cols-md-3">
-        <div class="col">
-          <div class="d-flex align-items-center justify-content-center profile-card m-3 gap-3">  
-            <div
-              class="icon-square text-body-emphasis bg-body-secondary d-inline-flex align-items-center justify-content-center fs-4 flex-shrink-0 me-3">
-              <img src="/images/google.svg" alt="Google Logo">
-            </div>
-            <div>
-              <h3 class="fs-2" style="color: #455a7c;">Google.</h3>
-              <a href="https://www.google.com/nonprofits/" target="_blank" rel="noopener noreferrer">Google for Non Profits.</a>
-            </div>
-          </div>
-        </div>
-          <div class="col">
-          <div class="d-flex align-items-center justify-content-center profile-card m-3 gap-3">  
-            <div
-              class="icon-square text-body-emphasis bg-body-secondary d-inline-flex align-items-center justify-content-center fs-4 flex-shrink-0 me-3">
-              <img src="/images/openai.svg" alt="OpenAI Logo" height="20">
-            </div>
-            <div>
-              <h3 class="fs-2" style="color: #455a7c;">OpenAI.</h3>
-              <a href="https://openai.com/index/introducing-openai-for-nonprofits/" target="_blank" rel="noopener noreferrer">OpenAI for Non Profits.</a>
-            </div>
-          </div>
-        </div>
-        <div class="col">
-          <div class="d-flex align-items-center justify-content-center profile-card m-3 gap-3">  
-            <div
-              class="icon-square text-body-emphasis bg-body-secondary d-inline-flex align-items-center justify-content-center fs-4 flex-shrink-0 me-3">
-              <img src="/images/microsoft.svg" alt="Microsoft Logo">
-            </div>
-            <div>
-              <h3 class="fs-2" style="color: #455a7c;">Microsoft.</h3>
-              <a href="https://www.microsoft.com/en-us/nonprofits/" target="_blank" rel="noopener noreferrer">Microsoft Tech for Social Impact.</a>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
   </section>
+
+  <!-- ═══════════════════════════════════════════════════
+       HERO
+  ═══════════════════════════════════════════════════════ -->
+  <section id="top" style="background: linear-gradient(180deg,#fff1f0 0%,#f4f4f4 60%,#f4f4f4 100%); padding: 64px 0 80px;">
+    <div class="container" style="max-width:1240px;">
+      <div class="row g-5 align-items-center">
+
+        <!-- Left column -->
+        <div class="col-12 col-lg-6">
+          <!-- Cohort badge -->
+          <div style="display:inline-flex;align-items:center;gap:10px;background:#fff;border:1px solid #ffd9d6;border-radius:999px;padding:6px 14px 6px 6px;margin-bottom:28px;box-shadow:0 1px 2px rgba(31,38,48,.04);max-width:100%;">
+            <img src="/images/favicon.png" alt="Get Kinder" style="width:40px;height:40px;object-fit:contain;flex-shrink:0;">
+            <span style="font-family:'Roboto',sans-serif;font-size:13px;color:#283853;line-height:1.4;">
+              Now selecting <strong style="font-weight:600;">5 nonprofit design partners</strong> for a no-cost Impact Reporting &amp; Data Readiness Assessment.
+            </span>
+          </div>
+
+          <!-- H1 -->
+          <h1 style="font-family:'Poppins',sans-serif;font-weight:600;font-size:clamp(36px,4.5vw,58px);line-height:1.05;letter-spacing:-0.025em;color:#455A7C;margin:0;">
+            Your impact deserves
+            <span style="font-family:'Lora',serif;font-style:italic;font-weight:500;color:#FF5656;"> more funding</span>
+            than your data can prove today.
+          </h1>
+
+          <!-- Subhead -->
+          <p style="margin-top:22px;font-family:'Roboto',sans-serif;font-size:18px;line-height:1.6;color:#455A7C;max-width:600px;">
+            Your team is already creating impact. The problem is proving it. Convert scattered reports, spreadsheets, stories, and program records into clear evidence for stronger funder reporting — without hiring a data team, adding reporting burden, or letting generic AI guess at the value your organization truly creates.
+          </p>
+
+          <!-- CTAs -->
+          <div style="margin-top:32px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+            <a href="#book" class="gk-cta-primary gk-cta-primary-lg">
+              Book a Reporting Readiness Call
+              <i data-lucide="arrow-right" style="width:16px;height:16px;"></i>
+            </a>
+            <a href="#how" class="gk-cta-secondary">See how it works</a>
+          </div>
+          <p style="margin-top:14px;font-family:'Roboto',sans-serif;font-size:13px;color:#6e7280;max-width:520px;line-height:1.55;">
+            The call qualifies fit, confirms reporting needs, and explains what selected design partners receive.
+          </p>
+
+          <!-- Trust row -->
+          <div style="margin-top:36px;padding-top:22px;border-top:1px solid #ffd9d6;display:flex;align-items:center;gap:18px;flex-wrap:wrap;">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <i data-lucide="sparkles" style="width:15px;height:15px;color:#455A7C;"></i>
+              <span style="font-family:'Roboto',sans-serif;font-size:13px;color:#283853;font-weight:500;">AI-assisted</span>
+              <span style="color:#c4c6cc;margin-left:8px;">·</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <i data-lucide="user-check" style="width:15px;height:15px;color:#455A7C;"></i>
+              <span style="font-family:'Roboto',sans-serif;font-size:13px;color:#283853;font-weight:500;">Human-reviewed</span>
+              <span style="color:#c4c6cc;margin-left:8px;">·</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <i data-lucide="lock" style="width:15px;height:15px;color:#455A7C;"></i>
+              <span style="font-family:'Roboto',sans-serif;font-size:13px;color:#283853;font-weight:500;">Your data stays yours</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right column: Assessment preview -->
+        <div class="col-12 col-lg-6">
+          <div style="position:relative;padding:24px 24px 36px 0;">
+            <!-- Back doc (rotated) -->
+            <div style="position:absolute;top:38px;left:44px;right:-20px;bottom:-20px;background:#fff;border-radius:16px;border:1px solid #ececec;transform:rotate(2.2deg);box-shadow:0 12px 32px rgba(31,38,48,.06);"></div>
+            <!-- Tinted page -->
+            <div style="position:absolute;top:22px;left:24px;right:-8px;bottom:-8px;background:#ffe9e6;border-radius:16px;transform:rotate(-1.2deg);"></div>
+            <!-- Front document -->
+            <div style="position:relative;background:#fff;border-radius:16px;border:1px solid #e3e4e8;box-shadow:0 4px 12px rgba(31,38,48,.06),0 24px 48px rgba(31,38,48,.10);overflow:hidden;">
+              <!-- Doc header bar -->
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 22px;border-bottom:1px solid #ececec;background:linear-gradient(180deg,#fff 0%,#fafafa 100%);">
+                <div style="display:flex;align-items:center;gap:10px;">
+                  <div style="width:22px;height:22px;border-radius:6px;background:#FF5656;display:flex;align-items:center;justify-content:center;">
+                    <i data-lucide="file-text" style="width:12px;height:12px;color:#fff;"></i>
+                  </div>
+                  <span style="font-family:'Roboto',sans-serif;font-size:12px;color:#4d525e;font-weight:500;">Get Kinder · Assessment</span>
+                </div>
+                <span style="font-family:'Roboto',sans-serif;font-size:11px;color:#9a9ea7;letter-spacing:0.06em;">v1.0 · DRAFT</span>
+              </div>
+              <!-- Doc body -->
+              <div style="padding:28px 28px 24px;">
+                <div style="font-family:'Roboto',sans-serif;font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:#FF5656;font-weight:600;margin-bottom:10px;">Impact Reporting &amp; Data Readiness Assessment</div>
+                <div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:22px;color:#283853;letter-spacing:-0.01em;line-height:1.25;">
+                  Riverbend Youth Coalition
+                  <span style="font-family:'Lora',serif;font-style:italic;font-weight:500;color:#455A7C;font-size:18px;display:block;margin-top:2px;">Prepared for Director of Programs</span>
+                </div>
+                <!-- Finding 01 -->
+                <div style="margin-top:22px;border:1px solid #ececec;border-radius:10px;padding:14px 16px;">
+                  <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+                    <div style="width:22px;height:22px;border-radius:6px;background:#f1f3f7;display:flex;align-items:center;justify-content:center;font-family:'Roboto',sans-serif;font-size:10px;font-weight:600;color:#455A7C;">01</div>
+                    <span style="font-family:'Poppins',sans-serif;font-size:13px;font-weight:500;color:#283853;">Where your data lives today</span>
+                  </div>
+                  <div style="display:flex;flex-direction:column;gap:6px;">
+                    <div style="display:flex;align-items:center;gap:10px;font-family:'Roboto',sans-serif;font-size:12.5px;color:#4d525e;">
+                      <i data-lucide="database" style="width:13px;height:13px;color:#6e7280;"></i>
+                      <span style="flex:1;">8 data sources identified</span>
+                      <span style="font-size:10px;font-weight:500;padding:2px 8px;border-radius:999px;background:#ecf0f5;color:#525f73;">mapped</span>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:10px;font-family:'Roboto',sans-serif;font-size:12.5px;color:#4d525e;">
+                      <i data-lucide="arrow-left-right" style="width:13px;height:13px;color:#6e7280;"></i>
+                      <span style="flex:1;">3 manual handoff points</span>
+                      <span style="font-size:10px;font-weight:500;padding:2px 8px;border-radius:999px;background:#ffeae8;color:#b8443c;">risk</span>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:10px;font-family:'Roboto',sans-serif;font-size:12.5px;color:#4d525e;">
+                      <i data-lucide="alert-triangle" style="width:13px;height:13px;color:#6e7280;"></i>
+                      <span style="flex:1;">2 reporting bottlenecks</span>
+                      <span style="font-size:10px;font-weight:500;padding:2px 8px;border-radius:999px;background:#ffeae8;color:#b8443c;">fix</span>
+                    </div>
+                  </div>
+                </div>
+                <!-- Finding 02 -->
+                <div style="margin-top:10px;border:1px solid #ececec;border-radius:10px;padding:14px 16px;background:#fffaf9;">
+                  <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+                    <div style="width:22px;height:22px;border-radius:6px;background:#f1f3f7;display:flex;align-items:center;justify-content:center;font-family:'Roboto',sans-serif;font-size:10px;font-weight:600;color:#b8443c;">02</div>
+                    <span style="font-family:'Poppins',sans-serif;font-size:13px;font-weight:500;color:#283853;">What funders may not be able to verify</span>
+                  </div>
+                  <div style="display:flex;flex-direction:column;gap:6px;">
+                    <div style="display:flex;align-items:center;gap:10px;font-family:'Roboto',sans-serif;font-size:12.5px;color:#4d525e;"><i data-lucide="unlink" style="width:13px;height:13px;color:#6e7280;"></i><span>Outcome claims not linked to source data</span></div>
+                    <div style="display:flex;align-items:center;gap:10px;font-family:'Roboto',sans-serif;font-size:12.5px;color:#4d525e;"><i data-lucide="user-x" style="width:13px;height:13px;color:#6e7280;"></i><span>Stories not consent-tagged</span></div>
+                    <div style="display:flex;align-items:center;gap:10px;font-family:'Roboto',sans-serif;font-size:12.5px;color:#4d525e;"><i data-lucide="clock" style="width:13px;height:13px;color:#6e7280;"></i><span>Volunteer hours not tied to programs</span></div>
+                  </div>
+                </div>
+                <!-- Finding 03 — timeline -->
+                <div style="margin-top:10px;border:1px solid #ececec;border-radius:10px;padding:14px 16px;">
+                  <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+                    <div style="width:22px;height:22px;border-radius:6px;background:#f1f3f7;display:flex;align-items:center;justify-content:center;font-family:'Roboto',sans-serif;font-size:10px;font-weight:600;color:#19c29c;">03</div>
+                    <span style="font-family:'Poppins',sans-serif;font-size:13px;font-weight:500;color:#283853;">12-week path to funder-ready evidence</span>
+                  </div>
+                  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;">
+                    <div style="background:#f1f3f7;border-radius:6px;padding:8px 10px;border-left:3px solid #ffbbbb;"><div style="font-size:10px;color:#6e7280;font-weight:500;">W 1–3</div><div style="font-size:11px;color:#283853;line-height:1.3;">Data map + cleanup</div></div>
+                    <div style="background:#f1f3f7;border-radius:6px;padding:8px 10px;border-left:3px solid #ff8c83;"><div style="font-size:10px;color:#6e7280;font-weight:500;">W 4–6</div><div style="font-size:11px;color:#283853;line-height:1.3;">Evidence architecture</div></div>
+                    <div style="background:#f1f3f7;border-radius:6px;padding:8px 10px;border-left:3px solid #ff5656;"><div style="font-size:10px;color:#6e7280;font-weight:500;">W 7–9</div><div style="font-size:11px;color:#283853;line-height:1.3;">Reporting workflow</div></div>
+                    <div style="background:#f1f3f7;border-radius:6px;padding:8px 10px;border-left:3px solid #455a7c;"><div style="font-size:10px;color:#6e7280;font-weight:500;">W 10–12</div><div style="font-size:11px;color:#283853;line-height:1.3;">Funder-ready report pack</div></div>
+                  </div>
+                </div>
+              </div>
+              <!-- Doc footer -->
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 22px;border-top:1px solid #ececec;background:#fafafa;">
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <i data-lucide="shield-check" style="width:13px;height:13px;color:#19c29c;"></i>
+                  <span style="font-family:'Roboto',sans-serif;font-size:11px;color:#4d525e;">AI-assisted · Human-reviewed</span>
+                </div>
+                <span style="font-family:'Roboto',sans-serif;font-size:11px;color:#9a9ea7;">Page 1 of 12</span>
+              </div>
+            </div>
+            <!-- Floating badge: cohort (bottom right) -->
+            <div style="position:absolute;bottom:-10px;right:4px;z-index:5;background:#FF5656;color:#fff;border-radius:12px;padding:12px 16px;display:flex;align-items:center;gap:12px;box-shadow:0 8px 24px rgba(255,86,86,.28);">
+              <div style="width:36px;height:36px;border-radius:8px;background:#fff;display:flex;align-items:center;justify-content:center;">
+                <img src="/images/favicon.png" alt="Kinder" style="width:32px;height:32px;object-fit:contain;">
+              </div>
+              <div>
+                <div style="font-family:'Roboto',sans-serif;font-size:11px;color:rgba(255,255,255,0.78);letter-spacing:0.08em;text-transform:uppercase;font-weight:500;">Cohort 01</div>
+                <div style="font-family:'Poppins',sans-serif;font-size:13px;font-weight:500;color:#fff;">5 design partner slots</div>
+              </div>
+            </div>
+            <!-- Floating badge: sources (top left) -->
+            <div style="position:absolute;top:-4px;left:4px;z-index:5;background:#fff;border-radius:12px;border:1px solid #e3e4e8;padding:10px 14px;box-shadow:0 8px 20px rgba(31,38,48,.08);">
+              <div style="display:flex;align-items:center;gap:10px;">
+                <div style="width:30px;height:30px;border-radius:8px;background:#fff1f0;display:flex;align-items:center;justify-content:center;">
+                  <i data-lucide="folder-tree" style="width:15px;height:15px;color:#FF5656;"></i>
+                </div>
+                <div>
+                  <div style="font-family:'Roboto',sans-serif;font-size:11px;color:#6e7280;letter-spacing:0.04em;">Sources analyzed</div>
+                  <div style="font-family:'Poppins',sans-serif;font-size:15px;font-weight:600;color:#283853;">247 documents · 12 spreadsheets</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div><!-- /.row -->
+
+      <!-- On this page jump nav -->
+      <nav style="margin-top:80px;padding-top:24px;border-top:1px solid #ffd9d6;display:flex;align-items:center;justify-content:center;gap:36px;flex-wrap:wrap;">
+        <span style="font-family:'Roboto',sans-serif;font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:#FF5656;font-weight:600;">On this page</span>
+        <div style="display:flex;align-items:center;gap:36px;flex-wrap:wrap;">
+          <a href="#how" class="gk-hero-nav-link">How it works</a>
+          <a href="#assessment" class="gk-hero-nav-link">Assessment</a>
+          <a href="#trust" class="gk-hero-nav-link">Data safety</a>
+          <a href="#faq" class="gk-hero-nav-link">FAQ</a>
+        </div>
+      </nav>
+    </div><!-- /.container -->
+  </section>
+  <!-- END HERO -->
+
+
+  <!-- ═══════════════════════════════════════════════════
+       MISSION QUOTE
+  ═══════════════════════════════════════════════════════ -->
+  <section style="background:#fff;padding:88px 0 96px;">
+    <div class="container" style="max-width:980px;">
+      <div style="background:#fff1f0;border-radius:20px;padding:56px 64px 48px;position:relative;overflow:hidden;">
+        <!-- oversized quote mark -->
+        <div aria-hidden="true" style="position:absolute;top:8px;left:36px;font-family:'Lora',serif;font-style:italic;font-weight:500;font-size:180px;line-height:1;color:#ffd9d6;user-select:none;pointer-events:none;">&ldquo;</div>
+        <!-- eyebrow -->
+        <div style="position:relative;display:flex;align-items:center;gap:10px;margin-bottom:22px;">
+          <span style="width:18px;height:1px;background:#FF5656;display:inline-block;"></span>
+          <span style="font-family:'Roboto',sans-serif;font-size:11px;color:#FF5656;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;">From the frontline</span>
+        </div>
+        <!-- quote -->
+        <blockquote style="margin:0;position:relative;font-family:'Lora',serif;font-style:italic;font-weight:500;font-size:clamp(22px,2.5vw,30px);line-height:1.35;color:#455A7C;letter-spacing:-0.005em;">
+          When I had the evidence to show our unique value, the same funder increased our grant six times over. Most nonprofits never get the time to do that work. Get Kinder gives it to them.
+        </blockquote>
+        <!-- attribution -->
+        <div style="margin-top:32px;padding-top:22px;border-top:1px solid #ffd9d6;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;position:relative;">
+          <div style="display:flex;align-items:center;gap:14px;">
+            <div style="width:44px;height:44px;border-radius:50%;background:#455A7C;display:flex;align-items:center;justify-content:center;color:#fff;font-family:'Poppins',sans-serif;font-weight:600;font-size:15px;flex-shrink:0;">NP</div>
+            <div>
+              <div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:15px;color:#283853;">Nonprofit board member</div>
+              <div style="font-family:'Roboto',sans-serif;font-size:13px;color:#6e7280;margin-top:2px;">Reflecting on the evidence work that changed a funder conversation</div>
+            </div>
+          </div>
+          <div style="display:inline-flex;align-items:center;gap:10px;background:#fff;border:1px solid #ffd9d6;border-radius:999px;padding:8px 14px;">
+            <i data-lucide="trending-up" style="width:14px;height:14px;color:#FF5656;"></i>
+            <span style="font-family:'Roboto',sans-serif;font-size:12.5px;color:#283853;font-weight:500;">Same funder, <strong style="color:#FF5656;font-weight:600;">6&times; grant increase</strong></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════
+       PROBLEM
+  ═══════════════════════════════════════════════════════ -->
+  <section style="background:#f4f4f4;padding:112px 0;">
+    <div class="container" style="max-width:1200px;">
+      <div class="row g-5 align-items-start">
+        <!-- Left: copy -->
+        <div class="col-12 col-lg-6">
+          <div class="gk-eyebrow">The problem</div>
+          <h2 style="font-family:'Poppins',sans-serif;font-weight:600;font-size:clamp(26px,3vw,36px);letter-spacing:-0.02em;color:#283853;margin:0;line-height:1.18;">
+            The data funders need is already inside your organization.
+            <span style="font-family:'Lora',serif;font-style:italic;font-weight:500;color:#455A7C;"> It is just not ready to prove your impact.</span>
+          </h2>
+          <p style="margin-top:22px;font-family:'Roboto',sans-serif;font-size:16px;line-height:1.65;color:#4d525e;">
+            Your evidence is spread across spreadsheets, grant reports, program notes, email threads, paper forms, survey summaries, staff memory, and stories from the frontline.
+          </p>
+          <p style="margin-top:18px;font-family:'Roboto',sans-serif;font-size:15.5px;line-height:1.7;color:#4d525e;">That means every funding report becomes a scramble:</p>
+          <ul style="margin:12px 0 0;padding:0;list-style:none;">
+            <% [
+              'program staff chase numbers',
+              'development teams rewrite the same impact language',
+              'leaders struggle to connect activities to outcomes',
+              'funder reports depend on manual reconstruction',
+              'your strongest evidence stays hidden in unstructured sources'
+            ].forEach(function(item) { %>
+            <li style="display:flex;gap:10px;margin-bottom:8px;font-family:'Roboto',sans-serif;font-size:15px;color:#4d525e;">
+              <span style="flex-shrink:0;width:6px;height:6px;border-radius:50%;background:#FF5656;margin-top:9px;"></span>
+              <span><%= item %>;</span>
+            </li>
+            <% }); %>
+          </ul>
+          <div style="margin-top:22px;padding-left:18px;border-left:3px solid #FF5656;font-family:'Lora',serif;font-style:italic;font-weight:500;font-size:19px;line-height:1.45;color:#455A7C;">
+            The result is not just reporting stress. It is a weaker funding case.
+          </div>
+        </div>
+        <!-- Right: before/after diagram -->
+        <div class="col-12 col-lg-6">
+          <!-- BEFORE -->
+          <div style="background:#fff;border-radius:14px;border:1px solid #e3e4e8;padding:24px;">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px;">
+              <span style="background:#ffeae8;color:#b8443c;border-radius:999px;padding:3px 10px;font-family:'Roboto',sans-serif;font-size:10px;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;">Today · Unstructured</span>
+              <span style="font-family:'Roboto',sans-serif;font-size:13px;color:#6e7280;">Sources scattered across your organization</span>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">
+              <div style="background:#fafafa;border:1px dashed #c4c6cc;border-radius:8px;padding:12px;display:flex;align-items:center;gap:10px;transform:rotate(-0.6deg);"><i data-lucide="table-2" style="width:15px;height:15px;color:#6e7280;flex-shrink:0;"></i><span style="font-family:'Roboto',sans-serif;font-size:13px;color:#4d525e;">Spreadsheets</span></div>
+              <div style="background:#fafafa;border:1px dashed #c4c6cc;border-radius:8px;padding:12px;display:flex;align-items:center;gap:10px;transform:rotate(0.4deg);"><i data-lucide="file-text" style="width:15px;height:15px;color:#6e7280;flex-shrink:0;"></i><span style="font-family:'Roboto',sans-serif;font-size:13px;color:#4d525e;">Old reports</span></div>
+              <div style="background:#fafafa;border:1px dashed #c4c6cc;border-radius:8px;padding:12px;display:flex;align-items:center;gap:10px;transform:rotate(-0.3deg);"><i data-lucide="sticky-note" style="width:15px;height:15px;color:#6e7280;flex-shrink:0;"></i><span style="font-family:'Roboto',sans-serif;font-size:13px;color:#4d525e;">Staff notes</span></div>
+              <div style="background:#fafafa;border:1px dashed #c4c6cc;border-radius:8px;padding:12px;display:flex;align-items:center;gap:10px;transform:rotate(0.6deg);"><i data-lucide="scroll-text" style="width:15px;height:15px;color:#6e7280;flex-shrink:0;"></i><span style="font-family:'Roboto',sans-serif;font-size:13px;color:#4d525e;">Paper forms</span></div>
+              <div style="background:#fafafa;border:1px dashed #c4c6cc;border-radius:8px;padding:12px;display:flex;align-items:center;gap:10px;transform:rotate(-0.5deg);"><i data-lucide="message-circle" style="width:15px;height:15px;color:#6e7280;flex-shrink:0;"></i><span style="font-family:'Roboto',sans-serif;font-size:13px;color:#4d525e;">Stories</span></div>
+              <div style="background:#fafafa;border:1px dashed #c4c6cc;border-radius:8px;padding:12px;display:flex;align-items:center;gap:10px;transform:rotate(0.3deg);"><i data-lucide="mail" style="width:15px;height:15px;color:#6e7280;flex-shrink:0;"></i><span style="font-family:'Roboto',sans-serif;font-size:13px;color:#4d525e;">Emails</span></div>
+            </div>
+          </div>
+          <!-- Arrow -->
+          <div style="display:flex;align-items:center;justify-content:center;padding:22px 0;">
+            <div style="display:flex;align-items:center;gap:10px;background:#283853;color:#fff;border-radius:999px;padding:8px 16px;box-shadow:0 8px 20px rgba(20,30,48,.14);">
+              <i data-lucide="git-merge" style="width:14px;height:14px;color:#ff8c83;"></i>
+              <span style="font-family:'Roboto',sans-serif;font-size:12px;font-weight:500;letter-spacing:0.02em;">Evidence architecture</span>
+              <i data-lucide="arrow-down" style="width:13px;height:13px;color:#b5bdcb;"></i>
+            </div>
+          </div>
+          <!-- AFTER -->
+          <div style="background:#fff;border-radius:14px;border:1px solid #e3e4e8;padding:24px;box-shadow:0 1px 2px rgba(31,38,48,.04),0 8px 24px rgba(31,38,48,.06);">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px;">
+              <span style="background:#ecf8f5;color:#0f8e72;border-radius:999px;padding:3px 10px;font-family:'Roboto',sans-serif;font-size:10px;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;">After · Structured</span>
+              <span style="font-family:'Roboto',sans-serif;font-size:13px;color:#6e7280;">A defensible chain from work to claim</span>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              <div style="display:flex;align-items:center;gap:12px;background:#fafafa;border:1px solid #ececec;border-radius:8px;padding:11px 14px;"><div style="width:22px;height:22px;border-radius:6px;background:#455a7c;display:flex;align-items:center;justify-content:center;color:#fff;font-family:'Roboto',sans-serif;font-size:11px;font-weight:600;flex-shrink:0;">1</div><div style="flex:1;font-family:'Poppins',sans-serif;font-size:14px;font-weight:500;color:#283853;">Programs</div><i data-lucide="arrow-down" style="width:13px;height:13px;color:#c4c6cc;opacity:0.7;"></i></div>
+              <div style="display:flex;align-items:center;gap:12px;background:#fafafa;border:1px solid #ececec;border-radius:8px;padding:11px 14px;"><div style="width:22px;height:22px;border-radius:6px;background:#647187;display:flex;align-items:center;justify-content:center;color:#fff;font-family:'Roboto',sans-serif;font-size:11px;font-weight:600;flex-shrink:0;">2</div><div style="flex:1;font-family:'Poppins',sans-serif;font-size:14px;font-weight:500;color:#283853;">Outputs</div><i data-lucide="arrow-down" style="width:13px;height:13px;color:#c4c6cc;opacity:0.7;"></i></div>
+              <div style="display:flex;align-items:center;gap:12px;background:#fafafa;border:1px solid #ececec;border-radius:8px;padding:11px 14px;"><div style="width:22px;height:22px;border-radius:6px;background:#ff8c83;display:flex;align-items:center;justify-content:center;color:#fff;font-family:'Roboto',sans-serif;font-size:11px;font-weight:600;flex-shrink:0;">3</div><div style="flex:1;font-family:'Poppins',sans-serif;font-size:14px;font-weight:500;color:#283853;">Outcomes</div><i data-lucide="arrow-down" style="width:13px;height:13px;color:#c4c6cc;opacity:0.7;"></i></div>
+              <div style="display:flex;align-items:center;gap:12px;background:#fafafa;border:1px solid #ececec;border-radius:8px;padding:11px 14px;"><div style="width:22px;height:22px;border-radius:6px;background:#ff5656;display:flex;align-items:center;justify-content:center;color:#fff;font-family:'Roboto',sans-serif;font-size:11px;font-weight:600;flex-shrink:0;">4</div><div style="flex:1;font-family:'Poppins',sans-serif;font-size:14px;font-weight:500;color:#283853;">Evidence</div><i data-lucide="arrow-down" style="width:13px;height:13px;color:#c4c6cc;opacity:0.7;"></i></div>
+              <div style="display:flex;align-items:center;gap:12px;background:#fafafa;border:1px solid #ececec;border-radius:8px;padding:11px 14px;"><div style="width:22px;height:22px;border-radius:6px;background:#ff5656;display:flex;align-items:center;justify-content:center;color:#fff;font-family:'Roboto',sans-serif;font-size:11px;font-weight:600;flex-shrink:0;">5</div><div style="flex:1;font-family:'Poppins',sans-serif;font-size:14px;font-weight:500;color:#283853;">Claims</div><i data-lucide="arrow-down" style="width:13px;height:13px;color:#c4c6cc;opacity:0.7;"></i></div>
+              <div style="display:flex;align-items:center;gap:12px;background:#fff1f0;border:1px solid #ffd9d6;border-radius:8px;padding:11px 14px;"><div style="width:22px;height:22px;border-radius:6px;background:#283853;display:flex;align-items:center;justify-content:center;color:#fff;font-family:'Roboto',sans-serif;font-size:11px;font-weight:600;flex-shrink:0;">6</div><div style="flex:1;font-family:'Poppins',sans-serif;font-size:14px;font-weight:500;color:#283853;">Funder-ready report</div><i data-lucide="check-circle-2" style="width:15px;height:15px;color:#19c29c;"></i></div>
+            </div>
+          </div>
+        </div>
+      </div><!-- /.row -->
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════
+       WHY EXISTING SOLUTIONS MISS
+  ═══════════════════════════════════════════════════════ -->
+  <section style="background:#fff;padding:112px 0;">
+    <div class="container" style="max-width:1200px;">
+      <!-- Section header -->
+      <div style="margin-bottom:48px;">
+        <div class="gk-eyebrow">The gap in the market</div>
+        <h2 class="gk-sh-title">Why existing solutions miss the <span style="font-family:'Lora',serif;font-style:italic;font-weight:500;color:#455A7C;">real problem.</span></h2>
+        <p class="gk-sh-body" style="max-width:820px;">Enterprise tools are too heavy and costly for many small and medium-sized nonprofits. AI writing tools miss the mark when your data sources are not set up properly. They are guessing — and when they guess, they miss the unique value, relationships, and impact your organization actually provides.</p>
+      </div>
+      <!-- 3 cards -->
+      <div class="row g-4 mb-4">
+        <% [
+          {cat:'Enterprise tools',             verdict:'Too heavy and costly', icon:'building-2',  body:'Built for larger organizations with budget, staff, and technical capacity. Small and medium-sized nonprofits often need the data architecture before they need another platform.', tags:['$$$','Multi-month onboarding','Requires data team']},
+          {cat:'AI writing tools',             verdict:'Too shallow',          icon:'feather',     body:'They can draft words, but they cannot prove your outcomes if your source data is scattered, incomplete, or disconnected from your programs.',                                    tags:['Draft only','No evidence trail','Guesses outcomes']},
+          {cat:'Traditional reporting support',verdict:'Too manual',           icon:'briefcase',   body:'Consultants can help with reports, but without a reusable evidence structure, the same reporting scramble repeats every funding cycle.',                                      tags:['Project-based','No reuse','Repeats each cycle']}
+        ].forEach(function(c) { %>
+        <div class="col-12 col-md-4">
+          <div style="background:#fff;border:1px solid #e3e4e8;border-radius:14px;padding:28px 26px 24px;height:100%;display:flex;flex-direction:column;">
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px;">
+              <div style="width:38px;height:38px;border-radius:10px;background:#f1f3f7;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                <i data-lucide="<%= c.icon %>" style="width:18px;height:18px;color:#455A7C;"></i>
+              </div>
+              <div>
+                <div style="font-family:'Roboto',sans-serif;font-size:11px;color:#6e7280;letter-spacing:0.1em;text-transform:uppercase;font-weight:600;">Category</div>
+                <div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:16px;color:#283853;"><%= c.cat %></div>
+              </div>
+            </div>
+            <div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:22px;color:#b8443c;letter-spacing:-0.01em;margin-bottom:12px;"><%= c.verdict %></div>
+            <p style="font-family:'Roboto',sans-serif;font-size:14px;color:#4d525e;line-height:1.6;flex:1;margin:0 0 20px;"><%= c.body %></p>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;">
+              <% c.tags.forEach(function(t) { %>
+              <span style="background:#fafafa;border:1px solid #ececec;border-radius:999px;padding:3px 10px;font-family:'Roboto',sans-serif;font-size:11px;color:#6e7280;font-weight:500;"><%= t %></span>
+              <% }); %>
+            </div>
+          </div>
+        </div>
+        <% }); %>
+      </div>
+      <!-- Positioning bar -->
+      <div style="background:#283853;border-radius:16px;padding:32px 36px;display:flex;align-items:center;gap:28px;flex-wrap:wrap;">
+        <div style="flex-shrink:0;width:56px;height:56px;border-radius:14px;background:#FF5656;display:flex;align-items:center;justify-content:center;">
+          <i data-lucide="layers" style="width:26px;height:26px;color:#fff;"></i>
+        </div>
+        <div style="flex:1;min-width:240px;">
+          <div style="font-family:'Roboto',sans-serif;font-size:11px;color:#ffbbbb;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;margin-bottom:6px;">Where Get Kinder fits</div>
+          <div style="font-family:'Poppins',sans-serif;font-size:22px;font-weight:500;color:#fff;line-height:1.35;letter-spacing:-0.01em;">
+            Get Kinder.ai starts <em style="font-family:'Lora',serif;font-weight:500;">before</em> the writing. We organize the unstructured evidence behind your impact first, then turn it into reporting funders can trust.
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <% ['Data readiness','Evidence architecture','Funder-ready reporting'].forEach(function(step, i, arr) { %>
+          <div style="background:rgba(255,255,255,0.08);color:#fff;border:1px solid rgba(255,255,255,0.12);border-radius:10px;padding:10px 14px;font-family:'Roboto',sans-serif;font-size:12.5px;font-weight:500;white-space:nowrap;"><%= step %></div>
+          <% if (i < arr.length-1) { %><i data-lucide="arrow-right" style="width:14px;height:14px;color:#b5bdcb;"></i><% } %>
+          <% }); %>
+        </div>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ═══════════════════════════════════════════════════
+       ASSESSMENT OFFER
+  ═══════════════════════════════════════════════════════ -->
+  <section id="assessment" style="background:#fff1f0;padding:112px 0;">
+    <div class="container" style="max-width:1200px;">
+      <div style="margin-bottom:48px;">
+        <div class="gk-eyebrow">The assessment offer</div>
+        <h2 class="gk-sh-title">What selected design partners <span style="font-family:'Lora',serif;font-style:italic;font-weight:500;color:#455A7C;">receive.</span></h2>
+        <p class="gk-sh-body" style="max-width:820px;">The Impact Reporting &amp; Data Readiness Assessment is a 1–2 week review that shows where your impact evidence lives today, what funders may not be able to verify, and what needs to change to make your reporting funding-ready.</p>
+      </div>
+      <!-- Stats row -->
+      <div style="background:#fff;border:1px solid #ffd9d6;border-radius:14px;padding:8px;margin-bottom:36px;display:grid;grid-template-columns:repeat(5,1fr);gap:1px;" class="row g-0">
+        <div style="background:#fff;padding:18px;border-right:1px solid #ffd9d6;display:flex;align-items:center;gap:12px;" class="col-6 col-md"><div style="width:36px;height:36px;border-radius:10px;background:#fff1f0;display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i data-lucide="gift" style="width:17px;height:17px;color:#FF5656;"></i></div><div><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:16px;color:#283853;letter-spacing:-0.01em;">No cost</div><div style="font-family:'Roboto',sans-serif;font-size:12px;color:#6e7280;margin-top:2px;">for selected design partners</div></div></div>
+        <div style="background:#fff;padding:18px;border-right:1px solid #ffd9d6;display:flex;align-items:center;gap:12px;" class="col-6 col-md"><div style="width:36px;height:36px;border-radius:10px;background:#fff1f0;display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i data-lucide="calendar-clock" style="width:17px;height:17px;color:#FF5656;"></i></div><div><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:16px;color:#283853;letter-spacing:-0.01em;">1–2 weeks</div><div style="font-family:'Roboto',sans-serif;font-size:12px;color:#6e7280;margin-top:2px;">focused review</div></div></div>
+        <div style="background:#fff;padding:18px;border-right:1px solid #ffd9d6;display:flex;align-items:center;gap:12px;" class="col-6 col-md"><div style="width:36px;height:36px;border-radius:10px;background:#fff1f0;display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i data-lucide="file-text" style="width:17px;height:17px;color:#FF5656;"></i></div><div><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:16px;color:#283853;letter-spacing:-0.01em;">10–15 pages</div><div style="font-family:'Roboto',sans-serif;font-size:12px;color:#6e7280;margin-top:2px;">written assessment</div></div></div>
+        <div style="background:#fff;padding:18px;border-right:1px solid #ffd9d6;display:flex;align-items:center;gap:12px;" class="col-6 col-md"><div style="width:36px;height:36px;border-radius:10px;background:#fff1f0;display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i data-lucide="presentation" style="width:17px;height:17px;color:#FF5656;"></i></div><div><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:16px;color:#283853;letter-spacing:-0.01em;">60-minute</div><div style="font-family:'Roboto',sans-serif;font-size:12px;color:#6e7280;margin-top:2px;">readout presentation</div></div></div>
+        <div style="background:#fff;padding:18px;display:flex;align-items:center;gap:12px;" class="col-6 col-md"><div style="width:36px;height:36px;border-radius:10px;background:#fff1f0;display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i data-lucide="map" style="width:17px;height:17px;color:#FF5656;"></i></div><div><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:16px;color:#283853;letter-spacing:-0.01em;">12-week</div><div style="font-family:'Roboto',sans-serif;font-size:12px;color:#6e7280;margin-top:2px;">implementation roadmap</div></div></div>
+      </div>
+      <!-- Deliverables grid -->
+      <div class="gk-del-grid">
+        <!-- 01 -->
+        <div class="gk-del-sm" style="background:#fff;border:1px solid #e3e4e8;border-radius:14px;padding:28px;display:flex;flex-direction:column;">
+          <div style="display:flex;align-items:flex-start;gap:14px;margin-bottom:14px;"><div style="width:40px;height:40px;border-radius:10px;background:#283853;display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i data-lucide="folder-search" style="width:19px;height:19px;color:#ff8c83;"></i></div><div><div style="font-family:'Roboto',sans-serif;font-size:11px;color:#FF5656;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;margin-bottom:4px;">Deliverable 01</div><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:18px;color:#283853;letter-spacing:-0.01em;line-height:1.3;">Where your impact data lives today</div></div></div>
+          <p style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#4d525e;line-height:1.6;flex:1;margin:0 0 14px;">A practical map of the spreadsheets, documents, paper forms, email threads, tools, and staff-held processes that currently hold your program evidence.</p>
+          <div style="padding:12px 14px;background:#fafafa;border-radius:8px;border:1px solid #ececec;"><div style="font-family:'Roboto',sans-serif;font-size:11px;color:#6e7280;letter-spacing:0.08em;text-transform:uppercase;font-weight:600;margin-bottom:4px;">Includes</div><div style="font-family:'Roboto',sans-serif;font-size:13px;color:#4d525e;line-height:1.5;">Source inventory, screenshots where useful, ownership map, and data-flow diagram.</div></div>
+        </div>
+        <!-- 02 -->
+        <div class="gk-del-sm" style="background:#fff;border:1px solid #e3e4e8;border-radius:14px;padding:28px;display:flex;flex-direction:column;">
+          <div style="display:flex;align-items:flex-start;gap:14px;margin-bottom:14px;"><div style="width:40px;height:40px;border-radius:10px;background:#283853;display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i data-lucide="shield-alert" style="width:19px;height:19px;color:#ff8c83;"></i></div><div><div style="font-family:'Roboto',sans-serif;font-size:11px;color:#FF5656;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;margin-bottom:4px;">Deliverable 02</div><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:18px;color:#283853;letter-spacing:-0.01em;line-height:1.3;">What is missing for funder-grade reporting</div></div></div>
+          <p style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#4d525e;line-height:1.6;flex:1;margin:0 0 14px;">A gap analysis against the types of evidence major funders commonly ask for: activities, outputs, outcomes, demographics, stories, budgets, learning, and impact claims.</p>
+          <div style="padding:12px 14px;background:#fafafa;border-radius:8px;border:1px solid #ececec;"><div style="font-family:'Roboto',sans-serif;font-size:11px;color:#6e7280;letter-spacing:0.08em;text-transform:uppercase;font-weight:600;margin-bottom:4px;">Includes</div><div style="font-family:'Roboto',sans-serif;font-size:13px;color:#4d525e;line-height:1.5;">Missing fields, weak evidence areas, unclear definitions, and reporting gaps.</div></div>
+        </div>
+        <!-- 03 -->
+        <div class="gk-del-sm" style="background:#fff;border:1px solid #e3e4e8;border-radius:14px;padding:28px;display:flex;flex-direction:column;">
+          <div style="display:flex;align-items:flex-start;gap:14px;margin-bottom:14px;"><div style="width:40px;height:40px;border-radius:10px;background:#283853;display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i data-lucide="alert-octagon" style="width:19px;height:19px;color:#ff8c83;"></i></div><div><div style="font-family:'Roboto',sans-serif;font-size:11px;color:#FF5656;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;margin-bottom:4px;">Deliverable 03</div><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:18px;color:#283853;letter-spacing:-0.01em;line-height:1.3;">Your top 3 reporting risks</div></div></div>
+          <p style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#4d525e;line-height:1.6;flex:1;margin:0 0 14px;">A clear view of the specific issues that could weaken a grant narrative, create inconsistent reporting, or make impact claims harder to substantiate.</p>
+          <div style="padding:12px 14px;background:#fafafa;border-radius:8px;border:1px solid #ececec;"><div style="font-family:'Roboto',sans-serif;font-size:11px;color:#6e7280;letter-spacing:0.08em;text-transform:uppercase;font-weight:600;margin-bottom:4px;">Includes</div><div style="font-family:'Roboto',sans-serif;font-size:13px;color:#4d525e;line-height:1.5;">Example: volunteer hours tracked overall, but not tied to specific programs or outcomes.</div></div>
+        </div>
+        <!-- 04 -->
+        <div class="gk-del-lg" style="background:#fff;border:1px solid #e3e4e8;border-radius:14px;padding:28px;display:flex;flex-direction:column;">
+          <div style="display:flex;align-items:flex-start;gap:14px;margin-bottom:14px;"><div style="width:40px;height:40px;border-radius:10px;background:#283853;display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i data-lucide="git-fork" style="width:19px;height:19px;color:#ff8c83;"></i></div><div><div style="font-family:'Roboto',sans-serif;font-size:11px;color:#FF5656;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;margin-bottom:4px;">Deliverable 04</div><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:18px;color:#283853;letter-spacing:-0.01em;line-height:1.3;">What clean evidence architecture could look like</div></div></div>
+          <p style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#4d525e;line-height:1.6;flex:1;margin:0 0 14px;">A tailored target-state diagram showing how your programs, outcomes, data sources, stories, claims, and reports should connect.</p>
+          <div style="padding:12px 14px;background:#fafafa;border-radius:8px;border:1px solid #ececec;"><div style="font-family:'Roboto',sans-serif;font-size:11px;color:#6e7280;letter-spacing:0.08em;text-transform:uppercase;font-weight:600;margin-bottom:4px;">Includes</div><div style="font-family:'Roboto',sans-serif;font-size:13px;color:#4d525e;line-height:1.5;">Source-of-truth recommendations, evidence categories, reporting flow, and human review checkpoints.</div></div>
+        </div>
+        <!-- 05 -->
+        <div class="gk-del-lg" style="background:#fff;border:1px solid #e3e4e8;border-radius:14px;padding:28px;display:flex;flex-direction:column;">
+          <div style="display:flex;align-items:flex-start;gap:14px;margin-bottom:14px;"><div style="width:40px;height:40px;border-radius:10px;background:#283853;display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i data-lucide="route" style="width:19px;height:19px;color:#ff8c83;"></i></div><div><div style="font-family:'Roboto',sans-serif;font-size:11px;color:#FF5656;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;margin-bottom:4px;">Deliverable 05</div><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:18px;color:#283853;letter-spacing:-0.01em;line-height:1.3;">The 12-week path to get there</div></div></div>
+          <p style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#4d525e;line-height:1.6;flex:1;margin:0 0 14px;">A phased roadmap showing how to move from today's unstructured data environment to a stronger evidence and reporting system.</p>
+          <div style="padding:12px 14px;background:#fafafa;border-radius:8px;border:1px solid #ececec;"><div style="font-family:'Roboto',sans-serif;font-size:11px;color:#6e7280;letter-spacing:0.08em;text-transform:uppercase;font-weight:600;margin-bottom:4px;">Includes</div><div style="font-family:'Roboto',sans-serif;font-size:13px;color:#4d525e;line-height:1.5;">Priority fixes, quick wins, implementation phases, and where Get Kinder.ai can support execution.</div></div>
+        </div>
+      </div>
+      <div style="margin-top:40px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+        <a href="#book" class="gk-cta-primary gk-cta-primary-lg">Book a Reporting Readiness Call <i data-lucide="arrow-right" style="width:16px;height:16px;"></i></a>
+        <span style="font-family:'Roboto',sans-serif;font-size:13.5px;color:#6e7280;line-height:1.5;">The call confirms fit before any materials are reviewed.</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════
+       HOW IT WORKS
+  ═══════════════════════════════════════════════════════ -->
+  <section id="how" style="background:#fff;padding:112px 0;">
+    <div class="container" style="max-width:1200px;">
+      <div style="margin-bottom:48px;">
+        <div class="gk-eyebrow">How it works</div>
+        <h2 class="gk-sh-title">How the design partner <span style="font-family:'Lora',serif;font-style:italic;font-weight:500;color:#455A7C;">process works.</span></h2>
+        <p class="gk-sh-body" style="max-width:720px;">Six clear steps from first call to readout. No surprises, no commitments before fit is confirmed.</p>
+      </div>
+      <div class="row g-4">
+        <div class="col-12 col-md-6 col-lg-4"><div style="background:#fff;border:1px solid #e3e4e8;border-radius:14px;padding:24px;height:100%;"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;"><div style="width:38px;height:38px;border-radius:10px;background:#fff1f0;display:flex;align-items:center;justify-content:center;"><i data-lucide="edit-3" style="width:18px;height:18px;color:#FF5656;"></i></div><span style="font-family:'Poppins',sans-serif;font-weight:600;font-size:38px;color:#f1f3f7;letter-spacing:-0.04em;line-height:1;">01</span></div><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:17px;color:#283853;margin-bottom:8px;line-height:1.3;">Apply for a Reporting Readiness Call</div><p style="font-family:'Roboto',sans-serif;font-size:14px;color:#4d525e;line-height:1.6;margin:0;">Complete a short qualification form so we can understand your organization, funding context, reporting needs, and data readiness.</p></div></div>
+        <div class="col-12 col-md-6 col-lg-4"><div style="background:#fff;border:1px solid #e3e4e8;border-radius:14px;padding:24px;height:100%;"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;"><div style="width:38px;height:38px;border-radius:10px;background:#fff1f0;display:flex;align-items:center;justify-content:center;"><i data-lucide="phone" style="width:18px;height:18px;color:#FF5656;"></i></div><span style="font-family:'Poppins',sans-serif;font-weight:600;font-size:38px;color:#f1f3f7;letter-spacing:-0.04em;line-height:1;">02</span></div><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:17px;color:#283853;margin-bottom:8px;line-height:1.3;">Confirm fit on a 30-minute call</div><p style="font-family:'Roboto',sans-serif;font-size:14px;color:#4d525e;line-height:1.6;margin:0;">The call qualifies fit, confirms expectations, and identifies whether the no-cost assessment is likely to create value.</p></div></div>
+        <div class="col-12 col-md-6 col-lg-4"><div style="background:#fff;border:1px solid #e3e4e8;border-radius:14px;padding:24px;height:100%;"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;"><div style="width:38px;height:38px;border-radius:10px;background:#fff1f0;display:flex;align-items:center;justify-content:center;"><i data-lucide="file-signature" style="width:18px;height:18px;color:#FF5656;"></i></div><span style="font-family:'Poppins',sans-serif;font-weight:600;font-size:38px;color:#f1f3f7;letter-spacing:-0.04em;line-height:1;">03</span></div><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:17px;color:#283853;margin-bottom:8px;line-height:1.3;">Sign data handling agreement</div><p style="font-family:'Roboto',sans-serif;font-size:14px;color:#4d525e;line-height:1.6;margin:0;">Before reviewing materials, we confirm how your data will be handled, what should be excluded, and what can be safely reviewed.</p></div></div>
+        <div class="col-12 col-md-6 col-lg-4"><div style="background:#fff;border:1px solid #e3e4e8;border-radius:14px;padding:24px;height:100%;"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;"><div style="width:38px;height:38px;border-radius:10px;background:#fff1f0;display:flex;align-items:center;justify-content:center;"><i data-lucide="upload-cloud" style="width:18px;height:18px;color:#FF5656;"></i></div><span style="font-family:'Poppins',sans-serif;font-weight:600;font-size:38px;color:#f1f3f7;letter-spacing:-0.04em;line-height:1;">04</span></div><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:17px;color:#283853;margin-bottom:8px;line-height:1.3;">Share selected reporting materials</div><p style="font-family:'Roboto',sans-serif;font-size:14px;color:#4d525e;line-height:1.6;margin:0;">You provide a focused set of documents and data sources: past reports, funder templates, spreadsheets, program summaries, survey results, and anonymized stories where appropriate.</p></div></div>
+        <div class="col-12 col-md-6 col-lg-4"><div style="background:#fff;border:1px solid #e3e4e8;border-radius:14px;padding:24px;height:100%;"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;"><div style="width:38px;height:38px;border-radius:10px;background:#fff1f0;display:flex;align-items:center;justify-content:center;"><i data-lucide="file-text" style="width:18px;height:18px;color:#FF5656;"></i></div><span style="font-family:'Poppins',sans-serif;font-weight:600;font-size:38px;color:#f1f3f7;letter-spacing:-0.04em;line-height:1;">05</span></div><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:17px;color:#283853;margin-bottom:8px;line-height:1.3;">Receive your assessment</div><p style="font-family:'Roboto',sans-serif;font-size:14px;color:#4d525e;line-height:1.6;margin:0;">Within 1–2 weeks, selected design partners receive a 10–15 page Impact Reporting &amp; Data Readiness Assessment.</p></div></div>
+        <div class="col-12 col-md-6 col-lg-4"><div style="background:#fff;border:1px solid #e3e4e8;border-radius:14px;padding:24px;height:100%;"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;"><div style="width:38px;height:38px;border-radius:10px;background:#fff1f0;display:flex;align-items:center;justify-content:center;"><i data-lucide="presentation" style="width:18px;height:18px;color:#FF5656;"></i></div><span style="font-family:'Poppins',sans-serif;font-weight:600;font-size:38px;color:#f1f3f7;letter-spacing:-0.04em;line-height:1;">06</span></div><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:17px;color:#283853;margin-bottom:8px;line-height:1.3;">Attend the readout presentation</div><p style="font-family:'Roboto',sans-serif;font-size:14px;color:#4d525e;line-height:1.6;margin:0;">We walk through the findings, risks, recommended evidence architecture, and 12-week path to implementation.</p></div></div>
+      </div>
+      <div style="margin-top:36px;padding:20px 24px;background:#f1f3f7;border-radius:12px;display:flex;align-items:flex-start;gap:14px;">
+        <i data-lucide="info" style="width:18px;height:18px;color:#455A7C;margin-top:2px;flex-shrink:0;"></i>
+        <p style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#455A7C;line-height:1.55;margin:0;"><strong style="font-weight:600;">Note.</strong> The assessment is not full implementation. It is designed to show what is holding your reporting back and what needs to happen next.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════
+       BEFORE / AFTER
+  ═══════════════════════════════════════════════════════ -->
+  <section style="background:#f4f4f4;padding:112px 0;">
+    <div class="container" style="max-width:1200px;">
+      <div style="margin-bottom:48px;">
+        <div class="gk-eyebrow">The shift</div>
+        <h2 class="gk-sh-title">From reporting scramble <span style="font-family:'Lora',serif;font-style:italic;font-weight:500;color:#455A7C;">to funding-ready evidence.</span></h2>
+        <p class="gk-sh-body" style="max-width:720px;">What changes when your evidence has a structure your funders can verify and your team can reuse.</p>
+      </div>
+      <div class="row g-4">
+        <!-- Before -->
+        <div class="col-12 col-md-6">
+          <div style="background:#fff;border-radius:16px;border:1px solid #e3e4e8;padding:32px;">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:20px;padding-bottom:18px;border-bottom:1px solid #ececec;">
+              <div style="width:32px;height:32px;border-radius:8px;background:#ffeae8;display:flex;align-items:center;justify-content:center;"><i data-lucide="alert-triangle" style="width:16px;height:16px;color:#b8443c;"></i></div>
+              <div><div style="font-family:'Roboto',sans-serif;font-size:11px;color:#b8443c;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;">Before</div><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:18px;color:#283853;">Reporting scramble</div></div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:12px;">
+              <div style="display:flex;align-items:flex-start;gap:12px;"><i data-lucide="x" style="width:16px;height:16px;color:#b8443c;margin-top:2px;flex-shrink:0;"></i><span style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#4d525e;line-height:1.5;">Data spread across documents, spreadsheets, forms, and staff memory</span></div>
+              <div style="display:flex;align-items:flex-start;gap:12px;"><i data-lucide="x" style="width:16px;height:16px;color:#b8443c;margin-top:2px;flex-shrink:0;"></i><span style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#4d525e;line-height:1.5;">Reports rebuilt manually every cycle</span></div>
+              <div style="display:flex;align-items:flex-start;gap:12px;"><i data-lucide="x" style="width:16px;height:16px;color:#b8443c;margin-top:2px;flex-shrink:0;"></i><span style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#4d525e;line-height:1.5;">Impact stories hard to connect to outcomes</span></div>
+              <div style="display:flex;align-items:flex-start;gap:12px;"><i data-lucide="x" style="width:16px;height:16px;color:#b8443c;margin-top:2px;flex-shrink:0;"></i><span style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#4d525e;line-height:1.5;">Claims not consistently tied to source evidence</span></div>
+              <div style="display:flex;align-items:flex-start;gap:12px;"><i data-lucide="x" style="width:16px;height:16px;color:#b8443c;margin-top:2px;flex-shrink:0;"></i><span style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#4d525e;line-height:1.5;">Staff pulled away from program work to chase information</span></div>
+              <div style="display:flex;align-items:flex-start;gap:12px;"><i data-lucide="x" style="width:16px;height:16px;color:#b8443c;margin-top:2px;flex-shrink:0;"></i><span style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#4d525e;line-height:1.5;">Generic AI guesses from incomplete context</span></div>
+            </div>
+          </div>
+        </div>
+        <!-- After -->
+        <div class="col-12 col-md-6">
+          <div style="background:#283853;border-radius:16px;padding:32px;position:relative;overflow:hidden;">
+            <div style="position:absolute;top:-60px;right:-60px;width:200px;height:200px;border-radius:50%;background:#FF5656;opacity:0.12;pointer-events:none;"></div>
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:20px;padding-bottom:18px;border-bottom:1px solid rgba(255,255,255,0.1);position:relative;">
+              <div style="width:32px;height:32px;border-radius:8px;background:#FF5656;display:flex;align-items:center;justify-content:center;"><i data-lucide="check-circle-2" style="width:16px;height:16px;color:#fff;"></i></div>
+              <div><div style="font-family:'Roboto',sans-serif;font-size:11px;color:#ffbbbb;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;">After</div><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:18px;color:#fff;">Funder-ready evidence</div></div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:12px;position:relative;">
+              <div style="display:flex;align-items:flex-start;gap:12px;"><i data-lucide="check" style="width:16px;height:16px;color:#ff8c83;margin-top:2px;flex-shrink:0;"></i><span style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#dfe3ec;line-height:1.5;">Clear map of where impact evidence lives</span></div>
+              <div style="display:flex;align-items:flex-start;gap:12px;"><i data-lucide="check" style="width:16px;height:16px;color:#ff8c83;margin-top:2px;flex-shrink:0;"></i><span style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#dfe3ec;line-height:1.5;">Reporting gaps and risks identified</span></div>
+              <div style="display:flex;align-items:flex-start;gap:12px;"><i data-lucide="check" style="width:16px;height:16px;color:#ff8c83;margin-top:2px;flex-shrink:0;"></i><span style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#dfe3ec;line-height:1.5;">Funder-ready evidence structure defined</span></div>
+              <div style="display:flex;align-items:flex-start;gap:12px;"><i data-lucide="check" style="width:16px;height:16px;color:#ff8c83;margin-top:2px;flex-shrink:0;"></i><span style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#dfe3ec;line-height:1.5;">Claims connected to programs, outputs, outcomes, and stories</span></div>
+              <div style="display:flex;align-items:flex-start;gap:12px;"><i data-lucide="check" style="width:16px;height:16px;color:#ff8c83;margin-top:2px;flex-shrink:0;"></i><span style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#dfe3ec;line-height:1.5;">12-week roadmap to reduce reporting burden</span></div>
+              <div style="display:flex;align-items:flex-start;gap:12px;"><i data-lucide="check" style="width:16px;height:16px;color:#ff8c83;margin-top:2px;flex-shrink:0;"></i><span style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#dfe3ec;line-height:1.5;">AI-assisted workflows grounded in your actual data</span></div>
+            </div>
+            <div style="margin-top:26px;padding-top:20px;border-top:1px solid rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:space-between;position:relative;">
+              <a href="#how" style="font-family:'Roboto',sans-serif;font-size:14px;color:#fff;font-weight:500;text-decoration:none;display:inline-flex;align-items:center;gap:8px;">See how it works <i data-lucide="arrow-right" style="width:14px;height:14px;color:#ff8c83;"></i></a>
+              <span style="font-family:'Lora',serif;font-style:italic;font-size:13px;color:#b5bdcb;">In about 12 weeks</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════
+       WHO THIS IS FOR
+  ═══════════════════════════════════════════════════════ -->
+  <section style="background:#fff;padding:112px 0;">
+    <div class="container" style="max-width:1200px;">
+      <div style="margin-bottom:48px;">
+        <div class="gk-eyebrow">Who this is for</div>
+        <h2 class="gk-sh-title">Built for small and medium-sized nonprofits <span style="font-family:'Lora',serif;font-style:italic;font-weight:500;color:#455A7C;">with real reporting pressure.</span></h2>
+      </div>
+      <div class="row g-4">
+        <div class="col-12 col-sm-6 col-lg-3"><div style="background:#fff;border:1px solid #e3e4e8;border-radius:14px;padding:28px 24px;height:100%;"><div style="display:inline-flex;align-items:center;gap:6px;background:#ecf8f5;color:#0f8e72;border-radius:999px;padding:4px 10px 4px 8px;margin-bottom:18px;font-family:'Roboto',sans-serif;font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;"><i data-lucide="check" style="width:12px;height:12px;color:#0f8e72;"></i>Strong fit</div><div style="width:40px;height:40px;border-radius:10px;background:#f1f3f7;display:flex;align-items:center;justify-content:center;margin-bottom:16px;"><i data-lucide="banknote" style="width:18px;height:18px;color:#455A7C;"></i></div><p style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#283853;line-height:1.55;margin:0;">You receive or are pursuing grant, foundation, government, or institutional funding.</p></div></div>
+        <div class="col-12 col-sm-6 col-lg-3"><div style="background:#fff;border:1px solid #e3e4e8;border-radius:14px;padding:28px 24px;height:100%;"><div style="display:inline-flex;align-items:center;gap:6px;background:#ecf8f5;color:#0f8e72;border-radius:999px;padding:4px 10px 4px 8px;margin-bottom:18px;font-family:'Roboto',sans-serif;font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;"><i data-lucide="check" style="width:12px;height:12px;color:#0f8e72;"></i>Strong fit</div><div style="width:40px;height:40px;border-radius:10px;background:#f1f3f7;display:flex;align-items:center;justify-content:center;margin-bottom:16px;"><i data-lucide="database" style="width:18px;height:18px;color:#455A7C;"></i></div><p style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#283853;line-height:1.55;margin:0;">Your impact evidence is spread across spreadsheets, reports, stories, surveys, program tools, or staff knowledge.</p></div></div>
+        <div class="col-12 col-sm-6 col-lg-3"><div style="background:#fff;border:1px solid #e3e4e8;border-radius:14px;padding:28px 24px;height:100%;"><div style="display:inline-flex;align-items:center;gap:6px;background:#ecf8f5;color:#0f8e72;border-radius:999px;padding:4px 10px 4px 8px;margin-bottom:18px;font-family:'Roboto',sans-serif;font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;"><i data-lucide="check" style="width:12px;height:12px;color:#0f8e72;"></i>Strong fit</div><div style="width:40px;height:40px;border-radius:10px;background:#f1f3f7;display:flex;align-items:center;justify-content:center;margin-bottom:16px;"><i data-lucide="calendar-days" style="width:18px;height:18px;color:#455A7C;"></i></div><p style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#283853;line-height:1.55;margin:0;">You have reporting deadlines, renewals, or funding asks coming up in the next 3–6 months.</p></div></div>
+        <div class="col-12 col-sm-6 col-lg-3"><div style="background:#fafafa;border:1px dashed #c4c6cc;border-radius:14px;padding:28px 24px;height:100%;"><div style="display:inline-flex;align-items:center;gap:6px;background:#ececec;color:#4d525e;border-radius:999px;padding:4px 10px 4px 8px;margin-bottom:18px;font-family:'Roboto',sans-serif;font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;"><i data-lucide="circle-slash" style="width:12px;height:12px;color:#4d525e;"></i>Not the right fit</div><div style="width:40px;height:40px;border-radius:10px;background:#ececec;display:flex;align-items:center;justify-content:center;margin-bottom:16px;"><i data-lucide="circle-help" style="width:18px;height:18px;color:#6e7280;"></i></div><p style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#4d525e;line-height:1.55;margin:0;">You do not currently report to funders, cannot share any reporting materials, or are not ready to review how your data supports your funding case.</p></div></div>
+      </div>
+      <div style="margin-top:24px;padding:16px 20px;background:#fff1f0;border-radius:10px;display:flex;align-items:flex-start;gap:12px;">
+        <i data-lucide="star" style="width:16px;height:16px;color:#FF5656;margin-top:2px;flex-shrink:0;"></i>
+        <p style="font-family:'Roboto',sans-serif;font-size:14px;color:#4d525e;line-height:1.55;margin:0;"><strong style="color:#283853;font-weight:600;">Priority</strong> will be given to nonprofits where stronger reporting evidence could directly support upcoming funder reporting, grant renewal, or funding conversations.</p>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ═══════════════════════════════════════════════════
+       DATA TRUST
+  ═══════════════════════════════════════════════════════ -->
+  <section id="trust" style="background:#283853;padding:112px 0;">
+    <div class="container" style="max-width:1200px;">
+      <div class="row g-5 align-items-start">
+        <!-- Left -->
+        <div class="col-12 col-lg-5">
+          <div class="gk-eyebrow gk-eyebrow-dark">Data handling &amp; trust</div>
+          <h2 style="font-family:'Poppins',sans-serif;font-weight:600;font-size:clamp(26px,3vw,38px);letter-spacing:-0.02em;color:#fff;margin:0;line-height:1.15;">
+            Your data stays yours.
+            <span style="font-family:'Lora',serif;font-style:italic;font-weight:500;color:#ffbbbb;"> Your trust comes first.</span>
+          </h2>
+          <p style="margin-top:22px;font-family:'Roboto',sans-serif;font-size:16px;color:#dfe3ec;line-height:1.65;max-width:460px;">
+            Nonprofits often hold sensitive program, participant, volunteer, donor, and community information. The assessment is designed to minimize risk from the start.
+          </p>
+          <div style="margin-top:28px;">
+            <a href="#book" class="gk-cta-primary">Book a Reporting Readiness Call <i data-lucide="arrow-right" style="width:15px;height:15px;"></i></a>
+          </div>
+          <div style="margin-top:36px;padding:18px 20px;background:rgba(255,255,255,0.04);border-radius:10px;border:1px solid rgba(255,255,255,0.08);display:flex;align-items:center;gap:14px;max-width:460px;">
+            <i data-lucide="shield-check" style="width:22px;height:22px;color:#ff8c83;flex-shrink:0;"></i>
+            <p style="font-family:'Roboto',sans-serif;font-size:13.5px;color:#dfe3ec;line-height:1.5;margin:0;">Every data-handling step is documented in writing before any materials are reviewed.</p>
+          </div>
+        </div>
+        <!-- Right: 2×3 promise cards -->
+        <div class="col-12 col-lg-7">
+          <div class="row g-3">
+            <div class="col-12 col-sm-6"><div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:22px;"><div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;"><div style="width:34px;height:34px;border-radius:8px;background:rgba(255,86,86,0.12);display:flex;align-items:center;justify-content:center;"><i data-lucide="key-round" style="width:16px;height:16px;color:#ff8c83;"></i></div><span style="font-family:'Roboto',sans-serif;font-size:11px;color:#b5bdcb;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;">01</span></div><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:16px;color:#fff;margin-bottom:6px;">You own your data</div><p style="font-family:'Roboto',sans-serif;font-size:13.5px;color:#b5bdcb;line-height:1.55;margin:0;">Your organization retains ownership of all documents, reports, spreadsheets, stories, and records shared with us.</p></div></div>
+            <div class="col-12 col-sm-6"><div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:22px;"><div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;"><div style="width:34px;height:34px;border-radius:8px;background:rgba(255,86,86,0.12);display:flex;align-items:center;justify-content:center;"><i data-lucide="shield-off" style="width:16px;height:16px;color:#ff8c83;"></i></div><span style="font-family:'Roboto',sans-serif;font-size:11px;color:#b5bdcb;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;">02</span></div><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:16px;color:#fff;margin-bottom:6px;">No AI model training</div><p style="font-family:'Roboto',sans-serif;font-size:13.5px;color:#b5bdcb;line-height:1.55;margin:0;">Your data is not used to train AI models.</p></div></div>
+            <div class="col-12 col-sm-6"><div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:22px;"><div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;"><div style="width:34px;height:34px;border-radius:8px;background:rgba(255,86,86,0.12);display:flex;align-items:center;justify-content:center;"><i data-lucide="file-signature" style="width:16px;height:16px;color:#ff8c83;"></i></div><span style="font-family:'Roboto',sans-serif;font-size:11px;color:#b5bdcb;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;">03</span></div><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:16px;color:#fff;margin-bottom:6px;">Data processing agreement</div><p style="font-family:'Roboto',sans-serif;font-size:13.5px;color:#b5bdcb;line-height:1.55;margin:0;">Before any materials are reviewed, we define how information is handled, accessed, retained, deleted, or returned.</p></div></div>
+            <div class="col-12 col-sm-6"><div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:22px;"><div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;"><div style="width:34px;height:34px;border-radius:8px;background:rgba(255,86,86,0.12);display:flex;align-items:center;justify-content:center;"><i data-lucide="minimize-2" style="width:16px;height:16px;color:#ff8c83;"></i></div><span style="font-family:'Roboto',sans-serif;font-size:11px;color:#b5bdcb;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;">04</span></div><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:16px;color:#fff;margin-bottom:6px;">Minimum necessary data</div><p style="font-family:'Roboto',sans-serif;font-size:13.5px;color:#b5bdcb;line-height:1.55;margin:0;">We request only what is needed to assess reporting readiness.</p></div></div>
+            <div class="col-12 col-sm-6"><div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:22px;"><div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;"><div style="width:34px;height:34px;border-radius:8px;background:rgba(255,86,86,0.12);display:flex;align-items:center;justify-content:center;"><i data-lucide="eye-off" style="width:16px;height:16px;color:#ff8c83;"></i></div><span style="font-family:'Roboto',sans-serif;font-size:11px;color:#b5bdcb;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;">05</span></div><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:16px;color:#fff;margin-bottom:6px;">Sensitive data controls</div><p style="font-family:'Roboto',sans-serif;font-size:13.5px;color:#b5bdcb;line-height:1.55;margin:0;">Beneficiary or client-level data can be redacted, anonymized, excluded, or handled under stricter review.</p></div></div>
+            <div class="col-12 col-sm-6"><div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:22px;"><div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;"><div style="width:34px;height:34px;border-radius:8px;background:rgba(255,86,86,0.12);display:flex;align-items:center;justify-content:center;"><i data-lucide="user-check" style="width:16px;height:16px;color:#ff8c83;"></i></div><span style="font-family:'Roboto',sans-serif;font-size:11px;color:#b5bdcb;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;">06</span></div><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:16px;color:#fff;margin-bottom:6px;">Human-reviewed outputs</div><p style="font-family:'Roboto',sans-serif;font-size:13.5px;color:#b5bdcb;line-height:1.55;margin:0;">AI may support analysis, but findings and recommendations are reviewed by humans before they are shared.</p></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════
+       FUTURE MODULE
+  ═══════════════════════════════════════════════════════ -->
+  <section style="background:#f4f4f4;padding:80px 0;">
+    <div class="container" style="max-width:1200px;">
+      <div style="background:#fff;border-radius:16px;border:1px solid #e3e4e8;padding:40px 48px;">
+        <div class="row g-4 align-items-center">
+          <div class="col-12 col-md-auto">
+            <div style="display:flex;align-items:center;gap:14px;">
+              <div style="width:56px;height:56px;border-radius:12px;background:#f1f3f7;display:flex;align-items:center;justify-content:center;position:relative;flex-shrink:0;">
+                <i data-lucide="users-round" style="width:26px;height:26px;color:#455A7C;"></i>
+                <div style="position:absolute;top:-6px;right:-6px;background:#FF5656;color:#fff;border-radius:999px;font-family:'Roboto',sans-serif;font-size:9px;font-weight:600;letter-spacing:0.06em;padding:2px 8px;">SOON</div>
+              </div>
+              <div>
+                <div style="font-family:'Roboto',sans-serif;font-size:11px;color:#6e7280;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;margin-bottom:4px;">Future module</div>
+                <div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:18px;color:#283853;">Volunteer impact data</div>
+              </div>
+            </div>
+          </div>
+          <div class="col-12 col-md">
+            <h3 style="font-family:'Poppins',sans-serif;font-weight:500;font-size:22px;color:#283853;margin:0;line-height:1.3;letter-spacing:-0.01em;">Volunteer data will become part of the <span style="font-family:'Lora',serif;font-style:italic;color:#455A7C;">evidence system.</span></h3>
+            <p style="margin-top:12px;font-family:'Roboto',sans-serif;font-size:14.5px;color:#4d525e;line-height:1.6;margin-bottom:0;">Volunteer contribution is one of the most underused sources of impact evidence. As Get Kinder.ai expands, the volunteer module will help nonprofits capture verified volunteer hours, activities, stories, and service capacity — then connect that contribution to programs, outcomes, and funder-ready reports.</p>
+          </div>
+          <div class="col-12 col-md-auto">
+            <a href="#book" style="display:inline-flex;align-items:center;gap:8px;font-family:'Roboto',sans-serif;font-size:14px;color:#455A7C;font-weight:500;text-decoration:none;padding:10px 14px;border-radius:8px;border:1px solid #dcdde0;background:#fff;white-space:nowrap;">Ask about the volunteer module <i data-lucide="arrow-right" style="width:14px;height:14px;color:#455A7C;"></i></a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════
+       FAQ
+  ═══════════════════════════════════════════════════════ -->
+  <section id="faq" style="background:#fff;padding:112px 0;">
+    <div class="container" style="max-width:1200px;">
+      <div class="row g-5">
+        <!-- Left: sticky label -->
+        <div class="col-12 col-lg-4">
+          <div style="position:sticky;top:100px;">
+            <div class="gk-eyebrow">FAQ</div>
+            <h2 style="font-family:'Poppins',sans-serif;font-weight:600;font-size:clamp(26px,2.8vw,36px);letter-spacing:-0.02em;color:#283853;margin:0;line-height:1.18;">Questions nonprofits <span style="font-family:'Lora',serif;font-style:italic;font-weight:500;color:#455A7C;">usually ask first.</span></h2>
+            <p style="margin-top:18px;font-family:'Roboto',sans-serif;font-size:15px;color:#4d525e;line-height:1.6;">Real questions from executive directors, development leads, and program directors we've spoken with.</p>
+            <div style="margin-top:24px;">
+              <a href="#book" style="font-family:'Roboto',sans-serif;font-size:14px;color:#FF5656;font-weight:500;text-decoration:none;display:inline-flex;align-items:center;gap:6px;">Still have a question? Book a call <i data-lucide="arrow-right" style="width:14px;height:14px;color:#FF5656;"></i></a>
+            </div>
+          </div>
+        </div>
+        <!-- Right: accordion -->
+        <div class="col-12 col-lg-8">
+          <!-- Q1 -->
+          <div style="border-top:1px solid #e3e4e8;border-bottom:1px solid #e3e4e8;">
+            <button class="gk-faq-btn">
+              <span style="display:flex;align-items:center;gap:14px;"><span style="font-family:'Roboto',sans-serif;font-size:11px;color:#9a9ea7;letter-spacing:0.08em;font-weight:600;width:28px;flex-shrink:0;">01</span><span style="line-height:1.4;">Is the Impact Reporting &amp; Data Readiness Assessment really free?</span></span>
+              <span class="gk-faq-icon" style="background:#f1f3f7;"><i data-lucide="plus" style="width:14px;height:14px;color:#455A7C;"></i></span>
+            </button>
+            <div class="gk-faq-body" style="max-height:0px;"><div class="gk-faq-body-inner"><p>Yes. For the first design partner cohort, the assessment is free for 5 selected nonprofits. The call is used to confirm fit, understand your reporting pressure, and set expectations before we proceed.</p><p style="margin-top:8px;">Selected organizations receive a 1–2 week review and a 10–15 page assessment. There is no obligation to continue after the assessment.</p></div></div>
+          </div>
+          <!-- Q2 -->
+          <div style="border-bottom:1px solid #e3e4e8;">
+            <button class="gk-faq-btn">
+              <span style="display:flex;align-items:center;gap:14px;"><span style="font-family:'Roboto',sans-serif;font-size:11px;color:#9a9ea7;letter-spacing:0.08em;font-weight:600;width:28px;flex-shrink:0;">02</span><span style="line-height:1.4;">Who is this for?</span></span>
+              <span class="gk-faq-icon" style="background:#f1f3f7;"><i data-lucide="plus" style="width:14px;height:14px;color:#455A7C;"></i></span>
+            </button>
+            <div class="gk-faq-body" style="max-height:0px;"><div class="gk-faq-body-inner"><p>This is for small and medium-sized nonprofits that already create meaningful impact but struggle to organize the data, stories, reports, and program activity needed to prove it to funders.</p><p style="margin-top:8px;">It is a strong fit if you have recurring grant reports, upcoming renewals, multiple funder requirements, unstructured program data, or no dedicated data/evaluation team.</p></div></div>
+          </div>
+          <!-- Q3 -->
+          <div style="border-bottom:1px solid #e3e4e8;">
+            <button class="gk-faq-btn">
+              <span style="display:flex;align-items:center;gap:14px;"><span style="font-family:'Roboto',sans-serif;font-size:11px;color:#9a9ea7;letter-spacing:0.08em;font-weight:600;width:28px;flex-shrink:0;">03</span><span style="line-height:1.4;">What will we receive?</span></span>
+              <span class="gk-faq-icon" style="background:#f1f3f7;"><i data-lucide="plus" style="width:14px;height:14px;color:#455A7C;"></i></span>
+            </button>
+            <div class="gk-faq-body" style="max-height:0px;"><div class="gk-faq-body-inner"><p>Selected design partners receive a 10–15 page Impact Reporting &amp; Data Readiness Assessment covering:</p><ol style="padding-left:20px;margin:8px 0 12px;"><li>where your impact data lives today;</li><li>what is missing for funder-grade reporting;</li><li>your top 3 reporting risks;</li><li>what a clean evidence architecture would look like;</li><li>the 12-week path to get there.</li></ol><p>The assessment also includes a 60-minute readout presentation.</p></div></div>
+          </div>
+          <!-- Q4 -->
+          <div style="border-bottom:1px solid #e3e4e8;">
+            <button class="gk-faq-btn">
+              <span style="display:flex;align-items:center;gap:14px;"><span style="font-family:'Roboto',sans-serif;font-size:11px;color:#9a9ea7;letter-spacing:0.08em;font-weight:600;width:28px;flex-shrink:0;">04</span><span style="line-height:1.4;">Do we need clean data before starting?</span></span>
+              <span class="gk-faq-icon" style="background:#f1f3f7;"><i data-lucide="plus" style="width:14px;height:14px;color:#455A7C;"></i></span>
+            </button>
+            <div class="gk-faq-body" style="max-height:0px;"><div class="gk-faq-body-inner"><p>No. The assessment is designed for organizations whose data is currently unstructured, spread across tools, or hard to assemble for funder reporting.</p><p style="margin-top:8px;">The point is to show what exists, what is missing, what is risky, and what needs to change before AI or reporting automation can be useful.</p></div></div>
+          </div>
+          <!-- Q5 -->
+          <div style="border-bottom:1px solid #e3e4e8;">
+            <button class="gk-faq-btn">
+              <span style="display:flex;align-items:center;gap:14px;"><span style="font-family:'Roboto',sans-serif;font-size:11px;color:#9a9ea7;letter-spacing:0.08em;font-weight:600;width:28px;flex-shrink:0;">05</span><span style="line-height:1.4;">How do you handle our data?</span></span>
+              <span class="gk-faq-icon" style="background:#f1f3f7;"><i data-lucide="plus" style="width:14px;height:14px;color:#455A7C;"></i></span>
+            </button>
+            <div class="gk-faq-body" style="max-height:0px;"><div class="gk-faq-body-inner"><p>Your organization owns your data. Get Kinder.ai does not use your data to train AI models.</p><p style="margin-top:8px;">Before reviewing any materials, we use a data processing agreement that defines how your information is handled, stored, protected, retained, deleted, or returned. We also identify sensitive data that should be excluded, redacted, or handled under stricter controls.</p></div></div>
+          </div>
+          <!-- Q6 -->
+          <div style="border-bottom:1px solid #e3e4e8;">
+            <button class="gk-faq-btn">
+              <span style="display:flex;align-items:center;gap:14px;"><span style="font-family:'Roboto',sans-serif;font-size:11px;color:#9a9ea7;letter-spacing:0.08em;font-weight:600;width:28px;flex-shrink:0;">06</span><span style="line-height:1.4;">Will you use our beneficiary or client data?</span></span>
+              <span class="gk-faq-icon" style="background:#f1f3f7;"><i data-lucide="plus" style="width:14px;height:14px;color:#455A7C;"></i></span>
+            </button>
+            <div class="gk-faq-body" style="max-height:0px;"><div class="gk-faq-body-inner"><p>Only if it is necessary, appropriate, and agreed in advance. In many cases, the assessment can be completed using reporting templates, past reports, spreadsheets, anonymized examples, program summaries, and data structure samples rather than sensitive raw beneficiary records.</p><p style="margin-top:8px;">When sensitive data is involved, we use minimization, redaction, access controls, and human review.</p></div></div>
+          </div>
+          <!-- Q7 -->
+          <div style="border-bottom:1px solid #e3e4e8;">
+            <button class="gk-faq-btn">
+              <span style="display:flex;align-items:center;gap:14px;"><span style="font-family:'Roboto',sans-serif;font-size:11px;color:#9a9ea7;letter-spacing:0.08em;font-weight:600;width:28px;flex-shrink:0;">07</span><span style="line-height:1.4;">Will AI write our reports?</span></span>
+              <span class="gk-faq-icon" style="background:#f1f3f7;"><i data-lucide="plus" style="width:14px;height:14px;color:#455A7C;"></i></span>
+            </button>
+            <div class="gk-faq-body" style="max-height:0px;"><div class="gk-faq-body-inner"><p>Not during the assessment. The assessment focuses first on whether your data and evidence are ready for credible reporting.</p><p style="margin-top:8px;">AI may be used internally to speed up document review, pattern detection, evidence mapping, and draft analysis, but outputs are human-reviewed. We do not use AI to invent outcomes, fill missing data, or make unsupported claims.</p></div></div>
+          </div>
+          <!-- Q8 -->
+          <div style="border-bottom:1px solid #e3e4e8;">
+            <button class="gk-faq-btn">
+              <span style="display:flex;align-items:center;gap:14px;"><span style="font-family:'Roboto',sans-serif;font-size:11px;color:#9a9ea7;letter-spacing:0.08em;font-weight:600;width:28px;flex-shrink:0;">08</span><span style="line-height:1.4;">What happens after the assessment?</span></span>
+              <span class="gk-faq-icon" style="background:#f1f3f7;"><i data-lucide="plus" style="width:14px;height:14px;color:#455A7C;"></i></span>
+            </button>
+            <div class="gk-faq-body" style="max-height:0px;"><div class="gk-faq-body-inner"><p>You receive a practical roadmap showing how to move from today's unstructured reporting environment to a cleaner evidence architecture. If there is a strong fit, Get Kinder.ai may propose a 12-week implementation plan to build the reporting workflows, evidence structure, and AI-assisted reporting system.</p><p style="margin-top:8px;">There is no obligation to continue.</p></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════
+       FINAL CTA
+  ═══════════════════════════════════════════════════════ -->
+  <section id="book" style="background:#f4f4f4;padding:80px 0 96px;">
+    <div class="container" style="max-width:1200px;">
+      <div style="background:#fff1f0;border-radius:24px;padding:64px;position:relative;overflow:hidden;border:1px solid #ffd9d6;">
+        <!-- Decorative doc stack -->
+        <div style="position:absolute;right:-40px;top:40px;width:320px;height:380px;pointer-events:none;" class="d-none d-xl-block">
+          <div style="position:absolute;top:28px;right:60px;width:220px;height:280px;background:#fff;border-radius:14px;border:1px solid #ffd9d6;transform:rotate(-6deg);box-shadow:0 10px 30px rgba(31,38,48,.08);"></div>
+          <div style="position:absolute;top:8px;right:20px;width:220px;height:280px;background:#fff;border-radius:14px;border:1px solid #e3e4e8;transform:rotate(3deg);box-shadow:0 10px 30px rgba(31,38,48,.10);padding:16px 18px;">
+            <div style="width:32px;height:32px;border-radius:8px;background:#FF5656;display:flex;align-items:center;justify-content:center;margin-bottom:12px;"><i data-lucide="file-text" style="width:16px;height:16px;color:#fff;"></i></div>
+            <div style="font-family:'Roboto',sans-serif;font-size:9px;color:#FF5656;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;margin-bottom:6px;">Assessment</div>
+            <div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:13px;color:#283853;line-height:1.3;margin-bottom:10px;">Riverbend Youth Coalition</div>
+            <div style="height:6px;background:#f1f3f7;border-radius:3px;margin-bottom:6px;width:100%;"></div>
+            <div style="height:6px;background:#f1f3f7;border-radius:3px;margin-bottom:6px;width:82%;"></div>
+            <div style="height:6px;background:#f1f3f7;border-radius:3px;margin-bottom:6px;width:94%;"></div>
+            <div style="height:6px;background:#f1f3f7;border-radius:3px;margin-bottom:6px;width:68%;"></div>
+            <div style="margin-top:14px;padding:8px 10px;background:#fff1f0;border-radius:6px;font-family:'Roboto',sans-serif;font-size:10px;color:#b8443c;display:flex;align-items:center;gap:6px;"><i data-lucide="alert-triangle" style="width:11px;height:11px;color:#b8443c;"></i>3 reporting risks identified</div>
+          </div>
+        </div>
+        <!-- Content -->
+        <div style="max-width:640px;position:relative;">
+          <div class="gk-eyebrow">Get started</div>
+          <h2 style="font-family:'Poppins',sans-serif;font-weight:600;font-size:clamp(28px,3.5vw,44px);letter-spacing:-0.025em;color:#283853;margin:0;line-height:1.1;">
+            Ready to find out what your data <span style="font-family:'Lora',serif;font-style:italic;font-weight:500;color:#455A7C;">can — and cannot —</span> prove to funders?
+          </h2>
+          <p style="margin-top:22px;font-family:'Roboto',sans-serif;font-size:17px;color:#4d525e;line-height:1.6;">We are selecting 5 nonprofit design partners for a no-cost Impact Reporting &amp; Data Readiness Assessment. If your organization is creating impact but struggling to prove it clearly, start with a Reporting Readiness Call.</p>
+          <div style="margin-top:32px;display:flex;gap:12px;flex-wrap:wrap;">
+            <a href="#book" class="gk-cta-primary gk-cta-primary-lg">Book a Reporting Readiness Call <i data-lucide="arrow-right" style="width:16px;height:16px;"></i></a>
+            <a href="#how" class="gk-cta-secondary">See how it works</a>
+          </div>
+          <p style="margin-top:16px;font-family:'Roboto',sans-serif;font-size:13px;color:#6e7280;line-height:1.55;">The assessment is free for selected design partners. The call confirms fit before any materials are reviewed.</p>
+          <!-- Slot indicator -->
+          <div style="margin-top:28px;display:inline-flex;align-items:center;gap:10px;background:#fff;border:1px solid #ffd9d6;border-radius:999px;padding:8px 14px 8px 8px;">
+            <div style="display:flex;gap:4px;">
+              <div style="width:8px;height:8px;border-radius:999px;background:#c4c6cc;"></div>
+              <div style="width:8px;height:8px;border-radius:999px;background:#c4c6cc;"></div>
+              <div style="width:8px;height:8px;border-radius:999px;background:#FF5656;"></div>
+              <div style="width:8px;height:8px;border-radius:999px;background:#FF5656;"></div>
+              <div style="width:8px;height:8px;border-radius:999px;background:#FF5656;"></div>
+            </div>
+            <span style="font-family:'Roboto',sans-serif;font-size:13px;color:#283853;font-weight:500;">3 of 5 design partner slots remaining &middot; Cohort 01</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+
+
+
+  <!-- ═══════════════════════════════════════════════════
+       FOOTER
+  ═══════════════════════════════════════════════════════ -->
+  <footer style="background:#fff;border-top:1px solid #ececec;padding:56px 0 32px;">
+    <div class="container" style="max-width:1200px;">
+      <div class="row gy-4 gk-footer-grid">
+        <!-- Col 1: Logo + nav links -->
+        <div class="col-12 col-md-5">
+          <div style="height:40px;width:160px;overflow:hidden;display:flex;align-items:center;margin-bottom:14px;">
+            <img src="/images/logo.png" alt="Get Kinder" style="height:180px;width:auto;object-fit:contain;margin:-45px 0;display:block;">
+          </div>
+          <p style="font-family:'Roboto',sans-serif;font-size:14px;color:#4d525e;max-width:320px;line-height:1.6;margin-bottom:18px;">
+            Impact reporting and data readiness for nonprofits.
+          </p>
+          <ul class="list-unstyled mb-0">
+            <li class="mb-2"><a href="http://localhost:5001/about"         style="font-family:'Roboto',sans-serif;font-size:13.5px;color:#283853;text-decoration:none;">About</a></li>
+            <li class="mb-2"><a href="http://localhost:5001/contact"       style="font-family:'Roboto',sans-serif;font-size:13.5px;color:#283853;text-decoration:none;">Contact</a></li>
+            <li class="mb-2"><a href="http://localhost:5001/privacy"       style="font-family:'Roboto',sans-serif;font-size:13.5px;color:#283853;text-decoration:none;">Privacy</a></li>
+            <li class="mb-2"><a href="http://localhost:5001/terms"         style="font-family:'Roboto',sans-serif;font-size:13.5px;color:#283853;text-decoration:none;">Terms</a></li>
+            <li class="mb-2"><a href="http://localhost:5001/accessibility" style="font-family:'Roboto',sans-serif;font-size:13.5px;color:#283853;text-decoration:none;">Accessibility</a></li>
+          </ul>
+        </div>
+        <!-- Col 2: Socials -->
+        <div class="col-12 col-md-4 mb-4 mb-md-0 d-flex justify-content-center">
+          <div>
+            <div style="font-family:'Roboto',sans-serif;font-size:11px;color:#6e7280;letter-spacing:0.1em;text-transform:uppercase;font-weight:600;margin-bottom:14px;">Socials</div>
+            <div>
+              <a class="btn btn-floating m-1 text-white" style="background-color: #3b5998;"
+                 href="https://www.facebook.com/profile.php?id=61576860759313" role="button" target="_blank" rel="noopener noreferrer">
+                <i class="fab fa-facebook-f"></i>
+              </a>
+              <a class="btn btn-floating m-1 text-white"
+                 style="background: radial-gradient(circle at 30% 110%, #fdf497 0%, #fdf497 5%, #fd5949 45%, #d6249f 60%, #285AEB 90%);"
+                 href="https://www.instagram.com/getkinder/" role="button" target="_blank" rel="noopener noreferrer">
+                <i class="fab fa-instagram"></i>
+              </a>
+              <a class="btn btn-floating m-1 text-white" style="background-color: #0082ca;"
+                 href="https://www.linkedin.com/company/getkindrfoundation/" role="button" target="_blank" rel="noopener noreferrer">
+                <i class="fab fa-linkedin-in"></i>
+              </a>
+              <a class="btn btn-floating m-1 text-white" style="background-color: #c8232c;"
+                 href="https://ca.pinterest.com/getkindr/" role="button" target="_blank" rel="noopener noreferrer">
+                <i class="fab fa-pinterest"></i>
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- Bottom bar -->
+      <div style="padding-top:24px;border-top:1px solid #ececec;display:flex;align-items:center;justify-content:space-between;gap:16px;font-family:'Roboto',sans-serif;font-size:12px;color:#9a9ea7;flex-wrap:wrap;margin-top:32px;">
+        <div>&copy; 2026 Get Kinder.ai &middot; Built for mission organizations.</div>
+        <div style="display:flex;gap:20px;">
+          <a href="http://localhost:5001/privacy"       style="color:#9a9ea7;text-decoration:none;">Privacy</a>
+          <a href="http://localhost:5001/terms"         style="color:#9a9ea7;text-decoration:none;">Terms</a>
+          <a href="#trust"                               style="color:#9a9ea7;text-decoration:none;">Data handling</a>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Logout modal (preserved) -->
   <div class="modal fade" id="logoutModal" tabindex="-1" aria-labelledby="logoutModalLabel" aria-hidden="true">
     <div class="modal-dialog">
       <div class="modal-content">
@@ -263,9 +942,7 @@ Every skill you share, every project you complete, every donation you make earns
           <h5 class="modal-title">Confirm Logout</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
-        <div class="https://www.gravatar.com/avatar/1a5cfe35718514d764a42484a0fb0830?s=64&d=robohashmodal-body">
-          Are you sure you want to log out?
-        </div>
+        <div class="modal-body">Are you sure you want to log out?</div>
         <div class="modal-footer">
           <form action="/logout" method="GET">
             <button type="submit" class="btn btn-danger">Log Out</button>
@@ -275,228 +952,117 @@ Every skill you share, every project you complete, every donation you make earns
       </div>
     </div>
   </div>
- <!-- navigation footer section-->
-  <section id="footer" class="gradient-background">
-  <div class="container">
-    <footer class="row align-items-center py-5 mt-5 border-top text-body-secondary">
-      <!-- 1) Logo: centered on xs, left on md+ -->
-      <div class="col-12 col-md-4 mb-4 mb-md-0 text-center text-md-start">
-        <a href="#">
-          <img src="/images/heart3D.png" alt="Get Kinder Heart" height="150">
-        </a>
-        <p class="mt-2">
-          &copy;
-          <a href="https://getkindr.com/" target="_blank" rel="noopener noreferrer"
-             class="text-body-secondary text-decoration-underline">
-            Get Kindr Foundation
-          </a>
-        </p>
-      </div>
-      <!-- 2) Social Icons: always centered -->
-      <div class="col-12 col-md-4 mb-4 mb-md-0 d-flex justify-content-center">
-        <a class="btn btn-floating m-1 text-white" style="background-color: #3b5998;"
-           href="https://www.facebook.com/profile.php?id=61576860759313" role="button" target="_blank" rel="noopener noreferrer">
-          <i class="fab fa-facebook-f"></i>
-        </a>
-        <a class="btn btn-floating m-1 text-white" style="background-color: #ac2bac;"
-           href="https://www.instagram.com/getkinder/" role="button" target="_blank" rel="noopener noreferrer">
-          <i class="fab fa-instagram"></i>
-        </a>
-        <a class="btn btn-floating m-1 text-white" style="background-color: #0082ca;"
-           href="https://www.linkedin.com/company/getkindrfoundation/" role="button" target="_blank" rel="noopener noreferrer">
-          <i class="fab fa-linkedin-in"></i>
-        </a>
-        <a class="btn btn-floating m-1 text-white" style="background-color: #c8232c;"
-           href="https://ca.pinterest.com/getkindr/" role="button" target="_blank" rel="noopener noreferrer">
-          <i class="fab fa-pinterest"></i>
-        </a>
-      </div>
-      <!-- 3) More About: centered on xs, right on md+ -->
-      <div class="col-12 col-md-4 mb-4 mb-md-0 text-center text-md-end footer-links-col">
-        <h5>More About Get Kinder</h5>
-        <ul class="nav flex-column">
-          <li class="nav-item mb-2"><a href="#"            class="nav-link p-0 text-body-secondary">Home</a></li>
-          <li class="nav-item mb-2"><a href="about" class="nav-link p-0 text-body-secondary">About</a></li>
-          <li class="nav-item mb-2"><a href="contact"     class="nav-link p-0 text-body-secondary">Contact</a></li>
-          <li class="nav-item mb-2"><a href="privacy"     class="nav-link p-0 text-body-secondary">Privacy</a></li>
-          <li class="nav-item mb-2"><a href="terms"       class="nav-link p-0 text-body-secondary">Terms</a></li>
-          <li class="nav-item mb-2"><a href="accessibility" class="nav-link p-0 text-body-secondary">Accessibility</a></li>
-        </ul>
-      </div>
-    </footer>
-  </div>
-</section>
-   <!-- vendor libs -->
-  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script> 
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/js/bootstrap.bundle.min.js" integrity="sha384-k6d4wzSIapyDyv1kpU366/PK5hCdSbCRGRCMv+eplOQJWyd1fbcAu9OCUj5zNLiq" crossorigin="anonymous"></script>
 
-  <!-- keep the visible viewport in sync for mobile keyboards -->
+  <!-- vendor libs -->
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/js/bootstrap.bundle.min.js" integrity="sha384-k6d4wzSIapyDyv1kpU366/PK5hCdSbCRGRCMv+eplOQJWyd1fbcAu9OCUj5zNLiq" crossorigin="anonymous"></script>
   <script src="/js/viewport-fix.js"></script>
 
-  <!-- 2) If logged in, expose the user picture (keep this block if you need it) -->
-  <% if (typeof user !== 'undefined' && user) { 
+  <% if (typeof user !== 'undefined' && user) {
        const profileInterests = [user.interest1, user.interest2, user.interest3]
          .map(item => (item || '').toString().trim())
          .filter(val => val.length > 0);
-       const normalizedHours = Number.isFinite(Number(user.hours_per_week))
-         ? Number(user.hours_per_week)
-         : null;
+       const normalizedHours = Number.isFinite(Number(user.hours_per_week)) ? Number(user.hours_per_week) : null;
        const onboardingProfile = {
-         source: 'profile',
-         why_friend: user.why_friend || null,
+         source: 'profile', why_friend: user.why_friend || null,
          known_connection: user.known_connection || null,
          desired_outcome: user.desired_outcome || null,
-         hours_per_week: normalizedHours,
-         age_bracket: user.age_bracket || null,
+         hours_per_week: normalizedHours, age_bracket: user.age_bracket || null,
          interests: profileInterests
        };
   %>
     <script type="application/json" id="onboarding-profile-data"><%- JSON.stringify(onboardingProfile).replace(/</g, '\\u003c') %></script>
     <script>
       window.loggedInUserPicture = "<%= (typeof resolveUserPictureUrl === 'function') ? resolveUserPictureUrl(user) : (user.picture ? user.picture : '/images/nerdy-KAI.png') %>";
-      window.__onboardingProfile = JSON.parse(
-        document.getElementById('onboarding-profile-data')?.textContent || '{}'
-      );
+      window.__onboardingProfile = JSON.parse(document.getElementById('onboarding-profile-data')?.textContent || '{}');
     </script>
   <% } %>
-<% if (typeof user !== 'undefined' && user) { %>
-<script>
-(function flushOnboardingDraftOnce() {
-  try {
-    var RAW_KEY = 'onboarding.draft';
-    var FLUSH_FLAG = 'onboarding.flushed';
-    if (localStorage.getItem(FLUSH_FLAG) === '1') return;
 
-    var raw = localStorage.getItem(RAW_KEY);
-    if (!raw) return;
-    var draft = JSON.parse(raw); // { v, answers, index, ts }
-    var a = (draft && draft.answers) || {};
-
-    // Map onboarding answers -> userdata fields
-    var interests = Array.isArray(a.interests)
-      ? a.interests.map(String).map(s => s.trim()).filter(Boolean)
-      : [];
-
-    var payload = {
-      // new columns you asked for:
-      why_friend:        a.whyFriend || null,
-      known_connection:  a.knownConnection || null,
-      desired_outcome:   a.outcome || null,
-      hours_per_week:    (typeof a.timeCommitment === 'number') ? a.timeCommitment : null,
-      age_bracket:       a.age || null,
-
-      // existing columns on profile page:
-      interest1: interests[0] || '',
-      interest2: interests[1] || '',
-      interest3: interests[2] || ''
-    };
-
-    fetch('/api/onboarding/complete', {
-      method: 'POST',
-      headers: { 'Content-Type':'application/json' },
-      body: JSON.stringify({ answers: payload, source: 'post_login_flush' })
-    })
-    .then(function (res) {
-      if (!res.ok) return;
-      // mark done & prevent remounting
-      localStorage.removeItem(RAW_KEY);
-      localStorage.setItem(FLUSH_FLAG, '1');
-      document.cookie = 'onboarding_done=1; Max-Age=31536000; Path=/';
-    })
-    .catch(function(){ /* swallow */ });
-
-  } catch (e) { /* swallow */ }
-})();
-</script>
-<% } %>
+  <% if (typeof user !== 'undefined' && user) { %>
+  <script>
+  (function flushOnboardingDraftOnce() {
+    try {
+      var RAW_KEY = 'onboarding.draft', FLUSH_FLAG = 'onboarding.flushed';
+      if (localStorage.getItem(FLUSH_FLAG) === '1') return;
+      var raw = localStorage.getItem(RAW_KEY);
+      if (!raw) return;
+      var draft = JSON.parse(raw), a = (draft && draft.answers) || {};
+      var interests = Array.isArray(a.interests) ? a.interests.map(String).map(s=>s.trim()).filter(Boolean) : [];
+      fetch('/api/onboarding/complete', {
+        method: 'POST', headers: { 'Content-Type':'application/json' },
+        body: JSON.stringify({ answers: {
+          why_friend: a.whyFriend||null, known_connection: a.knownConnection||null,
+          desired_outcome: a.outcome||null, hours_per_week: (typeof a.timeCommitment==='number')?a.timeCommitment:null,
+          age_bracket: a.age||null, interest1: interests[0]||'', interest2: interests[1]||'', interest3: interests[2]||''
+        }, source: 'post_login_flush' })
+      }).then(function(res){ if(!res.ok) return; localStorage.removeItem(RAW_KEY); localStorage.setItem(FLUSH_FLAG,'1'); document.cookie='onboarding_done=1; Max-Age=31536000; Path=/'; }).catch(function(){});
+    } catch(e) {}
+  })();
+  </script>
+  <% } %>
 
   <script>
     window.addEventListener('DOMContentLoaded', () => {
-      const alerts = document.querySelectorAll('.auto-dismiss');
-      alerts.forEach(alert => {
-        setTimeout(() => {
-          alert.classList.remove('show'); 
-          setTimeout(() => alert.remove(), 500); 
-        }, 5000); 
+      document.querySelectorAll('.auto-dismiss').forEach(alert => {
+        setTimeout(() => { alert.classList.remove('show'); setTimeout(() => alert.remove(), 500); }, 5000);
       });
     });
   </script>
 
+  <!-- FAQ accordion -->
   <script>
-    // tab scroll logic (unchanged)
-    document.addEventListener('DOMContentLoaded', function() {
-      var tabEl = document.getElementById('filledTabs');
-      function scrollToPaneSelector(selector) {
-        var pane = document.querySelector(selector);
-        if (!pane) return;
-        var header = document.querySelector('.navbar.fixed-top, .navbar.sticky-top');
-        var headerHeight = header ? header.getBoundingClientRect().height : 0;
-        var extra = 10;
-        var paneTop = pane.getBoundingClientRect().top + window.pageYOffset;
-        var targetY = paneTop - headerHeight - extra;
-        window.scrollTo({ top: targetY, behavior: 'smooth' });
-      }
-      if (tabEl) {
-        tabEl.addEventListener('shown.bs.tab', function(e) {
-          scrollToPaneSelector(e.target.getAttribute('data-bs-target'));
+  document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.gk-faq-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var body = this.nextElementSibling;
+        var icon = this.querySelector('.gk-faq-icon');
+        var isOpen = body.style.maxHeight && body.style.maxHeight !== '0px';
+        // close all
+        document.querySelectorAll('.gk-faq-body').forEach(function(b) { b.style.maxHeight = '0px'; });
+        document.querySelectorAll('.gk-faq-icon').forEach(function(ic) {
+          ic.style.background = '#f1f3f7';
+          ic.innerHTML = '<i data-lucide="plus" style="width:14px;height:14px;color:#455a7c;"></i>';
         });
-      }
-      var first = document.getElementById('start-tab');
-      if (first) first.addEventListener('click', function() { scrollToPaneSelector('#start'); });
+        if (!isOpen) {
+          body.style.maxHeight = body.scrollHeight + 'px';
+          icon.style.background = '#FF5656';
+          icon.innerHTML = '<i data-lucide="minus" style="width:14px;height:14px;color:#fff;"></i>';
+        }
+        if (window.lucide) window.lucide.createIcons();
+      });
+    });
+    // open first item by default
+    var firstBtn = document.querySelector('.gk-faq-btn');
+    if (firstBtn) firstBtn.click();
+  });
+  </script>
+
+  <!-- Lucide icon init -->
+  <script>
+    window.addEventListener('load', function() {
+      if (window.lucide) window.lucide.createIcons();
     });
   </script>
-<%- include('partials/kai-chat-floating', {
-  greetText: "👋 Hello! I’m KAI, how can I help you make an impact today?"
-}) %>
 
-<script>
-  // Starter buttons now open the floating chat and send the prompt
-  document.querySelectorAll('.starter-btn').forEach(btn => {
-    btn.addEventListener('click', () => window.askKAI(btn.dataset.prompt));
-  });
-</script>
-  <!-- HubSpot (can stay last) -->
-  <script type="text/javascript" id="hs-script-loader" async defer src="//js-na3.hs-scripts.com/342094649.js">
-  </script>
+  <%- include('partials/kai-chat-floating', {
+    greetText: "👋 Hello! I'm KAI, how can I help you make an impact today?"
+  }) %>
 
-  <!-- AOS (Animate On Scroll) -->
+  <!-- HubSpot -->
+  <script type="text/javascript" id="hs-script-loader" async defer src="//js-na3.hs-scripts.com/342094649.js"></script>
+
+  <!-- AOS -->
   <script src="https://unpkg.com/aos@2.3.1/dist/aos.js"></script>
   <script>
-    (function initHomeAos() {
-      const animatedNodes = Array.from(document.querySelectorAll('[data-aos]'));
-
-      function revealAllAnimatedNodes() {
-        animatedNodes.forEach((node) => {
-          node.classList.add('aos-animate');
-          node.style.opacity = '1';
-          node.style.transform = 'none';
-        });
-      }
-
+    (function initAos() {
       function startAos() {
         if (window.AOS && typeof window.AOS.init === 'function') {
-          window.AOS.init({
-            duration: 600,
-            easing: 'ease',
-            once: true,
-            anchorPlacement: 'top-bottom'
-          });
-          return;
+          window.AOS.init({ duration: 600, easing: 'ease', once: true, anchorPlacement: 'top-bottom' });
         }
-        revealAllAnimatedNodes();
       }
-
       if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', startAos, { once: true });
-      } else {
-        startAos();
-      }
-
-      window.addEventListener('load', () => {
-        if (!(window.AOS && typeof window.AOS.init === 'function')) {
-          revealAllAnimatedNodes();
-        }
-      }, { once: true });
+      } else { startAos(); }
     })();
   </script>
 </body>
