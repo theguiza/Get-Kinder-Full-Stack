@@ -1722,6 +1722,9 @@
     var rrDirty = false;
     var rrDone = false;
     var rrModal = null;
+    var rrSubmitting = false;
+    var rrEnteredStep3At = 0;
+    var rrSubmitDefaultHtml = 'Submit Application <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>';
 
     /* ── helpers ─────────────────────────────────────── */
     function q(id) { return document.getElementById(id); }
@@ -1739,13 +1742,22 @@
     function showErr(id) { var e = q(id); if (e) e.classList.add('visible'); }
     function hideErr(id) { var e = q(id); if (e) e.classList.remove('visible'); }
     function markInvalid(id, isInvalid) { var el = q(id); if (el) el.classList.toggle('is-invalid', isInvalid); }
+    function resetSubmitButton() {
+      rrSubmitting = false;
+      var btn = q('rrBtnSubmit');
+      if (!btn) return;
+      btn.disabled = false;
+      btn.innerHTML = rrSubmitDefaultHtml;
+    }
 
     /* ── init ────────────────────────────────────────── */
     function rrInit() {
       var modalEl = q('rrModal');
       if (!modalEl || !window.bootstrap) return;
 
-      rrModal = new bootstrap.Modal(modalEl, { backdrop: 'static', keyboard: false });
+      rrModal = bootstrap.Modal.getOrCreateInstance(modalEl, { backdrop: 'static', keyboard: false });
+      if (modalEl.dataset.rrInitialized === '1') return;
+      modalEl.dataset.rrInitialized = '1';
 
       q('rrCloseBtn').addEventListener('click', rrClose);
       q('rrBtnBack').addEventListener('click', function() { rrGo(rrStep - 1); });
@@ -1846,7 +1858,7 @@
 
     /* ── reset ───────────────────────────────────────── */
     function rrReset() {
-      rrStep = 1; rrDirty = false; rrDone = false;
+      rrStep = 1; rrDirty = false; rrDone = false; rrEnteredStep3At = 0;
       var modalEl = q('rrModal');
       if (!modalEl) return;
       modalEl.querySelectorAll('input, select, textarea').forEach(function(el) {
@@ -1865,6 +1877,7 @@
       });
       var se = q('rrStep3') && q('rrStep3').querySelector('.rrm-submit-error');
       if (se) se.remove();
+      resetSubmitButton();
       rrGo(1, true);
     }
 
@@ -1891,6 +1904,10 @@
       sub.style.display   = (step === 3) ? 'inline-flex' : 'none';
       ret.style.display   = (step > 3) ? 'inline-flex' : 'none';
       cls.style.display   = (step > 3) ? 'inline-flex' : 'none';
+      if (step === 3 && !rrSubmitting) {
+        rrEnteredStep3At = Date.now();
+        resetSubmitButton();
+      }
 
       if (step === 1) next.innerHTML = 'Next: Reporting needs <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>';
       if (step === 2) next.innerHTML = 'Next: Data readiness <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>';
@@ -1990,8 +2007,11 @@
 
     /* ── submit ──────────────────────────────────────── */
     async function rrSubmit() {
+      if (rrSubmitting) return;
+      if (rrEnteredStep3At && Date.now() - rrEnteredStep3At < 600) return;
       if (!rrValidate(3)) return;
       var btn = q('rrBtnSubmit');
+      rrSubmitting = true;
       btn.disabled = true;
       btn.innerHTML = 'Submitting…';
 
@@ -2025,8 +2045,7 @@
         rrDone = true;
         rrGo(4);
       } catch (err) {
-        btn.disabled = false;
-        btn.innerHTML = 'Submit Application <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>';
+        resetSubmitButton();
         var prev = q('rrStep3').querySelector('.rrm-submit-error');
         if (prev) prev.remove();
         var errDiv = document.createElement('div');
@@ -2040,6 +2059,7 @@
     /* ── public open function ────────────────────────── */
     window.openReportingReadinessModal = function () {
       if (!rrModal) rrInit();
+      if (!rrDirty || rrDone) rrReset();
       if (rrModal) rrModal.show();
     };
 

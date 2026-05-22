@@ -148,6 +148,66 @@ export async function sendProspectInviteEmail({
   }
   await transport.sendMail(mail);
 }
+export async function sendReportingReadinessApplicantConfirmationEmail({
+  to,
+  applicantName,
+  organizationName,
+}) {
+  const esc = (s) =>
+    String(s ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+
+  const name = applicantName?.trim() || "there";
+  const org = organizationName?.trim() || "your organization";
+  const subject = "We received your Reporting Readiness application";
+
+  const text = `Hi ${name},
+
+Thanks for applying for a Reporting Readiness Call with Get Kinder.
+
+We're currently selecting 5 nonprofit design partners for a free Impact Reporting & Data Readiness Assessment. We'll review your application to understand your reporting needs and whether the assessment is a strong fit for ${org}.
+
+What happens next:
+
+1. We'll review your responses.
+2. If your organization appears aligned with the design partner cohort, we'll send you a link to book a 30-minute Reporting Readiness Call.
+3. The call will confirm your reporting needs, data handling expectations, and whether to proceed with the free assessment.
+4. If both teams decide to move forward, we'll complete a data handling agreement before reviewing any materials.
+
+Please do not send sensitive program, beneficiary, client, donor, or volunteer data by email. If selected, we'll provide a secure process and data handling agreement before any materials are reviewed.
+
+Your data stays yours. Get Kinder does not use your data to train AI models.
+
+Thanks,
+The Get Kinder team`;
+
+  const html = `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px;color:#222;line-height:1.6">
+  <p style="font-size:20px;font-weight:bold;margin-bottom:16px">We received your Reporting Readiness application</p>
+  <p>Hi ${esc(name)},</p>
+  <p>Thanks for applying for a Reporting Readiness Call with Get Kinder.</p>
+  <p>We're currently selecting 5 nonprofit design partners for a free Impact Reporting &amp; Data Readiness Assessment. We'll review your application to understand your reporting needs and whether the assessment is a strong fit for <strong>${esc(org)}</strong>.</p>
+  <p style="font-weight:bold;margin-top:24px">What happens next</p>
+  <ol>
+    <li>We'll review your responses.</li>
+    <li>If your organization appears aligned with the design partner cohort, we'll send you a link to book a 30-minute Reporting Readiness Call.</li>
+    <li>The call will confirm your reporting needs, data handling expectations, and whether to proceed with the free assessment.</li>
+    <li>If both teams decide to move forward, we'll complete a data handling agreement before reviewing any materials.</li>
+  </ol>
+  <p style="margin-top:24px;padding:12px 16px;background:#f5f5f5;border-left:3px solid #ccc;font-size:14px">Please do not send sensitive program, beneficiary, client, donor, or volunteer data by email. If selected, we'll provide a secure process and data handling agreement before any materials are reviewed.</p>
+  <p style="margin-top:24px;font-size:13px;color:#666">Your data stays yours. Get Kinder does not use your data to train AI models.</p>
+  <p>Thanks,<br>The Get Kinder team</p>
+</body>
+</html>`;
+
+  return sendNudgeEmail({ to, subject, text, html });
+}
+
 // Core delivery worker for nudges_outbox
 // Core delivery worker for nudges_outbox (emails)
 export async function deliverQueuedNudges(pool, { max = 100 } = {}) {

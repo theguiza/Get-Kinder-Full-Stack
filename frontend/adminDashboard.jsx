@@ -8,6 +8,23 @@ const NAV_ITEMS = [
   { key: "events", label: "Events", icon: "fa-calendar-check" },
   { key: "volunteers", label: "Volunteers", icon: "fa-users" },
   { key: "donors", label: "Donors", icon: "fa-hand-holding-heart" },
+  { key: "reportingReadiness", label: "Reporting Readiness", icon: "fa-clipboard-list" },
+];
+
+const RR_STATUS_OPTIONS = [
+  { value: "pending", label: "Pending" },
+  { value: "new", label: "New" },
+  { value: "reviewing", label: "Reviewing" },
+  { value: "invite_to_call", label: "Invite to Call" },
+  { value: "calendar_sent", label: "Calendar Sent" },
+  { value: "call_booked", label: "Call Booked" },
+  { value: "selected_for_assessment", label: "Selected for Assessment" },
+  { value: "assessment_in_progress", label: "Assessment in Progress" },
+  { value: "assessment_complete", label: "Assessment Complete" },
+  { value: "implementation_proposed", label: "Implementation Proposed" },
+  { value: "waitlist", label: "Waitlist" },
+  { value: "not_fit", label: "Not Fit" },
+  { value: "closed", label: "Closed" },
 ];
 
 const CREDIT_REASON_OPTIONS = ["adjustment", "earn", "earn_shift", "donate", "redeem"];
@@ -142,6 +159,122 @@ function statusClass(status) {
   if (["pending", "draft"].includes(normalized)) return "admin-badge admin-badge-amber";
   if (["suspended", "rejected", "cancelled"].includes(normalized)) return "admin-badge admin-badge-red";
   return "admin-badge admin-badge-slate";
+}
+
+function rrStatusClass(status) {
+  const s = String(status || "").toLowerCase();
+  if (["selected_for_assessment", "assessment_complete"].includes(s)) return "admin-badge admin-badge-green";
+  if (["invite_to_call", "calendar_sent", "call_booked"].includes(s)) return "admin-badge rr-badge-teal";
+  if (s === "reviewing") return "admin-badge rr-badge-purple";
+  if (s === "implementation_proposed") return "admin-badge rr-badge-gold";
+  if (s === "assessment_in_progress") return "admin-badge admin-badge-slate";
+  if (s === "waitlist") return "admin-badge admin-badge-amber";
+  if (["not_fit", "closed"].includes(s)) return "admin-badge admin-badge-red";
+  return "admin-badge admin-badge-slate";
+}
+
+function rrStatusLabel(status) {
+  const opt = RR_STATUS_OPTIONS.find((o) => o.value === String(status || "").toLowerCase());
+  return opt ? opt.label : String(status || "—");
+}
+
+function computeRrFitSignals(app) {
+  if (!app) return { positives: [], risks: [], suggestedScore: 0 };
+  const positives = [];
+  const risks = [];
+  let score = 0;
+
+  const budget = String(app.budget_range || "").toLowerCase();
+  if (budget.includes("500k") || budget.includes("$500") || budget.includes("500,000")) {
+    if (budget.includes("2m") || budget.includes("$2") || budget.includes("2,000,000")) {
+      positives.push("Budget in prime range ($500K–$2M)");
+      score += 3;
+    } else {
+      positives.push("Mid-range budget");
+      score += 2;
+    }
+  } else if (budget.includes("250k") || budget.includes("$250")) {
+    positives.push("Emerging budget range ($250K–$500K)");
+    score += 2;
+  } else if (budget.includes("2m") || budget.includes("5m")) {
+    positives.push("Larger org budget ($2M–$5M)");
+    score += 2;
+  }
+
+  const funding = String(app.funding_status || "").toLowerCase();
+  if (funding.includes("yes") || funding.includes("applying")) {
+    positives.push("Has or is applying for foundation/government funding");
+    score += 3;
+  } else if (funding.includes("no")) {
+    risks.push("No current funder reporting pressure");
+    score -= 3;
+  }
+
+  const deadline = String(app.upcoming_deadline || "").toLowerCase();
+  if (deadline.includes("30 day") || deadline.includes("within 30") || deadline.includes("1–3") || deadline.includes("1-3") || deadline.includes("1 to 3")) {
+    positives.push("Report/renewal due within 1–3 months");
+    score += 3;
+  } else if (deadline.includes("3–6") || deadline.includes("3-6") || deadline.includes("3 to 6")) {
+    positives.push("Report due within 3–6 months");
+    score += 2;
+  } else if (deadline.includes("not currently") || deadline.includes("no upcoming") || deadline.includes("none")) {
+    risks.push("No upcoming report/renewal/application");
+    score -= 3;
+  }
+
+  const dataLocations = Array.isArray(app.data_locations) ? app.data_locations : [];
+  if (dataLocations.length >= 3) {
+    positives.push(`Data spread across ${dataLocations.length} locations (fragmented — high assessment value)`);
+    score += 3;
+  }
+
+  const challenges = Array.isArray(app.reporting_challenges) ? app.reporting_challenges : [];
+  const challengesText = challenges.join(" ").toLowerCase();
+  if (challengesText.includes("dedicated") || challengesText.includes("evaluation person")) {
+    positives.push("No dedicated data/evaluation staff");
+    score += 2;
+  }
+  if (challengesText.includes("grant renewal") || challengesText.includes("funding ask")) {
+    positives.push("Preparing for grant renewal or funding ask");
+    score += 2;
+  }
+
+  const confidence = parseInt(app.confidence_rating, 10);
+  if (!Number.isNaN(confidence) && confidence <= 2) {
+    positives.push(`Low reporting confidence (${confidence}/5) — strong need for support`);
+    score += 2;
+  }
+
+  const materials = Array.isArray(app.shareable_materials) ? app.shareable_materials : [];
+  const materialsText = materials.join(" ").toLowerCase();
+  if (
+    materialsText.includes("grant report") ||
+    materialsText.includes("template") ||
+    materialsText.includes("spreadsheet") ||
+    materialsText.includes("survey")
+  ) {
+    positives.push("Has shareable reports, templates, or data files");
+    score += 3;
+  }
+  if (materialsText.includes("cannot") || materialsText.includes("nothing") || materialsText.includes("not sure")) {
+    risks.push("Cannot or unsure about sharing materials");
+    score -= 5;
+  }
+
+  const learnings = String(app.anonymized_learnings || "").toLowerCase();
+  if (learnings.startsWith("yes")) {
+    positives.push("Open to anonymized learnings sharing");
+    score += 2;
+  } else if (learnings.startsWith("no")) {
+    risks.push("Not open to anonymized learnings");
+  }
+
+  const sensitive = String(app.sensitive_data || "").toLowerCase();
+  if (sensitive.startsWith("yes")) {
+    risks.push("Handles sensitive beneficiary/client data — requires care");
+  }
+
+  return { positives, risks, suggestedScore: Math.max(0, Math.min(25, score)) };
 }
 
 function computeTrend(currentValue, previousValue) {
@@ -501,6 +634,23 @@ export default function AdminDashboard() {
   const [orgPoolHistoryState, setOrgPoolHistoryState] = useState({ loading: false, error: "", items: [] });
   const [volunteerDetailState, setVolunteerDetailState] = useState({ loading: false, error: "", data: null, open: false });
 
+  const [rrState, setRrState] = useState({ loading: false, error: "", items: [], summary: {} });
+  const [rrSearch, setRrSearch] = useState("");
+  const [rrSearchInput, setRrSearchInput] = useState("");
+  const [rrStatusFilter, setRrStatusFilter] = useState("all");
+  const [rrPage, setRrPage] = useState(1);
+  const [rrTotalRows, setRrTotalRows] = useState(0);
+  const [rrTotalPages, setRrTotalPages] = useState(0);
+  const [rrDetailModal, setRrDetailModal] = useState({
+    open: false,
+    loading: false,
+    data: null,
+    status: "",
+    fitScore: "",
+    reviewerNotes: "",
+    saving: false,
+  });
+
   const [orgSearch, setOrgSearch] = useState("");
   const [eventSearch, setEventSearch] = useState("");
   const [volunteerSearch, setVolunteerSearch] = useState("");
@@ -755,6 +905,23 @@ export default function AdminDashboard() {
       setVolunteerState((curr) => ({ ...curr, loading: false, error: err?.message || "Unable to load volunteers" }));
     }
   }, [volunteerPage, volunteerSearch, volunteerStatusFilter, requestJson, unpackPagedResponse]);
+
+  const loadReportingReadiness = useCallback(async () => {
+    setRrState((curr) => ({ ...curr, loading: true, error: "" }));
+    try {
+      const qs = new URLSearchParams({ page: String(rrPage), limit: "50" });
+      if (rrStatusFilter && rrStatusFilter !== "all") qs.set("status", rrStatusFilter);
+      if (rrSearch.trim()) qs.set("search", rrSearch.trim());
+      const payload = await requestJson(`/api/admin/reporting-readiness/applications?${qs.toString()}`);
+      const paged = unpackPagedResponse(payload);
+      setRrState({ loading: false, error: "", items: paged.data, summary: payload.summary || {} });
+      setRrPage(paged.pagination.page);
+      setRrTotalRows(paged.pagination.totalRows);
+      setRrTotalPages(paged.pagination.totalPages);
+    } catch (err) {
+      setRrState((curr) => ({ ...curr, loading: false, error: err?.message || "Unable to load Reporting Readiness applications" }));
+    }
+  }, [rrPage, rrStatusFilter, rrSearch, requestJson, unpackPagedResponse]);
 
   const loadDonors = useCallback(async () => {
     setDonorState((curr) => ({ ...curr, loading: true, error: "" }));
@@ -1052,6 +1219,10 @@ export default function AdminDashboard() {
     }
   }, [activeSection, loadDonors, loadDonationAllocationOptions, loadDonationReviews, loadTransactions]);
 
+  useEffect(() => {
+    if (activeSection === "reportingReadiness") loadReportingReadiness();
+  }, [activeSection, loadReportingReadiness]);
+
   const handleSectionChange = useCallback((sectionKey) => {
     setActiveSection(sectionKey);
     setOrgPage(1);
@@ -1063,6 +1234,7 @@ export default function AdminDashboard() {
     setCreditLogPage(1);
     setPendingCreditsPage(1);
     setOrgPoolHistoryPage(1);
+    setRrPage(1);
   }, []);
 
   const openConfirm = useCallback((config, action) => {
@@ -1420,6 +1592,88 @@ export default function AdminDashboard() {
     setVolunteerEdit(null);
     loadVolunteers();
   }, [loadVolunteers, mutateJson, pushToast, volunteerEdit]);
+
+  const openRrDetail = useCallback(async (app) => {
+    setRrDetailModal({
+      open: true,
+      loading: true,
+      data: null,
+      status: app.status || "pending",
+      fitScore: app.fit_score != null ? String(app.fit_score) : "",
+      reviewerNotes: "",
+      saving: false,
+    });
+    try {
+      const payload = await requestJson(`/api/admin/reporting-readiness/applications/${app.id}`);
+      const full = payload.data;
+      setRrDetailModal((curr) => ({
+        ...curr,
+        loading: false,
+        data: full,
+        status: full.status || "pending",
+        fitScore: full.fit_score != null ? String(full.fit_score) : "",
+        reviewerNotes: full.reviewer_notes || "",
+      }));
+    } catch (err) {
+      setRrDetailModal((curr) => ({ ...curr, loading: false }));
+      pushToast(err?.message || "Unable to load application.", "error");
+    }
+  }, [requestJson, pushToast]);
+
+  const closeRrDetail = useCallback(() => {
+    setRrDetailModal({ open: false, loading: false, data: null, status: "", fitScore: "", reviewerNotes: "", saving: false });
+  }, []);
+
+  const saveRrReview = useCallback(async () => {
+    const appId = rrDetailModal.data?.id;
+    if (!appId || rrDetailModal.saving) return;
+    setRrDetailModal((curr) => ({ ...curr, saving: true }));
+    try {
+      const body = {
+        status: rrDetailModal.status,
+        reviewer_notes: rrDetailModal.reviewerNotes,
+      };
+      if (rrDetailModal.fitScore !== "") {
+        body.fit_score = rrDetailModal.fitScore === "" ? null : Number(rrDetailModal.fitScore);
+      } else {
+        body.fit_score = null;
+      }
+      const result = await mutateJson(`/api/admin/reporting-readiness/applications/${appId}`, "PATCH", body);
+      setRrDetailModal((curr) => ({
+        ...curr,
+        saving: false,
+        data: curr.data ? { ...curr.data, ...result.data } : curr.data,
+      }));
+      pushToast("Review saved.", "success");
+      loadReportingReadiness();
+    } catch (err) {
+      setRrDetailModal((curr) => ({ ...curr, saving: false }));
+      pushToast(err?.message || "Unable to save review updates. Please try again.", "error");
+    }
+  }, [rrDetailModal, mutateJson, pushToast, loadReportingReadiness]);
+
+  const markRrCalendarLinkSent = useCallback(async () => {
+    const appId = rrDetailModal.data?.id;
+    if (!appId || rrDetailModal.saving) return;
+    setRrDetailModal((curr) => ({ ...curr, saving: true }));
+    try {
+      const result = await mutateJson(`/api/admin/reporting-readiness/applications/${appId}`, "PATCH", {
+        status: "calendar_sent",
+        calendar_link_sent_at: new Date().toISOString(),
+      });
+      setRrDetailModal((curr) => ({
+        ...curr,
+        saving: false,
+        status: "calendar_sent",
+        data: curr.data ? { ...curr.data, ...result.data } : curr.data,
+      }));
+      pushToast("Marked as calendar link sent.", "success");
+      loadReportingReadiness();
+    } catch (err) {
+      setRrDetailModal((curr) => ({ ...curr, saving: false }));
+      pushToast(err?.message || "Unable to save. Please try again.", "error");
+    }
+  }, [rrDetailModal, mutateJson, pushToast, loadReportingReadiness]);
 
   const submitManualCredit = useCallback(async () => {
     if (!creditForm.user_id || !creditForm.amount || creditForm.submitting) {
@@ -2789,6 +3043,200 @@ export default function AdminDashboard() {
               </div>
             </section>
           )}
+
+          {activeSection === "reportingReadiness" && (
+            <section>
+              <div className="d-flex justify-content-between align-items-start mb-1 flex-wrap gap-2">
+                <div>
+                  <h1 className="admin-title mb-0">Reporting Readiness Applications</h1>
+                  <p className="text-muted small mb-0">Review nonprofit applications for the Impact Reporting &amp; Data Readiness Assessment.</p>
+                </div>
+                <button type="button" className="btn btn-sm btn-outline-secondary" onClick={loadReportingReadiness}>
+                  <i className="fa-solid fa-arrows-rotate me-1" />Refresh
+                </button>
+              </div>
+
+              {/* Summary cards */}
+              {(() => {
+                const s = rrState.summary;
+                const total = Object.values(s).reduce((a, b) => a + b, 0);
+                const cards = [
+                  { label: "Total", value: total, accent: "#455a7c" },
+                  { label: "New / Pending", value: (s.new || 0) + (s.pending || 0), accent: "#5b87e8" },
+                  { label: "Invite to Call", value: s.invite_to_call || 0, accent: "#0a7a6a" },
+                  { label: "Selected", value: s.selected_for_assessment || 0, accent: "#2f9155" },
+                  { label: "Waitlist / Not Fit", value: (s.waitlist || 0) + (s.not_fit || 0), accent: "#c24141" },
+                ];
+                return (
+                  <div className="row g-2 my-3">
+                    {cards.map((card) => (
+                      <div key={card.label} className="col-6 col-md-4 col-xl-2">
+                        <div className="admin-card admin-stat-card" style={{ borderLeftColor: card.accent }}>
+                          <div className="text-muted small">{card.label}</div>
+                          <div className="admin-stat-value" style={{ fontSize: "1.5rem" }}>
+                            {rrState.loading ? "…" : card.value}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+
+              {/* Filters */}
+              <div className="admin-card mb-3">
+                <div className="d-flex flex-wrap gap-2 align-items-end">
+                  <div>
+                    <label className="form-label small mb-1">Status</label>
+                    <select
+                      className="form-select form-select-sm"
+                      style={{ minWidth: 190 }}
+                      value={rrStatusFilter}
+                      onChange={(e) => { setRrStatusFilter(e.target.value); setRrPage(1); }}
+                    >
+                      <option value="all">All statuses</option>
+                      {RR_STATUS_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex-grow-1" style={{ maxWidth: 360 }}>
+                    <label className="form-label small mb-1">Search</label>
+                    <div className="input-group input-group-sm">
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="Org, applicant, email, funders…"
+                        value={rrSearchInput}
+                        onChange={(e) => setRrSearchInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            setRrSearch(rrSearchInput);
+                            setRrPage(1);
+                          }
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-outline-secondary"
+                        onClick={() => { setRrSearch(rrSearchInput); setRrPage(1); }}
+                      >
+                        Search
+                      </button>
+                      {rrSearch ? (
+                        <button
+                          type="button"
+                          className="btn btn-outline-danger"
+                          onClick={() => { setRrSearchInput(""); setRrSearch(""); setRrPage(1); }}
+                        >
+                          ×
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Loading / error */}
+              {rrState.loading ? <div className="text-muted mb-2">Loading Reporting Readiness applications…</div> : null}
+              {rrState.error ? (
+                <div className="admin-card mb-3" style={{ border: "1px solid #f5c6cb", background: "#fff5f5" }}>
+                  <div className="text-danger small mb-2">{rrState.error}</div>
+                  <button type="button" className="btn btn-sm btn-outline-secondary" onClick={loadReportingReadiness}>Refresh</button>
+                </div>
+              ) : null}
+
+              {/* Applications table */}
+              {!rrState.loading && !rrState.error && (
+                <div className="admin-card">
+                  {rrState.items.length === 0 ? (
+                    <div className="text-center py-5 text-muted">
+                      <i className="fa-solid fa-clipboard-list fa-2x mb-3 d-block opacity-25" />
+                      <div className="fw-semibold mb-1">No Reporting Readiness applications yet.</div>
+                      <div className="small">Applications submitted through the "Book a Reporting Readiness Call" form will appear here.</div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="table-responsive">
+                        <table className="table table-hover admin-table mb-0" style={{ minWidth: 900 }}>
+                          <thead>
+                            <tr>
+                              <th>Organization</th>
+                              <th>Applicant</th>
+                              <th>Budget</th>
+                              <th>Funding</th>
+                              <th>Timing</th>
+                              <th>Confidence</th>
+                              <th>Status</th>
+                              <th>Fit Score</th>
+                              <th>Submitted</th>
+                              <th>Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {rrState.items.map((row) => {
+                              const { date, time } = getDateTimeParts(row.created_at);
+                              return (
+                                <tr key={row.id}>
+                                  <td>
+                                    <div className="fw-semibold">{row.org_name}</div>
+                                  </td>
+                                  <td>
+                                    <div>{row.contact_name}</div>
+                                    <div className="small text-muted">{row.role}</div>
+                                    <div className="small text-muted">{row.email}</div>
+                                  </td>
+                                  <td><span className="small">{row.budget_range}</span></td>
+                                  <td><span className="small">{row.funding_status}</span></td>
+                                  <td><span className="small">{row.upcoming_deadline}</span></td>
+                                  <td>
+                                    {row.confidence_rating ? (
+                                      <span className="small">{row.confidence_rating}/5</span>
+                                    ) : <span className="text-muted small">—</span>}
+                                  </td>
+                                  <td>
+                                    <span className={rrStatusClass(row.status)}>{rrStatusLabel(row.status)}</span>
+                                  </td>
+                                  <td>
+                                    {row.fit_score != null ? (
+                                      <span className="fw-semibold">{row.fit_score}</span>
+                                    ) : (
+                                      <span className="text-muted small">Not scored</span>
+                                    )}
+                                  </td>
+                                  <td>
+                                    <div className="small">{date}</div>
+                                    <div className="small text-muted">{time}</div>
+                                  </td>
+                                  <td>
+                                    <button
+                                      type="button"
+                                      className="btn btn-sm admin-btn-coral"
+                                      onClick={() => openRrDetail(row)}
+                                    >
+                                      Review
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                      <Pagination
+                        page={rrPage}
+                        totalPages={rrTotalPages}
+                        totalRows={rrTotalRows}
+                        limit={50}
+                        onPageChange={setRrPage}
+                        disabled={rrState.loading}
+                      />
+                    </>
+                  )}
+                </div>
+              )}
+            </section>
+          )}
         </main>
       </div>
 
@@ -2908,6 +3356,310 @@ export default function AdminDashboard() {
                 </div>
               </>
             ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {rrDetailModal.open ? (
+        <div
+          className="admin-edit-backdrop"
+          onClick={(e) => { if (e.target === e.currentTarget) closeRrDetail(); }}
+        >
+          <div
+            className="admin-edit-card admin-edit-card-wide"
+            style={{ maxHeight: "90vh", overflowY: "auto", display: "flex", flexDirection: "column" }}
+          >
+            {/* Header */}
+            <div className="d-flex justify-content-between align-items-start mb-3" style={{ flexShrink: 0 }}>
+              <div>
+                <h5 className="mb-1">Application Review</h5>
+                <div className="small text-muted">
+                  {rrDetailModal.data?.org_name || "Loading…"} · submitted {formatDateTime(rrDetailModal.data?.created_at)}
+                </div>
+              </div>
+              <button type="button" className="btn-close" onClick={closeRrDetail} />
+            </div>
+
+            {rrDetailModal.loading ? (
+              <div className="text-muted text-center py-5">Loading application…</div>
+            ) : !rrDetailModal.data ? (
+              <div className="text-muted text-center py-5">Unable to load application.</div>
+            ) : (
+              <>
+                {/* Quick summary */}
+                <div className="admin-card mb-3 p-3" style={{ background: "#f8f9fc", border: "1px solid #e3e8f2" }}>
+                  <div className="row g-2 small">
+                    {[
+                      ["Organization", rrDetailModal.data.org_name],
+                      ["Applicant", rrDetailModal.data.contact_name],
+                      ["Email", rrDetailModal.data.email],
+                      ["Role", [rrDetailModal.data.role, rrDetailModal.data.role_other].filter(Boolean).join(" — ")],
+                      ["Budget", rrDetailModal.data.budget_range],
+                      ["Program Area", [rrDetailModal.data.program_area, rrDetailModal.data.program_area_other].filter(Boolean).join(" — ")],
+                      ["Funding Status", rrDetailModal.data.funding_status],
+                      ["Report Timing", rrDetailModal.data.upcoming_deadline],
+                      ["Confidence", rrDetailModal.data.confidence_rating ? `${rrDetailModal.data.confidence_rating}/5` : "—"],
+                      ["Sensitive Data", rrDetailModal.data.sensitive_data],
+                      ["Anon. Learnings", rrDetailModal.data.anonymized_learnings],
+                    ].map(([label, val]) => (
+                      <div key={label} className="col-6 col-md-4">
+                        <div className="text-muted">{label}</div>
+                        <div className="fw-semibold">{val || "—"}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Fit signals */}
+                {(() => {
+                  const { positives, risks, suggestedScore } = computeRrFitSignals(rrDetailModal.data);
+                  return (
+                    <div className="admin-card mb-3 p-3" style={{ background: "#fafbfd", border: "1px solid #e3e8f2" }}>
+                      <div className="d-flex justify-content-between align-items-center mb-2">
+                        <h6 className="mb-0">Fit Signals</h6>
+                        <span className="small text-muted">Suggested score: <strong>{suggestedScore}</strong>/25 (internal only)</span>
+                      </div>
+                      <div className="row g-2">
+                        {positives.length > 0 && (
+                          <div className="col-12 col-md-6">
+                            <div className="small fw-semibold mb-1" style={{ color: "#2f9155" }}>Positive signals</div>
+                            <ul className="mb-0 ps-3 small" style={{ color: "#2f7248" }}>
+                              {positives.map((sig, i) => <li key={i}>{sig}</li>)}
+                            </ul>
+                          </div>
+                        )}
+                        {risks.length > 0 && (
+                          <div className="col-12 col-md-6">
+                            <div className="small fw-semibold mb-1" style={{ color: "#b97710" }}>For consideration</div>
+                            <ul className="mb-0 ps-3 small" style={{ color: "#8a5c08" }}>
+                              {risks.map((sig, i) => <li key={i}>{sig}</li>)}
+                            </ul>
+                          </div>
+                        )}
+                        {positives.length === 0 && risks.length === 0 && (
+                          <div className="col-12 small text-muted">No signals computed from submitted answers.</div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Submitted answers accordion */}
+                <div className="mb-3">
+                  {/* Section A */}
+                  <div className="admin-card mb-2 p-0" style={{ border: "1px solid #e3e8f2" }}>
+                    <button
+                      type="button"
+                      className="w-100 text-start p-3 border-0 bg-transparent fw-semibold d-flex justify-content-between align-items-center"
+                      style={{ color: "#2f3d52", borderRadius: "inherit" }}
+                      onClick={(e) => { const body = e.currentTarget.nextSibling; body.style.display = body.style.display === "none" ? "block" : "none"; }}
+                    >
+                      <span><i className="fa-solid fa-building me-2 text-muted" />A. Organization Fit</span>
+                      <i className="fa-solid fa-chevron-down small text-muted" />
+                    </button>
+                    <div className="p-3 pt-0 small">
+                      <div className="row g-2">
+                        {[
+                          ["Organization", rrDetailModal.data.org_name],
+                          ["Website", rrDetailModal.data.website],
+                          ["Applicant Name", rrDetailModal.data.contact_name],
+                          ["Role", [rrDetailModal.data.role, rrDetailModal.data.role_other].filter(Boolean).join(" — ")],
+                          ["Email", rrDetailModal.data.email],
+                          ["Phone", rrDetailModal.data.phone || "—"],
+                          ["Annual Budget", rrDetailModal.data.budget_range],
+                          ["Program Area", [rrDetailModal.data.program_area, rrDetailModal.data.program_area_other].filter(Boolean).join(" — ")],
+                        ].map(([label, val]) => (
+                          <div key={label} className="col-6">
+                            <div className="text-muted">{label}</div>
+                            <div>{val || "—"}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Section B */}
+                  <div className="admin-card mb-2 p-0" style={{ border: "1px solid #e3e8f2" }}>
+                    <button
+                      type="button"
+                      className="w-100 text-start p-3 border-0 bg-transparent fw-semibold d-flex justify-content-between align-items-center"
+                      style={{ color: "#2f3d52" }}
+                      onClick={(e) => { const body = e.currentTarget.nextSibling; body.style.display = body.style.display === "none" ? "block" : "none"; }}
+                    >
+                      <span><i className="fa-solid fa-chart-line me-2 text-muted" />B. Reporting Pressure</span>
+                      <i className="fa-solid fa-chevron-down small text-muted" />
+                    </button>
+                    <div className="p-3 pt-0 small">
+                      <div className="row g-2 mb-2">
+                        <div className="col-6">
+                          <div className="text-muted">Funding Status</div>
+                          <div className="fw-semibold">{rrDetailModal.data.funding_status}</div>
+                        </div>
+                        <div className="col-6">
+                          <div className="text-muted">Upcoming Report Timing</div>
+                          <div className="fw-semibold">{rrDetailModal.data.upcoming_deadline}</div>
+                        </div>
+                        <div className="col-6">
+                          <div className="text-muted">Confidence Rating</div>
+                          <div>{rrDetailModal.data.confidence_rating ? `${rrDetailModal.data.confidence_rating}/5` : "—"}</div>
+                        </div>
+                        <div className="col-12">
+                          <div className="text-muted">Funders</div>
+                          <div>{rrDetailModal.data.funders_list || "—"}</div>
+                        </div>
+                        <div className="col-12">
+                          <div className="text-muted">Reporting Challenges</div>
+                          {(rrDetailModal.data.reporting_challenges || []).length > 0 ? (
+                            <ul className="mb-0 ps-3">{(rrDetailModal.data.reporting_challenges || []).map((c, i) => <li key={i}>{c}</li>)}</ul>
+                          ) : <div>—</div>}
+                          {rrDetailModal.data.reporting_challenge_other && (
+                            <div className="mt-1">Other: {rrDetailModal.data.reporting_challenge_other}</div>
+                          )}
+                        </div>
+                        <div className="col-12">
+                          <div className="text-muted">Biggest thing funders don't understand</div>
+                          <div className="mt-1" style={{ whiteSpace: "pre-wrap" }}>{rrDetailModal.data.funder_understanding}</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Section C */}
+                  <div className="admin-card mb-2 p-0" style={{ border: "1px solid #e3e8f2" }}>
+                    <button
+                      type="button"
+                      className="w-100 text-start p-3 border-0 bg-transparent fw-semibold d-flex justify-content-between align-items-center"
+                      style={{ color: "#2f3d52" }}
+                      onClick={(e) => { const body = e.currentTarget.nextSibling; body.style.display = body.style.display === "none" ? "block" : "none"; }}
+                    >
+                      <span><i className="fa-solid fa-database me-2 text-muted" />C. Data Readiness &amp; Privacy</span>
+                      <i className="fa-solid fa-chevron-down small text-muted" />
+                    </button>
+                    <div className="p-3 pt-0 small">
+                      <div className="row g-2">
+                        <div className="col-12 col-md-6">
+                          <div className="text-muted">Data Locations</div>
+                          {(rrDetailModal.data.data_locations || []).length > 0 ? (
+                            <ul className="mb-0 ps-3">{(rrDetailModal.data.data_locations || []).map((d, i) => <li key={i}>{d}</li>)}</ul>
+                          ) : <div>—</div>}
+                          {rrDetailModal.data.data_locations_other && <div className="mt-1">Other: {rrDetailModal.data.data_locations_other}</div>}
+                        </div>
+                        <div className="col-12 col-md-6">
+                          <div className="text-muted">Shareable Materials</div>
+                          {(rrDetailModal.data.shareable_materials || []).length > 0 ? (
+                            <ul className="mb-0 ps-3">{(rrDetailModal.data.shareable_materials || []).map((m, i) => <li key={i}>{m}</li>)}</ul>
+                          ) : <div>—</div>}
+                        </div>
+                        <div className="col-6">
+                          <div className="text-muted">Sensitive Beneficiary Data</div>
+                          <div className="fw-semibold">{rrDetailModal.data.sensitive_data}</div>
+                        </div>
+                        <div className="col-6">
+                          <div className="text-muted">Anonymized Learnings</div>
+                          <div>{rrDetailModal.data.anonymized_learnings}</div>
+                        </div>
+                        <div className="col-12">
+                          <div className="text-muted">What would make the assessment valuable</div>
+                          <div className="mt-1" style={{ whiteSpace: "pre-wrap" }}>{rrDetailModal.data.assessment_value}</div>
+                        </div>
+                        {rrDetailModal.data.additional_notes && (
+                          <div className="col-12">
+                            <div className="text-muted">Anything else we should know</div>
+                            <div className="mt-1" style={{ whiteSpace: "pre-wrap" }}>{rrDetailModal.data.additional_notes}</div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Internal review controls */}
+                <div className="admin-card mb-3 p-3" style={{ background: "#fffaf5", border: "1px solid #f0e0c8" }}>
+                  <h6 className="mb-3">Internal Review</h6>
+                  <div className="row g-3">
+                    <div className="col-12 col-md-6">
+                      <label className="form-label small fw-semibold">Status</label>
+                      <select
+                        className="form-select form-select-sm"
+                        value={rrDetailModal.status}
+                        onChange={(e) => setRrDetailModal((curr) => ({ ...curr, status: e.target.value }))}
+                      >
+                        {RR_STATUS_OPTIONS.map((o) => (
+                          <option key={o.value} value={o.value}>{o.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="col-12 col-md-6">
+                      <label className="form-label small fw-semibold">
+                        Fit Score (0–25)
+                        <span className="text-muted fw-normal ms-1">
+                          · Suggested: {computeRrFitSignals(rrDetailModal.data).suggestedScore}
+                        </span>
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="25"
+                        className="form-control form-control-sm"
+                        value={rrDetailModal.fitScore}
+                        onChange={(e) => setRrDetailModal((curr) => ({ ...curr, fitScore: e.target.value }))}
+                        placeholder="0–25"
+                      />
+                    </div>
+                    <div className="col-12">
+                      <label className="form-label small fw-semibold">Reviewer Notes</label>
+                      <textarea
+                        rows="3"
+                        className="form-control form-control-sm"
+                        placeholder="Internal notes on fit, risks, next steps, or call prep."
+                        value={rrDetailModal.reviewerNotes}
+                        onChange={(e) => setRrDetailModal((curr) => ({ ...curr, reviewerNotes: e.target.value }))}
+                      />
+                    </div>
+                    <div className="col-12">
+                      <label className="form-label small fw-semibold d-block">Calendar Link Sent</label>
+                      <div className="d-flex align-items-center gap-2 flex-wrap">
+                        {rrDetailModal.data.calendar_link_sent_at ? (
+                          <span className="admin-badge admin-badge-green">
+                            Sent {formatDateTime(rrDetailModal.data.calendar_link_sent_at)}
+                          </span>
+                        ) : (
+                          <span className="text-muted small">Not yet sent</span>
+                        )}
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-success"
+                          disabled={rrDetailModal.saving}
+                          onClick={markRrCalendarLinkSent}
+                        >
+                          Mark Calendar Link Sent
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div className="d-flex justify-content-end gap-2" style={{ flexShrink: 0 }}>
+                  <button
+                    type="button"
+                    className="btn btn-outline-secondary btn-sm"
+                    onClick={closeRrDetail}
+                    disabled={rrDetailModal.saving}
+                  >
+                    Close
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-sm admin-btn-coral"
+                    onClick={saveRrReview}
+                    disabled={rrDetailModal.saving}
+                  >
+                    {rrDetailModal.saving ? "Saving…" : "Save Review"}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       ) : null}
@@ -3171,6 +3923,9 @@ export default function AdminDashboard() {
         .admin-badge-amber { background: #fff4de; color: #b97710; }
         .admin-badge-red { background: #fde9e9; color: #c24141; }
         .admin-badge-slate { background: #edf1f6; color: #4b5f7f; }
+        .rr-badge-teal { background: #e0f7f4; color: #0a7a6a; }
+        .rr-badge-purple { background: #f0e9ff; color: #6b3fbb; }
+        .rr-badge-gold { background: #fff8e0; color: #9a7000; }
         .admin-chip {
           border-radius: 999px;
           padding: 0.35rem 0.65rem;

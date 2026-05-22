@@ -2794,4 +2794,163 @@ adminApiRouter.post("/credits/allocate", async (req, res) => {
   }
 });
 
+// ── Reporting Readiness Applications ─────────────────────────────────────────
+
+const RR_STATUS_SET = new Set([
+  "pending", "new", "reviewing", "invite_to_call", "calendar_sent",
+  "call_booked", "selected_for_assessment", "assessment_in_progress",
+  "assessment_complete", "implementation_proposed", "waitlist", "not_fit", "closed",
+]);
+
+adminApiRouter.get("/reporting-readiness/applications", async (req, res) => {
+  const status = String(req.query.status || "").trim().toLowerCase() || null;
+  const search = String(req.query.search || "").trim() || null;
+  const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 50));
+  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+  const offset = (page - 1) * limit;
+
+  const conditions = [];
+  const params = [];
+
+  if (status && status !== "all") {
+    params.push(status);
+    conditions.push(`status = $${params.length}`);
+  }
+
+  if (search) {
+    params.push(`%${search.toLowerCase()}%`);
+    const idx = params.length;
+    conditions.push(
+      `(LOWER(org_name) LIKE $${idx} OR LOWER(contact_name) LIKE $${idx} OR LOWER(email) LIKE $${idx} OR LOWER(COALESCE(funders_list,'')) LIKE $${idx})`
+    );
+  }
+
+  const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+
+  try {
+    const [dataResult, countResult, summaryResult] = await Promise.all([
+      pool.query(
+        `SELECT id, org_name, contact_name, role, email, budget_range, program_area,
+                funding_status, upcoming_deadline, confidence_rating,
+                sensitive_data, anonymized_learnings, status, fit_score,
+                calendar_link_sent_at, created_at, reviewed_at
+         FROM public.reporting_readiness_applications
+         ${where}
+         ORDER BY created_at DESC
+         LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+        [...params, limit, offset]
+      ),
+      pool.query(
+        `SELECT COUNT(*)::int AS total FROM public.reporting_readiness_applications ${where}`,
+        params
+      ),
+      pool.query(
+        `SELECT status, COUNT(*)::int AS count FROM public.reporting_readiness_applications GROUP BY status`
+      ),
+    ]);
+
+    const summary = {};
+    for (const row of summaryResult.rows) summary[row.status] = row.count;
+
+    return res.json({
+      data: dataResult.rows,
+      summary,
+      pagination: {
+        page,
+        limit,
+        totalRows: countResult.rows[0]?.total || 0,
+        totalPages: Math.ceil((countResult.rows[0]?.total || 0) / limit),
+      },
+    });
+  } catch (err) {
+    console.error("GET /api/admin/reporting-readiness/applications error:", err.message);
+    return res.status(500).json({ error: "server_error" });
+  }
+});
+
+adminApiRouter.get("/reporting-readiness/applications/:id", async (req, res) => {
+  const id = parsePositiveInt(req.params.id);
+  if (!id) return res.status(400).json({ error: "invalid_id" });
+
+  try {
+    const { rows: [row] } = await pool.query(
+      `SELECT * FROM public.reporting_readiness_applications WHERE id = $1 LIMIT 1`,
+      [id]
+    );
+    if (!row) return res.status(404).json({ error: "not_found" });
+    return res.json({ data: row });
+  } catch (err) {
+    console.error("GET /api/admin/reporting-readiness/applications/:id error:", err.message);
+    return res.status(500).json({ error: "server_error" });
+  }
+});
+
+adminApiRouter.patch("/reporting-readiness/applications/:id", async (req, res) => {
+  if (!requireCsrf(req, res)) return;
+  const id = parsePositiveInt(req.params.id);
+  if (!id) return res.status(400).json({ error: "invalid_id" });
+
+  const body = req.body || {};
+  const updates = [];
+  const params = [];
+
+  const addParam = (val) => {
+    params.push(val);
+    return `$${params.length}`;
+  };
+
+  if (body.status !== undefined) {
+    const s = String(body.status || "").toLowerCase();
+    if (!RR_STATUS_SET.has(s)) return res.status(422).json({ error: "invalid_status" });
+    updates.push(`status = ${addParam(s)}`);
+    if (s === "calendar_sent" && body.calendar_link_sent_at === undefined) {
+      updates.push(`calendar_link_sent_at = COALESCE(calendar_link_sent_at, NOW())`);
+    }
+  }
+
+  if (body.fit_score !== undefined) {
+    if (body.fit_score === null || body.fit_score === "") {
+      updates.push(`fit_score = ${addParam(null)}`);
+    } else {
+      const score = parseInt(body.fit_score, 10);
+      if (!Number.isInteger(score) || score < 0 || score > 25) {
+        return res.status(422).json({ error: "invalid_fit_score" });
+      }
+      updates.push(`fit_score = ${addParam(score)}`);
+    }
+  }
+
+  if (body.reviewer_notes !== undefined) {
+    updates.push(`reviewer_notes = ${addParam(body.reviewer_notes === null ? null : String(body.reviewer_notes))}`);
+  }
+
+  if (body.calendar_link_sent_at !== undefined) {
+    updates.push(`calendar_link_sent_at = ${addParam(body.calendar_link_sent_at === null ? null : body.calendar_link_sent_at)}`);
+  }
+
+  if (!updates.length) return res.status(400).json({ error: "no_fields_to_update" });
+
+  updates.push(`reviewed_by = ${addParam(req.user?.email || null)}`);
+  updates.push(`reviewed_at = NOW()`);
+
+  params.push(id);
+
+  try {
+    const { rows: [updated] } = await pool.query(
+      `UPDATE public.reporting_readiness_applications
+       SET ${updates.join(", ")}
+       WHERE id = $${params.length}
+       RETURNING id, org_name, contact_name, status, fit_score, reviewer_notes,
+                 calendar_link_sent_at, reviewed_at`,
+      params
+    );
+    if (!updated) return res.status(404).json({ error: "not_found" });
+    console.log("[reporting-readiness] Application updated", { id: updated.id, status: updated.status });
+    return res.json({ success: true, data: updated });
+  } catch (err) {
+    console.error("PATCH /api/admin/reporting-readiness/applications/:id error:", err.message);
+    return res.status(500).json({ error: "server_error" });
+  }
+});
+
 export default adminApiRouter;

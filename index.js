@@ -40,7 +40,7 @@ import {
   resolveProfileSaveAction,
 } from "./services/profileSaveService.js";
 import { verify as neoVerify, run as neoRun, close as neoClose } from './Backend/db/neo4j.js';
-import { deliverQueuedNudges, sendNudgeEmail } from './kindnessEmailer.js';
+import { deliverQueuedNudges, sendNudgeEmail, sendReportingReadinessApplicantConfirmationEmail } from './kindnessEmailer.js';
 const { fetchUserEmails, fetchKindnessPrompts, fetchEmailSubject } = await import("./fetchData.js");
 const { sendDailyKindnessPrompts } = await import("./kindnessEmailer.js");
 import cookieParser from "cookie-parser";
@@ -3793,7 +3793,7 @@ app.post("/api/reporting-readiness/apply", async (req, res) => {
       return res.status(422).json({ ok: false, message: "Please select at least one shareable material." });
     }
 
-    await pool.query(
+    const { rows: [inserted] } = await pool.query(
       `INSERT INTO public.reporting_readiness_applications (
          org_name, website, contact_name, role, role_other, email, phone,
          budget_range, program_area, program_area_other,
@@ -3802,7 +3802,8 @@ app.post("/api/reporting-readiness/apply", async (req, res) => {
          data_locations, data_locations_other, shareable_materials,
          sensitive_data, anonymized_learnings, assessment_value, additional_notes,
          consent
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)`,
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
+       RETURNING id`,
       [
         d.org_name?.trim(),
         d.website?.trim(),
@@ -3832,8 +3833,35 @@ app.post("/api/reporting-readiness/apply", async (req, res) => {
       ]
     );
 
-    console.log(`[reporting-readiness] New application from ${d.email} (${d.org_name})`);
-    return res.json({ ok: true });
+    const applicationId = inserted.id;
+    console.log(`[reporting-readiness] New application saved`, { applicationId });
+
+    void (async () => {
+      try {
+        await sendReportingReadinessApplicantConfirmationEmail({
+          to: d.email?.trim().toLowerCase(),
+          applicantName: d.contact_name?.trim(),
+          organizationName: d.org_name?.trim(),
+        });
+        await pool.query(
+          `UPDATE public.reporting_readiness_applications
+             SET applicant_confirmation_email_sent_at = NOW()
+           WHERE id = $1`,
+          [applicationId]
+        );
+      } catch (emailErr) {
+        console.error("[reporting-readiness] Applicant confirmation email failed", {
+          applicationId,
+          error: emailErr.message,
+        });
+      }
+    })();
+
+    return res.json({
+      ok: true,
+      application_id: applicationId,
+      applicant_email_queued: true,
+    });
   } catch (err) {
     console.error("POST /api/reporting-readiness/apply error:", err);
     return res.status(500).json({ ok: false, message: "Something went wrong. Please try again." });
