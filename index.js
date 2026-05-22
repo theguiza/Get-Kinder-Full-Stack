@@ -3300,8 +3300,30 @@ app.get(["/how-it-works", "/how-it-works/:section"], (req, res) => {
   res.redirect(302, "/home");
 });
 
+const HOME_SECTIONS = new Set(["assessment", "how", "trust", "faq", "book"]);
+const HOME_PATH_SECTIONS = {
+  "/home/assessment": "assessment",
+  "/home/how": "how",
+  "/home/trust": "trust",
+  "/home/faq": "faq",
+  "/home/book": "book",
+  "/impact-reporting-assessment": "assessment",
+  "/nonprofit-data-readiness": "assessment",
+  "/reporting-readiness-call": "book",
+  "/data-safety-for-nonprofits": "trust"
+};
+
 async function renderIndexPage(req, res, next) {
   try {
+    const requestedSection = req.params?.section || req.homeSection || null;
+    const scrollToSection = requestedSection && HOME_SECTIONS.has(requestedSection)
+      ? requestedSection
+      : null;
+
+    if (requestedSection && !scrollToSection) {
+      return next();
+    }
+
     const success      = req.query.success === "1";
     const loginSuccess = req.query.login   === "1";
     const name         = req.query.name   || "";
@@ -3324,12 +3346,18 @@ async function renderIndexPage(req, res, next) {
       loginSuccess,
       name,
       dbTime,
-      onboardingDone
+      onboardingDone,
+      scrollToSection
     });
   } catch (err) {
     return next(err);
   }
 }
+
+app.get(Object.keys(HOME_PATH_SECTIONS), (req, res, next) => {
+  req.homeSection = HOME_PATH_SECTIONS[req.path] || null;
+  return renderIndexPage(req, res, next);
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 15) Updated Home Route (with DB time check and chat-history logic)
