@@ -3,25 +3,18 @@
   const homeHref = "/home";
   const currentUser = (typeof user !== "undefined" && user) ? user : null;
 
-  const navItems = [
+  const futureModuleItems = [
     { key: "events", label: "Volunteering", href: "/events" },
     { key: "donor", label: "Donors", href: "/donor" }
   ];
 
-  const visibleNavItems = navItems.filter((item) => !(item.authOnly && !currentUser));
+  const visibleFutureModuleItems = futureModuleItems.filter((item) => !(item.authOnly && !currentUser));
   const headerAvatarSrc = (typeof resolveUserPictureUrl === "function")
     ? resolveUserPictureUrl(currentUser)
     : (currentUser?.picture || "/images/nerdy-KAI.png");
 
-  const renderedNavItems = visibleNavItems.map((item) => {
-    if (cp !== "home" && cp === item.key) {
-      return { ...item, label: "Home", href: homeHref, swapped: true };
-    }
-    return { ...item, swapped: false };
-  });
-  const navItemsWithDonateHome = cp === "donate"
-    ? [{ key: "home-link", label: "Home", href: homeHref, swapped: false }, ...renderedNavItems]
-    : renderedNavItems;
+  const isFutureModulePage = visibleFutureModuleItems.some((item) => cp === item.key);
+  const showHomeNav = cp === "donate" || isFutureModulePage;
 
   const donateHref = "/donate";
   const donateLabel = "DONATE";
@@ -36,16 +29,36 @@
         </button>
       <div class="collapse navbar-collapse" id="siteHeaderNav">
         <ul class="navbar-nav flex-lg-grow-1 justify-content-lg-center align-items-lg-center">
-          <% navItemsWithDonateHome.forEach((item) => { %>
+          <% if (showHomeNav) { %>
             <li class="nav-item">
               <a
-                class="nav-link mx-1 font-hover<%= (!item.swapped && cp === item.key) ? " active" : "" %>"
-                href="<%= item.href %>"
-                <%= (!item.swapped && cp === item.key) ? 'aria-current="page"' : "" %>
+                class="nav-link mx-1 font-hover"
+                href="<%= homeHref %>"
                 style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;"
-              ><%= item.label %></a>
+              >Home</a>
             </li>
-          <% }) %>
+          <% } %>
+          <li class="nav-item dropdown">
+            <button
+              class="nav-link dropdown-toggle mx-1 font-hover<%= isFutureModulePage ? " active" : "" %>"
+              type="button"
+              data-bs-toggle="dropdown"
+              aria-expanded="false"
+              <%- isFutureModulePage ? 'aria-current="page"' : "" %>
+              style="font-size: 1.1rem; color: #455a7c; padding-right: 20px;"
+            >Future modules</button>
+            <ul class="dropdown-menu">
+              <% visibleFutureModuleItems.forEach((item) => { %>
+                <li>
+                  <a
+                    class="dropdown-item<%= cp === item.key ? " active" : "" %>"
+                    href="<%= item.href %>"
+                    <%- cp === item.key ? 'aria-current="page"' : "" %>
+                  ><%= item.label %></a>
+                </li>
+              <% }) %>
+            </ul>
+          </li>
           <% if (showDonateCta) { %>
             <li class="nav-item">
               <a class="btn btn-primary btn-lg" href="<%= donateHref %>" style="font-size: 1.2rem; color:aliceblue; background-color: #ff5656; border-color: #ff5656;"><%= donateLabel %></a>
