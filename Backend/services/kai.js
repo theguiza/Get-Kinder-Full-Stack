@@ -1,12 +1,22 @@
 import Anthropic from "@anthropic-ai/sdk";
 import pool from "../db/pg.js";
-import { getSystemPrompt, getGuestSystemPrompt, getOrgSystemPrompt } from "./kai-prompts.js";
-import { getToolDefinitionsForTier } from "./kai-tool-definitions.js";
+import {
+  getSystemPrompt,
+  getGuestSystemPrompt,
+  getOrgSystemPrompt,
+  getReportingReadinessSystemPrompt,
+} from "./kai-prompts.js";
+import { getToolDefinitionsForKaiContext } from "./kai-tool-definitions.js";
 import { executeToolCall } from "./kai-tool-executor.js";
 import { determineKaiTier, getModelForTier } from "../middleware/kai-tier.js";
 
 const anthropic = new Anthropic();
-const GUEST_TOOL_ALLOWLIST = new Set(["search_events"]);
+const GUEST_TOOL_ALLOWLIST = new Set([
+  "search_events",
+  "platform_faq",
+  "get_reporting_readiness_info",
+  "assess_reporting_readiness_question",
+]);
 let anthropicCreateImpl = (payload) => anthropic.messages.create(payload);
 
 const MAX_HISTORY_MESSAGES = 40;
@@ -449,20 +459,66 @@ function selectDiscoveryToolHint(userMessage, allowedTools = new Set()) {
   return null;
 }
 
+function selectReportingReadinessToolHints(userMessage, allowedTools = new Set()) {
+  const lower = normalizeStringForRouting(userMessage);
+  if (!lower) return [];
+
+  const hints = [];
+  const allowInfo = allowedTools.has("get_reporting_readiness_info");
+  const allowAssessment = allowedTools.has("assess_reporting_readiness_question");
+  const infoPatterns = [
+    /\b(what is|how does|what happens|next steps?)\b/,
+    /\b(fit|eligible|eligibility|selected|selection|cohort)\b/,
+    /\b(assessment|materials?|prepare|privacy|data handling|readiness)\b/,
+  ];
+  const assessmentPatterns = [
+    /\b(reporting|funder|funders|grant|renewal|application)\b/,
+    /\b(outcomes?|evidence|activities|stories|testimonials?)\b/,
+    /\b(data|spreadsheets?|crm|survey|case management|staff notes)\b/,
+    /\b(privacy|sensitive|client|beneficiary|anonymized?)\b/,
+    /\b(ready|readiness|what should i do|opportunities?|find|help)\b/,
+  ];
+
+  if (allowInfo && countPatternMatches(lower, infoPatterns) > 0) {
+    hints.push({
+      toolName: "get_reporting_readiness_info",
+      instruction:
+        "Use the get_reporting_readiness_info tool for grounded information about the reporting-readiness assessment.",
+    });
+  }
+
+  if (allowAssessment && countPatternMatches(lower, assessmentPatterns) > 0) {
+    hints.push({
+      toolName: "assess_reporting_readiness_question",
+      instruction:
+        "Use the assess_reporting_readiness_question tool to give read-only reporting-readiness guidance.",
+    });
+  }
+
+  return hints;
+}
+
 function normalizeStringForRouting(value) {
   return typeof value === "string" ? value.trim().toLowerCase() : "";
 }
 
-function enrichMessageForClaude(userMessage, tier = null) {
+function enrichMessageForClaude(userMessage, tier = null, surface = "default") {
   const lower = normalizeStringForRouting(userMessage);
   const hints = [];
-  const allowedTools = new Set(getToolDefinitionsForTier(tier || "guest").map((tool) => tool?.name).filter(Boolean));
+  const allowedTools = new Set(
+    getToolDefinitionsForKaiContext(tier || "guest", { surface }).map((tool) => tool?.name).filter(Boolean)
+  );
   const allow = (toolName) => allowedTools.has(toolName);
-  const discoveryHint = selectDiscoveryToolHint(userMessage, allowedTools);
+  const isReportingReadinessSurface = surface === "reporting_readiness";
+  const discoveryHint = isReportingReadinessSurface ? null : selectDiscoveryToolHint(userMessage, allowedTools);
+  const reportingReadinessHints = isReportingReadinessSurface
+    ? selectReportingReadinessToolHints(userMessage, allowedTools)
+    : [];
 
   if (discoveryHint) {
     hints.push(discoveryHint.instruction);
   }
+  reportingReadinessHints.forEach((hint) => hints.push(hint.instruction));
 
   if (allow("get_user_profile") && /\b(my profile|my stats|my rating|my score|about me|my account|my info|show me my)\b/.test(lower)) {
     hints.push('Use the get_user_profile tool to retrieve the user\'s full profile data.');
@@ -470,10 +526,10 @@ function enrichMessageForClaude(userMessage, tier = null) {
   if (allow("get_ic_balance") && /\b(my balance|my credits|my ic|impact credits|how many credits|how much.*earned)\b/.test(lower)) {
     hints.push('Use the get_ic_balance tool to retrieve the user\'s IC balance.');
   }
-  if (!discoveryHint && allow("search_events") && /\b(events?|opportunities|volunteer.*near|what.*coming up|find.*volunteer|search)\b/.test(lower)) {
+  if (!isReportingReadinessSurface && !discoveryHint && allow("search_events") && /\b(events?|opportunities|volunteer.*near|what.*coming up|find.*volunteer|search)\b/.test(lower)) {
     hints.push('Use the search_events tool to find events.');
   }
-  if (!discoveryHint && allow("get_matched_events") && /\b(recommend|recommendation|matched|match me|best events|best opportunities|events for me|personalized)\b/.test(lower)) {
+  if (!isReportingReadinessSurface && !discoveryHint && allow("get_matched_events") && /\b(recommend|recommendation|matched|match me|best events|best opportunities|events for me|personalized)\b/.test(lower)) {
     hints.push('Use the get_matched_events tool to rank the best-fit events for this user.');
   }
   if (allow("rsvp_to_event") && /\b(rsvp|sign me up|register me|sign up for)\b/.test(lower)) {
@@ -493,7 +549,7 @@ function enrichMessageForClaude(userMessage, tier = null) {
   return userMessage + '\n\n[System instruction: ' + hints.join(' ') + ']';
 }
 
-export async function handleKaiMessage({ userId, userMessage, conversationId, tier } = {}) {
+export async function handleKaiMessage({ userId, userMessage, conversationId, tier, surface = "default" } = {}) {
   let resolvedConversationId = conversationId || null;
 
   try {
@@ -543,15 +599,18 @@ export async function handleKaiMessage({ userId, userMessage, conversationId, ti
       resolvedConversationId = null;
     }
 
-    messages.push({ role: "user", content: enrichMessageForClaude(rawUserMessage, resolvedTier) });
+    messages.push({ role: "user", content: enrichMessageForClaude(rawUserMessage, resolvedTier, surface) });
     messages = groupConsecutiveRoles(messages);
 
+    const isReportingReadinessSurface = surface === "reporting_readiness";
     const isOrgRep = user?.org_rep === true;
-    let systemPrompt = isGuest
-      ? getGuestSystemPrompt()
-      : resolvedTier === "org_growth" || resolvedTier === "org_enterprise" || (resolvedTier === "agent" && isOrgRep)
-        ? getOrgSystemPrompt(resolvedTier, user, orgContext)
-        : getSystemPrompt(resolvedTier, user);
+    let systemPrompt = isReportingReadinessSurface
+      ? getReportingReadinessSystemPrompt(user)
+      : isGuest
+        ? getGuestSystemPrompt()
+        : resolvedTier === "org_growth" || resolvedTier === "org_enterprise" || (resolvedTier === "agent" && isOrgRep)
+          ? getOrgSystemPrompt(resolvedTier, user, orgContext)
+          : getSystemPrompt(resolvedTier, user);
     if (!isGuest && isNewConversation) {
       const previousSummary = await getMostRecentSummaryForUser(userId);
       if (previousSummary) {
@@ -560,7 +619,7 @@ export async function handleKaiMessage({ userId, userMessage, conversationId, ti
       }
     }
 
-    const toolDefinitions = getToolDefinitionsForTier(resolvedTier).filter(
+    const toolDefinitions = getToolDefinitionsForKaiContext(resolvedTier, { surface }).filter(
       (tool) => resolvedTier !== "guest" || GUEST_TOOL_ALLOWLIST.has(tool?.name)
     );
     const model = getModelForTier(resolvedTier);
@@ -681,6 +740,7 @@ export const __testables = {
   estimateMessageTokens,
   prepareMessagesForAnthropic,
   selectDiscoveryToolHint,
+  selectReportingReadinessToolHints,
   setAnthropicCreateForTests(fn) {
     anthropicCreateImpl = typeof fn === "function" ? fn : anthropicCreateImpl;
   },

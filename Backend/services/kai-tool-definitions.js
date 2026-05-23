@@ -14,6 +14,45 @@ export const TOOL_DEFINITIONS = {
       additionalProperties: false,
     },
   },
+  get_reporting_readiness_info: {
+    name: "get_reporting_readiness_info",
+    description:
+      "Get grounded information about Get Kinder's Impact Reporting & Data Readiness Assessment, including fit, materials to prepare, privacy expectations, and next steps.",
+    input_schema: {
+      type: "object",
+      properties: {
+        topic: {
+          type: "string",
+          enum: [
+            "overview",
+            "fit",
+            "materials",
+            "privacy",
+            "next_steps",
+            "data_readiness",
+          ],
+          default: "overview",
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  assess_reporting_readiness_question: {
+    name: "assess_reporting_readiness_question",
+    description:
+      "Give read-only guidance for a nonprofit's reporting-readiness question. Use this for questions about reporting burden, data gaps, outcomes, funder expectations, privacy, assessment fit, or materials to prepare.",
+    input_schema: {
+      type: "object",
+      properties: {
+        question: { type: "string" },
+        reporting_challenges: { type: "array", items: { type: "string" } },
+        data_locations: { type: "array", items: { type: "string" } },
+        upcoming_deadline: { type: "string" },
+      },
+      required: ["question"],
+      additionalProperties: false,
+    },
+  },
   search_events: {
     name: "search_events",
     description: "Search upcoming published volunteer events.",
@@ -252,4 +291,16 @@ export const TOOL_DEFINITIONS = {
 export function getToolDefinitionsForTier(tier) {
   const toolNames = getAvailableTools(tier);
   return toolNames.map((toolName) => TOOL_DEFINITIONS[toolName]).filter(Boolean);
+}
+
+export function getToolDefinitionsForKaiContext(tier, { surface = "default" } = {}) {
+  if (surface === "reporting_readiness") {
+    return [
+      "platform_faq",
+      "get_reporting_readiness_info",
+      "assess_reporting_readiness_question",
+    ].map((toolName) => TOOL_DEFINITIONS[toolName]).filter(Boolean);
+  }
+
+  return getToolDefinitionsForTier(tier);
 }

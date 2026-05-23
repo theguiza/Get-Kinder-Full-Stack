@@ -26,7 +26,12 @@ const GENERIC_ERROR_RESPONSE = {
   error: true,
   message: "Something went wrong. Please try again.",
 };
-const GUEST_TOOL_ALLOWLIST = new Set(["search_events"]);
+const GUEST_TOOL_ALLOWLIST = new Set([
+  "search_events",
+  "platform_faq",
+  "get_reporting_readiness_info",
+  "assess_reporting_readiness_question",
+]);
 const GENERIC_SEARCH_STOP_WORDS = new Set([
   "find",
   "search",
@@ -97,6 +102,87 @@ const PLATFORM_FAQ_KB = {
     title: "Verification",
     answer:
       "Attendance verification uses event check-in/check-out flows, including QR-supported workflows. Verified completion is what finalizes attendance and unlocks IC crediting.",
+  },
+  reporting_readiness: {
+    key: "reporting_readiness",
+    title: "Impact Reporting & Data Readiness Assessment",
+    answer:
+      "The assessment helps nonprofits understand where their impact evidence lives today, what is missing, and what would make funder reporting stronger. It is designed for organizations dealing with reporting burden, scattered data, outcome evidence gaps, or upcoming funder reporting pressure.",
+  },
+  funder_grade_reporting: {
+    key: "funder_grade_reporting",
+    title: "Funder-grade reporting",
+    answer:
+      "Funder-grade reporting connects activities, outcomes, data sources, and credible stories into a clear evidence base. The goal is to make reports easier to prepare and stronger than activity counts alone.",
+  },
+  data_readiness: {
+    key: "data_readiness",
+    title: "Data readiness",
+    answer:
+      "Useful impact data may live in spreadsheets, shared drives, paper forms, CRMs, case management systems, surveys, accounting systems, volunteer systems, grant reports, program calendars, staff notes, board reports, or annual reports. The assessment does not require perfect data.",
+  },
+  assessment_materials: {
+    key: "assessment_materials",
+    title: "Materials to prepare",
+    answer:
+      "Potential materials include past grant reports, funder reporting templates, program spreadsheets, survey summaries, anonymized stories or testimonials, program descriptions, data flow examples, board reports, and annual reports. Organizations can discuss privacy before sharing materials.",
+  },
+  privacy_and_data_handling: {
+    key: "privacy_and_data_handling",
+    title: "Privacy and data handling",
+    answer:
+      "The page states that selected nonprofits complete a data handling agreement before sharing assessment materials, that data stays with the organization, and that submitted data is not used to train AI models.",
+  },
+  design_partner_cohort: {
+    key: "design_partner_cohort",
+    title: "Design partner cohort",
+    answer:
+      "The reporting-readiness form is used to assess fit for a design partner cohort. If there is a strong fit, Get Kinder invites the organization to book a 30-minute Reporting Readiness Call before deciding whether to proceed.",
+  },
+};
+
+const REPORTING_READINESS_INFO = {
+  overview: {
+    title: "Impact Reporting & Data Readiness Assessment",
+    summary:
+      "A fit-assessment process for nonprofits that want stronger funder-ready impact evidence. It focuses on reporting pressure, data locations, outcome evidence, privacy needs, and what would make reporting stronger.",
+    next_step:
+      "Start by naming the reporting challenge, where the data currently lives, and whether a funder report, renewal, or major application is coming up in the next 3-6 months.",
+  },
+  fit: {
+    title: "Who may be a good fit",
+    summary:
+      "Organizations may be a fit if they spend too much time preparing funder reports, have impact data spread across many places, struggle to prove outcomes, need to connect stories to data, or are preparing for a grant renewal or larger funding ask.",
+    next_step:
+      "Identify the top reporting pressure and the evidence gap that makes current reports feel weaker than the work being done.",
+  },
+  materials: {
+    title: "Materials to prepare",
+    summary:
+      "Useful examples may include past grant reports, funder templates, program spreadsheets, survey summaries, anonymized stories, program descriptions, data flow examples, board reports, or annual reports.",
+    next_step:
+      "List what exists today, even if it is messy or incomplete, and separate sensitive materials from examples that can be shared safely.",
+  },
+  privacy: {
+    title: "Privacy expectations",
+    summary:
+      "The page says selected nonprofits complete a data handling agreement before sharing assessment materials. It also says data stays with the organization and is not used to train AI models.",
+    next_step:
+      "Before sharing anything, flag whether beneficiary, client, donor, staff, or volunteer data is sensitive and whether examples should be anonymized.",
+  },
+  next_steps: {
+    title: "What happens after applying",
+    summary:
+      "Get Kinder reviews the responses. If there is a strong fit, the organization is invited to book a 30-minute Reporting Readiness Call. If both teams proceed, a data handling agreement comes before any materials are reviewed.",
+    next_step:
+      "Use the application to describe the reporting pressure, current data reality, privacy concerns, and what would make the assessment valuable.",
+  },
+  data_readiness: {
+    title: "Data readiness signals",
+    summary:
+      "Data can be useful even when it is spread across spreadsheets, shared drives, paper forms, CRMs, case systems, surveys, accounting systems, volunteer systems, past reports, calendars, staff notes, or board materials.",
+    next_step:
+      "Map each key outcome or report claim to the source where evidence currently lives, then mark what is missing or hard to verify.",
   },
 };
 
@@ -303,6 +389,12 @@ async function handlePlatformFaq(toolInput = {}) {
       { key: "reliability", patterns: ["reliability", "no-show", "noshow", "penalty", "recover"] },
       { key: "ratings", patterns: ["rating", "stars", "review"] },
       { key: "verification", patterns: ["verification", "verify", "qr", "check-in", "check in", "check-out"] },
+      { key: "reporting_readiness", patterns: ["reporting readiness", "assessment", "readiness"] },
+      { key: "funder_grade_reporting", patterns: ["funder", "grant", "outcome", "reporting", "impact evidence"] },
+      { key: "data_readiness", patterns: ["data", "spreadsheet", "crm", "case management", "survey", "staff notes"] },
+      { key: "assessment_materials", patterns: ["materials", "prepare", "share", "grant report", "template"] },
+      { key: "privacy_and_data_handling", patterns: ["privacy", "sensitive", "data handling", "train ai", "anonym"] },
+      { key: "design_partner_cohort", patterns: ["design partner", "cohort", "selected", "selection", "next steps"] },
     ];
 
     const match = matchers.find((candidate) =>
@@ -317,7 +409,7 @@ async function handlePlatformFaq(toolInput = {}) {
           key: entry.key,
           title: entry.title,
         })),
-        message: "Topic not recognized. Try asking about IC, subscriptions, reliability, ratings, or verification.",
+        message: "Topic not recognized. Try asking about reporting readiness, data readiness, assessment materials, privacy, IC, subscriptions, reliability, ratings, or verification.",
       };
     }
 
@@ -328,6 +420,85 @@ async function handlePlatformFaq(toolInput = {}) {
     };
   } catch (error) {
     console.error("[kai-tool-executor] platform_faq error:", error);
+    return GENERIC_ERROR_RESPONSE;
+  }
+}
+
+async function handleGetReportingReadinessInfo(toolInput = {}) {
+  try {
+    const requestedTopic = normalizeString(toolInput.topic).toLowerCase();
+    const topic = Object.prototype.hasOwnProperty.call(REPORTING_READINESS_INFO, requestedTopic)
+      ? requestedTopic
+      : "overview";
+
+    return {
+      status: "success",
+      topic,
+      data: REPORTING_READINESS_INFO[topic],
+      available_topics: Object.keys(REPORTING_READINESS_INFO),
+    };
+  } catch (error) {
+    console.error("[kai-tool-executor] get_reporting_readiness_info error:", error);
+    return GENERIC_ERROR_RESPONSE;
+  }
+}
+
+async function handleAssessReportingReadinessQuestion(toolInput = {}) {
+  try {
+    const question = normalizeString(toolInput.question);
+    const lower = question.toLowerCase();
+    const reportingChallenges = normalizeStringArray(toolInput.reporting_challenges);
+    const dataLocations = normalizeStringArray(toolInput.data_locations);
+    const upcomingDeadline = normalizeString(toolInput.upcoming_deadline);
+
+    const signals = [];
+    if (/\b(funder|grant|renewal|application|deadline|report)\b/.test(lower) || upcomingDeadline) {
+      signals.push("reporting_pressure");
+    }
+    if (/\b(spreadsheets?|drive|sharepoint|dropbox|paper|crm|case management|surveys?|accounting|notes|annual reports?)\b/.test(lower) || dataLocations.length > 0) {
+      signals.push("scattered_data");
+    }
+    if (/\b(outcomes?|prove|evidence|activity|activities|story|stories|testimonials?)\b/.test(lower)) {
+      signals.push("outcome_evidence_gap");
+    }
+    if (/\b(private|privacy|sensitive|client|beneficiary|anonym|consent|data handling)\b/.test(lower)) {
+      signals.push("privacy_review_needed");
+    }
+    if (signals.length === 0) {
+      signals.push("general_readiness_question");
+    }
+
+    const guidanceBySignal = {
+      reporting_pressure:
+        "Clarify the next reporting moment first: funder report, renewal, larger funding ask, or internal board reporting. The deadline determines how practical the first readiness step should be.",
+      scattered_data:
+        "Map where the evidence lives before trying to improve it. Separate source systems, spreadsheets, stories, and staff-held knowledge so gaps are visible.",
+      outcome_evidence_gap:
+        "Look for the link between activities and outcomes. A strong report should show what changed, who experienced the change, and what evidence supports that claim.",
+      privacy_review_needed:
+        "Treat privacy as a readiness requirement. Identify sensitive beneficiary, client, donor, staff, or volunteer data before sharing materials, and plan for anonymized examples where possible.",
+      general_readiness_question:
+        "Start with three questions: what funders need to see, where the evidence lives today, and what is hardest to prove with confidence.",
+    };
+
+    return {
+      status: "success",
+      question,
+      signals,
+      provided_context: {
+        reporting_challenges: reportingChallenges,
+        data_locations: dataLocations,
+        upcoming_deadline: upcomingDeadline || null,
+      },
+      guidance: signals.map((signal) => ({
+        signal,
+        recommendation: guidanceBySignal[signal],
+      })),
+      next_question:
+        "What is the most urgent reporting pressure: an upcoming funder report, scattered data, weak outcome evidence, or privacy concerns?",
+    };
+  } catch (error) {
+    console.error("[kai-tool-executor] assess_reporting_readiness_question error:", error);
     return GENERIC_ERROR_RESPONSE;
   }
 }
@@ -1297,6 +1468,8 @@ async function handleGeneratePostEventReport(toolInput = {}, _userId, orgId) {
 
 const TOOL_HANDLERS = {
   platform_faq: handlePlatformFaq,
+  get_reporting_readiness_info: handleGetReportingReadinessInfo,
+  assess_reporting_readiness_question: handleAssessReportingReadinessQuestion,
   search_events: handleSearchEvents,
   get_event_details: handleGetEventDetails,
   get_user_profile: handleGetUserProfile,

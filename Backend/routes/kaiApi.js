@@ -15,6 +15,7 @@ const router = express.Router();
 const DAILY_LIMIT = 10;
 const RESET_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const usageByKey = new Map();
+const ALLOWED_KAI_SURFACES = new Set(["default", "reporting_readiness"]);
 
 const resetTimer = setInterval(() => {
   usageByKey.clear();
@@ -50,6 +51,12 @@ function validateIncomingMessage(message) {
   const trimmed = message.trim();
   if (!trimmed || trimmed.length > 2000) return { valid: false };
   return { valid: true, value: trimmed };
+}
+
+function normalizeKaiSurface(surface) {
+  if (typeof surface !== "string") return "default";
+  const normalized = surface.trim().toLowerCase();
+  return ALLOWED_KAI_SURFACES.has(normalized) ? normalized : "default";
 }
 
 async function resolveAuthenticatedKaiUser(req) {
@@ -91,6 +98,7 @@ router.post("/message", async (req, res) => {
     }
 
     const { message, conversationId } = req.body || {};
+    const surface = normalizeKaiSurface(req.body?.surface);
     const validation = validateIncomingMessage(message);
     if (!validation.valid) {
       return res.status(400).json({
@@ -108,6 +116,7 @@ router.post("/message", async (req, res) => {
       userMessage: validation.value,
       conversationId: conversationId || null,
       tier,
+      surface,
     });
 
     if (result?.error) {
@@ -135,6 +144,7 @@ router.post("/message", async (req, res) => {
 router.post("/guest", async (req, res) => {
   try {
     const { message } = req.body || {};
+    const surface = normalizeKaiSurface(req.body?.surface);
     const validation = validateIncomingMessage(message);
     if (!validation.valid) {
       return res.status(400).json({
@@ -173,6 +183,7 @@ router.post("/guest", async (req, res) => {
       userMessage: validation.value,
       conversationId: null,
       tier,
+      surface,
     });
 
     if (result?.error) {
