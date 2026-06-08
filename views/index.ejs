@@ -1973,7 +1973,7 @@
         var json = await res.json().catch(function() { return {}; });
         if (!res.ok) throw new Error(json.message || 'Submission failed. Please try again.');
         rrDone = true;
-        rrGo(4);
+        window.location.assign('/assessment-received');
       } catch (err) {
         resetSubmitButton();
         var prev = q('rrStep3').querySelector('.rrm-submit-error');
