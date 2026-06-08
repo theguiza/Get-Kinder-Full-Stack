@@ -100,20 +100,8 @@
 		</div>
     </div>
   <!-- Footer section needs a logo to the far left -->
-  <section id="contact">
-    <div class="container">
-      <footer class="row row-cols-1 row-cols-sm-2 row-cols-md-5 py-5 mt-5 border-top">
-        <div class="col mb-3">
-          <div class="col mb-3">
-                 <a href="#">
-                  <img src="./images/heart3D.png" alt="Get Kinder Heart" height="150">
-                 </a>
-              </div>
-            <p class="text-body-secondary" style="color: #455a7c;">© Get Kindr Foundation </p>
-        </div>
-        <div class="col mb-3">
-        </div>
-  </section>
+  <%- include("partials/site-footer") %>
+
   <script>
   // Clear form inputs after successful registration
   if (window.location.search.includes("success=1")) {

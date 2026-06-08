@@ -45,8 +45,8 @@
     width: auto !important;
   }
   #footer .footer-heart {
-    height: 120px;
-    max-height: 120px;
+    height: 170px;
+    max-height: 170px;
     width: auto !important;
   }
 
@@ -1023,38 +1023,8 @@
   </div>
 
   <!-- Footer -->
-  <section id="footer" class="gradient-background mt-5">
-    <div class="container">
-      <footer class="row align-items-center py-5 border-top text-body-secondary">
-        <!-- Logo: centered on xs, left on md+ -->
-        <div class="col-12 col-md-4 mb-4 mb-md-0 text-center text-md-start">
-          <a href="#"><img src="./images/heart3D.png" alt="Get Kinder Heart" class="footer-heart"></a>
-          <p class="mt-2">&copy;
-            <a href="https://getkindr.com/" target="_blank" rel="noopener noreferrer" class="text-body-secondary text-decoration-underline">Get Kindr Foundation</a>
-          </p>
-        </div>
-        <!-- Social Icons -->
-        <div class="col-12 col-md-4 mb-4 mb-md-0 d-flex justify-content-center">
-          <a class="btn btn-floating m-1 text-white" style="background-color:#3b5998;" href="https://www.facebook.com/profile.php?id=61576860759313" role="button" target="_blank" rel="noopener noreferrer"><i class="fab fa-facebook-f"></i></a>
-          <a class="btn btn-floating m-1 text-white" style="background-color:#ac2bac;" href="https://www.instagram.com/getkinder/" role="button" target="_blank" rel="noopener noreferrer"><i class="fab fa-instagram"></i></a>
-          <a class="btn btn-floating m-1 text-white" style="background-color:#0082ca;" href="https://www.linkedin.com/company/getkindrfoundation/" role="button" target="_blank" rel="noopener noreferrer"><i class="fab fa-linkedin-in"></i></a>
-          <a class="btn btn-floating m-1 text-white" style="background-color:#c8232c;" href="https://ca.pinterest.com/getkindr/" role="button" target="_blank" rel="noopener noreferrer"><i class="fab fa-pinterest"></i></a>
-        </div>
-        <!-- More About -->
-        <div class="col-12 col-md-4 mb-4 mb-md-0 text-center text-md-end">
-          <h5>More About Get Kinder</h5>
-          <ul class="nav flex-column">
-            <li class="nav-item mb-2"><a href="/home" class="nav-link p-0 text-body-secondary">Home</a></li>
-            <li class="nav-item mb-2"><a href="about" class="nav-link p-0 text-body-secondary">About</a></li>
-            <li class="nav-item mb-2"><a href="contact" class="nav-link p-0 text-body-secondary">Contact</a></li>
-            <li class="nav-item mb-2"><a href="privacy" class="nav-link p-0 text-body-secondary">Privacy</a></li>
-            <li class="nav-item mb-2"><a href="terms" class="nav-link p-0 text-body-secondary">Terms</a></li>
-            <li class="nav-item mb-2"><a href="accessibility" class="nav-link p-0 text-body-secondary">Accessibility</a></li>
-          </ul>
-        </div>
-      </footer>
-    </div>
-  </section>
+  <%- include("partials/site-footer") %>
+
 
   <!-- Scripts -->
   <script>
