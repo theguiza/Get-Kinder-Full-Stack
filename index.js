@@ -3302,8 +3302,11 @@ app.get(["/how-it-works", "/how-it-works/:section"], (req, res) => {
 
 const HOME_SECTIONS = new Set(["assessment", "how", "trust", "faq", "book"]);
 const HOME_PATH_SECTIONS = {
+  "/home/assessment-offer": "assessment",
   "/home/assessment": "assessment",
+  "/home/how-it-works": "how",
   "/home/how": "how",
+  "/home/data-safety": "trust",
   "/home/trust": "trust",
   "/home/faq": "faq",
   "/home/book": "book",
