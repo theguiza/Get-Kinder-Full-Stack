@@ -3771,6 +3771,12 @@ app.post("/api/onboarding/complete", async (req, res) => {
 app.post("/api/reporting-readiness/apply", async (req, res) => {
   try {
     const d = req.body;
+    const referralSourceRequiredFor = new Set([
+      "Referral from another nonprofit",
+      "Foundation or funder recommendation",
+      "Partner organization",
+      "Other",
+    ]);
 
     // Minimal server-side validation of required fields
     const required = [
@@ -3778,6 +3784,7 @@ app.post("/api/reporting-readiness/apply", async (req, res) => {
       "budget_range", "program_area", "funding_status",
       "upcoming_deadline", "funder_understanding",
       "sensitive_data", "anonymized_learnings", "assessment_value",
+      "how_heard_about",
     ];
     for (const field of required) {
       if (!d[field] || String(d[field]).trim() === "") {
@@ -3796,6 +3803,12 @@ app.post("/api/reporting-readiness/apply", async (req, res) => {
     if (!Array.isArray(d.shareable_materials) || d.shareable_materials.length === 0) {
       return res.status(422).json({ ok: false, message: "Please select at least one shareable material." });
     }
+    if (referralSourceRequiredFor.has(String(d.how_heard_about || "").trim()) && !String(d.referral_source || "").trim()) {
+      return res.status(422).json({ ok: false, message: "Please share who referred you to Get Kinder." });
+    }
+    if (String(d.application_prompt || "").trim() === "Other" && !String(d.application_prompt_other || "").trim()) {
+      return res.status(422).json({ ok: false, message: "Please specify what prompted you to apply." });
+    }
 
     const { rows: [inserted] } = await pool.query(
       `INSERT INTO public.reporting_readiness_applications (
@@ -3805,8 +3818,9 @@ app.post("/api/reporting-readiness/apply", async (req, res) => {
          upcoming_deadline, confidence_rating, funder_understanding,
          data_locations, data_locations_other, shareable_materials,
          sensitive_data, anonymized_learnings, assessment_value, additional_notes,
+         how_heard_about, referral_source, application_prompt, application_prompt_other,
          consent
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)
        RETURNING id`,
       [
         d.org_name?.trim(),
@@ -3833,6 +3847,10 @@ app.post("/api/reporting-readiness/apply", async (req, res) => {
         d.anonymized_learnings,
         d.assessment_value?.trim(),
         d.additional_notes?.trim() || null,
+        d.how_heard_about?.trim(),
+        d.referral_source?.trim() || null,
+        d.application_prompt?.trim() || null,
+        d.application_prompt_other?.trim() || null,
         !!d.consent,
       ]
     );

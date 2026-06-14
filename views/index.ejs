@@ -1381,6 +1381,51 @@
               <textarea class="rrm-textarea" id="rrNotes" rows="3" placeholder="Optional"></textarea>
             </div>
 
+            <div class="rrm-field">
+              <label class="rrm-label" for="rrHowHeard">How did you first hear about Get Kinder? <span class="rrm-req" aria-label="required">*</span></label>
+              <select class="rrm-select" id="rrHowHeard">
+                <option value="" disabled selected>Select one</option>
+                <option>Google Search</option>
+                <option>Referral from another nonprofit</option>
+                <option>Foundation or funder recommendation</option>
+                <option>LinkedIn</option>
+                <option>Social media</option>
+                <option>Webinar or event</option>
+                <option>Newsletter or email</option>
+                <option>Partner organization</option>
+                <option>Existing Get Kinder contact</option>
+                <option>Other</option>
+              </select>
+              <div class="rrm-err" id="rrHowHeardErr">Please select how you heard about Get Kinder.</div>
+            </div>
+
+            <div class="rrm-field" id="rrReferralSourceWrap" style="display:none;">
+              <label class="rrm-label" for="rrReferralSource">Who referred you to Get Kinder? <span class="rrm-req" aria-label="required">*</span></label>
+              <input class="rrm-input" type="text" id="rrReferralSource" placeholder="Name or organization">
+              <div class="rrm-err" id="rrReferralSourceErr">Please share who referred you.</div>
+            </div>
+
+            <div class="rrm-field">
+              <label class="rrm-label" for="rrPromptedApply">What prompted you to apply today?</label>
+              <select class="rrm-select" id="rrPromptedApply">
+                <option value="" selected>Optional</option>
+                <option>Upcoming grant report</option>
+                <option>Funder reporting requirements</option>
+                <option>Grant renewal application</option>
+                <option>Board reporting needs</option>
+                <option>Impact measurement challenges</option>
+                <option>Data management challenges</option>
+                <option>Exploring options</option>
+                <option>Other</option>
+              </select>
+            </div>
+
+            <div class="rrm-field" id="rrPromptedOtherWrap" style="display:none;">
+              <label class="rrm-label" for="rrPromptedOther">Please specify what prompted you to apply <span class="rrm-req" aria-label="required">*</span></label>
+              <input class="rrm-input" type="text" id="rrPromptedOther" placeholder="What prompted you to apply?">
+              <div class="rrm-err" id="rrPromptedOtherErr">Please specify what prompted you to apply.</div>
+            </div>
+
             <!-- Consent -->
             <div class="rrm-field">
               <label class="rrm-consent-wrap" id="rrConsentWrap" for="rrConsent">
@@ -1672,6 +1717,14 @@
     function showErr(id) { var e = q(id); if (e) e.classList.add('visible'); }
     function hideErr(id) { var e = q(id); if (e) e.classList.remove('visible'); }
     function markInvalid(id, isInvalid) { var el = q(id); if (el) el.classList.toggle('is-invalid', isInvalid); }
+    function needsReferralSource(value) {
+      return [
+        'Referral from another nonprofit',
+        'Foundation or funder recommendation',
+        'Partner organization',
+        'Other'
+      ].indexOf(value) !== -1;
+    }
     function resetSubmitButton() {
       rrSubmitting = false;
       var btn = q('rrBtnSubmit');
@@ -1751,6 +1804,24 @@
         rrDirty = true;
       });
 
+      /* Conditional: Referral source */
+      q('rrHowHeard').addEventListener('change', function() {
+        var show = needsReferralSource(this.value);
+        q('rrReferralSourceWrap').style.display = show ? 'block' : 'none';
+        if (!show) { q('rrReferralSource').value = ''; markInvalid('rrReferralSource', false); hideErr('rrReferralSourceErr'); }
+        hideErr('rrHowHeardErr');
+        markInvalid('rrHowHeard', false);
+        rrDirty = true;
+      });
+
+      /* Conditional: Prompted other */
+      q('rrPromptedApply').addEventListener('change', function() {
+        var show = this.value === 'Other';
+        q('rrPromptedOtherWrap').style.display = show ? 'block' : 'none';
+        if (!show) { q('rrPromptedOther').value = ''; markInvalid('rrPromptedOther', false); hideErr('rrPromptedOtherErr'); }
+        rrDirty = true;
+      });
+
       /* Scale buttons */
       document.querySelectorAll('.rrm-scale-btn').forEach(function(btn) {
         btn.addEventListener('click', function() {
@@ -1802,7 +1873,7 @@
       document.querySelectorAll('.rrm-err').forEach(function(e) { e.classList.remove('visible'); });
       document.querySelectorAll('.rrm-input,.rrm-select,.rrm-textarea').forEach(function(e) { e.classList.remove('is-invalid'); });
       var cw = q('rrConsentWrap'); if (cw) cw.classList.remove('is-invalid');
-      ['rrRoleOtherWrap','rrProgAreaOtherWrap','rrChalOtherWrap','rrDataLocOtherWrap'].forEach(function(id) {
+      ['rrRoleOtherWrap','rrProgAreaOtherWrap','rrChalOtherWrap','rrDataLocOtherWrap','rrReferralSourceWrap','rrPromptedOtherWrap'].forEach(function(id) {
         var el = q(id); if (el) el.style.display = 'none';
       });
       var se = q('rrStep3') && q('rrStep3').querySelector('.rrm-submit-error');
@@ -1918,6 +1989,9 @@
         ok = vReq('rrSensitive','rrSensitiveErr') & ok;
         ok = vReq('rrAnonLearnings','rrAnonLearningsErr') & ok;
         ok = vReq('rrAssessValue','rrAssessValueErr') & ok;
+        ok = vReq('rrHowHeard','rrHowHeardErr') & ok;
+        if (needsReferralSource(v('rrHowHeard'))) ok = vReq('rrReferralSource','rrReferralSourceErr') & ok;
+        if (v('rrPromptedApply') === 'Other') ok = vReq('rrPromptedOther','rrPromptedOtherErr') & ok;
         var consent = q('rrConsent').checked;
         q('rrConsentWrap').classList.toggle('is-invalid', !consent);
         consent ? hideErr('rrConsentErr') : showErr('rrConsentErr');
@@ -1961,6 +2035,8 @@
         shareable_materials: checked('#rrShareGroup input[type=checkbox]'),
         sensitive_data: v('rrSensitive'), anonymized_learnings: v('rrAnonLearnings'),
         assessment_value: v('rrAssessValue'), additional_notes: v('rrNotes'),
+        how_heard_about: v('rrHowHeard'), referral_source: v('rrReferralSource'),
+        application_prompt: v('rrPromptedApply'), application_prompt_other: v('rrPromptedOther'),
         consent: q('rrConsent').checked
       };
 

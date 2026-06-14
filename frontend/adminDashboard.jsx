@@ -3401,6 +3401,7 @@ export default function AdminDashboard() {
                       ["Confidence", rrDetailModal.data.confidence_rating ? `${rrDetailModal.data.confidence_rating}/5` : "—"],
                       ["Sensitive Data", rrDetailModal.data.sensitive_data],
                       ["Anon. Learnings", rrDetailModal.data.anonymized_learnings],
+                      ["Heard About", rrDetailModal.data.how_heard_about],
                     ].map(([label, val]) => (
                       <div key={label} className="col-6 col-md-4">
                         <div className="text-muted">{label}</div>
@@ -3568,6 +3569,20 @@ export default function AdminDashboard() {
                             <div className="mt-1" style={{ whiteSpace: "pre-wrap" }}>{rrDetailModal.data.additional_notes}</div>
                           </div>
                         )}
+                        <div className="col-12 col-md-6">
+                          <div className="text-muted">How they first heard about Get Kinder</div>
+                          <div className="fw-semibold">{rrDetailModal.data.how_heard_about || "—"}</div>
+                          {rrDetailModal.data.referral_source && (
+                            <div className="mt-1">Referred by: {rrDetailModal.data.referral_source}</div>
+                          )}
+                        </div>
+                        <div className="col-12 col-md-6">
+                          <div className="text-muted">What prompted them to apply today</div>
+                          <div className="fw-semibold">{rrDetailModal.data.application_prompt || "—"}</div>
+                          {rrDetailModal.data.application_prompt_other && (
+                            <div className="mt-1">Other: {rrDetailModal.data.application_prompt_other}</div>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>

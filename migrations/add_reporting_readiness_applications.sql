@@ -31,6 +31,10 @@ CREATE TABLE IF NOT EXISTS public.reporting_readiness_applications (
   anonymized_learnings      TEXT NOT NULL,
   assessment_value          TEXT NOT NULL,
   additional_notes          TEXT,
+  how_heard_about           TEXT NOT NULL,
+  referral_source           TEXT,
+  application_prompt        TEXT,
+  application_prompt_other  TEXT,
   consent                   BOOLEAN NOT NULL DEFAULT FALSE,
 
   -- Internal review fields
