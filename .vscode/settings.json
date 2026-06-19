@@ -3,6 +3,7 @@
         "mobile/android/**"
     ],
     "java.jdt.ls.androidSupport.enabled": false,
+    "html.validate.scripts": false,
     "livePreview.defaultPreviewPath": "/login.html",
     "terminal.integrated.cwd": "${workspaceFolder}",
     "cSpell.words": [
@@ -12,7 +13,9 @@
         "Chal",
         "checkin",
         "checkins",
+        "Cpolyline",
         "creds",
+        "Csvg",
         "fafafa",
         "filterbar",
         "firstname",
