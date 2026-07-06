@@ -58,6 +58,7 @@ test("create batch writes metadata-only row with stable Pass 2 markers", async (
   assert.equal(result.ok, true);
   assert.equal(result.data.metadata_only, true);
   assert.equal(inserted.batchMetadata.p0_pass, "pass2_admin_metadata_intake_verification");
+  assert.equal(inserted.batchMetadata.gate_plan, "KAI_MVP_Sprint2_P0_Pass2_Production_Synthetic_Metadata_Write_Gate_Plan_v0.1.1");
   assert.equal(inserted.batchMetadata.raw_upload_enabled, false);
   assert.equal(inserted.batchMetadata.signed_url_enabled, false);
   assert.equal(inserted.batchMetadata.parser_worker_enabled, false);
@@ -265,6 +266,7 @@ test("file reservation writes no raw object and uses skipped policy/malware stat
   assert.equal(inserted.filePolicyStatus, "skipped");
   assert.equal(inserted.malwareScanStatus, "skipped");
   assert.equal(inserted.fileMetadata.p0_pass, "pass2_admin_metadata_intake_verification");
+  assert.equal(inserted.fileMetadata.gate_plan, "KAI_MVP_Sprint2_P0_Pass2_Production_Synthetic_Metadata_Write_Gate_Plan_v0.1.1");
   assert.equal(inserted.fileMetadata.checksum_scope, "metadata_reservation_no_raw_file");
   assert.match(inserted.storageUri, /^reservation:\/\/kai\/gcs\/org\//);
 });

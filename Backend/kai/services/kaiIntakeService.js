@@ -20,6 +20,7 @@ import {
 import { recordBlockedAttempt } from "./kaiAuditService.js";
 
 const PASS2_MARKER = "pass2_admin_metadata_intake_verification";
+const PASS2_GATE_PLAN = "KAI_MVP_Sprint2_P0_Pass2_Production_Synthetic_Metadata_Write_Gate_Plan_v0.1.1";
 const ALLOWED_METADATA_ONLY_MIME_TYPES = new Set(["text/csv", "application/csv", "text/plain", "application/json"]);
 
 function stableJson(value) {
@@ -106,6 +107,7 @@ function normalizeBatchMetadata(payload = {}) {
   return {
     ...(payload.batch_metadata && typeof payload.batch_metadata === "object" ? payload.batch_metadata : {}),
     p0_pass: PASS2_MARKER,
+    gate_plan: PASS2_GATE_PLAN,
     synthetic_only: true,
     raw_upload_enabled: false,
     signed_url_enabled: false,
@@ -227,6 +229,7 @@ function normalizeReservationMetadata({ payload, idempotencyKey, reservationPayl
     ...(payload.reservation_metadata && typeof payload.reservation_metadata === "object" ? payload.reservation_metadata : {}),
     ...(payload.file_metadata && typeof payload.file_metadata === "object" ? payload.file_metadata : {}),
     p0_pass: PASS2_MARKER,
+    gate_plan: PASS2_GATE_PLAN,
     synthetic_only: true,
     raw_upload_enabled: false,
     signed_url_enabled: false,
@@ -287,6 +290,7 @@ export async function checkAdminAccess(input = {}, dependencies = {}) {
 
   const auth = validateActorCanPerformOperation(actorContext, "create_intake_batch", organizationId);
   if (!auth.ok) return buildKaiError(auth.error_code, { blockers: auth.blockers });
+  const globalWriteRolePresent = (actorContext.kaiRoles || []).some((role) => role === "gk_admin" || role === "gk_operator");
 
   if (!engagementId) {
     return await toBlockerResponse([missingEngagementIdBlocker()], actorContext, "check_admin_access", {
@@ -319,6 +323,8 @@ export async function checkAdminAccess(input = {}, dependencies = {}) {
       organization_id: organizationId,
       engagement_id: engagementId,
       membership_active: true,
+      global_write_role_present: globalWriteRolePresent,
+      matched_write_role_family: globalWriteRolePresent ? "gk_admin_or_operator" : null,
       authorized_operations: ["create_intake_batch", "reserve_intake_file_metadata"],
     },
     warnings: [],

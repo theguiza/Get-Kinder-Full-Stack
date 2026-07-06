@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const PASS2_MARKER = "pass2_admin_metadata_intake_verification";
+const PASS2_GATE_PLAN = "KAI_MVP_Sprint2_P0_Pass2_Production_Synthetic_Metadata_Write_Gate_Plan_v0.1.1";
 const BASE_URL = process.env.KAI_PASS2_BASE_URL || "";
 const AUTH_COOKIE = process.env.KAI_PASS2_AUTH_COOKIE || "";
 const BEARER_TOKEN = process.env.KAI_PASS2_BEARER_TOKEN || "";
@@ -9,6 +10,12 @@ const ENGAGEMENT_ID = process.env.KAI_PASS2_ENGAGEMENT_ID || "2e426ea1-2be3-4e48
 const DB_TARGET_CLASS = process.env.KAI_PASS2_DB_TARGET_CLASS || "unknown";
 const PRODUCTION_GATE_ACCEPTED = String(process.env.KAI_PASS2_PRODUCTION_SYNTHETIC_WRITE_GATE_ACCEPTED || "false") === "true";
 const RUN_WRITE_PATH = String(process.env.KAI_PASS2_RUN_WRITE_PATH || "false") === "true";
+const PRODUCTION_GATE_ROUTES = Object.freeze([
+  "GET /api/kai/sprint2/intake/status",
+  "GET /api/kai/sprint2/intake/admin/access-check",
+  "POST /api/kai/sprint2/intake/admin/batches",
+  "POST /api/kai/sprint2/intake/admin/batches/:intakeBatchId/file-reservations",
+]);
 
 const rows = [];
 
@@ -34,7 +41,23 @@ function headers() {
   return result;
 }
 
+function routeKey(path, method = "GET") {
+  const routePath = path.split("?")[0].replace(
+    /^\/api\/kai\/sprint2\/intake\/admin\/batches\/[^/]+\/file-reservations$/,
+    "/api/kai/sprint2/intake/admin/batches/:intakeBatchId/file-reservations",
+  );
+  return `${method.toUpperCase()} ${routePath}`;
+}
+
+function assertAllowedProductionGateRoute(path, options = {}) {
+  const key = routeKey(path, options.method || "GET");
+  if (!PRODUCTION_GATE_ROUTES.includes(key)) {
+    throw new Error(`Verifier route is outside the production gate allowlist: ${key}`);
+  }
+}
+
 async function request(path, options = {}) {
+  assertAllowedProductionGateRoute(path, options);
   const url = `${BASE_URL.replace(/\/$/, "")}${path}`;
   const response = await fetch(url, {
     ...options,
@@ -54,6 +77,7 @@ async function request(path, options = {}) {
 }
 
 async function unauthenticatedRequest(path, options = {}) {
+  assertAllowedProductionGateRoute(path, options);
   const url = `${BASE_URL.replace(/\/$/, "")}${path}`;
   const response = await fetch(url, {
     ...options,
@@ -124,6 +148,22 @@ async function run() {
     return;
   }
 
+  const authMethodCount = Number(Boolean(AUTH_COOKIE)) + Number(Boolean(BEARER_TOKEN));
+  if (authMethodCount !== 1) {
+    add(
+      "API_AUTH_EXACTLY_ONE_METHOD_CONFIGURED",
+      "KAI_PASS2_AUTH_COOKIE,KAI_PASS2_BEARER_TOKEN",
+      "FAIL",
+      authMethodCount === 0
+        ? "Exactly one auth method is required; none were configured."
+        : "Exactly one auth method is required; both cookie and bearer token were configured.",
+    );
+    printRows();
+    process.exitCode = 1;
+    return;
+  }
+  add("API_AUTH_EXACTLY_ONE_METHOD_CONFIGURED", "auth_method", "PASS", "Exactly one auth method is configured.");
+
   const status = await request("/api/kai/sprint2/intake/status");
   if (status.response.status === 403 && status.body?.error?.code === "feature_disabled") {
     add("API_FEATURE_OFF_STATUS_RETURNS_DISABLED", "/api/kai/sprint2/intake/status", "PASS", "Feature flag OFF returned feature_disabled.");
@@ -167,6 +207,16 @@ async function run() {
     access.response.ok && access.body?.data?.membership_active === true ? "PASS" : "FAIL",
     `HTTP ${access.response.status}`,
   );
+  add(
+    "API_ACCESS_CHECK_CONFIRMS_GLOBAL_GK_WRITE_ROLE",
+    "/api/kai/sprint2/intake/admin/access-check",
+    access.response.ok &&
+      access.body?.data?.global_write_role_present === true &&
+      access.body?.data?.matched_write_role_family === "gk_admin_or_operator"
+      ? "PASS"
+      : "FAIL",
+    `HTTP ${access.response.status}`,
+  );
 
   const unauth = await unauthenticatedRequest("/api/kai/sprint2/intake/admin/batches", {
     method: "POST",
@@ -183,6 +233,12 @@ async function run() {
     unauth.response.status === 401 ? "PASS" : "FAIL",
     `HTTP ${unauth.response.status}`,
   );
+  add(
+    "API_AUTH_FAILURE_BATCH_NO_ROW_PROOF_IDEMPOTENCY_KEY_DECLARED",
+    "kai-p0-pass2-unauth",
+    "INFO",
+    "SQL verifier must prove this unauthenticated/auth-failure idempotency key created zero kai.intake_batches rows.",
+  );
 
   const batch = await request("/api/kai/sprint2/intake/admin/batches", {
     method: "POST",
@@ -195,6 +251,7 @@ async function run() {
       notes: "P0 Pass 2 metadata-only admin route verification. No raw files. No parser. No source promotion.",
       batch_metadata: {
         p0_pass: PASS2_MARKER,
+        gate_plan: PASS2_GATE_PLAN,
         synthetic_only: true,
         raw_upload_enabled: false,
         signed_url_enabled: false,
@@ -221,6 +278,7 @@ async function run() {
       notes: "P0 Pass 2 metadata-only admin route verification. No raw files. No parser. No source promotion.",
       batch_metadata: {
         p0_pass: PASS2_MARKER,
+        gate_plan: PASS2_GATE_PLAN,
         synthetic_only: true,
         raw_upload_enabled: false,
         signed_url_enabled: false,
@@ -244,7 +302,7 @@ async function run() {
       batch_code: "NCWS-P0-PASS2-METADATA-TENANT-MISMATCH",
       idempotency_key: "kai-p0-pass2-tenant-mismatch",
       intake_method: "manual_upload",
-      batch_metadata: { p0_pass: PASS2_MARKER },
+      batch_metadata: { p0_pass: PASS2_MARKER, gate_plan: PASS2_GATE_PLAN },
     }),
   });
   add(
@@ -252,6 +310,12 @@ async function run() {
     "/api/kai/sprint2/intake/admin/batches",
     tenantMismatch.response.status === 422 && tenantMismatch.body?.ok === false ? "PASS" : "FAIL",
     `HTTP ${tenantMismatch.response.status}`,
+  );
+  add(
+    "API_TENANT_MISMATCH_BATCH_NO_ROW_PROOF_IDEMPOTENCY_KEY_DECLARED",
+    "kai-p0-pass2-tenant-mismatch",
+    "INFO",
+    "SQL verifier must prove this tenant-mismatch idempotency key created zero kai.intake_batches rows.",
   );
 
   const intakeBatchId = batch.body?.data?.intake_batch_id;
@@ -268,6 +332,7 @@ async function run() {
         file_size_bytes: 0,
         reservation_metadata: {
           p0_pass: PASS2_MARKER,
+          gate_plan: PASS2_GATE_PLAN,
           synthetic_only: true,
           raw_upload_enabled: false,
           signed_url_enabled: false,
@@ -299,7 +364,7 @@ async function run() {
         mime_type: "text/csv",
         file_extension: ".csv",
         file_size_bytes: 0,
-        reservation_metadata: { p0_pass: PASS2_MARKER },
+        reservation_metadata: { p0_pass: PASS2_MARKER, gate_plan: PASS2_GATE_PLAN },
       }),
     });
     const unsafeBlockers = Array.isArray(unsafe.body?.blockers) ? unsafe.body.blockers : [];
@@ -308,6 +373,12 @@ async function run() {
       "/api/kai/sprint2/intake/admin/batches/:intakeBatchId/file-reservations",
       unsafe.response.status === 422 && unsafe.body?.ok === false ? "PASS" : "FAIL",
       `HTTP ${unsafe.response.status}`,
+    );
+    add(
+      "API_UNSAFE_FILE_NO_ROW_PROOF_IDEMPOTENCY_KEY_DECLARED",
+      "kai-p0-pass2-ncws-file-reservation-unsafe",
+      "INFO",
+      "SQL verifier must prove this unsafe file idempotency key created zero kai.intake_files rows.",
     );
     add(
       "API_EXPECTED_BLOCKER_SHAPE_OK_FALSE",
@@ -319,23 +390,15 @@ async function run() {
     add("API_FILE_RESERVATION_RETURNS_OK_NO_UPLOAD_URL", "file_reservation", "FAIL", "Batch creation did not return intake_batch_id.");
     add("API_FILE_RESERVATION_NO_SIGNED_URL_IN_RESPONSE", "file_reservation", "FAIL", "Batch creation did not return intake_batch_id.");
     add("API_FILE_RESERVATION_UNSAFE_FILENAME_RETURNS_422", "file_reservation", "FAIL", "Batch creation did not return intake_batch_id.");
+    add("API_UNSAFE_FILE_NO_ROW_PROOF_IDEMPOTENCY_KEY_DECLARED", "file_reservation", "FAIL", "Batch creation did not return intake_batch_id.");
     add("API_EXPECTED_BLOCKER_SHAPE_OK_FALSE", "validator_blocker_response", "FAIL", "Batch creation did not return intake_batch_id.");
   }
 
-  const uploadUrl = await request("/api/kai/sprint2/intake/upload-url", { method: "POST", body: JSON.stringify({}) });
   add(
-    "API_UPLOAD_URL_ROUTE_DISABLED_OR_NOT_PRESENT",
-    "/api/kai/sprint2/intake/upload-url",
-    [404, 405, 422, 503].includes(uploadUrl.response.status) && !uploadUrl.response.ok ? "PASS" : "FAIL",
-    `HTTP ${uploadUrl.response.status}`,
-  );
-
-  const sourcePromotion = await request("/api/kai/sprint2/intake/source-promotion", { method: "POST", body: JSON.stringify({}) });
-  add(
-    "API_SOURCE_PROMOTION_ROUTE_DISABLED_OR_NOT_PRESENT",
-    "/api/kai/sprint2/intake/source-promotion",
-    [404, 405, 422].includes(sourcePromotion.response.status) && !sourcePromotion.response.ok ? "PASS" : "FAIL",
-    `HTTP ${sourcePromotion.response.status}`,
+    "API_PRODUCTION_GATE_ROUTE_ALLOWLIST_ENFORCED",
+    "api_verifier_routes",
+    "PASS",
+    PRODUCTION_GATE_ROUTES.join(", "),
   );
 
   printRows();

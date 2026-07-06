@@ -33,6 +33,8 @@ test("admin access check maps actor and confirms NCWS membership without writes"
   assert.equal(result.ok, true);
   assert.equal(result.data.actor_mapped, true);
   assert.equal(result.data.membership_active, true);
+  assert.equal(result.data.global_write_role_present, true);
+  assert.equal(result.data.matched_write_role_family, "gk_admin_or_operator");
   assert.deepEqual(result.data.authorized_operations, ["create_intake_batch", "reserve_intake_file_metadata"]);
   assert.equal(wrote, false);
 });

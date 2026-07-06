@@ -3,7 +3,11 @@ WITH expected AS (
     'NCWS-P0-PASS2-METADATA-001'::text AS batch_code,
     'kai-p0-pass2-ncws-batch-001'::text AS batch_idempotency_key,
     'kai-p0-pass2-ncws-file-reservation-001'::text AS file_idempotency_key,
+    'kai-p0-pass2-unauth'::text AS unauth_batch_idempotency_key,
+    'kai-p0-pass2-tenant-mismatch'::text AS tenant_mismatch_batch_idempotency_key,
+    'kai-p0-pass2-ncws-file-reservation-unsafe'::text AS unsafe_file_idempotency_key,
     'pass2_admin_metadata_intake_verification'::text AS p0_pass,
+    'KAI_MVP_Sprint2_P0_Pass2_Production_Synthetic_Metadata_Write_Gate_Plan_v0.1.1'::text AS gate_plan,
     'a5d17c5a-c55f-43af-9b21-fe63aafe733f'::uuid AS organization_id,
     '2e426ea1-2be3-4e48-b80f-9783ddbacda0'::uuid AS engagement_id
 ),
@@ -13,11 +17,13 @@ pass2_batches AS (
   JOIN expected e ON b.batch_code = e.batch_code
     OR b.idempotency_key = e.batch_idempotency_key
     OR b.batch_metadata->>'p0_pass' = e.p0_pass
+    OR b.batch_metadata->>'gate_plan' = e.gate_plan
 ),
 pass2_files AS (
   SELECT f.*
   FROM kai.intake_files f
   JOIN expected e ON f.file_metadata->>'p0_pass' = e.p0_pass
+    OR f.file_metadata->>'gate_plan' = e.gate_plan
     OR f.file_metadata->>'idempotency_key' = e.file_idempotency_key
 ),
 pass2_audit AS (
@@ -30,6 +36,30 @@ SELECT 'CHECK' AS result_type,
        'kai.intake_batches' AS object_name,
        CASE WHEN (SELECT count(*) FROM pass2_batches) = 1 THEN 'PASS' ELSE 'FAIL' END AS status,
        'Pass 2 batch rows matched by batch_code, idempotency_key, or batch_metadata.p0_pass: ' || (SELECT count(*) FROM pass2_batches) AS detail
+UNION ALL
+SELECT 'CHECK',
+       'PASS2_AUTH_FAILURE_BATCH_ROWS_ZERO',
+       'kai.intake_batches',
+       CASE WHEN NOT EXISTS (
+         SELECT 1 FROM kai.intake_batches b JOIN expected e ON b.idempotency_key = e.unauth_batch_idempotency_key
+       ) THEN 'PASS' ELSE 'FAIL' END,
+       'Unauthenticated/auth-failure batch idempotency key created zero intake batch rows.'
+UNION ALL
+SELECT 'CHECK',
+       'PASS2_TENANT_MISMATCH_BATCH_ROWS_ZERO',
+       'kai.intake_batches',
+       CASE WHEN NOT EXISTS (
+         SELECT 1 FROM kai.intake_batches b JOIN expected e ON b.idempotency_key = e.tenant_mismatch_batch_idempotency_key
+       ) THEN 'PASS' ELSE 'FAIL' END,
+       'Tenant-mismatch batch idempotency key created zero intake batch rows.'
+UNION ALL
+SELECT 'CHECK',
+       'PASS2_UNSAFE_FILE_RESERVATION_ROWS_ZERO',
+       'kai.intake_files',
+       CASE WHEN NOT EXISTS (
+         SELECT 1 FROM kai.intake_files f JOIN expected e ON f.file_metadata->>'idempotency_key' = e.unsafe_file_idempotency_key
+       ) THEN 'PASS' ELSE 'FAIL' END,
+       'Unsafe/blocked file reservation idempotency key created zero intake file rows.'
 UNION ALL
 SELECT 'CHECK',
        'PASS2_BATCH_ORG_ENGAGEMENT_MATCH',
@@ -45,13 +75,22 @@ SELECT 'CHECK',
        CASE WHEN EXISTS (
          SELECT 1 FROM pass2_batches
          WHERE batch_metadata->>'p0_pass' = (SELECT p0_pass FROM expected)
+           AND batch_metadata->>'gate_plan' = (SELECT gate_plan FROM expected)
            AND batch_metadata->>'synthetic_only' = 'true'
            AND batch_metadata->>'raw_upload_enabled' = 'false'
            AND batch_metadata->>'signed_url_enabled' = 'false'
            AND batch_metadata->>'parser_worker_enabled' = 'false'
            AND batch_metadata->>'source_promotion_enabled' = 'false'
        ) THEN 'PASS' ELSE 'FAIL' END,
-       'Batch metadata contains stable Pass 2 markers and closed raw/parser/source flags.'
+       'Batch metadata contains stable Pass 2 p0_pass/gate_plan markers and closed raw/parser/source flags.'
+UNION ALL
+SELECT 'CHECK',
+       'PASS2_FILE_RESERVATION_EXACT_GATE_PLAN_PRESENT',
+       'kai.intake_files',
+       CASE WHEN EXISTS (
+         SELECT 1 FROM pass2_files WHERE file_metadata->>'gate_plan' = (SELECT gate_plan FROM expected)
+       ) THEN 'PASS' ELSE 'FAIL' END,
+       'File reservation metadata contains exact Pass 2 gate_plan marker.'
 UNION ALL
 SELECT 'CHECK',
        'PASS2_FILE_RESERVATION_EXISTS_ONCE',
