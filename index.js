@@ -60,6 +60,8 @@ import orgApplyRouter from "./routes/orgApplyApi.js";
 import adminApiRouter from "./routes/adminApi.js";
 import squareWebhooksApiRouter from "./routes/squareWebhooksApi.js";
 import kaiRouter from "./Backend/routes/kaiApi.js";
+import { requireKaiSprint2Enabled } from "./Backend/kai/config/kaiSprint2Config.js";
+import sprint2IntakeApiRouter from "./Backend/kai/routes/sprint2IntakeApi.js";
 import {
   legacyKaiDeprecatedJson,
   legacyKaiDeprecatedSse,
@@ -503,6 +505,12 @@ app.get("/sitemap.xml", (req, res) => {
 app.use(express.static(path.join(__dirname, "public")));
 app.use("/api/webhooks", squareWebhooksApiRouter);
 app.use("/api/kai", kaiRouter);
+app.use(
+  "/api/kai/sprint2/intake",
+  requireKaiSprint2Enabled,
+  ensureAuthenticatedApi,
+  sprint2IntakeApiRouter
+);
 app.use("/api/organizations", organizationsApiRouter);
 app.use("/api/events", eventsApiRouter);
 app.use("/api/invites", ensureAuthenticatedApi, invitesApiRouter);

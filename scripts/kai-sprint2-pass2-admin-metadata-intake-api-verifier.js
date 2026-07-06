@@ -1,0 +1,349 @@
+#!/usr/bin/env node
+
+const PASS2_MARKER = "pass2_admin_metadata_intake_verification";
+const BASE_URL = process.env.KAI_PASS2_BASE_URL || "";
+const AUTH_COOKIE = process.env.KAI_PASS2_AUTH_COOKIE || "";
+const BEARER_TOKEN = process.env.KAI_PASS2_BEARER_TOKEN || "";
+const ORGANIZATION_ID = process.env.KAI_PASS2_ORGANIZATION_ID || "a5d17c5a-c55f-43af-9b21-fe63aafe733f";
+const ENGAGEMENT_ID = process.env.KAI_PASS2_ENGAGEMENT_ID || "2e426ea1-2be3-4e48-b80f-9783ddbacda0";
+const DB_TARGET_CLASS = process.env.KAI_PASS2_DB_TARGET_CLASS || "unknown";
+const PRODUCTION_GATE_ACCEPTED = String(process.env.KAI_PASS2_PRODUCTION_SYNTHETIC_WRITE_GATE_ACCEPTED || "false") === "true";
+const RUN_WRITE_PATH = String(process.env.KAI_PASS2_RUN_WRITE_PATH || "false") === "true";
+
+const rows = [];
+
+function add(checkName, objectName, status, detail, resultType = "CHECK") {
+  rows.push({ result_type: resultType, check_name: checkName, object_name: objectName, status, detail });
+}
+
+function printRows() {
+  console.log("result_type\tcheck_name\tobject_name\tstatus\tdetail");
+  for (const row of rows) {
+    console.log(`${row.result_type}\t${row.check_name}\t${row.object_name}\t${row.status}\t${row.detail}`);
+  }
+}
+
+function writeGatePasses() {
+  return DB_TARGET_CLASS === "non_production" || (DB_TARGET_CLASS === "production" && PRODUCTION_GATE_ACCEPTED);
+}
+
+function headers() {
+  const result = { "Content-Type": "application/json" };
+  if (AUTH_COOKIE) result.Cookie = AUTH_COOKIE;
+  if (BEARER_TOKEN) result.Authorization = `Bearer ${BEARER_TOKEN}`;
+  return result;
+}
+
+async function request(path, options = {}) {
+  const url = `${BASE_URL.replace(/\/$/, "")}${path}`;
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      ...headers(),
+      ...(options.headers || {}),
+    },
+  });
+  const text = await response.text();
+  let body = null;
+  try {
+    body = text ? JSON.parse(text) : null;
+  } catch {
+    body = { raw: text };
+  }
+  return { response, body };
+}
+
+async function unauthenticatedRequest(path, options = {}) {
+  const url = `${BASE_URL.replace(/\/$/, "")}${path}`;
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.headers || {}),
+    },
+  });
+  const text = await response.text();
+  let body = null;
+  try {
+    body = text ? JSON.parse(text) : null;
+  } catch {
+    body = { raw: text };
+  }
+  return { response, body };
+}
+
+function containsForbiddenResponseKeys(value) {
+  const forbidden = new Set([
+    "signed_upload_url",
+    "signed_read_url",
+    "storage_credential",
+    "storage_credentials",
+    "raw_storage_url",
+    "req.user",
+    "session",
+    "raw_file_content",
+    "parser_output",
+    "claim",
+    "evidence",
+    "report",
+    "export",
+  ]);
+  const stack = [value];
+  while (stack.length) {
+    const current = stack.pop();
+    if (!current || typeof current !== "object") continue;
+    for (const [key, child] of Object.entries(current)) {
+      if (forbidden.has(key)) return key;
+      if (child && typeof child === "object") stack.push(child);
+    }
+  }
+  return null;
+}
+
+async function run() {
+  const gatePass = writeGatePasses();
+  add(
+    "API_OR_RUNTIME_DB_TARGET_CONFIRMED_NON_PRODUCTION_OR_WRITE_GATE_ACCEPTED",
+    "runtime_db_target",
+    gatePass ? "PASS" : "FAIL",
+    gatePass
+      ? `DB target class ${DB_TARGET_CLASS}; production gate accepted=${PRODUCTION_GATE_ACCEPTED}`
+      : `DB target class ${DB_TARGET_CLASS}; write-path verification must not proceed`,
+  );
+
+  if (!gatePass) {
+    printRows();
+    process.exitCode = 1;
+    return;
+  }
+
+  if (!BASE_URL) {
+    add("API_BASE_URL_CONFIGURED", "KAI_PASS2_BASE_URL", "FAIL", "KAI_PASS2_BASE_URL is required for API verification.");
+    printRows();
+    process.exitCode = 1;
+    return;
+  }
+
+  const status = await request("/api/kai/sprint2/intake/status");
+  if (status.response.status === 403 && status.body?.error?.code === "feature_disabled") {
+    add("API_FEATURE_OFF_STATUS_RETURNS_DISABLED", "/api/kai/sprint2/intake/status", "PASS", "Feature flag OFF returned feature_disabled.");
+    printRows();
+    process.exitCode = rows.some((row) => row.result_type === "CHECK" && row.status === "FAIL") ? 1 : 0;
+    return;
+  }
+
+  add(
+    "API_FEATURE_ON_STATUS_RETURNS_READY_METADATA_ONLY",
+    "/api/kai/sprint2/intake/status",
+    status.response.ok && status.body?.data?.mode === "admin_metadata_only" ? "PASS" : "FAIL",
+    `HTTP ${status.response.status}`,
+  );
+
+  const forbiddenStatusKey = containsForbiddenResponseKeys(status.body);
+  add(
+    "API_STATUS_RESPONSE_HAS_NO_FORBIDDEN_KEYS",
+    "/api/kai/sprint2/intake/status",
+    forbiddenStatusKey ? "FAIL" : "PASS",
+    forbiddenStatusKey ? `Forbidden key present: ${forbiddenStatusKey}` : "No forbidden response keys.",
+  );
+
+  if (!RUN_WRITE_PATH) {
+    add("API_WRITE_PATH_NOT_REQUESTED", "KAI_PASS2_RUN_WRITE_PATH", "INFO", "Set KAI_PASS2_RUN_WRITE_PATH=true only after DB target gate passes.");
+    printRows();
+    process.exitCode = rows.some((row) => row.result_type === "CHECK" && row.status === "FAIL") ? 1 : 0;
+    return;
+  }
+
+  const access = await request(`/api/kai/sprint2/intake/admin/access-check?organization_id=${ORGANIZATION_ID}&engagement_id=${ENGAGEMENT_ID}`);
+  add(
+    "API_ACCESS_CHECK_MAPS_ACTOR",
+    "/api/kai/sprint2/intake/admin/access-check",
+    access.response.ok && access.body?.data?.actor_mapped === true ? "PASS" : "FAIL",
+    `HTTP ${access.response.status}`,
+  );
+  add(
+    "API_ACCESS_CHECK_CONFIRMS_NCWS_MEMBERSHIP",
+    "/api/kai/sprint2/intake/admin/access-check",
+    access.response.ok && access.body?.data?.membership_active === true ? "PASS" : "FAIL",
+    `HTTP ${access.response.status}`,
+  );
+
+  const unauth = await unauthenticatedRequest("/api/kai/sprint2/intake/admin/batches", {
+    method: "POST",
+    body: JSON.stringify({
+      organization_id: ORGANIZATION_ID,
+      engagement_id: ENGAGEMENT_ID,
+      batch_code: "NCWS-P0-PASS2-METADATA-UNAUTH",
+      idempotency_key: "kai-p0-pass2-unauth",
+    }),
+  });
+  add(
+    "API_UNAUTHENTICATED_RETURNS_401",
+    "/api/kai/sprint2/intake/admin/batches",
+    unauth.response.status === 401 ? "PASS" : "FAIL",
+    `HTTP ${unauth.response.status}`,
+  );
+
+  const batch = await request("/api/kai/sprint2/intake/admin/batches", {
+    method: "POST",
+    body: JSON.stringify({
+      organization_id: ORGANIZATION_ID,
+      engagement_id: ENGAGEMENT_ID,
+      batch_code: "NCWS-P0-PASS2-METADATA-001",
+      idempotency_key: "kai-p0-pass2-ncws-batch-001",
+      intake_method: "manual_upload",
+      notes: "P0 Pass 2 metadata-only admin route verification. No raw files. No parser. No source promotion.",
+      batch_metadata: {
+        p0_pass: PASS2_MARKER,
+        synthetic_only: true,
+        raw_upload_enabled: false,
+        signed_url_enabled: false,
+        parser_worker_enabled: false,
+        source_promotion_enabled: false,
+      },
+    }),
+  });
+  add(
+    "API_CREATE_BATCH_RETURNS_OK",
+    "/api/kai/sprint2/intake/admin/batches",
+    batch.response.ok && batch.body?.data?.metadata_only === true ? "PASS" : "FAIL",
+    `HTTP ${batch.response.status}`,
+  );
+
+  const replay = await request("/api/kai/sprint2/intake/admin/batches", {
+    method: "POST",
+    body: JSON.stringify({
+      organization_id: ORGANIZATION_ID,
+      engagement_id: ENGAGEMENT_ID,
+      batch_code: "NCWS-P0-PASS2-METADATA-001",
+      idempotency_key: "kai-p0-pass2-ncws-batch-001",
+      intake_method: "manual_upload",
+      notes: "P0 Pass 2 metadata-only admin route verification. No raw files. No parser. No source promotion.",
+      batch_metadata: {
+        p0_pass: PASS2_MARKER,
+        synthetic_only: true,
+        raw_upload_enabled: false,
+        signed_url_enabled: false,
+        parser_worker_enabled: false,
+        source_promotion_enabled: false,
+      },
+    }),
+  });
+  add(
+    "API_CREATE_BATCH_IDEMPOTENT_REPLAY_RETURNS_EXISTING",
+    "/api/kai/sprint2/intake/admin/batches",
+    replay.response.ok && replay.body?.data?.intake_batch_id === batch.body?.data?.intake_batch_id ? "PASS" : "FAIL",
+    `HTTP ${replay.response.status}`,
+  );
+
+  const tenantMismatch = await request("/api/kai/sprint2/intake/admin/batches", {
+    method: "POST",
+    body: JSON.stringify({
+      organization_id: ORGANIZATION_ID,
+      engagement_id: "00000000-0000-4000-8000-000000000000",
+      batch_code: "NCWS-P0-PASS2-METADATA-TENANT-MISMATCH",
+      idempotency_key: "kai-p0-pass2-tenant-mismatch",
+      intake_method: "manual_upload",
+      batch_metadata: { p0_pass: PASS2_MARKER },
+    }),
+  });
+  add(
+    "API_CREATE_BATCH_TENANT_MISMATCH_RETURNS_422",
+    "/api/kai/sprint2/intake/admin/batches",
+    tenantMismatch.response.status === 422 && tenantMismatch.body?.ok === false ? "PASS" : "FAIL",
+    `HTTP ${tenantMismatch.response.status}`,
+  );
+
+  const intakeBatchId = batch.body?.data?.intake_batch_id;
+  if (intakeBatchId) {
+    const file = await request(`/api/kai/sprint2/intake/admin/batches/${intakeBatchId}/file-reservations`, {
+      method: "POST",
+      body: JSON.stringify({
+        organization_id: ORGANIZATION_ID,
+        engagement_id: ENGAGEMENT_ID,
+        idempotency_key: "kai-p0-pass2-ncws-file-reservation-001",
+        original_filename: "NCWS P0 Pass2 metadata-only reservation.csv",
+        mime_type: "text/csv",
+        file_extension: ".csv",
+        file_size_bytes: 0,
+        reservation_metadata: {
+          p0_pass: PASS2_MARKER,
+          synthetic_only: true,
+          raw_upload_enabled: false,
+          signed_url_enabled: false,
+          no_raw_object_created: true,
+        },
+      }),
+    });
+    const forbiddenFileKey = containsForbiddenResponseKeys(file.body);
+    add(
+      "API_FILE_RESERVATION_RETURNS_OK_NO_UPLOAD_URL",
+      "/api/kai/sprint2/intake/admin/batches/:intakeBatchId/file-reservations",
+      file.response.ok && file.body?.data?.metadata_only === true && !forbiddenFileKey ? "PASS" : "FAIL",
+      forbiddenFileKey ? `Forbidden key present: ${forbiddenFileKey}` : `HTTP ${file.response.status}`,
+    );
+    add(
+      "API_FILE_RESERVATION_NO_SIGNED_URL_IN_RESPONSE",
+      "/api/kai/sprint2/intake/admin/batches/:intakeBatchId/file-reservations",
+      forbiddenFileKey ? "FAIL" : "PASS",
+      forbiddenFileKey ? `Forbidden key present: ${forbiddenFileKey}` : "No signed URL key in response.",
+    );
+
+    const unsafe = await request(`/api/kai/sprint2/intake/admin/batches/${intakeBatchId}/file-reservations`, {
+      method: "POST",
+      body: JSON.stringify({
+        organization_id: ORGANIZATION_ID,
+        engagement_id: ENGAGEMENT_ID,
+        idempotency_key: "kai-p0-pass2-ncws-file-reservation-unsafe",
+        original_filename: "../unsafe.csv",
+        mime_type: "text/csv",
+        file_extension: ".csv",
+        file_size_bytes: 0,
+        reservation_metadata: { p0_pass: PASS2_MARKER },
+      }),
+    });
+    const unsafeBlockers = Array.isArray(unsafe.body?.blockers) ? unsafe.body.blockers : [];
+    add(
+      "API_FILE_RESERVATION_UNSAFE_FILENAME_RETURNS_422",
+      "/api/kai/sprint2/intake/admin/batches/:intakeBatchId/file-reservations",
+      unsafe.response.status === 422 && unsafe.body?.ok === false ? "PASS" : "FAIL",
+      `HTTP ${unsafe.response.status}`,
+    );
+    add(
+      "API_EXPECTED_BLOCKER_SHAPE_OK_FALSE",
+      "validator_blocker_response",
+      unsafe.body?.ok === false && unsafeBlockers.length > 0 ? "PASS" : "FAIL",
+      unsafeBlockers.length > 0 ? `blocker=${unsafeBlockers[0].blocking_reason || unsafeBlockers[0].validator_key}` : "No blocker returned.",
+    );
+  } else {
+    add("API_FILE_RESERVATION_RETURNS_OK_NO_UPLOAD_URL", "file_reservation", "FAIL", "Batch creation did not return intake_batch_id.");
+    add("API_FILE_RESERVATION_NO_SIGNED_URL_IN_RESPONSE", "file_reservation", "FAIL", "Batch creation did not return intake_batch_id.");
+    add("API_FILE_RESERVATION_UNSAFE_FILENAME_RETURNS_422", "file_reservation", "FAIL", "Batch creation did not return intake_batch_id.");
+    add("API_EXPECTED_BLOCKER_SHAPE_OK_FALSE", "validator_blocker_response", "FAIL", "Batch creation did not return intake_batch_id.");
+  }
+
+  const uploadUrl = await request("/api/kai/sprint2/intake/upload-url", { method: "POST", body: JSON.stringify({}) });
+  add(
+    "API_UPLOAD_URL_ROUTE_DISABLED_OR_NOT_PRESENT",
+    "/api/kai/sprint2/intake/upload-url",
+    [404, 405, 422, 503].includes(uploadUrl.response.status) && !uploadUrl.response.ok ? "PASS" : "FAIL",
+    `HTTP ${uploadUrl.response.status}`,
+  );
+
+  const sourcePromotion = await request("/api/kai/sprint2/intake/source-promotion", { method: "POST", body: JSON.stringify({}) });
+  add(
+    "API_SOURCE_PROMOTION_ROUTE_DISABLED_OR_NOT_PRESENT",
+    "/api/kai/sprint2/intake/source-promotion",
+    [404, 405, 422].includes(sourcePromotion.response.status) && !sourcePromotion.response.ok ? "PASS" : "FAIL",
+    `HTTP ${sourcePromotion.response.status}`,
+  );
+
+  printRows();
+  process.exitCode = rows.some((row) => row.result_type === "CHECK" && row.status === "FAIL") ? 1 : 0;
+}
+
+run().catch((error) => {
+  add("API_VERIFIER_UNEXPECTED_ERROR", "api_verifier", "FAIL", error?.message || String(error));
+  printRows();
+  process.exitCode = 1;
+});
