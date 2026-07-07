@@ -528,6 +528,7 @@ Use exactly one auth method. For this preflight gate, copied-cookie mode is requ
 ```text
 KAI_PASS2_AUTH_COOKIE present
 KAI_PASS2_BEARER_TOKEN absent
+KAI_PASS2_PREFLIGHT_ONLY=true
 KAI_PASS2_RUN_WRITE_PATH=false
 ```
 
@@ -539,6 +540,16 @@ GET /api/kai/sprint2/intake/auth-preflight
 
 This route is allowed only to prove copied-cookie auth before opening the feature-flag window. It must not expose Sprint 2 data, execute Sprint 2 intake services, touch `kai.*` tables, call POST routes, or expose ids, emails, names, roles, orgs, sessions, cookies, tokens, headers, credentials, secrets, or PII.
 
+The formal Step 8a verifier mode is preflight-only. It must call only `GET /api/kai/sprint2/intake/auth-preflight`, emit `API_AUTH_EXACTLY_ONE_METHOD_CONFIGURED`, `API_AUTH_COOKIE_ONLY_BEARER_ABSENT`, and `API_AUTH_PREFLIGHT_COOKIE_SESSION_ACCEPTED`, then exit immediately after the auth-preflight result.
+
+Step 8a preflight-only mode must not require:
+
+```text
+KAI_PASS2_ORGANIZATION_ID
+KAI_PASS2_ENGAGEMENT_ID
+KAI_PASS2_PRODUCTION_SYNTHETIC_WRITE_GATE_ACCEPTED
+```
+
 Cookie-auth preflight command template:
 
 ```bash
@@ -548,10 +559,8 @@ unset KAI_PASS2_BEARER_TOKEN
 KAI_PASS2_BASE_URL="<production-base-url>" \
 KAI_PASS2_AUTH_COOKIE="${KAI_PASS2_AUTH_COOKIE}" \
 KAI_PASS2_DB_TARGET_CLASS=production \
-KAI_PASS2_PRODUCTION_SYNTHETIC_WRITE_GATE_ACCEPTED=true \
+KAI_PASS2_PREFLIGHT_ONLY=true \
 KAI_PASS2_RUN_WRITE_PATH=false \
-KAI_PASS2_ORGANIZATION_ID=a5d17c5a-c55f-43af-9b21-fe63aafe733f \
-KAI_PASS2_ENGAGEMENT_ID=2e426ea1-2be3-4e48-b80f-9783ddbacda0 \
 node scripts/kai-sprint2-pass2-admin-metadata-intake-api-verifier.js
 ```
 

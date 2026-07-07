@@ -10,6 +10,7 @@ const ENGAGEMENT_ID = process.env.KAI_PASS2_ENGAGEMENT_ID || "2e426ea1-2be3-4e48
 const DB_TARGET_CLASS = process.env.KAI_PASS2_DB_TARGET_CLASS || "unknown";
 const PRODUCTION_GATE_ACCEPTED = String(process.env.KAI_PASS2_PRODUCTION_SYNTHETIC_WRITE_GATE_ACCEPTED || "false") === "true";
 const RUN_WRITE_PATH = String(process.env.KAI_PASS2_RUN_WRITE_PATH || "false") === "true";
+const PREFLIGHT_ONLY = String(process.env.KAI_PASS2_PREFLIGHT_ONLY || "false") === "true";
 const AUTH_PREFLIGHT_ROUTE = "GET /api/kai/sprint2/intake/auth-preflight";
 const PRODUCTION_GATE_ROUTES = Object.freeze([
   "GET /api/kai/sprint2/intake/status",
@@ -141,6 +142,29 @@ function containsForbiddenResponseKeys(value) {
   return null;
 }
 
+async function verifyAuthPreflight() {
+  const authPreflight = await request("/api/kai/sprint2/intake/auth-preflight");
+  const forbiddenAuthPreflightKey = containsForbiddenResponseKeys(authPreflight.body);
+  const authPreflightAccepted =
+    authPreflight.response.ok &&
+    authPreflight.body?.ok === true &&
+    authPreflight.body?.data?.authenticated === true &&
+    authPreflight.body?.data?.session_authenticated === true &&
+    authPreflight.body?.data?.feature_flag_required === false &&
+    Array.isArray(authPreflight.body?.blockers) &&
+    authPreflight.body.blockers.length === 0 &&
+    Array.isArray(authPreflight.body?.warnings) &&
+    authPreflight.body.warnings.length === 0 &&
+    !forbiddenAuthPreflightKey;
+  add(
+    "API_AUTH_PREFLIGHT_COOKIE_SESSION_ACCEPTED",
+    "/api/kai/sprint2/intake/auth-preflight",
+    authPreflightAccepted ? "PASS" : "FAIL",
+    forbiddenAuthPreflightKey ? `Forbidden key present: ${forbiddenAuthPreflightKey}` : `HTTP ${authPreflight.response.status}`,
+  );
+  return authPreflightAccepted;
+}
+
 async function run() {
   if (!BASE_URL) {
     add("API_BASE_URL_CONFIGURED", "KAI_PASS2_BASE_URL", "FAIL", "KAI_PASS2_BASE_URL is required for API verification.");
@@ -183,25 +207,32 @@ async function run() {
     "Copied-cookie auth is configured and bearer token is absent.",
   );
 
-  const authPreflight = await request("/api/kai/sprint2/intake/auth-preflight");
-  const forbiddenAuthPreflightKey = containsForbiddenResponseKeys(authPreflight.body);
-  const authPreflightAccepted =
-    authPreflight.response.ok &&
-    authPreflight.body?.ok === true &&
-    authPreflight.body?.data?.authenticated === true &&
-    authPreflight.body?.data?.session_authenticated === true &&
-    authPreflight.body?.data?.feature_flag_required === false &&
-    Array.isArray(authPreflight.body?.blockers) &&
-    authPreflight.body.blockers.length === 0 &&
-    Array.isArray(authPreflight.body?.warnings) &&
-    authPreflight.body.warnings.length === 0 &&
-    !forbiddenAuthPreflightKey;
-  add(
-    "API_AUTH_PREFLIGHT_COOKIE_SESSION_ACCEPTED",
-    "/api/kai/sprint2/intake/auth-preflight",
-    authPreflightAccepted ? "PASS" : "FAIL",
-    forbiddenAuthPreflightKey ? `Forbidden key present: ${forbiddenAuthPreflightKey}` : `HTTP ${authPreflight.response.status}`,
-  );
+  if (PREFLIGHT_ONLY && RUN_WRITE_PATH) {
+    add(
+      "API_PREFLIGHT_ONLY_REQUIRES_NO_WRITE_PATH",
+      "KAI_PASS2_PREFLIGHT_ONLY,KAI_PASS2_RUN_WRITE_PATH",
+      "FAIL",
+      "Preflight-only mode requires KAI_PASS2_RUN_WRITE_PATH=false.",
+    );
+    printRows();
+    process.exitCode = 1;
+    return;
+  }
+
+  if (PREFLIGHT_ONLY) {
+    add(
+      "API_PREFLIGHT_ONLY_REQUIRES_NO_WRITE_PATH",
+      "KAI_PASS2_PREFLIGHT_ONLY,KAI_PASS2_RUN_WRITE_PATH",
+      "PASS",
+      "Preflight-only mode is enabled with write path disabled.",
+    );
+    await verifyAuthPreflight();
+    printRows();
+    process.exitCode = rows.some((row) => row.result_type === "CHECK" && row.status === "FAIL") ? 1 : 0;
+    return;
+  }
+
+  const authPreflightAccepted = await verifyAuthPreflight();
 
   if (!authPreflightAccepted) {
     printRows();
