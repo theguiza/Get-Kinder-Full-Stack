@@ -10,12 +10,14 @@ const ENGAGEMENT_ID = process.env.KAI_PASS2_ENGAGEMENT_ID || "2e426ea1-2be3-4e48
 const DB_TARGET_CLASS = process.env.KAI_PASS2_DB_TARGET_CLASS || "unknown";
 const PRODUCTION_GATE_ACCEPTED = String(process.env.KAI_PASS2_PRODUCTION_SYNTHETIC_WRITE_GATE_ACCEPTED || "false") === "true";
 const RUN_WRITE_PATH = String(process.env.KAI_PASS2_RUN_WRITE_PATH || "false") === "true";
+const AUTH_PREFLIGHT_ROUTE = "GET /api/kai/sprint2/intake/auth-preflight";
 const PRODUCTION_GATE_ROUTES = Object.freeze([
   "GET /api/kai/sprint2/intake/status",
   "GET /api/kai/sprint2/intake/admin/access-check",
   "POST /api/kai/sprint2/intake/admin/batches",
   "POST /api/kai/sprint2/intake/admin/batches/:intakeBatchId/file-reservations",
 ]);
+const API_VERIFIER_ROUTES = Object.freeze([AUTH_PREFLIGHT_ROUTE, ...PRODUCTION_GATE_ROUTES]);
 
 const rows = [];
 
@@ -51,8 +53,8 @@ function routeKey(path, method = "GET") {
 
 function assertAllowedProductionGateRoute(path, options = {}) {
   const key = routeKey(path, options.method || "GET");
-  if (!PRODUCTION_GATE_ROUTES.includes(key)) {
-    throw new Error(`Verifier route is outside the production gate allowlist: ${key}`);
+  if (!API_VERIFIER_ROUTES.includes(key)) {
+    throw new Error(`Verifier route is outside the API verifier allowlist: ${key}`);
   }
 }
 
@@ -104,7 +106,22 @@ function containsForbiddenResponseKeys(value) {
     "storage_credentials",
     "raw_storage_url",
     "req.user",
+    "authorization",
+    "bearer",
+    "cookie",
+    "email",
+    "jwt",
+    "name",
+    "passport",
+    "password",
+    "role",
+    "roles",
+    "secret",
     "session",
+    "session_id",
+    "token",
+    "user",
+    "user_id",
     "raw_file_content",
     "parser_output",
     "claim",
@@ -125,22 +142,6 @@ function containsForbiddenResponseKeys(value) {
 }
 
 async function run() {
-  const gatePass = writeGatePasses();
-  add(
-    "API_OR_RUNTIME_DB_TARGET_CONFIRMED_NON_PRODUCTION_OR_WRITE_GATE_ACCEPTED",
-    "runtime_db_target",
-    gatePass ? "PASS" : "FAIL",
-    gatePass
-      ? `DB target class ${DB_TARGET_CLASS}; production gate accepted=${PRODUCTION_GATE_ACCEPTED}`
-      : `DB target class ${DB_TARGET_CLASS}; write-path verification must not proceed`,
-  );
-
-  if (!gatePass) {
-    printRows();
-    process.exitCode = 1;
-    return;
-  }
-
   if (!BASE_URL) {
     add("API_BASE_URL_CONFIGURED", "KAI_PASS2_BASE_URL", "FAIL", "KAI_PASS2_BASE_URL is required for API verification.");
     printRows();
@@ -163,6 +164,66 @@ async function run() {
     return;
   }
   add("API_AUTH_EXACTLY_ONE_METHOD_CONFIGURED", "auth_method", "PASS", "Exactly one auth method is configured.");
+
+  if (!AUTH_COOKIE || BEARER_TOKEN) {
+    add(
+      "API_AUTH_COOKIE_ONLY_BEARER_ABSENT",
+      "KAI_PASS2_AUTH_COOKIE,KAI_PASS2_BEARER_TOKEN",
+      "FAIL",
+      "Copied-cookie preflight requires KAI_PASS2_AUTH_COOKIE and no bearer token.",
+    );
+    printRows();
+    process.exitCode = 1;
+    return;
+  }
+  add(
+    "API_AUTH_COOKIE_ONLY_BEARER_ABSENT",
+    "KAI_PASS2_AUTH_COOKIE,KAI_PASS2_BEARER_TOKEN",
+    "PASS",
+    "Copied-cookie auth is configured and bearer token is absent.",
+  );
+
+  const authPreflight = await request("/api/kai/sprint2/intake/auth-preflight");
+  const forbiddenAuthPreflightKey = containsForbiddenResponseKeys(authPreflight.body);
+  const authPreflightAccepted =
+    authPreflight.response.ok &&
+    authPreflight.body?.ok === true &&
+    authPreflight.body?.data?.authenticated === true &&
+    authPreflight.body?.data?.session_authenticated === true &&
+    authPreflight.body?.data?.feature_flag_required === false &&
+    Array.isArray(authPreflight.body?.blockers) &&
+    authPreflight.body.blockers.length === 0 &&
+    Array.isArray(authPreflight.body?.warnings) &&
+    authPreflight.body.warnings.length === 0 &&
+    !forbiddenAuthPreflightKey;
+  add(
+    "API_AUTH_PREFLIGHT_COOKIE_SESSION_ACCEPTED",
+    "/api/kai/sprint2/intake/auth-preflight",
+    authPreflightAccepted ? "PASS" : "FAIL",
+    forbiddenAuthPreflightKey ? `Forbidden key present: ${forbiddenAuthPreflightKey}` : `HTTP ${authPreflight.response.status}`,
+  );
+
+  if (!authPreflightAccepted) {
+    printRows();
+    process.exitCode = 1;
+    return;
+  }
+
+  const gatePass = writeGatePasses();
+  add(
+    "API_OR_RUNTIME_DB_TARGET_CONFIRMED_NON_PRODUCTION_OR_WRITE_GATE_ACCEPTED",
+    "runtime_db_target",
+    gatePass ? "PASS" : "FAIL",
+    gatePass
+      ? `DB target class ${DB_TARGET_CLASS}; production gate accepted=${PRODUCTION_GATE_ACCEPTED}`
+      : `DB target class ${DB_TARGET_CLASS}; write-path verification must not proceed`,
+  );
+
+  if (!gatePass) {
+    printRows();
+    process.exitCode = 1;
+    return;
+  }
 
   const status = await request("/api/kai/sprint2/intake/status");
   if (status.response.status === 403 && status.body?.error?.code === "feature_disabled") {

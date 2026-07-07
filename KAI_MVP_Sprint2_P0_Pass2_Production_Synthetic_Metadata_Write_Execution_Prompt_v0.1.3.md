@@ -248,6 +248,11 @@ file_metadata.gate_plan or equivalent reservation marker = KAI_MVP_Sprint2_P0_Pa
 The verifier must also prove before writes:
 
 ```text
+exactly one auth method is present before auth preflight
+copied-cookie auth preflight uses KAI_PASS2_AUTH_COOKIE with KAI_PASS2_BEARER_TOKEN absent
+GET /api/kai/sprint2/intake/auth-preflight runs before GET /api/kai/sprint2/intake/status
+auth-preflight fails closed before /status, access-check, DB/write gate, or POST routes
+auth-preflight response contains no forbidden fields
 req.user.id -> public.userdata.id
 public.userdata.id -> active kai.users.legacy_public_userdata_id
 kai.users.user_id -> gk_admin or gk_operator role
@@ -334,6 +339,7 @@ Do not run commands with set -x while auth/env values are present.
 Load auth values from a local untracked environment source or secure secret manager.
 Confirm auth values are present without printing them.
 Do not include auth material in markdown evidence, terminal output, tickets, screenshots, logs, or commits.
+Do not include copied-cookie auth-preflight evidence containing cookie values, bearer tokens, session values, request headers, req.user, user id, email, names, roles, orgs, DATABASE_URL, credentials, secrets, or PII.
 Do not print session values.
 Do not print DATABASE_URL.
 Do not print credentials.
@@ -507,6 +513,63 @@ API_FEATURE_OFF_STATUS_RETURNS_DISABLED = PASS
 
 Stop if the feature-flag OFF check fails.
 
+## Step 8a: Confirm Copied-Cookie Auth Preflight Before Feature-Flag Window
+
+Keep production configuration at:
+
+```text
+KAI_SPRINT2_ENABLED=false
+```
+
+This gate proves copied-cookie session acceptance before opening the controlled feature-flag window. It does not replace the later feature-flag-ON no-write status/access-check gate or the controlled write-path verifier gate.
+
+Use exactly one auth method. For this preflight gate, copied-cookie mode is required:
+
+```text
+KAI_PASS2_AUTH_COOKIE present
+KAI_PASS2_BEARER_TOKEN absent
+KAI_PASS2_RUN_WRITE_PATH=false
+```
+
+Allowed route for this pre-feature-flag no-write auth-capability guard only:
+
+```text
+GET /api/kai/sprint2/intake/auth-preflight
+```
+
+This route is allowed only to prove copied-cookie auth before opening the feature-flag window. It must not expose Sprint 2 data, execute Sprint 2 intake services, touch `kai.*` tables, call POST routes, or expose ids, emails, names, roles, orgs, sessions, cookies, tokens, headers, credentials, secrets, or PII.
+
+Cookie-auth preflight command template:
+
+```bash
+set +x
+unset KAI_PASS2_BEARER_TOKEN
+
+KAI_PASS2_BASE_URL="<production-base-url>" \
+KAI_PASS2_AUTH_COOKIE="${KAI_PASS2_AUTH_COOKIE}" \
+KAI_PASS2_DB_TARGET_CLASS=production \
+KAI_PASS2_PRODUCTION_SYNTHETIC_WRITE_GATE_ACCEPTED=true \
+KAI_PASS2_RUN_WRITE_PATH=false \
+KAI_PASS2_ORGANIZATION_ID=a5d17c5a-c55f-43af-9b21-fe63aafe733f \
+KAI_PASS2_ENGAGEMENT_ID=2e426ea1-2be3-4e48-b80f-9783ddbacda0 \
+node scripts/kai-sprint2-pass2-admin-metadata-intake-api-verifier.js
+```
+
+Required auth-preflight evidence:
+
+```text
+API_AUTH_PREFLIGHT_COOKIE_SESSION_ACCEPTED = PASS
+auth_method_used = KAI_PASS2_AUTH_COOKIE
+exactly_one_auth_method_used = true
+bearer_token_absent_during_copied_cookie_preflight = true
+KAI_SPRINT2_ENABLED=false during auth-preflight
+preflight output contains no auth/session/user/PII/secret material
+```
+
+Proceed to Step 9 only if `API_AUTH_PREFLIGHT_COOKIE_SESSION_ACCEPTED = PASS` is present and no `CHECK` row fails.
+
+Stop before enabling `KAI_SPRINT2_ENABLED=true` if auth-preflight returns 401, 403, 500, malformed JSON, forbidden keys, missing `session_authenticated=true`, `feature_flag_required` is not `false`, any secret/PII/session/user material, or any failed `CHECK` row.
+
 ## Step 9: Define Controlled Feature-Flag Window
 
 Before enabling `KAI_SPRINT2_ENABLED=true`, record:
@@ -549,6 +612,8 @@ KAI_SPRINT2_ENABLED=true
 ```
 
 Enable only for the controlled verifier window.
+
+The Step 8a auth-preflight does not satisfy this gate. After `KAI_SPRINT2_ENABLED=true`, the no-write status/access-check verifier gate still runs before the controlled write path.
 
 Confirm the running app observes the flag as true before POST tests. Use only:
 
@@ -605,6 +670,8 @@ If any interruption occurs while the flag is ON, immediately set `KAI_SPRINT2_EN
 
 Run the verifier only after all previous gates pass.
 
+The Step 8a auth-preflight does not replace this controlled write-path gate. The controlled write path remains blocked until the feature-flag-ON no-write status/access-check gate in Step 10 passes.
+
 Do not include real auth cookies or tokens in this prompt, shell history exports, logs, tickets, or evidence.
 
 Required environment values:
@@ -656,11 +723,14 @@ node scripts/kai-sprint2-pass2-admin-metadata-intake-api-verifier.js
 The verifier may call only these allowed routes:
 
 ```text
+GET /api/kai/sprint2/intake/auth-preflight
 GET /api/kai/sprint2/intake/status
 GET /api/kai/sprint2/intake/admin/access-check
 POST /api/kai/sprint2/intake/admin/batches
 POST /api/kai/sprint2/intake/admin/batches/:intakeBatchId/file-reservations
 ```
+
+`GET /api/kai/sprint2/intake/auth-preflight` is allowed only as the Step 8a pre-feature-flag, no-write auth-capability guard. It must not expose Sprint 2 data, execute Sprint 2 intake services, touch `kai.*` tables, call POST routes, or expose ids, emails, names, roles, orgs, sessions, cookies, tokens, headers, credentials, secrets, or PII.
 
 Do not broaden the route allowlist.
 
@@ -1237,6 +1307,10 @@ required verifier gate variable is absent, false, ambiguous, or unsupported
 production synthetic-write gate acceptance is missing
 auth method is ambiguous
 auth/secret masking cannot be preserved
+copied-cookie auth-preflight is not run before enabling KAI_SPRINT2_ENABLED=true
+copied-cookie auth-preflight does not produce API_AUTH_PREFLIGHT_COOKIE_SESSION_ACCEPTED = PASS
+copied-cookie auth-preflight uses bearer auth or more than one auth method
+copied-cookie auth-preflight returns 401, 403, 500, malformed JSON, forbidden keys, missing session_authenticated=true, feature_flag_required not false, secret material, PII, session material, or user material
 app cannot be confirmed to observe KAI_SPRINT2_ENABLED=true during the controlled window
 maximum 10-minute feature-flag ON window is at risk of being exceeded
 terminal, verifier, Render dashboard, network connection, browser session, or operator session is interrupted while KAI_SPRINT2_ENABLED=true
@@ -1292,6 +1366,12 @@ The final evidence package must include:
 
 ```text
 API verifier one-result-set PASS/FAIL output
+API_AUTH_PREFLIGHT_COOKIE_SESSION_ACCEPTED PASS row
+confirmation KAI_SPRINT2_ENABLED=false during auth-preflight
+auth method used for auth-preflight: KAI_PASS2_AUTH_COOKIE
+confirmation exactly one auth method was used for auth-preflight
+confirmation bearer token was absent during copied-cookie auth-preflight
+confirmation no auth/session/user/PII/secret material appeared in auth-preflight output
 pgAdmin pre-write marker absence output
 pgAdmin post-write SQL verifier CSV
 production feature-flag reset confirmation
@@ -1324,12 +1404,18 @@ Evidence must not contain:
 auth cookies
 bearer tokens
 session values
+request headers
 DATABASE_URL
 credentials
 secrets
 raw payload
 raw file content
 req.user
+user id
+email
+names
+roles
+orgs
 signed URL
 storage credential
 prompt text

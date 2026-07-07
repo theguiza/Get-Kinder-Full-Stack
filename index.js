@@ -61,6 +61,7 @@ import adminApiRouter from "./routes/adminApi.js";
 import squareWebhooksApiRouter from "./routes/squareWebhooksApi.js";
 import kaiRouter from "./Backend/routes/kaiApi.js";
 import { requireKaiSprint2Enabled } from "./Backend/kai/config/kaiSprint2Config.js";
+import sprint2IntakeAuthPreflightApiRouter from "./Backend/kai/routes/sprint2IntakeAuthPreflightApi.js";
 import sprint2IntakeApiRouter from "./Backend/kai/routes/sprint2IntakeApi.js";
 import {
   legacyKaiDeprecatedJson,
@@ -505,6 +506,11 @@ app.get("/sitemap.xml", (req, res) => {
 app.use(express.static(path.join(__dirname, "public")));
 app.use("/api/webhooks", squareWebhooksApiRouter);
 app.use("/api/kai", kaiRouter);
+app.use(
+  "/api/kai/sprint2/intake/auth-preflight",
+  ensureAuthenticatedApi,
+  sprint2IntakeAuthPreflightApiRouter
+);
 app.use(
   "/api/kai/sprint2/intake",
   requireKaiSprint2Enabled,
