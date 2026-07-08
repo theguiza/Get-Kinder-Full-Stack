@@ -6,6 +6,8 @@ import { readFileSync } from "node:fs";
 import router, { __testables } from "../Backend/kai/routes/sprint2IntakeApi.js";
 
 const verifierPath = new URL("../scripts/kai-sprint2-pass2-admin-metadata-intake-api-verifier.js", import.meta.url);
+const validRequestCookieHeader = "session=secret-cookie-sentinel";
+const forbiddenSecretMaterial = /secret-cookie-sentinel|secret-token-sentinel|session-value-sentinel|user-id-sentinel|email-sentinel/;
 
 function runVerifierWithMockFetch(env = {}, responses = {}) {
   const preload = `
@@ -169,6 +171,139 @@ test("API verifier requires cookie-only auth before auth preflight", () => {
   assert.ok(cookieOnlyIndex < standardCallIndex);
 });
 
+test("API verifier validates request cookie header syntax before first API call", () => {
+  const verifier = readFileSync("scripts/kai-sprint2-pass2-admin-metadata-intake-api-verifier.js", "utf8");
+  const syntaxCheckIndex = verifier.indexOf("API_AUTH_COOKIE_REQUEST_HEADER_SYNTAX_VALID");
+  const preflightOnlyCallIndex = verifier.indexOf("await verifyAuthPreflight();");
+  const standardCallIndex = verifier.indexOf("const authPreflightAccepted = await verifyAuthPreflight();");
+
+  assert.notEqual(syntaxCheckIndex, -1);
+  assert.notEqual(preflightOnlyCallIndex, -1);
+  assert.notEqual(standardCallIndex, -1);
+  assert.ok(syntaxCheckIndex < preflightOnlyCallIndex);
+  assert.ok(syntaxCheckIndex < standardCallIndex);
+});
+
+test("malformed KAI_PASS2_AUTH_COOKIE fails before fetch", () => {
+  const result = runVerifierWithMockFetch({
+    KAI_PASS2_BASE_URL: "https://example.test",
+    KAI_PASS2_AUTH_COOKIE: "secret-cookie-sentinel",
+    KAI_PASS2_BEARER_TOKEN: undefined,
+    KAI_PASS2_PREFLIGHT_ONLY: "true",
+    KAI_PASS2_RUN_WRITE_PATH: "false",
+  });
+
+  assert.equal(result.status, 1, result.output);
+  assert.deepEqual(result.calls, []);
+  assert.match(result.stdout, /API_AUTH_COOKIE_REQUEST_HEADER_SYNTAX_VALID\tKAI_PASS2_AUTH_COOKIE\tFAIL/);
+  assert.doesNotMatch(result.output, forbiddenSecretMaterial);
+});
+
+test("empty KAI_PASS2_AUTH_COOKIE fails before fetch", () => {
+  const result = runVerifierWithMockFetch({
+    KAI_PASS2_BASE_URL: "https://example.test",
+    KAI_PASS2_AUTH_COOKIE: "",
+    KAI_PASS2_BEARER_TOKEN: undefined,
+    KAI_PASS2_PREFLIGHT_ONLY: "true",
+    KAI_PASS2_RUN_WRITE_PATH: "false",
+  });
+
+  assert.equal(result.status, 1, result.output);
+  assert.deepEqual(result.calls, []);
+  assert.match(result.stdout, /API_AUTH_EXACTLY_ONE_METHOD_CONFIGURED\tKAI_PASS2_AUTH_COOKIE,KAI_PASS2_BEARER_TOKEN\tFAIL/);
+  assert.doesNotMatch(result.output, forbiddenSecretMaterial);
+});
+
+test("newline and control-character cookie input fails before fetch", () => {
+  const result = runVerifierWithMockFetch({
+    KAI_PASS2_BASE_URL: "https://example.test",
+    KAI_PASS2_AUTH_COOKIE: "session=secret-cookie-sentinel\nother=value",
+    KAI_PASS2_BEARER_TOKEN: undefined,
+    KAI_PASS2_PREFLIGHT_ONLY: "true",
+    KAI_PASS2_RUN_WRITE_PATH: "false",
+  });
+
+  assert.equal(result.status, 1, result.output);
+  assert.deepEqual(result.calls, []);
+  assert.match(result.stdout, /API_AUTH_COOKIE_REQUEST_HEADER_SYNTAX_VALID\tKAI_PASS2_AUTH_COOKIE\tFAIL/);
+  assert.doesNotMatch(result.output, forbiddenSecretMaterial);
+});
+
+test("Set-Cookie-style and attributes-only cookie input fails before fetch", () => {
+  for (const cookieInput of ["Set-Cookie: session=secret-cookie-sentinel", "Path=/; HttpOnly; SameSite=Lax"]) {
+    const result = runVerifierWithMockFetch({
+      KAI_PASS2_BASE_URL: "https://example.test",
+      KAI_PASS2_AUTH_COOKIE: cookieInput,
+      KAI_PASS2_BEARER_TOKEN: undefined,
+      KAI_PASS2_PREFLIGHT_ONLY: "true",
+      KAI_PASS2_RUN_WRITE_PATH: "false",
+    });
+
+    assert.equal(result.status, 1, result.output);
+    assert.deepEqual(result.calls, []);
+    assert.match(result.stdout, /API_AUTH_COOKIE_REQUEST_HEADER_SYNTAX_VALID\tKAI_PASS2_AUTH_COOKIE\tFAIL/);
+    assert.doesNotMatch(result.output, forbiddenSecretMaterial);
+  }
+});
+
+test("unmatched and embedded quoted cookie values fail before fetch", () => {
+  for (const cookieInput of ['session=abc"', '"abc', 'session="ab"c"']) {
+    const result = runVerifierWithMockFetch({
+      KAI_PASS2_BASE_URL: "https://example.test",
+      KAI_PASS2_AUTH_COOKIE: cookieInput,
+      KAI_PASS2_BEARER_TOKEN: undefined,
+      KAI_PASS2_PREFLIGHT_ONLY: "true",
+      KAI_PASS2_RUN_WRITE_PATH: "false",
+    });
+
+    assert.equal(result.status, 1, result.output);
+    assert.deepEqual(result.calls, []);
+    assert.match(result.stdout, /API_AUTH_COOKIE_REQUEST_HEADER_SYNTAX_VALID\tKAI_PASS2_AUTH_COOKIE\tFAIL/);
+    assert.doesNotMatch(result.output, forbiddenSecretMaterial);
+  }
+});
+
+test("response-cookie attributes mixed into request cookie input fail before fetch", () => {
+  for (const cookieInput of [
+    "session=abc; Path=/",
+    "session=abc; SameSite=Lax",
+    "session=abc; Domain=example.com",
+    "session=abc; Max-Age=3600",
+    "session=abc; Expires=Wed, 21 Oct 2015 07:28:00 GMT",
+    "session=abc; HttpOnly",
+    "session=abc; Secure",
+  ]) {
+    const result = runVerifierWithMockFetch({
+      KAI_PASS2_BASE_URL: "https://example.test",
+      KAI_PASS2_AUTH_COOKIE: cookieInput,
+      KAI_PASS2_BEARER_TOKEN: undefined,
+      KAI_PASS2_PREFLIGHT_ONLY: "true",
+      KAI_PASS2_RUN_WRITE_PATH: "false",
+    });
+
+    assert.equal(result.status, 1, result.output);
+    assert.deepEqual(result.calls, []);
+    assert.match(result.stdout, /API_AUTH_COOKIE_REQUEST_HEADER_SYNTAX_VALID\tKAI_PASS2_AUTH_COOKIE\tFAIL/);
+    assert.doesNotMatch(result.output, forbiddenSecretMaterial);
+  }
+});
+
+test("additional request cookie pairs remain valid and attempt mocked fetch", () => {
+  const result = runVerifierWithMockFetch({
+    KAI_PASS2_BASE_URL: "https://example.test",
+    KAI_PASS2_AUTH_COOKIE: "session=abc; other=value",
+    KAI_PASS2_BEARER_TOKEN: undefined,
+    KAI_PASS2_PREFLIGHT_ONLY: "true",
+    KAI_PASS2_RUN_WRITE_PATH: "false",
+  });
+
+  assert.equal(result.status, 0, result.output);
+  assert.equal(result.calls.length, 1);
+  assert.match(result.stdout, /API_AUTH_COOKIE_REQUEST_HEADER_SYNTAX_VALID\tKAI_PASS2_AUTH_COOKIE\tPASS/);
+  assert.match(result.stdout, /API_AUTH_PREFLIGHT_COOKIE_SESSION_ACCEPTED\t\/api\/kai\/sprint2\/intake\/auth-preflight\tPASS\tHTTP 200/);
+  assert.doesNotMatch(result.output, forbiddenSecretMaterial);
+});
+
 test("API verifier calls auth preflight before status and fails closed", () => {
   const verifier = readFileSync("scripts/kai-sprint2-pass2-admin-metadata-intake-api-verifier.js", "utf8");
   const preflightRequestIndex = verifier.indexOf('request("/api/kai/sprint2/intake/auth-preflight")');
@@ -191,7 +326,7 @@ test("API verifier calls auth preflight before status and fails closed", () => {
 test("API verifier preflight-only mode calls only auth preflight and exits", () => {
   const result = runVerifierWithMockFetch({
     KAI_PASS2_BASE_URL: "https://example.test",
-    KAI_PASS2_AUTH_COOKIE: "secret-cookie-sentinel",
+    KAI_PASS2_AUTH_COOKIE: validRequestCookieHeader,
     KAI_PASS2_BEARER_TOKEN: undefined,
     KAI_PASS2_PREFLIGHT_ONLY: "true",
     KAI_PASS2_RUN_WRITE_PATH: "false",
@@ -212,6 +347,7 @@ test("API verifier preflight-only mode calls only auth preflight and exits", () 
   ]);
   assert.match(result.stdout, /API_AUTH_EXACTLY_ONE_METHOD_CONFIGURED\tauth_method\tPASS/);
   assert.match(result.stdout, /API_AUTH_COOKIE_ONLY_BEARER_ABSENT\tKAI_PASS2_AUTH_COOKIE,KAI_PASS2_BEARER_TOKEN\tPASS/);
+  assert.match(result.stdout, /API_AUTH_COOKIE_REQUEST_HEADER_SYNTAX_VALID\tKAI_PASS2_AUTH_COOKIE\tPASS/);
   assert.match(result.stdout, /API_PREFLIGHT_ONLY_REQUIRES_NO_WRITE_PATH\tKAI_PASS2_PREFLIGHT_ONLY,KAI_PASS2_RUN_WRITE_PATH\tPASS/);
   assert.match(result.stdout, /API_AUTH_PREFLIGHT_COOKIE_SESSION_ACCEPTED\t\/api\/kai\/sprint2\/intake\/auth-preflight\tPASS\tHTTP 200/);
   assert.doesNotMatch(result.output, /\/api\/kai\/sprint2\/intake\/status/);
@@ -223,7 +359,7 @@ test("API verifier preflight-only mode calls only auth preflight and exits", () 
 test("API verifier preflight-only mode preserves cookie-only and bearer-absent checks", () => {
   const result = runVerifierWithMockFetch({
     KAI_PASS2_BASE_URL: "https://example.test",
-    KAI_PASS2_AUTH_COOKIE: "secret-cookie-sentinel",
+    KAI_PASS2_AUTH_COOKIE: validRequestCookieHeader,
     KAI_PASS2_BEARER_TOKEN: "secret-token-sentinel",
     KAI_PASS2_PREFLIGHT_ONLY: "true",
     KAI_PASS2_RUN_WRITE_PATH: "false",
@@ -241,7 +377,7 @@ test("API verifier preflight-only mode preserves cookie-only and bearer-absent c
 test("API verifier preflight-only mode requires no write path before any API call", () => {
   const result = runVerifierWithMockFetch({
     KAI_PASS2_BASE_URL: "https://example.test",
-    KAI_PASS2_AUTH_COOKIE: "secret-cookie-sentinel",
+    KAI_PASS2_AUTH_COOKIE: validRequestCookieHeader,
     KAI_PASS2_BEARER_TOKEN: undefined,
     KAI_PASS2_PREFLIGHT_ONLY: "true",
     KAI_PASS2_RUN_WRITE_PATH: "true",
@@ -260,7 +396,7 @@ test("API verifier preflight-only mode does not log cookie, token, session, or u
   const result = runVerifierWithMockFetch(
     {
       KAI_PASS2_BASE_URL: "https://example.test",
-      KAI_PASS2_AUTH_COOKIE: "secret-cookie-sentinel",
+      KAI_PASS2_AUTH_COOKIE: validRequestCookieHeader,
       KAI_PASS2_BEARER_TOKEN: undefined,
       KAI_PASS2_PREFLIGHT_ONLY: "true",
       KAI_PASS2_RUN_WRITE_PATH: "false",
@@ -294,7 +430,7 @@ test("API verifier non-preflight mode still runs auth preflight, DB gate, then s
   const result = runVerifierWithMockFetch(
     {
       KAI_PASS2_BASE_URL: "https://example.test",
-      KAI_PASS2_AUTH_COOKIE: "secret-cookie-sentinel",
+      KAI_PASS2_AUTH_COOKIE: validRequestCookieHeader,
       KAI_PASS2_BEARER_TOKEN: undefined,
       KAI_PASS2_PREFLIGHT_ONLY: undefined,
       KAI_PASS2_DB_TARGET_CLASS: "production",

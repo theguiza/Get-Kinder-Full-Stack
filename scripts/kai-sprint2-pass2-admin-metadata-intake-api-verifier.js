@@ -44,6 +44,45 @@ function headers() {
   return result;
 }
 
+function isValidCookiePairName(name) {
+  return /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(name);
+}
+
+function isValidCookiePairValue(value) {
+  if (value.startsWith('"') || value.endsWith('"')) {
+    if (value.length < 2 || !value.startsWith('"') || !value.endsWith('"') || value.slice(1, -1).includes('"')) return false;
+    return /^[\x21\x23-\x2b\x2d-\x3a\x3c-\x5b\x5d-\x7e]*$/.test(value.slice(1, -1));
+  }
+  return /^[\x21\x23-\x2b\x2d-\x3a\x3c-\x5b\x5d-\x7e]*$/.test(value);
+}
+
+function isResponseCookieAttributeName(name) {
+  return /^(?:domain|expires|httponly|max-age|path|samesite|secure)$/i.test(name);
+}
+
+function isValidRequestCookieHeaderSyntax(cookieHeader) {
+  if (typeof cookieHeader !== "string" || cookieHeader.trim() === "") return false;
+  if (/[\x00-\x1f\x7f]/.test(cookieHeader)) return false;
+  if (/^\s*(?:cookie|set-cookie)\s*:/i.test(cookieHeader)) return false;
+
+  const parts = cookieHeader.split(";");
+  let hasRealCookiePair = false;
+  for (const part of parts) {
+    const segment = part.trim();
+    if (!segment) return false;
+    const equalsIndex = segment.indexOf("=");
+    if (equalsIndex <= 0) return false;
+
+    const name = segment.slice(0, equalsIndex);
+    const value = segment.slice(equalsIndex + 1);
+    if (!isValidCookiePairName(name) || !isValidCookiePairValue(value)) return false;
+    if (isResponseCookieAttributeName(name)) return false;
+    hasRealCookiePair = true;
+  }
+
+  return hasRealCookiePair;
+}
+
 function routeKey(path, method = "GET") {
   const routePath = path.split("?")[0].replace(
     /^\/api\/kai\/sprint2\/intake\/admin\/batches\/[^/]+\/file-reservations$/,
@@ -205,6 +244,24 @@ async function run() {
     "KAI_PASS2_AUTH_COOKIE,KAI_PASS2_BEARER_TOKEN",
     "PASS",
     "Copied-cookie auth is configured and bearer token is absent.",
+  );
+
+  if (!isValidRequestCookieHeaderSyntax(AUTH_COOKIE)) {
+    add(
+      "API_AUTH_COOKIE_REQUEST_HEADER_SYNTAX_VALID",
+      "KAI_PASS2_AUTH_COOKIE",
+      "FAIL",
+      "KAI_PASS2_AUTH_COOKIE must be a valid request cookie header string.",
+    );
+    printRows();
+    process.exitCode = 1;
+    return;
+  }
+  add(
+    "API_AUTH_COOKIE_REQUEST_HEADER_SYNTAX_VALID",
+    "KAI_PASS2_AUTH_COOKIE",
+    "PASS",
+    "KAI_PASS2_AUTH_COOKIE has valid request cookie header syntax.",
   );
 
   if (PREFLIGHT_ONLY && RUN_WRITE_PATH) {
