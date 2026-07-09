@@ -1,41 +1,136 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
-import { __testables } from "../Backend/kai/routes/sprint2IntakeApi.js";
+const routeSource = readFileSync("Backend/kai/routes/sprint2IntakeApi.js", "utf8");
+const authPreflightRouteSource = readFileSync("Backend/kai/routes/sprint2IntakeAuthPreflightApi.js", "utf8");
+const legacyKaiRouteSource = readFileSync("Backend/routes/kaiApi.js", "utf8");
+const indexSource = readFileSync("index.js", "utf8");
+const kaiDbSource = readFileSync("Backend/kai/db/kaiDb.js", "utf8");
+const kaiBackendIndexSource = readFileSync("Backend/kai/index.js", "utf8");
+const actorSource = readFileSync("Backend/kai/auth/actorContext.js", "utf8");
+const tenantAuthorizationSource = readFileSync("Backend/kai/auth/tenantAuthorization.js", "utf8");
+const actorContextTestSource = readFileSync("__tests__/kai-sprint2-actor-context.spec.js", "utf8");
+const tenantAuthorizationTestSource = readFileSync("__tests__/kai-sprint2-tenant-authorization.spec.js", "utf8");
 
 test("validator blockers map to 422 route behavior", () => {
-  let statusCode = null;
-  let jsonBody = null;
-  const res = {
-    status(code) {
-      statusCode = code;
-      return this;
-    },
-    json(body) {
-      jsonBody = body;
-      return body;
-    },
-  };
-
-  __testables.sendServiceResult(res, {
-    ok: false,
-    error: { code: "validation_blocker", message: "blocked", status: 422 },
-    blockers: [{ validator_key: "VAL-STO-001", severity: "blocker" }],
-  });
-
-  assert.equal(statusCode, 422);
-  assert.equal(jsonBody.error.code, "validation_blocker");
+  assert.match(routeSource, /result\?\.error\?\.code\s*===\s*["']validation_blocker["']/);
+  assert.match(routeSource, /return\s+res\.status\(422\)\.json\(result\)/);
 });
 
-test("api contract exposes Pass 2 status and admin metadata route shape", async () => {
-  const { default: router } = await import("../Backend/kai/routes/sprint2IntakeApi.js");
-  const statusLayer = router.stack.find((layer) => layer.route?.path === "/status");
-  const batchLayer = router.stack.find((layer) => layer.route?.path === "/admin/batches");
-  const fileLayer = router.stack.find((layer) => layer.route?.path === "/admin/batches/:intakeBatchId/file-reservations");
-  assert.ok(statusLayer);
-  assert.ok(batchLayer);
-  assert.ok(fileLayer);
-  assert.equal(Object.hasOwn(statusLayer.route.methods, "get"), true);
-  assert.equal(Object.hasOwn(batchLayer.route.methods, "post"), true);
-  assert.equal(Object.hasOwn(fileLayer.route.methods, "post"), true);
+test("api contract exposes Sprint 2 status and admin metadata route shape", () => {
+  assert.match(routeSource, /router\.get\(["']\/status["']/);
+  assert.match(routeSource, /router\.post\(["']\/admin\/batches["']/);
+  assert.match(routeSource, /router\.post\(["']\/admin\/batches\/:intakeBatchId\/file-reservations["']/);
+  assert.match(routeSource, /mode:\s*["']admin_metadata_only["']/);
+  assert.match(routeSource, /pass1f_contract:\s*["']p0_pass1f_metadata_write_storage_boundary_contract["']/);
+  assert.match(routeSource, /metadata_write_enabled:\s*false/);
+  assert.match(routeSource, /storage_provider_enabled:\s*false/);
+  assert.match(routeSource, /storage_upload_enabled:\s*false/);
+  assert.match(routeSource, /signed_upload_enabled:\s*false/);
+  assert.match(routeSource, /signed_read_enabled:\s*false/);
+  assert.match(routeSource, /parser_worker_enabled:\s*false/);
+  assert.match(routeSource, /source_promotion_enabled:\s*false/);
+});
+
+test("sprint2IntakeApi fails closed while disabled and does not expose req.user", () => {
+  assert.match(routeSource, /import\s+\{\s*requireKaiSprint2Enabled\s*\}\s+from\s+["']\.\.\/config\/kaiSprint2Config\.js["']/);
+  assert.match(routeSource, /router\.use\(requireKaiSprint2Enabled\)/);
+  assert.doesNotMatch(routeSource, /\breq\.user\b/);
+  assert.doesNotMatch(routeSource, /\buser:\s*req\b|\bsession:\s*req\b|\bheaders:\s*req\b/);
+});
+
+test("sprint2IntakeApi contains no direct route reads or writes against kai tables", () => {
+  assert.doesNotMatch(routeSource, /\b(?:select|insert|update|delete)\b[\s\S]{0,160}\bkai\./i);
+  assert.doesNotMatch(routeSource, /\bkai\.(?!js\b)[a-z_]+\b/i);
+  assert.doesNotMatch(routeSource, /kaiIntakeService\.js/);
+  assert.doesNotMatch(routeSource, /\b(?:createIntakeBatch|reserveIntakeFileMetadata|requestUploadUrl)\b/);
+});
+
+test("Pass 1F API contract tests do not import pg or initialize a pool", () => {
+  assert.doesNotMatch(routeSource, /from\s+["'][^"']*Backend\/db\/pg\.js["']/);
+  assert.doesNotMatch(routeSource, /\bnew\s+Pool\b|\bpool\.query\b|\bconnect\s*\(/);
+});
+
+test("route files contain no direct SQL against kai schema", () => {
+  for (const source of [routeSource, authPreflightRouteSource, legacyKaiRouteSource]) {
+    assert.doesNotMatch(source, /\b(?:SELECT|INSERT|UPDATE|DELETE)\b[\s\S]{0,200}\bkai\./i);
+    assert.doesNotMatch(source, /\bkai\.(?!js\b)[a-z_]+\b/i);
+  }
+});
+
+test("sprint2IntakeApi does not enable raw upload, signed URLs, parser raw-file work, source promotion, or tenant DB lookup", () => {
+  assert.match(routeSource, /Raw file upload is disabled/);
+  assert.doesNotMatch(routeSource, /\bsigned(?:Upload|Read)Url\b|\bgetSignedUrl\b|\bsigned_url\b/i);
+  assert.doesNotMatch(routeSource, /\bparser\b[\s\S]{0,80}\braw[-_ ]?file\b/i);
+  assert.doesNotMatch(routeSource, /\bpromote(?:Source)?\b|\bsource_promotion_enabled:\s*true\b/i);
+  assert.doesNotMatch(routeSource, /from\s+["'][^"']*(?:kaiDb|kaiQueries|kaiIntakeQueries)\.js["']/);
+  assert.doesNotMatch(routeSource, /\bSELECT\b[\s\S]{0,160}\b(?:kai\.|organization|tenant|membership)/i);
+});
+
+test("kaiDb imports the existing Postgres pool and does not instantiate a pool", () => {
+  assert.match(kaiDbSource, /import\s+pool\s+from\s+["']\.\.\/\.\.\/db\/pg\.js["']/);
+  assert.match(kaiDbSource, /export\s+function\s+query\(/);
+  assert.doesNotMatch(kaiDbSource, /import\s+\{\s*Pool\s*\}\s+from\s+["']pg["']/);
+  assert.doesNotMatch(kaiDbSource, /\bnew\s+Pool\b/);
+  assert.doesNotMatch(kaiDbSource, /from\s+["']neo4j-driver["']/);
+});
+
+test("index.js preserves legacy KAI and Sprint 2 auth-preflight mounts", () => {
+  assert.match(indexSource, /import\s+\{\s*verifyToken,\s*ensureAuthenticatedApi\s*\}\s+from\s+["']\.\/middleware\/auth\.js["']/);
+  assert.match(indexSource, /app\.use\(["']\/api\/kai["'],\s*kaiRouter\)/);
+  assert.match(indexSource, /["']\/api\/kai\/sprint2\/intake\/auth-preflight["'][\s\S]*ensureAuthenticatedApi[\s\S]*sprint2IntakeAuthPreflightApiRouter/);
+  assert.match(indexSource, /["']\/api\/kai\/sprint2\/intake["'][\s\S]*requireKaiSprint2Enabled[\s\S]*ensureAuthenticatedApi[\s\S]*sprint2IntakeApiRouter/);
+  assert.doesNotMatch(indexSource, /function\s+ensureAuthenticatedApi|const\s+ensureAuthenticatedApi\s*=/);
+});
+
+test("Backend KAI index exports Pass 1C actor and tenant helpers from accepted auth files", () => {
+  assert.match(kaiBackendIndexSource, /from\s+["']\.\/auth\/actorContext\.js["']/);
+  assert.match(kaiBackendIndexSource, /from\s+["']\.\/auth\/tenantAuthorization\.js["']/);
+  assert.match(kaiBackendIndexSource, /hydrateSprint2ActorContextFromRequest/);
+  assert.match(kaiBackendIndexSource, /findActiveOrganizationMembership/);
+  assert.doesNotMatch(kaiBackendIndexSource, /from\s+["']\.\/auth\/kaiActorContext\.js["']/);
+  assert.doesNotMatch(kaiBackendIndexSource, /from\s+["']\.\/auth\/kaiAuthorizationService\.js["']/);
+});
+
+test("Backend KAI index exports Pass 1D validator and service contracts without DB adapters", () => {
+  assert.match(kaiBackendIndexSource, /from\s+["']\.\/validators\/runValidators\.js["']/);
+  assert.match(kaiBackendIndexSource, /from\s+["']\.\/validators\/intakeValidators\.js["']/);
+  assert.match(kaiBackendIndexSource, /from\s+["']\.\/services\/intakeService\.js["']/);
+  assert.match(kaiBackendIndexSource, /validateIntakePreflight/);
+  assert.match(kaiBackendIndexSource, /requestIntakeFileTransfer/);
+  assert.doesNotMatch(kaiBackendIndexSource, /from\s+["'][^"']*(?:kaiDb|db\/pg|kaiIntakeQueries|storageAdapter)\.js["']/);
+});
+
+test("Backend KAI index exports Pass 1E state, assistant, and audit contracts without DB adapters", () => {
+  assert.match(kaiBackendIndexSource, /from\s+["']\.\/validators\/stateTransitionValidators\.js["']/);
+  assert.match(kaiBackendIndexSource, /from\s+["']\.\/validators\/assistantBoundaryValidators\.js["']/);
+  assert.match(kaiBackendIndexSource, /from\s+["']\.\/validators\/auditValidators\.js["']/);
+  assert.match(kaiBackendIndexSource, /from\s+["']\.\/services\/auditService\.js["']/);
+  assert.match(kaiBackendIndexSource, /validateP0IntakeStateTransitionAttempt/);
+  assert.match(kaiBackendIndexSource, /validateBlockedAttemptAuditPayload/);
+  assert.match(kaiBackendIndexSource, /recordBlockedAttemptAudit/);
+  assert.doesNotMatch(kaiBackendIndexSource, /from\s+["'][^"']*(?:kaiDb|db\/pg|kaiIntakeQueries|storageAdapter)\.js["']/);
+});
+
+test("Pass 1C auth helper SQL source is SELECT-only and isolated to helper modules", () => {
+  const authSource = `${actorSource}\n${tenantAuthorizationSource}`;
+  assert.match(actorSource, /FROM kai\.users/);
+  assert.match(actorSource, /JOIN kai\.roles/);
+  assert.match(tenantAuthorizationSource, /FROM kai\.organization_memberships/);
+  assert.doesNotMatch(authSource, /\b(?:INSERT|UPDATE|DELETE|UPSERT|TRUNCATE|ALTER|CREATE|DROP|GRANT|REVOKE)\b/i);
+  assert.doesNotMatch(authSource, /from\s+["'][^"']*(?:kaiDb|db\/pg|kaiQueries)\.js["']/);
+  assert.doesNotMatch(authSource, /\bconnect\s*\(|\bnew\s+Pool\b/);
+});
+
+test("Pass 1C tests use injected query functions and do not runtime-import DB modules", () => {
+  const pass1cTestSource = `${actorContextTestSource}\n${tenantAuthorizationTestSource}`;
+  assert.doesNotMatch(pass1cTestSource, /import\s+[\s\S]*["'][^"']*Backend\/kai\/db\/kaiDb\.js["']/);
+  assert.doesNotMatch(pass1cTestSource, /import\s+[\s\S]*["'][^"']*Backend\/db\/pg\.js["']/);
+  assert.doesNotMatch(pass1cTestSource, /import\s+[\s\S]*["'][^"']*Backend\/kai\/db\/kaiQueries\.js["']/);
+  assert.doesNotMatch(pass1cTestSource, /\bnew\s+Pool\b/);
+  assert.match(pass1cTestSource, /createActorQuery/);
+  assert.match(pass1cTestSource, /createMembershipQuery/);
+  assert.match(pass1cTestSource, /hydrateSprint2ActorContextFromRequest/);
+  assert.match(pass1cTestSource, /authorizeSprint2TenantMembershipWithLookup/);
 });

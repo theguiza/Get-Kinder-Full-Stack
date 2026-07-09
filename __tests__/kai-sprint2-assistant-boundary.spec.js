@@ -1,7 +1,20 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
-import { validateAssistantBoundary } from "../Backend/kai/validators/assistantBoundaryValidators.js";
+import {
+  assistant_claim_creation_blocked,
+  assistant_evidence_creation_blocked,
+  assistant_human_review_bypass_blocked,
+  assistant_raw_file_access_blocked,
+  assistant_report_export_generation_blocked,
+  assistant_review_approval_blocked,
+  assistant_signed_url_access_blocked,
+  assistant_source_promotion_blocked,
+  validateAssistantBoundary,
+} from "../Backend/kai/validators/assistantBoundaryValidators.js";
+
+const assistantBoundarySource = readFileSync("Backend/kai/validators/assistantBoundaryValidators.js", "utf8");
 
 test("assistant boundary blocks restricted system/assistant operations", () => {
   const result = validateAssistantBoundary({
@@ -20,4 +33,28 @@ test("assistant boundary permits non-restricted metadata operation", () => {
   });
 
   assert.equal(result.severity, "pass");
+});
+
+test("assistant boundary blocks raw file, signed URL, approval, promotion, claim, evidence, report, and review bypass operations", () => {
+  const actorContext = { actorType: "assistant" };
+  const blocked = [
+    assistant_raw_file_access_blocked({ actorContext }),
+    assistant_signed_url_access_blocked({ actorContext }),
+    assistant_review_approval_blocked({ actorContext }),
+    assistant_source_promotion_blocked({ actorContext }),
+    assistant_claim_creation_blocked({ actorContext }),
+    assistant_evidence_creation_blocked({ actorContext }),
+    assistant_report_export_generation_blocked({ actorContext }),
+    assistant_human_review_bypass_blocked({ actorContext }),
+  ];
+
+  for (const result of blocked) {
+    assert.equal(result.severity, "blocker");
+    assert.equal(result.blocking_reason, "assistant_boundary");
+  }
+});
+
+test("assistant boundary validator has no assistant, OpenAI, Neo4j, DB, or external API imports", () => {
+  assert.doesNotMatch(assistantBoundarySource, /from\s+["'][^"']*(?:openai|assistant|neo4j|db\/pg|kaiDb)[^"']*["']/i);
+  assert.doesNotMatch(assistantBoundarySource, /\bfetch\s*\(|\baxios\b|\bOpenAI\b|\bneo4j\b|\bnew\s+Pool\b|\bpool\.query\b/i);
 });

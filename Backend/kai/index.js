@@ -1,4 +1,92 @@
 export { isKaiSprint2Enabled, requireKaiSprint2Enabled } from "./config/kaiSprint2Config.js";
-export { resolveKaiActorContext } from "./auth/kaiActorContext.js";
-export { validateActorCanPerformOperation } from "./auth/kaiAuthorizationService.js";
-export { createIntakeBatch, reserveIntakeFileMetadata, requestUploadUrl } from "./services/kaiIntakeService.js";
+export {
+  ACTIVE_KAI_USER_MAPPING_SQL,
+  KAI_USER_ROLE_NAMES_SQL,
+  buildSafeHydratedActorContext,
+  extractSprint2ActorContext,
+  findActiveKaiUserMappingByLegacyPublicUserdataId,
+  hydrateSprint2ActorContextFromRequest,
+  listKaiRoleNamesForActorUser,
+} from "./auth/actorContext.js";
+export {
+  ACTIVE_ORGANIZATION_MEMBERSHIP_SQL,
+  ALLOWED_ACTIVE_MEMBERSHIP_STATUS,
+  authorizeSprint2TenantMembershipWithLookup,
+  authorizeSprint2TenantMembership,
+  findActiveOrganizationMembership,
+  isExplicitActiveMembershipStatus,
+} from "./auth/tenantAuthorization.js";
+export { runValidators } from "./validators/runValidators.js";
+export {
+  actor_context_required,
+  file_policy_status_supported,
+  intakeValidatorGroups,
+  organization_id_required,
+  parser_raw_file_work_blocked_in_p0,
+  raw_upload_blocked_in_p0,
+  signed_url_blocked_in_p0,
+  source_promotion_blocked_in_p0,
+  storage_provider_supported,
+  tenant_context_required,
+} from "./validators/intakeValidators.js";
+export {
+  createIntakeBatch,
+  confirmUpload,
+  parseIntakeRawFile,
+  promoteIntakeSource,
+  registerIntakeFileMetadata,
+  requestUploadUrl,
+  requestIntakeFileTransfer,
+  reserveIntakeFile,
+  validateBlockedAttemptAuditContract,
+  validateIntakePreflight,
+} from "./services/intakeService.js";
+export {
+  DisabledStorageProvider,
+  DISABLED_STORAGE_PROVIDER_CONTRACT,
+  createDisabledStorageProvider,
+  defaultStorageProvider,
+} from "./storage/storageProvider.js";
+export {
+  GoogleCloudStorageProvider,
+  createGoogleCloudStorageProvider,
+} from "./storage/googleCloudStorageProvider.js";
+export {
+  storage_provider_disabled_in_p0,
+  upload_url_request_blocked_in_p0,
+} from "./validators/storageValidators.js";
+export {
+  checksum_format_supported,
+  checksum_required,
+  duplicate_checksum_blocked,
+  idempotencyValidatorGroups,
+  idempotency_key_format_supported,
+  idempotency_key_required,
+  idempotent_replay_checksum_matches,
+} from "./validators/idempotencyValidators.js";
+export {
+  claim_creation_blocked_from_intake_in_p0,
+  evidence_extraction_blocked_from_raw_file_in_p0,
+  public_funder_gate_opening_blocked_in_p0,
+  report_export_generation_blocked_in_p0,
+  source_promotion_blocked_in_p0 as state_transition_source_promotion_blocked_in_p0,
+  validateP0IntakeStateTransitionAttempt,
+} from "./validators/stateTransitionValidators.js";
+export {
+  assistant_claim_creation_blocked,
+  assistant_evidence_creation_blocked,
+  assistant_human_review_bypass_blocked,
+  assistant_raw_file_access_blocked,
+  assistant_report_export_generation_blocked,
+  assistant_review_approval_blocked,
+  assistant_signed_url_access_blocked,
+  assistant_source_promotion_blocked,
+  validateAssistantBoundary,
+} from "./validators/assistantBoundaryValidators.js";
+export {
+  BLOCKED_ATTEMPT_AUDIT_METADATA_ALLOWLIST,
+  sanitizeBlockedAttemptAuditMetadata,
+  validateBlockedAttemptAuditPayload,
+} from "./validators/auditValidators.js";
+export { PASS1E_AUDIT_CONTRACT, recordBlockedAttemptAudit } from "./services/auditService.js";
+export { default as sprint2IntakeApiRouter } from "./routes/sprint2IntakeApi.js";

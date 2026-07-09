@@ -1,8 +1,8 @@
-import { StorageAdapter } from "./storageAdapter.js";
+import { DisabledStorageProvider } from "./storageProvider.js";
 
-export class GoogleCloudStorageProvider extends StorageAdapter {
+export class GoogleCloudStorageProvider extends DisabledStorageProvider {
   constructor(options = {}) {
-    super({ provider: "gcs", ...options });
+    super({ provider: "gcs", reason: "gcs_disabled_in_p0_pass1f", ...options });
   }
 }
 

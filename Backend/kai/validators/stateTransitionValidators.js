@@ -12,6 +12,86 @@ const FILE_POLICY_TRANSITIONS = new Set([
   "pending->skipped",
 ]);
 
+export const P0_BLOCKED_STATE_TRANSITION_REASONS = Object.freeze({
+  promote_intake_source: "source_promotion_blocked_in_p0",
+  create_claim_from_intake: "claim_creation_blocked_from_intake_in_p0",
+  extract_evidence_from_raw_file: "evidence_extraction_blocked_from_raw_file_in_p0",
+  generate_report_export: "report_export_generation_blocked_in_p0",
+  open_public_funder_gate: "public_funder_gate_opening_blocked_in_p0",
+});
+
+const P0_SUPPORTED_INTAKE_TRANSITIONS = Object.freeze({
+  file_policy_status: FILE_POLICY_TRANSITIONS,
+});
+
+function stateTransitionBlocker({ operation, blocking_reason, message, required_fix }) {
+  return blockerResult("VAL-STA-P0-001", message, {
+    object_type: "state_transition",
+    object_code: operation || "unknown",
+    blocking_reason,
+    required_fix,
+    evidence: {
+      sprint2_p0_mutating_transition_enabled: false,
+    },
+  });
+}
+
+export function validateP0IntakeStateTransitionAttempt({ operation, objectType, from = "pending", to } = {}) {
+  const blockedReason = P0_BLOCKED_STATE_TRANSITION_REASONS[operation];
+  if (blockedReason) {
+    return stateTransitionBlocker({
+      operation,
+      blocking_reason: blockedReason,
+      message: "This state transition is blocked in Sprint 2 P0.",
+      required_fix: "Keep this operation behind a later controlled implementation pass.",
+    });
+  }
+
+  if (objectType === "file_policy_status") {
+    if (P0_SUPPORTED_INTAKE_TRANSITIONS.file_policy_status.has(`${from}->${to}`)) {
+      return passResult("VAL-STA-P0-001", "P0 intake state transition is allowed.", {
+        object_type: objectType,
+        from,
+        to,
+      });
+    }
+
+    return stateTransitionBlocker({
+      operation: `${from}->${to}`,
+      blocking_reason: "unknown_state_transition_blocked",
+      message: "Unknown or unsupported state transition is blocked in Sprint 2 P0.",
+      required_fix: "Use the explicit P0 intake state-transition matrix.",
+    });
+  }
+
+  return stateTransitionBlocker({
+    operation,
+    blocking_reason: "unknown_state_transition_blocked",
+    message: "Unknown or unsupported state transition is blocked in Sprint 2 P0.",
+    required_fix: "Use an explicit supported P0 intake transition.",
+  });
+}
+
+export function source_promotion_blocked_in_p0() {
+  return validateP0IntakeStateTransitionAttempt({ operation: "promote_intake_source" });
+}
+
+export function claim_creation_blocked_from_intake_in_p0() {
+  return validateP0IntakeStateTransitionAttempt({ operation: "create_claim_from_intake" });
+}
+
+export function evidence_extraction_blocked_from_raw_file_in_p0() {
+  return validateP0IntakeStateTransitionAttempt({ operation: "extract_evidence_from_raw_file" });
+}
+
+export function report_export_generation_blocked_in_p0() {
+  return validateP0IntakeStateTransitionAttempt({ operation: "generate_report_export" });
+}
+
+export function public_funder_gate_opening_blocked_in_p0() {
+  return validateP0IntakeStateTransitionAttempt({ operation: "open_public_funder_gate" });
+}
+
 export function validateFilePolicyStatusTransition({ from = "pending", to } = {}) {
   if (!FILE_POLICY_STATUSES.includes(to)) {
     return blockerResult("VAL-STA-001", "File policy status is not DDL-valid.", {

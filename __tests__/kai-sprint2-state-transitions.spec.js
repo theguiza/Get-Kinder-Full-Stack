@@ -3,6 +3,12 @@ import assert from "node:assert/strict";
 
 import {
   MALWARE_SCAN_PRODUCTION_DEFAULT,
+  claim_creation_blocked_from_intake_in_p0,
+  evidence_extraction_blocked_from_raw_file_in_p0,
+  public_funder_gate_opening_blocked_in_p0,
+  report_export_generation_blocked_in_p0,
+  source_promotion_blocked_in_p0,
+  validateP0IntakeStateTransitionAttempt,
   validateMalwareScanStatusDbValue,
   validateFilePolicyStatusTransition,
   validateStorageProviderDbValue,
@@ -29,4 +35,29 @@ test("app-level DB vocabulary blocks invalid storage provider and malware values
   }
   assert.equal(validateMalwareScanStatusDbValue({ malwareScanStatus: "manual" }).severity, "blocker");
   assert.equal(validateMalwareScanStatusDbValue({ malwareScanStatus: "stub" }).severity, "blocker");
+});
+
+test("P0 state-transition validators block unsafe intake promotions and generated artifacts", () => {
+  const blocked = [
+    [source_promotion_blocked_in_p0(), "source_promotion_blocked_in_p0"],
+    [claim_creation_blocked_from_intake_in_p0(), "claim_creation_blocked_from_intake_in_p0"],
+    [evidence_extraction_blocked_from_raw_file_in_p0(), "evidence_extraction_blocked_from_raw_file_in_p0"],
+    [report_export_generation_blocked_in_p0(), "report_export_generation_blocked_in_p0"],
+    [public_funder_gate_opening_blocked_in_p0(), "public_funder_gate_opening_blocked_in_p0"],
+  ];
+
+  for (const [result, reason] of blocked) {
+    assert.equal(result.severity, "blocker");
+    assert.equal(result.blocking_reason, reason);
+  }
+});
+
+test("P0 state-transition validators block unknown transitions and remain pure", () => {
+  const result = validateP0IntakeStateTransitionAttempt({
+    objectType: "source",
+    operation: "unlisted_transition",
+  });
+
+  assert.equal(result.severity, "blocker");
+  assert.equal(result.blocking_reason, "unknown_state_transition_blocked");
 });
