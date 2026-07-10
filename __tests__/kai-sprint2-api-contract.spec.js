@@ -40,11 +40,17 @@ test("sprint2IntakeApi fails closed while disabled and does not expose req.user"
   assert.doesNotMatch(routeSource, /\buser:\s*req\b|\bsession:\s*req\b|\bheaders:\s*req\b/);
 });
 
-test("sprint2IntakeApi contains no direct route reads or writes against kai tables", () => {
+test("sprint2IntakeApi delegates admin metadata operations to service without direct kai table access", () => {
+  assert.match(routeSource, /import\(["']\.\.\/services\/kaiIntakeService\.js["']\)/);
+  assert.match(routeSource, /\bcheckAdminAccess\b/);
+  assert.match(routeSource, /\bcreateIntakeBatch\b/);
+  assert.match(routeSource, /\breserveIntakeFileMetadata\b/);
+  assert.match(routeSource, /service\.checkAdminAccess/);
+  assert.match(routeSource, /service\.createIntakeBatch/);
+  assert.match(routeSource, /service\.reserveIntakeFileMetadata/);
+  assert.doesNotMatch(routeSource, /\brequestUploadUrl\b/);
   assert.doesNotMatch(routeSource, /\b(?:select|insert|update|delete)\b[\s\S]{0,160}\bkai\./i);
   assert.doesNotMatch(routeSource, /\bkai\.(?!js\b)[a-z_]+\b/i);
-  assert.doesNotMatch(routeSource, /kaiIntakeService\.js/);
-  assert.doesNotMatch(routeSource, /\b(?:createIntakeBatch|reserveIntakeFileMetadata|requestUploadUrl)\b/);
 });
 
 test("Pass 1F API contract tests do not import pg or initialize a pool", () => {

@@ -3,6 +3,8 @@ import { sendKaiError } from "../errors/kaiErrors.js";
 import { requireKaiSprint2Enabled } from "../config/kaiSprint2Config.js";
 
 const router = express.Router();
+let intakeServiceOverride = null;
+let intakeServicePromise = null;
 
 export function sendServiceResult(res, result, successStatus = 200) {
   if (result?.ok) return res.status(successStatus).json(result);
@@ -16,6 +18,36 @@ export function sendServiceResult(res, result, successStatus = 200) {
     blockers: result?.blockers,
     warnings: result?.warnings,
   });
+}
+
+function safeAuthenticatedUser(req = {}) {
+  const user = req?.["user"];
+  if (!user || typeof user !== "object" || Array.isArray(user)) return null;
+  return {
+    id: user.id,
+  };
+}
+
+function requestPayload(req = {}) {
+  return req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : {};
+}
+
+function requestContext(req = {}, route) {
+  const payload = requestPayload(req);
+  return {
+    req: { user: safeAuthenticatedUser(req) },
+    payload,
+    organizationId: payload.organization_id,
+    engagementId: payload.engagement_id,
+    idempotencyKey: payload.idempotency_key || null,
+    route,
+  };
+}
+
+async function getIntakeService() {
+  if (intakeServiceOverride) return intakeServiceOverride;
+  intakeServicePromise ||= import("../services/kaiIntakeService.js");
+  return intakeServicePromise;
 }
 
 router.use(requireKaiSprint2Enabled);
@@ -41,21 +73,31 @@ router.get("/status", (req, res) => {
   });
 });
 
-router.get("/admin/access-check", (req, res) => {
-  return sendKaiError(res, "operation_not_enabled", {
-    status: 422,
-    message: "KAI Sprint 2 admin intake operations are disabled for this pass.",
+router.get("/admin/access-check", async (req, res) => {
+  const payload = requestPayload(req);
+  const service = await getIntakeService();
+  const result = await service.checkAdminAccess({
+    ...requestContext(req, "/api/kai/sprint2/intake/admin/access-check"),
+    organizationId: req.query?.organization_id || payload.organization_id,
+    engagementId: req.query?.engagement_id || payload.engagement_id,
   });
+  return sendServiceResult(res, result);
 });
 
-router.post("/admin/batches", (req, res) => {
-  return sendKaiError(res, "operation_not_enabled", {
-    status: 422,
-    message: "KAI Sprint 2 admin intake operations are disabled for this pass.",
+router.post("/admin/batches", async (req, res) => {
+  const payload = requestPayload(req);
+  const service = await getIntakeService();
+  const result = await service.createIntakeBatch({
+    ...requestContext(req, "/api/kai/sprint2/intake/admin/batches"),
+    batchCode: payload.batch_code,
+    sourceSystemName: payload.source_system_name || null,
+    sourceSystemRef: payload.source_system_ref || null,
+    notes: payload.notes || null,
   });
+  return sendServiceResult(res, result, 201);
 });
 
-router.post("/admin/batches/:intakeBatchId/file-reservations", (req, res) => {
+router.post("/admin/batches/:intakeBatchId/file-reservations", async (req, res) => {
   if (req.is("multipart/form-data")) {
     return sendKaiError(res, "invalid_request", {
       status: 400,
@@ -63,14 +105,38 @@ router.post("/admin/batches/:intakeBatchId/file-reservations", (req, res) => {
     });
   }
 
-  return sendKaiError(res, "operation_not_enabled", {
-    status: 422,
-    message: "KAI Sprint 2 file reservation operations are disabled for this pass.",
+  const payload = requestPayload(req);
+  const service = await getIntakeService();
+  const result = await service.reserveIntakeFileMetadata({
+    ...requestContext(req, "/api/kai/sprint2/intake/admin/batches/:intakeBatchId/file-reservations"),
+    intakeBatchId: req.params?.intakeBatchId,
+    intakeFileId: payload.intake_file_id,
+    originalFilename: payload.original_filename,
+    safeFilename: payload.safe_filename,
+    fileExtension: payload.file_extension,
+    mimeType: payload.mime_type,
+    fileSizeBytes: payload.file_size_bytes,
+    checksum: payload.checksum,
+    hashAlgorithm: payload.hash_algorithm,
+    storageProvider: payload.storage_provider,
+    storageBucket: payload.storage_bucket,
+    filePolicyStatus: payload.file_policy_status,
+    malwareScanStatus: payload.malware_scan_status,
   });
+  return sendServiceResult(res, result, 201);
 });
 
 export default router;
 
 export const __testables = {
+  requestContext,
+  requestPayload,
+  safeAuthenticatedUser,
   sendServiceResult,
+  setIntakeServiceForTest(service) {
+    intakeServiceOverride = service;
+    return () => {
+      intakeServiceOverride = null;
+    };
+  },
 };

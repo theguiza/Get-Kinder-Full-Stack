@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import { requireKaiSprint2Enabled } from "../Backend/kai/config/kaiSprint2Config.js";
-import router from "../Backend/kai/routes/sprint2IntakeApi.js";
+import router, { __testables as intakeRouteTestables } from "../Backend/kai/routes/sprint2IntakeApi.js";
 import authPreflightRouter, { __testables as authPreflightTestables } from "../Backend/kai/routes/sprint2IntakeAuthPreflightApi.js";
 import { ensureAuthenticatedApi } from "../middleware/auth.js";
 
@@ -51,6 +51,18 @@ function runFeatureGateBeforeAuth({ authenticated = false } = {}) {
   return { res, authMiddlewareReached };
 }
 
+function routeHandler(path, method) {
+  const layer = router.stack.find((candidate) => candidate.route?.path === path && candidate.route?.methods?.[method]);
+  assert.ok(layer, `${method.toUpperCase()} ${path} route exists`);
+  return layer.route.stack[0].handle;
+}
+
+async function invokeRoute(path, method, req) {
+  const res = createResponse();
+  await routeHandler(path, method)(req, res);
+  return res;
+}
+
 test("feature flag OFF returns 403 feature_disabled before Sprint 2 route execution", () => {
   const original = process.env.KAI_SPRINT2_ENABLED;
   process.env.KAI_SPRINT2_ENABLED = "false";
@@ -77,6 +89,136 @@ test("Pass 2 router exposes only metadata-intake admin surface", () => {
     "/admin/batches/:intakeBatchId/file-reservations",
     "/status",
   ]);
+});
+
+test("admin access route delegates to checkAdminAccess with sanitized request context", async () => {
+  let serviceInput = null;
+  const restore = intakeRouteTestables.setIntakeServiceForTest({
+    async checkAdminAccess(input) {
+      serviceInput = input;
+      return { ok: true, data: { metadata_only: true }, warnings: [] };
+    },
+  });
+
+  try {
+    const originalReq = {
+      query: {
+        organization_id: "org-1",
+        engagement_id: "eng-1",
+      },
+      headers: { cookie: "session=secret-cookie-sentinel" },
+      cookies: { session: "secret-cookie-sentinel" },
+      session: { id: "session-value-sentinel" },
+      user: {
+        id: 46,
+        email: "email-sentinel@example.test",
+        firstname: "First",
+        lastname: "Last",
+        token: "secret-token-sentinel",
+      },
+    };
+
+    const res = await invokeRoute("/admin/access-check", "get", originalReq);
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(serviceInput.organizationId, "org-1");
+    assert.equal(serviceInput.engagementId, "eng-1");
+    assert.notEqual(serviceInput.req, originalReq);
+    assert.deepEqual(serviceInput.req, {
+      user: {
+        id: 46,
+      },
+    });
+    assert.equal("headers" in serviceInput, false);
+    assert.equal("cookies" in serviceInput, false);
+    assert.equal("session" in serviceInput, false);
+  } finally {
+    restore();
+  }
+});
+
+test("admin batch route delegates to createIntakeBatch without direct DB access", async () => {
+  let serviceInput = null;
+  const restore = intakeRouteTestables.setIntakeServiceForTest({
+    async createIntakeBatch(input) {
+      serviceInput = input;
+      return { ok: true, data: { intake_batch_id: "batch-1", metadata_only: true }, warnings: [] };
+    },
+  });
+
+  try {
+    const res = await invokeRoute("/admin/batches", "post", {
+      user: { id: 46, email: "email-sentinel@example.test" },
+      body: {
+        organization_id: "org-1",
+        engagement_id: "eng-1",
+        batch_code: "BATCH-001",
+        idempotency_key: "idem-1",
+        source_system_name: "synthetic",
+        notes: "metadata only",
+      },
+    });
+
+    assert.equal(res.statusCode, 201);
+    assert.equal(serviceInput.organizationId, "org-1");
+    assert.equal(serviceInput.engagementId, "eng-1");
+    assert.equal(serviceInput.batchCode, "BATCH-001");
+    assert.equal(serviceInput.idempotencyKey, "idem-1");
+    assert.equal(serviceInput.route, "/api/kai/sprint2/intake/admin/batches");
+  } finally {
+    restore();
+  }
+});
+
+test("file reservation route rejects multipart before service and otherwise delegates metadata only", async () => {
+  let serviceCalls = 0;
+  let serviceInput = null;
+  const restore = intakeRouteTestables.setIntakeServiceForTest({
+    async reserveIntakeFileMetadata(input) {
+      serviceCalls += 1;
+      serviceInput = input;
+      return { ok: true, data: { intake_file_id: "file-1", metadata_only: true }, warnings: [] };
+    },
+  });
+
+  try {
+    const multipart = await invokeRoute("/admin/batches/:intakeBatchId/file-reservations", "post", {
+      is(contentType) {
+        return contentType === "multipart/form-data";
+      },
+      params: { intakeBatchId: "batch-1" },
+      user: { id: 46, email: "email-sentinel@example.test" },
+      body: { organization_id: "org-1" },
+    });
+
+    assert.equal(multipart.statusCode, 400);
+    assert.equal(multipart.body.error.code, "invalid_request");
+    assert.equal(serviceCalls, 0);
+
+    const metadataOnly = await invokeRoute("/admin/batches/:intakeBatchId/file-reservations", "post", {
+      is() {
+        return false;
+      },
+      params: { intakeBatchId: "batch-1" },
+      user: { id: 46, email: "email-sentinel@example.test" },
+      body: {
+        organization_id: "org-1",
+        engagement_id: "eng-1",
+        original_filename: "safe.csv",
+        mime_type: "text/csv",
+        checksum: "sha256abc",
+      },
+    });
+
+    assert.equal(metadataOnly.statusCode, 201);
+    assert.equal(serviceCalls, 1);
+    assert.equal(serviceInput.intakeBatchId, "batch-1");
+    assert.equal(serviceInput.originalFilename, "safe.csv");
+    assert.equal(serviceInput.mimeType, "text/csv");
+    assert.equal(serviceInput.route, "/api/kai/sprint2/intake/admin/batches/:intakeBatchId/file-reservations");
+  } finally {
+    restore();
+  }
 });
 
 test("auth preflight router exposes only the no-write preflight surface", () => {
