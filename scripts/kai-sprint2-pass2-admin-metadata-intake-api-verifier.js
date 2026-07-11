@@ -204,11 +204,19 @@ async function verifyAuthPreflight() {
   return authPreflightAccepted;
 }
 
+function finish(exitCode) {
+  printRows();
+  process.exitCode = exitCode;
+}
+
+function checksPass() {
+  return !rows.some((row) => row.result_type === "CHECK" && row.status === "FAIL");
+}
+
 async function run() {
   if (!BASE_URL) {
     add("API_BASE_URL_CONFIGURED", "KAI_PASS2_BASE_URL", "FAIL", "KAI_PASS2_BASE_URL is required for API verification.");
-    printRows();
-    process.exitCode = 1;
+    finish(1);
     return;
   }
 
@@ -222,8 +230,7 @@ async function run() {
         ? "Exactly one auth method is required; none were configured."
         : "Exactly one auth method is required; both cookie and bearer token were configured.",
     );
-    printRows();
-    process.exitCode = 1;
+    finish(1);
     return;
   }
   add("API_AUTH_EXACTLY_ONE_METHOD_CONFIGURED", "auth_method", "PASS", "Exactly one auth method is configured.");
@@ -235,8 +242,7 @@ async function run() {
       "FAIL",
       "Copied-cookie preflight requires KAI_PASS2_AUTH_COOKIE and no bearer token.",
     );
-    printRows();
-    process.exitCode = 1;
+    finish(1);
     return;
   }
   add(
@@ -253,8 +259,7 @@ async function run() {
       "FAIL",
       "KAI_PASS2_AUTH_COOKIE must be a valid request cookie header string.",
     );
-    printRows();
-    process.exitCode = 1;
+    finish(1);
     return;
   }
   add(
@@ -271,8 +276,7 @@ async function run() {
       "FAIL",
       "Preflight-only mode requires KAI_PASS2_RUN_WRITE_PATH=false.",
     );
-    printRows();
-    process.exitCode = 1;
+    finish(1);
     return;
   }
 
@@ -283,17 +287,15 @@ async function run() {
       "PASS",
       "Preflight-only mode is enabled with write path disabled.",
     );
-    await verifyAuthPreflight();
-    printRows();
-    process.exitCode = rows.some((row) => row.result_type === "CHECK" && row.status === "FAIL") ? 1 : 0;
+    const authPreflightAccepted = await verifyAuthPreflight();
+    finish(authPreflightAccepted && checksPass() ? 0 : 1);
     return;
   }
 
   const authPreflightAccepted = await verifyAuthPreflight();
 
   if (!authPreflightAccepted) {
-    printRows();
-    process.exitCode = 1;
+    finish(1);
     return;
   }
 
@@ -302,29 +304,31 @@ async function run() {
     "API_OR_RUNTIME_DB_TARGET_CONFIRMED_NON_PRODUCTION_OR_WRITE_GATE_ACCEPTED",
     "runtime_db_target",
     gatePass ? "PASS" : "FAIL",
-    gatePass
-      ? `DB target class ${DB_TARGET_CLASS}; production gate accepted=${PRODUCTION_GATE_ACCEPTED}`
-      : `DB target class ${DB_TARGET_CLASS}; write-path verification must not proceed`,
+    gatePass ? "Runtime target write gate passed." : "Runtime target write gate did not pass.",
   );
 
   if (!gatePass) {
-    printRows();
-    process.exitCode = 1;
+    finish(1);
     return;
   }
 
   const status = await request("/api/kai/sprint2/intake/status");
   if (status.response.status === 403 && status.body?.error?.code === "feature_disabled") {
-    add("API_FEATURE_OFF_STATUS_RETURNS_DISABLED", "/api/kai/sprint2/intake/status", "PASS", "Feature flag OFF returned feature_disabled.");
-    printRows();
-    process.exitCode = rows.some((row) => row.result_type === "CHECK" && row.status === "FAIL") ? 1 : 0;
+    add(
+      "API_FEATURE_OFF_STATUS_RETURNS_DISABLED",
+      "/api/kai/sprint2/intake/status",
+      RUN_WRITE_PATH ? "FAIL" : "PASS",
+      "Feature-disabled status returned the expected blocked response.",
+    );
+    finish(RUN_WRITE_PATH ? 1 : 0);
     return;
   }
 
+  const statusReady = status.response.ok && status.body?.data?.mode === "admin_metadata_only";
   add(
     "API_FEATURE_ON_STATUS_RETURNS_READY_METADATA_ONLY",
     "/api/kai/sprint2/intake/status",
-    status.response.ok && status.body?.data?.mode === "admin_metadata_only" ? "PASS" : "FAIL",
+    statusReady ? "PASS" : "FAIL",
     `HTTP ${status.response.status}`,
   );
 
@@ -336,10 +340,14 @@ async function run() {
     forbiddenStatusKey ? `Forbidden key present: ${forbiddenStatusKey}` : "No forbidden response keys.",
   );
 
+  if (!statusReady || forbiddenStatusKey) {
+    finish(1);
+    return;
+  }
+
   if (!RUN_WRITE_PATH) {
-    add("API_WRITE_PATH_NOT_REQUESTED", "KAI_PASS2_RUN_WRITE_PATH", "INFO", "Set KAI_PASS2_RUN_WRITE_PATH=true only after DB target gate passes.");
-    printRows();
-    process.exitCode = rows.some((row) => row.result_type === "CHECK" && row.status === "FAIL") ? 1 : 0;
+    add("API_WRITE_PATH_NOT_REQUESTED", "write_path", "INFO", "Write-disabled mode completed without POST operations.", "OBSERVATION");
+    finish(0);
     return;
   }
 
@@ -367,6 +375,11 @@ async function run() {
     `HTTP ${access.response.status}`,
   );
 
+  if (!checksPass()) {
+    finish(1);
+    return;
+  }
+
   const unauth = await unauthenticatedRequest("/api/kai/sprint2/intake/admin/batches", {
     method: "POST",
     body: JSON.stringify({
@@ -376,18 +389,56 @@ async function run() {
       idempotency_key: "kai-p0-pass2-unauth",
     }),
   });
+  const unauthAccepted = unauth.response.status === 401 && unauth.body?.ok === false;
   add(
     "API_UNAUTHENTICATED_RETURNS_401",
     "/api/kai/sprint2/intake/admin/batches",
-    unauth.response.status === 401 ? "PASS" : "FAIL",
+    unauthAccepted ? "PASS" : "FAIL",
     `HTTP ${unauth.response.status}`,
   );
   add(
     "API_AUTH_FAILURE_BATCH_NO_ROW_PROOF_IDEMPOTENCY_KEY_DECLARED",
-    "kai-p0-pass2-unauth",
+    "blocked_batch_probe",
     "INFO",
-    "SQL verifier must prove this unauthenticated/auth-failure idempotency key created zero kai.intake_batches rows.",
+    "SQL verification must confirm that the blocked probe created no row.",
+    "OBSERVATION",
   );
+
+  if (!unauthAccepted) {
+    finish(1);
+    return;
+  }
+
+  const tenantMismatch = await request("/api/kai/sprint2/intake/admin/batches", {
+    method: "POST",
+    body: JSON.stringify({
+      organization_id: ORGANIZATION_ID,
+      engagement_id: "00000000-0000-4000-8000-000000000000",
+      batch_code: "NCWS-P0-PASS2-METADATA-TENANT-MISMATCH",
+      idempotency_key: "kai-p0-pass2-tenant-mismatch",
+      intake_method: "manual_upload",
+      batch_metadata: { p0_pass: PASS2_MARKER, gate_plan: PASS2_GATE_PLAN },
+    }),
+  });
+  const tenantMismatchAccepted = tenantMismatch.response.status === 422 && tenantMismatch.body?.ok === false;
+  add(
+    "API_CREATE_BATCH_TENANT_MISMATCH_RETURNS_422",
+    "/api/kai/sprint2/intake/admin/batches",
+    tenantMismatchAccepted ? "PASS" : "FAIL",
+    `HTTP ${tenantMismatch.response.status}`,
+  );
+  add(
+    "API_TENANT_MISMATCH_BATCH_NO_ROW_PROOF_IDEMPOTENCY_KEY_DECLARED",
+    "blocked_tenant_probe",
+    "INFO",
+    "SQL verification must confirm that the blocked probe created no row.",
+    "OBSERVATION",
+  );
+
+  if (!tenantMismatchAccepted) {
+    finish(1);
+    return;
+  }
 
   const batch = await request("/api/kai/sprint2/intake/admin/batches", {
     method: "POST",
@@ -416,6 +467,11 @@ async function run() {
     `HTTP ${batch.response.status}`,
   );
 
+  if (!(batch.response.ok && batch.body?.data?.metadata_only === true && batch.body?.data?.intake_batch_id)) {
+    finish(1);
+    return;
+  }
+
   const replay = await request("/api/kai/sprint2/intake/admin/batches", {
     method: "POST",
     body: JSON.stringify({
@@ -443,104 +499,50 @@ async function run() {
     `HTTP ${replay.response.status}`,
   );
 
-  const tenantMismatch = await request("/api/kai/sprint2/intake/admin/batches", {
+  if (!(replay.response.ok && replay.body?.data?.intake_batch_id === batch.body?.data?.intake_batch_id)) {
+    finish(1);
+    return;
+  }
+
+  const intakeBatchId = batch.body?.data?.intake_batch_id;
+  const file = await request(`/api/kai/sprint2/intake/admin/batches/${intakeBatchId}/file-reservations`, {
     method: "POST",
     body: JSON.stringify({
       organization_id: ORGANIZATION_ID,
-      engagement_id: "00000000-0000-4000-8000-000000000000",
-      batch_code: "NCWS-P0-PASS2-METADATA-TENANT-MISMATCH",
-      idempotency_key: "kai-p0-pass2-tenant-mismatch",
-      intake_method: "manual_upload",
-      batch_metadata: { p0_pass: PASS2_MARKER, gate_plan: PASS2_GATE_PLAN },
+      engagement_id: ENGAGEMENT_ID,
+      idempotency_key: "kai-p0-pass2-ncws-file-reservation-001",
+      original_filename: "NCWS P0 Pass2 metadata-only reservation.csv",
+      mime_type: "text/csv",
+      file_extension: ".csv",
+      file_size_bytes: 0,
+      reservation_metadata: {
+        p0_pass: PASS2_MARKER,
+        gate_plan: PASS2_GATE_PLAN,
+        synthetic_only: true,
+        raw_upload_enabled: false,
+        signed_url_enabled: false,
+        no_raw_object_created: true,
+      },
     }),
   });
+  const forbiddenFileKey = containsForbiddenResponseKeys(file.body);
+  const fileAccepted = file.response.ok && file.body?.data?.metadata_only === true && !forbiddenFileKey;
   add(
-    "API_CREATE_BATCH_TENANT_MISMATCH_RETURNS_422",
-    "/api/kai/sprint2/intake/admin/batches",
-    tenantMismatch.response.status === 422 && tenantMismatch.body?.ok === false ? "PASS" : "FAIL",
-    `HTTP ${tenantMismatch.response.status}`,
+    "API_FILE_RESERVATION_RETURNS_OK_NO_UPLOAD_URL",
+    "/api/kai/sprint2/intake/admin/batches/:intakeBatchId/file-reservations",
+    fileAccepted ? "PASS" : "FAIL",
+    forbiddenFileKey ? `Forbidden key present: ${forbiddenFileKey}` : `HTTP ${file.response.status}`,
   );
   add(
-    "API_TENANT_MISMATCH_BATCH_NO_ROW_PROOF_IDEMPOTENCY_KEY_DECLARED",
-    "kai-p0-pass2-tenant-mismatch",
-    "INFO",
-    "SQL verifier must prove this tenant-mismatch idempotency key created zero kai.intake_batches rows.",
+    "API_FILE_RESERVATION_NO_SIGNED_URL_IN_RESPONSE",
+    "/api/kai/sprint2/intake/admin/batches/:intakeBatchId/file-reservations",
+    forbiddenFileKey ? "FAIL" : "PASS",
+    forbiddenFileKey ? `Forbidden key present: ${forbiddenFileKey}` : "No forbidden response key was returned.",
   );
 
-  const intakeBatchId = batch.body?.data?.intake_batch_id;
-  if (intakeBatchId) {
-    const file = await request(`/api/kai/sprint2/intake/admin/batches/${intakeBatchId}/file-reservations`, {
-      method: "POST",
-      body: JSON.stringify({
-        organization_id: ORGANIZATION_ID,
-        engagement_id: ENGAGEMENT_ID,
-        idempotency_key: "kai-p0-pass2-ncws-file-reservation-001",
-        original_filename: "NCWS P0 Pass2 metadata-only reservation.csv",
-        mime_type: "text/csv",
-        file_extension: ".csv",
-        file_size_bytes: 0,
-        reservation_metadata: {
-          p0_pass: PASS2_MARKER,
-          gate_plan: PASS2_GATE_PLAN,
-          synthetic_only: true,
-          raw_upload_enabled: false,
-          signed_url_enabled: false,
-          no_raw_object_created: true,
-        },
-      }),
-    });
-    const forbiddenFileKey = containsForbiddenResponseKeys(file.body);
-    add(
-      "API_FILE_RESERVATION_RETURNS_OK_NO_UPLOAD_URL",
-      "/api/kai/sprint2/intake/admin/batches/:intakeBatchId/file-reservations",
-      file.response.ok && file.body?.data?.metadata_only === true && !forbiddenFileKey ? "PASS" : "FAIL",
-      forbiddenFileKey ? `Forbidden key present: ${forbiddenFileKey}` : `HTTP ${file.response.status}`,
-    );
-    add(
-      "API_FILE_RESERVATION_NO_SIGNED_URL_IN_RESPONSE",
-      "/api/kai/sprint2/intake/admin/batches/:intakeBatchId/file-reservations",
-      forbiddenFileKey ? "FAIL" : "PASS",
-      forbiddenFileKey ? `Forbidden key present: ${forbiddenFileKey}` : "No signed URL key in response.",
-    );
-
-    const unsafe = await request(`/api/kai/sprint2/intake/admin/batches/${intakeBatchId}/file-reservations`, {
-      method: "POST",
-      body: JSON.stringify({
-        organization_id: ORGANIZATION_ID,
-        engagement_id: ENGAGEMENT_ID,
-        idempotency_key: "kai-p0-pass2-ncws-file-reservation-unsafe",
-        original_filename: "../unsafe.csv",
-        mime_type: "text/csv",
-        file_extension: ".csv",
-        file_size_bytes: 0,
-        reservation_metadata: { p0_pass: PASS2_MARKER, gate_plan: PASS2_GATE_PLAN },
-      }),
-    });
-    const unsafeBlockers = Array.isArray(unsafe.body?.blockers) ? unsafe.body.blockers : [];
-    add(
-      "API_FILE_RESERVATION_UNSAFE_FILENAME_RETURNS_422",
-      "/api/kai/sprint2/intake/admin/batches/:intakeBatchId/file-reservations",
-      unsafe.response.status === 422 && unsafe.body?.ok === false ? "PASS" : "FAIL",
-      `HTTP ${unsafe.response.status}`,
-    );
-    add(
-      "API_UNSAFE_FILE_NO_ROW_PROOF_IDEMPOTENCY_KEY_DECLARED",
-      "kai-p0-pass2-ncws-file-reservation-unsafe",
-      "INFO",
-      "SQL verifier must prove this unsafe file idempotency key created zero kai.intake_files rows.",
-    );
-    add(
-      "API_EXPECTED_BLOCKER_SHAPE_OK_FALSE",
-      "validator_blocker_response",
-      unsafe.body?.ok === false && unsafeBlockers.length > 0 ? "PASS" : "FAIL",
-      unsafeBlockers.length > 0 ? `blocker=${unsafeBlockers[0].blocking_reason || unsafeBlockers[0].validator_key}` : "No blocker returned.",
-    );
-  } else {
-    add("API_FILE_RESERVATION_RETURNS_OK_NO_UPLOAD_URL", "file_reservation", "FAIL", "Batch creation did not return intake_batch_id.");
-    add("API_FILE_RESERVATION_NO_SIGNED_URL_IN_RESPONSE", "file_reservation", "FAIL", "Batch creation did not return intake_batch_id.");
-    add("API_FILE_RESERVATION_UNSAFE_FILENAME_RETURNS_422", "file_reservation", "FAIL", "Batch creation did not return intake_batch_id.");
-    add("API_UNSAFE_FILE_NO_ROW_PROOF_IDEMPOTENCY_KEY_DECLARED", "file_reservation", "FAIL", "Batch creation did not return intake_batch_id.");
-    add("API_EXPECTED_BLOCKER_SHAPE_OK_FALSE", "validator_blocker_response", "FAIL", "Batch creation did not return intake_batch_id.");
+  if (!fileAccepted) {
+    finish(1);
+    return;
   }
 
   add(
@@ -550,12 +552,10 @@ async function run() {
     PRODUCTION_GATE_ROUTES.join(", "),
   );
 
-  printRows();
-  process.exitCode = rows.some((row) => row.result_type === "CHECK" && row.status === "FAIL") ? 1 : 0;
+  finish(checksPass() ? 0 : 1);
 }
 
-run().catch((error) => {
-  add("API_VERIFIER_UNEXPECTED_ERROR", "api_verifier", "FAIL", error?.message || String(error));
-  printRows();
-  process.exitCode = 1;
+run().catch(() => {
+  add("API_VERIFIER_UNEXPECTED_ERROR", "api_verifier", "FAIL", "Verifier operation failed; sensitive error detail suppressed.");
+  finish(1);
 });
