@@ -84,6 +84,15 @@ router.get("/admin/access-check", async (req, res) => {
   return sendServiceResult(res, result);
 });
 
+router.get("/admin/batches", async (req, res) => {
+  const service = await getIntakeService();
+  const result = await service.listIntakeBatchesForOrganization({
+    ...requestContext(req, "/api/kai/sprint2/intake/admin/batches"),
+    organizationId: req.query?.organization_id,
+  });
+  return sendServiceResult(res, result);
+});
+
 router.post("/admin/batches", async (req, res) => {
   const payload = requestPayload(req);
   const service = await getIntakeService();

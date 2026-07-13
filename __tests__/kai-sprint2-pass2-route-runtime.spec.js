@@ -82,13 +82,65 @@ test("feature flag OFF returns 403 feature_disabled before Sprint 2 route execut
 });
 
 test("Pass 2 router exposes only metadata-intake admin surface", () => {
-  const routePaths = router.stack.map((layer) => layer.route?.path).filter(Boolean);
-  assert.deepEqual(routePaths.sort(), [
+  const routePaths = new Set(router.stack.map((layer) => layer.route?.path).filter(Boolean));
+  assert.deepEqual([...routePaths].sort(), [
     "/admin/access-check",
     "/admin/batches",
     "/admin/batches/:intakeBatchId/file-reservations",
     "/status",
   ]);
+});
+
+test("admin batch list route delegates sanitized query scope with no direct database behavior", async () => {
+  let serviceInput = null;
+  const restore = intakeRouteTestables.setIntakeServiceForTest({
+    async listIntakeBatchesForOrganization(input) {
+      serviceInput = input;
+      return {
+        ok: true,
+        data: { organization_id: "org-1", batches: [] },
+        warnings: [],
+      };
+    },
+  });
+
+  try {
+    const originalReq = {
+      query: { organization_id: "org-1" },
+      headers: { cookie: "session=secret-cookie-sentinel" },
+      cookies: { session: "secret-cookie-sentinel" },
+      session: { id: "session-value-sentinel" },
+      user: {
+        id: 46,
+        email: "email-sentinel@example.test",
+        token: "secret-token-sentinel",
+      },
+    };
+
+    const res = await invokeRoute("/admin/batches", "get", originalReq);
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(serviceInput.organizationId, "org-1");
+    assert.equal(serviceInput.route, "/api/kai/sprint2/intake/admin/batches");
+    assert.notEqual(serviceInput.req, originalReq);
+    assert.deepEqual(serviceInput.req, { user: { id: 46 } });
+    assert.deepEqual(serviceInput.payload, {});
+    assert.equal("headers" in serviceInput, false);
+    assert.equal("cookies" in serviceInput, false);
+    assert.equal("session" in serviceInput, false);
+    assert.deepEqual(res.body, {
+      ok: true,
+      data: { organization_id: "org-1", batches: [] },
+      warnings: [],
+    });
+
+    const routeSource = readFileSync("Backend/kai/routes/sprint2IntakeApi.js", "utf8");
+    assert.doesNotMatch(routeSource, /from ["']\.\.\/db\//);
+    assert.doesNotMatch(routeSource, /\b(?:pool|db)\.query\s*\(/);
+    assert.doesNotMatch(routeSource, /\b(?:SELECT|INSERT|UPDATE|DELETE)\b/i);
+  } finally {
+    restore();
+  }
 });
 
 test("admin access route delegates to checkAdminAccess with sanitized request context", async () => {
@@ -399,6 +451,7 @@ test("auth preflight middleware does not intercept sibling Sprint 2 intake route
     const siblingRoutes = [
       { method: "GET", path: "/api/kai/sprint2/intake/status" },
       { method: "GET", path: "/api/kai/sprint2/intake/admin/access-check" },
+      { method: "GET", path: "/api/kai/sprint2/intake/admin/batches?organization_id=org-1" },
       { method: "POST", path: "/api/kai/sprint2/intake/admin/batches" },
       {
         method: "POST",

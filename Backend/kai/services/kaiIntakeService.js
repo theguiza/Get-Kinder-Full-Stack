@@ -9,6 +9,7 @@ import {
   insertIntakeBatchMetadata,
   insertIntakeFileMetadata,
 } from "../db/kaiIntakeQueries.js";
+import { listIntakeBatchesForOrganization as readIntakeBatchesForOrganization } from "../db/kaiReadModels.js";
 import { getEngagementTenantState, getIntakeBatchTenantState } from "../db/kaiQueries.js";
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
 import { validateSafeFilename, buildObjectKey } from "../storage/storagePathPolicy.js";
@@ -22,6 +23,7 @@ import { recordBlockedAttempt } from "./kaiAuditService.js";
 const PASS2_MARKER = "pass2_admin_metadata_intake_verification";
 const PASS2_GATE_PLAN = "KAI_MVP_Sprint2_P0_Pass2_Production_Synthetic_Metadata_Write_Gate_Plan_v0.1.1";
 const ALLOWED_METADATA_ONLY_MIME_TYPES = new Set(["text/csv", "application/csv", "text/plain", "application/json"]);
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function stableJson(value) {
   if (Array.isArray(value)) return `[${value.map((item) => stableJson(item)).join(",")}]`;
@@ -142,6 +144,19 @@ function responseBatch(row) {
   };
 }
 
+function responseBatchSummary(row) {
+  return {
+    intake_batch_id: row?.intake_batch_id,
+    organization_id: row?.organization_id,
+    engagement_id: row?.engagement_id || null,
+    batch_code: row?.batch_code,
+    processing_status: row?.processing_status,
+    review_status: row?.review_status,
+    created_at: row?.created_at,
+    updated_at: row?.updated_at,
+  };
+}
+
 function hasConflictingFingerprint(row, expectedFingerprint, metadataColumn) {
   const metadata = row?.[metadataColumn] || {};
   const existingFingerprint = metadata.normalized_payload_hash || metadata.reservation_payload_hash;
@@ -239,6 +254,52 @@ function normalizeReservationMetadata({ payload, idempotencyKey, reservationPayl
     reservation_payload_hash: reservationPayloadHash,
   };
 }
+
+export async function listIntakeBatchesForOrganization(input = {}, dependencies = {}) {
+  if (!isKaiSprint2Enabled(dependencies.env || process.env)) {
+    return buildKaiError("feature_disabled");
+  }
+
+  const actorResult = input.actorContext
+    ? { ok: true, actorContext: input.actorContext }
+    : await resolveKaiActorContext(input.req, dependencies);
+  if (!actorResult.ok) return actorError(actorResult);
+
+  const organizationId = String(input.organizationId || input.payload?.organization_id || "").trim().toLowerCase();
+  if (!UUID_RE.test(organizationId)) {
+    return buildKaiError("invalid_request", {
+      message: "organization_id must be a valid UUID.",
+    });
+  }
+
+  const actorContext = actorResult.actorContext;
+  const auth = validateActorCanPerformOperation(actorContext, "read_intake", organizationId);
+  if (!auth.ok) return buildKaiError(auth.error_code, { blockers: auth.blockers });
+
+  const listBatches = dependencies.listIntakeBatchesForOrganization || readIntakeBatchesForOrganization;
+  const rows = await listBatches(organizationId);
+  const tenantResult = validateTenantBoundaryConsistency({
+    expectedOrganizationId: organizationId,
+    payload: { organization_id: organizationId },
+    currentRecords: rows,
+  });
+  if (tenantResult.severity === "blocker") {
+    return validationBlocked([tenantResult]);
+  }
+
+  return {
+    ok: true,
+    data: {
+      organization_id: organizationId,
+      batches: rows
+        .filter((row) => String(row?.organization_id || "").toLowerCase() === organizationId)
+        .map((row) => responseBatchSummary(row)),
+    },
+    warnings: [],
+  };
+}
+
+export const listIntakeBatches = listIntakeBatchesForOrganization;
 
 function reservationPayloadFingerprint({ organizationId, engagementId, intakeBatchId, idempotencyKey, payload, safeFilename }) {
   return sha256({

@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { createIntakeBatch, reserveIntakeFileMetadata } from "../Backend/kai/services/kaiIntakeService.js";
+import {
+  createIntakeBatch,
+  listIntakeBatchesForOrganization,
+  reserveIntakeFileMetadata,
+} from "../Backend/kai/services/kaiIntakeService.js";
 
 const organizationId = "a5d17c5a-c55f-43af-9b21-fe63aafe733f";
 const engagementId = "2e426ea1-2be3-4e48-b80f-9783ddbacda0";
@@ -17,6 +21,232 @@ const actorContext = {
     { organization_id: organizationId, role_name: "gk_operator", membership_status: "active" },
   ],
 };
+
+test("list intake batches returns feature_disabled before actor or read-model access", async () => {
+  let readModelCalled = false;
+  const result = await listIntakeBatchesForOrganization(
+    { organizationId },
+    {
+      env: { KAI_SPRINT2_ENABLED: "false" },
+      async listIntakeBatchesForOrganization() {
+        readModelCalled = true;
+        return [];
+      },
+    },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "feature_disabled");
+  assert.equal(result.error.status, 403);
+  assert.equal(readModelCalled, false);
+});
+
+test("list intake batches authorizes an active organization member and returns restricted summaries", async () => {
+  let readOrganizationId = null;
+  const result = await listIntakeBatchesForOrganization(
+    { actorContext, organizationId },
+    {
+      env: { KAI_SPRINT2_ENABLED: "true" },
+      async listIntakeBatchesForOrganization(requestedOrganizationId) {
+        readOrganizationId = requestedOrganizationId;
+        return [
+          {
+            intake_batch_id: intakeBatchId,
+            organization_id: organizationId,
+            engagement_id: engagementId,
+            batch_code: "BATCH-SUMMARY-001",
+            processing_status: "received",
+            review_status: "proposed",
+            created_at: "2026-07-12T10:00:00.000Z",
+            updated_at: "2026-07-12T11:00:00.000Z",
+            raw_content: "raw-content-sentinel",
+            storage_uri: "storage-path-sentinel",
+            storage_object_key: "storage-object-key-sentinel",
+            signed_url: "signed-url-sentinel",
+            credentials: "credential-sentinel",
+            contact_email: "pii-sentinel@example.test",
+            batch_metadata: { unrestricted: "metadata-sentinel" },
+          },
+        ];
+      },
+    },
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(readOrganizationId, organizationId);
+  assert.deepEqual(result.data, {
+    organization_id: organizationId,
+    batches: [
+      {
+        intake_batch_id: intakeBatchId,
+        organization_id: organizationId,
+        engagement_id: engagementId,
+        batch_code: "BATCH-SUMMARY-001",
+        processing_status: "received",
+        review_status: "proposed",
+        created_at: "2026-07-12T10:00:00.000Z",
+        updated_at: "2026-07-12T11:00:00.000Z",
+      },
+    ],
+  });
+  assert.deepEqual(result.warnings, []);
+
+  const serialized = JSON.stringify(result);
+  for (const forbidden of [
+    "raw-content-sentinel",
+    "storage-path-sentinel",
+    "storage-object-key-sentinel",
+    "signed-url-sentinel",
+    "credential-sentinel",
+    "pii-sentinel",
+    "metadata-sentinel",
+  ]) {
+    assert.equal(serialized.includes(forbidden), false);
+  }
+});
+
+test("list intake batches rejects a missing KAI actor mapping", async () => {
+  let readModelCalled = false;
+  const result = await listIntakeBatchesForOrganization(
+    {
+      req: { user: { id: 46 } },
+      organizationId,
+    },
+    {
+      env: { KAI_SPRINT2_ENABLED: "true" },
+      async findKaiUserByLegacyPublicUserdataId() {
+        return null;
+      },
+      async listIntakeBatchesForOrganization() {
+        readModelCalled = true;
+        return [];
+      },
+    },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "mapped_kai_user_required");
+  assert.equal(result.error.status, 403);
+  assert.equal(readModelCalled, false);
+});
+
+test("list intake batches rejects an organization role that cannot read intake", async () => {
+  let readModelCalled = false;
+  const result = await listIntakeBatchesForOrganization(
+    {
+      actorContext: {
+        ...actorContext,
+        organizationMemberships: [
+          { organization_id: organizationId, role_name: "external_viewer", membership_status: "active" },
+        ],
+      },
+      organizationId,
+    },
+    {
+      env: { KAI_SPRINT2_ENABLED: "true" },
+      async listIntakeBatchesForOrganization() {
+        readModelCalled = true;
+        return [];
+      },
+    },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "authorization_denied");
+  assert.equal(result.error.status, 403);
+  assert.equal(result.blockers[0].blocking_reason, "role_not_allowed");
+  assert.equal(readModelCalled, false);
+});
+
+test("list intake batches rejects missing and inactive organization memberships", async (t) => {
+  for (const membershipState of ["missing", "inactive"]) {
+    await t.test(membershipState, async () => {
+      let readModelCalled = false;
+      const organizationMemberships = membershipState === "missing"
+        ? []
+        : [{ organization_id: organizationId, role_name: "gk_operator", membership_status: "inactive" }];
+      const result = await listIntakeBatchesForOrganization(
+        {
+          actorContext: { ...actorContext, organizationMemberships },
+          organizationId,
+        },
+        {
+          env: { KAI_SPRINT2_ENABLED: "true" },
+          async listIntakeBatchesForOrganization() {
+            readModelCalled = true;
+            return [];
+          },
+        },
+      );
+
+      assert.equal(result.ok, false);
+      assert.equal(result.error.code, "authorization_denied");
+      assert.equal(result.blockers[0].blocking_reason, "missing_active_organization_membership");
+      assert.equal(readModelCalled, false);
+    });
+  }
+});
+
+test("list intake batches rejects a cross-tenant organization request before read-model access", async () => {
+  let readModelCalled = false;
+  const result = await listIntakeBatchesForOrganization(
+    { actorContext, organizationId: otherOrganizationId },
+    {
+      env: { KAI_SPRINT2_ENABLED: "true" },
+      async listIntakeBatchesForOrganization() {
+        readModelCalled = true;
+        return [];
+      },
+    },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "authorization_denied");
+  assert.equal(result.blockers[0].blocking_reason, "missing_active_organization_membership");
+  assert.equal(readModelCalled, false);
+});
+
+test("list intake batches blocks a cross-tenant row returned by the scoped read model", async () => {
+  const result = await listIntakeBatchesForOrganization(
+    { actorContext, organizationId },
+    {
+      env: { KAI_SPRINT2_ENABLED: "true" },
+      async listIntakeBatchesForOrganization() {
+        return [{ intake_batch_id: intakeBatchId, organization_id: otherOrganizationId }];
+      },
+    },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "validation_blocker");
+  assert.equal(result.error.status, 422);
+  assert.equal(result.blockers[0].blocking_reason, "cross_organization_payload");
+  assert.equal("data" in result, false);
+});
+
+test("list intake batches rejects missing or invalid organization_id without reading batches", async (t) => {
+  for (const candidate of [undefined, "not-a-uuid"]) {
+    await t.test(candidate === undefined ? "missing" : "invalid", async () => {
+      let readModelCalled = false;
+      const result = await listIntakeBatchesForOrganization(
+        { actorContext, organizationId: candidate },
+        {
+          env: { KAI_SPRINT2_ENABLED: "true" },
+          async listIntakeBatchesForOrganization() {
+            readModelCalled = true;
+            return [];
+          },
+        },
+      );
+
+      assert.equal(result.ok, false);
+      assert.equal(result.error.code, "invalid_request");
+      assert.equal(result.error.status, 400);
+      assert.equal(result.error.message, "organization_id must be a valid UUID.");
+      assert.equal(readModelCalled, false);
+    });
+  }
+});
 
 test("create batch writes metadata-only row with stable Pass 2 markers", async () => {
   let inserted = null;
