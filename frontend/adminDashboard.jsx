@@ -1652,6 +1652,32 @@ export default function AdminDashboard() {
     }
   }, [rrDetailModal, mutateJson, pushToast, loadReportingReadiness]);
 
+  const runRrRemove = useCallback(
+    (application) =>
+      openConfirm(
+        {
+          title: `Delete ${application.org_name || "this application"}?`,
+          body: "This permanently deletes the Reporting Readiness application and cannot be undone.",
+          confirmLabel: "Delete application",
+        },
+        async () => {
+          await mutateJson(`/api/admin/reporting-readiness/applications/${application.id}`, "DELETE");
+          pushToast("Reporting Readiness application deleted.", "success");
+
+          const nextPage = Math.min(
+            rrPage,
+            Math.max(1, Math.ceil(Math.max(0, rrTotalRows - 1) / 50))
+          );
+          if (nextPage !== rrPage) {
+            setRrPage(nextPage);
+          } else {
+            loadReportingReadiness();
+          }
+        }
+      ),
+    [loadReportingReadiness, mutateJson, openConfirm, pushToast, rrPage, rrTotalRows]
+  );
+
   const markRrCalendarLinkSent = useCallback(async () => {
     const appId = rrDetailModal.data?.id;
     if (!appId || rrDetailModal.saving) return;
@@ -3209,13 +3235,22 @@ export default function AdminDashboard() {
                                     <div className="small text-muted">{time}</div>
                                   </td>
                                   <td>
-                                    <button
-                                      type="button"
-                                      className="btn btn-sm admin-btn-coral"
-                                      onClick={() => openRrDetail(row)}
-                                    >
-                                      Review
-                                    </button>
+                                    <div className="d-grid gap-1">
+                                      <button
+                                        type="button"
+                                        className="btn btn-sm admin-btn-coral"
+                                        onClick={() => openRrDetail(row)}
+                                      >
+                                        Review
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="btn btn-sm btn-outline-danger"
+                                        onClick={() => runRrRemove(row)}
+                                      >
+                                        Delete
+                                      </button>
+                                    </div>
                                   </td>
                                 </tr>
                               );

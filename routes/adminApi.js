@@ -2953,4 +2953,29 @@ adminApiRouter.patch("/reporting-readiness/applications/:id", async (req, res) =
   }
 });
 
+adminApiRouter.delete("/reporting-readiness/applications/:id", async (req, res) => {
+  if (!requireCsrf(req, res)) return;
+  const id = parsePositiveInt(req.params.id);
+  if (!id) return res.status(400).json({ error: "invalid_id" });
+
+  try {
+    const { rows: [deleted] } = await pool.query(
+      `DELETE FROM public.reporting_readiness_applications
+       WHERE id = $1
+       RETURNING id, org_name, contact_name`,
+      [id]
+    );
+    if (!deleted) return res.status(404).json({ error: "not_found" });
+    console.log("[reporting-readiness] Application deleted", {
+      id: deleted.id,
+      orgName: deleted.org_name,
+      deletedBy: req.user?.email || null,
+    });
+    return res.json({ success: true, data: deleted });
+  } catch (err) {
+    console.error("DELETE /api/admin/reporting-readiness/applications/:id error:", err.message);
+    return res.status(500).json({ error: "server_error" });
+  }
+});
+
 export default adminApiRouter;
