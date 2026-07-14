@@ -18,12 +18,21 @@ import {
   validateMalwareScanStatusDbValue,
   validateStorageProviderDbValue,
 } from "../validators/stateTransitionValidators.js";
+import {
+  idempotency_key_format_supported,
+  idempotency_key_required,
+} from "../validators/idempotencyValidators.js";
+import { runValidators } from "../validators/runValidators.js";
 import { recordBlockedAttempt } from "./kaiAuditService.js";
 
 const PASS2_MARKER = "pass2_admin_metadata_intake_verification";
 const PASS2_GATE_PLAN = "KAI_MVP_Sprint2_P0_Pass2_Production_Synthetic_Metadata_Write_Gate_Plan_v0.1.1";
 const ALLOWED_METADATA_ONLY_MIME_TYPES = new Set(["text/csv", "application/csv", "text/plain", "application/json"]);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const IDEMPOTENCY_KEY_VALIDATORS = Object.freeze([
+  idempotency_key_required,
+  idempotency_key_format_supported,
+]);
 
 function stableJson(value) {
   if (Array.isArray(value)) return `[${value.map((item) => stableJson(item)).join(",")}]`;
@@ -47,6 +56,14 @@ function actorError(actorResult) {
 
 function routeName(inputRoute, fallback) {
   return inputRoute || fallback;
+}
+
+async function validateIdempotencyKey(idempotencyKey, payload, operation) {
+  return await runValidators(
+    IDEMPOTENCY_KEY_VALIDATORS,
+    { idempotencyKey, payload },
+    { group_key: `${operation}_idempotency_key` },
+  );
 }
 
 function targetObjectTypeForOperation(operation) {
@@ -440,6 +457,11 @@ export async function createIntakeBatch(input = {}, dependencies = {}) {
 
   if (!batchCode) return buildKaiError("invalid_request", { message: "batch_code is required." });
 
+  const idempotencyValidation = await validateIdempotencyKey(idempotencyKey, payload, "create_intake_batch");
+  if (!idempotencyValidation.ok) {
+    return validationBlocked(idempotencyValidation.blockers, { warnings: idempotencyValidation.warnings });
+  }
+
   const normalizedPayloadHash = batchPayloadFingerprint({ organizationId, engagementId, batchCode, idempotencyKey, payload });
   const findExisting = dependencies.findIntakeBatchByIdempotencyKey || findIntakeBatchByIdempotencyKey;
   const existing = await findExisting({ organizationId, idempotencyKey });
@@ -642,6 +664,11 @@ export async function reserveIntakeFileMetadata(input = {}, dependencies = {}) {
       route: routeName(input.route, "/api/kai/sprint2/intake/admin/batches/:intakeBatchId/file-reservations"),
       request_id: input.requestId || null,
     }, dependencies);
+  }
+
+  const idempotencyValidation = await validateIdempotencyKey(idempotencyKey, payload, "reserve_intake_file_metadata");
+  if (!idempotencyValidation.ok) {
+    return validationBlocked(idempotencyValidation.blockers, { warnings: idempotencyValidation.warnings });
   }
 
   const reservationPayloadHash = reservationPayloadFingerprint({

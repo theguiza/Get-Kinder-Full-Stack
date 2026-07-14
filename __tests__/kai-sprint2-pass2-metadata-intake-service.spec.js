@@ -306,7 +306,7 @@ test("create batch idempotent replay returns existing row and conflict returns 4
   };
 
   const replay = await createIntakeBatch(
-    { actorContext, organizationId, engagementId, batchCode: existing.batch_code, payload: { idempotency_key: "same" } },
+    { actorContext, organizationId, engagementId, batchCode: existing.batch_code, payload: { idempotency_key: "same-key" } },
     {
       env: { KAI_SPRINT2_ENABLED: "true" },
       async getEngagementTenantState() {
@@ -319,7 +319,7 @@ test("create batch idempotent replay returns existing row and conflict returns 4
   );
 
   const conflict = await createIntakeBatch(
-    { actorContext, organizationId, engagementId, batchCode: existing.batch_code, payload: { idempotency_key: "same" } },
+    { actorContext, organizationId, engagementId, batchCode: existing.batch_code, payload: { idempotency_key: "same-key" } },
     {
       env: { KAI_SPRINT2_ENABLED: "true" },
       async getEngagementTenantState() {
@@ -336,6 +336,48 @@ test("create batch idempotent replay returns existing row and conflict returns 4
   assert.equal(conflict.ok, false);
   assert.equal(conflict.error.code, "duplicate_conflict");
   assert.equal(conflict.error.status, 409);
+});
+
+test("create batch blocks missing and invalid idempotency keys before lookup or insert", async (t) => {
+  for (const { name, idempotencyKey, blockingReason } of [
+    { name: "missing", idempotencyKey: undefined, blockingReason: "missing_idempotency_key" },
+    { name: "invalid", idempotencyKey: "short", blockingReason: "invalid_idempotency_key" },
+  ]) {
+    await t.test(name, async () => {
+      let lookupCalled = false;
+      let insertCalled = false;
+      const payload = idempotencyKey === undefined ? {} : { idempotency_key: idempotencyKey };
+      const result = await createIntakeBatch(
+        {
+          actorContext,
+          organizationId,
+          engagementId,
+          batchCode: `NCWS-P0-PASS2-IDEMPOTENCY-${name.toUpperCase()}`,
+          payload,
+        },
+        {
+          env: { KAI_SPRINT2_ENABLED: "true" },
+          async getEngagementTenantState() {
+            return { engagement_id: engagementId, organization_id: organizationId };
+          },
+          async findIntakeBatchByIdempotencyKey() {
+            lookupCalled = true;
+            return null;
+          },
+          async insertIntakeBatchMetadata() {
+            insertCalled = true;
+          },
+        },
+      );
+
+      assert.equal(result.ok, false);
+      assert.equal(result.error.code, "validation_blocker");
+      assert.equal(result.error.status, 422);
+      assert.ok(result.blockers.some((blocker) => blocker.blocking_reason === blockingReason));
+      assert.equal(lookupCalled, false);
+      assert.equal(insertCalled, false);
+    });
+  }
 });
 
 test("create batch blocks missing engagement tenant state without insert", async () => {
@@ -499,6 +541,55 @@ test("file reservation writes no raw object and uses skipped policy/malware stat
   assert.equal(inserted.fileMetadata.gate_plan, "KAI_MVP_Sprint2_P0_Pass2_Production_Synthetic_Metadata_Write_Gate_Plan_v0.1.1");
   assert.equal(inserted.fileMetadata.checksum_scope, "metadata_reservation_no_raw_file");
   assert.match(inserted.storageUri, /^reservation:\/\/kai\/gcs\/org\//);
+});
+
+test("file reservation blocks missing and invalid idempotency keys before lookup or insert", async (t) => {
+  for (const { name, idempotencyKey, blockingReason } of [
+    { name: "missing", idempotencyKey: undefined, blockingReason: "missing_idempotency_key" },
+    { name: "invalid", idempotencyKey: "bad key", blockingReason: "invalid_idempotency_key" },
+  ]) {
+    await t.test(name, async () => {
+      let lookupCalled = false;
+      let insertCalled = false;
+      const payload = {
+        ...(idempotencyKey === undefined ? {} : { idempotency_key: idempotencyKey }),
+        original_filename: "safe.csv",
+        mime_type: "text/csv",
+        file_extension: ".csv",
+        file_size_bytes: 0,
+      };
+      const result = await reserveIntakeFileMetadata(
+        {
+          actorContext,
+          organizationId,
+          engagementId,
+          intakeBatchId,
+          intakeFileId,
+          payload,
+        },
+        {
+          env: { KAI_SPRINT2_ENABLED: "true" },
+          async getIntakeBatchTenantState() {
+            return { intake_batch_id: intakeBatchId, organization_id: organizationId, engagement_id: engagementId };
+          },
+          async findIntakeFileReservationByIdempotencyKey() {
+            lookupCalled = true;
+            return null;
+          },
+          async insertIntakeFileMetadata() {
+            insertCalled = true;
+          },
+        },
+      );
+
+      assert.equal(result.ok, false);
+      assert.equal(result.error.code, "validation_blocker");
+      assert.equal(result.error.status, 422);
+      assert.ok(result.blockers.some((blocker) => blocker.blocking_reason === blockingReason));
+      assert.equal(lookupCalled, false);
+      assert.equal(insertCalled, false);
+    });
+  }
 });
 
 test("file reservation blocks missing request engagement_id when parent batch has engagement", async () => {

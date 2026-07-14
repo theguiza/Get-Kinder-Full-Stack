@@ -41,11 +41,15 @@ test("createIntakeBatch writes metadata through service dependency when enabled"
       organizationId: ids.organizationId,
       engagementId: ids.engagementId,
       batchCode: "NCWS-001",
+      idempotencyKey: "kai-intake-batch-001",
     },
     {
       env: { KAI_SPRINT2_ENABLED: "true" },
       async getEngagementTenantState() {
         return { engagement_id: ids.engagementId, organization_id: ids.organizationId };
+      },
+      async findIntakeBatchByIdempotencyKey() {
+        return null;
       },
       async insertIntakeBatchMetadata(batch) {
         inserted = batch;
@@ -102,6 +106,7 @@ test("reserveIntakeFileMetadata stores metadata defaults without issuing signed 
       engagementId: ids.engagementId,
       intakeBatchId: ids.intakeBatchId,
       intakeFileId: ids.intakeFileId,
+      idempotencyKey: "kai-intake-file-001",
       originalFilename: "safe.csv",
       storageBucket: "private-ca-bucket",
     },
@@ -113,6 +118,9 @@ test("reserveIntakeFileMetadata stores metadata defaults without issuing signed 
           organization_id: ids.organizationId,
           engagement_id: ids.engagementId,
         };
+      },
+      async findIntakeFileReservationByIdempotencyKey() {
+        return null;
       },
       async insertIntakeFileMetadata(file) {
         inserted = file;

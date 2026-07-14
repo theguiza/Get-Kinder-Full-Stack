@@ -5,7 +5,20 @@ import { readFileSync } from "node:fs";
 import { requireKaiSprint2Enabled } from "../Backend/kai/config/kaiSprint2Config.js";
 import router, { __testables as intakeRouteTestables } from "../Backend/kai/routes/sprint2IntakeApi.js";
 import authPreflightRouter, { __testables as authPreflightTestables } from "../Backend/kai/routes/sprint2IntakeAuthPreflightApi.js";
+import { createIntakeBatch, reserveIntakeFileMetadata } from "../Backend/kai/services/kaiIntakeService.js";
 import { ensureAuthenticatedApi } from "../middleware/auth.js";
+
+const organizationId = "a5d17c5a-c55f-43af-9b21-fe63aafe733f";
+const engagementId = "2e426ea1-2be3-4e48-b80f-9783ddbacda0";
+const intakeBatchId = "8e426ea1-2be3-4e48-b80f-9783ddbacda0";
+const actorContext = {
+  actorType: "human",
+  actorUserId: "7fe568b1-5c05-4c42-bb1f-6e20de216c7b",
+  kaiRoles: ["gk_operator"],
+  organizationMemberships: [
+    { organization_id: organizationId, role_name: "gk_operator", membership_status: "active" },
+  ],
+};
 
 function createResponse() {
   return {
@@ -205,7 +218,7 @@ test("admin batch route delegates to createIntakeBatch without direct DB access"
         organization_id: "org-1",
         engagement_id: "eng-1",
         batch_code: "BATCH-001",
-        idempotency_key: "idem-1",
+        idempotency_key: "idem-001",
         source_system_name: "synthetic",
         notes: "metadata only",
       },
@@ -215,7 +228,7 @@ test("admin batch route delegates to createIntakeBatch without direct DB access"
     assert.equal(serviceInput.organizationId, "org-1");
     assert.equal(serviceInput.engagementId, "eng-1");
     assert.equal(serviceInput.batchCode, "BATCH-001");
-    assert.equal(serviceInput.idempotencyKey, "idem-1");
+    assert.equal(serviceInput.idempotencyKey, "idem-001");
     assert.equal(serviceInput.route, "/api/kai/sprint2/intake/admin/batches");
   } finally {
     restore();
@@ -256,6 +269,7 @@ test("file reservation route rejects multipart before service and otherwise dele
       body: {
         organization_id: "org-1",
         engagement_id: "eng-1",
+        idempotency_key: "file-idem-001",
         original_filename: "safe.csv",
         mime_type: "text/csv",
         checksum: "sha256abc",
@@ -265,9 +279,99 @@ test("file reservation route rejects multipart before service and otherwise dele
     assert.equal(metadataOnly.statusCode, 201);
     assert.equal(serviceCalls, 1);
     assert.equal(serviceInput.intakeBatchId, "batch-1");
+    assert.equal(serviceInput.idempotencyKey, "file-idem-001");
     assert.equal(serviceInput.originalFilename, "safe.csv");
     assert.equal(serviceInput.mimeType, "text/csv");
     assert.equal(serviceInput.route, "/api/kai/sprint2/intake/admin/batches/:intakeBatchId/file-reservations");
+  } finally {
+    restore();
+  }
+});
+
+test("metadata-write routes return 422 idempotency blockers from the mounted services", async (t) => {
+  let batchLookupCalls = 0;
+  let batchInsertCalls = 0;
+  let fileLookupCalls = 0;
+  let fileInsertCalls = 0;
+  const dependencies = {
+    env: { KAI_SPRINT2_ENABLED: "true" },
+    async getEngagementTenantState() {
+      return { engagement_id: engagementId, organization_id: organizationId };
+    },
+    async getIntakeBatchTenantState() {
+      return { intake_batch_id: intakeBatchId, organization_id: organizationId, engagement_id: engagementId };
+    },
+    async findIntakeBatchByIdempotencyKey() {
+      batchLookupCalls += 1;
+      return null;
+    },
+    async insertIntakeBatchMetadata() {
+      batchInsertCalls += 1;
+    },
+    async findIntakeFileReservationByIdempotencyKey() {
+      fileLookupCalls += 1;
+      return null;
+    },
+    async insertIntakeFileMetadata() {
+      fileInsertCalls += 1;
+    },
+  };
+  const restore = intakeRouteTestables.setIntakeServiceForTest({
+    async createIntakeBatch(input) {
+      return createIntakeBatch({ ...input, actorContext }, dependencies);
+    },
+    async reserveIntakeFileMetadata(input) {
+      return reserveIntakeFileMetadata({ ...input, actorContext }, dependencies);
+    },
+  });
+
+  try {
+    for (const { name, idempotencyKey, blockingReason } of [
+      { name: "missing", idempotencyKey: undefined, blockingReason: "missing_idempotency_key" },
+      { name: "invalid", idempotencyKey: "short", blockingReason: "invalid_idempotency_key" },
+    ]) {
+      await t.test(`batch ${name}`, async () => {
+        const res = await invokeRoute("/admin/batches", "post", {
+          user: { id: 46 },
+          body: {
+            organization_id: organizationId,
+            engagement_id: engagementId,
+            batch_code: `BATCH-IDEMPOTENCY-${name.toUpperCase()}`,
+            ...(idempotencyKey === undefined ? {} : { idempotency_key: idempotencyKey }),
+          },
+        });
+
+        assert.equal(res.statusCode, 422);
+        assert.equal(res.body.error.code, "validation_blocker");
+        assert.ok(res.body.blockers.some((blocker) => blocker.blocking_reason === blockingReason));
+      });
+
+      await t.test(`file ${name}`, async () => {
+        const res = await invokeRoute("/admin/batches/:intakeBatchId/file-reservations", "post", {
+          is() {
+            return false;
+          },
+          params: { intakeBatchId },
+          user: { id: 46 },
+          body: {
+            organization_id: organizationId,
+            engagement_id: engagementId,
+            ...(idempotencyKey === undefined ? {} : { idempotency_key: idempotencyKey }),
+            original_filename: "safe.csv",
+            mime_type: "text/csv",
+          },
+        });
+
+        assert.equal(res.statusCode, 422);
+        assert.equal(res.body.error.code, "validation_blocker");
+        assert.ok(res.body.blockers.some((blocker) => blocker.blocking_reason === blockingReason));
+      });
+    }
+
+    assert.equal(batchLookupCalls, 0);
+    assert.equal(batchInsertCalls, 0);
+    assert.equal(fileLookupCalls, 0);
+    assert.equal(fileInsertCalls, 0);
   } finally {
     restore();
   }
