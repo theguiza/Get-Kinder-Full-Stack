@@ -37,6 +37,21 @@ export async function findIntakeFileReservationByIdempotencyKey(
   return rows[0] || null;
 }
 
+export async function findIntakeFileReservationByChecksum({ organizationId, checksum }, db = pool) {
+  if (!organizationId || !checksum) return null;
+  const { rows } = await db.query(
+    `SELECT intake_file_id, intake_batch_id, organization_id, engagement_id, checksum,
+            hash_algorithm, processing_status, parse_status, review_status, file_metadata
+       FROM kai.intake_files
+      WHERE organization_id = $1
+        AND checksum = $2
+        AND force_new_version = false
+      LIMIT 1`,
+    [organizationId, checksum],
+  );
+  return rows[0] || null;
+}
+
 export async function insertIntakeBatchMetadata(batch, db = pool) {
   const { rows } = await db.query(
     `INSERT INTO kai.intake_batches (

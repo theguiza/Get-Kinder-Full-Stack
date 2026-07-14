@@ -109,6 +109,8 @@ test("reserveIntakeFileMetadata stores metadata defaults without issuing signed 
       idempotencyKey: "kai-intake-file-001",
       originalFilename: "safe.csv",
       storageBucket: "private-ca-bucket",
+      checksum: "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      hashAlgorithm: "sha256",
     },
     {
       env: { KAI_SPRINT2_ENABLED: "true" },
@@ -120,6 +122,9 @@ test("reserveIntakeFileMetadata stores metadata defaults without issuing signed 
         };
       },
       async findIntakeFileReservationByIdempotencyKey() {
+        return null;
+      },
+      async findIntakeFileReservationByChecksum() {
         return null;
       },
       async insertIntakeFileMetadata(file) {
@@ -149,6 +154,10 @@ test("reserveIntakeFileMetadata stores metadata defaults without issuing signed 
   assert.equal(inserted.rawFileRetained, false);
   assert.equal(inserted.fileMetadata.p0_pass, "pass2_admin_metadata_intake_verification");
   assert.equal(inserted.fileMetadata.checksum_scope, "metadata_reservation_no_raw_file");
+  assert.equal(inserted.fileMetadata.checksum_source, "caller_declared");
+  assert.equal(inserted.fileMetadata.checksum_verification_status, "unverified");
+  assert.equal(inserted.checksum, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+  assert.equal(inserted.hashAlgorithm, "sha256");
   assert.match(result.data.storage_object_key, /^kai\/org\//);
 });
 

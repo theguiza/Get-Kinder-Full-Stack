@@ -13,6 +13,7 @@ const otherOrganizationId = "b5d17c5a-c55f-43af-9b21-fe63aafe733f";
 const otherEngagementId = "3e426ea1-2be3-4e48-b80f-9783ddbacda0";
 const intakeBatchId = "8e426ea1-2be3-4e48-b80f-9783ddbacda0";
 const intakeFileId = "9fe568b1-5c05-4c42-bb1f-6e20de216c7b";
+const declaredChecksum = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const actorContext = {
   actorType: "human",
   actorUserId: "7fe568b1-5c05-4c42-bb1f-6e20de216c7b",
@@ -501,6 +502,8 @@ test("file reservation writes no raw object and uses skipped policy/malware stat
         mime_type: "text/csv",
         file_extension: ".csv",
         file_size_bytes: 0,
+        checksum: `sha256:${declaredChecksum.toUpperCase()}`,
+        hash_algorithm: "sha256",
       },
     },
     {
@@ -509,6 +512,9 @@ test("file reservation writes no raw object and uses skipped policy/malware stat
         return { intake_batch_id: intakeBatchId, organization_id: organizationId, engagement_id: engagementId };
       },
       async findIntakeFileReservationByIdempotencyKey() {
+        return null;
+      },
+      async findIntakeFileReservationByChecksum() {
         return null;
       },
       async insertIntakeFileMetadata(file) {
@@ -540,6 +546,12 @@ test("file reservation writes no raw object and uses skipped policy/malware stat
   assert.equal(inserted.fileMetadata.p0_pass, "pass2_admin_metadata_intake_verification");
   assert.equal(inserted.fileMetadata.gate_plan, "KAI_MVP_Sprint2_P0_Pass2_Production_Synthetic_Metadata_Write_Gate_Plan_v0.1.1");
   assert.equal(inserted.fileMetadata.checksum_scope, "metadata_reservation_no_raw_file");
+  assert.equal(inserted.fileMetadata.checksum_source, "caller_declared");
+  assert.equal(inserted.fileMetadata.checksum_verification_status, "unverified");
+  assert.equal(inserted.checksum, declaredChecksum);
+  assert.equal(inserted.hashAlgorithm, "sha256");
+  assert.equal(result.data.processing_status, "quarantined");
+  assert.equal(result.data.parse_status, "quarantined");
   assert.match(inserted.storageUri, /^reservation:\/\/kai\/gcs\/org\//);
 });
 
@@ -550,6 +562,7 @@ test("file reservation blocks missing and invalid idempotency keys before lookup
   ]) {
     await t.test(name, async () => {
       let lookupCalled = false;
+      let duplicateLookupCalled = false;
       let insertCalled = false;
       const payload = {
         ...(idempotencyKey === undefined ? {} : { idempotency_key: idempotencyKey }),
@@ -576,6 +589,10 @@ test("file reservation blocks missing and invalid idempotency keys before lookup
             lookupCalled = true;
             return null;
           },
+          async findIntakeFileReservationByChecksum() {
+            duplicateLookupCalled = true;
+            return null;
+          },
           async insertIntakeFileMetadata() {
             insertCalled = true;
           },
@@ -587,9 +604,220 @@ test("file reservation blocks missing and invalid idempotency keys before lookup
       assert.equal(result.error.status, 422);
       assert.ok(result.blockers.some((blocker) => blocker.blocking_reason === blockingReason));
       assert.equal(lookupCalled, false);
+      assert.equal(duplicateLookupCalled, false);
       assert.equal(insertCalled, false);
     });
   }
+});
+
+test("file reservation blocks missing or invalid checksum metadata before replay, duplicate, or insert", async (t) => {
+  for (const { name, checksum, hashAlgorithm, blockingReason } of [
+    { name: "missing checksum", checksum: undefined, hashAlgorithm: "sha256", blockingReason: "missing_checksum" },
+    { name: "invalid checksum", checksum: "not-a-sha256", hashAlgorithm: "sha256", blockingReason: "invalid_checksum" },
+    { name: "missing algorithm", checksum: declaredChecksum, hashAlgorithm: undefined, blockingReason: "missing_hash_algorithm" },
+    { name: "unsupported algorithm", checksum: declaredChecksum, hashAlgorithm: "sha512", blockingReason: "unsupported_hash_algorithm" },
+  ]) {
+    await t.test(name, async () => {
+      let replayLookups = 0;
+      let duplicateLookups = 0;
+      let inserts = 0;
+      const result = await reserveIntakeFileMetadata(
+        {
+          actorContext,
+          organizationId,
+          engagementId,
+          intakeBatchId,
+          intakeFileId,
+          payload: {
+            idempotency_key: `kai-p0-checksum-${name.replace(/\s/g, "-")}`,
+            original_filename: "safe.csv",
+            mime_type: "text/csv",
+            ...(checksum === undefined ? {} : { checksum }),
+            ...(hashAlgorithm === undefined ? {} : { hash_algorithm: hashAlgorithm }),
+          },
+        },
+        {
+          env: { KAI_SPRINT2_ENABLED: "true" },
+          async getIntakeBatchTenantState() {
+            return { intake_batch_id: intakeBatchId, organization_id: organizationId, engagement_id: engagementId };
+          },
+          async findIntakeFileReservationByIdempotencyKey() {
+            replayLookups += 1;
+            return null;
+          },
+          async findIntakeFileReservationByChecksum() {
+            duplicateLookups += 1;
+            return null;
+          },
+          async insertIntakeFileMetadata() {
+            inserts += 1;
+          },
+        },
+      );
+
+      assert.equal(result.ok, false);
+      assert.equal(result.error.code, "validation_blocker");
+      assert.equal(result.error.status, 422);
+      assert.ok(result.blockers.some((blocker) => blocker.blocking_reason === blockingReason));
+      assert.equal(replayLookups, 0);
+      assert.equal(duplicateLookups, 0);
+      assert.equal(inserts, 0);
+    });
+  }
+});
+
+test("file reservation preserves identical replay and rejects conflicting checksum replay", async () => {
+  let inserted = null;
+  let duplicateLookups = 0;
+  const payload = {
+    idempotency_key: "kai-p0-checksum-replay-001",
+    original_filename: "safe.csv",
+    mime_type: "text/csv",
+    checksum: declaredChecksum,
+    hash_algorithm: "sha256",
+  };
+  const baseDependencies = {
+    env: { KAI_SPRINT2_ENABLED: "true" },
+    async getIntakeBatchTenantState() {
+      return { intake_batch_id: intakeBatchId, organization_id: organizationId, engagement_id: engagementId };
+    },
+    async findIntakeFileReservationByChecksum() {
+      duplicateLookups += 1;
+      return null;
+    },
+  };
+
+  const created = await reserveIntakeFileMetadata(
+    { actorContext, organizationId, engagementId, intakeBatchId, intakeFileId, payload },
+    {
+      ...baseDependencies,
+      async findIntakeFileReservationByIdempotencyKey() {
+        return null;
+      },
+      async insertIntakeFileMetadata(file) {
+        inserted = file;
+        return {
+          intake_file_id: file.intakeFileId,
+          intake_batch_id: file.intakeBatchId,
+          organization_id: file.organizationId,
+          engagement_id: file.engagementId,
+          safe_filename: file.safeFilename,
+          storage_provider: file.storageProvider,
+          storage_object_key: file.storageObjectKey,
+          file_policy_status: file.filePolicyStatus,
+          malware_scan_status: file.malwareScanStatus,
+          processing_status: "quarantined",
+          parse_status: "quarantined",
+          review_status: "proposed",
+        };
+      },
+    },
+  );
+  assert.equal(created.ok, true);
+  assert.ok(inserted);
+
+  const existing = {
+    intake_file_id: intakeFileId,
+    intake_batch_id: intakeBatchId,
+    organization_id: organizationId,
+    engagement_id: engagementId,
+    safe_filename: inserted.safeFilename,
+    storage_provider: inserted.storageProvider,
+    storage_object_key: inserted.storageObjectKey,
+    file_policy_status: inserted.filePolicyStatus,
+    malware_scan_status: inserted.malwareScanStatus,
+    processing_status: "quarantined",
+    parse_status: "quarantined",
+    review_status: "proposed",
+    file_metadata: inserted.fileMetadata,
+  };
+  const replay = await reserveIntakeFileMetadata(
+    { actorContext, organizationId, engagementId, intakeBatchId, intakeFileId, payload },
+    {
+      ...baseDependencies,
+      async findIntakeFileReservationByIdempotencyKey() {
+        return existing;
+      },
+      async insertIntakeFileMetadata() {
+        assert.fail("identical replay must not insert");
+      },
+    },
+  );
+  assert.equal(replay.ok, true);
+  assert.equal(replay.data.intake_file_id, intakeFileId);
+  assert.equal(duplicateLookups, 1);
+
+  const conflict = await reserveIntakeFileMetadata(
+    {
+      actorContext,
+      organizationId,
+      engagementId,
+      intakeBatchId,
+      intakeFileId,
+      payload: { ...payload, checksum: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" },
+    },
+    {
+      ...baseDependencies,
+      async findIntakeFileReservationByIdempotencyKey() {
+        return existing;
+      },
+      async insertIntakeFileMetadata() {
+        assert.fail("conflicting replay must not insert");
+      },
+    },
+  );
+  assert.equal(conflict.ok, false);
+  assert.equal(conflict.error.code, "duplicate_conflict");
+  assert.equal(conflict.error.status, 409);
+  assert.equal(duplicateLookups, 1);
+});
+
+test("file reservation blocks preliminary duplicate declared checksums without verification or insert", async () => {
+  let inserted = false;
+  let duplicateLookupInput = null;
+  const result = await reserveIntakeFileMetadata(
+    {
+      actorContext,
+      organizationId,
+      engagementId,
+      intakeBatchId,
+      intakeFileId,
+      payload: {
+        idempotency_key: "kai-p0-checksum-duplicate-001",
+        original_filename: "safe.csv",
+        mime_type: "text/csv",
+        checksum: `sha256:${declaredChecksum}`,
+        hash_algorithm: "sha256",
+      },
+    },
+    {
+      env: { KAI_SPRINT2_ENABLED: "true" },
+      async getIntakeBatchTenantState() {
+        return { intake_batch_id: intakeBatchId, organization_id: organizationId, engagement_id: engagementId };
+      },
+      async findIntakeFileReservationByIdempotencyKey() {
+        return null;
+      },
+      async findIntakeFileReservationByChecksum(input) {
+        duplicateLookupInput = input;
+        return { checksum: declaredChecksum };
+      },
+      async insertIntakeFileMetadata() {
+        inserted = true;
+      },
+      async insertBlockedAttemptAuditEvent() {
+        return { ok: true, auditEventId: "audit-preliminary-duplicate" };
+      },
+    },
+  );
+
+  assert.deepEqual(duplicateLookupInput, { organizationId, checksum: declaredChecksum });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.status, 422);
+  assert.equal(result.blockers[0].blocking_reason, "duplicate_checksum");
+  assert.equal(result.blockers[0].evidence.duplicate_evaluation, "preliminary_declared_checksum_match");
+  assert.equal(result.blockers[0].evidence.storage_checksum_verified, false);
+  assert.equal(inserted, false);
 });
 
 test("file reservation blocks missing request engagement_id when parent batch has engagement", async () => {

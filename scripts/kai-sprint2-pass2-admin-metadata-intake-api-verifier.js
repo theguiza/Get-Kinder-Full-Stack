@@ -2,6 +2,7 @@
 
 const PASS2_MARKER = "pass2_admin_metadata_intake_verification";
 const PASS2_GATE_PLAN = "KAI_MVP_Sprint2_P0_Pass2_Production_Synthetic_Metadata_Write_Gate_Plan_v0.1.1";
+const DECLARED_UNVERIFIED_CHECKSUM = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const BASE_URL = process.env.KAI_PASS2_BASE_URL || "";
 const AUTH_COOKIE = process.env.KAI_PASS2_AUTH_COOKIE || "";
 const BEARER_TOKEN = process.env.KAI_PASS2_BEARER_TOKEN || "";
@@ -515,6 +516,8 @@ async function run() {
       mime_type: "text/csv",
       file_extension: ".csv",
       file_size_bytes: 0,
+      checksum: DECLARED_UNVERIFIED_CHECKSUM,
+      hash_algorithm: "sha256",
       reservation_metadata: {
         p0_pass: PASS2_MARKER,
         gate_plan: PASS2_GATE_PLAN,

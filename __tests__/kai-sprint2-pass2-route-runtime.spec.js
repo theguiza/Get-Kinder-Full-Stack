@@ -272,7 +272,8 @@ test("file reservation route rejects multipart before service and otherwise dele
         idempotency_key: "file-idem-001",
         original_filename: "safe.csv",
         mime_type: "text/csv",
-        checksum: "sha256abc",
+        checksum: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        hash_algorithm: "sha256",
       },
     });
 
@@ -282,6 +283,8 @@ test("file reservation route rejects multipart before service and otherwise dele
     assert.equal(serviceInput.idempotencyKey, "file-idem-001");
     assert.equal(serviceInput.originalFilename, "safe.csv");
     assert.equal(serviceInput.mimeType, "text/csv");
+    assert.equal(serviceInput.checksum, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    assert.equal(serviceInput.hashAlgorithm, "sha256");
     assert.equal(serviceInput.route, "/api/kai/sprint2/intake/admin/batches/:intakeBatchId/file-reservations");
   } finally {
     restore();
@@ -372,6 +375,72 @@ test("metadata-write routes return 422 idempotency blockers from the mounted ser
     assert.equal(batchInsertCalls, 0);
     assert.equal(fileLookupCalls, 0);
     assert.equal(fileInsertCalls, 0);
+  } finally {
+    restore();
+  }
+});
+
+test("mounted file reservation returns 422 checksum blockers before lookup or insert", async (t) => {
+  let replayLookups = 0;
+  let duplicateLookups = 0;
+  let inserts = 0;
+  const dependencies = {
+    env: { KAI_SPRINT2_ENABLED: "true" },
+    async getIntakeBatchTenantState() {
+      return { intake_batch_id: intakeBatchId, organization_id: organizationId, engagement_id: engagementId };
+    },
+    async findIntakeFileReservationByIdempotencyKey() {
+      replayLookups += 1;
+      return null;
+    },
+    async findIntakeFileReservationByChecksum() {
+      duplicateLookups += 1;
+      return null;
+    },
+    async insertIntakeFileMetadata() {
+      inserts += 1;
+    },
+  };
+  const restore = intakeRouteTestables.setIntakeServiceForTest({
+    async reserveIntakeFileMetadata(input) {
+      return reserveIntakeFileMetadata({ ...input, actorContext }, dependencies);
+    },
+  });
+
+  try {
+    for (const { name, checksum, hashAlgorithm, blockingReason } of [
+      { name: "missing checksum", checksum: undefined, hashAlgorithm: "sha256", blockingReason: "missing_checksum" },
+      { name: "invalid checksum", checksum: "not-a-checksum", hashAlgorithm: "sha256", blockingReason: "invalid_checksum" },
+      { name: "missing algorithm", checksum: "a".repeat(64), hashAlgorithm: undefined, blockingReason: "missing_hash_algorithm" },
+      { name: "unsupported algorithm", checksum: "a".repeat(64), hashAlgorithm: "sha512", blockingReason: "unsupported_hash_algorithm" },
+    ]) {
+      await t.test(name, async () => {
+        const res = await invokeRoute("/admin/batches/:intakeBatchId/file-reservations", "post", {
+          is() {
+            return false;
+          },
+          params: { intakeBatchId },
+          user: { id: 46 },
+          body: {
+            organization_id: organizationId,
+            engagement_id: engagementId,
+            idempotency_key: `kai-route-checksum-${name.replace(/\s/g, "-")}`,
+            original_filename: "safe.csv",
+            mime_type: "text/csv",
+            ...(checksum === undefined ? {} : { checksum }),
+            ...(hashAlgorithm === undefined ? {} : { hash_algorithm: hashAlgorithm }),
+          },
+        });
+
+        assert.equal(res.statusCode, 422);
+        assert.equal(res.body.error.code, "validation_blocker");
+        assert.ok(res.body.blockers.some((blocker) => blocker.blocking_reason === blockingReason));
+      });
+    }
+
+    assert.equal(replayLookups, 0);
+    assert.equal(duplicateLookups, 0);
+    assert.equal(inserts, 0);
   } finally {
     restore();
   }

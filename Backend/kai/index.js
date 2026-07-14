@@ -56,9 +56,12 @@ export {
   upload_url_request_blocked_in_p0,
 } from "./validators/storageValidators.js";
 export {
+  canonicalizeSha256Checksum,
   checksum_format_supported,
   checksum_required,
   duplicate_checksum_blocked,
+  hash_algorithm_required,
+  hash_algorithm_supported,
   idempotencyValidatorGroups,
   idempotency_key_format_supported,
   idempotency_key_required,

@@ -409,6 +409,13 @@ test("both SQL verifier files exist with the exact result columns", () => {
   }
 });
 
+test("API verifier supplies declared unverified sha256 reservation metadata", () => {
+  const verifier = readFileSync(apiVerifierPath, "utf8");
+  assert.match(verifier, /const DECLARED_UNVERIFIED_CHECKSUM = "[a-f0-9]{64}";/);
+  assert.match(verifier, /checksum: DECLARED_UNVERIFIED_CHECKSUM/);
+  assert.match(verifier, /hash_algorithm: "sha256"/);
+});
+
 test("SQL check names are stable and unique in each emitted source", () => {
   for (const [path, sql] of sqlFiles()) {
     const prefix = path === prewriteSqlPath ? "PREWRITE" : "POSTWRITE";

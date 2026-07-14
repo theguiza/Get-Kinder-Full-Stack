@@ -5,6 +5,7 @@ import { resolveKaiActorContext } from "../auth/kaiActorContext.js";
 import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationService.js";
 import {
   findIntakeBatchByIdempotencyKey,
+  findIntakeFileReservationByChecksum,
   findIntakeFileReservationByIdempotencyKey,
   insertIntakeBatchMetadata,
   insertIntakeFileMetadata,
@@ -19,6 +20,12 @@ import {
   validateStorageProviderDbValue,
 } from "../validators/stateTransitionValidators.js";
 import {
+  canonicalizeSha256Checksum,
+  checksum_format_supported,
+  checksum_required,
+  duplicate_checksum_blocked,
+  hash_algorithm_required,
+  hash_algorithm_supported,
   idempotency_key_format_supported,
   idempotency_key_required,
 } from "../validators/idempotencyValidators.js";
@@ -33,6 +40,13 @@ const IDEMPOTENCY_KEY_VALIDATORS = Object.freeze([
   idempotency_key_required,
   idempotency_key_format_supported,
 ]);
+const FILE_RESERVATION_CHECKSUM_VALIDATORS = Object.freeze([
+  checksum_required,
+  checksum_format_supported,
+  hash_algorithm_required,
+  hash_algorithm_supported,
+]);
+const PRELIMINARY_DUPLICATE_VALIDATORS = Object.freeze([duplicate_checksum_blocked]);
 
 function stableJson(value) {
   if (Array.isArray(value)) return `[${value.map((item) => stableJson(item)).join(",")}]`;
@@ -63,6 +77,14 @@ async function validateIdempotencyKey(idempotencyKey, payload, operation) {
     IDEMPOTENCY_KEY_VALIDATORS,
     { idempotencyKey, payload },
     { group_key: `${operation}_idempotency_key` },
+  );
+}
+
+async function validateFileReservationChecksum(checksum, hashAlgorithm, payload) {
+  return await runValidators(
+    FILE_RESERVATION_CHECKSUM_VALIDATORS,
+    { checksum, hashAlgorithm, payload },
+    { group_key: "reserve_intake_file_metadata_checksum" },
   );
 }
 
@@ -267,6 +289,8 @@ function normalizeReservationMetadata({ payload, idempotencyKey, reservationPayl
     signed_url_enabled: false,
     no_raw_object_created: true,
     checksum_scope: "metadata_reservation_no_raw_file",
+    checksum_source: "caller_declared",
+    checksum_verification_status: "unverified",
     idempotency_key: idempotencyKey || null,
     reservation_payload_hash: reservationPayloadHash,
   };
@@ -318,7 +342,16 @@ export async function listIntakeBatchesForOrganization(input = {}, dependencies 
 
 export const listIntakeBatches = listIntakeBatchesForOrganization;
 
-function reservationPayloadFingerprint({ organizationId, engagementId, intakeBatchId, idempotencyKey, payload, safeFilename }) {
+function reservationPayloadFingerprint({
+  organizationId,
+  engagementId,
+  intakeBatchId,
+  idempotencyKey,
+  checksum,
+  hashAlgorithm,
+  payload,
+  safeFilename,
+}) {
   return sha256({
     organization_id: organizationId,
     engagement_id: engagementId || null,
@@ -329,6 +362,8 @@ function reservationPayloadFingerprint({ organizationId, engagementId, intakeBat
     mime_type: payload?.mime_type || null,
     file_extension: payload?.file_extension || null,
     file_size_bytes: payload?.file_size_bytes ?? 0,
+    checksum,
+    hash_algorithm: hashAlgorithm,
     reservation_metadata: payload?.reservation_metadata || {},
   });
 }
@@ -671,11 +706,23 @@ export async function reserveIntakeFileMetadata(input = {}, dependencies = {}) {
     return validationBlocked(idempotencyValidation.blockers, { warnings: idempotencyValidation.warnings });
   }
 
+  const providedChecksum = input.checksum || payload.checksum || null;
+  const providedHashAlgorithm = input.hashAlgorithm || payload.hash_algorithm || null;
+  const checksumValidation = await validateFileReservationChecksum(providedChecksum, providedHashAlgorithm, payload);
+  if (!checksumValidation.ok) {
+    return validationBlocked(checksumValidation.blockers, { warnings: checksumValidation.warnings });
+  }
+
+  const checksum = canonicalizeSha256Checksum(providedChecksum);
+  const hashAlgorithm = "sha256";
+
   const reservationPayloadHash = reservationPayloadFingerprint({
     organizationId,
     engagementId,
     intakeBatchId,
     idempotencyKey,
+    checksum,
+    hashAlgorithm,
     payload,
     safeFilename: filenameResult.safeFilename,
   });
@@ -697,8 +744,28 @@ export async function reserveIntakeFileMetadata(input = {}, dependencies = {}) {
     };
   }
 
+  const findDuplicate = dependencies.findIntakeFileReservationByChecksum || findIntakeFileReservationByChecksum;
+  const duplicate = await findDuplicate({ organizationId, checksum });
+  if (duplicate) {
+    const duplicateValidation = await runValidators(
+      PRELIMINARY_DUPLICATE_VALIDATORS,
+      { checksum, duplicateChecksums: [duplicate.checksum || checksum] },
+      { group_key: "reserve_intake_file_metadata_preliminary_duplicate" },
+    );
+    if (!duplicateValidation.ok) {
+      return await toBlockerResponse(duplicateValidation.blockers, actorContext, "reserve_intake_file_metadata", {
+        organization_id: organizationId,
+        engagement_id: engagementId,
+        intake_batch_id: intakeBatchId,
+        route: routeName(input.route, "/api/kai/sprint2/intake/admin/batches/:intakeBatchId/file-reservations"),
+        request_id: input.requestId || null,
+        duplicate_evaluation: "preliminary_declared_checksum_match",
+        storage_checksum_verified: false,
+      }, dependencies);
+    }
+  }
+
   const fileMetadata = normalizeReservationMetadata({ payload, idempotencyKey, reservationPayloadHash });
-  const checksum = input.checksum || payload.checksum || sha256(fileMetadata);
   const storageBucket = input.storageBucket || payload.storage_bucket || null;
   const storageUri =
     input.storageUri ||
@@ -720,7 +787,7 @@ export async function reserveIntakeFileMetadata(input = {}, dependencies = {}) {
     fileExtension: input.fileExtension || payload.file_extension || null,
     fileSizeBytes: input.fileSizeBytes ?? payload.file_size_bytes ?? 0,
     checksum,
-    hashAlgorithm: input.hashAlgorithm || payload.hash_algorithm || "sha256",
+    hashAlgorithm,
     rawFileRetained: false,
     filePolicyStatus: input.filePolicyStatus || "skipped",
     malwareScanStatus,
