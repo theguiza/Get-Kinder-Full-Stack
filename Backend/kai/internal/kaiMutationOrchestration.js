@@ -1,4 +1,10 @@
-import { withTransaction } from "../db/kaiDb.js";
+/**
+ * Repository-neutral mutation orchestration core.
+ *
+ * This module has no production composition root yet. Repository structure and
+ * the orchestration boundary test restrict imports to explicit test support;
+ * JavaScript cannot make a direct file import technically impossible.
+ */
 
 export const REQUIRED_AUDIT_METADATA_ALLOWLIST = Object.freeze([
   "operation",
@@ -116,40 +122,55 @@ export function sanitizeBestEffortMetricMetadata(metadata = {}) {
   return sanitizeMetadata(metadata, BEST_EFFORT_METRIC_METADATA_ALLOWLIST);
 }
 
-function requirePersistenceDependency(dependencies, name) {
-  if (typeof dependencies[name] !== "function") {
+function requireFunction(value, name) {
+  if (typeof value !== "function") {
     throw new TypeError(`${name} must be an injected function.`);
   }
-  return dependencies[name];
+  return value;
+}
+
+function didRequiredAuditSucceed(auditResult) {
+  const okDescriptor =
+    auditResult !== null && typeof auditResult === "object"
+      ? Object.getOwnPropertyDescriptor(auditResult, "ok")
+      : undefined;
+
+  return (
+    !Array.isArray(auditResult) &&
+    okDescriptor !== undefined &&
+    Object.hasOwn(okDescriptor, "value") &&
+    okDescriptor.value === true
+  );
 }
 
 /**
  * Persist one repository-neutral mutation and its required audit atomically,
- * then emit optional best-effort metrics after the transaction has completed.
+ * then emit optional best-effort metrics after transaction completion.
  *
- * Runtime callers use the existing callback-only `withTransaction(callback)`
- * interface. The transaction provider option is reserved for deterministic
- * tests and must not be supplied by production callers.
+ * Only explicit test support currently constructs these injected dependencies.
+ * A later authorized production package must supply a composition root before
+ * this core can be used by a live path.
  */
-export async function orchestrateMutationWithRequiredAudit(input = {}, dependencies = {}, testOptions = {}) {
-  const persistMutation = requirePersistenceDependency(dependencies, "persistMutation");
-  const persistRequiredAudit = requirePersistenceDependency(dependencies, "persistRequiredAudit");
+export async function orchestrateMutationWithRequiredAudit(
+  input = {},
+  dependencies = {},
+  runInTransaction,
+) {
+  const persistMutation = requireFunction(dependencies.persistMutation, "persistMutation");
+  const persistRequiredAudit = requireFunction(dependencies.persistRequiredAudit, "persistRequiredAudit");
+  const executeTransaction = requireFunction(runInTransaction, "runInTransaction");
   const emitBestEffortMetric = typeof dependencies.emitBestEffortMetric === "function"
     ? dependencies.emitBestEffortMetric
     : null;
   const requiredAuditMetadata = sanitizeRequiredAuditMetadata(input.requiredAuditMetadata);
   const bestEffortMetricMetadata = sanitizeBestEffortMetricMetadata(input.bestEffortMetricMetadata);
 
-  const transactionCallback = async (transactionContext) => {
-    const mutationResult = await persistMutation(input.mutation, transactionContext);
+  const mutationResult = await executeTransaction(async (transactionContext) => {
+    const result = await persistMutation(input.mutation, transactionContext);
     const auditResult = await persistRequiredAudit(requiredAuditMetadata, transactionContext);
-    if (auditResult?.ok !== true) throw new RequiredAuditPersistenceError();
-    return mutationResult;
-  };
-
-  const mutationResult = testOptions.testOnlyTransactionProvider
-    ? await withTransaction(transactionCallback, testOptions.testOnlyTransactionProvider)
-    : await withTransaction(transactionCallback);
+    if (!didRequiredAuditSucceed(auditResult)) throw new RequiredAuditPersistenceError();
+    return result;
+  });
 
   if (emitBestEffortMetric) {
     try {

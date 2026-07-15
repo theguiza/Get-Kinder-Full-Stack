@@ -1567,6 +1567,49 @@ package_commit: report after commit; a commit cannot contain its own SHA
 next_package_or_stop_condition: OWNER-DIRECTED STOP after the required-audit versus best-effort-metrics orchestration bounded leaf
 ```
 
+## P0-03 — required-audit versus best-effort-metrics orchestration boundary correction
+
+```text
+leaf_status: complete
+p0_03_package_status: in_progress
+implementation_status: partial
+verification_status: tool_verified_pass
+evidence_class: TOOL_VERIFIED
+starting_head: 52904658a3ba190b3b21057f6c880fd10e61e4ec
+correction_scope: existing required-audit versus best-effort-metrics orchestration leaf only
+production_composition_root: absent and not introduced
+production_barrel_boundary: complete orchestration export block removed from Backend/kai/index.js; no orchestration or test-support symbol is exported from a production barrel
+root_index_classification: repository-root index.js is the live Express application entry point and is not a barrel; it does not import, call, wire, export, or re-export the orchestration core or test harness
+internal_core_location: Backend/kai/internal/kaiMutationOrchestration.js
+test_harness_location: __tests__/support/kaiMutationOrchestrationTestHarness.js
+repository_boundary_enforcement: repository structure plus deterministic static test; JavaScript direct-file imports are not technically impossible
+core_importers: __tests__/support/kaiMutationOrchestrationTestHarness.js only
+test_harness_importers: __tests__/kai-sprint2-mutation-orchestration.spec.js and __tests__/kai-sprint2-transaction-interface.spec.js only
+unexpected_production_importers_callers_exports_reexports: none
+transaction_provider_usage: concrete optional provider seam remains unchanged in Backend/kai/db/kaiDb.js; deterministic provider construction and use occur only in explicit test support
+required_audit_success_predicate: non-array object with an own ok data descriptor whose value is exactly boolean true
+required_audit_fail_closed: null, undefined, primitives, functions, arrays including own ok true, missing/false/non-boolean/inherited/accessor ok, and malformed or synthetic results roll back; descriptor inspection errors fail the transaction
+transaction_context: mutation and required-audit persistence receive the identical opaque transaction context
+metrics_boundary: metrics run only after successful transaction completion; mutation or required-audit failure suppresses metrics; metric failure cannot replace the successful mutation result
+runtime_wiring: no mounted route, batch-creation path, file-reservation path, production service, production entry point, or other live mutation caller imports or calls the core or test harness
+focused_tests: node --test __tests__/kai-sprint2-mutation-orchestration.spec.js __tests__/kai-sprint2-transaction-interface.spec.js __tests__/kai-sprint2-orchestration-boundary.spec.js — 36 passed, 0 failed
+sprint2_tests: node --test __tests__/kai-sprint2-*.spec.js — 281 passed, 0 failed
+full_tests: npm test — 386 passed, 0 failed
+git_diff_check: passed
+database_sentinel: non-listening loopback DATABASE_URL at 127.0.0.1:1 used for every Node and npm command
+local_http_test: complete Sprint 2 and npm suites used the existing parser test's ephemeral 127.0.0.1 listener in the localhost-capable execution context after the default sandbox denied listen with EPERM
+kaiDb_sql_schema_tenant_queries_fingerprints_audit_persistence_metrics_persistence_routes_existing_runtime_mutations: intentionally unchanged
+repository_contract_change: not required; inspected contract text does not contradict the corrected boundary
+database_access: not performed
+cloud_or_external_network_access: not performed
+feature_or_tenant_configuration_change: not performed
+deployed_kai_schema_compatibility: NOT_CONFIRMED
+database_atomicity: NOT_CONFIRMED
+remaining_p0_03_items: unchanged and not implemented in this correction package
+package_commit: report after commit; a commit cannot contain its own SHA
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this orchestration-boundary correction package
+```
+
 
 ---
 

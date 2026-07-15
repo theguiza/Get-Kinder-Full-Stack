@@ -5,29 +5,9 @@ import {
   BEST_EFFORT_METRIC_METADATA_ALLOWLIST,
   REQUIRED_AUDIT_METADATA_ALLOWLIST,
   RequiredAuditPersistenceError,
-  orchestrateMutationWithRequiredAudit,
-} from "../Backend/kai/services/kaiMutationOrchestration.js";
-
-function createTransactionHarness() {
-  const events = [];
-  const transactionContext = {
-    async query(command) {
-      events.push(command);
-      return { rows: [] };
-    },
-    release() {
-      events.push("RELEASE");
-    },
-  };
-  const transactionProvider = {
-    async connect() {
-      events.push("CONNECT");
-      return transactionContext;
-    },
-  };
-
-  return { events, transactionContext, transactionProvider };
-}
+  createTransactionHarness,
+  runMutationOrchestrationForTest,
+} from "./support/kaiMutationOrchestrationTestHarness.js";
 
 function orchestrationInput(overrides = {}) {
   return {
@@ -54,16 +34,94 @@ function orchestrationInput(overrides = {}) {
   };
 }
 
-function testOptions(harness) {
-  return { testOnlyTransactionProvider: harness.transactionProvider };
+function dependenciesForAuditResult(harness, auditResultFactory) {
+  return {
+    async persistMutation() {
+      harness.events.push("MUTATION");
+      return { ok: true, mutationId: "mutation-1" };
+    },
+    async persistRequiredAudit() {
+      harness.events.push("REQUIRED_AUDIT");
+      return auditResultFactory();
+    },
+    async emitBestEffortMetric() {
+      harness.events.push("METRIC");
+    },
+  };
 }
 
-test("mutation and required audit share one context and commit before metrics", async () => {
+async function assertNonConfirmingAuditRollsBack(auditResultFactory) {
+  const harness = createTransactionHarness();
+
+  await assert.rejects(
+    runMutationOrchestrationForTest(
+      orchestrationInput(),
+      dependenciesForAuditResult(harness, auditResultFactory),
+      harness,
+    ),
+    (error) => error instanceof RequiredAuditPersistenceError && error.code === "required_audit_failed",
+  );
+
+  assert.deepEqual(harness.events, [
+    "CONNECT",
+    "BEGIN",
+    "MUTATION",
+    "REQUIRED_AUDIT",
+    "ROLLBACK",
+    "RELEASE",
+  ]);
+}
+
+for (const [description, auditResultFactory] of [
+  ["a plain object with its own boolean data property ok true", () => ({ ok: true })],
+  ["a null-prototype object with its own boolean data property ok true", () => {
+    const result = Object.create(null);
+    result.ok = true;
+    return result;
+  }],
+  ["a class instance with its own boolean data property ok true", () => {
+    class RequiredAuditReceipt {
+      constructor() {
+        this.ok = true;
+      }
+    }
+    return new RequiredAuditReceipt();
+  }],
+]) {
+  test(`required audit accepts ${description}`, async () => {
+    const harness = createTransactionHarness();
+    const expectedResult = { ok: true, mutationId: "mutation-1" };
+    const dependencies = dependenciesForAuditResult(harness, auditResultFactory);
+    dependencies.persistMutation = async () => {
+      harness.events.push("MUTATION");
+      return expectedResult;
+    };
+
+    const result = await runMutationOrchestrationForTest(
+      orchestrationInput(),
+      dependencies,
+      harness,
+    );
+
+    assert.strictEqual(result, expectedResult);
+    assert.deepEqual(harness.events, [
+      "CONNECT",
+      "BEGIN",
+      "MUTATION",
+      "REQUIRED_AUDIT",
+      "COMMIT",
+      "RELEASE",
+      "METRIC",
+    ]);
+  });
+}
+
+test("mutation and required audit receive the identical opaque context and metrics run after commit", async () => {
   const harness = createTransactionHarness();
   const receivedContexts = [];
   const expectedResult = { ok: true, mutationId: "mutation-1" };
 
-  const result = await orchestrateMutationWithRequiredAudit(orchestrationInput(), {
+  const result = await runMutationOrchestrationForTest(orchestrationInput(), {
     async persistMutation(_mutation, transactionContext) {
       receivedContexts.push(transactionContext);
       harness.events.push("MUTATION");
@@ -77,7 +135,7 @@ test("mutation and required audit share one context and commit before metrics", 
     async emitBestEffortMetric() {
       harness.events.push("METRIC");
     },
-  }, testOptions(harness));
+  }, harness);
 
   assert.strictEqual(result, expectedResult);
   assert.deepEqual(receivedContexts, [harness.transactionContext, harness.transactionContext]);
@@ -96,7 +154,7 @@ test("mutation failure rolls back and suppresses required audit and metrics", as
   const harness = createTransactionHarness();
 
   await assert.rejects(
-    orchestrateMutationWithRequiredAudit(orchestrationInput(), {
+    runMutationOrchestrationForTest(orchestrationInput(), {
       async persistMutation() {
         harness.events.push("MUTATION");
         throw new Error("synthetic mutation failure");
@@ -108,31 +166,102 @@ test("mutation failure rolls back and suppresses required audit and metrics", as
       async emitBestEffortMetric() {
         harness.events.push("METRIC");
       },
-    }, testOptions(harness)),
+    }, harness),
     /synthetic mutation failure/,
   );
 
   assert.deepEqual(harness.events, ["CONNECT", "BEGIN", "MUTATION", "ROLLBACK", "RELEASE"]);
 });
 
-test("required-audit failure rolls back the mutation and suppresses metrics", async () => {
+for (const [failureKind, persistRequiredAudit] of [
+  ["synchronous throw", () => { throw new Error("synthetic required-audit throw"); }],
+  ["rejected promise", () => Promise.reject(new Error("synthetic required-audit rejection"))],
+]) {
+  test(`required-audit persistence ${failureKind} rolls back and suppresses metrics`, async () => {
+    const harness = createTransactionHarness();
+
+    await assert.rejects(
+      runMutationOrchestrationForTest(orchestrationInput(), {
+        async persistMutation() {
+          harness.events.push("MUTATION");
+          return { ok: true };
+        },
+        persistRequiredAudit(...args) {
+          harness.events.push("REQUIRED_AUDIT");
+          return persistRequiredAudit(...args);
+        },
+        async emitBestEffortMetric() {
+          harness.events.push("METRIC");
+        },
+      }, harness),
+      /synthetic required-audit/,
+    );
+
+    assert.deepEqual(harness.events, [
+      "CONNECT",
+      "BEGIN",
+      "MUTATION",
+      "REQUIRED_AUDIT",
+      "ROLLBACK",
+      "RELEASE",
+    ]);
+  });
+}
+
+for (const [description, auditResultFactory] of [
+  ["null", () => null],
+  ["undefined", () => undefined],
+  ["boolean true", () => true],
+  ["number one", () => 1],
+  ["string true", () => "true"],
+  ["a symbol", () => Symbol("ok")],
+  ["a bigint", () => 1n],
+  ["a function with an own ok true property", () => Object.assign(() => {}, { ok: true })],
+  ["an array", () => []],
+  ["an array with its own ok true property", () => Object.assign([], { ok: true })],
+  ["an object missing ok", () => ({ result: "synthetic" })],
+  ["ok false", () => ({ ok: false })],
+  ["truthy string ok", () => ({ ok: "true" })],
+  ["truthy numeric ok", () => ({ ok: 1 })],
+  ["inherited ok true", () => Object.create({ ok: true })],
+  ["a synthetic Date result", () => new Date(0)],
+  ["a synthetic regular-expression result", () => /ok/],
+]) {
+  test(`required audit fails closed for ${description}`, async () => {
+    await assertNonConfirmingAuditRollsBack(auditResultFactory);
+  });
+}
+
+test("required audit rejects an accessor ok without invoking its getter", async () => {
+  let getterCalls = 0;
+  const auditResult = Object.defineProperty({}, "ok", {
+    enumerable: true,
+    get() {
+      getterCalls += 1;
+      return true;
+    },
+  });
+
+  await assertNonConfirmingAuditRollsBack(() => auditResult);
+  assert.equal(getterCalls, 0);
+});
+
+test("required-audit descriptor inspection failure fails the transaction", async () => {
   const harness = createTransactionHarness();
+  const descriptorError = new Error("synthetic descriptor failure");
+  const auditResult = new Proxy({}, {
+    getOwnPropertyDescriptor() {
+      throw descriptorError;
+    },
+  });
 
   await assert.rejects(
-    orchestrateMutationWithRequiredAudit(orchestrationInput(), {
-      async persistMutation() {
-        harness.events.push("MUTATION");
-        return { ok: true };
-      },
-      async persistRequiredAudit() {
-        harness.events.push("REQUIRED_AUDIT");
-        return { ok: false, reason: "synthetic_audit_failure" };
-      },
-      async emitBestEffortMetric() {
-        harness.events.push("METRIC");
-      },
-    }, testOptions(harness)),
-    (error) => error instanceof RequiredAuditPersistenceError && error.code === "required_audit_failed",
+    runMutationOrchestrationForTest(
+      orchestrationInput(),
+      dependenciesForAuditResult(harness, () => auditResult),
+      harness,
+    ),
+    (error) => error === descriptorError,
   );
 
   assert.deepEqual(harness.events, [
@@ -149,7 +278,7 @@ test("metrics failure cannot roll back or replace the successful mutation result
   const harness = createTransactionHarness();
   const expectedResult = { ok: true, mutationId: "mutation-1" };
 
-  const result = await orchestrateMutationWithRequiredAudit(orchestrationInput(), {
+  const result = await runMutationOrchestrationForTest(orchestrationInput(), {
     async persistMutation() {
       harness.events.push("MUTATION");
       return expectedResult;
@@ -162,7 +291,7 @@ test("metrics failure cannot roll back or replace the successful mutation result
       harness.events.push("METRIC");
       throw new Error("synthetic metrics failure");
     },
-  }, testOptions(harness));
+  }, harness);
 
   assert.strictEqual(result, expectedResult);
   assert.deepEqual(harness.events, [
@@ -196,7 +325,7 @@ test("audit and metric payloads retain only explicit metadata allowlists", async
     unapproved_pii: "555-0100",
   };
 
-  await orchestrateMutationWithRequiredAudit(orchestrationInput({
+  await runMutationOrchestrationForTest(orchestrationInput({
     requiredAuditMetadata: {
       operation: "synthetic_mutation",
       actor_type: "human",
@@ -233,7 +362,7 @@ test("audit and metric payloads retain only explicit metadata allowlists", async
     async emitBestEffortMetric(metadata) {
       captured.metric = metadata;
     },
-  }, testOptions(harness));
+  }, harness);
 
   assert.deepEqual(Object.keys(captured.audit), [
     "operation",

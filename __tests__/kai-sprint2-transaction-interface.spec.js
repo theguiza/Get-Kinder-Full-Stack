@@ -2,37 +2,24 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { withTransaction } from "../Backend/kai/db/kaiDb.js";
+import {
+  createTransactionHarness,
+  withTestTransaction,
+} from "./support/kaiMutationOrchestrationTestHarness.js";
 
-function createTransactionHarness() {
-  const events = [];
-  const transactionContext = {
-    async query(command) {
-      events.push(command);
-      return { rows: [] };
-    },
-    release() {
-      events.push("RELEASE");
-    },
-  };
-  const transactionProvider = {
-    async connect() {
-      events.push("CONNECT");
-      return transactionContext;
-    },
-  };
-
-  return { events, transactionContext, transactionProvider };
-}
+test("production transaction interface retains callback-only default usage", () => {
+  assert.equal(withTransaction.length, 1);
+});
 
 test("repository transaction commits when its callback completes successfully", async () => {
   const harness = createTransactionHarness();
   const expected = { intakeBatchId: "synthetic-batch" };
 
-  const result = await withTransaction(async (transactionContext) => {
+  const result = await withTestTransaction(async (transactionContext) => {
     assert.strictEqual(transactionContext, harness.transactionContext);
     harness.events.push("CALLBACK");
     return expected;
-  }, harness.transactionProvider);
+  }, harness);
 
   assert.strictEqual(result, expected);
   assert.deepEqual(harness.events, ["CONNECT", "BEGIN", "CALLBACK", "COMMIT", "RELEASE"]);
@@ -46,7 +33,7 @@ for (const [failureKind, callback] of [
     const harness = createTransactionHarness();
 
     await assert.rejects(
-      withTransaction(callback, harness.transactionProvider),
+      withTestTransaction(callback, harness),
       /synthetic transaction failure/,
     );
 
@@ -67,12 +54,12 @@ test("mutation persistence and required audit receive one consistent transaction
     harness.events.push("REQUIRED_AUDIT");
   };
 
-  await withTransaction(async (...callbackArguments) => {
+  await withTestTransaction(async (...callbackArguments) => {
     assert.equal(callbackArguments.length, 1);
     const [transactionContext] = callbackArguments;
     await persistMutation({ id: "synthetic-mutation" }, transactionContext);
     await persistRequiredAudit({ id: "synthetic-audit" }, transactionContext);
-  }, harness.transactionProvider);
+  }, harness);
 
   assert.deepEqual(receivedContexts, [harness.transactionContext, harness.transactionContext]);
   assert.deepEqual(harness.events, [
@@ -92,10 +79,10 @@ test("best-effort metrics remain outside the transaction interface and cannot ca
     throw new Error("synthetic metrics failure");
   };
 
-  await withTransaction(async (...callbackArguments) => {
+  await withTestTransaction(async (...callbackArguments) => {
     assert.equal(callbackArguments.length, 1);
     harness.events.push("CALLBACK");
-  }, harness.transactionProvider);
+  }, harness);
 
   await assert.rejects(emitBestEffortMetric(), /synthetic metrics failure/);
 
