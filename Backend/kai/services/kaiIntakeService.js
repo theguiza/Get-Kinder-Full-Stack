@@ -393,7 +393,7 @@ export async function getIntakeBatchDetail(input = {}, dependencies = {}) {
     currentRecords: [row],
   });
   if (tenantResult.severity === "blocker") {
-    return buildKaiError("tenant_boundary_violation", { blockers: [tenantResult] });
+    return buildKaiError("not_found");
   }
 
   return {

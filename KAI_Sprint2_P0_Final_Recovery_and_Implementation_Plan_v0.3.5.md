@@ -1781,6 +1781,37 @@ package_commit: report after commit; a commit cannot contain its own SHA
 next_package_or_stop_condition: RETURN the authorized batch-detail leaf evidence before selecting another P0-04 leaf
 ```
 
+## P0-04 — batch-detail post-read tenant-mismatch correction
+
+```text
+leaf_status: complete
+correction_status: complete
+implementation_status: partial
+verification_status: tool_verified_pass
+evidence_class: TOOL_VERIFIED
+owner_directed_correction_scope: USER_CONFIRMED
+starting_head: 7485928842330054e66d47ee4b479387f343d316
+defect: the accepted batch-detail leaf's post-read defense-in-depth tenant check returned tenant_boundary_violation (403) for a repository row whose organization_id differed from the requested organization, revealing that a differently scoped batch exists for that intake_batch_id
+controlling_text_reviewed: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md (no post-read-mismatch language found); this ExecPlan's P0-01 general HTTP convention list (authorization denial, mapped-user failure, and tenant-boundary violation: 403) which is a pre-read actor/payload convention already applied elsewhere in kaiIntakeService.js via validationBlocked (422), not via tenant_boundary_violation (403), for the same defense-in-depth validator on returned rows
+authority_conflict_found: none — no controlling contract or accepted plan text specifically prescribes 403 for a post-read returned-row tenant mismatch on this route; the prior 403 was an implementation defect, not an application of an accepted rule
+contract_changed: no
+correction: Backend/kai/services/kaiIntakeService.js getIntakeBatchDetail post-read tenant-mismatch branch now returns buildKaiError("not_found") instead of buildKaiError("tenant_boundary_violation", ...), identical to the no-row branch; no second lookup, no fallback, query scope and DTO unchanged
+tests_added_or_changed: __tests__/kai-sprint2-batch-detail-route.spec.js — direct service tests proving no-row and cross-tenant-row results are deeply equal to the canonical not_found result and exclude tenant_boundary_violation and the mismatched organization id; assembled-route tests proving the no-row and cross-tenant-row HTTP responses share the same 404 status and deeply equal JSON bodies; role and membership denial coverage added at the service level and unchanged at the route level
+focused_tests: node --test __tests__/kai-sprint2-batch-detail-route.spec.js — 16 passed, 0 failed
+api_contract_tests: npm run verify:kai-sprint2-api-contract — 51 passed, 0 failed
+schema_contract_tests: npm run verify:kai-sprint2-schema-contract — 9 passed, 0 failed
+pass2_tests: npm run test:kai-sprint2-pass2 — 105 passed, 0 failed
+sprint2_tests: node --test __tests__/kai-sprint2-*.spec.js — 324 passed, 0 failed
+full_tests: npm test — 429 passed, 0 failed
+git_diff_check: passed
+database_sentinel: non-listening loopback DATABASE_URL at 127.0.0.1:1 used for every Node and npm command
+database_access: not performed
+deployed_kai_schema_compatibility: NOT_CONFIRMED
+complete_diff_scope: Backend/kai/services/kaiIntakeService.js, __tests__/kai-sprint2-batch-detail-route.spec.js, and this living ExecPlan evidence update only
+package_commit: report after commit; a commit cannot contain its own SHA
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this bounded correction package; do not begin another P0-04 leaf
+```
+
 
 ---
 

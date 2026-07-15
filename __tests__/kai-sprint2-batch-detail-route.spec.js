@@ -10,6 +10,7 @@ import {
   getIntakeBatchDetail as readIntakeBatchDetail,
 } from "../Backend/kai/db/kaiReadModels.js";
 import { requireKaiSprint2Authenticated } from "../Backend/kai/middleware/kaiSprint2Authentication.js";
+import { buildKaiError } from "../Backend/kai/errors/kaiErrors.js";
 import {
   handleKaiSprint2JsonParserError,
   kaiSprint2ActorMutationLimiter,
@@ -99,6 +100,14 @@ const expectedBatchDto = Object.freeze({
   review_status: "proposed",
   created_at: "2026-07-15T10:00:00.000Z",
   updated_at: "2026-07-15T11:00:00.000Z",
+});
+const readActorContext = Object.freeze({
+  actorType: "human",
+  actorUserId: "7fe568b1-5c05-4c42-bb1f-6e20de216c7b",
+  kaiRoles: ["gk_operator"],
+  organizationMemberships: [
+    { organization_id: organizationId, role_name: "gk_operator", membership_status: "active" },
+  ],
 });
 
 function assertForbiddenSentinelsAbsent(value) {
@@ -316,6 +325,146 @@ test("the direct batch-detail service result is an explicit safe DTO", async () 
   assertForbiddenSentinelsAbsent(result);
 });
 
+test("a missing batch row returns the canonical safe not-found result", async () => {
+  const repositoryCalls = [];
+  const result = await getIntakeBatchDetail(
+    {
+      actorContext: readActorContext,
+      organizationId,
+      intakeBatchId,
+    },
+    {
+      env: { KAI_SPRINT2_ENABLED: "true" },
+      async getIntakeBatchDetail(requestedOrganizationId, requestedIntakeBatchId) {
+        repositoryCalls.push({ requestedOrganizationId, requestedIntakeBatchId });
+        return null;
+      },
+    },
+  );
+
+  assert.deepEqual(result, buildKaiError("not_found"));
+  assert.deepEqual(repositoryCalls, [{
+    requestedOrganizationId: organizationId,
+    requestedIntakeBatchId: intakeBatchId,
+  }]);
+});
+
+test("a cross-tenant returned row is deeply equal to the no-row result and performs no fallback", async () => {
+  const canonicalNotFound = buildKaiError("not_found");
+
+  const noRowCalls = [];
+  const noRowResult = await getIntakeBatchDetail(
+    {
+      actorContext: readActorContext,
+      organizationId,
+      intakeBatchId,
+    },
+    {
+      env: { KAI_SPRINT2_ENABLED: "true" },
+      async getIntakeBatchDetail(requestedOrganizationId, requestedIntakeBatchId) {
+        noRowCalls.push({ requestedOrganizationId, requestedIntakeBatchId });
+        return null;
+      },
+    },
+  );
+
+  const mismatchCalls = [];
+  const mismatchResult = await getIntakeBatchDetail(
+    {
+      actorContext: readActorContext,
+      organizationId,
+      intakeBatchId,
+    },
+    {
+      env: { KAI_SPRINT2_ENABLED: "true" },
+      async getIntakeBatchDetail(requestedOrganizationId, requestedIntakeBatchId) {
+        mismatchCalls.push({ requestedOrganizationId, requestedIntakeBatchId });
+        return crossTenantBatchRow;
+      },
+    },
+  );
+
+  assert.deepEqual(noRowResult, canonicalNotFound);
+  assert.deepEqual(mismatchResult, canonicalNotFound);
+  assert.deepEqual(mismatchResult, noRowResult);
+  assertForbiddenSentinelsAbsent(mismatchResult);
+  const serializedMismatch = JSON.stringify(mismatchResult);
+  assert.equal(serializedMismatch.includes(otherOrganizationId), false);
+  assert.equal(serializedMismatch.includes("tenant_boundary_violation"), false);
+  assert.deepEqual(noRowCalls, [{
+    requestedOrganizationId: organizationId,
+    requestedIntakeBatchId: intakeBatchId,
+  }]);
+  assert.deepEqual(mismatchCalls, [{
+    requestedOrganizationId: organizationId,
+    requestedIntakeBatchId: intakeBatchId,
+  }]);
+});
+
+test("a disallowed role is denied before any repository read", async () => {
+  const repositoryCalls = [];
+  const result = await getIntakeBatchDetail(
+    {
+      actorContext: {
+        actorType: "human",
+        actorUserId: "7fe568b1-5c05-4c42-bb1f-6e20de216c7b",
+        kaiRoles: ["external_viewer"],
+        organizationMemberships: [
+          { organization_id: organizationId, role_name: "external_viewer", membership_status: "active" },
+        ],
+      },
+      organizationId,
+      intakeBatchId,
+    },
+    {
+      env: { KAI_SPRINT2_ENABLED: "true" },
+      async getIntakeBatchDetail(requestedOrganizationId, requestedIntakeBatchId) {
+        repositoryCalls.push({ requestedOrganizationId, requestedIntakeBatchId });
+        return safeBatchRow;
+      },
+    },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.status, 403);
+  assert.equal(result.error.code, "authorization_denied");
+  assert.equal(result.blockers[0].blocking_reason, "role_not_allowed");
+  assert.deepEqual(repositoryCalls, []);
+});
+
+test("missing or inactive membership is denied before any repository read", async () => {
+  for (const memberships of [[], [
+    { organization_id: organizationId, role_name: "gk_operator", membership_status: "inactive" },
+  ]]) {
+    const repositoryCalls = [];
+    const result = await getIntakeBatchDetail(
+      {
+        actorContext: {
+          actorType: "human",
+          actorUserId: "7fe568b1-5c05-4c42-bb1f-6e20de216c7b",
+          kaiRoles: ["gk_operator"],
+          organizationMemberships: memberships,
+        },
+        organizationId,
+        intakeBatchId,
+      },
+      {
+        env: { KAI_SPRINT2_ENABLED: "true" },
+        async getIntakeBatchDetail(requestedOrganizationId, requestedIntakeBatchId) {
+          repositoryCalls.push({ requestedOrganizationId, requestedIntakeBatchId });
+          return safeBatchRow;
+        },
+      },
+    );
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error.status, 403);
+    assert.equal(result.error.code, "authorization_denied");
+    assert.equal(result.blockers[0].blocking_reason, "missing_active_organization_membership");
+    assert.deepEqual(repositoryCalls, []);
+  }
+});
+
 test("assembled production middleware and router enforce batch-detail boundaries", async (t) => {
   let scenario = createScenario();
   const restoreService = intakeRouteTestables.setIntakeServiceForTest({
@@ -413,15 +562,34 @@ test("assembled production middleware and router enforce batch-detail boundaries
     assert.deepEqual(scenario.repositoryCalls, []);
   });
 
-  await t.test("a cross-tenant repository row cannot become a DTO", async () => {
-    scenario = createScenario({
-      repositoryRow: crossTenantBatchRow,
-    });
+  await t.test("no repository row returns the canonical safe not-found result", async () => {
+    scenario = createScenario({ repositoryRow: null });
     const response = await withFeatureFlag("true", () => getJson(server, validPath));
 
-    assert.equal(response.statusCode, 403);
-    assert.equal(response.body.error.code, "tenant_boundary_violation");
-    assert.equal(response.body.data, null);
+    assert.equal(response.statusCode, 404);
+    assert.equal(response.body.error.code, "not_found");
+    assert.deepEqual(scenario.repositoryCalls, [{ organizationId, intakeBatchId }]);
+  });
+
+  await t.test("a cross-tenant repository row returns a response identical to the no-row response", async () => {
+    scenario = createScenario({ repositoryRow: null });
+    const noRowResponse = await withFeatureFlag("true", () => getJson(server, validPath));
+    const noRowRepositoryCalls = scenario.repositoryCalls;
+
+    scenario = createScenario({ repositoryRow: crossTenantBatchRow });
+    const mismatchResponse = await withFeatureFlag("true", () => getJson(server, validPath));
+
+    assert.equal(mismatchResponse.statusCode, 404);
+    assert.equal(mismatchResponse.statusCode, noRowResponse.statusCode);
+    assert.deepEqual(mismatchResponse.body, noRowResponse.body);
+    assert.equal(mismatchResponse.body.error.code, "not_found");
+    assert.equal(mismatchResponse.body.data, null);
+    const serializedMismatch = JSON.stringify(mismatchResponse.body);
+    assert.equal(serializedMismatch.includes(otherOrganizationId), false);
+    assert.equal(serializedMismatch.includes(intakeBatchId), false);
+    assert.equal(serializedMismatch.includes("tenant_boundary_violation"), false);
+    assertForbiddenSentinelsAbsent(mismatchResponse.body);
+    assert.deepEqual(noRowRepositoryCalls, [{ organizationId, intakeBatchId }]);
     assert.deepEqual(scenario.repositoryCalls, [{ organizationId, intakeBatchId }]);
   });
 
