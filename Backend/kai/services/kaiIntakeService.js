@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "crypto";
 import { isKaiSprint2Enabled } from "../config/kaiSprint2Config.js";
+import { KAI_SPRINT2_P0_PATTERNS } from "../config/kaiSprint2P0Contract.js";
 import { buildKaiError, validationBlocked } from "../errors/kaiErrors.js";
 import { resolveKaiActorContext } from "../auth/kaiActorContext.js";
 import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationService.js";
@@ -35,7 +36,7 @@ import { recordBlockedAttempt } from "./kaiAuditService.js";
 const PASS2_MARKER = "pass2_admin_metadata_intake_verification";
 const PASS2_GATE_PLAN = "KAI_MVP_Sprint2_P0_Pass2_Production_Synthetic_Metadata_Write_Gate_Plan_v0.1.1";
 const ALLOWED_METADATA_ONLY_MIME_TYPES = new Set(["text/csv", "application/csv", "text/plain", "application/json"]);
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_RE = KAI_SPRINT2_P0_PATTERNS.uuid;
 const IDEMPOTENCY_KEY_VALIDATORS = Object.freeze([
   idempotency_key_required,
   idempotency_key_format_supported,

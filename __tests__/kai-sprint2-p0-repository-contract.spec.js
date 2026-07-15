@@ -1,0 +1,155 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+
+import {
+  KAI_SPRINT2_P0_ABUSE_LIMITS,
+  KAI_SPRINT2_P0_CONTRACT_VERSION,
+  KAI_SPRINT2_P0_FINGERPRINT,
+  KAI_SPRINT2_P0_HASH_ALGORITHM,
+  KAI_SPRINT2_P0_OPERATION_ROLES,
+  KAI_SPRINT2_P0_PATTERNS,
+  KAI_SPRINT2_P0_REQUEST_LIMITS,
+  KAI_SPRINT2_P0_RESOURCE_LIMITS,
+  KAI_SPRINT2_P0_REVIEW_QUEUE_TYPES,
+  KAI_SPRINT2_P0_SECURITY_EXECUTOR,
+  KAI_SPRINT2_P0_STRING_LIMITS,
+  KAI_SPRINT2_P0_UPLOAD_STATES,
+  KAI_SPRINT2_P0_UPLOAD_TIMING,
+} from "../Backend/kai/config/kaiSprint2P0Contract.js";
+import { VALID_REVIEW_QUEUE_TYPES } from "../Backend/kai/validators/intakeValidators.js";
+
+const contract = readFileSync("Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md", "utf8");
+const prewriteVerifier = readFileSync(
+  "scripts/kai-sprint2-pass2-admin-metadata-intake-prewrite-verifier.sql",
+  "utf8",
+);
+
+test("repository contract locks request, string, and resource limits", () => {
+  assert.equal(KAI_SPRINT2_P0_CONTRACT_VERSION, "0.3.5");
+  assert.deepEqual(KAI_SPRINT2_P0_REQUEST_LIMITS, {
+    metadataJsonMaxRawBytes: 102400,
+    metadataJsonMaxDepth: 4,
+    metadataJsonMaxTotalKeys: 64,
+    allowlistedArrayMaxLength: 25,
+  });
+  assert.equal(KAI_SPRINT2_P0_STRING_LIMITS.checksumSha256HexLength, 64);
+  assert.equal(KAI_SPRINT2_P0_STRING_LIMITS.idempotencyKeyMinLength, 8);
+  assert.equal(KAI_SPRINT2_P0_STRING_LIMITS.idempotencyKeyMaxLength, 128);
+  assert.equal(KAI_SPRINT2_P0_STRING_LIMITS.safeFilenameMaxLength, 181);
+  assert.equal(KAI_SPRINT2_P0_STRING_LIMITS.originalFilenameMaxLength, 255);
+  assert.equal(KAI_SPRINT2_P0_STRING_LIMITS.mimeTypeMaxLength, 128);
+  assert.equal(KAI_SPRINT2_P0_STRING_LIMITS.machineCodeMaxLength, 64);
+  assert.equal(KAI_SPRINT2_P0_STRING_LIMITS.displayLabelMaxLength, 200);
+  assert.equal(KAI_SPRINT2_P0_STRING_LIMITS.operatorTextMaxLength, 1000);
+  assert.deepEqual(KAI_SPRINT2_P0_RESOURCE_LIMITS, {
+    maxFilesPerBatch: 25,
+    paginationDefaultLimit: 100,
+    paginationMaxLimit: 100,
+  });
+});
+
+test("checksum, idempotency key, filename, UUID, and hash constants match the contract", () => {
+  assert.equal(KAI_SPRINT2_P0_HASH_ALGORITHM, "sha256");
+  assert.equal(KAI_SPRINT2_P0_PATTERNS.checksumSha256.test("a".repeat(64)), true);
+  assert.equal(KAI_SPRINT2_P0_PATTERNS.checksumSha256.test("A".repeat(64)), true);
+  assert.equal(KAI_SPRINT2_P0_PATTERNS.checksumSha256.test(`sha256:${"a".repeat(64)}`), false);
+  assert.equal(KAI_SPRINT2_P0_PATTERNS.idempotencyKey.test("12345678"), true);
+  assert.equal(KAI_SPRINT2_P0_PATTERNS.idempotencyKey.test("short"), false);
+  assert.equal(KAI_SPRINT2_P0_PATTERNS.safeFilename.test("a".repeat(181)), true);
+  assert.equal(KAI_SPRINT2_P0_PATTERNS.safeFilename.test("a".repeat(182)), false);
+  assert.equal(KAI_SPRINT2_P0_PATTERNS.uuid.test("a5d17c5a-c55f-43af-9b21-fe63aafe733f"), true);
+  assert.equal(KAI_SPRINT2_P0_PATTERNS.uuid.test("a".repeat(64)), false);
+});
+
+test("abuse, upload timing, and synthetic lifecycle values are exact", () => {
+  assert.deepEqual(KAI_SPRINT2_P0_ABUSE_LIMITS, {
+    windowMs: 900000,
+    actorMutationAttempts: 120,
+    organizationMutationAttempts: 600,
+    concurrentUploadsPerActor: 2,
+    concurrentUploadsPerOrganization: 5,
+  });
+  assert.deepEqual(KAI_SPRINT2_P0_UPLOAD_TIMING, {
+    idleTimeoutMs: 30000,
+    totalTimeoutMs: 270000,
+    reservationExpiryMs: 86400000,
+  });
+  assert.deepEqual(KAI_SPRINT2_P0_UPLOAD_STATES, [
+    "reserved",
+    "upload_started",
+    "uploaded_unconfirmed",
+    "confirmed",
+    "policy_blocked",
+    "abandoned",
+    "expired",
+  ]);
+});
+
+test("fingerprint version, exact fields, and cross-version replay rule are recorded", () => {
+  assert.equal(KAI_SPRINT2_P0_FINGERPRINT.algorithm, "sha256");
+  assert.equal(KAI_SPRINT2_P0_FINGERPRINT.version, "kai-sprint2-p0-fingerprint-v1");
+  assert.deepEqual(KAI_SPRINT2_P0_FINGERPRINT.batchFields, [
+    "organization_id",
+    "engagement_id",
+    "batch_code",
+    "idempotency_key",
+    "intake_method",
+    "source_system_name",
+    "source_system_ref",
+    "notes",
+    "batch_metadata",
+  ]);
+  assert.deepEqual(KAI_SPRINT2_P0_FINGERPRINT.fileReservationFields, [
+    "organization_id",
+    "engagement_id",
+    "intake_batch_id",
+    "idempotency_key",
+    "original_filename",
+    "safe_filename",
+    "mime_type",
+    "file_extension",
+    "file_size_bytes",
+    "checksum",
+    "hash_algorithm",
+    "reservation_metadata",
+  ]);
+  assert.match(contract, /different version\/fingerprint fails closed as a 409 conflict/);
+});
+
+test("operation roles and the disabled security-executor identity are explicit", () => {
+  assert.deepEqual(KAI_SPRINT2_P0_OPERATION_ROLES.create_intake_batch, ["gk_admin", "gk_operator"]);
+  assert.deepEqual(KAI_SPRINT2_P0_OPERATION_ROLES.create_intake_file, ["gk_admin", "gk_operator"]);
+  assert.equal(KAI_SPRINT2_P0_SECURITY_EXECUTOR.actorType, "internal_service");
+  assert.equal(KAI_SPRINT2_P0_SECURITY_EXECUTOR.serviceIdentity, "kai_file_security_executor");
+  assert.equal(KAI_SPRINT2_P0_SECURITY_EXECUTOR.operationGroup, "file_security_assessment");
+  assert.deepEqual(KAI_SPRINT2_P0_SECURITY_EXECUTOR.allowedOperations, [
+    "record_file_security_result",
+    "transition_file_policy_status",
+    "write_file_security_audit",
+  ]);
+  assert.match(contract, /This package defines the identity but does not enable it\./);
+});
+
+test("queue vocabulary is shared by the repository contract and runtime validator", () => {
+  assert.deepEqual(VALID_REVIEW_QUEUE_TYPES, KAI_SPRINT2_P0_REVIEW_QUEUE_TYPES);
+  for (const queueType of KAI_SPRINT2_P0_REVIEW_QUEUE_TYPES) {
+    assert.match(contract, new RegExp(`^${queueType}$`, "m"));
+  }
+});
+
+test("contract retains the P0-06A boundary and unverified persistence labels", () => {
+  assert.match(contract, /P0-06A may implement this lifecycle only through dependency-injected interfaces and an in-memory synthetic repository/);
+  assert.match(contract, /P0-06B durable persistence is blocked by Gate A/);
+  assert.match(contract, /deployed_kai_schema_compatibility: NOT_CONFIRMED/);
+  assert.match(contract, /database_atomicity: NOT_CONFIRMED/);
+  assert.match(contract, /persistent_upload_lifecycle: NOT_CONFIRMED/);
+  assert.match(contract, /No lifecycle transition deletes an object or executes retention/);
+});
+
+test("executable prewrite verifier uses the repository checksum name", () => {
+  assert.doesNotMatch(prewriteVerifier, /checksum_sha256/);
+  assert.match(prewriteVerifier, /'intake_files', 'checksum'/);
+  assert.match(prewriteVerifier, /ARRAY\['organization_id', 'checksum'\]/);
+  assert.match(prewriteVerifier, /\(checksum IS NOT NULL\)/);
+});

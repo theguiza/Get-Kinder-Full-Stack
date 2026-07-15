@@ -1375,6 +1375,36 @@ cloud_access: not performed
 next_package: P0-02
 ```
 
+## P0-02 — repository schema and behavior contract
+
+```text
+package_status: complete
+implementation_status: complete
+verification_status: tool_verified_pass
+evidence_class: TOOL_VERIFIED
+starting_head: cea4583daa9b034acc206d97c92e07bcff6516a2
+repository_contract: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md
+runtime_constants: Backend/kai/config/kaiSprint2P0Contract.js
+contract_version: 0.3.5
+checksum_contract: exact 64 hexadecimal input, lowercase canonical checksum, hash_algorithm sha256
+static_verifier_alignment: executable prewrite verifier requires checksum and contains no checksum_sha256 requirement
+security_executor_identity: kai_file_security_executor defined as disabled internal_service contract
+focused_verification: npm run verify:kai-sprint2-schema-contract — 8 passed, 0 failed
+affected_tests: 110 passed, 0 failed
+pass2_tests: npm run test:kai-sprint2-pass2 — 89 passed, 0 failed
+sprint2_tests: node --test __tests__/kai-sprint2-*.spec.js — 213 passed, 0 failed
+full_tests: npm test — 318 passed, 0 failed
+database_sentinel: non-listening loopback DATABASE_URL used for every Node and npm command
+executable_schema_change: none
+deployed_kai_schema_compatibility: NOT_CONFIRMED
+database_atomicity: NOT_CONFIRMED
+persistent_upload_lifecycle: NOT_CONFIRMED
+database_access: not performed
+cloud_access: not performed
+package_commit: report after commit; a commit cannot contain its own SHA
+next_package: P0-01
+```
+
 
 ---
 
@@ -1384,7 +1414,7 @@ next_package: P0-02
 plan_version: 0.3.5
 approval_status: OWNER_ACCEPTED
 owner_acceptance_reference: USER_CONFIRMED in the KAI Project conversation on 2026-07-14
-repository_install_commit: NOT_CONFIRMED; report after local Phase 0-D commit, not self-reference inside that commit
+repository_install_commit: TOOL_VERIFIED cea4583daa9b034acc206d97c92e07bcff6516a2
 approved_execution_order: Phase 0-D, state recheck, P0-02, P0-01, first-write milestone checkpoint, P0-03 repository-safe portion, P0-04, P0-05, P0-06A, P0-07
 p0_06b: GATE_A_BLOCKED
 gates_a_through_d: UNAUTHORIZED

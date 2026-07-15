@@ -24,7 +24,7 @@ required_columns AS (
     ('PREWRITE_FILE_CATALOG_COMPATIBLE', 'intake_files', 'organization_id'),
     ('PREWRITE_FILE_CATALOG_COMPATIBLE', 'intake_files', 'engagement_id'),
     ('PREWRITE_FILE_CATALOG_COMPATIBLE', 'intake_files', 'file_metadata'),
-    ('PREWRITE_FILE_CATALOG_COMPATIBLE', 'intake_files', 'checksum_sha256')
+    ('PREWRITE_FILE_CATALOG_COMPATIBLE', 'intake_files', 'checksum')
   ) AS required(check_name, table_name, column_name)
 ),
 catalog_columns AS (
@@ -71,8 +71,8 @@ required_indexes AS (
       'PREWRITE_INDEX_FILE_ORG_CHECKSUM_DEFAULT_EXACT',
       'ux_intake_files_org_checksum_default',
       'intake_files',
-      ARRAY['organization_id', 'checksum_sha256']::text[],
-      '(checksum_sha256 IS NOT NULL)'::text
+      ARRAY['organization_id', 'checksum']::text[],
+      '(checksum IS NOT NULL)'::text
     )
   ) AS required(check_name, index_name, table_name, key_columns, predicate_expression)
 ),

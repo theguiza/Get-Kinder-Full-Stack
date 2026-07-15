@@ -109,7 +109,7 @@ test("reserveIntakeFileMetadata stores metadata defaults without issuing signed 
       idempotencyKey: "kai-intake-file-001",
       originalFilename: "safe.csv",
       storageBucket: "private-ca-bucket",
-      checksum: "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      checksum: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
       hashAlgorithm: "sha256",
     },
     {

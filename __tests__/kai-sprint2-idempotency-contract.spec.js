@@ -18,7 +18,7 @@ import {
 const validatorSource = readFileSync("Backend/kai/validators/idempotencyValidators.js", "utf8");
 const testSource = readFileSync("__tests__/kai-sprint2-idempotency-contract.spec.js", "utf8");
 
-const checksum = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+const checksum = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
 
 test("idempotency key validators require stable supported keys", () => {
   assert.equal(idempotency_key_required({}).blocking_reason, "missing_idempotency_key");
@@ -31,6 +31,7 @@ test("checksum validators accept supplied metadata checksums only", () => {
   assert.equal(checksum_required({}).blocking_reason, "missing_checksum");
   assert.equal(checksum_required({ checksum }).severity, "pass");
   assert.equal(checksum_format_supported({ checksum: "abc" }).blocking_reason, "invalid_checksum");
+  assert.equal(checksum_format_supported({ checksum: `sha256:${checksum}` }).blocking_reason, "invalid_checksum");
   assert.equal(checksum_format_supported({ checksum }).severity, "pass");
   assert.equal(canonicalizeSha256Checksum(checksum), "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
   assert.equal(
@@ -56,7 +57,7 @@ test("idempotency checksum conflict and duplicate checksum blockers are pure", (
   assert.equal(idempotent_replay_checksum_matches(input).severity, "pass");
   assert.equal(idempotent_replay_checksum_matches({
     checksum,
-    existingChecksum: "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    existingChecksum: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
   }).blocking_reason, "idempotency_checksum_conflict");
   assert.equal(duplicate_checksum_blocked(input).blocking_reason, "duplicate_checksum");
   assert.equal(duplicate_checksum_blocked(input).evidence.duplicate_evaluation, "preliminary_declared_checksum_match");

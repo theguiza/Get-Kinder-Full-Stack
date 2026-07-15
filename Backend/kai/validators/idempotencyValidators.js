@@ -1,8 +1,12 @@
 import { blockerResult, passResult } from "./types.js";
+import {
+  KAI_SPRINT2_P0_HASH_ALGORITHM,
+  KAI_SPRINT2_P0_PATTERNS,
+} from "../config/kaiSprint2P0Contract.js";
 
-const IDEMPOTENCY_KEY_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{7,127}$/;
-const CHECKSUM_PATTERN = /^(?:sha256:)?[a-fA-F0-9]{64}$/;
-const SUPPORTED_HASH_ALGORITHM = "sha256";
+const IDEMPOTENCY_KEY_PATTERN = KAI_SPRINT2_P0_PATTERNS.idempotencyKey;
+const CHECKSUM_PATTERN = KAI_SPRINT2_P0_PATTERNS.checksumSha256;
+const SUPPORTED_HASH_ALGORITHM = KAI_SPRINT2_P0_HASH_ALGORITHM;
 
 function hasValue(value) {
   return value != null && String(value).trim() !== "";
@@ -25,7 +29,7 @@ export function getProvidedHashAlgorithm(context = {}) {
 }
 
 export function canonicalizeSha256Checksum(checksum) {
-  return String(checksum).replace(/^sha256:/, "").toLowerCase();
+  return String(checksum).toLowerCase();
 }
 
 export function idempotency_key_required(context = {}) {
@@ -79,7 +83,7 @@ export function checksum_format_supported(context = {}) {
       object_type: "intake_file_metadata",
       object_code: "checksum",
       blocking_reason: "invalid_checksum",
-      required_fix: "Provide a sha256 metadata checksum as 64 hex characters, optionally prefixed by sha256:.",
+      required_fix: "Provide a sha256 metadata checksum as exactly 64 hexadecimal characters.",
     });
   }
 

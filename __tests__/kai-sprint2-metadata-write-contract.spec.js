@@ -14,7 +14,7 @@ const validInput = Object.freeze({
   tenantContext: Object.freeze({ organizationId: "org-1" }),
   organizationId: "org-1",
   idempotencyKey: "pass1f-metadata-001",
-  checksum: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  checksum: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
   storageProvider: "gcs",
   filePolicyStatus: "pending",
 });

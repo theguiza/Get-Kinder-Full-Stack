@@ -8,6 +8,7 @@
     "build": "vite build",
     "test": "node --test __tests__/*.spec.js",
     "test:kai-sprint2-pass2": "node --test __tests__/kai-sprint2-pass2-*.spec.js",
+    "verify:kai-sprint2-schema-contract": "node --test __tests__/kai-sprint2-p0-repository-contract.spec.js",
     "verify:kai-sprint2-pass2-api": "node scripts/kai-sprint2-pass2-admin-metadata-intake-api-verifier.js",
     "backfill:surprises": "node scripts/backfillDailySurprises.js",
     "prestart": "npm run backfill:surprises || true",
