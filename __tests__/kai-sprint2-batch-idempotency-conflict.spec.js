@@ -4,15 +4,11 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 import { kaiIdempotentWriteConflict } from "../Backend/kai/internal/kaiIdempotentWriteConflict.js";
-import {
-  createIntakeBatch,
-  reserveIntakeFileMetadata,
-} from "../Backend/kai/services/kaiIntakeService.js";
+import { createIntakeBatch } from "../Backend/kai/services/kaiIntakeService.js";
 
 const organizationId = "a5d17c5a-c55f-43af-9b21-fe63aafe733f";
 const engagementId = "2e426ea1-2be3-4e48-b80f-9783ddbacda0";
 const intakeBatchId = "8e426ea1-2be3-4e48-b80f-9783ddbacda0";
-const intakeFileId = "9fe568b1-5c05-4c42-bb1f-6e20de216c7b";
 const idempotencyKey = "batch-write-conflict-001";
 const actorContext = Object.freeze({
   actorType: "human",
@@ -247,44 +243,4 @@ test("the conflict signal is not barrel-exported or route-imported", () => {
   assert.doesNotMatch(kaiBarrel, forbidden);
   assert.doesNotMatch(rootEntry, forbidden);
   assert.doesNotMatch(routeSources, forbidden);
-});
-
-test("intake-file reservation does not classify the batch conflict signal", async () => {
-  let idempotencyLookupCalls = 0;
-  let checksumLookupCalls = 0;
-  let insertCalls = 0;
-  const failure = await captureFailure(() => reserveIntakeFileMetadata({
-    actorContext,
-    organizationId,
-    engagementId,
-    intakeBatchId,
-    intakeFileId,
-    idempotencyKey: "file-reservation-unchanged-001",
-    safeFilename: "reservation.csv",
-    checksum: "a".repeat(64),
-    hashAlgorithm: "sha256",
-  }, baseDependencies({
-    async getIntakeBatchTenantState(requestedBatchId, requestedOrganizationId) {
-      assert.equal(requestedBatchId, intakeBatchId);
-      assert.equal(requestedOrganizationId, organizationId);
-      return { intake_batch_id: intakeBatchId, organization_id: organizationId, engagement_id: engagementId };
-    },
-    async findIntakeFileReservationByIdempotencyKey() {
-      idempotencyLookupCalls += 1;
-      return null;
-    },
-    async findIntakeFileReservationByChecksum() {
-      checksumLookupCalls += 1;
-      return null;
-    },
-    async insertIntakeFileMetadata() {
-      insertCalls += 1;
-      throw kaiIdempotentWriteConflict;
-    },
-  })));
-
-  assert.equal(failure, kaiIdempotentWriteConflict);
-  assert.equal(idempotencyLookupCalls, 1);
-  assert.equal(checksumLookupCalls, 1);
-  assert.equal(insertCalls, 1);
 });

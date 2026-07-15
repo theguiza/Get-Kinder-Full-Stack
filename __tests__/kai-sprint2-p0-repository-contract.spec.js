@@ -155,6 +155,15 @@ test("contract retains the P0-06A boundary and unverified persistence labels", (
   assert.match(contract, /No lifecycle transition deletes an object or executes retention/);
 });
 
+test("one repository-neutral conflict signal covers batch and file reservation without claiming SQL mapping", () => {
+  assert.match(contract, /one exact-identity, repository-neutral signal/);
+  assert.match(contract, /Batch creation and intake-file metadata reservation both use that same exact-identity signal/);
+  assert.match(contract, /Neither live SQL insert adapter is claimed to emit it/);
+  assert.match(contract, /PostgreSQL mapping, constraints, two-session proof, and atomicity remain Gate-A-dependent/);
+  assert.match(contract, /deployed-schema compatibility remains `NOT_CONFIRMED`/);
+  assert.doesNotMatch(contract, /Only batch creation is integrated with that signal/);
+});
+
 test("executable prewrite verifier uses the repository checksum name", () => {
   assert.doesNotMatch(prewriteVerifier, /checksum_sha256/);
   assert.match(prewriteVerifier, /'intake_files', 'checksum'/);

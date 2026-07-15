@@ -387,6 +387,22 @@ function responseFile(row) {
   };
 }
 
+function fileReservationReplayResult(row, expectedFingerprint, actorContext) {
+  if (hasConflictingFingerprint(row, expectedFingerprint, "file_metadata", "reservation_payload_hash")) {
+    return buildKaiError("duplicate_conflict");
+  }
+  return {
+    ok: true,
+    data: responseFile(row),
+    warnings: [],
+    audit_context: {
+      actor_user_id: actorContext.actorUserId,
+      actor_type: actorContext.actorType,
+      operation: "reserve_intake_file_metadata",
+    },
+  };
+}
+
 export async function checkAdminAccess(input = {}, dependencies = {}) {
   if (!isKaiSprint2Enabled(dependencies.env || process.env)) {
     return buildKaiError("feature_disabled");
@@ -709,21 +725,16 @@ export async function reserveIntakeFileMetadata(input = {}, dependencies = {}) {
     safeFilename: filenameResult.safeFilename,
   });
   const findExisting = dependencies.findIntakeFileReservationByIdempotencyKey || findIntakeFileReservationByIdempotencyKey;
-  const existing = await findExisting({ organizationId, engagementId, intakeBatchId, idempotencyKey });
+  const idempotencyLookup = Object.freeze({
+    organizationId,
+    operation: "reserve_intake_file_metadata",
+    engagementId,
+    intakeBatchId,
+    idempotencyKey,
+  });
+  const existing = await findExisting(idempotencyLookup);
   if (existing) {
-    if (hasConflictingFingerprint(existing, reservationPayloadHash, "file_metadata", "reservation_payload_hash")) {
-      return buildKaiError("duplicate_conflict");
-    }
-    return {
-      ok: true,
-      data: responseFile(existing),
-      warnings: [],
-      audit_context: {
-        actor_user_id: actorContext.actorUserId,
-        actor_type: actorContext.actorType,
-        operation: "reserve_intake_file_metadata",
-      },
-    };
+    return fileReservationReplayResult(existing, reservationPayloadHash, actorContext);
   }
 
   const findDuplicate = dependencies.findIntakeFileReservationByChecksum || findIntakeFileReservationByChecksum;
@@ -753,29 +764,37 @@ export async function reserveIntakeFileMetadata(input = {}, dependencies = {}) {
     `reservation://kai/${storageProvider}/org/${organizationId}/intake/${intakeBatchId}/${intakeFileId}/${filenameResult.safeFilename}`;
 
   const insertFile = dependencies.insertIntakeFileMetadata || insertIntakeFileMetadata;
-  const row = await insertFile({
-    intakeFileId,
-    intakeBatchId,
-    organizationId,
-    engagementId,
-    originalFilename: input.originalFilename || payload.original_filename || filenameResult.safeFilename,
-    safeFilename: filenameResult.safeFilename,
-    storageUri,
-    storageProvider,
-    storageBucket,
-    storageObjectKey: objectKeyResult.objectKey,
-    mimeType,
-    fileExtension: input.fileExtension || payload.file_extension || null,
-    fileSizeBytes: input.fileSizeBytes ?? payload.file_size_bytes ?? 0,
-    checksum,
-    hashAlgorithm,
-    rawFileRetained: false,
-    filePolicyStatus: "pending",
-    malwareScanStatus: "not_configured",
-    fileMetadata,
-    createdBy: actorContext.actorUserId,
-    createdByType: actorContext.actorType,
-  });
+  let row;
+  try {
+    row = await insertFile({
+      intakeFileId,
+      intakeBatchId,
+      organizationId,
+      engagementId,
+      originalFilename: input.originalFilename || payload.original_filename || filenameResult.safeFilename,
+      safeFilename: filenameResult.safeFilename,
+      storageUri,
+      storageProvider,
+      storageBucket,
+      storageObjectKey: objectKeyResult.objectKey,
+      mimeType,
+      fileExtension: input.fileExtension || payload.file_extension || null,
+      fileSizeBytes: input.fileSizeBytes ?? payload.file_size_bytes ?? 0,
+      checksum,
+      hashAlgorithm,
+      rawFileRetained: false,
+      filePolicyStatus: "pending",
+      malwareScanStatus: "not_configured",
+      fileMetadata,
+      createdBy: actorContext.actorUserId,
+      createdByType: actorContext.actorType,
+    });
+  } catch (error) {
+    if (error !== kaiIdempotentWriteConflict) throw error;
+    const conflictedExisting = await findExisting(idempotencyLookup);
+    if (!conflictedExisting) return buildKaiError("duplicate_conflict");
+    return fileReservationReplayResult(conflictedExisting, reservationPayloadHash, actorContext);
+  }
 
   return {
     ok: true,
