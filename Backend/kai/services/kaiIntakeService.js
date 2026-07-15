@@ -549,8 +549,8 @@ export async function reserveIntakeFileMetadata(input = {}, dependencies = {}) {
   if (!auth.ok) return buildKaiError(auth.error_code, { blockers: auth.blockers });
 
   const batchRecord = dependencies.getIntakeBatchTenantState
-    ? await dependencies.getIntakeBatchTenantState(intakeBatchId)
-    : await getIntakeBatchTenantState(intakeBatchId);
+    ? await dependencies.getIntakeBatchTenantState(intakeBatchId, organizationId)
+    : await getIntakeBatchTenantState(intakeBatchId, organizationId);
   if (!batchRecord) {
     return buildKaiError("not_found", { message: "Intake batch was not found for metadata reservation." });
   }

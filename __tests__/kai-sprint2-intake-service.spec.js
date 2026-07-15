@@ -6,6 +6,7 @@ import {
   reserveIntakeFileMetadata,
   requestUploadUrl,
 } from "../Backend/kai/services/kaiIntakeService.js";
+import { getIntakeBatchTenantState } from "../Backend/kai/db/kaiQueries.js";
 
 const actorContext = {
   actorType: "human",
@@ -26,6 +27,51 @@ const ids = {
   intakeBatchId: "8e426ea1-2be3-4e48-b80f-9783ddbacda0",
   intakeFileId: "9fe568b1-5c05-4c42-bb1f-6e20de216c7b",
 };
+const otherOrganizationId = "b5d17c5a-c55f-43af-9b21-fe63aafe733f";
+
+function tenantScopedBatchDb(batchRow) {
+  return {
+    async query(sql, params) {
+      assert.match(sql, /WHERE intake_batch_id = \$1\s+AND organization_id = \$2/);
+      const [requestedBatchId, requestedOrganizationId] = params;
+      const matchesTenant = requestedBatchId === batchRow.intake_batch_id
+        && requestedOrganizationId === batchRow.organization_id;
+      return { rows: matchesTenant ? [batchRow] : [] };
+    },
+  };
+}
+
+test("getIntakeBatchTenantState retrieves a batch for the matching organization", async () => {
+  const batchRow = {
+    intake_batch_id: ids.intakeBatchId,
+    organization_id: ids.organizationId,
+    engagement_id: ids.engagementId,
+  };
+
+  const result = await getIntakeBatchTenantState(
+    ids.intakeBatchId,
+    ids.organizationId,
+    tenantScopedBatchDb(batchRow),
+  );
+
+  assert.deepEqual(result, batchRow);
+});
+
+test("getIntakeBatchTenantState does not retrieve a batch for another organization", async () => {
+  const batchRow = {
+    intake_batch_id: ids.intakeBatchId,
+    organization_id: ids.organizationId,
+    engagement_id: ids.engagementId,
+  };
+
+  const result = await getIntakeBatchTenantState(
+    ids.intakeBatchId,
+    otherOrganizationId,
+    tenantScopedBatchDb(batchRow),
+  );
+
+  assert.equal(result, null);
+});
 
 test("feature flag disabled blocks Sprint 2 service entry", async () => {
   const result = await createIntakeBatch({ actorContext }, { env: { KAI_SPRINT2_ENABLED: "false" } });
@@ -77,7 +123,9 @@ test("reserveIntakeFileMetadata returns validator blocker as ok false without ra
     },
     {
       env: { KAI_SPRINT2_ENABLED: "1" },
-      async getIntakeBatchTenantState() {
+      async getIntakeBatchTenantState(intakeBatchId, organizationId) {
+        assert.equal(intakeBatchId, ids.intakeBatchId);
+        assert.equal(organizationId, ids.organizationId);
         return {
           intake_batch_id: ids.intakeBatchId,
           organization_id: ids.organizationId,
@@ -114,7 +162,9 @@ test("reserveIntakeFileMetadata stores metadata defaults without issuing signed 
     },
     {
       env: { KAI_SPRINT2_ENABLED: "true" },
-      async getIntakeBatchTenantState() {
+      async getIntakeBatchTenantState(intakeBatchId, organizationId) {
+        assert.equal(intakeBatchId, ids.intakeBatchId);
+        assert.equal(organizationId, ids.organizationId);
         return {
           intake_batch_id: ids.intakeBatchId,
           organization_id: ids.organizationId,

@@ -60,14 +60,15 @@ export async function getEngagementTenantState(engagementId, db = pool) {
   return rows[0] || null;
 }
 
-export async function getIntakeBatchTenantState(intakeBatchId, db = pool) {
-  if (!intakeBatchId) return null;
+export async function getIntakeBatchTenantState(intakeBatchId, organizationId, db = pool) {
+  if (!intakeBatchId || !organizationId) return null;
   const { rows } = await db.query(
     `SELECT intake_batch_id, organization_id, engagement_id
        FROM kai.intake_batches
       WHERE intake_batch_id = $1
+        AND organization_id = $2
       LIMIT 1`,
-    [intakeBatchId],
+    [intakeBatchId, organizationId],
   );
   return rows[0] || null;
 }

@@ -1439,6 +1439,32 @@ package_commit: report after commit; a commit cannot contain its own SHA
 next_package_or_stop_condition: FIRST-WRITE MILESTONE CHECKPOINT — stop before P0-03
 ```
 
+## P0-03 — tenant-scoped batch lookup hardening (first bounded leaf)
+
+```text
+leaf_status: complete
+p0_03_package_status: in_progress
+implementation_status: partial
+verification_status: tool_verified_pass
+evidence_class: TOOL_VERIFIED
+starting_head: fb7970cd21f1ef6e7140dc12297a3c704f9890ad
+tenant_query_scope: getIntakeBatchTenantState requires intake_batch_id and organization_id and predicates the batch read on both values
+service_boundary: reserveIntakeFileMetadata supplies organization_id to the batch lookup and retains post-read tenant validation as defense in depth
+cross_tenant_behavior: matching organization lookup returns the row; a different organization receives no row and the service retains its safe not_found path
+focused_tests: node --test __tests__/kai-sprint2-intake-service.spec.js __tests__/kai-sprint2-pass2-metadata-intake-service.spec.js — 43 passed, 0 failed
+sprint2_tests: node --test __tests__/kai-sprint2-*.spec.js — 229 passed, 0 failed
+full_tests: npm test — 334 passed, 0 failed
+database_sentinel: non-listening loopback DATABASE_URL used for every Node and npm command
+local_http_test: existing parser test used an ephemeral 127.0.0.1 listener; sandbox-denied attempts were rerun in the localhost-capable execution context
+fingerprints_transactions_audit_metrics_routes_schema: intentionally unchanged
+database_access: not performed
+cloud_or_external_network_access: not performed
+feature_or_tenant_configuration_change: not performed
+remaining_p0_03_items: unchanged and not implemented in this bounded leaf
+package_commit: report after commit; a commit cannot contain its own SHA
+next_package_or_stop_condition: OWNER-DIRECTED STOP after the first bounded P0-03 leaf
+```
+
 
 ---
 
