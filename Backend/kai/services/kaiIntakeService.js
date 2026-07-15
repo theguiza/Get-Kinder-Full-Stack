@@ -5,6 +5,7 @@ import {
 } from "../config/kaiSprint2Config.js";
 import { KAI_SPRINT2_P0_PATTERNS } from "../config/kaiSprint2P0Contract.js";
 import { buildKaiError, validationBlocked } from "../errors/kaiErrors.js";
+import { kaiIdempotentWriteConflict } from "../internal/kaiIdempotentWriteConflict.js";
 import { resolveKaiActorContext } from "../auth/kaiActorContext.js";
 import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationService.js";
 import {
@@ -186,6 +187,22 @@ function hasConflictingFingerprint(row, expectedFingerprint, metadataColumn, fin
     return true;
   }
   return existingFingerprint !== expectedFingerprint;
+}
+
+function batchReplayResult(row, expectedFingerprint, actorContext) {
+  if (hasConflictingFingerprint(row, expectedFingerprint, "batch_metadata", "normalized_payload_hash")) {
+    return buildKaiError("duplicate_conflict");
+  }
+  return {
+    ok: true,
+    data: responseBatch(row),
+    warnings: [],
+    audit_context: {
+      actor_user_id: actorContext.actorUserId,
+      actor_type: actorContext.actorType,
+      operation: "create_intake_batch",
+    },
+  };
 }
 
 function unsafeFilenameBlocker(reason = "unsafe_filename") {
@@ -485,40 +502,41 @@ export async function createIntakeBatch(input = {}, dependencies = {}) {
 
   const normalizedPayloadHash = batchPayloadFingerprint({ organizationId, engagementId, batchCode, idempotencyKey, payload });
   const findExisting = dependencies.findIntakeBatchByIdempotencyKey || findIntakeBatchByIdempotencyKey;
-  const existing = await findExisting({ organizationId, idempotencyKey });
+  const idempotencyLookup = Object.freeze({
+    organizationId,
+    operation: "create_intake_batch",
+    idempotencyKey,
+  });
+  const existing = await findExisting(idempotencyLookup);
   if (existing) {
-    if (hasConflictingFingerprint(existing, normalizedPayloadHash, "batch_metadata", "normalized_payload_hash")) {
-      return buildKaiError("duplicate_conflict");
-    }
-    return {
-      ok: true,
-      data: responseBatch(existing),
-      warnings: [],
-      audit_context: {
-        actor_user_id: actorContext.actorUserId,
-        actor_type: actorContext.actorType,
-        operation: "create_intake_batch",
-      },
-    };
+    return batchReplayResult(existing, normalizedPayloadHash, actorContext);
   }
 
   const insertBatch = dependencies.insertIntakeBatchMetadata || insertIntakeBatchMetadata;
-  const row = await insertBatch({
-    organizationId,
-    engagementId,
-    batchCode,
-    idempotencyKey,
-    intakeMethod: payload.intake_method || "manual_upload",
-    sourceSystemName: input.sourceSystemName || payload.source_system_name || null,
-    sourceSystemRef: input.sourceSystemRef || payload.source_system_ref || null,
-    notes: input.notes || payload.notes || null,
-    batchMetadata: {
-      ...normalizeBatchMetadata(payload),
-      normalized_payload_hash: normalizedPayloadHash,
-    },
-    createdBy: actorContext.actorUserId,
-    createdByType: actorContext.actorType,
-  });
+  let row;
+  try {
+    row = await insertBatch({
+      organizationId,
+      engagementId,
+      batchCode,
+      idempotencyKey,
+      intakeMethod: payload.intake_method || "manual_upload",
+      sourceSystemName: input.sourceSystemName || payload.source_system_name || null,
+      sourceSystemRef: input.sourceSystemRef || payload.source_system_ref || null,
+      notes: input.notes || payload.notes || null,
+      batchMetadata: {
+        ...normalizeBatchMetadata(payload),
+        normalized_payload_hash: normalizedPayloadHash,
+      },
+      createdBy: actorContext.actorUserId,
+      createdByType: actorContext.actorType,
+    });
+  } catch (error) {
+    if (error !== kaiIdempotentWriteConflict) throw error;
+    const conflictedExisting = await findExisting(idempotencyLookup);
+    if (!conflictedExisting) return buildKaiError("duplicate_conflict");
+    return batchReplayResult(conflictedExisting, normalizedPayloadHash, actorContext);
+  }
 
   return {
     ok: true,

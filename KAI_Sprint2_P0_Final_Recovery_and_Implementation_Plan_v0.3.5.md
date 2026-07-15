@@ -1610,6 +1610,47 @@ package_commit: report after commit; a commit cannot contain its own SHA
 next_package_or_stop_condition: OWNER-DIRECTED STOP after this orchestration-boundary correction package
 ```
 
+## P0-03 — batch-creation write-time idempotency-conflict recovery
+
+```text
+leaf_status: complete
+p0_03_package_status: in_progress
+implementation_status: partial
+verification_status: tool_verified_pass
+evidence_class: TOOL_VERIFIED
+owner_directed_leaf_scope: USER_CONFIRMED
+starting_head: 25d87517c030fae5760dd01803cad508a8d3658c
+conflict_signal: Backend/kai/internal/kaiIdempotentWriteConflict.js exact-identity frozen singleton Error
+conflict_signal_semantics: internal repository-neutral idempotent-write-conflict signal; no database code, constraint, index, message, truthiness, or shape classification
+signal_importers: Backend/kai/services/kaiIntakeService.js and __tests__/kai-sprint2-batch-idempotency-conflict.spec.js only
+batch_lookup_dependency: existing findIntakeBatchByIdempotencyKey dependency used before insert and once after the exact conflict signal
+batch_lookup_scope: organizationId plus explicit create_intake_batch operation plus idempotencyKey; the same frozen lookup input is used for both calls
+insert_attempts_after_initial_miss: exactly one
+conflict_rereads: at most one
+conflict_replay: valid current-format matching fingerprint returns the existing responseBatch replay DTO and audit context
+conflict_fail_closed: no row or missing, malformed, or different stored fingerprint returns the existing duplicate_conflict response
+failure_preservation: unrelated insert errors, initial lookup failures, and conflict re-read failures propagate as their identical original failures
+file_reservation_behavior: unchanged; it does not classify or recover the batch conflict signal
+production_barrel_or_route_exposure: none
+repository_contract_change: narrow internal-signal semantics and Gate A limitations recorded
+live_sql_adapter_mapping: none; no adapter is claimed to emit the signal
+postgresql_constraints_two_session_proof_atomicity: Gate A dependent and not implemented or verified
+deployed_kai_schema_compatibility: NOT_CONFIRMED
+targeted_tests: node --test __tests__/kai-sprint2-batch-idempotency-conflict.spec.js __tests__/kai-sprint2-pass2-metadata-intake-service.spec.js __tests__/kai-sprint2-p0-repository-contract.spec.js — 69 passed, 0 failed
+pass2_tests: npm run test:kai-sprint2-pass2 — 105 passed, 0 failed
+sprint2_tests: node --test __tests__/kai-sprint2-*.spec.js — 292 passed, 0 failed after the existing parser listener's sandbox-denied EPERM was rerun with localhost-listener permission
+full_tests: npm test — 397 passed, 0 failed
+git_diff_check: passed before the single ExecPlan completion update and rerun afterward against the final package diff
+database_sentinel: non-listening loopback DATABASE_URL at 127.0.0.1:1 used for every Node and npm command
+database_access: not performed
+cloud_or_external_network_access: not performed
+feature_or_tenant_configuration_change: not performed
+sql_routes_http_contracts_transactions_audit_metrics_fingerprints_file_reservation: intentionally unchanged
+remaining_p0_03_items: unchanged and not implemented in this bounded leaf
+package_commit: report after commit; a commit cannot contain its own SHA
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this batch-only bounded leaf
+```
+
 
 ---
 
