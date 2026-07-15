@@ -1498,6 +1498,39 @@ package_commit: report after commit; a commit cannot contain its own SHA
 next_package_or_stop_condition: OWNER-DIRECTED STOP after the stored-fingerprint bounded leaf
 ```
 
+## P0-03 — transaction-interface definition (third bounded leaf)
+
+```text
+leaf_status: complete
+p0_03_package_status: in_progress
+implementation_status: partial
+verification_status: tool_verified_pass
+evidence_class: TOOL_VERIFIED
+starting_head: 78887d2e874bc23f91acf0c34654c91abf455759
+authoritative_transaction_interface: existing Backend/kai/db/kaiDb.js withTransaction(callback) reused; no competing abstraction created
+callback_scope: callback receives exactly one opaque transaction context and successful completion commits and returns its result
+failure_scope: synchronous throw and rejected promise both roll back and preserve the callback failure
+context_consistency: deterministic fake mutation persistence and required-audit persistence receive the same context object unchanged
+transaction_provider_seam: optional provider injection exists only for deterministic adapter contract tests; runtime callers retain the callback-only form
+metrics_boundary: best-effort metrics are absent from the transaction interface, run after commit, and deterministic failure does not cause rollback
+runtime_wiring: batch creation, file reservation, audit, and metrics are intentionally not wired to the interface
+focused_tests: node --test __tests__/kai-sprint2-transaction-interface.spec.js __tests__/kai-sprint2-p0-repository-contract.spec.js __tests__/kai-sprint2-api-contract.spec.js — 27 passed, 0 failed
+sprint2_tests: node --test __tests__/kai-sprint2-*.spec.js — 250 passed, 0 failed
+full_tests: npm test — 355 passed, 0 failed
+git_diff_check: passed
+database_sentinel: non-listening loopback DATABASE_URL at 127.0.0.1:1 used for every Node and npm command
+local_http_test: complete Sprint 2 and npm suites used the existing parser test's ephemeral 127.0.0.1 listener in the localhost-capable execution context after the default sandbox denied listen with EPERM
+sql_routes_schema_fingerprints_tenant_queries_runtime_mutation_orchestration: intentionally unchanged
+database_access: not performed
+cloud_or_external_network_access: not performed
+feature_or_tenant_configuration_change: not performed
+deployed_kai_schema_compatibility: NOT_CONFIRMED
+database_atomicity: NOT_CONFIRMED
+remaining_p0_03_items: unchanged and not implemented in this bounded leaf
+package_commit: report after commit; a commit cannot contain its own SHA
+next_package_or_stop_condition: OWNER-DIRECTED STOP after the transaction-interface bounded leaf
+```
+
 
 ---
 

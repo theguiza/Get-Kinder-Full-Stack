@@ -219,6 +219,10 @@ Audit payloads are metadata-only allowlists. Safe facts may include operation, a
 
 Required audit is part of the authorized mutation transaction and rolls back with that mutation. Best-effort metrics are separate and never roll back a valid mutation. Final database atomicity remains `NOT_CONFIRMED` until Gate A.
 
+The existing `withTransaction(callback)` helper in `Backend/kai/db/kaiDb.js` is the single authoritative callback-scoped repository transaction interface. Runtime orchestration supplies one callback, and that callback receives exactly one opaque transaction context. A successful callback completion commits and returns the callback result. A thrown error or rejected callback rolls back and rejects with that failure. Future mutation persistence and required-audit persistence may receive the same context unchanged through their query-runner injection points. They are not wired to it in this package.
+
+Best-effort metrics are not an argument, callback, hook, or participant in this transaction interface. They run only after the transaction has committed, and outer orchestration must contain any metrics failure so it cannot trigger rollback. The optional transaction-provider parameter on the concrete helper is only an adapter-injection seam for deterministic contract tests; it does not add a second transaction interface. These repository-local interface tests establish orchestration semantics only and make no PostgreSQL atomicity or deployed-schema compatibility claim.
+
 Intended constraints and indexes, without executable DDL, include:
 
 ```text
