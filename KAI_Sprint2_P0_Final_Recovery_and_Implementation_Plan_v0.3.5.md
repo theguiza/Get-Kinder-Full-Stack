@@ -1695,6 +1695,44 @@ package_commit: report after commit; a commit cannot contain its own SHA
 next_package_or_stop_condition: OWNER-DIRECTED STOP after this file-reservation conflict bounded leaf
 ```
 
+## P0-03 — repository-safe package closure
+
+```text
+p0_03_repository_safe_package_status: complete
+implementation_status: complete_for_authorized_repository_safe_scope
+verification_status: tool_verified_pass
+evidence_class: TOOL_VERIFIED
+ending_head: ff329d9243a5f3d1d2e868b39e44201e2a4ead84
+completed_units:
+1. tenant-scoped batch lookup hardening;
+2. stored-fingerprint fail-closed hardening;
+3. transaction-interface definition;
+4. required-audit versus best-effort-metrics orchestration;
+5. orchestration production-boundary correction;
+6. batch write-time idempotency-conflict recovery;
+7. file-reservation write-time idempotency-conflict recovery.
+established_acceptance_labels:
+TENANT_QUERY_SCOPE_TOOL_VERIFIED
+FINGERPRINT_FAIL_CLOSED_TOOL_VERIFIED
+TRANSACTION_ORCHESTRATION_TOOL_VERIFIED
+MOCKED_CONFLICT_HANDLING_TOOL_VERIFIED
+DATABASE_ATOMICITY_VERIFIED: not_established
+deployed_kai_schema_compatibility: NOT_CONFIRMED
+database_atomicity: NOT_CONFIRMED
+persistent_upload_lifecycle: NOT_CONFIRMED
+distributed abuse/concurrency coordination: NOT_CONFIRMED
+repository_safe_completion: synthetic repository milestone only
+repository_safe_completion_limit: This does not prove that the batch or file-reservation paths work against deployed PostgreSQL tables, constraints, indexes, or concurrent sessions.
+persisted_fingerprint_version_discrimination: Gate-A-deferred because no version discriminator is currently persisted
+gate_a_parked_items:
+1. rollback-failure error preservation;
+2. distinct corrupt-stored-fingerprint versus payload-conflict reason coding;
+3. orchestration boundary-guard review when a real production composition root is introduced;
+4. live PostgreSQL conflict mapping, deployed constraints, two-session proof, database atomicity, and concurrency enforcement.
+next_package: P0-04
+next_action: separate fresh read-only repository inspection to select one smallest bounded read-route leaf
+```
+
 
 ---
 
