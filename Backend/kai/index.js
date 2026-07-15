@@ -111,4 +111,12 @@ export {
   validateBlockedAttemptAuditPayload,
 } from "./validators/auditValidators.js";
 export { PASS1E_AUDIT_CONTRACT, recordBlockedAttemptAudit } from "./services/auditService.js";
+export {
+  BEST_EFFORT_METRIC_METADATA_ALLOWLIST,
+  REQUIRED_AUDIT_METADATA_ALLOWLIST,
+  RequiredAuditPersistenceError,
+  orchestrateMutationWithRequiredAudit,
+  sanitizeBestEffortMetricMetadata,
+  sanitizeRequiredAuditMetadata,
+} from "./services/kaiMutationOrchestration.js";
 export { default as sprint2IntakeApiRouter } from "./routes/sprint2IntakeApi.js";

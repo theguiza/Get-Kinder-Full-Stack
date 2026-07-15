@@ -1531,6 +1531,42 @@ package_commit: report after commit; a commit cannot contain its own SHA
 next_package_or_stop_condition: OWNER-DIRECTED STOP after the transaction-interface bounded leaf
 ```
 
+## P0-03 — required-audit versus best-effort-metrics orchestration (fourth bounded leaf)
+
+```text
+leaf_status: complete
+p0_03_package_status: in_progress
+implementation_status: partial
+verification_status: tool_verified_pass
+evidence_class: TOOL_VERIFIED
+starting_head: ed60a6847eb238637edadf4020bcd4321b734cec
+authoritative_transaction_interface: existing Backend/kai/db/kaiDb.js withTransaction(callback) reused unchanged; no competing transaction abstraction created
+repository_neutral_orchestration: Backend/kai/services/kaiMutationOrchestration.js coordinates injected mutation persistence, required-audit persistence, and optional best-effort metric emission
+transaction_context: mutation persistence and required-audit persistence receive the same opaque transaction context object unchanged
+required_audit_boundary: audit persistence must confirm ok true; a thrown, rejected, skipped, or non-confirming required audit fails the transaction and rolls back the mutation
+metrics_boundary: metrics run only after successful transaction completion; mutation or required-audit failure suppresses metrics; metric failure cannot roll back or replace the successful mutation result
+production_transaction_call: orchestration calls withTransaction(callback) without a transaction provider
+deterministic_test_seam: existing optional provider seam is reachable only through the explicitly named testOnlyTransactionProvider option in fake/in-memory tests
+metadata_safety: required audit and best-effort metrics use separate frozen scalar allowlists and field normalizers; metrics exclude organization, engagement, object, request, and route identifiers
+forbidden_payload_proof: raw content, parsed rows, prompt text, storage bucket/object/URI identifiers, unrestricted actor/session/membership data, and unapproved PII are excluded from audit and metric payloads
+runtime_wiring: real batch creation, file reservation, audit repositories, and metric emitters are intentionally not wired
+focused_tests: node --test __tests__/kai-sprint2-mutation-orchestration.spec.js __tests__/kai-sprint2-transaction-interface.spec.js __tests__/kai-sprint2-p0-repository-contract.spec.js __tests__/kai-sprint2-api-contract.spec.js — 32 passed, 0 failed
+sprint2_tests: node --test __tests__/kai-sprint2-*.spec.js — 255 passed, 0 failed
+full_tests: npm test — 360 passed, 0 failed
+git_diff_check: passed
+database_sentinel: non-listening loopback DATABASE_URL at 127.0.0.1:1 used for every Node and npm command
+local_http_test: complete Sprint 2 and npm suites used the existing parser test's ephemeral 127.0.0.1 listener in the localhost-capable execution context after the default sandbox denied listen with EPERM
+kaiDb_sql_routes_schema_fingerprints_tenant_queries_existing_runtime_mutations: intentionally unchanged
+database_access: not performed
+cloud_or_external_network_access: not performed
+feature_or_tenant_configuration_change: not performed
+deployed_kai_schema_compatibility: NOT_CONFIRMED
+database_atomicity: NOT_CONFIRMED
+remaining_p0_03_items: unchanged and not implemented in this bounded leaf
+package_commit: report after commit; a commit cannot contain its own SHA
+next_package_or_stop_condition: OWNER-DIRECTED STOP after the required-audit versus best-effort-metrics orchestration bounded leaf
+```
+
 
 ---
 
