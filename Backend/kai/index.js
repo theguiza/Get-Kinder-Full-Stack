@@ -54,6 +54,7 @@ export {
   checkAdminAccess,
   createIntakeBatch,
   confirmUpload,
+  getIntakeBatchDetail,
   listIntakeBatches,
   listIntakeBatchesForOrganization,
   requestUploadUrl,

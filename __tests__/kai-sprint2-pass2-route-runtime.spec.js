@@ -100,6 +100,7 @@ test("Pass 2 router exposes only metadata-intake admin surface", () => {
   assert.deepEqual([...routePaths].sort(), [
     "/admin/access-check",
     "/admin/batches",
+    "/admin/batches/:intakeBatchId",
     "/admin/batches/:intakeBatchId/file-reservations",
     "/status",
   ]);

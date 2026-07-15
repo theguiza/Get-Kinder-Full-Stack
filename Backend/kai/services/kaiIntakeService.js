@@ -15,7 +15,10 @@ import {
   insertIntakeBatchMetadata,
   insertIntakeFileMetadata,
 } from "../db/kaiIntakeQueries.js";
-import { listIntakeBatchesForOrganization as readIntakeBatchesForOrganization } from "../db/kaiReadModels.js";
+import {
+  getIntakeBatchDetail as readIntakeBatchDetail,
+  listIntakeBatchesForOrganization as readIntakeBatchesForOrganization,
+} from "../db/kaiReadModels.js";
 import { getEngagementTenantState, getIntakeBatchTenantState } from "../db/kaiQueries.js";
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
 import { validateSafeFilename, buildObjectKey } from "../storage/storagePathPolicy.js";
@@ -177,6 +180,19 @@ function responseBatchSummary(row) {
     review_status: row?.review_status,
     created_at: row?.created_at,
     updated_at: row?.updated_at,
+  };
+}
+
+function responseBatchDetail(row) {
+  return {
+    intake_batch_id: row.intake_batch_id,
+    organization_id: row.organization_id,
+    engagement_id: row.engagement_id,
+    batch_code: row.batch_code,
+    processing_status: row.processing_status,
+    review_status: row.review_status,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
   };
 }
 
@@ -344,6 +360,48 @@ export async function listIntakeBatchesForOrganization(input = {}, dependencies 
 }
 
 export const listIntakeBatches = listIntakeBatchesForOrganization;
+
+export async function getIntakeBatchDetail(input = {}, dependencies = {}) {
+  if (!isKaiSprint2Enabled(dependencies.env || process.env)) {
+    return buildKaiError("feature_disabled");
+  }
+
+  const organizationId = String(input.organizationId || "").trim().toLowerCase();
+  const intakeBatchId = String(input.intakeBatchId || "").trim().toLowerCase();
+  if (!UUID_RE.test(organizationId) || !UUID_RE.test(intakeBatchId)) {
+    return buildKaiError("invalid_request");
+  }
+
+  const actorResult = input.actorContext
+    ? { ok: true, actorContext: input.actorContext }
+    : await resolveKaiActorContext(input.req, dependencies);
+  if (!actorResult.ok) return actorError(actorResult);
+
+  const actorContext = actorResult.actorContext;
+  const auth = validateActorCanPerformOperation(actorContext, "read_intake", organizationId);
+  if (!auth.ok) return buildKaiError(auth.error_code, { blockers: auth.blockers });
+
+  const readBatch = dependencies.getIntakeBatchDetail || readIntakeBatchDetail;
+  const row = await readBatch(organizationId, intakeBatchId);
+  if (!row || String(row.intake_batch_id || "").toLowerCase() !== intakeBatchId) {
+    return buildKaiError("not_found");
+  }
+
+  const tenantResult = validateTenantBoundaryConsistency({
+    expectedOrganizationId: organizationId,
+    payload: { organization_id: organizationId },
+    currentRecords: [row],
+  });
+  if (tenantResult.severity === "blocker") {
+    return buildKaiError("tenant_boundary_violation", { blockers: [tenantResult] });
+  }
+
+  return {
+    ok: true,
+    data: responseBatchDetail(row),
+    warnings: [],
+  };
+}
 
 function reservationPayloadFingerprint({
   organizationId,

@@ -1733,6 +1733,54 @@ next_package: P0-04
 next_action: separate fresh read-only repository inspection to select one smallest bounded read-route leaf
 ```
 
+## P0-04 — tenant-scoped batch-detail read (first bounded leaf)
+
+```text
+leaf_status: complete
+p0_04_package_status: in_progress
+implementation_status: partial
+verification_status: tool_verified_pass
+evidence_class: TOOL_VERIFIED
+owner_directed_leaf_scope: USER_CONFIRMED
+starting_head: 50e5f05e16fc2b62058a24e68c0ff25367e55489
+mounted_route: GET /api/kai/sprint2/intake/admin/batches/:intakeBatchId
+route_registration: existing Backend/kai/routes/sprint2IntakeApi.js admin-batch family only; no second mount, duplicated feature gate, or parallel authentication path
+identifier_validation: organization_id query scope and intakeBatchId path parameter must both be canonical UUID-shaped identifiers before service invocation
+canonical_service: Backend/kai/services/kaiIntakeService.js getIntakeBatchDetail
+service_controls: feature flag, mapped human actor, allowed read role, active organization membership, tenant-scoped dependency arguments, returned-row identifier check, and defense-in-depth tenant validation
+repository_dependency: existing Backend/kai/db/kaiReadModels.js getIntakeBatchDetail used unchanged with organization_id and intake_batch_id predicates; no unscoped fallback or query-projection refactor
+dto_construction_style: explicit positive eight-field property allowlist
+row_spread_used: no
+forbidden_sentinel_test: direct service and assembled HTTP results exclude the required idempotency, source, notes, batch metadata, storage, signed URL, raw content, client data, and unapproved PII keys and sentinel values
+assembled_route_test: real ephemeral-loopback HTTP requests through a test Express application mounting the actual production Sprint 2 middleware and sprint2IntakeApiRouter in production order
+production_routers_used: Backend/kai/routes/sprint2IntakeApi.js
+production_middleware_used: setKaiSprint2NoStore, requireKaiSprint2Enabled, kaiSprint2MetadataJsonParser, handleKaiSprint2JsonParserError, kaiSprint2OrganizationMutationLimiter, kaiSprint2ActorMutationLimiter, requireKaiSprint2Authenticated
+feature_gate_before_auth_result: disabled request returned canonical 403 with an empty event trace and zero batch-repository calls; enabled unauthenticated request reached canonical authentication and returned canonical 401 with zero batch-repository calls
+repository_call_event_trace: outer_feature_gate_passed → canonical_http_authentication → sprint2_batch_detail_route_handler → actor_mapping → role_context_lookup → membership_context_lookup → tenant_membership_scope_check → active_membership_check → allowed_role_check → tenant_scoped_repository_read
+route_inherits_existing_admin_mount: yes
+api_contract_verifier_files_changed: __tests__/kai-sprint2-api-contract.spec.js and __tests__/kai-sprint2-pass2-route-runtime.spec.js
+schema_contract_verifier_files_changed: none
+verifier_change_classification: expected_inventory_only
+verifier_semantics: no existing route removed, no exact assertion weakened, no allowlist broadened, no verifier disabled, and no failure changed to warning-only
+focused_tests: node --test __tests__/kai-sprint2-batch-detail-route.spec.js — 11 passed, 0 failed
+api_contract_tests: npm run verify:kai-sprint2-api-contract — 51 passed, 0 failed
+schema_contract_tests: npm run verify:kai-sprint2-schema-contract — 9 passed, 0 failed
+sprint2_tests: node --test __tests__/kai-sprint2-*.spec.js — 319 passed, 0 failed
+legacy_kai_tests: 45 passed, 0 failed
+full_tests: npm test — 424 passed, 0 failed
+database_sentinel: non-listening loopback DATABASE_URL at 127.0.0.1:1 used for every Node and npm command
+local_http_test: focused, API-contract, Sprint 2, and full suites used only ephemeral 127.0.0.1 listeners in the owner-authorized localhost-capable execution context after the default sandbox rejected listen with EPERM
+database_access: not performed
+cloud_or_external_network_access: not performed
+feature_or_tenant_configuration_change: not performed
+schema_sql_migrations_query_projection_review_controls_other_routes: intentionally unchanged
+deployed_kai_schema_compatibility: NOT_CONFIRMED
+remaining_p0_04_items: unchanged and not implemented in this bounded leaf
+complete_diff_scope: Backend/kai/index.js, Backend/kai/routes/sprint2IntakeApi.js, Backend/kai/services/kaiIntakeService.js, __tests__/kai-sprint2-batch-detail-route.spec.js, __tests__/kai-sprint2-api-contract.spec.js, __tests__/kai-sprint2-pass2-route-runtime.spec.js, and this living ExecPlan evidence update only
+package_commit: report after commit; a commit cannot contain its own SHA
+next_package_or_stop_condition: RETURN the authorized batch-detail leaf evidence before selecting another P0-04 leaf
+```
+
 
 ---
 

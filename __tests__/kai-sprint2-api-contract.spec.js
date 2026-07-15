@@ -22,6 +22,7 @@ test("service errors map through the canonical KAI HTTP status contract", () => 
 test("api contract exposes Sprint 2 status and admin metadata route shape", () => {
   assert.match(routeSource, /router\.get\(["']\/status["']/);
   assert.match(routeSource, /router\.post\(["']\/admin\/batches["']/);
+  assert.match(routeSource, /router\.get\(["']\/admin\/batches\/:intakeBatchId["']/);
   assert.match(routeSource, /router\.post\(["']\/admin\/batches\/:intakeBatchId\/file-reservations["']/);
   assert.match(routeSource, /mode:\s*["']admin_metadata_only["']/);
   assert.match(routeSource, /contract:\s*`kai_sprint2_p0_repository_contract_v\$\{KAI_SPRINT2_P0_CONTRACT_VERSION\}`/);

@@ -1,7 +1,10 @@
 import express from "express";
 import { KAI_ERROR_STATUS, sendKaiError } from "../errors/kaiErrors.js";
 import { requireKaiSprint2Enabled } from "../config/kaiSprint2Config.js";
-import { KAI_SPRINT2_P0_CONTRACT_VERSION } from "../config/kaiSprint2P0Contract.js";
+import {
+  KAI_SPRINT2_P0_CONTRACT_VERSION,
+  KAI_SPRINT2_P0_PATTERNS,
+} from "../config/kaiSprint2P0Contract.js";
 import { setKaiSprint2NoStore } from "../middleware/kaiSprint2RequestSafety.js";
 import { validateKaiSprint2MutationRequest } from "../validators/kaiSprint2RequestSchemas.js";
 
@@ -93,6 +96,18 @@ function metadataContentTypeIsSupported(req = {}) {
   return mediaType === "application/json" || /^application\/[a-z0-9!#$&^_.+-]+\+json$/.test(mediaType);
 }
 
+function normalizedUuid(value) {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function batchDetailIdentifiers(req = {}) {
+  const organizationId = normalizedUuid(req.query?.organization_id);
+  const intakeBatchId = normalizedUuid(req.params?.intakeBatchId);
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId)) return null;
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(intakeBatchId)) return null;
+  return { organizationId, intakeBatchId };
+}
+
 function validateMutationRequestOrSend(req, res, operation, options = {}) {
   if (!metadataContentTypeIsSupported(req)) {
     sendKaiError(res, "unsupported_media_type");
@@ -174,6 +189,18 @@ router.get("/admin/batches", async (req, res) => {
   });
 });
 
+router.get("/admin/batches/:intakeBatchId", async (req, res) => {
+  const identifiers = batchDetailIdentifiers(req);
+  if (!identifiers) return sendKaiError(res, "invalid_request");
+  return invokeService(res, async () => {
+    const service = await getIntakeService();
+    return service.getIntakeBatchDetail({
+      ...requestContext(req, "/api/kai/sprint2/intake/admin/batches/:intakeBatchId"),
+      ...identifiers,
+    });
+  });
+});
+
 router.post("/admin/batches", async (req, res) => {
   const payload = requestPayload(req);
   if (!validateMutationRequestOrSend(req, res, "create_intake_batch")) return;
@@ -221,6 +248,7 @@ export const __testables = {
   requestContext,
   requestPayload,
   safeAuthenticatedUser,
+  batchDetailIdentifiers,
   sendServiceResult,
   sanitizeServiceBlockers,
   sanitizeServiceWarnings,
