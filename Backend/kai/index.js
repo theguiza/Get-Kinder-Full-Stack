@@ -1,4 +1,9 @@
-export { isKaiSprint2Enabled, requireKaiSprint2Enabled } from "./config/kaiSprint2Config.js";
+export {
+  areKaiSprint2UploadFeaturesEnabled,
+  isKaiFileUploadEnabled,
+  isKaiSprint2Enabled,
+  requireKaiSprint2Enabled,
+} from "./config/kaiSprint2Config.js";
 export {
   KAI_SPRINT2_P0_ABUSE_LIMITS,
   KAI_SPRINT2_P0_CONTRACT_VERSION,
@@ -46,17 +51,15 @@ export {
   tenant_context_required,
 } from "./validators/intakeValidators.js";
 export {
+  checkAdminAccess,
   createIntakeBatch,
   confirmUpload,
-  parseIntakeRawFile,
-  promoteIntakeSource,
-  registerIntakeFileMetadata,
+  listIntakeBatches,
+  listIntakeBatchesForOrganization,
   requestUploadUrl,
-  requestIntakeFileTransfer,
-  reserveIntakeFile,
-  validateBlockedAttemptAuditContract,
-  validateIntakePreflight,
-} from "./services/intakeService.js";
+  reserveIntakeFileMetadata,
+  validateIntakeFileMetadata,
+} from "./services/kaiIntakeService.js";
 export {
   DisabledStorageProvider,
   DISABLED_STORAGE_PROVIDER_CONTRACT,

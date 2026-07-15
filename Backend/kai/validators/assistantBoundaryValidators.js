@@ -23,7 +23,13 @@ export const FORBIDDEN_ASSISTANT_OPERATIONS = new Set([
   "bypass_human_review",
 ]);
 
-const ASSISTANT_ACTOR_TYPES = new Set(["assistant", "system"]);
+const NON_HUMAN_ACTOR_TYPES = new Set(["assistant", "ai", "system", "internal_service"]);
+const P0_MUTATION_OPERATIONS = new Set([
+  "create_intake_batch",
+  "create_intake_file",
+  "reserve_intake_file_metadata",
+  "create_review_queue_item",
+]);
 
 export function isAssistantRestrictedOperation(operation) {
   return FORBIDDEN_ASSISTANT_OPERATIONS.has(operation);
@@ -31,7 +37,7 @@ export function isAssistantRestrictedOperation(operation) {
 
 export function validateAssistantBoundary({ actorContext, operation } = {}) {
   const actorType = actorContext?.actorType;
-  if (ASSISTANT_ACTOR_TYPES.has(actorType) && isAssistantRestrictedOperation(operation)) {
+  if (NON_HUMAN_ACTOR_TYPES.has(actorType) && (isAssistantRestrictedOperation(operation) || P0_MUTATION_OPERATIONS.has(operation))) {
     return blockerResult("VAL-AST-001", "Assistant/system actor cannot perform this operation.", {
       object_type: "operation",
       object_code: operation,

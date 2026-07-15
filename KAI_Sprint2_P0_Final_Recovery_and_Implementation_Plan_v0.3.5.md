@@ -1368,7 +1368,7 @@ focused_tests: npm run test:kai-sprint2-pass2 — 89 passed, 0 failed
 broader_tests: node --test __tests__/kai-sprint2-*.spec.js — 205 passed, 0 failed; npm test — 310 passed, 0 failed
 database_sentinel: non-listening loopback DATABASE_URL used for every Node and npm command
 runtime_behavior_changed: false
-repository_install_commit: report after commit; a commit cannot contain its own SHA
+repository_install_commit: TOOL_VERIFIED cea4583daa9b034acc206d97c92e07bcff6516a2
 deployed_kai_schema_compatibility: NOT_CONFIRMED
 database_access: not performed
 cloud_access: not performed
@@ -1401,8 +1401,42 @@ database_atomicity: NOT_CONFIRMED
 persistent_upload_lifecycle: NOT_CONFIRMED
 database_access: not performed
 cloud_access: not performed
-package_commit: report after commit; a commit cannot contain its own SHA
+package_commit: TOOL_VERIFIED 87637525904650e482fdf12562305738905ee6f0
 next_package: P0-01
+```
+
+## P0-01 — foundation truth and response safety
+
+```text
+package_status: complete
+implementation_status: complete
+verification_status: tool_verified_pass
+evidence_class: TOOL_VERIFIED
+starting_head: 87637525904650e482fdf12562305738905ee6f0
+canonical_service: mounted and barrel-exported Backend/kai/services/kaiIntakeService.js
+feature_gate_order: auth preflight and metadata routes require KAI_SPRINT2_ENABLED before authentication or service execution
+status_truth: metadata_write_enabled true; upload, confirmation, storage, signed URL, parser, profiling, dictionary, source, evidence, claim, generation, export, and client review capabilities false
+request_safety: 100 KiB route parser before the global parser; JSON depth 4; total keys 64; route allowlists; unknown fields, unlisted arrays, invalid UUIDs, unsupported media, malformed JSON, and oversized bodies rejected
+response_safety: canonical KAI authentication and error envelopes; internal audit context and private storage identifiers omitted; unexpected failures reduced to generic system_error
+abuse_controls: separate actor 120 and organization 600 mutation-attempt limits per 15 minutes with canonical 429, Retry-After, and rate-limit headers
+mutation_authority: assistant, ai, generic system, and disabled internal-service identities cannot invoke metadata write dependencies
+upload_flags: fail-closed KAI_FILE_UPLOAD_ENABLED; upload URL and confirmation require both upload and Sprint 2 flags and remain storage-disabled
+verifier_identifiers: operational organization, engagement, batch, and idempotency identifiers parameterized; no verifier execution performed
+focused_tests: npm run verify:kai-sprint2-api-contract — 51 passed, 0 failed
+schema_contract_tests: npm run verify:kai-sprint2-schema-contract — 8 passed, 0 failed
+pass2_tests: npm run test:kai-sprint2-pass2 — 89 passed, 0 failed
+sprint2_tests: node --test __tests__/kai-sprint2-*.spec.js — 227 passed, 0 failed
+legacy_kai_tests: 45 passed, 0 failed
+full_tests: npm test — 332 passed, 0 failed
+database_sentinel: non-listening loopback DATABASE_URL used for every Node and npm command
+local_http_test: ephemeral 127.0.0.1 listener used only for parser response verification
+database_access: not performed
+cloud_or_external_network_access: not performed
+feature_or_tenant_configuration_change: not performed
+deployed_kai_schema_compatibility: NOT_CONFIRMED
+distributed_abuse_coordination: NOT_CONFIRMED; current limiter is single-process memory only
+package_commit: report after commit; a commit cannot contain its own SHA
+next_package_or_stop_condition: FIRST-WRITE MILESTONE CHECKPOINT — stop before P0-03
 ```
 
 

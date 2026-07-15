@@ -149,8 +149,8 @@ test("reserveIntakeFileMetadata stores metadata defaults without issuing signed 
 
   assert.equal(result.ok, true);
   assert.equal(inserted.storageProvider, "gcs");
-  assert.equal(inserted.filePolicyStatus, "skipped");
-  assert.equal(inserted.malwareScanStatus, "skipped");
+  assert.equal(inserted.filePolicyStatus, "pending");
+  assert.equal(inserted.malwareScanStatus, "not_configured");
   assert.equal(inserted.rawFileRetained, false);
   assert.equal(inserted.fileMetadata.p0_pass, "pass2_admin_metadata_intake_verification");
   assert.equal(inserted.fileMetadata.checksum_scope, "metadata_reservation_no_raw_file");
@@ -158,7 +158,10 @@ test("reserveIntakeFileMetadata stores metadata defaults without issuing signed 
   assert.equal(inserted.fileMetadata.checksum_verification_status, "unverified");
   assert.equal(inserted.checksum, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
   assert.equal(inserted.hashAlgorithm, "sha256");
-  assert.match(result.data.storage_object_key, /^kai\/org\//);
+  assert.equal("storage_provider" in result.data, false);
+  assert.equal("storage_bucket" in result.data, false);
+  assert.equal("storage_object_key" in result.data, false);
+  assert.equal("storage_uri" in result.data, false);
 });
 
 test("reserveIntakeFileMetadata blocks cross-org intake batch before file insert", async () => {
@@ -197,51 +200,66 @@ test("reserveIntakeFileMetadata blocks cross-org intake batch before file insert
   assert.equal(inserted, false);
 });
 
-test("reserveIntakeFileMetadata blocks invalid constrained DB vocabulary before insert", async () => {
-  for (const field of [
-    { storageProvider: "google_cloud_storage", blocker: "invalid_storage_provider" },
-    { malwareScanStatus: "manual", blocker: "invalid_malware_scan_status" },
-    { malwareScanStatus: "stub", blocker: "invalid_malware_scan_status" },
-  ]) {
-    let inserted = false;
-    const result = await reserveIntakeFileMetadata(
-      {
-        actorContext,
-        organizationId: ids.organizationId,
-        engagementId: ids.engagementId,
-        intakeBatchId: ids.intakeBatchId,
-        intakeFileId: ids.intakeFileId,
-        safeFilename: "safe.csv",
-        checksum: "sha256abc",
-        ...field,
+test("reserveIntakeFileMetadata ignores caller storage and malware configuration", async () => {
+  let inserted = null;
+  const result = await reserveIntakeFileMetadata(
+    {
+      actorContext,
+      organizationId: ids.organizationId,
+      engagementId: ids.engagementId,
+      intakeBatchId: ids.intakeBatchId,
+      intakeFileId: ids.intakeFileId,
+      idempotencyKey: "server-controlled-storage-001",
+      originalFilename: "safe.csv",
+      checksum: "a".repeat(64),
+      hashAlgorithm: "sha256",
+      storageProvider: "google_cloud_storage",
+      storageBucket: "caller-bucket",
+      storageUri: "private://caller/object",
+      malwareScanStatus: "manual",
+    },
+    {
+      env: { KAI_SPRINT2_ENABLED: "true" },
+      async getIntakeBatchTenantState() {
+        return {
+          intake_batch_id: ids.intakeBatchId,
+          organization_id: ids.organizationId,
+          engagement_id: ids.engagementId,
+        };
       },
-      {
-        env: { KAI_SPRINT2_ENABLED: "true" },
-        async getIntakeBatchTenantState() {
-          return {
-            intake_batch_id: ids.intakeBatchId,
-            organization_id: ids.organizationId,
-            engagement_id: ids.engagementId,
-          };
-        },
-        async insertIntakeFileMetadata() {
-          inserted = true;
-        },
-        async insertBlockedAttemptAuditEvent() {
-          return { ok: true, skipped: true };
-        },
+      async findIntakeFileReservationByIdempotencyKey() {
+        return null;
       },
-    );
+      async findIntakeFileReservationByChecksum() {
+        return null;
+      },
+      async insertIntakeFileMetadata(file) {
+        inserted = file;
+        return {
+          intake_file_id: file.intakeFileId,
+          intake_batch_id: file.intakeBatchId,
+          organization_id: file.organizationId,
+          engagement_id: file.engagementId,
+          safe_filename: file.safeFilename,
+          file_policy_status: file.filePolicyStatus,
+          malware_scan_status: file.malwareScanStatus,
+          processing_status: "quarantined",
+          parse_status: "quarantined",
+          review_status: "proposed",
+        };
+      },
+    },
+  );
 
-    assert.equal(result.ok, false);
-    assert.equal(result.error.code, "validation_blocker");
-    assert.equal(result.blockers[0].blocking_reason, field.blocker);
-    assert.equal(inserted, false);
-  }
+  assert.equal(result.ok, true);
+  assert.equal(inserted.storageProvider, "gcs");
+  assert.equal(inserted.storageBucket, null);
+  assert.notEqual(inserted.storageUri, "private://caller/object");
+  assert.equal(inserted.malwareScanStatus, "not_configured");
 });
 
 test("requestUploadUrl remains disabled in P0", async () => {
   const result = await requestUploadUrl({ env: { KAI_SPRINT2_ENABLED: "true" } });
   assert.equal(result.ok, false);
-  assert.equal(result.error.code, "storage_provider_not_configured");
+  assert.equal(result.error.code, "feature_disabled");
 });

@@ -1,5 +1,8 @@
 import { createHash, randomUUID } from "crypto";
-import { isKaiSprint2Enabled } from "../config/kaiSprint2Config.js";
+import {
+  areKaiSprint2UploadFeaturesEnabled,
+  isKaiSprint2Enabled,
+} from "../config/kaiSprint2Config.js";
 import { KAI_SPRINT2_P0_PATTERNS } from "../config/kaiSprint2P0Contract.js";
 import { buildKaiError, validationBlocked } from "../errors/kaiErrors.js";
 import { resolveKaiActorContext } from "../auth/kaiActorContext.js";
@@ -16,19 +19,12 @@ import { getEngagementTenantState, getIntakeBatchTenantState } from "../db/kaiQu
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
 import { validateSafeFilename, buildObjectKey } from "../storage/storagePathPolicy.js";
 import {
-  validateFilePolicyStatusTransition,
-  validateMalwareScanStatusDbValue,
   validateStorageProviderDbValue,
 } from "../validators/stateTransitionValidators.js";
 import {
   canonicalizeSha256Checksum,
-  checksum_format_supported,
-  checksum_required,
   duplicate_checksum_blocked,
-  hash_algorithm_required,
-  hash_algorithm_supported,
-  idempotency_key_format_supported,
-  idempotency_key_required,
+  idempotencyValidatorGroups,
 } from "../validators/idempotencyValidators.js";
 import { runValidators } from "../validators/runValidators.js";
 import { recordBlockedAttempt } from "./kaiAuditService.js";
@@ -37,16 +33,6 @@ const PASS2_MARKER = "pass2_admin_metadata_intake_verification";
 const PASS2_GATE_PLAN = "KAI_MVP_Sprint2_P0_Pass2_Production_Synthetic_Metadata_Write_Gate_Plan_v0.1.1";
 const ALLOWED_METADATA_ONLY_MIME_TYPES = new Set(["text/csv", "application/csv", "text/plain", "application/json"]);
 const UUID_RE = KAI_SPRINT2_P0_PATTERNS.uuid;
-const IDEMPOTENCY_KEY_VALIDATORS = Object.freeze([
-  idempotency_key_required,
-  idempotency_key_format_supported,
-]);
-const FILE_RESERVATION_CHECKSUM_VALIDATORS = Object.freeze([
-  checksum_required,
-  checksum_format_supported,
-  hash_algorithm_required,
-  hash_algorithm_supported,
-]);
 const PRELIMINARY_DUPLICATE_VALIDATORS = Object.freeze([duplicate_checksum_blocked]);
 
 function stableJson(value) {
@@ -73,19 +59,14 @@ function routeName(inputRoute, fallback) {
   return inputRoute || fallback;
 }
 
-async function validateIdempotencyKey(idempotencyKey, payload, operation) {
+async function validateMetadataMutationInput(operation, context) {
+  const validators = operation === "create_intake_batch"
+    ? idempotencyValidatorGroups.metadata_batch_write
+    : idempotencyValidatorGroups.metadata_file_write;
   return await runValidators(
-    IDEMPOTENCY_KEY_VALIDATORS,
-    { idempotencyKey, payload },
-    { group_key: `${operation}_idempotency_key` },
-  );
-}
-
-async function validateFileReservationChecksum(checksum, hashAlgorithm, payload) {
-  return await runValidators(
-    FILE_RESERVATION_CHECKSUM_VALIDATORS,
-    { checksum, hashAlgorithm, payload },
-    { group_key: "reserve_intake_file_metadata_checksum" },
+    validators,
+    context,
+    { group_key: `${operation}_metadata_mutation` },
   );
 }
 
@@ -376,9 +357,6 @@ function responseFile(row) {
     organization_id: row?.organization_id,
     engagement_id: row?.engagement_id || null,
     safe_filename: row?.safe_filename,
-    storage_provider: row?.storage_provider,
-    storage_bucket: row?.storage_bucket || null,
-    storage_object_key: row?.storage_object_key,
     file_policy_status: row?.file_policy_status,
     malware_scan_status: row?.malware_scan_status,
     processing_status: row?.processing_status,
@@ -493,7 +471,10 @@ export async function createIntakeBatch(input = {}, dependencies = {}) {
 
   if (!batchCode) return buildKaiError("invalid_request", { message: "batch_code is required." });
 
-  const idempotencyValidation = await validateIdempotencyKey(idempotencyKey, payload, "create_intake_batch");
+  const idempotencyValidation = await validateMetadataMutationInput("create_intake_batch", {
+    idempotencyKey,
+    payload,
+  });
   if (!idempotencyValidation.ok) {
     return validationBlocked(idempotencyValidation.blockers, { warnings: idempotencyValidation.warnings });
   }
@@ -668,17 +649,7 @@ export async function reserveIntakeFileMetadata(input = {}, dependencies = {}) {
     }, dependencies);
   }
 
-  const statusResult = validateFilePolicyStatusTransition({ from: "pending", to: input.filePolicyStatus || "skipped" });
-  if (statusResult.severity === "blocker") {
-    return await toBlockerResponse([statusResult], actorContext, "reserve_intake_file_metadata", {
-      organization_id: organizationId,
-      engagement_id: engagementId,
-      route: routeName(input.route, "/api/kai/sprint2/intake/admin/batches/:intakeBatchId/file-reservations"),
-      request_id: input.requestId || null,
-    }, dependencies);
-  }
-
-  const storageProvider = input.storageProvider || payload.storage_provider || "gcs";
+  const storageProvider = dependencies.storageProvider || "gcs";
   const storageProviderResult = validateStorageProviderDbValue({ storageProvider });
   if (storageProviderResult.severity === "blocker") {
     return await toBlockerResponse([storageProviderResult], actorContext, "reserve_intake_file_metadata", {
@@ -690,28 +661,16 @@ export async function reserveIntakeFileMetadata(input = {}, dependencies = {}) {
     }, dependencies);
   }
 
-  const malwareScanStatus = input.malwareScanStatus || payload.malware_scan_status || "skipped";
-  const malwareScanStatusResult = validateMalwareScanStatusDbValue({ malwareScanStatus });
-  if (malwareScanStatusResult.severity === "blocker") {
-    return await toBlockerResponse([malwareScanStatusResult], actorContext, "reserve_intake_file_metadata", {
-      organization_id: organizationId,
-      engagement_id: engagementId,
-      intake_batch_id: intakeBatchId,
-      route: routeName(input.route, "/api/kai/sprint2/intake/admin/batches/:intakeBatchId/file-reservations"),
-      request_id: input.requestId || null,
-    }, dependencies);
-  }
-
-  const idempotencyValidation = await validateIdempotencyKey(idempotencyKey, payload, "reserve_intake_file_metadata");
-  if (!idempotencyValidation.ok) {
-    return validationBlocked(idempotencyValidation.blockers, { warnings: idempotencyValidation.warnings });
-  }
-
   const providedChecksum = input.checksum || payload.checksum || null;
   const providedHashAlgorithm = input.hashAlgorithm || payload.hash_algorithm || null;
-  const checksumValidation = await validateFileReservationChecksum(providedChecksum, providedHashAlgorithm, payload);
-  if (!checksumValidation.ok) {
-    return validationBlocked(checksumValidation.blockers, { warnings: checksumValidation.warnings });
+  const mutationValidation = await validateMetadataMutationInput("reserve_intake_file_metadata", {
+    idempotencyKey,
+    checksum: providedChecksum,
+    hashAlgorithm: providedHashAlgorithm,
+    payload,
+  });
+  if (!mutationValidation.ok) {
+    return validationBlocked(mutationValidation.blockers, { warnings: mutationValidation.warnings });
   }
 
   const checksum = canonicalizeSha256Checksum(providedChecksum);
@@ -767,9 +726,8 @@ export async function reserveIntakeFileMetadata(input = {}, dependencies = {}) {
   }
 
   const fileMetadata = normalizeReservationMetadata({ payload, idempotencyKey, reservationPayloadHash });
-  const storageBucket = input.storageBucket || payload.storage_bucket || null;
+  const storageBucket = dependencies.storageBucket || null;
   const storageUri =
-    input.storageUri ||
     `reservation://kai/${storageProvider}/org/${organizationId}/intake/${intakeBatchId}/${intakeFileId}/${filenameResult.safeFilename}`;
 
   const insertFile = dependencies.insertIntakeFileMetadata || insertIntakeFileMetadata;
@@ -790,8 +748,8 @@ export async function reserveIntakeFileMetadata(input = {}, dependencies = {}) {
     checksum,
     hashAlgorithm,
     rawFileRetained: false,
-    filePolicyStatus: input.filePolicyStatus || "skipped",
-    malwareScanStatus,
+    filePolicyStatus: "pending",
+    malwareScanStatus: "not_configured",
     fileMetadata,
     createdBy: actorContext.actorUserId,
     createdByType: actorContext.actorType,
@@ -814,6 +772,19 @@ export const validateIntakeFileMetadata = reserveIntakeFileMetadata;
 export async function requestUploadUrl(dependencies = {}) {
   if (!isKaiSprint2Enabled(dependencies.env || process.env)) {
     return buildKaiError("feature_disabled");
+  }
+  if (!areKaiSprint2UploadFeaturesEnabled(dependencies.env || process.env)) {
+    return buildKaiError("feature_disabled", { message: "KAI file upload is not enabled." });
+  }
+  return buildKaiError("storage_provider_not_configured");
+}
+
+export async function confirmUpload(dependencies = {}) {
+  if (!isKaiSprint2Enabled(dependencies.env || process.env)) {
+    return buildKaiError("feature_disabled");
+  }
+  if (!areKaiSprint2UploadFeaturesEnabled(dependencies.env || process.env)) {
+    return buildKaiError("feature_disabled", { message: "KAI file upload is not enabled." });
   }
   return buildKaiError("storage_provider_not_configured");
 }

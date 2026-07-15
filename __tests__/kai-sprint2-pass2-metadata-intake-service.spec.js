@@ -487,7 +487,7 @@ test("create batch blocks engagement from another organization without insert", 
   assert.equal(result.audit_context.blocked_attempt_audit.ok, true);
 });
 
-test("file reservation writes no raw object and uses skipped policy/malware statuses", async () => {
+test("file reservation writes no raw object and uses pending policy with no configured malware scanner", async () => {
   let inserted = null;
   const result = await reserveIntakeFileMetadata(
     {
@@ -541,8 +541,8 @@ test("file reservation writes no raw object and uses skipped policy/malware stat
   assert.equal(result.ok, true);
   assert.equal(result.data.safe_filename, "ncws_p0_pass2_metadata_only_reservation.csv");
   assert.equal(inserted.rawFileRetained, false);
-  assert.equal(inserted.filePolicyStatus, "skipped");
-  assert.equal(inserted.malwareScanStatus, "skipped");
+  assert.equal(inserted.filePolicyStatus, "pending");
+  assert.equal(inserted.malwareScanStatus, "not_configured");
   assert.equal(inserted.fileMetadata.p0_pass, "pass2_admin_metadata_intake_verification");
   assert.equal(inserted.fileMetadata.gate_plan, "KAI_MVP_Sprint2_P0_Pass2_Production_Synthetic_Metadata_Write_Gate_Plan_v0.1.1");
   assert.equal(inserted.fileMetadata.checksum_scope, "metadata_reservation_no_raw_file");
@@ -552,6 +552,10 @@ test("file reservation writes no raw object and uses skipped policy/malware stat
   assert.equal(inserted.hashAlgorithm, "sha256");
   assert.equal(result.data.processing_status, "quarantined");
   assert.equal(result.data.parse_status, "quarantined");
+  assert.equal("storage_provider" in result.data, false);
+  assert.equal("storage_bucket" in result.data, false);
+  assert.equal("storage_object_key" in result.data, false);
+  assert.equal("storage_uri" in result.data, false);
   assert.match(inserted.storageUri, /^reservation:\/\/kai\/gcs\/org\//);
 });
 

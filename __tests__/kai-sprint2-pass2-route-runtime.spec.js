@@ -6,6 +6,7 @@ import { requireKaiSprint2Enabled } from "../Backend/kai/config/kaiSprint2Config
 import router, { __testables as intakeRouteTestables } from "../Backend/kai/routes/sprint2IntakeApi.js";
 import authPreflightRouter, { __testables as authPreflightTestables } from "../Backend/kai/routes/sprint2IntakeAuthPreflightApi.js";
 import { createIntakeBatch, reserveIntakeFileMetadata } from "../Backend/kai/services/kaiIntakeService.js";
+import { requireKaiSprint2Authenticated } from "../Backend/kai/middleware/kaiSprint2Authentication.js";
 import { ensureAuthenticatedApi } from "../middleware/auth.js";
 
 const organizationId = "a5d17c5a-c55f-43af-9b21-fe63aafe733f";
@@ -215,8 +216,8 @@ test("admin batch route delegates to createIntakeBatch without direct DB access"
     const res = await invokeRoute("/admin/batches", "post", {
       user: { id: 46, email: "email-sentinel@example.test" },
       body: {
-        organization_id: "org-1",
-        engagement_id: "eng-1",
+        organization_id: organizationId,
+        engagement_id: engagementId,
         batch_code: "BATCH-001",
         idempotency_key: "idem-001",
         source_system_name: "synthetic",
@@ -225,8 +226,8 @@ test("admin batch route delegates to createIntakeBatch without direct DB access"
     });
 
     assert.equal(res.statusCode, 201);
-    assert.equal(serviceInput.organizationId, "org-1");
-    assert.equal(serviceInput.engagementId, "eng-1");
+    assert.equal(serviceInput.organizationId, organizationId);
+    assert.equal(serviceInput.engagementId, engagementId);
     assert.equal(serviceInput.batchCode, "BATCH-001");
     assert.equal(serviceInput.idempotencyKey, "idem-001");
     assert.equal(serviceInput.route, "/api/kai/sprint2/intake/admin/batches");
@@ -251,24 +252,24 @@ test("file reservation route rejects multipart before service and otherwise dele
       is(contentType) {
         return contentType === "multipart/form-data";
       },
-      params: { intakeBatchId: "batch-1" },
+      params: { intakeBatchId },
       user: { id: 46, email: "email-sentinel@example.test" },
-      body: { organization_id: "org-1" },
+      body: { organization_id: organizationId },
     });
 
-    assert.equal(multipart.statusCode, 400);
-    assert.equal(multipart.body.error.code, "invalid_request");
+    assert.equal(multipart.statusCode, 415);
+    assert.equal(multipart.body.error.code, "unsupported_media_type");
     assert.equal(serviceCalls, 0);
 
     const metadataOnly = await invokeRoute("/admin/batches/:intakeBatchId/file-reservations", "post", {
       is() {
         return false;
       },
-      params: { intakeBatchId: "batch-1" },
+      params: { intakeBatchId },
       user: { id: 46, email: "email-sentinel@example.test" },
       body: {
-        organization_id: "org-1",
-        engagement_id: "eng-1",
+        organization_id: organizationId,
+        engagement_id: engagementId,
         idempotency_key: "file-idem-001",
         original_filename: "safe.csv",
         mime_type: "text/csv",
@@ -279,7 +280,7 @@ test("file reservation route rejects multipart before service and otherwise dele
 
     assert.equal(metadataOnly.statusCode, 201);
     assert.equal(serviceCalls, 1);
-    assert.equal(serviceInput.intakeBatchId, "batch-1");
+    assert.equal(serviceInput.intakeBatchId, intakeBatchId);
     assert.equal(serviceInput.idempotencyKey, "file-idem-001");
     assert.equal(serviceInput.originalFilename, "safe.csv");
     assert.equal(serviceInput.mimeType, "text/csv");
@@ -474,7 +475,7 @@ test("auth preflight route returns only sanitized booleans", () => {
     data: {
       authenticated: true,
       session_authenticated: true,
-      feature_flag_required: false,
+      feature_flag_required: true,
     },
     blockers: [],
     warnings: [],
@@ -510,12 +511,13 @@ test("missing auth reaches existing API auth middleware 401 behavior", async () 
   assert.deepEqual(res.body, { error: "unauthorized" });
 });
 
-test("auth preflight is exact-route mounted before the Sprint 2 feature flag gate", () => {
+test("auth preflight and metadata routes are both gated before canonical authentication", () => {
   const index = readFileSync("index.js", "utf8");
   const preflightMount = [
     "app.use(",
     '  "/api/kai/sprint2/intake/auth-preflight",',
-    "  ensureAuthenticatedApi,",
+    "  requireKaiSprint2Enabled,",
+    "  requireKaiSprint2Authenticated,",
     "  sprint2IntakeAuthPreflightApiRouter",
   ].join("\n");
   const unsafeBroadMount = 'app.use("/api/kai/sprint2/intake", ensureAuthenticatedApi, sprint2IntakeAuthPreflightApiRouter)';
@@ -523,7 +525,9 @@ test("auth preflight is exact-route mounted before the Sprint 2 feature flag gat
     'app.use(',
     '  "/api/kai/sprint2/intake",',
     '  requireKaiSprint2Enabled,',
-    '  ensureAuthenticatedApi,',
+    '  kaiSprint2OrganizationMutationLimiter,',
+    '  kaiSprint2ActorMutationLimiter,',
+    '  requireKaiSprint2Authenticated,',
     '  sprint2IntakeApiRouter',
   ].join("\n");
 
@@ -559,11 +563,11 @@ test("feature-OFF status returns 403 feature_disabled before auth with a valid s
 });
 
 test("auth preflight missing auth returns existing API auth middleware 401", async () => {
-  await withKaiSprint2Flag("false", async () => {
+  await withKaiSprint2Flag("true", async () => {
     const res = createResponse();
     let nextCalled = false;
 
-    await ensureAuthenticatedApi(
+    await requireKaiSprint2Authenticated(
       {
         get() {
           return null;
@@ -580,12 +584,14 @@ test("auth preflight missing auth returns existing API auth middleware 401", asy
 
     assert.equal(nextCalled, false);
     assert.equal(res.statusCode, 401);
-    assert.deepEqual(res.body, { error: "unauthorized" });
+    assert.equal(res.body.ok, false);
+    assert.equal(res.body.error.code, "unauthorized");
+    assert.deepEqual(res.body.data, null);
   });
 });
 
-test("auth preflight valid auth returns sanitized preflight response", async () => {
-  await withKaiSprint2Flag("false", async () => {
+test("auth preflight valid auth returns sanitized preflight response when enabled", async () => {
+  await withKaiSprint2Flag("true", async () => {
     const req = {
       isAuthenticated() {
         return true;
@@ -599,7 +605,7 @@ test("auth preflight valid auth returns sanitized preflight response", async () 
     const res = createResponse();
     let nextCalled = false;
 
-    await ensureAuthenticatedApi(req, res, () => {
+    await requireKaiSprint2Authenticated(req, res, () => {
       nextCalled = true;
     });
     assert.equal(nextCalled, true);
@@ -611,7 +617,7 @@ test("auth preflight valid auth returns sanitized preflight response", async () 
       data: {
         authenticated: true,
         session_authenticated: true,
-        feature_flag_required: false,
+        feature_flag_required: true,
       },
       blockers: [],
       warnings: [],
@@ -642,9 +648,10 @@ test("auth preflight middleware does not intercept sibling Sprint 2 intake route
   });
 });
 
-test("auth preflight route does not import or call Sprint 2 gate or intake services", () => {
+test("auth preflight route applies the Sprint 2 gate without calling intake services", () => {
   const route = readFileSync("Backend/kai/routes/sprint2IntakeAuthPreflightApi.js", "utf8");
 
-  assert.doesNotMatch(route, /requireKaiSprint2Enabled/);
+  assert.match(route, /requireKaiSprint2Enabled/);
+  assert.match(route, /router\.use\(requireKaiSprint2Enabled\)/);
   assert.doesNotMatch(route, /kaiIntakeService|kaiIntakeQueries|kaiQueries|kaiDb|pool\.query/);
 });

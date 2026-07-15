@@ -15,14 +15,29 @@ function readyResponses() {
       status: 200,
       body: {
         ok: true,
-        data: { authenticated: true, session_authenticated: true, feature_flag_required: false },
+        data: { authenticated: true, session_authenticated: true, feature_flag_required: true },
         blockers: [],
         warnings: [],
       },
     },
     "GET /api/kai/sprint2/intake/status": {
       status: 200,
-      body: { ok: true, data: { mode: "admin_metadata_only" } },
+      body: {
+        ok: true,
+        data: {
+          mode: "admin_metadata_only",
+          metadata_write_enabled: true,
+          file_upload_enabled: false,
+          upload_confirmation_enabled: false,
+          storage_upload_enabled: false,
+          parser_worker_enabled: false,
+          source_promotion_enabled: false,
+          evidence_creation_enabled: false,
+          claim_creation_enabled: false,
+          generation_enabled: false,
+          export_enabled: false,
+        },
+      },
     },
     "GET /api/kai/sprint2/intake/admin/access-check": {
       status: 200,
@@ -94,6 +109,11 @@ process.on("beforeExit", () => {
     KAI_PASS2_DB_TARGET_CLASS: "non_production",
     KAI_PASS2_PRODUCTION_SYNTHETIC_WRITE_GATE_ACCEPTED: "false",
     KAI_PASS2_RUN_WRITE_PATH: "true",
+    KAI_PASS2_ORGANIZATION_ID: "10000000-0000-4000-8000-000000000001",
+    KAI_PASS2_ENGAGEMENT_ID: "20000000-0000-4000-8000-000000000002",
+    KAI_PASS2_BATCH_CODE: "KAI-P0-SYNTHETIC-BATCH",
+    KAI_PASS2_BATCH_IDEMPOTENCY_KEY: "kai-p0-synthetic-batch",
+    KAI_PASS2_FILE_IDEMPOTENCY_KEY: "kai-p0-synthetic-file",
     ...env,
   };
   for (const [key, value] of Object.entries(childEnv)) {
@@ -554,7 +574,7 @@ test("comments and literals are removed before forbidden SQL lexical scans", () 
 });
 
 test("SQL function calls are restricted to the explicit read-only built-in allowlist", () => {
-  const allowedFunctions = new Set(["array_agg", "count", "pg_get_expr", "unnest"]);
+  const allowedFunctions = new Set(["array_agg", "count", "current_setting", "nullif", "pg_get_expr", "unnest"]);
   const grammar = new Set(["as", "exists", "filter", "from", "in", "not", "over", "values", "when"]);
 
   for (const [path, sql] of sqlFiles()) {

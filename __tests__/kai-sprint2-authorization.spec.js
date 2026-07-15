@@ -84,3 +84,25 @@ test("assistant/system actors cannot promote, approve, finalize, export, access 
     assert.equal(result.blockers[0].blocking_reason, "assistant_boundary");
   }
 });
+
+test("non-human actors cannot mutate intake even with full roles and active membership", () => {
+  for (const actorType of ["assistant", "ai", "system", "internal_service"]) {
+    for (const operation of ["create_intake_batch", "create_intake_file", "create_review_queue_item"]) {
+      const result = validateActorCanPerformOperation(
+        {
+          actorType,
+          actorUserId: `${actorType}-1`,
+          kaiRoles: ["gk_admin", "gk_operator"],
+          organizationMemberships: [
+            { organization_id: "org-1", role_name: "gk_admin", membership_status: "active" },
+          ],
+        },
+        operation,
+        "org-1",
+      );
+
+      assert.equal(result.ok, false, `${actorType}:${operation}`);
+      assert.equal(result.blockers[0].blocking_reason, "assistant_boundary", `${actorType}:${operation}`);
+    }
+  }
+});

@@ -61,6 +61,14 @@ import adminApiRouter from "./routes/adminApi.js";
 import squareWebhooksApiRouter from "./routes/squareWebhooksApi.js";
 import kaiRouter from "./Backend/routes/kaiApi.js";
 import { requireKaiSprint2Enabled } from "./Backend/kai/config/kaiSprint2Config.js";
+import { requireKaiSprint2Authenticated } from "./Backend/kai/middleware/kaiSprint2Authentication.js";
+import {
+  handleKaiSprint2JsonParserError,
+  kaiSprint2ActorMutationLimiter,
+  kaiSprint2MetadataJsonParser,
+  kaiSprint2OrganizationMutationLimiter,
+  setKaiSprint2NoStore,
+} from "./Backend/kai/middleware/kaiSprint2RequestSafety.js";
 import sprint2IntakeAuthPreflightApiRouter from "./Backend/kai/routes/sprint2IntakeAuthPreflightApi.js";
 import sprint2IntakeApiRouter from "./Backend/kai/routes/sprint2IntakeApi.js";
 import {
@@ -465,6 +473,13 @@ app.use((req, res, next) => {
   }
   next();
 });
+app.use(
+  "/api/kai/sprint2/intake",
+  setKaiSprint2NoStore,
+  requireKaiSprint2Enabled,
+  kaiSprint2MetadataJsonParser,
+);
+app.use("/api/kai/sprint2/intake", handleKaiSprint2JsonParserError);
 app.use(express.json({
   limit: "5mb",
   verify: (req, res, buf) => {
@@ -508,13 +523,16 @@ app.use("/api/webhooks", squareWebhooksApiRouter);
 app.use("/api/kai", kaiRouter);
 app.use(
   "/api/kai/sprint2/intake/auth-preflight",
-  ensureAuthenticatedApi,
+  requireKaiSprint2Enabled,
+  requireKaiSprint2Authenticated,
   sprint2IntakeAuthPreflightApiRouter
 );
 app.use(
   "/api/kai/sprint2/intake",
   requireKaiSprint2Enabled,
-  ensureAuthenticatedApi,
+  kaiSprint2OrganizationMutationLimiter,
+  kaiSprint2ActorMutationLimiter,
+  requireKaiSprint2Authenticated,
   sprint2IntakeApiRouter
 );
 app.use("/api/organizations", organizationsApiRouter);
