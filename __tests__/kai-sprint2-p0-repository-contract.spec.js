@@ -86,7 +86,7 @@ test("abuse, upload timing, and synthetic lifecycle values are exact", () => {
   ]);
 });
 
-test("fingerprint version, exact fields, and cross-version replay rule are recorded", () => {
+test("fingerprint version, exact fields, persisted representation, and compatibility limits are recorded", () => {
   assert.equal(KAI_SPRINT2_P0_FINGERPRINT.algorithm, "sha256");
   assert.equal(KAI_SPRINT2_P0_FINGERPRINT.version, "kai-sprint2-p0-fingerprint-v1");
   assert.deepEqual(KAI_SPRINT2_P0_FINGERPRINT.batchFields, [
@@ -114,7 +114,15 @@ test("fingerprint version, exact fields, and cross-version replay rule are recor
     "hash_algorithm",
     "reservation_metadata",
   ]);
-  assert.match(contract, /different version\/fingerprint fails closed as a 409 conflict/);
+  assert.match(contract, /installed and only supported P0 fingerprint version identifier/);
+  assert.match(contract, /identifier does not participate in the canonical hash input/);
+  assert.match(contract, /exactly a bare 64-character lowercase SHA-256 hexadecimal digest/);
+  assert.match(contract, /No separate version discriminator is persisted/);
+  assert.match(contract, /no second fingerprint version may be introduced until persisted-version compatibility is resolved/);
+  assert.match(contract, /missing, null, empty, non-string, malformed, or different stored fingerprint fails closed as a 409 conflict/);
+  assert.match(contract, /Unsupported-version detection is not currently possible/);
+  assert.match(contract, /remains deferred to Gate A/);
+  assert.match(contract, /Deployed-schema compatibility remains `NOT_CONFIRMED`/);
 });
 
 test("operation roles and the disabled security-executor identity are explicit", () => {

@@ -149,7 +149,7 @@ Mounted-P0 target types are `intake_batch` and `intake_file`. Metadata-only audi
 
 ## Idempotency, uniqueness, and versions
 
-Fingerprints use SHA-256 over recursively stable JSON: object keys sorted lexicographically, array order preserved, JSON scalar encoding preserved, and omitted contract fields normalized to the exact defaults below. The version identifier is `kai-sprint2-p0-fingerprint-v1`.
+Fingerprints use SHA-256 over recursively stable JSON: object keys sorted lexicographically, array order preserved, JSON scalar encoding preserved, and omitted contract fields normalized to the exact defaults below. The installed and only supported P0 fingerprint version identifier is `kai-sprint2-p0-fingerprint-v1`. Inspection of the installed builders confirms that this identifier does not participate in the canonical hash input; this records current behavior and does not authorize changing the algorithm or input.
 
 Batch fingerprint fields, in contract order, are:
 
@@ -182,7 +182,9 @@ hash_algorithm (sha256)
 reservation_metadata (default empty object)
 ```
 
-Idempotency replay scope is organization plus operation plus idempotency key. An identical replay is allowed only when fingerprint version and fingerprint match. A missing, malformed, unknown, or different version/fingerprint fails closed as a 409 conflict; implementations never silently reinterpret an old fingerprint under a new version.
+The current persisted fingerprint representation remains exactly a bare 64-character lowercase SHA-256 hexadecimal digest, stored as `normalized_payload_hash` for batches or `reservation_payload_hash` for file reservations. No separate version discriminator is persisted. The current P0 implementation supports only the installed fingerprint version, and no second fingerprint version may be introduced until persisted-version compatibility is resolved.
+
+Idempotency replay scope is organization plus operation plus idempotency key. An identical replay is allowed only when the stored fingerprint is a string in the exact current representation and equals the newly calculated fingerprint. A missing, null, empty, non-string, malformed, or different stored fingerprint fails closed as a 409 conflict; implementations do not regenerate, normalize, repair, accept, or overwrite the stored value during replay. Unsupported-version detection is not currently possible because no version discriminator is persisted and remains deferred to Gate A. Deployed-schema compatibility remains `NOT_CONFIRMED`.
 
 Declared-checksum duplicate detection is preliminary and organization-scoped. It never represents independent object verification. `force_new_version` may permit an explicitly authorized new version, but the new record must link to its predecessor, receive a new immutable object-version identity, and retain its own checksum and audit history. Final uniqueness and concurrency behavior require Gate A verification.
 

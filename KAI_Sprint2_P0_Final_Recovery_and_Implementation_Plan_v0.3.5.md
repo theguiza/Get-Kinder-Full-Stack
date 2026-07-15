@@ -1465,6 +1465,39 @@ package_commit: report after commit; a commit cannot contain its own SHA
 next_package_or_stop_condition: OWNER-DIRECTED STOP after the first bounded P0-03 leaf
 ```
 
+## P0-03 — stored-fingerprint fail-closed hardening (second bounded leaf)
+
+```text
+leaf_status: complete
+p0_03_package_status: in_progress
+implementation_status: partial
+verification_status: tool_verified_pass
+evidence_class: TOOL_VERIFIED
+starting_head: a58634bf0496996b283b358dc0ca9c485f0b743b
+persisted_representation: normalized_payload_hash and reservation_payload_hash remain bare 64-character lowercase SHA-256 hexadecimal digests
+persisted_version_discriminator: absent
+installed_fingerprint_version: kai-sprint2-p0-fingerprint-v1 is the only supported P0 version
+canonical_hash_input: installed version identifier does not participate; algorithm and canonical fields intentionally unchanged
+replay_fail_closed: missing, null, empty, non-string, wrong-length, non-hexadecimal, uppercase, or different stored fingerprints return the existing duplicate_conflict 409 without regeneration, normalization, repair, acceptance, or overwrite
+behavior_preserved: valid identical batch and file-reservation replays succeed; different valid payload fingerprints retain duplicate_conflict 409 behavior
+unsupported_version_detection: not currently possible without a persisted discriminator; deferred to Gate A
+second_version_constraint: prohibited until persisted-version compatibility is resolved
+focused_tests: node --test __tests__/kai-sprint2-p0-repository-contract.spec.js __tests__/kai-sprint2-pass2-metadata-intake-service.spec.js — 58 passed, 0 failed
+sprint2_tests: node --test __tests__/kai-sprint2-*.spec.js — 245 passed, 0 failed
+full_tests: npm test — 350 passed, 0 failed
+git_diff_check: passed
+database_sentinel: non-listening loopback DATABASE_URL at 127.0.0.1:1 used for every Node and npm command
+local_http_test: complete Sprint 2 and npm suites used the existing parser test's ephemeral 127.0.0.1 listener in the localhost-capable execution context after the default sandbox denied listen with EPERM
+database_access: not performed
+cloud_or_external_network_access: not performed
+fingerprint_storage_version_encoding_sql_schema_transactions_audit_metrics_routes_tenant_queries: intentionally unchanged
+feature_or_tenant_configuration_change: not performed
+deployed_kai_schema_compatibility: NOT_CONFIRMED
+remaining_p0_03_items: unchanged and not implemented in this bounded leaf
+package_commit: report after commit; a commit cannot contain its own SHA
+next_package_or_stop_condition: OWNER-DIRECTED STOP after the stored-fingerprint bounded leaf
+```
+
 
 ---
 

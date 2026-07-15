@@ -33,6 +33,7 @@ const PASS2_MARKER = "pass2_admin_metadata_intake_verification";
 const PASS2_GATE_PLAN = "KAI_MVP_Sprint2_P0_Pass2_Production_Synthetic_Metadata_Write_Gate_Plan_v0.1.1";
 const ALLOWED_METADATA_ONLY_MIME_TYPES = new Set(["text/csv", "application/csv", "text/plain", "application/json"]);
 const UUID_RE = KAI_SPRINT2_P0_PATTERNS.uuid;
+const STORED_FINGERPRINT_RE = /^[0-9a-f]{64}$/;
 const PRELIMINARY_DUPLICATE_VALIDATORS = Object.freeze([duplicate_checksum_blocked]);
 
 function stableJson(value) {
@@ -178,10 +179,13 @@ function responseBatchSummary(row) {
   };
 }
 
-function hasConflictingFingerprint(row, expectedFingerprint, metadataColumn) {
-  const metadata = row?.[metadataColumn] || {};
-  const existingFingerprint = metadata.normalized_payload_hash || metadata.reservation_payload_hash;
-  return existingFingerprint && existingFingerprint !== expectedFingerprint;
+function hasConflictingFingerprint(row, expectedFingerprint, metadataColumn, fingerprintField) {
+  const metadata = row?.[metadataColumn];
+  const existingFingerprint = metadata?.[fingerprintField];
+  if (typeof existingFingerprint !== "string" || !STORED_FINGERPRINT_RE.test(existingFingerprint)) {
+    return true;
+  }
+  return existingFingerprint !== expectedFingerprint;
 }
 
 function unsafeFilenameBlocker(reason = "unsafe_filename") {
@@ -483,7 +487,7 @@ export async function createIntakeBatch(input = {}, dependencies = {}) {
   const findExisting = dependencies.findIntakeBatchByIdempotencyKey || findIntakeBatchByIdempotencyKey;
   const existing = await findExisting({ organizationId, idempotencyKey });
   if (existing) {
-    if (hasConflictingFingerprint(existing, normalizedPayloadHash, "batch_metadata")) {
+    if (hasConflictingFingerprint(existing, normalizedPayloadHash, "batch_metadata", "normalized_payload_hash")) {
       return buildKaiError("duplicate_conflict");
     }
     return {
@@ -689,7 +693,7 @@ export async function reserveIntakeFileMetadata(input = {}, dependencies = {}) {
   const findExisting = dependencies.findIntakeFileReservationByIdempotencyKey || findIntakeFileReservationByIdempotencyKey;
   const existing = await findExisting({ organizationId, engagementId, intakeBatchId, idempotencyKey });
   if (existing) {
-    if (hasConflictingFingerprint(existing, reservationPayloadHash, "file_metadata")) {
+    if (hasConflictingFingerprint(existing, reservationPayloadHash, "file_metadata", "reservation_payload_hash")) {
       return buildKaiError("duplicate_conflict");
     }
     return {

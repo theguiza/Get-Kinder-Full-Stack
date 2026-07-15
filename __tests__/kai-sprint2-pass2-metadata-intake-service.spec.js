@@ -295,48 +295,150 @@ test("create batch writes metadata-only row with stable Pass 2 markers", async (
   assert.equal(inserted.batchMetadata.parser_worker_enabled, false);
 });
 
-test("create batch idempotent replay returns existing row and conflict returns 409", async () => {
+test("create batch preserves valid identical replay and conflicting payload behavior", async () => {
+  let inserted = null;
+  const input = {
+    actorContext,
+    organizationId,
+    engagementId,
+    batchCode: "NCWS-P0-PASS2-REPLAY-001",
+    payload: { idempotency_key: "same-key" },
+  };
+  const baseDependencies = {
+    env: { KAI_SPRINT2_ENABLED: "true" },
+    async getEngagementTenantState() {
+      return { engagement_id: engagementId, organization_id: organizationId };
+    },
+  };
+
+  const created = await createIntakeBatch(input, {
+    ...baseDependencies,
+    async findIntakeBatchByIdempotencyKey() {
+      return null;
+    },
+    async insertIntakeBatchMetadata(batch) {
+      inserted = batch;
+      return {
+        intake_batch_id: intakeBatchId,
+        organization_id: batch.organizationId,
+        engagement_id: batch.engagementId,
+        batch_code: batch.batchCode,
+        processing_status: "received",
+        review_status: "proposed",
+        batch_metadata: batch.batchMetadata,
+      };
+    },
+  });
+  assert.equal(created.ok, true);
+  assert.match(inserted.batchMetadata.normalized_payload_hash, /^[0-9a-f]{64}$/);
+
   const existing = {
     intake_batch_id: intakeBatchId,
     organization_id: organizationId,
     engagement_id: engagementId,
-    batch_code: "NCWS-P0-PASS2-METADATA-001",
+    batch_code: input.batchCode,
     processing_status: "received",
     review_status: "proposed",
-    batch_metadata: {},
+    batch_metadata: inserted.batchMetadata,
   };
+  const replay = await createIntakeBatch(input, {
+    ...baseDependencies,
+    async findIntakeBatchByIdempotencyKey() {
+      return existing;
+    },
+    async insertIntakeBatchMetadata() {
+      assert.fail("identical replay must not insert");
+    },
+  });
+  assert.equal(replay.ok, true);
+  assert.equal(replay.data.intake_batch_id, intakeBatchId);
 
-  const replay = await createIntakeBatch(
-    { actorContext, organizationId, engagementId, batchCode: existing.batch_code, payload: { idempotency_key: "same-key" } },
+  const conflict = await createIntakeBatch(
+    { ...input, payload: { ...input.payload, notes: "changed payload" } },
     {
-      env: { KAI_SPRINT2_ENABLED: "true" },
-      async getEngagementTenantState() {
-        return { engagement_id: engagementId, organization_id: organizationId };
-      },
+      ...baseDependencies,
       async findIntakeBatchByIdempotencyKey() {
         return existing;
       },
-    },
-  );
-
-  const conflict = await createIntakeBatch(
-    { actorContext, organizationId, engagementId, batchCode: existing.batch_code, payload: { idempotency_key: "same-key" } },
-    {
-      env: { KAI_SPRINT2_ENABLED: "true" },
-      async getEngagementTenantState() {
-        return { engagement_id: engagementId, organization_id: organizationId };
-      },
-      async findIntakeBatchByIdempotencyKey() {
-        return { ...existing, batch_metadata: { normalized_payload_hash: "different" } };
+      async insertIntakeBatchMetadata() {
+        assert.fail("conflicting replay must not insert");
       },
     },
   );
-
-  assert.equal(replay.ok, true);
-  assert.equal(replay.data.intake_batch_id, intakeBatchId);
   assert.equal(conflict.ok, false);
   assert.equal(conflict.error.code, "duplicate_conflict");
   assert.equal(conflict.error.status, 409);
+});
+
+test("create batch fails closed for missing or malformed stored fingerprints", async (t) => {
+  let inserted = null;
+  const input = {
+    actorContext,
+    organizationId,
+    engagementId,
+    batchCode: "NCWS-P0-PASS2-MALFORMED-001",
+    payload: { idempotency_key: "malformed-batch-key" },
+  };
+  const baseDependencies = {
+    env: { KAI_SPRINT2_ENABLED: "true" },
+    async getEngagementTenantState() {
+      return { engagement_id: engagementId, organization_id: organizationId };
+    },
+  };
+  const created = await createIntakeBatch(input, {
+    ...baseDependencies,
+    async findIntakeBatchByIdempotencyKey() {
+      return null;
+    },
+    async insertIntakeBatchMetadata(batch) {
+      inserted = batch;
+      return {
+        intake_batch_id: intakeBatchId,
+        organization_id: batch.organizationId,
+        engagement_id: batch.engagementId,
+        batch_code: batch.batchCode,
+        processing_status: "received",
+        review_status: "proposed",
+        batch_metadata: batch.batchMetadata,
+      };
+    },
+  });
+  assert.equal(created.ok, true);
+
+  const { normalized_payload_hash: validFingerprint, ...metadataWithoutFingerprint } = inserted.batchMetadata;
+  assert.match(validFingerprint, /^[0-9a-f]{64}$/);
+  for (const { name, batchMetadata } of [
+    { name: "missing", batchMetadata: metadataWithoutFingerprint },
+    { name: "null", batchMetadata: { ...metadataWithoutFingerprint, normalized_payload_hash: null } },
+    { name: "empty", batchMetadata: { ...metadataWithoutFingerprint, normalized_payload_hash: "" } },
+    { name: "non-string", batchMetadata: { ...metadataWithoutFingerprint, normalized_payload_hash: 64 } },
+    { name: "wrong-length", batchMetadata: { ...metadataWithoutFingerprint, normalized_payload_hash: "a".repeat(63) } },
+    { name: "non-hexadecimal", batchMetadata: { ...metadataWithoutFingerprint, normalized_payload_hash: "g".repeat(64) } },
+    { name: "uppercase", batchMetadata: { ...metadataWithoutFingerprint, normalized_payload_hash: "A".repeat(64) } },
+  ]) {
+    await t.test(name, async () => {
+      const result = await createIntakeBatch(input, {
+        ...baseDependencies,
+        async findIntakeBatchByIdempotencyKey() {
+          return {
+            intake_batch_id: intakeBatchId,
+            organization_id: organizationId,
+            engagement_id: engagementId,
+            batch_code: input.batchCode,
+            processing_status: "received",
+            review_status: "proposed",
+            batch_metadata: batchMetadata,
+          };
+        },
+        async insertIntakeBatchMetadata() {
+          assert.fail("invalid stored fingerprint must not be repaired or overwritten");
+        },
+      });
+      assert.equal(result.ok, false);
+      assert.equal(result.error.code, "duplicate_conflict");
+      assert.equal(result.error.status, 409);
+    });
+  }
 });
 
 test("create batch blocks missing and invalid idempotency keys before lookup or insert", async (t) => {
@@ -774,6 +876,96 @@ test("file reservation preserves identical replay and rejects conflicting checks
   assert.equal(conflict.error.code, "duplicate_conflict");
   assert.equal(conflict.error.status, 409);
   assert.equal(duplicateLookups, 1);
+});
+
+test("file reservation fails closed for missing or malformed stored fingerprints", async (t) => {
+  let inserted = null;
+  const payload = {
+    idempotency_key: "kai-p0-malformed-file-replay-001",
+    original_filename: "safe.csv",
+    mime_type: "text/csv",
+    checksum: declaredChecksum,
+    hash_algorithm: "sha256",
+  };
+  const baseDependencies = {
+    env: { KAI_SPRINT2_ENABLED: "true" },
+    async getIntakeBatchTenantState() {
+      return { intake_batch_id: intakeBatchId, organization_id: organizationId, engagement_id: engagementId };
+    },
+    async findIntakeFileReservationByChecksum() {
+      return null;
+    },
+  };
+  const created = await reserveIntakeFileMetadata(
+    { actorContext, organizationId, engagementId, intakeBatchId, intakeFileId, payload },
+    {
+      ...baseDependencies,
+      async findIntakeFileReservationByIdempotencyKey() {
+        return null;
+      },
+      async insertIntakeFileMetadata(file) {
+        inserted = file;
+        return {
+          intake_file_id: file.intakeFileId,
+          intake_batch_id: file.intakeBatchId,
+          organization_id: file.organizationId,
+          engagement_id: file.engagementId,
+          safe_filename: file.safeFilename,
+          file_policy_status: file.filePolicyStatus,
+          malware_scan_status: file.malwareScanStatus,
+          processing_status: "quarantined",
+          parse_status: "quarantined",
+          review_status: "proposed",
+        };
+      },
+    },
+  );
+  assert.equal(created.ok, true);
+
+  const { reservation_payload_hash: validFingerprint, ...metadataWithoutFingerprint } = inserted.fileMetadata;
+  assert.match(validFingerprint, /^[0-9a-f]{64}$/);
+  for (const { name, fileMetadata } of [
+    { name: "missing", fileMetadata: metadataWithoutFingerprint },
+    { name: "null", fileMetadata: { ...metadataWithoutFingerprint, reservation_payload_hash: null } },
+    { name: "empty", fileMetadata: { ...metadataWithoutFingerprint, reservation_payload_hash: "" } },
+    { name: "non-string", fileMetadata: { ...metadataWithoutFingerprint, reservation_payload_hash: 64 } },
+    { name: "wrong-length", fileMetadata: { ...metadataWithoutFingerprint, reservation_payload_hash: "a".repeat(63) } },
+    { name: "non-hexadecimal", fileMetadata: { ...metadataWithoutFingerprint, reservation_payload_hash: "g".repeat(64) } },
+    { name: "uppercase", fileMetadata: { ...metadataWithoutFingerprint, reservation_payload_hash: "A".repeat(64) } },
+  ]) {
+    await t.test(name, async () => {
+      const result = await reserveIntakeFileMetadata(
+        { actorContext, organizationId, engagementId, intakeBatchId, intakeFileId, payload },
+        {
+          ...baseDependencies,
+          async findIntakeFileReservationByIdempotencyKey() {
+            return {
+              intake_file_id: intakeFileId,
+              intake_batch_id: intakeBatchId,
+              organization_id: organizationId,
+              engagement_id: engagementId,
+              safe_filename: inserted.safeFilename,
+              file_policy_status: inserted.filePolicyStatus,
+              malware_scan_status: inserted.malwareScanStatus,
+              processing_status: "quarantined",
+              parse_status: "quarantined",
+              review_status: "proposed",
+              file_metadata: fileMetadata,
+            };
+          },
+          async findIntakeFileReservationByChecksum() {
+            assert.fail("invalid stored fingerprint must fail before duplicate-checksum lookup");
+          },
+          async insertIntakeFileMetadata() {
+            assert.fail("invalid stored fingerprint must not be repaired or overwritten");
+          },
+        },
+      );
+      assert.equal(result.ok, false);
+      assert.equal(result.error.code, "duplicate_conflict");
+      assert.equal(result.error.status, 409);
+    });
+  }
 });
 
 test("file reservation blocks preliminary duplicate declared checksums without verification or insert", async () => {
