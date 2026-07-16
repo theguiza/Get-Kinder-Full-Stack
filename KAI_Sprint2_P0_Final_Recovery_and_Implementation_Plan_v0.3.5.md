@@ -1886,6 +1886,56 @@ package_commit: report after commit; a commit cannot contain its own SHA
 next_package_or_stop_condition: OWNER-DIRECTED STOP after this bounded implementation commit; do not begin acceptance review, another route, or a mutation
 ```
 
+## P0-04 — intake-file detail read implementation
+
+```text
+leaf_status: complete
+p0_04_package_status: in_progress
+implementation_status: partial
+verification_status: TOOL_VERIFIED
+evidence_class: TOOL_VERIFIED
+owner_directed_leaf_scope: USER_CONFIRMED
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: d77bb338fddb5d0cc4169e06d512d31591a1f707
+starting_tree: clean
+starting_commit_scope: TOOL_VERIFIED — git show --stat lists only the nine declared intake-batch file collection files
+controlling_contract_review: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md and this ExecPlan's P0-04 mounted surface; GET /files/:id is consistent with the requested full mounted path and no exact contradiction was found
+route: GET /api/kai/sprint2/intake/admin/files/:intakeFileId
+operation: read_intake
+surface: internal operator detail read
+mount_and_middleware: existing feature gate remains before canonical HTTP authentication; route delegates mapped-human actor, read_intake role, and active-organization-membership controls to the established service before any repository read
+request_validation: established organization query convention plus strict canonical lowercase intakeFileId UUID validation before service invocation, with matching direct-service validation
+repository_read: exactly one getIntakeFileMetadata organization-and-file-scoped lookup using organizationId and intakeFileId; no ID-only, organization-only, unscoped, or fallback lookup
+not_found_behavior: no row, returned-file-ID mismatch, and returned-row organization mismatch use deeply equal canonical not_found 404 results and HTTP bodies without tenant or identifier disclosure
+dto_boundary: exact field-by-field reuse of the 14-field FileSummary allowlist; production SELECT is restricted to the same fields; storage identifiers, checksum, hash algorithm, file extension, raw content, unrestricted metadata, credentials, actor or membership context, client data, and unapproved PII are excluded
+focused_http_verification: genuine assembled production middleware and router over a temporary loopback listener, including feature/auth ordering, canonical UUID rejection, authorization-before-read, one scoped lookup, indistinguishable 404s, and forbidden-field sentinels
+focused_tests: node --test __tests__/kai-sprint2-file-detail-route.spec.js — 12 passed, 0 failed
+api_contract_verifier: npm run verify:kai-sprint2-api-contract — 51 passed, 0 failed
+schema_contract_verifier: npm run verify:kai-sprint2-schema-contract — 9 passed, 0 failed
+pass2_tests: npm run test:kai-sprint2-pass2 — 105 passed, 0 failed
+sprint2_tests: node --test __tests__/kai-sprint2-*.spec.js — 354 passed, 0 failed
+full_tests: npm test — 459 passed, 0 failed
+git_diff_check: passed
+database_sentinel: non-listening loopback DATABASE_URL at 127.0.0.1:1 used for every Node and npm command
+database_or_cloud_access: not performed
+localhost_test_behavior: initial sandbox EPERM was followed only by the owner-authorized identical rerun using temporary loopback HTTP listeners; no external network access
+api_contract_change: exact mounted-route inventory expectation only; verifier logic unchanged
+schema_verifier_change: none
+deployed_kai_schema_compatibility: NOT_CONFIRMED
+live_read_query_behavior: NOT_CONFIRMED
+database_file_count_enforcement: NOT_CONFIRMED
+database_atomicity: NOT_CONFIRMED
+persistent_upload_lifecycle: NOT_CONFIRMED
+distributed_abuse/concurrency_coordination: NOT_CONFIRMED
+nonproduction_storage_integration: NOT_CONFIRMED
+live_upload_readiness: NOT_CONFIRMED
+production_readiness: NOT_CONFIRMED
+real_client_data_readiness: NOT_CONFIRMED
+complete_diff_scope: Backend/kai/db/kaiReadModels.js, Backend/kai/index.js, Backend/kai/routes/sprint2IntakeApi.js, Backend/kai/services/kaiIntakeService.js, __tests__/kai-sprint2-file-detail-route.spec.js, __tests__/kai-sprint2-api-contract.spec.js, __tests__/kai-sprint2-pass2-route-runtime.spec.js, and this living ExecPlan evidence update only
+package_commit: report after commit; a commit cannot contain its own SHA
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this bounded implementation commit; do not begin another route, mutation, acceptance package, or P0 leaf
+```
+
 
 ---
 

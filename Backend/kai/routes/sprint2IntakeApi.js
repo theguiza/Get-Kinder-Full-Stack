@@ -111,6 +111,17 @@ function batchDetailIdentifiers(req = {}) {
   return { organizationId, intakeBatchId };
 }
 
+function fileDetailIdentifiers(req = {}) {
+  const organizationId = normalizedUuid(req.query?.organization_id);
+  const intakeFileId = typeof req.params?.intakeFileId === "string" ? req.params.intakeFileId : "";
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId)) return null;
+  if (
+    !KAI_SPRINT2_P0_PATTERNS.uuid.test(intakeFileId)
+    || intakeFileId !== intakeFileId.toLowerCase()
+  ) return null;
+  return { organizationId, intakeFileId };
+}
+
 function validateMutationRequestOrSend(req, res, operation, options = {}) {
   if (!metadataContentTypeIsSupported(req)) {
     sendKaiError(res, "unsupported_media_type");
@@ -218,6 +229,18 @@ router.get("/admin/batches/:intakeBatchId/files", async (req, res) => {
   });
 });
 
+router.get("/admin/files/:intakeFileId", async (req, res) => {
+  const identifiers = fileDetailIdentifiers(req);
+  if (!identifiers) return sendKaiError(res, "invalid_request");
+  return invokeService(res, async () => {
+    const service = await getIntakeService();
+    return service.getIntakeFileDetail({
+      ...requestContext(req, "/api/kai/sprint2/intake/admin/files/:intakeFileId"),
+      ...identifiers,
+    });
+  });
+});
+
 router.post("/admin/batches", async (req, res) => {
   const payload = requestPayload(req);
   if (!validateMutationRequestOrSend(req, res, "create_intake_batch")) return;
@@ -266,6 +289,7 @@ export const __testables = {
   requestPayload,
   safeAuthenticatedUser,
   batchDetailIdentifiers,
+  fileDetailIdentifiers,
   validateIntakeBatchFilesQuery,
   sendServiceResult,
   sanitizeServiceBlockers,

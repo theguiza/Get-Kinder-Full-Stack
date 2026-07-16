@@ -17,6 +17,7 @@ import {
 } from "../db/kaiIntakeQueries.js";
 import {
   getIntakeBatchDetail as readIntakeBatchDetail,
+  getIntakeFileMetadata as readIntakeFileMetadata,
   listIntakeBatchesForOrganization as readIntakeBatchesForOrganization,
   listIntakeFilesForBatch as readIntakeFilesForBatch,
 } from "../db/kaiReadModels.js";
@@ -423,6 +424,51 @@ export async function getIntakeBatchDetail(input = {}, dependencies = {}) {
   return {
     ok: true,
     data: responseBatchDetail(row),
+    warnings: [],
+  };
+}
+
+export async function getIntakeFileDetail(input = {}, dependencies = {}) {
+  if (!isKaiSprint2Enabled(dependencies.env || process.env)) {
+    return buildKaiError("feature_disabled");
+  }
+
+  const organizationId = String(input.organizationId || "").trim().toLowerCase();
+  const intakeFileId = typeof input.intakeFileId === "string" ? input.intakeFileId : "";
+  if (
+    !UUID_RE.test(organizationId)
+    || !UUID_RE.test(intakeFileId)
+    || intakeFileId !== intakeFileId.toLowerCase()
+  ) {
+    return buildKaiError("invalid_request");
+  }
+
+  const actorResult = input.actorContext
+    ? { ok: true, actorContext: input.actorContext }
+    : await resolveKaiActorContext(input.req, dependencies);
+  if (!actorResult.ok) return actorError(actorResult);
+
+  const actorContext = actorResult.actorContext;
+  if (actorContext.actorType !== "human") return buildKaiError("authorization_denied");
+  const auth = validateActorCanPerformOperation(actorContext, "read_intake", organizationId);
+  if (!auth.ok) return buildKaiError(auth.error_code, { blockers: auth.blockers });
+
+  const readFile = dependencies.getIntakeFileMetadata || readIntakeFileMetadata;
+  const row = await readFile(organizationId, intakeFileId);
+  if (!row || String(row.intake_file_id || "") !== intakeFileId) {
+    return buildKaiError("not_found");
+  }
+
+  const tenantResult = validateTenantBoundaryConsistency({
+    expectedOrganizationId: organizationId,
+    payload: { organization_id: organizationId },
+    currentRecords: [row],
+  });
+  if (tenantResult.severity === "blocker") return buildKaiError("not_found");
+
+  return {
+    ok: true,
+    data: responseFileSummary(row),
     warnings: [],
   };
 }

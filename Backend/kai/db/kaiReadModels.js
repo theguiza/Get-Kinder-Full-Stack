@@ -56,9 +56,8 @@ export async function listIntakeFilesForBatch(
 export async function getIntakeFileMetadata(organizationId, intakeFileId, db = pool) {
   const { rows } = await db.query(
     `SELECT intake_file_id, intake_batch_id, organization_id, engagement_id, safe_filename,
-            storage_provider, storage_bucket, storage_object_key, mime_type, file_extension,
-            file_size_bytes, checksum, hash_algorithm, file_policy_status,
-            malware_scan_status, processing_status, parse_status, review_status
+            mime_type, file_size_bytes, file_policy_status, malware_scan_status, processing_status,
+            parse_status, review_status, created_at, updated_at
        FROM kai.intake_files
       WHERE organization_id = $1
         AND intake_file_id = $2

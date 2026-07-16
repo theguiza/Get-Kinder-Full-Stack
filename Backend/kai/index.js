@@ -55,6 +55,7 @@ export {
   createIntakeBatch,
   confirmUpload,
   getIntakeBatchDetail,
+  getIntakeFileDetail,
   listIntakeBatches,
   listIntakeBatchesForOrganization,
   listIntakeFilesForBatch,
