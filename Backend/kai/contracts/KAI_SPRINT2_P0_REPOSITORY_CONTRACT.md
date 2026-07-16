@@ -215,6 +215,171 @@ allowed_operations:
 
 That executor must be tenant-bound and may record bounded security results, set file policy to passed/blocked/failed, and write metadata-only audit. It cannot change tenant, approve review, profile files, create sources/evidence/claims, expose raw content, or invoke arbitrary service operations. This package defines the identity but does not enable it.
 
+## Owner-confirmed intake-batch file collection read
+
+```text
+route: GET /api/kai/sprint2/intake/admin/batches/:intakeBatchId/files
+operation: read_intake
+surface: internal operator collection read
+implementation_status: unimplemented
+decision_evidence: USER_CONFIRMED
+```
+
+This owner decision authorizes one later bounded implementation package for this route only. It does not implement or mount the route and does not authorize another P0-04 leaf or any mutation.
+
+### Authorization, tenant controls, and parent validation
+
+The route requires an authenticated mapped human actor, one contract-approved `read_intake` role, and active membership in the requested organization. It uses the established organization-input convention, including canonical organization UUID validation, without redefining that convention. `intakeBatchId` must also be a canonical UUID. Authorization, role, membership, and identifier validation must complete before any tenant-sensitive repository read. The accepted outer composition remains feature gate before authentication.
+
+Before reading child files, the implementation must perform exactly one explicit tenant-scoped parent-batch lookup using both:
+
+```text
+organizationId
+intakeBatchId
+```
+
+Parent validation follows these rules:
+
+- No parent row returns the canonical `not_found` 404.
+- A returned parent whose `organization_id` differs from the requested organization returns the identical canonical `not_found` 404.
+- The public result never discloses whether a cross-tenant parent exists.
+- The child-file query is not executed when parent validation fails.
+- An existing authorized parent with no child files returns a successful 200 empty collection.
+- No ID-only, organization-only, or unscoped fallback parent lookup is permitted.
+
+### Repository-safe keyset pagination
+
+The intended route-specific file cap is 25, but deployed enforcement is `NOT_CONFIRMED`. Keyset pagination is therefore load-bearing at the repository-safe boundary: it prevents unbounded reads when deployed or legacy data exceeds the intended cap, does not assume that a database constraint currently enforces 25 files, and remains valid if this route's collection size changes later.
+
+The accepted pagination query parameters are `limit` and `cursor`, in addition to the route's already-established organization context. This route decision does not redefine the organization-input convention.
+
+`limit` is optional and must be a decimal integer. Its minimum is 1, default is 25, and maximum is 25. Zero, negative, fractional, non-numeric, malformed, or above-maximum values return the canonical `invalid_request` result.
+
+`cursor` is optional and is an opaque base64url token. Its decoded value must contain exactly:
+
+```text
+created_at: valid canonical ISO-8601 timestamp
+intake_file_id: canonical UUID
+```
+
+Missing, extra, malformed, undecodable, incorrectly typed, or invalid cursor values return the canonical `invalid_request` result. Clients must not depend on the cursor's internal representation. Unknown pagination parameters must not silently change paging behavior and return the canonical `invalid_request` result.
+
+Canonical ordering is:
+
+```text
+created_at DESC, intake_file_id DESC
+```
+
+`intake_file_id` is the unique tie-breaker. Continuation is exclusive:
+
+```text
+created_at < cursor.created_at
+OR (
+  created_at = cursor.created_at
+  AND intake_file_id < cursor.intake_file_id
+)
+```
+
+The child-file repository read must:
+
+- fetch at most `limit + 1` rows;
+- use both organization ID and intake batch ID predicates;
+- apply the cursor predicate only when a valid cursor is supplied;
+- never use offset pagination;
+- never execute an unbounded query; and
+- never add an unscoped fallback.
+
+The service must return at most `limit` items. It sets `next_cursor` only when the extra row proves another page exists, derives `next_cursor` from the final returned item, and uses `next_cursor: null` when no later page exists.
+
+### Success response and file-summary DTO
+
+The route preserves the established outer KAI success envelope. Its successful `data` object is exactly:
+
+```text
+{
+  items: FileSummary[],
+  pagination: {
+    limit: number,
+    next_cursor: string | null
+  }
+}
+```
+
+An existing authorized parent with no files returns:
+
+```text
+{
+  items: [],
+  pagination: {
+    limit: <validated effective limit>,
+    next_cursor: null
+  }
+}
+```
+
+Each `FileSummary` is constructed field-by-field and may contain only:
+
+```text
+intake_file_id
+intake_batch_id
+organization_id
+engagement_id
+safe_filename
+mime_type
+file_size_bytes
+file_policy_status
+malware_scan_status
+processing_status
+parse_status
+review_status
+created_at
+updated_at
+```
+
+`file_policy_status` and `malware_scan_status` are the canonical persisted names. Aliases such as `policy_status` and `malware_status` are not permitted. Row spreading, generic row serialization, blacklist deletion, and spread-then-delete DTO construction are prohibited.
+
+`mime_type` and `file_size_bytes` are approved operator-visible metadata for file triage and file-policy review. They do not authorize raw-file access. They remain caller-declared or repository metadata unless later independently verified, and their DTO presence must not be described as security verification.
+
+The route must never return:
+
+```text
+storage_provider
+storage_bucket
+storage_object_key
+storage_uri
+signed_url
+file_extension
+checksum
+hash_algorithm
+notes
+unrestricted metadata
+raw content
+credentials
+actor or membership context
+client data
+unapproved PII
+```
+
+A field's presence in a repository projection does not authorize it in the response. `checksum` and `hash_algorithm` remain internal integrity metadata for this route.
+
+### Synthetic acceptance boundary
+
+```text
+repository_safe_acceptance:
+mounted controls, tenant-scoped parent and child mocked reads,
+bounded keyset pagination, deterministic ordering,
+and explicit DTO boundary verified
+
+deployed_kai_schema_compatibility: NOT_CONFIRMED
+live_read_query_behavior: NOT_CONFIRMED
+database_file_count_enforcement: NOT_CONFIRMED
+database_atomicity: NOT_CONFIRMED
+persistent_upload_lifecycle: NOT_CONFIRMED
+distributed abuse/concurrency coordination: NOT_CONFIRMED
+```
+
+This synthetic boundary does not establish that the 25-file cap is deployed or enforced, that the route works against PostgreSQL, that file metadata has been independently verified, or that storage or raw-file access is enabled.
+
 ## Audit, transaction, and persistence expectations
 
 Audit payloads are metadata-only allowlists. Safe facts may include operation, actor type, organization-scoped object type and opaque ID, validator/reason code, request ID, route, state transition, timing, byte count, checksum verification outcome, and immutable version outcome. Raw content, parsed rows, prompts, credentials, signed URLs, private paths, bucket/object identifiers, unrestricted actor/session/membership records, and unapproved PII are forbidden.

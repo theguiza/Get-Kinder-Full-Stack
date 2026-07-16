@@ -1812,6 +1812,36 @@ package_commit: report after commit; a commit cannot contain its own SHA
 next_package_or_stop_condition: OWNER-DIRECTED STOP after this bounded correction package; do not begin another P0-04 leaf
 ```
 
+## P0-04 — intake-batch file collection owner decision
+
+```text
+decision_evidence: USER_CONFIRMED
+repository_state_inspected_at: TOOL_VERIFIED 3914e13634ab457dbd286aee864889931882a03f
+prior_read_only_scoping_review: USER_CONFIRMED — correctly stopped without implementing the route or selecting another leaf
+route: GET /api/kai/sprint2/intake/admin/batches/:intakeBatchId/files
+operation: read_intake
+surface: internal operator collection read
+implementation_status: unimplemented
+owner_confirmed_parent_validation: one explicit tenant-scoped parent lookup using organizationId and intakeBatchId before any child-file query
+owner_confirmed_parent_failure: canonical identical not_found 404 for no parent and returned-parent organization mismatch, with cross-tenant existence undisclosed and no child query on failure
+owner_confirmed_pagination: opaque keyset cursor with route-specific default limit 25 and maximum limit 25
+pagination_is_load_bearing: deployed 25-file enforcement is NOT_CONFIRMED, so the repository boundary must remain bounded even when deployed or legacy data exceeds the intended cap
+owner_confirmed_ordering: created_at DESC, intake_file_id DESC, with intake_file_id as the unique tie-breaker and exclusive continuation comparison
+owner_confirmed_success_data: exact items plus pagination object containing validated effective limit and nullable next_cursor inside the established outer KAI success envelope
+owner_confirmed_file_summary_dto: intake_file_id, intake_batch_id, organization_id, engagement_id, safe_filename, mime_type, file_size_bytes, file_policy_status, malware_scan_status, processing_status, parse_status, review_status, created_at, updated_at
+owner_confirmed_operator_metadata: mime_type and file_size_bytes included for triage and file-policy review without representing independent security verification or authorizing raw-file access
+owner_confirmed_exclusions: storage identifiers, storage URI, signed URL, file extension, checksum, hash algorithm, notes, unrestricted metadata, raw content, credentials, actor or membership context, client data, and unapproved PII
+later_implementation_authorization: one bounded vertical slice for this route only
+other_p0_04_route_or_mutation_authorization: none
+deployed_kai_schema_compatibility: NOT_CONFIRMED
+live_read_query_behavior: NOT_CONFIRMED
+database_file_count_enforcement: NOT_CONFIRMED
+database_atomicity: NOT_CONFIRMED
+persistent_upload_lifecycle: NOT_CONFIRMED
+distributed abuse/concurrency coordination: NOT_CONFIRMED
+next_package_or_stop_condition: STOP after this owner-decision record; do not implement the route or begin another P0-04 leaf in this package
+```
+
 
 ---
 
