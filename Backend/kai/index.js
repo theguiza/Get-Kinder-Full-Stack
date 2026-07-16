@@ -57,6 +57,7 @@ export {
   getIntakeBatchDetail,
   listIntakeBatches,
   listIntakeBatchesForOrganization,
+  listIntakeFilesForBatch,
   requestUploadUrl,
   reserveIntakeFileMetadata,
   validateIntakeFileMetadata,

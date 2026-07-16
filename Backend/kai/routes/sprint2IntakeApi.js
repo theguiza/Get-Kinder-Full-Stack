@@ -6,7 +6,10 @@ import {
   KAI_SPRINT2_P0_PATTERNS,
 } from "../config/kaiSprint2P0Contract.js";
 import { setKaiSprint2NoStore } from "../middleware/kaiSprint2RequestSafety.js";
-import { validateKaiSprint2MutationRequest } from "../validators/kaiSprint2RequestSchemas.js";
+import {
+  validateIntakeBatchFilesQuery,
+  validateKaiSprint2MutationRequest,
+} from "../validators/kaiSprint2RequestSchemas.js";
 
 const router = express.Router();
 let intakeServiceOverride = null;
@@ -201,6 +204,20 @@ router.get("/admin/batches/:intakeBatchId", async (req, res) => {
   });
 });
 
+router.get("/admin/batches/:intakeBatchId/files", async (req, res) => {
+  const identifiers = batchDetailIdentifiers(req);
+  const queryResult = validateIntakeBatchFilesQuery(req.query);
+  if (!identifiers || !queryResult.ok) return sendKaiError(res, "invalid_request");
+  return invokeService(res, async () => {
+    const service = await getIntakeService();
+    return service.listIntakeFilesForBatch({
+      ...requestContext(req, "/api/kai/sprint2/intake/admin/batches/:intakeBatchId/files"),
+      ...identifiers,
+      pagination: queryResult.pagination,
+    });
+  });
+});
+
 router.post("/admin/batches", async (req, res) => {
   const payload = requestPayload(req);
   if (!validateMutationRequestOrSend(req, res, "create_intake_batch")) return;
@@ -249,6 +266,7 @@ export const __testables = {
   requestPayload,
   safeAuthenticatedUser,
   batchDetailIdentifiers,
+  validateIntakeBatchFilesQuery,
   sendServiceResult,
   sanitizeServiceBlockers,
   sanitizeServiceWarnings,

@@ -26,17 +26,29 @@ export async function getIntakeBatchDetail(organizationId, intakeBatchId, db = p
   return rows[0] || null;
 }
 
-export async function listIntakeFilesForBatch(organizationId, intakeBatchId, db = pool) {
+export async function listIntakeFilesForBatch(
+  organizationId,
+  intakeBatchId,
+  { limit, cursor = null },
+  db = pool,
+) {
+  const cursorPredicate = cursor
+    ? `\n        AND (\n          created_at < $3\n          OR (created_at = $3 AND intake_file_id < $4)\n        )`
+    : "";
+  const params = cursor
+    ? [organizationId, intakeBatchId, cursor.created_at, cursor.intake_file_id, limit + 1]
+    : [organizationId, intakeBatchId, limit + 1];
+  const limitParameter = cursor ? "$5" : "$3";
   const { rows } = await db.query(
     `SELECT intake_file_id, intake_batch_id, organization_id, engagement_id, safe_filename,
-            storage_provider, mime_type, file_extension, file_size_bytes, checksum,
-            hash_algorithm, file_policy_status, malware_scan_status, processing_status,
+            mime_type, file_size_bytes, file_policy_status, malware_scan_status, processing_status,
             parse_status, review_status, created_at, updated_at
        FROM kai.intake_files
       WHERE organization_id = $1
-        AND intake_batch_id = $2
-      ORDER BY created_at DESC`,
-    [organizationId, intakeBatchId],
+        AND intake_batch_id = $2${cursorPredicate}
+      ORDER BY created_at DESC, intake_file_id DESC
+      LIMIT ${limitParameter}`,
+    params,
   );
   return rows;
 }

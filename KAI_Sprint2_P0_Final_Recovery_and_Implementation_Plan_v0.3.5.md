@@ -1842,6 +1842,50 @@ distributed abuse/concurrency coordination: NOT_CONFIRMED
 next_package_or_stop_condition: STOP after this owner-decision record; do not implement the route or begin another P0-04 leaf in this package
 ```
 
+## P0-04 — intake-batch file collection read implementation
+
+```text
+leaf_status: complete
+p0_04_package_status: in_progress
+implementation_status: partial
+verification_status: TOOL_VERIFIED
+evidence_class: TOOL_VERIFIED
+owner_directed_leaf_scope: USER_CONFIRMED
+starting_head: 46926f39d7c91fe715903d109f9bfe9c9be61b5b
+starting_head_direct_parent: 3914e13634ab457dbd286aee864889931882a03f
+inline_execplan_artifact_check: TOOL_VERIFIED — exactly one intake-batch file collection decision section, one normally fenced text block, no flattened text +decision_evidence artifact, and no literal Git addition markers in the decision block
+route: GET /api/kai/sprint2/intake/admin/batches/:intakeBatchId/files
+operation: read_intake
+surface: internal operator collection read
+mount_and_middleware: existing feature gate, mutation limiters, and canonical HTTP authentication remain outside the production router; route handler delegates actor mapping, read_intake role, and active-membership controls to the established service
+request_validation: canonical organization and intake-batch UUIDs; allowlisted limit and cursor query parameters only; limit minimum 1, default 25, maximum 25; strict opaque base64url cursor with exact canonical created_at and intake_file_id fields
+parent_validation: exactly one getIntakeBatchDetail organization-and-batch-scoped lookup; missing and mismatched-organization rows return deeply equal canonical not_found results and bodies with no child lookup or tenant disclosure
+child_read: at most one organization-and-batch-scoped listIntakeFilesForBatch lookup ordered created_at DESC, intake_file_id DESC, bounded to limit plus one, with the exclusive timestamp-and-ID continuation predicate and no offset or fallback
+service_pagination: at most limit DTOs; probe row used only for later-page detection; next_cursor derived from the final returned item; final pages use null
+dto_boundary: exact field-by-field FileSummary allowlist with file_policy_status and malware_scan_status; forbidden repository sentinel fields absent from the complete HTTP JSON
+focused_tests: node --test __tests__/kai-sprint2-batch-files-route.spec.js — 18 passed, 0 failed
+api_contract_verifier: npm run verify:kai-sprint2-api-contract — 51 passed, 0 failed
+schema_contract_verifier: npm run verify:kai-sprint2-schema-contract — 9 passed, 0 failed
+pass2_tests: npm run test:kai-sprint2-pass2 — 105 passed, 0 failed
+sprint2_tests: node --test __tests__/kai-sprint2-*.spec.js — 342 passed, 0 failed
+full_tests: npm test — 447 passed, 0 failed
+git_diff_check: passed
+database_sentinel: non-listening loopback DATABASE_URL at 127.0.0.1:1 used for every Node and npm command
+database_or_cloud_access: not performed
+localhost_test_behavior: temporary loopback HTTP listeners used only by assembled synthetic tests after narrow sandbox authorization; no external network access
+api_contract_change: exact mounted-route inventory expectation only; verifier logic unchanged
+schema_verifier_change: none
+deployed_kai_schema_compatibility: NOT_CONFIRMED
+live_read_query_behavior: NOT_CONFIRMED
+database_file_count_enforcement: NOT_CONFIRMED
+database_atomicity: NOT_CONFIRMED
+persistent_upload_lifecycle: NOT_CONFIRMED
+distributed abuse/concurrency coordination: NOT_CONFIRMED
+complete_diff_scope: Backend/kai/db/kaiReadModels.js, Backend/kai/index.js, Backend/kai/routes/sprint2IntakeApi.js, Backend/kai/services/kaiIntakeService.js, Backend/kai/validators/kaiSprint2RequestSchemas.js, __tests__/kai-sprint2-batch-files-route.spec.js, __tests__/kai-sprint2-api-contract.spec.js, __tests__/kai-sprint2-pass2-route-runtime.spec.js, and this living ExecPlan evidence update only
+package_commit: report after commit; a commit cannot contain its own SHA
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this bounded implementation commit; do not begin acceptance review, another route, or a mutation
+```
+
 
 ---
 

@@ -18,7 +18,12 @@ import {
 import {
   getIntakeBatchDetail as readIntakeBatchDetail,
   listIntakeBatchesForOrganization as readIntakeBatchesForOrganization,
+  listIntakeFilesForBatch as readIntakeFilesForBatch,
 } from "../db/kaiReadModels.js";
+import {
+  encodeIntakeBatchFilesCursor,
+  validateIntakeBatchFilesPagination,
+} from "../validators/kaiSprint2RequestSchemas.js";
 import { getEngagementTenantState, getIntakeBatchTenantState } from "../db/kaiQueries.js";
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
 import { validateSafeFilename, buildObjectKey } from "../storage/storagePathPolicy.js";
@@ -190,6 +195,25 @@ function responseBatchDetail(row) {
     engagement_id: row.engagement_id,
     batch_code: row.batch_code,
     processing_status: row.processing_status,
+    review_status: row.review_status,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+function responseFileSummary(row) {
+  return {
+    intake_file_id: row.intake_file_id,
+    intake_batch_id: row.intake_batch_id,
+    organization_id: row.organization_id,
+    engagement_id: row.engagement_id ?? null,
+    safe_filename: row.safe_filename,
+    mime_type: row.mime_type,
+    file_size_bytes: row.file_size_bytes,
+    file_policy_status: row.file_policy_status,
+    malware_scan_status: row.malware_scan_status,
+    processing_status: row.processing_status,
+    parse_status: row.parse_status,
     review_status: row.review_status,
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -399,6 +423,67 @@ export async function getIntakeBatchDetail(input = {}, dependencies = {}) {
   return {
     ok: true,
     data: responseBatchDetail(row),
+    warnings: [],
+  };
+}
+
+export async function listIntakeFilesForBatch(input = {}, dependencies = {}) {
+  if (!isKaiSprint2Enabled(dependencies.env || process.env)) {
+    return buildKaiError("feature_disabled");
+  }
+
+  const organizationId = String(input.organizationId || "").trim().toLowerCase();
+  const intakeBatchId = String(input.intakeBatchId || "").trim().toLowerCase();
+  if (!UUID_RE.test(organizationId) || !UUID_RE.test(intakeBatchId)) {
+    return buildKaiError("invalid_request");
+  }
+
+  const actorResult = input.actorContext
+    ? { ok: true, actorContext: input.actorContext }
+    : await resolveKaiActorContext(input.req, dependencies);
+  if (!actorResult.ok) return actorError(actorResult);
+
+  const actorContext = actorResult.actorContext;
+  if (actorContext.actorType !== "human") return buildKaiError("authorization_denied");
+  const auth = validateActorCanPerformOperation(actorContext, "read_intake", organizationId);
+  if (!auth.ok) return buildKaiError(auth.error_code, { blockers: auth.blockers });
+
+  const paginationResult = validateIntakeBatchFilesPagination(input.pagination);
+  if (!paginationResult.ok) return buildKaiError("invalid_request");
+  const { limit, cursor } = paginationResult.pagination;
+
+  const readBatch = dependencies.getIntakeBatchDetail || readIntakeBatchDetail;
+  const parent = await readBatch(organizationId, intakeBatchId);
+  if (!parent || String(parent.intake_batch_id || "").toLowerCase() !== intakeBatchId) {
+    return buildKaiError("not_found");
+  }
+  const tenantResult = validateTenantBoundaryConsistency({
+    expectedOrganizationId: organizationId,
+    payload: { organization_id: organizationId },
+    currentRecords: [parent],
+  });
+  if (tenantResult.severity === "blocker") return buildKaiError("not_found");
+
+  const readFiles = dependencies.listIntakeFilesForBatch || readIntakeFilesForBatch;
+  const rows = await readFiles(organizationId, intakeBatchId, { limit, cursor });
+  const hasNextPage = rows.length > limit;
+  const items = rows.slice(0, limit).map((row) => responseFileSummary(row));
+  const finalItem = items.at(-1);
+
+  return {
+    ok: true,
+    data: {
+      items,
+      pagination: {
+        limit,
+        next_cursor: hasNextPage
+          ? encodeIntakeBatchFilesCursor({
+            created_at: finalItem.created_at,
+            intake_file_id: finalItem.intake_file_id,
+          })
+          : null,
+      },
+    },
     warnings: [],
   };
 }

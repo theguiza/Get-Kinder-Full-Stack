@@ -4,6 +4,14 @@ import {
   KAI_SPRINT2_P0_STRING_LIMITS,
 } from "../config/kaiSprint2P0Contract.js";
 
+export const INTAKE_BATCH_FILES_DEFAULT_LIMIT = 25;
+export const INTAKE_BATCH_FILES_MAX_LIMIT = 25;
+
+const INTAKE_BATCH_FILES_QUERY_KEYS = new Set(["organization_id", "limit", "cursor"]);
+const INTAKE_BATCH_FILES_CURSOR_KEYS = Object.freeze(["created_at", "intake_file_id"]);
+const BASE64URL_RE = /^[A-Za-z0-9_-]+$/;
+const CANONICAL_ISO_TIMESTAMP_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+
 const metadataMarkerSchema = Object.freeze({
   p0_pass: { type: "string", maxLength: KAI_SPRINT2_P0_STRING_LIMITS.machineCodeMaxLength },
   gate_plan: { type: "string", maxLength: KAI_SPRINT2_P0_STRING_LIMITS.displayLabelMaxLength },
@@ -43,6 +51,87 @@ export const KAI_SPRINT2_ROUTE_SCHEMAS = Object.freeze({
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function canonicalIsoTimestamp(value) {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value.toISOString();
+  }
+  if (typeof value !== "string" || !CANONICAL_ISO_TIMESTAMP_RE.test(value)) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString() !== value) return null;
+  return value;
+}
+
+function canonicalCursorUuid(value) {
+  if (typeof value !== "string" || value !== value.toLowerCase()) return null;
+  return KAI_SPRINT2_P0_PATTERNS.uuid.test(value) ? value : null;
+}
+
+function validatedCursorObject(value) {
+  if (!isPlainObject(value)) return null;
+  const keys = Object.keys(value).sort();
+  if (keys.length !== INTAKE_BATCH_FILES_CURSOR_KEYS.length) return null;
+  if (!INTAKE_BATCH_FILES_CURSOR_KEYS.every((key, index) => keys[index] === key)) return null;
+
+  const createdAt = canonicalIsoTimestamp(value.created_at);
+  const intakeFileId = canonicalCursorUuid(value.intake_file_id);
+  if (!createdAt || !intakeFileId) return null;
+  return { created_at: createdAt, intake_file_id: intakeFileId };
+}
+
+function decodeIntakeBatchFilesCursor(token) {
+  if (typeof token !== "string" || !BASE64URL_RE.test(token)) return null;
+  try {
+    const bytes = Buffer.from(token, "base64url");
+    if (bytes.length === 0 || bytes.toString("base64url") !== token) return null;
+    return validatedCursorObject(JSON.parse(bytes.toString("utf8")));
+  } catch {
+    return null;
+  }
+}
+
+export function validateIntakeBatchFilesPagination(value = {}) {
+  if (!isPlainObject(value)) return { ok: false };
+  const limit = value.limit ?? INTAKE_BATCH_FILES_DEFAULT_LIMIT;
+  if (!Number.isInteger(limit) || limit < 1 || limit > INTAKE_BATCH_FILES_MAX_LIMIT) {
+    return { ok: false };
+  }
+  if (value.cursor == null) return { ok: true, pagination: { limit, cursor: null } };
+  const cursor = validatedCursorObject(value.cursor);
+  return cursor
+    ? { ok: true, pagination: { limit, cursor } }
+    : { ok: false };
+}
+
+export function validateIntakeBatchFilesQuery(query = {}) {
+  if (!isPlainObject(query)) return { ok: false };
+  if (Object.keys(query).some((key) => !INTAKE_BATCH_FILES_QUERY_KEYS.has(key))) {
+    return { ok: false };
+  }
+
+  let limit = INTAKE_BATCH_FILES_DEFAULT_LIMIT;
+  if (query.limit !== undefined) {
+    if (typeof query.limit !== "string" || !/^\d+$/.test(query.limit)) return { ok: false };
+    limit = Number(query.limit);
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > INTAKE_BATCH_FILES_MAX_LIMIT) {
+      return { ok: false };
+    }
+  }
+
+  let cursor = null;
+  if (query.cursor !== undefined) {
+    cursor = decodeIntakeBatchFilesCursor(query.cursor);
+    if (!cursor) return { ok: false };
+  }
+
+  return { ok: true, pagination: { limit, cursor } };
+}
+
+export function encodeIntakeBatchFilesCursor(value) {
+  const cursor = validatedCursorObject(value);
+  if (!cursor) throw new TypeError("Cannot encode an invalid intake-file cursor.");
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
 }
 
 function requestBlocker(blockingReason, objectCode) {
@@ -151,5 +240,8 @@ export function validateKaiSprint2MutationRequest(operation, payload, options = 
 }
 
 export const __testables = {
+  canonicalIsoTimestamp,
+  decodeIntakeBatchFilesCursor,
   measureStructure,
+  validatedCursorObject,
 };
