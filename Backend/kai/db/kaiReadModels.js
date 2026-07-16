@@ -67,17 +67,31 @@ export async function getIntakeFileMetadata(organizationId, intakeFileId, db = p
   return rows[0] || null;
 }
 
-export async function listOpenReviewQueueItems(organizationId, db = pool) {
+export async function listIntakeFileReviewQueueItems(
+  organizationId,
+  { limit, cursor = null },
+  db = pool,
+) {
+  const cursorPredicate = cursor
+    ? `\n        AND (\n          created_at < $2\n          OR (created_at = $2 AND review_queue_item_id < $3)\n        )`
+    : "";
+  const params = cursor
+    ? [organizationId, cursor.created_at, cursor.review_queue_item_id, limit + 1]
+    : [organizationId, limit + 1];
+  const limitParameter = cursor ? "$4" : "$2";
   const { rows } = await db.query(
-    `SELECT review_queue_item_id, organization_id, engagement_id, queue_type,
-            target_object_type, target_object_id, priority, queue_status,
-            review_status, summary, required_action, created_at, updated_at
+    `SELECT review_queue_item_id, organization_id, queue_type, target_object_type,
+            target_object_id, priority, queue_status, due_at, summary, required_action,
+            created_at, updated_at
        FROM kai.review_queue_items
       WHERE organization_id = $1
+        AND queue_type = 'intake_file_review'
+        AND target_object_type = 'intake_file'
         AND queue_status IN ('open', 'in_progress', 'blocked', 'waiting_on_client', 'waiting_on_gk')
-      ORDER BY priority, created_at
-      LIMIT 100`,
-    [organizationId],
+        ${cursorPredicate}
+      ORDER BY created_at DESC, review_queue_item_id DESC
+      LIMIT ${limitParameter}`,
+    params,
   );
   return rows;
 }

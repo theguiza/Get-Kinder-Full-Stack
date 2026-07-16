@@ -9,6 +9,7 @@ import { setKaiSprint2NoStore } from "../middleware/kaiSprint2RequestSafety.js";
 import {
   validateIntakeBatchFilesQuery,
   validateKaiSprint2MutationRequest,
+  validateReviewQueueQuery,
 } from "../validators/kaiSprint2RequestSchemas.js";
 
 const router = express.Router();
@@ -241,6 +242,22 @@ router.get("/admin/files/:intakeFileId", async (req, res) => {
   });
 });
 
+router.get("/admin/review-queue", async (req, res) => {
+  const organizationId = normalizedUuid(req.query?.organization_id);
+  const queryResult = validateReviewQueueQuery(req.query);
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) || !queryResult.ok) {
+    return sendKaiError(res, "invalid_request");
+  }
+  return invokeService(res, async () => {
+    const service = await getIntakeService();
+    return service.listIntakeFileReviewQueueItems({
+      ...requestContext(req, "/api/kai/sprint2/intake/admin/review-queue"),
+      organizationId,
+      pagination: queryResult.pagination,
+    });
+  });
+});
+
 router.post("/admin/batches", async (req, res) => {
   const payload = requestPayload(req);
   if (!validateMutationRequestOrSend(req, res, "create_intake_batch")) return;
@@ -291,6 +308,7 @@ export const __testables = {
   batchDetailIdentifiers,
   fileDetailIdentifiers,
   validateIntakeBatchFilesQuery,
+  validateReviewQueueQuery,
   sendServiceResult,
   sanitizeServiceBlockers,
   sanitizeServiceWarnings,

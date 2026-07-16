@@ -380,6 +380,82 @@ distributed abuse/concurrency coordination: NOT_CONFIRMED
 
 This synthetic boundary does not establish that the 25-file cap is deployed or enforced, that the route works against PostgreSQL, that file metadata has been independently verified, or that storage or raw-file access is enabled.
 
+## Owner-confirmed internal-GK intake-file review-queue collection read
+
+```text
+route: GET /api/kai/sprint2/intake/admin/review-queue
+operation: read_intake
+surface: internal GK review-queue collection read
+decision_evidence: USER_CONFIRMED
+queue_type: intake_file_review
+target_object_type: intake_file
+active_statuses: open, in_progress, blocked, waiting_on_client, waiting_on_gk
+excluded_statuses: resolved, cancelled
+```
+
+This route is internal to GK. Before any tenant-sensitive read it requires an authenticated mapped human actor, the generic `read_intake` capability, active membership in the requested organization, and at least one route-specific active organization role of `gk_admin`, `gk_operator`, or `gk_reviewer`. A `client_admin`, `client_reviewer`, or `client_contributor` who otherwise passes generic `read_intake` and active-membership checks still receives the canonical authorization denial at the route-specific GK restriction. The accepted outer composition remains feature gate before authentication.
+
+The route uses exactly one organization-scoped bounded collection query. The query must include all of:
+
+```text
+organization_id = requested organization
+queue_type = intake_file_review
+target_object_type = intake_file
+queue_status IN (open, in_progress, blocked, waiting_on_client, waiting_on_gk)
+```
+
+There is no unscoped query, fallback query, per-row target lookup, or ID-only lookup. `target_object_id` is an opaque intake-file identifier and is never dereferenced by this route.
+
+The optional `limit` and `cursor` parameters reuse the intake-batch file collection's canonical-integer parser, malformed-cursor behavior, opaque base64url codec, and success envelope. The default and maximum limit are both 25. The cursor contains exactly `created_at` and `review_queue_item_id`, where the timestamp is canonical ISO-8601 and the identifier is a canonical UUID. Ordering and exclusive continuation are:
+
+```text
+ORDER BY created_at DESC, review_queue_item_id DESC
+
+created_at < cursor.created_at
+OR (
+  created_at = cursor.created_at
+  AND review_queue_item_id < cursor.review_queue_item_id
+)
+```
+
+The repository reads at most `limit + 1` rows. The service returns at most `limit` items, emits `next_cursor` only when the probe row proves another page exists, and derives that cursor from the final returned item rather than the probe row.
+
+Each review-queue DTO is constructed field-by-field in exactly this order:
+
+```text
+review_queue_item_id
+organization_id
+queue_type
+target_object_type
+target_object_id
+priority
+queue_status
+due_at
+summary
+required_action
+created_at
+updated_at
+```
+
+`review_queue_item_id`, `organization_id`, and `target_object_id` are canonical UUID strings. The response never includes `assigned_to`, `blocked_reason`, queue metadata, internal notes, actor/session/membership context, storage information, credentials, raw content, client data, or PII. A blocked item may expose only its approved `queue_status`; a sanitized reason requires a separate owner decision. Markup characters in approved text remain inert JSON text and are never interpreted or rendered as HTML or Markdown by this route.
+
+`summary` is null or a compact human-display synopsis of 1–200 Unicode code points after normalization. `required_action` is null or operator guidance of 1–1000 Unicode code points after normalization. Every non-null value must be a string, normalize to Unicode NFC, normalize CRLF and CR line endings to LF, trim outer whitespace, remain non-empty, and then be counted by Unicode code point. NUL, C0 or C1 controls other than tab and LF, and Unicode bidi embedding, override, isolate, or directional-formatting controls are rejected. Invalid text is not truncated, repaired, replaced, or silently stripped.
+
+Every row returned by the bounded query, including the probe row, is validated before any response is serialized. Every row must match the requested organization, fixed queue type, fixed target type, active-status set, canonical identifiers, and text boundaries. Any inconsistent or malformed row fails the entire request with the canonical safe `500 system_error`, no items or partial collection, and no offending values or mismatched identifiers. Rows are never silently filtered.
+
+```text
+repository_safe_acceptance:
+mounted feature/auth controls, GK-only route authorization after generic read authorization,
+one bounded organization-scoped mocked read, fail-closed row validation,
+stable duplicate-timestamp keyset pagination, and explicit DTO boundary verified
+
+deployed_kai_schema_compatibility: NOT_CONFIRMED
+live_read_query_behavior: NOT_CONFIRMED
+database_atomicity: NOT_CONFIRMED
+persistent_upload_lifecycle: NOT_CONFIRMED
+distributed abuse/concurrency coordination: NOT_CONFIRMED
+```
+
 ## Audit, transaction, and persistence expectations
 
 Audit payloads are metadata-only allowlists. Safe facts may include operation, actor type, organization-scoped object type and opaque ID, validator/reason code, request ID, route, state transition, timing, byte count, checksum verification outcome, and immutable version outcome. Raw content, parsed rows, prompts, credentials, signed URLs, private paths, bucket/object identifiers, unrestricted actor/session/membership records, and unapproved PII are forbidden.

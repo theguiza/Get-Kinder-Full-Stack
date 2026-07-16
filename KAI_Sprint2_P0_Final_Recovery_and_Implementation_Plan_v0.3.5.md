@@ -1936,6 +1936,63 @@ package_commit: report after commit; a commit cannot contain its own SHA
 next_package_or_stop_condition: OWNER-DIRECTED STOP after this bounded implementation commit; do not begin another route, mutation, acceptance package, or P0 leaf
 ```
 
+## P0-04 — internal-GK intake-file review-queue collection read implementation
+
+```text
+leaf_status: complete
+p0_04_package_status: in_progress
+implementation_status: partial
+verification_status: TOOL_VERIFIED
+evidence_class: TOOL_VERIFIED
+owner_directed_leaf_scope: USER_CONFIRMED
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 698b6a70c76897344ed9774491f4d315042ef8d4
+starting_tree: clean tracked and untracked
+starting_commit_scope: TOOL_VERIFIED — 698b6a70 changed exactly the eight files declared by the intake-file detail complete_diff_scope, and complete diff inspection found only that leaf's route/service/read-model, focused test, inventory expectations, and ExecPlan evidence
+applicable_repository_instructions: root AGENTS.md only; P0-04 leaf remains inside the approved package order and no gate or additional leaf was selected
+controlling_contract_decision: owner-approved authorization, collection scope, pagination, DTO, text, and fail-closed row-validation decisions recorded only in Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md and this living ExecPlan
+route: GET /api/kai/sprint2/intake/admin/review-queue
+operation: read_intake
+surface: internal GK intake-file review-queue collection read
+mount_and_middleware: existing feature gate remains before canonical HTTP authentication; the route delegates mapped-human actor resolution and authorization to the established service before the collection read
+authorization: generic read_intake and active requested-organization membership are required first; a second route-specific active-membership role check permits only gk_admin, gk_operator, or gk_reviewer; client_admin, client_reviewer, and client_contributor each pass the generic check but receive the canonical route-level authorization denial with zero collection reads
+repository_read: exactly one bounded organization-scoped review_queue_items query with fixed intake_file_review queue type, fixed intake_file target type, and exactly open/in_progress/blocked/waiting_on_client/waiting_on_gk statuses; no unscoped, fallback, per-row target, or ID-only lookup
+pagination: established batch-file canonical-integer and base64url cursor behavior reused with default/max 25, created_at plus review_queue_item_id cursor, created_at DESC/review_queue_item_id DESC ordering, exclusive continuation, limit-plus-one probe, and next_cursor derived from the final returned item
+dto_boundary: exact field-by-field 12-field allowlist; review_queue_item_id, organization_id, and opaque target_object_id are canonical UUIDs; assigned_to, blocked_reason, queue metadata, internal notes, actor/session/membership context, storage data, credentials, raw content, client data, and PII are excluded from both SELECT and serialized output
+text_boundary: summary and required_action normalize NFC, CRLF/CR to LF, and outer whitespace before Unicode-code-point limits; empty, NUL, disallowed C0/C1, bidi formatting controls, and overlength values fail closed without truncation, repair, replacement, or silent removal; markup remains inert JSON text
+row_validation: every query-returned row including the probe row is validated before serialization; any organization, queue type, target type, status, UUID, timestamp, priority-code, or approved-text inconsistency returns one canonical safe 500 system_error with no partial collection or offending values
+focused_http_verification: genuine assembled production middleware and router over a temporary loopback listener, including feature/auth order, mapped role and membership controls, client-role denial, one scoped bounded read, fixed scope/statuses, fail-closed row validation, exact DTO/forbidden-field boundary, hostile text, pagination, and cursor behavior
+focused_tests: node --test __tests__/kai-sprint2-review-queue-route.spec.js — 16 passed, 0 failed
+cursor_regression_tests: node --test __tests__/kai-sprint2-batch-files-route.spec.js — 18 passed, 0 failed
+api_contract_verifier: npm run verify:kai-sprint2-api-contract — 51 passed, 0 failed
+schema_contract_verifier: npm run verify:kai-sprint2-schema-contract — 9 passed, 0 failed
+pass2_tests: npm run test:kai-sprint2-pass2 — 105 passed, 0 failed
+sprint2_tests: node --test __tests__/kai-sprint2-*.spec.js — 370 passed, 0 failed
+full_tests: npm test — 475 passed, 0 failed
+client_role_denial_test: passed for client_admin, client_reviewer, and client_contributor after each independently passed generic read_intake authorization with active membership
+hostile_text_tests: passed for bidi override, C1 control, NUL, 201-code-point summary, and 1001-code-point required_action; every case returned one safe 500 with no partial response
+duplicate_timestamp_test: passed; two pages under created_at DESC, review_queue_item_id DESC returned all four expected IDs exactly once with no skip or duplication, and the continuation cursor matched the final first-page item rather than its probe row
+git_diff_check: passed
+database_sentinel: non-listening loopback DATABASE_URL at 127.0.0.1:1 used for every Node and npm command
+database_or_cloud_access: not performed
+localhost_test_behavior: sandbox runs that exercised temporary HTTP listeners returned only the known EPERM; each was followed only by the owner-authorized identical localhost-capable rerun, with no external network access
+api_contract_change: exact mounted-route inventory expectation only; verifier logic unchanged
+schema_verifier_change: none
+deployed_kai_schema_compatibility: NOT_CONFIRMED
+live_read_query_behavior: NOT_CONFIRMED
+database_file_count_enforcement: NOT_CONFIRMED
+database_atomicity: NOT_CONFIRMED
+persistent_upload_lifecycle: NOT_CONFIRMED
+distributed_abuse/concurrency_coordination: NOT_CONFIRMED
+nonproduction_storage_integration: NOT_CONFIRMED
+live_upload_readiness: NOT_CONFIRMED
+production_readiness: NOT_CONFIRMED
+real_client_data_readiness: NOT_CONFIRMED
+complete_diff_scope: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md, Backend/kai/db/kaiReadModels.js, Backend/kai/index.js, Backend/kai/routes/sprint2IntakeApi.js, Backend/kai/services/kaiIntakeService.js, Backend/kai/validators/kaiSprint2RequestSchemas.js, __tests__/kai-sprint2-review-queue-route.spec.js, __tests__/kai-sprint2-api-contract.spec.js, __tests__/kai-sprint2-pass2-route-runtime.spec.js, and this living ExecPlan evidence update only
+package_commit: report after commit; a commit cannot contain its own SHA
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this bounded implementation commit; do not begin P0-05, another route, mutation, acceptance package, or additional leaf
+```
+
 
 ---
 

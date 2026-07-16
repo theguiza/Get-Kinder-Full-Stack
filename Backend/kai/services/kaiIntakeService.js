@@ -20,10 +20,13 @@ import {
   getIntakeFileMetadata as readIntakeFileMetadata,
   listIntakeBatchesForOrganization as readIntakeBatchesForOrganization,
   listIntakeFilesForBatch as readIntakeFilesForBatch,
+  listIntakeFileReviewQueueItems as readIntakeFileReviewQueueItems,
 } from "../db/kaiReadModels.js";
 import {
   encodeIntakeBatchFilesCursor,
+  encodeReviewQueueCursor,
   validateIntakeBatchFilesPagination,
+  validateReviewQueuePagination,
 } from "../validators/kaiSprint2RequestSchemas.js";
 import { getEngagementTenantState, getIntakeBatchTenantState } from "../db/kaiQueries.js";
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
@@ -45,6 +48,18 @@ const ALLOWED_METADATA_ONLY_MIME_TYPES = new Set(["text/csv", "application/csv",
 const UUID_RE = KAI_SPRINT2_P0_PATTERNS.uuid;
 const STORED_FINGERPRINT_RE = /^[0-9a-f]{64}$/;
 const PRELIMINARY_DUPLICATE_VALIDATORS = Object.freeze([duplicate_checksum_blocked]);
+const GK_REVIEW_QUEUE_ROLES = new Set(["gk_admin", "gk_operator", "gk_reviewer"]);
+const ACTIVE_REVIEW_QUEUE_STATUSES = new Set([
+  "open",
+  "in_progress",
+  "blocked",
+  "waiting_on_client",
+  "waiting_on_gk",
+]);
+const CANONICAL_ISO_TIMESTAMP_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+const REVIEW_QUEUE_PRIORITY_RE = /^[a-z0-9_]{1,64}$/;
+const DISALLOWED_TEXT_CONTROLS_RE = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/u;
+const BIDI_FORMATTING_CONTROLS_RE = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/u;
 
 function stableJson(value) {
   if (Array.isArray(value)) return `[${value.map((item) => stableJson(item)).join(",")}]`;
@@ -218,6 +233,84 @@ function responseFileSummary(row) {
     review_status: row.review_status,
     created_at: row.created_at,
     updated_at: row.updated_at,
+  };
+}
+
+function canonicalUuid(value) {
+  return typeof value === "string"
+    && value === value.toLowerCase()
+    && UUID_RE.test(value);
+}
+
+function canonicalTimestamp(value, { nullable = false } = {}) {
+  if (value === null && nullable) return null;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? undefined : value.toISOString();
+  }
+  if (typeof value !== "string" || !CANONICAL_ISO_TIMESTAMP_RE.test(value)) return undefined;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) || parsed.toISOString() !== value ? undefined : value;
+}
+
+function normalizedReviewQueueText(value, maximumCodePoints) {
+  if (value === null) return { ok: true, value: null };
+  if (typeof value !== "string") return { ok: false };
+  const normalized = value.normalize("NFC").replace(/\r\n?/g, "\n").trim();
+  if (
+    normalized.length === 0
+    || [...normalized].length > maximumCodePoints
+    || DISALLOWED_TEXT_CONTROLS_RE.test(normalized)
+    || BIDI_FORMATTING_CONTROLS_RE.test(normalized)
+  ) {
+    return { ok: false };
+  }
+  return { ok: true, value: normalized };
+}
+
+function responseReviewQueueItem(row, organizationId) {
+  if (!row || typeof row !== "object" || Array.isArray(row)) return null;
+  if (
+    !canonicalUuid(row.review_queue_item_id)
+    || !canonicalUuid(row.organization_id)
+    || row.organization_id !== organizationId
+    || row.queue_type !== "intake_file_review"
+    || row.target_object_type !== "intake_file"
+    || !canonicalUuid(row.target_object_id)
+    || !ACTIVE_REVIEW_QUEUE_STATUSES.has(row.queue_status)
+    || typeof row.priority !== "string"
+    || !REVIEW_QUEUE_PRIORITY_RE.test(row.priority)
+  ) {
+    return null;
+  }
+
+  const dueAt = canonicalTimestamp(row.due_at, { nullable: true });
+  const createdAt = canonicalTimestamp(row.created_at);
+  const updatedAt = canonicalTimestamp(row.updated_at);
+  const summary = normalizedReviewQueueText(row.summary, 200);
+  const requiredAction = normalizedReviewQueueText(row.required_action, 1000);
+  if (
+    dueAt === undefined
+    || createdAt === undefined
+    || updatedAt === undefined
+    || !summary.ok
+    || !requiredAction.ok
+  ) {
+    return null;
+  }
+
+  return {
+    review_queue_item_id: row.review_queue_item_id,
+    organization_id: row.organization_id,
+    queue_type: row.queue_type,
+    target_object_type: row.target_object_type,
+    target_object_id: row.target_object_id,
+    priority: row.priority,
+    queue_status: row.queue_status,
+    due_at: dueAt,
+    summary: summary.value,
+    required_action: requiredAction.value,
+    created_at: createdAt,
+    updated_at: updatedAt,
   };
 }
 
@@ -526,6 +619,76 @@ export async function listIntakeFilesForBatch(input = {}, dependencies = {}) {
           ? encodeIntakeBatchFilesCursor({
             created_at: finalItem.created_at,
             intake_file_id: finalItem.intake_file_id,
+          })
+          : null,
+      },
+    },
+    warnings: [],
+  };
+}
+
+export async function listIntakeFileReviewQueueItems(input = {}, dependencies = {}) {
+  if (!isKaiSprint2Enabled(dependencies.env || process.env)) {
+    return buildKaiError("feature_disabled");
+  }
+
+  const organizationId = String(input.organizationId || "").trim().toLowerCase();
+  if (!UUID_RE.test(organizationId)) return buildKaiError("invalid_request");
+
+  const actorResult = input.actorContext
+    ? { ok: true, actorContext: input.actorContext }
+    : await resolveKaiActorContext(input.req, dependencies);
+  if (!actorResult.ok) return actorError(actorResult);
+
+  const actorContext = actorResult.actorContext;
+  if (actorContext.actorType !== "human") return buildKaiError("authorization_denied");
+  const genericAuth = validateActorCanPerformOperation(
+    actorContext,
+    "read_intake",
+    organizationId,
+  );
+  if (!genericAuth.ok) {
+    return buildKaiError(genericAuth.error_code, { blockers: genericAuth.blockers });
+  }
+  const routeAuth = validateActorCanPerformOperation(
+    actorContext,
+    "read_intake",
+    organizationId,
+    { allowedRoles: GK_REVIEW_QUEUE_ROLES },
+  );
+  if (!routeAuth.ok) {
+    return buildKaiError(routeAuth.error_code, { blockers: routeAuth.blockers });
+  }
+
+  const paginationResult = validateReviewQueuePagination(input.pagination);
+  if (!paginationResult.ok) return buildKaiError("invalid_request");
+  const { limit, cursor } = paginationResult.pagination;
+
+  const readQueue = dependencies.listIntakeFileReviewQueueItems || readIntakeFileReviewQueueItems;
+  const rows = await readQueue(organizationId, { limit, cursor });
+  if (!Array.isArray(rows) || rows.length > limit + 1) return buildKaiError("system_error");
+
+  const validatedRows = [];
+  for (const row of rows) {
+    const item = responseReviewQueueItem(row, organizationId);
+    if (!item) return buildKaiError("system_error");
+    validatedRows.push(item);
+  }
+
+  const hasNextPage = validatedRows.length > limit;
+  const items = validatedRows.slice(0, limit);
+  const finalItem = items.at(-1);
+
+  return {
+    ok: true,
+    data: {
+      items,
+      pagination: {
+        limit,
+        next_cursor: hasNextPage
+          ? encodeReviewQueueCursor({
+            created_at: finalItem.created_at,
+            review_queue_item_id: finalItem.review_queue_item_id,
           })
           : null,
       },

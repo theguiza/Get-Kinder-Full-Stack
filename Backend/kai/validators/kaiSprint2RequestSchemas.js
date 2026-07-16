@@ -6,9 +6,13 @@ import {
 
 export const INTAKE_BATCH_FILES_DEFAULT_LIMIT = 25;
 export const INTAKE_BATCH_FILES_MAX_LIMIT = 25;
+export const REVIEW_QUEUE_DEFAULT_LIMIT = 25;
+export const REVIEW_QUEUE_MAX_LIMIT = 25;
 
 const INTAKE_BATCH_FILES_QUERY_KEYS = new Set(["organization_id", "limit", "cursor"]);
 const INTAKE_BATCH_FILES_CURSOR_KEYS = Object.freeze(["created_at", "intake_file_id"]);
+const REVIEW_QUEUE_QUERY_KEYS = new Set(["organization_id", "limit", "cursor"]);
+const REVIEW_QUEUE_CURSOR_KEYS = Object.freeze(["created_at", "review_queue_item_id"]);
 const BASE64URL_RE = /^[A-Za-z0-9_-]+$/;
 const CANONICAL_ISO_TIMESTAMP_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
@@ -68,27 +72,35 @@ function canonicalCursorUuid(value) {
   return KAI_SPRINT2_P0_PATTERNS.uuid.test(value) ? value : null;
 }
 
-function validatedCursorObject(value) {
+function validatedCursorObject(value, cursorKeys, identifierKey) {
   if (!isPlainObject(value)) return null;
   const keys = Object.keys(value).sort();
-  if (keys.length !== INTAKE_BATCH_FILES_CURSOR_KEYS.length) return null;
-  if (!INTAKE_BATCH_FILES_CURSOR_KEYS.every((key, index) => keys[index] === key)) return null;
+  if (keys.length !== cursorKeys.length) return null;
+  if (!cursorKeys.every((key, index) => keys[index] === key)) return null;
 
   const createdAt = canonicalIsoTimestamp(value.created_at);
-  const intakeFileId = canonicalCursorUuid(value.intake_file_id);
-  if (!createdAt || !intakeFileId) return null;
-  return { created_at: createdAt, intake_file_id: intakeFileId };
+  const identifier = canonicalCursorUuid(value[identifierKey]);
+  if (!createdAt || !identifier) return null;
+  return { created_at: createdAt, [identifierKey]: identifier };
 }
 
-function decodeIntakeBatchFilesCursor(token) {
+function decodeCollectionCursor(token, cursorKeys, identifierKey) {
   if (typeof token !== "string" || !BASE64URL_RE.test(token)) return null;
   try {
     const bytes = Buffer.from(token, "base64url");
     if (bytes.length === 0 || bytes.toString("base64url") !== token) return null;
-    return validatedCursorObject(JSON.parse(bytes.toString("utf8")));
+    return validatedCursorObject(JSON.parse(bytes.toString("utf8")), cursorKeys, identifierKey);
   } catch {
     return null;
   }
+}
+
+function decodeIntakeBatchFilesCursor(token) {
+  return decodeCollectionCursor(token, INTAKE_BATCH_FILES_CURSOR_KEYS, "intake_file_id");
+}
+
+function decodeReviewQueueCursor(token) {
+  return decodeCollectionCursor(token, REVIEW_QUEUE_CURSOR_KEYS, "review_queue_item_id");
 }
 
 export function validateIntakeBatchFilesPagination(value = {}) {
@@ -98,7 +110,11 @@ export function validateIntakeBatchFilesPagination(value = {}) {
     return { ok: false };
   }
   if (value.cursor == null) return { ok: true, pagination: { limit, cursor: null } };
-  const cursor = validatedCursorObject(value.cursor);
+  const cursor = validatedCursorObject(
+    value.cursor,
+    INTAKE_BATCH_FILES_CURSOR_KEYS,
+    "intake_file_id",
+  );
   return cursor
     ? { ok: true, pagination: { limit, cursor } }
     : { ok: false };
@@ -129,8 +145,63 @@ export function validateIntakeBatchFilesQuery(query = {}) {
 }
 
 export function encodeIntakeBatchFilesCursor(value) {
-  const cursor = validatedCursorObject(value);
+  const cursor = validatedCursorObject(
+    value,
+    INTAKE_BATCH_FILES_CURSOR_KEYS,
+    "intake_file_id",
+  );
   if (!cursor) throw new TypeError("Cannot encode an invalid intake-file cursor.");
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+
+export function validateReviewQueuePagination(value = {}) {
+  if (!isPlainObject(value)) return { ok: false };
+  const limit = value.limit ?? REVIEW_QUEUE_DEFAULT_LIMIT;
+  if (!Number.isInteger(limit) || limit < 1 || limit > REVIEW_QUEUE_MAX_LIMIT) {
+    return { ok: false };
+  }
+  if (value.cursor == null) return { ok: true, pagination: { limit, cursor: null } };
+  const cursor = validatedCursorObject(
+    value.cursor,
+    REVIEW_QUEUE_CURSOR_KEYS,
+    "review_queue_item_id",
+  );
+  return cursor
+    ? { ok: true, pagination: { limit, cursor } }
+    : { ok: false };
+}
+
+export function validateReviewQueueQuery(query = {}) {
+  if (!isPlainObject(query)) return { ok: false };
+  if (Object.keys(query).some((key) => !REVIEW_QUEUE_QUERY_KEYS.has(key))) {
+    return { ok: false };
+  }
+
+  let limit = REVIEW_QUEUE_DEFAULT_LIMIT;
+  if (query.limit !== undefined) {
+    if (typeof query.limit !== "string" || !/^\d+$/.test(query.limit)) return { ok: false };
+    limit = Number(query.limit);
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > REVIEW_QUEUE_MAX_LIMIT) {
+      return { ok: false };
+    }
+  }
+
+  let cursor = null;
+  if (query.cursor !== undefined) {
+    cursor = decodeReviewQueueCursor(query.cursor);
+    if (!cursor) return { ok: false };
+  }
+
+  return { ok: true, pagination: { limit, cursor } };
+}
+
+export function encodeReviewQueueCursor(value) {
+  const cursor = validatedCursorObject(
+    value,
+    REVIEW_QUEUE_CURSOR_KEYS,
+    "review_queue_item_id",
+  );
+  if (!cursor) throw new TypeError("Cannot encode an invalid review-queue cursor.");
   return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
 }
 
@@ -242,6 +313,9 @@ export function validateKaiSprint2MutationRequest(operation, payload, options = 
 export const __testables = {
   canonicalIsoTimestamp,
   decodeIntakeBatchFilesCursor,
+  decodeReviewQueueCursor,
   measureStructure,
-  validatedCursorObject,
+  validatedCursorObject(value) {
+    return validatedCursorObject(value, INTAKE_BATCH_FILES_CURSOR_KEYS, "intake_file_id");
+  },
 };
