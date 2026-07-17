@@ -656,10 +656,16 @@ Upload and confirmation behavior is defined in P0-06.
 * Use only canonical queue vocabulary.
 * Permit queue creation or transitions only when the target object currently exists.
 * Do not create P1 targets merely to make a queue type usable.
-* Require expected-current-status or a record version.
-* Return 409 for stale transitions.
-* Audit every transition.
-* Limit and sanitize notes.
+* Require route-specific expected-current-status; do not introduce or require record versions.
+* Scope every target read and compare-and-set write by organization, target object ID, and expected current status.
+* Return canonical `409 conflict_current_state_changed` when compare-and-set affects zero rows after a valid scoped read.
+* Return identical canonical `404 not_found` for no row and defensive tenant mismatch; never use ID-only lookup/write, tenant probes, fallbacks, unscoped queries, silent filtering, partial success, or mismatched target identifiers.
+* Validate the scoped stored row, perform scoped compare-and-set, validate the returned post-write row, persist required metadata-only audit only after post-write validation, and commit only after required audit confirms success.
+* Fail missing, malformed, cross-tenant, wrong-target, wrong-state, or internally inconsistent post-write rows with canonical safe `500 system_error`, suppress required audit and metrics, roll back all mutation side effects, and return no partial result or offending identifiers.
+* Audit every successful transition with a field-by-field metadata-only scalar allowlist in the same transaction as all required mutation side effects.
+* Treat required-audit persistence as confirmed only when it returns a non-array object with an own boolean data property named `ok` whose value is exactly `true`; thrown, rejected, skipped, missing, malformed, getter-backed, array-backed, non-boolean, or non-true results fail the transaction.
+* Run best-effort metrics only after successful commit; metrics cannot alter or roll back a successful mutation.
+* Keep generic dependency injection and deterministic transaction providers outside the canonical production barrel; test injection remains only through an explicitly test-only harness.
 * Resolution never means approval, promotion, evidence eligibility, consent approval, or external use.
 * Client-facing review remains disabled.
 
@@ -1991,6 +1997,51 @@ real_client_data_readiness: NOT_CONFIRMED
 complete_diff_scope: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md, Backend/kai/db/kaiReadModels.js, Backend/kai/index.js, Backend/kai/routes/sprint2IntakeApi.js, Backend/kai/services/kaiIntakeService.js, Backend/kai/validators/kaiSprint2RequestSchemas.js, __tests__/kai-sprint2-review-queue-route.spec.js, __tests__/kai-sprint2-api-contract.spec.js, __tests__/kai-sprint2-pass2-route-runtime.spec.js, and this living ExecPlan evidence update only
 package_commit: report after commit; a commit cannot contain its own SHA
 next_package_or_stop_condition: OWNER-DIRECTED STOP after this bounded implementation commit; do not begin P0-05, another route, mutation, acceptance package, or additional leaf
+```
+
+## P0-04 — shared human state-transition mutation contract decision
+
+```text
+leaf_status: complete
+p0_04_package_status: in_progress
+implementation_status: not_implemented
+verification_status: TOOL_VERIFIED
+evidence_class: TOOL_VERIFIED
+owner_directed_leaf_scope: USER_CONFIRMED
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 98d81e640ee799b38e5a8eaad39f2a4e1a8869a8
+starting_tree: clean tracked and untracked
+starting_commit_scope: TOOL_VERIFIED — 98d81e640ee799b38e5a8eaad39f2a4e1a8869a8 changed exactly the ten files declared by the internal-GK intake-file review-queue collection read complete_diff_scope, and complete diff inspection found only that leaf's contract, read-model, index, route, service, validator, focused test, API/pass2 expectations, and ExecPlan evidence
+applicable_repository_instructions: root AGENTS.md only; P0-04 leaf remains inside the approved package order and no gate, implementation leaf, route, service, write helper, production export, Current State update, P0-05 work, review-queue-status work, or additional leaf was selected
+controlling_contract_decision: owner-approved shared P0-04 human state-transition mutation rules recorded only in Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md and this living ExecPlan
+expected_current_status_concurrency: each route must require route-specific expected-current-status; record_version is not introduced or required; target reads and compare-and-set writes include organization_id, target object ID, and expected current status; zero-row compare-and-set after valid scoped read returns canonical 409 conflict_current_state_changed; already-transitioned state is not successful replay without later route-specific owner approval
+tenant_target_non_disclosure: mutations use organization-and-target-scoped reads and writes; no row and defensive tenant mismatch both return canonical 404 not_found; ID-only lookup/write, tenant probes, fallbacks, unscoped queries, silent filtering, partial success, and mismatched target identifiers are prohibited
+post_write_validation_ordering: validate scoped stored row, perform scoped compare-and-set, validate returned post-write row, persist required audit only after post-write validation, and commit only after required audit confirms success
+post_write_failure_behavior: missing, malformed, cross-tenant, wrong-target, wrong-state, or internally inconsistent post-write rows fail with canonical safe 500 system_error, suppress required audit and metrics, roll back mutation side effects, and return no partial result or offending identifiers
+required_audit_boundary: every successful P0-04 human state transition requires field-allowlisted metadata-only audit persistence in the same transaction as all required mutation side effects; payloads are constructed field-by-field from approved scalar values and only from the route-applicable subset of the shared semantic allowlist
+required_audit_success_predicate: audit persistence confirms only with an object having an own boolean data property named ok whose value is exactly true; thrown, rejected, skipped, missing, malformed, getter-backed ok, array with ok, non-boolean ok, and ok not exactly true fail the transaction
+metrics_boundary: mutation failure suppresses audit and metrics; required-audit failure rolls back all mutation side effects and suppresses metrics; best-effort metrics run only after successful commit and cannot alter or roll back the successful mutation result
+composition_boundary: generic dependency injection and deterministic transaction providers remain outside the canonical production barrel; a later mounted route may add only a narrow internal production composition binding for the existing transaction interface, route-specific mutation persistence, route-specific required-audit persistence, and optional post-commit metrics; test injection remains only through an explicitly test-only harness
+route_specific_matters_left_undecided: roles, request bodies beyond expected-status requirement, allowed transition vocabulary, replay behavior, reason codes or text, upload-state effects, review-queue effects, exact error matrix beyond shared rules, and success DTOs
+directly_affected_contract_static_test: not run — existing static contract tests read the controlling contract but do not validate the newly recorded shared P0-04 human-mutation decision text, and this owner-directed package allowed only such a test if one existed
+git_diff_check: passed
+broad_suites: not run per owner instruction for this documentation-only package
+database_or_cloud_access: not performed
+node_or_npm_commands: not run
+current_state_update: not performed
+deployed_kai_schema_compatibility: NOT_CONFIRMED
+live_postgresql_compare_and_set_behavior: NOT_CONFIRMED
+database_atomicity: NOT_CONFIRMED
+two_session_conflict_behavior: NOT_CONFIRMED
+durable_successful_audit_persistence: NOT_CONFIRMED
+persistent_upload_lifecycle: NOT_CONFIRMED
+nonproduction_storage_integration: NOT_CONFIRMED
+live_upload_readiness: NOT_CONFIRMED
+production_readiness: NOT_CONFIRMED
+real_client_data_readiness: NOT_CONFIRMED
+complete_diff_scope: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md and this living ExecPlan evidence update only
+package_commit: report after commit; a commit cannot contain its own SHA
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this documentation-only shared contract decision; do not implement a route, service, write helper, production export, P0-05 work, review-queue-status work, or additional leaf
 ```
 
 

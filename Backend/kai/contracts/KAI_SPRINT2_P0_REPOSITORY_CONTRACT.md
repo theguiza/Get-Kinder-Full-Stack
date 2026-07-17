@@ -456,6 +456,159 @@ persistent_upload_lifecycle: NOT_CONFIRMED
 distributed abuse/concurrency coordination: NOT_CONFIRMED
 ```
 
+## Shared P0-04 human state-transition mutation contract
+
+```text
+decision_evidence: USER_CONFIRMED
+applies_to: P0-04 human state-transition mutations
+implementation_status: unimplemented
+```
+
+This shared decision records owner-approved rules for later route-specific P0-04 human state-transition mutations. It does not implement or mount any route, service, write helper, production export, role mapping, transition vocabulary, replay behavior, reason-code vocabulary, upload-state effect, review-queue effect, exact route error matrix beyond these shared rules, request body beyond the expected-status requirement, or success DTO.
+
+### Expected-current-status concurrency
+
+Each route must require a route-specific expected-current-status field. Do not introduce or require `record_version`.
+
+Every target read and compare-and-set write must include:
+
+```text
+organization_id
+target object ID
+expected current status
+```
+
+A compare-and-set affecting zero rows after a valid scoped read returns canonical `409 conflict_current_state_changed`. An already-transitioned state is not a successful replay unless a later route-specific owner decision explicitly permits replay.
+
+### Tenant-target non-disclosure
+
+Every mutation must use organization-and-target-scoped reads and writes. No row and any defensive tenant mismatch must return the same canonical `404 not_found`.
+
+The mutation must not use:
+
+```text
+ID-only lookup or write
+separate tenant-probe query
+fallback query
+unscoped query
+silent filtering
+partial success
+return of mismatched target identifiers
+```
+
+### Mutation and post-write validation ordering
+
+The route-specific mutation must:
+
+1. validate the scoped stored row;
+2. perform the scoped compare-and-set mutation;
+3. validate the returned post-write row;
+4. only then persist the required audit event; and
+5. commit only after required audit confirms success.
+
+The returned row must match the requested organization, target ID, and approved new state, plus all route-specific stored-state invariants. A missing, malformed, cross-tenant, wrong-target, wrong-state, or internally inconsistent post-write row fails the mutation with canonical safe `500 system_error`.
+
+Post-write validation failure suppresses required audit, suppresses metrics, rolls back all mutation side effects, and returns no partial result or offending identifiers.
+
+### Required metadata-only audit
+
+Every successful P0-04 human state transition requires field-allowlisted metadata-only audit persistence in the same transaction as all required mutation side effects.
+
+The shared audit semantic allowlist is:
+
+```text
+actor user ID
+actor type
+organization ID
+operation type
+route
+request ID
+target object type
+target object ID
+prior status
+new status
+route-approved machine reason code, when applicable
+validator keys actually executed
+created timestamp
+```
+
+Each route may use only the applicable subset. It may not add request-derived fields without a further explicit owner decision. The audit payload must be constructed field-by-field from approved scalar values.
+
+Forbidden audit material includes:
+
+```text
+raw content or parsed rows
+prompts or generated text
+unrestricted notes
+copied request bodies
+filenames or MIME values unless separately approved
+checksums or hash values unless separately approved
+storage provider, bucket, object key, URI, signed URL, or provider version identifier
+credentials or infrastructure details
+unrestricted actor, session, or membership records
+unrestricted metadata
+client data or unapproved PII
+```
+
+Audit persistence succeeds only when it returns an object with an own boolean data property named `ok` whose value is exactly `true`.
+
+The following results are non-confirming and fail the transaction:
+
+```text
+thrown
+rejected
+skipped
+missing
+malformed
+getter-backed ok
+array with an ok property
+non-boolean ok
+ok !== true
+```
+
+Mutation failure suppresses audit and metrics. Required-audit failure rolls back all mutation side effects and suppresses metrics. Best-effort metrics run only after successful commit and cannot alter or roll back the successful mutation result.
+
+### Composition boundary
+
+Generic dependency injection and deterministic transaction providers must remain outside the canonical production barrel.
+
+A mounted route may later add only a narrow internal production composition binding:
+
+```text
+the existing transaction interface
+route-specific mutation persistence
+route-specific required-audit persistence
+optional post-commit metrics
+```
+
+Test injection remains accessible only through an explicitly test-only harness.
+
+### Evidence boundary
+
+Repository-safe tests may establish:
+
+```text
+mocked or in-memory compare-and-set behavior
+identical transaction-context propagation
+post-write validation ordering
+required-audit rollback behavior
+audit allowlist enforcement
+post-commit metric ordering
+```
+
+They do not establish:
+
+```text
+deployed-schema compatibility
+live PostgreSQL compare-and-set behavior
+database atomicity
+two-session conflict behavior
+durable successful-audit persistence
+persistent upload lifecycle
+```
+
+Those remain `NOT_CONFIRMED` until separately authorized Gate A verification.
+
 ## Audit, transaction, and persistence expectations
 
 Audit payloads are metadata-only allowlists. Safe facts may include operation, actor type, organization-scoped object type and opaque ID, validator/reason code, request ID, route, state transition, timing, byte count, checksum verification outcome, and immutable version outcome. Raw content, parsed rows, prompts, credentials, signed URLs, private paths, bucket/object identifiers, unrestricted actor/session/membership records, and unapproved PII are forbidden.
