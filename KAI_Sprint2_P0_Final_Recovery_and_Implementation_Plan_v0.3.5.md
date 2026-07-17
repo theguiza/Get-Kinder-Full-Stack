@@ -2093,6 +2093,56 @@ real_client_data_readiness: NOT_CONFIRMED
 next_package_or_stop_condition: OWNER-DIRECTED STOP after this route-specific implementation commit; do not begin P0-05, another route, acceptance package, review-queue mutation, upload lifecycle work, or additional leaf
 ```
 
+## P0-04 — route-specific review-queue status mutation owner decision
+
+```text
+leaf_status: complete
+p0_04_package_status: route_specific_review_queue_status_decision_recorded
+implementation_status: not_implemented
+verification_status: TOOL_VERIFIED
+evidence_class: TOOL_VERIFIED
+route: POST /api/kai/sprint2/intake/admin/review-queue/:reviewQueueItemId/status
+service: updateReviewQueueStatus
+operation: update_review_queue_status
+surface: internal GK status-only mutation
+decision_evidence: USER_CONFIRMED
+owner_directed_leaf_scope: USER_CONFIRMED
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 80bc4c0d275587dad5a14c275de1d84b20af759f
+starting_tree: clean tracked and untracked
+prior_boundary: TOOL_VERIFIED — 80bc4c0d275587dad5a14c275de1d84b20af759f changed only __tests__/kai-sprint2-orchestration-boundary.spec.js
+applicable_repository_instructions: root AGENTS.md only; package remains documentation-only inside the approved P0-04 boundary; no runtime code, tests, Current State update, database, schema, cloud, credentials, feature flags, tenants, production, P0-05 work, push, deployment, orchestration-guard preauthorization, or additional leaf was selected
+route_decision_recorded: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md and this living ExecPlan
+controlling_shared_contract: committed shared P0-04 human state-transition mutation contract remains controlling for compare-and-set, tenant-nondisclosure, post-write-validation, transactional-audit, metrics, composition, and evidence-boundary rules
+composition_boundary: preserve feature gate before authentication and the established organization-input convention
+authorization_boundary: authenticated mapped human actor, gk_admin or gk_operator, and active membership in the requested organization required; gk_reviewer, all client roles, AI actors, system actors, internal-service actors, import actors, and code actors denied
+request_contract: exact two-field JSON body only with expected_queue_status open and new_queue_status in_progress; both fields required; unknown keys, nulls, arrays, nested objects, record_version, idempotency or replay fields, reason codes, operator notes, blocked_reason, summary, required_action, assigned_to, due_at, and queue metadata rejected
+transition_contract: open -> in_progress only; same-status replay, all transitions from in_progress/blocked/waiting_on_client/waiting_on_gk/resolved/cancelled, all transitions to blocked/waiting_on_client/waiting_on_gk/resolved/cancelled, and reopening to open are unauthorized
+deferred_transition_decision: open -> blocked and open -> waiting_on_client are deliberately deferred despite appearing in the broader product destination; blocking lacks approved reason, required-action, and remediation semantics for this status-only route; waiting_on_client lacks a defined P0 client-response return path
+resolve_route_separation: in_progress -> resolved remains assigned to the separate resolveReviewQueueItem service and is not authorized or mounted through updateReviewQueueStatus
+terminal_semantics_boundary: blocked, waiting_on_client, resolved, and cancelled must not be described as globally terminal unless a later explicit graph decision establishes that
+future_graph_amendment_questions: (1) exit and recovery transitions out of blocked and waiting_on_client; (2) blocked-reason contract vocabulary, limits, normalization, rejection, storage, audit, and response exposure; (3) required-action behavior, safe-text contract, storage/update behavior, and DTO visibility; (4) terminal versus revisitable semantics for blocked; (5) client-response continuation path, actor, target state, metadata, and possible client-facing route
+text_and_reason_policy: route is status-only; accepts no machine reason code and no free text; does not create, update, append, clear, or reinterpret blocked_reason, summary, required_action, assigned_to, due_at, priority, or queue metadata; existing values remain unchanged
+tenant_and_linked_target_boundary: route is limited to queue_type intake_file_review and target_object_type intake_file; review-queue item and linked intake-file target must both belong to the requested organization; intake file is validated only for existence and tenant integrity and is not mutated; no ID-only queue-item lookup, ID-only target lookup, tenant-probe query, unscoped fallback, or cross-tenant disclosure; missing or nondisclosable queue item or target returns identical canonical 404 not_found; no raw file content, storage identifiers, checksums, or unrestricted target metadata read or returned
+mutation_and_audit_inheritance: implementation must perform scoped stored-row read, stored-row validation, expected-status compare-and-set, post-write row validation, required metadata-only audit in the same transaction, commit, then post-commit best-effort metrics
+persisted_field_boundary: only queue_status and repository-managed updated_at, if already established, may change
+audit_subset: actor user ID, actor type, organization ID, operation type update_review_queue_status, canonical route, request ID, target object type review_queue_item, target object ID, prior queue status, new queue status, validator keys actually executed, and created timestamp; no request bodies, queue text, linked-file metadata, storage details, raw content, client data, or PII
+error_contract: syntactically valid source-target pair outside open -> in_progress returns 422 state_transition_denied; stored queue status different from expected_queue_status or zero-row compare-and-set after valid scoped read returns 409 conflict_current_state_changed; already-transitioned request is not a successful replay
+success_response_boundary: established review-queue DTO field-by-field in order review_queue_item_id, organization_id, queue_type, target_object_type, target_object_id, priority, queue_status, due_at, summary, required_action, created_at, updated_at; reuse existing review-queue row and text validation rules; no assigned_to, blocked_reason, queue metadata, internal notes, audit payload, transaction context, actor/session/membership context, linked-file metadata, storage information, credentials, raw content, client data, or PII
+repository_safe_future_evidence: later implementation may establish mocked compare-and-set behavior, queue-item and linked-target tenant scoping, post-write validation ordering, transactional audit behavior, post-commit metric ordering, DTO and response boundaries, and mounted route composition
+retained_not_confirmed_limitations: deployed-schema compatibility, live PostgreSQL compare-and-set behavior, two-session conflict behavior, database atomicity, and durable successful-audit persistence remain NOT_CONFIRMED pending separately authorized Gate A work
+runtime_code_or_tests: not modified
+current_state_update: not performed
+node_or_npm_commands: not run
+database_or_cloud_access: not performed
+git_diff_check: passed
+broad_suites: not run per owner instruction for this documentation-only package
+complete_diff_inspection: TOOL_VERIFIED — complete two-file documentation diff inspected after git diff --check
+complete_diff_scope: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md and this living ExecPlan evidence update only
+package_commit: report after commit; a commit cannot contain its own SHA
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this documentation-only route-specific owner decision; do not implement a route, service, write helper, tests, production export, P0-05 work, review-queue mutation, upload lifecycle work, or additional leaf
+```
+
 
 ---
 

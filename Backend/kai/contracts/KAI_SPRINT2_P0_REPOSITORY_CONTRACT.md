@@ -685,6 +685,164 @@ The response excludes storage provider, bucket, object key, URI, signed URLs, ch
 
 Durable `upload_state = policy_blocked`, persistent lifecycle compatibility, and the full two-field lifecycle mapping remain `NOT_CONFIRMED` and deferred to separately authorized lifecycle/Gate A work.
 
+## P0-04 route-specific human mutation: review-queue status update
+
+```text
+route: POST /api/kai/sprint2/intake/admin/review-queue/:reviewQueueItemId/status
+service: updateReviewQueueStatus
+operation: update_review_queue_status
+surface: internal GK status-only mutation
+decision_evidence: USER_CONFIRMED
+implementation_status: unimplemented
+```
+
+This route-specific owner decision binds the shared P0-04 human state-transition mutation contract to this review-queue status route only. It is documentation-only, does not implement or mount the route, and does not authorize orchestration-guard preauthorization, runtime code, tests, another leaf, P0-05 work, deployment, database access, schema work, feature-flag changes, tenant changes, or production configuration changes. The shared compare-and-set, tenant-nondisclosure, post-write-validation, transactional-audit, metrics, composition, and evidence-boundary rules remain controlling. The established composition remains feature gate before authentication, and the route uses the established mounted admin route organization-input convention.
+
+Authorization requires an authenticated mapped human actor, `gk_admin` or `gk_operator`, and active membership in the requested organization before tenant-sensitive queue or target access. `gk_reviewer`, all client roles, AI actors, system actors, internal-service actors, import actors, and code actors are denied.
+
+The request body accepts exactly:
+
+```json
+{
+  "expected_queue_status": "open",
+  "new_queue_status": "in_progress"
+}
+```
+
+Both fields are required. Unknown keys, nulls, arrays, nested objects, `record_version`, idempotency or replay fields, reason codes, operator notes, `blocked_reason`, `summary`, `required_action`, `assigned_to`, `due_at`, and queue metadata are rejected.
+
+The only authorized transition for this route version is:
+
+```text
+open -> in_progress
+```
+
+No other source-target pair is authorized. `open -> blocked` and `open -> waiting_on_client` are deliberately deferred even though they appear in the broader controlling product destination because their operational contracts are incomplete. `open -> blocked` is deferred because blocking is associated with reason, required-action, and remediation semantics that this status-only route does not accept or write. `open -> waiting_on_client` is deferred because no P0 client-response return path is currently defined.
+
+`in_progress -> resolved` remains assigned to the separate `resolveReviewQueueItem` service and is not authorized or mounted through `updateReviewQueueStatus`.
+
+This route also does not authorize:
+
+```text
+same-status replay
+any transition from in_progress
+any transition from blocked
+any transition from waiting_on_client
+any transition from waiting_on_gk
+any transition from resolved
+any transition from cancelled
+any transition to blocked
+any transition to waiting_on_client
+any transition to waiting_on_gk
+any transition to resolved
+any transition to cancelled
+any reopening to open
+```
+
+Do not describe `blocked`, `waiting_on_client`, `resolved`, or `cancelled` as globally terminal unless a later explicit graph decision establishes that. A syntactically valid pair outside the authorized transition returns canonical `422 state_transition_denied`. An already-transitioned request is not a successful replay. A stored queue status different from `expected_queue_status`, or a compare-and-set affecting zero rows after a valid scoped read, returns canonical `409 conflict_current_state_changed`.
+
+A later owner-approved review-queue graph amendment must resolve all five of the following before deferred states are enabled:
+
+1. Exit and recovery transitions: define every permitted path out of `blocked` and `waiting_on_client`, including whether return is to `open`, `in_progress`, another state, or no state.
+2. Blocked-reason contract: define whether blocking uses a bounded machine reason code, sanitized operator-facing text, or both, including exact vocabulary, limits, normalization, rejection rules, storage, audit, and response exposure.
+3. Required-action behavior: define whether entering `blocked` requires `required_action`, whether it is created or updated by the transition, its safe-text contract, and whether it is visible through the existing review-queue DTO.
+4. Terminal versus revisitable semantics: decide explicitly whether `blocked` is terminal, revisitable, or recoverable, rather than allowing the absence of a return transition to decide that implicitly.
+5. Client-response continuation: define how an item in `waiting_on_client` returns to active GK work after the client responds, including the authorized actor, target state, required metadata, and whether any client-facing route is needed.
+
+These are deliberate deferrals, not forgotten transitions.
+
+This route version is status-only. It accepts no machine reason code and no free text. It does not create, update, append, clear, or reinterpret `blocked_reason`, `summary`, `required_action`, `assigned_to`, `due_at`, `priority`, or queue metadata. All existing values remain unchanged.
+
+The route is limited to:
+
+```text
+queue_type = intake_file_review
+target_object_type = intake_file
+```
+
+The review-queue item and its linked intake-file target must both belong to the requested organization. The intake file is validated only for existence and tenant integrity and is not mutated. No ID-only queue-item lookup, ID-only target lookup, separate tenant-probe query, unscoped fallback, or cross-tenant disclosure is permitted. Missing or nondisclosable queue-item or target scope returns identical canonical `404 not_found`. The route does not read or return raw file content, storage identifiers, checksums, or unrestricted target metadata.
+
+Implementation must inherit this shared sequence:
+
+```text
+scoped stored-row read
+stored-row validation
+expected-status compare-and-set
+post-write row validation
+required metadata-only audit in the same transaction
+commit
+post-commit best-effort metrics
+```
+
+Only these persisted fields may change:
+
+```text
+queue_status
+repository-managed updated_at, if already established
+```
+
+The route-specific audit subset is:
+
+```text
+actor user ID
+actor type
+organization ID
+operation type = update_review_queue_status
+canonical route
+request ID
+target object type = review_queue_item
+target object ID
+prior queue status
+new queue status
+validator keys actually executed
+created timestamp
+```
+
+The audit must not include request bodies, queue text, linked-file metadata, storage details, raw content, client data, or PII.
+
+The success response returns the established review-queue DTO field-by-field in exactly this order:
+
+```text
+review_queue_item_id
+organization_id
+queue_type
+target_object_type
+target_object_id
+priority
+queue_status
+due_at
+summary
+required_action
+created_at
+updated_at
+```
+
+The implementation must reuse the existing review-queue row and text validation rules. The response does not return `assigned_to`, `blocked_reason`, queue metadata, internal notes, audit payload, transaction context, actor/session/membership context, linked-file metadata, storage information, credentials, raw content, client data, or PII.
+
+Repository-safe implementation may later establish:
+
+```text
+mocked compare-and-set behavior
+queue-item and linked-target tenant scoping
+post-write validation ordering
+transactional audit behavior
+post-commit metric ordering
+DTO and response boundaries
+mounted route composition
+```
+
+It will not establish:
+
+```text
+deployed-schema compatibility
+live PostgreSQL compare-and-set behavior
+two-session conflict behavior
+database atomicity
+durable successful-audit persistence
+```
+
+Those remain `NOT_CONFIRMED` pending separately authorized Gate A work.
+
 ## Audit, transaction, and persistence expectations
 
 Audit payloads are metadata-only allowlists. Safe facts may include operation, actor type, organization-scoped object type and opaque ID, validator/reason code, request ID, route, state transition, timing, byte count, checksum verification outcome, and immutable version outcome. Raw content, parsed rows, prompts, credentials, signed URLs, private paths, bucket/object identifiers, unrestricted actor/session/membership records, and unapproved PII are forbidden.
