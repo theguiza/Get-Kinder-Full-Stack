@@ -1237,6 +1237,78 @@ real_client_data_readiness: NOT_CONFIRMED
 next_package_or_stop_condition: OWNER-DIRECTED STOP after this single P0-05F.2b1 fixture-only package commit; do not implement detectors, runtime MIME allowlist changes, repository contract changes, owner-decision changes, PDF/XLSX/signature/unknown-binary fixtures, upload lifecycle work, storage retrieval, worker/parser behavior, P0-06 work, database/cloud/production behavior, push, deployment, or another leaf
 ```
 
+## P0-05F.2b2a complete extension/MIME matrix fixtures
+
+```text
+leaf_status: complete after this fixture-only package commit
+p0_05_package_status: extension_mime_matrix_fixture_subcorpus_recorded
+implementation_status: fixture_and_test_only
+verification_status: TOOL_VERIFIED after documented checks pass
+evidence_class: TOOL_VERIFIED
+owner_directed_leaf_scope: USER_CONFIRMED
+owner_authority: OWNER_DECISION.P0_05F.TYPE_AGREEMENT_MATRIX_V1 plus OWNER_DECISION.P0_05F.XLSX_CENTRAL_DIRECTORY_BOUNDARY_V1 for imported XLSX positive bytes
+applicable_repository_instructions: root AGENTS.md only; changes remain inside the approved P0-05F.2b2a fixture-only boundary
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 81b6b4c06ceb905a5259bf406ac357714c8d3966
+starting_tree: clean
+preflight_owner_authorities_present: OWNER_DECISION.P0_05F.TYPE_AGREEMENT_MATRIX_V1 and OWNER_DECISION.P0_05F.XLSX_CENTRAL_DIRECTORY_BOUNDARY_V1
+preflight_prior_p0_05f_2a_verified_xlsx_zip_corpus: present with positive fixture XLSXZIP-P0-05F-001-ALLOW-MINIMUM-XLSX
+preflight_prior_p0_05f_2b1_matrix_contribution: five permitted text pairings and one .txt + text/markdown declared_type_mismatch
+preflight_complete_matrix_corpus: absent before this package
+preflight_fixture_process_rules_present: fixture packages graded against frozen owner authority; fixture packages must never modify the contract; discovered contract gap requires stopping for owner decision; contract and fixture changes must not be combined in one implementation commit
+implemented_fixture_module: __tests__/support/kaiSprint2ExtensionMimeMatrixFixtureCorpus.js
+implemented_integrity_test_file: __tests__/kai-sprint2-extension-mime-matrix-fixture-corpus.spec.js
+fixture_count: 24
+positive_fixture_count: 2
+blocking_fixture_count: 22
+new_fixture_ids: EXTMIME-P0-05F-001-BLOCK-CSV-TEXT-MARKDOWN-MISMATCH; EXTMIME-P0-05F-002-BLOCK-CSV-TEXT-PLAIN-MISMATCH; EXTMIME-P0-05F-003-BLOCK-CSV-XLSX-MIME-MISMATCH; EXTMIME-P0-05F-004-BLOCK-CSV-APPLICATION-PDF-MISMATCH; EXTMIME-P0-05F-005-BLOCK-XLSX-TEXT-CSV-MISMATCH; EXTMIME-P0-05F-006-BLOCK-XLSX-APPLICATION-CSV-MISMATCH; EXTMIME-P0-05F-007-BLOCK-XLSX-TEXT-MARKDOWN-MISMATCH; EXTMIME-P0-05F-008-BLOCK-XLSX-TEXT-PLAIN-MISMATCH; EXTMIME-P0-05F-009-ALLOW-XLSX-OFFICEDOCUMENT; EXTMIME-P0-05F-010-BLOCK-XLSX-APPLICATION-PDF-MISMATCH; EXTMIME-P0-05F-011-BLOCK-MD-TEXT-CSV-MISMATCH; EXTMIME-P0-05F-012-BLOCK-MD-APPLICATION-CSV-MISMATCH; EXTMIME-P0-05F-013-BLOCK-MD-XLSX-MIME-MISMATCH; EXTMIME-P0-05F-014-BLOCK-MD-APPLICATION-PDF-MISMATCH; EXTMIME-P0-05F-015-BLOCK-TXT-TEXT-CSV-MISMATCH; EXTMIME-P0-05F-016-BLOCK-TXT-APPLICATION-CSV-MISMATCH; EXTMIME-P0-05F-017-BLOCK-TXT-XLSX-MIME-MISMATCH; EXTMIME-P0-05F-018-BLOCK-TXT-APPLICATION-PDF-MISMATCH; EXTMIME-P0-05F-019-BLOCK-PDF-TEXT-CSV-MISMATCH; EXTMIME-P0-05F-020-BLOCK-PDF-APPLICATION-CSV-MISMATCH; EXTMIME-P0-05F-021-BLOCK-PDF-TEXT-MARKDOWN-MISMATCH; EXTMIME-P0-05F-022-BLOCK-PDF-TEXT-PLAIN-MISMATCH; EXTMIME-P0-05F-023-BLOCK-PDF-XLSX-MIME-MISMATCH; EXTMIME-P0-05F-024-ALLOW-PDF-APPLICATION-PDF
+new_permitted_fixture_ids: EXTMIME-P0-05F-009-ALLOW-XLSX-OFFICEDOCUMENT; EXTMIME-P0-05F-024-ALLOW-PDF-APPLICATION-PDF
+new_mismatch_fixture_ids: EXTMIME-P0-05F-001-BLOCK-CSV-TEXT-MARKDOWN-MISMATCH; EXTMIME-P0-05F-002-BLOCK-CSV-TEXT-PLAIN-MISMATCH; EXTMIME-P0-05F-003-BLOCK-CSV-XLSX-MIME-MISMATCH; EXTMIME-P0-05F-004-BLOCK-CSV-APPLICATION-PDF-MISMATCH; EXTMIME-P0-05F-005-BLOCK-XLSX-TEXT-CSV-MISMATCH; EXTMIME-P0-05F-006-BLOCK-XLSX-APPLICATION-CSV-MISMATCH; EXTMIME-P0-05F-007-BLOCK-XLSX-TEXT-MARKDOWN-MISMATCH; EXTMIME-P0-05F-008-BLOCK-XLSX-TEXT-PLAIN-MISMATCH; EXTMIME-P0-05F-010-BLOCK-XLSX-APPLICATION-PDF-MISMATCH; EXTMIME-P0-05F-011-BLOCK-MD-TEXT-CSV-MISMATCH; EXTMIME-P0-05F-012-BLOCK-MD-APPLICATION-CSV-MISMATCH; EXTMIME-P0-05F-013-BLOCK-MD-XLSX-MIME-MISMATCH; EXTMIME-P0-05F-014-BLOCK-MD-APPLICATION-PDF-MISMATCH; EXTMIME-P0-05F-015-BLOCK-TXT-TEXT-CSV-MISMATCH; EXTMIME-P0-05F-016-BLOCK-TXT-APPLICATION-CSV-MISMATCH; EXTMIME-P0-05F-017-BLOCK-TXT-XLSX-MIME-MISMATCH; EXTMIME-P0-05F-018-BLOCK-TXT-APPLICATION-PDF-MISMATCH; EXTMIME-P0-05F-019-BLOCK-PDF-TEXT-CSV-MISMATCH; EXTMIME-P0-05F-020-BLOCK-PDF-APPLICATION-CSV-MISMATCH; EXTMIME-P0-05F-021-BLOCK-PDF-TEXT-MARKDOWN-MISMATCH; EXTMIME-P0-05F-022-BLOCK-PDF-TEXT-PLAIN-MISMATCH; EXTMIME-P0-05F-023-BLOCK-PDF-XLSX-MIME-MISMATCH
+xlsx_source_module: __tests__/support/kaiSprint2XlsxZipFixtureCorpus.js
+xlsx_source_fixture_id: XLSXZIP-P0-05F-001-ALLOW-MINIMUM-XLSX
+xlsx_exact_export_used: XLSX_ZIP_FIXTURES
+xlsx_import_confirmation: P0-05F.2a positive XLSX bytes were imported directly from XLSX_ZIP_FIXTURES and reused unchanged; bytes were not copied, reconstructed, regenerated, or inlined
+byte_sources_by_extension: .csv -> EXTMIME-P0-05F-BYTES-CSV-VALID; .xlsx -> XLSXZIP-P0-05F-001-ALLOW-MINIMUM-XLSX imported bytes; .md -> EXTMIME-P0-05F-BYTES-MD-VALID; .txt -> EXTMIME-P0-05F-BYTES-TXT-VALID; .pdf -> EXTMIME-P0-05F-BYTES-PDF-POSITIVE
+pdf_positive_identity: deterministic PDF bytes begin with %PDF- at byte offset zero and contain %%EOF within the final 1024 bytes
+mismatch_isolation: every new mismatch uses allowed extension metadata, valid bytes for that extension, and varies only declared MIME; no mismatch is malformed, truncated, binary-invalid, or structurally inconsistent
+combined_matrix_contribution: P0-05F.2b1 contribution 6; P0-05F.2b2a contribution 24; combined total 30
+combined_matrix_expected_results: permitted 7; declared_type_mismatch 23
+combined_matrix_key_integrity: duplicate normalized keys 0; missing normalized keys 0; unexpected normalized keys 0
+normalization_collapse_result: .CSV -> .csv; Application/CSV -> application/csv; surrounding ASCII whitespace around Text/Plain trims to text/plain; no duplicate or gap created
+fixture_integrity: fixture IDs unique across both corpora; all new fixtures synthetic and authority-grounded; XLSX bytes imported unchanged; PDF bytes satisfy committed positive shallow identity; every mismatch uses valid extension bytes and only declared MIME conflicts; no production detector imported; no ZIP entry content decompressed
+excluded_scope_confirmation: no unsupported-extension, unsupported-MIME, application/json, application/octet-stream, MIME-parameter, PDF-negative, disallowed-signature, unknown-binary, ambiguous_file_type, production-detector, runtime-MIME, or dependency work added
+focused_matrix_fixture_test: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-extension-mime-matrix-fixture-corpus.spec.js - 10 passed, 0 failed
+existing_text_type_fixture_test: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-text-type-agreement-fixture-corpus.spec.js - 9 passed, 0 failed
+existing_xlsx_zip_fixture_test: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-xlsx-zip-fixture-corpus.spec.js - 8 passed, 0 failed
+sprint2_suite_initial_sandbox_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-*.spec.js - new matrix tests passed; existing assembled-HTTP localhost listener tests failed with sandbox EPERM
+sprint2_suite: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-*.spec.js - 487 passed, 0 failed after the existing assembled-HTTP localhost listener sandbox EPERM was rerun identically in localhost-capable mode
+full_repository_suite_initial_sandbox_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - new matrix tests passed; existing assembled-HTTP localhost listener tests failed with sandbox EPERM
+full_repository_suite: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - 592 passed, 0 failed after the existing assembled-HTTP localhost listener sandbox EPERM was rerun identically in localhost-capable mode
+database_sentinel: non-listening loopback DATABASE_URL at 127.0.0.1:9 used for every Node and npm command
+production_code_changed: false
+production_detector_added_or_changed: false
+runtime_behavior_changed: false
+repository_contract_changed: false
+owner_decision_changed: false
+dependencies_manifests_lockfiles_changed: false
+unsupported_extension_or_mime_work: false
+pdf_negative_family_added: false
+database_cloud_credentials_production_real_data: not accessed or modified
+current_state_update: not performed
+implementation_baseline_update: not performed
+git_diff_check: passed
+git_diff_cached_check: passed
+git_diff_cached_stat: inspected
+git_diff_cached: inspected before commit
+complete_diff_scope: __tests__/support/kaiSprint2ExtensionMimeMatrixFixtureCorpus.js, __tests__/kai-sprint2-extension-mime-matrix-fixture-corpus.spec.js, and this living ExecPlan P0-05F.2b2a evidence update only
+package_commit: report after commit; a commit cannot contain its own SHA
+deployed_kai_schema_compatibility: NOT_CONFIRMED
+live_upload_readiness: NOT_CONFIRMED
+production_readiness: NOT_CONFIRMED
+real_client_data_readiness: NOT_CONFIRMED
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this single P0-05F.2b2a fixture-only package commit; do not implement detectors, runtime MIME allowlist changes, repository contract changes, owner-decision changes, unsupported-extension fixtures, unsupported-MIME fixtures, PDF negative identity fixtures, disallowed-signature fixtures, unknown-binary fixtures, upload lifecycle work, storage retrieval, worker/parser behavior, P0-06 work, database/cloud/production behavior, push, deployment, or another leaf
+```
+
 ## Prompt-injection boundary
 
 Add synthetic fixtures containing instruction-like text.
