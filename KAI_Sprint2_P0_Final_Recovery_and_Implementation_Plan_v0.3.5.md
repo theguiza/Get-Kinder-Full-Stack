@@ -1176,6 +1176,67 @@ real_client_data_readiness: NOT_CONFIRMED
 next_package_or_stop_condition: P0-05F.2 remains open after this P0-05F.2a XLSX/ZIP fixture subcorpus; do not implement detectors, mounted integration, runtime MIME allowlist changes, upload lifecycle work, storage retrieval, worker/parser behavior, P0-06 work, database/cloud/production behavior, push, deployment, or another leaf without owner authorization
 ```
 
+## P0-05F.2b1 text-family type-agreement fixtures
+
+```text
+leaf_status: complete after this fixture-only package commit
+p0_05_package_status: text_family_type_agreement_fixture_subcorpus_recorded
+implementation_status: fixture_and_test_only
+verification_status: TOOL_VERIFIED after documented checks pass
+evidence_class: TOOL_VERIFIED
+owner_directed_leaf_scope: USER_CONFIRMED
+owner_authority: OWNER_DECISION.P0_05F.TYPE_AGREEMENT_MATRIX_V1 plus committed P0-05C strict text-byte authorities where fixture bytes require them
+applicable_repository_instructions: root AGENTS.md only; changes remain inside the approved P0-05F.2b1 fixture-only boundary
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 2051bbece9adf06ae7e7245523ac025b202e3fd8
+starting_tree: clean
+preflight_owner_authorities_present: OWNER_DECISION.P0_05F.TYPE_AGREEMENT_MATRIX_V1 and OWNER_DECISION.P0_05F.XLSX_CENTRAL_DIRECTORY_BOUNDARY_V1
+preflight_prior_commit_classification: 854e3ccf06f477e014999aa4983814cbd8b8a310 classified as P0-05F.2a - XLSX/ZIP fixture subcorpus
+preflight_fixture_process_rules_present: fixture packages graded against frozen owner authority; fixture packages must never modify the contract; discovered contract gap requires stopping for owner decision; contract and fixture changes must not be combined in one implementation commit
+preflight_text_family_type_agreement_corpus: absent before this package
+implemented_fixture_module: __tests__/support/kaiSprint2TextTypeAgreementFixtureCorpus.js
+implemented_integrity_test_file: __tests__/kai-sprint2-text-type-agreement-fixture-corpus.spec.js
+fixture_count: 6
+positive_fixture_count: 5
+blocking_fixture_count: 1
+permitted_pairings_exactly_once: .csv + text/csv; .csv + application/csv; .md + text/markdown; .md + text/plain; .txt + text/plain
+positive_expected_result: allow / type_agreement_pass / type_agreement_pass_only
+blocking_fixture: TEXTTYPE-P0-05F-006-BLOCK-TXT-TEXT-MARKDOWN-MISMATCH expects block / declared_type_mismatch
+normalization_coverage: uppercase extension; mixed-case MIME; surrounding ASCII MIME whitespace trimming
+empty_text_fixture_ids: TEXTTYPE-P0-05F-001-ALLOW-CSV-TEXT-CSV-UPPERCASE-EMPTY, TEXTTYPE-P0-05F-003-ALLOW-MD-TEXT-MARKDOWN-EMPTY, TEXTTYPE-P0-05F-005-ALLOW-TXT-TEXT-PLAIN-EMPTY
+instruction_like_fixture_id: TEXTTYPE-P0-05F-002-ALLOW-CSV-APPLICATION-CSV-INSTRUCTION
+html_script_looking_fixture_id: TEXTTYPE-P0-05F-004-ALLOW-MD-TEXT-PLAIN-HTML-SCRIPT-LOOKING
+fixture_ids: TEXTTYPE-P0-05F-001-ALLOW-CSV-TEXT-CSV-UPPERCASE-EMPTY; TEXTTYPE-P0-05F-002-ALLOW-CSV-APPLICATION-CSV-INSTRUCTION; TEXTTYPE-P0-05F-003-ALLOW-MD-TEXT-MARKDOWN-EMPTY; TEXTTYPE-P0-05F-004-ALLOW-MD-TEXT-PLAIN-HTML-SCRIPT-LOOKING; TEXTTYPE-P0-05F-005-ALLOW-TXT-TEXT-PLAIN-EMPTY; TEXTTYPE-P0-05F-006-BLOCK-TXT-TEXT-MARKDOWN-MISMATCH
+fixture_integrity: fixture IDs unique; fixtures synthetic; every expected result authority-grounded; positive bytes pass fatal UTF-8 and committed text control boundary; normalization assertions match contract; no production detector used as answer-key authority
+corpus_status: corpus_only; synthetic text-family type-agreement fixtures only; not security-verified and not a production detector conformance claim
+production_code_changed: false
+production_detector_added_or_changed: false
+runtime_behavior_changed: false
+repository_contract_changed: false
+owner_decision_changed: false
+dependencies_manifests_lockfiles_changed: false
+pdf_xlsx_signature_unknown_binary_work: false
+database_cloud_credentials_production_real_data: not accessed or modified
+current_state_update: not performed
+implementation_baseline_update: not performed
+focused_text_type_fixture_test: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-text-type-agreement-fixture-corpus.spec.js - 9 passed, 0 failed
+existing_txt_md_corpus_and_detector_tests: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-txt-md-byte-fixture-corpus.spec.js __tests__/kai-sprint2-txt-md-byte-detector.spec.js - 16 passed, 0 failed
+sprint2_suite_initial_sandbox_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-*.spec.js - new text-family type-agreement tests passed; existing assembled-HTTP localhost listener tests failed with sandbox EPERM
+sprint2_suite: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-*.spec.js - 477 passed, 0 failed after the existing assembled-HTTP localhost listener sandbox EPERM was rerun identically in localhost-capable mode
+database_sentinel: non-listening loopback DATABASE_URL at 127.0.0.1:9 used for every Node command
+git_diff_check: passed
+git_diff_cached_check: passed
+git_diff_cached_stat: inspected
+git_diff_cached: inspected before commit
+complete_diff_scope: __tests__/support/kaiSprint2TextTypeAgreementFixtureCorpus.js, __tests__/kai-sprint2-text-type-agreement-fixture-corpus.spec.js, and this living ExecPlan evidence update only
+package_commit: report after commit; a commit cannot contain its own SHA
+deployed_kai_schema_compatibility: NOT_CONFIRMED
+live_upload_readiness: NOT_CONFIRMED
+production_readiness: NOT_CONFIRMED
+real_client_data_readiness: NOT_CONFIRMED
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this single P0-05F.2b1 fixture-only package commit; do not implement detectors, runtime MIME allowlist changes, repository contract changes, owner-decision changes, PDF/XLSX/signature/unknown-binary fixtures, upload lifecycle work, storage retrieval, worker/parser behavior, P0-06 work, database/cloud/production behavior, push, deployment, or another leaf
+```
+
 ## Prompt-injection boundary
 
 Add synthetic fixtures containing instruction-like text.
