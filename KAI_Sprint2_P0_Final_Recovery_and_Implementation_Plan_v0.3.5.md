@@ -2143,6 +2143,55 @@ package_commit: report after commit; a commit cannot contain its own SHA
 next_package_or_stop_condition: OWNER-DIRECTED STOP after this documentation-only route-specific owner decision; do not implement a route, service, write helper, tests, production export, P0-05 work, review-queue mutation, upload lifecycle work, or additional leaf
 ```
 
+## P0-05A — synthetic filename, Unicode, path and reserved-name fixture contract
+
+```text
+leaf_status: complete
+p0_05_package_status: filename_fixture_contract_foundation_complete
+implementation_status: fixture_and_test_only
+verification_status: TOOL_VERIFIED
+evidence_class: TOOL_VERIFIED
+owner_directed_leaf_scope: USER_CONFIRMED
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: f686ab9b06c46c5ce7d759c636c6af8505ef26de
+starting_tree: clean tracked and untracked
+prior_boundary: TOOL_VERIFIED — f686ab9 implemented the review-queue status mutation after the P0-04 route-specific owner decision and is the required starting boundary for this P0-05A leaf
+applicable_repository_instructions: root AGENTS.md only; changes remain inside the approved P0-05 fixture-and-test-only boundary
+implemented_files: __tests__/support/kaiSprint2FilenameFixtureCorpus.js; __tests__/kai-sprint2-filename-fixture-corpus.spec.js
+production_code_changed: false
+runtime_behavior_changed: false
+dependencies_or_lockfiles_changed: false
+database_cloud_credentials_production_real_data: not accessed or modified
+current_state_update: not performed
+authority_map: closed map with BACKEND_CONTRACT.VAL_STO_004.PATH_TRAVERSAL, BACKEND_CONTRACT.VAL_STO_004.SLASH_BACKSLASH, BACKEND_CONTRACT.VAL_STO_004.CONTROL_CHARACTERS, BACKEND_CONTRACT.VAL_STO_004.RESERVED_DEVICE_NAMES, BACKEND_CONTRACT.VAL_STO_004.DANGEROUS_EXTENSION_MISMATCH, BACKEND_CONTRACT.VAL_STO_004.EMPTY_SANITIZED_FILENAME, EXECPLAN.P0_05.APPLICATION_GENERATED_SAFE_FILENAME, EXECPLAN.P0_05.UNICODE_NORMALIZATION, EXECPLAN.P0_05.BIDI_REJECTION, EXECPLAN.P0_05.PATH_SEPARATOR_REJECTION, EXECPLAN.P0_05.RESERVED_NAME_REJECTION, EXECPLAN.P0_05.CONTENT_DISPOSITION_SAFETY, THREAT_MODEL.T2.MALICIOUS_FILENAME_PATH_TRAVERSAL, EXECPLAN.P0_05.UNSPECIFIED_PUNCTUATION_SPACING, and EXECPLAN.P0_05.UNSPECIFIED_EXTENSION_PATTERN
+authority_statuses: contract_grounded and outcome_not_fully_specified only
+corpus_status: corpus_only; not security-verified and not a production detector conformance claim
+contract_grounded_fixture_counts: application_generated_safe_filename 1; path_traversal 2; path_separator 2; control_character 3; bidi_control 1; empty_sanitized_filename 1; reserved_device_name 6; dangerous_extension_mismatch 1
+unresolved_fixture_counts: unicode_normalization_question 1; punctuation_spacing_question 2; content_disposition_header_safety_question 1; drive_path_question 1; reserved_name_variant_question 1; extension_pattern_question 1
+contract_traceability: integrity test verifies every contract_grounded expected_policy and expected_category exactly match the closed authority map and rejects unknown authority identifiers, vague section references, and current-detector/runtime-behavior authority text
+unresolved_policy_boundary: integrity test verifies every owner_decision_required fixture has expected_policy null, maps only to outcome_not_fully_specified authority, has a question category, and is excluded from getContractGroundedFilenameFixtureExpectations()
+intrinsic_sequence_proof: integrity test verifies declared Unicode code points are present in actual_input and verifies traversal, separator, reserved-name, control-character, bidi, empty, and .csv.exe dangerous-extension sequences intrinsically without invoking the production detector
+synthetic_and_privacy_proof: integrity test verifies synthetic provenance, contains_client_data false, contains_pii false, contains_secret false, no email/UUID/URL/storage URI/secret-token patterns in actual_input, and no network/database/cloud/production configuration or detector imports in the corpus module
+ordinary_output_safety: integrity test source contains no console or diagnostic output and does not print raw fixture inputs during successful runs
+owner_decisions_required_before_detector_expectation: decide normalize-and-accept versus reject for decomposed Unicode; decide spaces and punctuation; decide exact CR/LF filename input and Content-Disposition serialization behavior; decide drive-style path form handling; decide reserved-name casing/extension/trailing-character semantics; decide unclassified multiple-extension patterns
+retained_deferrals: applying the answer key to the production detector; Unicode normalization implementation behavior; complete bidi, C0/C1 and reserved-name detector coverage; Content-Disposition construction and header safety; extension/MIME/signature agreement; received-byte size enforcement; TXT/MD, CSV, XLSX, PDF and malware corpora and detectors; archive-entry, expanded-byte, compression-ratio and timeout constants
+retained_unimplemented_constants: controlling backend contract supplies structured row maximum 100000, XLSX sheet maximum 20, and workbook cell maximum 1000000; these remain unrepresented or unenforced in inspected repository runtime
+focused_fixture_test: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-filename-fixture-corpus.spec.js — 7 passed, 0 failed
+directly_affected_existing_tests: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-storage-path-policy.spec.js __tests__/kai-sprint2-intake-service.spec.js __tests__/kai-sprint2-pass2-metadata-intake-service.spec.js — 60 passed, 0 failed
+sprint2_suite: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-*.spec.js — 413 passed, 0 failed after the existing assembled-HTTP localhost listener sandbox EPERM was rerun identically in localhost-capable mode
+full_repository_suite: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test — 518 passed, 0 failed after the existing assembled-HTTP localhost listener sandbox EPERM was rerun identically in localhost-capable mode
+database_sentinel: non-listening loopback DATABASE_URL at 127.0.0.1:9 used for every Node and npm command
+git_diff_check: passed
+complete_diff_inspection: TOOL_VERIFIED — complete staged diff inspected after final verification
+complete_diff_scope: __tests__/support/kaiSprint2FilenameFixtureCorpus.js, __tests__/kai-sprint2-filename-fixture-corpus.spec.js, and this living ExecPlan evidence update only
+package_commit: report after commit; a commit cannot contain its own SHA
+deployed_kai_schema_compatibility: NOT_CONFIRMED
+live_upload_readiness: NOT_CONFIRMED
+production_readiness: NOT_CONFIRMED
+real_client_data_readiness: NOT_CONFIRMED
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this fixture-and-test-only package commit; do not implement detector behavior, route/service work, upload lifecycle work, P0-06 work, database/cloud/production behavior, push, deployment, or another leaf
+```
+
 
 ---
 
