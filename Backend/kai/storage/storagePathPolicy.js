@@ -2,6 +2,10 @@ import { KAI_SPRINT2_P0_PATTERNS } from "../config/kaiSprint2P0Contract.js";
 
 const SAFE_FILENAME_PATTERN = KAI_SPRINT2_P0_PATTERNS.safeFilename;
 const UUID_PATTERN = KAI_SPRINT2_P0_PATTERNS.uuid;
+const GROUNDED_RESERVED_BASENAMES = new Set(["CON", "PRN", "AUX", "NUL", "COM1", "LPT1"]);
+const C0_DEL_C1_CONTROLS_RE = /[\u0000-\u001F\u007F-\u009F]/u;
+const APPROVED_BIDI_FORMATTING_CONTROLS_RE = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/u;
+const TERMINAL_EXE_SUFFIX_RE = /\.exe$/iu;
 
 export function validateSafeFilename(filename) {
   if (typeof filename !== "string" || !filename.trim()) {
@@ -15,6 +19,34 @@ export function validateSafeFilename(filename) {
     return { ok: false, error_code: "unsafe_filename_chars" };
   }
   return { ok: true, safeFilename: value };
+}
+
+export function detectGroundedFilenameHazard(filename) {
+  if (typeof filename !== "string") {
+    return { matched: true, reason: "missing_filename" };
+  }
+  if (filename.trim().length === 0) {
+    return { matched: true, reason: "missing_filename" };
+  }
+  if (filename.includes("/") || filename.includes("\\")) {
+    return { matched: true, reason: "unsafe_filename_path" };
+  }
+  if (filename.includes("..")) {
+    return { matched: true, reason: "unsafe_filename_path" };
+  }
+  if (C0_DEL_C1_CONTROLS_RE.test(filename)) {
+    return { matched: true, reason: "unsafe_filename_control" };
+  }
+  if (APPROVED_BIDI_FORMATTING_CONTROLS_RE.test(filename)) {
+    return { matched: true, reason: "unsafe_filename_bidi" };
+  }
+  if (GROUNDED_RESERVED_BASENAMES.has(filename.toUpperCase())) {
+    return { matched: true, reason: "unsafe_filename_reserved_basename" };
+  }
+  if (TERMINAL_EXE_SUFFIX_RE.test(filename)) {
+    return { matched: true, reason: "unsafe_filename_terminal_exe" };
+  }
+  return { matched: false, reason: null };
 }
 
 export function buildObjectKey({ organizationId, intakeBatchId, intakeFileId, safeFilename }) {

@@ -48,6 +48,34 @@ unlisted string field: reject
 
 The declared checksum is caller metadata and remains unverified until the exact immutable object version is independently streamed and hashed. The field name is `checksum`; executable repository verifiers must not require `checksum_sha256`. Uppercase hexadecimal input may be normalized to lowercase only after it passes the exact 64-character hexadecimal validator. A `sha256:` prefix is not accepted.
 
+## P0-05B filename rejection boundary
+
+P0-05B rejects:
+
+- the exact reserved basenames CON, PRN, AUX, NUL, COM1 and LPT1,
+  case-insensitively;
+- a terminal .exe suffix, case-insensitively;
+- the specifically approved controls, bidi characters, traversal,
+  separators and empty filename cases.
+
+Direct-service safeFilename and payload.safe_filename bypasses for
+those exact grounded categories are closed.
+
+NOT completed by P0-05B:
+
+- reserved names with extensions, including con.txt;
+- trailing-dot or trailing-space reserved-name semantics;
+- COM2-COM9 and LPT2-LPT9;
+- other platform-specific reserved names;
+- .bat, .cmd, .com, .scr, .js, .vbs, .sh or other executable/script suffixes;
+- arbitrary multiple-extension or double-extension policy;
+- .backup and other unspecified extension patterns;
+- extension/MIME/signature agreement;
+- general Unicode-normalization policy;
+- Content-Disposition serialization.
+
+The P0-05B gate does not decide decomposed Unicode, ordinary spaces, ordinary punctuation, drive-style path candidates without slash or backslash separators, con.txt, .backup, other reserved-name variants, other executable/script/markup suffixes, or arbitrary multiple-extension patterns.
+
 ## Abuse, concurrency, and timing
 
 ```text

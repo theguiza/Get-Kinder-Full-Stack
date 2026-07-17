@@ -38,7 +38,11 @@ import {
 } from "../validators/kaiSprint2RequestSchemas.js";
 import { getEngagementTenantState, getIntakeBatchTenantState } from "../db/kaiQueries.js";
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
-import { validateSafeFilename, buildObjectKey } from "../storage/storagePathPolicy.js";
+import {
+  buildObjectKey,
+  detectGroundedFilenameHazard,
+  validateSafeFilename,
+} from "../storage/storagePathPolicy.js";
 import {
   validateStorageProviderDbValue,
   validateFilePolicyStatusTransition,
@@ -490,11 +494,18 @@ function engagementBatchTenantMismatchBlocker({ intakeBatchId, requestedEngageme
 }
 
 function deriveSafeFilename({ originalFilename, safeFilename, fileExtension }) {
-  if (safeFilename) return { ok: true, safeFilename };
-  const original = String(originalFilename || "").trim();
-  if (!original || original.includes("/") || original.includes("\\") || original.includes("..")) {
-    return { ok: false, error_code: "unsafe_filename" };
+  if (safeFilename !== undefined && typeof safeFilename !== "string") {
+    return { ok: false, error_code: "missing_filename" };
   }
+  if (typeof safeFilename === "string") {
+    const safeFilenameHazard = detectGroundedFilenameHazard(safeFilename);
+    if (safeFilenameHazard.matched) return { ok: false, error_code: safeFilenameHazard.reason };
+    return { ok: true, safeFilename };
+  }
+  const rawOriginal = String(originalFilename ?? "");
+  const originalHazard = detectGroundedFilenameHazard(rawOriginal);
+  if (originalHazard.matched) return { ok: false, error_code: originalHazard.reason };
+  const original = rawOriginal.trim();
   const extension = String(fileExtension || "").trim().toLowerCase();
   const normalized = original
     .toLowerCase()
@@ -504,7 +515,18 @@ function deriveSafeFilename({ originalFilename, safeFilename, fileExtension }) {
     .replace(/^\.+/, "")
     .replace(/^_+|_+$/g, "");
   const candidate = extension && !normalized.endsWith(extension) ? `${normalized}${extension}` : normalized;
+  if (candidate.length === 0) return { ok: false, error_code: "missing_filename" };
+  if (extension) {
+    const candidateHazard = detectGroundedFilenameHazard(candidate);
+    if (candidateHazard.matched) return { ok: false, error_code: candidateHazard.reason };
+  }
   return { ok: true, safeFilename: candidate };
+}
+
+function explicitSafeFilenameInput(input = {}, payload = {}) {
+  if (Object.hasOwn(input, "safeFilename")) return input.safeFilename;
+  if (Object.hasOwn(payload, "safe_filename")) return payload.safe_filename;
+  return undefined;
 }
 
 function normalizeReservationMetadata({ payload, idempotencyKey, reservationPayloadHash }) {
@@ -1221,7 +1243,7 @@ export async function reserveIntakeFileMetadata(input = {}, dependencies = {}) {
 
   const derivedFilename = deriveSafeFilename({
     originalFilename: input.originalFilename || payload.original_filename,
-    safeFilename: input.safeFilename || payload.safe_filename,
+    safeFilename: explicitSafeFilenameInput(input, payload),
     fileExtension: input.fileExtension || payload.file_extension,
   });
   if (!derivedFilename.ok) {
@@ -1254,7 +1276,8 @@ export async function reserveIntakeFileMetadata(input = {}, dependencies = {}) {
   }
 
   const intakeFileId = input.intakeFileId || randomUUID();
-  const objectKeyResult = buildObjectKey({
+  const buildStorageObjectKey = dependencies.buildObjectKey || buildObjectKey;
+  const objectKeyResult = buildStorageObjectKey({
     organizationId,
     intakeBatchId,
     intakeFileId,

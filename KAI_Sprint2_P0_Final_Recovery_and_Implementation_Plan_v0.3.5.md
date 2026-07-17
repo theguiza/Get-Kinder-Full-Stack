@@ -2192,6 +2192,84 @@ real_client_data_readiness: NOT_CONFIRMED
 next_package_or_stop_condition: OWNER-DIRECTED STOP after this fixture-and-test-only package commit; do not implement detector behavior, route/service work, upload lifecycle work, P0-06 work, database/cloud/production behavior, push, deployment, or another leaf
 ```
 
+## P0-05B — grounded filename rejection gate
+
+```text
+leaf_status: complete
+p0_05_package_status: grounded_filename_rejection_gate_complete
+implementation_status: bounded_filename_rejection_gate_only
+verification_status: TOOL_VERIFIED
+evidence_class: TOOL_VERIFIED
+owner_directed_leaf_scope: USER_CONFIRMED binding P0-05B acceptance addendum
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 8708ed01c38c112fc831ee54de4e1f773b4a8670
+applicable_repository_instructions: root AGENTS.md only; changes remain inside the approved P0-05 filename rejection boundary
+implemented_files: Backend/kai/storage/storagePathPolicy.js; Backend/kai/services/kaiIntakeService.js; Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md; __tests__/kai-sprint2-filename-rejection-gate.spec.js
+database_cloud_credentials_production_real_data: not accessed or modified
+current_state_update: not performed
+production_code_changed: true
+runtime_behavior_changed: true, limited to the exact grounded filename rejection categories listed below
+dependencies_or_lockfiles_changed: false
+schema_or_migration_changed: false
+upload_storage_provider_enabled: false
+raw_file_upload_enabled: false
+```
+
+P0-05B rejects:
+
+- the exact reserved basenames CON, PRN, AUX, NUL, COM1 and LPT1,
+  case-insensitively;
+- a terminal .exe suffix, case-insensitively;
+- the specifically approved controls, bidi characters, traversal,
+  separators and empty filename cases.
+
+Direct-service safeFilename and payload.safe_filename bypasses for
+those exact grounded categories are closed.
+
+NOT completed by P0-05B:
+
+- reserved names with extensions, including con.txt;
+- trailing-dot or trailing-space reserved-name semantics;
+- COM2-COM9 and LPT2-LPT9;
+- other platform-specific reserved names;
+- .bat, .cmd, .com, .scr, .js, .vbs, .sh or other executable/script suffixes;
+- arbitrary multiple-extension or double-extension policy;
+- .backup and other unspecified extension patterns;
+- extension/MIME/signature agreement;
+- general Unicode-normalization policy;
+- Content-Disposition serialization.
+
+```text
+three_path_bypass_matrix: original_filename via mounted file-reservation route rejected; safeFilename via direct exported service rejected; payload.safe_filename via direct exported service rejected
+representative_bidi_control_result: report\u202Ecod.exe rejected on original_filename, safeFilename, and payload.safe_filename before object-key construction or insert
+representative_reserved_basename_result: CON rejected on original_filename, safeFilename, and payload.safe_filename before object-key construction or insert
+representative_terminal_exe_result: report.csv.exe rejected on original_filename, safeFilename, and payload.safe_filename before object-key construction or insert
+representative_control_character_result: report\n.csv rejected on original_filename, safeFilename, and payload.safe_filename before object-key construction or insert
+blocked_categories_covered: path traversal; slash separator; backslash separator; C0 including CR and LF; DEL; C1; U+061C, U+200E, U+200F, U+202A-U+202E, and U+2066-U+2069 bidi formatting controls; exact reserved basenames CON, PRN, AUX, NUL, COM1, LPT1; terminal .exe case-insensitively; empty filename or empty safe result
+insert_and_object_key_nonreachability: focused tests assert idempotency lookup, checksum lookup, object-key construction, and insert are not reached for rejected values on all three paths
+direct_service_bypass_closure: hostile values supplied independently through safeFilename and payload.safe_filename are rejected before insert and object-key construction
+unresolved_noninterference: decomposed Unicode, ordinary spaces, ordinary punctuation, drive-style path candidate, con.txt, .backup, other reserved-name variants, non-.exe executable/script/markup suffixes, and arbitrary multiple-extension examples remain unclassified by the new grounded helper
+unresolved_corpus_policy_status: listed unresolved corpus fixtures retain decision_status owner_decision_required and expected_policy null
+observed_current_behavior_only: no downstream unresolved-case behavior is asserted as policy by the P0-05B tests
+not_policy: unresolved-case helper nonmatches are noninterference checks only
+not_security_verified: unresolved-case downstream behavior is not security verified
+focused_filename_gate_test: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-filename-rejection-gate.spec.js __tests__/kai-sprint2-storage-path-policy.spec.js __tests__/kai-sprint2-intake-service.spec.js __tests__/kai-sprint2-filename-fixture-corpus.spec.js — 48 passed, 0 failed
+database_sentinel: non-listening loopback DATABASE_URL at 127.0.0.1:9 used for every Node and npm command
+broader_sprint2_suite: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-*.spec.js — 444 passed, 0 failed after the existing assembled-HTTP localhost listener sandbox EPERM was rerun identically in localhost-capable mode
+full_repository_suite: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test — 549 passed, 0 failed after the existing assembled-HTTP localhost listener sandbox EPERM was rerun identically in localhost-capable mode
+overclaim_scan: rg found no prohibited completion claims; hits were limited to explicit retained-deferral/noninterference language for reserved-name variants and non-.exe suffixes
+git_diff_check: passed
+complete_diff_inspection: TOOL_VERIFIED — complete production, test, contract, and living ExecPlan diff inspected after final verification
+complete_diff_scope: Backend/kai/storage/storagePathPolicy.js, Backend/kai/services/kaiIntakeService.js, Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md, __tests__/kai-sprint2-filename-rejection-gate.spec.js, and this living ExecPlan evidence update only
+package_commit: report after commit; a commit cannot contain its own SHA
+deployed_kai_schema_compatibility: NOT_CONFIRMED
+live_upload_readiness: NOT_CONFIRMED
+production_readiness: NOT_CONFIRMED
+real_client_data_readiness: NOT_CONFIRMED
+retained_deferrals: exactly the NOT completed by P0-05B list above
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this bounded filename rejection gate package commit; do not begin P0-06A, database/cloud/production behavior, push, deployment, or another leaf
+```
+
 
 ---
 
