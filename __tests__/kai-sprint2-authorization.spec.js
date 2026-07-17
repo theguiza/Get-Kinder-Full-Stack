@@ -87,7 +87,12 @@ test("assistant/system actors cannot promote, approve, finalize, export, access 
 
 test("non-human actors cannot mutate intake even with full roles and active membership", () => {
   for (const actorType of ["assistant", "ai", "system", "internal_service"]) {
-    for (const operation of ["create_intake_batch", "create_intake_file", "create_review_queue_item"]) {
+    for (const operation of [
+      "create_intake_batch",
+      "create_intake_file",
+      "create_review_queue_item",
+      "update_review_queue_status",
+    ]) {
       const result = validateActorCanPerformOperation(
         {
           actorType,

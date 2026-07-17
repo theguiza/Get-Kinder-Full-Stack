@@ -133,6 +133,7 @@ export const KAI_SPRINT2_P0_OPERATION_ROLES = Object.freeze({
   create_intake_file: Object.freeze(["gk_admin", "gk_operator"]),
   create_review_queue_item: Object.freeze(["gk_admin", "gk_operator"]),
   mark_file_policy_blocked: Object.freeze(["gk_admin", "gk_operator"]),
+  update_review_queue_status: Object.freeze(["gk_admin", "gk_operator"]),
   read_intake: Object.freeze([
     "gk_admin",
     "gk_operator",

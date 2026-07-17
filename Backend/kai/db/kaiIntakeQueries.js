@@ -206,3 +206,59 @@ export async function blockIntakeFilePolicyStatus({ organizationId, intakeFileId
   );
   return rows[0] || null;
 }
+
+export async function getScopedIntakeFileReviewQueueItem(
+  organizationId,
+  reviewQueueItemId,
+  db = pool,
+) {
+  const { rows } = await db.query(
+    `SELECT review_queue_item_id, organization_id, queue_type, target_object_type,
+            target_object_id, priority, queue_status, due_at, summary, required_action,
+            created_at, updated_at
+       FROM kai.review_queue_items
+      WHERE organization_id = $1
+        AND review_queue_item_id = $2
+        AND queue_type = 'intake_file_review'
+        AND target_object_type = 'intake_file'
+      LIMIT 1`,
+    [organizationId, reviewQueueItemId],
+  );
+  return rows[0] || null;
+}
+
+export async function getScopedReviewQueueLinkedIntakeFile(
+  organizationId,
+  intakeFileId,
+  db = pool,
+) {
+  const { rows } = await db.query(
+    `SELECT intake_file_id, organization_id
+       FROM kai.intake_files
+      WHERE organization_id = $1
+        AND intake_file_id = $2
+      LIMIT 1`,
+    [organizationId, intakeFileId],
+  );
+  return rows[0] || null;
+}
+
+export async function updateReviewQueueItemStatusIfCurrent(
+  { organizationId, reviewQueueItemId, expectedQueueStatus, newQueueStatus },
+  db = pool,
+) {
+  const { rows } = await db.query(
+    `UPDATE kai.review_queue_items
+        SET queue_status = $4
+      WHERE organization_id = $1
+        AND review_queue_item_id = $2
+        AND queue_type = 'intake_file_review'
+        AND target_object_type = 'intake_file'
+        AND queue_status = $3
+      RETURNING review_queue_item_id, organization_id, queue_type, target_object_type,
+        target_object_id, priority, queue_status, due_at, summary, required_action,
+        created_at, updated_at`,
+    [organizationId, reviewQueueItemId, expectedQueueStatus, newQueueStatus],
+  );
+  return rows[0] || null;
+}

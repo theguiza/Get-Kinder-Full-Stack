@@ -106,6 +106,7 @@ test("Pass 2 router exposes only metadata-intake admin surface", () => {
     "/admin/files/:intakeFileId",
     "/admin/files/:intakeFileId/block",
     "/admin/review-queue",
+    "/admin/review-queue/:reviewQueueItemId/status",
     "/status",
   ]);
 });

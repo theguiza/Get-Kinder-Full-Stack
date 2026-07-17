@@ -1,5 +1,6 @@
 import {
   KAI_SPRINT2_P0_PATTERNS,
+  KAI_SPRINT2_P0_REVIEW_QUEUE_STATUSES,
   KAI_SPRINT2_P0_REQUEST_LIMITS,
   KAI_SPRINT2_P0_STRING_LIMITS,
 } from "../config/kaiSprint2P0Contract.js";
@@ -27,7 +28,12 @@ const FILE_POLICY_BLOCK_REQUEST_KEYS = new Set([
   "expected_file_policy_status",
   "blocking_reason_code",
 ]);
+const REVIEW_QUEUE_STATUS_REQUEST_KEYS = new Set([
+  "expected_queue_status",
+  "new_queue_status",
+]);
 const FILE_POLICY_BLOCKING_REASON_CODE_SET = new Set(FILE_POLICY_BLOCKING_REASON_CODES);
+const REVIEW_QUEUE_STATUS_SET = new Set(KAI_SPRINT2_P0_REVIEW_QUEUE_STATUSES);
 const BASE64URL_RE = /^[A-Za-z0-9_-]+$/;
 const CANONICAL_ISO_TIMESTAMP_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
@@ -354,6 +360,35 @@ export function validateFilePolicyBlockRequest(payload) {
 
   if (!FILE_POLICY_BLOCKING_REASON_CODE_SET.has(payload.blocking_reason_code)) {
     return { ok: false, blockers: [requestBlocker("invalid_blocking_reason_code", "body.blocking_reason_code")] };
+  }
+
+  return { ok: true, blockers: [] };
+}
+
+export function validateReviewQueueStatusRequest(payload) {
+  if (!isPlainObject(payload)) {
+    return { ok: false, blockers: [requestBlocker("request_body_must_be_object", "body")] };
+  }
+
+  const keys = Object.keys(payload);
+  for (const key of keys) {
+    if (!REVIEW_QUEUE_STATUS_REQUEST_KEYS.has(key)) {
+      return { ok: false, blockers: [requestBlocker("unknown_field", `body.${key}`)] };
+    }
+    const value = payload[key];
+    if (value === null) return { ok: false, blockers: [requestBlocker("null_field_not_allowed", `body.${key}`)] };
+    if (Array.isArray(value)) return { ok: false, blockers: [requestBlocker("array_field_not_allowlisted", `body.${key}`)] };
+    if (isPlainObject(value)) return { ok: false, blockers: [requestBlocker("nested_object_not_allowed", `body.${key}`)] };
+    if (typeof value !== "string") return { ok: false, blockers: [requestBlocker("invalid_string_field", `body.${key}`)] };
+    if (!REVIEW_QUEUE_STATUS_SET.has(value)) {
+      return { ok: false, blockers: [requestBlocker("invalid_queue_status", `body.${key}`)] };
+    }
+  }
+
+  for (const key of REVIEW_QUEUE_STATUS_REQUEST_KEYS) {
+    if (!Object.hasOwn(payload, key)) {
+      return { ok: false, blockers: [requestBlocker("required_field_missing", `body.${key}`)] };
+    }
   }
 
   return { ok: true, blockers: [] };

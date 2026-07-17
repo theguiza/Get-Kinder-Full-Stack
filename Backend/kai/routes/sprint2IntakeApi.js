@@ -11,11 +11,13 @@ import {
   validateFilePolicyBlockRequest,
   validateKaiSprint2MutationRequest,
   validateReviewQueueQuery,
+  validateReviewQueueStatusRequest,
 } from "../validators/kaiSprint2RequestSchemas.js";
 
 const router = express.Router();
 let intakeServiceOverride = null;
 let intakeServicePromise = null;
+let reviewQueueServicePromise = null;
 
 export function sendServiceResult(res, result, successStatus = 200) {
   if (result?.ok) {
@@ -130,6 +132,19 @@ function fileDetailIdentifiers(req = {}) {
   return { organizationId, intakeFileId };
 }
 
+function reviewQueueStatusIdentifiers(req = {}) {
+  const organizationId = normalizedUuid(req.query?.organization_id);
+  const reviewQueueItemId = typeof req.params?.reviewQueueItemId === "string"
+    ? req.params.reviewQueueItemId
+    : "";
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId)) return null;
+  if (
+    !KAI_SPRINT2_P0_PATTERNS.uuid.test(reviewQueueItemId)
+    || reviewQueueItemId !== reviewQueueItemId.toLowerCase()
+  ) return null;
+  return { organizationId, reviewQueueItemId };
+}
+
 function validateMutationRequestOrSend(req, res, operation, options = {}) {
   if (!metadataContentTypeIsSupported(req)) {
     sendKaiError(res, "unsupported_media_type");
@@ -175,6 +190,26 @@ function validateFilePolicyBlockRequestOrSend(req, res) {
   return identifiers;
 }
 
+function validateReviewQueueStatusRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = reviewQueueStatusIdentifiers(req);
+  if (!identifiers) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_or_review_queue_item_id")],
+    });
+    return null;
+  }
+  const result = validateReviewQueueStatusRequest(req.body);
+  if (!result.ok) {
+    sendKaiError(res, "validation_blocker", { blockers: result.blockers });
+    return null;
+  }
+  return identifiers;
+}
+
 async function invokeService(res, serviceCall, successStatus = 200) {
   try {
     return sendServiceResult(res, await serviceCall(), successStatus);
@@ -187,6 +222,12 @@ async function getIntakeService() {
   if (intakeServiceOverride) return intakeServiceOverride;
   intakeServicePromise ||= import("../services/kaiIntakeService.js");
   return intakeServicePromise;
+}
+
+async function getReviewQueueService() {
+  if (intakeServiceOverride?.updateReviewQueueStatus) return intakeServiceOverride;
+  reviewQueueServicePromise ||= import("../services/kaiReviewQueueService.js");
+  return reviewQueueServicePromise;
 }
 
 router.use(requireKaiSprint2Enabled);
@@ -314,6 +355,21 @@ router.get("/admin/review-queue", async (req, res) => {
   });
 });
 
+router.post("/admin/review-queue/:reviewQueueItemId/status", async (req, res) => {
+  const identifiers = validateReviewQueueStatusRequestOrSend(req, res);
+  if (!identifiers) return;
+  const payload = requestPayload(req);
+  return invokeService(res, async () => {
+    const service = await getReviewQueueService();
+    return service.updateReviewQueueStatus({
+      ...requestContext(req, "/api/kai/sprint2/intake/admin/review-queue/:reviewQueueItemId/status"),
+      ...identifiers,
+      expectedQueueStatus: payload.expected_queue_status,
+      newQueueStatus: payload.new_queue_status,
+    });
+  });
+});
+
 router.post("/admin/batches", async (req, res) => {
   const payload = requestPayload(req);
   if (!validateMutationRequestOrSend(req, res, "create_intake_batch")) return;
@@ -363,14 +419,17 @@ export const __testables = {
   safeAuthenticatedUser,
   batchDetailIdentifiers,
   fileDetailIdentifiers,
+  reviewQueueStatusIdentifiers,
   validateIntakeBatchFilesQuery,
   validateReviewQueueQuery,
+  validateReviewQueueStatusRequest,
   sendServiceResult,
   sanitizeServiceBlockers,
   sanitizeServiceWarnings,
   metadataContentTypeIsSupported,
   validateMutationRequestOrSend,
   validateFilePolicyBlockRequestOrSend,
+  validateReviewQueueStatusRequestOrSend,
   setIntakeServiceForTest(service) {
     intakeServiceOverride = service;
     return () => {
