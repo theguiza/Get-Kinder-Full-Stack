@@ -885,6 +885,153 @@ real_client_data_readiness: NOT_CONFIRMED
 next_package_or_stop_condition: OWNER-DIRECTED STOP after this single P0-05E pure-detector package commit; do not implement mounted integration, route/service work, raw-byte transport, upload lifecycle work, storage retrieval, worker/parser behavior, P0-06 work, database/cloud/production behavior, push, deployment, or another leaf
 ```
 
+## P0-05F.1 extension, declared MIME, signature, and structural-type agreement
+
+```text
+leaf_status: complete after this documentation-only package commit
+p0_05_package_status: owner_type_agreement_matrix_recorded
+implementation_status: documentation_only
+verification_status: TOOL_VERIFIED after documented checks pass
+evidence_class: TOOL_VERIFIED
+owner_directed_leaf_scope: USER_CONFIRMED
+owner_authority: OWNER_DECISION.P0_05F.TYPE_AGREEMENT_MATRIX_V1
+decision_scope: deterministic P0 gate for terminal extension, declared file MIME, shallow byte signature, minimum structural-type identity, and agreement between those signals
+broader_file_security_assessment_completed: false
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 276d863918ef1d592eebd07e7fe888ef4b9e4af7
+starting_tree: clean tracked and untracked
+prior_boundary: TOOL_VERIFIED - 276d863918ef1d592eebd07e7fe888ef4b9e4af7 changed only Backend/kai/validators/txtMdByteDetector.js, __tests__/kai-sprint2-txt-md-byte-detector.spec.js, and this living ExecPlan to record P0-05E
+applicable_repository_instructions: root AGENTS.md only; changes remain inside the approved P0-05F.1 documentation-only owner-decision boundary
+preflight_detectTxtMdBytePolicy_production_caller: absent; current references are detector module, focused test, and this living ExecPlan only
+preflight_raw_byte_integration: mounted raw-byte integration remains absent
+preflight_extension_mime_signature_corpus: absent; no extension/MIME/signature fixture corpus exists
+preflight_general_type_detector: absent; no general CSV/XLSX/PDF/signature detector exists
+preflight_runtime_declared_file_mime_allowlist: Backend/kai/services/kaiIntakeService.js ALLOWED_METADATA_ONLY_MIME_TYPES currently contains text/csv, application/csv, text/plain, and application/json
+runtime_application_json_gap_status: unresolved_visible_code_alignment_gap
+runtime_behavior_changed: false
+production_code_changed: false
+tests_fixtures_detectors_changed: false
+dependencies_manifests_lockfiles_changed: false
+current_state_update: not performed
+implementation_baseline_update: not performed
+database_cloud_credentials_production_real_data: not accessed or modified
+```
+
+`OWNER_DECISION.P0_05F.TYPE_AGREEMENT_MATRIX_V1` records that all required type signals must agree. A legitimate file with inconsistent extension, declared MIME, detected signature, or minimum structure blocks rather than being guessed, repaired, or reclassified. There is no winner or fallback precedence among extension, declared MIME, detected signature, and minimum structure.
+
+Canonical P0 extensions are:
+
+```text
+.csv
+.xlsx
+.md
+.txt
+.pdf
+```
+
+Extension comparison is ASCII case-insensitive; accepted extension input canonicalizes to lowercase; exactly one terminal extension is evaluated; every other extension blocks; no filename extension overrides MIME, signature, or minimum structure; and multiple-extension and filename-hazard rules remain governed by the committed filename policy.
+
+Declared file MIME is separate from the HTTP request-envelope `Content-Type`. Declared file MIME normalization trims surrounding ASCII whitespace and lowercases the type and subtype. MIME parameters are not accepted in P0 file metadata, so `text/plain; charset=utf-8` blocks rather than being stripped or reinterpreted.
+
+Declared file-MIME matrix:
+
+```text
+.csv
+  text/csv
+  application/csv
+
+.xlsx
+  application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+
+.md
+  text/markdown
+  text/plain
+
+.txt
+  text/plain
+
+.pdf
+  application/pdf
+```
+
+Markdown/plain-text compatibility is asymmetric by owner decision: `.md + text/plain` is permitted, but `.txt + text/markdown` blocks as `declared_type_mismatch`. Markdown may be declared as plain text in P0; plain-text files are not thereby accepted as Markdown.
+
+Unsupported declared file MIME values include `application/json`, `application/octet-stream`, `text/html`, `text/javascript`, `application/javascript`, `application/zip`, `application/x-zip-compressed`, unknown MIME, empty MIME, and every value not explicitly listed in the matrix. `application/octet-stream` may later serve as an HTTP upload transport envelope; it is not an accepted declared file MIME.
+
+Known runtime-alignment gap:
+
+```text
+Current runtime declared file-MIME behavior accepts application/json.
+OWNER_DECISION.P0_05F.TYPE_AGREEMENT_MATRIX_V1 rejects application/json because JSON is not an allowed P0 document type.
+P0-05F.1 records policy only.
+A later separately authorized code package must align the runtime allowlist with the committed matrix.
+Until that package is completed:
+- policy authority says application/json must block;
+- current runtime behavior remains divergent;
+- the divergence must remain visible;
+- the project must not claim runtime type-policy alignment.
+```
+
+Block conditions include unsupported extension, unsupported MIME, extension/MIME disagreement, detected signature identifying another type, minimum structure contradicting declared type, ambiguous bytes where deterministic type cannot be established, bytes truncated below the required minimum, and no permitted type being deterministically established. Do not trust declared MIME over bytes, trust extension over bytes, rewrite declarations from detected bytes, guess likely type, apply fallback MIME detection, accept because one signal matches, or repair inconsistent metadata automatically.
+
+A pass establishes only `type_agreement_pass_only`. It does not establish document validity, document usability, machine-readable PDF status, encryption or password status, macro safety, active-content safety, archive-expansion safety, malware cleanliness, profile eligibility, source eligibility, upload acceptance, or complete file-policy pass.
+
+Text-family rule: CSV, MD, and TXT have no unique reliable magic signature for this P0 gate. Extension and declared MIME select the permitted text subtype; bytes must pass strict UTF-8 and deterministic binary-content validation; no semantic parsing distinguishes CSV, MD, or TXT; content meaning is not inspected; and instruction-like content remains inert data. CSV uses the committed strict UTF-8, BOM, NUL, prohibited-control, and lone-CR boundary already established for P0 text bytes. This does not decide CSV row limits, delimiter validity, header validity, formula handling, or parser behavior. Valid permitted text containing HTML, JavaScript, shell syntax, prompt injection, or other instruction-like strings is not reclassified as HTML or script content merely because those strings occur in the text. Empty CSV, MD, or TXT bytes may pass only when extension and MIME agree and the strict text-byte gate passes; the result remains `type_agreement_pass_only`.
+
+PDF shallow identity rule: a candidate PDF must use extension `.pdf`, declare `application/pdf`, begin at byte offset zero with ASCII `%PDF-`, and contain ASCII `%%EOF` within the final 1024 bytes. Leading bytes before `%PDF-` are not accepted. This does not establish machine-readable text layer, unencrypted status, password-free status, valid cross-reference structure, absence of JavaScript, absence of active actions, absence of embedded files, or complete PDF validity.
+
+XLSX shallow identity rule: a candidate XLSX must use extension `.xlsx`, declare `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`, begin with a ZIP local-file-header signature, expose a readable ZIP directory structure, and contain exact case-sensitive entry names `[Content_Types].xml`, `_rels/.rels`, and `xl/workbook.xml`. A generic ZIP prefix is insufficient. The future shallow XLSX identity detector may inspect ZIP headers, ZIP directory metadata, entry names, and entry offsets and lengths needed to bound directory inspection. It must not decompress entry contents, parse worksheet XML, parse workbook XML content, read cell values, expand the archive, execute macros, or follow external relationships in this P0-05F identity gate. ZIP packages missing required entries block as `standalone_archive_or_non_xlsx`; empty ZIP, arbitrary ZIP, RAR, 7z, gzip, truncated ZIP prefix, and ZIP containing only renamed non-OOXML files must not classify as XLSX.
+
+Recognized disallowed binary signatures for the future corpus include DOS/PE MZ, ELF, standalone ZIP, RAR 4, RAR 5, 7z, and gzip. A recognized disallowed signature blocks regardless of allowed extension or declared MIME. Unknown non-text binary input that does not satisfy permitted PDF or XLSX shallow identity remains fail-closed as `unknown_binary`.
+
+Deterministic block outcomes:
+
+```text
+unsupported extension or MIME -> block / unsupported_file_type
+extension and MIME disagreement -> block / declared_type_mismatch
+recognized disallowed signature -> block / disallowed_binary_signature
+ZIP without minimum XLSX structure -> block / standalone_archive_or_non_xlsx
+PDF or XLSX signature present but minimum identity incomplete -> block / truncated_or_malformed_type
+multiple permitted types genuinely remain plausible after applying all committed signals -> block / ambiguous_file_type
+non-text bytes matching no permitted binary type -> block / unknown_binary
+```
+
+`ambiguous_file_type` is a defensive fail-closed category. The future fixture corpus must not invent a contrived or semantically impossible byte case solely to exercise it. Include an `ambiguous_file_type` fixture only if a naturally reachable case exists under the committed matrix; otherwise record the category as defensive and currently unexercised. Do not weaken or alter another fixture merely to manufacture ambiguity, and do not treat absence of an ambiguity fixture as incomplete coverage when the category is unreachable by construction.
+
+Future sequence:
+
+```text
+P0-05F.2
+  complete synthetic extension/MIME/signature fixture corpus
+
+P0-05F.3
+  read-only detector measurement against the corpus
+
+P0-05F.4
+  pure unwired detector if measurement confirms absence
+
+separate runtime-alignment leaf
+  remove application/json and align the current declared file-MIME runtime allowlist
+  only after explicit authorization
+```
+
+The fixture corpus must precede detector implementation. The future fixture corpus must include every allowed extension/MIME pairing, every grounded cross-type mismatch, uppercase extension normalization, unsupported extensions, unsupported MIME values, `application/json` rejection, `application/octet-stream` declared-MIME rejection, MIME-parameter rejection, empty text-family cases, PDF positive and truncated cases, XLSX positive minimum structure, standalone ZIP, renamed ZIP, recognized executable/archive signatures, unknown binary, instruction-like permitted text remaining inert, and `ambiguous_file_type` only under the defensive-category rule. The runtime-alignment change must not be silently merged into fixture or detector packages.
+
+Explicit exclusions: this decision does not settle or implement CSV row count, CSV delimiter/header validity, CSV formula-injection handling, XLSX macro detection, XLSX external relationships, OOXML path traversal, archive expansion limits, PDF text-layer proof, PDF encryption, PDF JavaScript/actions, PDF embedded files, malware scanning, upload transport, storage integration, parser/profile behavior, production wiring, or P0-05A through P0-05E.
+
+```text
+tests_run: not run; documentation-only owner-decision package
+git_diff_check: passed after edit
+git_diff_cached_check: passed after staging
+complete_diff_scope: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md and this living ExecPlan only
+package_commit: report after commit; a commit cannot contain its own SHA
+deployed_kai_schema_compatibility: NOT_CONFIRMED
+live_upload_readiness: NOT_CONFIRMED
+production_readiness: NOT_CONFIRMED
+real_client_data_readiness: NOT_CONFIRMED
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this single P0-05F.1 documentation-only package commit; do not implement fixtures, tests, detectors, MIME allowlist changes, parsers, runtime behavior, P0-06 work, database/cloud/production behavior, push, deployment, or another leaf
+```
+
 ## Prompt-injection boundary
 
 Add synthetic fixtures containing instruction-like text.

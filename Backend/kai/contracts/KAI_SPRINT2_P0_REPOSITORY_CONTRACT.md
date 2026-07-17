@@ -176,6 +176,106 @@ This P0-05C decision follows the required P0 security-policy style: deterministi
 
 This statement guides later P0-05 decisions but does not define CSV, XLSX, PDF, MIME/signature, or malware policy. Those controls require separate owner decisions.
 
+## P0-05F.1 extension, declared MIME, signature, and structural-type agreement
+
+```text
+decision_evidence: USER_CONFIRMED
+owner_authority: OWNER_DECISION.P0_05F.TYPE_AGREEMENT_MATRIX_V1
+decision_scope: deterministic P0 gate for terminal extension, declared file MIME, shallow byte signature, minimum structural-type identity, and agreement between those signals
+broader_file_security_assessment_completed: false
+runtime_behavior_changed_by_this_decision: false
+```
+
+All required type signals must agree. A legitimate file with an inconsistent extension, declared MIME, detected signature, or minimum structure is blocked rather than guessed, repaired, or reclassified. No signal wins over another: extension, declared MIME, detected signature, and minimum structure have no fallback precedence.
+
+The only allowed P0 file extensions are:
+
+```text
+.csv
+.xlsx
+.md
+.txt
+.pdf
+```
+
+Extension comparison is ASCII case-insensitive, accepted extension input is canonicalized to lowercase, exactly one terminal extension is evaluated, every other extension is unsupported and blocks, and no filename extension can override MIME, signature, or minimum structure. Multiple-extension and filename-hazard rules remain governed by the committed filename policy. Examples: `REPORT.CSV` canonicalizes to `.csv`; `report.csv.exe` blocks as unsupported or dangerous terminal extension; `report.json` blocks as unsupported extension.
+
+The declared file MIME is separate from the HTTP request-envelope `Content-Type`. Declared file MIME is normalized by trimming surrounding ASCII whitespace and lowercasing the type and subtype. MIME parameters are not accepted in P0 file metadata; for example, `text/plain; charset=utf-8` blocks rather than being silently stripped or reinterpreted.
+
+The declared file-MIME matrix is:
+
+```text
+.csv
+  text/csv
+  application/csv
+
+.xlsx
+  application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+
+.md
+  text/markdown
+  text/plain
+
+.txt
+  text/plain
+
+.pdf
+  application/pdf
+```
+
+Markdown MIME compatibility is asymmetric by owner decision: `.md + text/markdown` is permitted, `.md + text/plain` is permitted for P0, `.txt + text/plain` is permitted, and `.txt + text/markdown` blocks as `declared_type_mismatch`. Markdown may be declared as plain text in P0; a plain-text file is not thereby accepted as Markdown.
+
+The following are not accepted as declared file MIME values: `application/json`, `application/octet-stream`, `text/html`, `text/javascript`, `application/javascript`, `application/zip`, `application/x-zip-compressed`, unknown MIME, empty MIME, and every value not explicitly listed in the matrix. `application/octet-stream` may later serve as an HTTP upload transport envelope; it is not an accepted declared file MIME.
+
+Current runtime declared file-MIME behavior accepts `application/json`. That is current runtime behavior only, is not policy authority, conflicts with `OWNER_DECISION.P0_05F.TYPE_AGREEMENT_MATRIX_V1`, remains a known unresolved code-alignment gap after this documentation decision, and must be corrected only in a later separately authorized implementation package. This P0-05F.1 documentation decision does not remove `application/json` from the runtime allowlist and must not be represented as fixed or runtime-aligned.
+
+Block when the extension is unsupported; the MIME is unsupported; extension and MIME do not map to the same permitted type; a detected signature identifies another type; minimum structure contradicts the declared type; bytes are ambiguous where a deterministic type cannot be established; bytes are truncated below the required minimum; or no permitted type can be established deterministically.
+
+Do not trust declared MIME over bytes, trust extension over bytes, rewrite the declaration from detected bytes, guess a likely type, apply fallback MIME detection, accept because one signal matches, or repair inconsistent metadata automatically.
+
+A pass establishes only:
+
+```text
+type_agreement_pass_only
+```
+
+It does not establish document validity, document usability, machine-readable PDF status, encryption or password status, macro safety, active-content safety, archive-expansion safety, malware cleanliness, profile eligibility, source eligibility, upload acceptance, or complete file-policy pass.
+
+CSV, MD, and TXT have no unique reliable magic signature for this P0 gate. For those types, extension and declared MIME select the permitted text subtype; bytes must pass strict UTF-8 and deterministic binary-content validation; no semantic parsing distinguishes CSV, MD, or TXT; content meaning is not inspected; and instruction-like content remains inert data. CSV uses the committed strict UTF-8, BOM, NUL, prohibited-control, and lone-CR boundary already established for P0 text bytes. This does not decide CSV row limits, CSV delimiter validity, CSV header validity, CSV formula handling, or CSV parser behavior. Valid permitted text containing HTML, JavaScript, shell syntax, prompt injection, or other instruction-like strings is not reclassified as HTML or script content merely because those strings occur in the text. HTML and script uploads are blocked through unsupported extension/MIME and recognized disallowed binary identity, not through heuristic scanning of valid permitted text. Empty CSV, MD, or TXT bytes may pass this gate only when extension and MIME agree and the strict text-byte gate passes; the result remains `type_agreement_pass_only`.
+
+A candidate PDF must use extension `.pdf`, declare `application/pdf`, begin at byte offset zero with ASCII `%PDF-`, and contain ASCII `%%EOF` within the final 1024 bytes. Leading bytes before `%PDF-` are not accepted. The PDF shallow identity rule does not establish machine-readable text layer, unencrypted status, password-free status, valid cross-reference structure, absence of JavaScript, absence of active actions, absence of embedded files, or complete PDF validity.
+
+A candidate XLSX must use extension `.xlsx`, declare `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`, begin with a ZIP local-file-header signature, expose a readable ZIP directory structure, and contain exact case-sensitive entry names `[Content_Types].xml`, `_rels/.rels`, and `xl/workbook.xml`. A generic ZIP prefix is insufficient. The future shallow XLSX identity detector may inspect ZIP headers, ZIP directory metadata, entry names, and entry offsets and lengths needed to bound directory inspection. It must not, in this P0-05F identity gate, decompress entry contents, parse worksheet XML, parse workbook XML content, read cell values, expand the archive, execute macros, or follow external relationships. A ZIP package missing any required entry blocks as `standalone_archive_or_non_xlsx`; empty ZIP, arbitrary ZIP, RAR, 7z, gzip, truncated ZIP prefix, and ZIP containing only renamed non-OOXML files must not classify as XLSX. This rule does not establish macro absence, external-relationship absence, encryption/password status, OOXML path safety, sheet limits, cell limits, entry-count limits, expanded-size limits, compression-ratio safety, or complete workbook validity.
+
+The future corpus must include deterministic block cases for at least DOS/PE MZ, ELF, standalone ZIP, RAR 4, RAR 5, 7z, and gzip. A recognized disallowed signature blocks regardless of an allowed extension or declared MIME. A non-text byte stream that does not satisfy the permitted PDF or XLSX shallow identity rule blocks as `unknown_binary`. This list does not mean every executable or archive format is individually identified; unknown binary input remains fail-closed.
+
+Deterministic block outcomes:
+
+```text
+unsupported extension or MIME -> block / unsupported_file_type
+extension and MIME disagreement -> block / declared_type_mismatch
+recognized disallowed signature -> block / disallowed_binary_signature
+ZIP without minimum XLSX structure -> block / standalone_archive_or_non_xlsx
+PDF or XLSX signature present but minimum identity incomplete -> block / truncated_or_malformed_type
+multiple permitted types genuinely remain plausible after applying all committed signals -> block / ambiguous_file_type
+non-text bytes matching no permitted binary type -> block / unknown_binary
+```
+
+No ambiguous, malformed, truncated, or unknown input is permitted. `ambiguous_file_type` is a defensive fail-closed category. The future fixture corpus must not invent a contrived or semantically impossible byte case solely to exercise it; include an `ambiguous_file_type` fixture only if a naturally reachable case exists under the committed matrix, otherwise record the category as defensive and currently unexercised. Do not weaken or alter another fixture merely to manufacture ambiguity, and do not treat absence of an ambiguity fixture as incomplete coverage when the category is unreachable by construction.
+
+Future sequence:
+
+```text
+P0-05F.2: complete synthetic extension/MIME/signature fixture corpus
+P0-05F.3: read-only detector measurement against the corpus
+P0-05F.4: pure unwired detector if measurement confirms absence
+separate runtime-alignment leaf: remove application/json and align the current declared file-MIME runtime allowlist only after explicit authorization
+```
+
+The fixture corpus must precede detector implementation, and the runtime-alignment change must not be silently merged into fixture or detector packages. The future fixture corpus must include every allowed extension/MIME pairing; every grounded cross-type mismatch; uppercase extension normalization; unsupported extensions; unsupported MIME values; `application/json` rejection; `application/octet-stream` declared-MIME rejection; MIME-parameter rejection; empty text-family cases; PDF positive and truncated cases; XLSX positive minimum structure; standalone ZIP; renamed ZIP; recognized executable/archive signatures; unknown binary; instruction-like permitted text remaining inert; and `ambiguous_file_type` only under the defensive-category rule.
+
+This decision does not settle or implement CSV row count, CSV delimiter/header validity, CSV formula-injection handling, XLSX macro detection, XLSX external relationships, OOXML path traversal, archive expansion limits, PDF text-layer proof, PDF encryption, PDF JavaScript/actions, PDF embedded files, malware scanning, upload transport, storage integration, parser/profile behavior, or production wiring. It does not reopen P0-05A through P0-05E.
+
 ## Abuse, concurrency, and timing
 
 ```text
