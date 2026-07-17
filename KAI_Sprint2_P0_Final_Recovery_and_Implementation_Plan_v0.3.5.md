@@ -980,7 +980,15 @@ Text-family rule: CSV, MD, and TXT have no unique reliable magic signature for t
 
 PDF shallow identity rule: a candidate PDF must use extension `.pdf`, declare `application/pdf`, begin at byte offset zero with ASCII `%PDF-`, and contain ASCII `%%EOF` within the final 1024 bytes. Leading bytes before `%PDF-` are not accepted. This does not establish machine-readable text layer, unencrypted status, password-free status, valid cross-reference structure, absence of JavaScript, absence of active actions, absence of embedded files, or complete PDF validity.
 
-XLSX shallow identity rule: a candidate XLSX must use extension `.xlsx`, declare `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`, begin with a ZIP local-file-header signature, expose a readable ZIP directory structure, and contain exact case-sensitive entry names `[Content_Types].xml`, `_rels/.rels`, and `xl/workbook.xml`. A generic ZIP prefix is insufficient. The future shallow XLSX identity detector may inspect ZIP headers, ZIP directory metadata, entry names, and entry offsets and lengths needed to bound directory inspection. It must not decompress entry contents, parse worksheet XML, parse workbook XML content, read cell values, expand the archive, execute macros, or follow external relationships in this P0-05F identity gate. ZIP packages missing required entries block as `standalone_archive_or_non_xlsx`; empty ZIP, arbitrary ZIP, RAR, 7z, gzip, truncated ZIP prefix, and ZIP containing only renamed non-OOXML files must not classify as XLSX.
+XLSX shallow identity rule: a candidate XLSX must use extension `.xlsx`, declare `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`, begin with a ZIP local-file-header signature, expose a structurally readable end-of-central-directory record, expose a structurally readable central directory, and contain exact case-sensitive central-directory entry names `[Content_Types].xml`, `_rels/.rels`, and `xl/workbook.xml`. A generic ZIP prefix is insufficient, and finding a required name somewhere in raw bytes is not proof that it is a valid central-directory entry.
+
+The XLSX shallow identity rule establishes ZIP entry identity only by parsing ZIP structure. It must locate and validate the end-of-central-directory record; read the recorded central-directory offset and byte length; verify those values remain within fixture byte bounds; iterate valid central-directory records; obtain entry names from those records; validate each record length before advancing; validate each recorded local-header offset; verify the expected number of directory entries; and establish required-entry presence from the parsed directory-name set. It must not establish required-entry presence through raw-byte substring search, regular-expression search over the byte buffer, decoded whole-buffer text search, or grep-like matching.
+
+The future shallow XLSX identity detector may inspect ZIP signatures, local headers, central-directory metadata, end-of-central-directory metadata, entry names, entry offsets, and stored and compressed lengths needed for bounded structural verification. It must not decompress entry contents, parse worksheet XML, parse workbook XML content, read cell values, expand archive data, execute macros, follow relationships, use the filesystem, or invoke external ZIP utilities in this P0-05F identity gate. A test-only ZIP builder may create deterministic stored empty entries without adding a dependency, but it must calculate and encode local-file-header offsets, central-directory record offsets, central-directory byte length, central-directory start offset, entry count, and end-of-central-directory metadata.
+
+The positive minimum XLSX fixture must be a readable ZIP whose central-directory offsets, record lengths, entry counts, bounds, and local-header references are internally consistent; it expects `allow / type_agreement_pass / type_agreement_pass_only`. Missing-entry negative fixtures must be separate readable ZIPs for missing `[Content_Types].xml`, missing `_rels/.rels`, and missing `xl/workbook.xml`, each with the other two required entries present and exactly the claimed entry absent; each expects `block / standalone_archive_or_non_xlsx`. A wrong-case fixture must be a readable ZIP with exactly one required entry present only under incorrect case, such as `xl/Workbook.xml`; it expects `block / standalone_archive_or_non_xlsx`. A renamed non-OOXML ZIP must remain readable, omit at least one exact required OOXML entry, and not qualify merely because raw bytes contain similar strings; it expects `block / standalone_archive_or_non_xlsx`. Malformed and truncated ZIP fixtures must remain separate from missing-entry and standalone-archive fixtures, including truncated local-file-header signature, local header without readable central directory, invalid or out-of-bounds central-directory offset, and truncated central-directory record; each expects `block / truncated_or_malformed_type`.
+
+Generic and standalone ZIP coverage must remain separate for readable arbitrary ZIP with allowed non-XLSX metadata, readable ZIP with `.xlsx` metadata but missing minimum OOXML structure, and recognized standalone ZIP signature with otherwise permitted non-XLSX metadata. This rule does not establish macro absence, external-relationship absence, encryption/password status, OOXML path safety, sheet limits, cell limits, entry-count limits, expanded-size limits, compression-ratio safety, or complete workbook validity.
 
 Recognized disallowed binary signatures for the future corpus include DOS/PE MZ, ELF, standalone ZIP, RAR 4, RAR 5, 7z, and gzip. A recognized disallowed signature blocks regardless of allowed extension or declared MIME. Unknown non-text binary input that does not satisfy permitted PDF or XLSX shallow identity remains fail-closed as `unknown_binary`.
 
@@ -1030,6 +1038,77 @@ live_upload_readiness: NOT_CONFIRMED
 production_readiness: NOT_CONFIRMED
 real_client_data_readiness: NOT_CONFIRMED
 next_package_or_stop_condition: OWNER-DIRECTED STOP after this single P0-05F.1 documentation-only package commit; do not implement fixtures, tests, detectors, MIME allowlist changes, parsers, runtime behavior, P0-06 work, database/cloud/production behavior, push, deployment, or another leaf
+```
+
+## P0-05F.2 XLSX and ZIP fixture family
+
+```text
+leaf_status: complete after this fixture-corpus package commit
+p0_05_package_status: xlsx_zip_fixture_family_recorded
+implementation_status: corpus_only_tests_and_contract_language
+verification_status: TOOL_VERIFIED after documented checks pass
+evidence_class: TOOL_VERIFIED
+owner_directed_leaf_scope: USER_CONFIRMED
+owner_authority: OWNER_DECISION.P0_05F.TYPE_AGREEMENT_MATRIX_V1 plus user-supplied stricter XLSX/ZIP fixture integrity requirements
+applicable_repository_instructions: root AGENTS.md only; changes remain inside the approved P0-05F fixture-corpus/documentation boundary
+implemented_fixture_module: __tests__/support/kaiSprint2XlsxZipFixtureCorpus.js
+implemented_integrity_test_file: __tests__/kai-sprint2-xlsx-zip-fixture-corpus.spec.js
+production_code_changed: false
+production_detector_added_or_changed: false
+runtime_behavior_changed: false
+dependencies_manifests_lockfiles_changed: false
+database_cloud_credentials_production_real_data: not accessed or modified
+current_state_update: not performed
+implementation_baseline_update: not performed
+positive_fixture_id: XLSXZIP-P0-05F-001-ALLOW-MINIMUM-XLSX
+positive_xlsx_expected_result: allow / type_agreement_pass / type_agreement_pass_only
+positive_xlsx_central_directory_parser_used: true
+positive_xlsx_entry_names_obtained_from_parsed_directory_records: [Content_Types].xml, _rels/.rels, xl/workbook.xml
+confirmation_no_raw_byte_string_search_established_entry_presence: true
+positive_xlsx_directory_bounds_and_local_header_offsets_valid: true
+positive_xlsx_readable_eocd: true
+positive_xlsx_readable_central_directory: true
+positive_xlsx_internally_consistent_directory_bounds: true
+positive_xlsx_valid_record_boundaries: true
+positive_xlsx_contains_exactly_intended_fixture_entries: true
+positive_xlsx_contains_all_three_required_names_through_parsed_central_directory_records: true
+positive_xlsx_exact_case_confirmed: true
+missing_entry_fixtures:
+  XLSXZIP-P0-05F-002-BLOCK-MISSING-CONTENT-TYPES: readable ZIP confirmed; _rels/.rels and xl/workbook.xml present; exactly [Content_Types].xml absent; expected category standalone_archive_or_non_xlsx
+  XLSXZIP-P0-05F-003-BLOCK-MISSING-RELS: readable ZIP confirmed; [Content_Types].xml and xl/workbook.xml present; exactly _rels/.rels absent; expected category standalone_archive_or_non_xlsx
+  XLSXZIP-P0-05F-004-BLOCK-MISSING-WORKBOOK: readable ZIP confirmed; [Content_Types].xml and _rels/.rels present; exactly xl/workbook.xml absent; expected category standalone_archive_or_non_xlsx
+wrong_case_fixture_id: XLSXZIP-P0-05F-005-BLOCK-WRONG-CASE-WORKBOOK
+wrong_case_zip_readable: true
+wrong_case_exact_required_spelling_absent: xl/workbook.xml
+wrong_case_case_variant_spelling_present: xl/Workbook.xml
+wrong_case_expected_category: standalone_archive_or_non_xlsx
+renamed_non_ooxml_fixture_id: XLSXZIP-P0-05F-006-BLOCK-RENAMED-NON-OOXML-ZIP
+generic_and_standalone_zip_fixture_ids: XLSXZIP-P0-05F-007-BLOCK-ARBITRARY-ZIP-NON-XLSX-METADATA, XLSXZIP-P0-05F-008-BLOCK-XLSX-METADATA-MISSING-OOXML, XLSXZIP-P0-05F-009-BLOCK-STANDALONE-ZIP-SIGNATURE
+malformed_truncated_zip_fixtures:
+  XLSXZIP-P0-05F-010-BLOCK-TRUNCATED-LOCAL-SIGNATURE: exact structural defect truncated local-file-header signature; expected category truncated_or_malformed_type
+  XLSXZIP-P0-05F-011-BLOCK-NO-CENTRAL-DIRECTORY: exact structural defect local header without readable central directory; expected category truncated_or_malformed_type
+  XLSXZIP-P0-05F-012-BLOCK-OUT-OF-BOUNDS-CD-OFFSET: exact structural defect invalid or out-of-bounds central-directory offset; expected category truncated_or_malformed_type
+  XLSXZIP-P0-05F-013-BLOCK-TRUNCATED-CD-RECORD: exact structural defect truncated central-directory record; expected category truncated_or_malformed_type
+confirmation_required_xlsx_entries_proven_through_central_directory_parsing_not_raw_byte_search: true
+confirmation_every_missing_entry_fixture_is_readable_zip_minus_exactly_one_required_entry: true
+confirmation_wrong_case_fixture_is_readable_zip_and_fails_only_exact_case_sensitive_name_matching: true
+confirmation_malformed_zip_fixtures_are_distinct_from_missing_entry_fixtures: true
+confirmation_no_entry_content_was_decompressed: true
+focused_xlsx_zip_fixture_test: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-xlsx-zip-fixture-corpus.spec.js - 8 passed, 0 failed
+repository_contract_test: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-schema-contract - 9 passed, 0 failed
+sprint2_suite_initial_sandbox_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-*.spec.js - new XLSX/ZIP tests passed; existing assembled-HTTP localhost listener tests failed with sandbox EPERM
+sprint2_suite: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-*.spec.js - 468 passed, 0 failed after the existing assembled-HTTP localhost listener sandbox EPERM was rerun identically in localhost-capable mode
+full_repository_suite_initial_sandbox_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - new XLSX/ZIP tests passed; existing assembled-HTTP localhost listener tests failed with sandbox EPERM
+full_repository_suite: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - 573 passed, 0 failed after the existing assembled-HTTP localhost listener sandbox EPERM was rerun identically in localhost-capable mode
+database_sentinel: non-listening loopback DATABASE_URL at 127.0.0.1:9 used for every Node and npm command
+git_diff_check: passed
+complete_diff_scope: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md, __tests__/support/kaiSprint2XlsxZipFixtureCorpus.js, __tests__/kai-sprint2-xlsx-zip-fixture-corpus.spec.js, and this living ExecPlan evidence/language update only
+package_commit: report after commit; a commit cannot contain its own SHA
+deployed_kai_schema_compatibility: NOT_CONFIRMED
+live_upload_readiness: NOT_CONFIRMED
+production_readiness: NOT_CONFIRMED
+real_client_data_readiness: NOT_CONFIRMED
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this single P0-05F.2 XLSX/ZIP fixture-corpus package commit; do not implement detectors, mounted integration, runtime MIME allowlist changes, upload lifecycle work, storage retrieval, worker/parser behavior, P0-06 work, database/cloud/production behavior, push, deployment, or another leaf
 ```
 
 ## Prompt-injection boundary
