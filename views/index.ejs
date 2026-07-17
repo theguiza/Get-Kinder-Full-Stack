@@ -84,15 +84,11 @@
     .gk-cta-secondary:hover { background: #fafafa; }
     .gk-sh-title {
       font-family: 'Poppins', sans-serif; font-weight: 600; font-size: 38px;
-      letter-spacing: -0.02em; color: #283853; margin: 0; line-height: 1.15;
+      letter-spacing: -0.02em; color: #455a7c; margin: 0; line-height: 1.15;
     }
     .gk-sh-body { margin-top: 18px; font-family: 'Roboto', sans-serif; font-size: 17px; color: #4d525e; line-height: 1.6; }
     .gk-card { background: #fff; border: 1px solid #e3e4e8; border-radius: 14px; padding: 28px; }
-    .gk-hero-nav-link {
-      font-family: 'Roboto', sans-serif; font-size: 14px; color: #455A7C;
-      text-decoration: none; font-weight: 500; transition: color 140ms;
-    }
-    .gk-hero-nav-link:hover { color: #FF5656; }
+    .gk-faq-first { border-top: 1px solid #e3e4e8; }
     .gk-faq-btn {
       background: transparent; border: none; width: 100%; text-align: left; cursor: pointer;
       padding: 22px 4px; display: flex; align-items: center; justify-content: space-between; gap: 16px;
@@ -107,16 +103,11 @@
       font-family: 'Roboto', sans-serif; font-size: 15px; color: #4d525e; line-height: 1.65;
     }
     .gk-faq-body-inner { padding: 0 4px 22px 46px; }
-    .gk-del-grid { display: grid; grid-template-columns: repeat(6,1fr); gap: 20px; }
-    .gk-del-sm { grid-column: span 2; }
-    .gk-del-lg { grid-column: span 3; }
     @media (max-width: 991px) {
       .gk-section { padding: 72px 0; } .gk-sh-title { font-size: 30px; }
-      .gk-del-sm, .gk-del-lg { grid-column: span 3; }
     }
     @media (max-width: 767px) {
       .gk-section { padding: 56px 0; } .gk-sh-title { font-size: 26px; }
-      .gk-del-sm, .gk-del-lg { grid-column: span 6; }
     }
 
     /* ── Reporting Readiness Application Modal ──────────────── */
@@ -364,27 +355,26 @@
 
           <!-- H1 -->
           <h1 style="font-family:'Poppins',sans-serif;font-weight:600;font-size:clamp(36px,4.5vw,58px);line-height:1.05;letter-spacing:-0.025em;color:#455A7C;margin:0;">
-            Your impact deserves
-            <span style="font-family:'Lora',serif;font-style:italic;font-weight:500;color:#FF5656;"> more funding</span>
-            than your data can prove today.
+            Turn the impact you already create into
+            <span style="font-family:'Lora',serif;font-style:italic;font-weight:500;color:#FF5656;"> evidence funders can trust</span>.
           </h1>
 
           <!-- Subhead -->
           <p style="margin-top:22px;font-family:'Roboto',sans-serif;font-size:18px;line-height:1.6;color:#455A7C;max-width:600px;">
-            Your team is already creating impact. The problem is proving it. Convert scattered reports, spreadsheets, stories, and program records into clear evidence for stronger funder reporting — without hiring a data team, adding reporting burden, or letting generic AI guess at the value your organization truly creates.
+            Your organization likely already holds much of the information needed to demonstrate its impact. The problem is that it is scattered across reports, spreadsheets, surveys, program records, stories, and staff knowledge.
+          </p>
+          <p style="margin-top:14px;font-family:'Roboto',sans-serif;font-size:16px;line-height:1.65;color:#4d525e;max-width:600px;">
+            Get Kinder helps you organize that information, strengthen what you collect, and build reusable evidence for funder reports, board updates, annual reports, impact communications, and future applications.
           </p>
 
           <!-- CTAs -->
           <div style="margin-top:32px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
-            <a href="/home/book" class="gk-cta-primary gk-cta-primary-lg">
-              Book a Reporting Readiness Call
+            <a href="/home/assessment-offer" class="gk-cta-primary gk-cta-primary-lg" style="width:330px;height:50px;padding:0;justify-content:center;box-sizing:border-box;">
+              Start with a Free Assessment
               <i data-lucide="arrow-right" style="width:16px;height:16px;"></i>
             </a>
-            <a href="/home/how-it-works" class="gk-cta-secondary">See how it works</a>
+            <a href="/home/how-it-works" class="gk-cta-secondary" style="width:165px;height:50px;padding:0;justify-content:center;box-sizing:border-box;">How it Works</a>
           </div>
-          <p style="margin-top:14px;font-family:'Roboto',sans-serif;font-size:13px;color:#6e7280;max-width:520px;line-height:1.55;">
-            The call qualifies fit, confirms reporting needs, and explains what selected design partners receive.
-          </p>
 
           <!-- Trust row -->
           <div style="margin-top:36px;padding-top:22px;border-top:1px solid #ffd9d6;display:flex;align-items:center;gap:18px;flex-wrap:wrap;">
@@ -399,133 +389,41 @@
               <span style="color:#c4c6cc;margin-left:8px;">·</span>
             </div>
             <div style="display:flex;align-items:center;gap:8px;">
-              <i data-lucide="lock" style="width:15px;height:15px;color:#455A7C;"></i>
-              <span style="font-family:'Roboto',sans-serif;font-size:13px;color:#283853;font-weight:500;">Your data stays yours</span>
+              <i data-lucide="shield-check" style="width:15px;height:15px;color:#455A7C;"></i>
+              <span style="font-family:'Roboto',sans-serif;font-size:13px;color:#283853;font-weight:500;">Your evidence stays under your control</span>
             </div>
           </div>
         </div>
 
-        <!-- Right column: Assessment preview -->
+        <!-- Right column: scattered → reviewed → reusable flow -->
         <div class="col-12 col-lg-6">
-          <div style="position:relative;padding:24px 24px 36px 0;">
-            <!-- Back doc (rotated) -->
-            <div style="position:absolute;top:38px;left:44px;right:-20px;bottom:-20px;background:#fff;border-radius:16px;border:1px solid #ececec;transform:rotate(2.2deg);box-shadow:0 12px 32px rgba(31,38,48,.06);"></div>
-            <!-- Tinted page -->
-            <div style="position:absolute;top:22px;left:24px;right:-8px;bottom:-8px;background:#ffe9e6;border-radius:16px;transform:rotate(-1.2deg);"></div>
-            <!-- Front document -->
-            <div style="position:relative;background:#fff;border-radius:16px;border:1px solid #e3e4e8;box-shadow:0 4px 12px rgba(31,38,48,.06),0 24px 48px rgba(31,38,48,.10);overflow:hidden;">
-              <!-- Doc header bar -->
-              <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 22px;border-bottom:1px solid #ececec;background:linear-gradient(180deg,#fff 0%,#fafafa 100%);">
-                <div style="display:flex;align-items:center;gap:10px;">
-                  <div style="width:22px;height:22px;border-radius:6px;background:#FF5656;display:flex;align-items:center;justify-content:center;">
-                    <i data-lucide="file-text" style="width:12px;height:12px;color:#fff;"></i>
-                  </div>
-                  <span style="font-family:'Roboto',sans-serif;font-size:12px;color:#4d525e;font-weight:500;">Get Kinder · Assessment</span>
-                </div>
-                <span style="font-family:'Roboto',sans-serif;font-size:11px;color:#9a9ea7;letter-spacing:0.06em;">v1.0 · DRAFT</span>
-              </div>
-              <!-- Doc body -->
-              <div style="padding:28px 28px 24px;">
-                <div style="font-family:'Roboto',sans-serif;font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:#FF5656;font-weight:600;margin-bottom:10px;">Impact Reporting &amp; Data Readiness Assessment</div>
-                <div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:22px;color:#283853;letter-spacing:-0.01em;line-height:1.25;">
-                  Coquitlam Youth Coalition
-                  <span style="font-family:'Lora',serif;font-style:italic;font-weight:500;color:#455A7C;font-size:18px;display:block;margin-top:2px;">Prepared for Director of Programs</span>
-                </div>
-                <!-- Finding 01 -->
-                <div style="margin-top:22px;border:1px solid #ececec;border-radius:10px;padding:14px 16px;">
-                  <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
-                    <div style="width:22px;height:22px;border-radius:6px;background:#f1f3f7;display:flex;align-items:center;justify-content:center;font-family:'Roboto',sans-serif;font-size:10px;font-weight:600;color:#455A7C;">01</div>
-                    <span style="font-family:'Poppins',sans-serif;font-size:13px;font-weight:500;color:#283853;">Where your data lives today</span>
-                  </div>
-                  <div style="display:flex;flex-direction:column;gap:6px;">
-                    <div style="display:flex;align-items:center;gap:10px;font-family:'Roboto',sans-serif;font-size:12.5px;color:#4d525e;">
-                      <i data-lucide="database" style="width:13px;height:13px;color:#6e7280;"></i>
-                      <span style="flex:1;">8 data sources identified</span>
-                      <span style="font-size:10px;font-weight:500;padding:2px 8px;border-radius:999px;background:#ecf0f5;color:#525f73;">mapped</span>
-                    </div>
-                    <div style="display:flex;align-items:center;gap:10px;font-family:'Roboto',sans-serif;font-size:12.5px;color:#4d525e;">
-                      <i data-lucide="arrow-left-right" style="width:13px;height:13px;color:#6e7280;"></i>
-                      <span style="flex:1;">3 manual handoff points</span>
-                      <span style="font-size:10px;font-weight:500;padding:2px 8px;border-radius:999px;background:#ffeae8;color:#b8443c;">risk</span>
-                    </div>
-                    <div style="display:flex;align-items:center;gap:10px;font-family:'Roboto',sans-serif;font-size:12.5px;color:#4d525e;">
-                      <i data-lucide="alert-triangle" style="width:13px;height:13px;color:#6e7280;"></i>
-                      <span style="flex:1;">2 reporting bottlenecks</span>
-                      <span style="font-size:10px;font-weight:500;padding:2px 8px;border-radius:999px;background:#ffeae8;color:#b8443c;">fix</span>
-                    </div>
-                  </div>
-                </div>
-                <!-- Finding 02 -->
-                <div style="margin-top:10px;border:1px solid #ececec;border-radius:10px;padding:14px 16px;background:#fffaf9;">
-                  <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
-                    <div style="width:22px;height:22px;border-radius:6px;background:#f1f3f7;display:flex;align-items:center;justify-content:center;font-family:'Roboto',sans-serif;font-size:10px;font-weight:600;color:#b8443c;">02</div>
-                    <span style="font-family:'Poppins',sans-serif;font-size:13px;font-weight:500;color:#283853;">What funders may not be able to verify</span>
-                  </div>
-                  <div style="display:flex;flex-direction:column;gap:6px;">
-                    <div style="display:flex;align-items:center;gap:10px;font-family:'Roboto',sans-serif;font-size:12.5px;color:#4d525e;"><i data-lucide="unlink" style="width:13px;height:13px;color:#6e7280;"></i><span>Outcome claims not linked to source data</span></div>
-                    <div style="display:flex;align-items:center;gap:10px;font-family:'Roboto',sans-serif;font-size:12.5px;color:#4d525e;"><i data-lucide="user-x" style="width:13px;height:13px;color:#6e7280;"></i><span>Stories not consent-tagged</span></div>
-                    <div style="display:flex;align-items:center;gap:10px;font-family:'Roboto',sans-serif;font-size:12.5px;color:#4d525e;"><i data-lucide="clock" style="width:13px;height:13px;color:#6e7280;"></i><span>Volunteer hours not tied to programs</span></div>
-                  </div>
-                </div>
-                <!-- Finding 03 — timeline -->
-                <div style="margin-top:10px;border:1px solid #ececec;border-radius:10px;padding:14px 16px;">
-                  <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
-                    <div style="width:22px;height:22px;border-radius:6px;background:#f1f3f7;display:flex;align-items:center;justify-content:center;font-family:'Roboto',sans-serif;font-size:10px;font-weight:600;color:#19c29c;">03</div>
-                    <span style="font-family:'Poppins',sans-serif;font-size:13px;font-weight:500;color:#283853;">12-week path to funder-ready evidence</span>
-                  </div>
-                  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;">
-                    <div style="background:#f1f3f7;border-radius:6px;padding:8px 10px;border-left:3px solid #ffbbbb;"><div style="font-size:10px;color:#6e7280;font-weight:500;">W 1–3</div><div style="font-size:11px;color:#283853;line-height:1.3;">Data map + cleanup</div></div>
-                    <div style="background:#f1f3f7;border-radius:6px;padding:8px 10px;border-left:3px solid #ff8c83;"><div style="font-size:10px;color:#6e7280;font-weight:500;">W 4–6</div><div style="font-size:11px;color:#283853;line-height:1.3;">Evidence architecture</div></div>
-                    <div style="background:#f1f3f7;border-radius:6px;padding:8px 10px;border-left:3px solid #ff5656;"><div style="font-size:10px;color:#6e7280;font-weight:500;">W 7–9</div><div style="font-size:11px;color:#283853;line-height:1.3;">Reporting workflow</div></div>
-                    <div style="background:#f1f3f7;border-radius:6px;padding:8px 10px;border-left:3px solid #455a7c;"><div style="font-size:10px;color:#6e7280;font-weight:500;">W 10–12</div><div style="font-size:11px;color:#283853;line-height:1.3;">Funder-ready report pack</div></div>
-                  </div>
-                </div>
-              </div>
-              <!-- Doc footer -->
-              <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 22px;border-top:1px solid #ececec;background:#fafafa;">
-                <div style="display:flex;align-items:center;gap:8px;">
-                  <i data-lucide="shield-check" style="width:13px;height:13px;color:#19c29c;"></i>
-                  <span style="font-family:'Roboto',sans-serif;font-size:11px;color:#4d525e;">AI-assisted · Human-reviewed</span>
-                </div>
-                <span style="font-family:'Roboto',sans-serif;font-size:11px;color:#9a9ea7;">Page 1 of 12</span>
-              </div>
-            </div>
-            <!-- Floating badge: cohort (bottom right) -->
-            <div style="position:absolute;bottom:-10px;right:4px;z-index:5;background:#FF5656;color:#fff;border-radius:12px;padding:12px 16px;display:flex;align-items:center;gap:12px;box-shadow:0 8px 24px rgba(255,86,86,.28);">
-              <div style="width:36px;height:36px;border-radius:8px;background:#fff;display:flex;align-items:center;justify-content:center;">
-                <img src="/images/favicon.png" alt="Kinder" style="width:32px;height:32px;object-fit:contain;">
-              </div>
+          <div style="display:flex;flex-direction:column;gap:6px;" aria-label="Scattered information becomes reviewed evidence, then stronger reporting">
+            <div style="display:flex;gap:14px;align-items:flex-start;background:#fafafa;border:1px dashed #c4c6cc;border-radius:14px;padding:20px;">
+              <span style="flex-shrink:0;width:40px;height:40px;border-radius:10px;background:#f1f3f7;display:flex;align-items:center;justify-content:center;"><i data-lucide="file-text" style="width:18px;height:18px;color:#6e7280;"></i></span>
               <div>
-                <div style="font-family:'Roboto',sans-serif;font-size:11px;color:rgba(255,255,255,0.78);letter-spacing:0.08em;text-transform:uppercase;font-weight:500;">Cohort 01</div>
-                <div style="font-family:'Poppins',sans-serif;font-size:13px;font-weight:500;color:#fff;">5 design partner slots</div>
+                <div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:16px;color:#283853;">Scattered information</div>
+                <div style="font-family:'Roboto',sans-serif;font-size:13px;color:#6e7280;margin-top:2px;line-height:1.5;">Reports · spreadsheets · surveys · program records · stories · staff knowledge</div>
               </div>
             </div>
-            <!-- Floating badge: sources (top left) -->
-            <div style="position:absolute;top:-4px;left:4px;z-index:5;background:#fff;border-radius:12px;border:1px solid #e3e4e8;padding:10px 14px;box-shadow:0 8px 20px rgba(31,38,48,.08);">
-              <div style="display:flex;align-items:center;gap:10px;">
-                <div style="width:30px;height:30px;border-radius:8px;background:#fff1f0;display:flex;align-items:center;justify-content:center;">
-                  <i data-lucide="folder-tree" style="width:15px;height:15px;color:#FF5656;"></i>
-                </div>
-                <div>
-                  <div style="font-family:'Roboto',sans-serif;font-size:11px;color:#6e7280;letter-spacing:0.04em;">Sources analyzed</div>
-                  <div style="font-family:'Poppins',sans-serif;font-size:15px;font-weight:600;color:#283853;">247 documents · 12 spreadsheets</div>
-                </div>
+            <div style="display:flex;justify-content:center;color:#dcb38c;padding:2px 0;"><i data-lucide="chevron-down" style="width:18px;height:18px;"></i></div>
+            <div style="display:flex;gap:14px;align-items:flex-start;background:#fff;border:1px solid #e3e4e8;border-radius:14px;padding:20px;box-shadow:0 1px 2px rgba(31,38,48,.05);">
+              <span style="flex-shrink:0;width:40px;height:40px;border-radius:10px;background:#fff1f0;display:flex;align-items:center;justify-content:center;"><i data-lucide="user-check" style="width:18px;height:18px;color:#FF5656;"></i></span>
+              <div>
+                <div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:16px;color:#283853;">Reviewed evidence</div>
+                <div style="font-family:'Roboto',sans-serif;font-size:13px;color:#6e7280;margin-top:2px;line-height:1.5;">Understood, reviewed, and connected to what it can support</div>
+              </div>
+            </div>
+            <div style="display:flex;justify-content:center;color:#dcb38c;padding:2px 0;"><i data-lucide="chevron-down" style="width:18px;height:18px;"></i></div>
+            <div style="display:flex;gap:14px;align-items:flex-start;background:#455a7c;border-radius:14px;padding:20px;">
+              <span style="flex-shrink:0;width:40px;height:40px;border-radius:10px;background:rgba(255,86,86,.16);display:flex;align-items:center;justify-content:center;"><i data-lucide="file-text" style="width:18px;height:18px;color:#ff8c83;"></i></span>
+              <div>
+                <div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:16px;color:#fff;">Stronger reporting</div>
+                <div style="font-family:'Roboto',sans-serif;font-size:13px;color:#b5bdcb;margin-top:2px;line-height:1.5;">Funder reports · board updates · annual reports · future applications</div>
               </div>
             </div>
           </div>
         </div>
       </div><!-- /.row -->
-
-      <!-- On this page jump nav -->
-      <nav style="margin-top:80px;padding-top:24px;border-top:1px solid #ffd9d6;display:flex;align-items:center;justify-content:center;gap:36px;flex-wrap:wrap;">
-        <span style="font-family:'Roboto',sans-serif;font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:#FF5656;font-weight:600;">On this page</span>
-        <div style="display:flex;align-items:center;gap:36px;flex-wrap:wrap;">
-          <a href="/home/how-it-works" class="gk-hero-nav-link">How it works</a>
-          <a href="/home/assessment-offer" class="gk-hero-nav-link">Assessment</a>
-          <a href="/home/data-safety" class="gk-hero-nav-link">Data safety</a>
-          <a href="/home/faq" class="gk-hero-nav-link">FAQ</a>
-        </div>
-      </nav>
     </div><!-- /.container -->
   </section>
   <!-- END HERO -->
@@ -574,310 +472,189 @@
         <!-- Left: copy -->
         <div class="col-12 col-lg-6">
           <div class="gk-eyebrow">The problem</div>
-          <h2 style="font-family:'Poppins',sans-serif;font-weight:600;font-size:clamp(26px,3vw,36px);letter-spacing:-0.02em;color:#283853;margin:0;line-height:1.18;">
-            The data funders need is already inside your organization.
-            <span style="font-family:'Lora',serif;font-style:italic;font-weight:500;color:#455A7C;"> It is just not ready to prove your impact.</span>
+          <h2 style="font-family:'Poppins',sans-serif;font-weight:600;font-size:clamp(26px,3vw,36px);letter-spacing:-0.02em;color:#455a7c;margin:0;line-height:1.18;">
+            Your impact is not the problem.
+            <span style="font-family:'Lora',serif;font-style:italic;font-weight:500;color:#FF5656;"> Proving it</span> is.
           </h2>
           <p style="margin-top:22px;font-family:'Roboto',sans-serif;font-size:16px;line-height:1.65;color:#4d525e;">
-            Across B.C., nonprofits are being asked to meet rising demand with limited capacity, insufficient funding, and growing reporting expectations. Your evidence is spread across spreadsheets, grant reports, program notes, email threads, paper forms, survey summaries, staff memory, and stories from the frontline.
+            Most nonprofits are already collecting valuable information. But it lives in different places, uses inconsistent definitions, and rarely connects cleanly to what funders ask organizations to demonstrate.
           </p>
-          <p style="margin-top:18px;font-family:'Roboto',sans-serif;font-size:15.5px;line-height:1.7;color:#4d525e;">That means every funding report becomes a scramble:</p>
-          <ul style="margin:12px 0 0;padding:0;list-style:none;">
-            <% [
-              'program staff chase numbers',
-              'development teams rewrite the same impact language',
-              'leaders struggle to connect activities to outcomes',
-              'funder reports depend on manual reconstruction',
-              'your strongest evidence stays hidden in unstructured sources'
-            ].forEach(function(item) { %>
-            <li style="display:flex;gap:10px;margin-bottom:8px;font-family:'Roboto',sans-serif;font-size:15px;color:#4d525e;">
-              <span style="flex-shrink:0;width:6px;height:6px;border-radius:50%;background:#FF5656;margin-top:9px;"></span>
-              <span><%= item %>;</span>
-            </li>
-            <% }); %>
-          </ul>
+          <p style="margin-top:18px;font-family:'Roboto',sans-serif;font-size:15.5px;line-height:1.7;color:#4d525e;">That creates a familiar cycle:</p>
           <div style="margin-top:22px;padding-left:18px;border-left:3px solid #FF5656;font-family:'Lora',serif;font-style:italic;font-weight:500;font-size:19px;line-height:1.45;color:#455A7C;">
-            The result is not just reporting stress. It is a weaker funding case.
+            The work is real. The evidence system behind it is missing.
           </div>
         </div>
-        <!-- Right: before/after diagram -->
+        <!-- Right: the cycle -->
         <div class="col-12 col-lg-6">
-          <!-- BEFORE -->
-          <div style="background:#fff;border-radius:14px;border:1px solid #e3e4e8;padding:24px;">
-            <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px;">
-              <span style="background:#ffeae8;color:#b8443c;border-radius:999px;padding:3px 10px;font-family:'Roboto',sans-serif;font-size:10px;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;">Today · Unstructured</span>
-              <span style="font-family:'Roboto',sans-serif;font-size:13px;color:#6e7280;">Sources scattered across your organization</span>
+          <div style="display:flex;flex-direction:column;gap:12px;">
+            <% [
+              {icon:'file-search', item:'Every report begins with another search through old files.'},
+              {icon:'brain',       item:'Staff reconstruct results from memory.'},
+              {icon:'search-x',    item:'Important outcomes are underreported because supporting evidence is difficult to find.'},
+              {icon:'puzzle',      item:'Claims are weakened by incomplete, inconsistent, or inaccessible information.'},
+              {icon:'user-minus',  item:'Organizational knowledge disappears when staff or volunteers leave.'}
+            ].forEach(function(row) { %>
+            <div style="display:flex;gap:14px;align-items:center;background:#fff;border:1px solid #e3e4e8;border-radius:12px;padding:16px 18px;">
+              <span style="width:36px;height:36px;border-radius:10px;background:#fff1f0;display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i data-lucide="<%= row.icon %>" style="width:17px;height:17px;color:#FF5656;"></i></span>
+              <span style="font-family:'Roboto',sans-serif;font-size:15px;color:#4d525e;line-height:1.5;"><%= row.item %></span>
             </div>
-            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">
-              <div style="background:#fafafa;border:1px dashed #c4c6cc;border-radius:8px;padding:12px;display:flex;align-items:center;gap:10px;transform:rotate(-0.6deg);"><i data-lucide="table-2" style="width:15px;height:15px;color:#6e7280;flex-shrink:0;"></i><span style="font-family:'Roboto',sans-serif;font-size:13px;color:#4d525e;">Spreadsheets</span></div>
-              <div style="background:#fafafa;border:1px dashed #c4c6cc;border-radius:8px;padding:12px;display:flex;align-items:center;gap:10px;transform:rotate(0.4deg);"><i data-lucide="file-text" style="width:15px;height:15px;color:#6e7280;flex-shrink:0;"></i><span style="font-family:'Roboto',sans-serif;font-size:13px;color:#4d525e;">Old reports</span></div>
-              <div style="background:#fafafa;border:1px dashed #c4c6cc;border-radius:8px;padding:12px;display:flex;align-items:center;gap:10px;transform:rotate(-0.3deg);"><i data-lucide="sticky-note" style="width:15px;height:15px;color:#6e7280;flex-shrink:0;"></i><span style="font-family:'Roboto',sans-serif;font-size:13px;color:#4d525e;">Staff notes</span></div>
-              <div style="background:#fafafa;border:1px dashed #c4c6cc;border-radius:8px;padding:12px;display:flex;align-items:center;gap:10px;transform:rotate(0.6deg);"><i data-lucide="scroll-text" style="width:15px;height:15px;color:#6e7280;flex-shrink:0;"></i><span style="font-family:'Roboto',sans-serif;font-size:13px;color:#4d525e;">Paper forms</span></div>
-              <div style="background:#fafafa;border:1px dashed #c4c6cc;border-radius:8px;padding:12px;display:flex;align-items:center;gap:10px;transform:rotate(-0.5deg);"><i data-lucide="message-circle" style="width:15px;height:15px;color:#6e7280;flex-shrink:0;"></i><span style="font-family:'Roboto',sans-serif;font-size:13px;color:#4d525e;">Stories</span></div>
-              <div style="background:#fafafa;border:1px dashed #c4c6cc;border-radius:8px;padding:12px;display:flex;align-items:center;gap:10px;transform:rotate(0.3deg);"><i data-lucide="mail" style="width:15px;height:15px;color:#6e7280;flex-shrink:0;"></i><span style="font-family:'Roboto',sans-serif;font-size:13px;color:#4d525e;">Emails</span></div>
-            </div>
-          </div>
-          <!-- Arrow -->
-          <div style="display:flex;align-items:center;justify-content:center;padding:22px 0;">
-            <div style="display:flex;align-items:center;gap:10px;background:#283853;color:#fff;border-radius:999px;padding:8px 16px;box-shadow:0 8px 20px rgba(20,30,48,.14);">
-              <i data-lucide="git-merge" style="width:14px;height:14px;color:#ff8c83;"></i>
-              <span style="font-family:'Roboto',sans-serif;font-size:12px;font-weight:500;letter-spacing:0.02em;">Evidence architecture</span>
-              <i data-lucide="arrow-down" style="width:13px;height:13px;color:#b5bdcb;"></i>
-            </div>
-          </div>
-          <!-- AFTER -->
-          <div style="background:#fff;border-radius:14px;border:1px solid #e3e4e8;padding:24px;box-shadow:0 1px 2px rgba(31,38,48,.04),0 8px 24px rgba(31,38,48,.06);">
-            <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px;">
-              <span style="background:#ecf8f5;color:#0f8e72;border-radius:999px;padding:3px 10px;font-family:'Roboto',sans-serif;font-size:10px;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;">After · Structured</span>
-              <span style="font-family:'Roboto',sans-serif;font-size:13px;color:#6e7280;">A defensible chain from work to claim</span>
-            </div>
-            <div style="display:flex;flex-direction:column;gap:8px;">
-              <div style="display:flex;align-items:center;gap:12px;background:#fafafa;border:1px solid #ececec;border-radius:8px;padding:11px 14px;"><div style="width:22px;height:22px;border-radius:6px;background:#455a7c;display:flex;align-items:center;justify-content:center;color:#fff;font-family:'Roboto',sans-serif;font-size:11px;font-weight:600;flex-shrink:0;">1</div><div style="flex:1;font-family:'Poppins',sans-serif;font-size:14px;font-weight:500;color:#283853;">Programs</div><i data-lucide="arrow-down" style="width:13px;height:13px;color:#c4c6cc;opacity:0.7;"></i></div>
-              <div style="display:flex;align-items:center;gap:12px;background:#fafafa;border:1px solid #ececec;border-radius:8px;padding:11px 14px;"><div style="width:22px;height:22px;border-radius:6px;background:#647187;display:flex;align-items:center;justify-content:center;color:#fff;font-family:'Roboto',sans-serif;font-size:11px;font-weight:600;flex-shrink:0;">2</div><div style="flex:1;font-family:'Poppins',sans-serif;font-size:14px;font-weight:500;color:#283853;">Outputs</div><i data-lucide="arrow-down" style="width:13px;height:13px;color:#c4c6cc;opacity:0.7;"></i></div>
-              <div style="display:flex;align-items:center;gap:12px;background:#fafafa;border:1px solid #ececec;border-radius:8px;padding:11px 14px;"><div style="width:22px;height:22px;border-radius:6px;background:#ff8c83;display:flex;align-items:center;justify-content:center;color:#fff;font-family:'Roboto',sans-serif;font-size:11px;font-weight:600;flex-shrink:0;">3</div><div style="flex:1;font-family:'Poppins',sans-serif;font-size:14px;font-weight:500;color:#283853;">Outcomes</div><i data-lucide="arrow-down" style="width:13px;height:13px;color:#c4c6cc;opacity:0.7;"></i></div>
-              <div style="display:flex;align-items:center;gap:12px;background:#fafafa;border:1px solid #ececec;border-radius:8px;padding:11px 14px;"><div style="width:22px;height:22px;border-radius:6px;background:#ff5656;display:flex;align-items:center;justify-content:center;color:#fff;font-family:'Roboto',sans-serif;font-size:11px;font-weight:600;flex-shrink:0;">4</div><div style="flex:1;font-family:'Poppins',sans-serif;font-size:14px;font-weight:500;color:#283853;">Evidence</div><i data-lucide="arrow-down" style="width:13px;height:13px;color:#c4c6cc;opacity:0.7;"></i></div>
-              <div style="display:flex;align-items:center;gap:12px;background:#fafafa;border:1px solid #ececec;border-radius:8px;padding:11px 14px;"><div style="width:22px;height:22px;border-radius:6px;background:#ff5656;display:flex;align-items:center;justify-content:center;color:#fff;font-family:'Roboto',sans-serif;font-size:11px;font-weight:600;flex-shrink:0;">5</div><div style="flex:1;font-family:'Poppins',sans-serif;font-size:14px;font-weight:500;color:#283853;">Claims</div><i data-lucide="arrow-down" style="width:13px;height:13px;color:#c4c6cc;opacity:0.7;"></i></div>
-              <div style="display:flex;align-items:center;gap:12px;background:#fff1f0;border:1px solid #ffd9d6;border-radius:8px;padding:11px 14px;"><div style="width:22px;height:22px;border-radius:6px;background:#283853;display:flex;align-items:center;justify-content:center;color:#fff;font-family:'Roboto',sans-serif;font-size:11px;font-weight:600;flex-shrink:0;">6</div><div style="flex:1;font-family:'Poppins',sans-serif;font-size:14px;font-weight:500;color:#283853;">Funder-ready report</div><i data-lucide="check-circle-2" style="width:15px;height:15px;color:#19c29c;"></i></div>
-            </div>
+            <% }); %>
           </div>
         </div>
-      </div><!-- /.row -->
+      </div>
     </div>
   </section>
 
   <!-- ═══════════════════════════════════════════════════
-       WHY EXISTING SOLUTIONS MISS
+       CORE VALUE
   ═══════════════════════════════════════════════════════ -->
-  <section style="background:#fff;padding:112px 0;">
+  <section style="background:#fff1f0;padding:112px 0;">
     <div class="container" style="max-width:1200px;">
-      <!-- Section header -->
       <div style="margin-bottom:48px;">
-        <div class="gk-eyebrow">The gap in the market</div>
-        <h2 class="gk-sh-title">Why existing solutions miss the <span style="font-family:'Lora',serif;font-style:italic;font-weight:500;color:#455A7C;">real problem.</span></h2>
-        <p class="gk-sh-body" style="max-width:820px;">Enterprise tools are too heavy and costly for many small and medium-sized nonprofits. AI writing tools miss the mark when your data sources are not set up properly. They are guessing — and when they guess, they miss the unique value, relationships, and impact your organization actually provides.</p>
+        <div class="gk-eyebrow">Core value</div>
+        <h2 class="gk-sh-title">Build your evidence once. <span style="font-family:'Lora',serif;font-style:italic;font-weight:500;color:#FF5656;">Strengthen it</span> every reporting cycle.</h2>
+        <p class="gk-sh-body" style="max-width:760px;">Get Kinder helps your organization move from one-off reporting scrambles to a reusable evidence system.</p>
       </div>
-      <!-- 3 cards -->
-      <div class="row g-4 mb-4">
+      <div class="row g-4">
         <% [
-          {cat:'Enterprise tools',             verdict:'Too heavy and costly', icon:'building-2',  body:'Built for larger organizations with budget, staff, and technical capacity. Small and medium-sized nonprofits often need the data architecture before they need another platform.', tags:['$$$','Multi-month onboarding','Requires data team']},
-          {cat:'AI writing tools',             verdict:'Too shallow',          icon:'feather',     body:'They can draft words, but they cannot prove your outcomes if your source data is scattered, incomplete, or disconnected from your programs.',                                    tags:['Draft only','No evidence trail','Guesses outcomes']},
-          {cat:'Traditional reporting support',verdict:'Too manual',           icon:'briefcase',   body:'Consultants can help with reports, but without a reusable evidence structure, the same reporting scramble repeats every funding cycle.',                                      tags:['Project-based','No reuse','Repeats each cycle']}
-        ].forEach(function(c) { %>
-        <div class="col-12 col-md-4">
-          <div style="background:#fff;border:1px solid #e3e4e8;border-radius:14px;padding:28px 26px 24px;height:100%;display:flex;flex-direction:column;">
-            <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px;">
-              <div style="width:38px;height:38px;border-radius:10px;background:#f1f3f7;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
-                <i data-lucide="<%= c.icon %>" style="width:18px;height:18px;color:#455A7C;"></i>
-              </div>
-              <div>
-                <div style="font-family:'Roboto',sans-serif;font-size:11px;color:#6e7280;letter-spacing:0.1em;text-transform:uppercase;font-weight:600;">Category</div>
-                <div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:16px;color:#283853;"><%= c.cat %></div>
-              </div>
-            </div>
-            <div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:22px;color:#b8443c;letter-spacing:-0.01em;margin-bottom:12px;"><%= c.verdict %></div>
-            <p style="font-family:'Roboto',sans-serif;font-size:14px;color:#4d525e;line-height:1.6;flex:1;margin:0 0 20px;"><%= c.body %></p>
-            <div style="display:flex;flex-wrap:wrap;gap:6px;">
-              <% c.tags.forEach(function(t) { %>
-              <span style="background:#fafafa;border:1px solid #ececec;border-radius:999px;padding:3px 10px;font-family:'Roboto',sans-serif;font-size:11px;color:#6e7280;font-weight:500;"><%= t %></span>
-              <% }); %>
-            </div>
+          {icon:'search',        h:'Find what already exists',          p:'Bring together the reports, spreadsheets, program records, surveys, stories, and other information your organization already holds.'},
+          {icon:'bar-chart-3',   h:'See what your evidence can support', p:'Understand which outcomes are well supported, where evidence is incomplete, and which claims still require clarification or review.'},
+          {icon:'pencil',        h:'Improve what you collect',          p:'Introduce practical habits that make important evidence easier to capture before the next report becomes urgent.'},
+          {icon:'check-circle-2',h:'Reuse approved evidence',           p:'Draw from reviewed evidence for funder reports, board materials, annual reports, impact communications, and other approved uses.'}
+        ].forEach(function(b) { %>
+        <div class="col-12 col-sm-6 col-lg-3">
+          <div style="background:#fff;border:1px solid #e3e4e8;border-radius:14px;padding:28px 24px;height:100%;">
+            <div style="width:40px;height:40px;border-radius:10px;background:#fff1f0;display:flex;align-items:center;justify-content:center;margin-bottom:16px;"><i data-lucide="<%= b.icon %>" style="width:18px;height:18px;color:#FF5656;"></i></div>
+            <h3 style="font-family:'Poppins',sans-serif;font-weight:600;font-size:16px;color:#283853;margin:0 0 8px;line-height:1.3;"><%= b.h %></h3>
+            <p style="font-family:'Roboto',sans-serif;font-size:14px;color:#4d525e;line-height:1.6;margin:0;"><%= b.p %></p>
           </div>
         </div>
         <% }); %>
       </div>
-      <!-- Positioning bar -->
-      <div style="background:#283853;border-radius:16px;padding:32px 36px;display:flex;align-items:center;gap:28px;flex-wrap:wrap;">
-        <div style="flex-shrink:0;width:56px;height:56px;border-radius:14px;background:#FF5656;display:flex;align-items:center;justify-content:center;">
-          <i data-lucide="layers" style="width:26px;height:26px;color:#fff;"></i>
-        </div>
-        <div style="flex:1;min-width:240px;">
-          <div style="font-family:'Roboto',sans-serif;font-size:11px;color:#ffbbbb;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;margin-bottom:6px;">Where Get Kinder fits</div>
-          <div style="font-family:'Poppins',sans-serif;font-size:22px;font-weight:500;color:#fff;line-height:1.35;letter-spacing:-0.01em;">
-            Get Kinder.ai starts <em style="font-family:'Lora',serif;font-weight:500;">before</em> the writing. We organize the unstructured evidence behind your impact first, then turn it into reporting funders can trust.
-          </div>
-        </div>
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-          <% ['Data readiness','Evidence architecture','Funder-ready reporting'].forEach(function(step, i, arr) { %>
-          <div style="background:rgba(255,255,255,0.08);color:#fff;border:1px solid rgba(255,255,255,0.12);border-radius:10px;padding:10px 14px;font-family:'Roboto',sans-serif;font-size:12.5px;font-weight:500;white-space:nowrap;"><%= step %></div>
-          <% if (i < arr.length-1) { %><i data-lucide="arrow-right" style="width:14px;height:14px;color:#b5bdcb;"></i><% } %>
-          <% }); %>
-        </div>
-      </div>
-    </div>
-  </section>
-
-
-  <!-- ═══════════════════════════════════════════════════
-       ASSESSMENT OFFER
-  ═══════════════════════════════════════════════════════ -->
-  <section id="assessment" style="background:#fff1f0;padding:112px 0;">
-    <div class="container" style="max-width:1200px;">
-      <div style="margin-bottom:48px;">
-        <div class="gk-eyebrow">The assessment offer</div>
-        <h2 class="gk-sh-title">What selected design partners <span style="font-family:'Lora',serif;font-style:italic;font-weight:500;color:#455A7C;">receive.</span></h2>
-        <p class="gk-sh-body" style="max-width:820px;">The Impact Reporting &amp; Data Readiness Assessment is a 1–2 week review that shows where your impact evidence lives today, what funders may not be able to verify, and what needs to change to make your reporting funding-ready.</p>
-      </div>
-      <!-- Stats row -->
-      <div style="background:#fff;border:1px solid #ffd9d6;border-radius:14px;padding:8px;margin-bottom:36px;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));">
-        <div style="background:#fff;padding:18px;border-right:1px solid #ffd9d6;display:flex;align-items:center;justify-content:center;gap:12px;min-width:0;"><div style="width:36px;height:36px;border-radius:10px;background:#fff1f0;display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i data-lucide="gift" style="width:17px;height:17px;color:#FF5656;"></i></div><div style="min-width:0;"><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:16px;color:#283853;letter-spacing:-0.01em;">No cost</div><div style="font-family:'Roboto',sans-serif;font-size:12px;color:#6e7280;margin-top:2px;">for selected design partners</div></div></div>
-        <div style="background:#fff;padding:18px;border-right:1px solid #ffd9d6;display:flex;align-items:center;justify-content:center;gap:12px;min-width:0;"><div style="width:36px;height:36px;border-radius:10px;background:#fff1f0;display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i data-lucide="calendar-clock" style="width:17px;height:17px;color:#FF5656;"></i></div><div style="min-width:0;"><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:16px;color:#283853;letter-spacing:-0.01em;">1–2 weeks</div><div style="font-family:'Roboto',sans-serif;font-size:12px;color:#6e7280;margin-top:2px;">focused review</div></div></div>
-        <div style="background:#fff;padding:18px;border-right:1px solid #ffd9d6;display:flex;align-items:center;justify-content:center;gap:12px;min-width:0;"><div style="width:36px;height:36px;border-radius:10px;background:#fff1f0;display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i data-lucide="file-text" style="width:17px;height:17px;color:#FF5656;"></i></div><div style="min-width:0;"><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:16px;color:#283853;letter-spacing:-0.01em;">10–15 pages</div><div style="font-family:'Roboto',sans-serif;font-size:12px;color:#6e7280;margin-top:2px;">written assessment</div></div></div>
-        <div style="background:#fff;padding:18px;border-right:1px solid #ffd9d6;display:flex;align-items:center;justify-content:center;gap:12px;min-width:0;"><div style="width:36px;height:36px;border-radius:10px;background:#fff1f0;display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i data-lucide="presentation" style="width:17px;height:17px;color:#FF5656;"></i></div><div style="min-width:0;"><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:16px;color:#283853;letter-spacing:-0.01em;">60-minute</div><div style="font-family:'Roboto',sans-serif;font-size:12px;color:#6e7280;margin-top:2px;">readout presentation</div></div></div>
-        <div style="background:#fff;padding:18px;display:flex;align-items:center;justify-content:center;gap:12px;min-width:0;"><div style="width:36px;height:36px;border-radius:10px;background:#fff1f0;display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i data-lucide="map" style="width:17px;height:17px;color:#FF5656;"></i></div><div style="min-width:0;"><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:16px;color:#283853;letter-spacing:-0.01em;">12-week</div><div style="font-family:'Roboto',sans-serif;font-size:12px;color:#6e7280;margin-top:2px;">implementation roadmap</div></div></div>
-      </div>
-      <!-- Deliverables grid -->
-      <div class="gk-del-grid">
-        <!-- 01 -->
-        <div class="gk-del-sm" style="background:#fff;border:1px solid #e3e4e8;border-radius:14px;padding:28px;display:flex;flex-direction:column;">
-          <div style="display:flex;align-items:flex-start;gap:14px;margin-bottom:14px;"><div style="width:40px;height:40px;border-radius:10px;background:#283853;display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i data-lucide="folder-search" style="width:19px;height:19px;color:#ff8c83;"></i></div><div><div style="font-family:'Roboto',sans-serif;font-size:11px;color:#FF5656;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;margin-bottom:4px;">Deliverable 01</div><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:18px;color:#283853;letter-spacing:-0.01em;line-height:1.3;">Where your impact data lives today</div></div></div>
-          <p style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#4d525e;line-height:1.6;flex:1;margin:0 0 14px;">A practical map of the spreadsheets, documents, paper forms, email threads, tools, and staff-held processes that currently hold your program evidence.</p>
-          <div style="padding:12px 14px;background:#fafafa;border-radius:8px;border:1px solid #ececec;"><div style="font-family:'Roboto',sans-serif;font-size:11px;color:#6e7280;letter-spacing:0.08em;text-transform:uppercase;font-weight:600;margin-bottom:4px;">Includes</div><div style="font-family:'Roboto',sans-serif;font-size:13px;color:#4d525e;line-height:1.5;">Source inventory, screenshots where useful, ownership map, and data-flow diagram.</div></div>
-        </div>
-        <!-- 02 -->
-        <div class="gk-del-sm" style="background:#fff;border:1px solid #e3e4e8;border-radius:14px;padding:28px;display:flex;flex-direction:column;">
-          <div style="display:flex;align-items:flex-start;gap:14px;margin-bottom:14px;"><div style="width:40px;height:40px;border-radius:10px;background:#283853;display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i data-lucide="shield-alert" style="width:19px;height:19px;color:#ff8c83;"></i></div><div><div style="font-family:'Roboto',sans-serif;font-size:11px;color:#FF5656;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;margin-bottom:4px;">Deliverable 02</div><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:18px;color:#283853;letter-spacing:-0.01em;line-height:1.3;">What is missing for funder-grade reporting</div></div></div>
-          <p style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#4d525e;line-height:1.6;flex:1;margin:0 0 14px;">A gap analysis against the types of evidence major funders commonly ask for: activities, outputs, outcomes, demographics, stories, budgets, learning, and impact claims.</p>
-          <div style="padding:12px 14px;background:#fafafa;border-radius:8px;border:1px solid #ececec;"><div style="font-family:'Roboto',sans-serif;font-size:11px;color:#6e7280;letter-spacing:0.08em;text-transform:uppercase;font-weight:600;margin-bottom:4px;">Includes</div><div style="font-family:'Roboto',sans-serif;font-size:13px;color:#4d525e;line-height:1.5;">Missing fields, weak evidence areas, unclear definitions, and reporting gaps.</div></div>
-        </div>
-        <!-- 03 -->
-        <div class="gk-del-sm" style="background:#fff;border:1px solid #e3e4e8;border-radius:14px;padding:28px;display:flex;flex-direction:column;">
-          <div style="display:flex;align-items:flex-start;gap:14px;margin-bottom:14px;"><div style="width:40px;height:40px;border-radius:10px;background:#283853;display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i data-lucide="alert-octagon" style="width:19px;height:19px;color:#ff8c83;"></i></div><div><div style="font-family:'Roboto',sans-serif;font-size:11px;color:#FF5656;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;margin-bottom:4px;">Deliverable 03</div><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:18px;color:#283853;letter-spacing:-0.01em;line-height:1.3;">Your top 3 reporting risks</div></div></div>
-          <p style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#4d525e;line-height:1.6;flex:1;margin:0 0 14px;">A clear view of the specific issues that could weaken a grant narrative, create inconsistent reporting, or make impact claims harder to substantiate.</p>
-          <div style="padding:12px 14px;background:#fafafa;border-radius:8px;border:1px solid #ececec;"><div style="font-family:'Roboto',sans-serif;font-size:11px;color:#6e7280;letter-spacing:0.08em;text-transform:uppercase;font-weight:600;margin-bottom:4px;">Includes</div><div style="font-family:'Roboto',sans-serif;font-size:13px;color:#4d525e;line-height:1.5;">Example: volunteer hours tracked overall, but not tied to specific programs or outcomes.</div></div>
-        </div>
-        <!-- 04 -->
-        <div class="gk-del-lg" style="background:#fff;border:1px solid #e3e4e8;border-radius:14px;padding:28px;display:flex;flex-direction:column;">
-          <div style="display:flex;align-items:flex-start;gap:14px;margin-bottom:14px;"><div style="width:40px;height:40px;border-radius:10px;background:#283853;display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i data-lucide="git-fork" style="width:19px;height:19px;color:#ff8c83;"></i></div><div><div style="font-family:'Roboto',sans-serif;font-size:11px;color:#FF5656;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;margin-bottom:4px;">Deliverable 04</div><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:18px;color:#283853;letter-spacing:-0.01em;line-height:1.3;">What clean evidence architecture could look like</div></div></div>
-          <p style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#4d525e;line-height:1.6;flex:1;margin:0 0 14px;">A tailored target-state diagram showing how your programs, outcomes, data sources, stories, claims, and reports should connect.</p>
-          <div style="padding:12px 14px;background:#fafafa;border-radius:8px;border:1px solid #ececec;"><div style="font-family:'Roboto',sans-serif;font-size:11px;color:#6e7280;letter-spacing:0.08em;text-transform:uppercase;font-weight:600;margin-bottom:4px;">Includes</div><div style="font-family:'Roboto',sans-serif;font-size:13px;color:#4d525e;line-height:1.5;">Source-of-truth recommendations, evidence categories, reporting flow, and human review checkpoints.</div></div>
-        </div>
-        <!-- 05 -->
-        <div class="gk-del-lg" style="background:#fff;border:1px solid #e3e4e8;border-radius:14px;padding:28px;display:flex;flex-direction:column;">
-          <div style="display:flex;align-items:flex-start;gap:14px;margin-bottom:14px;"><div style="width:40px;height:40px;border-radius:10px;background:#283853;display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i data-lucide="route" style="width:19px;height:19px;color:#ff8c83;"></i></div><div><div style="font-family:'Roboto',sans-serif;font-size:11px;color:#FF5656;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;margin-bottom:4px;">Deliverable 05</div><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:18px;color:#283853;letter-spacing:-0.01em;line-height:1.3;">The 12-week path to get there</div></div></div>
-          <p style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#4d525e;line-height:1.6;flex:1;margin:0 0 14px;">A phased roadmap showing how to move from today's unstructured data environment to a stronger evidence and reporting system.</p>
-          <div style="padding:12px 14px;background:#fafafa;border-radius:8px;border:1px solid #ececec;"><div style="font-family:'Roboto',sans-serif;font-size:11px;color:#6e7280;letter-spacing:0.08em;text-transform:uppercase;font-weight:600;margin-bottom:4px;">Includes</div><div style="font-family:'Roboto',sans-serif;font-size:13px;color:#4d525e;line-height:1.5;">Priority fixes, quick wins, implementation phases, and where Get Kinder.ai can support execution.</div></div>
-        </div>
-      </div>
-      <div style="margin-top:40px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
-        <a href="/home/book" class="gk-cta-primary gk-cta-primary-lg">Book a Reporting Readiness Call <i data-lucide="arrow-right" style="width:16px;height:16px;"></i></a>
-        <span style="font-family:'Roboto',sans-serif;font-size:13.5px;color:#6e7280;line-height:1.5;">The call confirms fit before any materials are reviewed.</span>
-      </div>
     </div>
   </section>
 
   <!-- ═══════════════════════════════════════════════════
-       HOW IT WORKS
+       THE GET KINDER SYSTEM
   ═══════════════════════════════════════════════════════ -->
-  <section id="how" style="background:#fff;padding:112px 0;">
+  <section id="system" style="background:#fff;padding:112px 0;">
     <div class="container" style="max-width:1200px;">
       <div style="margin-bottom:48px;">
-        <div class="gk-eyebrow">How it works</div>
-        <h2 class="gk-sh-title">How the design partner <span style="font-family:'Lora',serif;font-style:italic;font-weight:500;color:#455A7C;">process works.</span></h2>
-        <p class="gk-sh-body" style="max-width:720px;">Six clear steps from first call to readout. No surprises, no commitments before fit is confirmed.</p>
+        <div class="gk-eyebrow">The Get Kinder system</div>
+        <h2 class="gk-sh-title">A working system for turning <span style="font-family:'Lora',serif;font-style:italic;font-weight:500;color:#FF5656;">information into evidence</span>.</h2>
+        <p class="gk-sh-body" style="max-width:800px;">Get Kinder combines a guided Assessment, a practical Knowledge Studio, a reusable Impact Evidence Library, and Kinder AI™. Each part solves a different part of the reporting problem.</p>
       </div>
       <div class="row g-4">
-        <div class="col-12 col-md-6 col-lg-4"><div style="background:#fff;border:1px solid #e3e4e8;border-radius:14px;padding:24px;height:100%;"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;"><div style="width:38px;height:38px;border-radius:10px;background:#fff1f0;display:flex;align-items:center;justify-content:center;"><i data-lucide="edit-3" style="width:18px;height:18px;color:#FF5656;"></i></div><span style="font-family:'Poppins',sans-serif;font-weight:600;font-size:38px;color:#f1f3f7;letter-spacing:-0.04em;line-height:1;">01</span></div><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:17px;color:#283853;margin-bottom:8px;line-height:1.3;">Apply for a Reporting Readiness Call</div><p style="font-family:'Roboto',sans-serif;font-size:14px;color:#4d525e;line-height:1.6;margin:0;">Complete a short qualification form so we can understand your organization, funding context, reporting needs, and data readiness.</p></div></div>
-        <div class="col-12 col-md-6 col-lg-4"><div style="background:#fff;border:1px solid #e3e4e8;border-radius:14px;padding:24px;height:100%;"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;"><div style="width:38px;height:38px;border-radius:10px;background:#fff1f0;display:flex;align-items:center;justify-content:center;"><i data-lucide="phone" style="width:18px;height:18px;color:#FF5656;"></i></div><span style="font-family:'Poppins',sans-serif;font-weight:600;font-size:38px;color:#f1f3f7;letter-spacing:-0.04em;line-height:1;">02</span></div><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:17px;color:#283853;margin-bottom:8px;line-height:1.3;">Confirm fit on a 30-minute call</div><p style="font-family:'Roboto',sans-serif;font-size:14px;color:#4d525e;line-height:1.6;margin:0;">The call qualifies fit, confirms expectations, and identifies whether the no-cost assessment is likely to create value.</p></div></div>
-        <div class="col-12 col-md-6 col-lg-4"><div style="background:#fff;border:1px solid #e3e4e8;border-radius:14px;padding:24px;height:100%;"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;"><div style="width:38px;height:38px;border-radius:10px;background:#fff1f0;display:flex;align-items:center;justify-content:center;"><i data-lucide="file-signature" style="width:18px;height:18px;color:#FF5656;"></i></div><span style="font-family:'Poppins',sans-serif;font-weight:600;font-size:38px;color:#f1f3f7;letter-spacing:-0.04em;line-height:1;">03</span></div><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:17px;color:#283853;margin-bottom:8px;line-height:1.3;">Sign data handling agreement</div><p style="font-family:'Roboto',sans-serif;font-size:14px;color:#4d525e;line-height:1.6;margin:0;">Before reviewing materials, we confirm how your data will be handled, what should be excluded, and what can be safely reviewed.</p></div></div>
-        <div class="col-12 col-md-6 col-lg-4"><div style="background:#fff;border:1px solid #e3e4e8;border-radius:14px;padding:24px;height:100%;"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;"><div style="width:38px;height:38px;border-radius:10px;background:#fff1f0;display:flex;align-items:center;justify-content:center;"><i data-lucide="upload-cloud" style="width:18px;height:18px;color:#FF5656;"></i></div><span style="font-family:'Poppins',sans-serif;font-weight:600;font-size:38px;color:#f1f3f7;letter-spacing:-0.04em;line-height:1;">04</span></div><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:17px;color:#283853;margin-bottom:8px;line-height:1.3;">Share selected reporting materials</div><p style="font-family:'Roboto',sans-serif;font-size:14px;color:#4d525e;line-height:1.6;margin:0;">You provide a focused set of documents and data sources: past reports, funder templates, spreadsheets, program summaries, survey results, and anonymized stories where appropriate.</p></div></div>
-        <div class="col-12 col-md-6 col-lg-4"><div style="background:#fff;border:1px solid #e3e4e8;border-radius:14px;padding:24px;height:100%;"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;"><div style="width:38px;height:38px;border-radius:10px;background:#fff1f0;display:flex;align-items:center;justify-content:center;"><i data-lucide="file-text" style="width:18px;height:18px;color:#FF5656;"></i></div><span style="font-family:'Poppins',sans-serif;font-weight:600;font-size:38px;color:#f1f3f7;letter-spacing:-0.04em;line-height:1;">05</span></div><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:17px;color:#283853;margin-bottom:8px;line-height:1.3;">Receive your assessment</div><p style="font-family:'Roboto',sans-serif;font-size:14px;color:#4d525e;line-height:1.6;margin:0;">Within 1–2 weeks, selected design partners receive a 10–15 page Impact Reporting &amp; Data Readiness Assessment.</p></div></div>
-        <div class="col-12 col-md-6 col-lg-4"><div style="background:#fff;border:1px solid #e3e4e8;border-radius:14px;padding:24px;height:100%;"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;"><div style="width:38px;height:38px;border-radius:10px;background:#fff1f0;display:flex;align-items:center;justify-content:center;"><i data-lucide="presentation" style="width:18px;height:18px;color:#FF5656;"></i></div><span style="font-family:'Poppins',sans-serif;font-weight:600;font-size:38px;color:#f1f3f7;letter-spacing:-0.04em;line-height:1;">06</span></div><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:17px;color:#283853;margin-bottom:8px;line-height:1.3;">Attend the readout presentation</div><p style="font-family:'Roboto',sans-serif;font-size:14px;color:#4d525e;line-height:1.6;margin:0;">We walk through the findings, risks, recommended evidence architecture, and 12-week path to implementation.</p></div></div>
-      </div>
-      <div style="margin-top:36px;padding:20px 24px;background:#f1f3f7;border-radius:12px;display:flex;align-items:flex-start;gap:14px;">
-        <i data-lucide="info" style="width:18px;height:18px;color:#455A7C;margin-top:2px;flex-shrink:0;"></i>
-        <p style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#455A7C;line-height:1.55;margin:0;"><strong style="font-weight:600;">Note.</strong> The assessment is not full implementation. It is designed to show what is holding your reporting back and what needs to happen next.</p>
+        <div class="col-12 col-md-4">
+          <div style="background:#fff;border:1px solid #e3e4e8;border-radius:14px;padding:28px;height:100%;">
+            <div style="width:40px;height:40px;border-radius:10px;background:#f1f3f7;display:flex;align-items:center;justify-content:center;margin-bottom:16px;"><i data-lucide="monitor" style="width:18px;height:18px;color:#455A7C;"></i></div>
+            <div style="font-family:'Roboto',sans-serif;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:#FF5656;font-weight:600;margin-bottom:8px;">Knowledge Studio</div>
+            <h3 style="font-family:'Poppins',sans-serif;font-weight:600;font-size:17px;color:#283853;margin:0 0 10px;line-height:1.3;">Organize what you have. Improve what happens next.</h3>
+            <p style="font-family:'Roboto',sans-serif;font-size:14px;color:#4d525e;line-height:1.6;margin:0 0 10px;">The Knowledge Studio is where your organization can see what it has shared, understand what the information can support, resolve important questions, and follow practical steps for improving future evidence capture.</p>
+            <p style="font-family:'Roboto',sans-serif;font-size:14px;color:#4d525e;line-height:1.6;margin:0;">It is not intended to run your programs. It helps your team structure how it captures, reviews, and uses evidence of program impact.</p>
+          </div>
+        </div>
+        <div class="col-12 col-md-4">
+          <div style="background:#fff;border:1px solid #e3e4e8;border-radius:14px;padding:28px;height:100%;">
+            <div style="width:40px;height:40px;border-radius:10px;background:#f1f3f7;display:flex;align-items:center;justify-content:center;margin-bottom:16px;"><i data-lucide="database" style="width:18px;height:18px;color:#455A7C;"></i></div>
+            <div style="font-family:'Roboto',sans-serif;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:#FF5656;font-weight:600;margin-bottom:8px;">Impact Evidence Library</div>
+            <h3 style="font-family:'Poppins',sans-serif;font-weight:600;font-size:17px;color:#283853;margin:0 0 10px;line-height:1.3;">Keep reviewed evidence ready for appropriate reuse.</h3>
+            <p style="font-family:'Roboto',sans-serif;font-size:14px;color:#4d525e;line-height:1.6;margin:0 0 10px;">When information is understood, reviewed, and approved for use, eligible evidence can become part of your Impact Evidence Library.</p>
+            <p style="font-family:'Roboto',sans-serif;font-size:14px;color:#4d525e;line-height:1.6;margin:0;">The Library preserves important sources, definitions, limitations, review decisions, and permitted uses so your organization does not have to rediscover them during every reporting cycle.</p>
+          </div>
+        </div>
+        <div class="col-12 col-md-4">
+          <div style="background:#455a7c;border-radius:14px;padding:28px;height:100%;">
+            <div style="width:40px;height:40px;border-radius:10px;background:rgba(255,86,86,.16);display:flex;align-items:center;justify-content:center;margin-bottom:16px;"><i data-lucide="sparkles" style="width:18px;height:18px;color:#ff8c83;"></i></div>
+            <div style="font-family:'Roboto',sans-serif;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:#ff8c83;font-weight:600;margin-bottom:8px;">Kinder AI™ (KAI)</div>
+            <h3 style="font-family:'Poppins',sans-serif;font-weight:600;font-size:17px;color:#fff;margin:0 0 10px;line-height:1.3;">KAI assists. Your organization decides.</h3>
+            <p style="font-family:'Roboto',sans-serif;font-size:14px;color:#dfe3ec;line-height:1.6;margin:0 0 10px;">Kinder AI™ (KAI) is the AI built into the Knowledge Studio. KAI helps users understand findings, identify gaps and inconsistencies, answer questions, and work with evidence eligible for the intended use.</p>
+            <p style="font-family:'Roboto',sans-serif;font-size:14px;color:#dfe3ec;line-height:1.6;margin:0 0 10px;">KAI does not independently determine organizational truth or approve your organization's evidence and claims. Your authorized team remains responsible for definitions, interpretations, conclusions, approvals, and permitted uses.</p>
+            <p style="font-family:'Roboto',sans-serif;font-size:14px;color:#dfe3ec;line-height:1.6;margin:0;">KAI is part of the Knowledge Studio — not a companion, character, mascot, or separate product.</p>
+          </div>
+        </div>
       </div>
     </div>
   </section>
 
   <!-- ═══════════════════════════════════════════════════
-       BEFORE / AFTER
+       PROCESS
   ═══════════════════════════════════════════════════════ -->
-  <section style="background:#f4f4f4;padding:112px 0;">
+  <section id="how" style="background:#f4f4f4;padding:112px 0;">
     <div class="container" style="max-width:1200px;">
-      <div style="margin-bottom:48px;">
-        <div class="gk-eyebrow">The shift</div>
-        <h2 class="gk-sh-title">From reporting scramble <span style="font-family:'Lora',serif;font-style:italic;font-weight:500;color:#455A7C;">to funding-ready evidence.</span></h2>
-        <p class="gk-sh-body" style="max-width:720px;">What changes when your evidence has a structure your funders can verify and your team can reuse.</p>
+      <div style="margin-bottom:32px;">
+        <div class="gk-eyebrow">Process</div>
+        <h2 class="gk-sh-title">From scattered records to <span style="font-family:'Lora',serif;font-style:italic;font-weight:500;color:#FF5656;">reusable evidence</span>.</h2>
+      </div>
+      <div style="display:flex;align-items:center;gap:16px;margin-bottom:32px;flex-wrap:wrap;">
+        <% ['Understand','Build','Reuse'].forEach(function(w, i, arr) { %>
+        <span style="font-family:'Poppins',sans-serif;font-weight:600;font-size:22px;color:#283853;"><%= w %></span>
+        <% if (i < arr.length-1) { %><i data-lucide="arrow-right" style="width:18px;height:18px;color:#dcb38c;"></i><% } %>
+        <% }); %>
       </div>
       <div class="row g-4">
-        <!-- Before -->
-        <div class="col-12 col-md-6 d-flex">
-          <div style="background:#fff;border-radius:16px;border:1px solid #e3e4e8;padding:32px;width:100%;height:100%;">
-            <div style="display:flex;align-items:center;gap:10px;margin-bottom:20px;padding-bottom:18px;border-bottom:1px solid #ececec;">
-              <div style="width:32px;height:32px;border-radius:8px;background:#ffeae8;display:flex;align-items:center;justify-content:center;"><i data-lucide="alert-triangle" style="width:16px;height:16px;color:#b8443c;"></i></div>
-              <div><div style="font-family:'Roboto',sans-serif;font-size:11px;color:#b8443c;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;">Before</div><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:18px;color:#283853;">Reporting scramble</div></div>
-            </div>
-            <div style="display:flex;flex-direction:column;gap:12px;">
-              <div style="display:flex;align-items:flex-start;gap:12px;"><i data-lucide="x" style="width:16px;height:16px;color:#b8443c;margin-top:2px;flex-shrink:0;"></i><span style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#4d525e;line-height:1.5;">Data spread across documents, spreadsheets, forms, and staff memory</span></div>
-              <div style="display:flex;align-items:flex-start;gap:12px;"><i data-lucide="x" style="width:16px;height:16px;color:#b8443c;margin-top:2px;flex-shrink:0;"></i><span style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#4d525e;line-height:1.5;">Reports rebuilt manually every cycle</span></div>
-              <div style="display:flex;align-items:flex-start;gap:12px;"><i data-lucide="x" style="width:16px;height:16px;color:#b8443c;margin-top:2px;flex-shrink:0;"></i><span style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#4d525e;line-height:1.5;">Impact stories hard to connect to outcomes</span></div>
-              <div style="display:flex;align-items:flex-start;gap:12px;"><i data-lucide="x" style="width:16px;height:16px;color:#b8443c;margin-top:2px;flex-shrink:0;"></i><span style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#4d525e;line-height:1.5;">Claims not consistently tied to source evidence</span></div>
-              <div style="display:flex;align-items:flex-start;gap:12px;"><i data-lucide="x" style="width:16px;height:16px;color:#b8443c;margin-top:2px;flex-shrink:0;"></i><span style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#4d525e;line-height:1.5;">Staff pulled away from program work to chase information</span></div>
-              <div style="display:flex;align-items:flex-start;gap:12px;"><i data-lucide="x" style="width:16px;height:16px;color:#b8443c;margin-top:2px;flex-shrink:0;"></i><span style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#4d525e;line-height:1.5;">Generic AI guesses from incomplete context</span></div>
-            </div>
+        <% [
+          {n:'1', h:'Understand what you already have', p:['We begin with the information, reporting requirements, and evidence practices surrounding one or two priority programs.','The goal is to identify useful sources, reporting risks, missing definitions, and the strongest opportunities for improvement.']},
+          {n:'2', h:'Build your evidence foundation',    p:['Existing information is organized, reviewed, and connected to the programs, activities, outputs, and outcomes it can appropriately support.','Practical improvements are identified for evidence that is currently difficult or impossible to capture.']},
+          {n:'3', h:'Reuse evidence with confidence',    p:['Reviewed and approved evidence can support future reports and communications without requiring your team to reconstruct the entire story from the beginning.']}
+        ].forEach(function(s) { %>
+        <div class="col-12 col-md-4">
+          <div style="background:#fff;border:1px solid #e3e4e8;border-radius:14px;padding:24px;height:100%;">
+            <span style="font-family:'Poppins',sans-serif;font-weight:800;font-size:38px;color:#f1f3f7;letter-spacing:-0.04em;line-height:1;"><%= s.n %></span>
+            <h3 style="font-family:'Poppins',sans-serif;font-weight:600;font-size:17px;color:#283853;margin:8px 0;line-height:1.3;"><%= s.h %></h3>
+            <% s.p.forEach(function(t) { %><p style="font-family:'Roboto',sans-serif;font-size:14px;color:#4d525e;line-height:1.6;margin:0 0 8px;"><%= t %></p><% }); %>
           </div>
         </div>
-        <!-- After -->
-        <div class="col-12 col-md-6 d-flex">
-          <div style="background:#283853;border-radius:16px;padding:32px;position:relative;overflow:hidden;width:100%;height:100%;">
-            <div style="position:absolute;top:-60px;right:-60px;width:200px;height:200px;border-radius:50%;background:#FF5656;opacity:0.12;pointer-events:none;"></div>
-            <div style="display:flex;align-items:center;gap:10px;margin-bottom:20px;padding-bottom:18px;border-bottom:1px solid rgba(255,255,255,0.1);position:relative;">
-              <div style="width:32px;height:32px;border-radius:8px;background:#FF5656;display:flex;align-items:center;justify-content:center;"><i data-lucide="check-circle-2" style="width:16px;height:16px;color:#fff;"></i></div>
-              <div><div style="font-family:'Roboto',sans-serif;font-size:11px;color:#ffbbbb;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;">After</div><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:18px;color:#fff;">Funder-ready evidence</div></div>
-            </div>
-            <div style="display:flex;flex-direction:column;gap:12px;position:relative;">
-              <div style="display:flex;align-items:flex-start;gap:12px;"><i data-lucide="check" style="width:16px;height:16px;color:#ff8c83;margin-top:2px;flex-shrink:0;"></i><span style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#dfe3ec;line-height:1.5;">Clear map of where impact evidence lives</span></div>
-              <div style="display:flex;align-items:flex-start;gap:12px;"><i data-lucide="check" style="width:16px;height:16px;color:#ff8c83;margin-top:2px;flex-shrink:0;"></i><span style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#dfe3ec;line-height:1.5;">Reporting gaps and risks identified</span></div>
-              <div style="display:flex;align-items:flex-start;gap:12px;"><i data-lucide="check" style="width:16px;height:16px;color:#ff8c83;margin-top:2px;flex-shrink:0;"></i><span style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#dfe3ec;line-height:1.5;">Funder-ready evidence structure defined</span></div>
-              <div style="display:flex;align-items:flex-start;gap:12px;"><i data-lucide="check" style="width:16px;height:16px;color:#ff8c83;margin-top:2px;flex-shrink:0;"></i><span style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#dfe3ec;line-height:1.5;">Claims connected to programs, outputs, outcomes, and stories</span></div>
-              <div style="display:flex;align-items:flex-start;gap:12px;"><i data-lucide="check" style="width:16px;height:16px;color:#ff8c83;margin-top:2px;flex-shrink:0;"></i><span style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#dfe3ec;line-height:1.5;">12-week roadmap to reduce reporting burden</span></div>
-              <div style="display:flex;align-items:flex-start;gap:12px;"><i data-lucide="check" style="width:16px;height:16px;color:#ff8c83;margin-top:2px;flex-shrink:0;"></i><span style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#dfe3ec;line-height:1.5;">AI-assisted workflows grounded in your actual data</span></div>
-            </div>
-          </div>
-        </div>
+        <% }); %>
       </div>
     </div>
   </section>
 
   <!-- ═══════════════════════════════════════════════════
-       WHO THIS IS FOR
+       CUSTOMER OUTCOMES
   ═══════════════════════════════════════════════════════ -->
   <section style="background:#fff;padding:112px 0;">
     <div class="container" style="max-width:1200px;">
       <div style="margin-bottom:48px;">
-        <div class="gk-eyebrow">Who this is for</div>
-        <h2 class="gk-sh-title">Built for small and medium-sized nonprofits <span style="font-family:'Lora',serif;font-style:italic;font-weight:500;color:#455A7C;">with real reporting pressure.</span></h2>
+        <div class="gk-eyebrow">Customer outcomes</div>
+        <h2 class="gk-sh-title">Spend less time reconstructing. <span style="font-family:'Lora',serif;font-style:italic;font-weight:500;color:#FF5656;">Make more</span> of the evidence you already have.</h2>
       </div>
       <div class="row g-4">
-        <div class="col-12 col-sm-6 col-lg-3"><div style="background:#fff;border:1px solid #e3e4e8;border-radius:14px;padding:28px 24px;height:100%;"><div style="display:inline-flex;align-items:center;gap:6px;background:#ecf8f5;color:#0f8e72;border-radius:999px;padding:4px 10px 4px 8px;margin-bottom:18px;font-family:'Roboto',sans-serif;font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;"><i data-lucide="check" style="width:12px;height:12px;color:#0f8e72;"></i>Strong fit</div><div style="width:40px;height:40px;border-radius:10px;background:#f1f3f7;display:flex;align-items:center;justify-content:center;margin-bottom:16px;"><i data-lucide="banknote" style="width:18px;height:18px;color:#455A7C;"></i></div><p style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#283853;line-height:1.55;margin:0;">You receive or are pursuing grant, foundation, government, or institutional funding.</p></div></div>
-        <div class="col-12 col-sm-6 col-lg-3"><div style="background:#fff;border:1px solid #e3e4e8;border-radius:14px;padding:28px 24px;height:100%;"><div style="display:inline-flex;align-items:center;gap:6px;background:#ecf8f5;color:#0f8e72;border-radius:999px;padding:4px 10px 4px 8px;margin-bottom:18px;font-family:'Roboto',sans-serif;font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;"><i data-lucide="check" style="width:12px;height:12px;color:#0f8e72;"></i>Strong fit</div><div style="width:40px;height:40px;border-radius:10px;background:#f1f3f7;display:flex;align-items:center;justify-content:center;margin-bottom:16px;"><i data-lucide="database" style="width:18px;height:18px;color:#455A7C;"></i></div><p style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#283853;line-height:1.55;margin:0;">Your impact evidence is spread across spreadsheets, reports, stories, surveys, program tools, or staff knowledge.</p></div></div>
-        <div class="col-12 col-sm-6 col-lg-3"><div style="background:#fff;border:1px solid #e3e4e8;border-radius:14px;padding:28px 24px;height:100%;"><div style="display:inline-flex;align-items:center;gap:6px;background:#ecf8f5;color:#0f8e72;border-radius:999px;padding:4px 10px 4px 8px;margin-bottom:18px;font-family:'Roboto',sans-serif;font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;"><i data-lucide="check" style="width:12px;height:12px;color:#0f8e72;"></i>Strong fit</div><div style="width:40px;height:40px;border-radius:10px;background:#f1f3f7;display:flex;align-items:center;justify-content:center;margin-bottom:16px;"><i data-lucide="calendar-days" style="width:18px;height:18px;color:#455A7C;"></i></div><p style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#283853;line-height:1.55;margin:0;">You have reporting deadlines, renewals, or funding asks coming up in the next 3–6 months.</p></div></div>
-        <div class="col-12 col-sm-6 col-lg-3"><div style="background:#fafafa;border:1px dashed #c4c6cc;border-radius:14px;padding:28px 24px;height:100%;"><div style="display:inline-flex;align-items:center;gap:6px;background:#ececec;color:#4d525e;border-radius:999px;padding:4px 10px 4px 8px;margin-bottom:18px;font-family:'Roboto',sans-serif;font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;"><i data-lucide="circle-slash" style="width:12px;height:12px;color:#4d525e;"></i>Not the right fit</div><div style="width:40px;height:40px;border-radius:10px;background:#ececec;display:flex;align-items:center;justify-content:center;margin-bottom:16px;"><i data-lucide="circle-help" style="width:18px;height:18px;color:#6e7280;"></i></div><p style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#4d525e;line-height:1.55;margin:0;">You do not currently report to funders, cannot share any reporting materials, or are not ready to review how your data supports your funding case.</p></div></div>
-      </div>
-      <div style="margin-top:24px;padding:16px 20px;background:#fff1f0;border-radius:10px;display:flex;align-items:flex-start;gap:12px;">
-        <i data-lucide="star" style="width:16px;height:16px;color:#FF5656;margin-top:2px;flex-shrink:0;"></i>
-        <p style="font-family:'Roboto',sans-serif;font-size:14px;color:#4d525e;line-height:1.55;margin:0;"><strong style="color:#283853;font-weight:600;">Priority</strong> will be given to nonprofits where stronger reporting evidence could directly support upcoming funder reporting, grant renewal, or funding conversations.</p>
+        <% [
+          {icon:'clock',       h:'Reduce the reporting scramble',                       p:'Stop beginning every report with another search through old documents, emails, and spreadsheets.'},
+          {icon:'link-2',      h:'Strengthen funding conversations',                    p:'Give funders a clearer connection between your programs, the work delivered, the outcomes observed, and the evidence supporting those outcomes.'},
+          {icon:'users',       h:'Preserve organizational knowledge',                   p:'Keep important definitions, sources, findings, and review decisions from disappearing when staff or volunteers change.'},
+          {icon:'search',      h:'Find gaps before they become emergencies',            p:'Identify missing evidence early enough to improve future collection instead of discovering the problem immediately before a deadline.'},
+          {icon:'map',         h:'Create consistency without flattening your work',      p:'Use a more consistent evidence structure while preserving the context that makes each program and community different.'},
+          {icon:'bar-chart-3', h:'Build an asset that becomes more valuable',           p:"Every reviewed source and improved evidence-capture practice strengthens the organization's evidence foundation for future reporting cycles."}
+        ].forEach(function(o) { %>
+        <div class="col-12 col-sm-6 col-lg-4">
+          <div style="background:#fff;border:1px solid #e3e4e8;border-radius:14px;padding:24px;height:100%;">
+            <div style="width:36px;height:36px;border-radius:10px;background:#fff1f0;display:flex;align-items:center;justify-content:center;margin-bottom:14px;"><i data-lucide="<%= o.icon %>" style="width:17px;height:17px;color:#FF5656;"></i></div>
+            <h3 style="font-family:'Poppins',sans-serif;font-weight:600;font-size:16px;color:#283853;margin:0 0 8px;line-height:1.3;"><%= o.h %></h3>
+            <p style="font-family:'Roboto',sans-serif;font-size:14px;color:#4d525e;line-height:1.6;margin:0;"><%= o.p %></p>
+          </div>
+        </div>
+        <% }); %>
       </div>
     </div>
   </section>
 
-
   <!-- ═══════════════════════════════════════════════════
-       DATA TRUST
+       TRUST AND CONTROL / DATA SAFETY
   ═══════════════════════════════════════════════════════ -->
   <section id="trust" style="background:#283853;padding:112px 0;">
     <div class="container" style="max-width:1200px;">
       <div class="row g-5 align-items-start">
         <!-- Left -->
         <div class="col-12 col-lg-5">
-          <div class="gk-eyebrow gk-eyebrow-dark">Data handling &amp; trust</div>
+          <div class="gk-eyebrow gk-eyebrow-dark">Trust and control</div>
           <h2 style="font-family:'Poppins',sans-serif;font-weight:600;font-size:clamp(26px,3vw,38px);letter-spacing:-0.02em;color:#fff;margin:0;line-height:1.15;">
-            Your data stays yours.
-            <span style="font-family:'Lora',serif;font-style:italic;font-weight:500;color:#ffbbbb;"> Your trust comes first.</span>
+            Your evidence. Your judgment.
+            <span style="font-family:'Lora',serif;font-style:italic;font-weight:500;color:#ffbbbb;"> Your control.</span>
           </h2>
           <p style="margin-top:22px;font-family:'Roboto',sans-serif;font-size:16px;color:#dfe3ec;line-height:1.65;max-width:460px;">
-            Nonprofits often hold sensitive program, participant, volunteer, donor, and community information. The assessment is designed to minimize risk from the start.
+            Nonprofits should not have to choose between useful technology and responsible handling of their information.
           </p>
           <div style="margin-top:28px;">
             <a href="/home/book" class="gk-cta-primary">Book a Reporting Readiness Call <i data-lucide="arrow-right" style="width:15px;height:15px;"></i></a>
@@ -887,15 +664,25 @@
             <p style="font-family:'Roboto',sans-serif;font-size:13.5px;color:#dfe3ec;line-height:1.5;margin:0;">Every data-handling step is documented in writing before any materials are reviewed.</p>
           </div>
         </div>
-        <!-- Right: 2×3 promise cards -->
+        <!-- Right: trust items -->
         <div class="col-12 col-lg-7">
           <div class="row g-3">
-            <div class="col-12 col-sm-6"><div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:22px;"><div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;"><div style="width:34px;height:34px;border-radius:8px;background:rgba(255,86,86,0.12);display:flex;align-items:center;justify-content:center;"><i data-lucide="key-round" style="width:16px;height:16px;color:#ff8c83;"></i></div><span style="font-family:'Roboto',sans-serif;font-size:11px;color:#b5bdcb;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;">01</span></div><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:16px;color:#fff;margin-bottom:6px;">You own your data</div><p style="font-family:'Roboto',sans-serif;font-size:13.5px;color:#b5bdcb;line-height:1.55;margin:0;">Your organization retains ownership of all documents, reports, spreadsheets, stories, and records shared with us.</p></div></div>
-            <div class="col-12 col-sm-6"><div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:22px;"><div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;"><div style="width:34px;height:34px;border-radius:8px;background:rgba(255,86,86,0.12);display:flex;align-items:center;justify-content:center;"><i data-lucide="shield-off" style="width:16px;height:16px;color:#ff8c83;"></i></div><span style="font-family:'Roboto',sans-serif;font-size:11px;color:#b5bdcb;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;">02</span></div><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:16px;color:#fff;margin-bottom:6px;">No AI model training</div><p style="font-family:'Roboto',sans-serif;font-size:13.5px;color:#b5bdcb;line-height:1.55;margin:0;">Your data is not used to train AI models.</p></div></div>
-            <div class="col-12 col-sm-6"><div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:22px;"><div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;"><div style="width:34px;height:34px;border-radius:8px;background:rgba(255,86,86,0.12);display:flex;align-items:center;justify-content:center;"><i data-lucide="file-signature" style="width:16px;height:16px;color:#ff8c83;"></i></div><span style="font-family:'Roboto',sans-serif;font-size:11px;color:#b5bdcb;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;">03</span></div><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:16px;color:#fff;margin-bottom:6px;">Data processing agreement</div><p style="font-family:'Roboto',sans-serif;font-size:13.5px;color:#b5bdcb;line-height:1.55;margin:0;">Before any materials are reviewed, we define how information is handled, accessed, retained, deleted, or returned.</p></div></div>
-            <div class="col-12 col-sm-6"><div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:22px;"><div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;"><div style="width:34px;height:34px;border-radius:8px;background:rgba(255,86,86,0.12);display:flex;align-items:center;justify-content:center;"><i data-lucide="minimize-2" style="width:16px;height:16px;color:#ff8c83;"></i></div><span style="font-family:'Roboto',sans-serif;font-size:11px;color:#b5bdcb;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;">04</span></div><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:16px;color:#fff;margin-bottom:6px;">Minimum necessary data</div><p style="font-family:'Roboto',sans-serif;font-size:13.5px;color:#b5bdcb;line-height:1.55;margin:0;">We request only what is needed to assess reporting readiness.</p></div></div>
-            <div class="col-12 col-sm-6"><div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:22px;"><div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;"><div style="width:34px;height:34px;border-radius:8px;background:rgba(255,86,86,0.12);display:flex;align-items:center;justify-content:center;"><i data-lucide="eye-off" style="width:16px;height:16px;color:#ff8c83;"></i></div><span style="font-family:'Roboto',sans-serif;font-size:11px;color:#b5bdcb;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;">05</span></div><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:16px;color:#fff;margin-bottom:6px;">Sensitive data controls</div><p style="font-family:'Roboto',sans-serif;font-size:13.5px;color:#b5bdcb;line-height:1.55;margin:0;">Beneficiary or client-level data can be redacted, anonymized, excluded, or handled under stricter review.</p></div></div>
-            <div class="col-12 col-sm-6"><div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:22px;"><div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;"><div style="width:34px;height:34px;border-radius:8px;background:rgba(255,86,86,0.12);display:flex;align-items:center;justify-content:center;"><i data-lucide="user-check" style="width:16px;height:16px;color:#ff8c83;"></i></div><span style="font-family:'Roboto',sans-serif;font-size:11px;color:#b5bdcb;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;">06</span></div><div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:16px;color:#fff;margin-bottom:6px;">Human-reviewed outputs</div><p style="font-family:'Roboto',sans-serif;font-size:13.5px;color:#b5bdcb;line-height:1.55;margin:0;">AI may support analysis, but findings and recommendations are reviewed by humans before they are shared.</p></div></div>
+            <% [
+              {icon:'user-check',    h:'AI assists. People decide.',                                   p:'KAI may help explain findings, identify gaps, answer questions, and support evidence-grounded work. Authorized people review and approve what can be used.'},
+              {icon:'file-text',     h:'Uploading information does not automatically make it evidence.',p:'Information must be understood, reviewed, and connected to an appropriate source before it can support an external claim.'},
+              {icon:'ban',           h:'Unsupported claims remain unsupported.',                        p:'Get Kinder should identify missing, conflicting, or incomplete evidence rather than inventing a stronger story.'},
+              {icon:'lock',          h:'Information is used for defined purposes.',                     p:'Sensitive information, consent restrictions, intended uses, and appropriate audiences must be considered before evidence is reused.'},
+              {icon:'shield-check',  h:'Your organization retains control.',                            p:'Ownership, access, deletion, export, and account-closure terms must be clearly stated before an organization shares substantive information.'},
+              {icon:'file-signature',h:'Data processing agreement.',                                    p:'Before any materials are reviewed, we define how information is handled, accessed, retained, deleted, or returned.'}
+            ].forEach(function(t) { %>
+            <div class="col-12 col-sm-6">
+              <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:22px;height:100%;">
+                <div style="width:34px;height:34px;border-radius:8px;background:rgba(255,86,86,0.12);display:flex;align-items:center;justify-content:center;margin-bottom:12px;"><i data-lucide="<%= t.icon %>" style="width:16px;height:16px;color:#ff8c83;"></i></div>
+                <div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:16px;color:#fff;margin-bottom:6px;"><%= t.h %></div>
+                <p style="font-family:'Roboto',sans-serif;font-size:13.5px;color:#b5bdcb;line-height:1.55;margin:0;"><%= t.p %></p>
+              </div>
+            </div>
+            <% }); %>
           </div>
         </div>
       </div>
@@ -903,33 +690,98 @@
   </section>
 
   <!-- ═══════════════════════════════════════════════════
-       FUTURE MODULE
+       NONPROFIT AND FUNDER PATHWAYS
   ═══════════════════════════════════════════════════════ -->
-  <section style="background:#f4f4f4;padding:80px 0;">
+  <section id="funders" style="background:#fff;padding:112px 0;">
     <div class="container" style="max-width:1200px;">
-      <div style="background:#fff;border-radius:16px;border:1px solid #e3e4e8;padding:40px 48px;">
-        <div class="row g-4 align-items-center">
-          <div class="col-12 col-md-auto">
-            <div style="display:flex;align-items:center;gap:14px;">
-              <div style="width:56px;height:56px;border-radius:12px;background:#f1f3f7;display:flex;align-items:center;justify-content:center;position:relative;flex-shrink:0;">
-                <i data-lucide="users-round" style="width:26px;height:26px;color:#455A7C;"></i>
-                <div style="position:absolute;top:-6px;right:-6px;background:#FF5656;color:#fff;border-radius:999px;font-family:'Roboto',sans-serif;font-size:9px;font-weight:600;letter-spacing:0.06em;padding:2px 8px;">SOON</div>
-              </div>
-              <div>
-                <div style="font-family:'Roboto',sans-serif;font-size:11px;color:#6e7280;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;margin-bottom:4px;">Future module</div>
-                <div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:18px;color:#283853;">Volunteer impact data</div>
-              </div>
-            </div>
+      <div style="margin-bottom:48px;">
+        <div class="gk-eyebrow">Nonprofit and funder pathways</div>
+        <h2 class="gk-sh-title">One evidence system. <span style="font-family:'Lora',serif;font-style:italic;font-weight:500;color:#FF5656;">Two connected pathways</span>.</h2>
+      </div>
+      <div class="row g-4">
+        <div class="col-12 col-md-6 d-flex">
+          <div style="background:#fff;border:1px solid #e3e4e8;border-radius:14px;padding:28px;width:100%;display:flex;flex-direction:column;">
+            <div style="font-family:'Roboto',sans-serif;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:#FF5656;font-weight:600;margin-bottom:8px;">Nonprofit pathway</div>
+            <h3 style="font-family:'Poppins',sans-serif;font-weight:600;font-size:19px;color:#283853;margin:0 0 12px;line-height:1.3;">Prove more of the impact you already create.</h3>
+            <p style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#4d525e;line-height:1.6;margin:0 0 20px;flex:1;">Get Kinder helps nonprofit teams organize existing information, improve future evidence capture, and reduce the work required to prepare credible reporting.</p>
+            <div><a href="/home/assessment-offer" class="gk-cta-primary">Start with an Assessment</a></div>
           </div>
-          <div class="col-12 col-md">
-            <h3 style="font-family:'Poppins',sans-serif;font-weight:500;font-size:22px;color:#283853;margin:0;line-height:1.3;letter-spacing:-0.01em;">Volunteer data will become part of the <span style="font-family:'Lora',serif;font-style:italic;color:#455A7C;">evidence system.</span></h3>
-            <p style="margin-top:12px;font-family:'Roboto',sans-serif;font-size:14.5px;color:#4d525e;line-height:1.6;margin-bottom:0;">Volunteer contribution is one of the most underused sources of impact evidence. As Get Kinder.ai expands, the volunteer module will help nonprofits capture verified volunteer hours, activities, stories, and service capacity — then connect that contribution to programs, outcomes, and funder-ready reports.</p>
-          </div>
-          <div class="col-12 col-md-auto">
-            <a href="/home/book" style="display:inline-flex;align-items:center;gap:8px;font-family:'Roboto',sans-serif;font-size:14px;color:#455A7C;font-weight:500;text-decoration:none;padding:10px 14px;border-radius:8px;border:1px solid #dcdde0;background:#fff;white-space:nowrap;">Ask about the volunteer module <i data-lucide="arrow-right" style="width:14px;height:14px;color:#455A7C;"></i></a>
+        </div>
+        <div class="col-12 col-md-6 d-flex">
+          <div style="background:#fff;border:1px solid #e3e4e8;border-radius:14px;padding:28px;width:100%;display:flex;flex-direction:column;">
+            <div style="font-family:'Roboto',sans-serif;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:#FF5656;font-weight:600;margin-bottom:8px;">Funder and partner pathway</div>
+            <h3 style="font-family:'Poppins',sans-serif;font-weight:600;font-size:19px;color:#283853;margin:0 0 12px;line-height:1.3;">Strengthen evidence across a portfolio without adding another reporting burden.</h3>
+            <p style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#4d525e;line-height:1.6;margin:0 0 14px;">Funders and intermediary organizations can support groups of nonprofits in developing more consistent evidence practices while respecting each organization's context, ownership, permissions, and reporting realities.</p>
+            <p style="font-family:'Roboto',sans-serif;font-size:13.5px;color:#283853;font-weight:600;margin:0 0 8px;">Potential partnership directions may include:</p>
+            <ul style="margin:0 0 20px;padding-left:20px;font-family:'Roboto',sans-serif;font-size:14px;color:#4d525e;line-height:1.8;flex:1;">
+              <li>Sponsored readiness Assessments</li>
+              <li>Supported Knowledge Studio cohorts</li>
+              <li>Common reporting structures</li>
+              <li>Approved portfolio-level reporting</li>
+              <li>Evidence-capacity programs for grantees</li>
+            </ul>
+            <div><a href="/contact" class="gk-cta-secondary">Discuss a Portfolio Partnership</a></div>
           </div>
         </div>
       </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════
+       CURRENT PROOF
+  ═══════════════════════════════════════════════════════ -->
+  <section style="background:#f4f4f4;padding:96px 0;">
+    <div class="container" style="max-width:820px;text-align:center;">
+      <div class="gk-eyebrow" style="justify-content:center;">Current proof</div>
+      <h2 class="gk-sh-title" style="text-align:center;">Built <span style="font-family:'Lora',serif;font-style:italic;font-weight:500;color:#FF5656;">with</span> nonprofits, not imposed on them.</h2>
+      <p class="gk-sh-body" style="margin-left:auto;margin-right:auto;">Get Kinder is beginning with a limited group of BC nonprofit design partners.</p>
+      <p class="gk-sh-body" style="margin-left:auto;margin-right:auto;margin-top:8px;">These early engagements are being used to test the Assessment, refine the evidence model, understand real data-handling requirements, and shape the Knowledge Studio around the constraints nonprofit teams actually face.</p>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════
+       ASSESSMENT
+  ═══════════════════════════════════════════════════════ -->
+  <section id="assessment" style="background:#fff1f0;padding:112px 0;">
+    <div class="container" style="max-width:1200px;">
+      <div style="margin-bottom:48px;">
+        <div class="gk-eyebrow">The Assessment</div>
+        <h2 class="gk-sh-title">Start by discovering what your evidence <span style="font-family:'Lora',serif;font-style:italic;font-weight:500;color:#FF5656;">can already support</span>.</h2>
+        <p class="gk-sh-body" style="max-width:800px;">The Impact Reporting &amp; Data Readiness Assessment is the starting point for building your organization's evidence system. We focus on one or two priority programs and one immediate funder or reporting need.</p>
+      </div>
+      <div class="row g-4 align-items-stretch">
+        <div class="col-12 col-lg-6 d-flex">
+          <div style="background:#fff;border:1px solid #e3e4e8;border-radius:14px;padding:28px;width:100%;">
+            <h3 style="font-family:'Poppins',sans-serif;font-weight:600;font-size:17px;color:#283853;margin:0 0 14px;">The Assessment helps identify:</h3>
+            <ul style="margin:0;padding-left:20px;font-family:'Roboto',sans-serif;font-size:14.5px;color:#4d525e;line-height:1.9;">
+              <li>Which information already supports your impact story</li>
+              <li>Where evidence is difficult to find or reuse</li>
+              <li>Where important claims are weak, incomplete, or unsupported</li>
+              <li>What your team should begin capturing differently</li>
+              <li>The most practical next steps for strengthening reporting readiness</li>
+            </ul>
+          </div>
+        </div>
+        <div class="col-12 col-lg-6 d-flex">
+          <div style="background:#283853;border-radius:14px;padding:28px;width:100%;display:flex;flex-direction:column;">
+            <div style="font-family:'Roboto',sans-serif;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:#ff8c83;font-weight:600;margin-bottom:10px;">Current design-partner offer</div>
+            <h3 style="font-family:'Poppins',sans-serif;font-weight:600;font-size:17px;color:#fff;margin:0 0 14px;line-height:1.35;">Get Kinder is inviting five BC nonprofits to participate as design partners and receive the Assessment at no cost.</h3>
+            <p style="font-family:'Roboto',sans-serif;font-size:13.5px;color:#dfe3ec;font-weight:600;margin:0 0 8px;">The Assessment includes:</p>
+            <ul style="margin:0 0 20px;padding-left:20px;font-family:'Roboto',sans-serif;font-size:14px;color:#dfe3ec;line-height:1.8;flex:1;">
+              <li>An inventory of existing information and evidence sources</li>
+              <li>A reporting-readiness scorecard</li>
+              <li>A prioritized gap and risk list</li>
+              <li>A review of the impact claims most important to the organization's funding goals</li>
+              <li>Practical recommendations for improving future evidence capture</li>
+              <li>A prioritized implementation roadmap</li>
+              <li>A readout session with the Get Kinder team</li>
+            </ul>
+            <div><a href="/home/book" class="gk-cta-primary">Apply for a Reporting Readiness Call</a></div>
+          </div>
+        </div>
+      </div>
+      <p style="margin-top:32px;font-family:'Lora',serif;font-style:italic;font-weight:500;font-size:18px;color:#455A7C;max-width:640px;">The Assessment is not the final product. It is how your organization begins building a reusable evidence system.</p>
+      <p style="margin-top:12px;font-family:'Roboto',sans-serif;font-size:14px;color:#6e7280;line-height:1.6;max-width:800px;">The Assessment provides independent value and does not commit the organization to purchasing anything afterward. Any continued work with Get Kinder is a separate decision.</p>
     </div>
   </section>
 
@@ -943,7 +795,7 @@
         <div class="col-12 col-lg-4">
           <div style="position:sticky;top:100px;">
             <div class="gk-eyebrow">FAQ</div>
-            <h2 style="font-family:'Poppins',sans-serif;font-weight:600;font-size:clamp(26px,2.8vw,36px);letter-spacing:-0.02em;color:#283853;margin:0;line-height:1.18;">Questions nonprofits <span style="font-family:'Lora',serif;font-style:italic;font-weight:500;color:#455A7C;">usually ask first.</span></h2>
+            <h2 style="font-family:'Poppins',sans-serif;font-weight:600;font-size:clamp(26px,2.8vw,36px);letter-spacing:-0.02em;color:#455a7c;margin:0;line-height:1.18;">Questions nonprofits <span style="font-family:'Lora',serif;font-style:italic;font-weight:500;color:#FF5656;">usually ask first.</span></h2>
             <p style="margin-top:18px;font-family:'Roboto',sans-serif;font-size:15px;color:#4d525e;line-height:1.6;">Real questions from executive directors, development leads, and program directors we've spoken with.</p>
             <div style="margin-top:24px;">
               <a href="/home/book" style="font-family:'Roboto',sans-serif;font-size:14px;color:#FF5656;font-weight:500;text-decoration:none;display:inline-flex;align-items:center;gap:6px;">Still have a question? Book a call <i data-lucide="arrow-right" style="width:14px;height:14px;color:#FF5656;"></i></a>
@@ -952,70 +804,25 @@
         </div>
         <!-- Right: accordion -->
         <div class="col-12 col-lg-8">
-          <!-- Q1 -->
-          <div style="border-top:1px solid #e3e4e8;border-bottom:1px solid #e3e4e8;">
+          <% [
+            {q:'How can a nonprofit prove its impact to funders?', a:'A nonprofit can make its impact more defensible by connecting each important claim to a specific source, clear definition, relevant reporting period, known limitations, and authorized human review. Get Kinder helps teams find that information across existing records, identify gaps before a deadline, and preserve approved evidence for future use. Get Kinder does not independently verify impact or guarantee a funder decision.'},
+            {q:'How can a small nonprofit reduce grant-reporting workload?', a:'A nonprofit can reduce reporting workload by preserving reviewed evidence, definitions, source information, and approval decisions for reuse instead of reconstructing them for every report. Get Kinder helps organizations build that reusable evidence foundation while identifying a manageable number of evidence-capture practices that will make future reporting easier.'},
+            {q:'What evidence do funders expect from nonprofits?', a:'There is no single evidence list that applies to every funder. Requirements commonly relate to funded activities, participation, outputs, observed outcomes, use of funds, reporting periods, and the sources supporting important claims. Get Kinder begins with the organization\'s actual funder template or reporting obligation so the evidence work reflects what that funder is requesting rather than a generic checklist.'},
+            {q:'Do nonprofits need clean or perfectly organized data to use Get Kinder?', a:'No. Get Kinder is designed to begin with the reports, spreadsheets, records, surveys, and other information the organization already holds. The Assessment identifies what appears usable, what requires clarification, what is missing, and which evidence-capture practices should improve next. Human context and review are still required.'},
+            {q:'What is the Impact Reporting & Data Readiness Assessment?', a:"The Impact Reporting & Data Readiness Assessment is Get Kinder's starting point for understanding what evidence a nonprofit already has, what its priority reporting need requires, where gaps and risks remain, and what should improve next. It focuses on one or two priority programs and creates the starting point for a reusable evidence system rather than ending as a disconnected report."},
+            {q:'Is Get Kinder a grant-writing tool?', a:'No. Get Kinder starts before the writing by helping an organization understand, review, and preserve the evidence supporting its reports and applications. Evidence-grounded drafting may be supported where that capability is actually available, but Get Kinder should not be positioned as a generic AI grant writer or as a substitute for organizational judgment.'},
+            {q:"Does KAI decide whether a nonprofit's impact claim is true?", a:'No. Kinder AI™ (KAI) does not independently determine organizational truth or approve impact claims. KAI is the AI built into the Knowledge Studio and can help users understand findings, identify gaps and inconsistencies, answer questions, and work with eligible evidence. Authorized humans remain responsible for interpretations, conclusions, approvals, and permitted uses.'},
+            {q:"Can funders access a nonprofit's source information through Get Kinder?", a:"Not by default. A funder relationship does not create unrestricted access to a nonprofit's source files, sensitive records, or unapproved evidence. Any future portfolio reporting must use clearly defined permissions and information approved for that purpose and audience."}
+          ].forEach(function(item, i) { %>
+          <div class="<%= i === 0 ? 'gk-faq-first' : '' %>" style="border-bottom:1px solid #e3e4e8;">
             <button class="gk-faq-btn">
-              <span style="display:flex;align-items:center;gap:14px;"><span style="font-family:'Roboto',sans-serif;font-size:11px;color:#9a9ea7;letter-spacing:0.08em;font-weight:600;width:28px;flex-shrink:0;">01</span><span style="line-height:1.4;">Is the Impact Reporting &amp; Data Readiness Assessment really free?</span></span>
+              <span style="display:flex;align-items:center;gap:14px;"><span style="font-family:'Roboto',sans-serif;font-size:11px;color:#9a9ea7;letter-spacing:0.08em;font-weight:600;width:28px;flex-shrink:0;"><%= String(i+1).padStart(2,'0') %></span><span style="line-height:1.4;"><%= item.q %></span></span>
               <span class="gk-faq-icon" style="background:#f1f3f7;"><i data-lucide="plus" style="width:14px;height:14px;color:#455A7C;"></i></span>
             </button>
-            <div class="gk-faq-body" style="max-height:0px;"><div class="gk-faq-body-inner"><p>Yes. For the first design partner cohort, the assessment is free for 5 selected nonprofits. The call is used to confirm fit, understand your reporting pressure, and set expectations before we proceed.</p><p style="margin-top:8px;">Selected organizations receive a 1–2 week review and a 10–15 page assessment. There is no obligation to continue after the assessment.</p></div></div>
+            <div class="gk-faq-body" style="max-height:0px;"><div class="gk-faq-body-inner"><p><%= item.a %></p></div></div>
           </div>
-          <!-- Q2 -->
-          <div style="border-bottom:1px solid #e3e4e8;">
-            <button class="gk-faq-btn">
-              <span style="display:flex;align-items:center;gap:14px;"><span style="font-family:'Roboto',sans-serif;font-size:11px;color:#9a9ea7;letter-spacing:0.08em;font-weight:600;width:28px;flex-shrink:0;">02</span><span style="line-height:1.4;">Who is this for?</span></span>
-              <span class="gk-faq-icon" style="background:#f1f3f7;"><i data-lucide="plus" style="width:14px;height:14px;color:#455A7C;"></i></span>
-            </button>
-            <div class="gk-faq-body" style="max-height:0px;"><div class="gk-faq-body-inner"><p>This is for small and medium-sized nonprofits that already create meaningful impact but struggle to organize the data, stories, reports, and program activity needed to prove it to funders.</p><p style="margin-top:8px;">It is a strong fit if you have recurring grant reports, upcoming renewals, multiple funder requirements, unstructured program data, or no dedicated data/evaluation team.</p></div></div>
-          </div>
-          <!-- Q3 -->
-          <div style="border-bottom:1px solid #e3e4e8;">
-            <button class="gk-faq-btn">
-              <span style="display:flex;align-items:center;gap:14px;"><span style="font-family:'Roboto',sans-serif;font-size:11px;color:#9a9ea7;letter-spacing:0.08em;font-weight:600;width:28px;flex-shrink:0;">03</span><span style="line-height:1.4;">What will we receive?</span></span>
-              <span class="gk-faq-icon" style="background:#f1f3f7;"><i data-lucide="plus" style="width:14px;height:14px;color:#455A7C;"></i></span>
-            </button>
-            <div class="gk-faq-body" style="max-height:0px;"><div class="gk-faq-body-inner"><p>Selected design partners receive a 10–15 page Impact Reporting &amp; Data Readiness Assessment covering:</p><ol style="padding-left:20px;margin:8px 0 12px;"><li>where your impact data lives today;</li><li>what is missing for funder-grade reporting;</li><li>your top 3 reporting risks;</li><li>what a clean evidence architecture would look like;</li><li>the 12-week path to get there.</li></ol><p>The assessment also includes a 60-minute readout presentation.</p></div></div>
-          </div>
-          <!-- Q4 -->
-          <div style="border-bottom:1px solid #e3e4e8;">
-            <button class="gk-faq-btn">
-              <span style="display:flex;align-items:center;gap:14px;"><span style="font-family:'Roboto',sans-serif;font-size:11px;color:#9a9ea7;letter-spacing:0.08em;font-weight:600;width:28px;flex-shrink:0;">04</span><span style="line-height:1.4;">Do we need clean data before starting?</span></span>
-              <span class="gk-faq-icon" style="background:#f1f3f7;"><i data-lucide="plus" style="width:14px;height:14px;color:#455A7C;"></i></span>
-            </button>
-            <div class="gk-faq-body" style="max-height:0px;"><div class="gk-faq-body-inner"><p>No. The assessment is designed for organizations whose data is currently unstructured, spread across tools, or hard to assemble for funder reporting.</p><p style="margin-top:8px;">The point is to show what exists, what is missing, what is risky, and what needs to change before AI or reporting automation can be useful.</p></div></div>
-          </div>
-          <!-- Q5 -->
-          <div style="border-bottom:1px solid #e3e4e8;">
-            <button class="gk-faq-btn">
-              <span style="display:flex;align-items:center;gap:14px;"><span style="font-family:'Roboto',sans-serif;font-size:11px;color:#9a9ea7;letter-spacing:0.08em;font-weight:600;width:28px;flex-shrink:0;">05</span><span style="line-height:1.4;">How do you handle our data?</span></span>
-              <span class="gk-faq-icon" style="background:#f1f3f7;"><i data-lucide="plus" style="width:14px;height:14px;color:#455A7C;"></i></span>
-            </button>
-            <div class="gk-faq-body" style="max-height:0px;"><div class="gk-faq-body-inner"><p>Your organization owns your data. Get Kinder.ai does not use your data to train AI models.</p><p style="margin-top:8px;">Before reviewing any materials, we use a data processing agreement that defines how your information is handled, stored, protected, retained, deleted, or returned. We also identify sensitive data that should be excluded, redacted, or handled under stricter controls.</p></div></div>
-          </div>
-          <!-- Q6 -->
-          <div style="border-bottom:1px solid #e3e4e8;">
-            <button class="gk-faq-btn">
-              <span style="display:flex;align-items:center;gap:14px;"><span style="font-family:'Roboto',sans-serif;font-size:11px;color:#9a9ea7;letter-spacing:0.08em;font-weight:600;width:28px;flex-shrink:0;">06</span><span style="line-height:1.4;">Will you use our beneficiary or client data?</span></span>
-              <span class="gk-faq-icon" style="background:#f1f3f7;"><i data-lucide="plus" style="width:14px;height:14px;color:#455A7C;"></i></span>
-            </button>
-            <div class="gk-faq-body" style="max-height:0px;"><div class="gk-faq-body-inner"><p>Only if it is necessary, appropriate, and agreed in advance. In many cases, the assessment can be completed using reporting templates, past reports, spreadsheets, anonymized examples, program summaries, and data structure samples rather than sensitive raw beneficiary records.</p><p style="margin-top:8px;">When sensitive data is involved, we use minimization, redaction, access controls, and human review.</p></div></div>
-          </div>
-          <!-- Q7 -->
-          <div style="border-bottom:1px solid #e3e4e8;">
-            <button class="gk-faq-btn">
-              <span style="display:flex;align-items:center;gap:14px;"><span style="font-family:'Roboto',sans-serif;font-size:11px;color:#9a9ea7;letter-spacing:0.08em;font-weight:600;width:28px;flex-shrink:0;">07</span><span style="line-height:1.4;">Will AI write our reports?</span></span>
-              <span class="gk-faq-icon" style="background:#f1f3f7;"><i data-lucide="plus" style="width:14px;height:14px;color:#455A7C;"></i></span>
-            </button>
-            <div class="gk-faq-body" style="max-height:0px;"><div class="gk-faq-body-inner"><p>Not during the assessment. The assessment focuses first on whether your data and evidence are ready for credible reporting.</p><p style="margin-top:8px;">AI may be used internally to speed up document review, pattern detection, evidence mapping, and draft analysis, but outputs are human-reviewed. We do not use AI to invent outcomes, fill missing data, or make unsupported claims.</p></div></div>
-          </div>
-          <!-- Q8 -->
-          <div style="border-bottom:1px solid #e3e4e8;">
-            <button class="gk-faq-btn">
-              <span style="display:flex;align-items:center;gap:14px;"><span style="font-family:'Roboto',sans-serif;font-size:11px;color:#9a9ea7;letter-spacing:0.08em;font-weight:600;width:28px;flex-shrink:0;">08</span><span style="line-height:1.4;">What happens after the assessment?</span></span>
-              <span class="gk-faq-icon" style="background:#f1f3f7;"><i data-lucide="plus" style="width:14px;height:14px;color:#455A7C;"></i></span>
-            </button>
-            <div class="gk-faq-body" style="max-height:0px;"><div class="gk-faq-body-inner"><p>You receive a practical roadmap showing how to move from today's unstructured reporting environment to a cleaner evidence architecture. If there is a strong fit, Get Kinder.ai may propose a 12-week implementation plan to build the reporting workflows, evidence structure, and AI-assisted reporting system.</p><p style="margin-top:8px;">There is no obligation to continue.</p></div></div>
-          </div>
+          <% }); %>
+          <p style="margin-top:20px;"><a href="/home/faq" style="font-family:'Roboto',sans-serif;font-size:14px;color:#FF5656;font-weight:500;text-decoration:none;">Read the full FAQ</a><span style="font-family:'Roboto',sans-serif;font-size:14px;color:#6e7280;"> — proving impact, responsible AI, and the Assessment in detail.</span></p>
         </div>
       </div>
     </div>
@@ -1024,35 +831,25 @@
   <!-- ═══════════════════════════════════════════════════
        FINAL CTA
   ═══════════════════════════════════════════════════════ -->
-  <section id="book" style="background:#f4f4f4;padding:80px 0 96px;">
+  <section style="background:#283853;padding:96px 0;">
     <div class="container" style="max-width:1200px;">
-      <div style="background:#fff1f0;border-radius:24px;padding:64px;position:relative;overflow:hidden;border:1px solid #ffd9d6;">
-        <!-- Decorative doc stack -->
-        <div style="position:absolute;right:-40px;top:40px;width:320px;height:380px;pointer-events:none;" class="d-none d-xl-block">
-          <div style="position:absolute;top:28px;right:60px;width:220px;height:280px;background:#fff;border-radius:14px;border:1px solid #ffd9d6;transform:rotate(-6deg);box-shadow:0 10px 30px rgba(31,38,48,.08);"></div>
-          <div style="position:absolute;top:8px;right:20px;width:220px;height:280px;background:#fff;border-radius:14px;border:1px solid #e3e4e8;transform:rotate(3deg);box-shadow:0 10px 30px rgba(31,38,48,.10);padding:16px 18px;">
-            <div style="width:32px;height:32px;border-radius:8px;background:#FF5656;display:flex;align-items:center;justify-content:center;margin-bottom:12px;"><i data-lucide="file-text" style="width:16px;height:16px;color:#fff;"></i></div>
-            <div style="font-family:'Roboto',sans-serif;font-size:9px;color:#FF5656;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;margin-bottom:6px;">Assessment</div>
-            <div style="font-family:'Poppins',sans-serif;font-weight:600;font-size:13px;color:#283853;line-height:1.3;margin-bottom:10px;">Coquitlam Youth Coalition</div>
-            <div style="height:6px;background:#f1f3f7;border-radius:3px;margin-bottom:6px;width:100%;"></div>
-            <div style="height:6px;background:#f1f3f7;border-radius:3px;margin-bottom:6px;width:82%;"></div>
-            <div style="height:6px;background:#f1f3f7;border-radius:3px;margin-bottom:6px;width:94%;"></div>
-            <div style="height:6px;background:#f1f3f7;border-radius:3px;margin-bottom:6px;width:68%;"></div>
-            <div style="margin-top:14px;padding:8px 10px;background:#fff1f0;border-radius:6px;font-family:'Roboto',sans-serif;font-size:10px;color:#b8443c;display:flex;align-items:center;gap:6px;"><i data-lucide="alert-triangle" style="width:11px;height:11px;color:#b8443c;"></i>3 reporting risks identified</div>
+      <h2 style="font-family:'Poppins',sans-serif;font-weight:600;font-size:clamp(28px,3.5vw,44px);letter-spacing:-0.025em;color:#fff;margin:0;line-height:1.15;max-width:22em;">
+        Your organization is already creating impact. <span style="font-family:'Lora',serif;font-style:italic;font-weight:500;color:#ffbbbb;">Build the evidence system</span> that helps others see it.
+      </h2>
+      <div class="row g-4" style="margin-top:24px;">
+        <div class="col-12 col-md-6 d-flex">
+          <div style="background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:32px;width:100%;display:flex;flex-direction:column;">
+            <h3 style="font-family:'Poppins',sans-serif;font-weight:600;font-size:19px;color:#fff;margin:0 0 10px;">Start with a Free Assessment</h3>
+            <p style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#b5bdcb;line-height:1.6;margin:0 0 20px;flex:1;">Understand what your existing information can support and what will make future reporting stronger.</p>
+            <div><a href="/home/book" class="gk-cta-primary gk-cta-primary-lg">Apply for a Reporting Readiness Call</a></div>
           </div>
         </div>
-        <!-- Content -->
-        <div style="max-width:640px;position:relative;">
-          <div class="gk-eyebrow">Get started</div>
-          <h2 style="font-family:'Poppins',sans-serif;font-weight:600;font-size:clamp(28px,3.5vw,44px);letter-spacing:-0.025em;color:#283853;margin:0;line-height:1.1;">
-            Ready to find out what your data <span style="font-family:'Lora',serif;font-style:italic;font-weight:500;color:#455A7C;">can — and cannot —</span> prove to funders?
-          </h2>
-          <p style="margin-top:22px;font-family:'Roboto',sans-serif;font-size:17px;color:#4d525e;line-height:1.6;">We are selecting 5 nonprofit design partners for a no-cost Impact Reporting &amp; Data Readiness Assessment. If your organization is creating impact but struggling to prove it clearly, start with a Reporting Readiness Call.</p>
-          <div style="margin-top:32px;display:flex;gap:12px;flex-wrap:wrap;">
-            <a href="/home/book" class="gk-cta-primary gk-cta-primary-lg">Book a Reporting Readiness Call <i data-lucide="arrow-right" style="width:16px;height:16px;"></i></a>
-            <a href="/home/how-it-works" class="gk-cta-secondary">See how it works</a>
+        <div class="col-12 col-md-6 d-flex">
+          <div style="background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:32px;width:100%;display:flex;flex-direction:column;">
+            <h3 style="font-family:'Poppins',sans-serif;font-weight:600;font-size:19px;color:#fff;margin:0 0 10px;">Build stronger evidence across your portfolio.</h3>
+            <p style="font-family:'Roboto',sans-serif;font-size:14.5px;color:#b5bdcb;line-height:1.6;margin:0 0 20px;flex:1;">Explore sponsored Assessments, cohort partnerships, and more consistent evidence support for grantees.</p>
+            <div><a href="#funders" style="display:inline-flex;align-items:center;gap:6px;background:transparent;color:#fff;border:1px solid rgba(255,255,255,.35);border-radius:10px;padding:13px 22px;font-family:'Roboto',sans-serif;font-size:15px;font-weight:500;text-decoration:none;">Explore Funder Partnerships</a></div>
           </div>
-          <p style="margin-top:16px;font-family:'Roboto',sans-serif;font-size:13px;color:#6e7280;line-height:1.55;">The assessment is free for selected design partners. The call confirms fit before any materials are reviewed.</p>
         </div>
       </div>
     </div>
