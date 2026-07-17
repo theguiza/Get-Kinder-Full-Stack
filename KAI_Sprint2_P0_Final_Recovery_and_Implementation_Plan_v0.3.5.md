@@ -772,6 +772,58 @@ tests_run: not run; documentation-only owner-decision record
 database_or_cloud_access: not performed
 ```
 
+## P0-05D TXT/MD deterministic encoding and binary-content byte-fixture corpus
+
+```text
+leaf_status: complete
+p0_05_package_status: txt_md_byte_fixture_corpus_complete
+implementation_status: fixture_and_test_only
+verification_status: TOOL_VERIFIED
+evidence_class: TOOL_VERIFIED
+owner_directed_leaf_scope: USER_CONFIRMED
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: fe862d837a562cbfd3a296d4e9dfc4375dff82c5
+starting_tree: clean tracked and untracked
+prior_boundary: TOOL_VERIFIED — fe862d837a562cbfd3a296d4e9dfc4375dff82c5 changed only Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md and this living ExecPlan to record P0-05C.1
+applicable_repository_instructions: root AGENTS.md only; changes remain inside the approved P0-05D fixture-and-test-only boundary
+implemented_corpus_file: __tests__/support/kaiSprint2TxtMdByteFixtureCorpus.js
+implemented_integrity_test_file: __tests__/kai-sprint2-txt-md-byte-fixture-corpus.spec.js
+fixture_count: 27
+corpus_status: corpus_only; synthetic TXT/MD byte fixtures only; not security-verified and not a production detector conformance claim
+production_code_changed: false
+runtime_behavior_changed: false
+production_detector_upload_path_parser_implemented: false
+dependencies_or_lockfiles_changed: false
+database_cloud_credentials_production_real_data: not accessed or modified
+current_state_update: not performed
+implementation_baseline_update: not performed
+contract_update: not performed
+authority_grounding: every expected_policy and expected_category is grounded in committed P0-05C or P0-05C.1 OWNER_DECISION authority from Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md
+corpus_schema: fixture_id; description; applies_to; bytes_hex; byte_length; declared_utf8_valid; expected_policy; expected_category; authority; scope_note; utf8_validity_basis; byte_case_family; synthetic_provenance; corpus_status; usable_document_claim; source_eligibility_claim; production_detector_claim
+positive_fixture_coverage: ordinary ASCII; valid multibyte UTF-8; LF; CRLF; TAB; empty byte content; instruction-like inert text; leading UTF-8 BOM with text; leading UTF-8 BOM only; non-leading U+FEFF; two initial EF BB BF sequences
+blocking_fixture_coverage: isolated continuation byte; truncated multibyte sequence; invalid leading byte; overlong encoding; surrogate-encoded UTF-8; UTF-16 LE BOM; UTF-16 BE BOM; UTF-32 LE BOM; UTF-32 BE BOM; NUL; prohibited C0 U+001F; DEL; C1 U+0085; lone CR at beginning, middle, and end
+control_boundary_proof: TAB/LF/CRLF positive cases and prohibited-control negative cases prove both permitted and blocked sides of the control boundary without density, heuristic, normalization, document-usability, Markdown-semantic, extension/MIME/signature, upload-acceptance, or parser claims
+nonleading_ufeff_fixture: TXTMD-P0-05D-010-ALLOW-NONLEADING-UFEFF cites OWNER_DECISION.P0_05C.NONLEADING_UFEFF_ALLOWED_AS_TEXT with expected_policy allow, expected_category encoding_gate_pass, and scope_note encoding_gate_pass_only; fatal decoding succeeds and retains U+FEFF
+two_initial_efbbbf_fixture: TXTMD-P0-05D-011-ALLOW-TWO-INITIAL-EFBBBF cites OWNER_DECISION.P0_05C.NONLEADING_UFEFF_ALLOWED_AS_TEXT with expected_policy allow, expected_category encoding_gate_pass, and scope_note encoding_gate_pass_only; fatal decoding succeeds and retains the second U+FEFF after the committed single-leading-BOM treatment
+fatal_decoder_integrity: integrity test actively uses new TextDecoder("utf-8", { fatal: true }) to prove every declared-valid UTF-8 fixture decodes and every declared-invalid UTF-8 fixture throws; replacement-character decoding is not authoritative and byte comparison alone is not treated as UTF-8 validity proof
+invalid_utf8_individual_throw_proof: isolated continuation, truncated multibyte, invalid leading byte, overlong, and surrogate-encoded fixtures each throw independently in fatal mode; overlong and surrogate-encoded cases are asserted specifically
+unsupported_cases_policy: unsupported cases were omitted rather than assigned allow or block policy
+focused_fixture_test: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-txt-md-byte-fixture-corpus.spec.js — 9 passed, 0 failed
+sprint2_suite_initial_sandbox_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-*.spec.js — new test discovered and passed, existing assembled-HTTP localhost listener tests failed with sandbox EPERM
+sprint2_suite: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-*.spec.js — 453 passed, 0 failed after the existing assembled-HTTP localhost listener sandbox EPERM was rerun identically in localhost-capable mode
+pre_existing_test_outcome_change: none observed; initial failures were the established sandbox EPERM listener condition and passed on identical localhost-capable rerun
+broader_repository_suite: not run; fixture/test-only package did not change shared infrastructure and the directly affected and Sprint 2 suites passed
+database_sentinel: non-listening loopback DATABASE_URL at 127.0.0.1:9 used for every Node command
+git_diff_check: passed
+complete_diff_scope: __tests__/support/kaiSprint2TxtMdByteFixtureCorpus.js, __tests__/kai-sprint2-txt-md-byte-fixture-corpus.spec.js, and this living ExecPlan evidence update only
+package_commit: report after commit; a commit cannot contain its own SHA
+deployed_kai_schema_compatibility: NOT_CONFIRMED
+live_upload_readiness: NOT_CONFIRMED
+production_readiness: NOT_CONFIRMED
+real_client_data_readiness: NOT_CONFIRMED
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this single P0-05D fixture-and-test-only package commit; do not implement detector behavior, route/service work, upload lifecycle work, P0-06 work, database/cloud/production behavior, push, deployment, or another leaf
+```
+
 ## Prompt-injection boundary
 
 Add synthetic fixtures containing instruction-like text.
