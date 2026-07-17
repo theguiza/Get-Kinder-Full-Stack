@@ -90,6 +90,7 @@ OWNER_DECISION.P0_05C.PROHIBITED_CONTROL_REJECTION
 OWNER_DECISION.P0_05C.LONE_CR_REJECTION
 OWNER_DECISION.P0_05C.EMPTY_CONTENT_ENCODING_GATE_PASS
 OWNER_DECISION.P0_05C.INSTRUCTION_TEXT_IS_INERT_DATA
+OWNER_DECISION.P0_05C.NONLEADING_UFEFF_ALLOWED_AS_TEXT
 ```
 
 `OWNER_DECISION.P0_05C.LONE_CR_REJECTION` records that a TXT or MD file using CR-only line endings is rejected by the P0 encoding and deterministic binary-content gate. This includes legacy Mac-style text where line boundaries are represented only by `U+000D CR`, unless each CR is immediately followed by `U+000A LF`. P0 accepts LF and CRLF, rejects lone CR, does not normalize line endings, does not rewrite the quarantined object, and does not transcode legacy line-ending formats. CR-only text must not be described as malformed UTF-8 merely because of the lone CR rule; it may be valid UTF-8 but is blocked under the deterministic binary-content policy.
@@ -125,6 +126,51 @@ corpus_status: corpus_only
 ```
 
 No fixture may convert an encoding-gate result into a broader document-validity claim.
+
+`OWNER_DECISION.P0_05C.NONLEADING_UFEFF_ALLOWED_AS_TEXT` records that one `EF BB BF` sequence is treated specially as the optional UTF-8 BOM only when it begins at byte offset zero. That one leading sequence may be ignored for strict UTF-8 encoding-gate validation. An `EF BB BF` sequence occurring anywhere after byte offset zero decodes as Unicode `U+FEFF`. Non-leading `U+FEFF` passes the narrow P0 TXT/MD encoding and deterministic binary-content gate because it is valid strict UTF-8, not NUL, not a prohibited C0 control, not DEL, not a C1 control, and not lone CR.
+
+The gate must not strip non-leading `U+FEFF`, normalize non-leading `U+FEFF`, reinterpret it as another BOM, reject it merely because its UTF-8 encoding is `EF BB BF`, attach semantic meaning to it, or treat it as an instruction, policy, approval, or review decision.
+
+When two consecutive `EF BB BF` sequences occur at the beginning of the byte stream, the first may be treated as the single optional leading UTF-8 BOM and the second decodes and remains as an ordinary permitted `U+FEFF` character.
+
+Passing this decision establishes only:
+
+```text
+encoding_gate_pass_only
+```
+
+It does not establish:
+
+```text
+document validity
+content usability
+profile eligibility
+source eligibility
+evidence eligibility
+semantic safety
+security-assessment completion
+upload acceptance
+```
+
+Do not generalize this decision to all zero-width characters, Unicode formatting characters, or Unicode format controls. It applies only to `U+FEFF` under the P0 TXT/MD encoding and deterministic binary-content gate.
+
+The future P0-05D TXT/MD byte-fixture corpus must include a positive fixture containing non-leading `U+FEFF`. That fixture must cite `OWNER_DECISION.P0_05C.NONLEADING_UFEFF_ALLOWED_AS_TEXT` and use metadata equivalent to:
+
+```text
+expected_policy: allow
+expected_category: encoding_gate_pass
+scope_note: encoding_gate_pass_only
+```
+
+The future corpus must not contain a grounded blocking fixture whose only rationale is that `EF BB BF` occurs after byte offset zero or is described as a "non-leading UTF-8 BOM." A second `EF BB BF` immediately following the optional leading BOM is also a permitted `U+FEFF` case at this narrow gate.
+
+Future P0-05D fixture-integrity tests must actively establish UTF-8 validity using:
+
+```js
+new TextDecoder("utf-8", { fatal: true })
+```
+
+Every fixture labeled valid UTF-8 must decode successfully in fatal mode. Every fixture labeled invalid UTF-8 must throw in fatal mode. Byte-array or hexadecimal comparison alone is insufficient to establish UTF-8 validity. Replacement-character decoding is not authoritative evidence of validity. The check must operate on the fixture bytes themselves and must not rely on JavaScript string coercion to construct or classify invalid UTF-8 fixtures. This is a future P0-05D requirement only; it does not implement tests, fixtures, helper code, or production decoding.
 
 This P0-05C decision follows the required P0 security-policy style: deterministic and enumerated; reject rather than guess or silently transcode; no percentage, density, entropy, or language heuristics; no charset autodetection; no mutation of quarantined bytes; no execution or semantic interpretation of content; and raw bytes and decoded content excluded from blockers, responses, audit, metrics, and logs.
 

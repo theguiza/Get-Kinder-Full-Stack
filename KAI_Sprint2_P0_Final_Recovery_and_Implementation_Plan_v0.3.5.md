@@ -744,6 +744,7 @@ OWNER_DECISION.P0_05C.PROHIBITED_CONTROL_REJECTION: future fixtures must cite th
 OWNER_DECISION.P0_05C.LONE_CR_REJECTION: a TXT or MD file using CR-only line endings is rejected by the P0 encoding and deterministic binary-content gate
 OWNER_DECISION.P0_05C.EMPTY_CONTENT_ENCODING_GATE_PASS: an empty TXT or MD byte sequence passes only the strict UTF-8 and deterministic binary-content gate
 OWNER_DECISION.P0_05C.INSTRUCTION_TEXT_IS_INERT_DATA: future fixtures must cite this authority for instruction-like text treated as inert data
+OWNER_DECISION.P0_05C.NONLEADING_UFEFF_ALLOWED_AS_TEXT: non-leading U+FEFF passes the narrow P0 TXT/MD encoding and deterministic binary-content gate
 lone_cr_detail: legacy Mac-style line boundaries represented only by U+000D CR are rejected unless each CR is immediately followed by U+000A LF
 line_ending_policy: P0 accepts LF and CRLF, rejects lone CR, does not normalize line endings, does not rewrite the quarantined object, and does not transcode legacy line-ending formats
 cr_only_utf8_note: do not describe CR-only text as malformed UTF-8; it may be valid UTF-8 but is blocked under the deterministic binary-content policy
@@ -753,6 +754,17 @@ forbidden_empty_content_language: empty files are valid; empty uploads are accep
 later_empty_content_validators: usefulness or workflow validators may block empty content under separate owner decisions
 future_empty_fixture_metadata: expected_policy allow; expected_category encoding_gate_pass; scope_note encoding_gate_pass_only; usable_document_claim false; source_eligibility_claim false; corpus_status corpus_only
 fixture_boundary: no fixture may convert an encoding-gate result into a broader document-validity claim
+nonleading_ufeff_byte_position_treatment: one EF BB BF sequence is treated specially as the optional UTF-8 BOM only when it begins at byte offset zero; that one leading sequence may be ignored for strict UTF-8 encoding-gate validation; an EF BB BF sequence occurring anywhere after byte offset zero decodes as Unicode U+FEFF
+nonleading_ufeff_pass_basis: valid strict UTF-8; not NUL; not a prohibited C0 control; not DEL; not a C1 control; not lone CR
+nonleading_ufeff_gate_must_not: strip non-leading U+FEFF; normalize non-leading U+FEFF; reinterpret it as another BOM; reject it merely because its UTF-8 encoding is EF BB BF; attach semantic meaning to it; treat it as an instruction, policy, approval, or review decision
+consecutive_leading_efbbbf_treatment: when two consecutive EF BB BF sequences occur at the beginning of the byte stream, the first may be treated as the single optional leading UTF-8 BOM and the second decodes and remains as an ordinary permitted U+FEFF character
+nonleading_ufeff_result: encoding_gate_pass_only
+nonleading_ufeff_non_claims: not_document_validity; not_content_usability; not_profile_eligibility; not_source_eligibility; not_evidence_eligibility; not_semantic_safety; not_security_assessment_completion; not_upload_acceptance
+nonleading_ufeff_scope_limit: applies only to U+FEFF under the P0 TXT/MD encoding and deterministic binary-content gate; do not generalize to all zero-width characters, Unicode formatting characters, or Unicode format controls
+future_nonleading_ufeff_fixture: P0-05D TXT/MD byte-fixture corpus must include a positive fixture containing non-leading U+FEFF, citing OWNER_DECISION.P0_05C.NONLEADING_UFEFF_ALLOWED_AS_TEXT, with expected_policy allow, expected_category encoding_gate_pass, and scope_note encoding_gate_pass_only
+future_nonleading_ufeff_blocking_fixture_limit: future corpus must not contain a grounded blocking fixture whose only rationale is that EF BB BF occurs after byte offset zero or is described as a non-leading UTF-8 BOM
+future_second_efbbbf_fixture_note: a second EF BB BF immediately following the optional leading BOM is also a permitted U+FEFF case at this narrow gate
+future_p0_05d_fatal_decoder_integrity: fixture-integrity tests must actively establish UTF-8 validity using new TextDecoder("utf-8", { fatal: true }); every fixture labeled valid UTF-8 must decode successfully in fatal mode; every fixture labeled invalid UTF-8 must throw in fatal mode; byte-array or hexadecimal comparison alone is insufficient; replacement-character decoding is not authoritative evidence of validity; the check must operate on fixture bytes themselves and must not rely on JavaScript string coercion to construct or classify invalid UTF-8 fixtures
 p0_security_policy_style: deterministic and enumerated; reject rather than guess or silently transcode; no percentage, density, entropy, or language heuristics; no charset autodetection; no mutation of quarantined bytes; no execution or semantic interpretation of content; raw bytes and decoded content excluded from blockers, responses, audit, metrics, and logs
 non_scope: this statement guides later P0-05 decisions but does not define CSV, XLSX, PDF, MIME/signature, or malware policy; those controls require separate owner decisions
 implementation_status: not_implemented_by_this_decision_record
