@@ -609,6 +609,82 @@ persistent upload lifecycle
 
 Those remain `NOT_CONFIRMED` until separately authorized Gate A verification.
 
+## P0-04 route-specific human mutation: file policy block
+
+```text
+route: POST /api/kai/sprint2/intake/admin/files/:intakeFileId/block
+operation: mark_file_policy_blocked
+decision_evidence: USER_CONFIRMED
+implementation_status: implemented in this package after verification
+```
+
+This route binds the shared P0-04 human state-transition mutation contract to one mounted operation only. It preserves the established feature-gate and authentication order, uses the mounted admin route organization-input convention, and validates both `organization_id` and lowercase canonical `intakeFileId` UUIDs before tenant-sensitive access.
+
+Authorization requires a mapped human actor, `gk_admin` or `gk_operator`, and active membership in the requested organization before the scoped file read. `gk_reviewer`, client roles, AI, system, internal-service, import, and code actors are denied. The established actor- and organization-scoped mutation-attempt controls apply; no new limiter design or provider is introduced.
+
+The request body accepts exactly:
+
+```json
+{
+  "expected_file_policy_status": "pending",
+  "blocking_reason_code": "unsafe_filename"
+}
+```
+
+The only accepted `expected_file_policy_status` is `pending`. The accepted `blocking_reason_code` values are:
+
+```text
+unsafe_filename
+unsupported_mime_type
+file_too_large
+checksum_conflict
+malware_failed
+csv_formula_injection_risk
+storage_path_invalid
+other_policy_violation
+```
+
+Unknown keys, nested objects, arrays, nulls, unrestricted `blocked_reason`, operator notes, `required_action`, queue fields, metadata objects, idempotency keys, `record_version`, and upload-state instructions are rejected with canonical `422 validation_blocker`.
+
+The only permitted transition is:
+
+```text
+file_policy_status: pending -> blocked
+```
+
+Stored `pending` is eligible for the organization-and-file-scoped compare-and-set write. Stored `blocked` returns canonical `409 conflict_current_state_changed` and is not an idempotent success. Stored `passed`, `failed`, or `skipped` returns canonical `422 state_transition_denied`. Null, missing, unknown, malformed, or internally inconsistent stored status returns safe `500 system_error`.
+
+Inside the shared transaction composition, this route performs one organization-and-file-scoped read, validates the complete stored row, performs one organization-and-file-scoped compare-and-set write requiring `file_policy_status = pending`, validates the returned post-write row, persists the required successful audit, and commits only after audit success. No ID-only lookup or write, tenant probe, fallback, unscoped query, partial response, or partial success is permitted. No row and defensive tenant mismatch return identical canonical `404 not_found`. A zero-row compare-and-set after a valid scoped read returns `409 conflict_current_state_changed`.
+
+The write changes only `file_policy_status` to `blocked`; repository-managed `updated_at` may change only if the repository already manages it. The route leaves processing status, parse status, review status, malware status, storage and integrity fields, all upload-lifecycle fields or equivalents, and all unrelated file fields unchanged.
+
+This route performs no review-queue mutation. It does not create, update, deduplicate, resolve, block, or otherwise modify an `intake_file_review` item and does not write `summary`, `required_action`, `blocked_reason`, `priority`, `assigned_to`, `due_at`, or queue metadata. Any later coupling between file blocking and queue work requires a separate owner-approved route contract.
+
+The successful audit uses only the shared allowlist values applicable to this route: actor user ID, actor type, organization ID, operation type `mark_file_policy_blocked`, canonical route, request ID, target object type `intake_file`, target object ID, prior status `pending`, new status `blocked`, approved `blocking_reason_code`, validator keys actually executed, and created timestamp. It does not audit a copied request body or unrestricted text.
+
+The success response uses the established KAI success envelope. Its `data` object is exactly the same 14-field file DTO as `GET /api/kai/sprint2/intake/admin/files/:intakeFileId`:
+
+```text
+intake_file_id
+intake_batch_id
+organization_id
+engagement_id
+safe_filename
+mime_type
+file_size_bytes
+file_policy_status
+malware_scan_status
+processing_status
+parse_status
+review_status
+created_at
+updated_at
+```
+
+The response excludes storage provider, bucket, object key, URI, signed URLs, checksum, hash algorithm, upload-state and immutable-version details, raw content, unrestricted metadata, credentials, infrastructure, audit payload, transaction context, actor/session/membership context, review-queue internals, client data, and PII.
+
+Durable `upload_state = policy_blocked`, persistent lifecycle compatibility, and the full two-field lifecycle mapping remain `NOT_CONFIRMED` and deferred to separately authorized lifecycle/Gate A work.
+
 ## Audit, transaction, and persistence expectations
 
 Audit payloads are metadata-only allowlists. Safe facts may include operation, actor type, organization-scoped object type and opaque ID, validator/reason code, request ID, route, state transition, timing, byte count, checksum verification outcome, and immutable version outcome. Raw content, parsed rows, prompts, credentials, signed URLs, private paths, bucket/object identifiers, unrestricted actor/session/membership records, and unapproved PII are forbidden.

@@ -8,17 +8,24 @@
 
 export const REQUIRED_AUDIT_METADATA_ALLOWLIST = Object.freeze([
   "operation",
+  "actor_user_id",
   "actor_type",
   "organization_id",
   "engagement_id",
   "object_type",
+  "target_object_type",
   "object_id",
   "reason_code",
   "validator_key",
+  "validator_keys",
+  "blocking_reason_code",
   "request_id",
   "route",
   "from_state",
   "to_state",
+  "prior_status",
+  "new_status",
+  "created_at",
   "duration_ms",
   "byte_count",
   "checksum_verification_outcome",
@@ -44,20 +51,28 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 const METADATA_CODE_PATTERN = /^[a-z][a-z0-9_.:-]{0,95}$/i;
 const OPAQUE_REQUEST_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,127}$/i;
 const KAI_ROUTE_PATTERN = /^\/api\/kai(?:\/[a-z0-9_.:-]+)*$/i;
+const CANONICAL_ISO_TIMESTAMP_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
 const FIELD_NORMALIZERS = Object.freeze({
   operation: normalizeCode,
+  actor_user_id: normalizeUuid,
   actor_type: normalizeCode,
   organization_id: normalizeUuid,
   engagement_id: normalizeUuid,
   object_type: normalizeCode,
+  target_object_type: normalizeCode,
   object_id: normalizeUuid,
   reason_code: normalizeCode,
   validator_key: normalizeCode,
+  validator_keys: normalizeCodeArray,
+  blocking_reason_code: normalizeCode,
   request_id: normalizeRequestId,
   route: normalizeRoute,
   from_state: normalizeCode,
   to_state: normalizeCode,
+  prior_status: normalizeCode,
+  new_status: normalizeCode,
+  created_at: normalizeTimestamp,
   duration_ms: normalizeNonNegativeInteger,
   byte_count: normalizeNonNegativeInteger,
   checksum_verification_outcome: normalizeCode,
@@ -90,6 +105,23 @@ function normalizeRequestId(value) {
   if (typeof value !== "string") return undefined;
   const normalized = value.trim();
   return OPAQUE_REQUEST_ID_PATTERN.test(normalized) ? normalized : undefined;
+}
+
+function normalizeTimestamp(value) {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? undefined : value.toISOString();
+  }
+  if (typeof value !== "string" || !CANONICAL_ISO_TIMESTAMP_RE.test(value)) return undefined;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) || parsed.toISOString() !== value ? undefined : value;
+}
+
+function normalizeCodeArray(value) {
+  if (!Array.isArray(value)) return undefined;
+  const normalized = value.map(normalizeCode).filter(Boolean);
+  return normalized.length === value.length && normalized.length > 0
+    ? Object.freeze(normalized)
+    : undefined;
 }
 
 function normalizeRoute(value) {

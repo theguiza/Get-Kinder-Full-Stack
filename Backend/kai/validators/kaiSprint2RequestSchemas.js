@@ -13,6 +13,21 @@ const INTAKE_BATCH_FILES_QUERY_KEYS = new Set(["organization_id", "limit", "curs
 const INTAKE_BATCH_FILES_CURSOR_KEYS = Object.freeze(["created_at", "intake_file_id"]);
 const REVIEW_QUEUE_QUERY_KEYS = new Set(["organization_id", "limit", "cursor"]);
 const REVIEW_QUEUE_CURSOR_KEYS = Object.freeze(["created_at", "review_queue_item_id"]);
+export const FILE_POLICY_BLOCKING_REASON_CODES = Object.freeze([
+  "unsafe_filename",
+  "unsupported_mime_type",
+  "file_too_large",
+  "checksum_conflict",
+  "malware_failed",
+  "csv_formula_injection_risk",
+  "storage_path_invalid",
+  "other_policy_violation",
+]);
+const FILE_POLICY_BLOCK_REQUEST_KEYS = new Set([
+  "expected_file_policy_status",
+  "blocking_reason_code",
+]);
+const FILE_POLICY_BLOCKING_REASON_CODE_SET = new Set(FILE_POLICY_BLOCKING_REASON_CODES);
 const BASE64URL_RE = /^[A-Za-z0-9_-]+$/;
 const CANONICAL_ISO_TIMESTAMP_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
@@ -305,6 +320,40 @@ export function validateKaiSprint2MutationRequest(operation, payload, options = 
 
   if (options.intakeBatchId != null && !KAI_SPRINT2_P0_PATTERNS.uuid.test(String(options.intakeBatchId))) {
     return { ok: false, blockers: [requestBlocker("invalid_uuid_field", "path.intake_batch_id")] };
+  }
+
+  return { ok: true, blockers: [] };
+}
+
+export function validateFilePolicyBlockRequest(payload) {
+  if (!isPlainObject(payload)) {
+    return { ok: false, blockers: [requestBlocker("request_body_must_be_object", "body")] };
+  }
+
+  const keys = Object.keys(payload);
+  for (const key of keys) {
+    if (!FILE_POLICY_BLOCK_REQUEST_KEYS.has(key)) {
+      return { ok: false, blockers: [requestBlocker("unknown_field", `body.${key}`)] };
+    }
+    const value = payload[key];
+    if (value === null) return { ok: false, blockers: [requestBlocker("null_field_not_allowed", `body.${key}`)] };
+    if (Array.isArray(value)) return { ok: false, blockers: [requestBlocker("array_field_not_allowlisted", `body.${key}`)] };
+    if (isPlainObject(value)) return { ok: false, blockers: [requestBlocker("nested_object_not_allowed", `body.${key}`)] };
+    if (typeof value !== "string") return { ok: false, blockers: [requestBlocker("invalid_string_field", `body.${key}`)] };
+  }
+
+  for (const key of FILE_POLICY_BLOCK_REQUEST_KEYS) {
+    if (!Object.hasOwn(payload, key)) {
+      return { ok: false, blockers: [requestBlocker("required_field_missing", `body.${key}`)] };
+    }
+  }
+
+  if (payload.expected_file_policy_status !== "pending") {
+    return { ok: false, blockers: [requestBlocker("invalid_expected_file_policy_status", "body.expected_file_policy_status")] };
+  }
+
+  if (!FILE_POLICY_BLOCKING_REASON_CODE_SET.has(payload.blocking_reason_code)) {
+    return { ok: false, blockers: [requestBlocker("invalid_blocking_reason_code", "body.blocking_reason_code")] };
   }
 
   return { ok: true, blockers: [] };

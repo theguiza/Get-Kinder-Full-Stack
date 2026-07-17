@@ -29,6 +29,7 @@ const P0_MUTATION_OPERATIONS = new Set([
   "create_intake_file",
   "reserve_intake_file_metadata",
   "create_review_queue_item",
+  "mark_file_policy_blocked",
 ]);
 
 export function isAssistantRestrictedOperation(operation) {

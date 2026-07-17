@@ -104,6 +104,7 @@ test("Pass 2 router exposes only metadata-intake admin surface", () => {
     "/admin/batches/:intakeBatchId/file-reservations",
     "/admin/batches/:intakeBatchId/files",
     "/admin/files/:intakeFileId",
+    "/admin/files/:intakeFileId/block",
     "/admin/review-queue",
     "/status",
   ]);
@@ -639,6 +640,10 @@ test("auth preflight middleware does not intercept sibling Sprint 2 intake route
       {
         method: "POST",
         path: "/api/kai/sprint2/intake/admin/batches/batch-123/file-reservations",
+      },
+      {
+        method: "POST",
+        path: "/api/kai/sprint2/intake/admin/files/file-123/block",
       },
     ];
 

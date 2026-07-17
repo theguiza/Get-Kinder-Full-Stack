@@ -128,6 +128,7 @@ test("fingerprint version, exact fields, persisted representation, and compatibi
 test("operation roles and the disabled security-executor identity are explicit", () => {
   assert.deepEqual(KAI_SPRINT2_P0_OPERATION_ROLES.create_intake_batch, ["gk_admin", "gk_operator"]);
   assert.deepEqual(KAI_SPRINT2_P0_OPERATION_ROLES.create_intake_file, ["gk_admin", "gk_operator"]);
+  assert.deepEqual(KAI_SPRINT2_P0_OPERATION_ROLES.mark_file_policy_blocked, ["gk_admin", "gk_operator"]);
   assert.equal(KAI_SPRINT2_P0_SECURITY_EXECUTOR.actorType, "internal_service");
   assert.equal(KAI_SPRINT2_P0_SECURITY_EXECUTOR.serviceIdentity, "kai_file_security_executor");
   assert.equal(KAI_SPRINT2_P0_SECURITY_EXECUTOR.operationGroup, "file_security_assessment");

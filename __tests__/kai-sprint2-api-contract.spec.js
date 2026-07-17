@@ -25,6 +25,7 @@ test("api contract exposes Sprint 2 status and admin metadata route shape", () =
   assert.match(routeSource, /router\.get\(["']\/admin\/batches\/:intakeBatchId["']/);
   assert.match(routeSource, /router\.get\(["']\/admin\/batches\/:intakeBatchId\/files["']/);
   assert.match(routeSource, /router\.get\(["']\/admin\/files\/:intakeFileId["']/);
+  assert.match(routeSource, /router\.post\(["']\/admin\/files\/:intakeFileId\/block["']/);
   assert.match(routeSource, /router\.get\(["']\/admin\/review-queue["']/);
   assert.match(routeSource, /router\.post\(["']\/admin\/batches\/:intakeBatchId\/file-reservations["']/);
   assert.match(routeSource, /mode:\s*["']admin_metadata_only["']/);
@@ -52,9 +53,11 @@ test("sprint2IntakeApi delegates admin metadata operations to service without di
   assert.match(routeSource, /\bcheckAdminAccess\b/);
   assert.match(routeSource, /\bcreateIntakeBatch\b/);
   assert.match(routeSource, /\breserveIntakeFileMetadata\b/);
+  assert.match(routeSource, /\bmarkIntakeFilePolicyBlocked\b/);
   assert.match(routeSource, /service\.checkAdminAccess/);
   assert.match(routeSource, /service\.createIntakeBatch/);
   assert.match(routeSource, /service\.reserveIntakeFileMetadata/);
+  assert.match(routeSource, /service\.markIntakeFilePolicyBlocked/);
   assert.doesNotMatch(routeSource, /\brequestUploadUrl\b/);
   assert.doesNotMatch(routeSource, /\b(?:select|insert|update|delete)\b[\s\S]{0,160}\bkai\./i);
   assert.doesNotMatch(routeSource, /\bkai\.(?!js\b)[a-z_]+\b/i);

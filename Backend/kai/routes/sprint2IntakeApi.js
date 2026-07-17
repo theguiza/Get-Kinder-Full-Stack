@@ -8,6 +8,7 @@ import {
 import { setKaiSprint2NoStore } from "../middleware/kaiSprint2RequestSafety.js";
 import {
   validateIntakeBatchFilesQuery,
+  validateFilePolicyBlockRequest,
   validateKaiSprint2MutationRequest,
   validateReviewQueueQuery,
 } from "../validators/kaiSprint2RequestSchemas.js";
@@ -81,6 +82,11 @@ function requestPayload(req = {}) {
   return req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : {};
 }
 
+function safeRequestId(req = {}) {
+  const value = req.id || req.get?.("x-request-id") || req.headers?.["x-request-id"];
+  return typeof value === "string" && /^[a-z0-9][a-z0-9_-]{0,127}$/i.test(value) ? value : null;
+}
+
 function requestContext(req = {}, route) {
   const payload = requestPayload(req);
   return {
@@ -89,6 +95,7 @@ function requestContext(req = {}, route) {
     organizationId: payload.organization_id,
     engagementId: payload.engagement_id,
     idempotencyKey: payload.idempotency_key || null,
+    requestId: safeRequestId(req),
     route,
   };
 }
@@ -132,6 +139,40 @@ function validateMutationRequestOrSend(req, res, operation, options = {}) {
   if (result.ok) return true;
   sendKaiError(res, "invalid_request", { blockers: result.blockers });
   return false;
+}
+
+function routeValidationBlocker(blockingReason, objectCode) {
+  return {
+    validator_key: "VAL-REQ-P0-001",
+    severity: "blocker",
+    object_type: "request",
+    object_code: objectCode,
+    object_id: null,
+    message: "Request does not match the KAI Sprint 2 route schema.",
+    blocking_reason: blockingReason,
+    required_fix: "Send only the documented metadata fields with their documented types and limits.",
+    evidence: {},
+  };
+}
+
+function validateFilePolicyBlockRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = fileDetailIdentifiers(req);
+  if (!identifiers) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_or_intake_file_id")],
+    });
+    return null;
+  }
+  const result = validateFilePolicyBlockRequest(req.body);
+  if (!result.ok) {
+    sendKaiError(res, "validation_blocker", { blockers: result.blockers });
+    return null;
+  }
+  return identifiers;
 }
 
 async function invokeService(res, serviceCall, successStatus = 200) {
@@ -242,6 +283,21 @@ router.get("/admin/files/:intakeFileId", async (req, res) => {
   });
 });
 
+router.post("/admin/files/:intakeFileId/block", async (req, res) => {
+  const identifiers = validateFilePolicyBlockRequestOrSend(req, res);
+  if (!identifiers) return;
+  const payload = requestPayload(req);
+  return invokeService(res, async () => {
+    const service = await getIntakeService();
+    return service.markIntakeFilePolicyBlocked({
+      ...requestContext(req, "/api/kai/sprint2/intake/admin/files/:intakeFileId/block"),
+      ...identifiers,
+      expectedFilePolicyStatus: payload.expected_file_policy_status,
+      blockingReasonCode: payload.blocking_reason_code,
+    });
+  });
+});
+
 router.get("/admin/review-queue", async (req, res) => {
   const organizationId = normalizedUuid(req.query?.organization_id);
   const queryResult = validateReviewQueueQuery(req.query);
@@ -314,6 +370,7 @@ export const __testables = {
   sanitizeServiceWarnings,
   metadataContentTypeIsSupported,
   validateMutationRequestOrSend,
+  validateFilePolicyBlockRequestOrSend,
   setIntakeServiceForTest(service) {
     intakeServiceOverride = service;
     return () => {

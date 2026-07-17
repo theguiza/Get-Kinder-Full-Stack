@@ -191,3 +191,18 @@ export async function insertReviewQueueItem(item, db = pool) {
   );
   return rows[0] || null;
 }
+
+export async function blockIntakeFilePolicyStatus({ organizationId, intakeFileId }, db = pool) {
+  const { rows } = await db.query(
+    `UPDATE kai.intake_files
+        SET file_policy_status = 'blocked'
+      WHERE organization_id = $1
+        AND intake_file_id = $2
+        AND file_policy_status = 'pending'
+      RETURNING intake_file_id, intake_batch_id, organization_id, engagement_id, safe_filename,
+        mime_type, file_size_bytes, file_policy_status, malware_scan_status, processing_status,
+        parse_status, review_status, created_at, updated_at`,
+    [organizationId, intakeFileId],
+  );
+  return rows[0] || null;
+}

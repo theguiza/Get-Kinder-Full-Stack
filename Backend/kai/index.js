@@ -60,6 +60,7 @@ export {
   listIntakeBatchesForOrganization,
   listIntakeFilesForBatch,
   listIntakeFileReviewQueueItems,
+  markIntakeFilePolicyBlocked,
   requestUploadUrl,
   reserveIntakeFileMetadata,
   validateIntakeFileMetadata,

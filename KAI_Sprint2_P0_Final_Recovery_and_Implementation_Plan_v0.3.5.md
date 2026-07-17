@@ -2044,6 +2044,55 @@ package_commit: report after commit; a commit cannot contain its own SHA
 next_package_or_stop_condition: OWNER-DIRECTED STOP after this documentation-only shared contract decision; do not implement a route, service, write helper, production export, P0-05 work, review-queue-status work, or additional leaf
 ```
 
+## P0-04 — route-specific file-policy block mutation
+
+```text
+leaf_status: complete
+p0_04_package_status: route_specific_file_policy_block_complete
+route: POST /api/kai/sprint2/intake/admin/files/:intakeFileId/block
+operation: mark_file_policy_blocked
+owner_directed_leaf_scope: USER_CONFIRMED
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 8a219a68ec4ebef6ac3e3ed01c8bb926984f1a8e
+starting_tree: clean tracked and untracked
+prior_boundary: TOOL_VERIFIED — 8a219a68ec4ebef6ac3e3ed01c8bb926984f1a8e changed only Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md and this living ExecPlan to record the shared P0-04 human mutation contract
+applicable_repository_instructions: root AGENTS.md only; changes remain inside the approved P0-04 route-specific mutation package
+route_decision_recorded: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md and this living ExecPlan
+authorization_boundary: mapped human actor, gk_admin or gk_operator, and active membership required before tenant-sensitive file access; gk_reviewer, client roles, AI, system, internal-service, import, and code actors denied
+request_contract: exact two-field JSON body with expected_file_policy_status pending and approved blocking_reason_code only; unknown keys, nested objects, arrays, nulls, free text, queue fields, metadata, idempotency keys, record_version, and upload-state instructions rejected
+transition_contract: pending -> blocked only; blocked returns 409 conflict_current_state_changed; passed, failed, and skipped return 422 state_transition_denied; malformed stored state returns safe 500 system_error
+persistence_boundary: one organization-and-file-scoped read, one organization-and-file-scoped compare-and-set write requiring file_policy_status pending, post-write validation before required successful audit, and commit only after audit confirms ok true
+upload_lifecycle_decision: route changes only file_policy_status; durable upload_state = policy_blocked, persistent lifecycle compatibility, and full two-field lifecycle mapping remain NOT_CONFIRMED and deferred to authorized lifecycle/Gate A work
+review_queue_decision: no intake_file_review read, write, creation, update, deduplication, resolution, blocking, summary, required_action, blocked_reason, priority, assignment, due date, or queue metadata mutation
+success_response_boundary: established success envelope with exact 14-field file DTO matching mounted file-detail route and no storage, checksum, upload-state, raw content, metadata, credentials, audit, transaction, actor/session/membership, queue, client data, or PII sentinels
+implemented_files: Backend/kai/routes/sprint2IntakeApi.js; Backend/kai/services/kaiIntakeService.js; Backend/kai/db/kaiIntakeQueries.js; Backend/kai/db/kaiAuditQueries.js; Backend/kai/internal/kaiMutationOrchestration.js; Backend/kai/errors/kaiErrors.js; Backend/kai/config/kaiSprint2P0Contract.js; Backend/kai/auth/kaiAuthorizationService.js; Backend/kai/validators/assistantBoundaryValidators.js; Backend/kai/validators/kaiSprint2RequestSchemas.js; Backend/kai/index.js
+test_files: __tests__/kai-sprint2-file-policy-block-route.spec.js; __tests__/kai-sprint2-api-contract.spec.js; __tests__/kai-sprint2-orchestration-boundary.spec.js; __tests__/kai-sprint2-p0-repository-contract.spec.js; __tests__/kai-sprint2-pass2-route-runtime.spec.js
+documentation_files: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+focused_file_block_tests: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-file-policy-block-route.spec.js — 17 passed, 0 failed
+focused_audit_query_tests: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-audit-queries.spec.js — 4 passed, 0 failed
+mutation_orchestration_and_transaction_regressions: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-mutation-orchestration.spec.js __tests__/kai-sprint2-transaction-interface.spec.js — 34 passed, 0 failed
+api_contract_suite: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-api-contract — 51 passed, 0 failed
+schema_contract_suite: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-schema-contract — 9 passed, 0 failed
+pass2_suite: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2-pass2 — 105 passed, 0 failed
+sprint2_suite: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-*.spec.js — 387 passed, 0 failed
+full_repository_suite: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test — 492 passed, 0 failed
+localhost_eperm_note: sandbox-local 127.0.0.1 listen attempts returned EPERM for assembled HTTP tests; identical localhost-capable reruns used the same non-listening DATABASE_URL sentinel and passed
+git_diff_check: passed
+complete_diff_inspection: TOOL_VERIFIED — complete implementation, documentation, and test diff inspected after final verification
+package_commit: report after commit; a commit cannot contain its own SHA
+deployed_kai_schema_compatibility: NOT_CONFIRMED
+live_postgresql_compare_and_set_behavior: NOT_CONFIRMED
+database_atomicity: NOT_CONFIRMED
+two_session_conflict_behavior: NOT_CONFIRMED
+durable_successful_audit_persistence: NOT_CONFIRMED
+persistent_upload_lifecycle: NOT_CONFIRMED
+nonproduction_storage_integration: NOT_CONFIRMED
+live_upload_readiness: NOT_CONFIRMED
+production_readiness: NOT_CONFIRMED
+real_client_data_readiness: NOT_CONFIRMED
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this route-specific implementation commit; do not begin P0-05, another route, acceptance package, review-queue mutation, upload lifecycle work, or additional leaf
+```
+
 
 ---
 

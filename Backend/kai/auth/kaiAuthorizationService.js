@@ -11,6 +11,7 @@ const P0_MUTATING_OPERATIONS = new Set([
   "create_intake_batch",
   "create_intake_file",
   "create_review_queue_item",
+  "mark_file_policy_blocked",
 ]);
 
 const P0_GLOBAL_WRITE_ROLES = new Set(KAI_SPRINT2_P0_OPERATION_ROLES.create_intake_batch);

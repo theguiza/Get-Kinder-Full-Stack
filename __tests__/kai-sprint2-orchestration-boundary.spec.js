@@ -10,6 +10,7 @@ const IGNORED_DIRECTORIES = new Set([".git", "node_modules", "coverage", "dist",
 const INTERNAL_CORE_PATH = ["Backend", "kai", "internal", "kaiMutationOrchestration.js"].join("/");
 const TEST_HARNESS_PATH = ["__tests__", "support", "kaiMutationOrchestrationTestHarness.js"].join("/");
 const TRANSACTION_INTERFACE_PATH = ["Backend", "kai", "db", "kaiDb.js"].join("/");
+const ROUTE_SPECIFIC_RUNTIME_COMPOSITION_PATH = ["Backend", "kai", "services", "kaiIntakeService.js"].join("/");
 
 const ORCHESTRATION_SYMBOLS = [
   ["orchestrate", "Mutation", "With", "Required", "Audit"].join(""),
@@ -28,12 +29,12 @@ const TEST_HARNESS_SYMBOLS = [
 const TRANSACTION_PROVIDER_SYMBOL = ["transaction", "Provider"].join("");
 const LEGACY_TEST_OPTION_SYMBOL = ["test", "Only", "Transaction", "Provider"].join("");
 
-const ALLOWED_CORE_IMPORTERS = new Set([TEST_HARNESS_PATH]);
+const ALLOWED_CORE_IMPORTERS = new Set([TEST_HARNESS_PATH, ROUTE_SPECIFIC_RUNTIME_COMPOSITION_PATH]);
 const ALLOWED_HARNESS_IMPORTERS = new Set([
   "__tests__/kai-sprint2-mutation-orchestration.spec.js",
   "__tests__/kai-sprint2-transaction-interface.spec.js",
 ]);
-const ALLOWED_CORE_CALLERS = new Set([TEST_HARNESS_PATH]);
+const ALLOWED_CORE_CALLERS = new Set([TEST_HARNESS_PATH, ROUTE_SPECIFIC_RUNTIME_COMPOSITION_PATH]);
 const ALLOWED_HARNESS_CALLERS = new Set([
   TEST_HARNESS_PATH,
   ...ALLOWED_HARNESS_IMPORTERS,
@@ -164,7 +165,7 @@ function formatUnexpected(records) {
     .join("\n");
 }
 
-test("internal orchestration and its deterministic harness have no production exposure or live caller", () => {
+test("internal orchestration has only the approved file-policy block runtime caller", () => {
   const report = {
     core_importers: [],
     test_harness_importers: [],
@@ -238,8 +239,19 @@ test("internal orchestration and its deterministic harness have no production ex
   );
   assert.deepEqual(
     [...new Set(report.core_importers.map(({ file }) => file))],
-    [TEST_HARNESS_PATH],
+    [ROUTE_SPECIFIC_RUNTIME_COMPOSITION_PATH, TEST_HARNESS_PATH],
   );
+  assert.deepEqual(
+    report.core_callers
+      .filter(({ file }) => file === ROUTE_SPECIFIC_RUNTIME_COMPOSITION_PATH)
+      .map(({ kind }) => kind),
+    [`call ${CORE_CALL_SYMBOL}`],
+  );
+  const runtimeCompositionSource = readFileSync(
+    path.join(REPOSITORY_ROOT, ROUTE_SPECIFIC_RUNTIME_COMPOSITION_PATH),
+    "utf8",
+  );
+  assert.match(runtimeCompositionSource, /export\s+async\s+function\s+markIntakeFilePolicyBlocked/);
   assert.deepEqual(
     [...new Set(report.test_harness_importers.map(({ file }) => file))],
     [...ALLOWED_HARNESS_IMPORTERS],

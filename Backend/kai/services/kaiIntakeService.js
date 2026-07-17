@@ -9,12 +9,19 @@ import { kaiIdempotentWriteConflict } from "../internal/kaiIdempotentWriteConfli
 import { resolveKaiActorContext } from "../auth/kaiActorContext.js";
 import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationService.js";
 import {
+  blockIntakeFilePolicyStatus,
   findIntakeBatchByIdempotencyKey,
   findIntakeFileReservationByChecksum,
   findIntakeFileReservationByIdempotencyKey,
   insertIntakeBatchMetadata,
   insertIntakeFileMetadata,
 } from "../db/kaiIntakeQueries.js";
+import { withTransaction } from "../db/kaiDb.js";
+import { insertRequiredSuccessfulAuditEvent } from "../db/kaiAuditQueries.js";
+import {
+  RequiredAuditPersistenceError,
+  orchestrateMutationWithRequiredAudit,
+} from "../internal/kaiMutationOrchestration.js";
 import {
   getIntakeBatchDetail as readIntakeBatchDetail,
   getIntakeFileMetadata as readIntakeFileMetadata,
@@ -23,6 +30,7 @@ import {
   listIntakeFileReviewQueueItems as readIntakeFileReviewQueueItems,
 } from "../db/kaiReadModels.js";
 import {
+  FILE_POLICY_BLOCKING_REASON_CODES,
   encodeIntakeBatchFilesCursor,
   encodeReviewQueueCursor,
   validateIntakeBatchFilesPagination,
@@ -33,6 +41,7 @@ import { validateTenantBoundaryConsistency } from "../validators/tenantValidator
 import { validateSafeFilename, buildObjectKey } from "../storage/storagePathPolicy.js";
 import {
   validateStorageProviderDbValue,
+  validateFilePolicyStatusTransition,
 } from "../validators/stateTransitionValidators.js";
 import {
   canonicalizeSha256Checksum,
@@ -49,6 +58,16 @@ const UUID_RE = KAI_SPRINT2_P0_PATTERNS.uuid;
 const STORED_FINGERPRINT_RE = /^[0-9a-f]{64}$/;
 const PRELIMINARY_DUPLICATE_VALIDATORS = Object.freeze([duplicate_checksum_blocked]);
 const GK_REVIEW_QUEUE_ROLES = new Set(["gk_admin", "gk_operator", "gk_reviewer"]);
+const FILE_POLICY_BLOCKING_VALIDATOR_KEYS = Object.freeze([
+  "VAL-AUT-001",
+  "VAL-AUT-002",
+  "VAL-AUT-003",
+  "VAL-AUT-004",
+  "VAL-AST-001",
+  "VAL-STA-001",
+]);
+const KNOWN_TERMINAL_FILE_POLICY_STATUSES = new Set(["passed", "failed", "skipped"]);
+const FILE_POLICY_BLOCKING_REASON_CODE_SET = new Set(FILE_POLICY_BLOCKING_REASON_CODES);
 const ACTIVE_REVIEW_QUEUE_STATUSES = new Set([
   "open",
   "in_progress",
@@ -79,6 +98,14 @@ function sha256(value) {
 function actorError(actorResult) {
   if (actorResult.error_code === "mapped_kai_user_required") return buildKaiError("mapped_kai_user_required");
   return buildKaiError("unauthorized");
+}
+
+class KaiRouteMutationError extends Error {
+  constructor(code) {
+    super(code);
+    this.name = "KaiRouteMutationError";
+    this.code = code;
+  }
 }
 
 function routeName(inputRoute, fallback) {
@@ -234,6 +261,71 @@ function responseFileSummary(row) {
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
+}
+
+function requestValidationBlocker(blockingReason, objectCode) {
+  return {
+    validator_key: "VAL-REQ-P0-001",
+    severity: "blocker",
+    object_type: "request",
+    object_code: objectCode,
+    object_id: null,
+    message: "Request does not match the KAI Sprint 2 route schema.",
+    blocking_reason: blockingReason,
+    required_fix: "Send only the documented metadata fields with their documented types and limits.",
+    evidence: {},
+  };
+}
+
+function isValidFileDtoRow(row, { organizationId, intakeFileId, expectedFilePolicyStatus = null } = {}) {
+  if (!row || typeof row !== "object" || Array.isArray(row)) return false;
+  if (row.organization_id !== organizationId || row.intake_file_id !== intakeFileId) return false;
+  if (!canonicalUuid(row.intake_batch_id)) return false;
+  if (row.engagement_id !== null && !canonicalUuid(row.engagement_id)) return false;
+  if (typeof row.safe_filename !== "string" || row.safe_filename.length < 1) return false;
+  if (row.mime_type !== null && typeof row.mime_type !== "string") return false;
+  if (!Number.isSafeInteger(row.file_size_bytes) || row.file_size_bytes < 0) return false;
+  if (expectedFilePolicyStatus && row.file_policy_status !== expectedFilePolicyStatus) return false;
+  if (typeof row.malware_scan_status !== "string" || row.malware_scan_status.length < 1) return false;
+  if (typeof row.processing_status !== "string" || row.processing_status.length < 1) return false;
+  if (typeof row.parse_status !== "string" || row.parse_status.length < 1) return false;
+  if (typeof row.review_status !== "string" || row.review_status.length < 1) return false;
+  return Boolean(canonicalTimestamp(row.created_at) && canonicalTimestamp(row.updated_at));
+}
+
+function validateFilePolicyBlockBody(input = {}) {
+  const expectedStatus = input.expectedFilePolicyStatus ?? input.payload?.expected_file_policy_status;
+  const blockingReasonCode = input.blockingReasonCode ?? input.payload?.blocking_reason_code;
+  if (expectedStatus !== "pending") {
+    return {
+      ok: false,
+      blockers: [requestValidationBlocker("invalid_expected_file_policy_status", "expected_file_policy_status")],
+    };
+  }
+  if (!FILE_POLICY_BLOCKING_REASON_CODE_SET.has(blockingReasonCode)) {
+    return {
+      ok: false,
+      blockers: [requestValidationBlocker("invalid_blocking_reason_code", "blocking_reason_code")],
+    };
+  }
+  return { ok: true, blockingReasonCode };
+}
+
+function didUnrelatedFileFieldsRemainUnchanged(before, after) {
+  return [
+    "intake_file_id",
+    "intake_batch_id",
+    "organization_id",
+    "engagement_id",
+    "safe_filename",
+    "mime_type",
+    "file_size_bytes",
+    "malware_scan_status",
+    "processing_status",
+    "parse_status",
+    "review_status",
+    "created_at",
+  ].every((field) => before[field] === after[field]);
 }
 
 function canonicalUuid(value) {
@@ -564,6 +656,144 @@ export async function getIntakeFileDetail(input = {}, dependencies = {}) {
     data: responseFileSummary(row),
     warnings: [],
   };
+}
+
+export async function markIntakeFilePolicyBlocked(input = {}, dependencies = {}) {
+  if (!isKaiSprint2Enabled(dependencies.env || process.env)) {
+    return buildKaiError("feature_disabled");
+  }
+
+  const organizationId = String(input.organizationId || "").trim().toLowerCase();
+  const intakeFileId = typeof input.intakeFileId === "string" ? input.intakeFileId : "";
+  if (
+    !UUID_RE.test(organizationId)
+    || !UUID_RE.test(intakeFileId)
+    || intakeFileId !== intakeFileId.toLowerCase()
+  ) {
+    return buildKaiError("validation_blocker", {
+      blockers: [requestValidationBlocker("invalid_uuid_field", "organization_id_or_intake_file_id")],
+    });
+  }
+
+  const bodyValidation = validateFilePolicyBlockBody(input);
+  if (!bodyValidation.ok) return validationBlocked(bodyValidation.blockers);
+
+  const actorResult = input.actorContext
+    ? { ok: true, actorContext: input.actorContext }
+    : await resolveKaiActorContext(input.req, dependencies);
+  if (!actorResult.ok) return actorError(actorResult);
+
+  const actorContext = actorResult.actorContext;
+  if (actorContext.actorType !== "human") return buildKaiError("authorization_denied");
+  const auth = validateActorCanPerformOperation(actorContext, "mark_file_policy_blocked", organizationId);
+  if (!auth.ok) return buildKaiError(auth.error_code, { blockers: auth.blockers });
+
+  const readFile = dependencies.getIntakeFileMetadata || readIntakeFileMetadata;
+  const writeBlocked = dependencies.blockIntakeFilePolicyStatus || blockIntakeFilePolicyStatus;
+  const insertAudit = dependencies.insertRequiredSuccessfulAuditEvent || insertRequiredSuccessfulAuditEvent;
+  const runInTransaction = dependencies.runInTransaction || withTransaction;
+  const requestId = input.requestId || randomUUID();
+  const auditCreatedAt = (dependencies.now ? new Date(dependencies.now()) : new Date()).toISOString();
+  const route = routeName(input.route, "/api/kai/sprint2/intake/admin/files/:intakeFileId/block");
+
+  try {
+    const mutationResult = await orchestrateMutationWithRequiredAudit(
+      {
+        mutation: {
+          organizationId,
+          intakeFileId,
+          blockingReasonCode: bodyValidation.blockingReasonCode,
+        },
+        requiredAuditMetadata: {
+          operation: "mark_file_policy_blocked",
+          operation_type: "mark_file_policy_blocked",
+          actor_user_id: actorContext.actorUserId,
+          actor_type: actorContext.actorType,
+          organization_id: organizationId,
+          object_type: "intake_file",
+          target_object_type: "intake_file",
+          object_id: intakeFileId,
+          reason_code: bodyValidation.blockingReasonCode,
+          blocking_reason_code: bodyValidation.blockingReasonCode,
+          validator_key: "VAL-STA-001",
+          validator_keys: FILE_POLICY_BLOCKING_VALIDATOR_KEYS,
+          request_id: requestId,
+          route,
+          from_state: "pending",
+          to_state: "blocked",
+          prior_status: "pending",
+          new_status: "blocked",
+          created_at: auditCreatedAt,
+        },
+        bestEffortMetricMetadata: {
+          metric_name: "kai.file_policy.blocked",
+          operation: "mark_file_policy_blocked",
+          actor_type: actorContext.actorType,
+          object_type: "intake_file",
+          outcome: "success",
+          reason_code: bodyValidation.blockingReasonCode,
+          from_state: "pending",
+          to_state: "blocked",
+        },
+      },
+      {
+        async persistMutation(_mutation, transactionContext) {
+          const storedRow = await readFile(organizationId, intakeFileId, transactionContext);
+          if (!storedRow) throw new KaiRouteMutationError("not_found");
+          if (storedRow.organization_id !== organizationId || storedRow.intake_file_id !== intakeFileId) {
+            throw new KaiRouteMutationError("not_found");
+          }
+          if (!isValidFileDtoRow(storedRow, { organizationId, intakeFileId })) {
+            throw new KaiRouteMutationError("system_error");
+          }
+
+          const currentStatus = storedRow.file_policy_status;
+          if (currentStatus === "blocked") throw new KaiRouteMutationError("conflict_current_state_changed");
+          if (KNOWN_TERMINAL_FILE_POLICY_STATUSES.has(currentStatus)) {
+            throw new KaiRouteMutationError("state_transition_denied");
+          }
+          if (currentStatus !== "pending") throw new KaiRouteMutationError("system_error");
+
+          const transition = validateFilePolicyStatusTransition({ from: currentStatus, to: "blocked" });
+          if (transition.severity === "blocker") {
+            throw new KaiRouteMutationError("state_transition_denied");
+          }
+
+          const updatedRow = await writeBlocked({ organizationId, intakeFileId }, transactionContext);
+          if (!updatedRow) throw new KaiRouteMutationError("conflict_current_state_changed");
+          if (
+            !isValidFileDtoRow(updatedRow, {
+              organizationId,
+              intakeFileId,
+              expectedFilePolicyStatus: "blocked",
+            })
+            || !didUnrelatedFileFieldsRemainUnchanged(storedRow, updatedRow)
+          ) {
+            throw new KaiRouteMutationError("system_error");
+          }
+
+          return {
+            ok: true,
+            data: responseFileSummary(updatedRow),
+            warnings: [],
+          };
+        },
+        async persistRequiredAudit(metadata, transactionContext) {
+          return await insertAudit(metadata, transactionContext);
+        },
+        ...(typeof dependencies.emitBestEffortMetric === "function"
+          ? { emitBestEffortMetric: dependencies.emitBestEffortMetric }
+          : {}),
+      },
+      (callback) => runInTransaction(callback),
+    );
+
+    return mutationResult;
+  } catch (error) {
+    if (error instanceof KaiRouteMutationError) return buildKaiError(error.code);
+    if (error instanceof RequiredAuditPersistenceError) return buildKaiError("system_error");
+    return buildKaiError("system_error");
+  }
 }
 
 export async function listIntakeFilesForBatch(input = {}, dependencies = {}) {
