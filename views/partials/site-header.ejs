@@ -13,7 +13,8 @@
     { href: "/home/how-it-works", label: "How it works" },
     { href: "/home/assessment-offer", label: "Assessment" },
     { href: "/home/data-safety", label: "Data safety" },
-    { href: "/home/faq", label: "FAQ" }
+    { href: "/home/faq", label: "FAQ" },
+    { href: "/about", label: "About" }
   ];
 %>
 <header>
@@ -35,9 +36,6 @@
             </li>
           <% } %>
           <% if (showIndexNav) { %>
-            <li class="nav-item d-none d-lg-flex align-items-center mx-2">
-              <span style="font-family:'Roboto',sans-serif;font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:#FF5656;font-weight:600;white-space:nowrap;">On this page</span>
-            </li>
             <% indexNavLinks.forEach(function(link) { %>
               <li class="nav-item">
                 <a
