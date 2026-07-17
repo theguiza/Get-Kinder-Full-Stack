@@ -1,73 +1,63 @@
-<section id="footer" class="<%= typeof orgIsSuspended !== 'undefined' && orgIsSuspended ? 'org-portal-content-ghosted' : '' %>" style="background:#fff;border-top:1px solid #ececec;padding:56px 0 32px;">
+<section id="footer" class="<%= typeof orgIsSuspended !== 'undefined' && orgIsSuspended ? 'org-portal-content-ghosted' : '' %>" style="background:#283853;padding:72px 0 32px;">
   <div class="container" style="max-width:1200px;">
-    <div class="row gy-4">
+    <div class="row gy-5">
 
-      <!-- Col 1: Logo + taglines + Donate -->
-      <div class="col-12 col-md-4">
-        <div style="width:160px;margin-bottom:14px;">
-          <img src="/images/logo.png" alt="Get Kinder" style="width:100%;height:auto;object-fit:contain;display:block;">
+      <!-- Col 1: Brand -->
+      <div class="col-12 col-md-5">
+        <div style="font-family:'Poppins',sans-serif;font-weight:700;font-size:22px;color:#fff;letter-spacing:-0.01em;margin-bottom:16px;">Get Kinder</div>
+        <h2 style="font-family:'Poppins',sans-serif;font-weight:600;font-size:20px;color:#fff;line-height:1.35;margin:0 0 14px;max-width:22em;">Stop rebuilding the same evidence for every report.</h2>
+        <p style="font-family:'Roboto',sans-serif;font-size:14px;color:#b5bdcb;max-width:400px;line-height:1.6;margin-bottom:14px;">Get Kinder helps nonprofits turn scattered organizational records into reviewed, reusable evidence for funder reporting, board updates, annual reports, and better decisions.</p>
+        <p style="display:flex;align-items:flex-start;gap:8px;font-family:'Roboto',sans-serif;font-size:13.5px;color:#dfe3ec;line-height:1.5;margin-bottom:22px;">
+          <i data-lucide="shield-check" style="width:16px;height:16px;color:#ff8c83;flex-shrink:0;margin-top:2px;"></i>
+          AI-assisted. Human-reviewed. Your organization controls what is approved and used.
+        </p>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;">
+          <a href="/home/book" class="gk-cta-primary">Apply for a Reporting Readiness Call</a>
+          <a href="/donate" style="display:inline-flex;align-items:center;gap:8px;background:transparent;color:#fff;border:1px solid rgba(255,255,255,.35);border-radius:10px;padding:13px 22px;font-family:'Roboto',sans-serif;font-size:15px;font-weight:500;text-decoration:none;"><i class="fas fa-heart"></i> Donate</a>
         </div>
-        <p style="font-family:'Roboto',sans-serif;font-size:14px;color:#4d525e;max-width:280px;line-height:1.6;margin-bottom:8px;">
-          Impact reporting and data readiness for nonprofits.
-        </p>
-        <p style="font-family:'Roboto',sans-serif;font-size:13px;color:#4d525e;max-width:280px;line-height:1.6;font-style:italic;margin-bottom:20px;">
-          Help us help more mission organizations prove their impact.
-        </p>
-        <a href="/donate" class="btn" style="background-color:#e85d4a;color:#fff;font-family:'Roboto',sans-serif;font-size:14px;font-weight:500;padding:10px 22px;border-radius:6px;text-decoration:none;display:inline-flex;align-items:center;gap:6px;">
-          <i class="fas fa-heart"></i> Donate
-        </a>
       </div>
 
-      <!-- Col 2: Explore nav -->
-      <div class="col-12 col-md-4">
-        <div style="font-family:'Roboto',sans-serif;font-size:11px;color:#e85d4a;letter-spacing:0.12em;text-transform:uppercase;font-weight:700;margin-bottom:16px;display:flex;align-items:center;gap:8px;">
-          <span style="display:inline-block;width:20px;height:2px;background:#e85d4a;"></span> Explore
-        </div>
+      <!-- Col 2: Product -->
+      <div class="col-6 col-md-2">
+        <div style="font-family:'Roboto',sans-serif;font-size:11px;color:#ff8c83;letter-spacing:0.12em;text-transform:uppercase;font-weight:700;margin-bottom:16px;">Product</div>
         <ul class="list-unstyled mb-0">
-          <li class="mb-2"><a href="/about" style="font-family:'Roboto',sans-serif;font-size:14px;color:#283853;text-decoration:none;">About</a></li>
-          <li class="mb-2"><a href="/contact" style="font-family:'Roboto',sans-serif;font-size:14px;color:#283853;text-decoration:none;">Contact</a></li>
-          <li class="mb-2"><a href="/accessibility" style="font-family:'Roboto',sans-serif;font-size:14px;color:#283853;text-decoration:none;">Accessibility</a></li>
-          <li class="mb-2" style="display:flex;align-items:center;gap:6px;">
-            <a href="/events" style="font-family:'Roboto',sans-serif;font-size:14px;color:#283853;text-decoration:none;">Volunteering</a>
-            <span style="font-size:10px;font-weight:600;color:#6e7280;background:#f0f0f2;padding:2px 7px;border-radius:20px;letter-spacing:0.05em;">SOON</span>
-          </li>
-          <li class="mb-2" style="display:flex;align-items:center;gap:6px;">
-            <a href="/donor" style="font-family:'Roboto',sans-serif;font-size:14px;color:#283853;text-decoration:none;">Donors</a>
-            <span style="font-size:10px;font-weight:600;color:#6e7280;background:#f0f0f2;padding:2px 7px;border-radius:20px;letter-spacing:0.05em;">SOON</span>
-          </li>
+          <li class="mb-3"><a href="/home/how-it-works" style="font-family:'Roboto',sans-serif;font-size:14px;color:#dfe3ec;text-decoration:none;">How it works</a></li>
+          <li class="mb-3"><a href="/home/assessment-offer" style="font-family:'Roboto',sans-serif;font-size:14px;color:#dfe3ec;text-decoration:none;">Assessment</a></li>
+          <li class="mb-3"><a href="/home/data-safety" style="font-family:'Roboto',sans-serif;font-size:14px;color:#dfe3ec;text-decoration:none;">Data safety</a></li>
+          <li class="mb-3"><a href="/home/faq" style="font-family:'Roboto',sans-serif;font-size:14px;color:#dfe3ec;text-decoration:none;">FAQ</a></li>
+        </ul>
+        <div style="font-family:'Roboto',sans-serif;font-size:11px;color:#ff8c83;letter-spacing:0.12em;text-transform:uppercase;font-weight:700;margin:20px 0 16px;">For funders</div>
+        <ul class="list-unstyled mb-0">
+          <li><a href="/#funders" style="font-family:'Roboto',sans-serif;font-size:14px;color:#dfe3ec;text-decoration:none;">Funder Partnerships</a></li>
         </ul>
       </div>
 
-      <!-- Col 3: Connect -->
-      <div class="col-12 col-md-4">
-        <div style="font-family:'Roboto',sans-serif;font-size:11px;color:#e85d4a;letter-spacing:0.12em;text-transform:uppercase;font-weight:700;margin-bottom:16px;display:flex;align-items:center;gap:8px;">
-          <span style="display:inline-block;width:20px;height:2px;background:#e85d4a;"></span> Connect
-        </div>
-        <div style="margin-bottom:20px;">
-          <a class="btn btn-floating m-1 text-white" style="background-color:#3b5998;" href="https://www.facebook.com/profile.php?id=61576860759313" role="button" target="_blank" rel="noopener noreferrer"><i class="fab fa-facebook-f"></i></a>
-          <a class="btn btn-floating m-1 text-white" style="background:radial-gradient(circle at 30% 110%,#fdf497 0%,#fdf497 5%,#fd5949 45%,#d6249f 60%,#285AEB 90%);" href="https://www.instagram.com/getkinder/" role="button" target="_blank" rel="noopener noreferrer"><i class="fab fa-instagram"></i></a>
-          <a class="btn btn-floating m-1 text-white" style="background-color:#0082ca;" href="https://www.linkedin.com/company/getkindrfoundation/" role="button" target="_blank" rel="noopener noreferrer"><i class="fab fa-linkedin-in"></i></a>
-          <a class="btn btn-floating m-1 text-white" style="background-color:#c8232c;" href="https://ca.pinterest.com/getkindr/" role="button" target="_blank" rel="noopener noreferrer"><i class="fab fa-pinterest"></i></a>
-        </div>
-        <div style="background:#f8f9fa;border:1px solid #e8eaed;border-radius:10px;padding:14px 18px;max-width:240px;">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
-            <i class="fas fa-shield-alt" style="color:#4caf50;font-size:14px;"></i>
-            <span style="font-family:'Roboto',sans-serif;font-size:13px;font-weight:600;color:#283853;">AI-assisted. Human-reviewed.</span>
-          </div>
-          <p style="font-family:'Roboto',sans-serif;font-size:12px;color:#6e7280;margin:0;">Your data stays yours.</p>
-        </div>
+      <!-- Col 3: Company -->
+      <div class="col-6 col-md-2">
+        <div style="font-family:'Roboto',sans-serif;font-size:11px;color:#ff8c83;letter-spacing:0.12em;text-transform:uppercase;font-weight:700;margin-bottom:16px;">Company</div>
+        <ul class="list-unstyled mb-0">
+          <li class="mb-3"><a href="/about" style="font-family:'Roboto',sans-serif;font-size:14px;color:#dfe3ec;text-decoration:none;">About</a></li>
+          <li class="mb-3"><a href="/contact" style="font-family:'Roboto',sans-serif;font-size:14px;color:#dfe3ec;text-decoration:none;">Contact</a></li>
+          <li class="mb-3"><a href="/accessibility" style="font-family:'Roboto',sans-serif;font-size:14px;color:#dfe3ec;text-decoration:none;">Accessibility</a></li>
+          <li><a href="https://www.linkedin.com/company/getkindrfoundation/" target="_blank" rel="noopener noreferrer" style="font-family:'Roboto',sans-serif;font-size:14px;color:#dfe3ec;text-decoration:none;">LinkedIn</a></li>
+        </ul>
+      </div>
+
+      <!-- Col 4: Legal + connect -->
+      <div class="col-6 col-md-3">
+        <div style="font-family:'Roboto',sans-serif;font-size:11px;color:#ff8c83;letter-spacing:0.12em;text-transform:uppercase;font-weight:700;margin-bottom:16px;">Legal</div>
+        <ul class="list-unstyled mb-0">
+          <li class="mb-3"><a href="/privacy" style="font-family:'Roboto',sans-serif;font-size:14px;color:#dfe3ec;text-decoration:none;">Privacy Policy</a></li>
+          <li><a href="/terms" style="font-family:'Roboto',sans-serif;font-size:14px;color:#dfe3ec;text-decoration:none;">Terms of Use</a></li>
+        </ul>
       </div>
 
     </div>
 
     <!-- Bottom bar -->
-    <div style="padding-top:24px;border-top:1px solid #ececec;display:flex;align-items:center;justify-content:space-between;gap:16px;font-family:'Roboto',sans-serif;font-size:12px;color:#9a9ea7;flex-wrap:wrap;margin-top:32px;">
-      <div>&copy; 2026 Get Kinder.ai &middot; Vancouver, BC &middot; Built for BC's mission organizations.</div>
-      <div style="display:flex;gap:20px;">
-        <a href="/privacy" style="color:#9a9ea7;text-decoration:none;">Privacy</a>
-        <a href="/terms" style="color:#9a9ea7;text-decoration:none;">Terms</a>
-        <a href="/home/trust" style="color:#9a9ea7;text-decoration:none;">Data handling</a>
-      </div>
+    <div style="padding-top:24px;border-top:1px solid rgba(255,255,255,.12);display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:40px;">
+      <img src="/images/favicon.png" alt="" style="width:24px;height:24px;object-fit:contain;">
+      <p style="font-family:'Roboto',sans-serif;font-size:13px;color:#8894a8;margin:0;">&copy; 2026 Get Kinder. All rights reserved.</p>
     </div>
   </div>
 </section>
