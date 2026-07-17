@@ -11,6 +11,12 @@ const INTERNAL_CORE_PATH = ["Backend", "kai", "internal", "kaiMutationOrchestrat
 const TEST_HARNESS_PATH = ["__tests__", "support", "kaiMutationOrchestrationTestHarness.js"].join("/");
 const TRANSACTION_INTERFACE_PATH = ["Backend", "kai", "db", "kaiDb.js"].join("/");
 const ROUTE_SPECIFIC_RUNTIME_COMPOSITION_PATH = ["Backend", "kai", "services", "kaiIntakeService.js"].join("/");
+const FUTURE_REVIEW_QUEUE_RUNTIME_COMPOSITION_PATH = [
+  "Backend",
+  "kai",
+  "services",
+  "kaiReviewQueueService.js",
+].join("/");
 
 const ORCHESTRATION_SYMBOLS = [
   ["orchestrate", "Mutation", "With", "Required", "Audit"].join(""),
@@ -29,6 +35,7 @@ const TEST_HARNESS_SYMBOLS = [
 const TRANSACTION_PROVIDER_SYMBOL = ["transaction", "Provider"].join("");
 const LEGACY_TEST_OPTION_SYMBOL = ["test", "Only", "Transaction", "Provider"].join("");
 const MARK_FILE_POLICY_BLOCKED_FUNCTION = "markIntakeFilePolicyBlocked";
+const UPDATE_REVIEW_QUEUE_STATUS_FUNCTION = "updateReviewQueueStatus";
 
 const ALLOWED_CORE_IMPORTERS = new Set([TEST_HARNESS_PATH, ROUTE_SPECIFIC_RUNTIME_COMPOSITION_PATH]);
 const ALLOWED_HARNESS_IMPORTERS = new Set([
@@ -188,12 +195,19 @@ function findFunctionBodyStart(maskedSource, searchStart) {
 }
 
 function exportedAsyncFunctionBody(source, functionName) {
+  const functionBody = optionalExportedAsyncFunctionBody(source, functionName);
+  assert.notEqual(functionBody, null, `Expected exactly one exported async function ${functionName}.`);
+  return functionBody;
+}
+
+function optionalExportedAsyncFunctionBody(source, functionName) {
   const maskedSource = maskJavaScriptNonCode(source);
   const declarationPattern = new RegExp(
     `\\bexport\\s+async\\s+function\\s+${escapeRegExp(functionName)}\\b`,
     "g",
   );
   const declarations = [...maskedSource.matchAll(declarationPattern)];
+  if (declarations.length === 0) return null;
   assert.equal(declarations.length, 1, `Expected exactly one exported async function ${functionName}.`);
 
   const bodyStart = findFunctionBodyStart(maskedSource, declarations[0].index + declarations[0][0].length);
@@ -292,8 +306,8 @@ function symbolCalls(file, source, symbols) {
   return calls;
 }
 
-function assertSingleDirectCoreCallInsideMarkFilePolicyBlocked(source, file) {
-  const functionBody = exportedAsyncFunctionBody(source, MARK_FILE_POLICY_BLOCKED_FUNCTION);
+function assertSingleDirectCoreCallInsideExportedAsyncFunction(source, file, functionName) {
+  const functionBody = exportedAsyncFunctionBody(source, functionName);
   const coreCalls = symbolCalls(file, source, [CORE_CALL_SYMBOL]);
   const callsInsideTarget = coreCalls.filter(
     ({ index }) => index > functionBody.bodyStart && index < functionBody.bodyEnd,
@@ -310,18 +324,98 @@ function assertSingleDirectCoreCallInsideMarkFilePolicyBlocked(source, file) {
   assert.equal(
     callsInsideTarget.length,
     1,
-    `Expected the single ${CORE_CALL_SYMBOL} call to be inside ${MARK_FILE_POLICY_BLOCKED_FUNCTION}.`,
+    `Expected the single ${CORE_CALL_SYMBOL} call to be inside ${functionName}.`,
   );
   assert.equal(
     callsOutsideTarget.length,
     0,
-    `Expected zero ${CORE_CALL_SYMBOL} calls outside ${MARK_FILE_POLICY_BLOCKED_FUNCTION}; found:\n${formatUnexpected(callsOutsideTarget)}`,
+    `Expected zero ${CORE_CALL_SYMBOL} calls outside ${functionName}; found:\n${formatUnexpected(callsOutsideTarget)}`,
   );
 
   return {
     functionBody,
     call: callsInsideTarget[0],
     callsOutsideTarget,
+  };
+}
+
+function assertSingleDirectCoreCallInsideMarkFilePolicyBlocked(source, file) {
+  return assertSingleDirectCoreCallInsideExportedAsyncFunction(
+    source,
+    file,
+    MARK_FILE_POLICY_BLOCKED_FUNCTION,
+  );
+}
+
+function assertFutureReviewQueuePreauthorization(sourceByPath) {
+  const source = sourceByPath.get(FUTURE_REVIEW_QUEUE_RUNTIME_COMPOSITION_PATH);
+  if (source === undefined) {
+    return {
+      present: false,
+      exactDeclarationDetected: false,
+      authorized: false,
+      activeProductionCoreFiles: [ROUTE_SPECIFIC_RUNTIME_COMPOSITION_PATH],
+      reason: "future_service_absent",
+    };
+  }
+
+  const file = FUTURE_REVIEW_QUEUE_RUNTIME_COMPOSITION_PATH;
+  const coreEdges = moduleEdges(file, source).filter((edge) =>
+    targetsModule(file, edge.specifier, INTERNAL_CORE_PATH)
+  );
+  const coreCalls = symbolCalls(file, source, [CORE_CALL_SYMBOL]);
+  const functionBody = optionalExportedAsyncFunctionBody(source, UPDATE_REVIEW_QUEUE_STATUS_FUNCTION);
+
+  if (!functionBody) {
+    assert.equal(
+      coreEdges.length,
+      0,
+      `Unauthorized orchestration core import before exact ${UPDATE_REVIEW_QUEUE_STATUS_FUNCTION} declaration:\n${formatUnexpected(coreEdges)}`,
+    );
+    assert.equal(
+      coreCalls.length,
+      0,
+      `Unauthorized ${CORE_CALL_SYMBOL} call before exact ${UPDATE_REVIEW_QUEUE_STATUS_FUNCTION} declaration:\n${formatUnexpected(coreCalls)}`,
+    );
+    return {
+      present: true,
+      exactDeclarationDetected: false,
+      authorized: false,
+      activeProductionCoreFiles: [ROUTE_SPECIFIC_RUNTIME_COMPOSITION_PATH],
+      reason: "exact_declaration_absent",
+    };
+  }
+
+  assert.equal(
+    coreEdges.filter(({ kind }) => kind === "import").length,
+    1,
+    `Expected ${file} to import the orchestration core exactly once after exact ${UPDATE_REVIEW_QUEUE_STATUS_FUNCTION} declaration.`,
+  );
+  assert.equal(
+    coreEdges.filter(({ kind }) => kind !== "import").length,
+    0,
+    `Expected ${file} to have no non-import orchestration core module edges:\n${formatUnexpected(coreEdges.filter(({ kind }) => kind !== "import"))}`,
+  );
+
+  const placement = assertSingleDirectCoreCallInsideExportedAsyncFunction(
+    source,
+    file,
+    UPDATE_REVIEW_QUEUE_STATUS_FUNCTION,
+  );
+
+  return {
+    present: true,
+    exactDeclarationDetected: true,
+    authorized: true,
+    activeProductionCoreFiles: [
+      ROUTE_SPECIFIC_RUNTIME_COMPOSITION_PATH,
+      FUTURE_REVIEW_QUEUE_RUNTIME_COMPOSITION_PATH,
+    ],
+    reason: "exact_declaration_authorized",
+    functionStartLine: placement.functionBody.startLine,
+    functionEndLine: placement.functionBody.endLine,
+    callLine: placement.call.line,
+    callsOutsideFunction: placement.callsOutsideTarget.length,
   };
 }
 
@@ -419,7 +513,228 @@ test("function body locator accepts only direct file-policy block orchestration 
   console.log(`ORCHESTRATION_BODY_LOCATOR_FIXTURE_PROOF ${JSON.stringify(fixtureProof)}`);
 });
 
+test("future review-queue status orchestration preauthorization is exact and conditional", () => {
+  const futurePath = FUTURE_REVIEW_QUEUE_RUNTIME_COMPOSITION_PATH;
+  const coreImport = [
+    "import { orchestrateMutationWithRequiredAudit } from \"../internal/kaiMutationOrchestration.js\";",
+    "",
+  ].join("\n");
+  const exactAcceptedFixture = [
+    coreImport,
+    "export async function updateReviewQueueStatus(input = {}) {",
+    "  return await orchestrateMutationWithRequiredAudit({ mutation: input }, {}, async () => ({}));",
+    "}",
+  ].join("\n");
+  const proof = {
+    absent_future_file: assertFutureReviewQueuePreauthorization(new Map()),
+    no_exact_declaration_without_core_reference: assertFutureReviewQueuePreauthorization(new Map([
+      [
+        futurePath,
+        [
+          "export async function createReviewQueueItem(input = {}) {",
+          "  return { ok: true, input };",
+          "}",
+        ].join("\n"),
+      ],
+    ])),
+    exact_declaration_with_direct_call: assertFutureReviewQueuePreauthorization(new Map([
+      [futurePath, exactAcceptedFixture],
+    ])),
+  };
+
+  assert.equal(proof.absent_future_file.authorized, false);
+  assert.deepEqual(proof.absent_future_file.activeProductionCoreFiles, [
+    ROUTE_SPECIFIC_RUNTIME_COMPOSITION_PATH,
+  ]);
+  assert.equal(proof.no_exact_declaration_without_core_reference.authorized, false);
+  assert.deepEqual(proof.no_exact_declaration_without_core_reference.activeProductionCoreFiles, [
+    ROUTE_SPECIFIC_RUNTIME_COMPOSITION_PATH,
+  ]);
+  assert.equal(proof.exact_declaration_with_direct_call.exactDeclarationDetected, true);
+  assert.deepEqual(proof.exact_declaration_with_direct_call.activeProductionCoreFiles, [
+    ROUTE_SPECIFIC_RUNTIME_COMPOSITION_PATH,
+    FUTURE_REVIEW_QUEUE_RUNTIME_COMPOSITION_PATH,
+  ]);
+
+  const rejectedFixtures = [
+    [
+      "no_exact_declaration_with_core_import",
+      [
+        coreImport,
+        "export async function createReviewQueueItem(input = {}) {",
+        "  return { ok: true, input };",
+        "}",
+      ].join("\n"),
+      /core import before exact updateReviewQueueStatus declaration/,
+    ],
+    [
+      "no_exact_declaration_with_core_call",
+      [
+        "export async function createReviewQueueItem(input = {}) {",
+        "  return orchestrateMutationWithRequiredAudit({ mutation: input }, {}, async () => ({}));",
+        "}",
+      ].join("\n"),
+      /call before exact updateReviewQueueStatus declaration/,
+    ],
+    [
+      "near_miss_function_name",
+      [
+        "export async function updateReviewQueueItemStatus(input = {}) {",
+        "  return orchestrateMutationWithRequiredAudit({ mutation: input }, {}, async () => ({}));",
+        "}",
+      ].join("\n"),
+      /call before exact updateReviewQueueStatus declaration/,
+    ],
+    [
+      "non_exported_exact_name",
+      [
+        "async function updateReviewQueueStatus(input = {}) {",
+        "  return orchestrateMutationWithRequiredAudit({ mutation: input }, {}, async () => ({}));",
+        "}",
+      ].join("\n"),
+      /call before exact updateReviewQueueStatus declaration/,
+    ],
+    [
+      "exported_sync_function_form",
+      [
+        "export function updateReviewQueueStatus(input = {}) {",
+        "  return orchestrateMutationWithRequiredAudit({ mutation: input }, {}, async () => ({}));",
+        "}",
+      ].join("\n"),
+      /call before exact updateReviewQueueStatus declaration/,
+    ],
+    [
+      "exported_constant_form",
+      [
+        "export const updateReviewQueueStatus = async (input = {}) => {",
+        "  return orchestrateMutationWithRequiredAudit({ mutation: input }, {}, async () => ({}));",
+        "};",
+      ].join("\n"),
+      /call before exact updateReviewQueueStatus declaration/,
+    ],
+    [
+      "named_export_alias_form",
+      [
+        "const updateReviewQueueStatus = (input = {}) => {",
+        "  return orchestrateMutationWithRequiredAudit({ mutation: input }, {}, async () => ({}));",
+        "};",
+        "export { updateReviewQueueStatus };",
+      ].join("\n"),
+      /call before exact updateReviewQueueStatus declaration/,
+    ],
+    [
+      "object_method_form",
+      [
+        "export const reviewQueueService = {",
+        "  updateReviewQueueStatus(input = {}) {",
+        "    return orchestrateMutationWithRequiredAudit({ mutation: input }, {}, async () => ({}));",
+        "  },",
+        "};",
+      ].join("\n"),
+      /call before exact updateReviewQueueStatus declaration/,
+    ],
+    [
+      "class_method_form",
+      [
+        "export class ReviewQueueService {",
+        "  async updateReviewQueueStatus(input = {}) {",
+        "    return orchestrateMutationWithRequiredAudit({ mutation: input }, {}, async () => ({}));",
+        "  }",
+        "}",
+      ].join("\n"),
+      /call before exact updateReviewQueueStatus declaration/,
+    ],
+    [
+      "default_export_form",
+      [
+        "export default async function updateReviewQueueStatus(input = {}) {",
+        "  return orchestrateMutationWithRequiredAudit({ mutation: input }, {}, async () => ({}));",
+        "}",
+      ].join("\n"),
+      /call before exact updateReviewQueueStatus declaration/,
+    ],
+    [
+      "exact_declaration_call_in_other_function",
+      [
+        coreImport,
+        "export async function updateReviewQueueStatus(input = {}) {",
+        "  return { ok: true, input };",
+        "}",
+        "export async function closeReviewQueueStatus(input = {}) {",
+        "  return orchestrateMutationWithRequiredAudit({ mutation: input }, {}, async () => ({}));",
+        "}",
+      ].join("\n"),
+      /inside updateReviewQueueStatus/,
+    ],
+    [
+      "exact_declaration_generic_helper_wraps_call",
+      [
+        coreImport,
+        "function runStatusMutation(input) {",
+        "  return orchestrateMutationWithRequiredAudit({ mutation: input }, {}, async () => ({}));",
+        "}",
+        "export async function updateReviewQueueStatus(input = {}) {",
+        "  return runStatusMutation(input);",
+        "}",
+      ].join("\n"),
+      /inside updateReviewQueueStatus/,
+    ],
+    [
+      "exact_declaration_top_level_call",
+      [
+        coreImport,
+        "const eagerMutation = orchestrateMutationWithRequiredAudit({}, {}, async () => ({}));",
+        "export async function updateReviewQueueStatus(input = {}) {",
+        "  return orchestrateMutationWithRequiredAudit({ mutation: input }, {}, async () => ({})) || eagerMutation;",
+        "}",
+      ].join("\n"),
+      /exactly one direct production call/,
+    ],
+    [
+      "exact_declaration_multiple_calls",
+      [
+        coreImport,
+        "export async function updateReviewQueueStatus(input = {}) {",
+        "  await orchestrateMutationWithRequiredAudit({ mutation: input }, {}, async () => ({}));",
+        "  return orchestrateMutationWithRequiredAudit({ mutation: input }, {}, async () => ({}));",
+        "}",
+      ].join("\n"),
+      /exactly one direct production call/,
+    ],
+  ];
+
+  for (const [name, source, expectedMessage] of rejectedFixtures) {
+    assert.throws(
+      () => assertFutureReviewQueuePreauthorization(new Map([[futurePath, source]])),
+      (error) => {
+        proof[name] = {
+          exactDeclarationDetected: optionalExportedAsyncFunctionBody(
+            source,
+            UPDATE_REVIEW_QUEUE_STATUS_FUNCTION,
+          ) !== null,
+          message: error.message,
+        };
+        return expectedMessage.test(error.message);
+      },
+    );
+  }
+
+  console.log(`FUTURE_REVIEW_QUEUE_PREAUTHORIZATION_FIXTURE_PROOF ${JSON.stringify(proof)}`);
+});
+
 test("internal orchestration has only the approved file-policy block runtime caller", () => {
+  const sourceByPath = new Map(
+    sourceFiles().map((file) => [file, readFileSync(path.join(REPOSITORY_ROOT, file), "utf8")]),
+  );
+  const futureReviewQueueAuthorization = assertFutureReviewQueuePreauthorization(sourceByPath);
+  const activeCoreImporters = new Set([
+    TEST_HARNESS_PATH,
+    ...futureReviewQueueAuthorization.activeProductionCoreFiles,
+  ]);
+  const activeCoreCallers = new Set([
+    TEST_HARNESS_PATH,
+    ...futureReviewQueueAuthorization.activeProductionCoreFiles,
+  ]);
   const report = {
     core_importers: [],
     test_harness_importers: [],
@@ -433,8 +748,7 @@ test("internal orchestration has only the approved file-policy block runtime cal
     unexpected: [],
   };
 
-  for (const file of sourceFiles()) {
-    const source = readFileSync(path.join(REPOSITORY_ROOT, file), "utf8");
+  for (const [file, source] of sourceByPath) {
     const edges = moduleEdges(file, source);
     const coreEdges = edges.filter((edge) => targetsModule(file, edge.specifier, INTERNAL_CORE_PATH));
     const harnessEdges = edges.filter((edge) => targetsModule(file, edge.specifier, TEST_HARNESS_PATH));
@@ -467,9 +781,9 @@ test("internal orchestration has only the approved file-policy block runtime cal
     report.legacy_test_option_occurrences.push(...legacyTestOptionOccurrences);
 
     report.unexpected.push(
-      ...coreEdges.filter(() => !ALLOWED_CORE_IMPORTERS.has(file)),
+      ...coreEdges.filter(() => !activeCoreImporters.has(file)),
       ...harnessEdges.filter(() => !ALLOWED_HARNESS_IMPORTERS.has(file)),
-      ...coreCalls.filter(() => !ALLOWED_CORE_CALLERS.has(file)),
+      ...coreCalls.filter(() => !activeCoreCallers.has(file)),
       ...harnessCalls.filter(() => !ALLOWED_HARNESS_CALLERS.has(file)),
       ...orchestrationExports.filter(() => !ALLOWED_ORCHESTRATION_EXPORTERS.has(file)),
       ...harnessExports.filter(() => !ALLOWED_HARNESS_EXPORTERS.has(file)),
@@ -493,7 +807,15 @@ test("internal orchestration has only the approved file-policy block runtime cal
   );
   assert.deepEqual(
     [...new Set(report.core_importers.map(({ file }) => file))],
-    [ROUTE_SPECIFIC_RUNTIME_COMPOSITION_PATH, TEST_HARNESS_PATH],
+    [...futureReviewQueueAuthorization.activeProductionCoreFiles, TEST_HARNESS_PATH],
+  );
+  assert.deepEqual(
+    [...new Set(report.core_importers.map(({ file }) => file).filter((file) => !file.startsWith("__tests__/")))],
+    futureReviewQueueAuthorization.activeProductionCoreFiles,
+  );
+  assert.deepEqual(
+    [...new Set(report.core_callers.map(({ file }) => file).filter((file) => !file.startsWith("__tests__/")))],
+    futureReviewQueueAuthorization.activeProductionCoreFiles,
   );
   assert.deepEqual(
     report.core_callers
@@ -516,6 +838,7 @@ test("internal orchestration has only the approved file-policy block runtime cal
     call_line: runtimePlacement.call.line,
     calls_outside_function: runtimePlacement.callsOutsideTarget.length,
   })}`);
+  console.log(`FUTURE_REVIEW_QUEUE_ACTIVE_PREAUTHORIZATION_REPORT ${JSON.stringify(futureReviewQueueAuthorization)}`);
   assert.deepEqual(
     [...new Set(report.test_harness_importers.map(({ file }) => file))],
     [...ALLOWED_HARNESS_IMPORTERS],
