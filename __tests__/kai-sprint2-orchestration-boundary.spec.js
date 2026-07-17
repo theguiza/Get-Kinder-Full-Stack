@@ -28,6 +28,7 @@ const TEST_HARNESS_SYMBOLS = [
 ];
 const TRANSACTION_PROVIDER_SYMBOL = ["transaction", "Provider"].join("");
 const LEGACY_TEST_OPTION_SYMBOL = ["test", "Only", "Transaction", "Provider"].join("");
+const MARK_FILE_POLICY_BLOCKED_FUNCTION = "markIntakeFilePolicyBlocked";
 
 const ALLOWED_CORE_IMPORTERS = new Set([TEST_HARNESS_PATH, ROUTE_SPECIFIC_RUNTIME_COMPOSITION_PATH]);
 const ALLOWED_HARNESS_IMPORTERS = new Set([
@@ -48,6 +49,164 @@ const ALLOWED_TRANSACTION_PROVIDER_FILES = new Set([
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function maskJavaScriptNonCode(source) {
+  const chars = source.split("");
+  const stack = [{ type: "code" }];
+  const maskAt = (index) => {
+    if (chars[index] !== "\n" && chars[index] !== "\r") chars[index] = " ";
+  };
+  const currentMode = () => stack[stack.length - 1];
+  let index = 0;
+
+  while (index < source.length) {
+    const mode = currentMode();
+    const char = source[index];
+    const next = source[index + 1];
+
+    if (mode.type === "template") {
+      if (char === "\\") {
+        maskAt(index);
+        if (index + 1 < source.length) maskAt(index + 1);
+        index += 2;
+        continue;
+      }
+      if (char === "`") {
+        maskAt(index);
+        stack.pop();
+        index += 1;
+        continue;
+      }
+      if (char === "$" && next === "{") {
+        maskAt(index);
+        stack.push({ type: "templateExpression", depth: 1 });
+        index += 2;
+        continue;
+      }
+      maskAt(index);
+      index += 1;
+      continue;
+    }
+
+    if (char === "/" && next === "/") {
+      maskAt(index);
+      maskAt(index + 1);
+      index += 2;
+      while (index < source.length && source[index] !== "\n" && source[index] !== "\r") {
+        maskAt(index);
+        index += 1;
+      }
+      continue;
+    }
+
+    if (char === "/" && next === "*") {
+      maskAt(index);
+      maskAt(index + 1);
+      index += 2;
+      while (index < source.length) {
+        if (source[index] === "*" && source[index + 1] === "/") {
+          maskAt(index);
+          maskAt(index + 1);
+          index += 2;
+          break;
+        }
+        maskAt(index);
+        index += 1;
+      }
+      continue;
+    }
+
+    if (char === "'" || char === '"') {
+      const quote = char;
+      maskAt(index);
+      index += 1;
+      while (index < source.length) {
+        if (source[index] === "\\") {
+          maskAt(index);
+          if (index + 1 < source.length) maskAt(index + 1);
+          index += 2;
+          continue;
+        }
+        maskAt(index);
+        if (source[index] === quote) {
+          index += 1;
+          break;
+        }
+        index += 1;
+      }
+      continue;
+    }
+
+    if (char === "`") {
+      maskAt(index);
+      stack.push({ type: "template" });
+      index += 1;
+      continue;
+    }
+
+    if (mode.type === "templateExpression") {
+      if (char === "{") {
+        mode.depth += 1;
+      } else if (char === "}") {
+        mode.depth -= 1;
+        if (mode.depth === 0) {
+          stack.pop();
+        }
+      }
+    }
+
+    index += 1;
+  }
+
+  return chars.join("");
+}
+
+function findMatchingBrace(maskedSource, openBraceIndex) {
+  assert.equal(maskedSource[openBraceIndex], "{", "function body locator must start at an opening brace");
+  let depth = 0;
+  for (let index = openBraceIndex; index < maskedSource.length; index += 1) {
+    if (maskedSource[index] === "{") depth += 1;
+    if (maskedSource[index] === "}") depth -= 1;
+    if (depth === 0) return index;
+  }
+  throw new Error("Unable to locate matching function body closing brace.");
+}
+
+function findFunctionBodyStart(maskedSource, searchStart) {
+  let parenDepth = 0;
+  let bracketDepth = 0;
+  for (let index = searchStart; index < maskedSource.length; index += 1) {
+    const char = maskedSource[index];
+    if (char === "(") parenDepth += 1;
+    if (char === ")") parenDepth -= 1;
+    if (char === "[") bracketDepth += 1;
+    if (char === "]") bracketDepth -= 1;
+    if (char === "{" && parenDepth === 0 && bracketDepth === 0) return index;
+  }
+  return -1;
+}
+
+function exportedAsyncFunctionBody(source, functionName) {
+  const maskedSource = maskJavaScriptNonCode(source);
+  const declarationPattern = new RegExp(
+    `\\bexport\\s+async\\s+function\\s+${escapeRegExp(functionName)}\\b`,
+    "g",
+  );
+  const declarations = [...maskedSource.matchAll(declarationPattern)];
+  assert.equal(declarations.length, 1, `Expected exactly one exported async function ${functionName}.`);
+
+  const bodyStart = findFunctionBodyStart(maskedSource, declarations[0].index + declarations[0][0].length);
+  assert.notEqual(bodyStart, -1, `Expected ${functionName} to have a function body.`);
+  const bodyEnd = findMatchingBrace(maskedSource, bodyStart);
+  return {
+    functionName,
+    declarationStart: declarations[0].index,
+    bodyStart,
+    bodyEnd,
+    startLine: lineNumberAt(source, declarations[0].index),
+    endLine: lineNumberAt(source, bodyEnd),
+  };
 }
 
 function sourceFiles(directory = REPOSITORY_ROOT) {
@@ -82,6 +241,8 @@ function record(file, source, kind, match) {
     line: lineNumberAt(source, match.index),
     kind,
     match: matchedText(source, match.index, match[0].length),
+    index: match.index,
+    length: match[0].length,
   };
 }
 
@@ -119,15 +280,49 @@ function moduleEdges(file, source) {
 
 function symbolCalls(file, source, symbols) {
   const calls = [];
+  const maskedSource = maskJavaScriptNonCode(source);
   for (const symbol of symbols) {
     const pattern = new RegExp(`\\b${escapeRegExp(symbol)}\\s*\\(`, "g");
-    for (const match of source.matchAll(pattern)) {
-      const prefix = source.slice(Math.max(0, match.index - 80), match.index);
+    for (const match of maskedSource.matchAll(pattern)) {
+      const prefix = maskedSource.slice(Math.max(0, match.index - 80), match.index);
       if (/\bfunction\s*$/.test(prefix)) continue;
       calls.push({ ...record(file, source, `call ${symbol}`, match), symbol });
     }
   }
   return calls;
+}
+
+function assertSingleDirectCoreCallInsideMarkFilePolicyBlocked(source, file) {
+  const functionBody = exportedAsyncFunctionBody(source, MARK_FILE_POLICY_BLOCKED_FUNCTION);
+  const coreCalls = symbolCalls(file, source, [CORE_CALL_SYMBOL]);
+  const callsInsideTarget = coreCalls.filter(
+    ({ index }) => index > functionBody.bodyStart && index < functionBody.bodyEnd,
+  );
+  const callsOutsideTarget = coreCalls.filter(
+    ({ index }) => index <= functionBody.bodyStart || index >= functionBody.bodyEnd,
+  );
+
+  assert.equal(
+    coreCalls.length,
+    1,
+    `Expected exactly one direct production call to ${CORE_CALL_SYMBOL}; found ${coreCalls.length}.`,
+  );
+  assert.equal(
+    callsInsideTarget.length,
+    1,
+    `Expected the single ${CORE_CALL_SYMBOL} call to be inside ${MARK_FILE_POLICY_BLOCKED_FUNCTION}.`,
+  );
+  assert.equal(
+    callsOutsideTarget.length,
+    0,
+    `Expected zero ${CORE_CALL_SYMBOL} calls outside ${MARK_FILE_POLICY_BLOCKED_FUNCTION}; found:\n${formatUnexpected(callsOutsideTarget)}`,
+  );
+
+  return {
+    functionBody,
+    call: callsInsideTarget[0],
+    callsOutsideTarget,
+  };
 }
 
 function symbolExports(file, source, symbols) {
@@ -164,6 +359,65 @@ function formatUnexpected(records) {
     .map(({ file, line, kind, match }) => `${file}:${line} [${kind}] ${match}`)
     .join("\n");
 }
+
+test("function body locator accepts only direct file-policy block orchestration placement", () => {
+  const fixturePath = "synthetic/kaiIntakeService.js";
+  const insideFixture = [
+    "const ignored = \"orchestrateMutationWithRequiredAudit({ not: 'code' })\";",
+    "export async function markIntakeFilePolicyBlocked(input = {}) {",
+    "  const literal = \"{ this brace is not structural }\";",
+    "  const template = `raw { text } ${input.ok ? { nested: true } : { nested: false }}`;",
+    "  if (input.ok) {",
+    "    return await orchestrateMutationWithRequiredAudit({ mutation: { value: \"}\" } }, {}, async () => ({}));",
+    "  }",
+    "  return null;",
+    "}",
+  ].join("\n");
+  const otherFunctionFixture = [
+    "export async function markIntakeFilePolicyBlocked() {",
+    "  return null;",
+    "}",
+    "export async function markAnotherMutation() {",
+    "  return await orchestrateMutationWithRequiredAudit({}, {}, async () => ({}));",
+    "}",
+  ].join("\n");
+  const genericHelperFixture = [
+    "function runMutation(input) {",
+    "  return orchestrateMutationWithRequiredAudit(input, {}, async () => ({}));",
+    "}",
+    "export async function markIntakeFilePolicyBlocked(input = {}) {",
+    "  return await runMutation(input);",
+    "}",
+  ].join("\n");
+  const topLevelFixture = [
+    "const eagerMutation = orchestrateMutationWithRequiredAudit({}, {}, async () => ({}));",
+    "export async function markIntakeFilePolicyBlocked() {",
+    "  return eagerMutation;",
+    "}",
+  ].join("\n");
+
+  const fixtureProof = {};
+  fixtureProof.inside_function = assertSingleDirectCoreCallInsideMarkFilePolicyBlocked(
+    insideFixture,
+    fixturePath,
+  ).call.line;
+
+  for (const [name, source] of [
+    ["other_function", otherFunctionFixture],
+    ["generic_helper", genericHelperFixture],
+    ["top_level", topLevelFixture],
+  ]) {
+    assert.throws(
+      () => assertSingleDirectCoreCallInsideMarkFilePolicyBlocked(source, fixturePath),
+      (error) => {
+        fixtureProof[name] = error.message;
+        return /inside markIntakeFilePolicyBlocked|outside markIntakeFilePolicyBlocked/.test(error.message);
+      },
+    );
+  }
+
+  console.log(`ORCHESTRATION_BODY_LOCATOR_FIXTURE_PROOF ${JSON.stringify(fixtureProof)}`);
+});
 
 test("internal orchestration has only the approved file-policy block runtime caller", () => {
   const report = {
@@ -251,7 +505,17 @@ test("internal orchestration has only the approved file-policy block runtime cal
     path.join(REPOSITORY_ROOT, ROUTE_SPECIFIC_RUNTIME_COMPOSITION_PATH),
     "utf8",
   );
-  assert.match(runtimeCompositionSource, /export\s+async\s+function\s+markIntakeFilePolicyBlocked/);
+  const runtimePlacement = assertSingleDirectCoreCallInsideMarkFilePolicyBlocked(
+    runtimeCompositionSource,
+    ROUTE_SPECIFIC_RUNTIME_COMPOSITION_PATH,
+  );
+  console.log(`ORCHESTRATION_RUNTIME_PLACEMENT_REPORT ${JSON.stringify({
+    function_name: runtimePlacement.functionBody.functionName,
+    function_start_line: runtimePlacement.functionBody.startLine,
+    function_end_line: runtimePlacement.functionBody.endLine,
+    call_line: runtimePlacement.call.line,
+    calls_outside_function: runtimePlacement.callsOutsideTarget.length,
+  })}`);
   assert.deepEqual(
     [...new Set(report.test_harness_importers.map(({ file }) => file))],
     [...ALLOWED_HARNESS_IMPORTERS],
