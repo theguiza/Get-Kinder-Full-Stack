@@ -76,6 +76,60 @@ NOT completed by P0-05B:
 
 The P0-05B gate does not decide decomposed Unicode, ordinary spaces, ordinary punctuation, drive-style path candidates without slash or backslash separators, con.txt, .backup, other reserved-name variants, other executable/script/markup suffixes, or arbitrary multiple-extension patterns.
 
+## P0-05C TXT/MD encoding and deterministic binary-content boundary
+
+```text
+decision_evidence: USER_CONFIRMED
+owner_decisions:
+OWNER_DECISION.P0_05C.STRICT_UTF8_ONLY
+OWNER_DECISION.P0_05C.UTF8_BOM_ALLOWED
+OWNER_DECISION.P0_05C.UNSUPPORTED_BOM_REJECTION
+OWNER_DECISION.P0_05C.INVALID_UTF8_REJECTION
+OWNER_DECISION.P0_05C.NUL_REJECTION
+OWNER_DECISION.P0_05C.PROHIBITED_CONTROL_REJECTION
+OWNER_DECISION.P0_05C.LONE_CR_REJECTION
+OWNER_DECISION.P0_05C.EMPTY_CONTENT_ENCODING_GATE_PASS
+OWNER_DECISION.P0_05C.INSTRUCTION_TEXT_IS_INERT_DATA
+```
+
+`OWNER_DECISION.P0_05C.LONE_CR_REJECTION` records that a TXT or MD file using CR-only line endings is rejected by the P0 encoding and deterministic binary-content gate. This includes legacy Mac-style text where line boundaries are represented only by `U+000D CR`, unless each CR is immediately followed by `U+000A LF`. P0 accepts LF and CRLF, rejects lone CR, does not normalize line endings, does not rewrite the quarantined object, and does not transcode legacy line-ending formats. CR-only text must not be described as malformed UTF-8 merely because of the lone CR rule; it may be valid UTF-8 but is blocked under the deterministic binary-content policy.
+
+`OWNER_DECISION.P0_05C.EMPTY_CONTENT_ENCODING_GATE_PASS` records that an empty TXT or MD byte sequence passes only this narrow check:
+
+```text
+strict UTF-8 and deterministic binary-content gate
+```
+
+The empty-content result is:
+
+```text
+encoding_gate_pass_only
+not_document_validity
+not_content_usability
+not_profile_eligibility
+not_source_eligibility
+not_security_assessment_completion
+```
+
+Do not use broad completion language such as `empty files are valid`, `empty uploads are accepted`, or `empty documents are supported`. A later validator may block empty content for usefulness or workflow reasons as a separate decision.
+
+The planned TXT/MD fixture corpus must cite owner-decision identifiers for every expected result. The future empty-file fixture must include metadata equivalent to:
+
+```text
+expected_policy: allow
+expected_category: encoding_gate_pass
+scope_note: encoding_gate_pass_only
+usable_document_claim: false
+source_eligibility_claim: false
+corpus_status: corpus_only
+```
+
+No fixture may convert an encoding-gate result into a broader document-validity claim.
+
+This P0-05C decision follows the required P0 security-policy style: deterministic and enumerated; reject rather than guess or silently transcode; no percentage, density, entropy, or language heuristics; no charset autodetection; no mutation of quarantined bytes; no execution or semantic interpretation of content; and raw bytes and decoded content excluded from blockers, responses, audit, metrics, and logs.
+
+This statement guides later P0-05 decisions but does not define CSV, XLSX, PDF, MIME/signature, or malware policy. Those controls require separate owner decisions.
+
 ## Abuse, concurrency, and timing
 
 ```text

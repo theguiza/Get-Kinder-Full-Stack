@@ -730,6 +730,36 @@ ZIP, RAR, 7z, and other standalone archive uploads remain rejected. Bounded arch
 
 Exact archive-entry, expanded-byte, compression-ratio, and timeout constants must exist in the repository contract before completion.
 
+## P0-05C TXT/MD encoding and deterministic binary-content owner decisions
+
+```text
+decision_evidence: USER_CONFIRMED
+decision_scope: strict UTF-8 and deterministic binary-content gate for TXT and MD
+OWNER_DECISION.P0_05C.STRICT_UTF8_ONLY: future fixtures must cite this authority for strict UTF-8-only expected results
+OWNER_DECISION.P0_05C.UTF8_BOM_ALLOWED: future fixtures must cite this authority for UTF-8 BOM allowed expected results
+OWNER_DECISION.P0_05C.UNSUPPORTED_BOM_REJECTION: future fixtures must cite this authority for unsupported BOM rejection expected results
+OWNER_DECISION.P0_05C.INVALID_UTF8_REJECTION: future fixtures must cite this authority for invalid UTF-8 rejection expected results
+OWNER_DECISION.P0_05C.NUL_REJECTION: future fixtures must cite this authority for NUL rejection expected results
+OWNER_DECISION.P0_05C.PROHIBITED_CONTROL_REJECTION: future fixtures must cite this authority for prohibited-control rejection expected results
+OWNER_DECISION.P0_05C.LONE_CR_REJECTION: a TXT or MD file using CR-only line endings is rejected by the P0 encoding and deterministic binary-content gate
+OWNER_DECISION.P0_05C.EMPTY_CONTENT_ENCODING_GATE_PASS: an empty TXT or MD byte sequence passes only the strict UTF-8 and deterministic binary-content gate
+OWNER_DECISION.P0_05C.INSTRUCTION_TEXT_IS_INERT_DATA: future fixtures must cite this authority for instruction-like text treated as inert data
+lone_cr_detail: legacy Mac-style line boundaries represented only by U+000D CR are rejected unless each CR is immediately followed by U+000A LF
+line_ending_policy: P0 accepts LF and CRLF, rejects lone CR, does not normalize line endings, does not rewrite the quarantined object, and does not transcode legacy line-ending formats
+cr_only_utf8_note: do not describe CR-only text as malformed UTF-8; it may be valid UTF-8 but is blocked under the deterministic binary-content policy
+empty_content_result: encoding_gate_pass_only
+empty_content_non_claims: not_document_validity; not_content_usability; not_profile_eligibility; not_source_eligibility; not_security_assessment_completion
+forbidden_empty_content_language: empty files are valid; empty uploads are accepted; empty documents are supported
+later_empty_content_validators: usefulness or workflow validators may block empty content under separate owner decisions
+future_empty_fixture_metadata: expected_policy allow; expected_category encoding_gate_pass; scope_note encoding_gate_pass_only; usable_document_claim false; source_eligibility_claim false; corpus_status corpus_only
+fixture_boundary: no fixture may convert an encoding-gate result into a broader document-validity claim
+p0_security_policy_style: deterministic and enumerated; reject rather than guess or silently transcode; no percentage, density, entropy, or language heuristics; no charset autodetection; no mutation of quarantined bytes; no execution or semantic interpretation of content; raw bytes and decoded content excluded from blockers, responses, audit, metrics, and logs
+non_scope: this statement guides later P0-05 decisions but does not define CSV, XLSX, PDF, MIME/signature, or malware policy; those controls require separate owner decisions
+implementation_status: not_implemented_by_this_decision_record
+tests_run: not run; documentation-only owner-decision record
+database_or_cloud_access: not performed
+```
+
 ## Prompt-injection boundary
 
 Add synthetic fixtures containing instruction-like text.
