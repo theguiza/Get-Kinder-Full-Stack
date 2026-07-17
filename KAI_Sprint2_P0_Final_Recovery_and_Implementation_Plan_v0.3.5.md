@@ -824,6 +824,67 @@ real_client_data_readiness: NOT_CONFIRMED
 next_package_or_stop_condition: OWNER-DIRECTED STOP after this single P0-05D fixture-and-test-only package commit; do not implement detector behavior, route/service work, upload lifecycle work, P0-06 work, database/cloud/production behavior, push, deployment, or another leaf
 ```
 
+## P0-05E pure TXT/MD deterministic byte detector
+
+```text
+leaf_status: complete
+p0_05_package_status: pure_txt_md_byte_detector_complete
+implementation_status: pure_detector_and_corpus_driven_unit_test_only
+verification_status: TOOL_VERIFIED
+evidence_class: TOOL_VERIFIED
+owner_directed_leaf_scope: USER_CONFIRMED
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: c4fd14c45ce97fa21b274b1d327fe946c8ca3071
+starting_tree: clean tracked and untracked
+prior_boundary: TOOL_VERIFIED — c4fd14c45ce97fa21b274b1d327fe946c8ca3071 changed only __tests__/support/kaiSprint2TxtMdByteFixtureCorpus.js, __tests__/kai-sprint2-txt-md-byte-fixture-corpus.spec.js, and this living ExecPlan to record P0-05D
+applicable_repository_instructions: root AGENTS.md only; changes remain inside the approved P0-05E pure-detector/test/evidence boundary
+implemented_detector_module: Backend/kai/validators/txtMdByteDetector.js
+exported_detector_function: detectTxtMdBytePolicy
+focused_detector_test_file: __tests__/kai-sprint2-txt-md-byte-detector.spec.js
+reused_committed_corpus_file: __tests__/support/kaiSprint2TxtMdByteFixtureCorpus.js
+fixture_count: 27
+corpus_agreement: 27/27 exact agreement for expected_policy, expected_category, and scope_note
+detector_result_totals: matches 27; mismatches 0; false_allows 0; false_blocks 0; unclassified_results 0; detector_level_throws 0
+accepted_byte_input: Uint8Array-compatible in-memory bytes, including Buffer through Uint8Array compatibility
+result_shape: metadata-only object with validator_key, expected_policy, expected_category, scope_note, and safe evidence flags/counts; no raw bytes, decoded content, filenames, paths, excerpts, or semantic content
+raw_byte_bom_handling: detector inspects original bytes before decoding; checks UTF-32 LE and UTF-32 BE four-byte prefixes before UTF-16 LE and UTF-16 BE two-byte prefixes; rejects unsupported BOM encodings without fallback decoding or transcoding
+utf8_bom_handling: detector checks offset-zero EF BB BF before decoding, records the single optional leading UTF-8 BOM, and removes exactly those first three bytes from the view supplied to the decoder
+decoder_construction: new TextDecoder("utf-8", { fatal: true, ignoreBOM: true })
+decoder_failure_behavior: fatal decoder exceptions are caught internally and converted to structured invalid_utf8 block results; no decoder exception escapes to caller or test
+nonleading_ufeff_behavior: non-leading EF BB BF decodes as U+FEFF, is allowed at this narrow gate, and is retained as safe metadata count evidence without returning decoded content
+two_initial_efbbbf_behavior: first offset-zero EF BB BF receives BOM treatment; second sequence remains decoded U+FEFF; fixture allows with decoded_ufeff_count 1 and no double stripping
+control_boundary: TAB, LF, and CRLF allow; NUL blocks as nul_rejection; prohibited C0 other than TAB/LF/CR blocks as prohibited_control; DEL blocks; C1 blocks; CR blocks unless immediately followed by LF
+instruction_like_text: remains inert data and is not interpreted or blocked because it resembles instructions
+empty_content: returns only expected_policy allow, expected_category encoding_gate_pass, and scope_note encoding_gate_pass_only
+dependencies_or_lockfiles_changed: false
+production_barrel_changed: false
+production_caller_added: false
+current_authorized_production_caller: none
+route_service_storage_worker_parser_integration: not implemented
+raw_byte_transport_upload_storage_retrieval_worker_parser_behavior: not implemented
+enabled_behavior_phase_change: none
+raw_content_logging_or_result_exposure: none
+current_state_update: not performed
+implementation_baseline_update: not performed
+contract_update: not performed
+database_cloud_credentials_production_real_data: not accessed or modified
+focused_detector_and_corpus_test: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-txt-md-byte-fixture-corpus.spec.js __tests__/kai-sprint2-txt-md-byte-detector.spec.js — 16 passed, 0 failed
+sprint2_suite_initial_sandbox_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-*.spec.js — new detector tests passed; existing assembled-HTTP localhost listener tests failed with sandbox EPERM
+sprint2_suite: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-*.spec.js — 460 passed, 0 failed after the existing assembled-HTTP localhost listener sandbox EPERM was rerun identically in localhost-capable mode
+full_repository_suite_initial_sandbox_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test — new detector tests passed; existing assembled-HTTP localhost listener tests failed with sandbox EPERM
+full_repository_suite: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test — 565 passed, 0 failed after the existing assembled-HTTP localhost listener sandbox EPERM was rerun identically in localhost-capable mode
+pre_existing_test_outcome_change: none observed; initial failures were the established sandbox EPERM listener condition and passed on identical localhost-capable rerun
+database_sentinel: non-listening loopback DATABASE_URL at 127.0.0.1:9 used for every Node and npm command
+git_diff_check: passed
+complete_diff_scope: Backend/kai/validators/txtMdByteDetector.js, __tests__/kai-sprint2-txt-md-byte-detector.spec.js, and this living ExecPlan evidence update only
+package_commit: report after commit; a commit cannot contain its own SHA
+deployed_kai_schema_compatibility: NOT_CONFIRMED
+live_upload_readiness: NOT_CONFIRMED
+production_readiness: NOT_CONFIRMED
+real_client_data_readiness: NOT_CONFIRMED
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this single P0-05E pure-detector package commit; do not implement mounted integration, route/service work, raw-byte transport, upload lifecycle work, storage retrieval, worker/parser behavior, P0-06 work, database/cloud/production behavior, push, deployment, or another leaf
+```
+
 ## Prompt-injection boundary
 
 Add synthetic fixtures containing instruction-like text.
