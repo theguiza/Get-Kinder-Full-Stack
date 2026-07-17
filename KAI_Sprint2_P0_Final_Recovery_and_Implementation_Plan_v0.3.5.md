@@ -1040,19 +1040,84 @@ real_client_data_readiness: NOT_CONFIRMED
 next_package_or_stop_condition: OWNER-DIRECTED STOP after this single P0-05F.1 documentation-only package commit; do not implement fixtures, tests, detectors, MIME allowlist changes, parsers, runtime behavior, P0-06 work, database/cloud/production behavior, push, deployment, or another leaf
 ```
 
-## P0-05F.2 XLSX and ZIP fixture family
+## P0-05F.1A ratified XLSX central-directory boundary
 
 ```text
-leaf_status: complete after this fixture-corpus package commit
-p0_05_package_status: xlsx_zip_fixture_family_recorded
+leaf_status: complete after this documentation-only corrective commit
+p0_05_package_status: xlsx_central_directory_boundary_ratified
+implementation_status: documentation_only
+verification_status: TOOL_VERIFIED after documented checks pass
+evidence_class: TOOL_VERIFIED
+owner_directed_leaf_scope: USER_CONFIRMED
+owner_authority: OWNER_DECISION.P0_05F.XLSX_CENTRAL_DIRECTORY_BOUNDARY_V1
+owner_decision_recorded_after_reviewing_commit: 854e3ccf06f477e014999aa4983814cbd8b8a310
+owner_decision_scope: explicit ratification of the stricter XLSX identity boundary identified by read-only audit of the exact contract diff; not merely acceptance of an implementation side effect
+applicable_repository_instructions: root AGENTS.md only; changes remain inside the approved P0-05F.1A documentation-only corrective boundary
+preflight_branch: codex/kai-sprint2-p0-v0.3.5
+preflight_head: 854e3ccf06f477e014999aa4983814cbd8b8a310
+preflight_working_tree: clean
+prior_commit_boundary_verified: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md, KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md, __tests__/support/kaiSprint2XlsxZipFixtureCorpus.js, and __tests__/kai-sprint2-xlsx-zip-fixture-corpus.spec.js
+prior_commit_classification: P0-05F.2a - XLSX/ZIP fixture subcorpus
+prior_commit_completes_p0_05f_2: false
+verified_xlsx_zip_fixture_count: 13
+focused_xlsx_zip_fixture_test: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-xlsx-zip-fixture-corpus.spec.js - 8 passed, 0 failed
+production_code_changed: false
+tests_fixtures_detectors_changed: false
+runtime_behavior_changed: false
+dependencies_manifests_lockfiles_changed: false
+database_cloud_credentials_production_real_data: not accessed or modified
+current_state_update: not performed
+implementation_baseline_update: not performed
+```
+
+`OWNER_DECISION.P0_05F.XLSX_CENTRAL_DIRECTORY_BOUNDARY_V1` ratifies that XLSX shallow identity requires a readable EOCD and central directory; valid in-bounds directory offsets, lengths, records, entry counts, and local-header offsets; exact case-sensitive central-directory entries `[Content_Types].xml`, `_rels/.rels`, and `xl/workbook.xml`; and required-entry presence established only through parsed central-directory records.
+
+The ratified XLSX identity boundary forbids raw-buffer string search, regex search, decoded-buffer search, grep-like entry search, decompression, archive expansion, XML parsing, filesystem access, and external ZIP utilities. Readable ZIPs missing required entries or using wrong-case names block as `standalone_archive_or_non_xlsx`. Malformed or truncated ZIPs block as `truncated_or_malformed_type`.
+
+Commit `854e3ccf06f477e014999aa4983814cbd8b8a310` is accepted as `P0-05F.2a - XLSX/ZIP fixture subcorpus`. It contains 13 technically verified XLSX/ZIP fixtures and does not complete P0-05F.2.
+
+Remaining P0-05F.2 coverage:
+
+```text
+P0-05F.2b - text family and extension/MIME matrix
+P0-05F.2c - PDF identity fixtures
+P0-05F.2d - disallowed signatures and unknown binary
+P0-05F.2e - final combined completeness proof
+```
+
+Fixture packages are graded against frozen owner authority. Fixture packages must never modify the contract. A discovered contract gap requires stopping for an owner decision. Contract and fixture changes must not be combined in one implementation commit.
+
+```text
+git_diff_check: passed after P0-05F.1A edit
+git_diff_cached_check: passed after staging
+git_diff_cached_stat: inspected after staging
+git_diff_cached: inspected before commit
+complete_diff_scope: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md and this living ExecPlan only
+package_commit: report after commit; a commit cannot contain its own SHA
+deployed_kai_schema_compatibility: NOT_CONFIRMED
+live_upload_readiness: NOT_CONFIRMED
+production_readiness: NOT_CONFIRMED
+real_client_data_readiness: NOT_CONFIRMED
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this single P0-05F.1A documentation-only corrective commit; do not implement P0-05F.2b, fixtures, tests, detectors, MIME allowlist changes, parsers, runtime behavior, P0-06 work, database/cloud/production behavior, push, deployment, or another leaf
+```
+
+## P0-05F.2a XLSX and ZIP fixture subcorpus
+
+```text
+leaf_status: accepted as P0-05F.2a after P0-05F.1A owner ratification
+p0_05_package_status: xlsx_zip_fixture_subcorpus_recorded
 implementation_status: corpus_only_tests_and_contract_language
 verification_status: TOOL_VERIFIED after documented checks pass
 evidence_class: TOOL_VERIFIED
 owner_directed_leaf_scope: USER_CONFIRMED
-owner_authority: OWNER_DECISION.P0_05F.TYPE_AGREEMENT_MATRIX_V1 plus user-supplied stricter XLSX/ZIP fixture integrity requirements
+owner_authority: OWNER_DECISION.P0_05F.TYPE_AGREEMENT_MATRIX_V1 plus OWNER_DECISION.P0_05F.XLSX_CENTRAL_DIRECTORY_BOUNDARY_V1
 applicable_repository_instructions: root AGENTS.md only; changes remain inside the approved P0-05F fixture-corpus/documentation boundary
 implemented_fixture_module: __tests__/support/kaiSprint2XlsxZipFixtureCorpus.js
 implemented_integrity_test_file: __tests__/kai-sprint2-xlsx-zip-fixture-corpus.spec.js
+accepted_commit: 854e3ccf06f477e014999aa4983814cbd8b8a310
+p0_05f_2_subpackage: P0-05F.2a - XLSX/ZIP fixture subcorpus
+p0_05f_2_complete: false
+remaining_p0_05f_2_sequence: P0-05F.2b text family and extension/MIME matrix; P0-05F.2c PDF identity fixtures; P0-05F.2d disallowed signatures and unknown binary; P0-05F.2e final combined completeness proof
 production_code_changed: false
 production_detector_added_or_changed: false
 runtime_behavior_changed: false
@@ -1101,14 +1166,14 @@ sprint2_suite: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __te
 full_repository_suite_initial_sandbox_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - new XLSX/ZIP tests passed; existing assembled-HTTP localhost listener tests failed with sandbox EPERM
 full_repository_suite: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - 573 passed, 0 failed after the existing assembled-HTTP localhost listener sandbox EPERM was rerun identically in localhost-capable mode
 database_sentinel: non-listening loopback DATABASE_URL at 127.0.0.1:9 used for every Node and npm command
-git_diff_check: passed
+git_diff_check: passed in original fixture package; rerun in P0-05F.1A corrective package
 complete_diff_scope: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md, __tests__/support/kaiSprint2XlsxZipFixtureCorpus.js, __tests__/kai-sprint2-xlsx-zip-fixture-corpus.spec.js, and this living ExecPlan evidence/language update only
 package_commit: report after commit; a commit cannot contain its own SHA
 deployed_kai_schema_compatibility: NOT_CONFIRMED
 live_upload_readiness: NOT_CONFIRMED
 production_readiness: NOT_CONFIRMED
 real_client_data_readiness: NOT_CONFIRMED
-next_package_or_stop_condition: OWNER-DIRECTED STOP after this single P0-05F.2 XLSX/ZIP fixture-corpus package commit; do not implement detectors, mounted integration, runtime MIME allowlist changes, upload lifecycle work, storage retrieval, worker/parser behavior, P0-06 work, database/cloud/production behavior, push, deployment, or another leaf
+next_package_or_stop_condition: P0-05F.2 remains open after this P0-05F.2a XLSX/ZIP fixture subcorpus; do not implement detectors, mounted integration, runtime MIME allowlist changes, upload lifecycle work, storage retrieval, worker/parser behavior, P0-06 work, database/cloud/production behavior, push, deployment, or another leaf without owner authorization
 ```
 
 ## Prompt-injection boundary
