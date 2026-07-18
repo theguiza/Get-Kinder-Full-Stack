@@ -3480,6 +3480,41 @@ commit_hash: report after commit; a commit cannot contain its own SHA
 ```
 
 
+## P0-05F.2e final combined completeness proof
+
+```text
+leaf_status: complete after this bounded combined-completeness proof package commit
+p0_05_package_status: final_combined_fixture_completeness_proof_added
+implementation_status: focused_test_only
+verification_status: TOOL_VERIFIED after documented checks pass
+evidence_class: TOOL_VERIFIED
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: cf912d4dad17aac6cd1c04f095c73d40d6e7c77d
+applicable_repository_instructions: root AGENTS.md only; changes remain inside the approved P0-05F.2e mechanical-artifact/documentation boundary; DATABASE_URL sentinel used for every Node and npm command; no database/cloud/production/push/deployment/current-state access authorized
+active_package_scope: P0-05F.2e bounded final combined completeness proof only; no contract, existing fixture corpus, fixture helper, focused corpus test, production code, detector code, dependency, Current State, Implementation Baseline, P0-05F.3, or P0-05F.4 change
+committed_17_item_checklist: allowed extension/MIME pairings; grounded cross-type mismatches; uppercase extension normalization; unsupported extensions; unsupported MIME values; application/json rejection; application/octet-stream declared-MIME rejection; MIME-parameter rejection; empty text-family cases; PDF positive and truncated cases; XLSX positive minimum structure; readable ZIP without complete XLSX identity; renamed ZIP; recognized MZ, ELF, RAR 4, RAR 5, 7z, and gzip signatures; unknown binary; instruction-like permitted text remaining inert; ambiguous_file_type under the defensive-category rule
+created_focused_test_path: __tests__/kai-sprint2-p0-05f-combined-completeness.spec.js
+imported_corpora: __tests__/support/kaiSprint2DetectedPermittedTypeContradictionFixtureCorpus.js; __tests__/support/kaiSprint2ExtensionMimeMatrixFixtureCorpus.js; __tests__/support/kaiSprint2PdfShallowIdentityFixtureCorpus.js; __tests__/support/kaiSprint2RecognizedDisallowedSignatureFixtureCorpus.js; __tests__/support/kaiSprint2ResidualUnknownBinaryFixtureCorpus.js; __tests__/support/kaiSprint2TextTypeAgreementFixtureCorpus.js; __tests__/support/kaiSprint2TxtMdByteFixtureCorpus.js; __tests__/support/kaiSprint2UnsupportedExtensionMimeFixtureCorpus.js; __tests__/support/kaiSprint2XlsxZipFixtureCorpus.js
+excluded_filename_corpus: __tests__/support/kaiSprint2FilenameFixtureCorpus.js not imported; filename-safety classifications are outside this proof
+verified_coverage_result: all 17 committed checklist items are covered by actual committed fixture fields and IDs, except ambiguous_file_type, which is covered as defensive currently unexercised authority rather than by a fixture
+defensive_ambiguous_file_type_treatment: contract authority says ambiguous_file_type is fail-closed defensive; no fixture is required when ambiguity is unreachable by construction; absence does not make the corpus incomplete; no contrived ambiguous fixture was introduced
+fixture_id_uniqueness: all 101 imported fixture IDs are unique across the imported proof corpora
+authority_validation: authority tokens used by mapped fixtures, including secondary text-byte and metadata-pairing authorities, resolve to current committed contract-grounded authority
+proof_limitations: no detector, runtime, upload-acceptance, malware, parser-safety, semantic-validity, database, cloud, deployment, or source-eligibility claim
+changed_file_scope: __tests__/kai-sprint2-p0-05f-combined-completeness.spec.js; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+focused_test_result_before_execplan_evidence_update: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-p0-05f-combined-completeness.spec.js - initial new-test wording/count assertions corrected, final rerun 11 passed, 0 failed
+dependent_focused_test_result_before_execplan_evidence_update: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-extension-mime-matrix-fixture-corpus.spec.js __tests__/kai-sprint2-detected-permitted-type-contradiction-fixture-corpus.spec.js __tests__/kai-sprint2-xlsx-zip-fixture-corpus.spec.js __tests__/kai-sprint2-pdf-shallow-identity-fixture-corpus.spec.js __tests__/kai-sprint2-text-type-agreement-fixture-corpus.spec.js __tests__/kai-sprint2-unsupported-extension-mime-fixture-corpus.spec.js __tests__/kai-sprint2-txt-md-byte-fixture-corpus.spec.js __tests__/kai-sprint2-recognized-disallowed-signature-fixture-corpus.spec.js __tests__/kai-sprint2-residual-unknown-binary-fixture-corpus.spec.js - 74 passed, 0 failed
+sprint2_result_before_execplan_evidence_update: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-*.spec.js - initial sandbox run hit known localhost listen EPERM only; unchanged localhost-capable rerun passed 536 tests, 0 failed
+full_repo_result_before_execplan_evidence_update: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - initial sandbox run hit known localhost listen EPERM only; unchanged localhost-capable rerun passed 641 tests, 0 failed
+final_state_rerun_requirement: because this ExecPlan evidence section changed after broader suite runs, rerun the affected focused proof, complete Sprint 2 suite, and full repository suite against final file state before staging
+final_state_test_results: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-p0-05f-combined-completeness.spec.js - 11 passed, 0 failed; DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-*.spec.js - sandbox final-state rerun hit known localhost listen EPERM only, unchanged localhost-capable final-state rerun passed 536 tests, 0 failed; DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - sandbox final-state rerun hit known localhost listen EPERM only, unchanged localhost-capable final-state rerun passed 641 tests, 0 failed
+git_diff_check: git diff --check passed after final file state before staging
+git_cached_diff_check: git diff --cached --check passed after staging exactly the two authorized files
+package_exclusions: contract unchanged; existing corpora unchanged; fixture helpers unchanged; existing focused corpus tests unchanged; production code unchanged; detector code unchanged; dependencies unchanged; Current State unchanged; Implementation Baseline unchanged; P0-05F.3 remains unstarted; P0-05F.4 remains unstarted; no push or deployment
+commit_hash: report after commit; a commit cannot contain its own SHA
+```
+
+
 ## P0-05F.2a2 XLSX/ZIP authority citation reconciliation
 
 ```text
