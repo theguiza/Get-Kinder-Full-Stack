@@ -3272,6 +3272,32 @@ next_package_or_stop_condition: OWNER-DIRECTED STOP after this bounded filename 
 ```
 
 
+## P0-05F.2a1 XLSX/ZIP metadata-boundary fixture reconciliation
+
+```text
+leaf_status: complete after this bounded fixture-only reconciliation package commit
+p0_05_package_status: xlsx_zip_metadata_boundary_fixture_reconciled
+implementation_status: fixture_only
+verification_status: TOOL_VERIFIED after documented checks pass
+evidence_class: TOOL_VERIFIED
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 5b58e34f46a3f9d8eebdf3e981b08682f72025e3
+contract_authority: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md; OWNER_DECISION.P0_05F.ZIP_CLASSIFICATION_BOUNDARY_V1
+changed_files: __tests__/support/kaiSprint2XlsxZipFixtureCorpus.js; __tests__/kai-sprint2-xlsx-zip-fixture-corpus.spec.js; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+constructor_correction: shared XLSX/ZIP fixture constructor no longer supplies implicit .xlsx extension or XLSX declared MIME; every retained fixture row must explicitly provide extension and declared_mime
+original_historical_fixture_count: 13
+current_reconciled_fixture_count: 12
+fixture_007_corrected_metadata: extension .txt; declared_mime text/plain; metadata pair independently permitted by committed extension/MIME matrix; readable ZIP remains block / standalone_archive_or_non_xlsx
+fixture_008_preserved_role: retained as .xlsx plus application/vnd.openxmlformats-officedocument.spreadsheetml.sheet readable ZIP missing complete XLSX identity; expected block / standalone_archive_or_non_xlsx
+fixture_009_removed: XLSXZIP-P0-05F-009-BLOCK-STANDALONE-ZIP-SIGNATURE removed without renaming, repurposing, replacement, or standalone-ZIP-signature category creation
+retained_fixture_ids_unchanged: XLSXZIP-P0-05F-001-ALLOW-MINIMUM-XLSX; XLSXZIP-P0-05F-002-BLOCK-MISSING-CONTENT-TYPES; XLSXZIP-P0-05F-003-BLOCK-MISSING-RELS; XLSXZIP-P0-05F-004-BLOCK-MISSING-WORKBOOK; XLSXZIP-P0-05F-005-BLOCK-WRONG-CASE-WORKBOOK; XLSXZIP-P0-05F-006-BLOCK-RENAMED-NON-OOXML-ZIP; XLSXZIP-P0-05F-007-BLOCK-ARBITRARY-ZIP-NON-XLSX-METADATA; XLSXZIP-P0-05F-008-BLOCK-XLSX-METADATA-MISSING-OOXML; XLSXZIP-P0-05F-010-BLOCK-TRUNCATED-LOCAL-SIGNATURE; XLSXZIP-P0-05F-011-BLOCK-NO-CENTRAL-DIRECTORY; XLSXZIP-P0-05F-012-BLOCK-OUT-OF-BOUNDS-CD-OFFSET; XLSXZIP-P0-05F-013-BLOCK-TRUNCATED-CD-RECORD
+retained_byte_constructions_preserved: direct diff inspection shows retained fixture entries, ZIP byte builders, malformed ZIP builders, structural defects, expected policies, and expected categories unchanged; fixture 007 metadata is the only retained fixture-semantic correction
+focused_and_broader_tests: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-xlsx-zip-fixture-corpus.spec.js - 9 passed, 0 failed; DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-detected-permitted-type-contradiction-fixture-corpus.spec.js __tests__/kai-sprint2-extension-mime-matrix-fixture-corpus.spec.js - 15 passed, 0 failed; DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-*.spec.js - initial sandbox run hit known localhost listen EPERM, unchanged localhost-capable rerun passed 513 tests, 0 failed; DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - initial sandbox run hit known localhost listen EPERM, unchanged localhost-capable rerun passed 618 tests, 0 failed
+git_checks: git diff --check passed; git diff --cached --check, staged stat, and staged diff inspected before commit
+package_boundary: P0-05F.2a1 bounded fixture-only reconciliation; contract, owner decisions, production detector/runtime code, other fixture corpora, other tests, manifests, lockfiles, Current State, Implementation Baseline, database/cloud/production behavior, push, and deployment unchanged
+```
+
+
 ---
 
 ## Plan authority record

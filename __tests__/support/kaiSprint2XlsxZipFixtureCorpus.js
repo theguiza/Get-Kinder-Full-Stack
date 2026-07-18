@@ -1,4 +1,6 @@
 const textEncoder = new TextEncoder();
+const XLSX_EXTENSION = ".xlsx";
+const XLSX_DECLARED_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
 export const XLSX_ZIP_REQUIRED_ENTRIES = Object.freeze([
   "[Content_Types].xml",
@@ -189,6 +191,8 @@ export function createStoredEmptyZip(entries) {
 function fixture({
   fixture_id,
   description,
+  extension,
+  declared_mime,
   entries,
   expected_policy,
   expected_category,
@@ -200,12 +204,16 @@ function fixture({
   malformed_defect = null,
   buildBytes,
 }) {
+  if (!extension || !declared_mime) {
+    throw new Error(`Fixture ${fixture_id} must explicitly provide extension and declared_mime`);
+  }
+
   const zip = buildBytes ? buildBytes() : createStoredEmptyZip(entries);
   return Object.freeze({
     fixture_id,
     description,
-    extension: ".xlsx",
-    declared_mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    extension,
+    declared_mime,
     bytes: zip.bytes,
     entries: Object.freeze(entries),
     expected_policy,
@@ -242,6 +250,8 @@ export const XLSX_ZIP_FIXTURES = Object.freeze([
   fixture({
     fixture_id: "XLSXZIP-P0-05F-001-ALLOW-MINIMUM-XLSX",
     description: "Minimum positive XLSX identity with only required OOXML entries as parsed central-directory names.",
+    extension: XLSX_EXTENSION,
+    declared_mime: XLSX_DECLARED_MIME,
     entries: XLSX_ZIP_REQUIRED_ENTRIES,
     expected_policy: "allow",
     expected_category: "type_agreement_pass",
@@ -252,24 +262,32 @@ export const XLSX_ZIP_FIXTURES = Object.freeze([
   readableXlsxLikeFixture({
     fixture_id: "XLSXZIP-P0-05F-002-BLOCK-MISSING-CONTENT-TYPES",
     description: "Readable ZIP missing only the exact [Content_Types].xml OOXML entry.",
+    extension: XLSX_EXTENSION,
+    declared_mime: XLSX_DECLARED_MIME,
     entries: Object.freeze(["_rels/.rels", "xl/workbook.xml"]),
     missing_required_entry: "[Content_Types].xml",
   }),
   readableXlsxLikeFixture({
     fixture_id: "XLSXZIP-P0-05F-003-BLOCK-MISSING-RELS",
     description: "Readable ZIP missing only the exact _rels/.rels OOXML entry.",
+    extension: XLSX_EXTENSION,
+    declared_mime: XLSX_DECLARED_MIME,
     entries: Object.freeze(["[Content_Types].xml", "xl/workbook.xml"]),
     missing_required_entry: "_rels/.rels",
   }),
   readableXlsxLikeFixture({
     fixture_id: "XLSXZIP-P0-05F-004-BLOCK-MISSING-WORKBOOK",
     description: "Readable ZIP missing only the exact xl/workbook.xml OOXML entry.",
+    extension: XLSX_EXTENSION,
+    declared_mime: XLSX_DECLARED_MIME,
     entries: Object.freeze(["[Content_Types].xml", "_rels/.rels"]),
     missing_required_entry: "xl/workbook.xml",
   }),
   fixture({
     fixture_id: "XLSXZIP-P0-05F-005-BLOCK-WRONG-CASE-WORKBOOK",
     description: "Readable ZIP where workbook exists only as xl/Workbook.xml and fails exact case-sensitive identity.",
+    extension: XLSX_EXTENSION,
+    declared_mime: XLSX_DECLARED_MIME,
     entries: Object.freeze(["[Content_Types].xml", "_rels/.rels", "xl/Workbook.xml"]),
     expected_policy: "block",
     expected_category: "standalone_archive_or_non_xlsx",
@@ -282,6 +300,8 @@ export const XLSX_ZIP_FIXTURES = Object.freeze([
   fixture({
     fixture_id: "XLSXZIP-P0-05F-006-BLOCK-RENAMED-NON-OOXML-ZIP",
     description: "Readable ZIP with plausible renamed files that are not the authoritative exact OOXML entries.",
+    extension: XLSX_EXTENSION,
+    declared_mime: XLSX_DECLARED_MIME,
     entries: Object.freeze(["Content_Types.xml", "_rels/rels.xml", "xl/workbook.xml.txt", "xl/workbook.xml.bak"]),
     expected_policy: "block",
     expected_category: "standalone_archive_or_non_xlsx",
@@ -293,6 +313,8 @@ export const XLSX_ZIP_FIXTURES = Object.freeze([
   fixture({
     fixture_id: "XLSXZIP-P0-05F-007-BLOCK-ARBITRARY-ZIP-NON-XLSX-METADATA",
     description: "Readable arbitrary ZIP with allowed non-XLSX metadata but no OOXML identity.",
+    extension: ".txt",
+    declared_mime: "text/plain",
     entries: genericZipEntries,
     expected_policy: "block",
     expected_category: "standalone_archive_or_non_xlsx",
@@ -303,6 +325,8 @@ export const XLSX_ZIP_FIXTURES = Object.freeze([
   fixture({
     fixture_id: "XLSXZIP-P0-05F-008-BLOCK-XLSX-METADATA-MISSING-OOXML",
     description: "Readable ZIP with .xlsx metadata but missing the minimum OOXML structure.",
+    extension: XLSX_EXTENSION,
+    declared_mime: XLSX_DECLARED_MIME,
     entries: Object.freeze(["docProps/core.xml", "xl/styles.xml"]),
     expected_policy: "block",
     expected_category: "standalone_archive_or_non_xlsx",
@@ -311,18 +335,10 @@ export const XLSX_ZIP_FIXTURES = Object.freeze([
     structural_claim: "readable_zip",
   }),
   fixture({
-    fixture_id: "XLSXZIP-P0-05F-009-BLOCK-STANDALONE-ZIP-SIGNATURE",
-    description: "Recognized standalone ZIP signature with otherwise permitted non-XLSX metadata.",
-    entries: Object.freeze(["archive-manifest.json"]),
-    expected_policy: "block",
-    expected_category: "standalone_archive_or_non_xlsx",
-    authority: "OWNER_DECISION.P0_05F.STANDALONE_ZIP_SIGNATURE",
-    fixture_family: "recognized_standalone_zip_signature",
-    structural_claim: "readable_zip",
-  }),
-  fixture({
     fixture_id: "XLSXZIP-P0-05F-010-BLOCK-TRUNCATED-LOCAL-SIGNATURE",
     description: "Truncated local-file-header signature is not a readable ZIP identity.",
+    extension: XLSX_EXTENSION,
+    declared_mime: XLSX_DECLARED_MIME,
     entries: Object.freeze([]),
     expected_policy: "block",
     expected_category: "truncated_or_malformed_type",
@@ -335,6 +351,8 @@ export const XLSX_ZIP_FIXTURES = Object.freeze([
   fixture({
     fixture_id: "XLSXZIP-P0-05F-011-BLOCK-NO-CENTRAL-DIRECTORY",
     description: "Local header exists without a readable central directory or EOCD.",
+    extension: XLSX_EXTENSION,
+    declared_mime: XLSX_DECLARED_MIME,
     entries: Object.freeze(["[Content_Types].xml"]),
     expected_policy: "block",
     expected_category: "truncated_or_malformed_type",
@@ -350,6 +368,8 @@ export const XLSX_ZIP_FIXTURES = Object.freeze([
   fixture({
     fixture_id: "XLSXZIP-P0-05F-012-BLOCK-OUT-OF-BOUNDS-CD-OFFSET",
     description: "EOCD records a central-directory offset beyond fixture byte bounds.",
+    extension: XLSX_EXTENSION,
+    declared_mime: XLSX_DECLARED_MIME,
     entries: Object.freeze(["[Content_Types].xml"]),
     expected_policy: "block",
     expected_category: "truncated_or_malformed_type",
@@ -367,6 +387,8 @@ export const XLSX_ZIP_FIXTURES = Object.freeze([
   fixture({
     fixture_id: "XLSXZIP-P0-05F-013-BLOCK-TRUNCATED-CD-RECORD",
     description: "EOCD is readable but the central-directory record is truncated before its recorded name bytes.",
+    extension: XLSX_EXTENSION,
+    declared_mime: XLSX_DECLARED_MIME,
     entries: Object.freeze(["[Content_Types].xml"]),
     expected_policy: "block",
     expected_category: "truncated_or_malformed_type",

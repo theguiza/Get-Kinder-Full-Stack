@@ -3,6 +3,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import {
+  EXTENSION_MIME_MATRIX_ALLOWED_PAIRINGS,
+} from "./support/kaiSprint2ExtensionMimeMatrixFixtureCorpus.js";
+import {
   XLSX_ZIP_FIXTURE_AUTHORITY_MAP,
   XLSX_ZIP_FIXTURE_CATEGORIES,
   XLSX_ZIP_FIXTURE_CORPUS_STATUSES,
@@ -54,13 +57,14 @@ const expectedFixtureIds = Object.freeze([
   "XLSXZIP-P0-05F-006-BLOCK-RENAMED-NON-OOXML-ZIP",
   "XLSXZIP-P0-05F-007-BLOCK-ARBITRARY-ZIP-NON-XLSX-METADATA",
   "XLSXZIP-P0-05F-008-BLOCK-XLSX-METADATA-MISSING-OOXML",
-  "XLSXZIP-P0-05F-009-BLOCK-STANDALONE-ZIP-SIGNATURE",
   "XLSXZIP-P0-05F-010-BLOCK-TRUNCATED-LOCAL-SIGNATURE",
   "XLSXZIP-P0-05F-011-BLOCK-NO-CENTRAL-DIRECTORY",
   "XLSXZIP-P0-05F-012-BLOCK-OUT-OF-BOUNDS-CD-OFFSET",
   "XLSXZIP-P0-05F-013-BLOCK-TRUNCATED-CD-RECORD",
 ]);
 
+const XLSX_DECLARED_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+const removedStandaloneZipFixtureId = ["XLSXZIP", "P0", "05F", "009", "BLOCK", "STANDALONE", "ZIP", "SIGNATURE"].join("-");
 const policyAllowlist = new Set(XLSX_ZIP_FIXTURE_POLICIES);
 const categoryAllowlist = new Set(XLSX_ZIP_FIXTURE_CATEGORIES);
 const corpusStatusAllowlist = new Set(XLSX_ZIP_FIXTURE_CORPUS_STATUSES);
@@ -211,6 +215,16 @@ function assertReadableZipProof(fixture, proof) {
   assert.equal(proof.raw_byte_search_used_for_entry_presence, false, fixture.fixture_id);
 }
 
+function p0PairIsAllowed(extension, declaredMime) {
+  return EXTENSION_MIME_MATRIX_ALLOWED_PAIRINGS.some(
+    (pairing) => pairing.normalized_extension === extension && pairing.normalized_declared_mime === declaredMime,
+  );
+}
+
+function completeXlsxIdentityPresent(proof) {
+  return XLSX_ZIP_REQUIRED_ENTRIES.every((name) => proof.entry_name_set.has(name));
+}
+
 test("XLSX/ZIP fixture authority map is closed and grounded in P0-05F", () => {
   for (const [authorityId, authority] of Object.entries(XLSX_ZIP_FIXTURE_AUTHORITY_MAP)) {
     assert.deepEqual(Object.keys(authority), authorityKeys, authorityId);
@@ -230,16 +244,23 @@ test("XLSX/ZIP fixture authority map is closed and grounded in P0-05F", () => {
 });
 
 test("XLSX/ZIP fixtures are synthetic, ordered, complete, closed-schema, and in-memory only", () => {
+  assert.equal(XLSX_ZIP_FIXTURES.length, 12);
   assert.deepEqual(
     XLSX_ZIP_FIXTURES.map((fixture) => fixture.fixture_id),
     expectedFixtureIds,
   );
   assert.equal(new Set(XLSX_ZIP_FIXTURES.map((fixture) => fixture.fixture_id)).size, XLSX_ZIP_FIXTURES.length);
+  assert.equal(
+    XLSX_ZIP_FIXTURES.some((fixture) => fixture.fixture_id === removedStandaloneZipFixtureId),
+    false,
+  );
 
   for (const fixture of XLSX_ZIP_FIXTURES) {
     assert.deepEqual(Object.keys(fixture), fixtureKeys, fixture.fixture_id);
-    assert.equal(fixture.extension, ".xlsx", fixture.fixture_id);
-    assert.equal(fixture.declared_mime, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fixture.fixture_id);
+    assert.equal(typeof fixture.extension, "string", fixture.fixture_id);
+    assert.notEqual(fixture.extension, "", fixture.fixture_id);
+    assert.equal(typeof fixture.declared_mime, "string", fixture.fixture_id);
+    assert.notEqual(fixture.declared_mime, "", fixture.fixture_id);
     assert.ok(fixture.bytes instanceof Uint8Array, fixture.fixture_id);
     assert.ok(policyAllowlist.has(fixture.expected_policy), fixture.fixture_id);
     assert.ok(categoryAllowlist.has(fixture.expected_category), fixture.fixture_id);
@@ -251,6 +272,13 @@ test("XLSX/ZIP fixtures are synthetic, ordered, complete, closed-schema, and in-
     assert.equal(fixture.production_detector_claim, false, fixture.fixture_id);
     assert.ok(fixture.synthetic_provenance.includes("synthetic deterministic in-memory ZIP bytes"), fixture.fixture_id);
     assert.doesNotMatch(fixture.synthetic_provenance, /customer|database|cloud|filesystem|credential/i, fixture.fixture_id);
+  }
+
+  for (const fixture of XLSX_ZIP_FIXTURES.filter(
+    (item) => item.fixture_id !== "XLSXZIP-P0-05F-007-BLOCK-ARBITRARY-ZIP-NON-XLSX-METADATA",
+  )) {
+    assert.equal(fixture.extension, ".xlsx", fixture.fixture_id);
+    assert.equal(fixture.declared_mime, XLSX_DECLARED_MIME, fixture.fixture_id);
   }
 
   assert.deepEqual(
@@ -347,7 +375,6 @@ test("renamed and generic standalone ZIP fixtures remain readable but non-XLSX",
       "readable_renamed_non_ooxml_zip",
       "readable_arbitrary_zip",
       "readable_zip_xlsx_metadata_missing_ooxml",
-      "recognized_standalone_zip_signature",
     ].includes(fixture.fixture_family),
   );
 
@@ -366,6 +393,58 @@ test("renamed and generic standalone ZIP fixtures remain readable but non-XLSX",
   assert.equal(renamedProof.entry_name_set.has("xl/workbook.xml.txt"), true);
   assert.equal(renamedProof.entry_name_set.has("xl/workbook.xml"), false);
   assert.equal(renamedProof.entry_name_set.has("[Content_Types].xml"), false);
+});
+
+test("fixtures 007 and 008 prove the two readable ZIP metadata classes without complete XLSX identity", () => {
+  const permittedNonXlsxMetadata = fixtureById("XLSXZIP-P0-05F-007-BLOCK-ARBITRARY-ZIP-NON-XLSX-METADATA");
+  const xlsxMetadata = fixtureById("XLSXZIP-P0-05F-008-BLOCK-XLSX-METADATA-MISSING-OOXML");
+  const canonicalCoverage = new Map([
+    ["permitted non-XLSX metadata + readable non-XLSX ZIP", permittedNonXlsxMetadata.fixture_id],
+    ["XLSX metadata + readable non-XLSX ZIP", xlsxMetadata.fixture_id],
+  ]);
+
+  assert.equal(permittedNonXlsxMetadata.extension, ".txt");
+  assert.equal(permittedNonXlsxMetadata.declared_mime, "text/plain");
+  assert.equal(p0PairIsAllowed(permittedNonXlsxMetadata.extension, permittedNonXlsxMetadata.declared_mime), true);
+  assert.equal(permittedNonXlsxMetadata.bytes.byteLength, 232);
+  assert.equal(permittedNonXlsxMetadata.expected_policy, "block");
+  assert.equal(permittedNonXlsxMetadata.expected_category, "standalone_archive_or_non_xlsx");
+  for (const excludedCategory of [
+    "declared_type_mismatch",
+    "disallowed_binary_signature",
+    "truncated_or_malformed_type",
+    "unsupported_file_type",
+    "ambiguous_file_type",
+    "unknown_binary",
+  ]) {
+    assert.notEqual(permittedNonXlsxMetadata.expected_category, excludedCategory);
+  }
+
+  const permittedNonXlsxProof = parseZipDirectory(permittedNonXlsxMetadata.bytes);
+  assertReadableZipProof(permittedNonXlsxMetadata, permittedNonXlsxProof);
+  assert.deepEqual(permittedNonXlsxProof.entry_names, ["metadata.json", "notes/readme.txt"]);
+  assert.equal(permittedNonXlsxProof.defect, null);
+  assert.equal(completeXlsxIdentityPresent(permittedNonXlsxProof), false);
+
+  assert.equal(xlsxMetadata.extension, ".xlsx");
+  assert.equal(xlsxMetadata.declared_mime, XLSX_DECLARED_MIME);
+  assert.equal(xlsxMetadata.bytes.byteLength, 234);
+  assert.equal(xlsxMetadata.expected_policy, "block");
+  assert.equal(xlsxMetadata.expected_category, "standalone_archive_or_non_xlsx");
+
+  const xlsxMetadataProof = parseZipDirectory(xlsxMetadata.bytes);
+  assertReadableZipProof(xlsxMetadata, xlsxMetadataProof);
+  assert.deepEqual(xlsxMetadataProof.entry_names, ["docProps/core.xml", "xl/styles.xml"]);
+  assert.equal(xlsxMetadataProof.defect, null);
+  assert.equal(completeXlsxIdentityPresent(xlsxMetadataProof), false);
+
+  assert.deepEqual(
+    [...canonicalCoverage.entries()],
+    [
+      ["permitted non-XLSX metadata + readable non-XLSX ZIP", "XLSXZIP-P0-05F-007-BLOCK-ARBITRARY-ZIP-NON-XLSX-METADATA"],
+      ["XLSX metadata + readable non-XLSX ZIP", "XLSXZIP-P0-05F-008-BLOCK-XLSX-METADATA-MISSING-OOXML"],
+    ],
+  );
 });
 
 test("malformed and truncated ZIP fixtures are distinct from readable missing-entry cases", () => {
@@ -425,6 +504,19 @@ test("XLSX/ZIP corpus construction and integrity validation avoid decompression,
   const corpusSource = readFileSync("__tests__/support/kaiSprint2XlsxZipFixtureCorpus.js", "utf8");
   const testSource = readFileSync("__tests__/kai-sprint2-xlsx-zip-fixture-corpus.spec.js", "utf8");
   const combined = `${corpusSource}\n${testSource}`;
+
+  assert.doesNotMatch(
+    corpusSource,
+    /function fixture\(\{[\s\S]*extension\s*=\s*["']\.xlsx["'][\s\S]*\}\)/,
+    "fixture constructor must not default extension to XLSX",
+  );
+  assert.doesNotMatch(
+    corpusSource,
+    /function fixture\(\{[\s\S]*declared_mime\s*=\s*["']application\/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet["'][\s\S]*\}\)/,
+    "fixture constructor must not default declared_mime to XLSX",
+  );
+  assert.equal(corpusSource.includes("extension: \".xlsx\",\n    declared_mime:"), false);
+  assert.equal(corpusSource.includes(removedStandaloneZipFixtureId), false);
 
   for (const forbidden of [
     "from " + "\"node:z" + "lib",
