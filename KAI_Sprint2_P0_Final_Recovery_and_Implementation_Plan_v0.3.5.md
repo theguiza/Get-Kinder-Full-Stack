@@ -991,9 +991,9 @@ The future shallow XLSX identity detector may inspect ZIP signatures, local head
 
 The positive minimum XLSX fixture must be a readable ZIP whose central-directory offsets, record lengths, entry counts, bounds, and local-header references are internally consistent; it expects `allow / type_agreement_pass / type_agreement_pass_only`. Missing-entry negative fixtures must be separate readable ZIPs for missing `[Content_Types].xml`, missing `_rels/.rels`, and missing `xl/workbook.xml`, each with the other two required entries present and exactly the claimed entry absent; each expects `block / standalone_archive_or_non_xlsx`. A wrong-case fixture must be a readable ZIP with exactly one required entry present only under incorrect case, such as `xl/Workbook.xml`; it expects `block / standalone_archive_or_non_xlsx`. A renamed non-OOXML ZIP must remain readable, omit at least one exact required OOXML entry, and not qualify merely because raw bytes contain similar strings; it expects `block / standalone_archive_or_non_xlsx`. Malformed and truncated ZIP fixtures must remain separate from missing-entry and standalone-archive fixtures, including truncated local-file-header signature, local header without readable central directory, invalid or out-of-bounds central-directory offset, and truncated central-directory record; each expects `block / truncated_or_malformed_type`.
 
-Generic and standalone ZIP coverage must remain separate for readable arbitrary ZIP with allowed non-XLSX metadata, readable ZIP with `.xlsx` metadata but missing minimum OOXML structure, and recognized standalone ZIP signature with otherwise permitted non-XLSX metadata. This rule does not establish macro absence, external-relationship absence, encryption/password status, OOXML path safety, sheet limits, cell limits, entry-count limits, expanded-size limits, compression-ratio safety, or complete workbook validity.
+Readable non-XLSX ZIP coverage has two distinct classes: readable ZIP with `.xlsx` metadata but missing complete XLSX identity, and readable ZIP with otherwise permitted non-XLSX metadata and missing complete XLSX identity. The previously separated Case A, readable arbitrary ZIP with permitted non-XLSX metadata, and Case C, recognized standalone-ZIP signature with permitted non-XLSX metadata, are not distinct deterministic cases under the committed P0 signal model. A structurally readable ZIP necessarily carries the recognized ZIP signature. When complete XLSX identity is absent and otherwise permitted non-XLSX metadata is used, both expose the same relevant signals and block as `standalone_archive_or_non_xlsx`. Do not manufacture a distinction using fixture names, descriptions, byte length, arbitrary archive entry names, or the term "signature" in a fixture ID. Only one canonical permitted-non-XLSX readable-ZIP semantic fixture is required. This rule does not establish macro absence, external-relationship absence, encryption/password status, OOXML path safety, sheet limits, cell limits, entry-count limits, expanded-size limits, compression-ratio safety, or complete workbook validity.
 
-Recognized disallowed binary signatures for the future corpus include DOS/PE MZ, ELF, standalone ZIP, RAR 4, RAR 5, 7z, and gzip. A recognized disallowed signature blocks regardless of allowed extension or declared MIME. Unknown non-text binary input that does not satisfy permitted PDF or XLSX shallow identity remains fail-closed as `unknown_binary`.
+Recognized disallowed binary signatures for the future corpus are exactly DOS/PE MZ, ELF, RAR 4, RAR 5, 7z, and gzip. A recognized disallowed signature blocks as `disallowed_binary_signature` regardless of allowed extension or declared MIME. Structurally readable ZIP without complete XLSX identity blocks as `standalone_archive_or_non_xlsx`, not `disallowed_binary_signature`. Malformed or truncated ZIP/XLSX-signalling bytes block as `truncated_or_malformed_type`. Unknown non-text binary input that does not satisfy permitted PDF or XLSX shallow identity, readable ZIP/non-XLSX archive classification, or a recognized disallowed signature remains fail-closed as `unknown_binary`.
 
 Deterministic block outcomes:
 
@@ -1001,11 +1001,11 @@ Deterministic block outcomes:
 unsupported extension or MIME -> block / unsupported_file_type
 extension and MIME disagreement -> block / declared_type_mismatch
 extension and MIME agree on one permitted type but complete byte identity establishes another permitted type -> block / declared_type_mismatch
-recognized disallowed signature -> block / disallowed_binary_signature
-ZIP without minimum XLSX structure -> block / standalone_archive_or_non_xlsx
-PDF or XLSX signature present but minimum identity incomplete -> block / truncated_or_malformed_type
+recognized MZ, ELF, RAR 4, RAR 5, 7z, or gzip signature -> block / disallowed_binary_signature
+structurally readable ZIP without complete XLSX identity -> block / standalone_archive_or_non_xlsx
+malformed or truncated ZIP/XLSX-signalling bytes -> block / truncated_or_malformed_type
 multiple permitted types genuinely remain plausible after applying all committed signals -> block / ambiguous_file_type
-non-text bytes matching no permitted binary type -> block / unknown_binary
+non-text bytes matching no permitted binary type, no readable ZIP/non-XLSX archive classification, and no recognized disallowed signature -> block / unknown_binary
 ```
 
 `ambiguous_file_type` is a defensive fail-closed category. The future fixture corpus must not invent a contrived or semantically impossible byte case solely to exercise it. Include an `ambiguous_file_type` fixture only if a naturally reachable case exists under the committed matrix; otherwise record the category as defensive and currently unexercised. Do not weaken or alter another fixture merely to manufacture ambiguity, and do not treat absence of an ambiguity fixture as incomplete coverage when the category is unreachable by construction.
@@ -1027,7 +1027,7 @@ separate runtime-alignment leaf
   only after explicit authorization
 ```
 
-The fixture corpus must precede detector implementation. The future fixture corpus must include every allowed extension/MIME pairing, every grounded cross-type mismatch, uppercase extension normalization, unsupported extensions, unsupported MIME values, `application/json` rejection, `application/octet-stream` declared-MIME rejection, MIME-parameter rejection, empty text-family cases, PDF positive and truncated cases, XLSX positive minimum structure, standalone ZIP, renamed ZIP, recognized executable/archive signatures, unknown binary, instruction-like permitted text remaining inert, and `ambiguous_file_type` only under the defensive-category rule. The runtime-alignment change must not be silently merged into fixture or detector packages.
+The fixture corpus must precede detector implementation. The future fixture corpus must include every allowed extension/MIME pairing, every grounded cross-type mismatch, uppercase extension normalization, unsupported extensions, unsupported MIME values, `application/json` rejection, `application/octet-stream` declared-MIME rejection, MIME-parameter rejection, empty text-family cases, PDF positive and truncated cases, XLSX positive minimum structure, structurally readable ZIP without complete XLSX identity, recognized non-ZIP disallowed signatures for DOS/PE MZ, ELF, RAR 4, RAR 5, 7z, and gzip, unknown binary, instruction-like permitted text remaining inert, and `ambiguous_file_type` only under the defensive-category rule. The runtime-alignment change must not be silently merged into fixture or detector packages.
 
 Explicit exclusions: this decision does not settle or implement CSV row count, CSV delimiter/header validity, CSV formula-injection handling, XLSX macro detection, XLSX external relationships, OOXML path traversal, archive expansion limits, PDF text-layer proof, PDF encryption, PDF JavaScript/actions, PDF embedded files, malware scanning, upload transport, storage integration, parser/profile behavior, production wiring, or P0-05A through P0-05E.
 
@@ -1530,11 +1530,11 @@ truncated_or_malformed_type:
 the detected permitted type satisfies its complete committed shallow identity.
 
 disallowed_binary_signature:
-the detected type is a permitted P0 type, not MZ, ELF, standalone ZIP, RAR,
-7z, gzip, or another recognized disallowed signature.
+the detected type is a permitted P0 type, not MZ, ELF, RAR 4, RAR 5, 7z,
+gzip, or another separately recognized non-permitted binary signature.
 
 standalone_archive_or_non_xlsx:
-complete XLSX shallow identity is established when the detected type is XLSX.
+structurally readable ZIP without complete XLSX identity.
 
 ambiguous_file_type:
 one different permitted byte-established type is deterministically identified;
@@ -1544,7 +1544,7 @@ unknown_binary:
 the bytes are deterministically identified as a permitted PDF or XLSX type.
 ```
 
-Boundary with disallowed signatures: a recognized disallowed signature continues to block as `disallowed_binary_signature` regardless of permitted extension or declared MIME. `declared_type_mismatch` is not broadened to absorb MZ, ELF, standalone ZIP, RAR 4, RAR 5, 7z, gzip, or unknown binary cases. This decision applies only where the byte-established type is itself a permitted P0 type and its complete committed shallow identity is satisfied.
+Boundary with disallowed signatures: a recognized disallowed signature continues to block as `disallowed_binary_signature` regardless of permitted extension or declared MIME. `declared_type_mismatch` is not broadened to absorb MZ, ELF, RAR 4, RAR 5, 7z, gzip, another separately recognized non-permitted binary signature, readable non-XLSX ZIP, malformed or truncated ZIP/XLSX-signalling bytes, or unknown binary cases. This decision applies only where the byte-established type is itself a permitted P0 type and its complete committed shallow identity is satisfied.
 
 Text-family boundary: CSV, MD, and TXT have no unique reliable byte signature under the committed P0-05F gate. This package does not invent byte-level cross-type distinction among CSV, MD, and TXT. Their permitted subtype remains selected through the committed extension/MIME matrix plus strict text-byte validation.
 
@@ -1620,6 +1620,32 @@ current_state_update: not performed
 implementation_baseline_update: not performed
 push_or_deployment: not performed
 next_package_or_stop_condition: OWNER-DIRECTED STOP after this single P0-05F.1C documentation-only package commit; do not begin or resume P0-05F.2d1
+```
+
+## P0-05F.1C.1 living ExecPlan ZIP-authority reconciliation
+
+```text
+leaf_status: complete after this documentation-only reconciliation package commit
+p0_05_package_status: living_execplan_zip_authority_reconciled
+implementation_status: documentation_only
+verification_status: TOOL_VERIFIED after documented checks pass
+evidence_class: TOOL_VERIFIED
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 39292249d791e509e7b07c616114d43dfed07a20
+authorized_file: KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+contract_source_of_truth_decision_identifier: OWNER_DECISION.P0_05F.ZIP_CLASSIFICATION_BOUNDARY_V1
+stale_active_p0_05f_1_statements_found: old three-case ZIP coverage summary; standalone ZIP in recognized disallowed-signature set; overlapping deterministic outcome rows; future fixture-corpus standalone-ZIP/disallowed wording
+stale_active_p0_05f_1b_statements_found: standalone ZIP in disallowed_binary_signature category exclusion; standalone ZIP in disallowed-signature boundary exclusion
+final_recognized_disallowed_signature_set: DOS/PE MZ, ELF, RAR 4, RAR 5, 7z, gzip
+final_readable_zip_mapping: structurally readable ZIP without complete XLSX identity -> block / standalone_archive_or_non_xlsx
+final_malformed_truncated_zip_mapping: malformed or truncated ZIP/XLSX-signalling bytes -> block / truncated_or_malformed_type
+cases_a_c_collapse_retained: true
+contract_changed: false
+fixtures_changed: false
+tests_changed: false
+runtime_behavior_changed: false
+verification_commands: git status --short --branch; git rev-parse HEAD; rg -n "OWNER_DECISION\\.P0_05F\\.ZIP_CLASSIFICATION_BOUNDARY_V1|Generic and standalone ZIP coverage|standalone ZIP|recognized disallowed|ZIP without minimum XLSX structure|disallowed_binary_signature|standalone_archive_or_non_xlsx|P0-05F\\.1C|P0-05F\\.1B" Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md; sed -n '180,312p' Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md; sed -n '960,1045p' KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md; sed -n '1448,1560p' KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md; sed -n '1560,1628p' KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md; rg -n "standalone ZIP|recognized disallowed|Generic and standalone ZIP coverage|ZIP without minimum XLSX structure|disallowed_binary_signature|standalone_archive_or_non_xlsx" KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md; git diff --check; git diff --cached --check; git diff --cached --stat; git diff --cached
+package_boundary: P0-05F.1C.1 documentation-only living ExecPlan reconciliation; no contract, owner decision, fixture, test, answer key, production code, runtime configuration, Current State, Implementation Baseline, dependency, push, deployment, database, cloud, credential, production, or real client data change
 ```
 
 ## P0-05F.2d0 detected permitted-type contradiction fixtures
