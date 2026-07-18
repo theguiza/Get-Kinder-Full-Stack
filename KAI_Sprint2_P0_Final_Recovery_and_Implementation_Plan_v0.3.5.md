@@ -895,6 +895,7 @@ verification_status: TOOL_VERIFIED after documented checks pass
 evidence_class: TOOL_VERIFIED
 owner_directed_leaf_scope: USER_CONFIRMED
 owner_authority: OWNER_DECISION.P0_05F.TYPE_AGREEMENT_MATRIX_V1
+additional_owner_authority_recorded_later: OWNER_DECISION.P0_05F.DETECTED_PERMITTED_TYPE_CONTRADICTION_V1
 decision_scope: deterministic P0 gate for terminal extension, declared file MIME, shallow byte signature, minimum structural-type identity, and agreement between those signals
 broader_file_security_assessment_completed: false
 starting_branch: codex/kai-sprint2-p0-v0.3.5
@@ -974,6 +975,8 @@ Until that package is completed:
 
 Block conditions include unsupported extension, unsupported MIME, extension/MIME disagreement, detected signature identifying another type, minimum structure contradicting declared type, ambiguous bytes where deterministic type cannot be established, bytes truncated below the required minimum, and no permitted type being deterministically established. Do not trust declared MIME over bytes, trust extension over bytes, rewrite declarations from detected bytes, guess likely type, apply fallback MIME detection, accept because one signal matches, or repair inconsistent metadata automatically.
 
+Later owner authority `OWNER_DECISION.P0_05F.DETECTED_PERMITTED_TYPE_CONTRADICTION_V1` expands `declared_type_mismatch` category semantics for detected permitted-type contradictions. When terminal extension and declared file MIME jointly identify one permitted P0 type, but byte signature and the required minimum structure deterministically establish a different permitted P0 type, the file blocks as `block / declared_type_mismatch`.
+
 A pass establishes only `type_agreement_pass_only`. It does not establish document validity, document usability, machine-readable PDF status, encryption or password status, macro safety, active-content safety, archive-expansion safety, malware cleanliness, profile eligibility, source eligibility, upload acceptance, or complete file-policy pass.
 
 Text-family rule: CSV, MD, and TXT have no unique reliable magic signature for this P0 gate. Extension and declared MIME select the permitted text subtype; bytes must pass strict UTF-8 and deterministic binary-content validation; no semantic parsing distinguishes CSV, MD, or TXT; content meaning is not inspected; and instruction-like content remains inert data. CSV uses the committed strict UTF-8, BOM, NUL, prohibited-control, and lone-CR boundary already established for P0 text bytes. This does not decide CSV row limits, delimiter validity, header validity, formula handling, or parser behavior. Valid permitted text containing HTML, JavaScript, shell syntax, prompt injection, or other instruction-like strings is not reclassified as HTML or script content merely because those strings occur in the text. Empty CSV, MD, or TXT bytes may pass only when extension and MIME agree and the strict text-byte gate passes; the result remains `type_agreement_pass_only`.
@@ -997,6 +1000,7 @@ Deterministic block outcomes:
 ```text
 unsupported extension or MIME -> block / unsupported_file_type
 extension and MIME disagreement -> block / declared_type_mismatch
+extension and MIME agree on one permitted type but complete byte identity establishes another permitted type -> block / declared_type_mismatch
 recognized disallowed signature -> block / disallowed_binary_signature
 ZIP without minimum XLSX structure -> block / standalone_archive_or_non_xlsx
 PDF or XLSX signature present but minimum identity incomplete -> block / truncated_or_malformed_type
@@ -1447,6 +1451,116 @@ deployed_kai_schema_compatibility: NOT_CONFIRMED
 live_upload_readiness: NOT_CONFIRMED
 production_readiness: NOT_CONFIRMED
 real_client_data_readiness: NOT_CONFIRMED
+```
+
+## P0-05F.1B detected permitted type contradicts declared metadata
+
+```text
+leaf_status: complete after this documentation-only owner-decision package commit
+p0_05_package_status: detected_permitted_type_contradiction_category_recorded
+implementation_status: documentation_only
+verification_status: TOOL_VERIFIED after documented checks pass
+evidence_class: TOOL_VERIFIED
+owner_directed_leaf_scope: USER_CONFIRMED
+owner_authority: OWNER_DECISION.P0_05F.DETECTED_PERMITTED_TYPE_CONTRADICTION_V1
+applicable_repository_instructions: root AGENTS.md only; changes remain inside the approved P0-05F.1B documentation-only owner-decision boundary
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 259fe75548e990c28e573a65cd05ea470de51e9b
+starting_tree: clean
+preflight_owner_authorities_present: OWNER_DECISION.P0_05F.TYPE_AGREEMENT_MATRIX_V1 and OWNER_DECISION.P0_05F.XLSX_CENTRAL_DIRECTORY_BOUNDARY_V1
+preflight_deterministic_outcome_table_present: true
+preflight_completed_p0_05f_2a_xlsx_zip_corpus_present: true
+preflight_completed_p0_05f_2c_pdf_shallow_identity_corpus_present: true
+preflight_cross_type_contradiction_deferral_present: positive PDF bytes plus otherwise permitted non-PDF extension/MIME remained deferred before this package
+preflight_equivalent_general_category_mapping_already_committed: false
+production_code_changed: false
+tests_fixtures_detectors_changed: false
+runtime_behavior_changed: false
+runtime_mime_allowlist_changed: false
+dependencies_manifests_lockfiles_changed: false
+database_cloud_credentials_production_real_data: not accessed or modified
+current_state_update: not performed
+implementation_baseline_update: not performed
+```
+
+`OWNER_DECISION.P0_05F.DETECTED_PERMITTED_TYPE_CONTRADICTION_V1` records that when terminal extension and declared file MIME jointly identify one permitted P0 type, but byte signature and the required minimum structure deterministically establish a different permitted P0 type, the file blocks as `block / declared_type_mismatch`.
+
+This rule applies symmetrically to every naturally reachable permitted-type contradiction. It is not a PDF-specific exception.
+
+`declared_type_mismatch` covers both:
+
+```text
+1. terminal extension and declared MIME disagree with each other; and
+
+2. terminal extension and declared MIME agree on one permitted type, but
+   deterministic byte signature and required minimum structure establish a
+   different permitted type.
+```
+
+The jointly declared metadata type does not become authoritative merely because its extension and MIME agree with each other. No signal wins, rewrites, repairs, or reclassifies another signal. The file blocks rather than rewriting the extension, rewriting the declared MIME, reclassifying the file, selecting a fallback type, or accepting because one signal pair agrees.
+
+Non-executable examples:
+
+```text
+PDF contradiction
+extension: .txt
+declared MIME: text/plain
+bytes: complete positive PDF shallow identity
+  - %PDF- at offset zero
+  - %%EOF within the final 1024 bytes
+result: block / declared_type_mismatch
+
+XLSX contradiction
+extension: .txt
+declared MIME: text/plain
+bytes: complete positive XLSX shallow identity
+  - ZIP local-file-header signature
+  - readable EOCD and central directory
+  - exact required OOXML entries
+result: block / declared_type_mismatch
+```
+
+Category exclusions:
+
+```text
+unsupported_file_type:
+the extension and declared MIME are individually permitted.
+
+truncated_or_malformed_type:
+the detected permitted type satisfies its complete committed shallow identity.
+
+disallowed_binary_signature:
+the detected type is a permitted P0 type, not MZ, ELF, standalone ZIP, RAR,
+7z, gzip, or another recognized disallowed signature.
+
+standalone_archive_or_non_xlsx:
+complete XLSX shallow identity is established when the detected type is XLSX.
+
+ambiguous_file_type:
+one different permitted byte-established type is deterministically identified;
+multiple permitted types do not remain plausible.
+
+unknown_binary:
+the bytes are deterministically identified as a permitted PDF or XLSX type.
+```
+
+Boundary with disallowed signatures: a recognized disallowed signature continues to block as `disallowed_binary_signature` regardless of permitted extension or declared MIME. `declared_type_mismatch` is not broadened to absorb MZ, ELF, standalone ZIP, RAR 4, RAR 5, 7z, gzip, or unknown binary cases. This decision applies only where the byte-established type is itself a permitted P0 type and its complete committed shallow identity is satisfied.
+
+Text-family boundary: CSV, MD, and TXT have no unique reliable byte signature under the committed P0-05F gate. This package does not invent byte-level cross-type distinction among CSV, MD, and TXT. Their permitted subtype remains selected through the committed extension/MIME matrix plus strict text-byte validation.
+
+```text
+tests_run: not run; no existing directly affected static verifier was identified that validates this new authority text
+git_diff_check: passed after edit
+git_diff_cached_check: passed after staging
+git_diff_cached_stat: inspected after staging
+git_diff_cached: inspected before commit
+complete_diff_scope: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md and this living ExecPlan only
+package_commit: report after commit; a commit cannot contain its own SHA
+deployed_kai_schema_compatibility: NOT_CONFIRMED
+live_upload_readiness: NOT_CONFIRMED
+production_readiness: NOT_CONFIRMED
+real_client_data_readiness: NOT_CONFIRMED
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this single P0-05F.1B documentation-only package commit; do not implement fixtures, tests, detectors, runtime MIME allowlist changes, routes, storage or upload behavior, manifests, lockfiles, Current State, Implementation Baseline, database/cloud/production behavior, push, deployment, or another leaf
 ```
 
 ## Prompt-injection boundary

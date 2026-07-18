@@ -184,6 +184,7 @@ owner_authority: OWNER_DECISION.P0_05F.TYPE_AGREEMENT_MATRIX_V1
 owner_decisions:
 OWNER_DECISION.P0_05F.TYPE_AGREEMENT_MATRIX_V1
 OWNER_DECISION.P0_05F.XLSX_CENTRAL_DIRECTORY_BOUNDARY_V1
+OWNER_DECISION.P0_05F.DETECTED_PERMITTED_TYPE_CONTRADICTION_V1
 decision_scope: deterministic P0 gate for terminal extension, declared file MIME, shallow byte signature, minimum structural-type identity, and agreement between those signals
 broader_file_security_assessment_completed: false
 runtime_behavior_changed_by_this_decision: false
@@ -236,6 +237,33 @@ Block when the extension is unsupported; the MIME is unsupported; extension and 
 
 Do not trust declared MIME over bytes, trust extension over bytes, rewrite the declaration from detected bytes, guess a likely type, apply fallback MIME detection, accept because one signal matches, or repair inconsistent metadata automatically.
 
+`OWNER_DECISION.P0_05F.DETECTED_PERMITTED_TYPE_CONTRADICTION_V1` records that when terminal extension and declared file MIME jointly identify one permitted P0 type, but byte signature and the required minimum structure deterministically establish a different permitted P0 type, the file blocks as `block / declared_type_mismatch`.
+
+This rule applies symmetrically to every naturally reachable permitted-type contradiction. It is not a PDF-specific exception. `declared_type_mismatch` covers both: terminal extension and declared MIME disagree with each other; and terminal extension and declared MIME agree on one permitted type, but deterministic byte signature and required minimum structure establish a different permitted type. The jointly declared metadata type does not become authoritative merely because its extension and MIME agree with each other. No signal wins, rewrites, repairs, or reclassifies another signal. The file blocks rather than rewriting the extension, rewriting the declared MIME, reclassifying the file, selecting a fallback type, or accepting because one signal pair agrees.
+
+Non-executable category examples:
+
+```text
+PDF contradiction
+extension: .txt
+declared MIME: text/plain
+bytes: complete positive PDF shallow identity
+  - %PDF- at offset zero
+  - %%EOF within the final 1024 bytes
+result: block / declared_type_mismatch
+
+XLSX contradiction
+extension: .txt
+declared MIME: text/plain
+bytes: complete positive XLSX shallow identity
+  - ZIP local-file-header signature
+  - readable EOCD and central directory
+  - exact required OOXML entries
+result: block / declared_type_mismatch
+```
+
+This detected permitted-type contradiction case is not `unsupported_file_type`, because the extension and declared MIME are individually permitted; not `truncated_or_malformed_type`, because the detected permitted type satisfies its complete committed shallow identity; not `disallowed_binary_signature`, because the detected type is a permitted P0 type, not MZ, ELF, standalone ZIP, RAR 4, RAR 5, 7z, gzip, or another recognized disallowed signature; not `standalone_archive_or_non_xlsx`, because complete XLSX shallow identity is established when the detected type is XLSX; not `ambiguous_file_type`, because one different permitted byte-established type is deterministically identified and multiple permitted types do not remain plausible; and not `unknown_binary`, because the bytes are deterministically identified as a permitted PDF or XLSX type.
+
 A pass establishes only:
 
 ```text
@@ -244,7 +272,7 @@ type_agreement_pass_only
 
 It does not establish document validity, document usability, machine-readable PDF status, encryption or password status, macro safety, active-content safety, archive-expansion safety, malware cleanliness, profile eligibility, source eligibility, upload acceptance, or complete file-policy pass.
 
-CSV, MD, and TXT have no unique reliable magic signature for this P0 gate. For those types, extension and declared MIME select the permitted text subtype; bytes must pass strict UTF-8 and deterministic binary-content validation; no semantic parsing distinguishes CSV, MD, or TXT; content meaning is not inspected; and instruction-like content remains inert data. CSV uses the committed strict UTF-8, BOM, NUL, prohibited-control, and lone-CR boundary already established for P0 text bytes. This does not decide CSV row limits, CSV delimiter validity, CSV header validity, CSV formula handling, or CSV parser behavior. Valid permitted text containing HTML, JavaScript, shell syntax, prompt injection, or other instruction-like strings is not reclassified as HTML or script content merely because those strings occur in the text. HTML and script uploads are blocked through unsupported extension/MIME and recognized disallowed binary identity, not through heuristic scanning of valid permitted text. Empty CSV, MD, or TXT bytes may pass this gate only when extension and MIME agree and the strict text-byte gate passes; the result remains `type_agreement_pass_only`.
+CSV, MD, and TXT have no unique reliable magic signature for this P0 gate. For those types, extension and declared MIME select the permitted text subtype; bytes must pass strict UTF-8 and deterministic binary-content validation; no semantic parsing distinguishes CSV, MD, or TXT; content meaning is not inspected; and instruction-like content remains inert data. Do not invent byte-level cross-type distinction among CSV, MD, and TXT. CSV uses the committed strict UTF-8, BOM, NUL, prohibited-control, and lone-CR boundary already established for P0 text bytes. This does not decide CSV row limits, CSV delimiter validity, CSV header validity, CSV formula handling, or CSV parser behavior. Valid permitted text containing HTML, JavaScript, shell syntax, prompt injection, or other instruction-like strings is not reclassified as HTML or script content merely because those strings occur in the text. HTML and script uploads are blocked through unsupported extension/MIME and recognized disallowed binary identity, not through heuristic scanning of valid permitted text. Empty CSV, MD, or TXT bytes may pass this gate only when extension and MIME agree and the strict text-byte gate passes; the result remains `type_agreement_pass_only`.
 
 A candidate PDF must use extension `.pdf`, declare `application/pdf`, begin at byte offset zero with ASCII `%PDF-`, and contain ASCII `%%EOF` within the final 1024 bytes. Leading bytes before `%PDF-` are not accepted. The PDF shallow identity rule does not establish machine-readable text layer, unencrypted status, password-free status, valid cross-reference structure, absence of JavaScript, absence of active actions, absence of embedded files, or complete PDF validity.
 
@@ -262,13 +290,14 @@ Generic and standalone ZIP coverage must remain separate for readable arbitrary 
 
 Fixture packages are graded against frozen owner authority. Fixture packages must never modify this contract. When a fixture package discovers a contract gap, execution must stop for an owner decision. Contract and fixture changes must not be combined in one implementation commit.
 
-The future corpus must include deterministic block cases for at least DOS/PE MZ, ELF, standalone ZIP, RAR 4, RAR 5, 7z, and gzip. A recognized disallowed signature blocks regardless of an allowed extension or declared MIME. A non-text byte stream that does not satisfy the permitted PDF or XLSX shallow identity rule blocks as `unknown_binary`. This list does not mean every executable or archive format is individually identified; unknown binary input remains fail-closed.
+The future corpus must include deterministic block cases for at least DOS/PE MZ, ELF, standalone ZIP, RAR 4, RAR 5, 7z, and gzip. A recognized disallowed signature blocks as `disallowed_binary_signature` regardless of an allowed extension or declared MIME. `declared_type_mismatch` must not absorb MZ, ELF, standalone ZIP, RAR 4, RAR 5, 7z, gzip, or unknown binary cases. The detected permitted-type contradiction decision applies only where the byte-established type is itself a permitted P0 type and its complete committed shallow identity is satisfied. A non-text byte stream that does not satisfy the permitted PDF or XLSX shallow identity rule blocks as `unknown_binary`. This list does not mean every executable or archive format is individually identified; unknown binary input remains fail-closed.
 
 Deterministic block outcomes:
 
 ```text
 unsupported extension or MIME -> block / unsupported_file_type
 extension and MIME disagreement -> block / declared_type_mismatch
+extension and MIME agree on one permitted type but complete byte identity establishes another permitted type -> block / declared_type_mismatch
 recognized disallowed signature -> block / disallowed_binary_signature
 ZIP without minimum XLSX structure -> block / standalone_archive_or_non_xlsx
 PDF or XLSX signature present but minimum identity incomplete -> block / truncated_or_malformed_type
