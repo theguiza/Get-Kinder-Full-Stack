@@ -186,6 +186,7 @@ OWNER_DECISION.P0_05F.TYPE_AGREEMENT_MATRIX_V1
 OWNER_DECISION.P0_05F.XLSX_CENTRAL_DIRECTORY_BOUNDARY_V1
 OWNER_DECISION.P0_05F.DETECTED_PERMITTED_TYPE_CONTRADICTION_V1
 OWNER_DECISION.P0_05F.ZIP_CLASSIFICATION_BOUNDARY_V1
+OWNER_DECISION.P0_05F.PDF_INCOMPLETE_SHALLOW_IDENTITY_CATEGORY
 decision_scope: deterministic P0 gate for terminal extension, declared file MIME, shallow byte signature, minimum structural-type identity, and agreement between those signals
 broader_file_security_assessment_completed: false
 runtime_behavior_changed_by_this_decision: false
@@ -275,7 +276,35 @@ It does not establish document validity, document usability, machine-readable PD
 
 CSV, MD, and TXT have no unique reliable magic signature for this P0 gate. For those types, extension and declared MIME select the permitted text subtype; bytes must pass strict UTF-8 and deterministic binary-content validation; no semantic parsing distinguishes CSV, MD, or TXT; content meaning is not inspected; and instruction-like content remains inert data. Do not invent byte-level cross-type distinction among CSV, MD, and TXT. CSV uses the committed strict UTF-8, BOM, NUL, prohibited-control, and lone-CR boundary already established for P0 text bytes. This does not decide CSV row limits, CSV delimiter validity, CSV header validity, CSV formula handling, or CSV parser behavior. Valid permitted text containing HTML, JavaScript, shell syntax, prompt injection, or other instruction-like strings is not reclassified as HTML or script content merely because those strings occur in the text. HTML and script uploads are blocked through unsupported extension/MIME and recognized disallowed binary identity, not through heuristic scanning of valid permitted text. Empty CSV, MD, or TXT bytes may pass this gate only when extension and MIME agree and the strict text-byte gate passes; the result remains `type_agreement_pass_only`.
 
-A candidate PDF must use extension `.pdf`, declare `application/pdf`, begin at byte offset zero with ASCII `%PDF-`, and contain ASCII `%%EOF` within the final 1024 bytes. Leading bytes before `%PDF-` are not accepted. The PDF shallow identity rule does not establish machine-readable text layer, unencrypted status, password-free status, valid cross-reference structure, absence of JavaScript, absence of active actions, absence of embedded files, or complete PDF validity.
+A candidate PDF must use extension `.pdf`, declare `application/pdf`, begin at byte offset zero with ASCII `%PDF-`, and contain ASCII `%%EOF` within the final 1024 bytes. Complete PDF shallow identity returns `allow / type_agreement_pass / type_agreement_pass_only` when the extension and declared MIME also agree as `.pdf` plus `application/pdf`. Leading bytes before `%PDF-` are not accepted. The PDF shallow identity rule does not establish machine-readable text layer, unencrypted status, password-free status, valid cross-reference structure, absence of JavaScript, absence of active actions, absence of embedded files, or complete PDF validity.
+
+`OWNER_DECISION.P0_05F.PDF_INCOMPLETE_SHALLOW_IDENTITY_CATEGORY` records the owner-authorized deterministic result for narrowly defined incomplete PDF signalling:
+
+```text
+policy: block
+category: truncated_or_malformed_type
+scope: pdf_shallow_identity_block_only
+```
+
+This decision applies only to narrowly established PDF-signalling bytes that fail the committed minimum PDF shallow-identity rule. Complete PDF shallow identity is evaluated first; a complete PDF shallow identity returns `allow / type_agreement_pass`. Only PDF-signalling bytes that fail the complete shallow-identity rule are classified as `truncated_or_malformed_type`. Only bytes that establish neither complete PDF identity nor the narrowly defined incomplete PDF signalling may proceed to other applicable deterministic rows or the residual `unknown_binary` fallback. A valid PDF must never be swept into `truncated_or_malformed_type`, and the incomplete-PDF row is evaluated before the residual `unknown_binary` fallback.
+
+For this decision, incomplete PDF signalling exists only when extension is `.pdf`, declared MIME is `application/pdf`, and one of the following byte conditions is established:
+
+```text
+A. ASCII %PDF- exists but begins after byte offset zero.
+
+B. The byte stream begins at byte offset zero with the exact four ASCII bytes
+   %PDF
+   represented as:
+   25 50 44 46
+   but does not contain the required following ASCII hyphen byte 2D at that position.
+
+C. ASCII %PDF- begins at byte offset zero, but ASCII %%EOF is absent.
+
+D. ASCII %PDF- begins at byte offset zero and ASCII %%EOF exists, but no %%EOF occurrence is within the final 1024 bytes.
+```
+
+Condition B must not be generalized to `%P`, `%PD`, arbitrary percent-prefixed bytes, arbitrary bytes described as PDF-like, arbitrary bytes merely named `.pdf`, or arbitrary bytes merely declaring `application/pdf`. These four incomplete PDF signal families block as `truncated_or_malformed_type` and do not fall through to `unknown_binary`.
 
 A candidate XLSX must use extension `.xlsx`, declare `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`, begin with a ZIP local-file-header signature, expose a structurally readable end-of-central-directory record, expose a structurally readable central directory, and contain exact case-sensitive central-directory entry names `[Content_Types].xml`, `_rels/.rels`, and `xl/workbook.xml`. A generic ZIP prefix is insufficient, and finding a required name somewhere in raw bytes is not proof that it is a valid central-directory entry.
 
@@ -295,7 +324,7 @@ Readable non-XLSX ZIP coverage has two distinct classes: readable ZIP with `.xls
 
 Fixture packages are graded against frozen owner authority. Fixture packages must never modify this contract. When a fixture package discovers a contract gap, execution must stop for an owner decision. Contract and fixture changes must not be combined in one implementation commit.
 
-The future corpus must include deterministic block cases for at least DOS/PE MZ, ELF, RAR 4, RAR 5, 7z, gzip, structurally readable ZIP without complete XLSX identity, and malformed or truncated ZIP/XLSX-signalling bytes. The recognized disallowed-signature set is exactly DOS/PE MZ, ELF, RAR 4, RAR 5, 7z, and gzip. Each recognized disallowed signature blocks as `disallowed_binary_signature` regardless of an allowed extension or declared MIME. `declared_type_mismatch` must not absorb MZ, ELF, RAR 4, RAR 5, 7z, gzip, readable non-XLSX ZIP, malformed or truncated ZIP/XLSX-signalling bytes, or unknown binary cases. The detected permitted-type contradiction decision applies only where the byte-established type is itself a permitted P0 type and its complete committed shallow identity is satisfied. Structurally readable ZIP without complete XLSX identity must not be described as `disallowed_binary_signature`. Malformed or truncated ZIP/XLSX-signalling bytes remain separate and block as `truncated_or_malformed_type`, including truncated local-file-header signature, local header without readable central directory, invalid or out-of-bounds central-directory offset, and truncated central-directory record. Unsupported extension or declared MIME remains `unsupported_file_type`; this ZIP classification decision does not determine mixed cases where unsupported metadata and ZIP bytes coexist. A non-text byte stream matching no permitted binary type, no readable ZIP/non-XLSX archive classification, and no recognized disallowed signature blocks as `unknown_binary`. This list does not mean every executable or archive format is individually identified; unknown binary input remains fail-closed.
+The future corpus must include deterministic block cases for at least DOS/PE MZ, ELF, RAR 4, RAR 5, 7z, gzip, structurally readable ZIP without complete XLSX identity, malformed or truncated ZIP/XLSX-signalling bytes, and narrowly defined incomplete PDF-signalling bytes. The recognized disallowed-signature set is exactly DOS/PE MZ, ELF, RAR 4, RAR 5, 7z, and gzip. Each recognized disallowed signature blocks as `disallowed_binary_signature` regardless of an allowed extension or declared MIME. `declared_type_mismatch` must not absorb MZ, ELF, RAR 4, RAR 5, 7z, gzip, readable non-XLSX ZIP, malformed or truncated ZIP/XLSX-signalling bytes, narrowly defined incomplete PDF-signalling bytes, or unknown binary cases. The detected permitted-type contradiction decision applies only where the byte-established type is itself a permitted P0 type and its complete committed shallow identity is satisfied. Structurally readable ZIP without complete XLSX identity must not be described as `disallowed_binary_signature`. Malformed or truncated ZIP/XLSX-signalling bytes remain separate and block as `truncated_or_malformed_type`, including truncated local-file-header signature, local header without readable central directory, invalid or out-of-bounds central-directory offset, and truncated central-directory record. Narrowly defined incomplete PDF-signalling bytes also remain separate and block as `truncated_or_malformed_type`. Unsupported extension or declared MIME remains `unsupported_file_type`; this ZIP classification decision does not determine mixed cases where unsupported metadata and ZIP bytes coexist. A non-text byte stream matching no complete permitted identity, no recognized disallowed signature, no readable ZIP classification, no malformed or truncated ZIP/XLSX signalling, and no narrowly defined complete or incomplete PDF signalling blocks as `unknown_binary`. This list does not mean every executable or archive format is individually identified; unknown binary input remains fail-closed.
 
 Deterministic block outcomes:
 
@@ -306,8 +335,9 @@ extension and MIME agree on one permitted type but complete byte identity establ
 recognized MZ, ELF, RAR 4, RAR 5, 7z, or gzip signature -> block / disallowed_binary_signature
 structurally readable ZIP without complete XLSX identity -> block / standalone_archive_or_non_xlsx
 malformed or truncated ZIP/XLSX-signalling bytes -> block / truncated_or_malformed_type
+narrowly defined incomplete PDF-signalling bytes after complete PDF identity has failed -> block / truncated_or_malformed_type
 multiple permitted types genuinely remain plausible after applying all committed signals -> block / ambiguous_file_type
-non-text bytes matching no permitted binary type, no readable ZIP/non-XLSX archive classification, and no recognized disallowed signature -> block / unknown_binary
+non-text bytes matching no complete permitted identity, no recognized disallowed signature, no readable ZIP/non-XLSX archive classification, no malformed or truncated ZIP/XLSX signalling, and no narrowly defined complete or incomplete PDF signalling -> block / unknown_binary
 ```
 
 No ambiguous, malformed, truncated, or unknown input is permitted. `ambiguous_file_type` is a defensive fail-closed category. The future fixture corpus must not invent a contrived or semantically impossible byte case solely to exercise it; include an `ambiguous_file_type` fixture only if a naturally reachable case exists under the committed matrix, otherwise record the category as defensive and currently unexercised. Do not weaken or alter another fixture merely to manufacture ambiguity, and do not treat absence of an ambiguity fixture as incomplete coverage when the category is unreachable by construction.

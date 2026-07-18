@@ -896,6 +896,7 @@ evidence_class: TOOL_VERIFIED
 owner_directed_leaf_scope: USER_CONFIRMED
 owner_authority: OWNER_DECISION.P0_05F.TYPE_AGREEMENT_MATRIX_V1
 additional_owner_authority_recorded_later: OWNER_DECISION.P0_05F.DETECTED_PERMITTED_TYPE_CONTRADICTION_V1
+pdf_incomplete_owner_authority_recorded_later: OWNER_DECISION.P0_05F.PDF_INCOMPLETE_SHALLOW_IDENTITY_CATEGORY
 decision_scope: deterministic P0 gate for terminal extension, declared file MIME, shallow byte signature, minimum structural-type identity, and agreement between those signals
 broader_file_security_assessment_completed: false
 starting_branch: codex/kai-sprint2-p0-v0.3.5
@@ -981,7 +982,9 @@ A pass establishes only `type_agreement_pass_only`. It does not establish docume
 
 Text-family rule: CSV, MD, and TXT have no unique reliable magic signature for this P0 gate. Extension and declared MIME select the permitted text subtype; bytes must pass strict UTF-8 and deterministic binary-content validation; no semantic parsing distinguishes CSV, MD, or TXT; content meaning is not inspected; and instruction-like content remains inert data. CSV uses the committed strict UTF-8, BOM, NUL, prohibited-control, and lone-CR boundary already established for P0 text bytes. This does not decide CSV row limits, delimiter validity, header validity, formula handling, or parser behavior. Valid permitted text containing HTML, JavaScript, shell syntax, prompt injection, or other instruction-like strings is not reclassified as HTML or script content merely because those strings occur in the text. Empty CSV, MD, or TXT bytes may pass only when extension and MIME agree and the strict text-byte gate passes; the result remains `type_agreement_pass_only`.
 
-PDF shallow identity rule: a candidate PDF must use extension `.pdf`, declare `application/pdf`, begin at byte offset zero with ASCII `%PDF-`, and contain ASCII `%%EOF` within the final 1024 bytes. Leading bytes before `%PDF-` are not accepted. This does not establish machine-readable text layer, unencrypted status, password-free status, valid cross-reference structure, absence of JavaScript, absence of active actions, absence of embedded files, or complete PDF validity.
+PDF shallow identity rule: a candidate PDF must use extension `.pdf`, declare `application/pdf`, begin at byte offset zero with ASCII `%PDF-`, and contain ASCII `%%EOF` within the final 1024 bytes. Complete PDF shallow identity remains the positive allow path and returns `allow / type_agreement_pass / type_agreement_pass_only`. Leading bytes before `%PDF-` are not accepted. This does not establish machine-readable text layer, unencrypted status, password-free status, valid cross-reference structure, absence of JavaScript, absence of active actions, absence of embedded files, or complete PDF validity.
+
+Later owner authority `OWNER_DECISION.P0_05F.PDF_INCOMPLETE_SHALLOW_IDENTITY_CATEGORY` records that narrowly defined incomplete PDF signalling blocks as `block / truncated_or_malformed_type / pdf_shallow_identity_block_only`. Complete PDF shallow identity is evaluated before incomplete PDF classification. Incomplete PDF classification is evaluated before `unknown_binary`. The narrow incomplete PDF signal exists only when extension is `.pdf`, declared MIME is `application/pdf`, and one of these byte conditions is established: ASCII `%PDF-` exists but begins after byte offset zero; the byte stream begins at byte offset zero with exact bytes `25 50 44 46` for `%PDF` but lacks following hyphen byte `2D` at that position; ASCII `%PDF-` begins at byte offset zero but ASCII `%%EOF` is absent; or ASCII `%PDF-` begins at byte offset zero and ASCII `%%EOF` exists, but no `%%EOF` occurrence is within the final 1024 bytes. The exact four-byte `%PDF` prefix condition must not be generalized to `%P`, `%PD`, arbitrary percent-prefixed bytes, arbitrary PDF-like bytes, or bytes merely named `.pdf` or declaring `application/pdf`.
 
 XLSX shallow identity rule: a candidate XLSX must use extension `.xlsx`, declare `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`, begin with a ZIP local-file-header signature, expose a structurally readable end-of-central-directory record, expose a structurally readable central directory, and contain exact case-sensitive central-directory entry names `[Content_Types].xml`, `_rels/.rels`, and `xl/workbook.xml`. A generic ZIP prefix is insufficient, and finding a required name somewhere in raw bytes is not proof that it is a valid central-directory entry.
 
@@ -993,7 +996,7 @@ The positive minimum XLSX fixture must be a readable ZIP whose central-directory
 
 Readable non-XLSX ZIP coverage has two distinct classes: readable ZIP with `.xlsx` metadata but missing complete XLSX identity, and readable ZIP with otherwise permitted non-XLSX metadata and missing complete XLSX identity. The previously separated Case A, readable arbitrary ZIP with permitted non-XLSX metadata, and Case C, recognized standalone-ZIP signature with permitted non-XLSX metadata, are not distinct deterministic cases under the committed P0 signal model. A structurally readable ZIP necessarily carries the recognized ZIP signature. When complete XLSX identity is absent and otherwise permitted non-XLSX metadata is used, both expose the same relevant signals and block as `standalone_archive_or_non_xlsx`. Do not manufacture a distinction using fixture names, descriptions, byte length, arbitrary archive entry names, or the term "signature" in a fixture ID. Only one canonical permitted-non-XLSX readable-ZIP semantic fixture is required. This rule does not establish macro absence, external-relationship absence, encryption/password status, OOXML path safety, sheet limits, cell limits, entry-count limits, expanded-size limits, compression-ratio safety, or complete workbook validity.
 
-Recognized disallowed binary signatures for the future corpus are exactly DOS/PE MZ, ELF, RAR 4, RAR 5, 7z, and gzip. A recognized disallowed signature blocks as `disallowed_binary_signature` regardless of allowed extension or declared MIME. Structurally readable ZIP without complete XLSX identity blocks as `standalone_archive_or_non_xlsx`, not `disallowed_binary_signature`. Malformed or truncated ZIP/XLSX-signalling bytes block as `truncated_or_malformed_type`. Unknown non-text binary input that does not satisfy permitted PDF or XLSX shallow identity, readable ZIP/non-XLSX archive classification, or a recognized disallowed signature remains fail-closed as `unknown_binary`.
+Recognized disallowed binary signatures for the future corpus are exactly DOS/PE MZ, ELF, RAR 4, RAR 5, 7z, and gzip. A recognized disallowed signature blocks as `disallowed_binary_signature` regardless of allowed extension or declared MIME. Structurally readable ZIP without complete XLSX identity blocks as `standalone_archive_or_non_xlsx`, not `disallowed_binary_signature`. Malformed or truncated ZIP/XLSX-signalling bytes block as `truncated_or_malformed_type`. Narrowly defined incomplete PDF-signalling bytes block as `truncated_or_malformed_type` after complete PDF identity has failed. Unknown non-text binary input that does not establish a complete permitted identity, recognized disallowed signature, readable ZIP classification, malformed or truncated ZIP/XLSX signalling, or the narrowly defined complete or incomplete PDF signalling remains fail-closed as `unknown_binary`.
 
 Deterministic block outcomes:
 
@@ -1004,8 +1007,9 @@ extension and MIME agree on one permitted type but complete byte identity establ
 recognized MZ, ELF, RAR 4, RAR 5, 7z, or gzip signature -> block / disallowed_binary_signature
 structurally readable ZIP without complete XLSX identity -> block / standalone_archive_or_non_xlsx
 malformed or truncated ZIP/XLSX-signalling bytes -> block / truncated_or_malformed_type
+narrowly defined incomplete PDF-signalling bytes after complete PDF identity has failed -> block / truncated_or_malformed_type
 multiple permitted types genuinely remain plausible after applying all committed signals -> block / ambiguous_file_type
-non-text bytes matching no permitted binary type, no readable ZIP/non-XLSX archive classification, and no recognized disallowed signature -> block / unknown_binary
+non-text bytes matching no complete permitted identity, no recognized disallowed signature, no readable ZIP/non-XLSX archive classification, no malformed or truncated ZIP/XLSX signalling, and no narrowly defined complete or incomplete PDF signalling -> block / unknown_binary
 ```
 
 `ambiguous_file_type` is a defensive fail-closed category. The future fixture corpus must not invent a contrived or semantically impossible byte case solely to exercise it. Include an `ambiguous_file_type` fixture only if a naturally reachable case exists under the committed matrix; otherwise record the category as defensive and currently unexercised. Do not weaken or alter another fixture merely to manufacture ambiguity, and do not treat absence of an ambiguity fixture as incomplete coverage when the category is unreachable by construction.
@@ -1451,6 +1455,64 @@ deployed_kai_schema_compatibility: NOT_CONFIRMED
 live_upload_readiness: NOT_CONFIRMED
 production_readiness: NOT_CONFIRMED
 real_client_data_readiness: NOT_CONFIRMED
+```
+
+## P0-05F.2c.1 PDF incomplete shallow-identity category authority
+
+```text
+leaf_status: complete after this documentation-only authority-correction package commit
+p0_05_package_status: pdf_incomplete_shallow_identity_category_authority_recorded
+implementation_status: documentation_only
+verification_status: TOOL_VERIFIED after documented checks pass
+evidence_class: TOOL_VERIFIED
+owner_directed_leaf_scope: USER_CONFIRMED
+audit_result: PDF_AUTHORITY_GAP_OR_CONFLICT_CONFIRMED
+audit_result_evidence_class: USER_CONFIRMED
+owner_authority: OWNER_DECISION.P0_05F.PDF_INCOMPLETE_SHALLOW_IDENTITY_CATEGORY
+applicable_repository_instructions: root AGENTS.md only; changes remain inside the approved P0-05F.2c.1 documentation-only authority-correction boundary
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 9488e533b814bb0597d2d8cdb6ef34b177282784
+starting_tree: clean tracked and untracked
+owner_authorized_policy: block
+owner_authorized_category: truncated_or_malformed_type
+owner_authorized_scope: pdf_shallow_identity_block_only
+owner_authorized_result_evidence_class: USER_CONFIRMED
+complete_pdf_shallow_identity_rule: extension .pdf; declared MIME application/pdf; ASCII %PDF- begins at byte offset zero; ASCII %%EOF occurs within the final 1024 bytes
+complete_pdf_identity_result: allow / type_agreement_pass / type_agreement_pass_only
+classification_precedence: complete PDF shallow identity is evaluated first; a complete PDF shallow identity returns allow / type_agreement_pass; only PDF-signalling bytes that fail the complete shallow-identity rule are classified as truncated_or_malformed_type; only bytes that establish neither complete PDF identity nor narrowly defined incomplete PDF signalling may proceed to other applicable deterministic rows or the residual unknown_binary fallback
+incomplete_pdf_row_position: after complete PDF shallow identity and before residual unknown_binary
+incomplete_pdf_signalling_definition: extension .pdf plus declared MIME application/pdf plus one of the four owner-authorized byte-condition families
+authorized_byte_condition_a: ASCII %PDF- exists but begins after byte offset zero
+authorized_byte_condition_b: byte stream begins at byte offset zero with exact four ASCII bytes %PDF represented by 25 50 44 46, but does not contain required following ASCII hyphen byte 2D at that position
+authorized_byte_condition_c: ASCII %PDF- begins at byte offset zero, but ASCII %%EOF is absent
+authorized_byte_condition_d: ASCII %PDF- begins at byte offset zero and ASCII %%EOF exists, but no %%EOF occurrence is within the final 1024 bytes
+condition_b_non_generalization: not %P, not %PD, not arbitrary percent-prefixed bytes, not arbitrary PDF-like bytes, not arbitrary bytes merely named .pdf, and not arbitrary bytes merely declaring application/pdf
+existing_five_fixture_pdf_corpus_unchanged: true
+existing_four_negative_fixture_expectations_grounded_by_current_contract_authority: true
+complete_pdf_shallow_identity_positive_allow_path_preserved: true
+no_production_detector_behavior_implemented: true
+tests_changed: false
+fixtures_changed: false
+production_code_changed: false
+runtime_behavior_changed: false
+repository_contract_changed: true
+execplan_changed: true
+dependencies_manifests_lockfiles_changed: false
+database_cloud_credentials_production_real_data: not accessed or modified
+current_state_update: not performed
+implementation_baseline_update: not performed
+p0_05f_2d1_started: false
+push_or_deployment: not performed
+tests_run: not run; documentation-only authority-correction package
+git_diff_check: passed after edit
+git_diff_cached_check: passed after staging
+complete_diff_scope: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md and this living ExecPlan only
+package_commit: report after commit; a commit cannot contain its own SHA
+deployed_kai_schema_compatibility: NOT_CONFIRMED
+live_upload_readiness: NOT_CONFIRMED
+production_readiness: NOT_CONFIRMED
+real_client_data_readiness: NOT_CONFIRMED
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this single P0-05F.2c.1 documentation-only authority-correction commit; do not implement detectors, modify fixtures, modify tests, run tests, begin P0-05F.2d1, change runtime behavior, touch Current State or Implementation Baseline, use database/cloud/production behavior, push, deploy, or begin another leaf
 ```
 
 ## P0-05F.1B detected permitted type contradicts declared metadata
