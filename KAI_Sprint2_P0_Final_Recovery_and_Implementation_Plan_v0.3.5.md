@@ -1374,6 +1374,81 @@ real_client_data_readiness: NOT_CONFIRMED
 next_package_or_stop_condition: OWNER-DIRECTED STOP after this single P0-05F.2b2b fixture-only package commit; do not implement detectors, runtime MIME allowlist changes, repository contract changes, owner-decision changes, PDF negative identity fixtures, disallowed-signature fixtures, unknown-binary fixtures, upload lifecycle work, storage retrieval, worker/parser behavior, P0-06 work, database/cloud/production behavior, push, deployment, or another leaf
 ```
 
+## P0-05F.2c PDF shallow-identity fixtures
+
+```text
+leaf_status: complete after this fixture-only package commit
+p0_05_package_status: pdf_shallow_identity_fixture_subcorpus_recorded
+implementation_status: fixture_and_test_only
+verification_status: TOOL_VERIFIED after documented checks pass
+evidence_class: TOOL_VERIFIED
+owner_directed_leaf_scope: USER_CONFIRMED
+owner_authority: OWNER_DECISION.P0_05F.TYPE_AGREEMENT_MATRIX_V1
+applicable_repository_instructions: root AGENTS.md only; changes remain inside the approved P0-05F.2c fixture-only boundary
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 93b22258ef87b16763e1092c50c6bc40004848c7
+starting_tree: clean
+preflight_owner_authority_present: OWNER_DECISION.P0_05F.TYPE_AGREEMENT_MATRIX_V1
+preflight_fixture_process_rules_present: fixture packages graded against frozen owner authority; fixture packages must never modify the contract; discovered contract gap requires stopping for owner decision; contract and fixture changes must not be combined in one implementation commit
+preflight_prior_p0_05f_2b2a_pdf_positive_source: __tests__/support/kaiSprint2ExtensionMimeMatrixFixtureCorpus.js source identifier EXTMIME-P0-05F-BYTES-PDF-POSITIVE
+preflight_prior_p0_05f_2b2b_completion: complete unsupported extension and declared-MIME rejection fixtures
+preflight_pdf_shallow_identity_corpus: absent before this package
+implemented_fixture_module: __tests__/support/kaiSprint2PdfShallowIdentityFixtureCorpus.js
+implemented_integrity_test_file: __tests__/kai-sprint2-pdf-shallow-identity-fixture-corpus.spec.js
+fixture_count: 5
+positive_fixture_count: 1
+malformed_truncated_fixture_count: 4
+new_fixture_ids: PDFIDENT-P0-05F-001-ALLOW-MINIMUM-PDF; PDFIDENT-P0-05F-002-BLOCK-LEADING-BYTE-BEFORE-HEADER; PDFIDENT-P0-05F-003-BLOCK-TRUNCATED-PDF-PREFIX; PDFIDENT-P0-05F-004-BLOCK-MISSING-EOF; PDFIDENT-P0-05F-005-BLOCK-EOF-OUTSIDE-FINAL-1024
+positive_fixture_id: PDFIDENT-P0-05F-001-ALLOW-MINIMUM-PDF
+malformed_truncated_fixture_ids: PDFIDENT-P0-05F-002-BLOCK-LEADING-BYTE-BEFORE-HEADER; PDFIDENT-P0-05F-003-BLOCK-TRUNCATED-PDF-PREFIX; PDFIDENT-P0-05F-004-BLOCK-MISSING-EOF; PDFIDENT-P0-05F-005-BLOCK-EOF-OUTSIDE-FINAL-1024
+positive_pdf_source_module: __tests__/support/kaiSprint2ExtensionMimeMatrixFixtureCorpus.js
+positive_pdf_source_identifier: EXTMIME-P0-05F-BYTES-PDF-POSITIVE
+positive_pdf_exact_export_property_used: EXTENSION_MIME_MATRIX_BYTE_SOURCES[".pdf"].bytes
+positive_pdf_object_identity_reuse_result: imported object reused unchanged by PDFIDENT-P0-05F-001-ALLOW-MINIMUM-PDF
+positive_pdf_bytes_import_confirmation: positive PDF bytes were imported directly from P0-05F.2b2a and were not copied, reconstructed, or regenerated
+pdf_header_offsets: PDFIDENT-P0-05F-001-ALLOW-MINIMUM-PDF -> 0; PDFIDENT-P0-05F-002-BLOCK-LEADING-BYTE-BEFORE-HEADER -> 1; PDFIDENT-P0-05F-003-BLOCK-TRUNCATED-PDF-PREFIX -> -1; PDFIDENT-P0-05F-004-BLOCK-MISSING-EOF -> 0; PDFIDENT-P0-05F-005-BLOCK-EOF-OUTSIDE-FINAL-1024 -> 0
+pdf_eof_offsets: PDFIDENT-P0-05F-001-ALLOW-MINIMUM-PDF -> [42]; PDFIDENT-P0-05F-002-BLOCK-LEADING-BYTE-BEFORE-HEADER -> [43]; PDFIDENT-P0-05F-003-BLOCK-TRUNCATED-PDF-PREFIX -> [41]; PDFIDENT-P0-05F-004-BLOCK-MISSING-EOF -> []; PDFIDENT-P0-05F-005-BLOCK-EOF-OUTSIDE-FINAL-1024 -> [42]
+pdf_eof_to_end_distances: PDFIDENT-P0-05F-001-ALLOW-MINIMUM-PDF -> [6]; PDFIDENT-P0-05F-002-BLOCK-LEADING-BYTE-BEFORE-HEADER -> [6]; PDFIDENT-P0-05F-003-BLOCK-TRUNCATED-PDF-PREFIX -> [6]; PDFIDENT-P0-05F-004-BLOCK-MISSING-EOF -> []; PDFIDENT-P0-05F-005-BLOCK-EOF-OUTSIDE-FINAL-1024 -> [1030]
+byte_lengths: PDFIDENT-P0-05F-001-ALLOW-MINIMUM-PDF -> 48; PDFIDENT-P0-05F-002-BLOCK-LEADING-BYTE-BEFORE-HEADER -> 49; PDFIDENT-P0-05F-003-BLOCK-TRUNCATED-PDF-PREFIX -> 47; PDFIDENT-P0-05F-004-BLOCK-MISSING-EOF -> 48; PDFIDENT-P0-05F-005-BLOCK-EOF-OUTSIDE-FINAL-1024 -> 1072
+negative_single_identity_condition_violations: PDFIDENT-P0-05F-002-BLOCK-LEADING-BYTE-BEFORE-HEADER violates only offset_zero_header; PDFIDENT-P0-05F-003-BLOCK-TRUNCATED-PDF-PREFIX violates only offset_zero_header; PDFIDENT-P0-05F-004-BLOCK-MISSING-EOF violates only eof_presence; PDFIDENT-P0-05F-005-BLOCK-EOF-OUTSIDE-FINAL-1024 violates only eof_final_1024_window
+expected_positive_result: allow / type_agreement_pass / type_agreement_pass_only
+expected_negative_result_all_four: block / truncated_or_malformed_type / pdf_shallow_identity_block_only
+existing_p0_05f_2b2a_pdf_wrong_mime_fixture_ids: .pdf + text/csv -> EXTMIME-P0-05F-019-BLOCK-PDF-TEXT-CSV-MISMATCH; .pdf + application/csv -> EXTMIME-P0-05F-020-BLOCK-PDF-APPLICATION-CSV-MISMATCH; .pdf + text/markdown -> EXTMIME-P0-05F-021-BLOCK-PDF-TEXT-MARKDOWN-MISMATCH; .pdf + text/plain -> EXTMIME-P0-05F-022-BLOCK-PDF-TEXT-PLAIN-MISMATCH; .pdf + application/vnd.openxmlformats-officedocument.spreadsheetml.sheet -> EXTMIME-P0-05F-023-BLOCK-PDF-XLSX-MIME-MISMATCH
+wrong_mime_coverage_status: existing P0-05F.2b2a coverage remains block / declared_type_mismatch; no duplicate P0-05F.2c wrong-MIME fixtures added
+cross_type_detected_permitted_type_contradiction_fixture_added: false
+cross_type_detected_permitted_type_contradiction_deferral: positive PDF bytes plus an otherwise permitted non-PDF extension/MIME pairing remains deferred to a separate general cross-type owner decision before P0-05F.2d; no category inferred
+fixture_integrity: fixture IDs unique; closed fixture schema; all fixtures synthetic and authority-grounded; exact .pdf extension and application/pdf declared MIME; structural proof uses direct raw-byte marker comparisons and byte-offset calculations; positive bytes reuse imported object unchanged; every negative is deterministically derived from the imported source and violates exactly one named PDF shallow-identity condition; no production detector supplies the answer key
+excluded_scope_confirmation: no existing corpus or test changed; no contract or owner-decision change; no semantic PDF, encryption, active-content, embedded-file, or text-layer work; no signature-family or unknown-binary work; no production detector; no runtime MIME change; no dependency
+focused_pdf_shallow_identity_fixture_test: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-pdf-shallow-identity-fixture-corpus.spec.js - 10 passed, 0 failed
+existing_p0_05f_2b2a_matrix_test: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-extension-mime-matrix-fixture-corpus.spec.js - 10 passed, 0 failed
+existing_p0_05f_2b2b_unsupported_metadata_test: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-unsupported-extension-mime-fixture-corpus.spec.js - 10 passed, 0 failed
+existing_p0_05f_2a_xlsx_zip_test: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-xlsx-zip-fixture-corpus.spec.js - 8 passed, 0 failed
+sprint2_suite_initial_sandbox_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-*.spec.js - new PDF shallow-identity tests passed; existing assembled-HTTP localhost listener tests failed with sandbox EPERM
+sprint2_suite: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-*.spec.js - 507 passed, 0 failed after the existing assembled-HTTP localhost listener sandbox EPERM was rerun identically in localhost-capable mode
+full_repository_suite_initial_sandbox_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - new PDF shallow-identity tests passed; existing assembled-HTTP localhost listener tests failed with sandbox EPERM
+full_repository_suite: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - 612 passed, 0 failed after the existing assembled-HTTP localhost listener sandbox EPERM was rerun identically in localhost-capable mode
+database_sentinel: non-listening loopback DATABASE_URL at 127.0.0.1:9 used for every Node and npm command
+production_code_changed: false
+production_detector_added_or_changed: false
+runtime_behavior_changed: false
+repository_contract_changed: false
+owner_decision_changed: false
+dependencies_manifests_lockfiles_changed: false
+database_cloud_credentials_production_real_data: not accessed or modified
+current_state_update: not performed
+implementation_baseline_update: not performed
+git_diff_check: passed
+git_diff_cached_check: passed
+git_diff_cached_stat: inspected
+git_diff_cached: inspected before commit
+complete_diff_scope: __tests__/support/kaiSprint2PdfShallowIdentityFixtureCorpus.js, __tests__/kai-sprint2-pdf-shallow-identity-fixture-corpus.spec.js, and this living ExecPlan P0-05F.2c evidence update only
+package_commit: report after commit; a commit cannot contain its own SHA
+deployed_kai_schema_compatibility: NOT_CONFIRMED
+live_upload_readiness: NOT_CONFIRMED
+production_readiness: NOT_CONFIRMED
+real_client_data_readiness: NOT_CONFIRMED
+```
+
 ## Prompt-injection boundary
 
 Add synthetic fixtures containing instruction-like text.
