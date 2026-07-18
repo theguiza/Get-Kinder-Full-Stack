@@ -3480,6 +3480,37 @@ commit_hash: report after commit; a commit cannot contain its own SHA
 ```
 
 
+## P0-05F.2a2 XLSX/ZIP authority citation reconciliation
+
+```text
+leaf_status: complete after this bounded citation-only reconciliation commit
+p0_05_package_status: xlsx_zip_authority_citations_reconciled
+implementation_status: fixture_authority_metadata_only
+verification_status: TOOL_VERIFIED after documented checks pass
+evidence_class: TOOL_VERIFIED
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 89fe118dc82befc0f1be4e87f34810dce2e7a78c
+applicable_repository_instructions: root AGENTS.md only; DATABASE_URL sentinel used for every Node and npm command; no database/cloud/production/push/deployment/current-state access authorized
+active_package_scope: P0-05F.2a2 stale XLSX/ZIP fixture authority citation reconciliation only; no contract, owner-decision, detector, production runtime, dependency, fixture expected policy, fixture expected category, fixture scope, fixture bytes, fixture ZIP structure, fixture ID, fixture count, P0-05F.2e, or later-package work
+defect: __tests__/support/kaiSprint2XlsxZipFixtureCorpus.js cited dead OWNER_DECISION.P0_05F authority tokens while asserting authority_status contract_grounded
+contract_authority_verified: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md lines 181-190 list the live P0-05F owner decisions; lines 310-318 govern XLSX central-directory identity, exact case-sensitive required entries, missing-entry, renamed non-OOXML ZIP, and malformed/truncated ZIP fixture outcomes; lines 320-328 govern readable ZIP without complete XLSX identity, the forbidden standalone-signature distinction, malformed/truncated ZIP/XLSX signalling, and residual ZIP classification boundaries
+remap_applied: XLSX_MINIMUM_IDENTITY -> OWNER_DECISION.P0_05F.XLSX_CENTRAL_DIRECTORY_BOUNDARY_V1; MISSING_XLSX_ENTRY -> OWNER_DECISION.P0_05F.ZIP_CLASSIFICATION_BOUNDARY_V1; CASE_SENSITIVE_XLSX_ENTRY -> OWNER_DECISION.P0_05F.XLSX_CENTRAL_DIRECTORY_BOUNDARY_V1; RENAMED_NON_OOXML_ZIP -> OWNER_DECISION.P0_05F.ZIP_CLASSIFICATION_BOUNDARY_V1; STANDALONE_ZIP_SIGNATURE -> OWNER_DECISION.P0_05F.ZIP_CLASSIFICATION_BOUNDARY_V1; MALFORMED_XLSX_ZIP -> OWNER_DECISION.P0_05F.ZIP_CLASSIFICATION_BOUNDARY_V1
+changed_file_scope: __tests__/support/kaiSprint2XlsxZipFixtureCorpus.js; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+post_edit_grep_dead_tokens: rg -n "XLSX_MINIMUM_IDENTITY|MISSING_XLSX_ENTRY|CASE_SENSITIVE_XLSX_ENTRY|RENAMED_NON_OOXML_ZIP|MALFORMED_XLSX_ZIP|STANDALONE_ZIP_SIGNATURE" returned no matches
+post_edit_grep_authority_values: corpus authority-map keys and fixture authority values are only OWNER_DECISION.P0_05F.XLSX_CENTRAL_DIRECTORY_BOUNDARY_V1 and OWNER_DECISION.P0_05F.ZIP_CLASSIFICATION_BOUNDARY_V1, both members of the live committed P0-05F decision set
+post_edit_grep_contract_grounded_dead_tokens: corpus authority_status contract_grounded remains only on the live authority-map entries and no dead token remains attached
+focused_test_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-xlsx-zip-fixture-corpus.spec.js - 9 passed, 0 failed
+dependent_focused_test_results: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-extension-mime-matrix-fixture-corpus.spec.js __tests__/kai-sprint2-detected-permitted-type-contradiction-fixture-corpus.spec.js __tests__/kai-sprint2-xlsx-zip-fixture-corpus.spec.js __tests__/kai-sprint2-pdf-shallow-identity-fixture-corpus.spec.js __tests__/kai-sprint2-text-type-agreement-fixture-corpus.spec.js __tests__/kai-sprint2-unsupported-extension-mime-fixture-corpus.spec.js __tests__/kai-sprint2-txt-md-byte-fixture-corpus.spec.js __tests__/kai-sprint2-recognized-disallowed-signature-fixture-corpus.spec.js __tests__/kai-sprint2-residual-unknown-binary-fixture-corpus.spec.js - 74 passed, 0 failed
+sprint2_result_before_execplan_evidence_update: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-*.spec.js - initial sandbox run hit localhost listen EPERM; unchanged localhost-capable rerun passed 525 tests, 0 failed
+full_repo_result_before_execplan_evidence_update: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - initial sandbox run hit localhost listen EPERM; unchanged localhost-capable rerun passed 630 tests, 0 failed
+sprint2_result_after_final_file_state: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-*.spec.js - localhost-capable final-state rerun passed 525 tests, 0 failed
+full_repo_result_after_final_file_state: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - localhost-capable final-state rerun passed 630 tests, 0 failed
+git_diff_check_before_execplan_evidence_update: git diff --check reported clean
+package_exclusions: contract unchanged; owner decisions unchanged; fixture expected_policy, expected_category, scope, bytes, ZIP structure, IDs, and count unchanged; no detector code; no focused-test change; no P0-05F.2e; no push
+commit_hash: report after commit; a commit cannot contain its own SHA
+```
+
+
 ---
 
 ## Plan authority record
