@@ -326,13 +326,26 @@ Fixture packages are graded against frozen owner authority. Fixture packages mus
 
 The future corpus must include deterministic block cases for at least DOS/PE MZ, ELF, RAR 4, RAR 5, 7z, gzip, structurally readable ZIP without complete XLSX identity, malformed or truncated ZIP/XLSX-signalling bytes, and narrowly defined incomplete PDF-signalling bytes. The recognized disallowed-signature set is exactly DOS/PE MZ, ELF, RAR 4, RAR 5, 7z, and gzip. Each recognized disallowed signature blocks as `disallowed_binary_signature` regardless of an allowed extension or declared MIME. `declared_type_mismatch` must not absorb MZ, ELF, RAR 4, RAR 5, 7z, gzip, readable non-XLSX ZIP, malformed or truncated ZIP/XLSX-signalling bytes, narrowly defined incomplete PDF-signalling bytes, or unknown binary cases. The detected permitted-type contradiction decision applies only where the byte-established type is itself a permitted P0 type and its complete committed shallow identity is satisfied. Structurally readable ZIP without complete XLSX identity must not be described as `disallowed_binary_signature`. Malformed or truncated ZIP/XLSX-signalling bytes remain separate and block as `truncated_or_malformed_type`, including truncated local-file-header signature, local header without readable central directory, invalid or out-of-bounds central-directory offset, and truncated central-directory record. Narrowly defined incomplete PDF-signalling bytes also remain separate and block as `truncated_or_malformed_type`. Unsupported extension or declared MIME remains `unsupported_file_type`; this ZIP classification decision does not determine mixed cases where unsupported metadata and ZIP bytes coexist. A non-text byte stream matching no complete permitted identity, no recognized disallowed signature, no readable ZIP classification, no malformed or truncated ZIP/XLSX signalling, and no narrowly defined complete or incomplete PDF signalling blocks as `unknown_binary`. This list does not mean every executable or archive format is individually identified; unknown binary input remains fail-closed.
 
+`OWNER_DECISION.P0_05F.DISALLOWED_SIGNATURE_BYTES` records the owner-authorized exact recognition bytes and required offset for each recognized disallowed-signature family. Each recognized disallowed signature is a fixed byte sequence matched at byte offset zero. A match requires the complete family-specific byte sequence present beginning at byte offset zero; a partial sequence, a shorter prefix, or an occurrence at any non-zero offset is not a match. The committed sequences are:
+
+- DOS/PE MZ: `4D 5A` at byte offset zero.
+- ELF: `7F 45 4C 46` at byte offset zero.
+- gzip: `1F 8B` at byte offset zero.
+- 7z: `37 7A BC AF 27 1C` at byte offset zero.
+- RAR 4: `52 61 72 21 1A 07 00` at byte offset zero.
+- RAR 5: `52 61 72 21 1A 07 01 00` at byte offset zero.
+
+RAR 4 and RAR 5 share the first six bytes `52 61 72 21 1A 07` and differ only in the terminator; RAR 4 ends `00` at the seventh byte, and RAR 5 ends `01 00` at the seventh and eighth bytes. A RAR 4 match requires its complete seven-byte sequence, and a RAR 5 match requires its complete eight-byte sequence. The shared six-byte prefix alone is not a match for either family, RAR 4's seven-byte sequence must not be treated as matched by the RAR 5 prefix, and a RAR 5 stream must not be classified as RAR 4 on the strength of the shared prefix. Each committed match blocks as `disallowed_binary_signature` regardless of an allowed extension or declared MIME, consistent with the recognized disallowed-signature set already established above.
+
+The DOS/PE MZ match is the two-byte offset-zero prefix `4D 5A` only. This decision does not establish DOS/PE header traversal, PE structure validation, or any inspection beyond the committed offset-zero prefix bytes. For every family, this decision commits recognition bytes only for the six disallowed families named above; it does not establish archive parsing, decompression, container inspection, format validation, or recognition of any format outside these six. A binary byte stream matching none of the six committed signatures, no complete permitted identity, no readable ZIP/non-XLSX archive classification, no malformed or truncated ZIP/XLSX signalling, and no narrowly defined complete or incomplete PDF signalling remains fail-closed as `unknown_binary`.
+
 Deterministic block outcomes:
 
 ```text
 unsupported extension or MIME -> block / unsupported_file_type
 extension and MIME disagreement -> block / declared_type_mismatch
 extension and MIME agree on one permitted type but complete byte identity establishes another permitted type -> block / declared_type_mismatch
-recognized MZ, ELF, RAR 4, RAR 5, 7z, or gzip signature -> block / disallowed_binary_signature
+recognized MZ, ELF, RAR 4, RAR 5, 7z, or gzip signature matched at byte offset zero per OWNER_DECISION.P0_05F.DISALLOWED_SIGNATURE_BYTES -> block / disallowed_binary_signature
 structurally readable ZIP without complete XLSX identity -> block / standalone_archive_or_non_xlsx
 malformed or truncated ZIP/XLSX-signalling bytes -> block / truncated_or_malformed_type
 narrowly defined incomplete PDF-signalling bytes after complete PDF identity has failed -> block / truncated_or_malformed_type

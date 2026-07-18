@@ -3360,6 +3360,24 @@ package_boundary: P0-05F.2a1 bounded fixture-only reconciliation; contract, owne
 ```
 
 
+## P0-05F.1D recognized disallowed-signature byte authority
+
+```text
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 2d3202976ed88a5de8d725132a5279a134fedfae
+authorized_files: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+decision_identifier: OWNER_DECISION.P0_05F.DISALLOWED_SIGNATURE_BYTES
+committed_family_byte_offset_pairs: DOS/PE MZ -> 4D 5A at byte offset zero; ELF -> 7F 45 4C 46 at byte offset zero; gzip -> 1F 8B at byte offset zero; 7z -> 37 7A BC AF 27 1C at byte offset zero; RAR 4 -> 52 61 72 21 1A 07 00 at byte offset zero; RAR 5 -> 52 61 72 21 1A 07 01 00 at byte offset zero
+rar_4_rar_5_distinctness_rule: RAR 4 and RAR 5 share only the first six bytes; the shared six-byte prefix alone is not a match, RAR 4 requires the complete seven-byte sequence ending 00, RAR 5 requires the complete eight-byte sequence ending 01 00, RAR 4 must not be matched by the RAR 5 prefix, and RAR 5 must not be classified as RAR 4 from the shared prefix
+mz_two_byte_prefix_scope_limit: DOS/PE MZ recognition is limited to the two-byte offset-zero prefix 4D 5A and does not establish DOS/PE header traversal, PE structure validation, or inspection beyond that committed prefix
+fixtures_changed: false
+tests_changed: false
+runtime_behavior_changed: false
+verification_commands: git diff --check; git diff --cached --name-only; git diff --cached --check; git diff --cached; git show --stat --oneline HEAD; git status --short --branch --untracked-files=all
+package_boundary: P0-05F.1D documentation-only recognized disallowed-signature byte authority; no fixture, test, production code, runtime configuration, lockfile, Current State, Implementation Baseline, dependency, database, cloud, push, deployment, or P0-05F.2d1 change
+```
+
+
 ---
 
 ## Plan authority record
