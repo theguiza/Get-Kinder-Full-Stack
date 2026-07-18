@@ -3443,6 +3443,43 @@ commit_hash: report after commit; a commit cannot contain its own SHA
 ```
 
 
+## P0-05F.2d3 residual unknown-binary fixture corpus
+
+```text
+leaf_status: complete after this bounded one-fixture corpus-and-test package commit
+p0_05_package_status: residual_unknown_binary_fixture_corpus_added
+implementation_status: fixture_only
+verification_status: TOOL_VERIFIED after documented checks pass
+evidence_class: TOOL_VERIFIED
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: d3e154bb958c4fa3ed403f79c531d3faea6d49f7
+applicable_repository_instructions: root AGENTS.md only; changes remain inside the approved P0-05F.2d3 fixture-corpus/test/documentation boundary; DATABASE_URL sentinel used for every Node and npm command; no database/cloud/production/push/deployment/current-state access authorized
+active_package_scope: P0-05F.2d3 bounded residual unknown-binary fixture corpus only; no contract, owner-decision, detector, production runtime, dependency, route, service, existing-corpus, existing-test, P0-05F.2e, or later-package work
+contract_authority_inspected: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md OWNER_DECISION.P0_05F.RESIDUAL_UNKNOWN_BINARY_FIXTURE_V1; OWNER_DECISION.P0_05F.TYPE_AGREEMENT_MATRIX_V1 for independent .pdf plus application/pdf metadata pairing
+owner_decision_authority_consumed: TOOL_VERIFIED OWNER_DECISION.P0_05F.RESIDUAL_UNKNOWN_BINARY_FIXTURE_V1
+created_corpus_path: __tests__/support/kaiSprint2ResidualUnknownBinaryFixtureCorpus.js
+created_focused_test_path: __tests__/kai-sprint2-residual-unknown-binary-fixture-corpus.spec.js
+fixture_count: 1
+fixture_id: UNKNOWNBIN-P0-05F-2D3-001-BLOCK-PDF-APPLICATION-PDF-0001
+fixture_bytes: 00 01 at byte offset zero
+fixture_metadata: .pdf plus application/pdf
+fixture_metadata_pairing_authority: TOOL_VERIFIED committed extension/MIME matrix OWNER_DECISION.P0_05F.TYPE_AGREEMENT_MATRIX_V1 independently permits .pdf plus application/pdf
+expected_deterministic_result: block / unknown_binary / unknown_binary_block_only
+expected_category: unknown_binary
+scope_note: unknown_binary_block_only
+synthetic_corpus_only_limitation: fixture is synthetic inert corpus-only data and does not prove malware status, parser safety, archive validity, upload acceptance, source eligibility, usable document status, complete PDF validity, readable ZIP/XLSX validity, or production detector behavior
+exclusion_proofs: actual buffer bytes 00 01 are not %PDF- at offset zero and have no %%EOF basis for complete PDF identity; are not the incomplete PDF prefix 25 50 44 46; are not readable ZIP/XLSX local-file-header bytes 50 4B 03 04; are not any committed recognized disallowed signature 4D 5A, 7F 45 4C 46, 1F 8B, 37 7A BC AF 27 1C, 52 61 72 21 1A 07 00, or 52 61 72 21 1A 07 01 00; contain prohibited text controls 00 and 01 and therefore do not establish a permitted CSV/MD/TXT text identity; do not establish another complete permitted PDF or XLSX identity
+focused_test_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-residual-unknown-binary-fixture-corpus.spec.js - initial new-test assertion corrected, final rerun 6 passed, 0 failed
+dependent_focused_test_results: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-extension-mime-matrix-fixture-corpus.spec.js __tests__/kai-sprint2-detected-permitted-type-contradiction-fixture-corpus.spec.js __tests__/kai-sprint2-xlsx-zip-fixture-corpus.spec.js __tests__/kai-sprint2-pdf-shallow-identity-fixture-corpus.spec.js __tests__/kai-sprint2-text-type-agreement-fixture-corpus.spec.js __tests__/kai-sprint2-unsupported-extension-mime-fixture-corpus.spec.js __tests__/kai-sprint2-txt-md-byte-fixture-corpus.spec.js __tests__/kai-sprint2-recognized-disallowed-signature-fixture-corpus.spec.js - 68 passed, 0 failed
+sprint2_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-*.spec.js - initial sandbox run hit known localhost listen EPERM; unchanged localhost-capable rerun passed 525 tests, 0 failed; final-state localhost-capable rerun after ExecPlan evidence update passed 525 tests, 0 failed
+full_repo_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - initial sandbox run hit known localhost listen EPERM; unchanged localhost-capable rerun passed 630 tests, 0 failed; final-state localhost-capable rerun after ExecPlan evidence update passed 630 tests, 0 failed
+git_diff_check: git diff --check reports clean after broader suites and before ExecPlan evidence update; rerun after final file state before staging
+changed_file_scope: __tests__/support/kaiSprint2ResidualUnknownBinaryFixtureCorpus.js; __tests__/kai-sprint2-residual-unknown-binary-fixture-corpus.spec.js; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+package_exclusions: contract unchanged; owner decisions unchanged; existing corpora unchanged; existing tests unchanged; no detector code, production code, runtime behavior, dependency, manifest, lockfile, Current State, Implementation Baseline, database, cloud, credential, deployment, push, P0-05F.2e, or later-package change
+commit_hash: report after commit; a commit cannot contain its own SHA
+```
+
+
 ---
 
 ## Plan authority record
