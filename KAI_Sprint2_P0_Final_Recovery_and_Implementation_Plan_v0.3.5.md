@@ -1563,6 +1563,89 @@ real_client_data_readiness: NOT_CONFIRMED
 next_package_or_stop_condition: OWNER-DIRECTED STOP after this single P0-05F.1B documentation-only package commit; do not implement fixtures, tests, detectors, runtime MIME allowlist changes, routes, storage or upload behavior, manifests, lockfiles, Current State, Implementation Baseline, database/cloud/production behavior, push, deployment, or another leaf
 ```
 
+## P0-05F.2d0 detected permitted-type contradiction fixtures
+
+```text
+p0_05_package_status: completed
+implementation_status: fixture_only
+verification_status: TOOL_VERIFIED after documented checks passed
+evidence_class: TOOL_VERIFIED
+owner_directed_leaf_scope: USER_CONFIRMED
+owner_authority: OWNER_DECISION.P0_05F.DETECTED_PERMITTED_TYPE_CONTRADICTION_V1
+applicable_repository_instructions: root AGENTS.md only; changes remain inside the approved P0-05F.2d0 fixture-only boundary
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: c58869d9bc18e41e1c54009f65c1c98ea183e6df
+starting_tree: clean
+preflight_owner_authorities_present: OWNER_DECISION.P0_05F.TYPE_AGREEMENT_MATRIX_V1, OWNER_DECISION.P0_05F.XLSX_CENTRAL_DIRECTORY_BOUNDARY_V1, and OWNER_DECISION.P0_05F.DETECTED_PERMITTED_TYPE_CONTRADICTION_V1
+preflight_completed_p0_05f_2a_xlsx_zip_corpus_present: true
+preflight_completed_p0_05f_2c_pdf_shallow_identity_corpus_present: true
+preflight_detected_permitted_type_contradiction_corpus_present: false
+fixture_corpus: __tests__/support/kaiSprint2DetectedPermittedTypeContradictionFixtureCorpus.js
+focused_structural_integrity_test: __tests__/kai-sprint2-detected-permitted-type-contradiction-fixture-corpus.spec.js
+fixture_count: 2
+fixture_ids: DETPERMTYPE-P0-05F-2D0-001-BLOCK-TXT-TEXT-PLAIN-PDF-BYTES; DETPERMTYPE-P0-05F-2D0-002-BLOCK-TXT-TEXT-PLAIN-XLSX-BYTES
+metadata_pairing_for_both_fixtures: .txt plus text/plain
+metadata_pairing_independently_permitted: true
+extension_and_mime_agree_for_both_fixtures: true
+jointly_declared_metadata_type_for_both_fixtures: text
+detected_byte_established_types: PDF and XLSX
+detected_types_permitted: true
+declared_type_differs_from_detected_type_for_both_fixtures: true
+expected_policy_for_both_fixtures: block
+expected_category_for_both_fixtures: declared_type_mismatch
+scope_note_for_both_fixtures: detected_permitted_type_contradiction_only
+pdf_source_module: __tests__/support/kaiSprint2ExtensionMimeMatrixFixtureCorpus.js
+pdf_source_export_property: EXTENSION_MIME_MATRIX_BYTE_SOURCES[".pdf"].bytes
+pdf_object_identity_reuse: true
+pdf_header_offset: 0
+pdf_eof_offset: 42
+pdf_eof_distance_from_end: 6
+pdf_complete_shallow_identity: true
+xlsx_source_module: __tests__/support/kaiSprint2XlsxZipFixtureCorpus.js
+xlsx_source_fixture_id: XLSXZIP-P0-05F-001-ALLOW-MINIMUM-XLSX
+xlsx_source_export_property: XLSX_ZIP_FIXTURES fixture bytes
+xlsx_object_identity_reuse: true
+xlsx_zip_local_file_header_prefix_present: true
+xlsx_eocd_readable: true
+xlsx_eocd_offset: 318
+xlsx_central_directory_bounds_valid: true
+xlsx_central_directory_offset: 135
+xlsx_central_directory_length: 183
+xlsx_central_directory_end: 318
+xlsx_central_directory_record_boundaries_valid: true
+xlsx_entry_count_valid: true
+xlsx_expected_entry_count: 3
+xlsx_parsed_entry_count: 3
+xlsx_local_header_offsets_valid: true
+xlsx_local_header_offsets: 0, 49, 90
+xlsx_required_central_directory_entries: [Content_Types].xml; _rels/.rels; xl/workbook.xml
+xlsx_identity_proof_method: parsed EOCD and central-directory records; no raw-buffer string search, decompression, XML parsing, filesystem access, external ZIP utilities, or production detector output
+xlsx_complete_identity_prevents_standalone_zip_or_disallowed_signature_classification: true
+classification_exclusions_for_both_fixtures: unsupported_file_type=false; truncated_or_malformed_type=false; disallowed_binary_signature=false; standalone_archive_or_non_xlsx=false; ambiguous_file_type=false; unknown_binary=false
+byte_source_copy_reconstruction_regeneration: none
+existing_corpora_or_tests_changed: false
+contract_or_owner_decision_changed: false
+production_detector_changed: false
+runtime_mime_allowlist_changed: false
+dependencies_or_lockfiles_changed: false
+database_cloud_credentials_production_real_data: not accessed or modified
+current_state_update: not performed
+focused_p0_05f_2d0_test: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-detected-permitted-type-contradiction-fixture-corpus.spec.js - 5 passed, 0 failed
+existing_p0_05f_2c_pdf_test: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-pdf-shallow-identity-fixture-corpus.spec.js - 10 passed, 0 failed
+existing_p0_05f_2a_xlsx_zip_test: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-xlsx-zip-fixture-corpus.spec.js - 8 passed, 0 failed
+existing_p0_05f_2b2a_matrix_test: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-extension-mime-matrix-fixture-corpus.spec.js - 10 passed, 0 failed
+sprint2_suite: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-*.spec.js - 512 passed, 0 failed after the existing assembled-HTTP localhost listener sandbox EPERM was rerun identically in localhost-capable mode
+full_repository_suite: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - 617 passed, 0 failed after the existing assembled-HTTP localhost listener sandbox EPERM was rerun identically in localhost-capable mode
+git_diff_check: passed after edit
+complete_diff_inspection: TOOL_VERIFIED
+complete_diff_scope: __tests__/support/kaiSprint2DetectedPermittedTypeContradictionFixtureCorpus.js, __tests__/kai-sprint2-detected-permitted-type-contradiction-fixture-corpus.spec.js, and this living ExecPlan P0-05F.2d0 evidence update only
+package_commit: report after commit; a commit cannot contain its own SHA
+deployed_kai_schema_compatibility: NOT_CONFIRMED
+live_upload_readiness: NOT_CONFIRMED
+production_readiness: NOT_CONFIRMED
+real_client_data_readiness: NOT_CONFIRMED
+```
+
 ## Prompt-injection boundary
 
 Add synthetic fixtures containing instruction-like text.
