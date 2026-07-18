@@ -1309,6 +1309,71 @@ real_client_data_readiness: NOT_CONFIRMED
 next_package_or_stop_condition: OWNER-DIRECTED STOP after this single P0-05F.2b2a fixture-only package commit; do not implement detectors, runtime MIME allowlist changes, repository contract changes, owner-decision changes, unsupported-extension fixtures, unsupported-MIME fixtures, PDF negative identity fixtures, disallowed-signature fixtures, unknown-binary fixtures, upload lifecycle work, storage retrieval, worker/parser behavior, P0-06 work, database/cloud/production behavior, push, deployment, or another leaf
 ```
 
+## P0-05F.2b2b unsupported extension and declared-MIME rejection fixtures
+
+```text
+leaf_status: complete after this fixture-only package commit
+p0_05_package_status: unsupported_extension_and_declared_mime_fixture_subcorpus_recorded
+implementation_status: fixture_and_test_only
+verification_status: TOOL_VERIFIED after documented checks pass
+evidence_class: TOOL_VERIFIED
+owner_directed_leaf_scope: USER_CONFIRMED
+owner_authority: OWNER_DECISION.P0_05F.TYPE_AGREEMENT_MATRIX_V1 plus OWNER_DECISION.P0_05F.XLSX_CENTRAL_DIRECTORY_BOUNDARY_V1 as preflight authority and prior matrix context
+applicable_repository_instructions: root AGENTS.md only; changes remain inside the approved P0-05F.2b2b fixture-only boundary
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 1b2eba3fd72a58792a1a9eaf1c66e72e61e2fb90
+starting_tree: clean
+preflight_owner_authorities_present: OWNER_DECISION.P0_05F.TYPE_AGREEMENT_MATRIX_V1 and OWNER_DECISION.P0_05F.XLSX_CENTRAL_DIRECTORY_BOUNDARY_V1
+preflight_fixture_process_rules_present: fixture packages graded against frozen owner authority; fixture packages must never modify the contract; discovered contract gap requires stopping for owner decision; contract and fixture changes must not be combined in one implementation commit
+preflight_prior_p0_05f_2b1_and_2b2a_matrix_proof: P0-05F.2b1 contributes 6 rows and P0-05F.2b2a contributes 24 rows; combined 30 normalized extension/MIME pairs with duplicate keys 0, missing keys 0, unexpected keys 0
+preflight_unsupported_extension_mime_corpus: absent before this package
+implemented_fixture_module: __tests__/support/kaiSprint2UnsupportedExtensionMimeFixtureCorpus.js
+implemented_integrity_test_file: __tests__/kai-sprint2-unsupported-extension-mime-fixture-corpus.spec.js
+fixture_count: 18
+unsupported_extension_fixture_count: 8
+unsupported_declared_mime_fixture_count: 10
+unsupported_extension_fixture_ids: UNSUPMETA-P0-05F-001-BLOCK-JSON-EXTENSION; UNSUPMETA-P0-05F-002-BLOCK-HTML-EXTENSION; UNSUPMETA-P0-05F-003-BLOCK-JS-EXTENSION; UNSUPMETA-P0-05F-004-BLOCK-ZIP-EXTENSION-TEXT-BYTES; UNSUPMETA-P0-05F-005-BLOCK-EXE-EXTENSION-TEXT-BYTES; UNSUPMETA-P0-05F-006-BLOCK-BIN-EXTENSION-TEXT-BYTES; UNSUPMETA-P0-05F-007-BLOCK-EMPTY-EXTENSION; UNSUPMETA-P0-05F-008-BLOCK-MISSING-EXTENSION
+unsupported_declared_mime_fixture_ids: UNSUPMETA-P0-05F-009-BLOCK-APPLICATION-JSON-MIME; UNSUPMETA-P0-05F-010-BLOCK-OCTET-STREAM-MIME; UNSUPMETA-P0-05F-011-BLOCK-TEXT-HTML-MIME; UNSUPMETA-P0-05F-012-BLOCK-TEXT-JAVASCRIPT-MIME; UNSUPMETA-P0-05F-013-BLOCK-APPLICATION-JAVASCRIPT-MIME; UNSUPMETA-P0-05F-014-BLOCK-APPLICATION-ZIP-MIME; UNSUPMETA-P0-05F-015-BLOCK-X-ZIP-COMPRESSED-MIME; UNSUPMETA-P0-05F-016-BLOCK-EMPTY-MIME; UNSUPMETA-P0-05F-017-BLOCK-UNKNOWN-UNLISTED-MIME; UNSUPMETA-P0-05F-018-BLOCK-TEXT-PLAIN-PARAMETER-MIME
+expected_result_all_fixtures: block / unsupported_file_type / unsupported_metadata_block_only
+authority_grounding: every outcome cites OWNER_DECISION.P0_05F.TYPE_AGREEMENT_MATRIX_V1
+application_json_fixture: UNSUPMETA-P0-05F-009-BLOCK-APPLICATION-JSON-MIME expects block / unsupported_file_type; policy rejects application/json; current runtime alignment remains unresolved; this fixture does not prove the runtime allowlist was corrected
+application_octet_stream_fixture: UNSUPMETA-P0-05F-010-BLOCK-OCTET-STREAM-MIME expects block / unsupported_file_type; application/octet-stream may later be an HTTP transport envelope but is not an accepted declared file MIME
+parameterized_mime_fixture: UNSUPMETA-P0-05F-018-BLOCK-TEXT-PLAIN-PARAMETER-MIME expects block / unsupported_file_type; normalized_declared_mime remains text/plain; charset=utf-8 and does not become text/plain
+byte_source_used_by_each_fixture_family: unsupported_extension -> EXTMIME-P0-05F-BYTES-TXT-VALID imported from __tests__/support/kaiSprint2ExtensionMimeMatrixFixtureCorpus.js; unsupported_declared_mime -> EXTMIME-P0-05F-BYTES-TXT-VALID imported from __tests__/support/kaiSprint2ExtensionMimeMatrixFixtureCorpus.js
+byte_source_identity: all 18 fixtures reuse the exact P0-05F.2b2a TXT Uint8Array object; bytes decode in fatal UTF-8 mode and remain valid for .txt + text/plain
+unsupported_extension_isolation: extension unsupported; declared MIME permitted text/plain; bytes valid for selected permitted type .txt + text/plain; no recognized disallowed binary signature; no malformed, truncated, invalid UTF-8, unknown-binary, PDF-negative, or XLSX-negative claim
+unsupported_declared_mime_isolation: extension permitted .txt; declared MIME unsupported; bytes valid for extension and selected permitted type .txt + text/plain; no other conflicting signal
+zip_exe_bin_extension_bytes: .zip, .exe, and .bin extension fixtures contain valid permitted TXT bytes and do not match ZIP, executable, archive, or unknown-binary bytes/signatures
+fixture_integrity: fixture IDs unique; all fixtures synthetic; all outcomes authority-grounded; eight required unsupported-extension cases present; ten required unsupported-MIME cases present; MIME parameters rejected and not stripped; application/json runtime divergence remains open; application/octet-stream blocked as declared MIME
+excluded_scope_confirmation: no contract or owner-decision change; no existing corpora or tests modified; no runtime MIME change; no PDF-negative work; no signature or unknown-binary work; no ambiguous_file_type work; no production detector; no dependency
+focused_unsupported_metadata_fixture_test: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-unsupported-extension-mime-fixture-corpus.spec.js - 10 passed, 0 failed
+existing_p0_05f_2b1_focused_test: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-text-type-agreement-fixture-corpus.spec.js - 9 passed, 0 failed
+existing_p0_05f_2b2a_matrix_completeness_test: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-extension-mime-matrix-fixture-corpus.spec.js - 10 passed, 0 failed
+sprint2_suite_initial_sandbox_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-*.spec.js - new unsupported metadata tests passed; existing assembled-HTTP localhost listener tests failed with sandbox EPERM
+sprint2_suite: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-*.spec.js - 497 passed, 0 failed after the existing assembled-HTTP localhost listener sandbox EPERM was rerun identically in localhost-capable mode
+database_sentinel: non-listening loopback DATABASE_URL at 127.0.0.1:9 used for every Node command
+production_code_changed: false
+production_detector_added_or_changed: false
+runtime_behavior_changed: false
+repository_contract_changed: false
+owner_decision_changed: false
+dependencies_manifests_lockfiles_changed: false
+database_cloud_credentials_production_real_data: not accessed or modified
+current_state_update: not performed
+implementation_baseline_update: not performed
+git_diff_check: passed
+git_diff_cached_check: passed
+git_diff_cached_stat: inspected
+git_diff_cached: inspected before commit
+complete_diff_scope: __tests__/support/kaiSprint2UnsupportedExtensionMimeFixtureCorpus.js, __tests__/kai-sprint2-unsupported-extension-mime-fixture-corpus.spec.js, and this living ExecPlan P0-05F.2b2b evidence update only
+package_commit: report after commit; a commit cannot contain its own SHA
+deployed_kai_schema_compatibility: NOT_CONFIRMED
+live_upload_readiness: NOT_CONFIRMED
+production_readiness: NOT_CONFIRMED
+real_client_data_readiness: NOT_CONFIRMED
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this single P0-05F.2b2b fixture-only package commit; do not implement detectors, runtime MIME allowlist changes, repository contract changes, owner-decision changes, PDF negative identity fixtures, disallowed-signature fixtures, unknown-binary fixtures, upload lifecycle work, storage retrieval, worker/parser behavior, P0-06 work, database/cloud/production behavior, push, deployment, or another leaf
+```
+
 ## Prompt-injection boundary
 
 Add synthetic fixtures containing instruction-like text.
