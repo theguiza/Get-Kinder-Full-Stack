@@ -1563,6 +1563,65 @@ real_client_data_readiness: NOT_CONFIRMED
 next_package_or_stop_condition: OWNER-DIRECTED STOP after this single P0-05F.1B documentation-only package commit; do not implement fixtures, tests, detectors, runtime MIME allowlist changes, routes, storage or upload behavior, manifests, lockfiles, Current State, Implementation Baseline, database/cloud/production behavior, push, deployment, or another leaf
 ```
 
+## P0-05F.1C unified readable non-XLSX ZIP classification
+
+```text
+leaf_status: complete after this documentation-only owner-decision package commit
+p0_05_package_status: unified_readable_non_xlsx_zip_classification_recorded
+implementation_status: documentation_only
+verification_status: TOOL_VERIFIED after documented checks pass
+evidence_class: TOOL_VERIFIED
+owner_directed_leaf_scope: USER_CONFIRMED
+owner_authority: OWNER_DECISION.P0_05F.ZIP_CLASSIFICATION_BOUNDARY_V1
+applicable_repository_instructions: root AGENTS.md only; changes remain inside the approved P0-05F.1C documentation-only owner-decision boundary
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 48b7e4286d20e18be20c294325804f3a84004c50
+starting_tree: clean
+preflight_owner_authorities_present: OWNER_DECISION.P0_05F.TYPE_AGREEMENT_MATRIX_V1, OWNER_DECISION.P0_05F.XLSX_CENTRAL_DIRECTORY_BOUNDARY_V1, and OWNER_DECISION.P0_05F.DETECTED_PERMITTED_TYPE_CONTRADICTION_V1
+preflight_completed_read_only_zip_category_audit_present: true
+preflight_equivalent_zip_classification_owner_decision_already_committed: false
+preflight_stopped_p0_05f_2d1_attempt_made_no_changes: true
+pre_edit_contract_blocks_inspected: detected permitted-type contradiction exclusions; XLSX candidate rule; XLSX central-directory rule; positive/missing/malformed ZIP fixture boundaries; generic and standalone ZIP coverage paragraph; recognized disallowed-signature paragraph; deterministic block-outcome table
+pre_edit_corpus_constructor_inspected: fixture helper in __tests__/support/kaiSprint2XlsxZipFixtureCorpus.js unconditionally assigned extension ".xlsx" and declared_mime "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+pre_edit_corpus_fixtures_inspected: XLSXZIP-P0-05F-007-BLOCK-ARBITRARY-ZIP-NON-XLSX-METADATA; XLSXZIP-P0-05F-008-BLOCK-XLSX-METADATA-MISSING-OOXML; XLSXZIP-P0-05F-009-BLOCK-STANDALONE-ZIP-SIGNATURE
+fixture_007_current_metadata: .xlsx plus application/vnd.openxmlformats-officedocument.spreadsheetml.sheet from shared construction
+fixture_008_current_metadata: .xlsx plus application/vnd.openxmlformats-officedocument.spreadsheetml.sheet from shared construction
+fixture_009_current_metadata: .xlsx plus application/vnd.openxmlformats-officedocument.spreadsheetml.sheet from shared construction
+fixture_corpus_modified_by_this_package: false
+complete_xlsx_identity_mapping: complete committed XLSX shallow identity establishes permitted XLSX; .xlsx plus XLSX MIME allows as type_agreement_pass; another internally agreeing permitted P0 metadata type blocks as declared_type_mismatch
+readable_zip_without_complete_xlsx_identity_mapping: block / standalone_archive_or_non_xlsx for otherwise permitted XLSX metadata and otherwise permitted non-XLSX P0 metadata
+malformed_or_truncated_zip_xlsx_signalling_mapping: block / truncated_or_malformed_type
+recognized_disallowed_signature_set: DOS/PE MZ, ELF, RAR 4, RAR 5, 7z, gzip
+standalone_zip_removed_from_disallowed_binary_signature_authority: true
+unsupported_metadata_boundary: unsupported extension or declared MIME remains block / unsupported_file_type; mixed unsupported metadata plus ZIP bytes not determined by this owner decision
+unknown_binary_boundary: non-text bytes matching no permitted binary type, no readable ZIP/non-XLSX archive classification, and no recognized disallowed signature block as unknown_binary
+cases_a_c_collapse: Case A readable arbitrary ZIP with permitted non-XLSX metadata and Case C recognized standalone-ZIP signature with permitted non-XLSX metadata are one semantic case under the committed P0 signal model when complete XLSX identity is absent
+overlapping_contract_mappings_removed: standalone ZIP removed from recognized disallowed-signature authority; deterministic outcome table now has one readable ZIP without complete XLSX identity row and a separate malformed/truncated ZIP/XLSX row
+category_reachability_after_amendment: complete XLSX identity reaches permitted XLSX; structurally readable ZIP without complete XLSX identity reaches standalone_archive_or_non_xlsx; malformed or truncated ZIP/XLSX-signalling bytes reach truncated_or_malformed_type; MZ, ELF, RAR 4, RAR 5, 7z, and gzip reach disallowed_binary_signature; unsupported metadata reaches unsupported_file_type; residual unmatched non-text binary reaches unknown_binary
+fixture_008_recorded_status: current metadata, description, and standalone_archive_or_non_xlsx category are consistent with the unified ZIP classification
+fixture_007_recorded_status: ID and description claim non-XLSX metadata, but the constructor supplies XLSX metadata; it therefore does not currently prove the intended permitted non-XLSX readable-ZIP case
+fixture_009_recorded_status: ID emphasizes standalone ZIP signature, but committed metadata and category describe the same XLSX-metadata readable-non-XLSX case; the name is misleading and does not represent a separate category
+constructor_limitation_recorded: current constructor cannot express the intended metadata variation because it supplies XLSX metadata unconditionally
+fixture_name_reconciliation_status: recorded only; no fixture, fixture ID, answer key, test, corpus, detector, production code, runtime MIME behavior, route, service, manifest, lockfile, Current State, or Implementation Baseline changed
+tests_or_static_verifiers_run: not run; no fresh inspection identified an existing directly affected static verifier that validates this exact amended authority
+git_diff_check: passed after edit
+git_diff_cached_check: passed after staging
+git_diff_cached_stat: inspected after staging
+git_diff_cached: inspected before commit
+complete_diff_scope: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md and this living ExecPlan only
+package_commit: report after commit; a commit cannot contain its own SHA
+database_cloud_credentials_production_real_data: not accessed or modified
+dependencies_or_lockfiles_changed: false
+runtime_mime_allowlist_changed: false
+production_code_changed: false
+detector_code_changed: false
+fixtures_tests_answer_keys_changed: false
+current_state_update: not performed
+implementation_baseline_update: not performed
+push_or_deployment: not performed
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this single P0-05F.1C documentation-only package commit; do not begin or resume P0-05F.2d1
+```
+
 ## P0-05F.2d0 detected permitted-type contradiction fixtures
 
 ```text
