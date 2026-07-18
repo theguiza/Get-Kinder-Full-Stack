@@ -3377,6 +3377,40 @@ verification_commands: git diff --check; git diff --cached --name-only; git diff
 package_boundary: P0-05F.1D documentation-only recognized disallowed-signature byte authority; no fixture, test, production code, runtime configuration, lockfile, Current State, Implementation Baseline, dependency, database, cloud, push, deployment, or P0-05F.2d1 change
 ```
 
+## P0-05F.2d1 recognized disallowed-signature fixture corpus
+
+```text
+leaf_status: complete after this bounded synthetic fixture-and-test package commit
+p0_05_package_status: recognized_disallowed_signature_fixture_corpus_added
+implementation_status: fixture_only
+verification_status: TOOL_VERIFIED after documented checks pass
+evidence_class: TOOL_VERIFIED
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 69119d528c161166696722636ec23bc518a9b4aa
+applicable_repository_instructions: root AGENTS.md only; changes remain inside the approved P0-05F fixture-corpus/test/documentation boundary; DATABASE_URL sentinel used for every Node and npm command; no database/cloud/production/push/deployment/current-state access authorized
+active_package_scope: P0-05F.2d1 bounded recognized disallowed-signature fixture corpus only; no P0-05F.2a1, P0-05F.2c, P0-05F.2c.1, byte-authority, detector, unknown-binary, production runtime, dependency, route, service, or existing-corpus work
+contract_authority_inspected: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md P0-05F.1 extension, declared MIME, signature, and structural-type agreement; deterministic block outcomes; OWNER_DECISION.P0_05F.DISALLOWED_SIGNATURE_BYTES; declared file-MIME matrix
+owner_decision_authority_found_in_contract: OWNER_DECISION.P0_05F.DISALLOWED_SIGNATURE_BYTES; OWNER_DECISION.P0_05F.TYPE_AGREEMENT_MATRIX_V1 for metadata isolation
+created_corpus_path: __tests__/support/kaiSprint2RecognizedDisallowedSignatureFixtureCorpus.js
+created_focused_test_path: __tests__/kai-sprint2-recognized-disallowed-signature-fixture-corpus.spec.js
+exact_covered_signature_families: DOS/PE MZ; ELF; gzip; 7z; RAR 4; RAR 5
+exact_committed_bytes_and_offsets: DOS/PE MZ -> 4D 5A at byte offset zero; ELF -> 7F 45 4C 46 at byte offset zero; gzip -> 1F 8B at byte offset zero; 7z -> 37 7A BC AF 27 1C at byte offset zero; RAR 4 -> 52 61 72 21 1A 07 00 at byte offset zero; RAR 5 -> 52 61 72 21 1A 07 01 00 at byte offset zero
+fixture_count: 6
+metadata_isolation_pairing: .txt plus text/plain
+metadata_isolation_pairing_authority: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md declared file-MIME matrix under OWNER_DECISION.P0_05F.TYPE_AGREEMENT_MATRIX_V1
+expected_deterministic_result: block / disallowed_binary_signature / type_agreement_block_only
+rar_4_rar_5_distinction: actual buffers share first six bytes 52 61 72 21 1A 07; RAR 4 byte seven is 00; RAR 5 bytes seven and eight are 01 00; RAR 5 does not match the complete RAR 4 sequence at offset zero
+synthetic_corpus_only_limitation: corpus rows contain only the minimum committed signature bytes, are synthetic inert corpus-only data, do not execute, decompress, parse, validate executable/archive formats, scan malware, prove parser safety, prove upload acceptance, or claim runtime detector behavior
+focused_test_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-recognized-disallowed-signature-fixture-corpus.spec.js - 6 passed, 0 failed
+dependent_focused_test_results: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-extension-mime-matrix-fixture-corpus.spec.js __tests__/kai-sprint2-detected-permitted-type-contradiction-fixture-corpus.spec.js __tests__/kai-sprint2-xlsx-zip-fixture-corpus.spec.js __tests__/kai-sprint2-pdf-shallow-identity-fixture-corpus.spec.js __tests__/kai-sprint2-text-type-agreement-fixture-corpus.spec.js __tests__/kai-sprint2-unsupported-extension-mime-fixture-corpus.spec.js __tests__/kai-sprint2-txt-md-byte-fixture-corpus.spec.js - 62 passed, 0 failed
+broader_test_results_before_execplan_evidence_update: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-*.spec.js - initial sandbox run hit known localhost listen EPERM; unchanged localhost-capable rerun passed 519 tests, 0 failed; DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - initial sandbox run hit known localhost listen EPERM; unchanged localhost-capable rerun passed 624 tests, 0 failed
+broader_test_results_after_final_file_state: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-*.spec.js - localhost-capable final-state rerun passed 519 tests, 0 failed; DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - localhost-capable final-state rerun passed 624 tests, 0 failed
+git_diff_verification: git diff --check and git diff --cached --check report after final file state
+changed_file_scope: __tests__/support/kaiSprint2RecognizedDisallowedSignatureFixtureCorpus.js; __tests__/kai-sprint2-recognized-disallowed-signature-fixture-corpus.spec.js; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+package_exclusions: no unknown-binary fixture; no ZIP/XLSX/PDF fixture; no ambiguous/truncated/malformed/standalone archive fixture; no existing corpus or existing test modification; no contract change; no production code, detector, route, service, dependency, manifest, lockfile, Current State, Implementation Baseline, database, cloud, credential, deployment, or feature-flag change
+commit_hash: report after commit; a commit cannot contain its own SHA
+```
+
 
 ---
 
