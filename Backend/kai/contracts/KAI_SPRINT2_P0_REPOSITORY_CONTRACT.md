@@ -187,6 +187,7 @@ OWNER_DECISION.P0_05F.XLSX_CENTRAL_DIRECTORY_BOUNDARY_V1
 OWNER_DECISION.P0_05F.DETECTED_PERMITTED_TYPE_CONTRADICTION_V1
 OWNER_DECISION.P0_05F.ZIP_CLASSIFICATION_BOUNDARY_V1
 OWNER_DECISION.P0_05F.PDF_INCOMPLETE_SHALLOW_IDENTITY_CATEGORY
+OWNER_DECISION.P0_05F.RESIDUAL_UNKNOWN_BINARY_FIXTURE_V1
 decision_scope: deterministic P0 gate for terminal extension, declared file MIME, shallow byte signature, minimum structural-type identity, and agreement between those signals
 broader_file_security_assessment_completed: false
 runtime_behavior_changed_by_this_decision: false
@@ -338,6 +339,22 @@ The future corpus must include deterministic block cases for at least DOS/PE MZ,
 RAR 4 and RAR 5 share the first six bytes `52 61 72 21 1A 07` and differ only in the terminator; RAR 4 ends `00` at the seventh byte, and RAR 5 ends `01 00` at the seventh and eighth bytes. A RAR 4 match requires its complete seven-byte sequence, and a RAR 5 match requires its complete eight-byte sequence. The shared six-byte prefix alone is not a match for either family, RAR 4's seven-byte sequence must not be treated as matched by the RAR 5 prefix, and a RAR 5 stream must not be classified as RAR 4 on the strength of the shared prefix. Each committed match blocks as `disallowed_binary_signature` regardless of an allowed extension or declared MIME, consistent with the recognized disallowed-signature set already established above.
 
 The DOS/PE MZ match is the two-byte offset-zero prefix `4D 5A` only. This decision does not establish DOS/PE header traversal, PE structure validation, or any inspection beyond the committed offset-zero prefix bytes. For every family, this decision commits recognition bytes only for the six disallowed families named above; it does not establish archive parsing, decompression, container inspection, format validation, or recognition of any format outside these six. A binary byte stream matching none of the six committed signatures, no complete permitted identity, no readable ZIP/non-XLSX archive classification, no malformed or truncated ZIP/XLSX signalling, and no narrowly defined complete or incomplete PDF signalling remains fail-closed as `unknown_binary`.
+
+`OWNER_DECISION.P0_05F.RESIDUAL_UNKNOWN_BINARY_FIXTURE_V1` authorizes exactly one future synthetic fixture for P0-05F.2d3:
+
+```text
+bytes: 00 01
+byte_offset: zero
+extension: .pdf
+declared_mime: application/pdf
+expected_policy: block
+expected_category: unknown_binary
+expected_scope: unknown_binary_block_only
+```
+
+This decision creates the scope label `unknown_binary_block_only`, which did not previously exist. The fixture reaches `unknown_binary` only after establishing none of these higher-priority outcomes, each evaluated first: complete PDF identity, because the bytes are not `%PDF-` at offset zero with `%%EOF` in the final 1024 bytes; narrowly defined incomplete PDF signalling, because the bytes are not the `%PDF` prefix `25 50 44 46`; complete XLSX identity, readable ZIP, or non-XLSX ZIP, because the bytes are not `50 4B 03 04`; malformed or truncated ZIP/XLSX signalling; recognized disallowed signature, because the bytes are not `4D 5A`, `7F 45 4C 46`, `1F 8B`, `37 7A BC AF 27 1C`, `52 61 72 21 1A 07 00`, or `52 61 72 21 1A 07 01 00`; another complete permitted identity; detected permitted-type contradiction; `declared_type_mismatch`; `ambiguous_file_type`; or `unsupported_file_type`.
+
+This decision does not alter P0-05C, P0-05D, or P0-05E. Bytes `00 01` under `.txt`, `.md`, or `.csv` metadata remain governed by the existing text-byte gate, not this residual unknown-binary decision. No partial-signature policy is authorized. No additional unknown-binary fixture family is authorized. This fixture proves only reachability of the existing residual `unknown_binary` category. It establishes nothing about malware, parser safety, archive validity, or upload eligibility.
 
 Deterministic block outcomes:
 

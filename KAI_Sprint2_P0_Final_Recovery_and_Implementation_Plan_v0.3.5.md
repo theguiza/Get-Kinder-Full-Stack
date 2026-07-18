@@ -3412,6 +3412,37 @@ commit_hash: report after commit; a commit cannot contain its own SHA
 ```
 
 
+## P0-05F.2d2 residual unknown-binary fixture authority
+
+```text
+leaf_status: complete after this bounded documentation-only authority package commit
+p0_05_package_status: residual_unknown_binary_fixture_authority_recorded
+implementation_status: documentation_only
+verification_status: TOOL_VERIFIED after documented checks pass
+evidence_class: TOOL_VERIFIED
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 45fce2e36b46fa30affcf97df1999cb594ffc350
+applicable_repository_instructions: root AGENTS.md only; changes remain inside the approved P0-05F.2d2 documentation-only authority boundary; no Node or npm command run; no database/cloud/production/push/deployment/current-state access authorized
+active_package_scope: P0-05F.2d2 bounded residual unknown-binary fixture authority only; no fixture, test, detector, production runtime, dependency, route, service, existing-corpus, or later-package work
+contract_authority_inspected: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md P0-05F.1 extension, declared MIME, signature, and structural-type agreement; deterministic block outcomes; residual unknown_binary rule; OWNER_DECISION.P0_05F.DISALLOWED_SIGNATURE_BYTES; PDF incomplete shallow-identity authority; ZIP classification boundary
+owner_decision_authority: USER_CONFIRMED OWNER_DECISION.P0_05F.RESIDUAL_UNKNOWN_BINARY_FIXTURE_V1
+authorized_future_fixture_package: P0-05F.2d3 only
+authorized_bytes: 00 01 at byte offset zero
+authorized_metadata_pairing: .pdf plus application/pdf
+expected_deterministic_result: block / unknown_binary / unknown_binary_block_only
+created_scope_label: unknown_binary_block_only
+higher_priority_exclusions: complete PDF identity is not established because bytes are not %PDF- at offset zero with %%EOF in the final 1024 bytes; narrowly defined incomplete PDF signalling is not established because bytes are not the %PDF prefix 25 50 44 46; complete XLSX identity, readable ZIP, and non-XLSX ZIP are not established because bytes are not 50 4B 03 04; malformed or truncated ZIP/XLSX signalling is not established; recognized disallowed signature is not established because bytes are not 4D 5A, 7F 45 4C 46, 1F 8B, 37 7A BC AF 27 1C, 52 61 72 21 1A 07 00, or 52 61 72 21 1A 07 01 00; another complete permitted identity, detected permitted-type contradiction, declared_type_mismatch, ambiguous_file_type, and unsupported_file_type are not established
+relationship_to_existing_residual_rule: proves reachability of the existing residual unknown_binary category only after all committed higher-priority identities, signatures, structural classifications, malformed/truncated signalling, mismatch, ambiguity, and unsupported metadata outcomes are excluded
+text_gate_non_regression: does not alter P0-05C, P0-05D, or P0-05E; 00 01 under .txt, .md, or .csv metadata remains governed by the existing text-byte gate, not this decision
+non_generalization_boundary: no partial-signature policy is authorized; no additional unknown-binary fixture family is authorized; establishes nothing about malware, parser safety, archive validity, or upload eligibility
+package_sequence: P0-05F.2d2 residual authority -> P0-05F.2d3 one-fixture corpus plus focused test -> P0-05F.2e completeness proof -> P0-05F.3 read-only detector measurement -> P0-05F.4 pure unwired detector only if later authorized
+p0_05f_2d3_status: blocked until this P0-05F.2d2 documentation-only authority commit exists
+changed_file_scope: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+verification: git diff --check; git diff --cached --check; git diff --cached --stat; staged grep confirms unknown_binary_block_only, 00 01, and RESIDUAL_UNKNOWN_BINARY_FIXTURE_V1 in the contract
+commit_hash: report after commit; a commit cannot contain its own SHA
+```
+
+
 ---
 
 ## Plan authority record
