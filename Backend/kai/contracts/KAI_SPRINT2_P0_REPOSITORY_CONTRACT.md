@@ -188,6 +188,7 @@ OWNER_DECISION.P0_05F.DETECTED_PERMITTED_TYPE_CONTRADICTION_V1
 OWNER_DECISION.P0_05F.ZIP_CLASSIFICATION_BOUNDARY_V1
 OWNER_DECISION.P0_05F.PDF_INCOMPLETE_SHALLOW_IDENTITY_CATEGORY
 OWNER_DECISION.P0_05F.RESIDUAL_UNKNOWN_BINARY_FIXTURE_V1
+OWNER_DECISION.P0_05F.CLASSIFICATION_PRECEDENCE_V1
 decision_scope: deterministic P0 gate for terminal extension, declared file MIME, shallow byte signature, minimum structural-type identity, and agreement between those signals
 broader_file_security_assessment_completed: false
 runtime_behavior_changed_by_this_decision: false
@@ -339,6 +340,35 @@ The future corpus must include deterministic block cases for at least DOS/PE MZ,
 RAR 4 and RAR 5 share the first six bytes `52 61 72 21 1A 07` and differ only in the terminator; RAR 4 ends `00` at the seventh byte, and RAR 5 ends `01 00` at the seventh and eighth bytes. A RAR 4 match requires its complete seven-byte sequence, and a RAR 5 match requires its complete eight-byte sequence. The shared six-byte prefix alone is not a match for either family, RAR 4's seven-byte sequence must not be treated as matched by the RAR 5 prefix, and a RAR 5 stream must not be classified as RAR 4 on the strength of the shared prefix. Each committed match blocks as `disallowed_binary_signature` regardless of an allowed extension or declared MIME, consistent with the recognized disallowed-signature set already established above.
 
 The DOS/PE MZ match is the two-byte offset-zero prefix `4D 5A` only. This decision does not establish DOS/PE header traversal, PE structure validation, or any inspection beyond the committed offset-zero prefix bytes. For every family, this decision commits recognition bytes only for the six disallowed families named above; it does not establish archive parsing, decompression, container inspection, format validation, or recognition of any format outside these six. A binary byte stream matching none of the six committed signatures, no complete permitted identity, no readable ZIP/non-XLSX archive classification, no malformed or truncated ZIP/XLSX signalling, and no narrowly defined complete or incomplete PDF signalling remains fail-closed as `unknown_binary`.
+
+`OWNER_DECISION.P0_05F.CLASSIFICATION_PRECEDENCE_V1` records the deterministic classification precedence for P0-05F. Fixtures do not create precedence authority. The existing contract did not previously settle the newly decided pairs recorded in this decision, and this package supplies that missing owner authority. Every ordering below is a new owner decision authored by this package, except unsupported metadata before residual `unknown_binary`, which is already grounded by the existing residual ordering. The existing committed rules remain preserved: complete PDF identity is evaluated before incomplete PDF signalling; complete XLSX identity is evaluated before readable non-XLSX ZIP; and all named higher-priority outcomes are evaluated before residual `unknown_binary`.
+
+The P0-05F classification evaluation order is:
+
+```text
+1. recognized MZ, ELF, gzip, 7z, RAR 4, or RAR 5 signature
+2. unsupported extension or declared MIME
+3. supported extension/MIME disagreement
+4. complete permitted PDF or XLSX identity
+5. readable non-XLSX ZIP or malformed/truncated ZIP/XLSX classification
+6. incomplete PDF signalling
+7. TXT/MD/CSV strict text-byte gate
+8. defensive ambiguous_file_type
+9. residual unknown_binary
+```
+
+This precedence has these committed consequences:
+
+```text
+recognized signature before TXT/MD/CSV text-gate failure
+recognized signature before incomplete-PDF signalling
+recognized signature before unsupported metadata
+unsupported metadata before PDF, XLSX/ZIP, text-gate, ambiguity, and residual unknown_binary
+text-gate outcome before residual unknown_binary
+unknown_binary remains the final residual outcome
+```
+
+This decision is documentation-only authority. P0-05F.4 remains unimplemented and unstarted. The `application/json` runtime-alignment leaf remains separate and unstarted. Runtime behavior is unchanged.
 
 `OWNER_DECISION.P0_05F.RESIDUAL_UNKNOWN_BINARY_FIXTURE_V1` authorizes exactly one future synthetic fixture for P0-05F.2d3:
 

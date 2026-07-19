@@ -3578,6 +3578,25 @@ commit_hash: report after commit; a commit cannot contain its own SHA
 ```
 
 
+## P0-05F classification precedence authority
+
+```text
+leaf_status: edited_not_staged
+p0_05_package_status: classification_precedence_authority_recorded
+implementation_status: documentation_only
+evidence_class: TOOL_VERIFIED
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 1f0f16432243f85b96a123b81752c6b38a9804f8
+owner_decision_authority: OWNER_DECISION.P0_05F.CLASSIFICATION_PRECEDENCE_V1
+authorized_file_scope: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+runtime_behavior_changed: false
+p0_05f_4_status: unimplemented_and_unstarted
+runtime_alignment_leaf_status: separate_and_unstarted
+tests_run: none
+next_boundary: separate read-only verification before P0-05F.4 implementation
+```
+
+
 ---
 
 ## Plan authority record
