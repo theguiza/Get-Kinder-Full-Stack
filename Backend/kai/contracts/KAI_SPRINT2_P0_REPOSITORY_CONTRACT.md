@@ -385,6 +385,121 @@ The fixture corpus must precede detector implementation, and the runtime-alignme
 
 This decision does not settle or implement CSV row count, CSV delimiter/header validity, CSV formula-injection handling, XLSX macro detection, XLSX external relationships, OOXML path traversal, archive expansion limits, PDF text-layer proof, PDF encryption, PDF JavaScript/actions, PDF embedded files, malware scanning, upload transport, storage integration, parser/profile behavior, or production wiring. It does not reopen P0-05A through P0-05E.
 
+## P0-05F.3 detector measurement authority
+
+```text
+decision_evidence: USER_CONFIRMED
+owner_authority: OWNER_DECISION.P0_05F.DETECTOR_MEASUREMENT_AUTHORITY_V1
+runtime_behavior_changed_by_this_decision: false
+p0_05f_3_measurement_performed_by_this_decision: false
+p0_05f_4_started_by_this_decision: false
+```
+
+P0-05F.3 must determine whether any existing repository module or composed production path implements the complete committed P0-05F classification capability. The measurement must separate capability completeness from implementation form.
+
+Capability completeness is measured only by coverage of the committed classification behavior. A capability-complete implementation must cover all committed P0-05F.2e surfaces and return the required:
+
+```text
+policy
+category
+scope
+evidence
+```
+
+Its coverage must include:
+
+```text
+extension and MIME normalization
+allowed extension/MIME pairs
+unsupported metadata
+cross-type mismatches
+text-byte validation
+PDF identity
+XLSX identity
+ZIP classification
+recognized disallowed signatures
+unknown binary
+defensive ambiguous-file handling
+```
+
+Wiring, purity, and I/O do not determine capability completeness. A wired service is not disqualified from the capability measurement merely because it is wired or performs I/O. It must instead be assessed on whether it actually implements the complete classification surface.
+
+Implementation form must be established separately for every capability-complete candidate. The form measurement determines whether the candidate is:
+
+```text
+pure and deterministic
+unwired to routes and services
+free of database, network, filesystem, storage, audit, and other I/O
+suitable as the P0-05F.4 pure unwired detector
+```
+
+Capability completeness and implementation form must not be merged into one criterion.
+
+P0-05F.3 must report exactly one measurement result:
+
+```text
+COMPLETE_CAPABILITY_PRESENT_TARGET_FORM
+```
+
+A capability-complete implementation exists and already has the required pure, deterministic, unwired, no-I/O form.
+
+```text
+COMPLETE_CAPABILITY_PRESENT_NON_TARGET_FORM
+```
+
+A capability-complete implementation exists, but it is wired, performs I/O, or otherwise does not have the required P0-05F.4 form.
+
+```text
+COMPLETE_CAPABILITY_ABSENT_WITH_PARTIAL_HELPERS
+```
+
+No capability-complete implementation exists, but one or more modules or services implement part of the P0-05F surface.
+
+```text
+COMPLETE_CAPABILITY_ABSENT
+```
+
+No capability-complete implementation and no credible partial implementation exists.
+
+```text
+MEASUREMENT_INCONCLUSIVE
+```
+
+Required repository evidence is missing, conflicting, or insufficient.
+
+Known candidate treatment:
+
+```text
+Backend/kai/validators/txtMdByteDetector.js must be measured as a potential partial implementation if current repository inspection confirms its reported behavior.
+
+Backend/kai/services/kaiIntakeService.js must be measured for the metadata capability it actually implements. It must not be excluded merely because it is production-wired.
+
+Metadata-only MIME validation is not capability-complete unless it independently satisfies every committed P0-05F surface.
+
+Fixture corpora, test parsers, byte builders, and focused tests are test evidence, not production implementations.
+```
+
+P0-05F.4 handoff by P0-05F.3 measurement result:
+
+```text
+COMPLETE_CAPABILITY_PRESENT_TARGET_FORM:
+P0-05F.4 is blocked because implementing another detector would duplicate an existing suitable detector.
+
+COMPLETE_CAPABILITY_PRESENT_NON_TARGET_FORM:
+P0-05F.4 is not automatically authorized. A separate owner review must decide whether to extract, refactor, wrap, or replace the existing capability.
+
+COMPLETE_CAPABILITY_ABSENT_WITH_PARTIAL_HELPERS:
+P0-05F.4 is authorized as a separate package to implement the missing complete pure unwired detector, preserving or reusing compatible helpers only where supported by inspection.
+
+COMPLETE_CAPABILITY_ABSENT:
+P0-05F.4 is authorized as a separate package to implement the complete pure unwired detector.
+
+MEASUREMENT_INCONCLUSIVE:
+P0-05F.4 remains blocked.
+```
+
+If current repository inspection confirms that production metadata validation still allows a value rejected by the committed P0-05F contract, record that only as a separate runtime-alignment drift. Do not modify the runtime allowlist in P0-05F.3. Do not merge runtime alignment into P0-05F.3 or P0-05F.4.
+
 ## Abuse, concurrency, and timing
 
 ```text

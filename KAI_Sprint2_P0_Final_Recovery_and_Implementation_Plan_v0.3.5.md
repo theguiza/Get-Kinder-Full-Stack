@@ -3515,6 +3515,38 @@ commit_hash: report after commit; a commit cannot contain its own SHA
 ```
 
 
+## P0-05F.3 detector measurement authority
+
+```text
+leaf_status: complete after this bounded documentation-only authority package commit
+p0_05_package_status: detector_measurement_authority_defined
+implementation_status: documentation_only
+verification_status: TOOL_VERIFIED after documented checks pass
+evidence_class: TOOL_VERIFIED
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: cb5bc5b6ee181a01aeaaa24a638df0c38148a75d
+applicable_repository_instructions: root AGENTS.md only; no Node or npm command run; no database/cloud/production/push/deployment/current-state access authorized
+active_package_scope: P0-05F.3 detector measurement authority definition only; no measurement performed; no P0-05F.4 detector implementation started
+authorized_file_scope: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+detector_landscape_inventory: production implementation candidates must include repository modules and composed production paths; Backend/kai/validators/txtMdByteDetector.js is a potential partial text-byte helper if current inspection confirms its reported behavior; Backend/kai/services/kaiIntakeService.js is a production-wired metadata-validation candidate for the metadata capability it actually implements; fixture corpora, test parsers, byte builders, and focused tests are test evidence, not production implementations
+capability_complete_definition: complete P0-05F classification capability must cover all committed P0-05F.2e surfaces and return policy, category, scope, and evidence; required coverage includes extension and MIME normalization, allowed extension/MIME pairs, unsupported metadata, cross-type mismatches, text-byte validation, PDF identity, XLSX identity, ZIP classification, recognized disallowed signatures, unknown binary, and defensive ambiguous-file handling
+implementation_form_definition: implementation form is measured separately and determines whether a capability-complete candidate is pure and deterministic, unwired to routes and services, free of database, network, filesystem, storage, audit, and other I/O, and suitable as the P0-05F.4 pure unwired detector
+criterion_separation: wiring, purity, and I/O do not determine capability completeness; a wired service is not disqualified from capability measurement merely because it is wired or performs I/O; capability completeness and implementation form must not be merged into one criterion
+result_taxonomy: COMPLETE_CAPABILITY_PRESENT_TARGET_FORM; COMPLETE_CAPABILITY_PRESENT_NON_TARGET_FORM; COMPLETE_CAPABILITY_ABSENT_WITH_PARTIAL_HELPERS; COMPLETE_CAPABILITY_ABSENT; MEASUREMENT_INCONCLUSIVE
+txt_md_detector_treatment: Backend/kai/validators/txtMdByteDetector.js must be measured as a potential partial implementation if current repository inspection confirms its reported behavior; inspection for this authority package found it exports detectTxtMdBytePolicy, accepts Uint8Array byte input, applies UTF BOM and fatal UTF-8/control/lone-CR validation, and returns policy/category/scope/evidence-shaped results for the TXT/MD byte gate only
+intake_service_treatment: Backend/kai/services/kaiIntakeService.js must be measured for the metadata capability it actually implements and must not be excluded merely because it is production-wired; metadata-only MIME validation is not capability-complete unless it independently satisfies every committed P0-05F surface
+runtime_alignment_drift: separately verified only as documentation evidence that Backend/kai/services/kaiIntakeService.js currently defines ALLOWED_METADATA_ONLY_MIME_TYPES with application/json while the committed P0-05F contract rejects application/json as declared file MIME; this remains runtime-alignment drift only, not a P0-05F.3 or P0-05F.4 measurement result, and the runtime allowlist was not modified
+p0_05f_4_handoff: COMPLETE_CAPABILITY_PRESENT_TARGET_FORM blocks P0-05F.4 as duplicate suitable-detector work; COMPLETE_CAPABILITY_PRESENT_NON_TARGET_FORM requires separate owner review to extract, refactor, wrap, or replace; COMPLETE_CAPABILITY_ABSENT_WITH_PARTIAL_HELPERS authorizes a separate P0-05F.4 package to implement the missing complete pure unwired detector while preserving or reusing compatible helpers only where supported by inspection; COMPLETE_CAPABILITY_ABSENT authorizes a separate P0-05F.4 package to implement the complete pure unwired detector; MEASUREMENT_INCONCLUSIVE leaves P0-05F.4 blocked
+p0_05f_3_status: remains unperformed; this package defines the future measurement and handoff only and does not certify the current measurement result
+p0_05f_4_status: remains unstarted
+tests_run: none; documentation-only package per owner instruction
+package_exclusions: no tests, fixtures, validators, services, routes, production code, detector code, runtime allowlist, dependency, manifest, lockfile, Current State, Implementation Baseline, database, cloud, credential, deployment, push, P0-05F.3 measurement, or P0-05F.4 implementation change
+git_diff_check: git diff --check passed after final documentation-only file state before staging
+git_cached_diff_check: git diff --cached --check passed after staging exactly the two authorized files
+commit_hash: report after commit; a commit cannot contain its own SHA
+```
+
+
 ## P0-05F.2a2 XLSX/ZIP authority citation reconciliation
 
 ```text
