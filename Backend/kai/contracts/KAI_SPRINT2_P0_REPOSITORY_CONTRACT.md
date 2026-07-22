@@ -189,6 +189,7 @@ OWNER_DECISION.P0_05F.ZIP_CLASSIFICATION_BOUNDARY_V1
 OWNER_DECISION.P0_05F.PDF_INCOMPLETE_SHALLOW_IDENTITY_CATEGORY
 OWNER_DECISION.P0_05F.RESIDUAL_UNKNOWN_BINARY_FIXTURE_V1
 OWNER_DECISION.P0_05F.CLASSIFICATION_PRECEDENCE_V1
+OWNER_DECISION.P0_05F.PURE_DETECTOR_INTERFACE_V1
 decision_scope: deterministic P0 gate for terminal extension, declared file MIME, shallow byte signature, minimum structural-type identity, and agreement between those signals
 broader_file_security_assessment_completed: false
 runtime_behavior_changed_by_this_decision: false
@@ -529,6 +530,425 @@ P0-05F.4 remains blocked.
 ```
 
 If current repository inspection confirms that production metadata validation still allows a value rejected by the committed P0-05F contract, record that only as a separate runtime-alignment drift. Do not modify the runtime allowlist in P0-05F.3. Do not merge runtime alignment into P0-05F.3 or P0-05F.4.
+
+## P0-05F.4 detector-interface authority
+
+```text
+decision_evidence: USER_CONFIRMED
+owner_authority: OWNER_DECISION.P0_05F.PURE_DETECTOR_INTERFACE_V1
+runtime_behavior_changed_by_this_decision: false
+p0_05f_4_implementation_status: unimplemented
+p0_05f_4_interface_authority_status: recorded_by_this_package
+runtime_integration_status: unstarted
+runtime_alignment_status: separate_and_unstarted
+application_json_allowlist_change: prohibited_in_p0_05f_4
+```
+
+P0-05F.4 may implement only a pure unwired detector interface. It must not alter routes, services, upload runtime behavior, declared MIME runtime allowlists, storage, databases, cloud services, feature flags, dependencies, lockfiles, fixtures, or tests except in a later separately authorized implementation-test package.
+
+The authorized production detector interface is:
+
+```text
+production_module: Backend/kai/validators/p0FileTypeAgreementDetector.js
+production_export: detectP0FileTypeAgreement
+input:
+{
+  extension,
+  declaredMime,
+  bytes
+}
+extension_type: string
+declared_mime_type: string
+extension_required: true
+declared_mime_required: true
+extension_whitespace_trim: false
+missing_or_non_string_extension: throw TypeError
+missing_or_non_string_declared_mime: throw TypeError
+empty_extension: valid input; block / unsupported_file_type
+empty_declared_mime: valid input; block / unsupported_file_type
+test_adapter_missing_extension: convert to empty string before invocation
+test_adapter_missing_declared_mime: convert to empty string before invocation
+filename_input: prohibited
+extension canonicalizes using ASCII case-insensitive lowercase comparison
+declared MIME trims surrounding ASCII whitespace
+declared MIME type/subtype canonicalize to lowercase
+MIME parameters are retained and classify as unsupported_file_type
+bytes must be Uint8Array
+bytes must not be mutated
+bytes_type: Uint8Array
+bytes_mutation: prohibited
+non_Uint8Array: throw TypeError
+```
+
+`extension` is the already-selected terminal extension signal. Filename parsing, filename-hazard policy, multiple-extension policy, and path/name safety remain outside this detector and remain governed by the committed filename policy.
+
+Every detector result must be a frozen object containing exactly these enumerable own keys:
+
+```text
+policy
+category
+scope
+evidence
+```
+
+`policy`, `category`, and `scope` must be strings from the committed detector result table below. `evidence` must be a frozen closed object containing only bounded scalar or bounded enumerated diagnostic facts needed to prove which deterministic row fired. Evidence may include only these key families when relevant:
+
+```text
+normalized_extension
+normalized_declared_mime
+unsupported_signal
+extension_supported
+declared_mime_supported
+metadata_pairing
+recognized_signature_family
+recognized_signature_offset
+detected_permitted_type
+zip_classification
+pdf_classification
+text_gate_category
+text_gate_scope
+evaluation_step
+```
+
+Evidence must exclude raw bytes, decoded text, file content, filesystem paths, storage identifiers, signed URLs, credentials, arbitrary objects, and unbounded arrays.
+
+The declared file MIME parameter behavior is pre-existing contract authority, not fixture-derived authority and not a new owner decision in this P0-05F.4 package. Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md lines 211-236 already state that declared file MIME is normalized by trimming surrounding ASCII whitespace and lowercasing the type and subtype; MIME parameters are not accepted; `text/plain; charset=utf-8` blocks rather than being silently stripped or reinterpreted; and every declared MIME value not explicitly listed in the matrix is unsupported. Therefore:
+
+```text
+declared MIME normalization trims surrounding ASCII whitespace
+declared MIME type/subtype canonicalize to lowercase
+MIME parameters are not stripped
+MIME parameters are not reinterpreted
+parameterized text/plain; charset=utf-8 blocks as unsupported_file_type
+authority_class: pre_existing_contract_authority
+contract_source: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md lines 211-236
+```
+
+Empty declared MIME and empty terminal extension have different authority labels:
+
+```text
+empty MIME:
+  outcome: block / unsupported_file_type
+  authority_class: pre_existing_contract_authority
+  contract_source: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md lines 236-240
+
+empty extension:
+  outcome: block / unsupported_file_type
+  authority_class: new_owner_decision
+  rationale: this decision extends the committed every-other-extension-blocks rule to the empty-string extension input
+  authority_created_by:
+    OWNER_DECISION.P0_05F.PURE_DETECTOR_INTERFACE_V1
+```
+
+This empty-extension decision does not claim that the existing extension rule literally names the empty-string case.
+
+The detector evaluation order remains exactly `OWNER_DECISION.P0_05F.CLASSIFICATION_PRECEDENCE_V1` and is not changed by this decision:
+
+```text
+1. recognized MZ, ELF, gzip, 7z, RAR 4, or RAR 5 signature
+2. unsupported extension or declared MIME
+3. supported extension/MIME disagreement
+4. complete permitted PDF or XLSX identity
+5. readable non-XLSX ZIP or malformed/truncated ZIP/XLSX classification
+6. incomplete PDF signalling
+7. TXT/MD/CSV strict text-byte gate
+8. defensive ambiguous_file_type
+9. residual unknown_binary
+```
+
+The existing text-byte helper may be wrapped, not redefined:
+
+```text
+helper: Backend/kai/validators/txtMdByteDetector.js
+export: detectTxtMdBytePolicy
+decision: wrap
+applies_at_precedence_step: 7
+applies_to:
+.txt
+.md
+.csv
+
+helper allow:
+allow / type_agreement_pass / type_agreement_pass_only
+
+helper block:
+preserve encoding_binary_gate_block_only unchanged
+```
+
+A text-gate block must never become `unknown_binary` or `unknown_binary_block_only`. CSV uses the same strict text-byte boundary committed for TXT/MD/CSV.
+
+Pre-existing scope authorities:
+
+```text
+scope: type_agreement_pass_only
+contract_source: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md lines 271-281 and 319-321
+authority_class: pre_existing_contract_authority
+
+scope: pdf_shallow_identity_block_only
+contract_source: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md lines 283-309
+authority_class: pre_existing_contract_authority
+
+scope: unknown_binary_block_only
+contract_source: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md lines 373-387
+authority_class: pre_existing_contract_authority
+
+scope: encoding_gate_pass_only
+contract_source: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md lines 98-128 and 136-163
+authority_class: pre_existing_contract_authority
+```
+
+newly_ratified_scopes:
+
+```text
+scope: unsupported_metadata_block_only
+deterministic_condition: unsupported extension or declared MIME
+contract_grounded_category: unsupported_file_type
+fixture_source_path: __tests__/support/kaiSprint2UnsupportedExtensionMimeFixtureCorpus.js
+fixture_source_matching_lines: __tests__/support/kaiSprint2UnsupportedExtensionMimeFixtureCorpus.js:105
+fixture_source_evidence: TOOL_VERIFIED
+pre_existing_contract_authority: false
+authority_created_by:
+  OWNER_DECISION.P0_05F.PURE_DETECTOR_INTERFACE_V1
+
+scope: type_agreement_block_only
+deterministic_condition:
+  1. supported extension/MIME disagreement
+  2. recognized MZ, ELF, gzip, 7z, RAR 4, or RAR 5 signature at byte offset zero, regardless of extension or declared MIME
+contract_grounded_category: declared_type_mismatch or disallowed_binary_signature
+fixture_source_path: __tests__/support/kaiSprint2ExtensionMimeMatrixFixtureCorpus.js; __tests__/support/kaiSprint2TextTypeAgreementFixtureCorpus.js; __tests__/support/kaiSprint2RecognizedDisallowedSignatureFixtureCorpus.js
+fixture_source_matching_lines: __tests__/support/kaiSprint2ExtensionMimeMatrixFixtureCorpus.js:129; __tests__/support/kaiSprint2TextTypeAgreementFixtureCorpus.js:175; __tests__/support/kaiSprint2RecognizedDisallowedSignatureFixtureCorpus.js:102, 117, 132, 147, 162, 177
+fixture_source_evidence: TOOL_VERIFIED
+pre_existing_contract_authority: false
+authority_created_by:
+  OWNER_DECISION.P0_05F.PURE_DETECTOR_INTERFACE_V1
+
+scope: type_agreement_block_only
+
+scope_semantics:
+generic P0-05F type-agreement blocking boundary; the scope identifies the bounded detector layer, not one exclusive category
+
+authorized_conditions:
+1. supported extension/MIME disagreement
+   category: declared_type_mismatch
+
+2. recognized MZ, ELF, gzip, 7z, RAR 4, or RAR 5 signature at byte offset zero, regardless of extension or declared MIME
+   category: disallowed_binary_signature
+
+shared_scope_authorized: true
+authorized_condition_count: 2
+additional_conditions_authorized: false
+authority_created_by:
+  OWNER_DECISION.P0_05F.PURE_DETECTOR_INTERFACE_V1
+
+scope: detected_permitted_type_contradiction_only
+deterministic_condition: extension and declared MIME agree on one permitted type but complete byte identity establishes another permitted type
+contract_grounded_category: declared_type_mismatch
+fixture_source_path: __tests__/support/kaiSprint2DetectedPermittedTypeContradictionFixtureCorpus.js
+fixture_source_matching_lines: __tests__/support/kaiSprint2DetectedPermittedTypeContradictionFixtureCorpus.js:77
+fixture_source_evidence: TOOL_VERIFIED
+pre_existing_contract_authority: false
+authority_created_by:
+  OWNER_DECISION.P0_05F.PURE_DETECTOR_INTERFACE_V1
+
+scope: standalone_archive_or_non_xlsx_block_only
+deterministic_condition: structurally readable ZIP bytes without complete XLSX identity
+contract_grounded_category: standalone_archive_or_non_xlsx
+fixture_source_path: __tests__/support/kaiSprint2XlsxZipFixtureCorpus.js
+fixture_source_matching_lines: none from required raw scope grep
+fixture_source_evidence: USER_CONFIRMED
+pre_existing_contract_authority: false
+authority_created_by:
+  OWNER_DECISION.P0_05F.PURE_DETECTOR_INTERFACE_V1
+
+scope: truncated_or_malformed_type_block_only
+deterministic_condition: malformed or truncated ZIP/XLSX-signalling bytes
+contract_grounded_category: truncated_or_malformed_type
+fixture_source_path: __tests__/support/kaiSprint2XlsxZipFixtureCorpus.js
+fixture_source_matching_lines: none from required raw scope grep
+fixture_source_evidence: USER_CONFIRMED
+pre_existing_contract_authority: false
+authority_created_by:
+  OWNER_DECISION.P0_05F.PURE_DETECTOR_INTERFACE_V1
+
+scope: encoding_binary_gate_block_only
+deterministic_condition: TXT/MD/CSV strict text-byte helper block
+contract_grounded_category: unsupported_bom_encoding, invalid_utf8, nul_rejection, prohibited_control, or lone_cr
+fixture_source_path: __tests__/support/kaiSprint2TxtMdByteFixtureCorpus.js
+fixture_source_matching_lines: __tests__/support/kaiSprint2TxtMdByteFixtureCorpus.js:279, 291, 303, 315, 327, 339, 351, 363, 375, 387, 399, 411, 423, 435, 447, 459
+fixture_source_evidence: TOOL_VERIFIED
+pre_existing_contract_authority: false
+authority_created_by:
+  OWNER_DECISION.P0_05F.PURE_DETECTOR_INTERFACE_V1
+
+scope: ambiguous_file_type_block_only
+deterministic_condition: multiple permitted types genuinely remain plausible after applying all committed signals
+contract_grounded_category: ambiguous_file_type
+fixture_source_path: none
+fixture_source_evidence: not_applicable
+source_kind: contract-grounded defensive category
+pre_existing_contract_authority: false
+authority_created_by:
+  OWNER_DECISION.P0_05F.PURE_DETECTOR_INTERFACE_V1
+```
+
+These newly ratified scopes are valid only because the attached category is explicitly contract-grounded, the cited fixture outcome does not conflict with controlling contract text, each deterministic condition resolves to an authorized scope, and the scope does not broaden the detector claim beyond the policy/category result.
+
+Each deterministic condition must resolve to exactly one authorized scope.
+
+A scope label may be shared across more than one deterministic condition only when this owner decision explicitly enumerates every condition and category permitted to use it.
+
+type_agreement_block_only is shared only by the two conditions expressly listed above.
+
+Detector result rows:
+
+```text
+evaluation_condition: recognized MZ, ELF, gzip, 7z, RAR 4, or RAR 5 signature at byte offset zero
+policy: block
+category: disallowed_binary_signature
+scope: type_agreement_block_only
+scope_authority: OWNER_DECISION.P0_05F.PURE_DETECTOR_INTERFACE_V1
+allowed_evidence_keys: recognized_signature_family, recognized_signature_offset, normalized_extension, normalized_declared_mime, evaluation_step
+contract_category_authority: OWNER_DECISION.P0_05F.DISALLOWED_SIGNATURE_BYTES
+
+evaluation_condition: unsupported extension or declared MIME
+policy: block
+category: unsupported_file_type
+scope: unsupported_metadata_block_only
+scope_authority: OWNER_DECISION.P0_05F.PURE_DETECTOR_INTERFACE_V1; empty MIME category pre-existing at Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md lines 236-240; empty extension scope created by this decision
+allowed_evidence_keys: normalized_extension, normalized_declared_mime, unsupported_signal, extension_supported, declared_mime_supported, evaluation_step
+contract_category_authority: OWNER_DECISION.P0_05F.TYPE_AGREEMENT_MATRIX_V1
+
+evaluation_condition: supported extension/MIME disagreement
+policy: block
+category: declared_type_mismatch
+scope: type_agreement_block_only
+scope_authority: OWNER_DECISION.P0_05F.PURE_DETECTOR_INTERFACE_V1
+allowed_evidence_keys: normalized_extension, normalized_declared_mime, metadata_pairing, evaluation_step
+contract_category_authority: OWNER_DECISION.P0_05F.TYPE_AGREEMENT_MATRIX_V1
+
+evaluation_condition: extension and declared MIME agree on one permitted type but complete byte identity establishes another permitted type
+policy: block
+category: declared_type_mismatch
+scope: detected_permitted_type_contradiction_only
+scope_authority: OWNER_DECISION.P0_05F.PURE_DETECTOR_INTERFACE_V1
+allowed_evidence_keys: normalized_extension, normalized_declared_mime, metadata_pairing, detected_permitted_type, evaluation_step
+contract_category_authority: OWNER_DECISION.P0_05F.DETECTED_PERMITTED_TYPE_CONTRADICTION_V1
+
+evaluation_condition: complete permitted PDF identity with .pdf plus application/pdf
+policy: allow
+category: type_agreement_pass
+scope: type_agreement_pass_only
+scope_authority: pre_existing_contract_authority
+allowed_evidence_keys: normalized_extension, normalized_declared_mime, pdf_classification, evaluation_step
+contract_category_authority: OWNER_DECISION.P0_05F.TYPE_AGREEMENT_MATRIX_V1
+
+evaluation_condition: complete permitted XLSX identity with .xlsx plus application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+policy: allow
+category: type_agreement_pass
+scope: type_agreement_pass_only
+scope_authority: pre_existing_contract_authority
+allowed_evidence_keys: normalized_extension, normalized_declared_mime, zip_classification, evaluation_step
+contract_category_authority: OWNER_DECISION.P0_05F.XLSX_CENTRAL_DIRECTORY_BOUNDARY_V1
+
+evaluation_condition: structurally readable ZIP bytes without complete XLSX identity
+policy: block
+category: standalone_archive_or_non_xlsx
+scope: standalone_archive_or_non_xlsx_block_only
+scope_authority: OWNER_DECISION.P0_05F.PURE_DETECTOR_INTERFACE_V1
+allowed_evidence_keys: normalized_extension, normalized_declared_mime, zip_classification, evaluation_step
+contract_category_authority: OWNER_DECISION.P0_05F.ZIP_CLASSIFICATION_BOUNDARY_V1
+
+evaluation_condition: malformed or truncated ZIP/XLSX-signalling bytes
+policy: block
+category: truncated_or_malformed_type
+scope: truncated_or_malformed_type_block_only
+scope_authority: OWNER_DECISION.P0_05F.PURE_DETECTOR_INTERFACE_V1
+allowed_evidence_keys: normalized_extension, normalized_declared_mime, zip_classification, evaluation_step
+contract_category_authority: OWNER_DECISION.P0_05F.ZIP_CLASSIFICATION_BOUNDARY_V1
+
+evaluation_condition: narrowly defined incomplete PDF signalling after complete PDF identity has failed
+policy: block
+category: truncated_or_malformed_type
+scope: pdf_shallow_identity_block_only
+scope_authority: pre_existing_contract_authority
+allowed_evidence_keys: normalized_extension, normalized_declared_mime, pdf_classification, evaluation_step
+contract_category_authority: OWNER_DECISION.P0_05F.PDF_INCOMPLETE_SHALLOW_IDENTITY_CATEGORY
+
+evaluation_condition: TXT/MD/CSV strict text-byte helper allow
+policy: allow
+category: type_agreement_pass
+scope: type_agreement_pass_only
+scope_authority: pre_existing_contract_authority
+allowed_evidence_keys: normalized_extension, normalized_declared_mime, text_gate_category, text_gate_scope, evaluation_step
+contract_category_authority: OWNER_DECISION.P0_05F.TYPE_AGREEMENT_MATRIX_V1
+
+evaluation_condition: TXT/MD/CSV strict text-byte helper block: unsupported BOM encoding
+policy: block
+category: unsupported_bom_encoding
+scope: encoding_binary_gate_block_only
+scope_authority: OWNER_DECISION.P0_05F.PURE_DETECTOR_INTERFACE_V1
+allowed_evidence_keys: normalized_extension, normalized_declared_mime, text_gate_category, text_gate_scope, evaluation_step
+contract_category_authority: OWNER_DECISION.P0_05C.UNSUPPORTED_BOM_REJECTION
+
+evaluation_condition: TXT/MD/CSV strict text-byte helper block: invalid UTF-8
+policy: block
+category: invalid_utf8
+scope: encoding_binary_gate_block_only
+scope_authority: OWNER_DECISION.P0_05F.PURE_DETECTOR_INTERFACE_V1
+allowed_evidence_keys: normalized_extension, normalized_declared_mime, text_gate_category, text_gate_scope, evaluation_step
+contract_category_authority: OWNER_DECISION.P0_05C.INVALID_UTF8_REJECTION
+
+evaluation_condition: TXT/MD/CSV strict text-byte helper block: NUL rejection
+policy: block
+category: nul_rejection
+scope: encoding_binary_gate_block_only
+scope_authority: OWNER_DECISION.P0_05F.PURE_DETECTOR_INTERFACE_V1
+allowed_evidence_keys: normalized_extension, normalized_declared_mime, text_gate_category, text_gate_scope, evaluation_step
+contract_category_authority: OWNER_DECISION.P0_05C.NUL_REJECTION
+
+evaluation_condition: TXT/MD/CSV strict text-byte helper block: prohibited control
+policy: block
+category: prohibited_control
+scope: encoding_binary_gate_block_only
+scope_authority: OWNER_DECISION.P0_05F.PURE_DETECTOR_INTERFACE_V1
+allowed_evidence_keys: normalized_extension, normalized_declared_mime, text_gate_category, text_gate_scope, evaluation_step
+contract_category_authority: OWNER_DECISION.P0_05C.PROHIBITED_CONTROL_REJECTION
+
+evaluation_condition: TXT/MD/CSV strict text-byte helper block: lone CR
+policy: block
+category: lone_cr
+scope: encoding_binary_gate_block_only
+scope_authority: OWNER_DECISION.P0_05F.PURE_DETECTOR_INTERFACE_V1
+allowed_evidence_keys: normalized_extension, normalized_declared_mime, text_gate_category, text_gate_scope, evaluation_step
+contract_category_authority: OWNER_DECISION.P0_05C.LONE_CR_REJECTION
+
+evaluation_condition: multiple permitted types genuinely remain plausible after applying all committed signals
+policy: block
+category: ambiguous_file_type
+scope: ambiguous_file_type_block_only
+scope_authority: OWNER_DECISION.P0_05F.PURE_DETECTOR_INTERFACE_V1
+allowed_evidence_keys: normalized_extension, normalized_declared_mime, evaluation_step
+contract_category_authority: OWNER_DECISION.P0_05F.CLASSIFICATION_PRECEDENCE_V1
+
+evaluation_condition: residual non-text bytes matching no complete permitted identity, no recognized disallowed signature, no readable ZIP/non-XLSX classification, no malformed/truncated ZIP/XLSX signalling, and no narrowly defined complete or incomplete PDF signalling
+policy: block
+category: unknown_binary
+scope: unknown_binary_block_only
+scope_authority: pre_existing_contract_authority
+allowed_evidence_keys: normalized_extension, normalized_declared_mime, evaluation_step
+contract_category_authority: OWNER_DECISION.P0_05F.RESIDUAL_UNKNOWN_BINARY_FIXTURE_V1
+```
+
+Future implementation-test boundary:
+
+```text
+test_module: __tests__/kai-sprint2-p0-file-type-agreement-detector.spec.js
+frozen_corpus_count: 9
+frozen_fixture_count: 101
+existing_combined_completeness_spec_changed: false
+```
+
+The future detector test must import all nine frozen corpora, invoke the production detector exactly once for every one of the 101 fixtures, use explicit per-corpus input adapters, assert policy, category, scope, and closed evidence shape, prove 101 executions, and prove fixture IDs remain unique. The production detector must not import tests, corpora, fixture builders, or the combined-completeness specification. The corpus verifies the detector; it does not create categories, precedence, scopes, or production rules.
 
 ## Abuse, concurrency, and timing
 

@@ -3597,6 +3597,61 @@ next_boundary: separate read-only verification before P0-05F.4 implementation
 ```
 
 
+## P0-05F.4 detector-interface authority
+
+```text
+decision_evidence: USER_CONFIRMED
+edit_verification: TOOL_VERIFIED after documented checks pass
+leaf_status: corrected_not_staged
+p0_05_package_status: detector_interface_authority_recorded
+implementation_status: documentation_only
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 52d4769d52b907a58061beb7057f323887bbdd7f
+owner_decision_authority: OWNER_DECISION.P0_05F.PURE_DETECTOR_INTERFACE_V1
+authorized_file_scope: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+active_package_scope: bounded documentation-only P0-05F.4 detector-interface authority package; no implementation preflight repeated; no detector implementation started
+production_module_recorded: Backend/kai/validators/p0FileTypeAgreementDetector.js
+production_export_recorded: detectP0FileTypeAgreement
+input_recorded: extension, declaredMime, bytes
+input_contract_completed: extension_type string; declared_mime_type string; extension_required true; declared_mime_required true; extension_whitespace_trim false; missing_or_non_string_extension throws TypeError; missing_or_non_string_declared_mime throws TypeError; empty_extension and empty_declared_mime are valid input and block as unsupported_file_type; test adapters convert missing extension or declared MIME to empty string before invocation
+filename_input: prohibited
+extension_signal: already-selected terminal extension signal; filename parsing and filename-hazard policy remain outside this detector
+bytes_type: Uint8Array
+bytes_mutation: prohibited
+non_Uint8Array: throw TypeError
+result_contract: every detector result is a frozen object containing exactly policy, category, scope, evidence
+evidence_allowlist_exclusions: raw bytes; decoded text; file content; filesystem paths; storage identifiers; signed URLs; credentials; arbitrary objects; unbounded arrays
+evaluation_order_preserved: OWNER_DECISION.P0_05F.CLASSIFICATION_PRECEDENCE_V1 unchanged; order remains recognized MZ/ELF/gzip/7z/RAR 4/RAR 5 signature; unsupported extension or declared MIME; supported extension/MIME disagreement; complete permitted PDF or XLSX identity; readable non-XLSX ZIP or malformed/truncated ZIP/XLSX classification; incomplete PDF signalling; TXT/MD/CSV strict text-byte gate; defensive ambiguous_file_type; residual unknown_binary
+newly_ratified_scopes: unsupported_metadata_block_only; type_agreement_block_only; detected_permitted_type_contradiction_only; standalone_archive_or_non_xlsx_block_only; truncated_or_malformed_type_block_only; encoding_binary_gate_block_only; ambiguous_file_type_block_only
+pre_existing_scope_authorities: type_agreement_pass_only; pdf_shallow_identity_block_only; unknown_binary_block_only; encoding_gate_pass_only
+mime_parameter_authority: pre_existing_contract_authority from Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md lines 211-236; declared MIME normalization trims surrounding ASCII whitespace; declared MIME type/subtype canonicalize to lowercase; MIME parameters are not stripped; MIME parameters are not reinterpreted; parameterized text/plain; charset=utf-8 blocks as unsupported_file_type
+empty_mime_authority: pre_existing_contract_authority; empty MIME blocks as unsupported_file_type under literal unsupported declared MIME language in Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md lines 236-240
+empty_extension_owner_decision: new_owner_decision; empty terminal extension blocks as unsupported_file_type; rationale is that this decision extends the committed every-other-extension-blocks rule to the empty-string extension input and does not claim the existing extension rule literally names the empty-string case
+helper_mapping: Backend/kai/validators/txtMdByteDetector.js detectTxtMdBytePolicy is wrapped at precedence step 7 for .txt, .md, and .csv; helper allow maps to allow / type_agreement_pass / type_agreement_pass_only; helper block preserves encoding_binary_gate_block_only unchanged and expands to explicit unsupported_bom_encoding, invalid_utf8, nul_rejection, prohibited_control, and lone_cr rows; text-gate blocks must never become unknown_binary or unknown_binary_block_only; CSV uses the same strict text-byte boundary committed for TXT/MD/CSV
+type_agreement_block_only_shared_scope_authorized: true
+type_agreement_block_only_authorized_conditions: supported extension/MIME disagreement -> declared_type_mismatch; recognized MZ, ELF, gzip, 7z, RAR 4, or RAR 5 signature at byte offset zero, regardless of extension or declared MIME -> disallowed_binary_signature
+fixture_scope_rawgrep: TOOL_VERIFIED for unsupported_metadata_block_only, type_agreement_block_only, detected_permitted_type_contradiction_only, and encoding_binary_gate_block_only; USER_CONFIRMED for standalone_archive_or_non_xlsx_block_only and truncated_or_malformed_type_block_only because required raw scope grep did not output those scope tokens; not_applicable for ambiguous_file_type_block_only
+fixture_source_evidence_classes: TOOL_VERIFIED; USER_CONFIRMED; not_applicable
+result_rows_recorded: recognized disallowed signature; unsupported extension or declared MIME; supported extension/MIME disagreement; detected permitted-type contradiction; complete permitted PDF identity; complete permitted XLSX identity; readable non-XLSX ZIP; malformed or truncated ZIP/XLSX; incomplete PDF signalling; TXT/MD/CSV strict text-byte helper allow; TXT/MD/CSV strict text-byte helper block unsupported_bom_encoding; TXT/MD/CSV strict text-byte helper block invalid_utf8; TXT/MD/CSV strict text-byte helper block nul_rejection; TXT/MD/CSV strict text-byte helper block prohibited_control; TXT/MD/CSV strict text-byte helper block lone_cr; defensive ambiguous_file_type; residual unknown_binary
+test_module: __tests__/kai-sprint2-p0-file-type-agreement-detector.spec.js
+frozen_corpus_count: 9
+frozen_fixture_count: 101
+existing_combined_completeness_spec_changed: false
+future_test_requirements: import all nine frozen corpora; invoke production detector exactly once for every one of the 101 fixtures; use explicit per-corpus input adapters; assert policy, category, scope, and closed evidence shape; prove 101 executions; prove fixture IDs remain unique
+production_detector_import_boundary: production detector must not import tests, corpora, fixture builders, or the combined-completeness specification
+corpus_authority_boundary: corpus verifies the detector; it does not create categories, precedence, scopes, or production rules
+p0_05f_4_implementation_status: unimplemented
+p0_05f_4_interface_authority_status: recorded_by_this_package
+p0_05f_4_ready_to_start: false
+readiness_condition: interface authority must be committed and separately verified
+runtime_integration_status: unstarted
+runtime_alignment_status: separate_and_unstarted
+application_json_allowlist_change: prohibited_in_p0_05f_4
+tests_run: none; documentation-only package per owner instruction
+package_exclusions: no production code, tests, fixtures, routes, services, dependencies, lockfiles, Current State, Implementation Baseline, runtime configuration, database, cloud, deployment, staging, or commit
+```
+
+
 ---
 
 ## Plan authority record
