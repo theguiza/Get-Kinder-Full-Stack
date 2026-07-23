@@ -4028,6 +4028,22 @@ next_package_or_stop_condition: OWNER-DIRECTED STOP after this commit; do not be
 ```
 
 
+## P0-06A owner acceptance
+
+```text
+p0_06a_acceptance_status: accepted
+accepted_by: owner (USER_CONFIRMED)
+accepted_at_head: 0f7893c78249a97e5ac32dfa6f223929f339e1f3
+acceptance_basis: complete P0-06A synthetic-lifecycle coverage (13 positive edges, 29 negative edges, terminal-state rejection, replay and confirmation-conflict, cross-org isolation, defensive copy, exact success/failure envelopes, prohibited-field boundary, expiry-boundary and ordering); zero-byte confirmed uploads rejected in contract + implementation + tests (verified_size_bytes >= 1, validation_blocker/422); full suite node --test **tests**/*.spec.js green at 695 pass / 0 fail in a listener-capable environment, owner-run; prior loopback EPERM failures confirmed environmental
+acceptance_scope: full — no deferred items; zero-byte rejection is included, not outstanding
+reviewed_work_backed_up: origin/codex/kai-sprint2-p0-v0.3.5 == 0f7893c (USER_CONFIRMED)
+production_state: main at e39efb2, untouched; reviewed branch not merged, not deployed
+p0_06b_status: NOT_CONFIRMED
+gate_a_status: NOT_CONFIRMED
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this acceptance commit; P0-06B and Gate A remain blocked; do not begin any P0-06B, Gate A, merge, or deploy work without separate owner authorization
+```
+
+
 ---
 
 Plan authority record
