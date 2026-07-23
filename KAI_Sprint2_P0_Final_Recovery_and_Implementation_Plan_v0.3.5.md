@@ -1960,6 +1960,136 @@ expired
 
 No lifecycle transition performs deletion or retention. No database schema compatibility is claimed.
 
+### Owner-approved synthetic upload-lifecycle repository authority
+
+```text
+decision_identifier:
+  OWNER_DECISION.P0_06A.SYNTHETIC_UPLOAD_LIFECYCLE_REPOSITORY_V1
+
+decision_evidence:
+  USER_CONFIRMED
+
+authority_status:
+  active_documentation_authority
+
+implementation_status:
+  not_started
+
+authority_commit_scope:
+  Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md
+  KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+
+planned_implementation_location:
+  Backend/kai/upload/
+
+repository_operations:
+  createReservedUploadLifecycle
+  getUploadLifecycle
+  transitionUploadLifecycle
+
+state_authority:
+  KAI_SPRINT2_P0_UPLOAD_STATES
+
+synthetic_record_field_count:
+  12
+
+file_policy_status_authority:
+  existing committed intake_files.file_policy_status contract
+
+file_policy_status_writes:
+  pending at creation
+  blocked when entering policy_blocked
+
+transition_edge_count:
+  13
+
+sole_post_confirmation_edge:
+  confirmed -> policy_blocked
+
+terminal_upload_states:
+  policy_blocked
+  abandoned
+  expired
+
+creation_replay:
+  identical scoped identity returns replayed true without mutation
+
+transition_replay:
+  exact target-state replay with identical transition facts returns replayed true without mutation
+
+transition_evaluation_order:
+  validate input
+  scoped lookup
+  exact replay
+  non-replay pre-confirmation expiry enforcement
+  expected-state check
+  authorized-edge check
+  atomic transition
+
+expiry_replay_rule:
+  exact replay is evaluated before expiry; new pre-confirmation progression at or after expiry is denied except transition to expired
+
+conflict_mapping:
+  creation conflict, stale expected state, and conflicting replay facts use conflict_current_state_changed / 409
+
+error_vocabulary:
+  validation_blocker
+  state_transition_denied
+  conflict_current_state_changed
+  not_found
+
+new_error_codes_created:
+  false
+
+clock_source:
+  caller-supplied only
+
+system_clock_read_authorized:
+  false
+
+reservation_expiry:
+  exactly 24 hours after caller-supplied creation time
+
+organization_scope:
+  organization_id plus intake_file_id
+
+cross_organization_disclosure:
+  forbidden; missing and nondisclosable records return identical not_found / 404
+
+durable_schema_claim:
+  false
+
+database_or_cloud_binding_changed:
+  false
+
+runtime_config_changed:
+  false
+
+tests_changed:
+  false
+
+route_or_service_changed:
+  false
+
+storage_adapter_changed:
+  false
+
+timeout_or_concurrency_behavior_changed:
+  false
+
+audit_metric_or_executor_binding_changed:
+  false
+
+delete_or_retention_added:
+  false
+
+p0_06b_status:
+  Gate-A-blocked
+
+next_package_or_stop_condition:
+  OWNER-DIRECTED STOP after this two-file documentation-only authority commit; do not begin implementation or another leaf without separate owner authorization
+```
+
 ## P0-06A completion
 
 May establish:

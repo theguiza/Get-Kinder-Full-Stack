@@ -1004,6 +1004,368 @@ Lifecycle semantics are:
 
 No lifecycle transition deletes an object or executes retention. P0-06A may implement this lifecycle only through dependency-injected interfaces and an in-memory synthetic repository. P0-06B durable persistence is blocked by Gate A.
 
+### OWNER_DECISION.P0_06A.SYNTHETIC_UPLOAD_LIFECYCLE_REPOSITORY_V1
+
+```text
+decision_evidence: USER_CONFIRMED
+decision_scope: dependency-injected in-memory synthetic upload-lifecycle repository only
+implementation_status: not_started
+durable_schema_claim: false
+p0_06b_authorized: false
+```
+
+This decision defines the executable contract for a later bounded P0-06A synthetic upload-lifecycle repository. It authorizes no route, listener, byte storage, database, cloud integration, durable schema, production binding, deletion, retention, or P0-06B implementation.
+
+#### Repository operations
+
+The repository exposes exactly:
+
+<!-- BEGIN_P0_06A_LIFECYCLE_OPERATIONS_V1 -->
+
+```text
+createReservedUploadLifecycle
+getUploadLifecycle
+transitionUploadLifecycle
+```
+
+<!-- END_P0_06A_LIFECYCLE_OPERATIONS_V1 -->
+
+Inputs:
+
+```text
+createReservedUploadLifecycle({
+  organizationId,
+  intakeBatchId,
+  intakeFileId,
+  now
+})
+
+getUploadLifecycle({
+  organizationId,
+  intakeFileId
+})
+
+transitionUploadLifecycle({
+  organizationId,
+  intakeFileId,
+  expectedUploadState,
+  newUploadState,
+  now,
+  objectVersionId?,
+  verifiedChecksum?,
+  verifiedSizeBytes?
+})
+```
+
+No list, delete, retention, cleanup, upload, confirmation, checksum-computation, audit, metric, storage, security-assessment, or executor operation is authorized.
+
+#### State and record authority
+
+Every `upload_state` is constrained by the existing committed `KAI_SPRINT2_P0_UPLOAD_STATES` constant. This decision creates no new state value or duplicate state vocabulary.
+
+The synthetic record contains exactly:
+
+<!-- BEGIN_P0_06A_SYNTHETIC_RECORD_FIELDS_V1 -->
+
+```text
+organization_id
+intake_batch_id
+intake_file_id
+upload_state
+file_policy_status
+upload_state_changed_at
+upload_expires_at
+object_version_id
+verified_checksum
+verified_size_bytes
+verified_at
+created_at
+```
+
+<!-- END_P0_06A_SYNTHETIC_RECORD_FIELDS_V1 -->
+
+These fields define only the in-memory synthetic record and make no durable-schema or deployed-database claim.
+
+Creation initializes:
+
+```text
+upload_state: reserved
+file_policy_status: pending
+created_at: caller-supplied now
+upload_state_changed_at: caller-supplied now
+upload_expires_at: caller-supplied now plus exactly 24 hours
+object_version_id: null
+verified_checksum: null
+verified_size_bytes: null
+verified_at: null
+```
+
+`file_policy_status` remains governed by the existing committed `intake_files.file_policy_status` contract. This repository writes only `pending` at creation and `blocked` when entering `policy_blocked`. It creates no new file-policy value.
+
+Always immutable:
+
+```text
+organization_id
+intake_batch_id
+intake_file_id
+created_at
+upload_expires_at
+```
+
+`object_version_id` is nullable until entering `uploaded_unconfirmed` and immutable after assignment.
+
+`verified_checksum`, `verified_size_bytes`, and `verified_at` are nullable until confirmation and immutable afterward.
+
+`upload_state_changed_at` changes only after a successful non-replay transition.
+
+Returned records are defensive copies. The record contains no raw bytes, bucket, object key, path, URI, signed URL, provider-private identifier, or unrestricted metadata.
+
+#### Authorized transition graph
+
+<!-- BEGIN_P0_06A_UPLOAD_LIFECYCLE_EDGES_V1 -->
+
+```text
+reserved -> upload_started
+reserved -> policy_blocked
+reserved -> abandoned
+reserved -> expired
+upload_started -> uploaded_unconfirmed
+upload_started -> policy_blocked
+upload_started -> abandoned
+upload_started -> expired
+uploaded_unconfirmed -> confirmed
+uploaded_unconfirmed -> policy_blocked
+uploaded_unconfirmed -> abandoned
+uploaded_unconfirmed -> expired
+confirmed -> policy_blocked
+```
+
+<!-- END_P0_06A_UPLOAD_LIFECYCLE_EDGES_V1 -->
+
+There are exactly 13 directed edges.
+
+Terminal states:
+
+```text
+policy_blocked
+abandoned
+expired
+```
+
+No other edge is authorized.
+
+`confirmed -> policy_blocked` is the sole post-confirmation edge. Confirmation establishes exact-version and integrity confirmation only; it does not establish safety, evidence approval, parsing completion, or generation eligibility.
+
+#### Transition requirements
+
+Entering `uploaded_unconfirmed` requires a non-empty opaque `object_version_id`. The value is generated outside this repository, is provider-neutral and version-bound, and becomes immutable when stored.
+
+Entering `confirmed` requires:
+
+```text
+the same stored object_version_id
+a canonical lowercase 64-hex SHA-256 verified_checksum
+a non-negative integer verified_size_bytes
+caller-supplied now
+```
+
+On confirmation:
+
+```text
+verified_at = caller-supplied now
+```
+
+Entering `policy_blocked` sets:
+
+```text
+file_policy_status = blocked
+```
+
+`abandoned` is allowed only before confirmation.
+
+`expired` is allowed only from `reserved`, `upload_started`, or `uploaded_unconfirmed`, and only when:
+
+```text
+caller-supplied now >= upload_expires_at
+```
+
+A confirmed record does not expire through this repository.
+
+No transition deletes bytes, deletes an object, performs cleanup, or executes retention.
+
+#### Clock and expiry
+
+Creation and transition require a valid normalized caller-supplied `now`.
+
+The repository never reads or constructs system time and does not obtain time from an environment, database, network, filesystem, storage provider, or cloud provider.
+
+Replay does not alter timestamps or extend expiry. A retry’s `now` is not a replay-conflict fact.
+
+Transition evaluation order is exactly:
+
+```text
+1. validate inputs and transition-specific facts
+2. perform organization-scoped lookup
+3. evaluate exact replay
+4. enforce expiry for every non-replay pre-confirmation request
+5. require stored upload_state to equal expected_upload_state
+6. require an authorized directed edge
+7. apply the complete transition atomically
+```
+
+Before `upload_expires_at`, a transition to `expired` is denied.
+
+At or after `upload_expires_at`, the only new transition allowed for a pre-confirmation record is `expired`.
+
+Because replay is evaluated first, a transition completed before expiry remains replayable afterward when all replay facts match.
+
+#### Organization scope
+
+The repository key and every read or transition use:
+
+```text
+organization_id
+intake_file_id
+```
+
+Creation additionally requires `intake_batch_id`.
+
+The service layer must validate the organization, batch, and file relationship before creation. The repository does not perform cross-organization scans or establish global file-identifier uniqueness.
+
+No ID-only lookup, tenant probe, fallback lookup, or unscoped lookup is authorized.
+
+Missing and nondisclosable scoped records return identical `not_found` / 404 results. No response discloses another organization’s record or whether one exists.
+
+Separate in-memory repository instances share no state.
+
+#### Creation replay
+
+When no scoped record exists, `createReservedUploadLifecycle` creates the record in `reserved`.
+
+An existing scoped record with the same `organization_id`, `intake_file_id`, and `intake_batch_id` returns the existing record with:
+
+```text
+replayed: true
+```
+
+Replay changes no stored field and does not extend expiry.
+
+A scoped record with a conflicting `intake_batch_id` returns:
+
+```text
+conflict_current_state_changed — 409
+```
+
+#### Transition replay and conflict behavior
+
+When stored state equals `expected_upload_state` and the requested edge is authorized, the transition succeeds with `replayed: false`.
+
+When stored state already equals `new_upload_state` and all transition-specific facts match, return the existing record with `replayed: true`.
+
+Replay facts:
+
+```text
+uploaded_unconfirmed:
+  object_version_id
+
+confirmed:
+  object_version_id
+  verified_checksum
+  verified_size_bytes
+
+policy_blocked:
+  no caller-supplied transition fact
+
+abandoned:
+  no caller-supplied transition fact
+
+expired:
+  no caller-supplied transition fact
+```
+
+A same-target replay with conflicting facts returns `conflict_current_state_changed` / 409.
+
+A stored state different from both the expected and target states returns `conflict_current_state_changed` / 409.
+
+A recognized but unauthorized edge returns `state_transition_denied` / 422.
+
+Every failed creation or transition leaves stored state unchanged.
+
+#### Error and result contract
+
+This decision creates no new lifecycle-specific error code and uses exactly:
+
+<!-- BEGIN_P0_06A_LIFECYCLE_ERROR_CODES_V1 -->
+
+```text
+validation_blocker
+state_transition_denied
+conflict_current_state_changed
+not_found
+```
+
+<!-- END_P0_06A_LIFECYCLE_ERROR_CODES_V1 -->
+
+Mapping:
+
+```text
+invalid or malformed input:
+  validation_blocker — 422
+
+unauthorized transition:
+  state_transition_denied — 422
+
+creation, expected-state, or replay-fact conflict:
+  conflict_current_state_changed — 409
+
+missing or nondisclosable scoped record:
+  not_found — 404
+```
+
+Creation and transition success:
+
+```js
+{
+  ok: true,
+  data: {
+    record,
+    replayed: boolean
+  },
+  error: null
+}
+```
+
+Read success:
+
+```js
+{
+  ok: true,
+  data: {
+    record
+  },
+  error: null
+}
+```
+
+Failure:
+
+```js
+{
+  ok: false,
+  data: null,
+  error: {
+    code,
+    status
+  }
+}
+```
+
+#### Implementation boundary
+
+This decision authorizes only a later in-memory synthetic repository package under `Backend/kai/upload/`.
+
+It does not authorize implementation in this documentation step, production composition, barrel export, upload or confirmation routes, listener behavior, byte storage, object-version generation, checksum computation, streaming, backpressure, size or timeout enforcement, abort or cleanup execution, concurrency permits, shared coordination, audit, metrics, security-assessment enqueueing, executor enablement, database or cloud persistence, schema changes, deletion, retention, feature enablement, P0-06B, deployment, or push.
+
 Object integrity keeps declared and verified facts distinct:
 
 ```text
