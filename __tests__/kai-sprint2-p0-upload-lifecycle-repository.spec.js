@@ -618,6 +618,230 @@ test("validation blockers cover malformed inputs and transition facts", () => {
   );
 });
 
+test("success envelopes expose exact top-level and data shapes", () => {
+  const repo = createInMemoryUploadLifecycleRepository();
+
+  const created = repo.createReservedUploadLifecycle(BASE_CREATE);
+  assert.deepEqual(Object.keys(created), ["ok", "data", "error"]);
+  assert.equal(created.ok, true);
+  assert.equal(created.error, null);
+  assert.deepEqual(Object.keys(created.data), ["record", "replayed"]);
+  assert.equal(typeof created.data.replayed, "boolean");
+
+  const transitioned = repo.transitionUploadLifecycle(
+    transitionInput("reserved", "upload_started", { now: PLUS_ONE_HOUR }),
+  );
+  assert.deepEqual(Object.keys(transitioned), ["ok", "data", "error"]);
+  assert.equal(transitioned.ok, true);
+  assert.equal(transitioned.error, null);
+  assert.deepEqual(Object.keys(transitioned.data), ["record", "replayed"]);
+  assert.equal(typeof transitioned.data.replayed, "boolean");
+
+  const read = repo.getUploadLifecycle({
+    organizationId: BASE_CREATE.organizationId,
+    intakeFileId: BASE_CREATE.intakeFileId,
+  });
+  assert.deepEqual(Object.keys(read), ["ok", "data", "error"]);
+  assert.equal(read.ok, true);
+  assert.equal(read.error, null);
+  assert.deepEqual(Object.keys(read.data), ["record"]);
+  assert.equal(Object.hasOwn(read.data, "replayed"), false);
+});
+
+test("failure envelopes expose exact top-level and error shapes for every error class", () => {
+  const cases = [
+    {
+      name: "validation_blocker",
+      result: createInMemoryUploadLifecycleRepository().createReservedUploadLifecycle({
+        ...BASE_CREATE,
+        extra: true,
+      }),
+      code: "validation_blocker",
+      status: 422,
+    },
+    {
+      name: "state_transition_denied",
+      result: createRepoWithState("reserved").transitionUploadLifecycle(
+        transitionInput("reserved", "expired", { now: PLUS_ONE_HOUR }),
+      ),
+      code: "state_transition_denied",
+      status: 422,
+    },
+    {
+      name: "conflict_current_state_changed",
+      result: createRepoWithState("upload_started").transitionUploadLifecycle(
+        transitionInput("reserved", "policy_blocked"),
+      ),
+      code: "conflict_current_state_changed",
+      status: 409,
+    },
+    {
+      name: "not_found",
+      result: createInMemoryUploadLifecycleRepository().getUploadLifecycle({
+        organizationId: BASE_CREATE.organizationId,
+        intakeFileId: BASE_CREATE.intakeFileId,
+      }),
+      code: "not_found",
+      status: 404,
+    },
+  ];
+
+  for (const { name, result, code, status } of cases) {
+    assert.deepEqual(Object.keys(result), ["ok", "data", "error"], name);
+    assert.equal(result.ok, false, name);
+    assert.equal(result.data, null, name);
+    assert.deepEqual(Object.keys(result.error), ["code", "status"], name);
+    assert.equal(result.error.code, code, name);
+    assert.equal(result.error.status, status, name);
+  }
+});
+
+test("success records contain only authorized fields and no private storage boundary fields", () => {
+  const repo = createInMemoryUploadLifecycleRepository();
+  const authorizedFields = new Set([
+    "organization_id",
+    "intake_batch_id",
+    "intake_file_id",
+    "upload_state",
+    "file_policy_status",
+    "upload_state_changed_at",
+    "upload_expires_at",
+    "object_version_id",
+    "verified_checksum",
+    "verified_size_bytes",
+    "verified_at",
+    "created_at",
+  ]);
+  const prohibitedNormalizedKeys = new Set([
+    "bucket",
+    "objectkey",
+    "path",
+    "uri",
+    "url",
+    "signedurl",
+    "rawbytes",
+    "bytes",
+    "buffer",
+    "provider",
+    "providerid",
+    "provideridentifier",
+    "providerprivateid",
+    "providerprivateidentifier",
+    "metadata",
+    "unrestrictedmetadata",
+  ]);
+
+  const created = repo.createReservedUploadLifecycle(BASE_CREATE);
+  assert.equal(created.ok, true);
+  const read = repo.getUploadLifecycle({
+    organizationId: BASE_CREATE.organizationId,
+    intakeFileId: BASE_CREATE.intakeFileId,
+  });
+  assert.equal(read.ok, true);
+  const transitioned = repo.transitionUploadLifecycle(
+    transitionInput("reserved", "upload_started", { now: PLUS_ONE_HOUR }),
+  );
+  assert.equal(transitioned.ok, true);
+
+  for (const [operationName, record] of [
+    ["create", created.data.record],
+    ["read", read.data.record],
+    ["transition", transitioned.data.record],
+  ]) {
+    const recordKeys = Object.keys(record);
+    assert.equal(
+      recordKeys.every((key) => authorizedFields.has(key)),
+      true,
+      `${operationName} returned unauthorized keys: ${recordKeys.join(",")}`,
+    );
+    assert.equal(
+      recordKeys.some((key) => {
+        const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
+        return prohibitedNormalizedKeys.has(normalized) || normalized.startsWith("provider");
+      }),
+      false,
+      `${operationName} returned prohibited boundary keys: ${recordKeys.join(",")}`,
+    );
+  }
+});
+
+test("cross-tenant reads and transitions are indistinguishable from absent records", () => {
+  const repo = createInMemoryUploadLifecycleRepository();
+  assert.equal(repo.createReservedUploadLifecycle(BASE_CREATE).ok, true);
+
+  const crossTenantRead = repo.getUploadLifecycle({
+    organizationId: "org-2",
+    intakeFileId: BASE_CREATE.intakeFileId,
+  });
+  const absentRead = repo.getUploadLifecycle({
+    organizationId: "org-2",
+    intakeFileId: "absent-file",
+  });
+  assert.deepEqual(crossTenantRead, absentRead);
+  assert.deepEqual(crossTenantRead, {
+    ok: false,
+    data: null,
+    error: { code: "not_found", status: 404 },
+  });
+
+  const crossTenantTransition = repo.transitionUploadLifecycle({
+    ...transitionInput("reserved", "upload_started"),
+    organizationId: "org-2",
+  });
+  const absentTransition = repo.transitionUploadLifecycle({
+    ...transitionInput("reserved", "upload_started"),
+    organizationId: "org-2",
+    intakeFileId: "absent-file",
+  });
+  assert.deepEqual(crossTenantTransition, absentTransition);
+  assert.deepEqual(crossTenantTransition, {
+    ok: false,
+    data: null,
+    error: { code: "not_found", status: 404 },
+  });
+});
+
+test("returned lifecycle records are defensive copies across writes and reads", () => {
+  const repo = createInMemoryUploadLifecycleRepository();
+  const created = repo.createReservedUploadLifecycle(BASE_CREATE);
+  assert.equal(created.ok, true);
+  const originalCreatedRecord = { ...created.data.record };
+
+  created.data.record.upload_state = "confirmed";
+  created.data.record.organization_id = "mutated-org";
+  created.data.record.verified_size_bytes = 999;
+
+  const afterCreateMutation = repo.getUploadLifecycle({
+    organizationId: BASE_CREATE.organizationId,
+    intakeFileId: BASE_CREATE.intakeFileId,
+  });
+  assert.equal(afterCreateMutation.ok, true);
+  assert.deepEqual(afterCreateMutation.data.record, originalCreatedRecord);
+
+  const firstRead = repo.getUploadLifecycle({
+    organizationId: BASE_CREATE.organizationId,
+    intakeFileId: BASE_CREATE.intakeFileId,
+  });
+  const secondRead = repo.getUploadLifecycle({
+    organizationId: BASE_CREATE.organizationId,
+    intakeFileId: BASE_CREATE.intakeFileId,
+  });
+  assert.equal(firstRead.ok, true);
+  assert.equal(secondRead.ok, true);
+  assert.notStrictEqual(firstRead.data.record, secondRead.data.record);
+
+  firstRead.data.record.upload_state = "confirmed";
+  firstRead.data.record.intake_batch_id = "mutated-batch";
+  assert.deepEqual(secondRead.data.record, originalCreatedRecord);
+
+  const finalRead = repo.getUploadLifecycle({
+    organizationId: BASE_CREATE.organizationId,
+    intakeFileId: BASE_CREATE.intakeFileId,
+  });
+  assert.equal(finalRead.ok, true);
+  assert.deepEqual(finalRead.data.record, originalCreatedRecord);
+});
+
 test("repository instances share no in-memory state", () => {
   const first = createInMemoryUploadLifecycleRepository();
   const second = createInMemoryUploadLifecycleRepository();

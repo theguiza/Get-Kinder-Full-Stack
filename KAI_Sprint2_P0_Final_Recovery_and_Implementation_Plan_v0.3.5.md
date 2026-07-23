@@ -3939,6 +3939,39 @@ commit_hash: report after commit; a commit cannot contain its own SHA
 ```
 
 
+## P0-06A envelope and boundary coverage
+
+```text
+leaf_status: complete after this bounded test-only package commit
+p0_06a_package_status: envelope_and_boundary_coverage_added
+implementation_status: test_only
+verification_status: TOOL_VERIFIED
+evidence_class: TOOL_VERIFIED
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 5836a011e6a0e21dfd481559d6c779dbd17648ab
+applicable_repository_instructions: root AGENTS.md only; DATABASE_URL sentinel used for every Node command; no database/cloud/production/push/deployment/current-state access authorized
+active_package_scope: bounded P0-06A test-only envelope and boundary coverage for the synthetic upload-lifecycle repository; no implementation, contract-authority, transition-graph, replay, confirmation-conflict, expiry-boundary, accepted-key, factory-hardening, broad-suite, full-suite, P0-06B, database, cloud, or production change
+authorized_file_scope: __tests__/kai-sprint2-p0-upload-lifecycle-repository.spec.js; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+authority_reference: OWNER_DECISION.P0_06A.SYNTHETIC_UPLOAD_LIFECYCLE_REPOSITORY_V1
+authority_evidence: USER_CONFIRMED
+envelope_boundary_coverage_added: exact create success envelope; exact transition success envelope; exact read success envelope without replayed; exact failure envelope for validation_blocker/422, state_transition_denied/422, conflict_current_state_changed/409, and not_found/404; success-record authorized-field subset and prohibited private-storage-field exclusion across create/read/transition; cross-tenant read and transition not_found identity with absent records; defensive-copy immutability across returned write records and successive reads
+authorized_record_field_count_asserted: 12
+failure_error_extra_fields_asserted_absent: TOOL_VERIFIED
+success_read_replayed_field_asserted_absent: TOOL_VERIFIED
+cross_organization_disclosure: TOOL_VERIFIED by response identity assertion; missing and nondisclosable records both return identical not_found / 404 envelopes
+stored_record_defensive_copy_asserted: TOOL_VERIFIED
+lifecycle_repository_test_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-p0-upload-lifecycle-repository.spec.js - tests 22; pass 22; fail 0
+focused_test_counts: total 22; passed 22; failed 0
+p0_06a_acceptance_status: pending
+p0_06b_status: NOT_CONFIRMED
+gate_a_status: NOT_CONFIRMED
+p0_06b_gate_a_blocked_by_plan_authority: USER_CONFIRMED
+package_exclusions: no production code, route, service, storage, database, runtime configuration, dependency, lockfile, Current State, Implementation Baseline, contract authority, P0-06B, Gate A, push, deployment, cloud, credential, real-client-data, broad-suite, or full-suite change
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this two-file commit; do not begin another leaf without separate owner authorization
+commit_hash: report after commit; a commit cannot contain its own SHA
+```
+
+
 ---
 
 Plan authority record
