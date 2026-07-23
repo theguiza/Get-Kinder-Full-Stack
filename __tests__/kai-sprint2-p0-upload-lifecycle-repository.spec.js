@@ -16,6 +16,7 @@ const PLUS_ONE_HOUR = "2026-07-23T11:00:00.000Z";
 const PLUS_TWO_HOURS = "2026-07-23T12:00:00.000Z";
 const AT_EXPIRY = "2026-07-24T10:00:00.000Z";
 const CHECKSUM_A = "a".repeat(64);
+const CHECKSUM_B = "b".repeat(64);
 
 const AUTHORIZED_EDGES = Object.freeze([
   ["reserved", "upload_started"],
@@ -95,6 +96,15 @@ function createRepoWithState(state) {
     true,
   );
   return repo;
+}
+
+function readStoredRecord(repo) {
+  const read = repo.getUploadLifecycle({
+    organizationId: BASE_CREATE.organizationId,
+    intakeFileId: BASE_CREATE.intakeFileId,
+  });
+  assert.equal(read.ok, true);
+  return read.data.record;
 }
 
 test("DI factory exposes exactly the three authorized operations", () => {
@@ -371,6 +381,166 @@ test("transition replay runs before expiry and does not alter timestamps", () =>
   assert.equal(replay.ok, true);
   assert.equal(replay.data.replayed, true);
   assert.deepEqual(replay.data.record, uploaded.data.record);
+});
+
+test("uploaded_unconfirmed replay requires the same object version and never mutates stored state", () => {
+  const replayRepo = createRepoWithState("upload_started");
+  const uploaded = replayRepo.transitionUploadLifecycle(
+    transitionInput("upload_started", "uploaded_unconfirmed", {
+      objectVersionId: "object-version-1",
+      now: PLUS_ONE_HOUR,
+    }),
+  );
+  assert.equal(uploaded.ok, true);
+  const uploadedBefore = readStoredRecord(replayRepo);
+
+  const replay = replayRepo.transitionUploadLifecycle(
+    transitionInput("upload_started", "uploaded_unconfirmed", {
+      objectVersionId: "object-version-1",
+      now: PLUS_TWO_HOURS,
+    }),
+  );
+
+  assert.equal(replay.ok, true);
+  assert.equal(replay.data.replayed, true);
+  assert.deepEqual(replay.data.record, uploadedBefore);
+  assert.deepEqual(readStoredRecord(replayRepo), uploadedBefore);
+
+  const conflictRepo = createRepoWithState("uploaded_unconfirmed");
+  const conflictBefore = readStoredRecord(conflictRepo);
+
+  const conflict = conflictRepo.transitionUploadLifecycle(
+    transitionInput("upload_started", "uploaded_unconfirmed", {
+      objectVersionId: "object-version-2",
+      now: PLUS_TWO_HOURS,
+    }),
+  );
+
+  assert.deepEqual(conflict, {
+    ok: false,
+    data: null,
+    error: { code: "conflict_current_state_changed", status: 409 },
+  });
+  assert.deepEqual(readStoredRecord(conflictRepo), conflictBefore);
+});
+
+test("confirmed replay requires matching object version, checksum, and size without timestamp mutation", () => {
+  const repo = createRepoWithState("confirmed");
+  const before = readStoredRecord(repo);
+
+  const replay = repo.transitionUploadLifecycle(
+    transitionInput("uploaded_unconfirmed", "confirmed", {
+      objectVersionId: "object-version-1",
+      verifiedChecksum: CHECKSUM_A,
+      verifiedSizeBytes: 7,
+      now: PLUS_TWO_HOURS,
+    }),
+  );
+
+  assert.equal(replay.ok, true);
+  assert.equal(replay.data.replayed, true);
+  assert.deepEqual(replay.data.record, before);
+  assert.deepEqual(readStoredRecord(repo), before);
+});
+
+test("confirmed replay fact conflicts are independent 409s and leave stored state unchanged", () => {
+  const cases = [
+    {
+      name: "object version",
+      overrides: { objectVersionId: "object-version-2" },
+    },
+    {
+      name: "checksum",
+      overrides: { verifiedChecksum: CHECKSUM_B },
+    },
+    {
+      name: "size",
+      overrides: { verifiedSizeBytes: 8 },
+    },
+  ];
+
+  for (const { name, overrides } of cases) {
+    const repo = createRepoWithState("confirmed");
+    const before = readStoredRecord(repo);
+
+    const result = repo.transitionUploadLifecycle(
+      transitionInput("uploaded_unconfirmed", "confirmed", {
+        objectVersionId: "object-version-1",
+        verifiedChecksum: CHECKSUM_A,
+        verifiedSizeBytes: 7,
+        now: PLUS_TWO_HOURS,
+        ...overrides,
+      }),
+    );
+
+    assert.deepEqual(
+      result,
+      {
+        ok: false,
+        data: null,
+        error: { code: "conflict_current_state_changed", status: 409 },
+      },
+      name,
+    );
+    assert.deepEqual(readStoredRecord(repo), before, `${name} conflict mutated stored record`);
+  }
+});
+
+test("confirmation accepts zero size and rejects invalid size and checksum facts without mutation", () => {
+  const zeroSizeRepo = createRepoWithState("uploaded_unconfirmed");
+  const zeroSize = zeroSizeRepo.transitionUploadLifecycle(
+    transitionInput("uploaded_unconfirmed", "confirmed", {
+      objectVersionId: "object-version-1",
+      verifiedChecksum: CHECKSUM_A,
+      verifiedSizeBytes: 0,
+      now: PLUS_TWO_HOURS,
+    }),
+  );
+
+  assert.equal(zeroSize.ok, true);
+  assert.equal(zeroSize.data.replayed, false);
+  assert.equal(zeroSize.data.record.verified_size_bytes, 0);
+
+  const cases = [
+    {
+      name: "negative size",
+      overrides: { verifiedSizeBytes: -1 },
+    },
+    {
+      name: "non-integer size",
+      overrides: { verifiedSizeBytes: 7.5 },
+    },
+    {
+      name: "uppercase checksum",
+      overrides: { verifiedChecksum: CHECKSUM_A.toUpperCase() },
+    },
+  ];
+
+  for (const { name, overrides } of cases) {
+    const repo = createRepoWithState("uploaded_unconfirmed");
+    const before = readStoredRecord(repo);
+
+    const result = repo.transitionUploadLifecycle(
+      transitionInput("uploaded_unconfirmed", "confirmed", {
+        objectVersionId: "object-version-1",
+        verifiedChecksum: CHECKSUM_A,
+        verifiedSizeBytes: 7,
+        now: PLUS_TWO_HOURS,
+        ...overrides,
+      }),
+    );
+
+    assert.deepEqual(
+      result,
+      {
+        ok: false,
+        data: null,
+        error: { code: "validation_blocker", status: 422 },
+      },
+      name,
+    );
+    assert.deepEqual(readStoredRecord(repo), before, `${name} mutated stored record`);
+  }
 });
 
 test("same-target replay fact conflicts and expected-state conflicts return 409", () => {

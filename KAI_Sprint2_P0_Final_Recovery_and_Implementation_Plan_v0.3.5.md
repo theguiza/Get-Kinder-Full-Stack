@@ -3912,6 +3912,33 @@ commit_hash: report after commit; a commit cannot contain its own SHA
 ```
 
 
+## P0-06A replay and confirmation-conflict coverage
+
+```text
+leaf_status: complete after this bounded test-only package commit
+p0_06a_package_status: replay_and_confirmation_conflict_coverage_added
+implementation_status: test_only
+verification_status: TOOL_VERIFIED after documented checks pass
+evidence_class: TOOL_VERIFIED
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: fea74224ca4c7d315e3da9282c58579c9dbbc48f
+applicable_repository_instructions: root AGENTS.md only; DATABASE_URL sentinel used for every Node command; no database/cloud/production/push/deployment/current-state access authorized
+active_package_scope: bounded P0-06A test-only replay and confirmation-conflict coverage for the synthetic upload-lifecycle repository; no implementation, contract-authority, transition-graph, expiry-boundary, accepted-key, tenant, defensive-copy, envelope, prohibited-field, factory-hardening, terminal-replay, broad-suite, full-suite, P0-06B, database, cloud, or production change
+authorized_file_scope: __tests__/kai-sprint2-p0-upload-lifecycle-repository.spec.js; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+replay_confirmation_coverage_added: uploaded_unconfirmed exact object-version replay; uploaded_unconfirmed conflicting object-version replay 409; confirmed exact object-version/checksum/size replay; confirmed independent object-version, checksum, and size conflict 409s; retry now immutability; confirmation size 0 acceptance; negative and non-integer size validation blockers; uppercase checksum validation blocker
+stored_record_immutability_asserted: every replay and failed attempt in this leaf asserts stored state unchanged
+lifecycle_repository_test_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test **tests**/kai-sprint2-p0-upload-lifecycle-repository.spec.js - 17 passed, 0 failed
+repository_contract_test_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test **tests**/kai-sprint2-p0-repository-contract.spec.js - 9 passed, 0 failed
+focused_test_counts: lifecycle repository 17; repository contract 9
+p0_06a_acceptance_status: pending
+p0_06b_status: Gate-A-blocked
+gate_a_status: blocked
+remaining_pending_verification: expiry, tenant, envelope, prohibited-field, defensive-copy, terminal-replay, broad Sprint 2 suite, and full repository suite
+package_exclusions: no production code, route, service, storage, database, runtime configuration, dependency, lockfile, Current State, Implementation Baseline, contract authority, P0-06B, Gate A, push, deployment, cloud, credential, real-client-data, broad-suite, or full-suite change
+commit_hash: report after commit; a commit cannot contain its own SHA
+```
+
+
 ---
 
 Plan authority record
