@@ -11,6 +11,7 @@ import {
   KAI_SPRINT2_P0_PATTERNS,
   KAI_SPRINT2_P0_REQUEST_LIMITS,
   KAI_SPRINT2_P0_RESOURCE_LIMITS,
+  KAI_SPRINT2_P0_REVIEW_QUEUE_STATUS_TRANSITIONS,
   KAI_SPRINT2_P0_REVIEW_QUEUE_TYPES,
   KAI_SPRINT2_P0_SECURITY_EXECUTOR,
   KAI_SPRINT2_P0_STRING_LIMITS,
@@ -146,6 +147,38 @@ test("queue vocabulary is shared by the repository contract and runtime validato
   for (const queueType of KAI_SPRINT2_P0_REVIEW_QUEUE_TYPES) {
     assert.match(contract, new RegExp(`^${queueType}$`, "m"));
   }
+});
+
+test("review-queue transition graph has exactly thirteen distinct directed edges", () => {
+  const expectedTransitions = [
+    { from: "open", to: "in_progress" },
+    { from: "open", to: "blocked" },
+    { from: "open", to: "waiting_on_client" },
+    { from: "open", to: "cancelled" },
+    { from: "in_progress", to: "open" },
+    { from: "in_progress", to: "blocked" },
+    { from: "in_progress", to: "waiting_on_client" },
+    { from: "in_progress", to: "resolved" },
+    { from: "in_progress", to: "cancelled" },
+    { from: "blocked", to: "open" },
+    { from: "blocked", to: "in_progress" },
+    { from: "waiting_on_client", to: "waiting_on_gk" },
+    { from: "waiting_on_gk", to: "in_progress" },
+  ];
+  const graphBlock = contract.match(/exactly these 13 distinct directed edges:\n\n```text\n(?<edges>[\s\S]*?)\n```/);
+  assert.ok(graphBlock);
+
+  const documentedEdges = graphBlock.groups.edges
+    .trim()
+    .split("\n")
+    .map((edge) => edge.trim());
+  const configuredEdges = KAI_SPRINT2_P0_REVIEW_QUEUE_STATUS_TRANSITIONS
+    .map(({ from, to }) => `${from} -> ${to}`);
+  const expectedEdges = expectedTransitions.map(({ from, to }) => `${from} -> ${to}`);
+
+  assert.deepEqual(configuredEdges, expectedEdges);
+  assert.deepEqual(documentedEdges, expectedEdges);
+  assert.equal(new Set(documentedEdges).size, 13);
 });
 
 test("contract retains the P0-06A boundary and unverified persistence labels", () => {

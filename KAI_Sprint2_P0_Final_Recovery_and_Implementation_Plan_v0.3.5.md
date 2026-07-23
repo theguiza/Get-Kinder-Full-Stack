@@ -3747,6 +3747,32 @@ git_diff_check: passed
 package_exclusions: no route, service, storage, database, runtime, allowlist, fixture corpus, existing-test other than the focused detector spec, combined-completeness, dependency, lockfile, Current State, Implementation Baseline, push, deploy, cloud, credential, or real-client-data change
 ```
 
+## P0-04 — review-queue transition graph lock
+
+```text
+leaf_status: complete
+p0_04_package_status: review_queue_transition_graph_locked
+implementation_status: contract_constant_and_repository_test_only
+verification_status: TOOL_VERIFIED
+evidence_class: TOOL_VERIFIED
+owner_directed_leaf_scope: USER_CONFIRMED
+pre_edit_error_code_gate: passed; committed contract contains conflict_current_state_changed, state_transition_denied, validation_blocker, and not_found
+pre_edit_upload_state_gate: passed; committed KAI_SPRINT2_P0_UPLOAD_STATES authority is Backend/kai/config/kaiSprint2P0Contract.js
+transition_graph_authority: Backend/kai/config/kaiSprint2P0Contract.js KAI_SPRINT2_P0_REVIEW_QUEUE_STATUS_TRANSITIONS
+transition_edge_count: 13
+new_error_codes_created: false
+documented_edges_count_checked_before_commit: 13
+runtime_route_behavior_changed: false
+route_mount_changed: false
+database_cloud_credentials_production_real_data: not accessed or modified
+current_state_update: not performed
+focused_contract_test: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-p0-repository-contract.spec.js - 10 passed, 0 failed
+sprint2_suite: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-*.spec.js - sandbox run hit localhost listen EPERM; unchanged localhost-capable rerun passed 563 tests, 0 failed
+full_repository_test: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - sandbox run hit localhost listen EPERM; unchanged localhost-capable rerun passed 668 tests, 0 failed
+git_diff_check: passed
+forbidden_legacy_conflict_token_in_committed_diff: false
+```
+
 
 ---
 
