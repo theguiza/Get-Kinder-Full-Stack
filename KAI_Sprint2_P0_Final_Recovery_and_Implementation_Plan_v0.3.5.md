@@ -3972,6 +3972,37 @@ commit_hash: report after commit; a commit cannot contain its own SHA
 ```
 
 
+## P0-06A expiry boundary coverage
+
+```text
+leaf_status: complete after this bounded test-only package commit
+p0_06a_package_status: expiry_boundary_coverage_added
+implementation_status: test_only
+verification_status: TOOL_VERIFIED
+evidence_class: TOOL_VERIFIED
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 6177e882c153fd1c01189d8210ccf34e5b455558
+applicable_repository_instructions: root AGENTS.md only; DATABASE_URL sentinel used for the focused Node test command; no database/cloud/production/push/deployment/current-state access authorized
+active_package_scope: bounded P0-06A test-only expiry-boundary coverage for the synthetic upload-lifecycle repository; no implementation, contract-authority, transition-graph, replay/confirmation-conflict beyond expiry-order assertions, accepted-key, tenant, defensive-copy, envelope, prohibited-field, factory-hardening, broad-suite, full-suite, P0-06B, database, cloud, or production change
+authorized_file_scope: __tests__/kai-sprint2-p0-upload-lifecycle-repository.spec.js; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+authority_reference: OWNER_DECISION.P0_06A.SYNTHETIC_UPLOAD_LIFECYCLE_REPOSITORY_V1
+authority_evidence: USER_CONFIRMED
+expiry_boundary_coverage_added: replay-before-expiry ordering at and after upload_expires_at; expiry precedence over expected-state mismatch and unauthorized-edge denial for non-replay pre-confirmation transitions; before/at/after expiry boundary timing; expired transition allowed at and after expiry from reserved, upload_started, and uploaded_unconfirmed only; confirmed exact replay after expiry unaffected by expiry; readable stored records and unchanged upload_expires_at after expiry denial and expired transition
+caller_supplied_clock_only: TOOL_VERIFIED
+denial_envelope_asserted: ok false; data null; error code state_transition_denied; status 422
+no_deletion_or_retention_on_expiry_asserted: TOOL_VERIFIED
+lifecycle_repository_test_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-p0-upload-lifecycle-repository.spec.js - tests 28; pass 28; fail 0
+focused_test_counts: total 28; passed 28; failed 0
+p0_06a_acceptance_status: pending
+p0_06b_status: NOT_CONFIRMED
+gate_a_status: NOT_CONFIRMED
+p0_06b_gate_a_blocked_by_plan_authority: USER_CONFIRMED
+package_exclusions: no production code, route, service, storage, database, runtime configuration, dependency, lockfile, Current State, Implementation Baseline, contract authority, P0-06B, Gate A, push, deployment, cloud, credential, real-client-data, broad-suite, or full-suite change
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this two-file commit; do not begin another leaf without separate owner authorization
+commit_hash: report after commit; a commit cannot contain its own SHA
+```
+
+
 ---
 
 Plan authority record

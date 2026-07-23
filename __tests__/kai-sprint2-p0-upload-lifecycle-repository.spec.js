@@ -14,7 +14,9 @@ const BASE_CREATE = Object.freeze({
 
 const PLUS_ONE_HOUR = "2026-07-23T11:00:00.000Z";
 const PLUS_TWO_HOURS = "2026-07-23T12:00:00.000Z";
+const BEFORE_EXPIRY = "2026-07-24T09:59:59.999Z";
 const AT_EXPIRY = "2026-07-24T10:00:00.000Z";
+const AFTER_EXPIRY = "2026-07-24T10:00:00.001Z";
 const CHECKSUM_A = "a".repeat(64);
 const CHECKSUM_B = "b".repeat(64);
 
@@ -383,6 +385,34 @@ test("transition replay runs before expiry and does not alter timestamps", () =>
   assert.deepEqual(replay.data.record, uploaded.data.record);
 });
 
+test("pre-expiry transitions remain exact-replayable at and after expiry without mutation", () => {
+  const repo = createRepoWithState("upload_started");
+  const uploaded = repo.transitionUploadLifecycle(
+    transitionInput("upload_started", "uploaded_unconfirmed", {
+      objectVersionId: "object-version-1",
+      now: BEFORE_EXPIRY,
+    }),
+  );
+  assert.equal(uploaded.ok, true);
+  assert.equal(uploaded.data.replayed, false);
+  const storedBeforeReplay = readStoredRecord(repo);
+
+  for (const now of [AT_EXPIRY, AFTER_EXPIRY]) {
+    const replay = repo.transitionUploadLifecycle(
+      transitionInput("upload_started", "uploaded_unconfirmed", {
+        objectVersionId: "object-version-1",
+        now,
+      }),
+    );
+
+    assert.equal(replay.ok, true, now);
+    assert.equal(replay.data.replayed, true, now);
+    assert.deepEqual(replay.data.record, storedBeforeReplay, now);
+    assert.deepEqual(readStoredRecord(repo), storedBeforeReplay, now);
+    assert.equal(replay.data.record.upload_expires_at, AT_EXPIRY, now);
+  }
+});
+
 test("uploaded_unconfirmed replay requires the same object version and never mutates stored state", () => {
   const replayRepo = createRepoWithState("upload_started");
   const uploaded = replayRepo.transitionUploadLifecycle(
@@ -587,6 +617,177 @@ test("non-replay pre-confirmation expiry allows only the expired transition", ()
   );
   assert.equal(expired.ok, true);
   assert.equal(expired.data.record.upload_state, "expired");
+});
+
+test("expiry denial precedes expected-state mismatch and unauthorized-edge checks", () => {
+  const expectedMismatchRepo = createRepoWithState("upload_started");
+  const expectedMismatchBefore = readStoredRecord(expectedMismatchRepo);
+
+  const expectedMismatch = expectedMismatchRepo.transitionUploadLifecycle(
+    transitionInput("reserved", "policy_blocked", { now: AT_EXPIRY }),
+  );
+
+  assert.deepEqual(expectedMismatch, {
+    ok: false,
+    data: null,
+    error: { code: "state_transition_denied", status: 422 },
+  });
+  assert.deepEqual(readStoredRecord(expectedMismatchRepo), expectedMismatchBefore);
+
+  const unauthorizedEdgeRepo = createRepoWithState("upload_started");
+  const unauthorizedEdgeBefore = readStoredRecord(unauthorizedEdgeRepo);
+
+  const unauthorizedEdge = unauthorizedEdgeRepo.transitionUploadLifecycle(
+    transitionInput("upload_started", "confirmed", {
+      objectVersionId: "object-version-1",
+      verifiedChecksum: CHECKSUM_A,
+      verifiedSizeBytes: 7,
+      now: AFTER_EXPIRY,
+    }),
+  );
+
+  assert.deepEqual(unauthorizedEdge, {
+    ok: false,
+    data: null,
+    error: { code: "state_transition_denied", status: 422 },
+  });
+  assert.deepEqual(readStoredRecord(unauthorizedEdgeRepo), unauthorizedEdgeBefore);
+});
+
+test("expiry boundary permits pre-confirmation progression only before expiry", () => {
+  const beforeExpiryRepo = createRepoWithState("upload_started");
+  const beforeExpiry = beforeExpiryRepo.transitionUploadLifecycle(
+    transitionInput("upload_started", "uploaded_unconfirmed", {
+      objectVersionId: "object-version-1",
+      now: BEFORE_EXPIRY,
+    }),
+  );
+
+  assert.equal(beforeExpiry.ok, true);
+  assert.equal(beforeExpiry.data.replayed, false);
+  assert.equal(beforeExpiry.data.record.upload_state, "uploaded_unconfirmed");
+
+  for (const now of [AT_EXPIRY, AFTER_EXPIRY]) {
+    const repo = createRepoWithState("upload_started");
+    const before = readStoredRecord(repo);
+
+    const denied = repo.transitionUploadLifecycle(
+      transitionInput("upload_started", "uploaded_unconfirmed", {
+        objectVersionId: "object-version-1",
+        now,
+      }),
+    );
+
+    assert.deepEqual(
+      denied,
+      {
+        ok: false,
+        data: null,
+        error: { code: "state_transition_denied", status: 422 },
+      },
+      now,
+    );
+    assert.deepEqual(readStoredRecord(repo), before, now);
+  }
+});
+
+test("expired transition is allowed at and after expiry only from pre-confirmation states", () => {
+  for (const sourceState of ["reserved", "upload_started", "uploaded_unconfirmed"]) {
+    for (const now of [AT_EXPIRY, AFTER_EXPIRY]) {
+      const repo = createRepoWithState(sourceState);
+
+      const expired = repo.transitionUploadLifecycle(
+        transitionInput(sourceState, "expired", { now }),
+      );
+
+      assert.equal(expired.ok, true, `${sourceState} at ${now}`);
+      assert.equal(expired.data.replayed, false, `${sourceState} at ${now}`);
+      assert.equal(expired.data.record.upload_state, "expired", `${sourceState} at ${now}`);
+      assert.equal(expired.data.record.upload_expires_at, AT_EXPIRY, `${sourceState} at ${now}`);
+    }
+  }
+
+  for (const sourceState of ["confirmed", "policy_blocked", "abandoned"]) {
+    const repo = createRepoWithState(sourceState);
+    const before = readStoredRecord(repo);
+
+    const denied = repo.transitionUploadLifecycle(
+      transitionInput(sourceState, "expired", { now: AFTER_EXPIRY }),
+    );
+
+    assert.deepEqual(
+      denied,
+      {
+        ok: false,
+        data: null,
+        error: { code: "state_transition_denied", status: 422 },
+      },
+      sourceState,
+    );
+    assert.deepEqual(readStoredRecord(repo), before, sourceState);
+  }
+});
+
+test("confirmed records do not expire when caller-supplied now is past upload expiry", () => {
+  const repo = createRepoWithState("confirmed");
+  const before = readStoredRecord(repo);
+
+  const replay = repo.transitionUploadLifecycle(
+    transitionInput("uploaded_unconfirmed", "confirmed", {
+      objectVersionId: "object-version-1",
+      verifiedChecksum: CHECKSUM_A,
+      verifiedSizeBytes: 7,
+      now: AFTER_EXPIRY,
+    }),
+  );
+
+  assert.equal(replay.ok, true);
+  assert.equal(replay.data.replayed, true);
+  assert.deepEqual(replay.data.record, before);
+  assert.deepEqual(readStoredRecord(repo), before);
+  assert.equal(replay.data.record.upload_state, "confirmed");
+  assert.equal(replay.data.record.upload_expires_at, AT_EXPIRY);
+});
+
+test("expiry denials and expired transitions retain readable records without expiry extension", () => {
+  const deniedRepo = createRepoWithState("upload_started");
+  const deniedBefore = readStoredRecord(deniedRepo);
+
+  const denied = deniedRepo.transitionUploadLifecycle(
+    transitionInput("upload_started", "uploaded_unconfirmed", {
+      objectVersionId: "object-version-1",
+      now: AT_EXPIRY,
+    }),
+  );
+
+  assert.deepEqual(denied, {
+    ok: false,
+    data: null,
+    error: { code: "state_transition_denied", status: 422 },
+  });
+  const deniedReadback = deniedRepo.getUploadLifecycle({
+    organizationId: BASE_CREATE.organizationId,
+    intakeFileId: BASE_CREATE.intakeFileId,
+  });
+  assert.equal(deniedReadback.ok, true);
+  assert.deepEqual(deniedReadback.data.record, deniedBefore);
+  assert.equal(deniedReadback.data.record.upload_expires_at, AT_EXPIRY);
+
+  const expiredRepo = createRepoWithState("uploaded_unconfirmed");
+  const expiredBefore = readStoredRecord(expiredRepo);
+  const expired = expiredRepo.transitionUploadLifecycle(
+    transitionInput("uploaded_unconfirmed", "expired", { now: AFTER_EXPIRY }),
+  );
+
+  assert.equal(expired.ok, true);
+  const expiredReadback = expiredRepo.getUploadLifecycle({
+    organizationId: BASE_CREATE.organizationId,
+    intakeFileId: BASE_CREATE.intakeFileId,
+  });
+  assert.equal(expiredReadback.ok, true);
+  assert.equal(expiredReadback.data.record.upload_state, "expired");
+  assert.equal(expiredReadback.data.record.upload_expires_at, expiredBefore.upload_expires_at);
+  assert.equal(expiredReadback.data.record.object_version_id, expiredBefore.object_version_id);
 });
 
 test("validation blockers cover malformed inputs and transition facts", () => {
