@@ -3880,6 +3880,38 @@ package_exclusions: no route, service, storage, database, runtime, allowlist, fi
 ```
 
 
+## P0-06A unauthorized transition negative coverage
+
+```text
+leaf_status: complete after this bounded test-only package commit
+p0_06a_package_status: unauthorized_transition_negative_coverage_added
+implementation_status: test_only
+verification_status: TOOL_VERIFIED after documented checks pass
+evidence_class: TOOL_VERIFIED
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: c78b368d6bebd0c831eee2e4a2ee91b42bba1615
+applicable_repository_instructions: root AGENTS.md only; DATABASE_URL sentinel used for every Node command; no database/cloud/production/push/deployment/current-state access authorized
+active_package_scope: bounded P0-06A test-only negative coverage for unauthorized upload-lifecycle transitions; no implementation, contract-authority, replay, confirmation-conflict, expiry-boundary, accepted-key, tenant, defensive-copy, envelope, prohibited-field, factory-hardening, broad-suite, full-suite, P0-06B, database, cloud, or production change
+authorized_file_scope: __tests__/kai-sprint2-p0-upload-lifecycle-repository.spec.js; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+negative_matrix_source: committed KAI_SPRINT2_P0_UPLOAD_STATES seven-state set and committed thirteen authorized-edge set
+negative_matrix_count: 7 states x 6 non-self targets = 42 directed pairs; 42 - 13 authorized edges = 29 unauthorized edges
+unauthorized_edges_tested: 29
+terminal_state_negative_coverage: every outgoing non-self transition from policy_blocked, abandoned, and expired is included
+expiry_isolation: pre-confirmation unauthorized-edge assertions use pre-expiry caller-supplied now; expired source state is reached only by reserved -> expired at the valid expiry timing precondition; no wall-clock time or sleeps
+asserted_denial_shape: ok false; data null; error code state_transition_denied; status 422
+stored_record_immutability_asserted: true
+lifecycle_repository_test_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test **tests**/kai-sprint2-p0-upload-lifecycle-repository.spec.js - 13 passed, 0 failed
+repository_contract_test_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test **tests**/kai-sprint2-p0-repository-contract.spec.js - 9 passed, 0 failed
+focused_test_counts: lifecycle repository 13; repository contract 9
+p0_06a_acceptance_status: pending
+p0_06b_status: Gate-A-blocked
+gate_a_status: blocked
+remaining_pending_verification: replay, expiry, tenant, envelope, prohibited-field, defensive-copy, broad Sprint 2 suite, and full repository suite
+package_exclusions: no production code, route, service, storage, database, runtime configuration, dependency, lockfile, Current State, Implementation Baseline, contract authority, P0-06B, Gate A, push, deployment, cloud, credential, real-client-data, broad-suite, or full-suite change
+commit_hash: report after commit; a commit cannot contain its own SHA
+```
+
+
 ---
 
 Plan authority record

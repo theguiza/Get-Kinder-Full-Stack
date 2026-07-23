@@ -33,6 +33,8 @@ const AUTHORIZED_EDGES = Object.freeze([
   ["confirmed", "policy_blocked"],
 ]);
 
+const AUTHORIZED_EDGE_KEYS = Object.freeze(new Set(AUTHORIZED_EDGES.map(([from, to]) => `${from}->${to}`)));
+
 function transitionInput(expectedUploadState, newUploadState, overrides = {}) {
   return {
     organizationId: BASE_CREATE.organizationId,
@@ -49,6 +51,22 @@ function createRepoWithState(state) {
   assert.equal(repo.createReservedUploadLifecycle(BASE_CREATE).ok, true);
 
   if (state === "reserved") return repo;
+
+  if (state === "policy_blocked" || state === "abandoned") {
+    assert.equal(
+      repo.transitionUploadLifecycle(transitionInput("reserved", state)).ok,
+      true,
+    );
+    return repo;
+  }
+
+  if (state === "expired") {
+    assert.equal(
+      repo.transitionUploadLifecycle(transitionInput("reserved", "expired", { now: AT_EXPIRY })).ok,
+      true,
+    );
+    return repo;
+  }
 
   assert.equal(
     repo.transitionUploadLifecycle(transitionInput("reserved", "upload_started")).ok,
@@ -213,6 +231,88 @@ test("all and only the thirteen directed edges are authorized", () => {
     data: null,
     error: { code: "state_transition_denied", status: 422 },
   });
+});
+
+test("all twenty-nine unauthorized directed lifecycle edges are denied without mutation", () => {
+  assert.equal(KAI_SPRINT2_P0_UPLOAD_STATES.length, 7);
+  assert.equal(AUTHORIZED_EDGES.length, 13);
+
+  const directedNonSelfPairs = KAI_SPRINT2_P0_UPLOAD_STATES.flatMap((from) =>
+    KAI_SPRINT2_P0_UPLOAD_STATES
+      .filter((to) => to !== from)
+      .map((to) => [from, to]),
+  );
+  const unauthorizedEdges = directedNonSelfPairs.filter(
+    ([from, to]) => !AUTHORIZED_EDGE_KEYS.has(`${from}->${to}`),
+  );
+
+  assert.equal(directedNonSelfPairs.length, 42);
+  assert.equal(unauthorizedEdges.length, 29);
+  assert.deepEqual(
+    unauthorizedEdges.filter(([from]) =>
+      ["policy_blocked", "abandoned", "expired"].includes(from),
+    ),
+    [
+      ["policy_blocked", "reserved"],
+      ["policy_blocked", "upload_started"],
+      ["policy_blocked", "uploaded_unconfirmed"],
+      ["policy_blocked", "confirmed"],
+      ["policy_blocked", "abandoned"],
+      ["policy_blocked", "expired"],
+      ["abandoned", "reserved"],
+      ["abandoned", "upload_started"],
+      ["abandoned", "uploaded_unconfirmed"],
+      ["abandoned", "confirmed"],
+      ["abandoned", "policy_blocked"],
+      ["abandoned", "expired"],
+      ["expired", "reserved"],
+      ["expired", "upload_started"],
+      ["expired", "uploaded_unconfirmed"],
+      ["expired", "confirmed"],
+      ["expired", "policy_blocked"],
+      ["expired", "abandoned"],
+    ],
+  );
+
+  for (const [from, to] of unauthorizedEdges) {
+    const repo = createRepoWithState(from);
+    const before = repo.getUploadLifecycle({
+      organizationId: BASE_CREATE.organizationId,
+      intakeFileId: BASE_CREATE.intakeFileId,
+    });
+    assert.equal(before.ok, true, `${from} -> ${to} setup`);
+
+    const overrides = {};
+    if (to === "uploaded_unconfirmed" || to === "confirmed") {
+      overrides.objectVersionId = "object-version-1";
+    }
+    if (to === "confirmed") {
+      overrides.verifiedChecksum = CHECKSUM_A;
+      overrides.verifiedSizeBytes = 7;
+    }
+
+    const result = repo.transitionUploadLifecycle(transitionInput(from, to, overrides));
+
+    assert.deepEqual(
+      result,
+      {
+        ok: false,
+        data: null,
+        error: {
+          code: "state_transition_denied",
+          status: 422,
+        },
+      },
+      `${from} -> ${to}`,
+    );
+
+    const after = repo.getUploadLifecycle({
+      organizationId: BASE_CREATE.organizationId,
+      intakeFileId: BASE_CREATE.intakeFileId,
+    });
+    assert.equal(after.ok, true, `${from} -> ${to} readback`);
+    assert.deepEqual(after.data.record, before.data.record, `${from} -> ${to} mutated stored record`);
+  }
 });
 
 test("uploaded and confirmed transitions enforce immutable object and integrity facts", () => {
