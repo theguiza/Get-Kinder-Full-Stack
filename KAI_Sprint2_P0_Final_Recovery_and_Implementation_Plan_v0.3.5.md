@@ -3652,9 +3652,96 @@ package_exclusions: no production code, tests, fixtures, routes, services, depen
 ```
 
 
+## P0-05F.4 detector steps 1-9 working-tree checkpoint
+
+```text
+leaf_status: complete_ready_to_stage_and_commit
+p0_05_package_status: P0_05F_4_FINAL_AUDIT_PASSED_READY_TO_COMMIT
+implementation_status: complete_unwired_pure_detector
+evidence_class: TOOL_VERIFIED
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 902e0b6
+authorized_file_scope: Backend/kai/validators/p0FileTypeAgreementDetector.js; __tests__/kai-sprint2-p0-file-type-agreement-detector.spec.js; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+files_created: Backend/kai/validators/p0FileTypeAgreementDetector.js; __tests__/kai-sprint2-p0-file-type-agreement-detector.spec.js
+files_modified: KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+owner_decision_authority_consumed: OWNER_DECISION.P0_05F.PURE_DETECTOR_INTERFACE_V1; OWNER_DECISION.P0_05F.CLASSIFICATION_PRECEDENCE_V1; OWNER_DECISION.P0_05F.DISALLOWED_SIGNATURE_BYTES; OWNER_DECISION.P0_05F.TYPE_AGREEMENT_MATRIX_V1; OWNER_DECISION.P0_05F.XLSX_CENTRAL_DIRECTORY_BOUNDARY_V1; OWNER_DECISION.P0_05F.DETECTED_PERMITTED_TYPE_CONTRADICTION_V1
+active_package_scope: bounded detector implementation and acceptance-test package only; committed classification steps 1 through 9 implemented; full 101-fixture acceptance boundary built and passed
+runtime_behavior_changed: false
+runtime_mime_allowlist_changed: false
+runtime_integration_status: unstarted
+route_service_storage_database_wiring_changed: false
+fixtures_changed: false
+existing_tests_changed: false
+detector_export: detectP0FileTypeAgreement from Backend/kai/validators/p0FileTypeAgreementDetector.js
+detector_import_boundary: no imports from __tests__, fixture corpora, fixture builders, or combined-completeness spec; grep -rn "__tests__" Backend/kai/validators/p0FileTypeAgreementDetector.js produced no matches
+implemented_committed_steps: 1, 2, 3, 4, 5, 6, 7, 8, 9
+remaining_committed_steps: none
+evaluation_step_convention: committed classification ordinal
+temporary_sentinel_present: false
+detector_result_table_complete: true
+step_7_helper_export: detectTxtMdBytePolicy
+step_7_helper_decision: wrapped_not_redefined
+step_8_status: defensive_branch_implemented_currently_unexercised_by_construction
+step_9_result: block / unknown_binary / unknown_binary_block_only
+full_nine_corpus_boundary_complete: true
+full_101_fixture_boundary_complete: true
+detector_invocation_count: 101
+unique_fixture_id_count: 101
+duplicate_fixture_ids: none
+ambiguous_fixture_count: 0
+ambiguous_branch_status: implemented_defensive_unexercised_by_construction
+ready_to_stage: true
+ready_to_commit: true
+production_wiring: not_started
+runtime_mime_alignment: separate_and_unstarted
+step_1_result: block / disallowed_binary_signature / type_agreement_block_only
+step_2_result: block / unsupported_file_type / unsupported_metadata_block_only
+step_3_result: block / declared_type_mismatch / type_agreement_block_only
+step_4_pdf_pass_result: allow / type_agreement_pass / type_agreement_pass_only
+step_4_xlsx_pass_result: allow / type_agreement_pass / type_agreement_pass_only
+step_4_contradiction_result: block / declared_type_mismatch / detected_permitted_type_contradiction_only
+step_5_readable_zip_result: block / standalone_archive_or_non_xlsx / standalone_archive_or_non_xlsx_block_only
+step_5_malformed_zip_result: block / truncated_or_malformed_type / truncated_or_malformed_type_block_only
+step_6_incomplete_pdf_result: block / truncated_or_malformed_type / pdf_shallow_identity_block_only
+step_7_helper_fixture_count: 27
+step_7_helper_allow_result: allow / type_agreement_pass / type_agreement_pass_only / encoding_gate_pass / encoding_gate_pass_only / evaluation_step 7
+step_7_helper_block_scope: encoding_binary_gate_block_only
+step_7_permitted_text_pairings_result: allow / type_agreement_pass / type_agreement_pass_only / evaluation_step 7
+step_7_csv_invalid_utf8_result: block / invalid_utf8 / encoding_binary_gate_block_only / evaluation_step 7
+step_7_text_0001_precedence_result: block / nul_rejection / encoding_binary_gate_block_only / evaluation_step 7
+xlsx_required_entry_comparison_method: bounded exact length-and-byte comparison against the three required ASCII central-directory filename byte sequences only; unrelated central-directory filename bytes are ignored for required-entry presence
+zip_internal_classifications: no_zip_signal; complete_xlsx_shallow_identity; readable_non_xlsx_zip; malformed_or_truncated_zip_xlsx
+zip_structure_boundary: bounded EOCD discovery, EOCD comment length, single-disk records, central-directory offset and length bounds, central-directory record signatures and length bounds, entry-count consistency, central-directory byte consumption, local-header offset bounds, local-header signatures, and exact required-entry byte matching only
+zip_no_signal_boundary: exact ZIP local-file-header signature at byte offset zero or non-empty strict truncated prefix only; arbitrary PK-like bytes do not establish ZIP signalling
+pdf_incomplete_boundary: .pdf plus application/pdf only; committed conditions A through D only; no arbitrary short or percent-prefixed bytes
+step_5_precedes_step_6: true
+xlsx_zip_fixture_execution_count: 12
+pdf_fixture_execution_count: 5
+regression_a_name: complete XLSX plus unrelated non-ASCII central-directory filename
+regression_a_result: allow / type_agreement_pass / type_agreement_pass_only / complete_xlsx_shallow_identity / evaluation_step 4
+regression_b_name: missing xl/workbook.xml plus unrelated non-ASCII central-directory filename
+regression_b_result: block / standalone_archive_or_non_xlsx / standalone_archive_or_non_xlsx_block_only / readable_non_xlsx_zip / evaluation_step 5
+unrelated_non_ascii_entry_rejected: false
+step_8_result: defensive ambiguous_file_type branch implemented for multiple complete permitted byte identities; currently unexercised by construction; block / ambiguous_file_type / ambiguous_file_type_block_only / evaluation_step 8
+step_9_result: block / unknown_binary / unknown_binary_block_only / evaluation_step 9
+residual_fixture_result: UNKNOWNBIN-P0-05F-2D3-001-BLOCK-PDF-APPLICATION-PDF-0001 returns block / unknown_binary / unknown_binary_block_only / evaluation_step 9
+focused_detector_test: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test '__tests__/kai-sprint2-p0-file-type-agreement-detector.spec.js' - 24 passed, 0 failed
+helper_test: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test '__tests__/kai-sprint2-txt-md-byte-detector.spec.js' - 7 passed, 0 failed
+combined_completeness_test: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test '__tests__/kai-sprint2-p0-05f-combined-completeness.spec.js' - 11 passed, 0 failed
+sprint2_test: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-*.spec.js - sandbox run hit localhost listen EPERM; unchanged localhost-capable rerun passed 560 tests, 0 failed
+full_repository_test: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - sandbox run hit localhost listen EPERM; unchanged localhost-capable rerun passed 665 tests, 0 failed
+type_error_assertions_confirmed: missing extension, non-string extension, missing declaredMime, non-string declaredMime, and non-Uint8Array bytes throw TypeError
+bytes_no_mutation_assertion_confirmed: true
+git_no_index_detector_check: status 1, no whitespace-error output
+git_no_index_acceptance_test_check: status 1, no whitespace-error output
+git_diff_check: passed
+package_exclusions: no route, service, storage, database, runtime, allowlist, fixture corpus, existing-test other than the focused detector spec, combined-completeness, dependency, lockfile, Current State, Implementation Baseline, push, deploy, cloud, credential, or real-client-data change
+```
+
+
 ---
 
-## Plan authority record
+Plan authority record
 
 ```text
 plan_version: 0.3.5
