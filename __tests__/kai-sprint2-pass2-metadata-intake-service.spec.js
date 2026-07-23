@@ -661,6 +661,100 @@ test("file reservation writes no raw object and uses pending policy with no conf
   assert.match(inserted.storageUri, /^reservation:\/\/kai\/gcs\/org\//);
 });
 
+test("file reservation rejects application/json declared MIME and keeps permitted MIME accepted", async () => {
+  let jsonMimeInserted = false;
+  const jsonMimeResult = await reserveIntakeFileMetadata(
+    {
+      actorContext,
+      organizationId,
+      engagementId,
+      intakeBatchId,
+      intakeFileId,
+      payload: {
+        idempotency_key: "kai-p0-json-mime-runtime-block-001",
+        original_filename: "safe.txt",
+        mime_type: "application/json",
+        file_extension: ".txt",
+        file_size_bytes: 0,
+        checksum: declaredChecksum,
+        hash_algorithm: "sha256",
+      },
+    },
+    {
+      env: { KAI_SPRINT2_ENABLED: "true" },
+      async getIntakeBatchTenantState() {
+        return { intake_batch_id: intakeBatchId, organization_id: organizationId, engagement_id: engagementId };
+      },
+      async insertIntakeFileMetadata() {
+        jsonMimeInserted = true;
+      },
+    },
+  );
+
+  assert.equal(jsonMimeResult.ok, false);
+  assert.equal(jsonMimeResult.error.code, "validation_blocker");
+  assert.equal(jsonMimeResult.error.status, 422);
+  assert.equal(jsonMimeResult.blockers[0].validator_key, "VAL-STO-005");
+  assert.equal(jsonMimeResult.blockers[0].object_code, "mime_type");
+  assert.equal(jsonMimeResult.blockers[0].blocking_reason, "unsupported_mime_type");
+  assert.deepEqual(jsonMimeResult.blockers[0].evidence, { mime_type: "application/json" });
+  assert.equal(jsonMimeInserted, false);
+
+  let permittedMimeInserted = null;
+  const permittedMimeResult = await reserveIntakeFileMetadata(
+    {
+      actorContext,
+      organizationId,
+      engagementId,
+      intakeBatchId,
+      intakeFileId,
+      payload: {
+        idempotency_key: "kai-p0-text-plain-runtime-allow-001",
+        original_filename: "safe.txt",
+        mime_type: "text/plain",
+        file_extension: ".txt",
+        file_size_bytes: 0,
+        checksum: declaredChecksum,
+        hash_algorithm: "sha256",
+      },
+    },
+    {
+      env: { KAI_SPRINT2_ENABLED: "true" },
+      async getIntakeBatchTenantState() {
+        return { intake_batch_id: intakeBatchId, organization_id: organizationId, engagement_id: engagementId };
+      },
+      async findIntakeFileReservationByIdempotencyKey() {
+        return null;
+      },
+      async findIntakeFileReservationByChecksum() {
+        return null;
+      },
+      async insertIntakeFileMetadata(file) {
+        permittedMimeInserted = file;
+        return {
+          intake_file_id: file.intakeFileId,
+          intake_batch_id: file.intakeBatchId,
+          organization_id: file.organizationId,
+          engagement_id: file.engagementId,
+          safe_filename: file.safeFilename,
+          storage_provider: file.storageProvider,
+          storage_bucket: file.storageBucket,
+          storage_object_key: file.storageObjectKey,
+          file_policy_status: file.filePolicyStatus,
+          malware_scan_status: file.malwareScanStatus,
+          processing_status: "quarantined",
+          parse_status: "quarantined",
+          review_status: "proposed",
+        };
+      },
+    },
+  );
+
+  assert.equal(permittedMimeResult.ok, true);
+  assert.equal(permittedMimeInserted.mimeType, "text/plain");
+  assert.equal(permittedMimeResult.data.safe_filename, "safe.txt");
+});
+
 test("file reservation blocks missing and invalid idempotency keys before lookup or insert", async (t) => {
   for (const { name, idempotencyKey, blockingReason } of [
     { name: "missing", idempotencyKey: undefined, blockingReason: "missing_idempotency_key" },

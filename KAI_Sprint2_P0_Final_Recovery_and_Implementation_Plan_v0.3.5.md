@@ -960,18 +960,13 @@ Markdown/plain-text compatibility is asymmetric by owner decision: `.md + text/p
 
 Unsupported declared file MIME values include `application/json`, `application/octet-stream`, `text/html`, `text/javascript`, `application/javascript`, `application/zip`, `application/x-zip-compressed`, unknown MIME, empty MIME, and every value not explicitly listed in the matrix. `application/octet-stream` may later serve as an HTTP upload transport envelope; it is not an accepted declared file MIME.
 
-Known runtime-alignment gap:
+Known runtime-alignment gap recorded during P0-05F.1:
 
 ```text
-Current runtime declared file-MIME behavior accepts application/json.
+Runtime declared file-MIME behavior accepted application/json at the time of P0-05F.1.
 OWNER_DECISION.P0_05F.TYPE_AGREEMENT_MATRIX_V1 rejects application/json because JSON is not an allowed P0 document type.
 P0-05F.1 records policy only.
-A later separately authorized code package must align the runtime allowlist with the committed matrix.
-Until that package is completed:
-- policy authority says application/json must block;
-- current runtime behavior remains divergent;
-- the divergence must remain visible;
-- the project must not claim runtime type-policy alignment.
+The separately authorized P0-05F runtime-alignment leaf resolves this drift by removing application/json from the declared file-MIME runtime allowlist while preserving HTTP request-envelope JSON handling and the existing unsupported_mime_type blocker vocabulary.
 ```
 
 Block conditions include unsupported extension, unsupported MIME, extension/MIME disagreement, detected signature identifying another type, minimum structure contradicting declared type, ambiguous bytes where deterministic type cannot be established, bytes truncated below the required minimum, and no permitted type being deterministically established. Do not trust declared MIME over bytes, trust extension over bytes, rewrite declarations from detected bytes, guess likely type, apply fallback MIME detection, accept because one signal matches, or repair inconsistent metadata automatically.
@@ -3591,9 +3586,23 @@ owner_decision_authority: OWNER_DECISION.P0_05F.CLASSIFICATION_PRECEDENCE_V1
 authorized_file_scope: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
 runtime_behavior_changed: false
 p0_05f_4_status: unimplemented_and_unstarted
-runtime_alignment_leaf_status: separate_and_unstarted
-tests_run: none
-next_boundary: separate read-only verification before P0-05F.4 implementation
+runtime_alignment_leaf_status: complete after this bounded runtime-alignment commit
+runtime_alignment_starting_head: ca2909ae9ccd0c95fe1f83e2a95b311635de6851
+runtime_alignment_authorized_file_scope: Backend/kai/services/kaiIntakeService.js; __tests__/kai-sprint2-pass2-metadata-intake-service.spec.js; __tests__/kai-sprint2-pass2-route-runtime.spec.js; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+application_json_declared_mime_removed: true
+request_envelope_json_behavior_changed: false
+runtime_blocker_vocabulary_changed: false
+runtime_blocking_reason: unsupported_mime_type
+runtime_status: 422
+detector_wiring_changed: false
+runtime_declared_mime_allowlist_after_edit: text/csv; application/csv; text/plain
+request_envelope_json_preserved: mounted route accepts Content-Type application/json; charset=utf-8 and returns service validation_blocker for declared file MIME application/json, not unsupported_media_type
+runtime_blocker_preserved: unsupportedMimeBlocker still uses validator_key VAL-STO-005, object_code mime_type, blocking_reason unsupported_mime_type, error code validation_blocker, and status 422
+focused_service_test_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-pass2-metadata-intake-service.spec.js - 51 passed, 0 failed
+focused_route_test_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-pass2-route-runtime.spec.js - 27 passed, 0 failed
+sprint2_test_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-*.spec.js - initial sandbox run hit localhost listen EPERM with 507 passed and 7 failed; exact localhost-capable rerun passed 562 tests, 0 failed
+full_repository_test_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - initial sandbox run hit localhost listen EPERM with 612 passed and 7 failed; exact localhost-capable rerun passed 667 tests, 0 failed
+next_boundary: continue only under the living ExecPlan package order and owner authorization; do not push or deploy
 ```
 
 

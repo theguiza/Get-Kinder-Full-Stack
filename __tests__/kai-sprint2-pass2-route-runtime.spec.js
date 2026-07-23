@@ -298,6 +298,59 @@ test("file reservation route rejects multipart before service and otherwise dele
   }
 });
 
+test("mounted file reservation accepts JSON envelope while blocking application/json declared MIME", async () => {
+  const dependencies = {
+    env: { KAI_SPRINT2_ENABLED: "true" },
+    async getIntakeBatchTenantState() {
+      return { intake_batch_id: intakeBatchId, organization_id: organizationId, engagement_id: engagementId };
+    },
+    async insertIntakeFileMetadata() {
+      assert.fail("unsupported declared file MIME must not insert");
+    },
+  };
+  const restore = intakeRouteTestables.setIntakeServiceForTest({
+    async reserveIntakeFileMetadata(input) {
+      return reserveIntakeFileMetadata({ ...input, actorContext }, dependencies);
+    },
+  });
+
+  try {
+    const res = await invokeRoute("/admin/batches/:intakeBatchId/file-reservations", "post", {
+      get(headerName) {
+        return String(headerName).toLowerCase() === "content-type"
+          ? "application/json; charset=utf-8"
+          : undefined;
+      },
+      is() {
+        return false;
+      },
+      params: { intakeBatchId },
+      user: { id: 46 },
+      body: {
+        organization_id: organizationId,
+        engagement_id: engagementId,
+        idempotency_key: "kai-route-json-mime-runtime-block-001",
+        original_filename: "safe.txt",
+        mime_type: "application/json",
+        file_extension: ".txt",
+        file_size_bytes: 0,
+        checksum: "a".repeat(64),
+        hash_algorithm: "sha256",
+      },
+    });
+
+    assert.equal(res.statusCode, 422);
+    assert.equal(res.body.error.code, "validation_blocker");
+    assert.equal(res.body.blockers.length, 1);
+    assert.equal(res.body.blockers[0].validator_key, "VAL-STO-005");
+    assert.equal(res.body.blockers[0].object_code, "mime_type");
+    assert.equal(res.body.blockers[0].blocking_reason, "unsupported_mime_type");
+    assert.deepEqual(res.body.blockers[0].evidence, {});
+  } finally {
+    restore();
+  }
+});
+
 test("metadata-write routes return 422 idempotency blockers from the mounted services", async (t) => {
   let batchLookupCalls = 0;
   let batchInsertCalls = 0;
