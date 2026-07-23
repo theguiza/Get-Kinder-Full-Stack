@@ -1165,7 +1165,7 @@ Entering `confirmed` requires:
 ```text
 the same stored object_version_id
 a canonical lowercase 64-hex SHA-256 verified_checksum
-a non-negative integer verified_size_bytes
+a positive integer verified_size_bytes (>= 1); zero is rejected as validation_blocker
 caller-supplied now
 ```
 

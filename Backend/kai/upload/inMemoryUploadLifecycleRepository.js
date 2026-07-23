@@ -156,7 +156,7 @@ function validateTransitionInput(input) {
       KAI_SPRINT2_P0_PATTERNS.checksumSha256.test(input.verifiedChecksum) &&
       input.verifiedChecksum.toLowerCase() === input.verifiedChecksum &&
       Number.isSafeInteger(input.verifiedSizeBytes) &&
-      input.verifiedSizeBytes >= 0
+      input.verifiedSizeBytes >= 1
     );
   }
   return (

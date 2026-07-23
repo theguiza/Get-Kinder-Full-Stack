@@ -4003,6 +4003,31 @@ commit_hash: report after commit; a commit cannot contain its own SHA
 ```
 
 
+## P0-06A zero-byte confirmation rejection hardening
+
+```text
+p0_06a_package_status: zero_byte_confirmation_rejection_added
+implementation_status: implementation_and_contract_change
+verification_status: TOOL_VERIFIED after focused + full-suite pass
+evidence_class: TOOL_VERIFIED
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: d490142127426ad793dcc876090e514e322a8e5e
+applicable_repository_instructions: root AGENTS.md only; DATABASE_URL sentinel used for every Node and npm command; no database/cloud/production/push/deployment/current-state access authorized
+zero_byte_confirmed_discovery: no other zero-byte-confirmed occurrences
+authorized_file_scope: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md; Backend/kai/upload/inMemoryUploadLifecycleRepository.js; __tests__/kai-sprint2-p0-upload-lifecycle-repository.spec.js; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+contract_amendment: confirmed entry requires verified_size_bytes >= 1; zero rejected validation_blocker/422
+implementation_change: confirmation validation now requires verifiedSizeBytes >= 1
+existing_test_amended: "confirmation accepts zero size..." zero sub-case flipped to rejection
+positive_confirmation_coverage_added: verified_size_bytes 1 succeeds; normal positive verified_size_bytes succeeds
+focused_test_counts: tests 28; pass 28; fail 0
+full_suite_counts: tests 695; pass 695; fail 0
+p0_06a_acceptance_status: pending
+p0_06b_status: NOT_CONFIRMED
+gate_a_status: NOT_CONFIRMED
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this commit; do not begin another leaf or acceptance without separate owner authorization
+```
+
+
 ---
 
 Plan authority record

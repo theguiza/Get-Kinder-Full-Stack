@@ -516,8 +516,25 @@ test("confirmed replay fact conflicts are independent 409s and leave stored stat
   }
 });
 
-test("confirmation accepts zero size and rejects invalid size and checksum facts without mutation", () => {
+test("confirmation rejects zero size and rejects invalid size and checksum facts without mutation", () => {
+  for (const verifiedSizeBytes of [1, 7]) {
+    const positiveSizeRepo = createRepoWithState("uploaded_unconfirmed");
+    const positiveSize = positiveSizeRepo.transitionUploadLifecycle(
+      transitionInput("uploaded_unconfirmed", "confirmed", {
+        objectVersionId: "object-version-1",
+        verifiedChecksum: CHECKSUM_A,
+        verifiedSizeBytes,
+        now: PLUS_TWO_HOURS,
+      }),
+    );
+
+    assert.equal(positiveSize.ok, true);
+    assert.equal(positiveSize.data.replayed, false);
+    assert.equal(positiveSize.data.record.verified_size_bytes, verifiedSizeBytes);
+  }
+
   const zeroSizeRepo = createRepoWithState("uploaded_unconfirmed");
+  const zeroSizeBefore = readStoredRecord(zeroSizeRepo);
   const zeroSize = zeroSizeRepo.transitionUploadLifecycle(
     transitionInput("uploaded_unconfirmed", "confirmed", {
       objectVersionId: "object-version-1",
@@ -527,9 +544,12 @@ test("confirmation accepts zero size and rejects invalid size and checksum facts
     }),
   );
 
-  assert.equal(zeroSize.ok, true);
-  assert.equal(zeroSize.data.replayed, false);
-  assert.equal(zeroSize.data.record.verified_size_bytes, 0);
+  assert.deepEqual(zeroSize, {
+    ok: false,
+    data: null,
+    error: { code: "validation_blocker", status: 422 },
+  });
+  assert.deepEqual(readStoredRecord(zeroSizeRepo), zeroSizeBefore, "zero size mutated stored record");
 
   const cases = [
     {
