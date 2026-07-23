@@ -87,22 +87,6 @@ export const KAI_SPRINT2_P0_REVIEW_QUEUE_STATUSES = Object.freeze([
   "cancelled",
 ]);
 
-export const KAI_SPRINT2_P0_REVIEW_QUEUE_STATUS_TRANSITIONS = Object.freeze([
-  Object.freeze({ from: "open", to: "in_progress" }),
-  Object.freeze({ from: "open", to: "blocked" }),
-  Object.freeze({ from: "open", to: "waiting_on_client" }),
-  Object.freeze({ from: "open", to: "cancelled" }),
-  Object.freeze({ from: "in_progress", to: "open" }),
-  Object.freeze({ from: "in_progress", to: "blocked" }),
-  Object.freeze({ from: "in_progress", to: "waiting_on_client" }),
-  Object.freeze({ from: "in_progress", to: "resolved" }),
-  Object.freeze({ from: "in_progress", to: "cancelled" }),
-  Object.freeze({ from: "blocked", to: "open" }),
-  Object.freeze({ from: "blocked", to: "in_progress" }),
-  Object.freeze({ from: "waiting_on_client", to: "waiting_on_gk" }),
-  Object.freeze({ from: "waiting_on_gk", to: "in_progress" }),
-]);
-
 export const KAI_SPRINT2_P0_FINGERPRINT = Object.freeze({
   algorithm: "sha256",
   version: "kai-sprint2-p0-fingerprint-v1",

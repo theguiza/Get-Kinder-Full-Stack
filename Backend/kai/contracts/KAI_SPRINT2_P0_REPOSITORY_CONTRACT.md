@@ -1028,26 +1028,6 @@ malware scan: not_configured, queued, running, passed, failed, skipped
 review queue status: open, in_progress, blocked, waiting_on_client, waiting_on_gk, resolved, cancelled
 ```
 
-The repository-level review-queue transition graph is authority-referenced by the committed constant `KAI_SPRINT2_P0_REVIEW_QUEUE_STATUS_TRANSITIONS` in `Backend/kai/config/kaiSprint2P0Contract.js`. It contains exactly these 13 distinct directed edges:
-
-```text
-open -> in_progress
-open -> blocked
-open -> waiting_on_client
-open -> cancelled
-in_progress -> open
-in_progress -> blocked
-in_progress -> waiting_on_client
-in_progress -> resolved
-in_progress -> cancelled
-blocked -> open
-blocked -> in_progress
-waiting_on_client -> waiting_on_gk
-waiting_on_gk -> in_progress
-```
-
-This graph records the broader product status topology only. A route may exercise only the edge subset explicitly authorized by its route-specific mutation contract.
-
 No new enum value such as `security_assessment_pending` is introduced. A security pass changes only `file_policy_status`; the file remains quarantined and unparsed. No scanner means no policy pass.
 
 The repository-recognized queue types are:
