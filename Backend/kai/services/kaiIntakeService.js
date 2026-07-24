@@ -1034,6 +1034,21 @@ function sanitizedPostStartInternalFailure() {
   });
 }
 
+function sanitizedExactVersionVerificationFailure(code = "system_error", status) {
+  return buildKaiError(code, {
+    ...(status ? { status } : {}),
+  });
+}
+
+async function closeExactVersionByteSource(byteSource) {
+  if (!byteSource || typeof byteSource.close !== "function") return;
+  try {
+    await byteSource.close();
+  } catch {
+    // Verifier close diagnostics remain provider-private and sanitized.
+  }
+}
+
 function validatedStorageSuccessData(storage) {
   const objectVersionId = storage?.data?.object_version_id;
   const sizeBytes = storage?.data?.size_bytes;
@@ -1044,6 +1059,119 @@ function validatedStorageSuccessData(storage) {
     objectVersionId,
     sizeBytes,
   };
+}
+
+async function verifyExactObjectVersionStreamed({
+  storageAdapter,
+  objectVersionId,
+  declaredChecksum,
+  expectedSizeBytes,
+  hashAlgorithm,
+  signal,
+} = {}) {
+  if (typeof objectVersionId !== "string" || !PROVIDER_NEUTRAL_OBJECT_VERSION_ID_RE.test(objectVersionId)) {
+    return sanitizedExactVersionVerificationFailure("invalid_request", 400);
+  }
+  if (hashAlgorithm !== "sha256") {
+    return sanitizedExactVersionVerificationFailure("invalid_request", 400);
+  }
+  if (typeof declaredChecksum !== "string" || !STORED_FINGERPRINT_RE.test(declaredChecksum)) {
+    return sanitizedExactVersionVerificationFailure("invalid_request", 400);
+  }
+  if (!Number.isSafeInteger(expectedSizeBytes) || expectedSizeBytes < 0) {
+    return sanitizedExactVersionVerificationFailure("invalid_request", 400);
+  }
+  if (!storageAdapter || typeof storageAdapter.openObjectVersionReadStream !== "function") {
+    return sanitizedExactVersionVerificationFailure("storage_provider_not_configured", 503);
+  }
+
+  let result;
+  try {
+    result = await storageAdapter.openObjectVersionReadStream({
+      objectVersionId,
+      ...(signal ? { signal } : {}),
+    });
+  } catch {
+    return sanitizedExactVersionVerificationFailure(signal?.aborted ? "invalid_request" : "system_error");
+  }
+
+  if (result?.ok === false) {
+    return sanitizedExactVersionVerificationFailure("system_error", 500);
+  }
+  if (result?.ok !== true) {
+    return sanitizedExactVersionVerificationFailure("system_error", 500);
+  }
+
+  const storageData = result.data;
+  const returnedObjectVersionId = storageData?.object_version_id;
+  const storageSizeBytes = storageData?.size_bytes;
+  const byteSource = storageData?.byte_source;
+  if (typeof returnedObjectVersionId !== "string" || returnedObjectVersionId !== objectVersionId) {
+    await closeExactVersionByteSource(byteSource);
+    return sanitizedExactVersionVerificationFailure("system_error", 500);
+  }
+  if (!Number.isSafeInteger(storageSizeBytes) || storageSizeBytes < 0) {
+    await closeExactVersionByteSource(byteSource);
+    return sanitizedExactVersionVerificationFailure("system_error", 500);
+  }
+  if (!byteSource || typeof byteSource[Symbol.asyncIterator] !== "function") {
+    await closeExactVersionByteSource(byteSource);
+    return sanitizedExactVersionVerificationFailure("system_error", 500);
+  }
+  if (typeof byteSource.close !== "function") {
+    return sanitizedExactVersionVerificationFailure("system_error", 500);
+  }
+
+  try {
+    if (storageSizeBytes !== expectedSizeBytes) {
+      return sanitizedExactVersionVerificationFailure("system_error", 500);
+    }
+
+    const hash = createHash("sha256");
+    let streamedSizeBytes = 0;
+    for await (const chunk of byteSource) {
+      if (signal?.aborted) {
+        return sanitizedExactVersionVerificationFailure("invalid_request", 400);
+      }
+      if (!(Buffer.isBuffer(chunk) || chunk instanceof Uint8Array)) {
+        return sanitizedExactVersionVerificationFailure("system_error", 500);
+      }
+      if (chunk.byteLength > Number.MAX_SAFE_INTEGER - streamedSizeBytes) {
+        return sanitizedExactVersionVerificationFailure("system_error", 500);
+      }
+      streamedSizeBytes += chunk.byteLength;
+      if (streamedSizeBytes > expectedSizeBytes) {
+        return sanitizedExactVersionVerificationFailure("system_error", 500);
+      }
+      hash.update(chunk);
+      if (signal?.aborted) {
+        return sanitizedExactVersionVerificationFailure("invalid_request", 400);
+      }
+    }
+
+    if (streamedSizeBytes !== storageSizeBytes || streamedSizeBytes !== expectedSizeBytes) {
+      return sanitizedExactVersionVerificationFailure("system_error", 500);
+    }
+
+    const verifiedChecksum = hash.digest("hex");
+    if (verifiedChecksum !== declaredChecksum) {
+      return sanitizedExactVersionVerificationFailure("system_error", 500);
+    }
+
+    return {
+      ok: true,
+      data: {
+        objectVersionId,
+        verifiedChecksum,
+        verifiedSizeBytes: streamedSizeBytes,
+      },
+      warnings: [],
+    };
+  } catch {
+    return sanitizedExactVersionVerificationFailure(signal?.aborted ? "invalid_request" : "system_error");
+  } finally {
+    await closeExactVersionByteSource(byteSource);
+  }
 }
 
 function validUploadStartedTransitionSuccess(result, { organizationId, intakeFileId }) {
@@ -1709,3 +1837,7 @@ export async function confirmUpload(dependencies = {}) {
   }
   return buildKaiError("storage_provider_not_configured");
 }
+
+export const __testables = {
+  verifyExactObjectVersionStreamed,
+};

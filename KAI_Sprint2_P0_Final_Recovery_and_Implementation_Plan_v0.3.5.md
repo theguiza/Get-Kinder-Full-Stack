@@ -1944,6 +1944,10 @@ Using the in-memory synthetic lifecycle repository, confirmation must:
 
 Identical confirmation replay is allowed only for the same exact version, size, checksum, and state. A changed version returns 409.
 
+The internal exact-version verifier is a service-private prerequisite for later `confirmUpload` orchestration. It receives only trusted service-controlled facts: storage adapter, provider-neutral exact object-version ID, declared lowercase SHA-256 checksum, expected byte size, hash algorithm, and optional abort signal. It does not authorize an actor, read metadata or lifecycle records, accept public request payloads, perform lifecycle transitions, shape the final confirmation response, or call production/database/cloud services.
+
+The verifier calls only `openObjectVersionReadStream({ objectVersionId, signal? })`, validates exact storage identity and storage size before consuming the stream, releases a valid `byte_source` with mandatory `try/finally`, streams chunks through Node SHA-256 without whole-object buffering, verifies streamed size against both storage size and trusted expected size, and compares the computed lowercase checksum to the trusted declared checksum. It returns only `{ objectVersionId, verifiedChecksum, verifiedSizeBytes }` on success and sanitized structured failures otherwise. `confirmUpload` orchestration remains next; P0-06B and Gate A remain unchanged and unauthorized.
+
 ## Synthetic lifecycle behavior
 
 The in-memory repository implements the exact P0-02 lifecycle and 24-hour expiry for tests:
@@ -4200,6 +4204,34 @@ focused_intake_service_spec: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel no
 focused_storage_boundary_spec: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-storage-boundary.spec.js - tests 35; pass 35; fail 0
 combined_p0_specs: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-intake-service.spec.js __tests__/kai-sprint2-p0-upload-lifecycle-repository.spec.js __tests__/kai-sprint2-storage-boundary.spec.js - tests 110; pass 110; fail 0
 full_repository_suite: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - sandbox run hit known localhost listener EPERM with tests 715; pass 708; fail 7; listener-capable rerun passed tests 763; pass 763; fail 0
+```
+
+## P0-06A internal exact-version verifier
+
+```text
+p0_06a_package_status: internal_exact_version_verifier_implemented_not_staged
+implementation_status: IMPLEMENTED_NOT_STAGED
+verification_status: TOOL_VERIFIED after required focused + combined + full-suite commands completed
+evidence_class: TOOL_VERIFIED
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: e8578eaaaa0a3d0241b283ac66cc31b4d630e462
+working_tree_clean_at_start: true
+staged_paths_at_start: none
+applicable_repository_instructions: root AGENTS.md only; DATABASE_URL sentinel used for every Node and npm command; no database/cloud/production/push/deployment/current-state access authorized
+active_package_scope: bounded internal streamed exact-version SHA-256 verifier required by later confirmUpload orchestration; no confirmUpload orchestration implementation
+trusted_input_boundary: helper receives only storageAdapter, objectVersionId, declaredChecksum, expectedSizeBytes, hashAlgorithm, and signal; no actor authorization, public payload parsing, metadata read, lifecycle read, lifecycle transition, or response shaping
+storage_call_boundary: helper calls only storageAdapter.openObjectVersionReadStream({ objectVersionId, signal? }); explicit ok:false is the only ordinary returned storage failure; explicit ok:true is the only success-eligible result; malformed results are sanitized
+verification_boundary: validates provider-neutral exact object-version identity, storage size, async byte source, close method, chunk byte types, streamed byte count, trusted expected size, and computed lowercase SHA-256
+streaming_boundary: Node SHA-256 is updated chunk-by-chunk; no whole-object concatenation or buffering in the helper
+cleanup_boundary: after a callable byte_source.close() is exposed by an explicit storage ok:true, helper invokes byte_source.close() for malformed returned object-version ID, malformed storage size, malformed byte_source, success, checksum mismatch, storage-size mismatch, malformed chunk, excess bytes, insufficient bytes, read exception, abort, and unexpected verification failure
+private_boundary: raw bytes, paths, object keys, buckets, URIs, native handles, signed URLs, provider-private identifiers, and native storage diagnostics do not escape
+lifecycle_boundary: no lifecycle transition in this package; confirmUpload orchestration remains next
+p0_06b_and_gate_a: unchanged and unauthorized
+changed_files: Backend/kai/services/kaiIntakeService.js; __tests__/kai-sprint2-intake-service.spec.js; Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+focused_intake_service_spec: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-intake-service.spec.js - tests 75; pass 75; fail 0
+focused_storage_boundary_spec: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-storage-boundary.spec.js - tests 35; pass 35; fail 0
+combined_p0_specs: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-intake-service.spec.js __tests__/kai-sprint2-p0-upload-lifecycle-repository.spec.js __tests__/kai-sprint2-storage-boundary.spec.js - tests 138; pass 138; fail 0
+full_repository_suite: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - sandbox run hit known localhost listener EPERM with tests 743; pass 736; fail 7; listener-capable rerun passed tests 791; pass 791; fail 0
 ```
 
 

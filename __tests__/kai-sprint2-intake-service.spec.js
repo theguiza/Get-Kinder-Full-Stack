@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 
 import {
+  __testables as intakeServiceTestables,
   confirmUpload,
   createIntakeBatch,
   reserveIntakeFileMetadata,
@@ -37,6 +40,82 @@ const enabledUploadEnv = {
 const uploadNow = "2026-07-23T10:00:00.000Z";
 const objectVersionId = "ov_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const otherIntakeFileId = "1fe568b1-5c05-4c42-bb1f-6e20de216c7b";
+const verifyExactObjectVersionStreamed = intakeServiceTestables.verifyExactObjectVersionStreamed;
+
+function sha256Hex(bytes) {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+function exactVersionByteSource(chunks, hooks = {}) {
+  let closeCount = 0;
+  const source = {
+    get closeCount() {
+      return closeCount;
+    },
+    async close() {
+      closeCount += 1;
+      if (hooks.onClose) await hooks.onClose();
+    },
+    async *[Symbol.asyncIterator]() {
+      for (const chunk of chunks) {
+        if (hooks.onBeforeChunk) await hooks.onBeforeChunk(chunk);
+        yield chunk;
+        if (hooks.onAfterChunk) await hooks.onAfterChunk(chunk);
+      }
+    },
+  };
+  return source;
+}
+
+function exactVersionStorageAdapter({
+  chunks = [Buffer.from("exact bytes")],
+  storageSizeBytes,
+  returnedObjectVersionId = objectVersionId,
+  result,
+  source,
+  onOpen,
+} = {}) {
+  const byteSource = source || exactVersionByteSource(chunks);
+  const adapter = {
+    calls: [],
+    byteSource,
+    async openObjectVersionReadStream(input) {
+      adapter.calls.push(input);
+      if (onOpen) return await onOpen(input);
+      if (Object.hasOwn({ result }, "result") && result !== undefined) return result;
+      return {
+        ok: true,
+        data: {
+          object_version_id: returnedObjectVersionId,
+          size_bytes: storageSizeBytes ?? chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0),
+          byte_source: byteSource,
+        },
+      };
+    },
+  };
+  return adapter;
+}
+
+async function verifyExact(overrides = {}) {
+  const chunks = overrides.chunks || [Buffer.from("exact bytes")];
+  const bytes = Buffer.concat(chunks);
+  const storageAdapter = overrides.storageAdapter || exactVersionStorageAdapter({
+    chunks,
+    ...(Object.hasOwn(overrides, "storageSizeBytes") ? { storageSizeBytes: overrides.storageSizeBytes } : {}),
+    ...(Object.hasOwn(overrides, "returnedObjectVersionId") ? { returnedObjectVersionId: overrides.returnedObjectVersionId } : {}),
+    ...(Object.hasOwn(overrides, "source") ? { source: overrides.source } : {}),
+    ...(Object.hasOwn(overrides, "result") ? { result: overrides.result } : {}),
+    ...(Object.hasOwn(overrides, "onOpen") ? { onOpen: overrides.onOpen } : {}),
+  });
+  return await verifyExactObjectVersionStreamed({
+    storageAdapter,
+    objectVersionId: overrides.objectVersionId ?? objectVersionId,
+    declaredChecksum: overrides.declaredChecksum ?? sha256Hex(bytes),
+    expectedSizeBytes: overrides.expectedSizeBytes ?? bytes.byteLength,
+    hashAlgorithm: overrides.hashAlgorithm ?? "sha256",
+    ...(Object.hasOwn(overrides, "signal") ? { signal: overrides.signal } : {}),
+  });
+}
 
 function intakeFileRow(overrides = {}) {
   return {
@@ -439,6 +518,474 @@ test("confirmUpload remains fail-closed in P0", async () => {
   const enabledResult = await confirmUpload({ env: enabledUploadEnv });
   assert.equal(enabledResult.ok, false);
   assert.equal(enabledResult.error.code, "storage_provider_not_configured");
+});
+
+test("internal exact-version verifier succeeds for exact bytes, size, and SHA-256", async () => {
+  const bytes = Buffer.from("verified exact object bytes");
+  const storageAdapter = exactVersionStorageAdapter({ chunks: [bytes] });
+  const result = await verifyExact({ chunks: [bytes], storageAdapter });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.data, {
+    objectVersionId,
+    verifiedChecksum: sha256Hex(bytes),
+    verifiedSizeBytes: bytes.byteLength,
+  });
+  assert.deepEqual(storageAdapter.calls, [{ objectVersionId }]);
+  assert.equal(storageAdapter.byteSource.closeCount, 1);
+});
+
+test("internal exact-version verifier hashes multiple chunks without whole-object buffering", async () => {
+  const chunks = [Buffer.from("multi-"), new Uint8Array(Buffer.from("chunk-")), Buffer.from("hashing")];
+  const source = exactVersionByteSource(chunks);
+  const result = await verifyExact({ chunks, source });
+  const serviceSource = readFileSync("Backend/kai/services/kaiIntakeService.js", "utf8");
+  const helperSource = serviceSource.slice(
+    serviceSource.indexOf("async function verifyExactObjectVersionStreamed"),
+    serviceSource.indexOf("function validUploadStartedTransitionSuccess"),
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.verifiedChecksum, sha256Hex(Buffer.concat(chunks)));
+  assert.equal(source.closeCount, 1);
+  assert.doesNotMatch(helperSource, /Buffer\.concat|await\s+Array\.from|\.join\(/);
+});
+
+test("internal exact-version verifier rejects unsupported algorithm before storage", async () => {
+  let opened = false;
+  const result = await verifyExact({
+    hashAlgorithm: "sha512",
+    storageAdapter: {
+      async openObjectVersionReadStream() {
+        opened = true;
+      },
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "invalid_request");
+  assert.equal(opened, false);
+});
+
+test("internal exact-version verifier rejects malformed checksum before storage", async () => {
+  for (const declaredChecksum of [
+    "a".repeat(63),
+    "A".repeat(64),
+    "g".repeat(64),
+    new String("a".repeat(64)),
+  ]) {
+    let opened = false;
+    const result = await verifyExact({
+      declaredChecksum,
+      storageAdapter: {
+        async openObjectVersionReadStream() {
+          opened = true;
+        },
+      },
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "invalid_request");
+    assert.equal(opened, false);
+  }
+});
+
+test("internal exact-version verifier rejects malformed expected size before storage", async () => {
+  for (const expectedSizeBytes of [-1, 1.5, Number.MAX_SAFE_INTEGER + 1, "12"]) {
+    let opened = false;
+    const result = await verifyExact({
+      expectedSizeBytes,
+      storageAdapter: {
+        async openObjectVersionReadStream() {
+          opened = true;
+        },
+      },
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "invalid_request");
+    assert.equal(opened, false);
+  }
+});
+
+test("internal exact-version verifier fails closed when stream method is missing", async () => {
+  const result = await verifyExact({ storageAdapter: {} });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "storage_provider_not_configured");
+});
+
+for (const { name, onOpen } of [
+  { name: "null", onOpen: async () => null },
+  { name: "undefined", onOpen: async () => undefined },
+  { name: "primitive", onOpen: async () => "file:///private/tmp/raw-object.bin" },
+  { name: "malformed", onOpen: async () => ({ data: { storage_object_key: "private/key" } }) },
+]) {
+  test(`internal exact-version verifier sanitizes ${name} storage result`, async () => {
+    const result = await verifyExact({ onOpen });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "system_error");
+    assert.doesNotMatch(JSON.stringify(result), /private|raw-object|storage_object_key|file:|key/i);
+  });
+}
+
+test("internal exact-version verifier rejects non-boolean storage ok", async () => {
+  for (const ok of ["true", 1, null]) {
+    const result = await verifyExact({
+      onOpen: async () => ({
+        ok,
+        data: {
+          object_version_id: objectVersionId,
+          size_bytes: 11,
+          byte_source: exactVersionByteSource([Buffer.from("exact bytes")]),
+          bucket: "private-bucket",
+        },
+      }),
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "system_error");
+    assert.doesNotMatch(JSON.stringify(result), /private-bucket|bucket/i);
+  }
+});
+
+test("internal exact-version verifier rejects wrong returned object-version ID", async () => {
+  const source = exactVersionByteSource([Buffer.from("exact bytes")]);
+  const result = await verifyExact({
+    source,
+    returnedObjectVersionId: "ov_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "system_error");
+  assert.equal(source.closeCount, 1);
+});
+
+test("internal exact-version verifier closes malformed returned object-version ID", async () => {
+  for (const returnedObjectVersionId of [
+    "provider-generation-123",
+    new String(objectVersionId),
+    { toString: () => objectVersionId },
+  ]) {
+    const source = exactVersionByteSource([Buffer.from("exact bytes")]);
+    const result = await verifyExact({ source, returnedObjectVersionId });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "system_error");
+    assert.equal(source.closeCount, 1);
+  }
+});
+
+test("internal exact-version verifier rejects malformed storage size", async () => {
+  for (const storageSizeBytes of [-1, 1.5, Number.MAX_SAFE_INTEGER + 1, "11"]) {
+    const source = exactVersionByteSource([Buffer.from("exact bytes")]);
+    const result = await verifyExact({ source, storageSizeBytes });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "system_error");
+    assert.equal(source.closeCount, 1);
+  }
+});
+
+test("internal exact-version verifier sanitizes close failure after malformed returned object-version ID", async () => {
+  const source = exactVersionByteSource([Buffer.from("exact bytes")], {
+    async onClose() {
+      throw new Error(`close failed for /private/tmp/${objectVersionId}/secret.bin in private-bucket`);
+    },
+  });
+  const result = await verifyExact({
+    source,
+    returnedObjectVersionId: new String(objectVersionId),
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "system_error");
+  assert.equal(source.closeCount, 1);
+  assert.doesNotMatch(JSON.stringify(result), /private|secret|bucket|tmp|ov_aaaaaaaa|close failed/i);
+});
+
+test("internal exact-version verifier sanitizes close failure after malformed storage size", async () => {
+  const source = exactVersionByteSource([Buffer.from("exact bytes")], {
+    async onClose() {
+      throw new Error("provider close failed for file:///private/tmp/object.bin with raw byte 0xff");
+    },
+  });
+  const result = await verifyExact({
+    source,
+    storageSizeBytes: "11",
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "system_error");
+  assert.equal(source.closeCount, 1);
+  assert.doesNotMatch(JSON.stringify(result), /provider|file:|private|object\.bin|raw byte|0xff|close failed/i);
+});
+
+test("internal exact-version verifier closes storage-size mismatch without consuming chunks", async () => {
+  let consumed = false;
+  const source = exactVersionByteSource([Buffer.from("exact bytes")], {
+    onBeforeChunk() {
+      consumed = true;
+    },
+  });
+  const result = await verifyExact({
+    source,
+    storageSizeBytes: 12,
+    expectedSizeBytes: 11,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "system_error");
+  assert.equal(consumed, false);
+  assert.equal(source.closeCount, 1);
+});
+
+test("internal exact-version verifier rejects malformed byte source", async () => {
+  let closeCount = 0;
+  const result = await verifyExact({
+    source: {
+      async close() {
+        closeCount += 1;
+      },
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "system_error");
+  assert.equal(closeCount, 1);
+});
+
+test("internal exact-version verifier rejects byte source missing close", async () => {
+  const result = await verifyExact({
+    source: {
+      async *[Symbol.asyncIterator]() {
+        yield Buffer.from("exact bytes");
+      },
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "system_error");
+});
+
+test("internal exact-version verifier rejects non-byte chunks", async () => {
+  const source = exactVersionByteSource([Buffer.from("exact "), "bytes"]);
+  const result = await verifyExact({
+    source,
+    expectedSizeBytes: 11,
+    storageSizeBytes: 11,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "system_error");
+  assert.equal(source.closeCount, 1);
+});
+
+test("internal exact-version verifier rejects streamed bytes exceeding expected size", async () => {
+  const source = exactVersionByteSource([Buffer.from("exact "), Buffer.from("bytes!")]);
+  const result = await verifyExact({
+    source,
+    expectedSizeBytes: 11,
+    storageSizeBytes: 11,
+    declaredChecksum: sha256Hex(Buffer.from("exact bytes")),
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "system_error");
+  assert.equal(source.closeCount, 1);
+});
+
+test("internal exact-version verifier rejects streamed bytes below expected size", async () => {
+  const source = exactVersionByteSource([Buffer.from("short")]);
+  const result = await verifyExact({
+    source,
+    expectedSizeBytes: 11,
+    storageSizeBytes: 11,
+    declaredChecksum: sha256Hex(Buffer.from("exact bytes")),
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "system_error");
+  assert.equal(source.closeCount, 1);
+});
+
+test("internal exact-version verifier rejects checksum mismatch", async () => {
+  const source = exactVersionByteSource([Buffer.from("exact bytes")]);
+  const result = await verifyExact({
+    source,
+    declaredChecksum: "b".repeat(64),
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "system_error");
+  assert.equal(source.closeCount, 1);
+});
+
+test("internal exact-version verifier sanitizes read exception", async () => {
+  const source = {
+    closeCount: 0,
+    async close() {
+      this.closeCount += 1;
+    },
+    async *[Symbol.asyncIterator]() {
+      throw new Error(`read failed for /private/tmp/${objectVersionId}/secret.bin`);
+    },
+  };
+  const result = await verifyExact({
+    source,
+    expectedSizeBytes: 11,
+    storageSizeBytes: 11,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "system_error");
+  assert.equal(source.closeCount, 1);
+  assert.doesNotMatch(JSON.stringify(result), /private|secret|object\.bin|ov_aaaaaaaa/i);
+});
+
+test("internal exact-version verifier handles abort before first chunk", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  const source = {
+    closeCount: 0,
+    async close() {
+      this.closeCount += 1;
+    },
+    async *[Symbol.asyncIterator]() {
+      throw new DOMException("storage_read_aborted", "AbortError");
+    },
+  };
+  const result = await verifyExact({
+    source,
+    signal: controller.signal,
+    expectedSizeBytes: 11,
+    storageSizeBytes: 11,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "invalid_request");
+  assert.equal(source.closeCount, 1);
+});
+
+test("internal exact-version verifier handles abort during hashing", async () => {
+  const controller = new AbortController();
+  const source = exactVersionByteSource([Buffer.from("exact "), Buffer.from("bytes")], {
+    onAfterChunk() {
+      controller.abort();
+    },
+  });
+  const result = await verifyExact({
+    source,
+    signal: controller.signal,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "invalid_request");
+  assert.equal(source.closeCount, 1);
+});
+
+test("internal exact-version verifier closes exactly once for every post-open outcome", async () => {
+  const cases = [
+    {
+      name: "success",
+      source: exactVersionByteSource([Buffer.from("exact bytes")]),
+      overrides: {},
+    },
+    {
+      name: "malformed returned object-version ID",
+      source: exactVersionByteSource([Buffer.from("exact bytes")]),
+      overrides: { returnedObjectVersionId: new String(objectVersionId) },
+    },
+    {
+      name: "malformed storage size",
+      source: exactVersionByteSource([Buffer.from("exact bytes")]),
+      overrides: { storageSizeBytes: "11" },
+    },
+    {
+      name: "storage-size mismatch",
+      source: exactVersionByteSource([Buffer.from("exact bytes")]),
+      overrides: { storageSizeBytes: 12, expectedSizeBytes: 11 },
+    },
+    {
+      name: "malformed chunk",
+      source: exactVersionByteSource(["not-bytes"]),
+      overrides: { storageSizeBytes: 9, expectedSizeBytes: 9, declaredChecksum: sha256Hex(Buffer.from("not-bytes")) },
+    },
+    {
+      name: "excess bytes",
+      source: exactVersionByteSource([Buffer.from("exact bytes!")]),
+      overrides: { storageSizeBytes: 11, expectedSizeBytes: 11, declaredChecksum: sha256Hex(Buffer.from("exact bytes")) },
+    },
+    {
+      name: "insufficient bytes",
+      source: exactVersionByteSource([Buffer.from("short")]),
+      overrides: { storageSizeBytes: 11, expectedSizeBytes: 11, declaredChecksum: sha256Hex(Buffer.from("exact bytes")) },
+    },
+    {
+      name: "checksum mismatch",
+      source: exactVersionByteSource([Buffer.from("exact bytes")]),
+      overrides: { declaredChecksum: "c".repeat(64) },
+    },
+    {
+      name: "read exception",
+      source: {
+        closeCount: 0,
+        async close() {
+          this.closeCount += 1;
+        },
+        async *[Symbol.asyncIterator]() {
+          throw new Error("read failure with provider_private details");
+        },
+      },
+      overrides: {},
+    },
+  ];
+
+  for (const item of cases) {
+    await verifyExact({
+      source: item.source,
+      ...item.overrides,
+    });
+    assert.equal(item.source.closeCount, 1, item.name);
+  }
+});
+
+test("internal exact-version verifier exposes no raw bytes or private storage details on failures", async () => {
+  const raw = "secret raw bytes";
+  const storageFailure = await verifyExact({
+    onOpen: async () => ({
+      ok: false,
+      error: {
+        code: "provider_private_failure",
+        message: `failed at /private/tmp/object.bin with ${raw}`,
+        status: 500,
+      },
+      data: {
+        bucket: "private-bucket",
+        storage_uri: "file:///private/tmp/object.bin",
+        signed_url: "https://signed.example/private",
+      },
+    }),
+  });
+  const readFailure = await verifyExact({
+    source: {
+      closeCount: 0,
+      async close() {
+        this.closeCount += 1;
+      },
+      async *[Symbol.asyncIterator]() {
+        throw new Error(`failed reading ${raw} from provider_private /private/tmp/object.bin`);
+      },
+    },
+    expectedSizeBytes: 11,
+    storageSizeBytes: 11,
+  });
+
+  for (const result of [storageFailure, readFailure]) {
+    assert.equal(result.ok, false);
+    assert.doesNotMatch(JSON.stringify(result), /secret raw bytes|private|bucket|storage_uri|signed_url|file:|provider_private|object\.bin/i);
+  }
 });
 
 test("uploadReservedIntakeFile fails either feature gate before repository or storage calls", async () => {
