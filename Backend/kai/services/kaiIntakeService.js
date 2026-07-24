@@ -1010,6 +1010,24 @@ function uploadSuccessData({ organizationId, intakeFileId, intakeBatchId, record
   };
 }
 
+function confirmUploadSuccessData({
+  organizationId,
+  intakeFileId,
+  intakeBatchId,
+  record,
+  objectVersionId,
+  verifiedSizeBytes,
+  replayed,
+}) {
+  return {
+    ...uploadFileIdentity({ organizationId, intakeFileId, intakeBatchId }),
+    upload_state: record.upload_state,
+    object_version_id: objectVersionId,
+    verified_size_bytes: verifiedSizeBytes,
+    replayed: replayed === true,
+  };
+}
+
 function uploadNewReservationRequiredResult() {
   return buildKaiError("conflict_current_state_changed", {
     status: 409,
@@ -1155,7 +1173,7 @@ async function verifyExactObjectVersionStreamed({
 
     const verifiedChecksum = hash.digest("hex");
     if (verifiedChecksum !== declaredChecksum) {
-      return sanitizedExactVersionVerificationFailure("system_error", 500);
+      return sanitizedExactVersionVerificationFailure("checksum_mismatch", 500);
     }
 
     return {
@@ -1205,11 +1223,107 @@ function validUploadedUnconfirmedTransitionSuccess(result, { organizationId, int
   );
 }
 
+function validConfirmedTransitionSuccess(
+  result,
+  { organizationId, intakeFileId, objectVersionId, verifiedChecksum, verifiedSizeBytes },
+) {
+  const data = result?.data;
+  const record = data?.record;
+  return Boolean(
+    data
+    && typeof data.replayed === "boolean"
+    && record
+    && record.organization_id === organizationId
+    && record.intake_file_id === intakeFileId
+    && record.upload_state === "confirmed"
+    && record.object_version_id === objectVersionId
+    && record.verified_checksum === verifiedChecksum
+    && record.verified_size_bytes === verifiedSizeBytes,
+  );
+}
+
 function resolveUploadNow(input = {}, dependencies = {}) {
   const candidate = Object.hasOwn(input, "now")
     ? input.now
     : (typeof dependencies.now === "function" ? dependencies.now() : null);
   return canonicalTimestamp(candidate) || null;
+}
+
+const CONFIRM_UPLOAD_PROHIBITED_INPUT_KEYS = Object.freeze(new Set([
+  "checksum",
+  "declaredChecksum",
+  "verifiedChecksum",
+  "hashAlgorithm",
+  "algorithm",
+  "sizeBytes",
+  "fileSizeBytes",
+  "expectedSizeBytes",
+  "verifiedSizeBytes",
+  "objectVersionId",
+  "recoveryObjectVersionId",
+  "uploadState",
+  "lifecycleState",
+  "verifiedFacts",
+  "byteSource",
+  "bytes",
+  "rawBytes",
+  "recovery",
+]));
+
+const CONFIRM_UPLOAD_PROHIBITED_PAYLOAD_KEYS = Object.freeze(new Set([
+  "checksum",
+  "declared_checksum",
+  "verified_checksum",
+  "hash_algorithm",
+  "algorithm",
+  "size_bytes",
+  "file_size_bytes",
+  "expected_size_bytes",
+  "verified_size_bytes",
+  "object_version_id",
+  "recovery_object_version_id",
+  "upload_state",
+  "lifecycle_state",
+  "verified_facts",
+  "byte_source",
+  "bytes",
+  "raw_bytes",
+  "recovery",
+]));
+
+function hasConfirmUploadOverride(input = {}) {
+  const payload = input.payload || {};
+  return (
+    [...CONFIRM_UPLOAD_PROHIBITED_INPUT_KEYS].some((key) => input[key] !== undefined)
+    || [...CONFIRM_UPLOAD_PROHIBITED_PAYLOAD_KEYS].some((key) => payload[key] !== undefined)
+  );
+}
+
+function validConfirmUploadMetadata(row, { organizationId, intakeFileId }) {
+  return Boolean(
+    row
+    && typeof row === "object"
+    && !Array.isArray(row)
+    && row.organization_id === organizationId
+    && row.intake_file_id === intakeFileId
+    && typeof row.checksum === "string"
+    && STORED_FINGERPRINT_RE.test(row.checksum)
+    && row.hash_algorithm === "sha256"
+    && Number.isSafeInteger(row.file_size_bytes)
+    && row.file_size_bytes >= 0,
+  );
+}
+
+function validConfirmUploadLifecycleRead(result, { organizationId, intakeFileId }) {
+  const record = result?.data?.record;
+  return Boolean(
+    result?.ok === true
+    && record
+    && record.organization_id === organizationId
+    && record.intake_file_id === intakeFileId
+    && PROVIDER_NEUTRAL_OBJECT_VERSION_ID_RE.test(record.object_version_id)
+    && (record.upload_state === "uploaded_unconfirmed" || record.upload_state === "confirmed"),
+  );
 }
 
 async function authorizeUploadReservedIntakeFile(input = {}, dependencies = {}) {
@@ -1258,6 +1372,7 @@ async function authorizeUploadReservedIntakeFile(input = {}, dependencies = {}) 
     organizationId,
     intakeFileId,
     intakeBatchId: intakeBatchId || row.intake_batch_id || null,
+    metadata: row,
   };
 }
 
@@ -1828,14 +1943,115 @@ export async function requestUploadUrl(dependencies = {}) {
   return buildKaiError("storage_provider_not_configured");
 }
 
-export async function confirmUpload(dependencies = {}) {
-  if (!isKaiSprint2Enabled(dependencies.env || process.env)) {
+export async function confirmUpload(input = {}, dependencies = {}) {
+  const env = dependencies.env || process.env;
+  if (!isKaiSprint2Enabled(env)) {
     return buildKaiError("feature_disabled");
   }
-  if (!areKaiSprint2UploadFeaturesEnabled(dependencies.env || process.env)) {
+  if (!areKaiSprint2UploadFeaturesEnabled(env)) {
     return buildKaiError("feature_disabled", { message: "KAI file upload is not enabled." });
   }
-  return buildKaiError("storage_provider_not_configured");
+
+  if (hasConfirmUploadOverride(input)) {
+    return buildKaiError("invalid_request", {
+      message: "Upload confirmation uses only stored metadata and lifecycle facts.",
+    });
+  }
+
+  const auth = await authorizeUploadReservedIntakeFile(input, dependencies);
+  if (!auth.ok) return auth;
+
+  const now = resolveUploadNow(input, dependencies);
+  if (!now) return buildKaiError("invalid_request", { message: "A deterministic canonical now value is required." });
+
+  const lifecycleRepository = dependencies.uploadLifecycleRepository || dependencies.lifecycleRepository;
+  if (
+    !lifecycleRepository
+    || typeof lifecycleRepository.getUploadLifecycle !== "function"
+    || typeof lifecycleRepository.transitionUploadLifecycle !== "function"
+  ) {
+    return buildKaiError("storage_provider_not_configured", {
+      message: "Upload lifecycle repository is not configured.",
+    });
+  }
+
+  const { organizationId, intakeFileId, intakeBatchId, metadata } = auth;
+  if (!validConfirmUploadMetadata(metadata, { organizationId, intakeFileId })) {
+    return buildKaiError("invalid_request");
+  }
+
+  let lifecycle;
+  try {
+    lifecycle = await lifecycleRepository.getUploadLifecycle({ organizationId, intakeFileId });
+  } catch {
+    return buildKaiError("system_error");
+  }
+  if (lifecycle?.ok === false) return lifecycle;
+  if (!validConfirmUploadLifecycleRead(lifecycle, { organizationId, intakeFileId })) {
+    return buildKaiError("conflict_current_state_changed");
+  }
+
+  const storageAdapter = dependencies.storageAdapter;
+  if (!storageAdapter || typeof storageAdapter.openObjectVersionReadStream !== "function") {
+    return buildKaiError("storage_provider_not_configured", {
+      message: "Upload storage adapter cannot read object versions.",
+    });
+  }
+
+  const lifecycleRecord = lifecycle.data.record;
+  const verification = await verifyExactObjectVersionStreamed({
+    storageAdapter,
+    objectVersionId: lifecycleRecord.object_version_id,
+    declaredChecksum: metadata.checksum,
+    expectedSizeBytes: metadata.file_size_bytes,
+    hashAlgorithm: metadata.hash_algorithm,
+    ...(input.signal ? { signal: input.signal } : {}),
+  });
+  if (verification?.ok !== true) return verification;
+
+  const verifiedObjectVersionId = verification.data?.objectVersionId;
+  const verifiedChecksum = verification.data?.verifiedChecksum;
+  const verifiedSizeBytes = verification.data?.verifiedSizeBytes;
+
+  let confirmed;
+  try {
+    confirmed = await lifecycleRepository.transitionUploadLifecycle({
+      organizationId,
+      intakeFileId,
+      expectedUploadState: "uploaded_unconfirmed",
+      newUploadState: "confirmed",
+      now,
+      objectVersionId: verifiedObjectVersionId,
+      verifiedChecksum,
+      verifiedSizeBytes,
+    });
+  } catch {
+    return buildKaiError("system_error");
+  }
+  if (confirmed?.ok === false) return confirmed;
+  if (!validConfirmedTransitionSuccess(confirmed, {
+    organizationId,
+    intakeFileId,
+    objectVersionId: verifiedObjectVersionId,
+    verifiedChecksum,
+    verifiedSizeBytes,
+  })) {
+    return buildKaiError("conflict_current_state_changed");
+  }
+
+  return {
+    ok: true,
+    data: confirmUploadSuccessData({
+      organizationId,
+      intakeFileId,
+      intakeBatchId,
+      record: confirmed.data.record,
+      objectVersionId: verifiedObjectVersionId,
+      verifiedSizeBytes,
+      replayed: confirmed.data.replayed,
+    }),
+    warnings: [],
+  };
 }
 
 export const __testables = {

@@ -4234,6 +4234,30 @@ combined_p0_specs: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test 
 full_repository_suite: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - sandbox run hit known localhost listener EPERM with tests 743; pass 736; fail 7; listener-capable rerun passed tests 791; pass 791; fail 0
 ```
 
+## P0-06A confirmUpload orchestration
+
+```text
+p0_06a_package_status: confirm_upload_finalized_not_staged
+implementation_status: IMPLEMENTED_NOT_STAGED
+verification_status: USER_CONFIRMED after owner-run listener-capable full-suite pass
+evidence_class: USER_CONFIRMED
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 2e7492b44993dc155d259394cbc95070e6e69320
+active_package_scope: bounded confirmUpload(input, dependencies) service orchestration; no route, listener, production composition, P0-06B, Gate A, database, cloud, deployment, parsing, profiling, evidence generation, or live-upload readiness
+metadata_boundary: one organization-scoped metadata read supplies declared checksum, sha256, and expected size
+lifecycle_boundary: lifecycle supplies exact object version and current upload state
+verification_boundary: exact-version verification streams and hashes stored bytes using trusted facts only
+checksum_mismatch_boundary: checksum mismatch returns checksum_mismatch and performs no transition
+success_transition: uploaded_unconfirmed -> confirmed
+repository_authority: lifecycle repository owns first confirmation, identical replay, and changed-fact conflict
+response_boundary: successful response uses the restricted allowlist
+unchanged_boundaries: routes, listeners, production composition, P0-06B, and Gate A remain unchanged
+changed_files: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md; Backend/kai/services/kaiIntakeService.js; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md; __tests__/kai-sprint2-foundation-safety.spec.js; __tests__/kai-sprint2-intake-service.spec.js
+focused_intake_service_spec: TOOL_VERIFIED agent-run DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-intake-service.spec.js - tests 82; pass 82; fail 0
+combined_p0_specs: TOOL_VERIFIED agent-run DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-intake-service.spec.js __tests__/kai-sprint2-p0-upload-lifecycle-repository.spec.js __tests__/kai-sprint2-storage-boundary.spec.js - tests 145; pass 145; fail 0
+full_repository_suite: USER_CONFIRMED owner-run listener-capable DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - tests 799; pass 799; fail 0
+```
+
 
 ---
 

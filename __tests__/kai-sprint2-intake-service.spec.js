@@ -123,6 +123,27 @@ function intakeFileRow(overrides = {}) {
     intake_batch_id: ids.intakeBatchId,
     organization_id: ids.organizationId,
     engagement_id: ids.engagementId,
+    checksum: sha256Hex(Buffer.from("exact bytes")),
+    hash_algorithm: "sha256",
+    file_size_bytes: 11,
+    ...overrides,
+  };
+}
+
+function uploadLifecycleRecord(overrides = {}) {
+  return {
+    organization_id: ids.organizationId,
+    intake_batch_id: ids.intakeBatchId,
+    intake_file_id: ids.intakeFileId,
+    upload_state: "uploaded_unconfirmed",
+    file_policy_status: "pending",
+    upload_state_changed_at: uploadNow,
+    upload_expires_at: "2026-07-24T10:00:00.000Z",
+    object_version_id: objectVersionId,
+    verified_checksum: null,
+    verified_size_bytes: null,
+    verified_at: null,
+    created_at: uploadNow,
     ...overrides,
   };
 }
@@ -136,6 +157,18 @@ function uploadInput(overrides = {}) {
     intakeFileId: ids.intakeFileId,
     now: uploadNow,
     bytes: Buffer.from("fresh upload bytes"),
+    ...overrides,
+  };
+}
+
+function confirmInput(overrides = {}) {
+  return {
+    actorContext,
+    organizationId: ids.organizationId,
+    engagementId: ids.engagementId,
+    intakeBatchId: ids.intakeBatchId,
+    intakeFileId: ids.intakeFileId,
+    now: uploadNow,
     ...overrides,
   };
 }
@@ -211,6 +244,73 @@ function transitionFailure(code = "conflict_current_state_changed", status = 409
     ok: false,
     data: null,
     error: { code, status },
+  };
+}
+
+function confirmTransitionSuccess(input, { replayed = false, recordOverrides = {} } = {}) {
+  return {
+    ok: true,
+    data: {
+      replayed,
+      record: {
+        ...uploadLifecycleRecord({
+          upload_state: input.newUploadState,
+          object_version_id: input.objectVersionId,
+          verified_checksum: input.verifiedChecksum,
+          verified_size_bytes: input.verifiedSizeBytes,
+          verified_at: input.now,
+          upload_state_changed_at: input.now,
+        }),
+        ...recordOverrides,
+      },
+    },
+    error: null,
+  };
+}
+
+function lifecycleReadSuccess(record = uploadLifecycleRecord()) {
+  return {
+    ok: true,
+    data: { record },
+    error: null,
+  };
+}
+
+function confirmDependencies({
+  row = intakeFileRow(),
+  lifecycle = lifecycleReadSuccess(),
+  transition,
+  storageAdapter = exactVersionStorageAdapter(),
+  order = [],
+  calls = {},
+} = {}) {
+  calls.metadataReads = [];
+  calls.lifecycleReads = [];
+  calls.transitions = [];
+  return {
+    env: enabledUploadEnv,
+    async getIntakeFileMetadata(organizationId, intakeFileId) {
+      order.push("file_authorized");
+      calls.metadataReads.push({ organizationId, intakeFileId });
+      assert.equal(organizationId, ids.organizationId);
+      assert.equal(intakeFileId, ids.intakeFileId);
+      return row;
+    },
+    uploadLifecycleRepository: {
+      async getUploadLifecycle(input) {
+        order.push("lifecycle_read");
+        calls.lifecycleReads.push(input);
+        if (typeof lifecycle === "function") return lifecycle(input);
+        return lifecycle;
+      },
+      async transitionUploadLifecycle(input) {
+        order.push(`${input.expectedUploadState}->${input.newUploadState}`);
+        calls.transitions.push(input);
+        if (transition) return transition(input);
+        return confirmTransitionSuccess(input);
+      },
+    },
+    storageAdapter,
   };
 }
 
@@ -510,14 +610,306 @@ test("requestUploadUrl remains fail-closed in P0", async () => {
   assert.equal(enabledResult.error.code, "storage_provider_not_configured");
 });
 
-test("confirmUpload remains fail-closed in P0", async () => {
-  const result = await confirmUpload({ env: { KAI_SPRINT2_ENABLED: "true" } });
-  assert.equal(result.ok, false);
-  assert.equal(result.error.code, "feature_disabled");
+test("confirmUpload fails either feature gate before repository or storage calls", async () => {
+  for (const env of [
+    { KAI_SPRINT2_ENABLED: "false", KAI_FILE_UPLOAD_ENABLED: "true" },
+    { KAI_SPRINT2_ENABLED: "true", KAI_FILE_UPLOAD_ENABLED: "false" },
+  ]) {
+    const result = await confirmUpload(confirmInput(), {
+      env,
+      async getIntakeFileMetadata() {
+        throw new Error("metadata read should not run when gates are disabled");
+      },
+      uploadLifecycleRepository: {
+        async getUploadLifecycle() {
+          throw new Error("lifecycle read should not run when gates are disabled");
+        },
+        async transitionUploadLifecycle() {
+          throw new Error("transition should not run when gates are disabled");
+        },
+      },
+      storageAdapter: {
+        async openObjectVersionReadStream() {
+          throw new Error("storage should not run when gates are disabled");
+        },
+      },
+    });
 
-  const enabledResult = await confirmUpload({ env: enabledUploadEnv });
-  assert.equal(enabledResult.ok, false);
-  assert.equal(enabledResult.error.code, "storage_provider_not_configured");
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "feature_disabled");
+  }
+});
+
+test("confirmUpload rejects invalid input and prohibited caller overrides before scoped reads", async () => {
+  let metadataReadCount = 0;
+  const dependencies = {
+    env: enabledUploadEnv,
+    async getIntakeFileMetadata() {
+      metadataReadCount += 1;
+      throw new Error("metadata read should not run for invalid request");
+    },
+    uploadLifecycleRepository: {
+      async getUploadLifecycle() {
+        throw new Error("lifecycle read should not run for invalid request");
+      },
+      async transitionUploadLifecycle() {
+        throw new Error("transition should not run for invalid request");
+      },
+    },
+    storageAdapter: {
+      async openObjectVersionReadStream() {
+        throw new Error("storage should not run for invalid request");
+      },
+    },
+  };
+
+  const invalidId = await confirmUpload(confirmInput({ intakeFileId: "not-a-uuid" }), dependencies);
+  assert.equal(invalidId.ok, false);
+  assert.equal(invalidId.error.code, "invalid_request");
+
+  for (const override of [
+    { checksum: "a".repeat(64) },
+    { hashAlgorithm: "sha256" },
+    { sizeBytes: 11 },
+    { objectVersionId },
+    { uploadState: "uploaded_unconfirmed" },
+    { verifiedChecksum: "a".repeat(64) },
+    { byteSource: exactVersionByteSource([Buffer.from("exact bytes")]) },
+    { bytes: Buffer.from("exact bytes") },
+    { recovery: { objectVersionId } },
+    { payload: { checksum: "a".repeat(64) } },
+    { payload: { hash_algorithm: "sha256" } },
+    { payload: { file_size_bytes: 11 } },
+    { payload: { object_version_id: objectVersionId } },
+    { payload: { lifecycle_state: "confirmed" } },
+    { payload: { raw_bytes: "secret raw bytes" } },
+  ]) {
+    const result = await confirmUpload(confirmInput(override), dependencies);
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "invalid_request");
+  }
+
+  assert.equal(metadataReadCount, 0);
+});
+
+test("confirmUpload authorization failure happens before metadata, lifecycle, or storage calls", async () => {
+  const unauthorizedActor = {
+    ...actorContext,
+    kaiRoles: [],
+    organizationMemberships: [],
+  };
+  const result = await confirmUpload(confirmInput({ actorContext: unauthorizedActor }), {
+    env: enabledUploadEnv,
+    async getIntakeFileMetadata() {
+      throw new Error("metadata read should not run after authorization failure");
+    },
+    uploadLifecycleRepository: {
+      async getUploadLifecycle() {
+        throw new Error("lifecycle read should not run after authorization failure");
+      },
+      async transitionUploadLifecycle() {
+        throw new Error("transition should not run after authorization failure");
+      },
+    },
+    storageAdapter: {
+      async openObjectVersionReadStream() {
+        throw new Error("storage should not run after authorization failure");
+      },
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "authorization_denied");
+});
+
+test("confirmUpload verifies trusted stored facts and sends exact confirmation transition", async () => {
+  const calls = {};
+  const order = [];
+  const storageAdapter = exactVersionStorageAdapter({
+    chunks: [Buffer.from("exact bytes")],
+    returnedObjectVersionId: objectVersionId,
+  });
+  const result = await confirmUpload(confirmInput(), confirmDependencies({
+    calls,
+    order,
+    storageAdapter,
+  }));
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls.metadataReads, [
+    { organizationId: ids.organizationId, intakeFileId: ids.intakeFileId },
+  ]);
+  assert.deepEqual(calls.lifecycleReads, [
+    { organizationId: ids.organizationId, intakeFileId: ids.intakeFileId },
+  ]);
+  assert.deepEqual(storageAdapter.calls, [{ objectVersionId }]);
+  assert.deepEqual(calls.transitions, [{
+    organizationId: ids.organizationId,
+    intakeFileId: ids.intakeFileId,
+    expectedUploadState: "uploaded_unconfirmed",
+    newUploadState: "confirmed",
+    now: uploadNow,
+    objectVersionId,
+    verifiedChecksum: sha256Hex(Buffer.from("exact bytes")),
+    verifiedSizeBytes: 11,
+  }]);
+  assert.deepEqual(order, [
+    "file_authorized",
+    "lifecycle_read",
+    "uploaded_unconfirmed->confirmed",
+  ]);
+  assert.deepEqual(Object.keys(result.data).sort(), [
+    "intake_batch_id",
+    "intake_file_id",
+    "object_version_id",
+    "organization_id",
+    "replayed",
+    "upload_state",
+    "verified_size_bytes",
+  ]);
+  assert.deepEqual(result.data, {
+    organization_id: ids.organizationId,
+    intake_file_id: ids.intakeFileId,
+    intake_batch_id: ids.intakeBatchId,
+    upload_state: "confirmed",
+    object_version_id: objectVersionId,
+    verified_size_bytes: 11,
+    replayed: false,
+  });
+  safeUploadBoundary(result);
+});
+
+test("confirmUpload rejects malformed metadata and lifecycle results before storage", async () => {
+  for (const row of [
+    intakeFileRow({ checksum: "A".repeat(64) }),
+    intakeFileRow({ hash_algorithm: "sha512" }),
+    intakeFileRow({ file_size_bytes: "11" }),
+  ]) {
+    const calls = {};
+    const order = [];
+    const result = await confirmUpload(confirmInput(), confirmDependencies({
+      row,
+      calls,
+      order,
+      storageAdapter: {
+        async openObjectVersionReadStream() {
+          throw new Error("storage must not run after malformed metadata");
+        },
+      },
+    }));
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "invalid_request");
+    assert.equal(calls.metadataReads.length, 1);
+    assert.deepEqual(order, ["file_authorized"]);
+  }
+
+  for (const lifecycle of [
+    { ok: true, data: null },
+    lifecycleReadSuccess(uploadLifecycleRecord({ upload_state: "reserved" })),
+    lifecycleReadSuccess(uploadLifecycleRecord({ object_version_id: "provider-generation-123" })),
+    lifecycleReadSuccess(uploadLifecycleRecord({ organization_id: otherOrganizationId })),
+  ]) {
+    const calls = {};
+    const order = [];
+    const result = await confirmUpload(confirmInput(), confirmDependencies({
+      lifecycle,
+      calls,
+      order,
+      storageAdapter: {
+        async openObjectVersionReadStream() {
+          throw new Error("storage must not run after malformed lifecycle read");
+        },
+      },
+    }));
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "conflict_current_state_changed");
+    assert.equal(calls.metadataReads.length, 1);
+    assert.equal(calls.transitions.length, 0);
+    assert.deepEqual(order, ["file_authorized", "lifecycle_read"]);
+  }
+});
+
+test("confirmUpload verifier failure and checksum mismatch perform zero transitions", async () => {
+  const storageFailureCalls = {};
+  const storageFailure = await confirmUpload(confirmInput(), confirmDependencies({
+    calls: storageFailureCalls,
+    storageAdapter: exactVersionStorageAdapter({
+      result: {
+        ok: false,
+        error: {
+          code: "provider_private_failure",
+          message: "failed in /private/tmp/object.bin",
+          status: 500,
+        },
+      },
+    }),
+  }));
+  assert.equal(storageFailure.ok, false);
+  assert.equal(storageFailure.error.code, "system_error");
+  assert.equal(storageFailureCalls.transitions.length, 0);
+  safeUploadBoundary(storageFailure);
+
+  const mismatchCalls = {};
+  const checksumMismatch = await confirmUpload(confirmInput(), confirmDependencies({
+    calls: mismatchCalls,
+    row: intakeFileRow({ checksum: "b".repeat(64) }),
+    storageAdapter: exactVersionStorageAdapter({ chunks: [Buffer.from("exact bytes")] }),
+  }));
+  assert.equal(checksumMismatch.ok, false);
+  assert.equal(checksumMismatch.error.code, "checksum_mismatch");
+  assert.equal(mismatchCalls.transitions.length, 0);
+  safeUploadBoundary(checksumMismatch);
+});
+
+test("confirmUpload leaves replay and changed-fact conflict authoritative to repository", async () => {
+  const replayCalls = {};
+  const replay = await confirmUpload(confirmInput(), confirmDependencies({
+    calls: replayCalls,
+    lifecycle: lifecycleReadSuccess(uploadLifecycleRecord({
+      upload_state: "confirmed",
+      verified_checksum: sha256Hex(Buffer.from("exact bytes")),
+      verified_size_bytes: 11,
+      verified_at: uploadNow,
+    })),
+    transition: (input) => confirmTransitionSuccess(input, { replayed: true }),
+  }));
+
+  assert.equal(replay.ok, true);
+  assert.equal(replay.data.replayed, true);
+  assert.equal(replayCalls.transitions.length, 1);
+  assert.equal(replayCalls.transitions[0].expectedUploadState, "uploaded_unconfirmed");
+
+  const conflictCalls = {};
+  const conflict = await confirmUpload(confirmInput(), confirmDependencies({
+    calls: conflictCalls,
+    lifecycle: lifecycleReadSuccess(uploadLifecycleRecord({
+      upload_state: "confirmed",
+      verified_checksum: "c".repeat(64),
+      verified_size_bytes: 11,
+      verified_at: uploadNow,
+    })),
+    transition: () => transitionFailure("conflict_current_state_changed", 409),
+  }));
+
+  assert.equal(conflict.ok, false);
+  assert.equal(conflict.error.code, "conflict_current_state_changed");
+  assert.equal(conflictCalls.transitions.length, 1);
+});
+
+test("confirmUpload rejects malformed transition success and exposes no private storage details", async () => {
+  for (const transition of [
+    () => ({ ok: true, data: { record: uploadLifecycleRecord({ upload_state: "confirmed" }) } }),
+    (input) => confirmTransitionSuccess(input, { recordOverrides: { verified_size_bytes: 12 } }),
+    (input) => confirmTransitionSuccess(input, { recordOverrides: { upload_state: "uploaded_unconfirmed" } }),
+  ]) {
+    const result = await confirmUpload(confirmInput(), confirmDependencies({ transition }));
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "conflict_current_state_changed");
+    safeUploadBoundary(result);
+  }
 });
 
 test("internal exact-version verifier succeeds for exact bytes, size, and SHA-256", async () => {
@@ -818,7 +1210,7 @@ test("internal exact-version verifier rejects checksum mismatch", async () => {
   });
 
   assert.equal(result.ok, false);
-  assert.equal(result.error.code, "system_error");
+  assert.equal(result.error.code, "checksum_mismatch");
   assert.equal(source.closeCount, 1);
 });
 

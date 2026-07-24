@@ -316,21 +316,64 @@ test("assistant and generic system metadata mutations invoke no tenant or write 
   }
 });
 
-test("upload URL and confirmation entry points require both feature flags and remain storage-disabled", async () => {
-  for (const operation of [requestUploadUrl, confirmUpload]) {
-    for (const env of [
-      {},
-      { KAI_SPRINT2_ENABLED: "true" },
-      { KAI_FILE_UPLOAD_ENABLED: "true" },
-    ]) {
-      const result = await operation({ env });
-      assert.equal(result.error.code, "feature_disabled");
-    }
-    const gated = await operation({
-      env: { KAI_SPRINT2_ENABLED: "true", KAI_FILE_UPLOAD_ENABLED: "true" },
-    });
-    assert.equal(gated.error.code, "storage_provider_not_configured");
+test("upload URL entry point requires both feature flags and remains storage-disabled", async () => {
+  for (const env of [
+    {},
+    { KAI_SPRINT2_ENABLED: "true" },
+    { KAI_FILE_UPLOAD_ENABLED: "true" },
+  ]) {
+    const result = await requestUploadUrl({ env });
+    assert.equal(result.error.code, "feature_disabled");
   }
+
+  const gated = await requestUploadUrl({
+    env: { KAI_SPRINT2_ENABLED: "true", KAI_FILE_UPLOAD_ENABLED: "true" },
+  });
+  assert.equal(gated.error.code, "storage_provider_not_configured");
+});
+
+test("upload confirmation entry point requires both feature flags and actor context before dependencies", async () => {
+  for (const env of [
+    {},
+    { KAI_SPRINT2_ENABLED: "true" },
+    { KAI_FILE_UPLOAD_ENABLED: "true" },
+  ]) {
+    const result = await confirmUpload({}, { env });
+    assert.equal(result.error.code, "feature_disabled");
+  }
+
+  let metadataCalls = 0;
+  let lifecycleReadCalls = 0;
+  let lifecycleTransitionCalls = 0;
+  let storageCalls = 0;
+  const gated = await confirmUpload({}, {
+    env: { KAI_SPRINT2_ENABLED: "true", KAI_FILE_UPLOAD_ENABLED: "true" },
+    async getIntakeFileMetadata() {
+      metadataCalls += 1;
+      throw new Error("metadata read should not run without actor context");
+    },
+    uploadLifecycleRepository: {
+      async getUploadLifecycle() {
+        lifecycleReadCalls += 1;
+        throw new Error("lifecycle read should not run without actor context");
+      },
+      async transitionUploadLifecycle() {
+        lifecycleTransitionCalls += 1;
+        throw new Error("lifecycle transition should not run without actor context");
+      },
+    },
+    storageAdapter: {
+      async openObjectVersionReadStream() {
+        storageCalls += 1;
+        throw new Error("storage should not run without actor context");
+      },
+    },
+  });
+  assert.equal(gated.error.code, "unauthorized");
+  assert.equal(metadataCalls, 0);
+  assert.equal(lifecycleReadCalls, 0);
+  assert.equal(lifecycleTransitionCalls, 0);
+  assert.equal(storageCalls, 0);
 });
 
 test("unexpected service failures return only the generic system error", async () => {
