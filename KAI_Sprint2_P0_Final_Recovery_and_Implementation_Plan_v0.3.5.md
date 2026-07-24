@@ -4044,6 +4044,39 @@ next_package_or_stop_condition: OWNER-DIRECTED STOP after this acceptance commit
 ```
 
 
+## P0-06A local test storage adapter
+
+```text
+p0_06a_package_status: local_test_storage_adapter_exact_safety_fix_complete_not_staged
+implementation_status: IMPLEMENTED_NOT_STAGED
+verification_status: TOOL_VERIFIED after focused + relevant P0 + full-suite pass
+evidence_class: TOOL_VERIFIED
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: ae1aca879baa7b34eb3054acdc22e01975fd749a
+exact_safety_fix_starting_state: expected unstaged local-storage package only; branch and HEAD matched owner request; staged paths none
+staged_paths_at_start: none
+applicable_repository_instructions: root AGENTS.md only; DATABASE_URL sentinel used for every Node and npm command; no database/cloud/production/push/deployment/current-state access authorized
+active_package_scope: bounded owner-directed P0-06A local test storage adapter only, separate from and not modifying OWNER_DECISION.P0_06A.SYNTHETIC_UPLOAD_LIFECYCLE_REPOSITORY_V1
+repository_seam: existing Backend/kai/storage/storageAdapter.js seam with existing Backend/kai/storage/localDevStorageAdapter.js implementation location reused; focused storage boundary spec reused at __tests__/kai-sprint2-storage-boundary.spec.js
+adapter_behavior_added: dependency-injected private-root local dev/test byte adapter; exclusive create-once object-version storage; repeated generated-version collision rejection; adapter-generated provider-neutral immutable object_version_id; exact-version stat and read; complete per-chunk write loop with size_bytes counted from bytes actually written; incomplete write cleanup after source failure or abort; filesystem root rejection; root and objects directory canonicalization before object operations; configured root and objects directory reject symlink components instead of following them; exact object file final-component O_NOFOLLOW used only when available, with adapter unavailable otherwise; test-scoped teardown compares canonical paths, requires strict descendant of the canonical OS temporary directory, and rejects symlink components before removal; defensive binary byte copying; safe ordinary result/error boundary without raw bytes, filesystem paths, bucket, signed URL, or provider-private identifiers
+production_selection: default storage provider remains disabled/fail-closed; GCS provider remains disabled SDK-free stub; local adapter not added to production barrel
+changed_files: Backend/kai/storage/localDevStorageAdapter.js; __tests__/kai-sprint2-storage-boundary.spec.js; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+focused_adapter_spec: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-storage-boundary.spec.js - tests 19; pass 19; fail 0
+relevant_p0_tests: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-storage-boundary.spec.js __tests__/kai-sprint2-storage-path-policy.spec.js - tests 20; pass 20; fail 0
+full_repository_suite: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - sandbox run hit known localhost listener EPERM with 654 pass / 7 fail; localhost-capable rerun passed tests 709; pass 709; fail 0
+p0_06a_synthetic_upload_lifecycle_repository_changed: false
+routes_or_listeners_changed: false
+confirmation_or_hashing_added: false
+schema_or_sql_changed: false
+database_or_cloud_binding_added: false
+new_dependency_added: false
+contract_changed: false
+p0_06b_status: NOT_CONFIRMED
+gate_a_status: NOT_CONFIRMED
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this unstaged package; do not stage, commit, push, deploy, or begin another package without separate owner authorization
+```
+
+
 ---
 
 Plan authority record
