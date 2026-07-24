@@ -83,6 +83,7 @@ const CANONICAL_ISO_TIMESTAMP_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z
 const REVIEW_QUEUE_PRIORITY_RE = /^[a-z0-9_]{1,64}$/;
 const DISALLOWED_TEXT_CONTROLS_RE = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/u;
 const BIDI_FORMATTING_CONTROLS_RE = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/u;
+const PROVIDER_NEUTRAL_OBJECT_VERSION_ID_RE = /^ov_[a-f0-9]{32}$/;
 
 function stableJson(value) {
   if (Array.isArray(value)) return `[${value.map((item) => stableJson(item)).join(",")}]`;
@@ -991,6 +992,147 @@ function responseFile(row) {
   };
 }
 
+function uploadFileIdentity({ organizationId, intakeFileId, intakeBatchId = null }) {
+  return {
+    organization_id: organizationId,
+    intake_file_id: intakeFileId,
+    ...(intakeBatchId ? { intake_batch_id: intakeBatchId } : {}),
+  };
+}
+
+function uploadSuccessData({ organizationId, intakeFileId, intakeBatchId, record, objectVersionId, sizeBytes, replayed }) {
+  return {
+    ...uploadFileIdentity({ organizationId, intakeFileId, intakeBatchId }),
+    upload_state: record.upload_state,
+    object_version_id: objectVersionId,
+    size_bytes: sizeBytes,
+    replayed: replayed === true,
+  };
+}
+
+function uploadNewReservationRequiredResult() {
+  return buildKaiError("conflict_current_state_changed", {
+    status: 409,
+    message: "Upload attempt cannot continue. Reserve a new intake file.",
+    data: {
+      new_reservation_required: true,
+    },
+  });
+}
+
+function sanitizedStorageFailure(result, { newReservationRequired = false } = {}) {
+  return buildKaiError(result?.error?.code || "system_error", {
+    status: result?.error?.status || 500,
+    ...(newReservationRequired ? { data: { new_reservation_required: true } } : {}),
+  });
+}
+
+function sanitizedPostStartInternalFailure() {
+  return buildKaiError("system_error", {
+    status: 500,
+    data: { new_reservation_required: true },
+  });
+}
+
+function validatedStorageSuccessData(storage) {
+  const objectVersionId = storage?.data?.object_version_id;
+  const sizeBytes = storage?.data?.size_bytes;
+  if (typeof objectVersionId !== "string") return null;
+  if (!PROVIDER_NEUTRAL_OBJECT_VERSION_ID_RE.test(objectVersionId)) return null;
+  if (!Number.isSafeInteger(sizeBytes) || sizeBytes < 0) return null;
+  return {
+    objectVersionId,
+    sizeBytes,
+  };
+}
+
+function validUploadStartedTransitionSuccess(result, { organizationId, intakeFileId }) {
+  const data = result?.data;
+  const record = data?.record;
+  return Boolean(
+    data
+    && typeof data.replayed === "boolean"
+    && record
+    && record.organization_id === organizationId
+    && record.intake_file_id === intakeFileId
+    && record.upload_state === "upload_started"
+    && (
+      !Object.hasOwn(record, "object_version_id")
+      || record.object_version_id === null
+    ),
+  );
+}
+
+function validUploadedUnconfirmedTransitionSuccess(result, { organizationId, intakeFileId, objectVersionId }) {
+  const data = result?.data;
+  const record = data?.record;
+  return Boolean(
+    data
+    && typeof data.replayed === "boolean"
+    && record
+    && record.organization_id === organizationId
+    && record.intake_file_id === intakeFileId
+    && record.upload_state === "uploaded_unconfirmed"
+    && record.object_version_id === objectVersionId,
+  );
+}
+
+function resolveUploadNow(input = {}, dependencies = {}) {
+  const candidate = Object.hasOwn(input, "now")
+    ? input.now
+    : (typeof dependencies.now === "function" ? dependencies.now() : null);
+  return canonicalTimestamp(candidate) || null;
+}
+
+async function authorizeUploadReservedIntakeFile(input = {}, dependencies = {}) {
+  const actorResult = input.actorContext
+    ? { ok: true, actorContext: input.actorContext }
+    : await resolveKaiActorContext(input.req, dependencies);
+  if (!actorResult.ok) return actorError(actorResult);
+
+  const payload = input.payload || {};
+  const organizationId = String(input.organizationId || payload.organization_id || "").trim().toLowerCase();
+  const intakeFileId = String(input.intakeFileId || payload.intake_file_id || "").trim().toLowerCase();
+  const intakeBatchId = input.intakeBatchId || payload.intake_batch_id || null;
+  const engagementId = input.engagementId || payload.engagement_id || null;
+
+  if (!UUID_RE.test(organizationId) || !UUID_RE.test(intakeFileId)) {
+    return buildKaiError("invalid_request");
+  }
+
+  const actorContext = actorResult.actorContext;
+  if (actorContext.actorType !== "human") return buildKaiError("authorization_denied");
+  const auth = validateActorCanPerformOperation(actorContext, "create_intake_file", organizationId);
+  if (!auth.ok) return buildKaiError(auth.error_code, { blockers: auth.blockers });
+
+  const readFile = dependencies.getIntakeFileMetadata || readIntakeFileMetadata;
+  const row = await readFile(organizationId, intakeFileId);
+  if (!row || String(row.intake_file_id || "").toLowerCase() !== intakeFileId) {
+    return buildKaiError("not_found");
+  }
+
+  const tenantResult = validateTenantBoundaryConsistency({
+    expectedOrganizationId: organizationId,
+    payload: {
+      organization_id: organizationId,
+      ...(engagementId ? { engagement_id: engagementId } : {}),
+      ...(intakeBatchId ? { intake_batch_id: intakeBatchId } : {}),
+    },
+    currentRecords: [row],
+  });
+  if (tenantResult.severity === "blocker") return buildKaiError("not_found");
+  if (intakeBatchId && row.intake_batch_id !== intakeBatchId) return buildKaiError("not_found");
+  if (engagementId && row.engagement_id && row.engagement_id !== engagementId) return buildKaiError("not_found");
+
+  return {
+    ok: true,
+    actorContext,
+    organizationId,
+    intakeFileId,
+    intakeBatchId: intakeBatchId || row.intake_batch_id || null,
+  };
+}
+
 function fileReservationReplayResult(row, expectedFingerprint, actorContext) {
   if (hasConflictingFingerprint(row, expectedFingerprint, "file_metadata", "reservation_payload_hash")) {
     return buildKaiError("duplicate_conflict");
@@ -1414,6 +1556,133 @@ export async function reserveIntakeFileMetadata(input = {}, dependencies = {}) {
 }
 
 export const validateIntakeFileMetadata = reserveIntakeFileMetadata;
+
+export async function uploadReservedIntakeFile(input = {}, dependencies = {}) {
+  const env = dependencies.env || process.env;
+  if (!isKaiSprint2Enabled(env)) {
+    return buildKaiError("feature_disabled");
+  }
+  if (!areKaiSprint2UploadFeaturesEnabled(env)) {
+    return buildKaiError("feature_disabled", { message: "KAI file upload is not enabled." });
+  }
+
+  const auth = await authorizeUploadReservedIntakeFile(input, dependencies);
+  if (!auth.ok) return auth;
+
+  const now = resolveUploadNow(input, dependencies);
+  if (!now) return buildKaiError("invalid_request", { message: "A deterministic canonical now value is required." });
+
+  const hasBytes = input.bytes !== undefined;
+  const hasByteSource = input.byteSource !== undefined;
+  const payload = input.payload || {};
+  if (
+    input.recovery !== undefined ||
+    input.objectVersionId !== undefined ||
+    input.recoveryObjectVersionId !== undefined ||
+    input.sizeBytes !== undefined ||
+    input.recoverySizeBytes !== undefined ||
+    payload.recovery !== undefined ||
+    payload.object_version_id !== undefined ||
+    payload.size_bytes !== undefined
+  ) {
+    return buildKaiError("invalid_request", { message: "Fresh upload attempts must not include recovery input." });
+  }
+  if (hasBytes === hasByteSource) {
+    return buildKaiError("invalid_request", { message: "Fresh upload mode requires exactly one byte input." });
+  }
+
+  const lifecycleRepository = dependencies.uploadLifecycleRepository || dependencies.lifecycleRepository;
+  if (!lifecycleRepository || typeof lifecycleRepository.transitionUploadLifecycle !== "function") {
+    return buildKaiError("storage_provider_not_configured", {
+      message: "Upload lifecycle repository is not configured.",
+    });
+  }
+
+  const storageAdapter = dependencies.storageAdapter;
+  if (!storageAdapter) {
+    return buildKaiError("storage_provider_not_configured", {
+      message: "Upload storage adapter is not configured.",
+    });
+  }
+
+  const { organizationId, intakeFileId, intakeBatchId } = auth;
+
+  if (typeof storageAdapter.createObjectVersion !== "function") {
+    return buildKaiError("storage_provider_not_configured", {
+      message: "Upload storage adapter cannot create object versions.",
+    });
+  }
+
+  let started;
+  try {
+    started = await lifecycleRepository.transitionUploadLifecycle({
+      organizationId,
+      intakeFileId,
+      expectedUploadState: "reserved",
+      newUploadState: "upload_started",
+      now,
+    });
+  } catch {
+    return sanitizedPostStartInternalFailure();
+  }
+  if (started?.ok === false) return started;
+  if (started?.ok !== true) return uploadNewReservationRequiredResult();
+  if (!validUploadStartedTransitionSuccess(started, { organizationId, intakeFileId })) {
+    return uploadNewReservationRequiredResult();
+  }
+  if (started.data.replayed === true) {
+    return uploadNewReservationRequiredResult();
+  }
+
+  let storage;
+  try {
+    storage = await storageAdapter.createObjectVersion({
+      ...(hasBytes ? { bytes: input.bytes } : { byteSource: input.byteSource }),
+      ...(input.signal ? { signal: input.signal } : {}),
+    });
+  } catch {
+    return sanitizedPostStartInternalFailure();
+  }
+  if (!storage.ok) return sanitizedStorageFailure(storage, { newReservationRequired: true });
+
+  const storageSuccessData = validatedStorageSuccessData(storage);
+  if (!storageSuccessData) return sanitizedPostStartInternalFailure();
+  const { objectVersionId, sizeBytes } = storageSuccessData;
+
+  let uploaded;
+  try {
+    uploaded = await lifecycleRepository.transitionUploadLifecycle({
+      organizationId,
+      intakeFileId,
+      expectedUploadState: "upload_started",
+      newUploadState: "uploaded_unconfirmed",
+      now,
+      objectVersionId,
+    });
+  } catch {
+    return uploadNewReservationRequiredResult();
+  }
+  if (uploaded?.ok !== true) {
+    return uploadNewReservationRequiredResult();
+  }
+  if (!validUploadedUnconfirmedTransitionSuccess(uploaded, { organizationId, intakeFileId, objectVersionId })) {
+    return uploadNewReservationRequiredResult();
+  }
+
+  return {
+    ok: true,
+    data: uploadSuccessData({
+      organizationId,
+      intakeFileId,
+      intakeBatchId,
+      record: uploaded.data.record,
+      objectVersionId,
+      sizeBytes,
+      replayed: uploaded.data.replayed,
+    }),
+    warnings: [],
+  };
+}
 
 export async function requestUploadUrl(dependencies = {}) {
   if (!isKaiSprint2Enabled(dependencies.env || process.env)) {

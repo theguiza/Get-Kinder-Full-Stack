@@ -2094,6 +2094,103 @@ next_package_or_stop_condition:
 
 ## P0-06A completion
 
+### P0-06A local upload orchestration service package evidence
+
+```text
+package: P0-06A local upload orchestration service
+authorization: owner-authorized bounded service-layer orchestration package
+implementation_status: CORRECTED_NOT_STAGED
+service_operation: uploadReservedIntakeFile
+service_path: Backend/kai/services/kaiIntakeService.js
+focused_test_path: __tests__/kai-sprint2-intake-service.spec.js
+contract_path: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md
+production_composition: unchanged
+
+fresh_mode: implemented
+resume_mode: not_authorized_removed
+caller_supplied_recovery_removed: true
+one_attempt_per_reservation: true
+same_reservation_retry_after_upload_started: prohibited
+synthetic_recovery_or_resume: not_authorized
+recovery_identity_returned_to_callers: false
+durable_bound_recovery: deferred_to_P0_06B_Gate_A
+request_upload_url_semantics_changed: false
+confirm_upload_semantics_changed: false
+storage_adapter_injection: supplied exclusively through dependencies.storageAdapter
+service_constructs_local_adapter_from_root_directory: false
+service_level_object_version_id_factory: removed
+provider_neutral_result_boundary:
+  object_version_id_type: primitive_string_only
+  object_version_id_pattern: ^ov_[a-f0-9]{32}$
+  size_bytes: non_negative_safe_integer
+  service_independently_validates_storage_success: true
+  boxed_string_object_version_id_rejected: focused test passed
+  object_with_matching_toString_object_version_id_rejected: focused test passed
+  object_identity_exposed_on_invalid_result: false
+post_start_failure_contract:
+  thrown_initial_transition_requires_new_reservation_without_storage: true
+  malformed_initial_success_requires_new_reservation_without_storage: true
+  malformed_initial_success_exposes_repository_diagnostic: false
+  initial_success_envelope_validated_before_storage: true
+  initial_identity_state_and_object_version_validated_before_storage: true
+  returned_storage_failure_requires_new_reservation: true
+  thrown_storage_failure_requires_new_reservation: true
+  malformed_storage_success_requires_new_reservation: true
+  returned_final_transition_failure_requires_new_reservation: true
+  thrown_final_transition_failure_requires_new_reservation: true
+  malformed_final_success_requires_new_reservation: true
+  final_success_envelope_validated_before_success_return: true
+  final_identity_state_and_object_version_validated_before_success_return: true
+  object_identity_exposed_on_failure: false
+
+ordering_evidence:
+  feature_gates_before_repository_or_storage: focused test passed
+  authorization_before_repository_or_storage: focused test passed
+  no_adapter_injection_fails_closed_before_lifecycle: focused test passed
+  local_root_dependency_does_not_construct_adapter: focused test passed
+  reserved_to_upload_started_before_storage: focused test passed
+  thrown_initial_transition_sanitized_before_storage: focused test passed
+  malformed_initial_success_rejected_before_storage: focused test passed
+  initial_wrong_organization_rejected_before_storage: focused test passed
+  initial_wrong_intake_file_rejected_before_storage: focused test passed
+  initial_wrong_state_rejected_before_storage: focused test passed
+  initial_assigned_object_version_rejected_before_storage: focused test passed
+  storage_before_uploaded_unconfirmed: focused test passed
+  replayed_upload_started_blocks_new_storage_and_requires_new_reservation: focused test passed
+  storage_failure_requires_new_reservation_without_final_transition: focused test passed
+  malformed_object_version_id_rejected_after_upload_started: focused test passed
+  boxed_string_object_version_id_rejected_after_upload_started: focused test passed
+  object_with_matching_toString_object_version_id_rejected_after_upload_started: focused test passed
+  path_like_object_version_id_never_returned: focused test passed
+  malformed_size_bytes_rejected_after_upload_started: focused test passed
+  malformed_storage_success_requires_new_reservation: focused test passed
+  thrown_storage_error_sanitized_and_requires_new_reservation: focused test passed
+  final_transition_failure_exposes_no_object_identity_and_requires_new_reservation: focused test passed
+  final_missing_record_rejected_without_object_identity: focused test passed
+  final_non_boolean_replayed_rejected_without_object_identity: focused test passed
+  final_wrong_organization_rejected_without_object_identity: focused test passed
+  final_wrong_intake_file_rejected_without_object_identity: focused test passed
+  final_wrong_state_rejected_without_object_identity: focused test passed
+  final_wrong_object_version_id_rejected_without_object_identity: focused test passed
+  thrown_final_transition_error_sanitized_and_requires_new_reservation: focused test passed
+  caller_supplied_recovery_rejected_without_lifecycle_or_storage: focused test passed
+  completed_object_compensation_deletion_prohibited: focused test passed
+
+test_evidence:
+  DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-intake-service.spec.js: 41 passed, 0 failed
+  DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-intake-service.spec.js __tests__/kai-sprint2-p0-upload-lifecycle-repository.spec.js __tests__/kai-sprint2-storage-boundary.spec.js: 88 passed, 0 failed
+  DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test: sandbox run failed with 7 listener EPERM failures on 127.0.0.1 after 686 passed; listener-capable rerun passed with 741 passed, 0 failed
+
+unauthorized_changes:
+  storage_adapter_changed: false
+  lifecycle_repository_changed: false
+  routes_or_listeners_changed: false
+  production_composition_changed: false
+  schema_or_sql_changed: false
+  confirmation_or_hashing_added: false
+  p0_06b_or_gate_a_state_changed: false
+```
+
 May establish:
 
 ```text

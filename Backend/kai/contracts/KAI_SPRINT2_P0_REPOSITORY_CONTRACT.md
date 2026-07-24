@@ -1366,6 +1366,39 @@ This decision authorizes only a later in-memory synthetic repository package und
 
 It does not authorize implementation in this documentation step, production composition, barrel export, upload or confirmation routes, listener behavior, byte storage, object-version generation, checksum computation, streaming, backpressure, size or timeout enforcement, abort or cleanup execution, concurrency permits, shared coordination, audit, metrics, security-assessment enqueueing, executor enablement, database or cloud persistence, schema changes, deletion, retention, feature enablement, P0-06B, deployment, or push.
 
+### P0-06A local upload service orchestration
+
+The service operation `uploadReservedIntakeFile` is authorized only as a bounded local service-layer orchestration over the dependency-injected synthetic upload-lifecycle repository and dependency-injected storage adapter. The service does not construct a local adapter from a root-directory dependency, does not accept service-level object-version factories, and fails closed when no adapter is injected. Production composition remains unchanged. It authorizes no route, listener, confirmation, database persistence, durable schema, production binding, cloud provider binding, parser, worker, audit, metric, security-assessment execution, P0-06B behavior, deployment, or live-upload readiness.
+
+Fresh-upload mode is the only authorized upload orchestration mode in P0-06A. It requires organization and intake-file identity, a deterministic caller-supplied `now`, and exactly one byte source: `bytes` or `byteSource`. Caller-supplied recovery input, recovery `object_version_id`, recovery `size_bytes`, recovery envelopes, and same-reservation resume are not authorized.
+
+Each intake-file reservation permits at most one storage attempt. After a reservation transitions to `upload_started`, any failure, replay, retry, abort, or final-transition conflict requires a new intake-file reservation. No same-reservation retry may create another object or bind a previously completed object.
+
+The operation order is exactly:
+
+```text
+1. require KAI_SPRINT2_ENABLED and KAI_FILE_UPLOAD_ENABLED
+2. resolve and authorize actor, role, active membership, organization scope, and exact intake-file scope
+3. transition reserved -> upload_started
+4. if that transition throws, return a sanitized internal failure indicating only that a new reservation is required and do not call storage
+5. if that transition returns a contract-valid failure, return the repository failure and do not call storage
+6. if that transition returns ok true, require data, boolean replayed, a record for the exact organization and intake file, upload_state upload_started, and null or absent object_version_id before storage may be called
+7. if that transition is a replayed upload_started transition, return a sanitized failure indicating only that a new reservation is required and do not create another object
+8. call the injected storageAdapter.createObjectVersion({ bytes, byteSource, signal })
+9. if storage fails or aborts, return a sanitized storage failure indicating only that a new reservation is required and do not transition to uploaded_unconfirmed
+10. on storage success, independently validate that object_version_id is a primitive string matching `^ov_[a-f0-9]{32}$` and size_bytes is a non-negative safe integer, then transition upload_started -> uploaded_unconfirmed with the exact returned object_version_id
+11. on final transition ok true, require data, boolean replayed, a record for the exact organization and intake file, upload_state uploaded_unconfirmed, and the exact object_version_id returned by storage before returning success
+12. on transition success, return only intake-file identity, upload_state, provider-neutral object_version_id, size_bytes, and replayed
+```
+
+Malformed initial success envelopes, replayed initial transitions, malformed storage success results, thrown storage exceptions, and returned storage failures after `upload_started` are sanitized failures requiring a new reservation. No returned object identity from a malformed initial success, malformed storage result, or malformed final success may be exposed or bound. Boxed strings, arrays, numbers, objects with matching `toString()`, and all other non-string object-version values are invalid.
+
+If storage succeeds but the final `uploaded_unconfirmed` transition fails, throws, or returns a malformed ok true envelope, the completed object must not be deleted, replaced, retried, compensated, exposed, or bound through a caller recovery path. The service returns a sanitized failure indicating only that a new reservation is required. It does not return `object_version_id`, `size_bytes`, a recovery token, or any other completed-object identity.
+
+No filesystem root, path, object key, URI, bucket, signed URL, provider-private identifier, raw bytes, or storage-private diagnostic may be returned.
+
+Completed-object compensation deletion is prohibited in every fresh, failure, abort, replay, and final-transition-conflict path. Only the adapter's operation-scoped incomplete-write cleanup may remove incomplete local write state. Durable bound recovery is deferred to P0-06B and Gate A; P0-06A implements no synthetic recovery, resume, recovery identity return, or storage stat recovery behavior.
+
 Object integrity keeps declared and verified facts distinct:
 
 ```text
