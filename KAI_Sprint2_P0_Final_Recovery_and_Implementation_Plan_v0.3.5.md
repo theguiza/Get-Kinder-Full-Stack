@@ -4173,6 +4173,35 @@ gate_a_status: NOT_CONFIRMED
 next_package_or_stop_condition: OWNER-DIRECTED STOP after this unstaged package; do not stage, commit, push, deploy, or begin another package without separate owner authorization
 ```
 
+## P0-06A exact-version stream prerequisite
+
+```text
+p0_06a_package_status: exact_version_stream_ownership_fix_complete_not_staged
+implementation_status: IMPLEMENTED_NOT_STAGED
+verification_status: TOOL_VERIFIED after focused + combined + full-suite pass
+evidence_class: TOOL_VERIFIED
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: a67fee1b2f6db3e9a4cc67af8bdc36fb5baf9994
+working_tree_clean_at_start: true
+staged_paths_at_start: none
+applicable_repository_instructions: root AGENTS.md only; DATABASE_URL sentinel used for every Node and npm command; no database/cloud/production/push/deployment/current-state access authorized
+active_package_scope: bounded prerequisite before local exact-version confirmation; no confirmUpload implementation
+storage_result_guard: uploadReservedIntakeFile now treats only explicit ok:false as ordinary storage failure and only explicit ok:true as eligible to proceed; malformed storage results sanitize to internal new-reservation-required failure without final lifecycle transition or deletion
+stream_boundary_added: provider-neutral openObjectVersionReadStream({ objectVersionId, signal? }) on the local dev adapter and storage adapter seam
+same_open_handle_binding: object-version ID validation precedes filesystem access; the adapter opens the exact object version once; size_bytes comes from that handle; byte_source owns and reads from that same handle
+streaming_boundary: byte_source is async-iterable streamed chunks, not a full-file Buffer; sufficiently large fixtures yield multiple chunks
+cleanup_boundary: byte_source provides an explicit provider-neutral close operation; consumers must fully consume byte_source or invoke close/release; one idempotent close path closes the owned handle on normal completion, stream/read failure, abort during reading, abort before iteration begins, early consumer cancellation, consumer throw, and explicit close before or during iteration
+abort_boundary: abort handling is attached when ownership of the opened exact-version handle transfers to byte_source; abort closes the handle even before iteration begins; the abort listener is removed when the handle closes
+private_boundary: no filesystem path, object key, URI, bucket, native filesystem diagnostic, provider-private identifier, or raw byte payload is returned outside the byte source
+confirmation_status: confirmation remains unimplemented in this package; a future confirmUpload implementation must use try/finally and invoke byte_source.close() whether hashing succeeds or fails; checksum hashing and lifecycle confirmation remain the next package
+p0_06b_and_gate_a: unchanged and unauthorized
+changed_files: Backend/kai/services/kaiIntakeService.js; Backend/kai/storage/storageAdapter.js; Backend/kai/storage/localDevStorageAdapter.js; __tests__/kai-sprint2-intake-service.spec.js; __tests__/kai-sprint2-storage-boundary.spec.js; Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+focused_intake_service_spec: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-intake-service.spec.js - tests 47; pass 47; fail 0
+focused_storage_boundary_spec: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-storage-boundary.spec.js - tests 35; pass 35; fail 0
+combined_p0_specs: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-intake-service.spec.js __tests__/kai-sprint2-p0-upload-lifecycle-repository.spec.js __tests__/kai-sprint2-storage-boundary.spec.js - tests 110; pass 110; fail 0
+full_repository_suite: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - sandbox run hit known localhost listener EPERM with tests 715; pass 708; fail 7; listener-capable rerun passed tests 763; pass 763; fail 0
+```
+
 
 ---
 

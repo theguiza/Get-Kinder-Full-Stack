@@ -18,4 +18,12 @@ export class StorageAdapter {
       message: "Signed read URLs are disabled for KAI Sprint 2 P0 Pass 1.",
     };
   }
+
+  async openObjectVersionReadStream() {
+    return {
+      ok: false,
+      error_code: "storage_provider_not_configured",
+      message: "Exact object-version streamed reads are not configured.",
+    };
+  }
 }

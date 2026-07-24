@@ -1643,7 +1643,13 @@ export async function uploadReservedIntakeFile(input = {}, dependencies = {}) {
   } catch {
     return sanitizedPostStartInternalFailure();
   }
-  if (!storage.ok) return sanitizedStorageFailure(storage, { newReservationRequired: true });
+  if (storage?.ok === false) {
+    return sanitizedStorageFailure(storage, { newReservationRequired: true });
+  }
+
+  if (storage?.ok !== true) {
+    return sanitizedPostStartInternalFailure();
+  }
 
   const storageSuccessData = validatedStorageSuccessData(storage);
   if (!storageSuccessData) return sanitizedPostStartInternalFailure();

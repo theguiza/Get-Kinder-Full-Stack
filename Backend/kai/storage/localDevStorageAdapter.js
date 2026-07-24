@@ -38,7 +38,10 @@ function normalizeRootDirectory(rootDirectory) {
 }
 
 function normalizeGeneratedObjectVersionId(value) {
-  const id = String(value || "").trim().toLowerCase();
+  if (typeof value !== "string") {
+    return { ok: false };
+  }
+  const id = value.trim().toLowerCase();
   if (!OBJECT_VERSION_ID_PATTERN.test(id)) {
     return { ok: false };
   }
@@ -194,6 +197,102 @@ async function writeCompleteChunk(handle, chunk) {
     offset += bytesWritten;
   }
   return offset;
+}
+
+async function closeHandleSafely(handle) {
+  try {
+    await handle.close();
+    return { ok: true };
+  } catch {
+    return { ok: false };
+  }
+}
+
+function createOpenHandleByteSource(handle, { signal } = {}) {
+  const chunkSize = 64 * 1024;
+  let position = 0;
+  let closed = false;
+  let closePromise = null;
+
+  let onAbort = null;
+  const closeOnce = async () => {
+    if (!closePromise) {
+      closed = true;
+      if (signal && onAbort) {
+        signal.removeEventListener("abort", onAbort);
+        onAbort = null;
+      }
+      closePromise = closeHandleSafely(handle);
+    }
+    await closePromise;
+  };
+
+  if (signal) {
+    onAbort = () => {
+      void closeOnce();
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) {
+      void closeOnce();
+    }
+  }
+
+  return {
+    [Symbol.asyncIterator]() {
+      return this;
+    },
+
+    async next() {
+      if (signal?.aborted) {
+        await closeOnce();
+        throw new DOMException("storage_read_aborted", "AbortError");
+      }
+      if (closed) {
+        return { done: true, value: undefined };
+      }
+
+      const buffer = Buffer.allocUnsafe(chunkSize);
+      let bytesRead = 0;
+      try {
+        const readResult = await handle.read(buffer, 0, buffer.length, position);
+        bytesRead = readResult?.bytesRead;
+      } catch {
+        await closeOnce();
+        throw new Error("storage_read_failed");
+      }
+      if (!Number.isInteger(bytesRead) || bytesRead < 0) {
+        await closeOnce();
+        throw new Error("storage_read_failed");
+      }
+      if (signal?.aborted) {
+        await closeOnce();
+        throw new DOMException("storage_read_aborted", "AbortError");
+      }
+      if (closed) {
+        return { done: true, value: undefined };
+      }
+      if (bytesRead === 0) {
+        await closeOnce();
+        return { done: true, value: undefined };
+      }
+      position += bytesRead;
+      return { done: false, value: Buffer.from(buffer.subarray(0, bytesRead)) };
+    },
+
+    async return() {
+      await closeOnce();
+      return { done: true, value: undefined };
+    },
+
+    async throw(error) {
+      await closeOnce();
+      throw error;
+    },
+
+    async close() {
+      await closeOnce();
+    },
+  };
 }
 
 export class LocalDevStorageAdapter extends StorageAdapter {
@@ -372,6 +471,60 @@ export class LocalDevStorageAdapter extends StorageAdapter {
       if (handle) {
         await handle.close().catch(() => {});
       }
+    }
+  }
+
+  async openObjectVersionReadStream({ objectVersionId, signal } = {}) {
+    const idResult = normalizeGeneratedObjectVersionId(objectVersionId);
+    if (!idResult.ok) {
+      return safeError("invalid_request", "Invalid object version.", 400);
+    }
+
+    const ready = await this.ensureReady();
+    if (!ready.ok) return ready;
+
+    if (signal?.aborted) {
+      return safeError("invalid_request", "Object version read was aborted.", 400);
+    }
+
+    let handle = null;
+    try {
+      const objectPath = objectVersionPath(this.objectsDirectory, idResult.objectVersionId);
+      handle = await this.openFile(objectPath, constants.O_RDONLY | this.noFollowFlag);
+    } catch (error) {
+      if (error?.code === "ELOOP") {
+        return safeError("invalid_request", "Invalid object version.", 400);
+      }
+      if (error?.code === "ENOENT") {
+        return safeError("not_found", "Object version not found.", 404);
+      }
+      return safeError("system_error", "Local test storage open failed.", 500);
+    }
+
+    try {
+      const stat = await handle.stat();
+      if (!stat.isFile()) {
+        await closeHandleSafely(handle);
+        return safeError("not_found", "Object version not found.", 404);
+      }
+      if (!Number.isSafeInteger(stat.size) || stat.size < 0) {
+        await closeHandleSafely(handle);
+        return safeError("system_error", "Local test storage stat failed.", 500);
+      }
+
+      return {
+        ok: true,
+        data: {
+          object_version_id: idResult.objectVersionId,
+          size_bytes: stat.size,
+          byte_source: createOpenHandleByteSource(handle, { signal }),
+        },
+      };
+    } catch {
+      if (handle) {
+        await closeHandleSafely(handle);
+      }
+      return safeError("system_error", "Local test storage stat failed.", 500);
     }
   }
 

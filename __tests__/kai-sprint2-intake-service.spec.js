@@ -844,6 +844,57 @@ test("uploadReservedIntakeFile malformed storage success requires a new reservat
   assertNoUploadObjectIdentity(result);
 });
 
+for (const { name, storageResult } of [
+  { name: "null", storageResult: null },
+  { name: "undefined", storageResult: undefined },
+  { name: "empty object", storageResult: {} },
+  { name: "primitive string", storageResult: "storage-provider-/private/tmp/raw-secret" },
+  {
+    name: "string ok",
+    storageResult: {
+      ok: "true",
+      data: {
+        object_version_id: objectVersionId,
+        size_bytes: 18,
+        storage_object_key: "provider_private/raw-key",
+      },
+    },
+  },
+  {
+    name: "numeric ok",
+    storageResult: {
+      ok: 1,
+      data: {
+        object_version_id: objectVersionId,
+        size_bytes: 18,
+        storage_uri: "file:///private/tmp/kai-root/object.bin",
+      },
+    },
+  },
+]) {
+  test(`uploadReservedIntakeFile malformed storage result ${name} is sanitized`, async () => {
+    const order = [];
+    const result = await uploadReservedIntakeFile(uploadInput(), uploadDependencies({
+      order,
+      transitions: [(input) => transitionSuccess(input)],
+      storage: {
+        onCreate() {
+          return storageResult;
+        },
+      },
+    }));
+
+    assert.deepEqual(order, ["file_authorized", "reserved->upload_started", "storage_create"]);
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "system_error");
+    assert.deepEqual(result.data, { new_reservation_required: true });
+    assert.equal(order.includes("upload_started->uploaded_unconfirmed"), false);
+    assert.equal(order.includes("storage_delete"), false);
+    assertNoUploadObjectIdentity(result);
+    safeUploadBoundary(result);
+  });
+}
+
 test("uploadReservedIntakeFile storage failure leaves uploaded_unconfirmed uncalled", async () => {
   const order = [];
   const result = await uploadReservedIntakeFile(uploadInput(), uploadDependencies({

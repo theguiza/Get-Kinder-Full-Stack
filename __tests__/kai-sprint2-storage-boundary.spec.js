@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { constants, existsSync, readFileSync } from "node:fs";
-import { lstat, mkdir, mkdtemp, open, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, open, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -68,6 +68,32 @@ function assertSafeStorageResultBoundary(result) {
   const serialized = JSON.stringify(result);
   assert.doesNotMatch(serialized, /rootDirectory|objectsDirectory|\.bin|storage_object_key|bucket|signed_url|provider_private/i);
   assert.equal("bytes" in (result.data || {}), false);
+}
+
+async function collectByteSource(byteSource) {
+  const chunks = [];
+  for await (const chunk of byteSource) {
+    chunks.push(Buffer.from(chunk));
+  }
+  return { chunks, bytes: Buffer.concat(chunks) };
+}
+
+function isWriteOpen(flags) {
+  return (flags & constants.O_WRONLY) === constants.O_WRONLY;
+}
+
+async function openCountingReadHandle(filePath, flags, modeValue, counters, overrides = {}) {
+  const handle = await open(filePath, flags, modeValue);
+  if (isWriteOpen(flags)) return handle;
+  counters.open += 1;
+  return {
+    stat: overrides.stat || (() => handle.stat()),
+    read: overrides.read || ((...args) => handle.read(...args)),
+    async close() {
+      counters.close += 1;
+      return handle.close();
+    },
+  };
 }
 
 test("default storage provider boundary is disabled", async () => {
@@ -208,6 +234,440 @@ test("local dev storage adapter creates one immutable generated object version",
     assert.equal(readResult.data.object_version_id, result.data.object_version_id);
     assert.equal(readResult.data.size_bytes, "first bytes".length);
     assert.equal(readResult.data.bytes.toString("utf8"), "first bytes");
+  });
+});
+
+test("local dev storage adapter opens exact object-version byte stream", async () => {
+  await withLocalStorage("open-stream", async ({ adapter }) => {
+    const expected = Buffer.from("streamed exact version bytes");
+    const createResult = await adapter.createObjectVersion({ bytes: expected });
+    const streamResult = await adapter.openObjectVersionReadStream({
+      objectVersionId: createResult.data.object_version_id,
+    });
+
+    assert.equal(streamResult.ok, true);
+    assert.equal(streamResult.data.object_version_id, createResult.data.object_version_id);
+    assert.equal(streamResult.data.size_bytes, expected.length);
+    assert.equal(Buffer.isBuffer(streamResult.data.byte_source), false);
+    assertSafeStorageResultBoundary(streamResult);
+
+    const collected = await collectByteSource(streamResult.data.byte_source);
+    assert.deepEqual(collected.bytes, expected);
+  });
+});
+
+test("local dev storage adapter streams sufficiently large objects in multiple chunks", async () => {
+  await withLocalStorage("open-stream-chunks", async ({ adapter }) => {
+    const expected = Buffer.alloc(150000, "x");
+    const createResult = await adapter.createObjectVersion({ bytes: expected });
+    const streamResult = await adapter.openObjectVersionReadStream({
+      objectVersionId: createResult.data.object_version_id,
+    });
+
+    assert.equal(streamResult.ok, true);
+    const collected = await collectByteSource(streamResult.data.byte_source);
+    assert.equal(collected.bytes.length, streamResult.data.size_bytes);
+    assert.deepEqual(collected.bytes, expected);
+    assert.equal(collected.chunks.length > 1, true);
+  });
+});
+
+test("local dev storage adapter streamed read missing and malformed versions fail safely", async () => {
+  let openCalls = 0;
+  await withLocalStorage(
+    "open-stream-failures",
+    async ({ adapter }) => {
+      const missingResult = await adapter.openObjectVersionReadStream({
+        objectVersionId: "ov_77777777777777777777777777777777",
+      });
+      assert.equal(missingResult.ok, false);
+      assert.equal(missingResult.error.code, "not_found");
+      assertSafeStorageResultBoundary(missingResult);
+
+      const malformedResult = await adapter.openObjectVersionReadStream({
+        objectVersionId: "bad-version",
+      });
+      assert.equal(malformedResult.ok, false);
+      assert.equal(malformedResult.error.code, "invalid_request");
+      assertSafeStorageResultBoundary(malformedResult);
+      assert.equal(openCalls, 1);
+    },
+    {
+      openFileForTest(filePath, flags, modeValue) {
+        openCalls += 1;
+        return open(filePath, flags, modeValue);
+      },
+    },
+  );
+});
+
+test("local dev storage adapter byte_source close before first next closes the handle", async () => {
+  const counters = { open: 0, close: 0 };
+  await withLocalStorage(
+    "open-stream-close-before-next",
+    async ({ adapter }) => {
+      const createResult = await adapter.createObjectVersion({ bytes: Buffer.from("close before next") });
+      const streamResult = await adapter.openObjectVersionReadStream({
+        objectVersionId: createResult.data.object_version_id,
+      });
+
+      assert.equal(streamResult.ok, true);
+      assert.equal(typeof streamResult.data.byte_source.close, "function");
+      await streamResult.data.byte_source.close();
+      assert.equal(counters.close, 1);
+      assert.deepEqual(await streamResult.data.byte_source.next(), { done: true, value: undefined });
+      await streamResult.data.byte_source.close();
+      assert.equal(counters.close, 1);
+    },
+    {
+      openFileForTest: (filePath, flags, modeValue) => openCountingReadHandle(filePath, flags, modeValue, counters),
+    },
+  );
+});
+
+test("local dev storage adapter byte_source return before first next closes the handle", async () => {
+  const counters = { open: 0, close: 0 };
+  await withLocalStorage(
+    "open-stream-return-before-next",
+    async ({ adapter }) => {
+      const createResult = await adapter.createObjectVersion({ bytes: Buffer.from("return before next") });
+      const streamResult = await adapter.openObjectVersionReadStream({
+        objectVersionId: createResult.data.object_version_id,
+      });
+
+      assert.equal(streamResult.ok, true);
+      assert.deepEqual(await streamResult.data.byte_source.return(), { done: true, value: undefined });
+      assert.equal(counters.close, 1);
+      assert.deepEqual(await streamResult.data.byte_source.return(), { done: true, value: undefined });
+      assert.equal(counters.close, 1);
+    },
+    {
+      openFileForTest: (filePath, flags, modeValue) => openCountingReadHandle(filePath, flags, modeValue, counters),
+    },
+  );
+});
+
+test("local dev storage adapter abort after open before first next closes the handle", async () => {
+  const counters = { open: 0, close: 0 };
+  await withLocalStorage(
+    "open-stream-abort-before-next",
+    async ({ adapter }) => {
+      const controller = new AbortController();
+      const createResult = await adapter.createObjectVersion({ bytes: Buffer.from("abort before next") });
+      const streamResult = await adapter.openObjectVersionReadStream({
+        objectVersionId: createResult.data.object_version_id,
+        signal: controller.signal,
+      });
+
+      assert.equal(streamResult.ok, true);
+      controller.abort();
+      await assert.rejects(() => streamResult.data.byte_source.next(), { name: "AbortError" });
+      assert.equal(counters.close, 1);
+      await streamResult.data.byte_source.close();
+      assert.equal(counters.close, 1);
+    },
+    {
+      openFileForTest: (filePath, flags, modeValue) => openCountingReadHandle(filePath, flags, modeValue, counters),
+    },
+  );
+});
+
+test("local dev storage adapter already-aborted signal does not leave a handle open", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  const counters = { open: 0, close: 0 };
+
+  await withLocalStorage(
+    "open-stream-already-aborted",
+    async ({ adapter }) => {
+      const createResult = await adapter.createObjectVersion({ bytes: Buffer.from("already aborted") });
+      const streamResult = await adapter.openObjectVersionReadStream({
+        objectVersionId: createResult.data.object_version_id,
+        signal: controller.signal,
+      });
+
+      assert.equal(streamResult.ok, false);
+      assert.equal(streamResult.error.code, "invalid_request");
+      assert.equal(counters.open, 0);
+      assert.equal(counters.close, 0);
+      assertSafeStorageResultBoundary(streamResult);
+    },
+    {
+      openFileForTest: (filePath, flags, modeValue) => openCountingReadHandle(filePath, flags, modeValue, counters),
+    },
+  );
+});
+
+test("local dev storage adapter abort during open result construction closes the handle", async () => {
+  const controller = new AbortController();
+  const counters = { open: 0, close: 0 };
+
+  await withLocalStorage(
+    "open-stream-abort-during-stat",
+    async ({ adapter }) => {
+      const createResult = await adapter.createObjectVersion({ bytes: Buffer.from("abort during stat") });
+      const streamResult = await adapter.openObjectVersionReadStream({
+        objectVersionId: createResult.data.object_version_id,
+        signal: controller.signal,
+      });
+
+      assert.equal(streamResult.ok, true);
+      await assert.rejects(() => streamResult.data.byte_source.next(), { name: "AbortError" });
+      assert.equal(counters.close, 1);
+    },
+    {
+      openFileForTest: (filePath, flags, modeValue) => openCountingReadHandle(filePath, flags, modeValue, counters, {
+        async stat() {
+          controller.abort();
+          return { isFile: () => true, size: "abort during stat".length };
+        },
+      }),
+    },
+  );
+});
+
+test("local dev storage adapter byte_source throw closes and propagates consumer error", async () => {
+  const counters = { open: 0, close: 0 };
+  await withLocalStorage(
+    "open-stream-throw-close",
+    async ({ adapter }) => {
+      const createResult = await adapter.createObjectVersion({ bytes: Buffer.from("throw close") });
+      const streamResult = await adapter.openObjectVersionReadStream({
+        objectVersionId: createResult.data.object_version_id,
+      });
+
+      assert.equal(streamResult.ok, true);
+      const error = new Error("consumer_safe_error");
+      await assert.rejects(() => streamResult.data.byte_source.throw(error), /consumer_safe_error/);
+      assert.equal(counters.close, 1);
+      await streamResult.data.byte_source.return();
+      assert.equal(counters.close, 1);
+    },
+    {
+      openFileForTest: (filePath, flags, modeValue) => openCountingReadHandle(filePath, flags, modeValue, counters),
+    },
+  );
+});
+
+test("local dev storage adapter read failure closes exactly once and hides native details", async () => {
+  const counters = { open: 0, close: 0 };
+  await withLocalStorage(
+    "open-stream-read-failure",
+    async ({ adapter }) => {
+      const createResult = await adapter.createObjectVersion({ bytes: Buffer.from("read failure") });
+      const streamResult = await adapter.openObjectVersionReadStream({
+        objectVersionId: createResult.data.object_version_id,
+      });
+
+      assert.equal(streamResult.ok, true);
+      await assert.rejects(
+        () => streamResult.data.byte_source.next(),
+        (error) => error?.message === "storage_read_failed" && !String(error?.message).includes("/private/"),
+      );
+      assert.equal(counters.close, 1);
+      await streamResult.data.byte_source.close();
+      assert.equal(counters.close, 1);
+    },
+    {
+      openFileForTest: (filePath, flags, modeValue) => openCountingReadHandle(filePath, flags, modeValue, counters, {
+        async read() {
+          throw new Error("native read failure /private/tmp/provider-secret.bin");
+        },
+      }),
+    },
+  );
+});
+
+test("local dev storage adapter repeated close return and abort operations are idempotent", async () => {
+  const counters = { open: 0, close: 0 };
+  await withLocalStorage(
+    "open-stream-idempotent-close",
+    async ({ adapter }) => {
+      const controller = new AbortController();
+      const createResult = await adapter.createObjectVersion({ bytes: Buffer.from("idempotent") });
+      const streamResult = await adapter.openObjectVersionReadStream({
+        objectVersionId: createResult.data.object_version_id,
+        signal: controller.signal,
+      });
+
+      assert.equal(streamResult.ok, true);
+      await streamResult.data.byte_source.close();
+      await streamResult.data.byte_source.return();
+      controller.abort();
+      await streamResult.data.byte_source.close();
+      assert.equal(counters.close, 1);
+    },
+    {
+      openFileForTest: (filePath, flags, modeValue) => openCountingReadHandle(filePath, flags, modeValue, counters),
+    },
+  );
+});
+
+test("local dev storage adapter removes abort listener when byte_source closes", async () => {
+  const controller = new AbortController();
+  let listenerBalance = 0;
+  const originalAdd = controller.signal.addEventListener.bind(controller.signal);
+  const originalRemove = controller.signal.removeEventListener.bind(controller.signal);
+  controller.signal.addEventListener = (...args) => {
+    if (args[0] === "abort") listenerBalance += 1;
+    return originalAdd(...args);
+  };
+  controller.signal.removeEventListener = (...args) => {
+    if (args[0] === "abort") listenerBalance -= 1;
+    return originalRemove(...args);
+  };
+
+  await withLocalStorage("open-stream-abort-listener-remove", async ({ adapter }) => {
+    const createResult = await adapter.createObjectVersion({ bytes: Buffer.from("listener") });
+    const streamResult = await adapter.openObjectVersionReadStream({
+      objectVersionId: createResult.data.object_version_id,
+      signal: controller.signal,
+    });
+
+    assert.equal(streamResult.ok, true);
+    assert.equal(listenerBalance, 1);
+    await streamResult.data.byte_source.close();
+    assert.equal(listenerBalance, 0);
+    controller.abort();
+    assert.equal(listenerBalance, 0);
+  });
+});
+
+test("local dev storage adapter streamed read abort and cancellation close the handle", async () => {
+  for (const mode of ["abort", "cancel"]) {
+    let closeCount = 0;
+    await withLocalStorage(
+      `open-stream-${mode}`,
+      async ({ adapter }) => {
+        const createResult = await adapter.createObjectVersion({ bytes: Buffer.alloc(200000, "a") });
+        const controller = new AbortController();
+        const streamResult = await adapter.openObjectVersionReadStream({
+          objectVersionId: createResult.data.object_version_id,
+          signal: controller.signal,
+        });
+
+        assert.equal(streamResult.ok, true);
+        const iterator = streamResult.data.byte_source[Symbol.asyncIterator]();
+        const first = await iterator.next();
+        assert.equal(first.done, false);
+        if (mode === "abort") {
+          controller.abort();
+          await assert.rejects(() => iterator.next(), { name: "AbortError" });
+        } else {
+          await iterator.return();
+        }
+        assert.equal(closeCount, 1);
+      },
+      {
+        openFileForTest: async (filePath, flags, modeValue) => {
+          const handle = await open(filePath, flags, modeValue);
+          if ((flags & constants.O_WRONLY) === constants.O_WRONLY) return handle;
+          return {
+            stat: () => handle.stat(),
+            read: (...args) => handle.read(...args),
+            async close() {
+              closeCount += 1;
+              return handle.close();
+            },
+          };
+        },
+      },
+    );
+  }
+});
+
+test("local dev storage adapter streamed read normal completion closes the handle", async () => {
+  let closeCount = 0;
+  await withLocalStorage(
+    "open-stream-complete-close",
+    async ({ adapter }) => {
+      const expected = Buffer.from("complete close");
+      const createResult = await adapter.createObjectVersion({ bytes: expected });
+      const streamResult = await adapter.openObjectVersionReadStream({
+        objectVersionId: createResult.data.object_version_id,
+      });
+
+      assert.equal(streamResult.ok, true);
+      const collected = await collectByteSource(streamResult.data.byte_source);
+      assert.deepEqual(collected.bytes, expected);
+      assert.equal(closeCount, 1);
+    },
+    {
+      openFileForTest: async (filePath, flags, modeValue) => {
+        const handle = await open(filePath, flags, modeValue);
+        if ((flags & constants.O_WRONLY) === constants.O_WRONLY) return handle;
+        return {
+          stat: () => handle.stat(),
+          read: (...args) => handle.read(...args),
+          async close() {
+            closeCount += 1;
+            return handle.close();
+          },
+        };
+      },
+    },
+  );
+});
+
+test("local dev storage adapter streamed read binds stat and bytes to one open handle", async () => {
+  const objectVersionId = "ov_88888888888888888888888888888888";
+  const expected = Buffer.from("same handle data");
+  const calls = [];
+
+  await withLocalStorage(
+    "open-stream-same-handle",
+    async ({ adapter }) => {
+      const streamResult = await adapter.openObjectVersionReadStream({ objectVersionId });
+
+      assert.equal(streamResult.ok, true);
+      assert.equal(streamResult.data.size_bytes, expected.length);
+      const collected = await collectByteSource(streamResult.data.byte_source);
+      assert.deepEqual(collected.bytes, expected);
+      assert.deepEqual(calls, ["open", "stat", "read", "read", "close"]);
+    },
+    {
+      openFileForTest: async () => {
+        let position = 0;
+        calls.push("open");
+        return {
+          async stat() {
+            calls.push("stat");
+            return { isFile: () => true, size: expected.length };
+          },
+          async read(buffer, offset, length) {
+            calls.push("read");
+            const slice = expected.subarray(position, position + length);
+            slice.copy(buffer, offset);
+            position += slice.length;
+            return { bytesRead: slice.length };
+          },
+          async close() {
+            calls.push("close");
+          },
+        };
+      },
+    },
+  );
+});
+
+test("local dev storage adapter streamed read stays on opened object after path replacement", async () => {
+  await withLocalStorage("open-stream-path-replace", async ({ adapter, rootDirectory }) => {
+    const original = Buffer.alloc(150000, "o");
+    const replacement = Buffer.alloc(150000, "r");
+    const createResult = await adapter.createObjectVersion({ bytes: original });
+    const streamResult = await adapter.openObjectVersionReadStream({
+      objectVersionId: createResult.data.object_version_id,
+    });
+    assert.equal(streamResult.ok, true);
+
+    const openedObjectPath = objectPath(rootDirectory, createResult.data.object_version_id);
+    const renamedObjectPath = path.join(rootDirectory, "objects", "renamed-open-object.bin");
+    await rename(openedObjectPath, renamedObjectPath);
+    await writeFile(openedObjectPath, replacement);
+
+    const collected = await collectByteSource(streamResult.data.byte_source);
+    assert.deepEqual(collected.bytes, original);
+    assert.notDeepEqual(collected.bytes, replacement);
   });
 });
 
