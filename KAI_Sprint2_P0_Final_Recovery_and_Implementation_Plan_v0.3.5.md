@@ -4258,6 +4258,55 @@ combined_p0_specs: TOOL_VERIFIED agent-run DATABASE_URL=postgres://127.0.0.1:9/k
 full_repository_suite: USER_CONFIRMED owner-run listener-capable DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - tests 799; pass 799; fail 0
 ```
 
+## P0-07 local synthetic HTTP acceptance
+
+```text
+p0_07_package_status: local_synthetic_http_acceptance_complete
+implementation_status: complete
+verification_status: TOOL_VERIFIED after required final P0-07 verification commands completed
+evidence_class: TOOL_VERIFIED
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 86cd683260bc7ceddb6d2786d9b6270965c1b0d9
+working_tree_clean_at_start: true
+staged_paths_at_start: none
+applicable_repository_instructions: root AGENTS.md only; DATABASE_URL sentinel used for every Node and npm command; no fetch, push, database/cloud/production/deployment/current-state, P0-06B, or Gate A work authorized or performed
+active_package_scope: local synthetic HTTP acceptance only using dependency-injected nonproduction components; no production route mount, production listener, production composition, database, cloud, deployment, tenant configuration, parser/profile/source/evidence/claim/generation/export, P0-06B, or Gate A change
+assembled_acceptance_composition: ephemeral real HTTP listener; real feature-gate middleware; production-equivalent local authentication-adapter behavior using deterministic fixtures; real Sprint 2 router, services, and validators; in-memory metadata and upload lifecycle repositories; local storage adapter rooted in canonical OS temp; test malware adapter; deterministic clock, identity, UUID/object-version, and request-ID seams; captured audit, metrics, and safe logging
+positive_acceptance_path: feature enabled -> authenticated mapped human -> allowed role and active membership -> batch create -> idempotent replay -> file reserve -> local streamed upload -> immutable version -> confirm exact version -> compute SHA-256 -> policy pending -> bounded security assessment -> file policy passed -> file remains quarantined -> sanitized operator read -> review transition
+negative_acceptance_matrix: feature disabled; invalid mapping; wrong role; inactive membership; cross-tenant IDs; unbounded list attempts; 26th file; mocked concurrent reservations; actor and organization mutation-limit exhaustion; actor and organization concurrent-upload exhaustion; expired and explicitly abandoned reservations; malformed fingerprint; unknown metadata fields; request-body over-limit; unsafe Unicode filename; path traversal; oversize streamed body; slow/aborted stream; duplicate write; MIME/signature mismatch; binary TXT/MD; arbitrary archive; XLSX path traversal or expansion bomb; macros/external relationships; encrypted PDF/XLSX; PDF active content or embedded file; uploaded prompt-injection text; formula cells reaching no output; missing object; replaced object version; checksum mismatch; stale review transition; required-audit failure rollback at repository-interface level; telemetry failure not rolling back an authorized mutation; AI mutation; generic system mutation; unauthorized internal-executor operation; parser/profile/source/evidence/claim/generation/export attempt; storage identifier leakage; raw content in logs, errors, audit, metrics, or responses
+checksum_mismatch_http_boundary: shared KAI HTTP error allowlist now preserves checksum_mismatch as a 409 response instead of collapsing it to system_error
+package_scripts_added: test:kai-sprint2; test:kai-sprint2-p0-acceptance
+changed_files: Backend/kai/errors/kaiErrors.js; package.json; __tests__/kai-sprint2-p0-acceptance.spec.js; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+verify_schema_contract: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-schema-contract - tests 9; pass 9; fail 0
+verify_api_contract: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-api-contract - sandbox run hit known localhost listener EPERM after tests 53; pass 52; fail 1; listener-capable rerun passed tests 53; pass 53; fail 0
+test_kai_sprint2: listener-capable DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - tests 743; pass 743; fail 0
+test_kai_sprint2_p0_acceptance: listener-capable DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2-p0-acceptance - tests 49; pass 49; fail 0
+full_repository_suite: listener-capable DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - tests 848; pass 848; fail 0
+git_diff_check: git diff --check - pass
+completion_language:
+  P0 repository contract complete
+  P0 local synthetic acceptance passed
+  Persistent lifecycle integration pending Gate A
+completion_states_established:
+  P0_CODE_CONTRACT_COMPLETE
+  P0_LOCAL_SYNTHETIC_HTTP_ACCEPTANCE_PASS
+  P0_LOCAL_UPLOAD_CONTRACT_COMPLETE
+not_established:
+  P0_DATABASE_INTEGRATION_VERIFIED
+  P0_DATABASE_UPLOAD_LIFECYCLE_VERIFIED
+  P0_NONPRODUCTION_STORAGE_VERIFIED
+  P0_LIVE_UPLOAD_READY
+  REAL_CLIENT_DATA_READY
+deployed_kai_schema_compatibility: NOT_CONFIRMED
+database_atomicity: NOT_CONFIRMED
+persistent_upload_lifecycle: NOT_CONFIRMED
+nonproduction_storage_integration: NOT_CONFIRMED
+production_readiness: NOT_CONFIRMED
+real_client_data_readiness: NOT_CONFIRMED
+p0_06b_and_gate_a: unchanged and unauthorized
+current_state_update: NOT_AUTHORIZED
+```
+
 
 ---
 
