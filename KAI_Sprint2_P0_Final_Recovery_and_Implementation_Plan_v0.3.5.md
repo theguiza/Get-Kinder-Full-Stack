@@ -3980,6 +3980,45 @@ git_diff_check: passed
 package_exclusions: no route, service, storage, database, runtime, allowlist, fixture corpus, existing-test other than the focused detector spec, combined-completeness, dependency, lockfile, Current State, Implementation Baseline, push, deploy, cloud, credential, or real-client-data change
 ```
 
+## P0-05 bounded assessor authority
+
+```text
+leaf_status: complete after this documentation-only package commit
+p0_05_package_status: bounded_assessor_authority_recorded
+implementation_status: documentation_only
+verification_status: TOOL_VERIFIED after documented checks pass
+evidence_class: TOOL_VERIFIED
+decision_evidence: USER_CONFIRMED
+owner_decision_authority: OWNER_DECISION.P0_05_BOUNDED_ASSESSOR_V1
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: e5eba333fece7c2f7a64df2906afbeec9a507729
+authorized_file_scope: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+active_package_scope: documentation-only bounded assessor authority; no runtime code, tests, fixtures, routes, manifests, lockfiles, Current State, Implementation Baseline, dependency, database, cloud, production, implementation, P0-07, P0-06B, or Gate A work
+authority_summary: records archive limits, assessor timeout, archive/PDF/OOXML/encryption outcomes, prompt-injection inert-data boundary, formula-trigger metadata-only warning boundary, P0-07 case mapping, decision basis, and dependency authority
+limit_summary: archive_entry_maximum 1000; expanded_byte_maximum 262144000; expanded_byte_maximum_display 250 MiB; compression_ratio_maximum 100:1; minimum_inflate_ratio 0.01; assessor_timeout_seconds 60
+executor_authority_preserved: actor_type internal_service; service_identity kai_file_security_executor; operation_group file_security_assessment; allowed_operations record_file_security_result, transition_file_policy_status, write_file_security_audit
+executor_enabled: false
+trigger_queue_route_listener_worker_production_composition: not defined and not enabled
+write_boundary: organization ID must match scoped file and exact immutable object version; target IDs never establish tenant scope; permitted writes remain bounded security results, file-policy transition to passed/blocked/failed, and metadata-only required audit
+prohibited_operations: review approval, parsing, profiling, source, evidence, claim, generation, export, tenant change, raw-content exposure, arbitrary operation, LLM call, or tool/service action caused by uploaded file text
+prompt_injection_authority: instruction_text_inert; uploaded instruction-like text remains data; no heuristic keyword blocker; no policy change caused by file text; proof boundary is assessor dependency-call assertions and downstream-write zero-call assertions
+formula_authority: formula_trigger_detected metadata-only warning; warning alone does not block when every blocking security check passes; detects =, +, -, @, tab, carriage return, line feed, and full-width equals, plus, minus, and at-sign; raw file mutation prohibited
+formula_proof_boundaries: detector/assessor boundary records warning without rewriting quarantined bytes; P0 output boundary proves route, DTO, assistant-boundary, and export-denial paths do not render or export raw cell content
+future_output_specific_neutralization: mandatory before any preview, spreadsheet rendering, assistant exposure, or export is enabled
+new_file_policy_enum: not introduced
+p0_07_case_mapping_recorded: XLSX path traversal -> ooxml_path_traversal_detected; XLSX expansion bomb -> archive_entry_limit_exceeded, archive_expanded_size_limit_exceeded, archive_compression_ratio_limit_exceeded; macros/external relationships -> ooxml_macro_detected, ooxml_external_relationship_detected; encrypted PDF/XLSX -> encrypted_or_password_protected; PDF active content/embedded files -> pdf_active_content_detected, pdf_embedded_file_detected; uploaded prompt-injection text -> instruction_text_inert; formula cells -> formula_trigger_detected plus the P0 no-output boundary
+decision_basis: archive_entry_maximum and minimum_inflate_ratio align with Apache POI ZipSecureFile defaults; expanded_byte_maximum and assessor_timeout_seconds are KAI policy ceilings, not external standards; formula trigger set aligns with OWASP CSV Injection guidance; prompt-injection boundary aligns with treating external document instructions as untrusted data and preventing LLM/tool execution
+dependency_authority: new_dependency_authorized false; dependency_selection pending bounded repository inspection
+dependency_decision_required_boundary: if existing dependencies cannot safely implement the committed checks, the next package must return the repository-defined DEPENDENCY_DECISION_REQUIRED record
+node_or_npm_commands: not run
+database_or_cloud_access: not performed
+runtime_behavior_changed: false
+dependency_authorized: false
+current_state_update: not performed
+package_commit: report after commit; a commit cannot contain its own SHA
+next_package: bounded P0-05 assessor dependency inspection
+```
+
 
 ## P0-06A unauthorized transition negative coverage
 
@@ -4275,6 +4314,7 @@ assembled_acceptance_composition: ephemeral real HTTP listener; real feature-gat
 real_router_correction: added contract-defined router upload and confirm-upload routes using uploadReservedIntakeFile and confirmUpload service boundaries; route validation, tenant extraction, authentication through the existing mount, KAI feature gates, no-store middleware, safe request context, and canonical error shaping preserved
 upload_streaming_boundary: added bounded upload media-type and timed byte-source middleware that passes a single async byte source to storage without route buffering; uses the committed idle and total timeout constants, request abort signal, and existing storage adapter streaming/cleanup behavior
 security_assessment_boundary: no human-facing security-assessment route was added; prior test-mounted security-assessment and internal-operation routes were removed; broader assessor orchestration beyond the existing pure detector and internal executor identity remains not route-defined in the repository and is not claimed as production/live behavior
+p0_07_assessor_acceptance_dependency: local synthetic HTTP acceptance for XLSX path traversal, expansion bomb, macros, external relationships, encrypted PDF/XLSX, PDF active content, PDF embedded files, uploaded prompt-injection text, and formula cells depends on implementation of OWNER_DECISION.P0_05_BOUNDED_ASSESSOR_V1 authority before those assessor outcomes may be claimed
 positive_acceptance_path: feature enabled -> authenticated mapped human -> allowed role and active membership -> batch create through real router -> idempotent replay through real router -> file reserve through real router -> local streamed upload through real router -> immutable version -> confirm exact version through real router -> compute SHA-256 -> policy pending -> pure detector pass at lower boundary -> synthetic internal file-policy pass -> file remains quarantined -> sanitized operator read through real router -> review transition through real router
 negative_acceptance_matrix: feature disabled; invalid mapping; wrong role; inactive membership; cross-tenant IDs; unbounded list attempts; 26th file; mocked concurrent reservations; actor and organization mutation-limit exhaustion; actor and organization concurrent-upload exhaustion; expired and explicitly abandoned reservations; malformed fingerprint; unknown metadata fields; request-body over-limit; unsafe Unicode filename; path traversal; oversize streamed body; checksum-mismatch streamed body; duplicate write; MIME/signature mismatch; binary TXT/MD; arbitrary archive; broader security-assessment route substitution absent; missing object after valid uploaded state through exact-version storage failure; replaced object version; checksum mismatch through real confirm-upload route; stale review transition; required-audit failure rollback at repository-interface level; telemetry failure not rolling back an authorized mutation; AI mutation; generic system mutation; unauthorized internal-executor mutation; parser/profile/source/evidence/claim/generation/export attempt at assistant-boundary validator; storage identifier leakage; raw content in logs, errors, audit, metrics, or responses
 checksum_mismatch_http_boundary: shared KAI HTTP error allowlist now preserves checksum_mismatch as a 409 response instead of collapsing it to system_error

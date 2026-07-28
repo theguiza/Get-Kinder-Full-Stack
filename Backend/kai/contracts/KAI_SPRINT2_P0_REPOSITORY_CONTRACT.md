@@ -1516,6 +1516,166 @@ allowed_operations:
 
 That executor must be tenant-bound and may record bounded security results, set file policy to passed/blocked/failed, and write metadata-only audit. It cannot change tenant, approve review, profile files, create sources/evidence/claims, expose raw content, or invoke arbitrary service operations. This package defines the identity but does not enable it.
 
+## OWNER_DECISION.P0_05_BOUNDED_ASSESSOR_V1
+
+```text
+decision_evidence: USER_CONFIRMED
+implementation_status: documentation_only
+runtime_behavior_changed_by_this_decision: false
+dependency_authorized: false
+```
+
+This authority records the bounded P0 file-security assessor contract. It does not implement, define, or enable a trigger, queue, route, listener, worker, or production composition. The executor remains disabled.
+
+The existing executor authority remains exactly:
+
+```text
+actor_type: internal_service
+service_identity: kai_file_security_executor
+operation_group: file_security_assessment
+allowed_operations:
+  record_file_security_result
+  transition_file_policy_status
+  write_file_security_audit
+```
+
+The assessor and executor boundaries are:
+
+```text
+organization ID must match the scoped file and exact immutable object version
+target IDs never establish tenant scope
+permitted writes are bounded security results, file-policy transition to passed/blocked/failed, and metadata-only required audit
+no review approval, parsing, profiling, source, evidence, claim, generation, export, tenant change, raw-content exposure, or arbitrary operation
+```
+
+Limits:
+
+```text
+archive_entry_maximum: 1000
+expanded_byte_maximum: 262144000
+expanded_byte_maximum_display: 250 MiB
+compression_ratio_maximum: 100:1
+minimum_inflate_ratio: 0.01
+assessor_timeout_seconds: 60
+```
+
+Outcomes:
+
+```text
+archive_entry_limit_exceeded:
+  policy: block
+
+archive_expanded_size_limit_exceeded:
+  policy: block
+
+archive_compression_ratio_limit_exceeded:
+  policy: block
+
+security_assessment_timeout:
+  policy: failed
+
+pdf_active_content_detected:
+  policy: block
+
+pdf_embedded_file_detected:
+  policy: block
+
+encrypted_or_password_protected:
+  policy: block
+
+ooxml_path_traversal_detected:
+  policy: block
+
+ooxml_macro_detected:
+  policy: block
+
+ooxml_external_relationship_detected:
+  policy: block
+```
+
+Prompt-injection authority:
+
+```text
+category: instruction_text_inert
+uploaded instruction-like text remains data
+no heuristic keyword blocker
+no policy change caused by file text
+no LLM call
+no tool or service action caused by file text
+no approval, source, evidence, claim, generation, or export write
+proof boundary: assessor dependency-call assertions and downstream-write zero-call assertions
+```
+
+Formula authority:
+
+```text
+category: formula_trigger_detected
+result: metadata-only warning
+file-policy effect: warning alone does not block when every blocking security check passes
+detect:
+  =
+  +
+  -
+  @
+  tab
+  carriage return
+  line feed
+  full-width equals, plus, minus, and at-sign
+raw file mutation: prohibited
+```
+
+Formula proof boundaries:
+
+```text
+detector/assessor boundary:
+  each trigger fixture records formula_trigger_detected as a metadata-only warning without rewriting the quarantined bytes
+
+P0 output boundary:
+  route, DTO, assistant-boundary, and export-denial tests prove that no P0 path renders or exports raw cell content
+```
+
+Future output-specific neutralization remains mandatory before any preview, spreadsheet rendering, assistant exposure, or export is enabled. This decision does not introduce a new file-policy enum.
+
+P0-07 case mapping:
+
+```text
+XLSX path traversal -> ooxml_path_traversal_detected
+XLSX expansion bomb -> archive_entry_limit_exceeded, archive_expanded_size_limit_exceeded, archive_compression_ratio_limit_exceeded
+macros/external relationships -> ooxml_macro_detected, ooxml_external_relationship_detected
+encrypted PDF/XLSX -> encrypted_or_password_protected
+PDF active content/embedded files -> pdf_active_content_detected, pdf_embedded_file_detected
+uploaded prompt-injection text -> instruction_text_inert
+formula cells -> formula_trigger_detected plus the P0 no-output boundary
+```
+
+Decision basis:
+
+```text
+archive_entry_maximum and minimum_inflate_ratio:
+  aligned with Apache POI ZipSecureFile defaults
+
+expanded_byte_maximum:
+  KAI policy ceiling; not an external standard
+
+assessor_timeout_seconds:
+  KAI policy ceiling; not an external standard
+
+formula trigger set:
+  aligned with OWASP CSV Injection guidance
+
+prompt-injection boundary:
+  aligned with treating external document instructions as untrusted data and preventing LLM/tool execution
+```
+
+Dependency authority:
+
+```text
+new_dependency_authorized: false
+dependency_selection: pending bounded repository inspection
+```
+
+If existing dependencies cannot safely implement the committed checks, the next package must return the repository-defined `DEPENDENCY_DECISION_REQUIRED` record. Do not select or install a dependency in this documentation-only package.
+
 ## Owner-confirmed intake-batch file collection read
 
 ```text
