@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
 import { readFileSync } from "node:fs";
+import { Readable } from "node:stream";
 
 import express from "express";
 
@@ -65,6 +66,19 @@ function routeHandler(path, method) {
   const layer = router.stack.find((candidate) => candidate.route?.path === path && candidate.route?.methods?.[method]);
   assert.ok(layer, `${method.toUpperCase()} ${path} route exists`);
   return layer.route.stack[0].handle;
+}
+
+async function invokeRouteStack(path, method, req, res) {
+  const layer = router.stack.find((candidate) => candidate.route?.path === path && candidate.route?.methods?.[method]);
+  assert.ok(layer, `${method.toUpperCase()} ${path} route exists`);
+  const stack = layer.route.stack;
+  let index = 0;
+  const next = async () => {
+    const current = stack[index++];
+    if (!current) return;
+    await current.handle(req, res, next);
+  };
+  await next();
 }
 
 async function postJson(port, body) {
@@ -330,6 +344,113 @@ test("upload URL entry point requires both feature flags and remains storage-dis
     env: { KAI_SPRINT2_ENABLED: "true", KAI_FILE_UPLOAD_ENABLED: "true" },
   });
   assert.equal(gated.error.code, "storage_provider_not_configured");
+});
+
+test("real upload route streams through service boundary with safe identifiers", async () => {
+  let serviceInput = null;
+  const restore = intakeRouteTestables.setIntakeServiceForTest({
+    async uploadReservedIntakeFile(input) {
+      serviceInput = input;
+      const chunks = [];
+      for await (const chunk of input.byteSource) chunks.push(Buffer.from(chunk));
+      assert.equal(Buffer.concat(chunks).toString("utf8"), "route upload bytes");
+      return {
+        ok: true,
+        data: {
+          organization_id: organizationId,
+          intake_batch_id: intakeBatchId,
+          intake_file_id: intakeFileId,
+          upload_state: "uploaded_unconfirmed",
+          object_version_id: "ov_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          size_bytes: 18,
+          replayed: false,
+        },
+        warnings: [],
+      };
+    },
+  });
+  try {
+    const req = Readable.from([Buffer.from("route upload bytes")]);
+    Object.assign(req, {
+      get(name) {
+        return name.toLowerCase() === "content-type" ? "application/octet-stream" : null;
+      },
+      headers: { "content-type": "application/octet-stream" },
+      query: { organization_id: organizationId, engagement_id: engagementId, intake_batch_id: intakeBatchId },
+      params: { intakeFileId },
+      body: undefined,
+      user: { id: 46, private: "must-not-pass" },
+    });
+    const res = createResponse();
+    res.once = () => res;
+    await invokeRouteStack("/admin/files/:intakeFileId/upload", "post", req, res);
+
+    assert.equal(res.statusCode, 201);
+    assert.equal(res.body.data.upload_state, "uploaded_unconfirmed");
+    assert.equal(serviceInput.organizationId, organizationId);
+    assert.equal(serviceInput.engagementId, engagementId);
+    assert.equal(serviceInput.intakeBatchId, intakeBatchId);
+    assert.equal(serviceInput.intakeFileId, intakeFileId);
+    assert.equal(serviceInput.route, "/api/kai/sprint2/intake/admin/files/:intakeFileId/upload");
+    assert.deepEqual(serviceInput.req.user, { id: 46 });
+    assert.equal(typeof serviceInput.signal.aborted, "boolean");
+    assert.equal(JSON.stringify(res.body).includes("must-not-pass"), false);
+  } finally {
+    restore();
+  }
+});
+
+test("real confirm-upload route rejects caller verification facts and delegates only safe identity", async () => {
+  let serviceCalled = false;
+  const restore = intakeRouteTestables.setIntakeServiceForTest({
+    async confirmUpload(input) {
+      serviceCalled = true;
+      assert.equal(input.organizationId, organizationId);
+      assert.equal(input.intakeFileId, intakeFileId);
+      assert.equal(input.route, "/api/kai/sprint2/intake/admin/files/:intakeFileId/confirm-upload");
+      assert.deepEqual(input.req.user, { id: 46 });
+      return {
+        ok: true,
+        data: {
+          organization_id: organizationId,
+          intake_batch_id: intakeBatchId,
+          intake_file_id: intakeFileId,
+          upload_state: "confirmed",
+          object_version_id: "ov_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          verified_size_bytes: 18,
+          replayed: false,
+        },
+        warnings: [],
+      };
+    },
+  });
+  try {
+    const invalid = createResponse();
+    await invokeRouteStack("/admin/files/:intakeFileId/confirm-upload", "post", {
+      get() { return "application/json"; },
+      query: { organization_id: organizationId },
+      params: { intakeFileId },
+      body: { organization_id: organizationId, checksum: checksum },
+      user: { id: 46 },
+    }, invalid);
+    assert.equal(invalid.statusCode, 422);
+    assert.equal(serviceCalled, false);
+
+    const valid = createResponse();
+    await invokeRouteStack("/admin/files/:intakeFileId/confirm-upload", "post", {
+      get() { return "application/json"; },
+      query: { organization_id: organizationId },
+      params: { intakeFileId },
+      body: { organization_id: organizationId },
+      user: { id: 46, private: "must-not-pass" },
+    }, valid);
+    assert.equal(valid.statusCode, 200);
+    assert.equal(valid.body.data.upload_state, "confirmed");
+    assert.equal(serviceCalled, true);
+    assert.equal(JSON.stringify(valid.body).includes("must-not-pass"), false);
+  } finally {
+    restore();
+  }
 });
 
 test("upload confirmation entry point requires both feature flags and actor context before dependencies", async () => {

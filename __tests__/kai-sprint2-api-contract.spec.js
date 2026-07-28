@@ -26,6 +26,8 @@ test("api contract exposes Sprint 2 status and admin metadata route shape", () =
   assert.match(routeSource, /router\.get\(["']\/admin\/batches\/:intakeBatchId\/files["']/);
   assert.match(routeSource, /router\.get\(["']\/admin\/files\/:intakeFileId["']/);
   assert.match(routeSource, /router\.post\(["']\/admin\/files\/:intakeFileId\/block["']/);
+  assert.match(routeSource, /router\.post\(\s*["']\/admin\/files\/:intakeFileId\/upload["']/);
+  assert.match(routeSource, /router\.post\(["']\/admin\/files\/:intakeFileId\/confirm-upload["']/);
   assert.match(routeSource, /router\.get\(["']\/admin\/review-queue["']/);
   assert.match(routeSource, /router\.post\(["']\/admin\/review-queue\/:reviewQueueItemId\/status["']/);
   assert.match(routeSource, /router\.post\(["']\/admin\/batches\/:intakeBatchId\/file-reservations["']/);
@@ -55,11 +57,15 @@ test("sprint2IntakeApi delegates admin metadata operations to service without di
   assert.match(routeSource, /\bcreateIntakeBatch\b/);
   assert.match(routeSource, /\breserveIntakeFileMetadata\b/);
   assert.match(routeSource, /\bmarkIntakeFilePolicyBlocked\b/);
+  assert.match(routeSource, /\buploadReservedIntakeFile\b/);
+  assert.match(routeSource, /\bconfirmUpload\b/);
   assert.match(routeSource, /\bupdateReviewQueueStatus\b/);
   assert.match(routeSource, /service\.checkAdminAccess/);
   assert.match(routeSource, /service\.createIntakeBatch/);
   assert.match(routeSource, /service\.reserveIntakeFileMetadata/);
   assert.match(routeSource, /service\.markIntakeFilePolicyBlocked/);
+  assert.match(routeSource, /service\.uploadReservedIntakeFile/);
+  assert.match(routeSource, /service\.confirmUpload/);
   assert.match(routeSource, /service\.updateReviewQueueStatus/);
   assert.doesNotMatch(routeSource, /\brequestUploadUrl\b/);
   assert.doesNotMatch(routeSource, /\b(?:select|insert|update|delete)\b[\s\S]{0,160}\bkai\./i);
@@ -78,8 +84,9 @@ test("route files contain no direct SQL against kai schema", () => {
   }
 });
 
-test("sprint2IntakeApi does not enable raw upload, signed URLs, parser raw-file work, source promotion, or tenant DB lookup", () => {
-  assert.match(routeSource, /Raw file upload is disabled/);
+test("sprint2IntakeApi enables only direct local upload routes, not signed URLs, parser raw-file work, source promotion, or tenant DB lookup", () => {
+  assert.match(routeSource, /requireKaiSprint2UploadMediaType/);
+  assert.match(routeSource, /attachKaiSprint2UploadByteSource/);
   assert.doesNotMatch(routeSource, /\bsigned(?:Upload|Read)Url\b|\bgetSignedUrl\b|\bsigned_url\b/i);
   assert.doesNotMatch(routeSource, /\bparser\b[\s\S]{0,80}\braw[-_ ]?file\b/i);
   assert.doesNotMatch(routeSource, /\bpromote(?:Source)?\b|\bsource_promotion_enabled:\s*true\b/i);

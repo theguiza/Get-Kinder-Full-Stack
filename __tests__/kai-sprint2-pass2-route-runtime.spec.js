@@ -95,7 +95,7 @@ test("feature flag OFF returns 403 feature_disabled before Sprint 2 route execut
   process.env.KAI_SPRINT2_ENABLED = original;
 });
 
-test("Pass 2 router exposes only metadata-intake admin surface", () => {
+test("Pass 2 router exposes metadata intake plus real P0 upload confirmation surface", () => {
   const routePaths = new Set(router.stack.map((layer) => layer.route?.path).filter(Boolean));
   assert.deepEqual([...routePaths].sort(), [
     "/admin/access-check",
@@ -105,6 +105,8 @@ test("Pass 2 router exposes only metadata-intake admin surface", () => {
     "/admin/batches/:intakeBatchId/files",
     "/admin/files/:intakeFileId",
     "/admin/files/:intakeFileId/block",
+    "/admin/files/:intakeFileId/confirm-upload",
+    "/admin/files/:intakeFileId/upload",
     "/admin/review-queue",
     "/admin/review-queue/:reviewQueueItemId/status",
     "/status",

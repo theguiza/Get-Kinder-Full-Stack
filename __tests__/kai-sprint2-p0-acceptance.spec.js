@@ -12,6 +12,7 @@ import { requireKaiSprint2Enabled } from "../Backend/kai/config/kaiSprint2Config
 import {
   KAI_SPRINT2_P0_ABUSE_LIMITS,
   KAI_SPRINT2_P0_RESOURCE_LIMITS,
+  KAI_SPRINT2_P0_SECURITY_EXECUTOR,
 } from "../Backend/kai/config/kaiSprint2P0Contract.js";
 import { buildKaiError, sendKaiError } from "../Backend/kai/errors/kaiErrors.js";
 import { requireKaiSprint2Authenticated } from "../Backend/kai/middleware/kaiSprint2Authentication.js";
@@ -23,7 +24,6 @@ import {
 } from "../Backend/kai/middleware/kaiSprint2RequestSafety.js";
 import sprint2IntakeApiRouter, {
   __testables as intakeRouteTestables,
-  sendServiceResult,
 } from "../Backend/kai/routes/sprint2IntakeApi.js";
 import {
   checkAdminAccess,
@@ -40,6 +40,7 @@ import {
 import { updateReviewQueueStatus } from "../Backend/kai/services/kaiReviewQueueService.js";
 import { LocalDevStorageAdapter } from "../Backend/kai/storage/localDevStorageAdapter.js";
 import { createInMemoryUploadLifecycleRepository } from "../Backend/kai/upload/inMemoryUploadLifecycleRepository.js";
+import { validateAssistantBoundary } from "../Backend/kai/validators/assistantBoundaryValidators.js";
 import { detectP0FileTypeAgreement } from "../Backend/kai/validators/p0FileTypeAgreementDetector.js";
 
 const basePath = "/api/kai/sprint2/intake";
@@ -461,6 +462,12 @@ function serviceFacade(scenario) {
     listIntakeFileReviewQueueItems(input) {
       return listIntakeFileReviewQueueItems(input, deps());
     },
+    uploadReservedIntakeFile(input) {
+      return uploadReservedIntakeFile(input, deps());
+    },
+    confirmUpload(input) {
+      return confirmUpload(input, deps());
+    },
     updateReviewQueueStatus(input) {
       return updateReviewQueueStatus(input, deps());
     },
@@ -491,69 +498,7 @@ function uploadConcurrencyLimiter({ perActor = KAI_SPRINT2_P0_ABUSE_LIMITS.concu
   };
 }
 
-function parseByteLimit(value) {
-  const match = /^(\d+)(b|kb|mb)?$/i.exec(String(value || ""));
-  if (!match) return 1024 * 1024;
-  const amount = Number(match[1]);
-  const unit = String(match[2] || "b").toLowerCase();
-  if (unit === "mb") return amount * 1024 * 1024;
-  if (unit === "kb") return amount * 1024;
-  return amount;
-}
-
-function collectUploadBytes({ limit }) {
-  const maxBytes = parseByteLimit(limit);
-  return (req, res, next) => {
-    const chunks = [];
-    let size = 0;
-    let tooLarge = false;
-    req.on("data", (chunk) => {
-      if (tooLarge) return;
-      size += chunk.byteLength;
-      if (size > maxBytes) {
-        tooLarge = true;
-        chunks.length = 0;
-        return;
-      }
-      chunks.push(Buffer.from(chunk));
-    });
-    req.on("end", () => {
-      if (tooLarge) return sendKaiError(res, "request_too_large");
-      req.rawBody = Buffer.concat(chunks);
-      next();
-    });
-    req.on("error", () => sendKaiError(res, "invalid_request"));
-  };
-}
-
-function forbiddenOperationResult(operation) {
-  const denied = new Set([
-    "ai_mutation",
-    "generic_system_mutation",
-    "internal_executor_unauthorized_operation",
-    "parse",
-    "profile",
-    "source",
-    "evidence",
-    "claim",
-    "generation",
-    "export",
-  ]);
-  return denied.has(operation) ? buildKaiError("authorization_denied") : buildKaiError("invalid_request");
-}
-
-function securityAssessment(bytes, { extension, mimeType, scenario } = {}) {
-  if (scenario === "xlsx_path_traversal") return { policy: "block", category: "xlsx_path_traversal" };
-  if (scenario === "xlsx_expansion_bomb") return { policy: "block", category: "xlsx_expansion_bomb" };
-  if (scenario === "office_macro_external_relationship") return { policy: "block", category: "macros_or_external_relationships" };
-  if (scenario === "encrypted_pdf_xlsx") return { policy: "block", category: "encrypted_document" };
-  if (scenario === "pdf_active_content_embedded_file") return { policy: "block", category: "pdf_active_content_or_embedded_file" };
-  if (scenario === "prompt_injection_text") return { policy: "block", category: "uploaded_prompt_injection_text" };
-  if (scenario === "formula_cells_no_output") return { policy: "block", category: "formula_cells_reaching_no_output" };
-  return detectP0FileTypeAgreement({ extension, declaredMime: mimeType, bytes });
-}
-
-function createApplication(scenario, { featureEnabled = true, uploadLimitBytes = "1mb" } = {}) {
+function createApplication(scenario, { featureEnabled = true } = {}) {
   const previousSprint2Enabled = process.env.KAI_SPRINT2_ENABLED;
   const previousFileUploadEnabled = process.env.KAI_FILE_UPLOAD_ENABLED;
   process.env.KAI_SPRINT2_ENABLED = featureEnabled ? "true" : "false";
@@ -572,61 +517,12 @@ function createApplication(scenario, { featureEnabled = true, uploadLimitBytes =
   });
   app.use(basePath, setKaiSprint2NoStore);
   app.use(basePath, requireKaiSprint2Enabled);
-  app.use(`${basePath}/admin/files/:intakeFileId/upload`, requireKaiSprint2Authenticated, uploadLimiter, collectUploadBytes({ limit: uploadLimitBytes }));
-  app.post(`${basePath}/admin/files/:intakeFileId/upload`, async (req, res) => {
-    const byteSource = req.get("x-kai-scenario") === "slow_aborted_stream"
-      ? (async function* slowAbortedStream() {
-        yield Buffer.from("partial");
-        throw new DOMException("upload aborted", "AbortError");
-      })()
-      : undefined;
-    const bytes = Buffer.isBuffer(req.rawBody) ? req.rawBody : Buffer.alloc(0);
-    const result = await uploadReservedIntakeFile({
-      req,
-      organizationId: req.query.organization_id,
-      engagementId: req.query.engagement_id,
-      intakeBatchId: req.query.intake_batch_id,
-      intakeFileId: req.params.intakeFileId,
-      now,
-      route: `${basePath}/admin/files/:intakeFileId/upload`,
-      requestId: requestId(req),
-      ...(byteSource ? { byteSource } : { bytes }),
-    }, scenario.dependencies);
-    return sendServiceResult(res, result, result.ok ? 201 : 200);
-  });
 
   app.use(basePath, kaiSprint2MetadataJsonParser);
   app.use(basePath, handleKaiSprint2JsonParserError);
-  app.use(basePath, organizationLimiter, mutationLimiter, requireKaiSprint2Authenticated);
+  app.use(basePath, organizationLimiter, mutationLimiter, requireKaiSprint2Authenticated, uploadLimiter);
   const restore = intakeRouteTestables.setIntakeServiceForTest(serviceFacade(scenario));
   app.use(basePath, sprint2IntakeApiRouter);
-  app.post(`${basePath}/admin/files/:intakeFileId/confirm`, async (req, res) => {
-    const result = await confirmUpload({
-      req,
-      organizationId: req.body.organization_id,
-      intakeFileId: req.params.intakeFileId,
-      now,
-      route: `${basePath}/admin/files/:intakeFileId/confirm`,
-      requestId: requestId(req),
-    }, scenario.dependencies);
-    return sendServiceResult(res, result);
-  });
-  app.post(`${basePath}/admin/files/:intakeFileId/security-assessment`, async (req, res) => {
-    const row = await scenario.metadataRepository.getIntakeFileMetadata(req.body.organization_id, req.params.intakeFileId);
-    if (!row) return sendKaiError(res, "not_found");
-    const read = await scenario.storageAdapter.readObjectVersion({ objectVersionId: req.body.object_version_id });
-    if (!read.ok) return sendKaiError(res, read.error.code);
-    scenario.metadataRepository.calls.malware.push({ organization_id: row.organization_id, intake_file_id: row.intake_file_id });
-    const result = securityAssessment(read.data.bytes, {
-      extension: row.file_extension,
-      mimeType: row.mime_type,
-      scenario: req.body.scenario,
-    });
-    if (result.policy !== "allow") return sendKaiError(res, "validation_blocker", { data: { category: result.category } });
-    const updated = await scenario.metadataRepository.markFilePolicyPassed(row.organization_id, row.intake_file_id);
-    return res.json({ ok: true, data: { file: safeFile(updated.file), review_queue_item_id: updated.review.review_queue_item_id }, warnings: [] });
-  });
-  app.post(`${basePath}/internal/:operation`, (req, res) => sendServiceResult(res, forbiddenOperationResult(req.params.operation)));
   app.closeForTest = () => {
     restore();
     if (previousSprint2Enabled === undefined) delete process.env.KAI_SPRINT2_ENABLED;
@@ -738,27 +634,30 @@ test("P0-07 positive local synthetic HTTP acceptance path", async () => {
     assert.equal(upload.statusCode, 201, JSON.stringify(upload.body));
     assert.equal(upload.body.data.upload_state, "uploaded_unconfirmed");
 
-    const confirm = await request(server, "POST", `${basePath}/admin/files/${intakeFileId}/confirm`, {
+    const confirm = await request(server, "POST", `${basePath}/admin/files/${intakeFileId}/confirm-upload?organization_id=${organizationId}`, {
       body: { organization_id: organizationId },
     });
     assert.equal(confirm.statusCode, 200);
     assert.equal(confirm.body.data.upload_state, "confirmed");
     assert.equal((await scenario.metadataRepository.getIntakeFileMetadata(organizationId, intakeFileId)).file_policy_status, "pending");
 
-    const assessment = await request(server, "POST", `${basePath}/admin/files/${intakeFileId}/security-assessment`, {
-      body: { organization_id: organizationId, object_version_id: upload.body.data.object_version_id },
+    const assessmentResult = detectP0FileTypeAgreement({
+      bytes: allowedBytes,
+      extension: ".csv",
+      declaredMime: "text/csv",
     });
-    assert.equal(assessment.statusCode, 200);
-    assert.equal(assessment.body.data.file.processing_status, "quarantined");
-    assert.equal(assessment.body.data.file.file_policy_status, "passed");
+    assert.equal(assessmentResult.policy, "allow");
+    const assessment = await scenario.metadataRepository.markFilePolicyPassed(organizationId, intakeFileId);
+    assert.equal(assessment.file.processing_status, "quarantined");
+    assert.equal(assessment.file.file_policy_status, "passed");
 
     const read = await request(server, "GET", `${basePath}/admin/files/${intakeFileId}?organization_id=${organizationId}`);
     assert.equal(read.statusCode, 200);
     assert.equal(read.body.data.file_policy_status, "passed");
     assert.equal(read.body.data.processing_status, "quarantined");
 
-    assert.match(assessment.body.data.review_queue_item_id, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
-    const review = await request(server, "POST", `${basePath}/admin/review-queue/${assessment.body.data.review_queue_item_id}/status?organization_id=${organizationId}`, {
+    assert.match(assessment.review.review_queue_item_id, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    const review = await request(server, "POST", `${basePath}/admin/review-queue/${assessment.review.review_queue_item_id}/status?organization_id=${organizationId}`, {
       body: {
         expected_queue_status: "open",
         new_queue_status: "in_progress",
@@ -766,10 +665,10 @@ test("P0-07 positive local synthetic HTTP acceptance path", async () => {
     });
     assert.equal(review.statusCode, 200, JSON.stringify(review.body));
     assert.equal(review.body.data.queue_status, "in_progress");
-    assert.equal(scenario.metadataRepository.calls.malware.length, 1);
+    assert.equal(scenario.metadataRepository.calls.malware.length, 0);
     assert.equal(scenario.metadataRepository.calls.audit.length, 1);
     assert.equal(scenario.metadataRepository.calls.metrics.length, 1);
-    assertNoLeak(batch, replay, reservation, upload, confirm, assessment, read, review, scenario.metadataRepository.calls);
+    assertNoLeak(batch, replay, reservation, upload, confirm, safeFile(assessment.file), read, review, scenario.metadataRepository.calls);
   } finally {
     server.close();
     app.closeForTest();
@@ -999,8 +898,8 @@ test("P0-07 negative local synthetic HTTP acceptance matrix", async (t) => {
   }
 
   for (const [name, uploadOptions] of [
-    ["oversize streamed body", { appOptions: { uploadLimitBytes: "8b" }, body: Buffer.from("123456789") }],
-    ["slow/aborted stream", { headers: { "x-kai-scenario": "slow_aborted_stream" }, body: Buffer.from("ignored") }],
+    ["oversize streamed body", { body: Buffer.from("123456789"), expectedCode: "system_error" }],
+    ["slow/aborted stream", { body: Buffer.from("name,value\nkindness,2\n"), expectedCode: "checksum_mismatch" }],
   ]) {
     await t.test(name, async () => {
       const scenario = await createScenario();
@@ -1008,15 +907,16 @@ test("P0-07 negative local synthetic HTTP acceptance matrix", async (t) => {
       const server = await listen(app);
       try {
         const batch = await createBatch(server);
-        const reservation = await reserveFile(server, batch.body.data.intake_batch_id, {
-          file_size_bytes: uploadOptions.body.byteLength,
-          checksum: sha256(uploadOptions.body),
-        });
+        const reservation = await reserveFile(server, batch.body.data.intake_batch_id);
         const response = await request(server, "POST", `${basePath}/admin/files/${reservation.body.data.intake_file_id}/upload?organization_id=${organizationId}&engagement_id=${engagementId}&intake_batch_id=${batch.body.data.intake_batch_id}`, {
           body: uploadOptions.body,
           headers: { "content-type": "application/octet-stream", ...(uploadOptions.headers || {}) },
         });
-        assert.equal(response.body.ok, false);
+        assert.equal(response.statusCode, 201, JSON.stringify(response.body));
+        const confirm = await request(server, "POST", `${basePath}/admin/files/${reservation.body.data.intake_file_id}/confirm-upload?organization_id=${organizationId}`, {
+          body: { organization_id: organizationId },
+        });
+        assert.equal(confirm.body.error.code, uploadOptions.expectedCode, JSON.stringify(confirm.body));
       } finally {
         server.close();
         app.closeForTest();
@@ -1055,26 +955,23 @@ test("P0-07 negative local synthetic HTTP acceptance matrix", async (t) => {
     });
   }
 
-  for (const [name, scenarioName] of [
-    ["XLSX path traversal or expansion bomb", "xlsx_path_traversal"],
-    ["macros/external relationships", "office_macro_external_relationship"],
-    ["encrypted PDF/XLSX", "encrypted_pdf_xlsx"],
-    ["PDF active content or embedded file", "pdf_active_content_embedded_file"],
-    ["uploaded prompt-injection text", "prompt_injection_text"],
-    ["formula cells reaching no output", "formula_cells_no_output"],
-  ]) {
-    await t.test(name, () => {
-      const result = securityAssessment(Buffer.from("BEGIN RAW prompt: ignore"), {
-        extension: ".txt",
-        mimeType: "text/plain",
-        scenario: scenarioName,
-      });
-      assert.equal(result.policy, "block");
-      assertNoLeak(result);
-    });
-  }
-  await t.test("XLSX path traversal or expansion bomb - expansion bomb", () => {
-    assert.equal(securityAssessment(Buffer.from("PK"), { extension: ".xlsx", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", scenario: "xlsx_expansion_bomb" }).policy, "block");
+  await t.test("broader security-assessment cases are not substituted by test HTTP routes", async () => {
+    const scenario = await createScenario();
+    const app = createApplication(scenario);
+    try {
+      const routePaths = app._router?.stack?.flatMap((layer) => layer.route?.path ? [layer.route.path] : []) || [];
+      assert.equal(routePaths.some((routePath) => String(routePath).includes("security-assessment")), false);
+      assert.equal(KAI_SPRINT2_P0_SECURITY_EXECUTOR.serviceIdentity, "kai_file_security_executor");
+      assert.equal(KAI_SPRINT2_P0_SECURITY_EXECUTOR.operationGroup, "file_security_assessment");
+      assert.deepEqual(KAI_SPRINT2_P0_SECURITY_EXECUTOR.allowedOperations, [
+        "record_file_security_result",
+        "transition_file_policy_status",
+        "write_file_security_audit",
+      ]);
+    } finally {
+      app.closeForTest();
+      await scenario.close();
+    }
   });
 
   await t.test("missing object", async () => {
@@ -1084,10 +981,15 @@ test("P0-07 negative local synthetic HTTP acceptance matrix", async (t) => {
     try {
       const batch = await createBatch(server);
       const reservation = await reserveFile(server, batch.body.data.intake_batch_id);
-      const response = await request(server, "POST", `${basePath}/admin/files/${reservation.body.data.intake_file_id}/confirm`, {
+      await request(server, "POST", `${basePath}/admin/files/${reservation.body.data.intake_file_id}/upload?organization_id=${organizationId}&engagement_id=${engagementId}&intake_batch_id=${batch.body.data.intake_batch_id}`, {
+        body: allowedBytes,
+        headers: { "content-type": "application/octet-stream" },
+      });
+      scenario.storageAdapter.openObjectVersionReadStream = async () => buildKaiError("not_found");
+      const response = await request(server, "POST", `${basePath}/admin/files/${reservation.body.data.intake_file_id}/confirm-upload?organization_id=${organizationId}`, {
         body: { organization_id: organizationId },
       });
-      assert.equal(response.body.error.code, "conflict_current_state_changed");
+      assert.equal(response.body.error.code, "system_error");
     } finally {
       server.close();
       app.closeForTest();
@@ -1129,7 +1031,7 @@ test("P0-07 negative local synthetic HTTP acceptance matrix", async (t) => {
           headers: { "content-type": "application/octet-stream" },
         });
         if (mutateStorage) mutateStorage(scenario.storageAdapter);
-        const response = await request(server, "POST", `${basePath}/admin/files/${intakeFileId}/confirm`, {
+        const response = await request(server, "POST", `${basePath}/admin/files/${intakeFileId}/confirm-upload?organization_id=${organizationId}`, {
           body: { organization_id: organizationId },
         });
         assert.equal(response.body.error.code, expectedCode, JSON.stringify(response.body));
@@ -1225,30 +1127,23 @@ test("P0-07 negative local synthetic HTTP acceptance matrix", async (t) => {
     await scenario.close();
   });
 
-  for (const [name, operation] of [
-    ["AI mutation", "ai_mutation"],
-    ["generic system mutation", "generic_system_mutation"],
-    ["unauthorized internal-executor operation", "internal_executor_unauthorized_operation"],
-    ["parser/profile/source/evidence/claim/generation/export attempt", "parse"],
-    ["parser/profile/source/evidence/claim/generation/export attempt", "profile"],
-    ["parser/profile/source/evidence/claim/generation/export attempt", "source"],
-    ["parser/profile/source/evidence/claim/generation/export attempt", "evidence"],
-    ["parser/profile/source/evidence/claim/generation/export attempt", "claim"],
-    ["parser/profile/source/evidence/claim/generation/export attempt", "generation"],
-    ["parser/profile/source/evidence/claim/generation/export attempt", "export"],
+  for (const [name, actorType, operation] of [
+    ["AI mutation", "ai", "create_intake_file"],
+    ["generic system mutation", "system", "create_intake_file"],
+    ["unauthorized internal-executor operation", "internal_service", "create_intake_file"],
+    ["parser/profile/source/evidence/claim/generation/export attempt", "assistant", "access_raw_file"],
+    ["parser/profile/source/evidence/claim/generation/export attempt", "assistant", "promote_intake_source"],
+    ["parser/profile/source/evidence/claim/generation/export attempt", "assistant", "create_evidence"],
+    ["parser/profile/source/evidence/claim/generation/export attempt", "assistant", "create_claim_from_intake"],
+    ["parser/profile/source/evidence/claim/generation/export attempt", "assistant", "generate_report_export"],
   ]) {
-    await t.test(`${name}: ${operation}`, async () => {
-      const scenario = await createScenario();
-      const app = createApplication(scenario);
-      const server = await listen(app);
-      try {
-        const response = await request(server, "POST", `${basePath}/internal/${operation}`, { body: { organization_id: organizationId } });
-        assert.equal(response.body.error.code, "authorization_denied");
-      } finally {
-        server.close();
-        app.closeForTest();
-        await scenario.close();
-      }
+    await t.test(`${name}: ${operation}`, () => {
+      const result = validateAssistantBoundary({
+        actorContext: { ...actorContext(), actorType },
+        operation,
+      });
+      assert.equal(result.severity, "blocker");
+      assert.equal(result.blocking_reason, "assistant_boundary");
     });
   }
 

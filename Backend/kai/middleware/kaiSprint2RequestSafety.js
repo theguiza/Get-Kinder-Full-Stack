@@ -3,6 +3,7 @@ import {
   KAI_SPRINT2_P0_ABUSE_LIMITS,
   KAI_SPRINT2_P0_PATTERNS,
   KAI_SPRINT2_P0_REQUEST_LIMITS,
+  KAI_SPRINT2_P0_UPLOAD_TIMING,
 } from "../config/kaiSprint2P0Contract.js";
 import { sendKaiError } from "../errors/kaiErrors.js";
 
@@ -29,6 +30,92 @@ export function handleKaiSprint2JsonParserError(error, req, res, next) {
     return sendKaiError(res, "invalid_request");
   }
   return next(error);
+}
+
+export function requireKaiSprint2UploadMediaType(req, res, next) {
+  const header = req.get?.("content-type") || req.headers?.["content-type"] || "";
+  const mediaType = String(header).split(";", 1)[0].trim().toLowerCase();
+  if (mediaType !== "application/octet-stream") {
+    return sendKaiError(res, "unsupported_media_type");
+  }
+  return next();
+}
+
+function abortControllerForUpload(req, res) {
+  const controller = new AbortController();
+  let settled = false;
+  const abort = () => {
+    if (!settled) controller.abort();
+  };
+  req.once?.("aborted", abort);
+  req.once?.("error", abort);
+  res.once?.("close", abort);
+  res.once?.("finish", () => {
+    settled = true;
+  });
+  return controller;
+}
+
+function createUploadTimeoutController(req, res, {
+  idleTimeoutMs = KAI_SPRINT2_P0_UPLOAD_TIMING.idleTimeoutMs,
+  totalTimeoutMs = KAI_SPRINT2_P0_UPLOAD_TIMING.totalTimeoutMs,
+} = {}) {
+  const controller = abortControllerForUpload(req, res);
+  let idleTimer = null;
+  let totalTimer = null;
+
+  const clearTimers = () => {
+    if (idleTimer) clearTimeout(idleTimer);
+    if (totalTimer) clearTimeout(totalTimer);
+    idleTimer = null;
+    totalTimer = null;
+  };
+  const abortForTimeout = () => {
+    clearTimers();
+    controller.abort();
+  };
+  const refreshIdleTimer = () => {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(abortForTimeout, idleTimeoutMs);
+  };
+
+  refreshIdleTimer();
+  totalTimer = setTimeout(abortForTimeout, totalTimeoutMs);
+  req.once?.("end", clearTimers);
+  req.once?.("error", clearTimers);
+  req.once?.("aborted", clearTimers);
+  res.once?.("finish", clearTimers);
+  res.once?.("close", clearTimers);
+
+  return {
+    signal: controller.signal,
+    refreshIdleTimer,
+    clearTimers,
+  };
+}
+
+function createTimedUploadByteSource(req, timeoutController) {
+  return {
+    async *[Symbol.asyncIterator]() {
+      try {
+        for await (const chunk of req) {
+          timeoutController.refreshIdleTimer();
+          yield chunk;
+        }
+      } finally {
+        timeoutController.clearTimers();
+      }
+    },
+  };
+}
+
+export function attachKaiSprint2UploadByteSource(options = {}) {
+  return (req, res, next) => {
+    const timeoutController = createUploadTimeoutController(req, res, options);
+    req.kaiSprint2UploadSignal = timeoutController.signal;
+    req.kaiSprint2UploadByteSource = createTimedUploadByteSource(req, timeoutController);
+    return next();
+  };
 }
 
 function safeActorKey(req) {
@@ -94,4 +181,6 @@ export const kaiSprint2OrganizationMutationLimiter = createKaiMutationAttemptLim
 export const __testables = {
   safeActorKey,
   safeOrganizationKey,
+  createUploadTimeoutController,
+  createTimedUploadByteSource,
 };

@@ -5,7 +5,11 @@ import {
   KAI_SPRINT2_P0_CONTRACT_VERSION,
   KAI_SPRINT2_P0_PATTERNS,
 } from "../config/kaiSprint2P0Contract.js";
-import { setKaiSprint2NoStore } from "../middleware/kaiSprint2RequestSafety.js";
+import {
+  attachKaiSprint2UploadByteSource,
+  requireKaiSprint2UploadMediaType,
+  setKaiSprint2NoStore,
+} from "../middleware/kaiSprint2RequestSafety.js";
 import {
   validateIntakeBatchFilesQuery,
   validateFilePolicyBlockRequest,
@@ -130,6 +134,48 @@ function fileDetailIdentifiers(req = {}) {
     || intakeFileId !== intakeFileId.toLowerCase()
   ) return null;
   return { organizationId, intakeFileId };
+}
+
+function uploadIdentifiers(req = {}) {
+  const organizationId = normalizedUuid(req.query?.organization_id);
+  const engagementId = normalizedUuid(req.query?.engagement_id);
+  const intakeBatchId = normalizedUuid(req.query?.intake_batch_id);
+  const intakeFileId = typeof req.params?.intakeFileId === "string" ? req.params.intakeFileId : "";
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId)) return null;
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(engagementId)) return null;
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(intakeBatchId)) return null;
+  if (
+    !KAI_SPRINT2_P0_PATTERNS.uuid.test(intakeFileId)
+    || intakeFileId !== intakeFileId.toLowerCase()
+  ) return null;
+  return { organizationId, engagementId, intakeBatchId, intakeFileId };
+}
+
+function validateConfirmUploadRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = fileDetailIdentifiers(req);
+  if (!identifiers) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_or_intake_file_id")],
+    });
+    return null;
+  }
+  const payload = requestPayload(req);
+  const keys = Object.keys(payload);
+  if (
+    keys.length !== 1
+    || keys[0] !== "organization_id"
+    || payload.organization_id !== identifiers.organizationId
+  ) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("invalid_confirm_upload_request", "body")],
+    });
+    return null;
+  }
+  return identifiers;
 }
 
 function reviewQueueStatusIdentifiers(req = {}) {
@@ -339,6 +385,39 @@ router.post("/admin/files/:intakeFileId/block", async (req, res) => {
   });
 });
 
+router.post(
+  "/admin/files/:intakeFileId/upload",
+  requireKaiSprint2UploadMediaType,
+  attachKaiSprint2UploadByteSource(),
+  async (req, res) => {
+    const identifiers = uploadIdentifiers(req);
+    if (!identifiers) return sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_engagement_id_batch_id_or_intake_file_id")],
+    });
+    return invokeService(res, async () => {
+      const service = await getIntakeService();
+      return service.uploadReservedIntakeFile({
+        ...requestContext(req, "/api/kai/sprint2/intake/admin/files/:intakeFileId/upload"),
+        ...identifiers,
+        byteSource: req.kaiSprint2UploadByteSource,
+        signal: req.kaiSprint2UploadSignal,
+      });
+    }, 201);
+  },
+);
+
+router.post("/admin/files/:intakeFileId/confirm-upload", async (req, res) => {
+  const identifiers = validateConfirmUploadRequestOrSend(req, res);
+  if (!identifiers) return;
+  return invokeService(res, async () => {
+    const service = await getIntakeService();
+    return service.confirmUpload({
+      ...requestContext(req, "/api/kai/sprint2/intake/admin/files/:intakeFileId/confirm-upload"),
+      ...identifiers,
+    });
+  });
+});
+
 router.get("/admin/review-queue", async (req, res) => {
   const organizationId = normalizedUuid(req.query?.organization_id);
   const queryResult = validateReviewQueueQuery(req.query);
@@ -419,6 +498,7 @@ export const __testables = {
   safeAuthenticatedUser,
   batchDetailIdentifiers,
   fileDetailIdentifiers,
+  uploadIdentifiers,
   reviewQueueStatusIdentifiers,
   validateIntakeBatchFilesQuery,
   validateReviewQueueQuery,
@@ -429,6 +509,7 @@ export const __testables = {
   metadataContentTypeIsSupported,
   validateMutationRequestOrSend,
   validateFilePolicyBlockRequestOrSend,
+  validateConfirmUploadRequestOrSend,
   validateReviewQueueStatusRequestOrSend,
   setIntakeServiceForTest(service) {
     intakeServiceOverride = service;
