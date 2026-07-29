@@ -4441,6 +4441,52 @@ next_package_or_stop_condition: OWNER-DIRECTED STOP after this single bounded im
 commit_hash: report after commit; a commit cannot contain its own SHA
 ```
 
+## P0-05 OOXML path-traversal detection
+
+```text
+p0_05_package_status: ooxml_path_traversal_detection_complete_ready_to_commit
+implementation_status: bounded_internal_xlsx_result_only
+verification_status: TOOL_VERIFIED after pre-edit capability probe, focused OOXML, repository-contract, affected file-policy, Sprint 2, full-suite, diff, and post-commit clean-state checks complete
+evidence_class: TOOL_VERIFIED
+decision_evidence: USER_CONFIRMED
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 0945fde51bffd7fe654247005c92d45cd4cc48ca
+working_tree_clean_at_start: true
+staged_paths_at_start: none
+applicable_repository_instructions: root AGENTS.md only; DATABASE_URL sentinel used for every Node and npm command; no fetch, push, database/cloud/production/deployment/current-state, Implementation Baseline, P0-06B, executor mapping, persistence, route/service/listener wiring, PDF-worker change, macro detection, external-relationship classification, archive-limit work, or Gate A work authorized or performed
+owner_decision_authority: OWNER_DECISION.P0_05_OOXML_PATH_TRAVERSAL_DETECTOR_V1 newly authorized by this package prompt; the category ooxml_path_traversal and exact two-key result shape were not described as pre-existing committed repository authority
+owner_duplicate_authority: duplicate normalized ZIP entry names newly owner-authorized to block under ooxml_path_traversal; exact duplicate ZIP entry names also block under this category
+authorized_result_shape: exactly policy block and category ooxml_path_traversal; exact enumerable keys policy and category; no scope, evidence, metadata, entry names, targets, relationship identifiers, XML, workbook content, paths, stacks, parser internals, counts, or other keys
+pre_edit_capability_probe: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node /private/tmp/kai-p0-05-ooxml-capability-probe.mjs from /private/tmp returned capabilityPass true and repeated true with sanitized facts only; proved central-directory enumeration including directories and duplicates, every Relationship in every .rels part, and Target/TargetMode readability without outputting entry names or relationship targets
+capability_gap: false
+authorized_file_scope: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md; Backend/kai/validators/ooxmlPathTraversalDetector.js; __tests__/kai-sprint2-ooxml-path-traversal-detector.spec.js; __tests__/kai-sprint2-p0-repository-contract.spec.js; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+precedence_matches_owner_decision: complete XLSX shallow identity -> bounded XLSX sheet-count detector -> bounded XLSX cell-count detector -> OOXML path-traversal detector; duplicate ZIP entry-name detection is the explicit exception needed to classify newly owner-authorized duplicate normalized package names under this category
+zip_entry_behavior: blocks central-directory entry names containing a .. segment, backslash, NUL, drive-letter form, UNC form, or leading filesystem-absolute form; duplicate detection normalizes by removing . and empty slash-separated segments, preserving case and directory/file distinction, and not percent-decoding
+relationship_behavior: inspects every Relationship in every .rels part; TargetMode absent defaults internal; TargetMode Internal is inspected; TargetMode External is ignored here and not followed or classified
+internal_target_behavior: package-absolute leading slash resolves from package root and is allowed when inside package; literal relative .. is allowed only when normalized resolution remains inside package; blocks escape above package root, backslash, NUL, drive-letter form, UNC form, filesystem-path form, invalid percent encoding, and traversal revealed by one URI percent-decoding pass
+sanitized_failure_behavior: malformed or ambiguous ZIP/XML/relationship structures, missing targets, unsupported constructs, malformed deflate or unsupported compression, and thrown operations use the sanitized OOXML path-traversal inspection failure path; duplicate normalized entries are the explicit exception and block
+non_exposure_boundary: detector and tests do not expose entry names, targets, XML, workbook content, paths, stacks, parser internals, relationship identifiers, counts, formulas, values, or dependency details in returned results or sanitized errors
+state_and_integration_boundary: detector directly changes none of file_policy_status, processing_status, parse_status, or upload_state; internal result only
+executor_or_route_wiring_changed: false
+database_or_audit_writes_added: false
+public_api_mapping_added: false
+client_serialization_added: false
+pdf_worker_changed: false
+macro_detection_added: false
+external_relationship_classification_added: false
+archive_limit_work_added: false
+dependencies_or_lockfiles_changed: false
+focused_ooxml_and_contract_test: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-ooxml-path-traversal-detector.spec.js __tests__/kai-sprint2-p0-repository-contract.spec.js - tests 23; pass 23; fail 0
+affected_file_policy_tests: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-ooxml-path-traversal-detector.spec.js __tests__/kai-sprint2-xlsx-sheet-cell-limit-detector.spec.js __tests__/kai-sprint2-p0-repository-contract.spec.js __tests__/kai-sprint2-p0-file-type-agreement-detector.spec.js __tests__/kai-sprint2-csv-row-limit-detector.spec.js __tests__/kai-sprint2-txt-md-byte-detector.spec.js __tests__/kai-sprint2-p0-05f-combined-completeness.spec.js - tests 83; pass 83; fail 0
+sprint2_suite: localhost-capable DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - tests 829; pass 829; fail 0
+full_repository_suite: localhost-capable DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - tests 934; pass 934; fail 0
+complete_diff_inspected: true before ExecPlan update and rechecked before commit
+git_diff_check: git diff --check and git diff --cached --check - pass
+changed_files: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md; Backend/kai/validators/ooxmlPathTraversalDetector.js; __tests__/kai-sprint2-ooxml-path-traversal-detector.spec.js; __tests__/kai-sprint2-p0-repository-contract.spec.js; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this single bounded implementation package commit; do not start executor mapping, persistence, route/service/listener wiring, public API/client mapping, database/cloud/production/deployment behavior, P0-06B, Gate A, macro detection, external-relationship classification, archive-limit work, Current State update, Implementation Baseline update, push, or deploy without separate owner authorization
+commit_hash: report after commit; a commit cannot contain its own SHA
+```
+
 
 ## P0-06A unauthorized transition negative coverage
 

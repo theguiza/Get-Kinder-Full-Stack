@@ -251,6 +251,33 @@ test("repository contract records XLSX sheet and cell limit detector authority a
   assert.match(contract, /directly changes none of `file_policy_status`, `processing_status`, `parse_status`, or `upload_state`/);
 });
 
+test("repository contract records OOXML path-traversal detector authority and boundaries", () => {
+  assert.match(contract, /OWNER_DECISION\.P0_05_OOXML_PATH_TRAVERSAL_DETECTOR_V1/);
+  assert.match(contract, /newly_authorized_result_shape: true/);
+  assert.match(contract, /newly_authorized_duplicate_normalized_zip_entry_block: true/);
+  assert.match(contract, /policy: block\s+category: ooxml_path_traversal\s+exact_keys: policy, category/);
+  assert.match(contract, /No block result:\s+```text\s+undefined/);
+  assert.match(contract, /did not establish an OOXML path-traversal block/);
+  assert.match(contract, /not a file-policy pass, type-agreement pass, parser-eligibility result, upload acceptance result/);
+  assert.match(contract, /bounded XLSX cell-count detector\s+-> OOXML path-traversal detector/);
+  assert.match(contract, /Duplicate ZIP entry-name detection is the explicit exception/);
+  assert.match(contract, /containing a `\.\.` slash-separated segment, backslash, NUL, drive-letter form, UNC form, or leading filesystem-absolute form/);
+  assert.match(contract, /removing `\.` and empty slash-separated segments, preserving case and directory\/file distinction, and not percent-decoding/);
+  assert.match(contract, /Exact duplicates and distinct central-directory entries resolving to the same normalized package name both block as `ooxml_path_traversal`/);
+  assert.match(contract, /inspect every `<Relationship>` in every `\.rels` part/);
+  assert.match(contract, /Inspect relationships whose `TargetMode` is `Internal` or absent; absent defaults to internal/);
+  assert.match(contract, /`TargetMode="External"` is out of scope/);
+  assert.match(contract, /A leading `\/` is package-absolute, resolves from the package root, and is allowed when it remains inside the package/);
+  assert.match(contract, /Relative `\.\.` segments are allowed only when normalized resolution remains inside the package/);
+  assert.match(contract, /Block escape above the package root, backslash, NUL, drive-letter form, UNC form, filesystem-path form, invalid percent encoding, or traversal revealed by one URI percent-decoding pass/);
+  assert.match(contract, /Malformed or ambiguous ZIP\/XML\/relationship structures, missing targets, unsupported constructs, and thrown operations use the existing sanitized failure path/);
+  assert.match(contract, /Duplicate normalized entries are the explicit exception: they block/);
+  assert.match(contract, /Do not expose entry names, targets, XML, workbook content, paths, stacks, parser internals/);
+  assert.match(contract, /must not be placed in, imported by, or executed inside the PDF worker/);
+  assert.match(contract, /must not install dependencies or add archive-count, expanded-size, compression-ratio, timeout, macro, external-relationship/);
+  assert.match(contract, /directly changes none of `file_policy_status`, `processing_status`, `parse_status`, or `upload_state`/);
+});
+
 test("queue vocabulary is shared by the repository contract and runtime validator", () => {
   assert.deepEqual(VALID_REVIEW_QUEUE_TYPES, KAI_SPRINT2_P0_REVIEW_QUEUE_TYPES);
   for (const queueType of KAI_SPRINT2_P0_REVIEW_QUEUE_TYPES) {

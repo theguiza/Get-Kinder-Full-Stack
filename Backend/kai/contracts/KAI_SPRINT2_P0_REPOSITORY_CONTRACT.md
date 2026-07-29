@@ -1806,6 +1806,57 @@ Formula and instruction-like contents remain inert. Do not execute, evaluate, re
 
 State and integration boundary: this detector directly changes none of `file_policy_status`, `processing_status`, `parse_status`, or `upload_state`. It returns an internal result only. No executor mapping, service wiring, route wiring, listener wiring, database write, audit write, persistence, public API mapping, client serialization, macro detection, external-relationship classification, archive-limit work, deployment configuration, production configuration, or PDF-worker change is authorized by this decision.
 
+## OWNER_DECISION.P0_05_OOXML_PATH_TRAVERSAL_DETECTOR_V1
+
+```text
+decision_evidence: USER_CONFIRMED
+authority_created_by: owner authorization for this package
+classification: internal_non_persisted_xlsx_security_result
+newly_authorized_result_shape: true
+newly_authorized_duplicate_normalized_zip_entry_block: true
+```
+
+This owner decision newly authorizes the internal category `ooxml_path_traversal` and the exact two-key result shape below. It also newly authorizes exact duplicate ZIP entry names and duplicate normalized ZIP entry names to block under `ooxml_path_traversal`. Neither authority must be described as pre-existing committed repository authority before this decision.
+
+OOXML path-traversal result:
+
+```text
+policy: block
+category: ooxml_path_traversal
+exact_keys: policy, category
+```
+
+No block result:
+
+```text
+undefined
+```
+
+`undefined` means only that this detector did not establish an OOXML path-traversal block. It is not a file-policy pass, type-agreement pass, parser-eligibility result, upload acceptance result, macro-safety result, external-relationship result, archive-safety result, formula-safety result, instruction-safety result, content-validity result, or authorization for downstream processing.
+
+Precedence:
+
+```text
+complete XLSX shallow identity
+-> bounded XLSX sheet-count detector
+-> bounded XLSX cell-count detector
+-> OOXML path-traversal detector
+```
+
+Duplicate ZIP entry-name detection is the explicit exception needed to classify newly owner-authorized duplicate normalized package names under this category; the detector may establish that duplicate before relying on downstream relationship traversal.
+
+ZIP entry-name rules: block any central-directory entry name containing a `..` slash-separated segment, backslash, NUL, drive-letter form, UNC form, or leading filesystem-absolute form. Normalize ZIP entry names for duplicate detection by removing `.` and empty slash-separated segments, preserving case and directory/file distinction, and not percent-decoding. Exact duplicates and distinct central-directory entries resolving to the same normalized package name both block as `ooxml_path_traversal`.
+
+Relationship rules: inspect every `<Relationship>` in every `.rels` part. Read `Target` and `TargetMode` only for internal decisioning. Inspect relationships whose `TargetMode` is `Internal` or absent; absent defaults to internal. `TargetMode="External"` is out of scope for this detector: do not follow it and do not classify it here.
+
+Internal target rules: resolve internal targets relative to the owning OOXML part using package URI rules. A leading `/` is package-absolute, resolves from the package root, and is allowed when it remains inside the package. Relative `..` segments are allowed only when normalized resolution remains inside the package. Block escape above the package root, backslash, NUL, drive-letter form, UNC form, filesystem-path form, invalid percent encoding, or traversal revealed by one URI percent-decoding pass.
+
+Malformed or ambiguous ZIP/XML/relationship structures, missing targets, unsupported constructs, and thrown operations use the existing sanitized failure path, never block or pass. Duplicate normalized entries are the explicit exception: they block. Do not expose entry names, targets, XML, workbook content, paths, stacks, parser internals, relationship identifiers, or dependency details.
+
+This detector must not be placed in, imported by, or executed inside the PDF worker. It must not install dependencies or add archive-count, expanded-size, compression-ratio, timeout, macro, external-relationship, state-transition, executor, route, service, persistence, database, audit, deployment, Current State, or Implementation Baseline work.
+
+State and integration boundary: this detector directly changes none of `file_policy_status`, `processing_status`, `parse_status`, or `upload_state`. It returns an internal result only. No executor mapping, service wiring, route wiring, listener wiring, database write, audit write, persistence, public API mapping, client serialization, macro detection, external-relationship classification, archive-limit work, deployment configuration, production configuration, or PDF-worker change is authorized by this decision.
+
 Protected PDF result:
 
 ```text
