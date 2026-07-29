@@ -1,7 +1,7 @@
 import { Worker } from "node:worker_threads";
 
 export const PDF_ASSESSOR_PRE_PARSE_INPUT_GATE_BYTES = 25 * 1024 * 1024;
-export const PDF_ASSESSOR_PARENT_TIMEOUT_MS = 60_000;
+export const PDF_ASSESSOR_PARENT_TIMEOUT_MS = 10_000;
 export const MAXIMUM_CONCURRENT_PDF_ASSESSOR_WORKERS = 1;
 
 const PDF_WORKER_THREAD_URL = new URL("./pdfAssessorWorkerThread.js", import.meta.url);
@@ -136,7 +136,8 @@ async function runPdfAssessorWorkerBoundaryInternal(input, options = {}) {
     createWorker = createFileBackedPdfWorker,
     onLateWorkerMessageRejectedForTest,
     onWorkerMessageForTest,
-    timeoutMs = PDF_ASSESSOR_PARENT_TIMEOUT_MS,
+    setTimeoutFn = setTimeout,
+    clearTimeoutFn = clearTimeout,
   } = options;
   let ownedBytes = copyToOwnedUint8Array(input);
   let worker = null;
@@ -148,7 +149,7 @@ async function runPdfAssessorWorkerBoundaryInternal(input, options = {}) {
   return await new Promise((resolve, reject) => {
     const clearParentTimeout = () => {
       if (parentTimeout) {
-        clearTimeout(parentTimeout);
+        clearTimeoutFn(parentTimeout);
         parentTimeout = null;
       }
     };
@@ -240,6 +241,9 @@ async function runPdfAssessorWorkerBoundaryInternal(input, options = {}) {
     }
 
     try {
+      parentTimeout = setTimeoutFn(() => {
+        settle({ result: latch.timeout() });
+      }, PDF_ASSESSOR_PARENT_TIMEOUT_MS);
       worker = createWorker(ownedBytes);
       ownedBytes = null;
     } catch {
@@ -251,10 +255,6 @@ async function runPdfAssessorWorkerBoundaryInternal(input, options = {}) {
     worker.on("message", onMessage);
     worker.on("error", onError);
     worker.on("exit", onExit);
-
-    parentTimeout = setTimeout(() => {
-      settle({ result: latch.timeout() });
-    }, timeoutMs);
   });
 }
 

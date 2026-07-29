@@ -1557,7 +1557,7 @@ expanded_byte_maximum_display: 250 MiB
 compression_ratio_maximum: 100:1
 minimum_inflate_ratio: 0.01
 assessor_timeout_ms: 10000
-assessor_timeout_implementation_status: recorded_not_implemented
+assessor_timeout_implementation_status: implemented_for_existing_worker_backed_boundary_only; synchronous detectors unchanged
 ```
 
 Outcomes:
@@ -1573,7 +1573,9 @@ archive_compression_ratio_limit_exceeded:
   policy: block
 
 security_assessment_timeout:
-  policy: failed
+  status: failed
+  category: security_assessment_timeout
+  exact_keys: status, category
 
 pdf_active_content_detected:
   policy: block
@@ -1605,6 +1607,31 @@ xlsx_sheet_limit_exceeded:
 xlsx_cell_limit_exceeded:
   policy: block
 ```
+
+## OWNER_DECISION.P0_05_WORKER_BACKED_ASSESSOR_TIMEOUT_V1
+
+```text
+decision_evidence: USER_CONFIRMED
+authority_created_by: owner authorization for the 10-second worker timeout package
+fixed_worker_backed_assessment_deadline_ms: 10000
+implementation_scope: existing worker-backed security-assessment boundary only
+current_worker_backed_paths: PDF assessor worker boundary
+synchronous_detector_scope: unchanged; no dispatcher and no forced worker migration
+```
+
+This owner decision widens the previously PDF-worker-scoped timeout behavior to the worker-backed security-assessment boundary only. At this repository state, the only production worker-backed file-security assessment path is the PDF assessor worker boundary. CSV, XLSX, OOXML, archive, type-agreement, and TXT/MD detectors remain caller-thread detectors with their existing deterministic limits.
+
+The worker-backed deadline is fixed at 10000 ms. The timer starts immediately before file-backed worker dispatch and includes worker startup plus all worker processing. No caller timeout override is authorized. No nested worker, data-URL worker, eval worker, dispatcher, outer timeout wrapping an inner PDF timeout, executor mapping, route/service/listener wiring, persistence, database write, audit write, state transition, malware handling, production configuration, deployment, Current State update, or Implementation Baseline update is authorized by this decision.
+
+Timeout result:
+
+```text
+status: failed
+category: security_assessment_timeout
+exact_keys: status, category
+```
+
+On timeout, the boundary latches the exact two-key result above, terminates the worker, rejects late messages and results, clears the parent timer and worker listeners, releases the worker permit, releases parent byte references, and does not convert timeout into a policy block or pass.
 
 Prompt-injection authority:
 

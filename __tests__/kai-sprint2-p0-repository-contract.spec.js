@@ -351,6 +351,17 @@ test("repository contract records OOXML archive resource-limit detector authorit
   assert.match(contract, /directly changes none of `file_policy_status`, `processing_status`, `parse_status`, or `upload_state`/);
 });
 
+test("repository contract records worker-backed assessment timeout implementation scope", () => {
+  assert.match(contract, /OWNER_DECISION\.P0_05_WORKER_BACKED_ASSESSOR_TIMEOUT_V1/);
+  assert.match(contract, /fixed_worker_backed_assessment_deadline_ms: 10000/);
+  assert.match(contract, /implementation_scope: existing worker-backed security-assessment boundary only/);
+  assert.match(contract, /current_worker_backed_paths: PDF assessor worker boundary/);
+  assert.match(contract, /synchronous_detector_scope: unchanged; no dispatcher and no forced worker migration/);
+  assert.match(contract, /status: failed\s+category: security_assessment_timeout\s+exact_keys: status, category/);
+  assert.match(contract, /No caller timeout override is authorized/);
+  assert.match(contract, /does not convert timeout into a policy block or pass/);
+});
+
 test("queue vocabulary is shared by the repository contract and runtime validator", () => {
   assert.deepEqual(VALID_REVIEW_QUEUE_TYPES, KAI_SPRINT2_P0_REVIEW_QUEUE_TYPES);
   for (const queueType of KAI_SPRINT2_P0_REVIEW_QUEUE_TYPES) {

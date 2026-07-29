@@ -84,7 +84,7 @@ test("parent timeout latches failed / security_assessment_timeout and terminates
     startTimeoutAfterWorkerStartForTest: true,
   });
 
-  assert.equal(MUPDF_PARENT_TIMEOUT_MS, 60_000);
+  assert.equal(MUPDF_PARENT_TIMEOUT_MS, 10_000);
   assert.equal(result.status, "failed");
   assert.equal(result.category, "security_assessment_timeout");
   assert.equal(result.timeout_ms, 25);

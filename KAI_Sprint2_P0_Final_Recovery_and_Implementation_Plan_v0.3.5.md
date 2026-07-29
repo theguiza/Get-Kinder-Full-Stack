@@ -4916,6 +4916,40 @@ p0_06b_and_gate_a: unchanged and unauthorized
 current_state_update: NOT_AUTHORIZED
 ```
 
+## P0-05 worker-backed assessor timeout implementation
+
+```text
+p0_05_package_status: worker_backed_assessor_timeout_implemented_ready_to_commit
+implementation_status: complete
+verification_status: TOOL_VERIFIED after synthetic pre-edit proof, focused, affected, Sprint 2, full-suite, and diff checks
+evidence_class: TOOL_VERIFIED
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: bb8a744941d109f747bbb1722eac18fd16cc0002
+working_tree_clean_at_start: true
+staged_paths_at_start: none
+applicable_repository_instructions: root AGENTS.md only; DATABASE_URL sentinel used for every Node and npm command; no fetch, push, database/cloud/production/deployment/current-state, executor, route/service/listener wiring, persistence, state transition, audit, malware, P0-06B, or Gate A work authorized or performed
+owner_decision_authority: OWNER_DECISION.P0_05_WORKER_BACKED_ASSESSOR_TIMEOUT_V1 newly records owner-authorized widening from prior PDF-worker timeout behavior to the existing worker-backed security-assessment boundary only
+final_timeout_scope: existing worker-backed file-security assessment paths only; current production worker-backed path is Backend/kai/validators/pdfAssessorWorkerBoundary.js dispatching Backend/kai/validators/pdfAssessorWorkerThread.js
+synchronous_detector_scope: unchanged; TXT/MD, type-agreement, CSV, XLSX sheet/cell, OOXML path-traversal, XLSX macro/external-relationship, and OOXML archive resource-limit detectors remain caller-thread deterministic detectors; no dispatcher and no forced worker migration added
+timeout_configuration: PDF_ASSESSOR_PARENT_TIMEOUT_MS is fixed at 10000 ms; the parent timer starts immediately before file-backed worker dispatch and includes worker startup and worker processing
+timeout_result: exact two-key status failed / category security_assessment_timeout; timeout remains an assessment failure and is not converted to policy block or pass
+worker_lifecycle_behavior: one parent timer; one file-backed module worker; no nested workers; no data-URL or eval worker; no caller timeout override; no outer timeout wrapping an inner PDF timeout
+timeout_cleanup_behavior: timeout latches the result, terminates the worker, rejects late messages and results, clears timers and listeners, releases the worker permit, and releases parent byte references
+pre_edit_synthetic_file_backed_worker_proof: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --input-type=module synthetic /private/tmp harness - deadlineMs 10000; file worker URL protocol file:; normal PDF completed before deadline in 43 ms; synchronous blocked worker terminated with failed/security_assessment_timeout at 10004 ms; asynchronous streaming worker terminated with failed/security_assessment_timeout at 10008 ms; late success could not replace timeout and worker terminated at 10004 ms; malformed message, silent exit, and worker throw failed safely; timer, listeners, permit, and parent byte references released
+focused_timeout_and_contract_tests: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-pdf-assessor-worker-boundary.spec.js __tests__/kai-sprint2-mupdf-dependency.spec.js __tests__/kai-sprint2-p0-repository-contract.spec.js - tests 81; pass 81; fail 0
+affected_file_security_tests: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test PDF worker, MuPDF dependency, repository contract, CSV, XLSX, OOXML, type-agreement, and TXT/MD detector specs - tests 159; pass 159; fail 0
+sprint2_suite_initial_sandbox_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - sandbox run hit known localhost listen EPERM; tests 808; pass 781; fail 27
+sprint2_suite: listener-capable DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - tests 856; pass 856; fail 0
+full_repository_suite_initial_sandbox_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - sandbox run hit known localhost listen EPERM; tests 913; pass 886; fail 27
+full_repository_suite: listener-capable DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - tests 961; pass 961; fail 0
+git_diff_check_before_execplan_update: git diff --check - pass
+changed_files: Backend/kai/validators/pdfAssessorWorkerBoundary.js; Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md; __tests__/kai-sprint2-pdf-assessor-worker-boundary.spec.js; __tests__/kai-sprint2-mupdf-dependency.spec.js; __tests__/support/kaiSprint2MupdfDependencyWorker.js; __tests__/kai-sprint2-p0-repository-contract.spec.js; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+current_state_update: NOT_AUTHORIZED
+implementation_baseline_update: NOT_AUTHORIZED
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this single worker-backed timeout package commit; do not begin executor mapping, persistence, route/service/listener wiring, database/cloud/production/deployment behavior, malware handling, P0-06B, Gate A, Current State update, Implementation Baseline update, push, or deploy without separate owner authorization
+commit_hash: report after commit; a commit cannot contain its own SHA
+```
+
 
 ---
 

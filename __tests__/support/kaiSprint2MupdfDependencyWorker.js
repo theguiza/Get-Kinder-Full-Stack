@@ -3,7 +3,7 @@ import { Worker, isMainThread, parentPort, workerData } from "node:worker_thread
 
 export const MUPDF_DEPENDENCY_VERSION = "1.28.0";
 export const MUPDF_PRE_PARSE_INPUT_GATE_BYTES = 25 * 1024 * 1024;
-export const MUPDF_PARENT_TIMEOUT_MS = 60_000;
+export const MUPDF_PARENT_TIMEOUT_MS = 10_000;
 export const MAXIMUM_CONCURRENT_PDF_ASSESSOR_WORKERS = 1;
 export const SYNTHETIC_PDF_BUFFER_SOURCE = "synthetic_test_buffer";
 

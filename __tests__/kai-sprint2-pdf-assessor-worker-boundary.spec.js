@@ -245,6 +245,39 @@ class SyntheticWorker extends EventEmitter {
   }
 }
 
+function createManualParentTimer() {
+  let timer = null;
+  let clearCalls = 0;
+
+  return {
+    setTimeoutFn(callback, delay) {
+      assert.equal(timer, null);
+      timer = {
+        callback,
+        cleared: false,
+        delay,
+      };
+      return timer;
+    },
+    clearTimeoutFn(handle) {
+      assert.strictEqual(handle, timer);
+      if (!handle.cleared) {
+        clearCalls += 1;
+      }
+      handle.cleared = true;
+    },
+    fire() {
+      assert.equal(timer?.delay, PDF_ASSESSOR_PARENT_TIMEOUT_MS);
+      assert.equal(timer.cleared, false);
+      timer.callback();
+    },
+    assertCleared() {
+      assert.equal(timer?.cleared, true);
+      assert.equal(clearCalls, 1);
+    },
+  };
+}
+
 function assertReadableAndUnchanged(input, expectedBytes) {
   assert.equal(input.byteLength, expectedBytes.byteLength);
   assert.deepEqual(Array.from(input), Array.from(expectedBytes));
@@ -1206,22 +1239,27 @@ test("P0-05 PDF worker boundary transfers only an owned exact visible-range copy
 test("P0-05 PDF worker boundary timeout latches only failed / security_assessment_timeout", async () => {
   pdfWorkerBoundaryTestables.resetPdfAssessorWorkerState();
   const worker = new SyntheticWorker();
+  const timer = createManualParentTimer();
   const promise = pdfWorkerBoundaryTestables.runPdfAssessorWorkerBoundaryWithTestControls(syntheticPdfBytes(), {
     createWorker() {
       return worker;
     },
-    timeoutMs: 1,
+    setTimeoutFn: timer.setTimeoutFn,
+    clearTimeoutFn: timer.clearTimeoutFn,
   });
 
-  await new Promise((resolve) => setTimeout(resolve, 10));
+  timer.fire();
   assert.equal(worker.terminateCalls, 1);
   worker.finishTermination();
 
-  assert.deepEqual(await promise, {
+  const result = await promise;
+  assert.deepEqual(result, {
     status: "failed",
     category: "security_assessment_timeout",
   });
-  assert.equal(PDF_ASSESSOR_PARENT_TIMEOUT_MS, 60_000);
+  assert.deepEqual(Object.keys(result), ["status", "category"]);
+  assert.equal(PDF_ASSESSOR_PARENT_TIMEOUT_MS, 10_000);
+  timer.assertCleared();
 });
 
 test("P0-05 PDF worker boundary preserves caller-owned input after timeout", async () => {
@@ -1230,6 +1268,7 @@ test("P0-05 PDF worker boundary preserves caller-owned input after timeout", asy
     const originalByteLength = input.byteLength;
     const originalBytes = Uint8Array.from(input);
     const worker = new SyntheticWorker();
+    const timer = createManualParentTimer();
     let transferredBytes = null;
 
     const promise = pdfWorkerBoundaryTestables.runPdfAssessorWorkerBoundaryWithTestControls(input, {
@@ -1237,7 +1276,8 @@ test("P0-05 PDF worker boundary preserves caller-owned input after timeout", asy
         transferredBytes = bytes;
         return worker;
       },
-      timeoutMs: 1,
+      setTimeoutFn: timer.setTimeoutFn,
+      clearTimeoutFn: timer.clearTimeoutFn,
     });
 
     assertFreshVisibleRangeCopy({
@@ -1247,7 +1287,7 @@ test("P0-05 PDF worker boundary preserves caller-owned input after timeout", asy
       forbiddenAdjacentBytes,
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    timer.fire();
     worker.finishTermination();
 
     assert.deepEqual(await promise, {
@@ -1257,31 +1297,32 @@ test("P0-05 PDF worker boundary preserves caller-owned input after timeout", asy
     assert.equal(input.byteLength, originalByteLength, name);
     assertReadableAndUnchanged(input, originalBytes);
     assert.equal(pdfWorkerBoundaryTestables.getPdfAssessorWorkerState().active, 0, name);
+    timer.assertCleared();
   }
 });
 
 test("P0-05 PDF worker boundary rejects late worker messages after timeout", async () => {
   pdfWorkerBoundaryTestables.resetPdfAssessorWorkerState();
   const worker = new SyntheticWorker();
+  const timer = createManualParentTimer();
   let lateMessagesRejected = 0;
   const promise = pdfWorkerBoundaryTestables.runPdfAssessorWorkerBoundaryWithTestControls(syntheticPdfBytes(), {
     createWorker() {
-      setTimeout(() => {
-        worker.emit("message", {
-          type: "kai_pdf_worker_liveness_ok",
-          category: "late_worker_success",
-          policy: "late_policy",
-        });
-      }, 5);
       return worker;
     },
     onLateWorkerMessageRejectedForTest() {
       lateMessagesRejected += 1;
     },
-    timeoutMs: 1,
+    setTimeoutFn: timer.setTimeoutFn,
+    clearTimeoutFn: timer.clearTimeoutFn,
   });
 
-  await new Promise((resolve) => setTimeout(resolve, 15));
+  timer.fire();
+  worker.emit("message", {
+    type: "kai_pdf_worker_liveness_ok",
+    category: "late_worker_success",
+    policy: "late_policy",
+  });
   worker.finishTermination();
 
   assert.deepEqual(await promise, {
@@ -1289,6 +1330,7 @@ test("P0-05 PDF worker boundary rejects late worker messages after timeout", asy
     category: "security_assessment_timeout",
   });
   assert.equal(lateMessagesRejected, 1);
+  timer.assertCleared();
 });
 
 test("P0-05 PDF worker boundary terminates the worker and completes exit cleanup", async () => {
@@ -1372,16 +1414,58 @@ test("P0-05 PDF worker boundary releases the concurrency permit after success an
   assert.equal(pdfWorkerBoundaryTestables.getPdfAssessorWorkerState().active, 0);
 
   const timeoutWorker = new SyntheticWorker();
+  const timer = createManualParentTimer();
   const timeout = pdfWorkerBoundaryTestables.runPdfAssessorWorkerBoundaryWithTestControls(syntheticPdfBytes(), {
     createWorker() {
       return timeoutWorker;
     },
-    timeoutMs: 1,
+    setTimeoutFn: timer.setTimeoutFn,
+    clearTimeoutFn: timer.clearTimeoutFn,
   });
-  await new Promise((resolve) => setTimeout(resolve, 10));
+  timer.fire();
   timeoutWorker.finishTermination();
   await timeout;
   assert.equal(pdfWorkerBoundaryTestables.getPdfAssessorWorkerState().active, 0);
+  timer.assertCleared();
+});
+
+test("P0-05 PDF worker boundary uses fixed 10-second parent timer with no caller timeout override", () => {
+  assert.equal(PDF_ASSESSOR_PARENT_TIMEOUT_MS, 10_000);
+  assert.match(mainSource, /PDF_ASSESSOR_PARENT_TIMEOUT_MS\s*=\s*10_000/);
+  assert.doesNotMatch(mainSource, /\btimeoutMs\b/);
+  assert.doesNotMatch(mainSource, /\b60_000\b|60000/);
+  assert.equal((mainSource.match(/\bsetTimeoutFn\(/g) ?? []).length, 1);
+});
+
+test("P0-05 PDF worker boundary uses one non-nested file-backed worker path", () => {
+  assert.equal(pdfWorkerBoundaryTestables.getDefaultWorkerUrlProtocol(), "file:");
+  assert.equal((mainSource.match(/\bnew Worker\(/g) ?? []).length, 1);
+  assert.doesNotMatch(workerSource, /\bnew Worker\(/);
+});
+
+test("P0-05 PDF worker boundary uses safe failure for worker throw and silent exit", async () => {
+  for (const mode of ["throw", "silent-exit"]) {
+    pdfWorkerBoundaryTestables.resetPdfAssessorWorkerState();
+    const worker = new SyntheticWorker();
+    const promise = pdfWorkerBoundaryTestables.runPdfAssessorWorkerBoundaryWithTestControls(syntheticPdfBytes(), {
+      createWorker() {
+        return worker;
+      },
+    });
+
+    if (mode === "throw") {
+      worker.emit("error", new Error("secret worker internals"));
+    } else {
+      worker.emit("exit", 0);
+    }
+    worker.finishTermination();
+
+    await assert.rejects(promise, /PDF assessor worker failed\./);
+    assert.equal(worker.listenerCount("message"), 0, mode);
+    assert.equal(worker.listenerCount("error"), 0, mode);
+    assert.equal(worker.listenerCount("exit"), 0, mode);
+    assert.equal(pdfWorkerBoundaryTestables.getPdfAssessorWorkerState().active, 0, mode);
+  }
 });
 
 test("P0-05 PDF worker boundary prohibits main-thread MuPDF import", () => {
