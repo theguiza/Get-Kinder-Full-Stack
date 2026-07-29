@@ -4301,6 +4301,55 @@ commit_hash: report after commit; a commit cannot contain its own SHA
 ```
 
 
+## P0-05 PDF active-action and embedded-file detection
+
+```text
+p0_05_package_status: pdf_active_action_embedded_file_detection_complete_ready_to_commit
+implementation_status: bounded_internal_pdf_worker_result_only
+verification_status: TOOL_VERIFIED after focused worker-boundary, repository-contract, affected file-policy, Sprint 2, full-suite, and diff checks complete
+evidence_class: TOOL_VERIFIED
+decision_evidence: USER_CONFIRMED
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 0cc7d950aed4a1f4d057c2870d752ede470701cd
+working_tree_clean_at_start: true
+staged_paths_at_start: none
+applicable_repository_instructions: root AGENTS.md only; DATABASE_URL sentinel used for every Node and npm command; no fetch, push, database/cloud/production/deployment/current-state, P0-06B, executor mapping, persistence, route/service/listener wiring, CSV/XLSX/executor work, or Gate A work authorized or performed
+owner_decision_authority: OWNER_DECISION.P0_05_PDF_ACTIVE_ACTION_EMBEDDED_FILE_DETECTOR_V1
+authorized_file_scope: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md; Backend/kai/validators/pdfAssessorWorkerBoundary.js; Backend/kai/validators/pdfAssessorWorkerThread.js; __tests__/kai-sprint2-pdf-assessor-worker-boundary.spec.js; __tests__/kai-sprint2-p0-repository-contract.spec.js; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+capability_probe_boundary: temporary synthetic PDFs generated under /private/tmp via node --input-type=module; all samples under 25 MB; no repository fixtures, dependency installs, database access, cloud access, real client data, scripts, URLs, filenames, destinations, embedded bytes, document text, or object contents exposed in repository outputs
+mupdf_traversal_apis: Document.openDocument; Document.asPDF; PDFDocument.getTrailer; PDFDocument.loadPage(index); PDFPage.getObject; PDFObject.get(...); PDFObject.resolve(); PDFObject.isNull(); PDFObject.isDictionary(); PDFObject.isArray(); PDFObject.isName(); PDFObject.asName(); PDFObject.length; PDFObject.forEach(...); PDFPage.getAnnotations and PDFAnnotation.getType/getObject/hasFilespec for FileAttachment confirmation; page-object /Annots traversal for Link annotations
+capability_results: TOOL_VERIFIED synthetic observations repeated twice per material case; catalog /OpenAction dictionary subtype /Launch, /GoTo, and unknown /MadeUpAction were visible; catalog /OpenAction internal destination array was visible; catalog /AA and page /AA action subtypes were visible; page-object /Annots traversal exposed /Link annotations with no /A, /URI action, /GoTo action, and annotation /AA; /Names/JavaScript and /Names/EmbeddedFiles entries were visible; /EF references under Filespec/catalog and /AF associated-file arrays were visible; /FileAttachment annotations were visible through annotation type/object traversal; every repeated material observation matched deterministically
+capability_gap: false
+observed_pdf_check_chain: committed P0-05F pure file-type detector evaluates complete shallow PDF identity before PDF worker eligibility; actual PDF worker boundary has no production importer beyond tests and, when invoked, performs worker-owned exact bytes, successful MuPDF open/countPages, encryption/password detector, extractable-text detector, then this active-action/embedded-file detector only when both prior detectors return undefined
+precedence_matches_owner_decision: true
+protected_result: exactly policy block and category pdf_active_or_embedded_content; exact enumerable keys policy and category; no scope, evidence, metadata, identifiers, URLs, destinations, filenames, attachment names, scripts, object contents, dependency details, or other keys
+no_block_result: undefined; means only this detector found no active-action or embedded-file block; not a file-policy pass, PDF-validity result, integrity result, clean/safe status, parser eligibility, upload acceptance, or downstream-processing authorization
+blocking_behavior: blocks /Names/JavaScript, JavaScript action or /JS content, /Names/EmbeddedFiles, /EF references, /AF associated files, /FileAttachment annotations, every action subtype other than exact /GoTo, and action dictionaries with missing, malformed, unresolved, or unknown /S
+allow_behavior: allows clean text PDFs, catalog /OpenAction internal destinations, exact internal /GoTo actions, /Link annotations with no action, and /Link annotations with exact internal /GoTo
+failure_behavior: malformed object structure, traversal failure, thrown dependency operations, unexpected dependency return types, malformed worker result shapes, MuPDF open failure, and unusable dependency output use existing sanitized worker-failure path; no scripts, action contents, URLs, destinations, filenames, attachment names, embedded bytes, document text, object contents, paths, identifiers, stacks, dependency internals, or infrastructure details are returned
+short_circuit_behavior: encrypted_or_password_protected still short-circuits extractable-text and active/embedded detection; pdf_no_extractable_text still short-circuits active/embedded detection; repaired/openable PDF integrity deferral is preserved
+state_and_integration_boundary: detector directly changes none of file_policy_status, processing_status, parse_status, or upload_state; internal worker result only
+executor_or_route_wiring_changed: false
+database_or_audit_writes_added: false
+public_api_mapping_added: false
+client_serialization_added: false
+production_or_deployment_authorized: false
+csv_xlsx_executor_work_started: false
+dependencies_or_lockfiles_changed: false
+focused_worker_and_contract_test: DATABASE_URL=postgres://127.0.0.1:9/kai_sprint2_p0_sentinel node --test __tests__/kai-sprint2-pdf-assessor-worker-boundary.spec.js __tests__/kai-sprint2-p0-repository-contract.spec.js - tests 65; pass 65; fail 0
+affected_file_policy_tests: DATABASE_URL=postgres://127.0.0.1:9/kai_sprint2_p0_sentinel node --test __tests__/kai-sprint2-pdf-assessor-worker-boundary.spec.js __tests__/kai-sprint2-mupdf-dependency.spec.js __tests__/kai-sprint2-pdf-shallow-identity-fixture-corpus.spec.js __tests__/kai-sprint2-p0-file-type-agreement-detector.spec.js __tests__/kai-sprint2-p0-05f-combined-completeness.spec.js __tests__/kai-sprint2-p0-repository-contract.spec.js - tests 117; pass 117; fail 0
+sprint2_suite_initial_sandbox_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sprint2_p0_sentinel npm run test:kai-sprint2 - sandbox run hit known localhost listen EPERM with tests 752; pass 725; fail 27
+sprint2_suite: listener-capable DATABASE_URL=postgres://127.0.0.1:9/kai_sprint2_p0_sentinel npm run test:kai-sprint2 - tests 800; pass 800; fail 0
+full_repository_suite_initial_sandbox_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sprint2_p0_sentinel npm test - sandbox run hit known localhost listen EPERM with tests 857; pass 830; fail 27
+full_repository_suite: listener-capable DATABASE_URL=postgres://127.0.0.1:9/kai_sprint2_p0_sentinel npm test - tests 905; pass 905; fail 0
+complete_diff_inspected: true before ExecPlan update and rechecked before commit
+git_diff_check: git diff --check - pass
+changed_files: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md; Backend/kai/validators/pdfAssessorWorkerBoundary.js; Backend/kai/validators/pdfAssessorWorkerThread.js; __tests__/kai-sprint2-pdf-assessor-worker-boundary.spec.js; __tests__/kai-sprint2-p0-repository-contract.spec.js; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this single bounded implementation package commit; do not start CSV/XLSX/executor work, another PDF detector leaf, executor mapping, persistence, route/service/listener wiring, public API/client mapping, database/cloud/production/deployment behavior, P0-06B, Gate A, push, or deploy without separate owner authorization
+commit_hash: report after commit; a commit cannot contain its own SHA
+```
+
+
 ## P0-06A unauthorized transition negative coverage
 
 ```text

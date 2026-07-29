@@ -1580,6 +1580,9 @@ pdf_active_content_detected:
 pdf_embedded_file_detected:
   policy: block
 
+pdf_active_or_embedded_content:
+  policy: block
+
 encrypted_or_password_protected:
   policy: block
 
@@ -1763,6 +1766,44 @@ Repaired but openable PDFs remain subject to the previously recorded integrity d
 
 State and integration boundary: this detector directly changes none of `file_policy_status`, `processing_status`, `parse_status`, or `upload_state`. It returns an internal worker result only. No executor mapping, service wiring, route wiring, listener wiring, database write, audit write, persistence, public API mapping, client serialization, OCR, deployment configuration, production configuration, PDF JavaScript/action detection, embedded-file detection, or another PDF detector leaf is authorized by this decision.
 
+## OWNER_DECISION.P0_05_PDF_ACTIVE_ACTION_EMBEDDED_FILE_DETECTOR_V1
+
+Active-action or embedded-file PDF result:
+
+```text
+policy: block
+category: pdf_active_or_embedded_content
+exact_keys: policy, category
+```
+
+No block result:
+
+```text
+undefined
+```
+
+`undefined` means only that this detector did not establish an active-action or embedded-file block. It is not a file-policy pass and does not establish PDF validity, integrity, clean/safe status, parser eligibility, upload acceptance, or that other security checks have passed.
+
+Precedence:
+
+```text
+committed extension/MIME/signature and complete shallow PDF identity
+-> successful MuPDF open
+-> encryption/password detector returns undefined
+-> extractable-text detector returns undefined
+-> bounded MuPDF PDF-object active-action and embedded-file traversal
+```
+
+Block when any of these exists: `/Names/JavaScript`; JavaScript action or `/JS` content; `/Names/EmbeddedFiles`; `/EF` embedded-file reference; `/AF` associated file; `/FileAttachment` annotation; an action dictionary whose `/S` subtype is anything other than exact internal `/GoTo`; or an action dictionary with missing, malformed, unresolved, or unknown `/S`.
+
+For `/OpenAction`, allow an internal destination and exact internal `/GoTo`; block every other action. For `/AA` and annotation actions, allow exact internal `/GoTo` and block every other action. For `/Link` annotations, allow no action and exact internal `/GoTo`; block `/URI`, `/Launch`, `/GoToR`, JavaScript, or any other action subtype.
+
+Inspect only with installed MuPDF 1.28.0 object traversal APIs: `Document.asPDF()`, `PDFDocument.getTrailer()`, `PDFDocument.loadPage(index)`, `PDFPage.getObject()`, `PDFObject.get(...)`, `PDFObject.resolve()`, `PDFObject.isNull()`, `PDFObject.isDictionary()`, `PDFObject.isArray()`, `PDFObject.isName()`, `PDFObject.asName()`, `PDFObject.length`, and `PDFObject.forEach(...)`.
+
+Treat malformed object structure, traversal failure, thrown dependency operations, or unexpected dependency return types as dependency failure, not block and not pass. Use the existing sanitized worker-failure path. Do not return or expose scripts or action contents; URLs or destinations; filenames or attachment names; embedded bytes; document text; object contents; paths, identifiers, stacks, dependency internals, or infrastructure details.
+
+State and integration boundary: this detector directly changes none of `file_policy_status`, `processing_status`, `parse_status`, or `upload_state`. It returns an internal worker result only. No executor mapping, service wiring, route wiring, listener wiring, database write, audit write, persistence, public API mapping, client serialization, deployment configuration, production configuration, or another PDF detector leaf is authorized by this decision.
+
 P0-07 case mapping:
 
 ```text
@@ -1771,7 +1812,7 @@ XLSX expansion bomb -> archive_entry_limit_exceeded, archive_expanded_size_limit
 macros/external relationships -> ooxml_macro_detected, ooxml_external_relationship_detected
 encrypted PDF/XLSX -> encrypted_or_password_protected
 PDF without extractable text -> pdf_no_extractable_text
-PDF active content/embedded files -> pdf_active_content_detected, pdf_embedded_file_detected
+PDF active content/embedded files -> pdf_active_or_embedded_content
 uploaded prompt-injection text -> instruction_text_inert
 formula cells -> formula_trigger_detected plus the P0 no-output boundary
 ```

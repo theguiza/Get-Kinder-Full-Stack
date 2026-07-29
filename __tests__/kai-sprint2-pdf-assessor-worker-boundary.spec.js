@@ -12,6 +12,7 @@ import {
 } from "../Backend/kai/validators/pdfAssessorWorkerBoundary.js";
 import {
   assessOpenedPdfDocument,
+  detectPdfActiveOrEmbeddedContent,
   detectPdfExtractableText,
   detectPdfEncryptionPassword,
 } from "../Backend/kai/validators/pdfAssessorWorkerThread.js";
@@ -25,6 +26,10 @@ const protectedPdfResult = Object.freeze({
 const noExtractableTextPdfResult = Object.freeze({
   policy: "block",
   category: "pdf_no_extractable_text",
+});
+const activeOrEmbeddedPdfResult = Object.freeze({
+  policy: "block",
+  category: "pdf_active_or_embedded_content",
 });
 const fakeDocumentConstructor = Object.freeze({
   META_ENCRYPTION: "encryption",
@@ -165,6 +170,57 @@ function syntheticImageOnlyPdfBytes() {
 function syntheticInvalidButMupdfRepairedPdfBytes() {
   const text = new TextDecoder().decode(syntheticTextPdfBytes("repaired text layer remains only text evidence"));
   return encodeAscii(text.replace(/startxref\n\d+\n%%EOF\n$/, "startxref\n0\n%%EOF\n"));
+}
+
+function syntheticTextPdfBytesWithObjectExtras({
+  catalogExtra = "",
+  pageExtra = "",
+  annotationObjects = [],
+  extraObjects = [],
+} = {}) {
+  const text = "synthetic extractable text";
+  const content = `BT /F1 12 Tf 20 100 Td (${text}) Tj ET`;
+  return syntheticPdfBytesFromObjects([
+    `<< /Type /Catalog /Pages 2 0 R ${catalogExtra} >>`,
+    "<< /Type /Pages /Kids [4 0 R] /Count 1 >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R ${pageExtra} >>`,
+    `<< /Length ${encodeAscii(content).byteLength} >>\nstream\n${content}\nendstream`,
+    ...annotationObjects,
+    ...extraObjects,
+  ]);
+}
+
+function syntheticPdfBytesFromObjects(objects) {
+  const header = "%PDF-1.4\n";
+  const offsets = [0];
+  const parts = [encodeAscii(header)];
+  let byteOffset = parts[0].byteLength;
+
+  for (let objectIndex = 0; objectIndex < objects.length; objectIndex += 1) {
+    offsets.push(byteOffset);
+    const objectBytes = encodeAscii(`${objectIndex + 1} 0 obj\n${objects[objectIndex]}\nendobj\n`);
+    parts.push(objectBytes);
+    byteOffset += objectBytes.byteLength;
+  }
+
+  const xrefOffset = byteOffset;
+  parts.push(encodeAscii([
+    `xref\n0 ${objects.length + 1}\n`,
+    "0000000000 65535 f \n",
+    ...offsets.slice(1).map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`),
+    `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\n`,
+    `startxref\n${xrefOffset}\n%%EOF\n`,
+  ].join("")));
+
+  return concatBytes(parts);
+}
+
+function linkAnnotationPdfBytes(annotationObject) {
+  return syntheticTextPdfBytesWithObjectExtras({
+    pageExtra: "/Annots [6 0 R]",
+    annotationObjects: [annotationObject],
+  });
 }
 
 class SyntheticWorker extends EventEmitter {
@@ -349,6 +405,28 @@ function assertNoExtractableTextResult(result) {
   assert.equal(Object.hasOwn(result, "identifier"), false);
 }
 
+function assertActiveOrEmbeddedResult(result) {
+  assert.deepEqual(result, activeOrEmbeddedPdfResult);
+  assert.deepEqual(Object.keys(result), ["policy", "category"]);
+  for (const forbiddenKey of [
+    "scope",
+    "evidence",
+    "metadata",
+    "identifier",
+    "url",
+    "uri",
+    "destination",
+    "filename",
+    "attachment",
+    "script",
+    "object",
+    "path",
+    "stack",
+  ]) {
+    assert.equal(Object.hasOwn(result, forbiddenKey), false, forbiddenKey);
+  }
+}
+
 async function assertBoundaryRejectsSanitized(workerMessage) {
   pdfWorkerBoundaryTestables.resetPdfAssessorWorkerState();
   const worker = new SyntheticWorker();
@@ -378,6 +456,11 @@ async function assertBoundaryRejectsSanitized(workerMessage) {
     "synthetic-file-id-123",
     "DependencyInternalError",
     "at dependency",
+    "https://secret.example.invalid",
+    "secret-file-name.txt",
+    "[4 0 R /Fit]",
+    "<< /S /Launch >>",
+    "secret script content",
     "%PDF",
   ]) {
     assert.equal(text.includes(forbidden), false, forbidden);
@@ -517,6 +600,162 @@ test("P0-05 PDF extractable-text detector returns undefined only as text-presenc
   assert.equal(result, undefined);
   assert.equal(result?.policy, undefined);
   assert.notDeepEqual(result, { policy: "allow" });
+});
+
+test("P0-05 PDF active-action and embedded-file detector returns undefined for clean text PDFs", async () => {
+  pdfWorkerBoundaryTestables.resetPdfAssessorWorkerState();
+  const bytes = Buffer.from(syntheticTextPdfBytes("clean text pdf"));
+
+  assert.equal(await runPdfAssessorWorkerBoundary(bytes), undefined);
+  assert.equal(await runPdfAssessorWorkerBoundary(bytes), undefined);
+});
+
+test("P0-05 PDF active-action and embedded-file detector blocks JavaScript actions", async () => {
+  pdfWorkerBoundaryTestables.resetPdfAssessorWorkerState();
+  const result = await runPdfAssessorWorkerBoundary(Buffer.from(syntheticTextPdfBytesWithObjectExtras({
+    catalogExtra: "/OpenAction << /S /JavaScript /JS (secret script content) >>",
+  })));
+
+  assertActiveOrEmbeddedResult(result);
+});
+
+test("P0-05 PDF active-action and embedded-file detector blocks OpenAction Launch", async () => {
+  pdfWorkerBoundaryTestables.resetPdfAssessorWorkerState();
+  const result = await runPdfAssessorWorkerBoundary(Buffer.from(syntheticTextPdfBytesWithObjectExtras({
+    catalogExtra: "/OpenAction << /S /Launch /F (secret-file-name.txt) >>",
+  })));
+
+  assertActiveOrEmbeddedResult(result);
+});
+
+test("P0-05 PDF active-action and embedded-file detector blocks dangerous AA actions", async () => {
+  pdfWorkerBoundaryTestables.resetPdfAssessorWorkerState();
+  const cases = [
+    syntheticTextPdfBytesWithObjectExtras({
+      catalogExtra: "/AA << /WC << /S /URI /URI (https://secret.example.invalid) >> >>",
+    }),
+    syntheticTextPdfBytesWithObjectExtras({
+      pageExtra: "/AA << /O << /S /Launch /F (secret-file-name.txt) >> >>",
+    }),
+    linkAnnotationPdfBytes(
+      "<< /Type /Annot /Subtype /Link /Rect [0 0 10 10] /AA << /E << /S /Launch /F (secret-file-name.txt) >> >> >>",
+    ),
+  ];
+
+  for (const bytes of cases) {
+    assertActiveOrEmbeddedResult(await runPdfAssessorWorkerBoundary(Buffer.from(bytes)));
+  }
+});
+
+test("P0-05 PDF active-action and embedded-file detector blocks unknown action subtypes", async () => {
+  pdfWorkerBoundaryTestables.resetPdfAssessorWorkerState();
+  const result = await runPdfAssessorWorkerBoundary(Buffer.from(syntheticTextPdfBytesWithObjectExtras({
+    catalogExtra: "/OpenAction << /S /MadeUpAction /X 1 >>",
+  })));
+
+  assertActiveOrEmbeddedResult(result);
+});
+
+test("P0-05 PDF active-action and embedded-file detector allows internal destinations and GoTo actions", async () => {
+  pdfWorkerBoundaryTestables.resetPdfAssessorWorkerState();
+  const cases = [
+    syntheticTextPdfBytesWithObjectExtras({
+      catalogExtra: "/OpenAction [4 0 R /Fit]",
+    }),
+    syntheticTextPdfBytesWithObjectExtras({
+      catalogExtra: "/OpenAction << /S /GoTo /D [4 0 R /Fit] >>",
+    }),
+    syntheticTextPdfBytesWithObjectExtras({
+      pageExtra: "/AA << /O << /S /GoTo /D [4 0 R /Fit] >> >>",
+    }),
+    linkAnnotationPdfBytes(
+      "<< /Type /Annot /Subtype /Link /Rect [0 0 10 10] /A << /S /GoTo /D [4 0 R /Fit] >> >>",
+    ),
+  ];
+
+  for (const bytes of cases) {
+    assert.equal(await runPdfAssessorWorkerBoundary(Buffer.from(bytes)), undefined);
+  }
+});
+
+test("P0-05 PDF active-action and embedded-file detector allows Link annotations with no action", async () => {
+  pdfWorkerBoundaryTestables.resetPdfAssessorWorkerState();
+  const result = await runPdfAssessorWorkerBoundary(Buffer.from(linkAnnotationPdfBytes(
+    "<< /Type /Annot /Subtype /Link /Rect [0 0 10 10] >>",
+  )));
+
+  assert.equal(result, undefined);
+});
+
+test("P0-05 PDF active-action and embedded-file detector blocks Link URI actions", async () => {
+  pdfWorkerBoundaryTestables.resetPdfAssessorWorkerState();
+  const result = await runPdfAssessorWorkerBoundary(Buffer.from(linkAnnotationPdfBytes(
+    "<< /Type /Annot /Subtype /Link /Rect [0 0 10 10] /A << /S /URI /URI (https://secret.example.invalid) >> >>",
+  )));
+
+  assertActiveOrEmbeddedResult(result);
+});
+
+test("P0-05 PDF active-action and embedded-file detector blocks Names JavaScript entries", async () => {
+  pdfWorkerBoundaryTestables.resetPdfAssessorWorkerState();
+  const result = await runPdfAssessorWorkerBoundary(Buffer.from(syntheticTextPdfBytesWithObjectExtras({
+    catalogExtra: "/Names << /JavaScript << /Names [(secret-name) << /S /JavaScript /JS (secret script content) >>] >> >>",
+  })));
+
+  assertActiveOrEmbeddedResult(result);
+});
+
+test("P0-05 PDF active-action and embedded-file detector blocks Names EmbeddedFiles entries", async () => {
+  pdfWorkerBoundaryTestables.resetPdfAssessorWorkerState();
+  const result = await runPdfAssessorWorkerBoundary(Buffer.from(syntheticTextPdfBytesWithObjectExtras({
+    catalogExtra:
+      "/Names << /EmbeddedFiles << /Names [(secret-file-name.txt) << /Type /Filespec /F (secret-file-name.txt) /EF << /F 6 0 R >> >>] >> >>",
+    extraObjects: ["<< /Type /EmbeddedFile /Length 1 >>\nstream\nx\nendstream"],
+  })));
+
+  assertActiveOrEmbeddedResult(result);
+});
+
+test("P0-05 PDF active-action and embedded-file detector blocks EF embedded-file references", async () => {
+  pdfWorkerBoundaryTestables.resetPdfAssessorWorkerState();
+  const result = await runPdfAssessorWorkerBoundary(Buffer.from(syntheticTextPdfBytesWithObjectExtras({
+    catalogExtra: "/EF << /F 6 0 R >>",
+    extraObjects: ["<< /Type /EmbeddedFile /Length 1 >>\nstream\nx\nendstream"],
+  })));
+
+  assertActiveOrEmbeddedResult(result);
+});
+
+test("P0-05 PDF active-action and embedded-file detector blocks AF associated files", async () => {
+  pdfWorkerBoundaryTestables.resetPdfAssessorWorkerState();
+  const result = await runPdfAssessorWorkerBoundary(Buffer.from(syntheticTextPdfBytesWithObjectExtras({
+    catalogExtra: "/AF [6 0 R]",
+    extraObjects: [
+      "<< /Type /Filespec /F (secret-file-name.txt) /EF << /F 7 0 R >> >>",
+      "<< /Type /EmbeddedFile /Length 1 >>\nstream\nx\nendstream",
+    ],
+  })));
+
+  assertActiveOrEmbeddedResult(result);
+});
+
+test("P0-05 PDF active-action and embedded-file detector blocks FileAttachment annotations", async () => {
+  pdfWorkerBoundaryTestables.resetPdfAssessorWorkerState();
+  const result = await runPdfAssessorWorkerBoundary(Buffer.from(linkAnnotationPdfBytes(
+    "<< /Type /Annot /Subtype /FileAttachment /Rect [0 0 10 10] /FS << /Type /Filespec /F (secret-file-name.txt) /EF << /F 7 0 R >> >> >>",
+  )));
+
+  assertActiveOrEmbeddedResult(result);
+});
+
+test("P0-05 PDF active-action and embedded-file block result has exactly two keys", async () => {
+  pdfWorkerBoundaryTestables.resetPdfAssessorWorkerState();
+  const result = await runPdfAssessorWorkerBoundary(Buffer.from(syntheticTextPdfBytesWithObjectExtras({
+    catalogExtra: "/OpenAction << /S /Launch /F (secret-file-name.txt) >>",
+  })));
+
+  assertActiveOrEmbeddedResult(result);
+  assert.deepEqual(Object.keys(result), ["policy", "category"]);
 });
 
 test("P0-05 PDF encryption/password detector blocks when needsPassword is true", () => {
@@ -711,6 +950,78 @@ test("P0-05 PDF encryption/password block short-circuits extractable-text inspec
   assert.equal(loadPageCalls, 0);
 });
 
+test("P0-05 PDF encryption and no-text results short-circuit active-action and embedded-file detection", () => {
+  let encryptedAsPdfCalls = 0;
+  const encryptedResult = assessOpenedPdfDocument(
+    {
+      ...fakePdfDocument({ needsPassword: true, encryptionMetadata: "None" }),
+      asPDF() {
+        encryptedAsPdfCalls += 1;
+        throw new Error("active detector must not run");
+      },
+      loadPage() {
+        throw new Error("extractable-text detector must not run");
+      },
+    },
+    fakeDocumentConstructor,
+    1,
+  );
+
+  assertProtectedResult(encryptedResult);
+  assert.equal(encryptedAsPdfCalls, 0);
+
+  let noTextAsPdfCalls = 0;
+  const noTextResult = assessOpenedPdfDocument(
+    {
+      ...fakePdfDocument({ needsPassword: false, encryptionMetadata: "None" }),
+      asPDF() {
+        noTextAsPdfCalls += 1;
+        throw new Error("active detector must not run after no-text block");
+      },
+      loadPage() {
+        return fakeStructuredTextPage([" ", "\n", "\t"]);
+      },
+    },
+    fakeDocumentConstructor,
+    1,
+  );
+
+  assertNoExtractableTextResult(noTextResult);
+  assert.equal(noTextAsPdfCalls, 0);
+});
+
+test("P0-05 PDF active-action and embedded-file detector treats traversal failures as sanitized dependency failures", () => {
+  const secrets = [
+    "secret client content",
+    "https://secret.example.invalid",
+    "secret-file-name.txt",
+    "[4 0 R /Fit]",
+    "<< /S /Launch >>",
+    "DependencyInternalError at dependency",
+    "/Users/mikewoz/Get-Kinder-Full-Stack-Deploy/private.pdf",
+  ];
+
+  let error = null;
+  try {
+    detectPdfActiveOrEmbeddedContent(
+      {
+        asPDF() {
+          throw new Error(secrets.join(" "));
+        },
+      },
+      1,
+    );
+  } catch (caught) {
+    error = caught;
+  }
+
+  assert.match(String(error?.message), /PDF dependency inspection failed\./);
+  const text = String(error?.stack ?? error?.message ?? error);
+  for (const secret of secrets) {
+    assert.equal(text.includes(secret), false, secret);
+  }
+});
+
 test("P0-05 PDF worker boundary returns exactly the protected result and short-circuits later worker checks", async () => {
   pdfWorkerBoundaryTestables.resetPdfAssessorWorkerState();
   const worker = new SyntheticWorker();
@@ -736,9 +1047,12 @@ test("P0-05 PDF worker boundary uses safe failure for malformed result shapes", 
   for (const result of [
     { policy: "block", category: "encrypted_or_password_protected", scope: "extra" },
     { policy: "block", category: "pdf_no_extractable_text", scope: "extra" },
+    { policy: "block", category: "pdf_active_or_embedded_content", scope: "extra" },
     { policy: "allow", category: "encrypted_or_password_protected" },
     { policy: "allow", category: "pdf_no_extractable_text" },
+    { policy: "allow", category: "pdf_active_or_embedded_content" },
     { status: "failed", category: "encrypted_or_password_protected" },
+    { status: "failed", category: "pdf_active_or_embedded_content" },
     { policy: "block", category: "pdf_text_probe_internal_error" },
     undefined,
   ]) {
@@ -779,8 +1093,48 @@ test("P0-05 PDF worker boundary uses safe failure when document open or inspecti
         dependencyMetadata: "DependencyInternalError at dependency",
       },
     },
+    {
+      type: "kai_pdf_worker_liveness_ok",
+      liveness_operation: "Document.countPages",
+      handles_destroyed: true,
+      result: {
+        policy: "block",
+        category: "pdf_active_or_embedded_content",
+        script: "secret script content",
+        url: "https://secret.example.invalid",
+        filename: "secret-file-name.txt",
+        destination: "[4 0 R /Fit]",
+        objectData: "<< /S /Launch >>",
+        dependencyMetadata: "DependencyInternalError at dependency",
+      },
+    },
   ]) {
     await assertBoundaryRejectsSanitized(workerMessage);
+  }
+});
+
+test("P0-05 PDF active-action and embedded-file detector does not leak content or internals", async () => {
+  pdfWorkerBoundaryTestables.resetPdfAssessorWorkerState();
+  const bytes = Buffer.from(syntheticTextPdfBytesWithObjectExtras({
+    catalogExtra:
+      "/OpenAction << /S /URI /URI (https://secret.example.invalid) /JS (secret script content) /D [4 0 R /Fit] >>",
+  }));
+
+  const result = await runPdfAssessorWorkerBoundary(bytes);
+  assertActiveOrEmbeddedResult(result);
+
+  const serialized = JSON.stringify(result);
+  for (const forbidden of [
+    "secret script content",
+    "https://secret.example.invalid",
+    "secret-file-name.txt",
+    "[4 0 R /Fit]",
+    "<< /S /URI",
+    "DependencyInternalError",
+    "/Users/mikewoz/Get-Kinder-Full-Stack-Deploy",
+    "%PDF",
+  ]) {
+    assert.equal(serialized.includes(forbidden), false, forbidden);
   }
 });
 

@@ -179,6 +179,31 @@ test("repository contract records PDF extractable-text detector authority and bo
   assert.match(contract, /No executor mapping, service wiring, route wiring, listener wiring, database write, audit write, persistence, public API mapping, client serialization, OCR, deployment configuration, production configuration, PDF JavaScript\/action detection, embedded-file detection, or another PDF detector leaf/);
 });
 
+test("repository contract records PDF active-action and embedded-file detector authority and boundaries", () => {
+  assert.match(contract, /OWNER_DECISION\.P0_05_PDF_ACTIVE_ACTION_EMBEDDED_FILE_DETECTOR_V1/);
+  assert.match(contract, /policy: block\s+category: pdf_active_or_embedded_content\s+exact_keys: policy, category/);
+  assert.match(contract, /No block result:\s+```text\s+undefined/);
+  assert.match(contract, /did not establish an active-action or embedded-file block/);
+  assert.match(contract, /not a file-policy pass and does not establish PDF validity, integrity, clean\/safe status/);
+  assert.match(contract, /extractable-text detector returns undefined\s+-> bounded MuPDF PDF-object active-action and embedded-file traversal/);
+  assert.match(contract, /`\/Names\/JavaScript`; JavaScript action or `\/JS` content; `\/Names\/EmbeddedFiles`; `\/EF` embedded-file reference; `\/AF` associated file; `\/FileAttachment` annotation/);
+  assert.match(contract, /anything other than exact internal `\/GoTo`/);
+  assert.match(contract, /missing, malformed, unresolved, or unknown `\/S`/);
+  assert.match(contract, /For `\/OpenAction`, allow an internal destination and exact internal `\/GoTo`; block every other action/);
+  assert.match(contract, /For `\/Link` annotations, allow no action and exact internal `\/GoTo`; block `\/URI`, `\/Launch`, `\/GoToR`, JavaScript/);
+  assert.match(contract, /`Document\.asPDF\(\)`/);
+  assert.match(contract, /`PDFDocument\.getTrailer\(\)`/);
+  assert.match(contract, /`PDFDocument\.loadPage\(index\)`/);
+  assert.match(contract, /`PDFPage\.getObject\(\)`/);
+  assert.match(contract, /`PDFObject\.get\(\.\.\.\)`/);
+  assert.match(contract, /`PDFObject\.resolve\(\)`/);
+  assert.match(contract, /`PDFObject\.forEach\(\.\.\.\)`/);
+  assert.match(contract, /Use the existing sanitized worker-failure path/);
+  assert.match(contract, /Do not return or expose scripts or action contents; URLs or destinations; filenames or attachment names; embedded bytes; document text; object contents; paths, identifiers, stacks, dependency internals, or infrastructure details/);
+  assert.match(contract, /directly changes none of `file_policy_status`, `processing_status`, `parse_status`, or `upload_state`/);
+  assert.match(contract, /PDF active content\/embedded files -> pdf_active_or_embedded_content/);
+});
+
 test("queue vocabulary is shared by the repository contract and runtime validator", () => {
   assert.deepEqual(VALID_REVIEW_QUEUE_TYPES, KAI_SPRINT2_P0_REVIEW_QUEUE_TYPES);
   for (const queueType of KAI_SPRINT2_P0_REVIEW_QUEUE_TYPES) {

@@ -25,9 +25,14 @@ const NO_EXTRACTABLE_TEXT_PDF_RESULT = Object.freeze({
   policy: "block",
   category: "pdf_no_extractable_text",
 });
+const ACTIVE_OR_EMBEDDED_PDF_RESULT = Object.freeze({
+  policy: "block",
+  category: "pdf_active_or_embedded_content",
+});
 const PDF_BLOCK_RESULT_BY_CATEGORY = Object.freeze({
   encrypted_or_password_protected: PROTECTED_PDF_RESULT,
   pdf_no_extractable_text: NO_EXTRACTABLE_TEXT_PDF_RESULT,
+  pdf_active_or_embedded_content: ACTIVE_OR_EMBEDDED_PDF_RESULT,
 });
 
 let activePdfAssessorWorkers = 0;
