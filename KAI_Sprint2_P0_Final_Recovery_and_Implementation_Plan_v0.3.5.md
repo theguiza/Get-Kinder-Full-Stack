@@ -4059,6 +4059,50 @@ commit_hash: report after commit; a commit cannot contain its own SHA
 ```
 
 
+## P0-05 PDF assessor worker boundary
+
+```text
+p0_05_package_status: pdf_assessor_worker_boundary_complete_ready_to_commit
+implementation_status: bounded_worker_lifecycle_only
+verification_status: TOOL_VERIFIED after focused worker-boundary, affected file-policy, Sprint 2, full-suite, and diff checks complete
+evidence_class: TOOL_VERIFIED
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: e330a775cfd5321d95b1af7d6a2774e4d25f12e4
+working_tree_clean_at_start: true
+staged_paths_at_start: none
+applicable_repository_instructions: root AGENTS.md only; DATABASE_URL sentinel used for every Node and npm command; no fetch, push, database/cloud/production/deployment/current-state, P0-06B, malware, CSV/XLSX, detection-category, executor-integration, or Gate A work authorized or performed
+owner_decision_authority: OWNER_DECISION.P0_05_BOUNDED_ASSESSOR_V1
+committed_dependency_record: TOOL_VERIFIED package.json and package-lock.json pin mupdf exactly to 1.28.0; prior dependency test remains green; dependency attribution and production licensing path remain NOT_CONFIRMED
+active_package_scope: production internal file-backed PDF worker lifecycle boundary only; no route, listener, queue, executor orchestration, storage read, tenant repository, lifecycle repository, state transition, audit write, policy pass/block logic, PDF security detection, OCR, rendering, content extraction, JavaScript execution, raw-byte logging, production composition, deployment, or real-client-data work
+worker_boundary: Backend/kai/validators/pdfAssessorWorkerBoundary.js creates only a file-backed module worker at Backend/kai/validators/pdfAssessorWorkerThread.js; main-thread MuPDF import prohibited; data-URL and eval workers prohibited
+liveness_operation: worker dynamically imports mupdf, opens one bounded synthetic PDF buffer as application/pdf, calls Document.countPages, and destroys the MuPDF document handle before success message
+input_gate: accepts only Buffer or Uint8Array; rejects input over 25 MiB before worker creation with failed/input_size_exceeds_pre_parse_gate
+timeout_and_late_result_latch: committed parent timeout default is 60000 ms; timeout latches exactly failed/security_assessment_timeout before termination; late worker messages after timeout are rejected and cannot replace the latched result
+concurrency_behavior: reuses the existing internal maximum_concurrent_pdf_assessor_workers_exceeded fail-closed busy convention; maximum active PDF assessor workers is 1; success and timeout release the permit
+cleanup_behavior: success, worker failure, worker exit, worker construction failure, and timeout clear parent timers, remove listeners, release owned/transferred byte references, call worker.terminate, release worker state, and leave active permit count at 0
+success_result_shape: Promise resolves undefined; no policy, category, scope, eligibility, or security result is returned for successful liveness completion
+focused_worker_boundary_test: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-pdf-assessor-worker-boundary.spec.js - tests 11; pass 11; fail 0
+affected_file_policy_tests: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-pdf-assessor-worker-boundary.spec.js __tests__/kai-sprint2-mupdf-dependency.spec.js __tests__/kai-sprint2-p0-file-type-agreement-detector.spec.js __tests__/kai-sprint2-p0-05f-combined-completeness.spec.js - tests 53; pass 53; fail 0
+sprint2_suite_initial_sandbox_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - sandbox run hit known localhost listen EPERM with tests 707; pass 680; fail 27
+sprint2_suite: listener-capable DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - tests 755; pass 755; fail 0
+full_repository_suite_initial_sandbox_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - sandbox run hit known localhost listen EPERM with tests 812; pass 785; fail 27
+full_repository_suite: listener-capable DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - tests 860; pass 860; fail 0
+git_diff_check: git diff --check - pass
+npm_audit_not_run: prior_repository_audit_result USER_CONFIRMED - 17 findings reported at e330a77
+mupdf_audit_attribution: NOT_CONFIRMED
+production_licensing_path: NOT_CONFIRMED
+licensing_block_effect: blocks deployment or a later Gate; does not block local synthetic implementation
+detection_categories_implemented: none
+production_composition_changed: false
+executor_enabled: false
+policy_state_writes_added: false
+production_or_deployment_authorized: false
+changed_files: Backend/kai/validators/pdfAssessorWorkerBoundary.js; Backend/kai/validators/pdfAssessorWorkerThread.js; __tests__/kai-sprint2-pdf-assessor-worker-boundary.spec.js; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+next_package: PDF encryption and password detection
+commit_hash: report after commit; a commit cannot contain its own SHA
+```
+
+
 ## P0-06A unauthorized transition negative coverage
 
 ```text
