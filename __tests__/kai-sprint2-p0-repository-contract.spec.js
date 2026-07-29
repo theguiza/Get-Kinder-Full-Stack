@@ -278,6 +278,40 @@ test("repository contract records OOXML path-traversal detector authority and bo
   assert.match(contract, /directly changes none of `file_policy_status`, `processing_status`, `parse_status`, or `upload_state`/);
 });
 
+test("repository contract records XLSX macro/external-relationship detector authority and boundaries", () => {
+  assert.match(contract, /OWNER_DECISION\.P0_05_XLSX_MACRO_EXTERNAL_RELATIONSHIP_DETECTOR_V1/);
+  assert.match(contract, /newly_authorized_result_shape: true/);
+  assert.match(contract, /newly_authorized_category_fusion: true/);
+  assert.match(contract, /newly_authorized_all_external_relationship_block: true/);
+  assert.match(contract, /policy: block\s+category: xlsx_macro_or_external_relationship\s+exact_keys: policy, category/);
+  assert.match(contract, /This category deliberately fuses macro presence and external-relationship presence into one P0 block result/);
+  assert.match(contract, /P0 does not distinguish macro and external-relationship findings in this detector result/);
+  assert.match(contract, /No block result:\s+```text\s+undefined/);
+  assert.match(contract, /did not establish an XLSX macro or external-relationship block/);
+  assert.match(contract, /not a file-policy pass, type-agreement pass, parser-eligibility result, upload acceptance result/);
+  assert.match(contract, /OOXML path-traversal detector\s+-> XLSX macro\/external-relationship detector/);
+  assert.match(contract, /runs only after the OOXML path-traversal detector returns `undefined`/);
+  assert.match(contract, /If an earlier traversal block is established, that earlier block result is returned/);
+  assert.match(contract, /a VBA project part or VBA signature part/);
+  assert.match(contract, /macro-enabled workbook, macrosheet, international-macrosheet, VBA-project, or VBA-signature content type/);
+  assert.match(contract, /VBA, VBA-signature, macrosheet, or international-macrosheet relationship type/);
+  assert.match(contract, /any relationship whose `TargetMode` is exactly `External`, regardless of relationship type/);
+  assert.match(contract, /All external relationships block in P0, including hyperlinks, linked images, `oleObject` links, and unknown external relationship types/);
+  assert.match(contract, /`TargetMode` absent or exactly `Internal` does not block here/);
+  assert.match(contract, /Any other `TargetMode` value uses the sanitized failure path/);
+  assert.match(contract, /distinguishes `Default` and `Override` entries/);
+  assert.match(contract, /inspect every `\.rels` part across root, workbook, worksheet, and other relationship parts/);
+  assert.match(contract, /read every relationship `Type`, `Target`, and `TargetMode`/);
+  assert.match(contract, /must not follow targets/);
+  assert.match(contract, /Malformed or ambiguous ZIP\/XML\/content-type structures, unexpected parser output/);
+  assert.match(contract, /Do not follow targets, read VBA bytes, execute macros, evaluate formulas/);
+  assert.match(contract, /or expose entries, targets, XML, workbook content, paths, stacks, parser internals/);
+  assert.match(contract, /must not be placed in, imported by, or executed inside the PDF worker/);
+  assert.match(contract, /must not install dependencies or add archive-entry, expanded-size, compression-ratio, timeout/);
+  assert.match(contract, /directly changes none of `file_policy_status`, `processing_status`, `parse_status`, or `upload_state`/);
+  assert.match(contract, /macros\/external relationships -> xlsx_macro_or_external_relationship/);
+});
+
 test("queue vocabulary is shared by the repository contract and runtime validator", () => {
   assert.deepEqual(VALID_REVIEW_QUEUE_TYPES, KAI_SPRINT2_P0_REVIEW_QUEUE_TYPES);
   for (const queueType of KAI_SPRINT2_P0_REVIEW_QUEUE_TYPES) {

@@ -1592,10 +1592,7 @@ pdf_no_extractable_text:
 ooxml_path_traversal_detected:
   policy: block
 
-ooxml_macro_detected:
-  policy: block
-
-ooxml_external_relationship_detected:
+xlsx_macro_or_external_relationship:
   policy: block
 
 csv_row_limit_exceeded:
@@ -1857,6 +1854,64 @@ This detector must not be placed in, imported by, or executed inside the PDF wor
 
 State and integration boundary: this detector directly changes none of `file_policy_status`, `processing_status`, `parse_status`, or `upload_state`. It returns an internal result only. No executor mapping, service wiring, route wiring, listener wiring, database write, audit write, persistence, public API mapping, client serialization, macro detection, external-relationship classification, archive-limit work, deployment configuration, production configuration, or PDF-worker change is authorized by this decision.
 
+## OWNER_DECISION.P0_05_XLSX_MACRO_EXTERNAL_RELATIONSHIP_DETECTOR_V1
+
+```text
+decision_evidence: USER_CONFIRMED
+authority_created_by: owner authorization for this package
+classification: internal_non_persisted_xlsx_security_result
+newly_authorized_result_shape: true
+newly_authorized_category_fusion: true
+newly_authorized_all_external_relationship_block: true
+```
+
+This owner decision newly authorizes the internal category `xlsx_macro_or_external_relationship` and the exact two-key result shape below. This category deliberately fuses macro presence and external-relationship presence into one P0 block result. P0 does not distinguish macro and external-relationship findings in this detector result.
+
+XLSX macro or external-relationship result:
+
+```text
+policy: block
+category: xlsx_macro_or_external_relationship
+exact_keys: policy, category
+```
+
+No block result:
+
+```text
+undefined
+```
+
+`undefined` means only that this detector did not establish an XLSX macro or external-relationship block. It is not a file-policy pass, type-agreement pass, parser-eligibility result, upload acceptance result, macro-safety result, external-relationship-safety result, archive-safety result, formula-safety result, instruction-safety result, content-validity result, or authorization for downstream processing.
+
+Precedence:
+
+```text
+complete XLSX shallow identity
+-> bounded XLSX sheet-count detector
+-> bounded XLSX cell-count detector
+-> OOXML path-traversal detector
+-> XLSX macro/external-relationship detector
+```
+
+This detector runs only after the OOXML path-traversal detector returns `undefined`. If an earlier traversal block is established, that earlier block result is returned and this fused category must not replace it.
+
+Block when any of these exists:
+
+- a VBA project part or VBA signature part;
+- a macro-enabled workbook, macrosheet, international-macrosheet, VBA-project, or VBA-signature content type in either a `[Content_Types].xml` `Default` or `Override` entry;
+- a VBA, VBA-signature, macrosheet, or international-macrosheet relationship type;
+- any relationship whose `TargetMode` is exactly `External`, regardless of relationship type.
+
+All external relationships block in P0, including hyperlinks, linked images, `oleObject` links, and unknown external relationship types. `TargetMode` absent or exactly `Internal` does not block here. Any other `TargetMode` value uses the sanitized failure path.
+
+The detector must parse `[Content_Types].xml` in a way that distinguishes `Default` and `Override` entries and inspects only their required metadata attributes. It must inspect every `.rels` part across root, workbook, worksheet, and other relationship parts, and read every relationship `Type`, `Target`, and `TargetMode` only for this deterministic decision. It must not follow targets.
+
+Malformed or ambiguous ZIP/XML/content-type structures, unexpected parser output, unsupported compression, decompression failure, and thrown operations use the sanitized XLSX macro/external relationship failure path, never block and never pass. Do not follow targets, read VBA bytes, execute macros, evaluate formulas, or expose entries, targets, XML, workbook content, paths, stacks, parser internals, relationship identifiers, macro names, content-type strings, raw bytes, formulas, values, or dependency details.
+
+This detector must not be placed in, imported by, or executed inside the PDF worker. It must not install dependencies or add archive-entry, expanded-size, compression-ratio, timeout, state-transition, executor, route, service, persistence, database, audit, deployment, Current State, or Implementation Baseline work.
+
+State and integration boundary: this detector directly changes none of `file_policy_status`, `processing_status`, `parse_status`, or `upload_state`. It returns an internal result only. No executor mapping, service wiring, route wiring, listener wiring, database write, audit write, persistence, public API mapping, client serialization, archive-limit work, deployment configuration, production configuration, or PDF-worker change is authorized by this decision.
+
 Protected PDF result:
 
 ```text
@@ -1981,7 +2036,7 @@ P0-07 case mapping:
 ```text
 XLSX path traversal -> ooxml_path_traversal_detected
 XLSX expansion bomb -> archive_entry_limit_exceeded, archive_expanded_size_limit_exceeded, archive_compression_ratio_limit_exceeded
-macros/external relationships -> ooxml_macro_detected, ooxml_external_relationship_detected
+macros/external relationships -> xlsx_macro_or_external_relationship
 encrypted PDF/XLSX -> encrypted_or_password_protected
 PDF without extractable text -> pdf_no_extractable_text
 PDF active content/embedded files -> pdf_active_or_embedded_content
