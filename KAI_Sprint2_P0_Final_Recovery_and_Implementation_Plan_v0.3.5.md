@@ -4019,6 +4019,45 @@ package_commit: report after commit; a commit cannot contain its own SHA
 next_package: bounded P0-05 assessor dependency inspection
 ```
 
+## P0-05 MuPDF dependency approval and local synthetic installation
+
+```text
+p0_05_package_status: mupdf_dependency_installed_ready_to_commit
+implementation_status: dependency_and_test_only
+verification_status: TOOL_VERIFIED after focused dependency, Sprint 2, full-suite, audit, and diff checks complete
+evidence_class: TOOL_VERIFIED
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: d078e1161356aef36cfa86423f42db79c839cb56
+working_tree_clean_at_start: true
+staged_paths_at_start: none
+applicable_repository_instructions: root AGENTS.md only; DATABASE_URL sentinel used for every Node and npm command; no fetch, push, database/cloud/production/deployment/current-state, P0-06B, P0-07, or Gate A work authorized or performed
+owner_dependency_decision: USER_CONFIRMED package mupdf; exact_version 1.28.0; approval_scope local synthetic P0 only; production_or_deployment_approval false; real_client_data_approval false
+installed_dependency: TOOL_VERIFIED package.json and package-lock.json pin mupdf exactly to 1.28.0; node_modules/mupdf/package.json reports version 1.28.0
+package_license: TOOL_VERIFIED AGPL-3.0-or-later
+commercial_license_available: USER_CONFIRMED true
+production_proprietary_or_SaaS_path: NOT_CONFIRMED
+legal_or_commercial_approval_required_before_distribution_or_deployment: USER_CONFIRMED true
+security_record: USER_CONFIRMED CVE-2026-7233 Artifex_status fixed in MuPDF 1.28.0; Artifex_fix_commit 611f75f0c8657b92460554009196c5ac4b68d909; NVD_status affected through 1.28.0; exact_npm_WASM_fix_inclusion NOT_CONFIRMED; owner_disposition residual accepted for local synthetic P0 only
+architecture_record: USER_CONFIRMED file-backed dedicated worker; 25 MiB pre-parse input gate; 60-second parent timeout; failed / security_assessment_timeout latch; late-result rejection; worker termination; maximum_concurrent_pdf_assessor_workers 1; main-thread MuPDF prohibited; data-URL worker prohibited
+technical_evidence_record: USER_CONFIRMED file-backed worker termination was measured during synchronous MuPDF/WASM execution; parent timeout and late-result rejection were demonstrated; raw outline actions, chained actions, and unknown action types are reachable through public object APIs; residual decompression and parser-allocation risk remains
+test_support_boundary: one file-backed worker support module under __tests__/support imports MuPDF only inside worker execution; no production code or detector code imports MuPDF
+focused_dependency_test_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-mupdf-dependency.spec.js - tests 7; pass 7; fail 0
+focused_dependency_test_coverage: exact installed version 1.28.0; ESM import succeeds in local synthetic runtime; MuPDF execution only in file-backed worker; over-25-MiB input rejected before worker creation; default parent timeout constant 60000 ms with short-timeout latch proof; failed/security_assessment_timeout result; late-message rejection; worker termination; maximum concurrency 1; main-thread and data-URL worker absence; synthetic-buffer-only gate
+applicable_sprint2_tests: listener-capable DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - tests 744; pass 744; fail 0
+full_repository_suite: listener-capable DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - tests 849; pass 849; fail 0
+npm_audit_result: npm audit returned 17 vulnerabilities; 1 low, 5 moderate, 11 high
+runtime_detector_behavior_changed: false
+security_executor_enabled: false
+production_or_deployment_authorized: false
+real_client_data_used: false
+additional_parser_candidates_added: false
+routes_or_cloud_or_database_or_feature_flags_changed: false
+current_state_update: false
+changed_files: package.json; package-lock.json; __tests__/kai-sprint2-mupdf-dependency.spec.js; __tests__/support/kaiSprint2MupdfDependencyWorker.js; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+next_package: bounded PDF assessor worker and detector implementation
+commit_hash: report after commit; a commit cannot contain its own SHA
+```
+
 
 ## P0-06A unauthorized transition negative coverage
 
