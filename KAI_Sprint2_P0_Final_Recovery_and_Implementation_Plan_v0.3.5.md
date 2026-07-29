@@ -5039,3 +5039,157 @@ p0_06b: GATE_A_BLOCKED
 gates_a_through_d: UNAUTHORIZED
 current_state_update: NOT_AUTHORIZED
 ```
+
+---
+
+## P0-07 security assessment acceptance correction
+
+```text
+P0_07_SECURITY_ASSESSMENT_ACCEPTANCE_CORRECTION
+
+correction_date: 2026-07-29 America/Vancouver
+evidence_class: TOOL_VERIFIED
+correction_type: forward_only
+prior_records_deleted_or_rewritten: false
+current_interpretation_supersedes_prior_completion_claim: true
+
+superseded_prior_label:
+  exact_text: p0_07_package_status: local_synthetic_http_acceptance_corrected_complete
+  exact_line_location: KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md:4869 at blob 1bfde3f68aa7230e83654da86e2fd2485035a6b1
+  prior_block_left_byte_intact: true
+
+confirmed_valid_scope:
+  HTTP upload route acceptance: verified
+  HTTP exact-version confirmation acceptance: verified
+  synthetic upload lifecycle acceptance: verified
+  HTTP authentication, authorization, tenant and request-safety coverage:
+    verified only for the exact cases freshly identified in the current harness
+  committed detector implementations and focused detector tests:
+    remain valid and are not reopened
+
+P0_05_status:
+  detector_and_control_leaves: implemented and tested
+  bounded_security_executor_runtime: missing
+  canonical_assessor_execution_entry_point: missing
+  overall_end_to_end_security_assessment_implementation: partial
+
+P0_06A_status:
+  local upload and exact-version confirmation: implemented and tested
+  confirmation_to_security_assessment_enqueue: missing
+  sanitized_pending_policy_response_backed_by_real_enqueue: not established
+  overall_P0_06A_completion: partial against the controlling ExecPlan
+
+P0_07_status:
+  local_HTTP_upload_and_confirmation_acceptance: verified
+  local_HTTP_security_assessment_leg: not end_to_end verified
+  automated_policy_pass_from_real_HTTP_path: not established
+  overall_P0_07_completion: partial against the controlling ExecPlan
+
+reason:
+  the current positive acceptance path invokes a detector manually from test code after
+  HTTP confirmation; confirmation does not reach an enabled internal executor or a
+  canonical bounded assessor
+
+coverage_inventory:
+  HTTP_path_cases_verified:
+    - feature enabled
+    - authenticated mapped human
+    - allowed role and active membership
+    - batch create through POST /admin/batches
+    - idempotent replay through POST /admin/batches
+    - file reserve through POST /admin/batches/:intakeBatchId/file-reservations
+    - local streamed upload through POST /admin/files/:intakeFileId/upload
+    - upload reaches uploaded_unconfirmed
+    - confirm exact version through POST /admin/files/:intakeFileId/confirm-upload
+    - SHA-256 checksum verification through HTTP confirm-upload
+    - policy remains pending immediately after HTTP confirmation
+    - sanitized operator file read through GET /admin/files/:intakeFileId
+    - review transition through POST /admin/review-queue/:reviewQueueItemId/status after test-side policy pass
+    - feature disabled
+    - invalid mapping
+    - wrong role
+    - inactive membership
+    - cross-tenant IDs
+    - unbounded list attempts
+    - 26th file
+    - malformed fingerprint
+    - unknown metadata fields
+    - request-body over-limit
+    - unsafe Unicode filename
+    - path traversal
+    - oversize streamed body confirmation failure
+    - checksum-mismatch streamed body confirmation failure
+    - duplicate write
+    - missing object
+    - replaced object version
+    - checksum mismatch
+    - storage identifier leakage on the positive HTTP response set
+    - raw content absence from the positive HTTP response, audit, metrics and log set
+  test_side_detector_cases:
+    - allowed CSV type agreement policy allow after HTTP confirmation
+    - MIME/signature mismatch policy block
+    - binary TXT/MD policy block
+    - arbitrary archive policy block
+  test_side_non_detector_cases:
+    - mocked concurrent reservations
+    - actor and organization mutation-limit exhaustion
+    - actor and organization concurrent-upload exhaustion
+    - expired and explicitly abandoned reservations
+    - stale review transition
+    - required-audit failure rollback at repository-interface level
+    - telemetry failure not rolling back an authorized mutation
+    - AI mutation
+    - generic system mutation
+    - unauthorized internal-executor operation
+    - parser/profile/source/evidence/claim/generation/export attempt
+    - storage identifier leakage as a direct no-leak assertion
+    - raw content in logs, errors, audit, metrics, or responses as a direct no-leak assertion
+  cases_not_exercised:
+    - confirmation to security-assessment enqueue
+    - callable internal security-executor runtime
+    - canonical bounded assessor execution entry point from HTTP confirmation
+    - automated file-policy pass from the real HTTP confirmation path
+    - automated file-policy block or failure from the real HTTP confirmation path
+    - XLSX path traversal or expansion bomb in the P0-07 harness
+    - macros/external relationships in the P0-07 harness
+    - encrypted PDF/XLSX in the P0-07 harness
+    - PDF active content or embedded file in the P0-07 harness
+    - uploaded prompt-injection text in the P0-07 harness
+    - formula cells reaching no output in the P0-07 harness
+
+effective_completion_language:
+  P0 repository contract and detector controls implemented
+  P0 local synthetic upload and exact-version confirmation acceptance passed
+  P0 bounded security executor, confirmation enqueue and HTTP assessment integration pending
+
+suspended_unqualified_labels:
+  P0_LOCAL_SYNTHETIC_HTTP_ACCEPTANCE_PASS
+  P0 local synthetic acceptance passed
+
+qualification:
+  these labels must not be used as current unqualified completion claims until the
+  confirm-to-executor-to-assessor path is implemented and verified
+
+not_established:
+  callable_internal_security_executor
+  canonical_bounded_assessor_entry_point
+  confirmation_to_assessment_enqueue
+  transactional_enqueue_acceptance
+  canonical_assessor_execution_from_HTTP
+  automated_file_policy_pass_from_real_HTTP_path
+  automated_file_policy_block_or_failure_from_real_HTTP_path
+  persistent_lifecycle
+  database_atomicity
+  production_readiness
+  real_client_data_readiness
+
+future_implementation_authority:
+  not granted by this correction
+  any executor, queue, state-write or HTTP integration package requires separate explicit
+  owner authorization
+
+P0_06B_started: false
+Gate_A_started: false
+Current_State_updated: false
+Implementation_Baseline_updated: false
+```
