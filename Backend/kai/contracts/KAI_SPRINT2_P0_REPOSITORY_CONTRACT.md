@@ -1597,6 +1597,9 @@ ooxml_macro_detected:
 
 ooxml_external_relationship_detected:
   policy: block
+
+csv_row_limit_exceeded:
+  policy: block
 ```
 
 Prompt-injection authority:
@@ -1684,6 +1687,62 @@ authorization_scope:
   deployment: not authorized
 
 ## OWNER_DECISION.P0_05_PDF_ENCRYPTION_PASSWORD_DETECTOR_V1
+
+## OWNER_DECISION.P0_05_CSV_ROW_LIMIT_DETECTOR_V1
+
+```text
+decision_evidence: USER_CONFIRMED
+authority_created_by: owner authorization for this package
+classification: internal_non_persisted_csv_security_result
+maximum_logical_records: 100000
+```
+
+This owner decision newly authorizes the internal category `csv_row_limit_exceeded` and the exact two-key result shape below. It must not be described as pre-existing committed repository authority before this decision.
+
+CSV row-limit exceeded result:
+
+```text
+policy: block
+category: csv_row_limit_exceeded
+exact_keys: policy, category
+```
+
+At-or-below-limit result:
+
+```text
+undefined
+```
+
+`undefined` means only that this detector did not establish a CSV row-limit block. It is not a file-policy pass, type-agreement pass, parser-eligibility result, upload acceptance result, formula-safety result, instruction-safety result, content-validity result, or authorization for downstream processing.
+
+Precedence:
+
+```text
+existing CSV extension/MIME/type agreement gate
+-> existing strict text/UTF-8 and deterministic binary-content gate
+-> bounded CSV logical-record counter
+```
+
+This detector must run only after the existing CSV type and strict text/UTF-8 gates. It must not be placed in, imported by, or executed inside the PDF worker.
+
+Counting rules: maximum logical records is 100000; count every logical record, including the first; no header inference; comma delimiter; double-quote framing; doubled-quote escaping; LF and CRLF record endings; quoted LF or CRLF does not end a record; a terminal line ending does not add a record beyond the record it terminates; a final record without a line ending counts; empty content has zero records; blank records count when established by line endings; stop immediately when logical record 100001 is established.
+
+Exact examples:
+
+```text
+""       -> 0 records
+"a"      -> 1
+"a\n"    -> 1
+"\n"     -> 1 blank record
+"\n\n"   -> 2 blank records
+"a\n\n"  -> 2 records
+```
+
+The detector must not retain rows or cell values. Lone CR or malformed quoting uses the sanitized CSV row-limit failure path as dependency/internal failure, not block and not pass. Do not expose raw content, decoded content, unrestricted dependency errors, stack traces, paths, identifiers, parser internals, or infrastructure details.
+
+Instruction-like and formula-like values beginning with `=`, `+`, `-`, or `@` remain inert data. Do not execute, rewrite, neutralize, return, persist, expose, or log CSV content. Formula-output neutralization remains a future output-specific obligation before any preview, spreadsheet rendering, assistant exposure, or export is enabled; this row-limit detector does not perform output rendering.
+
+State and integration boundary: this detector directly changes none of `file_policy_status`, `processing_status`, `parse_status`, or `upload_state`. It returns an internal result only. No executor mapping, service wiring, route wiring, listener wiring, database write, audit write, persistence, public API mapping, client serialization, XLSX work, deployment configuration, production configuration, or PDF-worker change is authorized by this decision.
 
 Protected PDF result:
 

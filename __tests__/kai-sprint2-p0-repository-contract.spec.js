@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import {
   KAI_SPRINT2_P0_ABUSE_LIMITS,
   KAI_SPRINT2_P0_CONTRACT_VERSION,
+  KAI_SPRINT2_P0_CSV_LIMITS,
   KAI_SPRINT2_P0_FINGERPRINT,
   KAI_SPRINT2_P0_HASH_ALGORITHM,
   KAI_SPRINT2_P0_OPERATION_ROLES,
@@ -46,6 +47,9 @@ test("repository contract locks request, string, and resource limits", () => {
     maxFilesPerBatch: 25,
     paginationDefaultLimit: 100,
     paginationMaxLimit: 100,
+  });
+  assert.deepEqual(KAI_SPRINT2_P0_CSV_LIMITS, {
+    maxLogicalRecords: 100000,
   });
 });
 
@@ -202,6 +206,22 @@ test("repository contract records PDF active-action and embedded-file detector a
   assert.match(contract, /Do not return or expose scripts or action contents; URLs or destinations; filenames or attachment names; embedded bytes; document text; object contents; paths, identifiers, stacks, dependency internals, or infrastructure details/);
   assert.match(contract, /directly changes none of `file_policy_status`, `processing_status`, `parse_status`, or `upload_state`/);
   assert.match(contract, /PDF active content\/embedded files -> pdf_active_or_embedded_content/);
+});
+
+test("repository contract records CSV row-limit detector authority and boundaries", () => {
+  assert.match(contract, /OWNER_DECISION\.P0_05_CSV_ROW_LIMIT_DETECTOR_V1/);
+  assert.match(contract, /maximum_logical_records: 100000/);
+  assert.match(contract, /policy: block\s+category: csv_row_limit_exceeded\s+exact_keys: policy, category/);
+  assert.match(contract, /At-or-below-limit result:\s+```text\s+undefined/);
+  assert.match(contract, /`undefined` means only that this detector did not establish a CSV row-limit block/);
+  assert.match(contract, /not a file-policy pass/);
+  assert.match(contract, /count every logical record, including the first; no header inference/);
+  assert.match(contract, /stop immediately when logical record 100001 is established/);
+  assert.match(contract, /quoted LF or CRLF does not end a record/);
+  assert.match(contract, /Lone CR or malformed quoting uses the sanitized CSV row-limit failure path/);
+  assert.match(contract, /Instruction-like and formula-like values beginning with `=`, `\+`, `-`, or `@` remain inert data/);
+  assert.match(contract, /Do not execute, rewrite, neutralize, return, persist, expose, or log CSV content/);
+  assert.match(contract, /directly changes none of `file_policy_status`, `processing_status`, `parse_status`, or `upload_state`/);
 });
 
 test("queue vocabulary is shared by the repository contract and runtime validator", () => {

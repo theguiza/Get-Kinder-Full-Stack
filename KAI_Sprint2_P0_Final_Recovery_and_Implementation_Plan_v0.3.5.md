@@ -4349,6 +4349,50 @@ next_package_or_stop_condition: OWNER-DIRECTED STOP after this single bounded im
 commit_hash: report after commit; a commit cannot contain its own SHA
 ```
 
+## P0-05 CSV row-limit detection
+
+```text
+p0_05_package_status: csv_row_limit_detection_complete_ready_to_commit
+implementation_status: bounded_internal_csv_result_only
+verification_status: TOOL_VERIFIED after focused CSV, repository-contract, affected file-policy, Sprint 2, full-suite, diff, and post-commit clean-state checks complete
+evidence_class: TOOL_VERIFIED
+decision_evidence: USER_CONFIRMED
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 66f00473c4ec70d988efab10f7812438c1d8c14f
+working_tree_clean_at_start: true
+staged_paths_at_start: none
+applicable_repository_instructions: root AGENTS.md only; DATABASE_URL sentinel used for every Node and npm command; no fetch, push, database/cloud/production/deployment/current-state, P0-06B, executor mapping, persistence, route/service/listener wiring, XLSX work, PDF-worker change, or Gate A work authorized or performed
+owner_decision_authority: OWNER_DECISION.P0_05_CSV_ROW_LIMIT_DETECTOR_V1 newly authorized by this package prompt; the category csv_row_limit_exceeded and exact two-key result shape were not described as pre-existing committed repository authority
+authorized_file_scope: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md; Backend/kai/config/kaiSprint2P0Contract.js; Backend/kai/validators/csvRowLimitDetector.js; __tests__/kai-sprint2-csv-row-limit-detector.spec.js; __tests__/kai-sprint2-p0-repository-contract.spec.js; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+maximum_logical_records: 100000
+precedence_matches_owner_decision: existing CSV extension/MIME/type-agreement gate -> existing strict text/UTF-8 and deterministic binary-content gate -> bounded CSV logical-record counter
+protected_result: exactly policy block and category csv_row_limit_exceeded; exact enumerable keys policy and category; no scope, evidence, metadata, counts, records, rows, values, identifiers, content, or other keys
+at_or_below_limit_result: undefined; means only this detector did not establish a CSV row-limit block; not a file-policy pass, type-agreement pass, parser-eligibility result, upload acceptance result, content-validity result, formula-safety result, instruction-safety result, or downstream-processing authorization
+counter_behavior: counts every logical record including the first; no header inference; comma delimiter; double-quote framing; doubled-quote escaping; LF and CRLF endings; quoted LF/CRLF ignored as record endings; terminal line ending does not add an extra record; final unterminated-by-newline record counts; blank records count; stops immediately when logical record 100001 is established
+sanitized_failure_behavior: lone CR and malformed quoting use the sanitized CSV row-limit inspection failure path; no raw content, decoded content, parser detail, stack, path, identifier, row, cell, or internal detail is returned by the detector result
+instruction_formula_boundary: values beginning with =, +, -, or @ remain inert data; detector does not execute, rewrite, neutralize, return, persist, expose, or log CSV content
+state_and_integration_boundary: detector directly changes none of file_policy_status, processing_status, parse_status, or upload_state; internal pure result only
+executor_or_route_wiring_changed: false
+database_or_audit_writes_added: false
+public_api_mapping_added: false
+client_serialization_added: false
+pdf_worker_changed: false
+xlsx_work_started: false
+dependencies_or_lockfiles_changed: false
+focused_csv_test: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-csv-row-limit-detector.spec.js - tests 8; pass 8; fail 0
+focused_contract_test: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-p0-repository-contract.spec.js - tests 13; pass 13; fail 0
+affected_file_policy_tests: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-csv-row-limit-detector.spec.js __tests__/kai-sprint2-p0-repository-contract.spec.js __tests__/kai-sprint2-p0-file-type-agreement-detector.spec.js __tests__/kai-sprint2-txt-md-byte-detector.spec.js __tests__/kai-sprint2-p0-05f-combined-completeness.spec.js - tests 63; pass 63; fail 0
+sprint2_suite_initial_sandbox_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - sandbox run hit known localhost listen EPERM with tests 761; pass 734; fail 27
+sprint2_suite: localhost-capable DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - tests 809; pass 809; fail 0
+full_repository_suite_initial_sandbox_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - sandbox run hit known localhost listen EPERM with tests 866; pass 839; fail 27
+full_repository_suite: localhost-capable DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - tests 914; pass 914; fail 0
+complete_diff_inspected: true before ExecPlan update and rechecked before commit
+git_diff_check: git diff --check and git diff --cached --check - pass
+changed_files: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md; Backend/kai/config/kaiSprint2P0Contract.js; Backend/kai/validators/csvRowLimitDetector.js; __tests__/kai-sprint2-csv-row-limit-detector.spec.js; __tests__/kai-sprint2-p0-repository-contract.spec.js; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this single bounded implementation package commit; do not start XLSX work, executor mapping, persistence, route/service/listener wiring, public API/client mapping, database/cloud/production/deployment behavior, P0-06B, Gate A, push, or deploy without separate owner authorization
+commit_hash: report after commit; a commit cannot contain its own SHA
+```
+
 
 ## P0-06A unauthorized transition negative coverage
 
