@@ -4951,6 +4951,42 @@ commit_hash: report after commit; a commit cannot contain its own SHA
 ```
 
 
+## P0-05 malware adapter boundary
+
+```text
+p0_05_package_status: malware_adapter_boundary_implemented_ready_to_commit
+implementation_status: complete
+verification_status: TOOL_VERIFIED after focused, affected, Sprint 2, full-suite, and diff checks
+evidence_class: TOOL_VERIFIED
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 2420e6478587f1092303c4760546390ac3d7f9dd
+working_tree_clean_at_start: true
+staged_paths_at_start: none
+applicable_repository_instructions: root AGENTS.md only; DATABASE_URL sentinel used for every Node and npm command; no fetch, push, database/cloud/scanner/network/dependency-install/production/deployment/current-state, executor, route/service/listener wiring, persistence, state transition, audit, P0-06B, or Gate A work authorized or performed
+existing_vocabulary_preserved: MALWARE_SCAN_PRODUCTION_DEFAULT not_configured; DB vocabulary not_configured, queued, running, passed, failed, skipped
+contract_authority: OWNER_DECISION.P0_MALWARE_ADAPTER_BOUNDARY_V1 records neutral not_configured, exact synthetic clean and malware_detected provenance, exact malware_scan_failed failure, and production/test separation
+production_default_adapter: Backend/kai/security/malwareScanAdapter.js default adapter always returns exactly status not_configured; no scanner contact, environment selection, runtime factory, caller selection, production composition, route, executor, persistence, audit, or policy transition added
+neutral_status_semantics: not_configured is neither pass nor block; no scanner means no file-policy pass
+synthetic_adapter_boundary: __tests__/support/kaiSyntheticMalwareScanAdapter.js reachable only through explicit test-only dependency injection; no production file or canonical barrel imports or selects it
+synthetic_fixture_boundary: clean and malware-marker byte fixtures are constructed in tests as non-executable synthetic bytes; SHA-256 values computed during tests; no real malware, EICAR string, or real antivirus test signature
+result_shapes: not_configured exact status only; clean and malware_detected exact status plus provenance only; failed exact status failed plus category malware_scan_failed
+provenance_boundary: clean and malware_detected provenance contains exactly adapter_id kai_synthetic_fixture_adapter and signature_set v1
+fail_closed_boundary: unknown fixture, hash mismatch, malformed input, thrown operation, malformed adapter result, and inconsistent adapter result return exactly malware_scan_failed; no scanner, unknown fixture, or failure returns clean
+non_exposure_boundary: results expose no fixture name, hash, path, config, version, bytes, scanner detail, native diagnostics, or infrastructure detail beyond the exact allowed provenance
+changed_files: Backend/kai/security/malwareScanAdapter.js; __tests__/support/kaiSyntheticMalwareScanAdapter.js; __tests__/kai-sprint2-malware-adapter-boundary.spec.js; __tests__/kai-sprint2-p0-repository-contract.spec.js; Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+focused_malware_contract_state_tests: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-malware-adapter-boundary.spec.js __tests__/kai-sprint2-p0-repository-contract.spec.js __tests__/kai-sprint2-state-transitions.spec.js - tests 32; pass 32; fail 0
+affected_file_security_tests: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test malware adapter, repository contract, file-type agreement, TXT/MD, CSV, XLSX, OOXML, PDF worker, and MuPDF dependency specs - tests 168; pass 168; fail 0
+sprint2_suite_initial_sandbox_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - sandbox run hit known localhost listen EPERM; tests 817; pass 790; fail 27
+sprint2_suite: listener-capable DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - tests 865; pass 865; fail 0
+full_repository_suite_initial_sandbox_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - sandbox run hit known localhost listen EPERM; tests 922; pass 895; fail 27
+full_repository_suite: listener-capable DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - tests 970; pass 970; fail 0
+git_diff_check_before_execplan_update: git diff --check - pass
+current_state_update: NOT_AUTHORIZED
+implementation_baseline_update: NOT_AUTHORIZED
+commit_hash: report after commit; a commit cannot contain its own SHA
+```
+
+
 ---
 
 Plan authority record

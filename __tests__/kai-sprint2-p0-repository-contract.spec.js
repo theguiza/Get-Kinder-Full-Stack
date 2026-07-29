@@ -157,6 +157,27 @@ test("operation roles and the disabled security-executor identity are explicit",
   assert.match(contract, /This package defines the identity but does not enable it\./);
 });
 
+test("repository contract records malware adapter boundary semantics", () => {
+  assert.match(contract, /OWNER_DECISION\.P0_MALWARE_ADAPTER_BOUNDARY_V1/);
+  assert.match(contract, /\{ status: "not_configured" \}/);
+  assert.match(contract, /`not_configured` is the production default/);
+  assert.match(contract, /neutral and is neither a pass nor a block/);
+  assert.match(contract, /No scanner means no file-policy pass/);
+  assert.match(contract, /permitted only through explicit test-only dependency injection/);
+  assert.match(contract, /Production code, caller input, environment variables, runtime factories, canonical exports, routes, executors, persistence, audit, deployment configuration, and production composition must not select, import, or expose the synthetic adapter/);
+  assert.match(contract, /status: "clean"[\s\S]*adapter_id: "kai_synthetic_fixture_adapter"[\s\S]*signature_set: "v1"/);
+  assert.match(contract, /status: "malware_detected"[\s\S]*adapter_id: "kai_synthetic_fixture_adapter"[\s\S]*signature_set: "v1"/);
+  assert.match(contract, /`clean` means only that the synthetic test adapter recognized an approved synthetic fixture/);
+  assert.match(contract, /not a file-policy pass and authorizes no downstream transition/);
+  assert.match(contract, /\{ status: "failed", category: "malware_scan_failed" \}/);
+  assert.match(contract, /Unknown fixture, hash mismatch, malformed input, thrown operation, malformed adapter result, or internally inconsistent adapter result fails closed/);
+  assert.match(contract, /No scanner, unknown fixture, or failure may return `clean`/);
+  assert.match(contract, /Synthetic clean and malware-marker fixtures must be non-executable byte fixtures constructed in tests/);
+  assert.match(contract, /Fixture SHA-256 values must be computed during tests/);
+  assert.match(contract, /Do not use real malware, the EICAR string, or a real antivirus test signature/);
+  assert.match(contract, /only clean\/detected provenance keys are exactly `adapter_id` and `signature_set`/);
+});
+
 test("repository contract records PDF encryption/password detector authority and boundaries", () => {
   assert.match(contract, /OWNER_DECISION\.P0_05_PDF_ENCRYPTION_PASSWORD_DETECTOR_V1/);
   assert.match(contract, /policy: block\s+category: encrypted_or_password_protected\s+exact_keys: policy, category/);

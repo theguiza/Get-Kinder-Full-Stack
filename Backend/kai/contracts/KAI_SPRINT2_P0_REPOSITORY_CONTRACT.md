@@ -1429,6 +1429,56 @@ review queue status: open, in_progress, blocked, waiting_on_client, waiting_on_g
 
 No new enum value such as `security_assessment_pending` is introduced. A security pass changes only `file_policy_status`; the file remains quarantined and unparsed. No scanner means no policy pass.
 
+## Malware adapter boundary
+
+OWNER_DECISION.P0_MALWARE_ADAPTER_BOUNDARY_V1:
+
+Production/default malware scanning returns exactly:
+
+```js
+{ status: "not_configured" }
+```
+
+`not_configured` is the production default. It is neutral and is neither a pass nor a block. No scanner means no file-policy pass.
+
+The synthetic malware adapter is permitted only through explicit test-only dependency injection. Production code, caller input, environment variables, runtime factories, canonical exports, routes, executors, persistence, audit, deployment configuration, and production composition must not select, import, or expose the synthetic adapter.
+
+The test-only synthetic adapter may return exactly:
+
+```js
+{
+  status: "clean",
+  provenance: {
+    adapter_id: "kai_synthetic_fixture_adapter",
+    signature_set: "v1"
+  }
+}
+```
+
+or exactly:
+
+```js
+{
+  status: "malware_detected",
+  provenance: {
+    adapter_id: "kai_synthetic_fixture_adapter",
+    signature_set: "v1"
+  }
+}
+```
+
+`clean` means only that the synthetic test adapter recognized an approved synthetic fixture. It is not a file-policy pass and authorizes no downstream transition, parsing, review approval, source creation, evidence extraction, claim creation, export, or raw-content exposure. `malware_detected` is also only an adapter boundary result until a separately authorized policy transition maps it.
+
+Failure returns exactly:
+
+```js
+{ status: "failed", category: "malware_scan_failed" }
+```
+
+Unknown fixture, hash mismatch, malformed input, thrown operation, malformed adapter result, or internally inconsistent adapter result fails closed with exactly `malware_scan_failed`. No scanner, unknown fixture, or failure may return `clean`.
+
+Synthetic clean and malware-marker fixtures must be non-executable byte fixtures constructed in tests. Fixture SHA-256 values must be computed during tests. Do not use real malware, the EICAR string, or a real antivirus test signature. Results, logs, metrics, audit, and errors must not return or expose fixture name, hash, path, config, version, bytes, scanner detail, native diagnostics, or infrastructure detail. The only clean/detected provenance keys are exactly `adapter_id` and `signature_set`.
+
 The repository-recognized queue types are:
 
 ```text
