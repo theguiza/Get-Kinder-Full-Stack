@@ -1551,12 +1551,13 @@ no review approval, parsing, profiling, source, evidence, claim, generation, exp
 Limits:
 
 ```text
-archive_entry_maximum: 1000
+archive_entry_maximum: 2000
 expanded_byte_maximum: 262144000
 expanded_byte_maximum_display: 250 MiB
 compression_ratio_maximum: 100:1
 minimum_inflate_ratio: 0.01
-assessor_timeout_seconds: 60
+assessor_timeout_ms: 10000
+assessor_timeout_implementation_status: recorded_not_implemented
 ```
 
 Outcomes:
@@ -1912,6 +1913,88 @@ This detector must not be placed in, imported by, or executed inside the PDF wor
 
 State and integration boundary: this detector directly changes none of `file_policy_status`, `processing_status`, `parse_status`, or `upload_state`. It returns an internal result only. No executor mapping, service wiring, route wiring, listener wiring, database write, audit write, persistence, public API mapping, client serialization, archive-limit work, deployment configuration, production configuration, or PDF-worker change is authorized by this decision.
 
+## OWNER_DECISION.P0_05_OOXML_ARCHIVE_RESOURCE_LIMIT_DETECTOR_V1
+
+```text
+decision_evidence: USER_CONFIRMED
+authority_created_by: owner authorization for this package
+classification: internal_non_persisted_ooxml_security_result
+newly_authorized_constants_and_categories: true
+maximum_zip_entries: 2000
+maximum_total_expanded_bytes: 262144000
+maximum_compression_ratio: 100:1
+whole_assessor_timeout_ms_recorded_not_implemented: 10000
+```
+
+This owner decision newly authorizes the OOXML archive resource-limit constants and the exact two-key block result shapes below. The timeout constant is recorded for the next whole-assessor leaf only and is not implemented by this detector.
+
+Archive entry-limit result:
+
+```text
+policy: block
+category: archive_entry_limit_exceeded
+exact_keys: policy, category
+```
+
+Archive expanded-size result:
+
+```text
+policy: block
+category: archive_expanded_size_limit_exceeded
+exact_keys: policy, category
+```
+
+Archive compression-ratio result:
+
+```text
+policy: block
+category: archive_compression_ratio_limit_exceeded
+exact_keys: policy, category
+```
+
+No block result:
+
+```text
+undefined
+```
+
+`undefined` means only that this detector did not establish an OOXML archive entry-count, expanded-size, or compression-ratio block. It is not a file-policy pass, type-agreement pass, parser-eligibility result, upload acceptance result, macro-safety result, external-relationship-safety result, path-safety result, formula-safety result, instruction-safety result, content-validity result, or authorization for downstream processing.
+
+Precedence:
+
+```text
+complete XLSX shallow identity
+-> bounded XLSX sheet-count detector
+-> bounded XLSX cell-count detector
+-> OOXML path-traversal detector
+-> XLSX macro/external-relationship detector
+-> OOXML archive resource-limit detector
+```
+
+This detector runs only after the XLSX macro/external-relationship detector returns `undefined`. If an earlier XLSX file-security detector establishes a block, that earlier block result is returned and this detector must not replace it.
+
+Entry-count rules: count every central-directory entry, including directories. 2,000 entries pass; entry 2,001 blocks immediately as `archive_entry_limit_exceeded`.
+
+Expanded-size rules: 262,144,000 total expanded bytes pass. Inflation and stored-entry scanning must stop at emitted byte 262,144,001 and return `archive_expanded_size_limit_exceeded`. Never fully inflate an entry and check afterward for expanded-size enforcement. Declared sizes are cheap preflight facts only, never the enforced expanded-byte measurement.
+
+Compression-ratio rules: compression ratio is `expanded_bytes / compressed_bytes`. Compute it per entry and for the running archive aggregate. stored entries are 1:1. exactly 100:1 passes; strictly greater than 100:1 blocks as `archive_compression_ratio_limit_exceeded`. A non-empty entry with zero compressed bytes blocks as `archive_compression_ratio_limit_exceeded`.
+
+Archive-limit precedence is:
+
+```text
+entry count
+-> expanded size
+-> compression ratio
+```
+
+If one entry breaches expanded-size and compression-ratio, return `archive_expanded_size_limit_exceeded`.
+
+Use actual emitted expanded bytes and compressed payload bytes consumed. Forged or inconsistent ZIP metadata, unsupported compression, decompression failure, malformed structure, or mismatched emitted sizes use the sanitized failure path, never block and never pass.
+
+Do not retain or expose entry bytes, names, XML, workbook content, paths, stacks, or dependency internals. This detector must not be placed in, imported by, or executed inside the PDF worker. It must not install dependencies, add standalone archive support, implement timeout or malware handling, add executor mapping, service wiring, route wiring, listener wiring, database write, audit write, persistence, public API mapping, client serialization, deployment configuration, production configuration, Current State update, or Implementation Baseline update.
+
+State and integration boundary: this detector directly changes none of `file_policy_status`, `processing_status`, `parse_status`, or `upload_state`. It returns an internal result only.
+
 Protected PDF result:
 
 ```text
@@ -2047,14 +2130,11 @@ formula cells -> formula_trigger_detected plus the P0 no-output boundary
 Decision basis:
 
 ```text
-archive_entry_maximum and minimum_inflate_ratio:
-  aligned with Apache POI ZipSecureFile defaults
+archive_entry_maximum, expanded_byte_maximum, and compression_ratio_maximum:
+  KAI policy ceilings authorized by the owner for OOXML archive resource-limit detection
 
-expanded_byte_maximum:
-  KAI policy ceiling; not an external standard
-
-assessor_timeout_seconds:
-  KAI policy ceiling; not an external standard
+assessor_timeout_ms:
+  owner-authorized whole-assessor timeout constant recorded for the next leaf; not implemented here
 
 formula trigger set:
   aligned with OWASP CSV Injection guidance

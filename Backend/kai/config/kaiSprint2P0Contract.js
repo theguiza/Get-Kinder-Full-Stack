@@ -63,6 +63,13 @@ export const KAI_SPRINT2_P0_XLSX_LIMITS = Object.freeze({
   maxCells: 1000000,
 });
 
+export const KAI_SPRINT2_P0_ARCHIVE_LIMITS = Object.freeze({
+  maxEntries: 2000,
+  maxExpandedBytes: 262144000,
+  maxCompressionRatio: 100,
+  assessorTimeoutMs: 10000,
+});
+
 export const KAI_SPRINT2_P0_UPLOAD_STATES = Object.freeze([
   "reserved",
   "upload_started",

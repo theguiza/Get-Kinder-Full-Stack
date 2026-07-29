@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 
 import {
   KAI_SPRINT2_P0_ABUSE_LIMITS,
+  KAI_SPRINT2_P0_ARCHIVE_LIMITS,
   KAI_SPRINT2_P0_CONTRACT_VERSION,
   KAI_SPRINT2_P0_CSV_LIMITS,
   KAI_SPRINT2_P0_FINGERPRINT,
@@ -55,6 +56,12 @@ test("repository contract locks request, string, and resource limits", () => {
   assert.deepEqual(KAI_SPRINT2_P0_XLSX_LIMITS, {
     maxSheets: 20,
     maxCells: 1000000,
+  });
+  assert.deepEqual(KAI_SPRINT2_P0_ARCHIVE_LIMITS, {
+    maxEntries: 2000,
+    maxExpandedBytes: 262144000,
+    maxCompressionRatio: 100,
+    assessorTimeoutMs: 10000,
   });
 });
 
@@ -310,6 +317,38 @@ test("repository contract records XLSX macro/external-relationship detector auth
   assert.match(contract, /must not install dependencies or add archive-entry, expanded-size, compression-ratio, timeout/);
   assert.match(contract, /directly changes none of `file_policy_status`, `processing_status`, `parse_status`, or `upload_state`/);
   assert.match(contract, /macros\/external relationships -> xlsx_macro_or_external_relationship/);
+});
+
+test("repository contract records OOXML archive resource-limit detector authority and boundaries", () => {
+  assert.match(contract, /OWNER_DECISION\.P0_05_OOXML_ARCHIVE_RESOURCE_LIMIT_DETECTOR_V1/);
+  assert.match(contract, /maximum_zip_entries: 2000/);
+  assert.match(contract, /maximum_total_expanded_bytes: 262144000/);
+  assert.match(contract, /maximum_compression_ratio: 100:1/);
+  assert.match(contract, /whole_assessor_timeout_ms_recorded_not_implemented: 10000/);
+  assert.match(contract, /policy: block\s+category: archive_entry_limit_exceeded\s+exact_keys: policy, category/);
+  assert.match(contract, /policy: block\s+category: archive_expanded_size_limit_exceeded\s+exact_keys: policy, category/);
+  assert.match(contract, /policy: block\s+category: archive_compression_ratio_limit_exceeded\s+exact_keys: policy, category/);
+  assert.match(contract, /No block result:\s+```text\s+undefined/);
+  assert.match(contract, /did not establish an OOXML archive entry-count, expanded-size, or compression-ratio block/);
+  assert.match(contract, /not a file-policy pass, type-agreement pass, parser-eligibility result, upload acceptance result/);
+  assert.match(contract, /XLSX macro\/external-relationship detector\s+-> OOXML archive resource-limit detector/);
+  assert.match(contract, /runs only after the XLSX macro\/external-relationship detector returns `undefined`/);
+  assert.match(contract, /count every central-directory entry, including directories/);
+  assert.match(contract, /2,000 entries pass; entry 2,001 blocks immediately/);
+  assert.match(contract, /262,144,000 total expanded bytes pass/);
+  assert.match(contract, /stop at emitted byte 262,144,001 and return `archive_expanded_size_limit_exceeded`/);
+  assert.match(contract, /Declared sizes are cheap preflight facts only, never the enforced expanded-byte measurement/);
+  assert.match(contract, /expanded_bytes \/ compressed_bytes/);
+  assert.match(contract, /per entry and for the running archive aggregate/);
+  assert.match(contract, /stored entries are 1:1/);
+  assert.match(contract, /exactly 100:1 passes; strictly greater than 100:1 blocks/);
+  assert.match(contract, /A non-empty entry with zero compressed bytes blocks as `archive_compression_ratio_limit_exceeded`/);
+  assert.match(contract, /entry count\s+-> expanded size\s+-> compression ratio/);
+  assert.match(contract, /If one entry breaches expanded-size and compression-ratio, return `archive_expanded_size_limit_exceeded`/);
+  assert.match(contract, /Forged or inconsistent ZIP metadata, unsupported compression, decompression failure, malformed structure, or mismatched emitted sizes use the sanitized failure path/);
+  assert.match(contract, /Do not retain or expose entry bytes, names, XML, workbook content, paths, stacks, or dependency internals/);
+  assert.match(contract, /must not install dependencies, add standalone archive support, implement timeout or malware handling/);
+  assert.match(contract, /directly changes none of `file_policy_status`, `processing_status`, `parse_status`, or `upload_state`/);
 });
 
 test("queue vocabulary is shared by the repository contract and runtime validator", () => {

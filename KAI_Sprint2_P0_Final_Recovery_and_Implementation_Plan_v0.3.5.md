@@ -4535,6 +4535,56 @@ next_package_or_stop_condition: OWNER-DIRECTED STOP after this single bounded im
 commit_hash: report after commit; a commit cannot contain its own SHA
 ```
 
+## P0-05 OOXML archive resource-limit detection
+
+```text
+p0_05_package_status: ooxml_archive_resource_limit_detection_complete_ready_to_commit
+implementation_status: bounded_internal_ooxml_result_only
+verification_status: TOOL_VERIFIED after capability probe, focused archive/contract, affected file-policy, Sprint 2, full-suite, diff, and post-commit clean-state checks complete
+evidence_class: TOOL_VERIFIED
+decision_evidence: USER_CONFIRMED
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 4aa99a65fee3f8ea873347269255926e8c7d306e
+working_tree_clean_at_start: true
+staged_paths_at_start: none
+applicable_repository_instructions: root AGENTS.md only; DATABASE_URL sentinel used for every Node and npm command; no fetch, push, database/cloud/production/deployment/current-state, Implementation Baseline, P0-06B, executor mapping, persistence, route/service/listener wiring, malware handling, standalone archive support, timeout implementation, or Gate A work authorized or performed
+owner_decision_authority: OWNER_DECISION.P0_05_OOXML_ARCHIVE_RESOURCE_LIMIT_DETECTOR_V1 newly authorized by this package prompt; constants maximum_zip_entries 2000, maximum_total_expanded_bytes 262144000, maximum_compression_ratio 100:1, whole_assessor_timeout_ms_recorded_not_implemented 10000, and categories archive_entry_limit_exceeded, archive_expanded_size_limit_exceeded, and archive_compression_ratio_limit_exceeded are newly owner-authorized
+timeout_boundary: whole-assessor timeout constant 10000 ms recorded in contract/runtime constants only; timeout enforcement not implemented in this package
+pre_edit_capability_probe: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --input-type=module repeated synthetic probe - P0_05_ARCHIVE_LIMIT_CAPABILITY_PROBE_PASS iterations 5; proved central-directory enumeration including directories, exact stored and deflated emitted-byte counting, mid-entry inflation abort after 5120 emitted bytes while consuming only 65541 of 524456 compressed bytes, and compressed/expanded tracking without retaining or exposing entry content
+capability_gap: false
+authorized_file_scope: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md; Backend/kai/config/kaiSprint2P0Contract.js; Backend/kai/validators/ooxmlArchiveResourceLimitDetector.js; __tests__/kai-sprint2-ooxml-archive-resource-limit-detector.spec.js; __tests__/kai-sprint2-p0-repository-contract.spec.js; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+precedence_matches_owner_decision: complete XLSX shallow identity -> bounded XLSX sheet-count detector -> bounded XLSX cell-count detector -> OOXML path-traversal detector -> XLSX macro/external-relationship detector -> OOXML archive resource-limit detector; archive-local precedence is entry count -> expanded size -> compression ratio
+protected_result_shapes: exactly policy block and category archive_entry_limit_exceeded, archive_expanded_size_limit_exceeded, or archive_compression_ratio_limit_exceeded; exact enumerable keys policy and category; no scope, evidence, metadata, entry names, bytes, XML, workbook content, paths, stacks, parser internals, compressed/expanded counts, dependency internals, or other keys
+no_block_result: undefined only when archive entry-count, expanded-size, and compression-ratio checks all pass; not a file-policy pass, type-agreement pass, upload acceptance result, macro-safety result, external-relationship-safety result, path-safety result, content-validity result, or downstream-processing authorization
+entry_count_behavior: counts every central-directory entry including directories; 2000 entries pass; entry 2001 blocks immediately as archive_entry_limit_exceeded
+expanded_size_behavior: enforces actual emitted expanded bytes, not declared size; 262144000 total expanded bytes pass; stops at emitted byte 262144001 and returns archive_expanded_size_limit_exceeded; simultaneous expanded-size and ratio breach returns expanded-size
+compression_ratio_behavior: computes expanded_bytes / compressed_bytes per entry and running aggregate using actual emitted expanded bytes and compressed payload bytes consumed; stored entries are 1:1; exactly 100:1 passes; strictly greater than 100:1 blocks; non-empty zero-compressed entry blocks as ratio exceeded
+sanitized_failure_behavior: forged or inconsistent ZIP metadata, unsupported compression, malformed structure, decompression failure, and mismatched emitted sizes use sanitized OOXML archive resource-limit inspection failure; no block or pass is returned for malformed ambiguity
+non_exposure_boundary: detector and tests do not retain or expose entry bytes, names, XML, workbook content, paths, stacks, parser internals, compressed or expanded payloads, dependency internals, raw bytes, formulas, values, or counts in detector results
+state_and_integration_boundary: detector directly changes none of file_policy_status, processing_status, parse_status, or upload_state; internal result only
+executor_or_route_wiring_changed: false
+database_or_audit_writes_added: false
+public_api_mapping_added: false
+client_serialization_added: false
+pdf_worker_changed: false
+malware_handling_added: false
+standalone_archive_support_added: false
+timeout_implementation_added: false
+dependencies_or_lockfiles_changed: false
+focused_archive_and_contract_test: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-ooxml-archive-resource-limit-detector.spec.js __tests__/kai-sprint2-p0-repository-contract.spec.js - tests 29; pass 29; fail 0
+affected_file_policy_tests: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-ooxml-archive-resource-limit-detector.spec.js __tests__/kai-sprint2-xlsx-macro-external-relationship-detector.spec.js __tests__/kai-sprint2-ooxml-path-traversal-detector.spec.js __tests__/kai-sprint2-xlsx-sheet-cell-limit-detector.spec.js __tests__/kai-sprint2-p0-repository-contract.spec.js __tests__/kai-sprint2-p0-file-type-agreement-detector.spec.js __tests__/kai-sprint2-csv-row-limit-detector.spec.js __tests__/kai-sprint2-txt-md-byte-detector.spec.js __tests__/kai-sprint2-p0-05f-combined-completeness.spec.js - tests 106; pass 106; fail 0
+sprint2_suite_initial_sandbox_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - sandbox run hit known localhost listener EPERM with tests 804; pass 777; fail 27
+sprint2_suite: localhost-capable DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - tests 852; pass 852; fail 0
+full_repository_suite_initial_sandbox_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - sandbox run hit known localhost listener EPERM with tests 909; pass 882; fail 27
+full_repository_suite: localhost-capable DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - tests 957; pass 957; fail 0
+database_sentinel: non-listening loopback DATABASE_URL at 127.0.0.1:9 used for every Node and npm command
+complete_diff_inspected: true before commit after final ExecPlan update
+git_diff_check: git diff --check - pass
+changed_files: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md; Backend/kai/config/kaiSprint2P0Contract.js; Backend/kai/validators/ooxmlArchiveResourceLimitDetector.js; __tests__/kai-sprint2-ooxml-archive-resource-limit-detector.spec.js; __tests__/kai-sprint2-p0-repository-contract.spec.js; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this single bounded implementation package commit; do not start executor mapping, persistence, route/service/listener wiring, public API/client mapping, database/cloud/production/deployment behavior, P0-06B, Gate A, timeout implementation, malware handling, standalone archive support, Current State update, Implementation Baseline update, push, or deploy without separate owner authorization
+commit_hash: report after commit; a commit cannot contain its own SHA
+```
+
 
 ## P0-06A unauthorized transition negative coverage
 
