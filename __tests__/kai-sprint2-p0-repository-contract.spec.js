@@ -141,6 +141,25 @@ test("operation roles and the disabled security-executor identity are explicit",
   assert.match(contract, /This package defines the identity but does not enable it\./);
 });
 
+test("repository contract records PDF encryption/password detector authority and boundaries", () => {
+  assert.match(contract, /OWNER_DECISION\.P0_05_PDF_ENCRYPTION_PASSWORD_DETECTOR_V1/);
+  assert.match(contract, /policy: block\s+category: encrypted_or_password_protected\s+exact_keys: policy, category/);
+  assert.match(contract, /No block result:\s+```text\s+undefined/);
+  assert.match(contract, /did not establish an encryption\/password block/);
+  assert.match(contract, /not a file-policy pass, PDF-validity result, text-layer result, or authorization for downstream processing/);
+  assert.match(contract, /Primary signal: `document\.needsPassword\(\) === true`/);
+  assert.match(contract, /Secondary conservative signal: `document\.getMetaData\(Document\.META_ENCRYPTION\)`/);
+  assert.match(contract, /document open fails; `needsPassword\(\)` throws; `needsPassword\(\)` returns anything other than a boolean/);
+  assert.match(contract, /encryption metadata access throws; encryption metadata is an empty string; encryption metadata is neither a string nor `undefined`/);
+  assert.match(contract, /Do not call `authenticatePassword`/);
+  assert.match(contract, /committed extension\/MIME\/signature and complete shallow PDF identity\s+-> successful MuPDF open\s+-> encryption\/password detector/);
+  assert.match(contract, /A protected result short-circuits later PDF checks/);
+  assert.match(contract, /PDF integrity\/validity assessment is deferred to a later separately authorized leaf/);
+  assert.match(contract, /must not be described as valid, clean, safe, machine-readable, or passed/);
+  assert.match(contract, /directly changes none of `file_policy_status`, `processing_status`, `parse_status`, or `upload_state`/);
+  assert.match(contract, /No executor mapping, service wiring, route wiring, listener wiring, database write, audit write, persistence, public API mapping, client serialization, deployment configuration, production configuration, or later PDF detector work/);
+});
+
 test("queue vocabulary is shared by the repository contract and runtime validator", () => {
   assert.deepEqual(VALID_REVIEW_QUEUE_TYPES, KAI_SPRINT2_P0_REVIEW_QUEUE_TYPES);
   for (const queueType of KAI_SPRINT2_P0_REVIEW_QUEUE_TYPES) {

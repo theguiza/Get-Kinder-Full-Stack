@@ -17,6 +17,10 @@ const TIMEOUT_RESULT = Object.freeze({
   status: "failed",
   category: "security_assessment_timeout",
 });
+const PROTECTED_PDF_RESULT = Object.freeze({
+  policy: "block",
+  category: "encrypted_or_password_protected",
+});
 
 let activePdfAssessorWorkers = 0;
 let maxObservedPdfAssessorWorkers = 0;
@@ -90,6 +94,16 @@ function releasePdfWorkerPermit() {
 
 function sanitizedWorkerFailure() {
   return new Error("PDF assessor worker failed.");
+}
+
+function isExactProtectedPdfResult(result) {
+  return (
+    result &&
+    typeof result === "object" &&
+    Object.keys(result).length === 2 &&
+    result.policy === "block" &&
+    result.category === "encrypted_or_password_protected"
+  );
 }
 
 async function runPdfAssessorWorkerBoundaryInternal(input, options = {}) {
@@ -176,6 +190,16 @@ async function runPdfAssessorWorkerBoundaryInternal(input, options = {}) {
       onWorkerMessageForTest?.(message);
 
       if (message?.type === "kai_pdf_worker_liveness_ok") {
+        if (Object.hasOwn(message, "result")) {
+          if (!isExactProtectedPdfResult(message.result)) {
+            settle({ error: sanitizedWorkerFailure() });
+            return;
+          }
+
+          settle({ result: PROTECTED_PDF_RESULT });
+          return;
+        }
+
         settle({ result: undefined });
         return;
       }
@@ -227,6 +251,7 @@ export async function runPdfAssessorWorkerBoundary(input) {
 
 export const __testables = Object.freeze({
   createResultLatch,
+  isExactProtectedPdfResult,
   getDefaultWorkerUrlProtocol() {
     return PDF_WORKER_THREAD_URL.protocol;
   },

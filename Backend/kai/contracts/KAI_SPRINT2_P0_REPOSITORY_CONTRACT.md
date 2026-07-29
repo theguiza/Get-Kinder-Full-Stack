@@ -1677,6 +1677,51 @@ authorization_scope:
   database_persistence: not authorized
   deployment: not authorized
 
+## OWNER_DECISION.P0_05_PDF_ENCRYPTION_PASSWORD_DETECTOR_V1
+
+Protected PDF result:
+
+```text
+policy: block
+category: encrypted_or_password_protected
+exact_keys: policy, category
+```
+
+No block result:
+
+```text
+undefined
+```
+
+`undefined` means only that this detector did not establish an encryption/password block. It is not a file-policy pass, PDF-validity result, text-layer result, or authorization for downstream processing.
+
+Primary signal: `document.needsPassword() === true`.
+
+Secondary conservative signal: `document.getMetaData(Document.META_ENCRYPTION)` returns a non-empty string other than exact `None`.
+
+Return the protected result when either signal is true. Return `undefined` only when `needsPassword() === false` and encryption metadata is `undefined` or exact `None`.
+
+Treat these as dependency failure, not block and not pass: document open fails; `needsPassword()` throws; `needsPassword()` returns anything other than a boolean; encryption metadata access throws; encryption metadata is an empty string; encryption metadata is neither a string nor `undefined`.
+
+Use the existing sanitized worker-failure path for dependency failures. Do not expose raw content, unrestricted dependency errors, stack traces, paths, identifiers, worker internals, or infrastructure details.
+
+Do not call `authenticatePassword`. Do not request, accept, store, log, transmit, persist, or return passwords.
+
+Precedence:
+
+```text
+committed extension/MIME/signature and complete shallow PDF identity
+-> successful MuPDF open
+-> encryption/password detector
+-> later separately authorized PDF content/security checks
+```
+
+A protected result short-circuits later PDF checks. Later PDF checks means only checks authorized elsewhere in this contract and supported by the inspected chain, including text-layer/image-only and active-content or embedded-file checks where present. This decision does not implement those later checks.
+
+Repaired or truncated PDFs: MuPDF may repair and open a truncated or otherwise malformed PDF while reporting `needsPassword() === false` and encryption metadata exact `None`. This detector returns `undefined` for that condition. Repaired/invalid-but-openable PDF detection is outside this leaf; PDF integrity/validity assessment is deferred to a later separately authorized leaf; `undefined` from this detector must not be described as valid, clean, safe, machine-readable, or passed.
+
+State and integration boundary: this detector directly changes none of `file_policy_status`, `processing_status`, `parse_status`, or `upload_state`. It returns an internal worker result only. No executor mapping, service wiring, route wiring, listener wiring, database write, audit write, persistence, public API mapping, client serialization, deployment configuration, production configuration, or later PDF detector work is authorized by this decision.
+
 P0-07 case mapping:
 
 ```text

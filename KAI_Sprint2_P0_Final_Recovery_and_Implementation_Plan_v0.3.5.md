@@ -4208,6 +4208,51 @@ next_package: PDF encryption and password detection
 commit_hash: report after commit; a commit cannot contain its own SHA
 ```
 
+## P0-05 PDF encryption and password detection
+
+```text
+p0_05_package_status: pdf_encryption_password_detection_complete_ready_to_commit
+implementation_status: bounded_internal_pdf_worker_result_only
+verification_status: TOOL_VERIFIED after focused worker-boundary, repository-contract, affected file-policy, Sprint 2, full-suite, and diff checks complete
+evidence_class: TOOL_VERIFIED
+decision_evidence: USER_CONFIRMED
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 3f4600be3b977198aaeb79a0cb75e7b2052c8d48
+working_tree_clean_at_start: true
+staged_paths_at_start: none
+applicable_repository_instructions: root AGENTS.md only; DATABASE_URL sentinel used for every Node and npm command; no fetch, push, database/cloud/production/deployment/current-state, P0-06B, executor mapping, persistence, route/service/listener wiring, later PDF detector work, or Gate A work authorized or performed
+owner_decision_authority: OWNER_DECISION.P0_05_PDF_ENCRYPTION_PASSWORD_DETECTOR_V1
+authorized_file_scope: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md; Backend/kai/validators/pdfAssessorWorkerBoundary.js; Backend/kai/validators/pdfAssessorWorkerThread.js; __tests__/kai-sprint2-pdf-assessor-worker-boundary.spec.js; __tests__/kai-sprint2-p0-repository-contract.spec.js; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+observed_pdf_check_chain: committed P0-05F pure file-type detector evaluates recognized signatures, extension/MIME, complete shallow PDF identity, XLSX/ZIP, incomplete PDF, text gate, ambiguity, and residual unknown_binary; actual PDF worker boundary has no production importer beyond tests and, when invoked, performs worker-owned exact bytes, successful MuPDF open/countPages, then this encryption/password detector; no later PDF content/security checks are currently implemented in the inspected worker chain
+precedence_matches_owner_decision: true
+protected_result: exactly policy block and category encrypted_or_password_protected; exact enumerable keys policy and category; no scope, evidence, metadata, identifiers, dependency details, or other keys
+no_block_result: undefined; means only this detector did not establish an encryption/password block; not a file-policy pass, PDF-validity result, text-layer result, clean/safe/machine-readable claim, or downstream-processing authorization
+primary_signal: document.needsPassword() === true
+secondary_signal: document.getMetaData(Document.META_ENCRYPTION) returns a non-empty string other than exact None
+failure_behavior: document open failure, needsPassword throw, non-boolean needsPassword, metadata access throw, empty-string metadata, and non-string non-undefined metadata use existing sanitized worker-failure path; no raw content, unrestricted dependency errors, stack traces, paths, identifiers, worker internals, infrastructure details, passwords, or dependency metadata are returned
+password_boundary: authenticatePassword is not called; passwords are not requested, accepted, stored, logged, transmitted, persisted, or returned
+repaired_truncated_behavior: synthetic invalid-but-MuPDF-repaired PDF with needsPassword false and encryption metadata None returns undefined; repaired/invalid-but-openable PDF detection is outside this leaf; PDF integrity/validity assessment is deferred to a later separately authorized leaf; undefined must not be described as valid, clean, safe, machine-readable, passed, or eligible
+state_and_integration_boundary: detector directly changes none of file_policy_status, processing_status, parse_status, or upload_state; internal worker result only
+executor_or_route_wiring_changed: false
+database_or_audit_writes_added: false
+public_api_mapping_added: false
+client_serialization_added: false
+production_or_deployment_authorized: false
+later_pdf_checks_implemented: false
+dependencies_or_lockfiles_changed: false
+focused_worker_and_contract_test: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-pdf-assessor-worker-boundary.spec.js __tests__/kai-sprint2-p0-repository-contract.spec.js - tests 37; pass 37; fail 0
+affected_file_policy_tests: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-pdf-assessor-worker-boundary.spec.js __tests__/kai-sprint2-mupdf-dependency.spec.js __tests__/kai-sprint2-pdf-shallow-identity-fixture-corpus.spec.js __tests__/kai-sprint2-p0-file-type-agreement-detector.spec.js __tests__/kai-sprint2-p0-05f-combined-completeness.spec.js __tests__/kai-sprint2-p0-repository-contract.spec.js - tests 89; pass 89; fail 0
+sprint2_suite_initial_sandbox_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - sandbox run hit known localhost listen EPERM with tests 724; pass 697; fail 27
+sprint2_suite: listener-capable DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - tests 772; pass 772; fail 0
+full_repository_suite_initial_sandbox_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - sandbox run hit known localhost listen EPERM with tests 829; pass 802; fail 27
+full_repository_suite: listener-capable DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - tests 877; pass 877; fail 0
+complete_diff_inspected: true
+git_diff_check: git diff --check - pass
+changed_files: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md; Backend/kai/validators/pdfAssessorWorkerBoundary.js; Backend/kai/validators/pdfAssessorWorkerThread.js; __tests__/kai-sprint2-pdf-assessor-worker-boundary.spec.js; __tests__/kai-sprint2-p0-repository-contract.spec.js; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this single bounded implementation package commit; do not start another PDF leaf, add executor mapping, persistence, route/service/listener wiring, public API/client mapping, database/cloud/production/deployment behavior, P0-06B, Gate A, push, or deploy without separate owner authorization
+commit_hash: report after commit; a commit cannot contain its own SHA
+```
+
 
 ## P0-06A unauthorized transition negative coverage
 

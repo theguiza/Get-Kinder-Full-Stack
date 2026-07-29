@@ -10,9 +10,19 @@ import {
   runPdfAssessorWorkerBoundary,
   __testables as pdfWorkerBoundaryTestables,
 } from "../Backend/kai/validators/pdfAssessorWorkerBoundary.js";
+import {
+  detectPdfEncryptionPassword,
+} from "../Backend/kai/validators/pdfAssessorWorkerThread.js";
 
 const mainSource = readFileSync("Backend/kai/validators/pdfAssessorWorkerBoundary.js", "utf8");
 const workerSource = readFileSync("Backend/kai/validators/pdfAssessorWorkerThread.js", "utf8");
+const protectedPdfResult = Object.freeze({
+  policy: "block",
+  category: "encrypted_or_password_protected",
+});
+const fakeDocumentConstructor = Object.freeze({
+  META_ENCRYPTION: "encryption",
+});
 
 function encodeAscii(text) {
   return new TextEncoder().encode(text);
@@ -59,6 +69,11 @@ function syntheticPdfBytes() {
   ].join("")));
 
   return concatBytes(parts);
+}
+
+function syntheticInvalidButMupdfRepairedPdfBytes() {
+  const text = new TextDecoder().decode(syntheticPdfBytes());
+  return encodeAscii(text.replace(/startxref\n\d+\n%%EOF\n$/, "startxref\n0\n%%EOF\n"));
 }
 
 class SyntheticWorker extends EventEmitter {
@@ -160,6 +175,74 @@ function ownershipInputs() {
   ];
 }
 
+function fakePdfDocument({
+  needsPassword = false,
+  encryptionMetadata = "None",
+  authenticatePassword = () => {
+    throw new Error("authenticatePassword must not be called");
+  },
+} = {}) {
+  return {
+    authenticatePassword,
+    getMetaData(key) {
+      assert.equal(key, "encryption");
+      if (encryptionMetadata instanceof Error) {
+        throw encryptionMetadata;
+      }
+      return encryptionMetadata;
+    },
+    needsPassword() {
+      if (needsPassword instanceof Error) {
+        throw needsPassword;
+      }
+      return needsPassword;
+    },
+  };
+}
+
+function assertProtectedResult(result) {
+  assert.deepEqual(result, protectedPdfResult);
+  assert.deepEqual(Object.keys(result), ["policy", "category"]);
+  assert.equal(Object.hasOwn(result, "scope"), false);
+  assert.equal(Object.hasOwn(result, "evidence"), false);
+  assert.equal(Object.hasOwn(result, "metadata"), false);
+  assert.equal(Object.hasOwn(result, "identifier"), false);
+}
+
+async function assertBoundaryRejectsSanitized(workerMessage) {
+  pdfWorkerBoundaryTestables.resetPdfAssessorWorkerState();
+  const worker = new SyntheticWorker();
+  const promise = pdfWorkerBoundaryTestables.runPdfAssessorWorkerBoundaryWithTestControls(syntheticPdfBytes(), {
+    createWorker() {
+      return worker;
+    },
+  });
+
+  worker.emit("message", workerMessage);
+  worker.finishTermination();
+
+  let error = null;
+  try {
+    await promise;
+  } catch (caught) {
+    error = caught;
+  }
+
+  assert.match(String(error?.message), /PDF assessor worker failed\./);
+  const text = String(error?.stack ?? error?.message ?? error);
+  for (const forbidden of [
+    "secret client content",
+    "correct horse battery staple",
+    "/Users/mikewoz/Get-Kinder-Full-Stack-Deploy/private.pdf",
+    "synthetic-file-id-123",
+    "DependencyInternalError",
+    "at dependency",
+    "%PDF",
+  ]) {
+    assert.equal(text.includes(forbidden), false, forbidden);
+  }
+}
+
 function assertFreshVisibleRangeCopy({ input, transferredBytes, expectedBytes, forbiddenAdjacentBytes }) {
   assert.ok(transferredBytes instanceof Uint8Array);
   assert.equal(transferredBytes.buffer === input.buffer, false);
@@ -240,6 +323,215 @@ test("P0-05 PDF worker boundary opens a minimal synthetic PDF inside a file-back
   assert.equal(globalThis.$libmupdf_log_error, undefined);
   assert.equal(globalThis.$libmupdf_log_warning, undefined);
   assert.equal(pdfWorkerBoundaryTestables.getPdfAssessorWorkerState().active, 0);
+});
+
+test("P0-05 PDF encryption/password detector returns undefined for valid unencrypted PDF", async () => {
+  pdfWorkerBoundaryTestables.resetPdfAssessorWorkerState();
+
+  const result = await runPdfAssessorWorkerBoundary(Buffer.from(syntheticPdfBytes()));
+
+  assert.equal(result, undefined);
+});
+
+test("P0-05 PDF encryption/password detector blocks when needsPassword is true", () => {
+  const result = detectPdfEncryptionPassword(
+    fakePdfDocument({ needsPassword: true, encryptionMetadata: "None" }),
+    fakeDocumentConstructor,
+  );
+
+  assertProtectedResult(result);
+});
+
+test("P0-05 PDF encryption/password detector blocks when encryption metadata is non-None", () => {
+  const result = detectPdfEncryptionPassword(
+    fakePdfDocument({ needsPassword: false, encryptionMetadata: "Standard V5 R6" }),
+    fakeDocumentConstructor,
+  );
+
+  assertProtectedResult(result);
+});
+
+test("P0-05 PDF encryption/password detector blocks when either signal alone or both signals are present", () => {
+  for (const document of [
+    fakePdfDocument({ needsPassword: true, encryptionMetadata: undefined }),
+    fakePdfDocument({ needsPassword: false, encryptionMetadata: "AES-256" }),
+    fakePdfDocument({ needsPassword: true, encryptionMetadata: "AES-256" }),
+  ]) {
+    assertProtectedResult(detectPdfEncryptionPassword(document, fakeDocumentConstructor));
+  }
+});
+
+test("P0-05 PDF encryption/password detector returns undefined only for false plus undefined or exact None", () => {
+  assert.equal(
+    detectPdfEncryptionPassword(
+      fakePdfDocument({ needsPassword: false, encryptionMetadata: undefined }),
+      fakeDocumentConstructor,
+    ),
+    undefined,
+  );
+  assert.equal(
+    detectPdfEncryptionPassword(
+      fakePdfDocument({ needsPassword: false, encryptionMetadata: "None" }),
+      fakeDocumentConstructor,
+    ),
+    undefined,
+  );
+});
+
+test("P0-05 PDF encryption/password detector treats malformed dependency returns as failures", () => {
+  for (const document of [
+    fakePdfDocument({ needsPassword: "true", encryptionMetadata: "None" }),
+    fakePdfDocument({ needsPassword: false, encryptionMetadata: "" }),
+    fakePdfDocument({ needsPassword: false, encryptionMetadata: null }),
+    fakePdfDocument({ needsPassword: false, encryptionMetadata: { encryption: "None" } }),
+  ]) {
+    assert.throws(
+      () => detectPdfEncryptionPassword(document, fakeDocumentConstructor),
+      /PDF dependency inspection failed\./,
+    );
+  }
+});
+
+test("P0-05 PDF encryption/password detector treats thrown inspection operations as failures", () => {
+  for (const document of [
+    fakePdfDocument({ needsPassword: new Error("DependencyInternalError at dependency") }),
+    fakePdfDocument({ needsPassword: false, encryptionMetadata: new Error("DependencyInternalError at dependency") }),
+  ]) {
+    assert.throws(
+      () => detectPdfEncryptionPassword(document, fakeDocumentConstructor),
+      /PDF dependency inspection failed\./,
+    );
+  }
+});
+
+test("P0-05 PDF encryption/password detector never calls authenticatePassword", () => {
+  let authenticatePasswordCalls = 0;
+  const result = detectPdfEncryptionPassword(
+    fakePdfDocument({
+      needsPassword: true,
+      encryptionMetadata: "None",
+      authenticatePassword() {
+        authenticatePasswordCalls += 1;
+      },
+    }),
+    fakeDocumentConstructor,
+  );
+
+  assertProtectedResult(result);
+  assert.equal(authenticatePasswordCalls, 0);
+  assert.doesNotMatch(workerSource, /authenticatePassword\s*\(/);
+});
+
+test("P0-05 PDF encryption/password detector repeated evaluations are deterministic", () => {
+  const cases = [
+    fakePdfDocument({ needsPassword: false, encryptionMetadata: undefined }),
+    fakePdfDocument({ needsPassword: false, encryptionMetadata: "None" }),
+    fakePdfDocument({ needsPassword: true, encryptionMetadata: "None" }),
+    fakePdfDocument({ needsPassword: false, encryptionMetadata: "Standard" }),
+    fakePdfDocument({ needsPassword: true, encryptionMetadata: "Standard" }),
+  ];
+
+  for (const document of cases) {
+    const first = detectPdfEncryptionPassword(document, fakeDocumentConstructor);
+    const second = detectPdfEncryptionPassword(document, fakeDocumentConstructor);
+    assert.deepEqual(second, first);
+  }
+});
+
+test("P0-05 PDF worker boundary returns exactly the protected result and short-circuits later worker checks", async () => {
+  pdfWorkerBoundaryTestables.resetPdfAssessorWorkerState();
+  const worker = new SyntheticWorker();
+  const promise = pdfWorkerBoundaryTestables.runPdfAssessorWorkerBoundaryWithTestControls(syntheticPdfBytes(), {
+    createWorker() {
+      return worker;
+    },
+  });
+
+  worker.emit("message", {
+    type: "kai_pdf_worker_liveness_ok",
+    liveness_operation: "Document.countPages",
+    handles_destroyed: true,
+    later_pdf_checks_started: false,
+    result: protectedPdfResult,
+  });
+  worker.finishTermination();
+
+  assertProtectedResult(await promise);
+});
+
+test("P0-05 PDF worker boundary uses safe failure for malformed result shapes", async () => {
+  for (const result of [
+    { policy: "block", category: "encrypted_or_password_protected", scope: "extra" },
+    { policy: "allow", category: "encrypted_or_password_protected" },
+    { status: "failed", category: "encrypted_or_password_protected" },
+    undefined,
+  ]) {
+    await assertBoundaryRejectsSanitized({
+      type: "kai_pdf_worker_liveness_ok",
+      liveness_operation: "Document.countPages",
+      handles_destroyed: true,
+      result,
+      rawContent: "%PDF secret client content",
+      password: "correct horse battery staple",
+      privatePath: "/Users/mikewoz/Get-Kinder-Full-Stack-Deploy/private.pdf",
+      identifier: "synthetic-file-id-123",
+      dependencyMetadata: "DependencyInternalError at dependency",
+    });
+  }
+});
+
+test("P0-05 PDF worker boundary uses safe failure when document open or inspection fails", async () => {
+  for (const workerMessage of [
+    {
+      type: "kai_pdf_worker_liveness_failed",
+      rawContent: "%PDF secret client content",
+      password: "correct horse battery staple",
+      privatePath: "/Users/mikewoz/Get-Kinder-Full-Stack-Deploy/private.pdf",
+      identifier: "synthetic-file-id-123",
+      dependencyMetadata: "DependencyInternalError at dependency",
+    },
+    {
+      type: "kai_pdf_worker_liveness_ok",
+      liveness_operation: "Document.countPages",
+      handles_destroyed: true,
+      result: {
+        policy: "block",
+        category: "encrypted_or_password_protected",
+        dependencyMetadata: "DependencyInternalError at dependency",
+      },
+    },
+  ]) {
+    await assertBoundaryRejectsSanitized(workerMessage);
+  }
+});
+
+test("P0-05 PDF encryption/password detector records truncated repaired PDF limitation as deferred integrity detection", () => {
+  const result = detectPdfEncryptionPassword(
+    fakePdfDocument({ needsPassword: false, encryptionMetadata: "None" }),
+    fakeDocumentConstructor,
+  );
+
+  assert.equal(result, undefined);
+  assert.equal(result?.policy, undefined);
+  assert.notDeepEqual(result, { policy: "allow" });
+  assert.match(
+    "integrity detection is deferred for truncated-but-repaired PDFs",
+    /integrity detection is deferred/,
+  );
+});
+
+test("P0-05 PDF encryption/password detector returns undefined for synthetic invalid-but-repaired PDF and defers integrity detection", async () => {
+  pdfWorkerBoundaryTestables.resetPdfAssessorWorkerState();
+
+  const result = await runPdfAssessorWorkerBoundary(Buffer.from(syntheticInvalidButMupdfRepairedPdfBytes()));
+
+  assert.equal(result, undefined);
+  assert.equal(result?.policy, undefined);
+  assert.notDeepEqual(result, { policy: "allow" });
+  assert.match(
+    "integrity detection is deferred for truncated or invalid but openable PDFs",
+    /integrity detection is deferred/,
+  );
 });
 
 test("P0-05 PDF worker boundary transfers only an owned exact visible-range copy", async () => {
