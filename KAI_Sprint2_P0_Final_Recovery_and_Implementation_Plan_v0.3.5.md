@@ -4102,6 +4102,47 @@ next_package: PDF encryption and password detection
 commit_hash: report after commit; a commit cannot contain its own SHA
 ```
 
+## P0-05 PDF worker byte-ownership hardening
+
+```text
+p0_05_package_status: pdf_worker_byte_ownership_hardened_ready_to_commit
+implementation_status: bounded_worker_boundary_test_only
+verification_status: TOOL_VERIFIED after focused worker-boundary, affected file-policy, Sprint 2, full-suite, and diff checks complete
+evidence_class: TOOL_VERIFIED
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: e160d603cbdbf2d2e286fb77ad5dece335dae88a
+working_tree_clean_at_start: true
+staged_paths_at_start: none
+applicable_repository_instructions: root AGENTS.md only; DATABASE_URL sentinel used for every Node and npm command; no fetch, push, database/cloud/production/deployment/current-state, P0-06B, malware, CSV/XLSX, detection-category, executor-integration, or Gate A work authorized or performed
+owner_decision_authority: OWNER_DECISION.P0_05_BOUNDED_ASSESSOR_V1
+committed_dependency_record: TOOL_VERIFIED package.json and package-lock.json pin mupdf exactly to 1.28.0
+committed_pdf_worker_boundary: TOOL_VERIFIED file-backed module worker; main-thread MuPDF import prohibited; data-URL and eval workers prohibited; 25 MiB pre-parse input gate; 60000 ms parent timeout; maximum active PDF assessor workers 1; failed/security_assessment_timeout latch; internal busy result failed/maximum_concurrent_pdf_assessor_workers_exceeded
+contention_authority: TOOL_VERIFIED living ExecPlan committed PDF worker-boundary record authorizes reuse of the existing internal maximum_concurrent_pdf_assessor_workers_exceeded fail-closed busy convention; repository contract and canonical KAI safe-error vocabulary do not define a public HTTP/KAI error for this internal worker result
+caller_ownership_before: production boundary already created a fresh Uint8Array with input.byteLength, copied input visible bytes through bytes.set(input), and transferred only the fresh backing ArrayBuffer; caller Buffer/Uint8Array backing stores were not transferred
+caller_ownership_correction_applied: false
+caller_ownership_after: unchanged production implementation; new regression tests prove the existing owned exact-length visible-range transfer mechanism
+ownership_inputs_covered: Buffer.alloc; Buffer.from; standalone Uint8Array; Buffer subview with non-zero byteOffset; Uint8Array subview with non-zero byteOffset
+ownership_success_proof: for every covered input form, tests assert original byteLength unchanged, original visible bytes unchanged, object remains readable via indexed access and slice, transferred bytes are a fresh Uint8Array with byteOffset 0, byteLength equal to visible input length, backing ArrayBuffer length equal to visible input length, backing ArrayBuffer not equal to caller backing store, and adjacent backing-buffer sentinels absent for subviews
+ownership_timeout_proof: for every covered input form, tests use existing __testables runPdfAssessorWorkerBoundaryWithTestControls with timeoutMs 1 and SyntheticWorker termination controls to assert failed/security_assessment_timeout while preserving caller byteLength, bytes, readability, and visible-range-only transfer
+public_api_changed: false
+test_only_controls_exposed_to_public_api: false
+focused_worker_boundary_test: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-pdf-assessor-worker-boundary.spec.js - tests 13; pass 13; fail 0
+affected_file_policy_tests: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-pdf-assessor-worker-boundary.spec.js __tests__/kai-sprint2-mupdf-dependency.spec.js __tests__/kai-sprint2-pdf-shallow-identity-fixture-corpus.spec.js __tests__/kai-sprint2-p0-file-type-agreement-detector.spec.js __tests__/kai-sprint2-p0-05f-combined-completeness.spec.js - tests 65; pass 65; fail 0
+sprint2_suite_initial_sandbox_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - sandbox run hit known localhost listen EPERM with tests 709; pass 682; fail 27
+sprint2_suite: listener-capable DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - tests 757; pass 757; fail 0
+full_repository_suite_initial_sandbox_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - sandbox run hit known localhost listen EPERM with tests 814; pass 787; fail 27
+full_repository_suite: listener-capable DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - tests 862; pass 862; fail 0
+git_diff_check_before_execplan_update: git diff --check - pass
+npm_audit_not_run: true
+detection_categories_implemented: none
+executor_enabled: false
+policy_state_writes_added: false
+production_or_deployment_authorized: false
+changed_files: __tests__/kai-sprint2-pdf-assessor-worker-boundary.spec.js; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+next_package: PDF encryption and password detection
+commit_hash: report after commit; a commit cannot contain its own SHA
+```
+
 
 ## P0-06A unauthorized transition negative coverage
 

@@ -83,6 +83,96 @@ class SyntheticWorker extends EventEmitter {
   }
 }
 
+function assertReadableAndUnchanged(input, expectedBytes) {
+  assert.equal(input.byteLength, expectedBytes.byteLength);
+  assert.deepEqual(Array.from(input), Array.from(expectedBytes));
+  assert.equal(input[0], expectedBytes[0]);
+  assert.deepEqual(Array.from(input.slice(0, input.byteLength)), Array.from(expectedBytes));
+}
+
+function ownershipInputs() {
+  const visible = [0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34];
+
+  const allocatedBuffer = Buffer.alloc(visible.length);
+  allocatedBuffer.set(visible);
+
+  const fromBuffer = Buffer.from(visible);
+
+  const standaloneUint8Array = new Uint8Array(visible);
+
+  const bufferSubviewBacking = Buffer.from([
+    0xa1,
+    0xa2,
+    0xa3,
+    ...visible,
+    0xb1,
+    0xb2,
+    0xb3,
+  ]);
+  const bufferSubview = bufferSubviewBacking.subarray(3, 3 + visible.length);
+  assert.notEqual(bufferSubview.byteOffset, 0);
+
+  const uint8ArraySubviewBacking = new Uint8Array([
+    0xc1,
+    0xc2,
+    0xc3,
+    0xc4,
+    ...visible,
+    0xd1,
+    0xd2,
+    0xd3,
+    0xd4,
+  ]);
+  const uint8ArraySubview = uint8ArraySubviewBacking.subarray(4, 4 + visible.length);
+  assert.notEqual(uint8ArraySubview.byteOffset, 0);
+
+  return [
+    {
+      name: "Buffer.alloc",
+      input: allocatedBuffer,
+      expectedBytes: Uint8Array.from(visible),
+      forbiddenAdjacentBytes: [],
+    },
+    {
+      name: "Buffer.from",
+      input: fromBuffer,
+      expectedBytes: Uint8Array.from(visible),
+      forbiddenAdjacentBytes: [],
+    },
+    {
+      name: "standalone Uint8Array",
+      input: standaloneUint8Array,
+      expectedBytes: Uint8Array.from(visible),
+      forbiddenAdjacentBytes: [],
+    },
+    {
+      name: "Buffer subview with non-zero byteOffset",
+      input: bufferSubview,
+      expectedBytes: Uint8Array.from(visible),
+      forbiddenAdjacentBytes: [0xa1, 0xa2, 0xa3, 0xb1, 0xb2, 0xb3],
+    },
+    {
+      name: "Uint8Array subview with non-zero byteOffset",
+      input: uint8ArraySubview,
+      expectedBytes: Uint8Array.from(visible),
+      forbiddenAdjacentBytes: [0xc1, 0xc2, 0xc3, 0xc4, 0xd1, 0xd2, 0xd3, 0xd4],
+    },
+  ];
+}
+
+function assertFreshVisibleRangeCopy({ input, transferredBytes, expectedBytes, forbiddenAdjacentBytes }) {
+  assert.ok(transferredBytes instanceof Uint8Array);
+  assert.equal(transferredBytes.buffer === input.buffer, false);
+  assert.equal(transferredBytes.byteOffset, 0);
+  assert.equal(transferredBytes.byteLength, expectedBytes.byteLength);
+  assert.equal(transferredBytes.buffer.byteLength, expectedBytes.byteLength);
+  assert.deepEqual(Array.from(transferredBytes), Array.from(expectedBytes));
+
+  for (const forbiddenByte of forbiddenAdjacentBytes) {
+    assert.equal(transferredBytes.includes(forbiddenByte), false);
+  }
+}
+
 test("P0-05 PDF worker boundary rejects non-Buffer and non-Uint8Array input", async () => {
   pdfWorkerBoundaryTestables.resetPdfAssessorWorkerState();
 
@@ -152,6 +242,42 @@ test("P0-05 PDF worker boundary opens a minimal synthetic PDF inside a file-back
   assert.equal(pdfWorkerBoundaryTestables.getPdfAssessorWorkerState().active, 0);
 });
 
+test("P0-05 PDF worker boundary transfers only an owned exact visible-range copy", async () => {
+  for (const { name, input, expectedBytes, forbiddenAdjacentBytes } of ownershipInputs()) {
+    pdfWorkerBoundaryTestables.resetPdfAssessorWorkerState();
+    const originalByteLength = input.byteLength;
+    const originalBytes = Uint8Array.from(input);
+    const worker = new SyntheticWorker();
+    let transferredBytes = null;
+
+    const promise = pdfWorkerBoundaryTestables.runPdfAssessorWorkerBoundaryWithTestControls(input, {
+      createWorker(bytes) {
+        transferredBytes = bytes;
+        return worker;
+      },
+    });
+
+    assertFreshVisibleRangeCopy({
+      input,
+      transferredBytes,
+      expectedBytes,
+      forbiddenAdjacentBytes,
+    });
+
+    worker.emit("message", {
+      type: "kai_pdf_worker_liveness_ok",
+      liveness_operation: "Document.countPages",
+      handles_destroyed: true,
+    });
+    worker.finishTermination();
+
+    assert.equal(await promise, undefined, name);
+    assert.equal(input.byteLength, originalByteLength, name);
+    assertReadableAndUnchanged(input, originalBytes);
+    assert.equal(pdfWorkerBoundaryTestables.getPdfAssessorWorkerState().active, 0, name);
+  }
+});
+
 test("P0-05 PDF worker boundary timeout latches only failed / security_assessment_timeout", async () => {
   pdfWorkerBoundaryTestables.resetPdfAssessorWorkerState();
   const worker = new SyntheticWorker();
@@ -171,6 +297,42 @@ test("P0-05 PDF worker boundary timeout latches only failed / security_assessmen
     category: "security_assessment_timeout",
   });
   assert.equal(PDF_ASSESSOR_PARENT_TIMEOUT_MS, 60_000);
+});
+
+test("P0-05 PDF worker boundary preserves caller-owned input after timeout", async () => {
+  for (const { name, input, expectedBytes, forbiddenAdjacentBytes } of ownershipInputs()) {
+    pdfWorkerBoundaryTestables.resetPdfAssessorWorkerState();
+    const originalByteLength = input.byteLength;
+    const originalBytes = Uint8Array.from(input);
+    const worker = new SyntheticWorker();
+    let transferredBytes = null;
+
+    const promise = pdfWorkerBoundaryTestables.runPdfAssessorWorkerBoundaryWithTestControls(input, {
+      createWorker(bytes) {
+        transferredBytes = bytes;
+        return worker;
+      },
+      timeoutMs: 1,
+    });
+
+    assertFreshVisibleRangeCopy({
+      input,
+      transferredBytes,
+      expectedBytes,
+      forbiddenAdjacentBytes,
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    worker.finishTermination();
+
+    assert.deepEqual(await promise, {
+      status: "failed",
+      category: "security_assessment_timeout",
+    }, name);
+    assert.equal(input.byteLength, originalByteLength, name);
+    assertReadableAndUnchanged(input, originalBytes);
+    assert.equal(pdfWorkerBoundaryTestables.getPdfAssessorWorkerState().active, 0, name);
+  }
 });
 
 test("P0-05 PDF worker boundary rejects late worker messages after timeout", async () => {
