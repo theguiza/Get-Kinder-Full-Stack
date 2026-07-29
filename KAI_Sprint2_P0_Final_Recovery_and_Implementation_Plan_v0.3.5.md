@@ -4117,7 +4117,7 @@ applicable_repository_instructions: root AGENTS.md only; DATABASE_URL sentinel u
 owner_decision_authority: OWNER_DECISION.P0_05_BOUNDED_ASSESSOR_V1
 committed_dependency_record: TOOL_VERIFIED package.json and package-lock.json pin mupdf exactly to 1.28.0
 committed_pdf_worker_boundary: TOOL_VERIFIED file-backed module worker; main-thread MuPDF import prohibited; data-URL and eval workers prohibited; 25 MiB pre-parse input gate; 60000 ms parent timeout; maximum active PDF assessor workers 1; failed/security_assessment_timeout latch; internal busy result failed/maximum_concurrent_pdf_assessor_workers_exceeded
-contention_authority: TOOL_VERIFIED living ExecPlan committed PDF worker-boundary record authorizes reuse of the existing internal maximum_concurrent_pdf_assessor_workers_exceeded fail-closed busy convention; repository contract and canonical KAI safe-error vocabulary do not define a public HTTP/KAI error for this internal worker result
+contention_authority: NOT_CONFIRMED; current worker boundary emits internal busy result failed/maximum_concurrent_pdf_assessor_workers_exceeded; repository contract and canonical KAI safe-error vocabulary do not define a public HTTP/KAI error for this internal worker result
 caller_ownership_before: production boundary already created a fresh Uint8Array with input.byteLength, copied input visible bytes through bytes.set(input), and transferred only the fresh backing ArrayBuffer; caller Buffer/Uint8Array backing stores were not transferred
 caller_ownership_correction_applied: false
 caller_ownership_after: unchanged production implementation; new regression tests prove the existing owned exact-length visible-range transfer mechanism
