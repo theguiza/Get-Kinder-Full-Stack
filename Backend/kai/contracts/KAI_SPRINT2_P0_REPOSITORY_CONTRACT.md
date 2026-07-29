@@ -1600,6 +1600,12 @@ ooxml_external_relationship_detected:
 
 csv_row_limit_exceeded:
   policy: block
+
+xlsx_sheet_limit_exceeded:
+  policy: block
+
+xlsx_cell_limit_exceeded:
+  policy: block
 ```
 
 Prompt-injection authority:
@@ -1743,6 +1749,62 @@ The detector must not retain rows or cell values. Lone CR or malformed quoting u
 Instruction-like and formula-like values beginning with `=`, `+`, `-`, or `@` remain inert data. Do not execute, rewrite, neutralize, return, persist, expose, or log CSV content. Formula-output neutralization remains a future output-specific obligation before any preview, spreadsheet rendering, assistant exposure, or export is enabled; this row-limit detector does not perform output rendering.
 
 State and integration boundary: this detector directly changes none of `file_policy_status`, `processing_status`, `parse_status`, or `upload_state`. It returns an internal result only. No executor mapping, service wiring, route wiring, listener wiring, database write, audit write, persistence, public API mapping, client serialization, XLSX work, deployment configuration, production configuration, or PDF-worker change is authorized by this decision.
+
+## OWNER_DECISION.P0_05_XLSX_SHEET_CELL_LIMIT_DETECTOR_V1
+
+```text
+decision_evidence: USER_CONFIRMED
+authority_created_by: owner authorization for this package
+classification: internal_non_persisted_xlsx_security_result
+maximum_sheets: 20
+maximum_cells: 1000000
+```
+
+This owner decision newly authorizes the internal categories `xlsx_sheet_limit_exceeded` and `xlsx_cell_limit_exceeded`, and the exact two-key result shapes below. They must not be described as pre-existing committed repository authority before this decision.
+
+XLSX sheet-limit exceeded result:
+
+```text
+policy: block
+category: xlsx_sheet_limit_exceeded
+exact_keys: policy, category
+```
+
+XLSX cell-limit exceeded result:
+
+```text
+policy: block
+category: xlsx_cell_limit_exceeded
+exact_keys: policy, category
+```
+
+No block result:
+
+```text
+undefined
+```
+
+`undefined` means only that this detector did not establish an XLSX sheet-limit or cell-limit block. It is not a file-policy pass, type-agreement pass, parser-eligibility result, upload acceptance result, macro-safety result, external-relationship result, path-safety result, formula-safety result, instruction-safety result, content-validity result, or authorization for downstream processing.
+
+Precedence:
+
+```text
+complete XLSX shallow identity
+-> bounded XLSX sheet-count detector
+-> bounded XLSX cell-count detector
+```
+
+This detector must run only after the existing complete XLSX shallow identity gate. It must not be placed in, imported by, or executed inside the PDF worker.
+
+Counting rules: maximum sheets is 20; count direct `<sheet>` elements in the workbook `<sheets>` collection; visible, hidden, and veryHidden sheets all count; stop immediately when sheet 21 is established; evaluate sheet limit before cell limit. Resolve each sheet's `r:id` only through `xl/_rels/workbook.xml.rels`. Count cells only in internally referenced worksheet parts reached from workbook sheet entries. Do not count orphan worksheet files.
+
+Cell rules: maximum cells across the workbook is 1000000; count actual worksheet `<c>` XML elements by namespace/local name; stop immediately when cell 1000001 is established. Every actual `<c>` counts equally, including blank, formula, error, shared-string, and value cells. Do not use regex, byte searching, worksheet dimensions, row numbers, ranges, shared strings, comments, formulas, or text containing `<c>` as substitutes.
+
+Relationship and malformed-input boundary: missing, duplicate, unresolved, malformed, absolute, external, or traversal relationship mappings use the existing sanitized failure path. Do not follow those relationship targets and do not assign later OOXML relationship/path categories in this package. DTD/entity declarations, unsupported XML, malformed ZIP/XML, unsupported compression, decompression failure, or unexpected parser output use sanitized failure, never block or pass. Do not resolve DTDs, entities, schemas, network resources, or external references.
+
+Formula and instruction-like contents remain inert. Do not execute, evaluate, rewrite, return, retain, persist, expose, or log workbook content, formulas, filenames, relationship targets, XML, paths, stacks, parser internals, rows, cells, values, or counts. The detector must avoid retaining complete worksheets, rows, cells, formulas, or values.
+
+State and integration boundary: this detector directly changes none of `file_policy_status`, `processing_status`, `parse_status`, or `upload_state`. It returns an internal result only. No executor mapping, service wiring, route wiring, listener wiring, database write, audit write, persistence, public API mapping, client serialization, macro detection, external-relationship classification, archive-limit work, deployment configuration, production configuration, or PDF-worker change is authorized by this decision.
 
 Protected PDF result:
 

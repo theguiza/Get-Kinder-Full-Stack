@@ -58,6 +58,11 @@ export const KAI_SPRINT2_P0_CSV_LIMITS = Object.freeze({
   maxLogicalRecords: 100000,
 });
 
+export const KAI_SPRINT2_P0_XLSX_LIMITS = Object.freeze({
+  maxSheets: 20,
+  maxCells: 1000000,
+});
+
 export const KAI_SPRINT2_P0_UPLOAD_STATES = Object.freeze([
   "reserved",
   "upload_started",

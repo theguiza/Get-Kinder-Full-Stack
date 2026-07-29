@@ -17,6 +17,7 @@ import {
   KAI_SPRINT2_P0_STRING_LIMITS,
   KAI_SPRINT2_P0_UPLOAD_STATES,
   KAI_SPRINT2_P0_UPLOAD_TIMING,
+  KAI_SPRINT2_P0_XLSX_LIMITS,
 } from "../Backend/kai/config/kaiSprint2P0Contract.js";
 import { VALID_REVIEW_QUEUE_TYPES } from "../Backend/kai/validators/intakeValidators.js";
 
@@ -50,6 +51,10 @@ test("repository contract locks request, string, and resource limits", () => {
   });
   assert.deepEqual(KAI_SPRINT2_P0_CSV_LIMITS, {
     maxLogicalRecords: 100000,
+  });
+  assert.deepEqual(KAI_SPRINT2_P0_XLSX_LIMITS, {
+    maxSheets: 20,
+    maxCells: 1000000,
   });
 });
 
@@ -221,6 +226,28 @@ test("repository contract records CSV row-limit detector authority and boundarie
   assert.match(contract, /Lone CR or malformed quoting uses the sanitized CSV row-limit failure path/);
   assert.match(contract, /Instruction-like and formula-like values beginning with `=`, `\+`, `-`, or `@` remain inert data/);
   assert.match(contract, /Do not execute, rewrite, neutralize, return, persist, expose, or log CSV content/);
+  assert.match(contract, /directly changes none of `file_policy_status`, `processing_status`, `parse_status`, or `upload_state`/);
+});
+
+test("repository contract records XLSX sheet and cell limit detector authority and boundaries", () => {
+  assert.match(contract, /OWNER_DECISION\.P0_05_XLSX_SHEET_CELL_LIMIT_DETECTOR_V1/);
+  assert.match(contract, /maximum_sheets: 20/);
+  assert.match(contract, /maximum_cells: 1000000/);
+  assert.match(contract, /policy: block\s+category: xlsx_sheet_limit_exceeded\s+exact_keys: policy, category/);
+  assert.match(contract, /policy: block\s+category: xlsx_cell_limit_exceeded\s+exact_keys: policy, category/);
+  assert.match(contract, /No block result:\s+```text\s+undefined/);
+  assert.match(contract, /`undefined` means only that this detector did not establish an XLSX sheet-limit or cell-limit block/);
+  assert.match(contract, /complete XLSX shallow identity\s+-> bounded XLSX sheet-count detector\s+-> bounded XLSX cell-count detector/);
+  assert.match(contract, /count direct `<sheet>` elements in the workbook `<sheets>` collection/);
+  assert.match(contract, /visible, hidden, and veryHidden sheets all count/);
+  assert.match(contract, /stop immediately when sheet 21 is established/);
+  assert.match(contract, /count actual worksheet `<c>` XML elements by namespace\/local name/);
+  assert.match(contract, /Do not use regex, byte searching, worksheet dimensions, row numbers, ranges, shared strings, comments, formulas/);
+  assert.match(contract, /Do not count orphan worksheet files/);
+  assert.match(contract, /missing, duplicate, unresolved, malformed, absolute, external, or traversal relationship mappings use the existing sanitized failure path/);
+  assert.match(contract, /DTD\/entity declarations, unsupported XML, malformed ZIP\/XML, unsupported compression, decompression failure, or unexpected parser output use sanitized failure/);
+  assert.match(contract, /Formula and instruction-like contents remain inert/);
+  assert.match(contract, /Do not execute, evaluate, rewrite, return, retain, persist, expose, or log workbook content, formulas, filenames, relationship targets, XML, paths, stacks, parser internals, rows, cells, values, or counts/);
   assert.match(contract, /directly changes none of `file_policy_status`, `processing_status`, `parse_status`, or `upload_state`/);
 });
 

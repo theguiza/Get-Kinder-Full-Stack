@@ -4393,6 +4393,54 @@ next_package_or_stop_condition: OWNER-DIRECTED STOP after this single bounded im
 commit_hash: report after commit; a commit cannot contain its own SHA
 ```
 
+## P0-05 XLSX sheet and cell limit detection
+
+```text
+p0_05_package_status: xlsx_sheet_cell_limit_detection_complete_ready_to_commit
+implementation_status: bounded_internal_xlsx_result_only
+verification_status: TOOL_VERIFIED after focused XLSX, repository-contract, affected file-policy, Sprint 2, full-suite, diff, and post-commit clean-state checks complete
+evidence_class: TOOL_VERIFIED
+decision_evidence: USER_CONFIRMED
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 7fc797ea6c5aade13ff1ab440f9cd53adcd0cfc7
+working_tree_clean_at_start: true
+staged_paths_at_start: none
+applicable_repository_instructions: root AGENTS.md only; DATABASE_URL sentinel used for every Node and npm command; no fetch, push, database/cloud/production/deployment/current-state, Implementation Baseline, P0-06B, executor mapping, persistence, route/service/listener wiring, PDF-worker change, macro detection, external-relationship classification, archive-limit work, or Gate A work authorized or performed
+owner_decision_authority: OWNER_DECISION.P0_05_XLSX_SHEET_CELL_LIMIT_DETECTOR_V1 newly authorized by this package prompt; the categories xlsx_sheet_limit_exceeded and xlsx_cell_limit_exceeded and their exact two-key result shapes were not described as pre-existing committed repository authority
+pre_edit_capability_proof: existing p0FileTypeAgreementDetector parses ZIP EOCD and central-directory records to establish complete XLSX shallow identity without decompression; Node built-in node:zlib provides stream-capable raw DEFLATE for selected ZIP entries; TextDecoder fatal mode plus the purpose-built XmlElementScanner incrementally tokenizes workbook, relationship, and worksheet XML by chunks; implementation inspects only xl/workbook.xml, xl/_rels/workbook.xml.rels, and workbook-referenced worksheet parts after complete XLSX shallow identity; no new dependency is required
+authorized_file_scope: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md; Backend/kai/config/kaiSprint2P0Contract.js; Backend/kai/validators/xlsxSheetCellLimitDetector.js; __tests__/kai-sprint2-xlsx-sheet-cell-limit-detector.spec.js; __tests__/kai-sprint2-p0-repository-contract.spec.js; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+maximum_sheets: 20
+maximum_cells: 1000000
+precedence_matches_owner_decision: complete XLSX shallow identity -> bounded XLSX sheet-count detector -> bounded XLSX cell-count detector
+protected_results: exactly policy block and category xlsx_sheet_limit_exceeded or xlsx_cell_limit_exceeded; exact enumerable keys policy and category; no scope, evidence, metadata, sheet counts, cell counts, rows, cells, formulas, values, identifiers, content, paths, or other keys
+at_or_below_limit_result: undefined; means only this detector did not establish an XLSX sheet-limit or cell-limit block; not a file-policy pass, type-agreement pass, parser-eligibility result, upload acceptance result, macro-safety result, external-relationship result, path-safety result, formula-safety result, instruction-safety result, content-validity result, or downstream-processing authorization
+counter_behavior: counts direct sheet elements in workbook sheets collection including visible, hidden, and veryHidden sheets; stops immediately at sheet 21; resolves sheet r:id only through xl/_rels/workbook.xml.rels; counts actual worksheet c elements by namespace/local name only in internally referenced worksheet parts; stops immediately at cell 1000001; dimensions, row numbers, ranges, shared strings, comments, formulas, string text containing <c>, and orphan worksheets do not create counted cells
+sanitized_failure_behavior: missing, duplicate, unresolved, malformed, absolute, external, or traversal relationship mappings; DTD/entity declarations; unsupported XML; malformed ZIP/XML; unsupported compression; decompression failure; and unexpected parser output use the sanitized XLSX sheet/cell limit inspection failure path; no raw content, decoded content, parser detail, stack, path, identifier, relationship target, row, cell, value, formula, or internal detail is returned by the detector result
+instruction_formula_boundary: formula and instruction-like contents remain inert data; detector does not execute, evaluate, rewrite, neutralize, return, persist, expose, retain, or log workbook content, formulas, filenames, relationship targets, XML, paths, rows, cells, or values
+state_and_integration_boundary: detector directly changes none of file_policy_status, processing_status, parse_status, or upload_state; internal result only
+executor_or_route_wiring_changed: false
+database_or_audit_writes_added: false
+public_api_mapping_added: false
+client_serialization_added: false
+pdf_worker_changed: false
+macro_detection_added: false
+external_relationship_classification_added: false
+archive_limit_work_added: false
+dependencies_or_lockfiles_changed: false
+focused_xlsx_test: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-xlsx-sheet-cell-limit-detector.spec.js __tests__/kai-sprint2-p0-repository-contract.spec.js - tests 24; pass 24; fail 0
+focused_contract_test: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-xlsx-sheet-cell-limit-detector.spec.js __tests__/kai-sprint2-p0-repository-contract.spec.js - tests 24; pass 24; fail 0
+affected_file_policy_tests: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-xlsx-sheet-cell-limit-detector.spec.js __tests__/kai-sprint2-p0-repository-contract.spec.js __tests__/kai-sprint2-p0-file-type-agreement-detector.spec.js __tests__/kai-sprint2-csv-row-limit-detector.spec.js __tests__/kai-sprint2-txt-md-byte-detector.spec.js __tests__/kai-sprint2-p0-05f-combined-completeness.spec.js - tests 74; pass 74; fail 0
+sprint2_suite_initial_sandbox_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - sandbox run hit known localhost listen EPERM with tests 772; pass 745; fail 27
+sprint2_suite: localhost-capable DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - tests 820; pass 820; fail 0
+full_repository_suite_initial_sandbox_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - sandbox run hit known localhost listen EPERM with tests 877; pass 850; fail 27
+full_repository_suite: localhost-capable DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - tests 925; pass 925; fail 0
+complete_diff_inspected: true before ExecPlan update and rechecked before commit
+git_diff_check: git diff --check - pass
+changed_files: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md; Backend/kai/config/kaiSprint2P0Contract.js; Backend/kai/validators/xlsxSheetCellLimitDetector.js; __tests__/kai-sprint2-xlsx-sheet-cell-limit-detector.spec.js; __tests__/kai-sprint2-p0-repository-contract.spec.js; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this single bounded implementation package commit; do not start executor mapping, persistence, route/service/listener wiring, public API/client mapping, database/cloud/production/deployment behavior, P0-06B, Gate A, macro detection, external-relationship classification, archive-limit work, Current State update, Implementation Baseline update, push, or deploy without separate owner authorization
+commit_hash: report after commit; a commit cannot contain its own SHA
+```
+
 
 ## P0-06A unauthorized transition negative coverage
 
