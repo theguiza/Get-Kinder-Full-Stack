@@ -4117,7 +4117,7 @@ applicable_repository_instructions: root AGENTS.md only; DATABASE_URL sentinel u
 owner_decision_authority: OWNER_DECISION.P0_05_BOUNDED_ASSESSOR_V1
 committed_dependency_record: TOOL_VERIFIED package.json and package-lock.json pin mupdf exactly to 1.28.0
 committed_pdf_worker_boundary: TOOL_VERIFIED file-backed module worker; main-thread MuPDF import prohibited; data-URL and eval workers prohibited; 25 MiB pre-parse input gate; 60000 ms parent timeout; maximum active PDF assessor workers 1; failed/security_assessment_timeout latch; internal busy result failed/maximum_concurrent_pdf_assessor_workers_exceeded
-contention_authority: NOT_CONFIRMED; current worker boundary emits internal busy result failed/maximum_concurrent_pdf_assessor_workers_exceeded; repository contract and canonical KAI safe-error vocabulary do not define a public HTTP/KAI error for this internal worker result
+contention_authority_at_package_time: NOT_CONFIRMED; later resolved by OWNER_DECISION.P0_05_PDF_WORKER_CONTENTION_V1 in the P0-05 PDF worker contention authority package; current worker boundary emits internal busy result failed/maximum_concurrent_pdf_assessor_workers_exceeded; repository contract and canonical KAI safe-error vocabulary do not define a public HTTP/KAI error for this internal worker result
 caller_ownership_before: production boundary already created a fresh Uint8Array with input.byteLength, copied input visible bytes through bytes.set(input), and transferred only the fresh backing ArrayBuffer; caller Buffer/Uint8Array backing stores were not transferred
 caller_ownership_correction_applied: false
 caller_ownership_after: unchanged production implementation; new regression tests prove the existing owned exact-length visible-range transfer mechanism
@@ -4140,6 +4140,48 @@ policy_state_writes_added: false
 production_or_deployment_authorized: false
 changed_files: __tests__/kai-sprint2-pdf-assessor-worker-boundary.spec.js; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
 next_package: PDF encryption and password detection
+commit_hash: report after commit; a commit cannot contain its own SHA
+```
+
+## P0-05 PDF worker contention authority
+
+```text
+p0_05_package_status: pdf_worker_contention_authority_recorded_ready_to_commit
+implementation_status: contract_and_test_only
+verification_status: TOOL_VERIFIED after focused worker-boundary, repository-contract, affected file-policy, Sprint 2, full-suite, and diff checks complete
+evidence_class: TOOL_VERIFIED
+decision_evidence: USER_CONFIRMED
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 9b18a04b20f4907bec0f10cd1e4bfa577f0de98f
+working_tree_clean_at_start: true
+staged_paths_at_start: none
+applicable_repository_instructions: root AGENTS.md only; DATABASE_URL sentinel used for every Node and npm command; no fetch, push, database/cloud/production/deployment/current-state, P0-06B, public API mapping, persistence, multi-process coordination, queue, retry, audit-write, executor-operation, or Gate A work authorized or performed
+owner_decision_authority: OWNER_DECISION.P0_05_PDF_WORKER_CONTENTION_V1
+authorized_file_scope: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md; __tests__/kai-sprint2-pdf-assessor-worker-boundary.spec.js; __tests__/kai-sprint2-p0-repository-contract.spec.js; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+active_package_scope: local synthetic P0 PDF worker contention authority plus focused tests; no production or multi-process coordination, public HTTP/API mapping, database persistence, route/service/storage/lifecycle integration, queue, retry loop, implicit wait, executor operation, audit write, DDL enum, client serialization, deployment, or real-client-data work
+contract_record: OWNER_DECISION.P0_05_PDF_WORKER_CONTENTION_V1 recorded maximum_concurrent_pdf_assessor_workers 1; classification_scope internal_non_persisted_pdf_worker_boundary_result; authorization_scope local_synthetic_P0_only; runtime_public_api_mapping_authorized false; database_persistence_authorized false; production_or_multi_process_coordination_authorized false
+result_shape_authority: internal contention result is exactly status failed and category maximum_concurrent_pdf_assessor_workers_exceeded; exact enumerable keys status and category; policy and scope keys not emitted
+contention_semantics_recorded: contention evaluated before second PDF worker creation; no second worker, queue, retry loop, or implicit wait; already-active worker unaffected; active permit remains owned until active invocation cleanup; contention produces neither file-policy pass nor file-policy block
+state_and_side_effect_boundary_recorded: contention does not change file_policy_status, processing_status, parse_status, or upload_state; performs no executor operation, audit write, or database write; exposes no raw bytes, document content, identifiers, worker internals, or infrastructure details
+worker_boundary_test_assertions_added: existing one-active-worker test now asserts active permit is held before contention, contention returns a frozen two-key object, policy/scope/lifecycle/telemetry keys are absent, no second worker is created, and active worker state remains active until first invocation cleanup
+repository_contract_test_assertions_added: contract test now asserts the owner-decision identifier, maximum worker value, classification scope, exact result keys, no policy/scope keys, no queue/retry/wait, no state mutation, no executor/audit/database write, and no canonical public HTTP error mapping
+production_runtime_code_changed: false
+dependency_or_lockfile_changed: false
+executor_enabled: false
+policy_state_writes_added: false
+public_api_mapping_added: false
+database_or_cloud_access: not performed
+production_or_deployment_authorized: false
+current_state_update: false
+focused_worker_and_contract_test: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-pdf-assessor-worker-boundary.spec.js __tests__/kai-sprint2-p0-repository-contract.spec.js - tests 23; pass 23; fail 0
+affected_file_policy_tests: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-pdf-assessor-worker-boundary.spec.js __tests__/kai-sprint2-mupdf-dependency.spec.js __tests__/kai-sprint2-pdf-shallow-identity-fixture-corpus.spec.js __tests__/kai-sprint2-p0-file-type-agreement-detector.spec.js __tests__/kai-sprint2-p0-05f-combined-completeness.spec.js __tests__/kai-sprint2-p0-repository-contract.spec.js - tests 75; pass 75; fail 0
+sprint2_suite_initial_sandbox_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - sandbox run hit known localhost listen EPERM with tests 710; pass 683; fail 27
+sprint2_suite: listener-capable DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - tests 758; pass 758; fail 0
+full_repository_suite_initial_sandbox_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - sandbox run hit known localhost listen EPERM with tests 815; pass 788; fail 27
+full_repository_suite: listener-capable DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - tests 863; pass 863; fail 0
+git_diff_check: git diff --check - pass
+changed_files: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md; __tests__/kai-sprint2-pdf-assessor-worker-boundary.spec.js; __tests__/kai-sprint2-p0-repository-contract.spec.js; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this contract-and-test-only package commit; do not begin another leaf, implement PDF security detection, add public API mapping, persistence, production/multi-process coordination, executor/audit/database writes, queue/retry behavior, P0-06B, Gate A, push, or deploy without separate owner authorization
 commit_hash: report after commit; a commit cannot contain its own SHA
 ```
 

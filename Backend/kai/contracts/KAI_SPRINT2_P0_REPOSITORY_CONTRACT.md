@@ -1636,6 +1636,32 @@ P0 output boundary:
 
 Future output-specific neutralization remains mandatory before any preview, spreadsheet rendering, assistant exposure, or export is enabled. This decision does not introduce a new file-policy enum.
 
+## OWNER_DECISION.P0_05_PDF_WORKER_CONTENTION_V1
+
+```text
+decision_evidence: USER_CONFIRMED
+maximum_concurrent_pdf_assessor_workers: 1
+classification_scope: internal_non_persisted_pdf_worker_boundary_result
+authorization_scope: local_synthetic_P0_only
+runtime_public_api_mapping_authorized: false
+database_persistence_authorized: false
+production_or_multi_process_coordination_authorized: false
+```
+
+When one PDF assessor worker is already active in the local synthetic single-process boundary, contention is evaluated before a second PDF worker is created. The contention result is an internal worker-boundary result only:
+
+```text
+status: failed
+category: maximum_concurrent_pdf_assessor_workers_exceeded
+exact_keys: status, category
+policy_key_emitted: false
+scope_key_emitted: false
+```
+
+The contention result is not a file-policy pass, not a file-policy block, not a database or DDL-backed enum, not a persisted file status, and not a canonical public HTTP error. It is not serialized to a client unless a later separately authorized mapping is added.
+
+Contention creates no second worker, queue, retry loop, or implicit wait. The already-active worker is unaffected, and the active permit remains owned until that active invocation completes cleanup. Contention does not change `file_policy_status`, `processing_status`, `parse_status`, or `upload_state`; performs no executor operation, audit write, or database write; and exposes no raw bytes, document content, identifiers, worker internals, or infrastructure details.
+
 P0-07 case mapping:
 
 ```text
