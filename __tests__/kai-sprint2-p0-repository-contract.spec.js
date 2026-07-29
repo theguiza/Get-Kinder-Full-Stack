@@ -141,21 +141,6 @@ test("operation roles and the disabled security-executor identity are explicit",
   assert.match(contract, /This package defines the identity but does not enable it\./);
 });
 
-test("contract records PDF worker contention as internal non-persisted boundary output only", () => {
-  assert.match(contract, /OWNER_DECISION\.P0_05_PDF_WORKER_CONTENTION_V1/);
-  assert.match(contract, /maximum_concurrent_pdf_assessor_workers: 1/);
-  assert.match(contract, /classification_scope: internal_non_persisted_pdf_worker_boundary_result/);
-  assert.match(contract, /status: failed/);
-  assert.match(contract, /category: maximum_concurrent_pdf_assessor_workers_exceeded/);
-  assert.match(contract, /exact_keys: status, category/);
-  assert.match(contract, /policy_key_emitted: false/);
-  assert.match(contract, /scope_key_emitted: false/);
-  assert.match(contract, /Contention creates no second worker, queue, retry loop, or implicit wait/);
-  assert.match(contract, /does not change `file_policy_status`, `processing_status`, `parse_status`, or `upload_state`/);
-  assert.match(contract, /performs no executor operation, audit write, or database write/);
-  assert.match(contract, /not a canonical public HTTP error/);
-});
-
 test("queue vocabulary is shared by the repository contract and runtime validator", () => {
   assert.deepEqual(VALID_REVIEW_QUEUE_TYPES, KAI_SPRINT2_P0_REVIEW_QUEUE_TYPES);
   for (const queueType of KAI_SPRINT2_P0_REVIEW_QUEUE_TYPES) {

@@ -4185,6 +4185,29 @@ next_package_or_stop_condition: OWNER-DIRECTED STOP after this contract-and-test
 commit_hash: report after commit; a commit cannot contain its own SHA
 ```
 
+## P0-05 PDF worker contention authority correction
+
+```text
+p0_05_package_status: pdf_worker_contention_decision_and_scope_corrected_ready_to_commit
+evidence_class: TOOL_VERIFIED
+decision_evidence: USER_CONFIRMED
+starting_head: 451d9b14d40a304b2dea3eac8987c032718f7dd6
+parent_commit: 9b18a04b20f4907bec0f10cd1e4bfa577f0de98f
+superseded_claims_commit: 451d9b1
+correction_scope: contract decision record, two parent-blob test restores, and this ExecPlan correction only
+superseded_451d9b1_claims: 451d9b1 recorded a drifted representation of OWNER_DECISION.P0_05_PDF_WORKER_CONTENTION_V1 and changed __tests__/kai-sprint2-pdf-assessor-worker-boundary.spec.js plus __tests__/kai-sprint2-p0-repository-contract.spec.js outside its documentation-only scope
+corrected_decision_record: this commit records the exact approved OWNER_DECISION.P0_05_PDF_WORKER_CONTENTION_V1 decision
+restored_tests: this commit restores __tests__/kai-sprint2-pdf-assessor-worker-boundary.spec.js and __tests__/kai-sprint2-p0-repository-contract.spec.js to their 9b18a04 blobs
+runtime_behavior_changed: false
+dependency_changed: false
+public_api_changed: false
+persistence_authority_changed: false
+deployment_authority_changed: false
+historical_test_evidence_boundary: 451d9b1 reported test results remain historical USER_CONFIRMED evidence only and do not authorize retaining its test edits
+next_package: PDF encryption and password detection
+commit_hash: report after commit; a commit cannot contain its own SHA
+```
+
 
 ## P0-06A unauthorized transition negative coverage
 

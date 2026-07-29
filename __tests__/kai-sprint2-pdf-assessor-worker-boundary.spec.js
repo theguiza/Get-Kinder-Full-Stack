@@ -400,12 +400,6 @@ test("P0-05 PDF worker boundary permits at most one active worker", async () => 
       return firstWorker;
     },
   });
-  assert.deepEqual(pdfWorkerBoundaryTestables.getPdfAssessorWorkerState(), {
-    active: 1,
-    maxObserved: 1,
-    configuredMaximum: 1,
-  });
-
   const second = await pdfWorkerBoundaryTestables.runPdfAssessorWorkerBoundaryWithTestControls(syntheticPdfBytes(), {
     createWorker() {
       workerCreations += 1;
@@ -418,20 +412,6 @@ test("P0-05 PDF worker boundary permits at most one active worker", async () => 
     status: "failed",
     category: "maximum_concurrent_pdf_assessor_workers_exceeded",
   });
-  assert.deepEqual(Object.keys(second), ["status", "category"]);
-  assert.equal(Object.isFrozen(second), true);
-  for (const forbiddenKey of [
-    "policy",
-    "scope",
-    "file_policy_status",
-    "processing_status",
-    "parse_status",
-    "upload_state",
-    "worker_created",
-    "configured_maximum",
-  ]) {
-    assert.equal(Object.hasOwn(second, forbiddenKey), false, forbiddenKey);
-  }
   assert.equal(workerCreations, 1);
   assert.deepEqual(pdfWorkerBoundaryTestables.getPdfAssessorWorkerState(), {
     active: 1,
