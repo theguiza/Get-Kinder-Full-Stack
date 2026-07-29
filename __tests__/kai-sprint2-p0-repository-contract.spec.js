@@ -20,6 +20,7 @@ import {
   KAI_SPRINT2_P0_UPLOAD_TIMING,
   KAI_SPRINT2_P0_XLSX_LIMITS,
 } from "../Backend/kai/config/kaiSprint2P0Contract.js";
+import { FORMULA_INJECTION_DANGEROUS_FIRST_BYTES } from "../Backend/kai/validators/formulaInjectionBoundary.js";
 import { VALID_REVIEW_QUEUE_TYPES } from "../Backend/kai/validators/intakeValidators.js";
 
 const contract = readFileSync("Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md", "utf8");
@@ -255,6 +256,39 @@ test("repository contract records CSV row-limit detector authority and boundarie
   assert.match(contract, /Instruction-like and formula-like values beginning with `=`, `\+`, `-`, or `@` remain inert data/);
   assert.match(contract, /Do not execute, rewrite, neutralize, return, persist, expose, or log CSV content/);
   assert.match(contract, /directly changes none of `file_policy_status`, `processing_status`, `parse_status`, or `upload_state`/);
+});
+
+test("repository contract records untrusted-content and formula-output helper boundary", () => {
+  assert.match(contract, /OWNER_DECISION\.P0_05_UNTRUSTED_CONTENT_FORMULA_OUTPUT_BOUNDARY_V1/);
+  assert.match(contract, /classification: pure_unwired_output_helper_and_inertness_proof/);
+  assert.match(contract, /new_policy_category: not introduced/);
+  assert.match(contract, /Uploaded instruction-like content remains untrusted inert data/);
+  assert.match(contract, /must not alter deterministic detector results, invoke downstream operations, authorize anything, create evidence or claims/);
+  assert.match(contract, /= 0x3D\s+\+ 0x2B\s+- 0x2D\s+@ 0x40\s+TAB 0x09\s+CR 0x0D/);
+  assert.deepEqual(FORMULA_INJECTION_DANGEROUS_FIRST_BYTES, [
+    0x3D,
+    0x2B,
+    0x2D,
+    0x40,
+    0x09,
+    0x0D,
+  ]);
+  assert.match(contract, /CSV lone CR remains rejected by the committed input gate/);
+  assert.match(contract, /CR detection remains available for other future string-output paths, including XLSX-derived values/);
+  assert.match(contract, /production_module: Backend\/kai\/validators\/formulaInjectionBoundary\.js/);
+  assert.match(contract, /hasFormulaInjectionDangerousPrefix/);
+  assert.match(contract, /escapeFormulaInjectionDangerousPrefix/);
+  assert.match(contract, /prefixes exactly one ASCII apostrophe when detection is true/);
+  assert.match(contract, /leaves already escaped strings unchanged/);
+  assert.match(contract, /repeated escaping is idempotent/);
+  assert.match(contract, /non-string values pass through unchanged/);
+  assert.match(contract, /numeric-looking strings such as "-5" are escaped/);
+  assert.match(contract, /no numeric exemption is allowed/);
+  assert.match(contract, /no P0 preview path consumes raw or escaped cell output/);
+  assert.match(contract, /no P0 export path consumes raw or escaped cell output/);
+  assert.match(contract, /no P0 assistant path consumes raw or escaped cell output/);
+  assert.match(contract, /helper output is not wired into detectors, routes, DTOs, services, storage, audit, metrics, logs, or returned-result content/);
+  assert.match(contract, /existing detector modules do not import or call LLM, assistant, approval, review, export, audit, metrics, or logging sinks with file content/);
 });
 
 test("repository contract records XLSX sheet and cell limit detector authority and boundaries", () => {

@@ -4986,6 +4986,44 @@ implementation_baseline_update: NOT_AUTHORIZED
 commit_hash: report after commit; a commit cannot contain its own SHA
 ```
 
+## P0-05 untrusted-content and formula-injection boundary
+
+```text
+p0_05_package_status: untrusted_content_formula_boundary_implemented_ready_to_commit
+implementation_status: complete
+verification_status: TOOL_VERIFIED after focused, affected, Sprint 2, full-suite, diff, and pre-commit checks
+evidence_class: TOOL_VERIFIED
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 3081e5ec2e06040cf763993b6f3fbe96acadd629
+working_tree_clean_at_start: true
+staged_paths_at_start: none
+applicable_repository_instructions: root AGENTS.md only; DATABASE_URL sentinel used for every Node and npm command; no fetch, push, database/cloud/scanner/network/dependency-install/production/deployment/current-state, executor, route/service/listener wiring, persistence, state transition, audit, preview/export/assistant/parser/rendering integration, P0-06B, or Gate A work authorized or performed
+owner_decision_authority: OWNER_DECISION.P0_05_UNTRUSTED_CONTENT_FORMULA_OUTPUT_BOUNDARY_V1 newly authorized by this package prompt; exact dangerous first-byte set equals 0x3D, plus 0x2B, minus 0x2D, at-sign 0x40, TAB 0x09, CR 0x0D
+pre_edit_existing_prompt_injection_boundary: TOOL_VERIFIED contract recorded instruction_text_inert, no LLM call, no tool or service action caused by file text, and no approval/source/evidence/claim/generation/export write
+pre_edit_existing_formula_boundary: TOOL_VERIFIED contract recorded formula_trigger_detected as metadata-only warning, warning alone does not block when all blocking checks pass, raw file mutation prohibited, P0 output boundary required no raw cell rendering/export, and future output-specific neutralization mandatory
+pre_edit_formula_escape_helper: TOOL_VERIFIED absent; no existing code helper escaped formula-like cell output before this package
+trace_result: TOOL_VERIFIED no current detector path passes uploaded content to an LLM/assistant or uses it as system, developer, validator, policy, approval, review, audit, metrics, error, log, or returned-result content; detector results are fixed metadata-only objects or undefined and sanitized failures are content-free
+implemented_helper: Backend/kai/validators/formulaInjectionBoundary.js exports FORMULA_INJECTION_DANGEROUS_FIRST_BYTES, hasFormulaInjectionDangerousPrefix, and escapeFormulaInjectionDangerousPrefix
+helper_behavior: detection returns boolean false for non-strings and already escaped strings; escaping prefixes exactly one ASCII apostrophe for the exact six-byte first-byte set; already escaped strings stay unchanged; repeated escaping is idempotent; non-string values pass through unchanged; input values and raw bytes are not mutated; numeric-looking strings including "-5" are escaped with no numeric exemption
+csv_lone_cr_boundary: unchanged; CR-prefixed CSV remains rejected by the existing input gate as lone_cr; CR detection remains available for future non-CSV or XLSX-derived string-output paths
+inertness_tests: instruction-like and benign CSV, TXT, and MD content of the same type and byte length produce identical deterministic type-gate assessment; CSV row-limit assessment remains identical for instruction-like and benign CSV content
+no_sink_tests: detector modules statically do not import or call LLM, assistant, approval, review, export, audit, metrics, or logging sinks; runtime deterministic assessment logs no file-content sentinels
+output_boundary_tests: P0 route, service, assistant-boundary, state-transition, and data-dictionary paths do not reference or consume raw or escaped cell-output sentinels or formula-helper output
+changed_files: Backend/kai/validators/formulaInjectionBoundary.js; __tests__/kai-sprint2-formula-injection-boundary.spec.js; Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md; __tests__/kai-sprint2-p0-repository-contract.spec.js; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+focused_formula_boundary_test: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-formula-injection-boundary.spec.js - tests 9; pass 9; fail 0
+focused_repository_contract_test: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-p0-repository-contract.spec.js - tests 20; pass 20; fail 0
+affected_file_security_tests_initial_sandbox_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test formula boundary, repository contract, CSV, TXT/MD, file-type agreement, XLSX, OOXML, assistant-boundary, and P0 acceptance specs - sandbox run hit known localhost listen EPERM; tests 153; pass 133; fail 20
+affected_file_security_tests: listener-capable DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test formula boundary, repository contract, CSV, TXT/MD, file-type agreement, XLSX, OOXML, assistant-boundary, and P0 acceptance specs - tests 153; pass 153; fail 0
+sprint2_suite_initial_sandbox_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - sandbox run hit known localhost listen EPERM; tests 827; pass 800; fail 27
+sprint2_suite: listener-capable DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - tests 875; pass 875; fail 0
+full_repository_suite: listener-capable DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - tests 980; pass 980; fail 0
+git_diff_check_before_execplan_update: git diff --check - pass
+complete_diff_inspected_before_execplan_update: true
+current_state_update: NOT_AUTHORIZED
+implementation_baseline_update: NOT_AUTHORIZED
+commit_hash: report after commit; a commit cannot contain its own SHA
+```
+
 
 ---
 

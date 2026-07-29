@@ -1726,6 +1726,83 @@ P0 output boundary:
 
 Future output-specific neutralization remains mandatory before any preview, spreadsheet rendering, assistant exposure, or export is enabled. This decision does not introduce a new file-policy enum.
 
+## OWNER_DECISION.P0_05_UNTRUSTED_CONTENT_FORMULA_OUTPUT_BOUNDARY_V1
+
+```text
+decision_evidence: USER_CONFIRMED
+authority_created_by: owner authorization for the untrusted-content and formula-injection boundary package
+classification: pure_unwired_output_helper_and_inertness_proof
+new_policy_category: not introduced
+state_transition_change: not introduced
+executor_change: not introduced
+route_service_persistence_audit_metric_change: not introduced
+preview_export_assistant_parser_rendering_integration: not introduced
+```
+
+Uploaded instruction-like content remains untrusted inert data. It must not alter deterministic detector results, invoke downstream operations, authorize anything, create evidence or claims, or appear in outputs, logs, errors, audit, metrics, policy results, validator results, or returned result content.
+
+The exact dangerous first-byte set authorized for the pure formula-output helper is:
+
+```text
+= 0x3D
++ 0x2B
+- 0x2D
+@ 0x40
+TAB 0x09
+CR 0x0D
+```
+
+This six-byte set is exact for the helper. It does not require CR-prefixed CSV input to pass the existing CSV text-byte gate. CSV lone CR remains rejected by the committed input gate. CR detection remains available for other future string-output paths, including XLSX-derived values.
+
+The helper module is:
+
+```text
+production_module: Backend/kai/validators/formulaInjectionBoundary.js
+exports:
+  FORMULA_INJECTION_DANGEROUS_FIRST_BYTES
+  hasFormulaInjectionDangerousPrefix
+  escapeFormulaInjectionDangerousPrefix
+```
+
+Helper behavior:
+
+```text
+detection:
+  accepts any value
+  returns a boolean
+  returns true only for string values whose first byte is one of the exact six authorized bytes
+  returns false for already escaped strings beginning with ASCII apostrophe
+  returns false for non-string values
+
+escaping:
+  prefixes exactly one ASCII apostrophe when detection is true
+  leaves already escaped strings unchanged
+  repeated escaping is idempotent
+  non-string values pass through unchanged
+  input values and raw file bytes are not mutated
+  numeric-looking strings such as "-5" are escaped
+  no numeric exemption is allowed
+```
+
+Defense-in-depth boundary:
+
+```text
+no P0 preview path consumes raw or escaped cell output
+no P0 export path consumes raw or escaped cell output
+no P0 assistant path consumes raw or escaped cell output
+no P0 parser or rendering path consumes raw or escaped cell output
+helper output is not wired into detectors, routes, DTOs, services, storage, audit, metrics, logs, or returned-result content
+```
+
+Inertness proof boundary:
+
+```text
+instruction-like and benign content of the same type and byte length produce identical deterministic assessment at the existing type and CSV row-limit gates
+existing detector modules do not import or call LLM, assistant, approval, review, export, audit, metrics, or logging sinks with file content
+detector results remain fixed metadata-only objects or undefined
+sanitized failures remain content-free
+```
+
 ## OWNER_DECISION.P0_05_PDF_WORKER_CONTENTION_V1
 
 maximum_concurrent_pdf_assessor_workers: 1
