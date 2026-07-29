@@ -1583,6 +1583,9 @@ pdf_embedded_file_detected:
 encrypted_or_password_protected:
   policy: block
 
+pdf_no_extractable_text:
+  policy: block
+
 ooxml_path_traversal_detected:
   policy: block
 
@@ -1722,6 +1725,44 @@ Repaired or truncated PDFs: MuPDF may repair and open a truncated or otherwise m
 
 State and integration boundary: this detector directly changes none of `file_policy_status`, `processing_status`, `parse_status`, or `upload_state`. It returns an internal worker result only. No executor mapping, service wiring, route wiring, listener wiring, database write, audit write, persistence, public API mapping, client serialization, deployment configuration, production configuration, or later PDF detector work is authorized by this decision.
 
+## OWNER_DECISION.P0_05_PDF_EXTRACTABLE_TEXT_DETECTOR_V1
+
+No extractable text result:
+
+```text
+policy: block
+category: pdf_no_extractable_text
+exact_keys: policy, category
+```
+
+Text-present result:
+
+```text
+undefined
+```
+
+`undefined` means only that at least one extracted non-whitespace character was found. It is not a file-policy pass and does not establish PDF validity, integrity, active-content safety, parser eligibility, upload acceptance, or that later PDF checks have completed.
+
+Precedence:
+
+```text
+committed extension/MIME/signature and complete shallow PDF identity
+-> successful MuPDF open
+-> encryption/password detector returns undefined
+-> bounded MuPDF page-level structured-text extraction
+-> later separately authorized PDF JavaScript, action, and embedded-file checks
+```
+
+Inspect every PDF page with the installed MuPDF 1.28.0 page-level text-extraction API: `Document.loadPage(index)`, `Page.toStructuredText()`, and `StructuredText.walk({ onChar })`. Do not use OCR. Do not return, persist, log, expose, or store extracted text. The detector may observe individual characters only inside the worker to decide whether a non-whitespace character exists.
+
+Return `undefined` if at least one page contains at least one extracted non-whitespace character. Return the no-extractable-text result when all pages contain zero extracted non-whitespace characters, including valid blank PDFs and graphics/image-only PDFs. A no-extractable-text block short-circuits later PDF JavaScript, action, and embedded-file checks when those later checks are implemented.
+
+Treat MuPDF open failure, page count failure, page load failure, structured-text extraction failure, thrown operations, malformed result types, or unusable dependency output as dependency failure, not block and not pass. Use the existing sanitized worker-failure path. Do not expose raw content, extracted text, unrestricted dependency errors, stack traces, paths, identifiers, worker internals, or infrastructure details.
+
+Repaired but openable PDFs remain subject to the previously recorded integrity deferral. This detector assesses only whether extractable text exists; it does not establish PDF validity, integrity, clean/safe status, machine-readability beyond text presence, parser eligibility, upload acceptance, or policy pass.
+
+State and integration boundary: this detector directly changes none of `file_policy_status`, `processing_status`, `parse_status`, or `upload_state`. It returns an internal worker result only. No executor mapping, service wiring, route wiring, listener wiring, database write, audit write, persistence, public API mapping, client serialization, OCR, deployment configuration, production configuration, PDF JavaScript/action detection, embedded-file detection, or another PDF detector leaf is authorized by this decision.
+
 P0-07 case mapping:
 
 ```text
@@ -1729,6 +1770,7 @@ XLSX path traversal -> ooxml_path_traversal_detected
 XLSX expansion bomb -> archive_entry_limit_exceeded, archive_expanded_size_limit_exceeded, archive_compression_ratio_limit_exceeded
 macros/external relationships -> ooxml_macro_detected, ooxml_external_relationship_detected
 encrypted PDF/XLSX -> encrypted_or_password_protected
+PDF without extractable text -> pdf_no_extractable_text
 PDF active content/embedded files -> pdf_active_content_detected, pdf_embedded_file_detected
 uploaded prompt-injection text -> instruction_text_inert
 formula cells -> formula_trigger_detected plus the P0 no-output boundary

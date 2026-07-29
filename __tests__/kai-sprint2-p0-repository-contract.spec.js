@@ -160,6 +160,25 @@ test("repository contract records PDF encryption/password detector authority and
   assert.match(contract, /No executor mapping, service wiring, route wiring, listener wiring, database write, audit write, persistence, public API mapping, client serialization, deployment configuration, production configuration, or later PDF detector work/);
 });
 
+test("repository contract records PDF extractable-text detector authority and boundaries", () => {
+  assert.match(contract, /OWNER_DECISION\.P0_05_PDF_EXTRACTABLE_TEXT_DETECTOR_V1/);
+  assert.match(contract, /policy: block\s+category: pdf_no_extractable_text\s+exact_keys: policy, category/);
+  assert.match(contract, /Text-present result:\s+```text\s+undefined/);
+  assert.match(contract, /at least one extracted non-whitespace character was found/);
+  assert.match(contract, /not a file-policy pass and does not establish PDF validity, integrity, active-content safety, parser eligibility, upload acceptance/);
+  assert.match(contract, /encryption\/password detector returns undefined\s+-> bounded MuPDF page-level structured-text extraction/);
+  assert.match(contract, /Document\.loadPage\(index\)`[^`]+`Page\.toStructuredText\(\)`[^`]+`StructuredText\.walk\(\{ onChar \}\)`/s);
+  assert.match(contract, /Do not use OCR/);
+  assert.match(contract, /Do not return, persist, log, expose, or store extracted text/);
+  assert.match(contract, /valid blank PDFs and graphics\/image-only PDFs/);
+  assert.match(contract, /short-circuits later PDF JavaScript, action, and embedded-file checks/);
+  assert.match(contract, /MuPDF open failure, page count failure, page load failure, structured-text extraction failure/);
+  assert.match(contract, /Use the existing sanitized worker-failure path/);
+  assert.match(contract, /Repaired but openable PDFs remain subject to the previously recorded integrity deferral/);
+  assert.match(contract, /directly changes none of `file_policy_status`, `processing_status`, `parse_status`, or `upload_state`/);
+  assert.match(contract, /No executor mapping, service wiring, route wiring, listener wiring, database write, audit write, persistence, public API mapping, client serialization, OCR, deployment configuration, production configuration, PDF JavaScript\/action detection, embedded-file detection, or another PDF detector leaf/);
+});
+
 test("queue vocabulary is shared by the repository contract and runtime validator", () => {
   assert.deepEqual(VALID_REVIEW_QUEUE_TYPES, KAI_SPRINT2_P0_REVIEW_QUEUE_TYPES);
   for (const queueType of KAI_SPRINT2_P0_REVIEW_QUEUE_TYPES) {

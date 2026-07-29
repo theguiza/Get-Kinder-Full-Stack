@@ -21,6 +21,14 @@ const PROTECTED_PDF_RESULT = Object.freeze({
   policy: "block",
   category: "encrypted_or_password_protected",
 });
+const NO_EXTRACTABLE_TEXT_PDF_RESULT = Object.freeze({
+  policy: "block",
+  category: "pdf_no_extractable_text",
+});
+const PDF_BLOCK_RESULT_BY_CATEGORY = Object.freeze({
+  encrypted_or_password_protected: PROTECTED_PDF_RESULT,
+  pdf_no_extractable_text: NO_EXTRACTABLE_TEXT_PDF_RESULT,
+});
 
 let activePdfAssessorWorkers = 0;
 let maxObservedPdfAssessorWorkers = 0;
@@ -96,13 +104,13 @@ function sanitizedWorkerFailure() {
   return new Error("PDF assessor worker failed.");
 }
 
-function isExactProtectedPdfResult(result) {
+function isExactPdfBlockResult(result) {
   return (
     result &&
     typeof result === "object" &&
     Object.keys(result).length === 2 &&
     result.policy === "block" &&
-    result.category === "encrypted_or_password_protected"
+    Object.hasOwn(PDF_BLOCK_RESULT_BY_CATEGORY, result.category)
   );
 }
 
@@ -191,12 +199,12 @@ async function runPdfAssessorWorkerBoundaryInternal(input, options = {}) {
 
       if (message?.type === "kai_pdf_worker_liveness_ok") {
         if (Object.hasOwn(message, "result")) {
-          if (!isExactProtectedPdfResult(message.result)) {
+          if (!isExactPdfBlockResult(message.result)) {
             settle({ error: sanitizedWorkerFailure() });
             return;
           }
 
-          settle({ result: PROTECTED_PDF_RESULT });
+          settle({ result: PDF_BLOCK_RESULT_BY_CATEGORY[message.result.category] });
           return;
         }
 
@@ -251,7 +259,7 @@ export async function runPdfAssessorWorkerBoundary(input) {
 
 export const __testables = Object.freeze({
   createResultLatch,
-  isExactProtectedPdfResult,
+  isExactPdfBlockResult,
   getDefaultWorkerUrlProtocol() {
     return PDF_WORKER_THREAD_URL.protocol;
   },

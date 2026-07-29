@@ -11,6 +11,8 @@ import {
   __testables as pdfWorkerBoundaryTestables,
 } from "../Backend/kai/validators/pdfAssessorWorkerBoundary.js";
 import {
+  assessOpenedPdfDocument,
+  detectPdfExtractableText,
   detectPdfEncryptionPassword,
 } from "../Backend/kai/validators/pdfAssessorWorkerThread.js";
 
@@ -19,6 +21,10 @@ const workerSource = readFileSync("Backend/kai/validators/pdfAssessorWorkerThrea
 const protectedPdfResult = Object.freeze({
   policy: "block",
   category: "encrypted_or_password_protected",
+});
+const noExtractableTextPdfResult = Object.freeze({
+  policy: "block",
+  category: "pdf_no_extractable_text",
 });
 const fakeDocumentConstructor = Object.freeze({
   META_ENCRYPTION: "encryption",
@@ -41,38 +47,123 @@ function concatBytes(parts) {
   return output;
 }
 
-function syntheticPdfBytes() {
+function escapePdfLiteralString(text) {
+  return text.replace(/[\\()]/g, (character) => `\\${character}`);
+}
+
+function syntheticPdfBytesForPages(pages) {
   const header = "%PDF-1.4\n";
-  const objects = [
-    "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
-    "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
-    "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 1 1] >>\nendobj\n",
-  ];
+  const needsFont = pages.some((page) => Object.hasOwn(page, "text"));
+  const objects = [];
+  objects.push("<< /Type /Catalog /Pages 2 0 R >>");
+
+  let nextObjectId = 3;
+  const fontObjectId = needsFont ? nextObjectId++ : null;
+  const pageObjects = pages.map((page) => {
+    const pageObject = {
+      pageObjectId: nextObjectId++,
+      contentObjectId: nextObjectId++,
+      imageObjectId: null,
+    };
+    if (page.image === true) {
+      pageObject.imageObjectId = nextObjectId++;
+    }
+    return pageObject;
+  });
+
+  objects.push(
+    `<< /Type /Pages /Kids [${pageObjects
+      .map(({ pageObjectId }) => `${pageObjectId} 0 R`)
+      .join(" ")}] /Count ${pages.length} >>`,
+  );
+
+  if (needsFont) {
+    objects.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+  }
+
+  for (let index = 0; index < pages.length; index += 1) {
+    const page = pages[index];
+    let content = "";
+    if (Object.hasOwn(page, "text")) {
+      content = `BT /F1 12 Tf 20 100 Td (${escapePdfLiteralString(page.text)}) Tj ET`;
+    } else if (page.graphics === true) {
+      content = "q 0 0 10 10 re f Q";
+    } else if (page.image === true) {
+      content = "q 10 0 0 10 0 0 cm /Im1 Do Q";
+    }
+
+    const resourceEntries = [];
+    if (needsFont) {
+      resourceEntries.push(`/Font << /F1 ${fontObjectId} 0 R >>`);
+    }
+    if (page.image === true) {
+      resourceEntries.push(`/XObject << /Im1 ${pageObjects[index].imageObjectId} 0 R >>`);
+    }
+    const resources = `/Resources << ${resourceEntries.join(" ")} >>`;
+    objects.push(
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] ${resources} /Contents ${pageObjects[index].contentObjectId} 0 R >>`,
+    );
+    objects.push(`<< /Length ${encodeAscii(content).byteLength} >>\nstream\n${content}\nendstream`);
+    if (page.image === true) {
+      const imageData = "FF0000>";
+      objects.push([
+        `<< /Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /ASCIIHexDecode /Length ${imageData.length} >>`,
+        "stream",
+        imageData,
+        "endstream",
+      ].join("\n"));
+    }
+  }
+
   const offsets = [0];
   const parts = [encodeAscii(header)];
   let byteOffset = parts[0].byteLength;
 
-  for (const object of objects) {
+  for (let objectIndex = 0; objectIndex < objects.length; objectIndex += 1) {
     offsets.push(byteOffset);
-    const objectBytes = encodeAscii(object);
+    const objectBytes = encodeAscii(`${objectIndex + 1} 0 obj\n${objects[objectIndex]}\nendobj\n`);
     parts.push(objectBytes);
     byteOffset += objectBytes.byteLength;
   }
 
   const xrefOffset = byteOffset;
   parts.push(encodeAscii([
-    "xref\n0 4\n",
+    `xref\n0 ${objects.length + 1}\n`,
     "0000000000 65535 f \n",
     ...offsets.slice(1).map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`),
-    "trailer\n<< /Size 4 /Root 1 0 R >>\n",
+    `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\n`,
     `startxref\n${xrefOffset}\n%%EOF\n`,
   ].join("")));
 
   return concatBytes(parts);
 }
 
+function syntheticPdfBytes() {
+  return syntheticPdfBytesForPages([{}]);
+}
+
+function syntheticTextPdfBytes(text = "synthetic extractable text") {
+  return syntheticPdfBytesForPages([{ text }]);
+}
+
+function syntheticLaterPageTextPdfBytes() {
+  return syntheticPdfBytesForPages([{}, { text: "later page text" }]);
+}
+
+function syntheticWhitespaceOnlyPdfBytes() {
+  return syntheticPdfBytesForPages([{ text: "       " }]);
+}
+
+function syntheticGraphicsOnlyPdfBytes() {
+  return syntheticPdfBytesForPages([{ graphics: true }]);
+}
+
+function syntheticImageOnlyPdfBytes() {
+  return syntheticPdfBytesForPages([{ image: true }]);
+}
+
 function syntheticInvalidButMupdfRepairedPdfBytes() {
-  const text = new TextDecoder().decode(syntheticPdfBytes());
+  const text = new TextDecoder().decode(syntheticTextPdfBytes("repaired text layer remains only text evidence"));
   return encodeAscii(text.replace(/startxref\n\d+\n%%EOF\n$/, "startxref\n0\n%%EOF\n"));
 }
 
@@ -200,8 +291,57 @@ function fakePdfDocument({
   };
 }
 
+function fakeExtractableTextDocument(pages) {
+  return {
+    countPages() {
+      return pages.length;
+    },
+    loadPage(index) {
+      return pages[index];
+    },
+  };
+}
+
+function fakeStructuredTextPage(characters, {
+  onCharThrows = null,
+  characterOverride = undefined,
+  useCharacterOverride = false,
+} = {}) {
+  return {
+    destroyed: false,
+    toStructuredText() {
+      return {
+        destroyed: false,
+        walk(walker) {
+          for (const character of characters) {
+            if (onCharThrows) {
+              throw onCharThrows;
+            }
+            walker.onChar?.(useCharacterOverride ? characterOverride : character);
+          }
+        },
+        destroy() {
+          this.destroyed = true;
+        },
+      };
+    },
+    destroy() {
+      this.destroyed = true;
+    },
+  };
+}
+
 function assertProtectedResult(result) {
   assert.deepEqual(result, protectedPdfResult);
+  assert.deepEqual(Object.keys(result), ["policy", "category"]);
+  assert.equal(Object.hasOwn(result, "scope"), false);
+  assert.equal(Object.hasOwn(result, "evidence"), false);
+  assert.equal(Object.hasOwn(result, "metadata"), false);
+  assert.equal(Object.hasOwn(result, "identifier"), false);
+}
+
+function assertNoExtractableTextResult(result) {
+  assert.deepEqual(result, noExtractableTextPdfResult);
   assert.deepEqual(Object.keys(result), ["policy", "category"]);
   assert.equal(Object.hasOwn(result, "scope"), false);
   assert.equal(Object.hasOwn(result, "evidence"), false);
@@ -232,6 +372,7 @@ async function assertBoundaryRejectsSanitized(workerMessage) {
   const text = String(error?.stack ?? error?.message ?? error);
   for (const forbidden of [
     "secret client content",
+    "secret extractable client content",
     "correct horse battery staple",
     "/Users/mikewoz/Get-Kinder-Full-Stack-Deploy/private.pdf",
     "synthetic-file-id-123",
@@ -297,11 +438,11 @@ test("P0-05 PDF worker boundary rejects over-25-MiB input before worker creation
   assert.equal(pdfWorkerBoundaryTestables.getPdfAssessorWorkerState().active, 0);
 });
 
-test("P0-05 PDF worker boundary opens a minimal synthetic PDF inside a file-backed worker and destroys handles", async () => {
+test("P0-05 PDF worker boundary returns undefined when first page has extractable text", async () => {
   pdfWorkerBoundaryTestables.resetPdfAssessorWorkerState();
   const workerMessages = [];
   const result = await pdfWorkerBoundaryTestables.runPdfAssessorWorkerBoundaryWithTestControls(
-    Buffer.from(syntheticPdfBytes()),
+    Buffer.from(syntheticTextPdfBytes("first page text")),
     {
       onWorkerMessageForTest(message) {
         workerMessages.push(message);
@@ -310,7 +451,7 @@ test("P0-05 PDF worker boundary opens a minimal synthetic PDF inside a file-back
   );
 
   assert.equal(result, undefined);
-  assert.equal(await runPdfAssessorWorkerBoundary(Buffer.from(syntheticPdfBytes())), undefined);
+  assert.equal(await runPdfAssessorWorkerBoundary(Buffer.from(syntheticTextPdfBytes("first page text"))), undefined);
   assert.equal(workerMessages.length, 1);
   assert.deepEqual(workerMessages[0], {
     type: "kai_pdf_worker_liveness_ok",
@@ -325,12 +466,57 @@ test("P0-05 PDF worker boundary opens a minimal synthetic PDF inside a file-back
   assert.equal(pdfWorkerBoundaryTestables.getPdfAssessorWorkerState().active, 0);
 });
 
-test("P0-05 PDF encryption/password detector returns undefined for valid unencrypted PDF", async () => {
+test("P0-05 PDF worker boundary returns undefined when only a later page has extractable text", async () => {
+  pdfWorkerBoundaryTestables.resetPdfAssessorWorkerState();
+
+  const result = await runPdfAssessorWorkerBoundary(Buffer.from(syntheticLaterPageTextPdfBytes()));
+
+  assert.equal(result, undefined);
+});
+
+test("P0-05 PDF extractable-text detector blocks whitespace-only text blocks", async () => {
+  pdfWorkerBoundaryTestables.resetPdfAssessorWorkerState();
+
+  assertNoExtractableTextResult(
+    await runPdfAssessorWorkerBoundary(Buffer.from(syntheticWhitespaceOnlyPdfBytes())),
+  );
+});
+
+test("P0-05 PDF extractable-text detector blocks a valid blank PDF", async () => {
+  pdfWorkerBoundaryTestables.resetPdfAssessorWorkerState();
+
+  assertNoExtractableTextResult(await runPdfAssessorWorkerBoundary(Buffer.from(syntheticPdfBytes())));
+});
+
+test("P0-05 PDF extractable-text detector blocks graphics and image-only PDFs", async () => {
+  pdfWorkerBoundaryTestables.resetPdfAssessorWorkerState();
+
+  assertNoExtractableTextResult(
+    await runPdfAssessorWorkerBoundary(Buffer.from(syntheticGraphicsOnlyPdfBytes())),
+  );
+  assertNoExtractableTextResult(
+    await runPdfAssessorWorkerBoundary(Buffer.from(syntheticImageOnlyPdfBytes())),
+  );
+});
+
+test("P0-05 PDF extractable-text block result has exactly two keys", async () => {
   pdfWorkerBoundaryTestables.resetPdfAssessorWorkerState();
 
   const result = await runPdfAssessorWorkerBoundary(Buffer.from(syntheticPdfBytes()));
 
+  assertNoExtractableTextResult(result);
+  assert.deepEqual(Object.keys(result), ["policy", "category"]);
+});
+
+test("P0-05 PDF extractable-text detector returns undefined only as text-presence evidence", () => {
+  const result = detectPdfExtractableText(
+    fakeExtractableTextDocument([fakeStructuredTextPage(["s", "a", "f", "e"])]),
+    1,
+  );
+
   assert.equal(result, undefined);
+  assert.equal(result?.policy, undefined);
+  assert.notDeepEqual(result, { policy: "allow" });
 });
 
 test("P0-05 PDF encryption/password detector blocks when needsPassword is true", () => {
@@ -438,6 +624,93 @@ test("P0-05 PDF encryption/password detector repeated evaluations are determinis
   }
 });
 
+test("P0-05 PDF extractable-text detector repeated evaluations are deterministic", async () => {
+  pdfWorkerBoundaryTestables.resetPdfAssessorWorkerState();
+
+  const textBytes = Buffer.from(syntheticTextPdfBytes("deterministic text"));
+  assert.equal(await runPdfAssessorWorkerBoundary(textBytes), undefined);
+  assert.equal(await runPdfAssessorWorkerBoundary(textBytes), undefined);
+
+  const blankBytes = Buffer.from(syntheticPdfBytes());
+  assertNoExtractableTextResult(await runPdfAssessorWorkerBoundary(blankBytes));
+  assertNoExtractableTextResult(await runPdfAssessorWorkerBoundary(blankBytes));
+});
+
+test("P0-05 PDF extractable-text detector uses dependency failure for extraction failures", () => {
+  for (const document of [
+    fakeExtractableTextDocument([
+      {
+        destroy() {},
+        toStructuredText() {
+          throw new Error("secret client content from extraction");
+        },
+      },
+    ]),
+    fakeExtractableTextDocument([
+      fakeStructuredTextPage(["x"], {
+        onCharThrows: new Error("secret client content from onChar"),
+      }),
+    ]),
+    fakeExtractableTextDocument([
+      fakeStructuredTextPage(["x"], {
+        characterOverride: { text: "secret client content" },
+        useCharacterOverride: true,
+      }),
+    ]),
+  ]) {
+    assert.throws(
+      () => detectPdfExtractableText(document, 1),
+      /PDF dependency inspection failed\./,
+    );
+  }
+});
+
+test("P0-05 PDF extractable-text detector does not expose extracted text in results or errors", async () => {
+  pdfWorkerBoundaryTestables.resetPdfAssessorWorkerState();
+  const extractedText = "secret extractable client content";
+
+  assert.equal(
+    await runPdfAssessorWorkerBoundary(Buffer.from(syntheticTextPdfBytes(extractedText))),
+    undefined,
+  );
+
+  let error = null;
+  try {
+    detectPdfExtractableText(
+      fakeExtractableTextDocument([
+        fakeStructuredTextPage([extractedText], {
+          onCharThrows: new Error(extractedText),
+        }),
+      ]),
+      1,
+    );
+  } catch (caught) {
+    error = caught;
+  }
+
+  assert.match(String(error?.message), /PDF dependency inspection failed\./);
+  assert.equal(String(error?.message).includes(extractedText), false);
+  assert.equal(String(error?.stack ?? "").includes(extractedText), false);
+});
+
+test("P0-05 PDF encryption/password block short-circuits extractable-text inspection", () => {
+  let loadPageCalls = 0;
+  const result = assessOpenedPdfDocument(
+    {
+      ...fakePdfDocument({ needsPassword: true, encryptionMetadata: "None" }),
+      loadPage() {
+        loadPageCalls += 1;
+        throw new Error("extractable-text detector must not run");
+      },
+    },
+    fakeDocumentConstructor,
+    1,
+  );
+
+  assertProtectedResult(result);
+  assert.equal(loadPageCalls, 0);
+});
+
 test("P0-05 PDF worker boundary returns exactly the protected result and short-circuits later worker checks", async () => {
   pdfWorkerBoundaryTestables.resetPdfAssessorWorkerState();
   const worker = new SyntheticWorker();
@@ -462,8 +735,11 @@ test("P0-05 PDF worker boundary returns exactly the protected result and short-c
 test("P0-05 PDF worker boundary uses safe failure for malformed result shapes", async () => {
   for (const result of [
     { policy: "block", category: "encrypted_or_password_protected", scope: "extra" },
+    { policy: "block", category: "pdf_no_extractable_text", scope: "extra" },
     { policy: "allow", category: "encrypted_or_password_protected" },
+    { policy: "allow", category: "pdf_no_extractable_text" },
     { status: "failed", category: "encrypted_or_password_protected" },
+    { policy: "block", category: "pdf_text_probe_internal_error" },
     undefined,
   ]) {
     await assertBoundaryRejectsSanitized({
@@ -472,6 +748,7 @@ test("P0-05 PDF worker boundary uses safe failure for malformed result shapes", 
       handles_destroyed: true,
       result,
       rawContent: "%PDF secret client content",
+      extractedText: "secret extractable client content",
       password: "correct horse battery staple",
       privatePath: "/Users/mikewoz/Get-Kinder-Full-Stack-Deploy/private.pdf",
       identifier: "synthetic-file-id-123",
@@ -485,6 +762,7 @@ test("P0-05 PDF worker boundary uses safe failure when document open or inspecti
     {
       type: "kai_pdf_worker_liveness_failed",
       rawContent: "%PDF secret client content",
+      extractedText: "secret extractable client content",
       password: "correct horse battery staple",
       privatePath: "/Users/mikewoz/Get-Kinder-Full-Stack-Deploy/private.pdf",
       identifier: "synthetic-file-id-123",
@@ -497,6 +775,7 @@ test("P0-05 PDF worker boundary uses safe failure when document open or inspecti
       result: {
         policy: "block",
         category: "encrypted_or_password_protected",
+        extractedText: "secret extractable client content",
         dependencyMetadata: "DependencyInternalError at dependency",
       },
     },

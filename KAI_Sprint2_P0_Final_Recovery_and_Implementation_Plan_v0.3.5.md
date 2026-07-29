@@ -4253,6 +4253,53 @@ next_package_or_stop_condition: OWNER-DIRECTED STOP after this single bounded im
 commit_hash: report after commit; a commit cannot contain its own SHA
 ```
 
+## P0-05 PDF extractable-text detection
+
+```text
+p0_05_package_status: pdf_extractable_text_detection_complete_ready_to_commit
+implementation_status: bounded_internal_pdf_worker_result_only
+verification_status: TOOL_VERIFIED after focused worker-boundary, repository-contract, affected file-policy, Sprint 2, full-suite, and diff checks complete
+evidence_class: TOOL_VERIFIED
+decision_evidence: USER_CONFIRMED
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 6ddf92cc29532f204dcdec00066af763fbe134e9
+working_tree_clean_at_start: true
+staged_paths_at_start: none
+applicable_repository_instructions: root AGENTS.md only; DATABASE_URL sentinel used for every Node and npm command; no fetch, push, database/cloud/production/deployment/current-state, P0-06B, executor mapping, persistence, route/service/listener wiring, OCR, later PDF detector work, or Gate A work authorized or performed
+owner_decision_authority: OWNER_DECISION.P0_05_PDF_EXTRACTABLE_TEXT_DETECTOR_V1
+authorized_file_scope: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md; Backend/kai/validators/pdfAssessorWorkerBoundary.js; Backend/kai/validators/pdfAssessorWorkerThread.js; __tests__/kai-sprint2-pdf-assessor-worker-boundary.spec.js; __tests__/kai-sprint2-p0-repository-contract.spec.js; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+capability_probe: DATABASE_URL=postgres://127.0.0.1:9/kai_sprint2_p0_sentinel node --input-type=module confirmed installed mupdf 1.28.0 has Document.loadPage, Page.toStructuredText, StructuredText.walk, and page-level blank extraction produced zero characters
+mupdf_text_api: Document.loadPage(index) -> Page.toStructuredText() -> StructuredText.walk({ onChar })
+observed_pdf_check_chain: committed P0-05F pure file-type detector evaluates complete shallow PDF identity before PDF worker eligibility; actual PDF worker boundary has no production importer beyond tests and, when invoked, performs worker-owned exact bytes, successful MuPDF open/countPages, encryption/password detector, then this extractable-text detector only when encryption/password returns undefined; no PDF JavaScript, action, or embedded-file checks are currently implemented in the inspected worker chain
+precedence_matches_owner_decision: true
+no_extractable_text_result: exactly policy block and category pdf_no_extractable_text; exact enumerable keys policy and category; no scope, evidence, metadata, identifiers, dependency details, extracted text, or other keys
+text_present_result: undefined; means only at least one extracted non-whitespace character was found; not a file-policy pass, PDF-validity result, integrity result, active-content safety result, parser eligibility result, upload acceptance result, or later-check completion result
+detector_behavior: inspects every PDF page with bounded page-level MuPDF structured-text walking; returns undefined on the first non-whitespace character; returns pdf_no_extractable_text when every page yields zero non-whitespace characters, including blank, graphics-only, and image-only synthetic PDFs
+failure_behavior: MuPDF open failure, page count failure, page load failure, structured-text extraction failure, thrown operations, malformed page/text handles, non-string character callbacks, malformed worker result shapes, and unusable dependency output use existing sanitized worker-failure path; no extracted text, raw bytes, unrestricted dependency errors, stack traces, paths, identifiers, worker internals, infrastructure details, or dependency metadata are returned
+short_circuit_behavior: encrypted_or_password_protected result still short-circuits extractable-text inspection; pdf_no_extractable_text short-circuits later PDF JavaScript, action, and embedded-file checks when those later checks are implemented
+repaired_openable_behavior: synthetic invalid-but-MuPDF-repaired PDF with extractable text returns undefined while retaining the recorded integrity deferral; repaired/openable status is not converted into validity, clean/safe status, machine-readable acceptance, parser eligibility, upload acceptance, or file-policy pass
+state_and_integration_boundary: detector directly changes none of file_policy_status, processing_status, parse_status, or upload_state; internal worker result only
+executor_or_route_wiring_changed: false
+database_or_audit_writes_added: false
+public_api_mapping_added: false
+client_serialization_added: false
+ocr_added: false
+production_or_deployment_authorized: false
+later_pdf_checks_implemented: false
+dependencies_or_lockfiles_changed: false
+focused_worker_and_contract_test: DATABASE_URL=postgres://127.0.0.1:9/kai_sprint2_p0_sentinel node --test __tests__/kai-sprint2-pdf-assessor-worker-boundary.spec.js __tests__/kai-sprint2-p0-repository-contract.spec.js - tests 47; pass 47; fail 0
+affected_file_policy_tests: DATABASE_URL=postgres://127.0.0.1:9/kai_sprint2_p0_sentinel node --test __tests__/kai-sprint2-pdf-assessor-worker-boundary.spec.js __tests__/kai-sprint2-mupdf-dependency.spec.js __tests__/kai-sprint2-pdf-shallow-identity-fixture-corpus.spec.js __tests__/kai-sprint2-p0-file-type-agreement-detector.spec.js __tests__/kai-sprint2-p0-05f-combined-completeness.spec.js __tests__/kai-sprint2-p0-repository-contract.spec.js - tests 99; pass 99; fail 0
+sprint2_suite_initial_sandbox_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sprint2_p0_sentinel npm run test:kai-sprint2 - sandbox run hit known localhost listen EPERM with tests 734; pass 707; fail 27
+sprint2_suite: listener-capable DATABASE_URL=postgres://127.0.0.1:9/kai_sprint2_p0_sentinel npm run test:kai-sprint2 - tests 782; pass 782; fail 0
+full_repository_suite_initial_sandbox_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sprint2_p0_sentinel npm test - sandbox run hit known localhost listen EPERM with tests 839; pass 812; fail 27
+full_repository_suite: listener-capable DATABASE_URL=postgres://127.0.0.1:9/kai_sprint2_p0_sentinel npm test - tests 887; pass 887; fail 0
+complete_diff_inspected: true before commit
+git_diff_check: git diff --check - pass
+changed_files: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md; Backend/kai/validators/pdfAssessorWorkerBoundary.js; Backend/kai/validators/pdfAssessorWorkerThread.js; __tests__/kai-sprint2-pdf-assessor-worker-boundary.spec.js; __tests__/kai-sprint2-p0-repository-contract.spec.js; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this single bounded implementation package commit; do not start another PDF detector leaf, add executor mapping, persistence, route/service/listener wiring, public API/client mapping, database/cloud/production/deployment behavior, P0-06B, Gate A, push, or deploy without separate owner authorization
+commit_hash: report after commit; a commit cannot contain its own SHA
+```
+
 
 ## P0-06A unauthorized transition negative coverage
 
