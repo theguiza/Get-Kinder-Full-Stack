@@ -5440,3 +5440,106 @@ prohibited_actions_not_performed:
 
 next_package_or_stop_condition: OWNER-DIRECTED STOP after this synthetic enqueue package; later packages remain unauthorized
 ```
+
+---
+
+## Local synthetic confirmation to enqueue composition
+
+```text
+P0_LOCAL_SYNTHETIC_CONFIRMATION_TO_ENQUEUE_COMPOSITION
+
+package_date: 2026-07-30 America/Vancouver
+evidence_class: TOOL_VERIFIED
+owner_authorization: USER_CONFIRMED successful exact-version confirmation to synthetic in-memory security-assessment enqueue only
+package_status: complete after commit
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 361b23a8469ef98f2097b0a3d07434156b4e3db2
+starting_parent: 38caa36186544c09a911d42d12387376569a909e
+starting_tree: clean tracked and untracked
+staged_paths_at_start: none
+local_remote_tracking_status: branch ahead of origin/codex/kai-sprint2-p0-v0.3.5 by 24 commits; no fetch performed
+
+implemented_scope:
+  local_synthetic_orchestration: Backend/kai/security/syntheticConfirmUploadAndEnqueue.js
+  local_synthetic_http_composition: __tests__/kai-sprint2-p0-acceptance.spec.js serviceFacade only
+  production_confirmUpload_changed: false
+  production_composition_changed: false
+  production_barrel_export_changed: false
+  route_specific_enqueue_logic_added: false
+  public_http_response_shape_changed: false
+
+This package connects successful exact-version confirmation to the
+synthetic in-memory security-assessment enqueue only in the authorized
+local synthetic composition.
+
+The confirmation lifecycle transition and enqueue participate in the
+same inspected atomic orchestration boundary.
+
+This package does not establish production composition, persistent or
+database-backed queueing, queue draining, automatic execution, executor
+or assessor invocation, raw-byte assessment, policy-state mutation, or
+completed HTTP security assessment.
+
+atomicity_mechanism:
+  transaction_interface_reused: existing Backend/kai/db/kaiDb.js withTransaction(callback)
+  local_synthetic_transaction_participants:
+    - in-memory upload lifecycle repository snapshot participant
+    - synthetic security-assessment enqueue snapshot participant
+  commit_path: withTransaction BEGIN -> transaction-scoped confirmUpload lifecycle transition -> transaction-scoped enqueueSecurityAssessment -> COMMIT applies both snapshots
+  rollback_path: thrown enqueue rollback result -> withTransaction ROLLBACK discards both participant snapshots
+  sequential_best_effort_operations: false
+
+fresh_confirmation_behavior:
+  successful_http_confirmation_enqueue_count: exactly one
+  enqueue_facts:
+    - organization ID from confirmed response and authoritative metadata scope
+    - intake file ID from confirmed response and authoritative metadata scope
+    - immutable object-version token from exact-version confirmation transition
+    - verified SHA-256 from exact-version confirmation transition
+    - verified size from exact-version confirmation transition
+    - declared MIME from stored file metadata
+    - extension from stored file metadata
+  public_response_shape: existing sanitized confirmation DTO only
+
+identical_replay_alignment:
+  confirmation_replay_identity: organization ID + intake file ID + object-version token + verified SHA-256 + verified size
+  enqueue_replay_identity: organization ID + intake file ID + object-version token + verified SHA-256
+  replay_result: existing enqueue item returned internally, enqueue identifier preserved, record count unchanged, no conflict_current_state_changed
+
+changed_fact_behavior:
+  changed_object_version: existing conflict_current_state_changed semantics preserved by lifecycle and enqueue tests; no new enqueue
+  changed_sha256: existing conflict_current_state_changed semantics preserved by lifecycle and enqueue tests; no new enqueue
+
+trusted_fact_boundary:
+  excluded_private_facts:
+    - caller-supplied storage path
+    - bucket
+    - object key
+    - storage URI
+    - signed URL
+    - provider-private identifier
+    - credentials
+    - raw bytes
+    - unrestricted file content
+    - raw PII
+    - request-payload copies
+
+tests:
+  focused_enqueue_and_lifecycle: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-synthetic-security-assessment-enqueue.spec.js __tests__/kai-sprint2-p0-upload-lifecycle-repository.spec.js - tests 39; pass 39; fail 0
+  focused_http_acceptance: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-p0-acceptance.spec.js - tests 42; pass 42; fail 0 after localhost-capable rerun
+  focused_service_security_transaction: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-intake-service.spec.js __tests__/kai-sprint2-pass2-route-runtime.spec.js __tests__/kai-sprint2-internal-security-assessment-executor.spec.js __tests__/kai-sprint2-bounded-file-security-assessor.spec.js __tests__/kai-sprint2-malware-adapter-boundary.spec.js __tests__/kai-sprint2-transaction-interface.spec.js - tests 133; pass 133; fail 0
+  orchestration_boundary: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-orchestration-boundary.spec.js - tests 4; pass 4; fail 0
+  sprint2_suite: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - tests 897; pass 897; fail 0 after localhost-capable rerun
+
+not_confirmed:
+  database_atomicity: NOT_CONFIRMED
+  production_readiness: NOT_CONFIRMED
+  confirmation_to_executor_enqueue: NOT_CONFIRMED
+  automated_security_assessment: NOT_CONFIRMED
+  HTTP_completed_security_assessment: NOT_CONFIRMED
+
+prohibited_actions_not_performed:
+  - no production composition, canonical production barrel export, route-specific enqueue logic, route addition, public DTO field, queue drain, poller, retry worker, scheduler, background process, executor invocation, assessor invocation, raw-byte assessment read, persistent queue, database-backed queue, SQL, schema, migration, cloud, credential, tenant, deployment, feature-flag, Current State, Implementation Baseline, Gate A, or P0-06B work
+
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this bounded local synthetic confirmation-to-enqueue package; later packages remain unauthorized
+```

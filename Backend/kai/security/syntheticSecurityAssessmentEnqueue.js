@@ -71,6 +71,14 @@ function copyRecord(record) {
   };
 }
 
+function copyRecordsSnapshot(recordsByIdentity, identityByScopedFile, nextId) {
+  return {
+    recordsByIdentity: Array.from(recordsByIdentity.entries(), ([key, record]) => [key, copyRecord(record)]),
+    identityByScopedFile: Array.from(identityByScopedFile.entries()),
+    nextId,
+  };
+}
+
 function createRecord(id, input) {
   return {
     security_assessment_enqueue_id: id,
@@ -85,11 +93,11 @@ function createRecord(id, input) {
 }
 
 export function createSyntheticSecurityAssessmentEnqueue() {
-  const recordsByIdentity = new Map();
-  const identityByScopedFile = new Map();
+  let recordsByIdentity = new Map();
+  let identityByScopedFile = new Map();
   let nextId = 1;
 
-  return Object.freeze({
+  const capability = {
     enqueueSecurityAssessment(input = {}) {
       if (!isTrustedAssessmentFacts(input)) {
         return uploadLifecycleFailure("validation_blocker");
@@ -127,7 +135,45 @@ export function createSyntheticSecurityAssessmentEnqueue() {
     listSecurityAssessmentEnqueueRecords() {
       return Array.from(recordsByIdentity.values(), copyRecord);
     },
-  });
+  };
+
+  return Object.freeze(Object.defineProperty(
+    capability,
+    SYNTHETIC_SECURITY_ASSESSMENT_ENQUEUE_TRANSACTION_PARTICIPANT,
+    {
+      enumerable: false,
+      value: Object.freeze({
+        createTransactionParticipant() {
+          const participantCapability = createSyntheticSecurityAssessmentEnqueue();
+          participantCapability[SYNTHETIC_SECURITY_ASSESSMENT_ENQUEUE_TRANSACTION_PARTICIPANT]
+            .replaceSnapshot(copyRecordsSnapshot(recordsByIdentity, identityByScopedFile, nextId));
+          return Object.freeze({
+            capability: participantCapability,
+            commit() {
+              const snapshot = participantCapability[
+                SYNTHETIC_SECURITY_ASSESSMENT_ENQUEUE_TRANSACTION_PARTICIPANT
+              ].snapshot();
+              recordsByIdentity = new Map(
+                snapshot.recordsByIdentity.map(([key, record]) => [key, copyRecord(record)]),
+              );
+              identityByScopedFile = new Map(snapshot.identityByScopedFile);
+              nextId = snapshot.nextId;
+            },
+          });
+        },
+        replaceSnapshot(snapshot) {
+          recordsByIdentity = new Map(
+            snapshot.recordsByIdentity.map(([key, record]) => [key, copyRecord(record)]),
+          );
+          identityByScopedFile = new Map(snapshot.identityByScopedFile);
+          nextId = snapshot.nextId;
+        },
+        snapshot() {
+          return copyRecordsSnapshot(recordsByIdentity, identityByScopedFile, nextId);
+        },
+      }),
+    },
+  ));
 }
 
 export const __testables = Object.freeze({
@@ -135,3 +181,7 @@ export const __testables = Object.freeze({
   assessmentIdentityKey,
   isTrustedAssessmentFacts,
 });
+
+export const SYNTHETIC_SECURITY_ASSESSMENT_ENQUEUE_TRANSACTION_PARTICIPANT = Symbol.for(
+  "kai.syntheticSecurityAssessmentEnqueue.transactionParticipant",
+);

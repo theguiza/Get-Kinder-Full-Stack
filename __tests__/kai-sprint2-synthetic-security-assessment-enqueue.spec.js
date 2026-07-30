@@ -4,9 +4,13 @@ import { readFileSync } from "node:fs";
 
 import { uploadLifecycleFailure } from "../Backend/kai/upload/inMemoryUploadLifecycleRepository.js";
 import {
+  createSyntheticConfirmUploadAndEnqueue,
+} from "../Backend/kai/security/syntheticConfirmUploadAndEnqueue.js";
+import {
   createSyntheticSecurityAssessmentEnqueue,
   __testables,
 } from "../Backend/kai/security/syntheticSecurityAssessmentEnqueue.js";
+import { createInMemoryUploadLifecycleRepository } from "../Backend/kai/upload/inMemoryUploadLifecycleRepository.js";
 
 const BASE_FACTS = Object.freeze({
   organizationId: "org-1",
@@ -181,6 +185,7 @@ test("caller-supplied storage-private identifiers and raw payloads are rejected 
 
 test("synthetic enqueue stays unwired from confirmation, routes, executor, assessor, persistence, and production barrel", () => {
   const enqueueSource = readFileSync("Backend/kai/security/syntheticSecurityAssessmentEnqueue.js", "utf8");
+  const syntheticConfirmSource = readFileSync("Backend/kai/security/syntheticConfirmUploadAndEnqueue.js", "utf8");
   const intakeServiceSource = readFileSync("Backend/kai/services/kaiIntakeService.js", "utf8");
   const routeSource = readFileSync("Backend/kai/routes/sprint2IntakeApi.js", "utf8");
   const executorSource = readFileSync("Backend/kai/security/internalSecurityAssessmentExecutor.js", "utf8");
@@ -188,11 +193,37 @@ test("synthetic enqueue stays unwired from confirmation, routes, executor, asses
   const barrelSource = readFileSync("Backend/kai/index.js", "utf8");
 
   assert.doesNotMatch(enqueueSource, /executeInjectedInternalSecurityAssessment|createInternalSecurityAssessmentExecutor|assessBoundedFileSecurity|drain|router|express|pg|sql|file_policy_status|transitionUploadLifecycle/i);
+  assert.match(syntheticConfirmSource, /confirmUpload/);
+  assert.match(syntheticConfirmSource, /enqueueSecurityAssessment/);
+  assert.doesNotMatch(syntheticConfirmSource, /executeInjectedInternalSecurityAssessment|createInternalSecurityAssessmentExecutor|assessBoundedFileSecurity|drain|router|express|pg|sql|file_policy_status/i);
   assert.doesNotMatch(intakeServiceSource, /syntheticSecurityAssessmentEnqueue|createSyntheticSecurityAssessmentEnqueue/);
+  assert.doesNotMatch(intakeServiceSource, /syntheticConfirmUploadAndEnqueue|createSyntheticConfirmUploadAndEnqueue/);
   assert.doesNotMatch(routeSource, /syntheticSecurityAssessmentEnqueue|createSyntheticSecurityAssessmentEnqueue|security-assessment/);
+  assert.doesNotMatch(routeSource, /syntheticConfirmUploadAndEnqueue|createSyntheticConfirmUploadAndEnqueue/);
   assert.doesNotMatch(executorSource, /syntheticSecurityAssessmentEnqueue|createSyntheticSecurityAssessmentEnqueue/);
   assert.doesNotMatch(assessorSource, /syntheticSecurityAssessmentEnqueue|createSyntheticSecurityAssessmentEnqueue/);
   assert.doesNotMatch(barrelSource, /syntheticSecurityAssessmentEnqueue|createSyntheticSecurityAssessmentEnqueue/);
+  assert.doesNotMatch(barrelSource, /syntheticConfirmUploadAndEnqueue|createSyntheticConfirmUploadAndEnqueue/);
+});
+
+test("synthetic confirm-and-enqueue composition requires explicit enqueue participant", () => {
+  assert.throws(
+    () => createSyntheticConfirmUploadAndEnqueue({
+      uploadLifecycleRepository: createInMemoryUploadLifecycleRepository(),
+    }),
+    /requires lifecycle and enqueue participants/,
+  );
+  assert.throws(
+    () => createSyntheticConfirmUploadAndEnqueue({
+      uploadLifecycleRepository: createInMemoryUploadLifecycleRepository(),
+      securityAssessmentEnqueue: {
+        enqueueSecurityAssessment() {
+          return { ok: true };
+        },
+      },
+    }),
+    /securityAssessmentEnqueue must expose the synthetic transaction participant/,
+  );
 });
 
 test("deduplication identity key is the exact authorized four-fact conjunction", () => {

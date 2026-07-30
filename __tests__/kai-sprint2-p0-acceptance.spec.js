@@ -26,6 +26,13 @@ import sprint2IntakeApiRouter, {
   __testables as intakeRouteTestables,
 } from "../Backend/kai/routes/sprint2IntakeApi.js";
 import {
+  createSyntheticConfirmUploadAndEnqueue,
+} from "../Backend/kai/security/syntheticConfirmUploadAndEnqueue.js";
+import {
+  createSyntheticSecurityAssessmentEnqueue,
+  SYNTHETIC_SECURITY_ASSESSMENT_ENQUEUE_TRANSACTION_PARTICIPANT,
+} from "../Backend/kai/security/syntheticSecurityAssessmentEnqueue.js";
+import {
   checkAdminAccess,
   confirmUpload,
   createIntakeBatch,
@@ -39,7 +46,10 @@ import {
 } from "../Backend/kai/services/kaiIntakeService.js";
 import { updateReviewQueueStatus } from "../Backend/kai/services/kaiReviewQueueService.js";
 import { LocalDevStorageAdapter } from "../Backend/kai/storage/localDevStorageAdapter.js";
-import { createInMemoryUploadLifecycleRepository } from "../Backend/kai/upload/inMemoryUploadLifecycleRepository.js";
+import {
+  createInMemoryUploadLifecycleRepository,
+  uploadLifecycleFailure,
+} from "../Backend/kai/upload/inMemoryUploadLifecycleRepository.js";
 import { validateAssistantBoundary } from "../Backend/kai/validators/assistantBoundaryValidators.js";
 import { detectP0FileTypeAgreement } from "../Backend/kai/validators/p0FileTypeAgreementDetector.js";
 
@@ -338,6 +348,44 @@ function createMetadataRepository() {
   };
 }
 
+function createRejectingSyntheticSecurityAssessmentEnqueue() {
+  const base = createSyntheticSecurityAssessmentEnqueue();
+  return Object.freeze(Object.defineProperty(
+    {
+      enqueueSecurityAssessment() {
+        return uploadLifecycleFailure("validation_blocker");
+      },
+      listSecurityAssessmentEnqueueRecords() {
+        return base.listSecurityAssessmentEnqueueRecords();
+      },
+    },
+    SYNTHETIC_SECURITY_ASSESSMENT_ENQUEUE_TRANSACTION_PARTICIPANT,
+    {
+      enumerable: false,
+      value: Object.freeze({
+        createTransactionParticipant() {
+          const baseParticipant = base[
+            SYNTHETIC_SECURITY_ASSESSMENT_ENQUEUE_TRANSACTION_PARTICIPANT
+          ].createTransactionParticipant();
+          return Object.freeze({
+            capability: {
+              enqueueSecurityAssessment() {
+                return uploadLifecycleFailure("validation_blocker");
+              },
+              listSecurityAssessmentEnqueueRecords() {
+                return baseParticipant.capability.listSecurityAssessmentEnqueueRecords();
+              },
+            },
+            commit() {
+              baseParticipant.commit();
+            },
+          });
+        },
+      }),
+    },
+  ));
+}
+
 function createDependencies({ metadataRepository, lifecycleRepository, storageAdapter, context = {} }) {
   return {
     env: enabledEnv,
@@ -393,6 +441,10 @@ function createDependencies({ metadataRepository, lifecycleRepository, storageAd
 async function createScenario(context = {}) {
   const metadataRepository = createMetadataRepository();
   const lifecycleRepository = createInMemoryUploadLifecycleRepository();
+  const securityAssessmentEnqueue = context.rejectSecurityAssessmentEnqueue
+    ? createRejectingSyntheticSecurityAssessmentEnqueue()
+    : createSyntheticSecurityAssessmentEnqueue();
+  const transactionEvents = [];
   const rootDirectory = await mkdtemp(path.join(await realpath(tmpdir()), "kai-p0-07-"));
   let versionIndex = 0;
   const storageAdapter = new LocalDevStorageAdapter({
@@ -405,6 +457,8 @@ async function createScenario(context = {}) {
   return {
     metadataRepository,
     lifecycleRepository,
+    securityAssessmentEnqueue,
+    transactionEvents,
     storageAdapter,
     dependencies: createDependencies({ metadataRepository, lifecycleRepository, storageAdapter, context }),
     context,
@@ -420,6 +474,11 @@ function serviceFacade(scenario) {
     lifecycleRepository: scenario.lifecycleRepository,
     storageAdapter: scenario.storageAdapter,
     context: scenario.context,
+  });
+  const syntheticConfirmation = createSyntheticConfirmUploadAndEnqueue({
+    uploadLifecycleRepository: scenario.lifecycleRepository,
+    securityAssessmentEnqueue: scenario.securityAssessmentEnqueue,
+    transactionEvents: scenario.transactionEvents,
   });
   return {
     checkAdminAccess(input) {
@@ -466,7 +525,7 @@ function serviceFacade(scenario) {
       return uploadReservedIntakeFile(input, deps());
     },
     confirmUpload(input) {
-      return confirmUpload(input, deps());
+      return syntheticConfirmation.confirmUpload(input, deps());
     },
     updateReviewQueueStatus(input) {
       return updateReviewQueueStatus(input, deps());
@@ -639,7 +698,39 @@ test("P0-07 positive local synthetic HTTP acceptance path", async () => {
     });
     assert.equal(confirm.statusCode, 200);
     assert.equal(confirm.body.data.upload_state, "confirmed");
+    assert.deepEqual(Object.keys(confirm.body.data).sort(), [
+      "intake_batch_id",
+      "intake_file_id",
+      "object_version_id",
+      "organization_id",
+      "replayed",
+      "upload_state",
+      "verified_size_bytes",
+    ]);
     assert.equal((await scenario.metadataRepository.getIntakeFileMetadata(organizationId, intakeFileId)).file_policy_status, "pending");
+    assert.deepEqual(scenario.securityAssessmentEnqueue.listSecurityAssessmentEnqueueRecords(), [{
+      security_assessment_enqueue_id: "synthetic-security-assessment-000001",
+      organization_id: organizationId,
+      intake_file_id: intakeFileId,
+      object_version_id: objectVersionIds[0],
+      verified_checksum: allowedChecksum,
+      verified_size_bytes: allowedBytes.byteLength,
+      declared_mime: "text/csv",
+      extension: ".csv",
+    }]);
+    assert.deepEqual(scenario.transactionEvents, ["BEGIN", "COMMIT"]);
+
+    const confirmationReplay = await request(server, "POST", `${basePath}/admin/files/${intakeFileId}/confirm-upload?organization_id=${organizationId}`, {
+      body: { organization_id: organizationId },
+    });
+    assert.equal(confirmationReplay.statusCode, 200);
+    assert.equal(confirmationReplay.body.data.replayed, true);
+    assert.equal(confirmationReplay.body.error, undefined);
+    assert.equal(scenario.securityAssessmentEnqueue.listSecurityAssessmentEnqueueRecords().length, 1);
+    assert.equal(
+      scenario.securityAssessmentEnqueue.listSecurityAssessmentEnqueueRecords()[0].security_assessment_enqueue_id,
+      "synthetic-security-assessment-000001",
+    );
 
     const assessmentResult = detectP0FileTypeAgreement({
       bytes: allowedBytes,
@@ -669,6 +760,46 @@ test("P0-07 positive local synthetic HTTP acceptance path", async () => {
     assert.equal(scenario.metadataRepository.calls.audit.length, 1);
     assert.equal(scenario.metadataRepository.calls.metrics.length, 1);
     assertNoLeak(batch, replay, reservation, upload, confirm, safeFile(assessment.file), read, review, scenario.metadataRepository.calls);
+  } finally {
+    server.close();
+    app.closeForTest();
+    await scenario.close();
+  }
+});
+
+test("local synthetic HTTP confirmation rolls back when synthetic enqueue rejects", async () => {
+  const scenario = await createScenario({ rejectSecurityAssessmentEnqueue: true });
+  const app = createApplication(scenario);
+  const server = await listen(app);
+  try {
+    const batch = await createBatch(server);
+    assert.equal(batch.statusCode, 201);
+    const reservation = await reserveFile(server, batch.body.data.intake_batch_id);
+    assert.equal(reservation.statusCode, 201);
+    const intakeFileId = reservation.body.data.intake_file_id;
+
+    const upload = await request(
+      server,
+      "POST",
+      `${basePath}/admin/files/${intakeFileId}/upload?organization_id=${organizationId}&engagement_id=${engagementId}&intake_batch_id=${batch.body.data.intake_batch_id}`,
+      { body: allowedBytes, headers: { "content-type": "application/octet-stream" } },
+    );
+    assert.equal(upload.statusCode, 201, JSON.stringify(upload.body));
+
+    const confirm = await request(server, "POST", `${basePath}/admin/files/${intakeFileId}/confirm-upload?organization_id=${organizationId}`, {
+      body: { organization_id: organizationId },
+    });
+
+    assert.equal(confirm.statusCode, 422);
+    assert.equal(confirm.body.error.code, "validation_blocker");
+    assert.deepEqual(scenario.securityAssessmentEnqueue.listSecurityAssessmentEnqueueRecords(), []);
+    const lifecycle = scenario.lifecycleRepository.getUploadLifecycle({ organizationId, intakeFileId });
+    assert.equal(lifecycle.ok, true);
+    assert.equal(lifecycle.data.record.upload_state, "uploaded_unconfirmed");
+    assert.equal(lifecycle.data.record.verified_checksum, null);
+    assert.deepEqual(scenario.transactionEvents, ["BEGIN", "ROLLBACK"]);
+    assert.equal((await scenario.metadataRepository.getIntakeFileMetadata(organizationId, intakeFileId)).file_policy_status, "pending");
+    assertNoLeak(confirm, scenario.securityAssessmentEnqueue.listSecurityAssessmentEnqueueRecords());
   } finally {
     server.close();
     app.closeForTest();

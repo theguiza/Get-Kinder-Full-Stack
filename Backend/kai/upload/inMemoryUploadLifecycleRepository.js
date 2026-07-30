@@ -104,6 +104,10 @@ function copyRecord(record) {
   };
 }
 
+function copyRecordsSnapshot(records) {
+  return Array.from(records.entries(), ([key, record]) => [key, copyRecord(record)]);
+}
+
 function edgeKey(from, to) {
   return `${from}->${to}`;
 }
@@ -207,9 +211,9 @@ function applyTransition(record, input) {
 }
 
 export function createInMemoryUploadLifecycleRepository() {
-  const records = new Map();
+  let records = new Map();
 
-  return createUploadLifecycleRepository({
+  const repository = createUploadLifecycleRepository({
     createReservedUploadLifecycle(input) {
       if (!validateCreateInput(input)) return uploadLifecycleFailure("validation_blocker");
 
@@ -290,4 +294,38 @@ export function createInMemoryUploadLifecycleRepository() {
       return uploadLifecycleSuccess({ record: copyRecord(next), replayed: false });
     },
   });
+
+  return Object.freeze(Object.defineProperty(
+    { ...repository },
+    IN_MEMORY_UPLOAD_LIFECYCLE_TRANSACTION_PARTICIPANT,
+    {
+      enumerable: false,
+      value: Object.freeze({
+        createTransactionParticipant() {
+          const participantRepository = createInMemoryUploadLifecycleRepository();
+          participantRepository[IN_MEMORY_UPLOAD_LIFECYCLE_TRANSACTION_PARTICIPANT]
+            .replaceSnapshot(copyRecordsSnapshot(records));
+          return Object.freeze({
+            repository: participantRepository,
+            commit() {
+              records = new Map(
+                participantRepository[IN_MEMORY_UPLOAD_LIFECYCLE_TRANSACTION_PARTICIPANT]
+                  .snapshot(),
+              );
+            },
+          });
+        },
+        replaceSnapshot(snapshot) {
+          records = new Map(snapshot.map(([key, record]) => [key, copyRecord(record)]));
+        },
+        snapshot() {
+          return copyRecordsSnapshot(records);
+        },
+      }),
+    },
+  ));
 }
+
+export const IN_MEMORY_UPLOAD_LIFECYCLE_TRANSACTION_PARTICIPANT = Symbol.for(
+  "kai.inMemoryUploadLifecycleRepository.transactionParticipant",
+);
