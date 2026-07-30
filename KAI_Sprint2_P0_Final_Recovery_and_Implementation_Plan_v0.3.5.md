@@ -5333,3 +5333,110 @@ prohibited_actions_not_performed:
 
 next_package_or_stop_condition: OWNER-DIRECTED STOP after this bounded correction package; package two remains unauthorized
 ```
+
+---
+
+## Synthetic security-assessment enqueue capability
+
+```text
+P0_SYNTHETIC_SECURITY_ASSESSMENT_ENQUEUE_CAPABILITY
+
+package_date: 2026-07-30 America/Vancouver
+evidence_class: TOOL_VERIFIED
+owner_authorization: USER_CONFIRMED synthetic internal security-assessment enqueue capability plus exact-assessment replay deduplication and unit/focused integration tests only
+package_status: complete after commit
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 38caa36186544c09a911d42d12387376569a909e
+starting_parent: 8fee261bf1cb7399a27d2b867826c2e86aaa2576
+starting_tree: clean tracked and untracked
+staged_paths_at_start: none
+local_remote_tracking_status: branch ahead of origin/codex/kai-sprint2-p0-v0.3.5 by 23 commits; no fetch performed
+
+implemented_scope:
+  synthetic_internal_enqueue_interface: Backend/kai/security/syntheticSecurityAssessmentEnqueue.js
+  exact_assessment_replay_deduplication: true
+  unit_and_focused_integration_tests:
+    - __tests__/kai-sprint2-synthetic-security-assessment-enqueue.spec.js
+
+dedup_identity_key:
+  - organization ID
+  - intake file ID
+  - confirmed immutable object-version token
+  - verified SHA-256
+
+trusted_facts_retained:
+  - organization ID
+  - intake file ID
+  - confirmed immutable object-version token
+  - verified SHA-256
+  - verified file size
+  - trusted declared MIME
+  - trusted extension
+
+excluded_private_facts:
+  - caller-supplied storage path
+  - bucket
+  - object key
+  - storage URI
+  - signed URL
+  - provider-private identifier
+  - credentials
+  - raw storage location
+  - unrestricted file content
+  - raw PII
+  - route or request payload copies
+
+conflict_interface_reused:
+  source: Backend/kai/upload/inMemoryUploadLifecycleRepository.js
+  result: { ok: false, data: null, error: { code: "conflict_current_state_changed", status: 409 } }
+  helper_exports_added_without_shape_change:
+    - uploadLifecycleFailure
+    - uploadLifecycleSuccess
+    - UPLOAD_LIFECYCLE_RESULT_STATUS
+
+replay_behavior:
+  identical_replay: returns existing record, existing enqueue identifier, and replayed true; record count unchanged
+  changed_object_version_same_organization_and_file: conflict_current_state_changed; original record unchanged
+  changed_sha256_same_organization_and_file: conflict_current_state_changed; original record unchanged
+  same_object_version_changed_sha256: conflict_current_state_changed; original record unchanged
+  cross_organization_or_different_file: independent synthetic records
+
+synthetic_only_boundary:
+  directly_callable_from_tests_or_explicit_internal_injection: true
+  in_memory_only: true
+  automatic_execution: false
+  executor_invocation: false
+  drain_loop_or_background_execution_added: false
+  persistence_or_lifecycle_write_added: false
+  file_policy_status_write_added: false
+  confirmation_wiring: false
+  route_or_listener_wiring: false
+  production_barrel_export_changed: false
+
+This package implements only a synthetic in-memory security-assessment
+enqueue capability. It does not establish a persistent queue,
+database-backed enqueueing, confirmation wiring, automatic execution,
+policy-state mutation, or HTTP security-assessment integration.
+
+tests:
+  focused_package_tests: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-synthetic-security-assessment-enqueue.spec.js __tests__/kai-sprint2-p0-upload-lifecycle-repository.spec.js __tests__/kai-sprint2-internal-security-assessment-executor.spec.js __tests__/kai-sprint2-bounded-file-security-assessor.spec.js __tests__/kai-sprint2-malware-adapter-boundary.spec.js - tests 56; pass 56; fail 0
+  sprint2_suite_sandbox_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-*.spec.js - failed with sandbox localhost listener EPERM; package tests in that run passed
+  sprint2_suite_escalated_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-*.spec.js - tests 895; pass 895; fail 0
+  full_repository_suite_sandbox_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - failed with sandbox localhost listener EPERM; non-listener package tests in that run passed
+  full_repository_suite_escalated_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - tests 1000; pass 1000; fail 0
+
+not_confirmed:
+  database_atomicity: NOT_CONFIRMED
+  production_readiness: NOT_CONFIRMED
+  confirmation_to_executor_enqueue: NOT_CONFIRMED
+  automated_file_policy_state_mutation_from_http: NOT_CONFIRMED
+  HTTP_security_assessment_integration: NOT_CONFIRMED
+
+prohibited_actions_not_performed:
+  - no confirmUpload enqueue wiring, route, listener, middleware, public DTO, production barrel, or production composition change
+  - no drain loop, polling, retry worker, background process, executor invocation, or automatic execution
+  - no runtime persistence, lifecycle mutation, policy-state mutation, processing mutation, parse-status mutation, review-queue mutation, transaction, schema, SQL, migration, cloud, credential, feature-flag, tenant, deployment, or real-client-data work
+  - no P1 parser/profile behavior, intake_parser_runs lifecycle, file profiles, data dictionaries, sensitivity records, sources, evidence, claims, generation, exports, Gate A, P0-06B, Current State, or Implementation Baseline work
+
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this synthetic enqueue package; later packages remain unauthorized
+```

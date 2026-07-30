@@ -10,7 +10,7 @@ const FILE_POLICY_STATUS = Object.freeze({
   blocked: "blocked",
 });
 
-const RESULT_STATUS = Object.freeze({
+export const UPLOAD_LIFECYCLE_RESULT_STATUS = Object.freeze({
   validation_blocker: 422,
   state_transition_denied: 422,
   conflict_current_state_changed: 409,
@@ -37,18 +37,18 @@ const AUTHORIZED_EDGES = Object.freeze(
 
 const PRE_CONFIRMATION_STATES = Object.freeze(new Set(["reserved", "upload_started", "uploaded_unconfirmed"]));
 
-function failure(code) {
+export function uploadLifecycleFailure(code) {
   return {
     ok: false,
     data: null,
     error: {
       code,
-      status: RESULT_STATUS[code],
+      status: UPLOAD_LIFECYCLE_RESULT_STATUS[code],
     },
   };
 }
 
-function success(data) {
+export function uploadLifecycleSuccess(data) {
   return {
     ok: true,
     data,
@@ -211,16 +211,16 @@ export function createInMemoryUploadLifecycleRepository() {
 
   return createUploadLifecycleRepository({
     createReservedUploadLifecycle(input) {
-      if (!validateCreateInput(input)) return failure("validation_blocker");
+      if (!validateCreateInput(input)) return uploadLifecycleFailure("validation_blocker");
 
       const key = keyFor(input);
       const existing = records.get(key);
 
       if (existing) {
         if (existing.intake_batch_id === input.intakeBatchId) {
-          return success({ record: copyRecord(existing), replayed: true });
+          return uploadLifecycleSuccess({ record: copyRecord(existing), replayed: true });
         }
-        return failure("conflict_current_state_changed");
+        return uploadLifecycleFailure("conflict_current_state_changed");
       }
 
       const record = {
@@ -239,55 +239,55 @@ export function createInMemoryUploadLifecycleRepository() {
       };
 
       records.set(key, record);
-      return success({ record: copyRecord(record), replayed: false });
+      return uploadLifecycleSuccess({ record: copyRecord(record), replayed: false });
     },
 
     getUploadLifecycle(input) {
-      if (!validateGetInput(input)) return failure("validation_blocker");
+      if (!validateGetInput(input)) return uploadLifecycleFailure("validation_blocker");
       const record = records.get(keyFor(input));
-      if (!record) return failure("not_found");
-      return success({ record: copyRecord(record) });
+      if (!record) return uploadLifecycleFailure("not_found");
+      return uploadLifecycleSuccess({ record: copyRecord(record) });
     },
 
     transitionUploadLifecycle(input) {
-      if (!validateTransitionInput(input)) return failure("validation_blocker");
+      if (!validateTransitionInput(input)) return uploadLifecycleFailure("validation_blocker");
 
       const key = keyFor(input);
       const record = records.get(key);
-      if (!record) return failure("not_found");
+      if (!record) return uploadLifecycleFailure("not_found");
 
       if (record.upload_state === input.newUploadState) {
         if (replayFactsMatch(record, input)) {
-          return success({ record: copyRecord(record), replayed: true });
+          return uploadLifecycleSuccess({ record: copyRecord(record), replayed: true });
         }
-        return failure("conflict_current_state_changed");
+        return uploadLifecycleFailure("conflict_current_state_changed");
       }
 
       if (PRE_CONFIRMATION_STATES.has(record.upload_state)) {
         const expired = isExpired(record, input.now);
         if (input.newUploadState === "expired" && !expired) {
-          return failure("state_transition_denied");
+          return uploadLifecycleFailure("state_transition_denied");
         }
         if (input.newUploadState !== "expired" && expired) {
-          return failure("state_transition_denied");
+          return uploadLifecycleFailure("state_transition_denied");
         }
       }
 
       if (record.upload_state !== input.expectedUploadState) {
-        return failure("conflict_current_state_changed");
+        return uploadLifecycleFailure("conflict_current_state_changed");
       }
 
       if (!AUTHORIZED_EDGES.has(edgeKey(input.expectedUploadState, input.newUploadState))) {
-        return failure("state_transition_denied");
+        return uploadLifecycleFailure("state_transition_denied");
       }
 
       if (input.newUploadState === "confirmed" && record.object_version_id !== input.objectVersionId) {
-        return failure("conflict_current_state_changed");
+        return uploadLifecycleFailure("conflict_current_state_changed");
       }
 
       const next = applyTransition(record, input);
       records.set(key, next);
-      return success({ record: copyRecord(next), replayed: false });
+      return uploadLifecycleSuccess({ record: copyRecord(next), replayed: false });
     },
   });
 }
