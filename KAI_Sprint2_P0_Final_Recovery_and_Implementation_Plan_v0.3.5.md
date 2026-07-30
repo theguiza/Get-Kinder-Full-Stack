@@ -5193,3 +5193,77 @@ Gate_A_started: false
 Current_State_updated: false
 Implementation_Baseline_updated: false
 ```
+
+---
+
+## Direction B first bounded security-assessment capability package
+
+```text
+P0_SECURITY_ASSESSMENT_DIRECTION_B_FIRST_BOUNDED_CAPABILITY
+
+package_date: 2026-07-30 America/Vancouver
+evidence_class: TOOL_VERIFIED
+owner_authorization: USER_CONFIRMED Direction B first bounded security-assessment capability only
+package_status: complete
+
+implemented_scope:
+  callable_internal_security_executor: Backend/kai/security/internalSecurityAssessmentExecutor.js
+  canonical_bounded_assessor: Backend/kai/security/boundedFileSecurityAssessor.js
+  unit_and_focused_integration_tests:
+    - __tests__/kai-sprint2-internal-security-assessment-executor.spec.js
+    - __tests__/kai-sprint2-bounded-file-security-assessor.spec.js
+
+callable_boundary:
+  executor_invocation: executeInjectedInternalSecurityAssessment(input, { internalSecurityAssessmentExecutor })
+  executor_factory: createInternalSecurityAssessmentExecutor({ assessor })
+  required_seam_kind: kai_sprint2_internal_security_assessment_executor
+  required_identity: internal_service / kai_file_security_executor / file_security_assessment
+  result_contract:
+    - { policy: "pass" }
+    - { policy: "block", category: existing committed detector category }
+    - { status: "failed", category: "security_assessment_timeout" }
+
+canonical_composition:
+  type_agreement_gate: detectP0FileTypeAgreement
+  csv_terminal_entry_point: detectCsvRowLimitPolicy
+  xlsx_terminal_entry_point: detectOoxmlArchiveResourceLimitPolicy
+  pdf_worker_entry_point: runPdfAssessorWorkerBoundary
+  xlsx_precedence_owner: existing detector chain inside detectOoxmlArchiveResourceLimitPolicy
+  pdf_precedence_owner: existing PDF worker assessor boundary
+  second_xlsx_precedence_layer_added: false
+
+unwired_evidence:
+  confirmUpload_changed: false
+  route_changed: false
+  listener_changed: false
+  production_barrel_export_changed: false
+  queue_or_enqueue_added: false
+  drain_loop_or_background_execution_added: false
+  persistence_or_lifecycle_write_added: false
+  file_policy_status_write_added: false
+  database_or_schema_or_sql_changed: false
+
+tests:
+  focused_package_tests_initial: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-bounded-file-security-assessor.spec.js __tests__/kai-sprint2-internal-security-assessment-executor.spec.js - first run failed 1 assertion because expected category invalid_utf8 did not match committed detector category nul_rejection
+  focused_package_tests_final: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-bounded-file-security-assessor.spec.js __tests__/kai-sprint2-internal-security-assessment-executor.spec.js - tests 8; pass 8; fail 0
+  affected_detector_security_tests: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test bounded executor/assessor plus file-type, CSV, XLSX, OOXML, PDF worker, and repository contract specs - tests 155; pass 155; fail 0
+  sprint2_suite_sandbox_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-*.spec.js - failed with sandbox localhost listener EPERM; package tests in that run passed
+  sprint2_suite_escalated_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-*.spec.js - tests 883; pass 883; fail 0
+  full_repository_suite_sandbox_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - failed with sandbox localhost listener EPERM; non-listener package tests in that run passed
+  full_repository_suite_escalated_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - tests 988; pass 988; fail 0
+
+not_confirmed:
+  deployed_schema_compatibility: NOT_CONFIRMED
+  database_atomicity: NOT_CONFIRMED
+  production_readiness: NOT_CONFIRMED
+  confirmation_to_executor_enqueue: NOT_CONFIRMED
+  automated_file_policy_state_mutation_from_http: NOT_CONFIRMED
+
+prohibited_actions_not_performed:
+  - no queue, enqueue interface, drain loop, or background execution
+  - no confirmUpload, route, listener, public DTO, or production composition change
+  - no runtime persistence, lifecycle mutation, database write, file_policy_status write, transaction, schema, SQL, migration, cloud, credential, feature-flag, tenant, deployment, or real-client-data work
+  - no P1 parser/profile behavior, intake_parser_runs lifecycle, file profiles, data dictionaries, sensitivity records, sources, evidence, claims, Gate A, P0-06B, Current State, or Implementation Baseline work
+
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this first bounded Direction B capability package; do not select or design queue, enqueue, state-write, HTTP integration, P0-06B, Gate A, production, database, cloud, deployment, parser/profile/source/evidence/claim/export, or real-client-data work without separate authorization
+```
