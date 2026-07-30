@@ -1,25 +1,41 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 import { assessBoundedFileSecurity } from "../Backend/kai/security/boundedFileSecurityAssessor.js";
 
+const SYNTHETIC_PROVENANCE = Object.freeze({
+  adapter_id: "kai_synthetic_fixture_adapter",
+  signature_set: "v1",
+});
+const CSV_BYTES = Buffer.from("name,value\nkindness,1\n", "utf8");
+const TEXT_BYTES = Buffer.from("Uploaded instruction-like text remains inert data.\n", "utf8");
+const XLSX_BYTES = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
+
+function sha256(bytes) {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
 const CSV_INPUT = Object.freeze({
   extension: ".csv",
   declaredMime: "text/csv",
-  bytes: Buffer.from("name,value\nkindness,1\n", "utf8"),
+  bytes: CSV_BYTES,
+  sha256: sha256(CSV_BYTES),
 });
 
 const TEXT_INPUT = Object.freeze({
   extension: ".txt",
   declaredMime: "text/plain",
-  bytes: Buffer.from("Uploaded instruction-like text remains inert data.\n", "utf8"),
+  bytes: TEXT_BYTES,
+  sha256: sha256(TEXT_BYTES),
 });
 
 const XLSX_INPUT = Object.freeze({
   extension: ".xlsx",
   declaredMime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  bytes: Buffer.from([0x50, 0x4b, 0x03, 0x04]),
+  bytes: XLSX_BYTES,
+  sha256: sha256(XLSX_BYTES),
 });
 
 function csvTypePass(input) {
@@ -46,9 +62,37 @@ function xlsxTypePass() {
   };
 }
 
+function cleanMalwareAdapter() {
+  return Object.freeze({
+    async scan() {
+      return {
+        status: "clean",
+        provenance: { ...SYNTHETIC_PROVENANCE },
+      };
+    },
+  });
+}
+
+function detectedMalwareAdapter() {
+  return Object.freeze({
+    async scan() {
+      return {
+        status: "malware_detected",
+        provenance: { ...SYNTHETIC_PROVENANCE },
+      };
+    },
+  });
+}
+
 test("bounded assessor returns exact pass and block shapes over committed CSV and type detectors", async () => {
-  assert.deepEqual(await assessBoundedFileSecurity(TEXT_INPUT), { policy: "pass" });
-  assert.deepEqual(await assessBoundedFileSecurity(CSV_INPUT), { policy: "pass" });
+  assert.deepEqual(
+    await assessBoundedFileSecurity(TEXT_INPUT, { malwareScanAdapter: cleanMalwareAdapter() }),
+    { policy: "pass" },
+  );
+  assert.deepEqual(
+    await assessBoundedFileSecurity(CSV_INPUT, { malwareScanAdapter: cleanMalwareAdapter() }),
+    { policy: "pass" },
+  );
 
   const mismatch = await assessBoundedFileSecurity({
     extension: ".pdf",
@@ -105,6 +149,61 @@ test("bounded assessor delegates XLSX precedence to the terminal OOXML archive d
   ]);
 });
 
+test("production malware not_configured cannot produce aggregate policy pass", async () => {
+  const result = await assessBoundedFileSecurity(TEXT_INPUT);
+
+  assert.deepEqual(result, {
+    status: "failed",
+    category: "malware_scan_failed",
+  });
+});
+
+test("clean, detected, failed, and malformed malware outcomes aggregate through existing results", async () => {
+  assert.deepEqual(
+    await assessBoundedFileSecurity(TEXT_INPUT, { malwareScanAdapter: cleanMalwareAdapter() }),
+    { policy: "pass" },
+  );
+
+  assert.deepEqual(
+    await assessBoundedFileSecurity(TEXT_INPUT, { malwareScanAdapter: detectedMalwareAdapter() }),
+    {
+      policy: "block",
+      category: "malware_failed",
+    },
+  );
+
+  assert.deepEqual(
+    await assessBoundedFileSecurity(TEXT_INPUT, {
+      malwareScanAdapter: {
+        async scan() {
+          return {
+            status: "failed",
+            category: "malware_scan_failed",
+          };
+        },
+      },
+    }),
+    {
+      status: "failed",
+      category: "malware_scan_failed",
+    },
+  );
+
+  assert.deepEqual(
+    await assessBoundedFileSecurity(TEXT_INPUT, {
+      malwareScanAdapter: {
+        async scan() {
+          return { status: "clean" };
+        },
+      },
+    }),
+    {
+      status: "failed",
+      category: "malware_scan_failed",
+    },
+  );
+});
+
 test("bounded assessor maps detector failures to the committed safe failure category", async () => {
   const result = await assessBoundedFileSecurity(CSV_INPUT, {
     detectors: {
@@ -124,4 +223,5 @@ test("bounded assessor maps detector failures to the committed safe failure cate
 test("bounded assessor module does not import persistence, lifecycle, routes, queues, or confirmUpload", () => {
   const source = readFileSync("Backend/kai/security/boundedFileSecurityAssessor.js", "utf8");
   assert.doesNotMatch(source, /confirmUpload|file_policy_status|transitionUploadLifecycle|queue|enqueue|drain|route|router|express|pg|sql/i);
+  assert.doesNotMatch(source, /kaiSyntheticMalwareScanAdapter|createKaiSyntheticFixtureMalwareAdapter|__tests__\/support/);
 });

@@ -2,6 +2,7 @@ import { detectCsvRowLimitPolicy } from "../validators/csvRowLimitDetector.js";
 import { detectOoxmlArchiveResourceLimitPolicy } from "../validators/ooxmlArchiveResourceLimitDetector.js";
 import { detectP0FileTypeAgreement } from "../validators/p0FileTypeAgreementDetector.js";
 import { runPdfAssessorWorkerBoundary } from "../validators/pdfAssessorWorkerBoundary.js";
+import { runMalwareScanWithAdapter } from "./malwareScanAdapter.js";
 
 const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 const PDF_MIME = "application/pdf";
@@ -59,7 +60,7 @@ function normalizeDeclaredMime(declaredMime) {
   return declaredMime.trim().toLowerCase();
 }
 
-function normalizeInput({ extension, declaredMime, bytes } = {}) {
+function normalizeInput({ extension, declaredMime, bytes, sha256 } = {}) {
   if (typeof extension !== "string") return null;
   if (typeof declaredMime !== "string") return null;
   if (!(bytes instanceof Uint8Array)) return null;
@@ -67,7 +68,27 @@ function normalizeInput({ extension, declaredMime, bytes } = {}) {
     extension: extension.toLowerCase(),
     declaredMime: normalizeDeclaredMime(declaredMime),
     bytes,
+    sha256: typeof sha256 === "string" ? sha256 : undefined,
   });
+}
+
+async function assessMalware(input, dependencies) {
+  const result = await runMalwareScanWithAdapter(
+    { bytes: input.bytes, sha256: input.sha256 },
+    dependencies,
+  );
+  if (result.status === "clean") return passResult();
+  if (result.status === "malware_detected") return blockResult("malware_failed");
+  if (isFailureResult(result)) return assessmentFailureResult(result.category);
+  return assessmentFailureResult("malware_scan_failed");
+}
+
+async function passAfterMalwareScan(input, dependencies) {
+  try {
+    return await assessMalware(input, dependencies);
+  } catch {
+    return assessmentFailureResult("malware_scan_failed");
+  }
 }
 
 function defaultDetectors() {
@@ -126,7 +147,9 @@ export async function assessBoundedFileSecurity(input = {}, dependencies = {}) {
       return assessmentFailureResult();
     }
     try {
-      return await assessCsv(normalized, detectors);
+      const result = await assessCsv(normalized, detectors);
+      if (result.policy !== "pass") return result;
+      return await passAfterMalwareScan(normalized, dependencies);
     } catch {
       return assessmentFailureResult();
     }
@@ -137,7 +160,9 @@ export async function assessBoundedFileSecurity(input = {}, dependencies = {}) {
       return assessmentFailureResult();
     }
     try {
-      return await assessXlsx(normalized, detectors);
+      const result = await assessXlsx(normalized, detectors);
+      if (result.policy !== "pass") return result;
+      return await passAfterMalwareScan(normalized, dependencies);
     } catch {
       return assessmentFailureResult();
     }
@@ -148,7 +173,9 @@ export async function assessBoundedFileSecurity(input = {}, dependencies = {}) {
       return assessmentFailureResult();
     }
     try {
-      return await assessPdf(normalized, detectors);
+      const result = await assessPdf(normalized, detectors);
+      if (result.policy !== "pass") return result;
+      return await passAfterMalwareScan(normalized, dependencies);
     } catch {
       return assessmentFailureResult();
     }
@@ -158,7 +185,7 @@ export async function assessBoundedFileSecurity(input = {}, dependencies = {}) {
     if (!isPassTypeAgreement(typeAgreementResult, normalized.extension, normalized.declaredMime)) {
       return assessmentFailureResult();
     }
-    return passResult();
+    return await passAfterMalwareScan(normalized, dependencies);
   }
 
   return assessmentFailureResult();

@@ -5267,3 +5267,69 @@ prohibited_actions_not_performed:
 
 next_package_or_stop_condition: OWNER-DIRECTED STOP after this first bounded Direction B capability package; do not select or design queue, enqueue, state-write, HTTP integration, P0-06B, Gate A, production, database, cloud, deployment, parser/profile/source/evidence/claim/export, or real-client-data work without separate authorization
 ```
+
+---
+
+## Bounded assessor malware not_configured correction
+
+```text
+P0_SECURITY_ASSESSMENT_MALWARE_NOT_CONFIGURED_CORRECTION
+
+package_date: 2026-07-30 America/Vancouver
+evidence_class: TOOL_VERIFIED
+owner_authorization: USER_CONFIRMED bounded correction only
+package_status: complete
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 8fee261bf1cb7399a27d2b867826c2e86aaa2576
+starting_parent: 28b7efa0b62e11b61e94db36a575f3529da9ab60
+starting_tree: clean tracked and untracked
+staged_paths_at_start: none
+local_remote_tracking_status: branch ahead of origin/codex/kai-sprint2-p0-v0.3.5 by 22 commits; no fetch performed
+
+authority_rule:
+  production_default_adapter_result: { status: "not_configured" }
+  not_configured_semantics: neither pass nor block
+  controlling_policy_rule: No scanner means no file-policy pass
+  clean_boundary: synthetic clean means only recognized approved synthetic fixture; not independently a file-policy pass
+  detected_boundary: malware_detected is mapped only at this bounded assessor aggregate layer by this package
+  adapter_failure_boundary: malware_scan_failed remains exact adapter failure category
+
+pre_correction_finding: TOOL_VERIFIED: CONTRACT_CONFLICT
+conflict_summary: 8fee261 bounded assessor did not invoke the malware adapter, so production/default not_configured could be absent from aggregation and an otherwise clean detector path could return { policy: "pass" }
+
+correction:
+  bounded_assessor_runs_malware_after_other_detectors_reach_pass_candidate: true
+  not_configured_aggregate_result: { status: "failed", category: "malware_scan_failed" }
+  clean_aggregate_result_when_all_other_detectors_pass: { policy: "pass" }
+  malware_detected_aggregate_result: { policy: "block", category: "malware_failed" }
+  adapter_failure_or_malformed_result: { status: "failed", category: "malware_scan_failed" }
+  new_policy_or_status_or_enum_or_lifecycle_state: false
+  production_test_adapter_separation_changed: false
+  executor_injection_boundary_changed: false
+  detector_ordering_or_terminal_entry_points_changed: false
+
+result_contract:
+  assessor_authorized_shapes:
+    - { policy: "pass" }
+    - { policy: "block", category }
+    - { status: "failed", category }
+  new_callable_shape_added: false
+
+tests:
+  required_focused_tests: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-bounded-file-security-assessor.spec.js __tests__/kai-sprint2-internal-security-assessment-executor.spec.js __tests__/kai-sprint2-malware-adapter-boundary.spec.js __tests__/kai-sprint2-p0-repository-contract.spec.js - tests 38; pass 38; fail 0
+  affected_detector_security_tests: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test bounded assessor/executor, malware adapter, repository contract, file-type, TXT/MD, CSV, XLSX, OOXML, PDF worker, and MuPDF dependency specs - tests 155; pass 155; fail 0
+
+not_confirmed:
+  database_atomicity: NOT_CONFIRMED
+  production_readiness: NOT_CONFIRMED
+  confirmation_to_executor_enqueue: NOT_CONFIRMED
+  automated_file_policy_state_mutation_from_http: NOT_CONFIRMED
+
+prohibited_actions_not_performed:
+  - no queue, enqueue interface, drain loop, job, worker, or background execution
+  - no confirmUpload, route, listener, public DTO, production barrel, or production composition change
+  - no runtime persistence, lifecycle mutation, database write, file_policy_status write, transaction, schema, SQL, migration, cloud, credential, feature-flag, tenant, deployment, or real-client-data work
+  - no P1 parser/profile behavior, sources, evidence, claims, Gate A, P0-06B, Current State, or Implementation Baseline work
+
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this bounded correction package; package two remains unauthorized
+```
