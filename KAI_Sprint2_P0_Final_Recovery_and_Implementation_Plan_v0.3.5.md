@@ -3639,7 +3639,6 @@ package_exclusions: no unknown-binary fixture; no ZIP/XLSX/PDF fixture; no ambig
 commit_hash: report after commit; a commit cannot contain its own SHA
 ```
 
-
 ## P0-05F.2d2 residual unknown-binary fixture authority
 
 ```text
@@ -5625,5 +5624,115 @@ prohibited_actions_not_performed:
   - no production confirmUpload change, production route change, canonical production barrel change, public HTTP DTO change, queue draining, worker, polling, automatic execution, executor invocation, assessor invocation, exact-version assessment read, file_policy_status or other policy-state mutation, persistent queueing, database, SQL, schema, cloud, credential, tenant, feature-flag, deployment, Gate A, P0-06B, Current State, or Implementation Baseline work
 
 next_package_or_stop_condition: OWNER-DIRECTED STOP after this bounded atomicity correction package; later packages remain unauthorized
+commit_hash: report after commit; a commit cannot contain its own SHA
+```
+
+---
+
+## Assessment-time read-integrity bridge
+
+```text
+P0_ASSESSMENT_TIME_READ_INTEGRITY_BRIDGE
+
+package_date: 2026-07-31 America/Vancouver
+evidence_class: TOOL_VERIFIED
+owner_authorization: USER_CONFIRMED
+package_status: complete after commit
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 1ca47580644bd67a8a8d29a1ba63dabe14a0eee3
+starting_parent: 9d9e23c13ced98d7ae6135f11323c77be4aa0227
+starting_tree: clean tracked and untracked
+staged_paths_at_start: none
+
+This package adds one callable, local-only, unwired assessment-time
+read-integrity bridge.
+
+The bridge accepts trusted immutable object-version identity, reads that
+exact version through the existing local storage adapter, enforces the
+existing bounded byte limit, recomputes SHA-256 and byte count during the
+assessment-time read, and returns either bounded verified bytes or one
+typed internal integrity failure.
+
+The bridge has no consumer in this package. It does not select enqueue
+items, invoke the executor or assessor, return a policy verdict, persist
+bytes or results, mutate canonical state, alter confirm-to-enqueue
+behavior, expose HTTP execution, or create production or background
+composition.
+
+implemented_scope:
+  bridge_module: Backend/kai/security/assessmentReadIntegrityBridge.js
+  bridge_entry_point: readVerifiedAssessmentBytes
+  focused_bridge_tests: __tests__/kai-sprint2-assessment-read-integrity-bridge.spec.js
+  execplan_evidence: KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+
+input_contract:
+  accepted_keys: objectVersionId; expectedChecksum; expectedSize; storageAdapter; optional signal
+  rejected_caller_storage_facts: path; bucket; object key; provider-private identifier; URI; signed URL; filename; MIME; extension; unrestricted metadata
+  object_version_pattern: provider-neutral ov_ plus 32 lowercase hex characters
+  checksum_pattern: lowercase SHA-256 hex, 64 characters
+  expected_size: nonnegative safe integer
+
+exact_version_binding:
+  adapter_operation: openObjectVersionReadStream({ objectVersionId, signal? })
+  storage_authority: existing local adapter validates provider-neutral objectVersionId, opens by immutable exact version, stats the same open handle, and streams bytes from that same handle
+  path_replacement_behavior: existing storage-boundary tests prove streamed reads stay on the opened object after filesystem path replacement
+  storage_adapter_public_contract_changed: false
+
+read_integrity_behavior:
+  byte_limit: 25 * 1024 * 1024 bytes
+  chunked_read: yes
+  checksum_recompute: Node SHA-256 hash updated during this assessment-time read
+  size_count: independent counted byte total during this assessment-time read
+  final_byte_type: Buffer, satisfying the existing assessor Uint8Array input contract
+  success_shape: { ok: true, data: { bytes }, warnings: [] }
+  integrity_failure_shape: { ok: false, integrity_failure: { type: assessment_read_integrity_failure, kind } }
+  integrity_failure_kinds: invalid_input; exact_version_unavailable; read_failed; size_mismatch; checksum_mismatch; size_limit_exceeded; aborted
+  assessor_category_mapping: none
+  policy_verdict_shape_returned: false
+
+cleanup_and_isolation:
+  byte_source_close: finally closes valid byte_source after success, mismatch, limit breach, read failure, abort, cancellation, and thrown iteration
+  partial_bytes_returned_on_failure: false
+  module_level_runtime_state: none
+  concurrent_call_isolation: independent stream, buffer, hash, counter, and failure instances per call
+
+production_and_state_boundary:
+  enqueue_store_consumed: no
+  executor_invoked: no
+  assessor_invoked: no
+  detectors_invoked: no
+  malware_adapter_invoked: no
+  consumer_wired: none
+  production_barrel_export: none
+  route_wiring: none
+  production_composition: none
+  background_worker_or_queue_drain: none
+  state_mutation: none
+  persistent_result: no
+  bytes_cached_or_persisted: no
+  protected_files_changed: none
+
+tests:
+  focused_bridge: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-assessment-read-integrity-bridge.spec.js - tests 8; pass 8; fail 0
+  storage_boundary: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-storage-boundary.spec.js - tests 35; pass 35; fail 0
+  confirmation_regression: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-intake-service.spec.js - tests 82; pass 82; fail 0
+  enqueue_regression: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-synthetic-security-assessment-enqueue.spec.js - tests 17; pass 17; fail 0
+  transaction_interface: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-transaction-interface.spec.js - tests 6; pass 6; fail 0
+  executor_isolation: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-internal-security-assessment-executor.spec.js - tests 4; pass 4; fail 0
+  sprint2_suite_initial_sandbox: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-*.spec.js - initial sandbox listener failure, listen EPERM on 127.0.0.1; bridge tests passed inside this run
+  sprint2_suite_localhost_capable_rerun: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-*.spec.js - tests 911; pass 911; fail 0
+  git_diff_check: git diff --check and git diff --cached --check - pass
+
+not_confirmed:
+  database_atomicity: NOT_CONFIRMED
+  production_readiness: NOT_CONFIRMED
+  bridge_to_selection_execution_assessment_wiring: NOT_CONFIRMED
+  automated_security_assessment: NOT_CONFIRMED
+  HTTP_completed_security_assessment: NOT_CONFIRMED
+
+prohibited_actions_not_performed:
+  - no enqueue selection, enqueue store import, executor invocation, assessor invocation, detector invocation, malware adapter invocation, policy verdict mapping, HTTP route, production composition, production barrel export, background worker, queue drain, persistence, audit write, metrics write, canonical state mutation, processing_status mutation, parse_status mutation, file_policy_status mutation, retained metadata mutation, database, SQL, schema, cloud, credential, tenant, feature-flag, deployment, Current State, Implementation Baseline, Gate A, or P0-06B work
+
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this bounded unwired assessment-time read-integrity bridge package; later packages remain unauthorized
 commit_hash: report after commit; a commit cannot contain its own SHA
 ```
