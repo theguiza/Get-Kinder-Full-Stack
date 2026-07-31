@@ -57,7 +57,11 @@ function createSyntheticTransactionProvider({
             return { rows: [] };
           }
           if (command === "COMMIT") {
-            for (const participant of context._participants || []) participant.commit();
+            const [lifecycleTransaction, enqueueTransaction] = context._participants || [];
+            const lifecyclePublication = lifecycleTransaction.prepareCommit();
+            const enqueuePublication = enqueueTransaction.prepareCommit();
+            lifecyclePublication.target.state = lifecyclePublication.preparedState;
+            enqueuePublication.target.state = enqueuePublication.preparedState;
             transactionEvents?.push?.("COMMIT");
             return { rows: [] };
           }

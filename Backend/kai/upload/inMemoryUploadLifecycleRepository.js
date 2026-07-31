@@ -211,14 +211,18 @@ function applyTransition(record, input) {
 }
 
 export function createInMemoryUploadLifecycleRepository() {
-  let records = new Map();
+  const stateHolder = {
+    state: {
+      records: new Map(),
+    },
+  };
 
   const repository = createUploadLifecycleRepository({
     createReservedUploadLifecycle(input) {
       if (!validateCreateInput(input)) return uploadLifecycleFailure("validation_blocker");
 
       const key = keyFor(input);
-      const existing = records.get(key);
+      const existing = stateHolder.state.records.get(key);
 
       if (existing) {
         if (existing.intake_batch_id === input.intakeBatchId) {
@@ -242,13 +246,13 @@ export function createInMemoryUploadLifecycleRepository() {
         created_at: input.now,
       };
 
-      records.set(key, record);
+      stateHolder.state.records.set(key, record);
       return uploadLifecycleSuccess({ record: copyRecord(record), replayed: false });
     },
 
     getUploadLifecycle(input) {
       if (!validateGetInput(input)) return uploadLifecycleFailure("validation_blocker");
-      const record = records.get(keyFor(input));
+      const record = stateHolder.state.records.get(keyFor(input));
       if (!record) return uploadLifecycleFailure("not_found");
       return uploadLifecycleSuccess({ record: copyRecord(record) });
     },
@@ -257,7 +261,7 @@ export function createInMemoryUploadLifecycleRepository() {
       if (!validateTransitionInput(input)) return uploadLifecycleFailure("validation_blocker");
 
       const key = keyFor(input);
-      const record = records.get(key);
+      const record = stateHolder.state.records.get(key);
       if (!record) return uploadLifecycleFailure("not_found");
 
       if (record.upload_state === input.newUploadState) {
@@ -290,7 +294,7 @@ export function createInMemoryUploadLifecycleRepository() {
       }
 
       const next = applyTransition(record, input);
-      records.set(key, next);
+      stateHolder.state.records.set(key, next);
       return uploadLifecycleSuccess({ record: copyRecord(next), replayed: false });
     },
   });
@@ -304,22 +308,29 @@ export function createInMemoryUploadLifecycleRepository() {
         createTransactionParticipant() {
           const participantRepository = createInMemoryUploadLifecycleRepository();
           participantRepository[IN_MEMORY_UPLOAD_LIFECYCLE_TRANSACTION_PARTICIPANT]
-            .replaceSnapshot(copyRecordsSnapshot(records));
+            .replaceSnapshot(copyRecordsSnapshot(stateHolder.state.records));
           return Object.freeze({
             repository: participantRepository,
-            commit() {
-              records = new Map(
-                participantRepository[IN_MEMORY_UPLOAD_LIFECYCLE_TRANSACTION_PARTICIPANT]
-                  .snapshot(),
-              );
+            prepareCommit() {
+              return {
+                target: stateHolder,
+                preparedState: {
+                  records: new Map(
+                    participantRepository[IN_MEMORY_UPLOAD_LIFECYCLE_TRANSACTION_PARTICIPANT]
+                      .snapshot(),
+                  ),
+                },
+              };
             },
           });
         },
         replaceSnapshot(snapshot) {
-          records = new Map(snapshot.map(([key, record]) => [key, copyRecord(record)]));
+          stateHolder.state = {
+            records: new Map(snapshot.map(([key, record]) => [key, copyRecord(record)])),
+          };
         },
         snapshot() {
-          return copyRecordsSnapshot(records);
+          return copyRecordsSnapshot(stateHolder.state.records);
         },
       }),
     },

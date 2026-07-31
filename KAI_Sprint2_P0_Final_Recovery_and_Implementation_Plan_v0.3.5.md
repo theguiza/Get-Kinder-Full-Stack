@@ -5543,3 +5543,87 @@ prohibited_actions_not_performed:
 
 next_package_or_stop_condition: OWNER-DIRECTED STOP after this bounded local synthetic confirmation-to-enqueue package; later packages remain unauthorized
 ```
+
+---
+
+## Local synthetic confirmation-to-enqueue atomicity correction
+
+```text
+P0_LOCAL_SYNTHETIC_CONFIRMATION_TO_ENQUEUE_ATOMICITY_CORRECTION
+
+package_date: 2026-07-31 America/Vancouver
+evidence_class: TOOL_VERIFIED
+owner_authorization: USER_CONFIRMED ATOMICITY_CORRECTION_REQUIRED
+package_status: complete after commit
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 9d9e23c13ced98d7ae6135f11323c77be4aa0227
+starting_parent: 361b23a8469ef98f2097b0a3d07434156b4e3db2
+starting_tree: clean tracked and untracked
+staged_paths_at_start: none
+
+The prior local synthetic confirm-to-enqueue package had a commit-phase
+partial-state risk because lifecycle and enqueue canonical states were
+published sequentially while fallible preparation remained in the
+publication path.
+
+This correction fully prepares both replacement states before canonical
+publication and limits publication to direct replacement of already-
+prepared local state references, or uses an equally bounded proven
+non-failing restoration mechanism.
+
+It does not establish production composition, persistent queueing,
+automatic execution, executor or assessor invocation, raw-byte
+assessment, policy-state mutation, or completed HTTP security assessment.
+
+implemented_scope:
+  local_synthetic_orchestration: Backend/kai/security/syntheticConfirmUploadAndEnqueue.js
+  local_synthetic_lifecycle_participant: Backend/kai/upload/inMemoryUploadLifecycleRepository.js
+  local_synthetic_enqueue_participant: Backend/kai/security/syntheticSecurityAssessmentEnqueue.js
+  focused_atomicity_tests: __tests__/kai-sprint2-synthetic-security-assessment-enqueue.spec.js
+  execplan_evidence: KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+
+atomicity_mechanism:
+  transaction_interface_reused: existing Backend/kai/db/kaiDb.js withTransaction(callback)
+  kaiDb_withTransaction_modified: false
+  correction_mechanism: prepare both participant replacement state objects, then publish with direct state-reference replacement
+  lifecycle_prepared_state: { records: prepared Map }
+  enqueue_prepared_state: { recordsByIdentity: prepared Map, identityByScopedFile: prepared Map, nextId: prepared number }
+  publication_window:
+    - lifecyclePublication.target.state = lifecyclePublication.preparedState;
+    - enqueuePublication.target.state = enqueuePublication.preparedState;
+  publication_window_contains_method_calls: false
+  publication_window_contains_allocation: false
+  publication_window_contains_validation_or_deduplication: false
+  restoration_used: false
+
+behavior_preserved:
+  fresh_confirmation: confirmed lifecycle and one synthetic enqueue record publish together
+  identical_replay: same enqueue identifier, enqueue count unchanged, no spurious conflict
+  changed_object_version: conflict_current_state_changed before canonical publication
+  changed_sha256: conflict_current_state_changed before canonical publication
+  callback_phase_enqueue_failure: no canonical lifecycle or enqueue publication
+  preparation_failure: no canonical lifecycle or enqueue publication
+  production_isolation: unchanged
+  executor_or_assessor_invocation: none
+  policy_state_mutation: none
+
+tests:
+  focused_atomicity_lifecycle_transaction: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-synthetic-security-assessment-enqueue.spec.js __tests__/kai-sprint2-p0-upload-lifecycle-repository.spec.js __tests__/kai-sprint2-transaction-interface.spec.js - tests 51; pass 51; fail 0
+  affected_acceptance_service_security_transaction: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-synthetic-security-assessment-enqueue.spec.js __tests__/kai-sprint2-p0-upload-lifecycle-repository.spec.js __tests__/kai-sprint2-p0-acceptance.spec.js __tests__/kai-sprint2-intake-service.spec.js __tests__/kai-sprint2-pass2-route-runtime.spec.js __tests__/kai-sprint2-internal-security-assessment-executor.spec.js __tests__/kai-sprint2-bounded-file-security-assessor.spec.js __tests__/kai-sprint2-malware-adapter-boundary.spec.js __tests__/kai-sprint2-transaction-interface.spec.js - initial sandbox run failed on localhost listen EPERM; localhost-capable rerun tests 220; pass 220; fail 0
+  sprint2_suite: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - initial sandbox run failed on localhost listen EPERM; localhost-capable rerun tests 903; pass 903; fail 0
+  full_repository_suite: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - initial sandbox run failed on localhost listen EPERM; localhost-capable rerun tests 1008; pass 1008; fail 0
+  git_diff_check: git diff --check - pass
+
+not_confirmed:
+  database_atomicity: NOT_CONFIRMED
+  production_readiness: NOT_CONFIRMED
+  persistent_queueing: NOT_CONFIRMED
+  automated_security_assessment: NOT_CONFIRMED
+  HTTP_completed_security_assessment: NOT_CONFIRMED
+
+prohibited_actions_not_performed:
+  - no production confirmUpload change, production route change, canonical production barrel change, public HTTP DTO change, queue draining, worker, polling, automatic execution, executor invocation, assessor invocation, exact-version assessment read, file_policy_status or other policy-state mutation, persistent queueing, database, SQL, schema, cloud, credential, tenant, feature-flag, deployment, Gate A, P0-06B, Current State, or Implementation Baseline work
+
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this bounded atomicity correction package; later packages remain unauthorized
+commit_hash: report after commit; a commit cannot contain its own SHA
+```

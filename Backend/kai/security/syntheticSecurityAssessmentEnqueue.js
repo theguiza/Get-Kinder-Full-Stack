@@ -93,9 +93,13 @@ function createRecord(id, input) {
 }
 
 export function createSyntheticSecurityAssessmentEnqueue() {
-  let recordsByIdentity = new Map();
-  let identityByScopedFile = new Map();
-  let nextId = 1;
+  const stateHolder = {
+    state: {
+      recordsByIdentity: new Map(),
+      identityByScopedFile: new Map(),
+      nextId: 1,
+    },
+  };
 
   const capability = {
     enqueueSecurityAssessment(input = {}) {
@@ -104,6 +108,7 @@ export function createSyntheticSecurityAssessmentEnqueue() {
       }
 
       const identityKey = assessmentIdentityKey(input);
+      const { recordsByIdentity, identityByScopedFile } = stateHolder.state;
       const existingRecord = recordsByIdentity.get(identityKey);
       if (existingRecord) {
         return uploadLifecycleSuccess({
@@ -118,10 +123,10 @@ export function createSyntheticSecurityAssessmentEnqueue() {
       }
 
       const record = createRecord(
-        `synthetic-security-assessment-${String(nextId).padStart(6, "0")}`,
+        `synthetic-security-assessment-${String(stateHolder.state.nextId).padStart(6, "0")}`,
         input,
       );
-      nextId += 1;
+      stateHolder.state.nextId += 1;
 
       recordsByIdentity.set(identityKey, record);
       identityByScopedFile.set(fileKey, identityKey);
@@ -133,7 +138,7 @@ export function createSyntheticSecurityAssessmentEnqueue() {
     },
 
     listSecurityAssessmentEnqueueRecords() {
-      return Array.from(recordsByIdentity.values(), copyRecord);
+      return Array.from(stateHolder.state.recordsByIdentity.values(), copyRecord);
     },
   };
 
@@ -146,30 +151,47 @@ export function createSyntheticSecurityAssessmentEnqueue() {
         createTransactionParticipant() {
           const participantCapability = createSyntheticSecurityAssessmentEnqueue();
           participantCapability[SYNTHETIC_SECURITY_ASSESSMENT_ENQUEUE_TRANSACTION_PARTICIPANT]
-            .replaceSnapshot(copyRecordsSnapshot(recordsByIdentity, identityByScopedFile, nextId));
+            .replaceSnapshot(
+              copyRecordsSnapshot(
+                stateHolder.state.recordsByIdentity,
+                stateHolder.state.identityByScopedFile,
+                stateHolder.state.nextId,
+              ),
+            );
           return Object.freeze({
             capability: participantCapability,
-            commit() {
+            prepareCommit() {
               const snapshot = participantCapability[
                 SYNTHETIC_SECURITY_ASSESSMENT_ENQUEUE_TRANSACTION_PARTICIPANT
               ].snapshot();
-              recordsByIdentity = new Map(
-                snapshot.recordsByIdentity.map(([key, record]) => [key, copyRecord(record)]),
-              );
-              identityByScopedFile = new Map(snapshot.identityByScopedFile);
-              nextId = snapshot.nextId;
+              return {
+                target: stateHolder,
+                preparedState: {
+                  recordsByIdentity: new Map(
+                    snapshot.recordsByIdentity.map(([key, record]) => [key, copyRecord(record)]),
+                  ),
+                  identityByScopedFile: new Map(snapshot.identityByScopedFile),
+                  nextId: snapshot.nextId,
+                },
+              };
             },
           });
         },
         replaceSnapshot(snapshot) {
-          recordsByIdentity = new Map(
-            snapshot.recordsByIdentity.map(([key, record]) => [key, copyRecord(record)]),
-          );
-          identityByScopedFile = new Map(snapshot.identityByScopedFile);
-          nextId = snapshot.nextId;
+          stateHolder.state = {
+            recordsByIdentity: new Map(
+              snapshot.recordsByIdentity.map(([key, record]) => [key, copyRecord(record)]),
+            ),
+            identityByScopedFile: new Map(snapshot.identityByScopedFile),
+            nextId: snapshot.nextId,
+          };
         },
         snapshot() {
-          return copyRecordsSnapshot(recordsByIdentity, identityByScopedFile, nextId);
+          return copyRecordsSnapshot(
+            stateHolder.state.recordsByIdentity,
+            stateHolder.state.identityByScopedFile,
+            stateHolder.state.nextId,
+          );
         },
       }),
     },
