@@ -6128,3 +6128,75 @@ prohibited_actions_not_performed:
 next_package_or_stop_condition: OWNER-DIRECTED STOP after malware neutral-outcome split before C2; do not implement or draft C2 in this run
 commit_hash: report after commit; a commit cannot contain its own SHA
 ```
+
+## C2 thin assessment-to-policy wiring
+
+```text
+KAI_SPRINT2_P0_C2_THIN_ASSESSMENT_TO_POLICY_WIRING
+
+package_date: 2026-08-02 America/Vancouver
+evidence_class: TOOL_VERIFIED
+owner_authorization: USER_CONFIRMED
+package_status: complete before commit
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: ae46aec6b98c038208369edd4c499752af189d88
+starting_parent: 03b61d7ff1e770df015a833fca5c0e06a800b81c
+starting_tree: clean tracked and untracked
+staged_paths_at_start: none
+remote_tracking_relation_at_start: origin/codex/kai-sprint2-p0-v0.3.5 ahead 31, behind 0; no fetch performed
+
+quote_gate:
+  package_b_callable: executeSyntheticAssessmentFromEnqueueRecord(selectionIdentity, dependencies) with explicit organizationId/intakeFileId/objectVersionId/verifiedChecksum selection
+  package_b_returns: lifecycle failure envelopes, assessment_read_integrity_failure bridge envelopes, or executor result { policy: "pass" } / { policy: "block", category } / { status: "failed", category }
+  c1_callable: compareAndSetPolicyDecision({ confirmedFileFacts, expectedFilePolicyStatus, policyDecisionOutcome, sanitizedResult, metadataOnlyAudit, now })
+  c1_outcomes: passed, blocked, failed
+  enqueue_record_shape: security_assessment_enqueue_id, organization_id, intake_file_id, object_version_id, verified_checksum, verified_size_bytes, declared_mime, extension
+  same_record_binding: Package B and C2 both select by the immutable enqueue identity; C2 derives C1 confirmedFileFacts from the selected stored enqueue record
+  policy_failure_categories: security_assessment_timeout, input_size_exceeds_pre_parse_gate, malware_scan_failed
+  non_policy_categories: maximum_concurrent_pdf_assessor_workers_exceeded, malware_scan_not_configured
+  bridge_failure: assessment_read_integrity_failure remains non-policy and non-mutating
+  contract_gap: none
+
+implemented_scope:
+  new_internal_composition: Backend/kai/security/syntheticAssessmentPolicyComposition.js
+  focused_tests: __tests__/kai-sprint2-synthetic-assessment-policy-composition.spec.js
+  protected_files_changed: false
+  route_or_production_exposure: false
+  queue_lifecycle_or_database_work: false
+  gate_a_or_p0_06b_work: false
+
+behavior:
+  invokes_package_b_once_per_call: true
+  derives_c1_facts_from_stored_enqueue_record: true
+  pass_maps_to_c1_passed: true
+  block_maps_to_c1_blocked: true
+  policy_eligible_failed_maps_to_c1_failed: true
+  bridge_contention_and_malware_not_configured_call_c1_zero_times: true
+  unclassified_result: C2_UNCLASSIFIED_OUTCOME with C1 zero calls
+  c1_replay_conflict_lifecycle_and_atomic_audit_preserved: true
+  enqueue_record_left_unchanged_and_unconsumed: true
+  independent_c2_audit_write: false
+
+tests:
+  focused_c2: DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-synthetic-assessment-policy-composition.spec.js - tests 10; pass 10; fail 0
+  focused_c2_package_b_c1_enqueue_audit_acceptance_initial_sandbox: DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel node --test C2, Package B, enqueue, lifecycle, bridge, executor, audit, and P0 acceptance specs - existing local HTTP listener tests failed with sandbox listen EPERM on 127.0.0.1; non-listener subtests proceeded
+  focused_c2_package_b_c1_enqueue_audit_acceptance_localhost_capable: DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel node --test C2, Package B, enqueue, lifecycle, bridge, executor, audit, and P0 acceptance specs - tests 139; pass 139; fail 0
+  sprint2_suite_initial_sandbox: DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - existing local HTTP listener tests failed with sandbox listen EPERM on 127.0.0.1; non-listener subtests proceeded
+  sprint2_suite_localhost_capable: DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - tests 949; pass 949; fail 0
+  full_repository_initial_sandbox: DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel npm test - existing local HTTP listener tests failed with sandbox listen EPERM on 127.0.0.1; non-listener subtests proceeded
+  full_repository_localhost_capable: DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel npm test - tests 1054; pass 1054; fail 0
+  git_diff_check_before_execplan: git diff --check - pass
+
+not_confirmed:
+  database_atomicity: NOT_CONFIRMED
+  production_readiness: NOT_CONFIRMED
+  live_upload_readiness: NOT_CONFIRMED
+  automated_queue_processing: NOT_CONFIRMED
+  HTTP_completed_security_assessment: NOT_CONFIRMED
+
+prohibited_actions_not_performed:
+  - no protected-file change, HTTP route, production barrel, production composition, database, queue lifecycle, schema, cloud, credential, tenant, feature-flag, deployment, push, Current State update, Implementation Baseline update, Gate A, Gate B, Gate C, Gate D, P0-06B, P1, or next-package work
+
+next_package_or_stop_condition: OWNER-DIRECTED STOP after C2; do not begin HTTP integration or another package
+commit_hash: report after commit; a commit cannot contain its own SHA
+```
