@@ -661,98 +661,108 @@ test("file reservation writes no raw object and uses pending policy with no conf
   assert.match(inserted.storageUri, /^reservation:\/\/kai\/gcs\/org\//);
 });
 
-test("file reservation rejects application/json declared MIME and keeps permitted MIME accepted", async () => {
-  let jsonMimeInserted = false;
-  const jsonMimeResult = await reserveIntakeFileMetadata(
-    {
-      actorContext,
-      organizationId,
-      engagementId,
-      intakeBatchId,
-      intakeFileId,
-      payload: {
-        idempotency_key: "kai-p0-json-mime-runtime-block-001",
-        original_filename: "safe.txt",
-        mime_type: "application/json",
-        file_extension: ".txt",
-        file_size_bytes: 0,
-        checksum: declaredChecksum,
-        hash_algorithm: "sha256",
+test("file reservation enforces the committed extension MIME matrix", async (t) => {
+  async function reserveWithMetadata({ fileExtension, mimeType, idempotencyKey }) {
+    let inserted = null;
+    const result = await reserveIntakeFileMetadata(
+      {
+        actorContext,
+        organizationId,
+        engagementId,
+        intakeBatchId,
+        intakeFileId,
+        payload: {
+          idempotency_key: idempotencyKey,
+          original_filename: `safe${fileExtension}`,
+          mime_type: mimeType,
+          file_extension: fileExtension,
+          file_size_bytes: 0,
+          checksum: declaredChecksum,
+          hash_algorithm: "sha256",
+        },
       },
-    },
-    {
-      env: { KAI_SPRINT2_ENABLED: "true" },
-      async getIntakeBatchTenantState() {
-        return { intake_batch_id: intakeBatchId, organization_id: organizationId, engagement_id: engagementId };
+      {
+        env: { KAI_SPRINT2_ENABLED: "true" },
+        async getIntakeBatchTenantState() {
+          return { intake_batch_id: intakeBatchId, organization_id: organizationId, engagement_id: engagementId };
+        },
+        async findIntakeFileReservationByIdempotencyKey() {
+          return null;
+        },
+        async findIntakeFileReservationByChecksum() {
+          return null;
+        },
+        async insertIntakeFileMetadata(file) {
+          inserted = file;
+          return {
+            intake_file_id: file.intakeFileId,
+            intake_batch_id: file.intakeBatchId,
+            organization_id: file.organizationId,
+            engagement_id: file.engagementId,
+            safe_filename: file.safeFilename,
+            storage_provider: file.storageProvider,
+            storage_bucket: file.storageBucket,
+            storage_object_key: file.storageObjectKey,
+            file_policy_status: file.filePolicyStatus,
+            malware_scan_status: file.malwareScanStatus,
+            processing_status: "quarantined",
+            parse_status: "quarantined",
+            review_status: "proposed",
+          };
+        },
       },
-      async insertIntakeFileMetadata() {
-        jsonMimeInserted = true;
-      },
-    },
-  );
+    );
+    return { result, inserted };
+  }
 
-  assert.equal(jsonMimeResult.ok, false);
-  assert.equal(jsonMimeResult.error.code, "validation_blocker");
-  assert.equal(jsonMimeResult.error.status, 422);
-  assert.equal(jsonMimeResult.blockers[0].validator_key, "VAL-STO-005");
-  assert.equal(jsonMimeResult.blockers[0].object_code, "mime_type");
-  assert.equal(jsonMimeResult.blockers[0].blocking_reason, "unsupported_mime_type");
-  assert.deepEqual(jsonMimeResult.blockers[0].evidence, { mime_type: "application/json" });
-  assert.equal(jsonMimeInserted, false);
+  for (const [fileExtension, mimeType] of [
+    [".txt", "application/json"],
+    [".txt", "application/octet-stream"],
+    [".txt", "application/xml"],
+    [".xlsx", "text/plain"],
+    [".pdf", "text/plain"],
+    [".md", "application/pdf"],
+  ]) {
+    await t.test(`rejects ${fileExtension} ${mimeType}`, async () => {
+      const { result, inserted } = await reserveWithMetadata({
+        fileExtension,
+        mimeType,
+        idempotencyKey: `kai-p0-runtime-block-${fileExtension.slice(1)}-${mimeType.replace(/[^a-z0-9]/gi, "-")}`,
+      });
 
-  let permittedMimeInserted = null;
-  const permittedMimeResult = await reserveIntakeFileMetadata(
-    {
-      actorContext,
-      organizationId,
-      engagementId,
-      intakeBatchId,
-      intakeFileId,
-      payload: {
-        idempotency_key: "kai-p0-text-plain-runtime-allow-001",
-        original_filename: "safe.txt",
-        mime_type: "text/plain",
-        file_extension: ".txt",
-        file_size_bytes: 0,
-        checksum: declaredChecksum,
-        hash_algorithm: "sha256",
-      },
-    },
-    {
-      env: { KAI_SPRINT2_ENABLED: "true" },
-      async getIntakeBatchTenantState() {
-        return { intake_batch_id: intakeBatchId, organization_id: organizationId, engagement_id: engagementId };
-      },
-      async findIntakeFileReservationByIdempotencyKey() {
-        return null;
-      },
-      async findIntakeFileReservationByChecksum() {
-        return null;
-      },
-      async insertIntakeFileMetadata(file) {
-        permittedMimeInserted = file;
-        return {
-          intake_file_id: file.intakeFileId,
-          intake_batch_id: file.intakeBatchId,
-          organization_id: file.organizationId,
-          engagement_id: file.engagementId,
-          safe_filename: file.safeFilename,
-          storage_provider: file.storageProvider,
-          storage_bucket: file.storageBucket,
-          storage_object_key: file.storageObjectKey,
-          file_policy_status: file.filePolicyStatus,
-          malware_scan_status: file.malwareScanStatus,
-          processing_status: "quarantined",
-          parse_status: "quarantined",
-          review_status: "proposed",
-        };
-      },
-    },
-  );
+      assert.equal(result.ok, false);
+      assert.equal(result.error.code, "validation_blocker");
+      assert.equal(result.error.status, 422);
+      assert.equal(result.blockers[0].validator_key, "VAL-STO-005");
+      assert.equal(result.blockers[0].object_code, "mime_type");
+      assert.equal(result.blockers[0].blocking_reason, "unsupported_mime_type");
+      assert.deepEqual(result.blockers[0].evidence, { file_extension: fileExtension, mime_type: mimeType });
+      assert.equal(inserted, null);
+    });
+  }
 
-  assert.equal(permittedMimeResult.ok, true);
-  assert.equal(permittedMimeInserted.mimeType, "text/plain");
-  assert.equal(permittedMimeResult.data.safe_filename, "safe.txt");
+  for (const [fileExtension, mimeType] of [
+    [".csv", "text/csv"],
+    [".csv", "application/csv"],
+    [".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+    [".md", "text/markdown"],
+    [".md", "text/plain"],
+    [".txt", "text/plain"],
+    [".pdf", "application/pdf"],
+  ]) {
+    await t.test(`accepts ${fileExtension} ${mimeType}`, async () => {
+      const { result, inserted } = await reserveWithMetadata({
+        fileExtension,
+        mimeType,
+        idempotencyKey: `kai-p0-runtime-allow-${fileExtension.slice(1)}-${mimeType.replace(/[^a-z0-9]/gi, "-")}`,
+      });
+
+      assert.equal(result.ok, true);
+      assert.equal(inserted.mimeType, mimeType);
+      assert.equal(inserted.fileExtension, fileExtension);
+      assert.equal(result.data.safe_filename, `safe${fileExtension}`);
+    });
+  }
 });
 
 test("file reservation blocks missing and invalid idempotency keys before lookup or insert", async (t) => {
@@ -832,6 +842,7 @@ test("file reservation blocks missing or invalid checksum metadata before replay
             idempotency_key: `kai-p0-checksum-${name.replace(/\s/g, "-")}`,
             original_filename: "safe.csv",
             mime_type: "text/csv",
+            file_extension: ".csv",
             ...(checksum === undefined ? {} : { checksum }),
             ...(hashAlgorithm === undefined ? {} : { hash_algorithm: hashAlgorithm }),
           },
@@ -873,6 +884,7 @@ test("file reservation preserves identical replay and rejects conflicting checks
     idempotency_key: "kai-p0-checksum-replay-001",
     original_filename: "safe.csv",
     mime_type: "text/csv",
+    file_extension: ".csv",
     checksum: declaredChecksum,
     hash_algorithm: "sha256",
   };
@@ -978,6 +990,7 @@ test("file reservation fails closed for missing or malformed stored fingerprints
     idempotency_key: "kai-p0-malformed-file-replay-001",
     original_filename: "safe.csv",
     mime_type: "text/csv",
+    file_extension: ".csv",
     checksum: declaredChecksum,
     hash_algorithm: "sha256",
   };
@@ -1076,6 +1089,7 @@ test("file reservation blocks preliminary duplicate declared checksums without v
         idempotency_key: "kai-p0-checksum-duplicate-001",
         original_filename: "safe.csv",
         mime_type: "text/csv",
+        file_extension: ".csv",
         checksum: declaredChecksum,
         hash_algorithm: "sha256",
       },

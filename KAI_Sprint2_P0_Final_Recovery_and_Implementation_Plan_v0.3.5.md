@@ -6366,3 +6366,108 @@ prohibited_actions_not_performed:
 next_package_or_stop_condition: OWNER-DIRECTED STOP after this P0-07 per-format local HTTP acceptance package
 commit_hash: report after commit; a commit cannot contain its own SHA
 ```
+
+## Runtime MIME alignment and honest P0-07 coverage correction
+
+```text
+package_date: 2026-08-02 America/Vancouver
+evidence_class: TOOL_VERIFIED
+owner_authorization: USER_CONFIRMED
+package_status: complete before commit
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 638451531e56bff8947b3d1b036814b6896be3ba
+direct_parent: 96c04931262527489da5af7f15e9517150928a99
+starting_tree: clean tracked and untracked
+staged_paths_at_start: none
+remote_fetch_push_or_deploy: not performed
+
+execplan_integrity:
+  pre_edit_tail_printed: TOOL_VERIFIED
+  prior_6384515_block_at_true_eof_before_append: TOOL_VERIFIED
+  relocation_performed: false
+  prior_bytes_changed: false
+  new_evidence_block_location: literal EOF
+
+runtime_allowlist_before:
+  Backend/kai/services/kaiIntakeService.js allowed text/csv, application/csv, and text/plain by MIME only
+  extension_mime_pairing_enforced: false
+
+runtime_allowlist_after:
+  .csv: text/csv, application/csv
+  .xlsx: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+  .md: text/markdown, text/plain
+  .txt: text/plain
+  .pdf: application/pdf
+  extension_mime_pairing_enforced: true
+  application_json_rejected: TOOL_VERIFIED
+  application_octet_stream_declared_file_mime_rejected: TOOL_VERIFIED
+  unlisted_mime_rejected: TOOL_VERIFIED
+  mismatched_extension_mime_pairs_rejected: TOOL_VERIFIED
+  caller_metadata_repair_or_reclassification: false
+
+p0_07_correction:
+  metadata_substitution_removed: TOOL_VERIFIED
+  synthetic_enqueue_snapshot_retargeting_removed: TOOL_VERIFIED
+  reserve_upload_confirm_enqueue_assessment_use_original_reservation_facts: TOOL_VERIFIED
+  detector_semantics_changed: false
+  assessor_semantics_changed: false
+
+format_cases_proven:
+  encrypted_pdf: .pdf application/pdf reaches encrypted_or_password_protected block outcome through original reservation facts
+  encrypted_xlsx: .xlsx application/vnd.openxmlformats-officedocument.spreadsheetml.sheet reaches security_assessment_timeout sanitized failure through original reservation facts
+  xlsx_macro: .xlsx application/vnd.openxmlformats-officedocument.spreadsheetml.sheet reaches xlsx_macro_or_external_relationship block
+  xlsx_external_relationship: .xlsx application/vnd.openxmlformats-officedocument.spreadsheetml.sheet reaches xlsx_macro_or_external_relationship block
+  xlsx_path_traversal: .xlsx application/vnd.openxmlformats-officedocument.spreadsheetml.sheet reaches ooxml_path_traversal block
+  xlsx_entry_expansion_bomb: .xlsx application/vnd.openxmlformats-officedocument.spreadsheetml.sheet reaches archive_entry_limit_exceeded block
+  xlsx_compression_ratio_bomb: .xlsx application/vnd.openxmlformats-officedocument.spreadsheetml.sheet reaches archive_compression_ratio_limit_exceeded block
+  pdf_active_content: .pdf application/pdf reaches pdf_active_or_embedded_content block
+  pdf_embedded_file: .pdf application/pdf reaches pdf_active_or_embedded_content block
+  prompt_injection_txt: .txt text/plain reaches pass with text remaining inert and absent from outputs
+  prompt_injection_md: .md text/markdown reaches pass with text remaining inert and absent from outputs
+  spreadsheet_formula_cells: .xlsx application/vnd.openxmlformats-officedocument.spreadsheetml.sheet reaches pass with formula bytes absent from outputs
+  format_coverage_gaps_found: none
+
+sanitized_output:
+  responses_expose_no_raw_bytes: TOOL_VERIFIED
+  responses_expose_no_storage_details: TOOL_VERIFIED
+  responses_expose_no_checksums_or_object_version_facts: TOOL_VERIFIED
+  responses_expose_no_enqueue_identifiers: TOOL_VERIFIED
+  responses_expose_no_audit_data: TOOL_VERIFIED
+  responses_expose_no_internal_assessor_details: TOOL_VERIFIED
+
+tests_updated_for_old_behavior:
+  __tests__/kai-sprint2-pass2-metadata-intake-service.spec.js:
+    before: assert.deepEqual(jsonMimeResult.blockers[0].evidence, { mime_type: "application/json" })
+    after: rejects .txt application/json and application/octet-stream with file_extension plus mime_type evidence; accepts .xlsx application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, .pdf application/pdf, and .md text/markdown
+  __tests__/kai-sprint2-pass2-route-runtime.spec.js:
+    before: file-reservation route idempotency and checksum payloads declared text/csv without file_extension
+    after: same assertions declare file_extension .csv so intended idempotency/checksum blockers are reached after MIME-pair validation
+  __tests__/kai-sprint2-p0-acceptance.spec.js:
+    before: P0-07 helper reserved xlsx/pdf/md cases as .txt text/plain and retargeted synthetic enqueue metadata before assessment
+    after: helper reserves each case with the real extension and declared MIME and asserts enqueue records preserve those facts
+
+verification:
+  focused_reservation_validator: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-pass2-metadata-intake-service.spec.js - tests 64; pass 64; fail 0
+  focused_route_runtime: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-pass2-route-runtime.spec.js - tests 27; pass 27; fail 0
+  focused_p0_07_initial_sandbox: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2-p0-acceptance - sandbox listener failure, listen EPERM on 127.0.0.1
+  focused_p0_07_localhost_capable: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2-p0-acceptance - tests 62; pass 62; fail 0
+  verify_schema_contract: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-schema-contract - tests 21; pass 21; fail 0
+  verify_api_contract_initial_sandbox: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-api-contract - sandbox listener failure, listen EPERM on 127.0.0.1 plus pre-alignment route payload failures fixed by adding .csv
+  verify_api_contract_localhost_capable: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-api-contract - tests 55; pass 55; fail 0
+  sprint2_suite_localhost_capable: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - tests 982; pass 982; fail 0
+  full_repository_localhost_capable: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - tests 1087; pass 1087; fail 0
+
+not_confirmed:
+  deployed_kai_schema_compatibility: NOT_CONFIRMED
+  database_atomicity: NOT_CONFIRMED
+  persistent_upload_lifecycle: NOT_CONFIRMED
+  nonproduction_storage_integration: NOT_CONFIRMED
+  production_readiness: NOT_CONFIRMED
+  real_client_data_readiness: NOT_CONFIRMED
+
+prohibited_actions_not_performed:
+  - no detector semantic change, assessor semantic change, database, schema, cloud, production, queue drain, Gate A, Gate B, Gate C, Gate D, P0-06B, deployment, push, credential, tenant, feature-flag, real-client-data, Current State, or Implementation Baseline work
+
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this runtime MIME alignment and honest P0-07 coverage correction
+commit_hash: report after commit; a commit cannot contain its own SHA
+```

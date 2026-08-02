@@ -60,7 +60,13 @@ import { recordBlockedAttempt } from "./kaiAuditService.js";
 
 const PASS2_MARKER = "pass2_admin_metadata_intake_verification";
 const PASS2_GATE_PLAN = "KAI_MVP_Sprint2_P0_Pass2_Production_Synthetic_Metadata_Write_Gate_Plan_v0.1.1";
-const ALLOWED_METADATA_ONLY_MIME_TYPES = new Set(["text/csv", "application/csv", "text/plain"]);
+const ALLOWED_METADATA_EXTENSION_MIME_PAIRS = Object.freeze(new Map([
+  [".csv", new Set(["text/csv", "application/csv"])],
+  [".xlsx", new Set(["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"])],
+  [".md", new Set(["text/markdown", "text/plain"])],
+  [".txt", new Set(["text/plain"])],
+  [".pdf", new Set(["application/pdf"])],
+]));
 const UUID_RE = KAI_SPRINT2_P0_PATTERNS.uuid;
 const STORED_FINGERPRINT_RE = /^[0-9a-f]{64}$/;
 const PRELIMINARY_DUPLICATE_VALIDATORS = Object.freeze([duplicate_checksum_blocked]);
@@ -474,6 +480,35 @@ function unsupportedMimeBlocker(mimeType) {
     required_fix: "Use a DDL-safe metadata-only MIME type.",
     evidence: { mime_type: mimeType || null },
   };
+}
+
+function unsupportedExtensionMimePairBlocker({ fileExtension, mimeType }) {
+  return {
+    validator_key: "VAL-STO-005",
+    severity: "blocker",
+    object_type: "intake_file",
+    object_code: "mime_type",
+    object_id: null,
+    message: "Extension and MIME type pairing is not allowed for metadata-only reservation.",
+    blocking_reason: "unsupported_mime_type",
+    required_fix: "Use a committed P0 extension and MIME pairing.",
+    evidence: { file_extension: fileExtension || null, mime_type: mimeType || null },
+  };
+}
+
+function validateMetadataExtensionMimePair({ fileExtension, mimeType }) {
+  if (!mimeType) return { ok: true };
+  const extension = String(fileExtension || "").trim().toLowerCase();
+  const allowedMimeTypes = ALLOWED_METADATA_EXTENSION_MIME_PAIRS.get(extension);
+  if (!allowedMimeTypes) {
+    return { ok: false, blocker: unsupportedExtensionMimePairBlocker({ fileExtension: extension || fileExtension, mimeType }) };
+  }
+  if (!allowedMimeTypes.has(mimeType)) {
+    return allowedMimeTypes.size === 0
+      ? { ok: false, blocker: unsupportedMimeBlocker(mimeType) }
+      : { ok: false, blocker: unsupportedExtensionMimePairBlocker({ fileExtension: extension, mimeType }) };
+  }
+  return { ok: true };
 }
 
 function missingEngagementIdBlocker(objectType = "engagement") {
@@ -1779,8 +1814,12 @@ export async function reserveIntakeFileMetadata(input = {}, dependencies = {}) {
   }
 
   const mimeType = input.mimeType || payload.mime_type || null;
-  if (mimeType && !ALLOWED_METADATA_ONLY_MIME_TYPES.has(mimeType)) {
-    return await toBlockerResponse([unsupportedMimeBlocker(mimeType)], actorContext, "reserve_intake_file_metadata", {
+  const extensionMimeResult = validateMetadataExtensionMimePair({
+    fileExtension: input.fileExtension || payload.file_extension || null,
+    mimeType,
+  });
+  if (!extensionMimeResult.ok) {
+    return await toBlockerResponse([extensionMimeResult.blocker], actorContext, "reserve_intake_file_metadata", {
       organization_id: organizationId,
       engagement_id: engagementId,
       route: routeName(input.route, "/api/kai/sprint2/intake/admin/batches/:intakeBatchId/file-reservations"),

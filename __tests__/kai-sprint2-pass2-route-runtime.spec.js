@@ -424,6 +424,7 @@ test("metadata-write routes return 422 idempotency blockers from the mounted ser
             ...(idempotencyKey === undefined ? {} : { idempotency_key: idempotencyKey }),
             original_filename: "safe.csv",
             mime_type: "text/csv",
+            file_extension: ".csv",
           },
         });
 
@@ -489,6 +490,7 @@ test("mounted file reservation returns 422 checksum blockers before lookup or in
             idempotency_key: `kai-route-checksum-${name.replace(/\s/g, "-")}`,
             original_filename: "safe.csv",
             mime_type: "text/csv",
+            file_extension: ".csv",
             ...(checksum === undefined ? {} : { checksum }),
             ...(hashAlgorithm === undefined ? {} : { hash_algorithm: hashAlgorithm }),
           },

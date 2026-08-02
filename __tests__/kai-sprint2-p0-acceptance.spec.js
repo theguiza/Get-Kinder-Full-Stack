@@ -1003,13 +1003,11 @@ async function assertConfirmedHttpAssessmentCase({
   bytes,
   extension,
   declaredMime,
-  reserveExtension = extension,
-  reserveMime = declaredMime,
   expectedPolicyStatus,
   expectedSanitizedResult,
   malwareClean = false,
   assessmentResult,
-  originalFilename = `${name}.dat`,
+  originalFilename,
 }) {
   const scenario = await createScenario();
   const app = createApplication(scenario);
@@ -1020,42 +1018,17 @@ async function assertConfirmedHttpAssessmentCase({
       reserveOverrides: {
         batch_idempotency_key: `batch-${sha256(Buffer.from(name)).slice(0, 12)}`,
         idempotency_key: `file-${sha256(Buffer.from(name)).slice(0, 12)}`,
-        original_filename: originalFilename,
-        file_extension: reserveExtension,
-        mime_type: reserveMime,
+        original_filename: originalFilename || `${name}${extension}`,
+        file_extension: extension,
+        mime_type: declaredMime,
       },
     });
     assert.equal(confirm.body.data.upload_state, "confirmed");
 
-    if (reserveExtension !== extension || reserveMime !== declaredMime) {
-      const records = scenario.securityAssessmentEnqueue.listSecurityAssessmentEnqueueRecords();
-      assert.equal(records.length, 1);
-      const [record] = records;
-      const identityKey = [
-        record.organization_id,
-        record.intake_file_id,
-        record.object_version_id,
-        record.verified_checksum,
-      ].join("\u0000");
-      const snapshot = scenario.securityAssessmentEnqueue[
-        SYNTHETIC_SECURITY_ASSESSMENT_ENQUEUE_TRANSACTION_PARTICIPANT
-      ].snapshot();
-      scenario.securityAssessmentEnqueue[
-        SYNTHETIC_SECURITY_ASSESSMENT_ENQUEUE_TRANSACTION_PARTICIPANT
-      ].replaceSnapshot({
-        ...snapshot,
-        recordsByIdentity: snapshot.recordsByIdentity.map(([, existing]) => {
-          const next = existing.security_assessment_enqueue_id === record.security_assessment_enqueue_id
-            ? { ...existing, declared_mime: declaredMime, extension }
-            : existing;
-          return [identityKey, next];
-        }),
-        identityByScopedFile: snapshot.identityByScopedFile.map(([fileKey, existingIdentity]) => [
-          fileKey,
-          existingIdentity === snapshot.recordsByIdentity[0]?.[0] ? identityKey : existingIdentity,
-        ]),
-      });
-    }
+    const records = scenario.securityAssessmentEnqueue.listSecurityAssessmentEnqueueRecords();
+    assert.equal(records.length, 1);
+    assert.equal(records[0].extension, extension);
+    assert.equal(records[0].declared_mime, declaredMime);
 
     const { result, audit } = await executePolicyDecisionForFirstEnqueueRecord(scenario, {
       ...(malwareClean ? {
@@ -1456,9 +1429,7 @@ test("P0-07 format-security HTTP acceptance cases use bounded local assessment c
         ...item,
         extension: ".xlsx",
         declaredMime: XLSX_MIME,
-        reserveExtension: ".txt",
-        reserveMime: "text/plain",
-        originalFilename: `${item.name}.txt`,
+        originalFilename: `${item.name}.xlsx`,
       });
     });
   }
@@ -1489,9 +1460,7 @@ test("P0-07 format-security HTTP acceptance cases use bounded local assessment c
         ...item,
         extension: ".pdf",
         declaredMime: "application/pdf",
-        reserveExtension: ".txt",
-        reserveMime: "text/plain",
-        originalFilename: `${item.name}.txt`,
+        originalFilename: `${item.name}.pdf`,
       });
     });
   }
@@ -1513,9 +1482,6 @@ test("P0-07 format-security HTTP acceptance cases use bounded local assessment c
     await t.test(item.name, async () => {
       await assertConfirmedHttpAssessmentCase({
         ...item,
-        reserveExtension: item.extension === ".md" ? ".txt" : item.extension,
-        reserveMime: item.extension === ".md" ? "text/plain" : item.declaredMime,
-        originalFilename: item.extension === ".md" ? "prompt-injection.txt" : item.originalFilename,
         bytes: promptInjectionText,
         expectedPolicyStatus: "passed",
         expectedSanitizedResult: { policy: "pass" },
@@ -1526,6 +1492,75 @@ test("P0-07 format-security HTTP acceptance cases use bounded local assessment c
 });
 
 test("P0-07 negative local synthetic HTTP acceptance matrix", async (t) => {
+  await t.test("reservation accepts committed extension and MIME pairings through HTTP", async () => {
+    const scenario = await createScenario();
+    const app = createApplication(scenario);
+    const server = await listen(app);
+    try {
+      const batch = await createBatch(server, "batch-runtime-mime-allow");
+      assert.equal(batch.statusCode, 201);
+      const cases = [
+        [".csv", "text/csv"],
+        [".csv", "application/csv"],
+        [".xlsx", XLSX_MIME],
+        [".md", "text/markdown"],
+        [".md", "text/plain"],
+        [".txt", "text/plain"],
+        [".pdf", "application/pdf"],
+      ];
+
+      for (const [fileExtension, mimeType] of cases) {
+        const response = await reserveFile(server, batch.body.data.intake_batch_id, {
+          idempotency_key: `file-${fileExtension.slice(1)}-${sha256(Buffer.from(mimeType)).slice(0, 12)}`,
+          original_filename: `acceptance-${fileExtension.slice(1)}${fileExtension}`,
+          file_extension: fileExtension,
+          mime_type: mimeType,
+        });
+        assert.equal(response.statusCode, 201, JSON.stringify({ fileExtension, mimeType, body: response.body }));
+      }
+    } finally {
+      server.close();
+      app.closeForTest();
+      await scenario.close();
+    }
+  });
+
+  await t.test("reservation rejects unsupported declared MIME values and invalid extension MIME pairings through HTTP", async () => {
+    const scenario = await createScenario();
+    const app = createApplication(scenario);
+    const server = await listen(app);
+    try {
+      const batch = await createBatch(server, "batch-runtime-mime-reject");
+      assert.equal(batch.statusCode, 201);
+      const cases = [
+        [".txt", "application/json"],
+        [".txt", "application/octet-stream"],
+        [".txt", "application/xml"],
+        [".xlsx", "text/plain"],
+        [".pdf", "text/plain"],
+        [".md", "application/pdf"],
+        [".csv", "text/plain"],
+      ];
+
+      for (const [fileExtension, mimeType] of cases) {
+        const response = await reserveFile(server, batch.body.data.intake_batch_id, {
+          idempotency_key: `file-reject-${fileExtension.slice(1)}-${sha256(Buffer.from(mimeType)).slice(0, 12)}`,
+          original_filename: `acceptance-reject-${fileExtension.slice(1)}${fileExtension}`,
+          file_extension: fileExtension,
+          mime_type: mimeType,
+        });
+        assert.equal(response.statusCode, 422, JSON.stringify({ fileExtension, mimeType, body: response.body }));
+        assert.equal(response.body.error.code, "validation_blocker");
+        assert.equal(response.body.blockers[0].validator_key, "VAL-STO-005");
+        assert.equal(response.body.blockers[0].blocking_reason, "unsupported_mime_type");
+      }
+    } finally {
+      server.close();
+      app.closeForTest();
+      await scenario.close();
+    }
+  });
+
   await t.test("feature disabled", async () => {
     const scenario = await createScenario();
     const app = createApplication(scenario, { featureEnabled: false });
