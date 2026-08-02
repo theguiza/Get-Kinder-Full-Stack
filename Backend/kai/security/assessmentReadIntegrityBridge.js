@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { KAI_SPRINT2_MAX_FILE_SIZE_BYTES } from "../config/kaiSprint2P0Contract.js";
 
 const PROVIDER_NEUTRAL_OBJECT_VERSION_ID_RE = /^ov_[a-f0-9]{32}$/u;
 const SHA256_HEX_RE = /^[0-9a-f]{64}$/u;
@@ -10,7 +11,7 @@ const ALLOWED_INPUT_KEYS = Object.freeze(new Set([
   "signal",
 ]));
 
-export const ASSESSMENT_READ_INTEGRITY_MAX_BYTES = 25 * 1024 * 1024;
+export const ASSESSMENT_READ_INTEGRITY_MAX_BYTES = KAI_SPRINT2_MAX_FILE_SIZE_BYTES;
 
 export const ASSESSMENT_READ_INTEGRITY_FAILURE_TYPE = "assessment_read_integrity_failure";
 
@@ -102,6 +103,9 @@ export async function readVerifiedAssessmentBytes(input = {}) {
   if (signal?.aborted) {
     return integrityFailure(ASSESSMENT_READ_INTEGRITY_FAILURE_KINDS.aborted);
   }
+  if (expectedSize > KAI_SPRINT2_MAX_FILE_SIZE_BYTES) {
+    return integrityFailure(ASSESSMENT_READ_INTEGRITY_FAILURE_KINDS.size_limit_exceeded);
+  }
 
   let opened;
   try {
@@ -141,6 +145,9 @@ export async function readVerifiedAssessmentBytes(input = {}) {
       }
 
       const nextCount = countedBytes + chunkLength;
+      if (nextCount > expectedSize) {
+        return integrityFailure(ASSESSMENT_READ_INTEGRITY_FAILURE_KINDS.size_mismatch);
+      }
       if (nextCount > ASSESSMENT_READ_INTEGRITY_MAX_BYTES) {
         return integrityFailure(ASSESSMENT_READ_INTEGRITY_FAILURE_KINDS.size_limit_exceeded);
       }

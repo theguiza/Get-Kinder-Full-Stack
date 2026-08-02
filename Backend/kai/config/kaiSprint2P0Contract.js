@@ -34,6 +34,8 @@ export const KAI_SPRINT2_P0_PATTERNS = Object.freeze({
 
 export const KAI_SPRINT2_P0_HASH_ALGORITHM = "sha256";
 
+export const KAI_SPRINT2_MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024;
+
 export const KAI_SPRINT2_P0_ABUSE_LIMITS = Object.freeze({
   windowMs: 15 * 60 * 1000,
   actorMutationAttempts: 120,

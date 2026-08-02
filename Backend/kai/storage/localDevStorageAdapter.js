@@ -396,6 +396,9 @@ export class LocalDevStorageAdapter extends StorageAdapter {
       if (error?.name === "AbortError") {
         return safeError("invalid_request", "Object version write was aborted.", 400);
       }
+      if (error?.code === "request_too_large") {
+        return safeError("request_too_large", "Request body is too large.", 413);
+      }
       if (error instanceof TypeError) {
         return safeError("invalid_request", "Object version bytes must be binary.", 400);
       }

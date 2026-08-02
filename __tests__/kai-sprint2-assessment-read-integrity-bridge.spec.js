@@ -9,6 +9,8 @@ import {
   ASSESSMENT_READ_INTEGRITY_MAX_BYTES,
   readVerifiedAssessmentBytes,
 } from "../Backend/kai/security/assessmentReadIntegrityBridge.js";
+import { KAI_SPRINT2_MAX_FILE_SIZE_BYTES } from "../Backend/kai/config/kaiSprint2P0Contract.js";
+import { PDF_ASSESSOR_PRE_PARSE_INPUT_GATE_BYTES } from "../Backend/kai/validators/pdfAssessorWorkerBoundary.js";
 
 const OBJECT_VERSION_ID = "ov_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
@@ -113,6 +115,22 @@ function assertIntegrityFailure(result, kind) {
   assert.doesNotMatch(JSON.stringify(result), /private|bucket|storage_uri|signed_url|object\.bin|secret|raw bytes|ov_aaaaaaaa/i);
 }
 
+function generatedChunk(byteLength, fill = 0x61) {
+  return Buffer.alloc(byteLength, fill);
+}
+
+test("assessment read-integrity bridge uses the canonical global intake limit without changing the PDF gate", () => {
+  const bridgeSource = readFileSync("Backend/kai/security/assessmentReadIntegrityBridge.js", "utf8");
+  const pdfWorkerSource = readFileSync("Backend/kai/validators/pdfAssessorWorkerBoundary.js", "utf8");
+
+  assert.equal(KAI_SPRINT2_MAX_FILE_SIZE_BYTES, 26214400);
+  assert.equal(ASSESSMENT_READ_INTEGRITY_MAX_BYTES, KAI_SPRINT2_MAX_FILE_SIZE_BYTES);
+  assert.equal(PDF_ASSESSOR_PRE_PARSE_INPUT_GATE_BYTES, 26214400);
+  assert.match(bridgeSource, /KAI_SPRINT2_MAX_FILE_SIZE_BYTES/);
+  assert.doesNotMatch(bridgeSource, /25 \* 1024 \* 1024/);
+  assert.match(pdfWorkerSource, /PDF_ASSESSOR_PRE_PARSE_INPUT_GATE_BYTES = 25 \* 1024 \* 1024/);
+});
+
 test("assessment read-integrity bridge opens the requested exact version and returns assessor-compatible bytes", async () => {
   const chunks = [Buffer.from("exact "), new Uint8Array(Buffer.from("version")), Buffer.from(" bytes")];
   const source = exactVersionByteSource(chunks);
@@ -188,23 +206,70 @@ test("assessment read-integrity bridge fails closed for missing, changed, or cal
   }
 });
 
-test("assessment read-integrity bridge enforces the committed 25 MB byte limit incrementally", async () => {
-  const atLimit = Buffer.alloc(ASSESSMENT_READ_INTEGRITY_MAX_BYTES, 0x61);
-  const source = exactVersionByteSource([atLimit, Buffer.from("x"), Buffer.from("must not be read")]);
+test("assessment read-integrity bridge rejects expected size above the global limit before storage opens", async () => {
   const storageAdapter = storageAdapterFor({
-    source,
-    sizeBytes: ASSESSMENT_READ_INTEGRITY_MAX_BYTES + 1,
+    source: exactVersionByteSource([Buffer.from("not opened")]),
+    sizeBytes: KAI_SPRINT2_MAX_FILE_SIZE_BYTES + 1,
   });
 
   const result = await readVerifiedAssessmentBytes({
     objectVersionId: OBJECT_VERSION_ID,
     expectedChecksum: "a".repeat(64),
-    expectedSize: ASSESSMENT_READ_INTEGRITY_MAX_BYTES + 1,
+    expectedSize: KAI_SPRINT2_MAX_FILE_SIZE_BYTES + 1,
     storageAdapter,
   });
 
   assertIntegrityFailure(result, ASSESSMENT_READ_INTEGRITY_FAILURE_KINDS.size_limit_exceeded);
+  assert.deepEqual(storageAdapter.calls, []);
+});
+
+test("assessment read-integrity bridge rejects a chunk crossing expected size before retention", async () => {
+  const source = exactVersionByteSource([
+    Buffer.from("abc"),
+    Buffer.from("def"),
+    Buffer.from("must not be read"),
+  ]);
+  const storageAdapter = storageAdapterFor({
+    source,
+    sizeBytes: 6,
+  });
+
+  const result = await readVerifiedAssessmentBytes({
+    objectVersionId: OBJECT_VERSION_ID,
+    expectedChecksum: "a".repeat(64),
+    expectedSize: 5,
+    storageAdapter,
+  });
+
+  assertIntegrityFailure(result, ASSESSMENT_READ_INTEGRITY_FAILURE_KINDS.size_mismatch);
   assert.equal(source.nextCount, 2);
+  assert.equal(source.closeCount, 1);
+  assert.equal("data" in result, false);
+});
+
+test("assessment read-integrity bridge enforces the global byte limit incrementally", async () => {
+  const chunks = [
+    generatedChunk(8 * 1024 * 1024),
+    generatedChunk(8 * 1024 * 1024),
+    generatedChunk(8 * 1024 * 1024),
+    generatedChunk(1 * 1024 * 1024),
+  ];
+  const source = exactVersionByteSource(chunks);
+  const storageAdapter = storageAdapterFor({
+    source,
+    sizeBytes: ASSESSMENT_READ_INTEGRITY_MAX_BYTES,
+  });
+
+  const result = await readVerifiedAssessmentBytes({
+    objectVersionId: OBJECT_VERSION_ID,
+    expectedChecksum: sha256Hex(Buffer.concat(chunks.slice(0, 4))),
+    expectedSize: ASSESSMENT_READ_INTEGRITY_MAX_BYTES,
+    storageAdapter,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.bytes.byteLength, ASSESSMENT_READ_INTEGRITY_MAX_BYTES);
+  assert.equal(source.nextCount, 5);
   assert.equal(source.closeCount, 1);
 });
 

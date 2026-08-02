@@ -12,6 +12,8 @@ import {
   uploadReservedIntakeFile,
 } from "../Backend/kai/services/kaiIntakeService.js";
 import { getIntakeBatchTenantState } from "../Backend/kai/db/kaiQueries.js";
+import { KAI_SPRINT2_MAX_FILE_SIZE_BYTES } from "../Backend/kai/config/kaiSprint2P0Contract.js";
+import { PDF_ASSESSOR_PRE_PARSE_INPUT_GATE_BYTES } from "../Backend/kai/validators/pdfAssessorWorkerBoundary.js";
 
 const actorContext = {
   actorType: "human",
@@ -65,6 +67,52 @@ function exactVersionByteSource(chunks, hooks = {}) {
     },
   };
   return source;
+}
+
+function uploadTestByteSource(chunks) {
+  let index = 0;
+  let closed = false;
+  const source = {
+    nextCount: 0,
+    returnCount: 0,
+    closeCount: 0,
+    [Symbol.asyncIterator]() {
+      return this;
+    },
+    async next() {
+      source.nextCount += 1;
+      if (closed) return { done: true, value: undefined };
+      if (index >= chunks.length) {
+        closed = true;
+        return { done: true, value: undefined };
+      }
+      const value = chunks[index];
+      index += 1;
+      return { done: false, value };
+    },
+    async return() {
+      source.returnCount += 1;
+      closed = true;
+      return { done: true, value: undefined };
+    },
+    async close() {
+      source.closeCount += 1;
+      closed = true;
+    },
+  };
+  return source;
+}
+
+function generatedUploadChunks(byteLength) {
+  const chunks = [];
+  const chunkSize = 8 * 1024 * 1024;
+  let remaining = byteLength;
+  while (remaining > 0) {
+    const next = Math.min(chunkSize, remaining);
+    chunks.push(Buffer.alloc(next, 0x61));
+    remaining -= next;
+  }
+  return chunks;
 }
 
 function exactVersionStorageAdapter({
@@ -371,6 +419,16 @@ test("feature flag disabled blocks Sprint 2 service entry", async () => {
   assert.equal(result.error.code, "feature_disabled");
 });
 
+test("upload enforcement uses the canonical global intake limit and leaves the PDF pre-parse gate separate", () => {
+  const intakeSource = readFileSync("Backend/kai/services/kaiIntakeService.js", "utf8");
+  const pdfSource = readFileSync("Backend/kai/validators/pdfAssessorWorkerBoundary.js", "utf8");
+
+  assert.equal(KAI_SPRINT2_MAX_FILE_SIZE_BYTES, 26214400);
+  assert.equal(PDF_ASSESSOR_PRE_PARSE_INPUT_GATE_BYTES, 26214400);
+  assert.match(intakeSource, /KAI_SPRINT2_MAX_FILE_SIZE_BYTES/);
+  assert.match(pdfSource, /PDF_ASSESSOR_PRE_PARSE_INPUT_GATE_BYTES = 25 \* 1024 \* 1024/);
+});
+
 test("createIntakeBatch writes metadata through service dependency when enabled", async () => {
   let inserted = null;
   const result = await createIntakeBatch(
@@ -504,6 +562,52 @@ test("reserveIntakeFileMetadata stores metadata defaults without issuing signed 
   assert.equal("storage_bucket" in result.data, false);
   assert.equal("storage_object_key" in result.data, false);
   assert.equal("storage_uri" in result.data, false);
+});
+
+test("reserveIntakeFileMetadata rejects declared size above the canonical global limit before insert", async () => {
+  const calls = [];
+  const result = await reserveIntakeFileMetadata(
+    {
+      actorContext,
+      organizationId: ids.organizationId,
+      engagementId: ids.engagementId,
+      intakeBatchId: ids.intakeBatchId,
+      intakeFileId: ids.intakeFileId,
+      idempotencyKey: "kai-intake-file-too-large-001",
+      originalFilename: "safe.csv",
+      checksum: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      hashAlgorithm: "sha256",
+      fileSizeBytes: KAI_SPRINT2_MAX_FILE_SIZE_BYTES + 1,
+    },
+    {
+      env: { KAI_SPRINT2_ENABLED: "true" },
+      async getIntakeBatchTenantState() {
+        calls.push("batch");
+        return {
+          intake_batch_id: ids.intakeBatchId,
+          organization_id: ids.organizationId,
+          engagement_id: ids.engagementId,
+        };
+      },
+      async findIntakeFileReservationByIdempotencyKey() {
+        calls.push("idempotency");
+        return null;
+      },
+      async findIntakeFileReservationByChecksum() {
+        calls.push("checksum");
+        return null;
+      },
+      async insertIntakeFileMetadata() {
+        calls.push("insert");
+        throw new Error("over-limit reservation must not be inserted");
+      },
+    },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "request_too_large");
+  assert.equal(result.error.status, 413);
+  assert.deepEqual(calls, ["batch", "idempotency", "checksum"]);
 });
 
 test("reserveIntakeFileMetadata blocks cross-org intake batch before file insert", async () => {
@@ -1629,6 +1733,152 @@ test("uploadReservedIntakeFile successful fresh upload uses required ordering", 
     replayed: false,
   });
   safeUploadBoundary(result);
+});
+
+test("uploadReservedIntakeFile allows exactly the canonical global limit through the bounded byte source", async () => {
+  const order = [];
+  const source = uploadTestByteSource(generatedUploadChunks(KAI_SPRINT2_MAX_FILE_SIZE_BYTES));
+  const result = await uploadReservedIntakeFile(
+    uploadInput({ bytes: undefined, byteSource: source }),
+    uploadDependencies({
+      order,
+      transitions: [
+        (input) => transitionSuccess(input),
+        (input) => {
+          assert.equal(input.objectVersionId, objectVersionId);
+          return transitionSuccess(input);
+        },
+      ],
+      storage: {
+        async onCreate(input) {
+          assert.equal("bytes" in input, false);
+          let sizeBytes = 0;
+          for await (const chunk of input.byteSource) {
+            sizeBytes += chunk.byteLength;
+          }
+          return {
+            ok: true,
+            data: {
+              object_version_id: objectVersionId,
+              size_bytes: sizeBytes,
+            },
+          };
+        },
+      },
+    }),
+  );
+
+  assert.equal(KAI_SPRINT2_MAX_FILE_SIZE_BYTES, 26214400);
+  assert.equal(result.ok, true);
+  assert.equal(result.data.size_bytes, KAI_SPRINT2_MAX_FILE_SIZE_BYTES);
+  assert.deepEqual(order, [
+    "file_authorized",
+    "reserved->upload_started",
+    "storage_create",
+    "upload_started->uploaded_unconfirmed",
+  ]);
+  assert.equal(source.nextCount, 5);
+});
+
+test("uploadReservedIntakeFile rejects 26,214,401 received bytes before the crossing chunk reaches storage", async () => {
+  const order = [];
+  const chunks = [
+    ...generatedUploadChunks(KAI_SPRINT2_MAX_FILE_SIZE_BYTES),
+    Buffer.from("x"),
+    Buffer.from("must not be requested"),
+  ];
+  const source = uploadTestByteSource(chunks);
+  const storedChunkLengths = [];
+  const result = await uploadReservedIntakeFile(
+    uploadInput({ bytes: undefined, byteSource: source }),
+    uploadDependencies({
+      order,
+      transitions: [
+        (input) => transitionSuccess(input),
+        () => {
+          throw new Error("uploaded_unconfirmed must not be reached for oversized upload");
+        },
+      ],
+      storage: {
+        async onCreate(input) {
+          for await (const chunk of input.byteSource) {
+            storedChunkLengths.push(chunk.byteLength);
+          }
+          throw new Error("bounded byte source should throw before storage completes");
+        },
+      },
+    }),
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "request_too_large");
+  assert.equal(result.error.status, 413);
+  assert.deepEqual(result.data, { new_reservation_required: true });
+  assert.deepEqual(order, ["file_authorized", "reserved->upload_started", "storage_create"]);
+  assert.equal(storedChunkLengths.reduce((sum, length) => sum + length, 0), KAI_SPRINT2_MAX_FILE_SIZE_BYTES);
+  assert.equal(storedChunkLengths.includes(1), false);
+  assert.equal(source.nextCount, 5);
+  assert.equal(source.returnCount, 1);
+  assertNoUploadObjectIdentity(result);
+  safeUploadBoundary(result);
+});
+
+test("uploadReservedIntakeFile rejects actual bytes above the limit even when reserved size is smaller", async () => {
+  const order = [];
+  const source = uploadTestByteSource([
+    ...generatedUploadChunks(KAI_SPRINT2_MAX_FILE_SIZE_BYTES),
+    Buffer.from("x"),
+  ]);
+  const result = await uploadReservedIntakeFile(
+    uploadInput({ bytes: undefined, byteSource: source }),
+    uploadDependencies({
+      row: intakeFileRow({ file_size_bytes: 1 }),
+      order,
+      transitions: [(input) => transitionSuccess(input)],
+      storage: {
+        async onCreate(input) {
+          for await (const _chunk of input.byteSource) {
+            // Drain through the bounded wrapper.
+          }
+          return {
+            ok: true,
+            data: {
+              object_version_id: objectVersionId,
+              size_bytes: KAI_SPRINT2_MAX_FILE_SIZE_BYTES + 1,
+            },
+          };
+        },
+      },
+    }),
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "request_too_large");
+  assert.deepEqual(order, ["file_authorized", "reserved->upload_started", "storage_create"]);
+});
+
+test("uploadReservedIntakeFile rejects trusted reserved size above the global limit before lifecycle or storage", async () => {
+  const order = [];
+  const result = await uploadReservedIntakeFile(uploadInput(), uploadDependencies({
+    row: intakeFileRow({ file_size_bytes: KAI_SPRINT2_MAX_FILE_SIZE_BYTES + 1 }),
+    order,
+    transitions: [
+      () => {
+        throw new Error("lifecycle must not start when trusted reserved size is too large");
+      },
+    ],
+    storage: {
+      onCreate() {
+        throw new Error("storage must not open when trusted reserved size is too large");
+      },
+    },
+  }));
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "request_too_large");
+  assert.equal(result.error.status, 413);
+  assert.deepEqual(order, ["file_authorized"]);
+  assert.equal("data" in result, false);
 });
 
 test("uploadReservedIntakeFile rejects malformed object-version identity after upload_started", async () => {

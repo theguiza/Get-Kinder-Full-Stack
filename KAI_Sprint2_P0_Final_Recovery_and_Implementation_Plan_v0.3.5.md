@@ -3639,6 +3639,7 @@ package_exclusions: no unknown-binary fixture; no ZIP/XLSX/PDF fixture; no ambig
 commit_hash: report after commit; a commit cannot contain its own SHA
 ```
 
+
 ## P0-05F.2d2 residual unknown-binary fixture authority
 
 ```text
@@ -5734,5 +5735,123 @@ prohibited_actions_not_performed:
   - no enqueue selection, enqueue store import, executor invocation, assessor invocation, detector invocation, malware adapter invocation, policy verdict mapping, HTTP route, production composition, production barrel export, background worker, queue drain, persistence, audit write, metrics write, canonical state mutation, processing_status mutation, parse_status mutation, file_policy_status mutation, retained metadata mutation, database, SQL, schema, cloud, credential, tenant, feature-flag, deployment, Current State, Implementation Baseline, Gate A, or P0-06B work
 
 next_package_or_stop_condition: OWNER-DIRECTED STOP after this bounded unwired assessment-time read-integrity bridge package; later packages remain unauthorized
+commit_hash: report after commit; a commit cannot contain its own SHA
+```
+
+---
+
+## Global intake-file size limit authority
+
+```text
+P0_GLOBAL_INTAKE_FILE_SIZE_LIMIT
+
+package_date: 2026-08-02 America/Vancouver
+evidence_class: TOOL_VERIFIED
+owner_authorization: USER_CONFIRMED
+package_status: complete before commit
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 22f9273f1d45c27c0cba9aab37c11ba739183e59
+starting_parent: 1ca47580644bd67a8a8d29a1ba63dabe14a0eee3
+starting_tree: clean tracked and untracked
+staged_paths_at_start: none
+
+The owner defined the global KAI Sprint 2 P0 intake-file maximum as
+26,214,400 bytes.
+
+This correction added one canonical global intake limit, enforced it
+against actual received upload bytes, and made the callable unwired
+assessment-time read-integrity bridge use the same authority.
+
+The existing PDF pre-parse boundary remains a separate PDF-specific
+control with unchanged behavior.
+
+Upload and bridge streaming reject a crossing chunk before passing it
+to storage or retaining it in memory.
+
+The prior Package A blank-line formatting deletion was restored. No
+prior accepted evidence content was rewritten.
+
+No queue drain, executor or assessor invocation, result persistence,
+policy mutation, production assessment composition or Package B work
+was added.
+
+implemented_scope:
+  canonical_limit_file: Backend/kai/config/kaiSprint2P0Contract.js
+  canonical_limit_export: KAI_SPRINT2_MAX_FILE_SIZE_BYTES
+  canonical_limit_value: 26,214,400
+  upload_enforcement_file: Backend/kai/services/kaiIntakeService.js
+  storage_mapping_file: Backend/kai/storage/localDevStorageAdapter.js
+  bridge_file: Backend/kai/security/assessmentReadIntegrityBridge.js
+  focused_upload_tests: __tests__/kai-sprint2-intake-service.spec.js
+  focused_bridge_tests: __tests__/kai-sprint2-assessment-read-integrity-bridge.spec.js
+  affected_storage_tests: __tests__/kai-sprint2-storage-boundary.spec.js
+
+precondition_verification:
+  upload_actual_received_byte_limit_before_change: absent
+  bridge_local_limit_before_change: ASSESSMENT_READ_INTEGRITY_MAX_BYTES = 25 * 1024 * 1024
+  bridge_canonical_import_before_change: absent
+  pdf_pre_parse_boundary_before_change: PDF_ASSESSOR_PRE_PARSE_INPUT_GATE_BYTES = 25 * 1024 * 1024
+  package_a_execplan_blank_line_deletion: present in commit 22f9273
+  package_a_full_repository_npm_test: not present in Package A evidence
+
+upload_behavior:
+  actual_received_bytes_authoritative: yes
+  exact_limit_allowed: 26,214,400 bytes
+  one_byte_over_rejected: 26,214,401 bytes
+  crossing_chunk_yielded_to_storage: no
+  later_chunk_requested_after_breach: no
+  smaller_declared_size_bypass: no
+  trusted_reserved_size_above_limit_storage_opened: no
+  oversized_mapping: request_too_large / HTTP 413
+  incomplete_object_cleanup: preserved by local adapter unlink-on-failure
+  uploaded_unconfirmed_transition_on_breach: no
+  confirmation_or_enqueue_on_breach: no
+
+bridge_behavior:
+  limit_source: imported canonical KAI_SPRINT2_MAX_FILE_SIZE_BYTES
+  expected_size_above_limit_opens_storage: no
+  chunk_crossing_expected_size_retained: no
+  chunk_checks_before_retention: expectedSize then KAI_SPRINT2_MAX_FILE_SIZE_BYTES
+  partial_bytes_returned_on_failure: no
+  cleanup_on_failure_paths: preserved
+  bridge_wiring: none
+
+unchanged_boundaries:
+  pdf_worker_changed: false
+  confirm_to_enqueue_changed: false
+  enqueue_identity_replay_atomicity_changed: false
+  executor_assessor_contracts_changed: false
+  detector_malware_policy_state_changed: false
+  production_composition_changed: false
+  current_state_changed: false
+  implementation_baseline_changed: false
+  package_b_work: false
+
+tests:
+  focused_bridge: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-assessment-read-integrity-bridge.spec.js - tests 11; pass 11; fail 0
+  focused_upload_and_confirmation: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-intake-service.spec.js - tests 88; pass 88; fail 0
+  affected_storage: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-storage-boundary.spec.js - tests 36; pass 36; fail 0
+  enqueue_and_atomicity_regression: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-synthetic-security-assessment-enqueue.spec.js __tests__/kai-sprint2-transaction-interface.spec.js - tests 23; pass 23; fail 0
+  route_and_production_isolation_initial_sandbox: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-pass2-route-runtime.spec.js __tests__/kai-sprint2-p0-acceptance.spec.js - sandbox listener failure, listen EPERM on 127.0.0.1; non-listener route-runtime tests passed in the same run
+  route_and_production_isolation_localhost_capable_rerun: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-pass2-route-runtime.spec.js __tests__/kai-sprint2-p0-acceptance.spec.js - tests 69; pass 69; fail 0
+  executor_assessor_isolation: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-internal-security-assessment-executor.spec.js __tests__/kai-sprint2-bounded-file-security-assessor.spec.js - tests 10; pass 10; fail 0
+  sprint2_suite_initial_sandbox: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-*.spec.js - sandbox listener failures, listen EPERM on 127.0.0.1; continued run reported tests 873; pass 845; fail 28
+  sprint2_suite_localhost_capable_rerun: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-*.spec.js - tests 921; pass 921; fail 0
+  full_repository_initial_sandbox: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - sandbox listener failures, listen EPERM on 127.0.0.1; continued run reported tests 978; pass 950; fail 28
+  full_repository_localhost_capable_rerun: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - tests 1026; pass 1026; fail 0
+  git_diff_check: git diff --check - pass
+  git_diff_cached_check: git diff --cached --check - pass
+
+not_confirmed:
+  database_atomicity: NOT_CONFIRMED
+  production_readiness: NOT_CONFIRMED
+  live_upload_readiness: NOT_CONFIRMED
+  automated_security_assessment: NOT_CONFIRMED
+  HTTP_completed_security_assessment: NOT_CONFIRMED
+
+prohibited_actions_not_performed:
+  - no queue drain, executor invocation, assessor invocation, result persistence, policy mutation, production assessment composition, Package B work, database, SQL, schema, cloud, credential, tenant, feature-flag, deployment, Current State, Implementation Baseline, Gate A, Gate B, Gate C, Gate D, or P0-06B work
+
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this global intake-file size limit package; Package B and later packages remain unauthorized
 commit_hash: report after commit; a commit cannot contain its own SHA
 ```

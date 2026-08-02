@@ -16,6 +16,7 @@ import {
   storage_provider_disabled_in_p0,
   upload_url_request_blocked_in_p0,
 } from "../Backend/kai/validators/storageValidators.js";
+import { KAI_SPRINT2_MAX_FILE_SIZE_BYTES } from "../Backend/kai/config/kaiSprint2P0Contract.js";
 
 const storageProviderSource = readFileSync("Backend/kai/storage/storageProvider.js", "utf8");
 const gcsProviderSource = readFileSync("Backend/kai/storage/googleCloudStorageProvider.js", "utf8");
@@ -80,6 +81,47 @@ async function collectByteSource(byteSource) {
 
 function isWriteOpen(flags) {
   return (flags & constants.O_WRONLY) === constants.O_WRONLY;
+}
+
+function generatedStorageChunks(byteLength) {
+  const chunks = [];
+  const chunkSize = 8 * 1024 * 1024;
+  let remaining = byteLength;
+  while (remaining > 0) {
+    const next = Math.min(chunkSize, remaining);
+    chunks.push(Buffer.alloc(next, 0x61));
+    remaining -= next;
+  }
+  return chunks;
+}
+
+function tooLargeStorageSource(chunks) {
+  let index = 0;
+  let closed = false;
+  const source = {
+    nextCount: 0,
+    returnCount: 0,
+    [Symbol.asyncIterator]() {
+      return this;
+    },
+    async next() {
+      source.nextCount += 1;
+      if (closed) return { done: true, value: undefined };
+      if (index >= chunks.length) {
+        closed = true;
+        return { done: true, value: undefined };
+      }
+      const value = chunks[index];
+      index += 1;
+      return { done: false, value };
+    },
+    async return() {
+      source.returnCount += 1;
+      closed = true;
+      return { done: true, value: undefined };
+    },
+  };
+  return source;
 }
 
 async function openCountingReadHandle(filePath, flags, modeValue, counters, overrides = {}) {
@@ -234,6 +276,45 @@ test("local dev storage adapter creates one immutable generated object version",
     assert.equal(readResult.data.object_version_id, result.data.object_version_id);
     assert.equal(readResult.data.size_bytes, "first bytes".length);
     assert.equal(readResult.data.bytes.toString("utf8"), "first bytes");
+  });
+});
+
+test("local dev storage adapter maps oversized bounded upload failure to safe 413 and removes incomplete object", async () => {
+  const objectVersionId = "ov_99999999999999999999999999999999";
+  await withLocalStorage("oversized-bounded-source-cleanup", async ({ adapter, rootDirectory }) => {
+    const source = tooLargeStorageSource([
+      ...generatedStorageChunks(KAI_SPRINT2_MAX_FILE_SIZE_BYTES),
+      Buffer.from("x"),
+      Buffer.from("must not be requested"),
+    ]);
+    const result = await adapter.createObjectVersion({
+      byteSource: {
+        async *[Symbol.asyncIterator]() {
+          let countedBytes = 0;
+          for await (const chunk of source) {
+            const nextCount = countedBytes + chunk.byteLength;
+            if (nextCount > KAI_SPRINT2_MAX_FILE_SIZE_BYTES) {
+              const error = new Error("too large");
+              error.code = "request_too_large";
+              error.status = 413;
+              throw error;
+            }
+            countedBytes = nextCount;
+            yield chunk;
+          }
+        },
+      },
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "request_too_large");
+    assert.equal(result.error.status, 413);
+    assert.equal(existsSync(objectPath(rootDirectory, objectVersionId)), false);
+    assert.equal(source.nextCount, 5);
+    assert.equal(source.returnCount, 1);
+    assertSafeStorageResultBoundary(result);
+  }, {
+    objectVersionIdFactory: () => objectVersionId,
   });
 });
 

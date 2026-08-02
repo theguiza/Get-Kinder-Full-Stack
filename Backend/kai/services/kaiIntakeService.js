@@ -3,7 +3,10 @@ import {
   areKaiSprint2UploadFeaturesEnabled,
   isKaiSprint2Enabled,
 } from "../config/kaiSprint2Config.js";
-import { KAI_SPRINT2_P0_PATTERNS } from "../config/kaiSprint2P0Contract.js";
+import {
+  KAI_SPRINT2_MAX_FILE_SIZE_BYTES,
+  KAI_SPRINT2_P0_PATTERNS,
+} from "../config/kaiSprint2P0Contract.js";
 import { buildKaiError, validationBlocked } from "../errors/kaiErrors.js";
 import { kaiIdempotentWriteConflict } from "../internal/kaiIdempotentWriteConflict.js";
 import { resolveKaiActorContext } from "../auth/kaiActorContext.js";
@@ -110,6 +113,15 @@ class KaiRouteMutationError extends Error {
     super(code);
     this.name = "KaiRouteMutationError";
     this.code = code;
+  }
+}
+
+class KaiUploadFileTooLargeError extends Error {
+  constructor() {
+    super("kai_upload_file_too_large");
+    this.name = "KaiUploadFileTooLargeError";
+    this.code = "request_too_large";
+    this.status = 413;
   }
 }
 
@@ -1045,6 +1057,13 @@ function sanitizedStorageFailure(result, { newReservationRequired = false } = {}
   });
 }
 
+function fileTooLargeUploadFailure({ newReservationRequired = false } = {}) {
+  return buildKaiError("request_too_large", {
+    status: 413,
+    ...(newReservationRequired ? { data: { new_reservation_required: true } } : {}),
+  });
+}
+
 function sanitizedPostStartInternalFailure() {
   return buildKaiError("system_error", {
     status: 500,
@@ -1077,6 +1096,115 @@ function validatedStorageSuccessData(storage) {
     objectVersionId,
     sizeBytes,
   };
+}
+
+function binaryByteLength(value) {
+  if (Buffer.isBuffer(value) || value instanceof Uint8Array) return value.byteLength;
+  if (value instanceof ArrayBuffer) return value.byteLength;
+  if (ArrayBuffer.isView(value)) return value.byteLength;
+  return null;
+}
+
+function closeUploadByteIterator(iterator, byteSource) {
+  return async () => {
+    try {
+      if (iterator && typeof iterator.return === "function") {
+        await iterator.return();
+        return;
+      }
+      if (byteSource && typeof byteSource.close === "function") {
+        await byteSource.close();
+      }
+    } catch {
+      // Upload source cleanup diagnostics remain provider-private.
+    }
+  };
+}
+
+function createBoundedUploadByteSource(byteSource, { signal } = {}) {
+  return {
+    [Symbol.asyncIterator]() {
+      const iterator = byteSource?.[Symbol.asyncIterator]?.();
+      const close = closeUploadByteIterator(iterator, byteSource);
+      let countedBytes = 0;
+      let done = false;
+
+      return {
+        async next() {
+          if (done) return { done: true, value: undefined };
+          if (signal?.aborted) {
+            done = true;
+            await close();
+            throw new DOMException("upload_write_aborted", "AbortError");
+          }
+
+          let result;
+          try {
+            result = await iterator.next();
+          } catch (error) {
+            done = true;
+            await close();
+            throw error;
+          }
+
+          if (result?.done) {
+            done = true;
+            return { done: true, value: undefined };
+          }
+
+          const chunk = result.value;
+          const chunkLength = binaryByteLength(chunk);
+          if (chunkLength === null || chunkLength > Number.MAX_SAFE_INTEGER - countedBytes) {
+            done = true;
+            await close();
+            throw new TypeError("upload_bytes_must_be_binary");
+          }
+
+          const nextCount = countedBytes + chunkLength;
+          if (nextCount > KAI_SPRINT2_MAX_FILE_SIZE_BYTES) {
+            done = true;
+            await close();
+            throw new KaiUploadFileTooLargeError();
+          }
+
+          countedBytes = nextCount;
+          return { done: false, value: chunk };
+        },
+        async return() {
+          done = true;
+          await close();
+          return { done: true, value: undefined };
+        },
+        async throw(error) {
+          done = true;
+          await close();
+          throw error;
+        },
+      };
+    },
+  };
+}
+
+function boundedUploadInput({ input, hasBytes, hasByteSource }) {
+  if (hasBytes) {
+    const byteLength = binaryByteLength(input.bytes);
+    if (byteLength !== null && byteLength > KAI_SPRINT2_MAX_FILE_SIZE_BYTES) {
+      return { ok: false };
+    }
+    return {
+      ok: true,
+      storageInput: { bytes: input.bytes },
+    };
+  }
+  if (hasByteSource) {
+    return {
+      ok: true,
+      storageInput: {
+        byteSource: createBoundedUploadByteSource(input.byteSource, { signal: input.signal }),
+      },
+    };
+  }
+  return { ok: false };
 }
 
 async function verifyExactObjectVersionStreamed({
@@ -1749,6 +1877,10 @@ export async function reserveIntakeFileMetadata(input = {}, dependencies = {}) {
   }
 
   const fileMetadata = normalizeReservationMetadata({ payload, idempotencyKey, reservationPayloadHash });
+  const fileSizeBytes = input.fileSizeBytes ?? payload.file_size_bytes ?? 0;
+  if (Number.isSafeInteger(fileSizeBytes) && fileSizeBytes > KAI_SPRINT2_MAX_FILE_SIZE_BYTES) {
+    return fileTooLargeUploadFailure();
+  }
   const storageBucket = dependencies.storageBucket || null;
   const storageUri =
     `reservation://kai/${storageProvider}/org/${organizationId}/intake/${intakeBatchId}/${intakeFileId}/${filenameResult.safeFilename}`;
@@ -1769,7 +1901,7 @@ export async function reserveIntakeFileMetadata(input = {}, dependencies = {}) {
       storageObjectKey: objectKeyResult.objectKey,
       mimeType,
       fileExtension: input.fileExtension || payload.file_extension || null,
-      fileSizeBytes: input.fileSizeBytes ?? payload.file_size_bytes ?? 0,
+      fileSizeBytes,
       checksum,
       hashAlgorithm,
       rawFileRetained: false,
@@ -1849,6 +1981,10 @@ export async function uploadReservedIntakeFile(input = {}, dependencies = {}) {
   }
 
   const { organizationId, intakeFileId, intakeBatchId } = auth;
+  const trustedReservedSize = auth.metadata?.file_size_bytes;
+  if (Number.isSafeInteger(trustedReservedSize) && trustedReservedSize > KAI_SPRINT2_MAX_FILE_SIZE_BYTES) {
+    return fileTooLargeUploadFailure();
+  }
 
   if (typeof storageAdapter.createObjectVersion !== "function") {
     return buildKaiError("storage_provider_not_configured", {
@@ -1877,13 +2013,19 @@ export async function uploadReservedIntakeFile(input = {}, dependencies = {}) {
     return uploadNewReservationRequiredResult();
   }
 
+  const boundedInput = boundedUploadInput({ input, hasBytes, hasByteSource });
+  if (!boundedInput.ok) return fileTooLargeUploadFailure({ newReservationRequired: true });
+
   let storage;
   try {
     storage = await storageAdapter.createObjectVersion({
-      ...(hasBytes ? { bytes: input.bytes } : { byteSource: input.byteSource }),
+      ...boundedInput.storageInput,
       ...(input.signal ? { signal: input.signal } : {}),
     });
-  } catch {
+  } catch (error) {
+    if (error?.code === "request_too_large") {
+      return fileTooLargeUploadFailure({ newReservationRequired: true });
+    }
     return sanitizedPostStartInternalFailure();
   }
   if (storage?.ok === false) {
