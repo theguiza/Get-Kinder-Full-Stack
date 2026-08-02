@@ -6583,3 +6583,65 @@ prohibited_actions_not_performed:
 next_package_or_stop_condition: OWNER-DIRECTED STOP after P1-01A pure profiling kernel correction
 commit_hash: report after commit; a commit cannot contain its own SHA
 ```
+
+## P1-01B worker-backed PDF profiling evidence
+
+status: TOOL_VERIFIED
+date: 2026-08-02
+branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 90b86ace77d766682a8de580658f59c9517f3478
+parent_head: e088e6d6bf92ac7433c9ca322bcd8c7c59afe442
+
+preflight:
+  repository_instructions: TOOL_VERIFIED - AGENTS.md read; ExecPlan remains the single living repository ExecPlan; P1-01B authorized as bounded non-pure worker-backed PDF profiling only
+  clean_worktree_before_changes: TOOL_VERIFIED - no unstaged tracked changes, no staged paths, no untracked files
+  expected_head: TOOL_VERIFIED
+  pdf_worker_interface_and_callers: TOOL_VERIFIED - existing file-backed worker boundary in Backend/kai/validators/pdfAssessorWorkerBoundary.js and worker thread in Backend/kai/validators/pdfAssessorWorkerThread.js inspected
+  p1_profile_conventions: TOOL_VERIFIED - local profiling kernel result conventions inspected; pure PDF kernel continues typed not_profilable worker-boundary envelope
+  literal_execplan_tail_before_editing: TOOL_VERIFIED - final 30 lines printed before implementation; latest evidence block was at true EOF with prior blocks intact
+
+implemented:
+  Backend/kai/validators/pdfAssessorWorkerBoundary.js:
+    status: TOOL_VERIFIED
+    worker_interface: explicit runPdfProfilingWorkerBoundary(input) added on the existing file-backed PDF worker boundary; default P0 assessor path and result semantics unchanged
+    authorized_io: TOOL_VERIFIED - only existing file-backed worker execution; no temp file writes, storage, database, route, queue, lifecycle, source, evidence, claim, AI, OCR, or persistence integration
+    profile_parent_sanitization: TOOL_VERIFIED - parent accepts only exact sanitized profile, exact typed not_profilable, or safe parser failure; malformed worker messages collapse to safe pdf_profile_worker_failed
+  Backend/kai/validators/pdfAssessorWorkerThread.js:
+    status: TOOL_VERIFIED
+    worker_operation: explicit operation profile uses MuPDF Document.openDocument, countPages, existing encryption/text/active-content assessment, and StructuredText.walk
+    pdf_profile_output: TOOL_VERIFIED - real worker page_count, extractable_text_confirmed true only after non-whitespace structured-text characters, bounded redacted page section shapes, bounded redacted block shapes, no raw PDF text
+    not_profilable_behavior: TOOL_VERIFIED - encrypted/password-protected, no extractable text, image-only/scanned-equivalent, and active/embedded-content PDFs return typed not_profilable with stable safe reason and no partial profile
+    parser_failure_behavior: TOOL_VERIFIED - malformed, repaired, invalid dependency output, thrown operations, and malformed worker messages return safe parser failure with no raw content or parser internals
+  __tests__/kai-sprint2-p1-pdf-profiling-worker-boundary.spec.js:
+    status: TOOL_VERIFIED
+    coverage: page count from worker not marker scanning; extractable text from worker; no raw document text in profile or failures; encrypted and image-only not profilable; malformed safe failure; no OCR; no profiler temp artifacts; pure kernel unchanged; P0 PDF security unchanged; prohibited dependency exclusions
+
+verification:
+  focused_p1_pdf_profiling_tests_final: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-p1-pdf-profiling-worker-boundary.spec.js - tests 5; fail 0
+  focused_p1_kernel_tests_final: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-p1-local-profiling-kernel.spec.js - tests 10; fail 0
+  affected_pdf_worker_and_mupdf_regressions_final: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-pdf-assessor-worker-boundary.spec.js __tests__/kai-sprint2-mupdf-dependency.spec.js - tests 63; fail 0
+  affected_p0_detector_file_security_regressions_final: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-p0-file-type-agreement-detector.spec.js __tests__/kai-sprint2-csv-row-limit-detector.spec.js __tests__/kai-sprint2-txt-md-byte-detector.spec.js __tests__/kai-sprint2-xlsx-sheet-cell-limit-detector.spec.js __tests__/kai-sprint2-ooxml-archive-resource-limit-detector.spec.js __tests__/kai-sprint2-formula-injection-boundary.spec.js __tests__/kai-sprint2-bounded-file-security-assessor.spec.js - tests 77; fail 0
+  p0_07_acceptance_initial_sandbox: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2-p0-acceptance - sandbox listener restriction, listen EPERM on 127.0.0.1
+  p0_07_acceptance_localhost_capable: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2-p0-acceptance - tests 62; fail 0
+  sprint2_suite_initial_sandbox: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - sandbox listener restriction, listen EPERM on 127.0.0.1
+  sprint2_suite_localhost_capable: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - tests 997; fail 0
+  full_repository_initial_sandbox: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - sandbox listener restriction, listen EPERM on 127.0.0.1
+  full_repository_localhost_capable: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - tests 1102; fail 0
+  git_diff_check_pre_execplan: TOOL_VERIFIED
+  git_diff_cached_check_pre_execplan: TOOL_VERIFIED
+
+not_confirmed:
+  deployed_kai_schema_compatibility: NOT_CONFIRMED
+  database_atomicity: NOT_CONFIRMED
+  persistent_upload_lifecycle: NOT_CONFIRMED
+  nonproduction_storage_integration: NOT_CONFIRMED
+  production_readiness: NOT_CONFIRMED
+  real_client_data_readiness: NOT_CONFIRMED
+
+prohibited_actions_not_performed:
+  - no database, schema, storage-provider integration, route, feature flag, queue, persistent parser run, lifecycle mutation, review item, source, source version, evidence, claim, AI, LLM processing, OCR, Gate A, P0-06B, deployment, push, credential, tenant, production configuration, real-client-data, or Current State work
+  - no P0 detector or assessor semantic change
+
+next_package_or_stop_condition: OWNER-DIRECTED STOP after P1-01B worker-backed PDF profiling
+commit_hash: report after commit; a commit cannot contain its own SHA
+```

@@ -13,6 +13,13 @@ const ACTIVE_OR_EMBEDDED_PDF_RESULT = Object.freeze({
   category: "pdf_active_or_embedded_content",
 });
 const MAXIMUM_PDF_OBJECT_TRAVERSAL_NODES = 10_000;
+const PDF_PROFILE_MAXIMUM_SECTION_SHAPES = 20;
+const PDF_PROFILE_MAXIMUM_BLOCK_SHAPES = 80;
+const PDF_PROFILE_REASON_BY_BLOCK_CATEGORY = Object.freeze({
+  encrypted_or_password_protected: "encrypted_or_password_protected",
+  pdf_no_extractable_text: "pdf_no_extractable_text",
+  pdf_active_or_embedded_content: "pdf_active_or_embedded_content",
+});
 
 function dependencyFailure() {
   return new Error("PDF dependency inspection failed.");
@@ -504,6 +511,242 @@ export function assessOpenedPdfDocument(document, DocumentConstructor, pageCount
   return detectPdfActiveOrEmbeddedContent(document, pageCount);
 }
 
+function profileNotProfilable(reason) {
+  return Object.freeze({
+    status: "not_profilable",
+    format: "pdf",
+    reason,
+  });
+}
+
+function assertTrustedProfileMetadata(metadata, byteLength) {
+  if (
+    !metadata ||
+    typeof metadata !== "object" ||
+    metadata.extension !== ".pdf" ||
+    metadata.declaredMime !== "application/pdf" ||
+    metadata.byteSize !== byteLength
+  ) {
+    throw dependencyFailure();
+  }
+}
+
+function createPageProfile(pageNumber) {
+  return {
+    section_key: `page_${pageNumber}`,
+    section_type: "page",
+    page_number: pageNumber,
+    counts: {
+      text_block_count: 0,
+      line_count: 0,
+      character_count: 0,
+      non_whitespace_character_count: 0,
+      image_block_count: 0,
+      vector_block_count: 0,
+    },
+    redacted: true,
+  };
+}
+
+function createBlockShape(pageNumber, blockIndex, blockType) {
+  return {
+    block_key: `page_${pageNumber}_block_${blockIndex}`,
+    page_number: pageNumber,
+    block_index: blockIndex,
+    block_type: blockType,
+    line_count: 0,
+    character_count: 0,
+    non_whitespace_character_count: 0,
+    redacted: true,
+  };
+}
+
+function collectPdfProfile(document, pageCount, trustedMetadata) {
+  assertUsablePageCount(pageCount);
+  assertTrustedProfileMetadata(trustedMetadata, workerData.bytes.byteLength);
+
+  let pdfDocument = null;
+  try {
+    pdfDocument = document.asPDF();
+    if (!pdfDocument || typeof pdfDocument.wasRepaired !== "function") {
+      throw dependencyFailure();
+    }
+    if (pdfDocument.wasRepaired()) {
+      throw dependencyFailure();
+    }
+  } catch {
+    throw dependencyFailure();
+  }
+
+  const totals = {
+    page_count: pageCount,
+    extractable_text_page_count: 0,
+    text_block_count: 0,
+    line_count: 0,
+    character_count: 0,
+    non_whitespace_character_count: 0,
+    image_block_count: 0,
+    vector_block_count: 0,
+  };
+  const sectionShapes = [];
+  const blockShapes = [];
+
+  for (let pageIndex = 0; pageIndex < pageCount; pageIndex += 1) {
+    let page = null;
+    let structuredText = null;
+    const pageNumber = pageIndex + 1;
+    const pageShape = createPageProfile(pageNumber);
+    let currentBlock = null;
+    let blockIndex = 0;
+
+    try {
+      page = document.loadPage(pageIndex);
+      if (!page || typeof page.toStructuredText !== "function") {
+        throw dependencyFailure();
+      }
+
+      structuredText = page.toStructuredText();
+      if (!structuredText || typeof structuredText.walk !== "function") {
+        throw dependencyFailure();
+      }
+
+      structuredText.walk({
+        beginTextBlock() {
+          blockIndex += 1;
+          currentBlock = createBlockShape(pageNumber, blockIndex, "text");
+          pageShape.counts.text_block_count += 1;
+          totals.text_block_count += 1;
+        },
+        beginLine() {
+          pageShape.counts.line_count += 1;
+          totals.line_count += 1;
+          if (currentBlock) {
+            currentBlock.line_count += 1;
+          }
+        },
+        onChar(character) {
+          if (typeof character !== "string") {
+            throw dependencyFailure();
+          }
+          pageShape.counts.character_count += 1;
+          totals.character_count += 1;
+          if (currentBlock) {
+            currentBlock.character_count += 1;
+          }
+          if (/\S/u.test(character)) {
+            pageShape.counts.non_whitespace_character_count += 1;
+            totals.non_whitespace_character_count += 1;
+            if (currentBlock) {
+              currentBlock.non_whitespace_character_count += 1;
+            }
+          }
+        },
+        endTextBlock() {
+          if (currentBlock && blockShapes.length < PDF_PROFILE_MAXIMUM_BLOCK_SHAPES) {
+            blockShapes.push(Object.freeze(currentBlock));
+          }
+          currentBlock = null;
+        },
+        onImageBlock() {
+          blockIndex += 1;
+          pageShape.counts.image_block_count += 1;
+          totals.image_block_count += 1;
+          if (blockShapes.length < PDF_PROFILE_MAXIMUM_BLOCK_SHAPES) {
+            blockShapes.push(Object.freeze(createBlockShape(pageNumber, blockIndex, "image")));
+          }
+        },
+        onVector() {
+          blockIndex += 1;
+          pageShape.counts.vector_block_count += 1;
+          totals.vector_block_count += 1;
+          if (blockShapes.length < PDF_PROFILE_MAXIMUM_BLOCK_SHAPES) {
+            blockShapes.push(Object.freeze(createBlockShape(pageNumber, blockIndex, "vector")));
+          }
+        },
+      });
+    } catch {
+      throw dependencyFailure();
+    } finally {
+      try {
+        destroyDependencyHandle(structuredText);
+      } finally {
+        destroyDependencyHandle(page);
+      }
+    }
+
+    if (pageShape.counts.non_whitespace_character_count > 0) {
+      totals.extractable_text_page_count += 1;
+    }
+    if (sectionShapes.length < PDF_PROFILE_MAXIMUM_SECTION_SHAPES) {
+      sectionShapes.push(Object.freeze(pageShape));
+    }
+  }
+
+  if (totals.extractable_text_page_count <= 0 || totals.non_whitespace_character_count <= 0) {
+    return profileNotProfilable("pdf_no_extractable_text");
+  }
+
+  return Object.freeze({
+    status: "profiled",
+    format: "pdf",
+    trusted_metadata: Object.freeze({
+      extension: trustedMetadata.extension,
+      declared_mime: trustedMetadata.declaredMime,
+      byte_size: trustedMetadata.byteSize,
+    }),
+    counts: Object.freeze(totals),
+    structural_metadata: Object.freeze({
+      page_count_source: "mupdf_worker",
+      extractable_text_source: "mupdf_structured_text_worker",
+      extractable_text_confirmed: true,
+      ocr_performed: false,
+    }),
+    section_shapes: Object.freeze(sectionShapes),
+    block_shapes: Object.freeze(blockShapes),
+  });
+}
+
+function postPdfProfileMessage(profileResult) {
+  if (profileResult.status === "not_profilable") {
+    parentPort.postMessage({
+      type: "kai_pdf_profile_worker_not_profilable",
+      result: profileResult,
+    });
+    return;
+  }
+
+  parentPort.postMessage({
+    type: "kai_pdf_profile_worker_ok",
+    profile: profileResult,
+  });
+}
+
+async function runPdfProfile() {
+  globalThis.$libmupdf_log_error = () => {};
+  globalThis.$libmupdf_log_warning = () => {};
+  const mupdf = await import("mupdf");
+  mupdf.setLog(null);
+  let document = null;
+
+  try {
+    document = mupdf.Document.openDocument(workerData.bytes, "application/pdf");
+    const pageCount = document.countPages();
+    const assessmentResult = assessOpenedPdfDocument(document, mupdf.Document, pageCount);
+    if (assessmentResult !== undefined) {
+      postPdfProfileMessage(profileNotProfilable(
+        PDF_PROFILE_REASON_BY_BLOCK_CATEGORY[assessmentResult.category] ?? "pdf_no_extractable_text",
+      ));
+      return;
+    }
+
+    postPdfProfileMessage(collectPdfProfile(document, pageCount, workerData.trustedMetadata));
+  } finally {
+    if (document) {
+      document.destroy();
+    }
+  }
+}
+
 async function runPdfAssessment() {
   globalThis.$libmupdf_log_error = () => {};
   globalThis.$libmupdf_log_warning = () => {};
@@ -534,9 +777,12 @@ async function runPdfAssessment() {
 }
 
 if (!isMainThread && parentPort) {
-  runPdfAssessment().catch(() => {
+  const operation = workerData.operation === "profile" ? runPdfProfile : runPdfAssessment;
+  operation().catch(() => {
     parentPort.postMessage({
-      type: "kai_pdf_worker_liveness_failed",
+      type: workerData.operation === "profile"
+        ? "kai_pdf_profile_worker_failed"
+        : "kai_pdf_worker_liveness_failed",
     });
   });
 }
