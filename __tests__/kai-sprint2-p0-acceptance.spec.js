@@ -28,10 +28,17 @@ import sprint2IntakeApiRouter, {
 import {
   createSyntheticConfirmUploadAndEnqueue,
 } from "../Backend/kai/security/syntheticConfirmUploadAndEnqueue.js";
+import { createInternalSecurityAssessmentExecutor } from "../Backend/kai/security/internalSecurityAssessmentExecutor.js";
+import {
+  C2_UNCLASSIFIED_OUTCOME,
+  executeSyntheticAssessmentPolicyDecisionFromEnqueueRecord,
+} from "../Backend/kai/security/syntheticAssessmentPolicyComposition.js";
+import { assessBoundedFileSecurity } from "../Backend/kai/security/boundedFileSecurityAssessor.js";
 import {
   createSyntheticSecurityAssessmentEnqueue,
   SYNTHETIC_SECURITY_ASSESSMENT_ENQUEUE_TRANSACTION_PARTICIPANT,
 } from "../Backend/kai/security/syntheticSecurityAssessmentEnqueue.js";
+import { ASSESSMENT_READ_INTEGRITY_FAILURE_TYPE } from "../Backend/kai/security/assessmentReadIntegrityBridge.js";
 import {
   checkAdminAccess,
   confirmUpload,
@@ -52,6 +59,7 @@ import {
 } from "../Backend/kai/upload/inMemoryUploadLifecycleRepository.js";
 import { validateAssistantBoundary } from "../Backend/kai/validators/assistantBoundaryValidators.js";
 import { detectP0FileTypeAgreement } from "../Backend/kai/validators/p0FileTypeAgreementDetector.js";
+import { createKaiSyntheticFixtureMalwareAdapter } from "./support/kaiSyntheticMalwareScanAdapter.js";
 
 const basePath = "/api/kai/sprint2/intake";
 const organizationId = "a5d17c5a-c55f-43af-9b21-fe63aafe733f";
@@ -69,10 +77,27 @@ const objectVersionIds = [
 ];
 const allowedBytes = Buffer.from("name,value\nkindness,1\n", "utf8");
 const allowedChecksum = sha256(allowedBytes);
+const unrecognizedCleanBytes = Buffer.from("name,value\nkindness,3\n", "utf8");
 const enabledEnv = Object.freeze({
   KAI_SPRINT2_ENABLED: "true",
   KAI_FILE_UPLOAD_ENABLED: "true",
 });
+const fileSummaryKeys = Object.freeze([
+  "intake_file_id",
+  "intake_batch_id",
+  "organization_id",
+  "engagement_id",
+  "safe_filename",
+  "mime_type",
+  "file_size_bytes",
+  "file_policy_status",
+  "malware_scan_status",
+  "processing_status",
+  "parse_status",
+  "review_status",
+  "created_at",
+  "updated_at",
+]);
 
 function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
@@ -151,6 +176,12 @@ function createMetadataRepository() {
   }
 
   function rememberReviewItem(file) {
+    const dedupeKey = `${file.organization_id}:intake_file_review:intake_file:${file.intake_file_id}`;
+    for (const row of reviewItems.values()) {
+      if (`${row.organization_id}:${row.queue_type}:${row.target_object_type}:${row.target_object_id}` === dedupeKey) {
+        return row;
+      }
+    }
     const id = reviewId();
     const row = {
       review_queue_item_id: id,
@@ -242,8 +273,8 @@ function createMetadataRepository() {
           hash_algorithm: input.hashAlgorithm,
           file_policy_status: "pending",
           malware_scan_status: "not_configured",
-          processing_status: "received",
-          parse_status: "not_started",
+          processing_status: "quarantined",
+          parse_status: "quarantined",
           review_status: "proposed",
           file_metadata: input.fileMetadata,
           created_at: now,
@@ -269,8 +300,8 @@ function createMetadataRepository() {
         raw_file_retained: false,
         file_policy_status: input.filePolicyStatus,
         malware_scan_status: input.malwareScanStatus,
-        processing_status: "received",
-        parse_status: "not_started",
+        processing_status: "quarantined",
+        parse_status: "quarantined",
         review_status: "proposed",
         file_metadata: input.fileMetadata,
         created_by: input.createdBy,
@@ -309,12 +340,13 @@ function createMetadataRepository() {
     async markFilePolicyPassed(orgId, intakeFileId) {
       const row = files.get(intakeFileId);
       if (!row || row.organization_id !== orgId) return null;
-      row.file_policy_status = "passed";
-      row.malware_scan_status = "passed";
-      row.processing_status = "quarantined";
-      row.updated_at = later;
       const review = rememberReviewItem(row);
       return { file: row, review };
+    },
+    async createIntakeFileReviewItemForTestOnly({ organizationId: orgId, intakeFileId }) {
+      const row = files.get(intakeFileId);
+      if (!row || row.organization_id !== orgId) return null;
+      return rememberReviewItem(row);
     },
     async listIntakeFileReviewQueueItems(orgId, pagination) {
       return [...reviewItems.values()]
@@ -668,6 +700,115 @@ async function reserveFile(server, intakeBatchId, overrides = {}) {
   });
 }
 
+async function confirmUploadedFileThroughHttp(server, { bytes = allowedBytes, reserveOverrides = {} } = {}) {
+  const { batch_idempotency_key: batchIdempotencyKey, ...fileReservationOverrides } = reserveOverrides;
+  const batch = await createBatch(server, batchIdempotencyKey || `batch-key-${sha256(bytes).slice(0, 8)}`);
+  assert.equal(batch.statusCode, 201, JSON.stringify(batch.body));
+  const reservation = await reserveFile(server, batch.body.data.intake_batch_id, {
+    idempotency_key: `file-key-${sha256(bytes).slice(0, 8)}`,
+    file_size_bytes: bytes.byteLength,
+    checksum: sha256(bytes),
+    ...fileReservationOverrides,
+  });
+  assert.equal(reservation.statusCode, 201, JSON.stringify(reservation.body));
+  const intakeFileId = reservation.body.data.intake_file_id;
+  const upload = await request(
+    server,
+    "POST",
+    `${basePath}/admin/files/${intakeFileId}/upload?organization_id=${organizationId}&engagement_id=${engagementId}&intake_batch_id=${batch.body.data.intake_batch_id}`,
+    { body: bytes, headers: { "content-type": "application/octet-stream" } },
+  );
+  assert.equal(upload.statusCode, 201, JSON.stringify(upload.body));
+  const confirm = await request(server, "POST", `${basePath}/admin/files/${intakeFileId}/confirm-upload?organization_id=${organizationId}`, {
+    body: { organization_id: organizationId },
+  });
+  assert.equal(confirm.statusCode, 200, JSON.stringify(confirm.body));
+  return { batch, reservation, upload, confirm, intakeFileId };
+}
+
+function createMetadataOnlyAuditProbe() {
+  const prepared = [];
+  const published = [];
+  return {
+    prepared,
+    published,
+    dependency: {
+      prepareMetadataOnlyAudit(input) {
+        prepared.push(input);
+        return {
+          ok: true,
+          publish() {
+            published.push(input);
+          },
+        };
+      },
+    },
+  };
+}
+
+function selectionFromEnqueueRecord(record) {
+  return {
+    organizationId: record.organization_id,
+    intakeFileId: record.intake_file_id,
+    objectVersionId: record.object_version_id,
+    verifiedChecksum: record.verified_checksum,
+  };
+}
+
+function malwareProjectionForAssessmentResult(result) {
+  if (result?.policy === "pass") return "passed";
+  if (result?.status === "failed" && result.category === "malware_scan_not_configured") return "not_configured";
+  return "not_configured";
+}
+
+function projectTestOnlyOperatorFileRead(row, lifecycleRecord, assessmentResult) {
+  return safeFile({
+    ...row,
+    file_policy_status: lifecycleRecord.file_policy_status,
+    malware_scan_status: malwareProjectionForAssessmentResult(assessmentResult),
+    processing_status: row.processing_status,
+    parse_status: row.parse_status,
+  });
+}
+
+function mapSyntheticAssessmentOutcomeToHttpError(outcome) {
+  if (outcome?.integrity_failure?.type === ASSESSMENT_READ_INTEGRITY_FAILURE_TYPE) {
+    return buildKaiError("conflict_current_state_changed");
+  }
+  const category = outcome?.error?.code || outcome?.category;
+  if (
+    category === "maximum_concurrent_pdf_assessor_workers_exceeded" ||
+    category === "malware_scan_not_configured" ||
+    category === C2_UNCLASSIFIED_OUTCOME
+  ) {
+    return buildKaiError("system_error");
+  }
+  return buildKaiError("system_error");
+}
+
+async function executePolicyDecisionForFirstEnqueueRecord(scenario, { malwareScanAdapter, assessmentResult } = {}) {
+  const audit = createMetadataOnlyAuditProbe();
+  const executor = assessmentResult
+    ? createInternalSecurityAssessmentExecutor({ assessor: async () => assessmentResult })
+    : createInternalSecurityAssessmentExecutor({
+      assessor(input) {
+        return assessBoundedFileSecurity(input, malwareScanAdapter ? { malwareScanAdapter } : {});
+      },
+    });
+  const result = await executeSyntheticAssessmentPolicyDecisionFromEnqueueRecord(
+    selectionFromEnqueueRecord(scenario.securityAssessmentEnqueue.listSecurityAssessmentEnqueueRecords()[0]),
+    {
+      securityAssessmentEnqueue: scenario.securityAssessmentEnqueue,
+      storageAdapter: scenario.storageAdapter,
+      uploadLifecycleRepository: scenario.lifecycleRepository,
+      metadataOnlyAudit: audit.dependency,
+      now: later,
+      internalSecurityAssessmentExecutor: executor,
+    },
+  );
+  return { result, audit };
+}
+
 test("P0-07 positive local synthetic HTTP acceptance path", async () => {
   const scenario = await createScenario();
   const app = createApplication(scenario);
@@ -738,17 +879,57 @@ test("P0-07 positive local synthetic HTTP acceptance path", async () => {
       declaredMime: "text/csv",
     });
     assert.equal(assessmentResult.policy, "allow");
-    const assessment = await scenario.metadataRepository.markFilePolicyPassed(organizationId, intakeFileId);
-    assert.equal(assessment.file.processing_status, "quarantined");
-    assert.equal(assessment.file.file_policy_status, "passed");
+    const audit = createMetadataOnlyAuditProbe();
+    const policyDecision = await executeSyntheticAssessmentPolicyDecisionFromEnqueueRecord(
+      selectionFromEnqueueRecord(scenario.securityAssessmentEnqueue.listSecurityAssessmentEnqueueRecords()[0]),
+      {
+        securityAssessmentEnqueue: scenario.securityAssessmentEnqueue,
+        storageAdapter: scenario.storageAdapter,
+        uploadLifecycleRepository: scenario.lifecycleRepository,
+        metadataOnlyAudit: audit.dependency,
+        now: later,
+        internalSecurityAssessmentExecutor: createInternalSecurityAssessmentExecutor({
+          assessor(input) {
+            return assessBoundedFileSecurity(input, {
+              malwareScanAdapter: createKaiSyntheticFixtureMalwareAdapter({ cleanSha256: allowedChecksum }),
+            });
+          },
+        }),
+      },
+    );
+    assert.equal(policyDecision.ok, true, JSON.stringify(policyDecision));
+    assert.equal(policyDecision.data.record.file_policy_status, "passed");
+    assert.equal(policyDecision.data.record.upload_state, "confirmed");
+    assert.equal(audit.prepared.length, 1);
+    assert.equal(audit.published.length, 1);
+    const metadataAfterPolicy = await scenario.metadataRepository.getIntakeFileMetadata(organizationId, intakeFileId);
+    assert.equal(metadataAfterPolicy.file_policy_status, "pending");
+    assert.equal(metadataAfterPolicy.malware_scan_status, "not_configured");
+    assert.equal(metadataAfterPolicy.processing_status, "quarantined");
+    assert.equal(metadataAfterPolicy.parse_status, "quarantined");
+    const projectedRead = projectTestOnlyOperatorFileRead(
+      metadataAfterPolicy,
+      policyDecision.data.record,
+      policyDecision.data.record.policy_decision_replay.sanitized_result,
+    );
+    assert.deepEqual(Object.keys(projectedRead), fileSummaryKeys);
+    assert.equal(projectedRead.file_policy_status, "passed");
+    assert.equal(projectedRead.malware_scan_status, "passed");
+    assert.equal(projectedRead.processing_status, "quarantined");
+    assert.equal(projectedRead.parse_status, "quarantined");
 
     const read = await request(server, "GET", `${basePath}/admin/files/${intakeFileId}?organization_id=${organizationId}`);
     assert.equal(read.statusCode, 200);
-    assert.equal(read.body.data.file_policy_status, "passed");
+    assert.equal(read.body.data.file_policy_status, "pending");
+    assert.equal(read.body.data.malware_scan_status, "not_configured");
     assert.equal(read.body.data.processing_status, "quarantined");
 
-    assert.match(assessment.review.review_queue_item_id, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
-    const review = await request(server, "POST", `${basePath}/admin/review-queue/${assessment.review.review_queue_item_id}/status?organization_id=${organizationId}`, {
+    const reviewItem = await scenario.metadataRepository.createIntakeFileReviewItemForTestOnly({ organizationId, intakeFileId });
+    const replayedReviewItem = await scenario.metadataRepository.createIntakeFileReviewItemForTestOnly({ organizationId, intakeFileId });
+    assert.equal(replayedReviewItem.review_queue_item_id, reviewItem.review_queue_item_id);
+    assert.equal((await scenario.metadataRepository.listIntakeFileReviewQueueItems(organizationId, { limit: 100 })).length, 1);
+    assert.match(reviewItem.review_queue_item_id, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    const review = await request(server, "POST", `${basePath}/admin/review-queue/${reviewItem.review_queue_item_id}/status?organization_id=${organizationId}`, {
       body: {
         expected_queue_status: "open",
         new_queue_status: "in_progress",
@@ -759,7 +940,7 @@ test("P0-07 positive local synthetic HTTP acceptance path", async () => {
     assert.equal(scenario.metadataRepository.calls.malware.length, 0);
     assert.equal(scenario.metadataRepository.calls.audit.length, 1);
     assert.equal(scenario.metadataRepository.calls.metrics.length, 1);
-    assertNoLeak(batch, replay, reservation, upload, confirm, safeFile(assessment.file), read, review, scenario.metadataRepository.calls);
+    assertNoLeak(batch, replay, reservation, upload, confirm, projectedRead, read, review, scenario.metadataRepository.calls, audit);
   } finally {
     server.close();
     app.closeForTest();
@@ -805,6 +986,112 @@ test("local synthetic HTTP confirmation rolls back when synthetic enqueue reject
     app.closeForTest();
     await scenario.close();
   }
+});
+
+test("P0-07 corrected synthetic assessment binding and malware projection", async (t) => {
+  await t.test("malware not configured never passes policy and creates no review", async () => {
+    const scenario = await createScenario();
+    const app = createApplication(scenario);
+    const server = await listen(app);
+    try {
+      const { intakeFileId } = await confirmUploadedFileThroughHttp(server, {
+        reserveOverrides: { batch_idempotency_key: "batch-not-configured", idempotency_key: "file-not-configured" },
+      });
+
+      const { result, audit } = await executePolicyDecisionForFirstEnqueueRecord(scenario);
+      assert.deepEqual(result, {
+        ok: true,
+        data: {
+          policyDecisionInvoked: false,
+          assessmentResult: { status: "failed", category: "malware_scan_not_configured" },
+        },
+        error: null,
+      });
+      assert.equal(audit.prepared.length, 0);
+      assert.equal(audit.published.length, 0);
+      const lifecycle = scenario.lifecycleRepository.getUploadLifecycle({ organizationId, intakeFileId });
+      assert.equal(lifecycle.ok, true);
+      assert.equal(lifecycle.data.record.file_policy_status, "pending");
+      const metadata = await scenario.metadataRepository.getIntakeFileMetadata(organizationId, intakeFileId);
+      const projected = projectTestOnlyOperatorFileRead(metadata, lifecycle.data.record, result.data.assessmentResult);
+      assert.equal(projected.file_policy_status, "pending");
+      assert.equal(projected.malware_scan_status, "not_configured");
+      assert.equal(projected.processing_status, "quarantined");
+      assert.equal(projected.parse_status, "quarantined");
+      assert.equal((await scenario.metadataRepository.listIntakeFileReviewQueueItems(organizationId, { limit: 100 })).length, 0);
+    } finally {
+      server.close();
+      app.closeForTest();
+      await scenario.close();
+    }
+  });
+
+  await t.test("genuine malware scan failure follows policy failure path without malware pass", async () => {
+    const scenario = await createScenario();
+    const app = createApplication(scenario);
+    const server = await listen(app);
+    try {
+      const { intakeFileId } = await confirmUploadedFileThroughHttp(server, {
+        bytes: unrecognizedCleanBytes,
+        reserveOverrides: { batch_idempotency_key: "batch-malware-failed", idempotency_key: "file-malware-failed" },
+      });
+
+      const { result, audit } = await executePolicyDecisionForFirstEnqueueRecord(scenario, {
+        malwareScanAdapter: createKaiSyntheticFixtureMalwareAdapter({ cleanSha256: allowedChecksum }),
+      });
+      assert.equal(result.ok, true, JSON.stringify(result));
+      assert.equal(result.data.record.file_policy_status, "failed");
+      assert.equal(result.data.record.policy_decision_replay.sanitized_result.category, "malware_scan_failed");
+      assert.equal(audit.prepared.length, 1);
+      assert.equal(audit.published.length, 1);
+      const metadata = await scenario.metadataRepository.getIntakeFileMetadata(organizationId, intakeFileId);
+      const projected = projectTestOnlyOperatorFileRead(
+        metadata,
+        result.data.record,
+        result.data.record.policy_decision_replay.sanitized_result,
+      );
+      assert.equal(projected.file_policy_status, "failed");
+      assert.notEqual(projected.malware_scan_status, "passed");
+      assert.equal((await scenario.metadataRepository.listIntakeFileReviewQueueItems(organizationId, { limit: 100 })).length, 0);
+    } finally {
+      server.close();
+      app.closeForTest();
+      await scenario.close();
+    }
+  });
+
+  await t.test("non-policy and unclassified outcomes create no review and no extra state write", async () => {
+    for (const assessmentResult of [
+      { status: "failed", category: "maximum_concurrent_pdf_assessor_workers_exceeded" },
+      { status: "failed", category: "new_unclassified_category" },
+    ]) {
+      const scenario = await createScenario();
+      const app = createApplication(scenario);
+      const server = await listen(app);
+      try {
+        const { intakeFileId } = await confirmUploadedFileThroughHttp(server, {
+          reserveOverrides: {
+            batch_idempotency_key: `batch-${assessmentResult.category}`,
+            idempotency_key: `file-${assessmentResult.category}`,
+          },
+        });
+        const before = scenario.lifecycleRepository.getUploadLifecycle({ organizationId, intakeFileId }).data.record;
+        const { result } = await executePolicyDecisionForFirstEnqueueRecord(scenario, { assessmentResult });
+        const after = scenario.lifecycleRepository.getUploadLifecycle({ organizationId, intakeFileId }).data.record;
+        assert.deepEqual(after, before);
+        assert.equal((await scenario.metadataRepository.listIntakeFileReviewQueueItems(organizationId, { limit: 100 })).length, 0);
+        if (assessmentResult.category === "new_unclassified_category") {
+          assert.equal(result.error.code, C2_UNCLASSIFIED_OUTCOME);
+        } else {
+          assert.equal(result.data.policyDecisionInvoked, false);
+        }
+      } finally {
+        server.close();
+        app.closeForTest();
+        await scenario.close();
+      }
+    }
+  });
 });
 
 test("P0-07 negative local synthetic HTTP acceptance matrix", async (t) => {
@@ -1292,5 +1579,31 @@ test("P0-07 negative local synthetic HTTP acceptance matrix", async (t) => {
       blockers: [{ validator_key: "VAL-P0-07", message: "Request failed KAI validation." }],
     });
     assertNoLeak(response);
+  });
+
+  await t.test("corrected sanitized HTTP mappings hide internal assessment categories", () => {
+    const cases = [
+      [
+        {
+          ok: false,
+          integrity_failure: {
+            type: ASSESSMENT_READ_INTEGRITY_FAILURE_TYPE,
+            kind: "checksum_mismatch",
+          },
+        },
+        409,
+        "conflict_current_state_changed",
+      ],
+      [{ status: "failed", category: "maximum_concurrent_pdf_assessor_workers_exceeded" }, 500, "system_error"],
+      [{ status: "failed", category: "malware_scan_not_configured" }, 500, "system_error"],
+      [{ error: { code: C2_UNCLASSIFIED_OUTCOME } }, 500, "system_error"],
+    ];
+
+    for (const [outcome, status, code] of cases) {
+      const mapped = mapSyntheticAssessmentOutcomeToHttpError(outcome);
+      assert.equal(mapped.error.status, status);
+      assert.equal(mapped.error.code, code);
+      assert.doesNotMatch(JSON.stringify(mapped), /assessment_read_integrity_failure|maximum_concurrent_pdf_assessor_workers_exceeded|malware_scan_not_configured|C2_UNCLASSIFIED_OUTCOME/);
+    }
   });
 });

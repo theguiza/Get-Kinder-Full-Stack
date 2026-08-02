@@ -4916,6 +4916,81 @@ p0_06b_and_gate_a: unchanged and unauthorized
 current_state_update: NOT_AUTHORIZED
 ```
 
+## P0-07 corrected synthetic binding owner decision package
+
+```text
+p0_07_package_status: corrected_synthetic_binding_owner_decision_complete
+implementation_status: complete
+verification_status: TOOL_VERIFIED after focused acceptance, schema/API contract, Sprint 2, full repository, and diff checks
+evidence_class: TOOL_VERIFIED
+decision_evidence: USER_CONFIRMED OWNER_DECISION.P0_07_SYNTHETIC_BINDING_V1_CORRECTED
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 06d5901766fcf964f3686312d8df4e845ea4c082
+working_tree_clean_at_start: true
+applicable_repository_instructions: root AGENTS.md only; DATABASE_URL sentinel used for every Node and npm command; no fetch, push, database/cloud/production/deployment/current-state, P0-06B, Gate A, queue drain, second audit path, production wiring, or real-client-data work authorized or performed
+active_package_scope: bounded P0-07 local synthetic acceptance harness correction only; no production query, service, route, database, read-model, metadata policy write, persistent lifecycle convergence, durable metadata lifecycle mapping, P0-06B, Gate A, Current State, or Implementation Baseline change
+changed_files: __tests__/kai-sprint2-p0-acceptance.spec.js; KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+
+corrected_binding_behavior:
+  - C1 synthetic upload lifecycle compare-and-set remains the sole policy-state writer for assessment outcomes
+  - in-memory metadata repository no longer marks file_policy_status or malware_scan_status passed during the positive assessment harness
+  - established 14-field FileSummary DTO is constructed only as a test-only operator projection from C1 lifecycle state and metadata row fields
+  - production HTTP file-detail route remains unchanged and continues to read committed metadata state only
+  - processing_status and parse_status stay quarantined across every synthetic assessment outcome and are not changed by C2
+
+malware_projection_behavior:
+  - positive policy pass uses the explicitly injected test-only malware adapter with deterministic clean SHA-256 recognition
+  - only the verified clean pass projects malware_scan_status passed in the test-only operator read
+  - malware_scan_not_configured invokes no C1 policy decision, leaves lifecycle file_policy_status pending, projects malware_scan_status not_configured, and creates no review item
+  - genuine malware_scan_failed follows the approved policy-failure path, writes lifecycle file_policy_status failed through C1, and does not project malware pass
+
+review_creation_behavior:
+  - review creation is a separate idempotent test-harness operation
+  - idempotency key is organization_id + intake_file_review + intake_file + intake_file_id
+  - exact replay creates no duplicate review item
+  - review creation writes no policy, malware, lifecycle, or assessment-audit state
+  - non-policy and unclassified outcomes create no review item and perform no additional state write
+
+sanitized_http_mapping_behavior:
+  - assessment_read_integrity_failure maps to HTTP 409 conflict_current_state_changed
+  - maximum_concurrent_pdf_assessor_workers_exceeded maps to HTTP 500 system_error
+  - malware_scan_not_configured maps to HTTP 500 system_error
+  - C2_UNCLASSIFIED_OUTCOME maps to HTTP 500 system_error
+  - internal assessment categories are not serialized in mapped HTTP responses
+
+verification_results:
+  focused_acceptance_initial_sandbox_result: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2-p0-acceptance - sandbox listener EPERM only
+  focused_acceptance_result: listener-capable DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2-p0-acceptance - tests 47; pass 47; fail 0
+  verify_schema_contract: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-schema-contract - tests 21; pass 21; fail 0
+  verify_api_contract: listener-capable DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-api-contract - tests 55; pass 55; fail 0
+  test_kai_sprint2: listener-capable DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - tests 954; pass 954; fail 0
+  full_repository_suite: listener-capable DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - tests 1059; pass 1059; fail 0
+  git_diff_check_before_execplan_evidence_update: git diff --check - pass
+  final_state_focused_acceptance_rerun: listener-capable DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2-p0-acceptance - tests 47; pass 47; fail 0
+  final_state_git_diff_check: git diff --check - pass
+
+completion_language:
+  P0 repository contract complete
+  P0 local synthetic acceptance passed
+  Persistent lifecycle integration pending Gate A
+
+not_established:
+  P0_DATABASE_INTEGRATION_VERIFIED
+  P0_DATABASE_UPLOAD_LIFECYCLE_VERIFIED
+  P0_NONPRODUCTION_STORAGE_VERIFIED
+  P0_LIVE_UPLOAD_READY
+  REAL_CLIENT_DATA_READY
+
+deployed_kai_schema_compatibility: NOT_CONFIRMED
+database_atomicity: NOT_CONFIRMED
+persistent_upload_lifecycle: NOT_CONFIRMED
+nonproduction_storage_integration: NOT_CONFIRMED
+production_readiness: NOT_CONFIRMED
+real_client_data_readiness: NOT_CONFIRMED
+p0_06b_and_gate_a: unchanged and unauthorized
+current_state_update: NOT_AUTHORIZED
+```
+
 ## P0-05 worker-backed assessor timeout implementation
 
 ```text
