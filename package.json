@@ -12,7 +12,6 @@
     "test:kai-sprint2-p0-acceptance": "node --test __tests__/kai-sprint2-p0-acceptance.spec.js",
     "verify:kai-sprint2-api-contract": "node --test __tests__/kai-sprint2-api-contract.spec.js __tests__/kai-sprint2-foundation-safety.spec.js __tests__/kai-sprint2-pass2-route-runtime.spec.js",
     "verify:kai-sprint2-schema-contract": "node --test __tests__/kai-sprint2-p0-repository-contract.spec.js",
-    "verify:kai-sprint2-gate-a-local": "node scripts/kai-sprint2-gate-a-local-postgres.js",
     "verify:kai-sprint2-pass2-api": "node scripts/kai-sprint2-pass2-admin-metadata-intake-api-verifier.js",
     "backfill:surprises": "node scripts/backfillDailySurprises.js",
     "prestart": "npm run backfill:surprises || true",
