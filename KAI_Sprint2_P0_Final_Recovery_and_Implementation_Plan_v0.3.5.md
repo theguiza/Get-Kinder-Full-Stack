@@ -6645,3 +6645,84 @@ prohibited_actions_not_performed:
 next_package_or_stop_condition: OWNER-DIRECTED STOP after P1-01B worker-backed PDF profiling
 commit_hash: report after commit; a commit cannot contain its own SHA
 ```
+
+## Gate A ephemeral local PostgreSQL migration and verification package
+
+```text
+KAI_SPRINT2_GATE_A_EPHEMERAL_LOCAL_POSTGRES
+
+package_date: 2026-08-02 America/Vancouver
+evidence_class: TOOL_VERIFIED
+owner_authorization: USER_CONFIRMED isolated local PostgreSQL integration only
+package_status: complete before commit
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: db46e45aa4aa2234011c95295f6f359412c9753a
+worktree_at_start: clean tracked and untracked
+relevant_reverted_history_inspected: c54aa43 Add Gate A local Postgres verification package; 96c0493 Revert unauthorized Gate A verification package
+remote_fetch_push_or_deploy: not performed
+
+implemented_scope:
+  forward_migration: migrations/kai_sprint2_gate_a_persistent_upload_lifecycle.sql
+  rollback_draft: migrations/kai_sprint2_gate_a_persistent_upload_lifecycle.rollback.sql
+  deterministic_catalog_verifier: scripts/kai-sprint2-gate-a-verifier.sql
+  synthetic_bootstrap_schema: scripts/kai-sprint2-gate-a-bootstrap-synthetic-schema.sql
+  synthetic_smoke_seed: scripts/kai-sprint2-gate-a-smoke-seed.sql
+  smoke_verifier: scripts/kai-sprint2-gate-a-smoke-verifier.sql
+  ephemeral_runner: scripts/kai-sprint2-gate-a-local-postgres.js
+  local_runbook: scripts/kai-sprint2-gate-a-runbook.md
+  package_script: verify:kai-sprint2-gate-a-local
+  production_lifecycle_repository_mount: not implemented
+  route_or_feature_flag_or_tenant_change: false
+  cloud_or_gcs_or_real_data: false
+  current_state_update: false
+
+postgresql:
+  authorized_target: ephemeral local PostgreSQL 16 instance created and destroyed by repository verification runner
+  verified_server_version: 16.14 (Homebrew)
+  synthetic_fixtures_only: true
+  shared_external_cloud_or_production_database_access: false
+  sandbox_initdb_result: failed before database creation with local shared-memory EPERM; no external database reached
+  localhost_capable_gate_a_runner: passed outside sandbox under owner Gate A authorization
+  persistent_homebrew_service_started: false
+  temp_cluster_cleanup: runner stops cluster and removes temp directory
+
+migration_behavior:
+  durable_upload_lifecycle_columns: upload_state, upload_state_changed_at, upload_expires_at
+  immutable_object_version_identity: object_version_id with provider-neutral ov_ plus 32 lowercase hex constraint and immutability trigger
+  verified_checksum_state: verified_checksum, verified_size_bytes, verified_at with lowercase SHA-256 and immutable verified facts
+  policy_replay_state: policy_decision_replay constrained to required replay keys
+  enqueue_identity: kai.security_assessment_enqueue with unique organization_id/intake_file_id/object_version_id/verified_checksum identity
+  tenant_indexes: tenant-file, tenant-upload-state, object-version, and checksum replay indexes
+  lifecycle_trigger: allowed edge enforcement, expiry rejection, immutable tenant/file/object/checksum/size facts, and 25-active-file limit
+  existing_row_handling: backfills null lifecycle fields to reserved with 24-hour expiry from created_at/now
+  destructive_cleanup_or_retention_rule: none
+
+verification:
+  gate_a_ephemeral_postgres_initial_sandbox: DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-gate-a-local - initdb failed with shmget EPERM before database creation
+  gate_a_ephemeral_postgres_localhost_capable: DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-gate-a-local - PostgreSQL 16.14; passed
+  catalog_verifier: single result set; DDL syntax, vocabulary, columns, constraints, indexes, FK, trigger, and PostgreSQL version passed
+  smoke_verifier: single result set; lifecycle transitions, expiry, identical replay, conflict rejection, enqueue ON CONFLICT, transaction rollback, audit atomicity, tenant predicate, and 25-file active limit passed
+  two_session_checks: pg two-client runner verified identical replay, conflicting object-version replay rejection, and row-lock contention failure with lock_timeout
+  sprint2_suite_initial_sandbox: DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - existing localhost listener tests failed with sandbox listen EPERM on 127.0.0.1; non-listener subtests proceeded
+  sprint2_suite_localhost_capable: DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - tests 997; pass 997; fail 0
+  full_repository_initial_sandbox: DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel npm test - existing localhost listener tests failed with sandbox listen EPERM on 127.0.0.1; non-listener subtests proceeded
+  full_repository_localhost_capable: DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel npm test - tests 1102; pass 1102; fail 0
+
+established_label:
+  P0_DATABASE_INTEGRATION_VERIFIED: local ephemeral PostgreSQL plus synthetic fixtures only
+
+not_confirmed:
+  deployed_schema_compatibility: NOT_CONFIRMED
+  nonproduction_storage: NOT_CONFIRMED
+  live_upload_readiness: NOT_CONFIRMED
+  production_readiness: NOT_CONFIRMED
+  real_client_data_readiness: NOT_CONFIRMED
+  cloud_or_gcs_behavior: NOT_CONFIRMED
+  Gate_B_C_D: NOT_AUTHORIZED
+
+prohibited_actions_not_performed:
+  - no production or shared nonproduction database, external database, real client data, cloud or GCS work, credential inspection or disclosure, deployment, feature-flag or tenant change, Gate B, Gate C, Gate D, source promotion, P1 persistent schema, Current State update, push, or production lifecycle mount
+
+next_package_or_stop_condition: OWNER-DIRECTED STOP after Gate A ephemeral local PostgreSQL migration and verification package; do not begin Gate B, Gate C, Gate D, cloud, deployment, tenant/feature-flag change, Current State update, source promotion, or production lifecycle mounting without separate authorization
+commit_hash: report after commit; a commit cannot contain its own SHA
+```
