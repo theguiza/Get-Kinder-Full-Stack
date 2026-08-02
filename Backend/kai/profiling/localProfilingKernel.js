@@ -11,9 +11,8 @@ import { detectOoxmlArchiveResourceLimitPolicy } from "../validators/ooxmlArchiv
 import { detectXlsxSheetCellLimitPolicy } from "../validators/xlsxSheetCellLimitDetector.js";
 
 const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-const MAX_SAMPLE_ROWS = 3;
-const MAX_SAMPLE_FIELDS = 12;
-const MAX_PDF_SCAN_BYTES = 2 * 1024 * 1024;
+export const MAX_REDACTED_SAMPLE_RECORDS = 20;
+export const MAX_SAMPLE_VALUE_CHARACTERS = 120;
 const UTF8_BOM_BYTES = Object.freeze([0xef, 0xbb, 0xbf]);
 const CSV_FORMULA_PREFIXES = Object.freeze(new Set(["=", "+", "-", "@", "\t", "\r"]));
 const TEXT_DECODER = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
@@ -56,6 +55,10 @@ function notProfilablePdf(reason) {
     reason,
     governance: Object.freeze(governance()),
   });
+}
+
+function pdfWorkerBoundaryEnvelope() {
+  return notProfilablePdf("structural_pdf_profiling_requires_separately_governed_worker_boundary");
 }
 
 function okProfile(format, body) {
@@ -122,9 +125,31 @@ function primitiveType(value) {
   return "text_like";
 }
 
+function redactedValue(value) {
+  const characterCount = [...String(value ?? "")].length;
+  return Object.freeze({
+    redacted: true,
+    value: "[redacted]",
+    character_count: Math.min(characterCount, MAX_SAMPLE_VALUE_CHARACTERS),
+    truncated: characterCount > MAX_SAMPLE_VALUE_CHARACTERS,
+    primitive_type_hint: primitiveType(String(value ?? "")),
+  });
+}
+
+function redactedName(value) {
+  return Object.freeze({
+    redacted: true,
+    value: "[redacted]",
+    present: typeof value === "string" && value.length > 0,
+    character_count: Math.min([...(value ?? "")].length, MAX_SAMPLE_VALUE_CHARACTERS),
+    truncated: [...(value ?? "")].length > MAX_SAMPLE_VALUE_CHARACTERS,
+  });
+}
+
 function createColumnProfiles(columnCount) {
   return Array.from({ length: columnCount }, (_, index) => ({
     field_key: `field_${index + 1}`,
+    header_present: false,
     present_count: 0,
     missing_count: 0,
     primitive_type_hints: {
@@ -227,12 +252,19 @@ function parseCsvRecords(text) {
 }
 
 function summarizeTabularRecords(records, { headerRow = true } = {}) {
+  const header = headerRow && records.length > 0 ? records[0] : [];
   const dataRows = headerRow && records.length > 0 ? records.slice(1) : records;
   const columnCount = records.reduce((maximum, row) => Math.max(maximum, row.length), 0);
   const columns = createColumnProfiles(columnCount);
   let formula_count = 0;
+  const rowSignatures = new Map();
 
+  for (let index = 0; index < columnCount; index += 1) {
+    columns[index].header_present = typeof header[index] === "string" && header[index].trim().length > 0;
+  }
   for (const row of dataRows) {
+    const signature = JSON.stringify(Array.from({ length: columnCount }, (_, index) => row[index] ?? ""));
+    rowSignatures.set(signature, (rowSignatures.get(signature) ?? 0) + 1);
     for (let index = 0; index < columnCount; index += 1) {
       const value = row[index] ?? "";
       const hint = primitiveType(value);
@@ -246,11 +278,42 @@ function summarizeTabularRecords(records, { headerRow = true } = {}) {
     }
   }
 
+  const duplicate_row_count = [...rowSignatures.values()]
+    .filter((count) => count > 1)
+    .reduce((total, count) => total + count, 0);
+  const headers = columns.map((column, index) => Object.freeze({
+    field_key: column.field_key,
+    position: index + 1,
+    present: column.header_present,
+    name: redactedName(header[index] ?? ""),
+  }));
+  const sample_records = dataRows.slice(0, MAX_REDACTED_SAMPLE_RECORDS).map((row, rowIndex) => Object.freeze({
+    sample_index: rowIndex,
+    values: Object.freeze(columns.map((column, columnIndex) => Object.freeze({
+      field_key: column.field_key,
+      value: redactedValue(row[columnIndex] ?? ""),
+    }))),
+  }));
+  const draft_dictionary_fields = columns.map((column) => Object.freeze({
+    field_key: column.field_key,
+    meaning: "unknown",
+    sensitivity: "unknown",
+    review: "required",
+    allowed_use: "internal only",
+    primitive_type_hints: Object.freeze({ ...column.primitive_type_hints }),
+    missing_count: column.missing_count,
+    present_count: column.present_count,
+  }));
+
   return {
+    header_count: headers.filter((headerShape) => headerShape.present).length,
+    headers,
     row_count: dataRows.length,
     column_count: columnCount,
     field_count: columnCount,
     formula_count,
+    duplicate_row_count,
+    has_duplicate_rows: duplicate_row_count > 0,
     fields: columns.map((column) => Object.freeze({
       field_key: column.field_key,
       meaning: "unknown",
@@ -261,14 +324,16 @@ function summarizeTabularRecords(records, { headerRow = true } = {}) {
       present_count: column.present_count,
       primitive_type_hints: Object.freeze({ ...column.primitive_type_hints }),
     })),
-    sample_shapes: dataRows.slice(0, MAX_SAMPLE_ROWS).map((row, rowIndex) => Object.freeze({
+    sample_shapes: dataRows.slice(0, MAX_REDACTED_SAMPLE_RECORDS).map((row, rowIndex) => Object.freeze({
       sample_index: rowIndex,
-      field_shapes: columns.slice(0, MAX_SAMPLE_FIELDS).map((column, columnIndex) => Object.freeze({
+      field_shapes: columns.map((column, columnIndex) => Object.freeze({
         field_key: column.field_key,
         presence: row[columnIndex] === undefined || row[columnIndex] === "" ? "missing" : "present",
         primitive_type_hint: primitiveType(row[columnIndex] ?? ""),
       })),
     })),
+    sample_records,
+    draft_dictionary_fields,
   };
 }
 
@@ -289,13 +354,22 @@ async function profileCsv({ extension, declaredMime, bytes }) {
         max_logical_records: KAI_SPRINT2_P0_CSV_LIMITS.maxLogicalRecords,
       }),
       counts: Object.freeze({
+        header_count: summary.header_count,
         row_count: summary.row_count,
         column_count: summary.column_count,
         field_count: summary.field_count,
         formula_count: summary.formula_count,
+        duplicate_row_count: summary.duplicate_row_count,
       }),
+      headers: Object.freeze(summary.headers),
       fields: Object.freeze(summary.fields),
       sample_shapes: Object.freeze(summary.sample_shapes),
+      sample_records: Object.freeze(summary.sample_records),
+      duplicate_row_hints: Object.freeze({
+        has_duplicate_rows: summary.has_duplicate_rows,
+        duplicate_row_count: summary.duplicate_row_count,
+      }),
+      draft_dictionary_fields: Object.freeze(summary.draft_dictionary_fields),
       quality_findings: Object.freeze([]),
       proposals: Object.freeze({
         sensitivity: "unknown",
@@ -421,6 +495,66 @@ function cellColumnIndex(cellRef) {
   return index;
 }
 
+function extractRowIndex(cellRef) {
+  if (typeof cellRef !== "string") return null;
+  const match = /([0-9]+)$/.exec(cellRef);
+  if (!match) return null;
+  const rowIndex = Number.parseInt(match[1], 10);
+  return Number.isSafeInteger(rowIndex) && rowIndex > 0 ? rowIndex : null;
+}
+
+function safeXmlAttributeValue(source, elementStart, attributeName) {
+  const tagEnd = source.indexOf(">", elementStart);
+  if (tagEnd === -1) return "";
+  const tag = source.slice(elementStart, tagEnd + 1);
+  const escapedName = attributeName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = new RegExp(`${escapedName}\\s*=\\s*([\"'])(.*?)\\1`).exec(tag);
+  return match ? match[2] : "";
+}
+
+function parseWorkbookSheets(workbookBytes) {
+  const workbookXml = TEXT_DECODER.decode(workbookBytes);
+  const sheets = [];
+  for (const match of workbookXml.matchAll(/<sheet\b/g)) {
+    const elementStart = match.index;
+    const name = safeXmlAttributeValue(workbookXml, elementStart, "name");
+    const relationshipId = safeXmlAttributeValue(workbookXml, elementStart, "r:id");
+    sheets.push(Object.freeze({
+      sheet_key: `sheet_${sheets.length + 1}`,
+      name,
+      relationshipId,
+    }));
+  }
+  return sheets;
+}
+
+function parseWorkbookRelationships(relsBytes) {
+  const relsXmlText = TEXT_DECODER.decode(relsBytes);
+  const relationships = new Map();
+  for (const match of relsXmlText.matchAll(/<Relationship\b/g)) {
+    const elementStart = match.index;
+    const id = safeXmlAttributeValue(relsXmlText, elementStart, "Id");
+    const target = safeXmlAttributeValue(relsXmlText, elementStart, "Target");
+    if (id && /^worksheets\/sheet\d+\.xml$/.test(target)) {
+      relationships.set(id, `xl/${target}`);
+    }
+  }
+  return relationships;
+}
+
+function createXlsxSheetSummary(sheet_key, sheetName) {
+  return {
+    sheet_key,
+    sheet_name: redactedName(sheetName),
+    rowIndices: new Set(),
+    cell_count: 0,
+    formula_count: 0,
+    maxColumn: 0,
+    rows: new Map(),
+    columnHints: new Map(),
+  };
+}
+
 async function profileXlsx({ extension, declaredMime, bytes }) {
   try {
     const typeResult = detectP0FileTypeAgreement({ extension, declaredMime, bytes });
@@ -431,35 +565,65 @@ async function profileXlsx({ extension, declaredMime, bytes }) {
     if (sheetCellLimitResult) return safeFailure("xlsx", sheetCellLimitResult.category);
 
     const entries = parseZipEntries(bytes);
-    const worksheetEntries = [...entries.keys()].filter((name) => /^xl\/worksheets\/sheet\d+\.xml$/.test(name)).sort();
-    let row_count = 0;
-    let cell_count = 0;
-    let formula_count = 0;
-    let maxColumn = 0;
-    const columnHints = new Map();
+    const relationshipEntry = entries.get("xl/_rels/workbook.xml.rels");
+    const workbookEntry = entries.get("xl/workbook.xml");
+    const workbookSheets = workbookEntry ? parseWorkbookSheets(inflateEntry(bytes, workbookEntry)) : [];
+    const relationships = relationshipEntry ? parseWorkbookRelationships(inflateEntry(bytes, relationshipEntry)) : new Map();
+    const discoveredWorksheetEntries = [...entries.keys()].filter((name) => /^xl\/worksheets\/sheet\d+\.xml$/.test(name)).sort();
+    const worksheetRefs = workbookSheets.length > 0
+      ? workbookSheets.map((sheet, index) => Object.freeze({
+        sheet_key: sheet.sheet_key,
+        sheet_name: sheet.name,
+        entry_name: relationships.get(sheet.relationshipId) ?? discoveredWorksheetEntries[index],
+      })).filter((sheet) => typeof sheet.entry_name === "string" && entries.has(sheet.entry_name))
+      : discoveredWorksheetEntries.map((entry_name, index) => Object.freeze({
+        sheet_key: `sheet_${index + 1}`,
+        sheet_name: "",
+        entry_name,
+      }));
 
-    for (const name of worksheetEntries) {
-      const xmlBytes = inflateEntry(bytes, entries.get(name));
+    const sheetSummaries = [];
+
+    for (const worksheetRef of worksheetRefs) {
+      const sheetSummary = createXlsxSheetSummary(worksheetRef.sheet_key, worksheetRef.sheet_name);
+      const xmlBytes = inflateEntry(bytes, entries.get(worksheetRef.entry_name));
       scanXmlElements(xmlBytes, ({ localName, attributes }) => {
-        if (localName === "row") row_count += 1;
-        if (localName === "f") formula_count += 1;
+        if (localName === "row") {
+          const rowIndex = Number.parseInt(attributes.get("r") ?? `${sheetSummary.rowIndices.size + 1}`, 10);
+          sheetSummary.rowIndices.add(Number.isSafeInteger(rowIndex) && rowIndex > 0 ? rowIndex : sheetSummary.rowIndices.size + 1);
+        }
+        if (localName === "f") sheetSummary.formula_count += 1;
         if (localName !== "c") return;
-        cell_count += 1;
-        const columnIndex = cellColumnIndex(attributes.get("r")) ?? cell_count;
-        maxColumn = Math.max(maxColumn, columnIndex);
+        sheetSummary.cell_count += 1;
+        const rowIndex = extractRowIndex(attributes.get("r")) ?? (sheetSummary.rowIndices.size || 1);
+        const row = sheetSummary.rows.get(rowIndex) ?? [];
+        const columnIndex = cellColumnIndex(attributes.get("r")) ?? sheetSummary.cell_count;
+        row[columnIndex - 1] = attributes.get("t") || "number_or_blank";
+        sheetSummary.rows.set(rowIndex, row);
+        sheetSummary.rowIndices.add(rowIndex);
+        sheetSummary.maxColumn = Math.max(sheetSummary.maxColumn, columnIndex);
         const fieldKey = `field_${columnIndex}`;
         const type = attributes.get("t") || "number_or_blank";
-        const hints = columnHints.get(fieldKey) || { blank: 0, boolean: 0, number: 0, date_like: 0, text_like: 0 };
+        const hints = sheetSummary.columnHints.get(fieldKey) || { blank: 0, boolean: 0, number: 0, date_like: 0, text_like: 0 };
         if (type === "b") hints.boolean += 1;
         else if (type === "d") hints.date_like += 1;
         else if (["s", "str", "inlineStr", "e"].includes(type)) hints.text_like += 1;
         else hints.number += 1;
-        columnHints.set(fieldKey, hints);
+        sheetSummary.columnHints.set(fieldKey, hints);
       });
+      sheetSummaries.push(sheetSummary);
     }
 
-    const fieldCount = Math.max(maxColumn, columnHints.size);
-    const fields = Array.from({ length: fieldCount }, (_, index) => {
+    const workbookFieldCount = sheetSummaries.reduce((maximum, sheet) => Math.max(maximum, sheet.maxColumn, sheet.columnHints.size), 0);
+    const workbookHints = new Map();
+    for (const sheet of sheetSummaries) {
+      for (const [fieldKey, hints] of sheet.columnHints.entries()) {
+        const aggregate = workbookHints.get(fieldKey) || { blank: 0, boolean: 0, number: 0, date_like: 0, text_like: 0 };
+        for (const key of Object.keys(aggregate)) aggregate[key] += hints[key] ?? 0;
+        workbookHints.set(fieldKey, aggregate);
+      }
+    }
+    const fields = Array.from({ length: workbookFieldCount }, (_, index) => {
       const field_key = `field_${index + 1}`;
       return Object.freeze({
         field_key,
@@ -467,13 +631,81 @@ async function profileXlsx({ extension, declaredMime, bytes }) {
         sensitivity: "unknown",
         review: "required",
         allowed_use: "internal only",
-        primitive_type_hints: Object.freeze(columnHints.get(field_key) || {
+        primitive_type_hints: Object.freeze(workbookHints.get(field_key) || {
           blank: 0,
           boolean: 0,
           number: 0,
           date_like: 0,
           text_like: 0,
         }),
+      });
+    });
+    const sheets = sheetSummaries.map((sheet) => {
+      const fieldCount = Math.max(sheet.maxColumn, sheet.columnHints.size);
+      const sortedRows = [...sheet.rows.entries()].sort(([a], [b]) => a - b);
+      const headerTypes = sortedRows[0]?.[1] ?? [];
+      const dataRows = sortedRows.slice(1);
+      const rowSignatures = new Map();
+      for (const [, row] of dataRows) {
+        const signature = JSON.stringify(Array.from({ length: fieldCount }, (_, index) => row[index] ?? ""));
+        rowSignatures.set(signature, (rowSignatures.get(signature) ?? 0) + 1);
+      }
+      const duplicate_row_count = [...rowSignatures.values()]
+        .filter((count) => count > 1)
+        .reduce((total, count) => total + count, 0);
+      const headers = Array.from({ length: fieldCount }, (_, index) => Object.freeze({
+        field_key: `field_${index + 1}`,
+        position: index + 1,
+        present: headerTypes[index] !== undefined,
+        name: redactedName(headerTypes[index] ?? ""),
+      }));
+      const sheetFields = Array.from({ length: fieldCount }, (_, index) => {
+        const field_key = `field_${index + 1}`;
+        const rowsWithValue = [...sheet.rows.values()].filter((row) => row[index] !== undefined).length;
+        return Object.freeze({
+          field_key,
+          meaning: "unknown",
+          sensitivity: "unknown",
+          review: "required",
+          allowed_use: "internal only",
+          missing_count: sheet.rowIndices.size - rowsWithValue,
+          present_count: rowsWithValue,
+          primitive_type_hints: Object.freeze(sheet.columnHints.get(field_key) || {
+            blank: 0,
+            boolean: 0,
+            number: 0,
+            date_like: 0,
+            text_like: 0,
+          }),
+        });
+      });
+      const sample_records = dataRows.slice(0, MAX_REDACTED_SAMPLE_RECORDS).map(([rowIndex, row], sampleIndex) => Object.freeze({
+        sample_index: sampleIndex,
+        row_position: rowIndex,
+        values: Object.freeze(Array.from({ length: fieldCount }, (_, index) => Object.freeze({
+          field_key: `field_${index + 1}`,
+          value: redactedValue(row[index] ?? ""),
+        }))),
+      }));
+      return Object.freeze({
+        sheet_key: sheet.sheet_key,
+        sheet_name: sheet.sheet_name,
+        counts: Object.freeze({
+          header_count: headers.filter((headerShape) => headerShape.present).length,
+          row_count: sheet.rowIndices.size,
+          column_count: fieldCount,
+          cell_count: sheet.cell_count,
+          formula_count: sheet.formula_count,
+          duplicate_row_count,
+        }),
+        headers: Object.freeze(headers),
+        fields: Object.freeze(sheetFields),
+        sample_records: Object.freeze(sample_records),
+        duplicate_row_hints: Object.freeze({
+          has_duplicate_rows: duplicate_row_count > 0,
+          duplicate_row_count,
+        }),
+        draft_dictionary_fields: Object.freeze(sheetFields),
       });
     });
 
@@ -485,15 +717,23 @@ async function profileXlsx({ extension, declaredMime, bytes }) {
         max_cells: KAI_SPRINT2_P0_XLSX_LIMITS.maxCells,
       }),
       counts: Object.freeze({
-        sheet_count: worksheetEntries.length,
-        row_count,
-        column_count: fieldCount,
-        field_count: fieldCount,
-        cell_count,
-        formula_count,
+        sheet_count: sheets.length,
+        row_count: sheets.reduce((total, sheet) => total + sheet.counts.row_count, 0),
+        column_count: workbookFieldCount,
+        field_count: workbookFieldCount,
+        cell_count: sheets.reduce((total, sheet) => total + sheet.counts.cell_count, 0),
+        formula_count: sheets.reduce((total, sheet) => total + sheet.counts.formula_count, 0),
+        duplicate_row_count: sheets.reduce((total, sheet) => total + sheet.counts.duplicate_row_count, 0),
       }),
+      sheets: Object.freeze(sheets),
       fields: Object.freeze(fields),
       sample_shapes: Object.freeze([]),
+      sample_records: Object.freeze(sheets.flatMap((sheet) => sheet.sample_records).slice(0, MAX_REDACTED_SAMPLE_RECORDS)),
+      duplicate_row_hints: Object.freeze({
+        has_duplicate_rows: sheets.some((sheet) => sheet.duplicate_row_hints.has_duplicate_rows),
+        duplicate_row_count: sheets.reduce((total, sheet) => total + sheet.duplicate_row_hints.duplicate_row_count, 0),
+      }),
+      draft_dictionary_fields: Object.freeze(sheets.flatMap((sheet) => sheet.draft_dictionary_fields)),
       quality_findings: Object.freeze([]),
       proposals: Object.freeze({
         sensitivity: "unknown",
@@ -510,22 +750,68 @@ function profileText({ format, extension, declaredMime, bytes }) {
     const typeResult = detectP0FileTypeAgreement({ extension, declaredMime, bytes });
     if (typeResult.policy !== "allow") return safeFailure(format, typeResult.category);
     const text = decodeTrustedUtf8(bytes);
-    const lines = text.length === 0 ? 0 : text.split(/\n/).length;
-    const field_count = format === "markdown"
-      ? (text.match(/^\s*#{1,6}\s+/gm) || []).length
-      : 0;
+    const splitLines = text.length === 0 ? [] : text.split(/\n/);
+    const headings = [];
+    if (format === "markdown") {
+      splitLines.forEach((line, index) => {
+        const match = /^\s*(#{1,6})\s+/.exec(line);
+        if (match) {
+          headings.push(Object.freeze({
+            heading_key: `heading_${headings.length + 1}`,
+            line_position: index + 1,
+            level: match[1].length,
+            text: redactedValue(line),
+          }));
+        }
+      });
+    }
+    const paragraphPositions = [];
+    let inParagraph = false;
+    splitLines.forEach((line, index) => {
+      if (line.trim().length === 0) {
+        inParagraph = false;
+        return;
+      }
+      if (!inParagraph) {
+        paragraphPositions.push(index + 1);
+        inParagraph = true;
+      }
+    });
+    const date_candidates = [];
+    splitLines.forEach((line, lineIndex) => {
+      for (const match of line.matchAll(/\b\d{4}-\d{2}-\d{2}\b/g)) {
+        date_candidates.push(Object.freeze({
+          candidate_key: `date_${date_candidates.length + 1}`,
+          line_position: lineIndex + 1,
+          character_position: match.index + 1,
+          value: redactedValue(match[0]),
+        }));
+      }
+    });
+    const field_count = headings.length;
+    const sample_records = splitLines.slice(0, MAX_REDACTED_SAMPLE_RECORDS).map((line, index) => Object.freeze({
+      sample_index: index,
+      line_position: index + 1,
+      value: redactedValue(line),
+    }));
     return okProfile(format, {
       structural_metadata: Object.freeze({
         byte_size: bytes.byteLength,
         encoding: "utf-8",
       }),
       counts: Object.freeze({
-        row_count: lines,
+        line_count: splitLines.length,
+        paragraph_count: paragraphPositions.length,
+        heading_count: headings.length,
+        date_candidate_count: date_candidates.length,
+        row_count: splitLines.length,
         column_count: 0,
         field_count,
-        page_count: 0,
         formula_count: 0,
       }),
+      headings: Object.freeze(headings),
+      paragraph_positions: Object.freeze(paragraphPositions),
+      date_candidates: Object.freeze(date_candidates),
       fields: Object.freeze(Array.from({ length: field_count }, (_, index) => Object.freeze({
         field_key: `field_${index + 1}`,
         meaning: "unknown",
@@ -533,7 +819,19 @@ function profileText({ format, extension, declaredMime, bytes }) {
         review: "required",
         allowed_use: "internal only",
       }))),
-      sample_shapes: Object.freeze([]),
+      sample_shapes: Object.freeze(sample_records.map((sample) => Object.freeze({
+        sample_index: sample.sample_index,
+        line_position: sample.line_position,
+        primitive_type_hint: sample.value.primitive_type_hint,
+      }))),
+      sample_records: Object.freeze(sample_records),
+      draft_dictionary_fields: Object.freeze(Array.from({ length: field_count }, (_, index) => Object.freeze({
+        field_key: `field_${index + 1}`,
+        meaning: "unknown",
+        sensitivity: "unknown",
+        review: "required",
+        allowed_use: "internal only",
+      }))),
       quality_findings: Object.freeze([]),
       proposals: Object.freeze({
         sensitivity: "unknown",
@@ -545,57 +843,11 @@ function profileText({ format, extension, declaredMime, bytes }) {
   }
 }
 
-function includesAscii(bytes, ascii) {
-  const needle = Array.from(ascii, (character) => character.charCodeAt(0));
-  const end = Math.min(bytes.byteLength, MAX_PDF_SCAN_BYTES) - needle.length;
-  for (let offset = 0; offset <= end; offset += 1) {
-    let matched = true;
-    for (let index = 0; index < needle.length; index += 1) {
-      if (bytes[offset + index] !== needle[index]) {
-        matched = false;
-        break;
-      }
-    }
-    if (matched) return true;
-  }
-  return false;
-}
-
-function countAsciiPattern(bytes, pattern) {
-  const text = new TextDecoder("latin1").decode(bytes.subarray(0, Math.min(bytes.byteLength, MAX_PDF_SCAN_BYTES)));
-  return (text.match(pattern) || []).length;
-}
-
 function profilePdf({ extension, declaredMime, bytes }) {
   try {
     const typeResult = detectP0FileTypeAgreement({ extension, declaredMime, bytes });
     if (typeResult.policy !== "allow") return notProfilablePdf("pdf_identity_not_confirmed");
-    if (includesAscii(bytes, "/Encrypt")) return notProfilablePdf("encrypted_pdf");
-    const hasTextObject = includesAscii(bytes, "BT") && includesAscii(bytes, "ET");
-    const hasTextOperator = includesAscii(bytes, " Tj") || includesAscii(bytes, " TJ") || includesAscii(bytes, "'") || includesAscii(bytes, "\"");
-    if (!hasTextObject || !hasTextOperator) return notProfilablePdf("no_machine_readable_text_layer");
-    const pageCount = countAsciiPattern(bytes, /\/Type\s*\/Page\b/g);
-    return okProfile("pdf", {
-      structural_metadata: Object.freeze({
-        byte_size: bytes.byteLength,
-        text_layer: "machine_readable_present",
-        ocr_performed: false,
-      }),
-      counts: Object.freeze({
-        page_count: pageCount,
-        row_count: 0,
-        column_count: 0,
-        field_count: 0,
-        formula_count: 0,
-      }),
-      fields: Object.freeze([]),
-      sample_shapes: Object.freeze([]),
-      quality_findings: Object.freeze([]),
-      proposals: Object.freeze({
-        sensitivity: "unknown",
-        allowed_use: "internal only",
-      }),
-    });
+    return pdfWorkerBoundaryEnvelope();
   } catch {
     return notProfilablePdf("pdf_identity_not_confirmed");
   }

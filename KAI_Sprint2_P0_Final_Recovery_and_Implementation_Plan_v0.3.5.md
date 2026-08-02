@@ -6520,3 +6520,66 @@ prohibited_actions_not_performed:
 next_package_or_stop_condition: OWNER-DIRECTED STOP after P1-01 local profiling kernel
 commit_hash: report after commit; a commit cannot contain its own SHA
 ```
+
+```text
+P1-01A pure profiling kernel correction evidence
+
+starting_HEAD: e088e6d6bf92ac7433c9ca322bcd8c7c59afe442
+parent_HEAD: dea7b50125ca7368669f495aad1cca6c6b86d024
+branch: codex/kai-sprint2-p0-v0.3.5
+worktree_preflight: TOOL_VERIFIED
+staged_paths_preflight: TOOL_VERIFIED
+untracked_files_preflight: TOOL_VERIFIED
+execplan_true_tail_before_edit: TOOL_VERIFIED
+e088e6d_evidence_block_at_true_eof_before_edit: TOOL_VERIFIED
+prior_evidence_blocks_intact_before_edit: TOOL_VERIFIED
+contract_gap: NOT_CONFIRMED
+pdf_narrowing_anomaly: NOT_CONFIRMED
+
+implemented:
+  Backend/kai/profiling/localProfilingKernel.js:
+    status: TOOL_VERIFIED
+    boundary: pure local byte-input profiling kernel; no new dependency, filesystem read/write, network, storage, database, route, queue, lifecycle, review, source, evidence, claim, worker invocation, OCR, AI, persistence, or parser-run record
+    csv_outputs: TOOL_VERIFIED - headers, row and column counts, primitive type hints, missingness, duplicate-row hints, bounded redacted sample records, sample value character cap, and draft dictionary fields
+    xlsx_outputs: TOOL_VERIFIED - redacted sheet names and sheet count, row/column/cell/formula counts per sheet, headers per sheet, primitive type hints, missingness, duplicate-row hints, bounded redacted sample records, sample value character cap, and draft dictionary fields per sheet
+    text_outputs: TOOL_VERIFIED - Markdown heading positions and counts, TXT/Markdown paragraph and line counts, deterministic date-candidate positions, bounded redacted structure, and inert undisclosed instruction-like content
+    sample_limits: TOOL_VERIFIED - maximum redacted sample records 20; maximum sample characters per value 120
+    failure_behavior: TOOL_VERIFIED - malformed CSV/XLSX and policy-gated failures return safe typed results with no partial profile
+    redaction: TOOL_VERIFIED - no raw scalar, formula, prompt, document text, PII, path, URL, storage fact, or parser internal appears in tested results or errors
+    pdf_narrowing: TOOL_VERIFIED - every PDF with confirmed identity returns typed not_profilable envelope stating structural PDF profiling requires the separately governed worker boundary; page_count, machine-readable text-layer confirmation, section claims, and block claims removed from pure kernel output
+  __tests__/kai-sprint2-p1-local-profiling-kernel.spec.js:
+    status: TOOL_VERIFIED
+    focused_assertions: TOOL_VERIFIED - exact focused assertions cover CSV, XLSX, Markdown/TXT, cross-format sample limits, safe failure behavior, dependency boundary, redaction, and PDF narrowing
+    dependency_boundary: TOOL_VERIFIED - static assertions prove no filesystem, network, storage, database, route, queue, lifecycle, review, source, evidence, claim, worker, OCR, or AI dependency is imported or called
+    pdf_tests_updated: TOOL_VERIFIED
+    pdf_before_assertion: assert.equal(profiled.status, "profiled"); assert.equal(profiled.counts.page_count, 1)
+    pdf_after_assertion: assert.equal(profiled.status, "not_profilable"); assert.equal(profiled.reason, "structural_pdf_profiling_requires_separately_governed_worker_boundary"); assert.equal(profiled.counts, undefined); assert.equal(profiled.structural_metadata, undefined)
+
+verification:
+  focused_p1_kernel_tests_initial: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-p1-local-profiling-kernel.spec.js - syntax correction required before behavioral results
+  focused_p1_kernel_tests_final: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-p1-local-profiling-kernel.spec.js - tests 10; fail 0
+  affected_p0_detector_file_security_regressions: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-p0-file-type-agreement-detector.spec.js __tests__/kai-sprint2-csv-row-limit-detector.spec.js __tests__/kai-sprint2-txt-md-byte-detector.spec.js __tests__/kai-sprint2-xlsx-sheet-cell-limit-detector.spec.js __tests__/kai-sprint2-ooxml-archive-resource-limit-detector.spec.js __tests__/kai-sprint2-formula-injection-boundary.spec.js __tests__/kai-sprint2-pdf-assessor-worker-boundary.spec.js __tests__/kai-sprint2-bounded-file-security-assessor.spec.js - tests 133; fail 0
+  p0_07_acceptance_initial_sandbox: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2-p0-acceptance - sandbox listener failure, listen EPERM on 127.0.0.1
+  p0_07_acceptance_localhost_capable: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2-p0-acceptance - tests 62; fail 0
+  sprint2_suite_initial_sandbox: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - sandbox listener failure, listen EPERM on 127.0.0.1
+  sprint2_suite_localhost_capable: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - tests 992; fail 0
+  full_repository_initial_sandbox: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - sandbox listener failure, listen EPERM on 127.0.0.1
+  full_repository_localhost_capable: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - tests 1097; fail 0
+  git_diff_check_pre_execplan: TOOL_VERIFIED
+  git_diff_cached_check_pre_execplan: TOOL_VERIFIED
+
+not_confirmed:
+  deployed_kai_schema_compatibility: NOT_CONFIRMED
+  database_atomicity: NOT_CONFIRMED
+  persistent_upload_lifecycle: NOT_CONFIRMED
+  nonproduction_storage_integration: NOT_CONFIRMED
+  production_readiness: NOT_CONFIRMED
+  real_client_data_readiness: NOT_CONFIRMED
+
+prohibited_actions_not_performed:
+  - no PDF worker behavior change, PDF worker invocation, OCR, database, schema, persistent parser run, persistent profile, worker, queue, route, feature flag, review item, source candidate, promotion decision, source, source version, evidence, claim, Gate A, P0-06B, deployment, push, credential, tenant, feature-flag, real-client-data, Current State, or production configuration work
+  - no P0 detector or assessor semantic change
+
+next_package_or_stop_condition: OWNER-DIRECTED STOP after P1-01A pure profiling kernel correction
+commit_hash: report after commit; a commit cannot contain its own SHA
+```
