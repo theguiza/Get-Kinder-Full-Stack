@@ -5855,3 +5855,114 @@ prohibited_actions_not_performed:
 next_package_or_stop_condition: OWNER-DIRECTED STOP after this global intake-file size limit package; Package B and later packages remain unauthorized
 commit_hash: report after commit; a commit cannot contain its own SHA
 ```
+
+---
+
+## Package B local non-persistent assessment composition
+
+```text
+PACKAGE_B_LOCAL_NON_PERSISTENT_ASSESSMENT_COMPOSITION
+
+package_date: 2026-08-02 America/Vancouver
+evidence_class: TOOL_VERIFIED
+owner_authorization: USER_CONFIRMED
+package_status: complete before commit
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 631f1f2d5c9af248ab2c11bfb5001c278fac6446
+starting_parent: 22f9273f1d45c27c0cba9aab37c11ba739183e59
+starting_tree: clean tracked and untracked
+staged_paths_at_start: none
+remote_tracking_relation_at_start: origin/codex/kai-sprint2-p0-v0.3.5 ahead 28, behind 0; no fetch performed
+
+implemented_scope:
+  composition_file: Backend/kai/security/syntheticAssessmentComposition.js
+  focused_tests: __tests__/kai-sprint2-synthetic-assessment-composition.spec.js
+  execplan_evidence: KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+
+selection_identity:
+  selected_identity: complete stored identity tuple
+  tuple_fields: organizationId, intakeFileId, objectVersionId, verifiedChecksum
+  security_assessment_enqueue_id_used_as_selector: false
+  reason: generated counter identifier exists on records, but the current uniqueness/collision behavior is enforced by recordsByIdentity keyed on organization, intake file, object version, and checksum
+  snapshot_accessor: listSecurityAssessmentEnqueueRecords()
+  snapshot_mutation: none
+  snapshot_order_dependency: none
+  implicit_first_or_next_selection: false
+
+selection_failure_contract:
+  malformed_selection: validation_blocker / 422
+  malformed_snapshot_source: validation_blocker / 422
+  empty_snapshot: not_found / 404
+  no_matching_record: not_found / 404
+  ambiguous_matching_records: conflict_current_state_changed / 409
+
+trusted_fact_mapping:
+  source: selected stored enqueue record only
+  mapped_fields: organization_id, intake_file_id, object_version_id, verified_checksum, verified_size_bytes, declared_mime, extension
+  caller_fact_spread: false
+  full_record_spread: false
+
+bridge_invocation:
+  function: readVerifiedAssessmentBytes
+  objectVersionId_source: selected record object_version_id
+  expectedChecksum_source: selected record verified_checksum
+  expectedSize_source: selected record verified_size_bytes
+  storageAdapter_source: injected dependency
+  signal_source: optional injected dependency
+
+integrity_failure_branch:
+  returns_before_executor: true
+  executor_invoked: false
+  assessor_invoked: false
+  assessor_verdict_constructed: false
+  persistence_or_audit_or_state_mutation: false
+  returned_contract: existing typed assessment_read_integrity_failure
+
+executor_assessor_invocation:
+  executor_entry: executeInjectedInternalSecurityAssessment
+  executor_factory: createInternalSecurityAssessmentExecutor
+  default_assessor: existing canonical assessBoundedFileSecurity through the executor factory default
+  executor_input_fields: extension, declaredMime, bytes, sha256
+  bytes_source: bridge data.bytes
+  checksum_source: selected record verified_checksum as sha256
+  mime_extension_source: selected record declared_mime and extension
+  invocation_count_on_success: one executor call
+  direct_post_executor_assessor_call: false
+
+returned_result:
+  forms: { policy: "pass" }, { policy: "block", category }, { status: "failed", category }
+  sanitized_result_validation: existing internal executor callable-result validation
+  raw_bytes_exposed: false
+  enqueue_internals_exposed: false
+  storage_internals_exposed: false
+
+production_reachability:
+  public_routes: no import or exposure
+  production_barrel: no export
+  production_composition: no import or exposure
+  confirmation_composition: no import or exposure
+  explicit_call_only: true
+
+tests:
+  focused_package_b: DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-synthetic-assessment-composition.spec.js - tests 7; pass 7; fail 0
+  enqueue_and_confirmation_initial_sandbox: DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-synthetic-security-assessment-enqueue.spec.js __tests__/kai-sprint2-p0-acceptance.spec.js - sandbox listener failures in acceptance, listen EPERM on 127.0.0.1; non-listener enqueue and in-process acceptance subtests passed in same run
+  p0_acceptance_localhost_capable_rerun: DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-p0-acceptance.spec.js - tests 42; pass 42; fail 0
+  bridge_executor_assessor: DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-assessment-read-integrity-bridge.spec.js __tests__/kai-sprint2-internal-security-assessment-executor.spec.js __tests__/kai-sprint2-bounded-file-security-assessor.spec.js - tests 21; pass 21; fail 0
+  sprint2_suite_localhost_capable: DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - tests 928; pass 928; fail 0
+  full_repository_localhost_capable: DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel npm test - tests 1033; pass 1033; fail 0
+  git_diff_check_before_staging: git diff --check - pass
+  git_diff_cached_check: git diff --cached --check - pass
+
+not_confirmed:
+  database_atomicity: NOT_CONFIRMED
+  production_readiness: NOT_CONFIRMED
+  live_upload_readiness: NOT_CONFIRMED
+  automated_queue_processing: NOT_CONFIRMED
+  HTTP_completed_security_assessment: NOT_CONFIRMED
+
+prohibited_actions_not_performed:
+  - no Package A reopening, enqueue-store contract change, confirmation-to-enqueue change, bridge contract change, executor contract change, assessor contract change, detector change, route change, production barrel export, production composition, queue polling, queue draining, claim, lease, acknowledgement, retry, completion state, result persistence, audit write, policy mutation, lifecycle mutation, enqueue mutation, database, SQL, schema, cloud, credential, tenant, feature-flag, deployment, Current State, Implementation Baseline, Gate A, Gate B, Gate C, Gate D, or P0-06B work
+
+next_package_or_stop_condition: OWNER-DIRECTED STOP after Package B local non-persistent assessment composition
+commit_hash: report after commit; a commit cannot contain its own SHA
+```
