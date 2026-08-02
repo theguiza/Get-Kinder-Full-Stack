@@ -2,6 +2,7 @@ import { detectCsvRowLimitPolicy } from "../validators/csvRowLimitDetector.js";
 import { detectOoxmlArchiveResourceLimitPolicy } from "../validators/ooxmlArchiveResourceLimitDetector.js";
 import { detectP0FileTypeAgreement } from "../validators/p0FileTypeAgreementDetector.js";
 import { runPdfAssessorWorkerBoundary } from "../validators/pdfAssessorWorkerBoundary.js";
+import { MALWARE_SCAN_PRODUCTION_DEFAULT } from "../validators/stateTransitionValidators.js";
 import { runMalwareScanWithAdapter } from "./malwareScanAdapter.js";
 
 const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
@@ -13,6 +14,13 @@ const PASS_RESULT = Object.freeze({ policy: "pass" });
 const ASSESSMENT_FAILURE_RESULT = Object.freeze({
   status: "failed",
   category: "security_assessment_timeout",
+});
+const ASSESSOR_FAILED_CATEGORY_CLASSIFICATIONS = Object.freeze({
+  security_assessment_timeout: Object.freeze({ policyFailureEligible: true }),
+  input_size_exceeds_pre_parse_gate: Object.freeze({ policyFailureEligible: true }),
+  malware_scan_failed: Object.freeze({ policyFailureEligible: true }),
+  malware_scan_not_configured: Object.freeze({ policyFailureEligible: false }),
+  maximum_concurrent_pdf_assessor_workers_exceeded: Object.freeze({ policyFailureEligible: false }),
 });
 
 function passResult() {
@@ -79,6 +87,9 @@ async function assessMalware(input, dependencies) {
   );
   if (result.status === "clean") return passResult();
   if (result.status === "malware_detected") return blockResult("malware_failed");
+  if (result.status === MALWARE_SCAN_PRODUCTION_DEFAULT) {
+    return assessmentFailureResult("malware_scan_not_configured");
+  }
   if (isFailureResult(result)) return assessmentFailureResult(result.category);
   return assessmentFailureResult("malware_scan_failed");
 }
@@ -193,5 +204,6 @@ export async function assessBoundedFileSecurity(input = {}, dependencies = {}) {
 
 export const __testables = Object.freeze({
   ASSESSMENT_FAILURE_RESULT,
+  ASSESSOR_FAILED_CATEGORY_CLASSIFICATIONS,
   normalizeInput,
 });

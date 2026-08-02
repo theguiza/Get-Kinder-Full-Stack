@@ -417,6 +417,14 @@ test("repository contract records worker-backed assessment timeout implementatio
   assert.match(contract, /does not convert timeout into a policy block or pass/);
 });
 
+test("repository contract records assessor failed-category classifications", () => {
+  assert.match(contract, /security_assessment_timeout:\s+status: failed\s+category: security_assessment_timeout\s+exact_keys: status, category\s+policy_failure_eligible: true/);
+  assert.match(contract, /input_size_exceeds_pre_parse_gate:\s+status: failed\s+category: input_size_exceeds_pre_parse_gate\s+exact_keys: status, category\s+policy_failure_eligible: true/);
+  assert.match(contract, /malware_scan_failed:\s+status: failed\s+category: malware_scan_failed\s+exact_keys: status, category\s+policy_failure_eligible: true/);
+  assert.match(contract, /malware_scan_not_configured:\s+status: failed\s+category: malware_scan_not_configured\s+exact_keys: status, category\s+policy_failure_eligible: false/);
+  assert.match(contract, /maximum_concurrent_pdf_assessor_workers_exceeded:\s+status: failed\s+category: maximum_concurrent_pdf_assessor_workers_exceeded\s+exact_keys: status, category\s+policy_failure_eligible: false/);
+});
+
 test("queue vocabulary is shared by the repository contract and runtime validator", () => {
   assert.deepEqual(VALID_REVIEW_QUEUE_TYPES, KAI_SPRINT2_P0_REVIEW_QUEUE_TYPES);
   for (const queueType of KAI_SPRINT2_P0_REVIEW_QUEUE_TYPES) {

@@ -6046,3 +6046,85 @@ prohibited_actions_not_performed:
 next_package_or_stop_condition: OWNER-DIRECTED STOP after C1 lifecycle policy-decision transition capability
 commit_hash: report after commit; a commit cannot contain its own SHA
 ```
+
+---
+
+## Malware neutral-outcome split before C2
+
+```text
+KAI_SPRINT2_P0_MALWARE_NEUTRAL_OUTCOME_SPLIT_BEFORE_C2
+
+package_date: 2026-08-02 America/Vancouver
+evidence_class: TOOL_VERIFIED
+owner_authorization: USER_CONFIRMED
+package_status: complete before commit
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 03b61d7ff1e770df015a833fca5c0e06a800b81c
+starting_parent: 87201f56211182b33af6339f41ee828bcefb0341
+starting_tree: clean tracked and untracked
+staged_paths_at_start: none
+remote_tracking_relation_at_start: origin/codex/kai-sprint2-p0-v0.3.5 ahead 30, behind 0; no fetch performed
+
+quote_gate:
+  production_default_adapter_result: Backend/kai/security/malwareScanAdapter.js default adapter returns exact { status: "not_configured" }
+  prior_bounded_assessor_collapse: not_configured fell through to { status: "failed", category: "malware_scan_failed" }
+  genuine_adapter_failure_branch: adapter failure and thrown scan operations remain { status: "failed", category: "malware_scan_failed" }
+  executor_envelope: existing executor accepts exact sanitized { status: "failed", category }
+  failed_category_vocabulary_before_split: security_assessment_timeout, input_size_exceeds_pre_parse_gate, malware_scan_failed, maximum_concurrent_pdf_assessor_workers_exceeded
+  reopening_authority: USER_CONFIRMED C2 precondition activates banked distinction between scanner not_configured and genuine scan failure
+  test_scope_gate: only focused bounded-assessor assertion encoded not_configured -> malware_scan_failed; no protected-file test assertion required modification
+
+implemented_scope:
+  assessor_file: Backend/kai/security/boundedFileSecurityAssessor.js
+  contract_file: Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md
+  focused_tests:
+    - __tests__/kai-sprint2-bounded-file-security-assessor.spec.js
+    - __tests__/kai-sprint2-malware-adapter-boundary.spec.js
+    - __tests__/kai-sprint2-internal-security-assessment-executor.spec.js
+    - __tests__/kai-sprint2-synthetic-assessment-composition.spec.js
+    - __tests__/kai-sprint2-p0-repository-contract.spec.js
+  execplan_evidence: KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+
+outcome_split:
+  not_configured_result: { status: "failed", category: "malware_scan_not_configured" }
+  genuine_adapter_failure_result: { status: "failed", category: "malware_scan_failed" }
+  outcomes_cannot_collapse: focused assessor test asserts the categories are distinct
+  adapter_internals_exposed: false
+  executor_contract_changed: false
+  Package_B_changed: false
+  C1_changed: false
+  protected_files_changed: false
+  lifecycle_audit_enqueue_route_production_barrel_or_production_composition_changed: false
+  C2_implemented: false
+
+recorded_classification:
+  security_assessment_timeout: policy-failure eligible
+  input_size_exceeds_pre_parse_gate: policy-failure eligible
+  malware_scan_failed: genuine malware adapter failure; policy-failure eligible
+  malware_scan_not_configured: scanner unavailable or not configured; non-policy and non-mutating
+  maximum_concurrent_pdf_assessor_workers_exceeded: non-policy and non-mutating
+  assessment_read_integrity_failure: bridge failure outside assessor outcome vocabulary; non-policy and non-mutating
+
+tests:
+  focused_assessor_malware_executor_package_b_contract: DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-bounded-file-security-assessor.spec.js __tests__/kai-sprint2-malware-adapter-boundary.spec.js __tests__/kai-sprint2-internal-security-assessment-executor.spec.js __tests__/kai-sprint2-synthetic-assessment-composition.spec.js __tests__/kai-sprint2-p0-repository-contract.spec.js - tests 48; pass 48; fail 0
+  affected_detector_security_lifecycle_regression: DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel node --test file-type, TXT/MD, CSV, XLSX, OOXML, PDF worker, MuPDF, bridge, and lifecycle specs - tests 188; pass 188; fail 0
+  sprint2_suite_initial_sandbox: DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - sandbox listener failures, listen EPERM on 127.0.0.1; non-listener subtests proceeded
+  sprint2_suite_localhost_capable: DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - tests 939; pass 939; fail 0
+  full_repository_initial_sandbox: DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel npm test - sandbox listener failures, listen EPERM on 127.0.0.1; non-listener subtests proceeded
+  full_repository_localhost_capable: DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel npm test - tests 1044; pass 1044; fail 0
+  git_diff_check_before_execplan: git diff --check - pass
+  git_diff_check_after_execplan: git diff --check - pass
+
+not_confirmed:
+  database_atomicity: NOT_CONFIRMED
+  production_readiness: NOT_CONFIRMED
+  live_upload_readiness: NOT_CONFIRMED
+  automated_queue_processing: NOT_CONFIRMED
+  HTTP_completed_security_assessment: NOT_CONFIRMED
+
+prohibited_actions_not_performed:
+  - no Package B implementation change, C1 change, executor contract change, lifecycle mutation wiring, policy mutation wiring, audit write, enqueue mutation, route change, production barrel export, production composition, new result repository, database, SQL, schema, cloud, credential, tenant, feature-flag, deployment, push, Current State update, Implementation Baseline update, Gate A, Gate B, Gate C, Gate D, P0-06B, or C2 implementation
+
+next_package_or_stop_condition: OWNER-DIRECTED STOP after malware neutral-outcome split before C2; do not implement or draft C2 in this run
+commit_hash: report after commit; a commit cannot contain its own SHA
+```

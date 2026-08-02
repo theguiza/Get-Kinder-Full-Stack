@@ -91,6 +91,22 @@ test("internal security executor sanitizes thrown and malformed assessor results
   });
 });
 
+test("internal security executor accepts both malware failed categories in the sanitized failed envelope", async () => {
+  for (const category of ["malware_scan_not_configured", "malware_scan_failed"]) {
+    const executor = createInternalSecurityAssessmentExecutor({
+      async assessor() {
+        return { status: "failed", category };
+      },
+    });
+    const result = await executeInjectedInternalSecurityAssessment({}, {
+      internalSecurityAssessmentExecutor: executor,
+    });
+
+    assert.deepEqual(result.data.result, { status: "failed", category });
+    assert.deepEqual(Object.keys(result.data.result), ["status", "category"]);
+  }
+});
+
 test("internal executor remains unwired from routes, confirmUpload, production barrel, queues, and persistence", () => {
   const executorSource = readFileSync("Backend/kai/security/internalSecurityAssessmentExecutor.js", "utf8");
   const intakeServiceSource = readFileSync("Backend/kai/services/kaiIntakeService.js", "utf8");

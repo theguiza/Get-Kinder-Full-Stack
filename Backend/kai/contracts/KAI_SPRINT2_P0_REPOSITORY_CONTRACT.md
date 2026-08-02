@@ -1626,6 +1626,25 @@ security_assessment_timeout:
   status: failed
   category: security_assessment_timeout
   exact_keys: status, category
+  policy_failure_eligible: true
+
+input_size_exceeds_pre_parse_gate:
+  status: failed
+  category: input_size_exceeds_pre_parse_gate
+  exact_keys: status, category
+  policy_failure_eligible: true
+
+malware_scan_failed:
+  status: failed
+  category: malware_scan_failed
+  exact_keys: status, category
+  policy_failure_eligible: true
+
+malware_scan_not_configured:
+  status: failed
+  category: malware_scan_not_configured
+  exact_keys: status, category
+  policy_failure_eligible: false
 
 pdf_active_content_detected:
   policy: block
@@ -1656,6 +1675,12 @@ xlsx_sheet_limit_exceeded:
 
 xlsx_cell_limit_exceeded:
   policy: block
+
+maximum_concurrent_pdf_assessor_workers_exceeded:
+  status: failed
+  category: maximum_concurrent_pdf_assessor_workers_exceeded
+  exact_keys: status, category
+  policy_failure_eligible: false
 ```
 
 ## OWNER_DECISION.P0_05_WORKER_BACKED_ASSESSOR_TIMEOUT_V1

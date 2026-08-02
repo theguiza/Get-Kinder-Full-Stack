@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
-import { assessBoundedFileSecurity } from "../Backend/kai/security/boundedFileSecurityAssessor.js";
+import {
+  __testables,
+  assessBoundedFileSecurity,
+} from "../Backend/kai/security/boundedFileSecurityAssessor.js";
 
 const SYNTHETIC_PROVENANCE = Object.freeze({
   adapter_id: "kai_synthetic_fixture_adapter",
@@ -154,8 +157,18 @@ test("production malware not_configured cannot produce aggregate policy pass", a
 
   assert.deepEqual(result, {
     status: "failed",
-    category: "malware_scan_failed",
+    category: "malware_scan_not_configured",
   });
+  assert.deepEqual(Object.keys(result), ["status", "category"]);
+  assert.notEqual(result.category, "malware_scan_failed");
+  assert.equal(Object.hasOwn(result, "adapter"), false);
+  assert.equal(Object.hasOwn(result, "scanner"), false);
+  assert.equal(Object.hasOwn(result, "config"), false);
+  assert.equal(Object.hasOwn(result, "version"), false);
+  assert.equal(Object.hasOwn(result, "bytes"), false);
+  assert.equal(Object.hasOwn(result, "sha256"), false);
+  assert.equal(Object.hasOwn(result, "detail"), false);
+  assert.equal(Object.hasOwn(result, "stack"), false);
 });
 
 test("clean, detected, failed, and malformed malware outcomes aggregate through existing results", async () => {
@@ -189,6 +202,20 @@ test("clean, detected, failed, and malformed malware outcomes aggregate through 
     },
   );
 
+  const thrown = await assessBoundedFileSecurity(TEXT_INPUT, {
+    malwareScanAdapter: {
+      async scan() {
+        throw new Error("scanner host refused connection with private diagnostics");
+      },
+    },
+  });
+  assert.deepEqual(thrown, {
+    status: "failed",
+    category: "malware_scan_failed",
+  });
+  assert.notEqual(thrown.category, "malware_scan_not_configured");
+  assert.doesNotMatch(JSON.stringify(thrown), /scanner host|private diagnostics|adapter|stack|bytes|sha256/i);
+
   assert.deepEqual(
     await assessBoundedFileSecurity(TEXT_INPUT, {
       malwareScanAdapter: {
@@ -202,6 +229,16 @@ test("clean, detected, failed, and malformed malware outcomes aggregate through 
       category: "malware_scan_failed",
     },
   );
+});
+
+test("bounded assessor failed-category vocabulary records policy classifications", () => {
+  assert.deepEqual(__testables.ASSESSOR_FAILED_CATEGORY_CLASSIFICATIONS, {
+    security_assessment_timeout: { policyFailureEligible: true },
+    input_size_exceeds_pre_parse_gate: { policyFailureEligible: true },
+    malware_scan_failed: { policyFailureEligible: true },
+    malware_scan_not_configured: { policyFailureEligible: false },
+    maximum_concurrent_pdf_assessor_workers_exceeded: { policyFailureEligible: false },
+  });
 });
 
 test("bounded assessor maps detector failures to the committed safe failure category", async () => {

@@ -286,6 +286,8 @@ test("successful execution returns pass, block, and failed results unchanged and
     { policy: "pass" },
     { policy: "block", category: "csv_row_limit_exceeded" },
     { status: "failed", category: "security_assessment_timeout" },
+    { status: "failed", category: "malware_scan_not_configured" },
+    { status: "failed", category: "malware_scan_failed" },
   ];
 
   for (const expectedResult of results) {
