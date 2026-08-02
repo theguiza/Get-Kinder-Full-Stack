@@ -7,7 +7,9 @@ import { createUploadLifecycleRepository } from "./uploadLifecycleRepository.js"
 
 const FILE_POLICY_STATUS = Object.freeze({
   pending: "pending",
+  passed: "passed",
   blocked: "blocked",
+  failed: "failed",
 });
 
 export const UPLOAD_LIFECYCLE_RESULT_STATUS = Object.freeze({
@@ -100,7 +102,29 @@ function copyRecord(record) {
     verified_checksum: record.verified_checksum,
     verified_size_bytes: record.verified_size_bytes,
     verified_at: record.verified_at,
+    policy_decision_replay: copyPolicyDecisionReplay(record.policy_decision_replay),
     created_at: record.created_at,
+  };
+}
+
+function copySanitizedResult(value) {
+  if (value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map(copySanitizedResult);
+  return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, copySanitizedResult(entry)]));
+}
+
+function copyPolicyDecisionReplay(replay) {
+  if (!replay) return null;
+  return {
+    organization_id: replay.organization_id,
+    intake_file_id: replay.intake_file_id,
+    object_version_id: replay.object_version_id,
+    verified_checksum: replay.verified_checksum,
+    verified_size_bytes: replay.verified_size_bytes,
+    declared_mime: replay.declared_mime,
+    extension: replay.extension,
+    file_policy_status: replay.file_policy_status,
+    sanitized_result: copySanitizedResult(replay.sanitized_result),
   };
 }
 
@@ -170,6 +194,80 @@ function validateTransitionInput(input) {
   );
 }
 
+const POLICY_DECISION_OUTCOMES = Object.freeze({
+  passed: Object.freeze({
+    filePolicyStatus: FILE_POLICY_STATUS.passed,
+    uploadState: "confirmed",
+  }),
+  blocked: Object.freeze({
+    filePolicyStatus: FILE_POLICY_STATUS.blocked,
+    uploadState: "policy_blocked",
+  }),
+  failed: Object.freeze({
+    filePolicyStatus: FILE_POLICY_STATUS.failed,
+    uploadState: "confirmed",
+  }),
+});
+
+function isTrustedConfirmedFacts(value) {
+  const allowedKeys = new Set([
+    "organizationId",
+    "intakeFileId",
+    "objectVersionId",
+    "verifiedChecksum",
+    "verifiedSizeBytes",
+    "declaredMime",
+    "extension",
+  ]);
+  if (!isPlainObject(value) || !hasOnlyKeys(value, allowedKeys)) return false;
+  return (
+    isNonEmptyString(value.organizationId) &&
+    isNonEmptyString(value.intakeFileId) &&
+    isNonEmptyString(value.objectVersionId) &&
+    typeof value.verifiedChecksum === "string" &&
+    KAI_SPRINT2_P0_PATTERNS.checksumSha256.test(value.verifiedChecksum) &&
+    value.verifiedChecksum.toLowerCase() === value.verifiedChecksum &&
+    Number.isSafeInteger(value.verifiedSizeBytes) &&
+    value.verifiedSizeBytes >= 1 &&
+    isNonEmptyString(value.declaredMime) &&
+    value.declaredMime.trim().toLowerCase() === value.declaredMime &&
+    isNonEmptyString(value.extension) &&
+    value.extension.startsWith(".") &&
+    value.extension.toLowerCase() === value.extension
+  );
+}
+
+function isSanitizedResult(value) {
+  if (!isPlainObject(value)) return false;
+  try {
+    JSON.stringify(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function validatePolicyDecisionInput(input) {
+  const allowedKeys = new Set([
+    "confirmedFileFacts",
+    "expectedFilePolicyStatus",
+    "policyDecisionOutcome",
+    "sanitizedResult",
+    "metadataOnlyAudit",
+    "now",
+  ]);
+  if (!isPlainObject(input) || !hasOnlyKeys(input, allowedKeys)) return false;
+  return (
+    isTrustedConfirmedFacts(input.confirmedFileFacts) &&
+    input.expectedFilePolicyStatus === FILE_POLICY_STATUS.pending &&
+    Object.hasOwn(POLICY_DECISION_OUTCOMES, input.policyDecisionOutcome) &&
+    isSanitizedResult(input.sanitizedResult) &&
+    isNormalizedNow(input.now) &&
+    input.metadataOnlyAudit &&
+    typeof input.metadataOnlyAudit.prepareMetadataOnlyAudit === "function"
+  );
+}
+
 function isExpired(record, now) {
   return Date.parse(now) >= Date.parse(record.upload_expires_at);
 }
@@ -186,6 +284,83 @@ function replayFactsMatch(record, input) {
     );
   }
   return true;
+}
+
+function policyReplayFromInput(input) {
+  const { confirmedFileFacts: facts } = input;
+  return {
+    organization_id: facts.organizationId,
+    intake_file_id: facts.intakeFileId,
+    object_version_id: facts.objectVersionId,
+    verified_checksum: facts.verifiedChecksum,
+    verified_size_bytes: facts.verifiedSizeBytes,
+    declared_mime: facts.declaredMime,
+    extension: facts.extension,
+    file_policy_status: POLICY_DECISION_OUTCOMES[input.policyDecisionOutcome].filePolicyStatus,
+    sanitized_result: copySanitizedResult(input.sanitizedResult),
+  };
+}
+
+function stableJson(value) {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(",")}}`;
+}
+
+function samePolicyReplay(left, right) {
+  return (
+    left?.organization_id === right.organization_id &&
+    left?.intake_file_id === right.intake_file_id &&
+    left?.object_version_id === right.object_version_id &&
+    left?.verified_checksum === right.verified_checksum &&
+    left?.verified_size_bytes === right.verified_size_bytes &&
+    left?.declared_mime === right.declared_mime &&
+    left?.extension === right.extension &&
+    left?.file_policy_status === right.file_policy_status &&
+    stableJson(left?.sanitized_result) === stableJson(right.sanitized_result)
+  );
+}
+
+function confirmedFactsMatch(record, facts) {
+  return (
+    record.organization_id === facts.organizationId &&
+    record.intake_file_id === facts.intakeFileId &&
+    record.upload_state === "confirmed" &&
+    record.object_version_id === facts.objectVersionId &&
+    record.verified_checksum === facts.verifiedChecksum &&
+    record.verified_size_bytes === facts.verifiedSizeBytes
+  );
+}
+
+function validatePreparedPolicyState(next, input) {
+  const outcome = POLICY_DECISION_OUTCOMES[input.policyDecisionOutcome];
+  return (
+    next.organization_id === input.confirmedFileFacts.organizationId &&
+    next.intake_file_id === input.confirmedFileFacts.intakeFileId &&
+    next.upload_state === outcome.uploadState &&
+    next.file_policy_status === outcome.filePolicyStatus &&
+    next.object_version_id === input.confirmedFileFacts.objectVersionId &&
+    next.verified_checksum === input.confirmedFileFacts.verifiedChecksum &&
+    next.verified_size_bytes === input.confirmedFileFacts.verifiedSizeBytes &&
+    next.policy_decision_replay &&
+    samePolicyReplay(next.policy_decision_replay, policyReplayFromInput(input))
+  );
+}
+
+function buildPolicyDecisionAuditPayload(input) {
+  const outcome = POLICY_DECISION_OUTCOMES[input.policyDecisionOutcome];
+  return {
+    attempted_operation: "policy_decision_compare_and_set",
+    actor_type: "internal_service",
+    blocked_reason_code: input.policyDecisionOutcome,
+    contract: "owner_decision_post_b_policy_transition_v1",
+    file_policy_status: outcome.filePolicyStatus,
+    object_type: "intake_file",
+    request_scope: "organization_intake_file",
+    route_contract: "unwired_synthetic_lifecycle_repository",
+    sprint_phase: "kai_sprint2_p0_c1",
+    validator_key: "VAL-KAI-POLICY-C1-001",
+  };
 }
 
 function applyTransition(record, input) {
@@ -243,6 +418,7 @@ export function createInMemoryUploadLifecycleRepository() {
         verified_checksum: null,
         verified_size_bytes: null,
         verified_at: null,
+        policy_decision_replay: null,
         created_at: input.now,
       };
 
@@ -300,7 +476,54 @@ export function createInMemoryUploadLifecycleRepository() {
   });
 
   return Object.freeze(Object.defineProperty(
-    { ...repository },
+    {
+      ...repository,
+      compareAndSetPolicyDecision(input) {
+        if (!validatePolicyDecisionInput(input)) return uploadLifecycleFailure("validation_blocker");
+
+        const key = keyFor(input.confirmedFileFacts);
+        const record = stateHolder.state.records.get(key);
+        if (!record) return uploadLifecycleFailure("not_found");
+
+        const requestedReplay = policyReplayFromInput(input);
+        if (record.policy_decision_replay) {
+          if (samePolicyReplay(record.policy_decision_replay, requestedReplay)) {
+            return uploadLifecycleSuccess({ record: copyRecord(record), replayed: true });
+          }
+          return uploadLifecycleFailure("conflict_current_state_changed");
+        }
+
+        if (!confirmedFactsMatch(record, input.confirmedFileFacts)) {
+          return uploadLifecycleFailure("conflict_current_state_changed");
+        }
+
+        if (record.file_policy_status !== input.expectedFilePolicyStatus) {
+          return uploadLifecycleFailure("conflict_current_state_changed");
+        }
+
+        const outcome = POLICY_DECISION_OUTCOMES[input.policyDecisionOutcome];
+        const next = copyRecord(record);
+        next.upload_state = outcome.uploadState;
+        next.file_policy_status = outcome.filePolicyStatus;
+        next.upload_state_changed_at = input.now;
+        next.policy_decision_replay = requestedReplay;
+
+        if (!validatePreparedPolicyState(next, input)) {
+          return uploadLifecycleFailure("validation_blocker");
+        }
+
+        const preparedAudit = input.metadataOnlyAudit.prepareMetadataOnlyAudit({
+          payload: buildPolicyDecisionAuditPayload(input),
+        });
+        if (!preparedAudit || preparedAudit.ok !== true || typeof preparedAudit.publish !== "function") {
+          return uploadLifecycleFailure("validation_blocker");
+        }
+
+        stateHolder.state.records.set(key, next);
+        preparedAudit.publish();
+        return uploadLifecycleSuccess({ record: copyRecord(next), replayed: false });
+      },
+    },
     IN_MEMORY_UPLOAD_LIFECYCLE_TRANSACTION_PARTICIPANT,
     {
       enumerable: false,

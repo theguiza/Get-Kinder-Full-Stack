@@ -5966,3 +5966,83 @@ prohibited_actions_not_performed:
 next_package_or_stop_condition: OWNER-DIRECTED STOP after Package B local non-persistent assessment composition
 commit_hash: report after commit; a commit cannot contain its own SHA
 ```
+
+---
+
+## Package C1 lifecycle policy-decision transition capability
+
+```text
+PACKAGE_C1_LIFECYCLE_POLICY_DECISION_TRANSITION_CAPABILITY
+
+package_date: 2026-08-02 America/Vancouver
+evidence_class: TOOL_VERIFIED
+owner_authorization: USER_CONFIRMED
+package_status: complete before commit
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 87201f56211182b33af6339f41ee828bcefb0341
+starting_parent: 631f1f2d5c9af248ab2c11bfb5001c278fac6446
+starting_tree: clean tracked and untracked
+staged_paths_at_start: none
+remote_tracking_relation_at_start: origin/codex/kai-sprint2-p0-v0.3.5 ahead 29, behind 0; no fetch performed
+
+implemented_scope:
+  lifecycle_file: Backend/kai/upload/inMemoryUploadLifecycleRepository.js
+  focused_tests: __tests__/kai-sprint2-p0-upload-lifecycle-repository.spec.js
+  execplan_evidence: KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+
+quote_gate_summary:
+  lifecycle_owner: existing synthetic lifecycle repository owns upload_state and file_policy_status
+  lifecycle_publication: existing synthetic transaction participant prepares replacement state and publishes by assignment only after participant preparation
+  audit_interface: existing metadata-only audit allowlist and sanitizer inspected
+  audit_atomicity: new capability requires injected metadataOnlyAudit.prepareMetadataOnlyAudit success before lifecycle publication and publishes no audit on replay or failure
+  replay_storage: bounded policy_decision_replay retains organization, intake file, object version, checksum, size, declared MIME, extension, file policy outcome, and exact sanitized result
+  interface_boundary: Backend/kai/upload/uploadLifecycleRepository.js unchanged; callable added only to concrete in-memory leaf repository object
+
+state_effects:
+  pass_transition: pending -> passed; upload_state remains confirmed
+  block_transition: pending -> blocked; upload_state confirmed -> policy_blocked
+  failed_transition: pending -> failed; upload_state remains confirmed
+  confirmed_object_version_facts: unchanged
+  processing_status: not owned by lifecycle repository and no dependency is invoked that can mutate it
+  parse_status: not owned by lifecycle repository and no dependency is invoked that can mutate it
+  enqueue_state: untouched
+
+replay_and_conflict:
+  exact_replay: same trusted facts and same exact sanitized result returns existing policy outcome with no second mutation and no duplicate audit
+  changed_result_or_category: conflict_current_state_changed with no overwrite and no audit
+  changed_object_version_checksum_size_mime_extension: conflict_current_state_changed where comparable from current lifecycle or stored replay evidence
+  stale_expected_pending_state: conflict_current_state_changed except exact identical replay
+  scoped_missing: cross-tenant and missing records preserve existing not_found convention
+
+reachability:
+  Package_B_invocation: none
+  bridge_executor_assessor_invocation: none
+  route_or_http_wiring: none
+  production_barrel_export: none
+  production_composition: none
+  queue_polling_or_completion: none
+  database_sql_schema_work: none
+
+tests:
+  focused_lifecycle_policy_transition: DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-p0-upload-lifecycle-repository.spec.js - tests 36; pass 36; fail 0
+  affected_lifecycle_audit_transaction_enqueue_confirmation_initial_sandbox: DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-p0-upload-lifecycle-repository.spec.js __tests__/kai-sprint2-audit-contract.spec.js __tests__/kai-sprint2-pass2-audit-contract.spec.js __tests__/kai-sprint2-transaction-interface.spec.js __tests__/kai-sprint2-synthetic-security-assessment-enqueue.spec.js __tests__/kai-sprint2-p0-acceptance.spec.js __tests__/kai-sprint2-intake-service.spec.js - sandbox listener failures in acceptance, listen EPERM on 127.0.0.1; non-listener affected subtests passed in same run
+  p0_acceptance_localhost_capable_rerun: DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-p0-acceptance.spec.js - tests 42; pass 42; fail 0
+  sprint2_suite_localhost_capable: DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - tests 936; pass 936; fail 0
+  full_repository_localhost_capable: DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel npm test - tests 1041; pass 1041; fail 0
+  git_diff_check_before_execplan: git diff --check - pass
+  git_diff_check_before_staging: git diff --check - pass
+  git_diff_cached_check: git diff --cached --check - pass
+
+not_confirmed:
+  database_atomicity: NOT_CONFIRMED
+  production_readiness: NOT_CONFIRMED
+  live_upload_readiness: NOT_CONFIRMED
+  automated_queue_processing: NOT_CONFIRMED
+  HTTP_completed_security_assessment: NOT_CONFIRMED
+
+prohibited_actions_not_performed:
+  - no Package B invocation or mapping, bridge invocation, executor invocation, assessor invocation, route change, HTTP wiring, production barrel export, production composition, queue polling, queue draining, claim, lease, acknowledgement, retry, completion state, second result repository, database, SQL, schema, cloud, credential, tenant, feature-flag, deployment, Current State, Implementation Baseline, Gate A, Gate B, Gate C, Gate D, or P0-06B work
+
+next_package_or_stop_condition: OWNER-DIRECTED STOP after C1 lifecycle policy-decision transition capability
+commit_hash: report after commit; a commit cannot contain its own SHA
+```

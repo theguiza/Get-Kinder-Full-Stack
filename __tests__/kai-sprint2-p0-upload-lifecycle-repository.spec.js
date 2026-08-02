@@ -2,7 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { KAI_SPRINT2_P0_UPLOAD_STATES } from "../Backend/kai/config/kaiSprint2P0Contract.js";
-import { createInMemoryUploadLifecycleRepository } from "../Backend/kai/upload/inMemoryUploadLifecycleRepository.js";
+import {
+  IN_MEMORY_UPLOAD_LIFECYCLE_TRANSACTION_PARTICIPANT,
+  createInMemoryUploadLifecycleRepository,
+} from "../Backend/kai/upload/inMemoryUploadLifecycleRepository.js";
 import { createUploadLifecycleRepository } from "../Backend/kai/upload/uploadLifecycleRepository.js";
 
 const BASE_CREATE = Object.freeze({
@@ -19,6 +22,7 @@ const AT_EXPIRY = "2026-07-24T10:00:00.000Z";
 const AFTER_EXPIRY = "2026-07-24T10:00:00.001Z";
 const CHECKSUM_A = "a".repeat(64);
 const CHECKSUM_B = "b".repeat(64);
+const POLICY_NOW = "2026-07-23T13:00:00.000Z";
 
 const AUTHORIZED_EDGES = Object.freeze([
   ["reserved", "upload_started"],
@@ -109,6 +113,63 @@ function readStoredRecord(repo) {
   return read.data.record;
 }
 
+function confirmedPolicyFacts(overrides = {}) {
+  return {
+    organizationId: BASE_CREATE.organizationId,
+    intakeFileId: BASE_CREATE.intakeFileId,
+    objectVersionId: "object-version-1",
+    verifiedChecksum: CHECKSUM_A,
+    verifiedSizeBytes: 7,
+    declaredMime: "text/plain",
+    extension: ".txt",
+    ...overrides,
+  };
+}
+
+function sanitizedPolicyResult(overrides = {}) {
+  return {
+    policy: "pass",
+    category: "encoding_gate_pass",
+    ...overrides,
+  };
+}
+
+function createAuditProbe({ prepareOk = true } = {}) {
+  const prepared = [];
+  const published = [];
+  return {
+    prepared,
+    published,
+    dependency: {
+      prepareMetadataOnlyAudit(input) {
+        prepared.push(input);
+        if (!prepareOk) return { ok: false };
+        return {
+          ok: true,
+          publish() {
+            published.push(input);
+          },
+        };
+      },
+    },
+  };
+}
+
+function policyInput(policyDecisionOutcome, overrides = {}) {
+  const audit = overrides.audit || createAuditProbe();
+  const input = {
+    confirmedFileFacts: confirmedPolicyFacts(overrides.confirmedFileFacts),
+    expectedFilePolicyStatus: overrides.expectedFilePolicyStatus || "pending",
+    policyDecisionOutcome,
+    sanitizedResult: overrides.sanitizedResult || sanitizedPolicyResult({
+      policy: policyDecisionOutcome === "passed" ? "pass" : policyDecisionOutcome,
+    }),
+    metadataOnlyAudit: audit.dependency,
+    now: overrides.now || POLICY_NOW,
+  };
+  return { input, audit };
+}
+
 test("DI factory exposes exactly the three authorized operations", () => {
   const operations = {
     createReservedUploadLifecycle() {},
@@ -147,6 +208,7 @@ test("creation creates exactly the synthetic reserved lifecycle record", () => {
     "verified_checksum",
     "verified_size_bytes",
     "verified_at",
+    "policy_decision_replay",
     "created_at",
   ]);
   assert.deepEqual(result.data.record, {
@@ -161,6 +223,7 @@ test("creation creates exactly the synthetic reserved lifecycle record", () => {
     verified_checksum: null,
     verified_size_bytes: null,
     verified_at: null,
+    policy_decision_replay: null,
     created_at: "2026-07-23T10:00:00.000Z",
   });
   assert.equal(KAI_SPRINT2_P0_UPLOAD_STATES.includes(result.data.record.upload_state), true);
@@ -931,6 +994,7 @@ test("success records contain only authorized fields and no private storage boun
     "verified_checksum",
     "verified_size_bytes",
     "verified_at",
+    "policy_decision_replay",
     "created_at",
   ]);
   const prohibitedNormalizedKeys = new Set([
@@ -1073,4 +1137,252 @@ test("repository instances share no in-memory state", () => {
     data: null,
     error: { code: "not_found", status: 404 },
   });
+});
+
+test("policy decision CAS transitions pending to passed with metadata-only audit", () => {
+  const repo = createRepoWithState("confirmed");
+  const before = readStoredRecord(repo);
+  const { input, audit } = policyInput("passed");
+
+  const result = repo.compareAndSetPolicyDecision(input);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.replayed, false);
+  assert.equal(result.data.record.upload_state, "confirmed");
+  assert.equal(result.data.record.file_policy_status, "passed");
+  assert.equal(result.data.record.object_version_id, before.object_version_id);
+  assert.equal(result.data.record.verified_checksum, before.verified_checksum);
+  assert.equal(result.data.record.verified_size_bytes, before.verified_size_bytes);
+  assert.equal(result.data.record.policy_decision_replay.declared_mime, "text/plain");
+  assert.equal(result.data.record.policy_decision_replay.extension, ".txt");
+  assert.deepEqual(audit.prepared.map((entry) => entry.payload.file_policy_status), ["passed"]);
+  assert.equal(audit.published.length, 1);
+  assert.deepEqual(readStoredRecord(repo), result.data.record);
+});
+
+test("policy decision CAS transitions pending to blocked using policy_blocked semantics", () => {
+  const repo = createRepoWithState("confirmed");
+  const { input, audit } = policyInput("blocked", {
+    sanitizedResult: sanitizedPolicyResult({ policy: "block", category: "unsupported_extension" }),
+  });
+
+  const result = repo.compareAndSetPolicyDecision(input);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.record.upload_state, "policy_blocked");
+  assert.equal(result.data.record.file_policy_status, "blocked");
+  assert.equal(result.data.record.policy_decision_replay.file_policy_status, "blocked");
+  assert.equal(audit.published.length, 1);
+});
+
+test("policy decision CAS transitions pending to failed without changing upload_state", () => {
+  const repo = createRepoWithState("confirmed");
+  const { input, audit } = policyInput("failed", {
+    sanitizedResult: sanitizedPolicyResult({ status: "failed", category: "assessor_failed" }),
+  });
+
+  const result = repo.compareAndSetPolicyDecision(input);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.record.upload_state, "confirmed");
+  assert.equal(result.data.record.file_policy_status, "failed");
+  assert.equal(result.data.record.policy_decision_replay.file_policy_status, "failed");
+  assert.equal(audit.published.length, 1);
+});
+
+test("policy decision CAS exact replay is idempotent and does not duplicate audit", () => {
+  const repo = createRepoWithState("confirmed");
+  const first = policyInput("passed");
+  const created = repo.compareAndSetPolicyDecision(first.input);
+  assert.equal(created.ok, true);
+  assert.equal(first.audit.published.length, 1);
+
+  const replayAudit = createAuditProbe();
+  const replay = repo.compareAndSetPolicyDecision({
+    ...first.input,
+    metadataOnlyAudit: replayAudit.dependency,
+    expectedFilePolicyStatus: "pending",
+    now: PLUS_TWO_HOURS,
+  });
+
+  assert.equal(replay.ok, true);
+  assert.equal(replay.data.replayed, true);
+  assert.deepEqual(replay.data.record, created.data.record);
+  assert.equal(first.audit.published.length, 1);
+  assert.equal(replayAudit.published.length, 0);
+});
+
+test("policy decision CAS conflicts on changed result, category, trusted facts, and stale state", () => {
+  const changedResultCases = [
+    {
+      name: "result",
+      overrides: { sanitizedResult: sanitizedPolicyResult({ policy: "pass", category: "different" }) },
+    },
+    {
+      name: "category by outcome",
+      overrides: {
+        policyDecisionOutcome: "failed",
+        sanitizedResult: sanitizedPolicyResult({ status: "failed", category: "assessor_failed" }),
+      },
+    },
+  ];
+
+  for (const { name, overrides } of changedResultCases) {
+    const repo = createRepoWithState("confirmed");
+    const first = policyInput("passed");
+    assert.equal(repo.compareAndSetPolicyDecision(first.input).ok, true);
+    const audit = createAuditProbe();
+    const conflict = repo.compareAndSetPolicyDecision({
+      ...first.input,
+      policyDecisionOutcome: overrides.policyDecisionOutcome || first.input.policyDecisionOutcome,
+      sanitizedResult: overrides.sanitizedResult,
+      metadataOnlyAudit: audit.dependency,
+    });
+    assert.deepEqual(conflict, {
+      ok: false,
+      data: null,
+      error: { code: "conflict_current_state_changed", status: 409 },
+    }, name);
+    assert.equal(audit.published.length, 0, name);
+  }
+
+  for (const [field, value] of [
+    ["objectVersionId", "object-version-2"],
+    ["verifiedChecksum", CHECKSUM_B],
+    ["verifiedSizeBytes", 8],
+  ]) {
+    const repo = createRepoWithState("confirmed");
+    const before = readStoredRecord(repo);
+    const { input, audit } = policyInput("passed", {
+      confirmedFileFacts: { [field]: value },
+    });
+    const result = repo.compareAndSetPolicyDecision(input);
+    assert.deepEqual(result, {
+      ok: false,
+      data: null,
+      error: { code: "conflict_current_state_changed", status: 409 },
+    }, field);
+    assert.deepEqual(readStoredRecord(repo), before, field);
+    assert.equal(audit.published.length, 0, field);
+  }
+
+  for (const [field, value] of [
+    ["declaredMime", "text/csv"],
+    ["extension", ".csv"],
+  ]) {
+    const repo = createRepoWithState("confirmed");
+    const first = policyInput("passed");
+    assert.equal(repo.compareAndSetPolicyDecision(first.input).ok, true);
+    const audit = createAuditProbe();
+    const conflict = repo.compareAndSetPolicyDecision({
+      ...first.input,
+      confirmedFileFacts: {
+        ...first.input.confirmedFileFacts,
+        [field]: value,
+      },
+      metadataOnlyAudit: audit.dependency,
+    });
+    assert.deepEqual(conflict, {
+      ok: false,
+      data: null,
+      error: { code: "conflict_current_state_changed", status: 409 },
+    }, field);
+    assert.equal(audit.published.length, 0, field);
+  }
+});
+
+test("policy decision CAS preparation failures publish neither lifecycle nor audit", () => {
+  const auditFailureRepo = createRepoWithState("confirmed");
+  const auditFailureBefore = readStoredRecord(auditFailureRepo);
+  const audit = createAuditProbe({ prepareOk: false });
+  const auditFailure = policyInput("passed", { audit });
+  assert.deepEqual(auditFailureRepo.compareAndSetPolicyDecision(auditFailure.input), {
+    ok: false,
+    data: null,
+    error: { code: "validation_blocker", status: 422 },
+  });
+  assert.deepEqual(readStoredRecord(auditFailureRepo), auditFailureBefore);
+  assert.equal(audit.published.length, 0);
+
+  const lifecycleFailureRepo = createRepoWithState("confirmed");
+  const lifecycleFailureBefore = readStoredRecord(lifecycleFailureRepo);
+  const lifecycleFailure = policyInput("passed", {
+    confirmedFileFacts: { verifiedSizeBytes: 8 },
+  });
+  assert.deepEqual(lifecycleFailureRepo.compareAndSetPolicyDecision(lifecycleFailure.input), {
+    ok: false,
+    data: null,
+    error: { code: "conflict_current_state_changed", status: 409 },
+  });
+  assert.deepEqual(readStoredRecord(lifecycleFailureRepo), lifecycleFailureBefore);
+  assert.equal(lifecycleFailure.audit.prepared.length, 0);
+  assert.equal(lifecycleFailure.audit.published.length, 0);
+
+  const postValidationRepo = createRepoWithState("confirmed");
+  const postValidationBefore = readStoredRecord(postValidationRepo);
+  const postValidation = policyInput("passed", { now: "not-a-date" });
+  assert.deepEqual(postValidationRepo.compareAndSetPolicyDecision(postValidation.input), {
+    ok: false,
+    data: null,
+    error: { code: "validation_blocker", status: 422 },
+  });
+  assert.deepEqual(readStoredRecord(postValidationRepo), postValidationBefore);
+  assert.equal(postValidation.audit.prepared.length, 0);
+  assert.equal(postValidation.audit.published.length, 0);
+});
+
+test("policy decision CAS preserves scoped missing-record convention and does not touch enqueue or Package B", () => {
+  const repo = createRepoWithState("confirmed");
+  const crossTenant = policyInput("passed", {
+    confirmedFileFacts: { organizationId: "org-2" },
+  });
+  const missing = policyInput("passed", {
+    confirmedFileFacts: { organizationId: "org-2", intakeFileId: "absent-file" },
+  });
+
+  assert.deepEqual(repo.compareAndSetPolicyDecision(crossTenant.input), repo.compareAndSetPolicyDecision(missing.input));
+  assert.deepEqual(repo.compareAndSetPolicyDecision(crossTenant.input), {
+    ok: false,
+    data: null,
+    error: { code: "not_found", status: 404 },
+  });
+  assert.equal(crossTenant.audit.published.length, 0);
+  assert.equal(missing.audit.published.length, 0);
+
+  const source = String(createInMemoryUploadLifecycleRepository);
+  assert.doesNotMatch(source, /syntheticAssessmentComposition|executeInjectedInternalSecurityAssessment|assessBoundedFileSecurity|enqueueSecurityAssessment|drain|claim|lease|ack|retry|complete|router|express|pg|sql/i);
+});
+
+test("policy decision CAS is concrete-leaf callable only and transaction snapshots retain replay evidence", () => {
+  const repo = createRepoWithState("confirmed");
+  assert.equal(typeof repo.compareAndSetPolicyDecision, "function");
+  assert.deepEqual(Object.keys(createInMemoryUploadLifecycleRepository()), [
+    "createReservedUploadLifecycle",
+    "getUploadLifecycle",
+    "transitionUploadLifecycle",
+    "compareAndSetPolicyDecision",
+  ]);
+  assert.deepEqual(Object.keys(createUploadLifecycleRepository({
+    createReservedUploadLifecycle() {},
+    getUploadLifecycle() {},
+    transitionUploadLifecycle() {},
+  })), [
+    "createReservedUploadLifecycle",
+    "getUploadLifecycle",
+    "transitionUploadLifecycle",
+  ]);
+
+  const participant = repo[IN_MEMORY_UPLOAD_LIFECYCLE_TRANSACTION_PARTICIPANT].createTransactionParticipant();
+  const { input } = policyInput("passed");
+  const transitioned = participant.repository.compareAndSetPolicyDecision(input);
+  assert.equal(transitioned.ok, true);
+  const prepared = participant.prepareCommit();
+  prepared.target.state = prepared.preparedState;
+
+  const read = repo.getUploadLifecycle({
+    organizationId: BASE_CREATE.organizationId,
+    intakeFileId: BASE_CREATE.intakeFileId,
+  });
+  assert.equal(read.ok, true);
+  assert.equal(read.data.record.policy_decision_replay.declared_mime, "text/plain");
 });
