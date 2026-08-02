@@ -6471,3 +6471,52 @@ prohibited_actions_not_performed:
 next_package_or_stop_condition: OWNER-DIRECTED STOP after this runtime MIME alignment and honest P0-07 coverage correction
 commit_hash: report after commit; a commit cannot contain its own SHA
 ```
+
+```text
+P1-01 local profiling kernel evidence
+
+starting_HEAD: dea7b50125ca7368669f495aad1cca6c6b86d024
+parent_HEAD: 638451531e56bff8947b3d1b036814b6896be3ba
+branch: codex/kai-sprint2-p0-v0.3.5
+worktree_preflight: TOOL_VERIFIED
+staged_paths_preflight: TOOL_VERIFIED
+execplan_true_tail_before_edit: TOOL_VERIFIED
+dea7b50_evidence_block_at_true_eof_before_edit: TOOL_VERIFIED
+prior_evidence_blocks_intact_before_edit: TOOL_VERIFIED
+
+implemented:
+  Backend/kai/profiling/localProfilingKernel.js:
+    status: TOOL_VERIFIED
+    callable: profileLocalTrustedFile
+    boundary: pure local profiling callable; no database, storage, lifecycle, queue, review item, source, evidence, claim, AI, LLM, route, worker, or persistent record dependency
+    supported_formats: CSV, XLSX, Markdown, TXT, machine-readable PDF
+    detector_semantics: P0 detector semantics unchanged
+    pdf_boundary: PDF profiling is conservative and local; no OCR; encrypted or no machine-readable text layer returns typed not_profilable with stable safe reason and no partial profile
+  __tests__/kai-sprint2-p1-local-profiling-kernel.spec.js:
+    status: TOOL_VERIFIED
+    coverage: deterministic sanitized profiles for all five formats; redacted samples; formula and prompt text undisclosed; conservative governance defaults; safe malformed failures; encrypted and image-only PDF not_profilable; no prohibited production dependencies reachable
+
+verification:
+  focused_p1_profiling: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-p1-local-profiling-kernel.spec.js - tests 6; fail 0
+  affected_p0_detector_file_security_regressions: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-p0-file-type-agreement-detector.spec.js __tests__/kai-sprint2-csv-row-limit-detector.spec.js __tests__/kai-sprint2-txt-md-byte-detector.spec.js __tests__/kai-sprint2-xlsx-sheet-cell-limit-detector.spec.js __tests__/kai-sprint2-ooxml-archive-resource-limit-detector.spec.js __tests__/kai-sprint2-formula-injection-boundary.spec.js __tests__/kai-sprint2-pdf-assessor-worker-boundary.spec.js __tests__/kai-sprint2-bounded-file-security-assessor.spec.js - tests 133; fail 0
+  sprint2_suite_initial_sandbox: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - sandbox listener failure, listen EPERM on 127.0.0.1
+  sprint2_suite_localhost_capable: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - tests 988; fail 0
+  full_repository_initial_sandbox: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - sandbox listener failure, listen EPERM on 127.0.0.1
+  full_repository_localhost_capable: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - tests 1093; fail 0
+  git_diff_check_pre_execplan: TOOL_VERIFIED
+  git_diff_cached_check_pre_execplan: TOOL_VERIFIED
+
+not_confirmed:
+  deployed_kai_schema_compatibility: NOT_CONFIRMED
+  database_atomicity: NOT_CONFIRMED
+  persistent_upload_lifecycle: NOT_CONFIRMED
+  nonproduction_storage_integration: NOT_CONFIRMED
+  production_readiness: NOT_CONFIRMED
+  real_client_data_readiness: NOT_CONFIRMED
+
+prohibited_actions_not_performed:
+  - no new dependency, database, schema, storage, parser-run record, persistent profile, dictionary persistence, worker, queue, route, feature flag, review item, source candidate, promotion decision, source, source version, evidence, claim, AI, LLM, OCR, Gate A, P0-06B, deployment, push, credential, tenant, feature-flag, real-client-data, Current State, or production configuration work
+
+next_package_or_stop_condition: OWNER-DIRECTED STOP after P1-01 local profiling kernel
+commit_hash: report after commit; a commit cannot contain its own SHA
+```
