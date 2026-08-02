@@ -6275,3 +6275,94 @@ prohibited_actions_not_performed:
 next_package_or_stop_condition: OWNER-DIRECTED STOP after C2; do not begin HTTP integration or another package
 commit_hash: report after commit; a commit cannot contain its own SHA
 ```
+
+## P0-07 per-format local HTTP acceptance
+
+```text
+APPROVE_P0_07_PER_FORMAT_HTTP_ACCEPTANCE
+
+package_date: 2026-08-02 America/Vancouver
+evidence_class: TOOL_VERIFIED
+owner_authorization: USER_CONFIRMED
+package_status: complete before commit
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 96c04931262527489da5af7f15e9517150928a99
+starting_tree: clean tracked and untracked
+staged_paths_at_start: none
+remote_fetch_push_or_deploy: not performed
+
+implemented_scope:
+  test_file: __tests__/kai-sprint2-p0-acceptance.spec.js
+  production_code_changed: false
+  detector_semantics_changed: false
+  database_schema_cloud_queue_or_gate_work: false
+  execplan_evidence: KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+
+http_acceptance_composition:
+  real_ephemeral_listener: true
+  real_feature_gate_middleware: true
+  deterministic_local_auth_adapter: true
+  real_router_services_validators: true
+  in_memory_upload_lifecycle_repository: true
+  synthetic_security_assessment_enqueue: true
+  local_dev_storage_adapter: true
+  synthetic_malware_adapter_for_clean_pass_cases: true
+  c2_to_c1_policy_composition: true
+  sanitized_operator_read_assertions: true
+
+covered_format_cases:
+  encrypted_pdf: existing encrypted_or_password_protected block category exercised through local HTTP confirmation and C2/C1 policy composition; no detector semantic change
+  encrypted_xlsx: encrypted ZIP general-purpose flag exercised through existing bounded assessor fail-closed sanitized failure path; no detector semantic change
+  xlsx_macro: xlsx_macro_or_external_relationship block
+  xlsx_external_relationship: xlsx_macro_or_external_relationship block
+  xlsx_path_traversal: ooxml_path_traversal block
+  xlsx_entry_expansion_bomb: archive_entry_limit_exceeded block
+  xlsx_compression_ratio_bomb: archive_compression_ratio_limit_exceeded block
+  pdf_active_content: pdf_active_or_embedded_content block
+  pdf_embedded_file: pdf_active_or_embedded_content block
+  prompt_injection_txt: pass with instruction-like text remaining inert data and absent from outputs
+  prompt_injection_md: pass with instruction-like text remaining inert data and absent from outputs
+  spreadsheet_formula_cells: pass with formula cell bytes remaining quarantined and absent from outputs
+
+test_only_boundary:
+  reservation_mime_gate_preserved: true
+  assessment_fact_override_scope: synthetic enqueue snapshot only, inside acceptance harness, after real HTTP reservation/upload/confirm
+  reason: existing metadata-only reservation gate still allows only committed DDL-safe MIME values while P0-07 must exercise bounded assessor format facts locally
+  production_route_or_service_mime_allowlist_changed: false
+  raw_content_exposed_in_response_audit_metric_or_log: false
+  storage_identifier_exposed: false
+
+verification:
+  focused_p0_07_initial_sandbox: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2-p0-acceptance - sandbox listener failure, listen EPERM on 127.0.0.1
+  focused_p0_07_localhost_capable: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2-p0-acceptance - tests 60; pass 60; fail 0
+  verify_schema_contract: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-schema-contract - tests 21; pass 21; fail 0
+  verify_api_contract_initial_sandbox: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-api-contract - sandbox listener failure, listen EPERM on 127.0.0.1
+  verify_api_contract_localhost_capable: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-api-contract - tests 55; pass 55; fail 0
+  sprint2_suite_localhost_capable: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - tests 967; pass 967; fail 0
+  full_repository_localhost_capable: DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - tests 1072; pass 1072; fail 0
+  git_diff_check_before_execplan: git diff --check - pass
+  git_diff_check_after_execplan: git diff --check - pass
+  git_diff_cached_check: git diff --cached --check - pass
+
+completion_labels:
+  - P0 repository contract complete
+  - P0 local synthetic acceptance passed
+  - Persistent lifecycle integration pending Gate A
+  - P0_CODE_CONTRACT_COMPLETE
+  - P0_LOCAL_SYNTHETIC_HTTP_ACCEPTANCE_PASS
+  - P0_LOCAL_UPLOAD_CONTRACT_COMPLETE
+
+not_confirmed:
+  deployed_kai_schema_compatibility: NOT_CONFIRMED
+  database_atomicity: NOT_CONFIRMED
+  persistent_upload_lifecycle: NOT_CONFIRMED
+  nonproduction_storage_integration: NOT_CONFIRMED
+  production_readiness: NOT_CONFIRMED
+  real_client_data_readiness: NOT_CONFIRMED
+
+prohibited_actions_not_performed:
+  - no detector semantic change, database, schema, cloud, production, queue drain, Gate A, Gate B, Gate C, Gate D, P0-06B, deployment, push, credential, tenant, feature-flag, real-client-data, Current State, or Implementation Baseline work
+
+next_package_or_stop_condition: OWNER-DIRECTED STOP after this P0-07 per-format local HTTP acceptance package
+commit_hash: report after commit; a commit cannot contain its own SHA
+```
