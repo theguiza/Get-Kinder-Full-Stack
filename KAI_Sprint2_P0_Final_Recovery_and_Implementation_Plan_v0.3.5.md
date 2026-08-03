@@ -6789,3 +6789,63 @@ prohibited_actions_not_performed:
 
 next_package_or_stop_condition: OWNER-DIRECTED STOP after one bounded Gate A durable policy-decision replay and audit amendment package
 commit_hash: report after commit; a commit cannot contain its own SHA
+
+---
+
+## P0-06B PostgreSQL Upload-Lifecycle Repository Adapter Evidence
+
+status: TOOL_VERIFIED
+starting_branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: f8d771a1689a321cb33e153bfcdc5b8919d01ce5
+scope:
+  - additive internal PostgreSQL upload-lifecycle repository adapter only
+  - additive runner-owned loopback PostgreSQL 16 integration runner and adapter contract tests only
+  - no route wiring, listener wiring, production service composition, feature flags, cloud storage, signed URLs, P1 persistence, Gate B/C/D, deployment, production/shared database, real client data, Current State, or Implementation Baseline work
+
+files_added:
+  Backend/kai/upload/postgresUploadLifecycleRepository.js:
+    status: TOOL_VERIFIED
+    callable_interface: createReservedUploadLifecycle, getUploadLifecycle, transitionUploadLifecycle, compareAndSetPolicyDecision
+    transaction_boundary: existing Backend/kai/db/kaiDb.js withTransaction callback-scoped transaction; no second pool
+    db_tables_used: kai.intake_files; kai.upload_policy_decision_replay; kai.upload_lifecycle_audit
+    policy_replay_path: policyReplayFromInput/samePolicyReplay-equivalent fact set, plus committed replay_contract_version and sanitized_result_canonical_sha256 persistence
+    audit_path: kai.upload_lifecycle_audit metadata-only rows in the same transaction; policy exact replay creates no duplicate audit
+    error_boundary: single shapeLifecycleError boundary returns existing lifecycle error vocabulary only
+  __tests__/kai-sprint2-p0-postgres-upload-lifecycle-repository.integration.spec.js:
+    status: TOOL_VERIFIED
+    scope: runner-gated adapter integration and cross-implementation contract assertions; skipped outside runner-owned database context
+  scripts/kai-sprint2-p0-postgres-upload-lifecycle-adapter-runner.js:
+    status: TOOL_VERIFIED
+    scope: creates fresh isolated loopback PostgreSQL 16 target, applies 548194a and f8d771a migrations as setup, runs adapter tests, tears down runner-owned workdir
+
+protected_files:
+  Backend/kai/upload/inMemoryUploadLifecycleRepository.js: TOOL_VERIFIED unchanged
+  Backend/kai/upload/syntheticConfirmUploadAndEnqueue.js: TOOL_VERIFIED unchanged
+  Backend/kai/upload/syntheticSecurityAssessmentEnqueue.js: TOOL_VERIFIED unchanged
+  Backend/kai/db/kaiDb.js: TOOL_VERIFIED unchanged; no added lines
+
+frozen_migrations:
+  migrations/kai_sprint2_gate_a_p0_upload_lifecycle.sql: TOOL_VERIFIED unchanged
+  migrations/kai_sprint2_gate_a_p0_upload_lifecycle.rollback.sql: TOOL_VERIFIED unchanged
+  migrations/kai_sprint2_gate_a_p0_policy_decision_replay.sql: TOOL_VERIFIED unchanged
+  migrations/kai_sprint2_gate_a_p0_policy_decision_replay.rollback.sql: TOOL_VERIFIED unchanged
+
+verification:
+  adapter_runner_initial_sandbox: TOOL_VERIFIED - DATABASE_URL=postgresql://kai_sentinel@127.0.0.1:9/kai_sentinel node scripts/kai-sprint2-p0-postgres-upload-lifecycle-adapter-runner.js - sandbox shared-memory failure during PostgreSQL initdb; no database target retained
+  adapter_runner_localhost_capable_final: TOOL_VERIFIED - DATABASE_URL=postgresql://kai_sentinel@127.0.0.1:9/kai_sentinel node scripts/kai-sprint2-p0-postgres-upload-lifecycle-adapter-runner.js - ephemeral database kai_p0_06b_upload_lifecycle_adapter_synthetic; loopback 127.0.0.1:56888; tests 9; fail 0; workdir removed
+  existing_in_memory_lifecycle: TOOL_VERIFIED - DATABASE_URL=postgresql://kai_sentinel@127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-p0-upload-lifecycle-repository.spec.js - tests 36; fail 0
+  affected_transaction_audit_schema: TOOL_VERIFIED - DATABASE_URL=postgresql://kai_sentinel@127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-transaction-interface.spec.js __tests__/kai-sprint2-audit-contract.spec.js __tests__/kai-sprint2-gate-a-policy-decision-replay-schema-contract.spec.js - tests 16; fail 0
+  sprint2_suite_initial_sandbox: TOOL_VERIFIED - DATABASE_URL=postgresql://kai_sentinel@127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - sandbox listener restriction, listen EPERM on 127.0.0.1
+  sprint2_suite_localhost_capable_final: TOOL_VERIFIED - DATABASE_URL=postgresql://kai_sentinel@127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - tests 1001; pass 1000; fail 0; skipped 1 runner-gated adapter integration
+  full_repository_localhost_capable: TOOL_VERIFIED - DATABASE_URL=postgresql://kai_sentinel@127.0.0.1:9/kai_sentinel npm test - tests 1106; pass 1105; fail 0; skipped 1 runner-gated adapter integration
+  git_diff_check: TOOL_VERIFIED
+
+not_confirmed:
+  production_repository_selection: NOT_CONFIRMED
+  production_database_execution: NOT_CONFIRMED
+  deployment: NOT_CONFIRMED
+
+prohibited_actions_not_performed:
+  - no fetch, pull, push, merge, rebase, reset, cherry-pick, history rewrite, protected-file edit, migration edit, rollback edit, route/listener wiring, production service composition, feature-flag enablement, cloud storage, signed URL, P1 persistence, Gate B/C/D, deployment, production/shared database access, real client data access, retention/deletion, Current State update, or Implementation Baseline update
+
+commit_hash: report after commit; a commit cannot contain its own SHA
