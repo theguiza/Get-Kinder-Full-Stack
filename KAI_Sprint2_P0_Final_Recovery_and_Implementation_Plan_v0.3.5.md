@@ -6645,3 +6645,82 @@ prohibited_actions_not_performed:
 next_package_or_stop_condition: OWNER-DIRECTED STOP after P1-01B worker-backed PDF profiling
 commit_hash: report after commit; a commit cannot contain its own SHA
 ```
+
+## Gate A P0 persistent upload-lifecycle substrate evidence
+
+status: TOOL_VERIFIED
+date: 2026-08-03
+branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: f44a592c9aeefc2a228d7d0ec695c3b09f06b48b
+parent_head: a90d517e70946412ba63a1fe3d58186135b73dbf
+
+preflight:
+  repository_root: TOOL_VERIFIED - /Users/mikewoz/Get-Kinder-Full-Stack-Deploy
+  applicable_AGENTS_md: TOOL_VERIFIED - repository root AGENTS.md inspected
+  worktree_before_changes: TOOL_VERIFIED - clean; no staged paths; no untracked files
+  historical_material_inspected_only: TOOL_VERIFIED - c54aa43 and a90d517 inspected as reference only; no cherry-pick, restore, reset, merge, rebase, fetch, pull, or wholesale application performed
+  current_schema_and_migrations: TOOL_VERIFIED
+  transaction_and_audit_helpers: TOOL_VERIFIED
+  synthetic_lifecycle_repository_callers_tests: TOOL_VERIFIED
+  execplan_true_tail_before_edit: TOOL_VERIFIED - final 30 lines printed before append
+  execplan_prior_byte_count: TOOL_VERIFIED - 542922
+  execplan_prior_sha256: TOOL_VERIFIED - a7988a7e8ee25b0d08c02afe003dea649b5a21fade92fa7be0a1dba728c9fb22
+
+implemented:
+  migrations/kai_sprint2_gate_a_p0_upload_lifecycle.sql:
+    status: TOOL_VERIFIED
+    scope: dedicated PostgreSQL P0 upload-lifecycle columns, constraints, tenant indexes, lifecycle audit table, and transition trigger for kai.intake_files only
+    covered_behaviors: tenant-scoped reservation, immutable object-version identity, declared checksum constraints, independently verified checksum fields, upload expiry, same-fact replay surface, changed-fact conflict, checksum-mismatch zero transition surface, allowed and denied lifecycle transitions, transaction atomicity, audit atomicity, and active-upload concurrency limit
+  migrations/kai_sprint2_gate_a_p0_upload_lifecycle.rollback.sql:
+    status: TOOL_VERIFIED
+    scope: rollback draft for the Gate A P0 lifecycle substrate artifacts only
+  scripts/kai-sprint2-gate-a-bootstrap-synthetic-schema.sql:
+    status: TOOL_VERIFIED
+    scope: synthetic kai.intake_files bootstrap only; no real client data
+  scripts/kai-sprint2-gate-a-verifier.sql:
+    status: TOOL_VERIFIED
+    scope: read-only catalog verification for PostgreSQL 16, columns, constraints, indexes, trigger, and audit table
+  scripts/kai-sprint2-gate-a-failure-checks.sql:
+    status: TOOL_VERIFIED
+    scope: read-only failure checks proving no listed P1 durable tables or source/source_version columns
+  scripts/kai-sprint2-gate-a-smoke-seed.sql:
+    status: TOOL_VERIFIED
+    scope: synthetic smoke fixtures only
+  scripts/kai-sprint2-gate-a-smoke-verifier.sql:
+    status: TOOL_VERIFIED
+    scope: mutating smoke checks wrapped in rollback for tenant predicates, allowed and denied transitions, immutable facts, checksum match/mismatch, expiry, transaction/audit rollback, and active-upload concurrency limit
+  scripts/kai-sprint2-gate-a-local-postgres.js:
+    status: TOOL_VERIFIED
+    scope: runner-created isolated ephemeral PostgreSQL 16 target bound only to loopback; synthetic database name kai_gate_a_p0_upload_lifecycle_synthetic; teardown in finally block
+  scripts/kai-sprint2-gate-a-runbook.md:
+    status: TOOL_VERIFIED
+    scope: package command and local-only boundary
+  package.json:
+    status: TOOL_VERIFIED
+    package_command: verify:kai-sprint2-gate-a-p0
+
+verification:
+  gate_a_package_initial_sandbox: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-gate-a-p0 - sandbox shared-memory failure during PostgreSQL initdb; no database target retained
+  gate_a_package_localhost_capable_final: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-gate-a-p0 - ephemeral database created kai_gate_a_p0_upload_lifecycle_synthetic; loopback 127.0.0.1:55008; PostgreSQL verification passed; workdir removed /var/folders/hf/4f3q66q1311bpjpt4wm58l8w0000gn/T/kai-gate-a-p0-pg-NKcNHh
+  focused_upload_lifecycle_repository: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-p0-upload-lifecycle-repository.spec.js - tests 36; fail 0
+  focused_transaction_audit_regressions: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-transaction-interface.spec.js __tests__/kai-sprint2-mutation-orchestration.spec.js __tests__/kai-sprint2-audit-contract.spec.js - tests 41; fail 0
+  sprint2_suite_initial_sandbox: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - sandbox listener restriction, listen EPERM on 127.0.0.1
+  sprint2_suite_localhost_capable: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - tests 997; fail 0
+  full_repository_initial_sandbox: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - sandbox listener restriction, listen EPERM on 127.0.0.1
+  full_repository_localhost_capable: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - tests 1102; fail 0
+  git_diff_check_pre_execplan: TOOL_VERIFIED
+
+not_confirmed:
+  deployed_kai_schema_compatibility: NOT_CONFIRMED
+  production_database_atomicity: NOT_CONFIRMED
+  nonproduction_storage_integration: NOT_CONFIRMED
+  production_readiness: NOT_CONFIRMED
+  real_client_data_readiness: NOT_CONFIRMED
+
+prohibited_actions_not_performed:
+  - no P1 durable table for parser runs, profiles, dictionaries, quality records, sensitivity records, review workflow, source candidates, promotion decisions, source, or source_version
+  - no P0-06B route integration, Gate B, Gate C, Gate D, storage-provider integration, cloud work, route expansion, feature enablement, deployment, production or shared database work, real-client-data handling, retention/deletion, Current State update, Implementation Baseline update, fetch, pull, push, merge, rebase, reset, or cherry-pick
+
+next_package_or_stop_condition: OWNER-DIRECTED STOP after one bounded Gate A P0 persistent upload-lifecycle substrate package
+commit_hash: report after commit; a commit cannot contain its own SHA
+```
