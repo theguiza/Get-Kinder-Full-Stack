@@ -70,6 +70,45 @@ WITH checks AS (
   SELECT 'AUDIT_TABLE_EXISTS', 'kai.upload_lifecycle_audit',
          CASE WHEN to_regclass('kai.upload_lifecycle_audit') IS NOT NULL THEN 'PASS' ELSE 'FAIL' END,
          'metadata-only lifecycle audit substrate'
+  UNION ALL
+  SELECT 'POLICY_REPLAY_TABLE_EXISTS', 'kai.upload_policy_decision_replay',
+         CASE WHEN to_regclass('kai.upload_policy_decision_replay') IS NOT NULL THEN 'PASS' ELSE 'FAIL' END,
+         'durable policy decision replay authority'
+  UNION ALL
+  SELECT 'POLICY_REPLAY_COLUMN_EXISTS', 'kai.upload_policy_decision_replay.sanitized_result_canonical_sha256',
+         CASE WHEN EXISTS (
+           SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'kai' AND table_name = 'upload_policy_decision_replay' AND column_name = 'sanitized_result_canonical_sha256'
+         ) THEN 'PASS' ELSE 'FAIL' END,
+         'deterministic sanitized result comparison'
+  UNION ALL
+  SELECT 'POLICY_REPLAY_CONSTRAINT_EXISTS', 'upload_policy_decision_replay_gate_a_policy_status_check',
+         CASE WHEN EXISTS (
+           SELECT 1
+             FROM pg_constraint c
+             JOIN pg_class r ON r.oid = c.conrelid
+             JOIN pg_namespace n ON n.oid = r.relnamespace
+            WHERE n.nspname = 'kai'
+              AND r.relname = 'upload_policy_decision_replay'
+              AND c.conname = 'upload_policy_decision_replay_gate_a_policy_status_check'
+              AND pg_get_constraintdef(c.oid) LIKE '%passed%'
+              AND pg_get_constraintdef(c.oid) LIKE '%blocked%'
+              AND pg_get_constraintdef(c.oid) LIKE '%failed%'
+         ) THEN 'PASS' ELSE 'FAIL' END,
+         'policy outcome vocabulary'
+  UNION ALL
+  SELECT 'AUDIT_OPERATION_VOCABULARY', 'policy_decision_compare_and_set',
+         CASE WHEN EXISTS (
+           SELECT 1
+             FROM pg_constraint c
+             JOIN pg_class r ON r.oid = c.conrelid
+             JOIN pg_namespace n ON n.oid = r.relnamespace
+            WHERE n.nspname = 'kai'
+              AND r.relname = 'upload_lifecycle_audit'
+              AND c.conname = 'upload_lifecycle_audit_gate_a_operation_check'
+              AND pg_get_constraintdef(c.oid) LIKE '%policy_decision_compare_and_set%'
+         ) THEN 'PASS' ELSE 'FAIL' END,
+         'existing audit table accepts policy-decision CAS operation'
 )
 SELECT 'GATE_A_CATALOG' AS result_type, check_name, object_name, status, detail
 FROM checks

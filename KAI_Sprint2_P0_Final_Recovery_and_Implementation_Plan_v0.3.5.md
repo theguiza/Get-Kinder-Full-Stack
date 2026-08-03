@@ -6724,3 +6724,68 @@ prohibited_actions_not_performed:
 next_package_or_stop_condition: OWNER-DIRECTED STOP after one bounded Gate A P0 persistent upload-lifecycle substrate package
 commit_hash: report after commit; a commit cannot contain its own SHA
 ```
+
+## Gate A durable policy-decision replay and audit amendment evidence
+
+status: TOOL_VERIFIED
+date: 2026-08-03
+branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 548194a
+
+preflight:
+  repository_root: TOOL_VERIFIED - /Users/mikewoz/Get-Kinder-Full-Stack-Deploy
+  applicable_AGENTS_md: TOOL_VERIFIED - repository root AGENTS.md inspected
+  worktree_before_changes: TOOL_VERIFIED - clean; no staged paths; no untracked files
+  living_execplan_inspected: TOOL_VERIFIED
+  protected_files_not_diffed: TOOL_VERIFIED - Backend/kai/upload/inMemoryUploadLifecycleRepository.js, Backend/kai/upload/syntheticConfirmUploadAndEnqueue.js, Backend/kai/upload/syntheticSecurityAssessmentEnqueue.js, Backend/kai/db/kaiDb.js
+  frozen_gate_a_migration_not_modified: TOOL_VERIFIED - migrations/kai_sprint2_gate_a_p0_upload_lifecycle.sql unchanged
+  execplan_true_tail_before_edit: TOOL_VERIFIED - final 30 lines printed before append
+  execplan_prior_byte_count: TOOL_VERIFIED - 548996
+  execplan_prior_sha256: TOOL_VERIFIED - 911b24058bc5bfcd4371091dec7a95d34a9ab1df0bb90a22e43cd4dd60c291c3
+  execplan_pre_append_copy: TOOL_VERIFIED - /tmp/kai_execplan_pre_gate_a_policy_replay.md
+
+implemented:
+  migrations/kai_sprint2_gate_a_p0_policy_decision_replay.sql:
+    status: TOOL_VERIFIED
+    scope: forward-only follow-up migration after 548194a adding kai.upload_policy_decision_replay, deterministic sanitized-result hash, metadata-only JSON guard, and existing audit vocabulary amendment for policy_decision_compare_and_set
+    replay_facts_persisted: organization_id, intake_file_id, object_version_id, verified_checksum, verified_size_bytes, declared_mime, extension, file_policy_status, sanitized_result, sanitized_result_canonical_sha256, replay_contract_version
+  migrations/kai_sprint2_gate_a_p0_policy_decision_replay.rollback.sql:
+    status: TOOL_VERIFIED
+    scope: rollback draft for only the policy-decision replay amendment, including removal of follow-up policy audit rows before restoring prior audit operation vocabulary
+  scripts/kai-sprint2-gate-a-local-postgres.js:
+    status: TOOL_VERIFIED
+    scope: established runner now applies 548194a migration then follow-up migration, verifies policy-decision replay concurrency, rolls back the follow-up, then rolls back the substrate
+  scripts/kai-sprint2-gate-a-verifier.sql:
+    status: TOOL_VERIFIED
+    scope: catalog checks for replay table, deterministic hash column, policy status vocabulary, and audit operation amendment
+  scripts/kai-sprint2-gate-a-smoke-verifier.sql:
+    status: TOOL_VERIFIED
+    scope: synthetic SQL checks for fresh passed/blocked/failed decisions, exact replay, changed-fact conflicts, cross-tenant block, audit vocabulary rejection, transaction rollback, and metadata-only persistence
+  __tests__/kai-sprint2-gate-a-policy-decision-replay-schema-contract.spec.js:
+    status: TOOL_VERIFIED
+    scope: new contract-alignment assertions mapping durable replay schema to accepted synthetic compareAndSetPolicyDecision facts without diffing protected files
+
+verification:
+  gate_a_package_initial_sandbox: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-gate-a-p0 - sandbox shared-memory failure during PostgreSQL initdb; no database target retained
+  gate_a_package_intermediate_localhost: TOOL_VERIFIED - fresh ephemeral loopback PostgreSQL target created and torn down; migration helper issue found before completion
+  gate_a_package_localhost_capable_final: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-gate-a-p0 - ephemeral database created kai_gate_a_p0_upload_lifecycle_synthetic; loopback 127.0.0.1:55101; PostgreSQL verification passed; workdir removed /var/folders/hf/4f3q66q1311bpjpt4wm58l8w0000gn/T/kai-gate-a-p0-pg-RDNu9o
+  focused_schema_contract: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-gate-a-policy-decision-replay-schema-contract.spec.js - tests 3; fail 0
+  focused_lifecycle_and_contract: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-gate-a-policy-decision-replay-schema-contract.spec.js __tests__/kai-sprint2-p0-upload-lifecycle-repository.spec.js - tests 39; fail 0
+  focused_transaction_audit_regressions: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-transaction-interface.spec.js __tests__/kai-sprint2-mutation-orchestration.spec.js __tests__/kai-sprint2-audit-contract.spec.js - tests 41; fail 0
+  sprint2_suite_initial_sandbox: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - sandbox listener restriction, listen EPERM on 127.0.0.1
+  sprint2_suite_localhost_capable: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - tests 1000; fail 0
+  full_repository_localhost_capable: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - tests 1105; fail 0
+  git_diff_check_pre_execplan: TOOL_VERIFIED
+
+not_confirmed:
+  deployed_kai_schema_compatibility: NOT_CONFIRMED
+  production_database_atomicity: NOT_CONFIRMED
+  nonproduction_storage_integration: NOT_CONFIRMED
+  production_readiness: NOT_CONFIRMED
+  real_client_data_readiness: NOT_CONFIRMED
+
+prohibited_actions_not_performed:
+  - no PostgreSQL lifecycle repository adapter, application repository selection, services, routes, listeners, production composition, feature flags, cloud storage, signed URLs, P1 parser workflow, file profiles, dictionaries, quality or sensitivity records, review workflow, source/source_version, Gate B/C/D, deployment, production or shared database work, real-client-data handling, retention/deletion, Current State update, Implementation Baseline update, fetch, pull, push, merge, rebase, reset, cherry-pick, history rewrite, or modification of the 548194a migration SQL
+
+next_package_or_stop_condition: OWNER-DIRECTED STOP after one bounded Gate A durable policy-decision replay and audit amendment package
+commit_hash: report after commit; a commit cannot contain its own SHA
