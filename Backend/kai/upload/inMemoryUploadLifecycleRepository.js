@@ -17,6 +17,7 @@ export const UPLOAD_LIFECYCLE_RESULT_STATUS = Object.freeze({
   state_transition_denied: 422,
   conflict_current_state_changed: 409,
   not_found: 404,
+  system_error: 500,
 });
 
 const AUTHORIZED_EDGES = Object.freeze(

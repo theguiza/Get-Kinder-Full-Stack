@@ -13,6 +13,7 @@ const UPLOAD_LIFECYCLE_RESULT_STATUS = Object.freeze({
   state_transition_denied: 422,
   conflict_current_state_changed: 409,
   not_found: 404,
+  system_error: 500,
 });
 
 const AUTHORIZED_EDGES = Object.freeze(new Set([
@@ -258,10 +259,6 @@ function edgeKey(from, to) {
   return `${from}->${to}`;
 }
 
-function syntheticDeclaredChecksum() {
-  return "a".repeat(64);
-}
-
 function asIso(value) {
   if (value === null || value === undefined) return null;
   if (value instanceof Date) return value.toISOString();
@@ -285,7 +282,7 @@ function copyPolicyDecisionReplay(replay) {
 
 function rowToRecord(row) {
   if (!row) return null;
-  return {
+  const record = {
     organization_id: row.organization_id,
     intake_batch_id: row.intake_batch_id,
     intake_file_id: row.intake_file_id,
@@ -300,14 +297,19 @@ function rowToRecord(row) {
     policy_decision_replay: copyPolicyDecisionReplay(row.policy_decision_replay),
     created_at: asIso(row.created_at),
   };
+  return Object.defineProperty(record, "checksum", {
+    enumerable: false,
+    value: row.checksum,
+  });
 }
 
 async function readRecord(tx, input) {
   const result = await tx.query(
-    `SELECT f.organization_id::text AS organization_id,
-            f.intake_batch_id::text AS intake_batch_id,
-            f.intake_file_id::text AS intake_file_id,
-            f.upload_state,
+	    `SELECT f.organization_id::text AS organization_id,
+	            f.intake_batch_id::text AS intake_batch_id,
+	            f.intake_file_id::text AS intake_file_id,
+	            f.checksum,
+	            f.upload_state,
             f.file_policy_status,
             f.upload_state_changed_at,
             f.upload_expires_at,
@@ -360,6 +362,20 @@ async function insertAudit(tx, { organizationId, intakeFileId, operation, fromSt
   );
 }
 
+async function hasSuccessfulReservationAudit(tx, input) {
+  const result = await tx.query(
+    `SELECT 1
+       FROM kai.upload_lifecycle_audit
+      WHERE organization_id = $1::uuid
+        AND intake_file_id = $2::uuid
+        AND operation = 'reserve_upload'
+        AND outcome = 'success'
+      LIMIT 1`,
+    [input.organizationId, input.intakeFileId],
+  );
+  return result.rowCount > 0;
+}
+
 function buildPolicyDecisionAuditMetadata(input) {
   const outcome = POLICY_DECISION_OUTCOMES[input.policyDecisionOutcome];
   return {
@@ -399,7 +415,7 @@ function shapeLifecycleError(error) {
   if (error?.code === "23514" || error?.code === "P0001" || error?.code === "22P02") {
     return uploadLifecycleFailure("validation_blocker");
   }
-  return uploadLifecycleFailure("validation_blocker");
+  return uploadLifecycleFailure("system_error");
 }
 
 export function createPostgresUploadLifecycleRepository({ runInTransaction = withTransaction } = {}) {
@@ -409,31 +425,38 @@ export function createPostgresUploadLifecycleRepository({ runInTransaction = wit
       try {
         return await runInTransaction(async (tx) => {
           const existing = await readRecord(tx, input);
-          if (existing) {
-            if (existing.intake_batch_id === input.intakeBatchId) {
-              return uploadLifecycleSuccess({ record: existing, replayed: true });
-            }
+          if (!existing) return uploadLifecycleFailure("not_found");
+          if (existing.intake_batch_id !== input.intakeBatchId) {
             return uploadLifecycleFailure("conflict_current_state_changed");
           }
 
+          if (await hasSuccessfulReservationAudit(tx, input)) {
+            return uploadLifecycleSuccess({ record: existing, replayed: true });
+          }
+
           const result = await tx.query(
-            `INSERT INTO kai.intake_files (
-               organization_id, intake_batch_id, intake_file_id, original_filename, safe_filename,
-               checksum, hash_algorithm, force_new_version, upload_state, file_policy_status,
-               upload_state_changed_at, upload_expires_at, created_at
-             )
-             VALUES (
-               $1::uuid, $2::uuid, $3::uuid, $4, $4,
-               $5, 'sha256', true, 'reserved', 'pending',
-               $6::timestamptz, $7::timestamptz, $6::timestamptz
-             )
-             RETURNING intake_file_id`,
+            `UPDATE kai.intake_files
+                SET upload_state = 'reserved',
+                    file_policy_status = 'pending',
+                    upload_state_changed_at = $4::timestamptz,
+                    upload_expires_at = $5::timestamptz,
+                    object_version_id = NULL,
+                    verified_checksum = NULL,
+                    verified_size_bytes = NULL,
+                    verified_at = NULL
+              WHERE organization_id = $1::uuid
+                AND intake_batch_id = $2::uuid
+                AND intake_file_id = $3::uuid
+                AND upload_state = 'reserved'
+                AND file_policy_status = 'pending'
+                AND object_version_id IS NULL
+                AND verified_checksum IS NULL
+                AND verified_size_bytes IS NULL
+                AND verified_at IS NULL`,
             [
               input.organizationId,
               input.intakeBatchId,
               input.intakeFileId,
-              `synthetic-${input.intakeFileId}`,
-              syntheticDeclaredChecksum(),
               input.now,
               addReservationExpiry(input.now),
             ],
@@ -498,6 +521,9 @@ export function createPostgresUploadLifecycleRepository({ runInTransaction = wit
           }
 
           if (input.newUploadState === "confirmed" && record.object_version_id !== input.objectVersionId) {
+            return uploadLifecycleFailure("conflict_current_state_changed");
+          }
+          if (input.newUploadState === "confirmed" && record.checksum !== input.verifiedChecksum) {
             return uploadLifecycleFailure("conflict_current_state_changed");
           }
 

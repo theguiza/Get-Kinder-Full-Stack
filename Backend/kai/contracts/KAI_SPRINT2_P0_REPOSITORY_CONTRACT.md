@@ -1293,7 +1293,7 @@ Every failed creation or transition leaves stored state unchanged.
 
 #### Error and result contract
 
-This decision creates no new lifecycle-specific error code and uses exactly:
+This decision uses exactly:
 
 <!-- BEGIN_P0_06A_LIFECYCLE_ERROR_CODES_V1 -->
 
@@ -1302,6 +1302,7 @@ validation_blocker
 state_transition_denied
 conflict_current_state_changed
 not_found
+system_error
 ```
 
 <!-- END_P0_06A_LIFECYCLE_ERROR_CODES_V1 -->

@@ -33,9 +33,30 @@ async function withClient(callback) {
   }
 }
 
-async function resetTables() {
-  await withClient((client) => client.query("TRUNCATE kai.upload_lifecycle_audit, kai.upload_policy_decision_replay, kai.intake_files"));
-}
+	async function resetTables() {
+	  await withClient((client) => client.query("TRUNCATE kai.upload_lifecycle_audit, kai.upload_policy_decision_replay, kai.intake_files"));
+	}
+
+	async function seedReservedMetadataRow(fileId, overrides = {}) {
+	  const input = createInput(fileId, overrides);
+	  await withClient((client) => client.query(
+	    `INSERT INTO kai.intake_files (
+	       intake_file_id, intake_batch_id, organization_id, original_filename, safe_filename,
+	       checksum, hash_algorithm, force_new_version, processing_status, parse_status,
+	       file_policy_status, created_at
+	     )
+	     VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, 'sha256', true, 'quarantined', 'quarantined', 'pending', $7::timestamptz)`,
+	    [
+	      input.intakeFileId,
+	      input.intakeBatchId,
+	      input.organizationId,
+	      overrides.originalFilename || `fixture-${fileId}.txt`,
+	      overrides.safeFilename || `fixture-${fileId}.txt`,
+	      overrides.checksum || CHECKSUM_A,
+	      input.now,
+	    ],
+	  ));
+	}
 
 function createRepo() {
   return createPostgresUploadLifecycleRepository();
@@ -111,8 +132,9 @@ function policyInput(fileId, policyDecisionOutcome, overrides = {}) {
   };
 }
 
-async function createConfirmed(repo, fileId) {
-  assert.equal((await repo.createReservedUploadLifecycle(createInput(fileId))).ok, true);
+	async function createConfirmed(repo, fileId) {
+	  await seedReservedMetadataRow(fileId);
+	  assert.equal((await repo.createReservedUploadLifecycle(createInput(fileId))).ok, true);
   assert.equal((await repo.transitionUploadLifecycle(transitionInput(fileId, "reserved", "upload_started"))).ok, true);
   assert.equal((await repo.transitionUploadLifecycle(transitionInput(fileId, "upload_started", "uploaded_unconfirmed", {
     objectVersionId: "object-version-1",
@@ -144,10 +166,11 @@ test("PostgreSQL adapter exposes every upload lifecycle callable", async () => {
 });
 
 test("fresh reservation persists, exact replay is authoritative, changed-fact reservation conflicts, cross-tenant is absent", async () => {
-  await resetTables();
-  const repo = createRepo();
-  const fileId = "20000000-0000-4000-8000-000000000010";
-  const first = await repo.createReservedUploadLifecycle(createInput(fileId));
+	  await resetTables();
+	  const repo = createRepo();
+	  const fileId = "20000000-0000-4000-8000-000000000010";
+	  await seedReservedMetadataRow(fileId);
+	  const first = await repo.createReservedUploadLifecycle(createInput(fileId));
   assert.equal(first.ok, true);
   assert.equal(first.data.replayed, false);
   assert.equal(first.data.record.upload_state, "reserved");
@@ -162,18 +185,24 @@ test("fresh reservation persists, exact replay is authoritative, changed-fact re
     intakeBatchId: "10000000-0000-4000-8000-000000000099",
   })), { ok: false, data: null, error: { code: "conflict_current_state_changed", status: 409 } });
 
-  assert.deepEqual(await repo.getUploadLifecycle({ organizationId: OTHER_ORG, intakeFileId: fileId }), {
-    ok: false,
-    data: null,
-    error: { code: "not_found", status: 404 },
-  });
-});
+	  assert.deepEqual(await repo.getUploadLifecycle({ organizationId: OTHER_ORG, intakeFileId: fileId }), {
+	    ok: false,
+	    data: null,
+	    error: { code: "not_found", status: 404 },
+	  });
+	  assert.deepEqual(await repo.createReservedUploadLifecycle(createInput("20000000-0000-4000-8000-000000000011")), {
+	    ok: false,
+	    data: null,
+	    error: { code: "not_found", status: 404 },
+	  });
+	});
 
 test("transitions enforce 24h expiry, directed edges, object-version immutability, confirmation facts, and checksum mismatch zero transition", async () => {
-  await resetTables();
-  const repo = createRepo();
-  const fileId = "20000000-0000-4000-8000-000000000020";
-  assert.equal((await repo.createReservedUploadLifecycle(createInput(fileId))).ok, true);
+	  await resetTables();
+	  const repo = createRepo();
+	  const fileId = "20000000-0000-4000-8000-000000000020";
+	  await seedReservedMetadataRow(fileId);
+	  assert.equal((await repo.createReservedUploadLifecycle(createInput(fileId))).ok, true);
   assert.deepEqual(await repo.transitionUploadLifecycle(transitionInput(fileId, "reserved", "expired", { now: PLUS_ONE_HOUR })), {
     ok: false,
     data: null,
@@ -292,12 +321,12 @@ test("transaction boundary rolls back mutation when audit insert fails and rolls
   const publishFailFile = "20000000-0000-4000-8000-000000000051";
   await createConfirmed(repo, publishFailFile);
   const beforePublishFailure = await repo.getUploadLifecycle({ organizationId: ORG, intakeFileId: publishFailFile });
-  const publishFailure = policyInput(publishFailFile, "passed", { audit: createAuditProbe({ publishThrows: true }) });
-  assert.deepEqual(await repo.compareAndSetPolicyDecision(publishFailure.input), {
-    ok: false,
-    data: null,
-    error: { code: "validation_blocker", status: 422 },
-  });
+	  const publishFailure = policyInput(publishFailFile, "passed", { audit: createAuditProbe({ publishThrows: true }) });
+	  assert.deepEqual(await repo.compareAndSetPolicyDecision(publishFailure.input), {
+	    ok: false,
+	    data: null,
+	    error: { code: "system_error", status: 500 },
+	  });
   assert.deepEqual(await repo.getUploadLifecycle({ organizationId: ORG, intakeFileId: publishFailFile }), beforePublishFailure);
   assert.equal(await auditCount(publishFailFile, "policy_decision_compare_and_set"), 0);
 });
@@ -339,10 +368,11 @@ test("adapter failure envelopes expose no SQL, credentials, private paths, or st
 
 test("in-memory and PostgreSQL implementations agree on the callable lifecycle contract", async () => {
   await resetTables();
-  const fileId = "20000000-0000-4000-8000-000000000070";
-  const memory = createInMemoryUploadLifecycleRepository();
-  const postgres = createRepo();
-  for (const repo of [memory, postgres]) {
+	  const fileId = "20000000-0000-4000-8000-000000000070";
+	  const memory = createInMemoryUploadLifecycleRepository();
+	  const postgres = createRepo();
+	  await seedReservedMetadataRow(fileId);
+	  for (const repo of [memory, postgres]) {
     assert.equal((await repo.createReservedUploadLifecycle(createInput(fileId))).ok, true);
     assert.equal((await repo.transitionUploadLifecycle(transitionInput(fileId, "reserved", "upload_started"))).ok, true);
     assert.equal((await repo.transitionUploadLifecycle(transitionInput(fileId, "upload_started", "uploaded_unconfirmed", {

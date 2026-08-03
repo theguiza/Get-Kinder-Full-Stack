@@ -6849,3 +6849,68 @@ prohibited_actions_not_performed:
   - no fetch, pull, push, merge, rebase, reset, cherry-pick, history rewrite, protected-file edit, migration edit, rollback edit, route/listener wiring, production service composition, feature-flag enablement, cloud storage, signed URL, P1 persistence, Gate B/C/D, deployment, production/shared database access, real client data access, retention/deletion, Current State update, or Implementation Baseline update
 
 commit_hash: report after commit; a commit cannot contain its own SHA
+
+## P0-06B adapter contract correction evidence - shared system_error
+
+```text
+timestamp_local: 2026-08-03 America/Vancouver
+branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: beb80357bdbad3b8b2e50dad6504980d47fb8072
+package: KAI P0-06B adapter contract correction - shared system_error
+status: TOOL_VERIFIED
+
+pre_append_execplan:
+  byte_count: 560260
+  sha256: 5554f343e3e72bf24e56763ab9ede5b46bb1cc4dc41bef022bf67adfbbb68ea1
+  preserved_copy: /private/tmp/KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.pre-p0-06b-system-error.md
+
+contract_decision:
+  shared_upload_lifecycle_error_code_added: system_error
+  meaning: unexpected internal, database, driver or transaction failure
+  existing_lifecycle_codes_unchanged: validation_blocker; state_transition_denied; conflict_current_state_changed; not_found
+  lifecycle_failure_envelope_changed: false
+  callable_signatures_changed: false
+  schema_changed: false
+
+implementation:
+  in_memory_upload_lifecycle_repository: TOOL_VERIFIED - only UPLOAD_LIFECYCLE_RESULT_STATUS gained system_error: 500
+  postgres_upload_lifecycle_repository: TOOL_VERIFIED - createReservedUploadLifecycle now requires an existing matching kai.intake_files metadata row; removed adapter-generated synthetic filename/checksum insertion; unrecognized dependency/database/driver/transaction failures map to safe system_error; checksum mismatch is preclassified before SQL rowcount-derived result
+  postgres_adapter_integration_spec: TOOL_VERIFIED - fixtures seed accepted metadata rows before adapter lifecycle reservation
+  adapter_runner: TOOL_VERIFIED - runner-owned PostgreSQL specs execute sequentially against the isolated loopback target
+  cross_implementation_parity_spec: TOOL_VERIFIED - added database-free in-memory coverage and runner-owned PostgreSQL parity coverage
+
+verification:
+  existing_in_memory_lifecycle: TOOL_VERIFIED - DATABASE_URL=postgresql://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-p0-upload-lifecycle-repository.spec.js - tests 36; pass 36; fail 0
+  parity_database_free: TOOL_VERIFIED - DATABASE_URL=postgresql://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-p0-upload-lifecycle-cross-implementation-parity.spec.js - tests 5; pass 4; fail 0; skipped 1 runner-owned PostgreSQL case
+  adapter_runner_initial_sandbox: TOOL_VERIFIED - DATABASE_URL=postgresql://127.0.0.1:9/kai_sentinel node scripts/kai-sprint2-p0-postgres-upload-lifecycle-adapter-runner.js - sandbox shared-memory failure during PostgreSQL initdb; workdir removed
+  adapter_runner_localhost_capable_final: TOOL_VERIFIED - DATABASE_URL=postgresql://127.0.0.1:9/kai_sentinel node scripts/kai-sprint2-p0-postgres-upload-lifecycle-adapter-runner.js - ephemeral database kai_p0_06b_upload_lifecycle_adapter_synthetic; loopback 127.0.0.1:56578; integration tests 9 pass 9 fail 0; parity tests 5 pass 5 fail 0; workdir removed
+  affected_transaction_and_audit: TOOL_VERIFIED - DATABASE_URL=postgresql://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-transaction-interface.spec.js __tests__/kai-sprint2-audit-contract.spec.js __tests__/kai-sprint2-pass2-audit-contract.spec.js - tests 15; pass 15; fail 0
+  standalone_adapter_spec_runner_gated: TOOL_VERIFIED - DATABASE_URL=postgresql://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-p0-postgres-upload-lifecycle-repository.integration.spec.js - tests 1; skipped 1
+  sprint2_suite_initial_sandbox: TOOL_VERIFIED - DATABASE_URL=postgresql://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - sandbox listener restriction; listen EPERM on 127.0.0.1; tests 958; pass 909; fail 47; skipped 2
+  sprint2_suite_localhost_capable_final: TOOL_VERIFIED - DATABASE_URL=postgresql://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - tests 1006; pass 1004; fail 0; skipped 2
+  full_repository_initial_sandbox: TOOL_VERIFIED - DATABASE_URL=postgresql://127.0.0.1:9/kai_sentinel npm test - sandbox listener restriction; tests 1063; pass 1014; fail 47; skipped 2
+  full_repository_localhost_capable_final: TOOL_VERIFIED - DATABASE_URL=postgresql://127.0.0.1:9/kai_sentinel npm test - tests 1111; pass 1109; fail 0; skipped 2
+  git_diff_check: pending final post-append run
+
+protected_files:
+  Backend/kai/upload/inMemoryUploadLifecycleRepository.js: TOOL_VERIFIED limited to adding system_error to shared accepted error vocabulary
+  Backend/kai/upload/syntheticConfirmUploadAndEnqueue.js: TOOL_VERIFIED unchanged
+  Backend/kai/upload/syntheticSecurityAssessmentEnqueue.js: TOOL_VERIFIED unchanged
+  Backend/kai/db/kaiDb.js: TOOL_VERIFIED unchanged
+
+frozen_migrations:
+  migrations/kai_sprint2_gate_a_p0_upload_lifecycle.sql: TOOL_VERIFIED unchanged
+  migrations/kai_sprint2_gate_a_p0_upload_lifecycle.rollback.sql: TOOL_VERIFIED unchanged
+  migrations/kai_sprint2_gate_a_p0_policy_decision_replay.sql: TOOL_VERIFIED unchanged
+  migrations/kai_sprint2_gate_a_p0_policy_decision_replay.rollback.sql: TOOL_VERIFIED unchanged
+
+not_confirmed:
+  production_repository_selection: NOT_CONFIRMED
+  production_database_execution: NOT_CONFIRMED
+  deployment: NOT_CONFIRMED
+
+prohibited_actions_not_performed:
+  - no fetch, pull, push, merge, rebase, reset, cherry-pick, history rewrite, route wiring, service wiring, barrel wiring, production repository selection, production composition, feature-flag changes, cloud/storage work, P1 work, schema changes, Current State changes, Implementation Baseline changes, Gate A migration edits, Gate A rollback edits, deployment, production/shared database access, or real client data access
+
+commit_hash: report after commit; a commit cannot contain its own SHA
+```

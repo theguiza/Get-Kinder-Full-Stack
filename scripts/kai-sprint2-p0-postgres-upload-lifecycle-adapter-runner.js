@@ -84,26 +84,32 @@ try {
   psqlFile("migrations/kai_sprint2_gate_a_p0_upload_lifecycle.sql");
   psqlFile("migrations/kai_sprint2_gate_a_p0_policy_decision_replay.sql");
 
-  const testResult = spawnSync("node", ["--test", "__tests__/kai-sprint2-p0-postgres-upload-lifecycle-repository.integration.spec.js"], {
-    cwd: repoRoot,
-    encoding: "utf8",
-    stdio: "inherit",
-    env: {
-      ...process.env,
-      DATABASE_URL: "",
-      DATABASE_URL_LOCAL: "",
-      PGURL_LOCAL: "",
-      RENDER_DATABASE_URL: "",
-      PROD_DATABASE_URL: "",
-      DB_HOST: "127.0.0.1",
-      DB_PORT: port,
-      DB_NAME: dbName,
-      DB_USER: user,
-      DB_PASSWORD: "",
-      KAI_P0_POSTGRES_ADAPTER_DATABASE_URL: targetUrl,
-    },
-  });
-  if (testResult.status !== 0) throw new Error("P0-06B adapter integration tests failed");
+  const testEnv = {
+    ...process.env,
+    DATABASE_URL: "",
+    DATABASE_URL_LOCAL: "",
+    PGURL_LOCAL: "",
+    RENDER_DATABASE_URL: "",
+    PROD_DATABASE_URL: "",
+    DB_HOST: "127.0.0.1",
+    DB_PORT: port,
+    DB_NAME: dbName,
+    DB_USER: user,
+    DB_PASSWORD: "",
+    KAI_P0_POSTGRES_ADAPTER_DATABASE_URL: targetUrl,
+  };
+  for (const spec of [
+    "__tests__/kai-sprint2-p0-postgres-upload-lifecycle-repository.integration.spec.js",
+    "__tests__/kai-sprint2-p0-upload-lifecycle-cross-implementation-parity.spec.js",
+  ]) {
+    const testResult = spawnSync("node", ["--test", spec], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      stdio: "inherit",
+      env: testEnv,
+    });
+    if (testResult.status !== 0) throw new Error(`P0-06B adapter integration tests failed: ${spec}`);
+  }
   console.log("P0-06B adapter integration tests passed.");
 } finally {
   if (started) spawnSync(pgCtl, ["-D", dataDir, "stop", "-m", "fast"], { encoding: "utf8", stdio: "ignore" });
