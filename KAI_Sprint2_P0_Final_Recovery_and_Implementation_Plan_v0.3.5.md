@@ -6914,3 +6914,75 @@ prohibited_actions_not_performed:
 
 commit_hash: report after commit; a commit cannot contain its own SHA
 ```
+
+## P1-02 parser-run and file-profile persistence evidence
+
+status: TOOL_VERIFIED
+date: 2026-08-04
+branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 751aa814e111b3293fb7e4ab55b97b39c717d753
+
+preflight:
+  repository_root: TOOL_VERIFIED - /Users/mikewoz/Get-Kinder-Full-Stack-Deploy
+  applicable_AGENTS_md: TOOL_VERIFIED - repository root AGENTS.md inspected
+  worktree_before_changes: TOOL_VERIFIED - clean per `git status` before edits
+  frozen_gate_a_files_not_modified: TOOL_VERIFIED - `git diff --stat` against migrations/kai_sprint2_gate_a_p0_upload_lifecycle.sql, its rollback, migrations/kai_sprint2_gate_a_p0_policy_decision_replay.sql, its rollback, scripts/kai-sprint2-gate-a-local-postgres.js, scripts/kai-sprint2-gate-a-verifier.sql, scripts/kai-sprint2-gate-a-smoke-seed.sql, scripts/kai-sprint2-gate-a-smoke-verifier.sql, scripts/kai-sprint2-gate-a-failure-checks.sql, Backend/kai/db/kaiDb.js, Backend/kai/upload/inMemoryUploadLifecycleRepository.js, Backend/kai/upload/postgresUploadLifecycleRepository.js reported no output (unchanged)
+  execplan_true_tail_before_edit: TOOL_VERIFIED - final 17 lines printed before append
+  execplan_prior_byte_count: TOOL_VERIFIED - 565871
+  execplan_prior_sha256: TOOL_VERIFIED - 0686c7dfa685c16972e05e9d59936e362113debad753fdf327b1a143e82ab780
+
+implemented:
+  migrations/kai_sprint2_p1_parser_run_and_file_profile.sql:
+    status: TOOL_VERIFIED
+    scope: new forward-only migration adding kai.intake_parser_runs and kai.intake_file_profiles only, plus an additive amendment to the existing kai.upload_lifecycle_audit operation/metadata CHECK constraints for two new operations
+    accepted_identity: organization_id, intake_file_id, parser_name, parser_version, checksum (declared checksum column) - enforced via a UNIQUE constraint on each new table
+    parser_run_lifecycle: run_state IN (started, succeeded, failed) with a state/fact consistency CHECK on completed_at and failure_reason
+    file_profile_redaction: profile jsonb CHECK (jsonb_typeof = object AND kai.gate_a_p0_jsonb_metadata_only(profile)) - reuses the existing frozen redaction guard function unmodified; profile_canonical_sha256 for deterministic comparison
+    audit_vocabulary_added: parser_run_recorded, file_profile_persisted - additive DROP/ADD CONSTRAINT amendment, existing policy_decision_compare_and_set branch untouched
+  migrations/kai_sprint2_p1_parser_run_and_file_profile.rollback.sql:
+    status: TOOL_VERIFIED
+    scope: rollback draft for only the two new tables and the two new audit operations; deletes affected audit rows before restoring the prior operation/metadata CHECK definitions; does not touch kai.upload_lifecycle_audit's table shape, kai.upload_policy_decision_replay, upload_state, or the lifecycle trigger
+  scripts/kai-sprint2-p1-parser-run-file-profile-verifier.sql:
+    status: TOOL_VERIFIED
+    scope: read-only catalog verification for the new tables, columns, constraints, indexes, FKs, and audit vocabulary amendment
+  scripts/kai-sprint2-p1-parser-run-file-profile-failure-checks.sql:
+    status: TOOL_VERIFIED
+    scope: read-only failure checks proving no other listed P1 tables, no raw-content columns on the new tables, and no source/source_version columns
+  scripts/kai-sprint2-p1-parser-run-file-profile-smoke-seed.sql:
+    status: TOOL_VERIFIED
+    scope: one committed transaction persisting exactly one succeeded parser-run record and one metadata/redacted-only file-profile record (plus their required metadata-only audit rows) for the already-reserved org1/file1 fixture committed by the existing, unmodified scripts/kai-sprint2-gate-a-smoke-seed.sql
+  scripts/kai-sprint2-p1-parser-run-file-profile-smoke-verifier.sql:
+    status: TOOL_VERIFIED
+    scope: mutating checks wrapped in ROLLBACK for smoke-seed persistence, cross-tenant isolation, duplicate-identity rejection, invalid state/fact rejection, missing-parent FK rejection, non-redacted profile rejection, unapproved audit-operation rejection, and combined parser-run/profile/audit transaction atomicity
+  scripts/kai-sprint2-p1-parser-run-and-file-profile-local-postgres.js:
+    status: TOOL_VERIFIED
+    scope: new bounded runner (does not modify scripts/kai-sprint2-gate-a-local-postgres.js); runner-created isolated ephemeral PostgreSQL 16 target bound only to loopback; synthetic database name kai_p1_parser_run_file_profile_synthetic; applies the existing frozen Gate A migrations as unmodified prerequisites, then the new P1-02 migration, seeds, and verifiers; teardown in finally block
+  scripts/kai-sprint2-p1-parser-run-file-profile-runbook.md:
+    status: TOOL_VERIFIED
+    scope: package command, scope boundary, and explicit note that no application code was added so KAI_SPRINT2_ENABLED gating is unaffected
+  __tests__/kai-sprint2-p1-parser-run-file-profile-schema-contract.spec.js:
+    status: TOOL_VERIFIED
+    scope: static DB-free assertions on the new migration/rollback SQL source matching the accepted identity, redaction guard reuse, audit-vocabulary amendment, and rollback boundary
+  package.json:
+    status: TOOL_VERIFIED
+    package_command: verify:kai-sprint2-p1-parser-run-file-profile
+
+verification:
+  p1_02_package_localhost_capable: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p1-parser-run-file-profile - ephemeral database created kai_p1_parser_run_file_profile_synthetic; loopback 127.0.0.1:55558; verification passed; workdir removed
+  focused_schema_contract: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-p1-parser-run-file-profile-schema-contract.spec.js - tests 5; pass 5; fail 0
+  affected_regressions: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-gate-a-policy-decision-replay-schema-contract.spec.js __tests__/kai-sprint2-p0-upload-lifecycle-repository.spec.js __tests__/kai-sprint2-transaction-interface.spec.js __tests__/kai-sprint2-audit-contract.spec.js - tests 52; pass 52; fail 0
+  sprint2_suite_localhost_capable: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 - tests 1011; pass 1009; fail 0; skipped 2 runner-gated adapter integration
+  full_repository_localhost_capable: TOOL_VERIFIED - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test - tests 1116; pass 1114; fail 0; skipped 2 runner-gated adapter integration
+  git_diff_check: TOOL_VERIFIED - exit 0, no output
+
+not_confirmed:
+  production_database_execution: NOT_CONFIRMED
+  deployment: NOT_CONFIRMED
+  application_repository_or_service_use_of_this_substrate: NOT_CONFIRMED
+
+prohibited_actions_not_performed:
+  - no fetch, pull, push, merge, rebase, reset, cherry-pick, history rewrite, edit of any frozen Gate A migration/rollback/runner/verifier/smoke file, edit of Backend/kai/upload/* or Backend/kai/db/kaiDb.js, repository/service/route/listener code, production repository selection, production composition, feature-flag changes, cloud/storage work, Gate B/C/D work, data dictionaries, quality records, sensitivity records, review workflow, source candidates, promotion decisions, source, source_version, deployment, production/shared database access, real-client-data access, or Current State/Implementation Baseline changes
+
+next_package_or_stop_condition: OWNER-DIRECTED STOP after one bounded P1-02 parser-run and file-profile persistence package
+commit_hash: report after commit; a commit cannot contain its own SHA
+```
