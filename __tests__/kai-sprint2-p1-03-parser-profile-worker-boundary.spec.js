@@ -7,7 +7,10 @@ import {
   __parserProfileWorkerContract,
   __parserProfileWorkerTestables,
 } from "../Backend/kai/parsing/parserProfileWorkerOrchestration.js";
-import { __parserRunRepositoryContract } from "../Backend/kai/parsing/postgresParserRunRepository.js";
+import {
+  __parserRunRepositoryContract,
+  __parserRunRepositoryTestables,
+} from "../Backend/kai/parsing/postgresParserRunRepository.js";
 
 const ORCHESTRATION_PATH = "Backend/kai/parsing/parserProfileWorkerOrchestration.js";
 const REPOSITORY_PATH = "Backend/kai/parsing/postgresParserRunRepository.js";
@@ -259,6 +262,60 @@ test("P1-03 safe failure facts reject unsafe codes and messages before they can 
   const profiled = profilerOutcome({ status: "profiled", format: "txt" });
   assert.equal(profiled.profiled, true);
   assert.equal(profiled.profile.status, "profiled");
+});
+
+test("P1-03 required-audit predicate rejects every malformed prepared-audit shape and never invokes a getter-backed ok", () => {
+  const { prepareRequiredAudit, RequiredAuditRejectedError } = __parserRunRepositoryTestables;
+  const record = { parser_status: "running" };
+
+  let getterInvoked = false;
+  const rejectedShapes = [
+    null,
+    undefined,
+    true,
+    Object.assign(() => {}, { ok: true, publish() {} }),
+    Object.assign([], { ok: true, publish() {} }),
+    Object.create({ ok: true, publish() {} }),
+    {
+      get ok() {
+        getterInvoked = true;
+        return true;
+      },
+      publish() {},
+    },
+    { ok: "true", publish() {} },
+    { ok: 1, publish() {} },
+    { ok: false, publish() {} },
+    { ok: true },
+  ];
+
+  for (const shape of rejectedShapes) {
+    const metadataOnlyAudit = { prepareMetadataOnlyAudit: () => shape };
+    assert.throws(
+      () => prepareRequiredAudit(metadataOnlyAudit, record, "parser_run_claimed"),
+      RequiredAuditRejectedError,
+    );
+  }
+  assert.equal(getterInvoked, false);
+
+  const acceptedShapes = [
+    { ok: true, publish() {} },
+    Object.assign(Object.create(null), { ok: true, publish() {} }),
+  ];
+
+  class PreparedAudit {
+    constructor() {
+      this.ok = true;
+    }
+    publish() {}
+  }
+  acceptedShapes.push(new PreparedAudit());
+
+  for (const shape of acceptedShapes) {
+    const metadataOnlyAudit = { prepareMetadataOnlyAudit: () => shape };
+    const prepared = prepareRequiredAudit(metadataOnlyAudit, record, "parser_run_claimed");
+    assert.equal(prepared, shape);
+  }
 });
 
 test("P1-03 orchestration requires injected persistence and byte-source seams and selects no repository itself", () => {

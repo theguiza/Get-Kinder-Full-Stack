@@ -293,7 +293,7 @@ async function runParserProfileWorkerIntegrationSuite() {
     };
   }
 
-  function createAuditProbe({ prepareOk = true, publishThrows = false } = {}) {
+  function createAuditProbe({ prepareOk = true, publishThrows = false, publishRejects = false } = {}) {
     const prepared = [];
     const published = [];
     return {
@@ -307,7 +307,9 @@ async function runParserProfileWorkerIntegrationSuite() {
             ok: true,
             publish() {
               if (publishThrows) throw new Error("synthetic required-audit publish failure");
+              if (publishRejects) return Promise.reject(new Error("synthetic required-audit publish rejection"));
               published.push(input);
+              return Promise.resolve();
             },
           };
         },
@@ -742,7 +744,8 @@ async function runParserProfileWorkerIntegrationSuite() {
 
     for (const [label, probe, expectedCode] of [
       ["rejected_guard", createAuditProbe({ prepareOk: false }), "validation_blocker"],
-      ["publish_failure", createAuditProbe({ publishThrows: true }), "system_error"],
+      ["publish_sync_throw", createAuditProbe({ publishThrows: true }), "system_error"],
+      ["publish_promise_rejection", createAuditProbe({ publishRejects: true }), "system_error"],
     ]) {
       const result = await repository.completeParserRunWithProfile({
         identity,
@@ -786,7 +789,8 @@ async function runParserProfileWorkerIntegrationSuite() {
 
     for (const [label, probe, expectedCode] of [
       ["rejected_guard", createAuditProbe({ prepareOk: false }), "validation_blocker"],
-      ["publish_failure", createAuditProbe({ publishThrows: true }), "system_error"],
+      ["publish_sync_throw", createAuditProbe({ publishThrows: true }), "system_error"],
+      ["publish_promise_rejection", createAuditProbe({ publishRejects: true }), "system_error"],
     ]) {
       const result = await repository.failParserRunSafely({
         identity,
@@ -803,7 +807,92 @@ async function runParserProfileWorkerIntegrationSuite() {
       assert.equal(stored.retry_count, 0, label);
       assert.equal(stored.error_code, null, label);
       assert.equal((await auditRows(intakeFileId)).length, auditRowsBefore, label);
+      assert.deepEqual(probe.published, [], label);
     }
+  });
+
+  test("P1-03 rolls back the claim transition when the required claim audit fails", async () => {
+    await resetTables();
+    const intakeFileId = fileId(23);
+    const checksum = checksumFor(23);
+    await seedIntakeFile(intakeFileId, ORG, checksum);
+    const identity = identityFor(intakeFileId, ORG, checksum, LOCAL_PARSER);
+    const successAudit = createAuditProbe();
+    assert.equal((await repository.ensureQueuedParserRun({ identity, now: NOW })).ok, true);
+    const auditRowsBefore = (await auditRows(intakeFileId)).length;
+
+    for (const [label, probe, expectedCode] of [
+      ["rejected_guard", createAuditProbe({ prepareOk: false }), "validation_blocker"],
+      ["publish_sync_throw", createAuditProbe({ publishThrows: true }), "system_error"],
+      ["publish_promise_rejection", createAuditProbe({ publishRejects: true }), "system_error"],
+    ]) {
+      const result = await repository.claimQueuedParserRun({
+        identity,
+        now: NOW,
+        metadataOnlyAudit: probe.dependency,
+      });
+      assert.equal(result.ok, false, label);
+      assert.equal(result.error.code, expectedCode, label);
+      const stored = await storedRun(intakeFileId);
+      assert.equal(stored.parser_status, "queued", label);
+      assert.equal((await auditRows(intakeFileId)).length, auditRowsBefore, label);
+      assert.deepEqual(probe.published, [], label);
+    }
+
+    const claimed = await repository.claimQueuedParserRun({ identity, now: NOW, metadataOnlyAudit: successAudit.dependency });
+    assert.equal(claimed.ok, true);
+    assert.equal(claimed.data.run.parser_status, "running");
+    assert.equal((await auditRows(intakeFileId)).length, auditRowsBefore + 1);
+  });
+
+  test("P1-03 rolls back the retry requeue transition when the required requeue audit fails", async () => {
+    await resetTables();
+    const intakeFileId = fileId(24);
+    const checksum = checksumFor(24);
+    await seedIntakeFile(intakeFileId, ORG, checksum);
+    const identity = identityFor(intakeFileId, ORG, checksum, LOCAL_PARSER);
+    const successAudit = createAuditProbe();
+    assert.equal((await repository.ensureQueuedParserRun({ identity, now: NOW })).ok, true);
+    const claimed = await repository.claimQueuedParserRun({ identity, now: NOW, metadataOnlyAudit: successAudit.dependency });
+    assert.equal(claimed.ok, true);
+    const failed = await repository.failParserRunSafely({
+      identity,
+      parserRunId: claimed.data.run.parser_run_id,
+      errorCode: "safe_parser_error",
+      errorMessageSafe: "Deterministic profiling could not safely profile this file.",
+      now: NOW,
+      metadataOnlyAudit: successAudit.dependency,
+    });
+    assert.equal(failed.ok, true);
+    const auditRowsBefore = (await auditRows(intakeFileId)).length;
+
+    for (const [label, probe, expectedCode] of [
+      ["rejected_guard", createAuditProbe({ prepareOk: false }), "validation_blocker"],
+      ["publish_sync_throw", createAuditProbe({ publishThrows: true }), "system_error"],
+      ["publish_promise_rejection", createAuditProbe({ publishRejects: true }), "system_error"],
+    ]) {
+      const result = await repository.requeueFailedParserRunForRetry({
+        identity,
+        now: LATER,
+        metadataOnlyAudit: probe.dependency,
+      });
+      assert.equal(result.ok, false, label);
+      assert.equal(result.error.code, expectedCode, label);
+      const stored = await storedRun(intakeFileId);
+      assert.equal(stored.parser_status, "failed", label);
+      assert.equal(stored.retry_count, 1, label);
+      assert.equal((await auditRows(intakeFileId)).length, auditRowsBefore, label);
+      assert.deepEqual(probe.published, [], label);
+    }
+
+    const requeued = await repository.requeueFailedParserRunForRetry({
+      identity,
+      now: LATER,
+      metadataOnlyAudit: successAudit.dependency,
+    });
+    assert.equal(requeued.ok, true);
+    assert.equal(requeued.data.run.parser_status, "queued");
+    assert.equal((await auditRows(intakeFileId)).length, auditRowsBefore + 1);
   });
 
   test("P1-03 increments retry_count exactly once per safe failure, retries below three, refuses execution at three, and derives manual review", async () => {

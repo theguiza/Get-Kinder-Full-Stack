@@ -7325,3 +7325,126 @@ open_items:
   This package remains dormant: nothing composes, mounts, schedules, or enables it, and no
   runtime behavior changed.
 ```
+
+## P1-03 required-audit correction evidence - predicate hardening and awaited publish
+
+```text
+timestamp_local: 2026-08-04 America/Vancouver
+branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 886f368821baae4d8d9b64426497d31bdf975c72
+package: KAI P1-03 required-audit correction - confirmation predicate and asynchronous publish
+status: TOOL_VERIFIED
+
+pre_append_execplan:
+  byte_count: 595998
+  sha256: 481944b66e871e2c4fe421e4443c6b623025a2e2c6f17067c4baa26ada61c2d3
+  preserved_copy: /private/tmp/KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.pre-p1-03-required-audit-correction.md
+  prefix_proof: TOOL_VERIFIED - the preserved copy's first 595998 bytes are byte-identical to this
+    file's first 595998 bytes; this block is appended after that byte offset only, so the
+    correction is additions-only
+
+correction_scope:
+  problem_1: the prior prepareRequiredAudit predicate used `prepared.ok !== true` as a truthy
+    property read; a null/undefined-safe descriptor fallback of `null` would have made
+    `Object.hasOwn(null, "value")` throw instead of raising the intended
+    RequiredAuditRejectedError, and non-plain-object/array/inherited/getter-backed shapes were
+    not excluded
+  problem_2: `preparedAudit.publish()` was called without `await` at all four audited mutation
+    call sites, so a rejected publish() promise became an unhandled rejection instead of
+    rolling back the transaction like a synchronous publish throw
+
+fix_1_predicate:
+  file: Backend/kai/parsing/postgresParserRunRepository.js
+  function: prepareRequiredAudit
+  change: replaced the truthy `prepared.ok !== true` check with an own-property-descriptor
+    read guarded by `prepared !== null && typeof prepared === "object" && !Array.isArray(prepared)`,
+    confirming only `okDescriptor !== undefined && Object.hasOwn(okDescriptor, "value") &&
+    okDescriptor.value === true && typeof prepared.publish === "function"`; a getter-backed
+    `ok` has no own `value` property so its getter is never invoked; functions and arrays are
+    excluded before any property read is attempted, so `Object.hasOwn(null, ...)` can never be
+    reached
+
+fix_2_awaited_publish:
+  file: Backend/kai/parsing/postgresParserRunRepository.js
+  call_sites: claimQueuedParserRun; completeParserRunWithProfile; failParserRunSafely;
+    requeueFailedParserRunForRetry
+  change: each `preparedAudit.publish();` became `await preparedAudit.publish();` inside the
+    same `runInTransaction` callback already wrapped by the existing try/catch, so a rejected
+    publish() promise now throws inside the transaction and rolls back exactly like a
+    synchronous publish throw, and `shapeParserRunError` maps the resulting rejection to
+    `system_error` the same way it already mapped a synchronous throw
+
+tests_added:
+  __tests__/kai-sprint2-p1-03-parser-profile-worker-boundary.spec.js:
+    status: TOOL_VERIFIED
+    scope: one new focused test proving the predicate rejects null, undefined, true, a
+      function with own ok/publish, an array with own ok/publish, an object inheriting
+      ok/publish through its prototype, a getter-backed ok (proving the getter is never
+      invoked), ok as a non-boolean truthy string, ok as 1, ok:false, and ok:true without a
+      publish function; and proving acceptance of a plain object, an Object.create(null)
+      object with own ok/publish, and a class instance with an own ok:true data property and
+      a callable publish method
+  __tests__/kai-sprint2-p1-03-parser-profile-worker.integration.spec.js:
+    status: TOOL_VERIFIED
+    scope: extended createAuditProbe with a publishRejects option that returns a rejecting
+      promise from publish() instead of throwing synchronously; added publish_promise_rejection
+      cases alongside the existing publish_sync_throw cases in the completion and
+      safe-failure rollback tests; added two new transactional rollback tests, one for
+      claimQueuedParserRun and one for requeueFailedParserRunForRetry, each proving that a
+      rejected prepareMetadataOnlyAudit guard, a synchronous publish() throw, and a rejected
+      publish() promise all roll back the domain state transition and leave the audit row
+      count unchanged, followed by a successful claim/requeue proving the transaction commits
+      normally once the audit dependency is well-formed
+
+test_and_suite_results: TOOL_VERIFIED
+  node --test __tests__/kai-sprint2-p1-03-parser-profile-worker-boundary.spec.js -> 9 pass / 0 fail
+  npm run verify:kai-sprint2-p1-03-parser-profile-worker -> 14 pass / 0 fail (ephemeral
+    PostgreSQL 16 loopback target; database and workdir created and destroyed by the runner)
+  node --test __tests__/kai-sprint2-transaction-interface.spec.js
+    __tests__/kai-sprint2-audit-contract.spec.js __tests__/kai-sprint2-pass2-audit-contract.spec.js
+    -> 15 pass / 0 fail
+  npm run verify:kai-sprint2-gate-a-p0 -> Gate A ephemeral verification passed
+  npm run verify:kai-sprint2-p1-parser-run-file-profile -> P1-02 ephemeral verification passed
+  npm run test:kai-sprint2 -> tests 828 (1024 assertions); pass 1021; fail 0; skipped 3
+    (database-gated integration specs that skip without their runner-owned target)
+  npm test (complete repository suite) -> tests 933 (1129 assertions); pass 1126; fail 0;
+    skipped 3 (same three)
+  git diff --check -> clean (exit 0)
+  git diff --cached --check -> clean (exit 0; nothing staged at time of check)
+
+changed_files:
+  Backend/kai/parsing/postgresParserRunRepository.js (modified - predicate and await only)
+  __tests__/kai-sprint2-p1-03-parser-profile-worker-boundary.spec.js (modified - added
+    __parserRunRepositoryTestables import and one new predicate test)
+  __tests__/kai-sprint2-p1-03-parser-profile-worker.integration.spec.js (modified - added
+    publishRejects probe option and rollback coverage for four operations)
+  KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md (this additions-only
+    correction evidence block)
+
+new_export:
+  Backend/kai/parsing/postgresParserRunRepository.js: added `__parserRunRepositoryTestables`
+    (exposes `prepareRequiredAudit` and `RequiredAuditRejectedError`), following the existing
+    `__parserProfileWorkerTestables` test-seam convention already used by
+    Backend/kai/parsing/parserProfileWorkerOrchestration.js; adds no production export, route,
+    listener, barrel export, or production composition
+
+not_reopened:
+  - no schema change, migration edit, route, listener, feature-flag, project-state document,
+    or production composition was touched
+  - no P1-03 behavior other than the required-audit confirmation predicate and the awaited
+    publish() call sites was modified
+
+not_confirmed:
+  production_repository_selection: NOT_CONFIRMED
+  production_database_execution: NOT_CONFIRMED
+  deployment: NOT_CONFIRMED
+
+prohibited_actions_not_performed:
+  - no fetch, pull, push, merge, rebase, reset, cherry-pick, history rewrite, route wiring,
+    service wiring, barrel wiring, production repository selection, production composition,
+    feature-flag changes, cloud/storage work, schema changes, Current State changes,
+    Implementation Baseline changes, Gate A migration edits, deployment, production/shared
+    database access, or real client data access
+
+commit_hash: report after commit; a commit cannot contain its own SHA
+```

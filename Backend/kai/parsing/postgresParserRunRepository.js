@@ -343,9 +343,24 @@ function prepareRequiredAudit(metadataOnlyAudit, record, attemptedOperation) {
   const prepared = metadataOnlyAudit.prepareMetadataOnlyAudit({
     payload: buildParserRunAuditPayload(record, attemptedOperation),
   });
-  if (!prepared || prepared.ok !== true || typeof prepared.publish !== "function") {
+
+  const okDescriptor =
+    prepared !== null &&
+    typeof prepared === "object" &&
+    !Array.isArray(prepared)
+      ? Object.getOwnPropertyDescriptor(prepared, "ok")
+      : undefined;
+
+  const auditConfirmed =
+    okDescriptor !== undefined &&
+    Object.hasOwn(okDescriptor, "value") &&
+    okDescriptor.value === true &&
+    typeof prepared.publish === "function";
+
+  if (!auditConfirmed) {
     throw new RequiredAuditRejectedError();
   }
+
   return prepared;
 }
 
@@ -470,7 +485,7 @@ export function createPostgresParserRunRepository({ runInTransaction = withTrans
             metadata: buildParserRunAuditMetadata(running),
             now,
           });
-          preparedAudit.publish();
+          await preparedAudit.publish();
           return parserRunSuccess({ run: running, claimed: true });
         });
       } catch (error) {
@@ -550,7 +565,7 @@ export function createPostgresParserRunRepository({ runInTransaction = withTrans
             metadata: buildParserRunAuditMetadata(completed),
             now,
           });
-          preparedAudit.publish();
+          await preparedAudit.publish();
           return parserRunSuccess({ run: completed, replayed: false });
         });
       } catch (error) {
@@ -605,7 +620,7 @@ export function createPostgresParserRunRepository({ runInTransaction = withTrans
             metadata: buildParserRunAuditMetadata(failed),
             now,
           });
-          preparedAudit.publish();
+          await preparedAudit.publish();
           return parserRunSuccess({ run: failed, replayed: false });
         });
       } catch (error) {
@@ -665,7 +680,7 @@ export function createPostgresParserRunRepository({ runInTransaction = withTrans
             metadata: buildParserRunAuditMetadata(requeued),
             now,
           });
-          preparedAudit.publish();
+          await preparedAudit.publish();
           return parserRunSuccess({ run: requeued, requeued: true, requires_manual_review: false });
         });
       } catch (error) {
@@ -682,4 +697,9 @@ export const __parserRunRepositoryContract = Object.freeze({
   PARSER_RUN_AUDIT_VALIDATOR_KEY,
   PARSER_RUN_AUDIT_OPERATION,
   FILE_PROFILE_AUDIT_OPERATION,
+});
+
+export const __parserRunRepositoryTestables = Object.freeze({
+  prepareRequiredAudit,
+  RequiredAuditRejectedError,
 });
