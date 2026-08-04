@@ -7448,3 +7448,170 @@ prohibited_actions_not_performed:
 
 commit_hash: report after commit; a commit cannot contain its own SHA
 ```
+
+## KAI P1-04: draft data-dictionary and data-quality foundation
+
+```text
+timestamp_local: 2026-08-04 America/Vancouver
+branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: c5c26a83c4479b083c2d21217fca527e9795662b
+package: P1-04 - Draft data dictionary and data-quality foundation
+status: TOOL_VERIFIED
+
+pre_append_execplan:
+  byte_count: 603331
+  sha256: dfac23c7eda470147a997377826cd211825e268d6735afe9662398f0c817573b
+  preserved_copy: /private/tmp/claude-501/-Users-mikewoz-Get-Kinder-Full-Stack-Deploy/322b5dca-99a4-4048-a8a1-2066db05a2d8/scratchpad/execplan-pre-p1-04.md
+  prefix_proof: TOOL_VERIFIED - the preserved copy's first 603331 bytes are byte-identical to
+    this file's first 603331 bytes (the preserved copy is itself the unmodified pre-edit file,
+    byte count and sha256 confirmed above); this block is appended strictly after that byte
+    offset, so the correction is additions-only
+
+scope:
+  new tables: kai.data_dictionaries, kai.data_dictionary_fields, kai.data_dictionary_mappings,
+    kai.data_quality_findings, created by migrations/kai_sprint2_p1_04_data_dictionary_and_quality.sql
+  shared seam extension: one additive, backward-compatible UNIQUE constraint added to the existing
+    kai.intake_file_profiles (intake_file_profiles_p1_04_lineage_unique on
+    (file_profile_id, organization_id, intake_file_id, profile_canonical_sha256)), used only by the
+    new P1-04 dictionary lineage FK; no existing P1-02 constraint, column, or table was dropped or
+    altered
+  audit extension: new operation data_dictionary_draft_persisted and its exact required metadata
+    keys added to the existing kai.upload_lifecycle_audit operation/metadata CHECK constraints in
+    this new migration file only; every earlier operation branch (reserve_upload, start_upload,
+    complete_object_version, confirm_upload, block_upload, abandon_upload, expire_upload,
+    policy_decision_compare_and_set, parser_run_recorded, file_profile_persisted) is reproduced
+    verbatim, unchanged
+  new repository: Backend/kai/dictionary/postgresDataDictionaryRepository.js - the only authorized
+    location for this package's SQL and row locking; consumes only the tenant-scoped, already-
+    committed kai.intake_file_profiles row (organization_id + file_profile_id lookup only);
+    intake_file_id, profile, and profile_canonical_sha256 are always re-read from that row and
+    cannot be supplied or overridden by the caller
+  extended in place (not duplicated): Backend/kai/services/kaiDataDictionaryService.js -
+    createDraftDataDictionary is no longer a stub; validates its allowlist, checks
+    KAI_SPRINT2_ENABLED, and delegates persistence to the injected repository; contains no SQL and
+    imports no database pool
+
+identity_and_replay (owner decision verified by test):
+  one dictionary bundle per organization_id + file_profile_id, enforced by
+    data_dictionaries_p1_04_bundle_identity_unique
+  same profile identity + same stored hash -> replay (integration test 2)
+  same profile identity + different bound hash -> conflict_current_state_changed (DB-level FK
+    proof via smoke-verifier lineage_hash_mismatch_rejected; repository-level mapping verified by
+    boundary/integration coverage of shapeDictionaryError)
+  different profile identity -> separate bundle, never a revision (integration test 3); no
+    revision_number, predecessor_id, supersedes_id, or superseded_by_id column exists anywhere in
+    the migration (schema-contract test)
+
+exact_defaults_verified_by_check_constraint_not_default_alone:
+  dictionary_status = 'draft'; review_status = 'needs_gk_review'; finding_status = 'open';
+  sensitivity = 'unknown'; allowed_use = 'internal'; consent_status = 'unknown';
+  consent_scope = 'none'; llm_use_allowed = false; public_use_allowed = false;
+  funder_use_allowed = false; human_review_required = true; business_meaning and entity_level
+  default 'unknown' and accept only an explicit safe committed profile value otherwise
+
+deterministic_findings:
+  deriveDictionaryFields/deriveQualityFindings (Backend/kai/dictionary/postgresDataDictionaryRepository.js)
+  are pure functions over the committed profile only; findings limited to missingness,
+  duplicate_rows, type_inconsistency, invalid_date, formula_like_content, safe_profiler_warning;
+  absence of a fact produces no finding (boundary test + finding_type CHECK enum)
+
+transaction_and_audit:
+  draft/replay, all field/mapping/finding writes, and the required data_dictionary_draft_persisted
+  audit row are one transaction; RequiredAuditRejectedError on prepare rejection and a rejected
+  publish() promise each roll back every domain write (integration tests 6 and 7); publish() is
+  awaited inside the transaction
+
+audit_shape_verified:
+  metadata keys exactly metadata_only, contract, file_profile_id, profile_canonical_sha256,
+  dictionary_status, field_count, mapping_count, finding_count, validator_key - no extra keys, no
+  profile content, label, sample, finding text, PII, path, URL, prompt, or credential (integration
+  test 1 asserts the exact key set; smoke-verifier audit_metadata_exact_keys/audit_metadata_no_raw_profile)
+
+audit_vocabulary_conflict_check: no conflict found
+  operation data_dictionary_draft_persisted, contract p1_draft_data_dictionary_and_quality_v1, and
+  validator_key VAL-KAI-P1-04-001 were checked against every existing accepted operation
+  (reserve_upload, start_upload, complete_object_version, confirm_upload, block_upload,
+  abandon_upload, expire_upload, policy_decision_compare_and_set, parser_run_recorded,
+  file_profile_persisted), every existing contract string (p1_parser_run_and_file_profile_v1,
+  in_memory_policy_replay_v1, unwired_synthetic_parser_profile_worker), and every existing
+  validator key (VAL-KAI-P1-02-001, VAL-AUD-001) - no collision
+
+feature_flag: every repository/service operation checks KAI_SPRINT2_ENABLED first; disabled returns
+  the canonical feature_disabled result with zero profile reads, writes, locks, audit preparation,
+  or publication (boundary test)
+
+p1_02_p1_03_protection:
+  no P1-02 or P1-03 migration, rollback, runner, verifier, failure-checks, smoke-seed,
+  smoke-verifier, or runbook file was edited (all untouched per git status); the one shared-seam
+  extension (intake_file_profiles_p1_04_lineage_unique) is additive and backward-compatible
+
+runner: scripts/kai-sprint2-p1-04-data-dictionary-quality-runner.js - runner-owned synthetic
+  database kai_p1_04_data_dictionary_quality_synthetic, loopback 127.0.0.1, runner-chosen port in
+  59000-59999, listen_addresses '127.0.0.1' only, PostgreSQL 16 (proveRunnerOwnedTarget fails
+  closed on any mismatch, matching the P1-02/P1-03 runner pattern); no shared, staging, cloud,
+  deployed, production, or real-client-data database was created or used
+
+tests_added_and_results: TOOL_VERIFIED
+  __tests__/kai-sprint2-p1-04-data-dictionary-quality-schema-contract.spec.js: 12 passed
+  __tests__/kai-sprint2-p1-04-data-dictionary-quality-boundary.spec.js: 10 passed
+  __tests__/kai-sprint2-p1-04-data-dictionary-quality.integration.spec.js (ephemeral PG 16): 8 passed
+  npm run verify:kai-sprint2-p1-04-data-dictionary-quality -> catalog verifier all PASS, read-only
+    failure checks all PASS, smoke verifier 19/19 PASS, integration suite 8/8 passed
+  npm run verify:kai-sprint2-p1-parser-run-file-profile (P1-02 runner, unmodified) -> passed
+  npm run verify:kai-sprint2-p1-03-parser-profile-worker (P1-03 runner, unmodified) -> 14/14 passed
+  npm run test:kai-sprint2 -> 1043 passed, 4 skipped, 0 failed
+  npm test (complete repository suite) -> 1148 passed, 4 skipped, 0 failed
+  git diff --check -> clean (exit 0)
+  git diff --cached --check -> clean (exit 0)
+
+changed_files:
+  migrations/kai_sprint2_p1_04_data_dictionary_and_quality.sql (added)
+  migrations/kai_sprint2_p1_04_data_dictionary_and_quality.rollback.sql (added)
+  scripts/kai-sprint2-p1-04-data-dictionary-quality-verifier.sql (added)
+  scripts/kai-sprint2-p1-04-data-dictionary-quality-failure-checks.sql (added)
+  scripts/kai-sprint2-p1-04-data-dictionary-quality-smoke-seed.sql (added)
+  scripts/kai-sprint2-p1-04-data-dictionary-quality-smoke-verifier.sql (added)
+  scripts/kai-sprint2-p1-04-data-dictionary-quality-runner.js (added)
+  scripts/kai-sprint2-p1-04-data-dictionary-quality-runbook.md (added)
+  scripts/kai-sprint2-p1-04-data-dictionary-quality-patch-notes.md (added)
+  Backend/kai/dictionary/postgresDataDictionaryRepository.js (added)
+  Backend/kai/services/kaiDataDictionaryService.js (modified - stub replaced with delegation to the
+    injected P1-04 repository)
+  package.json (modified - added verify:kai-sprint2-p1-04-data-dictionary-quality script)
+  __tests__/kai-sprint2-p1-04-data-dictionary-quality-schema-contract.spec.js (added)
+  __tests__/kai-sprint2-p1-04-data-dictionary-quality-boundary.spec.js (added)
+  __tests__/kai-sprint2-p1-04-data-dictionary-quality.integration.spec.js (added)
+  KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md (this evidence block)
+
+new_export:
+  Backend/kai/dictionary/postgresDataDictionaryRepository.js: __dataDictionaryRepositoryContract,
+    __dataDictionaryRepositoryTestables (deriveDictionaryFields, deriveQualityFindings,
+    deriveDataType, prepareRequiredAudit, RequiredAuditRejectedError) - test-seam exports only,
+    following the existing __parserRunRepositoryTestables convention; adds no production export,
+    route, listener, barrel export, or production composition
+
+not_reopened:
+  - no P1-02 or P1-03 migration, rollback, runner, verifier, smoke, or runbook artifact was edited
+  - no route, listener, scheduler, timer, startup hook, public barrel export, production
+    composition, application repository selection, feature-flag default, or cloud configuration
+    was added
+  - no sensitivity profile, review item, source candidate, promotion decision, source, source
+    version, evidence, claim, or assistant tool was created
+  - no denominator assessment, coverage-gap analysis, funder-requirement alignment, or
+    client/operator follow-up generation was implemented
+  - no revision number, predecessor link, or supersession link was created
+
+not_confirmed:
+  production_repository_selection: NOT_CONFIRMED
+  production_database_execution: NOT_CONFIRMED
+  deployment: NOT_CONFIRMED
+
+prohibited_actions_not_performed:
+  - no fetch, pull, push, merge, rebase, reset, cherry-pick, history rewrite, route wiring,
+    service wiring, barrel wiring, production repository selection, production composition,
+    feature-flag changes, cloud/storage work, Current State changes, Implementation Baseline
+    changes, Gate A migration edits, P1-02/P1-03 migration edits, deployment, production/shared
+    database access, or real client data access
+
+commit_hash: report after commit; a commit cannot contain its own SHA
+```
