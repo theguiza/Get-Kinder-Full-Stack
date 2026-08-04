@@ -6986,3 +6986,143 @@ prohibited_actions_not_performed:
 next_package_or_stop_condition: OWNER-DIRECTED STOP after one bounded P1-02 parser-run and file-profile persistence package
 commit_hash: report after commit; a commit cannot contain its own SHA
 ```
+
+## KAI P1-02 correction: parser-run schema contract and profile lineage
+
+```text
+8fe2968 established the initial two-table P1-02 substrate.
+
+Its parser lifecycle vocabulary and profile-to-run lineage constraints required correction.
+
+The controlling parser-worker lifecycle contract was quoted before implementation.
+
+The correction aligns the schema with the quoted contract and enforces exact composite lineage
+between parser runs and file profiles.
+
+quoted_contract_source: "KAI MVP Sprint 2 Archive/KAI_MVP_Sprint2_Backend_Storage_and_Validator_Implementation_Contract.md"
+  (repository search for the exact expected path/filename named in the correction prompt returned
+  no match anywhere under this repository's working tree or git history; the controlling document
+  was located outside the repository, under the local filesystem path above, and read for quoting
+  only — no repository file at that path was created, and this reference is not itself a repository
+  edit)
+
+quoted_parser_status_vocabulary: TOOL_VERIFIED
+  source lines 239-247 ("## 9. Worker status model" / "Required statuses:"):
+    queued
+    running
+    completed
+    failed
+    cancelled
+
+quoted_required_parser_run_fields: TOOL_VERIFIED
+  source lines 249-260 ("Required fields:"):
+    parser_name
+    parser_version
+    parser_status
+    started_at
+    completed_at
+    retry_count
+    error_code
+    error_message_safe
+    output_profile_id
+
+quoted_retry_cap: TOOL_VERIFIED
+  source line 232 ("## 8. Async job and worker model" / "Retry policy:"): "max retries: 3"
+  corroborated by source line 284 ("## 10. MVP file limits"): "Max parser retries: 3"
+
+quoted_idempotency_identity: TOOL_VERIFIED
+  source lines 1826-1831 ("### Parser/profile job idempotency" / "Key:"):
+    "intake_file_id + parser_name + parser_version + checksum"
+
+quoted_safe_failure_behavior: TOOL_VERIFIED
+  source lines 218-227 ("Failure behavior:"):
+    mark failed
+    increment retry_count
+    store safe error_code
+    store safe error_message_safe
+    do not store raw file content
+    do not create source/evidence/claim records
+
+contract_discrepancies:
+  - The quoted idempotency-identity line (source lines 1826-1831) lists
+    "intake_file_id + parser_name + parser_version + checksum" and does not itself name
+    organization_id. The already-accepted P1-02 tenant-scoped identity (established by 8fe2968
+    and explicitly preserved, not reopened, by this correction) is
+    "organization_id + intake_file_id + parser_name + parser_version + checksum". organization_id
+    is retained because every other identity/key definition in the same source document is
+    explicitly tenant-scoped by organization_id, and intake_file_id itself only resolves within an
+    organization via the accepted kai.intake_files (organization_id, intake_file_id) composite key;
+    this is treated as an additive tenant-scoping convention already fixed by 8fe2968, not a
+    contradiction of the quoted key.
+  - Source section "22.3 intake_parser_runs" (lines 1941-1951), under "## 22. State-transition
+    matrix", describes an earlier, P0-scoped "parser-run stub" using different column names
+    (`job_status`, `parse_status`) and states most of its transitions are "not part of P0" /
+    "P1 worker only". This section governs a P0-era stub table shape, not the P1 worker/table this
+    correction builds. Section "## 9. Worker status model" (lines 237-270), titled for the async
+    job/worker model this package implements, is the section that governs this correction's
+    schema-governing values, and its vocabulary/field list is what was quoted above. No prompt
+    value was superseded by this discrepancy; the two sections describe different table
+    generations within the same source document, and the P1 worker section was used.
+  - No other discrepancy was found between the quoted contract and the prompt's expected values;
+    the quoted vocabulary, required-field list, retry cap, and failure behavior match the prompt's
+    expected values verbatim.
+```
+
+```text
+changed_files:
+  migrations/kai_sprint2_p1_parser_run_and_file_profile.sql
+  migrations/kai_sprint2_p1_parser_run_and_file_profile.rollback.sql
+  scripts/kai-sprint2-p1-parser-run-file-profile-verifier.sql
+  scripts/kai-sprint2-p1-parser-run-file-profile-smoke-seed.sql
+  scripts/kai-sprint2-p1-parser-run-file-profile-smoke-verifier.sql
+  scripts/kai-sprint2-p1-parser-run-file-profile-runbook.md
+  __tests__/kai-sprint2-p1-parser-run-file-profile-schema-contract.spec.js
+  KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md (this correction block)
+
+files_considered_and_not_modified:
+  scripts/kai-sprint2-p1-parser-run-file-profile-failure-checks.sql:
+    reason: existing checks (no other P1 tables, no raw-content columns, no source/source_version
+    columns) are orthogonal to the lifecycle-vocabulary correction; no new check was required to
+    prove the corrected contract that the verifier.sql could not already prove.
+  package.json:
+    reason: existing verify:kai-sprint2-p1-parser-run-file-profile script and
+    scripts/kai-sprint2-p1-parser-run-and-file-profile-local-postgres.js runner execute the
+    corrected migration/scripts unmodified; the runner has no coupling to specific lifecycle
+    column/status names, so it ran the corrected package without change.
+
+migration_discipline: TOOL_VERIFIED
+  the existing unpushed local P1-02 migration and rollback files (migrations/kai_sprint2_p1_parser_run_and_file_profile.sql,
+  migrations/kai_sprint2_p1_parser_run_and_file_profile.rollback.sql) were corrected in place, per
+  the prompt's required-migration-discipline instruction that unpushed/undeployed local packages be
+  corrected forward rather than appended as a second migration; no repository instruction requiring
+  append-only migration history for local, unpushed packages was found.
+
+schema_correction_summary: TOOL_VERIFIED
+  kai.intake_parser_runs: run_state/started/succeeded/failed/failure_reason replaced with
+  parser_status (queued/running/completed/failed/cancelled, default queued), retry_count
+  (integer, 0-3), error_code (safe lowercase snake_case identifier or null), error_message_safe
+  (bounded length, regex-excludes URLs/paths/credentials/secrets/stack traces or null), and
+  output_profile_id (uuid, nullable). A rewritten intake_parser_runs_p1_state_fact_consistency_check
+  enforces, per status, the fail-closed fact combinations from the correction prompt (queued/
+  running/completed/failed/cancelled). A new intake_parser_runs_p1_run_identity_unique constraint
+  (parser_run_id, organization_id, intake_file_id, parser_name, parser_version, checksum) and a
+  new intake_file_profiles_p1_run_identity_unique constraint (file_profile_id, organization_id,
+  intake_file_id, parser_name, parser_version, checksum) were added as declarative composite
+  unique-constraint targets. kai.intake_file_profiles' single-column parser_run_id foreign key was
+  replaced with a 6-column composite foreign key to kai.intake_parser_runs covering
+  (parser_run_id, organization_id, intake_file_id, parser_name, parser_version, checksum), so a
+  profile whose organization_id/intake_file_id/parser_name/parser_version/checksum differ from its
+  named parent run is rejected at the database boundary. After both tables exist, a new 6-column
+  composite foreign key from kai.intake_parser_runs.output_profile_id to
+  kai.intake_file_profiles (file_profile_id, organization_id, intake_file_id, parser_name,
+  parser_version, checksum) was added by ALTER TABLE, so a completed run's output_profile_id must
+  belong to a profile sharing that same run's exact identity; MATCH SIMPLE (Postgres default)
+  leaves the constraint unenforced only while output_profile_id itself is null (queued/running/
+  failed/cancelled), matching the state/fact consistency rule that only completed runs carry
+  output_profile_id. No trigger was added; both lineage invariants are enforced by declarative
+  foreign keys. The rollback draft now drops the output-profile foreign key before dropping
+  kai.intake_file_profiles, to satisfy the FK dependency order in reverse. The
+  upload_lifecycle_audit metadata-object CHECK's parser_run_recorded branch was updated to require
+  parser_status/retry_count/error_code/error_message_safe keys in place of the removed
+  run_state/failure_reason keys.
+```

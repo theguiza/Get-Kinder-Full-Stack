@@ -26,13 +26,18 @@ CREATE TABLE IF NOT EXISTS kai.intake_parser_runs (
   parser_name text NOT NULL,
   parser_version text NOT NULL,
   checksum text NOT NULL,
-  run_state text NOT NULL DEFAULT 'started',
+  parser_status text NOT NULL DEFAULT 'queued',
+  retry_count integer NOT NULL DEFAULT 0,
+  error_code text,
+  error_message_safe text,
+  output_profile_id uuid,
   started_at timestamptz NOT NULL DEFAULT now(),
   completed_at timestamptz,
-  failure_reason text,
   created_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT intake_parser_runs_p1_identity_unique
     UNIQUE (organization_id, intake_file_id, parser_name, parser_version, checksum),
+  CONSTRAINT intake_parser_runs_p1_run_identity_unique
+    UNIQUE (parser_run_id, organization_id, intake_file_id, parser_name, parser_version, checksum),
   CONSTRAINT intake_parser_runs_p1_file_fk
     FOREIGN KEY (organization_id, intake_file_id)
     REFERENCES kai.intake_files (organization_id, intake_file_id)
@@ -43,15 +48,27 @@ CREATE TABLE IF NOT EXISTS kai.intake_parser_runs (
     CHECK (length(parser_version) BETWEEN 1 AND 64 AND parser_version = lower(btrim(parser_version)) AND parser_version ~ '^[a-z0-9._-]+$'),
   CONSTRAINT intake_parser_runs_p1_checksum_check
     CHECK (checksum ~ '^[a-f0-9]{64}$'),
-  CONSTRAINT intake_parser_runs_p1_run_state_check
-    CHECK (run_state IN ('started', 'succeeded', 'failed')),
-  CONSTRAINT intake_parser_runs_p1_failure_reason_check
-    CHECK (failure_reason IS NULL OR (length(failure_reason) BETWEEN 1 AND 128 AND failure_reason = lower(btrim(failure_reason)) AND failure_reason ~ '^[a-z0-9_]+$')),
+  CONSTRAINT intake_parser_runs_p1_parser_status_check
+    CHECK (parser_status IN ('queued', 'running', 'completed', 'failed', 'cancelled')),
+  CONSTRAINT intake_parser_runs_p1_retry_count_check
+    CHECK (retry_count BETWEEN 0 AND 3),
+  CONSTRAINT intake_parser_runs_p1_error_code_check
+    CHECK (error_code IS NULL OR (length(error_code) BETWEEN 1 AND 64 AND error_code = lower(btrim(error_code)) AND error_code ~ '^[a-z0-9_]+$')),
+  CONSTRAINT intake_parser_runs_p1_error_message_safe_check
+    CHECK (
+      error_message_safe IS NULL
+      OR (
+        length(error_message_safe) BETWEEN 1 AND 500
+        AND error_message_safe !~* '(https?://|/Users/|/private/|/var/|/etc/|password|secret|api[_-]?key|token|credential|Bearer\s|stack ?trace|traceback|  at [A-Za-z])'
+      )
+    ),
   CONSTRAINT intake_parser_runs_p1_state_fact_consistency_check
     CHECK (
-      (run_state = 'started' AND completed_at IS NULL AND failure_reason IS NULL)
-      OR (run_state = 'succeeded' AND completed_at IS NOT NULL AND failure_reason IS NULL)
-      OR (run_state = 'failed' AND completed_at IS NOT NULL AND failure_reason IS NOT NULL)
+      (parser_status = 'queued' AND completed_at IS NULL AND output_profile_id IS NULL AND error_code IS NULL AND error_message_safe IS NULL)
+      OR (parser_status = 'running' AND started_at IS NOT NULL AND completed_at IS NULL AND output_profile_id IS NULL AND error_code IS NULL AND error_message_safe IS NULL)
+      OR (parser_status = 'completed' AND started_at IS NOT NULL AND completed_at IS NOT NULL AND output_profile_id IS NOT NULL AND error_code IS NULL AND error_message_safe IS NULL)
+      OR (parser_status = 'failed' AND started_at IS NOT NULL AND completed_at IS NOT NULL AND error_code IS NOT NULL AND error_message_safe IS NOT NULL AND output_profile_id IS NULL)
+      OR (parser_status = 'cancelled' AND completed_at IS NOT NULL AND output_profile_id IS NULL)
     )
 );
 
@@ -71,13 +88,15 @@ CREATE TABLE IF NOT EXISTS kai.intake_file_profiles (
   created_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT intake_file_profiles_p1_identity_unique
     UNIQUE (organization_id, intake_file_id, parser_name, parser_version, checksum),
+  CONSTRAINT intake_file_profiles_p1_run_identity_unique
+    UNIQUE (file_profile_id, organization_id, intake_file_id, parser_name, parser_version, checksum),
   CONSTRAINT intake_file_profiles_p1_file_fk
     FOREIGN KEY (organization_id, intake_file_id)
     REFERENCES kai.intake_files (organization_id, intake_file_id)
     ON DELETE RESTRICT,
   CONSTRAINT intake_file_profiles_p1_parser_run_fk
-    FOREIGN KEY (parser_run_id)
-    REFERENCES kai.intake_parser_runs (parser_run_id)
+    FOREIGN KEY (parser_run_id, organization_id, intake_file_id, parser_name, parser_version, checksum)
+    REFERENCES kai.intake_parser_runs (parser_run_id, organization_id, intake_file_id, parser_name, parser_version, checksum)
     ON DELETE RESTRICT,
   CONSTRAINT intake_file_profiles_p1_parser_name_check
     CHECK (length(parser_name) BETWEEN 1 AND 128 AND parser_name = lower(btrim(parser_name)) AND parser_name ~ '^[a-z0-9_]+$'),
@@ -98,6 +117,12 @@ CREATE INDEX IF NOT EXISTS ix_intake_file_profiles_p1_tenant_file
 
 CREATE INDEX IF NOT EXISTS ix_intake_file_profiles_p1_parser_run
   ON kai.intake_file_profiles (parser_run_id);
+
+ALTER TABLE kai.intake_parser_runs
+  ADD CONSTRAINT intake_parser_runs_p1_output_profile_fk
+  FOREIGN KEY (output_profile_id, organization_id, intake_file_id, parser_name, parser_version, checksum)
+  REFERENCES kai.intake_file_profiles (file_profile_id, organization_id, intake_file_id, parser_name, parser_version, checksum)
+  ON DELETE RESTRICT;
 
 ALTER TABLE kai.upload_lifecycle_audit
   DROP CONSTRAINT IF EXISTS upload_lifecycle_audit_gate_a_operation_check,
@@ -159,8 +184,10 @@ ALTER TABLE kai.upload_lifecycle_audit
           AND metadata ? 'parser_name'
           AND metadata ? 'parser_version'
           AND metadata ? 'checksum_bound'
-          AND metadata ? 'run_state'
-          AND metadata ? 'failure_reason'
+          AND metadata ? 'parser_status'
+          AND metadata ? 'retry_count'
+          AND metadata ? 'error_code'
+          AND metadata ? 'error_message_safe'
           AND metadata ? 'validator_key'
           AND metadata - ARRAY[
             'metadata_only',
@@ -168,8 +195,10 @@ ALTER TABLE kai.upload_lifecycle_audit
             'parser_name',
             'parser_version',
             'checksum_bound',
-            'run_state',
-            'failure_reason',
+            'parser_status',
+            'retry_count',
+            'error_code',
+            'error_message_safe',
             'validator_key'
           ] = '{}'::jsonb
         )

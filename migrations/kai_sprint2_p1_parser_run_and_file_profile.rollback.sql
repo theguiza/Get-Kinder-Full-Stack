@@ -55,6 +55,9 @@ ALTER TABLE IF EXISTS kai.upload_lifecycle_audit
       )
     );
 
+ALTER TABLE IF EXISTS kai.intake_parser_runs
+  DROP CONSTRAINT IF EXISTS intake_parser_runs_p1_output_profile_fk;
+
 DROP INDEX IF EXISTS kai.ix_intake_file_profiles_p1_parser_run;
 DROP INDEX IF EXISTS kai.ix_intake_file_profiles_p1_tenant_file;
 DROP TABLE IF EXISTS kai.intake_file_profiles;
