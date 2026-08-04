@@ -16,6 +16,7 @@
     "verify:kai-sprint2-p1-parser-run-file-profile": "node scripts/kai-sprint2-p1-parser-run-and-file-profile-local-postgres.js",
     "verify:kai-sprint2-p1-03-parser-profile-worker": "node scripts/kai-sprint2-p1-03-parser-profile-worker-runner.js",
     "verify:kai-sprint2-p1-04-data-dictionary-quality": "node scripts/kai-sprint2-p1-04-data-dictionary-quality-runner.js",
+    "verify:kai-sprint2-p1-05-intake-sensitivity-profile": "node scripts/kai-sprint2-p1-05-intake-sensitivity-profile-local-postgres.js",
     "verify:kai-sprint2-pass2-api": "node scripts/kai-sprint2-pass2-admin-metadata-intake-api-verifier.js",
     "backfill:surprises": "node scripts/backfillDailySurprises.js",
     "prestart": "npm run backfill:surprises || true",

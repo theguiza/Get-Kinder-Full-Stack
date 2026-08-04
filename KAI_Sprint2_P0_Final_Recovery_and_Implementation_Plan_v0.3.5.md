@@ -7834,3 +7834,178 @@ prohibited_actions_not_performed:
 
 commit_hash: report after commit; a commit cannot contain its own SHA
 ```
+
+## P1-05 evidence - intake sensitivity and allowed-use profile foundation
+
+```text
+timestamp_local: 2026-08-04 America/Vancouver
+branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: f4b74fff6a4b51b75a0c1dba1cc7f94a7ae92f47
+package: KAI P1-05 - intake sensitivity and allowed-use profile foundation
+status: TOOL_VERIFIED
+
+pre_append_execplan:
+  byte_count: 629799
+  sha256: af5f79e24fe84909dfbaf05e263d7bdd7e9a2568cb487f60a1f47a32a31a322c
+  preserved_copy: /private/tmp/claude-501/-Users-mikewoz-Get-Kinder-Full-Stack-Deploy/70ab29f8-42df-4f06-800d-cceeb3fb5730/scratchpad/execplan.pre-p1-05.md
+  prefix_proof: TOOL_VERIFIED - the preserved copy's full 629799 bytes are byte-identical to
+    this file's first 629799 bytes (cmp over the prefix, exit 0); this block is appended
+    after that byte offset only, so this package's evidence is additions-only and no
+    earlier byte was altered
+
+scope_decision:
+  new_table: kai.intake_sensitivity_profiles - one authoritative row per organization_id +
+    file_profile_id + data_dictionary_id, bound by composite foreign key to the exact
+    stored kai.intake_file_profiles lineage (file_profile_id, organization_id,
+    intake_file_id, profile_canonical_sha256 via intake_file_profiles_p1_04_lineage_unique)
+    and the exact stored kai.data_dictionaries lineage (data_dictionary_id,
+    organization_id, intake_file_id, file_profile_id via data_dictionaries_p1_04_lineage_unique).
+    Neither existing composite unique constraint was altered - both are only referenced.
+  dimensions: PII, minor data, health/housing/justice/immigration data, Indigenous/OCAP-like
+    governance-sensitive data, staff notes, story/testimonial content, small-cell risk,
+    consent basis, allowed use, and financial records are each their own CHECK-enforced
+    text column with an unknown/present/absent (or unknown/allowed/not_allowed for
+    allowed_use) enum. Indigenous governance and financial records are never merged into
+    the generic pii_status column (proven by CHECK_EXISTS/DISTINCT_* verifier rows and by
+    a dedicated boundary test). review_status/review_requirements are never persisted - the
+    only committed fact about review is the fail-closed human_review_required boolean,
+    pinned true by the same CHECK (x = fixed_value) idiom P1-04 already used for its own
+    per-field booleans.
+  pinned_restrictions: llm_processing_allowed, product_learning_allowed, public_use_allowed,
+    and funder_use_allowed are each their own boolean column, CHECK-pinned to false;
+    human_review_required is CHECK-pinned to true; retention_posture is a single
+    CHECK-pinned labeled restriction ('restricted_pending_review') - never a retention
+    execution, deletion, storage-lifecycle change, or job activation.
+  fact_source: deriveSensitivityFacts (Backend/kai/dictionary/postgresIntakeSensitivityProfileRepository.js)
+    is a pure function reading only an optional profile.sensitivity_committed_facts object
+    already present on the repository-loaded, committed kai.intake_file_profiles.profile
+    jsonb; any dimension absent, malformed, or outside its accepted enum defaults to
+    'unknown'. There is no inference from file content, filenames, or field names. The
+    internal fact-source key for the PII dimension is named `personal_data`, not `pii`:
+    the committed profile jsonb column is itself governed by the existing, frozen
+    kai.gate_a_p0_jsonb_metadata_only() content filter, which refuses any jsonb value
+    containing the literal substring "pii" anywhere in its text (discovered via a live
+    23514 failure on kai.intake_file_profiles during integration testing and resolved by
+    renaming only the internal fact-source key; the persisted SQL column is still named
+    pii_status, since that plain-text column is never checked by that jsonb-only filter).
+    Because no current committed profile producer states any sensitivity_committed_facts,
+    every dimension loads as 'unknown' today - the correct, expected behavior for this
+    foundation/schema/repository/service scaffold package.
+  identity_and_replay: one row per organization_id + file_profile_id + data_dictionary_id
+    (intake_sensitivity_profiles_p1_05_identity_unique). Same identity + same bound
+    profile hash: replay, no duplicate audit. Concurrent identical creation is resolved by
+    `ON CONFLICT (organization_id, file_profile_id, data_dictionary_id) DO NOTHING
+    RETURNING ...` plus an authoritative re-read in the same transaction - no in-memory
+    lock, mutex, in-flight map, or advisory lock. The "different bound hash" conflict
+    branch is retained defensively (shapeSensitivityError conflict_current_state_changed)
+    but is structurally unreachable through the real schema, exactly like P1-04's own
+    analogous branch: kai.intake_file_profiles.file_profile_id is its primary key and
+    profile_canonical_sha256 is bound only at insert time, so it is exercised directly
+    against the repository's transaction control flow with a fake transaction context in
+    the boundary spec rather than via real mutated Postgres state.
+  audit: operation intake_sensitivity_profile_persisted, contract
+    p1_intake_sensitivity_and_allowed_use_v1, validator_key VAL-KAI-P1-05-001, added
+    additively to upload_lifecycle_audit_gate_a_operation_check /
+    upload_lifecycle_audit_gate_a_metadata_object_check inside the new P1-05 migration
+    file only (the Gate A/P1-02/P1-03/P1-04 migration files were never edited - the
+    constraints are recreated in full by DROP CONSTRAINT IF EXISTS/ADD CONSTRAINT inside
+    this migration, exactly like P1-04 did for Gate A's constraints). Metadata carries
+    exactly metadata_only, contract, file_profile_id, data_dictionary_id,
+    profile_canonical_sha256, human_review_required, validator_key - no profile content,
+    label, sample, PII, path, URL, prompt, or credential. Rejection of the required audit
+    prepare, a synchronous publish() throw, or a rejected publish() promise rolls back the
+    sensitivity-profile write and the audit write together in the same transaction; the
+    own-boolean-data-property prepareRequiredAudit predicate (own-property descriptor
+    read, Object.hasOwn(okDescriptor, "value") && okDescriptor.value === true, callable
+    publish) is copied unchanged from postgresDataDictionaryRepository.js.
+  feature_flag: every repository/service operation checks KAI_SPRINT2_ENABLED first;
+    disabled returns the canonical feature_disabled result with zero profile reads,
+    dictionary reads, writes, locks, audit preparation, or publication (boundary test).
+  p1_02_p1_03_p1_04_protection: no P1-02, P1-03, P1-04, or Gate A migration, rollback,
+    runner, verifier, failure-checks, smoke-seed, smoke-verifier, repository, service, or
+    test file was edited - confirmed empty by `git diff --stat` over those exact paths
+    and by `git diff --cached --stat` limited to the P1-04/P1-02 migration and spec
+    files; the two referenced composite unique constraints
+    (intake_file_profiles_p1_04_lineage_unique, data_dictionaries_p1_04_lineage_unique)
+    are referenced only, never altered.
+  runner: scripts/kai-sprint2-p1-05-intake-sensitivity-profile-local-postgres.js -
+    runner-owned synthetic database kai_p1_05_intake_sensitivity_profile_synthetic,
+    loopback 127.0.0.1, runner-chosen port in 59000-59999, listen_addresses '127.0.0.1'
+    only, PostgreSQL 16 (proveRunnerOwnedTarget fails closed on any mismatch, matching
+    the P1-02/P1-03/P1-04 runner pattern); no shared, staging, cloud, deployed,
+    production, or real-client-data database was created or used.
+
+tests_added_and_results: TOOL_VERIFIED
+  __tests__/kai-sprint2-p1-05-intake-sensitivity-profile-schema-contract.spec.js: 11 passed
+  __tests__/kai-sprint2-p1-05-intake-sensitivity-profile-boundary.spec.js: 15 passed
+  __tests__/kai-sprint2-p1-05-intake-sensitivity-profile.integration.spec.js (ephemeral PG 16): 13 passed
+  npm run verify:kai-sprint2-p1-05-intake-sensitivity-profile -> catalog verifier all PASS,
+    read-only failure checks all PASS (9/9), smoke verifier 19/19 PASS, integration suite
+    13/13 passed
+  npm run verify:kai-sprint2-p1-04-data-dictionary-quality (P1-04 runner, unmodified) ->
+    tests 12; pass 12; fail 0
+  npm run verify:kai-sprint2-p1-03-parser-profile-worker (P1-03 runner, unmodified) ->
+    tests 14; pass 14; fail 0
+  npm run verify:kai-sprint2-p1-parser-run-file-profile (P1-02 runner, unmodified) -> passed
+  node --test __tests__/kai-sprint2-transaction-interface.spec.js
+    __tests__/kai-sprint2-audit-contract.spec.js __tests__/kai-sprint2-audit-queries.spec.js
+    -> tests 17; pass 17; fail 0
+  npm run test:kai-sprint2 -> tests 1080; pass 1075; fail 0; skipped 5
+  npm test (complete repository suite) -> tests 1185; pass 1180; fail 0; skipped 5
+  git diff --check -> clean (exit 0)
+  git diff --cached --check -> clean (exit 0)
+
+changed_files:
+  migrations/kai_sprint2_p1_05_intake_sensitivity_profile.sql (added)
+  migrations/kai_sprint2_p1_05_intake_sensitivity_profile.rollback.sql (added)
+  scripts/kai-sprint2-p1-05-intake-sensitivity-profile-verifier.sql (added)
+  scripts/kai-sprint2-p1-05-intake-sensitivity-profile-failure-checks.sql (added)
+  scripts/kai-sprint2-p1-05-intake-sensitivity-profile-smoke-seed.sql (added)
+  scripts/kai-sprint2-p1-05-intake-sensitivity-profile-smoke-verifier.sql (added)
+  scripts/kai-sprint2-p1-05-intake-sensitivity-profile-local-postgres.js (added)
+  scripts/kai-sprint2-p1-05-intake-sensitivity-profile-runbook.md (added)
+  scripts/kai-sprint2-p1-05-intake-sensitivity-profile-patch-notes.md (added)
+  Backend/kai/dictionary/postgresIntakeSensitivityProfileRepository.js (added)
+  Backend/kai/services/kaiIntakeSensitivityProfileService.js (added)
+  package.json (modified - added verify:kai-sprint2-p1-05-intake-sensitivity-profile script,
+    one new line only)
+  __tests__/kai-sprint2-p1-05-intake-sensitivity-profile-schema-contract.spec.js (added)
+  __tests__/kai-sprint2-p1-05-intake-sensitivity-profile-boundary.spec.js (added)
+  __tests__/kai-sprint2-p1-05-intake-sensitivity-profile.integration.spec.js (added)
+  KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md (this evidence block)
+
+new_export:
+  Backend/kai/dictionary/postgresIntakeSensitivityProfileRepository.js:
+    __intakeSensitivityProfileRepositoryContract, __intakeSensitivityProfileRepositoryTestables
+    (prepareRequiredAudit, RequiredAuditRejectedError, deriveSensitivityFacts) - test-seam
+    exports only, following the existing __dataDictionaryRepositoryTestables convention;
+    adds no production export, route, listener, barrel export, or production composition
+
+not_reopened:
+  - no P1-02, P1-03, P1-04, or Gate A migration, rollback, runner, verifier, smoke, or
+    runbook artifact was edited
+  - no route, listener, scheduler, timer, startup hook, public barrel export, production
+    composition, application repository selection, feature-flag default, or cloud
+    configuration was added
+  - no review queue item, source candidate, promotion decision, source, source version,
+    evidence, claim, or assistant tool was created
+  - no retention execution, deletion, storage-lifecycle change, job activation, approval,
+    or external-release authority was implemented anywhere
+  - no new approval state, audience/permission concept, review-completion semantics, or
+    retention-execution semantics was invented beyond exactly what this package's brief
+    required
+
+not_confirmed:
+  production_repository_selection: NOT_CONFIRMED
+  production_database_execution: NOT_CONFIRMED
+  deployment: NOT_CONFIRMED
+
+prohibited_actions_not_performed:
+  - no fetch, pull, push, merge, rebase, reset, cherry-pick, history rewrite, route wiring,
+    service wiring, barrel wiring, production repository selection, production
+    composition, feature-flag changes, cloud/storage work, Current State changes,
+    Implementation Baseline changes, Gate A/P1-02/P1-03/P1-04 migration edits, deployment,
+    production/shared database access, or real client data access
+
+commit_hash: report after commit; a commit cannot contain its own SHA
+```
