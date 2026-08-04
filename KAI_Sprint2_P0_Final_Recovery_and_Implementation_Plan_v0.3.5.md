@@ -7126,3 +7126,202 @@ schema_correction_summary: TOOL_VERIFIED
   parser_status/retry_count/error_code/error_message_safe keys in place of the removed
   run_state/failure_reason keys.
 ```
+
+## KAI P1-03: persistent parser/profile worker orchestration
+
+```text
+Scope: a dormant internal parser/profile worker subsystem over the existing, unmodified
+P1-02 substrate (kai.intake_parser_runs, kai.intake_file_profiles) and the existing Gate A
+metadata-only audit table (kai.upload_lifecycle_audit). No migration, no schema change, no
+route, listener, scheduler, timer, polling loop, startup hook, public barrel export,
+production composition, application repository selection, feature-flag default, or cloud
+configuration was added or modified. Sensitivity, data-dictionary, quality, review-workflow,
+source, source_version, evidence, claim, and generation records remain out of scope and are
+not created.
+
+seams_reused_not_invented: TOOL_VERIFIED
+  transaction interface: withTransaction(callback[, transactionProvider]) in
+    Backend/kai/db/kaiDb.js (the single authoritative callback-scoped repository transaction
+    interface; the provider parameter is used only as the existing test-injection seam)
+  identity + constraints: the frozen P1-02 identity organization_id + intake_file_id +
+    parser_name + parser_version + checksum, resolved concurrently through the existing
+    intake_parser_runs_p1_identity_unique constraint
+  canonical profile hash: the already-installed encode(digest(<jsonb>::text, 'sha256'), 'hex')
+    convention used by scripts/kai-sprint2-p1-parser-run-file-profile-smoke-seed.sql for
+    profile_canonical_sha256 and by Backend/kai/upload/postgresUploadLifecycleRepository.js for
+    sanitized_result_canonical_sha256; no competing JavaScript canonicalization was introduced
+  required metadata-only audit: the already-installed kai.upload_lifecycle_audit operations
+    parser_run_recorded and file_profile_persisted with the exact metadata key sets already
+    enforced by upload_lifecycle_audit_gate_a_metadata_object_check, the existing contract
+    value p1_parser_run_and_file_profile_v1, and the existing validator key VAL-KAI-P1-02-001;
+    no new audit operation, metadata key, contract string, or validator key was added
+  metadata-only audit guard: the existing injected
+    metadataOnlyAudit.prepareMetadataOnlyAudit({ payload }) -> { ok, publish } seam already used
+    by the Gate A / P0-06B policy-decision path
+  deterministic profilers: profileLocalTrustedFile (Backend/kai/profiling/localProfilingKernel.js)
+    for CSV, XLSX, Markdown, and TXT; runPdfProfilingWorkerBoundary
+    (Backend/kai/validators/pdfAssessorWorkerBoundary.js) for machine-readable PDF
+  exact object-version byte source: the existing readObjectVersion({ objectVersionId }) ->
+    { ok, data: { object_version_id, size_bytes, bytes } } storage-read seam already implemented
+    by Backend/kai/storage/localDevStorageAdapter.js; tests inject synthetic bytes through that
+    same shape and no new storage abstraction was created
+  feature gate: isKaiSprint2Enabled(env) with the canonical buildKaiError("feature_disabled")
+    disabled result, mirroring Backend/kai/services/kaiStorageService.js
+  result envelopes: { ok: true, data, error: null } / { ok: false, data: null, error: { code,
+    status } }, mirroring the P0-06B upload lifecycle adapter
+
+boundary_discipline: TOOL_VERIFIED
+  Backend/kai/parsing/postgresParserRunRepository.js is the only P1-03 module containing SQL or
+  row locking. Backend/kai/parsing/parserProfileWorkerOrchestration.js contains no SQL, imports
+  no pg pool and no kaiDb, references no kai.<table>, and requires both the parser-run
+  repository and the object-version byte source to be injected, so it selects no repository and
+  binds no production composition. Asserted by
+  __tests__/kai-sprint2-p1-03-parser-profile-worker-boundary.spec.js.
+
+required_behavior_evidence: TOOL_VERIFIED
+  verified by `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run
+  verify:kai-sprint2-p1-03-parser-profile-worker` (runner-created ephemeral loopback
+  PostgreSQL 16 target kai_p1_03_parser_profile_worker_synthetic) -> 12 pass, 0 fail, and by
+  `node --test __tests__/kai-sprint2-p1-03-parser-profile-worker-boundary.spec.js` -> 8 pass,
+  0 fail:
+    organization-scoped idempotent queue/ensure: new identity creates exactly one queued run;
+      identical queued and identical running work replay the same parser_run_id with no second
+      row; identical completed work replays the stored metadata-only profile and canonical hash
+      with zero byte reads and zero profiler calls
+    concurrent queue: a deterministically raced second ensure against an uncommitted duplicate
+      insert, and five parallel ensures for one identity, both resolve to exactly one
+      authoritative run (one row, one non-replayed result) through ON CONFLICT ON CONSTRAINT
+      intake_parser_runs_p1_identity_unique DO NOTHING plus re-read inside the same transaction
+    claim locking: FOR UPDATE OF r SKIP LOCKED on parser_status = 'queued' refuses a second
+      claim while another session holds the run row (409 conflict_current_state_changed), leaves
+      an independent run claimable in the same window, transitions queued -> running, and
+      refuses a repeat claim of a running run
+    profilers: CSV, XLSX, Markdown, TXT, and machine-readable PDF all complete with
+      status = "profiled", a linked output_profile_id, and a persisted canonical hash equal to
+      encode(digest(profile::text, 'sha256'), 'hex') recomputed in the database
+    non-profilable PDF: an image-only synthetic PDF records a safe failure with error_code
+      pdf_no_extractable_text, retry_count 1, no profile row, and null output_profile_id
+    atomic completion: profile + canonical hash + completed transition + output_profile_id link
+      + file_profile_persisted and parser_run_recorded audit commit together; a rejected audit
+      guard (422 validation_blocker) and a throwing audit publish (500 system_error) each roll
+      back every domain write, leaving the run running, zero profile rows, and no new audit rows
+    atomic safe failure: failed transition + exactly one retry_count increment + safe
+      error_code/error_message_safe + parser_run_recorded audit commit together; a rejected or
+      throwing failure audit rolls the transition back with retry_count unchanged
+    explicit retry: retry_count increments exactly once per safe failure (1, 2, 3); retry runs
+      while retry_count < 3; at retry_count = 3 no claim, no byte read, no profiler call, and no
+      audit write occur and the derived requires_manual_review: true is returned; retry_count is
+      never reset or decremented; information_schema confirms no requires_manual_review or
+      manual_review_required column exists
+    cancelled runs: never claimed (409) and never retried (422 state_transition_denied), with
+      zero byte reads and no audit or state change
+    tenant isolation: cross-tenant ensure, claim, get, complete, fail, and retry all return the
+      same nondisclosing 404 not_found while the owning tenant's run is unchanged, and a second
+      tenant's own file with the same checksum gets an independent run
+    feature gate: with KAI_SPRINT2_ENABLED unset, "false", or "0" all three operations return
+      the canonical feature_disabled result (403) with zero repository calls, zero byte reads,
+      zero profiler calls, and zero audit prepares, and against the live database zero runs,
+      zero profiles, and zero audit rows
+    prohibited content and integration: audit metadata key sets are asserted equal to the
+      key sets required by the existing migration CHECK, contain no checksum and no profile,
+      every persisted profile and audit metadata row is asserted free of raw sentinels, URLs,
+      /Users/ or /private/ paths, signed URLs, and raw byte/text markers, only the four
+      authorized kai tables are referenced by the adapter, the kai schema table list is
+      unchanged, kai.upload_policy_decision_replay stays empty, intake_files upload/policy/parse
+      state is unchanged, no new migration file exists, and Backend/kai/index.js exports nothing
+      from Backend/kai/parsing/
+
+test_and_suite_results: TOOL_VERIFIED
+  npm run verify:kai-sprint2-p1-03-parser-profile-worker -> 12 pass / 0 fail
+  node --test __tests__/kai-sprint2-p1-03-parser-profile-worker-boundary.spec.js -> 8 pass / 0 fail
+  affected profiler, byte-source, audit, repository, transaction, and P1-02 schema-contract
+    regression specs (kai-sprint2-p1-local-profiling-kernel, kai-sprint2-p1-pdf-profiling-worker-boundary,
+    kai-sprint2-storage-boundary, kai-sprint2-audit-contract, kai-sprint2-audit-queries,
+    kai-sprint2-mutation-orchestration, kai-sprint2-p0-upload-lifecycle-repository,
+    kai-sprint2-p0-repository-contract, kai-sprint2-p1-parser-run-file-profile-schema-contract,
+    kai-sprint2-p1-03-parser-profile-worker-boundary) -> 163 pass / 0 fail
+  npm run test:kai-sprint2 -> 1020 pass / 0 fail / 3 skipped (the three database-gated
+    integration specs, which skip without their runner-owned target)
+  npm test (complete repository suite) -> 1125 pass / 0 fail / 3 skipped (same three)
+  npm run verify:kai-sprint2-api-contract -> 55 pass / 0 fail
+  npm run verify:kai-sprint2-schema-contract -> 21 pass / 0 fail
+  npm run verify:kai-sprint2-p1-parser-run-file-profile -> P1-02 ephemeral verification passed
+  node scripts/kai-sprint2-p0-postgres-upload-lifecycle-adapter-runner.js -> 5 pass / 0 fail
+  npm run verify:kai-sprint2-gate-a-p0 -> Gate A ephemeral verification passed
+  git diff --check -> clean (exit 0)
+  DATABASE_URL was set to the non-listening loopback sentinel
+    postgres://127.0.0.1:9/kai_sentinel before the first Node/npm command of this session and
+    kept set for every later Node/npm command; every real PostgreSQL target was created,
+    proved loopback/version/name, and destroyed by a runner
+  no staged-diff verification script exists in package.json (searched every "verify:" script);
+    NOT_CONFIRMED that any such script was run because none is defined
+```
+
+```text
+changed_files:
+  Backend/kai/parsing/postgresParserRunRepository.js (new)
+  Backend/kai/parsing/parserProfileWorkerOrchestration.js (new)
+  __tests__/kai-sprint2-p1-03-parser-profile-worker.integration.spec.js (new)
+  __tests__/kai-sprint2-p1-03-parser-profile-worker-boundary.spec.js (new)
+  scripts/kai-sprint2-p1-03-parser-profile-worker-runner.js (new)
+  scripts/kai-sprint2-p1-03-parser-profile-worker-runbook.md (new)
+  package.json (one added verify:kai-sprint2-p1-03-parser-profile-worker script only)
+  KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md (this evidence block)
+
+migrations: none
+  no schema change is authorized for this package; the existing P1-02 migration and rollback
+  draft were read and reused unmodified.
+
+files_considered_and_not_modified:
+  migrations/kai_sprint2_p1_parser_run_and_file_profile.sql and .rollback.sql:
+    reason: P1-03 builds only on the existing tables, constraints, audit operations, and audit
+    metadata CHECK branches these files already install; no column, constraint, index, trigger,
+    or audit vocabulary was needed.
+  scripts/kai-sprint2-p1-parser-run-file-profile-verifier.sql, -failure-checks.sql,
+  -smoke-seed.sql, -smoke-verifier.sql, -runbook.md:
+    reason: they verify the P1-02 substrate itself, which is unchanged; P1-03 behavior is
+    proved by adapter-level integration tests against that substrate rather than by additional
+    SQL verifiers.
+  scripts/kai-sprint2-p1-parser-run-and-file-profile-local-postgres.js and
+  scripts/kai-sprint2-p0-postgres-upload-lifecycle-adapter-runner.js:
+    reason: both are single-purpose, frozen package runners with hardcoded database names,
+    migration lists, and spec lists; parameterizing either would have changed an existing
+    verified package's contract, so the P1-03 runner reuses their proven loopback/version/name
+    fail-closed pattern in a separate script and both existing runners were re-run unmodified
+    and still pass.
+  Backend/kai/db/kaiDb.js:
+    reason: withTransaction(callback[, transactionProvider]) already provides exactly the
+    callback-scoped transaction plus test-injection seam this package needs.
+  Backend/kai/profiling/localProfilingKernel.js and
+  Backend/kai/validators/pdfAssessorWorkerBoundary.js:
+    reason: the existing deterministic profilers already return frozen, redacted,
+    metadata-only envelopes with safe failure and not-profilable shapes; P1-03 only dispatches
+    to them and maps their safe outcomes.
+  Backend/kai/storage/localDevStorageAdapter.js, storageAdapter.js, objectStorageAdapter.js:
+    reason: readObjectVersion already exposes the exact object-version byte-source shape; the
+    orchestration consumes that shape through injection and no storage code needed changing.
+  Backend/kai/upload/postgresUploadLifecycleRepository.js and
+  inMemoryUploadLifecycleRepository.js:
+    reason: read as the closest sibling for transaction, locking, audit-guard, error-shaping,
+    and result-envelope conventions; P1-03 mirrors those conventions without editing the
+    upload lifecycle package.
+  Backend/kai/index.js:
+    reason: this package must add no public barrel export or production composition, so the
+    canonical barrel was deliberately left untouched.
+  Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md:
+    reason: read in full for audit, transaction, hashing, concurrency, and composition
+    conventions; it is the single non-executable repository contract and this package
+    introduced no new repository behavior requiring a contract amendment.
+  00_KAI_CURRENT_STATE.md and every other Current State / Implementation Baseline document:
+    reason: explicitly out of scope for this package.
+
+open_items:
+  parser_name values: the P1-02 smoke seed already fixes kai_local_profiling_kernel; this
+  package additionally uses kai_pdf_profiling_worker_boundary for the machine-readable PDF
+  profiler. parser_name has no controlled vocabulary in the installed schema (only the
+  ^[a-z0-9_]+$ CHECK), so this is a new value inside an existing free-form column, not new
+  audit or status vocabulary. If an owner later fixes a parser-name registry, that value is the
+  one to review.
+  This package remains dormant: nothing composes, mounts, schedules, or enables it, and no
+  runtime behavior changed.
+```
