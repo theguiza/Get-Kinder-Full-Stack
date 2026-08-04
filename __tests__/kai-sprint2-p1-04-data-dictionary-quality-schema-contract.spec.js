@@ -64,6 +64,17 @@ test("P1-04 business meaning and entity level default to unknown but may carry a
   assert.match(migrationSource, /CONSTRAINT data_dictionary_fields_p1_04_entity_level_check\s+CHECK \(\s*entity_level = 'unknown'/);
 });
 
+test("P1-04 mapping_confidence is nullable, carries no fabricated default, and is range-checked", () => {
+  assert.match(migrationSource, /^\s*mapping_confidence numeric\(3,2\),$/m);
+  assert.doesNotMatch(migrationSource, /mapping_confidence numeric\(3,2\)[^,\n]*NOT NULL/);
+  assert.doesNotMatch(migrationSource, /mapping_confidence[^,\n]*DEFAULT/);
+  assert.doesNotMatch(migrationSource, /DEFAULT 1\.00/);
+  assert.match(
+    migrationSource,
+    /CONSTRAINT data_dictionary_fields_p1_04_mapping_confidence_check\s+CHECK \(\s*mapping_confidence IS NULL\s+OR \(mapping_confidence >= 0 AND mapping_confidence <= 1\)\s*\)/,
+  );
+});
+
 test("P1-04 quality findings are constrained to the accepted profile-stage-fact vocabulary only", () => {
   assert.match(
     migrationSource,

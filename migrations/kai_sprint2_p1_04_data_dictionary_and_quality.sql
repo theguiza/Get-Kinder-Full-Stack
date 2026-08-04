@@ -72,7 +72,9 @@ CREATE TABLE IF NOT EXISTS kai.data_dictionary_fields (
   business_meaning text NOT NULL DEFAULT 'unknown',
   entity_level text NOT NULL DEFAULT 'unknown',
   quality_notes_safe text,
-  mapping_confidence numeric(3,2) NOT NULL DEFAULT 1.00,
+  -- Nullable with no default on purpose: absence of an explicit committed
+  -- profile-provided confidence is stored as NULL, never as a fabricated certainty.
+  mapping_confidence numeric(3,2),
   review_status text NOT NULL DEFAULT 'needs_gk_review',
   sensitivity text NOT NULL DEFAULT 'unknown',
   allowed_use text NOT NULL DEFAULT 'internal',
@@ -121,8 +123,15 @@ CREATE TABLE IF NOT EXISTS kai.data_dictionary_fields (
         AND quality_notes_safe !~* '(https?://|/Users/|/private/|/var/|/etc/|password|secret|api[_-]?key|token|credential|Bearer\s|stack ?trace|traceback|\s{2}at [A-Za-z])'
       )
     ),
+  -- The only accepted mapping_confidence values are NULL (unknown) or an explicit
+  -- finite value inside the authoritative inclusive range [0, 1]. numeric 'NaN' sorts
+  -- above every number, so it fails this comparison; numeric 'Infinity' is refused
+  -- earlier still, by the numeric(3,2) precision of the column itself.
   CONSTRAINT data_dictionary_fields_p1_04_mapping_confidence_check
-    CHECK (mapping_confidence >= 0 AND mapping_confidence <= 1),
+    CHECK (
+      mapping_confidence IS NULL
+      OR (mapping_confidence >= 0 AND mapping_confidence <= 1)
+    ),
   CONSTRAINT data_dictionary_fields_p1_04_review_status_check
     CHECK (review_status = 'needs_gk_review'),
   CONSTRAINT data_dictionary_fields_p1_04_sensitivity_check

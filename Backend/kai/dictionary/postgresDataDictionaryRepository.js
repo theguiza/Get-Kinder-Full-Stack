@@ -27,6 +27,14 @@ const DICTIONARY_AUDIT_OPERATION = "data_dictionary_draft_persisted";
 const FILE_LEVEL_FIELD_KEY = "file_level";
 const FIELD_TYPE_CATEGORIES = Object.freeze(["boolean", "number", "date_like", "text_like"]);
 
+/**
+ * Authoritative finite inclusive range for `kai.data_dictionary_fields.mapping_confidence`.
+ * The column is nullable with no default: absence of an explicit committed
+ * profile-provided confidence is persisted as NULL, never as certainty.
+ */
+const MAPPING_CONFIDENCE_MIN = 0;
+const MAPPING_CONFIDENCE_MAX = 1;
+
 const UNSAFE_TEXT_PATTERN =
   /(https?:\/\/|\/Users\/|\/private\/|\/var\/|\/etc\/|password|secret|api[_-]?key|token|credential|Bearer\s|stack ?trace|traceback|\s{2}at [A-Za-z])/i;
 
@@ -138,11 +146,38 @@ function deriveEntityLevel(entry) {
   return "unknown";
 }
 
+/**
+ * A profile-committed count is a fact only when the committed profile states it.
+ * An absent count is never substituted with 0, a denominator, or a total.
+ */
+function isCommittedCount(value) {
+  return Number.isFinite(value);
+}
+
+/**
+ * Quality note text records only the counts the committed profile actually states.
+ * Both counts absent yields no note at all; one count present records exactly that
+ * one count, with no fabricated counterpart and no fabricated denominator.
+ */
 function deriveQualityNotesSafe(entry) {
-  const missingCount = Number.isFinite(entry.missing_count) ? entry.missing_count : null;
-  const presentCount = Number.isFinite(entry.present_count) ? entry.present_count : null;
-  if (missingCount === null && presentCount === null) return null;
-  return `present_count=${presentCount ?? 0}, missing_count=${missingCount ?? 0}`;
+  const parts = [];
+  if (isCommittedCount(entry.present_count)) parts.push(`present_count=${entry.present_count}`);
+  if (isCommittedCount(entry.missing_count)) parts.push(`missing_count=${entry.missing_count}`);
+  if (parts.length === 0) return null;
+  return parts.join(", ");
+}
+
+/**
+ * Mapping confidence is copied only when the committed profile provides an explicit
+ * finite numeric value inside the authoritative inclusive range. Anything else -
+ * absent, non-numeric, NaN, Infinity, or out of range - persists as NULL. There is
+ * no default confidence and never an assumed certainty.
+ */
+function deriveMappingConfidence(entry) {
+  const value = entry?.mapping_confidence;
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  if (value < MAPPING_CONFIDENCE_MIN || value > MAPPING_CONFIDENCE_MAX) return null;
+  return value;
 }
 
 /**
@@ -165,6 +200,7 @@ function deriveDictionaryFields(profile) {
       businessMeaning: deriveBusinessMeaning(entry),
       entityLevel: deriveEntityLevel(entry),
       qualityNotesSafe: deriveQualityNotesSafe(entry),
+      mappingConfidence: deriveMappingConfidence(entry),
     });
   }
   return fields;
@@ -182,12 +218,16 @@ function deriveQualityFindings(profile, fields) {
     const entry = profile.fields.find((candidate) => candidate.field_key === field.profileFieldKey);
     if (!isPlainObject(entry)) continue;
 
-    if (Number.isFinite(entry.missing_count) && entry.missing_count > 0) {
-      const total = (Number.isFinite(entry.present_count) ? entry.present_count : 0) + entry.missing_count;
+    if (isCommittedCount(entry.missing_count) && entry.missing_count > 0) {
+      // A denominator exists only when the committed profile states both counts. A
+      // missing present_count is never substituted with 0 to invent a total.
+      const findingDetailSafe = isCommittedCount(entry.present_count)
+        ? `${field.profileFieldKey} has ${entry.missing_count} missing values out of ${entry.present_count + entry.missing_count}`
+        : `${field.profileFieldKey} has ${entry.missing_count} missing values`;
       findings.push({
         profileFieldKey: field.profileFieldKey,
         findingType: "missingness",
-        findingDetailSafe: `${field.profileFieldKey} has ${entry.missing_count} missing values out of ${total}`,
+        findingDetailSafe,
       });
     }
 
@@ -413,6 +453,12 @@ export function createPostgresDataDictionaryRepository({ runInTransaction = with
      * Same profile identity with a different bound hash: `conflict_current_state_changed`.
      * A different profile identity always creates a separate bundle. There is no
      * revision number, predecessor link, or supersession link.
+     *
+     * Concurrent identical creation is resolved by PostgreSQL conflict handling inside
+     * this same transaction (`ON CONFLICT (organization_id, file_profile_id) DO NOTHING`
+     * plus an authoritative re-read), never by an in-process lock: the losing caller
+     * replays the committed bundle when the bound hash matches and receives
+     * `conflict_current_state_changed` when it does not.
      */
     async draftDataDictionary(input) {
       if (!validateDraftInput(input)) return dictionaryFailure("validation_blocker");
@@ -442,10 +488,28 @@ export function createPostgresDataDictionaryRepository({ runInTransaction = with
                organization_id, intake_file_id, file_profile_id, profile_canonical_sha256, created_at
              )
              VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5::timestamptz)
+             ON CONFLICT (organization_id, file_profile_id) DO NOTHING
              RETURNING data_dictionary_id::text AS data_dictionary_id, created_at`,
             [profileRow.organization_id, profileRow.intake_file_id, profileRow.file_profile_id, profileRow.profile_canonical_sha256, now],
           );
-          if (dictionaryInsert.rowCount !== 1) return dictionaryFailure("conflict_current_state_changed");
+          if (dictionaryInsert.rowCount !== 1) {
+            // A concurrent transaction created the authoritative bundle for this exact
+            // (organization_id, file_profile_id) and committed first. PostgreSQL conflict
+            // handling - not an in-process lock - resolves the race: re-read the committed
+            // authoritative row inside this same transaction and replay it when the bound
+            // profile hash still matches, so no duplicate bundle, field, mapping, finding,
+            // or audit row is written and no raw unique violation reaches the caller.
+            const concurrent = await lockExistingBundle(tx, identity.organizationId, identity.fileProfileId);
+            if (!concurrent) return dictionaryFailure("system_error");
+            if (concurrent.profile_canonical_sha256 !== profileRow.profile_canonical_sha256) {
+              return dictionaryFailure("conflict_current_state_changed");
+            }
+            const concurrentCounts = await readBundleCounts(tx, concurrent.data_dictionary_id);
+            return dictionarySuccess({
+              dictionary: rowToBundleRecord(concurrent, concurrentCounts),
+              replayed: true,
+            });
+          }
           const dataDictionaryId = dictionaryInsert.rows[0].data_dictionary_id;
 
           const fieldIdByKey = new Map();
@@ -453,9 +517,10 @@ export function createPostgresDataDictionaryRepository({ runInTransaction = with
             const fieldInsert = await tx.query(
               `INSERT INTO kai.data_dictionary_fields (
                  data_dictionary_id, organization_id, file_profile_id, profile_field_key,
-                 field_label_safe, data_type, business_meaning, entity_level, quality_notes_safe, created_at
+                 field_label_safe, data_type, business_meaning, entity_level, quality_notes_safe,
+                 mapping_confidence, created_at
                )
-               VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9, $10::timestamptz)
+               VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9, $10::numeric, $11::timestamptz)
                RETURNING data_dictionary_field_id::text AS data_dictionary_field_id`,
               [
                 dataDictionaryId,
@@ -467,6 +532,7 @@ export function createPostgresDataDictionaryRepository({ runInTransaction = with
                 field.businessMeaning,
                 field.entityLevel,
                 field.qualityNotesSafe,
+                field.mappingConfidence,
                 now,
               ],
             );
@@ -558,6 +624,8 @@ export const __dataDictionaryRepositoryContract = Object.freeze({
   DICTIONARY_AUDIT_VALIDATOR_KEY,
   DICTIONARY_AUDIT_OPERATION,
   FILE_LEVEL_FIELD_KEY,
+  MAPPING_CONFIDENCE_MIN,
+  MAPPING_CONFIDENCE_MAX,
 });
 
 export const __dataDictionaryRepositoryTestables = Object.freeze({
@@ -566,4 +634,6 @@ export const __dataDictionaryRepositoryTestables = Object.freeze({
   deriveDictionaryFields,
   deriveQualityFindings,
   deriveDataType,
+  deriveQualityNotesSafe,
+  deriveMappingConfidence,
 });

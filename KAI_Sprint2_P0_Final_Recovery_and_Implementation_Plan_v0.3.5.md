@@ -7615,3 +7615,222 @@ prohibited_actions_not_performed:
 
 commit_hash: report after commit; a commit cannot contain its own SHA
 ```
+
+## P1-04 correction evidence - concurrent creation, fact derivation, mapping confidence, audit rollback
+
+```text
+timestamp_local: 2026-08-04 America/Vancouver
+branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 4dda523a7e145b7689a468cac48a7bec95aef0dd
+package: KAI P1-04 correction - concurrent identical creation, no invented zero-valued facts,
+  nullable range-checked mapping confidence, and required-audit rollback proof
+status: TOOL_VERIFIED
+
+pre_append_execplan:
+  byte_count: 614147
+  sha256: c318c05e4e201561d4a3839a8e1b38962130c08a9c8732f51382cce48d0b9c57
+  preserved_copy: /private/tmp/claude-501/-Users-mikewoz-Get-Kinder-Full-Stack-Deploy/6f5c056a-b7de-4479-ab34-d28c041d3dd9/scratchpad/execplan.pre-p1-04-correction.md
+  prefix_proof: TOOL_VERIFIED - the preserved copy's full 614147 bytes are byte-identical to this
+    file's first 614147 bytes (cmp over the prefix, exit 0); this block is appended after that
+    byte offset only, so the correction is additions-only and no earlier byte was altered
+
+post_append_execplan:
+  byte_count: 629799
+  sha256: reported in the correction report; a file cannot contain its own post-append digest
+
+repo_authoritative_facts_quoted:
+  present_count_key: `present_count` - Backend/kai/profiling/localProfilingKernel.js:305 and :324
+    (`present_count: column.present_count`), the committed profiler output contract for
+    `kai.intake_file_profiles.profile.fields[]`
+  missing_count_key: `missing_count` - Backend/kai/profiling/localProfilingKernel.js:304 and :323
+    (`missing_count: column.missing_count`)
+  mapping_confidence_key: DISCREPANCY_RESOLVED - no committed profiler output, contract module,
+    verifier, or read model anywhere in the repository emits any confidence key; the only
+    pre-existing occurrence of confidence in the P1-04 package was
+    migrations/kai_sprint2_p1_04_data_dictionary_and_quality.sql:75
+    (`mapping_confidence numeric(3,2) NOT NULL DEFAULT 1.00`). The repository-authoritative
+    range is therefore the one the P1-04 migration itself already declared and which the
+    numeric(3,2) column type can represent: the finite inclusive range [0, 1]. The repository
+    now copies `entry.mapping_confidence` only when the committed profile states it as an
+    explicit finite number inside that range; because no current profiler emits it, every
+    field persisted today stores NULL, which is the honest fact rather than a fabricated 1.00
+
+defect_1_concurrent_identical_creation:
+  was_wrong: Backend/kai/dictionary/postgresDataDictionaryRepository.js (pre-correction line 448)
+    `if (dictionaryInsert.rowCount !== 1) return dictionaryFailure("conflict_current_state_changed");`
+    guarded a plain `INSERT ... RETURNING` with no ON CONFLICT clause; the preceding
+    `lockExistingBundle` `FOR UPDATE` read cannot lock a row that does not exist yet, so two
+    overlapping transactions for the same (organization_id, file_profile_id) both reached the
+    INSERT and the loser raised a raw unique violation on
+    data_dictionaries_p1_04_bundle_identity_unique, which `shapeDictionaryError` mapped to
+    `conflict_current_state_changed` (SQLSTATE 23505) even though the bound profile hash was
+    identical and the correct outcome was a successful replay
+  fix: same file, the dictionary INSERT now carries
+    `ON CONFLICT (organization_id, file_profile_id) DO NOTHING RETURNING ...`; when no row is
+    returned the same transaction re-reads the committed authoritative row with the existing
+    `lockExistingBundle` helper and either replays it (`replayed: true`) when
+    `profile_canonical_sha256` matches the bound hash, returns
+    `conflict_current_state_changed` when the stored hash differs, or returns `system_error`
+    when the row is unexpectedly absent. All conflict handling is PostgreSQL-side and inside
+    the existing repository transaction: no in-memory lock, mutex, in-flight map, or advisory
+    lock was introduced
+  proof: __tests__/kai-sprint2-p1-04-data-dictionary-quality.integration.spec.js - new test
+    "two genuinely overlapping transactions creating the same bundle resolve to exactly one
+    authoritative bundle" injects a two-party gate into `runInTransaction` so both repository
+    transactions have issued BEGIN before either does its conflicting work (not two sequential
+    awaits), then asserts both calls ok, one shared data_dictionary_id, exactly one
+    `replayed:false` and one `replayed:true`, exactly one published required audit across both
+    probes, and post-race row counts of exactly [1 dictionary, 2 fields, 2 mappings,
+    4 findings, 1 data_dictionary_draft_persisted audit row], plus an authoritative
+    getDataDictionary read agreeing with those counts
+  mutation_check: TOOL_VERIFIED - with the ON CONFLICT clause and conflict re-read temporarily
+    reverted to the pre-correction code, the P1-04 runner reported 12 tests / 11 pass / 1 fail
+    with exactly the new concurrency test failing; the fix was then restored and the runner
+    returned to 12 pass / 0 fail
+
+defect_2_no_invented_zero_valued_facts:
+  was_wrong_1: same file, pre-correction line 145
+    `return \`present_count=${presentCount ?? 0}, missing_count=${missingCount ?? 0}\`;`
+    substituted 0 for whichever count the committed profile did not state, so a field with only
+    a present count was recorded as having `missing_count=0` and vice versa
+  was_wrong_2: same file, pre-correction line 186
+    `const total = (Number.isFinite(entry.present_count) ? entry.present_count : 0) + entry.missing_count;`
+    fabricated a denominator equal to the missing count alone when present_count was absent,
+    and the finding text then asserted `N missing values out of N`
+  fix: `deriveQualityNotesSafe` now builds the note from only the counts the profile states via
+    a new `isCommittedCount` predicate and returns null when neither is stated;
+    `deriveQualityFindings` emits `has N missing values out of <present+missing>` only when both
+    counts are stated and `has N missing values` with no denominator when present_count is absent
+  proof: __tests__/kai-sprint2-p1-04-data-dictionary-quality-boundary.spec.js - two new focused
+    tests cover all four required cases: both counts absent (no quality note, no missingness
+    finding), present count only (note records only `present_count=7`, no missingness finding,
+    no fabricated missing count), missing count only (note records only `missing_count=3`;
+    finding is `field_1 has 3 missing values` and is asserted not to contain "out of"), and both
+    counts present (note `present_count=7, missing_count=3`; finding computes the exact total 10)
+
+defect_3_mapping_confidence:
+  was_wrong: migrations/kai_sprint2_p1_04_data_dictionary_and_quality.sql pre-correction line 75
+    `mapping_confidence numeric(3,2) NOT NULL DEFAULT 1.00,` asserted full certainty for every
+    persisted field even though no committed profiler fact supports any confidence value, and
+    the repository never wrote the column at all
+  fix_migration: the column is now `mapping_confidence numeric(3,2),` - nullable, no DEFAULT -
+    and `data_dictionary_fields_p1_04_mapping_confidence_check` is now
+    `CHECK (mapping_confidence IS NULL OR (mapping_confidence >= 0 AND mapping_confidence <= 1))`,
+    which also refuses numeric 'NaN' (NaN sorts above every number, so `<= 1` is false)
+  fix_rollback: migrations/kai_sprint2_p1_04_data_dictionary_and_quality.rollback.sql documents
+    that the nullable, defaultless, range-checked column is removed together with its own P1-04
+    table; the rollback still alters no earlier-package column
+  fix_repository: new `deriveMappingConfidence` copies `entry.mapping_confidence` only when it is
+    an explicit finite JavaScript number inside the authoritative inclusive range
+    [MAPPING_CONFIDENCE_MIN = 0, MAPPING_CONFIDENCE_MAX = 1]; absent, null, non-numeric,
+    out-of-range, NaN, and +/-Infinity all persist as NULL, and the field INSERT now binds that
+    value as `$10::numeric`. Nothing defaults to 1.00
+  fix_service: none required - Backend/kai/services/kaiDataDictionaryService.js was not modified;
+    all derivation and SQL remain in the repository module, so the service still contains no SQL
+    and imports no pool
+  proof: boundary spec - explicit valid values 0, 0.42, and 1 preserved exactly; absent/null/
+    non-numeric stored as NULL; out-of-range -0.01, -1, 1.01, 2, 100 rejected to NULL (not
+    clamped); NaN, +Infinity, -Infinity rejected to NULL; plus a migration-text test asserting
+    the column is nullable, carries no DEFAULT, and has the range CHECK. Schema-contract spec
+    adds the same three assertions independently. Integration spec proves mapping_confidence
+    persists as NULL for a profile that states no confidence, that an explicit in-range 0.25 is
+    stored as 0.25 while an out-of-range 1.5 in the same profile is stored as NULL, and that
+    direct writes of 1.5, -0.01, and 'NaN' are refused by the CHECK constraint (SQLSTATE 23514)
+    while 'Infinity' is refused earlier by the numeric(3,2) cast (SQLSTATE 22003)
+  live_catalog_check: TOOL_VERIFIED on an ephemeral PostgreSQL 16 loopback database -
+    information_schema reports mapping_confidence is_nullable=YES, column_default=<none>,
+    numeric precision 3 scale 2, and pg_get_constraintdef returns
+    `CHECK (((mapping_confidence IS NULL) OR ((mapping_confidence >= (0)::numeric) AND (mapping_confidence <= (1)::numeric))))`;
+    the P1-04 rollback then dropped all four P1-04 tables (0 remaining) and the migration
+    re-applied cleanly
+
+defect_4_required_audit_rollback_proof:
+  was_wrong: the pre-correction integration test
+    "a rejected publish() promise rolls back every domain write in the same transaction"
+    wrapped the call in `assert.rejects(... .then((result) => { if (!result.ok) throw new Error(...) }))`,
+    so the assertion was satisfied by a test-thrown error rather than by the repository's own
+    returned result; it never asserted `ok:false`, never asserted the error code, checked only
+    kai.data_dictionaries for zero rows, and there was no synchronous-publish-throw case at all
+  fix: that wrapper test was replaced by two table-driven integration cases - one synchronous
+    `publish()` throw and one rejected `publish()` promise - each asserting directly on the
+    returned result object that `ok === false`, `data === null`, `error.code === "system_error"`,
+    and that the probe published nothing, then asserting zero rows in kai.data_dictionaries,
+    kai.data_dictionary_fields, kai.data_dictionary_mappings, kai.data_quality_findings, and
+    zero kai.upload_lifecycle_audit rows with operation = 'data_dictionary_draft_persisted'
+  preserved: the own-boolean-data-property `prepareRequiredAudit` predicate (own-property
+    descriptor read plus `Object.hasOwn(okDescriptor, "value") && okDescriptor.value === true`
+    and a callable publish) is unchanged, `await preparedAudit.publish()` remains awaited inside
+    the same transaction, and the pre-existing rejected-prepare test still proves
+    `validation_blocker` with the same four-table zero-row rollback
+
+tests_added_or_changed:
+  __tests__/kai-sprint2-p1-04-data-dictionary-quality-boundary.spec.js: five new focused tests
+    (PostgreSQL conflict handling with no in-process lock; quality-note count fidelity;
+    missingness denominator fidelity; mapping-confidence derivation; migration mapping_confidence
+    nullability/default/range)
+  __tests__/kai-sprint2-p1-04-data-dictionary-quality-schema-contract.spec.js: one new test
+    asserting mapping_confidence is nullable, carries no fabricated default, and is range-checked
+  __tests__/kai-sprint2-p1-04-data-dictionary-quality.integration.spec.js: replaced the wrapped
+    publish-rejection test with two direct-result rollback cases; added the overlapping-transaction
+    concurrency test and two mapping-confidence persistence tests
+
+test_and_suite_results: TOOL_VERIFIED
+  node --test __tests__/kai-sprint2-p1-04-data-dictionary-quality-boundary.spec.js
+    __tests__/kai-sprint2-p1-04-data-dictionary-quality-schema-contract.spec.js
+    -> tests 28; pass 28; fail 0
+  npm run verify:kai-sprint2-p1-04-data-dictionary-quality -> tests 12; pass 12; fail 0
+    (ephemeral PostgreSQL 16 loopback target created and destroyed by the runner; catalog
+    verifier and read-only failure checks all PASS)
+  npm run verify:kai-sprint2-p1-03-parser-profile-worker -> tests 14; pass 14; fail 0
+  npm run verify:kai-sprint2-p1-parser-run-file-profile -> P1-02 ephemeral verification passed
+  npm run verify:kai-sprint2-gate-a-p0 -> Gate A ephemeral verification passed
+  npm run test:kai-sprint2 -> tests 1053; pass 1049; fail 0; skipped 4
+  npm test (complete repository suite) -> tests 1158; pass 1154; fail 0; skipped 4
+  git diff --check -> clean (exit 0)
+  git diff --cached --check -> clean (exit 0)
+
+changed_files:
+  migrations/kai_sprint2_p1_04_data_dictionary_and_quality.sql (modified - mapping_confidence
+    nullability/default/CHECK only)
+  migrations/kai_sprint2_p1_04_data_dictionary_and_quality.rollback.sql (modified - explanatory
+    comment only)
+  Backend/kai/dictionary/postgresDataDictionaryRepository.js (modified - ON CONFLICT conflict
+    handling and authoritative re-read, count-fidelity derivation, mapping-confidence derivation
+    and INSERT binding, two new test-seam exports)
+  __tests__/kai-sprint2-p1-04-data-dictionary-quality-boundary.spec.js (modified - five tests)
+  __tests__/kai-sprint2-p1-04-data-dictionary-quality-schema-contract.spec.js (modified - one test)
+  __tests__/kai-sprint2-p1-04-data-dictionary-quality.integration.spec.js (modified - concurrency,
+    confidence, and required-audit rollback coverage)
+  KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md (this additions-only correction
+    evidence block)
+
+not_reopened:
+  - no P1-02, P1-03, or Gate A migration, rollback, repository, runner, verifier, smoke, or
+    runbook artifact was modified (verified by git show --stat on the correction commit and by
+    an empty git diff over those paths)
+  - Backend/kai/services/kaiDataDictionaryService.js was not modified; the service still holds no
+    SQL and imports no pool, and all SQL and conflict handling stay in the repository module
+  - no sensitivity profile, review item, source candidate, promotion decision, source, source
+    version, evidence, claim, assistant tool, route, listener, poller, scheduler, startup
+    wiring, public export, production composition, feature-flag default, or cloud config was
+    added
+  - no denominator assessment, coverage-gap analysis, or inference beyond explicit committed
+    profile facts was introduced; absence remains absence
+  - tenant scoping, profile-hash binding, dictionary identity/replay semantics, the
+    draft/needs_gk_review/open statuses, fail-closed unknown defaults, the audit vocabulary and
+    metadata shape, and feature-disabled zero-side-effect behavior are unchanged
+
+not_confirmed:
+  production_repository_selection: NOT_CONFIRMED
+  production_database_execution: NOT_CONFIRMED
+  deployment: NOT_CONFIRMED
+
+prohibited_actions_not_performed:
+  - no fetch, pull, push, merge, rebase, reset, cherry-pick, history rewrite, route wiring,
+    service wiring, barrel wiring, production repository selection, production composition,
+    feature-flag changes, cloud/storage work, Current State changes, Implementation Baseline
+    changes, Gate A migration edits, P1-02/P1-03 migration edits, deployment, production/shared
+    database access, or real client data access
+
+commit_hash: report after commit; a commit cannot contain its own SHA
+```

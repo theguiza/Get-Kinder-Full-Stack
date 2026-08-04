@@ -181,6 +181,112 @@ test("P1-04 deriveQualityFindings only emits findings for explicit committed pro
   assert.deepEqual(deriveQualityFindings(profileWithNoFacts, noFactFields), []);
 });
 
+test("P1-04 repository resolves concurrent identical creation with PostgreSQL conflict handling, not an in-process lock", () => {
+  assert.match(
+    repositorySource,
+    /ON CONFLICT \(organization_id, file_profile_id\) DO NOTHING\s+RETURNING data_dictionary_id/,
+  );
+  assert.doesNotMatch(repositorySource, /\b(?:inFlight|pendingLocks?|mutex|semaphore|advisory_lock|pg_advisory)\b/i);
+});
+
+test("P1-04 quality notes record only the counts the committed profile states, never a substituted zero", () => {
+  const { deriveQualityNotesSafe } = __dataDictionaryRepositoryTestables;
+
+  // both counts absent -> no quality note at all
+  assert.equal(deriveQualityNotesSafe({ field_key: "field_1" }), null);
+
+  // present_count only -> only the explicit present count, no fabricated missing count
+  const presentOnly = deriveQualityNotesSafe({ field_key: "field_1", present_count: 7 });
+  assert.equal(presentOnly, "present_count=7");
+  assert.doesNotMatch(presentOnly, /missing_count/);
+
+  // missing_count only -> only the explicit missing count, no fabricated present count
+  const missingOnly = deriveQualityNotesSafe({ field_key: "field_1", missing_count: 3 });
+  assert.equal(missingOnly, "missing_count=3");
+  assert.doesNotMatch(missingOnly, /present_count/);
+
+  // both present -> both explicit counts
+  assert.equal(
+    deriveQualityNotesSafe({ field_key: "field_1", present_count: 7, missing_count: 3 }),
+    "present_count=7, missing_count=3",
+  );
+});
+
+test("P1-04 missingness findings never invent a denominator when present_count is absent", () => {
+  const { deriveDictionaryFields, deriveQualityFindings } = __dataDictionaryRepositoryTestables;
+
+  function findingsFor(entry) {
+    const profile = { fields: [entry] };
+    return deriveQualityFindings(profile, deriveDictionaryFields(profile));
+  }
+
+  // both counts absent -> no missingness finding
+  assert.deepEqual(findingsFor({ field_key: "field_1" }), []);
+
+  // present_count only -> no missingness finding, no fabricated missing count
+  assert.deepEqual(findingsFor({ field_key: "field_1", present_count: 7 }), []);
+
+  // missing_count > 0 with present_count absent -> missing count reported with no denominator
+  const missingOnly = findingsFor({ field_key: "field_1", missing_count: 3 });
+  assert.equal(missingOnly.length, 1);
+  assert.equal(missingOnly[0].findingType, "missingness");
+  assert.equal(missingOnly[0].findingDetailSafe, "field_1 has 3 missing values");
+  assert.doesNotMatch(missingOnly[0].findingDetailSafe, /out of/);
+
+  // both counts present -> an exact total may be computed
+  const bothPresent = findingsFor({ field_key: "field_1", missing_count: 3, present_count: 7 });
+  assert.equal(bothPresent.length, 1);
+  assert.equal(bothPresent[0].findingDetailSafe, "field_1 has 3 missing values out of 10");
+});
+
+test("P1-04 mapping confidence is copied only from an explicit in-range committed profile value", () => {
+  const { deriveMappingConfidence, deriveDictionaryFields } = __dataDictionaryRepositoryTestables;
+  const { MAPPING_CONFIDENCE_MIN, MAPPING_CONFIDENCE_MAX } = __dataDictionaryRepositoryContract;
+
+  assert.equal(MAPPING_CONFIDENCE_MIN, 0);
+  assert.equal(MAPPING_CONFIDENCE_MAX, 1);
+
+  // explicit valid values are preserved exactly, including both range boundaries
+  assert.equal(deriveMappingConfidence({ mapping_confidence: 0 }), 0);
+  assert.equal(deriveMappingConfidence({ mapping_confidence: 0.42 }), 0.42);
+  assert.equal(deriveMappingConfidence({ mapping_confidence: 1 }), 1);
+
+  // absent, null, or non-numeric confidence becomes NULL, never a default certainty
+  for (const entry of [{}, { mapping_confidence: null }, { mapping_confidence: undefined }, { mapping_confidence: "0.9" }, { mapping_confidence: true }]) {
+    assert.equal(deriveMappingConfidence(entry), null);
+  }
+
+  // out-of-range confidence is rejected, not clamped and not persisted as valid
+  for (const value of [-0.01, -1, 1.01, 2, 100]) {
+    assert.equal(deriveMappingConfidence({ mapping_confidence: value }), null);
+  }
+
+  // non-finite confidence is rejected
+  for (const value of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+    assert.equal(deriveMappingConfidence({ mapping_confidence: value }), null);
+  }
+
+  const derived = deriveDictionaryFields({
+    fields: [
+      { field_key: "field_1", mapping_confidence: 0.5, primitive_type_hints: { number: 3 } },
+      { field_key: "field_2", primitive_type_hints: { number: 3 } },
+      { field_key: "field_3", mapping_confidence: 1.5, primitive_type_hints: { number: 3 } },
+      { field_key: "field_4", mapping_confidence: Number.NaN, primitive_type_hints: { number: 3 } },
+    ],
+  });
+  assert.deepEqual(derived.map((field) => field.mappingConfidence), [0.5, null, null, null]);
+});
+
+test("P1-04 migration keeps mapping_confidence nullable, defaultless, and range-checked", () => {
+  assert.match(migrationSource, /^\s*mapping_confidence numeric\(3,2\),$/m);
+  assert.doesNotMatch(migrationSource, /mapping_confidence[^,\n]*NOT NULL/);
+  assert.doesNotMatch(migrationSource, /mapping_confidence[^,\n]*DEFAULT/);
+  assert.match(
+    migrationSource,
+    /CONSTRAINT data_dictionary_fields_p1_04_mapping_confidence_check\s+CHECK \(\s*mapping_confidence IS NULL\s+OR \(mapping_confidence >= 0 AND mapping_confidence <= 1\)\s*\)/,
+  );
+});
+
 test("P1-04 contract constants match the exact owner-decided audit vocabulary", () => {
   assert.equal(__dataDictionaryRepositoryContract.DICTIONARY_AUDIT_CONTRACT, "p1_draft_data_dictionary_and_quality_v1");
   assert.equal(__dataDictionaryRepositoryContract.DICTIONARY_AUDIT_VALIDATOR_KEY, "VAL-KAI-P1-04-001");

@@ -112,6 +112,8 @@ DROP TABLE IF EXISTS kai.data_quality_findings;
 DROP INDEX IF EXISTS kai.ix_data_dictionary_mappings_p1_04_dictionary;
 DROP TABLE IF EXISTS kai.data_dictionary_mappings;
 
+-- Drops the P1-04 field table together with its nullable, defaultless,
+-- range-checked mapping_confidence column; no earlier-package column is altered.
 DROP INDEX IF EXISTS kai.ix_data_dictionary_fields_p1_04_dictionary;
 DROP TABLE IF EXISTS kai.data_dictionary_fields;
 

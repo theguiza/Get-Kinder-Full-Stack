@@ -304,23 +304,180 @@ async function runDataDictionaryIntegrationSuite() {
     for (const countResult of counts) assert.equal(countResult.rows[0].count, 0);
   });
 
-  test("P1-04: a rejected publish() promise rolls back every domain write in the same transaction", async () => {
-    const intakeFileId = fileId(7);
-    const checksum = checksumFor(7);
+  for (const [label, probeOptions, fileIndex] of [
+    ["a synchronous publish() throw", { publishThrows: true }, 7],
+    ["a rejected publish() promise", { publishRejects: true }, 9],
+  ]) {
+    test(`P1-04: ${label} rolls back the dictionary, fields, mappings, findings, and required audit row together`, async () => {
+      const intakeFileId = fileId(fileIndex);
+      const checksum = checksumFor(fileIndex);
+      await seedIntakeFile(intakeFileId, ORG, checksum);
+      const { fileProfileId } = await seedCompletedProfile({ intakeFileId, organizationId: ORG, checksum, profile: fixtureProfile() });
+
+      const audit = createAuditProbe(probeOptions);
+      // Asserted directly on the returned result object: no try/catch wrapper and no
+      // test-thrown error may stand in for the repository's own failure result.
+      const result = await repository.draftDataDictionary({
+        identity: { organizationId: ORG, fileProfileId },
+        now: NOW,
+        metadataOnlyAudit: audit.dependency,
+      });
+      assert.equal(result.ok, false);
+      assert.equal(result.data, null);
+      assert.equal(result.error.code, "system_error");
+      assert.equal(audit.published.length, 0);
+
+      const rollbackCounts = await withClient((client) => Promise.all([
+        client.query(`SELECT count(*)::int AS count FROM kai.data_dictionaries`),
+        client.query(`SELECT count(*)::int AS count FROM kai.data_dictionary_fields`),
+        client.query(`SELECT count(*)::int AS count FROM kai.data_dictionary_mappings`),
+        client.query(`SELECT count(*)::int AS count FROM kai.data_quality_findings`),
+        client.query(`SELECT count(*)::int AS count FROM kai.upload_lifecycle_audit WHERE operation = 'data_dictionary_draft_persisted'`),
+      ]));
+      for (const countResult of rollbackCounts) assert.equal(countResult.rows[0].count, 0);
+    });
+  }
+
+  test("P1-04: two genuinely overlapping transactions creating the same bundle resolve to exactly one authoritative bundle", async () => {
+    const intakeFileId = fileId(10);
+    const checksum = checksumFor(10);
     await seedIntakeFile(intakeFileId, ORG, checksum);
     const { fileProfileId } = await seedCompletedProfile({ intakeFileId, organizationId: ORG, checksum, profile: fixtureProfile() });
 
-    const audit = createAuditProbe({ publishRejects: true });
-    await assert.rejects(() => repository.draftDataDictionary({
+    // Both repository transactions issue BEGIN and only then pass this gate, so neither
+    // can have committed before the other has started: the overlap is real, not two
+    // sequential awaits.
+    let arrived = 0;
+    let openGate;
+    const gateOpened = new Promise((resolve) => { openGate = resolve; });
+    async function gate() {
+      arrived += 1;
+      if (arrived >= 2) openGate();
+      await gateOpened;
+    }
+    const racingRepository = createPostgresDataDictionaryRepository({
+      runInTransaction: (callback) => withTransaction(async (tx) => {
+        await gate();
+        return callback(tx);
+      }, pool),
+    });
+
+    const firstAudit = createAuditProbe();
+    const secondAudit = createAuditProbe();
+    const [first, second] = await Promise.all([
+      racingRepository.draftDataDictionary({
+        identity: { organizationId: ORG, fileProfileId },
+        now: NOW,
+        metadataOnlyAudit: firstAudit.dependency,
+      }),
+      racingRepository.draftDataDictionary({
+        identity: { organizationId: ORG, fileProfileId },
+        now: NOW,
+        metadataOnlyAudit: secondAudit.dependency,
+      }),
+    ]);
+    assert.equal(arrived, 2, "both transactions must have opened before either did its conflicting work");
+
+    assert.equal(first.ok, true, `first call failed: ${JSON.stringify(first.error)}`);
+    assert.equal(second.ok, true, `second call failed: ${JSON.stringify(second.error)}`);
+    assert.equal(first.data.dictionary.data_dictionary_id, second.data.dictionary.data_dictionary_id);
+    const replayFlags = [first.data.replayed, second.data.replayed].sort();
+    assert.deepEqual(replayFlags, [false, true], "exactly one creator and exactly one replay");
+    assert.equal(firstAudit.published.length + secondAudit.published.length, 1);
+
+    const rows = await withClient((client) => Promise.all([
+      client.query(`SELECT count(*)::int AS count FROM kai.data_dictionaries`),
+      client.query(`SELECT count(*)::int AS count FROM kai.data_dictionary_fields`),
+      client.query(`SELECT count(*)::int AS count FROM kai.data_dictionary_mappings`),
+      client.query(`SELECT count(*)::int AS count FROM kai.data_quality_findings`),
+      client.query(`SELECT count(*)::int AS count FROM kai.upload_lifecycle_audit WHERE operation = 'data_dictionary_draft_persisted'`),
+    ]));
+    assert.deepEqual(rows.map((row) => row.rows[0].count), [1, 2, 2, 4, 1]);
+
+    const authoritative = await repository.getDataDictionary({ identity: { organizationId: ORG, fileProfileId } });
+    assert.equal(authoritative.ok, true);
+    assert.equal(authoritative.data.dictionary.data_dictionary_id, first.data.dictionary.data_dictionary_id);
+    assert.equal(authoritative.data.dictionary.field_count, 2);
+    assert.equal(authoritative.data.dictionary.mapping_count, 2);
+    assert.equal(authoritative.data.dictionary.finding_count, 4);
+  });
+
+  test("P1-04: mapping_confidence persists as NULL when the committed profile states no explicit confidence", async () => {
+    const intakeFileId = fileId(11);
+    const checksum = checksumFor(11);
+    await seedIntakeFile(intakeFileId, ORG, checksum);
+    const { fileProfileId } = await seedCompletedProfile({ intakeFileId, organizationId: ORG, checksum, profile: fixtureProfile() });
+
+    const result = await repository.draftDataDictionary({
       identity: { organizationId: ORG, fileProfileId },
       now: NOW,
-      metadataOnlyAudit: audit.dependency,
-    }).then((result) => {
-      if (!result.ok) throw new Error(`draftDataDictionary resolved with a failure instead of propagating the rejection: ${result.error.code}`);
-    }));
+      metadataOnlyAudit: createAuditProbe().dependency,
+    });
+    assert.equal(result.ok, true);
 
-    const dictionaryCount = await withClient((client) => client.query(`SELECT count(*)::int AS count FROM kai.data_dictionaries`));
-    assert.equal(dictionaryCount.rows[0].count, 0);
+    const confidences = await withClient((client) => client.query(
+      `SELECT profile_field_key, mapping_confidence
+         FROM kai.data_dictionary_fields
+        WHERE data_dictionary_id = $1::uuid
+        ORDER BY profile_field_key`,
+      [result.data.dictionary.data_dictionary_id],
+    ));
+    assert.equal(confidences.rows.length, 2);
+    for (const row of confidences.rows) {
+      assert.equal(row.mapping_confidence, null, `${row.profile_field_key} must not carry a fabricated confidence`);
+    }
+  });
+
+  test("P1-04: an explicit in-range committed confidence is preserved while out-of-range and non-finite values are rejected by the schema", async () => {
+    const intakeFileId = fileId(12);
+    const checksum = checksumFor(12);
+    await seedIntakeFile(intakeFileId, ORG, checksum);
+    const profile = fixtureProfile();
+    profile.fields[0].mapping_confidence = 0.25;
+    profile.fields[1].mapping_confidence = 1.5;
+    const { fileProfileId } = await seedCompletedProfile({ intakeFileId, organizationId: ORG, checksum, profile });
+
+    const result = await repository.draftDataDictionary({
+      identity: { organizationId: ORG, fileProfileId },
+      now: NOW,
+      metadataOnlyAudit: createAuditProbe().dependency,
+    });
+    assert.equal(result.ok, true);
+
+    const confidences = await withClient((client) => client.query(
+      `SELECT profile_field_key, mapping_confidence::text AS mapping_confidence
+         FROM kai.data_dictionary_fields
+        WHERE data_dictionary_id = $1::uuid
+        ORDER BY profile_field_key`,
+      [result.data.dictionary.data_dictionary_id],
+    ));
+    assert.deepEqual(
+      confidences.rows,
+      [
+        { profile_field_key: "field_1", mapping_confidence: "0.25" },
+        { profile_field_key: "field_2", mapping_confidence: null },
+      ],
+    );
+
+    // Out-of-range and NaN values are rejected by the range CHECK (23514); PostgreSQL
+    // rejects numeric 'Infinity' earlier, at the numeric(3,2) precision cast (22003).
+    // In every case the value is refused, never stored and never coerced to certainty.
+    for (const [rejected, expectedCode] of [["1.5", "23514"], ["-0.01", "23514"], ["NaN", "23514"], ["Infinity", "22003"]]) {
+      await assert.rejects(
+        () => withClient((client) => client.query(
+          `INSERT INTO kai.data_dictionary_fields (
+             data_dictionary_id, organization_id, file_profile_id, profile_field_key,
+             field_label_safe, data_type, mapping_confidence, created_at
+           )
+           VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $4, 'number', $5::numeric, $6::timestamptz)`,
+          [result.data.dictionary.data_dictionary_id, ORG, fileProfileId, `probe_${rejected.replace(/[^a-z0-9]/gi, "_").toLowerCase()}`, rejected, NOW],
+        )),
+        (error) => {
+          assert.equal(error.code, expectedCode, `${rejected} must be refused by the schema, not stored`);
+          return true;
+        },
+      );
+    }
   });
 
   test("P1-04: end-to-end via the service seam with KAI_SPRINT2_ENABLED, using the postgres repository", async () => {
