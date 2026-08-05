@@ -179,6 +179,7 @@ async function runSourcePromotionIntegrationSuite() {
 
     const result = await repository.createSourcePromotionDecision({
       identity: { organizationId: ORG, intakeSourceCandidateId: pair.intakeSourceCandidateId },
+      outcome: "promoted",
       reviewedSourceType: REVIEWED_TYPE,
       actorUserId: "90000000-0000-4000-8000-000000000001",
       now: NOW,
@@ -212,6 +213,7 @@ async function runSourcePromotionIntegrationSuite() {
     const pair = await seedCompletePair(2);
     const first = await repository.createSourcePromotionDecision({
       identity: { organizationId: ORG, intakeSourceCandidateId: pair.intakeSourceCandidateId },
+      outcome: "promoted",
       reviewedSourceType: REVIEWED_TYPE,
       actorUserId: "90000000-0000-4000-8000-000000000001",
       now: NOW,
@@ -222,6 +224,7 @@ async function runSourcePromotionIntegrationSuite() {
     const secondAudit = createAuditProbe();
     const second = await repository.createSourcePromotionDecision({
       identity: { organizationId: ORG, intakeSourceCandidateId: pair.intakeSourceCandidateId },
+      outcome: "promoted",
       reviewedSourceType: REVIEWED_TYPE,
       actorUserId: "90000000-0000-4000-8000-000000000001",
       now: NOW,
@@ -245,6 +248,7 @@ async function runSourcePromotionIntegrationSuite() {
   test("P1-08: an unknown intake_source_candidate_id is rejected as not_found without creating any row", async () => {
     const result = await repository.createSourcePromotionDecision({
       identity: { organizationId: ORG, intakeSourceCandidateId: "90000000-0000-4000-8000-000000000999" },
+      outcome: "promoted",
       reviewedSourceType: REVIEWED_TYPE,
       actorUserId: "90000000-0000-4000-8000-000000000001",
       now: NOW,
@@ -258,6 +262,7 @@ async function runSourcePromotionIntegrationSuite() {
     const pair = await seedCompletePair(3);
     const crossTenantResult = await repository.createSourcePromotionDecision({
       identity: { organizationId: OTHER_ORG, intakeSourceCandidateId: pair.intakeSourceCandidateId },
+      outcome: "promoted",
       reviewedSourceType: REVIEWED_TYPE,
       actorUserId: "90000000-0000-4000-8000-000000000001",
       now: NOW,
@@ -277,6 +282,7 @@ async function runSourcePromotionIntegrationSuite() {
     const pair = await seedCompletePair(4);
     const result = await repository.createSourcePromotionDecision({
       identity: { organizationId: ORG, intakeSourceCandidateId: pair.intakeSourceCandidateId },
+      outcome: "promoted",
       reviewedSourceType: "unknown",
       actorUserId: "90000000-0000-4000-8000-000000000001",
       now: NOW,
@@ -296,6 +302,7 @@ async function runSourcePromotionIntegrationSuite() {
     const audit = createAuditProbe({ prepareOk: false });
     const result = await repository.createSourcePromotionDecision({
       identity: { organizationId: ORG, intakeSourceCandidateId: pair.intakeSourceCandidateId },
+      outcome: "promoted",
       reviewedSourceType: REVIEWED_TYPE,
       actorUserId: "90000000-0000-4000-8000-000000000001",
       now: NOW,
@@ -320,6 +327,258 @@ async function runSourcePromotionIntegrationSuite() {
     assert.equal(counts[5].rows[0].count, 0);
   });
 
+  test("P1-08: needs_more_information sets queue_status = waiting_on_client with the fixed required_action, leaves candidate_status untouched, and creates no source/source_version", async () => {
+    const pair = await seedCompletePair(10);
+    const audit = createAuditProbe();
+    const result = await repository.createSourcePromotionDecision({
+      identity: { organizationId: ORG, intakeSourceCandidateId: pair.intakeSourceCandidateId },
+      outcome: "needs_more_information",
+      actorUserId: "90000000-0000-4000-8000-000000000001",
+      now: NOW,
+      metadataOnlyAudit: audit.dependency,
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.data.promotionDecision.decision_status, "needs_more_information");
+    assert.equal(result.data.promotionDecision.reviewed_source_type, null);
+    assert.equal(result.data.sourceCandidate.candidate_status, "needs_gk_review");
+    assert.equal(result.data.reviewQueueItem.queue_status, "waiting_on_client");
+    assert.equal(result.data.source, null);
+    assert.equal(result.data.sourceVersion, null);
+    assert.equal(audit.published.length, 1);
+
+    const rows = await withClient((client) => Promise.all([
+      client.query(`SELECT candidate_status FROM kai.intake_source_candidates WHERE intake_source_candidate_id = $1::uuid`, [pair.intakeSourceCandidateId]),
+      client.query(`SELECT queue_status, required_action FROM kai.review_queue_items WHERE target_object_id = $1::uuid`, [pair.intakeSourceCandidateId]),
+      client.query(`SELECT count(*)::int AS count FROM kai.sources`),
+      client.query(`SELECT count(*)::int AS count FROM kai.source_versions`),
+    ]));
+    assert.equal(rows[0].rows[0].candidate_status, "needs_gk_review");
+    assert.equal(rows[1].rows[0].queue_status, "waiting_on_client");
+    assert.equal(rows[1].rows[0].required_action, "Obtain the missing client information before reconsidering source promotion.");
+    assert.equal(rows[2].rows[0].count, 0);
+    assert.equal(rows[3].rows[0].count, 0);
+  });
+
+  test("P1-08: rejected sets candidate_status = rejected, queue_status/review_status = resolved, and creates no source/source_version", async () => {
+    const pair = await seedCompletePair(11);
+    const audit = createAuditProbe();
+    const result = await repository.createSourcePromotionDecision({
+      identity: { organizationId: ORG, intakeSourceCandidateId: pair.intakeSourceCandidateId },
+      outcome: "rejected",
+      actorUserId: "90000000-0000-4000-8000-000000000001",
+      now: NOW,
+      metadataOnlyAudit: audit.dependency,
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.data.promotionDecision.decision_status, "rejected");
+    assert.equal(result.data.promotionDecision.reviewed_source_type, null);
+    assert.equal(result.data.sourceCandidate.candidate_status, "rejected");
+    assert.equal(result.data.reviewQueueItem.queue_status, "resolved");
+    assert.equal(audit.published.length, 1);
+
+    const rows = await withClient((client) => Promise.all([
+      client.query(`SELECT candidate_status FROM kai.intake_source_candidates WHERE intake_source_candidate_id = $1::uuid`, [pair.intakeSourceCandidateId]),
+      client.query(`SELECT queue_status, review_status FROM kai.review_queue_items WHERE target_object_id = $1::uuid`, [pair.intakeSourceCandidateId]),
+      client.query(`SELECT count(*)::int AS count FROM kai.sources`),
+      client.query(`SELECT count(*)::int AS count FROM kai.source_versions`),
+    ]));
+    assert.equal(rows[0].rows[0].candidate_status, "rejected");
+    assert.equal(rows[1].rows[0].queue_status, "resolved");
+    assert.equal(rows[1].rows[0].review_status, "resolved");
+    assert.equal(rows[2].rows[0].count, 0);
+    assert.equal(rows[3].rows[0].count, 0);
+  });
+
+  test("P1-08: needs_more_information -> rejected follow-up transitions the decision/candidate/review item and creates no source/source_version", async () => {
+    const pair = await seedCompletePair(12);
+    const first = await repository.createSourcePromotionDecision({
+      identity: { organizationId: ORG, intakeSourceCandidateId: pair.intakeSourceCandidateId },
+      outcome: "needs_more_information",
+      actorUserId: "90000000-0000-4000-8000-000000000001",
+      now: NOW,
+      metadataOnlyAudit: createAuditProbe().dependency,
+    });
+    assert.equal(first.ok, true);
+
+    const secondAudit = createAuditProbe();
+    const second = await repository.createSourcePromotionDecision({
+      identity: { organizationId: ORG, intakeSourceCandidateId: pair.intakeSourceCandidateId },
+      outcome: "rejected",
+      actorUserId: "90000000-0000-4000-8000-000000000001",
+      now: NOW,
+      metadataOnlyAudit: secondAudit.dependency,
+    });
+    assert.equal(second.ok, true, JSON.stringify(second));
+    assert.equal(second.data.promotionDecision.decision_status, "rejected");
+    assert.equal(second.data.sourceCandidate.candidate_status, "rejected");
+    assert.equal(second.data.reviewQueueItem.queue_status, "resolved");
+    assert.equal(secondAudit.published.length, 1);
+
+    const rows = await withClient((client) => Promise.all([
+      client.query(`SELECT count(*)::int AS count FROM kai.sources`),
+      client.query(`SELECT count(*)::int AS count FROM kai.source_versions`),
+      client.query(`SELECT count(*)::int AS count FROM kai.intake_promotion_decisions WHERE intake_source_candidate_id = $1::uuid`, [pair.intakeSourceCandidateId]),
+    ]));
+    assert.equal(rows[0].rows[0].count, 0);
+    assert.equal(rows[1].rows[0].count, 0);
+    assert.equal(rows[2].rows[0].count, 1);
+  });
+
+  test("P1-08: needs_more_information -> promoted follow-up creates the source/source_version and binds the decision row", async () => {
+    const pair = await seedCompletePair(13);
+    const first = await repository.createSourcePromotionDecision({
+      identity: { organizationId: ORG, intakeSourceCandidateId: pair.intakeSourceCandidateId },
+      outcome: "needs_more_information",
+      actorUserId: "90000000-0000-4000-8000-000000000001",
+      now: NOW,
+      metadataOnlyAudit: createAuditProbe().dependency,
+    });
+    assert.equal(first.ok, true);
+
+    const secondAudit = createAuditProbe();
+    const second = await repository.createSourcePromotionDecision({
+      identity: { organizationId: ORG, intakeSourceCandidateId: pair.intakeSourceCandidateId },
+      outcome: "promoted",
+      reviewedSourceType: REVIEWED_TYPE,
+      actorUserId: "90000000-0000-4000-8000-000000000001",
+      now: NOW,
+      metadataOnlyAudit: secondAudit.dependency,
+    });
+    assert.equal(second.ok, true, JSON.stringify(second));
+    assert.equal(second.data.promotionDecision.decision_status, "promoted");
+    assert.equal(second.data.sourceCandidate.candidate_status, "promoted");
+    assert.equal(second.data.reviewQueueItem.queue_status, "resolved");
+    assert.equal(second.data.source.reviewed_source_type, REVIEWED_TYPE);
+    assert.equal(second.data.sourceVersion.is_current, true);
+    assert.equal(secondAudit.published.length, 1);
+  });
+
+  test("P1-08: identical replay of needs_more_information while still needs_more_information is a zero-write, zero-audit no-op", async () => {
+    const pair = await seedCompletePair(14);
+    const first = await repository.createSourcePromotionDecision({
+      identity: { organizationId: ORG, intakeSourceCandidateId: pair.intakeSourceCandidateId },
+      outcome: "needs_more_information",
+      actorUserId: "90000000-0000-4000-8000-000000000001",
+      now: NOW,
+      metadataOnlyAudit: createAuditProbe().dependency,
+    });
+    assert.equal(first.ok, true);
+
+    const secondAudit = createAuditProbe();
+    const second = await repository.createSourcePromotionDecision({
+      identity: { organizationId: ORG, intakeSourceCandidateId: pair.intakeSourceCandidateId },
+      outcome: "needs_more_information",
+      actorUserId: "90000000-0000-4000-8000-000000000001",
+      now: NOW,
+      metadataOnlyAudit: secondAudit.dependency,
+    });
+    assert.equal(second.ok, true);
+    assert.equal(second.data.replayed, true);
+    assert.equal(second.data.promotionDecision.intake_promotion_decision_id, first.data.promotionDecision.intake_promotion_decision_id);
+    assert.equal(secondAudit.published.length, 0);
+  });
+
+  test("P1-08: prohibited transitions from a terminal decision return conflict_current_state_changed with zero mutation of the decision row, candidate, review item, or source tables", async () => {
+    const pair = await seedCompletePair(15);
+    const first = await repository.createSourcePromotionDecision({
+      identity: { organizationId: ORG, intakeSourceCandidateId: pair.intakeSourceCandidateId },
+      outcome: "rejected",
+      actorUserId: "90000000-0000-4000-8000-000000000001",
+      now: NOW,
+      metadataOnlyAudit: createAuditProbe().dependency,
+    });
+    assert.equal(first.ok, true);
+
+    const before = await withClient((client) => client.query(
+      `SELECT decision_status FROM kai.intake_promotion_decisions WHERE intake_source_candidate_id = $1::uuid`,
+      [pair.intakeSourceCandidateId],
+    ));
+
+    for (const outcome of ["promoted", "needs_more_information"]) {
+      const audit = createAuditProbe();
+      const input = {
+        identity: { organizationId: ORG, intakeSourceCandidateId: pair.intakeSourceCandidateId },
+        outcome,
+        actorUserId: "90000000-0000-4000-8000-000000000001",
+        now: NOW,
+        metadataOnlyAudit: audit.dependency,
+      };
+      if (outcome === "promoted") input.reviewedSourceType = REVIEWED_TYPE;
+      const result = await repository.createSourcePromotionDecision(input);
+      assert.equal(result.ok, false, outcome);
+      assert.equal(result.error.code, "conflict_current_state_changed", outcome);
+      assert.equal(audit.published.length, 0);
+    }
+
+    const after = await withClient((client) => Promise.all([
+      client.query(`SELECT decision_status FROM kai.intake_promotion_decisions WHERE intake_source_candidate_id = $1::uuid`, [pair.intakeSourceCandidateId]),
+      client.query(`SELECT count(*)::int AS count FROM kai.sources`),
+      client.query(`SELECT count(*)::int AS count FROM kai.source_versions`),
+      client.query(`SELECT candidate_status FROM kai.intake_source_candidates WHERE intake_source_candidate_id = $1::uuid`, [pair.intakeSourceCandidateId]),
+    ]));
+    assert.equal(after[0].rows[0].decision_status, before.rows[0].decision_status);
+    assert.equal(after[1].rows[0].count, 0);
+    assert.equal(after[2].rows[0].count, 0);
+    assert.equal(after[3].rows[0].candidate_status, "rejected");
+  });
+
+  test("P1-08: a rejected required-audit prepare rolls back needs_more_information and rejected outcomes exactly as it does promoted", async () => {
+    for (const [outcome, seedIndex] of [["needs_more_information", 16], ["rejected", 17]]) {
+      const pair = await seedCompletePair(seedIndex);
+      const audit = createAuditProbe({ prepareOk: false });
+      const result = await repository.createSourcePromotionDecision({
+        identity: { organizationId: ORG, intakeSourceCandidateId: pair.intakeSourceCandidateId },
+        outcome,
+        actorUserId: "90000000-0000-4000-8000-000000000001",
+        now: NOW,
+        metadataOnlyAudit: audit.dependency,
+      });
+      assert.equal(result.ok, false, outcome);
+      assert.equal(result.error.code, "validation_blocker", outcome);
+
+      const counts = await withClient((client) => Promise.all([
+        client.query(`SELECT count(*)::int AS count FROM kai.intake_promotion_decisions WHERE intake_source_candidate_id = $1::uuid`, [pair.intakeSourceCandidateId]),
+        client.query(`SELECT candidate_status FROM kai.intake_source_candidates WHERE intake_source_candidate_id = $1::uuid`, [pair.intakeSourceCandidateId]),
+        client.query(`SELECT queue_status FROM kai.review_queue_items WHERE target_object_id = $1::uuid`, [pair.intakeSourceCandidateId]),
+      ]));
+      assert.equal(counts[0].rows[0].count, 0, outcome);
+      assert.equal(counts[1].rows[0].candidate_status, "needs_gk_review", outcome);
+      assert.equal(counts[2].rows[0].queue_status, "open", outcome);
+    }
+  });
+
+  test("P1-08: disabled feature gates and unauthorized actors short-circuit with zero repository activity for all three outcomes", async () => {
+    const pair = await seedCompletePair(18);
+    for (const outcome of ["needs_more_information", "rejected", "promoted"]) {
+      const input = { organizationId: ORG, intakeSourceCandidateId: pair.intakeSourceCandidateId, outcome, actorContext: humanActor(), now: NOW };
+      if (outcome === "promoted") input.reviewedSourceType = REVIEWED_TYPE;
+
+      const disabledResult = await createSourcePromotionDecision(input, {
+        env: { KAI_SPRINT2_ENABLED: "true" },
+        sourcePromotionRepository: repository,
+        metadataOnlyAudit: createAuditProbe().dependency,
+      });
+      assert.equal(disabledResult.ok, false, outcome);
+      assert.equal(disabledResult.error.code, "feature_disabled", outcome);
+
+      const deniedResult = await createSourcePromotionDecision(
+        { ...input, actorContext: humanActor({ actorType: "ai" }) },
+        { env: { KAI_SPRINT2_ENABLED: "true", KAI_SOURCE_PROMOTION_ENABLED: "true" }, sourcePromotionRepository: repository, metadataOnlyAudit: createAuditProbe().dependency },
+      );
+      assert.equal(deniedResult.ok, false, outcome);
+      assert.equal(deniedResult.error.code, "authorization_denied", outcome);
+    }
+
+    const counts = await withClient((client) => Promise.all([
+      client.query(`SELECT count(*)::int AS count FROM kai.intake_promotion_decisions WHERE intake_source_candidate_id = $1::uuid`, [pair.intakeSourceCandidateId]),
+      client.query(`SELECT candidate_status FROM kai.intake_source_candidates WHERE intake_source_candidate_id = $1::uuid`, [pair.intakeSourceCandidateId]),
+      client.query(`SELECT queue_status FROM kai.review_queue_items WHERE target_object_id = $1::uuid`, [pair.intakeSourceCandidateId]),
+    ]));
+    assert.equal(counts[0].rows[0].count, 0);
+    assert.equal(counts[1].rows[0].candidate_status, "needs_gk_review");
+    assert.equal(counts[2].rows[0].queue_status, "open");
+  });
+
   for (const [label, probeOptions, seedIndex] of [
     ["a synchronous publish() throw", { publishThrows: true }, 6],
     ["a rejected publish() promise", { publishRejects: true }, 7],
@@ -329,6 +588,7 @@ async function runSourcePromotionIntegrationSuite() {
       const audit = createAuditProbe(probeOptions);
       const result = await repository.createSourcePromotionDecision({
         identity: { organizationId: ORG, intakeSourceCandidateId: pair.intakeSourceCandidateId },
+        outcome: "promoted",
         reviewedSourceType: REVIEWED_TYPE,
         actorUserId: "90000000-0000-4000-8000-000000000001",
         now: NOW,
@@ -369,6 +629,7 @@ async function runSourcePromotionIntegrationSuite() {
     const [first, second] = await Promise.all([
       racingRepository.createSourcePromotionDecision({
         identity: { organizationId: ORG, intakeSourceCandidateId: pair.intakeSourceCandidateId },
+        outcome: "promoted",
         reviewedSourceType: REVIEWED_TYPE,
         actorUserId: "90000000-0000-4000-8000-000000000001",
         now: NOW,
@@ -376,6 +637,7 @@ async function runSourcePromotionIntegrationSuite() {
       }),
       racingRepository.createSourcePromotionDecision({
         identity: { organizationId: ORG, intakeSourceCandidateId: pair.intakeSourceCandidateId },
+        outcome: "promoted",
         reviewedSourceType: REVIEWED_TYPE,
         actorUserId: "90000000-0000-4000-8000-000000000001",
         now: NOW,
@@ -414,7 +676,7 @@ async function runSourcePromotionIntegrationSuite() {
     const pair = await seedCompletePair(9);
 
     const result = await createSourcePromotionDecision(
-      { organizationId: ORG, intakeSourceCandidateId: pair.intakeSourceCandidateId, reviewedSourceType: REVIEWED_TYPE, actorContext: humanActor(), now: NOW },
+      { organizationId: ORG, intakeSourceCandidateId: pair.intakeSourceCandidateId, outcome: "promoted", reviewedSourceType: REVIEWED_TYPE, actorContext: humanActor(), now: NOW },
       {
         env: { KAI_SPRINT2_ENABLED: "true", KAI_SOURCE_PROMOTION_ENABLED: "true" },
         sourcePromotionRepository: repository,
@@ -425,14 +687,14 @@ async function runSourcePromotionIntegrationSuite() {
     assert.equal(result.data.sourceCandidate.candidate_status, "promoted");
 
     const deniedResult = await createSourcePromotionDecision(
-      { organizationId: ORG, intakeSourceCandidateId: pair.intakeSourceCandidateId, reviewedSourceType: REVIEWED_TYPE, actorContext: humanActor({ actorType: "ai" }), now: NOW },
+      { organizationId: ORG, intakeSourceCandidateId: pair.intakeSourceCandidateId, outcome: "promoted", reviewedSourceType: REVIEWED_TYPE, actorContext: humanActor({ actorType: "ai" }), now: NOW },
       { env: { KAI_SPRINT2_ENABLED: "true", KAI_SOURCE_PROMOTION_ENABLED: "true" }, sourcePromotionRepository: repository, metadataOnlyAudit: createAuditProbe().dependency },
     );
     assert.equal(deniedResult.ok, false);
     assert.equal(deniedResult.error.code, "authorization_denied");
 
     const disabledResult = await createSourcePromotionDecision(
-      { organizationId: ORG, intakeSourceCandidateId: pair.intakeSourceCandidateId, reviewedSourceType: REVIEWED_TYPE, actorContext: humanActor(), now: NOW },
+      { organizationId: ORG, intakeSourceCandidateId: pair.intakeSourceCandidateId, outcome: "promoted", reviewedSourceType: REVIEWED_TYPE, actorContext: humanActor(), now: NOW },
       { env: { KAI_SPRINT2_ENABLED: "true" }, sourcePromotionRepository: repository, metadataOnlyAudit: createAuditProbe().dependency },
     );
     assert.equal(disabledResult.ok, false);

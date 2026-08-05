@@ -212,3 +212,85 @@ their indexes, the P1-08-only foreign keys added onto
 `kai.intake_source_candidates`, and restores `kai.intake_source_candidates`'s
 `candidate_status` CHECK to its exact pre-P1-08 single-value pin. It alters no P1-02
 through P1-07 or Gate A table, column, or constraint beyond that restoration.
+
+## P1-08 CORRECTION (2026-08-05): three-outcome decision model
+
+The original single-outcome (`'promoted'`-only, with a transient `'decided'`
+intermediate `decision_status`) model above is corrected to a three-outcome model.
+This section documents the correction; the sections above describe the original
+`'promoted'` path, which is unchanged in its own mechanics (deterministic
+`source_code`, replay, and concurrency idiom) except that the transient `'decided'`
+intermediate value no longer exists - a decision row is now written directly at
+whichever of the three outcomes below was requested.
+
+**Outcome vocabulary** (`decision_status`, and the service/repository input field
+`outcome`): `needs_more_information`, `rejected`, `promoted`.
+
+**Legal transitions** (owner-authorized; every other requested transition returns
+`conflict_current_state_changed` with zero mutation, via an authoritative
+reread-and-compare-and-set, never a raced blind UPDATE):
+
+- `null -> needs_more_information`
+- `null -> rejected`
+- `null -> promoted`
+- `needs_more_information -> rejected`
+- `needs_more_information -> promoted`
+
+`rejected` and `promoted` are terminal except for an identical replay of the same
+outcome (same identity, same recorded facts - zero writes, zero audit).
+`needs_more_information` is also safely re-requestable as a zero-write, zero-audit
+replay while still at `needs_more_information` (its `required_action` is a fixed
+literal, so there are no caller-supplied facts that could ever mismatch).
+
+**needs_more_information**: `reviewed_source_type`, `source_id`, `source_version_id`,
+`promoted_at` all stay `NULL` on the decision row. No `kai.sources` or
+`kai.source_versions` row is created. `kai.intake_source_candidates.candidate_status`
+is untouched (stays `needs_gk_review`).
+`kai.review_queue_items.queue_status` transitions `open -> waiting_on_client` (an
+already-accepted P1-06 vocabulary value, not new) and `required_action` is set to the
+exact fixed literal `"Obtain the missing client information before reconsidering
+source promotion."` (`kai.review_queue_items.required_action` already existed as a
+nullable P1-06 column; no schema addition was needed for it).
+
+**rejected**: `reviewed_source_type`, `source_id`, `source_version_id`, `promoted_at`
+all stay `NULL`. No `kai.sources`/`kai.source_versions` row is created.
+`candidate_status` transitions to the new terminal value `'rejected'` (from either
+`needs_gk_review` directly, or from `needs_gk_review` after a
+`needs_more_information` detour - `candidate_status` never moves for
+`needs_more_information` itself). `queue_status`/`review_status` transition to
+`'resolved'` (from `'open'` for a direct decision, or from `'waiting_on_client'` for a
+`needs_more_information -> rejected` follow-up).
+
+**promoted**: unchanged mechanics (requires the same explicit non-`'unknown'`
+`reviewedSourceType`, the same deterministic `source_code`, the same
+creation-or-authoritative-replay path for `kai.sources`/`kai.source_versions`).
+Reachable either directly (`null -> promoted`) or as a `needs_more_information ->
+promoted` follow-up.
+
+**Schema changes made by this correction** (all within this package's own
+`migrations/kai_sprint2_p1_08_source_promotion.sql` - no P1-06/P1-07 migration file
+was edited):
+
+- `kai.intake_promotion_decisions.reviewed_source_type` changed from `NOT NULL` to
+  nullable; its CHECK constraint (`intake_promotion_decisions_p1_08_reviewed_source_type_check`)
+  now reads `reviewed_source_type IS NULL OR reviewed_source_type IN (...)`.
+- `kai.intake_promotion_decisions.decision_status` dropped its `DEFAULT 'decided'`
+  (no default; every write states its outcome explicitly), and its CHECK constraint
+  (`intake_promotion_decisions_p1_08_decision_status_check`) now reads
+  `decision_status IN ('needs_more_information', 'rejected', 'promoted')`.
+- `intake_promotion_decisions_p1_08_promoted_binding_check` now requires
+  `reviewed_source_type`/`source_id`/`source_version_id`/`promoted_at` all `NULL` for
+  `needs_more_information`/`rejected`, and all `NOT NULL` for `promoted` (previously
+  this only distinguished `'decided'` from `'promoted'` and did not gate
+  `reviewed_source_type`).
+- `kai.intake_source_candidates.candidate_status`'s CHECK
+  (`intake_source_candidates_p1_07_candidate_status_check`) is widened again, from
+  `IN ('needs_gk_review', 'promoted')` to `IN ('needs_gk_review', 'promoted',
+  'rejected')`.
+- No column or CHECK constraint was added to `kai.review_queue_items`:
+  `'waiting_on_client'` was already an accepted `queue_status` value in the P1-06
+  migration, and `required_action` already existed as a nullable P1-06 column.
+- The `migrations/kai_sprint2_p1_08_source_promotion.rollback.sql` rollback continues
+  to drop the three P1-08 tables outright and restore `candidate_status` to its exact
+  pre-P1-08 single-value pin (`'needs_gk_review'` only), so it reverses this
+  correction along with the rest of the package with no further changes needed.

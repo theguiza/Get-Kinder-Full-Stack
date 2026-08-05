@@ -9337,3 +9337,149 @@ not_confirmed:
   production_runtime_composition: NOT_CONFIRMED
   real_client_data_behavior: NOT_CONFIRMED
 ```
+
+## P1-08 Correction (2026-08-05): three-outcome decision model
+
+This is an additions-only correction block. It does not edit or delete anything in
+the P1-08 section above; it documents a bounded correction made to that same
+still-dormant package, on the same feature branch, before either
+`KAI_SPRINT2_ENABLED` or `KAI_SOURCE_PROMOTION_ENABLED` was ever set true anywhere.
+
+### Problem corrected
+
+The P1-08 implementation above only supported two `decision_status` values:
+`decided` (a transient intermediate) and `promoted` (terminal). There was no way to
+record a "needs more information" or "rejected" outcome. This correction replaces
+that two-value model with three owner-authorized, directly-reachable outcomes.
+
+### Corrected outcome vocabulary and transition matrix
+
+`decision_status` (and the new service/repository input field `outcome`, which
+replaces `reviewedSourceType` as the sole discriminator): `needs_more_information`,
+`rejected`, `promoted`. The transient `decided` value no longer exists.
+
+Legal transitions (every other requested transition returns
+`conflict_current_state_changed` with zero mutation, via an authoritative
+reread-and-compare-and-set - never a raced blind UPDATE):
+
+- `null -> needs_more_information`
+- `null -> rejected`
+- `null -> promoted`
+- `needs_more_information -> rejected`
+- `needs_more_information -> promoted`
+
+`rejected` and `promoted` are terminal except for an identical replay of the same
+outcome (same identity, same recorded facts - zero writes, zero audit).
+`needs_more_information` is also safely re-requestable as a zero-write, zero-audit
+replay while still at `needs_more_information`.
+
+Per-outcome side effects:
+
+- **needs_more_information**: `reviewed_source_type`/`source_id`/`source_version_id`/
+  `promoted_at` stay `NULL` on the decision row; no `kai.sources`/
+  `kai.source_versions` row is created; `candidate_status` stays
+  `needs_gk_review`; `review_queue_items.queue_status` transitions
+  `open -> waiting_on_client` (an already-accepted P1-06 vocabulary value) with
+  `required_action` set to the fixed literal `"Obtain the missing client
+  information before reconsidering source promotion."`; exactly one required
+  metadata-only audit row is written atomically.
+- **rejected**: the same four decision-row fields stay `NULL`; no source/
+  source_version row is created; `candidate_status` transitions to the new
+  terminal value `rejected` (from `needs_gk_review`, either directly or via a
+  `needs_more_information` detour); `queue_status`/`review_status` transition to
+  `resolved` (from `open` or from `waiting_on_client`); exactly one required audit
+  row is written atomically.
+- **promoted**: unchanged mechanics from the original P1-08 implementation
+  (explicit non-`'unknown'` `reviewedSourceType` required, same deterministic
+  `source_code`, same creation-or-authoritative-replay path for
+  `kai.sources`/`kai.source_versions`), reachable either directly or as a
+  `needs_more_information -> promoted` follow-up.
+
+### Schema changes made by this correction
+
+All within this package's own `migrations/kai_sprint2_p1_08_source_promotion.sql`
+and its `.rollback.sql` counterpart; no P1-06/P1-07 migration file was edited:
+
+- `kai.intake_promotion_decisions.reviewed_source_type` changed from `NOT NULL` to
+  nullable; `intake_promotion_decisions_p1_08_reviewed_source_type_check` now reads
+  `reviewed_source_type IS NULL OR reviewed_source_type IN (...)`.
+- `kai.intake_promotion_decisions.decision_status` dropped its
+  `DEFAULT 'decided'`; `intake_promotion_decisions_p1_08_decision_status_check` now
+  reads `decision_status IN ('needs_more_information', 'rejected', 'promoted')`.
+- `intake_promotion_decisions_p1_08_promoted_binding_check` now requires
+  `reviewed_source_type`/`source_id`/`source_version_id`/`promoted_at` all `NULL`
+  for `needs_more_information`/`rejected`, and all `NOT NULL` for `promoted`.
+- `kai.intake_source_candidates.candidate_status`'s CHECK
+  (`intake_source_candidates_p1_07_candidate_status_check`, already forward-migrated
+  by the original P1-08 package) is widened again to
+  `IN ('needs_gk_review', 'promoted', 'rejected')`.
+- No column or CHECK constraint was added to `kai.review_queue_items`:
+  `'waiting_on_client'` was already an accepted `queue_status` value in the P1-06
+  migration, and `required_action` already existed there as a nullable P1-06
+  column, so no P1-06 file was touched by this correction either.
+- The rollback migration continues to drop the three P1-08 tables outright and
+  restore `candidate_status` to its exact pre-P1-08 single-value pin
+  (`needs_gk_review` only), so it reverses this correction along with the rest of
+  the package with no further changes.
+
+### Files changed by this correction
+
+- `Backend/kai/dictionary/postgresSourcePromotionRepository.js` - rewritten to
+  support the full transition matrix; generalizes the prior single-path
+  candidate/review-item transition helpers into compare-and-set functions
+  parameterized by expected-from/target status, adds the
+  `needs_more_information`-only fixed `required_action` literal, and generalizes
+  decision-row replay validation (`validateReplayedDecisionRow`) to cover all
+  three outcomes instead of only `promoted`.
+- `Backend/kai/services/kaiSourcePromotionService.js` - the exported
+  `createSourcePromotionDecision(input, dependencies)` signature is unchanged, but
+  `input` now requires a new `outcome` field (`needs_more_information` | `rejected`
+  | `promoted`); `reviewedSourceType` is required only when `outcome === 'promoted'`
+  and is rejected as `validation_blocker` if present for any other outcome (never
+  silently accepted-and-ignored).
+- `migrations/kai_sprint2_p1_08_source_promotion.sql` and `.rollback.sql` - schema
+  changes above.
+- `scripts/kai-sprint2-p1-08-source-promotion-verifier.sql`,
+  `-smoke-verifier.sql`, `-failure-checks.sql` - extended with checks for the new
+  outcomes/constraints (e.g. `needs_more_information_binding_forbids_reviewed_source_type`,
+  `candidate_status_rejected_now_accepted`), while every prior check name and
+  assertion is preserved; `decision_status_vocabulary_enforced`'s fabricated value
+  changed from `'rejected'` (now legitimate) to `'decided'` (now itself invalid).
+- `scripts/kai-sprint2-p1-08-source-promotion-runbook.md` and
+  `-patch-notes.md` - each received an additions-only "P1-08 CORRECTION" section
+  documenting the above; no prior content in either file was edited or removed.
+- `__tests__/kai-sprint2-p1-08-source-promotion-boundary.spec.js`,
+  `-schema-contract.spec.js`, `.integration.spec.js` - extended with coverage for
+  all three direct outcomes, both follow-up transitions, non-`promoted`
+  `reviewed_source_type IS NULL` persistence, zero source/source_version creation
+  for non-`promoted` outcomes (including after a `needs_more_information` detour),
+  the exact `waiting_on_client`/`required_action` behavior, prohibited-transition
+  `conflict_current_state_changed` handling (verified via direct DB assertions in
+  the integration spec), disabled-feature-gate/unauthorized-actor short-circuiting
+  for all three outcomes, and required-audit-rejection rollback for all three
+  outcomes. `-runner-self-test.spec.js` required no change.
+
+### Verification performed for this correction
+
+`npm run verify:kai-sprint2-p1-08-source-promotion` was run against an ephemeral
+loopback PostgreSQL 16 instance created by this package's own runner: the catalog
+verifier (64 checks), the read-only failure checks (15 checks, including three new
+ones), the smoke verifier (13 checks), and the full
+`kai-sprint2-p1-08-source-promotion.integration.spec.js` suite (19 tests, including
+10 new/rewritten tests covering the three-outcome model) all passed with zero FAIL
+rows and zero test failures. The non-database
+`kai-sprint2-p1-08-source-promotion-boundary.spec.js` (31 tests) and
+`-schema-contract.spec.js` (17 tests) specs were also run directly via
+`node --test` and passed in full.
+
+### Not changed by this correction
+
+No P1-06 file was touched. No P1-07 file was edited (only this package's own
+forward migration gained new statements, as before). No route, listener,
+scheduler, production composition, or feature-flag default enablement was added;
+`KAI_SPRINT2_ENABLED` and `KAI_SOURCE_PROMOTION_ENABLED` both remain default
+false. AUTH-KAI-003, VAL-TEN-001, and VAL-KAI-P1-08-001/002/003 (predicates and
+validator-key names) are unchanged, except that VAL-KAI-P1-08-001's completeness
+predicate now has two forms (initial-decision and needs_more_information-follow-up)
+to account for the review item resting at `waiting_on_client` rather than `open`
+during a follow-up transition.

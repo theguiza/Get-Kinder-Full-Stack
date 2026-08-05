@@ -65,22 +65,23 @@ test("P1-08 pins reviewed_source_type to a fixed, disclosed, non-'unknown' vocab
   assert.doesNotMatch(migrationSource, /reviewed_source_type IN \([^)]*'unknown'/);
 });
 
-test("P1-08 pins decision_status to 'decided'/'promoted' only and enforces the promoted-binding invariant", () => {
+test("P1-08 pins decision_status to 'needs_more_information'/'rejected'/'promoted' only and enforces the promoted-binding invariant", () => {
   assert.match(
     migrationSource,
-    /intake_promotion_decisions_p1_08_decision_status_check\s+CHECK \(decision_status IN \('decided', 'promoted'\)\)/,
+    /intake_promotion_decisions_p1_08_decision_status_check\s+CHECK \(decision_status IN \('needs_more_information', 'rejected', 'promoted'\)\)/,
   );
   assert.match(migrationSource, /intake_promotion_decisions_p1_08_promoted_binding_check/);
-  assert.match(migrationSource, /decision_status = 'decided' AND source_id IS NULL AND source_version_id IS NULL/);
-  assert.match(migrationSource, /decision_status = 'promoted' AND source_id IS NOT NULL AND source_version_id IS NOT NULL/);
+  assert.match(migrationSource, /decision_status IN \('needs_more_information', 'rejected'\)[\s\S]*?AND reviewed_source_type IS NULL AND source_id IS NULL AND source_version_id IS NULL/);
+  assert.match(migrationSource, /decision_status = 'promoted'[\s\S]*?AND reviewed_source_type IS NOT NULL AND source_id IS NOT NULL AND source_version_id IS NOT NULL/);
+  assert.doesNotMatch(migrationSource, /decision_status IN \('decided', 'promoted'\)/);
 });
 
-test("P1-08 widens kai.intake_source_candidates.candidate_status to accept 'promoted' without adding any other value", () => {
+test("P1-08 widens kai.intake_source_candidates.candidate_status to accept 'promoted' and 'rejected' without adding any other value", () => {
   assert.match(
     migrationSource,
-    /intake_source_candidates_p1_07_candidate_status_check\s+CHECK \(candidate_status IN \('needs_gk_review', 'promoted'\)\)/,
+    /intake_source_candidates_p1_07_candidate_status_check\s+CHECK \(candidate_status IN \('needs_gk_review', 'promoted', 'rejected'\)\)/,
   );
-  for (const forbidden of ["'approved'", "'finalized'", "'export_ready'", "'rejected'"]) {
+  for (const forbidden of ["'approved'", "'finalized'", "'export_ready'"]) {
     assert.doesNotMatch(migrationSource, new RegExp(forbidden));
   }
 });

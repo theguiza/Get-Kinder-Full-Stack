@@ -106,34 +106,38 @@ BEGIN
   -- 'unknown' is accepted.
   BEGIN
     INSERT INTO kai.intake_promotion_decisions (
-      organization_id, intake_source_candidate_id, review_queue_item_id, reviewed_source_type
-    ) VALUES (org1, candidate1, review_item1, 'unknown');
+      organization_id, intake_source_candidate_id, review_queue_item_id, reviewed_source_type, decision_status
+    ) VALUES (org1, candidate1, review_item1, 'unknown', 'rejected');
     INSERT INTO p1_08_failure_results VALUES ('reviewed_source_type_unknown_rejected', 'FAIL', 'unknown was unexpectedly accepted as a reviewed_source_type');
   EXCEPTION WHEN check_violation THEN
     INSERT INTO p1_08_failure_results VALUES ('reviewed_source_type_unknown_rejected', 'PASS', 'safe check-violation failure');
   END;
   BEGIN
     INSERT INTO kai.intake_promotion_decisions (
-      organization_id, intake_source_candidate_id, review_queue_item_id, reviewed_source_type
-    ) VALUES (org1, candidate1, review_item1, 'fabricated_type_from_a_filename');
+      organization_id, intake_source_candidate_id, review_queue_item_id, reviewed_source_type, decision_status
+    ) VALUES (org1, candidate1, review_item1, 'fabricated_type_from_a_filename', 'rejected');
     INSERT INTO p1_08_failure_results VALUES ('reviewed_source_type_fabricated_rejected', 'FAIL', 'a fabricated reviewed_source_type was unexpectedly accepted');
   EXCEPTION WHEN check_violation THEN
     INSERT INTO p1_08_failure_results VALUES ('reviewed_source_type_fabricated_rejected', 'PASS', 'safe check-violation failure');
   END;
 
-  -- decision_status vocabulary enforcement.
+  -- decision_status vocabulary enforcement: P1-08 CORRECTION - the vocabulary is
+  -- now 'needs_more_information'/'rejected'/'promoted' (the old transient
+  -- 'decided' value no longer exists and is itself now rejected, alongside any
+  -- other fabricated status).
   BEGIN
     INSERT INTO kai.intake_promotion_decisions (
-      organization_id, intake_source_candidate_id, review_queue_item_id, reviewed_source_type, decision_status
-    ) VALUES (org1, candidate1, review_item1, 'organization_primary_record', 'rejected');
+      organization_id, intake_source_candidate_id, review_queue_item_id, decision_status
+    ) VALUES (org1, candidate1, review_item1, 'decided');
     INSERT INTO p1_08_failure_results VALUES ('decision_status_vocabulary_enforced', 'FAIL', 'an unsupported decision_status was unexpectedly accepted');
   EXCEPTION WHEN check_violation THEN
     INSERT INTO p1_08_failure_results VALUES ('decision_status_vocabulary_enforced', 'PASS', 'safe check-violation failure');
   END;
 
   -- promoted_binding_check: a decision cannot claim decision_status = 'promoted'
-  -- without a bound source_id and source_version_id, and cannot claim
-  -- decision_status = 'decided' while already carrying either binding.
+  -- without a bound reviewed_source_type/source_id/source_version_id/promoted_at,
+  -- and cannot claim decision_status = 'needs_more_information'/'rejected' while
+  -- already carrying any of those bindings.
   BEGIN
     INSERT INTO kai.intake_promotion_decisions (
       organization_id, intake_source_candidate_id, review_queue_item_id, reviewed_source_type, decision_status
@@ -143,12 +147,22 @@ BEGIN
     INSERT INTO p1_08_failure_results VALUES ('promoted_binding_requires_source_ids', 'PASS', 'safe check-violation failure');
   END;
 
+  -- non-promoted outcomes must not carry a reviewed_source_type binding either.
+  BEGIN
+    INSERT INTO kai.intake_promotion_decisions (
+      organization_id, intake_source_candidate_id, review_queue_item_id, reviewed_source_type, decision_status
+    ) VALUES (org1, candidate1, review_item1, 'organization_primary_record', 'needs_more_information');
+    INSERT INTO p1_08_failure_results VALUES ('needs_more_information_binding_forbids_reviewed_source_type', 'FAIL', 'a needs_more_information decision with a bound reviewed_source_type was unexpectedly accepted');
+  EXCEPTION WHEN check_violation THEN
+    INSERT INTO p1_08_failure_results VALUES ('needs_more_information_binding_forbids_reviewed_source_type', 'PASS', 'safe check-violation failure');
+  END;
+
   -- fabricated candidate lineage FK rejection: a never-committed candidate id is
   -- rejected by intake_promotion_decisions_p1_08_candidate_fk.
   BEGIN
     INSERT INTO kai.intake_promotion_decisions (
-      organization_id, intake_source_candidate_id, review_queue_item_id, reviewed_source_type
-    ) VALUES (org1, bogus_candidate, review_item1, 'organization_primary_record');
+      organization_id, intake_source_candidate_id, review_queue_item_id, decision_status
+    ) VALUES (org1, bogus_candidate, review_item1, 'rejected');
     INSERT INTO p1_08_failure_results VALUES ('fabricated_candidate_id_rejected', 'FAIL', 'a fabricated intake_source_candidate_id was unexpectedly accepted');
   EXCEPTION WHEN foreign_key_violation THEN
     INSERT INTO p1_08_failure_results VALUES ('fabricated_candidate_id_rejected', 'PASS', 'safe foreign-key-violation failure');
@@ -233,8 +247,8 @@ BEGIN
     FROM kai.source_versions WHERE source_id = source1 AND intake_source_candidate_id = candidate1;
   BEGIN
     INSERT INTO kai.intake_promotion_decisions (
-      organization_id, intake_source_candidate_id, review_queue_item_id, reviewed_source_type
-    ) VALUES (org1, candidate1, review_item1, 'public_record');
+      organization_id, intake_source_candidate_id, review_queue_item_id, decision_status
+    ) VALUES (org1, candidate1, review_item1, 'rejected');
     INSERT INTO p1_08_failure_results VALUES ('decision_identity_unique_enforced', 'FAIL', 'duplicate organization_id + intake_source_candidate_id unexpectedly accepted');
   EXCEPTION WHEN unique_violation THEN
     INSERT INTO p1_08_failure_results VALUES ('decision_identity_unique_enforced', 'PASS', 'safe unique-violation failure');
@@ -253,6 +267,15 @@ BEGIN
     CASE WHEN (SELECT candidate_status FROM kai.intake_source_candidates WHERE intake_source_candidate_id = candidate1) = 'promoted'
       THEN 'PASS' ELSE 'FAIL' END,
     'candidate_status = promoted is now accepted by the widened P1-08 CHECK'
+  );
+  -- P1-08 CORRECTION: 'rejected' is also now accepted (the rejected outcome's
+  -- terminal candidate_status).
+  UPDATE kai.intake_source_candidates SET candidate_status = 'rejected' WHERE intake_source_candidate_id = candidate1;
+  INSERT INTO p1_08_failure_results VALUES (
+    'candidate_status_rejected_now_accepted',
+    CASE WHEN (SELECT candidate_status FROM kai.intake_source_candidates WHERE intake_source_candidate_id = candidate1) = 'rejected'
+      THEN 'PASS' ELSE 'FAIL' END,
+    'candidate_status = rejected is now accepted by the widened P1-08 CHECK'
   );
 END $$;
 

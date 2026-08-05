@@ -179,3 +179,39 @@ path) happen inside one transaction; any compare-and-set observing a genuine
 concurrent state change, a rejected required-audit prepare, a synchronous publish
 failure, a rejected publish promise, or a malformed inserted row rolls back all of it
 together.
+
+## P1-08 CORRECTION (2026-08-05): three-outcome decision model
+
+The single-outcome (`'promoted'`-only) model above is corrected to three
+owner-authorized outcomes: `needs_more_information`, `rejected`, `promoted`. See
+`scripts/kai-sprint2-p1-08-source-promotion-runbook.md`'s "P1-08 CORRECTION" section
+for the full transition matrix, schema changes, and per-outcome side-effect
+description. Summary:
+
+- The service/repository input field `reviewedSourceType` is replaced as the sole
+  discriminator by a new `outcome` field (`needs_more_information` | `rejected` |
+  `promoted`); `reviewedSourceType` is now required only when `outcome ===
+  'promoted'` and must be entirely absent otherwise (a present value on a
+  non-promotion outcome is rejected as `validation_blocker`, never silently
+  ignored).
+- `kai.intake_promotion_decisions.decision_status` no longer has a transient
+  `'decided'` value; a decision row is written directly at whichever outcome was
+  requested. `reviewed_source_type` is now nullable (bound only for `promoted`).
+- `kai.intake_source_candidates.candidate_status` is widened again to also accept
+  `'rejected'`.
+- `kai.review_queue_items.queue_status` uses the already-accepted P1-06 value
+  `'waiting_on_client'` for `needs_more_information`, with `required_action` set to
+  the fixed literal `"Obtain the missing client information before reconsidering
+  source promotion."` No new column or CHECK constraint was needed on
+  `kai.review_queue_items`.
+- `Backend/kai/dictionary/postgresSourcePromotionRepository.js` and
+  `Backend/kai/services/kaiSourcePromotionService.js` were rewritten to support the
+  full transition matrix (`null -> X` for all three outcomes,
+  `needs_more_information -> rejected`/`promoted`), with every other requested
+  transition returning `conflict_current_state_changed` via an authoritative
+  reread-and-compare-and-set, and identical replay of any reachable outcome
+  performing zero writes and zero audit.
+- The four P1-08 test spec files, the P1-08 verifier/smoke-verifier/failure-checks/
+  smoke-seed SQL scripts, and this runbook/patch-notes pair were updated to match.
+  No P1-06/P1-07 file was touched; the correction remains entirely within this
+  package's own migration, repository, service, scripts, and tests.

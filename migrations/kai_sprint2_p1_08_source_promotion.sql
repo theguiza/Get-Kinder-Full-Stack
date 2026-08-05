@@ -46,17 +46,23 @@ END $$;
 
 -- P1-08 owner decision: kai.intake_source_candidates.candidate_status is widened
 -- from its P1-07 single-value pin ('needs_gk_review' only) to also accept
--- 'promoted', following the accepted P1-07 precedent of widening an earlier
--- package's CHECK-pinned vocabulary through a later package's forward migration
--- (P1-07 did this to the shared kai.upload_lifecycle_audit operation/metadata
--- CHECKs) rather than editing the accepted P1-07 migration file. No other value is
--- added. kai.review_queue_items.queue_status and review_status already include
--- 'resolved' in the accepted P1-06 vocabulary, so this package widens no
--- review_queue_items CHECK constraint.
+-- 'promoted' and 'rejected', following the accepted P1-07 precedent of widening an
+-- earlier package's CHECK-pinned vocabulary through a later package's forward
+-- migration (P1-07 did this to the shared kai.upload_lifecycle_audit
+-- operation/metadata CHECKs) rather than editing the accepted P1-07 migration
+-- file. No other value is added. 'rejected' is a P1-08 CORRECTION addition: the
+-- original single-outcome model only widened to 'promoted'; the corrected
+-- three-outcome model also needs a terminal candidate_status for a rejected
+-- decision. kai.review_queue_items.queue_status already includes both
+-- 'resolved' and 'waiting_on_client' in the accepted P1-06 vocabulary (the P1-06
+-- migration created the table with the full canonical, already-shared
+-- queue_status list), and review_queue_items.required_action already exists as a
+-- nullable P1-06 column, so this package widens no review_queue_items CHECK
+-- constraint and adds no review_queue_items column.
 ALTER TABLE kai.intake_source_candidates
   DROP CONSTRAINT IF EXISTS intake_source_candidates_p1_07_candidate_status_check,
   ADD CONSTRAINT intake_source_candidates_p1_07_candidate_status_check
-    CHECK (candidate_status IN ('needs_gk_review', 'promoted'));
+    CHECK (candidate_status IN ('needs_gk_review', 'promoted', 'rejected'));
 
 -- P1-08 owner decision: two new unique constraints on kai.intake_source_candidates,
 -- added here for the same reason P1-07 added
@@ -90,18 +96,24 @@ ALTER TABLE kai.review_queue_items
 -- and is pinned to a fixed, non-'unknown' vocabulary because no currently
 -- authorized upstream producer contract emits an explicit source-type
 -- classification (the same absence P1-07 found and disclosed for its own
--- proposed_source_type). decision_status starts at 'decided' and this package's
--- own compound creation transitions it to 'promoted' in the same transaction,
--- binding source_id/source_version_id, once every promotion validator has passed;
--- it never observably rests at any other value from this package's own writes.
+-- proposed_source_type).
+--
+-- P1-08 CORRECTION: decision_status is now one of three owner-authorized
+-- outcomes - 'needs_more_information', 'rejected', 'promoted' - reachable via
+-- exactly the transitions null -> any of the three, and needs_more_information ->
+-- rejected/promoted. There is no longer a transient 'decided' value: a decision
+-- is recorded directly at whichever of the three outcomes was requested.
+-- reviewed_source_type/source_id/source_version_id/promoted_at are therefore
+-- nullable, and bound (all four non-null) only when decision_status = 'promoted';
+-- they stay null for 'needs_more_information' and 'rejected'.
 CREATE TABLE IF NOT EXISTS kai.intake_promotion_decisions (
   intake_promotion_decision_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id uuid NOT NULL,
   intake_source_candidate_id uuid NOT NULL,
   review_queue_item_id uuid NOT NULL,
 
-  reviewed_source_type text NOT NULL,
-  decision_status text NOT NULL DEFAULT 'decided',
+  reviewed_source_type text,
+  decision_status text NOT NULL,
 
   source_id uuid,
   source_version_id uuid,
@@ -123,19 +135,21 @@ CREATE TABLE IF NOT EXISTS kai.intake_promotion_decisions (
     REFERENCES kai.review_queue_items (review_queue_item_id, organization_id)
     ON DELETE RESTRICT,
   CONSTRAINT intake_promotion_decisions_p1_08_reviewed_source_type_check
-    CHECK (reviewed_source_type IN (
+    CHECK (reviewed_source_type IS NULL OR reviewed_source_type IN (
       'organization_primary_record',
       'organization_secondary_record',
       'third_party_provided_record',
       'public_record'
     )),
   CONSTRAINT intake_promotion_decisions_p1_08_decision_status_check
-    CHECK (decision_status IN ('decided', 'promoted')),
+    CHECK (decision_status IN ('needs_more_information', 'rejected', 'promoted')),
   CONSTRAINT intake_promotion_decisions_p1_08_promoted_binding_check
     CHECK (
-      (decision_status = 'decided' AND source_id IS NULL AND source_version_id IS NULL AND promoted_at IS NULL)
+      (decision_status IN ('needs_more_information', 'rejected')
+        AND reviewed_source_type IS NULL AND source_id IS NULL AND source_version_id IS NULL AND promoted_at IS NULL)
       OR
-      (decision_status = 'promoted' AND source_id IS NOT NULL AND source_version_id IS NOT NULL AND promoted_at IS NOT NULL)
+      (decision_status = 'promoted'
+        AND reviewed_source_type IS NOT NULL AND source_id IS NOT NULL AND source_version_id IS NOT NULL AND promoted_at IS NOT NULL)
     ),
   CONSTRAINT intake_promotion_decisions_p1_08_created_by_type_check
     CHECK (created_by_type IN ('human', 'system'))

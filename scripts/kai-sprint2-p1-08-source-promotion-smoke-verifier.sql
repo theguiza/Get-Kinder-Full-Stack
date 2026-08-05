@@ -128,8 +128,8 @@ BEGIN
 
   -- Duplicate-identity rejection at the database level.
   BEGIN
-    INSERT INTO kai.intake_promotion_decisions (organization_id, intake_source_candidate_id, review_queue_item_id, reviewed_source_type)
-    VALUES (org1, candidate1, review_item1, reviewed_type);
+    INSERT INTO kai.intake_promotion_decisions (organization_id, intake_source_candidate_id, review_queue_item_id, decision_status)
+    VALUES (org1, candidate1, review_item1, 'rejected');
     INSERT INTO p1_08_results VALUES ('duplicate_identity_rejected', 'FAIL', 'duplicate organization_id + intake_source_candidate_id unexpectedly succeeded');
   EXCEPTION WHEN unique_violation THEN
     INSERT INTO p1_08_results VALUES ('duplicate_identity_rejected', 'PASS', 'safe unique-violation failure via intake_promotion_decisions_p1_08_identity_unique');
@@ -138,14 +138,14 @@ BEGIN
   -- Genuine concurrent-insert convergence proof (sequential-within-one-session
   -- form, mirroring the established P1-04 through P1-07 SQL-level convention).
   BEGIN
-    INSERT INTO kai.intake_promotion_decisions (organization_id, intake_source_candidate_id, review_queue_item_id, reviewed_source_type)
-    VALUES (org1, candidate2, review_item2, reviewed_type);
+    INSERT INTO kai.intake_promotion_decisions (organization_id, intake_source_candidate_id, review_queue_item_id, decision_status)
+    VALUES (org1, candidate2, review_item2, 'rejected');
   EXCEPTION WHEN unique_violation THEN
     NULL;
   END;
   BEGIN
-    INSERT INTO kai.intake_promotion_decisions (organization_id, intake_source_candidate_id, review_queue_item_id, reviewed_source_type)
-    VALUES (org1, candidate2, review_item2, reviewed_type);
+    INSERT INTO kai.intake_promotion_decisions (organization_id, intake_source_candidate_id, review_queue_item_id, decision_status)
+    VALUES (org1, candidate2, review_item2, 'rejected');
     INSERT INTO p1_08_results VALUES ('concurrent_insert_convergence_second_attempt_rejected', 'FAIL', 'second concurrent-identity insert unexpectedly succeeded');
   EXCEPTION WHEN unique_violation THEN
     INSERT INTO p1_08_results VALUES ('concurrent_insert_convergence_second_attempt_rejected', 'PASS', 'safe unique-violation failure on the second concurrent attempt');
@@ -175,10 +175,11 @@ BEGIN
   SELECT count(*) INTO version_count_before FROM kai.source_versions;
   SELECT count(*) INTO audit_count_before FROM kai.upload_lifecycle_audit WHERE operation = 'source_promotion_decision_persisted';
   BEGIN
-    decision_insert_reached := true;
-    INSERT INTO kai.intake_promotion_decisions (organization_id, intake_source_candidate_id, review_queue_item_id, reviewed_source_type)
-    VALUES (org1, candidate2, review_item2, reviewed_type);
-
+    -- P1-08's actual repository implementation performs source/source_version
+    -- work before binding the decision row (so a 'promoted' decision row is
+    -- always inserted already-fully-bound, per the corrected
+    -- promoted_binding_check), so this simulation follows the same order:
+    -- source, then source_version, then the fully-bound decision row, then audit.
     source_insert_reached := true;
     INSERT INTO kai.sources (organization_id, source_code, reviewed_source_type)
     VALUES (org1, repeat('c', 64), reviewed_type);
@@ -186,6 +187,16 @@ BEGIN
     version_insert_reached := true;
     INSERT INTO kai.source_versions (organization_id, source_id, intake_source_candidate_id, intake_sensitivity_profile_id, profile_canonical_sha256)
     SELECT org1, source_id, candidate2, sensitivity2, checksum2 FROM kai.sources WHERE organization_id = org1 AND source_code = repeat('c', 64);
+
+    decision_insert_reached := true;
+    INSERT INTO kai.intake_promotion_decisions (
+      organization_id, intake_source_candidate_id, review_queue_item_id, reviewed_source_type,
+      decision_status, source_id, source_version_id, promoted_at
+    )
+    SELECT org1, candidate2, review_item2, reviewed_type, 'promoted', sv.source_id, sv.source_version_id, now()
+      FROM kai.source_versions sv
+      JOIN kai.sources s ON s.source_id = sv.source_id
+     WHERE s.organization_id = org1 AND s.source_code = repeat('c', 64);
 
     audit_insert_reached := true;
     INSERT INTO kai.upload_lifecycle_audit (organization_id, intake_file_id, operation, from_state, to_state, outcome, metadata)
@@ -195,7 +206,7 @@ BEGIN
         'metadata_only', true, 'contract', 'p1_source_promotion_decision_v1',
         'intake_source_candidate_id', candidate2::text, 'intake_sensitivity_profile_id', sensitivity2::text,
         'profile_canonical_sha256', checksum2, 'reviewed_source_type', reviewed_type,
-        'decision_status', 'decided', 'candidate_status', 'needs_gk_review', 'queue_status', 'open',
+        'decision_status', 'promoted', 'candidate_status', 'promoted', 'queue_status', 'resolved',
         'source_id', null, 'source_version_id', null, 'validator_key', 'VAL-KAI-P1-08-001'
       )
     );

@@ -7,6 +7,14 @@ import { createPostgresSourcePromotionRepository } from "../dictionary/postgresS
 const SOURCE_PROMOTION_ALLOWED_ROLES = new Set(["gk_admin", "gk_operator", "gk_reviewer"]);
 const SOURCE_PROMOTION_OPERATION = "create_source_promotion_decision";
 
+/**
+ * P1-08 CORRECTION: the decision outcome vocabulary the service accepts as
+ * `outcome`. reviewedSourceType is required only for 'promoted' and must be
+ * entirely absent otherwise (see isReviewedSourceTypeShapeValidForOutcome
+ * below) - it is never silently accepted-and-ignored on a non-promotion outcome.
+ */
+const ALLOWED_DECISION_OUTCOMES = new Set(["needs_more_information", "rejected", "promoted"]);
+
 function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -22,13 +30,19 @@ function isNormalizedNow(value) {
   return new Date(parsed).toISOString() === value;
 }
 
+function isReviewedSourceTypeShapeValidForOutcome(outcome, reviewedSourceType) {
+  if (outcome === "promoted") return isNonEmptyString(reviewedSourceType);
+  return reviewedSourceType === undefined;
+}
+
 function isCreateSourcePromotionDecisionInput(value) {
-  const allowedKeys = new Set(["organizationId", "intakeSourceCandidateId", "reviewedSourceType", "actorContext", "now"]);
+  const allowedKeys = new Set(["organizationId", "intakeSourceCandidateId", "outcome", "reviewedSourceType", "actorContext", "now"]);
   if (!isPlainObject(value) || !Object.keys(value).every((key) => allowedKeys.has(key))) return false;
+  if (!ALLOWED_DECISION_OUTCOMES.has(value.outcome)) return false;
   return (
     isNonEmptyString(value.organizationId) &&
     isNonEmptyString(value.intakeSourceCandidateId) &&
-    isNonEmptyString(value.reviewedSourceType) &&
+    isReviewedSourceTypeShapeValidForOutcome(value.outcome, value.reviewedSourceType) &&
     isPlainObject(value.actorContext) &&
     isNormalizedNow(value.now)
   );
@@ -105,7 +119,8 @@ export async function createSourcePromotionDecision(input, dependencies = {}) {
       organizationId: input.organizationId,
       intakeSourceCandidateId: input.intakeSourceCandidateId,
     },
-    reviewedSourceType: input.reviewedSourceType,
+    outcome: input.outcome,
+    ...(input.outcome === "promoted" ? { reviewedSourceType: input.reviewedSourceType } : {}),
     actorUserId: actorContext.actorUserId,
     now: input.now,
     metadataOnlyAudit: dependencies.metadataOnlyAudit,
@@ -120,4 +135,5 @@ export async function createSourcePromotionDecision(input, dependencies = {}) {
 export const __sourcePromotionServiceContract = Object.freeze({
   SOURCE_PROMOTION_OPERATION,
   SOURCE_PROMOTION_ALLOWED_ROLES,
+  ALLOWED_DECISION_OUTCOMES: Object.freeze([...ALLOWED_DECISION_OUTCOMES]),
 });
