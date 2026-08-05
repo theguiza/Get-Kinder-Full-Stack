@@ -46,11 +46,11 @@ test("P1-05 defines every Phase 5 semantic dimension as its own distinct, CHECK-
     ["pii_status", "intake_sensitivity_profiles_p1_05_pii_status_check"],
     ["minor_data_status", "intake_sensitivity_profiles_p1_05_minor_data_status_check"],
     ["health_housing_justice_immigration_status", "intake_sensitivity_profiles_p1_05_hhji_status_check"],
-    ["indigenous_governance_status", "intake_sensitivity_profiles_p1_05_indigenous_governance_status_check"],
+    ["indigenous_governance_status", "intake_sensitivity_profiles_p1_05_indig_gov_status_check"],
     ["staff_notes_status", "intake_sensitivity_profiles_p1_05_staff_notes_status_check"],
-    ["story_testimonial_status", "intake_sensitivity_profiles_p1_05_story_testimonial_status_check"],
+    ["story_testimonial_status", "intake_sensitivity_profiles_p1_05_story_testimonial_check"],
     ["small_cell_risk_status", "intake_sensitivity_profiles_p1_05_small_cell_risk_status_check"],
-    ["financial_records_status", "intake_sensitivity_profiles_p1_05_financial_records_status_check"],
+    ["financial_records_status", "intake_sensitivity_profiles_p1_05_fin_records_status_check"],
     ["consent_basis_status", "intake_sensitivity_profiles_p1_05_consent_basis_status_check"],
   ];
   for (const [column, constraint] of threeStateDimensions) {
@@ -121,6 +121,27 @@ test("P1-05 audit metadata branch requires exactly the seven allowlisted keys", 
     assert.match(branch, new RegExp(`metadata \\? '${key}'`));
   }
   assert.match(branch, /metadata - ARRAY\[/);
+});
+
+test("P1-05 migration comments never claim classifications are copied from profile JSON", () => {
+  assert.doesNotMatch(migrationSource, /sensitivity_committed_facts/);
+  assert.doesNotMatch(migrationSource, /copied from|carried from.*profile/i);
+  assert.doesNotMatch(migrationSource, /profile\.sensitivity_committed_facts/);
+  assert.match(migrationSource, /fail-closed\s*\n?--?\s*'unknown' placeholder/);
+});
+
+test("P1-05 catalog verifier totality: every unnest-driven CHECK_EXISTS block embeds its PASS/FAIL in the CASE, with no outer WHERE EXISTS filter that could drop a check row", () => {
+  const verifierSource = readFileSync("scripts/kai-sprint2-p1-05-intake-sensitivity-profile-verifier.sql", "utf8");
+  const checkExistsBlocks = verifierSource.match(/SELECT 'CHECK_EXISTS'[\s\S]*?\]\)\s*AS check_name_value/g) || [];
+  assert.equal(checkExistsBlocks.length, 2, "expected exactly two CHECK_EXISTS unnest blocks");
+  for (const block of checkExistsBlocks) {
+    assert.match(block, /CASE WHEN EXISTS/);
+  }
+  // the prior bug: a WHERE EXISTS filtering the unnest results directly (rather than
+  // inside the CASE) causes a missing object's check row to disappear instead of
+  // reporting FAIL. Confirm that shape is gone from the whole file.
+  assert.doesNotMatch(verifierSource, /\]\)\s*AS check_name_value\s*\n\s*WHERE EXISTS/);
+  assert.match(verifierSource, /AUDIT_METADATA_BRANCH/);
 });
 
 test("P1-05 rollback removes only P1-05 objects and restores the exact prior audit constraints", () => {

@@ -150,72 +150,38 @@ test("P1-05 contract constants match the exact owner-decided audit vocabulary", 
   assert.equal(__intakeSensitivityProfileRepositoryContract.SENSITIVITY_AUDIT_OPERATION, "intake_sensitivity_profile_persisted");
 });
 
-test("P1-05 deriveSensitivityFacts defaults every dimension to unknown, distinct from false/absent, when the profile states nothing", () => {
-  const { deriveSensitivityFacts } = __intakeSensitivityProfileRepositoryTestables;
-  const facts = deriveSensitivityFacts({ status: "profiled", fields: [] });
+test("P1-05 repository never reads kai.intake_file_profiles.profile: no classification producer contract is recognized", () => {
+  assert.doesNotMatch(repositorySource, /\bderiveSensitivityFacts\b/);
+  assert.doesNotMatch(repositorySource, /\bsensitivity_committed_facts\b/);
+  assert.doesNotMatch(repositorySource, /profileRow\.profile\b/);
+  // readScopedProfile selects only the tenant-scoped lineage facts required for P1-05.
+  assert.doesNotMatch(repositorySource, /SELECT[\s\S]*?\bprofile\b[\s\S]*?FROM kai\.intake_file_profiles/);
+  assert.match(
+    repositorySource,
+    /SELECT organization_id::text AS organization_id,\s*intake_file_id::text AS intake_file_id,\s*file_profile_id::text AS file_profile_id,\s*profile_canonical_sha256\s*FROM kai\.intake_file_profiles/,
+  );
+});
+
+test("P1-05 repository testables no longer expose a profile-JSON classification derivation function", () => {
+  assert.equal(__intakeSensitivityProfileRepositoryTestables.deriveSensitivityFacts, undefined);
+});
+
+test("P1-05 repository persists every classification status as the pinned literal 'unknown' via column defaults, not a computed value", () => {
+  assert.doesNotMatch(repositorySource, /facts\.\w+/);
+  assert.match(
+    repositorySource,
+    /INSERT INTO kai\.intake_sensitivity_profiles \(\s*organization_id, intake_file_id, file_profile_id, data_dictionary_id, profile_canonical_sha256,\s*created_at\s*\)/,
+  );
+});
+
+test("P1-05 dimension vocabulary array is enumeration-only metadata, not a producer contract", () => {
   for (const dimension of __intakeSensitivityProfileRepositoryContract.PRESENT_ABSENT_DIMENSIONS) {
-    assert.equal(facts[dimension], "unknown");
-    assert.notEqual(facts[dimension], false);
-    assert.notEqual(facts[dimension], null);
+    assert.equal(typeof dimension, "string");
   }
   for (const dimension of __intakeSensitivityProfileRepositoryContract.ALLOWED_NOT_ALLOWED_DIMENSIONS) {
-    assert.equal(facts[dimension], "unknown");
+    assert.equal(typeof dimension, "string");
   }
-});
-
-test("P1-05 deriveSensitivityFacts preserves an explicit safe committed fact and rejects malformed/unsupported values", () => {
-  const { deriveSensitivityFacts } = __intakeSensitivityProfileRepositoryTestables;
-
-  const explicit = deriveSensitivityFacts({
-    sensitivity_committed_facts: {
-      personal_data: "present",
-      minor_data: "absent",
-      financial_records: "present",
-      indigenous_governance: "present",
-      small_cell_risk: "absent",
-      allowed_use: "not_allowed",
-    },
-  });
-  assert.equal(explicit.personal_data, "present");
-  assert.equal(explicit.minor_data, "absent");
-  assert.equal(explicit.financial_records, "present");
-  assert.equal(explicit.indigenous_governance, "present");
-  assert.equal(explicit.small_cell_risk, "absent");
-  assert.equal(explicit.allowed_use, "not_allowed");
-  // dimensions not stated remain unknown, never inferred
-  assert.equal(explicit.health_housing_justice_immigration, "unknown");
-  assert.equal(explicit.staff_notes, "unknown");
-  assert.equal(explicit.story_testimonial, "unknown");
-  assert.equal(explicit.consent_basis, "unknown");
-
-  const malformed = deriveSensitivityFacts({
-    sensitivity_committed_facts: { personal_data: "yes", allowed_use: "sometimes", minor_data: 1, financial_records: null },
-  });
-  assert.equal(malformed.personal_data, "unknown");
-  assert.equal(malformed.allowed_use, "unknown");
-  assert.equal(malformed.minor_data, "unknown");
-  assert.equal(malformed.financial_records, "unknown");
-
-  assert.deepEqual(deriveSensitivityFacts(null), deriveSensitivityFacts({}));
-  assert.deepEqual(deriveSensitivityFacts({ sensitivity_committed_facts: "not-an-object" }), deriveSensitivityFacts({}));
-});
-
-test("P1-05 financial records, Indigenous governance, and small-cell risk remain distinct dimensions, never merged into PII", () => {
-  const { deriveSensitivityFacts } = __intakeSensitivityProfileRepositoryTestables;
-  const facts = deriveSensitivityFacts({
-    sensitivity_committed_facts: {
-      personal_data: "absent",
-      financial_records: "present",
-      indigenous_governance: "present",
-      small_cell_risk: "present",
-    },
-  });
-  assert.equal(facts.personal_data, "absent");
-  assert.equal(facts.financial_records, "present");
-  assert.equal(facts.indigenous_governance, "present");
-  assert.equal(facts.small_cell_risk, "present");
-  assert.notEqual(facts.financial_records, facts.personal_data);
-  assert.notEqual(facts.indigenous_governance, facts.personal_data);
+  assert.doesNotMatch(repositorySource, /personal_data:|committedFacts\[/);
 });
 
 test("P1-05 migration pins every dimension default to unknown and every restriction to its fail-closed value", () => {

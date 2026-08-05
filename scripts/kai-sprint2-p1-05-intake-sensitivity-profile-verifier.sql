@@ -52,31 +52,43 @@ WITH checks AS (
          ) THEN 'PASS' ELSE 'FAIL' END,
          'sensitivity profile bound by composite lineage to the exact stored data-dictionary bundle identity'
   UNION ALL
-  SELECT 'CHECK_EXISTS', check_name_value, 'PASS', 'three-state (unknown/present/absent) dimension is CHECK-enforced'
+  SELECT 'CHECK_EXISTS', check_name_value,
+         CASE WHEN EXISTS (
+           SELECT 1
+             FROM pg_constraint c
+             JOIN pg_class r ON r.oid = c.conrelid
+             JOIN pg_namespace n ON n.oid = r.relnamespace
+            WHERE n.nspname = 'kai'
+              AND r.relname = 'intake_sensitivity_profiles'
+              AND c.conname = check_name_value
+              AND c.contype = 'c'
+         ) THEN 'PASS' ELSE 'FAIL' END,
+         'three-state (unknown/present/absent) dimension is CHECK-enforced'
     FROM unnest(ARRAY[
       'intake_sensitivity_profiles_p1_05_pii_status_check',
       'intake_sensitivity_profiles_p1_05_minor_data_status_check',
       'intake_sensitivity_profiles_p1_05_hhji_status_check',
-      'intake_sensitivity_profiles_p1_05_indigenous_governance_status_check',
+      'intake_sensitivity_profiles_p1_05_indig_gov_status_check',
       'intake_sensitivity_profiles_p1_05_staff_notes_status_check',
-      'intake_sensitivity_profiles_p1_05_story_testimonial_status_check',
+      'intake_sensitivity_profiles_p1_05_story_testimonial_check',
       'intake_sensitivity_profiles_p1_05_small_cell_risk_status_check',
-      'intake_sensitivity_profiles_p1_05_financial_records_status_check',
+      'intake_sensitivity_profiles_p1_05_fin_records_status_check',
       'intake_sensitivity_profiles_p1_05_consent_basis_status_check',
       'intake_sensitivity_profiles_p1_05_allowed_use_status_check'
     ]) AS check_name_value
-   WHERE EXISTS (
-     SELECT 1
-       FROM pg_constraint c
-       JOIN pg_class r ON r.oid = c.conrelid
-       JOIN pg_namespace n ON n.oid = r.relnamespace
-      WHERE n.nspname = 'kai'
-        AND r.relname = 'intake_sensitivity_profiles'
-        AND c.conname = check_name_value
-        AND c.contype = 'c'
-   )
   UNION ALL
-  SELECT 'CHECK_EXISTS', check_name_value, 'PASS', 'pinned fail-closed restriction is CHECK-enforced, not merely a default value'
+  SELECT 'CHECK_EXISTS', check_name_value,
+         CASE WHEN EXISTS (
+           SELECT 1
+             FROM pg_constraint c
+             JOIN pg_class r ON r.oid = c.conrelid
+             JOIN pg_namespace n ON n.oid = r.relnamespace
+            WHERE n.nspname = 'kai'
+              AND r.relname = 'intake_sensitivity_profiles'
+              AND c.conname = check_name_value
+              AND c.contype = 'c'
+         ) THEN 'PASS' ELSE 'FAIL' END,
+         'pinned fail-closed restriction is CHECK-enforced, not merely a default value'
     FROM unnest(ARRAY[
       'intake_sensitivity_profiles_p1_05_llm_processing_check',
       'intake_sensitivity_profiles_p1_05_product_learning_check',
@@ -85,16 +97,6 @@ WITH checks AS (
       'intake_sensitivity_profiles_p1_05_human_review_check',
       'intake_sensitivity_profiles_p1_05_retention_posture_check'
     ]) AS check_name_value
-   WHERE EXISTS (
-     SELECT 1
-       FROM pg_constraint c
-       JOIN pg_class r ON r.oid = c.conrelid
-       JOIN pg_namespace n ON n.oid = r.relnamespace
-      WHERE n.nspname = 'kai'
-        AND r.relname = 'intake_sensitivity_profiles'
-        AND c.conname = check_name_value
-        AND c.contype = 'c'
-   )
   UNION ALL
   SELECT 'COLUMN_ABSENT', 'kai.intake_sensitivity_profiles.review_status',
          CASE WHEN NOT EXISTS (
@@ -132,6 +134,21 @@ WITH checks AS (
               AND pg_get_constraintdef(c.oid) LIKE '%policy_decision_compare_and_set%'
          ) THEN 'PASS' ELSE 'FAIL' END,
          'P1-02/P1-03/P1-04/Gate A audit operations remain accepted alongside the new P1-05 operation'
+  UNION ALL
+  SELECT 'AUDIT_METADATA_BRANCH', 'intake_sensitivity_profile_persisted',
+         CASE WHEN EXISTS (
+           SELECT 1
+             FROM pg_constraint c
+             JOIN pg_class r ON r.oid = c.conrelid
+             JOIN pg_namespace n ON n.oid = r.relnamespace
+            WHERE n.nspname = 'kai'
+              AND r.relname = 'upload_lifecycle_audit'
+              AND c.conname = 'upload_lifecycle_audit_gate_a_metadata_object_check'
+              AND pg_get_constraintdef(c.oid) LIKE '%intake_sensitivity_profile_persisted%'
+              AND pg_get_constraintdef(c.oid) LIKE '%human_review_required%'
+              AND pg_get_constraintdef(c.oid) LIKE '%validator_key%'
+         ) THEN 'PASS' ELSE 'FAIL' END,
+         'metadata object-check constraint enforces the P1-05 sensitivity-profile metadata branch'
 )
 SELECT 'P1_05_CATALOG' AS result_type, check_name, object_name, status, detail
 FROM checks

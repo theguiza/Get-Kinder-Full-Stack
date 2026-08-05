@@ -4,16 +4,19 @@ import { withTransaction } from "../db/kaiDb.js";
  * KAI P1-05 intake sensitivity and allowed-use profile repository adapter.
  *
  * This module is the only authorized location for P1-05 SQL and row locking. It
- * consumes only the tenant-scoped, already-committed `kai.intake_file_profiles` row
- * identified by `organizationId` + `fileProfileId`, and the already-committed
+ * consumes only the tenant-scoped, already-committed `kai.intake_file_profiles`
+ * lineage identified by `organizationId` + `fileProfileId`, and the already-committed
  * `kai.data_dictionaries` bundle identified by `organizationId` + `fileProfileId` +
  * `dataDictionaryId`: `intake_file_id` and `profile_canonical_sha256` are always
  * re-read from those rows, never accepted from the caller. It never reads raw bytes,
  * calls storage, invokes a parser or profiler, uses an LLM, performs an external
- * lookup, or infers facts from filenames or field names. Every classification
- * dimension is copied only from an explicit, safe, already-committed profile fact;
- * absence of such a fact always persists as the fail-closed `unknown` state, never a
- * derived guess. This package does not execute retention, delete data, change
+ * lookup, or infers facts from filenames or field names. No currently authorized
+ * profiler, validator, review service, or producer emits a classification, consent,
+ * sensitivity, or permission fact, so this repository does not read the
+ * `kai.intake_file_profiles.profile` JSON column at all: it is machine-generated
+ * profiling metadata, not authoritative classification or consent input. Every
+ * classification dimension always persists as the fail-closed `unknown` state, never
+ * a derived guess. This package does not execute retention, delete data, change
  * storage lifecycle, activate a job, or grant any approval or external-release
  * authority - it only records the fail-closed restrictions themselves.
  */
@@ -36,16 +39,14 @@ const SENSITIVITY_AUDIT_OPERATION = "intake_sensitivity_profile_persisted";
  * governance-sensitive data, staff notes, story/testimonial content, small-cell risk,
  * consent basis, and financial records are each their own dimension and are never
  * merged into one another (Indigenous governance and financial records are always
- * kept distinct from generic PII).
+ * kept distinct from generic PII). This foundation package persists every dimension
+ * as `unknown` unconditionally: this array only enumerates the column vocabulary for
+ * test and catalog-check reuse, it is never used to read a classification value from
+ * any source.
  */
 const PRESENT_ABSENT_DIMENSIONS = Object.freeze([
-  // Named "personal_data" (not "pii") as the committed-profile fact key: the
-  // committed kai.intake_file_profiles.profile column is itself governed by the
-  // existing, frozen kai.gate_a_p0_jsonb_metadata_only() content filter, which
-  // refuses any jsonb value containing the literal substring "pii" (among other
-  // sensitive-term substrings) anywhere in its text. The persisted SQL column for
-  // this dimension is still named `pii_status`, since that column is a plain text
-  // column, never a jsonb value checked by that filter.
+  // Named "personal_data" (not "pii"): the persisted SQL column for this dimension is
+  // still named `pii_status`.
   "personal_data",
   "minor_data",
   "health_housing_justice_immigration",
@@ -130,49 +131,11 @@ function asIso(value) {
   return new Date(value).toISOString();
 }
 
-function isPresentAbsentValue(value) {
-  return value === "present" || value === "absent";
-}
-
-function isAllowedNotAllowedValue(value) {
-  return value === "allowed" || value === "not_allowed";
-}
-
-/**
- * Pure, deterministic derivation of the P1-05 classification dimensions from one
- * committed profile only. The committed profile may optionally state an explicit
- * safe fact for a dimension under `profile.sensitivity_committed_facts`; anything
- * absent, malformed, or outside the accepted enum for that dimension always persists
- * as 'unknown'. There is no inference from file content, filenames, field names, or
- * absence anywhere in this function: no current committed profile producer states
- * any of these facts, so every dimension loads as 'unknown' until a later,
- * separately authorized package supplies real classification input - that is the
- * correct, expected behavior for this foundation package.
- */
-function deriveSensitivityFacts(profile) {
-  const committedFacts =
-    isPlainObject(profile) && isPlainObject(profile.sensitivity_committed_facts)
-      ? profile.sensitivity_committed_facts
-      : {};
-
-  const facts = {};
-  for (const dimension of PRESENT_ABSENT_DIMENSIONS) {
-    const value = committedFacts[dimension];
-    facts[dimension] = isPresentAbsentValue(value) ? value : "unknown";
-  }
-  for (const dimension of ALLOWED_NOT_ALLOWED_DIMENSIONS) {
-    const value = committedFacts[dimension];
-    facts[dimension] = isAllowedNotAllowedValue(value) ? value : "unknown";
-  }
-  return facts;
-}
-
 async function readScopedProfile(tx, identity) {
   const result = await tx.query(
     `SELECT organization_id::text AS organization_id,
             intake_file_id::text AS intake_file_id,
             file_profile_id::text AS file_profile_id,
-            profile,
             profile_canonical_sha256
        FROM kai.intake_file_profiles
       WHERE organization_id = $1::uuid
@@ -406,19 +369,12 @@ export function createPostgresIntakeSensitivityProfileRepository({ runInTransact
           const uploadState = await readScopedUploadState(tx, profileRow.organization_id, profileRow.intake_file_id);
           if (!uploadState) return sensitivityFailure("not_found");
 
-          const facts = deriveSensitivityFacts(profileRow.profile);
-
           const insertResult = await tx.query(
             `INSERT INTO kai.intake_sensitivity_profiles (
                organization_id, intake_file_id, file_profile_id, data_dictionary_id, profile_canonical_sha256,
-               pii_status, minor_data_status, health_housing_justice_immigration_status,
-               indigenous_governance_status, staff_notes_status, story_testimonial_status,
-               small_cell_risk_status, financial_records_status, consent_basis_status, allowed_use_status,
                created_at
              )
-             VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5,
-                     $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-                     $16::timestamptz)
+             VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6::timestamptz)
              ON CONFLICT (organization_id, file_profile_id, data_dictionary_id) DO NOTHING
              RETURNING intake_sensitivity_profile_id::text AS intake_sensitivity_profile_id,
                        organization_id::text AS organization_id,
@@ -449,16 +405,6 @@ export function createPostgresIntakeSensitivityProfileRepository({ runInTransact
               profileRow.file_profile_id,
               identity.dataDictionaryId,
               profileRow.profile_canonical_sha256,
-              facts.personal_data,
-              facts.minor_data,
-              facts.health_housing_justice_immigration,
-              facts.indigenous_governance,
-              facts.staff_notes,
-              facts.story_testimonial,
-              facts.small_cell_risk,
-              facts.financial_records,
-              facts.consent_basis,
-              facts.allowed_use,
               now,
             ],
           );
@@ -542,5 +488,4 @@ export const __intakeSensitivityProfileRepositoryContract = Object.freeze({
 export const __intakeSensitivityProfileRepositoryTestables = Object.freeze({
   prepareRequiredAudit,
   RequiredAuditRejectedError,
-  deriveSensitivityFacts,
 });

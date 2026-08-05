@@ -8009,3 +8009,161 @@ prohibited_actions_not_performed:
 
 commit_hash: report after commit; a commit cannot contain its own SHA
 ```
+
+## KAI P1-05 Correction — Classification-Source and Verification-Integrity (appended, additions-only)
+
+This block is appended at the literal EOF of the prior P1-05 evidence block above, which is
+preserved unchanged, including its internal `tests_added_and_results: 1080/1075/5` and
+`npm test: 1185/1180/5` counts. Those counts were produced against a P1-05 package that (a)
+recognized an invented `profile.sensitivity_committed_facts` / `personal_data` classification
+producer contract that no authorized profiler, validator, review service, or producer actually
+emits, (b) had a runner that never checked verifier/failure-check/smoke-verifier output for a
+real `FAIL` status, (c) had two catalog `CHECK_EXISTS` blocks that used `WHERE EXISTS` to filter
+their `unnest(...)` check-name arrays, so a missing constraint silently dropped its check row
+instead of reporting `FAIL`, and (d) had a `transaction_and_audit_atomicity` smoke probe that
+forced a duplicate-key error on the already-seeded org1/profile1/dictionary1 identity, so the
+required audit insert inside that probe was never actually reached. The results below supersede
+the prior block's inconsistent count for P1-05 closure purposes.
+
+corrections_applied:
+  classification_producer_contract_removed:
+    - removed the `profile.sensitivity_committed_facts` / `personal_data` classification-producer
+      contract and the `deriveSensitivityFacts` function entirely from
+      Backend/kai/dictionary/postgresIntakeSensitivityProfileRepository.js
+    - the repository no longer selects `profile` from kai.intake_file_profiles at all; it loads
+      only organization_id, intake_file_id, file_profile_id, profile_canonical_sha256
+    - every P1-05 classification status column (pii_status, minor_data_status,
+      health_housing_justice_immigration_status, indigenous_governance_status,
+      staff_notes_status, story_testimonial_status, small_cell_risk_status,
+      financial_records_status, consent_basis_status, allowed_use_status) now persists as
+      'unknown' purely via the table's own DEFAULT 'unknown', with no computed value threaded
+      through the INSERT
+    - all six pinned restrictions (llm_processing_allowed, product_learning_allowed,
+      public_use_allowed, funder_use_allowed, human_review_required, retention_posture) remain
+      unchanged and fail-closed via their existing DEFAULT + CHECK constraints
+    - migration comments, the repository module/PRESENT_ABSENT_DIMENSIONS doc comments, the
+      runbook, and the patch notes were corrected to state that no currently authorized producer
+      emits a classification/consent/sensitivity/permission fact and that profile JSON is never
+      read for classification
+    - added/updated tests (boundary, integration) proving: profile JSON is not read for
+      classification; sensitivity_committed_facts is ignored; personal_data is ignored;
+      arbitrary classification-like JSON anywhere in the profile is ignored; every status remains
+      unknown; every pinned restriction remains fail-closed
+  runner_fail_status_enforcement:
+    - added scripts/kai-sprint2-p1-05-intake-sensitivity-profile-runner-assertions.js exporting
+      assertNoFail, copying the established P1-02 assertNoFail repository pattern
+      (kai-sprint2-p1-parser-run-and-file-profile-local-postgres.js)
+    - scripts/kai-sprint2-p1-05-intake-sensitivity-profile-local-postgres.js now calls
+      assertNoFail on the captured catalog-verifier, failure-checks, and smoke-verifier output
+      and throws/exits nonzero on a real FAIL status cell
+    - added __tests__/kai-sprint2-p1-05-intake-sensitivity-profile-runner-self-test.spec.js: a
+      deterministic self-test proving a real pipe-delimited FAIL status throws, PASS-only output
+      succeeds, and a check name containing FAIL_CLOSED does not trip it
+  catalog_check_totality:
+    - both CHECK_EXISTS unnest blocks in the verifier now embed CASE WHEN EXISTS ... THEN 'PASS'
+      ELSE 'FAIL' END directly in the SELECT list, with no outer WHERE EXISTS filtering the
+      unnest(...) results, so every named check always emits exactly one row
+    - added an AUDIT_METADATA_BRANCH check (previously absent) proving the metadata
+      object-check constraint enforces the P1-05 intake_sensitivity_profile_persisted branch
+    - making the runner honest surfaced a genuine pre-existing defect: three CHECK constraint
+      names exceeded PostgreSQL's 63-byte identifier limit and were silently truncated at
+      creation, so the verifier's exact-name lookups never matched them:
+        intake_sensitivity_profiles_p1_05_financial_records_status_check (64 bytes) ->
+          intake_sensitivity_profiles_p1_05_fin_records_status_check (58 bytes)
+        intake_sensitivity_profiles_p1_05_indigenous_governance_status_check (68 bytes) ->
+          intake_sensitivity_profiles_p1_05_indig_gov_status_check (56 bytes)
+        intake_sensitivity_profiles_p1_05_story_testimonial_status_check (64 bytes) ->
+          intake_sensitivity_profiles_p1_05_story_testimonial_check (57 bytes)
+      renamed consistently in the migration, the verifier's check-name arrays, and the
+      schema-contract spec; the underlying columns and their 'unknown'/'present'/'absent'
+      semantics are unchanged
+    - added focused schema tests proving: every expected check name appears exactly once
+      (integration, against the runner-owned database); a missing constraint produces FAIL for
+      that exact check rather than a missing row (integration, via a transaction that drops a
+      CHECK constraint, runs the verifier, and rolls back); the verifier source contains no
+      remaining WHERE-EXISTS-filtered unnest block (schema-contract, static)
+  smoke_atomicity_proof_corrected:
+    - replaced the transaction_and_audit_atomicity probe in
+      scripts/kai-sprint2-p1-05-intake-sensitivity-profile-smoke-verifier.sql: it previously
+      forced a duplicate-key error on the already-seeded org1/profile1/dictionary1 identity, so
+      the required audit insert was never reached before the exception
+    - the corrected probe captures exact pre-block counts of kai.intake_sensitivity_profiles and
+      of kai.upload_lifecycle_audit rows with operation = intake_sensitivity_profile_persisted,
+      then inside one exception-controlled block inserts a new, valid sensitivity profile for the
+      still-unseeded org1/profile2/dictionary2 lineage, confirms that insert was reached, inserts
+      its intake_sensitivity_profile_persisted audit row, confirms that insert was reached, and
+      raises a synthetic forced exception
+    - the check is only named PASS when both inserts were reached AND both post-exception counts
+      exactly equal their pre-block values
+    - the repository integration tests for rejected audit preparation, synchronous publish
+      throw, and rejected publish promise were left unchanged (no direct correction was needed)
+
+exact_final_focused_and_integration_tap_summaries: TOOL_VERIFIED
+  node --test __tests__/kai-sprint2-p1-05-intake-sensitivity-profile-schema-contract.spec.js \
+    __tests__/kai-sprint2-p1-05-intake-sensitivity-profile-boundary.spec.js \
+    __tests__/kai-sprint2-p1-05-intake-sensitivity-profile-runner-self-test.spec.js
+    -> # tests 32 / # pass 32 / # fail 0 / # cancelled 0 / # skipped 0 / # todo 0
+  npm run verify:kai-sprint2-p1-05-intake-sensitivity-profile (ephemeral PG 16 runner)
+    -> catalog verifier: 25 rows, all PASS
+    -> read-only failure checks: 9 rows, all PASS
+    -> smoke verifier: 19 rows, all PASS (including transaction_and_audit_atomicity: PASS)
+    -> integration suite (__tests__/kai-sprint2-p1-05-intake-sensitivity-profile.integration.spec.js):
+       # tests 15 / # pass 15 / # fail 0 / # cancelled 0 / # skipped 0 / # todo 0
+
+exact_final_sprint2_tap_summary: TOOL_VERIFIED
+  npm run test:kai-sprint2 -> # tests 1086 / # pass 1081 / # fail 0 / # cancelled 0 / # skipped 5 / # todo 0
+
+exact_final_repository_tap_summary: TOOL_VERIFIED
+  npm test -> # tests 1191 / # pass 1186 / # fail 0 / # cancelled 0 / # skipped 5 / # todo 0
+
+regression_confirmations: TOOL_VERIFIED
+  npm run verify:kai-sprint2-p1-04-data-dictionary-quality (unmodified) -> tests 12; pass 12; fail 0
+  npm run verify:kai-sprint2-p1-03-parser-profile-worker (unmodified) -> tests 14; pass 14; fail 0
+  npm run verify:kai-sprint2-p1-parser-run-file-profile (unmodified) -> passed
+  git diff --check -> clean (exit 0)
+  git diff --cached --check -> clean (exit 0)
+
+pre_post_byte_and_hash_proof: TOOL_VERIFIED
+  KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+    pre-append byte count:  641938
+    pre-append SHA-256:     80ec5bc8cb350a8a7ed4c01ea2d41df629be37342708181f1c5796870031b4a7
+    pre-append line count:  8011
+    byte-exact prefix proof: `head -c 641938` of the file after this block was appended hashes
+      to the identical pre-append SHA-256 above (verified before this correction's commit).
+    the exact post-append byte count and SHA-256, computed against this file's final committed
+    state, are reported in this same correction's commit-verification output below, since a file
+    cannot embed the hash of its own final write while still being written.
+
+changed_files_this_correction:
+  Backend/kai/dictionary/postgresIntakeSensitivityProfileRepository.js (modified)
+  migrations/kai_sprint2_p1_05_intake_sensitivity_profile.sql (modified - comments and three
+    constraint-name shortenings only; no column, default, or semantic change)
+  scripts/kai-sprint2-p1-05-intake-sensitivity-profile-verifier.sql (modified)
+  scripts/kai-sprint2-p1-05-intake-sensitivity-profile-smoke-verifier.sql (modified)
+  scripts/kai-sprint2-p1-05-intake-sensitivity-profile-local-postgres.js (modified)
+  scripts/kai-sprint2-p1-05-intake-sensitivity-profile-runner-assertions.js (added)
+  scripts/kai-sprint2-p1-05-intake-sensitivity-profile-runbook.md (modified)
+  scripts/kai-sprint2-p1-05-intake-sensitivity-profile-patch-notes.md (modified)
+  __tests__/kai-sprint2-p1-05-intake-sensitivity-profile-boundary.spec.js (modified)
+  __tests__/kai-sprint2-p1-05-intake-sensitivity-profile-schema-contract.spec.js (modified)
+  __tests__/kai-sprint2-p1-05-intake-sensitivity-profile.integration.spec.js (modified)
+  __tests__/kai-sprint2-p1-05-intake-sensitivity-profile-runner-self-test.spec.js (added)
+  KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md (this correction block)
+
+scope_protection_confirmed:
+  - no P1-02, P1-03, P1-04, or Gate A migration, rollback, runner, verifier, smoke, repository,
+    service, or test file was edited
+  - no route, listener, scheduler, timer, startup hook, public barrel export, production
+    composition, feature-flag default, or cloud configuration was added or changed
+  - no review queue item, source candidate, promotion decision, source, source version,
+    evidence, claim, or classification/review producer was created
+  - no 00_KAI_CURRENT_STATE.md or KAI_CURRENT_IMPLEMENTATION_BASELINE.md file was touched
+  - no real-client-data access
+
+not_confirmed:
+  production_repository_selection: NOT_CONFIRMED
+  production_database_execution: NOT_CONFIRMED
+  deployment: NOT_CONFIRMED
+
+correction_commit_hash: report after commit; a commit cannot contain its own SHA
+```

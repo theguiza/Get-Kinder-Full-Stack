@@ -24,6 +24,9 @@ DECLARE
   sensitivity_count_after integer;
   audit_count_before integer;
   audit_count_after integer;
+  profile2_sha text;
+  sensitivity_insert_reached boolean := false;
+  audit_insert_reached boolean := false;
 BEGIN
   SELECT count(*) INTO sensitivity_count
     FROM kai.intake_sensitivity_profiles
@@ -173,33 +176,49 @@ BEGIN
     INSERT INTO p1_05_results VALUES ('dictionary_profile_lineage_mismatch_rejected', 'PASS', 'safe foreign-key violation failure');
   END;
 
+  -- transaction-and-audit atomicity proof: profile2/dictionary2 have no sensitivity
+  -- profile of their own yet (every probe above that touched this identity failed on a
+  -- constraint violation and rolled back to its own savepoint without committing), so
+  -- this is a genuine valid, unseeded lineage - not a duplicate-key probe. Both inserts
+  -- must actually succeed and be reached before the forced exception, and the forced
+  -- exception must roll back both together, leaving the exact pre-block counts.
   SELECT count(*) INTO sensitivity_count_before FROM kai.intake_sensitivity_profiles;
-  SELECT count(*) INTO audit_count_before FROM kai.upload_lifecycle_audit;
+  SELECT count(*) INTO audit_count_before FROM kai.upload_lifecycle_audit WHERE operation = 'intake_sensitivity_profile_persisted';
+  SELECT profile_canonical_sha256 INTO profile2_sha FROM kai.intake_file_profiles WHERE file_profile_id = profile2;
   BEGIN
     fresh_sensitivity := '80000000-0000-4000-8000-000000000099';
     INSERT INTO kai.intake_sensitivity_profiles (intake_sensitivity_profile_id, organization_id, intake_file_id, file_profile_id, data_dictionary_id, profile_canonical_sha256)
-    SELECT fresh_sensitivity, org1, file1, profile1, dictionary1, profile_canonical_sha256 FROM kai.intake_file_profiles WHERE file_profile_id = profile1;
+    VALUES (fresh_sensitivity, org1, file1, profile2, dictionary2, profile2_sha);
+    sensitivity_insert_reached := true;
+
     INSERT INTO kai.upload_lifecycle_audit (
       organization_id, intake_file_id, operation, from_state, to_state, outcome, metadata
     ) VALUES (
       org1, file1, 'intake_sensitivity_profile_persisted', 'reserved', 'reserved', 'success',
       jsonb_build_object(
         'metadata_only', true, 'contract', 'p1_intake_sensitivity_and_allowed_use_v1',
-        'file_profile_id', profile1::text, 'data_dictionary_id', dictionary1::text,
-        'profile_canonical_sha256', repeat('1', 64), 'human_review_required', true,
+        'file_profile_id', profile2::text, 'data_dictionary_id', dictionary2::text,
+        'profile_canonical_sha256', profile2_sha, 'human_review_required', true,
         'validator_key', 'VAL-KAI-P1-05-001'
       )
     );
+    audit_insert_reached := true;
+
     RAISE EXCEPTION 'force rollback after sensitivity profile and audit insert';
   EXCEPTION WHEN OTHERS THEN
     NULL;
   END;
-  -- the fresh_sensitivity insert above conflicts with the seeded org1/profile1/dictionary1
-  -- row, so this forced-rollback probe also doubles as proof that the unique-violation path
-  -- never leaves a partial sensitivity profile or audit row behind.
   SELECT count(*) INTO sensitivity_count_after FROM kai.intake_sensitivity_profiles;
-  SELECT count(*) INTO audit_count_after FROM kai.upload_lifecycle_audit;
-  INSERT INTO p1_05_results VALUES ('transaction_and_audit_atomicity', CASE WHEN sensitivity_count_after = sensitivity_count_before AND audit_count_after = audit_count_before THEN 'PASS' ELSE 'FAIL' END, 'forced rollback removed sensitivity-profile and audit side effects together');
+  SELECT count(*) INTO audit_count_after FROM kai.upload_lifecycle_audit WHERE operation = 'intake_sensitivity_profile_persisted';
+  INSERT INTO p1_05_results VALUES (
+    'transaction_and_audit_atomicity',
+    CASE WHEN sensitivity_insert_reached
+           AND audit_insert_reached
+           AND sensitivity_count_after = sensitivity_count_before
+           AND audit_count_after = audit_count_before
+         THEN 'PASS' ELSE 'FAIL' END,
+    'both the sensitivity-profile insert and its required audit insert were reached and executed against a valid, previously-unseeded profile2/dictionary2 lineage before a forced exception rolled back both together'
+  );
 
   INSERT INTO p1_05_results VALUES (
     'audit_metadata_no_raw_content',

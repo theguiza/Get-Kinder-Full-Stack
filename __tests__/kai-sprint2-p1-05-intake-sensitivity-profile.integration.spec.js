@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 if (!process.env.KAI_P1_05_SENSITIVITY_PROFILE_DATABASE_URL) {
   test("P1-05 intake-sensitivity-profile integration requires the runner-owned database", { skip: true }, () => {});
@@ -410,15 +411,20 @@ async function runSensitivityProfileIntegrationSuite() {
     assert.equal(authoritative.data.sensitivityProfile.intake_sensitivity_profile_id, first.data.sensitivityProfile.intake_sensitivity_profile_id);
   });
 
-  test("P1-05: an explicit safe committed profile fact is persisted, not clobbered back to unknown", async () => {
+  test("P1-05: profile JSON classification-like content is always ignored - every dimension persists as unknown regardless of profile shape", async () => {
     const { fileProfileId, dataDictionaryId } = await seedFullLineage(14, {
       profile: fixtureProfile({
+        // legacy guessed producer shape - must be ignored
         sensitivity_committed_facts: {
           personal_data: "present",
           financial_records: "present",
           indigenous_governance: "absent",
           allowed_use: "not_allowed",
         },
+        // top-level guessed alternate key - must be ignored
+        personal_data: "present",
+        // arbitrary nested classification-like object - must be ignored
+        any_other_classifier: { financial_records: "present", consent_basis: "granted", allowed_use: "allowed" },
       }),
     });
 
@@ -429,13 +435,61 @@ async function runSensitivityProfileIntegrationSuite() {
     });
     assert.equal(result.ok, true);
     const row = result.data.sensitivityProfile;
-    assert.equal(row.pii_status, "present");
-    assert.equal(row.financial_records_status, "present");
-    assert.equal(row.indigenous_governance_status, "absent");
-    assert.equal(row.allowed_use_status, "not_allowed");
-    // dimensions not stated in this profile remain unknown
-    assert.equal(row.minor_data_status, "unknown");
-    assert.equal(row.staff_notes_status, "unknown");
+    for (const status of [
+      row.pii_status,
+      row.minor_data_status,
+      row.health_housing_justice_immigration_status,
+      row.indigenous_governance_status,
+      row.staff_notes_status,
+      row.story_testimonial_status,
+      row.small_cell_risk_status,
+      row.financial_records_status,
+      row.consent_basis_status,
+      row.allowed_use_status,
+    ]) {
+      assert.equal(status, "unknown");
+    }
+    assert.equal(row.llm_processing_allowed, false);
+    assert.equal(row.product_learning_allowed, false);
+    assert.equal(row.public_use_allowed, false);
+    assert.equal(row.funder_use_allowed, false);
+    assert.equal(row.human_review_required, true);
+    assert.equal(row.retention_posture, "restricted_pending_review");
+  });
+
+  test("P1-05 catalog verifier: every expected check name appears exactly once", async () => {
+    const verifierSql = readFileSync(
+      new URL("../scripts/kai-sprint2-p1-05-intake-sensitivity-profile-verifier.sql", import.meta.url),
+      "utf8",
+    );
+    const result = await pool.query(verifierSql);
+    const keys = result.rows.map((row) => `${row.check_name}::${row.object_name}`);
+    assert.equal(keys.length, new Set(keys).size, "duplicate catalog-check rows found");
+    assert.ok(keys.length >= 20, "expected the full P1-05 catalog of checks");
+    assert.ok(!result.rows.some((row) => row.status === "FAIL"), "catalog verifier reported an unexpected FAIL");
+  });
+
+  test("P1-05 catalog verifier: a missing constraint produces a FAIL row for that exact check, not a missing row", async () => {
+    const verifierSql = readFileSync(
+      new URL("../scripts/kai-sprint2-p1-05-intake-sensitivity-profile-verifier.sql", import.meta.url),
+      "utf8",
+    );
+    await withClient(async (client) => {
+      await client.query("BEGIN");
+      try {
+        await client.query(
+          "ALTER TABLE kai.intake_sensitivity_profiles DROP CONSTRAINT intake_sensitivity_profiles_p1_05_pii_status_check",
+        );
+        const result = await client.query(verifierSql);
+        const row = result.rows.find(
+          (candidate) => candidate.object_name === "intake_sensitivity_profiles_p1_05_pii_status_check",
+        );
+        assert.ok(row, "the check row for the dropped constraint must still appear");
+        assert.equal(row.status, "FAIL");
+      } finally {
+        await client.query("ROLLBACK");
+      }
+    });
   });
 
   test("P1-05: end-to-end via the service seam with KAI_SPRINT2_ENABLED, using the postgres repository", async () => {

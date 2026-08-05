@@ -50,9 +50,11 @@ END $$;
 -- P1-05 owner decision: one authoritative sensitivity/allowed-use profile row per
 -- organization_id + file_profile_id + data_dictionary_id. This is the foundation table
 -- and schema/repository/service scaffold only: every dimension below is a fail-closed
--- placeholder or an explicit safe committed fact carried from the already-committed,
--- metadata-only kai.intake_file_profiles.profile lineage - never an inference from raw
--- content, filenames, field names, or absence. No column here executes retention,
+-- 'unknown' placeholder. No currently authorized profiler, validator, review service, or
+-- producer contract emits a classification, consent, sensitivity, or permission fact, so
+-- this package never reads kai.intake_file_profiles.profile (machine-generated profiling
+-- metadata, not authoritative classification or consent input) or infers a dimension from
+-- raw content, filenames, field names, or absence. No column here executes retention,
 -- deletes data, changes storage lifecycle, activates a job, or grants any approval or
 -- external-release authority. review_status/review_requirements are not persisted:
 -- the only committed fact about review is the fail-closed human_review_required flag.
@@ -123,15 +125,15 @@ CREATE TABLE IF NOT EXISTS kai.intake_sensitivity_profiles (
     CHECK (minor_data_status IN ('unknown', 'present', 'absent')),
   CONSTRAINT intake_sensitivity_profiles_p1_05_hhji_status_check
     CHECK (health_housing_justice_immigration_status IN ('unknown', 'present', 'absent')),
-  CONSTRAINT intake_sensitivity_profiles_p1_05_indigenous_governance_status_check
+  CONSTRAINT intake_sensitivity_profiles_p1_05_indig_gov_status_check
     CHECK (indigenous_governance_status IN ('unknown', 'present', 'absent')),
   CONSTRAINT intake_sensitivity_profiles_p1_05_staff_notes_status_check
     CHECK (staff_notes_status IN ('unknown', 'present', 'absent')),
-  CONSTRAINT intake_sensitivity_profiles_p1_05_story_testimonial_status_check
+  CONSTRAINT intake_sensitivity_profiles_p1_05_story_testimonial_check
     CHECK (story_testimonial_status IN ('unknown', 'present', 'absent')),
   CONSTRAINT intake_sensitivity_profiles_p1_05_small_cell_risk_status_check
     CHECK (small_cell_risk_status IN ('unknown', 'present', 'absent')),
-  CONSTRAINT intake_sensitivity_profiles_p1_05_financial_records_status_check
+  CONSTRAINT intake_sensitivity_profiles_p1_05_fin_records_status_check
     CHECK (financial_records_status IN ('unknown', 'present', 'absent')),
   CONSTRAINT intake_sensitivity_profiles_p1_05_consent_basis_status_check
     CHECK (consent_basis_status IN ('unknown', 'present', 'absent')),

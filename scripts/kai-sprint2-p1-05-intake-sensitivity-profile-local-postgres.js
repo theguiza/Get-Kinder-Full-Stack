@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { Client } from "pg";
+import { assertNoFail } from "./kai-sprint2-p1-05-intake-sensitivity-profile-runner-assertions.js";
 
 const repoRoot = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 const dbName = "kai_p1_05_intake_sensitivity_profile_synthetic";
@@ -87,12 +88,21 @@ try {
   psqlFile("migrations/kai_sprint2_p1_04_data_dictionary_and_quality.sql");
   psqlFile("migrations/kai_sprint2_p1_05_intake_sensitivity_profile.sql");
 
-  console.log(psqlFile("scripts/kai-sprint2-p1-05-intake-sensitivity-profile-verifier.sql"));
-  console.log(psqlFile("scripts/kai-sprint2-p1-05-intake-sensitivity-profile-failure-checks.sql"));
+  const catalogOutput = psqlFile("scripts/kai-sprint2-p1-05-intake-sensitivity-profile-verifier.sql");
+  console.log(catalogOutput);
+  assertNoFail("P1-05 catalog verifier", catalogOutput);
+
+  const failureOutput = psqlFile("scripts/kai-sprint2-p1-05-intake-sensitivity-profile-failure-checks.sql");
+  console.log(failureOutput);
+  assertNoFail("P1-05 read-only failure checks", failureOutput);
+
   psqlFile("scripts/kai-sprint2-gate-a-smoke-seed.sql");
   psqlFile("scripts/kai-sprint2-p1-04-data-dictionary-quality-smoke-seed.sql");
   psqlFile("scripts/kai-sprint2-p1-05-intake-sensitivity-profile-smoke-seed.sql");
-  console.log(psqlFile("scripts/kai-sprint2-p1-05-intake-sensitivity-profile-smoke-verifier.sql"));
+
+  const smokeOutput = psqlFile("scripts/kai-sprint2-p1-05-intake-sensitivity-profile-smoke-verifier.sql");
+  console.log(smokeOutput);
+  assertNoFail("P1-05 smoke verifier", smokeOutput);
 
   const testEnv = {
     ...process.env,
