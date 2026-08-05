@@ -77,14 +77,49 @@ BEGIN
     INSERT INTO p1_06_failure_results VALUES ('required_action_non_empty_enforced', 'PASS', 'safe check-violation failure');
   END;
 
+  -- sensitivity_review rows must always carry a non-blank required_action (a NULL is
+  -- rejected), unlike the shared column's generally-optional default for other
+  -- queue_types.
+  BEGIN
+    INSERT INTO kai.review_queue_items (organization_id, queue_type, target_object_type, target_object_id, summary)
+    VALUES (org1, 'sensitivity_review', 'intake_sensitivity_profile', sensitivity1, 'x');
+    INSERT INTO p1_06_failure_results VALUES ('sensitivity_review_required_action_required_enforced', 'FAIL', 'null required_action on a sensitivity_review row unexpectedly accepted');
+  EXCEPTION WHEN check_violation THEN
+    INSERT INTO p1_06_failure_results VALUES ('sensitivity_review_required_action_required_enforced', 'PASS', 'safe check-violation failure');
+  END;
+
+  -- sensitivity_review rows also reject a whitespace-only required_action.
+  BEGIN
+    INSERT INTO kai.review_queue_items (organization_id, queue_type, target_object_type, target_object_id, summary, required_action)
+    VALUES (org1, 'sensitivity_review', 'intake_sensitivity_profile', sensitivity1, 'x', '   ');
+    INSERT INTO p1_06_failure_results VALUES ('sensitivity_review_required_action_blank_rejected', 'FAIL', 'whitespace-only required_action on a sensitivity_review row unexpectedly accepted');
+  EXCEPTION WHEN check_violation THEN
+    INSERT INTO p1_06_failure_results VALUES ('sensitivity_review_required_action_blank_rejected', 'PASS', 'safe check-violation failure');
+  END;
+
+  -- the shared column stays optional for other queue_types: a null required_action on
+  -- an unrelated queue_type still succeeds, proving the new CHECK is scoped to
+  -- queue_type = 'sensitivity_review' only.
+  INSERT INTO kai.review_queue_items (organization_id, queue_type, target_object_type, target_object_id, summary)
+  VALUES (org1, 'intake_file_review', 'intake_file', file1, 'no required_action needed here');
+  INSERT INTO p1_06_failure_results VALUES (
+    'other_queue_types_required_action_still_optional',
+    CASE WHEN EXISTS (
+      SELECT 1 FROM kai.review_queue_items
+       WHERE organization_id = org1 AND queue_type = 'intake_file_review'
+         AND target_object_id = file1 AND required_action IS NULL
+    ) THEN 'PASS' ELSE 'FAIL' END,
+    'a null required_action on an unrelated queue_type was correctly not rejected'
+  );
+
   -- unique-identity enforcement (organization_id, queue_type, target_object_type, target_object_id)
   -- for the sensitivity_review partial unique index.
   fabricated_target_row_id := gen_random_uuid();
-  INSERT INTO kai.review_queue_items (organization_id, queue_type, target_object_type, target_object_id, summary)
-  VALUES (org1, 'sensitivity_review', 'intake_sensitivity_profile', fabricated_target_row_id, 'x');
+  INSERT INTO kai.review_queue_items (organization_id, queue_type, target_object_type, target_object_id, summary, required_action)
+  VALUES (org1, 'sensitivity_review', 'intake_sensitivity_profile', fabricated_target_row_id, 'x', 'x');
   BEGIN
-    INSERT INTO kai.review_queue_items (organization_id, queue_type, target_object_type, target_object_id, summary)
-    VALUES (org1, 'sensitivity_review', 'intake_sensitivity_profile', fabricated_target_row_id, 'y');
+    INSERT INTO kai.review_queue_items (organization_id, queue_type, target_object_type, target_object_id, summary, required_action)
+    VALUES (org1, 'sensitivity_review', 'intake_sensitivity_profile', fabricated_target_row_id, 'y', 'y');
     INSERT INTO p1_06_failure_results VALUES ('sensitivity_review_identity_unique_enforced', 'FAIL', 'duplicate sensitivity_review identity unexpectedly accepted');
   EXCEPTION WHEN unique_violation THEN
     INSERT INTO p1_06_failure_results VALUES ('sensitivity_review_identity_unique_enforced', 'PASS', 'safe unique-violation failure');
@@ -111,8 +146,8 @@ BEGIN
   -- transaction (see readScopedSensitivityProfile in
   -- Backend/kai/dictionary/postgresReviewQueueRepository.js), not a DB constraint.
   BEGIN
-    INSERT INTO kai.review_queue_items (organization_id, queue_type, target_object_type, target_object_id, summary)
-    VALUES (org1, 'sensitivity_review', 'intake_sensitivity_profile', bogus_sensitivity, 'x');
+    INSERT INTO kai.review_queue_items (organization_id, queue_type, target_object_type, target_object_id, summary, required_action)
+    VALUES (org1, 'sensitivity_review', 'intake_sensitivity_profile', bogus_sensitivity, 'x', 'x');
     INSERT INTO p1_06_failure_results VALUES (
       'fabricated_target_no_db_level_fk_by_design', 'PASS',
       'the database itself does not reject a fabricated intake_sensitivity_profile_id; the P1-06 repository enforces this authoritatively inside its own transaction instead'

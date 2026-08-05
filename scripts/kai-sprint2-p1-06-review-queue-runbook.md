@@ -55,13 +55,21 @@ and need no database.
 
 `Backend/kai/dictionary/postgresReviewQueueRepository.js` is the only authorized
 location for this package's SQL and row locking, other than the reused
-`insertReviewQueueItem`/`getScopedSensitivityReviewQueueItemByIdentity` seams in
-`Backend/kai/db/kaiIntakeQueries.js`. `createSensitivityReviewQueueItem`
+`getScopedSensitivityReviewQueueItemByIdentity` seam in
+`Backend/kai/db/kaiIntakeQueries.js`. The idempotent
+`INSERT ... ON CONFLICT ... DO NOTHING RETURNING` lives in the repository itself
+(not in the shared query module) because that module's other exports are relied on,
+by an unrelated Gate-A/P1-02 idempotency contract, to never contain an ON
+CONFLICT/unique-violation-catch pattern. `createSensitivityReviewQueueItem`
 (`Backend/kai/services/kaiReviewQueueService.js`) contains no SQL and imports no
 database pool: it validates its input allowlist, checks `KAI_SPRINT2_ENABLED`,
-enforces AUTH-KAI-003 and VAL-TEN-001, and delegates persistence to the injected
-repository. It does not modify `createReviewQueueItem` or `updateReviewQueueStatus`,
-and it is not composed into any route.
+enforces AUTH-KAI-003 (a local, strictly narrower human-actor gate than the shared
+assistant-boundary allowlist) and then delegates tenant-membership and role
+authorization to the existing shared validator-group mechanisms
+(`validateActorCanPerformOperation`, `validateTenantBoundaryConsistency`), preserving
+their structured blockers rather than reimplementing membership/role logic locally.
+It does not modify `createReviewQueueItem` or `updateReviewQueueStatus`, and it is not
+composed into any route.
 
 **AUTH-KAI-003** (human-actor authorization): `actorContext.actorType` must be exactly
 `"human"` with a non-empty `actorUserId`. Every non-human actor type — `ai`, `system`,
@@ -91,9 +99,21 @@ Identity and replay (owner decision for P1-06): one `sensitivity_review` /
 'sensitivity_review'` only, so no other queue_type's legitimate multi-row-per-target
 behavior is affected). The repository does an authoritative existing-item lookup
 before ever inserting; if found, it replays that row with no duplicate insert and no
-duplicate audit. Concurrent identical creation is resolved by PostgreSQL's partial
-unique index (insert, catch `23505`, re-read, replay) inside the same transaction,
-never by an in-process lock, mutex, in-flight map, or advisory lock.
+duplicate audit. Concurrent identical creation is resolved entirely by PostgreSQL's
+partial unique index via `INSERT ... ON CONFLICT (organization_id, queue_type,
+target_object_type, target_object_id) WHERE queue_type = 'sensitivity_review' DO
+NOTHING RETURNING ...` (`insertSensitivityReviewQueueItemIfAbsent`,
+`Backend/kai/db/kaiIntakeQueries.js`): the losing transaction observes zero returned
+rows - never a raised `23505` that would abort its transaction before it could
+re-read - then re-reads and replays the authoritative committed row, inside the same
+transaction, never by a savepoint, in-process lock, mutex, in-flight map, or advisory
+lock. Replay validates only tenant scope and the immutable creation identity
+(`organization_id`, `queue_type`, `target_object_type`, `target_object_id`), never a
+later-authorized mutable field such as `queue_status`, `priority`, `assigned_to`,
+`due_at`, `summary`, or `required_action`; a tenant or identity mismatch is surfaced
+as `conflict_current_state_changed`. A newly inserted row is fully validated against
+every server-pinned field before its audit is prepared; a malformed inserted result
+returns `system_error`, publishes no audit, and rolls back the transaction.
 
 The caller supplies only `organizationId`, `intakeSensitivityProfileId`,
 `actorContext`, and `now`. `queue_type` (`'sensitivity_review'`), `target_object_type`
@@ -109,10 +129,16 @@ Creating the item and writing the required metadata-only
 Rejection of the required audit prepare, a synchronous publish failure, or a rejected
 publish promise rolls back the item insert in that same transaction (own-boolean-
 data-property audit predicate, copied from P1-04/P1-05's `prepareRequiredAudit`). The
-audit metadata carries exactly `contract` (`'p1_sensitivity_review_queue_item_v1'`),
-`queue_type`, `target_object_type`, `target_object_id`, `queue_status`, and
-`validator_key`, and no summary text, required-action text, profile content,
-classification, label, sample, PII, path, URL, prompt, or credential.
+audit metadata carries exactly `metadata_only` (`true`), `contract`
+(`'p1_sensitivity_review_queue_item_v1'`), `queue_type`, `target_object_type`,
+`target_object_id`, `queue_status`, and `validator_key` (`'VAL-FUP-001-P0'`), and no
+summary text, required-action text, profile content, classification, label, sample,
+PII, path, URL, prompt, or credential.
+
+`kai.review_queue_items` additionally enforces, for `queue_type = 'sensitivity_review'`
+rows only, that `required_action` is present and non-blank
+(`review_queue_items_p1_06_sensitivity_review_required_action_check`); every other
+queue_type's `required_action` remains optional, unchanged.
 
 When `KAI_SPRINT2_ENABLED` is disabled, the service returns the canonical
 `feature_disabled` result with zero profile reads, membership checks, writes, locks,

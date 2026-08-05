@@ -95,6 +95,14 @@ CREATE TABLE IF NOT EXISTS kai.review_queue_items (
     CHECK (length(summary) BETWEEN 1 AND 2000),
   CONSTRAINT review_queue_items_p1_06_required_action_check
     CHECK (required_action IS NULL OR length(required_action) BETWEEN 1 AND 2000),
+  CONSTRAINT review_queue_items_p1_06_sensrev_required_action_check
+    CHECK (
+      queue_type <> 'sensitivity_review'
+      OR (
+        required_action IS NOT NULL
+        AND length(btrim(required_action)) BETWEEN 1 AND 2000
+      )
+    ),
   CONSTRAINT review_queue_items_p1_06_blocked_reason_check
     CHECK (blocked_reason IS NULL OR length(blocked_reason) BETWEEN 1 AND 2000),
   CONSTRAINT review_queue_items_p1_06_queue_metadata_object_check
@@ -298,13 +306,15 @@ ALTER TABLE kai.upload_lifecycle_audit
       AND (
         operation <> 'sensitivity_review_queue_item_created'
         OR (
-          metadata ? 'contract'
+          metadata ? 'metadata_only'
+          AND metadata ? 'contract'
           AND metadata ? 'queue_type'
           AND metadata ? 'target_object_type'
           AND metadata ? 'target_object_id'
           AND metadata ? 'queue_status'
           AND metadata ? 'validator_key'
           AND metadata - ARRAY[
+            'metadata_only',
             'contract',
             'queue_type',
             'target_object_type',

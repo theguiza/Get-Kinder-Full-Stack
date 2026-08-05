@@ -64,6 +64,7 @@ WITH checks AS (
       'review_queue_items_p1_06_target_object_type_check',
       'review_queue_items_p1_06_summary_check',
       'review_queue_items_p1_06_required_action_check',
+      'review_queue_items_p1_06_sensrev_required_action_check',
       'review_queue_items_p1_06_blocked_reason_check',
       'review_queue_items_p1_06_queue_metadata_object_check'
     ]) AS check_name_value
@@ -134,6 +135,7 @@ WITH checks AS (
               AND r.relname = 'upload_lifecycle_audit'
               AND c.conname = 'upload_lifecycle_audit_gate_a_metadata_object_check'
               AND pg_get_constraintdef(c.oid) LIKE '%sensitivity_review_queue_item_created%'
+              AND pg_get_constraintdef(c.oid) LIKE '%metadata_only%'
               AND pg_get_constraintdef(c.oid) LIKE '%queue_type%'
               AND pg_get_constraintdef(c.oid) LIKE '%target_object_id%'
               AND pg_get_constraintdef(c.oid) LIKE '%validator_key%'

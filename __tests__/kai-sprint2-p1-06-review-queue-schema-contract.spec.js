@@ -92,17 +92,23 @@ test("P1-06 migration extends only the P1-06 audit operation and metadata branch
   assert.match(migrationSource, /operation <> 'sensitivity_review_queue_item_created'/);
 });
 
-test("P1-06 audit metadata branch requires exactly the six allowlisted keys (no metadata_only key)", () => {
+test("P1-06 audit metadata branch requires exactly the seven allowlisted keys, including the owner-authorized metadata_only key", () => {
   const branchMatch = migrationSource.match(
     /operation <> 'sensitivity_review_queue_item_created'\s+OR \(([\s\S]*?)\)\s*\)\s*\)\s*;/,
   );
   assert.ok(branchMatch, "expected to find the sensitivity_review_queue_item_created metadata branch");
   const branch = branchMatch[1];
-  for (const key of ["contract", "queue_type", "target_object_type", "target_object_id", "queue_status", "validator_key"]) {
+  for (const key of ["metadata_only", "contract", "queue_type", "target_object_type", "target_object_id", "queue_status", "validator_key"]) {
     assert.match(branch, new RegExp(`metadata \\? '${key}'`));
   }
-  assert.doesNotMatch(branch, /metadata \? 'metadata_only'/);
   assert.match(branch, /metadata - ARRAY\[/);
+});
+
+test("P1-06 enforces a required, non-blank required_action for sensitivity_review rows only", () => {
+  assert.match(
+    migrationSource,
+    /review_queue_items_p1_06_sensrev_required_action_check\s+CHECK \(\s*queue_type <> 'sensitivity_review'\s+OR \(\s*required_action IS NOT NULL\s+AND length\(btrim\(required_action\)\) BETWEEN 1 AND 2000\s*\)\s*\)/,
+  );
 });
 
 test("P1-06 catalog verifier totality: every check embeds its PASS/FAIL in the CASE, with no outer WHERE EXISTS filter", () => {

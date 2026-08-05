@@ -22,6 +22,7 @@ import {
 } from "../internal/kaiMutationOrchestration.js";
 import { validateReviewQueueType } from "../validators/intakeValidators.js";
 import { validateReviewQueueStatusRequest } from "../validators/kaiSprint2RequestSchemas.js";
+import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
 import { createPostgresReviewQueueRepository } from "../dictionary/postgresReviewQueueRepository.js";
 
 const UUID_RE = KAI_SPRINT2_P0_PATTERNS.uuid;
@@ -387,30 +388,18 @@ function isCreateSensitivityReviewQueueItemInput(value) {
   );
 }
 
+const SENSITIVITY_REVIEW_OPERATION = "create_sensitivity_review_queue_item";
+
 /**
  * AUTH-KAI-003: a P1-06 'sensitivity_review' queue item may only be created by a
  * mapped human actor. Every non-human actor type (ai, system, import, code, or any
- * other generic-service actor) is rejected outright - there is no bypass.
+ * other generic-service actor) is rejected outright - there is no bypass. This is a
+ * strictly narrower allowlist than the shared assistant-boundary validator's
+ * recognized non-human actor-type set, so it is kept as an explicit pre-condition
+ * rather than folded into `validateActorCanPerformOperation` below.
  */
 function isMappedHumanActor(actorContext) {
   return actorContext?.actorType === "human" && isNonEmptyString(actorContext?.actorUserId);
-}
-
-/**
- * VAL-TEN-001: the human actor must hold an active organization membership in the
- * requested organization, with a role authorized to trigger a sensitivity review
- * (gk_admin, gk_operator, or gk_reviewer). No tenant-membership bypass.
- */
-function hasActiveAuthorizedMembership(actorContext, organizationId) {
-  const memberships = Array.isArray(actorContext?.organizationMemberships)
-    ? actorContext.organizationMemberships
-    : [];
-  return memberships.some(
-    (membership) =>
-      String(membership?.organization_id) === String(organizationId) &&
-      membership?.membership_status === "active" &&
-      SENSITIVITY_REVIEW_ALLOWED_ROLES.has(membership?.role_name),
-  );
 }
 
 /**
@@ -421,15 +410,19 @@ function hasActiveAuthorizedMembership(actorContext, organizationId) {
  * row that satisfies the VAL-FUP-001-P0 creation-trigger predicate (human review
  * required and public/funder/LLM/product-learning use all still denied, retention
  * still restricted pending review). This reuses the existing canonical
- * `kai.review_queue_items` table and the existing `insertReviewQueueItem` seam via the
- * injected P1-06 repository; it never writes a queue_type other than
+ * `kai.review_queue_items` table via the injected P1-06 repository; it never writes
+ * a queue_type other than
  * 'sensitivity_review', never transitions queue_status beyond null -> 'open', and
  * performs no resolution, approval, escalation, or promotion. It is not composed into
  * any route, listener, or production path, and it does not modify
  * `createReviewQueueItem` or `updateReviewQueueStatus` above.
  *
  * Contains no SQL and imports no database pool: persistence is delegated entirely to
- * the injected P1-06 review-queue repository.
+ * the injected P1-06 review-queue repository. Authorization and tenant-membership
+ * checks are delegated to the existing shared validator-group mechanisms
+ * (`validateActorCanPerformOperation`, `validateTenantBoundaryConsistency`) rather
+ * than reimplemented locally; their structured blockers are preserved on the
+ * returned error.
  */
 export async function createSensitivityReviewQueueItem(input, dependencies = {}) {
   if (!isKaiSprint2Enabled(dependencies.env || process.env)) {
@@ -443,8 +436,23 @@ export async function createSensitivityReviewQueueItem(input, dependencies = {})
   if (!isMappedHumanActor(actorContext)) {
     return buildKaiError("authorization_denied");
   }
-  if (!hasActiveAuthorizedMembership(actorContext, input.organizationId)) {
-    return buildKaiError("tenant_boundary_violation");
+
+  const auth = validateActorCanPerformOperation(
+    actorContext,
+    SENSITIVITY_REVIEW_OPERATION,
+    input.organizationId,
+    { allowedRoles: SENSITIVITY_REVIEW_ALLOWED_ROLES },
+  );
+  if (!auth.ok) {
+    return buildKaiError("tenant_boundary_violation", { blockers: auth.blockers });
+  }
+
+  const tenant = validateTenantBoundaryConsistency({
+    expectedOrganizationId: input.organizationId,
+    payload: { organization_id: input.organizationId },
+  });
+  if (tenant.severity === "blocker") {
+    return buildKaiError("tenant_boundary_violation", { blockers: [tenant] });
   }
 
   const reviewQueueRepository = dependencies.reviewQueueRepository || createPostgresReviewQueueRepository();

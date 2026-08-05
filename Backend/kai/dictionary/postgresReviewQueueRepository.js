@@ -1,8 +1,5 @@
 import { withTransaction } from "../db/kaiDb.js";
-import {
-  getScopedSensitivityReviewQueueItemByIdentity,
-  insertReviewQueueItem,
-} from "../db/kaiIntakeQueries.js";
+import { getScopedSensitivityReviewQueueItemByIdentity } from "../db/kaiIntakeQueries.js";
 
 /**
  * KAI P1-06 review-queue repository adapter: idempotent creation of one
@@ -10,11 +7,10 @@ import {
  * `kai.intake_sensitivity_profiles` row.
  *
  * This module is the only authorized location for P1-06 SQL and row locking. It
- * reuses the EXISTING `kai.review_queue_items` canonical table and the EXISTING
- * `insertReviewQueueItem` seam (Backend/kai/db/kaiIntakeQueries.js) rather than
- * building a second, competing queue abstraction: this is the same table and the
- * same insert path the already-wired production `createReviewQueueItem` route uses
- * for other queue_types. It never writes any queue_type other than
+ * reuses the EXISTING `kai.review_queue_items` canonical table (Backend/kai/db/
+ * kaiIntakeQueries.js) rather than building a second, competing queue abstraction:
+ * this is the same table the already-wired production `createReviewQueueItem` route
+ * uses for other queue_types. It never writes any queue_type other than
  * 'sensitivity_review', never transitions queue_status beyond null -> 'open', and
  * never performs resolution, approval, escalation, or promotion.
  *
@@ -42,7 +38,7 @@ const SENSITIVITY_REVIEW_REQUIRED_ACTION =
   "Review classifications, consent basis, allowed-use restrictions, and governance requirements before source-candidate work.";
 
 const SENSITIVITY_REVIEW_AUDIT_CONTRACT = "p1_sensitivity_review_queue_item_v1";
-const SENSITIVITY_REVIEW_AUDIT_VALIDATOR_KEY = "VAL-KAI-P1-06-001";
+const SENSITIVITY_REVIEW_AUDIT_VALIDATOR_KEY = "VAL-FUP-001-P0";
 const SENSITIVITY_REVIEW_AUDIT_OPERATION = "sensitivity_review_queue_item_created";
 
 function reviewQueueFailure(code) {
@@ -133,6 +129,62 @@ async function readScopedSensitivityProfile(tx, organizationId, intakeSensitivit
   return result.rows[0] ?? null;
 }
 
+/**
+ * P1-06 idempotent creation for the 'sensitivity_review' identity only: relies on
+ * the existing partial unique index
+ * (ux_review_queue_items_p1_06_sensitivity_review_identity) via ON CONFLICT ...
+ * WHERE queue_type = 'sensitivity_review' DO NOTHING, so a losing concurrent
+ * transaction observes zero returned rows instead of a raised 23505 unique-violation
+ * (which would otherwise abort its transaction before it could re-read). This lives
+ * here rather than in the shared Backend/kai/db/kaiIntakeQueries.js query module
+ * because that module's other exports are relied on, by an unrelated Gate-A/P1-02
+ * idempotency contract, to never contain an ON CONFLICT/unique-violation-catch
+ * pattern; this repository is already the authorized location for P1-06's own raw
+ * SQL (see readScopedSensitivityProfile/readScopedUploadState/insertAudit above). It
+ * never writes a queue_type other than 'sensitivity_review'.
+ */
+async function insertSensitivityReviewQueueItemIfAbsent(tx, item) {
+  const result = await tx.query(
+    `INSERT INTO kai.review_queue_items (
+       organization_id,
+       engagement_id,
+       queue_type,
+       target_object_type,
+       target_object_id,
+       priority,
+       queue_status,
+       review_status,
+       blocked_reason,
+       summary,
+       required_action,
+       queue_metadata,
+       created_by,
+       created_by_type
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14)
+     ON CONFLICT (organization_id, queue_type, target_object_type, target_object_id)
+       WHERE queue_type = 'sensitivity_review'
+       DO NOTHING
+     RETURNING review_queue_item_id, organization_id, queue_type, queue_status, target_object_type, target_object_id`,
+    [
+      item.organizationId,
+      item.engagementId || null,
+      item.queueType,
+      item.targetObjectType,
+      item.targetObjectId,
+      item.priority || "normal",
+      item.queueStatus || "open",
+      item.reviewStatus || "needs_gk_review",
+      item.blockedReason || null,
+      item.summary,
+      item.requiredAction || null,
+      JSON.stringify(item.queueMetadata || {}),
+      item.createdBy || null,
+      item.createdByType || "system",
+    ],
+  );
+  return result.rows[0] ?? null;
+}
+
 async function readScopedUploadState(tx, organizationId, intakeFileId) {
   const result = await tx.query(
     `SELECT upload_state
@@ -182,6 +234,7 @@ function rowToReviewQueueRecord(row) {
 
 function buildSensitivityReviewAuditMetadata(record) {
   return {
+    metadata_only: true,
     contract: SENSITIVITY_REVIEW_AUDIT_CONTRACT,
     queue_type: record.queue_type,
     target_object_type: record.target_object_type,
@@ -254,9 +307,67 @@ function prepareRequiredAudit(metadataOnlyAudit, record) {
   return prepared;
 }
 
+function isSafeReviewQueueRecordShape(record) {
+  return (
+    isNonEmptyString(record.review_queue_item_id) &&
+    isNonEmptyString(record.organization_id) &&
+    isNonEmptyString(record.queue_type) &&
+    isNonEmptyString(record.target_object_type) &&
+    isNonEmptyString(record.target_object_id) &&
+    isNonEmptyString(record.queue_status)
+  );
+}
+
+/**
+ * Replay validates only tenant scope and the immutable creation identity (never any
+ * later-authorized mutable field such as queue_status, priority, assignment, due date,
+ * summary, or required_action, all of which a subsequent authorized workflow may
+ * legitimately have changed).
+ */
+function validateReplayedReviewQueueRow(row, profileRow) {
+  if (!row) return { ok: false, code: "system_error" };
+  const record = rowToReviewQueueRecord(row);
+  if (!isSafeReviewQueueRecordShape(record)) return { ok: false, code: "system_error" };
+  if (
+    record.organization_id !== profileRow.organization_id ||
+    record.queue_type !== SENSITIVITY_REVIEW_QUEUE_TYPE ||
+    record.target_object_type !== SENSITIVITY_REVIEW_TARGET_OBJECT_TYPE ||
+    record.target_object_id !== profileRow.intake_sensitivity_profile_id
+  ) {
+    return { ok: false, code: "conflict_current_state_changed" };
+  }
+  return { ok: true, record };
+}
+
+/**
+ * A newly inserted row is validated in full against every server-pinned field before
+ * its required audit is prepared or published.
+ */
+function isValidInsertedReviewQueueRecord(record, profileRow) {
+  return (
+    record.organization_id === profileRow.organization_id &&
+    record.queue_type === SENSITIVITY_REVIEW_QUEUE_TYPE &&
+    record.target_object_type === SENSITIVITY_REVIEW_TARGET_OBJECT_TYPE &&
+    record.target_object_id === profileRow.intake_sensitivity_profile_id &&
+    record.priority === SENSITIVITY_REVIEW_PRIORITY &&
+    record.queue_status === SENSITIVITY_REVIEW_QUEUE_STATUS &&
+    record.assigned_to === null &&
+    record.due_at === null &&
+    record.summary === SENSITIVITY_REVIEW_SUMMARY &&
+    record.required_action === SENSITIVITY_REVIEW_REQUIRED_ACTION
+  );
+}
+
+class MalformedInsertedRowError extends Error {
+  constructor() {
+    super("inserted sensitivity_review row failed validation");
+    this.name = "MalformedInsertedRowError";
+  }
+}
+
 function shapeReviewQueueError(error) {
+  if (error instanceof MalformedInsertedRowError) return reviewQueueFailure("system_error");
   if (error instanceof RequiredAuditRejectedError) return reviewQueueFailure("validation_blocker");
-  if (error?.code === "23505") return reviewQueueFailure("conflict_current_state_changed");
   if (error?.code === "23503") return reviewQueueFailure("not_found");
   if (error?.code === "23514" || error?.code === "P0001" || error?.code === "22P02") {
     return reviewQueueFailure("validation_blocker");
@@ -264,7 +375,10 @@ function shapeReviewQueueError(error) {
   return reviewQueueFailure("system_error");
 }
 
-export function createPostgresReviewQueueRepository({ runInTransaction = withTransaction } = {}) {
+export function createPostgresReviewQueueRepository({
+  runInTransaction = withTransaction,
+  beforeInsert = async () => {},
+} = {}) {
   return Object.freeze({
     /**
      * Organization-scoped idempotent create/replay of one 'sensitivity_review' queue
@@ -276,9 +390,16 @@ export function createPostgresReviewQueueRepository({ runInTransaction = withTra
      * summary, required_action, assigned_to, or due_at.
      *
      * Same identity that already has a matching 'sensitivity_review' row: replays it.
-     * Concurrent identical creation is resolved by PostgreSQL's partial unique index
-     * inside this same transaction (insert + authoritative re-read on conflict),
-     * never by an in-process lock.
+     * Genuinely concurrent identical creation is resolved entirely by PostgreSQL's
+     * partial unique index via `INSERT ... ON CONFLICT ... DO NOTHING RETURNING`
+     * (Backend/kai/db/kaiIntakeQueries.js): the losing transaction observes zero
+     * returned rows - never a raised 23505 that would abort its transaction before it
+     * could re-read - then re-reads and replays the authoritative committed row. No
+     * application-level synchronization primitive is used to coordinate this.
+     *
+     * `beforeInsert` is a test-only synchronization seam (defaults to a no-op) used
+     * to prove genuine cross-transaction convergence; it is never overridden in
+     * production wiring.
      */
     async createSensitivityReviewQueueItem(input) {
       if (!validateCreateInput(input)) return reviewQueueFailure("validation_blocker");
@@ -304,39 +425,37 @@ export function createPostgresReviewQueueRepository({ runInTransaction = withTra
             tx,
           );
           if (existing) {
-            return reviewQueueSuccess({ reviewQueueItem: rowToReviewQueueRecord(existing), replayed: true });
+            const replayValidation = validateReplayedReviewQueueRow(existing, profileRow);
+            if (!replayValidation.ok) return reviewQueueFailure(replayValidation.code);
+            return reviewQueueSuccess({ reviewQueueItem: replayValidation.record, replayed: true });
           }
 
           const uploadState = await readScopedUploadState(tx, profileRow.organization_id, profileRow.intake_file_id);
           if (!uploadState) return reviewQueueFailure("not_found");
 
-          let insertedRow;
-          try {
-            insertedRow = await insertReviewQueueItem(
-              {
-                organizationId: profileRow.organization_id,
-                engagementId: null,
-                queueType: SENSITIVITY_REVIEW_QUEUE_TYPE,
-                targetObjectType: SENSITIVITY_REVIEW_TARGET_OBJECT_TYPE,
-                targetObjectId: profileRow.intake_sensitivity_profile_id,
-                priority: SENSITIVITY_REVIEW_PRIORITY,
-                queueStatus: SENSITIVITY_REVIEW_QUEUE_STATUS,
-                blockedReason: null,
-                summary: SENSITIVITY_REVIEW_SUMMARY,
-                requiredAction: SENSITIVITY_REVIEW_REQUIRED_ACTION,
-                queueMetadata: {},
-                createdBy: actorUserId,
-                createdByType: "human",
-              },
-              tx,
-            );
-          } catch (insertError) {
-            if (insertError?.code !== "23505") throw insertError;
-            // A concurrent transaction won the partial unique index for this exact
-            // identity and committed first. PostgreSQL conflict handling - not an
-            // in-process lock - resolves the race: re-read the committed authoritative
-            // row inside this same transaction and replay it, so no duplicate row or
-            // audit row is written and no raw unique violation reaches the caller.
+          await beforeInsert();
+
+          const insertedRow = await insertSensitivityReviewQueueItemIfAbsent(tx, {
+            organizationId: profileRow.organization_id,
+            engagementId: null,
+            queueType: SENSITIVITY_REVIEW_QUEUE_TYPE,
+            targetObjectType: SENSITIVITY_REVIEW_TARGET_OBJECT_TYPE,
+            targetObjectId: profileRow.intake_sensitivity_profile_id,
+            priority: SENSITIVITY_REVIEW_PRIORITY,
+            queueStatus: SENSITIVITY_REVIEW_QUEUE_STATUS,
+            blockedReason: null,
+            summary: SENSITIVITY_REVIEW_SUMMARY,
+            requiredAction: SENSITIVITY_REVIEW_REQUIRED_ACTION,
+            queueMetadata: {},
+            createdBy: actorUserId,
+            createdByType: "human",
+          });
+
+          if (!insertedRow) {
+            // ON CONFLICT ... DO NOTHING returned zero rows: a concurrent transaction
+            // won the partial unique index for this exact identity and committed
+            // first. Re-read the committed authoritative row inside this same
+            // transaction and replay it; no audit row is written for a replay.
             const concurrent = await getScopedSensitivityReviewQueueItemByIdentity(
               {
                 organizationId: profileRow.organization_id,
@@ -344,8 +463,9 @@ export function createPostgresReviewQueueRepository({ runInTransaction = withTra
               },
               tx,
             );
-            if (!concurrent) return reviewQueueFailure("system_error");
-            return reviewQueueSuccess({ reviewQueueItem: rowToReviewQueueRecord(concurrent), replayed: true });
+            const replayValidation = validateReplayedReviewQueueRow(concurrent, profileRow);
+            if (!replayValidation.ok) return reviewQueueFailure(replayValidation.code);
+            return reviewQueueSuccess({ reviewQueueItem: replayValidation.record, replayed: true });
           }
 
           const record = rowToReviewQueueRecord({
@@ -363,6 +483,10 @@ export function createPostgresReviewQueueRepository({ runInTransaction = withTra
             created_at: now,
             updated_at: now,
           });
+
+          if (!isValidInsertedReviewQueueRecord(record, profileRow)) {
+            throw new MalformedInsertedRowError();
+          }
 
           const preparedAudit = prepareRequiredAudit(metadataOnlyAudit, record);
           await insertAudit(tx, {

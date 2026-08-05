@@ -132,10 +132,17 @@ llm_processing_allowed = product_learning_allowed = false` and `retention_postur
 (`queue_type`, `target_object_type`, `target_object_id`, `queue_status`, `priority`,
 `summary`, `required_action`, `assigned_to`, `due_at`) is server-pinned or
 server-derived. Same identity: replay, no duplicate insert, no duplicate audit.
-Concurrent identical creation converges via the partial unique index plus an
-authoritative re-read, never an in-process lock. The insert and its required
-metadata-only `sensitivity_review_queue_item_created` audit row (exactly `contract`,
-`queue_type`, `target_object_type`, `target_object_id`, `queue_status`,
-`validator_key`, no other keys) happen inside one transaction; rejection of the
-required audit prepare, a synchronous publish failure, or a rejected publish promise
-rolls back both together.
+Concurrent identical creation converges via `INSERT ... ON CONFLICT ... DO NOTHING
+RETURNING` against the existing partial unique index plus an authoritative re-read of
+the losing side, never a raised `23505` re-read inside an aborted transaction, a
+savepoint, an in-process lock, mutex, or advisory lock. Replay validates only tenant
+scope and the immutable creation identity, never a later-authorized mutable field.
+The insert and its required metadata-only `sensitivity_review_queue_item_created`
+audit row (exactly `metadata_only`, `contract`, `queue_type`, `target_object_type`,
+`target_object_id`, `queue_status`, `validator_key`, no other keys) happen inside one
+transaction; rejection of the required audit prepare, a synchronous publish failure,
+a rejected publish promise, or a malformed inserted row rolls back both together.
+`kai.review_queue_items` additionally requires a non-blank `required_action` for
+`queue_type = 'sensitivity_review'` rows only. Authorization delegates to the
+existing shared `validateActorCanPerformOperation`/`validateTenantBoundaryConsistency`
+validator-group mechanisms rather than reimplementing membership/role checks locally.

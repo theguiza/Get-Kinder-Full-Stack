@@ -158,10 +158,14 @@ test("P1-06 service: createSensitivityReviewQueueItem itself contains no SQL and
   assert.doesNotMatch(createSensitivityReviewQueueItemBody, /\bSELECT\b|\bINSERT INTO\b|\bUPDATE\b|\bDELETE FROM\b/i);
 });
 
-test("P1-06 repository: row locking for the sensitivity_review identity happens FOR UPDATE, and the actual insert reuses insertReviewQueueItem rather than duplicating its SQL", () => {
+test("P1-06 repository: row locking for the sensitivity_review identity happens FOR UPDATE (shared query module), and the insert uses ON CONFLICT ... RETURNING against the existing partial unique index (kept local to the P1-06 repository)", () => {
   assert.match(queriesSource, /getScopedSensitivityReviewQueueItemByIdentity[\s\S]*?FOR UPDATE/);
-  assert.doesNotMatch(repositorySource, /\bINSERT INTO kai\.review_queue_items\b/);
-  assert.match(repositorySource, /insertReviewQueueItem\(/);
+  assert.doesNotMatch(queriesSource, /ON\s+CONFLICT/i);
+  assert.match(
+    repositorySource,
+    /INSERT INTO kai\.review_queue_items[\s\S]*?ON CONFLICT \(organization_id, queue_type, target_object_type, target_object_id\)[\s\S]*?WHERE queue_type = 'sensitivity_review'[\s\S]*?DO NOTHING[\s\S]*?RETURNING/,
+  );
+  assert.match(repositorySource, /insertSensitivityReviewQueueItemIfAbsent\(/);
   assert.doesNotMatch(repositorySource, /anthropic|openai/i);
 });
 
@@ -361,12 +365,15 @@ test("P1-06 repository rolls back the insert when the required audit prepare is 
   }
 });
 
-test("P1-06 repository resolves concurrent identical creation via the unique-violation catch + re-read, not an in-process lock", () => {
-  assert.match(repositorySource, /insertError\?\.code !== "23505"/);
-  assert.doesNotMatch(repositorySource, /\b(?:inFlight|pendingLocks?|mutex|semaphore|advisory_lock|pg_advisory)\b/i);
+test("P1-06 repository resolves concurrent identical creation via ON CONFLICT ... DO NOTHING RETURNING plus an authoritative re-read, not a raised 23505 catch or an in-process lock", () => {
+  assert.doesNotMatch(repositorySource, /\bcatch\s*\(\s*insertError\s*\)/);
+  assert.doesNotMatch(repositorySource, /"23505"/);
+  assert.match(repositorySource, /if \(!insertedRow\) \{/);
+  assert.doesNotMatch(repositorySource, /\b(?:inFlight|pendingLocks?|mutex|semaphore|advisory_lock|pg_advisory|savepoint)\b/i);
 });
 
-test("P1-06 audit metadata builder emits exactly the six allowlisted keys with no raw content", () => {
+test("P1-06 audit metadata builder emits exactly the seven allowlisted keys with no raw content", () => {
+  assert.match(repositorySource, /metadata_only: true/);
   assert.match(repositorySource, /contract: SENSITIVITY_REVIEW_AUDIT_CONTRACT/);
   assert.match(repositorySource, /queue_type: record\.queue_type/);
   assert.match(repositorySource, /target_object_type: record\.target_object_type/);
@@ -375,6 +382,10 @@ test("P1-06 audit metadata builder emits exactly the six allowlisted keys with n
   assert.match(repositorySource, /validator_key: SENSITIVITY_REVIEW_AUDIT_VALIDATOR_KEY/);
   assert.doesNotMatch(repositorySource, /summary: record\.summary/);
   assert.doesNotMatch(repositorySource, /required_action: record\.required_action/);
+});
+
+test("P1-06 audit contract uses the owner-authorized validator_key", () => {
+  assert.equal(__reviewQueueRepositoryContract.SENSITIVITY_REVIEW_AUDIT_VALIDATOR_KEY, "VAL-FUP-001-P0");
 });
 
 test("P1-06 introduces no status transition, resolution, approval, escalation, or promotion logic, and does not modify updateReviewQueueStatus", () => {

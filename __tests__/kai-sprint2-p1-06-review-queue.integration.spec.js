@@ -182,13 +182,15 @@ async function runReviewQueueIntegrationSuite() {
     const metadata = auditRow.rows[0].metadata;
     assert.deepEqual(
       Object.keys(metadata).sort(),
-      ["contract", "queue_status", "queue_type", "target_object_id", "target_object_type", "validator_key"],
+      ["contract", "metadata_only", "queue_status", "queue_type", "target_object_id", "target_object_type", "validator_key"],
     );
+    assert.equal(metadata.metadata_only, true);
     assert.equal(metadata.contract, "p1_sensitivity_review_queue_item_v1");
     assert.equal(metadata.queue_type, "sensitivity_review");
     assert.equal(metadata.target_object_type, "intake_sensitivity_profile");
     assert.equal(metadata.target_object_id, intakeSensitivityProfileId);
     assert.equal(metadata.queue_status, "open");
+    assert.equal(metadata.validator_key, "VAL-FUP-001-P0");
   });
 
   test("P1-06: same identity replays the existing row without duplicating rows or audit", async () => {
@@ -303,6 +305,14 @@ async function runReviewQueueIntegrationSuite() {
   test("P1-06: two genuinely overlapping transactions creating the same item resolve to exactly one authoritative row", async () => {
     const { intakeSensitivityProfileId } = await seedPredicateSatisfyingSensitivityProfile(7);
 
+    // Test-only barrier placed immediately before the insert (never overridden in
+    // production wiring - the default `beforeInsert` is a no-op): both independent
+    // transactions must first complete their own initial no-row observation (the
+    // pre-insert existing-item read, run before this gate is reached) and only then
+    // rendezvous here before either one executes its
+    // `INSERT ... ON CONFLICT ... DO NOTHING RETURNING`. This proves the eventual
+    // convergence is genuinely resolved by PostgreSQL's partial unique index, not by
+    // one call short-circuiting the other in-process.
     let arrived = 0;
     let openGate;
     const gateOpened = new Promise((resolve) => { openGate = resolve; });
@@ -312,10 +322,8 @@ async function runReviewQueueIntegrationSuite() {
       await gateOpened;
     }
     const racingRepository = createPostgresReviewQueueRepository({
-      runInTransaction: (callback) => withTransaction(async (tx) => {
-        await gate();
-        return callback(tx);
-      }, pool),
+      runInTransaction: (callback) => withTransaction(callback, pool),
+      beforeInsert: gate,
     });
 
     const firstAudit = createAuditProbe();

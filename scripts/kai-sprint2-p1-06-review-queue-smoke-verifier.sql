@@ -41,12 +41,13 @@ BEGIN
   ) VALUES (
     org1, file1, 'sensitivity_review_queue_item_created', 'confirmed', 'confirmed', 'success',
     jsonb_build_object(
+      'metadata_only', true,
       'contract', 'p1_sensitivity_review_queue_item_v1',
       'queue_type', 'sensitivity_review',
       'target_object_type', 'intake_sensitivity_profile',
       'target_object_id', sensitivity1::text,
       'queue_status', 'open',
-      'validator_key', 'VAL-KAI-P1-06-001'
+      'validator_key', 'VAL-FUP-001-P0'
     )
   );
 
@@ -189,12 +190,13 @@ BEGIN
     ) VALUES (
       org1, file1, 'sensitivity_review_queue_item_created', 'confirmed', 'confirmed', 'success',
       jsonb_build_object(
+        'metadata_only', true,
         'contract', 'p1_sensitivity_review_queue_item_v1',
         'queue_type', 'sensitivity_review',
         'target_object_type', 'intake_sensitivity_profile',
         'target_object_id', fresh_item::text,
         'queue_status', 'open',
-        'validator_key', 'VAL-KAI-P1-06-001'
+        'validator_key', 'VAL-FUP-001-P0'
       )
     );
     audit_insert_reached := true;
@@ -231,10 +233,10 @@ BEGIN
       SELECT 1 FROM kai.upload_lifecycle_audit
        WHERE operation = 'sensitivity_review_queue_item_created'
          AND metadata - ARRAY[
-           'contract', 'queue_type', 'target_object_type', 'target_object_id', 'queue_status', 'validator_key'
+           'metadata_only', 'contract', 'queue_type', 'target_object_type', 'target_object_id', 'queue_status', 'validator_key'
          ] <> '{}'::jsonb
     ) THEN 'PASS' ELSE 'FAIL' END,
-    'sensitivity-review-queue-item audit metadata carries no keys beyond the accepted six-key allowlist'
+    'sensitivity-review-queue-item audit metadata carries no keys beyond the accepted seven-key allowlist'
   );
 END $$;
 

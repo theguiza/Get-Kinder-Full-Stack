@@ -8380,3 +8380,250 @@ prohibited_actions_not_performed:
 
 commit_hash: report after commit; a commit cannot contain its own SHA
 ```
+
+## P1-06 correction evidence - concurrency, audit-contract, validator, and durable-row correction
+
+```text
+timestamp_local: 2026-08-05 08:34 America/Vancouver
+branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 050c32fa5b1b029fc3778e8dd2862f7973a1a7ca
+package: KAI P1-06 correction - concurrency, audit-contract, validator, and durable-row correction
+status: TOOL_VERIFIED
+
+pre_append_execplan:
+  byte_count: 667834
+  sha256: 28cd9cbfac415f38b89cf94f5052b4919378bb68279bff85e52e4d7e507231c1
+  preserved_copy: /private/tmp/claude-501/-Users-mikewoz-Get-Kinder-Full-Stack-Deploy/ada01c1a-ca28-4d69-92a0-1fec68fc6d62/scratchpad/execplan.pre-p1-06-correction.md
+  prefix_proof: TOOL_VERIFIED - the preserved copy's full 667834 bytes are byte-identical to
+    this file's first 667834 bytes (cmp -l over the prefix, zero differing bytes, exit 0);
+    this block is appended after that byte offset only, so this correction's evidence is
+    additions-only and no earlier byte was altered.
+
+preflight:
+  branch: codex/kai-sprint2-p0-v0.3.5
+  head: 050c32fa5b1b029fc3778e8dd2862f7973a1a7ca
+  worktree: clean including untracked files (git status --porcelain=v2 --untracked-files=all
+    empty; git diff --cached --stat empty) - matched the expected start exactly.
+
+corrections_made:
+  broken_23505_recovery_replaced:
+    Removed the try/insert/catch("23505")/re-read-in-the-same-transaction path in
+    Backend/kai/dictionary/postgresReviewQueueRepository.js (that pattern re-reads inside a
+    transaction PostgreSQL has already aborted once a statement raises a unique-violation,
+    so the re-read itself would fail). Added a new local
+    insertSensitivityReviewQueueItemIfAbsent(tx, item) query directly in
+    postgresReviewQueueRepository.js (not the shared Backend/kai/db/kaiIntakeQueries.js
+    module - see shared_db_helper_placement_decision below) that issues
+    `INSERT ... ON CONFLICT (organization_id, queue_type, target_object_type,
+    target_object_id) WHERE queue_type = 'sensitivity_review' DO NOTHING RETURNING ...`
+    against the existing partial unique index
+    (ux_review_queue_items_p1_06_sensitivity_review_identity, unchanged). Behavior: a
+    returned row is validated in full against every server-pinned field, then exactly one
+    required audit is written and replayed:false is returned; zero returned rows triggers an
+    authoritative re-read (getScopedSensitivityReviewQueueItemByIdentity, unchanged,
+    FOR UPDATE), which is validated for tenant scope and immutable identity only, writes no
+    audit, and returns replayed:true. No savepoint, advisory lock, mutex, semaphore, or
+    in-process in-flight map is used anywhere in this path.
+  shared_db_helper_placement_decision:
+    The correction brief called for "the minimum P1-06 DB-helper/query seam" for the new
+    INSERT. Placing it in the shared Backend/kai/db/kaiIntakeQueries.js module (as first
+    attempted) was reverted after `npm test` surfaced that
+    __tests__/kai-sprint2-file-idempotency-conflict.spec.js asserts, as an unrelated
+    Gate-A/P1-02 batch-creation/file-reservation idempotency-contract invariant, that the
+    ENTIRE text of kaiIntakeQueries.js never contains an ON CONFLICT/23505/unique_violation
+    pattern (that file's own idempotency-conflict handling uses a different,
+    sentinel-object-based signal by owner design). That test is outside this correction's
+    authorized scope (not a P1-06 file) and was not modified. The new query was instead kept
+    local to Backend/kai/dictionary/postgresReviewQueueRepository.js, which already contains
+    several other raw P1-06 SQL statements directly (readScopedSensitivityProfile,
+    readScopedUploadState, insertAudit) and is the explicitly-authorized "P1-06 repository"
+    location. Backend/kai/db/kaiIntakeQueries.js is therefore untouched by this correction
+    (confirmed by an empty `git diff` for that file) - only its pre-existing, unmodified
+    getScopedSensitivityReviewQueueItemByIdentity export continues to be reused for the
+    authoritative FOR UPDATE re-read.
+  concurrency_barrier_added:
+    Added a test-only `beforeInsert` dependency to
+    createPostgresReviewQueueRepository({ runInTransaction, beforeInsert }) (default: a
+    no-op async function; never overridden by production wiring - grepped confirmed no
+    non-test call site passes it). It is awaited immediately before the
+    ON-CONFLICT-DO-NOTHING insert call, after each transaction has already completed its own
+    initial no-row observation. __tests__/kai-sprint2-p1-06-review-queue.integration.spec.js's
+    existing two-genuinely-overlapping-transactions test was rewired from a
+    before-the-whole-transaction gate to this `beforeInsert` seam (real PostgreSQL 16, two
+    concurrent Node-side transactions via withTransaction against a shared pool), and
+    verified TOOL_VERIFIED (see tests_added_and_results): both transactions independently
+    complete their initial no-row observation, both reach the insert boundary and rendezvous
+    there, one INSERT returns a row, the other's ON-CONFLICT path returns no row, both
+    resolve to the same review_queue_item_id, exactly one kai.review_queue_items row and
+    exactly one kai.upload_lifecycle_audit row exist afterward, and neither call fails.
+  required_action_constraint_added:
+    Added CONSTRAINT review_queue_items_p1_06_sensrev_required_action_check (this exact,
+    shorter name, not the 65-byte name literally suggested by the correction brief, because
+    PostgreSQL silently truncates identifiers over its 63-byte limit, which would have
+    desynchronized the migration's actual constraint name from every script/test that
+    references it by name) CHECK (queue_type <> 'sensitivity_review' OR (required_action IS
+    NOT NULL AND length(btrim(required_action)) BETWEEN 1 AND 2000)) to
+    migrations/kai_sprint2_p1_06_review_queue.sql. The shared required_action column itself
+    remains nullable/optional for every other queue_type (review_queue_items_p1_06_
+    required_action_check, unchanged). Three raw-SQL sensitivity_review inserts in
+    scripts/kai-sprint2-p1-06-review-queue-failure-checks.sql that previously omitted
+    required_action (all testing unrelated constraints: unique-identity enforcement x2, the
+    documented no-DB-level-FK proof) were updated to supply a required_action value so they
+    continue to exercise only their intended constraint; three new failure checks were added
+    (required required_action rejected when null, rejected when whitespace-only, and proof
+    that an unrelated queue_type's required_action remains optional).
+  owner_authorized_audit_contract_restored:
+    operation sensitivity_review_queue_item_created, contract
+    p1_sensitivity_review_queue_item_v1 (unchanged), validator_key changed from the
+    previous, P1-06-locally-invented VAL-KAI-P1-06-001 to the owner-authorized
+    VAL-FUP-001-P0. metadata_only: true added as a new required key. The metadata object now
+    contains exactly seven keys - metadata_only, contract, queue_type, target_object_type,
+    target_object_id, queue_status, validator_key - no others. Updated: the metadata builder
+    (buildSensitivityReviewAuditMetadata, postgresReviewQueueRepository.js), the audit CHECK
+    constraint's sensitivity_review_queue_item_created branch (migrations/kai_sprint2_p1_06_
+    review_queue.sql - now requires metadata ? 'metadata_only' and includes it in the
+    seven-key ARRAY subtraction), the catalog verifier's AUDIT_METADATA_BRANCH LIKE check
+    (now also asserts '%metadata_only%'), the smoke seed/verifier's two literal
+    jsonb_build_object metadata fixtures and its audit_metadata_exact_keys check (now
+    seven-key), the schema-contract spec (rewritten from asserting "no metadata_only key,
+    six keys" to asserting "seven keys, including metadata_only"), the integration spec's
+    metadata-key assertion, the boundary spec's key-count assertion, the patch notes, and the
+    runbook. rollback_restoration: migrations/kai_sprint2_p1_06_review_queue.rollback.sql
+    needed no change - it already deletes every sensitivity_review_queue_item_created audit
+    row and drops the operation from the CHECK vocabulary entirely (never adding a branch for
+    it), which already correctly restores the exact prior (pre-P1-06) audit constraints;
+    confirmed unchanged by an empty `git diff` for that file.
+  required_validation_boundary_preserved:
+    Added validateReplayedReviewQueueRow(row, profileRow) (validates only organization_id,
+    queue_type, target_object_type, target_object_id, and a safe non-empty-string record
+    shape; returns conflict_current_state_changed for a tenant or immutable-identity
+    mismatch, system_error for a missing/malformed row) and applied it uniformly to both the
+    pre-insert existing-row replay path and the post-ON-CONFLICT re-read replay path. Added
+    isValidInsertedReviewQueueRecord(record, profileRow) (validates organization_id,
+    queue_type, target_object_type, target_object_id, priority, queue_status, assigned_to,
+    due_at, summary, required_action against every server-pinned expectation) applied to a
+    newly inserted row before its audit is prepared; a failed check throws
+    MalformedInsertedRowError, which is mapped to system_error, never reaches audit
+    preparation/publication, and rolls back the transaction (the throw itself is what forces
+    the ROLLBACK in Backend/kai/db/kaiDb.js's withTransaction). Neither validation path
+    treats an authorized later workflow's change to queue_status, priority, assigned_to,
+    due_at, summary, or required_action as a conflict.
+  validator_group_duplication_removed:
+    Backend/kai/services/kaiReviewQueueService.js's createSensitivityReviewQueueItem no
+    longer reimplements organization-membership/role checking via a local
+    hasActiveAuthorizedMembership helper (removed). It now calls the existing shared
+    validateActorCanPerformOperation (Backend/kai/auth/kaiAuthorizationService.js, already
+    used by this same file's pre-existing createReviewQueueItem/updateReviewQueueStatus, and
+    by every other KAI Sprint 2 mutation) with a new, additive-only operation key
+    "create_sensitivity_review_queue_item" and an explicit allowedRoles override
+    (gk_admin/gk_operator/gk_reviewer, preserving the exact previously-established role set)
+    scoped to this call only, and validateTenantBoundaryConsistency
+    (Backend/kai/validators/tenantValidators.js, VAL-TEN-001, already used throughout
+    kaiIntakeService.js) with the requested organizationId as both the expected and payload
+    organization id. Both calls' structured blockers are preserved on the returned error via
+    buildKaiError(code, { blockers }). No shared validator-registry file
+    (Backend/kai/config/kaiSprint2P0Contract.js, Backend/kai/validators/
+    assistantBoundaryValidators.js, Backend/kai/validators/operationValidatorGroups.js) was
+    modified - confirmed by an empty `git diff` for each. The strict AUTH-KAI-003 mapped-
+    human-actor gate (actorContext.actorType === "human" with a non-empty actorUserId) is
+    kept as a local, explicit pre-condition, because it is strictly narrower than the shared
+    assistant-boundary validator's recognized non-human actor-type allowlist (which does not
+    itself reject "import"/"code"/other generic-service actor-type labels) and is not a
+    reimplementation of any existing shared primitive - there is no pre-existing shared
+    function that performs this exact check. External result codes for every existing
+    boundary-test scenario (authorization_denied for a non-human actor, tenant_boundary_
+    violation for every membership/role failure scenario, ok:true for
+    gk_admin/gk_operator/gk_reviewer with active membership) are unchanged.
+
+tests_added_and_results: TOOL_VERIFIED
+  node --test __tests__/kai-sprint2-p1-06-review-queue-schema-contract.spec.js
+    __tests__/kai-sprint2-p1-06-review-queue-boundary.spec.js
+    __tests__/kai-sprint2-p1-06-review-queue-runner-self-test.spec.js
+    __tests__/kai-sprint2-p1-06-review-queue.integration.spec.js
+    -> tests 32; pass 31; fail 0; cancelled 0; skipped 1 (integration spec skips without a
+       runner-owned database, by design); todo 0
+  npm run verify:kai-sprint2-p1-06-review-queue (ephemeral PostgreSQL 16) -> catalog verifier
+    38/38 PASS (one new CHECK_EXISTS row for review_queue_items_p1_06_sensrev_required_
+    action_check), read-only failure checks all PASS (14 checks, 3 new), smoke verifier
+    11/11 PASS, integration suite (node --test against the ephemeral database, real
+    PostgreSQL 16, two genuinely concurrent transactions) 11/11 passed
+  npm run verify:kai-sprint2-gate-a-p0 (unmodified) -> Gate A ephemeral PostgreSQL
+    verification passed
+  npm run verify:kai-sprint2-p1-parser-run-file-profile (P1-02 runner, unmodified) -> P1-02
+    ephemeral PostgreSQL verification passed
+  npm run verify:kai-sprint2-p1-03-parser-profile-worker (P1-03 runner, unmodified) ->
+    tests 14; pass 14; fail 0; skipped 0
+  npm run verify:kai-sprint2-p1-04-data-dictionary-quality (P1-04 runner, unmodified) ->
+    tests 12; pass 12; fail 0; skipped 0
+  npm run verify:kai-sprint2-p1-05-intake-sensitivity-profile (P1-05 runner, unmodified) ->
+    tests 15; pass 15; fail 0; skipped 0
+  npm run test:kai-sprint2 -> tests 1118; pass 1112; fail 0; cancelled 0; skipped 6; todo 0
+  npm test (complete repository suite) -> tests 1223; pass 1217; fail 0; cancelled 0;
+    skipped 6; todo 0
+  git diff --check -> clean (exit 0)
+  git diff --cached --check -> clean (exit 0)
+
+changed_files:
+  Backend/kai/dictionary/postgresReviewQueueRepository.js (modified - conflict handling,
+    audit contract, validation boundary; see corrections_made)
+  Backend/kai/services/kaiReviewQueueService.js (modified - validator-group delegation; see
+    corrections_made)
+  migrations/kai_sprint2_p1_06_review_queue.sql (modified - new required_action CHECK, new
+    metadata_only audit-metadata key; local P1-06 migration corrected in place, not applied
+    to any shared or durable environment)
+  scripts/kai-sprint2-p1-06-review-queue-verifier.sql (modified - new CHECK_EXISTS row,
+    AUDIT_METADATA_BRANCH LIKE addition)
+  scripts/kai-sprint2-p1-06-review-queue-failure-checks.sql (modified - 3 fixed inserts, 3
+    new checks)
+  scripts/kai-sprint2-p1-06-review-queue-smoke-verifier.sql (modified - validator_key and
+    metadata_only key corrections)
+  scripts/kai-sprint2-p1-06-review-queue-patch-notes.md (modified)
+  scripts/kai-sprint2-p1-06-review-queue-runbook.md (modified)
+  __tests__/kai-sprint2-p1-06-review-queue-boundary.spec.js (modified)
+  __tests__/kai-sprint2-p1-06-review-queue-schema-contract.spec.js (modified)
+  __tests__/kai-sprint2-p1-06-review-queue.integration.spec.js (modified)
+  KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md (this correction-evidence
+    block, additions-only)
+
+not_changed:
+  Backend/kai/db/kaiIntakeQueries.js (empty git diff - reverted to its pre-correction state
+    after the shared_db_helper_placement_decision above; only its pre-existing
+    getScopedSensitivityReviewQueueItemByIdentity export continues to be reused)
+  Backend/kai/config/kaiSprint2P0Contract.js, Backend/kai/validators/
+    assistantBoundaryValidators.js, Backend/kai/validators/operationValidatorGroups.js,
+    Backend/kai/validators/tenantValidators.js, Backend/kai/auth/kaiAuthorizationService.js
+    (all empty git diff - reused as pre-existing shared mechanisms, not modified)
+  scripts/kai-sprint2-p1-06-review-queue-smoke-seed.sql,
+  scripts/kai-sprint2-p1-06-review-queue-local-postgres.js,
+  scripts/kai-sprint2-p1-06-review-queue-runner-assertions.js,
+  __tests__/kai-sprint2-p1-06-review-queue-runner-self-test.spec.js (empty git diff)
+  migrations/kai_sprint2_p1_06_review_queue.rollback.sql (empty git diff - already correct;
+    see rollback_restoration above)
+  no P1-02, P1-03, P1-04, P1-05, or Gate A migration, rollback, runner, verifier, smoke,
+    repository, service, or runbook artifact was touched
+  no route, listener, scheduler, timer, startup hook, public barrel export, production
+    composition, application repository selection, feature-flag default, or cloud
+    configuration was added or changed
+  no new review transition, resolution, approval, rejection, source-candidate creation, or
+    promotion behavior was added
+  no UNIQUE (organization_id, review_queue_item_id) constraint was added
+  no mutable-field replay comparison was added (replay validates identity/tenant only, per
+    required_validation_boundary_preserved above)
+  no 00_KAI_CURRENT_STATE.md or KAI_CURRENT_IMPLEMENTATION_BASELINE.md file was touched
+  no real-client-data access
+
+not_confirmed:
+  production_repository_selection: NOT_CONFIRMED
+  production_database_execution: NOT_CONFIRMED
+  deployment: NOT_CONFIRMED
+
+prohibited_actions_not_performed:
+  - no fetch, pull, push, merge, rebase, reset, cherry-pick, history rewrite, route wiring,
+    service wiring, barrel wiring, production repository selection, production composition,
+    feature-flag changes, cloud/storage work, Current State changes, Implementation
+    Baseline changes, Gate A/P1-02/P1-03/P1-04/P1-05 migration edits, deployment,
+    production/shared database access, or real client data access
+  - did not begin P1-07, propose another package, or continue past this bounded correction
+
+correction_commit_hash: report after commit; a commit cannot contain its own SHA
+```
