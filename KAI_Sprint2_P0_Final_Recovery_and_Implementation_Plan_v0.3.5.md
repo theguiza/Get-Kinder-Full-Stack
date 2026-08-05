@@ -8627,3 +8627,216 @@ prohibited_actions_not_performed:
 
 correction_commit_hash: report after commit; a commit cannot contain its own SHA
 ```
+
+## P1-07 evidence - intake source-candidate durable object and review foundation
+
+```text
+timestamp_local: 2026-08-05 America/Vancouver
+branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 8f21bae5bd821a374eee7139f04630d07fd6eb9a
+package: KAI P1-07 - intake source-candidate durable object and review foundation
+status: TOOL_VERIFIED
+
+pre_append_execplan:
+  byte_count: 685324
+  sha256: a2e75d70c38af3ec8ff275f84a3a9fb654e434ecdbe5e69aacb94ea908e652ec
+  preserved_copy: /private/tmp/claude-501/-Users-mikewoz-Get-Kinder-Full-Stack-Deploy/9640ec97-7f75-44f2-b735-9d159551b25d/scratchpad/KAI_Sprint2_P0_ExecPlan_pre_p1_07.md
+  prefix_proof: cmp -l against the preserved copy over the first 685324 bytes of the
+    live file reports no differing bytes; this block is appended strictly after that
+    offset
+
+preflight:
+  branch: codex/kai-sprint2-p0-v0.3.5
+  head: 8f21bae5bd821a374eee7139f04630d07fd6eb9a
+  worktree: clean including untracked files (verified via `git status --porcelain`
+    before any change)
+
+p1_07_made:
+  - migrations/kai_sprint2_p1_07_intake_source_candidate.sql (new forward migration):
+    creates kai.intake_source_candidates (intake_source_candidate_id, organization_id,
+    intake_file_id, file_profile_id, data_dictionary_id, intake_sensitivity_profile_id,
+    profile_canonical_sha256, proposed_source_type [pinned 'unknown'], candidate_status
+    [pinned 'needs_gk_review'], created_by, created_by_type, created_at), tenant-safe
+    composite lineage foreign keys chaining file -> profile -> dictionary ->
+    sensitivity profile, a new intake_sensitivity_profiles_p1_07_candidate_lineage_unique
+    constraint added to the existing kai.intake_sensitivity_profiles table (needed to
+    express the composite sensitivity-lineage FK; P1-05's own migration file is not
+    edited), the P1-07 identity-unique constraint
+    (organization_id, intake_sensitivity_profile_id), a partial unique index scoping
+    the source_candidate_review idempotency identity on the existing
+    kai.review_queue_items table (P1-06's migration file is not edited), and the new
+    intake_source_candidate_persisted audit operation/metadata branch on
+    kai.upload_lifecycle_audit (additive only; every earlier branch preserved verbatim).
+  - migrations/kai_sprint2_p1_07_intake_source_candidate.rollback.sql (new rollback
+    draft): restores the exact prior audit constraints, drops the P1-07 table/indexes,
+    the P1-07-only review-queue partial unique index, and the P1-07-only
+    sensitivity-profile lineage-unique constraint. Alters no earlier package's table
+    beyond that restoration.
+  - Backend/kai/dictionary/postgresSourceCandidateRepository.js (new file): the only
+    authorized location for P1-07 SQL/row-locking. createSourceCandidateStub reads the
+    tenant-scoped P1-05 sensitivity-profile lineage, applies the VAL-KAI-P1-07-001
+    fail-closed creation-trigger predicate (identical in substance to P1-06's
+    VAL-FUP-001-P0, re-checked against the same row), does authoritative existing-row
+    lookups (candidate, then review item) before ever inserting either, uses
+    INSERT ... ON CONFLICT ... DO NOTHING RETURNING for both the candidate and the
+    review-item inserts, and writes the required metadata-only
+    intake_source_candidate_persisted audit row inside the same transaction as both
+    inserts on first creation only (own-boolean-data-property audit predicate, copied
+    from P1-05/P1-06's prepareRequiredAudit). No catch-23505, in-memory lock, mutex,
+    in-flight map, or advisory lock is used anywhere.
+  - Backend/kai/services/kaiSourceCandidateService.js (new file): createSourceCandidateStub
+    validates its input allowlist (organizationId, intakeSensitivityProfileId,
+    actorContext, now only), checks KAI_SPRINT2_ENABLED first, enforces AUTH-KAI-003
+    (mapped human actor only) and delegates tenant-membership/role authorization to the
+    existing shared validateActorCanPerformOperation/validateTenantBoundaryConsistency
+    mechanisms. Contains no SQL, imports no database pool, and is not composed into any
+    route, listener, scheduler, or production path.
+  - Backend/kai/db/kaiIntakeQueries.js (additive only): added
+    getScopedSourceCandidateReviewQueueItemByIdentity, a narrow, tenant-scoped,
+    FOR UPDATE lookup scoped to queue_type = 'source_candidate_review' /
+    target_object_type = 'intake_source_candidate' only. Every existing exported
+    function's signature and behavior is unchanged (confirmed by `git diff` showing a
+    pure addition).
+  - package.json (additive only): added the
+    verify:kai-sprint2-p1-07-source-candidate script.
+  - scripts/kai-sprint2-p1-07-source-candidate-verifier.sql, -failure-checks.sql,
+    -smoke-seed.sql, -smoke-verifier.sql, -runner-assertions.js, -local-postgres.js,
+    -runbook.md, -patch-notes.md (all new files).
+  - __tests__/kai-sprint2-p1-07-source-candidate-schema-contract.spec.js,
+    -boundary.spec.js, .integration.spec.js, -runner-self-test.spec.js (all new files).
+
+selected_idempotency_identity_and_basis:
+  - Candidate identity: organization_id + intake_sensitivity_profile_id. Basis: P1-05's
+    own (organization_id, file_profile_id, data_dictionary_id) uniqueness already
+    establishes a 1:1 relationship to one intake_sensitivity_profile_id; no currently
+    authorized producer contract emits a finer-grained candidate-source classification
+    that would justify a narrower identity. This is a P1-07 implementation decision,
+    documented in the migration comments, the schema-contract test, the patch notes,
+    and this evidence block - not claimed to be mandated by any governing source.
+  - Review-item identity: organization_id + queue_type ('source_candidate_review') +
+    target_object_type ('intake_source_candidate') + target_object_id (the candidate
+    id), enforced by a partial unique index, mirroring the accepted P1-06 precedent
+    exactly.
+
+selected_audit_vocabulary_and_p1_07_decision_disclosure:
+  - Audit operation: intake_source_candidate_persisted. Audit contract:
+    p1_intake_source_candidate_v1. Validator key: VAL-KAI-P1-07-001. All three are
+    explicit P1-07 implementation decisions using the smallest convention-consistent
+    naming already established by this repository (the same VAL-KAI-P1-0X-001 idiom
+    P1-05 itself used for VAL-KAI-P1-05-001) - not quoted from, and not claimed to be
+    mandated by, any owner-authorized governing source. This is disclosed in the
+    repository file's own code comment, the patch notes, the runbook, and here.
+
+commands: TOOL_VERIFIED
+  - node --test __tests__/kai-sprint2-p1-07-source-candidate-schema-contract.spec.js
+    __tests__/kai-sprint2-p1-07-source-candidate-runner-self-test.spec.js
+    __tests__/kai-sprint2-p1-07-source-candidate-boundary.spec.js
+    __tests__/kai-sprint2-p1-07-source-candidate.integration.spec.js
+    (DATABASE_URL set to a non-listening loopback sentinel; integration spec
+    self-skips without a runner-owned database)
+  - npm run verify:kai-sprint2-p1-07-source-candidate
+  - npm run verify:kai-sprint2-gate-a-p0
+  - npm run verify:kai-sprint2-p1-parser-run-file-profile
+  - npm run verify:kai-sprint2-p1-03-parser-profile-worker
+  - npm run verify:kai-sprint2-p1-04-data-dictionary-quality
+  - npm run verify:kai-sprint2-p1-05-intake-sensitivity-profile
+  - npm run verify:kai-sprint2-p1-06-review-queue
+  - npm test (full repository suite: __tests__/*.spec.js)
+  - git diff --check
+  - git diff --cached --check
+
+test_results: TOOL_VERIFIED
+  - P1-07 focused specs: 35 pass, 0 fail, 1 skipped (integration spec self-skip
+    without KAI_P1_07_SOURCE_CANDIDATE_DATABASE_URL)
+  - P1-07 ephemeral PostgreSQL 16 verifier: catalog verifier 35/35 PASS, read-only
+    failure checks 10/10 PASS, smoke verifier 14/14 PASS, integration suite 11/11 pass
+  - Gate A P0 verifier: pass
+  - P1-02 (parser-run/file-profile) verifier: pass
+  - P1-03 (parser/profile worker) verifier: 14/14 pass
+  - P1-04 (data-dictionary/quality) verifier: 12/12 pass
+  - P1-05 (intake-sensitivity-profile) verifier: 15/15 pass
+  - P1-06 (review-queue) verifier: 11/11 pass (no regression from the P1-07 additions
+    to the shared kai.review_queue_items table or kai.upload_lifecycle_audit)
+  - Full repository suite (`npm test`): 1259 tests, 1252 pass, 0 fail, 7 skipped
+    (unchanged skip set: DB-gated integration specs without a runner-owned database)
+
+postgresql_verification_results: TOOL_VERIFIED
+  - Ephemeral PostgreSQL 16, loopback-only (127.0.0.1, runner-chosen port),
+    runner-owned-target proof passed (database name, address, port,
+    listen_addresses, PostgreSQL 16.x version).
+  - Catalog verifier proved: table/column/CHECK/FK/unique-index existence; the new
+    sensitivity-profile candidate-lineage unique constraint; no raw-content column;
+    proposed_source_type and candidate_status pinning; the reused
+    source_candidate_review queue_type vocabulary; the new audit
+    operation/metadata branch alongside every earlier operation preserved; no
+    table-wide FK on the shared target_object_id column; and the absence of
+    kai.sources/kai.source_versions/kai.intake_promotion_decisions.
+  - Read-only failure checks (self-seeding their own fixture chain, since this
+    script runs before any smoke seed) proved: proposed_source_type/candidate_status/
+    created_by_type vocabulary rejection, checksum-shape rejection, composite-FK
+    rejection of a fabricated sensitivity-profile id and of a mismatched checksum
+    lineage, identity-unique enforcement, source_candidate_review identity-unique
+    enforcement on the shared queue table, and that an unrelated queue_type is not
+    deduplicated by the new partial index.
+  - Smoke verifier proved: first-creation persistence of the candidate, review item,
+    and audit row with pinned fields; replay returning the same candidate id;
+    duplicate-identity rejection; concurrent-insert convergence to exactly one row;
+    cross-tenant invisibility; composite-FK rejection of a fabricated sensitivity id;
+    transaction+audit atomicity (forced-exception rollback of the review-item and
+    audit inserts together); and the exact eleven-key audit-metadata allowlist with
+    no raw content.
+  - Integration suite (11 tests) proved, against the real schema: first creation with
+    exact pinned fields and the exact eleven-key audit metadata; full replay with zero
+    duplicate audit; not_found for an unknown profile id; cross-tenant not_found;
+    required-audit-prepare rejection rollback; synchronous-publish-throw rollback;
+    rejected-publish-promise rollback; two genuinely overlapping transactions (a
+    test-only beforeInsert barrier, never present in production wiring) converging to
+    exactly one candidate/review-item pair with exactly one audit row and one
+    replayed:true/one replayed:false; an unrelated queue_type unaffected; the catalog
+    verifier reporting zero FAIL rows with no duplicate check names; and an
+    end-to-end pass through the service seam exercising KAI_SPRINT2_ENABLED,
+    AUTH-KAI-003, and VAL-TEN-001 together.
+
+diff_checks: TOOL_VERIFIED
+  - git diff --check: clean (no whitespace errors)
+  - git diff --cached --check: clean (nothing staged before the commit below)
+  - git diff --stat (tracked-file changes only): Backend/kai/db/kaiIntakeQueries.js
+    (+29 additive lines), package.json (+1 additive line) - both purely additive, no
+    existing line altered or removed
+  - full diff inspected: confirms no route, listener, scheduler, UI, startup
+    composition, feature-flag default, Current State, or Implementation Baseline file
+    was touched, and no P1-08, promotion, source, source_version, evidence, or claim
+    identifier appears anywhere in the new or changed files
+
+final_commit: report after commit; a commit cannot contain its own SHA
+
+final_worktree_and_staged_state: report after commit
+
+prohibited_actions_not_performed:
+  - no route, listener, UI, scheduler, or startup-composition file was added or edited
+  - no source, source_version, evidence, claim, promotion, approval, or eligibility
+    logic was added
+  - kai.intake_promotion_decisions, kai.sources, and kai.source_versions were not
+    created (proved by the catalog verifier's NO_PROMOTION_OR_SOURCE_OBJECTS check)
+  - no accepted P1-02, P1-03, P1-04, P1-05, or P1-06 migration file was edited (each
+    remains byte-identical; only this package's own new migration adds the two
+    additive constraints on kai.intake_sensitivity_profiles and kai.review_queue_items)
+  - no feature-flag default was changed and KAI_SPRINT2_ENABLED continues to gate all
+    new behavior with zero side effects when disabled
+  - no fetch, push, merge, deploy, cloud/shared-infrastructure access, or real-client-
+    data handling was performed
+  - did not begin P1-08 or propose another package
+
+user_confirmed_starting_assumptions:
+  - the owner-supplied package boundary, schema/column/status naming direction, and
+    audit-contract naming convention described in the originating prompt, none of
+    which was independently re-derived from a quoted governing source during this
+    turn beyond what fresh repository inspection above established
+
+not_confirmed:
+  deployment: NOT_CONFIRMED
+  production_or_shared_database_state: NOT_CONFIRMED
+  feature_enablement: NOT_CONFIRMED
+  production_runtime_composition: NOT_CONFIRMED
+  real_client_data_behavior: NOT_CONFIRMED
+```

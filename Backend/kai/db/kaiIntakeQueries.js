@@ -291,3 +291,32 @@ export async function getScopedSensitivityReviewQueueItemByIdentity(
   );
   return rows[0] || null;
 }
+
+/**
+ * P1-07 narrow, tenant-scoped authoritative lookup by the 'source_candidate_review'
+ * idempotency identity (organization_id + queue_type + target_object_type +
+ * target_object_id). Locks the row FOR UPDATE so the P1-07 repository can decide
+ * between "replay this existing row" and "safe to insert" inside one transaction.
+ * This is additive: it does not change any other exported query in this module, and
+ * it is scoped to queue_type = 'source_candidate_review' / target_object_type =
+ * 'intake_source_candidate' only, so no other queue_type's rows are ever read,
+ * locked, or affected by it.
+ */
+export async function getScopedSourceCandidateReviewQueueItemByIdentity(
+  { organizationId, targetObjectId },
+  db = pool,
+) {
+  const { rows } = await db.query(
+    `SELECT review_queue_item_id, organization_id, queue_type, target_object_type,
+            target_object_id, priority, queue_status, assigned_to, due_at, summary,
+            required_action, queue_metadata, created_at, updated_at
+       FROM kai.review_queue_items
+      WHERE organization_id = $1
+        AND queue_type = 'source_candidate_review'
+        AND target_object_type = 'intake_source_candidate'
+        AND target_object_id = $2
+      FOR UPDATE`,
+    [organizationId, targetObjectId],
+  );
+  return rows[0] || null;
+}
