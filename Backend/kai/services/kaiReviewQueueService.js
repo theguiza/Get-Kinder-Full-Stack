@@ -22,6 +22,7 @@ import {
 } from "../internal/kaiMutationOrchestration.js";
 import { validateReviewQueueType } from "../validators/intakeValidators.js";
 import { validateReviewQueueStatusRequest } from "../validators/kaiSprint2RequestSchemas.js";
+import { createPostgresReviewQueueRepository } from "../dictionary/postgresReviewQueueRepository.js";
 
 const UUID_RE = KAI_SPRINT2_P0_PATTERNS.uuid;
 const REVIEW_QUEUE_STATUS_SET = new Set(KAI_SPRINT2_P0_REVIEW_QUEUE_STATUSES);
@@ -356,4 +357,110 @@ export async function updateReviewQueueStatus(input = {}, dependencies = {}) {
     if (error instanceof RequiredAuditPersistenceError) return buildKaiError("system_error");
     return buildKaiError("system_error");
   }
+}
+
+const SENSITIVITY_REVIEW_ALLOWED_ROLES = new Set(["gk_admin", "gk_operator", "gk_reviewer"]);
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isNonEmptyString(value) {
+  return typeof value === "string" && value.length > 0;
+}
+
+function isNormalizedNow(value) {
+  if (!isNonEmptyString(value)) return false;
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) return false;
+  return new Date(parsed).toISOString() === value;
+}
+
+function isCreateSensitivityReviewQueueItemInput(value) {
+  const allowedKeys = new Set(["organizationId", "intakeSensitivityProfileId", "actorContext", "now"]);
+  if (!isPlainObject(value) || !Object.keys(value).every((key) => allowedKeys.has(key))) return false;
+  return (
+    isNonEmptyString(value.organizationId) &&
+    isNonEmptyString(value.intakeSensitivityProfileId) &&
+    isPlainObject(value.actorContext) &&
+    isNormalizedNow(value.now)
+  );
+}
+
+/**
+ * AUTH-KAI-003: a P1-06 'sensitivity_review' queue item may only be created by a
+ * mapped human actor. Every non-human actor type (ai, system, import, code, or any
+ * other generic-service actor) is rejected outright - there is no bypass.
+ */
+function isMappedHumanActor(actorContext) {
+  return actorContext?.actorType === "human" && isNonEmptyString(actorContext?.actorUserId);
+}
+
+/**
+ * VAL-TEN-001: the human actor must hold an active organization membership in the
+ * requested organization, with a role authorized to trigger a sensitivity review
+ * (gk_admin, gk_operator, or gk_reviewer). No tenant-membership bypass.
+ */
+function hasActiveAuthorizedMembership(actorContext, organizationId) {
+  const memberships = Array.isArray(actorContext?.organizationMemberships)
+    ? actorContext.organizationMemberships
+    : [];
+  return memberships.some(
+    (membership) =>
+      String(membership?.organization_id) === String(organizationId) &&
+      membership?.membership_status === "active" &&
+      SENSITIVITY_REVIEW_ALLOWED_ROLES.has(membership?.role_name),
+  );
+}
+
+/**
+ * KAI P1-06 dormant sensitivity-review queue-item creation seam.
+ *
+ * Idempotent creation of exactly one 'sensitivity_review' `kai.review_queue_items`
+ * row for an existing, tenant-scoped, committed P1-05 `kai.intake_sensitivity_profiles`
+ * row that satisfies the VAL-FUP-001-P0 creation-trigger predicate (human review
+ * required and public/funder/LLM/product-learning use all still denied, retention
+ * still restricted pending review). This reuses the existing canonical
+ * `kai.review_queue_items` table and the existing `insertReviewQueueItem` seam via the
+ * injected P1-06 repository; it never writes a queue_type other than
+ * 'sensitivity_review', never transitions queue_status beyond null -> 'open', and
+ * performs no resolution, approval, escalation, or promotion. It is not composed into
+ * any route, listener, or production path, and it does not modify
+ * `createReviewQueueItem` or `updateReviewQueueStatus` above.
+ *
+ * Contains no SQL and imports no database pool: persistence is delegated entirely to
+ * the injected P1-06 review-queue repository.
+ */
+export async function createSensitivityReviewQueueItem(input, dependencies = {}) {
+  if (!isKaiSprint2Enabled(dependencies.env || process.env)) {
+    return buildKaiError("feature_disabled");
+  }
+  if (!isCreateSensitivityReviewQueueItemInput(input)) {
+    return buildKaiError("validation_blocker");
+  }
+
+  const { actorContext } = input;
+  if (!isMappedHumanActor(actorContext)) {
+    return buildKaiError("authorization_denied");
+  }
+  if (!hasActiveAuthorizedMembership(actorContext, input.organizationId)) {
+    return buildKaiError("tenant_boundary_violation");
+  }
+
+  const reviewQueueRepository = dependencies.reviewQueueRepository || createPostgresReviewQueueRepository();
+
+  const result = await reviewQueueRepository.createSensitivityReviewQueueItem({
+    identity: {
+      organizationId: input.organizationId,
+      intakeSensitivityProfileId: input.intakeSensitivityProfileId,
+    },
+    actorUserId: actorContext.actorUserId,
+    now: input.now,
+    metadataOnlyAudit: dependencies.metadataOnlyAudit,
+  });
+
+  if (!result.ok) {
+    return buildKaiError(result.error.code, { status: result.error.status });
+  }
+  return { ok: true, data: result.data, error: null };
 }

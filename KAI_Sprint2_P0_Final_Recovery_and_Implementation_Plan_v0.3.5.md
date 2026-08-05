@@ -8167,3 +8167,216 @@ not_confirmed:
 
 correction_commit_hash: report after commit; a commit cannot contain its own SHA
 ```
+
+## P1-06 evidence - review-queue durable table and sensitivity-review item foundation
+
+```text
+timestamp_local: 2026-08-04 18:31 America/Vancouver
+branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: e25e1ede69123459a92c9c176f193807bb8b7700
+package: KAI P1-06 - review-queue durable table and sensitivity-review item foundation
+status: TOOL_VERIFIED
+
+pre_append_execplan:
+  byte_count: 653206
+  sha256: 4fbd926c84698a66e8c4d0e57cc97c5235cd92634390067a76a80c182fee12b0
+  preserved_copy: /private/tmp/claude-501/-Users-mikewoz-Get-Kinder-Full-Stack-Deploy/28aad465-b1f9-4c43-9392-0ae0c35d0f69/scratchpad/execplan.pre-p1-06.md
+  prefix_proof: TOOL_VERIFIED - the preserved copy's full 653206 bytes are byte-identical to
+    this file's first 653206 bytes (cmp over the prefix, exit 0); this block is appended
+    after that byte offset only, so this package's evidence is additions-only and no
+    earlier byte was altered
+
+owner_scope_correction:
+  Repository preflight for this package surfaced that `kai.review_queue_items` was already
+  a live, production-wired table with an existing route-wired `createReviewQueueItem`
+  service (Backend/kai/db/kaiIntakeQueries.js, Backend/kai/services/kaiReviewQueueService.js,
+  scripts/kai-sprint2-ddl-vocabulary-status-check.sql already code against and assert this
+  table's canonical column list and `sensitivity_review`/`open` vocabulary), even though no
+  tracked migration had ever created it. The owner was presented with this discrepancy and
+  three implementation options before any file was written; the owner's explicit ruling was
+  to create the canonical table (full existing column set) in a tracked P1-06 migration and
+  wire the narrow sensitivity_review creation path through the existing
+  kaiReviewQueueService/insertReviewQueueItem seams - not a bootstrap-only substitute and not
+  a second, differently-named table. This package implements that ruling.
+
+scope_decision:
+  new_table: kai.review_queue_items - the first tracked migration to create this canonical,
+    already-production-referenced table, using the exact column list, defaults, and
+    vocabularies already assumed by Backend/kai/db/kaiIntakeQueries.js,
+    Backend/kai/services/kaiReviewQueueService.js, and
+    scripts/kai-sprint2-ddl-vocabulary-status-check.sql (review_queue_item_id,
+    organization_id, engagement_id, queue_type, target_object_type, target_object_id,
+    priority, queue_status, review_status, blocked_reason, assigned_to, due_at, summary,
+    required_action, queue_metadata, created_by, created_by_type, created_at, updated_at).
+    P1-06 itself only ever writes queue_type='sensitivity_review',
+    queue_status='open', priority='normal' rows; the wider vocabulary exists because the
+    table is shared with the pre-existing generic queue abstraction, not because P1-06 uses
+    it.
+  idempotency_identity: a partial unique index (organization_id, queue_type,
+    target_object_type, target_object_id) scoped to `WHERE queue_type = 'sensitivity_review'`
+    - not a table-wide constraint - so other queue_types' legitimate multi-row-per-target
+    behavior (e.g. a re-opened intake_file_review item after an earlier one resolved) is
+    left unmodified (proven by a dedicated failure-check and integration test).
+  target_lineage: no polymorphic or table-wide foreign key was added on the shared
+    target_object_id column, since it is already used by ~10 other queue_types pointing at
+    different target tables. Instead, Backend/kai/dictionary/postgresReviewQueueRepository.js
+    authoritatively verifies, inside the same transaction as the insert, that the referenced
+    kai.intake_sensitivity_profiles row exists and is tenant-matched before writing a
+    sensitivity_review item against it (proven deliberate, not a gap, by the
+    fabricated_target_no_db_level_fk_by_design failure-check).
+  creation_trigger_predicate (VAL-FUP-001-P0): a sensitivity_review item may only be created
+    for a committed, tenant-scoped kai.intake_sensitivity_profiles row where
+    human_review_required = true, public_use_allowed = false, funder_use_allowed = false,
+    llm_processing_allowed = false, product_learning_allowed = false, and
+    retention_posture = 'restricted_pending_review'. This predicate establishes only a
+    review obligation - never consent, approval, classification completion, external
+    eligibility, or promotion eligibility.
+  service_seam: Backend/kai/services/kaiReviewQueueService.js gains one new, narrow,
+    additive export - createSensitivityReviewQueueItem(input, dependencies) - accepting only
+    { organizationId, intakeSensitivityProfileId, actorContext, now } (unknown keys
+    rejected). It runs the feature gate, AUTH-KAI-003 human-actor authorization
+    (gk_admin/gk_operator/gk_reviewer only; ai/system/import/code/any generic-service actor
+    is rejected outright, no bypass), VAL-TEN-001 active-membership validation (no
+    tenant-membership bypass), then delegates persistence to the injected P1-06 repository.
+    The existing createReviewQueueItem and updateReviewQueueStatus exports, their route
+    wiring, and every other queue_type's behavior are unmodified.
+  repository_seam: Backend/kai/dictionary/postgresReviewQueueRepository.js is the only
+    authorized location for P1-06 SQL/locking. It reuses the existing insertReviewQueueItem
+    query (Backend/kai/db/kaiIntakeQueries.js, unmodified) and one new, additive,
+    narrowly-scoped query - getScopedSensitivityReviewQueueItemByIdentity - added to that
+    same file for the authoritative FOR UPDATE identity lookup. The caller cannot supply or
+    override lineage, queue type, target type, target ID, queue status, priority, summary,
+    required action, assignment, due date, classification, consent, allowed use, audience
+    eligibility, review result, or approval: every one of these is a server-pinned constant
+    or re-read from the authoritative committed sensitivity-profile row.
+  identity_and_replay: one authoritative row per organization_id + sensitivity_review +
+    intake_sensitivity_profile + intake_sensitivity_profile_id. Identical creation replays
+    the existing row with no duplicate write or duplicate audit. Concurrent identical
+    creation is resolved by the partial unique index's 23505 plus an authoritative re-read
+    in the same transaction - no in-memory lock, mutex, in-flight map, or advisory lock. A
+    changed-immutable-identity conflict is surfaced as conflict_current_state_changed.
+  audit: operation sensitivity_review_queue_item_created, contract
+    p1_sensitivity_review_queue_item_v1, validator_key VAL-KAI-P1-06-001, added additively to
+    upload_lifecycle_audit_gate_a_operation_check / upload_lifecycle_audit_gate_a_metadata_object_check
+    inside the new P1-06 migration file only (the Gate A/P1-02/P1-03/P1-04/P1-05 migration
+    files were never edited - the constraints are recreated in full by
+    DROP CONSTRAINT IF EXISTS/ADD CONSTRAINT inside this migration, exactly like P1-04 and
+    P1-05 did). Metadata carries exactly the six allowlisted keys - contract, queue_type,
+    target_object_type, target_object_id, queue_status, validator_key - deliberately
+    omitting the metadata_only bookkeeping key P1-05 used, per this package's explicit,
+    repeated allowlist. No profile JSON, classification, label, sample, PII, path, URL,
+    prompt, or credential is ever included. Rejection of the required audit prepare, a
+    synchronous publish() throw, or a rejected publish() promise rolls back the
+    review-queue-item insert and the audit insert together in the same transaction; the
+    own-boolean-data-property prepareRequiredAudit predicate (own-property descriptor read,
+    Object.hasOwn(okDescriptor, "value") && okDescriptor.value === true, callable publish)
+    is copied unchanged from the P1-04/P1-05 pattern.
+  status_boundary: only null -> open is implemented. No status transition, resolution,
+    approval, rejection, escalation, cancellation, reopening, or promotion logic was added;
+    updateReviewQueueStatus is untouched.
+  feature_flag: createSensitivityReviewQueueItem checks KAI_SPRINT2_ENABLED first; disabled
+    returns the canonical feature_disabled result with zero reads, writes, locks, audit
+    preparation, or publication (boundary test).
+  p1_02_p1_03_p1_04_p1_05_gate_a_protection: no P1-02, P1-03, P1-04, P1-05, or Gate A
+    migration, rollback, runner, verifier, failure-checks, smoke-seed, smoke-verifier,
+    repository, service, or test file was edited - confirmed empty by `git diff --stat`
+    filtered to every one of those exact path patterns.
+  runner: scripts/kai-sprint2-p1-06-review-queue-local-postgres.js - runner-owned synthetic
+    database kai_p1_06_review_queue_synthetic, loopback 127.0.0.1, runner-chosen ephemeral
+    port, listen_addresses '127.0.0.1' only, PostgreSQL 16 required and verified via
+    server_version_num (fails closed outside the 160000-169999 range); no shared, staging,
+    cloud, deployed, production, or real-client-data database was created or used.
+
+tests_added_and_results: TOOL_VERIFIED
+  node --test __tests__/kai-sprint2-p1-06-review-queue-schema-contract.spec.js
+    __tests__/kai-sprint2-p1-06-review-queue-boundary.spec.js
+    __tests__/kai-sprint2-p1-06-review-queue-runner-self-test.spec.js
+    __tests__/kai-sprint2-p1-06-review-queue.integration.spec.js
+    -> tests 30; pass 29; fail 0; cancelled 0; skipped 1 (integration spec skips without a
+       runner-owned database, by design); todo 0
+  npm run verify:kai-sprint2-p1-06-review-queue (ephemeral PostgreSQL 16) -> catalog verifier
+    37/37 PASS, read-only failure checks 10/10 PASS, smoke verifier 11/11 PASS, integration
+    suite (node --test against the ephemeral database) 11/11 passed
+  npm run verify:kai-sprint2-gate-a-p0 (unmodified) -> passed
+  npm run verify:kai-sprint2-p1-parser-run-file-profile (P1-02 runner, unmodified) -> passed
+  npm run verify:kai-sprint2-p1-03-parser-profile-worker (P1-03 runner, unmodified) ->
+    tests 14; pass 14; fail 0; skipped 0
+  npm run verify:kai-sprint2-p1-04-data-dictionary-quality (P1-04 runner, unmodified) ->
+    tests 12; pass 12; fail 0; skipped 0
+  npm run verify:kai-sprint2-p1-05-intake-sensitivity-profile (P1-05 runner, unmodified) ->
+    tests 15; pass 15; fail 0; skipped 0
+  npm run test:kai-sprint2 -> tests 1116; pass 1110; fail 0; cancelled 0; skipped 6; todo 0
+  npm test (complete repository suite) -> tests 1221; pass 1215; fail 0; cancelled 0;
+    skipped 6; todo 0
+  git diff --check -> clean (exit 0)
+  git diff --cached --check -> clean (exit 0)
+
+changed_files:
+  migrations/kai_sprint2_p1_06_review_queue.sql (added)
+  migrations/kai_sprint2_p1_06_review_queue.rollback.sql (added)
+  scripts/kai-sprint2-p1-06-review-queue-verifier.sql (added)
+  scripts/kai-sprint2-p1-06-review-queue-failure-checks.sql (added)
+  scripts/kai-sprint2-p1-06-review-queue-smoke-seed.sql (added)
+  scripts/kai-sprint2-p1-06-review-queue-smoke-verifier.sql (added)
+  scripts/kai-sprint2-p1-06-review-queue-local-postgres.js (added)
+  scripts/kai-sprint2-p1-06-review-queue-runner-assertions.js (added)
+  scripts/kai-sprint2-p1-06-review-queue-runbook.md (added)
+  scripts/kai-sprint2-p1-06-review-queue-patch-notes.md (added)
+  Backend/kai/dictionary/postgresReviewQueueRepository.js (added)
+  Backend/kai/db/kaiIntakeQueries.js (modified - one new additive query,
+    getScopedSensitivityReviewQueueItemByIdentity; insertReviewQueueItem and every other
+    existing export unchanged)
+  Backend/kai/services/kaiReviewQueueService.js (modified - one new additive export,
+    createSensitivityReviewQueueItem; createReviewQueueItem and updateReviewQueueStatus
+    unchanged)
+  package.json (modified - added verify:kai-sprint2-p1-06-review-queue script, one new
+    line only)
+  __tests__/kai-sprint2-p1-06-review-queue-schema-contract.spec.js (added)
+  __tests__/kai-sprint2-p1-06-review-queue-boundary.spec.js (added)
+  __tests__/kai-sprint2-p1-06-review-queue.integration.spec.js (added)
+  __tests__/kai-sprint2-p1-06-review-queue-runner-self-test.spec.js (added)
+  KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md (this evidence block)
+
+new_export:
+  Backend/kai/services/kaiReviewQueueService.js: createSensitivityReviewQueueItem - the
+    single new production export this package adds; not composed into any route, listener,
+    scheduler, or startup wiring.
+  Backend/kai/db/kaiIntakeQueries.js: getScopedSensitivityReviewQueueItemByIdentity - a
+    narrow, tenant-scoped, FOR UPDATE lookup used only by the P1-06 repository.
+  Backend/kai/dictionary/postgresReviewQueueRepository.js:
+    createPostgresReviewQueueRepository, __reviewQueueRepositoryContract,
+    __reviewQueueRepositoryTestables (prepareRequiredAudit, RequiredAuditRejectedError,
+    satisfiesCreationTriggerPredicate) - the repository factory plus test-seam exports only,
+    following the existing __dataDictionaryRepositoryTestables /
+    __intakeSensitivityProfileRepositoryTestables convention.
+
+not_reopened:
+  - no P1-02, P1-03, P1-04, P1-05, or Gate A migration, rollback, runner, verifier, smoke,
+    or runbook artifact was edited
+  - no route, listener, scheduler, timer, startup hook, public barrel export, production
+    composition, application repository selection, feature-flag default, or cloud
+    configuration was added
+  - no review-queue-item resolution, approval, rejection, escalation, or promotion was
+    implemented
+  - no source candidate, promotion decision, source, source version, evidence, claim, or
+    downstream-eligibility change was created
+  - no retention execution, deletion, storage-lifecycle change, job activation, approval, or
+    external-release authority was implemented anywhere
+  - no new approval state, audience/permission concept, review-completion semantics, or
+    retention-execution semantics was invented beyond exactly what this package's brief and
+    the owner's scope ruling required
+
+not_confirmed:
+  production_repository_selection: NOT_CONFIRMED
+  production_database_execution: NOT_CONFIRMED
+  deployment: NOT_CONFIRMED
+
+prohibited_actions_not_performed:
+  - no fetch, pull, push, merge, rebase, reset, cherry-pick, history rewrite, route wiring,
+    service wiring, barrel wiring, production repository selection, production composition,
+    feature-flag changes, cloud/storage work, Current State changes, Implementation
+    Baseline changes, Gate A/P1-02/P1-03/P1-04/P1-05 migration edits, deployment,
+    production/shared database access, or real client data access
+
+commit_hash: report after commit; a commit cannot contain its own SHA
+```
