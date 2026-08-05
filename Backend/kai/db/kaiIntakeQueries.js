@@ -320,3 +320,135 @@ export async function getScopedSourceCandidateReviewQueueItemByIdentity(
   );
   return rows[0] || null;
 }
+
+/**
+ * P1-08 narrow, tenant-scoped authoritative lookup of the P1-07 source candidate
+ * this package promotes. Locks the row FOR UPDATE so the P1-08 repository can
+ * decide between "replay an existing promotion decision" and "safe to promote"
+ * inside one transaction. This is additive: it does not change any other exported
+ * query in this module.
+ */
+export async function getScopedSourceCandidateByIdentity(
+  { organizationId, intakeSourceCandidateId },
+  db = pool,
+) {
+  const { rows } = await db.query(
+    `SELECT intake_source_candidate_id, organization_id, intake_file_id, file_profile_id,
+            data_dictionary_id, intake_sensitivity_profile_id, profile_canonical_sha256,
+            proposed_source_type, candidate_status, created_at
+       FROM kai.intake_source_candidates
+      WHERE organization_id = $1
+        AND intake_source_candidate_id = $2
+      FOR UPDATE`,
+    [organizationId, intakeSourceCandidateId],
+  );
+  return rows[0] || null;
+}
+
+/**
+ * P1-08 narrow, tenant-scoped authoritative lookup by the P1-08 promotion-decision
+ * idempotency identity (organization_id + intake_source_candidate_id). Locks the row
+ * FOR UPDATE. Additive: no other exported query in this module is changed.
+ */
+export async function getScopedSourcePromotionDecisionByIdentity(
+  { organizationId, intakeSourceCandidateId },
+  db = pool,
+) {
+  const { rows } = await db.query(
+    `SELECT intake_promotion_decision_id, organization_id, intake_source_candidate_id,
+            review_queue_item_id, reviewed_source_type, decision_status, source_id,
+            source_version_id, created_at, decided_at, promoted_at
+       FROM kai.intake_promotion_decisions
+      WHERE organization_id = $1
+        AND intake_source_candidate_id = $2
+      FOR UPDATE`,
+    [organizationId, intakeSourceCandidateId],
+  );
+  return rows[0] || null;
+}
+
+/**
+ * P1-08 narrow, tenant-scoped authoritative lookup of an existing `kai.sources` row
+ * by its deterministic identity (organization_id + source_code). Locks the row FOR
+ * UPDATE. Additive: no other exported query in this module is changed.
+ */
+export async function getScopedSourceByCode(
+  { organizationId, sourceCode },
+  db = pool,
+) {
+  const { rows } = await db.query(
+    `SELECT source_id, organization_id, source_code, reviewed_source_type, created_at
+       FROM kai.sources
+      WHERE organization_id = $1
+        AND source_code = $2
+      FOR UPDATE`,
+    [organizationId, sourceCode],
+  );
+  return rows[0] || null;
+}
+
+/**
+ * P1-08 narrow, tenant-scoped authoritative lookup of an existing `kai.sources` row
+ * by its primary key (organization_id + source_id), used only to read back a
+ * source already bound by a committed `kai.intake_promotion_decisions` row during
+ * replay. Never locked FOR UPDATE: replay performs no mutation. Additive: no other
+ * exported query in this module is changed.
+ */
+export async function getScopedSourceById(
+  { organizationId, sourceId },
+  db = pool,
+) {
+  const { rows } = await db.query(
+    `SELECT source_id, organization_id, source_code, reviewed_source_type, created_at
+       FROM kai.sources
+      WHERE organization_id = $1
+        AND source_id = $2`,
+    [organizationId, sourceId],
+  );
+  return rows[0] || null;
+}
+
+/**
+ * P1-08 narrow, tenant-scoped authoritative lookup of an existing
+ * `kai.source_versions` row by its primary key (organization_id +
+ * source_version_id), used only to read back a source version already bound by a
+ * committed `kai.intake_promotion_decisions` row during replay. Never locked FOR
+ * UPDATE: replay performs no mutation. Additive: no other exported query in this
+ * module is changed.
+ */
+export async function getScopedSourceVersionById(
+  { organizationId, sourceVersionId },
+  db = pool,
+) {
+  const { rows } = await db.query(
+    `SELECT source_version_id, organization_id, source_id, intake_source_candidate_id,
+            intake_sensitivity_profile_id, profile_canonical_sha256, is_current, created_at
+       FROM kai.source_versions
+      WHERE organization_id = $1
+        AND source_version_id = $2`,
+    [organizationId, sourceVersionId],
+  );
+  return rows[0] || null;
+}
+
+/**
+ * P1-08 narrow, tenant-scoped authoritative lookup of an existing `kai.source_versions`
+ * row by the P1-08 candidate-identity idempotency key (organization_id +
+ * intake_source_candidate_id). Locks the row FOR UPDATE. Additive: no other exported
+ * query in this module is changed.
+ */
+export async function getScopedSourceVersionByCandidateIdentity(
+  { organizationId, intakeSourceCandidateId },
+  db = pool,
+) {
+  const { rows } = await db.query(
+    `SELECT source_version_id, organization_id, source_id, intake_source_candidate_id,
+            intake_sensitivity_profile_id, profile_canonical_sha256, is_current, created_at
+       FROM kai.source_versions
+      WHERE organization_id = $1
+        AND intake_source_candidate_id = $2
+      FOR UPDATE`,
+    [organizationId, intakeSourceCandidateId],
+  );
+  return rows[0] || null;
+}

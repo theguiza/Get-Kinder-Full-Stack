@@ -9020,3 +9020,320 @@ not_confirmed:
   production_runtime_composition: NOT_CONFIRMED
   real_client_data_behavior: NOT_CONFIRMED
 ```
+
+## P1-08 evidence - source-promotion decision, source, and source_version creation
+
+```text
+timestamp_local: 2026-08-05 America/Vancouver
+branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: 9f6645350f559520f77c1dee33eeee1654495adc
+package: KAI P1-08 - complete P1 backend source-promotion subsystem
+status: TOOL_VERIFIED
+
+pre_append_execplan:
+  byte_count: 709161
+  sha256: 2c99205319a2473dd0a64e6838fe6f763b014aa34588f5cb74e02a978a993526
+  preserved_copy: /private/tmp/claude-501/-Users-mikewoz-Get-Kinder-Full-Stack-Deploy/ce408740-0a63-453f-ba4c-d1713e025eec/scratchpad/KAI_Sprint2_P0_ExecPlan_pre_p1_08.md
+  prefix_proof: the live file's first 709161 bytes are byte-identical to the preserved
+    copy (the preserved copy is exactly that file, taken immediately before this
+    block was appended); this block is appended strictly after that offset
+
+preflight:
+  branch: codex/kai-sprint2-p0-v0.3.5
+  head: 9f6645350f559520f77c1dee33eeee1654495adc
+  worktree: clean including untracked files (verified via `git status --porcelain`
+    before any change)
+
+p1_07_reopened: no - P1-07's accepted files
+  (Backend/kai/dictionary/postgresSourceCandidateRepository.js,
+  Backend/kai/services/kaiSourceCandidateService.js, its migration/rollback, its
+  scripts/*, its __tests__/*) were read for context only and are byte-identical
+  after this package (confirmed by `git status`/`git diff` showing zero changes to
+  any P1-07 file path)
+
+p1_08_made:
+  - migrations/kai_sprint2_p1_08_source_promotion.sql (new forward migration):
+    creates kai.intake_promotion_decisions (intake_promotion_decision_id,
+    organization_id, intake_source_candidate_id, review_queue_item_id,
+    reviewed_source_type, decision_status ['decided'|'promoted'], source_id,
+    source_version_id, created_by, created_by_type, created_at, decided_at,
+    promoted_at), kai.sources (source_id, organization_id, source_code,
+    reviewed_source_type, created_by, created_by_type, created_at), and
+    kai.source_versions (source_version_id, organization_id, source_id,
+    intake_source_candidate_id, intake_sensitivity_profile_id,
+    profile_canonical_sha256, is_current, created_by, created_by_type,
+    created_at), each with tenant-safe composite lineage foreign keys. Widens
+    kai.intake_source_candidates.candidate_status from P1-07's single-value pin
+    ('needs_gk_review' only) to IN ('needs_gk_review', 'promoted') - no other
+    value - following the accepted P1-07 precedent of widening an earlier
+    package's CHECK-pinned vocabulary through a later forward migration rather
+    than editing the accepted P1-07 migration file. Adds two trivially-unique
+    constraints to kai.intake_source_candidates
+    (intake_source_candidates_p1_08_identity_unique,
+    intake_source_candidates_p1_08_promotion_lineage_unique) and one to
+    kai.review_queue_items (review_queue_items_p1_08_identity_unique), each the
+    exact matching target of a new composite FK - P1-06's and P1-07's own
+    migration files are not edited. Adds the ux_source_versions_p1_08_current_per_source
+    partial unique index (at most one is_current = true source_version per
+    source_id) and the new source_promotion_decision_persisted audit
+    operation/metadata branch on kai.upload_lifecycle_audit (additive only; every
+    earlier branch preserved verbatim).
+  - migrations/kai_sprint2_p1_08_source_promotion.rollback.sql (new rollback
+    draft): restores the exact prior audit constraints, drops the three P1-08
+    tables and their indexes, the P1-08-only foreign keys added onto
+    kai.intake_promotion_decisions, the P1-08-only unique constraint on
+    kai.review_queue_items, the P1-08-only unique constraints on
+    kai.intake_source_candidates, and restores candidate_status to its exact
+    pre-P1-08 single-value CHECK. Alters no earlier package's table beyond that
+    restoration.
+  - Backend/kai/dictionary/postgresSourcePromotionRepository.js (new file): the
+    only authorized location for P1-08 SQL/row-locking. createSourcePromotionDecision
+    requires both feature flags before any read (enforced one level up, in the
+    service); reads the tenant-scoped, FOR UPDATE-locked P1-07 candidate row
+    first (the real serialization point for concurrent promotion attempts on an
+    already-existing row, unlike P1-07's own create-from-nothing case), applies
+    VAL-KAI-P1-08-001 (candidate/review completeness and open-review-item
+    status), VAL-KAI-P1-08-002 (the exact P1-05/P1-06/P1-07 fail-closed
+    allowed-use/consent/governance predicate, reapplied rather than a new
+    representation invented), and VAL-KAI-P1-08-003 (explicit, non-'unknown',
+    disclosed reviewed-source-type vocabulary), computes the deterministic
+    sha256 source_code from only organizationId + intakeSensitivityProfileId +
+    profileCanonicalSha256 + reviewedSourceType, does authoritative
+    existing-row lookups (decision, then source, then source_version) before
+    ever inserting any of them, uses INSERT ... ON CONFLICT ... DO NOTHING
+    RETURNING for all three inserts, transitions the candidate
+    (needs_gk_review -> promoted) and review item (open -> resolved) via
+    compare-and-set UPDATEs, transitions the decision itself
+    (decided -> promoted) via a compare-and-set UPDATE bound to the
+    source/source_version ids, and writes the required metadata-only
+    source_promotion_decision_persisted audit row inside the same transaction as
+    every insert/transition on first creation only (own-boolean-data-property
+    audit predicate, copied from P1-05 through P1-07's prepareRequiredAudit). A
+    losing concurrent transaction that unblocks from the candidate FOR UPDATE
+    lock onto an already-'promoted' row re-reads and replays the winner's
+    committed decision rather than misreporting validation_blocker. No
+    catch-23505, in-memory lock, mutex, in-flight map, or advisory lock is used
+    anywhere.
+  - Backend/kai/services/kaiSourcePromotionService.js (new file):
+    createSourcePromotionDecision validates its input allowlist (organizationId,
+    intakeSourceCandidateId, reviewedSourceType, actorContext, now only), checks
+    both KAI_SPRINT2_ENABLED and KAI_SOURCE_PROMOTION_ENABLED before any
+    repository read/lock/validator/audit activity, enforces AUTH-KAI-003 (mapped
+    human actor only - a resolved review item is never itself promotion
+    authority) and delegates tenant-membership/role authorization to the
+    existing shared validateActorCanPerformOperation/
+    validateTenantBoundaryConsistency mechanisms. Contains no SQL, imports no
+    database pool, and is not composed into any route, listener, scheduler, or
+    production path.
+  - Backend/kai/db/kaiIntakeQueries.js (additive only): added
+    getScopedSourceCandidateByIdentity, getScopedSourcePromotionDecisionByIdentity,
+    getScopedSourceByCode, getScopedSourceById,
+    getScopedSourceVersionByCandidateIdentity, getScopedSourceVersionById - six
+    narrow, tenant-scoped lookups (the first two, plus the by-code source lookup
+    and the candidate-identity source_version lookup, FOR UPDATE; the two by-id
+    lookups unlocked, used only to read back an already-committed binding during
+    replay). Every existing exported function's signature and behavior is
+    unchanged (confirmed by `git diff` showing a pure addition).
+  - Backend/kai/config/kaiSprint2Config.js (additive only): added
+    isKaiSourcePromotionEnabled (reading KAI_SOURCE_PROMOTION_ENABLED, default
+    false via the existing isEnabledValue helper) and
+    areKaiSprint2SourcePromotionFeaturesEnabled, matching the exact
+    isKaiFileUploadEnabled/areKaiSprint2UploadFeaturesEnabled composition idiom
+    already established in this file. Every existing exported function's
+    signature and behavior is unchanged. Neither KAI_SPRINT2_ENABLED nor
+    KAI_SOURCE_PROMOTION_ENABLED is enabled by this package.
+  - package.json (additive only): added the
+    verify:kai-sprint2-p1-08-source-promotion script.
+  - scripts/kai-sprint2-p1-08-source-promotion-verifier.sql, -failure-checks.sql,
+    -smoke-seed.sql, -smoke-verifier.sql, -runner-assertions.js,
+    -local-postgres.js, -runbook.md, -patch-notes.md (all new files).
+  - __tests__/kai-sprint2-p1-08-source-promotion-schema-contract.spec.js,
+    -boundary.spec.js, .integration.spec.js, -runner-self-test.spec.js (all new
+    files).
+
+selected_identity_and_basis:
+  - Promotion-decision/source_version identity: organization_id +
+    intake_source_candidate_id. Basis: P1-07's own
+    (organization_id, intake_sensitivity_profile_id) uniqueness already
+    establishes a 1:1 relationship to one candidate; no currently authorized
+    workflow permits re-deciding or re-promoting the same candidate. This is a
+    P1-08 implementation decision, documented in the migration comments, the
+    schema-contract test, the patch notes, the runbook, and this evidence block -
+    not claimed to be mandated by any governing source.
+  - Source identity: organization_id + source_code, where source_code is a
+    deterministic sha256 hex digest of only organizationId,
+    intakeSensitivityProfileId, profileCanonicalSha256, and reviewedSourceType -
+    never a filename, MIME type, sample value, AI output, or external lookup.
+    Because intakeSensitivityProfileId is already unique to one P1-07 candidate,
+    kai.sources/kai.source_versions rows are effectively 1:1 with the candidate
+    they were promoted from; this package does not implement merging multiple
+    candidates into one source's version history.
+  - Decision recording and promotion are compounded in one atomic transaction,
+    not split into two separately-atomic operations: no established P1-06/P1-07
+    package records a decision without also completing its associated write in
+    the same transaction, so this follows the same compound-boundary idiom P1-07
+    uses for its own candidate insert + review-item insert.
+
+selected_reviewed_source_type_vocabulary_and_p1_08_decision_disclosure:
+  - reviewed_source_type vocabulary: organization_primary_record,
+    organization_secondary_record, third_party_provided_record, public_record -
+    never 'unknown'. Fresh inspection found no currently authorized producer
+    contract that emits an explicit source-type classification (the same absence
+    P1-07 found and disclosed for its own proposed_source_type), so this
+    vocabulary is a P1-08 implementation decision, disclosed in the migration
+    comments, the repository file's own code comment, the patch notes, the
+    runbook, and here - not quoted from, and not claimed to be mandated by, any
+    owner-authorized governing source.
+  - Audit operation: source_promotion_decision_persisted. Audit contract:
+    p1_source_promotion_decision_v1. Validator keys: VAL-KAI-P1-08-001
+    (candidate/review completeness), VAL-KAI-P1-08-002 (reapplied permission
+    predicate), VAL-KAI-P1-08-003 (reviewed-type vocabulary) - the smallest
+    convention-consistent naming already established by this repository (the
+    same VAL-KAI-P1-0X-00N idiom P1-05/P1-06/P1-07 themselves used). The required
+    audit records VAL-KAI-P1-08-001 as its single disclosed key, matching the
+    one-key-per-audit-row idiom already established by P1-05 through P1-07.
+
+commands: TOOL_VERIFIED
+  - node --test __tests__/kai-sprint2-p1-08-source-promotion-schema-contract.spec.js
+    __tests__/kai-sprint2-p1-08-source-promotion-runner-self-test.spec.js
+    __tests__/kai-sprint2-p1-08-source-promotion-boundary.spec.js
+    __tests__/kai-sprint2-p1-08-source-promotion.integration.spec.js
+    (no KAI_P1_08_SOURCE_PROMOTION_DATABASE_URL set; integration spec self-skips
+    without a runner-owned database) -> 43 tests, 42 pass, 1 skip, 0 fail
+  - npm run verify:kai-sprint2-p1-08-source-promotion (ephemeral loopback
+    PostgreSQL 16 runner) -> catalog verifier 64/64 PASS, read-only failure
+    checks 13/13 PASS, smoke verifier 13/13 PASS, integration suite 11/11 pass,
+    0 fail
+  - node --test __tests__/kai-sprint2-p1-05-*.spec.js
+    __tests__/kai-sprint2-p1-06-*.spec.js __tests__/kai-sprint2-p1-07-*.spec.js
+    __tests__/kai-sprint2-p1-08-*.spec.js -> 146 tests, 142 pass, 0 fail, 4 skip
+  - npm run test:kai-sprint2 (complete Sprint 2 suite) -> 1199 tests, 1191 pass,
+    0 fail, 8 skip
+  - npm test (complete repository suite) -> 1304 tests, 1296 pass, 0 fail, 8 skip
+  - git diff --check -> clean (no whitespace errors)
+  - git diff --cached --check -> clean (nothing staged before the commit below)
+
+postgresql_verification_results: TOOL_VERIFIED
+  - P1-08 ephemeral PostgreSQL 16 catalog verifier
+    (verify:kai-sprint2-p1-08-source-promotion): 64/64 PASS across
+    TABLE_EXISTS/COLUMN_EXISTS/CHECK_EXISTS/UNIQUE_CONSTRAINT_EXISTS/FK_EXISTS/
+    UNIQUE_INDEX_EXISTS/NO_RAW_CONTENT_COLUMN/AUDIT_OPERATION_VOCABULARY/
+    AUDIT_METADATA_BRANCH/CANDIDATE_STATUS_WIDENED/
+    REVIEWED_SOURCE_TYPE_NEVER_UNKNOWN checks, no outer WHERE EXISTS filter
+  - Read-only failure checks (kai-sprint2-p1-08-source-promotion-failure-checks.sql):
+    13/13 PASS, covering reviewed_source_type vocabulary rejection (including
+    exactly 'unknown'), decision_status vocabulary/promoted-binding-invariant
+    enforcement, fabricated/mismatched composite-FK rejection, source_code shape
+    enforcement, identity-unique enforcement at every level (source,
+    source_version-by-candidate, decision), current-source-version-uniqueness
+    enforcement, and proof that candidate_status now accepts 'promoted'
+  - Smoke verifier (kai-sprint2-p1-08-source-promotion-smoke-verifier.sql):
+    13/13 PASS, covering creation (decision + source + source_version +
+    candidate/review transitions + audit, all atomically), replay, duplicate-
+    identity rejection, concurrent-insert convergence, cross-tenant invisibility,
+    transaction+audit atomicity (forced-rollback proof), and audit
+    metadata exact-twelve-key/no-raw-content checks
+  - Integration suite
+    (__tests__/kai-sprint2-p1-08-source-promotion.integration.spec.js against the
+    runner-owned ephemeral database): 11/11 pass, including the two-genuinely-
+    overlapping-transactions concurrency proof (one replayed: false, one
+    replayed: true, exactly one decision/source/source_version row) and the
+    end-to-end service-seam test (both feature flags, AUTH-KAI-003, VAL-TEN-001)
+
+proof_of_required_behavior: TOOL_VERIFIED
+  - both disabled feature gates produce zero side effects: proved by the
+    boundary-spec "either feature flag disabled returns feature_disabled with
+    zero repository calls" test across five flag-state combinations (probe.calls
+    asserted 0 in every case) and by the integration-spec service-seam test's
+    disabledResult assertion
+  - only an authorized mapped human with active tenant membership can decide/
+    promote: proved by the boundary-spec AUTH-KAI-003 test (five non-human actor
+    types all rejected with zero repository calls) and VAL-TEN-001 test (no
+    membership, wrong org, revoked membership, wrong role all rejected with zero
+    repository calls); integration-spec deniedResult confirms this against the
+    real postgres repository
+  - unknown type, incomplete pair, stale state, cross-tenant lineage, and
+    restricted permissions cannot promote: proved by boundary-spec tests for
+    not_found (missing candidate, missing review item, missing sensitivity
+    profile, cross-tenant), validation_blocker (candidate not needs_gk_review,
+    review item not open, reviewed_source_type unrecognized/'unknown'/empty,
+    reapplied VAL-KAI-P1-08-002 permission predicate failing on any of its six
+    columns), and conflict_current_state_changed (candidate lineage no longer
+    matching the freshly re-read sensitivity profile, an existing decision bound
+    to a different reviewedSourceType); integration-spec tests confirm not_found
+    and validation_blocker against the real schema with zero rows created
+  - deterministic source-code generation and current-version uniqueness: proved
+    by the boundary-spec computeSourceCode test (same inputs -> same sha256
+    output; a changed reviewedSourceType -> a different output) and by the
+    PostgreSQL failure-checks' current_source_version_uniqueness_enforced check
+    (a second is_current = true source_version for the same source_id is
+    rejected by ux_source_versions_p1_08_current_per_source)
+  - replay and genuine concurrent convergence: proved by the integration-spec
+    "same identity replays" test (zero duplicate rows, zero duplicate audit) and
+    the "two genuinely overlapping transactions" test (real Postgres
+    connections, a beforeInsert barrier placed before the candidate's FOR UPDATE
+    lock so both transactions genuinely rendezvous before either can win or
+    lose the row lock; exactly one decision/source/source_version row, exactly
+    one replayed: false and one replayed: true, exactly one audit row)
+  - transactional rollback and required-audit behavior: proved by the
+    integration-spec required-audit-prepare-rejection test and the synchronous-
+    publish-throw/publish-rejection tests (zero decision/source/source_version
+    rows and candidate_status still needs_gk_review after rollback in all three
+    cases) and by the smoke verifier's transaction_and_audit_atomicity check
+    (decision, source, source_version, and audit inserts all reached, then all
+    rolled back together by a forced exception)
+  - no unauthorized data enters persistence or audit: proved by the audit
+    metadata exact-twelve-key check (schema-contract, boundary, and smoke-verifier
+    tests), the NOT metadata ? 'storage_uri' / NOT metadata ? 'signed_url'
+    CHECK-enforced exclusions (catalog verifier AUDIT_METADATA_BRANCH check), and
+    the NO_RAW_CONTENT_COLUMN catalog check across all three P1-08 tables
+
+diff_checks: TOOL_VERIFIED
+  - git diff --check: clean (no whitespace errors)
+  - git diff --cached --check: clean (nothing staged before the commit below)
+  - complete diff inspected: three modified files, all additive only -
+    Backend/kai/config/kaiSprint2Config.js (+15 lines: two new exported
+    functions), Backend/kai/db/kaiIntakeQueries.js (+132 lines: six new exported
+    functions), package.json (+1 line: one new script entry) - plus sixteen new
+    untracked files (two migrations, one repository, one service, eight
+    scripts/docs, four test specs). No P1-02 through P1-07 or Gate A migration,
+    rollback, runner, verifier, smoke, repository, service, or runbook file was
+    edited. No route, listener, UI, scheduler, startup-composition, Current
+    State, or Implementation Baseline file was touched. No evidence, claim,
+    source-locator, or graph-relationship identifier appears anywhere in the
+    diff.
+
+final_commit_hash: report after commit; a commit cannot contain its own SHA
+
+final_worktree_and_staged_state: report after commit
+
+prohibited_actions_not_performed:
+  - no UI, route, production wiring, source locator, graph relationship,
+    evidence, claim, assistant tool, generation, cloud configuration,
+    deployment, feature enablement, real-client-data handling, P1-09, or P2 work
+    was implemented
+  - neither KAI_SPRINT2_ENABLED nor KAI_SOURCE_PROMOTION_ENABLED was enabled
+  - no accepted P1-07 contract element (VAL-KAI-P1-07-001, identity keys,
+    server-pinned fields, audit contract/operation/validator-key names, the
+    intake_source_candidates/review_queue_items migration files themselves) was
+    changed beyond the disclosed additive ALTER TABLE statements in P1-08's own
+    forward migration
+  - no fetch, pull, push, merge, rebase, reset, cherry-pick, history rewrite,
+    deployment, production/shared database access, or real client data access
+    was performed
+  - did not begin another package, propose another prompt, or continue past this
+    bounded implementation
+
+user_confirmed_starting_assumptions:
+  - the owner-supplied bounded-implementation scope and required-behavior
+    specification described in the originating prompt, none of which was
+    independently re-derived from a quoted governing source during this turn
+    beyond what fresh repository/test inspection above established
+
+not_confirmed:
+  deployment: NOT_CONFIRMED
+  production_or_shared_database_state: NOT_CONFIRMED
+  feature_enablement: NOT_CONFIRMED
+  production_runtime_composition: NOT_CONFIRMED
+  real_client_data_behavior: NOT_CONFIRMED
+```
