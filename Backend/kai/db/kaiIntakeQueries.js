@@ -437,6 +437,182 @@ export async function getScopedSourceVersionById(
  * intake_source_candidate_id). Locks the row FOR UPDATE. Additive: no other exported
  * query in this module is changed.
  */
+/**
+ * P2-01 narrow, tenant-scoped authoritative lookup of an existing P1-08
+ * `kai.intake_promotion_decisions` row by (organization_id, source_version_id).
+ * Never locked FOR UPDATE: P2-01 never mutates this table, only reads its already-
+ * committed promotion facts. Additive: no other exported query in this module is
+ * changed.
+ */
+export async function getScopedPromotionDecisionBySourceVersionId(
+  { organizationId, sourceVersionId },
+  db = pool,
+) {
+  const { rows } = await db.query(
+    `SELECT intake_promotion_decision_id, organization_id, intake_source_candidate_id,
+            review_queue_item_id, reviewed_source_type, decision_status, source_id,
+            source_version_id, created_at, decided_at, promoted_at
+       FROM kai.intake_promotion_decisions
+      WHERE organization_id = $1
+        AND source_version_id = $2`,
+    [organizationId, sourceVersionId],
+  );
+  return rows[0] || null;
+}
+
+/**
+ * P2-01 narrow, tenant-scoped authoritative lookup of an existing P1-05
+ * `kai.intake_sensitivity_profiles` row by (organization_id,
+ * intake_sensitivity_profile_id), reading exactly the columns P1-08's own
+ * `readScopedSensitivityProfile` already reads against the same table. Added here
+ * so both the P1-08 and P2-01 repositories can share one exported lookup rather
+ * than duplicating the query text; the P1-08 repository file itself is not
+ * modified. Never locked FOR UPDATE: P2-01 never mutates this table. Additive: no
+ * other exported query in this module is changed.
+ */
+export async function getScopedSensitivityProfileById(
+  { organizationId, intakeSensitivityProfileId },
+  db = pool,
+) {
+  const { rows } = await db.query(
+    `SELECT organization_id::text AS organization_id,
+            intake_sensitivity_profile_id::text AS intake_sensitivity_profile_id,
+            intake_file_id::text AS intake_file_id,
+            file_profile_id::text AS file_profile_id,
+            data_dictionary_id::text AS data_dictionary_id,
+            profile_canonical_sha256,
+            human_review_required,
+            public_use_allowed,
+            funder_use_allowed,
+            llm_processing_allowed,
+            product_learning_allowed,
+            retention_posture
+       FROM kai.intake_sensitivity_profiles
+      WHERE organization_id = $1
+        AND intake_sensitivity_profile_id = $2`,
+    [organizationId, intakeSensitivityProfileId],
+  );
+  return rows[0] || null;
+}
+
+/**
+ * P2-01 narrow, tenant-scoped authoritative lookup of an existing P1-04
+ * `kai.data_dictionaries` row by (organization_id, data_dictionary_id). Never
+ * locked FOR UPDATE: P2-01 never mutates this table. Additive: no other exported
+ * query in this module is changed.
+ */
+export async function getScopedDataDictionaryById(
+  { organizationId, dataDictionaryId },
+  db = pool,
+) {
+  const { rows } = await db.query(
+    `SELECT data_dictionary_id, organization_id, intake_file_id, file_profile_id,
+            profile_canonical_sha256, dictionary_status, created_at
+       FROM kai.data_dictionaries
+      WHERE organization_id = $1
+        AND data_dictionary_id = $2`,
+    [organizationId, dataDictionaryId],
+  );
+  return rows[0] || null;
+}
+
+/**
+ * P2-01 narrow, tenant-scoped authoritative read of every committed
+ * `kai.data_dictionary_fields` row for one dictionary, ordered deterministically
+ * by profile_field_key ASC so evidence composition is reproducible run to run.
+ * Reads only the three columns P2-01's deterministic evidence statements are
+ * built from - never a sample value, raw content, or free-text column. Never
+ * locked FOR UPDATE: P2-01 never mutates this table. Additive: no other exported
+ * query in this module is changed.
+ */
+export async function getScopedDataDictionaryFieldsByDictionaryId(
+  { organizationId, dataDictionaryId },
+  db = pool,
+) {
+  const { rows } = await db.query(
+    `SELECT data_dictionary_field_id, profile_field_key, data_type
+       FROM kai.data_dictionary_fields
+      WHERE organization_id = $1
+        AND data_dictionary_id = $2
+      ORDER BY profile_field_key ASC`,
+    [organizationId, dataDictionaryId],
+  );
+  return rows;
+}
+
+/**
+ * P2-01 narrow, tenant-scoped authoritative lookup of an existing
+ * `kai.evidence_items` row by its idempotency identity (organization_id,
+ * source_version_id, statement_fingerprint), used to distinguish a fresh insert
+ * from an authoritative replay after a losing conditional insert attempt.
+ * Additive: no other exported query in this module is changed.
+ */
+export async function getScopedEvidenceItemByStatementFingerprint(
+  { organizationId, sourceVersionId, statementFingerprint },
+  db = pool,
+) {
+  const { rows } = await db.query(
+    `SELECT evidence_item_id, organization_id, source_version_id, source_locator_id,
+            evidence_type, data_class, statement, statement_fingerprint,
+            evidence_review_status, internal_only, public_use_allowed,
+            funder_use_allowed, llm_processing_allowed, product_learning_allowed,
+            created_by, created_by_type, created_at
+       FROM kai.evidence_items
+      WHERE organization_id = $1
+        AND source_version_id = $2
+        AND statement_fingerprint = $3`,
+    [organizationId, sourceVersionId, statementFingerprint],
+  );
+  return rows[0] || null;
+}
+
+/**
+ * P2-01 narrow, tenant-scoped authoritative lookup of an existing
+ * `kai.source_locators` row by its idempotency identity (organization_id,
+ * source_version_id, locator_fingerprint), used to distinguish a fresh insert
+ * from an authoritative replay after a losing conditional insert attempt.
+ * Additive: no other exported query in this module is changed.
+ */
+export async function getScopedSourceLocatorByFingerprint(
+  { organizationId, sourceVersionId, locatorFingerprint },
+  db = pool,
+) {
+  const { rows } = await db.query(
+    `SELECT source_locator_id, organization_id, source_version_id, locator_type,
+            coordinates, locator_fingerprint, created_by_type, created_at
+       FROM kai.source_locators
+      WHERE organization_id = $1
+        AND source_version_id = $2
+        AND locator_fingerprint = $3`,
+    [organizationId, sourceVersionId, locatorFingerprint],
+  );
+  return rows[0] || null;
+}
+
+/**
+ * P2-01 narrow, tenant-scoped authoritative lookup by the 'evidence_review'
+ * idempotency identity (organization_id + queue_type + target_object_type +
+ * target_object_id), mirroring the identical P1-06/P1-07 lookup pattern exactly.
+ * Additive: no other exported query in this module is changed.
+ */
+export async function getScopedEvidenceReviewQueueItemByEvidenceItemId(
+  { organizationId, evidenceItemId },
+  db = pool,
+) {
+  const { rows } = await db.query(
+    `SELECT review_queue_item_id, organization_id, queue_type, target_object_type,
+            target_object_id, priority, queue_status, review_status, assigned_to,
+            due_at, summary, required_action, queue_metadata, created_at, updated_at
+       FROM kai.review_queue_items
+      WHERE organization_id = $1
+        AND queue_type = 'evidence_review'
+        AND target_object_type = 'evidence_item'
+        AND target_object_id = $2`,
+    [organizationId, evidenceItemId],
+  );
+  return rows[0] || null;
+}
+
 export async function getScopedSourceVersionByCandidateIdentity(
   { organizationId, intakeSourceCandidateId },
   db = pool,

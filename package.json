@@ -20,6 +20,7 @@
     "verify:kai-sprint2-p1-06-review-queue": "node scripts/kai-sprint2-p1-06-review-queue-local-postgres.js",
     "verify:kai-sprint2-p1-07-source-candidate": "node scripts/kai-sprint2-p1-07-source-candidate-local-postgres.js",
     "verify:kai-sprint2-p1-08-source-promotion": "node scripts/kai-sprint2-p1-08-source-promotion-local-postgres.js",
+    "verify:kai-sprint2-p2-01-evidence-lineage": "node scripts/kai-sprint2-p2-01-evidence-lineage-local-postgres.js",
     "verify:kai-sprint2-pass2-api": "node scripts/kai-sprint2-pass2-admin-metadata-intake-api-verifier.js",
     "backfill:surprises": "node scripts/backfillDailySurprises.js",
     "prestart": "npm run backfill:surprises || true",

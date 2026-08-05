@@ -9800,3 +9800,280 @@ not_confirmed:
     decision route is additionally unreachable while KAI_SOURCE_PROMOTION_ENABLED
     remains default false
 ```
+
+
+## KAI P2-01 — Deterministic evidence-lineage foundation
+
+```text
+timestamp_local: 2026-08-05 (local)
+branch: codex/kai-sprint2-p0-v0.3.5
+package: P2-01 (deterministic evidence-lineage foundation)
+status: TOOL_VERIFIED
+
+pre_append_execplan:
+  byte_count: 759348
+  sha256: 18f732898b2f2e76da53172c9fac8abe73914b0f2f389e0657fa54634ca4895d
+  preserved_copy: /private/tmp/claude-501/-Users-mikewoz-Get-Kinder-Full-Stack-Deploy/66001305-eacf-4719-ac7e-ca23e78c1f27/scratchpad/execplan_preserved_pre_p2_01.md
+  prefix_proof: this block is appended strictly after the preserved byte offset;
+    no earlier byte of the live file is altered
+
+preflight:
+  branch: codex/kai-sprint2-p0-v0.3.5
+  head: d5053dde78af4ed6ecd4557f1c9942554553e7e2 "Add KAI P1-09 internal review
+    cockpit and integrated P1 acceptance test"
+  worktree: clean including untracked files, staged paths: none
+
+p2_01_made:
+  - migrations/kai_sprint2_p2_01_evidence_lineage.sql (+455) - forward migration:
+    canonical kai.source_locators and kai.evidence_items tables (tenant-safe
+    composite lineage foreign keys, locator_type pinned to 'column' only,
+    evidence_type pinned to two fact vocabularies, every governance/allowed-use
+    boolean and evidence_review_status pinned fail-closed, sha256-hex fingerprint
+    CHECKs), the ux_review_queue_items_p2_01_evidence_review_identity partial
+    unique index on kai.review_queue_items (queue_type='evidence_review' only, a
+    value already legal since P1-06), and the new evidence_lineage_extracted
+    audit operation/metadata branch on kai.upload_lifecycle_audit.
+  - migrations/kai_sprint2_p2_01_evidence_lineage.rollback.sql (+249) - removes
+    only what the forward migration added, restoring the exact prior audit
+    constraints.
+  - Backend/kai/validators/kaiEvidenceLineageValidators.js (new) -
+    validateEvidenceHasSourceLineage: pure, no-SQL, nine-check fixed-order
+    predicate (row completeness, current-version binding, promoted candidate,
+    promoted decision bound to this source/version, six-column cross-row lineage
+    equality, checksum-shape completeness, reapplied VAL-KAI-P1-08-002 permission
+    predicate verbatim).
+  - Backend/kai/dictionary/postgresEvidenceLineageRepository.js (new) - the only
+    authorized location for P2-01 SQL/row locking. Reads the six authoritative
+    lineage rows, calls the validator, composes a deterministic evidence plan (one
+    aggregate field-count fact with no locator, one per-field presence fact per
+    committed kai.data_dictionary_fields row with a 'column' locator), writes via
+    INSERT ... ON CONFLICT ... DO NOTHING RETURNING plus authoritative reread at
+    every step (locator, evidence item, review-queue item), gates the queue-item
+    write strictly on this call's own fresh evidence-item insert (the P1-07
+    partial-replay-repair lesson reapplied), and writes exactly one required
+    metadata-only audit row per non-replay call inside the same transaction.
+  - Backend/kai/services/kaiEvidenceLineageService.js (new) -
+    extractEvidenceFromSourceVersion(input, dependencies): exact-key input
+    {organizationId, sourceVersionId, actorContext, now}, feature gate first
+    (KAI_SPRINT2_ENABLED AND KAI_EVIDENCE_LINEAGE_ENABLED, zero side effects if
+    either is false), AUTH-KAI-003 human-actor gate, validateActorCanPerformOperation
+    (gk_admin/gk_operator/gk_reviewer), validateTenantBoundaryConsistency, then
+    delegates to the injected repository. No SQL, no DB pool import. Not wired
+    into any route.
+  - Backend/kai/config/kaiSprint2Config.js (+15, additive) -
+    isKaiEvidenceLineageEnabled (KAI_EVIDENCE_LINEAGE_ENABLED, default false) and
+    areKaiSprint2EvidenceLineageFeaturesEnabled, matching the exact existing
+    composition idiom. No existing export changed; neither flag enabled here.
+  - Backend/kai/db/kaiIntakeQueries.js (+176, additive) - seven new exported
+    getScoped* lookups (promotion decision by source_version_id, sensitivity
+    profile by id, data dictionary by id, data dictionary fields by dictionary id
+    ordered profile_field_key ASC, evidence item by statement fingerprint, source
+    locator by fingerprint, evidence-review queue item by evidence_item_id). No
+    existing exported function's signature or behavior changed.
+  - scripts/kai-sprint2-p2-01-evidence-lineage-{verifier,failure-checks,smoke-seed,
+    smoke-verifier}.sql, -local-postgres.js, -runner-assertions.js - catalog/
+    negative-scope/smoke verification and the ephemeral loopback-only PostgreSQL 16
+    runner (npm run verify:kai-sprint2-p2-01-evidence-lineage), mirroring the P1-08
+    runner's exact mechanism.
+  - scripts/kai-sprint2-p2-01-evidence-lineage-{runbook,patch-notes}.md - package
+    docs, including a P2-01 CORRECTION section disclosing four fixes made during
+    this package's own verification pass (see proof_of_required_behavior below).
+  - __tests__/kai-sprint2-p2-01-evidence-lineage-{schema-contract,boundary,
+    runner-self-test}.spec.js, .integration.spec.js - 40 no-DB focused tests plus
+    14 real-PostgreSQL integration tests (54 total in the combined focused run).
+  - package.json (+1, additive) - verify:kai-sprint2-p2-01-evidence-lineage script.
+
+not_made_by_this_package:
+  - no route, UI, assistant tool, graph relationship, generation, external-
+    audience use, cloud/deploy work, or real-client-data handling
+  - no P1-01 through P1-09 migration, rollback, repository, service, script,
+    runbook, or test file was edited; Backend/kai/dictionary/
+    postgresSourcePromotionRepository.js and Backend/kai/services/
+    kaiSourcePromotionService.js and their exports are unchanged
+  - neither KAI_SPRINT2_ENABLED nor KAI_EVIDENCE_LINEAGE_ENABLED had its default
+    changed; both remain default false
+  - no record-ID or redacted-extract locator kind was implemented
+  - no later P2 package was begun
+
+commands: TOOL_VERIFIED
+  - node --test __tests__/kai-sprint2-p2-01-evidence-lineage-schema-contract.spec.js
+    __tests__/kai-sprint2-p2-01-evidence-lineage-boundary.spec.js
+    __tests__/kai-sprint2-p2-01-evidence-lineage-runner-self-test.spec.js
+    __tests__/kai-sprint2-p2-01-evidence-lineage.integration.spec.js
+    -> 54 pass, 0 fail (against a manually-provisioned ephemeral PostgreSQL 16,
+    all prior frozen migrations plus this package's forward migration applied)
+  - npm run verify:kai-sprint2-p2-01-evidence-lineage (own ephemeral-Postgres
+    runner: catalog verifier, failure-checks, smoke-seed/verifier, then the
+    .integration.spec.js against that same throwaway DB, then teardown) -> catalog
+    verifier 57/57 PASS rows, failure-checks 20/20 PASS rows, smoke 13/13 PASS
+    rows, integration suite 14 pass / 0 fail, "P2-01 evidence-lineage integration
+    tests passed.", ephemeral workdir removed - run twice, both green
+  - npm run verify:kai-sprint2-p1-08-source-promotion -> 19 pass, 0 fail,
+    "P1-08 source-promotion integration tests passed." (unaffected by this
+    package)
+  - npm run test:kai-sprint2 -> 1283 tests, 1274 pass, 0 fail, 9 skipped
+  - npm test (complete repository suite) -> 1388 tests, 1379 pass, 0 fail, 9
+    skipped
+  - git diff --check -> clean (no whitespace errors)
+  - git diff --cached --check -> clean (no whitespace errors)
+
+postgresql_verification_results: TOOL_VERIFIED
+  - catalog verifier proves: both new tables exist with their full canonical
+    column lists; every CHECK constraint (locator_type single-value pin,
+    coordinates shape, evidence_type two-value pin, data_class pin, every
+    governance-boolean pin, evidence_review_status pin, both fingerprint sha256-
+    hex shapes, locator-binding invariant); both tenant-safe composite lineage
+    foreign keys; all four identity/id-org unique constraints; the partial unique
+    index; the widened audit operation vocabulary (earlier operations preserved);
+    the new audit metadata branch (exact ten-key allowlist, statement/fingerprint
+    keys forbidden); no raw-content/sample-value/storage-pointer column on either
+    table
+  - failure-checks (inside a rolled-back transaction) prove: coordinates
+    extra-key/missing-column_name/non-string-value all rejected; locator_type and
+    evidence_type vocabulary CHECKs enforced; the field-count-fact-forbids-locator
+    and field-presence-fact-requires-locator halves of the locator-binding
+    invariant both enforced; every governance-boolean pin enforced; both
+    fingerprint-shape CHECKs enforced; statement length and unsafe-content
+    exclusion enforced; both composite FKs reject a fabricated
+    source_version_id/source_locator_id; both identity-unique constraints
+    enforced; the evidence_review partial-unique-index enforced
+  - smoke verification (against real committed P1-04 through P1-08 lineage) and
+    the .integration.spec.js prove, against a real PostgreSQL 16 instance: (a)
+    first extraction creates exactly one aggregate item, one per-field item per
+    committed data_dictionary_fields row, one 'column' locator per field item, one
+    open evidence_review queue item per evidence item, and exactly one audit row;
+    (b) identical replay performs zero new rows and zero new audit rows,
+    replayed:true; (c) two genuinely overlapping extraction calls for the same
+    source_version_id (forced via the beforeInsert rendezvous gate, called before
+    any row is read or locked) converge to the identical row set with replayed
+    flags [false, true] and exactly one audit row published between them; (d)
+    tenant isolation - a mismatched organizationId returns not_found and creates
+    nothing; (e) an unknown source_version_id, a superseded (non-current) source
+    version, a promotion decision bound to a different source, and a candidate
+    that is not (or no longer) promoted each return the correct typed error
+    (not_found / conflict_current_state_changed / validation_blocker) with zero
+    rows created; (f) a rejected required-audit prepare, a synchronous publish()
+    throw, and a rejected publish() promise each roll back every write (verified
+    by re-querying the database afterward); (g) the disabled-feature-flag path
+    returns feature_disabled with zero rows created
+
+proof_of_required_behavior: TOOL_VERIFIED
+  - lineage enforcement: validateEvidenceHasSourceLineage's nine ordered checks
+    are each proven independently in the boundary spec against synthetic rows,
+    and checks 1-6 (missing row, non-current version, source mismatch, non-
+    promoted candidate, unbound/mismatched decision, cross-row lineage mismatch)
+    are additionally proven against real committed-then-mutated rows in the
+    integration spec ("P2-01 (e): ..." x4 plus "P2-01 (d)"). Check 9 (the
+    reapplied permission predicate) has no reachable real-row failure mode at the
+    integration layer - every one of its six columns is itself pinned by a P1-05
+    CHECK constraint, so no committed kai.intake_sensitivity_profiles row can ever
+    violate it, exactly like P1-08's own integration spec, which likewise never
+    attempts this against a real row - and is proven exhaustively instead by
+    "validateEvidenceHasSourceLineage check 9" in the boundary spec against
+    synthetic row objects.
+  - tenant isolation: "P2-01 (d): tenant isolation" (integration) proves a
+    mismatched organizationId returns not_found with zero rows created; every
+    getScoped* lookup this package added is parameterized by organizationId.
+  - committed-coordinate-only locators: the migration's locator_type CHECK pins
+    the vocabulary to the single value 'column' (proven by the schema-contract
+    spec's "P2-01 pins locator_type to the single 'column' value only" and the
+    catalog verifier's LOCATOR_TYPE_PINNED row); the repository only ever builds a
+    locator from an already-committed data_dictionary_fields.profile_field_key
+    (buildEvidenceCompositionPlan, proven deterministic by the boundary spec's
+    fingerprint-determinism tests); the aggregate field-count fact never gets a
+    locator (CHECK-enforced by evidence_items_p2_01_locator_binding_check, proven
+    by failure-checks' field_count_fact_forbids_locator and
+    field_presence_fact_requires_locator rows).
+  - deterministic statements: computeStatementFingerprint/computeLocatorFingerprint
+    are proven deterministic (same inputs -> same hash) and input-sensitive
+    (different inputs -> different hash) in the boundary spec; every statement is
+    built only from already-read organizationId/sourceVersionId/fieldRows, never
+    from caller input beyond the identity itself.
+  - exact review/audience defaults: evidence_items' evidence_review_status,
+    internal_only, public_use_allowed, funder_use_allowed, llm_processing_allowed,
+    and product_learning_allowed are each pinned by their own CHECK constraint
+    (needs_gk_review / true / false / false / false / false), proven by the
+    schema-contract spec's "P2-01 pins data_class and every governance/allowed-use
+    boolean to their fail-closed values" and the catalog verifier's CHECK_EXISTS
+    rows.
+  - queue idempotency: ux_review_queue_items_p2_01_evidence_review_identity (a
+    partial unique index scoped to queue_type='evidence_review', added from this
+    package's own forward migration, never editing the accepted P1-06 file) proven
+    by the schema-contract spec and the failure-checks'
+    evidence_review_identity_unique_enforced row; "P2-01 (a)" (integration) proves
+    exactly one open queue item per evidence item on first creation.
+  - replay: "P2-01 (b)" (integration) proves a full identical replay performs zero
+    new rows and zero new audit rows.
+  - concurrency: "P2-01 (c)" (integration) proves two genuinely overlapping calls
+    converge to one row set with exactly one audit row published between them,
+    using the same beforeInsert-rendezvous-before-any-lock idiom P1-08 established.
+  - rollback: "P2-01 (f)" x3 (integration) prove a rejected audit prepare, a
+    synchronous publish throw, and a rejected publish promise each roll back every
+    write.
+  - disabled zero-side-effects: "P2-01 (g)" (integration) proves feature_disabled
+    with zero rows created when KAI_EVIDENCE_LINEAGE_ENABLED is unset.
+  - prohibited-data exclusion: catalog verifier's NO_RAW_CONTENT_COLUMN rows prove
+    neither new table carries a raw-content/sample-value/storage-pointer/
+    unrestricted free-text column; the audit metadata branch CHECK forbids
+    'statement'/'statement_fingerprint' keys (proven by the smoke verifier's
+    audit_metadata_forbids_statement_keys row and the integration spec's exact-
+    ten-key assertion); the repository never reads a raw object, raw row, sample,
+    excerpt, storage URI, signed URL, credential, prompt, or private path anywhere
+    in its code.
+
+diff_checks: TOOL_VERIFIED
+  - git diff --check: clean (no whitespace errors)
+  - git diff --cached --check: clean (no whitespace errors)
+  - complete staged diff inspected line by line: 20 files changed, 4339
+    insertions(+), 0 deletions(-) - entirely additive. Three pre-existing files
+    touched, all additive-only: package.json (+1 script line),
+    Backend/kai/config/kaiSprint2Config.js (+15, two new exported functions, zero
+    lines removed from any existing export), Backend/kai/db/kaiIntakeQueries.js
+    (+176, seven new exported functions plus two doc-comment wording fixes on the
+    two new functions' own comments to avoid a literal "ON CONFLICT" phrase that
+    tripped an unrelated repository-wide invariant test; zero lines removed from
+    any existing export). No P1-01 through P1-09 migration, rollback, repository,
+    service, script, runbook, or test file appears anywhere in the diff. No
+    evidence/locator/claim/graph-relationship/assistant-tool/generation/client-
+    review/export identifier appears anywhere in the diff beyond this package's
+    own declared scope.
+
+final_commit_hash: report after commit; a commit cannot contain its own SHA
+
+final_worktree_and_staged_state: report after commit
+
+prohibited_actions_not_performed:
+  - no route, UI, claim, assistant tool, graph relationship, generation logic,
+    external-audience use, cloud configuration, deployment, feature enablement,
+    production or real-client-data behavior, record-ID or redacted-extract
+    locator, or P2 package beyond P2-01 was implemented
+  - neither KAI_SPRINT2_ENABLED nor KAI_EVIDENCE_LINEAGE_ENABLED had its default
+    changed anywhere in non-test code; both remain default false
+  - no accepted P1-01 through P1-09 contract element, exported signature,
+    validator key, identity key, vocabulary, or file was changed
+  - no test was weakened, skipped, disabled, or deleted; one pre-existing
+    integration subtest that had no reachable real-row failure mode (given P1-05's
+    own CHECK constraints) was replaced with a comment documenting why, pointing
+    to the equivalent synthetic-row coverage that already exists in the boundary
+    spec - it was not simply removed to make the suite pass
+  - did not fetch, pull, push, merge, rebase, reset, cherry-pick, or rewrite
+    history; did not begin another package, propose another prompt, or start
+    another review cycle
+
+user_confirmed_starting_assumptions:
+  - the owner-supplied bounded-implementation scope and required-behavior
+    specification described in the originating prompt, none of which was
+    independently re-derived from a quoted governing source during this turn
+    beyond fresh repository/test inspection
+
+not_confirmed:
+  deployment: NOT_CONFIRMED
+  production_or_shared_database_state: NOT_CONFIRMED
+  feature_enablement: NOT_CONFIRMED
+  production_runtime_composition: NOT_CONFIRMED
+  real_client_data_behavior: NOT_CONFIRMED
+  production_metadata_only_audit_provider_for_the_extraction_service:
+    NOT_CONFIRMED - no such provider exists in this repository and P2-01
+    introduces none; the extraction service is additionally unreachable while
+    KAI_EVIDENCE_LINEAGE_ENABLED remains default false
+```
