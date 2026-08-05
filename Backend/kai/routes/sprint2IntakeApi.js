@@ -17,11 +17,16 @@ import {
   validateReviewQueueQuery,
   validateReviewQueueStatusRequest,
 } from "../validators/kaiSprint2RequestSchemas.js";
+import {
+  validateReviewCockpitQueueQuery,
+  validateSourceCandidateDecisionRequest,
+} from "../validators/kaiReviewCockpitRequestSchemas.js";
 
 const router = express.Router();
 let intakeServiceOverride = null;
 let intakeServicePromise = null;
 let reviewQueueServicePromise = null;
+let reviewCockpitServicePromise = null;
 
 export function sendServiceResult(res, result, successStatus = 200) {
   if (result?.ok) {
@@ -276,6 +281,25 @@ async function getReviewQueueService() {
   return reviewQueueServicePromise;
 }
 
+async function getReviewCockpitService() {
+  reviewCockpitServicePromise ||= import("../services/kaiReviewCockpitService.js");
+  return reviewCockpitServicePromise;
+}
+
+/**
+ * KAI P1-09 internal review-cockpit path identifiers. Every cockpit route requires
+ * an explicit, canonically-lowercased organization_id query parameter plus a
+ * canonically-lowercased object identifier: there is no implicit tenant scope, and
+ * no identifier is ever coerced into a different case or shape.
+ */
+function reviewCockpitIdentifiers(req = {}, parameterName) {
+  const organizationId = normalizedUuid(req.query?.organization_id);
+  const objectId = typeof req.params?.[parameterName] === "string" ? req.params[parameterName] : "";
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId)) return null;
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(objectId) || objectId !== objectId.toLowerCase()) return null;
+  return { organizationId, objectId };
+}
+
 router.use(requireKaiSprint2Enabled);
 router.use(setKaiSprint2NoStore);
 
@@ -449,6 +473,87 @@ router.post("/admin/review-queue/:reviewQueueItemId/status", async (req, res) =>
   });
 });
 
+/**
+ * KAI P1-09 internal review-cockpit routes.
+ *
+ * Internal, GK-authenticated only. These handlers contain no SQL, import no
+ * database pool, touch no `kai.*` schema object directly, and call no KAI DB
+ * helper: each one validates its request shape and then calls exactly one
+ * authorized service function, which performs its own feature gating, actor/role/
+ * tenant authorization, tenant-scoped reads, and response DTO allowlisting.
+ *
+ * All four are already behind this router's `requireKaiSprint2Enabled` gate (and
+ * the mount-level gate in index.js), so KAI_SPRINT2_ENABLED gates every one of
+ * them. The decision route additionally requires KAI_SOURCE_PROMOTION_ENABLED,
+ * enforced inside the service, which returns the canonical feature_disabled result
+ * rather than an error or a partial write when that flag is off. The three
+ * read-only routes remain available under KAI_SPRINT2_ENABLED alone.
+ */
+router.get("/admin/review-cockpit/queue", async (req, res) => {
+  const organizationId = normalizedUuid(req.query?.organization_id);
+  const queryResult = validateReviewCockpitQueueQuery(req.query);
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) || !queryResult.ok) {
+    return sendKaiError(res, "invalid_request");
+  }
+  return invokeService(res, async () => {
+    const service = await getReviewCockpitService();
+    return service.listReviewCockpitQueue({
+      ...requestContext(req, "/api/kai/sprint2/intake/admin/review-cockpit/queue"),
+      organizationId,
+      selection: queryResult.selection,
+    });
+  });
+});
+
+router.get("/admin/review-cockpit/file-profiles/:fileProfileId", async (req, res) => {
+  const identifiers = reviewCockpitIdentifiers(req, "fileProfileId");
+  if (!identifiers) return sendKaiError(res, "invalid_request");
+  return invokeService(res, async () => {
+    const service = await getReviewCockpitService();
+    return service.getReviewCockpitFileProfileDetail({
+      ...requestContext(req, "/api/kai/sprint2/intake/admin/review-cockpit/file-profiles/:fileProfileId"),
+      organizationId: identifiers.organizationId,
+      fileProfileId: identifiers.objectId,
+    });
+  });
+});
+
+router.get("/admin/review-cockpit/source-candidates/:intakeSourceCandidateId", async (req, res) => {
+  const identifiers = reviewCockpitIdentifiers(req, "intakeSourceCandidateId");
+  if (!identifiers) return sendKaiError(res, "invalid_request");
+  return invokeService(res, async () => {
+    const service = await getReviewCockpitService();
+    return service.getReviewCockpitSourceCandidateDetail({
+      ...requestContext(req, "/api/kai/sprint2/intake/admin/review-cockpit/source-candidates/:intakeSourceCandidateId"),
+      organizationId: identifiers.organizationId,
+      intakeSourceCandidateId: identifiers.objectId,
+    });
+  });
+});
+
+router.post("/admin/review-cockpit/source-candidates/:intakeSourceCandidateId/decision", async (req, res) => {
+  if (!metadataContentTypeIsSupported(req)) return sendKaiError(res, "unsupported_media_type");
+  const identifiers = reviewCockpitIdentifiers(req, "intakeSourceCandidateId");
+  if (!identifiers) {
+    return sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_or_intake_source_candidate_id")],
+    });
+  }
+  const bodyResult = validateSourceCandidateDecisionRequest(req.body);
+  if (!bodyResult.ok) {
+    return sendKaiError(res, "validation_blocker", { blockers: bodyResult.blockers });
+  }
+  return invokeService(res, async () => {
+    const service = await getReviewCockpitService();
+    return service.submitSourceCandidateDecision({
+      ...requestContext(req, "/api/kai/sprint2/intake/admin/review-cockpit/source-candidates/:intakeSourceCandidateId/decision"),
+      organizationId: identifiers.organizationId,
+      intakeSourceCandidateId: identifiers.objectId,
+      payload: requestPayload(req),
+    });
+  });
+});
+
 router.post("/admin/batches", async (req, res) => {
   const payload = requestPayload(req);
   if (!validateMutationRequestOrSend(req, res, "create_intake_batch")) return;
@@ -511,6 +616,7 @@ export const __testables = {
   validateFilePolicyBlockRequestOrSend,
   validateConfirmUploadRequestOrSend,
   validateReviewQueueStatusRequestOrSend,
+  reviewCockpitIdentifiers,
   setIntakeServiceForTest(service) {
     intakeServiceOverride = service;
     return () => {

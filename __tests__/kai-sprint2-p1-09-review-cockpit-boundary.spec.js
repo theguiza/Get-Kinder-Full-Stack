@@ -1,0 +1,693 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+
+import {
+  getReviewCockpitFileProfileDetail,
+  getReviewCockpitSourceCandidateDetail,
+  listReviewCockpitQueue,
+  submitSourceCandidateDecision,
+  __reviewCockpitServiceContract,
+} from "../Backend/kai/services/kaiReviewCockpitService.js";
+import { listReviewCockpitQueueItems } from "../Backend/kai/db/kaiReviewCockpitReadModels.js";
+import { __testables as intakeRouteTestables } from "../Backend/kai/routes/sprint2IntakeApi.js";
+import {
+  REVIEW_COCKPIT_QUEUE_TYPES,
+  encodeReviewCockpitQueueCursor,
+  validateReviewCockpitQueueQuery,
+  validateSourceCandidateDecisionRequest,
+} from "../Backend/kai/validators/kaiReviewCockpitRequestSchemas.js";
+
+const SERVICE_PATH = "Backend/kai/services/kaiReviewCockpitService.js";
+const READ_MODEL_PATH = "Backend/kai/db/kaiReviewCockpitReadModels.js";
+const ROUTE_PATH = "Backend/kai/routes/sprint2IntakeApi.js";
+const UI_PATH = "frontend/kaiReviewCockpit.jsx";
+
+const serviceSource = readFileSync(new URL(`../${SERVICE_PATH}`, import.meta.url), "utf8");
+const readModelSource = readFileSync(new URL(`../${READ_MODEL_PATH}`, import.meta.url), "utf8");
+const routeSource = readFileSync(new URL(`../${ROUTE_PATH}`, import.meta.url), "utf8");
+const uiSource = readFileSync(new URL(`../${UI_PATH}`, import.meta.url), "utf8");
+
+const ORG = "a5d17c5a-c55f-43af-9b21-fe63aafe733f";
+const OTHER_ORG = "b5d17c5a-c55f-43af-9b21-fe63aafe733f";
+const QUEUE_ITEM = "9e426ea1-2be3-4e48-b80f-9783ddbacda1";
+const OLDER_QUEUE_ITEM = "9e426ea1-2be3-4e48-b80f-9783ddbacda0";
+const FILE_PROFILE = "50000000-0000-4000-8000-000000000001";
+const INTAKE_FILE = "20000000-0000-4000-8000-000000000001";
+const DATA_DICTIONARY = "60000000-0000-4000-8000-000000000001";
+const SENSITIVITY = "80000000-0000-4000-8000-000000000001";
+const CANDIDATE = "90000000-0000-4000-8000-000000000001";
+const FINDING = "40000000-0000-4000-8000-000000000001";
+const CREATED_AT = "2026-07-15T10:00:00.000Z";
+const OLDER_CREATED_AT = "2026-07-15T09:00:00.000Z";
+const UPDATED_AT = "2026-07-15T11:00:00.000Z";
+const SHA = "a".repeat(64);
+
+const SPRINT2_ONLY = { KAI_SPRINT2_ENABLED: "true" };
+const BOTH_ENABLED = { KAI_SPRINT2_ENABLED: "true", KAI_SOURCE_PROMOTION_ENABLED: "true" };
+
+/**
+ * Sentinels for every field class the P1-09 spec forbids from any response. They are
+ * injected onto every synthetic row every read model returns, so a pass-through of a
+ * raw row anywhere would surface them.
+ */
+const forbiddenRowSentinels = Object.freeze({
+  storage_provider: "storage-provider-sentinel",
+  storage_bucket: "storage-bucket-sentinel",
+  storage_object_key: "storage-object-key-sentinel",
+  storage_uri: "storage-uri-sentinel",
+  signed_url: "signed-url-sentinel",
+  credentials: "credentials-sentinel",
+  prompt: "prompt-sentinel",
+  internal_notes: "internal-notes-sentinel",
+  raw_content: "raw-content-sentinel",
+  raw_sample: "raw-sample-sentinel",
+  sample_values: "sample-values-sentinel",
+  pii: "pii-sentinel",
+  profile: "profile-jsonb-sentinel",
+  queue_metadata: "queue-metadata-sentinel",
+  assigned_to: "assigned-to-sentinel",
+  blocked_reason: "blocked-reason-sentinel",
+  audit_metadata: "audit-metadata-sentinel",
+  created_by: "created-by-sentinel",
+});
+
+export function assertNoForbiddenFields(value) {
+  const serialized = JSON.stringify(value);
+  for (const [field, sentinel] of Object.entries(forbiddenRowSentinels)) {
+    assert.equal(serialized.includes(`"${field}"`), false, `forbidden field present: ${field}`);
+    assert.equal(serialized.includes(sentinel), false, `forbidden value present: ${sentinel}`);
+  }
+}
+
+function humanActor(overrides = {}) {
+  return {
+    actorType: "human",
+    actorUserId: "7fe568b1-5c05-4c42-bb1f-6e20de216c7b",
+    kaiRoles: ["gk_operator"],
+    organizationMemberships: [
+      { organization_id: ORG, membership_status: "active", role_name: "gk_operator" },
+    ],
+    ...overrides,
+  };
+}
+
+function queueRow(overrides = {}) {
+  return {
+    review_queue_item_id: QUEUE_ITEM,
+    organization_id: ORG,
+    queue_type: "source_candidate_review",
+    target_object_type: "intake_source_candidate",
+    target_object_id: CANDIDATE,
+    priority: "normal",
+    queue_status: "open",
+    due_at: null,
+    summary: "Review intake source-candidate stub for human classification.",
+    required_action: "Human review is required.",
+    created_at: CREATED_AT,
+    updated_at: UPDATED_AT,
+    ...forbiddenRowSentinels,
+    ...overrides,
+  };
+}
+
+function fileProfileRecord(overrides = {}) {
+  return {
+    fileProfile: {
+      file_profile_id: FILE_PROFILE,
+      organization_id: ORG,
+      intake_file_id: INTAKE_FILE,
+      parser_name: "kai_local_profiling_kernel",
+      parser_version: "1.0.0",
+      checksum: SHA,
+      profile_canonical_sha256: SHA,
+      created_at: CREATED_AT,
+      ...forbiddenRowSentinels,
+    },
+    dataDictionary: {
+      data_dictionary_id: DATA_DICTIONARY,
+      organization_id: ORG,
+      intake_file_id: INTAKE_FILE,
+      file_profile_id: FILE_PROFILE,
+      dictionary_status: "draft",
+      profile_canonical_sha256: SHA,
+      field_count: 3,
+      created_at: CREATED_AT,
+      ...forbiddenRowSentinels,
+    },
+    qualityFindings: [{
+      data_quality_finding_id: FINDING,
+      organization_id: ORG,
+      data_dictionary_id: DATA_DICTIONARY,
+      file_profile_id: FILE_PROFILE,
+      profile_field_key: "field_1",
+      finding_type: "missingness",
+      finding_status: "open",
+      finding_detail_safe: "Column has missing values in some rows.",
+      created_at: CREATED_AT,
+      ...forbiddenRowSentinels,
+    }],
+    sensitivityProfile: {
+      intake_sensitivity_profile_id: SENSITIVITY,
+      organization_id: ORG,
+      intake_file_id: INTAKE_FILE,
+      file_profile_id: FILE_PROFILE,
+      data_dictionary_id: DATA_DICTIONARY,
+      profile_canonical_sha256: SHA,
+      pii_status: "unknown",
+      minor_data_status: "unknown",
+      health_housing_justice_immigration_status: "unknown",
+      indigenous_governance_status: "unknown",
+      staff_notes_status: "unknown",
+      story_testimonial_status: "unknown",
+      small_cell_risk_status: "unknown",
+      financial_records_status: "unknown",
+      consent_basis_status: "unknown",
+      allowed_use_status: "unknown",
+      llm_processing_allowed: false,
+      product_learning_allowed: false,
+      public_use_allowed: false,
+      funder_use_allowed: false,
+      human_review_required: true,
+      retention_posture: "restricted_pending_review",
+      created_at: CREATED_AT,
+      ...forbiddenRowSentinels,
+    },
+    ...overrides,
+  };
+}
+
+function sourceCandidateRecord(overrides = {}) {
+  return {
+    sourceCandidate: {
+      intake_source_candidate_id: CANDIDATE,
+      organization_id: ORG,
+      intake_file_id: INTAKE_FILE,
+      file_profile_id: FILE_PROFILE,
+      data_dictionary_id: DATA_DICTIONARY,
+      intake_sensitivity_profile_id: SENSITIVITY,
+      profile_canonical_sha256: SHA,
+      proposed_source_type: "unknown",
+      candidate_status: "needs_gk_review",
+      created_at: CREATED_AT,
+      ...forbiddenRowSentinels,
+    },
+    reviewQueueItem: queueRow(),
+    promotionDecision: null,
+    source: null,
+    sourceVersion: null,
+    ...overrides,
+  };
+}
+
+function readDependencies(overrides = {}) {
+  return {
+    env: SPRINT2_ONLY,
+    async listReviewCockpitQueueItems() {
+      return [queueRow()];
+    },
+    async getReviewCockpitFileProfileRecord() {
+      return fileProfileRecord();
+    },
+    async getReviewCockpitSourceCandidateRecord() {
+      return sourceCandidateRecord();
+    },
+    ...overrides,
+  };
+}
+
+test("P1-09 read model: cockpit queue list is organization-scoped, canonically filtered, bounded, and keyset ordered on a unique tie-breaker", async () => {
+  let firstPage = null;
+  await listReviewCockpitQueueItems(
+    ORG,
+    {
+      limit: 25,
+      cursor: null,
+      queueTypes: ["sensitivity_review", "source_candidate_review"],
+      queueStatuses: ["open", "waiting_on_client"],
+    },
+    {
+      async query(sql, params) {
+        firstPage = { sql, params };
+        return { rows: [] };
+      },
+    },
+  );
+  assert.match(firstPage.sql, /WHERE organization_id = \$1/);
+  assert.match(firstPage.sql, /queue_type IN \(\$2, \$3\)/);
+  assert.match(firstPage.sql, /queue_status IN \(\$4, \$5\)/);
+  assert.match(firstPage.sql, /ORDER BY created_at DESC, review_queue_item_id DESC/);
+  assert.match(firstPage.sql, /LIMIT \$6/);
+  assert.doesNotMatch(firstPage.sql, /AND \(\n\s+created_at </);
+  assert.deepEqual(firstPage.params, [
+    ORG, "sensitivity_review", "source_candidate_review", "open", "waiting_on_client", 26,
+  ]);
+
+  let secondPage = null;
+  await listReviewCockpitQueueItems(
+    ORG,
+    {
+      limit: 2,
+      cursor: { created_at: CREATED_AT, review_queue_item_id: QUEUE_ITEM },
+      queueTypes: ["source_candidate_review"],
+      queueStatuses: ["open"],
+    },
+    {
+      async query(sql, params) {
+        secondPage = { sql, params };
+        return { rows: [] };
+      },
+    },
+  );
+  assert.match(secondPage.sql, /created_at < \$4/);
+  assert.match(secondPage.sql, /created_at = \$4 AND review_queue_item_id < \$5/);
+  assert.deepEqual(secondPage.params, [ORG, "source_candidate_review", "open", CREATED_AT, QUEUE_ITEM, 3]);
+});
+
+test("P1-09 read models and services contain no mutation SQL and the service imports no database pool", () => {
+  assert.doesNotMatch(readModelSource, /\bINSERT INTO\b|\bUPDATE\s+kai\.|\bDELETE FROM\b|\bTRUNCATE\b|\bALTER TABLE\b/i);
+  assert.doesNotMatch(readModelSource, /FOR UPDATE/);
+  assert.doesNotMatch(serviceSource, /\bSELECT\b|\bINSERT INTO\b|\bDELETE FROM\b/);
+  assert.doesNotMatch(serviceSource, /import\s+pool\s+from/);
+});
+
+test("P1-09 routes call authorized services only: no SQL, no pool import, no kai.* access, no KAI DB helper call", () => {
+  assert.doesNotMatch(routeSource, /import\s+pool\s+from/);
+  assert.doesNotMatch(routeSource, /kaiDb\.js|kaiIntakeQueries\.js|kaiReadModels\.js|kaiReviewCockpitReadModels\.js/);
+  assert.doesNotMatch(routeSource, /\bkai\.[a-z_]+\b/);
+  assert.doesNotMatch(routeSource, /\bSELECT\b|\bINSERT INTO\b|\bUPDATE\b|\bDELETE FROM\b/);
+  for (const path of [
+    '"/admin/review-cockpit/queue"',
+    '"/admin/review-cockpit/file-profiles/:fileProfileId"',
+    '"/admin/review-cockpit/source-candidates/:intakeSourceCandidateId"',
+    '"/admin/review-cockpit/source-candidates/:intakeSourceCandidateId/decision"',
+  ]) {
+    assert.ok(routeSource.includes(path), path);
+  }
+  assert.doesNotMatch(routeSource, /\/internal\/kai/);
+});
+
+test("P1-09 route identifiers require an explicit organization scope and a canonical lowercase object id", () => {
+  const { reviewCockpitIdentifiers } = intakeRouteTestables;
+  assert.deepEqual(
+    reviewCockpitIdentifiers({ query: { organization_id: ORG }, params: { fileProfileId: FILE_PROFILE } }, "fileProfileId"),
+    { organizationId: ORG, objectId: FILE_PROFILE },
+  );
+  for (const request of [
+    { query: {}, params: { fileProfileId: FILE_PROFILE } },
+    { query: { organization_id: "not-a-uuid" }, params: { fileProfileId: FILE_PROFILE } },
+    { query: { organization_id: ORG }, params: {} },
+    { query: { organization_id: ORG }, params: { fileProfileId: ORG.toUpperCase() } },
+    { query: { organization_id: ORG }, params: { fileProfileId: "not-a-uuid" } },
+  ]) {
+    assert.equal(reviewCockpitIdentifiers(request, "fileProfileId"), null, JSON.stringify(request));
+  }
+});
+
+test("P1-09 service: KAI_SPRINT2_ENABLED disabled returns feature_disabled with zero read-model calls on every endpoint", async () => {
+  for (const env of [{}, { KAI_SPRINT2_ENABLED: "false" }, { KAI_SOURCE_PROMOTION_ENABLED: "true" }]) {
+    const calls = [];
+    const dependencies = readDependencies({
+      env,
+      async listReviewCockpitQueueItems() { calls.push("queue"); return []; },
+      async getReviewCockpitFileProfileRecord() { calls.push("file"); return null; },
+      async getReviewCockpitSourceCandidateRecord() { calls.push("candidate"); return null; },
+      async createSourcePromotionDecision() { calls.push("decision"); return { ok: true, data: {}, error: null }; },
+    });
+    const results = [
+      await listReviewCockpitQueue({ organizationId: ORG, actorContext: humanActor(), selection: {} }, dependencies),
+      await getReviewCockpitFileProfileDetail({ organizationId: ORG, actorContext: humanActor(), fileProfileId: FILE_PROFILE }, dependencies),
+      await getReviewCockpitSourceCandidateDetail({ organizationId: ORG, actorContext: humanActor(), intakeSourceCandidateId: CANDIDATE }, dependencies),
+      await submitSourceCandidateDecision({ organizationId: ORG, actorContext: humanActor(), intakeSourceCandidateId: CANDIDATE, payload: { outcome: "rejected" } }, dependencies),
+    ];
+    for (const result of results) {
+      assert.equal(result.ok, false, JSON.stringify({ env, result }));
+      assert.equal(result.error.code, "feature_disabled");
+    }
+    assert.deepEqual(calls, []);
+  }
+});
+
+test("P1-09 service: with KAI_SPRINT2_ENABLED on and KAI_SOURCE_PROMOTION_ENABLED off, reads stay available and only the decision seam is disabled", async () => {
+  const decisionCalls = [];
+  const dependencies = readDependencies({
+    env: SPRINT2_ONLY,
+    async createSourcePromotionDecision(input) { decisionCalls.push(input); return { ok: true, data: {}, error: null }; },
+  });
+
+  const queue = await listReviewCockpitQueue({ organizationId: ORG, actorContext: humanActor(), selection: {} }, dependencies);
+  assert.equal(queue.ok, true);
+  const fileProfile = await getReviewCockpitFileProfileDetail({ organizationId: ORG, actorContext: humanActor(), fileProfileId: FILE_PROFILE }, dependencies);
+  assert.equal(fileProfile.ok, true);
+  const candidate = await getReviewCockpitSourceCandidateDetail({ organizationId: ORG, actorContext: humanActor(), intakeSourceCandidateId: CANDIDATE }, dependencies);
+  assert.equal(candidate.ok, true);
+  assert.equal(candidate.data.decision_controls_enabled, false);
+  assert.deepEqual(candidate.data.allowed_reviewed_source_types, []);
+
+  const decision = await submitSourceCandidateDecision(
+    { organizationId: ORG, actorContext: humanActor(), intakeSourceCandidateId: CANDIDATE, payload: { outcome: "rejected" } },
+    dependencies,
+  );
+  assert.equal(decision.ok, false);
+  assert.equal(decision.error.code, "feature_disabled");
+  assert.equal(decision.error.status, 403);
+  assert.deepEqual(decisionCalls, []);
+});
+
+test("P1-09 service: with both flags enabled the source-candidate detail advertises the P1-08 reviewed-source-type vocabulary", async () => {
+  const result = await getReviewCockpitSourceCandidateDetail(
+    { organizationId: ORG, actorContext: humanActor(), intakeSourceCandidateId: CANDIDATE },
+    readDependencies({ env: BOTH_ENABLED }),
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.data.decision_controls_enabled, true);
+  assert.deepEqual(
+    [...result.data.allowed_reviewed_source_types].sort(),
+    ["organization_primary_record", "organization_secondary_record", "public_record", "third_party_provided_record"],
+  );
+});
+
+test("P1-09 service: every endpoint rejects non-human actors with zero read-model calls", async () => {
+  for (const actorType of ["ai", "system", "import", "code", "generic_service"]) {
+    const calls = [];
+    const dependencies = readDependencies({
+      env: BOTH_ENABLED,
+      async listReviewCockpitQueueItems() { calls.push("queue"); return []; },
+      async getReviewCockpitFileProfileRecord() { calls.push("file"); return null; },
+      async getReviewCockpitSourceCandidateRecord() { calls.push("candidate"); return null; },
+      async createSourcePromotionDecision() { calls.push("decision"); return { ok: true, data: {}, error: null }; },
+    });
+    const actorContext = humanActor({ actorType });
+    for (const result of [
+      await listReviewCockpitQueue({ organizationId: ORG, actorContext, selection: {} }, dependencies),
+      await getReviewCockpitFileProfileDetail({ organizationId: ORG, actorContext, fileProfileId: FILE_PROFILE }, dependencies),
+      await getReviewCockpitSourceCandidateDetail({ organizationId: ORG, actorContext, intakeSourceCandidateId: CANDIDATE }, dependencies),
+      await submitSourceCandidateDecision({ organizationId: ORG, actorContext, intakeSourceCandidateId: CANDIDATE, payload: { outcome: "rejected" } }, dependencies),
+    ]) {
+      assert.equal(result.ok, false, actorType);
+      assert.equal(result.error.code, "authorization_denied", actorType);
+    }
+    assert.deepEqual(calls, []);
+  }
+});
+
+test("P1-09 service (role enforcement): only gk_admin/gk_operator/gk_reviewer with active membership in the requested organization are allowed", async () => {
+  assert.deepEqual(
+    [...__reviewCockpitServiceContract.REVIEW_COCKPIT_READ_ROLES].sort(),
+    ["gk_admin", "gk_operator", "gk_reviewer"],
+  );
+
+  for (const role of ["gk_admin", "gk_operator", "gk_reviewer"]) {
+    const result = await listReviewCockpitQueue(
+      {
+        organizationId: ORG,
+        actorContext: humanActor({
+          organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: role }],
+        }),
+        selection: {},
+      },
+      readDependencies(),
+    );
+    assert.equal(result.ok, true, role);
+  }
+
+  const deniedScenarios = [
+    humanActor({ organizationMemberships: [] }),
+    humanActor({ organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "org_viewer" }] }),
+    humanActor({ organizationMemberships: [{ organization_id: ORG, membership_status: "revoked", role_name: "gk_operator" }] }),
+    humanActor({ organizationMemberships: [{ organization_id: ORG, membership_status: "invited", role_name: "gk_operator" }] }),
+  ];
+  for (const actorContext of deniedScenarios) {
+    const calls = [];
+    const result = await listReviewCockpitQueue(
+      { organizationId: ORG, actorContext, selection: {} },
+      readDependencies({ async listReviewCockpitQueueItems() { calls.push("queue"); return []; } }),
+    );
+    assert.equal(result.ok, false, JSON.stringify(actorContext.organizationMemberships));
+    assert.equal(result.error.code, "authorization_denied");
+    assert.deepEqual(calls, []);
+  }
+});
+
+test("P1-09 service (tenant isolation): an actor with membership only in another organization is denied, and every read is scoped to the requested organization_id", async () => {
+  const crossTenantCalls = [];
+  const crossTenant = await listReviewCockpitQueue(
+    {
+      organizationId: OTHER_ORG,
+      actorContext: humanActor(),
+      selection: {},
+    },
+    readDependencies({ async listReviewCockpitQueueItems() { crossTenantCalls.push("queue"); return []; } }),
+  );
+  assert.equal(crossTenant.ok, false);
+  assert.equal(crossTenant.error.code, "authorization_denied");
+  assert.deepEqual(crossTenantCalls, []);
+
+  const scopedCalls = [];
+  await listReviewCockpitQueue(
+    { organizationId: ORG, actorContext: humanActor(), selection: {} },
+    readDependencies({
+      async listReviewCockpitQueueItems(organizationId, selection) {
+        scopedCalls.push({ organizationId, selection });
+        return [queueRow()];
+      },
+    }),
+  );
+  assert.equal(scopedCalls.length, 1);
+  assert.equal(scopedCalls[0].organizationId, ORG);
+
+  // A row belonging to another organization can never be shaped into a response.
+  const leakedRow = await listReviewCockpitQueue(
+    { organizationId: ORG, actorContext: humanActor(), selection: {} },
+    readDependencies({ async listReviewCockpitQueueItems() { return [queueRow({ organization_id: OTHER_ORG })]; } }),
+  );
+  assert.equal(leakedRow.ok, false);
+  assert.equal(leakedRow.error.code, "system_error");
+
+  for (const [reader, input] of [
+    ["getReviewCockpitFileProfileRecord", { fileProfileId: FILE_PROFILE }],
+    ["getReviewCockpitSourceCandidateRecord", { intakeSourceCandidateId: CANDIDATE }],
+  ]) {
+    const seen = [];
+    const dependencies = readDependencies({
+      [reader]: async (organizationId) => {
+        seen.push(organizationId);
+        return reader === "getReviewCockpitFileProfileRecord" ? fileProfileRecord() : sourceCandidateRecord();
+      },
+    });
+    const detail = reader === "getReviewCockpitFileProfileRecord"
+      ? await getReviewCockpitFileProfileDetail({ organizationId: ORG, actorContext: humanActor(), ...input }, dependencies)
+      : await getReviewCockpitSourceCandidateDetail({ organizationId: ORG, actorContext: humanActor(), ...input }, dependencies);
+    assert.equal(detail.ok, true, reader);
+    assert.deepEqual(seen, [ORG], reader);
+  }
+});
+
+test("P1-09 DTO allowlists: no raw content, storage location, object key, signed URL, credential, prompt, internal note, or unrestricted audit metadata reaches any response", async () => {
+  const dependencies = readDependencies({ env: BOTH_ENABLED });
+
+  const queue = await listReviewCockpitQueue({ organizationId: ORG, actorContext: humanActor(), selection: {} }, dependencies);
+  assert.equal(queue.ok, true);
+  assertNoForbiddenFields(queue);
+  assert.deepEqual(Object.keys(queue.data.items[0]).sort(), [
+    "created_at", "due_at", "organization_id", "priority", "queue_status", "queue_type",
+    "required_action", "review_queue_item_id", "summary", "target_object_id",
+    "target_object_type", "updated_at",
+  ]);
+
+  const fileProfile = await getReviewCockpitFileProfileDetail({ organizationId: ORG, actorContext: humanActor(), fileProfileId: FILE_PROFILE }, dependencies);
+  assert.equal(fileProfile.ok, true);
+  assertNoForbiddenFields(fileProfile);
+  assert.deepEqual(Object.keys(fileProfile.data).sort(), [
+    "allowed_use_restrictions", "data_dictionary", "file_profile", "quality_findings",
+    "read_only", "sensitivity_posture",
+  ]);
+  assert.deepEqual(Object.keys(fileProfile.data.file_profile).sort(), [
+    "checksum", "created_at", "file_profile_id", "intake_file_id", "organization_id",
+    "parser_name", "parser_version", "profile_canonical_sha256",
+  ]);
+
+  const candidate = await getReviewCockpitSourceCandidateDetail({ organizationId: ORG, actorContext: humanActor(), intakeSourceCandidateId: CANDIDATE }, dependencies);
+  assert.equal(candidate.ok, true);
+  assertNoForbiddenFields(candidate);
+  assert.deepEqual(Object.keys(candidate.data.review_queue_item).sort(), [
+    "organization_id", "queue_status", "queue_type", "review_queue_item_id",
+    "review_status", "target_object_id", "target_object_type",
+  ]);
+});
+
+test("P1-09 DTO allowlists: an unsafe quality-finding detail is refused rather than emitted", async () => {
+  const record = fileProfileRecord();
+  record.qualityFindings[0].finding_detail_safe = "See https://example.test/leak for the api_key";
+  const result = await getReviewCockpitFileProfileDetail(
+    { organizationId: ORG, actorContext: humanActor(), fileProfileId: FILE_PROFILE },
+    readDependencies({ async getReviewCockpitFileProfileRecord() { return record; } }),
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "system_error");
+});
+
+test("P1-09 file-profile review is read-only: the package exposes no file-profile mutation service, route, or state vocabulary", () => {
+  assert.doesNotMatch(serviceSource, /export async function (?:update|approve|reject|resolve|set|mark|delete)[A-Za-z]*FileProfile/);
+  assert.doesNotMatch(serviceSource, /file_profile_review_status|file_profile_approval|file_profile_eligibility/);
+  assert.doesNotMatch(routeSource, /review-cockpit\/file-profiles\/:fileProfileId\/[a-z-]+/);
+  const fileProfileRoutes = routeSource.match(/router\.[a-z]+\("\/admin\/review-cockpit\/file-profiles[^"]*"/g) || [];
+  assert.deepEqual(fileProfileRoutes, [
+    'router.get("/admin/review-cockpit/file-profiles/:fileProfileId"',
+  ]);
+  // The only mutating cockpit route is the source-candidate decision route.
+  const cockpitPosts = routeSource.match(/router\.post\("\/admin\/review-cockpit[^"]*"/g) || [];
+  assert.deepEqual(cockpitPosts, [
+    'router.post("/admin/review-cockpit/source-candidates/:intakeSourceCandidateId/decision"',
+  ]);
+});
+
+test("P1-09 queue reads never invoke, import, or imply a promotion call", () => {
+  const listBody = serviceSource.match(/export async function listReviewCockpitQueue\([\s\S]*?\n}\n/)?.[0];
+  const fileBody = serviceSource.match(/export async function getReviewCockpitFileProfileDetail\([\s\S]*?\n}\n/)?.[0];
+  const candidateBody = serviceSource.match(/export async function getReviewCockpitSourceCandidateDetail\([\s\S]*?\n}\n/)?.[0];
+  for (const body of [listBody, fileBody, candidateBody]) {
+    assert.ok(body);
+    assert.doesNotMatch(body, /createSourcePromotionDecision/);
+  }
+  // The P1-08 decision service is resolved exactly once, and invoked exactly once,
+  // in the whole module - inside submitSourceCandidateDecision only.
+  assert.equal(
+    (serviceSource.match(/const decide = deps\.createSourcePromotionDecision \|\| createSourcePromotionDecision;/g) || []).length,
+    1,
+  );
+  assert.equal((serviceSource.match(/await decide\(/g) || []).length, 1);
+  const decisionBody = serviceSource.match(/export async function submitSourceCandidateDecision\([\s\S]*?\n}\n/)?.[0];
+  assert.ok(decisionBody);
+  assert.match(decisionBody, /const decide = deps\.createSourcePromotionDecision/);
+});
+
+test("P1-09 decision seam: passes the request through to P1-08 unchanged and never retries or coerces a conflict", async () => {
+  const calls = [];
+  const dependencies = readDependencies({
+    env: BOTH_ENABLED,
+    now: () => Date.parse("2026-08-05T12:00:00.000Z"),
+    async createSourcePromotionDecision(input, injected) {
+      calls.push({ input, injected });
+      return { ok: false, data: null, error: { code: "conflict_current_state_changed", status: 409 } };
+    },
+  });
+
+  const result = await submitSourceCandidateDecision(
+    { organizationId: ORG, actorContext: humanActor(), intakeSourceCandidateId: CANDIDATE, payload: { outcome: "promoted", reviewed_source_type: "public_record" } },
+    dependencies,
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "conflict_current_state_changed");
+  assert.equal(result.error.status, 409);
+  assert.equal(calls.length, 1, "a conflict must never trigger a second mutation attempt");
+  assert.deepEqual(Object.keys(calls[0].input).sort(), [
+    "actorContext", "intakeSourceCandidateId", "now", "organizationId", "outcome", "reviewedSourceType",
+  ]);
+  assert.equal(calls[0].input.outcome, "promoted");
+  assert.equal(calls[0].input.reviewedSourceType, "public_record");
+  assert.equal(calls[0].input.now, "2026-08-05T12:00:00.000Z");
+});
+
+test("P1-09 decision seam: non-promoted outcomes forward no reviewedSourceType at all", async () => {
+  for (const outcome of ["needs_more_information", "rejected"]) {
+    const calls = [];
+    const result = await submitSourceCandidateDecision(
+      { organizationId: ORG, actorContext: humanActor(), intakeSourceCandidateId: CANDIDATE, payload: { outcome } },
+      readDependencies({
+        env: BOTH_ENABLED,
+        async createSourcePromotionDecision(input) {
+          calls.push(input);
+          return { ok: false, data: null, error: { code: "not_found", status: 404 } };
+        },
+      }),
+    );
+    assert.equal(result.ok, false);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].outcome, outcome);
+    assert.equal("reviewedSourceType" in calls[0], false, outcome);
+  }
+});
+
+test("P1-09 request validators: closed query allowlist, canonical filters, bounded limit, and round-trippable cursor", () => {
+  assert.deepEqual(REVIEW_COCKPIT_QUEUE_TYPES, [
+    "intake_file_review", "sensitivity_review", "source_candidate_review",
+  ]);
+
+  assert.equal(validateReviewCockpitQueueQuery({ organization_id: ORG }).ok, true);
+  assert.equal(validateReviewCockpitQueueQuery({ organization_id: ORG, limit: "25" }).ok, true);
+  assert.equal(validateReviewCockpitQueueQuery({ organization_id: ORG, limit: "26" }).ok, false);
+  assert.equal(validateReviewCockpitQueueQuery({ organization_id: ORG, limit: "0" }).ok, false);
+  assert.equal(validateReviewCockpitQueueQuery({ organization_id: ORG, limit: 25 }).ok, false);
+  assert.equal(validateReviewCockpitQueueQuery({ organization_id: ORG, unknown_key: "x" }).ok, false);
+  assert.equal(validateReviewCockpitQueueQuery({ organization_id: ORG, queue_type: "evidence_review" }).ok, false);
+  assert.equal(validateReviewCockpitQueueQuery({ organization_id: ORG, queue_status: "approved" }).ok, false);
+  assert.equal(validateReviewCockpitQueueQuery({ organization_id: ORG, queue_type: ["a", "b"] }).ok, false);
+  assert.equal(validateReviewCockpitQueueQuery({ organization_id: ORG, cursor: "not-base64url!" }).ok, false);
+
+  const token = encodeReviewCockpitQueueCursor({ created_at: OLDER_CREATED_AT, review_queue_item_id: OLDER_QUEUE_ITEM });
+  const decoded = validateReviewCockpitQueueQuery({ organization_id: ORG, cursor: token });
+  assert.equal(decoded.ok, true);
+  assert.deepEqual(decoded.selection.cursor, { created_at: OLDER_CREATED_AT, review_queue_item_id: OLDER_QUEUE_ITEM });
+  assert.throws(() => encodeReviewCockpitQueueCursor({ created_at: OLDER_CREATED_AT }), TypeError);
+});
+
+test("P1-09 request validators: the decision body allowlist mirrors the P1-08 outcome/reviewed-source-type rule", () => {
+  assert.equal(validateSourceCandidateDecisionRequest({ outcome: "needs_more_information" }).ok, true);
+  assert.equal(validateSourceCandidateDecisionRequest({ outcome: "rejected" }).ok, true);
+  assert.equal(validateSourceCandidateDecisionRequest({ outcome: "promoted", reviewed_source_type: "public_record" }).ok, true);
+
+  for (const payload of [
+    null,
+    {},
+    { outcome: "decided" },
+    { outcome: "promoted" },
+    { outcome: "rejected", reviewed_source_type: "public_record" },
+    { outcome: "needs_more_information", reviewed_source_type: "public_record" },
+    { outcome: "rejected", extra: "x" },
+    { outcome: ["rejected"] },
+    { outcome: { value: "rejected" } },
+    { outcome: null },
+    { outcome: "promoted", reviewed_source_type: "Public Record" },
+  ]) {
+    const result = validateSourceCandidateDecisionRequest(payload);
+    assert.equal(result.ok, false, JSON.stringify(payload));
+    assert.equal(result.blockers.length, 1);
+    assert.equal(result.blockers[0].severity, "blocker");
+  }
+});
+
+test("P1-09 pagination determinism: a full page emits a next_cursor bound to the unique review_queue_item_id tie-breaker", async () => {
+  const rows = [
+    queueRow({ review_queue_item_id: QUEUE_ITEM, created_at: CREATED_AT }),
+    queueRow({ review_queue_item_id: OLDER_QUEUE_ITEM, created_at: CREATED_AT }),
+    queueRow({ review_queue_item_id: "9e426ea1-2be3-4e48-b80f-9783ddbacda2", created_at: OLDER_CREATED_AT }),
+  ];
+  const result = await listReviewCockpitQueue(
+    { organizationId: ORG, actorContext: humanActor(), selection: { limit: 2 } },
+    readDependencies({ async listReviewCockpitQueueItems() { return rows; } }),
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.data.items.length, 2);
+  const decoded = JSON.parse(Buffer.from(result.data.pagination.next_cursor, "base64url").toString("utf8"));
+  assert.deepEqual(decoded, { created_at: CREATED_AT, review_queue_item_id: OLDER_QUEUE_ITEM });
+
+  const lastPage = await listReviewCockpitQueue(
+    { organizationId: ORG, actorContext: humanActor(), selection: { limit: 25 } },
+    readDependencies({ async listReviewCockpitQueueItems() { return rows; } }),
+  );
+  assert.equal(lastPage.data.pagination.next_cursor, null);
+});
+
+test("P1-09 introduces no evidence, locator, claim, graph, assistant-tool, generation, export, or client-facing surface", () => {
+  for (const source of [serviceSource, readModelSource, uiSource]) {
+    assert.doesNotMatch(source, /\b(?:evidence|locator|claim|graph_relationship|assistant_tool|generateContent|funder_export|public_export)\b/i);
+  }
+  assert.doesNotMatch(uiSource, /client[_-]review|clientPortal/i);
+});
+
+test("P1-09 UI hides the decision controls when the promotion flag is off and never fetches a database directly", () => {
+  assert.match(uiSource, /if \(!detail\?\.decision_controls_enabled\) \{\n\s+return <p className="kai-cockpit-note">Source-decision controls are disabled\.<\/p>;/);
+  assert.match(uiSource, /if \(featureEnabled !== true\) return null;/);
+  assert.doesNotMatch(uiSource, /\bpg\b|\bpool\b|connectionString|process\.env/);
+});

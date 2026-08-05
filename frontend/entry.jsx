@@ -14,6 +14,7 @@ import WeeksPlan from "./weeksPlan.jsx";
 import DonorDashboard from "./donorDashboard.jsx";
 import DonatePage from "./donate.jsx";
 import AdminDashboard from "./adminDashboard.jsx";
+import KaiReviewCockpit from "./kaiReviewCockpit.jsx";
 import { renderOrgPortal, renderKpiStrip } from "./orgPortal.jsx";
 import { renderOrgWorkspace } from "./orgWorkspace.jsx";
 
@@ -110,6 +111,20 @@ window.renderAdmin = (selector = "#admin-root", props = {}) => {
   root.render(
     <React.StrictMode>
       <AdminDashboard {...props} />
+    </React.StrictMode>
+  );
+};
+
+// KAI P1-09 internal review cockpit. Internal/GK-only: the component itself renders
+// nothing unless the KAI_SPRINT2_ENABLED-gated internal API answers its status
+// probe, so this entry point exposes no client-facing surface.
+window.renderKaiReviewCockpit = (selector = "#kai-review-cockpit-root", props = {}) => {
+  const el = typeof selector === "string" ? document.querySelector(selector) : selector;
+  if (!el) return;
+  const root = getOrCreateRoot(el);
+  root.render(
+    <React.StrictMode>
+      <KaiReviewCockpit {...props} />
     </React.StrictMode>
   );
 };

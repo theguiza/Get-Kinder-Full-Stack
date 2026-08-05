@@ -9483,3 +9483,320 @@ validator-key names) are unchanged, except that VAL-KAI-P1-08-001's completeness
 predicate now has two forms (initial-decision and needs_more_information-follow-up)
 to account for the review item resting at `waiting_on_client` rather than `open`
 during a follow-up transition.
+
+## P1-09 evidence - internal review cockpit and integrated P1 acceptance
+
+```text
+timestamp_local: 2026-08-05 America/Vancouver
+branch: codex/kai-sprint2-p0-v0.3.5
+starting_head: ad2f0f25e2aa7391f891579da5ca4f19498dbb5c
+package: KAI P1-09 - internal review cockpit and integrated P1 acceptance
+status: TOOL_VERIFIED
+
+pre_append_execplan:
+  byte_count: 738208
+  sha256: b889da853c88a3151380937ae7a3b6033a1535cf1ec6c80683a1f300dd36cb39
+  preserved_copy: /private/tmp/claude-501/-Users-mikewoz-Get-Kinder-Full-Stack-Deploy/e023d9b2-b093-43d7-bd25-e70deec27047/scratchpad/KAI_Sprint2_P0_ExecPlan_pre_p1_09.md
+  prefix_proof: the live file's first 738208 bytes are byte-identical to the preserved
+    copy (the preserved copy is exactly that file, taken immediately before this
+    block was appended); this block is appended strictly after that offset, after
+    the P1-08 Correction section's final line. Nothing before that offset - and in
+    particular no "Current State" or "Implementation Baseline" content - was read
+    for anything other than context or modified in any way.
+
+preflight:
+  branch: codex/kai-sprint2-p0-v0.3.5
+  head: ad2f0f2 ("Correct KAI P1-08 promotion decision to a three-outcome model")
+  worktree: clean including untracked files (verified via `git status --porcelain`
+    before any change)
+
+p1_01_through_p1_08_reopened: no - every accepted P1-01 through P1-08 file
+  (migrations/*, Backend/kai/dictionary/postgresSourcePromotionRepository.js,
+  Backend/kai/services/kaiSourcePromotionService.js,
+  Backend/kai/services/kaiSourceCandidateService.js,
+  Backend/kai/services/kaiReviewQueueService.js,
+  Backend/kai/db/kaiIntakeQueries.js, Backend/kai/db/kaiReadModels.js,
+  Backend/kai/config/kaiSprint2Config.js,
+  Backend/kai/validators/kaiSprint2RequestSchemas.js, their scripts/* and their
+  __tests__/*) is byte-identical after this package. Confirmed by
+  `git status --porcelain` and `git diff --stat` showing exactly three modified
+  files, none of which is a P1-01 through P1-08 file. No existing exported
+  function's signature or behavior was changed anywhere; every P1-08 behavior this
+  package surfaces is invoked, never reimplemented.
+
+p1_09_made:
+  - Backend/kai/db/kaiReviewCockpitReadModels.js (new file): three read-only,
+    tenant-scoped read models. listReviewCockpitQueueItems generalizes the exact
+    cursor pattern established by kaiReadModels.listIntakeFileReviewQueueItems -
+    ORDER BY created_at DESC, review_queue_item_id DESC, a strict
+    (created_at, review_queue_item_id) < (cursor.created_at,
+    cursor.review_queue_item_id) predicate applied only when a cursor is present,
+    and LIMIT n+1 - with parameter-bound canonical queue_type / queue_status
+    filters instead of a hardcoded single queue_type.
+    getReviewCockpitFileProfileRecord reads only safe P1-01/P1-04/P1-05 columns
+    (never kai.intake_file_profiles.profile, never any storage/object-key column)
+    with the quality-findings read bounded by a fixed
+    REVIEW_COCKPIT_MAX_QUALITY_FINDINGS = 50 cap.
+    getReviewCockpitSourceCandidateRecord adds no SQL at all: it composes the
+    already-accepted P1-07/P1-08 getScoped* lookups in
+    Backend/kai/db/kaiIntakeQueries.js. This module contains no INSERT/UPDATE/
+    DELETE/TRUNCATE/ALTER of any kind.
+  - Backend/kai/validators/kaiReviewCockpitRequestSchemas.js (new file): a closed
+    query-key allowlist and base64url cursor codec for the cockpit queue list, and
+    a closed request-body allowlist for the source-candidate decision. Both follow
+    the exact kaiSprint2RequestSchemas.js idiom. The queue vocabularies are strict
+    reuses of already-accepted vocabularies (the three queue_type values P1-06 and
+    P1-07 write; KAI_SPRINT2_P0_REVIEW_QUEUE_STATUSES verbatim); the reviewed-
+    source-type vocabulary is deliberately NOT restated here, so P1-08's
+    VAL-KAI-P1-08-003 remains its sole authority.
+  - Backend/kai/services/kaiReviewCockpitService.js (new file): listReviewCockpitQueue,
+    getReviewCockpitFileProfileDetail, getReviewCockpitSourceCandidateDetail (all
+    read-only) and submitSourceCandidateDecision (the sole write seam). Contains no
+    SQL and imports no database pool. Every endpoint runs the identical
+    authorization sequence already used by P1-05 through P1-08: KAI_SPRINT2_ENABLED
+    gate -> explicit organization_id shape -> mapped actor resolution -> mapped-
+    human-only gate -> validateActorCanPerformOperation('read_intake') ->
+    validateActorCanPerformOperation('read_intake', { allowedRoles: gk_admin |
+    gk_operator | gk_reviewer }) -> validateTenantBoundaryConsistency. Every
+    response object is hand-built field by field with independent re-validation
+    (UUID canonicality, enum membership, canonical ISO timestamps, bounded/
+    control-character-free text) and returns a typed system_error rather than
+    passing through any raw row. No new role name, operation name, queue status,
+    candidate status, decision status, or reviewed-source-type value is introduced.
+  - Backend/kai/routes/sprint2IntakeApi.js (additive only, +106 lines): four new
+    handlers under the existing /api/kai/sprint2/intake mount and its existing
+    rate-limiter/authentication stack - GET /admin/review-cockpit/queue, GET
+    /admin/review-cockpit/file-profiles/:fileProfileId, GET
+    /admin/review-cockpit/source-candidates/:intakeSourceCandidateId, and POST
+    /admin/review-cockpit/source-candidates/:intakeSourceCandidateId/decision -
+    plus one reviewCockpitIdentifiers helper, one lazily-imported service getter,
+    and one __testables entry. No /internal/kai prefix and no new top-level
+    app.use composition was introduced; index.js was not modified. Every prior
+    export, handler, and helper in this file is unchanged.
+  - frontend/kaiReviewCockpit.jsx (new file) and frontend/entry.jsx (additive only,
+    +15 lines): the internal GK-only cockpit component and its
+    window.renderKaiReviewCockpit entry point. The component returns null unless
+    the KAI_SPRINT2_ENABLED-gated internal status route answers ok, and its
+    source-decision controls are not rendered at all unless the detail response
+    reports decision_controls_enabled: true. No client-facing route, page, or
+    surface was added anywhere.
+  - __tests__/kai-sprint2-p1-09-review-cockpit-boundary.spec.js and
+    __tests__/kai-sprint2-p1-09-review-cockpit.integration.spec.js (new files).
+  - __tests__/kai-sprint2-pass2-route-runtime.spec.js (additive only, +6 lines):
+    the P0 router route-inventory assertion gained the four new cockpit paths.
+    Every prior entry is preserved verbatim; no assertion was weakened, skipped,
+    or disabled anywhere in this package.
+
+not_made_by_this_package:
+  - no migrations/*.sql file was created or edited; this package makes no schema
+    change of any kind, so no P1-09 catalog verifier or *-local-postgres.js runner
+    was added (the existing P1-05 through P1-08 runners are schema-focused and have
+    no schema to verify here). The P1-08 runner was executed unmodified instead.
+  - public/js/bundles/entry.js (the tracked Vite build artifact) was regenerated by
+    `npm run build` during verification and then restored to its committed content
+    via `git checkout --`; it is deliberately NOT part of this commit, so the diff
+    the reviewer reads contains only source.
+  - no new authentication, authorization, review-queue, source-promotion, or
+    transaction abstraction was introduced. P1-08's repository requires an injected
+    metadata-only audit dependency and no production provider for it exists in this
+    repository; P1-09 introduces none (that would be new abstraction outside this
+    package's scope) and forwards dependencies.metadataOnlyAudit unchanged, so an
+    absent provider yields P1-08's own clean validation_blocker rather than any
+    partial write. Both flags remain default false, so the decision route is
+    unreachable in production regardless.
+
+commands: TOOL_VERIFIED
+  - node --test __tests__/kai-sprint2-p1-09-*.spec.js -> 37 tests, 37 pass, 0 fail,
+    0 skip
+  - npm run build (vite build) -> succeeded, public/js/bundles/entry.js 697.95 kB
+    (artifact then restored, see not_made_by_this_package). package.json was
+    inspected directly: it defines no lint or typecheck script, so none was run.
+  - npm run verify:kai-sprint2-p1-08-source-promotion (P1-08's own unmodified
+    ephemeral loopback PostgreSQL 16 runner) -> 92 PASS rows, 0 FAIL rows across
+    the catalog verifier, read-only failure checks, and smoke verifier; P1-08
+    integration suite 19 tests, 19 pass, 0 fail
+  - node --test on the affected review-queue / authorization / tenant-scoping /
+    request-safety / source-promotion / route-runtime suites
+    (kai-sprint2-api-contract, -authorization, -foundation-safety, -p1-06-*,
+    -p1-08-*, -pass2-api-contract, -pass2-route-runtime, -review-queue-route,
+    -review-queue-status-route, -tenant-authorization, -tenant-validator,
+    -batch-detail-route, -batch-files-route, -file-detail-route,
+    -file-policy-block-route) -> 276 tests, 274 pass, 0 fail, 2 skip
+  - npm run test:kai-sprint2 (complete Sprint 2 suite) -> 1242 tests, 1234 pass,
+    0 fail, 8 skip
+  - npm test (complete repository suite) -> 1347 tests, 1339 pass, 0 fail, 8 skip
+  - git diff --check -> clean (no whitespace errors)
+  - git diff --cached --check -> clean (see diff_checks below)
+
+postgresql_verification_results: TOOL_VERIFIED
+  - This package adds no schema object, so it introduces no PostgreSQL verifier of
+    its own. The already-accepted P1-08 verifier was run unmodified against an
+    ephemeral loopback PostgreSQL 16 instance created by its own runner and
+    reported 92 PASS / 0 FAIL rows with its 19-test integration suite fully
+    passing, proving P1-09 broke nothing in the P1-08 durable layer.
+
+proof_of_required_behavior: TOOL_VERIFIED
+  - tenant isolation: "P1-09 service (tenant isolation): an actor with membership
+    only in another organization is denied, and every read is scoped to the
+    requested organization_id" (boundary spec) proves the cross-tenant request is
+    refused with zero read-model calls, that every read model receives exactly the
+    requested organization_id, and that a row whose organization_id does not match
+    the request scope is refused by the DTO layer rather than emitted. The
+    integrated spec's "tenant isolation: another organization's scope yields no
+    candidate and no decision" proves the same over real HTTP.
+  - role enforcement: "P1-09 service (role enforcement): only gk_admin/gk_operator/
+    gk_reviewer with active membership in the requested organization are allowed"
+    (boundary spec) accepts exactly those three already-existing GK roles and
+    rejects no-membership, wrong-role, revoked, and invited memberships with zero
+    read-model calls. No new role name is introduced anywhere in the diff.
+  - feature gating, both flags, both directions: "P1-09 service: KAI_SPRINT2_ENABLED
+    disabled returns feature_disabled with zero read-model calls on every endpoint"
+    and "P1-09 service: with KAI_SPRINT2_ENABLED on and KAI_SOURCE_PROMOTION_ENABLED
+    off, reads stay available and only the decision seam is disabled" (boundary
+    spec), plus the integrated spec's "with KAI_SOURCE_PROMOTION_ENABLED off, reads
+    stay available and the decision route returns a clean feature_disabled" (403
+    feature_disabled, zero repository calls, reads still 200) and "with
+    KAI_SPRINT2_ENABLED off, every cockpit route is feature-gated before
+    authentication" (all four routes 403 feature_disabled). Neither flag's default
+    was changed anywhere in non-test code; flags are set only inside injected env
+    objects, or via a process.env value set and restored within a single test's
+    own scope.
+  - pagination determinism: "P1-09 read model: cockpit queue list is
+    organization-scoped, canonically filtered, bounded, and keyset ordered on a
+    unique tie-breaker" and "P1-09 pagination determinism: a full page emits a
+    next_cursor bound to the unique review_queue_item_id tie-breaker" (boundary
+    spec). The tie-breaker column is review_queue_item_id, the
+    kai.review_queue_items primary key, so the ORDER BY created_at DESC,
+    review_queue_item_id DESC ordering is total and page boundaries can neither
+    repeat nor skip a row.
+  - DTO allowlists: "P1-09 DTO allowlists: no raw content, storage location, object
+    key, signed URL, credential, prompt, internal note, or unrestricted audit
+    metadata reaches any response" (boundary spec) is the forbidden-field assertion
+    test. It injects eighteen sentinel fields (storage_provider, storage_bucket,
+    storage_object_key, storage_uri, signed_url, credentials, prompt,
+    internal_notes, raw_content, raw_sample, sample_values, pii, profile,
+    queue_metadata, assigned_to, blocked_reason, audit_metadata, created_by) onto
+    every synthetic row and asserts both the field name and its value are absent
+    from every response, then asserts each response object's exact key set.
+    "P1-09 DTO allowlists: an unsafe quality-finding detail is refused rather than
+    emitted" additionally proves the response layer re-applies P1-04's own
+    detail-safety exclusions instead of trusting the stored CHECK.
+  - read-only file-profile behavior: no file-profile mutation path exists in this
+    package - there is no file-profile mutation service function, no file-profile
+    mutation route, and no invented approval/rejection/resolution/eligibility state
+    anywhere. Proved by "P1-09 file-profile review is read-only: the package
+    exposes no file-profile mutation service, route, or state vocabulary"
+    (boundary spec), which asserts the only cockpit file-profile route is a single
+    router.get and that the only mutating cockpit route in the whole router is the
+    source-candidate decision route, and by the integrated spec's file-profile
+    subtest, which sends POST/PUT/PATCH/DELETE at the file-profile detail path and
+    receives 404 for every one.
+  - all three decision outcomes exercised: the integrated spec's "decision: promoted
+    creates the source and current source_version result", "decision: rejected
+    records the outcome and creates no source or source_version", and the
+    needs_more_information first step inside "decision: needs_more_information ->
+    rejected follow-up transition" cover needs_more_information, rejected, and
+    promoted end to end over real HTTP.
+  - needs_more_information follow-up transitions: "decision: needs_more_information
+    -> rejected follow-up transition" and "decision: needs_more_information ->
+    promoted follow-up transition" (integrated spec) exercise both permitted
+    follow-ups, including the waiting_on_client queue state the first step leaves
+    behind and the source/source_version result the promoted follow-up produces.
+  - stale/terminal conflict safety: "decision: a stale/terminal conflict is
+    surfaced as a clean typed 409 and triggers no second mutation attempt"
+    (integrated spec) is the test proving zero second mutation - it records the
+    repository call-log length before and after and asserts exactly one call, a
+    clean typed 409 conflict_current_state_changed body (not a 500, not a raw
+    error), and that the candidate's committed decision and null source are
+    unchanged afterwards. "P1-09 decision seam: passes the request through to P1-08
+    unchanged and never retries or coerces a conflict" (boundary spec) proves the
+    same at the service seam, and "P1-09 queue reads never invoke, import, or imply
+    a promotion call" proves the decision service is resolved and invoked exactly
+    once in the whole module.
+  - incomplete-pair non-promotability: P1-09 introduces no completeness predicate of
+    its own and relies entirely on P1-08's VAL-KAI-P1-08-001 (candidate/review
+    completeness and status predicate, in both its initial-decision and
+    needs_more_information-follow-up forms) in
+    Backend/kai/dictionary/postgresSourcePromotionRepository.js, together with
+    VAL-KAI-P1-08-002 (reapplied fail-closed permission predicate) and
+    VAL-KAI-P1-08-003 (explicit non-'unknown' reviewed-source-type vocabulary).
+    P1-09's marshaling layer forwards every such result unchanged, proved by
+    "P1-09 decision seam: non-promoted outcomes forward no reviewedSourceType at
+    all" and by the integrated spec's "decision: a malformed decision body is
+    rejected before any repository call".
+  - queue-resolution-never-implies-promotion: reading, filtering, paginating, or
+    opening anything in the review queue never triggers and is never coupled to a
+    promotion call anywhere in this package's code. listReviewCockpitQueue,
+    getReviewCockpitFileProfileDetail, and getReviewCockpitSourceCandidateDetail
+    contain no reference to createSourcePromotionDecision at all, and the sole
+    resolution point of that service is inside submitSourceCandidateDecision -
+    asserted directly by "P1-09 queue reads never invoke, import, or imply a
+    promotion call" (boundary spec), which parses each read function's body and
+    asserts exactly one `const decide = deps.createSourcePromotionDecision || ...`
+    and exactly one `await decide(` in the whole module.
+  - integrated synthetic P1 acceptance path: "P1-09 integrated synthetic P1
+    acceptance: intake candidate -> review -> all three decisions ->
+    source/source_version result" (13 subtests) runs the whole path against a real
+    Express application mounted exactly as index.js mounts it, over entirely
+    synthetic in-memory data. Every response body on that path is passed through
+    assertNoRawDataExposure at the moment it is received, and the closing subtest
+    "no raw-data field appeared in any response across the whole acceptance path"
+    re-asserts all captured responses: no raw content, raw sample, raw PII,
+    internal note, storage location, object key, bucket name, signed URL,
+    credential, prompt, or unrestricted audit metadata appeared in any response
+    anywhere across the entire acceptance path.
+
+diff_checks: TOOL_VERIFIED
+  - git diff --check: clean (no whitespace errors)
+  - git diff --cached --check: clean
+  - complete diff inspected line by line: three modified files, all additive only -
+    Backend/kai/routes/sprint2IntakeApi.js (+106), frontend/entry.jsx (+15),
+    __tests__/kai-sprint2-pass2-route-runtime.spec.js (+6) - plus six new files
+    (one read model, one validator module, one service, one frontend component,
+    two test specs) and this evidence block. Zero lines were deleted anywhere in
+    the diff. No migrations/*.sql file was added or changed. No P1-01 through P1-08
+    source, migration, script, runbook, or test file was edited. No ExecPlan
+    content before byte offset 738208 was touched. No deploy, CI, or cloud
+    configuration file was touched. No evidence, locator, claim, graph-relationship,
+    assistant-tool, generation, client-review, or export identifier appears
+    anywhere in the diff.
+
+final_commit_hash: report after commit; a commit cannot contain its own SHA
+
+final_worktree_and_staged_state: report after commit
+
+prohibited_actions_not_performed:
+  - no evidence, locator, claim, graph relationship, assistant tool, generation,
+    client review, client-facing UI, public/funder export, cloud configuration,
+    deployment, feature enablement, production or real-client-data behavior, schema
+    or migration change, P2, or P3 work was implemented
+  - neither KAI_SPRINT2_ENABLED nor KAI_SOURCE_PROMOTION_ENABLED had its default
+    changed anywhere in non-test code; both remain default false
+  - no accepted P1-01 through P1-08 contract element, exported signature, validator
+    key, identity key, vocabulary, or file was changed
+  - no test was weakened, skipped, disabled, or deleted; the single edit to an
+    existing test file adds four route paths to an inventory assertion and
+    preserves every prior entry verbatim
+  - no fetch, pull, push, merge, rebase, reset, cherry-pick, history rewrite,
+    deployment, production/shared database access, or real client data access was
+    performed
+  - did not begin another package, propose another prompt, start another review
+    cycle, or continue past this bounded implementation
+
+user_confirmed_starting_assumptions:
+  - the owner-supplied bounded-implementation scope and required-behavior
+    specification described in the originating prompt, none of which was
+    independently re-derived from a quoted governing source during this turn beyond
+    what fresh repository/test inspection above established
+
+not_confirmed:
+  deployment: NOT_CONFIRMED
+  production_or_shared_database_state: NOT_CONFIRMED
+  feature_enablement: NOT_CONFIRMED
+  production_runtime_composition: NOT_CONFIRMED
+  real_client_data_behavior: NOT_CONFIRMED
+  production_metadata_only_audit_provider_for_the_decision_route: NOT_CONFIRMED -
+    no such provider exists in this repository and P1-09 introduces none; the
+    decision route is additionally unreachable while KAI_SOURCE_PROMOTION_ENABLED
+    remains default false
+```
