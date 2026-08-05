@@ -146,3 +146,35 @@ prepare, a synchronous publish failure, a rejected publish promise, or a malform
 inserted row rolls back all of it together. The review item's `required_action`
 states plainly that human review is required, this is a review-only stub, source
 promotion is not authorized, and no source or source_version has been created.
+
+## Correction: removed the silent partial-replay repair path
+
+The original `createSourceCandidateStub` repository path allowed a defect: when a
+candidate row already existed but its corresponding `source_candidate_review` item
+did not, the repository silently inserted the missing review item, returned
+`replayed: true`, and wrote no audit row for that write. This let a mutation occur
+with no audit trail under the "replay" label.
+
+That repair path is removed. `Backend/kai/dictionary/postgresSourceCandidateRepository.js`
+now inserts a `source_candidate_review` item only alongside a candidate this same
+call just created (`candidateIsFreshlyCreated`). When the candidate already existed,
+the review item is required to already exist too — its absence returns
+`conflict_current_state_changed` with zero mutation and zero audit activity, the same
+outcome already returned for any other lineage or immutable-identity mismatch. Full
+replay (both rows already exist and match) is unaffected: zero writes, zero audit
+activity, `replayed: true`. Initial creation of both rows together, concurrent
+identical creation, and required-audit rollback are all unaffected.
+
+Replay/conflict comparison remains scoped to immutable identity only — for the
+candidate: `organization_id`, `intake_sensitivity_profile_id`, `intake_file_id`,
+`file_profile_id`, `data_dictionary_id`, `profile_canonical_sha256`; for the review
+item: `organization_id`, `queue_type`, `target_object_type`, `target_object_id`.
+Mutable review fields (`queue_status`, `priority`, `assignment`, `due_at`, `summary`,
+`required_action`, `review_status`, `blocked_reason`) are still never compared, so an
+authorized reviewer's later edits to those fields do not break replay.
+
+Updated `__tests__/kai-sprint2-p1-07-source-candidate-boundary.spec.js`: replaced the
+test that asserted the old silent-repair behavior with tests proving
+`conflict_current_state_changed` on a missing review item (zero mutation, zero audit),
+`conflict_current_state_changed` on a mismatched review-item identity, and that
+authorized mutable review-field changes do not break full replay.

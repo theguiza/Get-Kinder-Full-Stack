@@ -8840,3 +8840,183 @@ not_confirmed:
   production_runtime_composition: NOT_CONFIRMED
   real_client_data_behavior: NOT_CONFIRMED
 ```
+
+## P1-07 correction - removed the silent partial-replay repair path
+
+```text
+timestamp_local: 2026-08-05 America/Vancouver
+branch: codex/kai-sprint2-p0-v0.3.5
+package: KAI P1-07 correction - createSourceCandidateStub partial-replay repair-path
+  removal
+status: TOOL_VERIFIED
+
+pre_append_execplan:
+  byte_count: 698727
+  sha256: 32511369e6470f8290a1249560b19764e201bf37bd3f7b160649a23826cc0fa5
+  preserved_copy: /private/tmp/claude-501/-Users-mikewoz-Get-Kinder-Full-Stack-Deploy/f283a90f-4bb5-4fe2-a9fc-62550eb3fe66/scratchpad/KAI_Sprint2_P0_ExecPlan_pre_p1_07_correction.md
+  prefix_proof: this block is appended strictly after the preserved byte offset; no
+    earlier byte of the live file is altered
+
+preflight:
+  branch: codex/kai-sprint2-p0-v0.3.5
+  head: 3b3d74cec7239b9c29209cb2d4bf39be6deeeba9
+  worktree: clean including untracked files (verified via `git status --porcelain`
+    before any change), no staged paths
+
+defect_corrected:
+  Backend/kai/dictionary/postgresSourceCandidateRepository.js's
+  createSourceCandidateStub allowed a silent partial-replay repair path: when a
+  candidate row already existed but its corresponding source_candidate_review item
+  did not, the repository inserted the missing review item, returned
+  replayed: true, and wrote no audit for that write. A mutation occurred with no
+  audit trail under the "replay" label.
+
+correction_made:
+  - Backend/kai/dictionary/postgresSourceCandidateRepository.js (only file with
+    production-code changes): the review-item branch is now keyed on
+    candidateIsFreshlyCreated instead of on whether a review item row already
+    exists. A review-item insert is attempted only alongside a candidate this same
+    call just created. When the candidate already existed, its review item is
+    required to already exist and match; its absence now returns
+    conflict_current_state_changed with zero mutation and zero audit activity, the
+    same outcome already returned for any other lineage or immutable-identity
+    mismatch. Full replay (both rows already exist and match) is unaffected: zero
+    writes, zero audit activity, replayed: true. Initial creation of both rows
+    together, concurrent identical creation via
+    INSERT ... ON CONFLICT ... DO NOTHING RETURNING, and required-audit rollback are
+    all structurally unchanged. Replay/conflict comparison remains scoped to
+    immutable identity only (candidate: organization_id,
+    intake_sensitivity_profile_id, intake_file_id, file_profile_id,
+    data_dictionary_id, profile_canonical_sha256; review item: organization_id,
+    queue_type, target_object_type, target_object_id) - no mutable review field
+    (queue_status, priority, assignment, due_at, summary, required_action,
+    review_status, blocked_reason) is compared, unchanged from before this
+    correction.
+  - __tests__/kai-sprint2-p1-07-source-candidate-boundary.spec.js: replaced the test
+    that asserted the old silent-repair behavior with three tests proving (a)
+    candidate-exists/review-missing returns conflict_current_state_changed with zero
+    mutation and zero audit calls, (b) a mismatched review-item immutable identity
+    also returns conflict_current_state_changed with zero mutation, and (c) full
+    replay tolerates authorized mutable review-field changes (queue_status,
+    priority, assignment, due_at, summary, required_action, review_status,
+    blocked_reason) without breaking replay.
+  - scripts/kai-sprint2-p1-07-source-candidate-runbook.md: updated the identity/
+    replay paragraph to describe the corrected behavior; removed the description of
+    the removed repair path.
+  - scripts/kai-sprint2-p1-07-source-candidate-patch-notes.md: appended an
+    additive "Correction" section describing the defect and the fix; no existing
+    patch-notes text was removed.
+  - VAL-KAI-P1-07-001 and every other accepted P1-07 contract element (identity
+    keys, server-pinned fields, audit contract/operation/validator-key names, the
+    eleven-key audit-metadata allowlist, AUTH-KAI-003, VAL-TEN-001) is unchanged.
+
+commands: TOOL_VERIFIED
+  - node --test __tests__/kai-sprint2-p1-07-source-candidate-schema-contract.spec.js
+    __tests__/kai-sprint2-p1-07-source-candidate-runner-self-test.spec.js
+    __tests__/kai-sprint2-p1-07-source-candidate-boundary.spec.js
+    __tests__/kai-sprint2-p1-07-source-candidate.integration.spec.js
+  - npm run verify:kai-sprint2-p1-07-source-candidate
+  - node --test __tests__/kai-sprint2-intake-queries.spec.js
+    __tests__/kai-sprint2-p1-06-review-queue-boundary.spec.js
+    __tests__/kai-sprint2-p1-06-review-queue-schema-contract.spec.js
+  - node --test __tests__/kai-sprint2-*.spec.js
+  - npm test
+  - git diff --check
+  - git diff --cached --check
+
+test_results: TOOL_VERIFIED
+  - P1-07 focused specs: 38 tests, 37 pass, 0 fail, 1 skipped (integration spec
+    self-skip without KAI_P1_07_SOURCE_CANDIDATE_DATABASE_URL)
+  - P1-07 ephemeral PostgreSQL 16 verifier
+    (verify:kai-sprint2-p1-07-source-candidate): catalog verifier 35/35 PASS,
+    read-only failure checks 10/10 PASS, smoke verifier 14/14 PASS, integration
+    suite 11/11 pass (all pre-existing checks; none needed changes for this
+    correction since the corrected path is a repository-internal branch not
+    exercised by a distinct catalog/smoke check)
+  - Affected shared tests (kai.review_queue_items /
+    getScopedSourceCandidateReviewQueueItemByIdentity consumers): 29 tests, 29
+    pass, 0 fail
+  - Complete Sprint 2 suite (__tests__/kai-sprint2-*.spec.js): 1156 tests, 1149
+    pass, 0 fail, 7 skipped (unchanged DB-gated skip set)
+  - Complete repository suite (npm test): 1261 tests, 1254 pass, 0 fail, 7 skipped
+    (unchanged DB-gated skip set)
+
+proof_of_required_behavior: TOOL_VERIFIED
+  - candidate-present/review-missing returns conflict_current_state_changed: proved
+    by the boundary spec's "candidate exists but its review item is missing"
+    test (fake transaction throws if any INSERT is attempted; result.error.code
+    asserted as conflict_current_state_changed, result.data asserted null)
+  - that path performs zero writes and zero audit calls: proved by the same test -
+    the fake transaction's INSERT INTO kai.review_queue_items and INSERT INTO
+    kai.upload_lifecycle_audit branches both throw if reached, and the test asserts
+    publishCalls === 0
+  - complete replay performs zero writes and zero audit calls: proved by the
+    pre-existing "identical full replay" boundary test (fake transaction has no
+    INSERT branches at all) and by the integration-spec "same identity replays"
+    test's rowCounts/secondAudit.published assertions against the real schema
+  - authorized mutable review-field changes do not break replay: proved by the new
+    boundary-spec test asserting a full replay (replayed: true, publishCalls === 0)
+    against a review row carrying non-default queue_status, priority, assignment,
+    due_at, summary, required_action, review_status, and blocked_reason values
+  - initial creation still creates exactly one candidate, one queue item, and one
+    audit: proved by the unchanged integration-spec first-creation test and by the
+    PostgreSQL smoke verifier's creation_candidate_persisted /
+    creation_review_item_persisted / creation_audit_persisted checks (all PASS)
+  - concurrent identical creation still converges correctly: proved by the
+    unchanged integration-spec overlapping-transaction test (one replayed: false,
+    one replayed: true, exactly one candidate/review-item/audit row) and by the
+    PostgreSQL smoke verifier's concurrent_insert_convergence checks (both PASS)
+  - required-audit failure still rolls back all initial writes: proved by the
+    unchanged integration-spec required-audit-prepare-rejection and
+    publish-throw/publish-rejection tests (zero rows in all three tables after
+    rollback) and by the boundary-spec audit-rejection test (candidateInsertReached
+    and queueInsertReached both true, result.ok false)
+
+diff_checks: TOOL_VERIFIED
+  - git diff --check: clean (no whitespace errors)
+  - git diff --cached --check: clean (nothing staged before the commit below)
+  - complete diff inspected: exactly four files changed -
+    Backend/kai/dictionary/postgresSourceCandidateRepository.js (the queue-item
+    branch restructure and one docstring update),
+    __tests__/kai-sprint2-p1-07-source-candidate-boundary.spec.js (one test
+    replaced with three),
+    scripts/kai-sprint2-p1-07-source-candidate-runbook.md (identity/replay
+    paragraph correction), and
+    scripts/kai-sprint2-p1-07-source-candidate-patch-notes.md (additive
+    Correction section) - plus this ExecPlan correction block. No migration,
+    rollback, verifier SQL, smoke SQL, service file, route, listener, UI, startup
+    composition, feature-flag default, Current State, or Implementation Baseline
+    file was touched. No P1-08, promotion, source, source_version, evidence, or
+    claim identifier appears anywhere in the diff.
+
+correction_commit_hash: report after commit; a commit cannot contain its own SHA
+
+final_worktree_and_staged_state: report after commit
+
+prohibited_actions_not_performed:
+  - no queue-only orphan discovery, repair service, new audit vocabulary, new
+    validator key, transition, promotion, source, source_version, evidence, claim,
+    route, UI, cloud work, or deployment/real-data handling was implemented
+  - no accepted P1-07 contract element (VAL-KAI-P1-07-001, identity keys,
+    server-pinned fields, audit contract/operation/validator-key names) was
+    changed
+  - no route, listener, UI, scheduler, or startup-composition file was added or
+    edited
+  - no fetch, pull, push, merge, rebase, reset, cherry-pick, history rewrite,
+    deployment, production/shared database access, or real client data access was
+    performed
+  - did not begin P1-08, propose another package, or perform another review cycle
+
+user_confirmed_starting_assumptions:
+  - the owner-supplied bounded-correction scope and required-behavior specification
+    described in the originating prompt, none of which was independently
+    re-derived from a quoted governing source during this turn beyond what fresh
+    repository/test inspection above established
+
+not_confirmed:
+  deployment: NOT_CONFIRMED
+  production_or_shared_database_state: NOT_CONFIRMED
+  feature_enablement: NOT_CONFIRMED
+  production_runtime_composition: NOT_CONFIRMED
+  real_client_data_behavior: NOT_CONFIRMED
+```

@@ -289,7 +289,7 @@ test("P1-07 repository: identical full replay (candidate and review item both al
   assert.equal(publishCalls, 0);
 });
 
-test("P1-07 repository: a partial replay (candidate exists, review item does not) creates only the missing review item and still writes no candidate audit", async () => {
+test("P1-07 repository: candidate exists but its review item is missing returns conflict_current_state_changed with zero mutation and zero audit calls", async () => {
   const existingCandidateRow = {
     intake_source_candidate_id: "c-existing",
     organization_id: ORG,
@@ -303,41 +303,120 @@ test("P1-07 repository: a partial replay (candidate exists, review item does not
     created_at: NOW,
   };
   let publishCalls = 0;
-  let queueInsertReached = false;
   const tx = {
-    async query(sql, params) {
+    async query(sql) {
       if (sql.includes("FROM kai.intake_sensitivity_profiles")) return { rows: [predicateSatisfyingProfileRow] };
       if (sql.includes("FROM kai.intake_files")) return { rows: [{ upload_state: "confirmed" }] };
       if (sql.includes("FROM kai.intake_source_candidates") && sql.includes("FOR UPDATE")) return { rows: [existingCandidateRow] };
       if (sql.includes("FROM kai.review_queue_items") && sql.includes("FOR UPDATE")) return { rows: [] };
-      if (sql.includes("INSERT INTO kai.review_queue_items")) {
-        queueInsertReached = true;
-        return {
-          rows: [
-            {
-              review_queue_item_id: "q-new",
-              organization_id: params[0],
-              queue_type: "source_candidate_review",
-              queue_status: "open",
-              target_object_type: "intake_source_candidate",
-              target_object_id: "c-existing",
-              queue_metadata: { p0_stub: true },
-            },
-          ],
-        };
-      }
-      if (sql.includes("INSERT INTO kai.upload_lifecycle_audit")) throw new Error("no audit should be written on a partial replay");
+      if (sql.includes("INSERT INTO kai.review_queue_items")) throw new Error("no review-item insert should be attempted when the candidate already exists");
+      if (sql.includes("INSERT INTO kai.upload_lifecycle_audit")) throw new Error("no audit should be written when the review item is missing");
       throw new Error(`unexpected query: ${sql}`);
     },
   };
   const repository = createPostgresSourceCandidateRepository({
     runInTransaction: (callback) => callback(tx),
+  });
+  const result = await repository.createSourceCandidateStub({
+    identity: { organizationId: ORG, intakeSensitivityProfileId: PROFILE },
+    actorUserId: "user-1",
+    now: NOW,
     metadataOnlyAudit: {
       prepareMetadataOnlyAudit: () => {
         publishCalls += 1;
         return { ok: true, publish: async () => {} };
       },
     },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.data, null);
+  assert.equal(result.error.code, "conflict_current_state_changed");
+  assert.equal(publishCalls, 0);
+});
+
+test("P1-07 repository: candidate exists, review item exists but with a mismatched immutable identity returns conflict_current_state_changed with zero mutation", async () => {
+  const existingCandidateRow = {
+    intake_source_candidate_id: "c-existing",
+    organization_id: ORG,
+    intake_file_id: predicateSatisfyingProfileRow.intake_file_id,
+    file_profile_id: predicateSatisfyingProfileRow.file_profile_id,
+    data_dictionary_id: predicateSatisfyingProfileRow.data_dictionary_id,
+    intake_sensitivity_profile_id: PROFILE,
+    profile_canonical_sha256: predicateSatisfyingProfileRow.profile_canonical_sha256,
+    proposed_source_type: "unknown",
+    candidate_status: "needs_gk_review",
+    created_at: NOW,
+  };
+  const mismatchedQueueRow = {
+    review_queue_item_id: "q-existing",
+    organization_id: ORG,
+    queue_type: "source_candidate_review",
+    target_object_type: "intake_source_candidate",
+    target_object_id: "c-some-other-candidate",
+    queue_status: "open",
+    queue_metadata: { p0_stub: true },
+  };
+  let publishCalls = 0;
+  const repository = createPostgresSourceCandidateRepository({
+    runInTransaction: (callback) => callback(fakeTxFor({
+      profileRow: predicateSatisfyingProfileRow,
+      existingCandidateRow,
+      existingQueueRow: mismatchedQueueRow,
+    })),
+  });
+  const result = await repository.createSourceCandidateStub({
+    identity: { organizationId: ORG, intakeSensitivityProfileId: PROFILE },
+    actorUserId: "user-1",
+    now: NOW,
+    metadataOnlyAudit: {
+      prepareMetadataOnlyAudit: () => {
+        publishCalls += 1;
+        return { ok: true, publish: async () => {} };
+      },
+    },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.data, null);
+  assert.equal(result.error.code, "conflict_current_state_changed");
+  assert.equal(publishCalls, 0);
+});
+
+test("P1-07 repository: complete replay tolerates authorized mutable review-field changes (queue_status, priority, summary, required_action, review_status, blocked_reason) without breaking replay", async () => {
+  const existingCandidateRow = {
+    intake_source_candidate_id: "c-existing",
+    organization_id: ORG,
+    intake_file_id: predicateSatisfyingProfileRow.intake_file_id,
+    file_profile_id: predicateSatisfyingProfileRow.file_profile_id,
+    data_dictionary_id: predicateSatisfyingProfileRow.data_dictionary_id,
+    intake_sensitivity_profile_id: PROFILE,
+    profile_canonical_sha256: predicateSatisfyingProfileRow.profile_canonical_sha256,
+    proposed_source_type: "unknown",
+    candidate_status: "needs_gk_review",
+    created_at: NOW,
+  };
+  const mutatedQueueRow = {
+    review_queue_item_id: "q-existing",
+    organization_id: ORG,
+    queue_type: "source_candidate_review",
+    target_object_type: "intake_source_candidate",
+    target_object_id: "c-existing",
+    queue_status: "assigned",
+    priority: "high",
+    assignment: "user-2",
+    due_at: NOW,
+    summary: "updated by a reviewer",
+    required_action: "updated required action",
+    review_status: "in_progress",
+    blocked_reason: "waiting on more data",
+    queue_metadata: { p0_stub: true },
+  };
+  let publishCalls = 0;
+  const repository = createPostgresSourceCandidateRepository({
+    runInTransaction: (callback) => callback(fakeTxFor({
+      profileRow: predicateSatisfyingProfileRow,
+      existingCandidateRow,
+      existingQueueRow: mutatedQueueRow,
+    })),
   });
   const result = await repository.createSourceCandidateStub({
     identity: { organizationId: ORG, intakeSensitivityProfileId: PROFILE },
@@ -352,8 +431,7 @@ test("P1-07 repository: a partial replay (candidate exists, review item does not
   });
   assert.equal(result.ok, true);
   assert.equal(result.data.replayed, true);
-  assert.equal(queueInsertReached, true);
-  assert.equal(result.data.reviewQueueItem.review_queue_item_id, "q-new");
+  assert.equal(result.data.reviewQueueItem.review_queue_item_id, "q-existing");
   assert.equal(publishCalls, 0);
 });
 

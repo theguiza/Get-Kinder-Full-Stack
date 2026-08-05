@@ -493,8 +493,12 @@ export function createPostgresSourceCandidateRepository({
      * committed `kai.intake_sensitivity_profiles` row; the caller cannot provide or
      * override lineage, classification, review status, or queue identity.
      *
-     * Same identity that already has a matching candidate row: replays it, ensuring
-     * (but never duplicating) its review item, and never writing a duplicate audit.
+     * Same identity that already has a matching candidate row AND a matching review
+     * item: replays both, with zero writes and zero audit activity. A pre-existing
+     * candidate whose review item is missing, or whose lineage/identity no longer
+     * matches, is never silently repaired - it returns `conflict_current_state_changed`
+     * with zero mutation and zero audit activity instead.
+     *
      * Genuinely concurrent identical creation is resolved entirely by PostgreSQL's
      * unique constraints via `INSERT ... ON CONFLICT ... DO NOTHING RETURNING`: the
      * losing transaction observes zero returned rows - never a raised 23505 that
@@ -578,16 +582,10 @@ export function createPostgresSourceCandidateRepository({
           let queueRecord;
           let reviewItemIsFreshlyCreated = false;
 
-          const existingQueueItem = await getScopedSourceCandidateReviewQueueItemByIdentity(
-            { organizationId: candidateRecord.organization_id, targetObjectId: candidateRecord.intake_source_candidate_id },
-            tx,
-          );
-
-          if (existingQueueItem) {
-            const replayValidation = validateReplayedReviewQueueRow(existingQueueItem, candidateRecord);
-            if (!replayValidation.ok) return sourceCandidateFailure(replayValidation.code);
-            queueRecord = replayValidation.record;
-          } else {
+          if (candidateIsFreshlyCreated) {
+            // The candidate row this transaction just created cannot already have a
+            // review item pointing at it, so the only outcomes are "insert it" or
+            // "a genuinely concurrent creator already inserted the same pair".
             const insertedQueueRow = await insertSourceCandidateReviewQueueItemIfAbsent(tx, {
               organizationId: candidateRecord.organization_id,
               targetObjectId: candidateRecord.intake_source_candidate_id,
@@ -611,6 +609,22 @@ export function createPostgresSourceCandidateRepository({
               queueRecord = record;
               reviewItemIsFreshlyCreated = true;
             }
+          } else {
+            // The candidate row already existed before this call. Its corresponding
+            // review item must also already exist: a pre-existing candidate with no
+            // review item is current-state drift, not something this seam repairs.
+            // Repairing it here would perform a silent, unaudited write, so it is
+            // rejected instead with zero mutation and zero audit activity.
+            const existingQueueItem = await getScopedSourceCandidateReviewQueueItemByIdentity(
+              { organizationId: candidateRecord.organization_id, targetObjectId: candidateRecord.intake_source_candidate_id },
+              tx,
+            );
+            if (!existingQueueItem) {
+              return sourceCandidateFailure("conflict_current_state_changed");
+            }
+            const replayValidation = validateReplayedReviewQueueRow(existingQueueItem, candidateRecord);
+            if (!replayValidation.ok) return sourceCandidateFailure(replayValidation.code);
+            queueRecord = replayValidation.record;
           }
 
           const replayed = !(candidateIsFreshlyCreated && reviewItemIsFreshlyCreated);

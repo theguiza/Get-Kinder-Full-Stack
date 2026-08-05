@@ -97,19 +97,23 @@ Identity and replay (owner decision for P1-07): one candidate per `organization_
 index `ux_review_queue_items_p1_07_source_candidate_review_identity` (scoped to
 `queue_type = 'source_candidate_review'` only). The repository does an authoritative
 existing-row lookup — candidate first, then review item — before ever inserting
-either; a fully existing pair is replayed with no duplicate insert and no duplicate
-audit. A *partial* replay (a candidate already exists but its review item does not —
-reachable only if an earlier attempt's transaction failed after the candidate commit,
-which cannot happen inside this package's own one-transaction design, but is defended
-against as a repository-level invariant) creates only the missing review item and
-still writes no candidate audit. Concurrent identical creation is resolved entirely by
-PostgreSQL's unique constraints via `INSERT ... ON CONFLICT ... DO NOTHING
-RETURNING`: the losing transaction observes zero returned rows — never a raised
-`23505` that would abort its transaction before it could re-read — then re-reads and
-replays the authoritative committed row, inside the same transaction, never by a
-savepoint, in-process lock, mutex, in-flight map, or advisory lock. Replay validates
-only tenant scope and the immutable creation identity, never a later-authorized
-mutable field (this package implements no such workflow). A newly inserted row is
+either; a fully existing pair, with matching tenant and immutable identity on both
+rows, is replayed with zero writes and zero audit activity. Because both rows are
+always created together inside this package's own one-transaction design, a
+pre-existing candidate whose review item is missing is current-state drift, never
+something this seam repairs: it returns `conflict_current_state_changed` with zero
+mutation and zero audit activity, the same as any other lineage or immutable-identity
+mismatch on either row. The review item is only ever inserted alongside a
+candidate this same call just created. Concurrent identical creation is resolved
+entirely by PostgreSQL's unique constraints via `INSERT ... ON CONFLICT ... DO
+NOTHING RETURNING`: the losing transaction observes zero returned rows — never a
+raised `23505` that would abort its transaction before it could re-read — then
+re-reads and replays the authoritative committed row, inside the same transaction,
+never by a savepoint, in-process lock, mutex, in-flight map, or advisory lock. Replay
+validates only tenant scope and the immutable creation identity — never a mutable
+review field such as `queue_status`, `priority`, `assignment`, `due_at`, `summary`,
+`required_action`, `review_status`, or `blocked_reason` — since this package
+implements no workflow that authorizes changing those fields. A newly inserted row is
 fully validated against every server-pinned field before the next step; a malformed
 inserted result returns `system_error` and rolls back the transaction.
 
