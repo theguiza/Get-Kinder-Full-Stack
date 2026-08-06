@@ -11164,6 +11164,96 @@ commands:
   - git diff --check -> TOOL_VERIFIED: no whitespace errors
   - git diff --cached --check -> TOOL_VERIFIED: no whitespace errors
 
+### P3-01 dormant cited evidence-summary draft foundation - completed 2026-08-06
+
+preflight:
+  branch: codex/kai-sprint2-p0-v0.3.5
+  head: 5a76277693b268cc09c24b253d0edad120dbf069
+  worktree: clean at task start, including untracked files; staged paths: none
+
+p3_01_made:
+  - Added dormant generated-content persistence substrate:
+    kai.generation_runs, kai.generated_content_drafts,
+    kai.generated_content_blocks, kai.generated_content_citations, and the
+    generated_content_review queue contract.
+  - Added createEvidenceSummaryDraft with KAI_SPRINT2_ENABLED ->
+    KAI_GENERATION_ENABLED -> exact input validation -> mapped-human validation
+    -> active tenant-membership/GK-role authorization -> lazy database-capable
+    repository loading. KAI_GENERATION_ENABLED remains default false and no
+    route, UI, assistant operation, provider, export, approval, or runtime
+    generation wiring was added.
+  - Added injected-only draftGenerator contract enforcement, deterministic
+    request fingerprinting, PostgreSQL idempotency arbitration, complete
+    replay/duplicate/malformed-state handling, rollback on generator,
+    validator, post-write, audit-prepare, and audit-publication failures, and
+    transaction-scoped revalidation through the accepted P2-06 evaluator.
+  - Added VAL-GEN-001 through VAL-GEN-005 structured validator results covering
+    exact audience eligibility, citation resolution, unauthorized references,
+    numeric/causal assertion support, and audience authority.
+  - Added the P3-01 forward migration, rollback, verifier, focused injected
+    tests, and runner-owned loopback PostgreSQL suite.
+
+disclosed_local_identifiers:
+  generation_flag: KAI_GENERATION_ENABLED
+  service: createEvidenceSummaryDraft
+  content_type: evidence_summary
+  draft_status: draft
+  review_status: needs_gk_review
+  queue_type: generated_content_review
+  queue_target_object_type: generated_content_draft
+  audit_operation: generated_content_draft_created
+  audit_contract: p3_01_generated_content_draft_v1
+  validators: VAL-GEN-001, VAL-GEN-002, VAL-GEN-003, VAL-GEN-004, VAL-GEN-005
+
+commands:
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2-p3-01-generated-content-drafts ->
+    TOOL_VERIFIED: 5/5 boundary tests pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p3-01-generated-content-drafts ->
+    TOOL_VERIFIED: P3-01 verifier PASS and 18/18 focused PostgreSQL/boundary
+    tests pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-08-eligible-claims-for-audience ->
+    TOOL_VERIFIED: 14/14 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-07-assistant-claim-traceability-tool ->
+    TOOL_VERIFIED: 12/12 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-06-claim-traceability ->
+    TOOL_VERIFIED: 11/11 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-05-conflict-review-candidate ->
+    TOOL_VERIFIED: catalog verifier 29/29 PASS, failure checks 5/5 PASS,
+    focused PostgreSQL integration/boundary spec 18/18 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-04-claim-gap-followup ->
+    TOOL_VERIFIED: 18/18 integration pass plus catalog/failure/smoke PASS
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-03-claim-proposal ->
+    TOOL_VERIFIED: 15/15 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-02-evidence-coverage-assessment ->
+    TOOL_VERIFIED: 7/7 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-01-evidence-lineage ->
+    TOOL_VERIFIED: 17/17 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-p3-01-generated-content-drafts-boundary.spec.js __tests__/kai-sprint2-authorization.spec.js __tests__/kai-sprint2-tenant-authorization.spec.js __tests__/kai-sprint2-tenant-validator.spec.js __tests__/kai-sprint2-p1-06-review-queue-boundary.spec.js __tests__/kai-sprint2-p1-06-review-queue-schema-contract.spec.js __tests__/kai-sprint2-review-queue-route.spec.js __tests__/kai-sprint2-review-queue-status-route.spec.js __tests__/kai-sprint2-assistant-boundary.spec.js __tests__/kai-sprint2-p2-07-assistant-claim-traceability-tool-boundary.spec.js __tests__/kai-sprint2-p2-08-eligible-claims-for-audience-boundary.spec.js __tests__/kai-sprint2-foundation-safety.spec.js __tests__/kai-sprint2-state-transitions.spec.js ->
+    TOOL_VERIFIED: 131 pass, 0 fail
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 ->
+    TOOL_VERIFIED: 1475 pass, 17 skip, 0 fail
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test ->
+    TOOL_VERIFIED: 1580 pass, 17 skip, 0 fail
+  - git diff --check -> TOOL_VERIFIED: no whitespace errors
+  - git diff --cached --check -> TOOL_VERIFIED: no whitespace errors
+
+NOT_CONFIRMED:
+  production deployment, feature enablement, external provider behavior,
+  cloud/database mutation outside runner-owned synthetic loopback PostgreSQL
+  databases, and real-client-data behavior
+
+complete_diff_scope: Backend/kai/config/kaiSprint2Config.js (additive),
+  Backend/kai/dictionary/postgresGeneratedContentRepository.js (new),
+  Backend/kai/services/kaiGeneratedContentService.js (new),
+  Backend/kai/validators/kaiGeneratedContentValidators.js (new),
+  __tests__/kai-sprint2-p3-01-generated-content-drafts-boundary.spec.js (new),
+  __tests__/kai-sprint2-p3-01-generated-content-drafts.integration.spec.js (new),
+  migrations/kai_sprint2_p3_01_generated_content_drafts.rollback.sql (new),
+  migrations/kai_sprint2_p3_01_generated_content_drafts.sql (new),
+  package.json (additive),
+  scripts/kai-sprint2-p3-01-generated-content-drafts-local-postgres.js (new),
+  scripts/kai-sprint2-p3-01-generated-content-drafts-verifier.sql (new)
+
 ### P2-08 controlled eligible-claims-for-audience tool - completed 2026-08-06
 
 preflight:

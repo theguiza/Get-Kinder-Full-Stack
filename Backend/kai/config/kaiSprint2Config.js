@@ -32,6 +32,14 @@ export function areKaiSprint2SourcePromotionFeaturesEnabled(env = process.env) {
   return isKaiSprint2Enabled(env) && isKaiSourcePromotionEnabled(env);
 }
 
+export function isKaiGenerationEnabled(env = process.env) {
+  return isEnabledValue(env.KAI_GENERATION_ENABLED);
+}
+
+export function areKaiSprint2GenerationFeaturesEnabled(env = process.env) {
+  return isKaiSprint2Enabled(env) && isKaiGenerationEnabled(env);
+}
+
 export function requireKaiSprint2Enabled(req, res, next) {
   if (isKaiSprint2Enabled()) return next();
 
