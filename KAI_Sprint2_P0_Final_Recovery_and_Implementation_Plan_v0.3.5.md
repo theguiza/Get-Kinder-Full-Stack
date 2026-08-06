@@ -11984,3 +11984,208 @@ NOT_CONFIRMED:
     creation, file rendering, audit mutation, production database access,
     P3-04 work, new P3-03 package proposal, or new P3-03 review cycle was
     performed.
+### P3-04 GK generated-content review completion - completed 2026-08-06
+
+preflight:
+  branch: codex/kai-sprint2-p0-v0.3.5
+  head: 024410b411280d011a03ca1516ab23677a870c12
+  worktree: clean at task start, including untracked files; staged paths: none
+
+p3_04_made:
+  - Backend/kai/dictionary/generatedContentReviewQueueContract.js - the
+    smallest behavior-preserving split of the accepted private queue contract:
+    GENERATED_CONTENT_REVIEW_QUEUE_CONTRACT's static fields (queue_type,
+    target_object_type, priority, summary, required_action, assigned_to,
+    due_at, created_by_type) moved into
+    GENERATED_CONTENT_REVIEW_QUEUE_STATIC_CONTRACT; a new
+    GENERATED_CONTENT_REVIEW_LIFECYCLE_PROFILES constant enumerates exactly
+    the three valid queue_status/review_status pairs
+    (open/needs_gk_review, in_progress/needs_gk_review, resolved/resolved);
+    isGeneratedContentReviewQueueRow is now the composition of
+    isGeneratedContentReviewStaticContractRow and the new
+    isGeneratedContentReviewLifecycleState, both newly exported. Every
+    existing caller's default (allowedLifecycleProfiles defaulting to
+    open/needs_gk_review only) is unchanged, so P3-01/P3-02 behavior and DTOs
+    are byte-identical to before this package.
+  - Backend/kai/dictionary/postgresGeneratedContentRepository.js -
+    validateReviewPacketRows split into validateImmutableGraphRows (P3-01
+    run/draft/block/citation shape and content, unchanged) and the new
+    validateGeneratedContentReviewQueueRows (queue identity/static-contract/
+    lifecycle, now parameterized by allowedLifecycleProfiles, defaulting to
+    the single open/needs_gk_review profile so P3-02's public behavior and DTO
+    are unchanged). evaluateGeneratedDraftReviewPacketInTransaction gained an
+    optional fourth {allowedLifecycleProfiles} argument threaded to the new
+    split validator; its own default preserves prior behavior for every
+    existing caller that omits it. Added one new dormant mutation method,
+    completeGeneratedContentReview(input, {metadataOnlyAudit}), on the object
+    returned by createPostgresGeneratedContentRepository. Inside one
+    transaction: locks the immutable P3-01 draft root row (SELECT ... FOR
+    UPDATE) to lock-and-load the complete immutable graph; loads the exact
+    review_queue_items row by reviewQueueItemId (not scoped by
+    organization_id, so a cross-tenant or wrong-target row is provably
+    detected as conflict_current_state_changed rather than silently
+    not_found); re-runs the shared evaluateGeneratedDraftReviewPacketInTransaction
+    with all three lifecycle profiles to revalidate the immutable graph and
+    P2-06 citation authority and to confirm the queue row's static contract
+    and current lifecycle state, and to confirm identity between the loaded
+    queue row and the packet's own queue row; executes one compare-and-set
+    UPDATE constrained by organization_id, review_queue_item_id,
+    target_object_type='generated_content_draft', target_object_id,
+    queue_status='in_progress', review_status='needs_gk_review', and
+    updated_at = expectedUpdatedAt (compared via date_trunc('milliseconds', ...)
+    on both sides, because kai.review_queue_items' existing P1-06
+    touch-updated-at trigger stamps now() at microsecond precision while the
+    canonical UTC timestamp contract used throughout this codebase is
+    millisecond-precision, so truncating both sides to milliseconds is the
+    correct equality check for a client-supplied canonical timestamp, not a
+    weakening of the CAS predicate); the UPDATE changes only queue_status,
+    review_status, and updated_at. On a zero-row UPDATE,
+    evaluateCompleteReviewReplayOrConflict re-reads the authoritative graph,
+    queue, and audit trail inside the same transaction and returns
+    replayed:true only when the complete immutable graph is still valid, the
+    exact queue identity/static contract/lifecycle are resolved/resolved, and
+    exactly one successful generated_content_review_completed audit row
+    matches organization id, generation-run id, draft id, queue-item id,
+    actor id, actor type, expectedUpdatedAt, requested completion timestamp,
+    and both previous/resulting queue and review statuses; otherwise
+    conflict_current_state_changed with zero mutation and zero audit. On a
+    successful fresh UPDATE, re-reads and validates the completed
+    resolved/resolved state, loads a required intake-file audit context by
+    joining the draft's own citations through claims/evidence_items/
+    source_versions/intake_source_candidates/intake_files (kai.
+    upload_lifecycle_audit.intake_file_id and to_state remain NOT NULL and
+    upload-lifecycle-enum-constrained from Gate A, so this package reuses one
+    real, tenant-scoped intake_file_id/upload_state pair as the required
+    non-semantic placeholder exactly as P3-01's own insertAudit already does,
+    putting the actual meaningful transition only in metadata), prepares and
+    publishes exactly one required metadata-only audit, and returns
+    replayed:false. All failure/rollback paths (post-write validation
+    failure, audit-prepare failure, audit-publish failure) throw
+    RollbackResultError so the queue mutation and any audit insert are rolled
+    back together with zero partial effect. New exports:
+    completeGeneratedContentReview method; validateCompleteReviewInput,
+    COMPLETE_REVIEW_FRESH_PROFILE, COMPLETE_REVIEW_RESOLVED_PROFILE,
+    COMPLETE_REVIEW_AUDIT_OPERATION, COMPLETE_REVIEW_AUDIT_CONTRACT added to
+    the existing testables/contract objects.
+  - Backend/kai/services/kaiGeneratedContentService.js - added one dormant
+    mutation service, completeGeneratedContentReview(input, dependencies).
+    Input is exactly {organizationId, generatedContentDraftId,
+    reviewQueueItemId, expectedUpdatedAt, actorContext, now}; unknown or
+    missing keys are rejected. Gate order: KAI_SPRINT2_ENABLED ->
+    KAI_GENERATION_ENABLED -> exact input validation (including canonical-UTC
+    round-trip validation of both expectedUpdatedAt and now) -> mapped-human
+    actor validation -> validateActorCanPerformOperation (active tenant
+    membership, then gk_reviewer/gk_admin authorization) ->
+    validateTenantBoundaryConsistency -> lazy dynamic import of
+    postgresGeneratedContentRepository.js. This package implements GK-side
+    review completion only; it defines no client-reviewer completion path,
+    and completion by a GK actor creates no export authority of any kind.
+  - migrations/kai_sprint2_p3_04_generated_content_review_completion.sql and
+    .rollback.sql - the smallest forward migration and paired rollback: (1)
+    replaces review_queue_items_p3_01_generated_content_review_contract_check
+    with review_queue_items_p3_04_generated_content_review_contract_check,
+    which admits exactly the three lifecycle profiles
+    (open/needs_gk_review, in_progress/needs_gk_review, resolved/resolved)
+    for queue_type='generated_content_review' while every other static field
+    (target_object_type, priority, summary, required_action, assigned_to,
+    due_at, created_by_type) remains pinned exactly as P3-01 established it;
+    (2) extends upload_lifecycle_audit_gate_a_operation_check with one new
+    operation value, generated_content_review_completed; (3) adds
+    upload_lifecycle_audit_p3_04_metadata_object_check, a metadata-only CHECK
+    (reusing kai.gate_a_p0_jsonb_metadata_only) that requires exactly
+    contract, organization_id, generation_run_id, generated_content_draft_id,
+    review_queue_item_id, actor_id, actor_type, expected_updated_at,
+    requested_completion_timestamp, previous_queue_status,
+    resulting_queue_status, previous_review_status, resulting_review_status,
+    validator_keys and forbids draft_text, claim_text, claim_statement,
+    evidence_text, block_text, citations, filename, storage_path, prompt,
+    raw_content, source_text, generated_text, credential, and notes keys, with
+    a closed-key-set check identical in shape to P3-01's. No table, column, or
+    index is added or removed; no export-authority, final-gate, approval, or
+    finalization state is introduced anywhere in the kai schema.
+  - scripts/kai-sprint2-p3-04-generated-content-review-completion-verifier.sql -
+    asserts the new lifecycle-matrix constraint exists and the single-state
+    P3-01 constraint was replaced (not duplicated), the new audit operation
+    and its metadata-only CHECK exist, and that no export-authority/
+    final-gate/finalize/export column exists anywhere in kai.
+  - scripts/kai-sprint2-p3-04-generated-content-review-completion-local-postgres.js -
+    a runner-owned loopback-only ephemeral PostgreSQL harness following the
+    exact P3-01/P3-02/P3-03 pattern (loopback-only target proof before
+    connection, synthetic database name, random high port), applying every
+    prior migration plus this package's forward migration and verifier, then
+    running the P3-04 boundary and integration specs together with the
+    existing P3-01/P3-02/P3-03 boundary specs against the same database.
+  - __tests__/kai-sprint2-p3-04-generated-content-review-completion-boundary.spec.js -
+    service gate-order tests (flags before any database-capable module loads,
+    exact input/mapped-human/tenant-membership/gk_reviewer-or-gk_admin
+    authorization all precede the repository call) with an injected fake
+    repository; repository-level tests against a hand-built fake transaction
+    proving: validateCompleteReviewInput's exact-key and canonical-timestamp
+    rejection; the three valid lifecycle profiles and rejection of every other
+    queue_status/review_status combination with zero mutation; fresh
+    completion writes exactly one queue transition and one audit; identical
+    replay returns replayed:true with zero additional writes/audits; a
+    resolved row without a matching completion audit (or with an audit whose
+    actor/timestamps differ) conflicts rather than replaying; a stale
+    expectedUpdatedAt conflicts without mutation or audit; a missing draft,
+    missing queue item, cross-tenant queue item, and a queue item pointed at a
+    different draft each fail closed with the specified codes; a missing
+    metadataOnlyAudit dependency is rejected before any transaction; the
+    draft, its blocks, and its citations are byte-identical before and after
+    completion; and the published audit metadata contains exactly the
+    specified fourteen keys and no draft/claim/evidence text.
+  - __tests__/kai-sprint2-p3-04-generated-content-review-completion.integration.spec.js -
+    a runner-owned loopback-only PostgreSQL suite (non-loopback target
+    refused before connection) that creates one authentic draft through the
+    accepted P3-01 path, proves completion is rejected while the queue item is
+    still open (never picked up), proves a missing tenant-scoped draft returns
+    not_found, proves one fresh real completion writes exactly one queue
+    transition and one audit row and then replays idempotently with zero
+    additional writes/audits, proves two genuinely concurrent identical calls
+    (via Promise.all against two separate pool connections, serialized by the
+    FOR UPDATE draft-root lock) converge to exactly one transition and one
+    audit with the loser provably replaying only after its own authoritative
+    reread, proves the draft row remains draft_status='draft' and its blocks/
+    citations are untouched, proves the published audit metadata carries no
+    draft/claim/evidence text, and then invokes the real, unmodified P3-03
+    evaluateGeneratedDraftExportEligibility for the same now-resolved draft to
+    prove it returns a successful DTO (not conflict_current_state_changed)
+    with exportEligible:false, queueStatus/reviewStatus both resolved,
+    generated_content_review_unresolved absent from failed_gates, and
+    generated_content_still_draft, affirmative_human_export_authority_absent,
+    and final_export_gate_absent all present - proving GK-side review
+    completion creates no export authority and no final gate.
+  - package.json - added verify:kai-sprint2-p3-04-generated-content-review-completion
+    and test:kai-sprint2-p3-04-generated-content-review-completion scripts
+    following the existing P3-01/P3-03 naming convention.
+
+TOOL_VERIFIED:
+  - node --test __tests__/kai-sprint2-p3-04-generated-content-review-completion-boundary.spec.js ->
+    19/19 pass
+  - npm run verify:kai-sprint2-p3-04-generated-content-review-completion ->
+    runner-owned loopback PostgreSQL target; 58/58 pass, 0 fail (boundary +
+    integration + concurrency + real-P3-03-preflight proof)
+  - npm run verify:kai-sprint2-p3-01-generated-content-drafts -> 18/18 pass
+    (re-verified unchanged after the shared queue-contract/repository refactor)
+  - npm run verify:kai-sprint2-p3-02-generated-draft-review-packet -> 16/16 pass
+    (re-verified unchanged after the shared queue-contract/repository refactor)
+  - npm run verify:kai-sprint2-p3-03-export-manifest-eligibility -> 26/26 pass
+    (re-verified unchanged after reviewIsResolved's derivation was narrowed to
+    resolved/resolved)
+  - npm run test:kai-sprint2 -> complete Sprint 2 suite 1525 pass, 20 skip, 0 fail
+  - npm test -> complete repository suite 1630 pass, 20 skip, 0 fail
+  - git diff --check -> no whitespace errors
+  - git diff --cached --check -> no whitespace errors
+
+USER_CONFIRMED:
+  - P2-01 through P2-08 and P3-01 through P3-03 remain accepted and closed.
+  - P3-04 is authorized as one bounded GK-side generated-content review
+    completion mutation service.
+
+NOT_CONFIRMED:
+  - No push, merge, deploy, generation or export enablement, export
+    authority, final export gate, export record or file creation, client-
+    reviewer completion path, production configuration change, cloud access,
+    real-client-data access, route, UI, assistant operation, listener,
+    startup registration, P3-05 work, new P3-04 package proposal, or new
+    P3-04 review cycle was performed.

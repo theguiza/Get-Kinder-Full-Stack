@@ -5,6 +5,7 @@ import { evaluateClaimTraceabilityInTransaction } from "./postgresClaimTraceabil
 import { validateGeneratedContentDraft } from "../validators/kaiGeneratedContentValidators.js";
 import {
   GENERATED_CONTENT_REVIEW_QUEUE_CONTRACT,
+  GENERATED_CONTENT_REVIEW_LIFECYCLE_PROFILES,
   isGeneratedContentReviewQueueRow,
 } from "./generatedContentReviewQueueContract.js";
 
@@ -28,6 +29,12 @@ const AUDIT_CONTRACT = "p3_01_generated_content_draft_v1";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const AUDIENCES = new Set(["internal", "funder", "public"]);
 const SHA256_LOWER_PATTERN = /^[0-9a-f]{64}$/;
+
+const COMPLETE_REVIEW_FRESH_PROFILE = GENERATED_CONTENT_REVIEW_LIFECYCLE_PROFILES[1];
+const COMPLETE_REVIEW_RESOLVED_PROFILE = GENERATED_CONTENT_REVIEW_LIFECYCLE_PROFILES[2];
+const COMPLETE_REVIEW_AUDIT_OPERATION = "generated_content_review_completed";
+const COMPLETE_REVIEW_AUDIT_CONTRACT = "p3_04_generated_content_review_completion_v1";
+const COMPLETE_REVIEW_VALIDATOR_KEYS = ["VAL-REV-001"];
 
 function failure(code) {
   return { ok: false, data: null, error: { code, status: RESULT_STATUS[code] || 500 } };
@@ -104,6 +111,36 @@ function validateReviewPacketInput(input) {
   return hasExactKeys(input, new Set(["organizationId", "generatedContentDraftId"]))
     && UUID_PATTERN.test(input.organizationId)
     && UUID_PATTERN.test(input.generatedContentDraftId);
+}
+
+function isCanonicalUtcTimestamp(value) {
+  if (typeof value !== "string") return false;
+  let normalized = null;
+  try {
+    normalized = new Date(value).toISOString();
+  } catch {
+    return false;
+  }
+  return normalized === value;
+}
+
+function validateCompleteReviewInput(input) {
+  return hasExactKeys(input, new Set([
+    "organizationId",
+    "generatedContentDraftId",
+    "reviewQueueItemId",
+    "expectedUpdatedAt",
+    "actorContext",
+    "now",
+  ]))
+    && UUID_PATTERN.test(input.organizationId)
+    && UUID_PATTERN.test(input.generatedContentDraftId)
+    && UUID_PATTERN.test(input.reviewQueueItemId)
+    && isCanonicalUtcTimestamp(input.expectedUpdatedAt)
+    && isCanonicalUtcTimestamp(input.now)
+    && Boolean(input.actorContext)
+    && typeof input.actorContext === "object"
+    && !Array.isArray(input.actorContext);
 }
 
 function validateGeneratorInput(input) {
@@ -356,17 +393,15 @@ function hasOnlyAllowedKeys(value, allowedKeys) {
     && Object.keys(value).every((key) => allowedKeys.has(key));
 }
 
-function validateReviewPacketRows(state, { organizationId, generatedContentDraftId }) {
+function validateImmutableGraphRows(state, { organizationId, generatedContentDraftId }) {
   const runKeys = new Set(["generation_run_id", "organization_id", "request_fingerprint", "content_type", "requested_audience"]);
   const draftKeys = new Set(["generated_content_draft_id", "generation_run_id", "organization_id", "content_type", "requested_audience", "draft_status", "review_status"]);
   const blockKeys = new Set(["generated_content_block_id", "generated_content_draft_id", "organization_id", "ordinal", "text"]);
   const citationKeys = new Set(["generated_content_citation_id", "generated_content_block_id", "organization_id", "claim_id", "evidence_item_id", "block_ordinal"]);
-  const queueKeys = new Set(["review_queue_item_id", "organization_id", "queue_type", "target_object_type", "target_object_id", "priority", "queue_status", "review_status", "assigned_to", "due_at", "summary", "required_action"]);
   if (!state?.run || !state?.draft) return false;
   if (!hasOnlyAllowedKeys(state.run, runKeys) || !hasOnlyAllowedKeys(state.draft, draftKeys)) return "system_error";
   if (!state.blocks.every((block) => hasOnlyAllowedKeys(block, blockKeys))) return "system_error";
   if (!state.citations.every((citation) => hasOnlyAllowedKeys(citation, citationKeys))) return "system_error";
-  if (!state.queues.every((queue) => hasOnlyAllowedKeys(queue, queueKeys))) return "system_error";
   if (state.run.organization_id !== organizationId || state.run.content_type !== CONTENT_TYPE) return false;
   if (!SHA256_LOWER_PATTERN.test(state.run.request_fingerprint)) return false;
   if (state.siblingDrafts.length !== 1) return false;
@@ -412,10 +447,24 @@ function validateReviewPacketRows(state, { organizationId, generatedContentDraft
     }
     citationsByBlock.set(blockId, citations);
   }
+  return { citationsByBlock };
+}
+
+function validateGeneratedContentReviewQueueRows(state, { organizationId, generatedContentDraftId }, allowedLifecycleProfiles) {
+  const queueKeys = new Set(["review_queue_item_id", "organization_id", "queue_type", "target_object_type", "target_object_id", "priority", "queue_status", "review_status", "assigned_to", "due_at", "summary", "required_action"]);
+  if (!state.queues.every((queue) => hasOnlyAllowedKeys(queue, queueKeys))) return "system_error";
   if (state.queues.length !== 1) return false;
   const queue = state.queues[0];
-  if (!isGeneratedContentReviewQueueRow(queue, { organizationId, targetObjectId: generatedContentDraftId })) return false;
-  return { citationsByBlock };
+  if (!isGeneratedContentReviewQueueRow(queue, { organizationId, targetObjectId: generatedContentDraftId, allowedLifecycleProfiles })) return false;
+  return true;
+}
+
+function validateReviewPacketRows(state, { organizationId, generatedContentDraftId }, allowedLifecycleProfiles = [GENERATED_CONTENT_REVIEW_LIFECYCLE_PROFILES[0]]) {
+  const graph = validateImmutableGraphRows(state, { organizationId, generatedContentDraftId });
+  if (graph === false || graph === "system_error") return graph;
+  const queueValidation = validateGeneratedContentReviewQueueRows(state, { organizationId, generatedContentDraftId }, allowedLifecycleProfiles);
+  if (queueValidation === false || queueValidation === "system_error") return queueValidation;
+  return graph;
 }
 
 function validateTraceabilityData(data, { claimId, requestedAudience }) {
@@ -703,14 +752,182 @@ async function rereadAsResult(tx, input, requestFingerprint, replayed) {
   return success(toResult(state, replayed));
 }
 
-export async function evaluateGeneratedDraftReviewPacketInTransaction(tx, input, evaluator = evaluateClaimTraceabilityInTransaction) {
+export async function evaluateGeneratedDraftReviewPacketInTransaction(
+  tx,
+  input,
+  evaluator = evaluateClaimTraceabilityInTransaction,
+  { allowedLifecycleProfiles = [GENERATED_CONTENT_REVIEW_LIFECYCLE_PROFILES[0]] } = {},
+) {
   if (!validateReviewPacketInput(input)) return failure("validation_blocker");
   const state = await readReviewPacketState(tx, input);
   if (!state) return failure("not_found");
-  const validation = validateReviewPacketRows(state, input);
+  const validation = validateReviewPacketRows(state, input, allowedLifecycleProfiles);
   if (validation === "system_error") return failure("system_error");
   if (validation === false) return failure("conflict_current_state_changed");
   return toReviewPacket(tx, state, input, validation, evaluator);
+}
+
+async function lockImmutableDraftRoot(tx, { organizationId, generatedContentDraftId }) {
+  const { rows } = await tx.query(
+    `SELECT generated_content_draft_id::text AS generated_content_draft_id
+       FROM kai.generated_content_drafts
+      WHERE organization_id = $1::uuid AND generated_content_draft_id = $2::uuid
+      FOR UPDATE`,
+    [organizationId, generatedContentDraftId],
+  );
+  return rows.length > 0;
+}
+
+async function loadReviewQueueItemById(tx, reviewQueueItemId) {
+  const { rows } = await tx.query(
+    `SELECT review_queue_item_id::text AS review_queue_item_id,
+            organization_id::text AS organization_id,
+            queue_type, target_object_type,
+            target_object_id::text AS target_object_id,
+            queue_status, review_status
+       FROM kai.review_queue_items
+      WHERE review_queue_item_id = $1::uuid`,
+    [reviewQueueItemId],
+  );
+  return rows[0] || null;
+}
+
+function isExactReviewQueueTarget(queueRow, { organizationId, generatedContentDraftId }) {
+  return Boolean(queueRow)
+    && queueRow.organization_id === organizationId
+    && queueRow.queue_type === REVIEW_QUEUE_TYPE
+    && queueRow.target_object_type === REVIEW_TARGET_TYPE
+    && queueRow.target_object_id === generatedContentDraftId;
+}
+
+function toCompleteReviewResult(packet, replayed) {
+  return {
+    generationRunId: packet.generationRunId,
+    generatedContentDraftId: packet.generatedContentDraftId,
+    reviewQueueItemId: packet.reviewQueueItemId,
+    draftStatus: packet.draftStatus,
+    queueStatus: packet.queueStatus,
+    reviewStatus: packet.reviewStatus,
+    replayed,
+  };
+}
+
+function buildCompleteReviewAuditMetadata({ input, packet, previousQueueStatus, previousReviewStatus }) {
+  return {
+    contract: COMPLETE_REVIEW_AUDIT_CONTRACT,
+    organization_id: input.organizationId,
+    generation_run_id: packet.generationRunId,
+    generated_content_draft_id: input.generatedContentDraftId,
+    review_queue_item_id: input.reviewQueueItemId,
+    actor_id: input.actorContext.actorUserId,
+    actor_type: "human",
+    expected_updated_at: input.expectedUpdatedAt,
+    requested_completion_timestamp: input.now,
+    previous_queue_status: previousQueueStatus,
+    resulting_queue_status: COMPLETE_REVIEW_RESOLVED_PROFILE.queueStatus,
+    previous_review_status: previousReviewStatus,
+    resulting_review_status: COMPLETE_REVIEW_RESOLVED_PROFILE.reviewStatus,
+    validator_keys: COMPLETE_REVIEW_VALIDATOR_KEYS,
+  };
+}
+
+async function loadAuditFileContext(tx, { organizationId, generatedContentDraftId }) {
+  const { rows } = await tx.query(
+    `SELECT f.intake_file_id::text AS intake_file_id, f.upload_state
+       FROM kai.generated_content_blocks b
+       JOIN kai.generated_content_citations c
+         ON c.generated_content_block_id = b.generated_content_block_id
+       JOIN kai.claims cl
+         ON cl.organization_id = c.organization_id AND cl.claim_id = c.claim_id
+       JOIN kai.evidence_items e
+         ON e.organization_id = cl.organization_id AND e.evidence_item_id = cl.evidence_item_id
+       JOIN kai.source_versions sv
+         ON sv.organization_id = e.organization_id AND sv.source_version_id = e.source_version_id
+       JOIN kai.intake_source_candidates isc
+         ON isc.organization_id = sv.organization_id AND isc.intake_source_candidate_id = sv.intake_source_candidate_id
+       JOIN kai.intake_files f
+         ON f.organization_id = isc.organization_id AND f.intake_file_id = isc.intake_file_id
+      WHERE b.organization_id = $1::uuid AND b.generated_content_draft_id = $2::uuid
+      ORDER BY b.ordinal ASC, c.claim_id ASC
+      LIMIT 1`,
+    [organizationId, generatedContentDraftId],
+  );
+  return rows[0] || null;
+}
+
+async function insertCompleteReviewAudit(tx, { input, packet, auditFileContext }) {
+  await tx.query(
+    `INSERT INTO kai.upload_lifecycle_audit (
+       organization_id, intake_file_id, operation, from_state, to_state, outcome, metadata, created_at
+     )
+     VALUES ($1::uuid,$2::uuid,$3,$4,$4,'success',$5::jsonb,$6::timestamptz)`,
+    [
+      input.organizationId,
+      auditFileContext.intake_file_id,
+      COMPLETE_REVIEW_AUDIT_OPERATION,
+      auditFileContext.upload_state,
+      JSON.stringify(buildCompleteReviewAuditMetadata({
+        input,
+        packet,
+        previousQueueStatus: COMPLETE_REVIEW_FRESH_PROFILE.queueStatus,
+        previousReviewStatus: COMPLETE_REVIEW_FRESH_PROFILE.reviewStatus,
+      })),
+      input.now,
+    ],
+  );
+}
+
+function auditMetadataMatchesCompletion(metadata, { input, packet }) {
+  return metadata
+    && metadata.generation_run_id === packet.generationRunId
+    && metadata.generated_content_draft_id === input.generatedContentDraftId
+    && metadata.review_queue_item_id === input.reviewQueueItemId
+    && metadata.actor_id === input.actorContext.actorUserId
+    && metadata.actor_type === "human"
+    && metadata.expected_updated_at === input.expectedUpdatedAt
+    && metadata.requested_completion_timestamp === input.now
+    && metadata.previous_queue_status === COMPLETE_REVIEW_FRESH_PROFILE.queueStatus
+    && metadata.resulting_queue_status === COMPLETE_REVIEW_RESOLVED_PROFILE.queueStatus
+    && metadata.previous_review_status === COMPLETE_REVIEW_FRESH_PROFILE.reviewStatus
+    && metadata.resulting_review_status === COMPLETE_REVIEW_RESOLVED_PROFILE.reviewStatus;
+}
+
+async function findMatchingCompletionAudit(tx, { input, packet }) {
+  const { rows } = await tx.query(
+    `SELECT metadata
+       FROM kai.upload_lifecycle_audit
+      WHERE organization_id = $1::uuid
+        AND operation = $2
+        AND outcome = 'success'
+        AND metadata->>'generated_content_draft_id' = $3
+        AND metadata->>'review_queue_item_id' = $4`,
+    [input.organizationId, COMPLETE_REVIEW_AUDIT_OPERATION, input.generatedContentDraftId, input.reviewQueueItemId],
+  );
+  const matches = rows.filter((row) => auditMetadataMatchesCompletion(row.metadata, { input, packet }));
+  return matches.length === 1;
+}
+
+async function evaluateCompleteReviewReplayOrConflict(tx, input, evaluator) {
+  const packetResult = await evaluateGeneratedDraftReviewPacketInTransaction(
+    tx,
+    { organizationId: input.organizationId, generatedContentDraftId: input.generatedContentDraftId },
+    evaluator,
+    { allowedLifecycleProfiles: GENERATED_CONTENT_REVIEW_LIFECYCLE_PROFILES },
+  );
+  if (!packetResult.ok) {
+    return packetResult.error.code === "not_found" ? failure("not_found") : failure("conflict_current_state_changed");
+  }
+  const packet = packetResult.data;
+  if (packet.reviewQueueItemId !== input.reviewQueueItemId) return failure("conflict_current_state_changed");
+  if (
+    packet.queueStatus !== COMPLETE_REVIEW_RESOLVED_PROFILE.queueStatus ||
+    packet.reviewStatus !== COMPLETE_REVIEW_RESOLVED_PROFILE.reviewStatus
+  ) {
+    return failure("conflict_current_state_changed");
+  }
+  const hasMatchingAudit = await findMatchingCompletionAudit(tx, { input, packet });
+  if (!hasMatchingAudit) return failure("conflict_current_state_changed");
+  return success(toCompleteReviewResult(packet, true));
 }
 
 export function createPostgresGeneratedContentRepository({
@@ -822,6 +1039,96 @@ export function createPostgresGeneratedContentRepository({
         return failure("system_error");
       }
     },
+    async completeGeneratedContentReview(input, dependencies = {}) {
+      if (!validateCompleteReviewInput(input)) return failure("validation_blocker");
+      if (!dependencies.metadataOnlyAudit) return failure("validation_blocker");
+
+      try {
+        return await runInTransaction(async (tx) => {
+          const draftLocked = await lockImmutableDraftRoot(tx, input);
+          if (!draftLocked) return failure("not_found");
+
+          const queueRow = await loadReviewQueueItemById(tx, input.reviewQueueItemId);
+          if (!queueRow) return failure("not_found");
+          if (!isExactReviewQueueTarget(queueRow, input)) return failure("conflict_current_state_changed");
+
+          const packetResult = await evaluateGeneratedDraftReviewPacketInTransaction(
+            tx,
+            { organizationId: input.organizationId, generatedContentDraftId: input.generatedContentDraftId },
+            evaluator,
+            { allowedLifecycleProfiles: GENERATED_CONTENT_REVIEW_LIFECYCLE_PROFILES },
+          );
+          if (!packetResult.ok) {
+            return packetResult.error.code === "not_found" ? failure("not_found") : failure("conflict_current_state_changed");
+          }
+          const packet = packetResult.data;
+          if (packet.reviewQueueItemId !== input.reviewQueueItemId) return failure("conflict_current_state_changed");
+
+          const updateResult = await tx.query(
+            `UPDATE kai.review_queue_items
+                SET queue_status = $1,
+                    review_status = $2,
+                    updated_at = $3::timestamptz
+              WHERE organization_id = $4::uuid
+                AND review_queue_item_id = $5::uuid
+                AND target_object_type = $6
+                AND target_object_id = $7::uuid
+                AND queue_status = $8
+                AND review_status = $9
+                AND date_trunc('milliseconds', updated_at) = date_trunc('milliseconds', $10::timestamptz)
+              RETURNING review_queue_item_id::text AS review_queue_item_id`,
+            [
+              COMPLETE_REVIEW_RESOLVED_PROFILE.queueStatus,
+              COMPLETE_REVIEW_RESOLVED_PROFILE.reviewStatus,
+              input.now,
+              input.organizationId,
+              input.reviewQueueItemId,
+              REVIEW_TARGET_TYPE,
+              input.generatedContentDraftId,
+              COMPLETE_REVIEW_FRESH_PROFILE.queueStatus,
+              COMPLETE_REVIEW_FRESH_PROFILE.reviewStatus,
+              input.expectedUpdatedAt,
+            ],
+          );
+
+          if (updateResult.rowCount !== 1) {
+            return evaluateCompleteReviewReplayOrConflict(tx, input, evaluator);
+          }
+
+          const postWrite = await evaluateGeneratedDraftReviewPacketInTransaction(
+            tx,
+            { organizationId: input.organizationId, generatedContentDraftId: input.generatedContentDraftId },
+            evaluator,
+            { allowedLifecycleProfiles: [COMPLETE_REVIEW_RESOLVED_PROFILE] },
+          );
+          if (!postWrite.ok) throw new RollbackResultError(postWrite);
+          if (postWrite.data.reviewQueueItemId !== input.reviewQueueItemId) {
+            throw new RollbackResultError(failure("conflict_current_state_changed"));
+          }
+
+          const auditFileContext = await loadAuditFileContext(tx, input);
+          if (!auditFileContext) throw new RollbackResultError(failure("system_error"));
+
+          const preparedAudit = prepareRequiredAudit(dependencies.metadataOnlyAudit, {
+            attempted_operation: COMPLETE_REVIEW_AUDIT_OPERATION,
+            actor_type: "human",
+            object_type: "generated_content_review_queue_item",
+            request_scope: "organization_generated_content_review_queue_item",
+            contract: COMPLETE_REVIEW_AUDIT_CONTRACT,
+          });
+          await insertCompleteReviewAudit(tx, { input, packet: postWrite.data, auditFileContext });
+          await preparedAudit.publish();
+
+          return success(toCompleteReviewResult(postWrite.data, false));
+        });
+      } catch (error) {
+        if (error instanceof RollbackResultError) return error.result;
+        if (error?.code === "22P02") return failure("validation_blocker");
+        if (error?.code === "23514") return failure("validation_blocker");
+        if (error?.code === "25001") return failure("conflict_current_state_changed");
+        return failure("system_error");
+      }
+    },
   });
 }
 
@@ -835,6 +1142,10 @@ export const __generatedContentRepositoryContract = Object.freeze({
   REVIEW_REQUIRED_ACTION,
   AUDIT_OPERATION,
   AUDIT_CONTRACT,
+  COMPLETE_REVIEW_FRESH_PROFILE,
+  COMPLETE_REVIEW_RESOLVED_PROFILE,
+  COMPLETE_REVIEW_AUDIT_OPERATION,
+  COMPLETE_REVIEW_AUDIT_CONTRACT,
 });
 
 export const __generatedContentRepositoryTestables = Object.freeze({
@@ -843,6 +1154,7 @@ export const __generatedContentRepositoryTestables = Object.freeze({
   validateInput,
   validateReviewPacketInput,
   validateReviewPacketRows,
+  validateCompleteReviewInput,
   fingerprintEvidenceSummaryRequest,
   prepareRequiredAudit,
 });

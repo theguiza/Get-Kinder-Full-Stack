@@ -9,8 +9,10 @@ import { validateTenantBoundaryConsistency } from "../validators/tenantValidator
 
 const GENERATED_CONTENT_ALLOWED_ROLES = new Set(["gk_admin", "gk_operator", "gk_reviewer"]);
 const GENERATED_CONTENT_REVIEW_ALLOWED_ROLES = new Set(["gk_admin", "gk_reviewer"]);
+const COMPLETE_GENERATED_CONTENT_REVIEW_ALLOWED_ROLES = new Set(["gk_reviewer", "gk_admin"]);
 const CREATE_EVIDENCE_SUMMARY_OPERATION = "create_evidence_summary_draft";
 const GET_GENERATED_DRAFT_REVIEW_PACKET_OPERATION = "get_generated_draft_review_packet";
+const COMPLETE_GENERATED_CONTENT_REVIEW_OPERATION = "complete_generated_content_review";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const AUDIENCES = new Set(["internal", "funder", "public"]);
 
@@ -59,6 +61,36 @@ function isGeneratedDraftReviewPacketInput(input) {
   return hasExactKeys(input, new Set(["organizationId", "generatedContentDraftId", "actorContext"]))
     && UUID_PATTERN.test(input.organizationId)
     && UUID_PATTERN.test(input.generatedContentDraftId)
+    && Boolean(input.actorContext)
+    && typeof input.actorContext === "object"
+    && !Array.isArray(input.actorContext);
+}
+
+function isCanonicalUtcTimestamp(value) {
+  if (typeof value !== "string") return false;
+  let normalized = null;
+  try {
+    normalized = new Date(value).toISOString();
+  } catch {
+    return false;
+  }
+  return normalized === value;
+}
+
+function isCompleteGeneratedContentReviewInput(input) {
+  return hasExactKeys(input, new Set([
+    "organizationId",
+    "generatedContentDraftId",
+    "reviewQueueItemId",
+    "expectedUpdatedAt",
+    "actorContext",
+    "now",
+  ]))
+    && UUID_PATTERN.test(input.organizationId)
+    && UUID_PATTERN.test(input.generatedContentDraftId)
+    && UUID_PATTERN.test(input.reviewQueueItemId)
+    && isCanonicalUtcTimestamp(input.expectedUpdatedAt)
+    && isCanonicalUtcTimestamp(input.now)
     && Boolean(input.actorContext)
     && typeof input.actorContext === "object"
     && !Array.isArray(input.actorContext);
@@ -210,14 +242,55 @@ export async function getGeneratedDraftReviewPacket(input, dependencies = {}) {
   return { ok: true, data: result.data, error: null };
 }
 
+export async function completeGeneratedContentReview(input, dependencies = {}) {
+  const env = dependencies.env || process.env;
+  if (!isKaiSprint2Enabled(env)) return buildKaiError("feature_disabled", { data: null });
+  if (!isKaiGenerationEnabled(env)) return buildKaiError("feature_disabled", { data: null });
+  if (!isCompleteGeneratedContentReviewInput(input)) return buildKaiError("validation_blocker", { data: null });
+  if (!isMappedHumanActor(input.actorContext)) return buildKaiError("authorization_denied", { data: null });
+
+  const auth = validateActorCanPerformOperation(
+    input.actorContext,
+    COMPLETE_GENERATED_CONTENT_REVIEW_OPERATION,
+    input.organizationId,
+    { allowedRoles: COMPLETE_GENERATED_CONTENT_REVIEW_ALLOWED_ROLES },
+  );
+  if (!auth.ok) {
+    return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers, data: null });
+  }
+
+  const tenant = validateTenantBoundaryConsistency({
+    expectedOrganizationId: input.organizationId,
+    payload: { organization_id: input.organizationId },
+  });
+  if (tenant.severity === "blocker") {
+    return buildKaiError("tenant_boundary_violation", { blockers: [tenant], data: null });
+  }
+
+  const repository =
+    dependencies.generatedContentRepository || (await createDefaultGeneratedContentRepository());
+  const result = await repository.completeGeneratedContentReview(input, {
+    metadataOnlyAudit: dependencies.metadataOnlyAudit,
+  });
+  if (!result.ok) return buildKaiError(result.error.code, { status: result.error.status, data: null });
+  return { ok: true, data: result.data, error: null };
+}
+
 export const __generatedContentServiceContract = Object.freeze({
   GENERATED_CONTENT_ALLOWED_ROLES,
   GENERATED_CONTENT_REVIEW_ALLOWED_ROLES,
+  COMPLETE_GENERATED_CONTENT_REVIEW_ALLOWED_ROLES,
   CREATE_EVIDENCE_SUMMARY_OPERATION,
   GET_GENERATED_DRAFT_REVIEW_PACKET_OPERATION,
+  COMPLETE_GENERATED_CONTENT_REVIEW_OPERATION,
 });
 
 export const __generatedContentReviewPacketServiceTestables = Object.freeze({
   isGeneratedDraftReviewPacketDto,
   isGeneratedDraftReviewPacketInput,
+});
+
+export const __completeGeneratedContentReviewServiceTestables = Object.freeze({
+  isCompleteGeneratedContentReviewInput,
+  isMappedHumanActor,
 });

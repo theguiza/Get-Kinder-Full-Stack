@@ -6,6 +6,7 @@ import {
 import { buildKaiError } from "../errors/kaiErrors.js";
 import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationService.js";
 import { validateExportManifestEligibility } from "../validators/kaiExportManifestEligibilityValidators.js";
+import { GENERATED_CONTENT_REVIEW_LIFECYCLE_PROFILES } from "../dictionary/generatedContentReviewQueueContract.js";
 
 const EXPORT_ELIGIBILITY_ALLOWED_ROLES = new Set(["gk_admin"]);
 const EVALUATE_EXPORT_ELIGIBILITY_OPERATION = "evaluate_generated_draft_export_eligibility";
@@ -87,6 +88,7 @@ export async function evaluateGeneratedDraftExportEligibility(input, dependencie
         tx,
         { organizationId: input.organizationId, generatedContentDraftId: input.generatedContentDraftId },
         evaluator,
+        { allowedLifecycleProfiles: GENERATED_CONTENT_REVIEW_LIFECYCLE_PROFILES },
       );
     });
   } catch (error) {
@@ -108,7 +110,7 @@ export async function evaluateGeneratedDraftExportEligibility(input, dependencie
     requestedExportAudience: input.requestedExportAudience,
     draftAudience: packet.requestedAudience,
     draftIsStillDraft: packet.draftStatus === "draft",
-    reviewIsResolved: packet.reviewStatus !== "needs_gk_review",
+    reviewIsResolved: packet.queueStatus === "resolved" && packet.reviewStatus === "resolved",
     currentUseEligible: packet.currentUseEligible === true,
     finalGate: false,
     affirmativeHumanExportAuthority: false,
