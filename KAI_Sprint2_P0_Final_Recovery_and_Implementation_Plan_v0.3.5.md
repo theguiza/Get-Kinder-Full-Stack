@@ -12189,3 +12189,240 @@ NOT_CONFIRMED:
     real-client-data access, route, UI, assistant operation, listener,
     startup registration, P3-05 work, new P3-04 package proposal, or new
     P3-04 review cycle was performed.
+
+### P3-05 GK export-review request foundation - completed 2026-08-06
+
+preflight:
+  branch: codex/kai-sprint2-p0-v0.3.5
+  head: 15a00cd99f5e5cfe7ef045b3d4580b5afa497af6
+  worktree: clean at task start, including untracked files; staged paths: none
+
+p3_05_made:
+  - Backend/kai/dictionary/postgresGeneratedContentRepository.js -
+    readReviewPacketState's queue lookup (used by the shared
+    evaluateGeneratedDraftReviewPacketInTransaction) gained one required
+    `AND queue_type = $4` predicate, matching the queue_type filter its
+    sibling readExistingState already applied. Before this package,
+    kai.review_queue_items never held two rows sharing the same
+    (organization_id, target_object_type='generated_content_draft',
+    target_object_id) for one draft, so the missing filter was latent; P3-05
+    is the first package to add a second queue_type ('export_review') against
+    that same target, and without this filter the shared P3-02 evaluator
+    would see two rows and fail every future P3-02/P3-03/P3-04 call for a
+    draft that ever requested export review. This is a minimal, purely
+    corrective, behavior-preserving fix for every previously-possible state
+    (re-verified: P3-01/P3-02/P3-03/P3-04 boundary and loopback suites are
+    unchanged, 49/49 and 58/58 respectively). Added one new dormant mutation
+    method, requestGeneratedDraftExportReview(input, {metadataOnlyAudit}), on
+    the object returned by createPostgresGeneratedContentRepository, plus
+    private helpers (validateRequestExportReviewInput,
+    loadExportReviewQueueRows, isExportReviewQueueContractRow,
+    buildCanonicalExportReviewValidatorResult,
+    evaluateExportReviewReadiness, toBlockedExportReviewResult,
+    toAcceptedExportReviewResult, buildExportReviewAuditMetadata,
+    insertExportReviewAudit, auditMetadataMatchesExportReview,
+    findMatchingExportReviewAudit, replayExportReviewFromExistingRow) and
+    exported constants (EXPORT_REVIEW_QUEUE_TYPE/TARGET_TYPE/PRIORITY/
+    SUMMARY/REQUIRED_ACTION/QUEUE_STATUS/REVIEW_STATUS/AUDIT_OPERATION/
+    AUDIT_CONTRACT/READINESS_FAILED_GATES) added to the existing
+    testables/contract objects. Inside one transaction: first checks for an
+    existing export_review queue row for (organization_id,
+    generated_content_draft_id) - if one exists, this is a replay attempt
+    and readiness is not recomputed, since replay is defined by matching
+    persisted state, not live re-evaluation (a later eligibility change must
+    not un-create an already-queued review request); if none exists,
+    evaluates authoritative readiness by calling the shared, unmodified
+    evaluateGeneratedDraftReviewPacketInTransaction with the exact P3-04
+    completed lifecycle profile ([{queueStatus:'resolved',
+    reviewStatus:'resolved'}], not the default open/needs_gk_review profile
+    and not the full three-profile matrix), then invokes the real,
+    unmodified VAL-EXP-001 (validateExportManifestEligibility) with
+    finalGate:false and affirmativeHumanExportAuthority:false hardcoded
+    exactly as P3-03 already does, plus the packet's own draftAudience/
+    draftIsStillDraft/reviewIsResolved/currentUseEligible; creation readiness
+    requires failed_gates to be exactly the three canonical codes
+    (generated_content_still_draft, affirmative_human_export_authority_absent,
+    final_export_gate_absent) and requestedExportAudience === draftAudience;
+    any other valid VAL-EXP-001 blocker set returns a successful blocked DTO
+    (exportReviewRequestAccepted:false, replayed:false, zero mutation, zero
+    audit) built only from the real validator's own output. On readiness,
+    INSERT ... ON CONFLICT (organization_id, queue_type, target_object_type,
+    target_object_id) WHERE queue_type='export_review' DO NOTHING RETURNING
+    creates the queue row (queue_status='open',
+    review_status='needs_gk_review', priority='normal', fixed summary/
+    required_action, blocked_reason/assigned_to/due_at/created_by all NULL,
+    queue_metadata='{}', created_by_type='system'); the row is re-read and
+    revalidated against the exact static contract; on a fresh insert, loads
+    the P3-04 audit-file-context mechanism unchanged
+    (loadAuditFileContext, reused verbatim) to satisfy
+    kai.upload_lifecycle_audit's NOT NULL intake_file_id/to_state, prepares
+    and publishes exactly one required metadata-only export_review_requested
+    audit (contract, organization_id, generated_content_draft_id,
+    review_queue_item_id, requested_export_audience, actor_id, actor_type,
+    requested_timestamp, validator_key, failed_gates - ten keys, no draft/
+    claim/evidence text), and re-reads to confirm exactly one matching
+    audit exists before returning exportReviewRequestAccepted:true,
+    replayed:false; on a lost race (INSERT returns zero rows because a
+    concurrent transaction already committed), falls back to the same
+    replay path used for a pre-existing row, requiring exactly one matching
+    export_review queue row and exactly one matching audit (matching
+    organization, draft, queue item, requested audience, contract label,
+    validator key, and the canonical three failed-gate codes; actor_id and
+    requested_timestamp are not compared, since a later authorized replay
+    may use a different actor and now) before returning
+    exportReviewRequestAccepted:true, replayed:true with the queue's
+    unchanged reviewQueueItemId; zero or duplicate matching audits, an
+    audit without a queue row, or a queue row failing the static contract
+    check all return conflict_current_state_changed with zero further
+    mutation. All post-insert-contract-check, audit-file-context, and
+    audit-prepare failures throw RollbackResultError so the queue insert and
+    any audit insert are rolled back together with zero partial effect; the
+    generic catch maps unknown/thrown errors (including a rejected
+    audit-prepare contract) to system_error rather than propagating.
+  - Backend/kai/services/kaiExportReviewService.js (new) -
+    requestGeneratedDraftExportReview(input, dependencies), following the
+    exact P3-03 gate order and lazy-loading idiom: KAI_SPRINT2_ENABLED ->
+    KAI_GENERATION_ENABLED -> KAI_PUBLIC_EXPORT_ENABLED -> exact five-key
+    input validation (organizationId, generatedContentDraftId,
+    requestedExportAudience, actorContext, now; canonical UUIDs, audience in
+    internal/funder/public, canonical UTC now) -> mapped-human actor check ->
+    validateActorCanPerformOperation with allowedRoles restricted to
+    gk_admin only (active tenant membership and role both enforced there) ->
+    only then a dynamic `await import` of postgresGeneratedContentRepository.js
+    (no database-capable module is imported at the top of this file). Builds
+    the repository call's response through one explicit eight-key allowlist
+    (isRequestExportReviewResultDto) that additionally enforces the accepted/
+    blocked field-nullability shape, returning system_error on any drift
+    rather than spreading the repository's row. New exports: the service
+    function; __exportReviewServiceContract
+    (EXPORT_REVIEW_ALLOWED_ROLES, REQUEST_EXPORT_REVIEW_OPERATION);
+    __exportReviewServiceTestables (isRequestExportReviewInput,
+    isMappedHumanActor, isRequestExportReviewResultDto).
+  - migrations/kai_sprint2_p3_05_export_review_request.sql (new) - guards on
+    kai.review_queue_items/generated_content_drafts/upload_lifecycle_audit
+    and kai.gate_a_p0_jsonb_metadata_only all existing; 'export_review' was
+    already an admitted review_queue_items.queue_type value from P1-06, so no
+    ALTER was needed for that vocabulary. Adds
+    ux_review_queue_items_p3_05_export_review_identity, a partial unique
+    index on (organization_id, queue_type, target_object_type,
+    target_object_id) WHERE queue_type='export_review' (the same pattern
+    P3-01 used for generated_content_review); adds
+    review_queue_items_p3_05_export_review_contract_check pinning
+    export_review rows to the single static open/needs_gk_review profile
+    (no lifecycle matrix, since this package never completes an export
+    review, only creates the request); extends
+    upload_lifecycle_audit_gate_a_operation_check (DROP+ADD, same
+    constraint name, following the exact P3-01/P3-04 convention) to admit
+    'export_review_requested'; adds
+    upload_lifecycle_audit_p3_05_metadata_object_check requiring the ten
+    metadata-only keys and forbidding draft_text, claim_text,
+    claim_statement, evidence_text, block_text, citations, filename,
+    storage_path, prompt, raw_content, source_text, generated_text,
+    credential, and notes, with a closed-key-set check identical in shape to
+    P3-01/P3-04's. No table, column, export-authority, final-gate, approval,
+    or finalization state is introduced anywhere in the kai schema.
+  - migrations/kai_sprint2_p3_05_export_review_request.rollback.sql (new) -
+    deletes export_review_requested audit rows and export_review queue rows,
+    drops the P3-05 metadata CHECK, restores the pre-P3-05 audit operation
+    vocabulary, drops the P3-05 queue contract CHECK and partial unique
+    index.
+  - scripts/kai-sprint2-p3-05-export-review-request-verifier.sql (new) -
+    asserts the export_review static-contract CHECK and partial unique
+    index exist, the new audit operation and its metadata-only CHECK exist,
+    and that no export-authority/final-gate/finalize/export column exists
+    anywhere in kai.
+  - scripts/kai-sprint2-p3-05-export-review-request-local-postgres.js (new) -
+    a runner-owned loopback-only ephemeral PostgreSQL harness following the
+    exact P3-04 pattern (loopback-only target proof before connection,
+    synthetic database name, random high port, ambient DATABASE_URL and
+    every ambient *_DATABASE_URL/PGURL_LOCAL variable overridden with a
+    disconnectable sentinel for every child process), applying every prior
+    migration plus this package's forward migration and both verifiers, then
+    running the P3-05 boundary and integration specs together with the
+    existing P3-01/P3-02/P3-03/P3-04 boundary specs against the same
+    database.
+  - __tests__/kai-sprint2-p3-05-export-review-request-boundary.spec.js (new) -
+    service gate-order tests (KAI_SPRINT2_ENABLED then KAI_GENERATION_ENABLED
+    then KAI_PUBLIC_EXPORT_ENABLED all precede any database-capable module
+    load; exact input/mapped-human/tenant-membership/gk_admin-only
+    authorization all precede the repository call, proven both by an
+    injected fake repository and by static source inspection for the lazy
+    `await import`) with an injected fake repository; repository-level tests
+    against a hand-built fake transaction proving:
+    validateRequestExportReviewInput's exact-key and canonical-timestamp
+    rejection; fresh creation writes exactly one export_review row and one
+    audit only when failed_gates is exactly the canonical three; a later
+    replay (different actor, different now) converges with zero additional
+    mutation or audit; currentUseEligible:false and an audience mismatch
+    each block creation with a successful DTO and zero mutation/audit; an
+    unresolved generated-content review conflicts without mutation; a
+    missing draft returns not_found; a cross-tenant generated-content-review
+    queue row conflicts; an existing export_review row without a matching
+    audit conflicts rather than replaying; duplicate matching audits fail
+    closed; a missing metadataOnlyAudit dependency is rejected before any
+    transaction; an audit-prepare rejection and an audit-publish failure
+    both fail closed with system_error rather than throwing past the
+    repository boundary; the draft, its blocks, its citations, and the
+    generated-content review queue row are byte-identical before and after
+    every call; and the published audit metadata contains exactly the
+    specified ten keys and no draft/claim/evidence text. Also proves the
+    service-level DTO allowlist accepts only the exact accepted and blocked
+    shapes.
+  - __tests__/kai-sprint2-p3-05-export-review-request.integration.spec.js
+    (new) - a runner-owned loopback-only PostgreSQL suite (non-loopback
+    target refused before connection) that creates one authentic draft
+    through the accepted P3-01 path, proves the export-review request is
+    rejected with conflict_current_state_changed while the generated-content
+    review is still open (not resolved/resolved), proves a missing
+    tenant-scoped draft returns not_found, drives the draft through the
+    real, unmodified P3-04 completeGeneratedContentReview to reach
+    resolved/resolved, then proves one fresh real export-review request
+    writes exactly one export_review queue row (queue_type='export_review',
+    queue_status='open', review_status='needs_gk_review') and one audit row
+    with the canonical three failed_gates and then replays idempotently with
+    a different actor and a later timestamp with zero additional writes/
+    audits; proves two genuinely concurrent identical requests (via
+    Promise.all against two separate pool connections, serialized by the
+    partial unique index) converge to exactly one queue row and one audit
+    row; proves draft_status, blocks, citations, and the generated-content
+    review queue row are untouched by the export-review request; proves the
+    published audit metadata carries no draft/claim/evidence text; and
+    confirms the ambient DATABASE_URL the harness sets is never the
+    runner-owned target.
+  - package.json - added verify:kai-sprint2-p3-05-export-review-request and
+    test:kai-sprint2-p3-05-export-review-request scripts following the
+    existing P3-01/P3-03/P3-04 naming convention.
+
+TOOL_VERIFIED:
+  - node --test __tests__/kai-sprint2-p3-05-export-review-request-boundary.spec.js ->
+    21/21 pass
+  - npm run verify:kai-sprint2-p3-05-export-review-request ->
+    runner-owned loopback PostgreSQL target; 79/79 pass, 0 fail (boundary +
+    integration + concurrency, together with the existing P3-01/P3-02/
+    P3-03/P3-04 boundary specs against the same database)
+  - npm run verify:kai-sprint2-p3-04-generated-content-review-completion ->
+    58/58 pass, 0 fail (re-verified unchanged after the readReviewPacketState
+    queue_type filter fix)
+  - node --test __tests__/kai-sprint2-p3-01-generated-content-drafts-boundary.spec.js
+    __tests__/kai-sprint2-p3-02-generated-draft-review-packet-boundary.spec.js
+    __tests__/kai-sprint2-p3-03-export-manifest-eligibility-boundary.spec.js
+    __tests__/kai-sprint2-p3-04-generated-content-review-completion-boundary.spec.js ->
+    49/49 pass (re-verified unchanged after the readReviewPacketState
+    queue_type filter fix)
+  - npm run test:kai-sprint2 -> complete Sprint 2 suite 1548 pass, 21 skip, 0 fail
+  - npm test -> complete repository suite 1653 pass, 21 skip, 0 fail
+  - git diff --check -> no whitespace errors
+  - git diff --cached --check -> no whitespace errors
+
+USER_CONFIRMED:
+  - P2-01 through P2-08 and P3-01 through P3-04 remain accepted and closed.
+  - P3-05 is authorized as one bounded GK export-review request foundation
+    mutation service.
+
+NOT_CONFIRMED:
+  - No push, merge, deploy, generation or export enablement, export
+    authority, final export gate, export record or file creation, export
+    review completion/approval path, production configuration change, cloud
+    access, real-client-data access, route, UI, assistant operation,
+    listener, startup registration, P3-06 work, new P3-05 package proposal,
+    or new P3-05 review cycle was performed.

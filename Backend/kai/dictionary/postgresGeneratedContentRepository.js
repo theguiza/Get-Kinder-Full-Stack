@@ -4,6 +4,10 @@ import { withTransaction } from "../db/kaiDb.js";
 import { evaluateClaimTraceabilityInTransaction } from "./postgresClaimTraceabilityRepository.js";
 import { validateGeneratedContentDraft } from "../validators/kaiGeneratedContentValidators.js";
 import {
+  validateExportManifestEligibility,
+  __exportManifestEligibilityValidatorContract,
+} from "../validators/kaiExportManifestEligibilityValidators.js";
+import {
   GENERATED_CONTENT_REVIEW_QUEUE_CONTRACT,
   GENERATED_CONTENT_REVIEW_LIFECYCLE_PROFILES,
   isGeneratedContentReviewQueueRow,
@@ -35,6 +39,40 @@ const COMPLETE_REVIEW_RESOLVED_PROFILE = GENERATED_CONTENT_REVIEW_LIFECYCLE_PROF
 const COMPLETE_REVIEW_AUDIT_OPERATION = "generated_content_review_completed";
 const COMPLETE_REVIEW_AUDIT_CONTRACT = "p3_04_generated_content_review_completion_v1";
 const COMPLETE_REVIEW_VALIDATOR_KEYS = ["VAL-REV-001"];
+
+const EXPORT_REVIEW_QUEUE_TYPE = "export_review";
+const EXPORT_REVIEW_TARGET_TYPE = "generated_content_draft";
+const EXPORT_REVIEW_PRIORITY = "normal";
+const EXPORT_REVIEW_SUMMARY = "Generated draft requires export review.";
+const EXPORT_REVIEW_REQUIRED_ACTION =
+  "Review audience authority, current eligibility, citations, and the final export gate before any export.";
+const EXPORT_REVIEW_QUEUE_STATUS = "open";
+const EXPORT_REVIEW_REVIEW_STATUS = "needs_gk_review";
+const EXPORT_REVIEW_AUDIT_OPERATION = "export_review_requested";
+const EXPORT_REVIEW_AUDIT_CONTRACT = "p3_05_export_review_request_v1";
+const EXPORT_REVIEW_READINESS_FAILED_GATES = Object.freeze([
+  "generated_content_still_draft",
+  "affirmative_human_export_authority_absent",
+  "final_export_gate_absent",
+]);
+const EXPORT_REVIEW_QUEUE_ROW_KEYS = new Set([
+  "review_queue_item_id",
+  "organization_id",
+  "queue_type",
+  "target_object_type",
+  "target_object_id",
+  "priority",
+  "queue_status",
+  "review_status",
+  "blocked_reason",
+  "assigned_to",
+  "due_at",
+  "summary",
+  "required_action",
+  "queue_metadata",
+  "created_by",
+  "created_by_type",
+]);
 
 function failure(code) {
   return { ok: false, data: null, error: { code, status: RESULT_STATUS[code] || 500 } };
@@ -347,8 +385,9 @@ async function readReviewPacketState(tx, { organizationId, generatedContentDraft
       WHERE organization_id = $1::uuid
         AND target_object_type = $2
         AND target_object_id = $3::uuid
+        AND queue_type = $4
       ORDER BY review_queue_item_id ASC`,
-    [organizationId, REVIEW_TARGET_TYPE, generatedContentDraftId],
+    [organizationId, REVIEW_TARGET_TYPE, generatedContentDraftId, REVIEW_QUEUE_TYPE],
   );
   return {
     run: runRows.rows[0] || null,
@@ -930,6 +969,211 @@ async function evaluateCompleteReviewReplayOrConflict(tx, input, evaluator) {
   return success(toCompleteReviewResult(packet, true));
 }
 
+function validateRequestExportReviewInput(input) {
+  return hasExactKeys(input, new Set([
+    "organizationId",
+    "generatedContentDraftId",
+    "requestedExportAudience",
+    "actorContext",
+    "now",
+  ]))
+    && UUID_PATTERN.test(input.organizationId)
+    && UUID_PATTERN.test(input.generatedContentDraftId)
+    && AUDIENCES.has(input.requestedExportAudience)
+    && Boolean(input.actorContext)
+    && typeof input.actorContext === "object"
+    && !Array.isArray(input.actorContext)
+    && isCanonicalUtcTimestamp(input.now);
+}
+
+async function loadExportReviewQueueRows(tx, { organizationId, generatedContentDraftId }) {
+  const { rows } = await tx.query(
+    `SELECT review_queue_item_id::text AS review_queue_item_id,
+            organization_id::text AS organization_id, queue_type, target_object_type,
+            target_object_id::text AS target_object_id, priority, queue_status, review_status,
+            blocked_reason, assigned_to::text AS assigned_to, due_at, summary, required_action,
+            queue_metadata, created_by::text AS created_by, created_by_type
+       FROM kai.review_queue_items
+      WHERE organization_id = $1::uuid
+        AND queue_type = $2
+        AND target_object_type = $3
+        AND target_object_id = $4::uuid`,
+    [organizationId, EXPORT_REVIEW_QUEUE_TYPE, EXPORT_REVIEW_TARGET_TYPE, generatedContentDraftId],
+  );
+  return rows;
+}
+
+function isExportReviewQueueContractRow(row, { organizationId, targetObjectId }) {
+  if (!hasOnlyAllowedKeys(row, EXPORT_REVIEW_QUEUE_ROW_KEYS)) return false;
+  return row.organization_id === organizationId
+    && row.queue_type === EXPORT_REVIEW_QUEUE_TYPE
+    && row.target_object_type === EXPORT_REVIEW_TARGET_TYPE
+    && row.target_object_id === targetObjectId
+    && row.priority === EXPORT_REVIEW_PRIORITY
+    && row.queue_status === EXPORT_REVIEW_QUEUE_STATUS
+    && row.review_status === EXPORT_REVIEW_REVIEW_STATUS
+    && row.blocked_reason === null
+    && row.assigned_to === null
+    && row.due_at === null
+    && row.summary === EXPORT_REVIEW_SUMMARY
+    && row.required_action === EXPORT_REVIEW_REQUIRED_ACTION
+    && row.created_by === null
+    && row.created_by_type === "system"
+    && Boolean(row.queue_metadata)
+    && typeof row.queue_metadata === "object"
+    && !Array.isArray(row.queue_metadata)
+    && Object.keys(row.queue_metadata).length === 0;
+}
+
+function buildCanonicalExportReviewValidatorResult(generatedContentDraftId) {
+  const contract = __exportManifestEligibilityValidatorContract;
+  return {
+    validator_key: contract.VALIDATOR_KEY,
+    severity: "blocker",
+    object_type: contract.OBJECT_TYPE,
+    object_code: contract.OBJECT_CODE,
+    object_id: generatedContentDraftId,
+    message: "Export manifest eligibility gates failed.",
+    blocking_reason: contract.BLOCKING_REASON,
+    required_fix: null,
+    evidence: { failed_gates: [...EXPORT_REVIEW_READINESS_FAILED_GATES] },
+  };
+}
+
+async function evaluateExportReviewReadiness(tx, input, evaluator) {
+  const packetResult = await evaluateGeneratedDraftReviewPacketInTransaction(
+    tx,
+    { organizationId: input.organizationId, generatedContentDraftId: input.generatedContentDraftId },
+    evaluator,
+    { allowedLifecycleProfiles: [COMPLETE_REVIEW_RESOLVED_PROFILE] },
+  );
+  if (!packetResult.ok) {
+    return { ok: false, code: packetResult.error.code === "not_found" ? "not_found" : "conflict_current_state_changed" };
+  }
+  const packet = packetResult.data;
+  const validatorResult = validateExportManifestEligibility({
+    generatedContentDraftId: input.generatedContentDraftId,
+    requestedExportAudience: input.requestedExportAudience,
+    draftAudience: packet.requestedAudience,
+    draftIsStillDraft: packet.draftStatus === "draft",
+    reviewIsResolved: packet.queueStatus === "resolved" && packet.reviewStatus === "resolved",
+    currentUseEligible: packet.currentUseEligible === true,
+    finalGate: false,
+    affirmativeHumanExportAuthority: false,
+  });
+  const failedGates = validatorResult.evidence?.failed_gates || [];
+  const ready = failedGates.length === EXPORT_REVIEW_READINESS_FAILED_GATES.length
+    && EXPORT_REVIEW_READINESS_FAILED_GATES.every((code) => failedGates.includes(code))
+    && input.requestedExportAudience === packet.requestedAudience;
+  return { ok: true, packet, validatorResult, ready };
+}
+
+function toBlockedExportReviewResult(input, validatorResult) {
+  return {
+    generatedContentDraftId: input.generatedContentDraftId,
+    requestedExportAudience: input.requestedExportAudience,
+    exportReviewRequestAccepted: false,
+    replayed: false,
+    reviewQueueItemId: null,
+    queueStatus: null,
+    reviewStatus: null,
+    validatorResult,
+  };
+}
+
+function toAcceptedExportReviewResult(input, reviewQueueItemId, replayed, validatorResult) {
+  return {
+    generatedContentDraftId: input.generatedContentDraftId,
+    requestedExportAudience: input.requestedExportAudience,
+    exportReviewRequestAccepted: true,
+    replayed,
+    reviewQueueItemId,
+    queueStatus: EXPORT_REVIEW_QUEUE_STATUS,
+    reviewStatus: EXPORT_REVIEW_REVIEW_STATUS,
+    validatorResult,
+  };
+}
+
+function buildExportReviewAuditMetadata({ input, reviewQueueItemId }) {
+  return {
+    contract: EXPORT_REVIEW_AUDIT_CONTRACT,
+    organization_id: input.organizationId,
+    generated_content_draft_id: input.generatedContentDraftId,
+    review_queue_item_id: reviewQueueItemId,
+    requested_export_audience: input.requestedExportAudience,
+    actor_id: input.actorContext.actorUserId,
+    actor_type: "human",
+    requested_timestamp: input.now,
+    validator_key: __exportManifestEligibilityValidatorContract.VALIDATOR_KEY,
+    failed_gates: [...EXPORT_REVIEW_READINESS_FAILED_GATES],
+  };
+}
+
+async function insertExportReviewAudit(tx, { input, auditFileContext, reviewQueueItemId }) {
+  await tx.query(
+    `INSERT INTO kai.upload_lifecycle_audit (
+       organization_id, intake_file_id, operation, from_state, to_state, outcome, metadata, created_at
+     )
+     VALUES ($1::uuid,$2::uuid,$3,$4,$4,'success',$5::jsonb,$6::timestamptz)`,
+    [
+      input.organizationId,
+      auditFileContext.intake_file_id,
+      EXPORT_REVIEW_AUDIT_OPERATION,
+      auditFileContext.upload_state,
+      JSON.stringify(buildExportReviewAuditMetadata({ input, reviewQueueItemId })),
+      input.now,
+    ],
+  );
+}
+
+function auditMetadataMatchesExportReview(metadata, { input, reviewQueueItemId }) {
+  return metadata
+    && metadata.contract === EXPORT_REVIEW_AUDIT_CONTRACT
+    && metadata.organization_id === input.organizationId
+    && metadata.generated_content_draft_id === input.generatedContentDraftId
+    && metadata.review_queue_item_id === reviewQueueItemId
+    && metadata.requested_export_audience === input.requestedExportAudience
+    && metadata.actor_type === "human"
+    && typeof metadata.actor_id === "string" && metadata.actor_id.length > 0
+    && metadata.validator_key === __exportManifestEligibilityValidatorContract.VALIDATOR_KEY
+    && Array.isArray(metadata.failed_gates)
+    && metadata.failed_gates.length === EXPORT_REVIEW_READINESS_FAILED_GATES.length
+    && EXPORT_REVIEW_READINESS_FAILED_GATES.every((code) => metadata.failed_gates.includes(code));
+}
+
+async function findMatchingExportReviewAudit(tx, { input, reviewQueueItemId }) {
+  const { rows } = await tx.query(
+    `SELECT metadata
+       FROM kai.upload_lifecycle_audit
+      WHERE organization_id = $1::uuid
+        AND operation = $2
+        AND outcome = 'success'
+        AND metadata->>'generated_content_draft_id' = $3
+        AND metadata->>'review_queue_item_id' = $4`,
+    [input.organizationId, EXPORT_REVIEW_AUDIT_OPERATION, input.generatedContentDraftId, reviewQueueItemId],
+  );
+  const matches = rows.filter((row) => auditMetadataMatchesExportReview(row.metadata, { input, reviewQueueItemId }));
+  return matches.length === 1;
+}
+
+async function replayExportReviewFromExistingRow(tx, input, existingRow) {
+  if (!isExportReviewQueueContractRow(existingRow, {
+    organizationId: input.organizationId,
+    targetObjectId: input.generatedContentDraftId,
+  })) {
+    return failure("conflict_current_state_changed");
+  }
+  const reviewQueueItemId = existingRow.review_queue_item_id;
+  const hasMatchingAudit = await findMatchingExportReviewAudit(tx, { input, reviewQueueItemId });
+  if (!hasMatchingAudit) return failure("conflict_current_state_changed");
+  return success(toAcceptedExportReviewResult(
+    input,
+    reviewQueueItemId,
+    true,
+    buildCanonicalExportReviewValidatorResult(input.generatedContentDraftId),
+  ));
+}
+
 export function createPostgresGeneratedContentRepository({
   runInTransaction = withTransaction,
   evaluator = evaluateClaimTraceabilityInTransaction,
@@ -1129,6 +1373,91 @@ export function createPostgresGeneratedContentRepository({
         return failure("system_error");
       }
     },
+    async requestGeneratedDraftExportReview(input, dependencies = {}) {
+      if (!validateRequestExportReviewInput(input)) return failure("validation_blocker");
+      if (!dependencies.metadataOnlyAudit) return failure("validation_blocker");
+
+      try {
+        return await runInTransaction(async (tx) => {
+          const existingRows = await loadExportReviewQueueRows(tx, input);
+          if (existingRows.length > 1) return failure("conflict_current_state_changed");
+          if (existingRows.length === 1) {
+            return replayExportReviewFromExistingRow(tx, input, existingRows[0]);
+          }
+
+          const readiness = await evaluateExportReviewReadiness(tx, input, evaluator);
+          if (!readiness.ok) return failure(readiness.code);
+          if (!readiness.ready) {
+            return success(toBlockedExportReviewResult(input, readiness.validatorResult));
+          }
+
+          const inserted = await tx.query(
+            `INSERT INTO kai.review_queue_items (
+               organization_id, engagement_id, queue_type, target_object_type, target_object_id,
+               priority, queue_status, review_status, blocked_reason, assigned_to, due_at,
+               summary, required_action, queue_metadata, created_by, created_by_type, created_at, updated_at
+             )
+             VALUES ($1::uuid,NULL,$2,$3,$4::uuid,$5,$6,$7,NULL,NULL,NULL,$8,$9,'{}'::jsonb,NULL,'system',$10::timestamptz,$10::timestamptz)
+             ON CONFLICT (organization_id, queue_type, target_object_type, target_object_id)
+               WHERE queue_type = 'export_review'
+               DO NOTHING
+             RETURNING review_queue_item_id::text AS review_queue_item_id`,
+            [
+              input.organizationId,
+              EXPORT_REVIEW_QUEUE_TYPE,
+              EXPORT_REVIEW_TARGET_TYPE,
+              input.generatedContentDraftId,
+              EXPORT_REVIEW_PRIORITY,
+              EXPORT_REVIEW_QUEUE_STATUS,
+              EXPORT_REVIEW_REVIEW_STATUS,
+              EXPORT_REVIEW_SUMMARY,
+              EXPORT_REVIEW_REQUIRED_ACTION,
+              input.now,
+            ],
+          );
+
+          const postInsertRows = await loadExportReviewQueueRows(tx, input);
+          if (postInsertRows.length !== 1) throw new RollbackResultError(failure("system_error"));
+          const queueRow = postInsertRows[0];
+
+          if (inserted.rows.length !== 1) {
+            return replayExportReviewFromExistingRow(tx, input, queueRow);
+          }
+
+          if (!isExportReviewQueueContractRow(queueRow, {
+            organizationId: input.organizationId,
+            targetObjectId: input.generatedContentDraftId,
+          })) {
+            throw new RollbackResultError(failure("conflict_current_state_changed"));
+          }
+          const reviewQueueItemId = queueRow.review_queue_item_id;
+
+          const auditFileContext = await loadAuditFileContext(tx, input);
+          if (!auditFileContext) throw new RollbackResultError(failure("system_error"));
+
+          const preparedAudit = prepareRequiredAudit(dependencies.metadataOnlyAudit, {
+            attempted_operation: EXPORT_REVIEW_AUDIT_OPERATION,
+            actor_type: "human",
+            object_type: "export_review_queue_item",
+            request_scope: "organization_export_review_queue_item",
+            contract: EXPORT_REVIEW_AUDIT_CONTRACT,
+          });
+          await insertExportReviewAudit(tx, { input, auditFileContext, reviewQueueItemId });
+          await preparedAudit.publish();
+
+          const hasMatchingAudit = await findMatchingExportReviewAudit(tx, { input, reviewQueueItemId });
+          if (!hasMatchingAudit) throw new RollbackResultError(failure("system_error"));
+
+          return success(toAcceptedExportReviewResult(input, reviewQueueItemId, false, readiness.validatorResult));
+        });
+      } catch (error) {
+        if (error instanceof RollbackResultError) return error.result;
+        if (error?.code === "23505") return failure("conflict_current_state_changed");
+        if (error?.code === "23503" || error?.code === "22P02" || error?.code === "23514") return failure("validation_blocker");
+        if (error?.code === "25001") return failure("conflict_current_state_changed");
+        return failure("system_error");
+      }
+    },
   });
 }
 
@@ -1146,6 +1475,16 @@ export const __generatedContentRepositoryContract = Object.freeze({
   COMPLETE_REVIEW_RESOLVED_PROFILE,
   COMPLETE_REVIEW_AUDIT_OPERATION,
   COMPLETE_REVIEW_AUDIT_CONTRACT,
+  EXPORT_REVIEW_QUEUE_TYPE,
+  EXPORT_REVIEW_TARGET_TYPE,
+  EXPORT_REVIEW_PRIORITY,
+  EXPORT_REVIEW_SUMMARY,
+  EXPORT_REVIEW_REQUIRED_ACTION,
+  EXPORT_REVIEW_QUEUE_STATUS,
+  EXPORT_REVIEW_REVIEW_STATUS,
+  EXPORT_REVIEW_AUDIT_OPERATION,
+  EXPORT_REVIEW_AUDIT_CONTRACT,
+  EXPORT_REVIEW_READINESS_FAILED_GATES,
 });
 
 export const __generatedContentRepositoryTestables = Object.freeze({
@@ -1157,4 +1496,6 @@ export const __generatedContentRepositoryTestables = Object.freeze({
   validateCompleteReviewInput,
   fingerprintEvidenceSummaryRequest,
   prepareRequiredAudit,
+  validateRequestExportReviewInput,
+  isExportReviewQueueContractRow,
 });
