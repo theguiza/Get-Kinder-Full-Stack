@@ -10900,3 +10900,137 @@ not_confirmed:
   prior_unintended_database_selection_effects: NOT_CONFIRMED
   remote_execution_environment_parity: NOT_CONFIRMED
 ```
+
+## KAI P2-03C — Current-source-version claim gate correction (appended, additions-only)
+
+Bounded correction applied on top of the accepted P2-03 package above. Nothing in
+the P2-03 section preceding this one was edited; this block only records what
+P2-03C changed and why.
+
+```yaml
+timestamp_local: 2026-08-06 (local session clock, not independently verified)
+branch: codex/kai-sprint2-p0-v0.3.5
+package: KAI P2-03C - current-source-version claim gate correction
+status: TOOL_VERIFIED
+
+pre_append_execplan:
+  byte_count: 827621
+  sha256: cce87e65601477de05255bac56399bb31512dba2b29d07b071c519847e90db46
+  preserved_copy: not made - this append is a single Edit tool call matching the
+    exact trailing bytes above, verified pre-image, no earlier byte rewritten
+  prefix_proof: the byte_count/sha256 above were computed against the file
+    immediately before this block was appended; everything preceding this
+    section is byte-for-byte the accepted P2-01/P2-01C/P2-02/P2-03 content
+
+preflight:
+  branch: codex/kai-sprint2-p0-v0.3.5
+  head: 540cfa4d6d24905c756fd8b36830e8682eae61d2
+  worktree: clean, including untracked files; staged paths: none
+
+defect:
+  - the accepted P2-03 validateClaimHasLoadBearingEvidence
+    (Backend/kai/validators/kaiClaimProposalValidators.js) required complete
+    tenant-safe evidence/source/version/locator lineage, a promoted
+    candidate/decision, and a compatible evidence_review pair, but never
+    required the loaded sourceVersionRow itself to remain the current version
+    of its source - a claim could be proposed from evidence whose
+    authoritative source_version had since been superseded, as long as every
+    other row (evidence item, locator, source row, candidate, decision,
+    evidence_review item) still existed, still referenced it, and the
+    candidate/decision remained promoted
+
+p2_03c_made:
+  validator:
+    - added a new check (renumbered check 8, moving the prior evidence_review-
+      pair-compatibility check to 9) requiring
+      `sourceVersionRow.is_current === true`; `false`, missing, or `null`
+      returns `conflict_current_state_changed`, before any claim,
+      claim-to-evidence link, claim_review queue item, audit row, or audit
+      publication - mirrors P2-01's own equivalent current-source-version gate
+      (Backend/kai/validators/kaiEvidenceLineageValidators.js)
+  tests:
+    - __tests__/kai-sprint2-p2-03-claim-proposal-boundary.spec.js: added
+      `is_current: true` to the default `validRows()` sourceVersionRow
+      fixture (required for every pre-existing test in this file to keep
+      passing under the new check), and two new focused tests -
+      `is_current = false`/missing/`null` fails closed with
+      `conflict_current_state_changed` regardless of every other row
+      remaining promoted/referencing it, and `is_current = true` preserves
+      both the existing warning and no-warning pass paths
+    - __tests__/kai-sprint2-p2-03-claim-proposal.integration.spec.js: added
+      one PostgreSQL integration test seeding an otherwise-valid promoted
+      evidence item/evidence_review pair, setting its source_version's
+      `is_current` to `false` before calling `repository.proposeClaim`, and
+      proving `conflict_current_state_changed` with zero new `kai.claims`,
+      `kai.claim_evidence_links`, or `claim_review` `kai.review_queue_items`
+      rows, zero new `claim_proposed` `kai.upload_lifecycle_audit` rows, and
+      zero audit publication
+  docs:
+    - scripts/kai-sprint2-p2-03-claim-proposal-runbook.md: documented the new
+      current-source-version requirement in both the lineage-authority
+      section and the VAL-KAI-P2-03-001 description
+    - scripts/kai-sprint2-p2-03-claim-proposal-patch-notes.md: appended a
+      "P2-03C correction" section recording the defect and the fix
+  not_touched:
+    - no migration, rollback, repository, or service file was edited - the
+      repository already reads sourceVersionRow.is_current via the shared
+      getScopedSourceVersionById helper (the same helper P2-01/P2-02 use);
+      only the validator was under-checking the value already being read
+    - no other P2-03 validator, write path, replay/idempotency behavior,
+      audit contract, or queue-item contract was changed
+    - P2-02 (accepted and closed) was not reopened or modified
+    - no evidence-review identity redesign, queue foreign key, claim schema
+      change, or missing-pair error-behavior change was made
+
+commands:
+  - focused P2-03 schema-contract, boundary, and runner-self-test suite
+    (50 tests): TOOL_VERIFIED
+  - P2-03 PostgreSQL verifier and integration suite
+    (`npm run verify:kai-sprint2-p2-03-claim-proposal`, 15 integration tests
+    plus the 15-row SQL smoke verifier): TOOL_VERIFIED
+  - P2-02 PostgreSQL integration suite
+    (`npm run verify:kai-sprint2-p2-02-evidence-coverage-assessment`):
+    TOOL_VERIFIED
+  - P2-01 PostgreSQL verifier and integration suite
+    (`npm run verify:kai-sprint2-p2-01-evidence-lineage`): TOOL_VERIFIED
+  - complete Sprint 2 suite (`npm run test:kai-sprint2`): TOOL_VERIFIED - 1365
+    pass, 0 fail, 11 skipped (Postgres-gated suites skip without a runner-owned
+    DATABASE_URL env var; each ran green independently above)
+  - complete repository suite (`npm test`): TOOL_VERIFIED - 1470 pass, 0 fail,
+    11 skipped
+  - git diff --check: TOOL_VERIFIED, clean
+  - git diff --cached --check: TOOL_VERIFIED, clean
+
+complete_diff_scope: Backend/kai/validators/kaiClaimProposalValidators.js,
+  __tests__/kai-sprint2-p2-03-claim-proposal-boundary.spec.js,
+  __tests__/kai-sprint2-p2-03-claim-proposal.integration.spec.js,
+  scripts/kai-sprint2-p2-03-claim-proposal-runbook.md,
+  scripts/kai-sprint2-p2-03-claim-proposal-patch-notes.md, and this living
+  ExecPlan correction block only
+
+final_commit_hash: report after commit
+final_worktree_and_staged_state: report after commit
+
+prohibited_actions_not_performed:
+  - no push, merge, or deploy of any kind
+  - no reopening of P2-02 (its own section above is unmodified)
+  - no other package proposed or begun; no P2-04 work
+  - no schema, migration, or rollback change
+  - no route, worker, listener, or production composition
+  - no feature flag added or enabled
+  - no evidence-review identity redesign, queue foreign key, or claim schema
+    change
+
+user_confirmed_starting_assumptions:
+  - branch/HEAD/worktree preflight state (see preflight above) matched the
+    expected state given at task start; proceeded directly per instruction
+
+not_confirmed:
+  deployment: NOT_CONFIRMED
+  production_or_shared_database_state: NOT_CONFIRMED
+  feature_enablement: NOT_CONFIRMED
+  production_runtime_composition: NOT_CONFIRMED
+  real_client_data_behavior: NOT_CONFIRMED
+  prior_unintended_database_selection_effects: NOT_CONFIRMED
+  remote_execution_environment_parity: NOT_CONFIRMED
+```

@@ -121,7 +121,15 @@ export function validateClaimHasLoadBearingEvidence(rows) {
     return { ok: false, code: "conflict_current_state_changed" };
   }
 
-  // 8. The evidence_review queue-item pair must be immutably compatible: exact
+  // 8. The source_version must still be the current version of its source.
+  // A superseded source_version is not sufficient for load-bearing evidence,
+  // regardless of whether the evidence item, locator, source row, candidate,
+  // decision, or evidence_review item still reference/remain promoted.
+  if (sourceVersionRow.is_current !== true) {
+    return { ok: false, code: "conflict_current_state_changed" };
+  }
+
+  // 9. The evidence_review queue-item pair must be immutably compatible: exact
   // queue_type/target_object_type/target_object_id/tenant match against this
   // evidence item. A missing pair was already caught by check 1 (not_found); an
   // incompatible pair is a conflict.

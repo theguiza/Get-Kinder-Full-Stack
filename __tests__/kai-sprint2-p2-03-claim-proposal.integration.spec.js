@@ -476,6 +476,42 @@ async function runClaimProposalIntegrationSuite() {
     assert.equal(count.rows[0].count, 0);
   });
 
+  test("P2-03 (e): a superseded (non-current) source_version returns conflict_current_state_changed without creating any claim, link, queue item, or audit row - even though the evidence item, locator, source, candidate, decision, and evidence_review pair all remain otherwise valid", async () => {
+    const seed = await seedPromotedEvidenceItem(13);
+    await withClient((client) => client.query(
+      `UPDATE kai.source_versions SET is_current = false WHERE source_version_id = $1::uuid`,
+      [seed.sourceVersionId],
+    ));
+    const audit = createAuditProbe();
+
+    const claimReviewCountBefore = await withClient((client) => client.query(
+      `SELECT count(*)::int AS count FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = 'claim_review'`,
+      [ORG],
+    ));
+
+    const result = await repository.proposeClaim({
+      organizationId: ORG,
+      evidenceItemId: seed.evidenceItemId,
+      actorUserId: "90000000-0000-4000-8000-000000000001",
+      now: NOW,
+      metadataOnlyAudit: audit.dependency,
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "conflict_current_state_changed");
+    assert.equal(audit.published.length, 0);
+
+    const counts = await withClient((client) => Promise.all([
+      client.query(`SELECT count(*)::int AS count FROM kai.claims WHERE evidence_item_id = $1::uuid`, [seed.evidenceItemId]),
+      client.query(`SELECT count(*)::int AS count FROM kai.claim_evidence_links WHERE evidence_item_id = $1::uuid`, [seed.evidenceItemId]),
+      client.query(`SELECT count(*)::int AS count FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = 'claim_review'`, [ORG]),
+      client.query(`SELECT count(*)::int AS count FROM kai.upload_lifecycle_audit WHERE operation = 'claim_proposed' AND organization_id = $1::uuid AND intake_file_id = $2::uuid`, [ORG, seed.intakeFileId]),
+    ]));
+    assert.equal(counts[0].rows[0].count, 0);
+    assert.equal(counts[1].rows[0].count, 0);
+    assert.equal(counts[2].rows[0].count, claimReviewCountBefore.rows[0].count, "no new claim_review queue item");
+    assert.equal(counts[3].rows[0].count, 0);
+  });
+
   // NOTE: the evidence_review-pair compatibility check inside
   // validateClaimHasLoadBearingEvidence (queue_type/target_object_type/
   // target_object_id equality) has no reachable real-row failure mode at this

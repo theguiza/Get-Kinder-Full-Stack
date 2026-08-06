@@ -156,6 +156,16 @@ identity (`queue_type = 'evidence_review'`, `target_object_type =
 paths: zero mutation, zero audit. P2-03 never mutates or resolves the
 evidence_review item - it only reads it.
 
+The loaded `source_version` row must also still be current
+(`is_current === true`) (P2-03C correction). A superseded source_version is
+never sufficient, regardless of whether the evidence item, locator, source
+row, candidate, decision, or evidence_review item still reference it, still
+remain promoted, or still exist - only evidence whose complete authoritative
+lineage resolves to the current source_version may produce the P2-03
+internal-only proposed claim. `is_current` missing, null, or `false` ->
+`conflict_current_state_changed`, before any claim, claim-to-evidence link,
+claim_review queue item, audit row, or audit publication.
+
 ## VAL-KAI-P2-03-001/002/003 (`Backend/kai/validators/kaiClaimProposalValidators.js`)
 
 Boolean-gate return shape, adapted from the P2-01 idiom with an added
@@ -164,8 +174,10 @@ Boolean-gate return shape, adapted from the P2-01 idiom with an added
 
 1. **`validateClaimHasLoadBearingEvidence`**: requires complete tenant-safe
    evidence/source/version/locator lineage (all rows present and cross-row
-   org/lineage-consistent) plus the compatible evidence_review pair; missing
-   lineage -> `not_found`; incompatible lineage -> `conflict_current_state_changed`;
+   org/lineage-consistent), that the source_version remain current
+   (`is_current === true`; P2-03C), plus the compatible evidence_review pair;
+   missing lineage -> `not_found`; incompatible lineage or a non-current
+   source_version -> `conflict_current_state_changed`;
    non-promoted candidate/decision -> `validation_blocker`. Passing returns a
    warning while the evidence item's `support_strength` remains `'unassessed'`
    or its evidence_review's `review_status` remains unresolved - in this

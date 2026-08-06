@@ -57,6 +57,7 @@ function validRows(overrides = {}) {
       organization_id: ORG,
       source_id: SOURCE,
       intake_source_candidate_id: CANDIDATE,
+      is_current: true,
       ...overrides.sourceVersionRow,
     },
     candidateRow: {
@@ -170,6 +171,30 @@ test("validateClaimHasLoadBearingEvidence: source_version bound to a different c
   const result = validateClaimHasLoadBearingEvidence(validRows({ sourceVersionRow: { intake_source_candidate_id: "99999999-0000-4000-8000-000000000092" } }));
   assert.equal(result.ok, false);
   assert.equal(result.code, "conflict_current_state_changed");
+});
+
+test("validateClaimHasLoadBearingEvidence: a non-current source_version fails closed with conflict_current_state_changed, regardless of every other row remaining promoted/referencing it", () => {
+  for (const isCurrent of [false, undefined, null]) {
+    const result = validateClaimHasLoadBearingEvidence(validRows({ sourceVersionRow: { is_current: isCurrent } }));
+    assert.equal(result.ok, false, String(isCurrent));
+    assert.equal(result.code, "conflict_current_state_changed", String(isCurrent));
+  }
+});
+
+test("validateClaimHasLoadBearingEvidence: is_current === true preserves the existing warning and no-warning paths", () => {
+  const withWarning = validateClaimHasLoadBearingEvidence(validRows({ sourceVersionRow: { is_current: true } }));
+  assert.equal(withWarning.ok, true);
+  assert.equal(withWarning.warnings.length, 1);
+
+  const withoutWarning = validateClaimHasLoadBearingEvidence(
+    validRows({
+      sourceVersionRow: { is_current: true },
+      evidenceItemRow: { support_strength: "supported" },
+      evidenceReviewQueueItemRow: { review_status: "resolved" },
+    }),
+  );
+  assert.equal(withoutWarning.ok, true);
+  assert.equal(withoutWarning.warnings.length, 0);
 });
 
 test("validateClaimHasLoadBearingEvidence: an evidence_review pair with mismatched target identity returns conflict_current_state_changed", () => {

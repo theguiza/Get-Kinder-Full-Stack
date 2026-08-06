@@ -171,3 +171,36 @@ happen inside one transaction; any compare-and-set observing a genuine
 concurrent state change, a rejected required-audit prepare, a synchronous
 publish failure, a rejected publish promise, or a malformed inserted row rolls
 back all of it together.
+
+## P2-03C correction — current-source-version claim gate
+
+`validateClaimHasLoadBearingEvidence` (`Backend/kai/validators/kaiClaimProposalValidators.js`)
+did not require the loaded `sourceVersionRow.is_current` to be `true` before
+allowing claim proposal, so a claim could be proposed from evidence whose
+authoritative source_version had since been superseded, as long as the
+evidence item, locator, source row, candidate, decision, and evidence_review
+item all still otherwise existed and remained promoted.
+
+Corrected: a new check (P2-03 check 8, renumbering the evidence_review-pair
+check to 9) requires `sourceVersionRow.is_current === true`; anything else
+(`false`, missing, `null`) returns `conflict_current_state_changed` before any
+claim, claim-to-evidence link, claim_review queue item, audit row, or audit
+publication. This mirrors P2-01's own equivalent current-source-version gate
+(`Backend/kai/validators/kaiEvidenceLineageValidators.js`).
+
+Added:
+- One focused boundary test proving `is_current = false`/missing/`null` fails
+  closed with `conflict_current_state_changed`, and `is_current = true`
+  preserves the existing warning and no-warning paths
+  (`__tests__/kai-sprint2-p2-03-claim-proposal-boundary.spec.js`).
+- One PostgreSQL integration test seeding an otherwise-valid promoted evidence
+  item/evidence_review pair, making its source_version non-current, and
+  proving `conflict_current_state_changed` with zero new claim, link,
+  claim_review queue item, or audit rows, and zero audit publication
+  (`__tests__/kai-sprint2-p2-03-claim-proposal.integration.spec.js`).
+
+No migration, rollback, repository, or service change was required: the
+repository already reads `sourceVersionRow.is_current` via the shared
+`getScopedSourceVersionById` helper (the same helper P2-01/P2-02 use); only
+the validator was under-checking it. P2-02 remains accepted and closed and
+was not touched.
