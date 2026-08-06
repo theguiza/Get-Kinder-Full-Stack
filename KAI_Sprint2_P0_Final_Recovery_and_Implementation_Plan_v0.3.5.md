@@ -11885,3 +11885,102 @@ NOT_CONFIRMED:
     registration, migration, approval, export, production wiring, queue
     transition, audit mutation, production database access, P3-03 work, new
     P3-02 package proposal, or new P3-02 review cycle was performed.
+### P3-03 export-manifest eligibility preflight - completed 2026-08-06
+
+preflight:
+  branch: codex/kai-sprint2-p0-v0.3.5
+  head: 84aa63edad43e1ef3a5ff5d8be8cc2d613dc8d70
+  worktree: clean at task start, including untracked files; staged paths: none
+
+p3_03_made:
+  - Backend/kai/config/kaiSprint2Config.js - added isKaiPublicExportEnabled and
+    areKaiSprint2PublicExportFeaturesEnabled following the exact
+    isKaiGenerationEnabled/areKaiSprint2GenerationFeaturesEnabled composition
+    idiom already established in this file. KAI_PUBLIC_EXPORT_ENABLED is not
+    enabled by this package.
+  - Backend/kai/validators/kaiExportManifestEligibilityValidators.js - added
+    the canonical VAL-EXP-001 validateExportManifestEligibility validator using
+    the shared createValidatorResult helper from validators/types.js. Exact
+    input contract; failed_gates populated once each in the specified stable
+    order; blocker evidence contains only failed_gates; pass evidence is empty.
+  - Backend/kai/dictionary/postgresGeneratedContentRepository.js - the smallest
+    behavior-preserving internal refactor: extracted the existing
+    getGeneratedDraftReviewPacket transaction body (read state, validate rows,
+    build the packet) into one exported
+    evaluateGeneratedDraftReviewPacketInTransaction(tx, input, evaluator)
+    function; getGeneratedDraftReviewPacket now calls it inside its own
+    unchanged transaction/isolation-level/error-mapping wrapper. Also exported
+    the existing RollbackResultError class so callers reusing the extracted
+    evaluator can unwrap its rollback-carried result. No SQL, validation, or
+    public behavior changed; P3-01 and P3-02 tests re-verified unchanged below.
+  - Backend/kai/services/kaiExportEligibilityService.js - added one dormant
+    read-only evaluateGeneratedDraftExportEligibility service. Gate order:
+    KAI_SPRINT2_ENABLED -> KAI_GENERATION_ENABLED -> KAI_PUBLIC_EXPORT_ENABLED
+    -> exact input validation -> mapped-human validation -> active tenant
+    membership + gk_admin authorization (validateActorCanPerformOperation) ->
+    lazy dynamic import of kaiDb.js/postgresGeneratedContentRepository.js/
+    postgresClaimTraceabilityRepository.js. Opens one transaction-scoped
+    REPEATABLE READ READ ONLY snapshot and reuses
+    evaluateGeneratedDraftReviewPacketInTransaction inside it (no nested
+    transaction, no public P3-02 service call, no duplicated graph/citation/
+    P2-06/DTO/leakage logic). Maps the reused evaluator's not_found to
+    not_found and every other reused failure (validation_blocker,
+    conflict_current_state_changed, system_error, and RollbackResultError
+    rollback results) to conflict_current_state_changed, so corrupted
+    authoritative state is never classified through VAL-EXP-001. On a valid
+    packet, always derives affirmativeHumanExportAuthority=false and
+    finalGate=false (no accepted persisted representation of either exists),
+    calls VAL-EXP-001, and returns the exact specified output field set with
+    exportEligible = (validatorResult.severity === "pass"). Performs no
+    INSERT/UPDATE/DELETE, audit, queue transition, export-manifest creation,
+    or finalization.
+  - __tests__/kai-sprint2-p3-03-export-manifest-eligibility-boundary.spec.js -
+    pure VAL-EXP-001 contract tests (pass, blocker, stable failed_gates
+    ordering, final_gate_true_while_draft/final_export_gate_absent mutual
+    exclusion, exact-input rejection) and pure service gate-order tests with
+    injected dependencies proving each disabled flag returns feature_disabled
+    before the transaction-scoped read runs, proving not_found and
+    conflict_current_state_changed boundaries, proving the exact output field
+    set, and proving no persisted authority/final-gate is ever inferred from
+    queue resolution, currentUseEligible, actor role, or absence of blockers.
+  - __tests__/kai-sprint2-p3-03-export-manifest-eligibility.integration.spec.js
+    and scripts/kai-sprint2-p3-03-export-manifest-eligibility-local-postgres.js -
+    a runner-owned loopback-only PostgreSQL suite (non-loopback target refused
+    before connection, ambient ignored via runner-owned env var only) that
+    creates one authentic draft through the accepted P3-01 path, then reuses
+    the real evaluateGeneratedDraftReviewPacketInTransaction to prove: the
+    real-repository path always fails closed (exportEligible:false, blocker
+    severity) for an authentic P3-01/P3-02 draft; audience mismatch and current
+    ineligibility each add their own gate; a missing draft returns not_found;
+    a malformed evidence-identity mismatch returns conflict_current_state_changed;
+    and zero writes, queue transitions, audits, or file/manifest effects occur.
+  - package.json - added verify:kai-sprint2-p3-03-export-manifest-eligibility
+    and test:kai-sprint2-p3-03-export-manifest-eligibility scripts following
+    the existing P3-01/P3-02 naming convention.
+
+TOOL_VERIFIED:
+  - node --test __tests__/kai-sprint2-p3-03-export-manifest-eligibility-boundary.spec.js __tests__/kai-sprint2-p3-03-export-manifest-eligibility.integration.spec.js ->
+    19/19 pass, 1 skip (runner-owned integration suite skipped without the
+    loopback database)
+  - npm run verify:kai-sprint2-p3-03-export-manifest-eligibility ->
+    runner-owned loopback PostgreSQL target; 26/26 pass
+  - npm run verify:kai-sprint2-p3-01-generated-content-drafts -> 18/18 pass
+  - npm run verify:kai-sprint2-p3-02-generated-draft-review-packet -> 16/16 pass
+  - npm run test:kai-sprint2 -> complete Sprint 2 suite 1504 pass, 19 skip, 0 fail
+  - npm test -> complete repository suite 1609 pass, 19 skip, 0 fail
+  - git diff --check -> no whitespace errors
+  - git diff --cached --check -> no whitespace errors
+
+USER_CONFIRMED:
+  - P2-01 through P2-08 and P3-01 through P3-02 remain accepted and closed.
+  - P3-03 is authorized as one bounded dormant read-only export-manifest
+    eligibility preflight service.
+
+NOT_CONFIRMED:
+  - No push, merge, deploy, public export enablement, production configuration
+    change, cloud access, real-client-data access, route, UI, assistant
+    operation, listener, startup registration, migration, approval or
+    finalization transition, export-manifest creation, export-review queue
+    creation, file rendering, audit mutation, production database access,
+    P3-04 work, new P3-03 package proposal, or new P3-03 review cycle was
+    performed.

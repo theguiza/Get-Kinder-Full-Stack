@@ -40,6 +40,14 @@ export function areKaiSprint2GenerationFeaturesEnabled(env = process.env) {
   return isKaiSprint2Enabled(env) && isKaiGenerationEnabled(env);
 }
 
+export function isKaiPublicExportEnabled(env = process.env) {
+  return isEnabledValue(env.KAI_PUBLIC_EXPORT_ENABLED);
+}
+
+export function areKaiSprint2PublicExportFeaturesEnabled(env = process.env) {
+  return isKaiSprint2Enabled(env) && isKaiGenerationEnabled(env) && isKaiPublicExportEnabled(env);
+}
+
 export function requireKaiSprint2Enabled(req, res, next) {
   if (isKaiSprint2Enabled()) return next();
 

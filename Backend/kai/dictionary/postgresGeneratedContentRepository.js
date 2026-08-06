@@ -37,7 +37,7 @@ function success(data) {
   return { ok: true, data, error: null };
 }
 
-class RollbackResultError extends Error {
+export class RollbackResultError extends Error {
   constructor(result) {
     super("rollback generated-content transaction");
     this.name = "RollbackResultError";
@@ -703,6 +703,16 @@ async function rereadAsResult(tx, input, requestFingerprint, replayed) {
   return success(toResult(state, replayed));
 }
 
+export async function evaluateGeneratedDraftReviewPacketInTransaction(tx, input, evaluator = evaluateClaimTraceabilityInTransaction) {
+  if (!validateReviewPacketInput(input)) return failure("validation_blocker");
+  const state = await readReviewPacketState(tx, input);
+  if (!state) return failure("not_found");
+  const validation = validateReviewPacketRows(state, input);
+  if (validation === "system_error") return failure("system_error");
+  if (validation === false) return failure("conflict_current_state_changed");
+  return toReviewPacket(tx, state, input, validation, evaluator);
+}
+
 export function createPostgresGeneratedContentRepository({
   runInTransaction = withTransaction,
   evaluator = evaluateClaimTraceabilityInTransaction,
@@ -714,12 +724,7 @@ export function createPostgresGeneratedContentRepository({
       try {
         return await runInTransaction(async (tx) => {
           await tx.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
-          const state = await readReviewPacketState(tx, input);
-          if (!state) return failure("not_found");
-          const validation = validateReviewPacketRows(state, input);
-          if (validation === "system_error") return failure("system_error");
-          if (validation === false) return failure("conflict_current_state_changed");
-          return toReviewPacket(tx, state, input, validation, evaluator);
+          return evaluateGeneratedDraftReviewPacketInTransaction(tx, input, evaluator);
         });
       } catch (error) {
         if (error instanceof RollbackResultError) return error.result;
