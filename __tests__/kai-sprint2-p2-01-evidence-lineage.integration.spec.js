@@ -2,21 +2,63 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-if (!process.env.KAI_P2_01_EVIDENCE_LINEAGE_DATABASE_URL) {
+const RUNNER_OWNED_DATABASE_URL = process.env.KAI_P2_01_EVIDENCE_LINEAGE_DATABASE_URL;
+
+/**
+ * P2-01C correction (PostgreSQL isolation): the runner-owned database URL is
+ * validated as loopback-only synchronously, before this file performs a single
+ * dynamic import of `pg`, `Backend/kai/db/kaiDb.js`, or any P2-01 module - and
+ * `Backend/kai/db/kaiDb.js` (which imports `Backend/db/pg.js`, itself capable of
+ * import-time construction of the ambient application connection pool from
+ * whatever DATABASE_URL/DATABASE_URL_LOCAL/etc happens to be set in the process
+ * environment) is never imported anywhere in this file. A non-loopback URL is
+ * rejected here, synchronously, before any connection attempt of any kind.
+ */
+function assertLoopbackDatabaseUrl(urlString) {
+  const parsed = new URL(urlString);
+  const host = parsed.hostname.toLowerCase();
+  if (host !== "127.0.0.1" && host !== "localhost" && host !== "::1") {
+    throw new Error(`P2-01 integration suite refused a non-loopback KAI_P2_01_EVIDENCE_LINEAGE_DATABASE_URL host: ${host}`);
+  }
+}
+
+test("P2-01 PostgreSQL isolation: a non-loopback runner-owned URL is rejected before any connection is attempted", () => {
+  for (const url of ["postgresql://user@example.com:5432/db", "postgresql://user@10.0.0.5:5432/db", "postgresql://user@my-internal-host.internal:5432/db"]) {
+    assert.throws(() => assertLoopbackDatabaseUrl(url), /refused a non-loopback/);
+  }
+  for (const url of ["postgresql://user@127.0.0.1:59123/db", "postgresql://user@localhost:59123/db"]) {
+    assert.doesNotThrow(() => assertLoopbackDatabaseUrl(url));
+  }
+});
+
+test("P2-01 PostgreSQL isolation: this file imports no database module at its top level and never imports Backend/kai/db/kaiDb.js", () => {
+  const ownSource = readFileSync(new URL(import.meta.url), "utf8");
+  const topLevelImports = ownSource.split("\n").filter((line) => /^import\b/.test(line));
+  assert.ok(topLevelImports.every((line) => !/"pg"|kaiDb\.js|postgresEvidenceLineageRepository\.js|kaiEvidenceLineageService\.js/.test(line)),
+    "expected every database-capable module to be imported dynamically, never at the top level");
+  assert.doesNotMatch(ownSource, /from\s+["']\.\.\/Backend\/kai\/db\/kaiDb\.js["']/,
+    "the P2-01 integration suite must never import the ambient kaiDb.js pool - it uses a test-local transaction wrapper over its own runner-owned Pool instead");
+});
+
+if (!RUNNER_OWNED_DATABASE_URL) {
+  // P2-01C correction: direct execution without the runner-owned URL performs
+  // zero database activity - no dynamic import of `pg` or any P2-01 module is
+  // ever reached, and the ambient DATABASE_URL (even if set in this process's
+  // environment) is never read or consulted anywhere in this branch.
   test("P2-01 evidence-lineage integration requires the runner-owned database", { skip: true }, () => {});
 } else {
+  assertLoopbackDatabaseUrl(RUNNER_OWNED_DATABASE_URL);
   await runEvidenceLineageIntegrationSuite();
 }
 
 async function runEvidenceLineageIntegrationSuite() {
   const { Pool } = await import("pg");
-  const { withTransaction } = await import("../Backend/kai/db/kaiDb.js");
   const { createPostgresEvidenceLineageRepository } = await import(
     "../Backend/kai/dictionary/postgresEvidenceLineageRepository.js"
   );
   const { extractEvidenceFromSourceVersion } = await import("../Backend/kai/services/kaiEvidenceLineageService.js");
 
-  const DATABASE_URL = process.env.KAI_P2_01_EVIDENCE_LINEAGE_DATABASE_URL;
+  const DATABASE_URL = RUNNER_OWNED_DATABASE_URL;
   const ORG = "00000000-0000-4000-8000-000000000001";
   const OTHER_ORG = "00000000-0000-4000-8000-000000000002";
   const BATCH = "10000000-0000-4000-8000-000000000001";
@@ -24,8 +66,33 @@ async function runEvidenceLineageIntegrationSuite() {
   const REVIEWED_TYPE = "organization_primary_record";
 
   const pool = new Pool({ connectionString: DATABASE_URL, ssl: false, max: 8 });
+
+  /**
+   * Test-local transaction wrapper over the already-validated runner-owned Pool
+   * - deliberately reimplemented here rather than imported from
+   * Backend/kai/db/kaiDb.js, so this suite never imports (and never
+   * import-time-initializes) the ambient application pool. Ambient
+   * DATABASE_URL, even if set in this process's environment, is never read by
+   * this function or by the Pool constructed above - only
+   * KAI_P2_01_EVIDENCE_LINEAGE_DATABASE_URL is.
+   */
+  async function withRunnerOwnedTransaction(callback, ownPool = pool) {
+    const client = await ownPool.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await callback(client);
+      await client.query("COMMIT");
+      return result;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   const repository = createPostgresEvidenceLineageRepository({
-    runInTransaction: (callback) => withTransaction(callback, pool),
+    runInTransaction: (callback) => withRunnerOwnedTransaction(callback, pool),
   });
 
   test.after(async () => {
@@ -194,7 +261,7 @@ async function runEvidenceLineageIntegrationSuite() {
     };
   }
 
-  test("P2-01 (a): first extraction creates the aggregate item, one field item per committed field, each field item's locator, one open evidence_review queue item per evidence item, and exactly one audit row", async () => {
+  test("P2-01 (a): first extraction creates one field item per committed field, each locator-bound with a non-null source_id/sensitivity_level/support_strength, one open evidence_review queue item per evidence item with the exact required_action, and exactly one audit row", async () => {
     const seed = await seedPromotedSourceVersion(1);
     const audit = createAuditProbe();
 
@@ -208,10 +275,17 @@ async function runEvidenceLineageIntegrationSuite() {
 
     assert.equal(result.ok, true, JSON.stringify(result));
     assert.equal(result.data.replayed, false);
-    assert.equal(result.data.evidenceItems.length, seed.fieldCount + 1);
+    assert.equal(result.data.evidenceItems.length, seed.fieldCount);
     assert.equal(result.data.sourceLocators.length, seed.fieldCount);
-    assert.equal(result.data.reviewQueueItems.length, seed.fieldCount + 1);
+    assert.equal(result.data.reviewQueueItems.length, seed.fieldCount);
     assert.ok(result.data.reviewQueueItems.every((item) => item.queue_status === "open"));
+    assert.ok(result.data.evidenceItems.every((item) =>
+      item.evidence_type === "dictionary_field_presence_fact" &&
+      item.source_id === seed.sourceId &&
+      item.source_locator_id !== null &&
+      item.sensitivity_level === "unknown" &&
+      item.support_strength === "unassessed"
+    ));
     assert.equal(audit.published.length, 1);
 
     const counts = await withClient((client) => Promise.all([
@@ -219,9 +293,19 @@ async function runEvidenceLineageIntegrationSuite() {
       client.query(`SELECT count(*)::int AS count FROM kai.source_locators WHERE organization_id = $1::uuid AND source_version_id = $2::uuid`, [ORG, seed.sourceVersionId]),
       client.query(`SELECT count(*)::int AS count FROM kai.upload_lifecycle_audit WHERE operation = 'evidence_lineage_extracted' AND organization_id = $1::uuid AND intake_file_id = $2::uuid`, [ORG, seed.intakeFileId]),
     ]));
-    assert.equal(counts[0].rows[0].count, seed.fieldCount + 1);
+    assert.equal(counts[0].rows[0].count, seed.fieldCount);
     assert.equal(counts[1].rows[0].count, seed.fieldCount);
     assert.equal(counts[2].rows[0].count, 1);
+
+    const reviewRows = await withClient((client) => client.query(
+      `SELECT required_action FROM kai.review_queue_items
+        WHERE organization_id = $1::uuid AND queue_type = 'evidence_review'
+          AND target_object_id IN (${result.data.evidenceItems.map((_, i) => `$${i + 2}::uuid`).join(",")})`,
+      [ORG, ...result.data.evidenceItems.map((item) => item.evidence_item_id)],
+    ));
+    assert.ok(reviewRows.rows.every((row) =>
+      row.required_action === "Review the evidence item's lineage, sensitivity, support strength, and audience eligibility before use."
+    ));
 
     const auditRow = await withClient((client) => client.query(
       `SELECT metadata FROM kai.upload_lifecycle_audit WHERE operation = 'evidence_lineage_extracted' AND organization_id = $1::uuid AND intake_file_id = $2::uuid`,
@@ -235,8 +319,8 @@ async function runEvidenceLineageIntegrationSuite() {
         "source_version_id", "validator_key",
       ],
     );
-    assert.equal(auditRow.rows[0].metadata.evidence_item_count, seed.fieldCount + 1);
-    assert.equal(auditRow.rows[0].metadata.fresh_write_count, seed.fieldCount + 1);
+    assert.equal(auditRow.rows[0].metadata.evidence_item_count, seed.fieldCount);
+    assert.equal(auditRow.rows[0].metadata.fresh_write_count, seed.fieldCount);
   });
 
   test("P2-01 (b): replaying the identical call is a full no-op - zero new rows, zero new audit rows, replayed: true", async () => {
@@ -270,7 +354,7 @@ async function runEvidenceLineageIntegrationSuite() {
       client.query(`SELECT count(*)::int AS count FROM kai.evidence_items WHERE organization_id = $1::uuid AND source_version_id = $2::uuid`, [ORG, seed.sourceVersionId]),
       client.query(`SELECT count(*)::int AS count FROM kai.upload_lifecycle_audit WHERE operation = 'evidence_lineage_extracted' AND organization_id = $1::uuid AND intake_file_id = $2::uuid`, [ORG, seed.intakeFileId]),
     ]));
-    assert.equal(counts[0].rows[0].count, seed.fieldCount + 1);
+    assert.equal(counts[0].rows[0].count, seed.fieldCount);
     assert.equal(counts[1].rows[0].count, 1);
   });
 
@@ -286,7 +370,7 @@ async function runEvidenceLineageIntegrationSuite() {
       await gateOpened;
     }
     const racingRepository = createPostgresEvidenceLineageRepository({
-      runInTransaction: (callback) => withTransaction(callback, pool),
+      runInTransaction: (callback) => withRunnerOwnedTransaction(callback, pool),
       beforeInsert: gate,
     });
 
@@ -324,7 +408,7 @@ async function runEvidenceLineageIntegrationSuite() {
       client.query(`SELECT count(*)::int AS count FROM kai.evidence_items WHERE organization_id = $1::uuid AND source_version_id = $2::uuid`, [ORG, seed.sourceVersionId]),
       client.query(`SELECT count(*)::int AS count FROM kai.source_locators WHERE organization_id = $1::uuid AND source_version_id = $2::uuid`, [ORG, seed.sourceVersionId]),
     ]));
-    assert.equal(rows[0].rows[0].count, seed.fieldCount + 1);
+    assert.equal(rows[0].rows[0].count, seed.fieldCount);
     assert.equal(rows[1].rows[0].count, seed.fieldCount);
   });
 
@@ -485,11 +569,11 @@ async function runEvidenceLineageIntegrationSuite() {
     });
   }
 
-  test("P2-01 (g): disabled feature flag returns feature_disabled with zero repository/DB activity", async () => {
+  test("P2-01 (g): disabled KAI_SPRINT2_ENABLED returns feature_disabled with zero repository/DB activity", async () => {
     const seed = await seedPromotedSourceVersion(13);
     const result = await extractEvidenceFromSourceVersion(
       { organizationId: ORG, sourceVersionId: seed.sourceVersionId, actorContext: humanActor(), now: NOW },
-      { env: { KAI_SPRINT2_ENABLED: "true" }, evidenceLineageRepository: repository, metadataOnlyAudit: createAuditProbe().dependency },
+      { env: {}, evidenceLineageRepository: repository, metadataOnlyAudit: createAuditProbe().dependency },
     );
     assert.equal(result.ok, false);
     assert.equal(result.error.code, "feature_disabled");
@@ -501,22 +585,56 @@ async function runEvidenceLineageIntegrationSuite() {
     assert.equal(count.rows[0].count, 0);
   });
 
-  test("P2-01: end-to-end via the service seam with both feature flags, AUTH-KAI-003, and VAL-TEN-001, using the postgres repository", async () => {
+  test("P2-01: end-to-end via the service seam with KAI_SPRINT2_ENABLED, AUTH-KAI-003, and VAL-TEN-001, using the postgres repository", async () => {
     const seed = await seedPromotedSourceVersion(14);
 
     const result = await extractEvidenceFromSourceVersion(
       { organizationId: ORG, sourceVersionId: seed.sourceVersionId, actorContext: humanActor(), now: NOW },
-      { env: { KAI_SPRINT2_ENABLED: "true", KAI_EVIDENCE_LINEAGE_ENABLED: "true" }, evidenceLineageRepository: repository, metadataOnlyAudit: createAuditProbe().dependency },
+      { env: { KAI_SPRINT2_ENABLED: "true" }, evidenceLineageRepository: repository, metadataOnlyAudit: createAuditProbe().dependency },
     );
     assert.equal(result.ok, true, JSON.stringify(result));
-    assert.equal(result.data.evidenceItems.length, seed.fieldCount + 1);
+    assert.equal(result.data.evidenceItems.length, seed.fieldCount);
 
     const deniedResult = await extractEvidenceFromSourceVersion(
       { organizationId: ORG, sourceVersionId: seed.sourceVersionId, actorContext: humanActor({ actorType: "ai" }), now: NOW },
-      { env: { KAI_SPRINT2_ENABLED: "true", KAI_EVIDENCE_LINEAGE_ENABLED: "true" }, evidenceLineageRepository: repository, metadataOnlyAudit: createAuditProbe().dependency },
+      { env: { KAI_SPRINT2_ENABLED: "true" }, evidenceLineageRepository: repository, metadataOnlyAudit: createAuditProbe().dependency },
     );
     assert.equal(deniedResult.ok, false);
     assert.equal(deniedResult.error.code, "authorization_denied");
+  });
+
+  test("P2-01: a malformed pre-correction partial row (evidence item with no matching evidence_review queue item) is never accepted as replay", async () => {
+    const seed = await seedPromotedSourceVersion(15);
+    const first = await repository.extractEvidenceFromSourceVersion({
+      organizationId: ORG,
+      sourceVersionId: seed.sourceVersionId,
+      actorUserId: "90000000-0000-4000-8000-000000000001",
+      now: NOW,
+      metadataOnlyAudit: createAuditProbe().dependency,
+    });
+    assert.equal(first.ok, true, JSON.stringify(first));
+
+    // Simulate a pre-correction partial row: delete one evidence item's matching
+    // evidence_review queue item, leaving an orphaned evidence_items row.
+    await withClient((client) => client.query(
+      `DELETE FROM kai.review_queue_items
+        WHERE organization_id = $1::uuid AND queue_type = 'evidence_review'
+          AND target_object_id = $2::uuid`,
+      [ORG, first.data.evidenceItems[0].evidence_item_id],
+    ));
+
+    const replay = await repository.extractEvidenceFromSourceVersion({
+      organizationId: ORG,
+      sourceVersionId: seed.sourceVersionId,
+      actorUserId: "90000000-0000-4000-8000-000000000001",
+      now: NOW,
+      metadataOnlyAudit: createAuditProbe().dependency,
+    });
+    assert.equal(replay.ok, false);
+    assert.ok(
+      replay.error.code === "conflict_current_state_changed" || replay.error.code === "system_error",
+      `expected conflict_current_state_changed or system_error, got ${replay.error.code}`,
+    );
   });
 
   test("P2-01 catalog verifier: every expected check name appears exactly once with no FAIL", async () => {

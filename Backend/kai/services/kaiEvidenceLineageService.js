@@ -1,4 +1,4 @@
-import { areKaiSprint2EvidenceLineageFeaturesEnabled } from "../config/kaiSprint2Config.js";
+import { isKaiSprint2Enabled } from "../config/kaiSprint2Config.js";
 import { buildKaiError } from "../errors/kaiErrors.js";
 import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationService.js";
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
@@ -46,17 +46,19 @@ function isMappedHumanActor(actorContext) {
 /**
  * KAI P2-01 dormant deterministic evidence-lineage extraction seam.
  *
- * Human-authorized, idempotent extraction of deterministic evidence statements
- * (an aggregate committed-field-count fact, plus one per-field presence fact per
- * already-committed `kai.data_dictionary_fields` row) from the CURRENT
- * `kai.source_versions` row of a fully promoted P1-08 source, each field-level fact
- * bound to a `kai.source_locators` 'column' coordinate, each evidence item paired
- * with exactly one open `evidence_review` `kai.review_queue_items` row. Requires
- * both `KAI_SPRINT2_ENABLED` and `KAI_EVIDENCE_LINEAGE_ENABLED` before any
- * repository read, lock, validator side effect, or audit activity - if either flag
- * is disabled, this returns the canonical `feature_disabled` result with zero
- * repository calls. It is not composed into any route, listener, scheduler, or
- * production path.
+ * Human-authorized, idempotent extraction of one deterministic
+ * `dictionary_field_presence_fact` evidence statement per already-committed
+ * `kai.data_dictionary_fields` row from the CURRENT `kai.source_versions` row of a
+ * fully promoted P1-08 source, each fact bound to a `kai.source_locators` 'column'
+ * coordinate, each evidence item paired with exactly one open `evidence_review`
+ * `kai.review_queue_items` row. Requires `KAI_SPRINT2_ENABLED` before any
+ * repository read, lock, validator side effect, or audit activity - if it is
+ * disabled, this returns the canonical `feature_disabled` result with zero
+ * repository calls. P2-01C correction: this package's own
+ * `KAI_EVIDENCE_LINEAGE_ENABLED` flag has been removed; P2-01 has no route,
+ * worker, listener, or production composition and so remains dormant under
+ * `KAI_SPRINT2_ENABLED` alone, exactly like every other still-unwired P2 package.
+ * It is not composed into any route, listener, scheduler, or production path.
  *
  * Contains no SQL and imports no database pool: persistence, lineage re-reads, and
  * every fail-closed validator are delegated entirely to the injected P2-01
@@ -65,7 +67,7 @@ function isMappedHumanActor(actorContext) {
  * `validateTenantBoundaryConsistency`) rather than reimplemented locally.
  */
 export async function extractEvidenceFromSourceVersion(input, dependencies = {}) {
-  if (!areKaiSprint2EvidenceLineageFeaturesEnabled(dependencies.env || process.env)) {
+  if (!isKaiSprint2Enabled(dependencies.env || process.env)) {
     return buildKaiError("feature_disabled");
   }
   if (!isExtractEvidenceFromSourceVersionInput(input)) {

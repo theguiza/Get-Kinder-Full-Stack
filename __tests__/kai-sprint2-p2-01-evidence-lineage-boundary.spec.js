@@ -184,18 +184,17 @@ test("validateEvidenceHasSourceLineage check 9: the reapplied P1-08 permission p
   }
 });
 
-test("P2-01 service: either feature flag disabled returns feature_disabled with zero repository calls", async () => {
+test("P2-01 service: KAI_SPRINT2_ENABLED disabled (or absent) returns feature_disabled with zero repository calls; P2-01 has no package-specific flag of its own", async () => {
   const throwingRepository = {
     async extractEvidenceFromSourceVersion() {
-      throw new Error("repository should never be called when a feature flag is disabled");
+      throw new Error("repository should never be called when KAI_SPRINT2_ENABLED is disabled");
     },
   };
   for (const env of [
     {},
-    { KAI_SPRINT2_ENABLED: "true" },
+    { KAI_SPRINT2_ENABLED: "false" },
+    { KAI_SPRINT2_ENABLED: "0" },
     { KAI_EVIDENCE_LINEAGE_ENABLED: "true" },
-    { KAI_SPRINT2_ENABLED: "false", KAI_EVIDENCE_LINEAGE_ENABLED: "true" },
-    { KAI_SPRINT2_ENABLED: "true", KAI_EVIDENCE_LINEAGE_ENABLED: "0" },
   ]) {
     const result = await extractEvidenceFromSourceVersion(
       { organizationId: ORG, sourceVersionId: SOURCE_VERSION, actorContext: humanActor(), now: NOW },
@@ -204,6 +203,19 @@ test("P2-01 service: either feature flag disabled returns feature_disabled with 
     assert.equal(result.ok, false, JSON.stringify(env));
     assert.equal(result.error.code, "feature_disabled", JSON.stringify(env));
   }
+});
+
+test("P2-01 service: KAI_SPRINT2_ENABLED alone (no other flag) enables the seam", async () => {
+  const probeRepository = {
+    async extractEvidenceFromSourceVersion() {
+      return { ok: true, data: { replayed: false }, error: null };
+    },
+  };
+  const result = await extractEvidenceFromSourceVersion(
+    { organizationId: ORG, sourceVersionId: SOURCE_VERSION, actorContext: humanActor(), now: NOW },
+    { env: { KAI_SPRINT2_ENABLED: "true" }, evidenceLineageRepository: probeRepository, metadataOnlyAudit: { prepareMetadataOnlyAudit: () => ({ ok: true, publish: async () => {} }) } },
+  );
+  assert.equal(result.ok, true, JSON.stringify(result));
 });
 
 function humanActor(overrides = {}) {
@@ -215,7 +227,7 @@ function humanActor(overrides = {}) {
   };
 }
 
-const bothEnabled = { KAI_SPRINT2_ENABLED: "true", KAI_EVIDENCE_LINEAGE_ENABLED: "true" };
+const sprint2Enabled = { KAI_SPRINT2_ENABLED: "true" };
 
 test("P2-01 service: rejects input shapes outside the accepted allowlist without calling the repository", async () => {
   const throwingRepository = {
@@ -236,7 +248,7 @@ test("P2-01 service: rejects input shapes outside the accepted allowlist without
     { organizationId: ORG, sourceVersionId: SOURCE_VERSION, actorContext: humanActor(), now: NOW, extraKey: "nope" },
   ];
   for (const input of invalidInputs) {
-    const result = await extractEvidenceFromSourceVersion(input, { env: bothEnabled, evidenceLineageRepository: throwingRepository });
+    const result = await extractEvidenceFromSourceVersion(input, { env: sprint2Enabled, evidenceLineageRepository: throwingRepository });
     assert.equal(result.ok, false, JSON.stringify(input));
     assert.equal(result.error.code, "validation_blocker", JSON.stringify(input));
   }
@@ -251,7 +263,7 @@ test("P2-01 service (AUTH-KAI-003): rejects every non-human actor type outright,
   for (const actorType of ["ai", "system", "import", "code", "generic_service"]) {
     const result = await extractEvidenceFromSourceVersion(
       { organizationId: ORG, sourceVersionId: SOURCE_VERSION, actorContext: humanActor({ actorType }), now: NOW },
-      { env: bothEnabled, evidenceLineageRepository: throwingRepository },
+      { env: sprint2Enabled, evidenceLineageRepository: throwingRepository },
     );
     assert.equal(result.ok, false, actorType);
     assert.equal(result.error.code, "authorization_denied", actorType);
@@ -269,7 +281,7 @@ test("P2-01 service: forwards only organizationId/sourceVersionId/actorUserId/no
   const metadataOnlyAudit = { prepareMetadataOnlyAudit: () => ({ ok: true, publish: async () => {} }) };
   const result = await extractEvidenceFromSourceVersion(
     { organizationId: ORG, sourceVersionId: SOURCE_VERSION, actorContext: humanActor(), now: NOW },
-    { env: bothEnabled, evidenceLineageRepository: probeRepository, metadataOnlyAudit },
+    { env: sprint2Enabled, evidenceLineageRepository: probeRepository, metadataOnlyAudit },
   );
   assert.equal(result.ok, true);
   assert.equal(calls.length, 1);
@@ -336,34 +348,39 @@ test("P2-01 computeLocatorFingerprint is deterministic and depends on organizati
 
 test("P2-01 computeStatementFingerprint is deterministic and depends on organizationId/sourceVersionId/evidenceType/statement", () => {
   const { computeStatementFingerprint } = __evidenceLineageRepositoryTestables;
-  const inputs = { organizationId: ORG, sourceVersionId: SOURCE_VERSION, evidenceType: "dictionary_field_count_fact", statement: "Source version's committed data dictionary contains 3 field(s)." };
+  const inputs = { organizationId: ORG, sourceVersionId: SOURCE_VERSION, evidenceType: "dictionary_field_presence_fact", statement: "Source version's committed data dictionary includes field \"email\" of committed type \"text\"." };
   const first = computeStatementFingerprint(inputs);
   const second = computeStatementFingerprint({ ...inputs });
   assert.equal(first, second);
   assert.match(first, /^[a-f0-9]{64}$/);
   assert.notEqual(first, computeStatementFingerprint({ ...inputs, statement: "different statement." }));
-  assert.notEqual(first, computeStatementFingerprint({ ...inputs, evidenceType: "dictionary_field_presence_fact" }));
+  assert.notEqual(first, computeStatementFingerprint({ ...inputs, evidenceType: "some_other_type" }));
 });
 
-test("P2-01 buildEvidenceCompositionPlan builds one aggregate item plus one per-field item, deterministically, in profile_field_key order", () => {
+test("P2-01 buildEvidenceCompositionPlan builds exactly one locator-bound item per committed field, deterministically, in profile_field_key order, with no unlocated aggregate item", () => {
   const { buildEvidenceCompositionPlan } = __evidenceLineageRepositoryTestables;
   const fieldRows = [
-    { profile_field_key: "email", data_type: "text" },
-    { profile_field_key: "name", data_type: "text" },
+    { profile_field_key: "email", data_type: "text", sensitivity: "unknown" },
+    { profile_field_key: "name", data_type: "text", sensitivity: "unknown" },
   ];
   const plan = buildEvidenceCompositionPlan({ organizationId: ORG, sourceVersionId: SOURCE_VERSION, fieldRows });
-  assert.equal(plan.length, 3);
-  assert.equal(plan[0].evidenceType, "dictionary_field_count_fact");
-  assert.equal(plan[0].needsLocator, false);
-  assert.match(plan[0].statement, /contains 2 field\(s\)\.$/);
-  assert.equal(plan[1].evidenceType, "dictionary_field_presence_fact");
-  assert.equal(plan[1].needsLocator, true);
-  assert.deepEqual(plan[1].coordinates, { column_name: "email" });
-  assert.equal(plan[2].coordinates.column_name, "name");
+  assert.equal(plan.length, 2);
+  assert.equal(plan[0].evidenceType, "dictionary_field_presence_fact");
+  assert.equal(plan[0].sensitivityLevel, "unknown");
+  assert.deepEqual(plan[0].coordinates, { column_name: "email" });
+  assert.equal(plan[1].coordinates.column_name, "name");
 
   const emptyPlan = buildEvidenceCompositionPlan({ organizationId: ORG, sourceVersionId: SOURCE_VERSION, fieldRows: [] });
-  assert.equal(emptyPlan.length, 1);
-  assert.match(emptyPlan[0].statement, /contains 0 field\(s\)\.$/);
+  assert.equal(emptyPlan.length, 0);
+});
+
+test("P2-01 repository never statically imports Backend/kai/db/kaiDb.js at module top level - only a deferred dynamic import, used only when no runInTransaction is injected", () => {
+  const topLevelImports = repositorySource.split("\n").filter((line) => /^import\b/.test(line));
+  assert.ok(
+    topLevelImports.every((line) => !/kaiDb\.js/.test(line)),
+    "expected no static top-level import of kaiDb.js - it must be deferred so importing this module never import-time-initializes the ambient application pool",
+  );
+  assert.match(repositorySource, /await import\("\.\.\/db\/kaiDb\.js"\)/);
 });
 
 test("P2-01 repository rejects an input shape outside its own allowlist without opening a transaction", async () => {

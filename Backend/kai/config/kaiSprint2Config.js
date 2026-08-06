@@ -32,21 +32,6 @@ export function areKaiSprint2SourcePromotionFeaturesEnabled(env = process.env) {
   return isKaiSprint2Enabled(env) && isKaiSourcePromotionEnabled(env);
 }
 
-/**
- * KAI_EVIDENCE_LINEAGE_ENABLED (P2-01 owner decision): added here with default
- * false (any unset/non-truthy value returns false via isEnabledValue), following
- * the exact `isKaiSourcePromotionEnabled`/`areKaiSprint2SourcePromotionFeaturesEnabled`
- * composition idiom already established in this file. Neither flag is enabled by
- * this package.
- */
-export function isKaiEvidenceLineageEnabled(env = process.env) {
-  return isEnabledValue(env.KAI_EVIDENCE_LINEAGE_ENABLED);
-}
-
-export function areKaiSprint2EvidenceLineageFeaturesEnabled(env = process.env) {
-  return isKaiSprint2Enabled(env) && isKaiEvidenceLineageEnabled(env);
-}
-
 export function requireKaiSprint2Enabled(req, res, next) {
   if (isKaiSprint2Enabled()) return next();
 

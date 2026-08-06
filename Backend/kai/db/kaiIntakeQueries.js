@@ -530,7 +530,7 @@ export async function getScopedDataDictionaryFieldsByDictionaryId(
   db = pool,
 ) {
   const { rows } = await db.query(
-    `SELECT data_dictionary_field_id, profile_field_key, data_type
+    `SELECT data_dictionary_field_id, profile_field_key, data_type, sensitivity
        FROM kai.data_dictionary_fields
       WHERE organization_id = $1
         AND data_dictionary_id = $2
@@ -552,8 +552,8 @@ export async function getScopedEvidenceItemByStatementFingerprint(
   db = pool,
 ) {
   const { rows } = await db.query(
-    `SELECT evidence_item_id, organization_id, source_version_id, source_locator_id,
-            evidence_type, data_class, statement, statement_fingerprint,
+    `SELECT evidence_item_id, organization_id, source_id, source_version_id, source_locator_id,
+            evidence_type, data_class, sensitivity_level, support_strength, statement, statement_fingerprint,
             evidence_review_status, internal_only, public_use_allowed,
             funder_use_allowed, llm_processing_allowed, product_learning_allowed,
             created_by, created_by_type, created_at

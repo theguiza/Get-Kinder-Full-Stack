@@ -25,11 +25,20 @@ WITH checks AS (
          ) THEN 'PASS' ELSE 'FAIL' END,
          'canonical column'
     FROM unnest(ARRAY[
-      'evidence_item_id', 'organization_id', 'source_version_id', 'source_locator_id',
-      'evidence_type', 'data_class', 'statement', 'statement_fingerprint',
+      'evidence_item_id', 'organization_id', 'source_id', 'source_version_id', 'source_locator_id',
+      'evidence_type', 'data_class', 'sensitivity_level', 'support_strength', 'statement', 'statement_fingerprint',
       'evidence_review_status', 'internal_only', 'public_use_allowed', 'funder_use_allowed',
       'llm_processing_allowed', 'product_learning_allowed', 'created_by', 'created_by_type', 'created_at'
     ]) AS column_name_value
+  UNION ALL
+  SELECT 'COLUMN_NOT_NULL', 'kai.evidence_items.' || column_name_value,
+         CASE WHEN EXISTS (
+           SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'kai' AND table_name = 'evidence_items' AND column_name = column_name_value
+              AND is_nullable = 'NO'
+         ) THEN 'PASS' ELSE 'FAIL' END,
+         'lineage/binding column must be NOT NULL'
+    FROM unnest(ARRAY['organization_id', 'source_id', 'source_version_id', 'source_locator_id']) AS column_name_value
   UNION ALL
   SELECT 'NO_RAW_CONTENT_COLUMN', table_name_value,
          CASE WHEN NOT EXISTS (
@@ -57,8 +66,9 @@ WITH checks AS (
       'source_locators_p2_01_fingerprint_check',
       'source_locators_p2_01_created_by_type_check',
       'evidence_items_p2_01_evidence_type_check',
-      'evidence_items_p2_01_locator_binding_check',
       'evidence_items_p2_01_data_class_check',
+      'evidence_items_p2_01_sensitivity_level_check',
+      'evidence_items_p2_01_support_strength_check',
       'evidence_items_p2_01_statement_check',
       'evidence_items_p2_01_statement_fingerprint_check',
       'evidence_items_p2_01_review_status_check',
@@ -67,7 +77,8 @@ WITH checks AS (
       'evidence_items_p2_01_funder_use_check',
       'evidence_items_p2_01_llm_processing_check',
       'evidence_items_p2_01_product_learning_check',
-      'evidence_items_p2_01_created_by_type_check'
+      'evidence_items_p2_01_created_by_type_check',
+      'review_queue_items_p2_01_evidence_review_required_action_check'
     ]) AS check_name_value
   UNION ALL
   SELECT 'LOCATOR_TYPE_PINNED', 'kai.source_locators.locator_type',
@@ -84,6 +95,21 @@ WITH checks AS (
          ) THEN 'PASS' ELSE 'FAIL' END,
          'locator_type is pinned to the single value column, not a widened vocabulary'
   UNION ALL
+  SELECT 'EVIDENCE_TYPE_PINNED', 'kai.evidence_items.evidence_type',
+         CASE WHEN EXISTS (
+           SELECT 1
+             FROM pg_constraint c
+             JOIN pg_class r ON r.oid = c.conrelid
+             JOIN pg_namespace n ON n.oid = r.relnamespace
+            WHERE n.nspname = 'kai'
+              AND r.relname = 'evidence_items'
+              AND c.conname = 'evidence_items_p2_01_evidence_type_check'
+              AND pg_get_constraintdef(c.oid) LIKE '%dictionary_field_presence_fact%'
+              AND pg_get_constraintdef(c.oid) NOT LIKE '%IN (%'
+              AND pg_get_constraintdef(c.oid) NOT LIKE '%dictionary_field_count_fact%'
+         ) THEN 'PASS' ELSE 'FAIL' END,
+         'evidence_type is pinned to the single value dictionary_field_presence_fact; the unlocated aggregate field-count type has been removed'
+  UNION ALL
   SELECT 'UNIQUE_CONSTRAINT_EXISTS', constraint_name_value,
          CASE WHEN EXISTS (
            SELECT 1
@@ -99,7 +125,8 @@ WITH checks AS (
       'source_locators_p2_01_identity_unique',
       'source_locators_p2_01_id_org_unique',
       'evidence_items_p2_01_identity_unique',
-      'evidence_items_p2_01_id_org_unique'
+      'evidence_items_p2_01_id_org_unique',
+      'source_versions_p2_01_id_source_org_unique'
     ]) AS constraint_name_value
   UNION ALL
   SELECT 'FK_EXISTS', fk_name_value,
@@ -118,6 +145,20 @@ WITH checks AS (
       'evidence_items_p2_01_source_version_fk',
       'evidence_items_p2_01_source_locator_fk'
     ]) AS fk_name_value
+  UNION ALL
+  SELECT 'FK_COMPOSITE_TUPLE', 'evidence_items_p2_01_source_version_fk',
+         CASE WHEN EXISTS (
+           SELECT 1
+             FROM pg_constraint c
+             JOIN pg_class r ON r.oid = c.conrelid
+             JOIN pg_namespace n ON n.oid = r.relnamespace
+            WHERE n.nspname = 'kai'
+              AND r.relname = 'evidence_items'
+              AND c.conname = 'evidence_items_p2_01_source_version_fk'
+              AND c.contype = 'f'
+              AND array_length(c.conkey, 1) = 3
+         ) THEN 'PASS' ELSE 'FAIL' END,
+         'organization_id + source_id + source_version_id is enforced as one three-column composite foreign key, not independent single-column foreign keys'
   UNION ALL
   SELECT 'UNIQUE_INDEX_EXISTS', 'ux_review_queue_items_p2_01_evidence_review_identity',
          CASE WHEN EXISTS (

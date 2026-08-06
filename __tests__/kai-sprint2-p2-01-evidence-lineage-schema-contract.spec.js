@@ -39,9 +39,12 @@ test("P2-01 creates kai.source_locators and kai.evidence_items with their full c
   }
   for (const column of [
     "evidence_item_id",
+    "source_id",
     "source_locator_id",
     "evidence_type",
     "data_class",
+    "sensitivity_level",
+    "support_strength",
     "statement",
     "statement_fingerprint",
     "evidence_review_status",
@@ -53,6 +56,10 @@ test("P2-01 creates kai.source_locators and kai.evidence_items with their full c
   ]) {
     assert.match(migrationSource, new RegExp(`\\b${column}\\b`), `expected evidence_items column ${column}`);
   }
+});
+
+test("P2-01C correction: source_id and source_locator_id are NOT NULL - no unlocated evidence item is permitted", () => {
+  assert.match(migrationSource, /source_id uuid NOT NULL,\s*\n\s*source_version_id uuid NOT NULL,\s*\n\s*source_locator_id uuid NOT NULL,/);
 });
 
 test("P2-01 pins locator_type to the single 'column' value only", () => {
@@ -68,14 +75,18 @@ test("P2-01 enforces the coordinates shape as exactly one string column_name key
   assert.match(migrationSource, /coordinates - ARRAY\['column_name'\] = '\{\}'::jsonb/);
 });
 
-test("P2-01 pins evidence_type to the two fact vocabularies and enforces the locator-binding invariant", () => {
+test("P2-01C correction: evidence_type is pinned to the single dictionary_field_presence_fact value - the unlocated dictionary_field_count_fact aggregate type is removed, with no locator-binding CHECK needed since source_locator_id is now unconditionally NOT NULL", () => {
   assert.match(
     migrationSource,
-    /evidence_items_p2_01_evidence_type_check\s+CHECK \(evidence_type IN \('dictionary_field_count_fact', 'dictionary_field_presence_fact'\)\)/,
+    /evidence_items_p2_01_evidence_type_check\s+CHECK \(evidence_type = 'dictionary_field_presence_fact'\)/,
   );
-  assert.match(migrationSource, /evidence_items_p2_01_locator_binding_check/);
-  assert.match(migrationSource, /evidence_type = 'dictionary_field_count_fact' AND source_locator_id IS NULL/);
-  assert.match(migrationSource, /evidence_type = 'dictionary_field_presence_fact' AND source_locator_id IS NOT NULL/);
+  assert.doesNotMatch(migrationSource, /CHECK \([^)]*dictionary_field_count_fact/);
+  assert.doesNotMatch(migrationSource, /evidence_items_p2_01_locator_binding_check/);
+});
+
+test("P2-01C correction: sensitivity_level and support_strength are pinned to their fail-closed values", () => {
+  assert.match(migrationSource, /evidence_items_p2_01_sensitivity_level_check\s+CHECK \(sensitivity_level = 'unknown'\)/);
+  assert.match(migrationSource, /evidence_items_p2_01_support_strength_check\s+CHECK \(support_strength = 'unassessed'\)/);
 });
 
 test("P2-01 pins data_class and every governance/allowed-use boolean to their fail-closed values", () => {
@@ -88,6 +99,24 @@ test("P2-01 pins data_class and every governance/allowed-use boolean to their fa
   assert.match(migrationSource, /evidence_items_p2_01_product_learning_check\s+CHECK \(product_learning_allowed = false\)/);
 });
 
+test("P2-01C correction: organization_id + source_id + source_version_id is enforced as one tenant-safe composite foreign key, not independent single-purpose foreign keys", () => {
+  assert.match(
+    migrationSource,
+    /evidence_items_p2_01_source_version_fk\s+FOREIGN KEY \(source_version_id, source_id, organization_id\)\s+REFERENCES kai\.source_versions \(source_version_id, source_id, organization_id\)/,
+  );
+  assert.match(
+    migrationSource,
+    /ALTER TABLE kai\.source_versions\s+DROP CONSTRAINT IF EXISTS source_versions_p2_01_id_source_org_unique,\s+ADD CONSTRAINT source_versions_p2_01_id_source_org_unique\s+UNIQUE \(source_version_id, source_id, organization_id\);/,
+  );
+});
+
+test("P2-01C correction: an evidence_review queue item's required_action must be present and non-blank, mirroring the P1-06 sensitivity_review precedent for that queue_type only", () => {
+  assert.match(
+    migrationSource,
+    /ALTER TABLE kai\.review_queue_items\s+DROP CONSTRAINT IF EXISTS review_queue_items_p2_01_evidence_review_required_action_check,\s+ADD CONSTRAINT review_queue_items_p2_01_evidence_review_required_action_check\s+CHECK \(\s+queue_type <> 'evidence_review'\s+OR \(\s+required_action IS NOT NULL\s+AND length\(btrim\(required_action\)\) BETWEEN 1 AND 2000\s+\)\s+\);/,
+  );
+});
+
 test("P2-01 enforces sha256 hex fingerprint shapes and the statement safe-content exclusion", () => {
   assert.match(migrationSource, /source_locators_p2_01_fingerprint_check\s+CHECK \(locator_fingerprint ~ '\^\[a-f0-9\]\{64\}\$'\)/);
   assert.match(migrationSource, /evidence_items_p2_01_statement_fingerprint_check\s+CHECK \(statement_fingerprint ~ '\^\[a-f0-9\]\{64\}\$'\)/);
@@ -96,14 +125,14 @@ test("P2-01 enforces sha256 hex fingerprint shapes and the statement safe-conten
   assert.match(migrationSource, /statement !~\* '\(https\?:\/\//);
 });
 
-test("P2-01 uses tenant-safe composite foreign keys for both source_locators and evidence_items", () => {
+test("P2-01 uses tenant-safe composite foreign keys for both source_locators and evidence_items; evidence_items' own lineage foreign key is the three-column organization_id/source_id/source_version_id tuple", () => {
   assert.match(
     migrationSource,
     /source_locators_p2_01_source_version_fk\s+FOREIGN KEY \(source_version_id, organization_id\)\s+REFERENCES kai\.source_versions \(source_version_id, organization_id\)/,
   );
   assert.match(
     migrationSource,
-    /evidence_items_p2_01_source_version_fk\s+FOREIGN KEY \(source_version_id, organization_id\)\s+REFERENCES kai\.source_versions \(source_version_id, organization_id\)/,
+    /evidence_items_p2_01_source_version_fk\s+FOREIGN KEY \(source_version_id, source_id, organization_id\)\s+REFERENCES kai\.source_versions \(source_version_id, source_id, organization_id\)/,
   );
   assert.match(
     migrationSource,

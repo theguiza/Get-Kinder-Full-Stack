@@ -10077,3 +10077,103 @@ not_confirmed:
     introduces none; the extraction service is additionally unreachable while
     KAI_EVIDENCE_LINEAGE_ENABLED remains default false
 ```
+
+## KAI P2-01C — Evidence contract and PostgreSQL isolation correction (appended, additions-only)
+
+Bounded correction applied on top of the accepted P2-01 package above. Nothing in
+the P2-01 section preceding this one was edited; this block only records what
+P2-01C changed and why.
+
+```yaml
+p2_01c_made:
+  evidence_contract:
+    - removed the unlocated `dictionary_field_count_fact` aggregate evidence
+      type; `evidence_type` is now pinned to the single value
+      `dictionary_field_presence_fact`; `evidence_items_p2_01_locator_binding_check`
+      is removed as unnecessary now that `source_locator_id` is unconditionally
+      `NOT NULL`
+    - added `source_id` (NOT NULL), `sensitivity_level` (copied verbatim from the
+      authoritative `kai.data_dictionary_fields.sensitivity` value, pinned to
+      that column's own existing single vocabulary value `'unknown'`), and
+      `support_strength` (pinned to `'unassessed'`) to `kai.evidence_items`
+    - enforced organization_id + source_id + source_version_id as one
+      tenant-safe lineage tuple: added `source_versions_p2_01_id_source_org_unique`
+      to the existing P1-08 `kai.source_versions` table, and widened
+      `evidence_items_p2_01_source_version_fk` from a two-column
+      `(source_version_id, organization_id)` foreign key to the three-column
+      `(source_version_id, source_id, organization_id)` composite - independent
+      single- or two-column foreign keys could not by themselves prove the
+      stored source_version belongs to the stored source and organization
+    - added a fixed, disclosed `required_action` ("Review the evidence item's
+      lineage, sensitivity, support strength, and audience eligibility before
+      use.") to every fresh `evidence_review` review-queue item, and a new
+      `review_queue_items_p2_01_evidence_review_required_action_check`
+      constraint requiring `required_action` to be present, non-blank, and
+      within the existing 1-2000 character bound for `queue_type =
+      'evidence_review'` rows only, mirroring the exact P1-06
+      `sensitivity_review` precedent; no other queue_type is affected
+  feature_gate:
+    - removed `KAI_EVIDENCE_LINEAGE_ENABLED`,
+      `isKaiEvidenceLineageEnabled`, and
+      `areKaiSprint2EvidenceLineageFeaturesEnabled` from
+      `Backend/kai/config/kaiSprint2Config.js`, and every test/doc reference to
+      them; P2-01 is now gated by `KAI_SPRINT2_ENABLED` alone and remains
+      dormant because it has no route, worker, listener, or production
+      composition
+  replay_and_post_write_validation:
+    - `Backend/kai/dictionary/postgresEvidenceLineageRepository.js` and its
+      integration suite now authoritatively verify the corrected contract on
+      every write and replay: the exact organization/source/source-version/
+      locator tuple, evidence_type, data_class, copied sensitivity_level,
+      support_strength = unassessed, review_status = needs_gk_review,
+      internal-only posture, all four audience gates false, and the exact
+      evidence_review required_action
+    - a malformed or pre-correction partial row (an evidence item with no
+      matching evidence_review queue item) returns
+      `conflict_current_state_changed` and is never accepted as replay,
+      exercised directly against a real committed row in the integration suite
+  postgresql_isolation:
+    - `postgresEvidenceLineageRepository.js` no longer statically imports
+      `Backend/kai/db/kaiDb.js` at module load; its default transaction runner
+      is now a deferred `await import(...)`, reached only when a caller does
+      not inject its own `runInTransaction`
+    - `__tests__/kai-sprint2-p2-01-evidence-lineage.integration.spec.js`
+      validates `KAI_P2_01_EVIDENCE_LINEAGE_DATABASE_URL` as loopback-only
+      synchronously before any dynamic import, never imports `kaiDb.js`, and
+      runs every repository call through a test-local `withTestTransaction`
+      wrapper over its own runner-owned `Pool` - proving ambient
+      `DATABASE_URL` is ignored, a non-loopback URL is rejected before any
+      connection attempt, and direct execution without the runner-owned URL
+      performs zero database activity
+  not_touched:
+    - no P1 package's accepted migration, rollback, repository, service,
+      validator, or test file was edited
+    - no route, worker, listener, or production composition was added; P2-01
+      remains dormant
+
+commands:
+  - focused P2-01 suite (schema-contract, boundary, integration skip-path,
+    runner-self-test): TOOL_VERIFIED
+  - P2-01 ephemeral PostgreSQL verifier/integration runner
+    (`npm run verify:kai-sprint2-p2-01-evidence-lineage`): TOOL_VERIFIED
+  - P1-08 PostgreSQL verifier (`npm run verify:kai-sprint2-p1-08-source-promotion`):
+    TOOL_VERIFIED
+  - complete Sprint 2 suite: TOOL_VERIFIED
+  - complete repository suite: TOOL_VERIFIED
+  - git diff --check / git diff --cached --check: TOOL_VERIFIED, no whitespace
+    errors
+
+user_confirmed:
+  - the prior unintended database selection reported ahead of this correction
+    is recorded as USER_CONFIRMED; its effects on that database are
+    NOT_CONFIRMED - this correction did not connect to, inspect, or repair any
+    remote database
+
+not_confirmed:
+  deployment: NOT_CONFIRMED
+  production_or_shared_database_state: NOT_CONFIRMED
+  feature_enablement: NOT_CONFIRMED
+  production_runtime_composition: NOT_CONFIRMED
+  real_client_data_behavior: NOT_CONFIRMED
+  prior_unintended_database_selection_effects: NOT_CONFIRMED
+```

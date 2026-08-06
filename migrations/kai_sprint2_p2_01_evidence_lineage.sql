@@ -98,19 +98,49 @@ CREATE TABLE IF NOT EXISTS kai.source_locators (
 CREATE INDEX IF NOT EXISTS ix_source_locators_p2_01_tenant_version
   ON kai.source_locators (organization_id, source_version_id);
 
+-- P2-01C correction: the migration originally accepted an unlocated
+-- 'dictionary_field_count_fact' aggregate evidence type with no source_locator_id.
+-- That vocabulary value and its locator-optional shape are removed entirely - this
+-- package now creates only 'dictionary_field_presence_fact' evidence, and every row
+-- carries a non-null source_locator_id, a non-null source_id, and a
+-- sensitivity_level copied verbatim from the authoritative
+-- kai.data_dictionary_fields.sensitivity value it was derived from.
+
+-- P2-01C correction: kai.source_versions was created by P1-08 with only a
+-- two-column (source_version_id, organization_id) unique constraint - insufficient
+-- to prove, by foreign key alone, that a given source_version_id actually belongs
+-- to a given source_id within a given organization_id. This three-column unique
+-- constraint is the target of evidence_items_p2_01_source_version_fk below; it adds
+-- no new column and narrows no existing behavior of the accepted P1-08 table. Added
+-- here, before kai.evidence_items, because the foreign key below depends on it.
+ALTER TABLE kai.source_versions
+  DROP CONSTRAINT IF EXISTS source_versions_p2_01_id_source_org_unique,
+  ADD CONSTRAINT source_versions_p2_01_id_source_org_unique
+    UNIQUE (source_version_id, source_id, organization_id);
+
 -- P2-01 foundation table: one row per deterministic evidence statement, derived
 -- only from already-committed kai.data_dictionary_fields rows bound to the current
--- source_version's promoted lineage. Every governance/allowed-use column below is
--- fail-closed-pinned exactly like P1-04/P1-05's own fail-closed defaults: this
--- package creates internal-only, GK-review-gated evidence and grants no public,
--- funder, LLM-processing, or product-learning use.
+-- source_version's promoted lineage, each row bound to its exact committed column
+-- coordinate. organization_id + source_id + source_version_id is enforced as one
+-- tenant-safe lineage tuple by a single composite foreign key
+-- (evidence_items_p2_01_source_version_fk) against
+-- source_versions_p2_01_id_source_org_unique below - never by independent
+-- source_id/source_version_id foreign keys, which could not by themselves prove the
+-- stored source_version belongs to the stored source and organization. Every
+-- governance/allowed-use column below is fail-closed-pinned exactly like P1-04/
+-- P1-05's own fail-closed defaults: this package creates internal-only, GK-review-
+-- gated evidence and grants no public, funder, LLM-processing, or product-learning
+-- use.
 CREATE TABLE IF NOT EXISTS kai.evidence_items (
   evidence_item_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id uuid NOT NULL,
+  source_id uuid NOT NULL,
   source_version_id uuid NOT NULL,
-  source_locator_id uuid,
+  source_locator_id uuid NOT NULL,
   evidence_type text NOT NULL,
   data_class text NOT NULL,
+  sensitivity_level text NOT NULL,
+  support_strength text NOT NULL,
   statement text NOT NULL,
   statement_fingerprint text NOT NULL,
 
@@ -130,23 +160,21 @@ CREATE TABLE IF NOT EXISTS kai.evidence_items (
   CONSTRAINT evidence_items_p2_01_id_org_unique
     UNIQUE (evidence_item_id, organization_id),
   CONSTRAINT evidence_items_p2_01_source_version_fk
-    FOREIGN KEY (source_version_id, organization_id)
-    REFERENCES kai.source_versions (source_version_id, organization_id)
+    FOREIGN KEY (source_version_id, source_id, organization_id)
+    REFERENCES kai.source_versions (source_version_id, source_id, organization_id)
     ON DELETE RESTRICT,
   CONSTRAINT evidence_items_p2_01_source_locator_fk
     FOREIGN KEY (source_locator_id, organization_id)
     REFERENCES kai.source_locators (source_locator_id, organization_id)
     ON DELETE RESTRICT,
   CONSTRAINT evidence_items_p2_01_evidence_type_check
-    CHECK (evidence_type IN ('dictionary_field_count_fact', 'dictionary_field_presence_fact')),
-  CONSTRAINT evidence_items_p2_01_locator_binding_check
-    CHECK (
-      (evidence_type = 'dictionary_field_count_fact' AND source_locator_id IS NULL)
-      OR
-      (evidence_type = 'dictionary_field_presence_fact' AND source_locator_id IS NOT NULL)
-    ),
+    CHECK (evidence_type = 'dictionary_field_presence_fact'),
   CONSTRAINT evidence_items_p2_01_data_class_check
     CHECK (data_class = 'organization_committed_metadata'),
+  CONSTRAINT evidence_items_p2_01_sensitivity_level_check
+    CHECK (sensitivity_level = 'unknown'),
+  CONSTRAINT evidence_items_p2_01_support_strength_check
+    CHECK (support_strength = 'unassessed'),
   CONSTRAINT evidence_items_p2_01_statement_check
     CHECK (
       length(statement) BETWEEN 1 AND 500
@@ -183,6 +211,23 @@ CREATE INDEX IF NOT EXISTS ix_evidence_items_p2_01_tenant_version
 CREATE UNIQUE INDEX IF NOT EXISTS ux_review_queue_items_p2_01_evidence_review_identity
   ON kai.review_queue_items (organization_id, queue_type, target_object_type, target_object_id)
   WHERE queue_type = 'evidence_review';
+
+-- P2-01C correction: mirrors the exact P1-06 sensitivity_review required_action
+-- precedent (see migrations/kai_sprint2_p1_06_review_queue.sql), for the
+-- 'evidence_review' queue_type only. required_action must be present, non-blank,
+-- and within the already-established table-wide 1-2000 character bound
+-- (review_queue_items_p1_06_required_action_check) - no other queue_type is
+-- affected.
+ALTER TABLE kai.review_queue_items
+  DROP CONSTRAINT IF EXISTS review_queue_items_p2_01_evidence_review_required_action_check,
+  ADD CONSTRAINT review_queue_items_p2_01_evidence_review_required_action_check
+    CHECK (
+      queue_type <> 'evidence_review'
+      OR (
+        required_action IS NOT NULL
+        AND length(btrim(required_action)) BETWEEN 1 AND 2000
+      )
+    );
 
 ALTER TABLE kai.upload_lifecycle_audit
   DROP CONSTRAINT IF EXISTS upload_lifecycle_audit_gate_a_operation_check,

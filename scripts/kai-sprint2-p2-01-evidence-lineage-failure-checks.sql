@@ -157,51 +157,74 @@ BEGIN
     INSERT INTO p2_01_failure_results VALUES ('source_locator_identity_unique_enforced', 'PASS', 'safe unique-violation failure');
   END;
 
-  -- evidence_type vocabulary enforcement.
+  -- evidence_type vocabulary enforcement: only 'dictionary_field_presence_fact' is
+  -- ever accepted; the removed unlocated 'dictionary_field_count_fact' aggregate
+  -- type is now rejected identically to any other fabricated value.
   BEGIN
-    INSERT INTO kai.evidence_items (organization_id, source_version_id, evidence_type, data_class, statement, statement_fingerprint)
-    VALUES (org1, source_version1, 'fabricated_fact_type', 'organization_committed_metadata', 'A statement.', fabricated_sha);
+    INSERT INTO kai.evidence_items (organization_id, source_id, source_version_id, source_locator_id, evidence_type, data_class, sensitivity_level, support_strength, statement, statement_fingerprint)
+    VALUES (org1, source1, source_version1, locator1, 'fabricated_fact_type', 'organization_committed_metadata', 'unknown', 'unassessed', 'A statement.', fabricated_sha);
     INSERT INTO p2_01_failure_results VALUES ('evidence_type_vocabulary_enforced', 'FAIL', 'a fabricated evidence_type was unexpectedly accepted');
   EXCEPTION WHEN check_violation THEN
     INSERT INTO p2_01_failure_results VALUES ('evidence_type_vocabulary_enforced', 'PASS', 'safe check-violation failure');
   END;
-
-  -- locator_binding_check: count_fact must have no locator; presence_fact must have one.
   BEGIN
-    INSERT INTO kai.evidence_items (organization_id, source_version_id, source_locator_id, evidence_type, data_class, statement, statement_fingerprint)
-    VALUES (org1, source_version1, locator1, 'dictionary_field_count_fact', 'organization_committed_metadata', 'A statement.', fabricated_sha);
-    INSERT INTO p2_01_failure_results VALUES ('field_count_fact_forbids_locator', 'FAIL', 'a dictionary_field_count_fact with a bound source_locator_id was unexpectedly accepted');
+    INSERT INTO kai.evidence_items (organization_id, source_id, source_version_id, source_locator_id, evidence_type, data_class, sensitivity_level, support_strength, statement, statement_fingerprint)
+    VALUES (org1, source1, source_version1, locator1, 'dictionary_field_count_fact', 'organization_committed_metadata', 'unknown', 'unassessed', 'A statement.', fabricated_sha);
+    INSERT INTO p2_01_failure_results VALUES ('removed_aggregate_evidence_type_rejected', 'FAIL', 'the removed unlocated dictionary_field_count_fact evidence_type was unexpectedly accepted');
   EXCEPTION WHEN check_violation THEN
-    INSERT INTO p2_01_failure_results VALUES ('field_count_fact_forbids_locator', 'PASS', 'safe check-violation failure');
+    INSERT INTO p2_01_failure_results VALUES ('removed_aggregate_evidence_type_rejected', 'PASS', 'safe check-violation failure');
   END;
+
+  -- source_locator_id must-be-bound enforcement: every evidence item requires an
+  -- exact committed column locator; a null source_locator_id is now a NOT NULL
+  -- violation, not a permitted unlocated-aggregate shape.
   BEGIN
-    INSERT INTO kai.evidence_items (organization_id, source_version_id, evidence_type, data_class, statement, statement_fingerprint)
-    VALUES (org1, source_version1, 'dictionary_field_presence_fact', 'organization_committed_metadata', 'A statement.', fabricated_sha);
-    INSERT INTO p2_01_failure_results VALUES ('field_presence_fact_requires_locator', 'FAIL', 'a dictionary_field_presence_fact with no bound source_locator_id was unexpectedly accepted');
-  EXCEPTION WHEN check_violation THEN
-    INSERT INTO p2_01_failure_results VALUES ('field_presence_fact_requires_locator', 'PASS', 'safe check-violation failure');
+    INSERT INTO kai.evidence_items (organization_id, source_id, source_version_id, evidence_type, data_class, sensitivity_level, support_strength, statement, statement_fingerprint)
+    VALUES (org1, source1, source_version1, 'dictionary_field_presence_fact', 'organization_committed_metadata', 'unknown', 'unassessed', 'A statement.', fabricated_sha);
+    INSERT INTO p2_01_failure_results VALUES ('evidence_item_requires_locator', 'FAIL', 'an evidence item with no bound source_locator_id was unexpectedly accepted');
+  EXCEPTION WHEN not_null_violation THEN
+    INSERT INTO p2_01_failure_results VALUES ('evidence_item_requires_locator', 'PASS', 'safe not-null-violation failure');
   END;
 
   -- data_class pin enforcement.
   BEGIN
-    INSERT INTO kai.evidence_items (organization_id, source_version_id, evidence_type, data_class, statement, statement_fingerprint)
-    VALUES (org1, source_version1, 'dictionary_field_count_fact', 'fabricated_class', 'A statement.', fabricated_sha);
+    INSERT INTO kai.evidence_items (organization_id, source_id, source_version_id, source_locator_id, evidence_type, data_class, sensitivity_level, support_strength, statement, statement_fingerprint)
+    VALUES (org1, source1, source_version1, locator1, 'dictionary_field_presence_fact', 'fabricated_class', 'unknown', 'unassessed', 'A statement.', fabricated_sha);
     INSERT INTO p2_01_failure_results VALUES ('data_class_pin_enforced', 'FAIL', 'a fabricated data_class was unexpectedly accepted');
   EXCEPTION WHEN check_violation THEN
     INSERT INTO p2_01_failure_results VALUES ('data_class_pin_enforced', 'PASS', 'safe check-violation failure');
   END;
 
+  -- sensitivity_level pin enforcement: must copy the authoritative
+  -- data_dictionary_fields.sensitivity vocabulary exactly ('unknown' only).
+  BEGIN
+    INSERT INTO kai.evidence_items (organization_id, source_id, source_version_id, source_locator_id, evidence_type, data_class, sensitivity_level, support_strength, statement, statement_fingerprint)
+    VALUES (org1, source1, source_version1, locator1, 'dictionary_field_presence_fact', 'organization_committed_metadata', 'fabricated_sensitivity', 'unassessed', 'A statement.', fabricated_sha);
+    INSERT INTO p2_01_failure_results VALUES ('sensitivity_level_pin_enforced', 'FAIL', 'a fabricated sensitivity_level was unexpectedly accepted');
+  EXCEPTION WHEN check_violation THEN
+    INSERT INTO p2_01_failure_results VALUES ('sensitivity_level_pin_enforced', 'PASS', 'safe check-violation failure');
+  END;
+
+  -- support_strength pin enforcement.
+  BEGIN
+    INSERT INTO kai.evidence_items (organization_id, source_id, source_version_id, source_locator_id, evidence_type, data_class, sensitivity_level, support_strength, statement, statement_fingerprint)
+    VALUES (org1, source1, source_version1, locator1, 'dictionary_field_presence_fact', 'organization_committed_metadata', 'unknown', 'fabricated_strength', 'A statement.', fabricated_sha);
+    INSERT INTO p2_01_failure_results VALUES ('support_strength_pin_enforced', 'FAIL', 'a fabricated support_strength was unexpectedly accepted');
+  EXCEPTION WHEN check_violation THEN
+    INSERT INTO p2_01_failure_results VALUES ('support_strength_pin_enforced', 'PASS', 'safe check-violation failure');
+  END;
+
   -- statement safe-content and length enforcement.
   BEGIN
-    INSERT INTO kai.evidence_items (organization_id, source_version_id, evidence_type, data_class, statement, statement_fingerprint)
-    VALUES (org1, source_version1, 'dictionary_field_count_fact', 'organization_committed_metadata', 'See https://example.com/secret for details.', fabricated_sha);
+    INSERT INTO kai.evidence_items (organization_id, source_id, source_version_id, source_locator_id, evidence_type, data_class, sensitivity_level, support_strength, statement, statement_fingerprint)
+    VALUES (org1, source1, source_version1, locator1, 'dictionary_field_presence_fact', 'organization_committed_metadata', 'unknown', 'unassessed', 'See https://example.com/secret for details.', fabricated_sha);
     INSERT INTO p2_01_failure_results VALUES ('statement_unsafe_content_rejected', 'FAIL', 'a statement containing a URL was unexpectedly accepted');
   EXCEPTION WHEN check_violation THEN
     INSERT INTO p2_01_failure_results VALUES ('statement_unsafe_content_rejected', 'PASS', 'safe check-violation failure');
   END;
   BEGIN
-    INSERT INTO kai.evidence_items (organization_id, source_version_id, evidence_type, data_class, statement, statement_fingerprint)
-    VALUES (org1, source_version1, 'dictionary_field_count_fact', 'organization_committed_metadata', repeat('x', 501), fabricated_sha);
+    INSERT INTO kai.evidence_items (organization_id, source_id, source_version_id, source_locator_id, evidence_type, data_class, sensitivity_level, support_strength, statement, statement_fingerprint)
+    VALUES (org1, source1, source_version1, locator1, 'dictionary_field_presence_fact', 'organization_committed_metadata', 'unknown', 'unassessed', repeat('x', 501), fabricated_sha);
     INSERT INTO p2_01_failure_results VALUES ('statement_length_enforced', 'FAIL', 'a statement over 500 characters was unexpectedly accepted');
   EXCEPTION WHEN check_violation THEN
     INSERT INTO p2_01_failure_results VALUES ('statement_length_enforced', 'PASS', 'safe check-violation failure');
@@ -209,8 +232,8 @@ BEGIN
 
   -- statement_fingerprint shape enforcement.
   BEGIN
-    INSERT INTO kai.evidence_items (organization_id, source_version_id, evidence_type, data_class, statement, statement_fingerprint)
-    VALUES (org1, source_version1, 'dictionary_field_count_fact', 'organization_committed_metadata', 'A statement.', 'not-a-real-sha256');
+    INSERT INTO kai.evidence_items (organization_id, source_id, source_version_id, source_locator_id, evidence_type, data_class, sensitivity_level, support_strength, statement, statement_fingerprint)
+    VALUES (org1, source1, source_version1, locator1, 'dictionary_field_presence_fact', 'organization_committed_metadata', 'unknown', 'unassessed', 'A statement.', 'not-a-real-sha256');
     INSERT INTO p2_01_failure_results VALUES ('statement_fingerprint_shape_enforced', 'FAIL', 'a malformed statement_fingerprint was unexpectedly accepted');
   EXCEPTION WHEN check_violation THEN
     INSERT INTO p2_01_failure_results VALUES ('statement_fingerprint_shape_enforced', 'PASS', 'safe check-violation failure');
@@ -218,27 +241,27 @@ BEGIN
 
   -- governance/allowed-use boolean pins.
   BEGIN
-    INSERT INTO kai.evidence_items (organization_id, source_version_id, evidence_type, data_class, statement, statement_fingerprint, public_use_allowed)
-    VALUES (org1, source_version1, 'dictionary_field_count_fact', 'organization_committed_metadata', 'A statement.', fabricated_sha, true);
+    INSERT INTO kai.evidence_items (organization_id, source_id, source_version_id, source_locator_id, evidence_type, data_class, sensitivity_level, support_strength, statement, statement_fingerprint, public_use_allowed)
+    VALUES (org1, source1, source_version1, locator1, 'dictionary_field_presence_fact', 'organization_committed_metadata', 'unknown', 'unassessed', 'A statement.', fabricated_sha, true);
     INSERT INTO p2_01_failure_results VALUES ('public_use_pin_enforced', 'FAIL', 'public_use_allowed = true was unexpectedly accepted');
   EXCEPTION WHEN check_violation THEN
     INSERT INTO p2_01_failure_results VALUES ('public_use_pin_enforced', 'PASS', 'safe check-violation failure');
   END;
   BEGIN
-    INSERT INTO kai.evidence_items (organization_id, source_version_id, evidence_type, data_class, statement, statement_fingerprint, internal_only)
-    VALUES (org1, source_version1, 'dictionary_field_count_fact', 'organization_committed_metadata', 'A statement.', fabricated_sha, false);
+    INSERT INTO kai.evidence_items (organization_id, source_id, source_version_id, source_locator_id, evidence_type, data_class, sensitivity_level, support_strength, statement, statement_fingerprint, internal_only)
+    VALUES (org1, source1, source_version1, locator1, 'dictionary_field_presence_fact', 'organization_committed_metadata', 'unknown', 'unassessed', 'A statement.', fabricated_sha, false);
     INSERT INTO p2_01_failure_results VALUES ('internal_only_pin_enforced', 'FAIL', 'internal_only = false was unexpectedly accepted');
   EXCEPTION WHEN check_violation THEN
     INSERT INTO p2_01_failure_results VALUES ('internal_only_pin_enforced', 'PASS', 'safe check-violation failure');
   END;
 
   -- evidence_items identity-unique enforcement.
-  INSERT INTO kai.evidence_items (evidence_item_id, organization_id, source_version_id, evidence_type, data_class, statement, statement_fingerprint)
-  VALUES (gen_random_uuid(), org1, source_version1, 'dictionary_field_count_fact', 'organization_committed_metadata', 'A statement.', fabricated_sha)
+  INSERT INTO kai.evidence_items (evidence_item_id, organization_id, source_id, source_version_id, source_locator_id, evidence_type, data_class, sensitivity_level, support_strength, statement, statement_fingerprint)
+  VALUES (gen_random_uuid(), org1, source1, source_version1, locator1, 'dictionary_field_presence_fact', 'organization_committed_metadata', 'unknown', 'unassessed', 'A statement.', fabricated_sha)
   RETURNING evidence_item_id INTO evidence1;
   BEGIN
-    INSERT INTO kai.evidence_items (organization_id, source_version_id, evidence_type, data_class, statement, statement_fingerprint)
-    VALUES (org1, source_version1, 'dictionary_field_count_fact', 'organization_committed_metadata', 'A statement.', fabricated_sha);
+    INSERT INTO kai.evidence_items (organization_id, source_id, source_version_id, source_locator_id, evidence_type, data_class, sensitivity_level, support_strength, statement, statement_fingerprint)
+    VALUES (org1, source1, source_version1, locator1, 'dictionary_field_presence_fact', 'organization_committed_metadata', 'unknown', 'unassessed', 'A statement.', fabricated_sha);
     INSERT INTO p2_01_failure_results VALUES ('evidence_item_identity_unique_enforced', 'FAIL', 'duplicate organization_id + source_version_id + statement_fingerprint unexpectedly accepted');
   EXCEPTION WHEN unique_violation THEN
     INSERT INTO p2_01_failure_results VALUES ('evidence_item_identity_unique_enforced', 'PASS', 'safe unique-violation failure');
@@ -246,18 +269,30 @@ BEGIN
 
   -- evidence_items FK rejection: fabricated source_version_id and fabricated source_locator_id.
   BEGIN
-    INSERT INTO kai.evidence_items (organization_id, source_version_id, evidence_type, data_class, statement, statement_fingerprint)
-    VALUES (org1, bogus_uuid, 'dictionary_field_count_fact', 'organization_committed_metadata', 'A different statement.', repeat('b', 64));
+    INSERT INTO kai.evidence_items (organization_id, source_id, source_version_id, source_locator_id, evidence_type, data_class, sensitivity_level, support_strength, statement, statement_fingerprint)
+    VALUES (org1, source1, bogus_uuid, locator1, 'dictionary_field_presence_fact', 'organization_committed_metadata', 'unknown', 'unassessed', 'A different statement.', repeat('b', 64));
     INSERT INTO p2_01_failure_results VALUES ('evidence_item_fabricated_source_version_rejected', 'FAIL', 'a fabricated source_version_id was unexpectedly accepted');
   EXCEPTION WHEN foreign_key_violation THEN
     INSERT INTO p2_01_failure_results VALUES ('evidence_item_fabricated_source_version_rejected', 'PASS', 'safe foreign-key-violation failure');
   END;
   BEGIN
-    INSERT INTO kai.evidence_items (organization_id, source_version_id, source_locator_id, evidence_type, data_class, statement, statement_fingerprint)
-    VALUES (org1, source_version1, bogus_uuid, 'dictionary_field_presence_fact', 'organization_committed_metadata', 'A different statement.', repeat('c', 64));
+    INSERT INTO kai.evidence_items (organization_id, source_id, source_version_id, source_locator_id, evidence_type, data_class, sensitivity_level, support_strength, statement, statement_fingerprint)
+    VALUES (org1, source1, source_version1, bogus_uuid, 'dictionary_field_presence_fact', 'organization_committed_metadata', 'unknown', 'unassessed', 'A different statement.', repeat('c', 64));
     INSERT INTO p2_01_failure_results VALUES ('evidence_item_fabricated_source_locator_rejected', 'FAIL', 'a fabricated source_locator_id was unexpectedly accepted');
   EXCEPTION WHEN foreign_key_violation THEN
     INSERT INTO p2_01_failure_results VALUES ('evidence_item_fabricated_source_locator_rejected', 'PASS', 'safe foreign-key-violation failure');
+  END;
+
+  -- composite lineage tuple rejection: a real source_version_id paired with a
+  -- source_id it does not actually belong to is rejected by the three-column
+  -- composite foreign key alone, even though both source_id and source_version_id
+  -- individually reference real, existing rows.
+  BEGIN
+    INSERT INTO kai.evidence_items (organization_id, source_id, source_version_id, source_locator_id, evidence_type, data_class, sensitivity_level, support_strength, statement, statement_fingerprint)
+    VALUES (org1, bogus_uuid, source_version1, locator1, 'dictionary_field_presence_fact', 'organization_committed_metadata', 'unknown', 'unassessed', 'A mismatched-lineage statement.', repeat('e', 64));
+    INSERT INTO p2_01_failure_results VALUES ('evidence_item_mismatched_source_lineage_rejected', 'FAIL', 'a source_id not actually bound to the given source_version_id was unexpectedly accepted');
+  EXCEPTION WHEN foreign_key_violation THEN
+    INSERT INTO p2_01_failure_results VALUES ('evidence_item_mismatched_source_lineage_rejected', 'PASS', 'safe foreign-key-violation failure via the composite source_id/source_version_id/organization_id lineage tuple');
   END;
 
   -- review_queue_items evidence_review partial unique index enforcement.
@@ -266,8 +301,27 @@ BEGIN
     priority, queue_status, review_status, summary, required_action, queue_metadata, created_by_type
   ) VALUES (
     org1, 'evidence_review', 'evidence_item', evidence1,
-    'normal', 'open', 'needs_gk_review', 'New evidence item requires GK review.', NULL, '{}'::jsonb, 'system'
+    'normal', 'open', 'needs_gk_review', 'New evidence item requires GK review.',
+    'Review the evidence item''s lineage, sensitivity, support strength, and audience eligibility before use.',
+    '{}'::jsonb, 'system'
   );
+  BEGIN
+    INSERT INTO kai.review_queue_items (
+      organization_id, queue_type, target_object_type, target_object_id,
+      priority, queue_status, review_status, summary, required_action, queue_metadata, created_by_type
+    ) VALUES (
+      org1, 'evidence_review', 'evidence_item', evidence1,
+      'normal', 'open', 'needs_gk_review', 'New evidence item requires GK review.',
+      'Review the evidence item''s lineage, sensitivity, support strength, and audience eligibility before use.',
+      '{}'::jsonb, 'system'
+    );
+    INSERT INTO p2_01_failure_results VALUES ('evidence_review_identity_unique_enforced', 'FAIL', 'duplicate evidence_review queue item unexpectedly accepted');
+  EXCEPTION WHEN unique_violation THEN
+    INSERT INTO p2_01_failure_results VALUES ('evidence_review_identity_unique_enforced', 'PASS', 'safe unique-violation failure via ux_review_queue_items_p2_01_evidence_review_identity');
+  END;
+
+  -- evidence_review required_action must-be-present enforcement: a null or blank
+  -- required_action for queue_type = 'evidence_review' is now rejected.
   BEGIN
     INSERT INTO kai.review_queue_items (
       organization_id, queue_type, target_object_type, target_object_id,
@@ -276,9 +330,21 @@ BEGIN
       org1, 'evidence_review', 'evidence_item', evidence1,
       'normal', 'open', 'needs_gk_review', 'New evidence item requires GK review.', NULL, '{}'::jsonb, 'system'
     );
-    INSERT INTO p2_01_failure_results VALUES ('evidence_review_identity_unique_enforced', 'FAIL', 'duplicate evidence_review queue item unexpectedly accepted');
-  EXCEPTION WHEN unique_violation THEN
-    INSERT INTO p2_01_failure_results VALUES ('evidence_review_identity_unique_enforced', 'PASS', 'safe unique-violation failure via ux_review_queue_items_p2_01_evidence_review_identity');
+    INSERT INTO p2_01_failure_results VALUES ('evidence_review_required_action_enforced', 'FAIL', 'a null required_action for an evidence_review queue item was unexpectedly accepted');
+  EXCEPTION WHEN check_violation THEN
+    INSERT INTO p2_01_failure_results VALUES ('evidence_review_required_action_enforced', 'PASS', 'safe check-violation failure');
+  END;
+  BEGIN
+    INSERT INTO kai.review_queue_items (
+      organization_id, queue_type, target_object_type, target_object_id,
+      priority, queue_status, review_status, summary, required_action, queue_metadata, created_by_type
+    ) VALUES (
+      org1, 'evidence_review', 'evidence_item', evidence1,
+      'normal', 'open', 'needs_gk_review', 'New evidence item requires GK review.', '   ', '{}'::jsonb, 'system'
+    );
+    INSERT INTO p2_01_failure_results VALUES ('evidence_review_required_action_blank_rejected', 'FAIL', 'a blank required_action for an evidence_review queue item was unexpectedly accepted');
+  EXCEPTION WHEN check_violation THEN
+    INSERT INTO p2_01_failure_results VALUES ('evidence_review_required_action_blank_rejected', 'PASS', 'safe check-violation failure');
   END;
 END $$;
 

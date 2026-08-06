@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { withTransaction } from "../db/kaiDb.js";
 import {
   getScopedSourceVersionById,
   getScopedSourceById,
@@ -16,11 +15,16 @@ import { validateEvidenceHasSourceLineage } from "../validators/kaiEvidenceLinea
 
 /**
  * KAI P2-01 deterministic evidence-lineage repository adapter: server-derived-only
- * extraction of deterministic evidence statements from the CURRENT
- * `kai.source_versions` row of a fully promoted P1-08 source, atomically compounded
- * with the `kai.source_locators` 'column' coordinate each per-field fact is bound
- * to, and the `kai.review_queue_items` 'evidence_review' item each fresh evidence
- * item requires.
+ * extraction of deterministic `dictionary_field_presence_fact` evidence statements
+ * from the CURRENT `kai.source_versions` row of a fully promoted P1-08 source,
+ * atomically compounded with the `kai.source_locators` 'column' coordinate each
+ * per-field fact is bound to, and the `kai.review_queue_items` 'evidence_review'
+ * item each fresh evidence item requires. Every evidence item carries a non-null
+ * source_id/source_version_id/source_locator_id lineage, an evidence_type of
+ * exactly 'dictionary_field_presence_fact', a sensitivity_level copied verbatim
+ * from the field's own committed `data_dictionary_fields.sensitivity`, and a
+ * support_strength of exactly 'unassessed'. P2-01C correction: this package no
+ * longer creates an unlocated aggregate field-count evidence item.
  *
  * This module is the only authorized location for P2-01's own SQL and row
  * locking, other than the reused `getScoped*` lookups added to
@@ -57,10 +61,12 @@ const EVIDENCE_LINEAGE_AUDIT_CONTRACT = "p2_evidence_lineage_extraction_v1";
 const EVIDENCE_LINEAGE_VALIDATOR_KEY = "VAL-KAI-P2-01-001";
 const EVIDENCE_LINEAGE_AUDIT_OPERATION = "evidence_lineage_extracted";
 
-const EVIDENCE_TYPE_FIELD_COUNT_FACT = "dictionary_field_count_fact";
 const EVIDENCE_TYPE_FIELD_PRESENCE_FACT = "dictionary_field_presence_fact";
 const EVIDENCE_DATA_CLASS = "organization_committed_metadata";
+const EVIDENCE_SUPPORT_STRENGTH_UNASSESSED = "unassessed";
 const LOCATOR_TYPE_COLUMN = "column";
+const REVIEW_REQUIRED_ACTION =
+  "Review the evidence item's lineage, sensitivity, support strength, and audience eligibility before use.";
 
 const REVIEW_QUEUE_TYPE = "evidence_review";
 const REVIEW_TARGET_OBJECT_TYPE = "evidence_item";
@@ -155,27 +161,18 @@ function computeStatementFingerprint({ organizationId, sourceVersionId, evidence
 }
 
 /**
- * Deterministic evidence-composition plan: one aggregate item (no locator), then
- * one per-field item per already-committed `kai.data_dictionary_fields` row, in
- * the deterministic `profile_field_key ASC` order the read query already applies.
- * Every statement and coordinate is server-derived only from `fieldRows` - never
- * from caller input, raw file content, or a sample value.
+ * Deterministic evidence-composition plan: one per-field item per already-
+ * committed `kai.data_dictionary_fields` row, in the deterministic
+ * `profile_field_key ASC` order the read query already applies. Every statement
+ * and coordinate is server-derived only from `fieldRows` - never from caller
+ * input, raw file content, or a sample value. Every item is bound to an exact
+ * committed column locator and carries the field's own authoritative
+ * `sensitivity_level`, copied verbatim from `data_dictionary_fields.sensitivity`.
+ * P2-01C correction: this package no longer composes an unlocated aggregate
+ * field-count item.
  */
 function buildEvidenceCompositionPlan({ organizationId, sourceVersionId, fieldRows }) {
-  const aggregateStatement = `Source version's committed data dictionary contains ${fieldRows.length} field(s).`;
-  const items = [
-    {
-      evidenceType: EVIDENCE_TYPE_FIELD_COUNT_FACT,
-      statement: aggregateStatement,
-      statementFingerprint: computeStatementFingerprint({
-        organizationId,
-        sourceVersionId,
-        evidenceType: EVIDENCE_TYPE_FIELD_COUNT_FACT,
-        statement: aggregateStatement,
-      }),
-      needsLocator: false,
-    },
-  ];
+  const items = [];
 
   for (const field of fieldRows) {
     const statement = `Source version's committed data dictionary includes field "${field.profile_field_key}" of committed type "${field.data_type}".`;
@@ -195,7 +192,7 @@ function buildEvidenceCompositionPlan({ organizationId, sourceVersionId, fieldRo
         evidenceType: EVIDENCE_TYPE_FIELD_PRESENCE_FACT,
         statement,
       }),
-      needsLocator: true,
+      sensitivityLevel: field.sensitivity,
       locatorType: LOCATOR_TYPE_COLUMN,
       coordinates,
       locatorFingerprint,
@@ -219,24 +216,27 @@ async function insertSourceLocatorIfAbsent(tx, { organizationId, sourceVersionId
   return result.rows[0] ?? null;
 }
 
-async function insertEvidenceItemIfAbsent(tx, { organizationId, sourceVersionId, sourceLocatorId, evidenceType, statement, statementFingerprint, createdBy, createdByType }) {
+async function insertEvidenceItemIfAbsent(tx, { organizationId, sourceId, sourceVersionId, sourceLocatorId, evidenceType, sensitivityLevel, statement, statementFingerprint, createdBy, createdByType }) {
   const result = await tx.query(
     `INSERT INTO kai.evidence_items (
-       organization_id, source_version_id, source_locator_id, evidence_type, data_class,
-       statement, statement_fingerprint, created_by, created_by_type
-     ) VALUES ($1,$2,$3::uuid,$4,$5,$6,$7,$8,$9)
+       organization_id, source_id, source_version_id, source_locator_id, evidence_type, data_class,
+       sensitivity_level, support_strength, statement, statement_fingerprint, created_by, created_by_type
+     ) VALUES ($1,$2,$3,$4::uuid,$5,$6,$7,$8,$9,$10,$11,$12)
      ON CONFLICT (organization_id, source_version_id, statement_fingerprint)
        DO NOTHING
-     RETURNING evidence_item_id, organization_id, source_version_id, source_locator_id,
-               evidence_type, data_class, statement, statement_fingerprint,
+     RETURNING evidence_item_id, organization_id, source_id, source_version_id, source_locator_id,
+               evidence_type, data_class, sensitivity_level, support_strength, statement, statement_fingerprint,
                evidence_review_status, internal_only, public_use_allowed, funder_use_allowed,
                llm_processing_allowed, product_learning_allowed, created_by, created_by_type, created_at`,
     [
       organizationId,
+      sourceId,
       sourceVersionId,
-      sourceLocatorId || null,
+      sourceLocatorId,
       evidenceType,
       EVIDENCE_DATA_CLASS,
+      sensitivityLevel,
+      EVIDENCE_SUPPORT_STRENGTH_UNASSESSED,
       statement,
       statementFingerprint,
       createdBy || null,
@@ -251,7 +251,7 @@ async function insertEvidenceReviewQueueItemIfAbsent(tx, { organizationId, evide
     `INSERT INTO kai.review_queue_items (
        organization_id, queue_type, target_object_type, target_object_id,
        priority, queue_status, review_status, summary, required_action, queue_metadata, created_by_type
-     ) VALUES ($1,$2,$3,$4::uuid,'normal',$5,$6,$7,NULL,'{}'::jsonb,$8)
+     ) VALUES ($1,$2,$3,$4::uuid,'normal',$5,$6,$7,$8,'{}'::jsonb,$9)
      ON CONFLICT (organization_id, queue_type, target_object_type, target_object_id)
        WHERE queue_type = 'evidence_review'
        DO NOTHING
@@ -266,6 +266,7 @@ async function insertEvidenceReviewQueueItemIfAbsent(tx, { organizationId, evide
       REVIEW_QUEUE_STATUS_OPEN,
       REVIEW_STATUS_NEEDS_GK_REVIEW,
       REVIEW_SUMMARY_NEW_EVIDENCE_ITEM,
+      REVIEW_REQUIRED_ACTION,
       createdByType || "system",
     ],
   );
@@ -379,10 +380,13 @@ function rowToEvidenceRecord(row) {
   return {
     evidence_item_id: row.evidence_item_id,
     organization_id: row.organization_id,
+    source_id: row.source_id,
     source_version_id: row.source_version_id,
     source_locator_id: row.source_locator_id,
     evidence_type: row.evidence_type,
     data_class: row.data_class,
+    sensitivity_level: row.sensitivity_level,
+    support_strength: row.support_strength,
     statement: row.statement,
     statement_fingerprint: row.statement_fingerprint,
     evidence_review_status: row.evidence_review_status,
@@ -505,8 +509,25 @@ function shapeEvidenceLineageError(error) {
   return evidenceLineageFailure("system_error");
 }
 
+/**
+ * P2-01C correction: this factory no longer statically imports `withTransaction`
+ * from Backend/kai/db/kaiDb.js at module load. A static top-level import there
+ * unconditionally executes Backend/db/pg.js, which is itself capable of import-
+ * time construction of the ambient application connection pool from whatever
+ * DATABASE_URL/DATABASE_URL_LOCAL/etc happens to be set in the process
+ * environment - exactly the import-time database initialization the P2-01
+ * PostgreSQL-isolation test suite must never trigger. Every real caller that does
+ * not inject its own `runInTransaction` still gets the identical default
+ * behavior via this lazy, deferred import, executed only the first time this
+ * repository actually runs a transaction.
+ */
+async function resolveDefaultRunInTransaction() {
+  const { withTransaction } = await import("../db/kaiDb.js");
+  return withTransaction;
+}
+
 export function createPostgresEvidenceLineageRepository({
-  runInTransaction = withTransaction,
+  runInTransaction,
   beforeInsert = async () => {},
 } = {}) {
   return Object.freeze({
@@ -525,8 +546,9 @@ export function createPostgresEvidenceLineageRepository({
     async extractEvidenceFromSourceVersion(input) {
       if (!validateExtractInput(input)) return evidenceLineageFailure("validation_blocker");
       const { organizationId, sourceVersionId, actorUserId, now, metadataOnlyAudit } = input;
+      const run = runInTransaction || (await resolveDefaultRunInTransaction());
       try {
-        return await runInTransaction(async (tx) => {
+        return await run(async (tx) => {
           // Test-only rendezvous seam, called once, before any row is read or
           // locked - in particular, before the FOR UPDATE lock
           // getScopedSourceCandidateByIdentity takes below, which is the real
@@ -587,36 +609,35 @@ export function createPostgresEvidenceLineageRepository({
           const queueRecords = [];
 
           for (const item of plan) {
-            let sourceLocatorId = null;
-            if (item.needsLocator) {
-              const insertedLocatorRow = await insertSourceLocatorIfAbsent(tx, {
-                organizationId,
-                sourceVersionId,
-                locatorType: item.locatorType,
-                coordinates: item.coordinates,
-                locatorFingerprint: item.locatorFingerprint,
-                createdByType: "system",
-              });
-              let locatorRecord;
-              if (insertedLocatorRow) {
-                locatorRecord = rowToLocatorRecord(insertedLocatorRow);
-              } else {
-                const existingLocatorRow = await getScopedSourceLocatorByFingerprint(
-                  { organizationId, sourceVersionId, locatorFingerprint: item.locatorFingerprint },
-                  tx,
-                );
-                if (!existingLocatorRow) throw new MalformedInsertedRowError("source_locators");
-                locatorRecord = rowToLocatorRecord(existingLocatorRow);
-              }
-              sourceLocatorId = locatorRecord.source_locator_id;
-              locatorRecords.push(locatorRecord);
+            const insertedLocatorRow = await insertSourceLocatorIfAbsent(tx, {
+              organizationId,
+              sourceVersionId,
+              locatorType: item.locatorType,
+              coordinates: item.coordinates,
+              locatorFingerprint: item.locatorFingerprint,
+              createdByType: "system",
+            });
+            let locatorRecord;
+            if (insertedLocatorRow) {
+              locatorRecord = rowToLocatorRecord(insertedLocatorRow);
+            } else {
+              const existingLocatorRow = await getScopedSourceLocatorByFingerprint(
+                { organizationId, sourceVersionId, locatorFingerprint: item.locatorFingerprint },
+                tx,
+              );
+              if (!existingLocatorRow) throw new MalformedInsertedRowError("source_locators");
+              locatorRecord = rowToLocatorRecord(existingLocatorRow);
             }
+            const sourceLocatorId = locatorRecord.source_locator_id;
+            locatorRecords.push(locatorRecord);
 
             const insertedEvidenceRow = await insertEvidenceItemIfAbsent(tx, {
               organizationId,
+              sourceId: sourceRow.source_id,
               sourceVersionId,
               sourceLocatorId,
               evidenceType: item.evidenceType,
+              sensitivityLevel: item.sensitivityLevel,
               statement: item.statement,
               statementFingerprint: item.statementFingerprint,
               createdBy: actorUserId,
@@ -724,15 +745,16 @@ export function createPostgresEvidenceLineageRepository({
 }
 
 export const __evidenceLineageRepositoryContract = Object.freeze({
-  EVIDENCE_TYPE_FIELD_COUNT_FACT,
   EVIDENCE_TYPE_FIELD_PRESENCE_FACT,
   EVIDENCE_DATA_CLASS,
+  EVIDENCE_SUPPORT_STRENGTH_UNASSESSED,
   LOCATOR_TYPE_COLUMN,
   REVIEW_QUEUE_TYPE,
   REVIEW_TARGET_OBJECT_TYPE,
   REVIEW_QUEUE_STATUS_OPEN,
   REVIEW_STATUS_NEEDS_GK_REVIEW,
   REVIEW_SUMMARY_NEW_EVIDENCE_ITEM,
+  REVIEW_REQUIRED_ACTION,
   EVIDENCE_LINEAGE_AUDIT_CONTRACT,
   EVIDENCE_LINEAGE_VALIDATOR_KEY,
   EVIDENCE_LINEAGE_AUDIT_OPERATION,

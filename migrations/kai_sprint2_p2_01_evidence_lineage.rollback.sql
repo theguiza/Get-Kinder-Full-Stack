@@ -241,9 +241,15 @@ ALTER TABLE IF EXISTS kai.upload_lifecycle_audit
       )
     );
 
+ALTER TABLE IF EXISTS kai.review_queue_items
+  DROP CONSTRAINT IF EXISTS review_queue_items_p2_01_evidence_review_required_action_check;
+
 DROP INDEX IF EXISTS kai.ux_review_queue_items_p2_01_evidence_review_identity;
 
 DROP TABLE IF EXISTS kai.evidence_items;
 DROP TABLE IF EXISTS kai.source_locators;
+
+ALTER TABLE IF EXISTS kai.source_versions
+  DROP CONSTRAINT IF EXISTS source_versions_p2_01_id_source_org_unique;
 
 COMMIT;

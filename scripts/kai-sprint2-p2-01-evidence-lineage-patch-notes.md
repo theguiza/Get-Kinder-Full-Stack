@@ -111,11 +111,12 @@ allowed-use posture.
   in this file was modified. `getScopedSensitivityProfileById` reads the same
   columns P1-08's own local `readScopedSensitivityProfile` already reads; the
   P1-08 repository file itself is not modified to consume this new export.
-- `Backend/kai/config/kaiSprint2Config.js` (additive) — added
-  `isKaiEvidenceLineageEnabled` (reading `KAI_EVIDENCE_LINEAGE_ENABLED`, default
-  false) and `areKaiSprint2EvidenceLineageFeaturesEnabled`, matching the exact
-  composition idiom already established in this file. No existing exported
-  function was modified; neither flag is enabled by this package.
+- `Backend/kai/config/kaiSprint2Config.js` (additive originally; removed by the
+  P2-01C correction below) — originally added `isKaiEvidenceLineageEnabled`
+  (reading `KAI_EVIDENCE_LINEAGE_ENABLED`, default false) and
+  `areKaiSprint2EvidenceLineageFeaturesEnabled`. Both are removed by P2-01C;
+  P2-01 is now gated by the pre-existing `isKaiSprint2Enabled`/
+  `KAI_SPRINT2_ENABLED` alone.
 - `__tests__/kai-sprint2-p2-01-evidence-lineage-schema-contract.spec.js`,
   `-boundary.spec.js`, `.integration.spec.js`, `-runner-self-test.spec.js` —
   focused schema, boundary, PostgreSQL-backed integration, and runner-assertion
@@ -140,17 +141,16 @@ unchanged. P1-08 is accepted and closed and was not reopened or modified. No
 route, listener, scheduler, timer, startup hook, public barrel export, production
 composition, record-ID or redacted-extract locator, graph relationship, claim,
 assistant tool, generation logic, cloud configuration, feature-flag default
-enablement, or real-client-data handling was added or implemented. Neither
-`KAI_SPRINT2_ENABLED` nor `KAI_EVIDENCE_LINEAGE_ENABLED` is enabled by this
-package.
+enablement, or real-client-data handling was added or implemented.
+`KAI_SPRINT2_ENABLED` is not enabled by this package; `KAI_EVIDENCE_LINEAGE_ENABLED`
+has been removed entirely by the P2-01C correction (see below).
 
 ## Behavior summary
 
-Human-authorized, idempotent extraction of deterministic evidence statements
-(one aggregate committed-field-count fact plus one per-field presence fact per
-already-committed `kai.data_dictionary_fields` row) from the CURRENT
-`kai.source_versions` row of a fully promoted P1-08 source, gated by both
-`KAI_SPRINT2_ENABLED` and `KAI_EVIDENCE_LINEAGE_ENABLED`, a mapped human actor
+Human-authorized, idempotent extraction of one deterministic
+`dictionary_field_presence_fact` evidence statement per already-committed
+`kai.data_dictionary_fields` row from the CURRENT `kai.source_versions` row of a
+fully promoted P1-08 source, gated by `KAI_SPRINT2_ENABLED`, a mapped human actor
 (`gk_admin`/`gk_operator`/`gk_reviewer`) with active organization membership, and
 VAL-KAI-P2-01-001's nine-check fixed-order lineage/permission predicate. The
 caller supplies only `organizationId`, `sourceVersionId`, `actorContext`, and
@@ -221,3 +221,60 @@ All four fixes were verified by rerunning the full focused P2-01 suite, the
 package's own PostgreSQL-backed `local-postgres.js` runner end-to-end, the P1-08
 verifier, the complete Sprint 2 suite, and the complete repository suite - all
 green - before this package's evidence was recorded.
+
+## P2-01C CORRECTION (evidence contract and PostgreSQL isolation)
+
+A bounded correction applied on top of the accepted P2-01 package, addressing
+defects found in the evidence contract and the integration suite's database
+isolation:
+
+- **Removed the unlocated aggregate evidence item.** The
+  `dictionary_field_count_fact` evidence type (one aggregate item per extraction,
+  with no `source_locator_id`) is removed entirely. `evidence_type` is now pinned
+  to the single value `dictionary_field_presence_fact`; `source_locator_id` is now
+  a `NOT NULL` column, and the conditional `evidence_items_p2_01_locator_binding_check`
+  is removed as unnecessary.
+- **Added `source_id`, `sensitivity_level`, and `support_strength` to
+  `kai.evidence_items`.** `source_id` is `NOT NULL`. `sensitivity_level` copies
+  the authoritative `kai.data_dictionary_fields.sensitivity` value verbatim
+  (pinned to that column's own existing single vocabulary value, `'unknown'`).
+  `support_strength` is pinned to `'unassessed'`.
+- **Enforced organization_id + source_id + source_version_id as one tenant-safe
+  lineage tuple.** A new `source_versions_p2_01_id_source_org_unique` constraint
+  is added to the existing P1-08 `kai.source_versions` table; `evidence_items_p2_01_source_version_fk`
+  is widened from a two-column `(source_version_id, organization_id)` foreign key
+  to the three-column `(source_version_id, source_id, organization_id)` composite,
+  proving the stored source_version actually belongs to the stored source and
+  organization - independent single- or two-column foreign keys could not prove
+  this by themselves.
+- **Added a fixed `required_action` to every evidence-review queue item** ("Review
+  the evidence item's lineage, sensitivity, support strength, and audience
+  eligibility before use."), and a new
+  `review_queue_items_p2_01_evidence_review_required_action_check` CHECK
+  constraint requiring `required_action` to be present, non-blank, and within the
+  existing 1-2000 character bound, for `queue_type = 'evidence_review'` rows only -
+  mirroring the exact P1-06 `sensitivity_review` precedent. No other `queue_type`
+  is affected.
+- **Removed `KAI_EVIDENCE_LINEAGE_ENABLED`** and its
+  `isKaiEvidenceLineageEnabled`/`areKaiSprint2EvidenceLineageFeaturesEnabled`
+  helpers from `Backend/kai/config/kaiSprint2Config.js`, along with every test and
+  doc reference to it. P2-01 is now gated by `KAI_SPRINT2_ENABLED` alone and
+  remains dormant because it has no route, worker, listener, or production
+  composition.
+- **PostgreSQL isolation.** `Backend/kai/dictionary/postgresEvidenceLineageRepository.js`
+  no longer statically imports `Backend/kai/db/kaiDb.js` at module load - its
+  default transaction runner is now a deferred `await import(...)`, reached only
+  when a caller does not inject its own `runInTransaction`. The integration spec
+  now validates `KAI_P2_01_EVIDENCE_LINEAGE_DATABASE_URL` as loopback-only
+  synchronously before any dynamic import, never imports `kaiDb.js`, and runs
+  every repository call through a test-local `withTestTransaction` wrapper over
+  its own runner-owned `Pool` - never through `kaiDb.js`'s ambient pool. Ambient
+  `DATABASE_URL` is therefore never read by this suite; a non-loopback runner URL
+  is rejected before any connection attempt; and direct execution without the
+  runner-owned URL performs zero database activity.
+
+Verified by rerunning the full focused P2-01 suite (schema-contract, boundary,
+integration, runner-self-test), the package's own PostgreSQL-backed
+`local-postgres.js` runner end-to-end, the P1-08 verifier, the complete Sprint 2
+suite, and the complete repository suite - all green - before this correction's
+evidence was recorded.
