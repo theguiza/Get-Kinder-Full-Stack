@@ -12551,3 +12551,100 @@ NOT_CONFIRMED:
     gate, manifest/file creation, schema migration/rollback, route, UI,
     assistant operation, listener, production wiring, cloud access, real
     client data access, or P3-07 work was performed.
+
+## P3-07 - Internal read-only GK export-review route (completed 2026-08-06)
+
+Status: accepted for this local package as a dormant authenticated internal
+read-only route only.
+
+Implementation evidence:
+  - Backend/kai/routes/sprint2IntakeApi.js - added exactly one GET route on
+    the existing mounted Sprint 2 intake/admin router:
+    /admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-review-queue/:exportReviewQueueItemId/packet.
+    The route uses the existing router, feature gate, no-store middleware,
+    service-injection override seam, lazy service import pattern, invokeService
+    wrapper, sendServiceResult envelope, and canonical KAI error mapper. It
+    creates no Router, mount, startup registration, listener, response helper,
+    status map, or custom catch block.
+  - The route validates only the three canonical lowercase path identifiers
+    before service invocation. It reads actorContext only from
+    req.kaiSprint2ActorContext, the mapped actor-context request property
+    populated by the assembled middleware in the focused route tests, and
+    forwards exactly organizationId, generatedContentDraftId,
+    exportReviewQueueItemId, and actorContext to
+    getGeneratedDraftExportReviewPacket. It forwards no body, query, req.user,
+    header, session, cookie, request id, route context, now, or other request
+    field. Unknown query keys and GET bodies follow the existing read-route
+    convention here by not influencing service input.
+  - The route reimplements none of the P3-06 authority checks. Feature flags
+    KAI_GENERATION_ENABLED and KAI_PUBLIC_EXPORT_ENABLED, mapped-human checks,
+    gk_admin/active-membership/tenant authorization, P3-06 exact input
+    validation, repository state validation, eligibility checks, and DTO
+    allowlisting remain authoritative in getGeneratedDraftExportReviewPacket.
+  - __tests__/kai-sprint2-p3-07-export-review-packet-route.spec.js (new) -
+    proves unauthenticated assembled requests never call the service; exact
+    path values and middleware actorContext are forwarded once; body/query
+    fields are not forwarded; malformed path values return safe invalid_request
+    before service invocation; success preserves the exact injected P3-06 DTO
+    inside the established KAI API envelope; feature_disabled, invalid_request,
+    unauthorized, mapped_kai_user_required, authorization_denied,
+    tenant_boundary_violation, not_found, conflict_current_state_changed, and
+    system_error all map through the existing safe envelope and status mapper;
+    the P3-07 route source imports no database or repository layer and contains
+    no SQL, direct kai.* access, write, audit, queue transition, approval,
+    export-authority, final-gate, manifest, or file operation.
+  - __tests__/kai-sprint2-pass2-route-runtime.spec.js and
+    __tests__/kai-sprint2-api-contract.spec.js - recorded the exact new mounted
+    path while preserving existing route inventory, middleware order, and API
+    contract assertions.
+
+TOOL_VERIFIED:
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test
+    __tests__/kai-sprint2-p3-07-export-review-packet-route.spec.js -> first
+    sandbox attempt hit local 127.0.0.1 listen EPERM; localhost-capable rerun
+    passed 8/8.
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test
+    __tests__/kai-sprint2-p3-06-export-review-packet-boundary.spec.js -> 11/11
+    pass.
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test
+    __tests__/kai-sprint2-p3-06-export-review-packet.integration.spec.js ->
+    2/2 pass, 1 runner-owned PostgreSQL case skipped under the loopback
+    sentinel.
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test
+    __tests__/kai-sprint2-actor-context.spec.js
+    __tests__/kai-sprint2-authorization.spec.js
+    __tests__/kai-sprint2-tenant-authorization.spec.js
+    __tests__/kai-sprint2-tenant-validator.spec.js -> 32/32 pass.
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test
+    __tests__/kai-sprint2-api-contract.spec.js
+    __tests__/kai-sprint2-pass2-route-runtime.spec.js
+    __tests__/kai-sprint2-foundation-safety.spec.js -> first sandbox attempt hit
+    local 127.0.0.1 listen EPERM; localhost-capable rerun passed 55/55.
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test
+    __tests__/kai-sprint2-pass2-admin-authz.spec.js
+    __tests__/kai-sprint2-pass2-api-contract.spec.js
+    __tests__/kai-sprint2-review-queue-route.spec.js
+    __tests__/kai-sprint2-review-queue-status-route.spec.js -> first sandbox
+    attempt hit local 127.0.0.1 listen EPERM in assembled route tests;
+    localhost-capable rerun of the affected route files passed 33/33, while the
+    non-listener auth/API tests passed in the initial affected run.
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2
+    -> sandbox attempt hit local 127.0.0.1 listen EPERM in assembled route
+    tests; localhost-capable rerun passed complete Sprint 2 suite: 1569 pass,
+    22 skip, 0 fail.
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test -> sandbox
+    attempt hit local 127.0.0.1 listen EPERM in assembled route tests;
+    localhost-capable rerun passed complete repository suite: 1674 pass,
+    22 skip, 0 fail.
+
+USER_CONFIRMED:
+  - P2-01 through P2-08 and P3-01 through P3-06 are accepted and closed.
+  - P3-07 is authorized as one bounded authenticated internal read-only GK
+    export-review route package.
+
+NOT_CONFIRMED:
+  - No push, merge, deploy, flag enablement, approval/export authority, final
+    gate, manifest/file creation, schema migration/rollback, UI, assistant
+    operation, listener, startup registration, production wiring, cloud access,
+    real client data access, P3-08 work, new review cycle, or production
+    database access was performed.

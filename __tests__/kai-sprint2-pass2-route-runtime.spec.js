@@ -107,6 +107,7 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     "/admin/files/:intakeFileId/block",
     "/admin/files/:intakeFileId/confirm-upload",
     "/admin/files/:intakeFileId/upload",
+    "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-review-queue/:exportReviewQueueItemId/packet",
     // KAI P1-09 internal review-cockpit surface (additive; every prior entry
     // preserved verbatim).
     "/admin/review-cockpit/file-profiles/:fileProfileId",

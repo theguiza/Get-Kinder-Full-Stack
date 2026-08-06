@@ -27,6 +27,7 @@ let intakeServiceOverride = null;
 let intakeServicePromise = null;
 let reviewQueueServicePromise = null;
 let reviewCockpitServicePromise = null;
+let exportReviewServicePromise = null;
 
 export function sendServiceResult(res, result, successStatus = 200) {
   if (result?.ok) {
@@ -300,6 +301,24 @@ function reviewCockpitIdentifiers(req = {}, parameterName) {
   return { organizationId, objectId };
 }
 
+function exportReviewPacketIdentifiers(req = {}) {
+  const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+  const generatedContentDraftId = typeof req.params?.generatedContentDraftId === "string"
+    ? req.params.generatedContentDraftId
+    : "";
+  const exportReviewQueueItemId = typeof req.params?.exportReviewQueueItemId === "string"
+    ? req.params.exportReviewQueueItemId
+    : "";
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) || organizationId !== organizationId.toLowerCase()) return null;
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(generatedContentDraftId) || generatedContentDraftId !== generatedContentDraftId.toLowerCase()) return null;
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(exportReviewQueueItemId) || exportReviewQueueItemId !== exportReviewQueueItemId.toLowerCase()) return null;
+  return { organizationId, generatedContentDraftId, exportReviewQueueItemId };
+}
+
+function sprint2MappedActorContext(req = {}) {
+  return req.kaiSprint2ActorContext;
+}
+
 router.use(requireKaiSprint2Enabled);
 router.use(setKaiSprint2NoStore);
 
@@ -554,6 +573,29 @@ router.post("/admin/review-cockpit/source-candidates/:intakeSourceCandidateId/de
   });
 });
 
+async function getExportReviewService() {
+  if (intakeServiceOverride?.getGeneratedDraftExportReviewPacket) return intakeServiceOverride;
+  exportReviewServicePromise ||= import("../services/kaiExportReviewService.js");
+  return exportReviewServicePromise;
+}
+
+router.get(
+  "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-review-queue/:exportReviewQueueItemId/packet",
+  async (req, res) => {
+    const identifiers = exportReviewPacketIdentifiers(req);
+    if (!identifiers) return sendKaiError(res, "invalid_request");
+    return invokeService(res, async () => {
+      const service = await getExportReviewService();
+      return service.getGeneratedDraftExportReviewPacket({
+        organizationId: req.params.organizationId,
+        generatedContentDraftId: req.params.generatedContentDraftId,
+        exportReviewQueueItemId: req.params.exportReviewQueueItemId,
+        actorContext: sprint2MappedActorContext(req),
+      });
+    });
+  },
+);
+
 router.post("/admin/batches", async (req, res) => {
   const payload = requestPayload(req);
   if (!validateMutationRequestOrSend(req, res, "create_intake_batch")) return;
@@ -617,6 +659,8 @@ export const __testables = {
   validateConfirmUploadRequestOrSend,
   validateReviewQueueStatusRequestOrSend,
   reviewCockpitIdentifiers,
+  exportReviewPacketIdentifiers,
+  sprint2MappedActorContext,
   setIntakeServiceForTest(service) {
     intakeServiceOverride = service;
     return () => {
