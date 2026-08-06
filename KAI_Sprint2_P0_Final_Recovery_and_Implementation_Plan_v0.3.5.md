@@ -11164,6 +11164,86 @@ commands:
   - git diff --check -> TOOL_VERIFIED: no whitespace errors
   - git diff --cached --check -> TOOL_VERIFIED: no whitespace errors
 
+### P2-06 read-only claim traceability and blocked-eligibility explanation - completed 2026-08-06
+
+preflight:
+  branch: codex/kai-sprint2-p0-v0.3.5
+  head: bc2c04eac4a73bdf9654eeb0c74d2e3de4c2ae2a
+  worktree: clean at task start, including untracked files; staged paths: none
+
+p2_06_made:
+  - Backend/kai/services/kaiClaimTraceabilityService.js - added the dormant
+    getClaimTraceabilitySummary seam with exact input key allowlist,
+    requestedAudience restricted to internal/funder/public, KAI_SPRINT2_ENABLED
+    gating before any database-capable module load, mapped-human authorization,
+    active organization membership, and gk_admin/gk_operator/gk_reviewer role
+    enforcement.
+  - Backend/kai/dictionary/postgresClaimTraceabilityRepository.js - added the
+    read-only transaction-scoped REPEATABLE READ READ ONLY summary repository.
+    It loads the tenant-scoped claim, canonical claim-evidence link, evidence,
+    locator, source, current source_version, candidate, promotion decision,
+    evidence_review and claim_review queue items, P2-02 committed inputs,
+    persisted P2-04 gap/follow-up/client_followup state, and bounded P2-05
+    potential conflict groups with conflict_resolution queue rows. It
+    recomputes P2-02 with the accepted deterministic functions, validates the
+    complete expected P2-04 set using accepted P2-04 helpers, validates P2-05
+    groups with the accepted P2-05 validator, returns at most 100 potential
+    groups, and fails closed with traceability_incomplete when row 101 exists.
+  - The P2-06 output is metadata-safe: identifiers/statuses/gates only, no
+    claim/evidence text, questions, summaries, raw values, samples, filenames,
+    storage locations, object keys, signed URLs, PII, notes, prompts,
+    credentials, or private infrastructure details.
+  - Eligibility remains false without affirmative persisted approval authority.
+    The inspected P2-03 schema contains only fail-closed proposed/internal-only
+    claim state, so accepted P2-03 proposed claims remain ineligible. Blockers
+    are ordered and deduplicated using the required ten-code contract.
+  - __tests__/kai-sprint2-p2-06-claim-traceability-boundary.spec.js and
+    .integration.spec.js - added focused lazy-loading, input rejection,
+    authorization, exact repository forwarding, no confirmed-conflict
+    vocabulary, consistent snapshot, P2-02 recomputation, P2-04 expected-set
+    validation, P2-05 group/queue-pair validation, blocker ordering,
+    internal-only ineligibility, truncation fail-closed, no-write, ambient
+    DATABASE_URL, and non-loopback runner URL coverage.
+  - scripts/kai-sprint2-p2-06-claim-traceability-local-postgres.js and
+    package.json - added the runner-owned loopback PostgreSQL verification
+    suite and npm script.
+
+TOOL_VERIFIED:
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-p2-06-claim-traceability-boundary.spec.js ->
+    4/4 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-06-claim-traceability ->
+    11/11 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-05-conflict-review-candidate ->
+    catalog verifier 29/29 PASS, failure checks 5/5 PASS, focused tests 18/18 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-04-claim-gap-followup ->
+    catalog verifier 59/59 PASS, failure checks 17/17 PASS, smoke verifier
+    15/15 PASS, integration spec 18/18 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-03-claim-proposal ->
+    catalog verifier 58/58 PASS, failure checks 21/21 PASS, smoke verifier
+    15/15 PASS, integration spec 15/15 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-02-evidence-coverage-assessment ->
+    7/7 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-01-evidence-lineage ->
+    catalog verifier 69/69 PASS, failure checks 25/25 PASS, smoke verifier
+    15/15 PASS, integration spec 17/17 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-p1-06-review-queue-boundary.spec.js __tests__/kai-sprint2-p1-09-review-cockpit.integration.spec.js __tests__/kai-sprint2-batch-detail-route.spec.js __tests__/kai-sprint2-p2-06-claim-traceability-boundary.spec.js ->
+    53/53 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 ->
+    1444 pass, 14 skip, 0 fail
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test ->
+    1549 pass, 14 skip, 0 fail
+  - git diff --check -> no whitespace errors
+  - git diff --cached --check -> no whitespace errors
+
+USER_CONFIRMED:
+  - P2-01 through P2-05 are accepted and closed.
+  - P2-06 is authorized as one bounded read-only implementation package.
+
+NOT_CONFIRMED:
+  - No route, UI, assistant exposure, generation, export, approval transition,
+    deployment, push, merge, cloud access, production configuration, feature
+    enablement, real client data, or database migration was performed.
+
 ### P2-05 potential conflict-review candidate foundation - completed 2026-08-06
 
 preflight:
