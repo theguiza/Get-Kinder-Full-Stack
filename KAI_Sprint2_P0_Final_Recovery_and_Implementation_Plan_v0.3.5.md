@@ -11164,6 +11164,105 @@ commands:
   - git diff --check -> TOOL_VERIFIED: no whitespace errors
   - git diff --cached --check -> TOOL_VERIFIED: no whitespace errors
 
+### P2-08 controlled eligible-claims-for-audience tool - completed 2026-08-06
+
+preflight:
+  branch: codex/kai-sprint2-p0-v0.3.5
+  head: 9d86361c575ebf192040ff96be465270c1b3f425
+  worktree: clean at task start, including untracked files; staged paths: none
+
+p2_08_made:
+  - Backend/kai/dictionary/postgresClaimTraceabilityRepository.js - exposed the
+    existing P2-06 eligibility evaluator as
+    evaluateClaimTraceabilityInTransaction(tx, input). The public
+    getClaimTraceabilitySummary repository method still opens one
+    REPEATABLE READ READ ONLY transaction and delegates to the same evaluator,
+    preserving accepted P2-06 output and behavior.
+  - Backend/kai/dictionary/postgresEligibleClaimsForAudienceRepository.js -
+    new read-only repository for tenant-scoped claim_id ascending candidate
+    enumeration in batches of 100, capped at 500 inspected candidates, with
+    all P2-06 eligibility evaluation performed inside the same transaction
+    snapshot and no nested public P2-06 service calls.
+  - Backend/kai/services/kaiEligibleClaimsForAudienceService.js - new
+    read-only service listEligibleClaimsForAudience with KAI_SPRINT2_ENABLED,
+    exact input validation, mapped-human actor, active tenant membership,
+    gk_admin/gk_operator/gk_reviewer role authorization, tenant boundary
+    validation, lazy repository loading, and preserved failure semantics.
+  - Backend/kai/services/kaiAssistantClaimTraceabilityTool.js - extended the
+    accepted P2-07 assistant wrapper with exactly one additional operation,
+    list_eligible_claims_for_audience. The existing
+    get_claim_traceability_summary operation remains routed through the
+    accepted P2-06 service path. The new operation has exact argument keys,
+    canonical cursor validation, assistant validators, tenant/role gates,
+    lazy service loading, and strict output validation for the six-key list DTO
+    and nine-key eligibleClaims entries.
+  - Backend/kai/validators/assistantBoundaryValidators.js - added
+    list_eligible_claims_for_audience to the same metadata-read assistant
+    allowlist; restricted assistant operations remain blocked.
+  - __tests__/kai-sprint2-p2-08-eligible-claims-for-audience-boundary.spec.js -
+    focused injected-evaluator coverage for feature/actor/role/tenant gates,
+    zero list-service calls on malformed or forbidden wrapper input, exactly
+    two assistant operations, unchanged traceability wrapper behavior, one
+    transaction-scoped snapshot, reuse of the P2-06 evaluator seam, scanning
+    through ineligible pages, pagination and ordering, 500-candidate cap,
+    non-null truncated cursors, eligible:false omission, malformed
+    authoritative state conflicting the whole request, output tamper
+    fail-closed behavior, and no write/audit source contracts.
+  - __tests__/kai-sprint2-p2-08-eligible-claims-for-audience.integration.spec.js
+    and scripts/kai-sprint2-p2-08-eligible-claims-for-audience-local-postgres.js -
+    runner-owned loopback PostgreSQL suite proving ambient DATABASE_URL is
+    ignored, non-loopback runner URLs are rejected before connection, one
+    read-only snapshot is used, no writes or audit effects occur, and the
+    currently accepted P2-03 proposed internal-only review-gated claim returns
+    a successful empty eligibleClaims list without fabricated audience
+    approval state.
+  - package.json - added
+    verify:kai-sprint2-p2-08-eligible-claims-for-audience.
+
+commands:
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-p2-08-eligible-claims-for-audience-boundary.spec.js ->
+    TOOL_VERIFIED: 11/11 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-08-eligible-claims-for-audience ->
+    TOOL_VERIFIED: initial sandbox initdb shared-memory failure; rerun with
+    localhost-capable execution passed 14/14, including runner-owned loopback
+    PostgreSQL; workdir removed
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-07-assistant-claim-traceability-tool ->
+    TOOL_VERIFIED: 12/12 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-06-claim-traceability ->
+    TOOL_VERIFIED: 11/11 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-05-conflict-review-candidate ->
+    TOOL_VERIFIED: catalog verifier 29/29 PASS, failure checks 5/5 PASS,
+    focused tests 18/18 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-04-claim-gap-followup ->
+    TOOL_VERIFIED: catalog verifier 59/59 PASS, failure checks 17/17 PASS,
+    smoke verifier 15/15 PASS, integration spec 18/18 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-03-claim-proposal ->
+    TOOL_VERIFIED: catalog verifier 58/58 PASS, failure checks 21/21 PASS,
+    smoke verifier 15/15 PASS, integration spec 15/15 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-02-evidence-coverage-assessment ->
+    TOOL_VERIFIED: 7/7 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-01-evidence-lineage ->
+    TOOL_VERIFIED: catalog verifier 69/69 PASS, failure checks 25/25 PASS,
+    smoke verifier 15/15 PASS, integration spec 17/17 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-p2-08-eligible-claims-for-audience-boundary.spec.js __tests__/kai-sprint2-p2-07-assistant-claim-traceability-tool-boundary.spec.js __tests__/kai-sprint2-assistant-boundary.spec.js __tests__/kai-sprint2-authorization.spec.js __tests__/kai-sprint2-tenant-validator.spec.js __tests__/kai-sprint2-tenant-authorization.spec.js __tests__/kai-sprint2-foundation-safety.spec.js __tests__/kai-sprint2-p0-repository-contract.spec.js ->
+    TOOL_VERIFIED: initial sandbox listener restriction on 127.0.0.1; rerun
+    with localhost-capable execution passed 81/81
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 ->
+    TOOL_VERIFIED: 1468 pass, 16 skip, 0 fail
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test ->
+    TOOL_VERIFIED: 1573 pass, 16 skip, 0 fail
+
+USER_CONFIRMED:
+  - P2-01 through P2-07 are accepted and closed.
+  - P2-08 is authorized as one bounded read-only service plus one additional
+    operation in the accepted P2-07 assistant wrapper.
+
+NOT_CONFIRMED:
+  - Production deployment, push, merge, feature-flag enablement, routes, UI,
+    generation, approval transition, export, cloud access, production
+    configuration, real client data, or non-runner-owned database behavior was
+    not performed or confirmed.
+
 ### P2-07 controlled assistant claim-traceability tool - completed 2026-08-06
 
 preflight:

@@ -9,9 +9,12 @@ import {
 } from "../validators/assistantBoundaryValidators.js";
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
 
-const TOOL_NAME = "get_claim_traceability_summary";
+const TRACEABILITY_TOOL_NAME = "get_claim_traceability_summary";
+const ELIGIBLE_CLAIMS_TOOL_NAME = "list_eligible_claims_for_audience";
+const TOOL_NAMES = new Set([TRACEABILITY_TOOL_NAME, ELIGIBLE_CLAIMS_TOOL_NAME]);
 const TOP_LEVEL_KEYS = new Set(["toolName", "arguments", "actorContext"]);
-const ARGUMENT_KEYS = new Set(["organizationId", "claimId", "requestedAudience"]);
+const TRACEABILITY_ARGUMENT_KEYS = new Set(["organizationId", "claimId", "requestedAudience"]);
+const ELIGIBLE_CLAIMS_ARGUMENT_KEYS = new Set(["organizationId", "requestedAudience", "limit", "afterClaimId"]);
 const REQUESTED_AUDIENCES = new Set(["internal", "funder", "public"]);
 const ALLOWED_ROLES = new Set(["gk_admin", "gk_operator", "gk_reviewer"]);
 const PRESERVED_FAILURE_CODES = new Set([
@@ -57,6 +60,7 @@ const ID_OR_CODE_KEY_PATTERN =
 const PROHIBITED_OUTPUT_KEY_PATTERN =
   /\b(text|summary|question|raw|row|rows|sample|samples|file|filename|file_name|storage|object_key|signed_url|prompt|credential|secret|note|email|phone|address|name|ssn|dob|birth)\b/i;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const CANONICAL_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const HASH_PATTERN = /^[0-9a-f]{32,128}$/i;
 const SAFE_CODE_PATTERN = /^[a-z][a-z0-9_:-]*$/i;
 
@@ -102,10 +106,23 @@ function isMappedHumanActor(actorContext) {
 
 function validateArgumentsShape(args) {
   return (
-    hasExactKeys(args, ARGUMENT_KEYS) &&
+    hasExactKeys(args, TRACEABILITY_ARGUMENT_KEYS) &&
     isNonEmptyString(args.organizationId) &&
     isNonEmptyString(args.claimId) &&
     REQUESTED_AUDIENCES.has(args.requestedAudience)
+  );
+}
+
+function validateEligibleClaimsArgumentsShape(args) {
+  return (
+    hasExactKeys(args, ELIGIBLE_CLAIMS_ARGUMENT_KEYS) &&
+    isNonEmptyString(args.organizationId) &&
+    REQUESTED_AUDIENCES.has(args.requestedAudience) &&
+    Number.isInteger(args.limit) &&
+    args.limit >= 1 &&
+    args.limit <= 100 &&
+    (args.afterClaimId === null ||
+      (typeof args.afterClaimId === "string" && CANONICAL_UUID_PATTERN.test(args.afterClaimId)))
   );
 }
 
@@ -179,6 +196,52 @@ function validateSuccessDto(data) {
   );
 }
 
+function validateEligibleClaimEntry(entry) {
+  const keys = new Set([
+    "claimId",
+    "claimType",
+    "claimStatus",
+    "claimReviewStatus",
+    "supportStrength",
+    "evidenceItemId",
+    "sourceId",
+    "sourceVersionId",
+    "requestedAudience",
+  ]);
+  return hasExactKeys(entry, keys) && Object.entries(entry).every(([key, value]) => validateMetadataSafeValue(key, value));
+}
+
+function validateEligibleClaimsSuccessDto(data) {
+  const rootKeys = new Set([
+    "requestedAudience",
+    "eligibleClaims",
+    "limit",
+    "afterClaimId",
+    "truncated",
+    "nextAfterClaimId",
+  ]);
+  return (
+    hasExactKeys(data, rootKeys) &&
+    REQUESTED_AUDIENCES.has(data.requestedAudience) &&
+    Array.isArray(data.eligibleClaims) &&
+    data.eligibleClaims.every(validateEligibleClaimEntry) &&
+    Number.isInteger(data.limit) &&
+    data.limit >= 1 &&
+    data.limit <= 100 &&
+    (data.afterClaimId === null ||
+      (typeof data.afterClaimId === "string" && CANONICAL_UUID_PATTERN.test(data.afterClaimId))) &&
+    typeof data.truncated === "boolean" &&
+    (data.nextAfterClaimId === null ||
+      (typeof data.nextAfterClaimId === "string" && CANONICAL_UUID_PATTERN.test(data.nextAfterClaimId))) &&
+    (data.truncated === false || data.nextAfterClaimId !== null) &&
+    validateMetadataSafeValue("requestedAudience", data.requestedAudience) &&
+    validateMetadataSafeValue("limit", data.limit) &&
+    validateMetadataSafeValue("afterClaimId", data.afterClaimId) &&
+    validateMetadataSafeValue("truncated", data.truncated) &&
+    validateMetadataSafeValue("nextAfterClaimId", data.nextAfterClaimId)
+  );
+}
+
 function validateServiceResult(result) {
   if (!isPlainObject(result) || typeof result.ok !== "boolean") return false;
   if (result.ok !== true) {
@@ -187,8 +250,20 @@ function validateServiceResult(result) {
   return result.error === null && validateSuccessDto(result.data);
 }
 
+function validateEligibleClaimsServiceResult(result) {
+  if (!isPlainObject(result) || typeof result.ok !== "boolean") return false;
+  if (result.ok !== true) {
+    return result.data == null && isPlainObject(result.error) && PRESERVED_FAILURE_CODES.has(result.error.code);
+  }
+  return result.error === null && validateEligibleClaimsSuccessDto(result.data);
+}
+
 async function importDefaultClaimTraceabilityService() {
   return import("./kaiClaimTraceabilityService.js");
+}
+
+async function importDefaultEligibleClaimsForAudienceService() {
+  return import("./kaiEligibleClaimsForAudienceService.js");
 }
 
 export async function getClaimTraceabilitySummaryTool(input, dependencies = {}) {
@@ -197,15 +272,18 @@ export async function getClaimTraceabilitySummaryTool(input, dependencies = {}) 
   if (!isAssistantToolsEnabled(env)) return buildKaiError("feature_disabled");
 
   if (!hasExactKeys(input, TOP_LEVEL_KEYS)) return validationBlocker();
-  if (input.toolName !== TOOL_NAME) return validationBlocker();
-  if (!validateArgumentsShape(input.arguments)) return validationBlocker();
+  if (!TOOL_NAMES.has(input.toolName)) return validationBlocker();
+  if (input.toolName === TRACEABILITY_TOOL_NAME && !validateArgumentsShape(input.arguments)) return validationBlocker();
+  if (input.toolName === ELIGIBLE_CLAIMS_TOOL_NAME && !validateEligibleClaimsArgumentsShape(input.arguments)) {
+    return validationBlocker();
+  }
 
   const { actorContext } = input;
   if (!isMappedHumanActor(actorContext)) return buildKaiError("authorization_denied");
 
   const auth = validateActorCanPerformOperation(
     actorContext,
-    TOOL_NAME,
+    input.toolName,
     input.arguments.organizationId,
     { allowedRoles: ALLOWED_ROLES },
   );
@@ -233,6 +311,27 @@ export async function getClaimTraceabilitySummaryTool(input, dependencies = {}) 
     return buildKaiError("tenant_boundary_violation", { blockers: [tenant] });
   }
 
+  if (input.toolName === ELIGIBLE_CLAIMS_TOOL_NAME) {
+    const serviceModule = await (
+      dependencies.importEligibleClaimsForAudienceService || importDefaultEligibleClaimsForAudienceService
+    )();
+    if (typeof serviceModule?.listEligibleClaimsForAudience !== "function") return systemError();
+
+    const result = await serviceModule.listEligibleClaimsForAudience(
+      {
+        organizationId: input.arguments.organizationId,
+        requestedAudience: input.arguments.requestedAudience,
+        limit: input.arguments.limit,
+        afterClaimId: input.arguments.afterClaimId,
+        actorContext,
+      },
+      dependencies.eligibleClaimsForAudienceServiceDependencies || { env },
+    );
+
+    if (!validateEligibleClaimsServiceResult(result)) return systemError();
+    return result;
+  }
+
   const serviceModule = await (dependencies.importClaimTraceabilityService || importDefaultClaimTraceabilityService)();
   if (typeof serviceModule?.getClaimTraceabilitySummary !== "function") return systemError();
 
@@ -251,9 +350,12 @@ export async function getClaimTraceabilitySummaryTool(input, dependencies = {}) 
 }
 
 export const __assistantClaimTraceabilityToolContract = Object.freeze({
-  TOOL_NAME,
+  TOOL_NAME: TRACEABILITY_TOOL_NAME,
+  TOOL_NAMES,
   TOP_LEVEL_KEYS,
-  ARGUMENT_KEYS,
+  ARGUMENT_KEYS: TRACEABILITY_ARGUMENT_KEYS,
+  TRACEABILITY_ARGUMENT_KEYS,
+  ELIGIBLE_CLAIMS_ARGUMENT_KEYS,
   REQUESTED_AUDIENCES,
   ALLOWED_ROLES,
 });
