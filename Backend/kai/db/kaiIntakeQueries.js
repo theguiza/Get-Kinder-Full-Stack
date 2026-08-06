@@ -613,6 +613,124 @@ export async function getScopedEvidenceReviewQueueItemByEvidenceItemId(
   return rows[0] || null;
 }
 
+/**
+ * P2-03 narrow, tenant-scoped authoritative lookup of an existing P2-01
+ * `kai.evidence_items` row by its primary key (organization_id,
+ * evidence_item_id). Never locked FOR UPDATE: P2-03 never mutates this table,
+ * only reads its already-committed evidence facts. Additive: no other exported
+ * query in this module is changed.
+ */
+export async function getScopedEvidenceItemById(
+  { organizationId, evidenceItemId },
+  db = pool,
+) {
+  const { rows } = await db.query(
+    `SELECT evidence_item_id, organization_id, source_id, source_version_id, source_locator_id,
+            evidence_type, data_class, sensitivity_level, support_strength, statement, statement_fingerprint,
+            evidence_review_status, internal_only, public_use_allowed,
+            funder_use_allowed, llm_processing_allowed, product_learning_allowed,
+            created_by, created_by_type, created_at
+       FROM kai.evidence_items
+      WHERE organization_id = $1
+        AND evidence_item_id = $2`,
+    [organizationId, evidenceItemId],
+  );
+  return rows[0] || null;
+}
+
+/**
+ * P2-03 narrow, tenant-scoped authoritative lookup of an existing P2-01
+ * `kai.source_locators` row by its primary key (organization_id,
+ * source_locator_id). Never locked FOR UPDATE: P2-03 never mutates this table.
+ * Additive: no other exported query in this module is changed.
+ */
+export async function getScopedSourceLocatorById(
+  { organizationId, sourceLocatorId },
+  db = pool,
+) {
+  const { rows } = await db.query(
+    `SELECT source_locator_id, organization_id, source_version_id, locator_type,
+            coordinates, locator_fingerprint, created_by_type, created_at
+       FROM kai.source_locators
+      WHERE organization_id = $1
+        AND source_locator_id = $2`,
+    [organizationId, sourceLocatorId],
+  );
+  return rows[0] || null;
+}
+
+/**
+ * P2-03 narrow, tenant-scoped authoritative lookup of an existing `kai.claims`
+ * row by its idempotency identity (organization_id, evidence_item_id,
+ * claim_type), used to distinguish a fresh insert from an authoritative replay
+ * after a losing conditional insert attempt. Additive: no other exported query
+ * in this module is changed.
+ */
+export async function getScopedClaimByEvidenceIdentity(
+  { organizationId, evidenceItemId, claimType },
+  db = pool,
+) {
+  const { rows } = await db.query(
+    `SELECT claim_id, organization_id, evidence_item_id, claim_type, claim_status,
+            claim_review_status, claim_strength, statement, statement_fingerprint,
+            internal_only, public_use_allowed, funder_use_allowed,
+            llm_processing_allowed, product_learning_allowed, export_ready,
+            created_by, created_by_type, created_at
+       FROM kai.claims
+      WHERE organization_id = $1
+        AND evidence_item_id = $2
+        AND claim_type = $3`,
+    [organizationId, evidenceItemId, claimType],
+  );
+  return rows[0] || null;
+}
+
+/**
+ * P2-03 narrow, tenant-scoped authoritative lookup of an existing
+ * `kai.claim_evidence_links` row by its per-claim idempotency identity
+ * (organization_id, claim_id), used to distinguish a fresh insert from an
+ * authoritative replay after a losing conditional insert attempt. Additive: no
+ * other exported query in this module is changed.
+ */
+export async function getScopedClaimEvidenceLinkByClaimId(
+  { organizationId, claimId },
+  db = pool,
+) {
+  const { rows } = await db.query(
+    `SELECT claim_evidence_link_id, organization_id, claim_id, evidence_item_id,
+            created_by_type, created_at
+       FROM kai.claim_evidence_links
+      WHERE organization_id = $1
+        AND claim_id = $2`,
+    [organizationId, claimId],
+  );
+  return rows[0] || null;
+}
+
+/**
+ * P2-03 narrow, tenant-scoped authoritative lookup by the 'claim_review'
+ * idempotency identity (organization_id + queue_type + target_object_type +
+ * target_object_id), mirroring the identical P1-06/P2-01 lookup pattern exactly.
+ * Additive: no other exported query in this module is changed.
+ */
+export async function getScopedClaimReviewQueueItemByClaimId(
+  { organizationId, claimId },
+  db = pool,
+) {
+  const { rows } = await db.query(
+    `SELECT review_queue_item_id, organization_id, queue_type, target_object_type,
+            target_object_id, priority, queue_status, review_status, assigned_to,
+            due_at, summary, required_action, queue_metadata, created_at, updated_at
+       FROM kai.review_queue_items
+      WHERE organization_id = $1
+        AND queue_type = 'claim_review'
+        AND target_object_type = 'claim'
+        AND target_object_id = $2`,
+    [organizationId, claimId],
+  );
+  return rows[0] || null;
+}
+
 export async function getScopedSourceVersionByCandidateIdentity(
   { organizationId, intakeSourceCandidateId },
   db = pool,

@@ -10446,3 +10446,457 @@ not_confirmed:
   prior_unintended_database_selection_effects: NOT_CONFIRMED
   remote_execution_environment_parity: NOT_CONFIRMED
 ```
+
+## KAI P2-03 — Deterministic claim-proposal foundation
+
+```text
+timestamp_local: 2026-08-06 (local session clock, not independently verified)
+branch: codex/kai-sprint2-p0-v0.3.5
+package: KAI P2-03 - deterministic claim-proposal foundation
+status: TOOL_VERIFIED
+
+pre_append_execplan:
+  byte_count: 798930
+  sha256: 3ac7c0fd5a843e3567fb11a33cb9ba6f0840f0f02a0733b1f8d2e9565b2dadb8
+  preserved_copy: not made - this append is a single Edit tool call matching the
+    exact trailing bytes above, verified pre-image, no earlier byte rewritten
+  prefix_proof: the byte_count/sha256 above were computed against the file
+    immediately before this block was appended; everything preceding this
+    section is byte-for-byte the accepted P2-01/P2-01C/P2-02 content
+
+preflight:
+  branch: codex/kai-sprint2-p0-v0.3.5
+  head: 650523dbb5404a7804685a7dbb7e0646296054d3
+  worktree: clean at task start, including untracked files; staged paths: none
+
+p2_03_made:
+  - migrations/kai_sprint2_p2_03_claim_proposal.sql (new, 486 lines) and
+    .rollback.sql (new, 282 lines): creates kai.claims (claim_id,
+    organization_id, evidence_item_id, claim_type, claim_status,
+    claim_review_status, claim_strength, statement, statement_fingerprint,
+    internal_only, public_use_allowed, funder_use_allowed,
+    llm_processing_allowed, product_learning_allowed, export_ready,
+    created_by, created_by_type, created_at) and kai.claim_evidence_links
+    (claim_evidence_link_id, organization_id, claim_id, evidence_item_id,
+    created_by_type, created_at) as two canonical, previously-untracked
+    tables, precisely copying the P2-01 evidence_items/source_locators
+    structural idiom (owner-decision comment blocks, tenant-safe composite
+    FKs, single-value-pinned CHECK constraints, sha256-shaped fingerprint
+    CHECK, statement safe-content/length CHECK reusing P2-01's exact
+    denylist regex). claim_type/claim_status/claim_review_status/
+    claim_strength are each pinned to a single literal
+    ('finding'/'proposed'/'needs_gk_review'/'unassessed'); internal_only is
+    pinned true; public_use_allowed/funder_use_allowed/
+    llm_processing_allowed/product_learning_allowed/export_ready are each
+    pinned false. claims_p2_03_evidence_item_fk is a tenant-safe composite
+    FK to kai.evidence_items(evidence_item_id, organization_id);
+    claims_p2_03_identity_unique is the idempotency identity (organization_id,
+    evidence_item_id, claim_type). kai.claim_evidence_links carries its own
+    composite FKs to both kai.claims and kai.evidence_items, an identity-
+    unique constraint (organization_id, claim_id, evidence_item_id), and
+    claim_evidence_links_p2_03_one_link_per_claim_unique (organization_id,
+    claim_id) pinning today's cardinality to exactly one link per claim -
+    kept as its own standalone junction table (not merely a column on
+    kai.claims) because "canonical claim-to-evidence links" is listed as its
+    own distinct deliverable from "canonical claims persistence"; no column
+    or feature enabling multiple links is added. Adds
+    ux_review_queue_items_p2_03_claim_review_identity (a partial unique index
+    on kai.review_queue_items scoped to queue_type = 'claim_review') and
+    review_queue_items_p2_03_claim_review_required_action_check, mirroring
+    the exact P1-06/P2-01 precedent - 'claim_review' was already an accepted
+    queue_type literal in the P1-06 migration
+    (review_queue_items_p1_06_queue_type_check), unused until this package;
+    that constraint is never touched. Extends
+    upload_lifecycle_audit_gate_a_operation_check with the new
+    'claim_proposed' literal and upload_lifecycle_audit_gate_a_metadata_object_check
+    with a new metadata branch (twelve allowlisted keys: metadata_only,
+    contract, evidence_item_id, claim_id, claim_type, claim_status,
+    claim_review_status, requirement_coverage_status, warning_count,
+    review_queue_item_count, fresh_write_count, validator_key; explicitly
+    forbids a 'claim_statement' key), preserving every earlier operation
+    branch verbatim including P2-01's own 'evidence_lineage_extracted'. The
+    migration's own preflight DO block guards on
+    kai.evidence_items/kai.source_locators/kai.intake_source_candidates/
+    kai.intake_promotion_decisions/kai.review_queue_items/
+    kai.upload_lifecycle_audit/kai.gate_a_p0_jsonb_metadata_only/
+    evidence_items_p2_01_id_org_unique all existing first. The rollback
+    removes only kai.claim_evidence_links/kai.claims (child-first), the
+    partial unique index, the required_action CHECK, and the P2-03 audit
+    rows/branch, restoring the exact prior audit constraints - it alters no
+    Gate A through P2-01 table, column, or constraint beyond that
+    restoration.
+  - Backend/kai/db/kaiIntakeQueries.js (additive, +118 lines): added
+    getScopedEvidenceItemById, getScopedSourceLocatorById,
+    getScopedClaimByEvidenceIdentity, getScopedClaimEvidenceLinkByClaimId,
+    getScopedClaimReviewQueueItemByClaimId. No existing exported function's
+    signature or behavior in this file was changed.
+  - Backend/kai/validators/kaiClaimProposalValidators.js (new, 221 lines):
+    pure, no-SQL predicates. validateClaimHasLoadBearingEvidence(rows)
+    requires complete tenant-safe evidence/source/version/locator lineage
+    (all seven rows present, cross-row organization_id equality, evidence
+    item's own source_locator_id/source_id/source_version_id matching the
+    rows read for it, locator/source_version/source cross-binding
+    consistency, candidate/decision promoted-status completeness, decision
+    bound to the exact source/source_version, source_version bound to the
+    exact candidate, and the evidence_review pair's immutable identity
+    match) - missing rows -> not_found; any lineage mismatch -> conflict;
+    non-promoted candidate/decision -> validation_blocker; passing returns
+    {ok:true, warnings:[...]} with exactly one warning while the evidence
+    item's own support_strength stays 'unassessed' or the evidence_review's
+    review_status stays unresolved (intentional and always-true in this
+    package's current world, since P2-01 only ever creates evidence in that
+    exact state). validateUnsupportedClaimPromotion(writePlan) is a
+    fixed-shape assertion over the literal write-plan constants this
+    package is about to write (never over caller input) - a real, testable
+    guard against a future accidental change to those constants;
+    passes only for the exact allowed proposed/needs_gk_review/unassessed/
+    internal-only/no-audience-gate/no-export-ready shape, otherwise
+    validation_blocker. validateClaimRequirementCoverage() takes no
+    parameters and always returns {ok:true, warnings:[one unresolved
+    requirement-coverage warning]} - it never creates or infers a
+    requirement identity, existing solely so a later package can replace it
+    without changing the service's call shape. Uses the boolean-gate return
+    shape from Backend/kai/validators/kaiEvidenceLineageValidators.js,
+    adapted with an added warnings array of createValidatorResult-shaped
+    objects (Backend/kai/validators/types.js, unchanged) - the P2-02
+    dimension-assessment shape (assessment_status embedded in evidence) was
+    considered and rejected as not fitting a validate-before-write boolean
+    gate.
+  - Backend/kai/dictionary/postgresClaimProposalRepository.js (new, 725
+    lines): the only authorized location for P2-03's own SQL and row
+    locking. proposeClaim(input): validates its own allowlist
+    (organizationId, evidenceItemId, actorUserId, now, metadataOnlyAudit);
+    inside one transaction, calls beforeInsert() first (before any read or
+    lock, matching the exact P1-08/P2-01 precedent), then reads
+    (unlocked, read-only) the evidence item, its locator, source,
+    source_version, then locks the candidate FOR UPDATE via the reused
+    getScopedSourceCandidateByIdentity (the real serialization point,
+    exactly like P1-08/P2-01's own precedent - no new lock is taken), reads
+    the promotion decision and the evidence_review queue item pair; a
+    missing row at any of those seven reads returns not_found. Runs the
+    three validators in order, aborting on the first ok:false with that
+    code, zero mutation, zero audit for every failure path. Composes the
+    claim statement deterministically from
+    locatorRow.coordinates.column_name and locatorRow.locator_fingerprint
+    only (never from evidenceItemRow.statement) and its sha256 statement
+    fingerprint from organizationId|evidenceItemId|claimType|statement.
+    Inserts the claim via INSERT ... ON CONFLICT (organization_id,
+    evidence_item_id, claim_type) DO NOTHING RETURNING; on a lost race,
+    rereads via getScopedClaimByEvidenceIdentity and throws
+    ConcurrentStateChangedError if the reread row's statement_fingerprint
+    does not match what this call would have written (genuine identity
+    drift, never a silent replay). Reapplies the exact P1-07/P2-01
+    partial-replay-repair correction: the claim_evidence_links insert and
+    the claim_review queue-item insert are both gated strictly on THIS
+    call's own isFreshlyCreated result for the claim, never on "a link or
+    queue item happens to be missing" - each uses its own
+    ON CONFLICT ... DO NOTHING RETURNING (the queue-item insert's ON
+    CONFLICT clause carries the identical WHERE queue_type = 'claim_review'
+    predicate the partial index requires, reapplying the exact P2-01
+    ExecPlan-documented arbiter-inference lesson), and a lost race on either
+    is a ConcurrentStateChangedError, never a silent repair-insert. Runs
+    verifyPostWriteContract on the claim/link/queue rows now in hand
+    (whether freshly inserted or reread on replay) - organization_id,
+    evidence_item_id, claim_type, statement, statement_fingerprint,
+    claim_status, claim_review_status, claim_strength, every audience-gate
+    boolean, the link identity, and the claim_review identity + non-blank
+    required_action; any mismatch throws MalformedInsertedRowError
+    (system_error, rolled back). On full replay (isFreshlyCreated === false)
+    returns immediately with zero audit. On a fresh write, resolves the
+    upload_state via candidateRow.intake_file_id (the identical resolution
+    path P2-01 already uses via the reused candidateRow), calls
+    prepareRequiredAudit (the identical own-boolean-data-property predicate
+    copied from P1-05 through P2-01), inserts the audit row, and publishes -
+    any rejection, synchronous throw, or rejected promise rolls back
+    everything (raised as an error inside the transaction, never returned).
+    The default runInTransaction is a deferred `await
+    import("../db/kaiDb.js")`, never a static top-level import, reapplying
+    the exact P2-01C PostgreSQL-isolation correction.
+  - Backend/kai/services/kaiClaimProposalService.js (new, 116 lines):
+    proposeClaim(input, dependencies). Input allowlist is exactly
+    {organizationId, evidenceItemId, actorContext, now} - an unknown or
+    missing key is rejected as validation_blocker before any repository
+    call. Checks isKaiSprint2Enabled first (no package-specific flag is
+    added - like P2-01/P2-02, this package has no route, worker, listener,
+    or production composition, so it stays dormant under
+    KAI_SPRINT2_ENABLED alone). Reapplies AUTH-KAI-003 (mapped-human-actor-
+    only, isMappedHumanActor - no bypass for any ai/system/import/code
+    actor), then validateActorCanPerformOperation with the operation string
+    "propose_claim" and explicit allowedRoles {gk_admin, gk_operator,
+    gk_reviewer} (mirrors P2-01's EVIDENCE_LINEAGE_ALLOWED_ROLES exactly),
+    then validateTenantBoundaryConsistency, exactly mirroring P2-01's own
+    authorization sequence and its exact tenant_boundary_violation
+    error-code mapping on any auth failure. A role without active tenant
+    membership is rejected by validateActorCanPerformOperation's own
+    membership check - not reimplemented or weakened here. Forwards only
+    organizationId/evidenceItemId/actorUserId/now/metadataOnlyAudit to the
+    injected repository; contains no SQL and imports no database pool
+    directly.
+  - __tests__/kai-sprint2-p2-03-claim-proposal-schema-contract.spec.js (new,
+    165 lines, 17 tests): asserts the migration's preflight guards, full
+    column lists, every single-value-pinned CHECK (claim_type through
+    export_ready), the statement length/safe-content/fingerprint CHECKs,
+    the tenant-safe composite FK, the identity-unique constraints, the
+    one-link-per-claim constraint, the claim_review partial unique index and
+    required_action CHECK, the audit operation/metadata branch (twelve
+    allowlisted keys, forbidding claim_statement), and that the rollback
+    removes only P2-03 objects while preserving evidence_lineage_extracted
+    and every Gate A through P2-01 table.
+  - __tests__/kai-sprint2-p2-03-claim-proposal-boundary.spec.js (new, 427
+    lines, 27 tests): pure no-DB coverage of all three validators (pass with
+    warning, pass with zero warnings, every missing-row/lineage-mismatch/
+    non-promoted/evidence-review-incompatibility failure mode for
+    validateClaimHasLoadBearingEvidence; every allowed-shape pass and every
+    single-field deviation for validateUnsupportedClaimPromotion; the
+    always-one-warning/zero-parameter contract for
+    validateClaimRequirementCoverage), the service's full gating sequence
+    (feature-disabled with zero repository calls, unknown/missing input key
+    rejection, AUTH-KAI-003 non-human-actor rejection, no-active-membership
+    rejection, exact five-key forwarding to the repository, no-SQL/no-pool
+    self-check), and repository-level structural assertions (ON CONFLICT ...
+    DO NOTHING RETURNING for all three inserts including the partial-index
+    WHERE clause, no 23505 catch or in-process lock, isFreshlyCreated-gated
+    link/queue writes, no raw-content/statement-in-audit leakage,
+    deterministic composeClaimStatement/computeClaimStatementFingerprint,
+    deferred-only kaiDb.js import, and allowlist rejection without opening a
+    transaction).
+  - __tests__/kai-sprint2-p2-03-claim-proposal-runner-self-test.spec.js (new,
+    28 lines, 3 tests): assertNoFail FAIL-detection/PASS-passthrough/
+    FAIL_CLOSED-substring-safety, copied from the established P2-01 pattern.
+  - __tests__/kai-sprint2-p2-03-claim-proposal.integration.spec.js (new, 586
+    lines, 14 tests + 2 isolation self-tests): PostgreSQL-backed integration
+    suite following the exact P2-01C isolation pattern
+    (KAI_P2_03_CLAIM_PROPOSAL_DATABASE_URL gate, synchronous loopback-only
+    URL check before any dynamic import, self-test asserting no top-level
+    database import and no import of Backend/kai/db/kaiDb.js, a test-local
+    withRunnerOwnedTransaction wrapper over its own runner-owned Pool). Seeds
+    its own fully promoted evidence-item fixtures (in a distinct 'c...' id
+    namespace, avoiding any collision with chained smoke-seed fixtures) and
+    proves: (a) first proposal creates the claim/link/queue-item/audit with
+    the exact required_action, two intentional warnings, and the exact
+    twelve-key audit metadata shape excluding claim_statement; (b) identical
+    replay is a full no-op; (c) two genuinely overlapping proposal calls
+    converge to one claim with exactly one audit row published between
+    them; (d) tenant isolation; (e) an unknown evidence_item_id and a
+    missing evidence_review queue item both return not_found with zero
+    writes (with a documented NOTE explaining why the "incompatible pair"
+    conflict branch has no reachable real-row failure mode at this
+    integration layer - the repository's own lookup query already filters
+    on the exact fields the compatibility check re-verifies, so that
+    check's coverage lives entirely in the boundary spec, mirroring P2-01's
+    own documented precedent for its check 9); (f) a rejected audit
+    prepare, a synchronous publish throw, and a rejected publish promise
+    all roll back every write; (g) disabled KAI_SPRINT2_ENABLED returns
+    feature_disabled with zero DB activity; an end-to-end service-seam test
+    proving AUTH-KAI-003 rejection through the real postgres repository; and
+    a final catalog-verifier no-FAIL/no-duplicate-check-row proof.
+  - scripts/kai-sprint2-p2-03-claim-proposal-verifier.sql (new, 194 lines):
+    catalog verifier - table/column/not-null/no-raw-content/CHECK/FK/
+    unique-constraint/partial-unique-index/audit-operation-and-metadata-
+    branch existence proofs, following the exact P2-01 verifier structure.
+  - scripts/kai-sprint2-p2-03-claim-proposal-failure-checks.sql (new, 326
+    lines): a self-contained fixture chain (file -> profile -> dictionary ->
+    sensitivity profile -> candidate -> promoted decision -> source ->
+    source_version -> locator -> evidence item -> evidence_review queue
+    item) inside one rolled-back transaction, proving rejection of: every
+    claim_type/claim_status/claim_review_status/claim_strength deviation,
+    every audience-gate-boolean-opening attempt (including export_ready),
+    unsafe/over-length/malformed-fingerprint statement text, a cross-tenant
+    evidence_item_id reference, a fabricated evidence_item_id, duplicate
+    claim identity, duplicate/fabricated claim_evidence_links rows, and
+    missing/blank claim_review required_action - twenty-one checks, all
+    PASS via the expected exception class.
+  - scripts/kai-sprint2-p2-03-claim-proposal-smoke-seed.sql (new, 52 lines):
+    creates one real, committed 'column' locator + one real, committed
+    'dictionary_field_presence_fact' evidence item (bound to field_1) + its
+    matching open evidence_review queue item, against the already-promoted
+    source_version the chained Gate A/P1-04 through P2-01 smoke seeds commit
+    for candidate1 - needed because P2-01's own smoke verifier always rolls
+    its own evidence-item/locator creation back, so no persisted P2-01 row
+    exists for this package's own smoke verifier to propose a claim against
+    otherwise.
+  - scripts/kai-sprint2-p2-03-claim-proposal-smoke-verifier.sql (new, 271
+    lines, 15 checks): inside one rolled-back transaction, proves claim/
+    link/queue-item/audit creation, the exact claim_review required_action
+    text, every audience-gate boolean closed, audit persistence, replay-by-
+    identity, duplicate-identity rejection, sequential-within-session
+    concurrent-insert convergence (true overlapping-transaction concurrency
+    is proved by the integration spec/runner, not by this smoke verifier -
+    the exact P2-01 division of labor), cross-tenant invisibility,
+    transaction+audit atomicity via a forced-exception rollback, and three
+    audit-metadata-safety checks (no raw content, exact twelve-key
+    allowlist, no claim_statement key).
+  - scripts/kai-sprint2-p2-03-claim-proposal-local-postgres.js (new, 147
+    lines): ephemeral-PostgreSQL-16 runner
+    (npm run verify:kai-sprint2-p2-03-claim-proposal), reusing the exact
+    P2-01 runner idiom (initdb/pg_ctl/psql/createdb resolved from
+    PG_BIN_DIR or the Homebrew postgresql@16 default,
+    proveRunnerOwnedTarget loopback/version check). Applies the bootstrap
+    schema, every Gate A through P2-01 migration (P2-02 added none), then
+    this package's own migration; runs the catalog verifier and failure
+    checks; runs every Gate A through P2-01 smoke seed (chained) then this
+    package's own smoke seed and smoke verifier; runs this package's own
+    integration spec with a scrubbed ambient-DB env; tears the ephemeral
+    database down unconditionally in a finally block.
+  - scripts/kai-sprint2-p2-03-claim-proposal-runner-assertions.js (new, 10
+    lines): assertNoFail, copied verbatim from the established P2-01 file
+    into this package's own file - not imported cross-package, matching the
+    established per-package-copy convention (no shared module for this
+    helper exists in the codebase).
+  - scripts/kai-sprint2-p2-03-claim-proposal-runbook.md (new, 302 lines) and
+    scripts/kai-sprint2-p2-03-claim-proposal-patch-notes.md (new, 173
+    lines): package runbook and patch notes, following the exact P2-01
+    structure/section headings.
+  - package.json: added exactly one new script entry,
+    "verify:kai-sprint2-p2-03-claim-proposal", pointing at the new runner
+    script above. No existing script entry changed.
+
+not_made_by_this_package:
+  - no claim approval, promotion, or audience-widening of any kind
+  - no evidence-review mutation of any kind (P2-03 only reads the
+    evidence_review queue item; it never resolves, updates, or writes to it)
+  - no engagement/requirement persistence, coverage/conflict/gap/follow-up
+    persistence of any kind
+  - no route, controller, or UI of any kind
+  - no assistant tool or generation path of any kind
+  - no external audience use/export of any kind
+  - no widening of review_queue_items_p1_06_queue_type_check - 'claim_review'
+    was already an accepted literal, unused until this package
+  - no feature flag beyond the existing, reused KAI_SPRINT2_ENABLED
+  - no change to any existing exported function in
+    Backend/kai/db/kaiIntakeQueries.js, Backend/kai/errors/kaiErrors.js,
+    Backend/kai/validators/types.js, Backend/kai/validators/tenantValidators.js,
+    Backend/kai/auth/kaiAuthorizationService.js,
+    Backend/kai/validators/kaiEvidenceLineageValidators.js,
+    Backend/kai/dictionary/postgresEvidenceLineageRepository.js,
+    Backend/kai/services/kaiEvidenceLineageService.js,
+    Backend/kai/validators/kaiEvidenceCoverageAssessmentValidators.js,
+    Backend/kai/dictionary/postgresEvidenceCoverageAssessmentRepository.js, or
+    Backend/kai/services/kaiEvidenceCoverageAssessmentService.js
+  - no read of kai.intake_file_profiles.profile, any raw sample value, any
+    storage location, signed URL, credential, prompt, or unrestricted audit
+    metadata
+  - no deployment, feature enablement, or real-data handling of any kind
+
+commands: TOOL_VERIFIED
+  - `node --test __tests__/kai-sprint2-p2-03-claim-proposal-schema-contract.spec.js
+    __tests__/kai-sprint2-p2-03-claim-proposal-boundary.spec.js
+    __tests__/kai-sprint2-p2-03-claim-proposal-runner-self-test.spec.js`
+    -> 48/48 pass, 0 fail
+  - `npm run verify:kai-sprint2-p2-03-claim-proposal` (ephemeral PostgreSQL
+    16, catalog verifier, failure checks, smoke seed/verifier, and the
+    KAI_P2_03_CLAIM_PROPOSAL_DATABASE_URL-gated integration suite) -> 14/14
+    integration tests pass, 0 fail (2 isolation self-tests + 12
+    PostgreSQL-backed repository/service/catalog tests); catalog verifier
+    58/58 checks PASS; failure-checks 21/21 PASS; smoke verifier 15/15 PASS
+  - `npm run verify:kai-sprint2-p2-02-evidence-coverage-assessment` (P2-02
+    PostgreSQL integration suite, unaffected by this package) -> 7/7 pass,
+    0 fail
+  - `npm run verify:kai-sprint2-p2-01-evidence-lineage` (P2-01 PostgreSQL
+    verifier, unaffected by this package) -> 17/17 pass, 0 fail
+  - `npm run test:kai-sprint2` (complete Sprint 2 no-DB suite) -> 1374 tests,
+    1363 pass, 0 fail, 11 skipped (pre-existing DB-gated skips, unrelated to
+    this package)
+  - `npm test` (complete repository suite) -> 1479 tests, 1468 pass, 0 fail,
+    11 skipped (same pre-existing DB-gated skips)
+  - `git diff --check` -> clean, no whitespace errors
+  - `git diff --cached --check` -> clean, no staged paths at time of check
+
+proof_of_required_behavior: TOOL_VERIFIED
+  - exact four-key service input, unknown/missing-key rejection: boundary
+    spec "rejects an unknown input key" / "rejects a missing required key"
+  - KAI_SPRINT2_ENABLED required before any repository activity, no
+    package-specific flag added: boundary spec "KAI_SPRINT2_ENABLED
+    disabled (or absent) returns feature_disabled with zero repository
+    calls; no package-specific flag exists"
+  - every claim column server-derived and fail-closed-pinned: schema-
+    contract spec's pin assertions; integration (a)'s full field-by-field
+    assertion on the returned claim record
+  - claim statement derived only from locator coordinates, never from the
+    evidence item's own statement text: boundary spec
+    "composeClaimStatement is deterministic, derives only from column name
+    and locator fingerprint, and never copies evidence statement text";
+    integration (a)'s statement-shape assertion
+  - evidence and evidence_review pair loaded and validated before any
+    write, missing/incompatible pair fail-closed with zero mutation:
+    integration (e) not_found tests; boundary spec's
+    validateClaimHasLoadBearingEvidence coverage of every missing-row and
+    lineage/pairing-mismatch scenario
+  - three validators run in fixed order, first ok:false aborts before any
+    write, warnings collected from every passing validator: repository
+    source order; integration (a)'s warnings.length === 2 assertion
+  - claim_review queue item created with the exact disclosed
+    required_action, partial-unique-index-enforced: integration (a);
+    smoke verifier "creation_claim_review_required_action_set"
+  - idempotent replay is a full no-op, zero writes, zero audit: integration
+    (b); smoke verifier "replay_reads_same_claim"
+  - genuinely concurrent identical proposal converges via
+    ON CONFLICT ... DO NOTHING RETURNING alone, never an app-level lock:
+    integration (c); boundary spec's "resolves concurrency via ON CONFLICT"
+    structural assertion
+  - the P1-07/P2-01 partial-replay-repair correction reapplied for both the
+    claim_evidence_links and claim_review writes: boundary spec "gates the
+    link/queue-item writes strictly on THIS call's own isFreshlyCreated
+    result"
+  - required metadata-only audit, exactly twelve keys, claim statement text
+    never included: integration (a)'s audit-metadata key-set assertion;
+    smoke verifier's three audit-metadata-safety checks; schema-contract
+    spec's audit metadata-branch assertion
+  - a rejected audit prepare, a synchronous publish throw, or a rejected
+    publish promise rolls back every write together: integration (f)
+  - fail-closed on missing/stale/cross-tenant/incompatible lineage: boundary
+    + integration tests reusing/extending the validator's fixed-order
+    checks
+  - AUTH-KAI-003 (human-actor-only) and VAL-TEN-001 (active tenant
+    membership) reapplied unweakened: boundary spec's non-human-actor and
+    no-active-membership rejection tests; integration's end-to-end
+    AUTH-KAI-003 assertion via the real postgres repository
+  - no raw content/PII/sample/storage/signed-URL/credential/prompt exposure:
+    the repository only ever selects the columns each reused getScoped*
+    function explicitly SELECTs; failure-checks/smoke-verifier's explicit
+    denylist-regex assertions against the audit table
+
+diff_checks: TOOL_VERIFIED
+  - `git diff --check` -> clean
+  - `git diff --cached --check` -> clean
+  - `git status --porcelain=v1 --untracked-files=all` before commit: 2
+    modified files (Backend/kai/db/kaiIntakeQueries.js and package.json,
+    both additive-only) and 17 new untracked files (three Backend/kai/*
+    modules, four __tests__/*.spec.js files, and ten
+    scripts/kai-sprint2-p2-03-claim-proposal-* files) - no other path
+    touched
+
+final_commit_hash: report after commit
+final_worktree_and_staged_state: report after commit
+
+prohibited_actions_not_performed:
+  - no push, merge, or deploy of any kind
+  - no reopening of P2-01 or P2-02 (their own files above this block are
+    unmodified; this package only reuses their already-accepted getScoped*
+    exports and validator/lineage idioms)
+  - no other package proposed or begun
+  - no schema or migration change beyond the additive ALTER TABLE
+    statements this package's own new migration file issues
+  - no route or UI
+  - no assistant tool or generation path
+  - no claim approval, promotion, or audience-widening
+  - no evidence-review mutation
+  - no engagement/requirement persistence, coverage/conflict/gap/follow-up
+    persistence
+  - no feature flag added
+  - no widening of review_queue_items_p1_06_queue_type_check
+  - no deployment, feature enablement, or real-data handling
+
+user_confirmed_starting_assumptions:
+  - branch/HEAD/worktree preflight state (see preflight above) matched the
+    expected state given at task start; proceeded directly per instruction
+
+not_confirmed:
+  deployment: NOT_CONFIRMED
+  production_or_shared_database_state: NOT_CONFIRMED
+  feature_enablement: NOT_CONFIRMED
+  production_runtime_composition: NOT_CONFIRMED
+  real_client_data_behavior: NOT_CONFIRMED
+  prior_unintended_database_selection_effects: NOT_CONFIRMED
+  remote_execution_environment_parity: NOT_CONFIRMED
+```
