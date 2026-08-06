@@ -11164,6 +11164,116 @@ commands:
   - git diff --check -> TOOL_VERIFIED: no whitespace errors
   - git diff --cached --check -> TOOL_VERIFIED: no whitespace errors
 
+### P2-07 controlled assistant claim-traceability tool - completed 2026-08-06
+
+preflight:
+  branch: codex/kai-sprint2-p0-v0.3.5
+  head: 165aacbeeea22f221dbb225148f78e16b3b584c2
+  worktree: clean at task start, including untracked files; staged paths: none
+
+p2_07_made:
+  - Backend/kai/services/kaiAssistantClaimTraceabilityTool.js - new dormant
+    read-only assistant wrapper for exactly get_claim_traceability_summary.
+    Requires KAI_SPRINT2_ENABLED, then KAI_ASSISTANT_TOOLS_ENABLED, then exact
+    top-level request keys, exact tool-name allowlist, exact arguments schema,
+    mapped human actor, active organization membership and allowed role,
+    assistant-boundary validators, tenant validator, lazy P2-06 service import,
+    exactly one P2-06 invocation, output-contract validation, and return.
+  - The wrapper delegates only organizationId, claimId, requestedAudience, and
+    actorContext to P2-06, preserves valid P2-06 success and failure envelopes
+    unchanged, maps malformed/unknown requests and expected assistant blockers
+    to validation_blocker, preserves authorization_denied for invalid actors
+    and role failures, preserves tenant_boundary_violation for missing active
+    membership/tenant failures, and returns system_error with no data for
+    malformed internal dependencies or prohibited output fields.
+  - Backend/kai/validators/assistantBoundaryValidators.js - minimally extends
+    the existing assistant-boundary validator vocabulary with canonical
+    structured VAL-AST-001 validateAssistantToolAuthorization, VAL-AST-002
+    validateAssistantCannotApprove, VAL-AST-003
+    validateAssistantCannotAccessRawFiles, and VAL-AST-004
+    validatePromptInjectionQuarantine helpers. No parallel authorization or
+    blocker vocabulary was added.
+  - __tests__/kai-sprint2-p2-07-assistant-claim-traceability-tool-boundary.spec.js
+    - focused tests for feature-flag order, exact input allowlists, wrapper
+    order, validator execution, blocker/failure semantics, exact P2-06 input
+    shape, exactly-one invocation, envelope preservation, metadata-safe output
+    validation, prohibited output rejection, prompt-injection quarantine, and
+    no route/listener/public-barrel/production-composition imports.
+  - __tests__/kai-sprint2-p2-07-assistant-claim-traceability-tool.integration.spec.js
+    and scripts/kai-sprint2-p2-07-assistant-claim-traceability-tool-local-postgres.js
+    - runner-owned loopback PostgreSQL suite proving non-loopback runner
+    targets are rejected before connection, ambient DATABASE_URL stays a
+    sentinel, P2-01 through P2-06 preparation remains runner-owned, the wrapper
+    calls P2-06 once, and the P2-07 call performs no SQL writes, audit
+    preparation, or audit publication.
+  - package.json - adds
+    verify:kai-sprint2-p2-07-assistant-claim-traceability-tool only. No route,
+    UI, startup hook, listener, public barrel export, production assistant
+    composition, feature-flag default change, migration, schema change, or
+    database write path was added.
+
+disclosed_local_identifiers:
+  assistant_tool: get_claim_traceability_summary
+  feature_flag_existing: KAI_SPRINT2_ENABLED default false
+  feature_flag_new: KAI_ASSISTANT_TOOLS_ENABLED default false
+  validator_keys: VAL-AST-001, VAL-AST-002, VAL-AST-003, VAL-AST-004,
+    VAL-TEN-001
+  npm_script: verify:kai-sprint2-p2-07-assistant-claim-traceability-tool
+
+commands:
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-p2-07-assistant-claim-traceability-tool-boundary.spec.js ->
+    TOOL_VERIFIED: 9/9 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-07-assistant-claim-traceability-tool ->
+    TOOL_VERIFIED: 12/12 pass; runner-owned loopback PostgreSQL, ambient
+    DATABASE_URL sentinel, non-loopback target rejection covered
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-06-claim-traceability ->
+    TOOL_VERIFIED: 11/11 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-05-conflict-review-candidate ->
+    TOOL_VERIFIED: catalog verifier 29/29 PASS, failure checks 5/5 PASS,
+    focused PostgreSQL integration/boundary spec 18/18 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-04-claim-gap-followup ->
+    TOOL_VERIFIED: catalog verifier 59/59 PASS, read-only failure checks 17/17
+    PASS, smoke verifier 15/15 PASS, integration spec 18/18 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-03-claim-proposal ->
+    TOOL_VERIFIED: catalog verifier 58/58 PASS, read-only failure checks 21/21
+    PASS, smoke verifier 15/15 PASS, integration spec 15/15 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-02-evidence-coverage-assessment ->
+    TOOL_VERIFIED: 7/7 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-01-evidence-lineage ->
+    TOOL_VERIFIED: catalog verifier 69/69 PASS, read-only failure checks 25/25
+    PASS, smoke verifier 15/15 PASS, integration spec 17/17 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-foundation-safety.spec.js __tests__/kai-sprint2-assistant-boundary.spec.js __tests__/kai-sprint2-authorization.spec.js __tests__/kai-sprint2-tenant-validator.spec.js __tests__/kai-sprint2-tenant-authorization.spec.js __tests__/kai-sprint2-actor-context.spec.js __tests__/kai-sprint2-p2-06-claim-traceability-boundary.spec.js __tests__/kai-sprint2-p2-07-assistant-claim-traceability-tool-boundary.spec.js ->
+    TOOL_VERIFIED: 64/64 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 ->
+    TOOL_VERIFIED: 1455 pass, 15 skip, 0 fail
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test ->
+    TOOL_VERIFIED: 1560 pass, 15 skip, 0 fail
+  - git diff --check -> TOOL_VERIFIED: no whitespace errors
+  - git diff --cached --check -> TOOL_VERIFIED: no whitespace errors
+
+USER_CONFIRMED:
+  - P2-01 through P2-06 are accepted and closed.
+  - P2-07 is authorized as one bounded dormant read-only assistant operation.
+
+NOT_CONFIRMED:
+  - No route, UI, eligible-claims listing tool, generation, export, approval,
+    mutation, retention execution, startup hook, listener, production assistant
+    composition, deployment, push, merge, cloud access, production
+    configuration, feature enablement, real client data, database migration, or
+    database mutation outside runner-owned synthetic loopback PostgreSQL suites
+    was performed.
+
+complete_diff_scope: Backend/kai/services/kaiAssistantClaimTraceabilityTool.js
+  (new), Backend/kai/validators/assistantBoundaryValidators.js (additive),
+  __tests__/kai-sprint2-p2-07-assistant-claim-traceability-tool-boundary.spec.js
+  (new),
+  __tests__/kai-sprint2-p2-07-assistant-claim-traceability-tool.integration.spec.js
+  (new),
+  scripts/kai-sprint2-p2-07-assistant-claim-traceability-tool-local-postgres.js
+  (new), package.json (additive),
+  KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+  (additions-only evidence)
+
 ### P2-06 read-only claim traceability and blocked-eligibility explanation - completed 2026-08-06
 
 preflight:
