@@ -11034,3 +11034,153 @@ not_confirmed:
   prior_unintended_database_selection_effects: NOT_CONFIRMED
   remote_execution_environment_parity: NOT_CONFIRMED
 ```
+
+## KAI P2-04 — Deterministic claim-gap and client-followup foundation
+
+```yaml
+timestamp_local: 2026-08-06 (local session clock, not independently verified)
+branch: codex/kai-sprint2-p0-v0.3.5
+package: KAI P2-04 - Deterministic claim gaps and client follow-up foundation
+status: TOOL_VERIFIED
+
+pre_append_execplan:
+  byte_count: 834447
+  sha256: e1f6f21e483e1408f7f3145e98afd924904861f32d43e0d01aa55d8728b915ff
+  preserved_copy: not made - this append is a single Edit tool call matching the
+    exact trailing bytes above, verified pre-image, no earlier byte rewritten
+  prefix_proof: the byte_count/sha256 above were computed against the file
+    immediately before this block was appended; everything preceding this
+    section is byte-for-byte the accepted P2-01/P2-02/P2-03/P2-03C content
+
+preflight:
+  branch: codex/kai-sprint2-p0-v0.3.5
+  head: e28e019179f15cd1c4b49bd2d588eaabea79f77e
+  worktree: clean at task start, including untracked files; staged paths: none
+
+p2_04_made:
+  - migrations/kai_sprint2_p2_04_claim_gap_followup.sql and .rollback.sql - creates
+    kai.gap_log_items (organization_id, claim_id, evidence_item_id,
+    source_version_id, dimension_key, assessment_status, validator_key,
+    safe_summary, four metadata-safe count columns, created_by_type/created_at),
+    kai.client_followup_items (organization_id, claim_id, gap_log_item_id,
+    dimension_key, question_text, created_by_type/created_at), each with
+    tenant-safe composite lineage foreign keys to kai.claims/kai.evidence_items/
+    kai.source_versions/kai.gap_log_items, identity-unique constraints on
+    organization_id+claim_id+dimension_key, dimension_key CHECK vocabularies
+    (ten P2-02 keys for gap_log_items; the four client-answerable keys for
+    client_followup_items), an assessment_status CHECK excluding
+    resolved_clear, a safe_summary CHECK pinning the exact deterministic
+    template, a question_text CHECK plus a dimension/question pairing CHECK
+    pinning each of the four fixed questions to its own dimension, and a
+    non-negative-counts CHECK. Adds
+    ux_review_queue_items_p2_04_client_followup_identity (partial unique index,
+    queue_type = 'client_followup' only, mirroring the P1-06/P2-01/P2-03
+    precedent - 'client_followup' was already an accepted queue_type literal)
+    and review_queue_items_p2_04_client_followup_contract_check (the complete
+    fixed client_followup queue contract - target_object_type, queue_status,
+    review_status, priority, summary, required_action, assigned_to, due_at -
+    scoped to that queue_type only). Extends
+    upload_lifecycle_audit_gate_a_operation_check and
+    _metadata_object_check with the new claim_gap_and_followup_generated
+    branch (twelve allowlisted keys; forbids question_text/summary/
+    safe_summary), preserving every earlier branch verbatim. Guards on
+    kai.claims/kai.evidence_items/kai.source_versions/kai.review_queue_items/
+    kai.upload_lifecycle_audit and their P2-01/P1-08/P2-03 identity-unique
+    constraints via a DO block; edits no earlier migration file.
+  - Backend/kai/validators/kaiClaimGapFollowupValidators.js - new pure, no-SQL
+    validator module. validateClaimGapLineage reuses (never forks)
+    P2-03's validateClaimHasLoadBearingEvidence and P2-02's
+    validateEvidenceCoverageAssessmentIsPermitted after its own claim/link
+    identity check. validateClientFollowupRouting (VAL-KAI-P2-04-002) is the
+    sole gate authorizing a follow-up plus its queue item: verifies the
+    dimension is one of the four authorized keys, the gap is tenant/dimension-
+    matched to the claim, the follow-up and queue write plans carry the exact
+    fixed contract and no field beyond that allowlist. dimensionResultRequiresGap
+    is the pure predicate (assessment_status !== 'resolved_clear') deciding
+    gap creation, reused by the repository rather than reimplemented inline.
+  - Backend/kai/dictionary/postgresClaimGapFollowupRepository.js - new
+    repository, the only authorized location for P2-04 SQL other than reused
+    getScoped* lookups. Reads claim/link/evidence/locator/source/
+    source_version/candidate/decision/evidence_review lineage plus the exact
+    P2-02-authoritative profile/dictionary/quality/evidence facts (three P2-02
+    read helpers reused directly via postgresEvidenceCoverageAssessmentRepository.js's
+    own exported testables, never P2-02's own transaction-opening seam),
+    invokes the ten P2-02 dimension functions imported unmodified from
+    kaiEvidenceCoverageAssessmentValidators.js, computes the complete
+    deterministic expected gap/follow-up/queue-item set, precheck-reads
+    existing state before any write, and returns empty/replayed/conflict or
+    writes the complete set atomically via one multi-row INSERT ... ON
+    CONFLICT ... DO NOTHING RETURNING statement per table (full-set overlap
+    guarantees a clean all-or-nothing split under genuine concurrency, never a
+    partial one - disclosed as this package's own concurrency-mechanism
+    decision, generalizing P2-03's per-row pattern to a whole set) plus the
+    required metadata-only claim_gap_and_followup_generated audit row, all in
+    one transaction. Accepts an optional computeDimensions test-only override
+    (parallel to the existing beforeInsert seam) used by the integration
+    suite to exercise the all-resolved_clear/empty-expected-set path, since
+    two of the ten P2-02 dimensions can never be resolved_clear from a real
+    committed row and four more are unconditionally unresolved by P2-02's own
+    design - a schema fact, not a P2-04 defect.
+  - Backend/kai/services/kaiClaimGapFollowupService.js - new file exporting
+    generateClaimGapFollowups(organizationId, claimId, actorContext, now).
+    Feature-gates on KAI_SPRINT2_ENABLED alone (no package-specific flag),
+    enforces AUTH-KAI-003 (mapped human actor only) and VAL-TEN-001 (active
+    tenant membership, gk_admin/gk_operator/gk_reviewer), then delegates to
+    the injected repository. No SQL, no database pool import, not composed
+    into any route.
+  - Backend/kai/db/kaiIntakeQueries.js (additive) - added getScopedClaimById
+    (organization_id + claim_id primary-key lookup, distinct from P2-03's
+    evidence-identity lookup). No existing exported function modified.
+  - __tests__/kai-sprint2-p2-04-claim-gap-followup-boundary.spec.js (31 tests),
+    -schema-contract.spec.js (15 tests), -runner-self-test.spec.js (3 tests),
+    .integration.spec.js (16 tests, PostgreSQL-backed) - focused coverage of
+    validators, service input/auth gating, repository SQL-shape assertions,
+    migration/rollback contract, and full end-to-end generation/replay/
+    concurrency/conflict/audit-rollback/all-clear behavior.
+  - scripts/kai-sprint2-p2-04-claim-gap-followup-{verifier,failure-checks,
+    smoke-seed,smoke-verifier}.sql, -local-postgres.js,
+    -runner-assertions.js, -runbook.md, -patch-notes.md - full verification
+    pack mirroring the P2-01/P2-03 ephemeral-PostgreSQL-runner convention.
+  - package.json (additive) - added verify:kai-sprint2-p2-04-claim-gap-followup.
+
+commands:
+  - node scripts/kai-sprint2-p2-04-claim-gap-followup-local-postgres.js ->
+    TOOL_VERIFIED: catalog verifier 59/59 PASS, read-only failure checks 17/17
+    PASS, smoke verifier 15/15 PASS, integration spec 16/16 pass (0 fail, 0
+    skip)
+  - npm run verify:kai-sprint2-p2-01-evidence-lineage -> TOOL_VERIFIED: 17/17
+    pass
+  - npm run verify:kai-sprint2-p2-02-evidence-coverage-assessment ->
+    TOOL_VERIFIED: 7/7 pass
+  - npm run verify:kai-sprint2-p2-03-claim-proposal -> TOOL_VERIFIED: 15/15
+    pass
+  - node --test __tests__/kai-sprint2-p2-04-*.spec.js -> TOOL_VERIFIED: 51
+    pass, 1 skip (integration spec self-skips outside the local-postgres
+    runner), 0 fail
+  - npm run test:kai-sprint2 -> TOOL_VERIFIED: 1416 pass, 12 skip, 0 fail
+    (1428 total)
+  - npm test (complete repository suite) -> TOOL_VERIFIED: 1521 pass, 12 skip,
+    0 fail (1533 total)
+  - git diff --check -> TOOL_VERIFIED: no whitespace errors
+  - git diff --cached --check -> TOOL_VERIFIED: no whitespace errors
+
+complete_diff_scope: Backend/kai/db/kaiIntakeQueries.js (additive),
+  Backend/kai/dictionary/postgresClaimGapFollowupRepository.js (new),
+  Backend/kai/services/kaiClaimGapFollowupService.js (new),
+  Backend/kai/validators/kaiClaimGapFollowupValidators.js (new),
+  __tests__/kai-sprint2-p2-04-claim-gap-followup-boundary.spec.js (new),
+  __tests__/kai-sprint2-p2-04-claim-gap-followup-runner-self-test.spec.js (new),
+  __tests__/kai-sprint2-p2-04-claim-gap-followup-schema-contract.spec.js (new),
+  __tests__/kai-sprint2-p2-04-claim-gap-followup.integration.spec.js (new),
+  migrations/kai_sprint2_p2_04_claim_gap_followup.rollback.sql (new),
+  migrations/kai_sprint2_p2_04_claim_gap_followup.sql (new),
+  package.json (additive),
+  scripts/kai-sprint2-p2-04-claim-gap-followup-failure-checks.sql (new),
+  scripts/kai-sprint2-p2-04-claim-gap-followup-local-postgres.js (new),
+  scripts/kai-sprint2-p2-04-claim-gap-followup-runner-assertions.js (new),
+  scripts/kai-sprint2-p2-04-claim-gap-followup-runbook.md (new),
+  scripts/kai-sprint2-p2-04-claim-gap-followup-patch-notes.md (new),
+  scripts/kai-sprint2-p2-04-claim-gap-followup-smoke-seed.sql (new),
+  scripts/kai-sprint2-p2-04-claim-gap-followup-smoke-verifier.sql (new),
+  scripts/kai-sprint2-p2-04-claim-gap-followup-verifier.sql (new)
+```

@@ -660,6 +660,32 @@ export async function getScopedSourceLocatorById(
 }
 
 /**
+ * P2-04 narrow, tenant-scoped authoritative lookup of an existing `kai.claims`
+ * row by its own primary key (organization_id, claim_id) - the P2-04 service
+ * input identity, distinct from P2-03's evidence-identity lookup below. Never
+ * locked FOR UPDATE: P2-04 never mutates this table, only reads its
+ * already-committed claim facts. Additive: no other exported query in this
+ * module is changed.
+ */
+export async function getScopedClaimById(
+  { organizationId, claimId },
+  db = pool,
+) {
+  const { rows } = await db.query(
+    `SELECT claim_id, organization_id, evidence_item_id, claim_type, claim_status,
+            claim_review_status, claim_strength, statement, statement_fingerprint,
+            internal_only, public_use_allowed, funder_use_allowed,
+            llm_processing_allowed, product_learning_allowed, export_ready,
+            created_by, created_by_type, created_at
+       FROM kai.claims
+      WHERE organization_id = $1
+        AND claim_id = $2`,
+    [organizationId, claimId],
+  );
+  return rows[0] || null;
+}
+
+/**
  * P2-03 narrow, tenant-scoped authoritative lookup of an existing `kai.claims`
  * row by its idempotency identity (organization_id, evidence_item_id,
  * claim_type), used to distinguish a fresh insert from an authoritative replay
