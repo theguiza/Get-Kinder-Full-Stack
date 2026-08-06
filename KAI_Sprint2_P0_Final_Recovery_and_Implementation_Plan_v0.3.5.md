@@ -11715,3 +11715,102 @@ commands:
     TOOL_VERIFIED: 1527 pass, 12 skip, 0 fail
   - git diff --check -> TOOL_VERIFIED: no whitespace errors
   - git diff --cached --check -> TOOL_VERIFIED: no whitespace errors
+### P3-02 read-only generated-draft review packet - completed 2026-08-06
+
+preflight:
+  branch: codex/kai-sprint2-p0-v0.3.5
+  head: 210c9dcfe84f486263ed39d7c155ac003bd841d7
+  worktree: clean at task start, including untracked files; staged paths: none
+
+p3_02_made:
+  - Backend/kai/services/kaiGeneratedContentService.js - added dormant
+    getGeneratedDraftReviewPacket. The service requires KAI_SPRINT2_ENABLED,
+    then KAI_GENERATION_ENABLED, then exact three-key input validation
+    (organizationId, generatedContentDraftId, actorContext), mapped-human
+    validation, active tenant membership and gk_admin/gk_reviewer
+    authorization, then lazy database-capable repository loading. It does not
+    enable either flag.
+  - Backend/kai/dictionary/postgresGeneratedContentRepository.js - added the
+    read-only getGeneratedDraftReviewPacket repository method. It opens one
+    REPEATABLE READ READ ONLY transaction-scoped snapshot, validates the
+    complete immutable run/draft/block/citation graph, validates exactly one
+    generated_content_review queue item against the P3-02 packet contract,
+    evaluates each unique cited claim once through the injected/default
+    transaction-scoped P2-06 evaluator, reuses the evaluated result for repeated
+    citations, returns currentUseEligible only when every unique claim is
+    currently eligible, and fails closed on malformed graph, queue, or
+    authority state without repair.
+  - The response is built from explicit allowlists only. Successful DTO keys
+    are exactly generationRunId, generatedContentDraftId, contentType,
+    draftStatus, requestedAudience, reviewQueueItemId, queueStatus,
+    reviewStatus, currentUseEligible, and blocks. Block and citation DTOs are
+    exact-key validated, with no claim/evidence text, filenames, storage
+    details, prompts, credentials, internal notes, raw rows, or signed URLs.
+  - __tests__/kai-sprint2-p3-02-generated-draft-review-packet-boundary.spec.js
+    and .integration.spec.js - added focused coverage for gate ordering before
+    repository loading, graph and queue fail-closed validation, exact DTO
+    allowlists, prohibited-field system_error handling with data:null,
+    deterministic block/citation ordering, repeated-claim evaluator reuse,
+    current ineligibility with per-claim blockers, citation/evaluator evidence
+    mismatch conflict, no confirmed-conflict vocabulary, no public P2-06
+    service nesting, no writes, no queue transition, no audit effect, ambient
+    DATABASE_URL isolation, and non-loopback runner rejection.
+  - scripts/kai-sprint2-p3-02-generated-draft-review-packet-local-postgres.js
+    and package.json - added the runner-owned loopback PostgreSQL verification
+    suite. The suite uses the accepted P1/P2/P3-01 seed chain and a
+    runner-local constraint adjustment because the accepted P3-01 generated
+    review queue constraint still pins the older write-side required_action,
+    while this P3-02 read packet contract requires the newer exact
+    required_action. No production migration file was changed.
+
+TOOL_VERIFIED:
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-p3-02-generated-draft-review-packet-boundary.spec.js ->
+    8/8 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p3-02-generated-draft-review-packet ->
+    initial sandbox initdb shared-memory failure; localhost-capable rerun 14/14
+    pass; runner-owned loopback PostgreSQL target; ambient DATABASE_URL stayed
+    on the non-listening sentinel
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p3-01-generated-content-drafts ->
+    initial sandbox initdb shared-memory failure; localhost-capable rerun 18/18
+    pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-08-eligible-claims-for-audience ->
+    14/14 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-07-assistant-claim-traceability-tool ->
+    12/12 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-06-claim-traceability ->
+    11/11 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-05-conflict-review-candidate ->
+    catalog verifier 29/29 PASS, failure checks 5/5 PASS, focused tests 18/18
+    pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-04-claim-gap-followup ->
+    catalog verifier 59/59 PASS, read-only failure checks 17/17 PASS, smoke
+    verifier 15/15 PASS, integration spec 18/18 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-03-claim-proposal ->
+    catalog verifier 58/58 PASS, read-only failure checks 21/21 PASS, smoke
+    verifier 15/15 PASS, integration spec 15/15 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-02-evidence-coverage-assessment ->
+    7/7 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-01-evidence-lineage ->
+    catalog verifier 69/69 PASS, read-only failure checks 25/25 PASS, smoke
+    verifier 15/15 PASS, integration spec 17/17 pass
+  - affected generation/auth/tenant/queue/safety tests:
+    initial sandbox listener failure on three existing ephemeral localhost HTTP
+    tests; localhost-capable rerun 124/124 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 ->
+    complete Sprint 2 suite 1485 pass, 18 skip, 0 fail
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test ->
+    complete repository suite 1590 pass, 18 skip, 0 fail
+  - git diff --check -> no whitespace errors
+  - git diff --cached --check -> no whitespace errors
+
+USER_CONFIRMED:
+  - P2-01 through P2-08 and P3-01 are accepted and closed.
+  - P3-02 is authorized as one bounded read-only generated-draft review packet
+    service.
+
+NOT_CONFIRMED:
+  - No push, merge, deploy, feature enablement, production configuration
+    change, cloud access, real-client-data access, route, UI, assistant
+    operation, public export, approval/finalization behavior, production
+    composition, audit publication, queue transition, or production migration
+    change was performed.

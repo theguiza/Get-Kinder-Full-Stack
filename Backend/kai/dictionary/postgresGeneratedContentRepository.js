@@ -18,12 +18,15 @@ const REVIEW_STATUS = "needs_gk_review";
 const REVIEW_QUEUE_TYPE = "generated_content_review";
 const REVIEW_TARGET_TYPE = "generated_content_draft";
 const REVIEW_SUMMARY = "Generated draft requires human review.";
+const REVIEW_PACKET_REQUIRED_ACTION =
+  "Review citations, audience eligibility, limitations, and unsupported claims before any use.";
 const REVIEW_REQUIRED_ACTION =
   "Review citations, audience eligibility, limitations, unsupported claims, and numeric or causal assertions before any use.";
 const AUDIT_OPERATION = "generated_content_draft_created";
 const AUDIT_CONTRACT = "p3_01_generated_content_draft_v1";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const AUDIENCES = new Set(["internal", "funder", "public"]);
+const SHA256_LOWER_PATTERN = /^[0-9a-f]{64}$/;
 
 function failure(code) {
   return { ok: false, data: null, error: { code, status: RESULT_STATUS[code] || 500 } };
@@ -94,6 +97,12 @@ function validateInput(input) {
     && !Array.isArray(input.actorContext)
     && typeof input.now === "string"
     && normalizedNow === input.now;
+}
+
+function validateReviewPacketInput(input) {
+  return hasExactKeys(input, new Set(["organizationId", "generatedContentDraftId"]))
+    && UUID_PATTERN.test(input.organizationId)
+    && UUID_PATTERN.test(input.generatedContentDraftId);
 }
 
 function validateGeneratorInput(input) {
@@ -236,6 +245,83 @@ async function readExistingState(tx, { organizationId, idempotencyKey }) {
   return { run, drafts, blocks: blockRows.rows, citations: citationRows.rows, queues: queueRows.rows };
 }
 
+async function readReviewPacketState(tx, { organizationId, generatedContentDraftId }) {
+  const draftRows = await tx.query(
+    `SELECT generated_content_draft_id::text AS generated_content_draft_id,
+            generation_run_id::text AS generation_run_id, organization_id::text AS organization_id,
+            content_type, requested_audience, draft_status, review_status
+       FROM kai.generated_content_drafts
+      WHERE organization_id = $1::uuid
+        AND generated_content_draft_id = $2::uuid`,
+    [organizationId, generatedContentDraftId],
+  );
+  if (draftRows.rows.length === 0) return null;
+  const draft = draftRows.rows[0];
+  const runRows = await tx.query(
+    `SELECT generation_run_id::text AS generation_run_id,
+            organization_id::text AS organization_id, request_fingerprint,
+            content_type, requested_audience
+       FROM kai.generation_runs
+      WHERE generation_run_id = $1::uuid`,
+    [draft.generation_run_id],
+  );
+  const siblingDraftRows = await tx.query(
+    `SELECT generated_content_draft_id::text AS generated_content_draft_id,
+            generation_run_id::text AS generation_run_id, organization_id::text AS organization_id,
+            content_type, requested_audience, draft_status, review_status
+       FROM kai.generated_content_drafts
+      WHERE generation_run_id = $1::uuid
+      ORDER BY generated_content_draft_id ASC`,
+    [draft.generation_run_id],
+  );
+  const blockRows = await tx.query(
+    `SELECT generated_content_block_id::text AS generated_content_block_id,
+            generated_content_draft_id::text AS generated_content_draft_id,
+            organization_id::text AS organization_id, ordinal, text
+       FROM kai.generated_content_blocks
+      WHERE generated_content_draft_id = $1::uuid
+      ORDER BY ordinal ASC, generated_content_block_id ASC`,
+    [generatedContentDraftId],
+  );
+  const blockIds = blockRows.rows.map((block) => block.generated_content_block_id);
+  const citationRows = blockIds.length === 0
+    ? { rows: [] }
+    : await tx.query(
+        `SELECT c.generated_content_citation_id::text AS generated_content_citation_id,
+                c.generated_content_block_id::text AS generated_content_block_id,
+                c.organization_id::text AS organization_id,
+                c.claim_id::text AS claim_id,
+                c.evidence_item_id::text AS evidence_item_id,
+                b.ordinal AS block_ordinal
+           FROM kai.generated_content_citations c
+           JOIN kai.generated_content_blocks b
+             ON b.generated_content_block_id = c.generated_content_block_id
+          WHERE c.generated_content_block_id = ANY($1::uuid[])
+          ORDER BY b.ordinal ASC, c.claim_id ASC, c.evidence_item_id ASC, c.generated_content_citation_id ASC`,
+        [blockIds],
+      );
+  const queueRows = await tx.query(
+    `SELECT review_queue_item_id::text AS review_queue_item_id,
+            organization_id::text AS organization_id, queue_type, target_object_type,
+            target_object_id::text AS target_object_id, priority, queue_status,
+            review_status, assigned_to, due_at, summary, required_action
+       FROM kai.review_queue_items
+      WHERE organization_id = $1::uuid
+        AND target_object_type = $2
+        AND target_object_id = $3::uuid
+      ORDER BY review_queue_item_id ASC`,
+    [organizationId, REVIEW_TARGET_TYPE, generatedContentDraftId],
+  );
+  return {
+    run: runRows.rows[0] || null,
+    draft,
+    siblingDrafts: siblingDraftRows.rows,
+    blocks: blockRows.rows,
+    citations: citationRows.rows,
+    queues: queueRows.rows,
+  };
+}
+
 function validateExistingState(state, requestFingerprint, requestedAudience) {
   if (!state?.run) return false;
   if (state.run.request_fingerprint !== requestFingerprint) return "duplicate_conflict";
@@ -266,6 +352,177 @@ function validateExistingState(state, requestFingerprint, requestedAudience) {
     queue.created_by_type !== "system"
   ) return false;
   return true;
+}
+
+function hasOnlyAllowedKeys(value, allowedKeys) {
+  return Boolean(value)
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && Object.keys(value).every((key) => allowedKeys.has(key));
+}
+
+function validateReviewPacketRows(state, { organizationId, generatedContentDraftId }) {
+  const runKeys = new Set(["generation_run_id", "organization_id", "request_fingerprint", "content_type", "requested_audience"]);
+  const draftKeys = new Set(["generated_content_draft_id", "generation_run_id", "organization_id", "content_type", "requested_audience", "draft_status", "review_status"]);
+  const blockKeys = new Set(["generated_content_block_id", "generated_content_draft_id", "organization_id", "ordinal", "text"]);
+  const citationKeys = new Set(["generated_content_citation_id", "generated_content_block_id", "organization_id", "claim_id", "evidence_item_id", "block_ordinal"]);
+  const queueKeys = new Set(["review_queue_item_id", "organization_id", "queue_type", "target_object_type", "target_object_id", "priority", "queue_status", "review_status", "assigned_to", "due_at", "summary", "required_action"]);
+  if (!state?.run || !state?.draft) return false;
+  if (!hasOnlyAllowedKeys(state.run, runKeys) || !hasOnlyAllowedKeys(state.draft, draftKeys)) return "system_error";
+  if (!state.blocks.every((block) => hasOnlyAllowedKeys(block, blockKeys))) return "system_error";
+  if (!state.citations.every((citation) => hasOnlyAllowedKeys(citation, citationKeys))) return "system_error";
+  if (!state.queues.every((queue) => hasOnlyAllowedKeys(queue, queueKeys))) return "system_error";
+  if (state.run.organization_id !== organizationId || state.run.content_type !== CONTENT_TYPE) return false;
+  if (!SHA256_LOWER_PATTERN.test(state.run.request_fingerprint)) return false;
+  if (state.siblingDrafts.length !== 1) return false;
+  if (state.siblingDrafts[0].generated_content_draft_id !== generatedContentDraftId) return false;
+  if (
+    state.draft.generated_content_draft_id !== generatedContentDraftId ||
+    state.draft.organization_id !== organizationId ||
+    state.draft.generation_run_id !== state.run.generation_run_id ||
+    state.draft.content_type !== CONTENT_TYPE ||
+    state.draft.draft_status !== DRAFT_STATUS ||
+    state.draft.requested_audience !== state.run.requested_audience ||
+    state.draft.review_status !== REVIEW_STATUS
+  ) return false;
+  if (state.blocks.length < 1 || state.blocks.length > 20) return false;
+  let totalText = 0;
+  for (const [index, block] of state.blocks.entries()) {
+    if (
+      block.organization_id !== organizationId ||
+      block.generated_content_draft_id !== generatedContentDraftId ||
+      block.ordinal !== index + 1 ||
+      typeof block.text !== "string" ||
+      block.text.length < 1 ||
+      block.text.length > 4000
+    ) return false;
+    totalText += block.text.length;
+  }
+  if (totalText > 20000) return false;
+  const blockById = new Map(state.blocks.map((block) => [block.generated_content_block_id, block]));
+  const citationsByBlock = new Map(state.blocks.map((block) => [block.generated_content_block_id, []]));
+  for (const citation of state.citations) {
+    const block = blockById.get(citation.generated_content_block_id);
+    if (!block || citation.organization_id !== organizationId || citation.block_ordinal !== block.ordinal) return false;
+    citationsByBlock.get(citation.generated_content_block_id).push(citation);
+  }
+  for (const [blockId, citations] of citationsByBlock.entries()) {
+    if (citations.length < 1) return false;
+    const seen = new Set();
+    for (const citation of citations) {
+      if (!UUID_PATTERN.test(citation.claim_id) || !UUID_PATTERN.test(citation.evidence_item_id)) return false;
+      const key = `${citation.claim_id}:${citation.evidence_item_id}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+    }
+    citationsByBlock.set(blockId, citations);
+  }
+  if (state.queues.length !== 1) return false;
+  const queue = state.queues[0];
+  if (
+    queue.organization_id !== organizationId ||
+    queue.queue_type !== REVIEW_QUEUE_TYPE ||
+    queue.target_object_type !== REVIEW_TARGET_TYPE ||
+    queue.target_object_id !== generatedContentDraftId ||
+    queue.queue_status !== "open" ||
+    queue.review_status !== REVIEW_STATUS ||
+    queue.priority !== "normal" ||
+    queue.summary !== REVIEW_SUMMARY ||
+    queue.required_action !== REVIEW_PACKET_REQUIRED_ACTION ||
+    queue.assigned_to !== null ||
+    queue.due_at !== null
+  ) return false;
+  return { citationsByBlock };
+}
+
+function validateTraceabilityData(data, { claimId, requestedAudience }) {
+  const rootKeys = new Set([
+    "claim",
+    "evidence",
+    "locator",
+    "source",
+    "source_version",
+    "claim_review",
+    "candidate",
+    "promotion_decision",
+    "dimensions",
+    "gap_items",
+    "client_followup_workflows",
+    "potential_conflict_groups",
+    "requestedAudience",
+    "eligible",
+    "blockerCodes",
+    "affectedDimensionKeys",
+    "affectedObjectIds",
+    "truncated",
+  ]);
+  if (!hasExactKeys(data, rootKeys)) return false;
+  if (data.requestedAudience !== requestedAudience || typeof data.eligible !== "boolean") return false;
+  if (!Array.isArray(data.blockerCodes) || !Array.isArray(data.affectedDimensionKeys) || !Array.isArray(data.affectedObjectIds)) return false;
+  if (!hasOnlyAllowedKeys(data.claim, new Set(["claim_id", "claim_type", "claim_status", "claim_review_status", "claim_strength", "audience_gates"]))) return false;
+  if (!hasOnlyAllowedKeys(data.evidence, new Set(["evidence_item_id", "evidence_review_status", "support_strength", "review_queue_item_id", "review_queue_status", "review_status"]))) return false;
+  if (!hasOnlyAllowedKeys(data.source, new Set(["source_id", "source_code"]))) return false;
+  if (!hasOnlyAllowedKeys(data.source_version, new Set(["source_version_id", "is_current"]))) return false;
+  return data.claim.claim_id === claimId
+    && UUID_PATTERN.test(data.evidence.evidence_item_id)
+    && UUID_PATTERN.test(data.source.source_id)
+    && UUID_PATTERN.test(data.source_version.source_version_id)
+    && data.source_version.is_current === true
+    && typeof data.evidence.support_strength === "string"
+    && typeof data.claim.claim_review_status === "string"
+    && typeof data.evidence.evidence_review_status === "string";
+}
+
+async function toReviewPacket(tx, state, input, validation, evaluator) {
+  const evaluatedByClaim = new Map();
+  const uniqueClaimIds = [...new Set(state.citations.map((citation) => citation.claim_id))].sort();
+  for (const claimId of uniqueClaimIds) {
+    const result = await evaluator(tx, {
+      organizationId: input.organizationId,
+      claimId,
+      requestedAudience: state.draft.requested_audience,
+    });
+    if (!result.ok) return failure("conflict_current_state_changed");
+    if (!validateTraceabilityData(result.data, { claimId, requestedAudience: state.draft.requested_audience })) {
+      return failure("conflict_current_state_changed");
+    }
+    evaluatedByClaim.set(claimId, result.data);
+  }
+
+  const blocks = state.blocks.map((block) => {
+    const citations = validation.citationsByBlock.get(block.generated_content_block_id).map((citation) => {
+      const evaluated = evaluatedByClaim.get(citation.claim_id);
+      if (citation.evidence_item_id !== evaluated.evidence.evidence_item_id) {
+        throw new RollbackResultError(failure("conflict_current_state_changed"));
+      }
+      return {
+        claimId: citation.claim_id,
+        evidenceItemId: citation.evidence_item_id,
+        sourceId: evaluated.source.source_id,
+        sourceVersionId: evaluated.source_version.source_version_id,
+        supportStrength: evaluated.evidence.support_strength,
+        claimReviewStatus: evaluated.claim.claim_review_status,
+        evidenceReviewStatus: evaluated.evidence.evidence_review_status,
+        currentEligible: evaluated.eligible,
+        blockerCodes: [...new Set(evaluated.blockerCodes)],
+        affectedDimensionKeys: evaluated.affectedDimensionKeys,
+        affectedObjectIds: evaluated.affectedObjectIds,
+      };
+    });
+    return { ordinal: block.ordinal, text: block.text, citations };
+  });
+  return success({
+    generationRunId: state.run.generation_run_id,
+    generatedContentDraftId: state.draft.generated_content_draft_id,
+    contentType: state.draft.content_type,
+    draftStatus: state.draft.draft_status,
+    requestedAudience: state.draft.requested_audience,
+    reviewQueueItemId: state.queues[0].review_queue_item_id,
+    queueStatus: state.queues[0].queue_status,
+    reviewStatus: state.queues[0].review_status,
+    currentUseEligible: [...evaluatedByClaim.values()].every((evaluated) => evaluated.eligible === true),
+    blocks,
+  });
 }
 
 async function loadGenerationProjection(tx, { organizationId, claimIds, requestedAudience }) {
@@ -469,6 +726,25 @@ export function createPostgresGeneratedContentRepository({
   afterPersist = async () => {},
 } = {}) {
   return Object.freeze({
+    async getGeneratedDraftReviewPacket(input) {
+      if (!validateReviewPacketInput(input)) return failure("validation_blocker");
+      try {
+        return await runInTransaction(async (tx) => {
+          await tx.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
+          const state = await readReviewPacketState(tx, input);
+          if (!state) return failure("not_found");
+          const validation = validateReviewPacketRows(state, input);
+          if (validation === "system_error") return failure("system_error");
+          if (validation === false) return failure("conflict_current_state_changed");
+          return toReviewPacket(tx, state, input, validation, evaluator);
+        });
+      } catch (error) {
+        if (error instanceof RollbackResultError) return error.result;
+        if (error?.code === "22P02") return failure("validation_blocker");
+        if (error?.code === "25001") return failure("conflict_current_state_changed");
+        return failure("system_error");
+      }
+    },
     async createEvidenceSummaryDraft(input, dependencies = {}) {
       if (!validateInput(input)) return failure("validation_blocker");
       if (typeof dependencies.draftGenerator !== "function") return failure("validation_blocker");
@@ -568,6 +844,7 @@ export const __generatedContentRepositoryContract = Object.freeze({
   REVIEW_QUEUE_TYPE,
   REVIEW_TARGET_TYPE,
   REVIEW_SUMMARY,
+  REVIEW_PACKET_REQUIRED_ACTION,
   REVIEW_REQUIRED_ACTION,
   AUDIT_OPERATION,
   AUDIT_CONTRACT,
@@ -577,6 +854,8 @@ export const __generatedContentRepositoryTestables = Object.freeze({
   validateGeneratorInput,
   validateGeneratorResult,
   validateInput,
+  validateReviewPacketInput,
+  validateReviewPacketRows,
   fingerprintEvidenceSummaryRequest,
   prepareRequiredAudit,
 });
