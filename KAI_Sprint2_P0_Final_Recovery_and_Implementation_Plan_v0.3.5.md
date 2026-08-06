@@ -10177,3 +10177,272 @@ not_confirmed:
   real_client_data_behavior: NOT_CONFIRMED
   prior_unintended_database_selection_effects: NOT_CONFIRMED
 ```
+
+## KAI P2-02 — Deterministic evidence-coverage-assessment foundation
+
+```text
+timestamp_local: 2026-08-06 (local session clock, not independently verified)
+branch: codex/kai-sprint2-p0-v0.3.5
+package: KAI P2-02 - deterministic evidence-coverage assessment foundation
+status: TOOL_VERIFIED
+
+pre_append_execplan:
+  byte_count: 782797
+  sha256: 74a45c49b26b7b4b0c696be00d2201420fbfb956d95d90aeb291c289459e4f20
+  preserved_copy: not made - this append is a single Edit tool call matching the
+    exact trailing bytes above, verified pre-image, no earlier byte rewritten
+  prefix_proof: the byte_count/sha256 above were computed against the file
+    immediately before this block was appended; everything preceding this
+    section is byte-for-byte the accepted P2-01/P2-01C content
+
+preflight:
+  branch: codex/kai-sprint2-p0-v0.3.5
+  head: aaec422276830f3889e6155e54e0c014cb103f8d
+  worktree: clean, including untracked files; staged paths: none
+
+p2_02_made:
+  - Backend/kai/validators/kaiEvidenceCoverageAssessmentValidators.js (new):
+    pure, no-SQL predicates and dimension-assessment functions.
+    validateEvidenceCoverageAssessmentIsPermitted(rows) reuses P2-01's
+    validateEvidenceHasSourceLineage wholesale (lineage completeness,
+    promotion-status completeness, cross-row lineage equality, checksum
+    completeness, and the reapplied P1-08 permission predicate), then adds
+    exactly one P2-02-owned check: profileRow.allowed_use_status ===
+    'not_allowed' fails closed with validation_blocker ('unknown'/'allowed' do
+    not themselves block assessment). Ten pure dimension functions
+    (assessMissingness, assessDuplicates, assessDefinitionClarity,
+    assessDenominatorClarity, assessTimePeriodClarity,
+    assessEntityLevelClarity, assessSmallCellRisk,
+    assessConflictingSourceIndicators, assessRequirementAlignment,
+    assessCoverageGaps) each return one createValidatorResult-shaped object
+    (Backend/kai/validators/types.js, unchanged) with a three-state
+    assessment_status ('resolved_clear' | 'resolved_risk_flagged' |
+    'unresolved') embedded in evidence. missingness/duplicates only resolve
+    from a committed kai.data_quality_findings row of the matching
+    finding_type - absence never proves "no issue", so it stays unresolved.
+    definition_clarity/entity_level_clarity read committed
+    business_meaning/entity_level per field ('unknown' is the fail-closed
+    schema default). small_cell_risk reads the committed
+    small_cell_risk_status three-state fact directly. denominator_clarity and
+    time_period_clarity are always unresolved - fresh repository inspection
+    (this session) found no committed schema fact (P1-04/P1-05) for either
+    concept anywhere in the current migrations. conflicting_source_indicators
+    and requirement_alignment are always unresolved for the same reason:
+    fresh inspection found no engagement/requirement table and no
+    engagement/requirement foreign key anywhere in the schema (the sole
+    engagement_id column, on kai.review_queue_items, is nullable with no FK to
+    any requirement/engagement entity) - per instruction, this package never
+    scans another source and never invents a requirement identity, mapping,
+    or funder alignment to fill that gap. coverage_gaps compares committed
+    data_dictionary_fields.profile_field_key values against the field keys
+    already covered by committed P2-01 evidence_items (joined through their
+    source_locators.coordinates.column_name) - never a sample, filename, or
+    inferred mapping.
+  - Backend/kai/dictionary/postgresEvidenceCoverageAssessmentRepository.js
+    (new): read-only, tenant-scoped repository. Reuses the existing P1-08/
+    P2-01 getScoped* lookups (getScopedSourceVersionById,
+    getScopedSourceById, getScopedSourceCandidateByIdentity,
+    getScopedPromotionDecisionBySourceVersionId, getScopedDataDictionaryById)
+    unchanged from Backend/kai/db/kaiIntakeQueries.js. Adds three new,
+    package-owned, additive SQL reads local to this file only (no existing
+    exported query in kaiIntakeQueries.js is touched):
+    readSensitivityProfileForAssessment (the existing
+    getScopedSensitivityProfileById projection plus the two P2-02-owned
+    dimension columns it does not select: small_cell_risk_status,
+    allowed_use_status), readDataDictionaryFieldsForAssessment (adds
+    business_meaning/entity_level to the existing field projection, ordered
+    profile_field_key ASC), readDataQualityFindingsForAssessment (ordered
+    finding_type ASC, profile_field_key ASC), and
+    readEvidenceCoverageFieldKeys (an evidence_items/source_locators join
+    projecting only coordinates->>'column_name'). Runs every read inside one
+    withTransaction callback via the same lazy-dynamic-import-of-kaiDb.js
+    idiom P2-01C established, so no test importing this repository module
+    ever import-time-initializes the ambient application pool. Performs no
+    lock beyond what the reused getScoped* lookups already take, no write, no
+    row mutation. A missing row anywhere in the lineage chain is returned as
+    null, never fabricated and never silently skipped; readEvidenceCoverageAssessmentFacts
+    applies no fail-closed judgment itself - that judgment belongs entirely to
+    the validators module, called by the service, over the rows this
+    function returns.
+  - Backend/kai/services/kaiEvidenceCoverageAssessmentService.js (new):
+    orchestration service. Input is exactly {organizationId, sourceVersionId,
+    actorContext} (allowlist rejection of any other key, following the exact
+    isExtractEvidenceFromSourceVersionInput idiom P2-01 already uses).
+    KAI_SPRINT2_ENABLED is checked first, before any other validation or
+    repository call - disabled returns feature_disabled with zero repository
+    calls. No package-specific feature flag is added: like P2-01, this
+    package has no route, worker, listener, or production composition, so it
+    stays dormant under KAI_SPRINT2_ENABLED alone. Reapplies AUTH-KAI-003
+    (mapped-human-actor-only, no bypass for any ai/system/import/code actor),
+    then validateActorCanPerformOperation with a novel operation string
+    ("assess_evidence_coverage") and explicit allowedRoles
+    {gk_admin, gk_operator, gk_reviewer} (mirrors P2-01's
+    EVIDENCE_LINEAGE_ALLOWED_ROLES exactly), then
+    validateTenantBoundaryConsistency, exactly mirroring P2-01's own
+    authorization sequence and its exact tenant_boundary_violation error-code
+    mapping on any auth failure. Calls the repository, then
+    validateEvidenceCoverageAssessmentIsPermitted over the returned rows, then
+    computes and returns all ten dimension results fresh, on every call, from
+    already-committed rows. No claim, coverage-gap write, conflict write,
+    follow-up, queue, or audit persistence of any kind is implemented; nothing
+    this service returns is ever written back to the database.
+  - __tests__/kai-sprint2-p2-02-evidence-coverage-assessment-boundary.spec.js
+    (new): 29 focused, no-DB tests covering
+    validateEvidenceCoverageAssessmentIsPermitted (reused P2-01 lineage gate
+    plus the new allowed_use_status check), all ten pure dimension functions,
+    and the service's full authorization/gating sequence (feature-disabled,
+    unknown/missing input keys, non-human actor, cross-org membership, role
+    exclusion, not_found propagation, stale-lineage fail-closed,
+    allowed_use_status fail-closed, and a full ten-dimension composed
+    result), using an injected fake repository dependency - no database
+    activity.
+  - __tests__/kai-sprint2-p2-02-evidence-coverage-assessment.integration.spec.js
+    (new): PostgreSQL-backed integration suite, following the exact P2-01C
+    isolation pattern (KAI_P2_02_EVIDENCE_COVERAGE_ASSESSMENT_DATABASE_URL
+    gate, synchronous loopback-only URL check before any dynamic import,
+    self-test asserting no top-level database import and no import of
+    Backend/kai/db/kaiDb.js, a test-local withRunnerOwnedTransaction wrapper
+    over its own runner-owned Pool). Seeds its own fully promoted P1-08
+    source_version fixtures (parameterized dictionary field
+    business_meaning/entity_level, quality findings, sensitivity-profile
+    small_cell_risk_status/allowed_use_status, and P2-01
+    evidence_items/source_locators for partial field coverage) and proves:
+    (a) the repository reads exactly the committed facts seeded; (b) the
+    service composes those facts into all ten dimension results end to end;
+    (c) a source_version in a different organization is never read across
+    the tenant boundary (an all-null/empty read, not an error); (d)
+    allowed_use_status 'not_allowed' fails the service closed even though the
+    repository read itself succeeds; (e) a non-existent source_version_id
+    returns not_found with an all-null read, never a fabricated fact.
+  - scripts/kai-sprint2-p2-02-evidence-coverage-assessment-local-postgres.js
+    (new): ephemeral-PostgreSQL-16 runner, following the exact P2-01 runner
+    idiom (initdb/pg_ctl/psql/createdb resolved from PG_BIN_DIR or the
+    Homebrew postgresql@16 default, proveRunnerOwnedTarget loopback/version
+    check). Applies the same migration chain the P2-01 runner already applies
+    (through kai_sprint2_p2_01_evidence_lineage.sql) - no new migration,
+    verifier.sql, failure-checks.sql, or smoke-seed.sql is added, because
+    P2-02 introduces no schema change and this package's own integration spec
+    seeds every fixture its assertions depend on. Runs only this package's own
+    integration spec against the ephemeral database, then tears the database
+    down unconditionally in a finally block.
+  - package.json: added exactly one new script entry,
+    "verify:kai-sprint2-p2-02-evidence-coverage-assessment", pointing at the
+    new runner script above. No existing script entry changed.
+
+not_made_by_this_package:
+  - no migration or schema change of any kind
+  - no route, controller, or UI of any kind
+  - no assistant tool or generation path of any kind
+  - no validateClaimHasLoadBearingEvidence, validateUnsupportedClaimPromotion,
+    or validateClaimRequirementCoverage
+  - no claim, claim status, or claim persistence of any kind
+  - no coverage, gap, conflict, follow-up, queue, or audit write of any kind
+  - no feature flag beyond the existing, reused KAI_SPRINT2_ENABLED
+  - no change to any existing exported function in
+    Backend/kai/db/kaiIntakeQueries.js, Backend/kai/errors/kaiErrors.js,
+    Backend/kai/validators/types.js, Backend/kai/validators/tenantValidators.js,
+    Backend/kai/auth/kaiAuthorizationService.js,
+    Backend/kai/validators/kaiEvidenceLineageValidators.js,
+    Backend/kai/dictionary/postgresEvidenceLineageRepository.js, or
+    Backend/kai/services/kaiEvidenceLineageService.js
+  - no read of kai.intake_file_profiles.profile, any raw sample value, any
+    storage location, signed URL, credential, prompt, or unrestricted audit
+    metadata
+  - no deployment, feature enablement, or real-data handling of any kind
+
+commands: TOOL_VERIFIED
+  - `node --test __tests__/kai-sprint2-p2-02-evidence-coverage-assessment-boundary.spec.js`
+    -> 29/29 pass, 0 fail
+  - `npm run verify:kai-sprint2-p2-02-evidence-coverage-assessment` (ephemeral
+    PostgreSQL 16, KAI_P2_02_EVIDENCE_COVERAGE_ASSESSMENT_DATABASE_URL-gated
+    integration suite) -> 7/7 pass, 0 fail (2 isolation self-tests + 5
+    PostgreSQL-backed repository/service tests)
+  - `npm run verify:kai-sprint2-p2-01-evidence-lineage` (P2-01 PostgreSQL
+    verifier, unaffected by this package) -> 17/17 pass, 0 fail
+  - focused affected-area suite (authorization, tenant, P1-04, P1-05, P2-01
+    boundary/schema-contract/runner-self-test files) -> 127/127 pass, 0 fail
+  - `npm run test:kai-sprint2` (complete Sprint 2 suite) -> 1323 tests, 1313
+    pass, 0 fail, 10 skipped (pre-existing DB-gated skips, unrelated to this
+    package)
+  - `npm test` (complete repository suite) -> 1428 tests, 1418 pass, 0 fail,
+    10 skipped (same pre-existing DB-gated skips)
+  - `git diff --check` -> clean, no whitespace errors
+  - `git diff --cached --check` -> clean, no staged paths at time of check
+
+proof_of_required_behavior: TOOL_VERIFIED
+  - exact three-key input, unknown-key rejection: boundary spec "rejects an
+    unknown input key" / "rejects a missing required key"
+  - KAI_SPRINT2_ENABLED required before any repository activity, no package-
+    specific flag added: boundary spec "KAI_SPRINT2_ENABLED gates every
+    repository call - disabled returns feature_disabled with zero repository
+    calls"
+  - ten fixed dimensions assessed, each from committed facts only: boundary
+    spec's ten per-function tests plus the full-composition test; integration
+    (b)
+  - unknown/absent facts remain unresolved, never inferred: assessMissingness/
+    assessDuplicates "no committed finding stays unresolved, never inferred
+    from absence"; assessDenominatorClarity/assessTimePeriodClarity/
+    assessConflictingSourceIndicators/assessRequirementAlignment "always
+    unresolved" tests
+  - cross-source conflict / requirement alignment never scan another source
+    or invent an identity: both functions take no repository-sourced
+    parameter at all and are proven constant-unresolved by boundary tests;
+    the ExecPlan text above records the fresh-inspection finding of no
+    committed engagement/requirement relationship
+  - fail-closed on missing/stale/cross-tenant/incompatible/not-current
+    lineage: boundary + integration tests reusing/extending the exact P2-01
+    validateEvidenceHasSourceLineage checks
+  - fail-closed when sensitivity/allowed-use facts prohibit internal
+    assessment: boundary + integration "allowed_use_status 'not_allowed'
+    fails closed" tests
+  - reuse of existing vocabularies, no new claim/requirement semantics: no
+    new error code, severity, or validator-result shape is introduced;
+    createValidatorResult (Backend/kai/validators/types.js) and buildKaiError
+    (Backend/kai/errors/kaiErrors.js) are used unchanged
+  - no raw object/PII/sample/storage/signed-URL/credential/prompt/audit
+    exposure: the repository projects only the columns each read function
+    explicitly SELECTs (never kai.intake_file_profiles.profile), and the
+    service response only ever includes ids, the canonical sha256, and the
+    ten createValidatorResult-shaped dimension objects
+
+diff_checks: TOOL_VERIFIED
+  - `git diff --check` -> clean
+  - `git diff --cached --check` -> clean
+  - `git status --porcelain=v1 --untracked-files=all` before commit: 1
+    modified file (package.json, +1 line) and 6 new untracked files (the
+    three Backend/kai/* modules, two __tests__/*.spec.js files, and the one
+    scripts/*-local-postgres.js runner) - no other path touched
+
+final_commit_hash: report after commit
+final_worktree_and_staged_state: report after commit
+
+prohibited_actions_not_performed:
+  - no push, merge, or deploy of any kind
+  - no claim proposal or P2-03 work begun
+  - no other package proposed
+  - no reopening of P2-01 (P2-01/P2-01C content above this block is
+    unmodified; this package only reuses P2-01's already-accepted
+    validateEvidenceHasSourceLineage and getScoped* exports)
+  - no schema or migration change
+  - no route or UI
+  - no assistant tool or generation path
+  - no validateClaimHasLoadBearingEvidence, validateUnsupportedClaimPromotion,
+    or validateClaimRequirementCoverage
+  - no claim, claim status, or claim persistence
+  - no coverage/gap/conflict/follow-up/queue/audit write
+  - no feature flag added
+  - no deployment, feature enablement, or real-data handling
+
+user_confirmed_starting_assumptions:
+  - branch/HEAD/worktree preflight state (see preflight above) matched the
+    expected state given at task start; proceeded directly per instruction
+
+not_confirmed:
+  deployment: NOT_CONFIRMED
+  production_or_shared_database_state: NOT_CONFIRMED
+  feature_enablement: NOT_CONFIRMED
+  production_runtime_composition: NOT_CONFIRMED
+  real_client_data_behavior: NOT_CONFIRMED
+  prior_unintended_database_selection_effects: NOT_CONFIRMED
+  remote_execution_environment_parity: NOT_CONFIRMED
+```
