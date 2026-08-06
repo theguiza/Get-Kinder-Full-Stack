@@ -321,6 +321,39 @@ suite; a non-loopback URL is rejected before any connection is attempted; and
 direct execution with `KAI_P2_04_CLAIM_GAP_FOLLOWUP_DATABASE_URL` unset
 performs zero database activity.
 
+## P2-04C follow-up correction
+
+`generateClaimGapFollowups` now also avoids statically importing
+`postgresClaimGapFollowupRepository.js`. The default PostgreSQL repository is
+dynamically imported only after `KAI_SPRINT2_ENABLED`, input validation,
+mapped-human authorization, and active tenant-membership/role validation pass,
+and only when no injected repository is provided. Disabled, invalid, or
+unauthorized calls therefore return before `postgresClaimGapFollowupRepository.js`,
+`kaiIntakeQueries.js`, `kaiDb.js`, `Backend/db/pg.js`, or `pg` can be loaded by
+this service path. The boundary spec includes a subprocess regression with a
+non-listening loopback sentinel `DATABASE_URL` proving disabled service import
+and invocation return `feature_disabled` with zero socket connection attempts,
+zero ambient pool initialization, and zero PostgreSQL connection-selection
+metadata logs.
+
+`validateClientFollowupRouting` now returns the canonical structured validator
+result from `Backend/kai/validators/types.js` with
+`validator_key = VAL-KAI-P2-04-002`, `object_type =
+client_followup_item`, dimension-key `object_code`, routed follow-up
+`object_id`, metadata-safe evidence, and blocker-only `blocking_reason` /
+`required_fix`. The repository treats any routing blocker as
+`validation_blocker` on fresh routing and validates complete routing plans
+before follow-up or queue writes.
+
+Fresh routing now validates complete non-null identities: the authoritative
+gap row has a non-null `gap_log_item_id` and exact organization/claim/dimension
+binding; each follow-up has a server-owned non-null
+`client_followup_item_id`; and each queue plan includes `target_object_id`
+equal to that follow-up ID plus the exact fixed queue contract. The same
+validator runs against fresh write plans, returned post-write rows, replay
+rows, and concurrent-loser rereads. Malformed existing routing state remains
+`conflict_current_state_changed` with no repair, mutation, or audit.
+
 ## Rollback
 
 `migrations/kai_sprint2_p2_04_claim_gap_followup.rollback.sql` removes only the

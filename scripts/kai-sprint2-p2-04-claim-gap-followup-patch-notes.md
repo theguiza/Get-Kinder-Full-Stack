@@ -229,3 +229,32 @@ evidence text, or any other free-form content) happen inside one transaction;
 any conflict, a rejected required-audit prepare, a synchronous publish
 failure, a rejected publish promise, or a malformed inserted/reread row rolls
 back all of it together.
+
+## P2-04C follow-up correction
+
+- Removed the service's static PostgreSQL repository import. Disabled, invalid,
+  or unauthorized service calls now return before loading the default
+  PostgreSQL repository, `kaiIntakeQueries.js`, `kaiDb.js`, the ambient pool,
+  or `pg`; only an injected repository is used before the dynamic default
+  import point.
+- Converted `validateClientFollowupRouting` from the legacy `{ ok, code }`
+  shape to canonical structured validator results from `validators/types.js`
+  with `VAL-KAI-P2-04-002`, `client_followup_item` object metadata,
+  metadata-safe evidence, and blocker `blocking_reason` / `required_fix`.
+- Tightened routing identity validation so fresh routing uses authoritative
+  non-null gap IDs, server-owned non-null follow-up IDs, and queue plans whose
+  `target_object_id` exactly equals the follow-up ID before any follow-up or
+  queue write. Routing validation now also covers post-write rows, replay rows,
+  and concurrent-loser rereads; malformed existing routing state remains
+  `conflict_current_state_changed` without repair.
+- Added focused tests for structured routing results, null/missing/mismatched
+  gap and follow-up identities, queue target binding, client-queue reason
+  containment, ignored-blocker prevention, disabled service import fail-closed
+  behavior, forced routing-blocker rollback, and malformed existing routing
+  state.
+
+USER_CONFIRMED: the prior transcript showed ambient database configuration
+being selected during service-module import.
+
+NOT_CONFIRMED: whether that import opened a connection or changed database
+state.

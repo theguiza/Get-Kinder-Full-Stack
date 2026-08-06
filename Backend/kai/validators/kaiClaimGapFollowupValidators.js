@@ -21,6 +21,7 @@
 
 import { validateClaimHasLoadBearingEvidence } from "./kaiClaimProposalValidators.js";
 import { validateEvidenceCoverageAssessmentIsPermitted } from "./kaiEvidenceCoverageAssessmentValidators.js";
+import { blockerResult, createValidatorResult } from "./types.js";
 
 const VALIDATOR_KEY_CLAIM_GAP_LINEAGE = "VAL-KAI-P2-04-001";
 const VALIDATOR_KEY_CLIENT_FOLLOWUP_ROUTING = "VAL-KAI-P2-04-002";
@@ -52,6 +53,60 @@ function isNonEmptyString(value) {
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function routingEvidence({
+  dimensionKey,
+  gapRow,
+  claimRow,
+  followupWritePlan,
+  queueWritePlan,
+  reasonCode,
+} = {}) {
+  return {
+    reason_code: reasonCode,
+    dimension_key: dimensionKey ?? null,
+    gap_log_item_id: gapRow?.gap_log_item_id ?? followupWritePlan?.gap_log_item_id ?? null,
+    client_followup_item_id: followupWritePlan?.client_followup_item_id ?? queueWritePlan?.target_object_id ?? null,
+    claim_id: claimRow?.claim_id ?? gapRow?.claim_id ?? followupWritePlan?.claim_id ?? null,
+    organization_id: claimRow?.organization_id ?? gapRow?.organization_id ?? followupWritePlan?.organization_id ?? queueWritePlan?.organization_id ?? null,
+    gap_present: Boolean(gapRow),
+    claim_present: Boolean(claimRow),
+    followup_plan_present: isPlainObject(followupWritePlan),
+    queue_plan_present: isPlainObject(queueWritePlan),
+    queue_target_matches_followup:
+      isPlainObject(followupWritePlan) &&
+      isPlainObject(queueWritePlan) &&
+      isNonEmptyString(followupWritePlan.client_followup_item_id) &&
+      queueWritePlan.target_object_id === followupWritePlan.client_followup_item_id,
+    queue_status: queueWritePlan?.queue_status ?? null,
+    review_status: queueWritePlan?.review_status ?? null,
+    priority: queueWritePlan?.priority ?? null,
+    target_object_type: queueWritePlan?.target_object_type ?? null,
+  };
+}
+
+function routingPass(fields) {
+  return createValidatorResult({
+    validator_key: VALIDATOR_KEY_CLIENT_FOLLOWUP_ROUTING,
+    severity: "pass",
+    message: "Client follow-up routing is complete and fixed-contract.",
+    object_type: "client_followup_item",
+    object_code: fields.dimensionKey ?? null,
+    object_id: fields.followupWritePlan?.client_followup_item_id ?? fields.queueWritePlan?.target_object_id ?? null,
+    evidence: routingEvidence({ ...fields, reasonCode: "routing_contract_passed" }),
+  });
+}
+
+function routingBlocker(message, fields, reasonCode, requiredFix = "Regenerate the route from authoritative gap, follow-up, and queue identities.") {
+  return blockerResult(VALIDATOR_KEY_CLIENT_FOLLOWUP_ROUTING, message, {
+    object_type: "client_followup_item",
+    object_code: fields?.dimensionKey ?? fields?.gapRow?.dimension_key ?? fields?.followupWritePlan?.dimension_key ?? null,
+    object_id: fields?.followupWritePlan?.client_followup_item_id ?? fields?.queueWritePlan?.target_object_id ?? null,
+    blocking_reason: reasonCode,
+    required_fix: requiredFix,
+    evidence: routingEvidence({ ...fields, reasonCode }),
+  });
 }
 
 /**
@@ -122,46 +177,60 @@ export function validateClaimGapLineage(rows) {
  *     it is only known after the follow-up row itself is inserted).
  */
 export function validateClientFollowupRouting({ dimensionKey, gapRow, claimRow, followupWritePlan, queueWritePlan } = {}) {
+  const fields = { dimensionKey, gapRow, claimRow, followupWritePlan, queueWritePlan };
   if (!CLIENT_ANSWERABLE_DIMENSION_KEYS.includes(dimensionKey)) {
-    return { ok: false, code: "validation_blocker" };
+    return routingBlocker("Only client-answerable dimensions may route to a client follow-up.", fields, "dimension_not_client_answerable");
   }
 
   if (!gapRow || !claimRow) {
-    return { ok: false, code: "not_found" };
+    return routingBlocker("A routed client follow-up requires authoritative gap and claim rows.", fields, "missing_authoritative_routing_row");
+  }
+
+  if (!isNonEmptyString(gapRow.gap_log_item_id)) {
+    return routingBlocker("A routed client follow-up requires a non-null authoritative gap identity.", fields, "missing_gap_identity");
   }
 
   if (gapRow.organization_id !== claimRow.organization_id) {
-    return { ok: false, code: "conflict_current_state_changed" };
+    return routingBlocker("The gap row must belong to the same organization as the claim.", fields, "gap_claim_organization_mismatch");
   }
 
   if (gapRow.claim_id !== claimRow.claim_id || gapRow.dimension_key !== dimensionKey) {
-    return { ok: false, code: "conflict_current_state_changed" };
+    return routingBlocker("The gap row must match the claim and dimension being routed.", fields, "gap_claim_dimension_mismatch");
   }
 
   const expectedQuestion = CLIENT_FOLLOWUP_QUESTION_BY_DIMENSION[dimensionKey];
 
   if (!isPlainObject(followupWritePlan)) {
-    return { ok: false, code: "validation_blocker" };
+    return routingBlocker("A routed client follow-up requires a complete follow-up plan.", fields, "missing_followup_plan");
   }
-  const followupAllowedKeys = new Set(["organization_id", "claim_id", "gap_log_item_id", "dimension_key", "question_text"]);
+  const followupAllowedKeys = new Set([
+    "client_followup_item_id",
+    "organization_id",
+    "claim_id",
+    "gap_log_item_id",
+    "dimension_key",
+    "question_text",
+  ]);
   const followupOk =
     Object.keys(followupWritePlan).every((key) => followupAllowedKeys.has(key)) &&
+    isNonEmptyString(followupWritePlan.client_followup_item_id) &&
     followupWritePlan.organization_id === claimRow.organization_id &&
     followupWritePlan.claim_id === claimRow.claim_id &&
     followupWritePlan.gap_log_item_id === gapRow.gap_log_item_id &&
     followupWritePlan.dimension_key === dimensionKey &&
     followupWritePlan.question_text === expectedQuestion;
   if (!followupOk) {
-    return { ok: false, code: "validation_blocker" };
+    return routingBlocker("The follow-up plan must use the exact server-owned routing contract.", fields, "invalid_followup_plan");
   }
 
   if (!isPlainObject(queueWritePlan)) {
-    return { ok: false, code: "validation_blocker" };
+    return routingBlocker("A routed client follow-up requires a complete queue plan.", fields, "missing_queue_plan");
   }
   const queueAllowedKeys = new Set([
     "organization_id",
     "queue_type",
     "target_object_type",
+    "target_object_id",
     "queue_status",
     "review_status",
     "priority",
@@ -175,6 +244,7 @@ export function validateClientFollowupRouting({ dimensionKey, gapRow, claimRow, 
     queueWritePlan.organization_id === claimRow.organization_id &&
     queueWritePlan.queue_type === CLIENT_FOLLOWUP_QUEUE_TYPE &&
     queueWritePlan.target_object_type === CLIENT_FOLLOWUP_TARGET_OBJECT_TYPE &&
+    queueWritePlan.target_object_id === followupWritePlan.client_followup_item_id &&
     queueWritePlan.queue_status === CLIENT_FOLLOWUP_QUEUE_STATUS &&
     queueWritePlan.review_status === CLIENT_FOLLOWUP_REVIEW_STATUS &&
     queueWritePlan.priority === CLIENT_FOLLOWUP_PRIORITY &&
@@ -183,10 +253,10 @@ export function validateClientFollowupRouting({ dimensionKey, gapRow, claimRow, 
     queueWritePlan.assigned_to === null &&
     queueWritePlan.due_at === null;
   if (!queueOk) {
-    return { ok: false, code: "validation_blocker" };
+    return routingBlocker("The queue plan must use the exact fixed client-follow-up contract.", fields, "invalid_queue_plan");
   }
 
-  return { ok: true, warnings: [] };
+  return routingPass(fields);
 }
 
 /**

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   getScopedClaimById,
   getScopedClaimEvidenceLinkByClaimId,
@@ -418,16 +419,16 @@ async function insertGapRowsBulk(tx, { organizationId, claimId, evidenceItemId, 
 
 async function insertFollowupRowsBulk(tx, { organizationId, claimId, followupPlans }) {
   if (followupPlans.length === 0) return [];
-  const columnsPerRow = 5;
+  const columnsPerRow = 6;
   const values = [];
   const placeholders = followupPlans.map((plan, index) => {
     const base = index * columnsPerRow;
-    values.push(organizationId, claimId, plan.gap_log_item_id, plan.dimension_key, plan.question_text);
-    return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, 'system')`;
+    values.push(plan.client_followup_item_id, organizationId, claimId, plan.gap_log_item_id, plan.dimension_key, plan.question_text);
+    return `($${base + 1}::uuid, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, 'system')`;
   });
   const result = await tx.query(
     `INSERT INTO kai.client_followup_items (
-       organization_id, claim_id, gap_log_item_id, dimension_key, question_text, created_by_type
+       client_followup_item_id, organization_id, claim_id, gap_log_item_id, dimension_key, question_text, created_by_type
      ) VALUES ${placeholders.join(", ")}
      ON CONFLICT (organization_id, claim_id, dimension_key)
        DO NOTHING
@@ -474,10 +475,61 @@ async function insertFollowupQueueRowsBulk(tx, { organizationId, followupRecords
   return result.rows;
 }
 
+function queueWritePlanForFollowup({ organizationId, clientFollowupItemId, dimensionKey }) {
+  return {
+    organization_id: organizationId,
+    queue_type: CLIENT_FOLLOWUP_QUEUE_TYPE,
+    target_object_type: CLIENT_FOLLOWUP_TARGET_OBJECT_TYPE,
+    target_object_id: clientFollowupItemId,
+    queue_status: CLIENT_FOLLOWUP_QUEUE_STATUS,
+    review_status: CLIENT_FOLLOWUP_REVIEW_STATUS,
+    priority: CLIENT_FOLLOWUP_PRIORITY,
+    summary: CLIENT_FOLLOWUP_SUMMARY,
+    required_action: CLIENT_FOLLOWUP_QUESTION_BY_DIMENSION[dimensionKey],
+    assigned_to: null,
+    due_at: null,
+  };
+}
+
+function rowToFollowupRoutingPlan(row) {
+  return {
+    client_followup_item_id: row.client_followup_item_id,
+    organization_id: row.organization_id,
+    claim_id: row.claim_id,
+    gap_log_item_id: row.gap_log_item_id,
+    dimension_key: row.dimension_key,
+    question_text: row.question_text,
+  };
+}
+
+function rowToQueueRoutingPlan(row) {
+  return {
+    organization_id: row.organization_id,
+    queue_type: row.queue_type,
+    target_object_type: row.target_object_type,
+    target_object_id: row.target_object_id,
+    queue_status: row.queue_status,
+    review_status: row.review_status,
+    priority: row.priority,
+    summary: row.summary,
+    required_action: row.required_action,
+    assigned_to: row.assigned_to,
+    due_at: row.due_at,
+  };
+}
+
 class MalformedInsertedRowError extends Error {
   constructor(what) {
     super(`inserted ${what} row failed validation`);
     this.name = "MalformedInsertedRowError";
+  }
+}
+
+class RoutingValidationBlockerError extends Error {
+  constructor(result) {
+    super(result?.message || "client follow-up routing validation blocked");
+    this.name = "RoutingValidationBlockerError";
+    this.result = result;
   }
 }
 
@@ -492,6 +544,34 @@ class RequiredAuditRejectedError extends Error {
   constructor() {
     super("required metadata-only audit was rejected");
     this.name = "RequiredAuditRejectedError";
+  }
+}
+
+function assertClientFollowupRoutingPass(input) {
+  const result = validateClientFollowupRouting(input);
+  if (result?.severity === "blocker") {
+    throw new RoutingValidationBlockerError(result);
+  }
+  if (result?.severity !== "pass") {
+    throw new RoutingValidationBlockerError(result);
+  }
+  return result;
+}
+
+function validateExistingRoutingRows({ gapRows, followupRows, queueRows, claimRow, expectedFollowupDimensionKeys }) {
+  const gapByDim = new Map(gapRows.map((row) => [row.dimension_key, row]));
+  const followupByDim = new Map(followupRows.map((row) => [row.dimension_key, row]));
+  const queueByTarget = new Map(queueRows.map((row) => [row.target_object_id, row]));
+  for (const dimensionKey of expectedFollowupDimensionKeys) {
+    const followupRow = followupByDim.get(dimensionKey);
+    const queueRow = followupRow ? queueByTarget.get(followupRow.client_followup_item_id) : null;
+    assertClientFollowupRoutingPass({
+      dimensionKey,
+      gapRow: gapByDim.get(dimensionKey),
+      claimRow,
+      followupWritePlan: followupRow ? rowToFollowupRoutingPlan(followupRow) : null,
+      queueWritePlan: queueRow ? rowToQueueRoutingPlan(queueRow) : null,
+    });
   }
 }
 
@@ -550,6 +630,13 @@ function verifyPostWriteContract({ gapRecords, followupRecords, queueRecords, or
       queueRow.assigned_to === null &&
       queueRow.due_at === null;
     if (!ok) throw new MalformedInsertedRowError("review_queue_items");
+    assertClientFollowupRoutingPass({
+      dimensionKey,
+      gapRow: gapByDim.get(dimensionKey),
+      claimRow: { organization_id: organizationId, claim_id: claimId },
+      followupWritePlan: rowToFollowupRoutingPlan(followupRow),
+      queueWritePlan: rowToQueueRoutingPlan(queueRow),
+    });
   }
 }
 
@@ -634,6 +721,7 @@ function prepareRequiredAudit(metadataOnlyAudit, context) {
 }
 
 function shapeClaimGapFollowupError(error) {
+  if (error instanceof RoutingValidationBlockerError) return claimGapFollowupFailure("validation_blocker");
   if (error instanceof MalformedInsertedRowError) return claimGapFollowupFailure("system_error");
   if (error instanceof ConcurrentStateChangedError) return claimGapFollowupFailure("conflict_current_state_changed");
   if (error instanceof RequiredAuditRejectedError) return claimGapFollowupFailure("validation_blocker");
@@ -653,6 +741,7 @@ export function createPostgresClaimGapFollowupRepository({
   runInTransaction,
   beforeInsert = async () => {},
   computeDimensions: computeDimensionsForTesting,
+  mutateRoutingPlansForTesting,
 } = {}) {
   const computeDimensionsFn = computeDimensionsForTesting || computeDimensions;
   return Object.freeze({
@@ -784,6 +873,20 @@ export function createPostgresClaimGapFollowupRepository({
             const queuesMatch = followupsMatch && queueRowsMatchExpectation(existingQueueRows, existingFollowupRows);
 
             if (gapsMatch && followupsMatch && queuesMatch) {
+              try {
+                validateExistingRoutingRows({
+                  gapRows: existingGapRows,
+                  followupRows: existingFollowupRows,
+                  queueRows: existingQueueRows,
+                  claimRow,
+                  expectedFollowupDimensionKeys,
+                });
+              } catch (error) {
+                if (error instanceof RoutingValidationBlockerError) {
+                  return claimGapFollowupFailure("conflict_current_state_changed");
+                }
+                throw error;
+              }
               return claimGapFollowupSuccess({
                 gapItems: existingGapRows.map(rowToGapRecord),
                 clientFollowupItems: existingFollowupRows.map(rowToFollowupRecord),
@@ -819,6 +922,13 @@ export function createPostgresClaimGapFollowupRepository({
               followupRowsMatchExpectation(rereadFollowupRows, expectedFollowupDimensionKeys, rereadGapRows, { claimId }) &&
               queueRowsMatchExpectation(rereadQueueRows, rereadFollowupRows);
             if (!matches) throw new ConcurrentStateChangedError("gap_log_items");
+            validateExistingRoutingRows({
+              gapRows: rereadGapRows,
+              followupRows: rereadFollowupRows,
+              queueRows: rereadQueueRows,
+              claimRow,
+              expectedFollowupDimensionKeys,
+            });
             return claimGapFollowupSuccess({
               gapItems: rereadGapRows.map(rowToGapRecord),
               clientFollowupItems: rereadFollowupRows.map(rowToFollowupRecord),
@@ -836,41 +946,54 @@ export function createPostgresClaimGapFollowupRepository({
 
           const gapRowByDimension = new Map(insertedGapRows.map((row) => [row.dimension_key, row]));
           const followupPlans = [];
+          const queuePlans = [];
           for (const dimensionKey of expectedFollowupDimensionKeys) {
             const gapRow = gapRowByDimension.get(dimensionKey);
             const questionText = CLIENT_FOLLOWUP_QUESTION_BY_DIMENSION[dimensionKey];
+            const clientFollowupItemId = randomUUID();
             const followupWritePlan = {
+              client_followup_item_id: clientFollowupItemId,
               organization_id: organizationId,
               claim_id: claimId,
               gap_log_item_id: gapRow.gap_log_item_id,
               dimension_key: dimensionKey,
               question_text: questionText,
             };
-            const queueWritePlan = {
-              organization_id: organizationId,
-              queue_type: CLIENT_FOLLOWUP_QUEUE_TYPE,
-              target_object_type: CLIENT_FOLLOWUP_TARGET_OBJECT_TYPE,
-              queue_status: CLIENT_FOLLOWUP_QUEUE_STATUS,
-              review_status: CLIENT_FOLLOWUP_REVIEW_STATUS,
-              priority: CLIENT_FOLLOWUP_PRIORITY,
-              summary: CLIENT_FOLLOWUP_SUMMARY,
-              required_action: questionText,
-              assigned_to: null,
-              due_at: null,
-            };
-            const routingCheck = validateClientFollowupRouting({
+            const queueWritePlan = queueWritePlanForFollowup({
+              organizationId,
+              clientFollowupItemId,
               dimensionKey,
-              gapRow,
-              claimRow: { organization_id: organizationId, claim_id: claimId },
-              followupWritePlan,
-              queueWritePlan,
             });
-            if (!routingCheck.ok) throw new MalformedInsertedRowError("client_followup_items");
-            followupPlans.push({ dimension_key: dimensionKey, gap_log_item_id: gapRow.gap_log_item_id, question_text: questionText });
+            followupPlans.push(followupWritePlan);
+            queuePlans.push(queueWritePlan);
           }
 
-          const insertedFollowupRows = await insertFollowupRowsBulk(tx, { organizationId, claimId, followupPlans });
-          if (insertedFollowupRows.length !== followupPlans.length) {
+          const mutatedRoutingPlans =
+            typeof mutateRoutingPlansForTesting === "function"
+              ? mutateRoutingPlansForTesting({
+                  followupPlans,
+                  queuePlans,
+                  gapRows: insertedGapRows,
+                  claimRow,
+                }) || {}
+              : {};
+          const finalFollowupPlans = mutatedRoutingPlans.followupPlans || followupPlans;
+          const finalQueuePlans = mutatedRoutingPlans.queuePlans || queuePlans;
+
+          const queuePlanByTarget = new Map(finalQueuePlans.map((plan) => [plan.target_object_id, plan]));
+          for (const followupPlan of finalFollowupPlans) {
+            const gapRow = gapRowByDimension.get(followupPlan.dimension_key);
+            assertClientFollowupRoutingPass({
+              dimensionKey: followupPlan.dimension_key,
+              gapRow,
+              claimRow,
+              followupWritePlan: followupPlan,
+              queueWritePlan: queuePlanByTarget.get(followupPlan.client_followup_item_id),
+            });
+          }
+
+          const insertedFollowupRows = await insertFollowupRowsBulk(tx, { organizationId, claimId, followupPlans: finalFollowupPlans });
+          if (insertedFollowupRows.length !== finalFollowupPlans.length) {
             throw new ConcurrentStateChangedError("client_followup_items");
           }
 

@@ -11184,3 +11184,63 @@ complete_diff_scope: Backend/kai/db/kaiIntakeQueries.js (additive),
   scripts/kai-sprint2-p2-04-claim-gap-followup-smoke-verifier.sql (new),
   scripts/kai-sprint2-p2-04-claim-gap-followup-verifier.sql (new)
 ```
+
+### P2-04C follow-up routing and fail-closed service loading correction - completed 2026-08-06
+
+preflight:
+  branch: codex/kai-sprint2-p0-v0.3.5
+  head: 9aafb798c7b875fe364d70c14e8900eb05ad34d1
+  worktree: clean at task start, including untracked files; staged paths: none
+
+p2_04c_made:
+  - Backend/kai/services/kaiClaimGapFollowupService.js - removed the static
+    PostgreSQL repository import. The default repository is now dynamically
+    imported only after KAI_SPRINT2_ENABLED, input validation, mapped-human
+    authorization, and active tenant-membership/role validation pass, and only
+    when no injected repository is supplied.
+  - Backend/kai/validators/kaiClaimGapFollowupValidators.js - converted
+    validateClientFollowupRouting to canonical structured validator results
+    from Backend/kai/validators/types.js using validator_key
+    VAL-KAI-P2-04-002, object_type client_followup_item, dimension-key
+    object_code, follow-up object_id, metadata-safe evidence, and blocker
+    blocking_reason/required_fix.
+  - Backend/kai/dictionary/postgresClaimGapFollowupRepository.js - allocates
+    server-owned non-null client_followup_item_id values before routing
+    validation, includes queue target_object_id in complete queue plans, maps
+    fresh routing blockers to validation_blocker, validates complete plans
+    before follow-up/queue writes, and reruns routing validation against
+    post-write rows, replay rows, and concurrent-loser rereads. Malformed
+    existing routing state remains conflict_current_state_changed without
+    repair.
+  - __tests__/kai-sprint2-p2-04-claim-gap-followup-boundary.spec.js and
+    .integration.spec.js - added focused structured-result, identity,
+    target-binding, queue-containment, disabled service import subprocess,
+    routing-blocker rollback, and malformed-existing-routing-state coverage.
+  - scripts/kai-sprint2-p2-04-claim-gap-followup-runbook.md and
+    -patch-notes.md - updated P2-04 documentation for the P2-04C correction.
+
+USER_CONFIRMED:
+  the prior transcript showed ambient database configuration being selected
+  during service-module import
+
+NOT_CONFIRMED:
+  whether that import opened a connection or changed database state
+
+commands:
+  - DATABASE_URL=postgres://sentinel@127.0.0.1:9/kai_sprint2_p2_04c_sentinel node --test __tests__/kai-sprint2-p2-04-claim-gap-followup-boundary.spec.js __tests__/kai-sprint2-p2-04-claim-gap-followup-schema-contract.spec.js __tests__/kai-sprint2-p2-04-claim-gap-followup-runner-self-test.spec.js ->
+    TOOL_VERIFIED: 55/55 pass
+  - DATABASE_URL=postgres://sentinel@127.0.0.1:9/kai_sprint2_p2_04c_sentinel npm run verify:kai-sprint2-p2-04-claim-gap-followup ->
+    TOOL_VERIFIED: catalog verifier 59/59 PASS, read-only failure checks 17/17
+    PASS, smoke verifier 15/15 PASS, integration spec 18/18 pass
+  - DATABASE_URL=postgres://sentinel@127.0.0.1:9/kai_sprint2_p2_04c_sentinel npm run verify:kai-sprint2-p2-03-claim-proposal ->
+    TOOL_VERIFIED: 15/15 pass
+  - DATABASE_URL=postgres://sentinel@127.0.0.1:9/kai_sprint2_p2_04c_sentinel npm run verify:kai-sprint2-p2-02-evidence-coverage-assessment ->
+    TOOL_VERIFIED: 7/7 pass
+  - DATABASE_URL=postgres://sentinel@127.0.0.1:9/kai_sprint2_p2_04c_sentinel npm run verify:kai-sprint2-p2-01-evidence-lineage ->
+    TOOL_VERIFIED: 17/17 pass
+  - DATABASE_URL=postgres://sentinel@127.0.0.1:9/kai_sprint2_p2_04c_sentinel npm run test:kai-sprint2 ->
+    TOOL_VERIFIED: 1422 pass, 12 skip, 0 fail
+  - DATABASE_URL=postgres://sentinel@127.0.0.1:9/kai_sprint2_p2_04c_sentinel npm test ->
+    TOOL_VERIFIED: 1527 pass, 12 skip, 0 fail
+  - git diff --check -> TOOL_VERIFIED: no whitespace errors
+  - git diff --cached --check -> TOOL_VERIFIED: no whitespace errors

@@ -313,12 +313,24 @@ async function runClaimGapFollowupIntegrationSuite() {
     assert.equal(result.data.gapItems.length, 9);
     assert.equal(result.data.clientFollowupItems.length, 4);
     assert.equal(result.data.reviewQueueItems.length, 4);
+    const gapByDimension = new Map(result.data.gapItems.map((gap) => [gap.dimension_key, gap]));
+    const followupById = new Map(result.data.clientFollowupItems.map((followup) => [followup.client_followup_item_id, followup]));
+    for (const followup of result.data.clientFollowupItems) {
+      assert.ok(followup.client_followup_item_id, "fresh follow-up identity must be server-owned and non-null");
+      const gap = gapByDimension.get(followup.dimension_key);
+      assert.ok(gap?.gap_log_item_id, "fresh routed gap identity must be real and non-null");
+      assert.equal(followup.gap_log_item_id, gap.gap_log_item_id);
+      assert.equal(followup.organization_id, ORG);
+      assert.equal(followup.claim_id, seed.claimId);
+    }
     assert.ok(!result.data.gapItems.some((g) => g.dimension_key === "coverage_gaps"));
     assert.deepEqual(
       result.data.clientFollowupItems.map((f) => f.dimension_key).sort(),
       ["definition_clarity", "denominator_clarity", "entity_level_clarity", "time_period_clarity"],
     );
     for (const queueItem of result.data.reviewQueueItems) {
+      const followup = followupById.get(queueItem.target_object_id);
+      assert.ok(followup, "client_followup queue target must be the follow-up ID");
       assert.equal(queueItem.queue_status, "waiting_on_client");
       assert.equal(queueItem.review_status, "proposed");
       assert.equal(queueItem.priority, "normal");
@@ -571,6 +583,52 @@ async function runClaimGapFollowupIntegrationSuite() {
     assert.equal(gapCount.rows[0].count, 1, "the pre-existing partial row must not be repaired into a complete set");
   });
 
+  test("P2-04 (i): malformed existing routing state returns conflict_current_state_changed without repair", async () => {
+    const seed = await seedPromotedClaim(14);
+    const first = await repository.generateClaimGapsAndFollowups({
+      organizationId: ORG,
+      claimId: seed.claimId,
+      actorUserId: "90000000-0000-4000-8000-000000000001",
+      now: NOW,
+      metadataOnlyAudit: createAuditProbe().dependency,
+    });
+    assert.equal(first.ok, true, JSON.stringify(first));
+    await withClient((client) => client.query(
+      `DELETE FROM kai.review_queue_items
+        WHERE organization_id = $1::uuid
+          AND queue_type = 'client_followup'
+          AND target_object_id = $2::uuid`,
+      [ORG, first.data.reviewQueueItems[0].target_object_id],
+    ));
+
+    const audit = createAuditProbe();
+    const result = await repository.generateClaimGapsAndFollowups({
+      organizationId: ORG,
+      claimId: seed.claimId,
+      actorUserId: "90000000-0000-4000-8000-000000000001",
+      now: NOW,
+      metadataOnlyAudit: audit.dependency,
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "conflict_current_state_changed");
+    assert.equal(audit.published.length, 0);
+
+    const counts = await withClient((client) => Promise.all([
+      client.query(`SELECT count(*)::int AS count FROM kai.client_followup_items WHERE claim_id = $1::uuid`, [seed.claimId]),
+      client.query(
+        `SELECT count(*)::int AS count
+           FROM kai.review_queue_items q
+           JOIN kai.client_followup_items f ON f.client_followup_item_id = q.target_object_id
+          WHERE f.claim_id = $1::uuid`,
+        [seed.claimId],
+      ),
+      client.query(`SELECT count(*)::int AS count FROM kai.upload_lifecycle_audit WHERE operation = 'claim_gap_and_followup_generated' AND intake_file_id = $1::uuid`, [seed.intakeFileId]),
+    ]));
+    assert.equal(counts[0].rows[0].count, 4);
+    assert.equal(counts[1].rows[0].count, 3, "the missing queue row must not be repaired");
+    assert.equal(counts[2].rows[0].count, 1, "only the original successful audit row should exist");
+  });
+
   test("P2-04 (j): a rejected required-audit prepare rolls back every write", async () => {
     const seed = await seedPromotedClaim(8);
     const audit = createAuditProbe({ prepareOk: false });
@@ -592,6 +650,52 @@ async function runClaimGapFollowupIntegrationSuite() {
     assert.equal(counts[0].rows[0].count, 0);
     assert.equal(counts[1].rows[0].count, 0);
     assert.equal(counts[2].rows[0].count, 0);
+  });
+
+  test("P2-04 (j): a forced routing blocker rolls back gaps, follow-ups, queue rows, audit rows, and audit publication", async () => {
+    const seed = await seedPromotedClaim(13);
+    const audit = createAuditProbe();
+    const blockingRepository = createPostgresClaimGapFollowupRepository({
+      runInTransaction: (callback) => withRunnerOwnedTransaction(callback, pool),
+      mutateRoutingPlansForTesting({ followupPlans, queuePlans }) {
+        return {
+          followupPlans,
+          queuePlans: queuePlans.map((plan, index) =>
+            index === 0
+              ? { ...plan, target_object_id: "e9999999-0000-4000-8000-000000000099" }
+              : plan,
+          ),
+        };
+      },
+    });
+
+    const result = await blockingRepository.generateClaimGapsAndFollowups({
+      organizationId: ORG,
+      claimId: seed.claimId,
+      actorUserId: "90000000-0000-4000-8000-000000000001",
+      now: NOW,
+      metadataOnlyAudit: audit.dependency,
+    });
+    assert.equal(result.ok, false, JSON.stringify(result));
+    assert.equal(result.error.code, "validation_blocker");
+    assert.equal(audit.published.length, 0);
+
+    const counts = await withClient((client) => Promise.all([
+      client.query(`SELECT count(*)::int AS count FROM kai.gap_log_items WHERE claim_id = $1::uuid`, [seed.claimId]),
+      client.query(`SELECT count(*)::int AS count FROM kai.client_followup_items WHERE claim_id = $1::uuid`, [seed.claimId]),
+      client.query(
+        `SELECT count(*)::int AS count
+           FROM kai.review_queue_items q
+           JOIN kai.client_followup_items f ON f.client_followup_item_id = q.target_object_id
+          WHERE f.claim_id = $1::uuid`,
+        [seed.claimId],
+      ),
+      client.query(`SELECT count(*)::int AS count FROM kai.upload_lifecycle_audit WHERE operation = 'claim_gap_and_followup_generated' AND intake_file_id = $1::uuid`, [seed.intakeFileId]),
+    ]));
+    assert.equal(counts[0].rows[0].count, 0);
+    assert.equal(counts[1].rows[0].count, 0);
+    assert.equal(counts[2].rows[0].count, 0);
+    assert.equal(counts[3].rows[0].count, 0);
   });
 
   for (const [label, probeOptions, seedIndex] of [

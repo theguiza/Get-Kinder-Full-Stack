@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 
 import {
   validateClaimGapLineage,
@@ -30,6 +31,7 @@ const SOURCE = "71000000-0000-4000-8000-000000000001";
 const SOURCE_VERSION = "70000000-0000-4000-8000-000000000001";
 const CANDIDATE = "90000000-0000-4000-8000-000000000001";
 const GAP = "d0000000-0000-4000-8000-000000000001";
+const FOLLOWUP = "e0000000-0000-4000-8000-000000000001";
 const NOW = "2026-08-06T10:00:00.000Z";
 
 function validRows(overrides = {}) {
@@ -191,6 +193,7 @@ function validFollowupRoutingInput(overrides = {}) {
     gapRow: { gap_log_item_id: GAP, organization_id: ORG, claim_id: CLAIM, dimension_key: dimensionKey, ...overrides.gapRow },
     claimRow: { organization_id: ORG, claim_id: CLAIM, ...overrides.claimRow },
     followupWritePlan: {
+      client_followup_item_id: FOLLOWUP,
       organization_id: ORG,
       claim_id: CLAIM,
       gap_log_item_id: GAP,
@@ -202,6 +205,7 @@ function validFollowupRoutingInput(overrides = {}) {
       organization_id: ORG,
       queue_type: "client_followup",
       target_object_type: "client_followup_item",
+      target_object_id: FOLLOWUP,
       queue_status: "waiting_on_client",
       review_status: "proposed",
       priority: "normal",
@@ -217,8 +221,34 @@ function validFollowupRoutingInput(overrides = {}) {
 test("validateClientFollowupRouting: passes for the exact fixed contract on each of the four authorized dimensions", () => {
   for (const dimensionKey of CLIENT_ANSWERABLE_DIMENSION_KEYS) {
     const result = validateClientFollowupRouting(validFollowupRoutingInput({ dimensionKey }));
-    assert.equal(result.ok, true, dimensionKey);
+    assert.equal(result.validator_key, "VAL-KAI-P2-04-002", dimensionKey);
+    assert.equal(result.severity, "pass", dimensionKey);
+    assert.equal(result.object_type, "client_followup_item", dimensionKey);
+    assert.equal(result.object_code, dimensionKey);
+    assert.equal(result.object_id, FOLLOWUP);
+    assert.equal(result.evidence.queue_target_matches_followup, true);
   }
+});
+
+test("validateClientFollowupRouting: returns exact structured pass and blocker result contracts", () => {
+  const pass = validateClientFollowupRouting(validFollowupRoutingInput());
+  assert.deepEqual(
+    Object.keys(pass).sort(),
+    ["blocking_reason", "evidence", "message", "object_code", "object_id", "object_type", "required_fix", "severity", "validator_key"],
+  );
+  assert.equal(pass.severity, "pass");
+  assert.equal(pass.blocking_reason, null);
+  assert.equal(pass.required_fix, null);
+
+  const blocker = validateClientFollowupRouting(validFollowupRoutingInput({ queueWritePlan: { target_object_id: "e9999999-0000-4000-8000-000000000099" } }));
+  assert.equal(blocker.validator_key, "VAL-KAI-P2-04-002");
+  assert.equal(blocker.severity, "blocker");
+  assert.equal(blocker.object_type, "client_followup_item");
+  assert.equal(blocker.object_code, "definition_clarity");
+  assert.equal(blocker.object_id, FOLLOWUP);
+  assert.equal(blocker.blocking_reason, "invalid_queue_plan");
+  assert.ok(blocker.required_fix);
+  assert.equal(blocker.evidence.queue_target_matches_followup, false);
 });
 
 test("validateClientFollowupRouting: rejects every dimension outside the four authorized client-answerable dimensions", () => {
@@ -232,49 +262,87 @@ test("validateClientFollowupRouting: rejects every dimension outside the four au
       followupWritePlan: { organization_id: ORG, claim_id: CLAIM, gap_log_item_id: GAP, dimension_key: dimensionKey, question_text: "anything" },
       queueWritePlan: {},
     });
-    assert.equal(result.ok, false, dimensionKey);
-    assert.equal(result.code, "validation_blocker", dimensionKey);
+    assert.equal(result.severity, "blocker", dimensionKey);
+    assert.equal(result.blocking_reason, "dimension_not_client_answerable", dimensionKey);
   }
 });
 
-test("validateClientFollowupRouting: a missing gap or claim row returns not_found", () => {
+test("validateClientFollowupRouting: a missing gap or claim row returns a routing blocker", () => {
   for (const key of ["gapRow", "claimRow"]) {
     const input = validFollowupRoutingInput();
     input[key] = null;
     const result = validateClientFollowupRouting(input);
-    assert.equal(result.ok, false, key);
-    assert.equal(result.code, "not_found", key);
+    assert.equal(result.severity, "blocker", key);
+    assert.equal(result.blocking_reason, "missing_authoritative_routing_row", key);
   }
 });
 
-test("validateClientFollowupRouting: tenant or dimension mismatch between gap and claim returns conflict_current_state_changed", () => {
-  const orgMismatch = validateClientFollowupRouting(validFollowupRoutingInput({ gapRow: { organization_id: "99999999-0000-4000-8000-000000000099" } }));
-  assert.equal(orgMismatch.ok, false);
-  assert.equal(orgMismatch.code, "conflict_current_state_changed");
-
-  const claimMismatch = validateClientFollowupRouting(validFollowupRoutingInput({ gapRow: { claim_id: "99999999-0000-4000-8000-000000000098" } }));
-  assert.equal(claimMismatch.ok, false);
-  assert.equal(claimMismatch.code, "conflict_current_state_changed");
-
-  const dimensionMismatch = validateClientFollowupRouting(validFollowupRoutingInput({ gapRow: { dimension_key: "time_period_clarity" } }));
-  assert.equal(dimensionMismatch.ok, false);
-  assert.equal(dimensionMismatch.code, "conflict_current_state_changed");
+test("validateClientFollowupRouting: null, missing, or mismatched gap identity blocks", () => {
+  const scenarios = [
+    ["null gap id", validFollowupRoutingInput({ gapRow: { gap_log_item_id: null } }), "missing_gap_identity"],
+    ["missing gap id", validFollowupRoutingInput({ gapRow: { gap_log_item_id: undefined } }), "missing_gap_identity"],
+    ["organization mismatch", validFollowupRoutingInput({ gapRow: { organization_id: "99999999-0000-4000-8000-000000000099" } }), "gap_claim_organization_mismatch"],
+    ["claim mismatch", validFollowupRoutingInput({ gapRow: { claim_id: "99999999-0000-4000-8000-000000000098" } }), "gap_claim_dimension_mismatch"],
+    ["dimension mismatch", validFollowupRoutingInput({ gapRow: { dimension_key: "time_period_clarity" } }), "gap_claim_dimension_mismatch"],
+  ];
+  for (const [label, input, reason] of scenarios) {
+    const result = validateClientFollowupRouting(input);
+    assert.equal(result.severity, "blocker", label);
+    assert.equal(result.blocking_reason, reason, label);
+  }
 });
 
-test("validateClientFollowupRouting: any deviation in the follow-up write plan is a validation_blocker", () => {
+test("validateClientFollowupRouting: tenant or dimension mismatch between gap and claim returns structured blockers", () => {
+  const orgMismatch = validateClientFollowupRouting(validFollowupRoutingInput({ gapRow: { organization_id: "99999999-0000-4000-8000-000000000099" } }));
+  assert.equal(orgMismatch.severity, "blocker");
+  assert.equal(orgMismatch.blocking_reason, "gap_claim_organization_mismatch");
+
+  const claimMismatch = validateClientFollowupRouting(validFollowupRoutingInput({ gapRow: { claim_id: "99999999-0000-4000-8000-000000000098" } }));
+  assert.equal(claimMismatch.severity, "blocker");
+  assert.equal(claimMismatch.blocking_reason, "gap_claim_dimension_mismatch");
+
+  const dimensionMismatch = validateClientFollowupRouting(validFollowupRoutingInput({ gapRow: { dimension_key: "time_period_clarity" } }));
+  assert.equal(dimensionMismatch.severity, "blocker");
+  assert.equal(dimensionMismatch.blocking_reason, "gap_claim_dimension_mismatch");
+});
+
+test("validateClientFollowupRouting: null, missing, or mismatched follow-up identity blocks", () => {
+  const scenarios = [
+    validFollowupRoutingInput({ followupWritePlan: { client_followup_item_id: null } }),
+    validFollowupRoutingInput({ followupWritePlan: { client_followup_item_id: undefined } }),
+    validFollowupRoutingInput({ queueWritePlan: { target_object_id: "e9999999-0000-4000-8000-000000000099" } }),
+  ];
+  for (const input of scenarios) {
+    const result = validateClientFollowupRouting(input);
+    assert.equal(result.severity, "blocker");
+    assert.match(result.blocking_reason, /invalid_(followup|queue)_plan/);
+  }
+});
+
+test("validateClientFollowupRouting: any deviation in the follow-up write plan is a structured blocker", () => {
   const scenarios = [
     validFollowupRoutingInput({ followupWritePlan: { question_text: "A different question." } }),
     validFollowupRoutingInput({ followupWritePlan: { gap_log_item_id: "99999999-0000-4000-8000-000000000097" } }),
+    validFollowupRoutingInput({ followupWritePlan: { client_followup_item_id: "" } }),
     validFollowupRoutingInput({ followupWritePlan: { extraField: "not allowed" } }),
   ];
   for (const input of scenarios) {
     const result = validateClientFollowupRouting(input);
-    assert.equal(result.ok, false);
-    assert.equal(result.code, "validation_blocker");
+    assert.equal(result.severity, "blocker");
+    assert.equal(result.blocking_reason, "invalid_followup_plan");
   }
 });
 
-test("validateClientFollowupRouting: any deviation in the queue write plan is a validation_blocker - including an internal-only or unsupported-assertion reason never leaking through", () => {
+test("validateClientFollowupRouting: queue target_object_id must equal the follow-up ID", () => {
+  const result = validateClientFollowupRouting(
+    validFollowupRoutingInput({ queueWritePlan: { target_object_id: "e9999999-0000-4000-8000-000000000099" } }),
+  );
+  assert.equal(result.severity, "blocker");
+  assert.equal(result.blocking_reason, "invalid_queue_plan");
+  assert.equal(result.evidence.queue_target_matches_followup, false);
+});
+
+test("validateClientFollowupRouting: any deviation in the queue write plan is a structured blocker - including an internal-only or unsupported-assertion reason never leaking through", () => {
   const scenarios = [
     validFollowupRoutingInput({ queueWritePlan: { queue_status: "open" } }),
     validFollowupRoutingInput({ queueWritePlan: { review_status: "needs_gk_review" } }),
@@ -288,8 +356,16 @@ test("validateClientFollowupRouting: any deviation in the queue write plan is a 
   ];
   for (const input of scenarios) {
     const result = validateClientFollowupRouting(input);
-    assert.equal(result.ok, false, JSON.stringify(input.queueWritePlan));
-    assert.equal(result.code, "validation_blocker", JSON.stringify(input.queueWritePlan));
+    assert.equal(result.severity, "blocker", JSON.stringify(input.queueWritePlan));
+    assert.equal(result.blocking_reason, "invalid_queue_plan", JSON.stringify(input.queueWritePlan));
+  }
+});
+
+test("validateClientFollowupRouting: conflict or requirement reasoning cannot enter the client queue", () => {
+  for (const required_action of ["A source conflict exists.", "The requirement is unmet."]) {
+    const result = validateClientFollowupRouting(validFollowupRoutingInput({ queueWritePlan: { required_action } }));
+    assert.equal(result.severity, "blocker", required_action);
+    assert.equal(result.blocking_reason, "invalid_queue_plan", required_action);
   }
 });
 
@@ -307,6 +383,60 @@ test("P2-04 service: KAI_SPRINT2_ENABLED disabled (or absent) returns feature_di
     assert.equal(result.ok, false, JSON.stringify(env));
     assert.equal(result.error.code, "feature_disabled", JSON.stringify(env));
   }
+});
+
+test("P2-04 service: disabled import and invocation do not load or initialize the ambient PostgreSQL pool", () => {
+  const script = `
+    import net from "node:net";
+    let connectionAttempts = 0;
+    const originalConnect = net.Socket.prototype.connect;
+    net.Socket.prototype.connect = function (...args) {
+      connectionAttempts += 1;
+      return originalConnect.apply(this, args);
+    };
+    const captured = [];
+    for (const method of ["log", "warn", "error"]) {
+      const original = console[method];
+      console[method] = (...args) => {
+        captured.push(args.map((arg) => typeof arg === "string" ? arg : JSON.stringify(arg)).join(" "));
+        return original.apply(console, args);
+      };
+    }
+    const { generateClaimGapFollowups } = await import("./Backend/kai/services/kaiClaimGapFollowupService.js");
+    const result = await generateClaimGapFollowups({
+      organizationId: "${ORG}",
+      claimId: "${CLAIM}",
+      actorContext: { actorType: "human", actorUserId: "user-1", organizationMemberships: [] },
+      now: "${NOW}"
+    }, { env: {} });
+    const dbMetadataLogs = captured.filter((line) => /\\[pg\\] Using (?:remote|local) connection/.test(line));
+    process.stdout.write(JSON.stringify({
+      code: result.error?.code,
+      connectionAttempts,
+      dbMetadataLogCount: dbMetadataLogs.length,
+      pgLoaded: Boolean(process.moduleLoadList.find((entry) => /node_modules\\/pg|\\/pg\\//.test(entry))),
+    }));
+  `;
+  const child = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
+    cwd: new URL("..", import.meta.url),
+    env: {
+      ...process.env,
+      DATABASE_URL: "postgres://sentinel@127.0.0.1:9/kai_p2_04_disabled_import_sentinel",
+      DATABASE_URL_LOCAL: "",
+      PGURL_LOCAL: "",
+      RENDER_DATABASE_URL: "",
+      PROD_DATABASE_URL: "",
+      KAI_SPRINT2_ENABLED: "",
+    },
+    encoding: "utf8",
+  });
+  assert.equal(child.status, 0, child.stderr);
+  const payload = JSON.parse(child.stdout);
+  assert.equal(payload.code, "feature_disabled");
+  assert.equal(payload.connectionAttempts, 0);
+  assert.equal(payload.dbMetadataLogCount, 0);
+  assert.equal(payload.pgLoaded, false);
+  assert.doesNotMatch(child.stderr, /\[pg\] Using (?:remote|local) connection/);
 });
 
 test("P2-04 service: KAI_SPRINT2_ENABLED alone (no other flag) enables the seam", async () => {
@@ -409,6 +539,9 @@ test("P2-04 service: forwards only organizationId/claimId/actorUserId/now/metada
 test("P2-04 service: generateClaimGapFollowups itself contains no SQL and does not import a database pool directly", () => {
   const body = serviceSource.match(/export async function generateClaimGapFollowups\([\s\S]*/)?.[0];
   assert.ok(body, "expected to find the generateClaimGapFollowups function body");
+  const topLevelImports = serviceSource.split("\n").filter((line) => /^import\b/.test(line));
+  assert.ok(topLevelImports.every((line) => !/postgresClaimGapFollowupRepository\.js|kaiIntakeQueries\.js|kaiDb\.js|pg/.test(line)));
+  assert.match(serviceSource, /await import\("\.\.\/dictionary\/postgresClaimGapFollowupRepository\.js"\)/);
   assert.doesNotMatch(body, /\bimport\s+pool\b/);
   assert.doesNotMatch(body, /\bSELECT\b|\bINSERT INTO\b|\bUPDATE\b|\bDELETE FROM\b/i);
 });

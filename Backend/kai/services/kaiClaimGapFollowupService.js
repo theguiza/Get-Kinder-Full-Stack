@@ -2,7 +2,6 @@ import { isKaiSprint2Enabled } from "../config/kaiSprint2Config.js";
 import { buildKaiError } from "../errors/kaiErrors.js";
 import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationService.js";
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
-import { createPostgresClaimGapFollowupRepository } from "../dictionary/postgresClaimGapFollowupRepository.js";
 
 const CLAIM_GAP_FOLLOWUP_ALLOWED_ROLES = new Set(["gk_admin", "gk_operator", "gk_reviewer"]);
 const CLAIM_GAP_FOLLOWUP_OPERATION = "generate_claim_gap_followups";
@@ -41,6 +40,11 @@ function isGenerateClaimGapFollowupsInput(value) {
  */
 function isMappedHumanActor(actorContext) {
   return actorContext?.actorType === "human" && isNonEmptyString(actorContext?.actorUserId);
+}
+
+async function createDefaultClaimGapFollowupRepository() {
+  const { createPostgresClaimGapFollowupRepository } = await import("../dictionary/postgresClaimGapFollowupRepository.js");
+  return createPostgresClaimGapFollowupRepository();
 }
 
 /**
@@ -97,7 +101,8 @@ export async function generateClaimGapFollowups(input, dependencies = {}) {
     return buildKaiError("tenant_boundary_violation", { blockers: [tenant] });
   }
 
-  const claimGapFollowupRepository = dependencies.claimGapFollowupRepository || createPostgresClaimGapFollowupRepository();
+  const claimGapFollowupRepository =
+    dependencies.claimGapFollowupRepository || (await createDefaultClaimGapFollowupRepository());
 
   const result = await claimGapFollowupRepository.generateClaimGapsAndFollowups({
     organizationId: input.organizationId,
