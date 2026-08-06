@@ -24,6 +24,7 @@
     "verify:kai-sprint2-p2-02-evidence-coverage-assessment": "node scripts/kai-sprint2-p2-02-evidence-coverage-assessment-local-postgres.js",
     "verify:kai-sprint2-p2-03-claim-proposal": "node scripts/kai-sprint2-p2-03-claim-proposal-local-postgres.js",
     "verify:kai-sprint2-p2-04-claim-gap-followup": "node scripts/kai-sprint2-p2-04-claim-gap-followup-local-postgres.js",
+    "verify:kai-sprint2-p2-05-conflict-review-candidate": "node scripts/kai-sprint2-p2-05-conflict-review-candidate-local-postgres.js",
     "verify:kai-sprint2-pass2-api": "node scripts/kai-sprint2-pass2-admin-metadata-intake-api-verifier.js",
     "backfill:surprises": "node scripts/backfillDailySurprises.js",
     "prestart": "npm run backfill:surprises || true",

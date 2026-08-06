@@ -11164,6 +11164,98 @@ commands:
   - git diff --check -> TOOL_VERIFIED: no whitespace errors
   - git diff --cached --check -> TOOL_VERIFIED: no whitespace errors
 
+### P2-05 potential conflict-review candidate foundation - completed 2026-08-06
+
+preflight:
+  branch: codex/kai-sprint2-p0-v0.3.5
+  head: dff7a4139dfedf491d8d2325670cce931e3fe85d
+  worktree: clean at task start, including untracked files; staged paths: none
+
+p2_05_made:
+  - migrations/kai_sprint2_p2_05_conflict_review_candidate.sql - adds
+    kai.conflict_groups with only conflict_group_id, organization_id,
+    lower_claim_id, higher_claim_id, lower_claim_conflict_gap_id,
+    higher_claim_conflict_gap_id, basis_code, safe_summary, created_by_type,
+    and created_at. Enforces lower_claim_id < higher_claim_id, basis_code =
+    human_selected_unresolved_comparison, safe_summary = Potential claim
+    conflict requires GK review., created_by_type = system, tenant-safe
+    composite FKs to kai.claims and kai.gap_log_items, and logical uniqueness
+    on organization_id + lower_claim_id + higher_claim_id.
+  - migration also adds
+    ux_review_queue_items_p2_05_conflict_resolution_identity and
+    review_queue_items_p2_05_conflict_resolution_contract_check, scoped only
+    to queue_type = conflict_resolution. It adds audit operation
+    conflict_review_candidate_created and scoped metadata constraint
+    upload_lifecycle_audit_p2_05_metadata_object_check for contract
+    p2_conflict_review_candidate_v1.
+  - Backend/kai/validators/kaiConflictGroupValidators.js - new pure validator
+    validateConflictGroupCompleteness using canonical result helpers with
+    validator_key VAL-KAI-P2-05-001, object_type conflict_group, object_code
+    human_selected_unresolved_comparison. Blocks self-pairing, non-normalized
+    persisted pairs, null/mismatched queue identities, malformed group/queue
+    plans, asserted-conflict semantics, and prohibited raw/sensitive content.
+  - Backend/kai/services/kaiConflictReviewCandidateService.js - new dormant
+    service createConflictReviewCandidate with exact input allowlist
+    organizationId, firstClaimId, secondClaimId, actorContext, now. Requires
+    KAI_SPRINT2_ENABLED before loading the PostgreSQL repository, rejects
+    unknown keys and noncanonical UUIDs, accepts either caller order, requires
+    mapped human actor plus active tenant membership with gk_admin,
+    gk_operator, or gk_reviewer.
+  - Backend/kai/dictionary/postgresConflictReviewCandidateRepository.js - new
+    tenant-scoped transactional repository. Reads both proposed, internal-only,
+    review-gated claims, canonical claim_evidence_links, full current
+    evidence/locator/source/source_version/candidate/promotion-decision/
+    evidence-review lineage, each unresolved P2-04
+    conflicting_source_indicators gap, and each immutable claim_review queue
+    item. Builds server-owned complete group/queue plans, validates fresh,
+    post-write, replay, and concurrent-loser reread rows, writes with
+    INSERT ... ON CONFLICT ... DO NOTHING RETURNING plus authoritative reread,
+    never repairs partial state, and writes one metadata-only audit row only
+    on fresh successful creation.
+  - __tests__/kai-sprint2-p2-05-conflict-review-candidate-boundary.spec.js,
+    .integration.spec.js, and -runner-self-test.spec.js - focused coverage of
+    validator structure, caller-order normalization, disabled service loading,
+    authorization, fresh atomic creation, replay zero-write/zero-audit,
+    partial-state rejection, concurrent convergence, and audit rollback.
+  - scripts/kai-sprint2-p2-05-conflict-review-candidate-{verifier,
+    failure-checks,local-postgres,runner-assertions}.js/sql - package verifier
+    and runner pack. package.json adds
+    verify:kai-sprint2-p2-05-conflict-review-candidate.
+
+disclosed_local_identifiers:
+  audit_operation: conflict_review_candidate_created
+  audit_contract: p2_conflict_review_candidate_v1
+  validator_key: VAL-KAI-P2-05-001
+  queue_partial_unique_index: ux_review_queue_items_p2_05_conflict_resolution_identity
+  queue_contract_constraint: review_queue_items_p2_05_conflict_resolution_contract_check
+  audit_metadata_constraint: upload_lifecycle_audit_p2_05_metadata_object_check
+
+commands:
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-05-conflict-review-candidate ->
+    TOOL_VERIFIED: catalog verifier 29/29 PASS, failure checks 5/5 PASS,
+    focused PostgreSQL integration/boundary spec 18/18 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-04-claim-gap-followup ->
+    TOOL_VERIFIED: 18/18 integration pass plus catalog/failure/smoke PASS
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-03-claim-proposal ->
+    TOOL_VERIFIED: 15/15 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-02-evidence-coverage-assessment ->
+    TOOL_VERIFIED: 7/7 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-01-evidence-lineage ->
+    TOOL_VERIFIED: 17/17 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-p2-01-evidence-lineage-boundary.spec.js __tests__/kai-sprint2-p2-02-evidence-coverage-assessment-boundary.spec.js __tests__/kai-sprint2-p2-03-claim-proposal-boundary.spec.js __tests__/kai-sprint2-p2-04-claim-gap-followup-boundary.spec.js __tests__/kai-sprint2-p2-05-conflict-review-candidate-boundary.spec.js __tests__/kai-sprint2-p1-06-review-queue*.spec.js __tests__/kai-sprint2-actor-context.spec.js __tests__/kai-sprint2-tenant-authorization.spec.js __tests__/kai-sprint2-transaction-interface.spec.js __tests__/kai-sprint2-audit*.spec.js ->
+    TOOL_VERIFIED: 208 pass, 1 skip, 0 fail
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 ->
+    TOOL_VERIFIED: 1438 pass, 13 skip, 0 fail
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test ->
+    TOOL_VERIFIED: 1543 pass, 13 skip, 0 fail
+  - git diff --check -> TOOL_VERIFIED: no whitespace errors
+  - git diff --cached --check -> TOOL_VERIFIED: no whitespace errors
+
+NOT_CONFIRMED:
+  production deployment, feature enablement, cloud/database mutation outside the
+  runner-owned synthetic loopback PostgreSQL databases, and real-client-data
+  behavior
+
 complete_diff_scope: Backend/kai/db/kaiIntakeQueries.js (additive),
   Backend/kai/dictionary/postgresClaimGapFollowupRepository.js (new),
   Backend/kai/services/kaiClaimGapFollowupService.js (new),
