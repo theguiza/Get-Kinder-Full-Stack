@@ -12426,3 +12426,128 @@ NOT_CONFIRMED:
     access, real-client-data access, route, UI, assistant operation,
     listener, startup registration, P3-06 work, new P3-05 package proposal,
     or new P3-05 review cycle was performed.
+
+## P3-06 - Read-only GK export-review packet (completed 2026-08-06)
+
+Status: accepted for this local package as a dormant read-only service only.
+
+Implementation evidence:
+  - Backend/kai/services/kaiExportReviewService.js - added
+    getGeneratedDraftExportReviewPacket(input, dependencies). Gate order is
+    KAI_SPRINT2_ENABLED -> KAI_GENERATION_ENABLED ->
+    KAI_PUBLIC_EXPORT_ENABLED -> exact four-key input validation
+    (organizationId, generatedContentDraftId, exportReviewQueueItemId,
+    actorContext; canonical UUIDs and no unknown/missing keys) ->
+    mapped-human validation -> validateActorCanPerformOperation with
+    allowedRoles restricted to gk_admin, which enforces active tenant
+    membership and role -> only then lazy database-capable imports for the
+    transaction and evaluators. The service opens exactly one REPEATABLE READ
+    READ ONLY transaction through the injected/default runInTransaction and
+    returns only an exact allowlisted DTO; malformed internal results or any
+    top-level/block/citation/validator DTO key drift return system_error with
+    data:null.
+  - Backend/kai/dictionary/postgresGeneratedContentRepository.js - added
+    evaluateGeneratedDraftExportReviewPacketInTransaction(tx, input,
+    evaluator) and evaluateExportReviewRequestStateInTransaction(tx, input).
+    The packet evaluator first runs the accepted P3-02 immutable graph and
+    citation evaluator inside the caller's transaction with the completed
+    generated-content-review lifecycle profile (queue_status='resolved',
+    review_status='resolved'), then reuses the new transaction-scoped P3-05
+    request-state evaluator without calling the P3-05 mutation service,
+    opening a nested transaction, or copying queue/audit matching logic into
+    the service. The P3-05 evaluator loads exportReviewQueueItemId scoped by
+    organizationId only, requires queue_type='export_review', validates the
+    complete accepted P3-05 queue contract, requires exactly one successful
+    export_review_requested audit, validates the accepted closed audit
+    metadata contract, requires VAL-EXP-001 and the canonical failed_gates in
+    exact order, validates actor/request timestamp well-formedness without
+    returning them, and returns only requestedExportAudience plus the queue
+    identity/status fields needed by P3-06. Absent tenant-scoped draft or
+    queue returns not_found; scoped malformed, duplicated, stale, partial,
+    wrong-target, wrong-audience, identity-mismatched, or incompatible graph/
+    review state returns conflict_current_state_changed.
+  - Backend/kai/dictionary/postgresGeneratedContentRepository.js - tightened
+    the existing P3-05 export-review audit matcher to require canonical
+    requested_timestamp and exact failed_gates ordering. This preserves the
+    accepted replay behavior while giving P3-06 the order-sensitive closed
+    audit metadata contract required here.
+  - The P3-06 packet invokes the existing canonical VAL-EXP-001 validator
+    once with generatedContentDraftId, requestedExportAudience, draftAudience,
+    draftIsStillDraft:true, reviewIsResolved:true, currentUseEligible,
+    finalGate:false, and affirmativeHumanExportAuthority:false. It derives
+    exportEligible only from validatorResult.severity === "pass"; persisted
+    P3-06 packets therefore remain exportEligible:false while the draft is
+    still draft and no human export authority/final gate exists, while a
+    legitimate current eligibility deterioration remains visible as
+    currentUseEligible:false plus current_use_ineligible in canonical
+    failed_gates.
+  - __tests__/kai-sprint2-p3-06-export-review-packet-boundary.spec.js (new)
+    - proves flag/input/auth gate order precedes database-capable loading;
+    both shared evaluators run inside the same snapshot; only resolved/
+    resolved generated-content review is accepted; the complete P3-05
+    queue-plus-audit authority is required; queue-only, audit-only,
+    duplicate-audit, wrong-target, wrong-audience, malformed, absent scoped
+    draft, absent scoped queue, and cross-tenant queue state fail closed as
+    specified; authentic P3-05 state returns draft blocks, citations, and the
+    canonical validator; current eligibility deterioration remains visible
+    but ineligible; exact top-level, block, citation, and validator allowlists
+    reject raw-row, audit-metadata, actor, intake-file-context, storage,
+    filename, prompt, credential, and internal-note injections; the read path
+    contains no write/audit/transition/authority/final-gate/manifest/file/
+    route/UI/listener wiring.
+  - __tests__/kai-sprint2-p3-06-export-review-packet.integration.spec.js
+    (new) - loopback-only PostgreSQL integration that refuses non-loopback
+    targets before connection, imports no DB module at top level, creates an
+    authentic draft through P3-01, completes generated-content review through
+    P3-04, requests export review through P3-05, then reads the P3-06 packet
+    with currentUseEligible:false to prove deterioration remains visible and
+    ineligible; also proves scoped missing queue returns not_found and
+    ambient DATABASE_URL is ignored in favor of the runner-owned loopback URL.
+  - scripts/kai-sprint2-p3-06-export-review-packet-local-postgres.js (new)
+    - runner-owned loopback-only ephemeral PostgreSQL harness applying the
+    accepted migrations/seeds/verifiers through P3-05 and running P3-06
+    boundary/integration plus P3-01 through P3-05 boundary coverage against
+    the same synthetic database. No migration or rollback was added for
+    P3-06.
+  - package.json - added test:kai-sprint2-p3-06-export-review-packet and
+    verify:kai-sprint2-p3-06-export-review-packet scripts.
+
+TOOL_VERIFIED:
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test
+    __tests__/kai-sprint2-p3-06-export-review-packet-boundary.spec.js ->
+    11/11 pass.
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run
+    verify:kai-sprint2-p3-06-export-review-packet -> first sandbox attempt
+    hit local PostgreSQL initdb shared-memory EPERM; escalated rerun used a
+    runner-owned loopback PostgreSQL target and passed 85/85.
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run
+    verify:kai-sprint2-p3-05-export-review-request -> first sandbox attempt
+    hit local PostgreSQL initdb shared-memory EPERM; escalated rerun passed
+    79/79.
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run
+    verify:kai-sprint2-p3-04-generated-content-review-completion -> first
+    sandbox attempt hit local PostgreSQL initdb shared-memory EPERM;
+    escalated rerun passed 58/58.
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test
+    __tests__/kai-sprint2-p3-01-generated-content-drafts-boundary.spec.js
+    __tests__/kai-sprint2-p3-02-generated-draft-review-packet-boundary.spec.js
+    __tests__/kai-sprint2-p3-03-export-manifest-eligibility-boundary.spec.js
+    -> 30/30 pass.
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run
+    test:kai-sprint2 -> sandbox attempt hit local 127.0.0.1 listen EPERM in
+    route tests; escalated rerun passed complete Sprint 2 suite: 1561 pass,
+    22 skip, 0 fail.
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test -> escalated
+    for local route listeners; complete repository suite passed: 1666 pass,
+    22 skip, 0 fail.
+
+USER_CONFIRMED:
+  - P2-01 through P2-08 and P3-01 through P3-05 are accepted and closed.
+  - P3-06 is authorized as one bounded dormant read-only GK export-review
+    packet service package.
+
+NOT_CONFIRMED:
+  - No push, merge, deploy, flag enablement, approval/export authority, final
+    gate, manifest/file creation, schema migration/rollback, route, UI,
+    assistant operation, listener, production wiring, cloud access, real
+    client data access, or P3-07 work was performed.
