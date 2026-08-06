@@ -3,6 +3,10 @@ import crypto from "node:crypto";
 import { withTransaction } from "../db/kaiDb.js";
 import { evaluateClaimTraceabilityInTransaction } from "./postgresClaimTraceabilityRepository.js";
 import { validateGeneratedContentDraft } from "../validators/kaiGeneratedContentValidators.js";
+import {
+  GENERATED_CONTENT_REVIEW_QUEUE_CONTRACT,
+  isGeneratedContentReviewQueueRow,
+} from "./generatedContentReviewQueueContract.js";
 
 const RESULT_STATUS = Object.freeze({
   validation_blocker: 422,
@@ -14,14 +18,11 @@ const RESULT_STATUS = Object.freeze({
 
 const CONTENT_TYPE = "evidence_summary";
 const DRAFT_STATUS = "draft";
-const REVIEW_STATUS = "needs_gk_review";
-const REVIEW_QUEUE_TYPE = "generated_content_review";
-const REVIEW_TARGET_TYPE = "generated_content_draft";
-const REVIEW_SUMMARY = "Generated draft requires human review.";
-const REVIEW_PACKET_REQUIRED_ACTION =
-  "Review citations, audience eligibility, limitations, and unsupported claims before any use.";
-const REVIEW_REQUIRED_ACTION =
-  "Review citations, audience eligibility, limitations, unsupported claims, and numeric or causal assertions before any use.";
+const REVIEW_STATUS = GENERATED_CONTENT_REVIEW_QUEUE_CONTRACT.reviewStatus;
+const REVIEW_QUEUE_TYPE = GENERATED_CONTENT_REVIEW_QUEUE_CONTRACT.queueType;
+const REVIEW_TARGET_TYPE = GENERATED_CONTENT_REVIEW_QUEUE_CONTRACT.targetObjectType;
+const REVIEW_SUMMARY = GENERATED_CONTENT_REVIEW_QUEUE_CONTRACT.summary;
+const REVIEW_REQUIRED_ACTION = GENERATED_CONTENT_REVIEW_QUEUE_CONTRACT.requiredAction;
 const AUDIT_OPERATION = "generated_content_draft_created";
 const AUDIT_CONTRACT = "p3_01_generated_content_draft_v1";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -340,17 +341,11 @@ function validateExistingState(state, requestFingerprint, requestedAudience) {
   const citedBlockIds = new Set(state.citations.map((citation) => citation.generated_content_block_id));
   if (!state.blocks.every((block) => citedBlockIds.has(block.generated_content_block_id))) return false;
   const queue = state.queues[0];
-  if (
-    queue.target_object_id !== draft.generated_content_draft_id ||
-    queue.priority !== "normal" ||
-    queue.queue_status !== "open" ||
-    queue.review_status !== REVIEW_STATUS ||
-    queue.summary !== REVIEW_SUMMARY ||
-    queue.required_action !== REVIEW_REQUIRED_ACTION ||
-    queue.assigned_to !== null ||
-    queue.due_at !== null ||
-    queue.created_by_type !== "system"
-  ) return false;
+  if (!isGeneratedContentReviewQueueRow(queue, {
+    organizationId: state.run.organization_id,
+    targetObjectId: draft.generated_content_draft_id,
+    requireCreatedByType: true,
+  })) return false;
   return true;
 }
 
@@ -419,19 +414,7 @@ function validateReviewPacketRows(state, { organizationId, generatedContentDraft
   }
   if (state.queues.length !== 1) return false;
   const queue = state.queues[0];
-  if (
-    queue.organization_id !== organizationId ||
-    queue.queue_type !== REVIEW_QUEUE_TYPE ||
-    queue.target_object_type !== REVIEW_TARGET_TYPE ||
-    queue.target_object_id !== generatedContentDraftId ||
-    queue.queue_status !== "open" ||
-    queue.review_status !== REVIEW_STATUS ||
-    queue.priority !== "normal" ||
-    queue.summary !== REVIEW_SUMMARY ||
-    queue.required_action !== REVIEW_PACKET_REQUIRED_ACTION ||
-    queue.assigned_to !== null ||
-    queue.due_at !== null
-  ) return false;
+  if (!isGeneratedContentReviewQueueRow(queue, { organizationId, targetObjectId: generatedContentDraftId })) return false;
   return { citationsByBlock };
 }
 
@@ -844,7 +827,6 @@ export const __generatedContentRepositoryContract = Object.freeze({
   REVIEW_QUEUE_TYPE,
   REVIEW_TARGET_TYPE,
   REVIEW_SUMMARY,
-  REVIEW_PACKET_REQUIRED_ACTION,
   REVIEW_REQUIRED_ACTION,
   AUDIT_OPERATION,
   AUDIT_CONTRACT,

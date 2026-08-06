@@ -119,7 +119,7 @@ function state(overrides = {}) {
       assigned_to: null,
       due_at: null,
       summary: "Generated draft requires human review.",
-      required_action: "Review citations, audience eligibility, limitations, and unsupported claims before any use.",
+      required_action: "Review citations, audience eligibility, limitations, unsupported claims, and numeric or causal assertions before any use.",
     }],
     ...overrides,
   };
@@ -211,7 +211,7 @@ test("P3-02 repository validators require complete graph and full generated_cont
   assert.equal(validateReviewPacketRows(state({ blocks: [{ ...state().blocks[0], ordinal: 2 }] }), { organizationId: ORG, generatedContentDraftId: DRAFT }), false);
   assert.equal(validateReviewPacketRows(state({ citations: [{ ...state().citations[0] }, { ...state().citations[0], generated_content_citation_id: "00000000-0000-4000-8000-000000000306" }] }), { organizationId: ORG, generatedContentDraftId: DRAFT }), false);
   assert.equal(validateReviewPacketRows(state({ queues: [{ ...state().queues[0], assigned_to: "90000000-0000-4000-8000-000000000001" }] }), { organizationId: ORG, generatedContentDraftId: DRAFT }), false);
-  assert.equal(validateReviewPacketRows(state({ queues: [{ ...state().queues[0], required_action: "Review citations, audience eligibility, limitations, unsupported claims, and numeric or causal assertions before any use." }] }), { organizationId: ORG, generatedContentDraftId: DRAFT }), false);
+  assert.equal(validateReviewPacketRows(state({ queues: [{ ...state().queues[0], required_action: "Review citations only before use." }] }), { organizationId: ORG, generatedContentDraftId: DRAFT }), false);
 });
 
 test("P3-02 repository validator treats unexpected internal row fields as system_error", () => {

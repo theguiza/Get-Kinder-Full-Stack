@@ -47,10 +47,6 @@ function psqlFile(path) {
   return run(psql, ["-v", "ON_ERROR_STOP=1", "-d", dbName, "-f", path], { capture: true }).stdout;
 }
 
-function psqlCommand(sql) {
-  return run(psql, ["-v", "ON_ERROR_STOP=1", "-d", dbName, "-c", sql], { capture: true }).stdout;
-}
-
 async function proveRunnerOwnedTarget() {
   const parsed = new URL(targetUrl);
   if (!["127.0.0.1", "localhost", "::1"].includes(parsed.hostname.toLowerCase())) {
@@ -108,25 +104,6 @@ try {
   psqlFile("scripts/kai-sprint2-p1-08-source-promotion-smoke-seed.sql");
   psqlFile("scripts/kai-sprint2-p2-01-evidence-lineage-smoke-seed.sql");
   psqlFile("scripts/kai-sprint2-p2-03-claim-proposal-smoke-seed.sql");
-  psqlCommand(`
-    ALTER TABLE kai.review_queue_items
-      DROP CONSTRAINT review_queue_items_p3_01_generated_content_review_contract_check,
-      ADD CONSTRAINT review_queue_items_p3_01_generated_content_review_contract_check
-        CHECK (
-          queue_type <> 'generated_content_review'
-          OR (
-            target_object_type = 'generated_content_draft'
-            AND queue_status = 'open'
-            AND review_status = 'needs_gk_review'
-            AND priority = 'normal'
-            AND summary = 'Generated draft requires human review.'
-            AND required_action = 'Review citations, audience eligibility, limitations, and unsupported claims before any use.'
-            AND assigned_to IS NULL
-            AND due_at IS NULL
-            AND created_by_type = 'system'
-          )
-        )
-  `);
 
   const testResult = spawnSync("node", [
     "--test",

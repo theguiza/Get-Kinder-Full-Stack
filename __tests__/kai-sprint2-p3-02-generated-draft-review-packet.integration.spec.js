@@ -33,20 +33,22 @@ if (!RUNNER_OWNED_DATABASE_URL) {
 async function runP302IntegrationSuite() {
   const { Pool } = await import("pg");
   const { createPostgresGeneratedContentRepository } = await import("../Backend/kai/dictionary/postgresGeneratedContentRepository.js");
-  const { getGeneratedDraftReviewPacket } = await import("../Backend/kai/services/kaiGeneratedContentService.js");
+  const {
+    createEvidenceSummaryDraft,
+    getGeneratedDraftReviewPacket,
+  } = await import("../Backend/kai/services/kaiGeneratedContentService.js");
 
   const ORG = "00000000-0000-4000-8000-000000000001";
-  const RUN = "10000000-0000-4000-8000-000000000001";
-  const DRAFT = "10000000-0000-4000-8000-000000000002";
-  const BLOCK_1 = "10000000-0000-4000-8000-000000000003";
-  const BLOCK_2 = "10000000-0000-4000-8000-000000000004";
   const CLAIM = "10000000-0000-4000-8000-000000000005";
-  const QUEUE = "10000000-0000-4000-8000-000000000010";
   const NOW = "2026-08-06T10:00:00.000Z";
+  const REQUIRED_ACTION =
+    "Review citations, audience eligibility, limitations, unsupported claims, and numeric or causal assertions before any use.";
   let evidenceId = null;
   let sourceId = null;
   let sourceVersionId = null;
   let locatorId = null;
+  let draftId = null;
+  let queueId = null;
   const pool = new Pool({ connectionString: RUNNER_OWNED_DATABASE_URL, ssl: false, max: 10 });
 
   async function withRunnerOwnedTransaction(callback) {
@@ -77,6 +79,60 @@ async function runP302IntegrationSuite() {
       { organization_id: ORG, membership_status: "active", role_name: "gk_reviewer" },
     ],
   };
+
+  function auditRecorder() {
+    return {
+      prepareMetadataOnlyAudit() {
+        return {
+          ok: true,
+          async publish() {},
+        };
+      },
+    };
+  }
+
+  function p301Evaluator() {
+    return async (tx, input) => {
+      const rows = await tx.query(
+        `SELECT claim_id::text AS claim_id, evidence_item_id::text AS evidence_item_id
+           FROM kai.claims
+          WHERE organization_id = $1::uuid
+            AND claim_id = $2::uuid`,
+        [input.organizationId, input.claimId],
+      );
+      const claim = rows.rows[0];
+      return {
+        ok: true,
+        data: {
+          claim: { claim_id: claim.claim_id },
+          evidence: { evidence_item_id: claim.evidence_item_id },
+          requestedAudience: input.requestedAudience,
+          eligible: true,
+        },
+        error: null,
+      };
+    };
+  }
+
+  function draftGenerator({ calls = [] } = {}) {
+    return async (input) => {
+      calls.push(input);
+      return {
+        blocks: [
+          {
+            ordinal: 1,
+            text: input.claims[0].claimStatement,
+            citations: [{ claimId: input.claims[0].claimId, evidenceItemId: input.claims[0].evidenceItemId }],
+          },
+          {
+            ordinal: 2,
+            text: input.claims[0].claimStatement,
+            citations: [{ claimId: input.claims[0].claimId, evidenceItemId: input.claims[0].evidenceItemId }],
+          },
+        ],
+      };
+    };
+  }
 
   function evaluator({ calls = [], eligible = true, evidenceItemId = evidenceId } = {}) {
     return async (tx, input) => {
@@ -175,69 +231,50 @@ async function runP302IntegrationSuite() {
      )`,
     [ORG, CLAIM],
   );
-  await query(
-    `INSERT INTO kai.generation_runs (
-       generation_run_id, organization_id, idempotency_key, request_fingerprint,
-       content_type, requested_audience, created_by_type, created_at
-     )
-     VALUES ($1::uuid,$2::uuid,'p3-02-synthetic',repeat('a',64),
-             'evidence_summary','internal','system',$3::timestamptz)`,
-    [RUN, ORG, NOW],
-  );
-  await query(
-    `INSERT INTO kai.generated_content_drafts (
-       generated_content_draft_id, generation_run_id, organization_id, content_type,
-       requested_audience, draft_status, review_status, validator_results,
-       created_by_type, created_at
-     )
-     VALUES ($1::uuid,$2::uuid,$3::uuid,'evidence_summary','internal','draft',
-             'needs_gk_review','[]'::jsonb,'system',$4::timestamptz)`,
-    [DRAFT, RUN, ORG, NOW],
-  );
-  await query(
-    `INSERT INTO kai.generated_content_blocks (
-       generated_content_block_id, generated_content_draft_id, organization_id,
-       ordinal, text, created_at
-     )
-     VALUES
-       ($1::uuid,$3::uuid,$4::uuid,1,'First visible generated paragraph.',$5::timestamptz),
-       ($2::uuid,$3::uuid,$4::uuid,2,'Second visible generated paragraph.',$5::timestamptz)`,
-    [BLOCK_1, BLOCK_2, DRAFT, ORG, NOW],
-  );
-  await query(
-    `INSERT INTO kai.generated_content_citations (
-       generated_content_block_id, organization_id, claim_id, evidence_item_id, created_at
-     )
-     VALUES
-       ($1::uuid,$3::uuid,$4::uuid,$5::uuid,$6::timestamptz),
-       ($2::uuid,$3::uuid,$4::uuid,$5::uuid,$6::timestamptz)`,
-    [BLOCK_1, BLOCK_2, ORG, CLAIM, evidenceId, NOW],
-  );
-  await query(
-    `INSERT INTO kai.review_queue_items (
-       review_queue_item_id, organization_id, queue_type, target_object_type,
-       target_object_id, priority, queue_status, review_status, summary,
-       required_action, queue_metadata, created_by_type
-     )
-     VALUES ($1::uuid,$2::uuid,'generated_content_review','generated_content_draft',
-             $3::uuid,'normal','open','needs_gk_review',
-             'Generated draft requires human review.',
-             'Review citations, audience eligibility, limitations, and unsupported claims before any use.',
-             '{}'::jsonb,'system')`,
-    [QUEUE, ORG, DRAFT],
-  );
 
-  test("P3-02 read packet returns deterministic blocks and evaluates one repeated claim once inside the shared snapshot", async () => {
+  const generatorCalls = [];
+  const createResult = await createEvidenceSummaryDraft(
+    {
+      organizationId: ORG,
+      requestedAudience: "internal",
+      claimIds: [CLAIM],
+      idempotencyKey: "p3-02-created-by-p3-01",
+      actorContext,
+      now: NOW,
+    },
+    {
+      env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" },
+      generatedContentRepository: createPostgresGeneratedContentRepository({
+        runInTransaction: withRunnerOwnedTransaction,
+        evaluator: p301Evaluator(),
+      }),
+      draftGenerator: draftGenerator({ calls: generatorCalls }),
+      metadataOnlyAudit: auditRecorder(),
+    },
+  );
+  assert.equal(createResult.ok, true);
+  assert.equal(createResult.data.replayed, false);
+  assert.equal(generatorCalls.length, 1);
+  draftId = createResult.data.generatedContentDraftId;
+  queueId = createResult.data.reviewQueueItemId;
+
+  test("P3-02 reads the exact P3-01-created draft as the accepted DTO and evaluates one repeated claim once inside the shared snapshot", async () => {
     const calls = [];
     const repository = createPostgresGeneratedContentRepository({
       runInTransaction: withRunnerOwnedTransaction,
       evaluator: evaluator({ calls, evidenceItemId: evidenceId }),
     });
     const result = await getGeneratedDraftReviewPacket(
-      { organizationId: ORG, generatedContentDraftId: DRAFT, actorContext },
+      { organizationId: ORG, generatedContentDraftId: draftId, actorContext },
       { env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" }, generatedContentRepository: repository },
     );
     assert.equal(result.ok, true);
+    assert.equal(result.data.generatedContentDraftId, draftId);
+    assert.equal(result.data.reviewQueueItemId, queueId);
+    assert.equal(result.data.contentType, "evidence_summary");
+    assert.equal(result.data.draftStatus, "draft");
+    assert.equal(result.data.queueStatus, "open");
+    assert.equal(result.data.reviewStatus, "needs_gk_review");
     assert.equal(result.data.currentUseEligible, true);
     assert.deepEqual(result.data.blocks.map((block) => block.ordinal), [1, 2]);
     assert.deepEqual(result.data.blocks.map((block) => block.citations[0].claimId), [CLAIM, CLAIM]);
@@ -250,7 +287,7 @@ async function runP302IntegrationSuite() {
       evaluator: evaluator({ eligible: false, evidenceItemId: evidenceId }),
     });
     const result = await getGeneratedDraftReviewPacket(
-      { organizationId: ORG, generatedContentDraftId: DRAFT, actorContext },
+      { organizationId: ORG, generatedContentDraftId: draftId, actorContext },
       { env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" }, generatedContentRepository: repository },
     );
     assert.equal(result.ok, true);
@@ -265,7 +302,7 @@ async function runP302IntegrationSuite() {
       evaluator: evaluator({ evidenceItemId: "10000000-0000-4000-8000-000000000099" }),
     });
     const result = await getGeneratedDraftReviewPacket(
-      { organizationId: ORG, generatedContentDraftId: DRAFT, actorContext },
+      { organizationId: ORG, generatedContentDraftId: draftId, actorContext },
       { env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" }, generatedContentRepository: repository },
     );
     assert.equal(result.error.code, "conflict_current_state_changed");
@@ -275,24 +312,114 @@ async function runP302IntegrationSuite() {
     const before = await query(
       `SELECT
          (SELECT count(*)::int FROM kai.review_queue_items WHERE review_queue_item_id = $1::uuid AND queue_status = 'open') AS open_queue,
+         (SELECT required_action FROM kai.review_queue_items WHERE review_queue_item_id = $1::uuid) AS required_action,
          (SELECT count(*)::int FROM kai.upload_lifecycle_audit WHERE operation = 'generated_content_draft_created') AS audits`,
-      [QUEUE],
+      [queueId],
     );
+    assert.equal(before[0].required_action, REQUIRED_ACTION);
     const repository = createPostgresGeneratedContentRepository({
       runInTransaction: withRunnerOwnedTransaction,
       evaluator: evaluator({ evidenceItemId: evidenceId }),
     });
     const result = await getGeneratedDraftReviewPacket(
-      { organizationId: ORG, generatedContentDraftId: DRAFT, actorContext },
+      { organizationId: ORG, generatedContentDraftId: draftId, actorContext },
       { env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" }, generatedContentRepository: repository },
     );
     assert.equal(result.ok, true);
     const after = await query(
       `SELECT
          (SELECT count(*)::int FROM kai.review_queue_items WHERE review_queue_item_id = $1::uuid AND queue_status = 'open') AS open_queue,
+         (SELECT required_action FROM kai.review_queue_items WHERE review_queue_item_id = $1::uuid) AS required_action,
          (SELECT count(*)::int FROM kai.upload_lifecycle_audit WHERE operation = 'generated_content_draft_created') AS audits`,
-      [QUEUE],
+      [queueId],
     );
     assert.deepEqual(after, before);
+  });
+
+  test("P3-01 database CHECK rejects malformed generated_content_review required_action", async () => {
+    await assert.rejects(
+      () => query(
+        `INSERT INTO kai.review_queue_items (
+           organization_id, queue_type, target_object_type, target_object_id,
+           priority, queue_status, review_status, summary, required_action,
+           queue_metadata, created_by_type
+         )
+         VALUES ($1::uuid,'generated_content_review','generated_content_draft',
+                 '10000000-0000-4000-8000-000000000099'::uuid,'normal','open',
+                 'needs_gk_review','Generated draft requires human review.',
+                 'Review citations only before use.','{}'::jsonb,'system')`,
+        [ORG],
+      ),
+      (error) => error.code === "23514",
+    );
+  });
+
+  test("P3-02 detects malformed generated_content_review queue rows without repair or mutation when the database CHECK is temporarily relaxed", async () => {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("ALTER TABLE kai.review_queue_items DROP CONSTRAINT review_queue_items_p3_01_generated_content_review_contract_check");
+      await client.query(
+        `UPDATE kai.review_queue_items
+            SET required_action = 'Review citations only before use.'
+          WHERE review_queue_item_id = $1::uuid`,
+        [queueId],
+      );
+      const before = await client.query(
+        `SELECT
+           (SELECT count(*)::int FROM kai.review_queue_items) AS queues,
+           (SELECT count(*)::int FROM kai.generated_content_drafts) AS drafts,
+           (SELECT count(*)::int FROM kai.generated_content_blocks) AS blocks,
+           (SELECT count(*)::int FROM kai.generated_content_citations) AS citations,
+           (SELECT count(*)::int FROM kai.upload_lifecycle_audit WHERE operation = 'generated_content_draft_created') AS audits,
+           (SELECT required_action FROM kai.review_queue_items WHERE review_queue_item_id = $1::uuid) AS required_action`,
+        [queueId],
+      );
+      const repository = createPostgresGeneratedContentRepository({
+        runInTransaction: async (callback) => callback({
+          async query(sql, params) {
+            if (/^SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY$/i.test(sql)) {
+              return { rows: [] };
+            }
+            return client.query(sql, params);
+          },
+        }),
+        evaluator: evaluator({ evidenceItemId: evidenceId }),
+      });
+      const result = await getGeneratedDraftReviewPacket(
+        { organizationId: ORG, generatedContentDraftId: draftId, actorContext },
+        { env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" }, generatedContentRepository: repository },
+      );
+      assert.equal(result.error.code, "conflict_current_state_changed");
+      assert.equal(result.data, null);
+      const after = await client.query(
+        `SELECT
+           (SELECT count(*)::int FROM kai.review_queue_items) AS queues,
+           (SELECT count(*)::int FROM kai.generated_content_drafts) AS drafts,
+           (SELECT count(*)::int FROM kai.generated_content_blocks) AS blocks,
+           (SELECT count(*)::int FROM kai.generated_content_citations) AS citations,
+           (SELECT count(*)::int FROM kai.upload_lifecycle_audit WHERE operation = 'generated_content_draft_created') AS audits,
+           (SELECT required_action FROM kai.review_queue_items WHERE review_queue_item_id = $1::uuid) AS required_action`,
+        [queueId],
+      );
+      assert.deepEqual(after.rows, before.rows);
+      await client.query("ROLLBACK");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+    const restored = await query(
+      `SELECT
+         (SELECT count(*)::int
+            FROM pg_constraint
+           WHERE conname = 'review_queue_items_p3_01_generated_content_review_contract_check') AS contract_checks,
+         (SELECT required_action
+            FROM kai.review_queue_items
+           WHERE review_queue_item_id = $1::uuid) AS required_action`,
+      [queueId],
+    );
+    assert.deepEqual(restored, [{ contract_checks: 1, required_action: REQUIRED_ACTION }]);
   });
 }

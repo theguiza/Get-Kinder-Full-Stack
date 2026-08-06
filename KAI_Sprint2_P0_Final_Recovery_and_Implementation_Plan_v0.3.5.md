@@ -11814,3 +11814,74 @@ NOT_CONFIRMED:
     operation, public export, approval/finalization behavior, production
     composition, audit publication, queue transition, or production migration
     change was performed.
+### P3-02C generated-content review queue contract correction - completed 2026-08-06
+
+preflight:
+  branch: codex/kai-sprint2-p0-v0.3.5
+  head: 2ef5b365750bfdb0f4d29e001bdfd88c057bfc81
+  worktree: clean at task start, including untracked files; staged paths: none
+
+p3_02c_made:
+  - Backend/kai/dictionary/generatedContentReviewQueueContract.js - added one
+    private shared generated_content_review queue contract for the accepted
+    P3-01/P3-02 row shape, including the authoritative required_action:
+    "Review citations, audience eligibility, limitations, unsupported claims,
+    and numeric or causal assertions before any use."
+  - Backend/kai/dictionary/postgresGeneratedContentRepository.js - replaced
+    the split writer/reader required_action constants with the shared contract.
+    P3-01 creation, replay, and post-write validation and P3-02 review-packet
+    validation now validate the same generated_content_review queue row without
+    adding any public route, UI, listener, startup registration, migration,
+    production wiring, approval, export, or queue transition.
+  - __tests__/kai-sprint2-p3-02-generated-draft-review-packet-boundary.spec.js
+    and .integration.spec.js - aligned the P3-02 queue fixture with the
+    accepted P3-01 row, replaced the handcrafted PostgreSQL-compatible
+    generated-content fixture with a complete draft created through the
+    accepted P3-01 persistence path using the existing injected eligibility and
+    generator seams, and proved getGeneratedDraftReviewPacket reads that exact
+    draft as the accepted P3-02 DTO.
+  - The P3-02 runner-owned PostgreSQL suite now proves the P3-01 database CHECK
+    rejects malformed generated_content_review required_action, then within one
+    rolled-back runner-owned transaction temporarily drops only that scoped
+    CHECK, persists the malformed value, calls getGeneratedDraftReviewPacket,
+    and verifies conflict_current_state_changed with zero repair, writes, queue
+    transitions, audit effects, or lingering constraint/data changes.
+  - scripts/kai-sprint2-p3-02-generated-draft-review-packet-local-postgres.js -
+    removed the runner-local rewrite that previously relaxed the P3-01
+    generated_content_review CHECK to the old P3-02-compatible value. No
+    production migration was changed.
+
+TOOL_VERIFIED:
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-p3-02-generated-draft-review-packet-boundary.spec.js ->
+    8/8 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p3-02-generated-draft-review-packet ->
+    initial sandbox initdb shared-memory failure; localhost-capable rerun 16/16
+    pass; runner-owned loopback PostgreSQL target; exact P3-01-created draft
+    read through P3-02; malformed CHECK rejection and rolled-back relaxed-CHECK
+    conflict proof passed
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p3-01-generated-content-drafts ->
+    initial sandbox initdb shared-memory failure; localhost-capable rerun 18/18
+    pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-p3-01-generated-content-drafts-boundary.spec.js __tests__/kai-sprint2-p3-02-generated-draft-review-packet-boundary.spec.js __tests__/kai-sprint2-p1-06-review-queue-boundary.spec.js __tests__/kai-sprint2-review-queue-route.spec.js __tests__/kai-sprint2-review-queue-status-route.spec.js ->
+    initial sandbox localhost listener failure on two existing HTTP-route tests;
+    localhost-capable rerun 63/63 pass
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run test:kai-sprint2 ->
+    initial sandbox localhost listener failures on existing HTTP-route tests;
+    localhost-capable rerun complete Sprint 2 suite 1485 pass, 18 skip, 0 fail
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test ->
+    initial sandbox localhost listener failures on existing HTTP-route tests;
+    localhost-capable rerun complete repository suite 1590 pass, 18 skip, 0 fail
+  - git diff --check -> no whitespace errors
+  - git diff --cached --check -> no whitespace errors
+
+USER_CONFIRMED:
+  - P2-01 through P2-08 and P3-01 remain accepted and closed.
+  - P3-02C is authorized as one bounded correction to align the P3-01 writer
+    and P3-02 reader queue contract.
+
+NOT_CONFIRMED:
+  - No push, merge, deploy, generation enablement, production configuration
+    change, cloud access, real-client-data access, route, UI, listener, startup
+    registration, migration, approval, export, production wiring, queue
+    transition, audit mutation, production database access, P3-03 work, new
+    P3-02 package proposal, or new P3-02 review cycle was performed.
