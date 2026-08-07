@@ -60,6 +60,7 @@ const validDto = Object.freeze({
       ],
     },
   ],
+  exportReviewUpdatedAt: "2026-08-06T09:00:00.000Z",
 });
 
 test("P3-08 packetPath builds the exact P3-07 route from the three route parameters", () => {
@@ -130,6 +131,14 @@ test("P3-08 success renders only allowlisted P3-06 fields and drops everything e
   assert.equal(rendered.includes("must not render"), false);
   assert.equal(rendered.includes("generationRunId"), false);
   assert.equal(rendered.includes("secret_internal_note"), false);
+});
+
+test("P3-11 P3-08 ignores the new exportReviewUpdatedAt packet field and stays read-only", () => {
+  const outcome = decideOutcome({ statusCode: 200, body: { ok: true, data: validDto, warnings: [] } });
+  assert.equal(outcome.kind, "success");
+  assert.equal("exportReviewUpdatedAt" in outcome.model, false);
+  const rendered = JSON.stringify(outcome.model);
+  assert.equal(rendered.includes("2026-08-06T09:00:00.000Z"), false);
 });
 
 test("P3-08 malformed/extra response fields are dropped, never rejected as an error and never silently promoted into new fields", () => {

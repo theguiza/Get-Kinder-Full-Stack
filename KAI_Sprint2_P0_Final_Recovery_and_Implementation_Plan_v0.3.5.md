@@ -13107,3 +13107,126 @@ NOT_CONFIRMED:
   - No push, merge, deploy, flag enablement, export-review completion,
     approval/export authority, finalGate, manifest/file creation, P3-11
     work, or new review cycle was performed.
+
+## P3-11 - Export-review concurrency token in the read packet (completed 2026-08-07)
+
+Status: accepted for this local package as one additive field on the
+existing dormant P3-06 read packet, with no schema, migration, route, or
+frontend production change.
+
+Implementation evidence:
+  - Backend/kai/dictionary/postgresGeneratedContentRepository.js -
+    loadExportReviewQueueRowById (the single shared tenant-scoped loader
+    already used by both the P3-06 packet reader and the P3-09 start
+    transition) now also selects updated_at in its existing query - no
+    second or unscoped queue lookup is added anywhere.
+    evaluateExportReviewRequestStateInTransaction (P3-06's export_review
+    reader) now returns exportReviewUpdatedAt, converted to a canonical UTC
+    ISO string by a new local helper, asCanonicalUtcTimestamp, which mirrors
+    the existing isCanonicalUtcTimestamp round-trip convention: null/
+    undefined maps to null, a Date instance or string is normalized via
+    .toISOString(), and an invalid value throws (caught by the service's
+    existing transaction try/catch and mapped to system_error). This value
+    flows unchanged into evaluateGeneratedDraftExportReviewPacketInTransaction's
+    returned DTO as exportReviewUpdatedAt - no recomputation, no second
+    read.
+  - Backend/kai/dictionary/exportReviewQueueContract.js -
+    EXPORT_REVIEW_QUEUE_ROW_KEYS (the internal exact-key contract already
+    applied to every row loadExportReviewQueueRowById returns, shared by
+    P3-05/P3-06/P3-09) now admits updated_at, the minimal change required to
+    keep that shared row-shape gate correct now that the shared loader
+    selects one more column; the gate still rejects any other unexpected
+    column.
+  - Backend/kai/services/kaiExportReviewService.js -
+    EXPORT_REVIEW_PACKET_KEYS (the existing exact P3-06 DTO allowlist) gains
+    exactly one new key, exportReviewUpdatedAt, and
+    isGeneratedDraftExportReviewPacketDto now additionally requires it to
+    pass the existing isCanonicalUtcTimestamp check. A null, undefined, or
+    otherwise malformed internal updated_at therefore fails this DTO gate
+    (or throws inside the transaction, caught the same way) and the service
+    returns system_error with data: null before any packet reaches a
+    caller - it never returns a packet with a missing or malformed
+    timestamp. No other key, validator, or code path in this file changed.
+  - P3-07 (Backend/kai/routes/sprint2IntakeApi.js) and P3-08
+    (frontend/gkExportReviewDetailLogic.js, gkExportReviewDetail.jsx) are
+    unmodified: P3-07 forwards whatever DTO the service returns as-is, and
+    P3-08's toRenderModel allowlist does not read exportReviewUpdatedAt, so
+    the field passes through the route untouched and is safely dropped by
+    the read-only UI's existing allowlist projection.
+  - __tests__/kai-sprint2-p3-06-export-review-packet-boundary.spec.js -
+    fixtures (makeState's exportReviewQueues row and packetDto()) now carry
+    updated_at/exportReviewUpdatedAt; the existing authoritative-evaluator
+    test additionally asserts the returned exportReviewUpdatedAt. Five new
+    tests prove: the authoritative value is returned unchanged for an
+    open/needs_gk_review row; the same for an in_progress/needs_gk_review
+    row; the full DTO key set is exactly the prior P3-06 shape plus this one
+    field; a null, undefined, non-canonical string, or invalid Date
+    updated_at on the loaded row fails closed through the full service call
+    with system_error and data: null in every case; and an authentic value
+    still passes the complete service DTO allowlist end to end.
+  - __tests__/kai-sprint2-p3-06-export-review-packet.integration.spec.js -
+    the existing authentic-state integration test now independently reads
+    updated_at for the export_review queue row from the runner-owned
+    database and asserts the packet's exportReviewUpdatedAt matches it
+    exactly, proving the field is sourced from the real column and not
+    recomputed.
+  - __tests__/kai-sprint2-p3-09-export-review-start.integration.spec.js -
+    the existing "fresh start ... then packet" test now also reads the
+    queue row's updated_at after the authentic P3-09 start, asserts the
+    P3-06 packet's exportReviewUpdatedAt equals that post-transition value,
+    and asserts it differs from the pre-transition expectedUpdatedAt used to
+    start the transition - proving the packet reflects the authoritative
+    post-transition timestamp and would be usable as a future P3-10
+    expected_updated_at request's compare-and-set token.
+  - __tests__/kai-sprint2-p3-07-export-review-packet-route.spec.js - the
+    route test's injected packet DTO fixture now carries
+    exportReviewUpdatedAt; the existing exact-body-forwarding assertion
+    (deepEqual against the injected DTO) already proves the route forwards
+    it unchanged, since any reshaping would fail that assertion.
+  - __tests__/kai-sprint2-p3-08-gk-export-review-detail.spec.js - the valid
+    DTO fixture now carries exportReviewUpdatedAt; one new test asserts the
+    rendered model neither contains an exportReviewUpdatedAt key nor
+    surfaces its value, proving the read-only page safely ignores the new
+    field.
+  - P3-05 request/replay semantics, P3-09 CAS/replay semantics, P3-10's
+    route/input contract, the export-review lifecycle states, generated-
+    content state, approval/export authority/finalGate, and manifests/files
+    are all unmodified by this package.
+
+TOOL_VERIFIED:
+  - node --test __tests__/kai-sprint2-p3-06-export-review-packet-boundary.spec.js
+    -> 16/16 pass.
+  - node --test __tests__/kai-sprint2-p3-07-export-review-packet-route.spec.js
+    -> 8/8 pass.
+  - node --test __tests__/kai-sprint2-p3-08-gk-export-review-detail.spec.js
+    -> 13/13 pass.
+  - node --test __tests__/kai-sprint2-p3-09-export-review-start-boundary.spec.js
+    -> 25/25 pass (unchanged CAS/replay boundary, re-run for regression).
+  - node --test __tests__/kai-sprint2-p3-10-export-review-start-route.spec.js
+    -> 9/9 pass (unchanged route/input contract, re-run for regression).
+  - npm run verify:kai-sprint2-p3-09-export-review-start -> runner-owned
+    ephemeral loopback PostgreSQL proof (initdb/pg_ctl on 127.0.0.1, a
+    synthetic database, migrations through kai_sprint2_p3_09_export_review_start.sql
+    applied) covering an authentic P3-09 start followed by a P3-06 packet
+    read: 119/119 pass, including the extended fresh-start-then-packet test
+    above.
+  - npm run verify:kai-sprint2-p3-06-export-review-packet -> runner-owned
+    ephemeral loopback PostgreSQL proof of the authentic open/needs_gk_review
+    packet path: 90/90 pass, including the extended updated_at-matches-DB
+    assertion above.
+  - npm run test:kai-sprint2 -> complete Sprint 2 suite: 1623 pass, 23 skip,
+    0 fail.
+  - npm test -> complete repository suite: 1728 pass, 23 skip, 0 fail.
+  - git diff --check -> clean (no whitespace errors).
+  - git diff --cached --check -> clean (no staged changes prior to this
+    package's commit).
+
+USER_CONFIRMED:
+  - P2-01 through P2-08 and P3-01 through P3-10 are accepted and closed.
+  - P3-11 is authorized as one bounded additive field, exportReviewUpdatedAt,
+    on the existing P3-06 read packet.
+
+NOT_CONFIRMED:
+  - No push, merge, deploy, flag enablement, Start Review UI control, export-
+    review completion, approval/export authority, finalGate, manifest/file
+    creation, P3-12 work, or new review cycle was performed.

@@ -330,6 +330,10 @@ async function runP309IntegrationSuite() {
     assert.equal(packet.data.exportReviewStatus, "needs_gk_review");
     assert.equal(packet.data.exportEligible, false);
     assert.equal(packet.data.draftStatus, "draft");
+
+    const postTransitionUpdatedAt = await currentUpdatedAt(exportReviewQueueItemId);
+    assert.equal(packet.data.exportReviewUpdatedAt, postTransitionUpdatedAt);
+    assert.notEqual(packet.data.exportReviewUpdatedAt, expectedUpdatedAt);
   });
 
   test("P3-09 stale expectedUpdatedAt conflicts with zero mutation and zero audit", async () => {

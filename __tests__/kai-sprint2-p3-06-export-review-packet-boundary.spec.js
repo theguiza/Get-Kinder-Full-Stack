@@ -130,6 +130,7 @@ function makeState({ currentUseEligible = true } = {}) {
       queue_metadata: {},
       created_by: null,
       created_by_type: "system",
+      updated_at: new Date("2026-08-06T09:00:00.000Z"),
     }],
     auditRows: [{
       organization_id: ORG,
@@ -293,6 +294,7 @@ function packetDto(overrides = {}) {
         affectedObjectIds: [],
       }],
     }],
+    exportReviewUpdatedAt: "2026-08-06T09:00:00.000Z",
     ...overrides,
   };
 }
@@ -363,6 +365,7 @@ test("P3-06 authoritative evaluator accepts authentic P3-05 state and returns dr
     "final_export_gate_absent",
   ]);
   assert.equal(result.data.blocks[0].citations[0].sourceId, SOURCE);
+  assert.equal(result.data.exportReviewUpdatedAt, "2026-08-06T09:00:00.000Z");
   assert.deepEqual(state.writes, []);
 });
 
@@ -463,6 +466,82 @@ test("P3-06 service maps scoped conflicts and not_found without returning intern
   });
   assert.equal(conflict.error.code, "conflict_current_state_changed");
   assert.equal(conflict.data, null);
+});
+
+test("P3-11 packet exposes the authoritative exportReviewUpdatedAt for an open/needs_gk_review queue row sourced from the single loaded queue row", async () => {
+  const state = makeState();
+  state.exportReviewQueues[0].queue_status = "open";
+  state.exportReviewQueues[0].review_status = "needs_gk_review";
+  state.exportReviewQueues[0].updated_at = new Date("2026-08-06T09:00:00.000Z");
+  const result = await evaluateGeneratedDraftExportReviewPacketInTransaction(makeTx(state), txInput(), evaluator(state));
+  assert.equal(result.ok, true);
+  assert.equal(result.data.exportReviewQueueStatus, "open");
+  assert.equal(result.data.exportReviewStatus, "needs_gk_review");
+  assert.equal(result.data.exportReviewUpdatedAt, "2026-08-06T09:00:00.000Z");
+});
+
+test("P3-11 packet exposes the authoritative exportReviewUpdatedAt for an in_progress/needs_gk_review queue row", async () => {
+  const state = makeState();
+  state.exportReviewQueues[0].queue_status = "in_progress";
+  state.exportReviewQueues[0].review_status = "needs_gk_review";
+  state.exportReviewQueues[0].updated_at = new Date("2026-08-06T10:05:00.000Z");
+  const result = await evaluateGeneratedDraftExportReviewPacketInTransaction(makeTx(state), txInput(), evaluator(state));
+  assert.equal(result.ok, true);
+  assert.equal(result.data.exportReviewQueueStatus, "in_progress");
+  assert.equal(result.data.exportReviewStatus, "needs_gk_review");
+  assert.equal(result.data.exportReviewUpdatedAt, "2026-08-06T10:05:00.000Z");
+});
+
+test("P3-11 the P3-06 DTO allowlist contains exactly one new field beyond the accepted P3-06 shape", () => {
+  const state = makeState();
+  return evaluateGeneratedDraftExportReviewPacketInTransaction(makeTx(state), txInput(), evaluator(state)).then((result) => {
+    assert.equal(result.ok, true);
+    assert.deepEqual([...Object.keys(result.data)].sort(), [
+      "blocks",
+      "contentType",
+      "currentUseEligible",
+      "draftStatus",
+      "exportEligible",
+      "exportReviewQueueItemId",
+      "exportReviewQueueStatus",
+      "exportReviewStatus",
+      "exportReviewUpdatedAt",
+      "generatedContentDraftId",
+      "generatedContentReviewQueueStatus",
+      "generatedContentReviewStatus",
+      "generationRunId",
+      "requestedExportAudience",
+      "validatorResult",
+    ]);
+  });
+});
+
+test("P3-11 missing or malformed internal updated_at fails closed with system_error and data:null", async () => {
+  for (const malformedUpdatedAt of [null, undefined, "not-a-timestamp", new Date("not-a-date")]) {
+    const state = makeState();
+    state.exportReviewQueues[0].updated_at = malformedUpdatedAt;
+    const result = await getGeneratedDraftExportReviewPacket(input(), {
+      env: enabledEnv,
+      runInTransaction: async (callback) => callback(makeTx(state)),
+      evaluatePacket: evaluateGeneratedDraftExportReviewPacketInTransaction,
+      evaluator: evaluator(state),
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "system_error");
+    assert.equal(result.data, null);
+  }
+});
+
+test("P3-11 an authentic exportReviewUpdatedAt still passes the full service DTO allowlist", async () => {
+  const state = makeState();
+  const result = await getGeneratedDraftExportReviewPacket(input(), {
+    env: enabledEnv,
+    runInTransaction: async (callback) => callback(makeTx(state)),
+    evaluatePacket: evaluateGeneratedDraftExportReviewPacketInTransaction,
+    evaluator: evaluator(state),
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.data.exportReviewUpdatedAt, "2026-08-06T09:00:00.000Z");
 });
 
 test("P3-06 read path has no write, audit publication, queue transition, authority, final gate, manifest, file, route, UI, or listener wiring", () => {

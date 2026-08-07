@@ -56,6 +56,7 @@ const injectedPacketDto = Object.freeze({
     affectedObjectIds: [],
     truncated: false,
   },
+  exportReviewUpdatedAt: "2026-08-06T09:00:00.000Z",
 });
 
 function concretePath(overrides = {}) {

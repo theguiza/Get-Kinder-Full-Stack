@@ -154,6 +154,11 @@ function isCanonicalUtcTimestamp(value) {
   return normalized === value;
 }
 
+function asCanonicalUtcTimestamp(value) {
+  if (value === null || value === undefined) return null;
+  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+}
+
 function validateCompleteReviewInput(input) {
   return hasExactKeys(input, new Set([
     "organizationId",
@@ -1012,7 +1017,7 @@ async function loadExportReviewQueueRowById(tx, { organizationId, exportReviewQu
             organization_id::text AS organization_id, queue_type, target_object_type,
             target_object_id::text AS target_object_id, priority, queue_status, review_status,
             blocked_reason, assigned_to::text AS assigned_to, due_at, summary, required_action,
-            queue_metadata, created_by::text AS created_by, created_by_type
+            queue_metadata, created_by::text AS created_by, created_by_type, updated_at
        FROM kai.review_queue_items
       WHERE organization_id = $1::uuid
         AND review_queue_item_id = $2::uuid`,
@@ -1349,6 +1354,7 @@ export async function evaluateExportReviewRequestStateInTransaction(tx, input) {
     exportReviewQueueItemId: queueRow.review_queue_item_id,
     exportReviewQueueStatus: queueRow.queue_status,
     exportReviewStatus: queueRow.review_status,
+    exportReviewUpdatedAt: asCanonicalUtcTimestamp(queueRow.updated_at),
   });
 }
 
@@ -1395,6 +1401,7 @@ export async function evaluateGeneratedDraftExportReviewPacketInTransaction(
     exportEligible: validatorResult.severity === "pass",
     validatorResult,
     blocks: packetResult.data.blocks,
+    exportReviewUpdatedAt: exportReviewResult.data.exportReviewUpdatedAt,
   });
 }
 

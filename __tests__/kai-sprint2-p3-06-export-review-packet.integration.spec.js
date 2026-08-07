@@ -255,6 +255,12 @@ async function runP306IntegrationSuite() {
     assert.ok(packet.data.validatorResult.evidence.failed_gates.includes("current_use_ineligible"));
     assert.equal(packet.data.blocks[0].citations[0].evidenceItemId, evidenceId);
 
+    const exportReviewQueueUpdatedAtRows = await query(
+      `SELECT updated_at FROM kai.review_queue_items WHERE review_queue_item_id = $1::uuid`,
+      [exportReviewQueueId],
+    );
+    assert.equal(packet.data.exportReviewUpdatedAt, exportReviewQueueUpdatedAtRows[0].updated_at.toISOString());
+
     const afterRows = await query(
       `SELECT count(*)::int AS audits
          FROM kai.upload_lifecycle_audit

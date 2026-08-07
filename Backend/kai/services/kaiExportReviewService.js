@@ -173,6 +173,7 @@ const EXPORT_REVIEW_PACKET_KEYS = new Set([
   "exportEligible",
   "validatorResult",
   "blocks",
+  "exportReviewUpdatedAt",
 ]);
 const BLOCK_KEYS = new Set(["ordinal", "text", "citations"]);
 const CITATION_KEYS = new Set([
@@ -252,6 +253,7 @@ function isGeneratedDraftExportReviewPacketDto(data) {
       if (!isStringArray(citation.affectedObjectIds)) return false;
     }
   }
+  if (!isCanonicalUtcTimestamp(data.exportReviewUpdatedAt)) return false;
   return true;
 }
 

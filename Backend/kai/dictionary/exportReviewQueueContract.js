@@ -32,6 +32,7 @@ const EXPORT_REVIEW_QUEUE_ROW_KEYS = new Set([
   "queue_metadata",
   "created_by",
   "created_by_type",
+  "updated_at",
 ]);
 
 function hasOnlyAllowedKeys(value, allowedKeys) {
