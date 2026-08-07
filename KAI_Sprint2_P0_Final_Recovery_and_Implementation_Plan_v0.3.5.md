@@ -12648,3 +12648,128 @@ NOT_CONFIRMED:
     operation, listener, startup registration, production wiring, cloud access,
     real client data access, P3-08 work, new review cycle, or production
     database access was performed.
+
+## P3-08 - Read-only GK export-review UI (completed 2026-08-07)
+
+Status: accepted for this local package as one bounded, read-only frontend
+detail page plus its Express/EJS mount, kept out of general navigation.
+
+Implementation evidence:
+  - frontend/gkExportReviewDetailLogic.js (new) - pure request/response logic
+    with no JSX, so it loads under plain Node in tests and under Vite in the
+    bundle. Builds the exact P3-07 packet path from organizationId,
+    generatedContentDraftId, and exportReviewQueueItemId; reuses the existing
+    per-component getJson fetch convention (credentials: "same-origin",
+    Accept: application/json, GET, no body); reuses the existing errorText
+    safe-message convention; and applies a single decideOutcome gate that only
+    ever treats an exact statusCode 200 + body.ok === true response as a
+    success. Every other combination (any of the nine listed safe error codes,
+    any status/ok mismatch, a null body, or a network failure) is rejected
+    into a message-only error outcome that never carries packet data - this
+    follows the frontend's existing "no client-side schema validation; trust
+    ok+statusCode, since the server converts malformed shapes to system_error"
+    convention rather than adding a new validation layer. toRenderModel is an
+    explicit allowlist projection covering only: requestedExportAudience,
+    draftStatus, generatedContentReviewStatus, exportReviewStatus,
+    currentUseEligible, exportEligible, validatorResult.severity,
+    validatorResult.blocking_reason, and, per block, ordinal/text/citations
+    (claimId, evidenceItemId, sourceId, sourceVersionId, supportStrength,
+    claimReviewStatus, evidenceReviewStatus, currentEligible, blockerCodes,
+    affectedDimensionKeys, affectedObjectIds). It never reads
+    generationRunId, contentType, the queue-level status fields,
+    validatorResult.message/required_fix/evidence, or any field outside this
+    list, so extra or unexpected response fields are dropped rather than
+    rendered.
+  - frontend/gkExportReviewDetail.jsx (new) - the page component, following
+    the existing kaiReviewCockpit.jsx conventions: a mount-time GET (no
+    separate feature-status probe, since feature_disabled is handled as one
+    of the nine safe error codes through the same error path as every other
+    safe failure), local FieldRow/CitationDetail/BlockDetail/PacketDetail
+    presentational subcomponents in the same file, and no shared component
+    library import. Every generated-content block renders its own "Why can
+    KAI say this?" section listing only its citations' allowlisted
+    traceability fields. The component issues exactly one fetch call (GET),
+    contains no postJson/putJson/patchJson/deleteJson, and has no
+    approve/reject/finalize/mark-ready/download control, queue-transition
+    control, or export-authority/final-gate state.
+  - frontend/entry.jsx - added exactly one new import and one new
+    window.renderGkExportReviewDetail mount function, following the existing
+    window.renderKaiReviewCockpit pattern. No existing window.render* function
+    was changed.
+  - index.js - added exactly one new Express route,
+    GET /gk-admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-review-queue/:exportReviewQueueItemId,
+    gated by the existing ensureAuthenticated and ensureAdmin middleware (the
+    same gate used by the existing /admin and /admin/event-assignment routes).
+    The route performs no gk_admin-specific authorization itself and no
+    packet fetch; it only renders the new EJS view with the three path
+    parameters as props, leaving gk_admin authorization, tenant membership,
+    packet validation, citation authority, and export eligibility entirely to
+    the accepted P3-07 route and its P3-06 service. No existing route was
+    modified.
+  - views/gk-export-review-detail.ejs (new) - follows the existing
+    views/admin.ejs mount-div + JSON-props-script + entry.js bundle + window
+    render-call structure. Not linked from any nav partial, so it is reachable
+    only by direct URL, consistent with keeping this page out of general
+    navigation.
+  - public/js/bundles/entry.js - rebuilt via `npx vite build` to include the
+    new page in the existing checked-in bundle, matching how this file has
+    been rebuilt and committed for prior frontend-page additions in this
+    repository's history.
+  - __tests__/kai-sprint2-p3-08-gk-export-review-detail.spec.js (new) - proves
+    packetPath builds the exact P3-07 route from the three route parameters;
+    getJson uses the existing same-origin/GET/Accept fetch convention; a
+    success response renders only the allowlisted P3-06 fields (asserted by
+    exact deepEqual and by asserting the internal-only
+    message/required_fix/evidence text never appears in the rendered model);
+    extra/unexpected fields on blocks, citations, and the top-level response
+    are dropped rather than rendered or erroring; every one of the nine listed
+    safe error codes (feature_disabled, invalid_request, unauthorized,
+    mapped_kai_user_required, authorization_denied, tenant_boundary_violation,
+    not_found, conflict_current_state_changed, system_error) is rejected into
+    an error outcome with no packet model attached; a status/ok mismatch (200
+    with ok:false, or non-200 with ok:true) is also rejected; errorText falls
+    back to a safe generic message when the server sends none; the frontend
+    source contains no POST/PUT/PATCH/DELETE method literal, no
+    postJson/putJson/patchJson/deleteJson helper, and no
+    approve/reject/finalize/mark-ready/download identifier, while it does
+    contain the required "Why can KAI say this?" section heading; the new
+    Express route is registered exactly once with ensureAuthenticated and
+    ensureAdmin; and entry.jsx still defines renderAdmin, renderKaiReviewCockpit,
+    and renderOrgPortal unchanged alongside the one new
+    renderGkExportReviewDetail function.
+
+TOOL_VERIFIED:
+  - node --test __tests__/kai-sprint2-p3-08-gk-export-review-detail.spec.js ->
+    12/12 pass.
+  - node --test __tests__/kai-sprint2-p3-07-export-review-packet-route.spec.js
+    __tests__/kai-sprint2-p3-06-export-review-packet-boundary.spec.js -> 19/19
+    pass.
+  - grep of __tests__ for existing router/API-client/auth/admin-view test
+    coverage referencing ensureAdmin, entry.jsx, or renderAdmin found none
+    beyond the new P3-08 spec file, so no separate focused suite exists to
+    re-run for those seams beyond the full suites below.
+  - npm run test:kai-sprint2 -> complete Sprint 2 suite: 1581 pass, 22 skip,
+    0 fail.
+  - npm test -> complete repository suite: 1686 pass, 22 skip, 0 fail.
+  - npx vite build -> production bundle rebuilt successfully (47 modules
+    transformed, 0 errors), confirming the new JSX and its wiring in
+    entry.jsx compile.
+  - git diff --check -> clean (no whitespace errors).
+  - git diff --cached --check -> clean (no staged changes prior to this
+    package's commit).
+  - No new PostgreSQL-backed suite was run for this package: it is
+    frontend-only and touches no repository/service/schema layer, and the
+    existing frontend test convention (plain node:test against pure logic
+    modules, no DOM/RTL harness) does not require one.
+
+USER_CONFIRMED:
+  - P2-01 through P2-08 and P3-01 through P3-07 are accepted and closed.
+  - P3-08 is authorized as one bounded read-only GK export-review UI package.
+
+NOT_CONFIRMED:
+  - No push, merge, deploy, flag enablement, approval/export authority, final
+    gate, manifest/file creation, schema migration/rollback, backend
+    route/service/repository/schema change, assistant or public/client-facing
+    functionality, listener, startup registration, production wiring, cloud
+    access, real client data access, P3-09 work, new review cycle, or
+    production database access was performed.

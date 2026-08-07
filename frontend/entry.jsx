@@ -15,6 +15,7 @@ import DonorDashboard from "./donorDashboard.jsx";
 import DonatePage from "./donate.jsx";
 import AdminDashboard from "./adminDashboard.jsx";
 import KaiReviewCockpit from "./kaiReviewCockpit.jsx";
+import GkExportReviewDetail from "./gkExportReviewDetail.jsx";
 import { renderOrgPortal, renderKpiStrip } from "./orgPortal.jsx";
 import { renderOrgWorkspace } from "./orgWorkspace.jsx";
 
@@ -125,6 +126,20 @@ window.renderKaiReviewCockpit = (selector = "#kai-review-cockpit-root", props = 
   root.render(
     <React.StrictMode>
       <KaiReviewCockpit {...props} />
+    </React.StrictMode>
+  );
+};
+
+// KAI P3-08 read-only GK export-review detail page. Internal/GK-only, read-only:
+// it issues a single GET against the accepted P3-07 packet route and holds no
+// mutation control of any kind.
+window.renderGkExportReviewDetail = (selector = "#gk-export-review-detail-root", props = {}) => {
+  const el = typeof selector === "string" ? document.querySelector(selector) : selector;
+  if (!el) return;
+  const root = getOrCreateRoot(el);
+  root.render(
+    <React.StrictMode>
+      <GkExportReviewDetail {...props} />
     </React.StrictMode>
   );
 };

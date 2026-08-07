@@ -2908,6 +2908,26 @@ app.get("/admin/event-assignment", ensureAuthenticated, ensureAdmin, (req, res) 
   });
 });
 
+// KAI P3-08 read-only GK export-review detail page. Kept out of general
+// navigation; gk_admin authorization for the underlying packet remains the
+// accepted P3-07 API's responsibility, not this route's.
+app.get(
+  "/gk-admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-review-queue/:exportReviewQueueItemId",
+  ensureAuthenticated,
+  ensureAdmin,
+  (req, res) => {
+    const assetTag = Date.now();
+    res.render("gk-export-review-detail", {
+      assetTag,
+      user: req.user,
+      csrfToken: req.session.csrfToken,
+      organizationId: req.params.organizationId,
+      generatedContentDraftId: req.params.generatedContentDraftId,
+      exportReviewQueueItemId: req.params.exportReviewQueueItemId,
+    });
+  },
+);
+
 app.get("/org-portal/workspace/events/:eventId", ensureOrgRepPage, async (req, res) => {
   const assetTag = Date.now();
   const isAdminViewer = isAdminRequest(req);
