@@ -12991,3 +12991,119 @@ NOT_CONFIRMED:
     startup registration, production wiring, cloud access, real client data
     access, P3-10 work, new review cycle, or production database access was
     performed.
+
+## P3-10 - Internal GK export-review start route (completed 2026-08-07)
+
+Status: accepted for this local package as one bounded, authenticated
+internal mutation route wired to the existing dormant P3-09
+startGeneratedDraftExportReview service. No completion authority, approval/
+export authority, finalGate, manifest/file, or new review cycle was added.
+
+Implementation evidence:
+  - Backend/kai/routes/sprint2IntakeApi.js - adds exactly one mounted route,
+    router.post("/admin/organizations/:organizationId/generated-content-
+    drafts/:generatedContentDraftId/export-review-queue/:exportReviewQueueItemId/start"),
+    on the existing mounted Sprint 2 intake router, reusing every existing
+    seam unchanged: exportReviewPacketIdentifiers for path-parameter
+    extraction/lowercase-UUID validation (identical convention to the P3-07
+    packet route), sprint2MappedActorContext(req) for the middleware-mapped
+    actor context, invokeService/sendServiceResult for the response mapper,
+    and getExportReviewService() for lazy service loading (its override-
+    detection condition is widened from
+    intakeServiceOverride?.getGeneratedDraftExportReviewPacket alone to also
+    check intakeServiceOverride?.startGeneratedDraftExportReview, the
+    smallest change needed for the shared getter to recognize a
+    test-injected P3-10 service double; the real dynamic import target is
+    unchanged). The service input object is constructed from exactly five
+    values: organizationId/generatedContentDraftId/exportReviewQueueItemId
+    from the validated path parameters, expectedUpdatedAt from the validated
+    request body, actorContext from the existing middleware-populated
+    sprint2MappedActorContext(req), and now from a fresh server-side
+    new Date().toISOString() call made inside the request handler - the
+    client cannot supply or influence actorContext or now, and any body key
+    other than expected_updated_at is rejected before the service is ever
+    called. Calls startGeneratedDraftExportReview exactly once. The new
+    route handler and its one helper function contain no SQL, no pool/
+    repository import, no direct kai.* access, and no queue/audit write
+    logic - all of that remains inside the unmodified P3-09 service and
+    repository layers.
+  - Backend/kai/validators/kaiSprint2RequestSchemas.js - adds
+    validateStartExportReviewRequest(payload), following the exact
+    reject-unknown-keys/no-null/no-array/no-nested-object/required-field
+    convention already established by validateReviewQueueStatusRequest and
+    validateFilePolicyBlockRequest in this same file. Accepts exactly one
+    body key, expected_updated_at, and validates it with the file's existing
+    canonicalIsoTimestamp helper (the same strict millisecond-precision UTC
+    check already used by the intake batch created_at cursor path) rather
+    than introducing a second timestamp-validation rule.
+  - __tests__/kai-sprint2-p3-10-export-review-start-route.spec.js (new) -
+    covers: exactly one mounted authenticated POST route at the documented
+    path; authentication failure prevents the service call; exact path/body
+    values and the middleware-populated actorContext are forwarded to the
+    service exactly once; now is generated server-side, is canonical UTC,
+    and falls inside the request's own wall-clock window; client-supplied
+    actorContext/now (in the body or as query parameters) and any unknown
+    body field are rejected as validation_blocker before the service is
+    invoked; malformed path UUIDs (missing, non-UUID, or not already
+    lowercased) and malformed bodies (missing expected_updated_at, a
+    non-string value, a non-canonical timestamp string, or an extra unknown
+    field) all use the existing safe validation_blocker envelope; a
+    successful call returns the exact P3-09 result DTO unchanged; every
+    listed service-result error code (feature_disabled, invalid_request,
+    unauthorized, mapped_kai_user_required, authorization_denied,
+    tenant_boundary_violation, not_found, conflict_current_state_changed,
+    system_error) maps through the existing safe envelope with no blocker/
+    warning/data leakage; and a source-slice scan proving the new route
+    region contains no SQL keyword, no db/repository/postgres import, no
+    pool/kaiDb/repository reference, and no audit/queue-transition/
+    approval/export-authority/final-gate/manifest text.
+  - __tests__/kai-sprint2-pass2-route-runtime.spec.js - the one required,
+    additive update: the existing exhaustive mounted-route-path enumeration
+    test now includes the new P3-10 path immediately after the P3-07 packet
+    path (alphabetically adjacent, "packet" before "start"); every
+    previously listed path is preserved verbatim and unreordered.
+
+Replay boundary (explicitly not changed by this package): P3-09's
+conflict/replay logic still requires an identical requested `now` to treat a
+repeated request as a replay. Because this HTTP route generates `now`
+server-side fresh on every request, two real HTTP requests to this route
+never share a `now` value, so this package establishes no HTTP-level replay
+semantics - a second real request against an already-started queue item
+correctly returns conflict_current_state_changed, not replayed:true. P3-09's
+own replay behavior (exercised with an explicitly identical `now` at the
+service/repository layer) is unmodified.
+
+TOOL_VERIFIED:
+  - node --test __tests__/kai-sprint2-p3-10-export-review-start-route.spec.js
+    -> 9/9 pass.
+  - node --test __tests__/kai-sprint2-p3-09-export-review-start-boundary.spec.js
+    -> 25/25 pass (unchanged; the P3-09 service/repository boundary is
+    untouched by this route package).
+  - node --test __tests__/kai-sprint2-p3-07-export-review-packet-route.spec.js
+    __tests__/kai-sprint2-p3-08-gk-export-review-detail.spec.js -> 20/20 pass
+    (unaffected; neither file was touched).
+  - node --test __tests__/kai-sprint2-actor-context.spec.js
+    __tests__/kai-sprint2-api-contract.spec.js
+    __tests__/kai-sprint2-authorization.spec.js
+    __tests__/kai-sprint2-tenant-authorization.spec.js
+    __tests__/kai-sprint2-tenant-validator.spec.js
+    __tests__/kai-sprint2-pass2-admin-authz.spec.js
+    __tests__/kai-sprint2-pass2-api-contract.spec.js
+    __tests__/kai-sprint2-pass2-route-runtime.spec.js -> 100/100 pass
+    (includes the one required route-enumeration update above).
+  - npm run test:kai-sprint2 -> complete Sprint 2 suite: 1617 pass, 23 skip,
+    0 fail.
+  - npm test -> complete repository suite: 1722 pass, 23 skip, 0 fail.
+  - git diff --check -> clean (no whitespace errors).
+  - git diff --cached --check -> clean (no staged changes prior to this
+    package's commit).
+
+USER_CONFIRMED:
+  - P2-01 through P2-08 and P3-01 through P3-09 are accepted and closed.
+  - P3-10 is authorized as one bounded internal GK export-review start route
+    exposing the existing P3-09 service.
+
+NOT_CONFIRMED:
+  - No push, merge, deploy, flag enablement, export-review completion,
+    approval/export authority, finalGate, manifest/file creation, P3-11
+    work, or new review cycle was performed.

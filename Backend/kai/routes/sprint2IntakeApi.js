@@ -16,6 +16,7 @@ import {
   validateKaiSprint2MutationRequest,
   validateReviewQueueQuery,
   validateReviewQueueStatusRequest,
+  validateStartExportReviewRequest,
 } from "../validators/kaiSprint2RequestSchemas.js";
 import {
   validateReviewCockpitQueueQuery,
@@ -574,7 +575,10 @@ router.post("/admin/review-cockpit/source-candidates/:intakeSourceCandidateId/de
 });
 
 async function getExportReviewService() {
-  if (intakeServiceOverride?.getGeneratedDraftExportReviewPacket) return intakeServiceOverride;
+  if (
+    intakeServiceOverride?.getGeneratedDraftExportReviewPacket
+    || intakeServiceOverride?.startGeneratedDraftExportReview
+  ) return intakeServiceOverride;
   exportReviewServicePromise ||= import("../services/kaiExportReviewService.js");
   return exportReviewServicePromise;
 }
@@ -591,6 +595,49 @@ router.get(
         generatedContentDraftId: req.params.generatedContentDraftId,
         exportReviewQueueItemId: req.params.exportReviewQueueItemId,
         actorContext: sprint2MappedActorContext(req),
+      });
+    });
+  },
+);
+
+function validateStartExportReviewRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = exportReviewPacketIdentifiers(req);
+  if (!identifiers) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker(
+        "invalid_uuid_field",
+        "organization_id_generated_content_draft_id_or_export_review_queue_item_id",
+      )],
+    });
+    return null;
+  }
+  const result = validateStartExportReviewRequest(req.body);
+  if (!result.ok) {
+    sendKaiError(res, "validation_blocker", { blockers: result.blockers });
+    return null;
+  }
+  return identifiers;
+}
+
+router.post(
+  "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-review-queue/:exportReviewQueueItemId/start",
+  async (req, res) => {
+    const identifiers = validateStartExportReviewRequestOrSend(req, res);
+    if (!identifiers) return;
+    const payload = requestPayload(req);
+    return invokeService(res, async () => {
+      const service = await getExportReviewService();
+      return service.startGeneratedDraftExportReview({
+        organizationId: identifiers.organizationId,
+        generatedContentDraftId: identifiers.generatedContentDraftId,
+        exportReviewQueueItemId: identifiers.exportReviewQueueItemId,
+        expectedUpdatedAt: payload.expected_updated_at,
+        actorContext: sprint2MappedActorContext(req),
+        now: new Date().toISOString(),
       });
     });
   },
@@ -661,6 +708,7 @@ export const __testables = {
   reviewCockpitIdentifiers,
   exportReviewPacketIdentifiers,
   sprint2MappedActorContext,
+  validateStartExportReviewRequestOrSend,
   setIntakeServiceForTest(service) {
     intakeServiceOverride = service;
     return () => {
