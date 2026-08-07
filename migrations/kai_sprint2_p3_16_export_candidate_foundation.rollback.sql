@@ -40,9 +40,13 @@ ALTER TABLE IF EXISTS kai.upload_lifecycle_audit
     ));
 
 DROP TABLE IF EXISTS kai.export_candidates;
+DROP TRIGGER IF EXISTS trg_p3_16_limitation_snapshot_entries_append_only ON kai.limitation_snapshot_entries;
 DROP TABLE IF EXISTS kai.limitation_snapshot_entries;
-DROP INDEX IF EXISTS kai.ux_limitation_snapshots_p3_16_current_per_draft;
+DROP TRIGGER IF EXISTS trg_p3_16_limitation_snapshots_append_only ON kai.limitation_snapshots;
+DROP INDEX IF EXISTS kai.ux_limitation_snapshots_p3_16_single_successor;
+DROP INDEX IF EXISTS kai.ux_limitation_snapshots_p3_16_root_per_draft;
 DROP TABLE IF EXISTS kai.limitation_snapshots;
+DROP FUNCTION IF EXISTS kai.p3_16_reject_authority_mutation();
 DROP FUNCTION IF EXISTS kai.p3_16_limitation_codes_valid(text[]);
 
 COMMIT;

@@ -43,32 +43,64 @@ BEGIN
   SELECT 'fresh_snapshot_is_current',
          CASE WHEN EXISTS (
                 SELECT 1 FROM kai.limitation_snapshots
-                 WHERE limitation_snapshot_id = snapshot1 AND superseded_by_snapshot_id IS NULL
+                 WHERE limitation_snapshot_id = snapshot1
+                   AND NOT EXISTS (SELECT 1 FROM kai.limitation_snapshots s WHERE s.supersedes_snapshot_id = snapshot1)
               )
               THEN 'PASS' ELSE 'FAIL' END,
-         'a freshly confirmed snapshot is the current (non-superseded) snapshot for the draft';
+         'a freshly confirmed snapshot (no successor yet) is the current snapshot for the draft';
 
-  -- Supersede: point the old row at a new one, then insert the new one.
-  UPDATE kai.limitation_snapshots SET superseded_by_snapshot_id = snapshot2 WHERE limitation_snapshot_id = snapshot1;
-  INSERT INTO kai.limitation_snapshots (limitation_snapshot_id, organization_id, generated_content_draft_id, confirmed_by, confirmed_by_role, entries_fingerprint, created_by_type)
-  VALUES (snapshot2, org1, draft1, org1, 'gk_admin', fingerprint2, 'human');
+  -- Supersede: insert the new row carrying a backward pointer at the prior
+  -- current row. The prior row (snapshot1) is never targeted by an UPDATE.
+  INSERT INTO kai.limitation_snapshots (limitation_snapshot_id, organization_id, generated_content_draft_id, confirmed_by, confirmed_by_role, entries_fingerprint, supersedes_snapshot_id, created_by_type)
+  VALUES (snapshot2, org1, draft1, org1, 'gk_admin', fingerprint2, snapshot1, 'human');
   INSERT INTO kai.limitation_snapshot_entries (limitation_snapshot_id, organization_id, claim_id, evidence_item_id, limitation_codes)
   VALUES
     (snapshot2, org1, claim1, evidence1, ARRAY['self_reported']),
     (snapshot2, org1, claim2, evidence2, ARRAY['small_sample_size']);
 
-  SELECT superseded_by_snapshot_id INTO supersede_check FROM kai.limitation_snapshots WHERE limitation_snapshot_id = snapshot1;
+  SELECT supersedes_snapshot_id INTO supersede_check FROM kai.limitation_snapshots WHERE limitation_snapshot_id = snapshot2;
   INSERT INTO p3_16_smoke_results
   SELECT 'supersession_lineage_is_append_only',
-         CASE WHEN supersede_check = snapshot2
+         CASE WHEN supersede_check = snapshot1
               THEN 'PASS' ELSE 'FAIL' END,
-         'the prior snapshot is updated to point at its successor rather than rewritten, and the successor is a new append-only row';
+         'the new (successor) row carries a backward pointer at its predecessor; the prior row is never rewritten';
+
+  INSERT INTO p3_16_smoke_results
+  SELECT 'prior_snapshot_and_entries_unchanged_after_supersession',
+         CASE WHEN EXISTS (
+                SELECT 1 FROM kai.limitation_snapshots ls
+                 WHERE ls.limitation_snapshot_id = snapshot1
+                   AND ls.confirmed_by = org1
+                   AND ls.confirmed_by_role = 'gk_reviewer'
+                   AND ls.entries_fingerprint = fingerprint1
+                   AND ls.supersedes_snapshot_id IS NULL
+              )
+              AND (SELECT count(*) FROM kai.limitation_snapshot_entries WHERE limitation_snapshot_id = snapshot1) = 2
+              AND (SELECT limitation_codes FROM kai.limitation_snapshot_entries WHERE limitation_snapshot_id = snapshot1 AND claim_id = claim1) = ARRAY[]::text[]
+              THEN 'PASS' ELSE 'FAIL' END,
+         'the complete prior snapshot header and its entries are identical before and after supersession';
 
   INSERT INTO p3_16_smoke_results
   SELECT 'exactly_one_current_snapshot_after_supersession',
-         CASE WHEN (SELECT count(*) FROM kai.limitation_snapshots WHERE generated_content_draft_id = draft1 AND superseded_by_snapshot_id IS NULL) = 1
+         CASE WHEN (
+                SELECT count(*) FROM kai.limitation_snapshots ls
+                 WHERE ls.generated_content_draft_id = draft1
+                   AND NOT EXISTS (SELECT 1 FROM kai.limitation_snapshots s WHERE s.supersedes_snapshot_id = ls.limitation_snapshot_id)
+              ) = 1
               THEN 'PASS' ELSE 'FAIL' END,
-         'after supersession, exactly one non-superseded snapshot remains for the draft';
+         'after supersession, exactly one current (no-successor) snapshot remains for the draft';
+
+  DECLARE
+    update_rejected boolean := false;
+  BEGIN
+    BEGIN
+      UPDATE kai.limitation_snapshots SET confirmed_by_role = 'gk_admin' WHERE limitation_snapshot_id = snapshot1;
+    EXCEPTION WHEN OTHERS THEN
+      update_rejected := true;
+    END;
+    INSERT INTO p3_16_smoke_results
+    VALUES ('ordinary_update_of_prior_snapshot_rejected', CASE WHEN update_rejected THEN 'PASS' ELSE 'FAIL' END, 'the append-only trigger rejects an ordinary UPDATE of the prior (superseded) snapshot row');
+  END;
 
   -- Export candidate bound to the now-current snapshot.
   INSERT INTO kai.export_candidates (export_candidate_id, organization_id, generated_content_draft_id, content_type, requested_audience, limitation_snapshot_id, fingerprint_contract_version, canonical_fingerprint, created_by, created_by_type)

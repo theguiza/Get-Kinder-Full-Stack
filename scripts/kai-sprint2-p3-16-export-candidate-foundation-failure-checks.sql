@@ -23,9 +23,12 @@ BEGIN
    WHERE r.organization_id = org1 AND r.idempotency_key = 'p3-16-smoke-seed';
   SELECT claim_id INTO claim1 FROM kai.claims WHERE organization_id = org1 AND statement = 'P3-16 smoke-seed claim one.';
   SELECT evidence_item_id INTO evidence1 FROM kai.claim_evidence_links WHERE organization_id = org1 AND claim_id = claim1;
-  SELECT limitation_snapshot_id INTO current_snapshot FROM kai.limitation_snapshots WHERE generated_content_draft_id = draft1 AND superseded_by_snapshot_id IS NULL;
+  SELECT ls.limitation_snapshot_id INTO current_snapshot
+    FROM kai.limitation_snapshots ls
+   WHERE ls.generated_content_draft_id = draft1
+     AND NOT EXISTS (SELECT 1 FROM kai.limitation_snapshots s WHERE s.supersedes_snapshot_id = ls.limitation_snapshot_id);
 
-  -- 1. A second non-superseded snapshot for the same draft is rejected by the partial unique index.
+  -- 1. A second root (no-predecessor) snapshot for the same draft is rejected by the partial unique index.
   rejected := false;
   BEGIN
     INSERT INTO kai.limitation_snapshots (organization_id, generated_content_draft_id, confirmed_by, confirmed_by_role, entries_fingerprint, created_by_type)
@@ -34,7 +37,61 @@ BEGIN
     rejected := true;
   END;
   INSERT INTO p3_16_failure_results
-  VALUES ('second_current_snapshot_rejected', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'at most one non-superseded snapshot per draft is enforced');
+  VALUES ('second_root_snapshot_rejected', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'at most one root (first) snapshot per draft is enforced');
+
+  -- 1b. Two concurrent-shaped inserts naming the same predecessor: only one direct successor per snapshot.
+  rejected := false;
+  BEGIN
+    INSERT INTO kai.limitation_snapshots (organization_id, generated_content_draft_id, confirmed_by, confirmed_by_role, entries_fingerprint, supersedes_snapshot_id, created_by_type)
+    VALUES (org1, draft1, org1, 'gk_reviewer', repeat('1', 64), current_snapshot, 'human');
+    INSERT INTO kai.limitation_snapshots (organization_id, generated_content_draft_id, confirmed_by, confirmed_by_role, entries_fingerprint, supersedes_snapshot_id, created_by_type)
+    VALUES (org1, draft1, org1, 'gk_admin', repeat('2', 64), current_snapshot, 'human');
+  EXCEPTION WHEN unique_violation THEN
+    rejected := true;
+  END;
+  INSERT INTO p3_16_failure_results
+  VALUES ('second_successor_of_same_predecessor_rejected', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'at most one direct successor may exist per predecessor snapshot');
+
+  -- 1c. Ordinary UPDATE of a persisted limitation-snapshot authority row is rejected at the database boundary.
+  rejected := false;
+  BEGIN
+    UPDATE kai.limitation_snapshots SET confirmed_by_role = 'gk_admin' WHERE limitation_snapshot_id = current_snapshot;
+  EXCEPTION WHEN OTHERS THEN
+    rejected := true;
+  END;
+  INSERT INTO p3_16_failure_results
+  VALUES ('limitation_snapshot_update_rejected', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'ordinary UPDATE of kai.limitation_snapshots is rejected by the append-only trigger');
+
+  -- 1d. Ordinary DELETE of a persisted limitation-snapshot authority row is rejected at the database boundary.
+  rejected := false;
+  BEGIN
+    DELETE FROM kai.limitation_snapshots WHERE limitation_snapshot_id = current_snapshot;
+  EXCEPTION WHEN OTHERS THEN
+    rejected := true;
+  END;
+  INSERT INTO p3_16_failure_results
+  VALUES ('limitation_snapshot_delete_rejected', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'ordinary DELETE of kai.limitation_snapshots is rejected by the append-only trigger');
+
+  -- 1e. Ordinary UPDATE/DELETE of a persisted limitation-snapshot entry is rejected at the database boundary.
+  rejected := false;
+  BEGIN
+    UPDATE kai.limitation_snapshot_entries SET limitation_codes = ARRAY['self_reported'] WHERE limitation_snapshot_id = current_snapshot AND claim_id = claim1;
+  EXCEPTION WHEN OTHERS THEN
+    rejected := true;
+  END;
+  INSERT INTO p3_16_failure_results
+  VALUES ('limitation_snapshot_entry_update_rejected', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'ordinary UPDATE of kai.limitation_snapshot_entries is rejected by the append-only trigger');
+
+  -- 1f. Cross-organization/cross-draft predecessor lineage fails closed (the composite supersedes FK requires an exact organization+draft match).
+  rejected := false;
+  BEGIN
+    INSERT INTO kai.limitation_snapshots (organization_id, generated_content_draft_id, confirmed_by, confirmed_by_role, entries_fingerprint, supersedes_snapshot_id, created_by_type)
+    VALUES (org2, draft1, org2, 'gk_reviewer', repeat('3', 64), current_snapshot, 'human');
+  EXCEPTION WHEN foreign_key_violation THEN
+    rejected := true;
+  END;
+  INSERT INTO p3_16_failure_results
+  VALUES ('cross_tenant_predecessor_lineage_rejected', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'predecessor lineage naming a snapshot outside the new row''s own organization/draft is rejected');
 
   -- 2. A malformed limitation code is rejected by the check constraint.
   rejected := false;

@@ -276,17 +276,119 @@ async function runP316IntegrationSuite() {
     assert.equal(second.data.supersededSnapshotId, first.data.limitationSnapshotId);
     assert.notEqual(second.data.limitationSnapshotId, first.data.limitationSnapshotId);
 
-    const priorRow = await query(`SELECT superseded_by_snapshot_id::text AS superseded_by_snapshot_id FROM kai.limitation_snapshots WHERE limitation_snapshot_id = $1::uuid`, [first.data.limitationSnapshotId]);
-    assert.equal(priorRow[0].superseded_by_snapshot_id, second.data.limitationSnapshotId);
-    const priorEntries = await query(`SELECT count(*)::int AS count FROM kai.limitation_snapshot_entries WHERE limitation_snapshot_id = $1::uuid`, [first.data.limitationSnapshotId]);
-    assert.equal(priorEntries[0].count, 2);
+    const successorRow = await query(`SELECT supersedes_snapshot_id::text AS supersedes_snapshot_id FROM kai.limitation_snapshots WHERE limitation_snapshot_id = $1::uuid`, [second.data.limitationSnapshotId]);
+    assert.equal(successorRow[0].supersedes_snapshot_id, first.data.limitationSnapshotId);
+
+    const priorRowBefore = await query(
+      `SELECT confirmed_by, confirmed_by_role, entries_fingerprint, supersedes_snapshot_id, created_at FROM kai.limitation_snapshots WHERE limitation_snapshot_id = $1::uuid`,
+      [first.data.limitationSnapshotId],
+    );
+    const priorEntriesBefore = await query(
+      `SELECT claim_id, evidence_item_id, limitation_codes FROM kai.limitation_snapshot_entries WHERE limitation_snapshot_id = $1::uuid ORDER BY claim_id ASC`,
+      [first.data.limitationSnapshotId],
+    );
+    assert.equal(priorRowBefore[0].supersedes_snapshot_id, null);
+    assert.equal(priorEntriesBefore.length, 2);
 
     const currentRows = await query(
-      `SELECT limitation_snapshot_id::text AS limitation_snapshot_id FROM kai.limitation_snapshots WHERE generated_content_draft_id = $1::uuid AND superseded_by_snapshot_id IS NULL`,
+      `SELECT ls.limitation_snapshot_id::text AS limitation_snapshot_id
+         FROM kai.limitation_snapshots ls
+        WHERE ls.generated_content_draft_id = $1::uuid
+          AND NOT EXISTS (SELECT 1 FROM kai.limitation_snapshots s WHERE s.supersedes_snapshot_id = ls.limitation_snapshot_id)`,
       [seed.draftId],
     );
     assert.equal(currentRows.length, 1);
     assert.equal(currentRows[0].limitation_snapshot_id, second.data.limitationSnapshotId);
+  });
+
+  test("P3-16 supersession is exactly one INSERT and no UPDATE of the prior snapshot: the prior row and its entries are byte-identical before and after, and ordinary UPDATE/DELETE against them is rejected by the database boundary", async () => {
+    const seed = await seedDraftReadyForCandidate();
+    const repo = repository();
+    const first = await repo.confirmLimitationSnapshot(confirmInput(seed), { metadataOnlyAudit: auditRecorder() });
+
+    const before = await query(
+      `SELECT confirmed_by, confirmed_by_role, entries_fingerprint, supersedes_snapshot_id, created_at FROM kai.limitation_snapshots WHERE limitation_snapshot_id = $1::uuid`,
+      [first.data.limitationSnapshotId],
+    );
+    const entriesBefore = await query(
+      `SELECT claim_id, evidence_item_id, limitation_codes, created_at FROM kai.limitation_snapshot_entries WHERE limitation_snapshot_id = $1::uuid ORDER BY claim_id ASC`,
+      [first.data.limitationSnapshotId],
+    );
+
+    await repo.confirmLimitationSnapshot(
+      confirmInput({ ...seed, codesA: ["small_sample_size"], now: LATER }),
+      { metadataOnlyAudit: auditRecorder() },
+    );
+
+    const after = await query(
+      `SELECT confirmed_by, confirmed_by_role, entries_fingerprint, supersedes_snapshot_id, created_at FROM kai.limitation_snapshots WHERE limitation_snapshot_id = $1::uuid`,
+      [first.data.limitationSnapshotId],
+    );
+    const entriesAfter = await query(
+      `SELECT claim_id, evidence_item_id, limitation_codes, created_at FROM kai.limitation_snapshot_entries WHERE limitation_snapshot_id = $1::uuid ORDER BY claim_id ASC`,
+      [first.data.limitationSnapshotId],
+    );
+    assert.deepEqual(before[0], after[0]);
+    assert.deepEqual(entriesBefore, entriesAfter);
+
+    await assert.rejects(() => pool.query(
+      `UPDATE kai.limitation_snapshots SET confirmed_by_role = 'gk_admin' WHERE limitation_snapshot_id = $1::uuid`,
+      [first.data.limitationSnapshotId],
+    ));
+    await assert.rejects(() => pool.query(
+      `DELETE FROM kai.limitation_snapshots WHERE limitation_snapshot_id = $1::uuid`,
+      [first.data.limitationSnapshotId],
+    ));
+    await assert.rejects(() => pool.query(
+      `UPDATE kai.limitation_snapshot_entries SET limitation_codes = ARRAY['self_reported'] WHERE limitation_snapshot_id = $1::uuid`,
+      [first.data.limitationSnapshotId],
+    ));
+  });
+
+  test("P3-16 predecessor lineage cannot cross organization or draft: a supersedes_snapshot_id naming a snapshot outside the new row's own organization/draft fails closed at the database boundary", async () => {
+    const seedA = await seedDraftReadyForCandidate();
+    const seedB = await seedDraftReadyForCandidate();
+    const repo = repository();
+    const confirmedA = await repo.confirmLimitationSnapshot(confirmInput(seedA), { metadataOnlyAudit: auditRecorder() });
+    assert.equal(confirmedA.ok, true);
+
+    await assert.rejects(() => pool.query(
+      `INSERT INTO kai.limitation_snapshots (organization_id, generated_content_draft_id, confirmed_by, confirmed_by_role, entries_fingerprint, supersedes_snapshot_id, created_by_type)
+       VALUES ($1::uuid,$2::uuid,$1::uuid,'gk_reviewer',repeat('9',64),$3::uuid,'human')`,
+      [ORG, seedB.draftId, confirmedA.data.limitationSnapshotId],
+    ));
+  });
+
+  test("P3-16 concurrent changed confirmations from the same predecessor: at most one successor and one fresh audit row are created, and the loser reports a zero-write conflict", async () => {
+    const seed = await seedDraftReadyForCandidate();
+    const repo = repository();
+    await repo.confirmLimitationSnapshot(confirmInput(seed), { metadataOnlyAudit: auditRecorder() });
+
+    const [winnerOrLoserA, winnerOrLoserB] = await Promise.all([
+      repo.confirmLimitationSnapshot(confirmInput({ ...seed, codesA: ["small_sample_size"], now: LATER }), { metadataOnlyAudit: auditRecorder() }),
+      repo.confirmLimitationSnapshot(confirmInput({ ...seed, codesA: ["self_reported"], now: LATER }), { metadataOnlyAudit: auditRecorder() }),
+    ]);
+    const results = [winnerOrLoserA, winnerOrLoserB];
+    const winners = results.filter((r) => r.ok);
+    const losers = results.filter((r) => !r.ok);
+    assert.equal(winners.length, 1);
+    assert.equal(losers.length, 1);
+    assert.equal(losers[0].error.code, "conflict_current_state_changed");
+
+    const successorRows = await query(
+      `SELECT count(*)::int AS count FROM kai.limitation_snapshots WHERE supersedes_snapshot_id = (
+         SELECT limitation_snapshot_id FROM kai.limitation_snapshots
+          WHERE generated_content_draft_id = $1::uuid AND supersedes_snapshot_id IS NULL
+       )`,
+      [seed.draftId],
+    );
+    assert.equal(successorRows[0].count, 1);
+
+    const auditRows = await query(
+      `SELECT count(*)::int AS count FROM kai.upload_lifecycle_audit WHERE operation = 'limitation_snapshot_confirmed' AND metadata->>'generated_content_draft_id' = $1`,
+      [seed.draftId],
+    );
+    assert.equal(auditRows[0].count, 2); // one for the first confirmation, one for the single winning supersession
   });
 
   test("P3-16 limitation snapshot confirmation: gk_reviewer role and gk_admin role are both authoritative, and cross-tenant/uncited claim ids are rejected", async () => {

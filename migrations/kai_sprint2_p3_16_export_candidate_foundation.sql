@@ -67,6 +67,12 @@ AS $$
      AND (SELECT count(*) FROM unnest(codes) AS c) = (SELECT count(DISTINCT c) FROM unnest(codes) AS c)
 $$;
 
+-- P3-16 correction (append-only authority): limitation-snapshot lineage is
+-- recorded as a backward pointer on the NEW row (supersedes_snapshot_id),
+-- never as a forward pointer written onto the prior row. A supersession is
+-- therefore always exactly one INSERT and never an UPDATE of any existing
+-- snapshot or entry. The prior row's own columns - including its own
+-- supersedes_snapshot_id - are never touched again after insert.
 CREATE TABLE IF NOT EXISTS kai.limitation_snapshots (
   limitation_snapshot_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id uuid NOT NULL,
@@ -74,28 +80,29 @@ CREATE TABLE IF NOT EXISTS kai.limitation_snapshots (
   confirmed_by uuid NOT NULL,
   confirmed_by_role text NOT NULL,
   entries_fingerprint text NOT NULL,
-  superseded_by_snapshot_id uuid,
+  supersedes_snapshot_id uuid,
   created_by_type text NOT NULL DEFAULT 'human',
   created_at timestamptz NOT NULL DEFAULT now(),
 
   CONSTRAINT limitation_snapshots_p3_16_id_org_unique
     UNIQUE (limitation_snapshot_id, organization_id),
+  CONSTRAINT limitation_snapshots_p3_16_id_org_draft_unique
+    UNIQUE (limitation_snapshot_id, organization_id, generated_content_draft_id),
   CONSTRAINT limitation_snapshots_p3_16_draft_fk
     FOREIGN KEY (generated_content_draft_id, organization_id)
     REFERENCES kai.generated_content_drafts (generated_content_draft_id, organization_id)
     ON DELETE RESTRICT,
-  -- Deferred to commit time: a supersession updates the prior row's
-  -- superseded_by_snapshot_id to the new row's id before that new row is
-  -- inserted, so the referenced row does not exist until later in the same
-  -- transaction. This never widens who may be referenced - it only moves
-  -- when the existing reference is checked.
-  CONSTRAINT limitation_snapshots_p3_16_superseded_by_fk
-    FOREIGN KEY (superseded_by_snapshot_id)
-    REFERENCES kai.limitation_snapshots (limitation_snapshot_id)
-    ON DELETE RESTRICT
-    DEFERRABLE INITIALLY DEFERRED,
+  -- The predecessor referenced by supersedes_snapshot_id must already exist
+  -- (ordinary, non-deferred FK) and must belong to the same organization and
+  -- the same generated-content draft as the new row - lineage can never
+  -- cross tenant or draft (and therefore never crosses requested audience,
+  -- which is fixed per draft).
+  CONSTRAINT limitation_snapshots_p3_16_supersedes_fk
+    FOREIGN KEY (supersedes_snapshot_id, organization_id, generated_content_draft_id)
+    REFERENCES kai.limitation_snapshots (limitation_snapshot_id, organization_id, generated_content_draft_id)
+    ON DELETE RESTRICT,
   CONSTRAINT limitation_snapshots_p3_16_not_self_superseding
-    CHECK (superseded_by_snapshot_id IS DISTINCT FROM limitation_snapshot_id),
+    CHECK (supersedes_snapshot_id IS DISTINCT FROM limitation_snapshot_id),
   CONSTRAINT limitation_snapshots_p3_16_confirmed_by_role_check
     CHECK (confirmed_by_role IN ('gk_reviewer', 'gk_admin')),
   CONSTRAINT limitation_snapshots_p3_16_entries_fingerprint_check
@@ -104,10 +111,33 @@ CREATE TABLE IF NOT EXISTS kai.limitation_snapshots (
     CHECK (created_by_type = 'human')
 );
 
--- At most one non-superseded ("current") snapshot per draft at any time.
-CREATE UNIQUE INDEX IF NOT EXISTS ux_limitation_snapshots_p3_16_current_per_draft
+-- At most one root (first) snapshot per draft: a draft's lineage is a single
+-- chain, never a forest.
+CREATE UNIQUE INDEX IF NOT EXISTS ux_limitation_snapshots_p3_16_root_per_draft
   ON kai.limitation_snapshots (organization_id, generated_content_draft_id)
-  WHERE superseded_by_snapshot_id IS NULL;
+  WHERE supersedes_snapshot_id IS NULL;
+
+-- At most one direct successor per predecessor: two concurrent changed
+-- confirmations racing from the same current snapshot can insert their own
+-- rows independently, but only one INSERT with a given supersedes_snapshot_id
+-- can ever commit - the loser receives a unique_violation and zero rows are
+-- written or rewritten for it.
+CREATE UNIQUE INDEX IF NOT EXISTS ux_limitation_snapshots_p3_16_single_successor
+  ON kai.limitation_snapshots (supersedes_snapshot_id)
+  WHERE supersedes_snapshot_id IS NOT NULL;
+
+CREATE OR REPLACE FUNCTION kai.p3_16_reject_authority_mutation()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RAISE EXCEPTION 'P3-16 limitation-snapshot authority history is append-only: % of %.% is not permitted', TG_OP, TG_TABLE_SCHEMA, TG_TABLE_NAME;
+END;
+$$;
+
+CREATE TRIGGER trg_p3_16_limitation_snapshots_append_only
+  BEFORE UPDATE OR DELETE ON kai.limitation_snapshots
+  FOR EACH ROW EXECUTE FUNCTION kai.p3_16_reject_authority_mutation();
 
 CREATE TABLE IF NOT EXISTS kai.limitation_snapshot_entries (
   limitation_snapshot_entry_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -136,6 +166,10 @@ CREATE TABLE IF NOT EXISTS kai.limitation_snapshot_entries (
     CHECK (kai.p3_16_limitation_codes_valid(limitation_codes))
 );
 
+CREATE TRIGGER trg_p3_16_limitation_snapshot_entries_append_only
+  BEFORE UPDATE OR DELETE ON kai.limitation_snapshot_entries
+  FOR EACH ROW EXECUTE FUNCTION kai.p3_16_reject_authority_mutation();
+
 CREATE TABLE IF NOT EXISTS kai.export_candidates (
   export_candidate_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id uuid NOT NULL,
@@ -157,9 +191,12 @@ CREATE TABLE IF NOT EXISTS kai.export_candidates (
     FOREIGN KEY (generated_content_draft_id, organization_id)
     REFERENCES kai.generated_content_drafts (generated_content_draft_id, organization_id)
     ON DELETE RESTRICT,
+  -- The bound snapshot must belong to this same organization and draft, so
+  -- currentness (whether an authoritative successor exists for that exact
+  -- snapshot) can be evaluated without any cross-draft ambiguity.
   CONSTRAINT export_candidates_p3_16_snapshot_fk
-    FOREIGN KEY (limitation_snapshot_id, organization_id)
-    REFERENCES kai.limitation_snapshots (limitation_snapshot_id, organization_id)
+    FOREIGN KEY (limitation_snapshot_id, organization_id, generated_content_draft_id)
+    REFERENCES kai.limitation_snapshots (limitation_snapshot_id, organization_id, generated_content_draft_id)
     ON DELETE RESTRICT,
   CONSTRAINT export_candidates_p3_16_content_type_check
     CHECK (content_type = 'evidence_summary'),

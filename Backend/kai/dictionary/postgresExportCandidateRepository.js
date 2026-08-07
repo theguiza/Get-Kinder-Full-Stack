@@ -178,16 +178,24 @@ async function loadDraftRow(tx, { organizationId, generatedContentDraftId }) {
   return rows[0] || null;
 }
 
+// The "current" snapshot for a draft is the one terminal node of its
+// append-only chain: the row no other row names as its supersedes_snapshot_id.
+// Locking it FOR UPDATE serializes concurrent changed confirmations against
+// the same predecessor; the single-successor unique index is what actually
+// decides the race (see confirmLimitationSnapshot).
 async function loadCurrentSnapshotForUpdate(tx, { organizationId, generatedContentDraftId }) {
   const { rows } = await tx.query(
-    `SELECT limitation_snapshot_id::text AS limitation_snapshot_id,
-            organization_id::text AS organization_id,
-            generated_content_draft_id::text AS generated_content_draft_id,
-            confirmed_by::text AS confirmed_by, confirmed_by_role, entries_fingerprint
-       FROM kai.limitation_snapshots
-      WHERE organization_id = $1::uuid AND generated_content_draft_id = $2::uuid
-        AND superseded_by_snapshot_id IS NULL
-      FOR UPDATE`,
+    `SELECT ls.limitation_snapshot_id::text AS limitation_snapshot_id,
+            ls.organization_id::text AS organization_id,
+            ls.generated_content_draft_id::text AS generated_content_draft_id,
+            ls.confirmed_by::text AS confirmed_by, ls.confirmed_by_role, ls.entries_fingerprint
+       FROM kai.limitation_snapshots ls
+      WHERE ls.organization_id = $1::uuid AND ls.generated_content_draft_id = $2::uuid
+        AND NOT EXISTS (
+              SELECT 1 FROM kai.limitation_snapshots successor
+               WHERE successor.supersedes_snapshot_id = ls.limitation_snapshot_id
+            )
+      FOR UPDATE OF ls`,
     [organizationId, generatedContentDraftId],
   );
   return rows[0] || null;
@@ -294,10 +302,13 @@ async function loadResolvedQueueRow(tx, { organizationId, generatedContentDraftI
 
 async function loadCurrentSnapshotWithEntries(tx, { organizationId, generatedContentDraftId }) {
   const snapshotRows = await tx.query(
-    `SELECT limitation_snapshot_id::text AS limitation_snapshot_id
-       FROM kai.limitation_snapshots
-      WHERE organization_id = $1::uuid AND generated_content_draft_id = $2::uuid
-        AND superseded_by_snapshot_id IS NULL`,
+    `SELECT ls.limitation_snapshot_id::text AS limitation_snapshot_id
+       FROM kai.limitation_snapshots ls
+      WHERE ls.organization_id = $1::uuid AND ls.generated_content_draft_id = $2::uuid
+        AND NOT EXISTS (
+              SELECT 1 FROM kai.limitation_snapshots successor
+               WHERE successor.supersedes_snapshot_id = ls.limitation_snapshot_id
+            )`,
     [organizationId, generatedContentDraftId],
   );
   const snapshot = snapshotRows.rows[0];
@@ -474,14 +485,23 @@ async function evaluateExportCandidateCurrentnessInTransaction(tx, { organizatio
   const candidate = rows[0];
   if (!candidate) return failure("not_found");
 
-  const supersededRows = await tx.query(
-    `SELECT superseded_by_snapshot_id::text AS superseded_by_snapshot_id
+  const boundSnapshotRows = await tx.query(
+    `SELECT limitation_snapshot_id::text AS limitation_snapshot_id
        FROM kai.limitation_snapshots
       WHERE organization_id = $1::uuid AND limitation_snapshot_id = $2::uuid`,
     [organizationId, candidate.limitation_snapshot_id],
   );
-  if (!supersededRows.rows[0]) return success({ current: false, reason: "limitation_snapshot_missing" });
-  if (supersededRows.rows[0].superseded_by_snapshot_id !== null) {
+  if (!boundSnapshotRows.rows[0]) return success({ current: false, reason: "limitation_snapshot_missing" });
+
+  // A candidate's bound snapshot becomes non-current the moment an
+  // authoritative successor exists whose supersedes_snapshot_id names it -
+  // the bound snapshot and the candidate row are read-only here; neither is
+  // rewritten to reflect this.
+  const successorRows = await tx.query(
+    `SELECT 1 FROM kai.limitation_snapshots WHERE supersedes_snapshot_id = $1::uuid LIMIT 1`,
+    [candidate.limitation_snapshot_id],
+  );
+  if (successorRows.rows.length > 0) {
     return success({ current: false, reason: "limitation_snapshot_superseded" });
   }
 
@@ -555,26 +575,22 @@ export function createPostgresExportCandidateRepository({ runInTransaction = wit
           }
 
           const newSnapshotId = crypto.randomUUID();
-          let supersededSnapshotId = null;
-          if (existing) {
-            const updateResult = await tx.query(
-              `UPDATE kai.limitation_snapshots
-                  SET superseded_by_snapshot_id = $1::uuid
-                WHERE organization_id = $2::uuid
-                  AND limitation_snapshot_id = $3::uuid
-                  AND superseded_by_snapshot_id IS NULL`,
-              [newSnapshotId, input.organizationId, existing.limitation_snapshot_id],
-            );
-            if (updateResult.rowCount !== 1) rollbackFailure("conflict_current_state_changed");
-            supersededSnapshotId = existing.limitation_snapshot_id;
-          }
+          const supersededSnapshotId = existing ? existing.limitation_snapshot_id : null;
 
+          // Append-only supersession: exactly one INSERT carrying a backward
+          // pointer (supersedes_snapshot_id) at the prior current snapshot.
+          // The prior row itself is never targeted by an UPDATE. If a
+          // concurrent changed confirmation already inserted a successor for
+          // the same predecessor (or, when there was no predecessor, another
+          // root), the single-successor / root-per-draft unique index
+          // rejects this INSERT with a unique_violation, caught below and
+          // reported as conflict_current_state_changed with zero new rows.
           await tx.query(
             `INSERT INTO kai.limitation_snapshots (
                limitation_snapshot_id, organization_id, generated_content_draft_id,
-               confirmed_by, confirmed_by_role, entries_fingerprint, created_by_type, created_at
+               confirmed_by, confirmed_by_role, entries_fingerprint, supersedes_snapshot_id, created_by_type, created_at
              )
-             VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5,$6,'human',$7::timestamptz)`,
+             VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5,$6,$7::uuid,'human',$8::timestamptz)`,
             [
               newSnapshotId,
               input.organizationId,
@@ -582,6 +598,7 @@ export function createPostgresExportCandidateRepository({ runInTransaction = wit
               input.actorContext.actorUserId,
               confirmedByRole,
               entriesFingerprint,
+              supersededSnapshotId,
               input.now,
             ],
           );

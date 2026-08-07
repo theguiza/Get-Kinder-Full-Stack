@@ -13999,3 +13999,145 @@ NOT_CONFIRMED:
     real client data, readiness/export-authority decision, finalGate,
     VAL-EXP-001 authority wiring, manifest, export artifact/event, route,
     UI, push, merge, P3-17 work, or new review cycle was performed.
+
+## P3-16 correction - append-only limitation-snapshot lineage (corrected 2026-08-07)
+
+Status: P3-16 was not yet accepted or deployed. This is a bounded local
+correction of one contract defect in that unaccepted package, not a new
+package and not acceptance. The original local P3-16 recorded snapshot
+supersession as a forward pointer (superseded_by_snapshot_id) written onto
+the prior row via an UPDATE at confirmation time - not append-only, since it
+rewrote persisted authority history. This correction removes that forward-
+pointer model everywhere it existed (schema, repository, verifier, smoke,
+failure-checks, tests, docs) and replaces it with a backward pointer
+(supersedes_snapshot_id) written once, at INSERT time, on the new row only.
+The existing P3-16 migration/rollback/verifier/smoke/failure-check/test
+files were corrected in place; no second migration was created to preserve
+the defective design, and 72615af was not amended or rebased.
+
+Corrected behavior: the first snapshot for a draft has no predecessor; a
+changed confirmation inserts exactly one new snapshot row referencing the
+previously current snapshot; identical replay remains zero-new-snapshot/
+zero-new-audit; supersession performs no UPDATE of the prior snapshot or its
+entries; a composite foreign key on (supersedes_snapshot_id, organization_id,
+generated_content_draft_id) scopes predecessor lineage to the same tenant and
+draft (and therefore the same requested audience, which is fixed per draft),
+making cross-tenant/cross-draft/cross-audience lineage impossible; a partial
+unique index allows at most one root (first) snapshot per draft and a second
+partial unique index allows at most one direct successor per predecessor, so
+concurrent changed confirmations from the same predecessor can create at
+most one successor - the losing request's own INSERT fails a unique
+constraint and is reported as conflict_current_state_changed with zero new
+authority rows and zero audit, never a silent rebase or a second successor;
+a new BEFORE UPDATE OR DELETE trigger (kai.p3_16_reject_authority_mutation)
+on both kai.limitation_snapshots and kai.limitation_snapshot_entries rejects
+ordinary runtime UPDATE/DELETE of any persisted snapshot or entry at the
+database boundary; a candidate bound to snapshot S becomes non-current
+exactly when an authoritative successor exists whose supersedes_snapshot_id
+names S, without rewriting either the old snapshot or the candidate.
+export_candidates_p3_16_snapshot_fk was tightened to also require the bound
+snapshot's own draft to match the candidate's draft, closing a latent
+cross-draft binding gap the original FK (organization-only) left open; this
+is the only change to export-candidate semantics, made solely to evaluate
+corrected snapshot currentness without ambiguity. No other accepted P3-16
+semantic (confirmation authorization, exact cited-pair coverage, canonical
+entries/candidate fingerprinting, export-candidate creation gates, or the
+metadata-only audit contract) was changed. No client_reviewed/funder_ready/
+public_ready/export_authority_granted/affirmativeHumanExportAuthority/
+finalGate/VAL-EXP-001 eligibility/manifest/export artifact or event/route/UI
+was added, and draft_status and the existing generated-content/export-review
+lifecycles are unchanged.
+
+Implementation evidence:
+  - migrations/kai_sprint2_p3_16_export_candidate_foundation.sql - schema
+    corrected: supersedes_snapshot_id backward pointer (nullable, set only at
+    INSERT) replaces superseded_by_snapshot_id; limitation_snapshots_p3_16_
+    supersedes_fk is an ordinary (non-deferred) composite FK scoped to
+    (organization_id, generated_content_draft_id); ux_limitation_snapshots_
+    p3_16_root_per_draft and ux_limitation_snapshots_p3_16_single_successor
+    partial unique indexes replace ux_limitation_snapshots_p3_16_current_
+    per_draft; kai.p3_16_reject_authority_mutation trigger function plus
+    trg_p3_16_limitation_snapshots_append_only and trg_p3_16_limitation_
+    snapshot_entries_append_only triggers added; export_candidates_p3_16_
+    snapshot_fk widened to a three-column composite. No Gate A through P3-15
+    table, column, or constraint touched beyond this package's own additive
+    audit-vocabulary widening (unchanged from the original package).
+  - migrations/kai_sprint2_p3_16_export_candidate_foundation.rollback.sql -
+    drops the two append-only triggers, both new indexes, and the
+    kai.p3_16_reject_authority_mutation function in addition to the
+    unchanged prior drop list; proven to restore the exact pre-P3-16 schema
+    and to allow a clean reapplication of the corrected forward migration
+    immediately afterward on the runner-owned synthetic PostgreSQL target.
+  - Backend/kai/dictionary/postgresExportCandidateRepository.js -
+    confirmLimitationSnapshot no longer issues an UPDATE against the prior
+    snapshot; it computes the current snapshot via NOT EXISTS(successor) and
+    inserts exactly one new row carrying supersedes_snapshot_id.
+    evaluateExportCandidateCurrentnessInTransaction now derives non-
+    currentness from successor existence rather than a forward-pointer
+    column. No caller-facing result shape or fingerprint/authorization
+    semantic changed.
+  - scripts/kai-sprint2-p3-16-export-candidate-foundation-verifier.sql,
+    -smoke-verifier.sql, -failure-checks.sql - updated/added catalog and
+    behavioral checks: absence of the forward-pointer column, presence of
+    the backward pointer/scoped FK/both partial unique indexes/both append-
+    only triggers, the tightened export-candidate snapshot FK, a byte-
+    identical-prior-row-and-entries check across a live supersession, and
+    failure-checks for a second root snapshot, a second successor of the
+    same predecessor, ordinary UPDATE/DELETE of a snapshot and of an entry,
+    and cross-tenant predecessor lineage.
+  - __tests__/kai-sprint2-p3-16-export-candidate-foundation.integration.spec.js -
+    updated existing assertions to the backward-pointer/successor-existence
+    model and added coverage for: no-UPDATE supersession with byte-identical
+    prior row/entries before and after; rejection of ordinary UPDATE/DELETE
+    against persisted snapshot/entry rows; cross-organization/cross-draft
+    predecessor lineage rejection; and two concurrent changed confirmations
+    from the same predecessor producing exactly one successor, one fresh
+    audit row, and a zero-write conflict_current_state_changed loser.
+  - scripts/kai-sprint2-p3-16-export-candidate-foundation-patch-notes.md,
+    -runbook.md - corrected to describe the backward-pointer append-only
+    model, the two partial unique indexes, and the append-only triggers;
+    added a top-of-file correction note.
+
+TOOL_VERIFIED:
+  - npm run verify:kai-sprint2-p3-16-export-candidate-foundation -> ephemeral
+    loopback PostgreSQL 16 runner: corrected forward migration, P3-04/P3-13
+    regression verifiers, corrected P3-16 catalog verifier, smoke seed/
+    corrected smoke verifier, corrected read-only failure checks, and the
+    full focused test list (corrected P3-16 integration+boundary plus P3-01
+    through P3-13 regression specs) all green - 180 total, 179 pass, 0 fail,
+    1 skipped (unrelated), runner workdir removed.
+  - A standalone runner-owned ephemeral PostgreSQL 16 instance additionally
+    proved: the corrected forward migration applies cleanly; the corrected
+    catalog verifier passes; the rollback migration removes every P3-16-
+    owned trigger/index/table/function and restores the exact pre-P3-16
+    schema; and the corrected forward migration reapplies cleanly and the
+    catalog verifier passes again immediately afterward.
+  - npm run test:kai-sprint2 -> complete Sprint 2 suite: 1738 total, 1713
+    pass, 0 fail, 25 skipped without a runner-owned database (unchanged
+    totals from the pre-correction package).
+  - npm test -> complete repository suite: 1843 total, 1818 pass, 0 fail, 25
+    skipped without a runner-owned database (unchanged totals).
+  - git diff --check -> clean (no whitespace errors).
+  - git diff --cached --check -> clean (nothing staged with whitespace
+    errors).
+  - Every node/npm/npx command above ran with
+    DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel explicitly set and
+    DATABASE_URL_LOCAL/PGURL_LOCAL/RENDER_DATABASE_URL/PROD_DATABASE_URL
+    explicitly cleared; the P3-16 runner and the standalone rollback/
+    reapply check each used only their own proven loopback-only, ephemeral
+    PostgreSQL target; no ad-hoc DB-capable import was run and no DB
+    configuration was printed by this package's own commands.
+
+USER_CONFIRMED:
+  - P2-01 through P2-08 and P3-01 through P3-15 remain accepted and closed.
+  - P3-16 remains not yet accepted; this correction fixes exactly one
+    contract defect (append-only limitation-snapshot lineage) in that
+    unaccepted local package before any acceptance review.
+
+NOT_CONFIRMED:
+  - No production/shared-database mutation, deployment, cloud/flag change,
+    real client data, push, merge, Current-State update, P3-17 work,
+    client_reviewed/funder_ready/public_ready/export_authority_granted/
+    affirmativeHumanExportAuthority/finalGate/VAL-EXP-001 eligibility/
+    manifest/export artifact or event/route/UI addition, or new review cycle
+    was performed.

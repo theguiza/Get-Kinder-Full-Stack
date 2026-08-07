@@ -1,5 +1,30 @@
 # KAI P3-16 Patch Notes — Export-Candidate Identity and Limitation-Snapshot Foundation
 
+## Correction (this package)
+
+The original P3-16 local package recorded limitation-snapshot supersession as
+a forward pointer (`superseded_by_snapshot_id`) written onto the *prior*
+row via an `UPDATE` at the moment a new snapshot was confirmed. That is not
+append-only: it rewrites persisted authority history. This corrective commit
+replaces that design everywhere it existed (schema, repository, verifier,
+smoke, failure-checks, tests, docs) with a backward pointer
+(`supersedes_snapshot_id`) written once, at INSERT time, on the *new* row —
+a supersession is now exactly one INSERT and never touches the prior row.
+`kai.limitation_snapshots`/`kai.limitation_snapshot_entries` now also carry a
+`BEFORE UPDATE OR DELETE` trigger that rejects any ordinary mutation of
+persisted authority rows/entries, and lineage (`supersedes_snapshot_id`) is
+now scoped by a composite foreign key to the exact same organization and
+generated-content draft as the new row, with a partial unique index
+guaranteeing at most one direct successor per predecessor and at most one
+root (first) snapshot per draft. No other accepted P3-16 semantic changed:
+confirmation authorization, exact cited-pair coverage, canonical
+entries/candidate fingerprinting, replay convergence, export-candidate
+creation gates, and the metadata-only audit contract are unchanged. See the
+runbook's "Append-only supersession (corrected)" section for the full
+behavior. P3-16 was not accepted or deployed before this correction, so the
+existing migration/rollback/verifier/smoke/failure-check/test files were
+corrected in place rather than superseded by a second migration.
+
 ## Owner decision on scope
 
 `OWNER_DECISION.P3_EXPORT_CANDIDATE_V1` and
@@ -17,8 +42,12 @@ VAL-EXP-001/`exportEligible`/`draftIsStillDraft` wiring, and creates no
 - `migrations/kai_sprint2_p3_16_export_candidate_foundation.sql` /
   `.rollback.sql` — forward/rollback migration creating `kai.limitation_snapshots`,
   `kai.limitation_snapshot_entries`, `kai.export_candidates`, the
-  `kai.p3_16_limitation_codes_valid` helper function, the partial unique index
-  enforcing at most one non-superseded snapshot per draft, and the two new
+  `kai.p3_16_limitation_codes_valid` helper function, the append-only
+  `supersedes_snapshot_id` backward-pointer lineage (scoped by a composite FK
+  to the same organization/draft), the partial unique indexes enforcing at
+  most one root snapshot per draft and at most one direct successor per
+  predecessor, the `kai.p3_16_reject_authority_mutation` trigger function
+  rejecting ordinary `UPDATE`/`DELETE` of snapshot/entry rows, and the two new
   `limitation_snapshot_confirmed`/`export_candidate_created` metadata-only audit
   operation branches on the existing `kai.upload_lifecycle_audit`.
 - `scripts/kai-sprint2-p3-16-export-candidate-foundation-verifier.sql` —
@@ -84,10 +113,13 @@ server loads the tenant-scoped cited-pair set from the draft's own
 block/citation graph and rejects missing, duplicate, extra/uncited, or
 malformed entries. An exact-content replay (same canonical entries fingerprint)
 converges with zero additional writes and zero additional audit. A changed
-limitation posture creates a new append-only snapshot and points the prior
-snapshot's `superseded_by_snapshot_id` at it — the prior row is never
-rewritten. At most one non-superseded ("current") snapshot exists per draft
-at any time (partial unique index).
+limitation posture creates exactly one new append-only snapshot row whose own
+`supersedes_snapshot_id` names the prior current snapshot — the prior row is
+never rewritten, and ordinary `UPDATE`/`DELETE` of any persisted snapshot or
+entry is rejected by a database trigger. At most one root (first, no
+predecessor) snapshot and at most one direct successor per predecessor exist
+per draft at any time (two partial unique indexes), so the current snapshot
+is always the unique row no other row names as its predecessor.
 
 **Export candidates.** `createGeneratedDraftExportCandidate` is gated the
 same way, restricted to `gk_admin` only, and requires the generated-content

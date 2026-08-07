@@ -21,14 +21,87 @@ SELECT 'export_candidates_table_present',
        'kai.export_candidates exists';
 
 INSERT INTO p3_16_results
-SELECT 'current_snapshot_per_draft_unique_index_present',
+SELECT 'root_snapshot_per_draft_unique_index_present',
        CASE WHEN EXISTS (
               SELECT 1 FROM pg_indexes
                WHERE schemaname = 'kai'
-                 AND indexname = 'ux_limitation_snapshots_p3_16_current_per_draft'
+                 AND indexname = 'ux_limitation_snapshots_p3_16_root_per_draft'
             )
             THEN 'PASS' ELSE 'FAIL' END,
-       'at most one non-superseded snapshot per (organization_id, generated_content_draft_id)';
+       'at most one root (first, no-predecessor) snapshot per (organization_id, generated_content_draft_id)';
+
+INSERT INTO p3_16_results
+SELECT 'single_successor_unique_index_present',
+       CASE WHEN EXISTS (
+              SELECT 1 FROM pg_indexes
+               WHERE schemaname = 'kai'
+                 AND indexname = 'ux_limitation_snapshots_p3_16_single_successor'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'at most one direct successor may exist per predecessor snapshot (supersedes_snapshot_id)';
+
+INSERT INTO p3_16_results
+SELECT 'no_forward_pointer_column_present',
+       CASE WHEN NOT EXISTS (
+              SELECT 1 FROM information_schema.columns
+               WHERE table_schema = 'kai'
+                 AND table_name = 'limitation_snapshots'
+                 AND column_name = 'superseded_by_snapshot_id'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'the defective forward-pointer superseded_by_snapshot_id column does not exist anywhere';
+
+INSERT INTO p3_16_results
+SELECT 'supersedes_snapshot_id_backward_pointer_present',
+       CASE WHEN EXISTS (
+              SELECT 1 FROM information_schema.columns
+               WHERE table_schema = 'kai'
+                 AND table_name = 'limitation_snapshots'
+                 AND column_name = 'supersedes_snapshot_id'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'lineage is recorded as a backward pointer on the new row (supersedes_snapshot_id)';
+
+INSERT INTO p3_16_results
+SELECT 'predecessor_scoped_to_org_and_draft',
+       CASE WHEN EXISTS (
+              SELECT 1 FROM pg_constraint
+               WHERE conname = 'limitation_snapshots_p3_16_supersedes_fk'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'a supersedes_snapshot_id reference is scoped to the same organization and generated-content draft as the new row';
+
+INSERT INTO p3_16_results
+SELECT 'limitation_snapshots_append_only_trigger_present',
+       CASE WHEN EXISTS (
+              SELECT 1 FROM pg_trigger
+               WHERE tgname = 'trg_p3_16_limitation_snapshots_append_only'
+                 AND tgrelid = 'kai.limitation_snapshots'::regclass
+                 AND NOT tgisinternal
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'ordinary UPDATE/DELETE of kai.limitation_snapshots is rejected at the database boundary';
+
+INSERT INTO p3_16_results
+SELECT 'limitation_snapshot_entries_append_only_trigger_present',
+       CASE WHEN EXISTS (
+              SELECT 1 FROM pg_trigger
+               WHERE tgname = 'trg_p3_16_limitation_snapshot_entries_append_only'
+                 AND tgrelid = 'kai.limitation_snapshot_entries'::regclass
+                 AND NOT tgisinternal
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'ordinary UPDATE/DELETE of kai.limitation_snapshot_entries is rejected at the database boundary';
+
+INSERT INTO p3_16_results
+SELECT 'export_candidate_snapshot_binding_scoped_to_draft',
+       CASE WHEN EXISTS (
+              SELECT 1 FROM pg_constraint c
+               WHERE c.conname = 'export_candidates_p3_16_snapshot_fk'
+                 AND pg_get_constraintdef(c.oid) LIKE '%generated_content_draft_id%'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'an export candidate can only bind a limitation snapshot from its own organization and draft';
 
 INSERT INTO p3_16_results
 SELECT 'limitation_snapshot_entries_identity_unique_present',

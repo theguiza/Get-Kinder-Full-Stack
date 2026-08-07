@@ -80,21 +80,57 @@ org-scoped membership (never trusted from caller-supplied text) and must be
 
 The confirmed entries are canonicalized (sorted by claim/evidence pair, each
 code set deduplicated and sorted) and SHA-256'd into `entries_fingerprint`.
-If a non-superseded ("current") snapshot already exists for the draft:
+If a current snapshot already exists for the draft:
 
 - identical fingerprint → replay: zero additional rows, zero additional audit;
-- different fingerprint → supersession: the new snapshot is inserted first
-  (client-generated id, `superseded_by_snapshot_id = NULL`), then the prior
-  snapshot's `superseded_by_snapshot_id` is set to point at it. The
-  cross-table foreign key from `superseded_by_snapshot_id` back into
-  `kai.limitation_snapshots` is `DEFERRABLE INITIALLY DEFERRED` specifically
-  to allow this ordering — an application-level ordering rather than any
-  widening of who may be referenced. The prior snapshot row itself is never
-  rewritten (append-only).
+- different fingerprint → supersession: exactly one new row is inserted,
+  carrying `supersedes_snapshot_id` set to the prior current snapshot's id.
+  The prior row is never targeted by an `UPDATE` or `DELETE` — the
+  supersession is one `INSERT` and nothing else.
 
-At most one non-superseded snapshot exists per `(organization_id,
-generated_content_draft_id)` at any time
-(`ux_limitation_snapshots_p3_16_current_per_draft`, a partial unique index).
+### Append-only supersession (corrected)
+
+Lineage is a **backward pointer on the new row**, not a forward pointer
+written onto the prior row:
+
+```
+new snapshot
+    -> supersedes_snapshot_id
+prior snapshot
+```
+
+- `supersedes_snapshot_id` is `NULL` for the first (root) snapshot of a
+  draft, and otherwise names the prior current snapshot — set once, at
+  `INSERT` time, and never altered afterward.
+- `limitation_snapshots_p3_16_supersedes_fk` is a composite, non-deferred
+  foreign key on `(supersedes_snapshot_id, organization_id,
+  generated_content_draft_id)`: a predecessor must already exist and must
+  belong to the exact same organization and generated-content draft as the
+  new row. Lineage can never cross tenant or draft, and therefore never
+  crosses `requested_audience` either, since a draft's audience is fixed.
+- `ux_limitation_snapshots_p3_16_root_per_draft` (partial unique index on
+  `(organization_id, generated_content_draft_id)` where
+  `supersedes_snapshot_id IS NULL`) allows at most one root snapshot per
+  draft.
+- `ux_limitation_snapshots_p3_16_single_successor` (partial unique index on
+  `supersedes_snapshot_id` where it is not null) allows at most one direct
+  successor per predecessor. Combined with the root-per-draft index, a
+  draft's lineage is always a single linear chain, never a forest or a
+  branch, and its **current** snapshot is always the unique row that no
+  other row names as its predecessor.
+- Two concurrent changed confirmations racing from the same current
+  snapshot each attempt their own `INSERT`; only one can satisfy the
+  single-successor (or, if the read raced ahead, the root-per-draft) unique
+  index. The loser's `INSERT` fails with a unique-constraint violation,
+  mapped to `conflict_current_state_changed` with zero rows written and
+  zero audit published — it never silently rebases onto the winner's row or
+  creates a second successor.
+- `kai.p3_16_reject_authority_mutation`, attached as a `BEFORE UPDATE OR
+  DELETE` trigger on both `kai.limitation_snapshots` and
+  `kai.limitation_snapshot_entries`, unconditionally raises an exception.
+  Ordinary application code, migrations, or ad-hoc SQL cannot rewrite or
+  remove any persisted snapshot or entry — this is enforced at the database
+  boundary regardless of what the repository layer does or doesn't attempt.
 
 ## Export candidates
 
@@ -137,11 +173,14 @@ row.
 
 `evaluateExportCandidateCurrentnessInTransaction` (exported only via
 `__exportCandidateRepositoryTestables` for this package's own tests) is a
-read-only evaluator: it reports `current: false` if the candidate's bound
-snapshot has since been superseded, or if recomputing the canonical
-fingerprint from the current graph no longer matches the stored one. It is
-not called from VAL-EXP-001, `exportEligible`, or any route — that wiring is
-explicitly out of scope for this package.
+read-only evaluator: it reports `current: false` if an authoritative
+successor now exists whose `supersedes_snapshot_id` names the candidate's
+bound snapshot, or if recomputing the canonical fingerprint from the current
+graph no longer matches the stored one. Currentness is derived solely from
+whether such a successor exists — neither the bound snapshot nor the
+candidate row is ever rewritten to reflect it. It is not called from
+VAL-EXP-001, `exportEligible`, or any route — that wiring is explicitly out
+of scope for this package.
 
 ## Required metadata-only audit
 
@@ -178,7 +217,9 @@ migration, never editing an earlier package's accepted migration file).
 removes the two new audit CHECK branches (restoring the exact prior audit
 operation vocabulary), deletes only `limitation_snapshot_confirmed`/
 `export_candidate_created` audit rows, and drops `kai.export_candidates`,
-`kai.limitation_snapshot_entries`, `kai.limitation_snapshots`, and the
-`kai.p3_16_limitation_codes_valid` function (child-first). It alters no Gate
-A through P3-15 table, column, or constraint beyond that restoration, and
-leaves all unrelated generated-content/review-queue/draft state untouched.
+the append-only triggers, `kai.limitation_snapshot_entries`,
+`kai.limitation_snapshots`, and the `kai.p3_16_reject_authority_mutation`
+and `kai.p3_16_limitation_codes_valid` functions (child-first). It alters no
+Gate A through P3-15 table, column, or constraint beyond that restoration,
+and leaves all unrelated generated-content/review-queue/draft state
+untouched.
