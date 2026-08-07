@@ -13230,3 +13230,137 @@ NOT_CONFIRMED:
   - No push, merge, deploy, flag enablement, Start Review UI control, export-
     review completion, approval/export authority, finalGate, manifest/file
     creation, P3-12 work, or new review cycle was performed.
+
+## P3-12 - GK export-review Start Review UI control (completed 2026-08-07)
+
+Status: accepted for this local package as exactly one mutation control added
+to the existing P3-08 GK export-review detail component, calling the existing
+accepted P3-10 start route once per user action. No new page, frontend route,
+navigation entry, API client, or backend endpoint was created; no backend
+route/service/repository/schema file changed.
+
+Implementation evidence:
+  - frontend/gkExportReviewDetailLogic.js - four additive exports, no
+    existing export's signature or behavior changed:
+    - startPath(organizationId, generatedContentDraftId,
+      exportReviewQueueItemId) builds the accepted P3-10
+      .../export-review-queue/:id/start route from the same three
+      identifiers packetPath already uses.
+    - startReviewRequest(path, expectedUpdatedAt) issues the mutation using
+      the same same-origin/credentialed fetch convention as the existing
+      getJson, with a request body fixed to exactly
+      { expected_updated_at: expectedUpdatedAt } - no actorContext, now,
+      roles, or other client-supplied field is ever constructed or sent.
+    - canStartReview(model) is the single control-visibility decision point:
+      true only when exportReviewQueueStatus === "open" and
+      exportReviewStatus === "needs_gk_review"; false for in_progress and
+      every other combination, including a null/undefined model.
+    - decideStartResult(result) is the single decision point for the start
+      response: statusCode 200 with ok:true resolves "success";
+      error.code === "conflict_current_state_changed" resolves "conflict";
+      everything else resolves "error" with the existing errorText message
+      convention. Neither "success" nor "conflict" ever reads or returns
+      response.body.data - the mutation response is never treated as the
+      new packet.
+    - toRenderModel's existing P3-06 allowlist projection gains exactly two
+      additional passthrough keys, exportReviewQueueStatus and
+      exportReviewUpdatedAt, retained only for the two functions above; no
+      other key, validator, or code path in this file changed.
+  - frontend/gkExportReviewDetail.jsx - the existing read-only component
+    gains exactly one control:
+    - A single <button>"Start Review"</button> renders only when
+      canStartReview(model) is true; it renders nothing for in_progress or
+      any other state, and no other button/control exists in the file.
+    - handleStartReview is re-entrancy-guarded
+      (if (startPending || outcome?.kind !== "success" || !outcome.model)
+      return;) and the button is disabled while startPending is true, so one
+      click can produce at most one in-flight POST.
+    - On startReviewRequest resolving to "success" or "conflict", the
+      handler awaits loadPacket() exactly once (a single fresh GET against
+      the unmodified P3-07 packetPath route) and replaces outcome/model
+      entirely from that authoritative response; the start response body is
+      never used to construct or patch local state, and the POST is never
+      retried on conflict.
+    - On any other decideStartResult "error", startErrorMessage is set and
+      rendered through the existing gk-export-review-note convention; model/
+      outcome are left untouched, so no partial mutation state is ever shown.
+    - exportReviewUpdatedAt appears exactly once in this file - as the
+      startReviewRequest argument sourced from outcome.model.exportReviewUpdatedAt
+      - and is never passed to FieldRow or otherwise rendered.
+    - The file still contains no literal method: "POST"/PUT/PATCH/DELETE, no
+      postJson/putJson/patchJson/deleteJson, and no approve/reject/finalize/
+      mark-ready/markReady/download token; "Why can KAI say this?" and the
+      existing citation rendering are byte-for-byte unchanged; no new route,
+      navigation entry, or entry.jsx mount point was added (index.js and
+      frontend/entry.jsx are untouched).
+  - __tests__/kai-sprint2-p3-08-gk-export-review-detail.spec.js - the exact
+    deepEqual success-model assertion now includes exportReviewQueueStatus
+    and exportReviewUpdatedAt (the two fields this ticket requires the
+    projection to retain); the former P3-11 test asserting those fields were
+    always dropped is replaced with one P3-12 test asserting they are now
+    retained internally on the model. Every other existing P3-08 test
+    (allowlist/extra-field dropping, all nine safe error codes, malformed-
+    envelope rejection, forbidden-field/mutation source-text checks, route/
+    entry-mount checks) is unmodified and still passes unchanged.
+  - __tests__/kai-sprint2-p3-12-gk-export-review-start-control.spec.js (new)
+    - proves: startPath's exact route string; startReviewRequest sends
+      exactly { expected_updated_at } via the existing POST convention and
+      no other field; canStartReview's full truth table (open/needs_gk_review
+      true, in_progress/needs_gk_review false, open/anything-else false,
+      every other queue status false, null/undefined false);
+      toRenderModel's retention of both fields; decideStartResult's three
+      outcomes (success, conflict_current_state_changed, other safe error)
+      including that a conflict is never treated as success; source-text
+      proof that exportReviewUpdatedAt is referenced exactly once in the
+      component (the mutation call, never a FieldRow); exactly one Start
+      Review control gated by canStartReview; the mutation call site is
+      sourced only from outcome.model.exportReviewUpdatedAt with no
+      actorContext/now anywhere in either file; the re-entrancy guard and
+      disabled={startPending} exist; success and conflict both resolve via a
+      single loadPacket() call and the component never reads
+      decideStartResult's result as new packet data; other errors set
+      startErrorMessage only; no approve/reject/finalize/mark-ready/download
+      control exists; the citation/"Why can KAI say this?" text is
+      unchanged; and entry.jsx/index.js mount/route counts are unchanged.
+
+TOOL_VERIFIED:
+  - node --test __tests__/kai-sprint2-p3-08-gk-export-review-detail.spec.js
+    -> 13/13 pass.
+  - node --test __tests__/kai-sprint2-p3-12-gk-export-review-start-control.spec.js
+    -> 17/17 pass.
+  - node --test __tests__/kai-sprint2-p3-10-export-review-start-route.spec.js
+    -> 9/9 pass (unchanged P3-10 route contract, re-run for regression).
+  - node --test __tests__/kai-sprint2-p3-07-export-review-packet-route.spec.js
+    -> 8/8 pass (unchanged P3-07 route, re-run for regression).
+  - node --test __tests__/kai-sprint2-p3-06-export-review-packet-boundary.spec.js
+    -> 16/16 pass (unchanged P3-06/P3-11 boundary, re-run for regression).
+  - node --test __tests__/kai-sprint2-p3-06-export-review-packet.integration.spec.js
+    -> 2/2 run, 1 skipped without a runner-owned database (no DB command was
+    executed by this package; skip is the existing DB-gated behavior).
+  - node --test __tests__/kai-sprint2-p3-09-export-review-start-boundary.spec.js
+    -> 25/25 pass (unchanged P3-09 CAS/replay boundary, re-run for
+    regression).
+  - npm run test:kai-sprint2 -> complete Sprint 2 suite: 1640 pass, 23 skip,
+    0 fail.
+  - npm test -> complete repository suite: 1745 pass, 23 skip, 0 fail.
+  - npx vite build -> succeeded (47 modules transformed; public/js/bundles/entry.js
+    rebuilt and included in this package's diff).
+  - git diff --check -> clean (no whitespace errors).
+  - git diff --cached --check -> clean (no staged changes prior to this
+    package's commit).
+  - Every node/npm/npx command above ran with
+    DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel explicitly set and
+    DATABASE_URL_LOCAL/PGURL_LOCAL/RENDER_DATABASE_URL/PROD_DATABASE_URL
+    explicitly cleared; no ad-hoc DB-capable import was run.
+
+USER_CONFIRMED:
+  - P2-01 through P2-08 and P3-01 through P3-11 are accepted and closed.
+  - P3-12 is authorized as one bounded Start Review mutation control added to
+    the existing P3-08 component, calling the existing accepted P3-10 start
+    route with exactly { expected_updated_at }.
+
+NOT_CONFIRMED:
+  - No push, merge, deploy, flag enablement, approve/reject/complete/
+    finalize/export/download/mark-ready control, export-review completion,
+    approval/export authority, finalGate, manifest/file creation, P3-13
+    work, or new review cycle was performed.

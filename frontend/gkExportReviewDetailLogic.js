@@ -24,6 +24,12 @@ export function packetPath(organizationId, generatedContentDraftId, exportReview
     + `/export-review-queue/${exportReviewQueueItemId}/packet`;
 }
 
+export function startPath(organizationId, generatedContentDraftId, exportReviewQueueItemId) {
+  return `${BASE_PATH}/admin/organizations/${organizationId}`
+    + `/generated-content-drafts/${generatedContentDraftId}`
+    + `/export-review-queue/${exportReviewQueueItemId}/start`;
+}
+
 async function readJson(response) {
   try {
     return await response.json();
@@ -37,6 +43,19 @@ export async function getJson(path) {
     method: "GET",
     credentials: "same-origin",
     headers: { Accept: "application/json" },
+  });
+  return { statusCode: response.status, body: await readJson(response) };
+}
+
+// P3-12: issues the accepted P3-10 start transition. The request body is fixed
+// to exactly { expected_updated_at } - no actorContext, no now, no other
+// client-supplied authority data ever leaves this call.
+export async function startReviewRequest(path, expectedUpdatedAt) {
+  const response = await fetch(path, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify({ expected_updated_at: expectedUpdatedAt }),
   });
   return { statusCode: response.status, body: await readJson(response) };
 }
@@ -62,6 +81,10 @@ export function toRenderModel(data) {
     exportReviewStatus: data.exportReviewStatus,
     currentUseEligible: data.currentUseEligible,
     exportEligible: data.exportEligible,
+    // P3-12: retained for Start Review control-state logic only. Neither
+    // field is rendered by this page - see gkExportReviewDetail.jsx.
+    exportReviewQueueStatus: data.exportReviewQueueStatus,
+    exportReviewUpdatedAt: data.exportReviewUpdatedAt,
     validatorSeverity: validatorResult.severity,
     validatorFailedGate: validatorResult.blocking_reason ?? null,
     blocks: blocks.map((block) => ({
@@ -91,6 +114,29 @@ export function toRenderModel(data) {
 export function decideOutcome(result) {
   if (result?.statusCode === 200 && result?.body?.ok === true) {
     return { kind: "success", model: toRenderModel(result.body.data) };
+  }
+  return { kind: "error", message: errorText(result) };
+}
+
+// P3-12: the Start Review control shows only for the one queue/review state
+// pair this ticket authorizes. Every other combination (including
+// in_progress) shows none.
+export function canStartReview(model) {
+  return !!model
+    && model.exportReviewQueueStatus === "open"
+    && model.exportReviewStatus === "needs_gk_review";
+}
+
+// P3-12: a single decision point for the P3-10 start response. Success and
+// conflict_current_state_changed both resolve by re-fetching the P3-07
+// packet once (never by trusting this response body); every other outcome
+// is a safe, displayable error with no partial mutation state.
+export function decideStartResult(result) {
+  if (result?.statusCode === 200 && result?.body?.ok === true) {
+    return { kind: "success" };
+  }
+  if (result?.body?.error?.code === "conflict_current_state_changed") {
+    return { kind: "conflict" };
   }
   return { kind: "error", message: errorText(result) };
 }

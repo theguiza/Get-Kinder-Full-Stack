@@ -103,6 +103,8 @@ test("P3-08 success renders only allowlisted P3-06 fields and drops everything e
     exportReviewStatus: "needs_gk_review",
     currentUseEligible: true,
     exportEligible: false,
+    exportReviewQueueStatus: "open",
+    exportReviewUpdatedAt: "2026-08-06T09:00:00.000Z",
     validatorSeverity: "blocker",
     validatorFailedGate: "claim_review_incomplete",
     blocks: [
@@ -133,12 +135,11 @@ test("P3-08 success renders only allowlisted P3-06 fields and drops everything e
   assert.equal(rendered.includes("secret_internal_note"), false);
 });
 
-test("P3-11 P3-08 ignores the new exportReviewUpdatedAt packet field and stays read-only", () => {
+test("P3-12 P3-08 projection retains exportReviewQueueStatus and exportReviewUpdatedAt internally for Start Review control-state logic only", () => {
   const outcome = decideOutcome({ statusCode: 200, body: { ok: true, data: validDto, warnings: [] } });
   assert.equal(outcome.kind, "success");
-  assert.equal("exportReviewUpdatedAt" in outcome.model, false);
-  const rendered = JSON.stringify(outcome.model);
-  assert.equal(rendered.includes("2026-08-06T09:00:00.000Z"), false);
+  assert.equal(outcome.model.exportReviewQueueStatus, "open");
+  assert.equal(outcome.model.exportReviewUpdatedAt, "2026-08-06T09:00:00.000Z");
 });
 
 test("P3-08 malformed/extra response fields are dropped, never rejected as an error and never silently promoted into new fields", () => {
