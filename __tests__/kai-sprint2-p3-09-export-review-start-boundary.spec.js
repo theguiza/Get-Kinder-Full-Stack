@@ -591,8 +591,8 @@ test("P3-06 reads both open/needs_gk_review and in_progress/needs_gk_review expo
   }
 });
 
-test("P3-06 rejects an export_review state outside the two admitted lifecycle profiles", async () => {
-  const state = makeState({ queueRow: makeExportReviewRow({ queue_status: "resolved", review_status: "resolved" }) });
+test("P3-06 rejects an export_review state outside the three admitted lifecycle profiles", async () => {
+  const state = makeState({ queueRow: makeExportReviewRow({ queue_status: "in_progress", review_status: "resolved" }) });
   const tx = makeFakeTx(state);
   const result = await evaluateExportReviewRequestStateInTransaction(tx, {
     organizationId: ORG,
@@ -602,12 +602,13 @@ test("P3-06 rejects an export_review state outside the two admitted lifecycle pr
   assert.equal(result.error.code, "conflict_current_state_changed");
 });
 
-test("P3-09 exposes exactly the two lifecycle profiles: open/needs_gk_review and in_progress/needs_gk_review", () => {
+test("P3-09 (widened by P3-13) exposes exactly three lifecycle profiles: open/needs_gk_review, in_progress/needs_gk_review, and resolved/resolved", () => {
   assert.deepEqual(
     EXPORT_REVIEW_LIFECYCLE_PROFILES.map((profile) => ({ ...profile })),
     [
       { queueStatus: "open", reviewStatus: "needs_gk_review" },
       { queueStatus: "in_progress", reviewStatus: "needs_gk_review" },
+      { queueStatus: "resolved", reviewStatus: "resolved" },
     ],
   );
 });

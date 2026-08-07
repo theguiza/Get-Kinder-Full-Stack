@@ -13364,3 +13364,233 @@ NOT_CONFIRMED:
     finalize/export/download/mark-ready control, export-review completion,
     approval/export authority, finalGate, manifest/file creation, P3-13
     work, or new review cycle was performed.
+
+## P3-13 - GK export-review completion transition (completed 2026-08-07)
+
+Status: accepted for this local package as exactly one dormant backend
+service, completeGeneratedDraftExportReview, that transitions an export_review
+queue row from in_progress/needs_gk_review to resolved/resolved via a
+tenant-scoped compare-and-set, plus the minimal schema/audit widening and
+P3-06 read-path widening this transition requires. This means only that the
+GK export-review queue work is complete for the affected draft; it creates no
+approval, affirmativeHumanExportAuthority, finalGate, exportEligible=true,
+funder-ready/public-ready state, or manifest/file/export/finalization
+artifact anywhere in the system. No route or frontend production control was
+added.
+
+Implementation evidence:
+  - Backend/kai/dictionary/exportReviewQueueContract.js - EXPORT_REVIEW_LIFECYCLE_PROFILES
+    gains exactly one additional frozen entry, { queueStatus: "resolved",
+    reviewStatus: "resolved" }, appended after the existing P3-05/P3-09 open
+    and in_progress profiles; every other export in this file (the static
+    contract, isExportReviewQueueStaticContractRow,
+    isExportReviewQueueLifecycleState, isExportReviewQueueContractRow) is
+    unchanged and still defaults allowedLifecycleProfiles to the single P3-05
+    open profile for existing call sites that do not opt in.
+  - Backend/kai/dictionary/postgresGeneratedContentRepository.js:
+    - New constants EXPORT_REVIEW_COMPLETE_QUEUE_STATUS/
+      EXPORT_REVIEW_COMPLETE_REVIEW_STATUS/EXPORT_REVIEW_COMPLETE_LIFECYCLE_PROFILE
+      derived from EXPORT_REVIEW_LIFECYCLE_PROFILES[2] (never a literal
+      "resolved" string in the P3-09 start section), plus
+      EXPORT_REVIEW_COMPLETE_AUDIT_OPERATION = "export_review_completed",
+      EXPORT_REVIEW_COMPLETE_AUDIT_CONTRACT = "p3_13_export_review_completion_v1",
+      EXPORT_REVIEW_COMPLETE_VALIDATOR_KEYS = ["VAL-EXP-003"].
+    - New completeGeneratedDraftExportReview(input, dependencies) method on
+      createPostgresGeneratedContentRepository's returned object, placed
+      directly after the existing startGeneratedDraftExportReview method:
+      loads the tenant-scoped queue row by id (not_found if absent, conflict
+      if target_object_type/target_object_id mismatch), then runs one CAS
+      UPDATE requiring organization_id, exact review_queue_item_id,
+      queue_type='export_review', target_object_type='generated_content_draft',
+      target_object_id, queue_status='in_progress', review_status=
+      'needs_gk_review', and date_trunc('milliseconds', updated_at) matching
+      expectedUpdatedAt, setting only queue_status='resolved',
+      review_status='resolved', and updated_at bookkeeping. On rowCount!==1
+      it falls through to evaluateCompleteExportReviewReplayOrConflict
+      (reread by id, require the resolved/resolved lifecycle profile, require
+      exactly one matching export_review_completed audit row, else conflict
+      with zero repair). On a fresh CAS success it re-reads and re-validates
+      the row against exactly [EXPORT_REVIEW_COMPLETE_LIFECYCLE_PROFILE],
+      writes exactly one metadata-only audit row via the same
+      prepareRequiredAudit/loadAuditFileContext helpers P3-04/P3-09 already
+      established, self-verifies the audit via
+      findMatchingCompleteExportReviewAudit, and returns
+      { generatedContentDraftId, exportReviewQueueItemId,
+      queueStatus:"resolved", reviewStatus:"resolved", replayed }. Postgres
+      error mapping (23505/23503/22P02/23514/25001) matches P3-09's start
+      method exactly.
+    - The standalone helpers (validateCompleteExportReviewInput,
+      toCompleteExportReviewResult, buildCompleteExportReviewAuditMetadata,
+      auditMetadataMatchesComplete, insertCompleteExportReviewAudit,
+      findMatchingCompleteExportReviewAudit,
+      evaluateCompleteExportReviewReplayOrConflict) are declared after
+      createPostgresGeneratedContentRepository's closing brace (function
+      declarations are hoisted, so this is load-order-neutral) specifically
+      so they fall outside both the existing P3-09 "no resolved state" source
+      scan and the existing P3-06 "read path has no write/audit/INSERT"
+      source scan already enforced by prior tickets' tests - this ticket's
+      own boundary test proves the same section contains no approval/
+      export_authority/finalGate/manifest token.
+    - evaluateExportReviewRequestStateInTransaction (P3-06's read path) and
+      evaluateGeneratedDraftExportReviewPacketInTransaction are completely
+      unchanged; both already parameterize on the full
+      EXPORT_REVIEW_LIFECYCLE_PROFILES array/default, so they admit the new
+      resolved/resolved profile automatically once the dictionary is widened,
+      with zero code change to either function.
+    - __generatedContentRepositoryContract/__generatedContentRepositoryTestables
+      gain the new EXPORT_REVIEW_COMPLETE_* constants and
+      validateCompleteExportReviewInput; every existing key is unchanged.
+  - Backend/kai/services/kaiExportReviewService.js - new
+    completeGeneratedDraftExportReview(input, dependencies) export, placed
+    directly before getGeneratedDraftExportReviewPacket, following the exact
+    P3-09 gate order: KAI_SPRINT2_ENABLED -> KAI_GENERATION_ENABLED ->
+    KAI_PUBLIC_EXPORT_ENABLED -> exact input contract
+    (isCompleteExportReviewInput: organizationId, generatedContentDraftId,
+    exportReviewQueueItemId, expectedUpdatedAt, actorContext, now, no more
+    and no less) -> isMappedHumanActor -> validateActorCanPerformOperation
+    against the existing EXPORT_REVIEW_ALLOWED_ROLES ({"gk_admin"}) scoped to
+    organizationId (active-membership + role check) -> lazy
+    await import("../dictionary/postgresGeneratedContentRepository.js") only
+    after every gate passes. isCompleteExportReviewResultDto pins the exact
+    five-key allowlist and queueStatus==="resolved"/reviewStatus==="resolved".
+    No route, controller, or frontend file references this export.
+  - migrations/kai_sprint2_p3_13_export_review_completion.sql (new) - widens
+    review_queue_items_p3_09_export_review_contract_check (dropped) into
+    review_queue_items_p3_13_export_review_contract_check admitting exactly
+    open/needs_gk_review, in_progress/needs_gk_review, and resolved/resolved
+    for queue_type='export_review', with every P3-05 static field
+    (target_object_type, priority, summary, required_action, blocked_reason,
+    assigned_to, due_at, queue_metadata, created_by, created_by_type)
+    preserved verbatim; widens upload_lifecycle_audit_gate_a_operation_check
+    to add 'export_review_completed'; adds
+    upload_lifecycle_audit_p3_13_metadata_object_check requiring exactly
+    contract/organization_id/generated_content_draft_id/review_queue_item_id/
+    actor_id/actor_type/expected_updated_at/requested_completion_timestamp/
+    previous_queue_status/resulting_queue_status/previous_review_status/
+    resulting_review_status/validator_keys and forbidding raw-content keys
+    plus approval/export_authority/affirmative_human_export_authority/
+    final_export_gate/final_gate/export_eligible/manifest/
+    requested_export_audience.
+  - migrations/kai_sprint2_p3_13_export_review_completion.rollback.sql (new) -
+    deletes export_review_completed audit rows; converts queue_type=
+    'export_review' AND queue_status='resolved' AND review_status='resolved'
+    rows back to in_progress/needs_gk_review (scoped by queue_type so
+    unrelated resolved queue rows, e.g. generated_content_review, are
+    preserved untouched); drops the P3-13 metadata check; restores the P3-09
+    operation check (without 'export_review_completed'); drops the P3-13
+    contract check and restores review_queue_items_p3_09_export_review_contract_check
+    verbatim. Verified by hand against a fresh ephemeral local PostgreSQL
+    instance: seeded one resolved/resolved export_review row, one unrelated
+    resolved/resolved generated_content_review row, and one
+    export_review_completed audit row; after rollback the export_review row
+    read back in_progress/needs_gk_review, the audit count was 0, the P3-09
+    constraint name was restored (P3-13's was gone), and the unrelated
+    generated_content_review row remained resolved/resolved untouched.
+  - scripts/kai-sprint2-p3-13-export-review-completion-verifier.sql (new) -
+    asserts the P3-13 contract check exists and the P3-09 check does not,
+    the P3-05 identity unique index is preserved, the audit operation
+    vocabulary includes export_review_completed, the P3-13 metadata check
+    exists and its definition text still forbids approval/export_authority/
+    final_export_gate, and no export-authority/final-gate/export-eligible/
+    finalize/export column exists anywhere in the kai schema.
+  - scripts/kai-sprint2-p3-13-export-review-completion-local-postgres.js
+    (new) - runner-owned ephemeral loopback-only PostgreSQL harness
+    (identical proveRunnerOwnedTarget isolation proof as P3-09's), applying
+    every prior migration plus this ticket's migration and verifier, then
+    running the new P3-13 boundary/integration specs together with the
+    P3-09/P3-05/P3-06/P3-04/P3-03/P3-02/P3-01 boundary specs for regression,
+    with DATABASE_URL poisoned to the sentinel and only PG*/
+    KAI_P3_13_EXPORT_REVIEW_COMPLETION_DATABASE_URL pointed at the real
+    ephemeral cluster.
+  - __tests__/kai-sprint2-p3-13-export-review-completion-boundary.spec.js
+    (new) - fake-transaction proof of: gate order and lazy database-capable
+    loading; the exact input contract; fresh completion; audit-backed
+    replay and its negative cases (different actor/expectedUpdatedAt/now);
+    stale CAS; a still-open (never-started) row failing the CAS; tenant-safe
+    not_found; cross-draft conflict; duplicate/malformed audit fail-closed;
+    the required metadataOnlyAudit dependency; audit publish/prepare
+    failures mapping to system_error without a thrown exception; the exact
+    audit metadata key set and values; the exact service DTO allowlist
+    pinning resolved/resolved; P3-06's evaluateExportReviewRequestStateInTransaction
+    reading all three lifecycle profiles including resolved/resolved; a real
+    evaluateGeneratedDraftExportReviewPacketInTransaction call proving
+    exportReviewQueueStatus/exportReviewStatus="resolved", draftStatus="draft",
+    exportEligible=false, and a VAL-EXP-001 blocker still carrying
+    affirmative_human_export_authority_absent and final_export_gate_absent;
+    and two forbidden-token source scans (repository completion helpers,
+    service completion functions) proving no approval/export_authority/
+    finalGate/affirmativeHumanExportAuthority/manifest/exportEligible/
+    funder-ready/public-ready token exists in the new code.
+  - __tests__/kai-sprint2-p3-13-export-review-completion.integration.spec.js
+    (new) - runner-owned-database-gated (skips cleanly without one) proof
+    against a real PostgreSQL transaction of: fresh completion transitioning
+    in_progress/needs_gk_review to resolved/resolved with exactly one audit
+    row, then an identical replay with zero additional writes; the real P3-06
+    packet reporting resolved/resolved, exportEligible=false, draftStatus=
+    "draft", and the same VAL-EXP-001 blocker evidence; stale CAS with zero
+    mutation and zero audit; tenant-safe not_found and cross-draft conflict;
+    concurrent identical completions converging to exactly one transition and
+    one audit; and proof that draft_status and the generated_content_review
+    queue row are never mutated and that no export-authority/final-gate/
+    export-eligible column exists in the kai schema.
+  - __tests__/kai-sprint2-p3-09-export-review-start-boundary.spec.js - two
+    existing assertions updated to match the P3-13 widening (not P3-09
+    behavior, which is unchanged): the "rejects an export_review state
+    outside the admitted lifecycle profiles" test now uses an
+    in_progress/resolved mismatch (a state still outside all three profiles)
+    instead of resolved/resolved (now legitimately admitted by P3-06's read
+    path); and the "exposes exactly N lifecycle profiles" assertion now
+    expects three profiles including resolved/resolved. Every other P3-09
+    test, including the start CAS/replay/audit logic itself, is unchanged.
+  - package.json - two additive script entries,
+    test:kai-sprint2-p3-13-export-review-completion and
+    verify:kai-sprint2-p3-13-export-review-completion, following the exact
+    existing test:/verify: naming convention; no existing script changed.
+  - No route file, frontend production file, approval/export-authority/
+    finalGate field, or manifest/file/export artifact was added anywhere in
+    this package.
+
+TOOL_VERIFIED:
+  - node --test __tests__/kai-sprint2-p3-13-export-review-completion-boundary.spec.js
+    -> 26/26 pass.
+  - node --test __tests__/kai-sprint2-p3-13-export-review-completion.integration.spec.js
+    -> 3/3 run, 1 skipped without a runner-owned database (no DB command was
+    executed by this check; skip is the existing DB-gated behavior).
+  - node --test (P3-13 boundary + integration, P3-09 boundary + integration,
+    P3-05/P3-06/P3-04/P3-03/P3-02/P3-01 boundary, P3-08/P3-10/P3-12/P3-07)
+    -> 190 total, 188 pass, 0 fail, 2 skipped without a runner-owned database.
+  - npm run test:kai-sprint2 -> complete Sprint 2 suite: 1668 pass, 24 skip,
+    0 fail.
+  - npm test -> complete repository suite: 1773 pass, 24 skip, 0 fail.
+  - npm run verify:kai-sprint2-p3-13-export-review-completion -> runner-owned
+    ephemeral loopback PostgreSQL suite: 147 pass, 1 skip (a sibling
+    integration file's own runner-var gate, not this ticket's), 0 fail;
+    forward migration and verifier both applied cleanly.
+  - Hand-verified migration/rollback correctness against a fresh ephemeral
+    local PostgreSQL instance (forward migration + verifier, seed, rollback,
+    re-read): resolved/resolved -> in_progress/needs_gk_review conversion,
+    audit deletion, P3-09 constraint restoration, and unrelated
+    generated_content_review resolved/resolved row preservation all
+    confirmed as described above.
+  - git diff --check -> clean (no whitespace errors).
+  - git diff --cached --check -> clean.
+  - Every node/npm/npx command above ran with
+    DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel explicitly set and
+    DATABASE_URL_LOCAL/PGURL_LOCAL/RENDER_DATABASE_URL/PROD_DATABASE_URL
+    explicitly cleared; no ad-hoc DB-capable import was left in the tree and
+    no DB configuration was printed by this package's own commands.
+
+USER_CONFIRMED:
+  - P2-01 through P2-08 and P3-01 through P3-12 are accepted and closed.
+  - P3-13 is authorized as exactly the in_progress/needs_gk_review ->
+    resolved/resolved GK export-review queue completion transition, meaning
+    only that the queue work is complete - not approval, not
+    affirmativeHumanExportAuthority, not finalGate, not exportEligible=true,
+    not a funder-ready/public-ready state, and not manifest/file creation or
+    finalization/export.
+
+NOT_CONFIRMED:
+  - No push, merge, deploy, flag enablement, completion route, frontend
+    production control, approval/export authority, finalGate,
+    manifest/file/export/finalization artifact, P3-14 work, or new review
+    cycle was performed.

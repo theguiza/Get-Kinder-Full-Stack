@@ -13,6 +13,7 @@ export const EXPORT_REVIEW_QUEUE_STATIC_CONTRACT = Object.freeze({
 export const EXPORT_REVIEW_LIFECYCLE_PROFILES = Object.freeze([
   Object.freeze({ queueStatus: "open", reviewStatus: "needs_gk_review" }),
   Object.freeze({ queueStatus: "in_progress", reviewStatus: "needs_gk_review" }),
+  Object.freeze({ queueStatus: "resolved", reviewStatus: "resolved" }),
 ]);
 
 const EXPORT_REVIEW_QUEUE_ROW_KEYS = new Set([
