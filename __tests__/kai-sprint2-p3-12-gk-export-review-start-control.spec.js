@@ -104,9 +104,9 @@ test("P3-12 decideStartResult: a 200/ok:true paired with an unrelated body is st
   assert.equal(decideStartResult({ statusCode: 200, body: { ok: true, data: null, warnings: [] } }).kind, "success");
 });
 
-test("P3-12 exportReviewUpdatedAt is referenced by the component only to build the mutation request, never to render a field", () => {
+test("P3-12 exportReviewUpdatedAt is referenced by the component only to build mutation requests, never to render a field", () => {
   const occurrences = jsxSource.match(/exportReviewUpdatedAt/g) || [];
-  assert.equal(occurrences.length, 1, "exportReviewUpdatedAt must appear exactly once: as the startReviewRequest argument");
+  assert.equal(occurrences.length, 2, "exportReviewUpdatedAt must appear exactly twice: as the startReviewRequest and completeReviewRequest arguments (P3-15)");
   assert.doesNotMatch(jsxSource, /FieldRow[^)]*exportReviewUpdatedAt/);
 });
 
@@ -146,7 +146,7 @@ test("P3-12 other safe start failures render an error message without touching p
 test("P3-12 frontend source still contains no approve/reject/finalize/download controls after adding Start Review", () => {
   assert.doesNotMatch(jsxSource, /\b(approve|reject|finalize|mark-ready|markReady|download)\b/i);
   assert.doesNotMatch(logicSource, /\b(approve|reject|finalize|mark-ready|markReady|download)\b/i);
-  assert.equal((jsxSource.match(/<button/g) || []).length, 1);
+  assert.equal((jsxSource.match(/<button/g) || []).length, 2, "Start Review (P3-12) and Complete Review (P3-15) are the only two controls");
 });
 
 test("P3-12 P3-08 citation rendering ('Why can KAI say this?') is unchanged", () => {

@@ -30,6 +30,12 @@ export function startPath(organizationId, generatedContentDraftId, exportReviewQ
     + `/export-review-queue/${exportReviewQueueItemId}/start`;
 }
 
+export function completePath(organizationId, generatedContentDraftId, exportReviewQueueItemId) {
+  return `${BASE_PATH}/admin/organizations/${organizationId}`
+    + `/generated-content-drafts/${generatedContentDraftId}`
+    + `/export-review-queue/${exportReviewQueueItemId}/complete`;
+}
+
 async function readJson(response) {
   try {
     return await response.json();
@@ -51,6 +57,19 @@ export async function getJson(path) {
 // to exactly { expected_updated_at } - no actorContext, no now, no other
 // client-supplied authority data ever leaves this call.
 export async function startReviewRequest(path, expectedUpdatedAt) {
+  const response = await fetch(path, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify({ expected_updated_at: expectedUpdatedAt }),
+  });
+  return { statusCode: response.status, body: await readJson(response) };
+}
+
+// P3-15: issues the accepted P3-14 completion transition. The request body is
+// fixed to exactly { expected_updated_at } - no actorContext, no now, no
+// other client-supplied authority data ever leaves this call.
+export async function completeReviewRequest(path, expectedUpdatedAt) {
   const response = await fetch(path, {
     method: "POST",
     credentials: "same-origin",
@@ -132,6 +151,29 @@ export function canStartReview(model) {
 // packet once (never by trusting this response body); every other outcome
 // is a safe, displayable error with no partial mutation state.
 export function decideStartResult(result) {
+  if (result?.statusCode === 200 && result?.body?.ok === true) {
+    return { kind: "success" };
+  }
+  if (result?.body?.error?.code === "conflict_current_state_changed") {
+    return { kind: "conflict" };
+  }
+  return { kind: "error", message: errorText(result) };
+}
+
+// P3-15: the Complete Review control shows only for the one queue/review
+// state pair this ticket authorizes. Every other combination (including
+// open/needs_gk_review, where Start Review shows instead) shows none.
+export function canCompleteReview(model) {
+  return !!model
+    && model.exportReviewQueueStatus === "in_progress"
+    && model.exportReviewStatus === "needs_gk_review";
+}
+
+// P3-15: a single decision point for the P3-14 completion response. Success
+// and conflict_current_state_changed both resolve by re-fetching the P3-07
+// packet once (never by trusting this response body); every other outcome
+// is a safe, displayable error with no partial mutation state.
+export function decideCompleteResult(result) {
   if (result?.statusCode === 200 && result?.body?.ok === true) {
     return { kind: "success" };
   }

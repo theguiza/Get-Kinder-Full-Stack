@@ -1,7 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import {
+  canCompleteReview,
   canStartReview,
+  completePath,
+  completeReviewRequest,
+  decideCompleteResult,
   decideOutcome,
   decideStartResult,
   getJson,
@@ -11,18 +15,20 @@ import {
 } from "./gkExportReviewDetailLogic.js";
 
 /**
- * KAI P3-08/P3-12 GK export-review detail page (GK-internal only).
+ * KAI P3-08/P3-12/P3-15 GK export-review detail page (GK-internal only).
  *
  * This component performs a single GET against the accepted P3-07 packet route
  * and renders only the allowlisted P3-06 DTO fields (see gkExportReviewDetailLogic.js).
- * The only write request it can issue is the single P3-12 "Start Review"
- * transition against the accepted P3-10 route, sent with exactly
+ * The only write requests it can issue are the P3-12 "Start Review" transition
+ * against the accepted P3-10 route and the P3-15 "Complete Review" transition
+ * against the accepted P3-14 route, each sent with exactly
  * { expected_updated_at } and no other client-supplied authority data. It
  * holds no other queue-transition or final-gate control. gk_admin
  * authorization, tenant membership, feature-flag state, packet validation,
- * citation authority, export eligibility, and the start transition itself are
- * all decided by the backend; this component never re-derives or overrides
- * those decisions and never trusts the mutation response as the new packet.
+ * citation authority, export eligibility, and the start/complete transitions
+ * themselves are all decided by the backend; this component never re-derives
+ * or overrides those decisions and never trusts a mutation response as the
+ * new packet.
  */
 
 function FieldRow({ label, value }) {
@@ -99,6 +105,8 @@ export default function GkExportReviewDetail({
   const [loading, setLoading] = useState(false);
   const [startPending, setStartPending] = useState(false);
   const [startErrorMessage, setStartErrorMessage] = useState(null);
+  const [completePending, setCompletePending] = useState(false);
+  const [completeErrorMessage, setCompleteErrorMessage] = useState(null);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -154,8 +162,31 @@ export default function GkExportReviewDetail({
     }
   }, [startPending, outcome, organizationId, generatedContentDraftId, exportReviewQueueItemId, loadPacket]);
 
+  const handleCompleteReview = useCallback(async () => {
+    if (completePending || outcome?.kind !== "success" || !outcome.model) return;
+    setCompletePending(true);
+    setCompleteErrorMessage(null);
+    try {
+      const result = await completeReviewRequest(
+        completePath(organizationId, generatedContentDraftId, exportReviewQueueItemId),
+        outcome.model.exportReviewUpdatedAt,
+      );
+      const decided = decideCompleteResult(result);
+      if (decided.kind === "success" || decided.kind === "conflict") {
+        await loadPacket();
+      } else {
+        setCompleteErrorMessage(decided.message);
+      }
+    } catch {
+      if (mountedRef.current) setCompleteErrorMessage("Request failed (network error).");
+    } finally {
+      if (mountedRef.current) setCompletePending(false);
+    }
+  }, [completePending, outcome, organizationId, generatedContentDraftId, exportReviewQueueItemId, loadPacket]);
+
   const model = outcome?.kind === "success" ? outcome.model : null;
   const showStartControl = canStartReview(model);
+  const showCompleteControl = canCompleteReview(model);
 
   return (
     <div className="gk-export-review-page">
@@ -178,6 +209,17 @@ export default function GkExportReviewDetail({
             </button>
           ) : null}
           {startErrorMessage ? <p className="gk-export-review-note">{startErrorMessage}</p> : null}
+          {showCompleteControl ? (
+            <button
+              type="button"
+              className="gk-export-review-complete-button"
+              onClick={handleCompleteReview}
+              disabled={completePending}
+            >
+              Complete Review
+            </button>
+          ) : null}
+          {completeErrorMessage ? <p className="gk-export-review-note">{completeErrorMessage}</p> : null}
           <PacketDetail model={model} />
         </>
       ) : null}

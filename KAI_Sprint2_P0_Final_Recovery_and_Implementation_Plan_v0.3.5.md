@@ -13720,3 +13720,155 @@ NOT_CONFIRMED:
   - No push, merge, deploy, flag enablement, completion UI control,
     approval/export authority, finalGate, manifest/file/export/finalization
     artifact, P3-15 work, or new review cycle was performed.
+
+## P3-15 - GK export-review Complete Review UI control (completed 2026-08-07)
+
+Status: accepted for this local package as exactly one additional mutation
+control added to the existing P3-08/P3-12 GK export-review detail component,
+calling the existing accepted P3-14 completion route once per user action. No
+new page, frontend route, navigation entry, API client, or backend endpoint
+was created; no backend route/service/repository/schema file changed.
+
+Implementation evidence:
+  - frontend/gkExportReviewDetailLogic.js - four additive exports, no
+    existing export's signature or behavior changed:
+    - completePath(organizationId, generatedContentDraftId,
+      exportReviewQueueItemId) builds the accepted P3-14
+      .../export-review-queue/:id/complete route from the same three
+      identifiers packetPath/startPath already use.
+    - completeReviewRequest(path, expectedUpdatedAt) issues the mutation
+      using the same same-origin/credentialed fetch convention as the
+      existing getJson/startReviewRequest, with a request body fixed to
+      exactly { expected_updated_at: expectedUpdatedAt } - no actorContext,
+      now, roles, or other client-supplied field is ever constructed or
+      sent.
+    - canCompleteReview(model) is the single control-visibility decision
+      point: true only when exportReviewQueueStatus === "in_progress" and
+      exportReviewStatus === "needs_gk_review"; false for open/
+      needs_gk_review (where canStartReview is true instead), resolved/
+      resolved, and every other combination, including a null/undefined
+      model.
+    - decideCompleteResult(result) is the single decision point for the
+      complete response: statusCode 200 with ok:true resolves "success";
+      error.code === "conflict_current_state_changed" resolves "conflict";
+      everything else resolves "error" with the existing errorText message
+      convention. Neither "success" nor "conflict" ever reads or returns
+      response.body.data - the mutation response is never treated as the
+      new packet. canStartReview, decideStartResult, toRenderModel, and
+      every other existing export are unchanged.
+  - frontend/gkExportReviewDetail.jsx - the existing component gains exactly
+    one additional control:
+    - A single <button>"Complete Review"</button> renders only when
+      canCompleteReview(model) is true; the existing Start Review control
+      (gated by canStartReview) is unchanged and still renders only for
+      open/needs_gk_review. resolved/resolved renders neither control.
+    - handleCompleteReview is re-entrancy-guarded (if (completePending ||
+      outcome?.kind !== "success" || !outcome.model) return;) and the
+      button is disabled while completePending is true, so one click can
+      produce at most one in-flight POST.
+    - On completeReviewRequest resolving to "success" or "conflict", the
+      handler awaits loadPacket() exactly once (a single fresh GET against
+      the unmodified P3-07 packetPath route) and replaces outcome/model
+      entirely from that authoritative response; the complete response
+      body is never used to construct or patch local state, and the POST is
+      never retried on conflict. This mirrors the existing P3-12
+      handleStartReview handler exactly, with its own independent pending/
+      error state (completePending/completeErrorMessage) so the two
+      controls cannot block or clobber each other.
+    - On any other decideCompleteResult "error", completeErrorMessage is
+      set and rendered through the existing gk-export-review-note
+      convention; model/outcome are left untouched, so no partial mutation
+      state is ever shown.
+    - exportReviewUpdatedAt now appears exactly twice in this file - once as
+      the startReviewRequest argument and once as the completeReviewRequest
+      argument, both sourced from outcome.model.exportReviewUpdatedAt - and
+      is never passed to FieldRow or otherwise rendered.
+    - The file still contains no approve/reject/finalize/mark-ready/
+      markReady/download/affirmativeHumanExportAuthority/finalGate/
+      client-reviewed/funder-ready/public-ready/manifest token; "Why can KAI
+      say this?" and the existing citation rendering are byte-for-byte
+      unchanged; no new route, navigation entry, or entry.jsx mount point
+      was added (index.js and frontend/entry.jsx are untouched).
+  - __tests__/kai-sprint2-p3-12-gk-export-review-start-control.spec.js - two
+    existing exact-count source-text assertions are updated to reflect the
+    new Complete Review control: the exportReviewUpdatedAt occurrence-count
+    assertion moves from 1 to 2, and the <button> count assertion moves from
+    1 to 2. No other test in this file changed; the Start Review truth
+    table, mutation-body assertions, re-entrancy guard, and
+    success/conflict re-fetch assertions are all unmodified and still pass.
+  - __tests__/kai-sprint2-p3-15-gk-export-review-complete-control.spec.js
+    (new) - proves: completePath's exact route string; completeReviewRequest
+    sends exactly { expected_updated_at } via the existing POST convention
+    and no other field; canCompleteReview's full truth table (in_progress/
+    needs_gk_review true, open/needs_gk_review false, in_progress/resolved
+    false, every other queue status false, resolved/resolved false, null/
+    undefined false); decideCompleteResult's three outcomes (success,
+    conflict_current_state_changed, other safe error) including that a
+    conflict is never treated as success; exactly one Complete Review
+    control gated by canCompleteReview; the existing Start Review control is
+    still gated by canStartReview and unaffected; the mutation call site is
+    sourced only from outcome.model.exportReviewUpdatedAt with no
+    actorContext/now anywhere in either file; the re-entrancy guard and
+    disabled={completePending} exist; success and conflict both resolve via
+    a single loadPacket() call and the component never reads
+    decideCompleteResult's result as new packet data; other errors set
+    completeErrorMessage only; exportReviewUpdatedAt is never rendered via
+    FieldRow and appears exactly twice in the component source; no approve/
+    export/finalize/publish/manifest/download or other post-review-authority
+    control exists; the citation/"Why can KAI say this?" text is unchanged;
+    and entry.jsx/index.js mount/route counts are unchanged.
+
+TOOL_VERIFIED:
+  - node --test __tests__/kai-sprint2-p3-15-gk-export-review-complete-control.spec.js
+    -> 17/17 pass.
+  - node --test __tests__/kai-sprint2-p3-12-gk-export-review-start-control.spec.js
+    -> 17/17 pass (updated exact-count assertions pass against the new
+    two-control component).
+  - node --test __tests__/kai-sprint2-p3-08-gk-export-review-detail.spec.js
+    -> 13/13 pass (unchanged read-only packet contract, re-run for
+    regression).
+  - node --test __tests__/kai-sprint2-p3-14-export-review-complete-route.spec.js
+    -> 10/10 pass (unchanged P3-14 route contract, re-run for regression).
+  - node --test __tests__/kai-sprint2-p3-07-export-review-packet-route.spec.js
+    -> 8/8 pass (unchanged P3-07 route, re-run for regression).
+  - node --test __tests__/kai-sprint2-p3-06-export-review-packet-boundary.spec.js
+    -> 16/16 pass (unchanged P3-06/P3-11 boundary, re-run for regression).
+  - node --test __tests__/kai-sprint2-p3-13-export-review-completion-boundary.spec.js
+    -> 26/26 pass (unchanged P3-13 CAS/replay boundary, re-run for
+    regression).
+  - node --test __tests__/kai-sprint2-p3-10-export-review-start-route.spec.js
+    -> 9/9 pass (unchanged P3-10 route, re-run for regression).
+  - node --test __tests__/kai-sprint2-p3-09-export-review-start-boundary.spec.js
+    -> 25/25 pass (unchanged P3-09 CAS/replay boundary, re-run for
+    regression).
+  - node --test __tests__/kai-sprint2-pass2-route-runtime.spec.js -> 27/27
+    pass (unchanged mounted-route inventory, re-run for regression).
+  - npm run test:kai-sprint2 -> complete Sprint 2 suite: 1719 total, 1695
+    pass, 0 fail, 24 skipped without a runner-owned database.
+  - npm test -> complete repository suite: 1824 total, 1800 pass, 0 fail,
+    24 skipped without a runner-owned database.
+  - npx vite build -> succeeded (47 modules transformed; public/js/bundles/entry.js
+    rebuilt and included in this package's diff).
+  - git diff --check -> clean (no whitespace errors).
+  - git diff --cached --check -> clean (no staged changes prior to this
+    package's commit).
+  - Every node/npm/npx command above ran with
+    DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel explicitly set and
+    DATABASE_URL_LOCAL/PGURL_LOCAL/RENDER_DATABASE_URL/PROD_DATABASE_URL
+    explicitly cleared; no ad-hoc DB-capable import was run and no DB
+    configuration was printed by this package's own commands.
+
+USER_CONFIRMED:
+  - P2-01 through P2-08 and P3-01 through P3-14 are accepted and closed.
+  - P3-15 is authorized as one bounded Complete Review mutation control
+    added to the existing P3-08/P3-12 component, shown only for
+    in_progress/needs_gk_review, calling the existing accepted P3-14
+    completion route with exactly { expected_updated_at }, and showing
+    neither mutation control for resolved/resolved.
+
+NOT_CONFIRMED:
+  - No push, merge, deploy, flag enablement, approval/
+    affirmativeHumanExportAuthority/finalGate/client-reviewed/funder-ready/
+    public-ready/exportEligible=true state, manifest/file/export/
+    finalization artifact, additional finalize/export/download control,
+    P3-16 work, or new review cycle was performed.
