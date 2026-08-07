@@ -13872,3 +13872,130 @@ NOT_CONFIRMED:
     public-ready/exportEligible=true state, manifest/file/export/
     finalization artifact, additional finalize/export/download control,
     P3-16 work, or new review cycle was performed.
+
+## P3-16 - Export-candidate identity and authoritative limitation-snapshot foundation (completed 2026-08-07)
+
+Status: accepted for this local package as exactly two new additive,
+append-only authoritative foundations - human-confirmed limitation snapshots
+and export-candidate identities - added as dormant repository/service writes
+on top of the existing immutable generated-content draft/citation graph and
+the existing generated-content-review/export-review queue lifecycles. No
+existing table, column, constraint, migration, rollback, runner, verifier,
+repository, service, route, or UI file from Gate A through P3-15 was edited,
+other than the additive audit-vocabulary ALTER TABLE statements this
+package's own forward migration issues against
+kai.upload_lifecycle_audit. generated_content_drafts.draft_status,
+VAL-EXP-001, draftIsStillDraft wiring, and exportEligible are unchanged and
+unreferenced by any write in this package. No route, listener, scheduler,
+startup hook, UI control, manifest, export artifact/event, or production
+composition was added.
+
+Implementation evidence:
+  - migrations/kai_sprint2_p3_16_export_candidate_foundation.sql,
+    .rollback.sql - forward/rollback migration creating
+    kai.limitation_snapshots, kai.limitation_snapshot_entries,
+    kai.export_candidates, the kai.p3_16_limitation_codes_valid helper
+    function, the partial unique index enforcing at most one non-superseded
+    snapshot per draft, a DEFERRABLE INITIALLY DEFERRED self-referencing
+    foreign key enabling append-only supersession ordering, and the two new
+    limitation_snapshot_confirmed/export_candidate_created metadata-only
+    audit branches on kai.upload_lifecycle_audit. No existing table, column,
+    or constraint from Gate A through P3-15 is altered beyond that
+    additive audit-vocabulary widening.
+  - scripts/kai-sprint2-p3-16-export-candidate-foundation-verifier.sql,
+    -smoke-seed.sql, -smoke-verifier.sql, -failure-checks.sql,
+    -local-postgres.js, -patch-notes.md, -runbook.md - full migration/proof
+    pack: catalog verification, a real fully-eligible seeded draft, SQL-level
+    exercise of fresh confirmation/supersession/candidate-creation/replay
+    convergence, read-only negative checks (second current snapshot,
+    malformed code, duplicate cited pair, cross-tenant entry, missing
+    snapshot reference, unsupported fingerprint contract version,
+    non-reviewer/admin confirmed_by_role), the ephemeral loopback PostgreSQL
+    16 runner, and package documentation.
+  - Backend/kai/dictionary/exportCandidateContract.js - new file: static
+    contract constants only (allowed roles, limitation-code syntax,
+    audience/content-type vocabulary, fingerprint contract version, audit
+    operation/contract names). No existing export from any other file is
+    changed.
+  - Backend/kai/dictionary/postgresExportCandidateRepository.js - new file:
+    confirmLimitationSnapshot (exact cited-pair coverage enforcement,
+    canonical entries fingerprint, append-only supersession, replay
+    convergence, metadata-only audit) and createExportCandidate
+    (gk_admin-only, requires both queue lifecycles resolved/resolved and a
+    current non-superseded snapshot, deterministic canonical
+    representation/SHA-256 fingerprint excluding all mutable live state,
+    ON CONFLICT-based replay convergence, metadata-only audit), plus the
+    private read-only evaluateExportCandidateCurrentnessInTransaction
+    evaluator (exported only via __exportCandidateRepositoryTestables; not
+    called from VAL-EXP-001 or any route). No existing repository file is
+    modified.
+  - Backend/kai/services/kaiExportCandidateService.js - new file:
+    confirmGeneratedDraftLimitationSnapshot and
+    createGeneratedDraftExportCandidate. Feature-flag gates
+    (KAI_SPRINT2_ENABLED, KAI_GENERATION_ENABLED, KAI_PUBLIC_EXPORT_ENABLED),
+    exact input-shape validation, mapped-human-actor check, and
+    validateActorCanPerformOperation role authorization
+    (gk_reviewer/gk_admin for snapshot confirmation; gk_admin only for
+    candidate creation) all precede any repository call. Contains no SQL,
+    imports no database module at top level, and is not imported by any
+    route file.
+  - package.json - added exactly two new npm scripts
+    (verify:kai-sprint2-p3-16-export-candidate-foundation,
+    test:kai-sprint2-p3-16-export-candidate-foundation). No existing script
+    is changed.
+  - __tests__/kai-sprint2-p3-16-export-candidate-foundation-boundary.spec.js,
+    .integration.spec.js - focused boundary (pure-function and service-gate,
+    no database) and PostgreSQL-backed integration coverage of: missing/
+    explicit-empty limitation distinction, exact cited-pair coverage
+    (missing/extra/duplicate rejection), role/tenant controls
+    (gk_reviewer/gk_admin for snapshots, gk_admin-only for candidates,
+    cross-tenant/uncited rejection), replay/supersession convergence for
+    both snapshots and candidates, deterministic fingerprinting (order-
+    independence of unordered collections, sensitivity to text/lineage/
+    audience/limitation-code changes), candidate currentness reporting
+    after supersession, review-prerequisite enforcement (unresolved
+    generated-content review, unresolved export review, missing snapshot
+    each fail closed), unchanged draft_status/export-review lifecycle
+    behavior, and the absence of route/UI/manifest/export-authority
+    references in either new module's own source.
+
+TOOL_VERIFIED:
+  - node --test __tests__/kai-sprint2-p3-16-export-candidate-foundation-boundary.spec.js -> 16/16 pass.
+  - npm run verify:kai-sprint2-p3-16-export-candidate-foundation -> ephemeral
+    loopback PostgreSQL 16 runner: migration, P3-04/P3-13 regression
+    verifiers, P3-16 catalog verifier, smoke seed/verifier, read-only
+    failure checks, and the full focused test list (P3-16
+    integration+boundary plus P3-01 through P3-13 regression specs) all
+    green - 177 total, 176 pass, 0 fail, 1 skipped (unrelated), runner
+    workdir removed.
+  - npm run test:kai-sprint2 -> complete Sprint 2 suite: 1738 total, 1713
+    pass, 0 fail, 25 skipped without a runner-owned database.
+  - npm test -> complete repository suite: 1843 total, 1818 pass, 0 fail, 25
+    skipped without a runner-owned database.
+  - npx vite build -> succeeded (47 modules transformed).
+  - git diff --check -> clean (no whitespace errors).
+  - git diff --cached --check -> clean (nothing staged with whitespace
+    errors).
+  - Every node/npm/npx command above ran with
+    DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel explicitly set and
+    DATABASE_URL_LOCAL/PGURL_LOCAL/RENDER_DATABASE_URL/PROD_DATABASE_URL
+    explicitly cleared; the P3-16 runner replaced DATABASE_URL only with its
+    own proven loopback-only, name/port/listen_addresses-verified ephemeral
+    PostgreSQL target for the duration of its own child process; no ad-hoc
+    DB-capable import was run and no DB configuration was printed by this
+    package's own commands.
+
+USER_CONFIRMED:
+  - P2-01 through P2-08 and P3-01 through P3-15 are accepted and closed.
+  - P3-16 is authorized per OWNER_DECISION.P3_EXPORT_CANDIDATE_V1 and
+    OWNER_DECISION.P3_EXPORT_LIMITATION_SNAPSHOT_V1 as exactly two additive
+    authoritative foundations (limitation snapshots; export-candidate
+    identities), using the smallest required additive local synthetic
+    schema/migration and audit-contract work plus runner-owned synthetic
+    PostgreSQL verification only.
+
+NOT_CONFIRMED:
+  - No production/shared-database mutation, deployment, cloud/flag change,
+    real client data, readiness/export-authority decision, finalGate,
+    VAL-EXP-001 authority wiring, manifest, export artifact/event, route,
+    UI, push, merge, P3-17 work, or new review cycle was performed.
