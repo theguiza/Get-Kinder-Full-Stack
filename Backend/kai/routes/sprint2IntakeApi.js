@@ -11,6 +11,7 @@ import {
   setKaiSprint2NoStore,
 } from "../middleware/kaiSprint2RequestSafety.js";
 import {
+  validateCompleteExportReviewRequest,
   validateIntakeBatchFilesQuery,
   validateFilePolicyBlockRequest,
   validateKaiSprint2MutationRequest,
@@ -578,6 +579,7 @@ async function getExportReviewService() {
   if (
     intakeServiceOverride?.getGeneratedDraftExportReviewPacket
     || intakeServiceOverride?.startGeneratedDraftExportReview
+    || intakeServiceOverride?.completeGeneratedDraftExportReview
   ) return intakeServiceOverride;
   exportReviewServicePromise ||= import("../services/kaiExportReviewService.js");
   return exportReviewServicePromise;
@@ -632,6 +634,49 @@ router.post(
     return invokeService(res, async () => {
       const service = await getExportReviewService();
       return service.startGeneratedDraftExportReview({
+        organizationId: identifiers.organizationId,
+        generatedContentDraftId: identifiers.generatedContentDraftId,
+        exportReviewQueueItemId: identifiers.exportReviewQueueItemId,
+        expectedUpdatedAt: payload.expected_updated_at,
+        actorContext: sprint2MappedActorContext(req),
+        now: new Date().toISOString(),
+      });
+    });
+  },
+);
+
+function validateCompleteExportReviewRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = exportReviewPacketIdentifiers(req);
+  if (!identifiers) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker(
+        "invalid_uuid_field",
+        "organization_id_generated_content_draft_id_or_export_review_queue_item_id",
+      )],
+    });
+    return null;
+  }
+  const result = validateCompleteExportReviewRequest(req.body);
+  if (!result.ok) {
+    sendKaiError(res, "validation_blocker", { blockers: result.blockers });
+    return null;
+  }
+  return identifiers;
+}
+
+router.post(
+  "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-review-queue/:exportReviewQueueItemId/complete",
+  async (req, res) => {
+    const identifiers = validateCompleteExportReviewRequestOrSend(req, res);
+    if (!identifiers) return;
+    const payload = requestPayload(req);
+    return invokeService(res, async () => {
+      const service = await getExportReviewService();
+      return service.completeGeneratedDraftExportReview({
         organizationId: identifiers.organizationId,
         generatedContentDraftId: identifiers.generatedContentDraftId,
         exportReviewQueueItemId: identifiers.exportReviewQueueItemId,
@@ -709,6 +754,7 @@ export const __testables = {
   exportReviewPacketIdentifiers,
   sprint2MappedActorContext,
   validateStartExportReviewRequestOrSend,
+  validateCompleteExportReviewRequestOrSend,
   setIntakeServiceForTest(service) {
     intakeServiceOverride = service;
     return () => {

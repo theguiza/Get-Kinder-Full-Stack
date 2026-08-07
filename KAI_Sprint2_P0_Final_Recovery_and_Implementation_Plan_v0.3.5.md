@@ -13594,3 +13594,129 @@ NOT_CONFIRMED:
     production control, approval/export authority, finalGate,
     manifest/file/export/finalization artifact, P3-14 work, or new review
     cycle was performed.
+
+## P3-14 - Internal GK export-review completion route (completed 2026-08-07)
+
+Status: accepted for this local package as exactly one authenticated internal
+POST route, completeGeneratedDraftExportReview, mirroring the existing P3-10
+start route's shape and mounted alongside it. The route contains no
+authorization, tenant, lifecycle, CAS, audit, or replay logic of its own;
+all of that authority remains inside the P3-13 service/repository, unchanged.
+This means only that the GK export-review completion transition is now
+reachable over HTTP by an authenticated internal caller - it creates no
+approval, affirmativeHumanExportAuthority, finalGate, exportEligible=true,
+funder-ready/public-ready state, manifest/file/export/finalization artifact,
+or completion UI control anywhere in the system.
+
+Implementation evidence:
+  - Backend/kai/validators/kaiSprint2RequestSchemas.js - new
+    COMPLETE_EXPORT_REVIEW_REQUEST_KEYS = ["expected_updated_at"] and new
+    validateCompleteExportReviewRequest(payload) export, placed directly
+    after the existing validateStartExportReviewRequest, following the exact
+    same reject-unknown-keys/null/array/nested-object/non-string/
+    non-canonical-timestamp convention. Every existing validator in this file
+    is unchanged.
+  - Backend/kai/routes/sprint2IntakeApi.js:
+    - New import of validateCompleteExportReviewRequest from
+      kaiSprint2RequestSchemas.js.
+    - getExportReviewService's override-detection condition gains
+      `|| intakeServiceOverride?.completeGeneratedDraftExportReview` so a
+      test can inject a stub exposing only the completion method; the
+      existing lazy `import("../services/kaiExportReviewService.js")`
+      fallback is unchanged.
+    - New validateCompleteExportReviewRequestOrSend(req, res) helper,
+      structurally identical to validateStartExportReviewRequestOrSend
+      (reuses the existing exportReviewPacketIdentifiers path-UUID
+      validator), placed directly after the P3-10 start route and before the
+      pre-existing "/admin/batches" route.
+    - New router.post(
+      "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-review-queue/:exportReviewQueueItemId/complete")
+      route: validates the request, then calls
+      service.completeGeneratedDraftExportReview({ organizationId,
+      generatedContentDraftId, exportReviewQueueItemId (all three from
+      path params), expectedUpdatedAt: body.expected_updated_at,
+      actorContext: sprint2MappedActorContext(req) (the existing mapped
+      middleware context, unchanged), now: new Date().toISOString()
+      (server-generated per request) }) through the existing invokeService/
+      sendServiceResult safe response mapper, unchanged. The route contains
+      no SQL, repository/pool access, direct kai.* access, queue write,
+      audit write, or duplicated lifecycle logic - it only forwards path/
+      body/middleware-context values and a freshly generated timestamp to
+      the service.
+    - __testables gains validateCompleteExportReviewRequestOrSend; every
+      existing key is unchanged.
+    - Because this route calls `new Date().toISOString()` independently on
+      every HTTP request, it establishes no HTTP retry idempotency of its
+      own; P3-13's audit-backed replay still requires the same requested
+      completion timestamp, so a later duplicate HTTP request with a fresh
+      `now` may correctly surface conflict_current_state_changed. P3-13's
+      replay semantics are otherwise untouched.
+  - __tests__/kai-sprint2-p3-14-export-review-complete-route.spec.js (new) -
+    mirrors the P3-10 route spec's structure and assembled-middleware
+    harness, proving: exactly one mounted authenticated POST route at the
+    new path; authentication failure blocks the service call entirely;
+    exact path/body values and the middleware actorContext are forwarded
+    exactly once, with `now` generated server-side inside the request
+    window; client-supplied actorContext/now and unknown body fields cannot
+    influence the service call (422 validation_blocker, zero service
+    calls); malformed path UUIDs and malformed/missing/unknown body fields
+    use the existing safe validation_blocker response; every listed safe
+    error code (feature_disabled, invalid_request, unauthorized,
+    mapped_kai_user_required, authorization_denied,
+    tenant_boundary_violation, not_found, conflict_current_state_changed,
+    system_error) maps through the existing envelope with no leakage of
+    service-supplied data/blocker-evidence/warning text; success returns the
+    exact P3-13 DTO unchanged; a source scan proving the new route section
+    contains no db/repository/postgres import, no SQL/pool/kaiDb/repository
+    token, and no audit/queue-transition/approval/export-authority/
+    final-gate/manifest/writeFile/signed_url token; and that two
+    back-to-back HTTP requests generate two distinct server-side `now`
+    values (documenting, not changing, the no-HTTP-retry-idempotency
+    boundary called out above).
+  - __tests__/kai-sprint2-pass2-route-runtime.spec.js - one existing
+    assertion's expected route-path list gains the new
+    ".../export-review-queue/:exportReviewQueueItemId/complete" entry in
+    sorted position; every other expected path in that list, and every
+    other test in the file, is unchanged.
+  - No migration, audit write, queue write, repository change, service
+    change, approval/export-authority/finalGate/manifest field, frontend
+    file, or completion UI control was added anywhere in this package.
+
+TOOL_VERIFIED:
+  - node --test __tests__/kai-sprint2-p3-14-export-review-complete-route.spec.js
+    -> 10/10 pass.
+  - node --test __tests__/kai-sprint2-p3-13-export-review-completion-boundary.spec.js
+    __tests__/kai-sprint2-p3-10-export-review-start-route.spec.js -> 35/35
+    pass (P3-13 boundary unchanged; P3-10 route regression unchanged).
+  - node --test (P3-14 route, P3-13 boundary + integration, P3-10 route,
+    pass2 route-runtime) -> 75 total, 74 pass, 0 fail, 1 skipped without a
+    runner-owned database (the existing P3-13 integration DB gate, not this
+    ticket's).
+  - node --test __tests__/kai-sprint2-*.spec.js -> complete Sprint 2 suite:
+    1702 total, 1678 pass, 0 fail, 24 skipped without a runner-owned
+    database.
+  - npm test -> complete repository suite: 1807 total, 1783 pass, 0 fail,
+    24 skipped without a runner-owned database.
+  - git diff --check -> clean (no whitespace errors).
+  - git diff --cached --check -> clean.
+  - Every node/npm/npx command above ran with
+    DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel explicitly set and
+    DATABASE_URL_LOCAL/PGURL_LOCAL/RENDER_DATABASE_URL/PROD_DATABASE_URL
+    explicitly cleared; no ad-hoc DB-capable import was left in the tree and
+    no DB configuration was printed by this package's own commands. No
+    PostgreSQL runner or frontend build was run because no persistence or
+    frontend production file changed.
+
+USER_CONFIRMED:
+  - P2-01 through P2-08 and P3-01 through P3-13 are accepted and closed.
+  - P3-14 is authorized as exactly one authenticated internal POST
+    completion route forwarding path/body/middleware-actor-context values
+    and a server-generated timestamp to the existing P3-13 service, with
+    all authorization/tenant/lifecycle/CAS/audit/replay authority remaining
+    inside P3-13, and with no HTTP retry idempotency of its own established
+    by this route.
+
+NOT_CONFIRMED:
+  - No push, merge, deploy, flag enablement, completion UI control,
+    approval/export authority, finalGate, manifest/file/export/finalization
+    artifact, P3-15 work, or new review cycle was performed.

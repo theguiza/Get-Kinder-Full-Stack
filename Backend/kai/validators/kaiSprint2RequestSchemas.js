@@ -35,6 +35,9 @@ const REVIEW_QUEUE_STATUS_REQUEST_KEYS = new Set([
 const START_EXPORT_REVIEW_REQUEST_KEYS = new Set([
   "expected_updated_at",
 ]);
+const COMPLETE_EXPORT_REVIEW_REQUEST_KEYS = new Set([
+  "expected_updated_at",
+]);
 const FILE_POLICY_BLOCKING_REASON_CODE_SET = new Set(FILE_POLICY_BLOCKING_REASON_CODES);
 const REVIEW_QUEUE_STATUS_SET = new Set(KAI_SPRINT2_P0_REVIEW_QUEUE_STATUSES);
 const BASE64URL_RE = /^[A-Za-z0-9_-]+$/;
@@ -418,6 +421,35 @@ export function validateStartExportReviewRequest(payload) {
   }
 
   for (const key of START_EXPORT_REVIEW_REQUEST_KEYS) {
+    if (!Object.hasOwn(payload, key)) {
+      return { ok: false, blockers: [requestBlocker("required_field_missing", `body.${key}`)] };
+    }
+  }
+
+  return { ok: true, blockers: [] };
+}
+
+export function validateCompleteExportReviewRequest(payload) {
+  if (!isPlainObject(payload)) {
+    return { ok: false, blockers: [requestBlocker("request_body_must_be_object", "body")] };
+  }
+
+  const keys = Object.keys(payload);
+  for (const key of keys) {
+    if (!COMPLETE_EXPORT_REVIEW_REQUEST_KEYS.has(key)) {
+      return { ok: false, blockers: [requestBlocker("unknown_field", `body.${key}`)] };
+    }
+    const value = payload[key];
+    if (value === null) return { ok: false, blockers: [requestBlocker("null_field_not_allowed", `body.${key}`)] };
+    if (Array.isArray(value)) return { ok: false, blockers: [requestBlocker("array_field_not_allowlisted", `body.${key}`)] };
+    if (isPlainObject(value)) return { ok: false, blockers: [requestBlocker("nested_object_not_allowed", `body.${key}`)] };
+    if (typeof value !== "string") return { ok: false, blockers: [requestBlocker("invalid_string_field", `body.${key}`)] };
+    if (!canonicalIsoTimestamp(value)) {
+      return { ok: false, blockers: [requestBlocker("invalid_expected_updated_at", `body.${key}`)] };
+    }
+  }
+
+  for (const key of COMPLETE_EXPORT_REVIEW_REQUEST_KEYS) {
     if (!Object.hasOwn(payload, key)) {
       return { ok: false, blockers: [requestBlocker("required_field_missing", `body.${key}`)] };
     }
