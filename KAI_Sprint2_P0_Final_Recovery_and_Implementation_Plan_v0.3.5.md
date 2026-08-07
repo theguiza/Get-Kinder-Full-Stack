@@ -14141,3 +14141,127 @@ NOT_CONFIRMED:
     affirmativeHumanExportAuthority/finalGate/VAL-EXP-001 eligibility/
     manifest/export artifact or event/route/UI addition, or new review cycle
     was performed.
+
+## P3-17 - Human authority decision ledger foundation (completed 2026-08-07)
+
+Status: accepted for this local package as exactly one new additive,
+append-only authoritative foundation - a human authority decision ledger for
+client_reviewed/funder_ready/public_ready/export_authority_granted, bound to
+an existing P3-16 export candidate - added as a dormant, read-only
+repository evaluator on top of the existing generated-content/export-review/
+export-candidate/limitation-snapshot foundations. No existing table, column,
+constraint, migration, rollback, runner, verifier, repository, service,
+route, or UI file from Gate A through P3-16 was edited. finalGate,
+VAL-EXP-001 wiring, and exportEligible are unchanged and unreferenced by any
+write in this package. No route, listener, scheduler, startup hook, UI
+control, human grant/revoke operation, manifest, export artifact/event, or
+production composition was added.
+
+Implementation evidence:
+  - migrations/kai_sprint2_p3_17_human_authority_decision_ledger.sql,
+    .rollback.sql - forward/rollback migration creating
+    kai.human_authority_decisions, the append-only supersedes_decision_id
+    backward-pointer lineage (a composite self-referencing foreign key
+    scoped to the same organization/export-candidate/decision-type), the two
+    partial unique indexes enforcing at most one root decision per lineage
+    and at most one direct successor per predecessor, the
+    kai.p3_17_reject_authority_mutation BEFORE UPDATE OR DELETE trigger, and
+    the kai.p3_17_enforce_decision_audience_compatibility BEFORE INSERT
+    trigger enforcing that funder_ready/public_ready may only bind a
+    candidate of the matching requested audience (read from the candidate
+    row itself, never duplicated onto the ledger). No existing table,
+    column, or constraint from Gate A through P3-16 is altered.
+  - scripts/kai-sprint2-p3-17-human-authority-decision-ledger-verifier.sql,
+    -smoke-seed.sql, -smoke-verifier.sql, -failure-checks.sql,
+    -local-postgres.js, -patch-notes.md, -runbook.md - full migration/proof
+    pack: catalog verification, three real fully-eligible seeded P3-16
+    export candidates (one per requested audience), SQL-level exercise of
+    audience compatibility, role/type compatibility, candidate binding,
+    root-must-be-grant, append-only grant/revoke/re-grant lineage, and fork
+    rejection, read-only negative checks (malformed vocabulary,
+    self-superseding, cross-candidate lineage, cross-decision-type lineage,
+    missing candidate reference, role/type mismatch, non-human
+    created_by_type), the ephemeral loopback PostgreSQL 16 runner, and
+    package documentation.
+  - Backend/kai/dictionary/humanAuthorityDecisionContract.js - new file:
+    static contract constants only (exact decision-type/action vocabulary,
+    decision-type to required-role map, decision-type to required-audience
+    map). No existing export from any other file is changed.
+  - Backend/kai/dictionary/postgresHumanAuthorityDecisionRepository.js - new
+    file: the private, read-only evaluateHumanAuthorityEffectivenessInTransaction
+    evaluator (current head exists AND current head action = grant AND the
+    bound P3-16 export candidate is still current; fails closed on no
+    decision, a revoke head, ambiguous lineage, or a stale bound candidate),
+    exposed publicly only as evaluateEffectiveness on
+    createPostgresHumanAuthorityDecisionRepository. No grant/revoke write
+    method exists anywhere in this file, and it is not called from
+    VAL-EXP-001 or any route. No existing repository file is modified.
+  - package.json - added exactly two new npm scripts
+    (verify:kai-sprint2-p3-17-human-authority-decision-ledger,
+    test:kai-sprint2-p3-17-human-authority-decision-ledger). No existing
+    script is changed.
+  - __tests__/kai-sprint2-p3-17-human-authority-decision-ledger-boundary.spec.js,
+    .integration.spec.js - focused boundary (pure-function, no database) and
+    PostgreSQL-backed integration coverage of: exact decision-type/action
+    vocabulary, decision-type/role compatibility, audience compatibility for
+    funder_ready/public_ready, exact candidate binding, append-only
+    grant/revoke lineage, absence of lineage forks/multiple roots, revoke
+    recorded strictly as a successor never an unrelated root, re-grant after
+    revoke as another successor event, current-head derivation, a stale
+    P3-16 export candidate making an old grant ineffective without
+    mutation, queue/audit/role-possession state creating no authority on its
+    own, and the absence of finalGate/VAL-EXP/manifest/export-artifact state
+    anywhere in the kai schema.
+
+TOOL_VERIFIED:
+  - node --test __tests__/kai-sprint2-p3-17-human-authority-decision-ledger-boundary.spec.js -> 15/15 pass.
+  - npm run verify:kai-sprint2-p3-17-human-authority-decision-ledger -> ephemeral
+    loopback PostgreSQL 16 runner: migration, P3-04/P3-13/P3-16 regression
+    verifiers, P3-17 catalog verifier, smoke seed/verifier, read-only
+    failure checks, and the full focused test list (P3-17
+    integration+boundary plus P3-16 through P3-01 regression specs) all
+    green - 211 total, 210 pass, 0 fail, 1 skipped (unrelated), runner
+    workdir removed. One rerun of this same command hit one pre-existing,
+    unmodified P3-16 concurrency test flaking under load
+    (kai-sprint2-p3-16-export-candidate-foundation.integration.spec.js's own
+    concurrent-changed-confirmations race); an immediate rerun of the
+    identical command was fully green (211/211, 0 fail) with no P3-17 file
+    touched between runs, confirming the flake was pre-existing and
+    unrelated to this package.
+  - A standalone rollback/reapply check (forward migration chain through
+    P3-17, then the P3-17 rollback alone, confirmed table absent, then the
+    P3-17 forward migration alone, then the P3-17 catalog verifier) against
+    a separate ephemeral loopback PostgreSQL 16 instance -> forward apply,
+    rollback, reapply, and post-reapply verifier all succeeded cleanly.
+  - npm run test:kai-sprint2 -> complete Sprint 2 suite: 1756 total, 1730
+    pass, 0 fail, 26 skipped without a runner-owned database.
+  - npm test -> complete repository suite: 1861 total, 1835 pass, 0 fail, 26
+    skipped without a runner-owned database.
+  - npx vite build -> succeeded (47 modules transformed).
+  - git diff --check -> clean (no whitespace errors).
+  - git diff --cached --check -> clean (nothing staged with whitespace
+    errors).
+  - Every node/npm/npx command above ran with
+    DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel explicitly set and
+    DATABASE_URL_LOCAL/PGURL_LOCAL/RENDER_DATABASE_URL/PROD_DATABASE_URL
+    explicitly cleared; the P3-17 runner and the standalone rollback/reapply
+    check each used only their own proven loopback-only, name/port/
+    listen_addresses-verified ephemeral PostgreSQL target for the duration
+    of their own child process; no ad-hoc DB-capable import was run and no
+    DB configuration was printed by this package's own commands.
+
+USER_CONFIRMED:
+  - P2-01 through P2-08 and P3-01 through P3-16 are accepted and closed.
+  - P3-17 is authorized as one bounded local synthetic schema package: the
+    append-only persistence/read foundation only for
+    client_reviewed/funder_ready/public_ready/export_authority_granted
+    decisions, using the smallest required additive local synthetic
+    schema/migration work plus runner-owned synthetic PostgreSQL
+    verification only.
+
+NOT_CONFIRMED:
+  - No production/shared-database mutation, deployment, cloud/flag change,
+    real client data, push, merge, Current-State update, human grant/revoke
+    operation or route/UI, draftIsStillDraft/VAL-EXP-001 wiring,
+    exportEligible=true, finalGate, manifest, export artifact/event, P3-18
+    work, or new review cycle was performed.
