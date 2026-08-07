@@ -12773,3 +12773,221 @@ NOT_CONFIRMED:
     functionality, listener, startup registration, production wiring, cloud
     access, real client data access, P3-09 work, new review cycle, or
     production database access was performed.
+
+## P3-09 - GK export-review start transition (completed 2026-08-07)
+
+Status: accepted for this local package as one bounded, dormant backend
+mutation service with no route, UI, assistant, or production wiring.
+
+Implementation evidence:
+  - Backend/kai/dictionary/exportReviewQueueContract.js (new) - the smallest
+    internal refactor needed for queue-contract separation, following the
+    exact static-contract/lifecycle-profile split already established by
+    generatedContentReviewQueueContract.js. Exports
+    EXPORT_REVIEW_QUEUE_STATIC_CONTRACT (queue_type, target_object_type,
+    priority, summary, required_action, assigned_to, due_at, created_by_type
+    - unchanged from P3-05), EXPORT_REVIEW_LIFECYCLE_PROFILES (exactly
+    open/needs_gk_review and in_progress/needs_gk_review, in that order, and
+    no other pair), and isExportReviewQueueStaticContractRow /
+    isExportReviewQueueLifecycleState / isExportReviewQueueContractRow, whose
+    default allowedLifecycleProfiles remains [open/needs_gk_review] so every
+    existing P3-05 call site (fresh-creation contract check and request
+    replay) is byte-for-byte unchanged unless it explicitly opts into the
+    broader profile list.
+  - Backend/kai/dictionary/postgresGeneratedContentRepository.js - imports the
+    new contract file and deletes the local, single-state
+    isExportReviewQueueContractRow duplicate in favor of the shared one;
+    EXPORT_REVIEW_QUEUE_TYPE/TARGET_TYPE/PRIORITY/SUMMARY/REQUIRED_ACTION/
+    QUEUE_STATUS/REVIEW_STATUS now derive from the shared contract instead of
+    repeating literal strings. evaluateExportReviewRequestStateInTransaction
+    (the P3-06 packet's export_review reader) is the only call site widened,
+    passing allowedLifecycleProfiles: EXPORT_REVIEW_LIFECYCLE_PROFILES so it
+    accepts both open/needs_gk_review and in_progress/needs_gk_review;
+    replayExportReviewFromExistingRow (P3-05's own replay path) keeps calling
+    isExportReviewQueueContractRow with no allowedLifecycleProfiles override,
+    so it still accepts open/needs_gk_review only - an in_progress row is not
+    an eligible P3-05 replay target and returns conflict_current_state_changed
+    instead. Adds one new dormant repository method,
+    startGeneratedDraftExportReview(input, {metadataOnlyAudit}), plus its
+    private helpers (validateStartExportReviewInput,
+    toStartExportReviewResult, buildStartExportReviewAuditMetadata,
+    auditMetadataMatchesStart, insertStartExportReviewAudit,
+    findMatchingStartExportReviewAudit,
+    evaluateStartExportReviewReplayOrConflict), placed before
+    evaluateExportReviewRequestStateInTransaction so the existing P3-06
+    read-path-purity boundary test's source slice is untouched. The method:
+    (1) loads the export_review queue row by organizationId +
+    exportReviewQueueItemId only (tenant-scoped in the query itself, no
+    unscoped lookup) and returns not_found if absent; (2) returns
+    conflict_current_state_changed if the row's target_object_type/
+    target_object_id does not match generatedContentDraftId; (3) runs one
+    tenant-scoped compare-and-set UPDATE requiring queue_type='export_review',
+    the P3-05 static target fields, queue_status='open',
+    review_status='needs_gk_review', and
+    date_trunc('milliseconds', updated_at) = expectedUpdatedAt, setting only
+    queue_status='in_progress' plus updated_at bookkeeping (review_status is
+    left untouched in both the SET clause and the row); (4) on a successful
+    CAS, rereads and re-validates the row against the single
+    in_progress/needs_gk_review profile, writes one export_review_started
+    audit row via the existing prepareRequiredAudit/metadataOnlyAudit
+    contract, and re-reads to prove exactly one matching audit exists before
+    returning replayed:false; (5) on a CAS miss, calls
+    evaluateStartExportReviewReplayOrConflict, which rereads the row, requires
+    it to be exactly in_progress/needs_gk_review under the shared static
+    contract, then requires exactly one export_review_started audit row whose
+    metadata exactly matches this call's organizationId,
+    generatedContentDraftId, exportReviewQueueItemId, actorContext.actorUserId,
+    expectedUpdatedAt, and now (requested_start_timestamp) before returning
+    replayed:true - a different actor, expectedUpdatedAt, or now is therefore
+    not an identical replay and returns conflict_current_state_changed with
+    zero mutation and zero audit, as does a stale CAS, an unrelated
+    in_progress state, zero/duplicate matching audits, or malformed audit
+    metadata. All Postgres error codes map through the same
+    23505/23503/22P02/23514/25001 table already used by
+    requestGeneratedDraftExportReview.
+  - Backend/kai/services/kaiExportReviewService.js - adds
+    startGeneratedDraftExportReview(input, dependencies), gated in the exact
+    required order (KAI_SPRINT2_ENABLED -> KAI_GENERATION_ENABLED ->
+    KAI_PUBLIC_EXPORT_ENABLED -> exact input validation
+    [organizationId, generatedContentDraftId, exportReviewQueueItemId,
+    expectedUpdatedAt, actorContext, now; canonical UUIDs;
+    isCanonicalUtcTimestamp on expectedUpdatedAt and now; unknown/missing keys
+    rejected] -> mapped-human-actor check -> active-tenant-membership +
+    gk_admin authorization via validateActorCanPerformOperation -> lazy
+    `await import("../dictionary/postgresGeneratedContentRepository.js")`),
+    identical in shape to requestGeneratedDraftExportReview and reusing the
+    same EXPORT_REVIEW_ALLOWED_ROLES (gk_admin only). Adds
+    isStartExportReviewResultDto, an exact allowlist
+    (generatedContentDraftId, exportReviewQueueItemId, queueStatus,
+    reviewStatus, replayed) that pins queueStatus==='in_progress' and
+    reviewStatus==='needs_gk_review'. Statically imports only
+    EXPORT_REVIEW_LIFECYCLE_PROFILES from the new pure-data contract file (no
+    db/pg import), which the existing P3-09 lazy-load boundary test proves is
+    still the only lazily-loaded module. Widens
+    isGeneratedDraftExportReviewPacketDto's exportReviewQueueStatus/
+    exportReviewStatus check from a single pinned open/needs_gk_review pair to
+    membership in EXPORT_REVIEW_LIFECYCLE_PROFILES, so the P3-06 packet DTO
+    now accepts either lifecycle state while still rejecting every other
+    combination (e.g. resolved/resolved).
+  - migrations/kai_sprint2_p3_09_export_review_start.sql (new) +
+    .rollback.sql (new) - preflight-checks that
+    review_queue_items_p3_05_export_review_contract_check already exists,
+    then drops it and adds
+    review_queue_items_p3_09_export_review_contract_check, which is byte-for-
+    byte the P3-05 contract with the single
+    `queue_status = 'open' AND review_status = 'needs_gk_review'` clause
+    replaced by `(open AND needs_gk_review) OR (in_progress AND
+    needs_gk_review)` - every other static field (target_object_type,
+    priority, summary, required_action, blocked_reason, assigned_to, due_at,
+    queue_metadata, created_by, created_by_type) is unchanged. Extends
+    upload_lifecycle_audit_gate_a_operation_check to admit
+    'export_review_started' alongside the existing vocabulary, and adds
+    upload_lifecycle_audit_p3_09_metadata_object_check, a closed metadata
+    contract for that operation requiring exactly contract, organization_id,
+    generated_content_draft_id, review_queue_item_id, actor_id, actor_type,
+    expected_updated_at, requested_start_timestamp, previous_queue_status,
+    resulting_queue_status, previous_review_status, resulting_review_status,
+    validator_keys and forbidding raw-content keys plus
+    requested_export_audience (a P3-05-only field, kept out of the P3-09
+    contract to prove no cross-contamination). No resolved/resolved state, no
+    export_authority/final_export_gate/approved_at/finalized_at/exported_at
+    column, and no manifest/finalization table or column is introduced,
+    verified directly by the new verifier script. The rollback drops the
+    P3-09 constraint, restores the exact P3-05 single-state constraint text,
+    reverts the audit operation/metadata-object checks, deletes
+    export_review_started audit rows, and resets any in_progress export_review
+    row back to open.
+  - scripts/kai-sprint2-p3-09-export-review-start-verifier.sql (new) - asserts
+    the P3-09 two-state contract check exists, the P3-05 single-state check
+    is absent (proving replacement, not duplication), the P3-05 identity
+    unique index is preserved, the export_review_started audit operation and
+    its metadata contract exist, no export-authority/final-gate/finalize
+    column exists anywhere in the kai schema, and the P3-09 contract text
+    contains no 'resolved' lifecycle state.
+  - scripts/kai-sprint2-p3-09-export-review-start-local-postgres.js (new) -
+    follows the exact P3-05 runner shape (ephemeral loopback-only Postgres in
+    a temp dir, proveRunnerOwnedTarget() before any real query, full prior
+    migration/verifier/smoke-seed replay, then the focused P3-09 + P3-05 +
+    P3-06 + P3-04 + P3-03 + P3-02 + P3-01 test files under `node --test` with
+    a poisoned DATABASE_URL/RENDER_DATABASE_URL sentinel). Deliberately does
+    NOT re-run the P3-05 verifier after the P3-09 migration is applied, since
+    that verifier asserts the single-state P3-05 constraint by name and P3-09
+    intentionally replaces it - re-running it post-P3-09 would be a false
+    failure, not a real regression; the new P3-09 verifier's
+    export_review_p3_05_single_state_contract_removed check covers that same
+    boundary correctly for the post-P3-09 schema state.
+  - package.json - added
+    test:kai-sprint2-p3-09-export-review-start and
+    verify:kai-sprint2-p3-09-export-review-start, following the existing
+    naming convention exactly.
+  - __tests__/kai-sprint2-p3-09-export-review-start-boundary.spec.js (new,
+    25 tests, fake-transaction/no real DB) and
+    __tests__/kai-sprint2-p3-09-export-review-start.integration.spec.js (new,
+    skips without a runner-owned database URL) - cover: the full gate order
+    and lazy-load proof; exact input-contract rejection of unknown/missing
+    keys and non-canonical timestamps; fresh start (one transition, one
+    audit); audit-backed identical replay (zero additional writes) and its
+    negative cases (different actor / different expectedUpdatedAt / different
+    now each fail closed as non-identical replays); stale CAS (zero mutation,
+    zero audit); tenant-safe not_found for an unknown or cross-organization
+    exportReviewQueueItemId with no unscoped lookup; conflict for a queue item
+    that targets a different draft; duplicate and malformed audit states
+    failing closed without repair; the required-audit-dependency and
+    audit-prepare-rejection failure paths; the exact audit-metadata key set
+    and value bindings; the exact service-level result DTO allowlist; a
+    regression proof that an in_progress export_review row is not an eligible
+    P3-05 replay target; a regression proof that P3-06's
+    evaluateExportReviewRequestStateInTransaction now reads both lifecycle
+    profiles and still rejects a third (resolved/resolved); and a source-slice
+    scan proving the new P3-09 helpers reference no resolved/approval/export-
+    authority/final-gate/manifest state. The integration spec (real,
+    runner-owned, loopback-only Postgres) additionally proves: fresh start
+    and identical replay against real rows and real audit rows; a real stale-
+    CAS conflict; real tenant-safe not_found and cross-draft conflict; a true
+    concurrent Promise.all pair converging to exactly one transition and one
+    audit (the loser replaying only after its own fresh reread, not a fake-
+    tx race); that draft_status and the generated_content_review queue row
+    are untouched; and that the authentic P3-06 packet
+    (getGeneratedDraftExportReviewPacket, not a stub) reports
+    exportReviewQueueStatus:"in_progress", exportReviewStatus:
+    "needs_gk_review", exportEligible:false, and draftStatus:"draft"
+    immediately after a start.
+
+TOOL_VERIFIED:
+  - node --test __tests__/kai-sprint2-p3-09-export-review-start-boundary.spec.js
+    -> 25/25 pass.
+  - npm run test:kai-sprint2-p3-05-export-review-request -> 21/21 pass
+    (unchanged; proves the P3-05 request/replay lifecycle is still
+    open/needs_gk_review only).
+  - npm run test:kai-sprint2-p3-06-export-review-packet -> 11/11 pass
+    (unchanged; the read-path-purity boundary test still passes, proving no
+    write/audit/queue-transition code was added to the read-path source
+    slice).
+  - node --test __tests__/kai-sprint2-p3-07-export-review-packet-route.spec.js
+    __tests__/kai-sprint2-p3-08-gk-export-review-detail.spec.js -> 20/20 pass
+    (unaffected; no route or UI file was touched).
+  - npm run verify:kai-sprint2-p3-09-export-review-start -> ephemeral
+    loopback-only Postgres cluster built from the full prior migration chain
+    plus the new P3-09 migration and verifier; 114/114 focused tests pass
+    (P3-09 boundary + integration, P3-05 boundary, P3-06 boundary, P3-04/03/
+    02/01 boundary), including the real-Postgres concurrency and post-start
+    P3-06-packet proofs above.
+  - npm run test:kai-sprint2 -> complete Sprint 2 suite: 1608 pass, 23 skip,
+    0 fail.
+  - npm test -> complete repository suite: 1713 pass, 23 skip, 0 fail.
+  - git diff --check -> clean (no whitespace errors).
+  - git diff --cached --check -> clean (no staged changes prior to this
+    package's commit).
+
+USER_CONFIRMED:
+  - P2-01 through P2-08 and P3-01 through P3-08 are accepted and closed.
+  - P3-09 is authorized as one bounded GK export-review start-transition
+    backend mutation service.
+
+NOT_CONFIRMED:
+  - No push, merge, deploy, flag enablement, approval/export authority, final
+    gate, manifest/file creation, export finalization, resolved/resolved
+    export_review state, route, frontend UI, assistant tool, listener,
+    startup registration, production wiring, cloud access, real client data
+    access, P3-10 work, new review cycle, or production database access was
+    performed.

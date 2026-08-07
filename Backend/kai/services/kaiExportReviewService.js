@@ -5,10 +5,12 @@ import {
 } from "../config/kaiSprint2Config.js";
 import { buildKaiError } from "../errors/kaiErrors.js";
 import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationService.js";
+import { EXPORT_REVIEW_LIFECYCLE_PROFILES } from "../dictionary/exportReviewQueueContract.js";
 
 const EXPORT_REVIEW_ALLOWED_ROLES = new Set(["gk_admin"]);
 const REQUEST_EXPORT_REVIEW_OPERATION = "request_generated_draft_export_review";
 const GET_EXPORT_REVIEW_PACKET_OPERATION = "get_generated_draft_export_review_packet";
+const START_EXPORT_REVIEW_OPERATION = "start_generated_draft_export_review";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const AUDIENCES = new Set(["internal", "funder", "public"]);
 
@@ -58,6 +60,25 @@ function isGeneratedDraftExportReviewPacketInput(input) {
     && UUID_PATTERN.test(input.organizationId)
     && UUID_PATTERN.test(input.generatedContentDraftId)
     && UUID_PATTERN.test(input.exportReviewQueueItemId)
+    && Boolean(input.actorContext)
+    && typeof input.actorContext === "object"
+    && !Array.isArray(input.actorContext);
+}
+
+function isStartExportReviewInput(input) {
+  return hasExactKeys(input, new Set([
+    "organizationId",
+    "generatedContentDraftId",
+    "exportReviewQueueItemId",
+    "expectedUpdatedAt",
+    "actorContext",
+    "now",
+  ]))
+    && UUID_PATTERN.test(input.organizationId)
+    && UUID_PATTERN.test(input.generatedContentDraftId)
+    && UUID_PATTERN.test(input.exportReviewQueueItemId)
+    && isCanonicalUtcTimestamp(input.expectedUpdatedAt)
+    && isCanonicalUtcTimestamp(input.now)
     && Boolean(input.actorContext)
     && typeof input.actorContext === "object"
     && !Array.isArray(input.actorContext);
@@ -119,6 +140,22 @@ function isRequestExportReviewResultDto(data) {
     && data.reviewQueueItemId === null
     && data.queueStatus === null
     && data.reviewStatus === null;
+}
+
+const START_EXPORT_REVIEW_RESULT_KEYS = new Set([
+  "generatedContentDraftId",
+  "exportReviewQueueItemId",
+  "queueStatus",
+  "reviewStatus",
+  "replayed",
+]);
+
+function isStartExportReviewResultDto(data) {
+  if (!hasExactKeys(data, START_EXPORT_REVIEW_RESULT_KEYS)) return false;
+  if (!UUID_PATTERN.test(data.generatedContentDraftId)) return false;
+  if (!UUID_PATTERN.test(data.exportReviewQueueItemId)) return false;
+  if (data.queueStatus !== "in_progress" || data.reviewStatus !== "needs_gk_review") return false;
+  return typeof data.replayed === "boolean";
 }
 
 const EXPORT_REVIEW_PACKET_KEYS = new Set([
@@ -190,8 +227,9 @@ function isGeneratedDraftExportReviewPacketDto(data) {
   if (data.generatedContentReviewQueueStatus !== "resolved") return false;
   if (data.generatedContentReviewStatus !== "resolved") return false;
   if (!UUID_PATTERN.test(data.exportReviewQueueItemId)) return false;
-  if (data.exportReviewQueueStatus !== "open") return false;
-  if (data.exportReviewStatus !== "needs_gk_review") return false;
+  if (!EXPORT_REVIEW_LIFECYCLE_PROFILES.some(
+    (profile) => data.exportReviewQueueStatus === profile.queueStatus && data.exportReviewStatus === profile.reviewStatus,
+  )) return false;
   if (typeof data.currentUseEligible !== "boolean") return false;
   if (typeof data.exportEligible !== "boolean") return false;
   if (!isValidatorResultDto(data.validatorResult, data.generatedContentDraftId)) return false;
@@ -242,6 +280,34 @@ export async function requestGeneratedDraftExportReview(input, dependencies = {}
   });
   if (!result.ok) return buildKaiError(result.error.code, { status: result.error.status, data: null });
   if (!isRequestExportReviewResultDto(result.data)) return buildKaiError("system_error", { data: null });
+  return { ok: true, data: result.data, error: null };
+}
+
+export async function startGeneratedDraftExportReview(input, dependencies = {}) {
+  const env = dependencies.env || process.env;
+  if (!isKaiSprint2Enabled(env)) return buildKaiError("feature_disabled", { data: null });
+  if (!isKaiGenerationEnabled(env)) return buildKaiError("feature_disabled", { data: null });
+  if (!isKaiPublicExportEnabled(env)) return buildKaiError("feature_disabled", { data: null });
+  if (!isStartExportReviewInput(input)) return buildKaiError("validation_blocker", { data: null });
+  if (!isMappedHumanActor(input.actorContext)) return buildKaiError("authorization_denied", { data: null });
+
+  const auth = validateActorCanPerformOperation(
+    input.actorContext,
+    START_EXPORT_REVIEW_OPERATION,
+    input.organizationId,
+    { allowedRoles: EXPORT_REVIEW_ALLOWED_ROLES },
+  );
+  if (!auth.ok) {
+    return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers, data: null });
+  }
+
+  const repository =
+    dependencies.generatedContentRepository || (await createDefaultGeneratedContentRepository());
+  const result = await repository.startGeneratedDraftExportReview(input, {
+    metadataOnlyAudit: dependencies.metadataOnlyAudit,
+  });
+  if (!result.ok) return buildKaiError(result.error.code, { status: result.error.status, data: null });
+  if (!isStartExportReviewResultDto(result.data)) return buildKaiError("system_error", { data: null });
   return { ok: true, data: result.data, error: null };
 }
 
@@ -297,12 +363,15 @@ export const __exportReviewServiceContract = Object.freeze({
   EXPORT_REVIEW_ALLOWED_ROLES,
   REQUEST_EXPORT_REVIEW_OPERATION,
   GET_EXPORT_REVIEW_PACKET_OPERATION,
+  START_EXPORT_REVIEW_OPERATION,
 });
 
 export const __exportReviewServiceTestables = Object.freeze({
   isRequestExportReviewInput,
   isGeneratedDraftExportReviewPacketInput,
+  isStartExportReviewInput,
   isMappedHumanActor,
   isRequestExportReviewResultDto,
   isGeneratedDraftExportReviewPacketDto,
+  isStartExportReviewResultDto,
 });
