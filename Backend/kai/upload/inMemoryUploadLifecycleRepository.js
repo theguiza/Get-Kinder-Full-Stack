@@ -273,6 +273,38 @@ function isExpired(record, now) {
   return Date.parse(now) >= Date.parse(record.upload_expires_at);
 }
 
+const GCS_GENERATION_PATTERN = /^[1-9][0-9]{0,19}$/;
+
+// Mirrors postgresUploadLifecycleRepository.js: the GCS SDK's own generation
+// option is passed through Number(...) internally, so a digit string that
+// would lose precision under that conversion could bind to the wrong
+// generation. Fail closed rather than persist such a value.
+function isPrecisionSafeGcsGeneration(value) {
+  return (
+    typeof value === "string" &&
+    GCS_GENERATION_PATTERN.test(value) &&
+    Number.isSafeInteger(Number(value))
+  );
+}
+
+function validateBindGcsGenerationInput(input) {
+  const allowedKeys = new Set(["organizationId", "intakeFileId", "objectVersionId", "gcsGeneration", "now"]);
+  if (!isPlainObject(input) || !hasOnlyKeys(input, allowedKeys)) return false;
+  return (
+    isNonEmptyString(input.organizationId) &&
+    isNonEmptyString(input.intakeFileId) &&
+    isNonEmptyString(input.objectVersionId) &&
+    isPrecisionSafeGcsGeneration(input.gcsGeneration) &&
+    isNormalizedNow(input.now)
+  );
+}
+
+function validateResolveGcsGenerationBindingInput(input) {
+  const allowedKeys = new Set(["organizationId", "intakeFileId"]);
+  if (!isPlainObject(input) || !hasOnlyKeys(input, allowedKeys)) return false;
+  return isNonEmptyString(input.organizationId) && isNonEmptyString(input.intakeFileId);
+}
+
 function replayFactsMatch(record, input) {
   if (input.newUploadState === "uploaded_unconfirmed") {
     return record.object_version_id === input.objectVersionId;
@@ -366,6 +398,11 @@ function buildPolicyDecisionAuditPayload(input) {
 
 function applyTransition(record, input) {
   const next = copyRecord(record);
+  // copyRecord() intentionally omits gcs_generation (Gate C-1 private
+  // storage binding) from the public record shape; preserve it on the
+  // internal map entry so a later transition does not erase an existing
+  // binding.
+  next.gcs_generation = record.gcs_generation;
   next.upload_state = input.newUploadState;
   next.upload_state_changed_at = input.now;
 
@@ -420,6 +457,7 @@ export function createInMemoryUploadLifecycleRepository() {
         verified_size_bytes: null,
         verified_at: null,
         policy_decision_replay: null,
+        gcs_generation: null,
         created_at: input.now,
       };
 
@@ -504,6 +542,7 @@ export function createInMemoryUploadLifecycleRepository() {
 
         const outcome = POLICY_DECISION_OUTCOMES[input.policyDecisionOutcome];
         const next = copyRecord(record);
+        next.gcs_generation = record.gcs_generation;
         next.upload_state = outcome.uploadState;
         next.file_policy_status = outcome.filePolicyStatus;
         next.upload_state_changed_at = input.now;
@@ -523,6 +562,41 @@ export function createInMemoryUploadLifecycleRepository() {
         stateHolder.state.records.set(key, next);
         preparedAudit.publish();
         return uploadLifecycleSuccess({ record: copyRecord(next), replayed: false });
+      },
+
+      // Gate C-1: mirrors postgresUploadLifecycleRepository.bindGcsGeneration.
+      bindGcsGeneration(input) {
+        if (!validateBindGcsGenerationInput(input)) return uploadLifecycleFailure("validation_blocker");
+
+        const key = keyFor(input);
+        const record = stateHolder.state.records.get(key);
+        if (!record) return uploadLifecycleFailure("not_found");
+        if (record.object_version_id !== input.objectVersionId) {
+          return uploadLifecycleFailure("conflict_current_state_changed");
+        }
+        if (record.gcs_generation !== null) {
+          if (record.gcs_generation === input.gcsGeneration) {
+            return uploadLifecycleSuccess({ bound: true, replayed: true });
+          }
+          return uploadLifecycleFailure("conflict_current_state_changed");
+        }
+
+        const next = copyRecord(record);
+        next.gcs_generation = input.gcsGeneration;
+        stateHolder.state.records.set(key, next);
+        return uploadLifecycleSuccess({ bound: true, replayed: false });
+      },
+
+      // Gate C-1: the sole read path for the private storage binding.
+      resolveGcsGenerationBinding(input) {
+        if (!validateResolveGcsGenerationBindingInput(input)) return uploadLifecycleFailure("validation_blocker");
+
+        const record = stateHolder.state.records.get(keyFor(input));
+        if (!record) return uploadLifecycleFailure("not_found");
+        return uploadLifecycleSuccess({
+          object_version_id: record.object_version_id,
+          gcs_generation: record.gcs_generation,
+        });
       },
     },
     IN_MEMORY_UPLOAD_LIFECYCLE_TRANSACTION_PARTICIPANT,

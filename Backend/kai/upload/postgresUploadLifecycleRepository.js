@@ -409,6 +409,40 @@ function buildPolicyDecisionAuditPayload(input) {
   };
 }
 
+const GCS_GENERATION_PATTERN = /^[1-9][0-9]{0,19}$/;
+
+// The GCS SDK's own generation option is passed through Number(...)
+// internally (see @google-cloud/storage File constructor / getSignedUrl),
+// so a digit string that would lose precision under that conversion could
+// bind to the wrong generation. Fail closed rather than persist a value the
+// provider could later misinterpret, even though real-world GCS generation
+// values are far below this bound today.
+function isPrecisionSafeGcsGeneration(value) {
+  return (
+    typeof value === "string" &&
+    GCS_GENERATION_PATTERN.test(value) &&
+    Number.isSafeInteger(Number(value))
+  );
+}
+
+function validateBindGcsGenerationInput(input) {
+  const allowedKeys = new Set(["organizationId", "intakeFileId", "objectVersionId", "gcsGeneration", "now"]);
+  if (!isPlainObject(input) || !hasOnlyKeys(input, allowedKeys)) return false;
+  return (
+    isNonEmptyString(input.organizationId) &&
+    isNonEmptyString(input.intakeFileId) &&
+    isNonEmptyString(input.objectVersionId) &&
+    isPrecisionSafeGcsGeneration(input.gcsGeneration) &&
+    isNormalizedNow(input.now)
+  );
+}
+
+function validateResolveGcsGenerationBindingInput(input) {
+  const allowedKeys = new Set(["organizationId", "intakeFileId"]);
+  if (!isPlainObject(input) || !hasOnlyKeys(input, allowedKeys)) return false;
+  return isNonEmptyString(input.organizationId) && isNonEmptyString(input.intakeFileId);
+}
+
 function shapeLifecycleError(error) {
   if (error?.code === "23505") return uploadLifecycleFailure("conflict_current_state_changed");
   if (error?.code === "23503") return uploadLifecycleFailure("not_found");
@@ -665,6 +699,79 @@ export function createPostgresUploadLifecycleRepository({ runInTransaction = wit
           });
           preparedAudit.publish();
           return uploadLifecycleSuccess({ record: await readRecord(tx, input.confirmedFileFacts), replayed: false });
+        });
+      } catch (error) {
+        return shapeLifecycleError(error);
+      }
+    },
+
+    // Gate C-1: binds the provider-private, immutable native GCS generation
+    // to the row's already-bound provider-neutral objectVersionId. This is
+    // an additive method outside the three-operation DI contract, following
+    // the exact compareAndSetPolicyDecision pattern. gcs_generation is never
+    // included in the ordinary `record` shape returned by the other
+    // methods above.
+    async bindGcsGeneration(input) {
+      if (!validateBindGcsGenerationInput(input)) return uploadLifecycleFailure("validation_blocker");
+      try {
+        return await runInTransaction(async (tx) => {
+          const existing = await tx.query(
+            `SELECT object_version_id, gcs_generation::text AS gcs_generation
+               FROM kai.intake_files
+              WHERE organization_id = $1::uuid
+                AND intake_file_id = $2::uuid`,
+            [input.organizationId, input.intakeFileId],
+          );
+          const row = existing.rows[0];
+          if (!row) return uploadLifecycleFailure("not_found");
+          if (row.object_version_id !== input.objectVersionId) {
+            return uploadLifecycleFailure("conflict_current_state_changed");
+          }
+          if (row.gcs_generation !== null) {
+            if (row.gcs_generation === input.gcsGeneration) {
+              return uploadLifecycleSuccess({ bound: true, replayed: true });
+            }
+            return uploadLifecycleFailure("conflict_current_state_changed");
+          }
+
+          const result = await tx.query(
+            `UPDATE kai.intake_files
+                SET gcs_generation = $4::numeric
+              WHERE organization_id = $1::uuid
+                AND intake_file_id = $2::uuid
+                AND object_version_id = $3
+                AND gcs_generation IS NULL`,
+            [input.organizationId, input.intakeFileId, input.objectVersionId, input.gcsGeneration],
+          );
+          if (result.rowCount !== 1) return uploadLifecycleFailure("conflict_current_state_changed");
+          return uploadLifecycleSuccess({ bound: true, replayed: false });
+        });
+      } catch (error) {
+        return shapeLifecycleError(error);
+      }
+    },
+
+    // Gate C-1: the sole read path for the private storage binding. Returns
+    // only { object_version_id, gcs_generation } - never the ordinary
+    // lifecycle record - so this fact cannot reach a DTO, audit payload, or
+    // log line through any other method on this repository.
+    async resolveGcsGenerationBinding(input) {
+      if (!validateResolveGcsGenerationBindingInput(input)) return uploadLifecycleFailure("validation_blocker");
+      try {
+        return await runInTransaction(async (tx) => {
+          const result = await tx.query(
+            `SELECT object_version_id, gcs_generation::text AS gcs_generation
+               FROM kai.intake_files
+              WHERE organization_id = $1::uuid
+                AND intake_file_id = $2::uuid`,
+            [input.organizationId, input.intakeFileId],
+          );
+          const row = result.rows[0];
+          if (!row) return uploadLifecycleFailure("not_found");
+          return uploadLifecycleSuccess({
+            object_version_id: row.object_version_id,
+            gcs_generation: row.gcs_generation,
+          });
         });
       } catch (error) {
         return shapeLifecycleError(error);

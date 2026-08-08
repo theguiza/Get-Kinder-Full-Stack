@@ -14375,3 +14375,117 @@ NOT_CONFIRMED:
     operation or route/UI, draftIsStillDraft/VAL-EXP-001 wiring,
     exportEligible=true, finalGate, manifest, export artifact/event, P3-18
     work, or new review cycle was performed.
+
+## Gate C-1 - dormant GCS provider and exact-generation binding foundation (completed 2026-08-08)
+
+TOOL_VERIFIED:
+  - pre_edit_storage_binding_check: existing Gate A authoritative metadata
+    (organization_id, intake_batch_id, intake_file_id, safe_filename via
+    storagePathPolicy.buildObjectKey) already resolves objectVersionId to
+    the exact private GCS object identity with no new schema. The only
+    missing durable fact was the native GCS generation itself, so exactly
+    one additive column (no new relation, no global objectVersionId lookup)
+    was authorized and added.
+  - dependency_audit: sanitized npm-audit baseline before install
+    {info:0, low:1, moderate:4, high:13, critical:0, total:18}; after
+    installing `@google-cloud/storage@7.21.0` (exact, --save-exact)
+    {info:0, low:1, moderate:9, high:13, critical:0, total:23} - the HIGH
+    advisory set (axios, brace-expansion, form-data, ip-address, minimatch,
+    multer, nanoid, nodemailer, path-to-regexp, picomatch, postcss, rollup,
+    vite) is byte-for-byte identical before/after; zero new HIGH/CRITICAL
+    findings attributable to this package. The 5 new moderate findings
+    (@google-cloud/storage, gaxios, retry-request, teeny-request, uuid) all
+    trace to one `uuid` advisory (buffer-bounds-check when a caller-supplied
+    buffer is passed; not exercised by this package's usage). `npm ls
+    google-auth-library` shows the new SDK resolves its own
+    `google-auth-library@9.15.1` independently of the pre-existing root
+    `google-auth-library@10.6.2` - not a shared/deduped resolution.
+  - schema_files: `migrations/kai_sprint2_gate_c1_gcs_generation_binding.sql`
+    / `.rollback.sql` add `kai.intake_files.gcs_generation numeric(20,0)`
+    (nullable), two CHECK constraints (positive; requires object_version_id
+    already set), and a new, separate immutability trigger
+    (`kai.enforce_gate_c1_gcs_generation_binding`) - no existing Gate A
+    column, constraint, trigger, or transition edge is altered. Full proof
+    package added: verifier, smoke-seed, smoke-verifier, read-only
+    failure-checks, patch-notes, runbook, and an ephemeral-loopback-Postgres
+    runner (`npm run verify:kai-sprint2-gate-c1-gcs-generation-binding`).
+    The runner proves: generation absent before the lifecycle point at
+    which binding is valid; a valid generation persists exactly once with
+    no precision loss; immutable once bound; malformed generation rejected;
+    provider-neutral objectVersionId semantics unchanged; Gate A lifecycle
+    transition semantics unchanged; tenant boundaries unchanged;
+    gcs_generation absent from every ordinary record/DTO surface; rollback
+    removes the column and Gate A's own verifier still passes immediately
+    after rollback; clean reapplication succeeds and re-verifies.
+  - repository_binding: `bindGcsGeneration`/`resolveGcsGenerationBinding`
+    added identically to `postgresUploadLifecycleRepository.js` and
+    `inMemoryUploadLifecycleRepository.js`, outside the three-operation DI
+    contract, mirroring the existing `compareAndSetPolicyDecision` pattern.
+    `gcs_generation` is never included in the `record` shape returned by
+    `createReservedUploadLifecycle`/`getUploadLifecycle`/
+    `transitionUploadLifecycle`/`compareAndSetPolicyDecision` - confirmed by
+    both integration and in-memory boundary tests.
+  - signed_upload_contract: `GoogleCloudStorageProvider.createSignedUploadUrl`
+    calls the pinned SDK's V4 `getSignedUrl` (`action: "write"`, method
+    PUT) with `extensionHeaders` carrying `x-goog-content-length-range`
+    (bounded by the existing `KAI_SPRINT2_MAX_FILE_SIZE_BYTES`) and
+    `x-goog-if-generation-match: 0`, plus the signed `contentType` and a
+    short expiry. SDK inspection of `signer.js` confirmed every one of
+    these becomes part of the V4 canonical request's `signedHeaders`.
+    Mocked-SDK boundary tests prove every required header is present in the
+    signing call and in the returned header set the eventual upload must
+    supply.
+  - crc32c: SDK inspection of `file.js`'s `createReadStream` showed CRC32C
+    validation defaults to enabled for a full (non-range) read of an
+    identity-encoded object, comparing the response's `x-goog-hash` header
+    and destroying the stream on mismatch.
+    `openExactGenerationReadStream` always performs a full read and
+    explicitly requests `validation: "crc32c"` rather than relying on the
+    default. No duplicate KAI CRC32C algorithm was implemented. Real
+    (non-mocked) CRC32C behavior against a live bucket remains deferred to
+    Gate B, per that gate's own `P0_NONPRODUCTION_STORAGE_VERIFIED`
+    requirement.
+  - exact_generation: every stat/read/open-stream call requires an explicit
+    `gcsGeneration` and pins `bucket.file(objectKey, { generation })`; a
+    mismatched/later generation is rejected (surfaced as `conflict` or a
+    sanitized `not_found` on a 404) rather than silently resolving the
+    current object. Precision-safety guards reject any generation that
+    would not survive the SDK's internal `Number(...)` conversion without
+    precision loss, both in the provider and in both repository
+    implementations.
+  - no_leakage: mocked-SDK boundary tests prove provider failures never
+    include bucket name, object key, generation, credential material, or
+    the underlying error's raw message - only `{operation, provider,
+    contract}` is present on `data`.
+  - tests_and_commands: `npm run verify:kai-sprint2-gate-c1-gcs-generation-binding`
+    (59/59 pass, including schema rollback/reapply round-trip); focused
+    Gate C-1 boundary suites plus `kai-sprint2-storage-boundary`,
+    `kai-sprint2-storage-path-policy`, `kai-sprint2-intake-service`,
+    `kai-sprint2-intake-queries`, `kai-sprint2-p0-acceptance`,
+    `kai-sprint2-p0-upload-lifecycle-repository`,
+    `kai-sprint2-p0-upload-lifecycle-cross-implementation-parity`,
+    `kai-sprint2-p0-repository-contract` (265/265 pass, 1 skip - the
+    database-gated integration spec outside its own runner); complete
+    `__tests__/kai-sprint2-*.spec.js` suite (1748 pass, 27 skip, 0 fail);
+    complete `__tests__/*.spec.js` repository suite (1853 pass, 27 skip, 0
+    fail); `git diff --check` and `git diff --cached --check` both clean.
+
+USER_CONFIRMED:
+  - Owner-reported accepted checkpoint 98625a2f4203cfcbb030382507d9bee66e0756a7
+    matched the actual repository HEAD and clean worktree at the start of
+    this package.
+  - This package's exact scope (dependency, schema, repository binding,
+    dormant provider, signed-upload contract, CRC32C behavior, tests) was
+    explicitly authorized by the owner in the same turn as this evidence
+    entry.
+
+NOT_CONFIRMED:
+  - No contact with Google Cloud, no owner bucket/credential/IAM/CORS
+    access or change, no application-startup selection of the GCS provider
+    or of `postgresUploadLifecycleRepository`, no `sprint2IntakeApi` wiring,
+    no staging values, no deployment, no feature-flag enablement, no real
+    client data, no Gate C-2, and no P3-18 work was performed. Remaining
+    facts require real synthetic-GCS proof under Gate B/Gate C: actual
+    signed-PUT enforcement, actual CRC32C behavior against transferred
+    bytes, actual generation-mismatch rejection against a real multi-
+    generation object, and CORS behavior.

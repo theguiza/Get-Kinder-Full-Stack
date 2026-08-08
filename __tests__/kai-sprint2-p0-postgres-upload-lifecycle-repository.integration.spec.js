@@ -162,6 +162,8 @@ test("PostgreSQL adapter exposes every upload lifecycle callable", async () => {
     "getUploadLifecycle",
     "transitionUploadLifecycle",
     "compareAndSetPolicyDecision",
+    "bindGcsGeneration",
+    "resolveGcsGenerationBinding",
   ]);
 });
 

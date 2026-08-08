@@ -168,16 +168,14 @@ test("raw upload, signed URL, read, and deletion operations are blocked", async 
   }
 });
 
-test("Google Cloud Storage provider is a disabled stub and imports no SDK", async () => {
+test("Google Cloud Storage provider is disabled by default construction", async () => {
   const provider = createGoogleCloudStorageProvider();
-  const result = await provider.requestUploadUrl();
+  const result = await provider.createSignedUploadUrl({ objectKey: "kai/org/x/intake/y/z/f.pdf", contentType: "application/pdf" });
 
   assert.equal(provider.enabled, false);
   assert.equal(provider.provider, "gcs");
   assert.equal(result.ok, false);
   assert.equal(result.error.code, "operation_not_enabled");
-  assert.doesNotMatch(gcsProviderSource, /@google-cloud\/storage/);
-  assert.doesNotMatch(gcsProviderSource, /\bnew\s+Storage\b|\bgetSignedUrl\b|\bbucket\s*\(/);
 });
 
 test("storage validators fail closed for provider and upload URL execution", () => {
@@ -185,10 +183,12 @@ test("storage validators fail closed for provider and upload URL execution", () 
   assert.equal(upload_url_request_blocked_in_p0({ storageProvider: "gcs" }).blocking_reason, "upload_url_request_blocked_in_p0");
 });
 
-test("storage boundary source contains no SDK import or signed URL implementation", () => {
+test("storage boundary source contains no direct SQL/database access", () => {
+  // Gate C-1 authorizes a real SDK-backed GoogleCloudStorageProvider, so the
+  // prior "no @google-cloud/storage import" assertion is intentionally
+  // removed here; storageProvider.js (DisabledStorageProvider) itself still
+  // imports no SDK. Both files must still never touch SQL/kai.* directly.
   const combinedSource = `${storageProviderSource}\n${gcsProviderSource}`;
-  assert.doesNotMatch(combinedSource, /@google-cloud\/storage/);
-  assert.doesNotMatch(combinedSource, /\bnew\s+Storage\b|\bgetSignedUrl\b|\bcreateSigned/i);
   assert.doesNotMatch(combinedSource, /from\s+["'][^"']*(?:kaiDb|db\/pg|pg|kaiQueries|kaiIntakeQueries)\.js["']/);
   assert.doesNotMatch(combinedSource, /\bnew\s+Pool\b|\bpool\.query\b|\bconnect\s*\(/);
 });

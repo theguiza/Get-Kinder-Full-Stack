@@ -202,6 +202,8 @@ test("upload lifecycle implementations expose complete callable surface and vali
       "getUploadLifecycle",
       "transitionUploadLifecycle",
       "compareAndSetPolicyDecision",
+      "bindGcsGeneration",
+      "resolveGcsGenerationBinding",
     ], impl.name);
     assert.deepEqual(await impl.repo.createReservedUploadLifecycle({}), {
       ok: false,

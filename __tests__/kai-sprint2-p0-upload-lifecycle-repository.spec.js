@@ -1361,6 +1361,8 @@ test("policy decision CAS is concrete-leaf callable only and transaction snapsho
     "getUploadLifecycle",
     "transitionUploadLifecycle",
     "compareAndSetPolicyDecision",
+    "bindGcsGeneration",
+    "resolveGcsGenerationBinding",
   ]);
   assert.deepEqual(Object.keys(createUploadLifecycleRepository({
     createReservedUploadLifecycle() {},
