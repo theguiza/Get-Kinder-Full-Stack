@@ -1,5 +1,6 @@
 import { withTransaction } from "../db/kaiDb.js";
 import { HUMAN_AUTHORITY_DECISION_TYPES } from "./humanAuthorityDecisionContract.js";
+import { evaluateExportCandidateCurrentnessInTransaction } from "./postgresExportCandidateRepository.js";
 
 const RESULT_STATUS = Object.freeze({
   validation_blocker: 422,
@@ -32,28 +33,22 @@ function isEvaluateEffectivenessInput(input) {
 }
 
 // ---------------------------------------------------------------------------
-// Private, read-only currentness helper. Checks only whether the bound P3-16
-// export candidate's limitation snapshot is still the current (non-
-// superseded) one - the same cheap first check P3-16's own currentness
-// evaluator performs before any full canonical-fingerprint recomputation.
-// Read-only: neither the candidate row nor the snapshot row is ever rewritten.
+// Private, read-only currentness helper. Delegates to P3-16's own
+// authoritative evaluateExportCandidateCurrentnessInTransaction - full
+// currentness (limitation-snapshot currentness AND recomputed-fingerprint
+// match against current authoritative state), never a narrower reduction of
+// it. Read-only: neither the candidate row nor the snapshot row is ever
+// rewritten. evaluateCurrentness is injectable only for boundary testing;
+// the real repository always uses the P3-16 evaluator.
 // ---------------------------------------------------------------------------
-async function isExportCandidateCurrentForAuthority(tx, { organizationId, exportCandidateId }) {
-  const { rows } = await tx.query(
-    `SELECT limitation_snapshot_id::text AS limitation_snapshot_id
-       FROM kai.export_candidates
-      WHERE organization_id = $1::uuid AND export_candidate_id = $2::uuid`,
-    [organizationId, exportCandidateId],
-  );
-  const candidate = rows[0];
-  if (!candidate) return { current: false, reason: "export_candidate_missing" };
-
-  const successorRows = await tx.query(
-    `SELECT 1 FROM kai.limitation_snapshots WHERE supersedes_snapshot_id = $1::uuid LIMIT 1`,
-    [candidate.limitation_snapshot_id],
-  );
-  if (successorRows.rows.length > 0) return { current: false, reason: "limitation_snapshot_superseded" };
-  return { current: true, reason: null };
+async function isExportCandidateCurrentForAuthority(
+  tx,
+  { organizationId, exportCandidateId },
+  evaluateCurrentness = evaluateExportCandidateCurrentnessInTransaction,
+) {
+  const result = await evaluateCurrentness(tx, { organizationId, exportCandidateId });
+  if (!result.ok) return { current: false, reason: "export_candidate_missing" };
+  return result.data;
 }
 
 // ---------------------------------------------------------------------------
@@ -64,7 +59,11 @@ async function isExportCandidateCurrentForAuthority(tx, { organizationId, export
 // candidate. Not wired into VAL-EXP-001, any human grant/revoke operation
 // (none exists in this package), or any route.
 // ---------------------------------------------------------------------------
-async function evaluateHumanAuthorityEffectivenessInTransaction(tx, input) {
+async function evaluateHumanAuthorityEffectivenessInTransaction(
+  tx,
+  input,
+  evaluateCurrentness = evaluateExportCandidateCurrentnessInTransaction,
+) {
   if (!isEvaluateEffectivenessInput(input)) return failure("validation_blocker");
 
   const headRows = await tx.query(
@@ -92,7 +91,7 @@ async function evaluateHumanAuthorityEffectivenessInTransaction(tx, input) {
     return success({ effective: false, reason: "head_is_revoke", headDecisionId: head.decision_id });
   }
 
-  const currentness = await isExportCandidateCurrentForAuthority(tx, input);
+  const currentness = await isExportCandidateCurrentForAuthority(tx, input, evaluateCurrentness);
   if (!currentness.current) {
     return success({ effective: false, reason: currentness.reason, headDecisionId: head.decision_id });
   }
@@ -100,12 +99,15 @@ async function evaluateHumanAuthorityEffectivenessInTransaction(tx, input) {
   return success({ effective: true, reason: null, headDecisionId: head.decision_id });
 }
 
-export function createPostgresHumanAuthorityDecisionRepository({ runInTransaction = withTransaction } = {}) {
+export function createPostgresHumanAuthorityDecisionRepository({
+  runInTransaction = withTransaction,
+  evaluateCandidateCurrentness = evaluateExportCandidateCurrentnessInTransaction,
+} = {}) {
   return Object.freeze({
     async evaluateEffectiveness(input) {
       if (!isEvaluateEffectivenessInput(input)) return failure("validation_blocker");
       try {
-        return await runInTransaction((tx) => evaluateHumanAuthorityEffectivenessInTransaction(tx, input));
+        return await runInTransaction((tx) => evaluateHumanAuthorityEffectivenessInTransaction(tx, input, evaluateCandidateCurrentness));
       } catch {
         return failure("system_error");
       }

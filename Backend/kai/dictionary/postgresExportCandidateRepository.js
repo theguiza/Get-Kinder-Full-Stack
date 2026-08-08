@@ -470,10 +470,14 @@ async function insertExportCandidateAudit(tx, { input, auditFileContext, metadat
 }
 
 // ---------------------------------------------------------------------------
-// Private, read-only currentness evaluator. Not wired into VAL-EXP-001.
+// Read-only currentness evaluator: the single authoritative implementation of
+// full P3-16 candidate currentness (limitation-snapshot currentness AND
+// recomputed-fingerprint match). Exported so P3-17's human-authority
+// evaluator can reuse it directly rather than re-deriving a narrower check.
+// Not wired into VAL-EXP-001.
 // ---------------------------------------------------------------------------
 
-async function evaluateExportCandidateCurrentnessInTransaction(tx, { organizationId, exportCandidateId }) {
+export async function evaluateExportCandidateCurrentnessInTransaction(tx, { organizationId, exportCandidateId }) {
   const { rows } = await tx.query(
     `SELECT export_candidate_id::text AS export_candidate_id, organization_id::text AS organization_id,
             generated_content_draft_id::text AS generated_content_draft_id, content_type, requested_audience,

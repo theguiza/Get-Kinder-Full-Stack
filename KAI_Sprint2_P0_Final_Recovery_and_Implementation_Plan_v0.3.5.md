@@ -14265,3 +14265,113 @@ NOT_CONFIRMED:
     operation or route/UI, draftIsStillDraft/VAL-EXP-001 wiring,
     exportEligible=true, finalGate, manifest, export artifact/event, P3-18
     work, or new review cycle was performed.
+
+## P3-17 correction - full P3-16 candidate-currentness reuse (corrected 2026-08-08)
+
+Status: P3-17 was not yet accepted. This is a bounded local correction to
+exactly one acceptance gap and not a new acceptance. P3-17's own
+isExportCandidateCurrentForAuthority reduced full P3-16 candidate
+currentness to candidate existence plus limitation-snapshot currentness only
+- it never recomputed the canonical fingerprint against current
+authoritative state, so an export-authority grant could remain reported
+effective after the underlying generated-content graph (e.g. block text)
+drifted out from under an unsuperseded limitation snapshot. Inspection
+confirmed P3-16's own evaluateExportCandidateCurrentnessInTransaction (in
+postgresExportCandidateRepository.js) already implements the full required
+predicate - limitation-snapshot currentness AND a recomputed-fingerprint
+match against current authoritative state, reading exactly the accepted
+P3-16 canonical representation and fingerprint function, under the single
+fingerprint-contract version the export_candidates table's own CHECK
+constraint pins every row to - so this correction is a narrow reuse fix
+(Option A), not a new or second fingerprint/currentness algorithm. No P3-16
+fingerprint semantics, migration, schema, or public behavior changed.
+
+Correction evidence:
+  - Backend/kai/dictionary/postgresExportCandidateRepository.js -
+    evaluateExportCandidateCurrentnessInTransaction is now a named export
+    (previously reachable only via __exportCandidateRepositoryTestables) so
+    it is the one authoritative currentness implementation any other P3
+    package can reuse. Its internal logic, fingerprint algorithm, and
+    contract-version constant are unchanged.
+  - Backend/kai/dictionary/postgresHumanAuthorityDecisionRepository.js -
+    isExportCandidateCurrentForAuthority now delegates to P3-16's imported
+    evaluateExportCandidateCurrentnessInTransaction instead of re-deriving a
+    narrower snapshot-only check; a failed P3-16 lookup (e.g. missing
+    candidate) still fails closed as export_candidate_missing. Both
+    isExportCandidateCurrentForAuthority and
+    evaluateHumanAuthorityEffectivenessInTransaction accept an injectable
+    evaluateCurrentness parameter (defaulting to the real P3-16 evaluator)
+    used only by boundary tests to substitute a stub instead of mocking the
+    full multi-query recomputation cascade; createPostgresHumanAuthorityDecisionRepository
+    accepts a matching evaluateCandidateCurrentness override alongside the
+    existing runInTransaction override. The public evaluateEffectiveness(input)
+    signature, the four decision types, append-only lineage, role/audience
+    constraints, and the absence of any write/route/UI/finalGate/VAL-EXP-001
+    wiring are all unchanged.
+  - __tests__/kai-sprint2-p3-17-human-authority-decision-ledger-boundary.spec.js -
+    isExportCandidateCurrentForAuthority and
+    evaluateHumanAuthorityEffectivenessInTransaction coverage updated to
+    stub the injected P3-16 evaluator (including a fingerprint_mismatch
+    case) instead of hand-mocking only the old narrower query shape, plus a
+    new case confirming the real P3-16 evaluator is used by default when no
+    override is supplied.
+  - __tests__/kai-sprint2-p3-17-human-authority-decision-ledger.integration.spec.js -
+    new test, separate from the existing limitation-supersession test: seeds
+    a valid grant that is initially effective, confirms the bound limitation
+    snapshot and the stored canonical_fingerprint are unchanged, drifts the
+    underlying generated-content block text (the primary P3-16
+    fingerprint-bound graph fact) directly in synthetic PostgreSQL, and
+    proves the same grant becomes ineffective with reason fingerprint_mismatch
+    while the human-authority ledger row is provably unchanged. Citation/
+    resolved-lineage drift was not added as a second case: doing so with the
+    existing fixture would require widening it with new evidence/claim rows,
+    which this bounded correction does not do.
+
+TOOL_VERIFIED:
+  - node --test __tests__/kai-sprint2-p3-17-human-authority-decision-ledger-boundary.spec.js
+    -> 16/16 pass.
+  - DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel (DATABASE_URL_LOCAL,
+    PGURL_LOCAL, RENDER_DATABASE_URL, PROD_DATABASE_URL explicitly cleared)
+    npm run verify:kai-sprint2-p3-17-human-authority-decision-ledger ->
+    ephemeral loopback PostgreSQL 16 runner: migration, regression
+    verifiers, P3-17 catalog verifier, smoke seed/verifier, read-only
+    failure checks, and the full focused test list all green - 213 total,
+    212 pass, 0 fail, 1 skipped (unrelated), including the new fingerprint-
+    drift proof test; runner workdir removed.
+  - Same DATABASE_URL/clearing convention, npm run
+    verify:kai-sprint2-p3-16-export-candidate-foundation -> ephemeral
+    loopback PostgreSQL 16 runner green - 180 total, 179 pass, 0 fail, 1
+    skipped (unrelated); no observed reoccurrence of the previously reported
+    concurrency flake in this run. No claim is made about the cause or
+    provenance of that earlier isolated flake beyond what was independently
+    observed here.
+  - Same convention, npm run test:kai-sprint2 -> complete Sprint 2 suite:
+    1757 total, 1731 pass, 0 fail, 26 skipped without a runner-owned
+    database (one more pass than the prior accepted P3-17 baseline, matching
+    the one new test added).
+  - Same convention, npm test -> complete repository suite: 1862 total, 1836
+    pass, 0 fail, 26 skipped without a runner-owned database.
+  - git diff --check -> clean (no whitespace errors).
+  - git diff --cached --check -> clean (nothing staged with whitespace
+    errors).
+  - Every node/npm command above ran with
+    DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel explicitly set and
+    DATABASE_URL_LOCAL/PGURL_LOCAL/RENDER_DATABASE_URL/PROD_DATABASE_URL
+    explicitly cleared; the P3-17 and P3-16 runners each used only their own
+    proven loopback-only ephemeral PostgreSQL target for the duration of
+    their own child process; no ad-hoc DB-capable import was run and no DB
+    configuration was printed by this correction's own commands.
+
+USER_CONFIRMED:
+  - P3-16 remains accepted and closed.
+  - P3-17 remains not yet accepted; this correction fixes exactly one
+    acceptance gap (full P3-16 candidate-currentness reuse) in the same
+    bounded local synthetic schema package, using no additional schema or
+    migration change.
+
+NOT_CONFIRMED:
+  - No production/shared-database mutation, deployment, cloud/flag change,
+    real client data, push, merge, Current-State update, human grant/revoke
+    operation or route/UI, draftIsStillDraft/VAL-EXP-001 wiring,
+    exportEligible=true, finalGate, manifest, export artifact/event, P3-18
+    work, or new review cycle was performed.

@@ -347,6 +347,47 @@ async function runP317IntegrationSuite() {
     assert.deepEqual(beforeRow[0], afterRow[0]);
   });
 
+  test("P3-17 a P3-16 fingerprint-bound graph drift (generated-content block text changed) makes an old grant ineffective while the limitation snapshot and the ledger row are both untouched", async () => {
+    const seed = await seedExportCandidate();
+    const [grant] = await insertDecision({ exportCandidateId: seed.exportCandidateId, decisionType: "export_authority_granted", decisionAction: "grant", decidedBy: ORG, decidedByRole: "gk_admin", createdAt: NOW });
+
+    const stillEffective = await humanAuthorityDecisionRepository.evaluateEffectiveness({ organizationId: ORG, exportCandidateId: seed.exportCandidateId, decisionType: "export_authority_granted" });
+    assert.equal(stillEffective.ok, true);
+    assert.equal(stillEffective.data.effective, true);
+
+    const candidateBefore = await query(
+      `SELECT limitation_snapshot_id::text AS limitation_snapshot_id, canonical_fingerprint FROM kai.export_candidates WHERE export_candidate_id = $1::uuid`,
+      [seed.exportCandidateId],
+    );
+
+    // Drift one P3-16 fingerprint-bound graph fact - the generated-content
+    // block text - without touching the limitation snapshot at all.
+    await query(
+      `UPDATE kai.generated_content_blocks SET text = 'Drifted P3-17 fingerprint-proof block text.'
+        WHERE generated_content_draft_id = $1::uuid`,
+      [seed.draftId],
+    );
+
+    const candidateAfter = await query(
+      `SELECT limitation_snapshot_id::text AS limitation_snapshot_id, canonical_fingerprint FROM kai.export_candidates WHERE export_candidate_id = $1::uuid`,
+      [seed.exportCandidateId],
+    );
+    // The limitation snapshot binding is unchanged and unsuperseded, and the
+    // stored export-candidate fingerprint is unchanged - only the current
+    // authoritative graph moved out from under it.
+    assert.deepEqual(candidateBefore, candidateAfter);
+
+    const beforeRow = await query(`SELECT decision_action, decided_by_role, supersedes_decision_id, created_at FROM kai.human_authority_decisions WHERE decision_id = $1::uuid`, [grant.decision_id]);
+    const nowStale = await humanAuthorityDecisionRepository.evaluateEffectiveness({ organizationId: ORG, exportCandidateId: seed.exportCandidateId, decisionType: "export_authority_granted" });
+    assert.equal(nowStale.ok, true);
+    assert.equal(nowStale.data.effective, false);
+    assert.equal(nowStale.data.reason, "fingerprint_mismatch");
+    assert.equal(nowStale.data.headDecisionId, grant.decision_id);
+
+    const afterRow = await query(`SELECT decision_action, decided_by_role, supersedes_decision_id, created_at FROM kai.human_authority_decisions WHERE decision_id = $1::uuid`, [grant.decision_id]);
+    assert.deepEqual(beforeRow[0], afterRow[0]);
+  });
+
   test("P3-17 queue resolution, role possession, and audit history create no authority: effectiveness is false until an explicit decision row is inserted", async () => {
     const seed = await seedExportCandidate();
     const auditRows = await query(`SELECT count(*)::int AS count FROM kai.upload_lifecycle_audit WHERE metadata->>'generated_content_draft_id' = $1`, [seed.draftId]);

@@ -84,26 +84,47 @@ test("P3-17 evaluate-effectiveness input validator rejects unknown keys, malform
 
 // --- currentness helper ---
 
-test("P3-17 isExportCandidateCurrentForAuthority fails closed when the candidate is missing or its snapshot has a successor", async () => {
+test("P3-17 isExportCandidateCurrentForAuthority delegates to the authoritative P3-16 currentness evaluator and fails closed on every non-current result, not only limitation-snapshot supersession", async () => {
   const { isExportCandidateCurrentForAuthority } = __humanAuthorityDecisionRepositoryTestables;
 
-  const missing = await isExportCandidateCurrentForAuthority(fakeTx([[]]), { organizationId: ORG, exportCandidateId: CANDIDATE });
+  const missing = await isExportCandidateCurrentForAuthority(
+    {},
+    { organizationId: ORG, exportCandidateId: CANDIDATE },
+    async () => ({ ok: false, data: null, error: { code: "not_found", status: 404 } }),
+  );
   assert.equal(missing.current, false);
   assert.equal(missing.reason, "export_candidate_missing");
 
   const superseded = await isExportCandidateCurrentForAuthority(
-    fakeTx([[{ limitation_snapshot_id: "s1" }], [{ "?column?": 1 }]]),
+    {},
     { organizationId: ORG, exportCandidateId: CANDIDATE },
+    async () => ({ ok: true, data: { current: false, reason: "limitation_snapshot_superseded" }, error: null }),
   );
   assert.equal(superseded.current, false);
   assert.equal(superseded.reason, "limitation_snapshot_superseded");
 
-  const current = await isExportCandidateCurrentForAuthority(
-    fakeTx([[{ limitation_snapshot_id: "s1" }], []]),
+  const fingerprintMismatch = await isExportCandidateCurrentForAuthority(
+    {},
     { organizationId: ORG, exportCandidateId: CANDIDATE },
+    async () => ({ ok: true, data: { current: false, reason: "fingerprint_mismatch" }, error: null }),
+  );
+  assert.equal(fingerprintMismatch.current, false);
+  assert.equal(fingerprintMismatch.reason, "fingerprint_mismatch");
+
+  const current = await isExportCandidateCurrentForAuthority(
+    {},
+    { organizationId: ORG, exportCandidateId: CANDIDATE },
+    async () => ({ ok: true, data: { current: true, reason: null }, error: null }),
   );
   assert.equal(current.current, true);
   assert.equal(current.reason, null);
+});
+
+test("P3-17 isExportCandidateCurrentForAuthority defaults to the real P3-16 evaluator when none is injected", async () => {
+  const { isExportCandidateCurrentForAuthority } = __humanAuthorityDecisionRepositoryTestables;
+  const result = await isExportCandidateCurrentForAuthority(fakeTx([[]]), { organizationId: ORG, exportCandidateId: CANDIDATE });
+  assert.equal(result.current, false);
+  assert.equal(result.reason, "export_candidate_missing");
 });
 
 // --- effective-authority derivation ---
@@ -152,16 +173,31 @@ test("P3-17 evaluateHumanAuthorityEffectivenessInTransaction reports effective o
   const { evaluateHumanAuthorityEffectivenessInTransaction } = __humanAuthorityDecisionRepositoryTestables;
 
   const staleCandidate = await evaluateHumanAuthorityEffectivenessInTransaction(
-    fakeTx([[{ decision_id: "d1", decision_action: "grant" }], [{ limitation_snapshot_id: "s1" }], [{ "?column?": 1 }]]),
+    fakeTx([[{ decision_id: "d1", decision_action: "grant" }]]),
     input(),
+    async () => ({ ok: true, data: { current: false, reason: "limitation_snapshot_superseded" }, error: null }),
   );
   assert.equal(staleCandidate.data.effective, false);
   assert.equal(staleCandidate.data.reason, "limitation_snapshot_superseded");
   assert.equal(staleCandidate.data.headDecisionId, "d1");
 
-  const effective = await evaluateHumanAuthorityEffectivenessInTransaction(
-    fakeTx([[{ decision_id: "d1", decision_action: "grant" }], [{ limitation_snapshot_id: "s1" }], []]),
+  // A fingerprint mismatch (authoritative graph drift with the limitation
+  // snapshot untouched) must fail closed exactly like a superseded snapshot -
+  // this is the case a candidate-existence + snapshot-currentness-only check
+  // would miss.
+  const fingerprintDrifted = await evaluateHumanAuthorityEffectivenessInTransaction(
+    fakeTx([[{ decision_id: "d1", decision_action: "grant" }]]),
     input(),
+    async () => ({ ok: true, data: { current: false, reason: "fingerprint_mismatch" }, error: null }),
+  );
+  assert.equal(fingerprintDrifted.data.effective, false);
+  assert.equal(fingerprintDrifted.data.reason, "fingerprint_mismatch");
+  assert.equal(fingerprintDrifted.data.headDecisionId, "d1");
+
+  const effective = await evaluateHumanAuthorityEffectivenessInTransaction(
+    fakeTx([[{ decision_id: "d1", decision_action: "grant" }]]),
+    input(),
+    async () => ({ ok: true, data: { current: true, reason: null }, error: null }),
   );
   assert.equal(effective.ok, true);
   assert.equal(effective.data.effective, true);
