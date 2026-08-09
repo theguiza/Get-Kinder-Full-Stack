@@ -516,8 +516,87 @@ export async function runGateB1LiveVerifier() {
   return proof;
 }
 
+async function proveContentTypeMutationRejected({ signerProvider, objectKey }) {
+  const signedUpload = await signerProvider.createSignedUploadUrl({
+    objectKey,
+    contentType: SYNTHETIC_CONTENT_TYPE,
+  });
+  assertSignedPutContract(signedUpload);
+  const mutatedHeaders = { ...signedUpload.data.headers, "Content-Type": "application/octet-stream" };
+  const response = await fetch(signedUpload.data.url, {
+    method: "PUT",
+    headers: mutatedHeaders,
+    body: Buffer.from("gate-b1 negative content-type probe\n", "utf8"),
+  });
+  return response.status;
+}
+
+async function proveOutOfRangeBodyRejected({ signerProvider, objectKey }) {
+  const signedUpload = await signerProvider.createSignedUploadUrl({
+    objectKey,
+    contentType: SYNTHETIC_CONTENT_TYPE,
+  });
+  assertSignedPutContract(signedUpload);
+  const oversizedBody = Buffer.alloc(KAI_SPRINT2_MAX_FILE_SIZE_BYTES + 1, 0x4b);
+  const response = await fetch(signedUpload.data.url, {
+    method: "PUT",
+    headers: signedUpload.data.headers,
+    body: oversizedBody,
+  });
+  return { status: response.status, bytes: oversizedBody.length };
+}
+
+function freshSyntheticObjectKey() {
+  const objectKeyResult = buildObjectKey({
+    organizationId: SYNTHETIC_ORGANIZATION_ID,
+    intakeBatchId: SYNTHETIC_BATCH_ID,
+    intakeFileId: randomUUID(),
+    safeFilename: SYNTHETIC_SAFE_FILENAME,
+  });
+  assertCondition(objectKeyResult.ok, "synthetic object key policy failed");
+  return objectKeyResult.objectKey;
+}
+
+// Exercises only the two signed-request negative requirements against the real
+// synthetic target: Content-Type enforcement and content-length-range enforcement.
+// Deliberately does not repeat the full positive proof (no read-back, no Postgres
+// binding) so it can be run in isolation from the already-proven assertions.
+export async function runGateB1LiveNegativeSignedRequestProof() {
+  const bucketName = requiredEnv("KAI_GATE_B1_GCS_BUCKET_NAME");
+  const uploadSigningPrincipal = requiredEnv("KAI_GATE_B1_GCS_UPLOAD_SIGNER_TARGET_PRINCIPAL");
+  const uploadSigningClient = await createImpersonatedStorageClient({ targetPrincipal: uploadSigningPrincipal });
+  const signerProvider = createGoogleCloudStorageProvider({
+    bucketName,
+    enabled: true,
+    maxUploadSizeBytes: KAI_SPRINT2_MAX_FILE_SIZE_BYTES,
+    storageClientFactory: () => uploadSigningClient,
+  });
+
+  const contentTypeStatus = await proveContentTypeMutationRejected({
+    signerProvider,
+    objectKey: freshSyntheticObjectKey(),
+  });
+  const rangeResult = await proveOutOfRangeBodyRejected({
+    signerProvider,
+    objectKey: freshSyntheticObjectKey(),
+  });
+
+  return {
+    contentTypeMutationRejected: contentTypeStatus < 200 || contentTypeStatus >= 300,
+    contentTypeMutationStatus: contentTypeStatus,
+    outOfRangeUploadRejected: rangeResult.status < 200 || rangeResult.status >= 300,
+    outOfRangeStatus: rangeResult.status,
+    outOfRangeBodyBytes: rangeResult.bytes,
+  };
+}
+
 async function main() {
   process.env.DATABASE_URL = SENTINEL_DATABASE_URL;
+  if (process.argv.includes("--live-negative-signed-request")) {
+    const result = await runGateB1LiveNegativeSignedRequestProof();
+    console.log(JSON.stringify(result));
+    return;
+  }
   if (process.argv.includes("--live")) {
     await runGateB1LiveVerifier();
     console.log("GATE_B1_SYNTHETIC_GCS_PROOF_COMPLETE");

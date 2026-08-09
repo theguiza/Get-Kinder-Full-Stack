@@ -14599,3 +14599,86 @@ NOT_CONFIRMED:
   - The accepted live proof result above was not independently re-verified
     against Google Cloud in this step; it is recorded as reported/accepted
     context from the prior session, not as a live observation made here.
+
+## Gate B-1 - negative signed-request proof completed for the two remaining unproven requirements (implemented 2026-08-09)
+
+pre_post_byte_and_hash_proof: TOOL_VERIFIED
+  KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+    pre-append byte count:  1062482
+    pre-append SHA-256:     2423dff6053a01474badbbc26edf4bbd9467cfe323fca75678503d30fa01ba7f
+    pre-append line count:  14601
+    byte-exact prefix proof: `head -c 1062482` of the file after this block was appended
+      hashes to the identical pre-append SHA-256 above (verified before this correction's
+      commit). The exact post-append byte count and SHA-256, computed against this file's
+      final committed state, are reported in this same correction's commit-verification
+      output below, since a file cannot embed the hash of its own final write while still
+      being written.
+
+TOOL_VERIFIED:
+  - starting_state: this correction started from committed HEAD
+    `0a243cf37a39d345357ec1954386bcd7ee39e985` on branch
+    `codex/kai-sprint2-p0-v0.3.5` with a clean worktree (including untracked
+    files) and nothing staged, freshly confirmed before any action was taken.
+  - scope_confirmed_before_action: the two remaining unproven Gate B-1
+    real-target signed-request requirements were identified as (1) signed
+    `Content-Type` enforcement, including failure when that signed header is
+    mutated, and (2) rejection of an upload body exceeding the signed
+    `x-goog-content-length-range` maximum. All ten previously proven Gate B-1
+    live assertions (V4 signing, in-range first PUT, create-only replay
+    rejection, authoritative generation capture, exact-generation stat/read/
+    stream, wrong-generation failure, CRC32C validation, independent SHA-256,
+    exact-byte verification, isolated PostgreSQL generation binding) were not
+    repeated.
+  - negative_case_1_content_type: a fresh signed upload URL was created
+    through the existing `createGoogleCloudStorageProvider` /
+    `createSignedUploadUrl` path against the already-authorized synthetic GCS
+    target, using the existing `KAI_GATE_B1_GCS_UPLOAD_SIGNER_TARGET_PRINCIPAL`
+    impersonated signer. The PUT was sent with every signed header unchanged
+    except `Content-Type`, which was mutated to a different safe synthetic
+    value (`application/octet-stream`) than the value the URL was signed
+    with. The real target returned HTTP 403 (non-2xx), proving the signed
+    `Content-Type` header is enforced and mutation of a required signed
+    header fails closed. A fresh synthetic object key was used for this case.
+  - negative_case_2_content_length_range: a second fresh signed upload URL
+    was created the same way. The PUT was sent with all signed headers
+    (`Content-Type`, `x-goog-content-length-range`,
+    `x-goog-if-generation-match: 0`) exactly as issued by the provider, and a
+    synthetic body of exactly `KAI_SPRINT2_MAX_FILE_SIZE_BYTES + 1`
+    (26,214,401) bytes. The signed range header itself was not mutated. The
+    real target returned HTTP 400 (non-2xx), proving the target actually
+    enforces the signed content-length-range on the request body rather than
+    the mere presence of the header in the signature. A fresh synthetic
+    object key (distinct from negative_case_1) was used for this case.
+  - durable_correction: `scripts/kai-sprint2-gate-b1-gcs-verifier.js` gained
+    `runGateB1LiveNegativeSignedRequestProof`, a standalone export that
+    exercises only these two negative cases against the real target (fresh
+    signed upload + mutated `Content-Type` PUT; fresh signed upload +
+    exactly-oversized-body PUT), reusing the existing upload-signing
+    `Impersonated` client and `createSignedUploadUrl` seam. It deliberately
+    does not perform read-back, CRC32C, SHA-256, or PostgreSQL binding, so it
+    does not repeat the already-proven positive assertions. A new
+    `--live-negative-signed-request` CLI flag on the same script's `main()`
+    invokes it in isolation. `__tests__/kai-sprint2-gate-b1-gcs-verifier.spec.js`
+    gained one structural (non-network) test asserting the new export and its
+    header-mutation / oversized-body construction exist in source, following
+    the same source-pattern-assertion style as the existing seam-preservation
+    test in that file. `GoogleCloudStorageProvider` was not changed.
+  - focused_and_regression_tests: `node --test
+    __tests__/kai-sprint2-gate-b1-gcs-verifier.spec.js` passed (3 pass, 0
+    fail); `node --test
+    __tests__/kai-sprint2-gate-c1-gcs-provider-boundary.spec.js` passed (17
+    pass, 0 fail); `git diff --check` passed. The complete live Gate B-1
+    positive proof, exact-generation proof, CRC32C/SHA-256 proof, and
+    PostgreSQL generation-binding proof were not rerun.
+  - scope: files touched in this correction are
+    `scripts/kai-sprint2-gate-b1-gcs-verifier.js`,
+    `__tests__/kai-sprint2-gate-b1-gcs-verifier.spec.js`, and this ExecPlan
+    file. `GoogleCloudStorageProvider` was not changed. No IAM, ADC,
+    credentials, service-account permissions, bucket configuration, CORS,
+    lifecycle, retention, monitoring, feature flags, application composition,
+    or deployment was changed. Nothing was pushed. Gate C-2 was not started.
+
+NOT_CONFIRMED:
+  - `P0_NONPRODUCTION_STORAGE_VERIFIED` remains NOT_CONFIRMED.
+  - `P0_LIVE_UPLOAD_READY` remains NOT_CONFIRMED.
+  - Gate C-2 has not begun.

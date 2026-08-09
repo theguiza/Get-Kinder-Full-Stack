@@ -26,3 +26,16 @@ test("Gate B-1 verifier uses the existing provider injection seam without changi
   assert.match(providerSource, /storageClientFactory/);
   assert.doesNotMatch(providerSource, /KAI_GATE_B1|Impersonated|targetPrincipal/);
 });
+
+test("Gate B-1 verifier exercises the two missing negative signed-request requirements against the real target only", () => {
+  const verifierSource = readFileSync("scripts/kai-sprint2-gate-b1-gcs-verifier.js", "utf8");
+
+  assert.match(verifierSource, /export async function runGateB1LiveNegativeSignedRequestProof/);
+  assert.match(
+    verifierSource,
+    /mutatedHeaders\s*=\s*\{\s*\.\.\.signedUpload\.data\.headers,\s*"Content-Type":\s*"application\/octet-stream"\s*\}/,
+  );
+  assert.match(verifierSource, /Buffer\.alloc\(KAI_SPRINT2_MAX_FILE_SIZE_BYTES \+ 1, 0x4b\)/);
+  assert.match(verifierSource, /headers:\s*signedUpload\.data\.headers,/);
+  assert.match(verifierSource, /freshSyntheticObjectKey\(\)/);
+});
