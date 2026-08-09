@@ -305,7 +305,7 @@ async function invokeService(res, serviceCall, successStatus = 200) {
 
 async function getIntakeService() {
   if (intakeServiceOverride) return intakeServiceOverride;
-  intakeServicePromise ||= import("../services/kaiIntakeService.js");
+  intakeServicePromise ||= import("../services/kaiIntakeRuntimeService.js");
   return intakeServicePromise;
 }
 

@@ -54,7 +54,7 @@ test("sprint2IntakeApi fails closed while disabled and does not expose req.user"
 });
 
 test("sprint2IntakeApi delegates admin metadata operations to service without direct kai table access", () => {
-  assert.match(routeSource, /import\(["']\.\.\/services\/kaiIntakeService\.js["']\)/);
+  assert.match(routeSource, /import\(["']\.\.\/services\/kaiIntakeRuntimeService\.js["']\)/);
   assert.match(routeSource, /\bcheckAdminAccess\b/);
   assert.match(routeSource, /\bcreateIntakeBatch\b/);
   assert.match(routeSource, /\breserveIntakeFileMetadata\b/);

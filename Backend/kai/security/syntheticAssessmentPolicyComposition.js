@@ -143,9 +143,11 @@ export async function executeSyntheticAssessmentPolicyDecisionFromEnqueueRecord(
   {
     securityAssessmentEnqueue,
     storageAdapter,
+    gcsProvider,
     signal,
     internalSecurityAssessmentExecutor,
     uploadLifecycleRepository,
+    getIntakeFileMetadata,
     metadataOnlyAudit,
     now,
     executeAssessmentFromEnqueueRecord = executeSyntheticAssessmentFromEnqueueRecord,
@@ -157,6 +159,9 @@ export async function executeSyntheticAssessmentPolicyDecisionFromEnqueueRecord(
   const assessmentResult = await executeAssessmentFromEnqueueRecord(selectionIdentity, {
     securityAssessmentEnqueue,
     storageAdapter,
+    ...(gcsProvider ? { gcsProvider } : {}),
+    ...(uploadLifecycleRepository ? { uploadLifecycleRepository } : {}),
+    ...(getIntakeFileMetadata ? { getIntakeFileMetadata } : {}),
     ...(signal ? { signal } : {}),
     ...(internalSecurityAssessmentExecutor ? { internalSecurityAssessmentExecutor } : {}),
   });

@@ -78,11 +78,88 @@ function executorInputFromFacts(facts, bytes) {
   };
 }
 
+function isGcsExactGenerationProvider(provider) {
+  return (
+    provider &&
+    provider.enabled === true &&
+    typeof provider.openExactGenerationReadStream === "function"
+  );
+}
+
+function isGcsBindingRepository(repository) {
+  return (
+    repository &&
+    typeof repository.resolveGcsGenerationBinding === "function"
+  );
+}
+
+function createBoundGcsAssessmentStorageAdapter({
+  facts,
+  gcsProvider,
+  uploadLifecycleRepository,
+  getIntakeFileMetadata,
+}) {
+  if (
+    !isGcsExactGenerationProvider(gcsProvider) ||
+    !isGcsBindingRepository(uploadLifecycleRepository) ||
+    typeof getIntakeFileMetadata !== "function"
+  ) {
+    return null;
+  }
+
+  return {
+    async openObjectVersionReadStream({ objectVersionId, signal } = {}) {
+      if (objectVersionId !== facts.objectVersionId) return { ok: false };
+
+      const binding = await uploadLifecycleRepository.resolveGcsGenerationBinding({
+        organizationId: facts.organizationId,
+        intakeFileId: facts.intakeFileId,
+      });
+      if (
+        binding?.ok !== true ||
+        binding.data?.object_version_id !== facts.objectVersionId ||
+        typeof binding.data?.gcs_generation !== "string"
+      ) {
+        return { ok: false };
+      }
+
+      const metadata = await getIntakeFileMetadata(facts.organizationId, facts.intakeFileId);
+      if (
+        metadata?.organization_id !== facts.organizationId ||
+        metadata?.intake_file_id !== facts.intakeFileId ||
+        metadata?.storage_provider !== "gcs" ||
+        typeof metadata?.storage_object_key !== "string" ||
+        metadata.storage_object_key.length === 0
+      ) {
+        return { ok: false };
+      }
+
+      const opened = await gcsProvider.openExactGenerationReadStream({
+        objectKey: metadata.storage_object_key,
+        gcsGeneration: binding.data.gcs_generation,
+        ...(signal ? { signal } : {}),
+      });
+      if (opened?.ok !== true) return opened;
+      return {
+        ok: true,
+        data: {
+          object_version_id: facts.objectVersionId,
+          size_bytes: opened.data?.size_bytes,
+          byte_source: opened.data?.byte_source,
+        },
+      };
+    },
+  };
+}
+
 export async function executeSyntheticAssessmentFromEnqueueRecord(
   selectionIdentity = {},
   {
     securityAssessmentEnqueue,
     storageAdapter,
+    gcsProvider,
+    uploadLifecycleRepository,
+    getIntakeFileMetadata,
     signal,
     internalSecurityAssessmentExecutor,
   } = {},
@@ -100,11 +177,17 @@ export async function executeSyntheticAssessmentFromEnqueueRecord(
   if (matches.length > 1) return uploadLifecycleFailure("conflict_current_state_changed");
 
   const facts = selectedTrustedFacts(matches[0]);
+  const effectiveStorageAdapter = storageAdapter || createBoundGcsAssessmentStorageAdapter({
+    facts,
+    gcsProvider,
+    uploadLifecycleRepository,
+    getIntakeFileMetadata,
+  });
   const readResult = await readVerifiedAssessmentBytes({
     objectVersionId: facts.objectVersionId,
     expectedChecksum: facts.verifiedChecksum,
     expectedSize: facts.verifiedSizeBytes,
-    storageAdapter,
+    storageAdapter: effectiveStorageAdapter,
     ...(signal ? { signal } : {}),
   });
 
@@ -121,6 +204,7 @@ export async function executeSyntheticAssessmentFromEnqueueRecord(
 }
 
 export const __testables = Object.freeze({
+  createBoundGcsAssessmentStorageAdapter,
   executorInputFromFacts,
   isValidSelectionIdentity,
   selectedTrustedFacts,

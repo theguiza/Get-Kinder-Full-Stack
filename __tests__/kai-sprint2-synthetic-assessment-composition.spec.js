@@ -310,6 +310,76 @@ test("successful execution returns pass, block, and failed results unchanged and
   }
 });
 
+test("GCS-backed security assessment reads only the privately bound exact generation", async () => {
+  const selectedBytes = Buffer.from("gcs exact generation bytes\n", "utf8");
+  const selected = factsFor({
+    organizationId: "org-gcs",
+    intakeFileId: "file-gcs",
+    bytes: selectedBytes,
+    declaredMime: "application/pdf",
+    extension: ".pdf",
+  });
+  const enqueue = createSyntheticSecurityAssessmentEnqueue();
+  assert.equal(enqueue.enqueueSecurityAssessment(selected).ok, true);
+  const calls = [];
+
+  const result = await executeSyntheticAssessmentFromEnqueueRecord(selectionFromFacts(selected), {
+    securityAssessmentEnqueue: enqueue,
+    uploadLifecycleRepository: {
+      async resolveGcsGenerationBinding(input) {
+        calls.push(["resolve", input]);
+        return {
+          ok: true,
+          data: {
+            object_version_id: selected.objectVersionId,
+            gcs_generation: "1700000000000001",
+          },
+        };
+      },
+    },
+    async getIntakeFileMetadata(organizationId, intakeFileId) {
+      calls.push(["metadata", { organizationId, intakeFileId }]);
+      return {
+        organization_id: selected.organizationId,
+        intake_file_id: selected.intakeFileId,
+        storage_provider: "gcs",
+        storage_object_key: "private/gcs/object.pdf",
+      };
+    },
+    gcsProvider: {
+      enabled: true,
+      async openExactGenerationReadStream(input) {
+        calls.push(["open", input]);
+        return {
+          ok: true,
+          data: {
+            size_bytes: selectedBytes.byteLength,
+            byte_source: byteSource([selectedBytes]),
+          },
+        };
+      },
+    },
+    internalSecurityAssessmentExecutor: createInternalSecurityAssessmentExecutor({
+      async assessor(input) {
+        assert.deepEqual(input.bytes, selectedBytes);
+        assert.equal(input.sha256, selected.verifiedChecksum);
+        return { policy: "pass" };
+      },
+    }),
+  });
+
+  assert.deepEqual(result, { policy: "pass" });
+  assert.deepEqual(calls, [
+    ["resolve", { organizationId: selected.organizationId, intakeFileId: selected.intakeFileId }],
+    ["metadata", { organizationId: selected.organizationId, intakeFileId: selected.intakeFileId }],
+    ["open", {
+      objectKey: "private/gcs/object.pdf",
+      gcsGeneration: "1700000000000001",
+    }],
+  ]);
+  assert.doesNotMatch(JSON.stringify(result), /1700000000000001|private\/gcs|object\.pdf|gcs_generation|storage_object_key/i);
+});
+
 test("repeated explicit execution does not consume, complete, or mutate the enqueue snapshot", async () => {
   const bytes = Buffer.from("repeatable safe text\n", "utf8");
   const selected = factsFor({ bytes });

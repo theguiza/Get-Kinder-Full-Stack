@@ -14856,3 +14856,101 @@ NOT_CONFIRMED:
     composition remains NOT_CONFIRMED.
   - `P0_NONPRODUCTION_STORAGE_VERIFIED` remains NOT_CONFIRMED.
   - `P0_LIVE_UPLOAD_READY` remains NOT_CONFIRMED.
+
+GATE_C2_COMPOSITION_COMPLETE
+
+TOOL_VERIFIED:
+  - starting_head: `91d128f`.
+  - mounted_gcs_provider_composition: `Backend/kai/routes/sprint2IntakeApi.js`
+    now lazy-imports `Backend/kai/services/kaiIntakeRuntimeService.js`; that
+    runtime facade constructs the existing configured
+    `createConfiguredGoogleCloudStorageProvider(process.env)` only when a
+    mounted route first calls the service.
+  - postgres_lifecycle_composition: the same runtime facade supplies the
+    existing `createPostgresUploadLifecycleRepository()` to mounted upload
+    service calls. Construction performs no query; repository methods remain
+    the only query boundary.
+  - signed_upload_runtime_composed: mounted `requestUploadUrl` now receives the
+    runtime GCS provider and PostgreSQL lifecycle repository through service
+    dependency composition, while route handlers remain service-only.
+  - confirm_upload_runtime_composed: mounted GCS-backed `confirmUpload` now
+    receives the runtime GCS provider and PostgreSQL lifecycle repository
+    through the same service facade. No route-level SQL, DB helper access, or
+    provider construction was added.
+  - private_generation_binding_preserved: the existing provider-neutral
+    `objectVersionId` remains the ordinary DTO field; the exact
+    `gcs_generation` binding remains private behind
+    `resolveGcsGenerationBinding` / `bindGcsGeneration` and is not included in
+    route DTOs, audit payloads, logs, or test-visible success envelopes.
+  - security_worker_exact_version_read: `syntheticAssessmentComposition` now
+    builds a private exact-generation assessment storage adapter only when no
+    local `storageAdapter` is supplied and trusted GCS dependencies are present.
+    It resolves the stored `objectVersionId -> gcs_generation` binding,
+    obtains the server-owned `storage_object_key` through the trusted
+    `getIntakeFileMetadata` authority, and calls only
+    `gcsProvider.openExactGenerationReadStream({ objectKey, gcsGeneration })`.
+  - security_read_integrity_preserved: the GCS adapter is fed into the existing
+    `readVerifiedAssessmentBytes` bridge, preserving the existing size and
+    SHA-256 verification before bytes reach the bounded internal security
+    assessment executor.
+  - disabled_startup_no_eager_cloud_or_db: unconfigured runtime dependency
+    creation leaves the GCS provider disabled and performs no GCS operation or
+    database query; repository methods are dormant until service invocation.
+  - local_path_preserved: existing local-development security reads still use a
+    caller-supplied `storageAdapter` first; the prior local upload/confirmation
+    path remains unchanged and covered by existing Gate C-2A tests.
+  - provider_private_data_not_exposed: focused tests assert public responses
+    and security-assessment results omit bucket, object key,
+    `storage_object_key`, `gcs_generation`, and exact generation values.
+  - feature_flags_remain_disabled: no feature flag, bucket, credential, IAM,
+    ADC, tenant, or deployment configuration was changed.
+  - focused_tests: `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test
+    __tests__/kai-sprint2-gate-c2-runtime-composition.spec.js
+    __tests__/kai-sprint2-gate-c2a-signed-upload-confirmation.spec.js
+    __tests__/kai-sprint2-synthetic-assessment-composition.spec.js
+    __tests__/kai-sprint2-synthetic-assessment-policy-composition.spec.js
+    __tests__/kai-sprint2-assessment-read-integrity-bridge.spec.js` passed
+    (50 pass, 0 fail).
+  - security_read_integrity_regressions: `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel
+    node --test __tests__/kai-sprint2-assessment-read-integrity-bridge.spec.js
+    __tests__/kai-sprint2-bounded-file-security-assessor.spec.js
+    __tests__/kai-sprint2-internal-security-assessment-executor.spec.js
+    __tests__/kai-sprint2-malware-adapter-boundary.spec.js
+    __tests__/kai-sprint2-txt-md-byte-detector.spec.js
+    __tests__/kai-sprint2-pdf-assessor-worker-boundary.spec.js
+    __tests__/kai-sprint2-p0-file-type-agreement-detector.spec.js` passed
+    (118 pass, 0 fail).
+  - api_route_regressions: `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel
+    node --test __tests__/kai-sprint2-api-contract.spec.js` passed (15 pass,
+    0 fail). Listener-based route tests required unsandboxed local loopback
+    bind and then passed: `node --test
+    __tests__/kai-sprint2-foundation-safety.spec.js
+    __tests__/kai-sprint2-pass2-route-runtime.spec.js` (43 pass, 0 fail).
+  - sprint2_tests: `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run
+    test:kai-sprint2` passed with local loopback listener allowance (1777
+    pass, 0 fail, 27 skipped).
+  - full_repository_tests: `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel
+    npm test` passed with local loopback listener allowance (1882 pass, 0
+    fail, 27 skipped).
+  - git_diff_check: `git diff --check` passed (no output, exit 0).
+  - final_diff_inspected: complete diff inspected after marking new files
+    intent-to-add; changed files are `Backend/kai/routes/sprint2IntakeApi.js`,
+    `Backend/kai/services/kaiIntakeRuntimeService.js`,
+    `Backend/kai/security/syntheticAssessmentComposition.js`,
+    `Backend/kai/security/syntheticAssessmentPolicyComposition.js`,
+    `__tests__/kai-sprint2-api-contract.spec.js`,
+    `__tests__/kai-sprint2-gate-c2-runtime-composition.spec.js`,
+    `__tests__/kai-sprint2-synthetic-assessment-composition.spec.js`, and this
+    living ExecPlan.
+  - cloud_calls_performed: no.
+  - deployment_performed: no.
+  - push_performed: no.
+  - parser_profile_composition_performed: no.
+  - gate_c_e2e_started: no.
+
+GATE_C2_STATUS: COMPLETE
+NEXT_BOUNDARY: Gate C synthetic staging E2E
+
+NOT_CONFIRMED:
+  - `P0_NONPRODUCTION_STORAGE_VERIFIED` remains NOT_CONFIRMED.
+  - `P0_LIVE_UPLOAD_READY` remains NOT_CONFIRMED.
