@@ -14489,3 +14489,113 @@ NOT_CONFIRMED:
     signed-PUT enforcement, actual CRC32C behavior against transferred
     bytes, actual generation-mismatch rejection against a real multi-
     generation object, and CORS behavior.
+
+## Gate B-1 - synthetic GCS verifier harness ready for authorized live proof (implemented 2026-08-09)
+
+TOOL_VERIFIED:
+  - verifier_artifacts: `scripts/kai-sprint2-gate-b1-gcs-verifier.js`,
+    `__tests__/kai-sprint2-gate-b1-gcs-verifier.spec.js`, and
+    `npm run verify:kai-sprint2-gate-b1-gcs` were added as the bounded
+    Gate B-1 verifier/harness surface.
+  - provider_scope: no `GoogleCloudStorageProvider` behavior was changed.
+    The verifier reuses the existing `storageClientFactory` seam and, in
+    live mode, constructs one `Storage({ authClient })` for the
+    upload/signing impersonated context and one separate
+    `Storage({ authClient })` for the parser/read impersonated context.
+    Two distinct `GoogleCloudStorageProvider` instances receive those
+    clients through the existing injection seam.
+  - local_synthetic_proof: the mock-GCS proof exercises V4 signed PUT
+    constraints, signed `Content-Type`, signed content-length range,
+    create-only `x-goog-if-generation-match: 0`, first synthetic create,
+    replay/create rejection, authoritative generation capture,
+    exact-generation stat/read/stream, wrong-generation failure, explicit
+    provider CRC32C read validation request, independent SHA-256, exact-byte
+    verification, and structural signer/read separation without contacting
+    GCS.
+  - postgres_binding_proof: the local verifier creates an isolated
+    loopback-only ephemeral PostgreSQL instance, applies Gate A and Gate C-1
+    schema, seeds synthetic uploaded_unconfirmed metadata, binds the captured
+    generation once, proves same-generation replay, rejects a wrong
+    generation, resolves the exact binding, and removes the ephemeral data
+    directory afterward.
+  - reproducibility: live-mode object keys use fresh synthetic UUIDs under
+    the existing `storagePathPolicy.buildObjectKey` path policy to avoid
+    create-only collisions on rerun. The verifier does not print bucket
+    names, object keys, signed URLs, tokens, credentials, or private Google
+    Cloud identifiers.
+  - tests_and_commands: `npm run verify:kai-sprint2-gate-b1-gcs` passed;
+    focused/shared storage sweep passed (95 pass, 1 skip); complete
+    repository `npm test` passed under local loopback-server escalation
+    (1855 pass, 27 skip, 0 fail); `git diff --check` passed.
+
+NOT_CONFIRMED:
+  - The live synthetic GCS proof was not executed in this step because this
+    process did not have the required Gate B-1 live target/authentication
+    inputs available. No Google Cloud contact, IAM/bucket/CORS/lifecycle
+    change, service-account key creation, production configuration,
+    deployment, KAI application GCS connection, real client data use, Gate
+    C-2, or P0-06B work was performed.
+
+## Gate B-1 - repository-closure review package prepared after accepted live proof (implemented 2026-08-09)
+
+TOOL_VERIFIED:
+  - accepted_prior_result: this step accepts, without re-execution, the prior
+    session's reported successful live synthetic Gate B-1 GCS proof (V4
+    signing path usable, first signed PUT 200, replay PUT 412, native
+    generation captured, exact-generation stat/read/stream passed, wrong-
+    generation rejection passed, CRC32C validation passed, independent
+    SHA-256 passed, exact-byte match passed, isolated PostgreSQL generation
+    binding passed). No live GCS operation was performed in this step.
+  - reader_path_change_inspected: freshly inspecting the current repository
+    diff (not prior narration) confirms `createSignedUploadUrl` in
+    `Backend/kai/storage/googleCloudStorageProvider.js` now builds its own
+    GOOG4-RSA-SHA256 V4 canonical request/signature via
+    `extractSigningContext`/`signV4String` instead of calling the SDK's
+    `file.getSignedUrl()`. The signer/principal are read from
+    `storageClient._kaiGcsSigner` / `storageClient._kaiGcsSigningPrincipal`
+    (or `authClient`/`getTargetPrincipal()`), matching the separate
+    upload-signing and parser-read `Impersonated` auth clients constructed by
+    `createImpersonatedStorageClient` in
+    `scripts/kai-sprint2-gate-b1-gcs-verifier.js`. `statExactGeneration` and
+    `openExactGenerationReadStream` were not changed.
+  - stale_regression_corrected: `__tests__/kai-sprint2-gate-c1-gcs-provider-boundary.spec.js`
+    asserted the obsolete SDK `file.getSignedUrl()` call shape. The mock
+    storage client was updated to expose a `_kaiGcsSigner`/
+    `_kaiGcsSigningPrincipal` signing seam, and the signed-PUT test now
+    asserts the behavioral `createSignedUploadUrl` contract instead: `ok`,
+    `method: "PUT"`, returned `Content-Type` /
+    `x-goog-content-length-range` / `x-goog-if-generation-match` headers,
+    bounded `expires_in_seconds`, `GOOG4-RSA-SHA256` algorithm, and the
+    presence of `content-type`, `host`, `x-goog-content-length-range`, and
+    `x-goog-if-generation-match` in the URL's `X-Goog-SignedHeaders`. A new
+    test was added proving the signed-PUT path fails closed with a sanitized
+    `system_error` (no bucket name or object key leaked) when a signing
+    context is unavailable. The successful provider implementation itself
+    was not altered to satisfy the test.
+  - focused_and_broader_tests: `node --test
+    __tests__/kai-sprint2-gate-c1-gcs-provider-boundary.spec.js` passed (17
+    pass, 0 fail); `node --test
+    __tests__/kai-sprint2-gate-b1-gcs-verifier.spec.js` passed (2 pass, 0
+    fail); `node --test __tests__/kai-sprint2-*.spec.js` (complete Sprint 2
+    suite) passed (1751 pass, 27 skip, 0 fail); `node --test
+    __tests__/*.spec.js` (complete repository suite) passed (1856 pass, 27
+    skip, 0 fail); `git diff --check` passed. All commands used the required
+    loopback `DATABASE_URL` sentinel; no runner-owned isolated PostgreSQL or
+    live GCS operation was invoked by these commands.
+  - scope: Gate B-1 package files for this step are
+    `Backend/kai/storage/googleCloudStorageProvider.js`,
+    `__tests__/kai-sprint2-gate-c1-gcs-provider-boundary.spec.js`,
+    `__tests__/kai-sprint2-gate-b1-gcs-verifier.spec.js`,
+    `scripts/kai-sprint2-gate-b1-gcs-verifier.js`, `package.json` (adds
+    `verify:kai-sprint2-gate-b1-gcs`), and this ExecPlan file. No changes
+    were made outside this scope. No commit was created in this step.
+
+NOT_CONFIRMED:
+  - `P0_NONPRODUCTION_STORAGE_VERIFIED` remains NOT_CONFIRMED: this bounded
+    Gate B-1 package does not by itself establish all broader Gate B
+    operational controls.
+  - `P0_LIVE_UPLOAD_READY` remains NOT_CONFIRMED.
+  - Gate C-2 has not begun.
+  - The accepted live proof result above was not independently re-verified
+    against Google Cloud in this step; it is recorded as reported/accepted
+    context from the prior session, not as a live observation made here.

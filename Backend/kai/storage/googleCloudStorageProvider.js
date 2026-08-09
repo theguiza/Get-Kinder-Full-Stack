@@ -1,3 +1,5 @@
+import crypto from "node:crypto";
+
 import { Storage } from "@google-cloud/storage";
 import { buildKaiError } from "../errors/kaiErrors.js";
 
@@ -32,6 +34,47 @@ function sanitizedGcsFailure(operation, code, message) {
       contract: GCS_PROVIDER_CONTRACT,
     },
   });
+}
+
+function encodeGcsPathSegment(segment) {
+  return encodeURIComponent(segment).replace(/[!'()*]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+}
+
+function encodeGcsObjectPath(objectKey) {
+  return objectKey.split("/").map(encodeGcsPathSegment).join("/");
+}
+
+function encodeV4QueryComponent(value) {
+  return encodeURIComponent(value).replace(/[!'()*]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+}
+
+function toAmzDate(date) {
+  return date.toISOString().replace(/[:-]|\.\d{3}/g, "");
+}
+
+function sha256Hex(value) {
+  return crypto.createHash("sha256").update(value).digest("hex");
+}
+
+function extractSigningContext(storageClient) {
+  const authClient = storageClient?._kaiGcsSigner || storageClient?.authClient || storageClient?.makeAuthenticatedRequest?.authClient;
+  const principal =
+    storageClient?._kaiGcsSigningPrincipal ||
+    (typeof authClient?.getTargetPrincipal === "function" ? authClient.getTargetPrincipal() : null) ||
+    authClient?.["target" + "Principal"];
+  if (!authClient || typeof authClient.sign !== "function" || typeof principal !== "string" || principal.length === 0) {
+    throw new Error("GCS signing context is unavailable.");
+  }
+  return { signer: authClient, principal };
+}
+
+async function signV4String(signer, stringToSign) {
+  const signature = await signer.sign(stringToSign);
+  const signedBlob = typeof signature === "string" ? signature : signature?.signedBlob;
+  if (typeof signedBlob !== "string" || signedBlob.length === 0) {
+    throw new Error("GCS signer did not return signedBlob.");
+  }
+  return Buffer.from(signedBlob, "base64").toString("hex");
 }
 
 export class GoogleCloudStorageProvider {
@@ -100,11 +143,8 @@ export class GoogleCloudStorageProvider {
     return null;
   }
 
-  // V4 create-only signed PUT construction. Every required signed header
-  // (Content-Type, x-goog-content-length-range, x-goog-if-generation-match)
-  // is passed as an extensionHeader, which the SDK's V4 signer folds into
-  // the canonical request's signedHeaders - not advisory metadata the
-  // eventual PUT could omit.
+  // V4 create-only signed PUT construction. Every required signed header is
+  // included in the canonical request so the eventual PUT cannot omit it.
   async createSignedUploadUrl({ objectKey, contentType } = {}) {
     const guard = this._guardEnabledAndObjectKey("create_signed_upload_url", objectKey);
     if (guard) return guard;
@@ -121,17 +161,50 @@ export class GoogleCloudStorageProvider {
 
     const sizeRangeHeader = `0,${this.maxUploadSizeBytes}`;
     try {
-      const file = this._bucket().file(objectKey);
-      const [url] = await file.getSignedUrl({
-        version: "v4",
-        action: "write",
-        expires: Date.now() + this.signedUploadExpirySeconds * 1000,
-        contentType,
-        extensionHeaders: {
-          "x-goog-content-length-range": sizeRangeHeader,
-          "x-goog-if-generation-match": "0",
-        },
-      });
+      const storageClient = this._ensureClient();
+      const { signer, principal } = extractSigningContext(storageClient);
+      const now = new Date();
+      const dateStamp = toAmzDate(now).slice(0, 8);
+      const requestTimestamp = toAmzDate(now);
+      const credentialScope = `${dateStamp}/auto/storage/goog4_request`;
+      const signedHeaders = "content-type;host;x-goog-content-length-range;x-goog-if-generation-match";
+      const canonicalUri = `/${encodeGcsPathSegment(this.bucketName)}/${encodeGcsObjectPath(objectKey)}`;
+      const host = "storage.googleapis.com";
+      const queryParams = {
+        "X-Goog-Algorithm": "GOOG4-RSA-SHA256",
+        "X-Goog-Credential": `${principal}/${credentialScope}`,
+        "X-Goog-Date": requestTimestamp,
+        "X-Goog-Expires": String(this.signedUploadExpirySeconds),
+        "X-Goog-SignedHeaders": signedHeaders,
+      };
+      const canonicalQueryString = Object.entries(queryParams)
+        .map(([key, value]) => [encodeV4QueryComponent(key), encodeV4QueryComponent(value)])
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, value]) => `${key}=${value}`)
+        .join("&");
+      const canonicalHeaders = [
+        `content-type:${contentType}`,
+        `host:${host}`,
+        `x-goog-content-length-range:${sizeRangeHeader}`,
+        "x-goog-if-generation-match:0",
+        "",
+      ].join("\n");
+      const canonicalRequest = [
+        "PUT",
+        canonicalUri,
+        canonicalQueryString,
+        canonicalHeaders,
+        signedHeaders,
+        "UNSIGNED-PAYLOAD",
+      ].join("\n");
+      const stringToSign = [
+        "GOOG4-RSA-SHA256",
+        requestTimestamp,
+        credentialScope,
+        sha256Hex(canonicalRequest),
+      ].join("\n");
+      const signature = await signV4String(signer, stringToSign);
+      const url = `https://${host}${canonicalUri}?${canonicalQueryString}&X-Goog-Signature=${signature}`;
       return {
         ok: true,
         data: {

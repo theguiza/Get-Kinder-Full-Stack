@@ -14,22 +14,25 @@ function createMockStorage(overrides = {}) {
   const calls = {
     bucketName: null,
     fileConstruct: [],
-    getSignedUrl: [],
+    sign: [],
     getMetadata: [],
     createReadStream: [],
   };
   const storage = {
+    _kaiGcsSigningPrincipal: "gate-c1-test-signer@example.invalid",
+    _kaiGcsSigner: {
+      async sign(stringToSign) {
+        calls.sign.push(stringToSign);
+        if (overrides.sign) return overrides.sign(stringToSign);
+        return { signedBlob: Buffer.from("mock-signature").toString("base64") };
+      },
+    },
     bucket(bucketName) {
       calls.bucketName = bucketName;
       return {
         file(objectKey, opts) {
           calls.fileConstruct.push({ objectKey, opts });
           return {
-            async getSignedUrl(config) {
-              calls.getSignedUrl.push(config);
-              if (overrides.getSignedUrl) return overrides.getSignedUrl(config);
-              return ["https://storage.googleapis.com/mock-signed-url"];
-            },
             async getMetadata() {
               calls.getMetadata.push(opts);
               if (overrides.getMetadata) return overrides.getMetadata(opts);
@@ -108,16 +111,38 @@ test("Gate C-1 signed PUT construction includes every required signed header", a
   });
   assert.equal(result.ok, true);
   assert.equal(result.data.method, "PUT");
-  assert.equal(calls.getSignedUrl.length, 1);
-  const config = calls.getSignedUrl[0];
-  assert.equal(config.version, "v4");
-  assert.equal(config.action, "write");
-  assert.equal(config.contentType, "application/pdf");
-  assert.equal(typeof config.expires, "number");
-  assert.equal(config.extensionHeaders["x-goog-content-length-range"], `0,${KAI_SPRINT2_MAX_FILE_SIZE_BYTES}`);
-  assert.equal(config.extensionHeaders["x-goog-if-generation-match"], "0");
+  assert.equal(calls.sign.length, 1);
+  assert.equal(result.data.headers["Content-Type"], "application/pdf");
   assert.equal(result.data.headers["x-goog-content-length-range"], `0,${KAI_SPRINT2_MAX_FILE_SIZE_BYTES}`);
   assert.equal(result.data.headers["x-goog-if-generation-match"], "0");
+  assert.equal(typeof result.data.expires_in_seconds, "number");
+  assert.ok(result.data.expires_in_seconds > 0 && result.data.expires_in_seconds <= 900);
+
+  const url = new URL(result.data.url);
+  assert.equal(url.searchParams.get("X-Goog-Algorithm"), "GOOG4-RSA-SHA256");
+  assert.ok(url.searchParams.has("X-Goog-Signature"));
+  const signedHeaders = new Set((url.searchParams.get("X-Goog-SignedHeaders") || "").split(";").filter(Boolean));
+  for (const header of ["content-type", "host", "x-goog-content-length-range", "x-goog-if-generation-match"]) {
+    assert.ok(signedHeaders.has(header), `${header} was not in V4 signed headers`);
+  }
+});
+
+test("Gate C-1 signed PUT fails closed and sanitized when a signing context is unavailable", async () => {
+  const provider = createGoogleCloudStorageProvider({
+    bucketName: "kai-gate-c1-synthetic-bucket",
+    enabled: true,
+    maxUploadSizeBytes: KAI_SPRINT2_MAX_FILE_SIZE_BYTES,
+    storageClientFactory: () => ({ bucket: () => ({ file: () => ({}) }) }),
+  });
+  const result = await provider.createSignedUploadUrl({
+    objectKey: "kai/org/o1/intake/b1/f1/safe.pdf",
+    contentType: "application/pdf",
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "system_error");
+  const serialized = JSON.stringify(result);
+  assert.doesNotMatch(serialized, /kai-gate-c1-synthetic-bucket/);
+  assert.doesNotMatch(serialized, /safe\.pdf/);
 });
 
 test("Gate C-1 signed PUT fails closed without a configured upload-size bound", async () => {
@@ -133,7 +158,7 @@ test("Gate C-1 signed PUT validates required inputs before calling the SDK", asy
   assert.equal(missingKey.error.code, "validation_blocker");
   const missingType = await provider.createSignedUploadUrl({ objectKey: "k" });
   assert.equal(missingType.error.code, "validation_blocker");
-  assert.equal(calls.getSignedUrl.length, 0);
+  assert.equal(calls.sign.length, 0);
 });
 
 test("Gate C-1 statExactGeneration pins the exact caller-supplied generation", async () => {
