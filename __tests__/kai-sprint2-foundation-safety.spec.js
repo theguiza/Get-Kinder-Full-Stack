@@ -336,13 +336,35 @@ test("upload URL entry point requires both feature flags and remains storage-dis
     { KAI_SPRINT2_ENABLED: "true" },
     { KAI_FILE_UPLOAD_ENABLED: "true" },
   ]) {
-    const result = await requestUploadUrl({ env });
+    const result = await requestUploadUrl({}, { env });
     assert.equal(result.error.code, "feature_disabled");
   }
 
-  const gated = await requestUploadUrl({
-    env: { KAI_SPRINT2_ENABLED: "true", KAI_FILE_UPLOAD_ENABLED: "true" },
-  });
+  const minimalActorContext = {
+    actorType: "human",
+    actorUserId: "7fe568b1-5c05-4c42-bb1f-6e20de216c7b",
+    kaiRoles: ["gk_operator"],
+    organizationMemberships: [
+      {
+        organization_id: "a5d17c5a-c55f-43af-9b21-fe63aafe733f",
+        role_name: "gk_operator",
+        membership_status: "active",
+      },
+    ],
+  };
+  const gated = await requestUploadUrl(
+    {
+      actorContext: minimalActorContext,
+      organizationId: "a5d17c5a-c55f-43af-9b21-fe63aafe733f",
+      intakeFileId: "9fe568b1-5c05-4c42-bb1f-6e20de216c7b",
+    },
+    {
+      env: { KAI_SPRINT2_ENABLED: "true", KAI_FILE_UPLOAD_ENABLED: "true" },
+      async getIntakeFileMetadata(organizationId, intakeFileId) {
+        return { organization_id: organizationId, intake_file_id: intakeFileId };
+      },
+    },
+  );
   assert.equal(gated.error.code, "storage_provider_not_configured");
 });
 

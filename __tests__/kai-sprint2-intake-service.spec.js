@@ -705,11 +705,16 @@ test("reserveIntakeFileMetadata ignores caller storage and malware configuration
 });
 
 test("requestUploadUrl remains fail-closed in P0", async () => {
-  const result = await requestUploadUrl({ env: { KAI_SPRINT2_ENABLED: "true" } });
+  const result = await requestUploadUrl({}, { env: { KAI_SPRINT2_ENABLED: "true" } });
   assert.equal(result.ok, false);
   assert.equal(result.error.code, "feature_disabled");
 
-  const enabledResult = await requestUploadUrl({ env: enabledUploadEnv });
+  const enabledResult = await requestUploadUrl(confirmInput(), {
+    env: enabledUploadEnv,
+    async getIntakeFileMetadata() {
+      return intakeFileRow();
+    },
+  });
   assert.equal(enabledResult.ok, false);
   assert.equal(enabledResult.error.code, "storage_provider_not_configured");
 });

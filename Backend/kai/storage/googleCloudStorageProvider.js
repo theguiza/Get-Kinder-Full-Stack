@@ -227,6 +227,40 @@ export class GoogleCloudStorageProvider {
     }
   }
 
+  // Gate C-2A: metadata discovery only. Resolves to whatever generation is
+  // currently live at objectKey - never pinned, never authoritative on its
+  // own. The caller MUST immediately re-verify the returned candidate
+  // generation through statExactGeneration/openExactGenerationReadStream
+  // before treating it as the confirmed object.
+  async headObject({ objectKey } = {}) {
+    const guard = this._guardEnabledAndObjectKey("head_object", objectKey);
+    if (guard) return guard;
+    try {
+      const file = this._bucket().file(objectKey);
+      const [metadata] = await file.getMetadata();
+      const candidateGeneration = String(metadata?.generation ?? "");
+      if (!isPrecisionSafeGcsGeneration(candidateGeneration)) {
+        return sanitizedGcsFailure("head_object", "system_error", "Object metadata generation was not usable.");
+      }
+      const sizeBytes = Number(metadata.size);
+      if (!Number.isSafeInteger(sizeBytes) || sizeBytes < 0) {
+        return sanitizedGcsFailure("head_object", "system_error", "Object metadata size was not usable.");
+      }
+      return {
+        ok: true,
+        data: {
+          candidate_generation: candidateGeneration,
+          size_bytes: sizeBytes,
+        },
+      };
+    } catch (error) {
+      if (error?.code === 404) {
+        return sanitizedGcsFailure("head_object", "not_found", "Object was not found at the trusted key.");
+      }
+      return sanitizedGcsFailure("head_object", "system_error", "Unable to head the object.");
+    }
+  }
+
   // Exact-generation stat: pins the File to the caller-supplied generation
   // and never resolves "latest." A mismatched/later generation is a 404 to
   // GCS, not a silent fallback.

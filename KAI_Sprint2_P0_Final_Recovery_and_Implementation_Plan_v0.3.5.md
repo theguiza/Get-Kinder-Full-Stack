@@ -14682,3 +14682,124 @@ NOT_CONFIRMED:
   - `P0_NONPRODUCTION_STORAGE_VERIFIED` remains NOT_CONFIRMED.
   - `P0_LIVE_UPLOAD_READY` remains NOT_CONFIRMED.
   - Gate C-2 has not begun.
+
+## Gate C-2A: signed-upload issuance and GCS confirmation, wired into the intake service
+
+GATE_C2A_SIGNED_UPLOAD_CONFIRMATION_COMPLETE
+
+TOOL_VERIFIED:
+  - starting_head: `80ebc0cf494b55865c2599141bd7c9bd01b7be12`.
+  - request_upload_url_composition: `kaiIntakeService.requestUploadUrl` (in
+    `Backend/kai/services/kaiIntakeService.js`) now takes `(input,
+    dependencies)`, reuses `authorizeUploadReservedIntakeFile` for tenant/
+    actor/permission checks, and requires the trusted intake-file row's
+    `storage_provider === "gcs"`. It reads only the row's server-owned
+    `storage_object_key` and `mime_type` - no client-supplied object key,
+    bucket, filename, MIME, or generation is ever consumed. It requires the
+    lifecycle to be in the `reserved` state before calling
+    `dependencies.gcsProvider.createSignedUploadUrl({ objectKey, contentType
+    })`, and returns only `upload_url` / `upload_method` / `upload_headers` /
+    `expires_in_seconds`; no `upload_channel` or `initiated_via` field was
+    added, and no schema/migration change was made.
+  - head_object_lookup: `GoogleCloudStorageProvider.headObject({ objectKey
+    })` was added to `Backend/kai/storage/googleCloudStorageProvider.js`. It
+    calls `bucket.file(objectKey).getMetadata()` with no generation pinned
+    (still gated by the existing `enabled && bucketName` fail-closed
+    construction), and returns only `{ candidate_generation, size_bytes }`
+    after validating the generation is a precision-safe digit string and the
+    size is a safe non-negative integer. A 404 maps to a sanitized
+    `not_found`; any other failure maps to a sanitized `system_error`. Its
+    result is documented and used only as a candidate.
+  - exact_generation_reverification: a new `confirmGcsObjectVersion` (in
+    `kaiIntakeService.js`, exported via `__testables`) never trusts
+    `headObject`'s candidate directly. It always calls the existing
+    `statExactGeneration` and `openExactGenerationReadStream` (both from
+    Gate C-1) against that exact candidate generation before treating it as
+    authoritative, through a new `verifyExactGcsObjectVersionStreamed`
+    helper that mirrors the local path's independent-verification shape.
+  - size_sha256_verification: `verifyExactGcsObjectVersionStreamed` checks
+    `statExactGeneration`'s reported size, `openExactGenerationReadStream`'s
+    reported size, and the actual streamed byte count all equal the
+    reservation's trusted `file_size_bytes`, and independently recomputes a
+    SHA-256 over the streamed bytes with Node's `crypto.createHash`,
+    comparing it to the reservation's trusted, stored `checksum`. A mismatch
+    on any of these returns `system_error` (size) or `checksum_mismatch`
+    (hash) and performs no lifecycle mutation.
+  - object_version_generation_persistence: on first success,
+    `confirmGcsObjectVersion` mints a fresh provider-neutral `ov_<32 hex>`
+    object-version id (or reuses `dependencies.objectVersionIdFactory` if
+    supplied), persists it via the existing
+    `transitionUploadLifecycle(reserved->upload_started->uploaded_unconfirmed)`
+    calls, then calls the existing Gate C-1
+    `lifecycleRepository.bindGcsGeneration` to privately bind the verified
+    exact GCS generation to that same object-version id, then completes the
+    existing `uploaded_unconfirmed->confirmed` transition with the verified
+    checksum/size. No new column, table, or migration was added; Gate C-1's
+    `kai.intake_files.gcs_generation` column and
+    `bindGcsGeneration`/`resolveGcsGenerationBinding` repository methods
+    (already present at the starting HEAD) were reused as-is.
+  - failure_atomicity_or_replay_safety: proven by test "Gate C-2A a failure
+    between the uploaded_unconfirmed transition and the generation binding
+    is retry-safe, not stranded" in
+    `__tests__/kai-sprint2-gate-c2a-signed-upload-confirmation.spec.js`. A
+    `bindGcsGeneration` failure injected on the first `confirmUpload` call
+    leaves the lifecycle in `uploaded_unconfirmed` with its object-version id
+    already persisted (not stranded pending forever); a second
+    `confirmUpload` call resolves that same already-persisted object-version
+    id (via `resolveGcsGenerationBinding`/the lifecycle record) instead of
+    minting a new one, and completes to `confirmed`. This relies only on the
+    two pre-existing repository operations each being independently
+    idempotent/replay-safe (`transitionUploadLifecycle`'s equal-state replay
+    branch and `bindGcsGeneration`'s already-bound-value replay branch) -
+    no new repository method, transaction, or migration was added.
+  - local_path_preserved: `verifyExactObjectVersionStreamed`,
+    `uploadReservedIntakeFile`, and the local-object-version branch of
+    `confirmUpload` were not modified. `confirmUpload` now branches on the
+    trusted row's `storage_provider` field (not on `upload_state` and not on
+    any client-supplied field) before choosing the GCS path or the original,
+    byte-for-byte-unchanged local path. Proven by test "Gate C-2A local
+    upload/confirmation path is unaffected: non-gcs rows never call the GCS
+    provider", which asserts zero calls to `headObject` /
+    `statExactGeneration` / `openExactGenerationReadStream` for a
+    `local_dev`-provider row.
+  - provider_private_data_not_exposed: proven by test "Gate C-2A confirmUpload
+    never leaks bucket, object key, or GCS generation in its response" and by
+    the pre-existing `sanitizedGcsFailure`/`buildKaiError` shape, which never
+    includes bucket name, object key, or generation in any success or error
+    payload from `requestUploadUrl` or `confirmUpload`.
+  - focused_tests: `node --test
+    __tests__/kai-sprint2-gate-c2a-signed-upload-confirmation.spec.js`
+    passed (18 pass, 0 fail), covering signed-upload issuance, override
+    rejection, non-gcs/lifecycle/provider-disabled fail-closed cases,
+    `headObject` metadata discovery and its fail-closed/no-leak behavior,
+    the discover->reverify->bind->confirm success path, object-not-found,
+    exact-generation-mismatch, size-mismatch, checksum-mismatch,
+    retry-after-partial-failure, confirmed-replay-without-rediscovery, the
+    unchanged local path, and direct `confirmGcsObjectVersion`/
+    `verifyExactGcsObjectVersionStreamed` unit cases.
+  - sprint2_tests: `npm run test:kai-sprint2` passed (1770 pass, 0 fail, 27
+    skipped - the pre-existing loopback-only PostgreSQL integration specs,
+    same skip count as at the starting HEAD).
+  - full_repository_tests: `npm test` passed (1875 pass, 0 fail, 27 skipped,
+    same skip count as at the starting HEAD).
+  - git_diff_check: `git diff --check` passed (no output, exit 0).
+  - final_worktree_status: five files changed, no other files touched -
+    `Backend/kai/services/kaiIntakeService.js`,
+    `Backend/kai/storage/googleCloudStorageProvider.js`,
+    `__tests__/kai-sprint2-foundation-safety.spec.js` (updated one
+    pre-existing test to the new two-argument `requestUploadUrl(input,
+    dependencies)` signature),
+    `__tests__/kai-sprint2-intake-service.spec.js` (same signature update to
+    one pre-existing test), and the new
+    `__tests__/kai-sprint2-gate-c2a-signed-upload-confirmation.spec.js`.
+  - cloud_calls_performed: no.
+  - push_performed: no.
+
+NOT_CONFIRMED:
+  - `P0_NONPRODUCTION_STORAGE_VERIFIED` remains NOT_CONFIRMED.
+  - `P0_LIVE_UPLOAD_READY` remains NOT_CONFIRMED.
+  - No route, feature flag, or application composition was changed:
+    `sprint2IntakeApi.js` still does not reference `requestUploadUrl`, and
+    the `KAI_GATE_C1_GCS_PROVIDER_ENABLED`/`KAI_GATE_C1_GCS_BUCKET_NAME`
+    dormant-provider gates were not touched.
+  - Gate C E2E has not begun.

@@ -1355,6 +1355,235 @@ async function verifyExactObjectVersionStreamed({
   }
 }
 
+// Gate C-2A: streams and independently re-hashes the exact GCS generation
+// returned by statExactGeneration/openExactGenerationReadStream. gcsGeneration
+// is always treated as a candidate up to this point - only a byte-exact
+// SHA-256 and size match makes it authoritative.
+async function verifyExactGcsObjectVersionStreamed({
+  gcsProvider,
+  objectKey,
+  gcsGeneration,
+  declaredChecksum,
+  expectedSizeBytes,
+  hashAlgorithm,
+  signal,
+} = {}) {
+  if (hashAlgorithm !== "sha256") {
+    return sanitizedExactVersionVerificationFailure("invalid_request", 400);
+  }
+  if (typeof declaredChecksum !== "string" || !STORED_FINGERPRINT_RE.test(declaredChecksum)) {
+    return sanitizedExactVersionVerificationFailure("invalid_request", 400);
+  }
+  if (!Number.isSafeInteger(expectedSizeBytes) || expectedSizeBytes < 0) {
+    return sanitizedExactVersionVerificationFailure("invalid_request", 400);
+  }
+
+  const stat = await gcsProvider.statExactGeneration({ objectKey, gcsGeneration });
+  if (stat?.ok !== true) {
+    return sanitizedExactVersionVerificationFailure(stat?.error?.code === "not_found" ? "not_found" : "system_error");
+  }
+  if (stat.data.size_bytes !== expectedSizeBytes) {
+    return sanitizedExactVersionVerificationFailure("system_error", 500);
+  }
+
+  const opened = await gcsProvider.openExactGenerationReadStream({ objectKey, gcsGeneration, signal });
+  if (opened?.ok !== true) {
+    return sanitizedExactVersionVerificationFailure(opened?.error?.code === "not_found" ? "not_found" : "system_error");
+  }
+
+  const byteSource = opened.data.byte_source;
+  if (opened.data.size_bytes !== expectedSizeBytes) {
+    byteSource?.destroy?.();
+    return sanitizedExactVersionVerificationFailure("system_error", 500);
+  }
+
+  try {
+    const hash = createHash("sha256");
+    let streamedSizeBytes = 0;
+    for await (const chunk of byteSource) {
+      if (signal?.aborted) {
+        return sanitizedExactVersionVerificationFailure("invalid_request", 400);
+      }
+      if (!(Buffer.isBuffer(chunk) || chunk instanceof Uint8Array)) {
+        return sanitizedExactVersionVerificationFailure("system_error", 500);
+      }
+      if (chunk.byteLength > Number.MAX_SAFE_INTEGER - streamedSizeBytes) {
+        return sanitizedExactVersionVerificationFailure("system_error", 500);
+      }
+      streamedSizeBytes += chunk.byteLength;
+      if (streamedSizeBytes > expectedSizeBytes) {
+        return sanitizedExactVersionVerificationFailure("system_error", 500);
+      }
+      hash.update(chunk);
+    }
+
+    if (streamedSizeBytes !== expectedSizeBytes) {
+      return sanitizedExactVersionVerificationFailure("system_error", 500);
+    }
+
+    const verifiedChecksum = hash.digest("hex");
+    if (verifiedChecksum !== declaredChecksum) {
+      return sanitizedExactVersionVerificationFailure("checksum_mismatch", 500);
+    }
+
+    return {
+      ok: true,
+      data: {
+        verifiedChecksum,
+        verifiedSizeBytes: streamedSizeBytes,
+      },
+      warnings: [],
+    };
+  } catch {
+    return sanitizedExactVersionVerificationFailure(signal?.aborted ? "invalid_request" : "system_error");
+  } finally {
+    if (typeof byteSource?.destroy === "function") byteSource.destroy();
+  }
+}
+
+function generatedGcsObjectVersionId(factory) {
+  return typeof factory === "function" ? factory() : `ov_${randomUUID().replaceAll("-", "")}`;
+}
+
+// Gate C-2A: drives a GCS-sourced confirmation from the trusted reservation's
+// server-owned storageObjectKey through to the same "confirmed" lifecycle
+// state the local upload path reaches. Every step is either read-only or
+// replay-safe (transitionUploadLifecycle/bindGcsGeneration are both
+// idempotent on their existing repositories), so a failure between the
+// uploaded_unconfirmed transition and the generation binding leaves the
+// record retry-safe rather than stranded: a retry resolves the
+// already-persisted objectVersionId/binding instead of minting a new one.
+async function confirmGcsObjectVersion({
+  gcsProvider,
+  lifecycleRepository,
+  organizationId,
+  intakeFileId,
+  objectKey,
+  declaredChecksum,
+  expectedSizeBytes,
+  hashAlgorithm,
+  now,
+  lifecycleRecord,
+  objectVersionIdFactory,
+  signal,
+} = {}) {
+  if (
+    !gcsProvider
+    || gcsProvider.enabled !== true
+    || typeof gcsProvider.headObject !== "function"
+    || typeof gcsProvider.statExactGeneration !== "function"
+    || typeof gcsProvider.openExactGenerationReadStream !== "function"
+  ) {
+    return sanitizedExactVersionVerificationFailure("storage_provider_not_configured", 503);
+  }
+  if (
+    !lifecycleRepository
+    || typeof lifecycleRepository.resolveGcsGenerationBinding !== "function"
+    || typeof lifecycleRepository.bindGcsGeneration !== "function"
+  ) {
+    return sanitizedExactVersionVerificationFailure("storage_provider_not_configured", 503);
+  }
+
+  let objectVersionId = PROVIDER_NEUTRAL_OBJECT_VERSION_ID_RE.test(lifecycleRecord.object_version_id)
+    ? lifecycleRecord.object_version_id
+    : null;
+
+  let gcsGeneration = null;
+  const binding = await lifecycleRepository.resolveGcsGenerationBinding({ organizationId, intakeFileId });
+  if (binding?.ok === true && typeof binding.data.gcs_generation === "string") {
+    gcsGeneration = binding.data.gcs_generation;
+    if (!objectVersionId && typeof binding.data.object_version_id === "string") {
+      objectVersionId = binding.data.object_version_id;
+    }
+  }
+
+  if (!gcsGeneration) {
+    const head = await gcsProvider.headObject({ objectKey });
+    if (head?.ok !== true) {
+      return sanitizedExactVersionVerificationFailure(head?.error?.code === "not_found" ? "not_found" : "system_error");
+    }
+    gcsGeneration = head.data.candidate_generation;
+  }
+
+  const verification = await verifyExactGcsObjectVersionStreamed({
+    gcsProvider,
+    objectKey,
+    gcsGeneration,
+    declaredChecksum,
+    expectedSizeBytes,
+    hashAlgorithm,
+    signal,
+  });
+  if (verification?.ok !== true) return verification;
+
+  if (!objectVersionId) {
+    objectVersionId = generatedGcsObjectVersionId(objectVersionIdFactory);
+  }
+
+  if (lifecycleRecord.upload_state === "reserved") {
+    const started = await lifecycleRepository.transitionUploadLifecycle({
+      organizationId,
+      intakeFileId,
+      expectedUploadState: "reserved",
+      newUploadState: "upload_started",
+      now,
+    });
+    if (started?.ok !== true) {
+      return sanitizedExactVersionVerificationFailure("conflict_current_state_changed", 409);
+    }
+  }
+
+  if (lifecycleRecord.upload_state === "reserved" || lifecycleRecord.upload_state === "upload_started") {
+    const uploaded = await lifecycleRepository.transitionUploadLifecycle({
+      organizationId,
+      intakeFileId,
+      expectedUploadState: "upload_started",
+      newUploadState: "uploaded_unconfirmed",
+      now,
+      objectVersionId,
+    });
+    if (uploaded?.ok !== true) {
+      return sanitizedExactVersionVerificationFailure("conflict_current_state_changed", 409);
+    }
+  }
+
+  const bound = await lifecycleRepository.bindGcsGeneration({
+    organizationId,
+    intakeFileId,
+    objectVersionId,
+    gcsGeneration,
+    now,
+  });
+  if (bound?.ok !== true) {
+    return sanitizedExactVersionVerificationFailure(bound?.error?.code || "system_error", bound?.error?.status);
+  }
+
+  const confirmed = await lifecycleRepository.transitionUploadLifecycle({
+    organizationId,
+    intakeFileId,
+    expectedUploadState: "uploaded_unconfirmed",
+    newUploadState: "confirmed",
+    now,
+    objectVersionId,
+    verifiedChecksum: verification.data.verifiedChecksum,
+    verifiedSizeBytes: verification.data.verifiedSizeBytes,
+  });
+  if (confirmed?.ok !== true) {
+    return sanitizedExactVersionVerificationFailure("conflict_current_state_changed", 409);
+  }
+
+  return {
+    ok: true,
+    data: {
+      objectVersionId,
+      verifiedChecksum: verification.data.verifiedChecksum,
+      verifiedSizeBytes: verification.data.verifiedSizeBytes,
+      record: confirmed.data.record,
+      replayed: confirmed.data.replayed,
+    },
+  };
+}
+
 function validUploadStartedTransitionSuccess(result, { organizationId, intakeFileId }) {
   const data = result?.data;
   const record = data?.record;
@@ -1477,15 +1706,28 @@ function validConfirmUploadMetadata(row, { organizationId, intakeFileId }) {
   );
 }
 
-function validConfirmUploadLifecycleRead(result, { organizationId, intakeFileId }) {
+function validConfirmUploadLifecycleRead(result, { organizationId, intakeFileId, storageProvider }) {
   const record = result?.data?.record;
-  return Boolean(
-    result?.ok === true
-    && record
-    && record.organization_id === organizationId
-    && record.intake_file_id === intakeFileId
-    && PROVIDER_NEUTRAL_OBJECT_VERSION_ID_RE.test(record.object_version_id)
-    && (record.upload_state === "uploaded_unconfirmed" || record.upload_state === "confirmed"),
+  if (
+    !(
+      result?.ok === true
+      && record
+      && record.organization_id === organizationId
+      && record.intake_file_id === intakeFileId
+    )
+  ) {
+    return false;
+  }
+  // Gate C-2A: a gcs-backed reservation never runs the local upload path, so
+  // its lifecycle can still legitimately be "reserved"/"upload_started" (no
+  // objectVersionId yet) when confirmUpload is the first call to discover
+  // and bind the object. Non-gcs rows keep the original, unchanged contract.
+  if (storageProvider === "gcs") {
+    return ["reserved", "upload_started", "uploaded_unconfirmed", "confirmed"].includes(record.upload_state);
+  }
+  return (
+    PROVIDER_NEUTRAL_OBJECT_VERSION_ID_RE.test(record.object_version_id)
+    && (record.upload_state === "uploaded_unconfirmed" || record.upload_state === "confirmed")
   );
 }
 
@@ -2114,14 +2356,74 @@ export async function uploadReservedIntakeFile(input = {}, dependencies = {}) {
   };
 }
 
-export async function requestUploadUrl(dependencies = {}) {
-  if (!isKaiSprint2Enabled(dependencies.env || process.env)) {
+export async function requestUploadUrl(input = {}, dependencies = {}) {
+  const env = dependencies.env || process.env;
+  if (!isKaiSprint2Enabled(env)) {
     return buildKaiError("feature_disabled");
   }
-  if (!areKaiSprint2UploadFeaturesEnabled(dependencies.env || process.env)) {
+  if (!areKaiSprint2UploadFeaturesEnabled(env)) {
     return buildKaiError("feature_disabled", { message: "KAI file upload is not enabled." });
   }
-  return buildKaiError("storage_provider_not_configured");
+
+  const auth = await authorizeUploadReservedIntakeFile(input, dependencies);
+  if (!auth.ok) return auth;
+
+  const { organizationId, intakeFileId, intakeBatchId, metadata } = auth;
+  if (metadata.storage_provider !== "gcs") {
+    return buildKaiError("storage_provider_not_configured");
+  }
+  if (typeof metadata.storage_object_key !== "string" || metadata.storage_object_key.length === 0) {
+    return buildKaiError("storage_provider_not_configured", {
+      message: "Reservation is missing its server-owned storage object key.",
+    });
+  }
+  if (typeof metadata.mime_type !== "string" || metadata.mime_type.length === 0) {
+    return buildKaiError("storage_provider_not_configured", {
+      message: "Reservation is missing its declared MIME type.",
+    });
+  }
+
+  const lifecycleRepository = dependencies.uploadLifecycleRepository || dependencies.lifecycleRepository;
+  if (!lifecycleRepository || typeof lifecycleRepository.getUploadLifecycle !== "function") {
+    return buildKaiError("storage_provider_not_configured", {
+      message: "Upload lifecycle repository is not configured.",
+    });
+  }
+
+  let lifecycle;
+  try {
+    lifecycle = await lifecycleRepository.getUploadLifecycle({ organizationId, intakeFileId });
+  } catch {
+    return buildKaiError("system_error");
+  }
+  if (lifecycle?.ok !== true || lifecycle.data?.record?.upload_state !== "reserved") {
+    return buildKaiError("conflict_current_state_changed");
+  }
+
+  const gcsProvider = dependencies.gcsProvider;
+  if (!gcsProvider || gcsProvider.enabled !== true || typeof gcsProvider.createSignedUploadUrl !== "function") {
+    return buildKaiError("storage_provider_not_configured", {
+      message: "GCS signed-upload provider is not configured.",
+    });
+  }
+
+  const signed = await gcsProvider.createSignedUploadUrl({
+    objectKey: metadata.storage_object_key,
+    contentType: metadata.mime_type,
+  });
+  if (signed?.ok !== true) return signed;
+
+  return {
+    ok: true,
+    data: {
+      ...uploadFileIdentity({ organizationId, intakeFileId, intakeBatchId }),
+      upload_url: signed.data.url,
+      upload_method: signed.data.method,
+      upload_headers: signed.data.headers,
+      expires_in_seconds: signed.data.expires_in_seconds,
+    },
+    warnings: [],
+  };
 }
 
 export async function confirmUpload(input = {}, dependencies = {}) {
@@ -2168,8 +2470,54 @@ export async function confirmUpload(input = {}, dependencies = {}) {
     return buildKaiError("system_error");
   }
   if (lifecycle?.ok === false) return lifecycle;
-  if (!validConfirmUploadLifecycleRead(lifecycle, { organizationId, intakeFileId })) {
+  if (!validConfirmUploadLifecycleRead(lifecycle, { organizationId, intakeFileId, storageProvider: metadata.storage_provider })) {
     return buildKaiError("conflict_current_state_changed");
+  }
+
+  const lifecycleRecord = lifecycle.data.record;
+
+  // Gate C-2A: a gcs-backed reservation was never routed through the local
+  // uploadReservedIntakeFile path (the client PUTs directly to the signed
+  // URL), so there is no local object-version to open here. Discover and
+  // independently re-verify the exact GCS generation at the trusted,
+  // server-owned storageObjectKey instead. Non-gcs rows fall through to the
+  // existing local object-version verification path, unchanged.
+  if (metadata.storage_provider === "gcs") {
+    if (typeof metadata.storage_object_key !== "string" || metadata.storage_object_key.length === 0) {
+      return buildKaiError("storage_provider_not_configured", {
+        message: "Reservation is missing its server-owned storage object key.",
+      });
+    }
+
+    const gcsResult = await confirmGcsObjectVersion({
+      gcsProvider: dependencies.gcsProvider,
+      lifecycleRepository,
+      organizationId,
+      intakeFileId,
+      objectKey: metadata.storage_object_key,
+      declaredChecksum: metadata.checksum,
+      expectedSizeBytes: metadata.file_size_bytes,
+      hashAlgorithm: metadata.hash_algorithm,
+      now,
+      lifecycleRecord,
+      objectVersionIdFactory: dependencies.objectVersionIdFactory,
+      ...(input.signal ? { signal: input.signal } : {}),
+    });
+    if (gcsResult?.ok !== true) return gcsResult;
+
+    return {
+      ok: true,
+      data: confirmUploadSuccessData({
+        organizationId,
+        intakeFileId,
+        intakeBatchId,
+        record: gcsResult.data.record,
+        objectVersionId: gcsResult.data.objectVersionId,
+        verifiedSizeBytes: gcsResult.data.verifiedSizeBytes,
+        replayed: gcsResult.data.replayed,
+      }),
+      warnings: [],
+    };
   }
 
   const storageAdapter = dependencies.storageAdapter;
@@ -2179,7 +2527,6 @@ export async function confirmUpload(input = {}, dependencies = {}) {
     });
   }
 
-  const lifecycleRecord = lifecycle.data.record;
   const verification = await verifyExactObjectVersionStreamed({
     storageAdapter,
     objectVersionId: lifecycleRecord.object_version_id,
@@ -2237,4 +2584,6 @@ export async function confirmUpload(input = {}, dependencies = {}) {
 
 export const __testables = {
   verifyExactObjectVersionStreamed,
+  verifyExactGcsObjectVersionStreamed,
+  confirmGcsObjectVersion,
 };
