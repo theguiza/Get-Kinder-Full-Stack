@@ -28,6 +28,7 @@ test("api contract exposes Sprint 2 status and admin metadata route shape", () =
   assert.match(routeSource, /router\.post\(["']\/admin\/files\/:intakeFileId\/block["']/);
   assert.match(routeSource, /router\.post\(\s*["']\/admin\/files\/:intakeFileId\/upload["']/);
   assert.match(routeSource, /router\.post\(["']\/admin\/files\/:intakeFileId\/confirm-upload["']/);
+  assert.match(routeSource, /router\.post\(["']\/admin\/batches\/:intakeBatchId\/files\/upload-url["']/);
   assert.match(routeSource, /router\.get\(\s*["']\/admin\/organizations\/:organizationId\/generated-content-drafts\/:generatedContentDraftId\/export-review-queue\/:exportReviewQueueItemId\/packet["']/);
   assert.match(routeSource, /router\.get\(["']\/admin\/review-queue["']/);
   assert.match(routeSource, /router\.post\(["']\/admin\/review-queue\/:reviewQueueItemId\/status["']/);
@@ -60,6 +61,7 @@ test("sprint2IntakeApi delegates admin metadata operations to service without di
   assert.match(routeSource, /\bmarkIntakeFilePolicyBlocked\b/);
   assert.match(routeSource, /\buploadReservedIntakeFile\b/);
   assert.match(routeSource, /\bconfirmUpload\b/);
+  assert.match(routeSource, /\brequestUploadUrl\b/);
   assert.match(routeSource, /\bupdateReviewQueueStatus\b/);
   assert.match(routeSource, /service\.checkAdminAccess/);
   assert.match(routeSource, /service\.createIntakeBatch/);
@@ -67,8 +69,8 @@ test("sprint2IntakeApi delegates admin metadata operations to service without di
   assert.match(routeSource, /service\.markIntakeFilePolicyBlocked/);
   assert.match(routeSource, /service\.uploadReservedIntakeFile/);
   assert.match(routeSource, /service\.confirmUpload/);
+  assert.match(routeSource, /service\.requestUploadUrl/);
   assert.match(routeSource, /service\.updateReviewQueueStatus/);
-  assert.doesNotMatch(routeSource, /\brequestUploadUrl\b/);
   assert.doesNotMatch(routeSource, /\b(?:select|insert|update|delete)\b[\s\S]{0,160}\bkai\./i);
   assert.doesNotMatch(routeSource, /\bkai\.(?!js\b)[a-z_]+\b/i);
 });
@@ -85,14 +87,24 @@ test("route files contain no direct SQL against kai schema", () => {
   }
 });
 
-test("sprint2IntakeApi enables only direct local upload routes, not signed URLs, parser raw-file work, source promotion, or tenant DB lookup", () => {
+test("sprint2IntakeApi enables only service-delegated upload routes, not parser raw-file work, source promotion, or tenant DB lookup", () => {
   assert.match(routeSource, /requireKaiSprint2UploadMediaType/);
   assert.match(routeSource, /attachKaiSprint2UploadByteSource/);
-  assert.doesNotMatch(routeSource, /\bsigned(?:Upload|Read)Url\b|\bgetSignedUrl\b|\bsigned_url\b/i);
   assert.doesNotMatch(routeSource, /\bparser\b[\s\S]{0,80}\braw[-_ ]?file\b/i);
   assert.doesNotMatch(routeSource, /\bpromote(?:Source)?\b|\bsource_promotion_enabled:\s*true\b/i);
   assert.doesNotMatch(routeSource, /from\s+["'][^"']*(?:kaiDb|kaiQueries|kaiIntakeQueries)\.js["']/);
   assert.doesNotMatch(routeSource, /\bSELECT\b[\s\S]{0,160}\b(?:kai\.|organization|tenant|membership)/i);
+});
+
+test("upload-url route delegates to requestUploadUrl without route-level storage provider facts", () => {
+  const start = routeSource.indexOf('router.post("/admin/batches/:intakeBatchId/files/upload-url"');
+  assert.notEqual(start, -1);
+  const nextRoute = routeSource.indexOf("router.", start + 1);
+  const slice = routeSource.slice(start, nextRoute);
+  assert.match(slice, /service\.requestUploadUrl/);
+  assert.doesNotMatch(slice, /\b(?:SELECT|INSERT|UPDATE|DELETE)\b|\bpool\b|\bkaiDb\b|\bkaiIntakeQueries\b/i);
+  assert.doesNotMatch(slice, /\bGoogleCloudStorageProvider\b|\bgcsProvider\b|\bstorageProvider\b|\blifecycleRepository\b/);
+  assert.doesNotMatch(slice, /\bbucket\b|\bobjectKey\b|\bstorageObjectKey\b|\bmimeType\b|\boriginalFilename\b|\bsafeFilename\b|\bstoragePath\b|\bstorageUri\b/);
 });
 
 test("kaiDb imports the existing Postgres pool and does not instantiate a pool", () => {

@@ -109,6 +109,34 @@ async function postJson(port, body) {
   });
 }
 
+async function postJsonPath(port, path, body) {
+  return await new Promise((resolve, reject) => {
+    const request = http.request({
+      hostname: "127.0.0.1",
+      port,
+      path,
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "content-length": Buffer.byteLength(body),
+      },
+    }, (response) => {
+      const chunks = [];
+      response.on("data", (chunk) => chunks.push(chunk));
+      response.on("end", () => {
+        const raw = Buffer.concat(chunks).toString("utf8");
+        resolve({
+          statusCode: response.statusCode,
+          headers: response.headers,
+          body: JSON.parse(raw),
+        });
+      });
+    });
+    request.on("error", reject);
+    request.end(body);
+  });
+}
+
 test("route schemas enforce metadata allowlists, structure bounds, UUIDs, and locked string limits", () => {
   const validBatch = {
     organization_id: organizationId,
@@ -227,6 +255,33 @@ test("status reports only the mounted metadata capability as enabled", () => {
   ]) {
     assert.equal(res.body.data[field], false, field);
   }
+});
+
+test("upload-url route remains blocked by the Sprint 2 feature gate when disabled", async (t) => {
+  const previous = process.env.KAI_SPRINT2_ENABLED;
+  delete process.env.KAI_SPRINT2_ENABLED;
+  const app = express();
+  app.use(router);
+
+  let server;
+  await new Promise((resolve, reject) => {
+    server = app.listen(0, "127.0.0.1");
+    server.once("listening", resolve);
+    server.once("error", reject);
+  });
+  t.after(() => {
+    if (previous === undefined) delete process.env.KAI_SPRINT2_ENABLED;
+    else process.env.KAI_SPRINT2_ENABLED = previous;
+    return new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  });
+
+  const response = await postJsonPath(
+    server.address().port,
+    `/admin/batches/${intakeBatchId}/files/upload-url`,
+    JSON.stringify({ organization_id: organizationId, engagement_id: engagementId, intake_file_id: intakeFileId }),
+  );
+  assert.equal(response.statusCode, 403);
+  assert.equal(response.body.error.code, "feature_disabled");
 });
 
 test("Sprint 2 authentication failures use the canonical KAI response shape", async () => {
@@ -469,6 +524,73 @@ test("real confirm-upload route rejects caller verification facts and delegates 
     assert.equal(valid.statusCode, 200);
     assert.equal(valid.body.data.upload_state, "confirmed");
     assert.equal(serviceCalled, true);
+    assert.equal(JSON.stringify(valid.body).includes("must-not-pass"), false);
+  } finally {
+    restore();
+  }
+});
+
+test("contract upload-url route rejects storage overrides and delegates only safe reservation identity", async () => {
+  let serviceInput = null;
+  const restore = intakeRouteTestables.setIntakeServiceForTest({
+    async requestUploadUrl(input) {
+      serviceInput = input;
+      assert.equal(input.organizationId, organizationId);
+      assert.equal(input.engagementId, engagementId);
+      assert.equal(input.intakeBatchId, intakeBatchId);
+      assert.equal(input.intakeFileId, intakeFileId);
+      assert.equal(input.route, "/api/kai/sprint2/intake/admin/batches/:intakeBatchId/files/upload-url");
+      assert.deepEqual(input.req.user, { id: 46 });
+      assert.equal(input.bucket, undefined);
+      assert.equal(input.objectKey, undefined);
+      assert.equal(input.storageObjectKey, undefined);
+      assert.equal(input.mimeType, undefined);
+      assert.equal(input.originalFilename, undefined);
+      return {
+        ok: true,
+        data: {
+          organization_id: organizationId,
+          intake_batch_id: intakeBatchId,
+          intake_file_id: intakeFileId,
+          upload_url: "https://signed.example.test/upload",
+          upload_method: "PUT",
+          upload_headers: { "content-type": "application/pdf" },
+          expires_in_seconds: 900,
+        },
+        warnings: [],
+      };
+    },
+  });
+  try {
+    const invalid = createResponse();
+    await invokeRouteStack("/admin/batches/:intakeBatchId/files/upload-url", "post", {
+      get() { return "application/json"; },
+      params: { intakeBatchId },
+      body: {
+        organization_id: organizationId,
+        engagement_id: engagementId,
+        intake_file_id: intakeFileId,
+        bucket: "attacker-bucket",
+      },
+      user: { id: 46 },
+    }, invalid);
+    assert.equal(invalid.statusCode, 422);
+    assert.equal(serviceInput, null);
+
+    const valid = createResponse();
+    await invokeRouteStack("/admin/batches/:intakeBatchId/files/upload-url", "post", {
+      get() { return "application/json"; },
+      params: { intakeBatchId },
+      body: {
+        organization_id: organizationId,
+        engagement_id: engagementId,
+        intake_file_id: intakeFileId,
+      },
+      user: { id: 46, private: "must-not-pass" },
+    }, valid);
+    assert.equal(valid.statusCode, 200);
+    assert.equal(valid.body.data.upload_method, "PUT");
+    assert.equal(serviceInput.payload.bucket, undefined);
     assert.equal(JSON.stringify(valid.body).includes("must-not-pass"), false);
   } finally {
     restore();

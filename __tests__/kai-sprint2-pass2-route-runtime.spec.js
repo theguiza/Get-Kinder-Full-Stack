@@ -103,6 +103,7 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     "/admin/batches/:intakeBatchId",
     "/admin/batches/:intakeBatchId/file-reservations",
     "/admin/batches/:intakeBatchId/files",
+    "/admin/batches/:intakeBatchId/files/upload-url",
     "/admin/files/:intakeFileId",
     "/admin/files/:intakeFileId/block",
     "/admin/files/:intakeFileId/confirm-upload",

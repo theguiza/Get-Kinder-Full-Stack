@@ -14803,3 +14803,56 @@ NOT_CONFIRMED:
     the `KAI_GATE_C1_GCS_PROVIDER_ENABLED`/`KAI_GATE_C1_GCS_BUCKET_NAME`
     dormant-provider gates were not touched.
   - Gate C E2E has not begun.
+
+GATE_C2A_ROUTE_CLOSURE_COMPLETE
+
+TOOL_VERIFIED:
+  - starting_head: `7231479`.
+  - contract_route: `POST /api/kai/sprint2/intake/admin/batches/:intakeBatchId/files/upload-url`.
+  - route_calls_requestUploadUrl: `Backend/kai/routes/sprint2IntakeApi.js`
+    now mounts the upload-url route and delegates through `getIntakeService()`
+    / `invokeService()` to `service.requestUploadUrl(...)`.
+  - route_service_only: the new route builds only the established request
+    context plus `organizationId`, `engagementId`, path-derived
+    `intakeBatchId`, and `intakeFileId`; it performs no storage, lifecycle,
+    repository, or provider work itself.
+  - route_has_no_sql_or_direct_db_provider_access: source-contract tests prove
+    the route imports no KAI DB helper and contains no route-level SQL,
+    `GoogleCloudStorageProvider`, `gcsProvider`, `storageProvider`, or
+    `lifecycleRepository` access.
+  - client_storage_overrides_absent: route validation accepts only
+    `organization_id`, `engagement_id`, and `intake_file_id` in the JSON
+    body. A behavioral route test proves a caller-supplied `bucket` field
+    returns `422` before the service is called; source tests also guard
+    against route-level bucket/object-key/MIME/filename/storage-path handling.
+  - feature_disabled_behavior: the route remains behind the existing Sprint 2
+    router gate; the new mounted-route test proves disabled behavior returns
+    canonical `403 feature_disabled` before route execution.
+  - stale_route_tests_updated: obsolete route-source assertions forbidding
+    `requestUploadUrl` were replaced with delegation and boundary assertions;
+    the stale exact route inventory test now includes the contract upload-url
+    route.
+  - local_paths_preserved: existing `POST /admin/files/:intakeFileId/upload`
+    and `POST /admin/files/:intakeFileId/confirm-upload` route handlers were
+    not changed, and the Gate C-2A local-path preservation test still passes.
+  - focused_tests: `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test
+    __tests__/kai-sprint2-api-contract.spec.js
+    __tests__/kai-sprint2-foundation-safety.spec.js
+    __tests__/kai-sprint2-pass2-route-runtime.spec.js
+    __tests__/kai-sprint2-gate-c2a-signed-upload-confirmation.spec.js
+    __tests__/kai-sprint2-intake-service.spec.js` passed (164 pass, 0 fail).
+  - sprint2_tests: `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run
+    test:kai-sprint2` passed (1773 pass, 0 fail, 27 skipped).
+  - full_repository_tests: `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel
+    npm test` passed (1878 pass, 0 fail, 27 skipped).
+  - git_diff_check: `git diff --check` passed (no output, exit 0).
+  - cloud_calls_performed: no.
+  - runtime_provider_composition_performed: no.
+  - push_performed: no.
+  - gate_c_e2e_started: no.
+
+NOT_CONFIRMED:
+  - Gate C-2 remaining application provider/PostgreSQL/security-worker
+    composition remains NOT_CONFIRMED.
+  - `P0_NONPRODUCTION_STORAGE_VERIFIED` remains NOT_CONFIRMED.
+  - `P0_LIVE_UPLOAD_READY` remains NOT_CONFIRMED.

@@ -159,6 +159,37 @@ function uploadIdentifiers(req = {}) {
   return { organizationId, engagementId, intakeBatchId, intakeFileId };
 }
 
+function validateUploadUrlRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const payload = requestPayload(req);
+  const organizationId = normalizedUuid(payload.organization_id);
+  const engagementId = normalizedUuid(payload.engagement_id);
+  const intakeBatchId = normalizedUuid(req.params?.intakeBatchId);
+  const intakeFileId = normalizedUuid(payload.intake_file_id);
+  if (
+    !KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId)
+    || !KAI_SPRINT2_P0_PATTERNS.uuid.test(engagementId)
+    || !KAI_SPRINT2_P0_PATTERNS.uuid.test(intakeBatchId)
+    || !KAI_SPRINT2_P0_PATTERNS.uuid.test(intakeFileId)
+  ) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_engagement_id_batch_id_or_intake_file_id")],
+    });
+    return null;
+  }
+  const allowedKeys = new Set(["organization_id", "engagement_id", "intake_file_id"]);
+  if (Object.keys(payload).some((key) => !allowedKeys.has(key))) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("unknown_field", "body")],
+    });
+    return null;
+  }
+  return { organizationId, engagementId, intakeBatchId, intakeFileId };
+}
+
 function validateConfirmUploadRequestOrSend(req, res) {
   if (!metadataContentTypeIsSupported(req)) {
     sendKaiError(res, "unsupported_media_type");
@@ -463,6 +494,18 @@ router.post("/admin/files/:intakeFileId/confirm-upload", async (req, res) => {
   });
 });
 
+router.post("/admin/batches/:intakeBatchId/files/upload-url", async (req, res) => {
+  const identifiers = validateUploadUrlRequestOrSend(req, res);
+  if (!identifiers) return;
+  return invokeService(res, async () => {
+    const service = await getIntakeService();
+    return service.requestUploadUrl({
+      ...requestContext(req, "/api/kai/sprint2/intake/admin/batches/:intakeBatchId/files/upload-url"),
+      ...identifiers,
+    });
+  });
+});
+
 router.get("/admin/review-queue", async (req, res) => {
   const organizationId = normalizedUuid(req.query?.organization_id);
   const queryResult = validateReviewQueueQuery(req.query);
@@ -748,6 +791,7 @@ export const __testables = {
   metadataContentTypeIsSupported,
   validateMutationRequestOrSend,
   validateFilePolicyBlockRequestOrSend,
+  validateUploadUrlRequestOrSend,
   validateConfirmUploadRequestOrSend,
   validateReviewQueueStatusRequestOrSend,
   reviewCockpitIdentifiers,
