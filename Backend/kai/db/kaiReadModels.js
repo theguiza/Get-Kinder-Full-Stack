@@ -56,6 +56,27 @@ export async function listIntakeFilesForBatch(
 export async function getIntakeFileMetadata(organizationId, intakeFileId, db = pool) {
   const { rows } = await db.query(
     `SELECT intake_file_id, intake_batch_id, organization_id, engagement_id, safe_filename,
+            mime_type, file_size_bytes, file_policy_status, malware_scan_status, processing_status,
+            parse_status, review_status, created_at, updated_at
+       FROM kai.intake_files
+      WHERE organization_id = $1
+        AND intake_file_id = $2
+      LIMIT 1`,
+    [organizationId, intakeFileId],
+  );
+  return rows[0] || null;
+}
+
+/**
+ * Upload-authorization callers (requestUploadUrl, confirmUpload,
+ * uploadReservedIntakeFile) need the server-owned storage reservation facts
+ * that getIntakeFileMetadata deliberately withholds from general-purpose
+ * callers like the file-detail route, so they get their own query instead of
+ * a broadened shared one.
+ */
+export async function getIntakeFileUploadMetadata(organizationId, intakeFileId, db = pool) {
+  const { rows } = await db.query(
+    `SELECT intake_file_id, intake_batch_id, organization_id, engagement_id, safe_filename,
             storage_provider, storage_bucket, storage_object_key, mime_type, file_size_bytes,
             checksum, hash_algorithm, file_policy_status, malware_scan_status, processing_status,
             parse_status, review_status, created_at, updated_at

@@ -28,6 +28,7 @@ import {
 import {
   getIntakeBatchDetail as readIntakeBatchDetail,
   getIntakeFileMetadata as readIntakeFileMetadata,
+  getIntakeFileUploadMetadata as readIntakeFileUploadMetadata,
   listIntakeBatchesForOrganization as readIntakeBatchesForOrganization,
   listIntakeFilesForBatch as readIntakeFilesForBatch,
   listIntakeFileReviewQueueItems as readIntakeFileReviewQueueItems,
@@ -1752,7 +1753,7 @@ async function authorizeUploadReservedIntakeFile(input = {}, dependencies = {}) 
   const auth = validateActorCanPerformOperation(actorContext, "create_intake_file", organizationId);
   if (!auth.ok) return buildKaiError(auth.error_code, { blockers: auth.blockers });
 
-  const readFile = dependencies.getIntakeFileMetadata || readIntakeFileMetadata;
+  const readFile = dependencies.getIntakeFileMetadata || readIntakeFileUploadMetadata;
   const row = await readFile(organizationId, intakeFileId);
   if (!row || String(row.intake_file_id || "").toLowerCase() !== intakeFileId) {
     return buildKaiError("not_found");
