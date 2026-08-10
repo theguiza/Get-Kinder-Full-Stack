@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { findIntakeFileReservationByChecksum } from "../Backend/kai/db/kaiIntakeQueries.js";
-import { getIntakeFileMetadata } from "../Backend/kai/db/kaiReadModels.js";
+import { getIntakeFileUploadMetadata } from "../Backend/kai/db/kaiReadModels.js";
 
 test("declared checksum duplicate lookup matches the existing organization checksum index contract", async () => {
   const organizationId = "a5d17c5a-c55f-43af-9b21-fe63aafe733f";
@@ -29,7 +29,7 @@ test("declared checksum duplicate lookup matches the existing organization check
   assert.doesNotMatch(queryText, /storage|verified/i);
 });
 
-test("intake file metadata read includes private storage facts for upload service composition", async () => {
+test("upload-authorization metadata read includes private storage facts for upload service composition", async () => {
   const organizationId = "a5d17c5a-c55f-43af-9b21-fe63aafe733f";
   const intakeFileId = "7d5482be-ad6b-4ed5-95cc-1a1bf4fcb749";
   let queryText = null;
@@ -43,7 +43,7 @@ test("intake file metadata read includes private storage facts for upload servic
     hash_algorithm: "sha256",
   };
 
-  const result = await getIntakeFileMetadata(
+  const result = await getIntakeFileUploadMetadata(
     organizationId,
     intakeFileId,
     {
