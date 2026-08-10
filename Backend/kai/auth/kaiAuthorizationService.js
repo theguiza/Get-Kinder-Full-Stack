@@ -1,19 +1,21 @@
 import { validateAssistantBoundary } from "../validators/assistantBoundaryValidators.js";
+import { KAI_SPRINT2_P0_OPERATION_ROLES } from "../config/kaiSprint2P0Contract.js";
 
-const OPERATION_ROLES = Object.freeze({
-  create_intake_batch: new Set(["gk_admin", "gk_operator"]),
-  create_intake_file: new Set(["gk_admin", "gk_operator"]),
-  create_review_queue_item: new Set(["gk_admin", "gk_operator", "gk_reviewer"]),
-  read_intake: new Set(["gk_admin", "gk_operator", "gk_reviewer", "client_admin", "client_reviewer", "client_contributor"]),
-});
+const OPERATION_ROLES = Object.freeze(
+  Object.fromEntries(
+    Object.entries(KAI_SPRINT2_P0_OPERATION_ROLES).map(([operation, roles]) => [operation, new Set(roles)]),
+  ),
+);
 
 const P0_MUTATING_OPERATIONS = new Set([
   "create_intake_batch",
   "create_intake_file",
   "create_review_queue_item",
+  "mark_file_policy_blocked",
+  "update_review_queue_status",
 ]);
 
-const P0_GLOBAL_WRITE_ROLES = new Set(["gk_admin", "gk_operator"]);
+const P0_GLOBAL_WRITE_ROLES = new Set(KAI_SPRINT2_P0_OPERATION_ROLES.create_intake_batch);
 
 function activeMembershipsForOrg(actorContext, organizationId) {
   return (actorContext?.organizationMemberships || []).filter(

@@ -2,11 +2,15 @@
 
 const PASS2_MARKER = "pass2_admin_metadata_intake_verification";
 const PASS2_GATE_PLAN = "KAI_MVP_Sprint2_P0_Pass2_Production_Synthetic_Metadata_Write_Gate_Plan_v0.1.1";
+const DECLARED_UNVERIFIED_CHECKSUM = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const BASE_URL = process.env.KAI_PASS2_BASE_URL || "";
 const AUTH_COOKIE = process.env.KAI_PASS2_AUTH_COOKIE || "";
 const BEARER_TOKEN = process.env.KAI_PASS2_BEARER_TOKEN || "";
-const ORGANIZATION_ID = process.env.KAI_PASS2_ORGANIZATION_ID || "a5d17c5a-c55f-43af-9b21-fe63aafe733f";
-const ENGAGEMENT_ID = process.env.KAI_PASS2_ENGAGEMENT_ID || "2e426ea1-2be3-4e48-b80f-9783ddbacda0";
+const ORGANIZATION_ID = process.env.KAI_PASS2_ORGANIZATION_ID || "";
+const ENGAGEMENT_ID = process.env.KAI_PASS2_ENGAGEMENT_ID || "";
+const BATCH_CODE = process.env.KAI_PASS2_BATCH_CODE || "";
+const BATCH_IDEMPOTENCY_KEY = process.env.KAI_PASS2_BATCH_IDEMPOTENCY_KEY || "";
+const FILE_IDEMPOTENCY_KEY = process.env.KAI_PASS2_FILE_IDEMPOTENCY_KEY || "";
 const DB_TARGET_CLASS = process.env.KAI_PASS2_DB_TARGET_CLASS || "unknown";
 const PRODUCTION_GATE_ACCEPTED = String(process.env.KAI_PASS2_PRODUCTION_SYNTHETIC_WRITE_GATE_ACCEPTED || "false") === "true";
 const RUN_WRITE_PATH = String(process.env.KAI_PASS2_RUN_WRITE_PATH || "false") === "true";
@@ -189,7 +193,7 @@ async function verifyAuthPreflight() {
     authPreflight.body?.ok === true &&
     authPreflight.body?.data?.authenticated === true &&
     authPreflight.body?.data?.session_authenticated === true &&
-    authPreflight.body?.data?.feature_flag_required === false &&
+    authPreflight.body?.data?.feature_flag_required === true &&
     Array.isArray(authPreflight.body?.blockers) &&
     authPreflight.body.blockers.length === 0 &&
     Array.isArray(authPreflight.body?.warnings) &&
@@ -324,7 +328,19 @@ async function run() {
     return;
   }
 
-  const statusReady = status.response.ok && status.body?.data?.mode === "admin_metadata_only";
+  const statusReady =
+    status.response.ok &&
+    status.body?.data?.mode === "admin_metadata_only" &&
+    status.body?.data?.metadata_write_enabled === true &&
+    status.body?.data?.file_upload_enabled === false &&
+    status.body?.data?.upload_confirmation_enabled === false &&
+    status.body?.data?.storage_upload_enabled === false &&
+    status.body?.data?.parser_worker_enabled === false &&
+    status.body?.data?.source_promotion_enabled === false &&
+    status.body?.data?.evidence_creation_enabled === false &&
+    status.body?.data?.claim_creation_enabled === false &&
+    status.body?.data?.generation_enabled === false &&
+    status.body?.data?.export_enabled === false;
   add(
     "API_FEATURE_ON_STATUS_RETURNS_READY_METADATA_ONLY",
     "/api/kai/sprint2/intake/status",
@@ -351,6 +367,28 @@ async function run() {
     return;
   }
 
+  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const idempotencyPattern = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{7,127}$/;
+  const operationalParametersValid =
+    uuidPattern.test(ORGANIZATION_ID) &&
+    uuidPattern.test(ENGAGEMENT_ID) &&
+    BATCH_CODE.length >= 1 &&
+    BATCH_CODE.length <= 64 &&
+    idempotencyPattern.test(BATCH_IDEMPOTENCY_KEY) &&
+    idempotencyPattern.test(FILE_IDEMPOTENCY_KEY);
+  add(
+    "API_OPERATIONAL_IDENTIFIERS_PARAMETERIZED",
+    "KAI_PASS2_ORGANIZATION_ID,KAI_PASS2_ENGAGEMENT_ID,KAI_PASS2_BATCH_CODE,KAI_PASS2_BATCH_IDEMPOTENCY_KEY,KAI_PASS2_FILE_IDEMPOTENCY_KEY",
+    operationalParametersValid ? "PASS" : "FAIL",
+    operationalParametersValid
+      ? "Operational identifiers were supplied through validated parameters."
+      : "All validated operational identifier parameters are required for the write path.",
+  );
+  if (!operationalParametersValid) {
+    finish(1);
+    return;
+  }
+
   const access = await request(`/api/kai/sprint2/intake/admin/access-check?organization_id=${ORGANIZATION_ID}&engagement_id=${ENGAGEMENT_ID}`);
   add(
     "API_ACCESS_CHECK_MAPS_ACTOR",
@@ -359,7 +397,7 @@ async function run() {
     `HTTP ${access.response.status}`,
   );
   add(
-    "API_ACCESS_CHECK_CONFIRMS_NCWS_MEMBERSHIP",
+    "API_ACCESS_CHECK_CONFIRMS_TENANT_MEMBERSHIP",
     "/api/kai/sprint2/intake/admin/access-check",
     access.response.ok && access.body?.data?.membership_active === true ? "PASS" : "FAIL",
     `HTTP ${access.response.status}`,
@@ -385,8 +423,8 @@ async function run() {
     body: JSON.stringify({
       organization_id: ORGANIZATION_ID,
       engagement_id: ENGAGEMENT_ID,
-      batch_code: "NCWS-P0-PASS2-METADATA-UNAUTH",
-      idempotency_key: "kai-p0-pass2-unauth",
+      batch_code: "KAI-P0-UNAUTH-PROBE",
+      idempotency_key: "kai-p0-unauth-probe",
     }),
   });
   const unauthAccepted = unauth.response.status === 401 && unauth.body?.ok === false;
@@ -414,8 +452,8 @@ async function run() {
     body: JSON.stringify({
       organization_id: ORGANIZATION_ID,
       engagement_id: "00000000-0000-4000-8000-000000000000",
-      batch_code: "NCWS-P0-PASS2-METADATA-TENANT-MISMATCH",
-      idempotency_key: "kai-p0-pass2-tenant-mismatch",
+      batch_code: "KAI-P0-TENANT-MISMATCH-PROBE",
+      idempotency_key: "kai-p0-tenant-mismatch-probe",
       intake_method: "manual_upload",
       batch_metadata: { p0_pass: PASS2_MARKER, gate_plan: PASS2_GATE_PLAN },
     }),
@@ -445,8 +483,8 @@ async function run() {
     body: JSON.stringify({
       organization_id: ORGANIZATION_ID,
       engagement_id: ENGAGEMENT_ID,
-      batch_code: "NCWS-P0-PASS2-METADATA-001",
-      idempotency_key: "kai-p0-pass2-ncws-batch-001",
+      batch_code: BATCH_CODE,
+      idempotency_key: BATCH_IDEMPOTENCY_KEY,
       intake_method: "manual_upload",
       notes: "P0 Pass 2 metadata-only admin route verification. No raw files. No parser. No source promotion.",
       batch_metadata: {
@@ -477,8 +515,8 @@ async function run() {
     body: JSON.stringify({
       organization_id: ORGANIZATION_ID,
       engagement_id: ENGAGEMENT_ID,
-      batch_code: "NCWS-P0-PASS2-METADATA-001",
-      idempotency_key: "kai-p0-pass2-ncws-batch-001",
+      batch_code: BATCH_CODE,
+      idempotency_key: BATCH_IDEMPOTENCY_KEY,
       intake_method: "manual_upload",
       notes: "P0 Pass 2 metadata-only admin route verification. No raw files. No parser. No source promotion.",
       batch_metadata: {
@@ -510,11 +548,13 @@ async function run() {
     body: JSON.stringify({
       organization_id: ORGANIZATION_ID,
       engagement_id: ENGAGEMENT_ID,
-      idempotency_key: "kai-p0-pass2-ncws-file-reservation-001",
-      original_filename: "NCWS P0 Pass2 metadata-only reservation.csv",
+      idempotency_key: FILE_IDEMPOTENCY_KEY,
+      original_filename: "KAI P0 metadata-only reservation.csv",
       mime_type: "text/csv",
       file_extension: ".csv",
       file_size_bytes: 0,
+      checksum: DECLARED_UNVERIFIED_CHECKSUM,
+      hash_algorithm: "sha256",
       reservation_metadata: {
         p0_pass: PASS2_MARKER,
         gate_plan: PASS2_GATE_PLAN,

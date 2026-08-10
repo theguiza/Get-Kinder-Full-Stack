@@ -1,7 +1,12 @@
 import { blockerResult, passResult } from "./types.js";
+import {
+  KAI_SPRINT2_P0_HASH_ALGORITHM,
+  KAI_SPRINT2_P0_PATTERNS,
+} from "../config/kaiSprint2P0Contract.js";
 
-const IDEMPOTENCY_KEY_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{7,127}$/;
-const CHECKSUM_PATTERN = /^(?:sha256:)?[a-fA-F0-9]{64}$/;
+const IDEMPOTENCY_KEY_PATTERN = KAI_SPRINT2_P0_PATTERNS.idempotencyKey;
+const CHECKSUM_PATTERN = KAI_SPRINT2_P0_PATTERNS.checksumSha256;
+const SUPPORTED_HASH_ALGORITHM = KAI_SPRINT2_P0_HASH_ALGORITHM;
 
 function hasValue(value) {
   return value != null && String(value).trim() !== "";
@@ -17,6 +22,14 @@ export function getIdempotencyKey(context = {}) {
 
 export function getProvidedChecksum(context = {}) {
   return getPayloadValue(context, "checksum", "checksum");
+}
+
+export function getProvidedHashAlgorithm(context = {}) {
+  return getPayloadValue(context, "hashAlgorithm", "hash_algorithm");
+}
+
+export function canonicalizeSha256Checksum(checksum) {
+  return String(checksum).toLowerCase();
 }
 
 export function idempotency_key_required(context = {}) {
@@ -70,11 +83,43 @@ export function checksum_format_supported(context = {}) {
       object_type: "intake_file_metadata",
       object_code: "checksum",
       blocking_reason: "invalid_checksum",
-      required_fix: "Provide a sha256 metadata checksum as 64 hex characters, optionally prefixed by sha256:.",
+      required_fix: "Provide a sha256 metadata checksum as exactly 64 hexadecimal characters.",
     });
   }
 
   return passResult("VAL-IDEMP-004", "checksum format is supported.");
+}
+
+export function hash_algorithm_required(context = {}) {
+  const hashAlgorithm = getProvidedHashAlgorithm(context);
+  if (!hasValue(hashAlgorithm)) {
+    return blockerResult("VAL-IDEMP-007", "hash_algorithm is required for file metadata contracts.", {
+      object_type: "intake_file_metadata",
+      object_code: "hash_algorithm",
+      blocking_reason: "missing_hash_algorithm",
+      required_fix: "Provide hash_algorithm with the value sha256.",
+      evidence: { hash_algorithm_present: false },
+    });
+  }
+
+  return passResult("VAL-IDEMP-007", "hash_algorithm is present.", { hash_algorithm_present: true });
+}
+
+export function hash_algorithm_supported(context = {}) {
+  const hashAlgorithm = getProvidedHashAlgorithm(context);
+  if (!hasValue(hashAlgorithm) || hashAlgorithm !== SUPPORTED_HASH_ALGORITHM) {
+    return blockerResult("VAL-IDEMP-008", "hash_algorithm is not supported.", {
+      object_type: "intake_file_metadata",
+      object_code: "hash_algorithm",
+      blocking_reason: "unsupported_hash_algorithm",
+      required_fix: "Provide hash_algorithm with the exact value sha256.",
+      evidence: { hash_algorithm: hashAlgorithm || null },
+    });
+  }
+
+  return passResult("VAL-IDEMP-008", "hash_algorithm is supported.", {
+    hash_algorithm: SUPPORTED_HASH_ALGORITHM,
+  });
 }
 
 export function idempotent_replay_checksum_matches(context = {}) {
@@ -96,15 +141,19 @@ export function duplicate_checksum_blocked(context = {}) {
   const checksum = getProvidedChecksum(context);
   const duplicateChecksums = context.duplicateChecksums || context.duplicate_checksums || context.payload?.duplicate_checksums || [];
   if (hasValue(checksum) && Array.isArray(duplicateChecksums) && duplicateChecksums.includes(checksum)) {
-    return blockerResult("VAL-IDEMP-006", "Duplicate file metadata checksum is blocked.", {
+    return blockerResult("VAL-IDEMP-006", "A caller-declared checksum matches an existing intake reservation.", {
       object_type: "intake_file_metadata",
       object_code: "checksum",
       blocking_reason: "duplicate_checksum",
-      required_fix: "Use an existing intake file reference or provide unique file metadata.",
+      required_fix: "Use the existing intake file reference or reserve metadata with a different declared checksum.",
+      evidence: {
+        duplicate_evaluation: "preliminary_declared_checksum_match",
+        storage_checksum_verified: false,
+      },
     });
   }
 
-  return passResult("VAL-IDEMP-006", "Duplicate checksum was not detected from supplied metadata.");
+  return passResult("VAL-IDEMP-006", "No preliminary duplicate declared checksum was detected.");
 }
 
 export const idempotencyValidatorGroups = Object.freeze({
@@ -117,6 +166,8 @@ export const idempotencyValidatorGroups = Object.freeze({
     idempotency_key_format_supported,
     checksum_required,
     checksum_format_supported,
+    hash_algorithm_required,
+    hash_algorithm_supported,
     idempotent_replay_checksum_matches,
     duplicate_checksum_blocked,
   ]),

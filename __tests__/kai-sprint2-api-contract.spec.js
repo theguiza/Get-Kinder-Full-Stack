@@ -13,18 +13,31 @@ const tenantAuthorizationSource = readFileSync("Backend/kai/auth/tenantAuthoriza
 const actorContextTestSource = readFileSync("__tests__/kai-sprint2-actor-context.spec.js", "utf8");
 const tenantAuthorizationTestSource = readFileSync("__tests__/kai-sprint2-tenant-authorization.spec.js", "utf8");
 
-test("validator blockers map to 422 route behavior", () => {
-  assert.match(routeSource, /result\?\.error\?\.code\s*===\s*["']validation_blocker["']/);
-  assert.match(routeSource, /return\s+res\.status\(422\)\.json\(result\)/);
+test("service errors map through the canonical KAI HTTP status contract", () => {
+  assert.match(routeSource, /import\s+\{\s*KAI_ERROR_STATUS,\s*sendKaiError\s*\}/);
+  assert.match(routeSource, /Object\.hasOwn\(KAI_ERROR_STATUS,\s*requestedCode\)/);
+  assert.match(routeSource, /return\s+sendKaiError\(res,\s*code/);
 });
 
 test("api contract exposes Sprint 2 status and admin metadata route shape", () => {
   assert.match(routeSource, /router\.get\(["']\/status["']/);
   assert.match(routeSource, /router\.post\(["']\/admin\/batches["']/);
+  assert.match(routeSource, /router\.get\(["']\/admin\/batches\/:intakeBatchId["']/);
+  assert.match(routeSource, /router\.get\(["']\/admin\/batches\/:intakeBatchId\/files["']/);
+  assert.match(routeSource, /router\.get\(["']\/admin\/files\/:intakeFileId["']/);
+  assert.match(routeSource, /router\.post\(["']\/admin\/files\/:intakeFileId\/block["']/);
+  assert.match(routeSource, /router\.post\(\s*["']\/admin\/files\/:intakeFileId\/upload["']/);
+  assert.match(routeSource, /router\.post\(["']\/admin\/files\/:intakeFileId\/confirm-upload["']/);
+  assert.match(routeSource, /router\.post\(["']\/admin\/batches\/:intakeBatchId\/files\/upload-url["']/);
+  assert.match(routeSource, /router\.get\(\s*["']\/admin\/organizations\/:organizationId\/generated-content-drafts\/:generatedContentDraftId\/export-review-queue\/:exportReviewQueueItemId\/packet["']/);
+  assert.match(routeSource, /router\.get\(["']\/admin\/review-queue["']/);
+  assert.match(routeSource, /router\.post\(["']\/admin\/review-queue\/:reviewQueueItemId\/status["']/);
   assert.match(routeSource, /router\.post\(["']\/admin\/batches\/:intakeBatchId\/file-reservations["']/);
   assert.match(routeSource, /mode:\s*["']admin_metadata_only["']/);
-  assert.match(routeSource, /pass1f_contract:\s*["']p0_pass1f_metadata_write_storage_boundary_contract["']/);
-  assert.match(routeSource, /metadata_write_enabled:\s*false/);
+  assert.match(routeSource, /contract:\s*`kai_sprint2_p0_repository_contract_v\$\{KAI_SPRINT2_P0_CONTRACT_VERSION\}`/);
+  assert.match(routeSource, /metadata_write_enabled:\s*true/);
+  assert.match(routeSource, /file_upload_enabled:\s*false/);
+  assert.match(routeSource, /upload_confirmation_enabled:\s*false/);
   assert.match(routeSource, /storage_provider_enabled:\s*false/);
   assert.match(routeSource, /storage_upload_enabled:\s*false/);
   assert.match(routeSource, /signed_upload_enabled:\s*false/);
@@ -41,14 +54,23 @@ test("sprint2IntakeApi fails closed while disabled and does not expose req.user"
 });
 
 test("sprint2IntakeApi delegates admin metadata operations to service without direct kai table access", () => {
-  assert.match(routeSource, /import\(["']\.\.\/services\/kaiIntakeService\.js["']\)/);
+  assert.match(routeSource, /import\(["']\.\.\/services\/kaiIntakeRuntimeService\.js["']\)/);
   assert.match(routeSource, /\bcheckAdminAccess\b/);
   assert.match(routeSource, /\bcreateIntakeBatch\b/);
   assert.match(routeSource, /\breserveIntakeFileMetadata\b/);
+  assert.match(routeSource, /\bmarkIntakeFilePolicyBlocked\b/);
+  assert.match(routeSource, /\buploadReservedIntakeFile\b/);
+  assert.match(routeSource, /\bconfirmUpload\b/);
+  assert.match(routeSource, /\brequestUploadUrl\b/);
+  assert.match(routeSource, /\bupdateReviewQueueStatus\b/);
   assert.match(routeSource, /service\.checkAdminAccess/);
   assert.match(routeSource, /service\.createIntakeBatch/);
   assert.match(routeSource, /service\.reserveIntakeFileMetadata/);
-  assert.doesNotMatch(routeSource, /\brequestUploadUrl\b/);
+  assert.match(routeSource, /service\.markIntakeFilePolicyBlocked/);
+  assert.match(routeSource, /service\.uploadReservedIntakeFile/);
+  assert.match(routeSource, /service\.confirmUpload/);
+  assert.match(routeSource, /service\.requestUploadUrl/);
+  assert.match(routeSource, /service\.updateReviewQueueStatus/);
   assert.doesNotMatch(routeSource, /\b(?:select|insert|update|delete)\b[\s\S]{0,160}\bkai\./i);
   assert.doesNotMatch(routeSource, /\bkai\.(?!js\b)[a-z_]+\b/i);
 });
@@ -65,13 +87,24 @@ test("route files contain no direct SQL against kai schema", () => {
   }
 });
 
-test("sprint2IntakeApi does not enable raw upload, signed URLs, parser raw-file work, source promotion, or tenant DB lookup", () => {
-  assert.match(routeSource, /Raw file upload is disabled/);
-  assert.doesNotMatch(routeSource, /\bsigned(?:Upload|Read)Url\b|\bgetSignedUrl\b|\bsigned_url\b/i);
+test("sprint2IntakeApi enables only service-delegated upload routes, not parser raw-file work, source promotion, or tenant DB lookup", () => {
+  assert.match(routeSource, /requireKaiSprint2UploadMediaType/);
+  assert.match(routeSource, /attachKaiSprint2UploadByteSource/);
   assert.doesNotMatch(routeSource, /\bparser\b[\s\S]{0,80}\braw[-_ ]?file\b/i);
   assert.doesNotMatch(routeSource, /\bpromote(?:Source)?\b|\bsource_promotion_enabled:\s*true\b/i);
   assert.doesNotMatch(routeSource, /from\s+["'][^"']*(?:kaiDb|kaiQueries|kaiIntakeQueries)\.js["']/);
   assert.doesNotMatch(routeSource, /\bSELECT\b[\s\S]{0,160}\b(?:kai\.|organization|tenant|membership)/i);
+});
+
+test("upload-url route delegates to requestUploadUrl without route-level storage provider facts", () => {
+  const start = routeSource.indexOf('router.post("/admin/batches/:intakeBatchId/files/upload-url"');
+  assert.notEqual(start, -1);
+  const nextRoute = routeSource.indexOf("router.", start + 1);
+  const slice = routeSource.slice(start, nextRoute);
+  assert.match(slice, /service\.requestUploadUrl/);
+  assert.doesNotMatch(slice, /\b(?:SELECT|INSERT|UPDATE|DELETE)\b|\bpool\b|\bkaiDb\b|\bkaiIntakeQueries\b/i);
+  assert.doesNotMatch(slice, /\bGoogleCloudStorageProvider\b|\bgcsProvider\b|\bstorageProvider\b|\blifecycleRepository\b/);
+  assert.doesNotMatch(slice, /\bbucket\b|\bobjectKey\b|\bstorageObjectKey\b|\bmimeType\b|\boriginalFilename\b|\bsafeFilename\b|\bstoragePath\b|\bstorageUri\b/);
 });
 
 test("kaiDb imports the existing Postgres pool and does not instantiate a pool", () => {
@@ -84,9 +117,10 @@ test("kaiDb imports the existing Postgres pool and does not instantiate a pool",
 
 test("index.js preserves legacy KAI and Sprint 2 auth-preflight mounts", () => {
   assert.match(indexSource, /import\s+\{\s*verifyToken,\s*ensureAuthenticatedApi\s*\}\s+from\s+["']\.\/middleware\/auth\.js["']/);
+  assert.match(indexSource, /import\s+\{\s*requireKaiSprint2Authenticated\s*\}\s+from\s+["']\.\/Backend\/kai\/middleware\/kaiSprint2Authentication\.js["']/);
   assert.match(indexSource, /app\.use\(["']\/api\/kai["'],\s*kaiRouter\)/);
-  assert.match(indexSource, /["']\/api\/kai\/sprint2\/intake\/auth-preflight["'][\s\S]*ensureAuthenticatedApi[\s\S]*sprint2IntakeAuthPreflightApiRouter/);
-  assert.match(indexSource, /["']\/api\/kai\/sprint2\/intake["'][\s\S]*requireKaiSprint2Enabled[\s\S]*ensureAuthenticatedApi[\s\S]*sprint2IntakeApiRouter/);
+  assert.match(indexSource, /["']\/api\/kai\/sprint2\/intake\/auth-preflight["'][\s\S]*requireKaiSprint2Enabled[\s\S]*requireKaiSprint2Authenticated[\s\S]*sprint2IntakeAuthPreflightApiRouter/);
+  assert.match(indexSource, /["']\/api\/kai\/sprint2\/intake["'][\s\S]*requireKaiSprint2Enabled[\s\S]*kaiSprint2OrganizationMutationLimiter[\s\S]*kaiSprint2ActorMutationLimiter[\s\S]*requireKaiSprint2Authenticated[\s\S]*sprint2IntakeApiRouter/);
   assert.doesNotMatch(indexSource, /function\s+ensureAuthenticatedApi|const\s+ensureAuthenticatedApi\s*=/);
 });
 
@@ -99,12 +133,13 @@ test("Backend KAI index exports Pass 1C actor and tenant helpers from accepted a
   assert.doesNotMatch(kaiBackendIndexSource, /from\s+["']\.\/auth\/kaiAuthorizationService\.js["']/);
 });
 
-test("Backend KAI index exports Pass 1D validator and service contracts without DB adapters", () => {
+test("Backend KAI index exports one canonical mounted intake service without DB adapters", () => {
   assert.match(kaiBackendIndexSource, /from\s+["']\.\/validators\/runValidators\.js["']/);
   assert.match(kaiBackendIndexSource, /from\s+["']\.\/validators\/intakeValidators\.js["']/);
-  assert.match(kaiBackendIndexSource, /from\s+["']\.\/services\/intakeService\.js["']/);
-  assert.match(kaiBackendIndexSource, /validateIntakePreflight/);
-  assert.match(kaiBackendIndexSource, /requestIntakeFileTransfer/);
+  assert.match(kaiBackendIndexSource, /from\s+["']\.\/services\/kaiIntakeService\.js["']/);
+  assert.match(kaiBackendIndexSource, /createIntakeBatch/);
+  assert.match(kaiBackendIndexSource, /reserveIntakeFileMetadata/);
+  assert.doesNotMatch(kaiBackendIndexSource, /from\s+["']\.\/services\/intakeService\.js["']/);
   assert.doesNotMatch(kaiBackendIndexSource, /from\s+["'][^"']*(?:kaiDb|db\/pg|kaiIntakeQueries|storageAdapter)\.js["']/);
 });
 

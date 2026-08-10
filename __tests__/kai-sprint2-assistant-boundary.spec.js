@@ -35,6 +35,21 @@ test("assistant boundary permits non-restricted metadata operation", () => {
   assert.equal(result.severity, "pass");
 });
 
+test("assistant, AI, and generic system identities cannot mutate P0 intake metadata", () => {
+  for (const actorType of ["assistant", "ai", "system", "internal_service"]) {
+    for (const operation of [
+      "create_intake_batch",
+      "create_intake_file",
+      "create_review_queue_item",
+      "update_review_queue_status",
+    ]) {
+      const result = validateAssistantBoundary({ actorContext: { actorType }, operation });
+      assert.equal(result.severity, "blocker", `${actorType}:${operation}`);
+      assert.equal(result.blocking_reason, "assistant_boundary", `${actorType}:${operation}`);
+    }
+  }
+});
+
 test("assistant boundary blocks raw file, signed URL, approval, promotion, claim, evidence, report, and review bypass operations", () => {
   const actorContext = { actorType: "assistant" };
   const blocked = [

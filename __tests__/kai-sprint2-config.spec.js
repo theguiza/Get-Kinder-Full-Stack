@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { isKaiSprint2Enabled, requireKaiSprint2Enabled } from "../Backend/kai/config/kaiSprint2Config.js";
+import {
+  areKaiSprint2UploadFeaturesEnabled,
+  isKaiFileUploadEnabled,
+  isKaiSprint2Enabled,
+  requireKaiSprint2Enabled,
+} from "../Backend/kai/config/kaiSprint2Config.js";
 
 function restoreSprint2Flag(previous) {
   if (previous === undefined) {
@@ -31,6 +36,18 @@ test("feature flag false, missing, and unknown values fail closed", () => {
   assert.equal(isKaiSprint2Enabled({ KAI_SPRINT2_ENABLED: "enabled" }), false);
   assert.equal(isKaiSprint2Enabled({ KAI_SPRINT2_ENABLED: "" }), false);
   assert.equal(isKaiSprint2Enabled({}), false);
+});
+
+test("file upload flag is fail-closed and upload requires both feature flags", () => {
+  assert.equal(isKaiFileUploadEnabled({}), false);
+  assert.equal(isKaiFileUploadEnabled({ KAI_FILE_UPLOAD_ENABLED: "enabled" }), false);
+  assert.equal(isKaiFileUploadEnabled({ KAI_FILE_UPLOAD_ENABLED: "true" }), true);
+  assert.equal(areKaiSprint2UploadFeaturesEnabled({ KAI_FILE_UPLOAD_ENABLED: "true" }), false);
+  assert.equal(areKaiSprint2UploadFeaturesEnabled({ KAI_SPRINT2_ENABLED: "true" }), false);
+  assert.equal(areKaiSprint2UploadFeaturesEnabled({
+    KAI_SPRINT2_ENABLED: "true",
+    KAI_FILE_UPLOAD_ENABLED: "true",
+  }), true);
 });
 
 test("feature flag disabled blocks Sprint 2 route middleware", () => {

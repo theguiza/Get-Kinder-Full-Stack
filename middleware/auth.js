@@ -43,10 +43,17 @@ export function verifyToken(req, res, next) {
   return next();
 }
 
-export async function ensureAuthenticatedApi(req, res, next) {
+function sendAuthenticationFailure(res, status, body, options = {}) {
+  if (typeof options.onFailure === "function") {
+    return options.onFailure({ res, status, body });
+  }
+  return res.status(status).json(body);
+}
+
+export async function ensureAuthenticatedApi(req, res, next, options = {}) {
   if (req.isAuthenticated && req.isAuthenticated()) {
     if (req.user?.is_suspended) {
-      return res.status(403).json({ error: "account_suspended" });
+      return sendAuthenticationFailure(res, 403, { error: "account_suspended" }, options);
     }
     return next();
   }
@@ -54,12 +61,12 @@ export async function ensureAuthenticatedApi(req, res, next) {
   const token = getBearerToken(req);
   const verification = verifyBearerToken(token);
   if (!verification.ok) {
-    return res.status(401).json({ error: "unauthorized" });
+    return sendAuthenticationFailure(res, 401, { error: "unauthorized" }, options);
   }
 
   const userId = Number(verification.decoded?.id ?? verification.decoded?.sub);
   if (!Number.isInteger(userId)) {
-    return res.status(401).json({ error: "unauthorized" });
+    return sendAuthenticationFailure(res, 401, { error: "unauthorized" }, options);
   }
 
   const { rows } = await pool.query(
@@ -68,11 +75,11 @@ export async function ensureAuthenticatedApi(req, res, next) {
   );
   const user = rows?.[0] || null;
   if (!user) {
-    return res.status(401).json({ error: "unauthorized" });
+    return sendAuthenticationFailure(res, 401, { error: "unauthorized" }, options);
   }
 
   if (user.is_suspended) {
-    return res.status(403).json({ error: "account_suspended" });
+    return sendAuthenticationFailure(res, 403, { error: "account_suspended" }, options);
   }
 
   req.user = user;

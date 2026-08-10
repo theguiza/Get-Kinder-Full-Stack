@@ -2,13 +2,26 @@
 -- SQL_EXECUTION_FAILURE. It is never PASS and may prevent any result set.
 WITH expected AS (
   SELECT
-    'NCWS-P0-PASS2-METADATA-001'::text AS batch_code,
-    'kai-p0-pass2-ncws-batch-001'::text AS batch_idempotency_key,
-    'kai-p0-pass2-ncws-file-reservation-001'::text AS file_idempotency_key,
+    NULLIF(current_setting('kai.verifier.batch_code', true), '')::text AS batch_code,
+    NULLIF(current_setting('kai.verifier.batch_idempotency_key', true), '')::text AS batch_idempotency_key,
+    NULLIF(current_setting('kai.verifier.file_idempotency_key', true), '')::text AS file_idempotency_key,
     'pass2_admin_metadata_intake_verification'::text AS p0_pass,
     'KAI_MVP_Sprint2_P0_Pass2_Production_Synthetic_Metadata_Write_Gate_Plan_v0.1.1'::text AS gate_plan,
-    'a5d17c5a-c55f-43af-9b21-fe63aafe733f'::uuid AS organization_id,
-    '2e426ea1-2be3-4e48-b80f-9783ddbacda0'::uuid AS engagement_id
+    NULLIF(current_setting('kai.verifier.organization_id', true), '')::uuid AS organization_id,
+    NULLIF(current_setting('kai.verifier.engagement_id', true), '')::uuid AS engagement_id
+),
+parameter_checks AS (
+  SELECT 'CHECK' AS result_type,
+         'PREWRITE_OPERATIONAL_PARAMETERS_PRESENT' AS check_name,
+         'verifier_parameters' AS object_name,
+         CASE WHEN organization_id IS NOT NULL
+                   AND engagement_id IS NOT NULL
+                   AND batch_code IS NOT NULL
+                   AND batch_idempotency_key IS NOT NULL
+                   AND file_idempotency_key IS NOT NULL
+              THEN 'PASS' ELSE 'FAIL' END AS status,
+         'Required operational identifiers were evaluated from session parameters.' AS detail
+  FROM expected
 ),
 required_columns AS (
   SELECT *
@@ -24,7 +37,7 @@ required_columns AS (
     ('PREWRITE_FILE_CATALOG_COMPATIBLE', 'intake_files', 'organization_id'),
     ('PREWRITE_FILE_CATALOG_COMPATIBLE', 'intake_files', 'engagement_id'),
     ('PREWRITE_FILE_CATALOG_COMPATIBLE', 'intake_files', 'file_metadata'),
-    ('PREWRITE_FILE_CATALOG_COMPATIBLE', 'intake_files', 'checksum_sha256')
+    ('PREWRITE_FILE_CATALOG_COMPATIBLE', 'intake_files', 'checksum')
   ) AS required(check_name, table_name, column_name)
 ),
 catalog_columns AS (
@@ -71,8 +84,8 @@ required_indexes AS (
       'PREWRITE_INDEX_FILE_ORG_CHECKSUM_DEFAULT_EXACT',
       'ux_intake_files_org_checksum_default',
       'intake_files',
-      ARRAY['organization_id', 'checksum_sha256']::text[],
-      '(checksum_sha256 IS NOT NULL)'::text
+      ARRAY['organization_id', 'checksum']::text[],
+      '(checksum IS NOT NULL)'::text
     )
   ) AS required(check_name, index_name, table_name, key_columns, predicate_expression)
 ),
@@ -171,6 +184,8 @@ marker_checks AS (
   FROM file_marker_count
 ),
 checks AS (
+  SELECT * FROM parameter_checks
+  UNION ALL
   SELECT * FROM catalog_checks
   UNION ALL
   SELECT * FROM index_checks

@@ -1,4 +1,25 @@
-export { isKaiSprint2Enabled, requireKaiSprint2Enabled } from "./config/kaiSprint2Config.js";
+export {
+  areKaiSprint2UploadFeaturesEnabled,
+  isKaiFileUploadEnabled,
+  isKaiSprint2Enabled,
+  requireKaiSprint2Enabled,
+} from "./config/kaiSprint2Config.js";
+export {
+  KAI_SPRINT2_P0_ABUSE_LIMITS,
+  KAI_SPRINT2_P0_CONTRACT_VERSION,
+  KAI_SPRINT2_P0_FINGERPRINT,
+  KAI_SPRINT2_P0_HASH_ALGORITHM,
+  KAI_SPRINT2_P0_OPERATION_ROLES,
+  KAI_SPRINT2_P0_PATTERNS,
+  KAI_SPRINT2_P0_REQUEST_LIMITS,
+  KAI_SPRINT2_P0_RESOURCE_LIMITS,
+  KAI_SPRINT2_P0_REVIEW_QUEUE_STATUSES,
+  KAI_SPRINT2_P0_REVIEW_QUEUE_TYPES,
+  KAI_SPRINT2_P0_SECURITY_EXECUTOR,
+  KAI_SPRINT2_P0_STRING_LIMITS,
+  KAI_SPRINT2_P0_UPLOAD_STATES,
+  KAI_SPRINT2_P0_UPLOAD_TIMING,
+} from "./config/kaiSprint2P0Contract.js";
 export {
   ACTIVE_KAI_USER_MAPPING_SQL,
   KAI_USER_ROLE_NAMES_SQL,
@@ -30,17 +51,20 @@ export {
   tenant_context_required,
 } from "./validators/intakeValidators.js";
 export {
+  checkAdminAccess,
   createIntakeBatch,
   confirmUpload,
-  parseIntakeRawFile,
-  promoteIntakeSource,
-  registerIntakeFileMetadata,
+  getIntakeBatchDetail,
+  getIntakeFileDetail,
+  listIntakeBatches,
+  listIntakeBatchesForOrganization,
+  listIntakeFilesForBatch,
+  listIntakeFileReviewQueueItems,
+  markIntakeFilePolicyBlocked,
   requestUploadUrl,
-  requestIntakeFileTransfer,
-  reserveIntakeFile,
-  validateBlockedAttemptAuditContract,
-  validateIntakePreflight,
-} from "./services/intakeService.js";
+  reserveIntakeFileMetadata,
+  validateIntakeFileMetadata,
+} from "./services/kaiIntakeService.js";
 export {
   DisabledStorageProvider,
   DISABLED_STORAGE_PROVIDER_CONTRACT,
@@ -56,9 +80,12 @@ export {
   upload_url_request_blocked_in_p0,
 } from "./validators/storageValidators.js";
 export {
+  canonicalizeSha256Checksum,
   checksum_format_supported,
   checksum_required,
   duplicate_checksum_blocked,
+  hash_algorithm_required,
+  hash_algorithm_supported,
   idempotencyValidatorGroups,
   idempotency_key_format_supported,
   idempotency_key_required,

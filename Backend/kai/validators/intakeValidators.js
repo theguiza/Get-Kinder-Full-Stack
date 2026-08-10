@@ -5,19 +5,9 @@ import {
   idempotency_key_format_supported,
   idempotency_key_required,
 } from "./idempotencyValidators.js";
+import { KAI_SPRINT2_P0_REVIEW_QUEUE_TYPES } from "../config/kaiSprint2P0Contract.js";
 
-const VALID_REVIEW_QUEUE_TYPES = Object.freeze([
-  "intake_file_review",
-  "source_candidate_review",
-  "sensitivity_review",
-  "data_dictionary_review",
-  "evidence_review",
-  "claim_review",
-  "client_followup",
-  "conflict_resolution",
-  "generated_content_review",
-  "export_review",
-]);
+const VALID_REVIEW_QUEUE_TYPES = KAI_SPRINT2_P0_REVIEW_QUEUE_TYPES;
 
 export const SUPPORTED_FILE_POLICY_STATUSES = Object.freeze(["pending", "passed", "blocked", "failed", "skipped"]);
 export const SUPPORTED_STORAGE_PROVIDERS = Object.freeze(["gcs", "local_dev"]);

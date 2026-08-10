@@ -20,9 +20,12 @@ const AUDIT_COLUMNS_TO_LOOKUP = [
 const SAFE_AUDIT_METADATA_KEYS = new Set([
   "p0_pass",
   "operation",
+  "operation_type",
   "validator_key",
+  "validator_keys",
   "blocker_code",
   "blocker_codes",
+  "blocking_reason_code",
   "object_type",
   "target_object_type",
   "object_id",
@@ -35,6 +38,11 @@ const SAFE_AUDIT_METADATA_KEYS = new Set([
   "actor_user_id",
   "request_id",
   "route",
+  "from_state",
+  "to_state",
+  "prior_status",
+  "new_status",
+  "created_at",
   "http_status",
   "safe_message",
   "contains_raw_file_content",
@@ -103,7 +111,16 @@ function normalizeAuditMetadataValue(key, value) {
   if (["operation", "validator_key", "blocker_code", "object_type", "target_object_type", "actor_type", "created_by_service", "p0_pass"].includes(key)) {
     return normalizeIdentifier(value);
   }
-  if (key === "blocker_codes") return normalizeStringArray(value);
+  if (["operation_type", "blocking_reason_code", "from_state", "to_state", "prior_status", "new_status"].includes(key)) {
+    return normalizeIdentifier(value);
+  }
+  if (key === "blocker_codes" || key === "validator_keys") return normalizeStringArray(value);
+  if (key === "created_at") {
+    const normalized = normalizeSafeText(value, null, 64);
+    if (!normalized || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(normalized)) return null;
+    const parsed = new Date(normalized);
+    return Number.isNaN(parsed.getTime()) || parsed.toISOString() !== normalized ? null : normalized;
+  }
   if (key === "blocked" || key === "metadata_only") return value === true;
   if (key === "http_status") {
     const status = Number(value);
@@ -165,6 +182,32 @@ export function buildBlockedAttemptAuditEventRecord(metadata = {}, objectType) {
   };
 }
 
+export function buildSuccessfulMutationAuditEventRecord(metadata = {}, objectType) {
+  const sanitizedMetadata = sanitizeAuditMetadataForStorage({
+    ...metadata,
+    metadata_only: true,
+  });
+  const action = normalizeIdentifier(
+    sanitizedMetadata.operation_type || sanitizedMetadata.operation,
+    "successful_mutation",
+  );
+  const reasonCode = normalizeIdentifier(
+    sanitizedMetadata.blocking_reason_code || sanitizedMetadata.reason_code,
+    "state_transition_completed",
+  );
+
+  return {
+    organization_id: sanitizedMetadata.organization_id || null,
+    actor_user_id: sanitizedMetadata.actor_user_id || null,
+    actor_type: sanitizedMetadata.actor_type || "human",
+    action,
+    metadata: sanitizedMetadata,
+    object_type: objectType,
+    reason_code: reasonCode,
+    reason_text: "KAI state transition completed.",
+  };
+}
+
 function resolveAuditObjectType(metadata = {}, enumLabels = []) {
   const labels = new Set(enumLabels);
   if (metadata.target_object_type === "intake_batch" || metadata.target_object_type === "intake_file") {
@@ -219,6 +262,55 @@ export async function insertBlockedAttemptAuditEvent(metadata, db = pool) {
   }
 
   const record = buildBlockedAttemptAuditEventRecord(metadata, objectType);
+  const returningClause = available.has("audit_event_id") ? " RETURNING audit_event_id" : "";
+  const { rows } = await db.query(
+    `INSERT INTO kai.audit_events (
+       organization_id,
+       actor_user_id,
+       actor_type,
+       action,
+       metadata,
+       object_type,
+       reason_code,
+       reason_text
+     ) VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8)${returningClause}`,
+    [
+      record.organization_id,
+      record.actor_user_id,
+      record.actor_type,
+      record.action,
+      JSON.stringify(record.metadata),
+      record.object_type,
+      record.reason_code,
+      record.reason_text,
+    ],
+  );
+
+  return { ok: true, auditEventId: rows[0]?.audit_event_id || null };
+}
+
+export async function insertRequiredSuccessfulAuditEvent(metadata, db = pool) {
+  const columns = await getAuditEventColumnNames(db);
+  const available = new Set(columns);
+  for (const column of REQUIRED_AUDIT_INSERT_COLUMNS) {
+    if (!available.has(column)) {
+      return { ok: false, skipped: true, reason: "audit_insert_shape_unavailable" };
+    }
+  }
+
+  const enumLabels = await getAuditObjectTypeEnumLabels(db);
+  const objectType = resolveAuditObjectType(
+    {
+      object_type: metadata.object_type,
+      target_object_type: metadata.target_object_type || metadata.object_type,
+    },
+    enumLabels,
+  );
+  if (!objectType) {
+    return { ok: false, skipped: true, reason: "audit_object_type_enum_unavailable" };
+  }
+
+  const record = buildSuccessfulMutationAuditEventRecord(metadata, objectType);
   const returningClause = available.has("audit_event_id") ? " RETURNING audit_event_id" : "";
   const { rows } = await db.query(
     `INSERT INTO kai.audit_events (
