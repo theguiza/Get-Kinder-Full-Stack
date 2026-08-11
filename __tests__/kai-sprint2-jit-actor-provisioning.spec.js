@@ -173,6 +173,9 @@ test("resolveKaiActorContext auto-provisions an authenticated Get Kinder user wi
     async listOrganizationMembershipsForUser() {
       return [];
     },
+    async resolveEffectiveClientOrganizationMembershipsForLegacyUser() {
+      return [];
+    },
   };
 
   const result = await resolveKaiActorContext({ user: fakeGetKinderUser() }, dependencies);
@@ -194,6 +197,9 @@ test("resolveKaiActorContext resolution is idempotent and returns a deterministi
       return [];
     },
     async listOrganizationMembershipsForUser() {
+      return [];
+    },
+    async resolveEffectiveClientOrganizationMembershipsForLegacyUser() {
       return [];
     },
   };
@@ -225,6 +231,9 @@ test("resolveKaiActorContext leaves an already-mapped active kai.users identity 
     },
     async listOrganizationMembershipsForUser() {
       return [{ organization_id: "org-1", role_name: "gk_operator", membership_status: "active" }];
+    },
+    async resolveEffectiveClientOrganizationMembershipsForLegacyUser() {
+      return [];
     },
   };
 

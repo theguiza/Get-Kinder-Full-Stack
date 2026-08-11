@@ -120,6 +120,9 @@ test("missing kai.users mapping is auto-provisioned and then fails closed on mis
       async listOrganizationMembershipsForUser() {
         return [];
       },
+      async resolveEffectiveClientOrganizationMembershipsForLegacyUser() {
+        return [];
+      },
     },
   );
 

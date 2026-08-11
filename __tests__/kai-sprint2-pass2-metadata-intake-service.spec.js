@@ -132,6 +132,9 @@ test("list intake batches auto-provisions a missing KAI actor mapping then rejec
       async listOrganizationMembershipsForUser() {
         return [];
       },
+      async resolveEffectiveClientOrganizationMembershipsForLegacyUser() {
+        return [];
+      },
       async listIntakeBatchesForOrganization() {
         readModelCalled = true;
         return [];

@@ -1544,14 +1544,16 @@ Declared-checksum duplicate detection is preliminary and organization-scoped. It
 
 ## Authorization and operation matrix
 
-Every human operation requires a mapped actor and active membership in the target organization. P0 mutation additionally requires the named global role:
+Every human operation requires a mapped actor and active membership in the target organization. P0 mutation additionally requires the named global role, except for the two owner-authorized client-write operations noted below:
 
 ```text
-create_intake_batch: gk_admin or gk_operator
-create_intake_file: gk_admin or gk_operator
+create_intake_batch: gk_admin or gk_operator, OR an org-scoped client_admin membership for the same organization
+create_intake_file: gk_admin or gk_operator, OR an org-scoped client_admin membership for the same organization
 create_review_queue_item: gk_admin or gk_operator
 read_intake: gk_admin, gk_operator, gk_reviewer, client_admin, client_reviewer, or client_contributor, subject to route-specific policy
 ```
+
+The `client_admin` org-scoped write path is not a global role and is never obtained from Get Kinder authentication alone: it is derived, read-only and non-persisted, only when the actor's existing Get Kinder organization-admin (`public.user_org_memberships.role = 'admin'`) membership has an active, explicit `kai.gk_organization_bindings` row for that organization (see `Backend/kai/auth/gkOrganizationBindingAuthority.js`). It does not extend to `create_review_queue_item`, `mark_file_policy_blocked`, `update_review_queue_status`, or any other governance/finalization operation, which remain global-GK-role-only exactly as before.
 
 AI actors and generic `system` actors are denied mutation. The later security assessor uses a distinct internal-service contract:
 

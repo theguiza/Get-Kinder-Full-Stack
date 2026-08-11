@@ -168,6 +168,9 @@ function scenarioDependencies(scenario) {
       scenario.events.push("role_context_lookup");
       return ["gk_operator"];
     },
+    async resolveEffectiveClientOrganizationMembershipsForLegacyUser() {
+      return [];
+    },
     async listOrganizationMembershipsForUser() {
       scenario.events.push("membership_context_lookup");
       if (scenario.membershipState === "missing") return [];

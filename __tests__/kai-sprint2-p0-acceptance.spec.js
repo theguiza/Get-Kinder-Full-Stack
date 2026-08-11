@@ -448,6 +448,9 @@ function createDependencies({ metadataRepository, lifecycleRepository, storageAd
         },
       ];
     },
+    resolveEffectiveClientOrganizationMembershipsForLegacyUser() {
+      return [];
+    },
     uploadLifecycleRepository: lifecycleRepository,
     storageAdapter,
     getEngagementTenantState: metadataRepository.getEngagementTenantState,
