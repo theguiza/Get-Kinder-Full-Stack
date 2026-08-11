@@ -4,10 +4,10 @@ import { createPostgresUploadLifecycleRepository } from "../upload/postgresUploa
 
 let runtimeDependencies = null;
 
-export function createKaiIntakeRuntimeDependencies(env = process.env) {
+export function createKaiIntakeRuntimeDependencies(env = process.env, options = {}) {
   return Object.freeze({
     env,
-    gcsProvider: createConfiguredGoogleCloudStorageProvider(env),
+    gcsProvider: createConfiguredGoogleCloudStorageProvider(env, options),
     uploadLifecycleRepository: createPostgresUploadLifecycleRepository(),
   });
 }
