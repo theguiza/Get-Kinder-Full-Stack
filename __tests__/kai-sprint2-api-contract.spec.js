@@ -36,18 +36,20 @@ test("api contract exposes Sprint 2 status and admin metadata route shape", () =
   assert.match(routeSource, /mode:\s*["']admin_metadata_only["']/);
   assert.match(routeSource, /contract:\s*`kai_sprint2_p0_repository_contract_v\$\{KAI_SPRINT2_P0_CONTRACT_VERSION\}`/);
   assert.match(routeSource, /metadata_write_enabled:\s*true/);
-  assert.match(routeSource, /file_upload_enabled:\s*false/);
-  assert.match(routeSource, /upload_confirmation_enabled:\s*false/);
-  assert.match(routeSource, /storage_provider_enabled:\s*false/);
-  assert.match(routeSource, /storage_upload_enabled:\s*false/);
-  assert.match(routeSource, /signed_upload_enabled:\s*false/);
+  assert.match(routeSource, /areKaiSprint2UploadFeaturesEnabled\(env\)/);
+  assert.match(routeSource, /isKaiGateC1GcsProviderEnabled\(env\)/);
+  assert.match(routeSource, /file_upload_enabled:\s*uploadFeaturesEnabled/);
+  assert.match(routeSource, /upload_confirmation_enabled:\s*uploadFeaturesEnabled/);
+  assert.match(routeSource, /storage_provider_enabled:\s*storageProviderEnabled/);
+  assert.match(routeSource, /storage_upload_enabled:\s*uploadFeaturesEnabled/);
+  assert.match(routeSource, /signed_upload_enabled:\s*uploadFeaturesEnabled\s*&&\s*storageProviderEnabled/);
   assert.match(routeSource, /signed_read_enabled:\s*false/);
   assert.match(routeSource, /parser_worker_enabled:\s*false/);
   assert.match(routeSource, /source_promotion_enabled:\s*false/);
 });
 
 test("sprint2IntakeApi fails closed while disabled and does not expose req.user", () => {
-  assert.match(routeSource, /import\s+\{\s*requireKaiSprint2Enabled\s*\}\s+from\s+["']\.\.\/config\/kaiSprint2Config\.js["']/);
+  assert.match(routeSource, /requireKaiSprint2Enabled[\s\S]+from\s+["']\.\.\/config\/kaiSprint2Config\.js["']/);
   assert.match(routeSource, /router\.use\(requireKaiSprint2Enabled\)/);
   assert.doesNotMatch(routeSource, /\breq\.user\b/);
   assert.doesNotMatch(routeSource, /\buser:\s*req\b|\bsession:\s*req\b|\bheaders:\s*req\b/);

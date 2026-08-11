@@ -1,6 +1,10 @@
 import express from "express";
 import { KAI_ERROR_STATUS, sendKaiError } from "../errors/kaiErrors.js";
-import { requireKaiSprint2Enabled } from "../config/kaiSprint2Config.js";
+import {
+  areKaiSprint2UploadFeaturesEnabled,
+  requireKaiSprint2Enabled,
+} from "../config/kaiSprint2Config.js";
+import { isKaiGateC1GcsProviderEnabled } from "../config/kaiSprint2GcsConfig.js";
 import {
   KAI_SPRINT2_P0_CONTRACT_VERSION,
   KAI_SPRINT2_P0_PATTERNS,
@@ -46,7 +50,7 @@ export function sendServiceResult(res, result, successStatus = 200) {
     : "system_error";
   const includeExpectedDetails = code !== "system_error";
   return sendKaiError(res, code, {
-    data: null,
+    data: sanitizeServiceData(result?.data),
     blockers: includeExpectedDetails ? sanitizeServiceBlockers(result?.blockers) : [],
     warnings: includeExpectedDetails ? sanitizeServiceWarnings(result?.warnings) : [],
   });
@@ -82,6 +86,26 @@ function sanitizeServiceBlockers(blockers) {
       evidence: {},
     }];
   });
+}
+
+function sanitizeServiceData(data) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return null;
+  const sanitized = {};
+  if (typeof data.operation === "string") sanitized.operation = data.operation.slice(0, 64);
+  if (data.provider === "gcs" || data.provider === "disabled") sanitized.provider = data.provider;
+  if (typeof data.contract === "string" && /^[-_a-zA-Z0-9.]{1,128}$/.test(data.contract)) {
+    sanitized.contract = data.contract;
+  }
+  for (const key of [
+    "storage_provider_enabled",
+    "raw_upload_enabled",
+    "signed_upload_enabled",
+    "signed_read_enabled",
+    "upload_confirmation_enabled",
+  ]) {
+    if (typeof data[key] === "boolean") sanitized[key] = data[key];
+  }
+  return Object.keys(sanitized).length > 0 ? sanitized : null;
 }
 
 function safeAuthenticatedUser(req = {}) {
@@ -355,31 +379,37 @@ function sprint2MappedActorContext(req = {}) {
 router.use(requireKaiSprint2Enabled);
 router.use(setKaiSprint2NoStore);
 
+function statusData(env = process.env) {
+  const uploadFeaturesEnabled = areKaiSprint2UploadFeaturesEnabled(env);
+  const storageProviderEnabled = isKaiGateC1GcsProviderEnabled(env);
+  return {
+    feature_enabled: true,
+    route: "/api/kai/sprint2/intake",
+    mode: "admin_metadata_only",
+    contract: `kai_sprint2_p0_repository_contract_v${KAI_SPRINT2_P0_CONTRACT_VERSION}`,
+    metadata_write_enabled: true,
+    file_upload_enabled: uploadFeaturesEnabled,
+    upload_confirmation_enabled: uploadFeaturesEnabled,
+    storage_provider_enabled: storageProviderEnabled,
+    storage_upload_enabled: uploadFeaturesEnabled,
+    signed_upload_enabled: uploadFeaturesEnabled && storageProviderEnabled,
+    signed_read_enabled: false,
+    parser_worker_enabled: false,
+    profiling_enabled: false,
+    data_dictionary_generation_enabled: false,
+    source_promotion_enabled: false,
+    evidence_creation_enabled: false,
+    claim_creation_enabled: false,
+    generation_enabled: false,
+    export_enabled: false,
+    client_review_enabled: false,
+  };
+}
+
 export function sendStatus(req, res) {
   return res.json({
     ok: true,
-    data: {
-      feature_enabled: true,
-      route: "/api/kai/sprint2/intake",
-      mode: "admin_metadata_only",
-      contract: `kai_sprint2_p0_repository_contract_v${KAI_SPRINT2_P0_CONTRACT_VERSION}`,
-      metadata_write_enabled: true,
-      file_upload_enabled: false,
-      upload_confirmation_enabled: false,
-      storage_provider_enabled: false,
-      storage_upload_enabled: false,
-      signed_upload_enabled: false,
-      signed_read_enabled: false,
-      parser_worker_enabled: false,
-      profiling_enabled: false,
-      data_dictionary_generation_enabled: false,
-      source_promotion_enabled: false,
-      evidence_creation_enabled: false,
-      claim_creation_enabled: false,
-      generation_enabled: false,
-      export_enabled: false,
-      client_review_enabled: false,
-    },
+    data: statusData(req?.kaiSprint2StatusEnv || process.env),
     warnings: [],
   });
 }
