@@ -15030,6 +15030,26 @@ NOT_CONFIRMED:
 - production availability of the already-proven Gate B upload-signing runtime configuration remains NOT_CONFIRMED.
 - `P0_LIVE_UPLOAD_READY` remains NOT_CONFIRMED.
 
+Gate C configuration-contract closure for accepted Gate B runtime config (2026-08-11)
+
+TOOL_VERIFIED:
+
+- starting_commit: `ae3ac7e`.
+- accepted_absent_production_config: owner confirmed production does not contain `KAI_GATE_C1_GCS_PROVIDER_ENABLED` or `KAI_GATE_C1_GCS_BUCKET_NAME`; this was accepted without re-inspection.
+- root_cause_after_ae3ac7e: `ae3ac7e` reused the Gate B bucket variable and injected the shared impersonated upload-signing client, but provider enablement still depended on `KAI_GATE_C1_GCS_PROVIDER_ENABLED`; with that accepted-absent variable, a mounted production runtime would still construct a disabled provider and return `storage_provider_not_configured`.
+- fix: `Backend/kai/config/kaiSprint2GcsConfig.js#isKaiGateC1GcsProviderEnabled` now enables the mounted provider when the current Gate B upload-signing contract is complete (`KAI_GATE_B1_GCS_BUCKET_NAME` is a safe bucket name and `KAI_GATE_B1_GCS_UPLOAD_SIGNER_TARGET_PRINCIPAL` is present), while preserving the legacy C1 explicit-enable path and fail-closed behavior for missing/malformed Gate B configuration.
+- mounted_runtime_path: `Backend/kai/services/kaiIntakeRuntimeService.js#createKaiIntakeRuntimeDependencies` constructs `gcsProvider` with `createConfiguredGoogleCloudStorageProvider(env, options)`, which reads `KAI_GATE_C1_GCS_BUCKET_NAME || KAI_GATE_B1_GCS_BUCKET_NAME`, requires `KAI_GATE_B1_GCS_UPLOAD_SIGNER_TARGET_PRINCIPAL`, enables on either `KAI_GATE_C1_GCS_PROVIDER_ENABLED` or the complete Gate B contract, and injects the shared `createImpersonatedStorageClientFactory`.
+- tests_added_or_updated: `__tests__/kai-sprint2-gate-c1-gcs-provider-boundary.spec.js` now proves Gate B bucket plus upload-signing principal enables the provider with both C1 variables absent and missing principal remains fail-closed. `__tests__/kai-sprint2-gate-c2-runtime-composition.spec.js` now proves mounted `requestUploadUrl` reaches the shared upload signer with both C1 variables absent, and errors do not leak bucket, signer, or storage object details.
+- focused_tests: `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-gate-b1-gcs-verifier.spec.js __tests__/kai-sprint2-gate-c1-gcs-provider-boundary.spec.js __tests__/kai-sprint2-gate-c2-runtime-composition.spec.js __tests__/kai-sprint2-gate-c2a-signed-upload-confirmation.spec.js __tests__/kai-sprint2-intake-queries.spec.js` passed (46 pass, 0 fail).
+- broader_tests: `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-*.spec.js` passed outside the sandbox for local listener binding (1832 pass, 0 fail, 28 skipped).
+- full_tests: `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test` passed outside the sandbox for local listener binding (1937 pass, 0 fail, 28 skipped).
+- git_diff_check: `git diff --check` passed.
+
+NOT_CONFIRMED:
+
+- production deployment of this configuration-contract closure is NOT_CONFIRMED.
+- production canary after deployment is NOT_CONFIRMED.
+
 Bounded KAI identity integration correction — JIT actor provisioning (2026-08-11)
 
 USER_CONFIRMED:

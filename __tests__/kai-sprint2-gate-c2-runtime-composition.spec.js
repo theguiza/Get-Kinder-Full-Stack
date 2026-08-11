@@ -33,7 +33,6 @@ const ids = {
 const env = { KAI_SPRINT2_ENABLED: "true", KAI_FILE_UPLOAD_ENABLED: "true" };
 const configuredUploadEnv = {
   ...env,
-  KAI_GATE_C1_GCS_PROVIDER_ENABLED: "true",
   KAI_GATE_B1_GCS_BUCKET_NAME: "gate-b1-runtime-synthetic-bucket",
   KAI_GATE_B1_GCS_UPLOAD_SIGNER_TARGET_PRINCIPAL: "upload-signing@example.invalid",
 };
@@ -197,6 +196,8 @@ test("Gate C-2 runtime dependency factory is dormant and fail-closed when unconf
 });
 
 test("Gate C-2 mounted runtime requestUploadUrl uses the configured Gate B upload-signing provider", async () => {
+  assert.equal(configuredUploadEnv.KAI_GATE_C1_GCS_PROVIDER_ENABLED, undefined);
+  assert.equal(configuredUploadEnv.KAI_GATE_C1_GCS_BUCKET_NAME, undefined);
   const { factoryCalls, signingClient, restore } = await seededConfiguredRuntime();
   try {
     const signed = await requestUploadUrl(input());

@@ -109,19 +109,23 @@ test("Gate C-1 provider-selection seam stays dormant even with valid config unle
 test("Gate C-1 runtime config reuses Gate B bucket and requires the Gate B upload-signing principal", () => {
   const env = {
     KAI_GATE_B1_GCS_BUCKET_NAME: "valid-gate-b-bucket",
-    KAI_GATE_C1_GCS_PROVIDER_ENABLED: "true",
   };
   const config = readKaiGateC1GcsConfig(env);
   assert.equal(config.ok, true);
   assert.equal(config.bucketName, "valid-gate-b-bucket");
+  assert.equal(isKaiGateC1GcsProviderEnabled(env), false);
 
   const missingPrincipal = createConfiguredGoogleCloudStorageProvider(env);
   assert.equal(missingPrincipal.enabled, false);
 
-  const enabled = createConfiguredGoogleCloudStorageProvider({
+  const gateBOnlyEnv = {
     ...env,
     KAI_GATE_B1_GCS_UPLOAD_SIGNER_TARGET_PRINCIPAL: "upload-signing@example.invalid",
-  });
+  };
+  assert.equal(gateBOnlyEnv.KAI_GATE_C1_GCS_PROVIDER_ENABLED, undefined);
+  assert.equal(gateBOnlyEnv.KAI_GATE_C1_GCS_BUCKET_NAME, undefined);
+  assert.equal(isKaiGateC1GcsProviderEnabled(gateBOnlyEnv), true);
+  const enabled = createConfiguredGoogleCloudStorageProvider(gateBOnlyEnv);
   assert.equal(enabled.enabled, true);
 });
 

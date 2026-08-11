@@ -22,6 +22,15 @@ function isEnabledValue(value) {
   return normalized === "true" || normalized === "1" || normalized === "yes" || normalized === "on";
 }
 
+function hasCompleteGateBGcsUploadSigningConfig(env = process.env) {
+  const bucketName = env.KAI_GATE_B1_GCS_BUCKET_NAME;
+  return (
+    typeof bucketName === "string"
+    && SAFE_BUCKET_NAME_PATTERN.test(bucketName)
+    && isUsableGcsTargetPrincipal(env.KAI_GATE_B1_GCS_UPLOAD_SIGNER_TARGET_PRINCIPAL)
+  );
+}
+
 // Missing or malformed configuration fails closed: returns { ok: false }
 // rather than throwing, so a misconfigured environment never crashes
 // request handling - it simply leaves the provider disabled.
@@ -39,11 +48,11 @@ export function readKaiGateC1GcsConfig(env = process.env) {
   };
 }
 
-// KAI_GATE_C1_GCS_PROVIDER_ENABLED is a second, independent gate on top of
-// configuration validity - this package sets no default that turns it on,
-// and nothing in this repository's startup composition reads this factory.
+// A complete Gate B upload-signing contract is enough to enable the mounted
+// Gate C provider; the C1 flag remains supported for the older C1-only config
+// path, but production does not need a second enablement variable.
 export function isKaiGateC1GcsProviderEnabled(env = process.env) {
-  return isEnabledValue(env.KAI_GATE_C1_GCS_PROVIDER_ENABLED);
+  return isEnabledValue(env.KAI_GATE_C1_GCS_PROVIDER_ENABLED) || hasCompleteGateBGcsUploadSigningConfig(env);
 }
 
 export function createConfiguredGoogleCloudStorageProvider(env = process.env, {
