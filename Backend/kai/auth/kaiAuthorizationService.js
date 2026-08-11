@@ -17,6 +17,17 @@ const P0_MUTATING_OPERATIONS = new Set([
 
 const P0_GLOBAL_WRITE_ROLES = new Set(KAI_SPRINT2_P0_OPERATION_ROLES.create_intake_batch);
 
+// Owner-authorized minimum DDL-backed exception: an org-scoped client_admin
+// (derived only from an active kai.gk_organization_bindings row - see
+// gkOrganizationBindingAuthority.js) may perform ordinary intake for its own
+// bound organization without holding a global gk_admin/gk_operator role.
+// This is intentionally narrower than P0_MUTATING_OPERATIONS: it does not
+// extend to review-queue administration, file-policy administration, or any
+// other governance operation, which still require a global GK write role
+// exactly as before.
+const P0_CLIENT_WRITE_OPERATIONS = new Set(["create_intake_batch", "create_intake_file"]);
+const P0_CLIENT_WRITE_ROLES = new Set(["client_admin"]);
+
 function activeMembershipsForOrg(actorContext, organizationId) {
   return (actorContext?.organizationMemberships || []).filter(
     (membership) =>
@@ -93,7 +104,10 @@ export function validateActorCanPerformOperation(actorContext, operation, organi
   if (P0_MUTATING_OPERATIONS.has(operation)) {
     const globalRoles = new Set(actorContext.kaiRoles || []);
     const hasGlobalWriteRole = [...P0_GLOBAL_WRITE_ROLES].some((role) => globalRoles.has(role));
-    if (!hasGlobalWriteRole) {
+    const hasClientWriteRole =
+      P0_CLIENT_WRITE_OPERATIONS.has(operation) &&
+      memberships.some((membership) => P0_CLIENT_WRITE_ROLES.has(membership.role_name));
+    if (!hasGlobalWriteRole && !hasClientWriteRole) {
       return {
         ok: false,
         error_code: "authorization_denied",
@@ -104,10 +118,15 @@ export function validateActorCanPerformOperation(actorContext, operation, organi
             object_type: "operation",
             object_code: operation,
             object_id: organizationId,
-            message: "P0 write operation requires global GK write role.",
+            message: "P0 write operation requires a global GK write role or an org-scoped client write role.",
             blocking_reason: "missing_global_gk_write_role",
-            required_fix: "Assign gk_admin or gk_operator in kai.user_roles before allowing P0 writes.",
-            evidence: { required_global_roles: [...P0_GLOBAL_WRITE_ROLES], bypass_allowed: false },
+            required_fix:
+              "Assign gk_admin or gk_operator in kai.user_roles, or bind this organization to a KAI tenant so its admin-role members hold client_admin.",
+            evidence: {
+              required_global_roles: [...P0_GLOBAL_WRITE_ROLES],
+              client_write_operations: [...P0_CLIENT_WRITE_OPERATIONS],
+              bypass_allowed: false,
+            },
           },
         ],
       };

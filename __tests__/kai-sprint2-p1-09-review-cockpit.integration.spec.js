@@ -363,7 +363,7 @@ function cockpitDependencies({ promotionEnabled }) {
     now: () => Date.parse("2026-08-05T12:00:00.000Z"),
     sourcePromotionRepository: createSyntheticSourcePromotionRepository(),
     metadataOnlyAudit: { prepareMetadataOnlyAudit: () => ({ ok: true, publish: async () => {} }) },
-    async findKaiUserByLegacyPublicUserdataId(legacyId) {
+    async findOrCreateKaiUserByLegacyPublicUserdataId({ legacyPublicUserdataId: legacyId }) {
       assert.equal(legacyId, LEGACY_USER_ID);
       return {
         user_id: ACTOR_USER_ID,
@@ -374,6 +374,9 @@ function cockpitDependencies({ promotionEnabled }) {
     },
     async listKaiRolesForUser() {
       return ["gk_operator"];
+    },
+    async resolveEffectiveClientOrganizationMembershipsForLegacyUser() {
+      return [];
     },
     async listOrganizationMembershipsForUser() {
       return [{ organization_id: ORG, membership_status: "active", role_name: "gk_operator" }];

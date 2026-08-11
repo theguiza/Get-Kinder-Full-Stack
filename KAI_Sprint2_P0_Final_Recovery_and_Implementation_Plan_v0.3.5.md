@@ -14954,3 +14954,231 @@ NEXT_BOUNDARY: Gate C synthetic staging E2E
 NOT_CONFIRMED:
   - `P0_NONPRODUCTION_STORAGE_VERIFIED` remains NOT_CONFIRMED.
   - `P0_LIVE_UPLOAD_READY` remains NOT_CONFIRMED.
+Owner execution-environment decision — production synthetic canary path (2026-08-09)
+
+USER_CONFIRMED:
+
+- Gate C-2 remains accepted and closed at reported commit `4752f45805127d42f973c6661d9d293deb89e713`.
+- There is no separate Get Kinder staging website or staging PostgreSQL database. Do not create, search for, infer, or require one unless the owner later reopens that infrastructure decision.
+- The existing production Render application and existing production PostgreSQL environment are the execution surface for the next synthetic-only KAI integration proof.
+- Production use does not create or complete the historical Gate C staging proof.
+- Real client data remains blocked.
+- `P0_LIVE_UPLOAD_READY` remains `NOT_CONFIRMED`.
+
+current_execution_boundary:
+
+- The next supported step is one bounded production-canary delta synthesis using the evidence and production access already established in the existing Codex execution context.
+- The sole outcome is the exact minimum production delta, if any, required before one synthetic-only KAI canary can run.
+- Do not re-investigate owner-established infrastructure, access, completed gates, repository implementation, PostgreSQL setup, GCS setup, staging, or any fact already established by current-session evidence.
+- For every fact already `TOOL_VERIFIED` in the current Codex session, use the exact verified value/result. Do not substitute `preserved`, `previously verified`, placeholders, or `NOT_CONFIRMED` when the value already exists in the session evidence.
+- Do not create standalone audit or discovery workstreams for Render/control-plane configuration, PostgreSQL server version, generic `kai.*` schema compatibility, synthetic-tenant/admin surfaces, monitoring, logging, metrics, alerting, operator review, rollback, or any other subsystem merely because it could be inspected.
+- Failure or prohibition of one inspection method does not invalidate an already-established capability or access path and does not create a blocker by itself. Use the correct existing execution surface or method and continue.
+- If one genuinely necessary fact remains absent after synthesizing existing evidence, inspect only that fact, and only when it is necessary to decide one concrete pre-canary delta item.
+- No durable blocker is currently confirmed.
+
+authorization_boundary:
+
+- No production mutation or synthetic canary execution is authorized by this decision.
+- Do not reset, revert, checkout over, stash, clean, overwrite, or discard existing repository work.
+- Any production deployment, database/schema mutation, feature/configuration change, tenant/environment mutation, credential/secret handling, destructive action, or synthetic canary execution requires separate explicit owner authorization for the exact action.
+
+stop_rule:
+
+- Return the exact minimum production delta and the exact owner authorization required, then stop.
+- If one genuinely necessary fact prevents an exact delta, return only that fact and the narrow inspection required to resolve it; do not start another subsystem audit or access/setup exercise.
+- Do not begin another KAI package automatically.
+
+Historical Gate C staging language above remains historical plan authority. This owner decision supersedes that historical execution-surface assumption for current execution only; it does not rewrite or complete the historical staging proof.
+
+Production upload-url 503 repository hotfix evidence (2026-08-10)
+
+TOOL_VERIFIED:
+
+- observed_failure_basis: owner supplied production `POST /api/kai/sprint2/intake/admin/batches/:intakeBatchId/files/upload-url` response with `503 storage_provider_not_configured`.
+- root_cause: mounted `requestUploadUrl` authorizes via `getIntakeFileMetadata`, then requires trusted row fields `storage_provider`, `storage_object_key`, and `mime_type`; the runtime read model `Backend/kai/db/kaiReadModels.js#getIntakeFileMetadata` selected `mime_type` but omitted `storage_provider` and `storage_object_key`, causing the mounted service to fail closed before signed-upload issuance even for ordinary GCS reservations.
+- fix: `Backend/kai/db/kaiReadModels.js#getIntakeFileMetadata` now selects `storage_provider`, `storage_bucket`, `storage_object_key`, `checksum`, and `hash_algorithm` alongside the existing safe metadata fields for internal service composition.
+- regression_test: `__tests__/kai-sprint2-intake-queries.spec.js` now asserts the read-model SQL includes the private storage and checksum facts required by upload service composition without performing a database call.
+- focused_tests: `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-intake-queries.spec.js __tests__/kai-sprint2-gate-c2-runtime-composition.spec.js __tests__/kai-sprint2-gate-c2a-signed-upload-confirmation.spec.js` passed (23 pass, 0 fail).
+- broader_tests: `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-intake-service.spec.js __tests__/kai-sprint2-foundation-safety.spec.js __tests__/kai-sprint2-api-contract.spec.js __tests__/kai-sprint2-intake-queries.spec.js` passed after escalation for local 127.0.0.1 listener binding (121 pass, 0 fail). The first sandboxed run failed only on two `listen EPERM: operation not permitted 127.0.0.1` route-listener tests.
+- git_diff_check: `git diff --check` passed.
+- prohibited_actions_not_performed: no production access, deployment, database mutation, cloud mutation, feature/configuration change, credential/secret inspection, push, destructive action, or synthetic canary execution.
+
+NOT_CONFIRMED:
+
+- production deployment of this hotfix is NOT_CONFIRMED.
+- production `KAI_GATE_C1_GCS_PROVIDER_ENABLED` / `KAI_GATE_C1_GCS_BUCKET_NAME` configuration remains NOT_CONFIRMED.
+- `P0_LIVE_UPLOAD_READY` remains NOT_CONFIRMED.
+
+Bounded KAI identity integration correction — JIT actor provisioning (2026-08-11)
+
+USER_CONFIRMED:
+
+- Owner decision: existing Get Kinder authentication is authoritative for user identity; manual provisioning of users into `kai.users` is removed; KAI introduces no second login/registration system; organization authorization remains mandatory and fail-closed; identity creation and organization authorization are kept as separate concerns.
+
+TOOL_VERIFIED:
+
+- production_canary_failure_basis: owner-reported production canary against `GET /api/kai/sprint2/intake/admin/access-check` returned `403 mapped_kai_user_required` before any batch creation, file reservation, signed upload, or object creation, i.e. the failure is in actor identity resolution, not in the Gate C-2/C-2A upload path.
+- root_cause: `Backend/kai/auth/kaiActorContext.js#resolveKaiActorContext` (the actor-resolution choke point for every Sprint 2 admin/mutating operation, including `checkAdminAccess` behind `/admin/access-check`) required a pre-existing active `kai.users` row keyed on `legacy_public_userdata_id`, found via `findKaiUserByLegacyPublicUserdataId` (`Backend/kai/db/kaiQueries.js`), and returned `mapped_kai_user_required` whenever no such row existed. No in-repo code path ever provisioned that row — the only way to obtain one was an out-of-band manual DB write, matching the owner's "manual provisioning" framing. A second, parallel actor-resolution implementation (`Backend/kai/auth/actorContext.js#hydrateSprint2ActorContextFromRequest`) exists with the same limitation but is re-exported only through `Backend/kai/index.js` and is not called by any mounted route or service (`kaiIntakeService.js`, `kaiReviewQueueService.js`, `kaiReviewCockpitService.js` all import `resolveKaiActorContext` from `kaiActorContext.js`); it was left unchanged as out of scope (dead code on the live request path).
+- fix: `Backend/kai/db/kaiQueries.js` replaces the find-only `findKaiUserByLegacyPublicUserdataId` with `findOrCreateKaiUserByLegacyPublicUserdataId`, which selects an existing `kai.users` row of any status (never resurrecting a non-active/deprovisioned row's status) and, only when genuinely absent, provisions one with `status = 'active'` inside a transaction serialized by `pg_advisory_xact_lock` keyed on the legacy `public.userdata` id, so concurrent first-requests from the same Get Kinder user cannot create duplicate principals. `Backend/kai/auth/kaiActorContext.js#resolveKaiActorContext` now calls this find-or-create function instead of the find-only lookup; all downstream behavior (active-mapping check, role/membership hydration, `mapped_kai_user_required` for an explicitly non-active row, `validateActorCanPerformOperation` fail-closed organization/role authorization) is unchanged. A freshly provisioned identity receives zero `kai.user_roles`/`kai.organization_memberships` rows — identity creation grants no role or organization access by itself; authorization is decided afterward, unchanged, by `Backend/kai/auth/kaiAuthorizationService.js#validateActorCanPerformOperation`, which remains fail-closed (`authorization_denied` for missing organization membership) exactly as for any other actor.
+- existing_organization_authority_review: inspected the main (non-KAI) product's persisted user↔organization relationship, `public.user_org_memberships` (`scripts/migrations/add_user_org_memberships.sql`, `user_id`/`org_id`/`role`/`is_active`), populated via the DB-backed, admin-gated `public.org_applications` approval workflow in `routes/orgApplyApi.js` — this is a real, queryable, non-ad-hoc workflow, not an unbacked manual process. It was deliberately **not** reused to auto-populate `kai.organization_memberships`: no evidence in this repository (no FK, no join, no shared migration) confirms that `kai.organization_memberships.organization_id` and `public.organizations.id` occupy the same ID space or domain — `kai.users`/`kai.roles`/`kai.user_roles`/`kai.organization_memberships` are not defined by any migration in this repository and are treated as externally managed. Synchronizing across an unconfirmed ID-space mapping risked crossing tenant boundaries, which the owner's fail-closed organization-authorization requirement forbids absent that confirmation. The existing KAI organization-membership boundary (`kai.organization_memberships`, `kai.user_roles`) is left completely intact for this package, per the owner's instruction to leave the boundary intact when no suitable persisted cross-domain relationship is confirmed, and no self-service organization onboarding/request/invitation workflow was added.
+- tests_added_or_updated: new `__tests__/kai-sprint2-jit-actor-provisioning.spec.js` (11 tests) proves: JIT provisioning of a missing `kai.users` row; idempotent repeated resolution; concurrency safety against duplicate principals (simulated Postgres advisory-lock serialization with a fake pool.connect()-based client and artificial insert latency); no resurrection of an explicitly non-active existing row; deterministic actor identity across repeated requests; unauthenticated requests remain `unauthorized`; a JIT-provisioned actor with no organization memberships is denied any organization access; an actor mapped to one organization is denied a different organization's KAI resources. Updated existing dependency-injection stubs (rename `findKaiUserByLegacyPublicUserdataId` → `findOrCreateKaiUserByLegacyPublicUserdataId`, same active-row shape) in `__tests__/kai-sprint2-{batch-detail-route,batch-files-route,file-detail-route,file-policy-block-route,p1-09-review-cockpit.integration,review-queue-route,review-queue-status-route}.spec.js` to match the new dependency contract; these all continued to assert the same already-mapped-active-user happy paths unchanged. Updated `__tests__/kai-sprint2-pass2-admin-authz.spec.js` and `__tests__/kai-sprint2-pass2-metadata-intake-service.spec.js`'s "missing mapping" tests, and `__tests__/kai-sprint2-p0-acceptance.spec.js`'s parametrized "invalid mapping" case, to assert the corrected behavior directly: a request with no pre-existing `kai.users` mapping is now auto-provisioned and fails only on the still-enforced, unrelated fail-closed organization-membership check (`authorization_denied`), never on `mapped_kai_user_required`; a case renamed to "deactivated mapping" (an explicitly non-active existing row) continues to assert `mapped_kai_user_required`.
+- focused_tests: `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-jit-actor-provisioning.spec.js __tests__/kai-sprint2-actor-context.spec.js __tests__/kai-sprint2-pass2-admin-authz.spec.js __tests__/kai-sprint2-pass2-metadata-intake-service.spec.js __tests__/kai-sprint2-p0-acceptance.spec.js __tests__/kai-sprint2-batch-files-route.spec.js __tests__/kai-sprint2-review-queue-status-route.spec.js __tests__/kai-sprint2-file-detail-route.spec.js __tests__/kai-sprint2-review-queue-route.spec.js __tests__/kai-sprint2-batch-detail-route.spec.js __tests__/kai-sprint2-file-policy-block-route.spec.js __tests__/kai-sprint2-p1-09-review-cockpit.integration.spec.js` passed (253 pass, 0 fail).
+- broader_tests: `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-*.spec.js` passed (1789 pass, 0 fail, 27 pre-existing skipped runner-owned-database integration tests, unrelated to this change). `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test` (full `__tests__/*.spec.js` suite) passed (1894 pass, 0 fail, 27 skipped).
+- git_diff_check: `git diff --check` passed.
+- prohibited_actions_not_performed: no production access, deployment, database mutation, cloud mutation, feature/configuration change, credential/secret inspection, push, destructive action, manual user/membership creation, or synthetic canary execution.
+
+NOT_CONFIRMED:
+
+- Whether production `kai.users` already has a unique constraint compatible with idempotent provisioning was not inspected (no production DB access is authorized). The shipped fix does not require or assume one — it serializes first-provisioning attempts with `pg_advisory_xact_lock` rather than relying on `ON CONFLICT` — so this is not a blocker for retrying the Gate C canary, but it remains an open confirmation item for anyone later hardening the schema with an explicit uniqueness constraint.
+- Whether `kai.organization_memberships.organization_id` shares an ID space with `public.organizations.id` was not confirmed and was deliberately not assumed; an authenticated user with no existing `kai.organization_memberships` row still cannot access any organization's KAI resources under this fix, matching the pre-existing (unchanged) organization-authorization boundary.
+- production deployment of this correction is NOT_CONFIRMED.
+- `P0_LIVE_UPLOAD_READY` remains NOT_CONFIRMED.
+
+Organization-authorization bridge re-investigation — no safe implementation this package (2026-08-11)
+
+USER_CONFIRMED:
+
+- Owner requested a second pass specifically to determine whether the existing Get Kinder organization authority (`public.user_org_memberships` / `public.organizations` / `public.org_applications`) could safely become the KAI organization-authorization source, so that a JIT-provisioned `kai.users` principal is not stranded with zero organization access.
+- Owner's own instruction was conditional: "If repository evidence proves the organization ID relationship, implement the smallest coherent authorization bridge now" — implying no bridge should be implemented if the relationship is not proven.
+
+TOOL_VERIFIED:
+
+- `public.user_org_memberships` full schema (`scripts/migrations/add_user_org_memberships.sql`): `id SERIAL PK`, `user_id INTEGER NOT NULL REFERENCES userdata(id)`, `org_id INTEGER NOT NULL REFERENCES organizations(id)`, `role VARCHAR(64) NOT NULL DEFAULT 'admin'`, `is_active BOOLEAN NOT NULL DEFAULT true`, `added_by_user_id INTEGER REFERENCES userdata(id)`, `created_at TIMESTAMPTZ`, `UNIQUE(user_id, org_id)`. The existing product's own authorization query, `services/orgScopeService.js#loadMembershipsForUser`, gates solely on `COALESCE(m.is_active, true) = true`; `organizations.status` (`'pending'`/`'approved'`, no enforced CHECK constraint) is joined only as informational metadata and is not itself an access gate.
+- `public.organizations.id` is `SERIAL` (integer) (`scripts/migrations/add_org_tables.sql`).
+- KAI's `organization_id` is UUID-typed everywhere it appears: `Backend/kai/config/kaiSprint2P0Contract.js` defines a UUID regex pattern used to validate it (`Backend/kai/services/kaiIntakeService.js` `UUID_RE.test(organizationId)`); `migrations/kai_sprint2_gate_a_p0_upload_lifecycle.sql` declares `organization_id uuid NOT NULL` on `kai.upload_lifecycle_audit`; `scripts/kai-sprint2-pass2-admin-metadata-intake-verifier.sql` casts `::uuid`; every KAI test/fixture and planning-doc example (e.g. `KAI_MVP_Sprint2_P0_Pass2_Production_Synthetic_Metadata_Write_Execution_Prompt_v0.1.3.md`) uses UUID literals paired with an "NCWS"-style engagement/batch code, not a Get Kinder charity-organization name.
+- A `SERIAL` integer (`public.organizations.id`) cannot equal a UUID (`kai.organization_id`) — the two identifier spaces are structurally incompatible as direct values, not merely "unconfirmed as compatible."
+- Exhaustively re-searched this repository (this session, fresh grep pass) for any bridge: no `kai.organizations` table exists anywhere (`grep -rn "kai\.organizations\b"` across all `.js`/`.sql`/`.md` returned zero matches); no `legacy_organization_id`/`gk_organization_id`/`legacy_org_id`/`gk_org_id`-style column (the pattern `kai.users` itself uses for its own legacy-identity bridge, `legacy_public_userdata_id`) exists anywhere for organizations; no migration, seed script, config file, or KAI contract doc (`Backend/kai/contracts/*.md`, `Backend/kai/config/kaiSprint2P0Contract.js`) derives, seeds, or documents a KAI `organization_id` from `public.organizations.id`. `kai.organization_memberships`, `kai.engagements`, `kai.users`, `kai.roles`, and `kai.user_roles` have no `CREATE TABLE` anywhere in this repository and are treated throughout as externally managed.
+- KAI also requires a distinct role vocabulary (`gk_admin`, `gk_operator`, `gk_reviewer`, `client_admin`, `client_reviewer`, `client_contributor`, `Backend/kai/config/kaiSprint2P0Contract.js`) enforced both as an org-scoped `role_name` and, for mutating operations, a separate global role (`Backend/kai/auth/kaiAuthorizationService.js`). Get Kinder's `user_org_memberships.role` is a free-text column populated only with the literal `'admin'` in current code (`routes/orgApplyApi.js`) and has no defined mapping onto KAI's role vocabulary; `organizations.rep_role`/`org_applications.rep_role` is arbitrary applicant-submitted free text, not a role enum. No translation table or logic exists to bridge these vocabularies either.
+
+DECISION (this package):
+
+- No organization-authorization bridge was implemented. Repository evidence does not prove the required relationship — it affirmatively disproves a direct identifier equivalence (integer vs. UUID) and shows no indirection layer exists to translate between them, and no role-vocabulary translation exists either. Implementing a bridge under these conditions would require inventing a mapping the repository does not contain, which risks granting KAI organization access to users based on an unconfirmed and possibly incorrect correspondence — a direct violation of the owner's fail-closed requirement ("authentication alone must never grant access to arbitrary organizations"). Per the owner's own stated condition, no bridge is implemented this package.
+- The KAI organization-membership boundary (`kai.organization_memberships`, `kai.user_roles`) is left exactly as it was after the JIT-identity package (commit `d35a8c7`): unchanged, fail-closed, requiring an explicit `kai.organization_memberships`/`kai.user_roles` row per actor per organization, provisioned by whatever externally-managed process already populates that (still externally managed) schema.
+- No tests were added asserting "an authenticated Get Kinder user with organization-A membership can reach KAI organization A," because that capability does not exist in this codebase and asserting it would misrepresent the system. Writing a test that fabricates the mapping (e.g., a test-only stub asserting `org_id === organization_id` by coincidence of the test's own construction) would not constitute evidence of a real bridge and was not done.
+- `Backend/kai/db/kaiQueries.js`/`Backend/kai/auth/kaiActorContext.js` JIT-identity behavior from commit `d35a8c7` is unchanged and remains correct on its own terms (identity resolution no longer requires manual mapping); this package changes nothing there.
+
+kai.users deployed-schema verification — repository evidence is insufficient; one minimal read-only query is required:
+
+- This repository contains no `CREATE TABLE` for `kai.users` anywhere (confirmed by exhaustive grep across `scripts/migrations/*.sql`, `migrations/*.sql`, and all markdown/contract docs). The only columns ever referenced by any code path are `user_id, legacy_identity_source, legacy_public_userdata_id, status, email` (`Backend/kai/db/kaiQueries.js`). Repository evidence cannot rule out an additional NOT-NULL column without a default on the real deployed table, which would make the JIT `INSERT INTO kai.users (legacy_identity_source, legacy_public_userdata_id, email, status) VALUES (...)` fail in production even though it passes all in-repo tests (which exercise a fake/mocked `kai.users`, not the deployed schema).
+- Per instruction, no further repository-only guessing was attempted and no database audit was broadened. The single minimal read-only query needed to close this gap (for the owner or an operator with pgAdmin access to run against the actual deployed database — not run by Codex):
+
+```sql
+SELECT 'column' AS kind, column_name AS name, data_type AS detail,
+       is_nullable AS nullable, column_default AS default_value, NULL AS constraint_def
+FROM information_schema.columns
+WHERE table_schema = 'kai' AND table_name = 'users'
+UNION ALL
+SELECT 'constraint', con.conname, pg_get_constraintdef(con.oid), NULL, NULL, con.contype::text
+FROM pg_constraint con
+JOIN pg_class rel ON rel.oid = con.conrelid
+JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+WHERE nsp.nspname = 'kai' AND rel.relname = 'users'
+ORDER BY kind, name;
+```
+
+This is read-only (`SELECT` only against `information_schema`/`pg_catalog`), touches no data, and returns exactly the column/default/nullability/constraint facts needed to confirm the JIT insert contract is safe to deploy. It was not run by Codex (no production database access is authorized in this session).
+
+REMAINING BLOCKER FOR GATE C RETRY (explicit, not resolved this package):
+
+- A JIT-provisioned `kai.users` principal still has zero `kai.organization_memberships`/`kai.user_roles` rows and therefore no authorized organization path. The Gate C canary (or any real authenticated Get Kinder user without a pre-existing, externally-provisioned KAI organization-membership row) will still be correctly and fail-closed blocked by `authorization_denied` after identity resolution succeeds — this is intended fail-closed behavior, not a bug, but it does mean **the canary cannot succeed end-to-end for a brand-new actor without a decision from the owner** on one of: (a) confirm/provide an explicit, authoritative mapping between Get Kinder organizations and KAI organization identities (none currently exists in any system this repository can see) so a real bridge can be built; (b) accept that KAI organization membership continues to be provisioned by whatever existing externally-managed process already populates `kai.organization_memberships` today, and use that process (not a new one built by this package) to grant the canary's specific test actor access to the specific test organization before retrying; or (c) redefine, for Sprint 2 P0's actual production usage, what a KAI "organization" is meant to be relative to Get Kinder's organization model, since the current evidence suggests they may be intentionally distinct concepts (KAI engagement clients vs. Get Kinder charity organizations) rather than the same entity under two names.
+- Do not state Gate C is ready to retry while this blocker stands: identity resolution alone (fixed in `d35a8c7`) is necessary but not sufficient for the canary's authorized route to succeed for a brand-new actor.
+- `P0_LIVE_UPLOAD_READY` remains NOT_CONFIRMED.
+
+Get Kinder organization <-> KAI tenant binding and client_admin intake authorization (2026-08-11)
+
+USER_CONFIRMED:
+
+- Owner explicitly authorized this bounded package: create an explicit, durable Get Kinder organization <-> KAI tenant binding, derive effective KAI tenant membership from it read-only, and make the minimum DDL-backed authorization change so an org-scoped `client_admin` can perform ordinary Gate C intake for its own bound organization, without ever granting KAI organization access from authentication alone and without manually seeding `kai.organization_memberships` as the normal client path.
+
+TOOL_VERIFIED - binding model:
+
+- New migration `migrations/kai_sprint2_gk_organization_tenant_binding.sql` (+ `.rollback.sql`), following this repository's established `kai_sprint2_*` migration convention (BEGIN/COMMIT, `CREATE SCHEMA IF NOT EXISTS kai`, a `DO $$ ... RAISE EXCEPTION` precondition guard, named CHECK constraints, `CREATE TABLE IF NOT EXISTS`). Adds exactly one new table, `kai.gk_organization_bindings`: `gk_organization_binding_id uuid PK`, `gk_organization_id integer NOT NULL REFERENCES public.organizations (id)`, `kai_organization_id uuid NOT NULL`, `status text NOT NULL DEFAULT 'active' CHECK (status IN ('active','inactive'))`, `created_at`/`updated_at timestamptz` (auto-touched by a trigger). Cardinality is schema-enforced, not just application-checked: two partial unique indexes, `ux_gk_organization_bindings_active_gk_org ON (gk_organization_id) WHERE status = 'active'` and `ux_gk_organization_bindings_active_kai_org ON (kai_organization_id) WHERE status = 'active'`, together enforce the MVP's one-active-Get-Kinder-org <-> one-active-KAI-tenant cardinality at the database level. No name/email/other-attribute equality is fabricated anywhere in the migration or its consuming code (asserted by `__tests__/kai-sprint2-gk-organization-binding-schema-contract.spec.js`). Migration was NOT executed against any database (no DB access authorized); it is new repository text only.
+- Binding-creation capability: `Backend/kai/db/kaiOrganizationBindingQueries.js#upsertGkOrganizationBinding({ gkOrganizationId, kaiOrganizationId, status })` - explicit (never auto-invoked by any request path), idempotent (same pair replays as a no-op), uniqueness-safe (checks the existing row for the Get Kinder org first, then relies on the database's partial unique index and catches Postgres `23505` for the KAI-tenant-side race, translating both to `{ ok:false, error_code:"conflicting_binding" }` rather than throwing a raw constraint violation), and supports explicit deactivate/reactivate of the same pair. No route, controller, or client-facing endpoint calls it - it exists only as a repository-layer capability for a human operator/script to invoke, per the owner's "do not mount a new client-facing onboarding UI" instruction. `listActiveGkOrganizationBindingsForGkOrganizationIds` is the sole read path used by authorization.
+
+TOOL_VERIFIED - organization-authority path reused:
+
+- `Backend/kai/auth/gkOrganizationBindingAuthority.js#resolveEffectiveClientOrganizationMembershipsForLegacyUser` reuses `services/orgScopeService.js#resolveOrgScopeForUserId(legacyPublicUserdataId)` UNCHANGED and as-is - not `resolveOrgScope(req)` - specifically because `resolveOrgScopeForUserId` takes a raw legacy user id and never reads `req.session`/admin-preview keys, so no admin-preview/session-impersonation path can reach KAI authorization. Its `memberships` array (already filtered to `COALESCE(is_active, true) = true` by the existing, unmodified `loadMembershipsForUser` SQL) is the sole Get-Kinder-side authority; `organizations.status` (`'pending'`/`'approved'`) is deliberately NOT treated as an additional gate, matching the existing product's own behavior (verified: `loadMembershipsForUser`'s WHERE clause never references `o.status`).
+- `Backend/kai/auth/kaiActorContext.js#resolveKaiActorContext` now merges two independent membership sources into `actorContext.organizationMemberships`: (1) unchanged internal `kai.organization_memberships` rows via `listOrganizationMembershipsForUser` (authoritative for existing internal/legacy KAI actors, e.g. `gk_operator`/`gk_reviewer` engagement staff), and (2) the new read-only, non-persisted, per-request-derived client memberships from the binding. Nothing is ever written to `kai.organization_memberships` by this package.
+
+TOOL_VERIFIED - role derivation:
+
+- `Backend/kai/auth/gkOrganizationBindingAuthority.js#deriveEffectiveClientOrganizationMemberships` translates exactly one existing Get Kinder role value, `public.user_org_memberships.role === 'admin'` (the only role value current code ever writes, confirmed in `routes/orgApplyApi.js`), into exactly one KAI role, `client_admin`, and only when that specific Get Kinder organization also has an active `kai.gk_organization_bindings` row. No other Get Kinder role value is translated. This produces a membership shaped exactly like an internal `kai.organization_memberships` row (`organization_id`, `role_name`, `membership_status: "active"`) plus a `source: "gk_organization_binding"` marker for traceability, so `Backend/kai/auth/kaiAuthorizationService.js` needs no new membership shape to consume it.
+
+TOOL_VERIFIED - exact client_admin operations enabled:
+
+- Traced every mounted call site of `validateActorCanPerformOperation` in `Backend/kai/services/kaiIntakeService.js`: `checkAdminAccess` and `createIntakeBatch` use `"create_intake_batch"`; `reserveIntakeFileMetadata` and the shared `authorizeUploadReservedIntakeFile` helper (used by all three of `uploadReservedIntakeFile`, `requestUploadUrl`, and `confirmUpload`) use `"create_intake_file"`; four read functions (`listIntakeBatchesForOrganization`, `getIntakeBatchDetail`, `getIntakeFileDetail`, `listIntakeFilesForBatch`) use `"read_intake"`, which already included `client_admin` in `KAI_SPRINT2_P0_OPERATION_ROLES.read_intake` before this package - no change was needed there. `markIntakeFilePolicyBlocked` uses `"mark_file_policy_blocked"`; review-queue services use `"create_review_queue_item"`/`"update_review_queue_status"`.
+- `Backend/kai/auth/kaiAuthorizationService.js`: added `P0_CLIENT_WRITE_OPERATIONS = {"create_intake_batch", "create_intake_file"}` and `P0_CLIENT_WRITE_ROLES = {"client_admin"}`; a mutating-operation actor now passes the P0 global-role gate if it holds `gk_admin`/`gk_operator` (unchanged) OR, only for those two operations, an active org-scoped `client_admin` membership for the target organization. `mark_file_policy_blocked`, `create_review_queue_item`, and `update_review_queue_status` are unchanged and still require a global GK write role - `client_admin` is denied all three (proven in tests below).
+- Minimum corresponding contract correction (owner-authorized, since the prior text directly contradicted this change): `Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md`'s "Authorization and operation matrix" section updated only for the `create_intake_batch`/`create_intake_file` lines and one added clarifying paragraph; no other section touched.
+
+TOOL_VERIFIED - cross-org/internal-operation denial evidence (see test list below for exact assertions):
+
+- A `client_admin` derived from a binding to KAI org A is denied `read_intake`/write operations against KAI org B (membership lookup is by exact `organization_id` string match; no fallback).
+- An arbitrary, never-bound KAI organization UUID supplied by a caller is denied - the effective membership's `organization_id` is always server-derived from the binding table, never client input, so a request can only ever match an organization the actor is actually bound to.
+- `client_admin` is denied `mark_file_policy_blocked`, `create_review_queue_item`, and `update_review_queue_status` even within its own bound organization (`missing_global_gk_write_role`).
+- Existing internal `gk_operator`/`gk_admin` actors are unaffected and still pass every mutating operation, including the governance ones `client_admin` cannot reach.
+
+tests_added_or_updated:
+
+- New `__tests__/kai-sprint2-gk-organization-binding.spec.js` (17 tests): `upsertGkOrganizationBinding` create/idempotent/conflict-on-either-side/invalid-input/deactivate-reactivate against a fake Postgres-shaped pool; `listActiveGkOrganizationBindingsForGkOrganizationIds` active-only filtering; the pure `deriveEffectiveClientOrganizationMemberships` translation and its fail-closed branches; `resolveEffectiveClientOrganizationMembershipsForLegacyUser` orchestration proving it reuses the injected `resolveOrgScopeForUserId`/binding-read functions and fails closed with no GK access, inactive GK membership, no binding, and an inactive binding.
+- New `__tests__/kai-sprint2-client-org-authorization.spec.js` (13 tests) proving, end to end through `resolveKaiActorContext` + `validateActorCanPerformOperation` (and, for two tests, the actual mounted `checkAdminAccess`/`createIntakeBatch`/`reserveIntakeFileMetadata` service functions): JIT identity with no pre-existing `kai.users` row resolves; GK org-admin + active binding yields the corresponding `client_admin` KAI membership; `admin` derives `client_admin` and nothing else; `client_admin` passes `create_intake_batch`/`create_intake_file` for its own org and is denied governance operations; org A membership cannot reach org B; an arbitrary supplied KAI UUID is denied; missing/inactive Get Kinder org access and missing/inactive binding all yield zero organization access (fail closed, not an error); unauthenticated requests remain `unauthorized`; an explicitly deactivated `kai.users` mapping still fails closed with `mapped_kai_user_required` even with a valid Get Kinder binding present (identity check runs and fails before organization derivation is ever reached); existing internal `gk_operator` remains compatible with every mutating operation.
+- New `__tests__/kai-sprint2-gk-organization-binding-schema-contract.spec.js` (7 tests, static-text assertions against the migration/rollback/repository source, following this repository's established `*-schema-contract.spec.js` pattern since no live database is available in this environment): table/column/CHECK shape; both partial unique indexes present (schema-enforced cardinality); no fabricated name/email equality; precondition guard and transaction wrapper present; rollback drops exactly what forward creates; no KAI route file (`Backend/kai/routes/*.js`) contains direct SQL or a reference to `gk_organization_bindings`.
+- Updated pre-existing `__tests__/kai-sprint2-authorization.spec.js`: split the old "authorization blocks client roles for P0 write operations" test (which asserted `client_admin` was blocked, directly contradicting this owner-authorized change) into "authorization blocks non-admin client roles" (`client_contributor`/`client_reviewer`, unchanged, still blocked) and two new tests proving `client_admin` passes the two client-write operations but is denied governance operations and is denied in an organization it is not bound to.
+- Updated 10 pre-existing test files whose `resolveKaiActorContext` dependency-injection stubs needed one new no-op stub (`resolveEffectiveClientOrganizationMembershipsForLegacyUser: async () => []`) to avoid a real-pool call in the sandbox, all of which continued to assert their original internal-KAI-actor behavior unchanged: `kai-sprint2-{batch-detail-route,batch-files-route,file-detail-route,file-policy-block-route,p1-09-review-cockpit.integration,review-queue-route,review-queue-status-route,jit-actor-provisioning,pass2-admin-authz,pass2-metadata-intake-service}.spec.js` and the shared `createDependencies` helper in `kai-sprint2-p0-acceptance.spec.js`.
+- focused_tests: `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-gk-organization-binding.spec.js __tests__/kai-sprint2-gk-organization-binding-schema-contract.spec.js __tests__/kai-sprint2-client-org-authorization.spec.js __tests__/kai-sprint2-authorization.spec.js` passed (45 pass, 0 fail).
+- broader_tests: `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-*.spec.js` passed (1828 pass, 0 fail, 27 pre-existing skipped runner-owned-database integration tests, unrelated to this change). `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test` (full `__tests__/*.spec.js` suite) passed (1933 pass, 0 fail, 27 skipped).
+- git_diff_check: `git diff --check` passed.
+- prohibited_actions_not_performed: no production access, deployment, database/schema mutation, cloud mutation, feature/configuration change, credential/secret inspection, push, destructive action, manual production user/role/membership creation, new self-service organization onboarding, or synthetic canary execution.
+
+kai.users deployed-schema production compatibility - still NOT_CONFIRMED, single read-only script provided (not run):
+
+Repository evidence still cannot prove the exact deployed `kai.users` insert contract (no `CREATE TABLE` for `kai.users` exists anywhere in this repository; see the prior package's evidence entry). Combined with this package's need to confirm the Get Kinder organization id to bind for the canary, ONE minimal read-only script is provided for an operator to run externally via pgAdmin (not run by Codex, no PII beyond an organization name/status which is not personal data):
+
+```sql
+-- Part 1: kai.users deployed column/default/constraint facts needed by the JIT insert.
+SELECT 'column' AS kind, column_name AS name, data_type AS detail,
+       is_nullable AS nullable, column_default AS default_value, NULL AS constraint_def
+FROM information_schema.columns
+WHERE table_schema = 'kai' AND table_name = 'users'
+UNION ALL
+SELECT 'constraint', con.conname, pg_get_constraintdef(con.oid), NULL, NULL, con.contype::text
+FROM pg_constraint con
+JOIN pg_class rel ON rel.oid = con.conrelid
+JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+WHERE nsp.nspname = 'kai' AND rel.relname = 'users'
+
+UNION ALL
+
+-- Part 2: the existing Get Kinder organization id needed to bind the current
+-- synthetic KAI organization for the canary. Returns only id/name/status -
+-- no user PII, no member list.
+SELECT 'organization', id::text, name, status, NULL, NULL
+FROM public.organizations
+WHERE id = <OWNER_SUPPLIES_THE_SYNTHETIC_CANARY_ORGANIZATION_ID>
+ORDER BY kind, name;
+```
+
+This was not run by Codex (no production database access is authorized in this session). The `<OWNER_SUPPLIES_THE_SYNTHETIC_CANARY_ORGANIZATION_ID>` placeholder must not be guessed or invented; the owner or an operator with knowledge of the canary's actual Get Kinder organization must fill it in.
+
+Parameterized binding operation required after migration deployment (not executed, not invented):
+
+Once the migration above is deployed to the target database and the owner has confirmed both the real Get Kinder `organizations.id` for the canary's organization and the real KAI tenant `organization_id` UUID already used by the canary's `kai.engagements`/`kai.intake_batches` rows, the controlled binding call is:
+
+```js
+import { upsertGkOrganizationBinding } from "Backend/kai/db/kaiOrganizationBindingQueries.js";
+
+await upsertGkOrganizationBinding({
+  gkOrganizationId: <OWNER_CONFIRMED_PUBLIC_ORGANIZATIONS_ID>,   // integer, from public.organizations.id
+  kaiOrganizationId: "<OWNER_CONFIRMED_KAI_ORGANIZATION_UUID>",  // uuid, the canary's existing KAI organization_id
+  status: "active",
+});
+```
+
+Neither value is invented or defaulted anywhere in this package; both must come from the owner/operator. This call is idempotent and uniqueness-safe (see tests) and is the only controlled path that may create this binding - it must not be run by Codex and was not run.
+
+REMAINING STEPS BEFORE PRODUCTION PROMOTION (explicit):
+
+1. Operator runs the read-only verification script above against the deployed database and confirms the `kai.users` insert contract is compatible with the JIT insert shipped in commit `d35a8c7`, and supplies the real synthetic-canary Get Kinder organization id.
+2. Owner/operator deploys `migrations/kai_sprint2_gk_organization_tenant_binding.sql` to the target database (not performed by Codex).
+3. Owner/operator runs the parameterized `upsertGkOrganizationBinding(...)` call above with confirmed real values (not performed by Codex) to bind the canary's Get Kinder organization to its existing KAI tenant UUID.
+4. Owner/operator confirms the canary's Get Kinder test user has an active `public.user_org_memberships` row with `role = 'admin'` for that organization (existing, unmodified Get Kinder workflow - this package does not create or modify any Get Kinder membership row).
+5. Only after 1-4 does the Gate C canary have a real, non-fabricated organization-authorization path to retry. `P0_LIVE_UPLOAD_READY` remains NOT_CONFIRMED until then.

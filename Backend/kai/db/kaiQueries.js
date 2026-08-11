@@ -1,16 +1,82 @@
 import pool from "./kaiDb.js";
 
-export async function findKaiUserByLegacyPublicUserdataId(legacyPublicUserdataId, db = pool) {
+const KAI_USER_PROVISIONING_LOCK_NAMESPACE = 913_224_001;
+
+const KAI_USER_SELECT_COLUMNS = "user_id, legacy_identity_source, legacy_public_userdata_id, status, email";
+
+async function selectKaiUserByLegacyPublicUserdataId(db, legacyPublicUserdataId) {
   const { rows } = await db.query(
-    `SELECT user_id, legacy_identity_source, legacy_public_userdata_id, status, email
+    `SELECT ${KAI_USER_SELECT_COLUMNS}
        FROM kai.users
       WHERE legacy_identity_source = 'public.userdata'
         AND legacy_public_userdata_id = $1
-        AND status = 'active'
       LIMIT 1`,
     [legacyPublicUserdataId],
   );
   return rows[0] || null;
+}
+
+/**
+ * Resolve the internal kai.users principal for an authenticated public.userdata
+ * identity, provisioning it on first use. Existing rows (any status) are
+ * returned as-is so an explicitly deactivated mapping still fails closed in
+ * the caller; only a genuinely absent mapping is created.
+ *
+ * Concurrency safety does not depend on a kai.users uniqueness constraint
+ * (kai.users is externally managed and its constraints are not confirmed from
+ * this repository): a Postgres advisory transaction lock keyed on the legacy
+ * user id serializes concurrent first-provisioning attempts for the same
+ * user, so two simultaneous callers cannot both observe "absent" and both
+ * insert.
+ */
+export async function findOrCreateKaiUserByLegacyPublicUserdataId(
+  { legacyPublicUserdataId, email = null } = {},
+  db = pool,
+) {
+  if (!Number.isInteger(legacyPublicUserdataId) || legacyPublicUserdataId <= 0) {
+    return null;
+  }
+
+  if (typeof db.connect !== "function") {
+    const existing = await selectKaiUserByLegacyPublicUserdataId(db, legacyPublicUserdataId);
+    if (existing) return existing;
+    const { rows } = await db.query(
+      `INSERT INTO kai.users (legacy_identity_source, legacy_public_userdata_id, email, status)
+       VALUES ('public.userdata', $1, $2, 'active')
+       RETURNING ${KAI_USER_SELECT_COLUMNS}`,
+      [legacyPublicUserdataId, email],
+    );
+    return rows[0] || null;
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock($1, $2)", [
+      KAI_USER_PROVISIONING_LOCK_NAMESPACE,
+      legacyPublicUserdataId,
+    ]);
+
+    const existing = await selectKaiUserByLegacyPublicUserdataId(client, legacyPublicUserdataId);
+    if (existing) {
+      await client.query("COMMIT");
+      return existing;
+    }
+
+    const { rows } = await client.query(
+      `INSERT INTO kai.users (legacy_identity_source, legacy_public_userdata_id, email, status)
+       VALUES ('public.userdata', $1, $2, 'active')
+       RETURNING ${KAI_USER_SELECT_COLUMNS}`,
+      [legacyPublicUserdataId, email],
+    );
+    await client.query("COMMIT");
+    return rows[0] || null;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function listKaiRolesForUser(userId, db = pool) {

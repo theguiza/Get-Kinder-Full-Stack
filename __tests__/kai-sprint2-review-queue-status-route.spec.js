@@ -575,7 +575,7 @@ function scenarioDependencies(scenario) {
   });
   return {
     ...serviceDependencies(harness),
-    async findKaiUserByLegacyPublicUserdataId(legacyId) {
+    async findOrCreateKaiUserByLegacyPublicUserdataId({ legacyPublicUserdataId: legacyId }) {
       scenario.events.push("actor_mapping");
       assert.equal(legacyId, 46);
       return {
@@ -588,6 +588,9 @@ function scenarioDependencies(scenario) {
     async listKaiRolesForUser() {
       scenario.events.push("role_context_lookup");
       return [scenario.globalRole || "gk_operator"];
+    },
+    async resolveEffectiveClientOrganizationMembershipsForLegacyUser() {
+      return [];
     },
     async listOrganizationMembershipsForUser() {
       scenario.events.push("membership_context_lookup");

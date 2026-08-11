@@ -34,8 +34,8 @@ test("authorization allows P0 write with global GK role plus active organization
   assert.equal(result.ok, true);
 });
 
-test("authorization blocks client roles for P0 write operations", () => {
-  for (const roleName of ["client_admin", "client_contributor"]) {
+test("authorization blocks non-admin client roles for P0 write operations", () => {
+  for (const roleName of ["client_contributor", "client_reviewer"]) {
     const result = validateActorCanPerformOperation(
       {
         actorType: "human",
@@ -53,6 +53,50 @@ test("authorization blocks client roles for P0 write operations", () => {
     assert.equal(result.error_code, "authorization_denied");
     assert.equal(result.blockers[0].blocking_reason, "missing_global_gk_write_role");
   }
+});
+
+// Owner-authorized minimum DDL-backed exception (Get Kinder org <-> KAI
+// tenant binding package): an org-scoped client_admin - derived only from an
+// active kai.gk_organization_bindings row, never from authentication alone -
+// may perform ordinary intake (create_intake_batch/create_intake_file) for
+// its own bound organization without a global gk_admin/gk_operator role.
+// This does not extend to governance operations.
+test("authorization allows client_admin for the two client-write intake operations, but not for governance operations", () => {
+  const clientAdmin = {
+    actorType: "human",
+    actorUserId: "user-1",
+    kaiRoles: [],
+    organizationMemberships: [{ organization_id: "org-1", role_name: "client_admin", membership_status: "active" }],
+  };
+
+  for (const operation of ["create_intake_batch", "create_intake_file"]) {
+    const result = validateActorCanPerformOperation(clientAdmin, operation, "org-1");
+    assert.equal(result.ok, true, `expected client_admin to pass ${operation}`);
+  }
+
+  for (const operation of ["mark_file_policy_blocked", "create_review_queue_item", "update_review_queue_status"]) {
+    const result = validateActorCanPerformOperation(clientAdmin, operation, "org-1");
+    assert.equal(result.ok, false, `expected client_admin to be denied ${operation}`);
+    assert.equal(result.error_code, "authorization_denied");
+    assert.equal(result.blockers[0].blocking_reason, "missing_global_gk_write_role");
+  }
+});
+
+test("authorization still blocks client_admin in an organization it is not actively bound/mapped to", () => {
+  const result = validateActorCanPerformOperation(
+    {
+      actorType: "human",
+      actorUserId: "user-1",
+      kaiRoles: [],
+      organizationMemberships: [{ organization_id: "org-1", role_name: "client_admin", membership_status: "active" }],
+    },
+    "create_intake_file",
+    "org-2",
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error_code, "authorization_denied");
+  assert.equal(result.blockers[0].blocking_reason, "missing_active_organization_membership");
 });
 
 test("authorization requires global GK write role even with active organization membership", () => {

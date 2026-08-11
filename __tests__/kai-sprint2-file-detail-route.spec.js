@@ -160,7 +160,7 @@ function tracedMembership(scenario, {
 function scenarioDependencies(scenario) {
   return {
     env: { KAI_SPRINT2_ENABLED: "true" },
-    async findKaiUserByLegacyPublicUserdataId(legacyId) {
+    async findOrCreateKaiUserByLegacyPublicUserdataId({ legacyPublicUserdataId: legacyId }) {
       scenario.events.push("actor_mapping");
       assert.equal(legacyId, 46);
       return {
@@ -173,6 +173,9 @@ function scenarioDependencies(scenario) {
     async listKaiRolesForUser() {
       scenario.events.push("role_context_lookup");
       return ["gk_operator"];
+    },
+    async resolveEffectiveClientOrganizationMembershipsForLegacyUser() {
+      return [];
     },
     async listOrganizationMembershipsForUser() {
       scenario.events.push("membership_context_lookup");
