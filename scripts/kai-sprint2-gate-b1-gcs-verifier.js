@@ -6,12 +6,11 @@ import { pathToFileURL } from "node:url";
 import { PassThrough } from "node:stream";
 import { spawnSync } from "node:child_process";
 
-import { Storage } from "@google-cloud/storage";
-import { GoogleAuth, Impersonated } from "google-auth-library";
 import { Client } from "pg";
 
 import { KAI_SPRINT2_MAX_FILE_SIZE_BYTES } from "../Backend/kai/config/kaiSprint2P0Contract.js";
 import { createGoogleCloudStorageProvider } from "../Backend/kai/storage/googleCloudStorageProvider.js";
+import { createImpersonatedStorageClient } from "../Backend/kai/storage/gcsImpersonatedStorageClientFactory.js";
 import { buildObjectKey } from "../Backend/kai/storage/storagePathPolicy.js";
 
 const SENTINEL_DATABASE_URL = "postgres://127.0.0.1:9/kai_sentinel";
@@ -416,34 +415,6 @@ function requiredEnv(name) {
   const value = process.env[name];
   if (typeof value !== "string" || value.length === 0) fail(`${name} is required for live Gate B-1 execution`);
   return value;
-}
-
-async function createImpersonatedStorageClient({ targetPrincipal }) {
-  const sourceClient = await new GoogleAuth({
-    scopes: ["https://www.googleapis.com/auth/cloud-platform"],
-  }).getClient();
-  const authClient = new Impersonated({
-    sourceClient,
-    targetPrincipal,
-    targetScopes: ["https://www.googleapis.com/auth/cloud-platform"],
-    lifetime: 900,
-  });
-  const storage = new Storage({ authClient });
-  storage.authClient.authorizeRequest = async (reqOpts) => {
-    const authHeaders = await authClient.getRequestHeaders();
-    const normalizedAuthHeaders =
-      typeof authHeaders?.entries === "function" ? Object.fromEntries(authHeaders.entries()) : authHeaders;
-    return {
-      ...reqOpts,
-      headers: {
-        ...(reqOpts.headers || {}),
-        ...normalizedAuthHeaders,
-      },
-    };
-  };
-  storage._kaiGcsSigner = authClient;
-  storage._kaiGcsSigningPrincipal = targetPrincipal;
-  return storage;
 }
 
 async function signedPut({ signedUpload, bytes }) {

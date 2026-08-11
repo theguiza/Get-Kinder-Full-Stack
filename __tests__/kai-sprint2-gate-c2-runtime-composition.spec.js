@@ -31,6 +31,12 @@ const ids = {
   intakeFileId: "9fe568b1-5c05-4c42-bb1f-6e20de216c7b",
 };
 const env = { KAI_SPRINT2_ENABLED: "true", KAI_FILE_UPLOAD_ENABLED: "true" };
+const configuredUploadEnv = {
+  ...env,
+  KAI_GATE_C1_GCS_PROVIDER_ENABLED: "true",
+  KAI_GATE_B1_GCS_BUCKET_NAME: "gate-b1-runtime-synthetic-bucket",
+  KAI_GATE_B1_GCS_UPLOAD_SIGNER_TARGET_PRINCIPAL: "upload-signing@example.invalid",
+};
 const now = "2026-08-09T10:00:00.000Z";
 const bytes = Buffer.from("gate c2 runtime bytes");
 const checksum = createHash("sha256").update(bytes).digest("hex");
@@ -91,6 +97,46 @@ function gcsProvider() {
   };
 }
 
+function signingStorageClient() {
+  const calls = {
+    sign: [],
+    bucket: [],
+    file: [],
+    getMetadata: [],
+    createReadStream: [],
+  };
+  return {
+    calls,
+    storage: {
+      _kaiGcsSigningPrincipal: "upload-signing@example.invalid",
+      _kaiGcsSigner: {
+        async sign(stringToSign) {
+          calls.sign.push(stringToSign);
+          return { signedBlob: createHash("sha256").update(stringToSign).digest("base64") };
+        },
+      },
+      bucket(bucketName) {
+        calls.bucket.push(bucketName);
+        return {
+          file(key, opts) {
+            calls.file.push({ key, opts });
+            return {
+              async getMetadata() {
+                calls.getMetadata.push({ key, opts });
+                return [{ generation: "1700000000000001", size: String(bytes.byteLength) }];
+              },
+              createReadStream() {
+                calls.createReadStream.push({ key, opts });
+                return Readable.from([bytes]);
+              },
+            };
+          },
+        };
+      },
+    },
+  };
+}
+
 async function seededRuntime() {
   const uploadLifecycleRepository = createInMemoryUploadLifecycleRepository();
   const created = await uploadLifecycleRepository.createReservedUploadLifecycle({
@@ -112,6 +158,34 @@ async function seededRuntime() {
   return { uploadLifecycleRepository, provider, restore };
 }
 
+async function seededConfiguredRuntime({ envOverride = configuredUploadEnv } = {}) {
+  const uploadLifecycleRepository = createInMemoryUploadLifecycleRepository();
+  const created = await uploadLifecycleRepository.createReservedUploadLifecycle({
+    organizationId: ids.organizationId,
+    intakeBatchId: ids.intakeBatchId,
+    intakeFileId: ids.intakeFileId,
+    now,
+  });
+  assert.equal(created.ok, true);
+
+  const signingClient = signingStorageClient();
+  const factoryCalls = [];
+  const deps = createKaiIntakeRuntimeDependencies(envOverride, {
+    createStorageClientFactory({ targetPrincipal }) {
+      factoryCalls.push({ targetPrincipal });
+      return () => signingClient.storage;
+    },
+  });
+  const restore = setKaiIntakeRuntimeDependenciesForTest({
+    ...deps,
+    uploadLifecycleRepository,
+    async getIntakeFileMetadata() {
+      return metadata();
+    },
+  });
+  return { factoryCalls, signingClient, restore };
+}
+
 test("Gate C-2 runtime dependency factory is dormant and fail-closed when unconfigured", () => {
   const deps = createKaiIntakeRuntimeDependencies({
     KAI_SPRINT2_ENABLED: "true",
@@ -120,6 +194,44 @@ test("Gate C-2 runtime dependency factory is dormant and fail-closed when unconf
 
   assert.equal(deps.gcsProvider.enabled, false);
   assert.equal(typeof deps.uploadLifecycleRepository.getUploadLifecycle, "function");
+});
+
+test("Gate C-2 mounted runtime requestUploadUrl uses the configured Gate B upload-signing provider", async () => {
+  const { factoryCalls, signingClient, restore } = await seededConfiguredRuntime();
+  try {
+    const signed = await requestUploadUrl(input());
+
+    assert.equal(signed.ok, true);
+    assert.equal(signed.data.upload_method, "PUT");
+    assert.equal(factoryCalls.length, 1);
+    assert.equal(factoryCalls[0].targetPrincipal, configuredUploadEnv.KAI_GATE_B1_GCS_UPLOAD_SIGNER_TARGET_PRINCIPAL);
+    assert.equal(signingClient.calls.sign.length, 1);
+    assert.equal(signingClient.calls.getMetadata.length, 0);
+    assert.equal(signingClient.calls.createReadStream.length, 0);
+    assert.match(signed.data.upload_url, /X-Goog-Algorithm=GOOG4-RSA-SHA256/);
+    assert.equal(signed.data.upload_headers["x-goog-if-generation-match"], "0");
+    assert.match(signed.data.upload_headers["x-goog-content-length-range"], /^0,\d+$/);
+  } finally {
+    restore();
+  }
+});
+
+test("Gate C-2 mounted runtime fails closed when upload-signing principal configuration is missing", async () => {
+  const { restore } = await seededConfiguredRuntime({
+    envOverride: {
+      ...configuredUploadEnv,
+      KAI_GATE_B1_GCS_UPLOAD_SIGNER_TARGET_PRINCIPAL: "",
+    },
+  });
+  try {
+    const result = await requestUploadUrl(input());
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "storage_provider_not_configured");
+    const serialized = JSON.stringify(result);
+    assert.doesNotMatch(serialized, /gate-b1-runtime-synthetic-bucket|upload-signing|storage_object_key|gate-c2-runtime/i);
+  } finally {
+    restore();
+  }
 });
 
 test("Gate C-2 mounted runtime facade supplies GCS provider and lifecycle repository to signed upload and confirmUpload", async () => {

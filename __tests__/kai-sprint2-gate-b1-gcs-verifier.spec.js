@@ -17,12 +17,14 @@ test("Gate B-1 verifier preserves separate signer and parser/read provider conte
 test("Gate B-1 verifier uses the existing provider injection seam without changing provider behavior", () => {
   const verifierSource = readFileSync("scripts/kai-sprint2-gate-b1-gcs-verifier.js", "utf8");
   const providerSource = readFileSync("Backend/kai/storage/googleCloudStorageProvider.js", "utf8");
+  const factorySource = readFileSync("Backend/kai/storage/gcsImpersonatedStorageClientFactory.js", "utf8");
 
   assert.match(verifierSource, /storageClientFactory:\s*\(\)\s*=>\s*uploadSigningClient/);
   assert.match(verifierSource, /storageClientFactory:\s*\(\)\s*=>\s*parserReadClient/);
-  assert.match(verifierSource, /new Storage\(\{\s*authClient\s*\}\)/);
-  assert.doesNotMatch(verifierSource, /new GoogleAuth\(\{\s*authClient\s*\}\)/);
-  assert.match(verifierSource, /new Impersonated\(/);
+  assert.match(verifierSource, /createImpersonatedStorageClient/);
+  assert.match(factorySource, /new Storage\(\{\s*authClient\s*\}\)/);
+  assert.doesNotMatch(factorySource, /new GoogleAuth\(\{\s*authClient\s*\}\)/);
+  assert.match(factorySource, /new Impersonated\(/);
   assert.match(providerSource, /storageClientFactory/);
   assert.doesNotMatch(providerSource, /KAI_GATE_B1|Impersonated|targetPrincipal/);
 });

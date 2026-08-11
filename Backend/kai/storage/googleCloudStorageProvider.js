@@ -104,20 +104,21 @@ export class GoogleCloudStorageProvider {
     this._client = null;
   }
 
-  _ensureClient() {
+  async _ensureClient() {
     if (!this._client) {
       // Application Default Credentials only: no keyFilename, no embedded
-      // key material. storageClientFactory exists solely so tests can inject
-      // a mocked SDK client without touching real credentials or network.
+      // key material. storageClientFactory lets tests and runtime composition
+      // inject an already-authorized SDK client without changing provider
+      // behavior.
       this._client = this._storageClientFactory
-        ? this._storageClientFactory()
+        ? await this._storageClientFactory()
         : new Storage(this._projectId ? { projectId: this._projectId } : {});
     }
     return this._client;
   }
 
-  _bucket() {
-    return this._ensureClient().bucket(this.bucketName);
+  async _bucket() {
+    return (await this._ensureClient()).bucket(this.bucketName);
   }
 
   _guardEnabledAndObjectKey(operation, objectKey) {
@@ -161,7 +162,7 @@ export class GoogleCloudStorageProvider {
 
     const sizeRangeHeader = `0,${this.maxUploadSizeBytes}`;
     try {
-      const storageClient = this._ensureClient();
+      const storageClient = await this._ensureClient();
       const { signer, principal } = extractSigningContext(storageClient);
       const now = new Date();
       const dateStamp = toAmzDate(now).slice(0, 8);
@@ -236,7 +237,7 @@ export class GoogleCloudStorageProvider {
     const guard = this._guardEnabledAndObjectKey("head_object", objectKey);
     if (guard) return guard;
     try {
-      const file = this._bucket().file(objectKey);
+      const file = (await this._bucket()).file(objectKey);
       const [metadata] = await file.getMetadata();
       const candidateGeneration = String(metadata?.generation ?? "");
       if (!isPrecisionSafeGcsGeneration(candidateGeneration)) {
@@ -268,7 +269,7 @@ export class GoogleCloudStorageProvider {
     const guard = this._guardExactGenerationCall("stat_exact_generation", objectKey, gcsGeneration);
     if (guard) return guard;
     try {
-      const file = this._bucket().file(objectKey, { generation: Number(gcsGeneration) });
+      const file = (await this._bucket()).file(objectKey, { generation: Number(gcsGeneration) });
       const [metadata] = await file.getMetadata();
       if (String(metadata.generation) !== gcsGeneration) {
         return sanitizedGcsFailure(
@@ -299,7 +300,7 @@ export class GoogleCloudStorageProvider {
     const guard = this._guardExactGenerationCall("open_exact_generation_read_stream", objectKey, gcsGeneration);
     if (guard) return guard;
     try {
-      const file = this._bucket().file(objectKey, { generation: Number(gcsGeneration) });
+      const file = (await this._bucket()).file(objectKey, { generation: Number(gcsGeneration) });
       const [metadata] = await file.getMetadata();
       if (String(metadata.generation) !== gcsGeneration) {
         return sanitizedGcsFailure(

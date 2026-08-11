@@ -1,5 +1,9 @@
 import { KAI_SPRINT2_MAX_FILE_SIZE_BYTES } from "./kaiSprint2P0Contract.js";
 import { createGoogleCloudStorageProvider } from "../storage/googleCloudStorageProvider.js";
+import {
+  createImpersonatedStorageClientFactory,
+  isUsableGcsTargetPrincipal,
+} from "../storage/gcsImpersonatedStorageClientFactory.js";
 
 // Gate C-1: smallest non-secret configuration-key definitions and a dormant
 // provider-selection/factory seam. Nothing in this file enables the GCS
@@ -22,13 +26,14 @@ function isEnabledValue(value) {
 // rather than throwing, so a misconfigured environment never crashes
 // request handling - it simply leaves the provider disabled.
 export function readKaiGateC1GcsConfig(env = process.env) {
-  const bucketName = env.KAI_GATE_C1_GCS_BUCKET_NAME;
+  const bucketName = env.KAI_GATE_C1_GCS_BUCKET_NAME || env.KAI_GATE_B1_GCS_BUCKET_NAME;
   if (typeof bucketName !== "string" || !SAFE_BUCKET_NAME_PATTERN.test(bucketName)) {
     return { ok: false, reason: "missing_or_malformed_bucket_name" };
   }
   return {
     ok: true,
     bucketName,
+    uploadSigningTargetPrincipal: env.KAI_GATE_B1_GCS_UPLOAD_SIGNER_TARGET_PRINCIPAL || null,
     signedUploadExpirySeconds: KAI_GATE_C1_GCS_DEFAULTS.signedUploadExpirySeconds,
     maxUploadSizeBytes: KAI_GATE_C1_GCS_DEFAULTS.maxUploadSizeBytes,
   };
@@ -41,13 +46,23 @@ export function isKaiGateC1GcsProviderEnabled(env = process.env) {
   return isEnabledValue(env.KAI_GATE_C1_GCS_PROVIDER_ENABLED);
 }
 
-export function createConfiguredGoogleCloudStorageProvider(env = process.env) {
+export function createConfiguredGoogleCloudStorageProvider(env = process.env, {
+  createStorageClientFactory = createImpersonatedStorageClientFactory,
+} = {}) {
   const config = readKaiGateC1GcsConfig(env);
   if (!config.ok) {
     return createGoogleCloudStorageProvider({ enabled: false });
   }
+  if (!isUsableGcsTargetPrincipal(config.uploadSigningTargetPrincipal)) {
+    return createGoogleCloudStorageProvider({ enabled: false });
+  }
   return createGoogleCloudStorageProvider({
-    ...config,
+    bucketName: config.bucketName,
+    signedUploadExpirySeconds: config.signedUploadExpirySeconds,
+    maxUploadSizeBytes: config.maxUploadSizeBytes,
     enabled: isKaiGateC1GcsProviderEnabled(env),
+    storageClientFactory: createStorageClientFactory({
+      targetPrincipal: config.uploadSigningTargetPrincipal,
+    }),
   });
 }
