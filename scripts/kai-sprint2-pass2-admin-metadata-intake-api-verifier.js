@@ -402,12 +402,20 @@ async function run() {
     access.response.ok && access.body?.data?.membership_active === true ? "PASS" : "FAIL",
     `HTTP ${access.response.status}`,
   );
+  // Capability-based, not role-based: a legitimate org-scoped client_admin
+  // (derived from an active Get Kinder org <-> KAI tenant binding) is
+  // intentionally never a global gk_admin/gk_operator role, so
+  // global_write_role_present/matched_write_role_family must not gate
+  // acceptance here. What matters is that the actor is actually authorized
+  // for the operations this canary is about to perform.
+  const requiredAuthorizedOperations = ["create_intake_batch", "reserve_intake_file_metadata"];
+  const authorizedOperations = Array.isArray(access.body?.data?.authorized_operations)
+    ? access.body.data.authorized_operations
+    : [];
   add(
-    "API_ACCESS_CHECK_CONFIRMS_GLOBAL_GK_WRITE_ROLE",
+    "API_ACCESS_CHECK_CONFIRMS_REQUIRED_AUTHORIZED_OPERATIONS",
     "/api/kai/sprint2/intake/admin/access-check",
-    access.response.ok &&
-      access.body?.data?.global_write_role_present === true &&
-      access.body?.data?.matched_write_role_family === "gk_admin_or_operator"
+    access.response.ok && requiredAuthorizedOperations.every((operation) => authorizedOperations.includes(operation))
       ? "PASS"
       : "FAIL",
     `HTTP ${access.response.status}`,
