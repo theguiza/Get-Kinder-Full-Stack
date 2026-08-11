@@ -14954,3 +14954,82 @@ NEXT_BOUNDARY: Gate C synthetic staging E2E
 NOT_CONFIRMED:
   - `P0_NONPRODUCTION_STORAGE_VERIFIED` remains NOT_CONFIRMED.
   - `P0_LIVE_UPLOAD_READY` remains NOT_CONFIRMED.
+Owner execution-environment decision — production synthetic canary path (2026-08-09)
+
+USER_CONFIRMED:
+
+- Gate C-2 remains accepted and closed at reported commit `4752f45805127d42f973c6661d9d293deb89e713`.
+- There is no separate Get Kinder staging website or staging PostgreSQL database. Do not create, search for, infer, or require one unless the owner later reopens that infrastructure decision.
+- The existing production Render application and existing production PostgreSQL environment are the execution surface for the next synthetic-only KAI integration proof.
+- Production use does not create or complete the historical Gate C staging proof.
+- Real client data remains blocked.
+- `P0_LIVE_UPLOAD_READY` remains `NOT_CONFIRMED`.
+
+current_execution_boundary:
+
+- The next supported step is one bounded production-canary delta synthesis using the evidence and production access already established in the existing Codex execution context.
+- The sole outcome is the exact minimum production delta, if any, required before one synthetic-only KAI canary can run.
+- Do not re-investigate owner-established infrastructure, access, completed gates, repository implementation, PostgreSQL setup, GCS setup, staging, or any fact already established by current-session evidence.
+- For every fact already `TOOL_VERIFIED` in the current Codex session, use the exact verified value/result. Do not substitute `preserved`, `previously verified`, placeholders, or `NOT_CONFIRMED` when the value already exists in the session evidence.
+- Do not create standalone audit or discovery workstreams for Render/control-plane configuration, PostgreSQL server version, generic `kai.*` schema compatibility, synthetic-tenant/admin surfaces, monitoring, logging, metrics, alerting, operator review, rollback, or any other subsystem merely because it could be inspected.
+- Failure or prohibition of one inspection method does not invalidate an already-established capability or access path and does not create a blocker by itself. Use the correct existing execution surface or method and continue.
+- If one genuinely necessary fact remains absent after synthesizing existing evidence, inspect only that fact, and only when it is necessary to decide one concrete pre-canary delta item.
+- No durable blocker is currently confirmed.
+
+authorization_boundary:
+
+- No production mutation or synthetic canary execution is authorized by this decision.
+- Do not reset, revert, checkout over, stash, clean, overwrite, or discard existing repository work.
+- Any production deployment, database/schema mutation, feature/configuration change, tenant/environment mutation, credential/secret handling, destructive action, or synthetic canary execution requires separate explicit owner authorization for the exact action.
+
+stop_rule:
+
+- Return the exact minimum production delta and the exact owner authorization required, then stop.
+- If one genuinely necessary fact prevents an exact delta, return only that fact and the narrow inspection required to resolve it; do not start another subsystem audit or access/setup exercise.
+- Do not begin another KAI package automatically.
+
+Historical Gate C staging language above remains historical plan authority. This owner decision supersedes that historical execution-surface assumption for current execution only; it does not rewrite or complete the historical staging proof.
+
+Production upload-url 503 repository hotfix evidence (2026-08-10)
+
+TOOL_VERIFIED:
+
+- observed_failure_basis: owner supplied production `POST /api/kai/sprint2/intake/admin/batches/:intakeBatchId/files/upload-url` response with `503 storage_provider_not_configured`.
+- root_cause: mounted `requestUploadUrl` authorizes via `getIntakeFileMetadata`, then requires trusted row fields `storage_provider`, `storage_object_key`, and `mime_type`; the runtime read model `Backend/kai/db/kaiReadModels.js#getIntakeFileMetadata` selected `mime_type` but omitted `storage_provider` and `storage_object_key`, causing the mounted service to fail closed before signed-upload issuance even for ordinary GCS reservations.
+- fix: `Backend/kai/db/kaiReadModels.js#getIntakeFileMetadata` now selects `storage_provider`, `storage_bucket`, `storage_object_key`, `checksum`, and `hash_algorithm` alongside the existing safe metadata fields for internal service composition.
+- regression_test: `__tests__/kai-sprint2-intake-queries.spec.js` now asserts the read-model SQL includes the private storage and checksum facts required by upload service composition without performing a database call.
+- focused_tests: `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-intake-queries.spec.js __tests__/kai-sprint2-gate-c2-runtime-composition.spec.js __tests__/kai-sprint2-gate-c2a-signed-upload-confirmation.spec.js` passed (23 pass, 0 fail).
+- broader_tests: `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-intake-service.spec.js __tests__/kai-sprint2-foundation-safety.spec.js __tests__/kai-sprint2-api-contract.spec.js __tests__/kai-sprint2-intake-queries.spec.js` passed after escalation for local 127.0.0.1 listener binding (121 pass, 0 fail). The first sandboxed run failed only on two `listen EPERM: operation not permitted 127.0.0.1` route-listener tests.
+- git_diff_check: `git diff --check` passed.
+- prohibited_actions_not_performed: no production access, deployment, database mutation, cloud mutation, feature/configuration change, credential/secret inspection, push, destructive action, or synthetic canary execution.
+
+NOT_CONFIRMED:
+
+- production deployment of this hotfix is NOT_CONFIRMED.
+- production `KAI_GATE_C1_GCS_PROVIDER_ENABLED` / `KAI_GATE_C1_GCS_BUCKET_NAME` configuration remains NOT_CONFIRMED.
+- `P0_LIVE_UPLOAD_READY` remains NOT_CONFIRMED.
+
+Bounded KAI identity integration correction — JIT actor provisioning (2026-08-11)
+
+USER_CONFIRMED:
+
+- Owner decision: existing Get Kinder authentication is authoritative for user identity; manual provisioning of users into `kai.users` is removed; KAI introduces no second login/registration system; organization authorization remains mandatory and fail-closed; identity creation and organization authorization are kept as separate concerns.
+
+TOOL_VERIFIED:
+
+- production_canary_failure_basis: owner-reported production canary against `GET /api/kai/sprint2/intake/admin/access-check` returned `403 mapped_kai_user_required` before any batch creation, file reservation, signed upload, or object creation, i.e. the failure is in actor identity resolution, not in the Gate C-2/C-2A upload path.
+- root_cause: `Backend/kai/auth/kaiActorContext.js#resolveKaiActorContext` (the actor-resolution choke point for every Sprint 2 admin/mutating operation, including `checkAdminAccess` behind `/admin/access-check`) required a pre-existing active `kai.users` row keyed on `legacy_public_userdata_id`, found via `findKaiUserByLegacyPublicUserdataId` (`Backend/kai/db/kaiQueries.js`), and returned `mapped_kai_user_required` whenever no such row existed. No in-repo code path ever provisioned that row — the only way to obtain one was an out-of-band manual DB write, matching the owner's "manual provisioning" framing. A second, parallel actor-resolution implementation (`Backend/kai/auth/actorContext.js#hydrateSprint2ActorContextFromRequest`) exists with the same limitation but is re-exported only through `Backend/kai/index.js` and is not called by any mounted route or service (`kaiIntakeService.js`, `kaiReviewQueueService.js`, `kaiReviewCockpitService.js` all import `resolveKaiActorContext` from `kaiActorContext.js`); it was left unchanged as out of scope (dead code on the live request path).
+- fix: `Backend/kai/db/kaiQueries.js` replaces the find-only `findKaiUserByLegacyPublicUserdataId` with `findOrCreateKaiUserByLegacyPublicUserdataId`, which selects an existing `kai.users` row of any status (never resurrecting a non-active/deprovisioned row's status) and, only when genuinely absent, provisions one with `status = 'active'` inside a transaction serialized by `pg_advisory_xact_lock` keyed on the legacy `public.userdata` id, so concurrent first-requests from the same Get Kinder user cannot create duplicate principals. `Backend/kai/auth/kaiActorContext.js#resolveKaiActorContext` now calls this find-or-create function instead of the find-only lookup; all downstream behavior (active-mapping check, role/membership hydration, `mapped_kai_user_required` for an explicitly non-active row, `validateActorCanPerformOperation` fail-closed organization/role authorization) is unchanged. A freshly provisioned identity receives zero `kai.user_roles`/`kai.organization_memberships` rows — identity creation grants no role or organization access by itself; authorization is decided afterward, unchanged, by `Backend/kai/auth/kaiAuthorizationService.js#validateActorCanPerformOperation`, which remains fail-closed (`authorization_denied` for missing organization membership) exactly as for any other actor.
+- existing_organization_authority_review: inspected the main (non-KAI) product's persisted user↔organization relationship, `public.user_org_memberships` (`scripts/migrations/add_user_org_memberships.sql`, `user_id`/`org_id`/`role`/`is_active`), populated via the DB-backed, admin-gated `public.org_applications` approval workflow in `routes/orgApplyApi.js` — this is a real, queryable, non-ad-hoc workflow, not an unbacked manual process. It was deliberately **not** reused to auto-populate `kai.organization_memberships`: no evidence in this repository (no FK, no join, no shared migration) confirms that `kai.organization_memberships.organization_id` and `public.organizations.id` occupy the same ID space or domain — `kai.users`/`kai.roles`/`kai.user_roles`/`kai.organization_memberships` are not defined by any migration in this repository and are treated as externally managed. Synchronizing across an unconfirmed ID-space mapping risked crossing tenant boundaries, which the owner's fail-closed organization-authorization requirement forbids absent that confirmation. The existing KAI organization-membership boundary (`kai.organization_memberships`, `kai.user_roles`) is left completely intact for this package, per the owner's instruction to leave the boundary intact when no suitable persisted cross-domain relationship is confirmed, and no self-service organization onboarding/request/invitation workflow was added.
+- tests_added_or_updated: new `__tests__/kai-sprint2-jit-actor-provisioning.spec.js` (11 tests) proves: JIT provisioning of a missing `kai.users` row; idempotent repeated resolution; concurrency safety against duplicate principals (simulated Postgres advisory-lock serialization with a fake pool.connect()-based client and artificial insert latency); no resurrection of an explicitly non-active existing row; deterministic actor identity across repeated requests; unauthenticated requests remain `unauthorized`; a JIT-provisioned actor with no organization memberships is denied any organization access; an actor mapped to one organization is denied a different organization's KAI resources. Updated existing dependency-injection stubs (rename `findKaiUserByLegacyPublicUserdataId` → `findOrCreateKaiUserByLegacyPublicUserdataId`, same active-row shape) in `__tests__/kai-sprint2-{batch-detail-route,batch-files-route,file-detail-route,file-policy-block-route,p1-09-review-cockpit.integration,review-queue-route,review-queue-status-route}.spec.js` to match the new dependency contract; these all continued to assert the same already-mapped-active-user happy paths unchanged. Updated `__tests__/kai-sprint2-pass2-admin-authz.spec.js` and `__tests__/kai-sprint2-pass2-metadata-intake-service.spec.js`'s "missing mapping" tests, and `__tests__/kai-sprint2-p0-acceptance.spec.js`'s parametrized "invalid mapping" case, to assert the corrected behavior directly: a request with no pre-existing `kai.users` mapping is now auto-provisioned and fails only on the still-enforced, unrelated fail-closed organization-membership check (`authorization_denied`), never on `mapped_kai_user_required`; a case renamed to "deactivated mapping" (an explicitly non-active existing row) continues to assert `mapped_kai_user_required`.
+- focused_tests: `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-jit-actor-provisioning.spec.js __tests__/kai-sprint2-actor-context.spec.js __tests__/kai-sprint2-pass2-admin-authz.spec.js __tests__/kai-sprint2-pass2-metadata-intake-service.spec.js __tests__/kai-sprint2-p0-acceptance.spec.js __tests__/kai-sprint2-batch-files-route.spec.js __tests__/kai-sprint2-review-queue-status-route.spec.js __tests__/kai-sprint2-file-detail-route.spec.js __tests__/kai-sprint2-review-queue-route.spec.js __tests__/kai-sprint2-batch-detail-route.spec.js __tests__/kai-sprint2-file-policy-block-route.spec.js __tests__/kai-sprint2-p1-09-review-cockpit.integration.spec.js` passed (253 pass, 0 fail).
+- broader_tests: `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-*.spec.js` passed (1789 pass, 0 fail, 27 pre-existing skipped runner-owned-database integration tests, unrelated to this change). `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test` (full `__tests__/*.spec.js` suite) passed (1894 pass, 0 fail, 27 skipped).
+- git_diff_check: `git diff --check` passed.
+- prohibited_actions_not_performed: no production access, deployment, database mutation, cloud mutation, feature/configuration change, credential/secret inspection, push, destructive action, manual user/membership creation, or synthetic canary execution.
+
+NOT_CONFIRMED:
+
+- Whether production `kai.users` already has a unique constraint compatible with idempotent provisioning was not inspected (no production DB access is authorized). The shipped fix does not require or assume one — it serializes first-provisioning attempts with `pg_advisory_xact_lock` rather than relying on `ON CONFLICT` — so this is not a blocker for retrying the Gate C canary, but it remains an open confirmation item for anyone later hardening the schema with an explicit uniqueness constraint.
+- Whether `kai.organization_memberships.organization_id` shares an ID space with `public.organizations.id` was not confirmed and was deliberately not assumed; an authenticated user with no existing `kai.organization_memberships` row still cannot access any organization's KAI resources under this fix, matching the pre-existing (unchanged) organization-authorization boundary.
+- production deployment of this correction is NOT_CONFIRMED.
+- `P0_LIVE_UPLOAD_READY` remains NOT_CONFIRMED.

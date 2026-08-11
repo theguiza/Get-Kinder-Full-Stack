@@ -586,7 +586,7 @@ function scenarioDependencies(scenario) {
   });
   return {
     ...serviceDependencies(harness),
-    async findKaiUserByLegacyPublicUserdataId(legacyId) {
+    async findOrCreateKaiUserByLegacyPublicUserdataId({ legacyPublicUserdataId: legacyId }) {
       scenario.events.push("actor_mapping");
       assert.equal(legacyId, 46);
       return {

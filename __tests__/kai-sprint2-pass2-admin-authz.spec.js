@@ -93,7 +93,8 @@ test("admin access check blocks missing engagement_id with metadata-only audit",
   assert.equal(auditMetadata.contains_storage_credentials, false);
 });
 
-test("missing kai.users mapping returns mapped_kai_user_required, not 500", async () => {
+test("missing kai.users mapping is auto-provisioned and then fails closed on missing org membership, not mapped_kai_user_required or 500", async () => {
+  let created = false;
   const result = await createIntakeBatch(
     {
       req: { user: { id: 46, email: "kai@getkinder.ai" } },
@@ -103,13 +104,28 @@ test("missing kai.users mapping returns mapped_kai_user_required, not 500", asyn
     },
     {
       env: { KAI_SPRINT2_ENABLED: "true" },
-      async findKaiUserByLegacyPublicUserdataId() {
-        return null;
+      async findOrCreateKaiUserByLegacyPublicUserdataId({ legacyPublicUserdataId }) {
+        created = true;
+        return {
+          user_id: "jit-kai-user-46",
+          legacy_identity_source: "public.userdata",
+          legacy_public_userdata_id: legacyPublicUserdataId,
+          status: "active",
+          email: "kai@getkinder.ai",
+        };
+      },
+      async listKaiRolesForUser() {
+        return [];
+      },
+      async listOrganizationMembershipsForUser() {
+        return [];
       },
     },
   );
 
+  assert.equal(created, true);
   assert.equal(result.ok, false);
-  assert.equal(result.error.code, "mapped_kai_user_required");
+  assert.notEqual(result.error.code, "mapped_kai_user_required");
+  assert.equal(result.error.code, "authorization_denied");
   assert.equal(result.error.status, 403);
 });

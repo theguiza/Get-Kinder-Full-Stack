@@ -106,8 +106,9 @@ test("list intake batches authorizes an active organization member and returns r
   }
 });
 
-test("list intake batches rejects a missing KAI actor mapping", async () => {
+test("list intake batches auto-provisions a missing KAI actor mapping then rejects for missing org membership", async () => {
   let readModelCalled = false;
+  let created = false;
   const result = await listIntakeBatchesForOrganization(
     {
       req: { user: { id: 46 } },
@@ -115,8 +116,21 @@ test("list intake batches rejects a missing KAI actor mapping", async () => {
     },
     {
       env: { KAI_SPRINT2_ENABLED: "true" },
-      async findKaiUserByLegacyPublicUserdataId() {
-        return null;
+      async findOrCreateKaiUserByLegacyPublicUserdataId({ legacyPublicUserdataId }) {
+        created = true;
+        return {
+          user_id: "jit-kai-user-46",
+          legacy_identity_source: "public.userdata",
+          legacy_public_userdata_id: legacyPublicUserdataId,
+          status: "active",
+          email: null,
+        };
+      },
+      async listKaiRolesForUser() {
+        return [];
+      },
+      async listOrganizationMembershipsForUser() {
+        return [];
       },
       async listIntakeBatchesForOrganization() {
         readModelCalled = true;
@@ -125,8 +139,10 @@ test("list intake batches rejects a missing KAI actor mapping", async () => {
     },
   );
 
+  assert.equal(created, true);
   assert.equal(result.ok, false);
-  assert.equal(result.error.code, "mapped_kai_user_required");
+  assert.notEqual(result.error.code, "mapped_kai_user_required");
+  assert.equal(result.error.code, "authorization_denied");
   assert.equal(result.error.status, 403);
   assert.equal(readModelCalled, false);
 });

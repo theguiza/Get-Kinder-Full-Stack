@@ -428,13 +428,12 @@ function createDependencies({ metadataRepository, lifecycleRepository, storageAd
     storageProvider: "local_dev",
     storageBucket: "synthetic-test-bucket",
     now: () => now,
-    findKaiUserByLegacyPublicUserdataId(legacyId) {
-      if (context.invalidMapping) return null;
+    findOrCreateKaiUserByLegacyPublicUserdataId({ legacyPublicUserdataId: legacyId }) {
       return {
         user_id: actorUserId,
         legacy_identity_source: "public.userdata",
         legacy_public_userdata_id: legacyId,
-        status: "active",
+        status: context.deactivatedMapping ? "inactive" : "active",
       };
     },
     listKaiRolesForUser() {
@@ -1577,7 +1576,7 @@ test("P0-07 negative local synthetic HTTP acceptance matrix", async (t) => {
   });
 
   for (const [name, context, expectedCode] of [
-    ["invalid mapping", { invalidMapping: true }, "mapped_kai_user_required"],
+    ["deactivated mapping", { deactivatedMapping: true }, "mapped_kai_user_required"],
     ["wrong role", { role: "client_reviewer" }, "authorization_denied"],
     ["inactive membership", { membershipStatus: "inactive" }, "authorization_denied"],
   ]) {

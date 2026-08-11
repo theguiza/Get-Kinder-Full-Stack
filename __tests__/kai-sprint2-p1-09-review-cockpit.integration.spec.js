@@ -363,7 +363,7 @@ function cockpitDependencies({ promotionEnabled }) {
     now: () => Date.parse("2026-08-05T12:00:00.000Z"),
     sourcePromotionRepository: createSyntheticSourcePromotionRepository(),
     metadataOnlyAudit: { prepareMetadataOnlyAudit: () => ({ ok: true, publish: async () => {} }) },
-    async findKaiUserByLegacyPublicUserdataId(legacyId) {
+    async findOrCreateKaiUserByLegacyPublicUserdataId({ legacyPublicUserdataId: legacyId }) {
       assert.equal(legacyId, LEGACY_USER_ID);
       return {
         user_id: ACTOR_USER_ID,

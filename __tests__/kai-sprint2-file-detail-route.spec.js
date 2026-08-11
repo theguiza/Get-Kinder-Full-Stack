@@ -160,7 +160,7 @@ function tracedMembership(scenario, {
 function scenarioDependencies(scenario) {
   return {
     env: { KAI_SPRINT2_ENABLED: "true" },
-    async findKaiUserByLegacyPublicUserdataId(legacyId) {
+    async findOrCreateKaiUserByLegacyPublicUserdataId({ legacyPublicUserdataId: legacyId }) {
       scenario.events.push("actor_mapping");
       assert.equal(legacyId, 46);
       return {
