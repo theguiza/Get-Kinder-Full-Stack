@@ -65,6 +65,33 @@ function enabledProvider(overrides = {}, providerOptions = {}) {
   return { provider, calls: mock.calls };
 }
 
+function providerError({ httpStatus, providerStatus, message = "raw provider error with signer@example.invalid" } = {}) {
+  const error = new Error(message);
+  error.response = {
+    status: httpStatus,
+    data: {
+      error: {
+        code: httpStatus,
+        status: providerStatus,
+        message,
+      },
+    },
+  };
+  return error;
+}
+
+async function signedUploadFailureFor(error) {
+  const { provider } = enabledProvider({
+    sign() {
+      throw error;
+    },
+  });
+  return provider.createSignedUploadUrl({
+    objectKey: "kai/org/o1/intake/b1/f1/private.pdf",
+    contentType: "application/pdf",
+  });
+}
+
 test("Gate C-1 provider is disabled by default and never constructs an SDK client", async () => {
   const provider = createGoogleCloudStorageProvider({
     storageClientFactory: () => {
@@ -172,10 +199,13 @@ test("Gate C-1 signed PUT fails closed and sanitized when a signing context is u
   assert.doesNotMatch(serialized, /safe\.pdf/);
 });
 
-test("Gate C-1 signed PUT reports only a safe failure phase when signing fails", async () => {
-  const { provider } = enabledProvider({
-    sign() {
-      throw new Error("raw iamcredentials.googleapis.com failure with secret principal");
+test("Gate C-1 signed PUT classifies source credentials unavailable during client initialization", async () => {
+  const provider = createGoogleCloudStorageProvider({
+    bucketName: "kai-gate-c1-synthetic-bucket",
+    enabled: true,
+    maxUploadSizeBytes: KAI_SPRINT2_MAX_FILE_SIZE_BYTES,
+    storageClientFactory() {
+      throw new Error("Could not load the default credentials. Browse to https://cloud.google.com/docs/authentication/getting-started for more information.");
     },
   });
   const result = await provider.createSignedUploadUrl({
@@ -183,10 +213,62 @@ test("Gate C-1 signed PUT reports only a safe failure phase when signing fails",
     contentType: "application/pdf",
   });
   assert.equal(result.ok, false);
+  assert.equal(result.data.failure_phase, "initialize_storage_client");
+  assert.equal(result.data.diagnostic_code, "source_credentials_unavailable");
+  assert.doesNotMatch(JSON.stringify(result), /default credentials|private\.pdf|kai-gate-c1-synthetic-bucket/);
+});
+
+test("Gate C-1 signed PUT reports only safe diagnostics when signing fails", async () => {
+  const result = await signedUploadFailureFor(providerError({
+    httpStatus: 403,
+    providerStatus: "PERMISSION_DENIED",
+  }));
+  assert.equal(result.ok, false);
   assert.equal(result.error.code, "system_error");
   assert.equal(result.data.failure_phase, "sign_v4_string");
+  assert.equal(result.data.diagnostic_code, "signing_permission_denied");
+  assert.equal(result.data.provider_http_status, 403);
+  assert.equal(result.data.provider_status, "PERMISSION_DENIED");
   const serialized = JSON.stringify(result);
-  assert.doesNotMatch(serialized, /iamcredentials|secret principal|private\.pdf|kai-gate-c1-synthetic-bucket/);
+  assert.doesNotMatch(serialized, /iamcredentials|signer@example|private\.pdf|kai-gate-c1-synthetic-bucket/);
+});
+
+test("Gate C-1 signed PUT classifies supported provider signing failures", async () => {
+  const cases = [
+    [{ httpStatus: 401, providerStatus: "UNAUTHENTICATED" }, "signing_unauthenticated"],
+    [{ httpStatus: 404, providerStatus: "NOT_FOUND" }, "signing_target_not_found"],
+    [{ httpStatus: 429, providerStatus: "RESOURCE_EXHAUSTED" }, "provider_unavailable_rate_limited"],
+    [{ httpStatus: 503, providerStatus: "UNAVAILABLE" }, "provider_unavailable_rate_limited"],
+    [{ httpStatus: 418, providerStatus: "FAILED_PRECONDITION" }, "unclassified_signing_failure"],
+  ];
+  for (const [input, diagnosticCode] of cases) {
+    const result = await signedUploadFailureFor(providerError(input));
+    assert.equal(result.ok, false);
+    assert.equal(result.data.failure_phase, "sign_v4_string");
+    assert.equal(result.data.diagnostic_code, diagnosticCode);
+    assert.equal(result.data.provider_http_status, input.httpStatus);
+    assert.equal(result.data.provider_status, input.providerStatus);
+  }
+});
+
+test("Gate C-1 signed PUT preserves wrapped lazy source-credential diagnostics", async () => {
+  const error = providerError({
+    httpStatus: 403,
+    providerStatus: "PERMISSION_DENIED",
+    message: "raw token exchange failed for signer@example.invalid",
+  });
+  error._kaiGcsDiagnostic = {
+    diagnostic_code: "source_credentials_rejected",
+    provider_http_status: 403,
+    provider_status: "PERMISSION_DENIED",
+  };
+  const result = await signedUploadFailureFor(error);
+  assert.equal(result.ok, false);
+  assert.equal(result.data.failure_phase, "sign_v4_string");
+  assert.equal(result.data.diagnostic_code, "source_credentials_rejected");
+  assert.equal(result.data.provider_http_status, 403);
+  assert.equal(result.data.provider_status, "PERMISSION_DENIED");
+  assert.doesNotMatch(JSON.stringify(result), /token exchange|signer@example|private\.pdf/);
 });
 
 test("Gate C-1 signed PUT fails closed without a configured upload-size bound", async () => {

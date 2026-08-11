@@ -720,7 +720,11 @@ test("route responses omit internal audit context and sanitize unexpected return
       provider: "gcs",
       contract: "kai_sprint2_gate_c1_gcs_provider_v1",
       failure_phase: "sign_v4_string",
+      diagnostic_code: "signing_permission_denied",
+      provider_http_status: 403,
+      provider_status: "PERMISSION_DENIED",
       storage_uri: "gs://secret-bucket/private-object",
+      raw_provider_response: { error: { message: "private://secret/object" } },
     },
   });
   assert.equal(storageErrorRes.statusCode, 500);
@@ -730,8 +734,12 @@ test("route responses omit internal audit context and sanitize unexpected return
     provider: "gcs",
     contract: "kai_sprint2_gate_c1_gcs_provider_v1",
     failure_phase: "sign_v4_string",
+    diagnostic_code: "signing_permission_denied",
+    provider_http_status: 403,
+    provider_status: "PERMISSION_DENIED",
   });
   assert.equal(JSON.stringify(storageErrorRes.body).includes("secret-bucket"), false);
+  assert.equal(JSON.stringify(storageErrorRes.body).includes("private://secret/object"), false);
 
   const blockerRes = createResponse();
   intakeRouteTestables.sendServiceResult(blockerRes, {

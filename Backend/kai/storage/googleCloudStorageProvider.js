@@ -12,6 +12,19 @@ import { buildKaiError } from "../errors/kaiErrors.js";
 export const GCS_PROVIDER_CONTRACT = "kai_sprint2_gate_c1_gcs_provider_v1";
 
 const GCS_GENERATION_PATTERN = /^[1-9][0-9]{0,19}$/;
+const SOURCE_CREDENTIAL_UNAVAILABLE_MESSAGES = new Set([
+  "Could not load the default credentials. Browse to https://cloud.google.com/docs/authentication/getting-started for more information.",
+  "Unable to find credentials in current environment. \nTo learn more about authentication and Google APIs, visit: \nhttps://cloud.google.com/docs/authentication/getting-started",
+]);
+const SAFE_DIAGNOSTIC_CODES = new Set([
+  "source_credentials_unavailable",
+  "source_credentials_rejected",
+  "signing_unauthenticated",
+  "signing_permission_denied",
+  "signing_target_not_found",
+  "provider_unavailable_rate_limited",
+  "unclassified_signing_failure",
+]);
 
 // The SDK's own generation option is passed through Number(...) internally
 // (see @google-cloud/storage File constructor), so a digit string that
@@ -67,6 +80,56 @@ function extractSigningContext(storageClient) {
     throw new Error("GCS signing context is unavailable.");
   }
   return { signer: authClient, principal };
+}
+
+function providerStatus(error) {
+  const value = error?.response?.data?.error?.status || error?.status;
+  return typeof value === "string" && /^[A-Z_]{1,64}$/.test(value) ? value : null;
+}
+
+function providerHttpStatus(error) {
+  for (const value of [error?.response?.status, error?.status, error?.code, error?.response?.data?.error?.code]) {
+    if (Number.isSafeInteger(value) && value >= 100 && value <= 599) return value;
+  }
+  return null;
+}
+
+function diagnosticCodeForProviderError(error, failurePhase) {
+  const explicitCode = error?._kaiGcsDiagnostic?.diagnostic_code;
+  if (SAFE_DIAGNOSTIC_CODES.has(explicitCode)) return explicitCode;
+  if (SOURCE_CREDENTIAL_UNAVAILABLE_MESSAGES.has(error?.message)) return "source_credentials_unavailable";
+
+  const status = providerStatus(error);
+  const httpStatus = providerHttpStatus(error);
+  if (status === "UNAVAILABLE" || status === "RESOURCE_EXHAUSTED" || [429, 500, 502, 503, 504].includes(httpStatus)) {
+    return "provider_unavailable_rate_limited";
+  }
+  if (failurePhase === "initialize_storage_client") {
+    if (status === "UNAUTHENTICATED" || status === "PERMISSION_DENIED" || httpStatus === 401 || httpStatus === 403) {
+      return "source_credentials_rejected";
+    }
+    return "unclassified_signing_failure";
+  }
+  if (status === "UNAUTHENTICATED" || httpStatus === 401) return "signing_unauthenticated";
+  if (status === "PERMISSION_DENIED" || httpStatus === 403) return "signing_permission_denied";
+  if (status === "NOT_FOUND" || httpStatus === 404) return "signing_target_not_found";
+  return "unclassified_signing_failure";
+}
+
+function gcsFailureDiagnostic(error, failurePhase) {
+  const data = {
+    failure_phase: failurePhase,
+    diagnostic_code: diagnosticCodeForProviderError(error, failurePhase),
+  };
+  const httpStatus = error?._kaiGcsDiagnostic?.provider_http_status || providerHttpStatus(error);
+  const status = error?._kaiGcsDiagnostic?.provider_status || providerStatus(error);
+  if (Number.isSafeInteger(httpStatus) && httpStatus >= 100 && httpStatus <= 599) {
+    data.provider_http_status = httpStatus;
+  }
+  if (typeof status === "string" && /^[A-Z_]{1,64}$/.test(status)) {
+    data.provider_status = status;
+  }
+  return data;
 }
 
 async function signV4String(signer, stringToSign) {
@@ -223,12 +286,12 @@ export class GoogleCloudStorageProvider {
           expires_in_seconds: this.signedUploadExpirySeconds,
         },
       };
-    } catch {
+    } catch (error) {
       return sanitizedGcsFailure(
         "create_signed_upload_url",
         "system_error",
         "Unable to create a signed upload URL.",
-        { failure_phase: failurePhase },
+        gcsFailureDiagnostic(error, failurePhase),
       );
     }
   }

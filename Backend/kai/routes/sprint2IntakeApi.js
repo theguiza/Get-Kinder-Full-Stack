@@ -102,6 +102,22 @@ function sanitizeServiceData(data) {
   ) {
     sanitized.failure_phase = data.failure_phase;
   }
+  if (
+    typeof data.diagnostic_code === "string"
+    && /^(source_credentials_unavailable|source_credentials_rejected|signing_unauthenticated|signing_permission_denied|signing_target_not_found|provider_unavailable_rate_limited|unclassified_signing_failure)$/.test(data.diagnostic_code)
+  ) {
+    sanitized.diagnostic_code = data.diagnostic_code;
+  }
+  if (
+    Number.isSafeInteger(data.provider_http_status)
+    && data.provider_http_status >= 100
+    && data.provider_http_status <= 599
+  ) {
+    sanitized.provider_http_status = data.provider_http_status;
+  }
+  if (typeof data.provider_status === "string" && /^[A-Z_]{1,64}$/.test(data.provider_status)) {
+    sanitized.provider_status = data.provider_status;
+  }
   for (const key of [
     "storage_provider_enabled",
     "raw_upload_enabled",
