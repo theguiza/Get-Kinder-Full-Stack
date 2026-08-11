@@ -15033,3 +15033,53 @@ NOT_CONFIRMED:
 - Whether `kai.organization_memberships.organization_id` shares an ID space with `public.organizations.id` was not confirmed and was deliberately not assumed; an authenticated user with no existing `kai.organization_memberships` row still cannot access any organization's KAI resources under this fix, matching the pre-existing (unchanged) organization-authorization boundary.
 - production deployment of this correction is NOT_CONFIRMED.
 - `P0_LIVE_UPLOAD_READY` remains NOT_CONFIRMED.
+
+Organization-authorization bridge re-investigation — no safe implementation this package (2026-08-11)
+
+USER_CONFIRMED:
+
+- Owner requested a second pass specifically to determine whether the existing Get Kinder organization authority (`public.user_org_memberships` / `public.organizations` / `public.org_applications`) could safely become the KAI organization-authorization source, so that a JIT-provisioned `kai.users` principal is not stranded with zero organization access.
+- Owner's own instruction was conditional: "If repository evidence proves the organization ID relationship, implement the smallest coherent authorization bridge now" — implying no bridge should be implemented if the relationship is not proven.
+
+TOOL_VERIFIED:
+
+- `public.user_org_memberships` full schema (`scripts/migrations/add_user_org_memberships.sql`): `id SERIAL PK`, `user_id INTEGER NOT NULL REFERENCES userdata(id)`, `org_id INTEGER NOT NULL REFERENCES organizations(id)`, `role VARCHAR(64) NOT NULL DEFAULT 'admin'`, `is_active BOOLEAN NOT NULL DEFAULT true`, `added_by_user_id INTEGER REFERENCES userdata(id)`, `created_at TIMESTAMPTZ`, `UNIQUE(user_id, org_id)`. The existing product's own authorization query, `services/orgScopeService.js#loadMembershipsForUser`, gates solely on `COALESCE(m.is_active, true) = true`; `organizations.status` (`'pending'`/`'approved'`, no enforced CHECK constraint) is joined only as informational metadata and is not itself an access gate.
+- `public.organizations.id` is `SERIAL` (integer) (`scripts/migrations/add_org_tables.sql`).
+- KAI's `organization_id` is UUID-typed everywhere it appears: `Backend/kai/config/kaiSprint2P0Contract.js` defines a UUID regex pattern used to validate it (`Backend/kai/services/kaiIntakeService.js` `UUID_RE.test(organizationId)`); `migrations/kai_sprint2_gate_a_p0_upload_lifecycle.sql` declares `organization_id uuid NOT NULL` on `kai.upload_lifecycle_audit`; `scripts/kai-sprint2-pass2-admin-metadata-intake-verifier.sql` casts `::uuid`; every KAI test/fixture and planning-doc example (e.g. `KAI_MVP_Sprint2_P0_Pass2_Production_Synthetic_Metadata_Write_Execution_Prompt_v0.1.3.md`) uses UUID literals paired with an "NCWS"-style engagement/batch code, not a Get Kinder charity-organization name.
+- A `SERIAL` integer (`public.organizations.id`) cannot equal a UUID (`kai.organization_id`) — the two identifier spaces are structurally incompatible as direct values, not merely "unconfirmed as compatible."
+- Exhaustively re-searched this repository (this session, fresh grep pass) for any bridge: no `kai.organizations` table exists anywhere (`grep -rn "kai\.organizations\b"` across all `.js`/`.sql`/`.md` returned zero matches); no `legacy_organization_id`/`gk_organization_id`/`legacy_org_id`/`gk_org_id`-style column (the pattern `kai.users` itself uses for its own legacy-identity bridge, `legacy_public_userdata_id`) exists anywhere for organizations; no migration, seed script, config file, or KAI contract doc (`Backend/kai/contracts/*.md`, `Backend/kai/config/kaiSprint2P0Contract.js`) derives, seeds, or documents a KAI `organization_id` from `public.organizations.id`. `kai.organization_memberships`, `kai.engagements`, `kai.users`, `kai.roles`, and `kai.user_roles` have no `CREATE TABLE` anywhere in this repository and are treated throughout as externally managed.
+- KAI also requires a distinct role vocabulary (`gk_admin`, `gk_operator`, `gk_reviewer`, `client_admin`, `client_reviewer`, `client_contributor`, `Backend/kai/config/kaiSprint2P0Contract.js`) enforced both as an org-scoped `role_name` and, for mutating operations, a separate global role (`Backend/kai/auth/kaiAuthorizationService.js`). Get Kinder's `user_org_memberships.role` is a free-text column populated only with the literal `'admin'` in current code (`routes/orgApplyApi.js`) and has no defined mapping onto KAI's role vocabulary; `organizations.rep_role`/`org_applications.rep_role` is arbitrary applicant-submitted free text, not a role enum. No translation table or logic exists to bridge these vocabularies either.
+
+DECISION (this package):
+
+- No organization-authorization bridge was implemented. Repository evidence does not prove the required relationship — it affirmatively disproves a direct identifier equivalence (integer vs. UUID) and shows no indirection layer exists to translate between them, and no role-vocabulary translation exists either. Implementing a bridge under these conditions would require inventing a mapping the repository does not contain, which risks granting KAI organization access to users based on an unconfirmed and possibly incorrect correspondence — a direct violation of the owner's fail-closed requirement ("authentication alone must never grant access to arbitrary organizations"). Per the owner's own stated condition, no bridge is implemented this package.
+- The KAI organization-membership boundary (`kai.organization_memberships`, `kai.user_roles`) is left exactly as it was after the JIT-identity package (commit `d35a8c7`): unchanged, fail-closed, requiring an explicit `kai.organization_memberships`/`kai.user_roles` row per actor per organization, provisioned by whatever externally-managed process already populates that (still externally managed) schema.
+- No tests were added asserting "an authenticated Get Kinder user with organization-A membership can reach KAI organization A," because that capability does not exist in this codebase and asserting it would misrepresent the system. Writing a test that fabricates the mapping (e.g., a test-only stub asserting `org_id === organization_id` by coincidence of the test's own construction) would not constitute evidence of a real bridge and was not done.
+- `Backend/kai/db/kaiQueries.js`/`Backend/kai/auth/kaiActorContext.js` JIT-identity behavior from commit `d35a8c7` is unchanged and remains correct on its own terms (identity resolution no longer requires manual mapping); this package changes nothing there.
+
+kai.users deployed-schema verification — repository evidence is insufficient; one minimal read-only query is required:
+
+- This repository contains no `CREATE TABLE` for `kai.users` anywhere (confirmed by exhaustive grep across `scripts/migrations/*.sql`, `migrations/*.sql`, and all markdown/contract docs). The only columns ever referenced by any code path are `user_id, legacy_identity_source, legacy_public_userdata_id, status, email` (`Backend/kai/db/kaiQueries.js`). Repository evidence cannot rule out an additional NOT-NULL column without a default on the real deployed table, which would make the JIT `INSERT INTO kai.users (legacy_identity_source, legacy_public_userdata_id, email, status) VALUES (...)` fail in production even though it passes all in-repo tests (which exercise a fake/mocked `kai.users`, not the deployed schema).
+- Per instruction, no further repository-only guessing was attempted and no database audit was broadened. The single minimal read-only query needed to close this gap (for the owner or an operator with pgAdmin access to run against the actual deployed database — not run by Codex):
+
+```sql
+SELECT 'column' AS kind, column_name AS name, data_type AS detail,
+       is_nullable AS nullable, column_default AS default_value, NULL AS constraint_def
+FROM information_schema.columns
+WHERE table_schema = 'kai' AND table_name = 'users'
+UNION ALL
+SELECT 'constraint', con.conname, pg_get_constraintdef(con.oid), NULL, NULL, con.contype::text
+FROM pg_constraint con
+JOIN pg_class rel ON rel.oid = con.conrelid
+JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+WHERE nsp.nspname = 'kai' AND rel.relname = 'users'
+ORDER BY kind, name;
+```
+
+This is read-only (`SELECT` only against `information_schema`/`pg_catalog`), touches no data, and returns exactly the column/default/nullability/constraint facts needed to confirm the JIT insert contract is safe to deploy. It was not run by Codex (no production database access is authorized in this session).
+
+REMAINING BLOCKER FOR GATE C RETRY (explicit, not resolved this package):
+
+- A JIT-provisioned `kai.users` principal still has zero `kai.organization_memberships`/`kai.user_roles` rows and therefore no authorized organization path. The Gate C canary (or any real authenticated Get Kinder user without a pre-existing, externally-provisioned KAI organization-membership row) will still be correctly and fail-closed blocked by `authorization_denied` after identity resolution succeeds — this is intended fail-closed behavior, not a bug, but it does mean **the canary cannot succeed end-to-end for a brand-new actor without a decision from the owner** on one of: (a) confirm/provide an explicit, authoritative mapping between Get Kinder organizations and KAI organization identities (none currently exists in any system this repository can see) so a real bridge can be built; (b) accept that KAI organization membership continues to be provisioned by whatever existing externally-managed process already populates `kai.organization_memberships` today, and use that process (not a new one built by this package) to grant the canary's specific test actor access to the specific test organization before retrying; or (c) redefine, for Sprint 2 P0's actual production usage, what a KAI "organization" is meant to be relative to Get Kinder's organization model, since the current evidence suggests they may be intentionally distinct concepts (KAI engagement clients vs. Get Kinder charity organizations) rather than the same entity under two names.
+- Do not state Gate C is ready to retry while this blocker stands: identity resolution alone (fixed in `d35a8c7`) is necessary but not sufficient for the canary's authorized route to succeed for a brand-new actor.
+- `P0_LIVE_UPLOAD_READY` remains NOT_CONFIRMED.
