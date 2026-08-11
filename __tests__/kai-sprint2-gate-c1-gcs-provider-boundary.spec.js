@@ -166,9 +166,27 @@ test("Gate C-1 signed PUT fails closed and sanitized when a signing context is u
   });
   assert.equal(result.ok, false);
   assert.equal(result.error.code, "system_error");
+  assert.equal(result.data.failure_phase, "resolve_signing_context");
   const serialized = JSON.stringify(result);
   assert.doesNotMatch(serialized, /kai-gate-c1-synthetic-bucket/);
   assert.doesNotMatch(serialized, /safe\.pdf/);
+});
+
+test("Gate C-1 signed PUT reports only a safe failure phase when signing fails", async () => {
+  const { provider } = enabledProvider({
+    sign() {
+      throw new Error("raw iamcredentials.googleapis.com failure with secret principal");
+    },
+  });
+  const result = await provider.createSignedUploadUrl({
+    objectKey: "kai/org/o1/intake/b1/f1/private.pdf",
+    contentType: "application/pdf",
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "system_error");
+  assert.equal(result.data.failure_phase, "sign_v4_string");
+  const serialized = JSON.stringify(result);
+  assert.doesNotMatch(serialized, /iamcredentials|secret principal|private\.pdf|kai-gate-c1-synthetic-bucket/);
 });
 
 test("Gate C-1 signed PUT fails closed without a configured upload-size bound", async () => {

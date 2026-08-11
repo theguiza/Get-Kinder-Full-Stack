@@ -25,13 +25,14 @@ function isPrecisionSafeGcsGeneration(value) {
   );
 }
 
-function sanitizedGcsFailure(operation, code, message) {
+function sanitizedGcsFailure(operation, code, message, data = {}) {
   return buildKaiError(code, {
     message,
     data: {
       operation,
       provider: "gcs",
       contract: GCS_PROVIDER_CONTRACT,
+      ...data,
     },
   });
 }
@@ -161,8 +162,10 @@ export class GoogleCloudStorageProvider {
     }
 
     const sizeRangeHeader = `0,${this.maxUploadSizeBytes}`;
+    let failurePhase = "initialize_storage_client";
     try {
       const storageClient = await this._ensureClient();
+      failurePhase = "resolve_signing_context";
       const { signer, principal } = extractSigningContext(storageClient);
       const now = new Date();
       const dateStamp = toAmzDate(now).slice(0, 8);
@@ -204,6 +207,7 @@ export class GoogleCloudStorageProvider {
         credentialScope,
         sha256Hex(canonicalRequest),
       ].join("\n");
+      failurePhase = "sign_v4_string";
       const signature = await signV4String(signer, stringToSign);
       const url = `https://${host}${canonicalUri}?${canonicalQueryString}&X-Goog-Signature=${signature}`;
       return {
@@ -224,6 +228,7 @@ export class GoogleCloudStorageProvider {
         "create_signed_upload_url",
         "system_error",
         "Unable to create a signed upload URL.",
+        { failure_phase: failurePhase },
       );
     }
   }

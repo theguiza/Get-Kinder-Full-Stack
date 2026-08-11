@@ -96,6 +96,12 @@ function sanitizeServiceData(data) {
   if (typeof data.contract === "string" && /^[-_a-zA-Z0-9.]{1,128}$/.test(data.contract)) {
     sanitized.contract = data.contract;
   }
+  if (
+    typeof data.failure_phase === "string"
+    && /^(initialize_storage_client|resolve_signing_context|sign_v4_string)$/.test(data.failure_phase)
+  ) {
+    sanitized.failure_phase = data.failure_phase;
+  }
   for (const key of [
     "storage_provider_enabled",
     "raw_upload_enabled",

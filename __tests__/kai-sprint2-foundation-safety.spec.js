@@ -719,6 +719,7 @@ test("route responses omit internal audit context and sanitize unexpected return
       operation: "create_signed_upload_url",
       provider: "gcs",
       contract: "kai_sprint2_gate_c1_gcs_provider_v1",
+      failure_phase: "sign_v4_string",
       storage_uri: "gs://secret-bucket/private-object",
     },
   });
@@ -728,6 +729,7 @@ test("route responses omit internal audit context and sanitize unexpected return
     operation: "create_signed_upload_url",
     provider: "gcs",
     contract: "kai_sprint2_gate_c1_gcs_provider_v1",
+    failure_phase: "sign_v4_string",
   });
   assert.equal(JSON.stringify(storageErrorRes.body).includes("secret-bucket"), false);
 
