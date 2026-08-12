@@ -1107,9 +1107,10 @@ function sanitizedPostStartInternalFailure() {
   });
 }
 
-function sanitizedExactVersionVerificationFailure(code = "system_error", status) {
+function sanitizedExactVersionVerificationFailure(code = "system_error", status, data = null) {
   return buildKaiError(code, {
     ...(status ? { status } : {}),
+    ...(data && typeof data === "object" && !Array.isArray(data) ? { data } : {}),
   });
 }
 
@@ -1379,23 +1380,49 @@ async function verifyExactGcsObjectVersionStreamed({
     return sanitizedExactVersionVerificationFailure("invalid_request", 400);
   }
 
-  const stat = await gcsProvider.statExactGeneration({ objectKey, gcsGeneration });
+  let stat;
+  try {
+    stat = await gcsProvider.statExactGeneration({ objectKey, gcsGeneration });
+  } catch {
+    return sanitizedExactVersionVerificationFailure("system_error", 500, {
+      exact_verification_phase: "gcs_stat_exact_generation",
+    });
+  }
   if (stat?.ok !== true) {
-    return sanitizedExactVersionVerificationFailure(stat?.error?.code === "not_found" ? "not_found" : "system_error");
+    return sanitizedExactVersionVerificationFailure(
+      stat?.error?.code === "not_found" ? "not_found" : "system_error",
+      stat?.error?.code === "not_found" ? 404 : 500,
+      { exact_verification_phase: "gcs_stat_exact_generation" },
+    );
   }
   if (stat.data.size_bytes !== expectedSizeBytes) {
-    return sanitizedExactVersionVerificationFailure("system_error", 500);
+    return sanitizedExactVersionVerificationFailure("system_error", 500, {
+      exact_verification_phase: "gcs_size_check",
+    });
   }
 
-  const opened = await gcsProvider.openExactGenerationReadStream({ objectKey, gcsGeneration, signal });
+  let opened;
+  try {
+    opened = await gcsProvider.openExactGenerationReadStream({ objectKey, gcsGeneration, signal });
+  } catch {
+    return sanitizedExactVersionVerificationFailure("system_error", 500, {
+      exact_verification_phase: "gcs_open_exact_generation",
+    });
+  }
   if (opened?.ok !== true) {
-    return sanitizedExactVersionVerificationFailure(opened?.error?.code === "not_found" ? "not_found" : "system_error");
+    return sanitizedExactVersionVerificationFailure(
+      opened?.error?.code === "not_found" ? "not_found" : "system_error",
+      opened?.error?.code === "not_found" ? 404 : 500,
+      { exact_verification_phase: "gcs_open_exact_generation" },
+    );
   }
 
   const byteSource = opened.data.byte_source;
   if (opened.data.size_bytes !== expectedSizeBytes) {
     byteSource?.destroy?.();
-    return sanitizedExactVersionVerificationFailure("system_error", 500);
+    return sanitizedExactVersionVerificationFailure("system_error", 500, {
+      exact_verification_phase: "gcs_size_check",
+    });
   }
 
   try {
@@ -1406,25 +1433,35 @@ async function verifyExactGcsObjectVersionStreamed({
         return sanitizedExactVersionVerificationFailure("invalid_request", 400);
       }
       if (!(Buffer.isBuffer(chunk) || chunk instanceof Uint8Array)) {
-        return sanitizedExactVersionVerificationFailure("system_error", 500);
+        return sanitizedExactVersionVerificationFailure("system_error", 500, {
+          exact_verification_phase: "gcs_stream_exact_generation",
+        });
       }
       if (chunk.byteLength > Number.MAX_SAFE_INTEGER - streamedSizeBytes) {
-        return sanitizedExactVersionVerificationFailure("system_error", 500);
+        return sanitizedExactVersionVerificationFailure("system_error", 500, {
+          exact_verification_phase: "gcs_stream_exact_generation",
+        });
       }
       streamedSizeBytes += chunk.byteLength;
       if (streamedSizeBytes > expectedSizeBytes) {
-        return sanitizedExactVersionVerificationFailure("system_error", 500);
+        return sanitizedExactVersionVerificationFailure("system_error", 500, {
+          exact_verification_phase: "gcs_size_check",
+        });
       }
       hash.update(chunk);
     }
 
     if (streamedSizeBytes !== expectedSizeBytes) {
-      return sanitizedExactVersionVerificationFailure("system_error", 500);
+      return sanitizedExactVersionVerificationFailure("system_error", 500, {
+        exact_verification_phase: "gcs_size_check",
+      });
     }
 
     const verifiedChecksum = hash.digest("hex");
     if (verifiedChecksum !== declaredChecksum) {
-      return sanitizedExactVersionVerificationFailure("checksum_mismatch", 500);
+      return sanitizedExactVersionVerificationFailure("checksum_mismatch", 409, {
+        exact_verification_phase: "gcs_checksum_check",
+      });
     }
 
     return {
@@ -1436,7 +1473,11 @@ async function verifyExactGcsObjectVersionStreamed({
       warnings: [],
     };
   } catch {
-    return sanitizedExactVersionVerificationFailure(signal?.aborted ? "invalid_request" : "system_error");
+    return sanitizedExactVersionVerificationFailure(
+      signal?.aborted ? "invalid_request" : "system_error",
+      signal?.aborted ? 400 : 500,
+      { exact_verification_phase: "gcs_stream_exact_generation" },
+    );
   } finally {
     if (typeof byteSource?.destroy === "function") byteSource.destroy();
   }
@@ -1490,7 +1531,14 @@ async function confirmGcsObjectVersion({
     : null;
 
   let gcsGeneration = null;
-  const binding = await lifecycleRepository.resolveGcsGenerationBinding({ organizationId, intakeFileId });
+  let binding;
+  try {
+    binding = await lifecycleRepository.resolveGcsGenerationBinding({ organizationId, intakeFileId });
+  } catch {
+    return sanitizedExactVersionVerificationFailure("system_error", 500, {
+      exact_verification_phase: "gcs_generation_binding_lookup",
+    });
+  }
   if (binding?.ok === true && typeof binding.data.gcs_generation === "string") {
     gcsGeneration = binding.data.gcs_generation;
     if (!objectVersionId && typeof binding.data.object_version_id === "string") {
@@ -1499,9 +1547,20 @@ async function confirmGcsObjectVersion({
   }
 
   if (!gcsGeneration) {
-    const head = await gcsProvider.headObject({ objectKey });
+    let head;
+    try {
+      head = await gcsProvider.headObject({ objectKey });
+    } catch {
+      return sanitizedExactVersionVerificationFailure("system_error", 500, {
+        exact_verification_phase: "gcs_head_object",
+      });
+    }
     if (head?.ok !== true) {
-      return sanitizedExactVersionVerificationFailure(head?.error?.code === "not_found" ? "not_found" : "system_error");
+      return sanitizedExactVersionVerificationFailure(
+        head?.error?.code === "not_found" ? "not_found" : "system_error",
+        head?.error?.code === "not_found" ? 404 : 500,
+        { exact_verification_phase: "gcs_head_object" },
+      );
     }
     gcsGeneration = head.data.candidate_generation;
   }
@@ -1522,55 +1581,91 @@ async function confirmGcsObjectVersion({
   }
 
   if (lifecycleRecord.upload_state === "reserved") {
-    const started = await lifecycleRepository.transitionUploadLifecycle({
-      organizationId,
-      intakeFileId,
-      expectedUploadState: "reserved",
-      newUploadState: "upload_started",
-      now,
-    });
+    let started;
+    try {
+      started = await lifecycleRepository.transitionUploadLifecycle({
+        organizationId,
+        intakeFileId,
+        expectedUploadState: "reserved",
+        newUploadState: "upload_started",
+        now,
+      });
+    } catch {
+      return sanitizedExactVersionVerificationFailure("system_error", 500, {
+        exact_verification_phase: "gcs_lifecycle_start",
+      });
+    }
     if (started?.ok !== true) {
-      return sanitizedExactVersionVerificationFailure("conflict_current_state_changed", 409);
+      return sanitizedExactVersionVerificationFailure("conflict_current_state_changed", 409, {
+        exact_verification_phase: "gcs_lifecycle_start",
+      });
     }
   }
 
   if (lifecycleRecord.upload_state === "reserved" || lifecycleRecord.upload_state === "upload_started") {
-    const uploaded = await lifecycleRepository.transitionUploadLifecycle({
-      organizationId,
-      intakeFileId,
-      expectedUploadState: "upload_started",
-      newUploadState: "uploaded_unconfirmed",
-      now,
-      objectVersionId,
-    });
+    let uploaded;
+    try {
+      uploaded = await lifecycleRepository.transitionUploadLifecycle({
+        organizationId,
+        intakeFileId,
+        expectedUploadState: "upload_started",
+        newUploadState: "uploaded_unconfirmed",
+        now,
+        objectVersionId,
+      });
+    } catch {
+      return sanitizedExactVersionVerificationFailure("system_error", 500, {
+        exact_verification_phase: "gcs_lifecycle_complete",
+      });
+    }
     if (uploaded?.ok !== true) {
-      return sanitizedExactVersionVerificationFailure("conflict_current_state_changed", 409);
+      return sanitizedExactVersionVerificationFailure("conflict_current_state_changed", 409, {
+        exact_verification_phase: "gcs_lifecycle_complete",
+      });
     }
   }
 
-  const bound = await lifecycleRepository.bindGcsGeneration({
-    organizationId,
-    intakeFileId,
-    objectVersionId,
-    gcsGeneration,
-    now,
-  });
+  let bound;
+  try {
+    bound = await lifecycleRepository.bindGcsGeneration({
+      organizationId,
+      intakeFileId,
+      objectVersionId,
+      gcsGeneration,
+      now,
+    });
+  } catch {
+    return sanitizedExactVersionVerificationFailure("system_error", 500, {
+      exact_verification_phase: "gcs_generation_bind",
+    });
+  }
   if (bound?.ok !== true) {
-    return sanitizedExactVersionVerificationFailure(bound?.error?.code || "system_error", bound?.error?.status);
+    return sanitizedExactVersionVerificationFailure(bound?.error?.code || "system_error", bound?.error?.status, {
+      exact_verification_phase: "gcs_generation_bind",
+    });
   }
 
-  const confirmed = await lifecycleRepository.transitionUploadLifecycle({
-    organizationId,
-    intakeFileId,
-    expectedUploadState: "uploaded_unconfirmed",
-    newUploadState: "confirmed",
-    now,
-    objectVersionId,
-    verifiedChecksum: verification.data.verifiedChecksum,
-    verifiedSizeBytes: verification.data.verifiedSizeBytes,
-  });
+  let confirmed;
+  try {
+    confirmed = await lifecycleRepository.transitionUploadLifecycle({
+      organizationId,
+      intakeFileId,
+      expectedUploadState: "uploaded_unconfirmed",
+      newUploadState: "confirmed",
+      now,
+      objectVersionId,
+      verifiedChecksum: verification.data.verifiedChecksum,
+      verifiedSizeBytes: verification.data.verifiedSizeBytes,
+    });
+  } catch {
+    return sanitizedExactVersionVerificationFailure("system_error", 500, {
+      exact_verification_phase: "gcs_lifecycle_confirm",
+    });
+  }
   if (confirmed?.ok !== true) {
-    return sanitizedExactVersionVerificationFailure("conflict_current_state_changed", 409);
+    return sanitizedExactVersionVerificationFailure("conflict_current_state_changed", 409, {
+      exact_verification_phase: "gcs_lifecycle_confirm",
+    });
   }
 
   return {
@@ -2442,7 +2537,14 @@ export async function confirmUpload(input = {}, dependencies = {}) {
     });
   }
 
-  const auth = await authorizeUploadReservedIntakeFile(input, dependencies);
+  let auth;
+  try {
+    auth = await authorizeUploadReservedIntakeFile(input, dependencies);
+  } catch {
+    return buildKaiError("system_error", {
+      data: { exact_verification_phase: "confirm_upload_authorization" },
+    });
+  }
   if (!auth.ok) return auth;
 
   const now = resolveUploadNow(input, dependencies);
@@ -2468,9 +2570,18 @@ export async function confirmUpload(input = {}, dependencies = {}) {
   try {
     lifecycle = await lifecycleRepository.getUploadLifecycle({ organizationId, intakeFileId });
   } catch {
-    return buildKaiError("system_error");
+    return buildKaiError("system_error", {
+      data: { exact_verification_phase: "upload_lifecycle_read" },
+    });
   }
-  if (lifecycle?.ok === false) return lifecycle;
+  if (lifecycle?.ok === false) {
+    if (lifecycle.error?.code === "system_error") {
+      return buildKaiError("system_error", {
+        data: { exact_verification_phase: "upload_lifecycle_read" },
+      });
+    }
+    return lifecycle;
+  }
   if (!validConfirmUploadLifecycleRead(lifecycle, { organizationId, intakeFileId, storageProvider: metadata.storage_provider })) {
     return buildKaiError("conflict_current_state_changed");
   }

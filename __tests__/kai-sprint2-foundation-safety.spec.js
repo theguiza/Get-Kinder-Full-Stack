@@ -551,6 +551,30 @@ test("real confirm-upload route rejects caller verification facts and delegates 
   }
 });
 
+test("real confirm-upload route returns a safe phase when the service throws", async () => {
+  const restore = intakeRouteTestables.setIntakeServiceForTest({
+    async confirmUpload() {
+      throw new Error("private confirm-upload service failure with storage object detail");
+    },
+  });
+  try {
+    const res = createResponse();
+    await invokeRouteStack("/admin/files/:intakeFileId/confirm-upload", "post", {
+      get() { return "application/json"; },
+      query: { organization_id: organizationId },
+      params: { intakeFileId },
+      body: { organization_id: organizationId },
+      user: { id: 46 },
+    }, res);
+    assert.equal(res.statusCode, 500);
+    assert.equal(res.body.error.code, "system_error");
+    assert.deepEqual(res.body.data, { exact_verification_phase: "confirm_upload_route_service" });
+    assert.doesNotMatch(JSON.stringify(res.body), /storage object detail/);
+  } finally {
+    restore();
+  }
+});
+
 test("contract upload-url route rejects storage overrides and delegates only safe reservation identity", async () => {
   let serviceInput = null;
   const restore = intakeRouteTestables.setIntakeServiceForTest({
@@ -740,6 +764,30 @@ test("route responses omit internal audit context and sanitize unexpected return
   });
   assert.equal(JSON.stringify(storageErrorRes.body).includes("secret-bucket"), false);
   assert.equal(JSON.stringify(storageErrorRes.body).includes("private://secret/object"), false);
+
+  const exactGenerationErrorRes = createResponse();
+  intakeRouteTestables.sendServiceResult(exactGenerationErrorRes, {
+    ok: false,
+    error: { code: "system_error", message: "private://secret/object", status: 500 },
+    data: {
+      operation: "open_exact_generation_read_stream",
+      provider: "gcs",
+      contract: "kai_sprint2_gate_c1_gcs_provider_v1",
+      exact_verification_phase: "gcs_stream_exact_generation",
+      storage_uri: "gs://secret-bucket/private-object",
+      raw_provider_response: { error: { message: "private://secret/object" } },
+    },
+  });
+  assert.equal(exactGenerationErrorRes.statusCode, 500);
+  assert.equal(exactGenerationErrorRes.body.error.code, "system_error");
+  assert.deepEqual(exactGenerationErrorRes.body.data, {
+    operation: "open_exact_generation_read_stream",
+    provider: "gcs",
+    contract: "kai_sprint2_gate_c1_gcs_provider_v1",
+    exact_verification_phase: "gcs_stream_exact_generation",
+  });
+  assert.equal(JSON.stringify(exactGenerationErrorRes.body).includes("secret-bucket"), false);
+  assert.equal(JSON.stringify(exactGenerationErrorRes.body).includes("private://secret/object"), false);
 
   const blockerRes = createResponse();
   intakeRouteTestables.sendServiceResult(blockerRes, {

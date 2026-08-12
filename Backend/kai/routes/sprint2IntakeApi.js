@@ -56,6 +56,9 @@ export function sendServiceResult(res, result, successStatus = 200) {
   });
 }
 
+const EXACT_VERIFICATION_PHASE_PATTERN =
+  /^(confirm_upload_authorization|upload_lifecycle_read|gcs_generation_binding_lookup|gcs_head_object|gcs_stat_exact_generation|gcs_open_exact_generation|gcs_stream_exact_generation|gcs_size_check|gcs_checksum_check|gcs_lifecycle_start|gcs_lifecycle_complete|gcs_generation_bind|gcs_lifecycle_confirm|confirm_upload_route_service)$/;
+
 const SAFE_SERVICE_WARNING_MESSAGES = Object.freeze({
   blocked_attempt_audit_not_written: "Blocked-attempt audit was not written.",
   blocked_attempt_audit_failed: "Blocked-attempt audit failed without changing the validator response.",
@@ -103,6 +106,12 @@ function sanitizeServiceData(data) {
     sanitized.failure_phase = data.failure_phase;
   }
   if (
+    typeof data.exact_verification_phase === "string"
+    && EXACT_VERIFICATION_PHASE_PATTERN.test(data.exact_verification_phase)
+  ) {
+    sanitized.exact_verification_phase = data.exact_verification_phase;
+  }
+  if (
     typeof data.diagnostic_code === "string"
     && /^(source_credentials_unavailable|source_credentials_rejected|signing_unauthenticated|signing_permission_denied|signing_target_not_found|provider_unavailable_rate_limited|unclassified_signing_failure)$/.test(data.diagnostic_code)
   ) {
@@ -145,6 +154,62 @@ function requestPayload(req = {}) {
 function safeRequestId(req = {}) {
   const value = req.id || req.get?.("x-request-id") || req.headers?.["x-request-id"];
   return typeof value === "string" && /^[a-z0-9][a-z0-9_-]{0,127}$/i.test(value) ? value : null;
+}
+
+function safeHeaderId(req = {}, headerName) {
+  const value = req.get?.(headerName) || req.headers?.[String(headerName).toLowerCase()];
+  return typeof value === "string" && /^[a-z0-9][a-z0-9._:-]{0,127}$/i.test(value) ? value : null;
+}
+
+function safeOrganizationIdForLog(req = {}) {
+  const payload = requestPayload(req);
+  const value = normalizedUuid(req.query?.organization_id || payload.organization_id);
+  return KAI_SPRINT2_P0_PATTERNS.uuid.test(value) ? value : null;
+}
+
+function safeRoutePathForLog(req = {}) {
+  const value = typeof req.path === "string" ? req.path : "";
+  return /^\/[-_a-zA-Z0-9/:.]{0,255}$/.test(value) ? value : null;
+}
+
+function safeKaiResponseSummary(body) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return { errorCode: null, exactVerificationPhase: null };
+  }
+  const errorCode = typeof body.error?.code === "string" && Object.hasOwn(KAI_ERROR_STATUS, body.error.code)
+    ? body.error.code
+    : null;
+  const exactVerificationPhase =
+    typeof body.data?.exact_verification_phase === "string"
+    && EXACT_VERIFICATION_PHASE_PATTERN.test(body.data.exact_verification_phase)
+      ? body.data.exact_verification_phase
+      : null;
+  return { errorCode, exactVerificationPhase };
+}
+
+function logKaiSprint2IntakeRequest(req, res, responseBody) {
+  const { errorCode, exactVerificationPhase } = safeKaiResponseSummary(responseBody);
+  console.log("[kai-sprint2-intake-route]", {
+    method: req.method,
+    path: safeRoutePathForLog(req),
+    status: res.statusCode,
+    "x-request-id": safeRequestId(req),
+    "rndr-id": safeHeaderId(req, "rndr-id") || safeHeaderId(req, "x-render-request-id"),
+    organization_id: safeOrganizationIdForLog(req),
+    "error.code": errorCode,
+    exact_verification_phase: exactVerificationPhase,
+  });
+}
+
+function attachTemporarySafeIntakeRouteLogger(req, res, next) {
+  let responseBody = null;
+  const originalJson = res.json.bind(res);
+  res.json = (body) => {
+    responseBody = body;
+    return originalJson(body);
+  };
+  res.on("finish", () => logKaiSprint2IntakeRequest(req, res, responseBody));
+  next();
 }
 
 function requestContext(req = {}, route) {
@@ -341,10 +406,17 @@ function validateReviewQueueStatusRequestOrSend(req, res) {
   return identifiers;
 }
 
-async function invokeService(res, serviceCall, successStatus = 200) {
+async function invokeService(res, serviceCall, successStatus = 200, exceptionData = null) {
   try {
     return sendServiceResult(res, await serviceCall(), successStatus);
   } catch {
+    if (exceptionData) {
+      return sendServiceResult(res, {
+        ok: false,
+        error: { code: "system_error", status: 500 },
+        data: exceptionData,
+      });
+    }
     return sendKaiError(res, "system_error");
   }
 }
@@ -400,6 +472,7 @@ function sprint2MappedActorContext(req = {}) {
 
 router.use(requireKaiSprint2Enabled);
 router.use(setKaiSprint2NoStore);
+router.use(attachTemporarySafeIntakeRouteLogger);
 
 function statusData(env = process.env) {
   const uploadFeaturesEnabled = areKaiSprint2UploadFeaturesEnabled(env);
@@ -544,7 +617,7 @@ router.post("/admin/files/:intakeFileId/confirm-upload", async (req, res) => {
       ...identifiers,
       now: new Date().toISOString(),
     });
-  });
+  }, 200, { exact_verification_phase: "confirm_upload_route_service" });
 });
 
 router.post("/admin/batches/:intakeBatchId/files/upload-url", async (req, res) => {
