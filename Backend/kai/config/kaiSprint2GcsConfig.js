@@ -31,6 +31,15 @@ function hasCompleteGateBGcsUploadSigningConfig(env = process.env) {
   );
 }
 
+function hasCompleteGateBGcsParserReaderConfig(env = process.env) {
+  const bucketName = env.KAI_GATE_B1_GCS_BUCKET_NAME;
+  return (
+    typeof bucketName === "string"
+    && SAFE_BUCKET_NAME_PATTERN.test(bucketName)
+    && isUsableGcsTargetPrincipal(env.KAI_GATE_B1_GCS_PARSER_READER_TARGET_PRINCIPAL)
+  );
+}
+
 // Missing or malformed configuration fails closed: returns { ok: false }
 // rather than throwing, so a misconfigured environment never crashes
 // request handling - it simply leaves the provider disabled.
@@ -43,6 +52,7 @@ export function readKaiGateC1GcsConfig(env = process.env) {
     ok: true,
     bucketName,
     uploadSigningTargetPrincipal: env.KAI_GATE_B1_GCS_UPLOAD_SIGNER_TARGET_PRINCIPAL || null,
+    parserReaderTargetPrincipal: env.KAI_GATE_B1_GCS_PARSER_READER_TARGET_PRINCIPAL || null,
     signedUploadExpirySeconds: KAI_GATE_C1_GCS_DEFAULTS.signedUploadExpirySeconds,
     maxUploadSizeBytes: KAI_GATE_C1_GCS_DEFAULTS.maxUploadSizeBytes,
   };
@@ -55,23 +65,47 @@ export function isKaiGateC1GcsProviderEnabled(env = process.env) {
   return isEnabledValue(env.KAI_GATE_C1_GCS_PROVIDER_ENABLED) || hasCompleteGateBGcsUploadSigningConfig(env);
 }
 
-export function createConfiguredGoogleCloudStorageProvider(env = process.env, {
+export function isKaiGateB1GcsParserReaderProviderEnabled(env = process.env) {
+  return hasCompleteGateBGcsParserReaderConfig(env);
+}
+
+function createConfiguredGoogleCloudStorageProviderForTarget(env = process.env, {
   createStorageClientFactory = createImpersonatedStorageClientFactory,
+  targetPrincipal,
+  enabled,
 } = {}) {
   const config = readKaiGateC1GcsConfig(env);
   if (!config.ok) {
     return createGoogleCloudStorageProvider({ enabled: false });
   }
-  if (!isUsableGcsTargetPrincipal(config.uploadSigningTargetPrincipal)) {
+  if (!isUsableGcsTargetPrincipal(targetPrincipal)) {
     return createGoogleCloudStorageProvider({ enabled: false });
   }
   return createGoogleCloudStorageProvider({
     bucketName: config.bucketName,
     signedUploadExpirySeconds: config.signedUploadExpirySeconds,
     maxUploadSizeBytes: config.maxUploadSizeBytes,
-    enabled: isKaiGateC1GcsProviderEnabled(env),
+    enabled,
     storageClientFactory: createStorageClientFactory({
-      targetPrincipal: config.uploadSigningTargetPrincipal,
+      targetPrincipal,
     }),
+  });
+}
+
+export function createConfiguredGoogleCloudStorageProvider(env = process.env, options = {}) {
+  const config = readKaiGateC1GcsConfig(env);
+  return createConfiguredGoogleCloudStorageProviderForTarget(env, {
+    ...options,
+    targetPrincipal: config.ok ? config.uploadSigningTargetPrincipal : null,
+    enabled: isKaiGateC1GcsProviderEnabled(env),
+  });
+}
+
+export function createConfiguredGoogleCloudStorageParserReaderProvider(env = process.env, options = {}) {
+  const config = readKaiGateC1GcsConfig(env);
+  return createConfiguredGoogleCloudStorageProviderForTarget(env, {
+    ...options,
+    targetPrincipal: config.ok ? config.parserReaderTargetPrincipal : null,
+    enabled: isKaiGateB1GcsParserReaderProviderEnabled(env),
   });
 }

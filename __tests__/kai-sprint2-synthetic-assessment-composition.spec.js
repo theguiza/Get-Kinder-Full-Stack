@@ -380,6 +380,76 @@ test("GCS-backed security assessment reads only the privately bound exact genera
   assert.doesNotMatch(JSON.stringify(result), /1700000000000001|private\/gcs|object\.pdf|gcs_generation|storage_object_key/i);
 });
 
+test("GCS-backed security assessment prefers the parser/read provider over the signer provider", async () => {
+  const selectedBytes = Buffer.from("gcs parser reader bytes\n", "utf8");
+  const selected = factsFor({
+    organizationId: "org-gcs-reader",
+    intakeFileId: "file-gcs-reader",
+    bytes: selectedBytes,
+    declaredMime: "application/pdf",
+    extension: ".pdf",
+  });
+  const enqueue = createSyntheticSecurityAssessmentEnqueue();
+  assert.equal(enqueue.enqueueSecurityAssessment(selected).ok, true);
+  const calls = [];
+
+  const result = await executeSyntheticAssessmentFromEnqueueRecord(selectionFromFacts(selected), {
+    securityAssessmentEnqueue: enqueue,
+    uploadLifecycleRepository: {
+      async resolveGcsGenerationBinding(input) {
+        calls.push(["resolve", input]);
+        return {
+          ok: true,
+          data: {
+            object_version_id: selected.objectVersionId,
+            gcs_generation: "1700000000000001",
+          },
+        };
+      },
+    },
+    async getIntakeFileMetadata(organizationId, intakeFileId) {
+      calls.push(["metadata", { organizationId, intakeFileId }]);
+      return {
+        organization_id: selected.organizationId,
+        intake_file_id: selected.intakeFileId,
+        storage_provider: "gcs",
+        storage_object_key: "private/gcs/parser-reader.pdf",
+      };
+    },
+    gcsProvider: {
+      enabled: true,
+      async openExactGenerationReadStream() {
+        throw new Error("signer provider must not perform exact-generation reads");
+      },
+    },
+    gcsParserReaderProvider: {
+      enabled: true,
+      async openExactGenerationReadStream(input) {
+        calls.push(["reader-open", input]);
+        return {
+          ok: true,
+          data: {
+            size_bytes: selectedBytes.byteLength,
+            byte_source: byteSource([selectedBytes]),
+          },
+        };
+      },
+    },
+    internalSecurityAssessmentExecutor: createInternalSecurityAssessmentExecutor({
+      async assessor(input) {
+        assert.deepEqual(input.bytes, selectedBytes);
+        return { policy: "pass" };
+      },
+    }),
+  });
+
+  assert.deepEqual(result, { policy: "pass" });
+  assert.deepEqual(calls.at(-1), ["reader-open", {
+    objectKey: "private/gcs/parser-reader.pdf",
+    gcsGeneration: "1700000000000001",
+  }]);
+});
+
 test("repeated explicit execution does not consume, complete, or mutate the enqueue snapshot", async () => {
   const bytes = Buffer.from("repeatable safe text\n", "utf8");
   const selected = factsFor({ bytes });

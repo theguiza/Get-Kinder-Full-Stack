@@ -1,13 +1,20 @@
 import * as intakeService from "./kaiIntakeService.js";
-import { createConfiguredGoogleCloudStorageProvider } from "../config/kaiSprint2GcsConfig.js";
+import {
+  createConfiguredGoogleCloudStorageParserReaderProvider,
+  createConfiguredGoogleCloudStorageProvider,
+} from "../config/kaiSprint2GcsConfig.js";
 import { createPostgresUploadLifecycleRepository } from "../upload/postgresUploadLifecycleRepository.js";
 
 let runtimeDependencies = null;
 
 export function createKaiIntakeRuntimeDependencies(env = process.env, options = {}) {
+  const gcsUploadSignerProvider = createConfiguredGoogleCloudStorageProvider(env, options);
+  const gcsParserReaderProvider = createConfiguredGoogleCloudStorageParserReaderProvider(env, options);
   return Object.freeze({
     env,
-    gcsProvider: createConfiguredGoogleCloudStorageProvider(env, options),
+    gcsProvider: gcsUploadSignerProvider,
+    gcsUploadSignerProvider,
+    gcsParserReaderProvider,
     uploadLifecycleRepository: createPostgresUploadLifecycleRepository(),
   });
 }
@@ -17,10 +24,17 @@ function getRuntimeDependencies() {
   return runtimeDependencies;
 }
 
-function mergeRuntimeDependencies(dependencies = {}) {
+function mergeRuntimeDependencies(dependencies = {}, { gcsProviderKey = "gcsProvider" } = {}) {
+  const runtime = getRuntimeDependencies();
+  const operationGcsProvider =
+    dependencies.gcsProvider ||
+    dependencies[gcsProviderKey] ||
+    runtime[gcsProviderKey] ||
+    runtime.gcsProvider;
   return {
-    ...getRuntimeDependencies(),
+    ...runtime,
     ...dependencies,
+    gcsProvider: operationGcsProvider,
   };
 }
 
@@ -55,9 +69,13 @@ export async function uploadReservedIntakeFile(input = {}, dependencies = {}) {
 }
 
 export async function requestUploadUrl(input = {}, dependencies = {}) {
-  return intakeService.requestUploadUrl(input, mergeRuntimeDependencies(dependencies));
+  return intakeService.requestUploadUrl(input, mergeRuntimeDependencies(dependencies, {
+    gcsProviderKey: "gcsUploadSignerProvider",
+  }));
 }
 
 export async function confirmUpload(input = {}, dependencies = {}) {
-  return intakeService.confirmUpload(input, mergeRuntimeDependencies(dependencies));
+  return intakeService.confirmUpload(input, mergeRuntimeDependencies(dependencies, {
+    gcsProviderKey: "gcsParserReaderProvider",
+  }));
 }

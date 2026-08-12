@@ -36,6 +36,10 @@ const configuredUploadEnv = {
   KAI_GATE_B1_GCS_BUCKET_NAME: "gate-b1-runtime-synthetic-bucket",
   KAI_GATE_B1_GCS_UPLOAD_SIGNER_TARGET_PRINCIPAL: "upload-signing@example.invalid",
 };
+const configuredSeparatedEnv = {
+  ...configuredUploadEnv,
+  KAI_GATE_B1_GCS_PARSER_READER_TARGET_PRINCIPAL: "parser-reader@example.invalid",
+};
 const now = "2026-08-09T10:00:00.000Z";
 const bytes = Buffer.from("gate c2 runtime bytes");
 const checksum = createHash("sha256").update(bytes).digest("hex");
@@ -96,7 +100,7 @@ function gcsProvider() {
   };
 }
 
-function signingStorageClient() {
+function storageClient({ signingPrincipal = "upload-signing@example.invalid" } = {}) {
   const calls = {
     sign: [],
     bucket: [],
@@ -107,7 +111,7 @@ function signingStorageClient() {
   return {
     calls,
     storage: {
-      _kaiGcsSigningPrincipal: "upload-signing@example.invalid",
+      _kaiGcsSigningPrincipal: signingPrincipal,
       _kaiGcsSigner: {
         async sign(stringToSign) {
           calls.sign.push(stringToSign);
@@ -167,7 +171,7 @@ async function seededConfiguredRuntime({ envOverride = configuredUploadEnv } = {
   });
   assert.equal(created.ok, true);
 
-  const signingClient = signingStorageClient();
+  const signingClient = storageClient();
   const factoryCalls = [];
   const deps = createKaiIntakeRuntimeDependencies(envOverride, {
     createStorageClientFactory({ targetPrincipal }) {
@@ -183,6 +187,43 @@ async function seededConfiguredRuntime({ envOverride = configuredUploadEnv } = {
     },
   });
   return { factoryCalls, signingClient, restore };
+}
+
+async function seededSeparatedConfiguredRuntime() {
+  const uploadLifecycleRepository = createInMemoryUploadLifecycleRepository();
+  const created = await uploadLifecycleRepository.createReservedUploadLifecycle({
+    organizationId: ids.organizationId,
+    intakeBatchId: ids.intakeBatchId,
+    intakeFileId: ids.intakeFileId,
+    now,
+  });
+  assert.equal(created.ok, true);
+
+  const signerClient = storageClient({
+    signingPrincipal: configuredSeparatedEnv.KAI_GATE_B1_GCS_UPLOAD_SIGNER_TARGET_PRINCIPAL,
+  });
+  const readerClient = storageClient({
+    signingPrincipal: configuredSeparatedEnv.KAI_GATE_B1_GCS_PARSER_READER_TARGET_PRINCIPAL,
+  });
+  const clientsByPrincipal = new Map([
+    [configuredSeparatedEnv.KAI_GATE_B1_GCS_UPLOAD_SIGNER_TARGET_PRINCIPAL, signerClient],
+    [configuredSeparatedEnv.KAI_GATE_B1_GCS_PARSER_READER_TARGET_PRINCIPAL, readerClient],
+  ]);
+  const factoryCalls = [];
+  const deps = createKaiIntakeRuntimeDependencies(configuredSeparatedEnv, {
+    createStorageClientFactory({ targetPrincipal }) {
+      factoryCalls.push({ targetPrincipal });
+      return () => clientsByPrincipal.get(targetPrincipal).storage;
+    },
+  });
+  const restore = setKaiIntakeRuntimeDependenciesForTest({
+    ...deps,
+    uploadLifecycleRepository,
+    async getIntakeFileMetadata() {
+      return metadata();
+    },
+  });
+  return { factoryCalls, signerClient, readerClient, restore };
 }
 
 test("Gate C-2 runtime dependency factory is dormant and fail-closed when unconfigured", () => {
@@ -212,6 +253,36 @@ test("Gate C-2 mounted runtime requestUploadUrl uses the configured Gate B uploa
     assert.match(signed.data.upload_url, /X-Goog-Algorithm=GOOG4-RSA-SHA256/);
     assert.equal(signed.data.upload_headers["x-goog-if-generation-match"], "0");
     assert.match(signed.data.upload_headers["x-goog-content-length-range"], /^0,\d+$/);
+  } finally {
+    restore();
+  }
+});
+
+test("Gate C-2 mounted runtime composes separate signer and parser/read GCS providers", async () => {
+  const { factoryCalls, signerClient, readerClient, restore } = await seededSeparatedConfiguredRuntime();
+  try {
+    const signed = await requestUploadUrl(input());
+    assert.equal(signed.ok, true);
+
+    const confirmed = await confirmUpload(input());
+    assert.equal(confirmed.ok, true);
+    assert.equal(confirmed.data.upload_state, "confirmed");
+
+    assert.deepEqual(factoryCalls.map((call) => call.targetPrincipal), [
+      configuredSeparatedEnv.KAI_GATE_B1_GCS_UPLOAD_SIGNER_TARGET_PRINCIPAL,
+      configuredSeparatedEnv.KAI_GATE_B1_GCS_PARSER_READER_TARGET_PRINCIPAL,
+    ]);
+
+    assert.equal(signerClient.calls.sign.length, 1);
+    assert.equal(signerClient.calls.getMetadata.length, 0);
+    assert.equal(signerClient.calls.createReadStream.length, 0);
+
+    assert.equal(readerClient.calls.sign.length, 0);
+    assert.equal(readerClient.calls.getMetadata.length, 3);
+    assert.equal(readerClient.calls.createReadStream.length, 1);
+    assert.equal(readerClient.calls.file[0].opts, undefined);
+    assert.equal(readerClient.calls.file[1].opts.generation, 1700000000000001);
+    assert.equal(readerClient.calls.file[2].opts.generation, 1700000000000001);
   } finally {
     restore();
   }
