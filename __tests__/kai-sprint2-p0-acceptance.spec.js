@@ -68,9 +68,9 @@ const organizationId = "a5d17c5a-c55f-43af-9b21-fe63aafe733f";
 const otherOrganizationId = "b5d17c5a-c55f-43af-9b21-fe63aafe733f";
 const engagementId = "2e426ea1-2be3-4e48-b80f-9783ddbacda0";
 const actorUserId = "7fe568b1-5c05-4c42-bb1f-6e20de216c7b";
-const now = "2026-07-23T10:00:00.000Z";
-const later = "2026-07-23T10:01:00.000Z";
-const expiredNow = "2026-07-24T10:00:00.000Z";
+const now = new Date().toISOString();
+const later = new Date(Date.parse(now) + 60 * 1000).toISOString();
+const expiredNow = new Date(Date.parse(now) + 24 * 60 * 60 * 1000).toISOString();
 const objectVersionIds = [
   "ov_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "ov_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",

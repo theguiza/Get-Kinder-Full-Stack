@@ -542,6 +542,7 @@ router.post("/admin/files/:intakeFileId/confirm-upload", async (req, res) => {
     return service.confirmUpload({
       ...requestContext(req, "/api/kai/sprint2/intake/admin/files/:intakeFileId/confirm-upload"),
       ...identifiers,
+      now: new Date().toISOString(),
     });
   });
 });
