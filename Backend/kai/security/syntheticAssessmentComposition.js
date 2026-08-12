@@ -158,6 +158,7 @@ export async function executeSyntheticAssessmentFromEnqueueRecord(
     securityAssessmentEnqueue,
     storageAdapter,
     gcsProvider,
+    gcsParserReaderProvider,
     uploadLifecycleRepository,
     getIntakeFileMetadata,
     signal,
@@ -177,9 +178,10 @@ export async function executeSyntheticAssessmentFromEnqueueRecord(
   if (matches.length > 1) return uploadLifecycleFailure("conflict_current_state_changed");
 
   const facts = selectedTrustedFacts(matches[0]);
+  const exactGenerationReadProvider = gcsParserReaderProvider || gcsProvider;
   const effectiveStorageAdapter = storageAdapter || createBoundGcsAssessmentStorageAdapter({
     facts,
-    gcsProvider,
+    gcsProvider: exactGenerationReadProvider,
     uploadLifecycleRepository,
     getIntakeFileMetadata,
   });
