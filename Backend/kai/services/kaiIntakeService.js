@@ -1563,6 +1563,9 @@ async function confirmGcsObjectVersion({
         {
           exact_verification_phase: "gcs_head_object",
           gcs_head_object_failure_code: typeof head?.error?.code === "string" ? head.error.code : "unclassified",
+          ...(typeof head?.data?.reason === "string" ? { gcs_head_object_failure_reason: head.data.reason } : {}),
+          ...(Number.isSafeInteger(head?.data?.provider_http_status) ? { provider_http_status: head.data.provider_http_status } : {}),
+          ...(typeof head?.data?.provider_status === "string" ? { provider_status: head.data.provider_status } : {}),
         },
       );
     }

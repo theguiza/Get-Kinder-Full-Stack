@@ -309,11 +309,15 @@ export class GoogleCloudStorageProvider {
       const [metadata] = await file.getMetadata();
       const candidateGeneration = String(metadata?.generation ?? "");
       if (!isPrecisionSafeGcsGeneration(candidateGeneration)) {
-        return sanitizedGcsFailure("head_object", "system_error", "Object metadata generation was not usable.");
+        return sanitizedGcsFailure("head_object", "system_error", "Object metadata generation was not usable.", {
+          reason: "generation_unusable",
+        });
       }
       const sizeBytes = Number(metadata.size);
       if (!Number.isSafeInteger(sizeBytes) || sizeBytes < 0) {
-        return sanitizedGcsFailure("head_object", "system_error", "Object metadata size was not usable.");
+        return sanitizedGcsFailure("head_object", "system_error", "Object metadata size was not usable.", {
+          reason: "size_unusable",
+        });
       }
       return {
         ok: true,
@@ -326,7 +330,16 @@ export class GoogleCloudStorageProvider {
       if (error?.code === 404) {
         return sanitizedGcsFailure("head_object", "not_found", "Object was not found at the trusted key.");
       }
-      return sanitizedGcsFailure("head_object", "system_error", "Unable to head the object.");
+      const providerExceptionData = { reason: "provider_exception" };
+      const httpStatus = providerHttpStatus(error);
+      const status = providerStatus(error);
+      if (Number.isSafeInteger(httpStatus) && httpStatus >= 100 && httpStatus <= 599) {
+        providerExceptionData.provider_http_status = httpStatus;
+      }
+      if (typeof status === "string" && /^[A-Z_]{1,64}$/.test(status)) {
+        providerExceptionData.provider_status = status;
+      }
+      return sanitizedGcsFailure("head_object", "system_error", "Unable to head the object.", providerExceptionData);
     }
   }
 
