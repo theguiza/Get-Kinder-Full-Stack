@@ -56,6 +56,9 @@ export function sendServiceResult(res, result, successStatus = 200) {
   });
 }
 
+const EXACT_VERIFICATION_PHASE_PATTERN =
+  /^(confirm_upload_authorization|upload_lifecycle_read|gcs_generation_binding_lookup|gcs_head_object|gcs_stat_exact_generation|gcs_open_exact_generation|gcs_stream_exact_generation|gcs_size_check|gcs_checksum_check|gcs_lifecycle_start|gcs_lifecycle_complete|gcs_generation_bind|gcs_lifecycle_confirm|confirm_upload_route_service)$/;
+
 const SAFE_SERVICE_WARNING_MESSAGES = Object.freeze({
   blocked_attempt_audit_not_written: "Blocked-attempt audit was not written.",
   blocked_attempt_audit_failed: "Blocked-attempt audit failed without changing the validator response.",
@@ -101,6 +104,12 @@ function sanitizeServiceData(data) {
     && /^(initialize_storage_client|resolve_signing_context|sign_v4_string)$/.test(data.failure_phase)
   ) {
     sanitized.failure_phase = data.failure_phase;
+  }
+  if (
+    typeof data.exact_verification_phase === "string"
+    && EXACT_VERIFICATION_PHASE_PATTERN.test(data.exact_verification_phase)
+  ) {
+    sanitized.exact_verification_phase = data.exact_verification_phase;
   }
   if (
     typeof data.diagnostic_code === "string"
@@ -341,10 +350,17 @@ function validateReviewQueueStatusRequestOrSend(req, res) {
   return identifiers;
 }
 
-async function invokeService(res, serviceCall, successStatus = 200) {
+async function invokeService(res, serviceCall, successStatus = 200, exceptionData = null) {
   try {
     return sendServiceResult(res, await serviceCall(), successStatus);
   } catch {
+    if (exceptionData) {
+      return sendServiceResult(res, {
+        ok: false,
+        error: { code: "system_error", status: 500 },
+        data: exceptionData,
+      });
+    }
     return sendKaiError(res, "system_error");
   }
 }
@@ -544,7 +560,7 @@ router.post("/admin/files/:intakeFileId/confirm-upload", async (req, res) => {
       ...identifiers,
       now: new Date().toISOString(),
     });
-  });
+  }, 200, { exact_verification_phase: "confirm_upload_route_service" });
 });
 
 router.post("/admin/batches/:intakeBatchId/files/upload-url", async (req, res) => {

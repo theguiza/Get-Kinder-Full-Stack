@@ -342,11 +342,15 @@ test("Gate C-2 mounted runtime facade supplies GCS provider and lifecycle reposi
 
 test("Gate C-2 mounted routes lazy-import runtime composition without constructing providers in route handlers", () => {
   const routeSource = readFileSync("Backend/kai/routes/sprint2IntakeApi.js", "utf8");
+  const routeSourceWithoutSafePhaseAllowlist = routeSource.replace(
+    /const EXACT_VERIFICATION_PHASE_PATTERN =\n  \/[^;]+;\n/,
+    "",
+  );
   const runtimeSource = readFileSync("Backend/kai/services/kaiIntakeRuntimeService.js", "utf8");
   const indexSource = readFileSync("index.js", "utf8");
 
   assert.match(routeSource, /import\("\.\.\/services\/kaiIntakeRuntimeService\.js"\)/);
-  assert.doesNotMatch(routeSource, /createConfiguredGoogleCloudStorageProvider|createPostgresUploadLifecycleRepository|kaiDb|pool\.query|storage_object_key|gcs_generation/);
+  assert.doesNotMatch(routeSourceWithoutSafePhaseAllowlist, /createConfiguredGoogleCloudStorageProvider|createPostgresUploadLifecycleRepository|kaiDb|pool\.query|storage_object_key|gcs_generation/);
   assert.match(runtimeSource, /createConfiguredGoogleCloudStorageProvider/);
   assert.match(runtimeSource, /createPostgresUploadLifecycleRepository/);
   assert.match(indexSource, /"\/api\/kai\/sprint2\/intake"[\s\S]*sprint2IntakeApiRouter/);

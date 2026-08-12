@@ -284,9 +284,71 @@ test("Gate C-2A confirmUpload fails closed when no object exists at the trusted 
   const result = await confirmUpload(confirmInput(), confirmDeps({ lifecycleRepository, gcsProvider }));
   assert.equal(result.ok, false);
   assert.equal(result.error.code, "not_found");
+  assert.equal(result.data.exact_verification_phase, "gcs_head_object");
 
   const lifecycle = await lifecycleRepository.getUploadLifecycle({ organizationId: ids.organizationId, intakeFileId: ids.intakeFileId });
   assert.equal(lifecycle.data.record.upload_state, "reserved");
+});
+
+test("Gate C-2A confirmUpload reports a safe phase when the metadata authorization read throws", async () => {
+  const lifecycleRepository = await seededReservedRepository();
+  const result = await confirmUpload(confirmInput(), {
+    env: enabledUploadEnv,
+    gcsProvider: fakeGcsProvider(),
+    uploadLifecycleRepository: lifecycleRepository,
+    async getIntakeFileMetadata() {
+      throw new Error(`raw metadata read failure for bucket=${bucketSecret} object=${objectKey}`);
+    },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "system_error");
+  assert.equal(result.data.exact_verification_phase, "confirm_upload_authorization");
+  assert.doesNotMatch(JSON.stringify(result), new RegExp(bucketSecret));
+  assert.doesNotMatch(JSON.stringify(result), /safe\.pdf/);
+});
+
+test("Gate C-2A confirmUpload reports a safe phase when lifecycle read throws", async () => {
+  const lifecycleRepository = await seededReservedRepository();
+  const throwingRepository = {
+    ...lifecycleRepository,
+    async getUploadLifecycle() {
+      throw new Error(`raw lifecycle read failure for bucket=${bucketSecret} object=${objectKey}`);
+    },
+  };
+  const result = await confirmUpload(confirmInput(), confirmDeps({ lifecycleRepository: throwingRepository, gcsProvider: fakeGcsProvider() }));
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "system_error");
+  assert.equal(result.data.exact_verification_phase, "upload_lifecycle_read");
+  assert.doesNotMatch(JSON.stringify(result), new RegExp(bucketSecret));
+  assert.doesNotMatch(JSON.stringify(result), /safe\.pdf/);
+});
+
+test("Gate C-2A confirmUpload reports a safe phase when lifecycle read returns system_error", async () => {
+  const lifecycleRepository = await seededReservedRepository();
+  const failingRepository = {
+    ...lifecycleRepository,
+    async getUploadLifecycle() {
+      return {
+        ok: false,
+        data: {
+          storage_object_key: objectKey,
+          gcs_generation: "1700000000000001",
+        },
+        error: {
+          code: "system_error",
+          status: 500,
+          message: `raw lifecycle failure for bucket=${bucketSecret}`,
+        },
+      };
+    },
+  };
+  const result = await confirmUpload(confirmInput(), confirmDeps({ lifecycleRepository: failingRepository, gcsProvider: fakeGcsProvider() }));
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "system_error");
+  assert.equal(result.error.status, 500);
+  assert.deepEqual(result.data, { exact_verification_phase: "upload_lifecycle_read" });
+  assert.doesNotMatch(JSON.stringify(result), new RegExp(bucketSecret));
+  assert.doesNotMatch(JSON.stringify(result), /safe\.pdf|1700000000000001|gcs_generation|storage_object_key/);
 });
 
 test("Gate C-2A confirmUpload fails closed when the candidate generation does not survive exact-generation re-verification", async () => {
@@ -297,6 +359,7 @@ test("Gate C-2A confirmUpload fails closed when the candidate generation does no
   const result = await confirmUpload(confirmInput(), confirmDeps({ lifecycleRepository, gcsProvider }));
   assert.equal(result.ok, false);
   assert.equal(result.error.code, "system_error");
+  assert.equal(result.data.exact_verification_phase, "gcs_stat_exact_generation");
 
   const lifecycle = await lifecycleRepository.getUploadLifecycle({ organizationId: ids.organizationId, intakeFileId: ids.intakeFileId });
   assert.equal(lifecycle.data.record.upload_state, "reserved");
@@ -314,6 +377,7 @@ test("Gate C-2A confirmUpload fails closed on a streamed size mismatch and confi
   const result = await confirmUpload(confirmInput(), confirmDeps({ lifecycleRepository, gcsProvider }));
   assert.equal(result.ok, false);
   assert.equal(result.error.code, "system_error");
+  assert.equal(result.data.exact_verification_phase, "gcs_size_check");
 
   const lifecycle = await lifecycleRepository.getUploadLifecycle({ organizationId: ids.organizationId, intakeFileId: ids.intakeFileId });
   assert.equal(lifecycle.data.record.upload_state, "reserved");
@@ -335,6 +399,31 @@ test("Gate C-2A confirmUpload fails closed on a checksum mismatch and confirms n
   );
   assert.equal(result.ok, false);
   assert.equal(result.error.code, "checksum_mismatch");
+  assert.equal(result.data.exact_verification_phase, "gcs_checksum_check");
+
+  const lifecycle = await lifecycleRepository.getUploadLifecycle({ organizationId: ids.organizationId, intakeFileId: ids.intakeFileId });
+  assert.equal(lifecycle.data.record.upload_state, "reserved");
+});
+
+test("Gate C-2A confirmUpload reports a safe phase when the exact-generation stream errors", async () => {
+  const lifecycleRepository = await seededReservedRepository();
+  const failingStream = new Readable({
+    read() {
+      this.destroy(new Error(`raw stream failure for bucket=${bucketSecret} object=${objectKey}`));
+    },
+  });
+  const gcsProvider = fakeGcsProvider({
+    openExactGenerationReadStream: async () => ({
+      ok: true,
+      data: { size_bytes: exactBytes.byteLength, byte_source: failingStream },
+    }),
+  });
+  const result = await confirmUpload(confirmInput(), confirmDeps({ lifecycleRepository, gcsProvider }));
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "system_error");
+  assert.equal(result.data.exact_verification_phase, "gcs_stream_exact_generation");
+  assert.doesNotMatch(JSON.stringify(result), new RegExp(bucketSecret));
+  assert.doesNotMatch(JSON.stringify(result), /safe\.pdf/);
 
   const lifecycle = await lifecycleRepository.getUploadLifecycle({ organizationId: ids.organizationId, intakeFileId: ids.intakeFileId });
   assert.equal(lifecycle.data.record.upload_state, "reserved");
@@ -357,6 +446,7 @@ test("Gate C-2A a failure between the uploaded_unconfirmed transition and the ge
   const firstAttempt = await confirmUpload(confirmInput(), confirmDeps({ lifecycleRepository: flakyRepository, gcsProvider }));
   assert.equal(firstAttempt.ok, false);
   assert.equal(firstAttempt.error.code, "system_error");
+  assert.equal(firstAttempt.data.exact_verification_phase, "gcs_generation_bind");
 
   const strandedLifecycle = await lifecycleRepository.getUploadLifecycle({ organizationId: ids.organizationId, intakeFileId: ids.intakeFileId });
   assert.equal(strandedLifecycle.data.record.upload_state, "uploaded_unconfirmed");
@@ -371,6 +461,53 @@ test("Gate C-2A a failure between the uploaded_unconfirmed transition and the ge
   const binding = await lifecycleRepository.resolveGcsGenerationBinding({ organizationId: ids.organizationId, intakeFileId: ids.intakeFileId });
   assert.equal(binding.data.gcs_generation, "1700000000000001");
   assert.equal(binding.data.object_version_id, strandedObjectVersionId);
+});
+
+test("Gate C-2A confirmUpload reports safe phases for thrown generation lookup and lifecycle transitions", async () => {
+  for (const [phase, repositoryOverride] of [
+    ["gcs_generation_binding_lookup", {
+      async resolveGcsGenerationBinding() {
+        throw new Error(`raw lookup failure for bucket=${bucketSecret} object=${objectKey}`);
+      },
+    }],
+    ["gcs_lifecycle_start", {
+      async transitionUploadLifecycle(input) {
+        if (input.newUploadState === "upload_started") {
+          throw new Error(`raw start failure for bucket=${bucketSecret} object=${objectKey}`);
+        }
+        return this.__base.transitionUploadLifecycle(input);
+      },
+    }],
+    ["gcs_lifecycle_complete", {
+      async transitionUploadLifecycle(input) {
+        if (input.newUploadState === "uploaded_unconfirmed") {
+          throw new Error(`raw complete failure for bucket=${bucketSecret} object=${objectKey}`);
+        }
+        return this.__base.transitionUploadLifecycle(input);
+      },
+    }],
+    ["gcs_lifecycle_confirm", {
+      async transitionUploadLifecycle(input) {
+        if (input.newUploadState === "confirmed") {
+          throw new Error(`raw confirm failure for bucket=${bucketSecret} object=${objectKey}`);
+        }
+        return this.__base.transitionUploadLifecycle(input);
+      },
+    }],
+  ]) {
+    const lifecycleRepository = await seededReservedRepository();
+    const throwingRepository = {
+      ...lifecycleRepository,
+      __base: lifecycleRepository,
+      ...repositoryOverride,
+    };
+    const result = await confirmUpload(confirmInput(), confirmDeps({ lifecycleRepository: throwingRepository, gcsProvider: fakeGcsProvider() }));
+    assert.equal(result.ok, false, phase);
+    assert.equal(result.error.code, "system_error", phase);
+    assert.equal(result.data.exact_verification_phase, phase);
+    assert.doesNotMatch(JSON.stringify(result), new RegExp(bucketSecret));
+    assert.doesNotMatch(JSON.stringify(result), /safe\.pdf/);
+  }
 });
 
 test("Gate C-2A confirmUpload replay after full confirmation reuses the bound generation without a fresh headObject discovery", async () => {
