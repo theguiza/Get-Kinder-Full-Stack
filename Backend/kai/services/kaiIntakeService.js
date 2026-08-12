@@ -1566,6 +1566,11 @@ async function confirmGcsObjectVersion({
           ...(typeof head?.data?.reason === "string" ? { gcs_head_object_failure_reason: head.data.reason } : {}),
           ...(Number.isSafeInteger(head?.data?.provider_http_status) ? { provider_http_status: head.data.provider_http_status } : {}),
           ...(typeof head?.data?.provider_status === "string" ? { provider_status: head.data.provider_status } : {}),
+          ...(typeof head?.data?.google_api === "string" ? { google_api: head.data.google_api } : {}),
+          ...(typeof head?.data?.error_info_reason === "string" ? { error_info_reason: head.data.error_info_reason } : {}),
+          ...(typeof head?.data?.error_info_domain === "string" ? { error_info_domain: head.data.error_info_domain } : {}),
+          ...(typeof head?.data?.error_info_service === "string" ? { error_info_service: head.data.error_info_service } : {}),
+          ...(typeof head?.data?.error_info_permission === "string" ? { error_info_permission: head.data.error_info_permission } : {}),
         },
       );
     }

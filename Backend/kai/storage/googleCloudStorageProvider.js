@@ -94,6 +94,68 @@ function providerHttpStatus(error) {
   return null;
 }
 
+const GOOGLE_API_HOSTS_BY_HOSTNAME = {
+  "iamcredentials.googleapis.com": "iamcredentials",
+  "storage.googleapis.com": "storage",
+  "sts.googleapis.com": "sts",
+  "oauth2.googleapis.com": "oauth",
+};
+
+// Classifies which Google API produced a provider error from the request
+// URL only - never returns the URL itself, only a fixed enum member.
+function googleApiFromError(error) {
+  const candidateUrls = [
+    error?.response?.config?.url,
+    error?.config?.url,
+    error?.response?.request?.responseURL,
+  ];
+  for (const candidate of candidateUrls) {
+    if (typeof candidate !== "string" || candidate.length === 0) continue;
+    let hostname;
+    try {
+      hostname = new URL(candidate).hostname;
+    } catch {
+      continue;
+    }
+    const known = GOOGLE_API_HOSTS_BY_HOSTNAME[hostname];
+    if (known) return known;
+  }
+  return "unknown";
+}
+
+const ERROR_INFO_REASON_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/;
+const ERROR_INFO_DOMAIN_PATTERN = /^[a-z0-9](?:[a-z0-9.-]{0,126}[a-z0-9])?$/;
+const ERROR_INFO_PERMISSION_PATTERN = /^[a-zA-Z0-9_]{1,64}(?:\.[a-zA-Z0-9_]{1,64}){1,4}$/;
+
+// Extracts only the fixed, validated google.rpc.ErrorInfo fields from a
+// provider error's response body, if Google supplied that structured detail.
+// Any value that fails its pattern is dropped rather than passed through.
+function googleErrorInfo(error) {
+  const details = error?.response?.data?.error?.details;
+  if (!Array.isArray(details)) return null;
+  const errorInfo = details.find(
+    (detail) => detail && detail["@type"] === "type.googleapis.com/google.rpc.ErrorInfo",
+  );
+  if (!errorInfo || typeof errorInfo !== "object") return null;
+
+  const data = {};
+  if (typeof errorInfo.reason === "string" && ERROR_INFO_REASON_PATTERN.test(errorInfo.reason)) {
+    data.error_info_reason = errorInfo.reason;
+  }
+  if (typeof errorInfo.domain === "string" && ERROR_INFO_DOMAIN_PATTERN.test(errorInfo.domain)) {
+    data.error_info_domain = errorInfo.domain;
+  }
+  const service = errorInfo.metadata?.service;
+  if (typeof service === "string" && ERROR_INFO_DOMAIN_PATTERN.test(service)) {
+    data.error_info_service = service;
+  }
+  const permission = errorInfo.metadata?.permission;
+  if (typeof permission === "string" && ERROR_INFO_PERMISSION_PATTERN.test(permission)) {
+    data.error_info_permission = permission;
+  }
+  return Object.keys(data).length > 0 ? data : null;
+}
+
 function diagnosticCodeForProviderError(error, failurePhase) {
   const explicitCode = error?._kaiGcsDiagnostic?.diagnostic_code;
   if (SAFE_DIAGNOSTIC_CODES.has(explicitCode)) return explicitCode;
@@ -339,6 +401,9 @@ export class GoogleCloudStorageProvider {
       if (typeof status === "string" && /^[A-Z_]{1,64}$/.test(status)) {
         providerExceptionData.provider_status = status;
       }
+      providerExceptionData.google_api = googleApiFromError(error);
+      const errorInfo = googleErrorInfo(error);
+      if (errorInfo) Object.assign(providerExceptionData, errorInfo);
       return sanitizedGcsFailure("head_object", "system_error", "Unable to head the object.", providerExceptionData);
     }
   }
