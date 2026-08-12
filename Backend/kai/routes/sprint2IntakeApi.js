@@ -156,6 +156,62 @@ function safeRequestId(req = {}) {
   return typeof value === "string" && /^[a-z0-9][a-z0-9_-]{0,127}$/i.test(value) ? value : null;
 }
 
+function safeHeaderId(req = {}, headerName) {
+  const value = req.get?.(headerName) || req.headers?.[String(headerName).toLowerCase()];
+  return typeof value === "string" && /^[a-z0-9][a-z0-9._:-]{0,127}$/i.test(value) ? value : null;
+}
+
+function safeOrganizationIdForLog(req = {}) {
+  const payload = requestPayload(req);
+  const value = normalizedUuid(req.query?.organization_id || payload.organization_id);
+  return KAI_SPRINT2_P0_PATTERNS.uuid.test(value) ? value : null;
+}
+
+function safeRoutePathForLog(req = {}) {
+  const value = typeof req.path === "string" ? req.path : "";
+  return /^\/[-_a-zA-Z0-9/:.]{0,255}$/.test(value) ? value : null;
+}
+
+function safeKaiResponseSummary(body) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return { errorCode: null, exactVerificationPhase: null };
+  }
+  const errorCode = typeof body.error?.code === "string" && Object.hasOwn(KAI_ERROR_STATUS, body.error.code)
+    ? body.error.code
+    : null;
+  const exactVerificationPhase =
+    typeof body.data?.exact_verification_phase === "string"
+    && EXACT_VERIFICATION_PHASE_PATTERN.test(body.data.exact_verification_phase)
+      ? body.data.exact_verification_phase
+      : null;
+  return { errorCode, exactVerificationPhase };
+}
+
+function logKaiSprint2IntakeRequest(req, res, responseBody) {
+  const { errorCode, exactVerificationPhase } = safeKaiResponseSummary(responseBody);
+  console.log("[kai-sprint2-intake-route]", {
+    method: req.method,
+    path: safeRoutePathForLog(req),
+    status: res.statusCode,
+    "x-request-id": safeRequestId(req),
+    "rndr-id": safeHeaderId(req, "rndr-id") || safeHeaderId(req, "x-render-request-id"),
+    organization_id: safeOrganizationIdForLog(req),
+    "error.code": errorCode,
+    exact_verification_phase: exactVerificationPhase,
+  });
+}
+
+function attachTemporarySafeIntakeRouteLogger(req, res, next) {
+  let responseBody = null;
+  const originalJson = res.json.bind(res);
+  res.json = (body) => {
+    responseBody = body;
+    return originalJson(body);
+  };
+  res.on("finish", () => logKaiSprint2IntakeRequest(req, res, responseBody));
+  next();
+}
+
 function requestContext(req = {}, route) {
   const payload = requestPayload(req);
   return {
@@ -416,6 +472,7 @@ function sprint2MappedActorContext(req = {}) {
 
 router.use(requireKaiSprint2Enabled);
 router.use(setKaiSprint2NoStore);
+router.use(attachTemporarySafeIntakeRouteLogger);
 
 function statusData(env = process.env) {
   const uploadFeaturesEnabled = areKaiSprint2UploadFeaturesEnabled(env);
