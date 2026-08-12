@@ -118,6 +118,12 @@ function sanitizeServiceData(data) {
     sanitized.gcs_head_object_failure_code = data.gcs_head_object_failure_code;
   }
   if (
+    typeof data.gcs_head_object_failure_reason === "string"
+    && /^(generation_unusable|size_unusable|provider_exception)$/.test(data.gcs_head_object_failure_reason)
+  ) {
+    sanitized.gcs_head_object_failure_reason = data.gcs_head_object_failure_reason;
+  }
+  if (
     typeof data.diagnostic_code === "string"
     && /^(source_credentials_unavailable|source_credentials_rejected|signing_unauthenticated|signing_permission_denied|signing_target_not_found|provider_unavailable_rate_limited|unclassified_signing_failure)$/.test(data.diagnostic_code)
   ) {
@@ -180,7 +186,14 @@ function safeRoutePathForLog(req = {}) {
 
 function safeKaiResponseSummary(body) {
   if (!body || typeof body !== "object" || Array.isArray(body)) {
-    return { errorCode: null, exactVerificationPhase: null, gcsHeadObjectFailureCode: null };
+    return {
+      errorCode: null,
+      exactVerificationPhase: null,
+      gcsHeadObjectFailureCode: null,
+      gcsHeadObjectFailureReason: null,
+      providerHttpStatus: null,
+      providerStatus: null,
+    };
   }
   const errorCode = typeof body.error?.code === "string" && Object.hasOwn(KAI_ERROR_STATUS, body.error.code)
     ? body.error.code
@@ -195,11 +208,40 @@ function safeKaiResponseSummary(body) {
     && /^(operation_not_enabled|validation_blocker|system_error|not_found|unhandled_exception|unclassified)$/.test(body.data.gcs_head_object_failure_code)
       ? body.data.gcs_head_object_failure_code
       : null;
-  return { errorCode, exactVerificationPhase, gcsHeadObjectFailureCode };
+  const gcsHeadObjectFailureReason =
+    typeof body.data?.gcs_head_object_failure_reason === "string"
+    && /^(generation_unusable|size_unusable|provider_exception)$/.test(body.data.gcs_head_object_failure_reason)
+      ? body.data.gcs_head_object_failure_reason
+      : null;
+  const providerHttpStatus =
+    Number.isSafeInteger(body.data?.provider_http_status)
+    && body.data.provider_http_status >= 100
+    && body.data.provider_http_status <= 599
+      ? body.data.provider_http_status
+      : null;
+  const providerStatus =
+    typeof body.data?.provider_status === "string" && /^[A-Z_]{1,64}$/.test(body.data.provider_status)
+      ? body.data.provider_status
+      : null;
+  return {
+    errorCode,
+    exactVerificationPhase,
+    gcsHeadObjectFailureCode,
+    gcsHeadObjectFailureReason,
+    providerHttpStatus,
+    providerStatus,
+  };
 }
 
 function logKaiSprint2IntakeRequest(req, res, responseBody) {
-  const { errorCode, exactVerificationPhase, gcsHeadObjectFailureCode } = safeKaiResponseSummary(responseBody);
+  const {
+    errorCode,
+    exactVerificationPhase,
+    gcsHeadObjectFailureCode,
+    gcsHeadObjectFailureReason,
+    providerHttpStatus,
+    providerStatus,
+  } = safeKaiResponseSummary(responseBody);
   console.log("[kai-sprint2-intake-route]", {
     method: req.method,
     path: safeRoutePathForLog(req),
@@ -210,6 +252,9 @@ function logKaiSprint2IntakeRequest(req, res, responseBody) {
     "error.code": errorCode,
     exact_verification_phase: exactVerificationPhase,
     gcs_head_object_failure_code: gcsHeadObjectFailureCode,
+    gcs_head_object_failure_reason: gcsHeadObjectFailureReason,
+    provider_http_status: providerHttpStatus,
+    provider_status: providerStatus,
   });
 }
 
