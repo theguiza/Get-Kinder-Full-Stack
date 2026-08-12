@@ -1553,13 +1553,17 @@ async function confirmGcsObjectVersion({
     } catch {
       return sanitizedExactVersionVerificationFailure("system_error", 500, {
         exact_verification_phase: "gcs_head_object",
+        gcs_head_object_failure_code: "unhandled_exception",
       });
     }
     if (head?.ok !== true) {
       return sanitizedExactVersionVerificationFailure(
         head?.error?.code === "not_found" ? "not_found" : "system_error",
         head?.error?.code === "not_found" ? 404 : 500,
-        { exact_verification_phase: "gcs_head_object" },
+        {
+          exact_verification_phase: "gcs_head_object",
+          gcs_head_object_failure_code: typeof head?.error?.code === "string" ? head.error.code : "unclassified",
+        },
       );
     }
     gcsGeneration = head.data.candidate_generation;

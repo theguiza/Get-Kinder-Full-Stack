@@ -112,6 +112,12 @@ function sanitizeServiceData(data) {
     sanitized.exact_verification_phase = data.exact_verification_phase;
   }
   if (
+    typeof data.gcs_head_object_failure_code === "string"
+    && /^(operation_not_enabled|validation_blocker|system_error|not_found|unhandled_exception|unclassified)$/.test(data.gcs_head_object_failure_code)
+  ) {
+    sanitized.gcs_head_object_failure_code = data.gcs_head_object_failure_code;
+  }
+  if (
     typeof data.diagnostic_code === "string"
     && /^(source_credentials_unavailable|source_credentials_rejected|signing_unauthenticated|signing_permission_denied|signing_target_not_found|provider_unavailable_rate_limited|unclassified_signing_failure)$/.test(data.diagnostic_code)
   ) {
@@ -174,7 +180,7 @@ function safeRoutePathForLog(req = {}) {
 
 function safeKaiResponseSummary(body) {
   if (!body || typeof body !== "object" || Array.isArray(body)) {
-    return { errorCode: null, exactVerificationPhase: null };
+    return { errorCode: null, exactVerificationPhase: null, gcsHeadObjectFailureCode: null };
   }
   const errorCode = typeof body.error?.code === "string" && Object.hasOwn(KAI_ERROR_STATUS, body.error.code)
     ? body.error.code
@@ -184,11 +190,16 @@ function safeKaiResponseSummary(body) {
     && EXACT_VERIFICATION_PHASE_PATTERN.test(body.data.exact_verification_phase)
       ? body.data.exact_verification_phase
       : null;
-  return { errorCode, exactVerificationPhase };
+  const gcsHeadObjectFailureCode =
+    typeof body.data?.gcs_head_object_failure_code === "string"
+    && /^(operation_not_enabled|validation_blocker|system_error|not_found|unhandled_exception|unclassified)$/.test(body.data.gcs_head_object_failure_code)
+      ? body.data.gcs_head_object_failure_code
+      : null;
+  return { errorCode, exactVerificationPhase, gcsHeadObjectFailureCode };
 }
 
 function logKaiSprint2IntakeRequest(req, res, responseBody) {
-  const { errorCode, exactVerificationPhase } = safeKaiResponseSummary(responseBody);
+  const { errorCode, exactVerificationPhase, gcsHeadObjectFailureCode } = safeKaiResponseSummary(responseBody);
   console.log("[kai-sprint2-intake-route]", {
     method: req.method,
     path: safeRoutePathForLog(req),
@@ -198,6 +209,7 @@ function logKaiSprint2IntakeRequest(req, res, responseBody) {
     organization_id: safeOrganizationIdForLog(req),
     "error.code": errorCode,
     exact_verification_phase: exactVerificationPhase,
+    gcs_head_object_failure_code: gcsHeadObjectFailureCode,
   });
 }
 
