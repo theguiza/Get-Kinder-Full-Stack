@@ -257,6 +257,27 @@ test("status reports only the mounted metadata capability as enabled", () => {
   }
 });
 
+test("status reports configured Gate B signed-upload capability from the mounted route guard config", () => {
+  const res = createResponse();
+  sendStatus({
+    kaiSprint2StatusEnv: {
+      KAI_SPRINT2_ENABLED: "true",
+      KAI_FILE_UPLOAD_ENABLED: "true",
+      KAI_GATE_B1_GCS_BUCKET_NAME: "valid-gate-b-bucket",
+      KAI_GATE_B1_GCS_UPLOAD_SIGNER_TARGET_PRINCIPAL: "upload-signing@example.invalid",
+    },
+  }, res);
+
+  assert.equal(res.body.data.metadata_write_enabled, true);
+  assert.equal(res.body.data.file_upload_enabled, true);
+  assert.equal(res.body.data.upload_confirmation_enabled, true);
+  assert.equal(res.body.data.storage_provider_enabled, true);
+  assert.equal(res.body.data.storage_upload_enabled, true);
+  assert.equal(res.body.data.signed_upload_enabled, true);
+  assert.equal(res.body.data.signed_read_enabled, false);
+  assert.equal(res.body.data.parser_worker_enabled, false);
+});
+
 test("upload-url route remains blocked by the Sprint 2 feature gate when disabled", async (t) => {
   const previous = process.env.KAI_SPRINT2_ENABLED;
   delete process.env.KAI_SPRINT2_ENABLED;
@@ -689,6 +710,36 @@ test("route responses omit internal audit context and sanitize unexpected return
   assert.equal(errorRes.statusCode, 500);
   assert.equal(errorRes.body.error.code, "system_error");
   assert.equal(JSON.stringify(errorRes.body).includes("private://secret/object"), false);
+
+  const storageErrorRes = createResponse();
+  intakeRouteTestables.sendServiceResult(storageErrorRes, {
+    ok: false,
+    error: { code: "system_error", message: "private://secret/object", status: 500 },
+    data: {
+      operation: "create_signed_upload_url",
+      provider: "gcs",
+      contract: "kai_sprint2_gate_c1_gcs_provider_v1",
+      failure_phase: "sign_v4_string",
+      diagnostic_code: "signing_permission_denied",
+      provider_http_status: 403,
+      provider_status: "PERMISSION_DENIED",
+      storage_uri: "gs://secret-bucket/private-object",
+      raw_provider_response: { error: { message: "private://secret/object" } },
+    },
+  });
+  assert.equal(storageErrorRes.statusCode, 500);
+  assert.equal(storageErrorRes.body.error.code, "system_error");
+  assert.deepEqual(storageErrorRes.body.data, {
+    operation: "create_signed_upload_url",
+    provider: "gcs",
+    contract: "kai_sprint2_gate_c1_gcs_provider_v1",
+    failure_phase: "sign_v4_string",
+    diagnostic_code: "signing_permission_denied",
+    provider_http_status: 403,
+    provider_status: "PERMISSION_DENIED",
+  });
+  assert.equal(JSON.stringify(storageErrorRes.body).includes("secret-bucket"), false);
+  assert.equal(JSON.stringify(storageErrorRes.body).includes("private://secret/object"), false);
 
   const blockerRes = createResponse();
   intakeRouteTestables.sendServiceResult(blockerRes, {
