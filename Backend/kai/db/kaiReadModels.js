@@ -1,5 +1,22 @@
 import pool from "./kaiDb.js";
 
+/**
+ * pg returns bigint columns (file_size_bytes) as strings to avoid silent
+ * precision loss on values outside the JS safe-integer range. The upload
+ * read model is the only caller that needs a JS number, so the narrow
+ * conversion happens here rather than via a global pg bigint type parser:
+ * out-of-range or malformed strings are left untouched and still fail the
+ * caller's Number.isSafeInteger validation, unchanged from today.
+ */
+function withSafeIntegerFileSizeBytes(row) {
+  if (!row || typeof row.file_size_bytes !== "string" || !/^-?\d+$/.test(row.file_size_bytes)) {
+    return row;
+  }
+  const parsed = Number(row.file_size_bytes);
+  if (!Number.isSafeInteger(parsed) || String(parsed) !== row.file_size_bytes) return row;
+  return { ...row, file_size_bytes: parsed };
+}
+
 export async function listIntakeBatchesForOrganization(organizationId, db = pool) {
   const { rows } = await db.query(
     `SELECT intake_batch_id, organization_id, engagement_id, batch_code, processing_status,
@@ -86,7 +103,7 @@ export async function getIntakeFileUploadMetadata(organizationId, intakeFileId, 
       LIMIT 1`,
     [organizationId, intakeFileId],
   );
-  return rows[0] || null;
+  return withSafeIntegerFileSizeBytes(rows[0] || null);
 }
 
 export async function listIntakeFileReviewQueueItems(
