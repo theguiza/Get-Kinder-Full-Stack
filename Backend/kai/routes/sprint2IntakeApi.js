@@ -139,6 +139,33 @@ function sanitizeServiceData(data) {
   if (typeof data.provider_status === "string" && /^[A-Z_]{1,64}$/.test(data.provider_status)) {
     sanitized.provider_status = data.provider_status;
   }
+  if (
+    typeof data.google_api === "string"
+    && /^(iamcredentials|storage|sts|oauth|unknown)$/.test(data.google_api)
+  ) {
+    sanitized.google_api = data.google_api;
+  }
+  if (typeof data.error_info_reason === "string" && /^[A-Z][A-Z0-9_]{0,63}$/.test(data.error_info_reason)) {
+    sanitized.error_info_reason = data.error_info_reason;
+  }
+  if (
+    typeof data.error_info_domain === "string"
+    && /^[a-z0-9](?:[a-z0-9.-]{0,126}[a-z0-9])?$/.test(data.error_info_domain)
+  ) {
+    sanitized.error_info_domain = data.error_info_domain;
+  }
+  if (
+    typeof data.error_info_service === "string"
+    && /^[a-z0-9](?:[a-z0-9.-]{0,126}[a-z0-9])?$/.test(data.error_info_service)
+  ) {
+    sanitized.error_info_service = data.error_info_service;
+  }
+  if (
+    typeof data.error_info_permission === "string"
+    && /^[a-zA-Z0-9_]{1,64}(?:\.[a-zA-Z0-9_]{1,64}){1,4}$/.test(data.error_info_permission)
+  ) {
+    sanitized.error_info_permission = data.error_info_permission;
+  }
   for (const key of [
     "storage_provider_enabled",
     "raw_upload_enabled",
@@ -193,6 +220,11 @@ function safeKaiResponseSummary(body) {
       gcsHeadObjectFailureReason: null,
       providerHttpStatus: null,
       providerStatus: null,
+      googleApi: null,
+      errorInfoReason: null,
+      errorInfoDomain: null,
+      errorInfoService: null,
+      errorInfoPermission: null,
     };
   }
   const errorCode = typeof body.error?.code === "string" && Object.hasOwn(KAI_ERROR_STATUS, body.error.code)
@@ -223,6 +255,29 @@ function safeKaiResponseSummary(body) {
     typeof body.data?.provider_status === "string" && /^[A-Z_]{1,64}$/.test(body.data.provider_status)
       ? body.data.provider_status
       : null;
+  const googleApi =
+    typeof body.data?.google_api === "string" && /^(iamcredentials|storage|sts|oauth|unknown)$/.test(body.data.google_api)
+      ? body.data.google_api
+      : null;
+  const errorInfoReason =
+    typeof body.data?.error_info_reason === "string" && /^[A-Z][A-Z0-9_]{0,63}$/.test(body.data.error_info_reason)
+      ? body.data.error_info_reason
+      : null;
+  const errorInfoDomain =
+    typeof body.data?.error_info_domain === "string"
+    && /^[a-z0-9](?:[a-z0-9.-]{0,126}[a-z0-9])?$/.test(body.data.error_info_domain)
+      ? body.data.error_info_domain
+      : null;
+  const errorInfoService =
+    typeof body.data?.error_info_service === "string"
+    && /^[a-z0-9](?:[a-z0-9.-]{0,126}[a-z0-9])?$/.test(body.data.error_info_service)
+      ? body.data.error_info_service
+      : null;
+  const errorInfoPermission =
+    typeof body.data?.error_info_permission === "string"
+    && /^[a-zA-Z0-9_]{1,64}(?:\.[a-zA-Z0-9_]{1,64}){1,4}$/.test(body.data.error_info_permission)
+      ? body.data.error_info_permission
+      : null;
   return {
     errorCode,
     exactVerificationPhase,
@@ -230,6 +285,11 @@ function safeKaiResponseSummary(body) {
     gcsHeadObjectFailureReason,
     providerHttpStatus,
     providerStatus,
+    googleApi,
+    errorInfoReason,
+    errorInfoDomain,
+    errorInfoService,
+    errorInfoPermission,
   };
 }
 
@@ -241,6 +301,11 @@ function logKaiSprint2IntakeRequest(req, res, responseBody) {
     gcsHeadObjectFailureReason,
     providerHttpStatus,
     providerStatus,
+    googleApi,
+    errorInfoReason,
+    errorInfoDomain,
+    errorInfoService,
+    errorInfoPermission,
   } = safeKaiResponseSummary(responseBody);
   console.log("[kai-sprint2-intake-route]", {
     method: req.method,
@@ -255,6 +320,11 @@ function logKaiSprint2IntakeRequest(req, res, responseBody) {
     gcs_head_object_failure_reason: gcsHeadObjectFailureReason,
     provider_http_status: providerHttpStatus,
     provider_status: providerStatus,
+    google_api: googleApi,
+    error_info_reason: errorInfoReason,
+    error_info_domain: errorInfoDomain,
+    error_info_service: errorInfoService,
+    error_info_permission: errorInfoPermission,
   });
 }
 

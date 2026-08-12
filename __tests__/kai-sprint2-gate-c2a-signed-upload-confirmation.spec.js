@@ -182,6 +182,150 @@ test("Gate C-2A headObject is disabled by default and never leaks bucket/key on 
   assert.doesNotMatch(serialized, /safe\.pdf/);
 });
 
+test("Gate C-2A headObject extracts safe google_api and google.rpc.ErrorInfo fields on a 403 provider exception", async () => {
+  const provider = createGoogleCloudStorageProvider({
+    bucketName: bucketSecret,
+    enabled: true,
+    maxUploadSizeBytes: 1000,
+    storageClientFactory: () => ({
+      bucket: () => ({
+        file: () => ({
+          async getMetadata() {
+            const error = new Error(`private provider message for ${bucketSecret}/${objectKey}`);
+            error.response = {
+              status: 403,
+              config: { url: "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/private@example.invalid:generateAccessToken" },
+              data: {
+                error: {
+                  code: 403,
+                  status: "PERMISSION_DENIED",
+                  message: `private provider message for ${bucketSecret}/${objectKey}`,
+                  details: [
+                    {
+                      "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+                      reason: "IAM_PERMISSION_DENIED",
+                      domain: "iam.googleapis.com",
+                      metadata: {
+                        service: "iamcredentials.googleapis.com",
+                        permission: "iam.serviceAccounts.getAccessToken",
+                      },
+                    },
+                  ],
+                },
+              },
+            };
+            throw error;
+          },
+        }),
+      }),
+    }),
+  });
+  const result = await provider.headObject({ objectKey });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "system_error");
+  assert.deepEqual(result.data, {
+    operation: "head_object",
+    provider: "gcs",
+    contract: "kai_sprint2_gate_c1_gcs_provider_v1",
+    reason: "provider_exception",
+    provider_http_status: 403,
+    provider_status: "PERMISSION_DENIED",
+    google_api: "iamcredentials",
+    error_info_reason: "IAM_PERMISSION_DENIED",
+    error_info_domain: "iam.googleapis.com",
+    error_info_service: "iamcredentials.googleapis.com",
+    error_info_permission: "iam.serviceAccounts.getAccessToken",
+  });
+  const serialized = JSON.stringify(result);
+  assert.doesNotMatch(serialized, /private provider message/);
+  assert.doesNotMatch(serialized, new RegExp(bucketSecret));
+  assert.doesNotMatch(serialized, /safe\.pdf/);
+  assert.doesNotMatch(serialized, /generateAccessToken/);
+});
+
+test("Gate C-2A headObject falls back to unknown google_api and drops unsafe/missing ErrorInfo fields", async () => {
+  const provider = createGoogleCloudStorageProvider({
+    bucketName: bucketSecret,
+    enabled: true,
+    maxUploadSizeBytes: 1000,
+    storageClientFactory: () => ({
+      bucket: () => ({
+        file: () => ({
+          async getMetadata() {
+            const error = new Error("private provider message");
+            error.response = {
+              status: 403,
+              config: { url: "https://unrelated-google-api.googleapis.com/v1/whatever" },
+              data: {
+                error: {
+                  code: 403,
+                  status: "PERMISSION_DENIED",
+                  message: "private provider message",
+                  details: [
+                    {
+                      "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+                      reason: "not a valid reason token!!",
+                      domain: "iam.googleapis.com",
+                      metadata: {
+                        service: "iamcredentials.googleapis.com",
+                        permission: "../../etc/passwd",
+                      },
+                    },
+                  ],
+                },
+              },
+            };
+            throw error;
+          },
+        }),
+      }),
+    }),
+  });
+  const result = await provider.headObject({ objectKey });
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.data, {
+    operation: "head_object",
+    provider: "gcs",
+    contract: "kai_sprint2_gate_c1_gcs_provider_v1",
+    reason: "provider_exception",
+    provider_http_status: 403,
+    provider_status: "PERMISSION_DENIED",
+    google_api: "unknown",
+    error_info_domain: "iam.googleapis.com",
+    error_info_service: "iamcredentials.googleapis.com",
+  });
+});
+
+test("Gate C-2A headObject omits ErrorInfo fields entirely when the provider response has no details array", async () => {
+  const provider = createGoogleCloudStorageProvider({
+    bucketName: bucketSecret,
+    enabled: true,
+    maxUploadSizeBytes: 1000,
+    storageClientFactory: () => ({
+      bucket: () => ({
+        file: () => ({
+          async getMetadata() {
+            const error = new Error("private provider message");
+            error.response = { status: 500, data: { error: { code: 500, status: "INTERNAL" } } };
+            throw error;
+          },
+        }),
+      }),
+    }),
+  });
+  const result = await provider.headObject({ objectKey });
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.data, {
+    operation: "head_object",
+    provider: "gcs",
+    contract: "kai_sprint2_gate_c1_gcs_provider_v1",
+    reason: "provider_exception",
+    provider_http_status: 500,
+    provider_status: "INTERNAL",
+    google_api: "unknown",
+  });
+});
+
 // --- requestUploadUrl: signed-upload issuance ---
 
 test("Gate C-2A requestUploadUrl issues a signed URL from the trusted reservation's object key and MIME type only", async () => {

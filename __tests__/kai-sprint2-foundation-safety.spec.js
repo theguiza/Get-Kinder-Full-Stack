@@ -787,6 +787,63 @@ test("route responses omit internal audit context and sanitize unexpected return
     exact_verification_phase: "gcs_stream_exact_generation",
   });
   assert.equal(JSON.stringify(exactGenerationErrorRes.body).includes("secret-bucket"), false);
+
+  const googleApiErrorRes = createResponse();
+  intakeRouteTestables.sendServiceResult(googleApiErrorRes, {
+    ok: false,
+    error: { code: "system_error", message: "private://secret/object", status: 500 },
+    data: {
+      operation: "head_object",
+      provider: "gcs",
+      contract: "kai_sprint2_gate_c1_gcs_provider_v1",
+      exact_verification_phase: "gcs_head_object",
+      gcs_head_object_failure_code: "system_error",
+      gcs_head_object_failure_reason: "provider_exception",
+      provider_http_status: 403,
+      provider_status: "PERMISSION_DENIED",
+      google_api: "iamcredentials",
+      error_info_reason: "IAM_PERMISSION_DENIED",
+      error_info_domain: "iam.googleapis.com",
+      error_info_service: "iamcredentials.googleapis.com",
+      error_info_permission: "iam.serviceAccounts.getAccessToken",
+    },
+  });
+  assert.deepEqual(googleApiErrorRes.body.data, {
+    operation: "head_object",
+    provider: "gcs",
+    contract: "kai_sprint2_gate_c1_gcs_provider_v1",
+    exact_verification_phase: "gcs_head_object",
+    gcs_head_object_failure_code: "system_error",
+    gcs_head_object_failure_reason: "provider_exception",
+    provider_http_status: 403,
+    provider_status: "PERMISSION_DENIED",
+    google_api: "iamcredentials",
+    error_info_reason: "IAM_PERMISSION_DENIED",
+    error_info_domain: "iam.googleapis.com",
+    error_info_service: "iamcredentials.googleapis.com",
+    error_info_permission: "iam.serviceAccounts.getAccessToken",
+  });
+
+  const unsafeGoogleApiErrorRes = createResponse();
+  intakeRouteTestables.sendServiceResult(unsafeGoogleApiErrorRes, {
+    ok: false,
+    error: { code: "system_error", message: "private://secret/object", status: 500 },
+    data: {
+      operation: "head_object",
+      provider: "gcs",
+      contract: "kai_sprint2_gate_c1_gcs_provider_v1",
+      google_api: "https://iamcredentials.googleapis.com/private-path",
+      error_info_reason: "not a safe token",
+      error_info_domain: "<script>alert(1)</script>",
+      error_info_service: "javascript:alert(1)",
+      error_info_permission: "raw arbitrary metadata blob",
+    },
+  });
+  assert.deepEqual(unsafeGoogleApiErrorRes.body.data, {
+    operation: "head_object",
+    provider: "gcs",
+    contract: "kai_sprint2_gate_c1_gcs_provider_v1",
+  });
   assert.equal(JSON.stringify(exactGenerationErrorRes.body).includes("private://secret/object"), false);
 
   const blockerRes = createResponse();
