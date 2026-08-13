@@ -13,9 +13,11 @@ import { resolveKaiActorContext } from "../auth/kaiActorContext.js";
 import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationService.js";
 import {
   blockIntakeFilePolicyStatus,
+  casSecurityAssessmentFilePolicyDecision,
   findIntakeBatchByIdempotencyKey,
   findIntakeFileReservationByChecksum,
   findIntakeFileReservationByIdempotencyKey,
+  getScopedIntakeFileSecurityAssessmentFacts,
   insertIntakeBatchMetadata,
   insertIntakeFileMetadata,
 } from "../db/kaiIntakeQueries.js";
@@ -25,6 +27,7 @@ import {
   RequiredAuditPersistenceError,
   orchestrateMutationWithRequiredAudit,
 } from "../internal/kaiMutationOrchestration.js";
+import { runProductionSecurityAssessment } from "../security/productionSecurityAssessmentComposition.js";
 import {
   getIntakeBatchDetail as readIntakeBatchDetail,
   getIntakeFileMetadata as readIntakeFileMetadata,
@@ -1074,6 +1077,149 @@ function confirmUploadSuccessData({
     verified_size_bytes: verifiedSizeBytes,
     replayed: replayed === true,
   };
+}
+
+const SECURITY_ASSESSMENT_POLICY_OUTCOME_TO_STATUS = Object.freeze({
+  passed: "passed",
+  blocked: "blocked",
+  failed: "failed",
+});
+
+function isValidSecurityAssessmentFactsRow(row, { organizationId, intakeFileId }) {
+  return Boolean(
+    row
+    && row.organization_id === organizationId
+    && row.intake_file_id === intakeFileId
+    && typeof row.object_version_id === "string"
+    && PROVIDER_NEUTRAL_OBJECT_VERSION_ID_RE.test(row.object_version_id)
+    && typeof row.verified_checksum === "string"
+    && STORED_FINGERPRINT_RE.test(row.verified_checksum)
+    && Number.isSafeInteger(row.verified_size_bytes)
+    && row.verified_size_bytes >= 0
+    && typeof row.mime_type === "string"
+    && row.mime_type.length > 0
+    && typeof row.file_extension === "string"
+    && row.file_extension.length > 0,
+  );
+}
+
+/**
+ * Gate C production post-confirm security-assessment handoff.
+ *
+ * Invoked unconditionally from confirmUpload's success path, on both a fresh
+ * confirmation and a replayed one. This is the crash-recovery mechanism: if a
+ * process dies after the durable `confirmed` transition but before this
+ * mutation commits, file_policy_status durably remains 'pending' (never lost
+ * or defaulted to a pass), and the next confirmUpload call for the same file
+ * - which is already safely replayable - retries this handoff. There is no
+ * separate queue or job table; the existing 'pending' state plus
+ * confirmUpload's existing replay safety is the durable recovery path.
+ *
+ * Never throws: any integrity, executor, or mutation failure fails closed by
+ * leaving file_policy_status untouched, so confirmUpload's own response is
+ * never affected by this function's outcome.
+ */
+export async function applyConfirmedSecurityAssessment(
+  { organizationId, intakeFileId, objectVersionId, verifiedChecksum, verifiedSizeBytes, requestId, actorContext },
+  dependencies = {},
+) {
+  const readFacts = dependencies.getScopedIntakeFileSecurityAssessmentFacts || getScopedIntakeFileSecurityAssessmentFacts;
+  const runAssessment = dependencies.runProductionSecurityAssessment || runProductionSecurityAssessment;
+  const casPolicy = dependencies.casSecurityAssessmentFilePolicyDecision || casSecurityAssessmentFilePolicyDecision;
+  const insertAudit = dependencies.insertRequiredSuccessfulAuditEvent || insertRequiredSuccessfulAuditEvent;
+  const runInTransaction = dependencies.runInTransaction || withTransaction;
+
+  let factsRow;
+  try {
+    factsRow = await readFacts({ organizationId, intakeFileId });
+  } catch {
+    return;
+  }
+  if (!isValidSecurityAssessmentFactsRow(factsRow, { organizationId, intakeFileId })) return;
+  if (
+    factsRow.object_version_id !== objectVersionId
+    || factsRow.verified_checksum !== verifiedChecksum
+    || factsRow.verified_size_bytes !== verifiedSizeBytes
+  ) {
+    // Confirmed facts no longer match what this call observed: fail closed,
+    // no mutation. (In practice unreachable: object_version_id and the
+    // verified facts are trigger-enforced immutable once bound.)
+    return;
+  }
+  if (factsRow.file_policy_status !== "pending") return;
+
+  let assessment;
+  try {
+    assessment = await runAssessment(
+      {
+        organizationId,
+        intakeFileId,
+        objectVersionId,
+        verifiedChecksum,
+        verifiedSizeBytes,
+        declaredMime: factsRow.mime_type,
+        extension: factsRow.file_extension,
+        storageProvider: factsRow.storage_provider,
+        storageObjectKey: factsRow.storage_object_key,
+      },
+      {
+        storageAdapter: dependencies.storageAdapter,
+        gcsProvider: dependencies.gcsProvider,
+        gcsParserReaderProvider: dependencies.gcsParserReaderProvider,
+        uploadLifecycleRepository: dependencies.uploadLifecycleRepository || dependencies.lifecycleRepository,
+        signal: dependencies.signal,
+        internalSecurityAssessmentExecutor: dependencies.internalSecurityAssessmentExecutor,
+      },
+    );
+  } catch {
+    return;
+  }
+  if (assessment?.ok !== true) return;
+
+  const outcome = assessment.data.policyDecisionOutcome;
+  const newFilePolicyStatus = SECURITY_ASSESSMENT_POLICY_OUTCOME_TO_STATUS[outcome];
+  if (!newFilePolicyStatus) return;
+
+  try {
+    await orchestrateMutationWithRequiredAudit(
+      {
+        mutation: { organizationId, intakeFileId, objectVersionId, verifiedChecksum, verifiedSizeBytes, newFilePolicyStatus },
+        requiredAuditMetadata: {
+          operation: "apply_security_assessment_policy_decision",
+          operation_type: "apply_security_assessment_policy_decision",
+          actor_user_id: actorContext?.actorUserId || null,
+          actor_type: actorContext?.actorType || "system",
+          organization_id: organizationId,
+          object_type: "intake_file",
+          target_object_type: "intake_file",
+          object_id: intakeFileId,
+          reason_code: newFilePolicyStatus,
+          validator_key: "VAL-STA-001",
+          request_id: requestId,
+          route: "/api/kai/sprint2/intake/admin/files/:intakeFileId/confirm-upload",
+          from_state: "pending",
+          to_state: newFilePolicyStatus,
+          prior_status: "pending",
+          new_status: newFilePolicyStatus,
+          created_at: (dependencies.now ? new Date(dependencies.now()) : new Date()).toISOString(),
+        },
+      },
+      {
+        async persistMutation(mutation, transactionContext) {
+          const updated = await casPolicy(mutation, transactionContext);
+          if (!updated) throw new KaiRouteMutationError("conflict_current_state_changed");
+          return { ok: true, data: updated };
+        },
+        async persistRequiredAudit(metadata, transactionContext) {
+          return await insertAudit(metadata, transactionContext);
+        },
+      },
+      (callback) => runInTransaction(callback),
+    );
+  } catch {
+    // Fail closed: no partial policy mutation is left standing. A future
+    // confirmUpload replay for the same file retries this handoff.
+  }
 }
 
 function uploadNewReservationRequiredResult() {
@@ -2629,6 +2775,19 @@ export async function confirmUpload(input = {}, dependencies = {}) {
     });
     if (gcsResult?.ok !== true) return gcsResult;
 
+    await applyConfirmedSecurityAssessment(
+      {
+        organizationId,
+        intakeFileId,
+        objectVersionId: gcsResult.data.objectVersionId,
+        verifiedChecksum: gcsResult.data.verifiedChecksum,
+        verifiedSizeBytes: gcsResult.data.verifiedSizeBytes,
+        requestId: input.requestId,
+        actorContext: auth.actorContext,
+      },
+      dependencies,
+    );
+
     return {
       ok: true,
       data: confirmUploadSuccessData({
@@ -2691,6 +2850,19 @@ export async function confirmUpload(input = {}, dependencies = {}) {
     return buildKaiError("conflict_current_state_changed");
   }
 
+  await applyConfirmedSecurityAssessment(
+    {
+      organizationId,
+      intakeFileId,
+      objectVersionId: verifiedObjectVersionId,
+      verifiedChecksum,
+      verifiedSizeBytes,
+      requestId: input.requestId,
+      actorContext: auth.actorContext,
+    },
+    dependencies,
+  );
+
   return {
     ok: true,
     data: confirmUploadSuccessData({
@@ -2710,4 +2882,6 @@ export const __testables = {
   verifyExactObjectVersionStreamed,
   verifyExactGcsObjectVersionStreamed,
   confirmGcsObjectVersion,
+  applyConfirmedSecurityAssessment,
+  isValidSecurityAssessmentFactsRow,
 };

@@ -1,0 +1,194 @@
+import { readVerifiedAssessmentBytes } from "./assessmentReadIntegrityBridge.js";
+import {
+  createInternalSecurityAssessmentExecutor,
+  executeInjectedInternalSecurityAssessment,
+} from "./internalSecurityAssessmentExecutor.js";
+import { policyDecisionOutcomeForAssessmentResult } from "./assessmentPolicyOutcome.js";
+
+const PROVIDER_NEUTRAL_OBJECT_VERSION_ID_RE = /^ov_[a-f0-9]{32}$/;
+const SHA256_HEX_RE = /^[0-9a-f]{64}$/;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const EXTENSION_RE = /^\.[a-z0-9]{1,31}$/;
+
+function isNonEmptyLowercaseUuid(value) {
+  return typeof value === "string" && value === value.toLowerCase() && UUID_RE.test(value);
+}
+
+/**
+ * Trusted server-side facts only. No caller/request input reaches this
+ * composition: confirmUpload's own verified confirmation result and stored,
+ * validated intake_files columns are the only source for these fields.
+ */
+function isValidTrustedFacts(facts) {
+  return Boolean(
+    facts
+    && typeof facts === "object"
+    && isNonEmptyLowercaseUuid(facts.organizationId)
+    && isNonEmptyLowercaseUuid(facts.intakeFileId)
+    && typeof facts.objectVersionId === "string"
+    && PROVIDER_NEUTRAL_OBJECT_VERSION_ID_RE.test(facts.objectVersionId)
+    && typeof facts.verifiedChecksum === "string"
+    && SHA256_HEX_RE.test(facts.verifiedChecksum)
+    && Number.isSafeInteger(facts.verifiedSizeBytes)
+    && facts.verifiedSizeBytes >= 0
+    && typeof facts.declaredMime === "string"
+    && facts.declaredMime.length > 0
+    && typeof facts.extension === "string"
+    && EXTENSION_RE.test(facts.extension),
+  );
+}
+
+function isGcsExactGenerationProvider(provider) {
+  return (
+    provider
+    && provider.enabled === true
+    && typeof provider.openExactGenerationReadStream === "function"
+  );
+}
+
+function isGcsBindingRepository(repository) {
+  return (
+    repository
+    && typeof repository.resolveGcsGenerationBinding === "function"
+  );
+}
+
+/**
+ * Resolves reads against the exact, already-bound GCS generation for this
+ * object_version_id. Never accepts bucket, object key, or generation from
+ * request input - the object key comes only from the trusted facts computed
+ * server-side from stored intake_files columns, and the generation is
+ * resolved from the existing Gate C-1 binding, not re-derived.
+ */
+function createBoundGcsAssessmentStorageAdapter({ facts, gcsProvider, uploadLifecycleRepository }) {
+  if (
+    !isGcsExactGenerationProvider(gcsProvider)
+    || !isGcsBindingRepository(uploadLifecycleRepository)
+    || facts.storageProvider !== "gcs"
+    || typeof facts.storageObjectKey !== "string"
+    || facts.storageObjectKey.length === 0
+  ) {
+    return null;
+  }
+
+  return {
+    async openObjectVersionReadStream({ objectVersionId, signal } = {}) {
+      if (objectVersionId !== facts.objectVersionId) return { ok: false };
+
+      const binding = await uploadLifecycleRepository.resolveGcsGenerationBinding({
+        organizationId: facts.organizationId,
+        intakeFileId: facts.intakeFileId,
+      });
+      if (
+        binding?.ok !== true
+        || binding.data?.object_version_id !== facts.objectVersionId
+        || typeof binding.data?.gcs_generation !== "string"
+      ) {
+        return { ok: false };
+      }
+
+      const opened = await gcsProvider.openExactGenerationReadStream({
+        objectKey: facts.storageObjectKey,
+        gcsGeneration: binding.data.gcs_generation,
+        ...(signal ? { signal } : {}),
+      });
+      if (opened?.ok !== true) return opened;
+      return {
+        ok: true,
+        data: {
+          object_version_id: facts.objectVersionId,
+          size_bytes: opened.data?.size_bytes,
+          byte_source: opened.data?.byte_source,
+        },
+      };
+    },
+  };
+}
+
+function executorInputFromFacts(facts, bytes) {
+  return {
+    extension: facts.extension,
+    declaredMime: facts.declaredMime,
+    bytes,
+    sha256: facts.verifiedChecksum,
+  };
+}
+
+function integrityFailureResult(integrityFailure) {
+  return {
+    ok: false,
+    error: {
+      code: "assessment_read_integrity_failure",
+      integrity_failure: integrityFailure,
+    },
+  };
+}
+
+/**
+ * Production-neutral post-confirmation security-assessment composition:
+ * trusted confirmed facts -> exact-version read via the existing integrity
+ * bridge -> internal security executor -> bounded file-security assessor ->
+ * sanitized assessment result + policy-decision outcome mapping.
+ *
+ * Reaches no synthetic malware adapter, test fixture, or in-memory enqueue
+ * state: the malware adapter used is whatever the internal executor's own
+ * default composition selects (production default: not_configured).
+ */
+export async function runProductionSecurityAssessment(trustedFacts, dependencies = {}) {
+  if (!isValidTrustedFacts(trustedFacts)) {
+    return { ok: false, error: { code: "validation_blocker" } };
+  }
+
+  const {
+    storageAdapter,
+    gcsProvider,
+    gcsParserReaderProvider,
+    uploadLifecycleRepository,
+    signal,
+    internalSecurityAssessmentExecutor,
+  } = dependencies;
+
+  const exactGenerationReadProvider = gcsParserReaderProvider || gcsProvider;
+  const effectiveStorageAdapter = storageAdapter || createBoundGcsAssessmentStorageAdapter({
+    facts: trustedFacts,
+    gcsProvider: exactGenerationReadProvider,
+    uploadLifecycleRepository,
+  });
+
+  const readResult = await readVerifiedAssessmentBytes({
+    objectVersionId: trustedFacts.objectVersionId,
+    expectedChecksum: trustedFacts.verifiedChecksum,
+    expectedSize: trustedFacts.verifiedSizeBytes,
+    storageAdapter: effectiveStorageAdapter,
+    ...(signal ? { signal } : {}),
+  });
+  if (readResult?.ok !== true) {
+    return integrityFailureResult(readResult?.integrity_failure || { type: "assessment_read_integrity_failure", kind: "read_failed" });
+  }
+
+  const executor = internalSecurityAssessmentExecutor || createInternalSecurityAssessmentExecutor();
+  const execution = await executeInjectedInternalSecurityAssessment(
+    executorInputFromFacts(trustedFacts, readResult.data.bytes),
+    { internalSecurityAssessmentExecutor: executor },
+  );
+  if (execution?.ok !== true) {
+    return { ok: false, error: { code: "internal_security_executor_failed" } };
+  }
+
+  const assessmentResult = execution.data.result;
+  const policyDecisionOutcome = policyDecisionOutcomeForAssessmentResult(assessmentResult);
+
+  return {
+    ok: true,
+    data: {
+      assessmentResult,
+      policyDecisionOutcome,
+    },
+  };
+}
+
+export const __testables = Object.freeze({
+  isValidTrustedFacts,
+  createBoundGcsAssessmentStorageAdapter,
+  executorInputFromFacts,
+});
