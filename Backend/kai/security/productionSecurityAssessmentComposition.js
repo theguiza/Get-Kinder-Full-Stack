@@ -1,4 +1,6 @@
 import { readVerifiedAssessmentBytes } from "./assessmentReadIntegrityBridge.js";
+import { assessBoundedFileSecurity } from "./boundedFileSecurityAssessor.js";
+import { createConfiguredClamavCloudRunMalwareScanAdapter } from "./clamavCloudRunMalwareScanAdapter.js";
 import {
   createInternalSecurityAssessmentExecutor,
   executeInjectedInternalSecurityAssessment,
@@ -124,6 +126,15 @@ function integrityFailureResult(integrityFailure) {
   };
 }
 
+function createProductionInternalSecurityAssessmentExecutor({ env = process.env, clamavAdapterDependencies = {} } = {}) {
+  const malwareScanAdapter = createConfiguredClamavCloudRunMalwareScanAdapter(env, clamavAdapterDependencies);
+  return createInternalSecurityAssessmentExecutor({
+    assessor(input) {
+      return assessBoundedFileSecurity(input, { malwareScanAdapter });
+    },
+  });
+}
+
 /**
  * Production-neutral post-confirmation security-assessment composition:
  * trusted confirmed facts -> exact-version read via the existing integrity
@@ -131,8 +142,9 @@ function integrityFailureResult(integrityFailure) {
  * sanitized assessment result + policy-decision outcome mapping.
  *
  * Reaches no synthetic malware adapter, test fixture, or in-memory enqueue
- * state: the malware adapter used is whatever the internal executor's own
- * default composition selects (production default: not_configured).
+ * state. Valid Gate C ClamAV config injects the ClamAV adapter into the
+ * existing executor/assessor chain; missing config keeps the existing
+ * not_configured path without constructing or calling the scanner adapter.
  */
 export async function runProductionSecurityAssessment(trustedFacts, dependencies = {}) {
   if (!isValidTrustedFacts(trustedFacts)) {
@@ -146,6 +158,8 @@ export async function runProductionSecurityAssessment(trustedFacts, dependencies
     uploadLifecycleRepository,
     signal,
     internalSecurityAssessmentExecutor,
+    env,
+    clamavAdapterDependencies,
   } = dependencies;
 
   const exactGenerationReadProvider = gcsParserReaderProvider || gcsProvider;
@@ -166,7 +180,10 @@ export async function runProductionSecurityAssessment(trustedFacts, dependencies
     return integrityFailureResult(readResult?.integrity_failure || { type: "assessment_read_integrity_failure", kind: "read_failed" });
   }
 
-  const executor = internalSecurityAssessmentExecutor || createInternalSecurityAssessmentExecutor();
+  const executor = internalSecurityAssessmentExecutor || createProductionInternalSecurityAssessmentExecutor({
+    env,
+    clamavAdapterDependencies,
+  });
   const execution = await executeInjectedInternalSecurityAssessment(
     executorInputFromFacts(trustedFacts, readResult.data.bytes),
     { internalSecurityAssessmentExecutor: executor },
@@ -190,5 +207,6 @@ export async function runProductionSecurityAssessment(trustedFacts, dependencies
 export const __testables = Object.freeze({
   isValidTrustedFacts,
   createBoundGcsAssessmentStorageAdapter,
+  createProductionInternalSecurityAssessmentExecutor,
   executorInputFromFacts,
 });
