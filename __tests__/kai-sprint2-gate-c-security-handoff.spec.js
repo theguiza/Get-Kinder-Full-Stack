@@ -279,6 +279,144 @@ test("runProductionSecurityAssessment reaches the internal executor with an inje
   assert.equal(result.data.policyDecisionOutcome, "passed");
 });
 
+test("production composition with missing ClamAV config keeps not_configured and performs zero scanner/auth calls", async () => {
+  const bytes = Buffer.from("clamav missing config production text", "utf8");
+  const facts = {
+    organizationId,
+    intakeFileId,
+    objectVersionId,
+    verifiedChecksum: createHash("sha256").update(bytes).digest("hex"),
+    verifiedSizeBytes: bytes.byteLength,
+    declaredMime: "text/plain",
+    extension: ".txt",
+  };
+  const storageAdapter = {
+    async openObjectVersionReadStream() {
+      return {
+        ok: true,
+        data: {
+          object_version_id: facts.objectVersionId,
+          size_bytes: bytes.byteLength,
+          byte_source: {
+            [Symbol.asyncIterator]() {
+              let done = false;
+              return {
+                async next() {
+                  if (done) return { done: true, value: undefined };
+                  done = true;
+                  return { done: false, value: bytes };
+                },
+              };
+            },
+            async close() {},
+          },
+        },
+      };
+    },
+  };
+
+  let fetchCalled = false;
+  let idTokenFactoryCalled = false;
+  const result = await runProductionSecurityAssessment(facts, {
+    storageAdapter,
+    env: {},
+    clamavAdapterDependencies: {
+      idTokenClientFactory() {
+        idTokenFactoryCalled = true;
+        return { async getIdToken() { throw new Error("must not call auth"); } };
+      },
+      fetchImpl: async () => {
+        fetchCalled = true;
+        throw new Error("must not call scanner");
+      },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.data.assessmentResult, { status: "failed", category: "malware_scan_not_configured" });
+  assert.equal(result.data.policyDecisionOutcome, null);
+  assert.equal(idTokenFactoryCalled, false);
+  assert.equal(fetchCalled, false);
+});
+
+test("production composition with valid ClamAV config wires config to executor to assessor to adapter", async () => {
+  const bytes = Buffer.from("clamav valid config production text", "utf8");
+  const facts = {
+    organizationId,
+    intakeFileId,
+    objectVersionId,
+    verifiedChecksum: createHash("sha256").update(bytes).digest("hex"),
+    verifiedSizeBytes: bytes.byteLength,
+    declaredMime: "text/plain",
+    extension: ".txt",
+  };
+  const storageAdapter = {
+    async openObjectVersionReadStream() {
+      return {
+        ok: true,
+        data: {
+          object_version_id: facts.objectVersionId,
+          size_bytes: bytes.byteLength,
+          byte_source: {
+            [Symbol.asyncIterator]() {
+              let done = false;
+              return {
+                async next() {
+                  if (done) return { done: true, value: undefined };
+                  done = true;
+                  return { done: false, value: bytes };
+                },
+              };
+            },
+            async close() {},
+          },
+        },
+      };
+    },
+  };
+  const calls = [];
+  const scannerUrl = "https://clamav-scanner.example.run.app";
+  const targetPrincipal = "kai-clamav-invoker@example-project.iam.gserviceaccount.com";
+
+  const result = await runProductionSecurityAssessment(facts, {
+    storageAdapter,
+    env: {
+      KAI_GATE_C_CLAMAV_SCANNER_URL: scannerUrl,
+      KAI_GATE_C_CLAMAV_SCANNER_INVOKER_TARGET_PRINCIPAL: targetPrincipal,
+    },
+    clamavAdapterDependencies: {
+      idTokenClientFactory({ targetPrincipal: requestedPrincipal }) {
+        calls.push({ targetPrincipal: requestedPrincipal });
+        return {
+          async getIdToken(audience) {
+            calls.push({ audience });
+            return "synthetic-id-token";
+          },
+        };
+      },
+      fetchImpl: async (url, options) => {
+        calls.push({ url, method: options.method, contentType: options.headers["content-type"] });
+        assert.equal(Buffer.compare(Buffer.from(options.body), bytes), 0);
+        return {
+          ok: true,
+          async text() {
+            return JSON.stringify({ status: "clean" });
+          },
+        };
+      },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.data.assessmentResult, { policy: "pass" });
+  assert.equal(result.data.policyDecisionOutcome, "passed");
+  assert.deepEqual(calls, [
+    { targetPrincipal },
+    { audience: scannerUrl },
+    { url: scannerUrl, method: "POST", contentType: "application/octet-stream" },
+  ]);
+});
+
 test("production security assessment composition never imports synthetic modules", async () => {
   const source = await (await import("node:fs/promises")).readFile(
     new URL("../Backend/kai/security/productionSecurityAssessmentComposition.js", import.meta.url),
