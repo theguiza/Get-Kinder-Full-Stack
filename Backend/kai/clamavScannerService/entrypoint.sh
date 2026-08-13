@@ -1,10 +1,12 @@
 #!/bin/sh
 # Gate C ClamAV Cloud Run scanner container entrypoint.
-# Definition updates and freshness are deployment runtime prerequisites for
-# this package and are intentionally not implemented here. This entrypoint
-# starts local clamd and the Node HTTP boundary; /readyz remains fail-closed
-# unless clamd can detect EICAR, so PING alone is not enough.
+# Definition mirror bootstrap must succeed before local clamd starts. /readyz
+# remains fail-closed unless clamd can detect EICAR, so PING alone is not
+# enough.
 set -eu
+
+echo "[entrypoint] bootstrapping ClamAV definitions"
+node /app/Backend/kai/clamavScannerService/bootstrapDefinitions.js
 
 echo "[entrypoint] starting clamd"
 clamd --config-file=/app/Backend/kai/clamavScannerService/clamd.conf &

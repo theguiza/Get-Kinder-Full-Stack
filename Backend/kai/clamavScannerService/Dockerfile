@@ -1,7 +1,7 @@
 # Gate C ClamAV scanner image.
 # Runs a local clamd (loopback-only, no exposed clamd port) behind a Node
-# HTTP boundary. Definition updates and freshness are deployment runtime
-# prerequisites for this package and are intentionally not implemented here.
+# HTTP boundary. The entrypoint bootstraps accepted private-mirror definitions
+# before clamd starts; the updater job image/provisioning remains separate.
 FROM node:20-bookworm-slim AS runtime
 
 RUN apt-get update \
