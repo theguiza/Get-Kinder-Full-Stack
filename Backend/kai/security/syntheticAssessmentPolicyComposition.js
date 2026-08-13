@@ -1,16 +1,10 @@
-import { __testables as boundedFileSecurityAssessorTestables } from "./boundedFileSecurityAssessor.js";
 import { executeSyntheticAssessmentFromEnqueueRecord } from "./syntheticAssessmentComposition.js";
+import {
+  POLICY_ELIGIBLE_FAILED_CATEGORIES,
+  policyDecisionOutcomeForAssessmentResult,
+} from "./assessmentPolicyOutcome.js";
 
 export const C2_UNCLASSIFIED_OUTCOME = "C2_UNCLASSIFIED_OUTCOME";
-const { ASSESSOR_FAILED_CATEGORY_CLASSIFICATIONS } = boundedFileSecurityAssessorTestables;
-
-const POLICY_ELIGIBLE_FAILED_CATEGORIES = Object.freeze(
-  new Set(
-    Object.entries(ASSESSOR_FAILED_CATEGORY_CLASSIFICATIONS)
-      .filter(([, classification]) => classification.policyFailureEligible === true)
-      .map(([category]) => category),
-  ),
-);
 
 const ALLOWED_SELECTION_KEYS = Object.freeze(new Set([
   "organizationId",
@@ -104,38 +98,6 @@ function selectStoredRecord(selectionIdentity, securityAssessmentEnqueue) {
     },
     error: null,
   };
-}
-
-function policyDecisionOutcomeForAssessmentResult(result) {
-  if (
-    isPlainObject(result) &&
-    result.ok === false &&
-    result.integrity_failure?.type === "assessment_read_integrity_failure"
-  ) {
-    return null;
-  }
-  if (isPlainObject(result) && Object.keys(result).length === 1 && result.policy === "pass") {
-    return "passed";
-  }
-  if (
-    isPlainObject(result) &&
-    Object.keys(result).length === 2 &&
-    result.policy === "block" &&
-    typeof result.category === "string"
-  ) {
-    return "blocked";
-  }
-  if (
-    isPlainObject(result) &&
-    Object.keys(result).length === 2 &&
-    result.status === "failed" &&
-    typeof result.category === "string"
-  ) {
-    if (POLICY_ELIGIBLE_FAILED_CATEGORIES.has(result.category)) return "failed";
-    if (Object.hasOwn(ASSESSOR_FAILED_CATEGORY_CLASSIFICATIONS, result.category)) return null;
-    return undefined;
-  }
-  return undefined;
 }
 
 export async function executeSyntheticAssessmentPolicyDecisionFromEnqueueRecord(

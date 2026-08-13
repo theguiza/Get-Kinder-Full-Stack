@@ -35,6 +35,7 @@ const TEST_HARNESS_SYMBOLS = [
 const TRANSACTION_PROVIDER_SYMBOL = ["transaction", "Provider"].join("");
 const LEGACY_TEST_OPTION_SYMBOL = ["test", "Only", "Transaction", "Provider"].join("");
 const MARK_FILE_POLICY_BLOCKED_FUNCTION = "markIntakeFilePolicyBlocked";
+const APPLY_CONFIRMED_SECURITY_ASSESSMENT_FUNCTION = "applyConfirmedSecurityAssessment";
 const UPDATE_REVIEW_QUEUE_STATUS_FUNCTION = "updateReviewQueueStatus";
 
 const ALLOWED_CORE_IMPORTERS = new Set([TEST_HARNESS_PATH, ROUTE_SPECIFIC_RUNTIME_COMPOSITION_PATH]);
@@ -345,6 +346,46 @@ function assertSingleDirectCoreCallInsideMarkFilePolicyBlocked(source, file) {
     file,
     MARK_FILE_POLICY_BLOCKED_FUNCTION,
   );
+}
+
+/**
+ * Gate C production post-confirm security-assessment handoff: the security
+ * policy mutation reuses the same orchestration core as the file-policy
+ * block route (Path A), inside its own exported async function. This
+ * generalizes the single-function fence above to authorize exactly one
+ * direct core call inside each of several named exported async functions in
+ * one file, with zero calls anywhere else.
+ */
+function assertDirectCoreCallsInsideExportedAsyncFunctions(source, file, functionNames) {
+  const coreCalls = symbolCalls(file, source, [CORE_CALL_SYMBOL]);
+  const placements = functionNames.map((functionName) => {
+    const functionBody = exportedAsyncFunctionBody(source, functionName);
+    const callsInside = coreCalls.filter(
+      ({ index }) => index > functionBody.bodyStart && index < functionBody.bodyEnd,
+    );
+    assert.equal(
+      callsInside.length,
+      1,
+      `Expected exactly one ${CORE_CALL_SYMBOL} call inside ${functionName}; found ${callsInside.length}.`,
+    );
+    return { functionName, functionBody, call: callsInside[0] };
+  });
+
+  const callsInsideAnyTarget = new Set(placements.map(({ call }) => call.index));
+  const callsOutsideTargets = coreCalls.filter(({ index }) => !callsInsideAnyTarget.has(index));
+
+  assert.equal(
+    coreCalls.length,
+    functionNames.length,
+    `Expected exactly ${functionNames.length} direct production calls to ${CORE_CALL_SYMBOL}; found ${coreCalls.length}.`,
+  );
+  assert.equal(
+    callsOutsideTargets.length,
+    0,
+    `Expected zero ${CORE_CALL_SYMBOL} calls outside ${functionNames.join(", ")}; found:\n${formatUnexpected(callsOutsideTargets)}`,
+  );
+
+  return { placements, callsOutsideTargets };
 }
 
 function assertFutureReviewQueuePreauthorization(sourceByPath) {
@@ -821,22 +862,25 @@ test("internal orchestration has only the approved file-policy block runtime cal
     report.core_callers
       .filter(({ file }) => file === ROUTE_SPECIFIC_RUNTIME_COMPOSITION_PATH)
       .map(({ kind }) => kind),
-    [`call ${CORE_CALL_SYMBOL}`],
+    [`call ${CORE_CALL_SYMBOL}`, `call ${CORE_CALL_SYMBOL}`],
   );
   const runtimeCompositionSource = readFileSync(
     path.join(REPOSITORY_ROOT, ROUTE_SPECIFIC_RUNTIME_COMPOSITION_PATH),
     "utf8",
   );
-  const runtimePlacement = assertSingleDirectCoreCallInsideMarkFilePolicyBlocked(
+  const runtimePlacement = assertDirectCoreCallsInsideExportedAsyncFunctions(
     runtimeCompositionSource,
     ROUTE_SPECIFIC_RUNTIME_COMPOSITION_PATH,
+    [MARK_FILE_POLICY_BLOCKED_FUNCTION, APPLY_CONFIRMED_SECURITY_ASSESSMENT_FUNCTION],
   );
   console.log(`ORCHESTRATION_RUNTIME_PLACEMENT_REPORT ${JSON.stringify({
-    function_name: runtimePlacement.functionBody.functionName,
-    function_start_line: runtimePlacement.functionBody.startLine,
-    function_end_line: runtimePlacement.functionBody.endLine,
-    call_line: runtimePlacement.call.line,
-    calls_outside_function: runtimePlacement.callsOutsideTarget.length,
+    placements: runtimePlacement.placements.map(({ functionName, functionBody, call }) => ({
+      function_name: functionName,
+      function_start_line: functionBody.startLine,
+      function_end_line: functionBody.endLine,
+      call_line: call.line,
+    })),
+    calls_outside_functions: runtimePlacement.callsOutsideTargets.length,
   })}`);
   console.log(`FUTURE_REVIEW_QUEUE_ACTIVE_PREAUTHORIZATION_REPORT ${JSON.stringify(futureReviewQueueAuthorization)}`);
   assert.deepEqual(

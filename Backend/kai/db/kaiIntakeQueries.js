@@ -207,6 +207,67 @@ export async function blockIntakeFilePolicyStatus({ organizationId, intakeFileId
   return rows[0] || null;
 }
 
+/**
+ * Gate C production post-confirm security-assessment handoff: narrow,
+ * organization/file-scoped read of the exact immutable facts a security
+ * assessment must be bound to (object_version_id, verified_checksum,
+ * verified_size_bytes) plus the trusted mime/extension/storage-locator
+ * columns needed to run the assessment and its current file_policy_status
+ * for the CAS guard below. Additive: no other exported query in this module
+ * is changed.
+ */
+export async function getScopedIntakeFileSecurityAssessmentFacts(
+  { organizationId, intakeFileId },
+  db = pool,
+) {
+  const { rows } = await db.query(
+    `SELECT organization_id, intake_file_id, intake_batch_id, engagement_id,
+            object_version_id, verified_checksum, verified_size_bytes,
+            mime_type, file_extension, file_policy_status,
+            storage_provider, storage_object_key
+       FROM kai.intake_files
+      WHERE organization_id = $1
+        AND intake_file_id = $2
+      LIMIT 1`,
+    [organizationId, intakeFileId],
+  );
+  return rows[0] || null;
+}
+
+/**
+ * Gate C production post-confirm security-assessment handoff: the new
+ * security-policy mutation's scoped SQL CAS. Extends the exact
+ * organization/file-scoped compare-and-set pattern already proven by
+ * `blockIntakeFilePolicyStatus` below with the additional immutable-fact
+ * guards (object_version_id, verified_checksum, verified_size_bytes) a
+ * security-assessment decision must be bound to. Only ever transitions a
+ * file still in file_policy_status = 'pending' whose immutable confirmed
+ * facts match exactly; any mismatch (facts changed, already terminal) is a
+ * no-op (0 rows), never an overwrite. Additive: no other exported query in
+ * this module is changed.
+ */
+export async function casSecurityAssessmentFilePolicyDecision(
+  { organizationId, intakeFileId, objectVersionId, verifiedChecksum, verifiedSizeBytes, newFilePolicyStatus },
+  db = pool,
+) {
+  const { rows } = await db.query(
+    `UPDATE kai.intake_files
+        SET file_policy_status = $6
+      WHERE organization_id = $1
+        AND intake_file_id = $2
+        AND file_policy_status = 'pending'
+        AND object_version_id = $3
+        AND verified_checksum = $4
+        AND verified_size_bytes = $5::bigint
+      RETURNING intake_file_id, intake_batch_id, organization_id, engagement_id, safe_filename,
+        mime_type, file_size_bytes, file_policy_status, malware_scan_status, processing_status,
+        parse_status, review_status, object_version_id, verified_checksum, verified_size_bytes,
+        created_at, updated_at`,
+    [organizationId, intakeFileId, objectVersionId, verifiedChecksum, verifiedSizeBytes, newFilePolicyStatus],
+  );
+  return rows[0] || null;
+}
+
 export async function getScopedIntakeFileReviewQueueItem(
   organizationId,
   reviewQueueItemId,
