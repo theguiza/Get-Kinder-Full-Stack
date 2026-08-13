@@ -1,0 +1,28 @@
+# Gate C ClamAV definition updater image.
+# Runs only the private-mirror definition updater (scripts/kai-clamav-definition-mirror-update.js).
+# It never runs clamd/scanner and never handles intake/client files; the
+# scanner image (./Dockerfile) remains separate and free of this tooling.
+FROM node:20-bookworm-slim AS runtime
+
+# clamav provides sigtool (required to read database build metadata);
+# python3/pip install the supported CVDUpdate package.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends clamav python3 python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip3 install --no-cache-dir --break-system-packages cvdupdate
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+
+COPY Backend/kai/clamavScannerService/clamavDefinitionMirror.js ./Backend/kai/clamavScannerService/clamavDefinitionMirror.js
+COPY scripts/kai-clamav-definition-mirror-update.js ./scripts/kai-clamav-definition-mirror-update.js
+
+RUN mkdir -p /var/lib/kai-clamav-updater-work \
+    && chmod 0777 /var/lib/kai-clamav-updater-work
+
+ENV NODE_ENV=production
+
+ENTRYPOINT ["node", "scripts/kai-clamav-definition-mirror-update.js"]
