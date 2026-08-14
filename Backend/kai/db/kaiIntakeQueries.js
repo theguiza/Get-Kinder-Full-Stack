@@ -208,6 +208,25 @@ export async function blockIntakeFilePolicyStatus({ organizationId, intakeFileId
 }
 
 /**
+ * pg returns bigint columns (verified_size_bytes) as strings to avoid silent
+ * precision loss on values outside the JS safe-integer range, the same
+ * convention already used for file_size_bytes in kaiReadModels.js. This
+ * facts read is the only caller that needs a JS number for
+ * verified_size_bytes, so the narrow conversion happens here rather than via
+ * a global pg bigint type parser: malformed, noncanonical, or out-of-range
+ * strings are left untouched and still fail the caller's
+ * Number.isSafeInteger validation, unchanged from today.
+ */
+function withSafeIntegerVerifiedSizeBytes(row) {
+  if (!row || typeof row.verified_size_bytes !== "string" || !/^-?\d+$/.test(row.verified_size_bytes)) {
+    return row;
+  }
+  const parsed = Number(row.verified_size_bytes);
+  if (!Number.isSafeInteger(parsed) || String(parsed) !== row.verified_size_bytes) return row;
+  return { ...row, verified_size_bytes: parsed };
+}
+
+/**
  * Gate C production post-confirm security-assessment handoff: narrow,
  * organization/file-scoped read of the exact immutable facts a security
  * assessment must be bound to (object_version_id, verified_checksum,
@@ -231,7 +250,7 @@ export async function getScopedIntakeFileSecurityAssessmentFacts(
       LIMIT 1`,
     [organizationId, intakeFileId],
   );
-  return rows[0] || null;
+  return withSafeIntegerVerifiedSizeBytes(rows[0] || null);
 }
 
 /**
