@@ -17,6 +17,7 @@ import {
 
 const applyConfirmedSecurityAssessment = intakeServiceTestables.applyConfirmedSecurityAssessment;
 const logGateCPostConfirmSecurityPhase = intakeServiceTestables.logGateCPostConfirmSecurityPhase;
+const isValidSecurityAssessmentFactsRow = intakeServiceTestables.isValidSecurityAssessmentFactsRow;
 
 async function captureConsoleLog(fn) {
   const lines = [];
@@ -710,6 +711,45 @@ test("diagnostic: only the four allowlisted phase literals can ever be emitted, 
     }
     assert.equal(called, false, `unexpected log for input: ${String(prohibited)}`);
   }
+});
+
+// --- verified_size_bytes PostgreSQL bigint -> JS number normalization ---
+
+test("isValidSecurityAssessmentFactsRow accepts a normalized (numeric) verified_size_bytes", () => {
+  const row = pendingFactsRow({ verified_size_bytes: 57 });
+  assert.equal(isValidSecurityAssessmentFactsRow(row, { organizationId, intakeFileId }), true);
+});
+
+test("isValidSecurityAssessmentFactsRow still rejects a raw bigint-string verified_size_bytes (never weakened)", () => {
+  const row = pendingFactsRow({ verified_size_bytes: "57" });
+  assert.equal(isValidSecurityAssessmentFactsRow(row, { organizationId, intakeFileId }), false);
+});
+
+test("isValidSecurityAssessmentFactsRow still rejects a negative verified_size_bytes", () => {
+  const row = pendingFactsRow({ verified_size_bytes: -5 });
+  assert.equal(isValidSecurityAssessmentFactsRow(row, { organizationId, intakeFileId }), false);
+});
+
+test("post-confirm handoff with a PostgreSQL-style bigint verified_size_bytes proceeds into runProductionSecurityAssessment", async () => {
+  const harness = createHarness({ factsRow: pendingFactsRow({ verified_size_bytes: verifiedSizeBytes }) });
+  const lines = await captureConsoleLog(() =>
+    applyConfirmedSecurityAssessment(baseInput(), dependenciesFromHarness(harness)),
+  );
+
+  assert.equal(harness.assessmentCalls.length, 1);
+  assert.equal(harness.assessmentCalls[0].trustedFacts.verifiedSizeBytes, verifiedSizeBytes);
+  assert.deepEqual(gateCPhaseLines(lines), ["KAI_GATE_C_SECURITY_PHASE=policy_persisted"]);
+});
+
+test("a facts row still carrying a raw bigint string for verified_size_bytes fails validation and never reaches the assessment", async () => {
+  const harness = createHarness({ factsRow: pendingFactsRow({ verified_size_bytes: String(verifiedSizeBytes) }) });
+  const lines = await captureConsoleLog(() =>
+    applyConfirmedSecurityAssessment(baseInput(), dependenciesFromHarness(harness)),
+  );
+
+  assert.equal(harness.assessmentCalls.length, 0);
+  assert.equal(harness.writeCalls.length, 0);
+  assert.deepEqual(gateCPhaseLines(lines), ["KAI_GATE_C_SECURITY_PHASE=pre_assessment_failure"]);
 });
 
 test("diagnostic: confirmUpload public DTO is unaffected by the added diagnostic logging", async () => {
