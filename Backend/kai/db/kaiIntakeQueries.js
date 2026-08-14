@@ -313,6 +313,30 @@ export async function getScopedIntakeFileParserProfileEligibilityFacts(
   return withSafeIntegerVerifiedSizeBytes(rows[0] || null);
 }
 
+const P1_WORKER_SYNTHETIC_SCOPE_SWEEP_LIMIT = 25;
+
+/**
+ * P1 worker runtime composition: lists authoritative `file_policy_status =
+ * 'passed'` intake files inside exactly one configured organization scope. No
+ * file-ID selector, no cross-organization sweep - the WHERE clause is bound to
+ * the single organizationId the caller supplies.
+ */
+export async function listKaiP1WorkerSyntheticScopedEligibleIntakeFiles(
+  { organizationId },
+  db = pool,
+) {
+  const { rows } = await db.query(
+    `SELECT organization_id, intake_file_id
+       FROM kai.intake_files
+      WHERE organization_id = $1
+        AND file_policy_status = 'passed'
+      ORDER BY intake_file_id ASC
+      LIMIT ${P1_WORKER_SYNTHETIC_SCOPE_SWEEP_LIMIT}`,
+    [organizationId],
+  );
+  return rows;
+}
+
 export async function getScopedIntakeFileReviewQueueItem(
   organizationId,
   reviewQueueItemId,

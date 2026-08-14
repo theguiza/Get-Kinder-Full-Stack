@@ -44,7 +44,9 @@ test("api contract exposes Sprint 2 status and admin metadata route shape", () =
   assert.match(routeSource, /storage_upload_enabled:\s*uploadFeaturesEnabled/);
   assert.match(routeSource, /signed_upload_enabled:\s*uploadFeaturesEnabled\s*&&\s*storageProviderEnabled/);
   assert.match(routeSource, /signed_read_enabled:\s*false/);
-  assert.match(routeSource, /parser_worker_enabled:\s*false/);
+  assert.match(routeSource, /areKaiSprint2WorkerFeaturesEnabled\(env\)/);
+  assert.match(routeSource, /parser_worker_enabled:\s*workerFeaturesEnabled/);
+  assert.match(routeSource, /profiling_enabled:\s*workerFeaturesEnabled/);
   assert.match(routeSource, /source_promotion_enabled:\s*false/);
 });
 

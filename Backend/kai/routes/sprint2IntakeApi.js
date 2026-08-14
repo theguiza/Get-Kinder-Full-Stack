@@ -2,6 +2,7 @@ import express from "express";
 import { KAI_ERROR_STATUS, sendKaiError } from "../errors/kaiErrors.js";
 import {
   areKaiSprint2UploadFeaturesEnabled,
+  areKaiSprint2WorkerFeaturesEnabled,
   requireKaiSprint2Enabled,
 } from "../config/kaiSprint2Config.js";
 import { isKaiGateC1GcsProviderEnabled } from "../config/kaiSprint2GcsConfig.js";
@@ -604,6 +605,7 @@ router.use(attachTemporarySafeIntakeRouteLogger);
 function statusData(env = process.env) {
   const uploadFeaturesEnabled = areKaiSprint2UploadFeaturesEnabled(env);
   const storageProviderEnabled = isKaiGateC1GcsProviderEnabled(env);
+  const workerFeaturesEnabled = areKaiSprint2WorkerFeaturesEnabled(env);
   return {
     feature_enabled: true,
     route: "/api/kai/sprint2/intake",
@@ -616,8 +618,8 @@ function statusData(env = process.env) {
     storage_upload_enabled: uploadFeaturesEnabled,
     signed_upload_enabled: uploadFeaturesEnabled && storageProviderEnabled,
     signed_read_enabled: false,
-    parser_worker_enabled: false,
-    profiling_enabled: false,
+    parser_worker_enabled: workerFeaturesEnabled,
+    profiling_enabled: workerFeaturesEnabled,
     data_dictionary_generation_enabled: false,
     source_promotion_enabled: false,
     evidence_creation_enabled: false,

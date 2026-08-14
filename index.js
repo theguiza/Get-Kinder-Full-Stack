@@ -71,6 +71,7 @@ import {
 } from "./Backend/kai/middleware/kaiSprint2RequestSafety.js";
 import sprint2IntakeAuthPreflightApiRouter from "./Backend/kai/routes/sprint2IntakeAuthPreflightApi.js";
 import sprint2IntakeApiRouter from "./Backend/kai/routes/sprint2IntakeApi.js";
+import { registerKaiP1WorkerCron } from "./Backend/kai/parsing/p1WorkerCron.js";
 import {
   legacyKaiDeprecatedJson,
   legacyKaiDeprecatedSse,
@@ -3572,6 +3573,11 @@ if (process.env.NODE_ENV === "production" && process.env.ENABLE_DONATION_POLICY_
     { timezone: "America/Vancouver" }
   );
 }
+// KAI P1 worker: registers only when KAI_SPRINT2_ENABLED and KAI_WORKER_ENABLED
+// are both on, and only activates eligible files once a synthetic organization
+// scope is configured (see Backend/kai/parsing/p1WorkerCron.js).
+registerKaiP1WorkerCron();
+
 // Cron: run every day at KINDNESS_SEND_TIME (HH:MM, Vancouver)
 const KINDNESS_SEND_TIME = process.env.KINDNESS_SEND_TIME || "09:00";
 const [hour, minute] = KINDNESS_SEND_TIME.split(":");

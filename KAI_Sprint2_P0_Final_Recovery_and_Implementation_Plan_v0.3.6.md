@@ -15411,3 +15411,181 @@ TOOL_VERIFIED:
     real client data handling, push, or destructive reset. No new audit
     mechanism or transaction abstraction introduced. No P1/P2/P3 repository
     outside `postgresParserRunRepository.js` was modified.
+
+P1 runtime composition package evidence (2026-08-14)
+
+Contaminated test result closure:
+  - Re-ran `__tests__/kai-sprint2-p0-05f-combined-completeness.spec.js`,
+    `__tests__/kai-sprint2-p1-03-audit-transaction-propagation.spec.js`,
+    `__tests__/kai-sprint2-foundation-safety.spec.js`, and
+    `__tests__/kai-sprint2-p1-activation.spec.js` once, together, against the
+    unmodified starting tree (`f330722`) with the sentinel `DATABASE_URL` set:
+    51/51 pass (11 + 1 + 18 + 21). The prior recorded
+    `kai-sprint2-foundation-safety.spec.js` `file_upload_enabled` failure did
+    not reproduce. Recorded as TEST_ENVIRONMENT_CONTAMINATION - the previous
+    failing run's environment (not this repository's code) was the cause.
+
+Production-write static diagnostic (no database connection made):
+  - Statically inspected every `.integration.spec.js` file matched by
+    `npm run test:kai-sprint2`'s glob (`__tests__/kai-sprint2-*.spec.js`,
+    which does include the `.integration.spec.js` files). Every one of the 29
+    integration spec files gates its real-database path behind its own
+    suite-specific `KAI_<SUITE>_DATABASE_URL` opt-in variable (e.g.
+    `KAI_P1_03_PARSER_WORKER_DATABASE_URL`,
+    `KAI_P0_POSTGRES_ADAPTER_DATABASE_URL`), never the plain `DATABASE_URL`;
+    several additionally assert a loopback-only host and/or explicitly assert
+    that ambient `DATABASE_URL` is ignored. No guardless mutating-SQL path
+    (INSERT/UPDATE/DELETE/DDL) reachable from plain `DATABASE_URL` alone was
+    found. Result: `PROD_DB_MUTATION_FROM_CONTAMINATED_RUN = NOT_ESTABLISHED`.
+
+Implementation:
+  - `Backend/kai/config/kaiSprint2Config.js` - added `isKaiWorkerEnabled`
+    (reads `KAI_WORKER_ENABLED`, default false, same
+    true/1/yes/on normalization idiom as every other flag in this file) and
+    `areKaiSprint2WorkerFeaturesEnabled` (`isKaiSprint2Enabled &&
+    isKaiWorkerEnabled`, mirroring `areKaiSprint2UploadFeaturesEnabled`). Also
+    added `getKaiP1WorkerSyntheticOrganizationId`, the smallest explicit
+    synthetic-scope configuration: reads
+    `KAI_P1_WORKER_SYNTHETIC_ORGANIZATION_ID`, fails closed (returns `null`)
+    when absent, empty, or not already trimmed. No existing flag's default or
+    behavior changed.
+  - `Backend/kai/db/kaiIntakeQueries.js` - added
+    `listKaiP1WorkerSyntheticScopedEligibleIntakeFiles({ organizationId }, db)`,
+    a `SELECT organization_id, intake_file_id FROM kai.intake_files WHERE
+    organization_id = $1 AND file_policy_status = 'passed'` bound to exactly
+    one caller-supplied organization id, ordered, and capped at 25 rows. No
+    file-ID selector; no query in this module sweeps across organizations.
+  - `Backend/kai/parsing/p1WorkerRuntime.js` (new) - `runKaiP1WorkerTick`,
+    the small runtime seam. Fails closed to `{ activated: [], reason:
+    "worker_disabled" }` unless both `KAI_SPRINT2_ENABLED` and
+    `KAI_WORKER_ENABLED` are enabled, and to `{ activated: [], reason:
+    "synthetic_scope_not_configured" }` when no synthetic organization scope
+    is configured. Discovers eligible files only inside that one configured
+    organization (with a defense-in-depth re-check dropping any row whose
+    `organization_id` does not match, even though the query above already
+    scopes it), then calls the existing, unchanged
+    `activateParserProfileWorkForIntakeFile` once per file with `retry:
+    false` and a fixed `{ actorType: "system", actorUserId: null }` synthetic
+    actor context. Introduces no new queue, claim, lock, or retry logic of
+    its own - every one of those semantics is reused unmodified from the
+    existing P1 activation seam and its underlying
+    `parserProfileWorkerOrchestration.js` / `postgresParserRunRepository.js`.
+    Performs no P2/P3 (evidence/claim/generation/export) activation - the
+    module imports only config, the P1 activation seam, and the new
+    organization-scoped query.
+  - `Backend/kai/parsing/p1WorkerCron.js` (new) - `registerKaiP1WorkerCron`,
+    wiring `runKaiP1WorkerTick` onto the repository's existing `node-cron`
+    scheduling model (the same `node-cron` package `index.js` already uses
+    for the nudges, donation-policy, and daily-kindness jobs). Registers no
+    `cron.schedule` call at all unless both feature flags are already
+    enabled at registration time; the tick itself re-checks both flags and
+    the synthetic scope on every fire regardless. No new worker process,
+    Procfile, Render service, Bull/Redis queue, child process, or HTTP route
+    was added.
+  - `index.js` - imports and calls `registerKaiP1WorkerCron()` once, next to
+    the existing cron registrations, with no arguments (so it uses
+    `process.env` and the real `node-cron` library exactly as the other
+    cron jobs in this file do). No existing cron job or flag was changed.
+  - `Backend/kai/routes/sprint2IntakeApi.js` - `statusData()` now computes
+    `workerFeaturesEnabled = areKaiSprint2WorkerFeaturesEnabled(env)` and
+    reports `parser_worker_enabled` and `profiling_enabled` from that value
+    instead of a literal `false`. No other status field changed; production
+    default remains `false` because `KAI_WORKER_ENABLED` is unset by
+    default.
+  - `__tests__/kai-sprint2-api-contract.spec.js` - updated the one existing
+    assertion that matched the literal source text
+    `parser_worker_enabled:\s*false` to instead assert the route source uses
+    `areKaiSprint2WorkerFeaturesEnabled(env)` and assigns
+    `workerFeaturesEnabled` to both `parser_worker_enabled` and
+    `profiling_enabled`. This is the one pre-existing test this package's
+    required status-field change made stale; no unrelated assertion in that
+    file was touched.
+
+KAI_WORKER_ENABLED behavior: default false (unset/any non-true/1/yes/on
+value); P1 worker execution (both the cron tick's real work and the status
+endpoint's reported `parser_worker_enabled`/`profiling_enabled`) requires
+`KAI_SPRINT2_ENABLED` and `KAI_WORKER_ENABLED` to both be enabled. Neither
+flag's default or any other flag was changed.
+
+Synthetic scope mechanism: `KAI_P1_WORKER_SYNTHETIC_ORGANIZATION_ID`
+(`getKaiP1WorkerSyntheticOrganizationId` in `kaiSprint2Config.js`) - fails
+closed (no work) when unset; the worker never sweeps more than the one
+organization id this variable names, and never accepts a file-ID selector.
+
+Cron execution path: `index.js` calls `registerKaiP1WorkerCron()` at module
+load (next to the existing nudges/donation-policy/kindness `cron.schedule`
+registrations), which - only when both feature flags are already on -
+registers one `node-cron` `cron.schedule` job (`*/15 * * * *`,
+`America/Vancouver`) whose handler calls `runKaiP1WorkerTick({ env:
+process.env })` and logs/catches errors exactly like the other jobs in that
+file.
+
+New/changed runtime files: `Backend/kai/config/kaiSprint2Config.js`,
+`Backend/kai/db/kaiIntakeQueries.js`,
+`Backend/kai/parsing/p1WorkerRuntime.js` (new),
+`Backend/kai/parsing/p1WorkerCron.js` (new),
+`Backend/kai/routes/sprint2IntakeApi.js`, `index.js`.
+
+TOOL_VERIFIED - tests:
+
+- New `__tests__/kai-sprint2-p1-worker-runtime-composition.spec.js` (10
+  tests) proves: either `KAI_SPRINT2_ENABLED` or `KAI_WORKER_ENABLED` alone
+  disabled yields zero list/activation calls; a missing synthetic
+  organization scope yields zero list/activation calls even with both flags
+  enabled; an out-of-scope organization row returned by a (deliberately
+  misbehaving) dependency is never activated; an eligible in-scope file
+  reaches the existing activation seam exactly once with `retry: false` and
+  the fixed synthetic system actor context; two overlapping ticks each call
+  the activation seam once per discovered file (idempotency itself remains
+  owned by the unchanged parser-run repository, proven separately in
+  `kai-sprint2-p1-activation.spec.js` and
+  `kai-sprint2-p1-03-parser-profile-worker*.spec.js`); no call ever sets
+  `retry: true`; the runtime module's own import lines reference no
+  P2/P3 (evidence/claim/generation/export/review-cockpit/source-promotion/
+  data-dictionary) module; `registerKaiP1WorkerCron` registers no
+  `cron.schedule` call unless both flags are enabled at registration, reuses
+  the injected `node-cron`-shaped library unchanged, and its scheduled
+  handler never throws out of the callback even when the injected tick
+  rejects; and the status endpoint reports `parser_worker_enabled` /
+  `profiling_enabled` as `true` only when both flags are enabled together,
+  `false` when either or both are absent.
+- focused_tests:
+  `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false node --test __tests__/kai-sprint2-p1-worker-runtime-composition.spec.js __tests__/kai-sprint2-p1-activation.spec.js __tests__/kai-sprint2-p1-03-audit-transaction-propagation.spec.js __tests__/kai-sprint2-api-contract.spec.js __tests__/kai-sprint2-foundation-safety.spec.js __tests__/kai-sprint2-config.spec.js __tests__/kai-sprint2-pass2-api-contract.spec.js __tests__/kai-sprint2-pass2-metadata-intake-service.spec.js`
+  passed (158 pass, 0 fail).
+- broader_tests:
+  `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm run test:kai-sprint2`
+  passed (1977 pass, 0 fail, 29 skipped - the pre-existing integration specs
+  that each require their own suite-specific database opt-in variable, per
+  the static diagnostic above) and
+  `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm test`
+  passed (2082 pass, 0 fail, 29 skipped).
+- git_diff_check: `git diff --check` passed.
+- prohibited_actions_not_performed: no production access, deployment,
+  PostgreSQL/database/schema/migration mutation, GCP/IAM/GCS/Render/cloud
+  mutation, feature/configuration change, credential/secret inspection, real
+  client data handling, push, or destructive action. No new Render worker,
+  Procfile, Bull/Redis queue, child process, HTTP parsing route, or
+  scheduler was introduced - only the repository's existing `node-cron`
+  model was reused. No P2/P3 activation, evidence, claims, generation, or
+  export behavior was added. No existing P0/P1 activation, queue,
+  idempotency, locking, exact-version read, or audit-transaction semantics
+  were redesigned - all reused unmodified.
+
+NOT_CONFIRMED:
+
+- Whether this cron registration is ever actually reached in a deployed
+  process (i.e. whether `NODE_ENV`/`KAI_SPRINT2_ENABLED`/
+  `KAI_WORKER_ENABLED`/`KAI_P1_WORKER_SYNTHETIC_ORGANIZATION_ID` are set in
+  any real deployment target) is NOT_CONFIRMED - no production or deployment
+  configuration was inspected or changed by this package, and none of these
+  flags' values were changed.
+- Whether a `kai.intake_files` row with `file_policy_status = 'passed'`
+  currently exists in any real database for the synthetic organization scope
+  this package's owner ultimately configures is NOT_CONFIRMED - this
+  package's own test coverage is entirely synthetic/in-memory, per the
+  synthetic-only requirement.
+- Whether 15 minutes and the `America/Vancouver` timezone are the schedule
+  an owner ultimately wants for this job is NOT_CONFIRMED - these are this
+  package's smallest-reasonable defaults, both fully overridable via
+  `registerKaiP1WorkerCron`'s options, and neither was asserted by the task
+  instructions.
