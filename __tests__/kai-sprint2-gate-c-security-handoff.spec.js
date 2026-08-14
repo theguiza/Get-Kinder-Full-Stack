@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { EventEmitter } from "node:events";
 
 import {
   __testables as intakeServiceTestables,
@@ -854,5 +855,115 @@ test("diagnostic: confirmUpload public DTO is unaffected by the added diagnostic
     assert.equal(result.data.malware_scan_status, undefined);
   });
 
+  assert.deepEqual(gateCPhaseLines(lines), ["KAI_GATE_C_SECURITY_PHASE=policy_persisted"]);
+});
+
+// --- Real GCS byte-source contract repair: end-to-end handoff/persistence proof ---
+
+// A raw Node Readable-style double: async iterable + destroy(), no close(),
+// mirroring the real @google-cloud/storage createReadStream() return value
+// that the production GCS provider hands back as byte_source.
+function rawGcsStreamDouble(bytes) {
+  const emitter = new EventEmitter();
+  let destroyed = false;
+  return {
+    once(event, listener) {
+      emitter.once(event, listener);
+      return this;
+    },
+    destroy() {
+      if (destroyed) return;
+      destroyed = true;
+      setTimeout(() => emitter.emit("close"), 5);
+    },
+    async *[Symbol.asyncIterator]() {
+      yield bytes;
+    },
+  };
+}
+
+test("Gate C-3: handoff/persistence proof drives real byte reading, size verification, and SHA-256 verification through a raw GCS stream to policy_persisted", async () => {
+  const bytes57 = Buffer.from(Array.from({ length: 57 }, (_, index) => 97 + (index % 26)));
+  const checksum57 = createHash("sha256").update(bytes57).digest("hex");
+  const gcsObjectKey = "kai/intake/gate-c3-handoff-object-key";
+  const gcsGeneration = "1700000000000001";
+
+  const harness = createHarness({
+    factsRow: pendingFactsRow({
+      verified_checksum: checksum57,
+      verified_size_bytes: bytes57.byteLength,
+      storage_provider: "gcs",
+      storage_object_key: gcsObjectKey,
+    }),
+  });
+
+  const gcsProviderCalls = [];
+  const gcsProvider = {
+    enabled: true,
+    async openExactGenerationReadStream(request) {
+      gcsProviderCalls.push(request);
+      return { ok: true, data: { size_bytes: bytes57.byteLength, byte_source: rawGcsStreamDouble(bytes57) } };
+    },
+  };
+  const uploadLifecycleRepository = {
+    async resolveGcsGenerationBinding({ organizationId: requestedOrgId, intakeFileId: requestedFileId }) {
+      assert.equal(requestedOrgId, organizationId);
+      assert.equal(requestedFileId, intakeFileId);
+      return { ok: true, data: { object_version_id: objectVersionId, gcs_generation: gcsGeneration } };
+    },
+  };
+
+  let executorCalled = false;
+  const internalSecurityAssessmentExecutor = {
+    seamKind: "kai_sprint2_internal_security_assessment_executor",
+    identity: {
+      actorType: "internal_service",
+      serviceIdentity: "kai_file_security_executor",
+      operationGroup: "file_security_assessment",
+    },
+    async execute(input) {
+      executorCalled = true;
+      assert.equal(input.bytes.byteLength, 57);
+      assert.equal(createHash("sha256").update(input.bytes).digest("hex"), checksum57);
+      return { policy: "pass" };
+    },
+  };
+
+  const deps = {
+    now: () => "2026-08-01T00:00:00.000Z",
+    runInTransaction: harness.runInTransaction.bind(harness),
+    async getScopedIntakeFileSecurityAssessmentFacts(identity) {
+      harness.readCalls.push(identity);
+      return harness.factsRow;
+    },
+    async casSecurityAssessmentFilePolicyDecision(mutation, transactionContext) {
+      harness.writeCalls.push({ mutation, transactionContext });
+      return harness.updatedRow;
+    },
+    async insertRequiredSuccessfulAuditEvent(metadata, transactionContext) {
+      harness.auditMetadata = metadata;
+      harness.auditTransactionContext = transactionContext;
+      return harness.auditResult;
+    },
+    gcsProvider,
+    uploadLifecycleRepository,
+    internalSecurityAssessmentExecutor,
+  };
+
+  const lines = await captureConsoleLog(() =>
+    applyConfirmedSecurityAssessment(
+      { ...baseInput(), verifiedChecksum: checksum57, verifiedSizeBytes: bytes57.byteLength },
+      deps,
+    ),
+  );
+
+  assert.equal(gcsProviderCalls.length, 1);
+  assert.equal(gcsProviderCalls[0].objectKey, gcsObjectKey);
+  assert.equal(gcsProviderCalls[0].gcsGeneration, gcsGeneration);
+  assert.equal(executorCalled, true);
+  assert.equal(harness.writeCalls.length, 1);
+  assert.equal(harness.writeCalls[0].mutation.newFilePolicyStatus, "passed");
+  assert.ok(harness.auditMetadata);
+  assert.equal(harness.auditMetadata.to_state, "passed");
   assert.deepEqual(gateCPhaseLines(lines), ["KAI_GATE_C_SECURITY_PHASE=policy_persisted"]);
 });

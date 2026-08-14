@@ -56,6 +56,44 @@ function isGcsBindingRepository(repository) {
 }
 
 /**
+ * Adapts a provider byte source into the assessment-side contract required by
+ * assessmentReadIntegrityBridge (async iteration + async close()), without
+ * buffering or otherwise touching the bytes it yields.
+ *
+ * A source that already exposes both an async iterator and a close() is
+ * returned unchanged - its own cleanup operation is authoritative. A raw
+ * Node Readable (async iterator + destroy(), no close()) is wrapped so that
+ * the first close() call synchronously initiates destroy() (unless already
+ * destroyed) and returns a resolved, memoized promise - assessmentReadIntegrityBridge's
+ * closeByteSource() treats close() as best-effort cleanup and never depends
+ * on underlying stream teardown completing, so waiting for a "close" event
+ * here would be unobserved latency with no correctness benefit. Anything
+ * lacking async iteration, or lacking any supported cleanup mechanism, is
+ * rejected (returns null) so the caller fails closed.
+ */
+function adaptAssessmentByteSource(source) {
+  if (!source || typeof source[Symbol.asyncIterator] !== "function") return null;
+  if (typeof source.close === "function") return source;
+  if (typeof source.destroy !== "function") return null;
+
+  let closePromise = null;
+  return {
+    [Symbol.asyncIterator]() {
+      return source[Symbol.asyncIterator]();
+    },
+    close() {
+      if (!closePromise) {
+        if (source.destroyed !== true) {
+          source.destroy();
+        }
+        closePromise = Promise.resolve();
+      }
+      return closePromise;
+    },
+  };
+}
+
+/**
  * Resolves reads against the exact, already-bound GCS generation for this
  * object_version_id. Never accepts bucket, object key, or generation from
  * request input - the object key comes only from the trusted facts computed
@@ -100,7 +138,7 @@ function createBoundGcsAssessmentStorageAdapter({ facts, gcsProvider, uploadLife
         data: {
           object_version_id: facts.objectVersionId,
           size_bytes: opened.data?.size_bytes,
-          byte_source: opened.data?.byte_source,
+          byte_source: adaptAssessmentByteSource(opened.data?.byte_source),
         },
       };
     },
@@ -209,4 +247,5 @@ export const __testables = Object.freeze({
   createBoundGcsAssessmentStorageAdapter,
   createProductionInternalSecurityAssessmentExecutor,
   executorInputFromFacts,
+  adaptAssessmentByteSource,
 });
