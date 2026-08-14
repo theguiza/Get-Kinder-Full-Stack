@@ -5,7 +5,7 @@
 FROM node:20-bookworm-slim AS runtime
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends clamav-daemon \
+    && apt-get install -y --no-install-recommends clamav-daemon clamdscan clamav \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /var/lib/clamav \
     && chown -R clamav:clamav /var/lib/clamav
