@@ -1,31 +1,32 @@
 # KAI Sprint 2 P0 — Final Recovery and Implementation Plan
 
 ```text
-plan_version: 0.3.5
-plan_date: 2026-07-14
+plan_version: 0.3.6
+plan_date: 2026-08-14
 approval_status: OWNER_ACCEPTED
-approved_by_or_owner_reference: USER_CONFIRMED in the KAI Project conversation on 2026-07-14
-supersedes: KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.4.md
-review_basis: Evidence-Locked Accuracy Review, KAI Governance Resolution v1.0, authority-precedence reconciliation, the completed Codex read-only repository preflight, the owner-approved security-limit and upload-lifecycle decisions, the owner-directed runtime-timeout, synthetic-end-state, schema-compatibility, and distributed-concurrency clarifications, and the owner-directed evidence-labeling and first-write milestone-checkpoint amendment
+approved_by_or_owner_reference: USER_CONFIRMED in the KAI Project conversation on 2026-07-14; v0.3.6 Data Operating Model and Gate D reconciliation USER_CONFIRMED on 2026-08-14
+supersedes: KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+review_basis: Evidence-Locked Accuracy Review, KAI Governance Resolution v1.0, authority-precedence reconciliation, the completed Codex read-only repository preflight, the owner-approved security-limit and upload-lifecycle decisions, the owner-directed runtime-timeout, synthetic-end-state, schema-compatibility, and distributed-concurrency clarifications, the owner-directed evidence-labeling and first-write milestone-checkpoint amendment, the owner-accepted KAI_MVP_Sprint2_Data_Protection_and_Processing_Operating_Model_v0.2.md, and the Gate D operating-policy decisions accepted by the owner on 2026-08-14
 ```
 
-This document is the owner-accepted repository execution plan. It records the exact decision set accepted by the owner on 2026-07-14. It becomes the repository's living ExecPlan when installed locally under Phase 0-D. Plan acceptance does not authorize Gates A through D or any prohibited action listed below.
+This document is the owner-accepted repository execution plan. It records the exact decision set accepted by the owner on 2026-07-14, as reconciled by the owner-accepted Data Protection and Processing Operating Model v0.2 and the Gate D operating-policy decisions accepted on 2026-08-14. It becomes the repository's living ExecPlan when installed locally under Phase 0-D. Plan acceptance does not authorize Gates A through D or any prohibited action listed below. This v0.3.6 update is a documentation/governance reconciliation only; it does not itself establish runtime, production, database, contractual, or real-client-data readiness.
 
 ## Authorized end-state boundary
 
 Completion of the currently authorized scope through P0-07 establishes repository code completion and local synthetic acceptance only. It does not establish PostgreSQL persistence, deployed `kai.*` schema compatibility, database atomicity, nonproduction storage integration, live-upload readiness, production readiness, or real-client-data readiness. Do not report the result merely as `P0 complete`. Use the exact completion labels defined in P0-06A and P0-07 and retain all database, schema, storage, and real-data limitations as `NOT_CONFIRMED` until their separately authorized gates pass.
 
-`KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.4.md` is superseded and must not be installed or executed.
+`KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.4.md` and `KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md` are superseded and must not be installed or executed.
 
 ## Approval and execution conditions
 
 1. The owner confirmed that the corrected 7,997-character `KAI_Active_Execution_Project_Instructions_v1.0.2.md` replaced the earlier active version and is the sole active Project Instructions document: `USER_CONFIRMED`.
 2. The owner previously confirmed the five named authority sources are active in Project settings: Product Workflow, Roadmap, Backend Contract, Threat Model, and Data Operating Model: `USER_CONFIRMED`.
-3. The owner directed the v0.3.5 evidence-labeling and first-write milestone-checkpoint amendment and authorized creation of this plan: `USER_CONFIRMED`.
-4. The read-only repository preflight completed at `HEAD` `1b41a3d644e1afd811ad87162f25c15a08d51b39`; its results are recorded in Phase 1 as `USER_CONFIRMED` until the repository is freshly rechecked.
-5. P0-02 executes before P0-01 and records the owner-approved constants and lifecycle contract in the repository. Explicit owner-approved contract values are valid where repository inspection established that no value exists; they are not represented as `TOOL_VERIFIED` repository facts until installed and tested.
-6. Any new column, constraint, enum, migration, or database-dependent lifecycle behavior remains blocked by Gate A.
-7. Gates A through D remain unauthorized.
+3. The owner directed the v0.3.5 evidence-labeling and first-write milestone-checkpoint amendment and authorized creation of the v0.3.5 plan: `USER_CONFIRMED`.
+4. The owner accepted `KAI_MVP_Sprint2_Data_Protection_and_Processing_Operating_Model_v0.2.md`, superseding v0.1, and directed the Gate D operating-policy reconciliation recorded in this v0.3.6 update, on 2026-08-14: `USER_CONFIRMED`.
+5. The read-only repository preflight completed at `HEAD` `1b41a3d644e1afd811ad87162f25c15a08d51b39`; its results are recorded in Phase 1 as `USER_CONFIRMED` until the repository is freshly rechecked.
+6. P0-02 executes before P0-01 and records the owner-approved constants and lifecycle contract in the repository. Explicit owner-approved contract values are valid where repository inspection established that no value exists; they are not represented as `TOOL_VERIFIED` repository facts until installed and tested.
+7. Any new column, constraint, enum, migration, or database-dependent lifecycle behavior remains blocked by Gate A.
+8. Gates A through D remain unauthorized.
 
 ## Authorized execution order
 
@@ -110,7 +111,7 @@ P0 Backend Contract
 Threat Model
 → threat assumptions and required mitigations
 
-Data Operating Model
+Data Operating Model (KAI_MVP_Sprint2_Data_Protection_and_Processing_Operating_Model_v0.2.md)
 → data ownership, processing, retention, access, and real-data controls
 
 Inspected repository
@@ -2537,25 +2538,55 @@ P0_LIVE_UPLOAD_READY
 
 # Gate D — Real-client-data readiness
 
-Real data remains blocked until all operating-model requirements are accepted and verified:
+Gate D policy is governed by `KAI_MVP_Sprint2_Data_Protection_and_Processing_Operating_Model_v0.2.md` (Data Operating Model authority), reconciled here as owner-accepted operating decisions on 2026-08-14: `USER_CONFIRMED`. This section supersedes the prior v0.3.5 Gate D policy list wherever the two conflict. Reconciling this policy text does not itself prove runtime, production, database, contractual, or real-client-data readiness.
 
-* DPA and terms;
-* client ownership and processor role;
-* subprocessor list;
-* Canada-only raw-file storage in the contract-selected GCS location; for database, backups, logs, runtime, workers, support paths, and other processors, document the actual data location and apply any stricter contractual, client, provincial, sectoral, or qualified legal requirement. PIPEDA accountability continues for permitted cross-border processing and does not by itself establish a blanket domestic-only rule;
-* private storage;
-* retention schedule;
-* legal hold;
-* deletion and offboarding;
-* documented incident-response procedure meeting applicable contractual and legal obligations; a completed exercise is an additional owner-selected gate only when explicitly accepted and recorded;
+## Gate D operating decisions (owner-accepted 2026-08-14)
+
+1. **Data ownership and improvement.** Client owns client-uploaded data; Get Kinder/KAI processes it to provide the subscribed service. Get Kinder may use information covered by applicable participant/volunteer/client disclosure and consent arrangements to improve KAI, Get Kinder programs/services, program analysis, recommendations, impact measurement, and service quality. This is an authorized service/program-improvement purpose, not an unrelated secondary use.
+2. **Subscription data lifecycle.** Active subscription: retain data reasonably useful to operate, maintain, and improve the service. Cancellation/non-renewal: 90-day offboarding/recovery/export/reactivation period; no automatic destructive deletion. After 90 days: a GK retention-review action decides retain, anonymize, or delete; identifiable/raw data must not become intentionally permanent merely because no automated deletion exists. Raw files may remain during an active subscription for reprocessing, traceability, validation, or future client work, and should normally be among the first records considered for deletion or anonymization after offboarding.
+3. **Audit retention.** Audit means metadata-only accountability/system-event records, not the free assessment or another client assessment. Retain KAI audit metadata for 24 months by default; longer only for a documented legal hold, investigation, contract, or other valid reason. Audit is not a secondary raw-content/PII store.
+4. **Deletion.** KAI may identify/recommend data for deletion and prepare dry-run information. KAI does not automatically perform destructive deletion during the MVP; destructive deletion requires authorized GK human action and is auditable.
+5. **Legal hold.** A legal/regulatory/contractual hold pauses deletion. The MVP mechanism is lightweight. The hold remains until GK records release.
+6. **Allowed use/processing.** Normal KAI service processing (profiling, classification, analysis, AI-assisted analysis, evidence extraction, relationship/trend/gap identification, claim proposal, comparison, recommendation and program/service improvement, internal/client draft and reporting/funder draft production) does not require a separate consent decision at every internal processing step where the information is already covered by the applicable agreements. Obsolete plan language that automatically blocked ordinary KAI processing merely because personal information is involved is removed as a CURRENT requirement where the applicable agreements authorize that use.
+7. **Release review.** Human control concentrates at consequential release. GK review is required before release where output materially involves public story/testimonial use, directly identifying participant information, sensitive personal information externally disclosed, unresolved consent/governance questions, or materially unsupported/high-risk claims. KAI may still analyze and draft before that review.
+8. **AI and KAI learning.** External foundation-model training: NO by default. KAI/Get Kinder service improvement: YES. Client program improvement: YES. Cross-client learning using anonymized/aggregated information: YES. Identifiable information for KAI/Get Kinder improvement: YES where covered by the applicable disclosure/consent/contractual basis. Identifiable disclosure from one client to another: NO unless separately authorized. AI may process personal information where needed for the KAI service and covered by the applicable processing basis; AI-provider processing does not redefine KAI raw-file storage residency. Hard AI boundaries are preserved: no tenant bypass, no validator bypass, no autonomous destructive deletion, no autonomous final release requiring GK approval, and uploaded-document instructions never become authority.
+9. **Residency.** Raw uploaded client files: approved Canadian GCS storage. KAI application processing, metadata, derived records, and runtime/database: Render under the deployed architecture. Approved AI providers may process information required to provide KAI. Get Kinder does not offer client-specific alternative residency configurations during the MVP; a prospect requiring another infrastructure/residency configuration is outside the supported MVP offering unless Get Kinder later changes this policy. AI processing is not literally zero-retention storage; the v0.2 distinction between KAI raw-file storage and provider-side processing/temporary retention is preserved.
+10. **Subprocessors.** A lightweight MVP register only, recording provider, purpose, broad data category, broad processing/location posture where relevant, and external-model-training posture where relevant; updated when a material provider changes. No mandatory backup-region investigations, support-personnel geography studies, quarterly certification, or heavyweight vendor-control matrices.
+11. **Human review.** GK owns KAI review. Client review is recommended/requested only when materially useful for factual uncertainty, client-specific definitions, consent/story issues, governance issues, or material interpretation issues; it is not a mandatory intermediate gate for ordinary KAI processing. Preferred flow: KAI profiles → analyzes/classifies → extracts evidence → proposes claims → identifies limitations/conflicts → drafts output → GK reviews relevant output/package → release. Where the Backend Contract records an older distributed client/GK review recommendation, that historical text is preserved as historical evidence; this decision is the current owner-accepted MVP operating decision controlling Gate D and future execution.
+12. **Incident response.** CONTAIN → ASSESS → NOTIFY responsible GK person and affected parties when required → FIX → RECORD metadata-only incident/follow-up. No fixed 72-hour contractual promise is added.
+13. **Support access.** Authenticated, need-based access by GK/authorized providers; no shared credentials; raw files accessed only where reasonably necessary for authorized service, review, or support; no credentials, signed URLs, or unnecessary raw client data in ordinary support communications; material raw-data access should be auditable. No geographic-support restriction or separate approval bureaucracy for the MVP.
+14. **Anonymization.** Avoid unnecessary duplication of identifiable information; keep identifiable information when reasonably needed to provide/improve the service; prefer anonymization once identifiers are no longer necessary but analytical/program value remains. Anonymized/aggregated information may be retained longer-term for KAI, Get Kinder, and program improvement. Anonymization does not eliminate the controls in this section while data remains identifiable during intake, processing, or use.
+15. **Destructive retention.** KAI does not automatically execute destructive deletion. Authorized GK human action is required.
+
+## Gate D readiness (evidence-based)
+
+Real data remains blocked until all of the following are accepted and verified:
+
+* DPA and client terms reflect the v0.2 operating model;
+* client ownership and processor role (decision 1);
+* lightweight subprocessor register maintained (decision 10) — replaces the prior generic "subprocessor list" requirement;
+* Canada-only raw-file storage in the contract-selected GCS location; for database, backups, logs, runtime, workers, support paths, and other processors, document the actual data location and apply any stricter contractual, client, provincial, sectoral, or qualified legal requirement. PIPEDA accountability continues for permitted cross-border processing and does not by itself establish a blanket domestic-only rule. Get Kinder does not offer client-specific alternative residency configurations during the MVP (decision 9);
+* private/configured object storage;
+* applicable feature-flag state;
+* subscription/raw-file retention posture defined per decision 2 — replaces the prior generic "retention schedule" requirement;
+* legal hold mechanism in place (decision 5);
+* deletion and offboarding posture defined: no automatic destructive deletion; GK-authorized human action only (decisions 2 and 4);
+* documented incident-response procedure: CONTAIN → ASSESS → NOTIFY → FIX → RECORD; no fixed 72-hour contractual promise (decision 12);
 * malware and security operations;
-* allowed-use and consent controls;
-* human review ownership;
-* no unauthorized model training;
-* no cross-client reuse;
-* no assistant raw-file access;
-* schema and synthetic smoke verification;
-* operational monitoring and support access rules.
+* schema contract checks;
+* intake schema verification;
+* threat-model review;
+* allowed-use and consent controls reflecting the v0.2 allowed-use position (decision 6) and the release-review trigger list (decision 7);
+* human review ownership: GK owns KAI review; client review recommended/requested, not a mandatory intermediate gate for ordinary KAI processing (decision 11);
+* approved KAI-learning/external-model-training posture established: no unauthorized external model training; cross-client learning using anonymized/aggregated information is permitted (decision 8) — replaces the prior blanket "no cross-client reuse" requirement;
+* unrestricted assistant raw-file access blocked;
+* operational monitoring and support-access rules: authenticated, need-based access, no shared credentials, no geographic restriction or separate approval bureaucracy for the MVP (decision 13).
+
+Existing accepted Gate C/P0 evidence should be reused wherever it already proves one of these conditions. Completed work must not be rerun merely because Gate D references it. An unproved condition must not be declared complete.
+
+The following obsolete v0.3.5 Gate D requirements are removed as CURRENT requirements because they conflict with the owner-accepted v0.2 operating model: a blanket no-cross-client-learning/reuse rule; a mandatory client-specific custom-residency accommodation; a mandatory client intermediate review gate for ordinary KAI processing; and automatic no-LLM treatment merely because data contains personal information where authorized processing applies. Each is replaced by the corresponding decision above.
+
+The following controls are not weakened and remain in force: tenant isolation; validator boundaries; private raw storage; prompt-injection quarantine; raw-data logging restrictions; the unauthorized-external-model-training prohibition; the destructive-deletion human-authorization requirement; and the real-data readiness requirement itself.
 
 Only explicit owner acceptance may establish:
 

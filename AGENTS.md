@@ -2,7 +2,7 @@
 
 These instructions apply to the entire repository.
 
-- Treat `KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md` as the single living repository ExecPlan for KAI Sprint 2 P0.
+- Treat `KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.6.md` as the single living repository ExecPlan for KAI Sprint 2 P0.
 - Inspect the relevant implementation, tests, scripts, and documentation before every change.
 - Follow the accepted package order and keep every change inside the approved P0 boundary.
 - Update the living ExecPlan evidence and status once, at the end of each coherent package.
