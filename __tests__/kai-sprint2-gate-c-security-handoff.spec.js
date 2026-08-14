@@ -413,7 +413,7 @@ test("production composition with valid ClamAV config wires config to executor t
   assert.deepEqual(calls, [
     { targetPrincipal },
     { audience: scannerUrl },
-    { url: scannerUrl, method: "POST", contentType: "application/octet-stream" },
+    { url: `${scannerUrl}/scan`, method: "POST", contentType: "application/octet-stream" },
   ]);
 });
 
