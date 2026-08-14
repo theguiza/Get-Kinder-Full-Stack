@@ -15346,3 +15346,68 @@ NOT_CONFIRMED:
 - A scheduler/sweep mechanism to discover all eligible intake files across an organization (as opposed to activating one already-known organization/intake-file identity, the scope this package implements) remains unimplemented; adding one was judged out of the "smallest coherent change" boundary and is deferred to whatever later, separately-authorized worker/deployment package selects a runtime and invocation mechanism for `activateParserProfileWorkForIntakeFile`.
 - Deployment platform/runtime selection for actually invoking this dormant entrypoint continuously in production is NOT_CONFIRMED and was not selected by this package, per instruction.
 - `P0_LIVE_UPLOAD_READY` / production canary status is unchanged by this package and remains as previously recorded above.
+
+P1 activation package correction evidence (2026-08-14)
+
+Correction evidence:
+  - `__tests__/kai-sprint2-p0-05f-combined-completeness.spec.js` - updated the
+    hardcoded ExecPlan filename literal from the stale
+    `KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md` to the
+    living `..._v0.3.6.md`, closing the pre-existing failure this package's
+    own evidence already identified above. No content assertion changed.
+  - `Backend/kai/parsing/postgresParserRunRepository.js` -
+    `prepareRequiredAudit` now accepts the same `tx` (the parser-run
+    repository's own transaction context, already opened by `runInTransaction`)
+    and forwards it as `db` into `metadataOnlyAudit.prepareMetadataOnlyAudit`.
+    Previously `db` was never passed, so `insertRequiredSuccessfulAuditEvent`
+    (`Backend/kai/db/kaiAuditQueries.js`) fell through to its own default
+    global pool connection instead of the parser-run mutation's transaction -
+    meaning the required audit INSERT could commit or fail independently of
+    the domain write it is supposed to be atomic with. All four call sites
+    (`claimQueuedParserRun`, `completeParserRunWithProfile`,
+    `failParserRunSafely`, `requeueFailedParserRunForRetry`) updated
+    identically. No new audit mechanism or transaction abstraction was added;
+    the existing single `tx` already threaded through each method is reused.
+  - `Backend/kai/services/kaiMetadataOnlyAuditComposition.js` -
+    `prepareMetadataOnlyAudit({payload, db})` now accepts and forwards the
+    caller-supplied `db` to `insertAuditEvent(metadata, db)` instead of
+    calling it with only `metadata` (which silently defaulted to the global
+    pool). The transaction context is passed as a plain argument, never
+    embedded in the audit `metadata` payload. Omitting `db` still falls back
+    to the pool default, so no other existing caller of this contract is
+    affected.
+  - `__tests__/kai-sprint2-p1-03-audit-transaction-propagation.spec.js`
+    (new): a fake transaction provider that behaves like a real pg client
+    (routes every query, including the audit_events insert performed by the
+    injected `insertAuditEvent`, through one connection object and logs which
+    connection issued each query) proves `claimQueuedParserRun`'s required
+    audit insert is issued on the exact same connection as its parser-run
+    `UPDATE`, and that `db` captured by the audit composition is `===` the
+    transaction context the repository received. Confirmed this test fails
+    against the pre-correction code (asserting `false !== true` on the
+    identity check) and passes after the fix.
+
+TOOL_VERIFIED:
+  - `node --test __tests__/kai-sprint2-p0-05f-combined-completeness.spec.js`
+    -> 11/11 pass.
+  - `node --test __tests__/kai-sprint2-p1-03-audit-transaction-propagation.spec.js`
+    -> 1/1 pass; confirmed failing (false !== true) against the
+    pre-correction working tree via `git stash`.
+  - `node --test __tests__/kai-sprint2-p1-03-parser-profile-worker-boundary.spec.js`
+    -> 9/9 pass.
+  - `node --test __tests__/kai-sprint2-p1-activation.spec.js` -> 21/21 pass.
+  - `DATABASE_URL=<sentinel> npm run test:kai-sprint2` -> 1966 pass, 1 fail,
+    29 skipped. The single failure,
+    `kai-sprint2-foundation-safety.spec.js` ("status reports only the
+    mounted metadata capability as enabled" / `file_upload_enabled` expected
+    `false`, actual `true`), is confirmed pre-existing and unrelated to this
+    correction: it reproduces identically via `git stash` against this
+    package's unmodified starting tree (`c242150`), before any file in this
+    correction was touched.
+  - `git diff --check` passed.
+  - prohibited_actions_not_performed: no production access, deployment,
+    PostgreSQL/database/schema/migration mutation, GCP/IAM/GCS/Render/cloud
+    mutation, feature/configuration change, credential/secret inspection,
+    real client data handling, push, or destructive reset. No new audit
+    mechanism or transaction abstraction introduced. No P1/P2/P3 repository
+    outside `postgresParserRunRepository.js` was modified.

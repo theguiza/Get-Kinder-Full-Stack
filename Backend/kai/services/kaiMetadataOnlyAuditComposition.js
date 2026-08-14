@@ -2,7 +2,7 @@ import { insertRequiredSuccessfulAuditEvent } from "../db/kaiAuditQueries.js";
 
 /**
  * Production composition of the `metadataOnlyAudit` contract required by P1
- * (`prepareMetadataOnlyAudit({ payload }) -> { ok, publish() }`), consumed by
+ * (`prepareMetadataOnlyAudit({ payload, db }) -> { ok, publish() }`), consumed by
  * `Backend/kai/parsing/postgresParserRunRepository.js` and
  * `Backend/kai/parsing/parserProfileWorkerOrchestration.js` unchanged.
  *
@@ -42,7 +42,7 @@ export function createProductionMetadataOnlyAudit({
   }
 
   return Object.freeze({
-    prepareMetadataOnlyAudit({ payload } = {}) {
+    prepareMetadataOnlyAudit({ payload, db } = {}) {
       if (!isPlainObject(payload)) return { ok: false };
 
       const metadata = {
@@ -73,7 +73,7 @@ export function createProductionMetadataOnlyAudit({
       return {
         ok: true,
         async publish() {
-          const result = await insertAuditEvent(metadata);
+          const result = await insertAuditEvent(metadata, db);
           if (!result || result.ok !== true) {
             throw new Error("p1_metadata_only_audit_publish_failed");
           }

@@ -48,7 +48,7 @@ const contractText = readFileSync(
   "utf8",
 );
 const execPlanText = readFileSync(
-  "KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md",
+  "KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.6.md",
   "utf8",
 );
 
