@@ -287,6 +287,32 @@ export async function casSecurityAssessmentFilePolicyDecision(
   return rows[0] || null;
 }
 
+/**
+ * P1 activation: narrow, organization/file-scoped read of exactly the
+ * authoritative facts needed to decide whether a confirmed intake file is
+ * eligible for the existing P1 parser/profile workflow, and the trusted facts
+ * to run it. Mirrors `getScopedIntakeFileSecurityAssessmentFacts` above
+ * (same table, same tenant-scoped WHERE clause shape, same bigint-safe
+ * `verified_size_bytes` handling); it is additive and changes no other query.
+ */
+export async function getScopedIntakeFileParserProfileEligibilityFacts(
+  { organizationId, intakeFileId },
+  db = pool,
+) {
+  const { rows } = await db.query(
+    `SELECT organization_id, intake_file_id, intake_batch_id, engagement_id,
+            object_version_id, verified_checksum, verified_size_bytes,
+            mime_type, file_extension, file_policy_status,
+            storage_provider, storage_object_key
+       FROM kai.intake_files
+      WHERE organization_id = $1
+        AND intake_file_id = $2
+      LIMIT 1`,
+    [organizationId, intakeFileId],
+  );
+  return withSafeIntegerVerifiedSizeBytes(rows[0] || null);
+}
+
 export async function getScopedIntakeFileReviewQueueItem(
   organizationId,
   reviewQueueItemId,
