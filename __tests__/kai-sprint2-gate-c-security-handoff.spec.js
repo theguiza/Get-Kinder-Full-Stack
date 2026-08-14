@@ -16,6 +16,25 @@ import {
 } from "../Backend/kai/security/syntheticAssessmentPolicyComposition.js";
 
 const applyConfirmedSecurityAssessment = intakeServiceTestables.applyConfirmedSecurityAssessment;
+const logGateCPostConfirmSecurityPhase = intakeServiceTestables.logGateCPostConfirmSecurityPhase;
+
+async function captureConsoleLog(fn) {
+  const lines = [];
+  const originalLog = console.log;
+  console.log = (...args) => {
+    lines.push(args.join(" "));
+  };
+  try {
+    await fn();
+  } finally {
+    console.log = originalLog;
+  }
+  return lines;
+}
+
+function gateCPhaseLines(lines) {
+  return lines.filter((line) => line.startsWith("KAI_GATE_C_SECURITY_PHASE="));
+}
 
 const organizationId = "a5d17c5a-c55f-43af-9b21-fe63aafe733f";
 const intakeFileId = "9fe568b1-5c05-4c42-bb1f-6e20de216c7b";
@@ -546,4 +565,254 @@ test("confirmUpload non-gcs success path invokes the security-assessment handoff
   assert.equal(harness.assessmentCalls[0].trustedFacts.verifiedChecksum, checksum);
   assert.equal(harness.writeCalls.length, 1);
   assert.equal(harness.writeCalls[0].mutation.newFilePolicyStatus, "passed");
+});
+
+// --- Diagnostic-only terminal phase for the pending-file post-confirm handoff ---
+
+test("diagnostic: facts read throwing before a usable result emits pre_assessment_failure", async () => {
+  const harness = createHarness();
+  const deps = dependenciesFromHarness(harness);
+  deps.getScopedIntakeFileSecurityAssessmentFacts = async () => {
+    throw new Error("synthetic facts read failure");
+  };
+  const lines = await captureConsoleLog(() => applyConfirmedSecurityAssessment(baseInput(), deps));
+  assert.deepEqual(gateCPhaseLines(lines), ["KAI_GATE_C_SECURITY_PHASE=pre_assessment_failure"]);
+});
+
+test("diagnostic: invalid trusted facts row emits pre_assessment_failure", async () => {
+  const harness = createHarness({ factsRow: pendingFactsRow({ verified_checksum: "not-a-valid-fingerprint" }) });
+  const lines = await captureConsoleLog(() => applyConfirmedSecurityAssessment(baseInput(), dependenciesFromHarness(harness)));
+  assert.deepEqual(gateCPhaseLines(lines), ["KAI_GATE_C_SECURITY_PHASE=pre_assessment_failure"]);
+});
+
+test("diagnostic: immutable-fact mismatch emits pre_assessment_failure", async () => {
+  const harness = createHarness({ factsRow: pendingFactsRow({ object_version_id: "ov_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }) });
+  const lines = await captureConsoleLog(() => applyConfirmedSecurityAssessment(baseInput(), dependenciesFromHarness(harness)));
+  assert.deepEqual(gateCPhaseLines(lines), ["KAI_GATE_C_SECURITY_PHASE=pre_assessment_failure"]);
+});
+
+test("diagnostic: assessment invocation throwing emits pre_assessment_failure", async () => {
+  const harness = createHarness({ throwOnAssessment: true });
+  const lines = await captureConsoleLog(() => applyConfirmedSecurityAssessment(baseInput(), dependenciesFromHarness(harness)));
+  assert.deepEqual(gateCPhaseLines(lines), ["KAI_GATE_C_SECURITY_PHASE=pre_assessment_failure"]);
+});
+
+test("diagnostic: assessment returning failure emits pre_assessment_failure", async () => {
+  const harness = createHarness({ assessmentResult: { ok: false, error: { code: "assessment_read_integrity_failure" } } });
+  const lines = await captureConsoleLog(() => applyConfirmedSecurityAssessment(baseInput(), dependenciesFromHarness(harness)));
+  assert.deepEqual(gateCPhaseLines(lines), ["KAI_GATE_C_SECURITY_PHASE=pre_assessment_failure"]);
+});
+
+test("diagnostic: actual malware_scan_not_configured category emits malware_not_configured, never inferred", async () => {
+  const harness = createHarness({
+    assessmentResult: {
+      ok: true,
+      data: { assessmentResult: { status: "failed", category: "malware_scan_not_configured" }, policyDecisionOutcome: null },
+    },
+  });
+  const lines = await captureConsoleLog(() => applyConfirmedSecurityAssessment(baseInput(), dependenciesFromHarness(harness)));
+  assert.deepEqual(gateCPhaseLines(lines), ["KAI_GATE_C_SECURITY_PHASE=malware_not_configured"]);
+});
+
+test("diagnostic: a null outcome NOT proven to be malware_scan_not_configured falls back to pre_assessment_failure, not malware_not_configured", async () => {
+  const harness = createHarness({
+    assessmentResult: {
+      ok: true,
+      data: { assessmentResult: { status: "failed", category: "some_other_unclassified_category" }, policyDecisionOutcome: null },
+    },
+  });
+  const lines = await captureConsoleLog(() => applyConfirmedSecurityAssessment(baseInput(), dependenciesFromHarness(harness)));
+  assert.deepEqual(gateCPhaseLines(lines), ["KAI_GATE_C_SECURITY_PHASE=pre_assessment_failure"]);
+});
+
+test("diagnostic: CAS conflict (write returns null) emits policy_persist_failure", async () => {
+  const harness = createHarness({ writeReturnsNull: true });
+  const lines = await captureConsoleLog(() => applyConfirmedSecurityAssessment(baseInput(), dependenciesFromHarness(harness)));
+  assert.deepEqual(gateCPhaseLines(lines), ["KAI_GATE_C_SECURITY_PHASE=policy_persist_failure"]);
+});
+
+test("diagnostic: required audit failure (transaction rollback) emits policy_persist_failure", async () => {
+  const harness = createHarness({ throwOnAudit: true });
+  const lines = await captureConsoleLog(() => applyConfirmedSecurityAssessment(baseInput(), dependenciesFromHarness(harness)));
+  assert.deepEqual(gateCPhaseLines(lines), ["KAI_GATE_C_SECURITY_PHASE=policy_persist_failure"]);
+});
+
+test("diagnostic: mutation write throwing emits policy_persist_failure", async () => {
+  const harness = createHarness({ throwOnWrite: true });
+  const lines = await captureConsoleLog(() => applyConfirmedSecurityAssessment(baseInput(), dependenciesFromHarness(harness)));
+  assert.deepEqual(gateCPhaseLines(lines), ["KAI_GATE_C_SECURITY_PHASE=policy_persist_failure"]);
+});
+
+test("diagnostic: eligible outcome with successful policy + audit commit emits policy_persisted", async () => {
+  const harness = createHarness();
+  const lines = await captureConsoleLog(() => applyConfirmedSecurityAssessment(baseInput(), dependenciesFromHarness(harness)));
+  assert.deepEqual(gateCPhaseLines(lines), ["KAI_GATE_C_SECURITY_PHASE=policy_persisted"]);
+});
+
+test("diagnostic: already-terminal replay stays a no-op with zero terminal phases emitted", async () => {
+  const harness = createHarness({ factsRow: pendingFactsRow({ file_policy_status: "blocked" }) });
+  const lines = await captureConsoleLog(() => applyConfirmedSecurityAssessment(baseInput(), dependenciesFromHarness(harness)));
+  assert.deepEqual(gateCPhaseLines(lines), []);
+  assert.equal(harness.assessmentCalls.length, 0);
+  assert.equal(harness.writeCalls.length, 0);
+});
+
+test("diagnostic: exactly one terminal phase is emitted per pending-file invocation, across every branch", async () => {
+  const scenarios = [
+    createHarness({ assessmentResult: { ok: false, error: { code: "assessment_read_integrity_failure" } } }),
+    createHarness({
+      assessmentResult: {
+        ok: true,
+        data: { assessmentResult: { status: "failed", category: "malware_scan_not_configured" }, policyDecisionOutcome: null },
+      },
+    }),
+    createHarness({ throwOnAudit: true }),
+    createHarness(),
+  ];
+  for (const harness of scenarios) {
+    const lines = await captureConsoleLog(() => applyConfirmedSecurityAssessment(baseInput(), dependenciesFromHarness(harness)));
+    assert.equal(gateCPhaseLines(lines).length, 1);
+  }
+});
+
+test("diagnostic: only the four allowlisted phase literals can ever be emitted, nothing else passes through", () => {
+  for (const allowed of ["pre_assessment_failure", "malware_not_configured", "policy_persist_failure", "policy_persisted"]) {
+    let emitted;
+    const originalLog = console.log;
+    console.log = (line) => { emitted = line; };
+    try {
+      logGateCPostConfirmSecurityPhase(allowed);
+    } finally {
+      console.log = originalLog;
+    }
+    assert.equal(emitted, `KAI_GATE_C_SECURITY_PHASE=${allowed}`);
+  }
+
+  const prohibitedInputs = [
+    "boom: ECONNREFUSED at 10.0.0.5",
+    "Error: secret-token-abc123",
+    JSON.stringify({ objectKey: "kai/intake/some-object-key", checksum: "deadbeef" }),
+    "not_configured",
+    "pending",
+    "",
+    null,
+    undefined,
+    { attackerControlled: true },
+  ];
+  for (const prohibited of prohibitedInputs) {
+    let called = false;
+    const originalLog = console.log;
+    console.log = () => { called = true; };
+    try {
+      logGateCPostConfirmSecurityPhase(prohibited);
+    } finally {
+      console.log = originalLog;
+    }
+    assert.equal(called, false, `unexpected log for input: ${String(prohibited)}`);
+  }
+});
+
+test("diagnostic: confirmUpload public DTO is unaffected by the added diagnostic logging", async () => {
+  const now = "2026-08-01T00:00:00.000Z";
+  const bytes = Buffer.from("hello diagnostic");
+  const checksum = createHash("sha256").update(bytes).digest("hex");
+  const harness = createHarness({
+    factsRow: pendingFactsRow({ verified_checksum: checksum, verified_size_bytes: bytes.byteLength }),
+  });
+
+  const lifecycleRepository = {
+    async getUploadLifecycle() {
+      return {
+        ok: true,
+        data: {
+          record: {
+            organization_id: organizationId,
+            intake_file_id: intakeFileId,
+            upload_state: "uploaded_unconfirmed",
+            object_version_id: objectVersionId,
+          },
+        },
+      };
+    },
+    async transitionUploadLifecycle() {
+      return {
+        ok: true,
+        data: {
+          replayed: false,
+          record: {
+            organization_id: organizationId,
+            intake_file_id: intakeFileId,
+            upload_state: "confirmed",
+            object_version_id: objectVersionId,
+            verified_checksum: checksum,
+            verified_size_bytes: bytes.byteLength,
+          },
+        },
+      };
+    },
+  };
+
+  const storageAdapter = {
+    async openObjectVersionReadStream() {
+      return {
+        ok: true,
+        data: {
+          object_version_id: objectVersionId,
+          size_bytes: bytes.byteLength,
+          byte_source: {
+            [Symbol.asyncIterator]() {
+              let done = false;
+              return {
+                async next() {
+                  if (done) return { done: true, value: undefined };
+                  done = true;
+                  return { done: false, value: bytes };
+                },
+              };
+            },
+            async close() {},
+          },
+        },
+      };
+    },
+  };
+
+  const lines = await captureConsoleLog(async () => {
+    const result = await confirmUpload(
+      {
+        organizationId,
+        intakeFileId,
+        now,
+        actorContext: { actorType: "human", actorUserId: "7fe568b1-5c05-4c42-bb1f-6e20de216c7b", kaiRoles: ["gk_operator"], organizationMemberships: [{ organization_id: organizationId, role_name: "gk_operator", membership_status: "active" }] },
+      },
+      {
+        env: { KAI_SPRINT2_ENABLED: "true", KAI_FILE_UPLOAD_ENABLED: "true" },
+        uploadLifecycleRepository: lifecycleRepository,
+        storageAdapter,
+        async getIntakeFileMetadata() {
+          return {
+            organization_id: organizationId,
+            intake_file_id: intakeFileId,
+            engagement_id: null,
+            intake_batch_id: "8e426ea1-2be3-4e48-b80f-9783ddbacda0",
+            checksum,
+            hash_algorithm: "sha256",
+            file_size_bytes: bytes.byteLength,
+            storage_provider: "local_dev",
+          };
+        },
+        ...dependenciesFromHarness(harness),
+      },
+    );
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(
+      Object.keys(result.data).sort(),
+      ["intake_batch_id", "intake_file_id", "object_version_id", "organization_id", "replayed", "upload_state", "verified_size_bytes"].sort(),
+    );
+    assert.equal(result.data.file_policy_status, undefined);
+    assert.equal(result.data.malware_scan_status, undefined);
+  });
+
+  assert.deepEqual(gateCPhaseLines(lines), ["KAI_GATE_C_SECURITY_PHASE=policy_persisted"]);
 });
