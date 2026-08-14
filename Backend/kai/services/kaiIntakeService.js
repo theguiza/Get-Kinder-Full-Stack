@@ -1103,6 +1103,18 @@ function isValidSecurityAssessmentFactsRow(row, { organizationId, intakeFileId }
   );
 }
 
+// Diagnostic-only: fixed allowlist of terminal phases for the Gate C
+// post-confirm security handoff. No other value is ever emitted, and the
+// emitted line never carries anything beyond one of these literals.
+const GATE_C_POST_CONFIRM_SECURITY_PHASES = Object.freeze(
+  new Set(["pre_assessment_failure", "malware_not_configured", "policy_persist_failure", "policy_persisted"]),
+);
+
+function logGateCPostConfirmSecurityPhase(phase) {
+  if (!GATE_C_POST_CONFIRM_SECURITY_PHASES.has(phase)) return;
+  console.log(`KAI_GATE_C_SECURITY_PHASE=${phase}`);
+}
+
 /**
  * Gate C production post-confirm security-assessment handoff.
  *
@@ -1133,9 +1145,13 @@ export async function applyConfirmedSecurityAssessment(
   try {
     factsRow = await readFacts({ organizationId, intakeFileId });
   } catch {
+    logGateCPostConfirmSecurityPhase("pre_assessment_failure");
     return;
   }
-  if (!isValidSecurityAssessmentFactsRow(factsRow, { organizationId, intakeFileId })) return;
+  if (!isValidSecurityAssessmentFactsRow(factsRow, { organizationId, intakeFileId })) {
+    logGateCPostConfirmSecurityPhase("pre_assessment_failure");
+    return;
+  }
   if (
     factsRow.object_version_id !== objectVersionId
     || factsRow.verified_checksum !== verifiedChecksum
@@ -1144,8 +1160,10 @@ export async function applyConfirmedSecurityAssessment(
     // Confirmed facts no longer match what this call observed: fail closed,
     // no mutation. (In practice unreachable: object_version_id and the
     // verified facts are trigger-enforced immutable once bound.)
+    logGateCPostConfirmSecurityPhase("pre_assessment_failure");
     return;
   }
+  // Already-terminal replay: existing no-op behavior, no diagnostic phase.
   if (factsRow.file_policy_status !== "pending") return;
 
   let assessment;
@@ -1172,13 +1190,27 @@ export async function applyConfirmedSecurityAssessment(
       },
     );
   } catch {
+    logGateCPostConfirmSecurityPhase("pre_assessment_failure");
     return;
   }
-  if (assessment?.ok !== true) return;
+  if (assessment?.ok !== true) {
+    logGateCPostConfirmSecurityPhase("pre_assessment_failure");
+    return;
+  }
 
   const outcome = assessment.data.policyDecisionOutcome;
   const newFilePolicyStatus = SECURITY_ASSESSMENT_POLICY_OUTCOME_TO_STATUS[outcome];
-  if (!newFilePolicyStatus) return;
+  if (!newFilePolicyStatus) {
+    // outcome is not policy-eligible (null/undefined). Only attribute this to
+    // malware_not_configured when the assessment result actually proves that
+    // fixed category; never infer it from anything else.
+    if (assessment.data.assessmentResult?.category === "malware_scan_not_configured") {
+      logGateCPostConfirmSecurityPhase("malware_not_configured");
+    } else {
+      logGateCPostConfirmSecurityPhase("pre_assessment_failure");
+    }
+    return;
+  }
 
   try {
     await orchestrateMutationWithRequiredAudit(
@@ -1219,7 +1251,10 @@ export async function applyConfirmedSecurityAssessment(
   } catch {
     // Fail closed: no partial policy mutation is left standing. A future
     // confirmUpload replay for the same file retries this handoff.
+    logGateCPostConfirmSecurityPhase("policy_persist_failure");
+    return;
   }
+  logGateCPostConfirmSecurityPhase("policy_persisted");
 }
 
 function uploadNewReservationRequiredResult() {
@@ -2884,4 +2919,6 @@ export const __testables = {
   confirmGcsObjectVersion,
   applyConfirmedSecurityAssessment,
   isValidSecurityAssessmentFactsRow,
+  logGateCPostConfirmSecurityPhase,
+  GATE_C_POST_CONFIRM_SECURITY_PHASES,
 };
