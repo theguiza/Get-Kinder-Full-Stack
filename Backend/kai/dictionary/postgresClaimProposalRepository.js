@@ -413,9 +413,10 @@ function buildClaimProposalAuditPayload(context) {
  * (never a getter) whose `value` is exactly `true`, alongside a callable
  * `publish`.
  */
-function prepareRequiredAudit(metadataOnlyAudit, context) {
+function prepareRequiredAudit(metadataOnlyAudit, tx, context) {
   const prepared = metadataOnlyAudit.prepareMetadataOnlyAudit({
     payload: buildClaimProposalAuditPayload(context),
+    db: tx,
   });
 
   const okDescriptor =
@@ -674,7 +675,7 @@ export function createPostgresClaimProposalRepository({
             reviewQueueItemCount: 1,
             freshWriteCount: 1,
           };
-          const preparedAudit = prepareRequiredAudit(metadataOnlyAudit, auditContext);
+          const preparedAudit = prepareRequiredAudit(metadataOnlyAudit, tx, auditContext);
           await insertAudit(tx, {
             organizationId,
             intakeFileId: candidateRow.intake_file_id,

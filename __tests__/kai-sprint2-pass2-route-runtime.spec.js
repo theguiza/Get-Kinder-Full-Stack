@@ -108,6 +108,9 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     "/admin/files/:intakeFileId/block",
     "/admin/files/:intakeFileId/confirm-upload",
     "/admin/files/:intakeFileId/upload",
+    // KAI P2-03 claim-proposal surface (additive; every prior entry preserved
+    // verbatim).
+    "/admin/organizations/:organizationId/evidence-items/:evidenceItemId/claim-proposal",
     "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-review-queue/:exportReviewQueueItemId/complete",
     "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-review-queue/:exportReviewQueueItemId/packet",
     "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-review-queue/:exportReviewQueueItemId/start",

@@ -28,7 +28,10 @@ import {
   validateReviewCockpitQueueQuery,
   validateSourceCandidateDecisionRequest,
 } from "../validators/kaiReviewCockpitRequestSchemas.js";
-import { createProductionMetadataOnlyAuditForSourceVersion } from "../services/kaiMetadataOnlyAuditComposition.js";
+import {
+  createProductionMetadataOnlyAuditForClaimProposal,
+  createProductionMetadataOnlyAuditForSourceVersion,
+} from "../services/kaiMetadataOnlyAuditComposition.js";
 
 const router = express.Router();
 let intakeServiceOverride = null;
@@ -38,6 +41,7 @@ let reviewCockpitServicePromise = null;
 let exportReviewServicePromise = null;
 let evidenceLineageServicePromise = null;
 let evidenceCoverageAssessmentServicePromise = null;
+let claimProposalServicePromise = null;
 
 export function sendServiceResult(res, result, successStatus = 200) {
   if (result?.ok) {
@@ -1136,6 +1140,74 @@ router.get(
   },
 );
 
+async function getClaimProposalService() {
+  if (intakeServiceOverride?.proposeClaim) return intakeServiceOverride;
+  claimProposalServicePromise ||= import("../services/kaiClaimProposalService.js");
+  return claimProposalServicePromise;
+}
+
+function evidenceItemClaimProposalIdentifiers(req = {}) {
+  const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+  const evidenceItemId = typeof req.params?.evidenceItemId === "string" ? req.params.evidenceItemId : "";
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) || organizationId !== organizationId.toLowerCase()) return null;
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(evidenceItemId) || evidenceItemId !== evidenceItemId.toLowerCase()) return null;
+  return { organizationId, evidenceItemId };
+}
+
+function validateClaimProposalRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = evidenceItemClaimProposalIdentifiers(req);
+  if (!identifiers) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_or_evidence_item_id")],
+    });
+    return null;
+  }
+  if (Object.keys(requestPayload(req)).length !== 0) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("unknown_field", "body")],
+    });
+    return null;
+  }
+  return identifiers;
+}
+
+/**
+ * KAI P2-03 claim-proposal route. Mirrors the P2-01 evidence-extraction
+ * route's organization-scoped path convention, empty-body requirement, and
+ * actorContext/now derivation exactly, on the same mounted router - the
+ * resource identity here is the evidenceItemId, not the sourceVersionId,
+ * because `proposeClaim` is scoped to an already-committed evidence item.
+ */
+router.post(
+  "/admin/organizations/:organizationId/evidence-items/:evidenceItemId/claim-proposal",
+  async (req, res) => {
+    const identifiers = validateClaimProposalRequestOrSend(req, res);
+    if (!identifiers) return;
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getClaimProposalService();
+      return service.proposeClaim({
+        organizationId: identifiers.organizationId,
+        evidenceItemId: identifiers.evidenceItemId,
+        actorContext,
+        now,
+      }, {
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForClaimProposal({
+          organizationId: identifiers.organizationId,
+          evidenceItemId: identifiers.evidenceItemId,
+          actorContext,
+          now,
+        }),
+      });
+    });
+  },
+);
+
 export default router;
 
 export const __testables = {
@@ -1165,6 +1237,8 @@ export const __testables = {
   validateCompleteExportReviewRequestOrSend,
   sourceVersionEvidenceExtractionIdentifiers,
   validateEvidenceExtractionRequestOrSend,
+  evidenceItemClaimProposalIdentifiers,
+  validateClaimProposalRequestOrSend,
   setIntakeServiceForTest(service) {
     intakeServiceOverride = service;
     return () => {

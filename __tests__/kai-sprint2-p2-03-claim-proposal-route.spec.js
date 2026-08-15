@@ -17,21 +17,20 @@ import {
 } from "../Backend/kai/middleware/kaiSprint2RequestSafety.js";
 
 /**
- * P2-02 evidence-coverage-assessment composition proof. Mirrors the existing
- * proven `kai-sprint2-p2-01-evidence-extraction-route.spec.js` pattern exactly.
- * P2-02's own read logic (the ten dimension assessors, the reused lineage/
- * permission gate) is not retested here - it remains owned by
- * `kai-sprint2-p2-02-evidence-coverage-assessment-boundary.spec.js` and the
- * P2-02 verifier script. This file proves only the new mounted boundary: the
- * route forwards server-resolved organizationId/sourceVersionId/actorContext
- * to the existing service, unchanged, with no persistence or audit path of
- * its own.
+ * P2-03 claim-proposal composition proof. Mirrors the existing proven
+ * `kai-sprint2-p2-01-evidence-extraction-route.spec.js` pattern exactly.
+ * P2-03's own claim-derivation/lineage/persistence logic is not retested here
+ * - it remains owned by `kai-sprint2-p2-03-claim-proposal-boundary.spec.js`
+ * and the P2-03 verifier script. This file proves only the new mounted
+ * boundary: the route forwards server-resolved organizationId/evidenceItemId/
+ * actorContext/now, plus a production metadataOnlyAudit dependency, to the
+ * existing service, unchanged, exactly once.
  */
 
 const basePath = "/api/kai/sprint2/intake";
-const routePath = "/admin/organizations/:organizationId/source-versions/:sourceVersionId/evidence-coverage-assessment";
+const routePath = "/admin/organizations/:organizationId/evidence-items/:evidenceItemId/claim-proposal";
 const organizationId = "00000000-0000-4000-8000-000000000001";
-const sourceVersionId = "00000000-0000-4000-8000-000000000801";
+const evidenceItemId = "a0000000-0000-4000-8000-000000000001";
 const actorContext = Object.freeze({
   actorType: "human",
   actorUserId: "90000000-0000-4000-8000-000000000001",
@@ -40,17 +39,17 @@ const actorContext = Object.freeze({
     { organization_id: organizationId, membership_status: "active", role_name: "gk_admin" },
   ],
 });
-const injectedAssessmentDto = Object.freeze({
-  organization_id: organizationId,
-  source_version_id: sourceVersionId,
-  data_dictionary_id: "60000000-0000-4000-8000-000000000001",
-  profile_canonical_sha256: "a".repeat(64),
-  dimensions: { missingness: { ok: true } },
+const injectedProposalDto = Object.freeze({
+  claim: { claim_id: "a0000000-0000-4000-8000-000000000001", evidence_item_id: evidenceItemId },
+  claimEvidenceLink: { claim_evidence_link_id: "b0000000-0000-4000-8000-000000000001" },
+  reviewQueueItem: { review_queue_item_id: "c0000000-0000-4000-8000-000000000001" },
+  warnings: [],
+  replayed: false,
 });
 
 function concretePath(overrides = {}) {
   return `${basePath}/admin/organizations/${overrides.organizationId || organizationId}`
-    + `/source-versions/${overrides.sourceVersionId || sourceVersionId}/evidence-coverage-assessment`;
+    + `/evidence-items/${overrides.evidenceItemId || evidenceItemId}/claim-proposal`;
 }
 
 function createScenario(overrides = {}) {
@@ -59,7 +58,7 @@ function createScenario(overrides = {}) {
     actorContext,
     serviceCalls: [],
     dependencyCalls: [],
-    serviceResult: { ok: true, data: injectedAssessmentDto, error: null },
+    serviceResult: { ok: true, data: injectedProposalDto, error: null },
     events: [],
     ...overrides,
   };
@@ -101,15 +100,18 @@ async function listen(app) {
   });
 }
 
-async function requestJson(server, path, { method = "GET" } = {}) {
+async function requestJson(server, path, { body = null, method = "POST" } = {}) {
   const { port } = server.address();
+  const serialized = body == null ? null : JSON.stringify(body);
   return await new Promise((resolve, reject) => {
     const request = http.request({
       hostname: "127.0.0.1",
       port,
       path,
       method,
-      headers: {},
+      headers: serialized
+        ? { "content-type": "application/json", "content-length": Buffer.byteLength(serialized) }
+        : {},
     }, (response) => {
       const chunks = [];
       response.on("data", (chunk) => chunks.push(chunk));
@@ -119,23 +121,24 @@ async function requestJson(server, path, { method = "GET" } = {}) {
       }));
     });
     request.on("error", reject);
+    if (serialized) request.write(serialized);
     request.end();
   });
 }
 
-test("P2-02 evidence-coverage-assessment route appears as exactly one mounted authenticated GET route", () => {
+test("P2-03 claim-proposal route appears as exactly one mounted authenticated POST route", () => {
   const matches = sprint2IntakeApiRouter.stack
-    .filter((layer) => layer.route?.path === routePath && layer.route?.methods?.get);
+    .filter((layer) => layer.route?.path === routePath && layer.route?.methods?.post);
   assert.equal(matches.length, 1);
-  assert.deepEqual(Object.keys(matches[0].route.methods), ["get"]);
+  assert.deepEqual(Object.keys(matches[0].route.methods), ["post"]);
 });
 
-test("P2-02 evidence-coverage-assessment route", async (t) => {
+test("P2-03 claim-proposal route", async (t) => {
   let scenario = createScenario();
   const originalFeatureFlag = process.env.KAI_SPRINT2_ENABLED;
   process.env.KAI_SPRINT2_ENABLED = "true";
   const restore = intakeRouteTestables.setIntakeServiceForTest({
-    async assessEvidenceCoverageForSourceVersion(input, dependencies) {
+    async proposeClaim(input, dependencies) {
       scenario.serviceCalls.push(input);
       scenario.dependencyCalls.push(dependencies);
       return scenario.serviceResult;
@@ -151,7 +154,7 @@ test("P2-02 evidence-coverage-assessment route", async (t) => {
     await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   });
 
-  await t.test("unauthenticated requests fail before the P2-02 read seam", async () => {
+  await t.test("unauthenticated requests fail before the P2-03 write seam", async () => {
     scenario = createScenario({ authenticated: false });
     const response = await requestJson(server, concretePath());
 
@@ -162,40 +165,78 @@ test("P2-02 evidence-coverage-assessment route", async (t) => {
   });
 
   await t.test(
-    "an authenticated mapped human in the correct organization reaches the service exactly once with server-resolved identity, no metadataOnlyAudit dependency",
+    "an authenticated mapped human in the correct organization reaches the service exactly once with server-resolved identity and a production metadataOnlyAudit dependency",
     async () => {
       scenario = createScenario();
+      const before = Date.now();
       const response = await requestJson(server, concretePath());
+      const after = Date.now();
 
       assert.equal(response.statusCode, 200);
       assert.equal(scenario.serviceCalls.length, 1);
       const call = scenario.serviceCalls[0];
-      assert.deepEqual(call, { organizationId, sourceVersionId, actorContext });
-      assert.deepEqual(response.body, { ok: true, data: injectedAssessmentDto, warnings: [] });
+      assert.deepEqual(call, {
+        organizationId,
+        evidenceItemId,
+        actorContext,
+        now: call.now,
+      });
+      assert.deepEqual(response.body, { ok: true, data: injectedProposalDto, warnings: [] });
+
+      assert.match(call.now, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+      const nowMs = new Date(call.now).getTime();
+      assert.ok(nowMs >= before && nowMs <= after, "now must be generated server-side within the request window");
 
       const dependencies = scenario.dependencyCalls[0];
-      assert.equal(dependencies?.metadataOnlyAudit, undefined, "P2-02 is read-only and must not receive an audit dependency");
+      assert.equal(typeof dependencies.metadataOnlyAudit?.prepareMetadataOnlyAudit, "function");
+      const rejectedNoClaim = dependencies.metadataOnlyAudit.prepareMetadataOnlyAudit({
+        payload: { attempted_operation: "claim_proposed", object_type: "claim" },
+      });
+      assert.equal(rejectedNoClaim.ok, false, "the production adapter must refuse a payload with no claim_id");
+      const prepared = dependencies.metadataOnlyAudit.prepareMetadataOnlyAudit({
+        payload: { attempted_operation: "claim_proposed", object_type: "claim", claim_id: injectedProposalDto.claim.claim_id },
+      });
+      assert.equal(prepared.ok, true);
+      assert.equal(typeof prepared.publish, "function");
     },
   );
 
-  await t.test("caller-supplied identifiers cannot replace the server-resolved actor or path-scoped tenant identity", async () => {
+  await t.test("request body cannot inject actor/time/claim fields", async () => {
     scenario = createScenario();
     const response = await requestJson(
       server,
       `${concretePath()}?organization_id=00000000-0000-4000-8000-000000000999&actorContext=%7B%22actorType%22%3A%22system%22%7D`,
+      {
+        body: {
+          organization_id: "00000000-0000-4000-8000-000000000999",
+          actorContext: { actorType: "system", actorUserId: "attacker" },
+          now: "1999-01-01T00:00:00.000Z",
+          claim_id: "ffffffff-0000-4000-8000-000000000001",
+          claim_type: "finding",
+          claim_status: "gk_reviewed",
+          claim_review_status: "resolved",
+          claim_strength: "supported",
+          actorUserId: "attacker",
+          actorType: "system",
+          roles: ["gk_admin"],
+          memberships: [{ organization_id: organizationId, role_name: "gk_admin" }],
+          public_use_allowed: true,
+          export_ready: true,
+        },
+      },
     );
 
-    assert.equal(response.statusCode, 200);
-    assert.equal(scenario.serviceCalls.length, 1);
-    assert.deepEqual(scenario.serviceCalls[0], { organizationId, sourceVersionId, actorContext });
+    assert.equal(response.statusCode, 422);
+    assert.equal(response.body.error.code, "validation_blocker");
+    assert.deepEqual(scenario.serviceCalls, []);
   });
 
   await t.test("malformed path values use the existing safe validation_blocker response", async () => {
     for (const path of [
       concretePath({ organizationId: "not-a-uuid" }),
-      concretePath({ sourceVersionId: "not-a-uuid" }),
+      concretePath({ evidenceItemId: "not-a-uuid" }),
       concretePath({ organizationId: "a0000000-0000-4000-8000-000000000001".toUpperCase() }),
-      concretePath({ sourceVersionId: "a0000000-0000-4000-8000-000000000801".toUpperCase() }),
+      concretePath({ evidenceItemId: "a0000000-0000-4000-8000-000000000001".toUpperCase() }),
     ]) {
       scenario = createScenario();
       const response = await requestJson(server, path);
@@ -206,7 +247,7 @@ test("P2-02 evidence-coverage-assessment route", async (t) => {
   });
 
   await t.test(
-    "unmapped/unauthorized/non-human/cross-tenant service rejections fail closed before any leak",
+    "unmapped/unauthorized/non-human service rejections fail before any write, with no leaked detail",
     async () => {
       for (const code of [
         "feature_disabled",
@@ -240,12 +281,12 @@ test("P2-02 evidence-coverage-assessment route", async (t) => {
   );
 });
 
-test("P2-02 evidence-coverage-assessment route: KAI_SPRINT2_ENABLED=false produces zero P2-02 service activity", async (t) => {
+test("P2-03 claim-proposal route: KAI_SPRINT2_ENABLED=false produces zero service/write activity", async (t) => {
   const originalFeatureFlag = process.env.KAI_SPRINT2_ENABLED;
   process.env.KAI_SPRINT2_ENABLED = "false";
   let scenario = createScenario();
   const restore = intakeRouteTestables.setIntakeServiceForTest({
-    async assessEvidenceCoverageForSourceVersion(input, dependencies) {
+    async proposeClaim(input, dependencies) {
       scenario.serviceCalls.push(input);
       scenario.dependencyCalls.push(dependencies);
       return scenario.serviceResult;
@@ -266,15 +307,20 @@ test("P2-02 evidence-coverage-assessment route: KAI_SPRINT2_ENABLED=false produc
   assert.deepEqual(scenario.serviceCalls, []);
 });
 
-test("P2-02 evidence-coverage-assessment route source imports no database/repository layer, performs no writes, and invokes no P2-03+ service", () => {
+test("P2-03 claim-proposal route source imports no database or repository layer, performs no writes, and invokes no P2-04+ service", () => {
   const source = readFileSync("Backend/kai/routes/sprint2IntakeApi.js", "utf8");
   const slice = source.slice(
-    source.indexOf("async function getEvidenceCoverageAssessmentService"),
     source.indexOf("async function getClaimProposalService"),
+    source.indexOf("export default router;"),
   );
-  assert.match(slice, /assessEvidenceCoverageForSourceVersion/);
+  assert.match(source, /async function getClaimProposalService/);
+  assert.match(slice, /proposeClaim/);
   assert.doesNotMatch(slice, /from\s+["'][^"']*(?:db|repository|postgres|kaiDb|kaiQueries|kaiReadModels)[^"']*["']/i);
   assert.doesNotMatch(slice, /\b(?:SELECT|INSERT|UPDATE|DELETE)\b|\bpool\b|\bkaiDb\b|\brepository\b|\bkai\.(?!js\b)/i);
-  assert.doesNotMatch(slice, /metadataOnlyAudit/i);
-  assert.doesNotMatch(slice, /p2-03|p2-04|p2-05|p2-06|p2-07|p2-08|kaiClaimProposalService|kaiConflictReviewService|kaiExportCandidateService|kaiClaimGapFollowupService/i);
+  assert.doesNotMatch(slice, /p2-04|p2-05|p2-06|p2-07|p2-08|kaiClaimGapFollowupService|kaiConflictReviewService|kaiExportCandidateService/i);
+});
+
+test("P2-03 claim-proposal route source never contains the literal token req.user", () => {
+  const source = readFileSync("Backend/kai/routes/sprint2IntakeApi.js", "utf8");
+  assert.doesNotMatch(source, /req\.user/);
 });
