@@ -114,6 +114,9 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // KAI P2-09 human claim-review/internal-approval completion surface
     // (additive; every prior entry preserved verbatim).
     "/admin/organizations/:organizationId/claims/:claimId/claim-review/:reviewQueueItemId/complete",
+    // KAI P2-11 client-followup-completion surface (additive; every prior
+    // entry preserved verbatim).
+    "/admin/organizations/:organizationId/claims/:claimId/client-followups/:clientFollowupItemId/complete",
     // KAI P2-10 owner-policy internal-coverage-acceptance surface (additive;
     // every prior entry preserved verbatim).
     "/admin/organizations/:organizationId/claims/:claimId/coverage-dimensions/:dimensionKey/internal-acceptance",

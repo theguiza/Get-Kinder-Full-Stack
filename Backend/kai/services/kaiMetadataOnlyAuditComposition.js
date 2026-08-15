@@ -602,6 +602,80 @@ export function createProductionMetadataOnlyAuditForCoverageReviewDecision({
   });
 }
 
+const CLIENT_FOLLOWUP_ITEM_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Production composition of the `metadataOnlyAudit` contract required by
+ * P2-11 (`Backend/kai/dictionary/postgresClientFollowupCompletionRepository.js`).
+ * Mirrors `createProductionMetadataOnlyAuditForCoverageReviewDecision` exactly:
+ * bound to organizationId/claimId, refusing a payload whose claim_id or
+ * client_followup_item_id don't match, and never accepting/forwarding an
+ * answer, free-text, question_text, or safe_summary field.
+ */
+export function createProductionMetadataOnlyAuditForClientFollowupCompletion({
+  organizationId,
+  claimId,
+  actorContext,
+  now,
+  insertAuditEvent = insertRequiredSuccessfulAuditEvent,
+} = {}) {
+  if (typeof organizationId !== "string" || organizationId.length === 0) {
+    throw new TypeError("createProductionMetadataOnlyAuditForClientFollowupCompletion requires organizationId.");
+  }
+  if (typeof claimId !== "string" || claimId.length === 0) {
+    throw new TypeError("createProductionMetadataOnlyAuditForClientFollowupCompletion requires claimId.");
+  }
+
+  function isPlainObject(value) {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  }
+
+  return Object.freeze({
+    prepareMetadataOnlyAudit({ payload, db } = {}) {
+      if (!isPlainObject(payload)) return { ok: false };
+      const payloadClaimId = payload.claim_id;
+      if (typeof payloadClaimId !== "string" || !CLAIM_ID_PATTERN.test(payloadClaimId)) return { ok: false };
+      if (payloadClaimId !== claimId) return { ok: false };
+      const payloadClientFollowupItemId = payload.client_followup_item_id;
+      if (typeof payloadClientFollowupItemId !== "string" || !CLIENT_FOLLOWUP_ITEM_ID_PATTERN.test(payloadClientFollowupItemId)) return { ok: false };
+
+      const metadata = {
+        organization_id: organizationId,
+        object_type: "claim",
+        target_object_type: "client_followup_item",
+        object_id: payloadClientFollowupItemId,
+        operation: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "p2_11_client_followup_completed",
+        operation_type: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "p2_11_client_followup_completed",
+        validator_key: typeof payload.validator_key === "string" ? payload.validator_key : null,
+        actor_type: actorContext?.actorType || "human",
+        actor_user_id: actorContext?.actorUserId || null,
+        request_id: actorContext?.requestId || null,
+        route: "p2_11_client_followup_completion",
+        created_at: typeof now === "string" ? now : new Date().toISOString(),
+        metadata_only: true,
+        contains_raw_file_content: false,
+        contains_raw_parsed_rows: false,
+        contains_client_pii: false,
+        contains_prompt_text: false,
+        contains_unsafe_generated_text: false,
+        contains_signed_urls: false,
+        contains_storage_credentials: false,
+      };
+
+      return {
+        ok: true,
+        async publish() {
+          const result = await insertAuditEvent(metadata, db);
+          if (!result || result.ok !== true) {
+            throw new Error("p2_11_client_followup_completion_metadata_only_audit_publish_failed");
+          }
+          return result;
+        },
+      };
+    },
+  });
+}
+
 export const __testables = Object.freeze({
   createProductionMetadataOnlyAudit,
   createProductionMetadataOnlyAuditForSourceVersion,
@@ -611,4 +685,5 @@ export const __testables = Object.freeze({
   createProductionMetadataOnlyAuditForEvidenceReview,
   createProductionMetadataOnlyAuditForClaimReview,
   createProductionMetadataOnlyAuditForCoverageReviewDecision,
+  createProductionMetadataOnlyAuditForClientFollowupCompletion,
 });

@@ -17,6 +17,7 @@ import {
 } from "../middleware/kaiSprint2RequestSafety.js";
 import {
   validateCompleteClaimReviewRequest,
+  validateCompleteClientFollowupRequest,
   validateCompleteEvidenceReviewRequest,
   validateCompleteExportReviewRequest,
   validateIntakeBatchFilesQuery,
@@ -34,6 +35,7 @@ import {
   createProductionMetadataOnlyAuditForClaimGapFollowup,
   createProductionMetadataOnlyAuditForClaimProposal,
   createProductionMetadataOnlyAuditForClaimReview,
+  createProductionMetadataOnlyAuditForClientFollowupCompletion,
   createProductionMetadataOnlyAuditForConflictReviewCandidate,
   createProductionMetadataOnlyAuditForCoverageReviewDecision,
   createProductionMetadataOnlyAuditForEvidenceReview,
@@ -1768,6 +1770,89 @@ router.post(
   },
 );
 
+let clientFollowupCompletionServicePromise = null;
+async function getClientFollowupCompletionService() {
+  if (intakeServiceOverride?.completeClientFollowup) return intakeServiceOverride;
+  clientFollowupCompletionServicePromise ||= import("../services/kaiClientFollowupCompletionService.js");
+  return clientFollowupCompletionServicePromise;
+}
+
+function clientFollowupCompletionIdentifiers(req = {}) {
+  const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+  const claimId = typeof req.params?.claimId === "string" ? req.params.claimId : "";
+  const clientFollowupItemId = typeof req.params?.clientFollowupItemId === "string" ? req.params.clientFollowupItemId : "";
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) || organizationId !== organizationId.toLowerCase()) return null;
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(claimId) || claimId !== claimId.toLowerCase()) return null;
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(clientFollowupItemId) || clientFollowupItemId !== clientFollowupItemId.toLowerCase()) return null;
+  return { organizationId, claimId, clientFollowupItemId };
+}
+
+function validateClientFollowupCompletionRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = clientFollowupCompletionIdentifiers(req);
+  if (!identifiers) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker(
+        "invalid_uuid_field",
+        "organization_id_claim_id_or_client_followup_item_id",
+      )],
+    });
+    return null;
+  }
+  const result = validateCompleteClientFollowupRequest(req.body);
+  if (!result.ok) {
+    sendKaiError(res, "validation_blocker", { blockers: result.blockers });
+    return null;
+  }
+  return identifiers;
+}
+
+/**
+ * KAI P2-11 client-followup-completion route. Mirrors the P2-09 evidence-
+ * review/claim-review completion routes' `expected_updated_at` body
+ * convention exactly, on the same mounted router. The only role ever
+ * authorized for this route is the organization-scoped `client_reviewer` -
+ * never a GK role, `client_admin`, or `client_contributor`. This records a
+ * workflow disposition (the fixed follow-up question was reviewed and no
+ * additional client information is being supplied), never a client answer:
+ * the request body carries no answer/free-text field, and the route contains
+ * no SQL or direct data-access-layer calls, delegating exactly once to the
+ * authorized P2-11 service. It never invokes P2-06/P2-08 or any other
+ * mutation - completing this workflow triggers no automatic downstream
+ * chaining.
+ */
+router.post(
+  "/admin/organizations/:organizationId/claims/:claimId/client-followups/:clientFollowupItemId/complete",
+  async (req, res) => {
+    const identifiers = validateClientFollowupCompletionRequestOrSend(req, res);
+    if (!identifiers) return;
+    const payload = requestPayload(req);
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getClientFollowupCompletionService();
+      return service.completeClientFollowup({
+        organizationId: identifiers.organizationId,
+        claimId: identifiers.claimId,
+        clientFollowupItemId: identifiers.clientFollowupItemId,
+        expectedUpdatedAt: payload.expected_updated_at,
+        actorContext,
+        now,
+      }, {
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForClientFollowupCompletion({
+          organizationId: identifiers.organizationId,
+          claimId: identifiers.claimId,
+          actorContext,
+          now,
+        }),
+      });
+    });
+  },
+);
+
 export default router;
 
 export const __testables = {
@@ -1812,6 +1897,8 @@ export const __testables = {
   validateClaimReviewCompletionRequestOrSend,
   coverageReviewDecisionIdentifiers,
   validateCoverageReviewDecisionRequestOrSend,
+  clientFollowupCompletionIdentifiers,
+  validateClientFollowupCompletionRequestOrSend,
   setIntakeServiceForTest(service) {
     intakeServiceOverride = service;
     return () => {

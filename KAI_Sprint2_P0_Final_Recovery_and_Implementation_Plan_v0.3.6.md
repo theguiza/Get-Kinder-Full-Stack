@@ -17243,3 +17243,153 @@ One local commit was made on this branch recording this package. No push,
 no deploy.
 
 STOP BEFORE IMPACT EVIDENCE LIBRARY.
+
+## P2-11 - client follow-up disposition -> first internally eligible claim (completed 2026-08-15)
+
+Closed P2-10's own recommended-follow-up gap: no route previously let anyone
+resolve a `client_followup` workflow, so `client_followup_unresolved` blocked
+`eligible=true` for every claim in the schema regardless of P2-09/P2-10
+completion. This package adds the smallest authorized transition that lets an
+organization-scoped `client_reviewer` dispose of a CURRENT `client_followup`
+workflow as "reviewed, no additional client information supplied" - a
+workflow disposition, never a client answer - producing the first claim that
+can legitimately reach `eligible=true` for the `internal` audience.
+
+IMPLEMENTATION:
+  - Existing-transition search: no compatible client_followup completion
+    transition existed anywhere in the repository (P2-09's evidence/claim
+    review completions and P2-10's coverage acceptance are the only prior
+    review-queue completions, none targeting `queue_type='client_followup'`).
+    Built the smallest dedicated transition, mirroring P2-09's
+    `completeEvidenceReview` concurrency/replay/audit shape exactly.
+  - New migration `migrations/kai_sprint2_p2_11_client_followup_completion.sql`
+    (+ rollback): widens the existing P2-04
+    `review_queue_items_p2_04_client_followup_contract_check` CHECK to admit
+    exactly one additional branch - `queue_status='resolved' AND
+    review_status='resolved'` - alongside the original
+    `waiting_on_client`/`proposed` branch, with every other client_followup
+    field (target_object_type, priority, summary, required_action,
+    assigned_to, due_at) still pinned exactly as P2-04 wrote it. Also widens
+    `upload_lifecycle_audit_gate_a_operation_check` for the one new
+    `client_followup_completed` operation and adds a matching metadata-object
+    CHECK requiring `disposition = 'no_additional_client_information'` and
+    explicitly forbidding `answer`/`client_answer`/`question_text`/
+    `safe_summary`/`raw_value` keys. This migration was required: the P2-04
+    CHECK admitted only the fresh state.
+  - DISCOVERY mid-package: P2-06's own `evaluateClaimTraceabilityInTransaction`
+    (`Backend/kai/dictionary/postgresClaimTraceabilityRepository.js`) reuses a
+    shared pure lineage-integrity check, `queueRowsMatchExpectation` (from
+    `Backend/kai/dictionary/postgresClaimGapFollowupRepository.js`'s own
+    `__claimGapFollowupRepositoryTestables`), which hard-pinned every
+    client_followup queue row to the exact P2-04 fresh shape
+    (`waiting_on_client`/`proposed`) as its definition of "not corrupted." A
+    resolved row therefore made the WHOLE evaluator fail closed with
+    `conflict_current_state_changed` before it ever reached the per-row
+    blocker loop - not a policy weakening, a lineage-integrity gate that had
+    no legitimate resolved shape to recognize yet. Fixed by adding
+    `CLIENT_FOLLOWUP_RESOLVED_QUEUE_STATUS`/`CLIENT_FOLLOWUP_RESOLVED_REVIEW_STATUS`
+    (`Backend/kai/validators/kaiClaimGapFollowupValidators.js`) and widening
+    `queueRowsMatchExpectation` to accept either the fresh pair or the
+    resolved pair as equally CURRENT, leaving every other field-match
+    requirement, the per-row blocker loop
+    (`unresolvedReviewStatus(row.review_status) || row.queue_status ===
+    "waiting_on_client"`), P2-08, and P2-10 completely untouched. This is the
+    only reason P2-06/P2-08 source changed in this package - zero change to
+    blocker semantics or eligibility policy.
+  - New repository
+    `Backend/kai/dictionary/postgresClientFollowupCompletionRepository.js`:
+    `completeClientFollowup` writes exactly one row - the linked
+    `client_followup` `kai.review_queue_items` row's own
+    `queue_status`/`review_status`/`updated_at` (`waiting_on_client`/`proposed`
+    -> `resolved`/`resolved`) - and nothing else. Never touches
+    `kai.client_followup_items` (fixed question preserved), `kai.gap_log_items`
+    (P2-04 gap preserved, never resolved/deleted), or any P2-02
+    `assessment_status`. Accepts no answer/free-text/raw value from the caller
+    - the input contract has no such field. Optimistic-concurrency-guarded via
+    `expected_updated_at` (fails closed on stale state), exact-replay
+    idempotent (rereads and returns `replayed:true`, publishes no second
+    audit), and the same-transaction required metadata-only audit publish
+    failure rolls back the fresh queue-row write.
+  - New service `Backend/kai/services/kaiClientFollowupCompletionService.js`:
+    allowed role is exactly `client_reviewer` - the literal already
+    established for org-scoped client access by
+    `KAI_SPRINT2_P0_OPERATION_ROLES.read_intake`
+    (`Backend/kai/config/kaiSprint2P0Contract.js`). `gk_reviewer`, `gk_admin`,
+    `gk_operator`, `client_admin`, `client_contributor`, `system`,
+    `assistant`, import, and code actors are all denied by construction -
+    never broadened by analogy.
+  - New audit-composition factory
+    `createProductionMetadataOnlyAuditForClientFollowupCompletion` in
+    `Backend/kai/services/kaiMetadataOnlyAuditComposition.js`, bound to
+    organizationId/claimId, refusing a payload whose claim_id/
+    client_followup_item_id don't match.
+  - New request schema `validateCompleteClientFollowupRequest` in
+    `Backend/kai/validators/kaiSprint2RequestSchemas.js`: `expected_updated_at`
+    is the only accepted field - no answer/free-text/disposition vocabulary is
+    ever accepted from the caller.
+  - New authenticated POST route on the existing Sprint 2 intake router:
+    `/admin/organizations/:organizationId/claims/:claimId/client-followups/:clientFollowupItemId/complete`,
+    body `{ expected_updated_at }` only. No SQL/direct data-access-layer calls
+    in the route; delegates exactly once to the service. Never automatically
+    invokes P2-06/P2-08/P3 or another mutation. The Pass-2 route inventory
+    (`__tests__/kai-sprint2-pass2-route-runtime.spec.js`) was updated with the
+    one new route path.
+  - P2-10 compatibility: confirmed `computeCoverageReviewDecisionFingerprint`
+    (`Backend/kai/validators/kaiCoverageReviewDecisionValidators.js`) binds
+    only claim/evidence/dimension/gap/review-strength state - it does not read
+    client_followup queue status at all - so P2-10 needed zero changes, and
+    none were made.
+  - Zero changes to P2-02, P2-04's own write path, P2-05, P2-09's own write
+    path, P2-06's blocker semantics, or P2-08's eligibility model.
+
+LOAD-BEARING PROOF (`__tests__/kai-sprint2-p2-11-client-followup-completion.integration.spec.js`,
+runner-owned ephemeral PostgreSQL):
+  - BEFORE: after P2-09 review + full P2-10 coverage acceptance,
+    `blockerCodes` is exactly `["client_followup_unresolved"]`; P2-08 internal
+    omits the claim.
+  - PARTIAL: resolving one of >=2 current client_followup workflows still
+    leaves `eligible=false` with `client_followup_unresolved` still present.
+  - COMPLETE: resolving every remaining current workflow yields
+    `eligible=true`, `blockerCodes=[]`; P2-08 internal returns the same claim.
+  - TRUTH: P2-02 dimensions stay `unresolved`; P2-04 gap rows and
+    client_followup_items rows remain (never deleted); queue items are
+    resolved, not deleted; P2-10 authority rows remain current; no
+    answer/client_answer/raw_value/free_text column was ever introduced.
+  - EXTERNAL: funder/public stay ineligible throughout.
+  - CONFLICT: a real unresolved P2-05 conflict (candidate created before
+    either claim's own claim_review was touched) still blocks internal
+    eligibility on the second claim even after that claim's own full
+    P2-09/P2-10/P2-11 completion.
+  - SAFETY: non-human, wrong-role (`gk_reviewer`, `client_admin`),
+    cross-tenant, wrong-target, and disabled-feature attempts all fail closed
+    with zero mutation; a rejected required audit rolls back the fresh
+    queue-row write; exact replay (twice) creates no duplicate mutation or
+    audit.
+
+VERIFICATION:
+  - `verify:kai-sprint2-p2-11-client-followup-completion` (new, 28/28
+    passing): schema verifier plus the full load-bearing proof above,
+    integration (10 cases) and boundary (17 cases).
+  - `verify:kai-sprint2-p2-10-coverage-review-decision`: 28/28 unchanged.
+  - `verify:kai-sprint2-p2-06-claim-traceability`: 11/11 unchanged.
+  - `verify:kai-sprint2-p2-08-eligible-claims-for-audience`: 14/14 unchanged.
+  - `verify:kai-sprint2-p2-04-claim-gap-followup`: 18/18 unchanged.
+  - `verify:kai-sprint2-api-contract`: 59/60 (the one failure,
+    `file_upload_enabled` in `kai-sprint2-foundation-safety.spec.js`, is the
+    same pre-existing/environment-dependent failure recorded at P2-10 and
+    reproduces identically here - not a new provenance loop).
+  - `npm run test:kai-sprint2`: 2124/2125 non-skipped (same single
+    pre-existing failure). `npm test`: 2229/2230 non-skipped (same). `git
+    diff --check`: clean.
+
+NOT_CONFIRMED / RECOMMENDED FOLLOW-UP:
+  - No push, merge, deploy, flag enablement, Impact Evidence Library, P3/
+    generation/export work, funder/public/export approval, assistant runtime
+    work, or shared/staging/production database access was performed. Real
+    client data was not used. `00_KAI_CURRENT_STATE.md` and the
+    Implementation Baseline were not updated.
+
+One local commit was made on this branch recording this package. No push,
+no deploy.
+
+STOP AFTER P2-11.

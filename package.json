@@ -32,6 +32,8 @@
     "test:kai-sprint2-p2-09-human-review": "node --test __tests__/kai-sprint2-p2-09-human-review-boundary.spec.js",
     "verify:kai-sprint2-p2-10-coverage-review-decision": "node scripts/kai-sprint2-p2-10-coverage-review-decision-local-postgres.js",
     "test:kai-sprint2-p2-10-coverage-review-decision": "node --test __tests__/kai-sprint2-p2-10-coverage-review-decision-boundary.spec.js",
+    "verify:kai-sprint2-p2-11-client-followup-completion": "node scripts/kai-sprint2-p2-11-client-followup-completion-local-postgres.js",
+    "test:kai-sprint2-p2-11-client-followup-completion": "node --test __tests__/kai-sprint2-p2-11-client-followup-completion-boundary.spec.js",
     "verify:kai-sprint2-p3-01-generated-content-drafts": "node scripts/kai-sprint2-p3-01-generated-content-drafts-local-postgres.js",
     "verify:kai-sprint2-p3-02-generated-draft-review-packet": "node scripts/kai-sprint2-p3-02-generated-draft-review-packet-local-postgres.js",
     "verify:kai-sprint2-p3-03-export-manifest-eligibility": "node scripts/kai-sprint2-p3-03-export-manifest-eligibility-local-postgres.js",
