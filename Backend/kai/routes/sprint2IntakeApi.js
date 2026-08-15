@@ -35,6 +35,7 @@ import {
   createProductionMetadataOnlyAuditForClaimProposal,
   createProductionMetadataOnlyAuditForClaimReview,
   createProductionMetadataOnlyAuditForConflictReviewCandidate,
+  createProductionMetadataOnlyAuditForCoverageReviewDecision,
   createProductionMetadataOnlyAuditForEvidenceReview,
   createProductionMetadataOnlyAuditForSourceVersion,
 } from "../services/kaiMetadataOnlyAuditComposition.js";
@@ -1677,6 +1678,96 @@ router.post(
   },
 );
 
+let coverageReviewDecisionServicePromise = null;
+async function getCoverageReviewDecisionService() {
+  if (intakeServiceOverride?.acceptInternalCoverageLimitation) return intakeServiceOverride;
+  coverageReviewDecisionServicePromise ||= import("../services/kaiCoverageReviewDecisionService.js");
+  return coverageReviewDecisionServicePromise;
+}
+
+const KAI_P2_10_DIMENSION_KEYS = new Set([
+  "missingness",
+  "duplicates",
+  "definition_clarity",
+  "denominator_clarity",
+  "time_period_clarity",
+  "entity_level_clarity",
+  "small_cell_risk",
+  "conflicting_source_indicators",
+  "requirement_alignment",
+  "coverage_gaps",
+]);
+
+function coverageReviewDecisionIdentifiers(req = {}) {
+  const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+  const claimId = typeof req.params?.claimId === "string" ? req.params.claimId : "";
+  const dimensionKey = typeof req.params?.dimensionKey === "string" ? req.params.dimensionKey : "";
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) || organizationId !== organizationId.toLowerCase()) return null;
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(claimId) || claimId !== claimId.toLowerCase()) return null;
+  if (!KAI_P2_10_DIMENSION_KEYS.has(dimensionKey)) return null;
+  return { organizationId, claimId, dimensionKey };
+}
+
+function validateCoverageReviewDecisionRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = coverageReviewDecisionIdentifiers(req);
+  if (!identifiers) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker(
+        "invalid_uuid_field_or_dimension_key",
+        "organization_id_claim_id_or_dimension_key",
+      )],
+    });
+    return null;
+  }
+  if (Object.keys(requestPayload(req)).length !== 0) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("unknown_field", "body")],
+    });
+    return null;
+  }
+  return identifiers;
+}
+
+/**
+ * KAI P2-10 owner-policy internal-coverage-acceptance route. Mirrors the
+ * P2-04/P2-05 claim-scoped routes' organization-scoped path convention and
+ * empty-body requirement exactly, on the same mounted router. The caller
+ * identifies only the target claim and dimension via the path; actor, tenant,
+ * decision value, audience (always internal), and decision timestamp are all
+ * server-controlled by the authorized P2-10 service layer, never accepted
+ * from the request body.
+ */
+router.post(
+  "/admin/organizations/:organizationId/claims/:claimId/coverage-dimensions/:dimensionKey/internal-acceptance",
+  async (req, res) => {
+    const identifiers = validateCoverageReviewDecisionRequestOrSend(req, res);
+    if (!identifiers) return;
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getCoverageReviewDecisionService();
+      return service.acceptInternalCoverageLimitation({
+        organizationId: identifiers.organizationId,
+        claimId: identifiers.claimId,
+        dimensionKey: identifiers.dimensionKey,
+        actorContext,
+        now,
+      }, {
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForCoverageReviewDecision({
+          organizationId: identifiers.organizationId,
+          claimId: identifiers.claimId,
+          actorContext,
+          now,
+        }),
+      });
+    }, 201);
+  },
+);
+
 export default router;
 
 export const __testables = {
@@ -1719,6 +1810,8 @@ export const __testables = {
   validateEvidenceReviewCompletionRequestOrSend,
   claimReviewCompletionIdentifiers,
   validateClaimReviewCompletionRequestOrSend,
+  coverageReviewDecisionIdentifiers,
+  validateCoverageReviewDecisionRequestOrSend,
   setIntakeServiceForTest(service) {
     intakeServiceOverride = service;
     return () => {

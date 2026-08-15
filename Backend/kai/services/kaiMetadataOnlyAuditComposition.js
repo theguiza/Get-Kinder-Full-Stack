@@ -525,6 +525,83 @@ export function createProductionMetadataOnlyAuditForClaimReview({
   });
 }
 
+const DIMENSION_KEY_PATTERN = /^[a-z_]+$/;
+
+/**
+ * Production composition of the `metadataOnlyAudit` contract required by
+ * P2-10's coverage-review-decision write
+ * (Backend/kai/dictionary/postgresCoverageReviewDecisionRepository.js), which
+ * supplies its own full audit payload including the authoritative `claim_id`
+ * and `dimension_key` the route was invoked for. Bound at construction to
+ * organizationId/claimId, mirroring the P2-04/P2-09 claim-scoped adapters'
+ * identity discipline exactly: a payload whose claim_id does not match the
+ * route's own claimId, or whose dimension_key is missing/malformed, is
+ * refused.
+ */
+export function createProductionMetadataOnlyAuditForCoverageReviewDecision({
+  organizationId,
+  claimId,
+  actorContext,
+  now,
+  insertAuditEvent = insertRequiredSuccessfulAuditEvent,
+} = {}) {
+  if (typeof organizationId !== "string" || organizationId.length === 0) {
+    throw new TypeError("createProductionMetadataOnlyAuditForCoverageReviewDecision requires organizationId.");
+  }
+  if (typeof claimId !== "string" || claimId.length === 0) {
+    throw new TypeError("createProductionMetadataOnlyAuditForCoverageReviewDecision requires claimId.");
+  }
+
+  function isPlainObject(value) {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  }
+
+  return Object.freeze({
+    prepareMetadataOnlyAudit({ payload, db } = {}) {
+      if (!isPlainObject(payload)) return { ok: false };
+      const payloadClaimId = payload.claim_id;
+      if (typeof payloadClaimId !== "string" || !CLAIM_ID_PATTERN.test(payloadClaimId)) return { ok: false };
+      if (payloadClaimId !== claimId) return { ok: false };
+      const dimensionKey = payload.dimension_key;
+      if (typeof dimensionKey !== "string" || !DIMENSION_KEY_PATTERN.test(dimensionKey)) return { ok: false };
+
+      const metadata = {
+        organization_id: organizationId,
+        object_type: "claim",
+        target_object_type: "claim",
+        object_id: payloadClaimId,
+        operation: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "p2_10_coverage_review_decision_accepted_internal_with_limitation",
+        operation_type: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "p2_10_coverage_review_decision_accepted_internal_with_limitation",
+        validator_key: typeof payload.validator_key === "string" ? payload.validator_key : null,
+        actor_type: actorContext?.actorType || "human",
+        actor_user_id: actorContext?.actorUserId || null,
+        request_id: actorContext?.requestId || null,
+        route: "p2_10_coverage_review_decision_internal_acceptance",
+        created_at: typeof now === "string" ? now : new Date().toISOString(),
+        metadata_only: true,
+        contains_raw_file_content: false,
+        contains_raw_parsed_rows: false,
+        contains_client_pii: false,
+        contains_prompt_text: false,
+        contains_unsafe_generated_text: false,
+        contains_signed_urls: false,
+        contains_storage_credentials: false,
+      };
+
+      return {
+        ok: true,
+        async publish() {
+          const result = await insertAuditEvent(metadata, db);
+          if (!result || result.ok !== true) {
+            throw new Error("p2_10_coverage_review_decision_metadata_only_audit_publish_failed");
+          }
+          return result;
+        },
+      };
+    },
+  });
+}
+
 export const __testables = Object.freeze({
   createProductionMetadataOnlyAudit,
   createProductionMetadataOnlyAuditForSourceVersion,
@@ -533,4 +610,5 @@ export const __testables = Object.freeze({
   createProductionMetadataOnlyAuditForConflictReviewCandidate,
   createProductionMetadataOnlyAuditForEvidenceReview,
   createProductionMetadataOnlyAuditForClaimReview,
+  createProductionMetadataOnlyAuditForCoverageReviewDecision,
 });

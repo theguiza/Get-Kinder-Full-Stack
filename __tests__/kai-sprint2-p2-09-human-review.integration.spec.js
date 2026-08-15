@@ -382,7 +382,13 @@ async function runP209IntegrationSuite() {
     assert.ok(!tracedInternal.data.blockerCodes.includes("claim_review_unresolved"));
     assert.ok(!tracedInternal.data.blockerCodes.includes("support_strength_unassessed"));
     assert.ok(tracedInternal.data.blockerCodes.includes("coverage_dimension_unresolved"));
-    assert.ok(tracedInternal.data.blockerCodes.includes("claim_not_approved_for_requested_audience"));
+    // KAI P2-10: for requestedAudience = "internal", claim_not_approved_for_
+    // requested_audience/audience_gate_closed/requirement_authority_absent no
+    // longer fire merely because the old stub returned false - P2-09
+    // completeness is fully satisfied here (both blockers cleared above), so
+    // none of the three fire; the claim stays ineligible solely because no
+    // coverage-dimension acceptance has been recorded yet.
+    assert.ok(!tracedInternal.data.blockerCodes.includes("claim_not_approved_for_requested_audience"));
     assert.equal(tracedInternal.data.eligible, false);
 
     for (const audience of ["funder", "public"]) {

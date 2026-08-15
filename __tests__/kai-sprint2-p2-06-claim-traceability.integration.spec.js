@@ -160,7 +160,14 @@ async function runP206IntegrationSuite() {
     assert.equal(result.data.requestedAudience, "internal");
     assert.equal(result.data.claim.claim_status, "proposed");
     assert.equal(result.data.claim.audience_gates.internal_only, true);
-    assert.ok(result.data.blockerCodes.includes("claim_not_approved_for_requested_audience"));
+    // KAI P2-10: for requestedAudience = "internal", claim_not_approved_for_
+    // requested_audience/audience_gate_closed/requirement_authority_absent no
+    // longer fire merely because this stub used to unconditionally return
+    // false - P2-09 evidence/claim-review completeness (still incomplete
+    // here) is independently enforced by its own blocker codes instead.
+    assert.ok(!result.data.blockerCodes.includes("claim_not_approved_for_requested_audience"));
+    assert.ok(result.data.blockerCodes.includes("evidence_review_unresolved"));
+    assert.ok(result.data.blockerCodes.includes("claim_review_unresolved"));
     assert.ok(result.data.blockerCodes.includes("coverage_dimension_unresolved"));
     assert.ok(result.data.dimensions.denominator_clarity.assessment_status, "unresolved");
     assert.ok(result.data.gap_items.some((gap) => gap.dimension_key === "denominator_clarity"));

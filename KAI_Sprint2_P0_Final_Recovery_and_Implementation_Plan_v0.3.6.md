@@ -17093,4 +17093,153 @@ NOT_CONFIRMED / RECOMMENDED FOLLOW-UP:
 One local commit was made on this branch recording this package. No push,
 no deploy.
 
+## P2-10 - Phase 11 internal coverage authority + P2-06 internal eligibility completion (completed 2026-08-15)
+
+Implemented the owner-authorized `accepted_internal_with_limitation` GK
+reviewer decision and finished P2-06's internal-audience policy (the two
+seams P2-09 explicitly deferred), producing the first P2 claim path that can
+legitimately reach `internal` eligibility while every unresolved limitation
+stays truthfully visible.
+
+IMPLEMENTATION:
+  - Pure vocabulary/fingerprint module
+    `Backend/kai/validators/kaiCoverageReviewDecisionValidators.js`:
+    `computeCoverageReviewDecisionFingerprint` is the single authoritative
+    "current state" binding, imported unchanged by both the write path and
+    P2-06's read path - never reimplemented twice.
+  - New durable authority: migration
+    `migrations/kai_sprint2_p2_10_coverage_review_decision.sql` (+ rollback)
+    adds `kai.coverage_review_decisions` (organization_id, claim_id,
+    dimension_key, decision pinned to
+    `accepted_internal_with_limitation`, state_fingerprint,
+    decided_by/decided_by_role pinned to `gk_reviewer`, created_by_type
+    pinned to `human`), append-only by trigger (mirroring the P3-17 ledger
+    precedent), with a composite FK to `kai.gap_log_items` enforcing at the
+    database level that a current P2-04 gap row already exists for the exact
+    claim/dimension targeted, and a widened
+    `upload_lifecycle_audit_gate_a_operation_check` plus a new metadata-object
+    CHECK for the one new audit operation.
+  - New repository
+    `Backend/kai/dictionary/postgresCoverageReviewDecisionRepository.js`:
+    `acceptInternalCoverageLimitation` reuses P2-06's own
+    `evaluateClaimTraceabilityInTransaction` as the sole source of current
+    state (no second evaluator), rejects unless both P2-09 evidence/claim
+    review blockers are already absent (`human_review_incomplete`), the
+    target dimension's CURRENT `assessment_status` is exactly `unresolved`
+    (`dimension_not_unresolved` - `resolved_risk_flagged` and `resolved_clear`
+    are both refused, so a risk-flagged dimension can never be waived), and a
+    current P2-04 gap row exists. Insert is `ON CONFLICT
+    (organization_id, claim_id, dimension_key, state_fingerprint) DO NOTHING`
+    with a reread-and-return-replayed path - exact replay creates no
+    duplicate authority row or audit. The required same-transaction
+    metadata-only audit publish failure rolls back the fresh insert.
+  - New service `Backend/kai/services/kaiCoverageReviewDecisionService.js`:
+    allowed role is `gk_reviewer` ONLY - `gk_operator`, `gk_admin`, client
+    actors, `system`, `assistant`, import, and code actors are all denied by
+    construction; the decided-by role is server-derived, never accepted from
+    the caller.
+  - New audit-composition factory
+    `createProductionMetadataOnlyAuditForCoverageReviewDecision` in
+    `Backend/kai/services/kaiMetadataOnlyAuditComposition.js`, bound to
+    organizationId/claimId, refusing a payload whose claim_id/dimension_key
+    don't match.
+  - New authenticated POST route on the existing Sprint 2 intake router:
+    `/admin/organizations/:organizationId/claims/:claimId/coverage-dimensions/:dimensionKey/internal-acceptance`,
+    empty body (mirroring the P2-04/P2-05 claim-scoped convention exactly) -
+    actor, tenant, decision value, audience (always internal), and timestamp
+    are all server-controlled.
+  - P2-06 completion in
+    `Backend/kai/dictionary/postgresClaimTraceabilityRepository.js`:
+    `approvalForAudience` now returns `approved:true/gateOpen:true/
+    authorityPresent:true` unconditionally for `requestedAudience ===
+    "internal"` (funder/public unchanged, still unconditionally fail-closed) -
+    the three blockers this stub used to raise unconditionally
+    (`claim_not_approved_for_requested_audience`, `audience_gate_closed`,
+    `requirement_authority_absent`) no longer fire for internal merely
+    because of the old stub; P2-09 completeness remains independently
+    enforced by `evidence_review_unresolved`/`claim_review_unresolved`. The
+    per-dimension `coverage_dimension_unresolved` loop now reads every
+    accepted decision for the claim and recomputes each dimension's expected
+    fingerprint fresh every call; for `requestedAudience === "internal"`, an
+    unresolved dimension with a matching current acceptance no longer blocks
+    - for funder/public, or any dimension without a matching acceptance, it
+    blocks exactly as before. The traceability DTO's `dimensions` map gained
+    two metadata-safe fields per dimension - `internal_limitation_accepted`
+    and `blocks_requested_audience` - computed regardless of requested
+    audience so acceptance is always disclosed truthfully; `assessment_status`
+    itself is never relabeled `resolved_clear`. Zero changes to P2-02, P2-04,
+    or P2-05.
+  - Every existing runner script whose fixtures reach
+    `evaluateClaimTraceabilityInTransaction` (`kai-sprint2-p2-06-*`,
+    `kai-sprint2-p2-07-*`, `kai-sprint2-p2-08-*`,
+    `kai-sprint2-p2-09-*-local-postgres.js`) now also applies the P2-10
+    migration - this new table is queried unconditionally, so every ephemeral
+    schema chain that exercises P2-06 needs it present.
+
+DISCOVERY / STOPPED-AND-REPORTED CONTRADICTION - P2-02's
+`denominator_clarity` and `time_period_clarity` dimensions are
+unconditionally `unresolved` by design (no committed fact ever satisfies
+them - see `kaiEvidenceCoverageAssessmentValidators.js`), so P2-04 always
+opens a `client_followup_item` (`queue_status='waiting_on_client'`) for both,
+for every claim ever proposed, and no P2 package through P2-09 built a route
+to resolve one. `client_followup_unresolved` is therefore an independent,
+pre-existing blocker on every claim in the current schema, and per this
+package's explicit hard boundary it was neither resolved, mutated, nor
+silently suppressed. This means full coverage acceptance clears
+`coverage_dimension_unresolved` completely (proven end-to-end), but
+`eligible=true` is not reachable for any claim in the smoke-seed fixture
+today - the one remaining, independent, untouched blocker is
+`client_followup_unresolved`. This was surfaced to the user mid-package (per
+the package's own STOP instruction) and the user confirmed: commit P2-10 as
+designed, and report this finding rather than inventing a client-response
+mechanism. `eligibleClaims`/P2-08 stay perfectly consistent with P2-06
+throughout - no second eligibility model exists.
+
+VERIFICATION:
+  - `verify:kai-sprint2-p2-10-coverage-review-decision` (new, 28/28 passing):
+    schema verifier plus boundary (21 cases: authority/role/tenant/feature/
+    fabricated-dimension/resolved-risk-flagged/resolved-clear/gap-absent/
+    replay/audit-rollback negatives and positives) and integration suites
+    (7 cases: authority safety zero-mutation, a real unresolved P2-05
+    conflict remaining blocking after full coverage acceptance, zero/partial/
+    full coverage acceptance end-to-end, audit-failure rollback).
+  - `verify:kai-sprint2-p2-09-human-review`: 16/16 (one pre-existing
+    assertion updated to reflect the corrected internal-audience policy).
+  - `verify:kai-sprint2-p2-06-claim-traceability`: 11/11 (one pre-existing
+    assertion updated for the same reason).
+  - `verify:kai-sprint2-p2-08-eligible-claims-for-audience`: 14/14 unchanged.
+  - `verify:kai-sprint2-api-contract`: 59/60 (the one failure,
+    `file_upload_enabled` in `kai-sprint2-foundation-safety.spec.js`, is
+    pre-existing/environment-dependent and reproduces identically on the
+    pre-P2-10 tree; the Pass-2 route inventory was updated with the one new
+    route path).
+  - `npm run test:kai-sprint2`: 2105/2106 non-skipped (same single
+    pre-existing failure). `npm test`: 2210/2211 non-skipped (same). `git
+    diff --check`: clean.
+
+NOT_CONFIRMED / RECOMMENDED FOLLOW-UP:
+  - **P2-04 client-followup resolution.** No route or mechanism currently
+    lets a client answer (and thereby resolve) a `client_followup_item`. Until
+    one is built, `client_followup_unresolved` blocks every claim's internal
+    eligibility unconditionally, regardless of P2-10 coverage acceptance.
+    This is the load-bearing gap for the stated product outcome ("first
+    normal claim usable for INTERNAL purposes") and needs a separately
+    authorized package.
+  - P3 packages' own `-local-postgres.js` runners (export-review,
+    generated-content, export-candidate, human-authority-decision-ledger,
+    etc.) were not updated to include the new P2-10 migration in their own
+    ephemeral schema chains, per this package's explicit package-boundary
+    instruction not to reflexively rerun/fix unrelated packages. Any of them
+    that exercise `evaluateClaimTraceabilityInTransaction` will need that one
+    additive migration line added to their own chain before they can pass
+    again.
+  - No push, merge, deploy, flag enablement, Impact Evidence Library, P3/
+    generation/export work, funder/public/export approval, assistant runtime
+    work, or shared/staging/production database access was performed. Real
+    client data was not used. `00_KAI_CURRENT_STATE.md` and the
+    Implementation Baseline were not updated.
+
+One local commit was made on this branch recording this package. No push,
+no deploy.
+
 STOP BEFORE IMPACT EVIDENCE LIBRARY.
