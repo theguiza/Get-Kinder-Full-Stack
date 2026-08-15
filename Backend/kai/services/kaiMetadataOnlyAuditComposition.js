@@ -380,10 +380,157 @@ export function createProductionMetadataOnlyAuditForConflictReviewCandidate({
   });
 }
 
+const EVIDENCE_ITEM_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Production composition of the `metadataOnlyAudit` contract required by
+ * P2-09's evidence-review completion
+ * (Backend/kai/dictionary/postgresHumanReviewRepository.js), which supplies
+ * its own full audit payload including the authoritative `evidence_item_id`
+ * the route was invoked for. Bound at construction to
+ * organizationId/evidenceItemId, mirroring the P2-03 claim-proposal adapter's
+ * identity discipline: a payload whose evidence_item_id does not match the
+ * route's own evidenceItemId is refused, as is a payload with no valid
+ * evidence_item_id at all.
+ */
+export function createProductionMetadataOnlyAuditForEvidenceReview({
+  organizationId,
+  evidenceItemId,
+  actorContext,
+  now,
+  insertAuditEvent = insertRequiredSuccessfulAuditEvent,
+} = {}) {
+  if (typeof organizationId !== "string" || organizationId.length === 0) {
+    throw new TypeError("createProductionMetadataOnlyAuditForEvidenceReview requires organizationId.");
+  }
+  if (typeof evidenceItemId !== "string" || evidenceItemId.length === 0) {
+    throw new TypeError("createProductionMetadataOnlyAuditForEvidenceReview requires evidenceItemId.");
+  }
+
+  function isPlainObject(value) {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  }
+
+  return Object.freeze({
+    prepareMetadataOnlyAudit({ payload, db } = {}) {
+      if (!isPlainObject(payload)) return { ok: false };
+      const payloadEvidenceItemId = payload.evidence_item_id;
+      if (typeof payloadEvidenceItemId !== "string" || !EVIDENCE_ITEM_ID_PATTERN.test(payloadEvidenceItemId)) return { ok: false };
+      if (payloadEvidenceItemId !== evidenceItemId) return { ok: false };
+
+      const metadata = {
+        organization_id: organizationId,
+        object_type: "evidence_item",
+        target_object_type: "evidence_item",
+        object_id: payloadEvidenceItemId,
+        operation: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "p2_09_evidence_review_completed",
+        operation_type: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "p2_09_evidence_review_completed",
+        validator_key: typeof payload.validator_key === "string" ? payload.validator_key : null,
+        actor_type: actorContext?.actorType || "human",
+        actor_user_id: actorContext?.actorUserId || null,
+        request_id: actorContext?.requestId || null,
+        route: "p2_09_evidence_review_completion",
+        created_at: typeof now === "string" ? now : new Date().toISOString(),
+        metadata_only: true,
+        contains_raw_file_content: false,
+        contains_raw_parsed_rows: false,
+        contains_client_pii: false,
+        contains_prompt_text: false,
+        contains_unsafe_generated_text: false,
+        contains_signed_urls: false,
+        contains_storage_credentials: false,
+      };
+
+      return {
+        ok: true,
+        async publish() {
+          const result = await insertAuditEvent(metadata, db);
+          if (!result || result.ok !== true) {
+            throw new Error("p2_09_evidence_review_metadata_only_audit_publish_failed");
+          }
+          return result;
+        },
+      };
+    },
+  });
+}
+
+/**
+ * Production composition of the `metadataOnlyAudit` contract required by
+ * P2-09's claim-review/internal-approval completion
+ * (Backend/kai/dictionary/postgresHumanReviewRepository.js), which supplies
+ * its own full audit payload including the authoritative `claim_id` the route
+ * was invoked for. Bound at construction to organizationId/claimId, mirroring
+ * the P2-04 claim-gap-followup adapter's identity discipline exactly.
+ */
+export function createProductionMetadataOnlyAuditForClaimReview({
+  organizationId,
+  claimId,
+  actorContext,
+  now,
+  insertAuditEvent = insertRequiredSuccessfulAuditEvent,
+} = {}) {
+  if (typeof organizationId !== "string" || organizationId.length === 0) {
+    throw new TypeError("createProductionMetadataOnlyAuditForClaimReview requires organizationId.");
+  }
+  if (typeof claimId !== "string" || claimId.length === 0) {
+    throw new TypeError("createProductionMetadataOnlyAuditForClaimReview requires claimId.");
+  }
+
+  function isPlainObject(value) {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  }
+
+  return Object.freeze({
+    prepareMetadataOnlyAudit({ payload, db } = {}) {
+      if (!isPlainObject(payload)) return { ok: false };
+      const payloadClaimId = payload.claim_id;
+      if (typeof payloadClaimId !== "string" || !CLAIM_ID_PATTERN.test(payloadClaimId)) return { ok: false };
+      if (payloadClaimId !== claimId) return { ok: false };
+
+      const metadata = {
+        organization_id: organizationId,
+        object_type: "claim",
+        target_object_type: "claim",
+        object_id: payloadClaimId,
+        operation: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "p2_09_claim_review_completed_internal_approval",
+        operation_type: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "p2_09_claim_review_completed_internal_approval",
+        validator_key: typeof payload.validator_key === "string" ? payload.validator_key : null,
+        actor_type: actorContext?.actorType || "human",
+        actor_user_id: actorContext?.actorUserId || null,
+        request_id: actorContext?.requestId || null,
+        route: "p2_09_claim_review_internal_approval",
+        created_at: typeof now === "string" ? now : new Date().toISOString(),
+        metadata_only: true,
+        contains_raw_file_content: false,
+        contains_raw_parsed_rows: false,
+        contains_client_pii: false,
+        contains_prompt_text: false,
+        contains_unsafe_generated_text: false,
+        contains_signed_urls: false,
+        contains_storage_credentials: false,
+      };
+
+      return {
+        ok: true,
+        async publish() {
+          const result = await insertAuditEvent(metadata, db);
+          if (!result || result.ok !== true) {
+            throw new Error("p2_09_claim_review_metadata_only_audit_publish_failed");
+          }
+          return result;
+        },
+      };
+    },
+  });
+}
+
 export const __testables = Object.freeze({
   createProductionMetadataOnlyAudit,
   createProductionMetadataOnlyAuditForSourceVersion,
   createProductionMetadataOnlyAuditForClaimProposal,
   createProductionMetadataOnlyAuditForClaimGapFollowup,
   createProductionMetadataOnlyAuditForConflictReviewCandidate,
+  createProductionMetadataOnlyAuditForEvidenceReview,
+  createProductionMetadataOnlyAuditForClaimReview,
 });

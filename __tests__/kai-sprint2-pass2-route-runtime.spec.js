@@ -111,6 +111,9 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // KAI P2-04 claim-gap/client-followup surface (additive; every prior
     // entry preserved verbatim).
     "/admin/organizations/:organizationId/claims/:claimId/claim-gap-followups",
+    // KAI P2-09 human claim-review/internal-approval completion surface
+    // (additive; every prior entry preserved verbatim).
+    "/admin/organizations/:organizationId/claims/:claimId/claim-review/:reviewQueueItemId/complete",
     // KAI P2-06 human claim-traceability read surface (additive; every prior
     // entry preserved verbatim).
     "/admin/organizations/:organizationId/claims/:claimId/traceability",
@@ -123,6 +126,9 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // KAI P2-03 claim-proposal surface (additive; every prior entry preserved
     // verbatim).
     "/admin/organizations/:organizationId/evidence-items/:evidenceItemId/claim-proposal",
+    // KAI P2-09 human evidence-review completion surface (additive; every
+    // prior entry preserved verbatim).
+    "/admin/organizations/:organizationId/evidence-items/:evidenceItemId/evidence-review/:reviewQueueItemId/complete",
     "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-review-queue/:exportReviewQueueItemId/complete",
     "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-review-queue/:exportReviewQueueItemId/packet",
     "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-review-queue/:exportReviewQueueItemId/start",

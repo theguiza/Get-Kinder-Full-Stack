@@ -28,6 +28,8 @@
     "verify:kai-sprint2-p2-06-claim-traceability": "node scripts/kai-sprint2-p2-06-claim-traceability-local-postgres.js",
     "verify:kai-sprint2-p2-07-assistant-claim-traceability-tool": "node scripts/kai-sprint2-p2-07-assistant-claim-traceability-tool-local-postgres.js",
     "verify:kai-sprint2-p2-08-eligible-claims-for-audience": "node scripts/kai-sprint2-p2-08-eligible-claims-for-audience-local-postgres.js",
+    "verify:kai-sprint2-p2-09-human-review": "node scripts/kai-sprint2-p2-09-human-review-local-postgres.js",
+    "test:kai-sprint2-p2-09-human-review": "node --test __tests__/kai-sprint2-p2-09-human-review-boundary.spec.js",
     "verify:kai-sprint2-p3-01-generated-content-drafts": "node scripts/kai-sprint2-p3-01-generated-content-drafts-local-postgres.js",
     "verify:kai-sprint2-p3-02-generated-draft-review-packet": "node scripts/kai-sprint2-p3-02-generated-draft-review-packet-local-postgres.js",
     "verify:kai-sprint2-p3-03-export-manifest-eligibility": "node scripts/kai-sprint2-p3-03-export-manifest-eligibility-local-postgres.js",

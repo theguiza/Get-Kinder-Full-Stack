@@ -16922,3 +16922,175 @@ NOT_CONFIRMED:
 
 One local commit was made on this branch recording this package. No push,
 no deploy.
+
+## P2-09 human evidence-review / claim-review internal-usability transition (completed 2026-08-15)
+
+Implemented the smallest authoritative HUMAN review path that lets a P2
+claim/evidence chain move from its review-gated proposed state toward
+INTERNAL usability, reusing P2-06's own eligibility evaluator as the sole
+authority on what internal eligibility requires. Neither evidence-review nor
+claim-review/internal-approval transitions previously existed in current
+source (P3-17's human-authority contract only enumerates
+`client_reviewed`/`funder_ready`/`public_ready`/`export_authority_granted` -
+none compatible), so this package built both from scratch.
+
+DISCOVERY - P2-06 blocker analysis showed two blocker families are
+unconditional stubs unrelated to review-gate state and cannot be cleared by
+any review transition without reopening P2-06 eligibility itself (explicitly
+out of scope): `approvalForAudience()` (always returns unapproved for every
+audience) and four permanently-`unresolved` coverage-dimension validators.
+Because of this, P2-06 `eligible=true` for `internal` is not reachable in
+this package. This package's scope was therefore narrowed, with the user's
+explicit sign-off, to: prove the three review-gated blockers this package
+CAN affect - `evidence_review_unresolved`, `claim_review_unresolved`,
+`support_strength_unassessed` - clear correctly via the new human transitions,
+and defer the `eligible=true` proof to a follow-up P2-06-completion package
+that finishes `approvalForAudience` and the coverage-dimension validators.
+That follow-up is out of scope here and was not started.
+
+IMPLEMENTATION:
+  - New repository `Backend/kai/dictionary/postgresHumanReviewRepository.js`:
+    `completeEvidenceReview` and `completeClaimReviewInternalApproval`, both
+    compare-and-set on the linked `evidence_review`/`claim_review`
+    `kai.review_queue_items` row (`queue_status`/`review_status`:
+    `open`/`needs_gk_review` -> `resolved`/`resolved`, already an accepted
+    P1-06 vocabulary - no widening needed there) plus one companion write
+    (`evidence_items.support_strength` / `claims.claim_strength`:
+    `unassessed` -> `reviewed_supported`), guarded by
+    `expected_updated_at` optimistic concurrency, re-verified lineage
+    (evidence item -> locator -> source -> current source_version ->
+    source candidate), post-write validation, and a required same-transaction
+    metadata-only audit. `completeClaimReviewInternalApproval` additionally
+    requires the linked evidence item's own `evidence_review` queue item to
+    already be `resolved` before proceeding (`evidence_review_unresolved`,
+    409) - the one non-approval blocker this transition may require clear
+    first. Neither transition touches `evidence_review_status`,
+    `claim_status`, or `claim_review_status`: those columns are read
+    elsewhere by P2-05's own conflict-candidate-detection contract check
+    (`claim_status = 'proposed' AND claim_review_status = 'needs_gk_review'`)
+    and by P2-06's traceability output, and changing them was not required to
+    clear the three targeted blockers, so P2-05's foundation is undisturbed.
+    Idempotent full-state replay is supported; a stale/mismatched
+    `expected_updated_at` against a still-open row is a genuine conflict.
+  - New service `Backend/kai/services/kaiHumanReviewService.js`:
+    `completeEvidenceReview`/`completeClaimReviewInternalApproval`, both
+    `gk_reviewer`/`gk_admin` only (mirroring the existing
+    `COMPLETE_GENERATED_CONTENT_REVIEW_ALLOWED_ROLES` precedent in
+    `kaiGeneratedContentService.js` exactly - no `gk_operator`, `client`,
+    `assistant`, or generic system actor), requiring a mapped human actor
+    before any repository call.
+  - Two new audit-composition factories in
+    `Backend/kai/services/kaiMetadataOnlyAuditComposition.js`
+    (`createProductionMetadataOnlyAuditForEvidenceReview`/
+    `ForClaimReview`), each bound at construction to the route's own
+    resource identity and refusing a payload whose identifier does not match.
+  - Two new authenticated POST routes on the existing Sprint 2 intake router
+    (`Backend/kai/routes/sprint2IntakeApi.js`):
+    `/admin/organizations/:organizationId/evidence-items/:evidenceItemId/evidence-review/:reviewQueueItemId/complete`
+    and
+    `/admin/organizations/:organizationId/claims/:claimId/claim-review/:reviewQueueItemId/complete`,
+    both accepting only `{ expected_updated_at }` (no reviewer-supplied
+    decision vocabulary at all - completing either review has exactly one
+    accepted outcome, mirroring the P3-04
+    `completeGeneratedContentReview` convention). Routes contain no SQL,
+    import no repository/pool, derive actor/tenant identity server-side, and
+    delegate exactly once. Evidence review never invokes the claim-review
+    service; claim review never invokes P2-08, any Impact Evidence Library
+    service, or any P3/generation/export service.
+  - Two new request-schema validators in
+    `Backend/kai/validators/kaiSprint2RequestSchemas.js`
+    (`validateCompleteEvidenceReviewRequest`/`validateCompleteClaimReviewRequest`),
+    mirroring `validateCompleteExportReviewRequest` exactly.
+  - Forward migration
+    `migrations/kai_sprint2_p2_09_human_review_internal_approval.sql` (+
+    rollback draft) widens exactly two CHECK constraints -
+    `evidence_items_p2_01_support_strength_check` and
+    `claims_p2_03_claim_strength_check` - to admit `reviewed_supported`
+    alongside `unassessed`, adds the two new operation values
+    (`evidence_review_completed`, `claim_review_completed_internal_approval`)
+    to `upload_lifecycle_audit_gate_a_operation_check`, and adds one
+    metadata-only-object CHECK per new operation. No other column, table, or
+    constraint was touched; accepted P2-01/P2-03 migration bytes are
+    unchanged (confirmed by `git status` showing no diff on those files).
+  - Corrective, additive-only updates (same pattern every prior P2 package
+    used when appending a new route/constant region): the P2-08 route
+    boundary-scan test's slice end marker moved from `export default
+    router;` to the new `let evidenceReviewServicePromise` marker so it stops
+    incidentally spanning this package's region, and
+    `kai-sprint2-pass2-route-runtime.spec.js`'s exhaustive mounted-route
+    enumeration now includes both new paths, alphabetically ordered, every
+    prior path preserved verbatim.
+
+ELIGIBILITY PROOF (via the new
+`__tests__/kai-sprint2-p2-09-human-review.integration.spec.js`, real
+ephemeral PostgreSQL):
+  - Before review: P2-06 internal blockerCodes include
+    `evidence_review_unresolved`, `claim_review_unresolved`,
+    `support_strength_unassessed`; P2-08 omits the claim for `internal`.
+  - After `completeEvidenceReview`: `evidence_review_unresolved` clears;
+    `claim_review_unresolved`/`support_strength_unassessed` remain (claim
+    review still pending) - same-transaction audit row present
+    (`evidence_review_completed`).
+  - After `completeClaimReviewInternalApproval` (only reachable once evidence
+    review is resolved - proven as its own negative case): all three targeted
+    blockers clear; `coverage_dimension_unresolved` and
+    `claim_not_approved_for_requested_audience` remain (the permanently-
+    stubbed, out-of-scope blockers); `eligible` stays `false` for `internal`,
+    `funder`, and `public` - as expected and explicitly deferred, not a
+    defect of this package. P2-08 continues to omit the claim for `internal`.
+    Same-transaction audit row present (`claim_review_completed_internal_approval`).
+  - Authority/safety: non-human actor, wrong role (`gk_operator`),
+    cross-tenant access, stale `expected_updated_at`, a mismatched
+    `reviewQueueItemId`, and `KAI_SPRINT2_ENABLED=false` are all rejected
+    with zero mutation; a rejected audit `publish()` rolls back the whole
+    transition (queue status and support_strength/claim_strength both
+    verified unchanged afterward).
+
+TOOL_VERIFIED:
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-09-human-review`
+    -> P2-09 human-review focused tests passed (16/16), using a real
+    ephemeral local PostgreSQL instance, then removed.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-06-claim-traceability`
+    -> 11/11 pass (P2-06 eligibility logic unchanged).
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-08-eligible-claims-for-audience`
+    -> 14/14 pass.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-01-evidence-lineage`
+    -> 17/17 pass (original extraction path unaffected by the widened
+    `support_strength` CHECK).
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-03-claim-proposal`
+    -> 15/15 pass (original proposal path unaffected by the widened
+    `claim_strength` CHECK).
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm run verify:kai-sprint2-api-contract`
+    -> 60/60 pass (route added to the mounted-route enumeration).
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm run test:kai-sprint2`
+    -> 2083/2083 pass, 30 skipped, 0 fail.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm test`
+    -> 2188/2188 pass, 30 skipped, 0 fail.
+  - `git diff --check` -> clean (no whitespace errors).
+
+USER_CONFIRMED:
+  - Re-scoped acceptance (dropping the `eligible=true` end-to-end proof in
+    favor of proving the three review-gated blockers clear, with
+    `eligible=true` explicitly deferred to a separately authorized P2-06-
+    completion follow-up) was authorized after the discovery above showed
+    the originally-specified acceptance criterion was unreachable without
+    reopening P2-06 eligibility logic, which remains out of scope.
+
+NOT_CONFIRMED / RECOMMENDED FOLLOW-UP:
+  - **P2-06 completion: audience approval + coverage-dimension resolution.**
+    A separately-authorized package is needed to implement
+    `approvalForAudience` for `internal` (deriving it from this package's new
+    review state; funder/public remain hardcoded closed) and to resolve or
+    intentionally retire the four permanently-`unresolved` coverage-dimension
+    validators, before `P2-06 internal eligible=true` / `P2-08 internal
+    claim present` become achievable for any claim.
+  - No push, merge, deploy, flag enablement, Impact Evidence Library, P3/
+    generation/export work, funder/public/export approval, assistant runtime
+    work, or shared/staging/production database access was performed. Real
+    client data was not used. `00_KAI_CURRENT_STATE.md` and the
+    Implementation Baseline were not updated.
+
+One local commit was made on this branch recording this package. No push,
+no deploy.
+
+STOP BEFORE IMPACT EVIDENCE LIBRARY.

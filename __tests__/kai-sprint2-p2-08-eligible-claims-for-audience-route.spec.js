@@ -321,7 +321,7 @@ test("P2-08 eligible-claims-for-audience route source imports no database or rep
   const source = readFileSync("Backend/kai/routes/sprint2IntakeApi.js", "utf8");
   const slice = source.slice(
     source.indexOf("let eligibleClaimsForAudienceServicePromise"),
-    source.indexOf("export default router;"),
+    source.indexOf("let evidenceReviewServicePromise"),
   );
   assert.match(source, /async function getEligibleClaimsForAudienceService/);
   assert.match(slice, /listEligibleClaimsForAudience/);
@@ -335,7 +335,7 @@ test("P2-08 eligible-claims-for-audience route source never contains the literal
   const source = readFileSync("Backend/kai/routes/sprint2IntakeApi.js", "utf8");
   const slice = source.slice(
     source.indexOf("let eligibleClaimsForAudienceServicePromise"),
-    source.indexOf("export default router;"),
+    source.indexOf("let evidenceReviewServicePromise"),
   );
   assert.doesNotMatch(slice, /req\.user/);
 });

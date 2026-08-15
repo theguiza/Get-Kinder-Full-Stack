@@ -16,6 +16,8 @@ import {
   setKaiSprint2NoStore,
 } from "../middleware/kaiSprint2RequestSafety.js";
 import {
+  validateCompleteClaimReviewRequest,
+  validateCompleteEvidenceReviewRequest,
   validateCompleteExportReviewRequest,
   validateIntakeBatchFilesQuery,
   validateFilePolicyBlockRequest,
@@ -31,7 +33,9 @@ import {
 import {
   createProductionMetadataOnlyAuditForClaimGapFollowup,
   createProductionMetadataOnlyAuditForClaimProposal,
+  createProductionMetadataOnlyAuditForClaimReview,
   createProductionMetadataOnlyAuditForConflictReviewCandidate,
+  createProductionMetadataOnlyAuditForEvidenceReview,
   createProductionMetadataOnlyAuditForSourceVersion,
 } from "../services/kaiMetadataOnlyAuditComposition.js";
 
@@ -1517,6 +1521,162 @@ router.get(
   },
 );
 
+let evidenceReviewServicePromise = null;
+async function getHumanReviewServiceForEvidenceReview() {
+  if (intakeServiceOverride?.completeEvidenceReview) return intakeServiceOverride;
+  evidenceReviewServicePromise ||= import("../services/kaiHumanReviewService.js");
+  return evidenceReviewServicePromise;
+}
+
+let claimReviewServicePromise = null;
+async function getHumanReviewServiceForClaimReview() {
+  if (intakeServiceOverride?.completeClaimReviewInternalApproval) return intakeServiceOverride;
+  claimReviewServicePromise ||= import("../services/kaiHumanReviewService.js");
+  return claimReviewServicePromise;
+}
+
+function evidenceReviewCompletionIdentifiers(req = {}) {
+  const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+  const evidenceItemId = typeof req.params?.evidenceItemId === "string" ? req.params.evidenceItemId : "";
+  const reviewQueueItemId = typeof req.params?.reviewQueueItemId === "string" ? req.params.reviewQueueItemId : "";
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) || organizationId !== organizationId.toLowerCase()) return null;
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(evidenceItemId) || evidenceItemId !== evidenceItemId.toLowerCase()) return null;
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(reviewQueueItemId) || reviewQueueItemId !== reviewQueueItemId.toLowerCase()) return null;
+  return { organizationId, evidenceItemId, reviewQueueItemId };
+}
+
+function validateEvidenceReviewCompletionRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = evidenceReviewCompletionIdentifiers(req);
+  if (!identifiers) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker(
+        "invalid_uuid_field",
+        "organization_id_evidence_item_id_or_review_queue_item_id",
+      )],
+    });
+    return null;
+  }
+  const result = validateCompleteEvidenceReviewRequest(req.body);
+  if (!result.ok) {
+    sendKaiError(res, "validation_blocker", { blockers: result.blockers });
+    return null;
+  }
+  return identifiers;
+}
+
+/**
+ * KAI P2-09 human evidence-review completion route. Mirrors the sibling
+ * generated-content-review-completion route's `expected_updated_at` body
+ * convention exactly, on the same mounted router. Contains no SQL, imports no
+ * data-access layer, derives actor/tenant identity exclusively server-side
+ * from `sprint2MappedActorContext`, and delegates exactly once to the
+ * authorized P2-09 service, which alone owns the compare-and-set write,
+ * post-write validation, and required same-transaction audit. Never
+ * completes, resolves, or references the linked claim's own claim_review
+ * queue item - completing an evidence review can never approve a claim.
+ */
+router.post(
+  "/admin/organizations/:organizationId/evidence-items/:evidenceItemId/evidence-review/:reviewQueueItemId/complete",
+  async (req, res) => {
+    const identifiers = validateEvidenceReviewCompletionRequestOrSend(req, res);
+    if (!identifiers) return;
+    const payload = requestPayload(req);
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getHumanReviewServiceForEvidenceReview();
+      return service.completeEvidenceReview({
+        organizationId: identifiers.organizationId,
+        evidenceItemId: identifiers.evidenceItemId,
+        reviewQueueItemId: identifiers.reviewQueueItemId,
+        expectedUpdatedAt: payload.expected_updated_at,
+        actorContext,
+        now,
+      }, {
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForEvidenceReview({
+          organizationId: identifiers.organizationId,
+          evidenceItemId: identifiers.evidenceItemId,
+          actorContext,
+          now,
+        }),
+      });
+    });
+  },
+);
+
+function claimReviewCompletionIdentifiers(req = {}) {
+  const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+  const claimId = typeof req.params?.claimId === "string" ? req.params.claimId : "";
+  const reviewQueueItemId = typeof req.params?.reviewQueueItemId === "string" ? req.params.reviewQueueItemId : "";
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) || organizationId !== organizationId.toLowerCase()) return null;
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(claimId) || claimId !== claimId.toLowerCase()) return null;
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(reviewQueueItemId) || reviewQueueItemId !== reviewQueueItemId.toLowerCase()) return null;
+  return { organizationId, claimId, reviewQueueItemId };
+}
+
+function validateClaimReviewCompletionRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = claimReviewCompletionIdentifiers(req);
+  if (!identifiers) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker(
+        "invalid_uuid_field",
+        "organization_id_claim_id_or_review_queue_item_id",
+      )],
+    });
+    return null;
+  }
+  const result = validateCompleteClaimReviewRequest(req.body);
+  if (!result.ok) {
+    sendKaiError(res, "validation_blocker", { blockers: result.blockers });
+    return null;
+  }
+  return identifiers;
+}
+
+/**
+ * KAI P2-09 human claim-review/internal-approval completion route. Mirrors
+ * the evidence-review completion route above exactly. It never invokes the
+ * P2-08 eligible-claims-for-audience service, any Impact Evidence Library
+ * service, or any P3/generation/export service - approving a claim internally
+ * triggers no automatic downstream chaining.
+ */
+router.post(
+  "/admin/organizations/:organizationId/claims/:claimId/claim-review/:reviewQueueItemId/complete",
+  async (req, res) => {
+    const identifiers = validateClaimReviewCompletionRequestOrSend(req, res);
+    if (!identifiers) return;
+    const payload = requestPayload(req);
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getHumanReviewServiceForClaimReview();
+      return service.completeClaimReviewInternalApproval({
+        organizationId: identifiers.organizationId,
+        claimId: identifiers.claimId,
+        reviewQueueItemId: identifiers.reviewQueueItemId,
+        expectedUpdatedAt: payload.expected_updated_at,
+        actorContext,
+        now,
+      }, {
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForClaimReview({
+          organizationId: identifiers.organizationId,
+          claimId: identifiers.claimId,
+          actorContext,
+          now,
+        }),
+      });
+    });
+  },
+);
+
 export default router;
 
 export const __testables = {
@@ -1555,6 +1715,10 @@ export const __testables = {
   claimTraceabilityRequestedAudienceFromQuery,
   eligibleClaimsForAudienceOrganizationIdentifier,
   eligibleClaimsForAudienceQuery,
+  evidenceReviewCompletionIdentifiers,
+  validateEvidenceReviewCompletionRequestOrSend,
+  claimReviewCompletionIdentifiers,
+  validateClaimReviewCompletionRequestOrSend,
   setIntakeServiceForTest(service) {
     intakeServiceOverride = service;
     return () => {
