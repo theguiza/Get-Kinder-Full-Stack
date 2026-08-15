@@ -111,6 +111,9 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // KAI P2-04 claim-gap/client-followup surface (additive; every prior
     // entry preserved verbatim).
     "/admin/organizations/:organizationId/claims/:claimId/claim-gap-followups",
+    // KAI P2-06 human claim-traceability read surface (additive; every prior
+    // entry preserved verbatim).
+    "/admin/organizations/:organizationId/claims/:claimId/traceability",
     // KAI P2-05 potential conflict-review candidate surface (additive; every
     // prior entry preserved verbatim).
     "/admin/organizations/:organizationId/claims/:firstClaimId/potential-conflicts/:secondClaimId",

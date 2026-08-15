@@ -1354,6 +1354,72 @@ router.post(
   },
 );
 
+let claimTraceabilityServicePromise = null;
+async function getClaimTraceabilityService() {
+  if (intakeServiceOverride?.getClaimTraceabilitySummary) return intakeServiceOverride;
+  claimTraceabilityServicePromise ||= import("../services/kaiClaimTraceabilityService.js");
+  return claimTraceabilityServicePromise;
+}
+
+const KAI_P2_06_REQUESTED_AUDIENCES = new Set(["internal", "funder", "public"]);
+
+/**
+ * KAI P2-06 requestedAudience query-string convention: this router's existing
+ * GET routes never carry an enumerated caller-controlled field via query
+ * string (only pagination/organization_id), so requestedAudience travels as
+ * its own dedicated query parameter (`requested_audience`) rather than
+ * reusing an unrelated key or inventing a body on a GET request. The value is
+ * validated against the exact enum
+ * `kaiClaimTraceabilityService.js`'s `REQUESTED_AUDIENCES` already accepts, so
+ * an invalid audience fails closed here with the router's standard
+ * validation_blocker shape before the service is ever called.
+ */
+function claimTraceabilityRequestedAudienceFromQuery(req = {}) {
+  const keys = Object.keys(req.query || {});
+  if (keys.length !== 1 || keys[0] !== "requested_audience") return null;
+  const value = req.query.requested_audience;
+  return typeof value === "string" && KAI_P2_06_REQUESTED_AUDIENCES.has(value) ? value : null;
+}
+
+/**
+ * KAI P2-06 human claim-traceability read route. Reuses the exact
+ * organizationId/claimId path identity and validation
+ * (`claimGapFollowupIdentifiers`) already proven by the P2-04 route above,
+ * and the same actorContext derivation (`sprint2MappedActorContext`)
+ * unchanged, on the same mounted router - the resource identity here is the
+ * same claimId, because `getClaimTraceabilitySummary` is scoped to the
+ * identical organizationId/claimId pair. Strictly read-only: the route
+ * performs no SQL, no direct database or kai schema access, no audit
+ * dependency injection, and no audit write - it derives organizationId
+ * (path) and actorContext (server session) and delegates exactly once to
+ * the already-accepted P2-06 service, which alone owns eligibility
+ * evaluation, blocker ordering, and tenant/role authorization.
+ */
+router.get(
+  "/admin/organizations/:organizationId/claims/:claimId/traceability",
+  async (req, res) => {
+    const identifiers = claimGapFollowupIdentifiers(req);
+    const requestedAudience = claimTraceabilityRequestedAudienceFromQuery(req);
+    if (!identifiers || !requestedAudience) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker(
+          "invalid_uuid_field_or_requested_audience",
+          "organization_id_claim_id_or_requested_audience",
+        )],
+      });
+    }
+    return invokeService(res, async () => {
+      const service = await getClaimTraceabilityService();
+      return service.getClaimTraceabilitySummary({
+        organizationId: identifiers.organizationId,
+        claimId: identifiers.claimId,
+        requestedAudience,
+        actorContext: sprint2MappedActorContext(req),
+      });
+    });
+  },
+);
+
 export default router;
 
 export const __testables = {
@@ -1389,6 +1455,7 @@ export const __testables = {
   validateClaimGapFollowupRequestOrSend,
   conflictReviewCandidateIdentifiers,
   validateConflictReviewCandidateRequestOrSend,
+  claimTraceabilityRequestedAudienceFromQuery,
   setIntakeServiceForTest(service) {
     intakeServiceOverride = service;
     return () => {

@@ -16664,3 +16664,128 @@ NOT_CONFIRMED:
 
 One local commit was made on this branch recording this package. No push,
 no deploy.
+
+## P2-06 operational composition - internal human claim-traceability read route (completed 2026-08-15)
+
+Status: accepted for this local package as one bounded, authenticated,
+human-only internal GET route wired to the existing accepted, dormant P2-06
+`getClaimTraceabilitySummary` service. P2-06's foundation (eligibility
+evaluator reuse, blocker ordering, traceability DTO, tenant/role rules, and
+the REPEATABLE READ READ ONLY transaction behavior owned by
+`Backend/kai/dictionary/postgresClaimTraceabilityRepository.js`) was not
+reopened, reworked, or rebuilt. No SQL or direct repository access was added
+in the route. No P2-07/P2-08/P3 service was imported or invoked. No
+worker/cron/listener/scheduler or automatic chaining was added. No metadata-
+only audit or persistence of any kind was introduced, because
+`getClaimTraceabilitySummary` is itself strictly read-only.
+
+Implementation evidence:
+  - Backend/kai/routes/sprint2IntakeApi.js - adds exactly one mounted route,
+    `router.get("/admin/organizations/:organizationId/claims/:claimId/
+    traceability")`, on the existing mounted Sprint 2 intake router, placed
+    immediately after the P2-05 potential-conflict-review-candidate route
+    (before `export default router;`). The organizationId/claimId path pair
+    reuses the existing `claimGapFollowupIdentifiers(req)` helper unchanged
+    (the identical organizationId/claimId identity P2-04 already validates),
+    rather than duplicating an equivalent identifier function. One new lazy-
+    import getter, `getClaimTraceabilityService()`, follows the exact
+    existing `getClaimGapFollowupService()` pattern (including the override-
+    detection convention: `intakeServiceOverride?.getClaimTraceabilitySummary`).
+    Because this is the first GET route on this router carrying an
+    enumerated caller-controlled field, one new helper,
+    `claimTraceabilityRequestedAudienceFromQuery(req)`, transports
+    `requestedAudience` as a dedicated `requested_audience` query-string
+    parameter (the router's existing GET query convention already reserves
+    query-string parameters for pagination/organization_id; this route adds
+    exactly one more, validated against the same
+    `internal`/`funder`/`public` enum the service itself already enforces,
+    with any other or missing query key failing closed as
+    `validation_blocker` before the service is ever reached - matching this
+    router's existing "reject unknown fields outright" convention rather
+    than silently ignoring them). `organizationId`/`claimId` are always
+    taken from the validated path, and `actorContext` only from
+    `sprint2MappedActorContext(req)` (the existing server-authenticated/
+    mapped context - never request body/query), so no caller-supplied field
+    can override actor identity, roles, memberships, or tenant
+    authorization; the service's own `validateActorCanPerformOperation` and
+    `validateTenantBoundaryConsistency` calls remain the sole tenant/role
+    authorization boundary, unchanged. The route delegates to
+    `getClaimTraceabilitySummary({ organizationId, claimId,
+    requestedAudience, actorContext })` exactly once, with no route-level
+    transformation of the result beyond the router's existing
+    `sendServiceResult` envelope. The route and its two new helpers contain
+    no SQL, no pool/repository import, and no direct `kai.*` access, and
+    import/invoke no P2-07/P2-08 service. No occurrence of the literal
+    token `req.user` was introduced anywhere in the new route region.
+  - __tests__/kai-sprint2-p2-06-claim-traceability-route.spec.js (new) -
+    covers: exactly one mounted authenticated GET route at the documented
+    path; unauthenticated requests fail (401) before the service is ever
+    called; an authenticated mapped human in the correct organization
+    reaches `getClaimTraceabilitySummary` exactly once with the exact
+    expected `{ organizationId, claimId, requestedAudience, actorContext }`
+    inputs; a caller attempt to smuggle an alternate organization/actor
+    identity alongside `requested_audience` is rejected as an unknown-field
+    combination before the service is ever called, while a clean request
+    reaches the service using exclusively the server-derived
+    organizationId/claimId/actorContext; invalid or missing
+    `requestedAudience` (absent, an unrecognized value, or an extra query
+    key) fails closed as `validation_blocker` with zero service calls;
+    malformed path UUIDs (non-UUID or not already lowercased) use the
+    existing safe `validation_blocker` envelope; every listed service-result
+    error code maps through the existing safe envelope with no
+    blocker/warning/data leakage; `KAI_SPRINT2_ENABLED=false` returns the
+    existing outer feature-gate's 403 with zero service calls; a source-
+    slice scan proving the new route region contains no SQL keyword, no
+    db/repository/postgres import, no pool/kaiDb/repository/kai-schema
+    reference, no audit dependency injection, and no P2-07/P2-08 service
+    reference; and a whole-file-region scan proving the literal token
+    `req.user` never appears in the new route region. Existing P2-06
+    evaluator/blocker-ordering/traceability-DTO/tenant-role/transaction
+    coverage is not duplicated here; it remains owned by
+    `__tests__/kai-sprint2-p2-06-claim-traceability-boundary.spec.js`,
+    `__tests__/kai-sprint2-p2-06-claim-traceability.integration.spec.js`,
+    and the P2-06 verifier script.
+  - __tests__/kai-sprint2-p2-05-conflict-review-candidate-route.spec.js -
+    the one required, corrective update: the existing P2-05 source-slice
+    test's end anchor is narrowed from `export default router;` to the new
+    `let claimTraceabilityServicePromise` marker (the exact P1-04/P2-04/
+    P2-05 defect class recurring one package later), so the P2-05-only
+    source-slice assertions (no SQL, no P2-06+ reference) stop incidentally
+    spanning the newly appended P2-06 route region. No P2-05 behavioral
+    assertion was changed.
+  - __tests__/kai-sprint2-pass2-route-runtime.spec.js - the one required,
+    additive update: the existing exhaustive mounted-route-path enumeration
+    test now includes the new P2-06 path, alphabetically ordered
+    immediately after the P2-04 claim-gap-followups path and before the
+    P2-05 potential-conflicts path; every previously listed path is
+    preserved verbatim and unreordered.
+
+TOOL_VERIFIED:
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false node --test __tests__/kai-sprint2-p2-06-claim-traceability-route.spec.js __tests__/kai-sprint2-p2-05-conflict-review-candidate-route.spec.js __tests__/kai-sprint2-pass2-route-runtime.spec.js __tests__/kai-sprint2-p2-06-claim-traceability-boundary.spec.js`
+    -> all pass.
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm run verify:kai-sprint2-p2-06-claim-traceability`
+    -> P2-06 claim-traceability focused tests passed (11/11), using a real
+    ephemeral local PostgreSQL instance, then removed.
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm run verify:kai-sprint2-api-contract`
+    -> 60/60 pass.
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm run test:kai-sprint2`
+    -> 2059/2088 pass, 29 skipped, 0 fail.
+  - `git diff --check` -> clean (no whitespace errors).
+
+USER_CONFIRMED:
+  - P2-06 is accepted and closed as a backend foundation; this operational-
+    composition package (exposing the existing `getClaimTraceabilitySummary`
+    through the existing authenticated internal KAI human application
+    surface, as one bounded, strictly read-only GET route addition) is
+    authorized.
+
+NOT_CONFIRMED:
+  - No push, merge, deploy, flag enablement, P2-07/P2-08 or P3 invocation,
+    cron/worker/scheduler/listener/promotion-hook creation, schema/migration
+    change, new database enum value, write/mutation of any kind, or new
+    review cycle was performed. Real client data was not used.
+    `00_KAI_CURRENT_STATE.md` and the Implementation Baseline were not
+    updated.
+
+One local commit was made on this branch recording this package. No push,
+no deploy.
