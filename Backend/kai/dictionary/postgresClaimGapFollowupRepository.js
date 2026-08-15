@@ -697,9 +697,10 @@ function buildClaimGapFollowupAuditPayload(context) {
   };
 }
 
-function prepareRequiredAudit(metadataOnlyAudit, context) {
+function prepareRequiredAudit(metadataOnlyAudit, tx, context) {
   const prepared = metadataOnlyAudit.prepareMetadataOnlyAudit({
     payload: buildClaimGapFollowupAuditPayload(context),
+    db: tx,
   });
 
   const okDescriptor =
@@ -1025,7 +1026,7 @@ export function createPostgresClaimGapFollowupRepository({
             followupDimensionKeys: expectedFollowupDimensionKeys,
             freshWriteCount: insertedGapRows.length + insertedFollowupRows.length + insertedQueueRows.length,
           };
-          const preparedAudit = prepareRequiredAudit(metadataOnlyAudit, auditContext);
+          const preparedAudit = prepareRequiredAudit(metadataOnlyAudit, tx, auditContext);
           await insertAudit(tx, {
             organizationId,
             intakeFileId: candidateRow.intake_file_id,

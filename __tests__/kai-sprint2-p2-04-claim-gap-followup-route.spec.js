@@ -17,20 +17,22 @@ import {
 } from "../Backend/kai/middleware/kaiSprint2RequestSafety.js";
 
 /**
- * P2-03 claim-proposal composition proof. Mirrors the existing proven
- * `kai-sprint2-p2-01-evidence-extraction-route.spec.js` pattern exactly.
- * P2-03's own claim-derivation/lineage/persistence logic is not retested here
- * - it remains owned by `kai-sprint2-p2-03-claim-proposal-boundary.spec.js`
- * and the P2-03 verifier script. This file proves only the new mounted
- * boundary: the route forwards server-resolved organizationId/evidenceItemId/
- * actorContext/now, plus a production metadataOnlyAudit dependency, to the
- * existing service, unchanged, exactly once.
+ * P2-04 claim-gap/client-followup composition proof. Mirrors the existing
+ * proven `kai-sprint2-p2-03-claim-proposal-route.spec.js` pattern exactly.
+ * P2-04's own dimension-derivation/lineage/persistence/replay logic is not
+ * retested here - it remains owned by
+ * `kai-sprint2-p2-04-claim-gap-followup-boundary.spec.js`,
+ * `kai-sprint2-p2-04-claim-gap-followup.integration.spec.js`, and the P2-04
+ * verifier script. This file proves only the new mounted boundary: the route
+ * forwards server-resolved organizationId/claimId/actorContext/now, plus a
+ * production metadataOnlyAudit dependency, to the existing service, unchanged,
+ * exactly once.
  */
 
 const basePath = "/api/kai/sprint2/intake";
-const routePath = "/admin/organizations/:organizationId/evidence-items/:evidenceItemId/claim-proposal";
+const routePath = "/admin/organizations/:organizationId/claims/:claimId/claim-gap-followups";
 const organizationId = "00000000-0000-4000-8000-000000000001";
-const evidenceItemId = "a0000000-0000-4000-8000-000000000001";
+const claimId = "a0000000-0000-4000-8000-000000000001";
 const actorContext = Object.freeze({
   actorType: "human",
   actorUserId: "90000000-0000-4000-8000-000000000001",
@@ -39,17 +41,16 @@ const actorContext = Object.freeze({
     { organization_id: organizationId, membership_status: "active", role_name: "gk_admin" },
   ],
 });
-const injectedProposalDto = Object.freeze({
-  claim: { claim_id: "a0000000-0000-4000-8000-000000000001", evidence_item_id: evidenceItemId },
-  claimEvidenceLink: { claim_evidence_link_id: "b0000000-0000-4000-8000-000000000001" },
-  reviewQueueItem: { review_queue_item_id: "c0000000-0000-4000-8000-000000000001" },
-  warnings: [],
+const injectedFollowupDto = Object.freeze({
+  gapItems: [{ gap_log_item_id: "b0000000-0000-4000-8000-000000000001", claim_id: claimId }],
+  clientFollowupItems: [{ client_followup_item_id: "c0000000-0000-4000-8000-000000000001" }],
+  reviewQueueItems: [{ review_queue_item_id: "d0000000-0000-4000-8000-000000000001" }],
   replayed: false,
 });
 
 function concretePath(overrides = {}) {
   return `${basePath}/admin/organizations/${overrides.organizationId || organizationId}`
-    + `/evidence-items/${overrides.evidenceItemId || evidenceItemId}/claim-proposal`;
+    + `/claims/${overrides.claimId || claimId}/claim-gap-followups`;
 }
 
 function createScenario(overrides = {}) {
@@ -58,7 +59,7 @@ function createScenario(overrides = {}) {
     actorContext,
     serviceCalls: [],
     dependencyCalls: [],
-    serviceResult: { ok: true, data: injectedProposalDto, error: null },
+    serviceResult: { ok: true, data: injectedFollowupDto, error: null },
     events: [],
     ...overrides,
   };
@@ -126,19 +127,19 @@ async function requestJson(server, path, { body = null, method = "POST" } = {}) 
   });
 }
 
-test("P2-03 claim-proposal route appears as exactly one mounted authenticated POST route", () => {
+test("P2-04 claim-gap-followup route appears as exactly one mounted authenticated POST route", () => {
   const matches = sprint2IntakeApiRouter.stack
     .filter((layer) => layer.route?.path === routePath && layer.route?.methods?.post);
   assert.equal(matches.length, 1);
   assert.deepEqual(Object.keys(matches[0].route.methods), ["post"]);
 });
 
-test("P2-03 claim-proposal route", async (t) => {
+test("P2-04 claim-gap-followup route", async (t) => {
   let scenario = createScenario();
   const originalFeatureFlag = process.env.KAI_SPRINT2_ENABLED;
   process.env.KAI_SPRINT2_ENABLED = "true";
   const restore = intakeRouteTestables.setIntakeServiceForTest({
-    async proposeClaim(input, dependencies) {
+    async generateClaimGapFollowups(input, dependencies) {
       scenario.serviceCalls.push(input);
       scenario.dependencyCalls.push(dependencies);
       return scenario.serviceResult;
@@ -154,7 +155,7 @@ test("P2-03 claim-proposal route", async (t) => {
     await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   });
 
-  await t.test("unauthenticated requests fail before the P2-03 write seam", async () => {
+  await t.test("unauthenticated requests fail before the P2-04 write seam", async () => {
     scenario = createScenario({ authenticated: false });
     const response = await requestJson(server, concretePath());
 
@@ -177,11 +178,11 @@ test("P2-03 claim-proposal route", async (t) => {
       const call = scenario.serviceCalls[0];
       assert.deepEqual(call, {
         organizationId,
-        evidenceItemId,
+        claimId,
         actorContext,
         now: call.now,
       });
-      assert.deepEqual(response.body, { ok: true, data: injectedProposalDto, warnings: [] });
+      assert.deepEqual(response.body, { ok: true, data: injectedFollowupDto, warnings: [] });
 
       assert.match(call.now, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
       const nowMs = new Date(call.now).getTime();
@@ -190,18 +191,26 @@ test("P2-03 claim-proposal route", async (t) => {
       const dependencies = scenario.dependencyCalls[0];
       assert.equal(typeof dependencies.metadataOnlyAudit?.prepareMetadataOnlyAudit, "function");
       const rejectedNoClaim = dependencies.metadataOnlyAudit.prepareMetadataOnlyAudit({
-        payload: { attempted_operation: "claim_proposed", object_type: "claim" },
+        payload: { attempted_operation: "claim_gap_and_followup_generated", object_type: "claim" },
       });
       assert.equal(rejectedNoClaim.ok, false, "the production adapter must refuse a payload with no claim_id");
+      const rejectedMismatchedClaim = dependencies.metadataOnlyAudit.prepareMetadataOnlyAudit({
+        payload: {
+          attempted_operation: "claim_gap_and_followup_generated",
+          object_type: "claim",
+          claim_id: "ffffffff-0000-4000-8000-000000000001",
+        },
+      });
+      assert.equal(rejectedMismatchedClaim.ok, false, "the production adapter must refuse a claim_id that does not match the route claimId");
       const prepared = dependencies.metadataOnlyAudit.prepareMetadataOnlyAudit({
-        payload: { attempted_operation: "claim_proposed", object_type: "claim", claim_id: injectedProposalDto.claim.claim_id },
+        payload: { attempted_operation: "claim_gap_and_followup_generated", object_type: "claim", claim_id: claimId },
       });
       assert.equal(prepared.ok, true);
       assert.equal(typeof prepared.publish, "function");
     },
   );
 
-  await t.test("request body cannot inject actor/time/claim fields", async () => {
+  await t.test("request body cannot inject actor/time/gap/followup fields", async () => {
     scenario = createScenario();
     const response = await requestJson(
       server,
@@ -212,16 +221,13 @@ test("P2-03 claim-proposal route", async (t) => {
           actorContext: { actorType: "system", actorUserId: "attacker" },
           now: "1999-01-01T00:00:00.000Z",
           claim_id: "ffffffff-0000-4000-8000-000000000001",
-          claim_type: "finding",
-          claim_status: "gk_reviewed",
-          claim_review_status: "resolved",
-          claim_strength: "supported",
+          dimension_key: "missingness",
+          assessment_status: "resolved_clear",
           actorUserId: "attacker",
           actorType: "system",
           roles: ["gk_admin"],
           memberships: [{ organization_id: organizationId, role_name: "gk_admin" }],
-          public_use_allowed: true,
-          export_ready: true,
+          queue_status: "resolved",
         },
       },
     );
@@ -234,9 +240,9 @@ test("P2-03 claim-proposal route", async (t) => {
   await t.test("malformed path values use the existing safe validation_blocker response", async () => {
     for (const path of [
       concretePath({ organizationId: "not-a-uuid" }),
-      concretePath({ evidenceItemId: "not-a-uuid" }),
+      concretePath({ claimId: "not-a-uuid" }),
       concretePath({ organizationId: "a0000000-0000-4000-8000-000000000001".toUpperCase() }),
-      concretePath({ evidenceItemId: "a0000000-0000-4000-8000-000000000001".toUpperCase() }),
+      concretePath({ claimId: "a0000000-0000-4000-8000-000000000001".toUpperCase() }),
     ]) {
       scenario = createScenario();
       const response = await requestJson(server, path);
@@ -281,12 +287,12 @@ test("P2-03 claim-proposal route", async (t) => {
   );
 });
 
-test("P2-03 claim-proposal route: KAI_SPRINT2_ENABLED=false produces zero service/write activity", async (t) => {
+test("P2-04 claim-gap-followup route: KAI_SPRINT2_ENABLED=false produces zero service/write activity", async (t) => {
   const originalFeatureFlag = process.env.KAI_SPRINT2_ENABLED;
   process.env.KAI_SPRINT2_ENABLED = "false";
   let scenario = createScenario();
   const restore = intakeRouteTestables.setIntakeServiceForTest({
-    async proposeClaim(input, dependencies) {
+    async generateClaimGapFollowups(input, dependencies) {
       scenario.serviceCalls.push(input);
       scenario.dependencyCalls.push(dependencies);
       return scenario.serviceResult;
@@ -307,20 +313,20 @@ test("P2-03 claim-proposal route: KAI_SPRINT2_ENABLED=false produces zero servic
   assert.deepEqual(scenario.serviceCalls, []);
 });
 
-test("P2-03 claim-proposal route source imports no database or repository layer, performs no writes, and invokes no P2-04+ service", () => {
+test("P2-04 claim-gap-followup route source imports no database or repository layer, performs no writes, and invokes no P2-05+ service", () => {
   const source = readFileSync("Backend/kai/routes/sprint2IntakeApi.js", "utf8");
   const slice = source.slice(
-    source.indexOf("async function getClaimProposalService"),
     source.indexOf("async function getClaimGapFollowupService"),
+    source.indexOf("export default router;"),
   );
-  assert.match(source, /async function getClaimProposalService/);
-  assert.match(slice, /proposeClaim/);
+  assert.match(source, /async function getClaimGapFollowupService/);
+  assert.match(slice, /generateClaimGapFollowups/);
   assert.doesNotMatch(slice, /from\s+["'][^"']*(?:db|repository|postgres|kaiDb|kaiQueries|kaiReadModels)[^"']*["']/i);
   assert.doesNotMatch(slice, /\b(?:SELECT|INSERT|UPDATE|DELETE)\b|\bpool\b|\bkaiDb\b|\brepository\b|\bkai\.(?!js\b)/i);
-  assert.doesNotMatch(slice, /p2-04|p2-05|p2-06|p2-07|p2-08|kaiClaimGapFollowupService|kaiConflictReviewService|kaiExportCandidateService/i);
+  assert.doesNotMatch(slice, /p2-05|p2-06|p2-07|p2-08|kaiConflictReviewCandidateService|kaiExportCandidateService/i);
 });
 
-test("P2-03 claim-proposal route source never contains the literal token req.user", () => {
+test("P2-04 claim-gap-followup route source never contains the literal token req.user", () => {
   const source = readFileSync("Backend/kai/routes/sprint2IntakeApi.js", "utf8");
   assert.doesNotMatch(source, /req\.user/);
 });

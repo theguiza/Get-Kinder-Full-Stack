@@ -16318,3 +16318,168 @@ NOT_CONFIRMED:
 
 One local commit was made on this branch recording this package. No push,
 no deploy.
+
+## P2-04 operational composition - internal claim-gap/client-followup route plus audit-transaction correction (completed 2026-08-15)
+
+Status: accepted for this local package as one bounded, authenticated,
+human-only internal POST route wired to the existing accepted, dormant P2-04
+`generateClaimGapFollowups` service, plus the one required tx-propagation
+correction found already missing at the start of this package. P2-04's
+foundation (dimension derivation reusing the exact P2-02 assessment
+functions, lineage/permission validators, client-followup routing gate,
+gap_log_items/client_followup_items/review_queue_items persistence, replay/
+concurrency/partial-state handling) was not reopened or rebuilt. No SQL or
+direct repository access was added in the route. No P2-05 through P2-08 or
+P3 service was imported or invoked. No worker/cron/listener/scheduler or
+automatic P2-03->P2-04 or P2-04->P2-05 chaining was added.
+
+Implementation evidence:
+  - Backend/kai/dictionary/postgresClaimGapFollowupRepository.js -
+    `prepareRequiredAudit(metadataOnlyAudit, context)` was still missing tx
+    propagation at the start of this package (the exact P1-04/P1-05/P2-01/
+    P2-03 defect class). Corrected to
+    `prepareRequiredAudit(metadataOnlyAudit, tx, context)`, now calling
+    `metadataOnlyAudit.prepareMetadataOnlyAudit({ payload:
+    buildClaimGapFollowupAuditPayload(context), db: tx })`, forwarding the
+    repository's own existing fresh-write transaction as `db`. The one call
+    site (inside the existing fresh-write branch, immediately before
+    `preparedAudit.publish()`) is unchanged in every other respect: no
+    second transaction is opened, `publish()` is still awaited inside the
+    same transaction callback, the existing `upload_lifecycle_audit` write
+    is untouched, and `buildClaimGapFollowupAuditPayload` (including its
+    internal `route_contract: "unwired_synthetic_claim_gap_followup"` value,
+    which is not read by the new production adapter) is unchanged.
+  - Backend/kai/services/kaiMetadataOnlyAuditComposition.js - adds
+    `createProductionMetadataOnlyAuditForClaimGapFollowup`, the smallest new
+    production adapter around the existing `insertRequiredSuccessfulAuditEvent`
+    mechanism, bound at construction to organizationId/claimId/actorContext/
+    now - the route's own resource identity, unlike the P2-03 adapter which
+    binds no claimId. Its `prepareMetadataOnlyAudit({ payload, db })`
+    requires `payload.claim_id` to be a valid UUID AND to equal the
+    constructed claimId; a payload with a missing, malformed, or mismatched
+    `claim_id` returns `{ ok: false }` - it never falls back to the
+    constructed claimId or fabricates/selects a gap_log_item/
+    client_followup_item id, since one P2-04 execution may create multiple
+    such records. For a valid, matching payload, the generic audit metadata
+    sets `object_type: "claim"`, `target_object_type: "claim"`,
+    `object_id: payload.claim_id`, and identifies the mounted operation as
+    `route: "p2_04_claim_gap_followup"`. No audit enum/schema/constraint was
+    changed; the existing `resolveAuditObjectType` resolver/fallback in
+    `Backend/kai/db/kaiAuditQueries.js` is untouched. Publication passes the
+    exact supplied `db` through to `insertAuditEvent` unchanged. The sibling
+    P1/P2-01/P2-03 factories are unchanged.
+  - Backend/kai/routes/sprint2IntakeApi.js - adds exactly one mounted route,
+    `router.post("/admin/organizations/:organizationId/claims/:claimId/
+    claim-gap-followups")`, on the existing mounted Sprint 2 intake router,
+    placed immediately after the P2-03 claim-proposal route (before
+    `export default router;`). The resource identity is the claimId (P2-04's
+    own resource, the already-proposed P2-03 claim), scoped under the same
+    `/admin/organizations/:organizationId/...` convention already used by
+    the P2-01/P2-02/P2-03 routes. Two new helpers mirror the existing P2-03
+    identifier/body-validation pattern exactly:
+    `claimGapFollowupIdentifiers(req)` (organizationId/claimId path-UUID
+    validation, lowercase-only) and
+    `validateClaimGapFollowupRequestOrSend(req, res)` (content-type check
+    plus the existing P2-01/P2-03 empty-body requirement - any request
+    body, including an attempt to inject `actorUserId`/`actorType`/`roles`/
+    `memberships`/`actorContext`/`now`/`claim_id`/`dimension_key`/
+    `assessment_status`/`queue_status`, is rejected as `validation_blocker`
+    before the service is ever reached). One new lazy-import getter,
+    `getClaimGapFollowupService()`, follows the exact existing
+    `getClaimProposalService()` pattern (including the override-detection
+    convention: `intakeServiceOverride?.generateClaimGapFollowups`). The
+    route derives `organizationId`/`claimId` only from the validated path,
+    `actorContext` only from `sprint2MappedActorContext(req)` (the existing
+    server-authenticated/mapped context - never request body/query), and
+    `now` only from a fresh server-side `new Date().toISOString()`, then
+    delegates to `generateClaimGapFollowups({ organizationId, claimId,
+    actorContext, now }, { metadataOnlyAudit })` exactly once, with
+    `metadataOnlyAudit` the new production adapter above constructed from
+    the same server-derived values. The route and its two new helpers
+    contain no SQL, no pool/repository import, and no direct `kai.*`
+    access, and import/invoke no P2-05 through P2-08 service. No occurrence
+    of the literal token `req.user` was introduced anywhere in the file.
+  - __tests__/kai-sprint2-p2-04-claim-gap-followup-route.spec.js (new) -
+    covers: exactly one mounted authenticated POST route at the documented
+    path; unauthenticated requests fail (401) before the service is ever
+    called; an authenticated mapped human in the correct organization
+    reaches `generateClaimGapFollowups` exactly once with the
+    server-resolved organizationId/claimId/actorContext/a server-generated
+    `now` (bounded within the request window) and a production
+    `metadataOnlyAudit` dependency whose `prepareMetadataOnlyAudit` refuses
+    a payload with no `claim_id`, refuses one with a `claim_id` that does
+    not match the route's claimId, and accepts one with the matching valid
+    `claim_id`; a request body attempting to inject actor/time/gap/followup
+    fields is rejected as `validation_blocker` with zero service calls;
+    malformed path UUIDs (non-UUID or not already lowercased, for either
+    identifier) use the existing safe `validation_blocker` envelope; every
+    listed service-result error code maps through the existing safe
+    envelope with no blocker/warning/data leakage; `KAI_SPRINT2_ENABLED=false`
+    returns the existing outer feature-gate's 403 with zero service calls; a
+    source-slice scan proving the new route region contains no SQL keyword,
+    no db/repository/postgres import, no pool/kaiDb/repository reference,
+    and no P2-05 through P2-08 service reference; and a whole-file scan
+    proving the literal token `req.user` never appears. Existing P2-04
+    dimension-derivation/lineage/persistence/concurrency/rollback coverage
+    is not duplicated here; it remains owned by
+    `__tests__/kai-sprint2-p2-04-claim-gap-followup-boundary.spec.js`,
+    `__tests__/kai-sprint2-p2-04-claim-gap-followup.integration.spec.js`,
+    and the P2-04 verifier script.
+  - __tests__/kai-sprint2-p2-04-audit-transaction-propagation.spec.js (new) -
+    mirrors `kai-sprint2-p2-03-audit-transaction-propagation.spec.js`.
+    Covers: (1) a full `generateClaimGapsAndFollowups` fresh-write call
+    (via an injected deterministic `computeDimensions` override, isolating
+    this proof from real dimension computation) through a fake
+    multi-connection transaction provider, proving the `audit_events`
+    insert issued via `createProductionMetadataOnlyAuditForClaimGapFollowup`
+    lands on the exact same connection as the `gap_log_items` domain insert
+    (the SAME_TRANSACTION proof); (2) the production adapter refuses a
+    payload with a missing or mismatched `claim_id`, and for a valid
+    matching `claim_id` its generic adapter metadata is
+    `object_type = "claim"`, `target_object_type = "claim"`, `object_id` =
+    the payload's `claim_id`; (3) the repository's own
+    `buildClaimGapFollowupAuditPayload` payload, as observed by a capturing
+    `metadataOnlyAudit` double, still declares `object_type: "claim"` and
+    the authoritative `claim_id`, and `prepareMetadataOnlyAudit` still
+    receives the repository's own tx as `db`. Existing P2-04 lineage/
+    replay/rollback coverage is not duplicated here; it remains owned by
+    the existing P2-04 boundary spec, integration spec, and verifier
+    script.
+  - __tests__/kai-sprint2-p2-03-claim-proposal-route.spec.js - the one
+    required, corrective update: the existing P2-03 source-slice test's
+    end anchor is narrowed from `export default router;` to the new
+    `async function getClaimGapFollowupService` marker, so the P2-03-only
+    source-slice assertions (no SQL, no P2-04+ reference) stop incidentally
+    spanning the newly appended P2-04 claim-gap-followup route region. No
+    P2-03 behavioral assertion was changed.
+  - __tests__/kai-sprint2-pass2-route-runtime.spec.js - the one required,
+    additive update: the existing exhaustive mounted-route-path enumeration
+    test now includes the new P2-04 path, alphabetically ordered
+    immediately after the last `/admin/files/...` path and before the P2-03
+    claim-proposal path; every previously listed path is preserved verbatim
+    and unreordered.
+
+TOOL_VERIFIED:
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false node --test __tests__/kai-sprint2-p2-04-claim-gap-followup-route.spec.js __tests__/kai-sprint2-p2-04-audit-transaction-propagation.spec.js __tests__/kai-sprint2-p2-03-claim-proposal-route.spec.js __tests__/kai-sprint2-p2-03-audit-transaction-propagation.spec.js __tests__/kai-sprint2-pass2-route-runtime.spec.js __tests__/kai-sprint2-p2-04-claim-gap-followup-boundary.spec.js`
+    -> 91/91 pass.
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm run verify:kai-sprint2-p2-04-claim-gap-followup`
+    -> P2-04 claim-gap/client-followup integration tests passed (18/18),
+    using a real ephemeral local PostgreSQL instance, then removed.
+  - `git diff --check` -> clean (no whitespace errors).
+
+USER_CONFIRMED:
+  - P2-04 is accepted and closed as a backend foundation; this operational-
+    composition package (exposing the existing `generateClaimGapFollowups`
+    through the existing authenticated internal KAI human application
+    surface, as one bounded POST route addition, plus the one required
+    tx-propagation correction found already missing) is authorized.
+
+NOT_CONFIRMED:
+  - No push, merge, deploy, flag enablement, P2-05 through P2-08 or P3
+    invocation, cron/worker/scheduler/listener/promotion-hook creation,
+    schema/migration change, new database enum value, or new review cycle
+    was performed. Real client data was not used. `00_KAI_CURRENT_STATE.md`
+    and the Implementation Baseline were not updated.
+
+One local commit was made on this branch recording this package. No push,
+no deploy.

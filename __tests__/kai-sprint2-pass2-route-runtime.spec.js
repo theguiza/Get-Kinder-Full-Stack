@@ -108,6 +108,9 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     "/admin/files/:intakeFileId/block",
     "/admin/files/:intakeFileId/confirm-upload",
     "/admin/files/:intakeFileId/upload",
+    // KAI P2-04 claim-gap/client-followup surface (additive; every prior
+    // entry preserved verbatim).
+    "/admin/organizations/:organizationId/claims/:claimId/claim-gap-followups",
     // KAI P2-03 claim-proposal surface (additive; every prior entry preserved
     // verbatim).
     "/admin/organizations/:organizationId/evidence-items/:evidenceItemId/claim-proposal",

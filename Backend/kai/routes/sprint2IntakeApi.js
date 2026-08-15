@@ -29,6 +29,7 @@ import {
   validateSourceCandidateDecisionRequest,
 } from "../validators/kaiReviewCockpitRequestSchemas.js";
 import {
+  createProductionMetadataOnlyAuditForClaimGapFollowup,
   createProductionMetadataOnlyAuditForClaimProposal,
   createProductionMetadataOnlyAuditForSourceVersion,
 } from "../services/kaiMetadataOnlyAuditComposition.js";
@@ -42,6 +43,7 @@ let exportReviewServicePromise = null;
 let evidenceLineageServicePromise = null;
 let evidenceCoverageAssessmentServicePromise = null;
 let claimProposalServicePromise = null;
+let claimGapFollowupServicePromise = null;
 
 export function sendServiceResult(res, result, successStatus = 200) {
   if (result?.ok) {
@@ -1208,6 +1210,74 @@ router.post(
   },
 );
 
+async function getClaimGapFollowupService() {
+  if (intakeServiceOverride?.generateClaimGapFollowups) return intakeServiceOverride;
+  claimGapFollowupServicePromise ||= import("../services/kaiClaimGapFollowupService.js");
+  return claimGapFollowupServicePromise;
+}
+
+function claimGapFollowupIdentifiers(req = {}) {
+  const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+  const claimId = typeof req.params?.claimId === "string" ? req.params.claimId : "";
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) || organizationId !== organizationId.toLowerCase()) return null;
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(claimId) || claimId !== claimId.toLowerCase()) return null;
+  return { organizationId, claimId };
+}
+
+function validateClaimGapFollowupRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = claimGapFollowupIdentifiers(req);
+  if (!identifiers) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_or_claim_id")],
+    });
+    return null;
+  }
+  if (Object.keys(requestPayload(req)).length !== 0) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("unknown_field", "body")],
+    });
+    return null;
+  }
+  return identifiers;
+}
+
+/**
+ * KAI P2-04 claim-gap/client-followup route. Mirrors the P2-03 claim-proposal
+ * route's organization-scoped path convention, empty-body requirement, and
+ * actorContext/now derivation exactly, on the same mounted router - the
+ * resource identity here is the claimId, not the evidenceItemId, because
+ * `generateClaimGapFollowups` is scoped to an already-proposed P2-03 claim.
+ */
+router.post(
+  "/admin/organizations/:organizationId/claims/:claimId/claim-gap-followups",
+  async (req, res) => {
+    const identifiers = validateClaimGapFollowupRequestOrSend(req, res);
+    if (!identifiers) return;
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getClaimGapFollowupService();
+      return service.generateClaimGapFollowups({
+        organizationId: identifiers.organizationId,
+        claimId: identifiers.claimId,
+        actorContext,
+        now,
+      }, {
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForClaimGapFollowup({
+          organizationId: identifiers.organizationId,
+          claimId: identifiers.claimId,
+          actorContext,
+          now,
+        }),
+      });
+    });
+  },
+);
+
 export default router;
 
 export const __testables = {
@@ -1239,6 +1309,8 @@ export const __testables = {
   validateEvidenceExtractionRequestOrSend,
   evidenceItemClaimProposalIdentifiers,
   validateClaimProposalRequestOrSend,
+  claimGapFollowupIdentifiers,
+  validateClaimGapFollowupRequestOrSend,
   setIntakeServiceForTest(service) {
     intakeServiceOverride = service;
     return () => {
