@@ -17479,3 +17479,86 @@ One targeted local commit was made on this branch recording the Phase-12 Impact
 Evidence Library Claims + Traceability vertical slice. No push, no deploy.
 
 STOP BEFORE P3.
+
+## Phase-13 Stage A internal evidence-summary generation path - completed 2026-08-15
+
+SCOPE:
+  - Mounted the smallest real P3-01 -> P3-02 internal generation path:
+    internal eligible Library claims -> existing `createEvidenceSummaryDraft`
+    service/repository/validators -> persisted citation-backed draft -> existing
+    generated-draft review packet read.
+  - This slice is `content_type=evidence_summary` and
+    `requested_audience=internal` only. No funder/public generation, export
+    composition, finalization, approval, feature-flag mutation, schema change,
+    P2 redesign, Library redesign, chatbot/tool runtime, raw-file-to-model path,
+    or arbitrary browser prompt path was introduced.
+
+IMPLEMENTATION:
+  - Added `Backend/kai/services/kaiEvidenceSummaryDraftGenerator.js`, a narrow
+    Anthropic SDK adapter around the existing production model dependency. It
+    accepts only the governed P3-01 generator projection, sends no tools/history/
+    browser prompt/raw files/source rows/credentials, and normalizes provider
+    JSON into the exact `{ blocks }` draftGenerator contract. Tests inject the
+    provider call; no external model call is made in verification.
+  - Added a production metadata-only audit composition for generated-content
+    draft creation and mounted two authenticated HUMAN routes on the existing
+    Sprint 2 intake router:
+    `POST /admin/organizations/:organizationId/generated-content-drafts/evidence-summary`
+    accepting only `claim_ids` and `idempotency_key`, and
+    `GET /admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/review-packet`
+    delegating to P3-02.
+  - The route supplies organization/tenant authority, mapped actor context,
+    `requestedAudience=internal`, `now`, production draftGenerator, and
+    production metadata-only audit. It performs no SQL/direct repository access
+    and accepts no generated text, citations, evidence IDs, prompts, actor/role
+    data, approval/export state, or generation content type.
+  - Extended the existing Impact Evidence Library to show
+    `Generate evidence summary` only in the internal flow. Claim selection is
+    convenience only and is limited to P2-08 usable claims; P3-01 remains
+    authoritative and revalidates eligibility server-side. After create, the UI
+    reads the persisted draft back through P3-02 rather than trusting the POST
+    response as the review representation.
+  - Updated the P3-01 runner-owned PostgreSQL verifier to load the existing
+    P2-10 coverage-review-decision migration required by the current
+    P2-06/P3-01 evaluator path.
+
+SAFETY:
+  - Preserved the accepted P3-01 service/repository path, including
+    `KAI_SPRINT2_ENABLED`, `KAI_GENERATION_ENABLED`, mapped-human/tenant/role
+    authority, deterministic idempotency, P2 eligibility revalidation, generator
+    input allowlist, output/citation contract, VAL-GEN validators, second
+    pre-persistence eligibility validation, draft-only persistence,
+    generated-content-review queue creation, metadata-only required audit, and
+    transaction rollback semantics.
+  - The provider receives only content type, internal requested audience, and
+    claim projections containing claim/evidence/source/source-version IDs,
+    claim statement/type, and limitation codes. It receives no uploaded file
+    bytes, raw files, raw source rows, storage locations, signed URLs,
+    credentials, unrestricted evidence objects, arbitrary prompt text,
+    chatbot history, or tool-runtime state.
+
+VERIFICATION:
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test
+    __tests__/kai-sprint2-p3-01-generated-content-drafts-boundary.spec.js` ->
+    6/6 passing.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test
+    __tests__/kai-sprint2-impact-evidence-library.spec.js` -> 10/10 passing
+    with temporary loopback-server permission.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run
+    verify:kai-sprint2-p3-01-generated-content-drafts` -> 19/19 passing with
+    runner-owned PostgreSQL permission.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run
+    verify:kai-sprint2-p3-02-generated-draft-review-packet` -> 16/16 passing
+    with runner-owned PostgreSQL permission.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run
+    verify:kai-sprint2-api-contract` -> 59/60 passing; sole failure is the
+    established environment-dependent `foundation-safety file_upload_enabled`
+    baseline (`true !== false`).
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run build` -> Vite
+    production build passed.
+  - `git diff --check` -> clean.
+
+One targeted local Stage-A commit was made on this branch. No push, deploy,
+config/flag mutation, credential/secret inspection, shared/staging/production
+database mutation, real client data access, export work, or current-state /
+baseline update was performed.

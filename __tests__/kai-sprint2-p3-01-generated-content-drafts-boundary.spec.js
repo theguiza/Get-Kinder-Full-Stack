@@ -8,6 +8,10 @@ import {
   __generatedContentRepositoryTestables,
   fingerprintEvidenceSummaryRequest,
 } from "../Backend/kai/dictionary/postgresGeneratedContentRepository.js";
+import {
+  __evidenceSummaryDraftGeneratorContract,
+  createProductionEvidenceSummaryDraftGenerator,
+} from "../Backend/kai/services/kaiEvidenceSummaryDraftGenerator.js";
 
 const ORG = "00000000-0000-4000-8000-000000000001";
 const OTHER_ORG = "00000000-0000-4000-8000-000000000002";
@@ -169,4 +173,55 @@ test("P3-01 request fingerprint is deterministic and sensitive only to content t
     fingerprintEvidenceSummaryRequest(input({ requestedAudience: "public" })),
     fingerprintEvidenceSummaryRequest(input()),
   );
+});
+
+test("P3-01 production draft-generator adapter sends only the governed projection and normalizes provider JSON into the draftGenerator contract", async () => {
+  const calls = [];
+  const generator = createProductionEvidenceSummaryDraftGenerator({
+    async createMessage(payload) {
+      calls.push(payload);
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            blocks: [{
+              text: "Enrollment increased by 12% in 2025.",
+              citations: [{ claimId: CLAIM, evidenceItemId: EVIDENCE, ignored: "drop" }],
+              ignored: "drop",
+            }],
+          }),
+        }],
+      };
+    },
+  });
+
+  const result = await generator({
+    contentType: "evidence_summary",
+    requestedAudience: "internal",
+    claims: [{
+      claimId: CLAIM,
+      claimStatement: "Enrollment increased by 12% in 2025.",
+      claimType: "finding",
+      evidenceItemId: EVIDENCE,
+      sourceId: "00000000-0000-4000-8000-000000000301",
+      sourceVersionId: "00000000-0000-4000-8000-000000000401",
+      limitationCodes: [],
+    }],
+  });
+
+  assert.deepEqual(result, {
+    blocks: [{
+      ordinal: 1,
+      text: "Enrollment increased by 12% in 2025.",
+      citations: [{ claimId: CLAIM, evidenceItemId: EVIDENCE }],
+    }],
+  });
+  assert.equal(__generatedContentRepositoryTestables.validateGeneratorResult(result), true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].model, __evidenceSummaryDraftGeneratorContract.MODEL);
+  assert.equal(calls[0].tools, undefined);
+  assert.equal(JSON.stringify(calls[0]).includes("prompt"), false);
+  assert.equal(JSON.stringify(calls[0]).includes("signed_url"), false);
+  assert.equal(JSON.stringify(calls[0]).includes("raw_content"), false);
+  assert.equal(JSON.stringify(calls[0]).includes("file bytes"), false);
 });

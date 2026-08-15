@@ -141,6 +141,11 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-review-queue/:exportReviewQueueItemId/complete",
     "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-review-queue/:exportReviewQueueItemId/packet",
     "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-review-queue/:exportReviewQueueItemId/start",
+    // KAI P3-01/P3-02 internal evidence-summary generation and generated-draft
+    // review-packet read surface (additive; every prior entry preserved
+    // verbatim).
+    "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/review-packet",
+    "/admin/organizations/:organizationId/generated-content-drafts/evidence-summary",
     // KAI P2-02 evidence-coverage-assessment surface (additive; every prior
     // entry preserved verbatim).
     "/admin/organizations/:organizationId/source-versions/:sourceVersionId/evidence-coverage-assessment",

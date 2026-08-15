@@ -3,12 +3,16 @@ import {
   LIBRARY_AUDIENCES,
   claimLibraryCandidatesPath,
   claimTraceabilityPath,
+  createEvidenceSummaryPath,
   eligibleClaimsPath,
   errorText,
+  generatedDraftReviewPacketPath,
   getJson,
   mergeClaims,
+  postJson,
   projectCandidateClaims,
   projectEligibleClaims,
+  projectGeneratedDraftPacket,
   projectTraceability,
 } from "./impactEvidenceLibraryLogic.js";
 
@@ -32,9 +36,12 @@ export default function ImpactEvidenceLibrary() {
   const [audience, setAudience] = useState("internal");
   const [claims, setClaims] = useState([]);
   const [selectedClaimId, setSelectedClaimId] = useState("");
+  const [selectedGenerationClaimIds, setSelectedGenerationClaimIds] = useState([]);
+  const [generatedDraftPacket, setGeneratedDraftPacket] = useState(null);
   const [traceability, setTraceability] = useState(null);
   const [loadingClaims, setLoadingClaims] = useState(false);
   const [loadingTraceability, setLoadingTraceability] = useState(false);
+  const [generatingDraft, setGeneratingDraft] = useState(false);
   const [message, setMessage] = useState("");
 
   const selectedClaim = useMemo(
@@ -70,6 +77,8 @@ export default function ImpactEvidenceLibrary() {
       projectCandidateClaims(candidateResult.body.data),
     );
     setClaims(merged);
+    setGeneratedDraftPacket(null);
+    setSelectedGenerationClaimIds((current) => current.filter((claimId) => merged.some((claim) => claim.claimId === claimId && claim.libraryStatus === "usable")));
     setSelectedClaimId((current) => (merged.some((claim) => claim.claimId === current) ? current : merged[0]?.claimId || ""));
   }, [audience, organizationId]);
 
@@ -90,6 +99,44 @@ export default function ImpactEvidenceLibrary() {
   useEffect(() => {
     if (selectedClaimId) loadTraceability(selectedClaimId);
   }, [audience, selectedClaimId, loadTraceability]);
+
+  const toggleGenerationClaim = useCallback((claim) => {
+    if (claim.libraryStatus !== "usable") return;
+    setSelectedGenerationClaimIds((current) => (
+      current.includes(claim.claimId)
+        ? current.filter((claimId) => claimId !== claim.claimId)
+        : [...current, claim.claimId].sort()
+    ));
+  }, []);
+
+  const generateEvidenceSummary = useCallback(async () => {
+    if (audience !== "internal" || selectedGenerationClaimIds.length === 0) return;
+    setGeneratingDraft(true);
+    setMessage("");
+    setGeneratedDraftPacket(null);
+    const createResult = await postJson(createEvidenceSummaryPath(organizationId), {
+      claim_ids: selectedGenerationClaimIds,
+      idempotency_key: `evidence-summary-${selectedGenerationClaimIds.join("-")}`,
+    });
+    if (createResult.statusCode !== 201 && createResult.statusCode !== 200) {
+      setGeneratingDraft(false);
+      setMessage(errorText(createResult));
+      return;
+    }
+    const draftId = createResult.body?.data?.generatedContentDraftId;
+    if (!draftId) {
+      setGeneratingDraft(false);
+      setMessage("Generated draft response did not include a draft id.");
+      return;
+    }
+    const packetResult = await getJson(generatedDraftReviewPacketPath(organizationId, draftId));
+    setGeneratingDraft(false);
+    if (packetResult.statusCode !== 200 || !packetResult.body?.ok) {
+      setMessage(errorText(packetResult));
+      return;
+    }
+    setGeneratedDraftPacket(projectGeneratedDraftPacket(packetResult.body.data));
+  }, [audience, organizationId, selectedGenerationClaimIds]);
 
   return (
     <section>
@@ -141,6 +188,17 @@ export default function ImpactEvidenceLibrary() {
                     <span className="text-break">{claim.claimId}</span>
                     <StatusBadge status={claim.libraryStatus} />
                   </div>
+                  {audience === "internal" && claim.libraryStatus === "usable" ? (
+                    <div className="form-check small mt-2" onClick={(event) => event.stopPropagation()}>
+                      <input
+                        className="form-check-input"
+                        type="checkbox"
+                        checked={selectedGenerationClaimIds.includes(claim.claimId)}
+                        onChange={() => toggleGenerationClaim(claim)}
+                      />
+                      <span className="form-check-label">Include in evidence summary</span>
+                    </div>
+                  ) : null}
                   <div className="small mt-1">
                     {claim.claimType || "claim"} · {claim.claimReviewStatus || claim.claimStatus || "status unknown"}
                   </div>
@@ -152,6 +210,16 @@ export default function ImpactEvidenceLibrary() {
                 </button>
               ))}
             </div>
+            {audience === "internal" ? (
+              <button
+                type="button"
+                className="btn btn-sm btn-primary mt-3 w-100"
+                onClick={generateEvidenceSummary}
+                disabled={generatingDraft || selectedGenerationClaimIds.length === 0}
+              >
+                {generatingDraft ? "Generating..." : "Generate evidence summary"}
+              </button>
+            ) : null}
           </div>
         </div>
 
@@ -203,6 +271,32 @@ export default function ImpactEvidenceLibrary() {
               </>
             ) : null}
           </div>
+          {generatedDraftPacket ? (
+            <div className="admin-card mt-3">
+              <div className="d-flex justify-content-between align-items-center mb-2">
+                <h5 className="mb-0">Generated draft</h5>
+                <StatusBadge status={generatedDraftPacket.queueStatus === "open" ? "needs_review" : "usable"} />
+              </div>
+              <ValueRow label="Content type" value={generatedDraftPacket.contentType} />
+              <ValueRow label="Requested audience" value={generatedDraftPacket.requestedAudience} />
+              <ValueRow label="Draft status" value={generatedDraftPacket.draftStatus} />
+              <ValueRow label="Review state" value={`${generatedDraftPacket.queueStatus} / ${generatedDraftPacket.reviewStatus}`} />
+              <h6 className="mt-3">Blocks</h6>
+              {generatedDraftPacket.blocks.map((block) => (
+                <div key={block.ordinal} className="border rounded p-2 mb-2">
+                  <div className="small fw-semibold">Block {block.ordinal}</div>
+                  <p className="small mb-2">{block.text}</p>
+                  {block.citations.map((citation, index) => (
+                    <ValueRow
+                      key={`${citation.claimId}-${citation.evidenceItemId}-${index}`}
+                      label="Citation"
+                      value={`${citation.claimId} / ${citation.evidenceItemId}`}
+                    />
+                  ))}
+                </div>
+              ))}
+            </div>
+          ) : null}
         </div>
       </div>
     </section>

@@ -16,6 +16,15 @@ export function claimTraceabilityPath(organizationId, claimId, audience) {
     + `/claims/${encodeURIComponent(claimId)}/traceability?${params.toString()}`;
 }
 
+export function createEvidenceSummaryPath(organizationId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/generated-content-drafts/evidence-summary`;
+}
+
+export function generatedDraftReviewPacketPath(organizationId, generatedContentDraftId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
+    + `/generated-content-drafts/${encodeURIComponent(generatedContentDraftId)}/review-packet`;
+}
+
 async function readJson(response) {
   try {
     return await response.json();
@@ -29,6 +38,16 @@ export async function getJson(path) {
     method: "GET",
     credentials: "same-origin",
     headers: { Accept: "application/json" },
+  });
+  return { statusCode: response.status, body: await readJson(response) };
+}
+
+export async function postJson(path, body) {
+  const response = await fetch(path, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify(body),
   });
   return { statusCode: response.status, body: await readJson(response) };
 }
@@ -123,5 +142,31 @@ export function projectTraceability(dto) {
     potentialConflictGroups: asArray(dto.potential_conflict_groups),
     libraryStatus: dto.eligible === true ? "usable" : (asArray(dto.blockerCodes).length ? "blocked" : "needs_review"),
     truncated: dto.truncated === true,
+  };
+}
+
+export function projectGeneratedDraftPacket(dto) {
+  if (!dto || typeof dto !== "object") return null;
+  return {
+    generatedContentDraftId: dto.generatedContentDraftId,
+    contentType: dto.contentType,
+    draftStatus: dto.draftStatus,
+    requestedAudience: dto.requestedAudience,
+    reviewQueueItemId: dto.reviewQueueItemId,
+    queueStatus: dto.queueStatus,
+    reviewStatus: dto.reviewStatus,
+    currentUseEligible: dto.currentUseEligible === true,
+    blocks: asArray(dto.blocks).map((block) => ({
+      ordinal: block?.ordinal,
+      text: block?.text,
+      citations: asArray(block?.citations).map((citation) => ({
+        claimId: citation?.claimId,
+        evidenceItemId: citation?.evidenceItemId,
+        sourceId: citation?.sourceId,
+        sourceVersionId: citation?.sourceVersionId,
+        supportStrength: citation?.supportStrength,
+        currentEligible: citation?.currentEligible === true,
+      })),
+    })),
   };
 }

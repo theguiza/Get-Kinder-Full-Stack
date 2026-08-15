@@ -676,6 +676,63 @@ export function createProductionMetadataOnlyAuditForClientFollowupCompletion({
   });
 }
 
+export function createProductionMetadataOnlyAuditForGeneratedContentDraft({
+  organizationId,
+  actorContext,
+  now,
+  insertAuditEvent = insertRequiredSuccessfulAuditEvent,
+} = {}) {
+  if (typeof organizationId !== "string" || organizationId.length === 0) {
+    throw new TypeError("createProductionMetadataOnlyAuditForGeneratedContentDraft requires organizationId.");
+  }
+
+  function isPlainObject(value) {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  }
+
+  return Object.freeze({
+    prepareMetadataOnlyAudit({ payload, db } = {}) {
+      if (!isPlainObject(payload)) return { ok: false };
+      const draftId = payload.generated_content_draft_id;
+      if (typeof draftId !== "string" || !CLAIM_ID_PATTERN.test(draftId)) return { ok: false };
+
+      const metadata = {
+        organization_id: organizationId,
+        object_type: "generated_content_draft",
+        target_object_type: "generated_content_draft",
+        object_id: draftId,
+        operation: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "create_evidence_summary_draft",
+        operation_type: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "create_evidence_summary_draft",
+        validator_key: typeof payload.validator_key === "string" ? payload.validator_key : null,
+        actor_type: actorContext?.actorType || "human",
+        actor_user_id: actorContext?.actorUserId || null,
+        request_id: actorContext?.requestId || null,
+        route: "p3_01_create_evidence_summary_draft",
+        created_at: typeof now === "string" ? now : new Date().toISOString(),
+        metadata_only: true,
+        contains_raw_file_content: false,
+        contains_raw_parsed_rows: false,
+        contains_client_pii: false,
+        contains_prompt_text: false,
+        contains_unsafe_generated_text: false,
+        contains_signed_urls: false,
+        contains_storage_credentials: false,
+      };
+
+      return {
+        ok: true,
+        async publish() {
+          const result = await insertAuditEvent(metadata, db);
+          if (!result || result.ok !== true) {
+            throw new Error("p3_01_generated_content_metadata_only_audit_publish_failed");
+          }
+          return result;
+        },
+      };
+    },
+  });
+}
+
 export const __testables = Object.freeze({
   createProductionMetadataOnlyAudit,
   createProductionMetadataOnlyAuditForSourceVersion,
@@ -686,4 +743,5 @@ export const __testables = Object.freeze({
   createProductionMetadataOnlyAuditForClaimReview,
   createProductionMetadataOnlyAuditForCoverageReviewDecision,
   createProductionMetadataOnlyAuditForClientFollowupCompletion,
+  createProductionMetadataOnlyAuditForGeneratedContentDraft,
 });

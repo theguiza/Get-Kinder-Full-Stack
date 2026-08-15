@@ -22,11 +22,15 @@ import { listClaimLibraryReviewCandidates } from "../Backend/kai/db/kaiClaimLibr
 import {
   claimLibraryCandidatesPath,
   claimTraceabilityPath,
+  createEvidenceSummaryPath,
   eligibleClaimsPath,
+  generatedDraftReviewPacketPath,
   getJson,
   mergeClaims,
+  postJson,
   projectCandidateClaims,
   projectEligibleClaims,
+  projectGeneratedDraftPacket,
   projectTraceability,
 } from "../frontend/impactEvidenceLibraryLogic.js";
 
@@ -136,11 +140,149 @@ async function requestJson(server, path) {
   });
 }
 
+async function postRequestJson(server, path, body) {
+  const { port } = server.address();
+  return await new Promise((resolve, reject) => {
+    const payload = JSON.stringify(body);
+    const request = http.request({
+      hostname: "127.0.0.1",
+      port,
+      path,
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(payload),
+      },
+    }, (response) => {
+      const chunks = [];
+      response.on("data", (chunk) => chunks.push(chunk));
+      response.on("end", () => resolve({
+        statusCode: response.statusCode,
+        body: JSON.parse(Buffer.concat(chunks).toString("utf8")),
+      }));
+    });
+    request.on("error", reject);
+    request.end(payload);
+  });
+}
+
 test("Impact Evidence Library claim-index route is mounted once as authenticated read-only GET", () => {
   const matches = sprint2IntakeApiRouter.stack
     .filter((layer) => layer.route?.path === "/admin/organizations/:organizationId/claim-library/candidates" && layer.route?.methods?.get);
   assert.equal(matches.length, 1);
   assert.deepEqual(Object.keys(matches[0].route.methods), ["get"]);
+});
+
+test("Impact Evidence Library internal evidence-summary generation routes are mounted with narrow methods", () => {
+  const createMatches = sprint2IntakeApiRouter.stack
+    .filter((layer) => layer.route?.path === "/admin/organizations/:organizationId/generated-content-drafts/evidence-summary" && layer.route?.methods?.post);
+  const readMatches = sprint2IntakeApiRouter.stack
+    .filter((layer) => layer.route?.path === "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/review-packet" && layer.route?.methods?.get);
+  assert.equal(createMatches.length, 1);
+  assert.equal(readMatches.length, 1);
+  assert.deepEqual(Object.keys(createMatches[0].route.methods), ["post"]);
+  assert.deepEqual(Object.keys(readMatches[0].route.methods), ["get"]);
+});
+
+test("Impact Evidence Library create route pins evidence_summary/internal and accepts no browser prompt, text, citations, evidence ids, or authority", async (t) => {
+  let current = scenario({
+    result: {
+      ok: true,
+      data: {
+        generatedContentDraftId: "00000000-0000-4000-8000-000000000777",
+        requestedAudience: "internal",
+        draftStatus: "draft",
+        reviewQueueItemId: "00000000-0000-4000-8000-000000000778",
+        blocks: [{ ordinal: 1, text: "A.", citations: [{ claimId, evidenceItemId }] }],
+      },
+      error: null,
+    },
+  });
+  const originalFeatureFlag = process.env.KAI_SPRINT2_ENABLED;
+  process.env.KAI_SPRINT2_ENABLED = "true";
+  const restore = intakeRouteTestables.setIntakeServiceForTest({
+    async createEvidenceSummaryDraft(input, deps) {
+      current.calls.push({ input, deps });
+      return current.result;
+    },
+  });
+  const server = await listen(createApp(() => current));
+
+  t.after(async () => {
+    restore();
+    if (originalFeatureFlag === undefined) delete process.env.KAI_SPRINT2_ENABLED;
+    else process.env.KAI_SPRINT2_ENABLED = originalFeatureFlag;
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  });
+
+  const path = `${basePath}/admin/organizations/${organizationId}/generated-content-drafts/evidence-summary`;
+  const rejected = await postRequestJson(server, path, {
+    claim_ids: [claimId],
+    idempotency_key: "p3-stage-a",
+    prompt: "write anything",
+  });
+  assert.equal(rejected.statusCode, 422);
+  assert.deepEqual(current.calls, []);
+
+  const allowed = await postRequestJson(server, path, {
+    claim_ids: [claimId],
+    idempotency_key: "p3-stage-a",
+  });
+  assert.equal(allowed.statusCode, 201);
+  assert.equal(current.calls.length, 1);
+  assert.deepEqual(current.calls[0].input, {
+    organizationId,
+    requestedAudience: "internal",
+    claimIds: [claimId],
+    idempotencyKey: "p3-stage-a",
+    actorContext,
+    now: current.calls[0].input.now,
+  });
+  assert.match(current.calls[0].input.now, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+  assert.equal(typeof current.calls[0].deps.draftGenerator, "function");
+  assert.equal(typeof current.calls[0].deps.metadataOnlyAudit?.prepareMetadataOnlyAudit, "function");
+});
+
+test("Impact Evidence Library P3-02 route delegates to the existing generated-draft review packet service", async (t) => {
+  const generatedContentDraftId = "00000000-0000-4000-8000-000000000777";
+  let current = scenario({
+    result: {
+      ok: true,
+      data: {
+        generationRunId: "00000000-0000-4000-8000-000000000779",
+        generatedContentDraftId,
+        contentType: "evidence_summary",
+        draftStatus: "draft",
+        requestedAudience: "internal",
+        reviewQueueItemId: "00000000-0000-4000-8000-000000000778",
+        queueStatus: "open",
+        reviewStatus: "needs_gk_review",
+        currentUseEligible: true,
+        blocks: [{ ordinal: 1, text: "A.", citations: [] }],
+      },
+      error: null,
+    },
+  });
+  const originalFeatureFlag = process.env.KAI_SPRINT2_ENABLED;
+  process.env.KAI_SPRINT2_ENABLED = "true";
+  const restore = intakeRouteTestables.setIntakeServiceForTest({
+    async getGeneratedDraftReviewPacket(input) {
+      current.calls.push(input);
+      return current.result;
+    },
+  });
+  const server = await listen(createApp(() => current));
+
+  t.after(async () => {
+    restore();
+    if (originalFeatureFlag === undefined) delete process.env.KAI_SPRINT2_ENABLED;
+    else process.env.KAI_SPRINT2_ENABLED = originalFeatureFlag;
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  });
+
+  const response = await requestJson(server, `${basePath}/admin/organizations/${organizationId}/generated-content-drafts/${generatedContentDraftId}/review-packet`);
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(current.calls, [{ organizationId, generatedContentDraftId, actorContext }]);
 });
 
 test("Impact Evidence Library claim-index route reuses the existing cockpit/read access boundary", async (t) => {
@@ -335,10 +477,39 @@ test("Impact Evidence Library frontend projections compose P2-08 and P2-06 witho
   assert.equal(traceability.clientFollowupWorkflows[0].workflowDisposition, "completed_workflow_obligation");
   assert.equal(JSON.stringify(traceability).includes("must not render"), false);
 
+  const packet = projectGeneratedDraftPacket({
+    generatedContentDraftId: "00000000-0000-4000-8000-000000000777",
+    contentType: "evidence_summary",
+    draftStatus: "draft",
+    requestedAudience: "internal",
+    reviewQueueItemId,
+    queueStatus: "open",
+    reviewStatus: "needs_gk_review",
+    currentUseEligible: true,
+    blocks: [{
+      ordinal: 1,
+      text: "Enrollment increased by 12% in 2025.",
+      raw_content: "must not render",
+      citations: [{
+        claimId,
+        evidenceItemId,
+        sourceId: "00000000-0000-4000-8000-000000000401",
+        sourceVersionId: "00000000-0000-4000-8000-000000000501",
+        supportStrength: "strong",
+        currentEligible: true,
+        signed_url: "must not render",
+      }],
+    }],
+  });
+  assert.equal(packet.contentType, "evidence_summary");
+  assert.equal(packet.requestedAudience, "internal");
+  assert.equal(packet.draftStatus, "draft");
+  assert.equal(JSON.stringify(packet).includes("must not render"), false);
+
   assert.deepEqual(mergeClaims(usable, candidates).map((claim) => claim.libraryStatus), ["usable", "needs_review"]);
 });
 
-test("Impact Evidence Library source has no P2 mutation, assistant, generation, or export calls", () => {
+test("Impact Evidence Library source has only the Stage-A internal generation call and no assistant, export, or raw-source paths", () => {
   const serviceSource = readFileSync("Backend/kai/services/kaiClaimLibraryService.js", "utf8");
   const readModelSource = readFileSync("Backend/kai/db/kaiClaimLibraryReadModels.js", "utf8");
   const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
@@ -351,6 +522,9 @@ test("Impact Evidence Library source has no P2 mutation, assistant, generation, 
     /completeEvidenceReview|completeClaimReview|recordCoverageReviewDecision|completeClientFollowup|createGenerated/i,
   );
   assert.doesNotMatch(readModelSource, /\bINSERT\b|\bUPDATE\b|\bDELETE\b|\bTRUNCATE\b|FOR UPDATE/i);
-  assert.doesNotMatch(uiSource + logicSource, /\bPOST\b|\bPUT\b|\bPATCH\b|\bDELETE\b|assistant|generate/i);
+  assert.match(uiSource + logicSource, /generated-content-drafts\/evidence-summary/);
+  assert.match(uiSource + logicSource, /claim_ids/);
+  assert.match(uiSource + logicSource, /idempotency_key/);
+  assert.doesNotMatch(uiSource + logicSource, /\bPUT\b|\bPATCH\b|\bDELETE\b|assistant|export-review|export candidate/i);
   assert.doesNotMatch(uiSource + logicSource, /raw_content|signed_url|storage_object|api[_-]?key|secret/i);
 });
