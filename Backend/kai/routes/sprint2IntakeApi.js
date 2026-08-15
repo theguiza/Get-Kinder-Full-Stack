@@ -28,6 +28,7 @@ import {
   validateReviewCockpitQueueQuery,
   validateSourceCandidateDecisionRequest,
 } from "../validators/kaiReviewCockpitRequestSchemas.js";
+import { createProductionMetadataOnlyAuditForSourceVersion } from "../services/kaiMetadataOnlyAuditComposition.js";
 
 const router = express.Router();
 let intakeServiceOverride = null;
@@ -35,6 +36,7 @@ let intakeServicePromise = null;
 let reviewQueueServicePromise = null;
 let reviewCockpitServicePromise = null;
 let exportReviewServicePromise = null;
+let evidenceLineageServicePromise = null;
 
 export function sendServiceResult(res, result, successStatus = 200) {
   if (result?.ok) {
@@ -1027,6 +1029,75 @@ router.post("/admin/batches/:intakeBatchId/file-reservations", async (req, res) 
   }, 201);
 });
 
+async function getEvidenceLineageService() {
+  if (intakeServiceOverride?.extractEvidenceFromSourceVersion) return intakeServiceOverride;
+  evidenceLineageServicePromise ||= import("../services/kaiEvidenceLineageService.js");
+  return evidenceLineageServicePromise;
+}
+
+function sourceVersionEvidenceExtractionIdentifiers(req = {}) {
+  const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+  const sourceVersionId = typeof req.params?.sourceVersionId === "string" ? req.params.sourceVersionId : "";
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) || organizationId !== organizationId.toLowerCase()) return null;
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(sourceVersionId) || sourceVersionId !== sourceVersionId.toLowerCase()) return null;
+  return { organizationId, sourceVersionId };
+}
+
+function validateEvidenceExtractionRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = sourceVersionEvidenceExtractionIdentifiers(req);
+  if (!identifiers) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_or_source_version_id")],
+    });
+    return null;
+  }
+  if (Object.keys(requestPayload(req)).length !== 0) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("unknown_field", "body")],
+    });
+    return null;
+  }
+  return identifiers;
+}
+
+/**
+ * KAI P2-01 evidence-lineage extraction route. Mirrors the export-review
+ * routes' organization-scoped path convention and actorContext derivation
+ * (`sprint2MappedActorContext`) exactly, because - like those routes, and
+ * unlike the review-cockpit routes - `extractEvidenceFromSourceVersion` expects
+ * an already-resolved `actorContext`, not a raw authenticated-user identifier
+ * for the service to resolve itself.
+ */
+router.post(
+  "/admin/organizations/:organizationId/source-versions/:sourceVersionId/evidence-extraction",
+  async (req, res) => {
+    const identifiers = validateEvidenceExtractionRequestOrSend(req, res);
+    if (!identifiers) return;
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getEvidenceLineageService();
+      return service.extractEvidenceFromSourceVersion({
+        organizationId: identifiers.organizationId,
+        sourceVersionId: identifiers.sourceVersionId,
+        actorContext,
+        now,
+      }, {
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForSourceVersion({
+          organizationId: identifiers.organizationId,
+          sourceVersionId: identifiers.sourceVersionId,
+          actorContext,
+          now,
+        }),
+      });
+    });
+  },
+);
+
 export default router;
 
 export const __testables = {
@@ -1054,6 +1125,8 @@ export const __testables = {
   sprint2MappedActorContext,
   validateStartExportReviewRequestOrSend,
   validateCompleteExportReviewRequestOrSend,
+  sourceVersionEvidenceExtractionIdentifiers,
+  validateEvidenceExtractionRequestOrSend,
   setIntakeServiceForTest(service) {
     intakeServiceOverride = service;
     return () => {

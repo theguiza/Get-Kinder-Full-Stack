@@ -15804,3 +15804,141 @@ TOOL_VERIFIED - tests:
 
 One local commit was made on this branch recording this closure. No push,
 no deploy.
+
+## P2-01 operational composition - internal evidence-lineage extraction route (completed 2026-08-15)
+
+Status: accepted for this local package as one bounded, authenticated
+internal mutation route wired to the existing dormant P2-01
+`extractEvidenceFromSourceVersion` service. P2-01's foundation (schema,
+migrations, repository, validators, lineage gates, replay rules, and
+evidence-review semantics) was not reopened or rebuilt. P2-01 does not run
+automatically from P1 source promotion; no cron, worker, scheduler, listener,
+or promotion hook was added. No P2-02 through P2-08 or P3 service was
+imported or invoked.
+
+Implementation evidence:
+  - Backend/kai/routes/sprint2IntakeApi.js - adds exactly one mounted route,
+    `router.post("/admin/organizations/:organizationId/source-versions/
+    :sourceVersionId/evidence-extraction")`, on the existing mounted Sprint 2
+    intake router, placed after the last existing route (immediately before
+    `export default router;`) so it does not fall inside any prior route's
+    source-slice test window. The path/HTTP-parameter convention was derived
+    from the existing P3-07/P3-10/P3-14 export-review routes rather than
+    invented: those are the only existing routes whose actorContext
+    derivation matches what `extractEvidenceFromSourceVersion` requires -
+    an already-resolved `actorContext` taken directly from
+    `sprint2MappedActorContext(req)` (the middleware-populated
+    `req.kaiSprint2ActorContext`), with no server-side re-resolution from a
+    bare authenticated-user id the way the review-cockpit routes'
+    `authorizeReviewCockpitRequest`/`resolveKaiActorContext` path does. The
+    export-review routes also nest `organizationId` as a path parameter
+    under `/admin/organizations/:organizationId/...` rather than a query
+    parameter, which was reused unchanged for consistency with that same
+    actorContext convention. `sourceVersionId` is transported as a path
+    parameter (not a body field) because, like the export-review routes'
+    identifiers, it is resource identity, not request data, and the route
+    requires an otherwise-empty JSON body (any key present is rejected as
+    `validation_blocker`) since no field beyond resource identity is needed.
+    Two new helpers, `sourceVersionEvidenceExtractionIdentifiers` (path
+    UUID/lowercase-canonical validation, mirroring
+    `exportReviewPacketIdentifiers`) and
+    `validateEvidenceExtractionRequestOrSend`, plus a `getEvidenceLineageService()`
+    lazy-import getter following the existing `getExportReviewService()`
+    pattern (including its override-detection convention:
+    `intakeServiceOverride?.extractEvidenceFromSourceVersion`), are the only
+    additions. The service is called with exactly four values -
+    organizationId/sourceVersionId from the validated path parameters,
+    actorContext from `sprint2MappedActorContext(req)`, and now from a fresh
+    server-side `new Date().toISOString()` call made inside the request
+    handler - the client cannot supply or influence actorContext or now, and
+    any body field is rejected before the service is ever called. Calls
+    `extractEvidenceFromSourceVersion` exactly once. The new route handler
+    and its two helper functions contain no SQL, no pool/repository import,
+    no direct `kai.*` access, and no evidence/locator/review-queue/audit
+    write logic - all of that remains inside the unmodified P2-01 service
+    and repository layers.
+  - Backend/kai/services/kaiMetadataOnlyAuditComposition.js - adds
+    `createProductionMetadataOnlyAuditForSourceVersion`, the real production
+    `metadataOnlyAudit` dependency for this route, alongside the existing
+    P1 `createProductionMetadataOnlyAudit` (unchanged). The existing P1
+    factory could not be reused directly: it requires an `intakeFileId` and
+    unconditionally writes it as `object_id`, and P2-01 extracts evidence
+    from an already-promoted `source_version`, which has no intake-file
+    identity of its own - reusing it would have meant fabricating an
+    intake-file identity for a request that has none. The new factory is
+    the smallest adapter around the same existing required-audit mechanism:
+    it calls the same `insertRequiredSuccessfulAuditEvent` writing into the
+    same `kai.audit_events` table, and builds `prepareMetadataOnlyAudit`'s
+    metadata using the caller-supplied `organizationId`/`sourceVersionId`
+    (as the already-allowlisted `object_id` field) and the payload's own
+    `attempted_operation`/`object_type`/`validator_key` fields exactly as
+    `postgresEvidenceLineageRepository.js`'s `buildEvidenceLineageAuditPayload`
+    already builds them - no new identifier was invented, no P2-01 audit
+    payload field was changed, and no second audit table or framework was
+    created.
+  - __tests__/kai-sprint2-p2-01-evidence-extraction-route.spec.js (new) -
+    covers: exactly one mounted authenticated POST route at the documented
+    path; unauthenticated requests fail (401) before the service is ever
+    called; an authenticated mapped human in the correct organization
+    reaches `extractEvidenceFromSourceVersion` exactly once with the server
+    organizationId, the requested sourceVersionId, the server-resolved
+    actorContext, and a server-generated now falling inside the request's
+    own wall-clock window, alongside a production `metadataOnlyAudit`
+    dependency whose `prepareMetadataOnlyAudit` returns a real
+    `{ ok: true, publish }` shape; client-supplied `organization_id` (query
+    or body), `actorContext`, and `now` cannot override the server-resolved
+    values, and any body field at all is rejected as `validation_blocker`
+    before the service is invoked; malformed path UUIDs (non-UUID or not
+    already lowercased, for either identifier) use the existing safe
+    `validation_blocker` envelope; every listed service-result error code
+    (`feature_disabled`, `invalid_request`, `unauthorized`,
+    `mapped_kai_user_required`, `authorization_denied`,
+    `tenant_boundary_violation`, `not_found`, `conflict_current_state_changed`,
+    `system_error`) maps through the existing safe envelope with no
+    blocker/warning/data leakage; `KAI_SPRINT2_ENABLED=false` returns the
+    existing outer feature-gate's 403 with zero service calls; and a
+    source-slice scan proving the new route region contains no SQL keyword,
+    no db/repository/postgres import, no pool/kaiDb/repository reference,
+    and no P2-02/P2-03/P2-04/P2-05+ service reference.
+  - __tests__/kai-sprint2-pass2-route-runtime.spec.js - the one required,
+    additive update: the existing exhaustive mounted-route-path enumeration
+    test now includes the new P2-01 path immediately after the last
+    export-review path (alphabetically adjacent); every previously listed
+    path is preserved verbatim and unreordered.
+
+TOOL_VERIFIED:
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false node --test __tests__/kai-sprint2-p2-01-evidence-extraction-route.spec.js`
+    -> 9/9 pass.
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false node --test __tests__/kai-sprint2-p2-01-evidence-lineage-boundary.spec.js __tests__/kai-sprint2-p2-01-evidence-lineage-runner-self-test.spec.js __tests__/kai-sprint2-p2-01-evidence-lineage-schema-contract.spec.js`
+    -> 46/46 pass (unchanged; the P2-01 service/repository boundary is
+    untouched by this route package).
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false node --test __tests__/kai-sprint2-p3-07-export-review-packet-route.spec.js __tests__/kai-sprint2-p3-10-export-review-start-route.spec.js __tests__/kai-sprint2-p3-14-export-review-complete-route.spec.js`
+    -> 35/35 pass (unaffected by the new route's insertion point).
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm run verify:kai-sprint2-p2-01-evidence-lineage`
+    -> P2-01 evidence-lineage integration tests passed (17/17), using a real
+    ephemeral local PostgreSQL instance, then removed.
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm run test:kai-sprint2`
+    -> complete Sprint 2 suite: 1995 pass, 0 fail, 29 skip.
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm test`
+    -> complete repository suite: 2100 pass, 0 fail, 29 skip.
+  - `git diff --check` -> clean (no whitespace errors).
+
+USER_CONFIRMED:
+  - P2-01 through P2-08 are accepted and closed as backend foundations;
+    P2-01 is human-authorized under its existing AUTH-KAI-003 rules and
+    gated by KAI_SPRINT2_ENABLED alone (KAI_EVIDENCE_LINEAGE_ENABLED was not
+    added or restored).
+  - This P2-01 operational-composition package (exposing the existing
+    `extractEvidenceFromSourceVersion` through the existing authenticated
+    internal KAI human application surface) is authorized as one bounded
+    route addition.
+
+NOT_CONFIRMED:
+  - No push, merge, deploy, flag enablement, P2-02 through P2-08 or P3
+    invocation, cron/worker/scheduler/listener/promotion-hook creation,
+    schema/migration change, or new review cycle was performed. Real
+    client data was not used. `00_KAI_CURRENT_STATE.md` and the
+    Implementation Baseline were not updated.
+
+One local commit was made on this branch recording this package. No push,
+no deploy.

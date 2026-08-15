@@ -84,6 +84,80 @@ export function createProductionMetadataOnlyAudit({
   });
 }
 
+/**
+ * Production composition of the `metadataOnlyAudit` contract required by P2-01
+ * (`Backend/kai/dictionary/postgresEvidenceLineageRepository.js`), which builds its
+ * own full audit payload (`attempted_operation`, `object_type`, `validator_key`,
+ * etc.) and calls `prepareMetadataOnlyAudit({ payload })` directly - unlike P1's
+ * caller, it supplies no `intakeFileId`, because P2-01 extracts evidence from an
+ * already-promoted `source_version`, not an intake file. Reusing
+ * `createProductionMetadataOnlyAudit` here would force a fabricated
+ * `intakeFileId` identity onto a request that has none, so this is instead the
+ * smallest separate adapter around the same existing required-audit mechanism -
+ * `insertRequiredSuccessfulAuditEvent` writing into the existing
+ * `kai.audit_events` table - keyed by the real `sourceVersionId` identity via the
+ * already-allowlisted `object_id` metadata field.
+ */
+export function createProductionMetadataOnlyAuditForSourceVersion({
+  organizationId,
+  sourceVersionId,
+  actorContext,
+  now,
+  insertAuditEvent = insertRequiredSuccessfulAuditEvent,
+} = {}) {
+  if (typeof organizationId !== "string" || organizationId.length === 0) {
+    throw new TypeError("createProductionMetadataOnlyAuditForSourceVersion requires organizationId.");
+  }
+  if (typeof sourceVersionId !== "string" || sourceVersionId.length === 0) {
+    throw new TypeError("createProductionMetadataOnlyAuditForSourceVersion requires sourceVersionId.");
+  }
+
+  function isPlainObject(value) {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  }
+
+  return Object.freeze({
+    prepareMetadataOnlyAudit({ payload, db } = {}) {
+      if (!isPlainObject(payload)) return { ok: false };
+
+      const metadata = {
+        organization_id: organizationId,
+        object_type: typeof payload.object_type === "string" ? payload.object_type : "source_version",
+        target_object_type: typeof payload.object_type === "string" ? payload.object_type : "source_version",
+        object_id: sourceVersionId,
+        operation: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "p2_01_evidence_lineage_extraction",
+        operation_type: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "p2_01_evidence_lineage_extraction",
+        validator_key: typeof payload.validator_key === "string" ? payload.validator_key : null,
+        actor_type: actorContext?.actorType || "human",
+        actor_user_id: actorContext?.actorUserId || null,
+        request_id: actorContext?.requestId || null,
+        route: "p2_01_evidence_lineage_extraction",
+        created_at: typeof now === "string" ? now : new Date().toISOString(),
+        metadata_only: true,
+        contains_raw_file_content: false,
+        contains_raw_parsed_rows: false,
+        contains_client_pii: false,
+        contains_prompt_text: false,
+        contains_unsafe_generated_text: false,
+        contains_signed_urls: false,
+        contains_storage_credentials: false,
+      };
+
+      return {
+        ok: true,
+        async publish() {
+          const result = await insertAuditEvent(metadata, db);
+          if (!result || result.ok !== true) {
+            throw new Error("p2_01_metadata_only_audit_publish_failed");
+          }
+          return result;
+        },
+      };
+    },
+  });
+}
+
 export const __testables = Object.freeze({
   createProductionMetadataOnlyAudit,
+  createProductionMetadataOnlyAuditForSourceVersion,
 });
