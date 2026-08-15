@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import ImpactEvidenceLibrary from "./ImpactEvidenceLibrary.jsx";
 
 const NAV_ITEMS = [
   { key: "overview", label: "Overview", icon: "fa-gauge-high" },
@@ -9,6 +10,7 @@ const NAV_ITEMS = [
   { key: "volunteers", label: "Volunteers", icon: "fa-users" },
   { key: "donors", label: "Donors", icon: "fa-hand-holding-heart" },
   { key: "reportingReadiness", label: "Reporting Readiness", icon: "fa-clipboard-list" },
+  { key: "impactEvidenceLibrary", label: "Evidence Library", icon: "fa-folder-tree" },
 ];
 
 const RR_STATUS_OPTIONS = [
@@ -2112,6 +2114,8 @@ export default function AdminDashboard() {
               </div>
             </section>
           )}
+
+          {activeSection === "impactEvidenceLibrary" && <ImpactEvidenceLibrary />}
 
           {activeSection === "impactCredits" && (
             <section>

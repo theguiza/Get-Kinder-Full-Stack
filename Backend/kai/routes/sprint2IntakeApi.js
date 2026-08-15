@@ -1434,6 +1434,13 @@ async function getEligibleClaimsForAudienceService() {
   return eligibleClaimsForAudienceServicePromise;
 }
 
+let claimLibraryServicePromise = null;
+async function getClaimLibraryService() {
+  if (intakeServiceOverride?.listClaimLibraryCandidates) return intakeServiceOverride;
+  claimLibraryServicePromise ||= import("../services/kaiClaimLibraryService.js");
+  return claimLibraryServicePromise;
+}
+
 const KAI_P2_08_DEFAULT_LIMIT = 25;
 const KAI_P2_08_MAX_LIMIT = 100;
 
@@ -1516,6 +1523,59 @@ router.get(
       return service.listEligibleClaimsForAudience({
         organizationId: identifiers.organizationId,
         requestedAudience: query.requestedAudience,
+        limit: query.limit,
+        afterClaimId: query.afterClaimId,
+        actorContext: sprint2MappedActorContext(req),
+      });
+    });
+  },
+);
+
+function claimLibraryIndexQuery(req = {}) {
+  const allowedKeys = new Set(["limit", "after_claim_id"]);
+  const keys = Object.keys(req.query || {});
+  if (!keys.every((key) => allowedKeys.has(key))) return null;
+
+  let limit = 25;
+  if (req.query.limit !== undefined) {
+    if (typeof req.query.limit !== "string" || !/^\d+$/.test(req.query.limit)) return null;
+    limit = Number(req.query.limit);
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 25) return null;
+  }
+
+  let afterClaimId = null;
+  if (req.query.after_claim_id !== undefined) {
+    const candidate = normalizedUuid(req.query.after_claim_id);
+    if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(candidate)) return null;
+    afterClaimId = candidate;
+  }
+
+  return { limit, afterClaimId };
+}
+
+/**
+ * First Impact Evidence Library navigation read. This route only enumerates
+ * metadata-safe claim identities connected to existing P2 review/followup/conflict
+ * queues. It does not calculate audience eligibility or blockers; the Library UI
+ * must obtain usable claims from P2-08 and selected-claim explanations from P2-06.
+ */
+router.get(
+  "/admin/organizations/:organizationId/claim-library/candidates",
+  async (req, res) => {
+    const identifiers = eligibleClaimsForAudienceOrganizationIdentifier(req);
+    const query = claimLibraryIndexQuery(req);
+    if (!identifiers || !query) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker(
+          "invalid_organization_id_or_query",
+          "organization_id_limit_or_after_claim_id",
+        )],
+      });
+    }
+    return invokeService(res, async () => {
+      const service = await getClaimLibraryService();
+      return service.listClaimLibraryCandidates({
+        organizationId: identifiers.organizationId,
         limit: query.limit,
         afterClaimId: query.afterClaimId,
         actorContext: sprint2MappedActorContext(req),
@@ -1891,6 +1951,7 @@ export const __testables = {
   claimTraceabilityRequestedAudienceFromQuery,
   eligibleClaimsForAudienceOrganizationIdentifier,
   eligibleClaimsForAudienceQuery,
+  claimLibraryIndexQuery,
   evidenceReviewCompletionIdentifiers,
   validateEvidenceReviewCompletionRequestOrSend,
   claimReviewCompletionIdentifiers,

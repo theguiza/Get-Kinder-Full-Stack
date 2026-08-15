@@ -17393,3 +17393,89 @@ One local commit was made on this branch recording this package. No push,
 no deploy.
 
 STOP AFTER P2-11.
+
+## Phase-12 Impact Evidence Library Claims + Traceability vertical slice - completed 2026-08-15
+
+SCOPE:
+  - Built the first read-only Impact Evidence Library product slice inside the
+    existing authenticated admin dashboard/cockpit surface. No separate
+    application, router, design system, eligibility model, blocker model,
+    generation, export, assistant-runtime, or P3 work was introduced.
+  - P2-08 remains authoritative for usable-claim enumeration by selected
+    audience (`internal`, `funder`, `public`). P2-06 remains authoritative for
+    selected-claim eligibility, blocker, limitation, lineage, review/followup,
+    conflict, and allowed-audience explanation.
+
+IMPLEMENTATION:
+  - Added `frontend/ImpactEvidenceLibrary.jsx` and
+    `frontend/impactEvidenceLibraryLogic.js`, mounted from the existing
+    `frontend/adminDashboard.jsx` navigation as `Evidence Library`.
+  - The UI issues only authenticated same-origin GET requests:
+    `/admin/organizations/:organizationId/eligible-claims` with the selected
+    `requested_audience`, `/admin/organizations/:organizationId/claim-library/candidates`
+    for review-candidate identities, and
+    `/admin/organizations/:organizationId/claims/:claimId/traceability` for the
+    selected claim plus selected audience. There is no browser eligibility or
+    blocker algorithm; the browser only projects safe DTO fields.
+  - Existing cockpit/review reads were insufficient for claim-library
+    navigation because P1-09's read model intentionally allowlists only
+    `intake_file_review`, `sensitivity_review`, and `source_candidate_review`
+    targets, not P2 claim/evidence/followup/conflict claim identities.
+  - Added exactly one minimal read-only index:
+    `Backend/kai/db/kaiClaimLibraryReadModels.js`,
+    `Backend/kai/services/kaiClaimLibraryService.js`, and
+    `GET /admin/organizations/:organizationId/claim-library/candidates` in the
+    existing Sprint 2 intake router. It enumerates organization-scoped claim IDs
+    already linked to existing P2 `claim_review`, `evidence_review`,
+    `client_followup`, or `conflict_resolution` queue rows, with bounded
+    claim-id pagination and metadata-safe queue status fields only. It does not
+    calculate eligibility, blocker state, limitation acceptance, or audience
+    authority.
+  - Access control reuses the existing internal cockpit/read pattern:
+    `KAI_SPRINT2_ENABLED`, mapped human actor, tenant-bound organization, generic
+    `read_intake`, then role-narrowed `gk_admin`/`gk_operator`/`gk_reviewer`.
+    Client roles and non-human actors do not gain access from the Library.
+  - Unresolved dimensions with `internal_limitation_accepted=true` render as
+    `known limitation`, never as resolved/clear. Resolved P2-11 followups render
+    as completed workflow obligations, not as evidence that the missing fact was
+    supplied.
+  - Updated `__tests__/kai-sprint2-pass2-route-runtime.spec.js` for the one new
+    read-only route inventory entry.
+
+SAFETY:
+  - The Library is read-only: no P2 mutation endpoint/service is invoked, no
+    approval/review/followup/conflict/coverage completion control is rendered,
+    and no audit write is required by the new index.
+  - No raw uploaded content, raw row payloads, raw client answers, storage object
+    locations, signed URLs, credentials, unrestricted audit metadata, or unsafe
+    internal fields are exposed by the new DTO projection.
+  - Organization and actor authority remain server-controlled; client request
+    data cannot replace actor context or tenant authorization.
+
+VERIFICATION:
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test
+    __tests__/kai-sprint2-impact-evidence-library.spec.js` -> 7/7 passing.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run build` -> Vite
+    production build passed. No `typecheck` or `lint` npm scripts exist in the
+    current root `package.json`.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run
+    verify:kai-sprint2-api-contract` -> 59/60 passing; the sole failure is the
+    established environment-dependent `foundation-safety file_upload_enabled`
+    expectation (`true !== false`) recorded as the known starting baseline.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run
+    test:kai-sprint2` -> 2131 passed, 32 skipped, 1 failed; same known
+    `file_upload_enabled` baseline only.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test` -> 2236 passed,
+    32 skipped, 1 failed; same known `file_upload_enabled` baseline only.
+  - `git diff --check` -> clean.
+
+NOT_CONFIRMED / RECOMMENDED FOLLOW-UP:
+  - No push, deploy, shared/staging/production database mutation, feature-flag
+    enablement, credential/secret inspection, real client data access,
+    assistant-runtime work, export, generation, P3 work, `00_KAI_CURRENT_STATE.md`
+    update, or Implementation Baseline update was performed.
+
+One targeted local commit was made on this branch recording the Phase-12 Impact
+Evidence Library Claims + Traceability vertical slice. No push, no deploy.
+
+STOP BEFORE P3.
