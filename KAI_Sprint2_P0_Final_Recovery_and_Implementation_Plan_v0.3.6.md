@@ -15695,3 +15695,112 @@ TOOL_VERIFIED - tests:
 
 One local commit was made on this branch recording this correction. No push,
 no deploy.
+
+P1 repository closure: P1-04/P1-05 audit atomicity and downstream resumability
+(2026-08-15)
+
+Fresh preflight: `git status` clean at `01f4049` (the accepted P1-04/P1-05
+worker-continuation commit); branch `fix/kai-gate-c-assessment-byte-source`.
+Re-read `postgresDataDictionaryRepository.js`,
+`postgresIntakeSensitivityProfileRepository.js`, `p1WorkerRuntime.js`,
+`parserProfileActivation.js`, `parserProfileWorkerOrchestration.js`, and
+`postgresParserRunRepository.js` before implementing.
+
+P1-04 audit same-transaction correction: `prepareRequiredAudit` in
+`postgresDataDictionaryRepository.js` now takes the repository's own `tx`
+and forwards it as `metadataOnlyAudit.prepareMetadataOnlyAudit({ payload,
+db: tx })`, mirroring the pattern already proven for P1-03 in
+`postgresParserRunRepository.js`. Previously `db` was never forwarded, so
+`insertRequiredSuccessfulAuditEvent`/any injected `insertAuditEvent` fell
+through to its own `db = pool` default - a separate connection outside the
+repository's transaction, breaking atomicity between the dictionary/field/
+mapping/finding writes and their required audit. Audit payload, audit
+operation, repository identity/idempotency rules, service API,
+`kaiMetadataOnlyAuditComposition.js`, and schema/migrations are unchanged.
+Result: **SAME_TRANSACTION**.
+
+P1-05 audit same-transaction correction: identical fix in
+`postgresIntakeSensitivityProfileRepository.js`'s `prepareRequiredAudit`.
+Sensitivity derivation, conservative unknown/default behavior, idempotency/
+replay, service API, audit composition, and schema/migrations are
+unchanged. Result: **SAME_TRANSACTION**.
+
+Downstream resumability correction: `activateParserProfileWorkForIntakeFile`
+in `parserProfileActivation.js` previously handed an already-completed P1-03
+replay straight to `runQueuedParserProfileWork`/`retryParserProfileWork`,
+which only ever claims a `queued` row - so a completed replay always
+produced a spurious `conflict_current_state_changed` and hid the completed
+run's `output_profile_id` from any later caller. The fix is a return-shape-
+only change: when `queueParserProfileWork` reports `replayed: true` and the
+replayed run's `parser_status === "completed"` (and no explicit `retry` was
+requested), activation now returns that authoritative completed run
+directly - `{ ok: true, data: { activated: false, queued, run: { run,
+replayed: true } } }` - instead of attempting a reclaim. P1-03 persistence,
+queueing/claiming, `parser_status` transitions, retry_count, retry behavior,
+exact-version byte reads, and idempotency are all untouched;
+`parserProfileWorkerOrchestration.js` and `postgresParserRunRepository.js`
+were not modified.
+
+`p1WorkerRuntime.js`'s continuation predicate was changed to match: it no
+longer requires `result.data.activated === true` (which is `false` on a
+completed replay), and instead requires `result.ok === true` AND
+`result.data.run.run.parser_status === "completed"` AND a non-empty
+`output_profile_id` - true whether P1-03 completed fresh this tick or via an
+idempotent replay of an already-completed run. A later cron tick never
+re-profiles or re-queues an already-completed P1-03 run merely to resume
+P1-04/P1-05, since the replay short-circuit above never reaches
+`claimQueuedParserRun`/`requeueFailedParserRunForRetry`.
+
+TOOL_VERIFIED - tests:
+
+- New `__tests__/kai-sprint2-p1-04-p1-05-audit-transaction-propagation.spec.js`
+  (2 tests, mirroring `kai-sprint2-p1-03-audit-transaction-propagation.spec.js`'s
+  proven fake-connection pattern) proves P1-04's and P1-05's required audit
+  insert is issued on the exact same transaction connection as their domain
+  mutation. Confirmed failing against the pre-fix tree (`git stash`): both
+  tests fail (`false !== true`) because the audit composition never received
+  a `db`/tx context.
+- Updated `__tests__/kai-sprint2-p1-activation.spec.js`'s replay-idempotency
+  test, which previously asserted the defect itself (a second activation of
+  an already-completed identity returns `ok: false` /
+  `conflict_current_state_changed`) as correct behavior. It now asserts the
+  corrected contract: the second activation returns `ok: true`,
+  `activated: false`, `run.replayed: true`, the same `output_profile_id`, and
+  that `claimQueuedParserRun` is never called a second time for the
+  completed identity.
+- Updated `__tests__/kai-sprint2-p1-04-data-dictionary-quality-boundary.spec.js`
+  and `__tests__/kai-sprint2-p1-05-intake-sensitivity-profile-boundary.spec.js`'s
+  own-boolean-data-property predicate tests to call `prepareRequiredAudit`
+  with the new `(metadataOnlyAudit, tx, record)` arity and additionally
+  assert the audit composition receives that exact `tx` as `db`.
+- Rewrote `__tests__/kai-sprint2-p1-worker-runtime-composition.spec.js`'s
+  fresh-vs-replay coverage into five explicit cases: (A) a fresh P1-03
+  completion continues through P1-04 then P1-05 in order, then stops; (B) a
+  P1-04 failure on tick 1 (P1-05 never called) is retried/succeeds on tick 2
+  against an `activated: false` replayed-completed P1-03 result carrying the
+  same `output_profile_id`; (C) a P1-05 failure on tick 1 is retried/
+  succeeds on tick 2, with P1-04 idempotently replaying the same dictionary
+  identity both times (no duplicate authoritative record); (D) non-completed
+  P1-03 results - `ok: false`, `activated: false`/ineligible, `parser_status`
+  of `queued`/`running`/`failed`, and a malformed result with unrelated
+  truthy `activated`/data but no completed run - never reach P1-04; (E) the
+  P1-06 boundary check (no reachable import/call path) still passes.
+- `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false node --test __tests__/kai-sprint2-p1-worker-runtime-composition.spec.js __tests__/kai-sprint2-p1-04-p1-05-audit-transaction-propagation.spec.js __tests__/kai-sprint2-p1-activation.spec.js __tests__/kai-sprint2-p1-03-parser-profile-worker-boundary.spec.js __tests__/kai-sprint2-p1-03-audit-transaction-propagation.spec.js __tests__/kai-sprint2-p1-04-data-dictionary-quality-boundary.spec.js __tests__/kai-sprint2-p1-04-data-dictionary-quality.integration.spec.js __tests__/kai-sprint2-p1-05-intake-sensitivity-profile-boundary.spec.js __tests__/kai-sprint2-p1-05-intake-sensitivity-profile.integration.spec.js __tests__/kai-sprint2-p1-06-review-queue-boundary.spec.js`
+  passed (98 pass, 0 fail, 2 skipped - the same pre-existing suite-specific
+  integration opt-in specs).
+- `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm run test:kai-sprint2`
+  passed (1986 pass, 0 fail, 29 skipped).
+- `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm test`
+  passed (2091 pass, 0 fail, 29 skipped).
+- git_diff_check: `git diff --check` passed.
+- prohibited_actions_not_performed: no production access, deployment,
+  PostgreSQL/database/schema/migration mutation, GCP/IAM/GCS/Render/cloud
+  mutation, feature/configuration change, credential/secret inspection, real
+  client data handling, push, or destructive action. P1-06
+  (`createSensitivityReviewQueueItem`, `kaiReviewQueueService.js`,
+  `postgresReviewQueueRepository.js`) and P2/P3 were never imported or
+  called; `AUTH-KAI-003` was not weakened; no worker/system/internal P1-06
+  bypass was created. `00_KAI_CURRENT_STATE.md` was not updated.
+
+One local commit was made on this branch recording this closure. No push,
+no deploy.

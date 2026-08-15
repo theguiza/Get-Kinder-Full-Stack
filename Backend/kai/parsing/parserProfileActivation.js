@@ -133,6 +133,21 @@ export async function activateParserProfileWorkForIntakeFile(
   const queued = await orchestration.queueParserProfileWork({ trustedFileFacts, now });
   if (!queued.ok) return { ok: false, data: null, error: queued.error };
 
+  // An already-completed run is authoritative and immutable: it is never
+  // reclaimed, re-read as running, or re-profiled merely to expose it to a
+  // caller that arrives after completion. `claimQueuedParserRun` only ever
+  // claims a `queued` row (see `postgresParserRunRepository.js`), so handing a
+  // completed replay to `runQueuedParserProfileWork`/`retryParserProfileWork`
+  // would only ever produce a spurious `conflict_current_state_changed` and
+  // hide the completed run this caller needs. Return it directly instead.
+  if (!retry && queued.data.replayed === true && queued.data.run?.parser_status === "completed") {
+    return {
+      ok: true,
+      data: { activated: false, queued: queued.data, run: { run: queued.data.run, replayed: true } },
+      error: null,
+    };
+  }
+
   const run = retry
     ? await orchestration.retryParserProfileWork({ trustedFileFacts, now, metadataOnlyAudit })
     : await orchestration.runQueuedParserProfileWork({ trustedFileFacts, now, metadataOnlyAudit });

@@ -287,9 +287,10 @@ class RequiredAuditRejectedError extends Error {
  * P1-04's `prepareRequiredAudit`: an own-property descriptor read (never a getter)
  * whose `value` is exactly `true`, alongside a callable `publish`.
  */
-function prepareRequiredAudit(metadataOnlyAudit, record) {
+function prepareRequiredAudit(metadataOnlyAudit, tx, record) {
   const prepared = metadataOnlyAudit.prepareMetadataOnlyAudit({
     payload: buildSensitivityAuditPayload(record),
+    db: tx,
   });
 
   const okDescriptor =
@@ -439,7 +440,7 @@ export function createPostgresIntakeSensitivityProfileRepository({ runInTransact
             return sensitivitySuccess({ sensitivityProfile: record, replayed: true });
           }
 
-          const preparedAudit = prepareRequiredAudit(metadataOnlyAudit, record);
+          const preparedAudit = prepareRequiredAudit(metadataOnlyAudit, tx, record);
           await insertAudit(tx, {
             organizationId: profileRow.organization_id,
             intakeFileId: profileRow.intake_file_id,

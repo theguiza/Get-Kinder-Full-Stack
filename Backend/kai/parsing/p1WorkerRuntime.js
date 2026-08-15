@@ -18,13 +18,16 @@ import { createProductionMetadataOnlyAudit } from "../services/kaiMetadataOnlyAu
  * activation seam - reusing its existing activation, queue/idempotency,
  * locking, exact-version read, audit-transaction, and retry semantics as-is.
  *
- * Only when that P1-03 activation reports a fresh `activated: true` completion
- * does the tick continue, strictly in order, through the existing dormant
- * P1-04 (`createDraftDataDictionary`) and P1-05 (`persistIntakeSensitivityProfile`)
- * service seams - unchanged by this module - using the authoritative
- * `output_profile_id` P1-03 just committed, and then the P1-04 bundle's own
- * `data_dictionary_id`. Neither seam is reimplemented here; both are invoked
- * exactly as any other caller would invoke them. The tick stops there: it
+ * Only when that P1-03 activation reports an authoritative COMPLETED run -
+ * whether freshly completed this tick or an idempotent replay of an
+ * already-completed run - does the tick continue, strictly in order, through
+ * the existing dormant P1-04 (`createDraftDataDictionary`) and P1-05
+ * (`persistIntakeSensitivityProfile`) service seams - unchanged by this
+ * module - using the authoritative `output_profile_id` that completed run
+ * carries, and then the P1-04 bundle's own `data_dictionary_id`. Neither seam
+ * is reimplemented here; both are invoked exactly as any other caller would
+ * invoke them. A later tick never re-profiles or re-queues an already-
+ * completed P1-03 run merely to resume P1-04/P1-05. The tick stops there: it
  * never imports, calls, or otherwise reaches the P1-06 review-queue seam, so
  * no worker/system/internal P1-06 write path exists. P1-06 initiation remains
  * exclusively a human action, gated by the existing `AUTH-KAI-003` mapped-
@@ -99,12 +102,16 @@ export async function runKaiP1WorkerTick(dependencies = {}) {
 
     const entry = { intakeFileId, result };
 
-    // Only a fresh P1-03 completion carries an authoritative output_profile_id
-    // this tick can hand to P1-04. A replayed/failed activation result never
-    // does, so P1-04/P1-05 are never attempted for it.
+    // Continuation requires an authoritative COMPLETED P1-03 result - whether
+    // freshly completed this tick or an idempotent replay of an
+    // already-completed run - never a bare `activated: true` flag, which is
+    // false on a completed replay even though the completed run itself is
+    // just as authoritative. Any other status (queued/running/failed/error)
+    // never carries a completed run and is never treated as one.
+    const parserStatus = result?.ok === true ? result?.data?.run?.run?.parser_status : undefined;
     const outputProfileId = result?.ok === true ? result?.data?.run?.run?.output_profile_id : undefined;
 
-    if (result?.ok === true && result?.data?.activated === true && typeof outputProfileId === "string" && outputProfileId.length > 0) {
+    if (result?.ok === true && parserStatus === "completed" && typeof outputProfileId === "string" && outputProfileId.length > 0) {
       const metadataOnlyAudit = dependencies.metadataOnlyAudit || buildMetadataOnlyAudit({
         organizationId,
         intakeFileId,

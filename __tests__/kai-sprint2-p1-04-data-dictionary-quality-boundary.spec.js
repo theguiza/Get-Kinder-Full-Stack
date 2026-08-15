@@ -97,35 +97,39 @@ test("P1-04 repository: is the only place SQL and row locking for these tables a
 test("P1-04 own-boolean-data-property audit predicate rejects a getter-backed ok and a non-plain prepared result", () => {
   const { prepareRequiredAudit, RequiredAuditRejectedError } = __dataDictionaryRepositoryTestables;
   const record = { dictionary_status: "draft" };
+  const fakeTx = { query: async () => ({ rows: [], rowCount: 0 }) };
 
   const getterBacked = {
     prepareMetadataOnlyAudit() {
       return Object.defineProperty({}, "ok", { get() { return true; }, enumerable: true });
     },
   };
-  assert.throws(() => prepareRequiredAudit(getterBacked, record), RequiredAuditRejectedError);
+  assert.throws(() => prepareRequiredAudit(getterBacked, fakeTx, record), RequiredAuditRejectedError);
 
   const arrayShaped = {
     prepareMetadataOnlyAudit() {
       return Object.assign([], { ok: true, publish() {} });
     },
   };
-  assert.throws(() => prepareRequiredAudit(arrayShaped, record), RequiredAuditRejectedError);
+  assert.throws(() => prepareRequiredAudit(arrayShaped, fakeTx, record), RequiredAuditRejectedError);
 
   const missingPublish = {
     prepareMetadataOnlyAudit() {
       return { ok: true };
     },
   };
-  assert.throws(() => prepareRequiredAudit(missingPublish, record), RequiredAuditRejectedError);
+  assert.throws(() => prepareRequiredAudit(missingPublish, fakeTx, record), RequiredAuditRejectedError);
 
+  let capturedDb;
   const accepted = {
-    prepareMetadataOnlyAudit() {
+    prepareMetadataOnlyAudit({ db } = {}) {
+      capturedDb = db;
       return { ok: true, publish: async () => {} };
     },
   };
-  const prepared = prepareRequiredAudit(accepted, record);
+  const prepared = prepareRequiredAudit(accepted, fakeTx, record);
   assert.equal(typeof prepared.publish, "function");
+  assert.equal(capturedDb, fakeTx, "the repository's transaction must be forwarded as the audit's db context");
 });
 
 test("P1-04 deriveDictionaryFields copies safe committed profile facts and defaults business_meaning/entity_level to unknown", () => {

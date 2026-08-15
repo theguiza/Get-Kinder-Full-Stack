@@ -47,7 +47,31 @@ function fakeCompletedActivation(calls) {
     calls.push(input);
     return {
       ok: true,
-      data: { activated: true, run: { run: { output_profile_id: OUTPUT_PROFILE_ID } } },
+      data: {
+        activated: true,
+        run: { run: { output_profile_id: OUTPUT_PROFILE_ID, parser_status: "completed" }, replayed: false },
+      },
+      error: null,
+    };
+  };
+}
+
+/**
+ * A completed run's authoritative continuation must never depend on
+ * `activated: true` - an idempotent replay of an already-completed P1-03 run
+ * reports `activated: false` (nothing new happened this tick) even though the
+ * completed run and its `output_profile_id` are just as authoritative.
+ */
+function fakeReplayedCompletedActivation(calls) {
+  return async (input) => {
+    calls.push(input);
+    return {
+      ok: true,
+      data: {
+        activated: false,
+        queued: { replayed: true },
+        run: { run: { output_profile_id: OUTPUT_PROFILE_ID, parser_status: "completed" }, replayed: true },
+      },
       error: null,
     };
   };
@@ -268,7 +292,7 @@ test("status reports the worker state correctly: both flags required, neither al
   assert.equal(neither.body.data.profiling_enabled, false);
 });
 
-test("a fresh P1-03 completion continues through P1-04 then P1-05 in order, then stops", async () => {
+test("A. fresh success: a fresh P1-03 completion continues through P1-04 then P1-05 in order, then stops", async () => {
   const activationCalls = [];
   const dictionaryCalls = [];
   const sensitivityCalls = [];
@@ -385,16 +409,137 @@ test("a P1-04 failure stops the chain before P1-05 is ever invoked", async () =>
   assert.equal(entry.sensitivityProfile, undefined);
 });
 
-test("a P1-03 activation that is not a fresh completion never reaches P1-04", async () => {
+test("B. P1-04 recovery: a P1-04 failure on tick 1 is retried on tick 2 against the replayed completed P1-03 run, without reprofiling", async () => {
+  const activationCalls = [];
   const dictionaryCalls = [];
   const sensitivityCalls = [];
 
-  const notFreshCases = [
+  const activateParserProfileWorkForIntakeFile = async (input) => {
+    activationCalls.push(input);
+    return activationCalls.length === 1
+      ? fakeCompletedActivation([])(input)
+      : fakeReplayedCompletedActivation([])(input);
+  };
+
+  const dependencies = {
+    env: ENABLED_ENV,
+    listKaiP1WorkerSyntheticScopedEligibleIntakeFiles: async () => [
+      { organization_id: IN_SCOPE_ORG, intake_file_id: "file-1" },
+    ],
+    activateParserProfileWorkForIntakeFile,
+    createDraftDataDictionary: async (input) => {
+      dictionaryCalls.push(input);
+      if (dictionaryCalls.length === 1) {
+        return { ok: false, data: null, error: { code: "system_error" } };
+      }
+      return { ok: true, data: { dictionary: { data_dictionary_id: DATA_DICTIONARY_ID }, replayed: false }, error: null };
+    },
+    persistIntakeSensitivityProfile: async (input) => {
+      sensitivityCalls.push(input);
+      return { ok: true, data: { sensitivityProfile: { intake_sensitivity_profile_id: "sp-1" } }, error: null };
+    },
+    createProductionMetadataOnlyAudit: () => ({ prepareMetadataOnlyAudit: () => ({ ok: true, publish: async () => {} }) }),
+  };
+
+  const first = await runKaiP1WorkerTick(dependencies);
+  const firstEntry = first.data.activated[0];
+  assert.equal(firstEntry.dataDictionary.ok, false);
+  assert.equal(firstEntry.sensitivityProfile, undefined, "P1-05 must never be called after a P1-04 failure");
+
+  const second = await runKaiP1WorkerTick(dependencies);
+  assert.equal(activationCalls.length, 2);
+  assert.equal(activationCalls[1].retry, false, "the replayed completed run must never be retried/reprofiled");
+
+  const secondEntry = second.data.activated[0];
+  assert.equal(secondEntry.dataDictionary.ok, true, "P1-04 must succeed/replay against the same authoritative output_profile_id");
+  assert.equal(dictionaryCalls[1].fileProfileId, OUTPUT_PROFILE_ID, "the exact persisted output_profile_id must be reused, not re-derived");
+  assert.equal(secondEntry.sensitivityProfile.ok, true);
+});
+
+test("C. P1-05 recovery: a P1-05 failure on tick 1 is retried on tick 2, idempotently replaying the same P1-04 dictionary, no duplicate authoritative records", async () => {
+  const activationCalls = [];
+  const dictionaryCalls = [];
+  const sensitivityCalls = [];
+
+  const activateParserProfileWorkForIntakeFile = async (input) => {
+    activationCalls.push(input);
+    return activationCalls.length === 1
+      ? fakeCompletedActivation([])(input)
+      : fakeReplayedCompletedActivation([])(input);
+  };
+
+  const dependencies = {
+    env: ENABLED_ENV,
+    listKaiP1WorkerSyntheticScopedEligibleIntakeFiles: async () => [
+      { organization_id: IN_SCOPE_ORG, intake_file_id: "file-1" },
+    ],
+    activateParserProfileWorkForIntakeFile,
+    createDraftDataDictionary: async (input) => {
+      dictionaryCalls.push(input);
+      // The injected P1-04 repository owns idempotent replay: it reports the
+      // same committed dictionary identity for the same lookup input every time.
+      return {
+        ok: true,
+        data: { dictionary: { data_dictionary_id: DATA_DICTIONARY_ID }, replayed: dictionaryCalls.length > 1 },
+        error: null,
+      };
+    },
+    persistIntakeSensitivityProfile: async (input) => {
+      sensitivityCalls.push(input);
+      if (sensitivityCalls.length === 1) {
+        return { ok: false, data: null, error: { code: "system_error" } };
+      }
+      return { ok: true, data: { sensitivityProfile: { intake_sensitivity_profile_id: "sp-1" }, replayed: false }, error: null };
+    },
+    createProductionMetadataOnlyAudit: () => ({ prepareMetadataOnlyAudit: () => ({ ok: true, publish: async () => {} }) }),
+  };
+
+  const first = await runKaiP1WorkerTick(dependencies);
+  const firstEntry = first.data.activated[0];
+  assert.equal(firstEntry.dataDictionary.ok, true);
+  assert.equal(firstEntry.sensitivityProfile.ok, false);
+
+  const second = await runKaiP1WorkerTick(dependencies);
+  const secondEntry = second.data.activated[0];
+  assert.equal(secondEntry.dataDictionary.ok, true);
+  assert.equal(
+    dictionaryCalls[0].fileProfileId,
+    dictionaryCalls[1].fileProfileId,
+    "the same dictionary identity must be reused across ticks, never a second authoritative bundle",
+  );
+  assert.equal(dictionaryCalls[1].fileProfileId, OUTPUT_PROFILE_ID);
+  assert.equal(secondEntry.sensitivityProfile.ok, true);
+  assert.equal(sensitivityCalls.length, 2);
+});
+
+test("D. non-completed P1-03 results never reach P1-04, even a malformed/fake result carrying unrelated data", async () => {
+  const dictionaryCalls = [];
+  const sensitivityCalls = [];
+
+  const notCompletedCases = [
     async () => ({ ok: false, data: null, error: { code: "conflict_current_state_changed" } }),
     async () => ({ ok: true, data: { activated: false, reason: "not_eligible_for_p1" }, error: null }),
+    async () => ({
+      ok: true,
+      data: { activated: true, run: { run: { parser_status: "queued", output_profile_id: OUTPUT_PROFILE_ID } } },
+      error: null,
+    }),
+    async () => ({
+      ok: true,
+      data: { activated: true, run: { run: { parser_status: "running", output_profile_id: OUTPUT_PROFILE_ID } } },
+      error: null,
+    }),
+    async () => ({
+      ok: true,
+      data: { activated: false, run: { run: { parser_status: "failed", output_profile_id: null } } },
+      error: null,
+    }),
+    // Malformed/fake result: truthy `activated` and unrelated data, but no
+    // completed run/output_profile_id at the expected shape.
+    async () => ({ ok: true, data: { activated: true, unrelated: { output_profile_id: OUTPUT_PROFILE_ID } }, error: null }),
   ];
 
-  for (const activateParserProfileWorkForIntakeFile of notFreshCases) {
+  for (const activateParserProfileWorkForIntakeFile of notCompletedCases) {
     // eslint-disable-next-line no-await-in-loop
     await runKaiP1WorkerTick({
       env: ENABLED_ENV,
@@ -417,7 +562,7 @@ test("a P1-03 activation that is not a fresh completion never reaches P1-04", as
   assert.equal(sensitivityCalls.length, 0);
 });
 
-test("no P1-06 seam is ever imported or reachable from the runtime module", () => {
+test("E. P1-06 boundary: no P1-06 seam is ever imported or reachable from the runtime module", () => {
   const source = readFileSync("Backend/kai/parsing/p1WorkerRuntime.js", "utf8");
   const importLines = source.match(/^import .+$/gm) || [];
   for (const line of importLines) {
