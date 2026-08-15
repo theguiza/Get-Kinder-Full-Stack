@@ -37,6 +37,7 @@ let reviewQueueServicePromise = null;
 let reviewCockpitServicePromise = null;
 let exportReviewServicePromise = null;
 let evidenceLineageServicePromise = null;
+let evidenceCoverageAssessmentServicePromise = null;
 
 export function sendServiceResult(res, result, successStatus = 200) {
   if (result?.ok) {
@@ -1093,6 +1094,43 @@ router.post(
           actorContext,
           now,
         }),
+      });
+    });
+  },
+);
+
+async function getEvidenceCoverageAssessmentService() {
+  if (intakeServiceOverride?.assessEvidenceCoverageForSourceVersion) return intakeServiceOverride;
+  evidenceCoverageAssessmentServicePromise ||= import("../services/kaiEvidenceCoverageAssessmentService.js");
+  return evidenceCoverageAssessmentServicePromise;
+}
+
+/**
+ * KAI P2-02 evidence-coverage-assessment route. Reuses the exact P2-01
+ * organization/source-version path identity and identifier validation
+ * (`sourceVersionEvidenceExtractionIdentifiers`) and actorContext derivation
+ * (`sprint2MappedActorContext`) unchanged, on the same mounted router, since
+ * `assessEvidenceCoverageForSourceVersion` is scoped to the identical
+ * organizationId/sourceVersionId resource identity and also expects an
+ * already-resolved actorContext. Read-only: no body, no persistence, no
+ * audit write - the service only reads already-committed rows and returns a
+ * computed-fresh result.
+ */
+router.get(
+  "/admin/organizations/:organizationId/source-versions/:sourceVersionId/evidence-coverage-assessment",
+  async (req, res) => {
+    const identifiers = sourceVersionEvidenceExtractionIdentifiers(req);
+    if (!identifiers) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_or_source_version_id")],
+      });
+    }
+    return invokeService(res, async () => {
+      const service = await getEvidenceCoverageAssessmentService();
+      return service.assessEvidenceCoverageForSourceVersion({
+        organizationId: identifiers.organizationId,
+        sourceVersionId: identifiers.sourceVersionId,
+        actorContext: sprint2MappedActorContext(req),
       });
     });
   },

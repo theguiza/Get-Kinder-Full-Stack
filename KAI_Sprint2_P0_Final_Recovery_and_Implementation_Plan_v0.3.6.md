@@ -16031,3 +16031,113 @@ NOT_CONFIRMED:
 
 One local commit was made on this branch recording this package. No push,
 no deploy.
+
+## P2-02 operational composition - internal evidence-coverage-assessment route (completed 2026-08-15)
+
+Status: accepted for this local package as one bounded, authenticated,
+read-only internal GET route wired to the existing accepted, dormant P2-02
+`assessEvidenceCoverageForSourceVersion` service. P2-02's foundation (the ten
+dimension assessors, the reused lineage/permission gate, the repository read
+logic) was not reopened or rebuilt. No persistence, audit write, SQL, or
+direct repository access was added in the route. No P2-03 through P2-08 or
+P3 service was imported or invoked. No worker/cron/listener/scheduler or
+automatic P1->P2 chaining was added.
+
+Implementation evidence:
+  - Backend/kai/routes/sprint2IntakeApi.js - adds exactly one mounted route,
+    `router.get("/admin/organizations/:organizationId/source-versions/
+    :sourceVersionId/evidence-coverage-assessment")`, on the existing
+    mounted Sprint 2 intake router, placed immediately after the P2-01
+    evidence-extraction route (before `export default router;`). Reuses the
+    existing P2-01 `sourceVersionEvidenceExtractionIdentifiers` path-UUID
+    validator and `sprint2MappedActorContext(req)` actorContext derivation
+    unchanged - both already scope to the identical organizationId/
+    sourceVersionId resource identity `assessEvidenceCoverageForSourceVersion`
+    expects, so no new identifier-validation or actor-derivation helper was
+    written. One new helper, `getEvidenceCoverageAssessmentService()`, is a
+    lazy-import getter following the exact existing
+    `getEvidenceLineageService()` pattern (including its override-detection
+    convention: `intakeServiceOverride?.assessEvidenceCoverageForSourceVersion`).
+    The route calls the service with exactly three values -
+    organizationId/sourceVersionId from the validated path parameters and
+    actorContext from `sprint2MappedActorContext(req)` - matching the
+    service's exact accepted input shape
+    (`{ organizationId, sourceVersionId, actorContext }`, no `now`). No
+    request body is read or required. The route handler and its one new
+    helper contain no SQL, no pool/repository import, no direct `kai.*`
+    access, and pass no `metadataOnlyAudit` dependency at all, since
+    `assessEvidenceCoverageForSourceVersion` performs no write and requires
+    none.
+  - __tests__/kai-sprint2-p2-02-evidence-coverage-assessment-route.spec.js
+    (new) - covers: exactly one mounted authenticated GET route at the
+    documented path; unauthenticated requests fail (401) before the service
+    is ever called; an authenticated mapped human in the correct
+    organization reaches `assessEvidenceCoverageForSourceVersion` exactly
+    once with the server-resolved organizationId/sourceVersionId/
+    actorContext and no `metadataOnlyAudit` dependency; caller-supplied
+    query-string identity (`organization_id`, `actorContext`) cannot replace
+    the server-resolved actor or path-scoped tenant identity, since the
+    route never reads them; malformed path UUIDs (non-UUID or not already
+    lowercased, for either identifier) use the existing safe
+    `validation_blocker` envelope; every listed service-result error code
+    (`feature_disabled`, `invalid_request`, `unauthorized`,
+    `mapped_kai_user_required`, `authorization_denied`,
+    `tenant_boundary_violation`, `not_found`, `conflict_current_state_changed`,
+    `system_error` - covering unmapped/unauthorized/non-human/cross-tenant
+    rejection, all of which the existing service already enforces) maps
+    through the existing safe envelope with no blocker/warning/data leakage;
+    `KAI_SPRINT2_ENABLED=false` returns the existing outer feature-gate's
+    403 with zero service calls; and a source-slice scan proving the new
+    route region contains no SQL keyword, no db/repository/postgres import,
+    no pool/kaiDb/repository reference, no `metadataOnlyAudit` reference,
+    and no P2-03 through P2-08 service reference. Existing P2-02
+    assessment/lineage-gate/database-read coverage is not duplicated here;
+    it remains owned by
+    `__tests__/kai-sprint2-p2-02-evidence-coverage-assessment-boundary.spec.js`
+    and the P2-02 verifier script.
+  - __tests__/kai-sprint2-pass2-route-runtime.spec.js - the one required,
+    additive update: the existing exhaustive mounted-route-path enumeration
+    test now includes the new P2-02 path immediately before the P2-01
+    evidence-extraction path (alphabetically adjacent - `evidence-coverage-
+    assessment` sorts before `evidence-extraction`); every previously listed
+    path is preserved verbatim and unreordered.
+  - __tests__/kai-sprint2-p2-01-evidence-extraction-route.spec.js - the one
+    required, corrective update: the existing P2-01 source-slice test's end
+    anchor is narrowed from `export default router;` to the new
+    `async function getEvidenceCoverageAssessmentService` marker, so the
+    P2-01-only source-slice assertions (no SQL, no P2-02+ reference) stop
+    incidentally spanning the newly appended P2-02 route region (whose own
+    doc comment names "P2-02", which the P2-01 test's own forbidden-pattern
+    regex would otherwise - falsely - flag). No P2-01 behavioral assertion
+    was changed.
+
+TOOL_VERIFIED:
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false node --test __tests__/kai-sprint2-p2-02-evidence-coverage-assessment-route.spec.js`
+    -> 9/9 pass.
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false node --test __tests__/kai-sprint2-pass2-route-runtime.spec.js __tests__/kai-sprint2-p2-01-evidence-extraction-route.spec.js`
+    -> 36/36 pass.
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm run verify:kai-sprint2-p2-02-evidence-coverage-assessment`
+    -> P2-02 evidence-coverage-assessment integration tests passed (7/7),
+    using a real ephemeral local PostgreSQL instance, then removed.
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm run test:kai-sprint2`
+    -> complete Sprint 2 suite: 2007 pass, 0 fail, 29 skip.
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm test`
+    -> complete repository suite: 2112 pass, 0 fail, 29 skip.
+  - `git diff --check` -> clean (no whitespace errors).
+
+USER_CONFIRMED:
+  - P2-02 is accepted and closed as a backend foundation; this operational-
+    composition package (exposing the existing
+    `assessEvidenceCoverageForSourceVersion` through the existing
+    authenticated internal KAI human application surface, as one bounded,
+    read-only route addition) is authorized.
+
+NOT_CONFIRMED:
+  - No push, merge, deploy, flag enablement, P2-03 through P2-08 or P3
+    invocation, cron/worker/scheduler/listener/promotion-hook creation,
+    schema/migration change, persistence, or audit-write path was added.
+    Real client data was not used. `00_KAI_CURRENT_STATE.md` and the
+    Implementation Baseline were not updated.
+
+One local commit was made on this branch recording this package. No push,
+no deploy.
