@@ -15589,3 +15589,109 @@ NOT_CONFIRMED:
   package's smallest-reasonable defaults, both fully overridable via
   `registerKaiP1WorkerCron`'s options, and neither was asserted by the task
   instructions.
+
+P1 worker composition correction: authorize continuation into P1-04/P1-05 only,
+STOP before P1-06 (2026-08-15)
+
+Fresh repository preflight: `git status` clean at `70421cd` (the accepted P1
+worker runtime commit); re-read
+`Backend/kai/parsing/p1WorkerRuntime.js`, `p1WorkerCron.js`,
+`parserProfileActivation.js`, `parserProfileWorkerOrchestration.js`, the P1-04
+`kaiDataDictionaryService.js` / `postgresDataDictionaryRepository.js`, the
+P1-05 `kaiIntakeSensitivityProfileService.js` /
+`postgresIntakeSensitivityProfileRepository.js`, and the P1-06
+`kaiReviewQueueService.js` `AUTH-KAI-003` mapped-human-actor gate
+(`isMappedHumanActor`, `actorContext.actorType === "human"`) to confirm the
+reported state matched before implementing directly, per the owner's
+instruction.
+
+Implementation:
+  - `Backend/kai/parsing/p1WorkerRuntime.js` - `runKaiP1WorkerTick` now
+    continues, strictly in order, past a fresh P1-03 `activated: true`
+    completion into the existing, unmodified P1-04
+    `createDraftDataDictionary` and P1-05 `persistIntakeSensitivityProfile`
+    service seams, then stops. The authoritative `output_profile_id` P1-03
+    just committed (`result.data.run.run.output_profile_id`) is passed as
+    P1-04's `fileProfileId`; P1-04's own returned
+    `dictionary.data_dictionary_id` is passed as P1-05's `dataDictionaryId`.
+    Neither downstream call is attempted unless the prior stage returned
+    `ok: true` with the expected identity present, so a P1-04 failure stops
+    the chain before P1-05 is ever invoked, and a P1-03 result that is not a
+    fresh completion (already-failed, or a replay lacking
+    `activated: true`) never reaches P1-04. A `metadataOnlyAudit` instance is
+    constructed via the existing `createProductionMetadataOnlyAudit`
+    composition (unchanged) and shared across the P1-04/P1-05 calls for that
+    file. Neither `parserProfileActivation.js` nor
+    `parserProfileWorkerOrchestration.js` nor
+    `postgresParserRunRepository.js` was touched: P1-03's own
+    `parser_status = 'completed'` transition and audit remain exactly as
+    committed in `70421cd`. No P1-06 (`kaiReviewQueueService.js`,
+    `createSensitivityReviewQueueItem`) import, call, or write seam of any
+    kind was added - the runtime module still imports nothing from that
+    file, and no worker/system/internal actor can reach it: `AUTH-KAI-003`'s
+    mapped-human-actor requirement in `kaiReviewQueueService.js` is
+    unmodified. No P1-07/P1-08/P1-09/P2/P3 module was imported or invoked.
+    No schema, production config, feature flag, cloud, or deployment file
+    was changed. The existing synthetic-org scope check,
+    `KAI_SPRINT2_ENABLED`/`KAI_WORKER_ENABLED` composition, tenant-boundary
+    defense-in-depth check, `retry: false` (no automatic parser retry), and
+    conservative-unknown-defaults behavior owned by the injected P1-05
+    repository are all unchanged.
+  - `__tests__/kai-sprint2-p1-worker-runtime-composition.spec.js` - updated
+    the existing import-boundary test (previously asserting the module
+    imported no `dataDictionary`-named module at all) to instead assert the
+    module's import lines reference no P1-06-and-beyond module
+    (`reviewQueue`/`review-?queue`/`sourceCandidate`/`sourcePromotion`/
+    `evidence`/`claim`/`generat`/`review-?cockpit`/`exportReview`/
+    `exportCandidate`/`humanAuthority`) while positively asserting the new
+    `createDraftDataDictionary` and `persistIntakeSensitivityProfile` seams
+    are present, since P1-04/P1-05 are now the authorized continuation.
+    Added five new tests: a fresh P1-03 completion reaches P1-04 then P1-05,
+    in that order, with the correct identity at each stage, and never
+    reaches any P1-06 seam (a spy `createSensitivityReviewQueueItem`
+    dependency is supplied but is unreachable since the runtime never wires
+    or calls it); replaying the same tick calls P1-04/P1-05 again with the
+    identical `fileProfileId`/`dataDictionaryId` identity each time, which is
+    what lets their own idempotent repositories replay instead of
+    duplicating (per the existing, separately-tested P1-04/P1-05 replay
+    contracts); a P1-04 failure stops the chain before P1-05 is ever
+    invoked; a P1-03 result that is not a fresh completion (`ok: false`, or
+    `ok: true` with `activated: false`) never reaches P1-04; and a dedicated
+    static check that no P1-06 seam name appears in the module's import
+    lines or as a called identifier.
+
+TOOL_VERIFIED - tests:
+
+- `node --test __tests__/kai-sprint2-p1-worker-runtime-composition.spec.js`
+  passed (15 pass, 0 fail) - the pre-existing 10 tests plus the 5 new ones
+  above.
+- focused_tests:
+  `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false node --test __tests__/kai-sprint2-p1-worker-runtime-composition.spec.js __tests__/kai-sprint2-p1-activation.spec.js __tests__/kai-sprint2-p1-03-audit-transaction-propagation.spec.js __tests__/kai-sprint2-api-contract.spec.js __tests__/kai-sprint2-foundation-safety.spec.js __tests__/kai-sprint2-config.spec.js __tests__/kai-sprint2-pass2-api-contract.spec.js __tests__/kai-sprint2-pass2-metadata-intake-service.spec.js`
+  passed (163 pass, 0 fail).
+- broader_tests:
+  `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm run test:kai-sprint2`
+  passed (1982 pass, 0 fail, 29 skipped - the same pre-existing
+  suite-specific-opt-in integration specs noted above, unaffected by this
+  correction) and
+  `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm test`
+  passed (2087 pass, 0 fail, 29 skipped).
+- Without the `DATABASE_URL`/`KAI_FILE_UPLOAD_ENABLED` overrides, plain
+  `npm test` reproduces exactly one failure,
+  `kai-sprint2-foundation-safety.spec.js` ("status reports only the mounted
+  metadata capability as enabled" / `file_upload_enabled` expected `false`,
+  actual `true`) - confirmed pre-existing and unrelated to this correction by
+  reproducing it identically via `git stash` against the unmodified starting
+  tree (`70421cd`) before any file in this correction was touched.
+- git_diff_check: `git diff --check` passed.
+- prohibited_actions_not_performed: no production access, deployment,
+  PostgreSQL/database/schema/migration mutation, GCP/IAM/GCS/Render/cloud
+  mutation, feature/configuration change, credential/secret inspection, real
+  client data handling, push, or destructive action. P1-03's
+  `parser_status = 'completed'` transition was not moved or redefined. No
+  P1-06 review-queue item, human actor, or system/internal write seam was
+  created or fabricated; `AUTH-KAI-003` was not weakened. No P1-07/P1-08/
+  P1-09/P2/P3 module was invoked. No schema, production config, flag, cloud,
+  or deployment change was made.
+
+One local commit was made on this branch recording this correction. No push,
+no deploy.

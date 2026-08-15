@@ -39,6 +39,20 @@ function fakeActivation(calls) {
   };
 }
 
+const OUTPUT_PROFILE_ID = "b2f6b6f0-1111-4a2a-9c3d-000000000001";
+const DATA_DICTIONARY_ID = "b2f6b6f0-2222-4a2a-9c3d-000000000002";
+
+function fakeCompletedActivation(calls) {
+  return async (input) => {
+    calls.push(input);
+    return {
+      ok: true,
+      data: { activated: true, run: { run: { output_profile_id: OUTPUT_PROFILE_ID } } },
+      error: null,
+    };
+  };
+}
+
 test("either feature flag disabled => zero worker work", async () => {
   const activationCalls = [];
   const listCalls = [];
@@ -169,17 +183,19 @@ test("no automatic retry: the tick never sets retry: true", async () => {
   }
 });
 
-test("no P2/P3 activation: the runtime module imports only the P1 activation seam", () => {
+test("no P1-06+ activation: the runtime module imports only the P1-03/P1-04/P1-05 seams", () => {
   const source = readFileSync("Backend/kai/parsing/p1WorkerRuntime.js", "utf8");
   const importLines = source.match(/^import .+$/gm) || [];
   assert.ok(importLines.length > 0);
   for (const line of importLines) {
     assert.doesNotMatch(
       line,
-      /evidence|claim|generat|review-?cockpit|sourcePromotion|dataDictionary|exportReview|exportCandidate|humanAuthority/i,
+      /evidence|claim|generat|review-?cockpit|reviewQueue|sourceCandidate|sourcePromotion|exportReview|exportCandidate|humanAuthority/i,
     );
   }
   assert.match(source, /activateParserProfileWorkForIntakeFile/);
+  assert.match(source, /createDraftDataDictionary/);
+  assert.match(source, /persistIntakeSensitivityProfile/);
 });
 
 test("cron registration is dormant unless both feature flags are enabled, and reuses the existing node-cron model", () => {
@@ -250,4 +266,162 @@ test("status reports the worker state correctly: both flags required, neither al
   sendStatus({ kaiSprint2StatusEnv: {} }, neither);
   assert.equal(neither.body.data.parser_worker_enabled, false);
   assert.equal(neither.body.data.profiling_enabled, false);
+});
+
+test("a fresh P1-03 completion continues through P1-04 then P1-05 in order, then stops", async () => {
+  const activationCalls = [];
+  const dictionaryCalls = [];
+  const sensitivityCalls = [];
+  const reviewQueueCalls = [];
+
+  const result = await runKaiP1WorkerTick({
+    env: ENABLED_ENV,
+    listKaiP1WorkerSyntheticScopedEligibleIntakeFiles: async () => [
+      { organization_id: IN_SCOPE_ORG, intake_file_id: "file-1" },
+    ],
+    activateParserProfileWorkForIntakeFile: fakeCompletedActivation(activationCalls),
+    createDraftDataDictionary: async (input) => {
+      dictionaryCalls.push(input);
+      return { ok: true, data: { dictionary: { data_dictionary_id: DATA_DICTIONARY_ID } }, error: null };
+    },
+    persistIntakeSensitivityProfile: async (input) => {
+      sensitivityCalls.push(input);
+      return { ok: true, data: { sensitivityProfile: { intake_sensitivity_profile_id: "sp-1" } }, error: null };
+    },
+    createProductionMetadataOnlyAudit: () => ({ prepareMetadataOnlyAudit: () => ({ ok: true, publish: async () => {} }) }),
+    // No P1-06 dependency is ever wired in by the runtime, so a caller cannot
+    // even supply a reachable one to spy on - `createSensitivityReviewQueueItem`
+    // has no dependency key on this seam at all.
+    createSensitivityReviewQueueItem: async (input) => {
+      reviewQueueCalls.push(input);
+      throw new Error("must never be reachable");
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(activationCalls.length, 1);
+
+  assert.equal(dictionaryCalls.length, 1);
+  assert.deepEqual(dictionaryCalls[0].organizationId, IN_SCOPE_ORG);
+  assert.deepEqual(dictionaryCalls[0].fileProfileId, OUTPUT_PROFILE_ID);
+
+  assert.equal(sensitivityCalls.length, 1);
+  assert.equal(sensitivityCalls[0].organizationId, IN_SCOPE_ORG);
+  assert.equal(sensitivityCalls[0].fileProfileId, OUTPUT_PROFILE_ID);
+  assert.equal(sensitivityCalls[0].dataDictionaryId, DATA_DICTIONARY_ID);
+
+  assert.equal(reviewQueueCalls.length, 0);
+
+  const entry = result.data.activated[0];
+  assert.equal(entry.dataDictionary.ok, true);
+  assert.equal(entry.sensitivityProfile.ok, true);
+});
+
+test("replaying the same tick does not duplicate P1-04 or P1-05 work", async () => {
+  const activationCalls = [];
+  const dictionaryCalls = [];
+  const sensitivityCalls = [];
+
+  const dependencies = {
+    env: ENABLED_ENV,
+    listKaiP1WorkerSyntheticScopedEligibleIntakeFiles: async () => [
+      { organization_id: IN_SCOPE_ORG, intake_file_id: "file-1" },
+    ],
+    activateParserProfileWorkForIntakeFile: fakeCompletedActivation(activationCalls),
+    createDraftDataDictionary: async (input) => {
+      dictionaryCalls.push(input);
+      // The injected P1-04 repository owns idempotent replay; this double always
+      // reports the same committed identity for the same lookup input.
+      return { ok: true, data: { dictionary: { data_dictionary_id: DATA_DICTIONARY_ID }, replayed: dictionaryCalls.length > 1 }, error: null };
+    },
+    persistIntakeSensitivityProfile: async (input) => {
+      sensitivityCalls.push(input);
+      return { ok: true, data: { sensitivityProfile: { intake_sensitivity_profile_id: "sp-1" }, replayed: sensitivityCalls.length > 1 }, error: null };
+    },
+    createProductionMetadataOnlyAudit: () => ({ prepareMetadataOnlyAudit: () => ({ ok: true, publish: async () => {} }) }),
+  };
+
+  await runKaiP1WorkerTick(dependencies);
+  await runKaiP1WorkerTick(dependencies);
+
+  assert.equal(dictionaryCalls.length, 2);
+  assert.equal(sensitivityCalls.length, 2);
+  // Every call carries the identical identity - the same fileProfileId and, once
+  // derived, the same dataDictionaryId - which is what lets the injected P1-04/
+  // P1-05 repositories replay the existing committed row instead of inserting a
+  // second one.
+  assert.equal(dictionaryCalls[0].organizationId, dictionaryCalls[1].organizationId);
+  assert.equal(dictionaryCalls[0].fileProfileId, dictionaryCalls[1].fileProfileId);
+  assert.equal(sensitivityCalls[0].dataDictionaryId, sensitivityCalls[1].dataDictionaryId);
+  assert.equal(sensitivityCalls[0].fileProfileId, sensitivityCalls[1].fileProfileId);
+});
+
+test("a P1-04 failure stops the chain before P1-05 is ever invoked", async () => {
+  const activationCalls = [];
+  const dictionaryCalls = [];
+  const sensitivityCalls = [];
+
+  const result = await runKaiP1WorkerTick({
+    env: ENABLED_ENV,
+    listKaiP1WorkerSyntheticScopedEligibleIntakeFiles: async () => [
+      { organization_id: IN_SCOPE_ORG, intake_file_id: "file-1" },
+    ],
+    activateParserProfileWorkForIntakeFile: fakeCompletedActivation(activationCalls),
+    createDraftDataDictionary: async (input) => {
+      dictionaryCalls.push(input);
+      return { ok: false, data: null, error: { code: "system_error" } };
+    },
+    persistIntakeSensitivityProfile: async (input) => {
+      sensitivityCalls.push(input);
+      return { ok: true, data: { sensitivityProfile: { intake_sensitivity_profile_id: "sp-1" } }, error: null };
+    },
+    createProductionMetadataOnlyAudit: () => ({ prepareMetadataOnlyAudit: () => ({ ok: true, publish: async () => {} }) }),
+  });
+
+  assert.equal(dictionaryCalls.length, 1);
+  assert.equal(sensitivityCalls.length, 0);
+  const entry = result.data.activated[0];
+  assert.equal(entry.dataDictionary.ok, false);
+  assert.equal(entry.sensitivityProfile, undefined);
+});
+
+test("a P1-03 activation that is not a fresh completion never reaches P1-04", async () => {
+  const dictionaryCalls = [];
+  const sensitivityCalls = [];
+
+  const notFreshCases = [
+    async () => ({ ok: false, data: null, error: { code: "conflict_current_state_changed" } }),
+    async () => ({ ok: true, data: { activated: false, reason: "not_eligible_for_p1" }, error: null }),
+  ];
+
+  for (const activateParserProfileWorkForIntakeFile of notFreshCases) {
+    // eslint-disable-next-line no-await-in-loop
+    await runKaiP1WorkerTick({
+      env: ENABLED_ENV,
+      listKaiP1WorkerSyntheticScopedEligibleIntakeFiles: async () => [
+        { organization_id: IN_SCOPE_ORG, intake_file_id: "file-1" },
+      ],
+      activateParserProfileWorkForIntakeFile,
+      createDraftDataDictionary: async (input) => {
+        dictionaryCalls.push(input);
+        return { ok: true, data: { dictionary: { data_dictionary_id: DATA_DICTIONARY_ID } }, error: null };
+      },
+      persistIntakeSensitivityProfile: async (input) => {
+        sensitivityCalls.push(input);
+        return { ok: true, data: { sensitivityProfile: { intake_sensitivity_profile_id: "sp-1" } }, error: null };
+      },
+    });
+  }
+
+  assert.equal(dictionaryCalls.length, 0);
+  assert.equal(sensitivityCalls.length, 0);
+});
+
+test("no P1-06 seam is ever imported or reachable from the runtime module", () => {
+  const source = readFileSync("Backend/kai/parsing/p1WorkerRuntime.js", "utf8");
+  const importLines = source.match(/^import .+$/gm) || [];
+  for (const line of importLines) {
+    assert.doesNotMatch(line, /createSensitivityReviewQueueItem|kaiReviewQueueService|review-?queue/i);
+  }
+  assert.doesNotMatch(source, /createSensitivityReviewQueueItem\s*\(/);
 });

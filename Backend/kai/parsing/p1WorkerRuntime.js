@@ -4,6 +4,9 @@ import {
 } from "../config/kaiSprint2Config.js";
 import { activateParserProfileWorkForIntakeFile } from "./parserProfileActivation.js";
 import { listKaiP1WorkerSyntheticScopedEligibleIntakeFiles } from "../db/kaiIntakeQueries.js";
+import { createDraftDataDictionary } from "../services/kaiDataDictionaryService.js";
+import { persistIntakeSensitivityProfile } from "../services/kaiIntakeSensitivityProfileService.js";
+import { createProductionMetadataOnlyAudit } from "../services/kaiMetadataOnlyAuditComposition.js";
 
 /**
  * KAI P1 worker runtime tick.
@@ -14,6 +17,22 @@ import { listKaiP1WorkerSyntheticScopedEligibleIntakeFiles } from "../db/kaiInta
  * one to the existing, unchanged `activateParserProfileWorkForIntakeFile`
  * activation seam - reusing its existing activation, queue/idempotency,
  * locking, exact-version read, audit-transaction, and retry semantics as-is.
+ *
+ * Only when that P1-03 activation reports a fresh `activated: true` completion
+ * does the tick continue, strictly in order, through the existing dormant
+ * P1-04 (`createDraftDataDictionary`) and P1-05 (`persistIntakeSensitivityProfile`)
+ * service seams - unchanged by this module - using the authoritative
+ * `output_profile_id` P1-03 just committed, and then the P1-04 bundle's own
+ * `data_dictionary_id`. Neither seam is reimplemented here; both are invoked
+ * exactly as any other caller would invoke them. The tick stops there: it
+ * never imports, calls, or otherwise reaches the P1-06 review-queue seam, so
+ * no worker/system/internal P1-06 write path exists. P1-06 initiation remains
+ * exclusively a human action, gated by the existing `AUTH-KAI-003` mapped-
+ * human-actor check in `kaiReviewQueueService.js`, untouched by this package.
+ *
+ * A P1-04 or P1-05 failure stops the chain at that stage: it is recorded on
+ * the returned entry but never retried automatically and never treated as
+ * grounds to re-run P1-03.
  *
  * Fails closed (zero work) unless both `KAI_SPRINT2_ENABLED` and
  * `KAI_WORKER_ENABLED` are enabled and a synthetic organization scope is
@@ -52,6 +71,12 @@ export async function runKaiP1WorkerTick(dependencies = {}) {
 
   const activateFn =
     dependencies.activateParserProfileWorkForIntakeFile || activateParserProfileWorkForIntakeFile;
+  const draftDataDictionaryFn = dependencies.createDraftDataDictionary || createDraftDataDictionary;
+  const persistSensitivityProfileFn =
+    dependencies.persistIntakeSensitivityProfile || persistIntakeSensitivityProfile;
+  const buildMetadataOnlyAudit =
+    dependencies.createProductionMetadataOnlyAudit || createProductionMetadataOnlyAudit;
+  const nowFn = dependencies.now || (() => new Date().toISOString());
 
   const activated = [];
   for (const file of Array.isArray(eligibleFiles) ? eligibleFiles : []) {
@@ -60,16 +85,56 @@ export async function runKaiP1WorkerTick(dependencies = {}) {
     if (file?.organization_id !== organizationId) continue;
     if (typeof file?.intake_file_id !== "string" || file.intake_file_id.length === 0) continue;
 
+    const intakeFileId = file.intake_file_id;
+
     const result = await activateFn(
       {
         organizationId,
-        intakeFileId: file.intake_file_id,
+        intakeFileId,
         actorContext: KAI_P1_WORKER_SYNTHETIC_ACTOR_CONTEXT,
         retry: false,
       },
       dependencies,
     );
-    activated.push({ intakeFileId: file.intake_file_id, result });
+
+    const entry = { intakeFileId, result };
+
+    // Only a fresh P1-03 completion carries an authoritative output_profile_id
+    // this tick can hand to P1-04. A replayed/failed activation result never
+    // does, so P1-04/P1-05 are never attempted for it.
+    const outputProfileId = result?.ok === true ? result?.data?.run?.run?.output_profile_id : undefined;
+
+    if (result?.ok === true && result?.data?.activated === true && typeof outputProfileId === "string" && outputProfileId.length > 0) {
+      const metadataOnlyAudit = dependencies.metadataOnlyAudit || buildMetadataOnlyAudit({
+        organizationId,
+        intakeFileId,
+        actorContext: KAI_P1_WORKER_SYNTHETIC_ACTOR_CONTEXT,
+        now: nowFn(),
+      });
+
+      const dictionaryResult = await draftDataDictionaryFn(
+        { organizationId, fileProfileId: outputProfileId, now: nowFn() },
+        { ...dependencies, metadataOnlyAudit },
+      );
+      entry.dataDictionary = dictionaryResult;
+
+      const dataDictionaryId =
+        dictionaryResult?.ok === true ? dictionaryResult?.data?.dictionary?.data_dictionary_id : undefined;
+
+      if (dictionaryResult?.ok === true && typeof dataDictionaryId === "string" && dataDictionaryId.length > 0) {
+        entry.sensitivityProfile = await persistSensitivityProfileFn(
+          {
+            organizationId,
+            fileProfileId: outputProfileId,
+            dataDictionaryId,
+            now: nowFn(),
+          },
+          { ...dependencies, metadataOnlyAudit },
+        );
+      }
+    }
+
+    activated.push(entry);
   }
 
   return { ok: true, data: { activated, organizationId }, error: null };
