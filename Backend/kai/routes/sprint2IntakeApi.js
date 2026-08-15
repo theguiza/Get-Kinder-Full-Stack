@@ -1420,6 +1420,103 @@ router.get(
   },
 );
 
+let eligibleClaimsForAudienceServicePromise = null;
+async function getEligibleClaimsForAudienceService() {
+  if (intakeServiceOverride?.listEligibleClaimsForAudience) return intakeServiceOverride;
+  eligibleClaimsForAudienceServicePromise ||= import("../services/kaiEligibleClaimsForAudienceService.js");
+  return eligibleClaimsForAudienceServicePromise;
+}
+
+const KAI_P2_08_DEFAULT_LIMIT = 25;
+const KAI_P2_08_MAX_LIMIT = 100;
+
+function eligibleClaimsForAudienceOrganizationIdentifier(req = {}) {
+  const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) || organizationId !== organizationId.toLowerCase()) return null;
+  return { organizationId };
+}
+
+/**
+ * KAI P2-08 requestedAudience/limit/afterClaimId query-string convention:
+ * reuses the exact P2-06 `requested_audience` query-parameter shape and
+ * enum, plus this router's existing `limit` string-digit query convention
+ * (as already used by the review-queue and intake-batch-files list routes),
+ * clamped to the exact 1-100 range
+ * `kaiEligibleClaimsForAudienceService.js` itself already enforces (not the
+ * narrower 25-item cap those older list routes use for their own resources).
+ * `afterClaimId` travels as a plain `after_claim_id` UUID query parameter,
+ * because the P2-08 service's own cursor is already a raw claimId - not an
+ * opaque encoded cursor object like the older review-queue/intake-batch-
+ * files list routes - so no new cursor-encoding scheme is introduced. Any
+ * other or missing/invalid query field fails closed as `validation_blocker`
+ * before the service is ever reached.
+ */
+function eligibleClaimsForAudienceQuery(req = {}) {
+  const allowedKeys = new Set(["requested_audience", "limit", "after_claim_id"]);
+  const keys = Object.keys(req.query || {});
+  if (keys.length === 0 || !keys.every((key) => allowedKeys.has(key))) return null;
+
+  const requestedAudience = req.query.requested_audience;
+  if (typeof requestedAudience !== "string" || !KAI_P2_06_REQUESTED_AUDIENCES.has(requestedAudience)) return null;
+
+  let limit = KAI_P2_08_DEFAULT_LIMIT;
+  if (req.query.limit !== undefined) {
+    if (typeof req.query.limit !== "string" || !/^\d+$/.test(req.query.limit)) return null;
+    limit = Number(req.query.limit);
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > KAI_P2_08_MAX_LIMIT) return null;
+  }
+
+  let afterClaimId = null;
+  if (req.query.after_claim_id !== undefined) {
+    const candidate = normalizedUuid(req.query.after_claim_id);
+    if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(candidate)) return null;
+    afterClaimId = candidate;
+  }
+
+  return { requestedAudience, limit, afterClaimId };
+}
+
+/**
+ * KAI P2-08 human eligible-claims-for-audience read route. Reuses the exact
+ * organization-scoped path convention already proven above (a single
+ * organizationId path segment, as on the review-cockpit/review-queue list
+ * routes), and the same actorContext derivation (`sprint2MappedActorContext`)
+ * unchanged, on the same mounted router. Strictly read-only: the route
+ * performs no SQL, no direct database or kai schema access, no audit
+ * dependency injection, and no audit write - it derives organizationId
+ * (path) and actorContext (server session), accepts only the
+ * requestedAudience/limit/afterClaimId fields the existing P2-08 service
+ * already accepts, and delegates exactly once to that already-accepted
+ * service, which alone owns the P2-06 evaluator reuse, snapshot
+ * consistency, candidate-scan cap, ordering, pagination, and eligibility
+ * semantics.
+ */
+router.get(
+  "/admin/organizations/:organizationId/eligible-claims",
+  async (req, res) => {
+    const identifiers = eligibleClaimsForAudienceOrganizationIdentifier(req);
+    const query = eligibleClaimsForAudienceQuery(req);
+    if (!identifiers || !query) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker(
+          "invalid_organization_id_or_query",
+          "organization_id_requested_audience_limit_or_after_claim_id",
+        )],
+      });
+    }
+    return invokeService(res, async () => {
+      const service = await getEligibleClaimsForAudienceService();
+      return service.listEligibleClaimsForAudience({
+        organizationId: identifiers.organizationId,
+        requestedAudience: query.requestedAudience,
+        limit: query.limit,
+        afterClaimId: query.afterClaimId,
+        actorContext: sprint2MappedActorContext(req),
+      });
+    });
+  },
+);
+
 export default router;
 
 export const __testables = {
@@ -1456,6 +1553,8 @@ export const __testables = {
   conflictReviewCandidateIdentifiers,
   validateConflictReviewCandidateRequestOrSend,
   claimTraceabilityRequestedAudienceFromQuery,
+  eligibleClaimsForAudienceOrganizationIdentifier,
+  eligibleClaimsForAudienceQuery,
   setIntakeServiceForTest(service) {
     intakeServiceOverride = service;
     return () => {

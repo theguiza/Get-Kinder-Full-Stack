@@ -16789,3 +16789,136 @@ NOT_CONFIRMED:
 
 One local commit was made on this branch recording this package. No push,
 no deploy.
+
+## P2-08 operational composition - internal human eligible-claims-for-audience read route (completed 2026-08-15)
+
+Status: accepted for this local package as one bounded, authenticated,
+human-only internal GET route wired to the existing accepted, dormant P2-08
+`listEligibleClaimsForAudience` service. P2-08's foundation (P2-06 evaluator
+reuse inside one REPEATABLE READ READ ONLY transaction, snapshot
+consistency, ascending claim ordering, cursor/pagination semantics, the
+500-candidate scan cap, `eligible:false` omission, malformed-authoritative-
+state fail-closed behavior, and the output DTO contract) was not reopened,
+reworked, or rebuilt. No SQL or direct repository access was added in the
+route. No P2-07/P3 service was imported or invoked. No worker/cron/
+listener/scheduler or automatic chaining was added. No metadata-only audit
+or persistence of any kind was introduced, because
+`listEligibleClaimsForAudience` is itself strictly read-only.
+
+Implementation evidence:
+  - Backend/kai/routes/sprint2IntakeApi.js - adds exactly one mounted route,
+    `router.get("/admin/organizations/:organizationId/eligible-claims")`, on
+    the existing mounted Sprint 2 intake router, placed immediately after
+    the P2-06 claim-traceability route (before `export default router;`).
+    One new identifier helper,
+    `eligibleClaimsForAudienceOrganizationIdentifier(req)`, mirrors the
+    existing single-organizationId-path-segment identifier shape already
+    used elsewhere on this router. One new lazy-import getter,
+    `getEligibleClaimsForAudienceService()`, follows the exact existing
+    `getClaimTraceabilityService()` pattern (including the override-
+    detection convention:
+    `intakeServiceOverride?.listEligibleClaimsForAudience`). One new query
+    helper, `eligibleClaimsForAudienceQuery(req)`, reuses the P2-06
+    `requested_audience` query-parameter shape/enum unchanged, plus this
+    router's existing `limit` string-digit query convention (as already
+    used by the review-queue and intake-batch-files list routes), clamped
+    to the exact 1-100 range the P2-08 service itself already enforces
+    (default 25, matching this router's existing list-route default,
+    rather than inventing a new default). `afterClaimId` travels as a plain
+    `after_claim_id` UUID query parameter, because the P2-08 service's own
+    cursor is already a raw claimId - not an opaque encoded cursor object
+    like the older review-queue/intake-batch-files list routes - so no new
+    cursor-encoding scheme was introduced. Any other, missing, or invalid
+    query field fails closed as `validation_blocker` before the service is
+    ever reached, matching this router's existing "reject unknown fields
+    outright" convention. `organizationId` is always taken from the
+    validated path, and `actorContext` only from
+    `sprint2MappedActorContext(req)` (the existing server-authenticated/
+    mapped context - never request body/query), so no caller-supplied field
+    can override actor identity, roles, memberships, or tenant
+    authorization; the service's own `validateActorCanPerformOperation` and
+    `validateTenantBoundaryConsistency` calls remain the sole tenant/role
+    authorization boundary, unchanged. The route delegates to
+    `listEligibleClaimsForAudience({ organizationId, requestedAudience,
+    limit, afterClaimId, actorContext })` exactly once, with no route-level
+    transformation of the result beyond the router's existing
+    `sendServiceResult` envelope. The route and its three new helpers
+    contain no SQL, no pool/repository import, and no direct `kai.*`
+    access, and import/invoke no P2-07 or P3 service. No occurrence of the
+    literal token `req.user` was introduced anywhere in the new route
+    region.
+  - __tests__/kai-sprint2-p2-08-eligible-claims-for-audience-route.spec.js
+    (new) - covers: exactly one mounted authenticated GET route at the
+    documented path; unauthenticated requests fail (401) before the service
+    is ever called; an authenticated mapped human in the correct
+    organization reaches `listEligibleClaimsForAudience` exactly once with
+    the exact expected `{ organizationId, requestedAudience, limit,
+    afterClaimId, actorContext }` inputs, including the default limit when
+    omitted; caller-supplied `limit`/`after_claim_id` are forwarded exactly
+    as the service expects; a caller attempt to smuggle an alternate
+    organization/actor identity alongside `requested_audience` is rejected
+    as an unknown-field combination before the service is ever called,
+    while a clean request reaches the service using exclusively the
+    server-derived organizationId/actorContext; invalid or missing query
+    fields (absent audience, an unrecognized audience, out-of-range or
+    non-numeric limit, a malformed `after_claim_id`, or an extra query key)
+    fail closed as `validation_blocker` with zero service calls; a
+    malformed organizationId path value (non-UUID or not already
+    lowercased) uses the existing safe `validation_blocker` envelope; every
+    listed service-result error code maps through the existing safe
+    envelope with no blocker/warning/data leakage; `KAI_SPRINT2_ENABLED=false`
+    returns the existing outer feature-gate's 403 with zero service calls;
+    a source-slice scan proving the new route region contains no SQL
+    keyword, no db/repository/postgres import, no pool/kaiDb/repository/
+    kai-schema reference, no audit dependency injection, and no P2-07/P3
+    service reference; and a source-slice scan proving the literal token
+    `req.user` never appears in the new route region. Existing P2-08
+    evaluator-reuse/snapshot/ordering/pagination/scan-cap/eligibility/output-
+    DTO coverage is not duplicated here; it remains owned by
+    `__tests__/kai-sprint2-p2-08-eligible-claims-for-audience-boundary.spec.js`,
+    `__tests__/kai-sprint2-p2-08-eligible-claims-for-audience.integration.spec.js`,
+    and the P2-08 verifier script.
+  - __tests__/kai-sprint2-p2-06-claim-traceability-route.spec.js - the one
+    required, corrective update: the existing P2-06 source-slice tests' end
+    anchor is narrowed from `export default router;` to the new
+    `let eligibleClaimsForAudienceServicePromise` marker (the exact
+    P1-04/P2-04/P2-05/P2-06 defect class recurring one package later), so
+    the P2-06-only source-slice assertions (no SQL, no P2-07/P2-08
+    reference) stop incidentally spanning the newly appended P2-08 route
+    region. No P2-06 behavioral assertion was changed.
+  - __tests__/kai-sprint2-pass2-route-runtime.spec.js - the one required,
+    additive update: the existing exhaustive mounted-route-path enumeration
+    test now includes the new P2-08 path, alphabetically ordered
+    immediately after the P2-05 potential-conflicts path and before the
+    P2-03 claim-proposal path; every previously listed path is preserved
+    verbatim and unreordered.
+
+TOOL_VERIFIED:
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false node --test __tests__/kai-sprint2-p2-08-eligible-claims-for-audience-route.spec.js __tests__/kai-sprint2-p2-06-claim-traceability-route.spec.js __tests__/kai-sprint2-p2-05-conflict-review-candidate-route.spec.js __tests__/kai-sprint2-pass2-route-runtime.spec.js __tests__/kai-sprint2-p2-08-eligible-claims-for-audience-boundary.spec.js`
+    -> all pass.
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm run verify:kai-sprint2-p2-08-eligible-claims-for-audience`
+    -> P2-08 eligible-claims focused tests passed (14/14), using a real
+    ephemeral local PostgreSQL instance, then removed.
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm run verify:kai-sprint2-api-contract`
+    -> 60/60 pass.
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm run test:kai-sprint2`
+    -> 2071/2100 pass, 29 skipped, 0 fail.
+  - `git diff --check` -> clean (no whitespace errors).
+
+USER_CONFIRMED:
+  - P2-08 is accepted and closed as a backend foundation; this operational-
+    composition package (exposing the existing
+    `listEligibleClaimsForAudience` through the existing authenticated
+    internal KAI human application surface, as one bounded, strictly
+    read-only GET route addition) is authorized.
+
+NOT_CONFIRMED:
+  - No push, merge, deploy, flag enablement, P2-07 or P3 invocation,
+    cron/worker/scheduler/listener/promotion-hook creation, schema/migration
+    change, new database enum value, write/mutation of any kind, or new
+    review cycle was performed. Real client data was not used.
+    `00_KAI_CURRENT_STATE.md` and the Implementation Baseline were not
+    updated.
+
+One local commit was made on this branch recording this package. No push,
+no deploy.

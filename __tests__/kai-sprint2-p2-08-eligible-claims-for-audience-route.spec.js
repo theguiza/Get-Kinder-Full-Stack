@@ -17,23 +17,24 @@ import {
 } from "../Backend/kai/middleware/kaiSprint2RequestSafety.js";
 
 /**
- * P2-06 human claim-traceability read composition proof. Mirrors the existing
- * proven `kai-sprint2-p2-04-claim-gap-followup-route.spec.js` pattern exactly,
- * as a GET route instead of a POST route. The P2-06 service's own evaluator,
- * blocker ordering, traceability DTO, tenant/role rules, and REPEATABLE READ
- * READ ONLY transaction behavior are not retested here - they remain owned by
- * `kai-sprint2-p2-06-claim-traceability-boundary.spec.js`,
- * `kai-sprint2-p2-06-claim-traceability.integration.spec.js`, and the P2-06
- * verifier script. This file proves only the new mounted boundary: the route
- * forwards server-resolved organizationId/claimId/actorContext plus the
- * caller-supplied requestedAudience to the existing service, unchanged,
- * exactly once, with no persistence and no audit write.
+ * P2-08 human eligible-claims-for-audience read composition proof. Mirrors
+ * the existing proven `kai-sprint2-p2-06-claim-traceability-route.spec.js`
+ * pattern exactly. The P2-08 service's own evaluator reuse, snapshot
+ * consistency, candidate-scan cap, ordering, pagination, and eligibility
+ * semantics are not retested here - they remain owned by
+ * `kai-sprint2-p2-08-eligible-claims-for-audience-boundary.spec.js`,
+ * `kai-sprint2-p2-08-eligible-claims-for-audience.integration.spec.js`, and
+ * the P2-08 verifier script. This file proves only the new mounted
+ * boundary: the route forwards a server-resolved organizationId/actorContext
+ * plus the caller-supplied requestedAudience/limit/afterClaimId to the
+ * existing service, unchanged, exactly once, with no persistence and no
+ * audit write.
  */
 
 const basePath = "/api/kai/sprint2/intake";
-const routePath = "/admin/organizations/:organizationId/claims/:claimId/traceability";
+const routePath = "/admin/organizations/:organizationId/eligible-claims";
 const organizationId = "00000000-0000-4000-8000-000000000001";
-const claimId = "a0000000-0000-4000-8000-000000000001";
+const afterClaimId = "a0000000-0000-4000-8000-000000000001";
 const actorContext = Object.freeze({
   actorType: "human",
   actorUserId: "90000000-0000-4000-8000-000000000001",
@@ -42,20 +43,17 @@ const actorContext = Object.freeze({
     { organization_id: organizationId, membership_status: "active", role_name: "gk_reviewer" },
   ],
 });
-const injectedTraceabilityDto = Object.freeze({
-  claim: { claim_id: claimId, claim_status: "proposed" },
-  eligible: true,
-  blockerCodes: [],
+const injectedListDto = Object.freeze({
+  requestedAudience: "internal",
+  eligibleClaims: [],
+  limit: 25,
+  afterClaimId: null,
+  truncated: false,
+  nextAfterClaimId: null,
 });
 
-function concretePath(overrides = {}) {
-  const query = overrides.requestedAudience === undefined
-    ? "?requested_audience=internal"
-    : overrides.requestedAudience === null
-      ? ""
-      : `?requested_audience=${encodeURIComponent(overrides.requestedAudience)}`;
-  return `${basePath}/admin/organizations/${overrides.organizationId || organizationId}`
-    + `/claims/${overrides.claimId || claimId}/traceability${query}`;
+function concretePath({ organizationId: org = organizationId, query = "?requested_audience=internal" } = {}) {
+  return `${basePath}/admin/organizations/${org}/eligible-claims${query}`;
 }
 
 function createScenario(overrides = {}) {
@@ -63,7 +61,7 @@ function createScenario(overrides = {}) {
     authenticated: true,
     actorContext,
     serviceCalls: [],
-    serviceResult: { ok: true, data: injectedTraceabilityDto, error: null },
+    serviceResult: { ok: true, data: injectedListDto, error: null },
     events: [],
     ...overrides,
   };
@@ -127,19 +125,19 @@ async function requestJson(server, path, { method = "GET" } = {}) {
   });
 }
 
-test("P2-06 claim-traceability route appears as exactly one mounted authenticated GET route", () => {
+test("P2-08 eligible-claims-for-audience route appears as exactly one mounted authenticated GET route", () => {
   const matches = sprint2IntakeApiRouter.stack
     .filter((layer) => layer.route?.path === routePath && layer.route?.methods?.get);
   assert.equal(matches.length, 1);
   assert.deepEqual(Object.keys(matches[0].route.methods), ["get"]);
 });
 
-test("P2-06 claim-traceability route", async (t) => {
+test("P2-08 eligible-claims-for-audience route", async (t) => {
   let scenario = createScenario();
   const originalFeatureFlag = process.env.KAI_SPRINT2_ENABLED;
   process.env.KAI_SPRINT2_ENABLED = "true";
   const restore = intakeRouteTestables.setIntakeServiceForTest({
-    async getClaimTraceabilitySummary(input) {
+    async listEligibleClaimsForAudience(input) {
       scenario.serviceCalls.push(input);
       return scenario.serviceResult;
     },
@@ -154,7 +152,7 @@ test("P2-06 claim-traceability route", async (t) => {
     await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   });
 
-  await t.test("unauthenticated requests fail before the P2-06 service seam", async () => {
+  await t.test("unauthenticated requests fail before the P2-08 service seam", async () => {
     scenario = createScenario({ authenticated: false });
     const response = await requestJson(server, concretePath());
 
@@ -165,30 +163,49 @@ test("P2-06 claim-traceability route", async (t) => {
   });
 
   await t.test(
-    "an authenticated mapped human in the correct organization reaches the service exactly once with the exact expected inputs",
+    "an authenticated mapped human in the correct organization reaches the service exactly once with the exact expected inputs, including a default limit",
     async () => {
       scenario = createScenario();
-      const response = await requestJson(server, concretePath({ requestedAudience: "public" }));
+      const response = await requestJson(server, concretePath({ query: "?requested_audience=public" }));
 
       assert.equal(response.statusCode, 200);
       assert.equal(scenario.serviceCalls.length, 1);
       assert.deepEqual(scenario.serviceCalls[0], {
         organizationId,
-        claimId,
         requestedAudience: "public",
+        limit: 25,
+        afterClaimId: null,
         actorContext,
       });
-      assert.deepEqual(response.body, { ok: true, data: injectedTraceabilityDto, warnings: [] });
+      assert.deepEqual(response.body, { ok: true, data: injectedListDto, warnings: [] });
     },
   );
+
+  await t.test("caller-supplied limit and afterClaimId are forwarded exactly as the service expects", async () => {
+    scenario = createScenario();
+    const response = await requestJson(
+      server,
+      concretePath({ query: `?requested_audience=internal&limit=7&after_claim_id=${afterClaimId}` }),
+    );
+
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(scenario.serviceCalls[0], {
+      organizationId,
+      requestedAudience: "internal",
+      limit: 7,
+      afterClaimId,
+      actorContext,
+    });
+  });
 
   await t.test("actor/tenant identity cannot be overridden by caller-supplied data", async () => {
     scenario = createScenario();
 
-    // Attempting to smuggle an alternate organization/actor identity alongside
-    // requested_audience is an unknown-field combination, so the route's
-    // exact-key query validation fails closed before the service is ever
-    // called - the caller-supplied override values never reach the service.
+    // Attempting to smuggle an alternate organization/actor identity
+    // alongside requested_audience is an unknown-field combination, so the
+    // route's exact-key query validation fails closed before the service is
+    // ever called - the caller-supplied override values never reach the
+    // service.
     const smuggledResponse = await requestJson(
       server,
       `${concretePath()}&organization_id=00000000-0000-4000-8000-000000000999`
@@ -198,46 +215,47 @@ test("P2-06 claim-traceability route", async (t) => {
     assert.equal(smuggledResponse.body.error.code, "validation_blocker");
     assert.deepEqual(scenario.serviceCalls, []);
 
-    // A clean request with only the accepted requested_audience field reaches
-    // the service using exclusively the server-derived organizationId/claimId
-    // (from the authenticated path) and actorContext (from the session) -
-    // there is no field the caller can supply to change either.
-    const cleanResponse = await requestJson(server, concretePath({ requestedAudience: "internal" }));
+    // A clean request reaches the service using exclusively the
+    // server-derived organizationId (from the authenticated path) and
+    // actorContext (from the session) - there is no field the caller can
+    // supply to change either.
+    const cleanResponse = await requestJson(server, concretePath());
     assert.equal(cleanResponse.statusCode, 200);
     assert.equal(scenario.serviceCalls.length, 1);
     assert.deepEqual(scenario.serviceCalls[0], {
       organizationId,
-      claimId,
       requestedAudience: "internal",
+      limit: 25,
+      afterClaimId: null,
       actorContext,
     });
   });
 
-  await t.test("invalid or missing requestedAudience fails closed before the service is called", async () => {
-    for (const path of [
-      concretePath({ requestedAudience: null }),
-      concretePath({ requestedAudience: "partner" }),
-      `${concretePath({ requestedAudience: null })}?requested_audience=internal&extra=1`,
+  await t.test("invalid or missing query fields fail closed before the service is called", async () => {
+    for (const query of [
+      "",
+      "?requested_audience=partner",
+      "?requested_audience=internal&limit=0",
+      "?requested_audience=internal&limit=101",
+      "?requested_audience=internal&limit=abc",
+      "?requested_audience=internal&after_claim_id=not-a-uuid",
+      "?requested_audience=internal&extra=1",
     ]) {
       scenario = createScenario();
-      const response = await requestJson(server, path);
-      assert.equal(response.statusCode, 422, path);
-      assert.equal(response.body.error.code, "validation_blocker", path);
-      assert.deepEqual(scenario.serviceCalls, [], path);
+      const response = await requestJson(server, concretePath({ query }));
+      assert.equal(response.statusCode, 422, query);
+      assert.equal(response.body.error.code, "validation_blocker", query);
+      assert.deepEqual(scenario.serviceCalls, [], query);
     }
   });
 
-  await t.test("malformed path values use the existing safe validation_blocker response", async () => {
-    for (const path of [
-      concretePath({ organizationId: "not-a-uuid" }),
-      concretePath({ claimId: "not-a-uuid" }),
-      concretePath({ claimId: claimId.toUpperCase() }),
-    ]) {
+  await t.test("malformed organizationId path value uses the existing safe validation_blocker response", async () => {
+    for (const org of ["not-a-uuid", `A${organizationId.slice(1)}`]) {
       scenario = createScenario();
-      const response = await requestJson(server, path);
-      assert.equal(response.statusCode, 422, path);
-      assert.equal(response.body.error.code, "validation_blocker", path);
-      assert.deepEqual(scenario.serviceCalls, [], path);
+      const response = await requestJson(server, concretePath({ organizationId: org }));
+      assert.equal(response.statusCode, 422, org);
+      assert.equal(response.body.error.code, "validation_blocker", org);
+      assert.deepEqual(scenario.serviceCalls, [], org);
     }
   });
 
@@ -251,7 +269,6 @@ test("P2-06 claim-traceability route", async (t) => {
         "mapped_kai_user_required",
         "authorization_denied",
         "tenant_boundary_violation",
-        "not_found",
         "system_error",
       ]) {
         scenario = createScenario({
@@ -275,12 +292,12 @@ test("P2-06 claim-traceability route", async (t) => {
   );
 });
 
-test("P2-06 claim-traceability route: KAI_SPRINT2_ENABLED=false produces zero P2-06 service activity", async (t) => {
+test("P2-08 eligible-claims-for-audience route: KAI_SPRINT2_ENABLED=false produces zero P2-08 service activity", async (t) => {
   const originalFeatureFlag = process.env.KAI_SPRINT2_ENABLED;
   process.env.KAI_SPRINT2_ENABLED = "false";
   let scenario = createScenario();
   const restore = intakeRouteTestables.setIntakeServiceForTest({
-    async getClaimTraceabilitySummary(input) {
+    async listEligibleClaimsForAudience(input) {
       scenario.serviceCalls.push(input);
       return scenario.serviceResult;
     },
@@ -300,25 +317,25 @@ test("P2-06 claim-traceability route: KAI_SPRINT2_ENABLED=false produces zero P2
   assert.deepEqual(scenario.serviceCalls, []);
 });
 
-test("P2-06 claim-traceability route source imports no database or repository layer, performs no writes/audit, and invokes no other P2 service", () => {
+test("P2-08 eligible-claims-for-audience route source imports no database or repository layer, performs no writes/audit, and invokes no other P2 or P3 service", () => {
   const source = readFileSync("Backend/kai/routes/sprint2IntakeApi.js", "utf8");
   const slice = source.slice(
-    source.indexOf("let claimTraceabilityServicePromise"),
     source.indexOf("let eligibleClaimsForAudienceServicePromise"),
+    source.indexOf("export default router;"),
   );
-  assert.match(source, /async function getClaimTraceabilityService/);
-  assert.match(slice, /getClaimTraceabilitySummary/);
+  assert.match(source, /async function getEligibleClaimsForAudienceService/);
+  assert.match(slice, /listEligibleClaimsForAudience/);
   assert.doesNotMatch(slice, /from\s+["'][^"']*(?:db|repository|postgres|kaiDb|kaiQueries|kaiReadModels)[^"']*["']/i);
   assert.doesNotMatch(slice, /\b(?:SELECT|INSERT|UPDATE|DELETE)\b|\bpool\b|\bkaiDb\b|\brepository\b|\bkai\.(?!js\b)/i);
   assert.doesNotMatch(slice, /metadataOnlyAudit/i);
-  assert.doesNotMatch(slice, /p2-07|p2-08|kaiEligibleClaimsForAudienceService|kaiAssistantClaimTraceabilityTool/i);
+  assert.doesNotMatch(slice, /p2-07|p3-|kaiAssistantClaimTraceabilityTool|kaiGeneratedContentDraft/i);
 });
 
-test("P2-06 claim-traceability route source never contains the literal token req.user", () => {
+test("P2-08 eligible-claims-for-audience route source never contains the literal token req.user", () => {
   const source = readFileSync("Backend/kai/routes/sprint2IntakeApi.js", "utf8");
   const slice = source.slice(
-    source.indexOf("let claimTraceabilityServicePromise"),
     source.indexOf("let eligibleClaimsForAudienceServicePromise"),
+    source.indexOf("export default router;"),
   );
   assert.doesNotMatch(slice, /req\.user/);
 });
