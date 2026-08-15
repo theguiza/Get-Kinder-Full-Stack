@@ -31,6 +31,7 @@ import {
 import {
   createProductionMetadataOnlyAuditForClaimGapFollowup,
   createProductionMetadataOnlyAuditForClaimProposal,
+  createProductionMetadataOnlyAuditForConflictReviewCandidate,
   createProductionMetadataOnlyAuditForSourceVersion,
 } from "../services/kaiMetadataOnlyAuditComposition.js";
 
@@ -44,6 +45,7 @@ let evidenceLineageServicePromise = null;
 let evidenceCoverageAssessmentServicePromise = null;
 let claimProposalServicePromise = null;
 let claimGapFollowupServicePromise = null;
+let conflictReviewCandidateServicePromise = null;
 
 export function sendServiceResult(res, result, successStatus = 200) {
   if (result?.ok) {
@@ -1278,6 +1280,80 @@ router.post(
   },
 );
 
+async function getConflictReviewCandidateService() {
+  if (intakeServiceOverride?.createConflictReviewCandidate) return intakeServiceOverride;
+  conflictReviewCandidateServicePromise ||= import("../services/kaiConflictReviewCandidateService.js");
+  return conflictReviewCandidateServicePromise;
+}
+
+function conflictReviewCandidateIdentifiers(req = {}) {
+  const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+  const firstClaimId = typeof req.params?.firstClaimId === "string" ? req.params.firstClaimId : "";
+  const secondClaimId = typeof req.params?.secondClaimId === "string" ? req.params.secondClaimId : "";
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) || organizationId !== organizationId.toLowerCase()) return null;
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(firstClaimId) || firstClaimId !== firstClaimId.toLowerCase()) return null;
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(secondClaimId) || secondClaimId !== secondClaimId.toLowerCase()) return null;
+  return { organizationId, firstClaimId, secondClaimId };
+}
+
+function validateConflictReviewCandidateRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = conflictReviewCandidateIdentifiers(req);
+  if (!identifiers) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_first_claim_id_or_second_claim_id")],
+    });
+    return null;
+  }
+  if (Object.keys(requestPayload(req)).length !== 0) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("unknown_field", "body")],
+    });
+    return null;
+  }
+  return identifiers;
+}
+
+/**
+ * KAI P2-05 potential conflict-review candidate route. Mirrors the preceding
+ * claim-scoped routes' organization-scoped path convention, empty-body
+ * requirement, and actorContext/now derivation exactly, on the same mounted
+ * router. Both claim resource identifiers are carried in the path, following
+ * this router's existing nested-resource-id convention (e.g. the
+ * export-review-queue routes' two path identifiers), rather than inventing a
+ * body-based transport; `createConflictReviewCandidate` alone owns
+ * lower/higher claim normalization, so the route forwards
+ * firstClaimId/secondClaimId unchanged and never reinterprets their order.
+ */
+router.post(
+  "/admin/organizations/:organizationId/claims/:firstClaimId/potential-conflicts/:secondClaimId",
+  async (req, res) => {
+    const identifiers = validateConflictReviewCandidateRequestOrSend(req, res);
+    if (!identifiers) return;
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getConflictReviewCandidateService();
+      return service.createConflictReviewCandidate({
+        organizationId: identifiers.organizationId,
+        firstClaimId: identifiers.firstClaimId,
+        secondClaimId: identifiers.secondClaimId,
+        actorContext,
+        now,
+      }, {
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForConflictReviewCandidate({
+          organizationId: identifiers.organizationId,
+          actorContext,
+          now,
+        }),
+      });
+    });
+  },
+);
+
 export default router;
 
 export const __testables = {
@@ -1311,6 +1387,8 @@ export const __testables = {
   validateClaimProposalRequestOrSend,
   claimGapFollowupIdentifiers,
   validateClaimGapFollowupRequestOrSend,
+  conflictReviewCandidateIdentifiers,
+  validateConflictReviewCandidateRequestOrSend,
   setIntakeServiceForTest(service) {
     intakeServiceOverride = service;
     return () => {

@@ -16483,3 +16483,184 @@ NOT_CONFIRMED:
 
 One local commit was made on this branch recording this package. No push,
 no deploy.
+
+## P2-05 operational composition - internal potential-conflict-review-candidate route plus audit-transaction correction (completed 2026-08-15)
+
+Status: accepted for this local package as one bounded, authenticated,
+human-only internal POST route wired to the existing accepted, dormant P2-05
+`createConflictReviewCandidate` service, plus the one required tx-propagation
+correction found already missing at the start of this package. P2-05's
+foundation (claim-pair normalization, lineage/permission validators reused
+from P2-03/P2-04, unresolved `conflicting_source_indicators` gap prerequisite,
+conflict_groups/review_queue_items persistence, replay/concurrency/partial-
+state handling, potential-conflict-only semantics) was not reopened or
+rebuilt. No SQL or direct repository access was added in the route. No
+P2-04 or P2-06+ or P3 service was imported or invoked. No worker/cron/
+listener/scheduler or automatic P2-04->P2-05 or P2-05->P2-06 chaining was
+added.
+
+Implementation evidence:
+  - Backend/kai/dictionary/postgresConflictReviewCandidateRepository.js -
+    `prepareRequiredAudit(metadataOnlyAudit, context)` was still missing tx
+    propagation at the start of this package (the exact P1-04/P1-05/P2-01/
+    P2-03/P2-04 defect class). Corrected to
+    `prepareRequiredAudit(metadataOnlyAudit, tx, context)`, now passing
+    `db: tx` alongside the repository's own existing full required-audit
+    payload (which already carries the authoritative `conflict_group_id` of
+    the row just inserted/reread inside this package's own transaction, so
+    no additional field was added to that payload). The one call site
+    (inside the existing fresh-write branch, immediately before
+    `preparedAudit.publish()`) is unchanged in every other respect: no
+    second transaction is opened, `publish()` is still awaited inside the
+    same transaction callback (inside the existing try/catch that maps a
+    thrown or rejected `publish()` to `RequiredAuditRejectedError`), and the
+    existing `upload_lifecycle_audit` write is untouched.
+  - Backend/kai/services/kaiMetadataOnlyAuditComposition.js - adds
+    `createProductionMetadataOnlyAuditForConflictReviewCandidate`, the
+    smallest new production adapter around the existing
+    `insertRequiredSuccessfulAuditEvent` mechanism, bound at construction
+    only to organizationId/actorContext/now - never a claim or conflict-
+    group identity. Its `prepareMetadataOnlyAudit({ payload, db })` requires
+    `payload.conflict_group_id` to be present and a valid canonical UUID;
+    a payload with a missing or malformed `conflict_group_id` returns
+    `{ ok: false }`. The adapter never generates, hashes, or derives a
+    conflict-group identity from firstClaimId/secondClaimId - it only ever
+    reads the already-authoritative value the repository's own payload
+    supplies. For a valid payload, the generic audit metadata sets
+    `object_type: "conflict_group"`, `target_object_type: "conflict_group"`,
+    `object_id: payload.conflict_group_id`, and identifies the mounted
+    operation as `route: "p2_05_conflict_review_candidate"`. No audit
+    enum/schema/constraint was changed; the existing
+    `resolveAuditObjectType` resolver/fallback in
+    `Backend/kai/db/kaiAuditQueries.js` is untouched. Publication passes
+    the exact supplied `db` through to `insertAuditEvent` unchanged. The
+    sibling P1/P2-01/P2-03/P2-04 factories are unchanged.
+  - Backend/kai/routes/sprint2IntakeApi.js - adds exactly one mounted
+    route, `router.post("/admin/organizations/:organizationId/claims/
+    :firstClaimId/potential-conflicts/:secondClaimId")`, on the existing
+    mounted Sprint 2 intake router, placed immediately after the P2-04
+    claim-gap-followup route (before `export default router;`). Both claim
+    resource identifiers are carried in the path - the only existing
+    two-path-identifier convention on this router (mirroring the
+    export-review-queue routes' two path identifiers) - rather than
+    inventing a body-based transport; `organizationId` remains route-scoped
+    exactly as every other route on this router. Two new helpers mirror
+    the existing P2-03/P2-04 identifier/body-validation pattern exactly:
+    `conflictReviewCandidateIdentifiers(req)` (organizationId/firstClaimId/
+    secondClaimId path-UUID validation, lowercase-only) and
+    `validateConflictReviewCandidateRequestOrSend(req, res)` (content-type
+    check plus the existing empty-body requirement - any request body,
+    including an attempt to inject `actorUserId`/`actorType`/`roles`/
+    `memberships`/`actorContext`/`now`/`conflict_group_id`/`basis_code`/
+    `queue_status`, is rejected as `validation_blocker` before the service
+    is ever reached). One new lazy-import getter,
+    `getConflictReviewCandidateService()`, follows the exact existing
+    `getClaimGapFollowupService()` pattern (including the
+    override-detection convention:
+    `intakeServiceOverride?.createConflictReviewCandidate`). The route
+    derives `organizationId`/`firstClaimId`/`secondClaimId` only from the
+    validated path (forwarded to the service exactly as requested, with no
+    route-level reordering or normalization - `createConflictReviewCandidate`
+    alone owns lower/higher claim-pair normalization), `actorContext` only
+    from `sprint2MappedActorContext(req)` (the existing server-
+    authenticated/mapped context - never request body/query), and `now`
+    only from a fresh server-side `new Date().toISOString()`, then
+    delegates to `createConflictReviewCandidate({ organizationId,
+    firstClaimId, secondClaimId, actorContext, now }, { metadataOnlyAudit })`
+    exactly once, with `metadataOnlyAudit` the new production adapter above
+    constructed from the same server-derived values. The route and its two
+    new helpers contain no SQL, no pool/repository import, and no direct
+    `kai.*` access, and import/invoke no P2-04 or P2-06+ service. No
+    occurrence of the literal token `req.user` was introduced anywhere in
+    the file.
+  - __tests__/kai-sprint2-p2-05-conflict-review-candidate-route.spec.js
+    (new) - covers: exactly one mounted authenticated POST route at the
+    documented path; unauthenticated requests fail (401) before the
+    service is ever called; an authenticated mapped human in the correct
+    organization reaches `createConflictReviewCandidate` exactly once with
+    the exact requested firstClaimId/secondClaimId (never reordered or
+    normalized by the route), server-resolved organizationId/actorContext/
+    a server-generated `now` (bounded within the request window), and a
+    production `metadataOnlyAudit` dependency whose `prepareMetadataOnlyAudit`
+    refuses a payload with no `conflict_group_id` and accepts one with a
+    valid `conflict_group_id`; a request body attempting to inject
+    actor/time/conflict-group fields is rejected as `validation_blocker`
+    with zero service calls; malformed path UUIDs (non-UUID or not already
+    lowercased, for any of the three identifiers) use the existing safe
+    `validation_blocker` envelope; every listed service-result error code
+    maps through the existing safe envelope with no blocker/warning/data
+    leakage; `KAI_SPRINT2_ENABLED=false` returns the existing outer
+    feature-gate's 403 with zero service calls; a source-slice scan
+    proving the new route region contains no SQL keyword, no
+    db/repository/postgres import, no pool/kaiDb/repository reference, and
+    no P2-04 or P2-06+ service reference; and a whole-file scan proving
+    the literal token `req.user` never appears. Existing P2-05 claim-pair-
+    normalization/lineage/persistence/concurrency/rollback/potential-
+    conflict-only-semantics coverage is not duplicated here; it remains
+    owned by
+    `__tests__/kai-sprint2-p2-05-conflict-review-candidate-boundary.spec.js`,
+    `__tests__/kai-sprint2-p2-05-conflict-review-candidate.integration.spec.js`,
+    and the P2-05 verifier script.
+  - __tests__/kai-sprint2-p2-05-audit-transaction-propagation.spec.js (new) -
+    mirrors `kai-sprint2-p2-04-audit-transaction-propagation.spec.js`.
+    Covers: (1) a full `createConflictReviewCandidate` fresh-write call
+    through a fake multi-connection transaction provider (with the two
+    per-claim reads inside `readClaimBundle` parameterized by each call's
+    own claimId), proving the `audit_events` insert issued via
+    `createProductionMetadataOnlyAuditForConflictReviewCandidate` lands on
+    the exact same connection as the `conflict_groups` domain insert (the
+    SAME_TRANSACTION proof); (2) the production adapter refuses a payload
+    with a missing or malformed `conflict_group_id`, and for a valid one
+    its generic adapter metadata is `object_type = "conflict_group"`,
+    `target_object_type = "conflict_group"`, `object_id` = the payload's
+    `conflict_group_id` - distinct from either claim id, confirming no
+    conflict-group identity is ever fabricated from firstClaimId/
+    secondClaimId; (3) the repository's own required-audit payload, as
+    observed by a capturing `metadataOnlyAudit` double, already declares
+    `object_type: "conflict_group"` and the authoritative
+    `conflict_group_id` with no change required to add it, and
+    `prepareMetadataOnlyAudit` still receives the repository's own tx as
+    `db`. Existing P2-05 lineage/replay/rollback coverage is not
+    duplicated here; it remains owned by the existing P2-05 boundary spec,
+    integration spec, and verifier script.
+  - __tests__/kai-sprint2-p2-04-claim-gap-followup-route.spec.js - the one
+    required, corrective update: the existing P2-04 source-slice test's
+    end anchor is narrowed from `export default router;` back to the
+    `async function getConflictReviewCandidateService` marker (restoring
+    the exact boundary this file used before the temporary Package-1-only
+    commit state), so the P2-04-only source-slice assertions (no SQL, no
+    P2-05+ reference) stop incidentally spanning the newly appended P2-05
+    potential-conflict-review-candidate route region. No P2-04 behavioral
+    assertion was changed.
+  - __tests__/kai-sprint2-pass2-route-runtime.spec.js - the one required,
+    additive update: the existing exhaustive mounted-route-path enumeration
+    test now includes the new P2-05 path, alphabetically ordered
+    immediately after the P2-04 claim-gap-followups path and before the
+    P2-03 claim-proposal path; every previously listed path is preserved
+    verbatim and unreordered.
+
+TOOL_VERIFIED:
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false node --test __tests__/kai-sprint2-p2-05-conflict-review-candidate-route.spec.js __tests__/kai-sprint2-p2-05-audit-transaction-propagation.spec.js __tests__/kai-sprint2-p2-04-claim-gap-followup-route.spec.js __tests__/kai-sprint2-p2-04-audit-transaction-propagation.spec.js __tests__/kai-sprint2-p2-03-claim-proposal-route.spec.js __tests__/kai-sprint2-p2-03-audit-transaction-propagation.spec.js __tests__/kai-sprint2-pass2-route-runtime.spec.js __tests__/kai-sprint2-p2-05-conflict-review-candidate-boundary.spec.js`
+    -> 79/79 pass.
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm run verify:kai-sprint2-p2-05-conflict-review-candidate`
+    -> P2-05 conflict-review-candidate focused tests passed (18/18), using a
+    real ephemeral local PostgreSQL instance, then removed.
+  - `git diff --check` -> clean (no whitespace errors).
+
+USER_CONFIRMED:
+  - P2-05 is accepted and closed as a backend foundation; this operational-
+    composition package (exposing the existing
+    `createConflictReviewCandidate` through the existing authenticated
+    internal KAI human application surface, as one bounded POST route
+    addition, plus the one required tx-propagation correction found
+    already missing) is authorized.
+
+NOT_CONFIRMED:
+  - No push, merge, deploy, flag enablement, P2-04/P2-06 through P2-08 or
+    P3 invocation, cron/worker/scheduler/listener/promotion-hook creation,
+    schema/migration change, new database enum value, or new review cycle
+    was performed. Real client data was not used. `00_KAI_CURRENT_STATE.md`
+    and the Implementation Baseline were not updated.
+
+One local commit was made on this branch recording this package. No push,
+no deploy.

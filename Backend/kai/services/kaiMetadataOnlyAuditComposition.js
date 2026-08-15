@@ -310,9 +310,80 @@ export function createProductionMetadataOnlyAuditForClaimGapFollowup({
   });
 }
 
+const CONFLICT_GROUP_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Production composition of the `metadataOnlyAudit` contract required by P2-05
+ * (`Backend/kai/dictionary/postgresConflictReviewCandidateRepository.js`),
+ * which already supplies its own full required-audit payload including the
+ * authoritative `conflict_group_id` of the row it just inserted/reread inside
+ * this package's own transaction. This adapter never generates, hashes, or
+ * derives a conflict-group identity from `firstClaimId`/`secondClaimId`: the
+ * generic audit object identity is derived exclusively from
+ * `payload.conflict_group_id` at prepare time, and preparation is refused
+ * closed when that field is absent or malformed.
+ */
+export function createProductionMetadataOnlyAuditForConflictReviewCandidate({
+  organizationId,
+  actorContext,
+  now,
+  insertAuditEvent = insertRequiredSuccessfulAuditEvent,
+} = {}) {
+  if (typeof organizationId !== "string" || organizationId.length === 0) {
+    throw new TypeError("createProductionMetadataOnlyAuditForConflictReviewCandidate requires organizationId.");
+  }
+
+  function isPlainObject(value) {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  }
+
+  return Object.freeze({
+    prepareMetadataOnlyAudit({ payload, db } = {}) {
+      if (!isPlainObject(payload)) return { ok: false };
+      const conflictGroupId = payload.conflict_group_id;
+      if (typeof conflictGroupId !== "string" || !CONFLICT_GROUP_ID_PATTERN.test(conflictGroupId)) return { ok: false };
+
+      const metadata = {
+        organization_id: organizationId,
+        object_type: "conflict_group",
+        target_object_type: "conflict_group",
+        object_id: conflictGroupId,
+        operation: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "p2_05_conflict_review_candidate_created",
+        operation_type: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "p2_05_conflict_review_candidate_created",
+        validator_key: typeof payload.validator_key === "string" ? payload.validator_key : null,
+        actor_type: actorContext?.actorType || "human",
+        actor_user_id: actorContext?.actorUserId || null,
+        request_id: actorContext?.requestId || null,
+        route: "p2_05_conflict_review_candidate",
+        created_at: typeof now === "string" ? now : new Date().toISOString(),
+        metadata_only: true,
+        contains_raw_file_content: false,
+        contains_raw_parsed_rows: false,
+        contains_client_pii: false,
+        contains_prompt_text: false,
+        contains_unsafe_generated_text: false,
+        contains_signed_urls: false,
+        contains_storage_credentials: false,
+      };
+
+      return {
+        ok: true,
+        async publish() {
+          const result = await insertAuditEvent(metadata, db);
+          if (!result || result.ok !== true) {
+            throw new Error("p2_05_metadata_only_audit_publish_failed");
+          }
+          return result;
+        },
+      };
+    },
+  });
+}
+
 export const __testables = Object.freeze({
   createProductionMetadataOnlyAudit,
   createProductionMetadataOnlyAuditForSourceVersion,
   createProductionMetadataOnlyAuditForClaimProposal,
   createProductionMetadataOnlyAuditForClaimGapFollowup,
+  createProductionMetadataOnlyAuditForConflictReviewCandidate,
 });
