@@ -15942,3 +15942,92 @@ NOT_CONFIRMED:
 
 One local commit was made on this branch recording this package. No push,
 no deploy.
+
+## P2-01 operational audit correction (completed 2026-08-15)
+
+Status: accepted for this local package as two minimal, additions-only
+corrections to the P2-01 operational-composition package immediately above.
+The mounted route, `extractEvidenceFromSourceVersion`, the AUTH-KAI-003
+human boundary, the source/current-lineage validators,
+evidence/locator/evidence_review persistence, replay/idempotency,
+migrations/schema, and the P2-01 service contract were not reopened or
+changed.
+
+Implementation evidence:
+  - Backend/kai/dictionary/postgresEvidenceLineageRepository.js -
+    `prepareRequiredAudit(metadataOnlyAudit, context)` is corrected to
+    `prepareRequiredAudit(metadataOnlyAudit, tx, context)`, and now calls
+    `metadataOnlyAudit.prepareMetadataOnlyAudit({ payload:
+    buildEvidenceLineageAuditPayload(context), db: tx })`, forwarding the
+    repository's own existing fresh-write transaction as `db`. Before this
+    correction, `db` was never supplied, so the required-audit insert issued
+    by a real production `metadataOnlyAudit` dependency ran outside this
+    call's own transaction (or against `undefined`) instead of on the same
+    connection as the domain writes it is meant to audit alongside - the
+    exact same class of defect already corrected for P1-04/P1-05 in
+    `kai-sprint2-p1-04-p1-05-audit-transaction-propagation.spec.js`. The one
+    call site (inside the existing fresh-write branch, immediately before
+    `preparedAudit.publish()`) is unchanged in every other respect: no second
+    transaction is opened, `publish()` is still awaited inside the same
+    transaction callback, and the existing P2-01 audit payload
+    (`buildEvidenceLineageAuditPayload`, `object_type: "evidence_item"`
+    included) is untouched.
+  - Backend/kai/services/kaiMetadataOnlyAuditComposition.js -
+    `createProductionMetadataOnlyAuditForSourceVersion`'s
+    `prepareMetadataOnlyAudit` no longer derives its generic audit event's
+    `object_type`/`target_object_type` from the caller's `payload.object_type`
+    (which, for every real P2-01 caller, is always the repository's own
+    internal `"evidence_item"` lineage-payload contract field). Both fields
+    are now the fixed literal `"source_version"`, truthfully describing the
+    object that actually triggered this adapter's operation - the
+    `source_version` identified by the already-correct `object_id:
+    sourceVersionId`. No database enum, constraint, migration, or
+    `insertRequiredSuccessfulAuditEvent` resolver/fallback behavior was
+    changed; `"source_version"` was not added anywhere as a new persisted
+    enum value, only as adapter-level metadata content. The sibling P1
+    factory, `createProductionMetadataOnlyAudit` (used by
+    `postgresParserRunRepository.js`/`parserProfileWorkerOrchestration.js`),
+    is unchanged.
+  - __tests__/kai-sprint2-p2-01-audit-transaction-propagation.spec.js (new) -
+    covers: (1) a full `extractEvidenceFromSourceVersion` fresh-write call
+    through a fake multi-connection transaction provider, proving the
+    `audit_events` insert issued via `createProductionMetadataOnlyAuditForSourceVersion`
+    lands on the exact same connection as the `evidence_items` domain
+    insert; (2) `createProductionMetadataOnlyAuditForSourceVersion`'s
+    generic adapter metadata is `object_type = "source_version"`,
+    `target_object_type = "source_version"`, `object_id` = the requested
+    sourceVersionId, even when given a payload whose own `object_type` is
+    `"evidence_item"`; (3) the repository's own
+    `buildEvidenceLineageAuditPayload` payload, as observed by a capturing
+    `metadataOnlyAudit` double, still declares `object_type: "evidence_item"`
+    unchanged. Existing P2-01 lineage/replay/rollback coverage is not
+    duplicated here; it remains owned by
+    `__tests__/kai-sprint2-p2-01-evidence-lineage-boundary.spec.js` and the
+    P2-01 verifier script.
+
+TOOL_VERIFIED:
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false node --test __tests__/kai-sprint2-p2-01-audit-transaction-propagation.spec.js __tests__/kai-sprint2-p2-01-evidence-lineage-boundary.spec.js __tests__/kai-sprint2-p2-01-evidence-lineage.integration.spec.js`
+    -> 32/32 pass (31 pass, 1 skip - the runner-owned-database integration
+    test, which requires the local ephemeral PostgreSQL harness run
+    separately below).
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm run verify:kai-sprint2-p2-01-evidence-lineage`
+    -> P2-01 evidence-lineage integration tests passed (17/17), using a real
+    ephemeral local PostgreSQL instance, then removed.
+  - `git diff --check` -> clean (no whitespace errors).
+
+USER_CONFIRMED:
+  - P2-01's two operational-audit defects (missing transaction propagation
+    into the required-audit insert; the generic adapter's audit-event
+    object identity following the internal evidence_item payload contract
+    instead of the source_version that triggered the operation) are
+    authorized for correction as one bounded, additions-only package.
+
+NOT_CONFIRMED:
+  - No push, merge, deploy, flag enablement, P2-02+ or P3 invocation,
+    cron/worker/scheduler/listener/promotion-hook creation, schema/migration
+    change, new database enum value, or new review cycle was performed.
+    Real client data was not used. `00_KAI_CURRENT_STATE.md` and the
+    Implementation Baseline were not updated.
+
+One local commit was made on this branch recording this package. No push,
+no deploy.

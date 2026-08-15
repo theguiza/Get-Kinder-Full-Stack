@@ -122,8 +122,8 @@ export function createProductionMetadataOnlyAuditForSourceVersion({
 
       const metadata = {
         organization_id: organizationId,
-        object_type: typeof payload.object_type === "string" ? payload.object_type : "source_version",
-        target_object_type: typeof payload.object_type === "string" ? payload.object_type : "source_version",
+        object_type: "source_version",
+        target_object_type: "source_version",
         object_id: sourceVersionId,
         operation: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "p2_01_evidence_lineage_extraction",
         operation_type: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "p2_01_evidence_lineage_extraction",
