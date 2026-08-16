@@ -20,6 +20,10 @@ export function createEvidenceSummaryPath(organizationId) {
   return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/generated-content-drafts/evidence-summary`;
 }
 
+export function generatedDraftLibraryIndexPath(organizationId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/generated-content-drafts?limit=25`;
+}
+
 export function generatedDraftReviewPacketPath(organizationId, generatedContentDraftId) {
   return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
     + `/generated-content-drafts/${encodeURIComponent(generatedContentDraftId)}/review-packet`;
@@ -186,6 +190,27 @@ export function projectGeneratedDraftPacket(dto) {
       })),
     })),
   };
+}
+
+export function projectGeneratedDraftLibraryItems(dto) {
+  return asArray(dto?.items).map((item) => ({
+    generatedContentDraftId: item.generatedContentDraftId,
+    contentType: item.contentType,
+    requestedAudience: item.requestedAudience,
+    draftStatus: item.draftStatus,
+    reviewQueueItemId: item.reviewQueueItemId,
+    queueStatus: item.queueStatus,
+    reviewStatus: item.reviewStatus,
+    createdAt: item.createdAt,
+  })).filter((item) => typeof item.generatedContentDraftId === "string");
+}
+
+export function generatedDraftReviewLabel(queueStatus, reviewStatus) {
+  const key = `${queueStatus}/${reviewStatus}`;
+  if (key === "open/needs_gk_review") return "Needs review";
+  if (key === "in_progress/needs_gk_review") return "In review";
+  if (key === "resolved/resolved") return "Review completed";
+  return "Unknown review state";
 }
 
 export function canStartGeneratedContentReview(packet) {

@@ -1598,6 +1598,72 @@ async function getGeneratedContentService() {
   return generatedContentServicePromise;
 }
 
+let generatedDraftLibraryServicePromise = null;
+async function getGeneratedDraftLibraryService() {
+  if (intakeServiceOverride?.listGeneratedDraftLibraryIndex) return intakeServiceOverride;
+  generatedDraftLibraryServicePromise ||= import("../services/kaiGeneratedDraftLibraryService.js");
+  return generatedDraftLibraryServicePromise;
+}
+
+const KAI_GENERATED_DRAFT_LIBRARY_DEFAULT_LIMIT = 25;
+const KAI_GENERATED_DRAFT_LIBRARY_MAX_LIMIT = 25;
+
+function generatedDraftLibraryIndexQuery(req = {}) {
+  const allowedKeys = new Set(["limit", "after_generated_content_draft_id"]);
+  const keys = Object.keys(req.query || {});
+  if (!keys.every((key) => allowedKeys.has(key))) return null;
+
+  let limit = KAI_GENERATED_DRAFT_LIBRARY_DEFAULT_LIMIT;
+  if (req.query.limit !== undefined) {
+    if (typeof req.query.limit !== "string" || !/^\d+$/.test(req.query.limit)) return null;
+    limit = Number(req.query.limit);
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > KAI_GENERATED_DRAFT_LIBRARY_MAX_LIMIT) return null;
+  }
+
+  let afterGeneratedContentDraftId = null;
+  if (req.query.after_generated_content_draft_id !== undefined) {
+    const candidate = normalizedUuid(req.query.after_generated_content_draft_id);
+    if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(candidate)) return null;
+    afterGeneratedContentDraftId = candidate;
+  }
+
+  return { limit, afterGeneratedContentDraftId };
+}
+
+/**
+ * Persistent Impact Evidence Library generated-drafts index. This route only
+ * enumerates metadata-safe `evidence_summary`/`internal` generated-content-draft
+ * identities already persisted through the accepted P3-01 path, so a persisted
+ * draft remains rediscoverable across a fresh Library load independently of any
+ * transient browser-only generation state. It performs no SQL/direct database
+ * access itself and never invokes the model/provider; detailed draft content
+ * (blocks, citations, limitations) remains P3-02's responsibility.
+ */
+router.get(
+  "/admin/organizations/:organizationId/generated-content-drafts",
+  async (req, res) => {
+    const identifiers = eligibleClaimsForAudienceOrganizationIdentifier(req);
+    const query = generatedDraftLibraryIndexQuery(req);
+    if (!identifiers || !query) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker(
+          "invalid_organization_id_or_query",
+          "organization_id_limit_or_after_generated_content_draft_id",
+        )],
+      });
+    }
+    return invokeService(res, async () => {
+      const service = await getGeneratedDraftLibraryService();
+      return service.listGeneratedDraftLibraryIndex({
+        organizationId: identifiers.organizationId,
+        limit: query.limit,
+        afterGeneratedContentDraftId: query.afterGeneratedContentDraftId,
+        actorContext: sprint2MappedActorContext(req),
+      });
+    });
+  },
+);
+
 function generatedContentDraftIdentifier(req = {}) {
   const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
   const generatedContentDraftId = typeof req.params?.generatedContentDraftId === "string"
@@ -2155,6 +2221,7 @@ export const __testables = {
   eligibleClaimsForAudienceOrganizationIdentifier,
   eligibleClaimsForAudienceQuery,
   claimLibraryIndexQuery,
+  generatedDraftLibraryIndexQuery,
   evidenceReviewCompletionIdentifiers,
   validateEvidenceReviewCompletionRequestOrSend,
   claimReviewCompletionIdentifiers,

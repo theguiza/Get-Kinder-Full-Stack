@@ -138,6 +138,9 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // KAI P2-09 human evidence-review completion surface (additive; every
     // prior entry preserved verbatim).
     "/admin/organizations/:organizationId/evidence-items/:evidenceItemId/evidence-review/:reviewQueueItemId/complete",
+    // Generated Drafts library index: read-only, additive, and every prior
+    // entry preserved verbatim.
+    "/admin/organizations/:organizationId/generated-content-drafts",
     "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-review-queue/:exportReviewQueueItemId/complete",
     "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-review-queue/:exportReviewQueueItemId/packet",
     "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-review-queue/:exportReviewQueueItemId/start",

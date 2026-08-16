@@ -10,12 +10,15 @@ import {
   errorText,
   generatedContentReviewCompletePath,
   generatedContentReviewStartPath,
+  generatedDraftLibraryIndexPath,
+  generatedDraftReviewLabel,
   generatedDraftReviewPacketPath,
   getJson,
   mergeClaims,
   postJson,
   projectCandidateClaims,
   projectEligibleClaims,
+  projectGeneratedDraftLibraryItems,
   projectGeneratedDraftPacket,
   projectTraceability,
   reviewTransitionBody,
@@ -43,6 +46,9 @@ export default function ImpactEvidenceLibrary() {
   const [selectedClaimId, setSelectedClaimId] = useState("");
   const [selectedGenerationClaimIds, setSelectedGenerationClaimIds] = useState([]);
   const [generatedDraftPacket, setGeneratedDraftPacket] = useState(null);
+  const [generatedDrafts, setGeneratedDrafts] = useState([]);
+  const [selectedGeneratedDraftId, setSelectedGeneratedDraftId] = useState("");
+  const [loadingGeneratedDrafts, setLoadingGeneratedDrafts] = useState(false);
   const [traceability, setTraceability] = useState(null);
   const [loadingClaims, setLoadingClaims] = useState(false);
   const [loadingTraceability, setLoadingTraceability] = useState(false);
@@ -115,6 +121,39 @@ export default function ImpactEvidenceLibrary() {
     ));
   }, []);
 
+  const loadGeneratedDrafts = useCallback(async () => {
+    if (!organizationId) return;
+    setLoadingGeneratedDrafts(true);
+    const result = await getJson(generatedDraftLibraryIndexPath(organizationId));
+    setLoadingGeneratedDrafts(false);
+    if (result.statusCode !== 200 || !result.body?.ok) {
+      setGeneratedDrafts([]);
+      setMessage(errorText(result));
+      return;
+    }
+    setGeneratedDrafts(projectGeneratedDraftLibraryItems(result.body.data));
+  }, [organizationId]);
+
+  // Rediscover persisted drafts on every fresh Library load, independent of
+  // any transient in-browser generation state.
+  useEffect(() => {
+    setGeneratedDrafts([]);
+    setSelectedGeneratedDraftId("");
+    if (organizationId) loadGeneratedDrafts();
+  }, [organizationId, loadGeneratedDrafts]);
+
+  const selectGeneratedDraft = useCallback(async (generatedContentDraftId) => {
+    setSelectedGeneratedDraftId(generatedContentDraftId);
+    setMessage("");
+    const packetResult = await getJson(generatedDraftReviewPacketPath(organizationId, generatedContentDraftId));
+    if (packetResult.statusCode !== 200 || !packetResult.body?.ok) {
+      setGeneratedDraftPacket(null);
+      setMessage(errorText(packetResult));
+      return;
+    }
+    setGeneratedDraftPacket(projectGeneratedDraftPacket(packetResult.body.data));
+  }, [organizationId]);
+
   const generateEvidenceSummary = useCallback(async () => {
     if (audience !== "internal" || selectedGenerationClaimIds.length === 0) return;
     setGeneratingDraft(true);
@@ -135,6 +174,8 @@ export default function ImpactEvidenceLibrary() {
       setMessage("Generated draft response did not include a draft id.");
       return;
     }
+    await loadGeneratedDrafts();
+    setSelectedGeneratedDraftId(draftId);
     const packetResult = await getJson(generatedDraftReviewPacketPath(organizationId, draftId));
     setGeneratingDraft(false);
     if (packetResult.statusCode !== 200 || !packetResult.body?.ok) {
@@ -142,7 +183,7 @@ export default function ImpactEvidenceLibrary() {
       return;
     }
     setGeneratedDraftPacket(projectGeneratedDraftPacket(packetResult.body.data));
-  }, [audience, organizationId, selectedGenerationClaimIds]);
+  }, [audience, organizationId, selectedGenerationClaimIds, loadGeneratedDrafts]);
 
   const refetchGeneratedDraftPacket = useCallback(async (draftId) => {
     const packetResult = await getJson(generatedDraftReviewPacketPath(organizationId, draftId));
@@ -169,8 +210,9 @@ export default function ImpactEvidenceLibrary() {
       return;
     }
     await refetchGeneratedDraftPacket(generatedDraftPacket.generatedContentDraftId);
+    await loadGeneratedDrafts();
     setReviewTransitionPending(false);
-  }, [generatedDraftPacket, organizationId, refetchGeneratedDraftPacket, reviewTransitionPending]);
+  }, [generatedDraftPacket, organizationId, refetchGeneratedDraftPacket, loadGeneratedDrafts, reviewTransitionPending]);
 
   return (
     <section>
@@ -254,6 +296,33 @@ export default function ImpactEvidenceLibrary() {
                 {generatingDraft ? "Generating..." : "Generate evidence summary"}
               </button>
             ) : null}
+          </div>
+
+          <div className="admin-card mt-3">
+            <div className="d-flex justify-content-between align-items-center mb-2">
+              <h5 className="mb-0">Generated Drafts</h5>
+              <span className="text-muted small">{generatedDrafts.length} shown</span>
+            </div>
+            {loadingGeneratedDrafts ? <div className="text-muted">Loading generated drafts...</div> : null}
+            {!loadingGeneratedDrafts && generatedDrafts.length === 0 ? (
+              <div className="text-muted">No persisted generated drafts for this organization yet.</div>
+            ) : null}
+            <div className="list-group">
+              {generatedDrafts.map((draft) => (
+                <button
+                  type="button"
+                  key={draft.generatedContentDraftId}
+                  className={`list-group-item list-group-item-action ${draft.generatedContentDraftId === selectedGeneratedDraftId ? "active" : ""}`}
+                  onClick={() => selectGeneratedDraft(draft.generatedContentDraftId)}
+                >
+                  <div className="d-flex justify-content-between gap-2">
+                    <span>Evidence Summary · Internal</span>
+                    <span className="badge text-bg-secondary">{generatedDraftReviewLabel(draft.queueStatus, draft.reviewStatus)}</span>
+                  </div>
+                  <div className="small mt-1">Created {draft.createdAt}</div>
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 

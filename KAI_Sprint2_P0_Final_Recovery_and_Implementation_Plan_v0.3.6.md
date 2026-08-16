@@ -17635,3 +17635,92 @@ One targeted local Stage-B commit was prepared on this branch. No push, deploy,
 config/flag mutation, credential/secret inspection, shared/staging/production
 database mutation, real client data access, export work, or current-state /
 baseline update was performed.
+
+## Phase-13 Stage C persistent Generated Drafts library index - completed 2026-08-16
+
+SCOPE:
+  - Continued only because Stage A/B proved a persisted, citation-backed
+    `evidence_summary`/`internal` generated-content draft and its
+    open/needs_gk_review -> in_progress/needs_gk_review -> resolved/resolved
+    generated-content-review lifecycle, both read through the existing P3-02
+    packet.
+  - Added the smallest read-only Generated Drafts index so a persisted draft
+    remains rediscoverable from a fresh Impact Evidence Library load,
+    independent of any transient browser-only generation state. No
+    generation, provider adapter, review-lifecycle, schema/migration, or P2
+    change was introduced.
+
+IMPLEMENTATION:
+  - Added `Backend/kai/db/kaiGeneratedDraftLibraryReadModels.js`
+    (`listGeneratedDraftLibraryIndex`), a bounded, organization-scoped,
+    deterministically ordered (`generated_content_draft_id ASC`, cursor
+    pagination) read-only query joining `kai.generated_content_drafts` to its
+    existing `generated_content_review` queue row, filtered to
+    `content_type=evidence_summary` and `requested_audience=internal` for this
+    MVP slice. No INSERT/UPDATE/DELETE/FOR UPDATE.
+  - Added `Backend/kai/services/kaiGeneratedDraftLibraryService.js`
+    (`listGeneratedDraftLibraryIndex`), following the exact P2-08/claim-library
+    service shape: `KAI_SPRINT2_ENABLED`/`KAI_GENERATION_ENABLED` gates,
+    mapped-human/tenant authority, and the existing P3-02
+    `get_generated_draft_review_packet` operation plus its
+    `gk_admin`/`gk_reviewer` allowed-roles Set reused verbatim (imported from
+    `kaiGeneratedContentService.js`'s `__generatedContentServiceContract`, not
+    reinvented). The response DTO returns only
+    `generatedContentDraftId, contentType, requestedAudience, draftStatus,
+    reviewQueueItemId, queueStatus, reviewStatus, createdAt` - no block text,
+    citations, evidence/source content, or storage identifiers - and rejects
+    (system_error) any row failing that shape or a non-`draft` `draftStatus`.
+  - Mounted one authenticated HUMAN read route on the existing Sprint 2 intake
+    router: `GET /admin/organizations/:organizationId/generated-content-drafts`
+    accepting only `limit`/`after_generated_content_draft_id`, performing no
+    SQL/direct repository access and no audit write.
+  - Extended the existing Impact Evidence Library with a `Generated Drafts`
+    panel that fetches this index whenever the organization id changes
+    (independent of the existing claims-load button), rendering
+    open/needs_gk_review -> "Needs review",
+    in_progress/needs_gk_review -> "In review", and
+    resolved/resolved -> "Review completed" from authoritative server state
+    only, never "final"/"approved"/"export-ready". Selecting a listed draft
+    fetches the existing P3-02 review packet by its `generatedContentDraftId`
+    and reuses the existing Start/Complete Review controls and their P3-02
+    refetch unchanged. After a successful `Generate evidence summary` call,
+    the panel refreshes from this index and opens the persisted draft through
+    P3-02, rather than keeping a browser-only generated object as state.
+
+SAFETY:
+  - The list route and service never call the model/provider and never import
+    the P3-01 draft-generator adapter; listing/opening a draft is a pure read
+    of already-persisted rows.
+  - Cross-tenant membership, disallowed role, and feature-disabled requests
+    fail closed (`authorization_denied` / `feature_disabled`) with no read
+    model invocation.
+  - No table, column, feature-flag, credential, or role policy was added or
+    changed; the exact existing P3-02 read-authority Set is reused, not
+    duplicated.
+
+VERIFICATION:
+  - `DATABASE_URL=postgres://127.0.0.1:1/sentinel_do_not_use node --test
+    __tests__/kai-sprint2-generated-drafts-library.spec.js` -> 8/8 passing.
+  - `DATABASE_URL=postgres://127.0.0.1:1/sentinel_do_not_use node --test
+    __tests__/kai-sprint2-impact-evidence-library.spec.js` -> 11/11 passing
+    unchanged.
+  - `DATABASE_URL=postgres://127.0.0.1:1/sentinel_do_not_use npm run
+    verify:kai-sprint2-api-contract` -> 59/60 passing; sole failure is the
+    established environment-dependent `foundation-safety file_upload_enabled`
+    baseline (`true !== false`) - the same known baseline, not a new
+    regression. The Pass 2 route-runtime mounted-route-list snapshot was
+    updated additively for the one new read-only route.
+  - `DATABASE_URL=postgres://127.0.0.1:1/sentinel_do_not_use npm run build`
+    -> Vite production build passed.
+  - `DATABASE_URL=postgres://127.0.0.1:1/sentinel_do_not_use npm run
+    test:kai-sprint2` -> 2147/2148 passing; sole failure is the same known
+    `file_upload_enabled` baseline.
+  - `DATABASE_URL=postgres://127.0.0.1:1/sentinel_do_not_use npm test` ->
+    2252/2253 passing; sole failure is the same known baseline.
+  - `git diff --check` -> clean.
+
+One targeted local Stage-C commit was made on this branch. No push, deploy,
+config/flag mutation, credential/secret inspection, shared/staging/production
+database mutation, real client data access, export/export-review work,
+schema/migration, new dependency, or current-state / baseline update was
+performed.
