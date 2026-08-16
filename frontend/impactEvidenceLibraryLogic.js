@@ -25,6 +25,18 @@ export function generatedDraftReviewPacketPath(organizationId, generatedContentD
     + `/generated-content-drafts/${encodeURIComponent(generatedContentDraftId)}/review-packet`;
 }
 
+export function generatedContentReviewStartPath(organizationId, generatedContentDraftId, reviewQueueItemId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
+    + `/generated-content-drafts/${encodeURIComponent(generatedContentDraftId)}`
+    + `/generated-content-review-queue/${encodeURIComponent(reviewQueueItemId)}/start`;
+}
+
+export function generatedContentReviewCompletePath(organizationId, generatedContentDraftId, reviewQueueItemId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
+    + `/generated-content-drafts/${encodeURIComponent(generatedContentDraftId)}`
+    + `/generated-content-review-queue/${encodeURIComponent(reviewQueueItemId)}/complete`;
+}
+
 async function readJson(response) {
   try {
     return await response.json();
@@ -50,6 +62,10 @@ export async function postJson(path, body) {
     body: JSON.stringify(body),
   });
   return { statusCode: response.status, body: await readJson(response) };
+}
+
+export function reviewTransitionBody(expectedUpdatedAt) {
+  return { expected_updated_at: expectedUpdatedAt };
 }
 
 export function errorText(result) {
@@ -155,6 +171,7 @@ export function projectGeneratedDraftPacket(dto) {
     reviewQueueItemId: dto.reviewQueueItemId,
     queueStatus: dto.queueStatus,
     reviewStatus: dto.reviewStatus,
+    reviewUpdatedAt: dto.reviewUpdatedAt,
     currentUseEligible: dto.currentUseEligible === true,
     blocks: asArray(dto.blocks).map((block) => ({
       ordinal: block?.ordinal,
@@ -169,4 +186,12 @@ export function projectGeneratedDraftPacket(dto) {
       })),
     })),
   };
+}
+
+export function canStartGeneratedContentReview(packet) {
+  return !!packet && packet.queueStatus === "open" && packet.reviewStatus === "needs_gk_review";
+}
+
+export function canCompleteGeneratedContentReview(packet) {
+  return !!packet && packet.queueStatus === "in_progress" && packet.reviewStatus === "needs_gk_review";
 }

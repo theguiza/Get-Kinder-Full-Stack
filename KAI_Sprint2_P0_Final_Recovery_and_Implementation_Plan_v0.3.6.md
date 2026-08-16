@@ -17562,3 +17562,76 @@ One targeted local Stage-A commit was made on this branch. No push, deploy,
 config/flag mutation, credential/secret inspection, shared/staging/production
 database mutation, real client data access, export work, or current-state /
 baseline update was performed.
+
+## Phase-13 Stage B generated-content human review lifecycle - completed 2026-08-15
+
+SCOPE:
+  - Continued only because Stage A proved a compatible production
+    `draftGenerator` adapter, mounted P3-01 create route, persisted
+    citation-backed `evidence_summary` draft, and P3-02 read path.
+  - Added the smallest generated-content human-review lifecycle over the
+    existing generated-content draft and review queue contract:
+    `open/needs_gk_review` -> `in_progress/needs_gk_review` ->
+    `resolved/resolved`.
+  - No schema/migration change, export composition, finalization authority,
+    funder/public generation, AI approval, draft text mutation, citation
+    mutation, feature-flag mutation, or P2/Library redesign was introduced.
+
+IMPLEMENTATION:
+  - Added `startGeneratedContentReview` to the generated-content service and
+    PostgreSQL repository. It follows existing KAI flag gates, mapped-human
+    tenant authority, `gk_reviewer`/`gk_admin` role authority, optimistic
+    `expectedUpdatedAt` concurrency, same-transaction metadata-only required
+    audit, stale-state failure, and deterministic replay conventions.
+  - Reused the existing P3-04 `completeGeneratedContentReview` service for the
+    resolved transition and mounted the smallest authenticated HUMAN routes:
+    `POST /admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/generated-content-review-queue/:reviewQueueItemId/start`
+    and
+    `POST /admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/generated-content-review-queue/:reviewQueueItemId/complete`.
+    Each route accepts only `expected_updated_at`; actor, tenant, role, `now`,
+    and metadata-only audit composition are server-controlled.
+  - Extended P3-02 to read the authoritative review queue `updated_at` token and
+    to represent the current generated-content-review lifecycle state without
+    mutating the immutable generated draft graph.
+  - Extended the Impact Evidence Library generated-draft panel with minimal
+    `Start Review` and `Complete Review` controls. Each mutation re-fetches the
+    P3-02 packet and performs no browser-side lifecycle authority.
+
+SAFETY:
+  - Start and completion transitions never change `draft_status`, generated
+    blocks, citations, requested audience, export authority, final gates, or
+    export artifacts.
+  - Cross-tenant, wrong-role, stale-token, wrong-state, and audit-failure paths
+    fail closed with no queue mutation or draft mutation.
+  - Metadata-only audit composition carries identifiers, actor, timestamps, and
+    lifecycle state only; it carries no draft text, claim/evidence text, raw
+    source rows, prompts, credentials, signed URLs, or file bytes.
+
+VERIFICATION:
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test
+    __tests__/kai-sprint2-p3-04-generated-content-review-completion-boundary.spec.js`
+    -> 22/22 passing.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test
+    __tests__/kai-sprint2-p3-02-generated-draft-review-packet-boundary.spec.js`
+    -> 8/8 passing.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test
+    __tests__/kai-sprint2-impact-evidence-library.spec.js` -> 11/11 passing
+    with temporary loopback-server permission.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run
+    verify:kai-sprint2-p3-02-generated-draft-review-packet` -> 16/16 passing
+    with runner-owned PostgreSQL permission.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run
+    verify:kai-sprint2-p3-04-generated-content-review-completion` -> 62/62
+    passing with runner-owned PostgreSQL permission.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run
+    verify:kai-sprint2-api-contract` -> 59/60 passing; sole failure is the
+    established environment-dependent `foundation-safety file_upload_enabled`
+    baseline (`true !== false`).
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run build` -> Vite
+    production build passed.
+  - `git diff --check` -> clean.
+
+One targeted local Stage-B commit was prepared on this branch. No push, deploy,
+config/flag mutation, credential/secret inspection, shared/staging/production
+database mutation, real client data access, export work, or current-state /
+baseline update was performed.

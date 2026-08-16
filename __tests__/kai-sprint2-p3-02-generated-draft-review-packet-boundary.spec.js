@@ -43,6 +43,7 @@ function dto(overrides = {}) {
     reviewQueueItemId: QUEUE,
     queueStatus: "open",
     reviewStatus: "needs_gk_review",
+    reviewUpdatedAt: "2026-08-06T09:00:00.000Z",
     currentUseEligible: true,
     blocks: [{
       ordinal: 1,
@@ -120,6 +121,7 @@ function state(overrides = {}) {
       due_at: null,
       summary: "Generated draft requires human review.",
       required_action: "Review citations, audience eligibility, limitations, unsupported claims, and numeric or causal assertions before any use.",
+      updated_at: "2026-08-06T09:00:00.000Z",
     }],
     ...overrides,
   };

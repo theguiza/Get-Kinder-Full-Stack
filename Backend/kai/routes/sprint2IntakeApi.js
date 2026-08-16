@@ -40,6 +40,7 @@ import {
   createProductionMetadataOnlyAuditForCoverageReviewDecision,
   createProductionMetadataOnlyAuditForEvidenceReview,
   createProductionMetadataOnlyAuditForGeneratedContentDraft,
+  createProductionMetadataOnlyAuditForGeneratedContentReview,
   createProductionMetadataOnlyAuditForSourceVersion,
 } from "../services/kaiMetadataOnlyAuditComposition.js";
 
@@ -1590,6 +1591,8 @@ async function getGeneratedContentService() {
   if (
     intakeServiceOverride?.createEvidenceSummaryDraft
     || intakeServiceOverride?.getGeneratedDraftReviewPacket
+    || intakeServiceOverride?.startGeneratedContentReview
+    || intakeServiceOverride?.completeGeneratedContentReview
   ) return intakeServiceOverride;
   generatedContentServicePromise ||= import("../services/kaiGeneratedContentService.js");
   return generatedContentServicePromise;
@@ -1688,6 +1691,97 @@ router.get(
         organizationId: identifiers.organizationId,
         generatedContentDraftId: identifiers.generatedContentDraftId,
         actorContext: sprint2MappedActorContext(req),
+      });
+    });
+  },
+);
+
+function generatedContentReviewQueueIdentifier(req = {}) {
+  const root = generatedContentDraftIdentifier(req);
+  const reviewQueueItemId = typeof req.params?.reviewQueueItemId === "string" ? req.params.reviewQueueItemId : "";
+  if (!root) return null;
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(reviewQueueItemId) || reviewQueueItemId !== reviewQueueItemId.toLowerCase()) return null;
+  return { ...root, reviewQueueItemId };
+}
+
+function validateGeneratedContentReviewTransitionRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = generatedContentReviewQueueIdentifier(req);
+  if (!identifiers) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker(
+        "invalid_organization_id_generated_content_draft_id_or_review_queue_item_id",
+        "organization_id_generated_content_draft_id_or_review_queue_item_id",
+      )],
+    });
+    return null;
+  }
+  const result = validateStartExportReviewRequest(req.body);
+  if (!result.ok) {
+    sendKaiError(res, "validation_blocker", { blockers: result.blockers });
+    return null;
+  }
+  return identifiers;
+}
+
+router.post(
+  "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/generated-content-review-queue/:reviewQueueItemId/start",
+  async (req, res) => {
+    const identifiers = validateGeneratedContentReviewTransitionRequestOrSend(req, res);
+    if (!identifiers) return;
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    const payload = requestPayload(req);
+    return invokeService(res, async () => {
+      const service = await getGeneratedContentService();
+      return service.startGeneratedContentReview({
+        organizationId: identifiers.organizationId,
+        generatedContentDraftId: identifiers.generatedContentDraftId,
+        reviewQueueItemId: identifiers.reviewQueueItemId,
+        expectedUpdatedAt: payload.expected_updated_at,
+        actorContext,
+        now,
+      }, {
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForGeneratedContentReview({
+          organizationId: identifiers.organizationId,
+          generatedContentDraftId: identifiers.generatedContentDraftId,
+          reviewQueueItemId: identifiers.reviewQueueItemId,
+          actorContext,
+          now,
+        }),
+      });
+    });
+  },
+);
+
+router.post(
+  "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/generated-content-review-queue/:reviewQueueItemId/complete",
+  async (req, res) => {
+    const identifiers = validateGeneratedContentReviewTransitionRequestOrSend(req, res);
+    if (!identifiers) return;
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    const payload = requestPayload(req);
+    return invokeService(res, async () => {
+      const service = await getGeneratedContentService();
+      return service.completeGeneratedContentReview({
+        organizationId: identifiers.organizationId,
+        generatedContentDraftId: identifiers.generatedContentDraftId,
+        reviewQueueItemId: identifiers.reviewQueueItemId,
+        expectedUpdatedAt: payload.expected_updated_at,
+        actorContext,
+        now,
+      }, {
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForGeneratedContentReview({
+          organizationId: identifiers.organizationId,
+          generatedContentDraftId: identifiers.generatedContentDraftId,
+          reviewQueueItemId: identifiers.reviewQueueItemId,
+          actorContext,
+          now,
+        }),
       });
     });
   },

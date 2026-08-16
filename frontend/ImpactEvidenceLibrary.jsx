@@ -1,11 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   LIBRARY_AUDIENCES,
+  canCompleteGeneratedContentReview,
+  canStartGeneratedContentReview,
   claimLibraryCandidatesPath,
   claimTraceabilityPath,
   createEvidenceSummaryPath,
   eligibleClaimsPath,
   errorText,
+  generatedContentReviewCompletePath,
+  generatedContentReviewStartPath,
   generatedDraftReviewPacketPath,
   getJson,
   mergeClaims,
@@ -14,6 +18,7 @@ import {
   projectEligibleClaims,
   projectGeneratedDraftPacket,
   projectTraceability,
+  reviewTransitionBody,
 } from "./impactEvidenceLibraryLogic.js";
 
 function ValueRow({ label, value }) {
@@ -42,6 +47,7 @@ export default function ImpactEvidenceLibrary() {
   const [loadingClaims, setLoadingClaims] = useState(false);
   const [loadingTraceability, setLoadingTraceability] = useState(false);
   const [generatingDraft, setGeneratingDraft] = useState(false);
+  const [reviewTransitionPending, setReviewTransitionPending] = useState(false);
   const [message, setMessage] = useState("");
 
   const selectedClaim = useMemo(
@@ -137,6 +143,34 @@ export default function ImpactEvidenceLibrary() {
     }
     setGeneratedDraftPacket(projectGeneratedDraftPacket(packetResult.body.data));
   }, [audience, organizationId, selectedGenerationClaimIds]);
+
+  const refetchGeneratedDraftPacket = useCallback(async (draftId) => {
+    const packetResult = await getJson(generatedDraftReviewPacketPath(organizationId, draftId));
+    if (packetResult.statusCode !== 200 || !packetResult.body?.ok) {
+      setMessage(errorText(packetResult));
+      return null;
+    }
+    const packet = projectGeneratedDraftPacket(packetResult.body.data);
+    setGeneratedDraftPacket(packet);
+    return packet;
+  }, [organizationId]);
+
+  const transitionGeneratedContentReview = useCallback(async (transition) => {
+    if (!generatedDraftPacket || reviewTransitionPending) return;
+    setReviewTransitionPending(true);
+    setMessage("");
+    const path = transition === "start"
+      ? generatedContentReviewStartPath(organizationId, generatedDraftPacket.generatedContentDraftId, generatedDraftPacket.reviewQueueItemId)
+      : generatedContentReviewCompletePath(organizationId, generatedDraftPacket.generatedContentDraftId, generatedDraftPacket.reviewQueueItemId);
+    const result = await postJson(path, reviewTransitionBody(generatedDraftPacket.reviewUpdatedAt));
+    if (result.statusCode !== 200 || !result.body?.ok) {
+      setReviewTransitionPending(false);
+      setMessage(errorText(result));
+      return;
+    }
+    await refetchGeneratedDraftPacket(generatedDraftPacket.generatedContentDraftId);
+    setReviewTransitionPending(false);
+  }, [generatedDraftPacket, organizationId, refetchGeneratedDraftPacket, reviewTransitionPending]);
 
   return (
     <section>
@@ -281,6 +315,26 @@ export default function ImpactEvidenceLibrary() {
               <ValueRow label="Requested audience" value={generatedDraftPacket.requestedAudience} />
               <ValueRow label="Draft status" value={generatedDraftPacket.draftStatus} />
               <ValueRow label="Review state" value={`${generatedDraftPacket.queueStatus} / ${generatedDraftPacket.reviewStatus}`} />
+              {canStartGeneratedContentReview(generatedDraftPacket) ? (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline-primary me-2 mt-2"
+                  onClick={() => transitionGeneratedContentReview("start")}
+                  disabled={reviewTransitionPending}
+                >
+                  Start Review
+                </button>
+              ) : null}
+              {canCompleteGeneratedContentReview(generatedDraftPacket) ? (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline-primary mt-2"
+                  onClick={() => transitionGeneratedContentReview("complete")}
+                  disabled={reviewTransitionPending}
+                >
+                  Complete Review
+                </button>
+              ) : null}
               <h6 className="mt-3">Blocks</h6>
               {generatedDraftPacket.blocks.map((block) => (
                 <div key={block.ordinal} className="border rounded p-2 mb-2">

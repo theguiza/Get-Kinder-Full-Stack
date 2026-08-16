@@ -20,10 +20,14 @@ import {
 } from "../Backend/kai/services/kaiClaimLibraryService.js";
 import { listClaimLibraryReviewCandidates } from "../Backend/kai/db/kaiClaimLibraryReadModels.js";
 import {
+  canCompleteGeneratedContentReview,
+  canStartGeneratedContentReview,
   claimLibraryCandidatesPath,
   claimTraceabilityPath,
   createEvidenceSummaryPath,
   eligibleClaimsPath,
+  generatedContentReviewCompletePath,
+  generatedContentReviewStartPath,
   generatedDraftReviewPacketPath,
   getJson,
   mergeClaims,
@@ -32,6 +36,7 @@ import {
   projectEligibleClaims,
   projectGeneratedDraftPacket,
   projectTraceability,
+  reviewTransitionBody,
 } from "../frontend/impactEvidenceLibraryLogic.js";
 
 const basePath = "/api/kai/sprint2/intake";
@@ -178,10 +183,18 @@ test("Impact Evidence Library internal evidence-summary generation routes are mo
     .filter((layer) => layer.route?.path === "/admin/organizations/:organizationId/generated-content-drafts/evidence-summary" && layer.route?.methods?.post);
   const readMatches = sprint2IntakeApiRouter.stack
     .filter((layer) => layer.route?.path === "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/review-packet" && layer.route?.methods?.get);
+  const startMatches = sprint2IntakeApiRouter.stack
+    .filter((layer) => layer.route?.path === "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/generated-content-review-queue/:reviewQueueItemId/start" && layer.route?.methods?.post);
+  const completeMatches = sprint2IntakeApiRouter.stack
+    .filter((layer) => layer.route?.path === "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/generated-content-review-queue/:reviewQueueItemId/complete" && layer.route?.methods?.post);
   assert.equal(createMatches.length, 1);
   assert.equal(readMatches.length, 1);
+  assert.equal(startMatches.length, 1);
+  assert.equal(completeMatches.length, 1);
   assert.deepEqual(Object.keys(createMatches[0].route.methods), ["post"]);
   assert.deepEqual(Object.keys(readMatches[0].route.methods), ["get"]);
+  assert.deepEqual(Object.keys(startMatches[0].route.methods), ["post"]);
+  assert.deepEqual(Object.keys(completeMatches[0].route.methods), ["post"]);
 });
 
 test("Impact Evidence Library create route pins evidence_summary/internal and accepts no browser prompt, text, citations, evidence ids, or authority", async (t) => {
@@ -283,6 +296,59 @@ test("Impact Evidence Library P3-02 route delegates to the existing generated-dr
   const response = await requestJson(server, `${basePath}/admin/organizations/${organizationId}/generated-content-drafts/${generatedContentDraftId}/review-packet`);
   assert.equal(response.statusCode, 200);
   assert.deepEqual(current.calls, [{ organizationId, generatedContentDraftId, actorContext }]);
+});
+
+test("Impact Evidence Library generated-content-review transition routes accept only expected_updated_at and server-owned authority", async (t) => {
+  const generatedContentDraftId = "00000000-0000-4000-8000-000000000777";
+  const generatedReviewQueueItemId = "00000000-0000-4000-8000-000000000778";
+  const expectedUpdatedAt = "2026-08-15T10:00:00.000Z";
+  let current = scenario({
+    result: { ok: true, data: { queueStatus: "in_progress", reviewStatus: "needs_gk_review" }, error: null },
+  });
+  const originalFeatureFlag = process.env.KAI_SPRINT2_ENABLED;
+  process.env.KAI_SPRINT2_ENABLED = "true";
+  const restore = intakeRouteTestables.setIntakeServiceForTest({
+    async startGeneratedContentReview(input, deps) {
+      current.calls.push({ operation: "start", input, deps });
+      return current.result;
+    },
+    async completeGeneratedContentReview(input, deps) {
+      current.calls.push({ operation: "complete", input, deps });
+      return { ok: true, data: { queueStatus: "resolved", reviewStatus: "resolved" }, error: null };
+    },
+  });
+  const server = await listen(createApp(() => current));
+
+  t.after(async () => {
+    restore();
+    if (originalFeatureFlag === undefined) delete process.env.KAI_SPRINT2_ENABLED;
+    else process.env.KAI_SPRINT2_ENABLED = originalFeatureFlag;
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  });
+
+  const startPath = `${basePath}/admin/organizations/${organizationId}/generated-content-drafts/${generatedContentDraftId}/generated-content-review-queue/${generatedReviewQueueItemId}/start`;
+  const rejected = await postRequestJson(server, startPath, { expected_updated_at: expectedUpdatedAt, actorContext: { role: "evil" } });
+  assert.equal(rejected.statusCode, 422);
+  assert.deepEqual(current.calls, []);
+
+  const started = await postRequestJson(server, startPath, { expected_updated_at: expectedUpdatedAt });
+  assert.equal(started.statusCode, 200);
+  assert.equal(current.calls.length, 1);
+  assert.equal(current.calls[0].operation, "start");
+  assert.deepEqual(current.calls[0].input, {
+    organizationId,
+    generatedContentDraftId,
+    reviewQueueItemId: generatedReviewQueueItemId,
+    expectedUpdatedAt,
+    actorContext,
+    now: current.calls[0].input.now,
+  });
+  assert.equal(typeof current.calls[0].deps.metadataOnlyAudit?.prepareMetadataOnlyAudit, "function");
+
+  const completePath = `${basePath}/admin/organizations/${organizationId}/generated-content-drafts/${generatedContentDraftId}/generated-content-review-queue/${generatedReviewQueueItemId}/complete`;
+  const completed = await postRequestJson(server, completePath, { expected_updated_at: expectedUpdatedAt });
+  assert.equal(completed.statusCode, 200);
+  assert.equal(current.calls[1].operation, "complete");
 });
 
 test("Impact Evidence Library claim-index route reuses the existing cockpit/read access boundary", async (t) => {
@@ -485,6 +551,7 @@ test("Impact Evidence Library frontend projections compose P2-08 and P2-06 witho
     reviewQueueItemId,
     queueStatus: "open",
     reviewStatus: "needs_gk_review",
+    reviewUpdatedAt: "2026-08-15T10:00:00.000Z",
     currentUseEligible: true,
     blocks: [{
       ordinal: 1,
@@ -504,6 +571,11 @@ test("Impact Evidence Library frontend projections compose P2-08 and P2-06 witho
   assert.equal(packet.contentType, "evidence_summary");
   assert.equal(packet.requestedAudience, "internal");
   assert.equal(packet.draftStatus, "draft");
+  assert.equal(canStartGeneratedContentReview(packet), true);
+  assert.equal(canCompleteGeneratedContentReview(packet), false);
+  assert.deepEqual(reviewTransitionBody(packet.reviewUpdatedAt), { expected_updated_at: "2026-08-15T10:00:00.000Z" });
+  assert.match(generatedContentReviewStartPath(organizationId, packet.generatedContentDraftId, packet.reviewQueueItemId), /generated-content-review-queue/);
+  assert.match(generatedContentReviewCompletePath(organizationId, packet.generatedContentDraftId, packet.reviewQueueItemId), /complete$/);
   assert.equal(JSON.stringify(packet).includes("must not render"), false);
 
   assert.deepEqual(mergeClaims(usable, candidates).map((claim) => claim.libraryStatus), ["usable", "needs_review"]);

@@ -2,7 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { completeGeneratedContentReview } from "../Backend/kai/services/kaiGeneratedContentService.js";
+import {
+  completeGeneratedContentReview,
+  startGeneratedContentReview,
+} from "../Backend/kai/services/kaiGeneratedContentService.js";
 import {
   createPostgresGeneratedContentRepository,
   __generatedContentRepositoryTestables,
@@ -196,14 +199,21 @@ function makeFakeTx(state) {
         return {
           rows: state.queues
             .filter((q) => q.organization_id === organizationId && q.target_object_type === targetType && q.target_object_id === targetId)
-            .map(({ updated_at, ...projected }) => projected),
+            .map((projected) => projected),
         };
       }
       if (s.startsWith("UPDATE kai.review_queue_items")) {
-        const [
-          newQueueStatus, newReviewStatus, now, organizationId, reviewQueueItemId,
-          targetType, targetId, expectedQueueStatus, expectedReviewStatus, expectedUpdatedAt,
-        ] = params;
+        const isStartTransition = params.length === 9;
+        const newQueueStatus = params[0];
+        const newReviewStatus = isStartTransition ? state.queues[0]?.review_status : params[1];
+        const now = isStartTransition ? params[1] : params[2];
+        const organizationId = isStartTransition ? params[2] : params[3];
+        const reviewQueueItemId = isStartTransition ? params[3] : params[4];
+        const targetType = isStartTransition ? params[4] : params[5];
+        const targetId = isStartTransition ? params[5] : params[6];
+        const expectedQueueStatus = isStartTransition ? params[6] : params[7];
+        const expectedReviewStatus = isStartTransition ? params[7] : params[8];
+        const expectedUpdatedAt = isStartTransition ? params[8] : params[9];
         const row = state.queues.find((q) => q.review_queue_item_id === reviewQueueItemId);
         const matches = row
           && row.organization_id === organizationId
@@ -339,9 +349,66 @@ test("P3-04 lifecycle profile constants match the specification exactly", () => 
   ]);
   assert.deepEqual(__generatedContentRepositoryContract.COMPLETE_REVIEW_FRESH_PROFILE, { queueStatus: "in_progress", reviewStatus: "needs_gk_review" });
   assert.deepEqual(__generatedContentRepositoryContract.COMPLETE_REVIEW_RESOLVED_PROFILE, { queueStatus: "resolved", reviewStatus: "resolved" });
+  assert.deepEqual(__generatedContentRepositoryContract.START_REVIEW_FRESH_PROFILE, { queueStatus: "open", reviewStatus: "needs_gk_review" });
+  assert.deepEqual(__generatedContentRepositoryContract.START_REVIEW_IN_PROGRESS_PROFILE, { queueStatus: "in_progress", reviewStatus: "needs_gk_review" });
 });
 
 // --- repository behavior against a fake authoritative transaction ---
+
+test("Stage-B generated-content review start moves open/needs_gk_review to in_progress/needs_gk_review with one audit and no draft mutation", async () => {
+  const state = makeFixtureState({ queueStatus: "open", reviewStatus: "needs_gk_review" });
+  const before = JSON.stringify({ draft: state.draft, blocks: state.blocks, citations: state.citations });
+  const repository = makeRepository(state);
+  const result = await repository.startGeneratedContentReview(input(), { metadataOnlyAudit: auditRecorder() });
+  assert.equal(result.ok, true);
+  assert.equal(result.data.queueStatus, "in_progress");
+  assert.equal(result.data.reviewStatus, "needs_gk_review");
+  assert.equal(state.queues[0].queue_status, "in_progress");
+  assert.equal(state.queues[0].review_status, "needs_gk_review");
+  assert.equal(state.auditRows.length, 1);
+  assert.equal(JSON.stringify({ draft: state.draft, blocks: state.blocks, citations: state.citations }), before);
+});
+
+test("Stage-B generated-content review start rejects stale, cross-tenant, and wrong-state attempts without mutation", async () => {
+  for (const state of [
+    makeFixtureState({ queueStatus: "open", reviewStatus: "needs_gk_review", updatedAt: LATER }),
+    (() => {
+      const s = makeFixtureState({ queueStatus: "open", reviewStatus: "needs_gk_review" });
+      s.queues[0].organization_id = OTHER_ORG;
+      return s;
+    })(),
+    makeFixtureState({ queueStatus: "resolved", reviewStatus: "resolved" }),
+  ]) {
+    const before = JSON.stringify(state.queues);
+    const result = await makeRepository(state).startGeneratedContentReview(input(), { metadataOnlyAudit: auditRecorder() });
+    assert.equal(result.error.code, "conflict_current_state_changed");
+    assert.equal(JSON.stringify(state.queues), before);
+    assert.equal(state.auditRows.length, 0);
+  }
+});
+
+test("Stage-B generated-content review start service gates match completion role and tenant authority", async () => {
+  let repositoryCalls = 0;
+  const repository = {
+    async startGeneratedContentReview() {
+      repositoryCalls += 1;
+      return { ok: true, data: { queueStatus: "in_progress", reviewStatus: "needs_gk_review" }, error: null };
+    },
+  };
+  const deps = { generatedContentRepository: repository, metadataOnlyAudit: auditRecorder(), env: enabledEnv };
+  assert.equal((await startGeneratedContentReview(input({ actorContext: { actorType: "system", actorUserId: actorContext.actorUserId } }), deps)).error.code, "authorization_denied");
+  assert.equal((await startGeneratedContentReview(input({ organizationId: OTHER_ORG }), deps)).error.code, "authorization_denied");
+  assert.equal((await startGeneratedContentReview(input({
+    actorContext: {
+      ...actorContext,
+      organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_reviewer" }],
+    },
+  }), deps)).error.code, "authorization_denied");
+  assert.equal(repositoryCalls, 0);
+  const ok = await startGeneratedContentReview(input(), deps);
+  assert.equal(ok.ok, true);
+  assert.equal(repositoryCalls, 1);
+});
 
 test("P3-04 fresh completion from the exact precondition writes one queue transition and one audit", async () => {
   const state = makeFixtureState({ queueStatus: "in_progress", reviewStatus: "needs_gk_review" });
