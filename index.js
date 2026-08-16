@@ -2914,6 +2914,20 @@ app.get("/admin/event-assignment", ensureAuthenticated, ensureAdmin, (req, res) 
 // internal API answers its status probe, and role/tenant authorization for the
 // underlying queue/detail/decision routes remains the accepted P1-09 service's
 // responsibility, not this route's.
+// KAI P2-11 client-reviewer-facing follow-up page. Gated by ordinary site
+// authentication only, never ensureAdmin: the `client_reviewer` KAI role
+// itself is an org-scoped authorization decision enforced server-side by the
+// underlying read/completion routes, independent of this page's reachability.
+app.get("/kai/client-followups", ensureAuthenticated, (req, res) => {
+  const assetTag = Date.now();
+  res.render("kai-client-followups", {
+    assetTag,
+    user: req.user,
+    csrfToken: req.session.csrfToken,
+    organizationId: typeof req.query.organizationId === "string" ? req.query.organizationId : "",
+  });
+});
+
 app.get("/gk-admin/kai-review-cockpit", ensureAuthenticated, ensureAdmin, (req, res) => {
   const assetTag = Date.now();
   res.render("kai-review-cockpit", {

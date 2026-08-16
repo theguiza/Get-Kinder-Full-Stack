@@ -1,5 +1,9 @@
 export const BASE_PATH = "/api/kai/sprint2/intake";
 
+export function engagementsPath(organizationId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/engagements`;
+}
+
 export function batchesPath(organizationId) {
   return `${BASE_PATH}/admin/batches?organization_id=${encodeURIComponent(organizationId)}`;
 }
@@ -20,13 +24,8 @@ export function fileReservationsPath(intakeBatchId) {
   return `${BASE_PATH}/admin/batches/${encodeURIComponent(intakeBatchId)}/file-reservations`;
 }
 
-export function uploadPath(organizationId, engagementId, intakeBatchId, intakeFileId) {
-  const params = new URLSearchParams({
-    organization_id: organizationId,
-    engagement_id: engagementId,
-    intake_batch_id: intakeBatchId,
-  });
-  return `${BASE_PATH}/admin/files/${encodeURIComponent(intakeFileId)}/upload?${params.toString()}`;
+export function requestUploadUrlPath(intakeBatchId) {
+  return `${BASE_PATH}/admin/batches/${encodeURIComponent(intakeBatchId)}/files/upload-url`;
 }
 
 export function confirmUploadPath(organizationId, intakeFileId) {
@@ -60,14 +59,21 @@ export async function postJson(path, body) {
   return { statusCode: response.status, body: await readJson(response) };
 }
 
-export async function postBytes(path, file) {
-  const response = await fetch(path, {
-    method: "POST",
-    credentials: "same-origin",
-    headers: { Accept: "application/json", "Content-Type": "application/octet-stream" },
+/**
+ * Gate C-2A browser signed-upload PUT. The signed URL and its headers exist
+ * only as function parameters/locals for the duration of this call - never
+ * rendered, logged, or stored in any longer-lived state. No application
+ * cookies, Authorization header, CSRF token, or other app header is ever
+ * attached: only the server-issued upload_headers (the reserved Content-Type)
+ * are sent, cross-origin, with no credentials.
+ */
+export async function putToSignedUrl(uploadUrl, uploadMethod, uploadHeaders, file) {
+  const response = await fetch(uploadUrl, {
+    method: uploadMethod || "PUT",
+    headers: uploadHeaders || {},
     body: file,
   });
-  return { statusCode: response.status, body: await readJson(response) };
+  return { statusCode: response.status, ok: response.ok };
 }
 
 export async function sha256HexOfFile(file) {

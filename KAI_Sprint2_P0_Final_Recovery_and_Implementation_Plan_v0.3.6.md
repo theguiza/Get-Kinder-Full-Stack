@@ -17842,3 +17842,154 @@ UAT-enablement package. No push, deploy, config/flag mutation, credential/
 secret inspection, shared/staging/production database mutation, real client
 data access, export/export-review work, schema/migration, new dependency, or
 current-state/baseline update was performed.
+
+## MVP UAT final completion - closing the four real browser composition gaps (completed 2026-08-16)
+
+SCOPE:
+  - Closed exactly the four composition gaps the prior UAT-enablement package
+    exposed, without reopening P0-P3 backend policy, the review cockpit, the
+    Evidence Library architecture, internal generation, Generated Drafts, or
+    generated-content review.
+
+REVIEW CONCURRENCY (P2-09):
+  - `Backend/kai/dictionary/postgresClaimTraceabilityRepository.js`: P2-06's
+    `evidence` and `claim_review` DTO subobjects each gained one additive
+    `updated_at` field, sourced only from the already-read
+    `kai.review_queue_items.updated_at` row value (never derived/manufactured
+    in the browser). No new read API, no queue_metadata/assigned_to/audit/
+    actor exposure, no concurrency weakening.
+  - `frontend/impactEvidenceLibraryLogic.js` / `ImpactEvidenceLibrary.jsx`:
+    added `evidenceReviewCompletePath`/`claimReviewCompletePath` (reusing the
+    exact existing P2-09 completion routes) and `canCompleteEvidenceReview`/
+    `canCompleteClaimReview` display gates mirroring the accepted P3-04
+    `canStartGeneratedContentReview`/`canCompleteGeneratedContentReview`
+    pattern. Each control sends exactly `{ expected_updated_at }` from the
+    P2-06 read and refetches P2-06 traceability after success. Claim-review
+    display stays gated on evidence-review already reading `resolved`. Server
+    remains authoritative for role/tenant/state/stale-token handling.
+
+CLIENT FOLLOWUP (P2-11):
+  - No existing client_reviewer-authorized read of client_followup queue
+    state existed, so exactly one minimal read was added:
+    `Backend/kai/db/kaiIntakeQueries.js#listClientFollowupWorkflowsForOrganization`
+    (SELECT only, joins `kai.client_followup_items` to its own
+    `kai.review_queue_items` row) plus
+    `Backend/kai/services/kaiClientFollowupReadService.js#listClientFollowupWorkflows`,
+    gated to exactly `client_reviewer` (the same role as the P2-11 completion
+    service) with mapped-human/active-membership/tenant checks that fail
+    closed on wrong role or cross-tenant access. Exposed fields: claim_id,
+    client_followup_item_id, dimension_key, the fixed P2-04
+    `question_text`, review_queue_item_id, queue_status, review_status,
+    updated_at - no raw evidence, free text, rationale, PII, or unrestricted
+    queue/audit metadata.
+  - New route: `GET /admin/organizations/:organizationId/client-followups`
+    on the existing Sprint 2 intake router.
+  - New client-facing page: `views/kai-client-followups.ejs` +
+    `frontend/KaiClientFollowupReview.jsx` +
+    `frontend/kaiClientFollowupReviewLogic.js`, mounted at
+    `GET /kai/client-followups` in `index.js`, gated by `ensureAuthenticated`
+    only - never `ensureAdmin` and never the `/admin` site surface. The
+    client_reviewer KAI role itself remains an org-scoped server-side
+    authorization decision, independent of this page's reachability. The
+    completion control sends only `{ expected_updated_at }` to the existing
+    P2-11 completion route and refetches the read after success. Copy reads
+    "Reviewed - no additional client information is being supplied for this
+    internal workflow," never implying an answer was supplied or the P2-02
+    gap resolved.
+
+INTAKE CONTEXT:
+  - No existing repository-authorized listing of engagements existed (only
+    a lookup-by-id, `getEngagementTenantState`); one minimal read was added:
+    `Backend/kai/db/kaiQueries.js#listEngagementsForOrganization` (SELECT
+    engagement_id/organization_id only - the same minimal field set every
+    other engagement read in this codebase already uses) plus
+    `Backend/kai/services/kaiEngagementContextService.js#listAuthorizedEngagements`,
+    gated to exactly `gk_admin`/`gk_operator` (the same roles as
+    `create_intake_batch`). New route:
+    `GET /admin/organizations/:organizationId/engagements`.
+  - `frontend/KaiWebIntake.jsx`: removed `generateEngagementId`/"Generate"
+    button entirely; the engagement id is now selected from a dropdown
+    populated by the new read, never typed or fabricated. Batch creation is
+    disabled until an existing engagement is selected.
+
+SIGNED UPLOAD (Gate C-2A browser composition):
+  - `frontend/KaiWebIntake.jsx` no longer calls
+    `POST /admin/files/:intakeFileId/upload` (the server-streaming route,
+    left in place and unmodified for any other caller). The browser flow is
+    now: file-reservation (unchanged) -> `POST
+    /admin/batches/:intakeBatchId/files/upload-url` (existing, unchanged
+    `requestUploadUrl` route/contract) -> a same-call browser `fetch(...,
+    {method: upload_method, headers: upload_headers})` PUT straight to the
+    returned signed GCS URL, using only the server-issued Content-Type header
+    and no application cookies/Authorization/CSRF/other app header -> `POST
+    /admin/files/:intakeFileId/confirm-upload` (existing, unchanged
+    `confirmUpload` route/contract, already re-verifies the exact GCS
+    generation server-side).
+  - `frontend/kaiWebIntakeLogic.js`: removed `uploadPath`/`postBytes`; added
+    `requestUploadUrlPath` and `putToSignedUrl`. The signed URL/headers exist
+    only as function parameters for the duration of the PUT - never stored in
+    component state, rendered, logged, or persisted to any web storage.
+  - Backend `requestUploadUrl`/`confirmUpload` service contracts in
+    `Backend/kai/services/kaiIntakeService.js` were not modified.
+
+FOCUSED ACCEPTANCE (new/affected tests):
+  - `__tests__/kai-sprint2-uat-final-completion-boundary.spec.js` (new):
+    P2-11 read role/tenant/feature-flag boundary and safe-field-set proof;
+    engagement-context read role/tenant/feature-flag boundary proof.
+  - `__tests__/kai-sprint2-uat-enablement-frontend.spec.js` (updated):
+    replaced the removed `postBytes`/`uploadPath` assertions with the
+    reserve -> requestUploadUrl -> signed-PUT -> confirmUpload composition
+    proof (signed URL never leaks outside its own PUT call, no app
+    credentials/headers on the PUT, server-streaming route no longer
+    invoked, no `Generate engagement`/`crypto.randomUUID` text), plus new
+    engagement-read, client-followup-page, and evidence/claim-review-control
+    composition assertions.
+  - `__tests__/kai-sprint2-pass2-route-runtime.spec.js` (additive-only
+    correction): the exhaustive mounted-route snapshot gained the two new
+    read-only routes.
+
+VERIFICATION:
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test
+    __tests__/kai-sprint2-uat-final-completion-boundary.spec.js` -> 11/11
+    passing.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test
+    __tests__/kai-sprint2-uat-enablement-frontend.spec.js` -> 10/10 passing.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test
+    __tests__/kai-sprint2-p2-06-claim-traceability-boundary.spec.js
+    __tests__/kai-sprint2-p2-06-claim-traceability-route.spec.js
+    __tests__/kai-sprint2-p2-09-human-review-boundary.spec.js
+    __tests__/kai-sprint2-p2-11-client-followup-completion-boundary.spec.js`
+    -> 42/42 passing unchanged (P2-09/P2-11 mutation contracts untouched).
+  - `npm run verify:kai-sprint2-p2-06-claim-traceability` -> 11/11 passing
+    against a fresh runner-owned ephemeral local PostgreSQL instance,
+    including the additive `updated_at` DTO fields.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test
+    __tests__/kai-sprint2-gate-c2a-signed-upload-confirmation.spec.js` ->
+    26/26 passing unchanged (backend signed-upload service untouched).
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run
+    verify:kai-sprint2-api-contract` -> 59/60 passing; sole failure is the
+    established `foundation-safety file_upload_enabled` baseline, the same
+    known baseline, not a new regression.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npx vite build` ->
+    production build passed; `public/js/bundles/entry.js` regenerated and
+    included in this commit.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run
+    test:kai-sprint2` -> 2200/2201 passing; sole failure is the same known
+    baseline.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test` -> 2305/2306
+    passing; sole failure is the same known baseline.
+  - `git diff --check` -> clean.
+
+RUNTIME NOT_CONFIRMED (deployment/production boundary, not a repository
+blocker): production KAI_SPRINT2_ENABLED/KAI_FILE_UPLOAD_ENABLED/GCS-provider
+flag state, deployed GCS credentials/runtime, browser CORS behavior for the
+signed PUT against the real bucket, and an actual browser click-through of
+this journey. None of these were exercised or asserted locally, and none of
+them are treated as repository blockers.
+
+One targeted local commit was made on this branch recording this MVP UAT
+final-completion package. No push, deploy, config/flag mutation,
+credential/secret inspection, shared/staging/production database mutation,
+real client data access, export/export-review work, schema/migration, new
+dependency, live model/cloud call, or current-state/baseline update was
+performed.

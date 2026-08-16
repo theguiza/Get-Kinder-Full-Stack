@@ -1007,6 +1007,35 @@ router.post(
   },
 );
 
+let engagementContextServicePromise = null;
+async function getEngagementContextService() {
+  if (intakeServiceOverride?.listAuthorizedEngagements) return intakeServiceOverride;
+  engagementContextServicePromise ||= import("../services/kaiEngagementContextService.js");
+  return engagementContextServicePromise;
+}
+
+/**
+ * KAI intake-context read: existing tenant-authoritative engagement contexts
+ * for an organization, so the Web Intake UI never has to fabricate one.
+ * Read-only; gated the same as `create_intake_batch` (enforced inside the
+ * service, not here).
+ */
+router.get("/admin/organizations/:organizationId/engagements", async (req, res) => {
+  const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) || organizationId !== organizationId.toLowerCase()) {
+    return sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id")],
+    });
+  }
+  return invokeService(res, async () => {
+    const service = await getEngagementContextService();
+    return service.listAuthorizedEngagements({
+      organizationId,
+      actorContext: sprint2MappedActorContext(req),
+    });
+  });
+});
+
 router.post("/admin/batches", async (req, res) => {
   const payload = requestPayload(req);
   if (!validateMutationRequestOrSend(req, res, "create_intake_batch")) return;
@@ -2105,6 +2134,35 @@ async function getClientFollowupCompletionService() {
   clientFollowupCompletionServicePromise ||= import("../services/kaiClientFollowupCompletionService.js");
   return clientFollowupCompletionServicePromise;
 }
+
+let clientFollowupReadServicePromise = null;
+async function getClientFollowupReadService() {
+  if (intakeServiceOverride?.listClientFollowupWorkflows) return intakeServiceOverride;
+  clientFollowupReadServicePromise ||= import("../services/kaiClientFollowupReadService.js");
+  return clientFollowupReadServicePromise;
+}
+
+/**
+ * KAI P2-11 client-reviewer-facing read route. Exactly one organization-scoped
+ * role - `client_reviewer` - is authorized (enforced inside the service, not
+ * here). Read-only: exposes only the fixed, already-established-safe
+ * client_followup workflow fields, never raw evidence/claim/answer content.
+ */
+router.get("/admin/organizations/:organizationId/client-followups", async (req, res) => {
+  const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) || organizationId !== organizationId.toLowerCase()) {
+    return sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id")],
+    });
+  }
+  return invokeService(res, async () => {
+    const service = await getClientFollowupReadService();
+    return service.listClientFollowupWorkflows({
+      organizationId,
+      actorContext: sprint2MappedActorContext(req),
+    });
+  });
+});
 
 function clientFollowupCompletionIdentifiers(req = {}) {
   const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";

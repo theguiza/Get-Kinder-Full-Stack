@@ -59,6 +59,29 @@ export function coverageInternalAcceptancePath(organizationId, claimId, dimensio
     + `/claims/${encodeURIComponent(claimId)}/coverage-dimensions/${encodeURIComponent(dimensionKey)}/internal-acceptance`;
 }
 
+export function evidenceReviewCompletePath(organizationId, evidenceItemId, reviewQueueItemId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
+    + `/evidence-items/${encodeURIComponent(evidenceItemId)}/evidence-review/${encodeURIComponent(reviewQueueItemId)}/complete`;
+}
+
+export function claimReviewCompletePath(organizationId, claimId, reviewQueueItemId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
+    + `/claims/${encodeURIComponent(claimId)}/claim-review/${encodeURIComponent(reviewQueueItemId)}/complete`;
+}
+
+export function canCompleteEvidenceReview(evidence) {
+  return Boolean(evidence) && evidence.review_queue_status === "open" && evidence.review_status === "needs_gk_review";
+}
+
+export function canCompleteClaimReview(evidence, claimReview) {
+  return (
+    Boolean(claimReview)
+    && evidence?.review_status === "resolved"
+    && claimReview.queue_status === "open"
+    && claimReview.review_status === "needs_gk_review"
+  );
+}
+
 export const COVERAGE_DIMENSION_KEYS = Object.freeze([
   "missingness",
   "duplicates",

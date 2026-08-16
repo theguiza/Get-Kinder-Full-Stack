@@ -902,3 +902,27 @@ export async function getScopedSourceVersionByCandidateIdentity(
   );
   return rows[0] || null;
 }
+
+/**
+ * KAI P2-11 client-reviewer-facing read: the minimal current `client_followup`
+ * workflow state for an organization, joined to its own review-queue row.
+ * Returns only the fixed, already-established-safe fields - never raw
+ * evidence, claim text, or free-text/answer content.
+ */
+export async function listClientFollowupWorkflowsForOrganization({ organizationId }, db = pool) {
+  const { rows } = await db.query(
+    `SELECT cf.claim_id, cf.client_followup_item_id, cf.dimension_key, cf.question_text,
+            rq.review_queue_item_id, rq.queue_status, rq.review_status, rq.updated_at
+       FROM kai.client_followup_items cf
+       JOIN kai.review_queue_items rq
+         ON rq.organization_id = cf.organization_id
+        AND rq.queue_type = 'client_followup'
+        AND rq.target_object_type = 'client_followup_item'
+        AND rq.target_object_id = cf.client_followup_item_id
+      WHERE cf.organization_id = $1
+      ORDER BY rq.updated_at DESC, cf.client_followup_item_id ASC
+      LIMIT 100`,
+    [organizationId],
+  );
+  return rows;
+}

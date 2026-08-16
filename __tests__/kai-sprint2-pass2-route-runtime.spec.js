@@ -129,9 +129,15 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // KAI P2-05 potential conflict-review candidate surface (additive; every
     // prior entry preserved verbatim).
     "/admin/organizations/:organizationId/claims/:firstClaimId/potential-conflicts/:secondClaimId",
+    // MVP UAT final completion: P2-11 client-reviewer-facing read (additive;
+    // every prior entry preserved verbatim).
+    "/admin/organizations/:organizationId/client-followups",
     // KAI P2-08 human eligible-claims-for-audience read surface (additive;
     // every prior entry preserved verbatim).
     "/admin/organizations/:organizationId/eligible-claims",
+    // MVP UAT final completion: authoritative intake-context engagement read
+    // (additive; every prior entry preserved verbatim).
+    "/admin/organizations/:organizationId/engagements",
     // KAI P2-03 claim-proposal surface (additive; every prior entry preserved
     // verbatim).
     "/admin/organizations/:organizationId/evidence-items/:evidenceItemId/claim-proposal",

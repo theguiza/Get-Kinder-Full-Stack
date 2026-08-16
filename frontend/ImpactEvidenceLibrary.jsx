@@ -2,11 +2,14 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   LIBRARY_AUDIENCES,
   COVERAGE_DIMENSION_KEYS,
+  canCompleteClaimReview,
+  canCompleteEvidenceReview,
   canCompleteGeneratedContentReview,
   canStartGeneratedContentReview,
   claimGapFollowupsPath,
   claimLibraryCandidatesPath,
   claimProposalPath,
+  claimReviewCompletePath,
   claimTraceabilityPath,
   coverageInternalAcceptancePath,
   createEvidenceSummaryPath,
@@ -14,6 +17,7 @@ import {
   errorText,
   evidenceCoverageAssessmentPath,
   evidenceExtractionPath,
+  evidenceReviewCompletePath,
   generatedContentReviewCompletePath,
   generatedContentReviewStartPath,
   generatedDraftLibraryIndexPath,
@@ -299,6 +303,34 @@ export default function ImpactEvidenceLibrary() {
     if (result.statusCode === 200 || result.statusCode === 201) await loadTraceability(selectedClaimId);
   }, [organizationId, selectedClaimId, coverageDimensionKey, workflowPending, loadTraceability]);
 
+  const runCompleteEvidenceReview = useCallback(async () => {
+    if (!organizationId || !traceability?.evidence || workflowPending) return;
+    if (!canCompleteEvidenceReview(traceability.evidence)) return;
+    setWorkflowPending(true);
+    setWorkflowResult("");
+    const result = await postJson(
+      evidenceReviewCompletePath(organizationId, traceability.evidence.evidence_item_id, traceability.evidence.review_queue_item_id),
+      reviewTransitionBody(traceability.evidence.updated_at),
+    );
+    setWorkflowPending(false);
+    setWorkflowResult(result.statusCode === 200 ? "Evidence review completed." : errorText(result));
+    if (result.statusCode === 200) await loadTraceability(selectedClaimId);
+  }, [organizationId, traceability, selectedClaimId, workflowPending, loadTraceability]);
+
+  const runCompleteClaimReview = useCallback(async () => {
+    if (!organizationId || !selectedClaimId || !traceability?.claimReview || workflowPending) return;
+    if (!canCompleteClaimReview(traceability.evidence, traceability.claimReview)) return;
+    setWorkflowPending(true);
+    setWorkflowResult("");
+    const result = await postJson(
+      claimReviewCompletePath(organizationId, selectedClaimId, traceability.claimReview.review_queue_item_id),
+      reviewTransitionBody(traceability.claimReview.updated_at),
+    );
+    setWorkflowPending(false);
+    setWorkflowResult(result.statusCode === 200 ? "Claim review completed." : errorText(result));
+    if (result.statusCode === 200) await loadTraceability(selectedClaimId);
+  }, [organizationId, selectedClaimId, traceability, workflowPending, loadTraceability]);
+
   return (
     <section>
       <h1 className="admin-title mb-3">Impact Evidence Library</h1>
@@ -441,7 +473,28 @@ export default function ImpactEvidenceLibrary() {
                 ))}
 
                 <h6 className="mt-3">Reviews, followups, conflicts</h6>
+                <ValueRow label="Evidence review" value={`${traceability.evidence?.review_queue_status || "none"} / ${traceability.evidence?.review_status || "none"}`} />
+                {canCompleteEvidenceReview(traceability.evidence) ? (
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-outline-primary mt-2 me-2"
+                    onClick={runCompleteEvidenceReview}
+                    disabled={workflowPending}
+                  >
+                    Complete Evidence Review
+                  </button>
+                ) : null}
                 <ValueRow label="Claim review" value={`${traceability.claimReview?.queue_status || "none"} / ${traceability.claimReview?.review_status || "none"}`} />
+                {canCompleteClaimReview(traceability.evidence, traceability.claimReview) ? (
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-outline-primary mt-2"
+                    onClick={runCompleteClaimReview}
+                    disabled={workflowPending}
+                  >
+                    Complete Claim Review
+                  </button>
+                ) : null}
                 {traceability.clientFollowupWorkflows.map((item) => (
                   <ValueRow
                     key={item.clientFollowupItemId}

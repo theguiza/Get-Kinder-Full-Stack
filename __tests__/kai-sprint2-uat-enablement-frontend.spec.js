@@ -4,11 +4,15 @@ import { readFileSync } from "node:fs";
 
 import sprint2IntakeApiRouter from "../Backend/kai/routes/sprint2IntakeApi.js";
 import {
+  canCompleteClaimReview,
+  canCompleteEvidenceReview,
   claimGapFollowupsPath,
   claimProposalPath,
+  claimReviewCompletePath,
   coverageInternalAcceptancePath,
   evidenceCoverageAssessmentPath,
   evidenceExtractionPath,
+  evidenceReviewCompletePath,
   potentialConflictsPath,
   postJson,
 } from "../frontend/impactEvidenceLibraryLogic.js";
@@ -16,11 +20,17 @@ import {
   batchFilesPath,
   confirmUploadPath,
   createBatchPath,
+  engagementsPath,
   fileDetailPath,
   fileReservationsPath,
-  postBytes,
-  uploadPath,
+  putToSignedUrl,
+  requestUploadUrlPath,
 } from "../frontend/kaiWebIntakeLogic.js";
+import {
+  canCompleteClientFollowup,
+  clientFollowupCompletePath,
+  clientFollowupsPath,
+} from "../frontend/kaiClientFollowupReviewLogic.js";
 
 const organizationId = "00000000-0000-4000-8000-000000000001";
 const engagementId = "00000000-0000-4000-8000-000000000002";
@@ -103,10 +113,11 @@ test("KAI UAT-enablement web-intake frontend paths reuse the exact existing moun
 
   assert.ok(postPaths.includes("/admin/batches"));
   assert.ok(postPaths.includes("/admin/batches/:intakeBatchId/file-reservations"));
-  assert.ok(postPaths.includes("/admin/files/:intakeFileId/upload"));
+  assert.ok(postPaths.includes("/admin/batches/:intakeBatchId/files/upload-url"));
   assert.ok(postPaths.includes("/admin/files/:intakeFileId/confirm-upload"));
   assert.ok(getPaths.includes("/admin/batches/:intakeBatchId/files"));
   assert.ok(getPaths.includes("/admin/files/:intakeFileId"));
+  assert.ok(getPaths.includes("/admin/organizations/:organizationId/engagements"));
 
   assert.equal(createBatchPath(), "/api/kai/sprint2/intake/admin/batches");
   assert.equal(
@@ -114,9 +125,8 @@ test("KAI UAT-enablement web-intake frontend paths reuse the exact existing moun
     `/api/kai/sprint2/intake/admin/batches/${intakeBatchId}/file-reservations`,
   );
   assert.equal(
-    uploadPath(organizationId, engagementId, intakeBatchId, intakeFileId),
-    `/api/kai/sprint2/intake/admin/files/${intakeFileId}/upload`
-      + `?organization_id=${organizationId}&engagement_id=${engagementId}&intake_batch_id=${intakeBatchId}`,
+    requestUploadUrlPath(intakeBatchId),
+    `/api/kai/sprint2/intake/admin/batches/${intakeBatchId}/files/upload-url`,
   );
   assert.equal(
     confirmUploadPath(organizationId, intakeFileId),
@@ -130,38 +140,184 @@ test("KAI UAT-enablement web-intake frontend paths reuse the exact existing moun
     fileDetailPath(organizationId, intakeFileId),
     `/api/kai/sprint2/intake/admin/files/${intakeFileId}?organization_id=${organizationId}`,
   );
+  assert.equal(
+    engagementsPath(organizationId),
+    `/api/kai/sprint2/intake/admin/organizations/${organizationId}/engagements`,
+  );
 });
 
-test("KAI UAT-enablement raw-byte upload sends application/octet-stream with the file as the body, no multipart wrapper", async () => {
+test("KAI UAT-enablement Gate-C2A browser flow: the UAT UI no longer invokes the server-streaming admin upload route", () => {
+  const postPaths = mountedRoutePaths(["post"]);
+  assert.ok(postPaths.includes("/admin/files/:intakeFileId/upload"), "the route may still exist for other callers");
+
+  const intakeLogicSource = readFileSync("frontend/kaiWebIntakeLogic.js", "utf8");
+  const intakeUiSource = readFileSync("frontend/KaiWebIntake.jsx", "utf8");
+  assert.doesNotMatch(intakeLogicSource, /admin\/files\/\$\{[^}]*\}\/upload/);
+  assert.doesNotMatch(intakeUiSource, /postBytes|uploadPath\(/);
+  assert.doesNotMatch(intakeUiSource, /Generate engagement|generateEngagementId|crypto\.randomUUID/);
+});
+
+test("KAI UAT-enablement Gate-C2A browser flow sends a signed PUT with only the server-issued Content-Type, no app credentials/headers", async () => {
   const calls = [];
   const originalFetch = global.fetch;
   global.fetch = async (path, init) => {
     calls.push({ path, init });
-    return { status: 201, json: async () => ({ ok: true, data: {} }) };
+    return { status: 200, ok: true };
   };
   try {
-    await postBytes(uploadPath(organizationId, engagementId, intakeBatchId, intakeFileId), "synthetic-bytes");
+    await putToSignedUrl(
+      "https://storage.googleapis.com/bucket/object?X-Goog-Signature=abc",
+      "PUT",
+      { "Content-Type": "text/csv" },
+      "synthetic-bytes",
+    );
   } finally {
     global.fetch = originalFetch;
   }
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].init.method, "POST");
-  assert.equal(calls[0].init.headers["Content-Type"], "application/octet-stream");
+  assert.equal(calls[0].init.method, "PUT");
+  assert.deepEqual(calls[0].init.headers, { "Content-Type": "text/csv" });
+  assert.equal(calls[0].init.credentials, undefined);
+  assert.equal(Object.keys(calls[0].init).includes("credentials"), false);
   assert.equal(calls[0].init.body, "synthetic-bytes");
 });
 
+test("KAI UAT-enablement Gate-C2A browser flow composes reserve -> requestUploadUrl -> signed PUT -> confirmUpload", async () => {
+  const calls = [];
+  const signedUrl = "https://storage.googleapis.com/bucket/object?X-Goog-Signature=abc";
+  const originalFetch = global.fetch;
+  global.fetch = async (path, init) => {
+    calls.push({ path, init });
+    if (path === signedUrl) return { status: 200, ok: true };
+    if (String(path).includes("/file-reservations")) {
+      return { status: 201, json: async () => ({ ok: true, data: { intake_file_id: intakeFileId } }) };
+    }
+    if (String(path).includes("/files/upload-url")) {
+      return {
+        status: 200,
+        json: async () => ({
+          ok: true,
+          data: { upload_url: signedUrl, upload_method: "PUT", upload_headers: { "Content-Type": "text/csv" } },
+        }),
+      };
+    }
+    if (String(path).includes("/confirm-upload")) {
+      return { status: 200, json: async () => ({ ok: true, data: { upload_state: "confirmed" } }) };
+    }
+    throw new Error(`unexpected fetch: ${path}`);
+  };
+  const { postJson: postJsonIntake, putToSignedUrl: putSigned, requestUploadUrlPath: uploadUrlPath, confirmUploadPath: confirmPath, fileReservationsPath: reservationsPath } =
+    await import("../frontend/kaiWebIntakeLogic.js");
+  try {
+    const reserved = await postJsonIntake(reservationsPath(intakeBatchId), { organization_id: organizationId, engagement_id: engagementId });
+    const uploadUrl = await postJsonIntake(uploadUrlPath(intakeBatchId), {
+      organization_id: organizationId,
+      engagement_id: engagementId,
+      intake_file_id: reserved.body.data.intake_file_id,
+    });
+    const putResult = await putSigned(
+      uploadUrl.body.data.upload_url,
+      uploadUrl.body.data.upload_method,
+      uploadUrl.body.data.upload_headers,
+      "synthetic-bytes",
+    );
+    assert.equal(putResult.ok, true);
+    await postJsonIntake(confirmPath(organizationId, reserved.body.data.intake_file_id), { organization_id: organizationId });
+  } finally {
+    global.fetch = originalFetch;
+  }
+  assert.equal(calls.length, 4);
+  assert.match(calls[0].path, /\/file-reservations$/);
+  assert.match(calls[1].path, /\/files\/upload-url$/);
+  assert.equal(calls[2].path, signedUrl);
+  assert.match(calls[3].path, /\/confirm-upload/);
+  const otherCalls = [calls[0], calls[1], calls[3]];
+  const serialized = JSON.stringify(otherCalls);
+  assert.doesNotMatch(serialized, /X-Goog-Signature/, "the signed URL must never leak into any other call's path or body");
+});
+
+test("KAI UAT-enablement client-followup review page composes the exact P2-11 read/completion routes and the accepted disposition wording", () => {
+  const getPaths = mountedRoutePaths(["get"]);
+  const postPaths = mountedRoutePaths(["post"]);
+  assert.ok(getPaths.includes("/admin/organizations/:organizationId/client-followups"));
+  assert.ok(postPaths.includes("/admin/organizations/:organizationId/claims/:claimId/client-followups/:clientFollowupItemId/complete"));
+
+  assert.equal(
+    clientFollowupsPath(organizationId),
+    `/api/kai/sprint2/intake/admin/organizations/${organizationId}/client-followups`,
+  );
+  assert.equal(
+    clientFollowupCompletePath(organizationId, claimId, "f1"),
+    `/api/kai/sprint2/intake/admin/organizations/${organizationId}/claims/${claimId}/client-followups/f1/complete`,
+  );
+  assert.equal(canCompleteClientFollowup({ queueStatus: "waiting_on_client", reviewStatus: "proposed" }), true);
+  assert.equal(canCompleteClientFollowup({ queueStatus: "resolved", reviewStatus: "resolved" }), false);
+
+  const indexSource = readFileSync("index.js", "utf8");
+  assert.match(indexSource, /app\.get\(["']\/kai\/client-followups["'],\s*ensureAuthenticated,/);
+  assert.doesNotMatch(
+    indexSource.slice(indexSource.indexOf('"/kai/client-followups"'), indexSource.indexOf('"/kai/client-followups"') + 200),
+    /ensureAdmin/,
+  );
+});
+
+test("KAI UAT-enablement evidence/claim review controls send only the server-supplied expected_updated_at", () => {
+  const postPaths = mountedRoutePaths(["post"]);
+  assert.ok(postPaths.includes("/admin/organizations/:organizationId/evidence-items/:evidenceItemId/evidence-review/:reviewQueueItemId/complete"));
+  assert.ok(postPaths.includes("/admin/organizations/:organizationId/claims/:claimId/claim-review/:reviewQueueItemId/complete"));
+
+  assert.equal(
+    evidenceReviewCompletePath(organizationId, evidenceItemId, "q1"),
+    `/api/kai/sprint2/intake/admin/organizations/${organizationId}/evidence-items/${evidenceItemId}/evidence-review/q1/complete`,
+  );
+  assert.equal(
+    claimReviewCompletePath(organizationId, claimId, "q2"),
+    `/api/kai/sprint2/intake/admin/organizations/${organizationId}/claims/${claimId}/claim-review/q2/complete`,
+  );
+
+  assert.equal(canCompleteEvidenceReview({ review_queue_status: "open", review_status: "needs_gk_review" }), true);
+  assert.equal(canCompleteEvidenceReview({ review_queue_status: "resolved", review_status: "resolved" }), false);
+  assert.equal(
+    canCompleteClaimReview(
+      { review_status: "resolved" },
+      { queue_status: "open", review_status: "needs_gk_review" },
+    ),
+    true,
+  );
+  assert.equal(
+    canCompleteClaimReview(
+      { review_status: "needs_gk_review" },
+      { queue_status: "open", review_status: "needs_gk_review" },
+    ),
+    false,
+    "claim review must stay gated on evidence review already being resolved",
+  );
+});
+
 test("KAI UAT-enablement new frontend surfaces add no export, assistant, eligibility, or unsafe-field composition", () => {
-  const sources = [
+  const nonUploadSources = [
     readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8"),
     readFileSync("frontend/impactEvidenceLibraryLogic.js", "utf8"),
+    readFileSync("frontend/KaiClientFollowupReview.jsx", "utf8"),
+    readFileSync("frontend/kaiClientFollowupReviewLogic.js", "utf8"),
+  ].join("\n");
+  const uploadSources = [
     readFileSync("frontend/KaiWebIntake.jsx", "utf8"),
     readFileSync("frontend/kaiWebIntakeLogic.js", "utf8"),
   ].join("\n");
+  const allSources = `${nonUploadSources}\n${uploadSources}`;
 
-  assert.doesNotMatch(sources, /\bPUT\b|\bPATCH\b|\bDELETE\b/);
-  assert.doesNotMatch(sources, /export-review|export candidate|assistant/i);
-  assert.doesNotMatch(sources, /raw_content|signed_url|storage_object|storage_uri|storage_bucket|api[_-]?key|secret/i);
-  assert.doesNotMatch(sources, /computeEligibility|calculateEligibility|isEligible\s*=\s*(?!.*server)/i);
+  // Every route these files call against this app's own /api/kai backend is
+  // GET/POST only. The one legitimate PUT is the Gate-C2A browser-to-GCS
+  // signed upload, which never targets an /api/kai path.
+  assert.doesNotMatch(nonUploadSources, /\bPUT\b|\bPATCH\b|\bDELETE\b/);
+  assert.doesNotMatch(uploadSources, /\bPATCH\b|\bDELETE\b/);
+
+  assert.doesNotMatch(allSources, /export-review|export candidate|assistant/i);
+  assert.doesNotMatch(allSources, /raw_content|storage_object|storage_uri|storage_bucket|api[_-]?key|secret/i);
+  assert.doesNotMatch(allSources, /computeEligibility|calculateEligibility|isEligible\s*=\s*(?!.*server)/i);
+  assert.doesNotMatch(allSources, /console\.(log|warn|error)\([^)]*(upload_url|uploadUrl|signed)/i);
+  assert.doesNotMatch(allSources, /localStorage|sessionStorage|indexedDB/);
 });
 
 test("KAI UAT-enablement review-cockpit host page reuses the unchanged existing component and entry point", () => {
