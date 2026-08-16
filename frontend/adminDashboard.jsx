@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ImpactEvidenceLibrary from "./ImpactEvidenceLibrary.jsx";
+import KaiWebIntake from "./KaiWebIntake.jsx";
 
 const NAV_ITEMS = [
   { key: "overview", label: "Overview", icon: "fa-gauge-high" },
@@ -10,6 +11,7 @@ const NAV_ITEMS = [
   { key: "volunteers", label: "Volunteers", icon: "fa-users" },
   { key: "donors", label: "Donors", icon: "fa-hand-holding-heart" },
   { key: "reportingReadiness", label: "Reporting Readiness", icon: "fa-clipboard-list" },
+  { key: "kaiWebIntake", label: "KAI Web Intake", icon: "fa-upload" },
   { key: "impactEvidenceLibrary", label: "Evidence Library", icon: "fa-folder-tree" },
 ];
 
@@ -2114,6 +2116,8 @@ export default function AdminDashboard() {
               </div>
             </section>
           )}
+
+          {activeSection === "kaiWebIntake" && <KaiWebIntake />}
 
           {activeSection === "impactEvidenceLibrary" && <ImpactEvidenceLibrary />}
 

@@ -1,13 +1,19 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   LIBRARY_AUDIENCES,
+  COVERAGE_DIMENSION_KEYS,
   canCompleteGeneratedContentReview,
   canStartGeneratedContentReview,
+  claimGapFollowupsPath,
   claimLibraryCandidatesPath,
+  claimProposalPath,
   claimTraceabilityPath,
+  coverageInternalAcceptancePath,
   createEvidenceSummaryPath,
   eligibleClaimsPath,
   errorText,
+  evidenceCoverageAssessmentPath,
+  evidenceExtractionPath,
   generatedContentReviewCompletePath,
   generatedContentReviewStartPath,
   generatedDraftLibraryIndexPath,
@@ -16,7 +22,9 @@ import {
   getJson,
   mergeClaims,
   postJson,
+  potentialConflictsPath,
   projectCandidateClaims,
+  projectCoverageAssessment,
   projectEligibleClaims,
   projectGeneratedDraftLibraryItems,
   projectGeneratedDraftPacket,
@@ -55,6 +63,12 @@ export default function ImpactEvidenceLibrary() {
   const [generatingDraft, setGeneratingDraft] = useState(false);
   const [reviewTransitionPending, setReviewTransitionPending] = useState(false);
   const [message, setMessage] = useState("");
+  const [sourceVersionId, setSourceVersionId] = useState("");
+  const [coverageAssessment, setCoverageAssessment] = useState(null);
+  const [secondClaimId, setSecondClaimId] = useState("");
+  const [coverageDimensionKey, setCoverageDimensionKey] = useState(COVERAGE_DIMENSION_KEYS[0]);
+  const [workflowPending, setWorkflowPending] = useState(false);
+  const [workflowResult, setWorkflowResult] = useState("");
 
   const selectedClaim = useMemo(
     () => claims.find((claim) => claim.claimId === selectedClaimId) || null,
@@ -213,6 +227,77 @@ export default function ImpactEvidenceLibrary() {
     await loadGeneratedDrafts();
     setReviewTransitionPending(false);
   }, [generatedDraftPacket, organizationId, refetchGeneratedDraftPacket, loadGeneratedDrafts, reviewTransitionPending]);
+
+  const runExtractEvidence = useCallback(async () => {
+    if (!organizationId || !sourceVersionId || workflowPending) return;
+    setWorkflowPending(true);
+    setWorkflowResult("");
+    const result = await postJson(evidenceExtractionPath(organizationId, sourceVersionId), {});
+    setWorkflowPending(false);
+    setWorkflowResult(result.statusCode === 200 || result.statusCode === 201
+      ? `Evidence extracted: ${(result.body?.data?.evidenceItems || []).length} evidence item(s).`
+      : errorText(result));
+  }, [organizationId, sourceVersionId, workflowPending]);
+
+  const runCoverageAssessment = useCallback(async () => {
+    if (!organizationId || !sourceVersionId || workflowPending) return;
+    setWorkflowPending(true);
+    setWorkflowResult("");
+    setCoverageAssessment(null);
+    const result = await getJson(evidenceCoverageAssessmentPath(organizationId, sourceVersionId));
+    setWorkflowPending(false);
+    if (result.statusCode !== 200 || !result.body?.ok) {
+      setWorkflowResult(errorText(result));
+      return;
+    }
+    setCoverageAssessment(projectCoverageAssessment(result.body.data));
+  }, [organizationId, sourceVersionId, workflowPending]);
+
+  const runClaimProposal = useCallback(async () => {
+    if (!organizationId || !selectedClaim?.evidenceItemId || workflowPending) return;
+    setWorkflowPending(true);
+    setWorkflowResult("");
+    const result = await postJson(claimProposalPath(organizationId, selectedClaim.evidenceItemId), {});
+    setWorkflowPending(false);
+    setWorkflowResult(result.statusCode === 200 || result.statusCode === 201
+      ? `Claim proposal recorded (claim ${result.body?.data?.claim?.claim_id || "unknown"}).`
+      : errorText(result));
+    if (result.statusCode === 200 || result.statusCode === 201) await loadClaims();
+  }, [organizationId, selectedClaim, workflowPending, loadClaims]);
+
+  const runClaimGapFollowups = useCallback(async () => {
+    if (!organizationId || !selectedClaimId || workflowPending) return;
+    setWorkflowPending(true);
+    setWorkflowResult("");
+    const result = await postJson(claimGapFollowupsPath(organizationId, selectedClaimId), {});
+    setWorkflowPending(false);
+    setWorkflowResult(result.statusCode === 200 || result.statusCode === 201
+      ? "Claim-gap client-followups generated."
+      : errorText(result));
+  }, [organizationId, selectedClaimId, workflowPending]);
+
+  const runPotentialConflictCheck = useCallback(async () => {
+    if (!organizationId || !selectedClaimId || !secondClaimId || workflowPending) return;
+    setWorkflowPending(true);
+    setWorkflowResult("");
+    const result = await postJson(potentialConflictsPath(organizationId, selectedClaimId, secondClaimId), {});
+    setWorkflowPending(false);
+    setWorkflowResult(result.statusCode === 200 || result.statusCode === 201
+      ? "Potential-conflict review candidate recorded."
+      : errorText(result));
+  }, [organizationId, selectedClaimId, secondClaimId, workflowPending]);
+
+  const runCoverageInternalAcceptance = useCallback(async () => {
+    if (!organizationId || !selectedClaimId || !coverageDimensionKey || workflowPending) return;
+    setWorkflowPending(true);
+    setWorkflowResult("");
+    const result = await postJson(coverageInternalAcceptancePath(organizationId, selectedClaimId, coverageDimensionKey), {});
+    setWorkflowPending(false);
+    setWorkflowResult(result.statusCode === 200 || result.statusCode === 201
+      ? `Internal limitation accepted for ${coverageDimensionKey}.`
+      : errorText(result));
+    if (result.statusCode === 200 || result.statusCode === 201) await loadTraceability(selectedClaimId);
+  }, [organizationId, selectedClaimId, coverageDimensionKey, workflowPending, loadTraceability]);
 
   return (
     <section>
@@ -374,6 +459,84 @@ export default function ImpactEvidenceLibrary() {
               </>
             ) : null}
           </div>
+
+          <div className="admin-card mt-3">
+            <h5 className="mb-2">Claim &amp; evidence workflow</h5>
+            {workflowResult ? <div className="alert alert-info py-2">{workflowResult}</div> : null}
+
+            <div className="row g-2 align-items-end mb-3">
+              <div className="col-12 col-lg-6">
+                <label className="form-label small fw-semibold">Source version id</label>
+                <input
+                  className="form-control form-control-sm"
+                  value={sourceVersionId}
+                  onChange={(event) => setSourceVersionId(event.target.value.trim())}
+                />
+              </div>
+              <div className="col-6 col-lg-3">
+                <button type="button" className="btn btn-sm btn-outline-primary w-100" onClick={runExtractEvidence} disabled={workflowPending}>
+                  Extract evidence
+                </button>
+              </div>
+              <div className="col-6 col-lg-3">
+                <button type="button" className="btn btn-sm btn-outline-primary w-100" onClick={runCoverageAssessment} disabled={workflowPending}>
+                  View coverage assessment
+                </button>
+              </div>
+            </div>
+
+            {coverageAssessment ? (
+              <div className="mb-3">
+                <h6>Coverage assessment</h6>
+                {coverageAssessment.dimensions.map((dimension) => (
+                  <ValueRow key={dimension.dimensionKey} label={dimension.dimensionKey} value={`${dimension.assessmentStatus} · ${dimension.summary}`} />
+                ))}
+              </div>
+            ) : null}
+
+            <div className="row g-2 align-items-end mb-3">
+              <div className="col-12">
+                <div className="small text-muted">Selected claim: {selectedClaimId || "none"} · evidence item: {selectedClaim?.evidenceItemId || "none"}</div>
+              </div>
+              <div className="col-6 col-lg-4">
+                <button type="button" className="btn btn-sm btn-outline-primary w-100" onClick={runClaimProposal} disabled={workflowPending || !selectedClaim?.evidenceItemId}>
+                  Propose claim
+                </button>
+              </div>
+              <div className="col-6 col-lg-4">
+                <button type="button" className="btn btn-sm btn-outline-primary w-100" onClick={runClaimGapFollowups} disabled={workflowPending || !selectedClaimId}>
+                  Generate gap followups
+                </button>
+              </div>
+              <div className="col-12 col-lg-4">
+                <select className="form-select form-select-sm" value={coverageDimensionKey} onChange={(event) => setCoverageDimensionKey(event.target.value)}>
+                  {COVERAGE_DIMENSION_KEYS.map((key) => <option key={key} value={key}>{key}</option>)}
+                </select>
+              </div>
+              <div className="col-12">
+                <button type="button" className="btn btn-sm btn-outline-primary w-100" onClick={runCoverageInternalAcceptance} disabled={workflowPending || !selectedClaimId}>
+                  Accept internal limitation for selected dimension
+                </button>
+              </div>
+            </div>
+
+            <div className="row g-2 align-items-end">
+              <div className="col-12 col-lg-8">
+                <label className="form-label small fw-semibold">Second claim id (conflict check against selected claim)</label>
+                <input
+                  className="form-control form-control-sm"
+                  value={secondClaimId}
+                  onChange={(event) => setSecondClaimId(event.target.value.trim())}
+                />
+              </div>
+              <div className="col-12 col-lg-4">
+                <button type="button" className="btn btn-sm btn-outline-primary w-100" onClick={runPotentialConflictCheck} disabled={workflowPending || !selectedClaimId || !secondClaimId}>
+                  Record potential conflict
+                </button>
+              </div>
+            </div>
+          </div>
+
           {generatedDraftPacket ? (
             <div className="admin-card mt-3">
               <div className="d-flex justify-content-between align-items-center mb-2">

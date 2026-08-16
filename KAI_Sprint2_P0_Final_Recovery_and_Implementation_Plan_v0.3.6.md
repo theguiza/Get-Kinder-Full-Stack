@@ -17724,3 +17724,121 @@ config/flag mutation, credential/secret inspection, shared/staging/production
 database mutation, real client data access, export/export-review work,
 schema/migration, new dependency, or current-state / baseline update was
 performed.
+
+## MVP UAT enablement - browser reachability for the internal synthetic journey (completed 2026-08-16)
+
+SCOPE:
+  - Made every HUMAN action required for the current internal synthetic MVP
+    journey reachable through the existing /admin browser product, leaving
+    SYSTEM/WORKER actions automated and unchanged. No intake/storage/security
+    foundation, parser/profile/source workflow, P2 evidence/claim/review/
+    internal-eligibility service, Impact Evidence Library service, INTERNAL
+    evidence_summary generation, generated-content human-review lifecycle, or
+    Generated Drafts service was reopened, redesigned, or given new backend
+    policy. No export/export-review work was introduced. No new role,
+    permission, or authorization bypass was added; every mutation still
+    resolves organization/actor/role authority server-side.
+
+IMPLEMENTATION (MISSING_UI_COMPOSITION additions, each the smallest frontend/
+route composition over an already-accepted, unmodified service):
+  - `frontend/KaiWebIntake.jsx` + `frontend/kaiWebIntakeLogic.js` (new): a web
+    intake panel, mounted from the existing `adminDashboard.jsx` navigation as
+    `KAI Web Intake`. Composes only existing routes -
+    `POST /admin/batches`, `POST /admin/batches/:intakeBatchId/file-reservations`,
+    `POST /admin/files/:intakeFileId/upload` (raw `application/octet-stream`
+    body, no multipart wrapper), `POST /admin/files/:intakeFileId/confirm-upload`,
+    `GET /admin/files/:intakeFileId`, `GET /admin/batches/:intakeBatchId/files` -
+    with a client-side SHA-256 checksum (browser `crypto.subtle`, no new
+    dependency) computed for the reservation step. No new backend route,
+    service, or persistence was added.
+  - `views/kai-review-cockpit.ejs` (new) + one additive `app.get(
+    "/gk-admin/kai-review-cockpit", ensureAuthenticated, ensureAdmin, ...)`
+    route in `index.js`: the smallest host page for the already-accepted,
+    already-unchanged P1-09 `window.renderKaiReviewCockpit` entry point and
+    its four existing cockpit routes, which previously had no browser page at
+    all. Mirrors the exact existing `/gk-admin/...` `gk-export-review-detail`
+    page pattern (same auth gate, same asset-tag/CSRF/props composition). No
+    cockpit component, service, or route was changed.
+  - `frontend/impactEvidenceLibraryLogic.js` and `frontend/ImpactEvidenceLibrary.jsx`
+    (additive only): a `Claim & evidence workflow` panel added to the existing
+    Impact Evidence Library, composing six already-accepted, human-authorized
+    P2 routes that previously had no browser control - evidence-extraction,
+    evidence-coverage-assessment (read), claim-proposal, claim-gap-followups,
+    potential-conflicts, and coverage-dimension internal-acceptance. Every
+    mutation sends the exact empty JSON body (`{}`) those routes already
+    require; no eligibility, blocker, or coverage computation was added to the
+    browser, and dimension-key selection uses the fixed ten-item vocabulary
+    already enforced server-side. No new backend route or service was added.
+  - `__tests__/fixtures/kai-uat-synthetic-intake-sample.csv` (new): a tiny,
+    obviously synthetic four-row CSV (`text/csv`, already-supported extension)
+    with no real client/user data, used as the UAT upload fixture.
+  - `__tests__/kai-sprint2-uat-enablement-frontend.spec.js` (new): proves the
+    new frontend paths reuse the exact existing mounted routes, that
+    governance mutation calls send only the required empty body, that the raw
+    upload uses `application/octet-stream` with the file as the body (no
+    multipart wrapper), that the new surfaces add no export/assistant/
+    eligibility/unsafe-field composition, and that the cockpit host page
+    reuses the unmodified existing component/entry point.
+  - `__tests__/kai-sprint2-p3-08-gk-export-review-detail.spec.js`,
+    `__tests__/kai-sprint2-p3-12-gk-export-review-start-control.spec.js`,
+    `__tests__/kai-sprint2-p3-15-gk-export-review-complete-control.spec.js`
+    (additive corrections only): each asserted exactly one `/gk-admin/` page
+    route existed in `index.js`; updated from one to two to reflect the one
+    new `/gk-admin/kai-review-cockpit` page route added by this package. No
+    other assertion in any of the three files was changed.
+
+REMAINING_BLOCKERS (genuine backend read gap, not fixable as UI composition):
+  - The P2-09 evidence-review-completion, claim-review-completion, and P2-11
+    client-followup-completion routes each require an `expected_updated_at`
+    optimistic-concurrency token compared against the live
+    `kai.review_queue_items.updated_at` column. No existing read route or
+    service response (the P2-06 traceability packet, the P2-03 claim-proposal
+    response, the P2-04 claim-gap-followup response, or the P1-06/P1-09
+    review-queue reads, which are scoped only to `intake_file_review`/
+    `sensitivity_review`/`source_candidate_review`) ever returns that
+    timestamp for an `evidence_review`, `claim_review`, or `client_followup`
+    queue item. Building a new read route to expose it would mean designing
+    new backend response surface beyond the smallest-HTTP-composition rule
+    this package is bounded to, so these three completions were left
+    unreachable from the browser and are reported here rather than worked
+    around. `client_followup` completion is additionally scoped to the
+    `client_reviewer` role, never a GK role.
+
+SAFETY:
+  - Every new control calls an already-accepted, already-authorized service
+    unchanged; every mutation still requires the existing
+    `KAI_SPRINT2_ENABLED`/tenant/mapped-human/role authorization chain, and
+    every response is re-fetched from the server afterward rather than
+    trusted from the mutation's own response.
+  - No SQL, database pool, or repository import was added to any frontend
+    file. No raw content, storage location, signed URL, credential, or
+    unrestricted audit field is rendered by any new control.
+  - No export, export-review, finalization, or approval-authority surface was
+    introduced or exposed from any new page.
+
+VERIFICATION:
+  - `DATABASE_URL=postgres://127.0.0.1:1/sentinel_do_not_use node --test
+    __tests__/kai-sprint2-uat-enablement-frontend.spec.js` -> 6/6 passing.
+  - `DATABASE_URL=postgres://127.0.0.1:1/sentinel_do_not_use node --test
+    __tests__/kai-sprint2-impact-evidence-library.spec.js` -> 11/11 passing
+    unchanged.
+  - `DATABASE_URL=postgres://127.0.0.1:1/sentinel_do_not_use npm run
+    verify:kai-sprint2-api-contract` -> 59/60 passing; sole failure is the
+    established `foundation-safety file_upload_enabled` baseline
+    (`true !== false`), the same known baseline, not a new regression.
+  - `DATABASE_URL=postgres://127.0.0.1:1/sentinel_do_not_use npm run build`
+    -> Vite production build passed; the regenerated
+    `public/js/bundles/entry.js` artifact was restored to its committed
+    content via `git checkout --` and is not part of this commit.
+  - `DATABASE_URL=postgres://127.0.0.1:1/sentinel_do_not_use npm run
+    test:kai-sprint2` -> 2153/2154 passing; sole failure is the same known
+    `file_upload_enabled` baseline.
+  - `DATABASE_URL=postgres://127.0.0.1:1/sentinel_do_not_use npm test` ->
+    2258/2259 passing; sole failure is the same known baseline.
+  - `git diff --check` -> clean.
+
+One targeted local commit was made on this branch recording this MVP
+UAT-enablement package. No push, deploy, config/flag mutation, credential/
+secret inspection, shared/staging/production database mutation, real client
+data access, export/export-review work, schema/migration, new dependency, or
+current-state/baseline update was performed.

@@ -29,6 +29,49 @@ export function generatedDraftReviewPacketPath(organizationId, generatedContentD
     + `/generated-content-drafts/${encodeURIComponent(generatedContentDraftId)}/review-packet`;
 }
 
+export function evidenceExtractionPath(organizationId, sourceVersionId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
+    + `/source-versions/${encodeURIComponent(sourceVersionId)}/evidence-extraction`;
+}
+
+export function evidenceCoverageAssessmentPath(organizationId, sourceVersionId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
+    + `/source-versions/${encodeURIComponent(sourceVersionId)}/evidence-coverage-assessment`;
+}
+
+export function claimProposalPath(organizationId, evidenceItemId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
+    + `/evidence-items/${encodeURIComponent(evidenceItemId)}/claim-proposal`;
+}
+
+export function claimGapFollowupsPath(organizationId, claimId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
+    + `/claims/${encodeURIComponent(claimId)}/claim-gap-followups`;
+}
+
+export function potentialConflictsPath(organizationId, firstClaimId, secondClaimId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
+    + `/claims/${encodeURIComponent(firstClaimId)}/potential-conflicts/${encodeURIComponent(secondClaimId)}`;
+}
+
+export function coverageInternalAcceptancePath(organizationId, claimId, dimensionKey) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
+    + `/claims/${encodeURIComponent(claimId)}/coverage-dimensions/${encodeURIComponent(dimensionKey)}/internal-acceptance`;
+}
+
+export const COVERAGE_DIMENSION_KEYS = Object.freeze([
+  "missingness",
+  "duplicates",
+  "definition_clarity",
+  "denominator_clarity",
+  "time_period_clarity",
+  "entity_level_clarity",
+  "small_cell_risk",
+  "conflicting_source_indicators",
+  "requirement_alignment",
+  "coverage_gaps",
+]);
+
 export function generatedContentReviewStartPath(organizationId, generatedContentDraftId, reviewQueueItemId) {
   return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
     + `/generated-content-drafts/${encodeURIComponent(generatedContentDraftId)}`
@@ -162,6 +205,20 @@ export function projectTraceability(dto) {
     potentialConflictGroups: asArray(dto.potential_conflict_groups),
     libraryStatus: dto.eligible === true ? "usable" : (asArray(dto.blockerCodes).length ? "blocked" : "needs_review"),
     truncated: dto.truncated === true,
+  };
+}
+
+export function projectCoverageAssessment(dto) {
+  if (!dto || typeof dto !== "object") return null;
+  return {
+    sourceVersionId: dto.source_version_id,
+    dataDictionaryId: dto.data_dictionary_id,
+    profileChecksum: dto.profile_canonical_sha256,
+    dimensions: Object.entries(dto.dimensions || {}).map(([dimensionKey, value]) => ({
+      dimensionKey,
+      assessmentStatus: value?.assessment_status,
+      summary: JSON.stringify(value),
+    })),
   };
 }
 

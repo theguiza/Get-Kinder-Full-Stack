@@ -2909,6 +2909,21 @@ app.get("/admin/event-assignment", ensureAuthenticated, ensureAdmin, (req, res) 
   });
 });
 
+// KAI P1-09 internal review cockpit page. Kept out of general navigation; the
+// cockpit component itself renders nothing unless the KAI_SPRINT2_ENABLED-gated
+// internal API answers its status probe, and role/tenant authorization for the
+// underlying queue/detail/decision routes remains the accepted P1-09 service's
+// responsibility, not this route's.
+app.get("/gk-admin/kai-review-cockpit", ensureAuthenticated, ensureAdmin, (req, res) => {
+  const assetTag = Date.now();
+  res.render("kai-review-cockpit", {
+    assetTag,
+    user: req.user,
+    csrfToken: req.session.csrfToken,
+    organizationId: typeof req.query.organizationId === "string" ? req.query.organizationId : "",
+  });
+});
+
 // KAI P3-08 read-only GK export-review detail page. Kept out of general
 // navigation; gk_admin authorization for the underlying packet remains the
 // accepted P3-07 API's responsibility, not this route's.
