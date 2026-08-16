@@ -558,7 +558,32 @@ function validateReviewQueueStatusRequestOrSend(req, res) {
 async function invokeService(res, serviceCall, successStatus = 200, exceptionData = null) {
   try {
     return sendServiceResult(res, await serviceCall(), successStatus);
-  } catch {
+  } catch (error) {
+    const applicationStackFrames = typeof error?.stack === "string"
+      ? error.stack
+          .split("\n")
+          .map((line) => {
+            const backendIndex = line.indexOf("Backend/");
+            if (backendIndex < 0) return null;
+            return line.slice(backendIndex).replace(/\)+$/, "");
+          })
+          .filter(Boolean)
+          .slice(0, 10)
+          .join("\n")
+      : null;
+
+    console.error("KAI_UNEXPECTED_ERROR", {
+      error_name:
+        typeof error?.name === "string"
+          ? error.name
+          : error?.constructor?.name || "UnknownError",
+      error_code:
+        typeof error?.code === "string" || typeof error?.code === "number"
+          ? String(error.code)
+          : null,
+      application_stack_frames: applicationStackFrames,
+    });
+
     if (exceptionData) {
       return sendServiceResult(res, {
         ok: false,
@@ -566,6 +591,7 @@ async function invokeService(res, serviceCall, successStatus = 200, exceptionDat
         data: exceptionData,
       });
     }
+
     return sendKaiError(res, "system_error");
   }
 }
