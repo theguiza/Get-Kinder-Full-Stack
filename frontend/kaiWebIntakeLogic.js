@@ -94,3 +94,96 @@ export function fileExtensionOf(filename) {
 export function errorText(result) {
   return result?.body?.error?.message || `Request failed (${result?.statusCode ?? "unknown"}).`;
 }
+
+export function normalizeBatchCode(batchCode) {
+  return String(batchCode || "").trim();
+}
+
+function stableIdempotencyKey(control, identityParts) {
+  const identity = JSON.stringify(identityParts);
+  if (control.current?.identity === identity) return control.current.idempotencyKey;
+  const idempotencyKey = crypto.randomUUID();
+  control.current = { identity, idempotencyKey };
+  return idempotencyKey;
+}
+
+export function stableBatchIdempotencyKey(control, { organizationId, engagementId, batchCode }) {
+  return stableIdempotencyKey(control, {
+    organization_id: organizationId,
+    engagement_id: engagementId,
+    batch_code: normalizeBatchCode(batchCode),
+  });
+}
+
+export function createBatchRequestBody(control, { organizationId, engagementId, batchCode }) {
+  const normalizedBatchCode = normalizeBatchCode(batchCode);
+  return {
+    organization_id: organizationId,
+    engagement_id: engagementId,
+    batch_code: normalizedBatchCode,
+    idempotency_key: stableBatchIdempotencyKey(control, {
+      organizationId,
+      engagementId,
+      batchCode: normalizedBatchCode,
+    }),
+    intake_method: "manual_upload",
+  };
+}
+
+export function stableFileReservationIdempotencyKey(control, {
+  organizationId,
+  engagementId,
+  intakeBatchId,
+  originalFilename,
+  fileExtension,
+  mimeType,
+  fileSizeBytes,
+  checksum,
+  hashAlgorithm,
+}) {
+  return stableIdempotencyKey(control, {
+    organization_id: organizationId,
+    engagement_id: engagementId,
+    intake_batch_id: intakeBatchId,
+    original_filename: originalFilename,
+    file_extension: fileExtension,
+    mime_type: mimeType,
+    file_size_bytes: fileSizeBytes,
+    checksum,
+    hash_algorithm: hashAlgorithm,
+  });
+}
+
+export function fileReservationRequestBody(control, {
+  organizationId,
+  engagementId,
+  intakeBatchId,
+  originalFilename,
+  fileExtension,
+  mimeType,
+  fileSizeBytes,
+  checksum,
+  hashAlgorithm,
+}) {
+  return {
+    organization_id: organizationId,
+    engagement_id: engagementId,
+    original_filename: originalFilename,
+    file_extension: fileExtension,
+    mime_type: mimeType,
+    file_size_bytes: fileSizeBytes,
+    checksum,
+    hash_algorithm: hashAlgorithm,
+    idempotency_key: stableFileReservationIdempotencyKey(control, {
+      organizationId,
+      engagementId,
+      intakeBatchId,
+      originalFilename,
+      fileExtension,
+      mimeType,
+      fileSizeBytes,
+      checksum,
+      hashAlgorithm,
+    }),
+  };
+}

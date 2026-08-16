@@ -1,14 +1,17 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   batchFilesPath,
   confirmUploadPath,
   createBatchPath,
+  createBatchRequestBody,
   engagementsPath,
   errorText,
   fileDetailPath,
   fileExtensionOf,
+  fileReservationRequestBody,
   fileReservationsPath,
   getJson,
+  normalizeBatchCode,
   organizationsPath,
   postJson,
   putToSignedUrl,
@@ -42,6 +45,8 @@ export default function KaiWebIntake() {
   const [batchFiles, setBatchFiles] = useState([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const batchIdempotencyControl = useRef(null);
+  const fileReservationIdempotencyControl = useRef(null);
 
   // The browser never types or fabricates an organization id: it always
   // bootstraps from the server-authoritative list of organizations the
@@ -100,17 +105,18 @@ export default function KaiWebIntake() {
   }, [organizationId, loadEngagements]);
 
   const createBatch = useCallback(async () => {
-    if (!organizationId || !engagementId || !batchCode) {
+    const normalizedBatchCode = normalizeBatchCode(batchCode);
+    if (!organizationId || !engagementId || !normalizedBatchCode) {
       setMessage("Organization id, an existing engagement, and batch code are required.");
       return;
     }
     setBusy(true);
     setMessage("");
-    const result = await postJson(createBatchPath(), {
-      organization_id: organizationId,
-      engagement_id: engagementId,
-      batch_code: batchCode,
-    });
+    const result = await postJson(createBatchPath(), createBatchRequestBody(batchIdempotencyControl, {
+      organizationId,
+      engagementId,
+      batchCode: normalizedBatchCode,
+    }));
     setBusy(false);
     if (result.statusCode !== 201 && result.statusCode !== 200) {
       setMessage(errorText(result));
@@ -128,16 +134,20 @@ export default function KaiWebIntake() {
     setBusy(true);
     setMessage("");
     const checksum = await sha256HexOfFile(file);
-    const reserveResult = await postJson(fileReservationsPath(intakeBatchId), {
-      organization_id: organizationId,
-      engagement_id: engagementId,
-      original_filename: file.name,
-      file_extension: fileExtensionOf(file.name),
-      mime_type: file.type || "text/csv",
-      file_size_bytes: file.size,
+    const fileExtension = fileExtensionOf(file.name);
+    const mimeType = file.type || "text/csv";
+    const hashAlgorithm = "sha256";
+    const reserveResult = await postJson(fileReservationsPath(intakeBatchId), fileReservationRequestBody(fileReservationIdempotencyControl, {
+      organizationId,
+      engagementId,
+      intakeBatchId,
+      originalFilename: file.name,
+      fileExtension,
+      mimeType,
+      fileSizeBytes: file.size,
       checksum,
-      hash_algorithm: "sha256",
-    });
+      hashAlgorithm,
+    }));
     if (reserveResult.statusCode !== 201 && reserveResult.statusCode !== 200) {
       setBusy(false);
       setMessage(errorText(reserveResult));

@@ -19,9 +19,11 @@ import {
 import {
   batchFilesPath,
   confirmUploadPath,
+  createBatchRequestBody,
   createBatchPath,
   engagementsPath,
   fileDetailPath,
+  fileReservationRequestBody,
   fileReservationsPath,
   organizationsPath,
   putToSignedUrl,
@@ -41,6 +43,7 @@ const evidenceItemId = "00000000-0000-4000-8000-000000000201";
 const sourceVersionId = "00000000-0000-4000-8000-000000000301";
 const intakeBatchId = "00000000-0000-4000-8000-000000000401";
 const intakeFileId = "00000000-0000-4000-8000-000000000501";
+const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function mountedRoutePaths(methods) {
   return sprint2IntakeApiRouter.stack
@@ -172,6 +175,65 @@ test("KAI Web Intake bootstraps its organization/engagement selection from the s
   assert.match(intakeUiSource, /disabled=\{busy \|\| !organizationId \|\| !engagementId\}/);
 });
 
+test("KAI Web Intake create-batch request sends the backend-required idempotency contract and reuses it only for the same logical retry", () => {
+  const control = { current: null };
+  const first = createBatchRequestBody(control, {
+    organizationId,
+    engagementId,
+    batchCode: "  august-manual-upload  ",
+  });
+  const retry = createBatchRequestBody(control, {
+    organizationId,
+    engagementId,
+    batchCode: "august-manual-upload",
+  });
+  const changedOrg = createBatchRequestBody(control, {
+    organizationId: "00000000-0000-4000-8000-000000000099",
+    engagementId,
+    batchCode: "august-manual-upload",
+  });
+  const changedEngagement = createBatchRequestBody(control, {
+    organizationId: "00000000-0000-4000-8000-000000000099",
+    engagementId: "00000000-0000-4000-8000-000000000098",
+    batchCode: "august-manual-upload",
+  });
+  const changedBatchCode = createBatchRequestBody(control, {
+    organizationId: "00000000-0000-4000-8000-000000000099",
+    engagementId: "00000000-0000-4000-8000-000000000098",
+    batchCode: "september-manual-upload",
+  });
+
+  assert.equal(first.organization_id, organizationId);
+  assert.equal(first.engagement_id, engagementId);
+  assert.equal(first.batch_code, "august-manual-upload");
+  assert.equal(first.intake_method, "manual_upload");
+  assert.match(first.idempotency_key, uuidRe);
+  assert.equal(retry.idempotency_key, first.idempotency_key);
+  assert.notEqual(changedOrg.idempotency_key, first.idempotency_key);
+  assert.notEqual(changedEngagement.idempotency_key, changedOrg.idempotency_key);
+  assert.notEqual(changedBatchCode.idempotency_key, changedEngagement.idempotency_key);
+  assert.deepEqual(Object.keys(first).sort(), [
+    "batch_code",
+    "engagement_id",
+    "idempotency_key",
+    "intake_method",
+    "organization_id",
+  ]);
+});
+
+test("KAI Web Intake keeps idempotency keys out of rendered UI and browser storage", () => {
+  const intakeUiSource = readFileSync("frontend/KaiWebIntake.jsx", "utf8");
+  const intakeLogicSource = readFileSync("frontend/kaiWebIntakeLogic.js", "utf8");
+  const sources = `${intakeUiSource}\n${intakeLogicSource}`;
+
+  assert.doesNotMatch(intakeUiSource, /useState\([^)]*idempotency/i);
+  assert.doesNotMatch(intakeUiSource, />[^<>{}]*idempotency[^<>{}]*</i);
+  assert.doesNotMatch(intakeUiSource, /idempotency_key/);
+  assert.doesNotMatch(intakeUiSource, /ValueRow[^>]*idempotency/i);
+  assert.doesNotMatch(sources, /localStorage|sessionStorage|indexedDB/);
+  assert.doesNotMatch(sources, /console\.(log|warn|error)\([^)]*idempotency/i);
+});
+
 test("KAI UAT-enablement Gate-C2A browser flow: the UAT UI no longer invokes the server-streaming admin upload route", () => {
   const postPaths = mountedRoutePaths(["post"]);
   assert.ok(postPaths.includes("/admin/files/:intakeFileId/upload"), "the route may still exist for other callers");
@@ -260,6 +322,36 @@ test("KAI UAT-enablement Gate-C2A browser flow composes reserve -> requestUpload
   const otherCalls = [calls[0], calls[1], calls[3]];
   const serialized = JSON.stringify(otherCalls);
   assert.doesNotMatch(serialized, /X-Goog-Signature/, "the signed URL must never leak into any other call's path or body");
+});
+
+test("KAI Web Intake file-reservation request sends and retries with a stable idempotency key", () => {
+  const control = { current: null };
+  const baseInput = {
+    organizationId,
+    engagementId,
+    intakeBatchId,
+    originalFilename: "intake.csv",
+    fileExtension: ".csv",
+    mimeType: "text/csv",
+    fileSizeBytes: 42,
+    checksum: "a".repeat(64),
+    hashAlgorithm: "sha256",
+  };
+  const first = fileReservationRequestBody(control, baseInput);
+  const retry = fileReservationRequestBody(control, { ...baseInput });
+  const changedChecksum = fileReservationRequestBody(control, { ...baseInput, checksum: "b".repeat(64) });
+
+  assert.equal(first.organization_id, organizationId);
+  assert.equal(first.engagement_id, engagementId);
+  assert.equal(first.original_filename, "intake.csv");
+  assert.equal(first.file_extension, ".csv");
+  assert.equal(first.mime_type, "text/csv");
+  assert.equal(first.file_size_bytes, 42);
+  assert.equal(first.checksum, "a".repeat(64));
+  assert.equal(first.hash_algorithm, "sha256");
+  assert.match(first.idempotency_key, uuidRe);
+  assert.equal(retry.idempotency_key, first.idempotency_key);
+  assert.notEqual(changedChecksum.idempotency_key, first.idempotency_key);
 });
 
 test("KAI UAT-enablement client-followup review page composes the exact P2-11 read/completion routes and the accepted disposition wording", () => {
