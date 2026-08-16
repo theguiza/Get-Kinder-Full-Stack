@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   batchFilesPath,
   confirmUploadPath,
@@ -9,6 +9,7 @@ import {
   fileExtensionOf,
   fileReservationsPath,
   getJson,
+  organizationsPath,
   postJson,
   putToSignedUrl,
   requestUploadUrlPath,
@@ -25,10 +26,14 @@ function ValueRow({ label, value }) {
 }
 
 export default function KaiWebIntake() {
+  const [organizations, setOrganizations] = useState([]);
   const [organizationId, setOrganizationId] = useState("");
+  const [loadingOrganizations, setLoadingOrganizations] = useState(true);
+  const [organizationsLoaded, setOrganizationsLoaded] = useState(false);
   const [engagements, setEngagements] = useState([]);
   const [engagementId, setEngagementId] = useState("");
   const [loadingEngagements, setLoadingEngagements] = useState(false);
+  const [engagementsLoaded, setEngagementsLoaded] = useState(false);
   const [batchCode, setBatchCode] = useState("");
   const [intakeBatchId, setIntakeBatchId] = useState("");
   const [file, setFile] = useState(null);
@@ -38,15 +43,44 @@ export default function KaiWebIntake() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
 
-  const loadEngagements = useCallback(async () => {
-    if (!organizationId) {
-      setMessage("An organization id is required.");
+  // The browser never types or fabricates an organization id: it always
+  // bootstraps from the server-authoritative list of organizations the
+  // already-resolved actor is authorized to use for ordinary intake.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoadingOrganizations(true);
+      const result = await getJson(organizationsPath());
+      if (cancelled) return;
+      setLoadingOrganizations(false);
+      setOrganizationsLoaded(true);
+      if (result.statusCode !== 200 || !result.body?.ok) {
+        setOrganizations([]);
+        setMessage(errorText(result));
+        return;
+      }
+      const items = result.body.data?.items || [];
+      setOrganizations(items);
+      if (items.length === 1) {
+        setOrganizationId(items[0].organization_id);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const loadEngagements = useCallback(async (orgId) => {
+    if (!orgId) {
+      setEngagements([]);
+      setEngagementId("");
+      setEngagementsLoaded(false);
       return;
     }
     setLoadingEngagements(true);
-    setMessage("");
-    const result = await getJson(engagementsPath(organizationId));
+    const result = await getJson(engagementsPath(orgId));
     setLoadingEngagements(false);
+    setEngagementsLoaded(true);
     if (result.statusCode !== 200 || !result.body?.ok) {
       setEngagements([]);
       setEngagementId("");
@@ -55,8 +89,15 @@ export default function KaiWebIntake() {
     }
     const items = result.body.data?.items || [];
     setEngagements(items);
-    setEngagementId((current) => (items.some((item) => item.engagement_id === current) ? current : items[0]?.engagement_id || ""));
-  }, [organizationId]);
+    setEngagementId(items.length === 1 ? items[0].engagement_id : "");
+  }, []);
+
+  // Once an organization is selected (auto- or user-picked), the engagement
+  // list for that organization is fetched automatically - the user never
+  // types or fabricates an engagement id either.
+  useEffect(() => {
+    loadEngagements(organizationId);
+  }, [organizationId, loadEngagements]);
 
   const createBatch = useCallback(async () => {
     if (!organizationId || !engagementId || !batchCode) {
@@ -174,30 +215,52 @@ export default function KaiWebIntake() {
         <h5 className="mb-2">1. Batch</h5>
         <div className="row g-2 align-items-end mb-2">
           <div className="col-12 col-lg-4">
-            <label className="form-label small fw-semibold">Organization id</label>
-            <input className="form-control form-control-sm" value={organizationId} onChange={(event) => setOrganizationId(event.target.value.trim())} />
+            <label className="form-label small fw-semibold">Organization</label>
+            {loadingOrganizations ? (
+              <div className="small text-muted">Loading your organizations...</div>
+            ) : organizationsLoaded && organizations.length === 0 ? (
+              <div className="small text-muted">No KAI organization is available for this account.</div>
+            ) : (
+              <select
+                className="form-select form-select-sm"
+                value={organizationId}
+                onChange={(event) => setOrganizationId(event.target.value)}
+                disabled={organizations.length <= 1}
+              >
+                {organizations.map((item) => (
+                  <option key={item.organization_id} value={item.organization_id}>{item.organization_id}</option>
+                ))}
+              </select>
+            )}
           </div>
           <div className="col-12 col-lg-5">
             <label className="form-label small fw-semibold">Engagement</label>
-            <div className="input-group input-group-sm">
-              <select className="form-select" value={engagementId} onChange={(event) => setEngagementId(event.target.value)} disabled={engagements.length === 0}>
-                {engagements.length === 0 ? <option value="">No engagements loaded</option> : null}
+            {loadingEngagements ? (
+              <div className="small text-muted">Loading engagements...</div>
+            ) : !organizationId ? (
+              <div className="small text-muted">Select an organization first.</div>
+            ) : engagementsLoaded && engagements.length === 0 ? (
+              <div className="small text-muted">No existing engagement is available for this organization.</div>
+            ) : (
+              <select
+                className="form-select form-select-sm"
+                value={engagementId}
+                onChange={(event) => setEngagementId(event.target.value)}
+                disabled={engagements.length <= 1}
+              >
                 {engagements.map((item) => (
                   <option key={item.engagement_id} value={item.engagement_id}>{item.engagement_id}</option>
                 ))}
               </select>
-              <button type="button" className="btn btn-outline-secondary" onClick={loadEngagements} disabled={loadingEngagements}>
-                {loadingEngagements ? "Loading..." : "Load"}
-              </button>
-            </div>
-            <div className="form-text">Only existing, tenant-authoritative engagements are selectable.</div>
+            )}
+            <div className="form-text">Only existing, tenant-authoritative organizations and engagements are selectable.</div>
           </div>
           <div className="col-12 col-lg-3">
             <label className="form-label small fw-semibold">Batch code</label>
             <input className="form-control form-control-sm" value={batchCode} onChange={(event) => setBatchCode(event.target.value.trim())} />
           </div>
         </div>
-        <button type="button" className="btn btn-sm btn-primary" onClick={createBatch} disabled={busy || !engagementId}>Create batch</button>
+        <button type="button" className="btn btn-sm btn-primary" onClick={createBatch} disabled={busy || !organizationId || !engagementId}>Create batch</button>
         {intakeBatchId ? <div className="small mt-2">Batch id: {intakeBatchId}</div> : null}
       </div>
 

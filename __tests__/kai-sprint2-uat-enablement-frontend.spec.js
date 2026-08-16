@@ -23,6 +23,7 @@ import {
   engagementsPath,
   fileDetailPath,
   fileReservationsPath,
+  organizationsPath,
   putToSignedUrl,
   requestUploadUrlPath,
 } from "../frontend/kaiWebIntakeLogic.js";
@@ -118,7 +119,9 @@ test("KAI UAT-enablement web-intake frontend paths reuse the exact existing moun
   assert.ok(getPaths.includes("/admin/batches/:intakeBatchId/files"));
   assert.ok(getPaths.includes("/admin/files/:intakeFileId"));
   assert.ok(getPaths.includes("/admin/organizations/:organizationId/engagements"));
+  assert.ok(getPaths.includes("/admin/organizations"));
 
+  assert.equal(organizationsPath(), "/api/kai/sprint2/intake/admin/organizations");
   assert.equal(createBatchPath(), "/api/kai/sprint2/intake/admin/batches");
   assert.equal(
     fileReservationsPath(intakeBatchId),
@@ -144,6 +147,29 @@ test("KAI UAT-enablement web-intake frontend paths reuse the exact existing moun
     engagementsPath(organizationId),
     `/api/kai/sprint2/intake/admin/organizations/${organizationId}/engagements`,
   );
+});
+
+test("KAI Web Intake bootstraps its organization/engagement selection from the server, never from a typed or fabricated id", () => {
+  const intakeUiSource = readFileSync("frontend/KaiWebIntake.jsx", "utf8");
+
+  // No free-text organization id input: the browser can no longer type/guess one.
+  assert.doesNotMatch(intakeUiSource, /<input[^>]*value=\{organizationId\}/);
+  assert.doesNotMatch(intakeUiSource, /onChange=\{\(event\) => setOrganizationId\(event\.target\.value\.trim\(\)\)\}/);
+
+  // The organization list bootstraps from the server on mount and auto-selects a single result.
+  assert.match(intakeUiSource, /useEffect\(\(\) => \{[\s\S]*?getJson\(organizationsPath\(\)\)/);
+  assert.match(intakeUiSource, /items\.length === 1[\s\S]{0,80}setOrganizationId\(items\[0\]\.organization_id\)/);
+
+  // Selecting an organization automatically chains into the existing engagements read.
+  assert.match(intakeUiSource, /loadEngagements\(organizationId\)/);
+  assert.match(intakeUiSource, /setEngagementId\(items\.length === 1 \? items\[0\]\.engagement_id : ""\)/);
+
+  // Explicit empty states are rendered rather than fabricating an id.
+  assert.match(intakeUiSource, /No KAI organization is available for this account\./);
+  assert.match(intakeUiSource, /No existing engagement is available for this organization\./);
+
+  // Create batch is gated on both an organization and an engagement being selected.
+  assert.match(intakeUiSource, /disabled=\{busy \|\| !organizationId \|\| !engagementId\}/);
 });
 
 test("KAI UAT-enablement Gate-C2A browser flow: the UAT UI no longer invokes the server-streaming admin upload route", () => {

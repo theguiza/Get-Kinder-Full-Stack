@@ -1,5 +1,9 @@
 export const BASE_PATH = "/api/kai/sprint2/intake";
 
+export function organizationsPath() {
+  return `${BASE_PATH}/admin/organizations`;
+}
+
 export function engagementsPath(organizationId) {
   return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/engagements`;
 }
