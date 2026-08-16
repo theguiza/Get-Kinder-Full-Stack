@@ -39,6 +39,11 @@ const aiActor = Object.freeze({
   actorUserId: "90000000-0000-4000-8000-000000000005",
   organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_reviewer" }],
 });
+const clientAdminActor = Object.freeze({
+  actorType: "human",
+  actorUserId: "90000000-0000-4000-8000-000000000006",
+  organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_admin" }],
+});
 
 // --- P2-11 client-followup read ---
 
@@ -113,10 +118,10 @@ test("P2-11 read is disabled when KAI_SPRINT2_ENABLED is not true", async () => 
 
 // --- intake-context engagement read ---
 
-test("engagement-context read allowed roles are exactly gk_admin/gk_operator", () => {
+test("engagement-context read allowed roles are exactly gk_admin/gk_operator/client_admin", () => {
   assert.deepEqual(
     [...__engagementContextServiceContract.LIST_ENGAGEMENTS_ALLOWED_ROLES].sort(),
-    ["gk_admin", "gk_operator"],
+    ["client_admin", "gk_admin", "gk_operator"],
   );
 });
 
@@ -124,6 +129,15 @@ test("engagement-context read returns only engagement_id/organization_id for an 
   const result = await listAuthorizedEngagements(
     { organizationId: ORG, actorContext: gkOperatorActor },
     { env: enabledEnv, listEngagementsForOrganization: async () => [{ engagement_id: "e1", organization_id: ORG, extra: "must not leak" }] },
+  );
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.data.items, [{ engagement_id: "e1", organization_id: ORG }]);
+});
+
+test("engagement-context read allows a bound client_admin to read its own organization's engagements", async () => {
+  const result = await listAuthorizedEngagements(
+    { organizationId: ORG, actorContext: clientAdminActor },
+    { env: enabledEnv, listEngagementsForOrganization: async () => [{ engagement_id: "e1", organization_id: ORG }] },
   );
   assert.equal(result.ok, true);
   assert.deepEqual(result.data.items, [{ engagement_id: "e1", organization_id: ORG }]);

@@ -108,6 +108,9 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     "/admin/files/:intakeFileId/block",
     "/admin/files/:intakeFileId/confirm-upload",
     "/admin/files/:intakeFileId/upload",
+    // KAI Web Intake organization bootstrap: read-only, additive, and every
+    // prior entry preserved verbatim.
+    "/admin/organizations",
     // Impact Evidence Library claim-navigation index: read-only, additive, and
     // every prior entry preserved verbatim.
     "/admin/organizations/:organizationId/claim-library/candidates",
@@ -265,6 +268,77 @@ test("admin access route delegates to checkAdminAccess with sanitized request co
         id: 46,
       },
     });
+    assert.equal("headers" in serviceInput, false);
+    assert.equal("cookies" in serviceInput, false);
+    assert.equal("session" in serviceInput, false);
+  } finally {
+    restore();
+  }
+});
+
+test("admin organizations bootstrap route delegates to listAuthorizedOrganizations with a sanitized req, no organization id accepted from the caller", async () => {
+  let serviceInput = null;
+  const restore = intakeRouteTestables.setIntakeServiceForTest({
+    async listAuthorizedOrganizations(input) {
+      serviceInput = input;
+      return { ok: true, data: { items: [{ organization_id: "org-1" }] }, warnings: [] };
+    },
+  });
+
+  try {
+    const originalReq = {
+      query: { organization_id: "attacker-supplied-org" },
+      headers: { cookie: "session=secret-cookie-sentinel" },
+      cookies: { session: "secret-cookie-sentinel" },
+      session: { id: "session-value-sentinel" },
+      user: {
+        id: 46,
+        email: "email-sentinel@example.test",
+        token: "secret-token-sentinel",
+      },
+    };
+
+    const res = await invokeRoute("/admin/organizations", "get", originalReq);
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(res.body.data.items, [{ organization_id: "org-1" }]);
+    assert.deepEqual(serviceInput, { req: { user: { id: 46 } } });
+    assert.equal("headers" in serviceInput, false);
+    assert.equal("cookies" in serviceInput, false);
+    assert.equal("session" in serviceInput, false);
+    assert.equal("organizationId" in serviceInput, false, "the caller-supplied organization id must never reach the service");
+  } finally {
+    restore();
+  }
+});
+
+test("admin organizations engagements route delegates to listAuthorizedEngagements with a sanitized req and the path organization id", async () => {
+  let serviceInput = null;
+  const restore = intakeRouteTestables.setIntakeServiceForTest({
+    async listAuthorizedEngagements(input) {
+      serviceInput = input;
+      return { ok: true, data: { items: [{ engagement_id: "eng-1", organization_id: input.organizationId }] }, warnings: [] };
+    },
+  });
+
+  try {
+    const originalReq = {
+      params: { organizationId },
+      headers: { cookie: "session=secret-cookie-sentinel" },
+      cookies: { session: "secret-cookie-sentinel" },
+      session: { id: "session-value-sentinel" },
+      user: {
+        id: 46,
+        email: "email-sentinel@example.test",
+        token: "secret-token-sentinel",
+      },
+    };
+
+    const res = await invokeRoute("/admin/organizations/:organizationId/engagements", "get", originalReq);
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(serviceInput.organizationId, organizationId);
+    assert.deepEqual(serviceInput.req, { user: { id: 46 } });
     assert.equal("headers" in serviceInput, false);
     assert.equal("cookies" in serviceInput, false);
     assert.equal("session" in serviceInput, false);

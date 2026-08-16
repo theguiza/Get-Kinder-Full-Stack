@@ -1014,6 +1014,27 @@ async function getEngagementContextService() {
   return engagementContextServicePromise;
 }
 
+let organizationContextServicePromise = null;
+async function getOrganizationContextService() {
+  if (intakeServiceOverride?.listAuthorizedOrganizations) return intakeServiceOverride;
+  organizationContextServicePromise ||= import("../services/kaiOrganizationContextService.js");
+  return organizationContextServicePromise;
+}
+
+/**
+ * KAI Web Intake organization-bootstrap read: the authenticated actor's own
+ * organizations authorized for ordinary intake, so the browser never has to
+ * know or type an organization id. Read-only, derived entirely from the
+ * freshly resolved server-side actor context - the caller supplies nothing
+ * that could steer which organizations come back.
+ */
+router.get("/admin/organizations", async (req, res) => {
+  return invokeService(res, async () => {
+    const service = await getOrganizationContextService();
+    return service.listAuthorizedOrganizations({ req: { user: safeAuthenticatedUser(req) } });
+  });
+});
+
 /**
  * KAI intake-context read: existing tenant-authoritative engagement contexts
  * for an organization, so the Web Intake UI never has to fabricate one.
@@ -1031,7 +1052,7 @@ router.get("/admin/organizations/:organizationId/engagements", async (req, res) 
     const service = await getEngagementContextService();
     return service.listAuthorizedEngagements({
       organizationId,
-      actorContext: sprint2MappedActorContext(req),
+      req: { user: safeAuthenticatedUser(req) },
     });
   });
 });
