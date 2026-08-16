@@ -108,9 +108,61 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     "/admin/files/:intakeFileId/block",
     "/admin/files/:intakeFileId/confirm-upload",
     "/admin/files/:intakeFileId/upload",
+    // Impact Evidence Library claim-navigation index: read-only, additive, and
+    // every prior entry preserved verbatim.
+    "/admin/organizations/:organizationId/claim-library/candidates",
+    // KAI P2-04 claim-gap/client-followup surface (additive; every prior
+    // entry preserved verbatim).
+    "/admin/organizations/:organizationId/claims/:claimId/claim-gap-followups",
+    // KAI P2-09 human claim-review/internal-approval completion surface
+    // (additive; every prior entry preserved verbatim).
+    "/admin/organizations/:organizationId/claims/:claimId/claim-review/:reviewQueueItemId/complete",
+    // KAI P2-11 client-followup-completion surface (additive; every prior
+    // entry preserved verbatim).
+    "/admin/organizations/:organizationId/claims/:claimId/client-followups/:clientFollowupItemId/complete",
+    // KAI P2-10 owner-policy internal-coverage-acceptance surface (additive;
+    // every prior entry preserved verbatim).
+    "/admin/organizations/:organizationId/claims/:claimId/coverage-dimensions/:dimensionKey/internal-acceptance",
+    // KAI P2-06 human claim-traceability read surface (additive; every prior
+    // entry preserved verbatim).
+    "/admin/organizations/:organizationId/claims/:claimId/traceability",
+    // KAI P2-05 potential conflict-review candidate surface (additive; every
+    // prior entry preserved verbatim).
+    "/admin/organizations/:organizationId/claims/:firstClaimId/potential-conflicts/:secondClaimId",
+    // MVP UAT final completion: P2-11 client-reviewer-facing read (additive;
+    // every prior entry preserved verbatim).
+    "/admin/organizations/:organizationId/client-followups",
+    // KAI P2-08 human eligible-claims-for-audience read surface (additive;
+    // every prior entry preserved verbatim).
+    "/admin/organizations/:organizationId/eligible-claims",
+    // MVP UAT final completion: authoritative intake-context engagement read
+    // (additive; every prior entry preserved verbatim).
+    "/admin/organizations/:organizationId/engagements",
+    // KAI P2-03 claim-proposal surface (additive; every prior entry preserved
+    // verbatim).
+    "/admin/organizations/:organizationId/evidence-items/:evidenceItemId/claim-proposal",
+    // KAI P2-09 human evidence-review completion surface (additive; every
+    // prior entry preserved verbatim).
+    "/admin/organizations/:organizationId/evidence-items/:evidenceItemId/evidence-review/:reviewQueueItemId/complete",
+    // Generated Drafts library index: read-only, additive, and every prior
+    // entry preserved verbatim.
+    "/admin/organizations/:organizationId/generated-content-drafts",
     "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-review-queue/:exportReviewQueueItemId/complete",
     "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-review-queue/:exportReviewQueueItemId/packet",
     "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-review-queue/:exportReviewQueueItemId/start",
+    "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/generated-content-review-queue/:reviewQueueItemId/complete",
+    "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/generated-content-review-queue/:reviewQueueItemId/start",
+    // KAI P3-01/P3-02 internal evidence-summary generation and generated-draft
+    // review-packet read surface (additive; every prior entry preserved
+    // verbatim).
+    "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/review-packet",
+    "/admin/organizations/:organizationId/generated-content-drafts/evidence-summary",
+    // KAI P2-02 evidence-coverage-assessment surface (additive; every prior
+    // entry preserved verbatim).
+    "/admin/organizations/:organizationId/source-versions/:sourceVersionId/evidence-coverage-assessment",
+    // KAI P2-01 evidence-lineage extraction surface (additive; every prior
+    // entry preserved verbatim).
+    "/admin/organizations/:organizationId/source-versions/:sourceVersionId/evidence-extraction",
     // KAI P1-09 internal review-cockpit surface (additive; every prior entry
     // preserved verbatim).
     "/admin/review-cockpit/file-profiles/:fileProfileId",

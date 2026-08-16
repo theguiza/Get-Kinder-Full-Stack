@@ -71,6 +71,7 @@ import {
 } from "./Backend/kai/middleware/kaiSprint2RequestSafety.js";
 import sprint2IntakeAuthPreflightApiRouter from "./Backend/kai/routes/sprint2IntakeAuthPreflightApi.js";
 import sprint2IntakeApiRouter from "./Backend/kai/routes/sprint2IntakeApi.js";
+import { registerKaiP1WorkerCron } from "./Backend/kai/parsing/p1WorkerCron.js";
 import {
   legacyKaiDeprecatedJson,
   legacyKaiDeprecatedSse,
@@ -2908,6 +2909,35 @@ app.get("/admin/event-assignment", ensureAuthenticated, ensureAdmin, (req, res) 
   });
 });
 
+// KAI P1-09 internal review cockpit page. Kept out of general navigation; the
+// cockpit component itself renders nothing unless the KAI_SPRINT2_ENABLED-gated
+// internal API answers its status probe, and role/tenant authorization for the
+// underlying queue/detail/decision routes remains the accepted P1-09 service's
+// responsibility, not this route's.
+// KAI P2-11 client-reviewer-facing follow-up page. Gated by ordinary site
+// authentication only, never ensureAdmin: the `client_reviewer` KAI role
+// itself is an org-scoped authorization decision enforced server-side by the
+// underlying read/completion routes, independent of this page's reachability.
+app.get("/kai/client-followups", ensureAuthenticated, (req, res) => {
+  const assetTag = Date.now();
+  res.render("kai-client-followups", {
+    assetTag,
+    user: req.user,
+    csrfToken: req.session.csrfToken,
+    organizationId: typeof req.query.organizationId === "string" ? req.query.organizationId : "",
+  });
+});
+
+app.get("/gk-admin/kai-review-cockpit", ensureAuthenticated, ensureAdmin, (req, res) => {
+  const assetTag = Date.now();
+  res.render("kai-review-cockpit", {
+    assetTag,
+    user: req.user,
+    csrfToken: req.session.csrfToken,
+    organizationId: typeof req.query.organizationId === "string" ? req.query.organizationId : "",
+  });
+});
+
 // KAI P3-08 read-only GK export-review detail page. Kept out of general
 // navigation; gk_admin authorization for the underlying packet remains the
 // accepted P3-07 API's responsibility, not this route's.
@@ -3572,6 +3602,11 @@ if (process.env.NODE_ENV === "production" && process.env.ENABLE_DONATION_POLICY_
     { timezone: "America/Vancouver" }
   );
 }
+// KAI P1 worker: registers only when KAI_SPRINT2_ENABLED and KAI_WORKER_ENABLED
+// are both on, and only activates eligible files once a synthetic organization
+// scope is configured (see Backend/kai/parsing/p1WorkerCron.js).
+registerKaiP1WorkerCron();
+
 // Cron: run every day at KINDNESS_SEND_TIME (HH:MM, Vancouver)
 const KINDNESS_SEND_TIME = process.env.KINDNESS_SEND_TIME || "09:00";
 const [hour, minute] = KINDNESS_SEND_TIME.split(":");

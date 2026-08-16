@@ -48,6 +48,35 @@ export function areKaiSprint2PublicExportFeaturesEnabled(env = process.env) {
   return isKaiSprint2Enabled(env) && isKaiGenerationEnabled(env) && isKaiPublicExportEnabled(env);
 }
 
+/**
+ * KAI_WORKER_ENABLED (P1 runtime composition): added here with default false
+ * (any unset/non-truthy value returns false via isEnabledValue), following the
+ * exact `isKaiFileUploadEnabled`/`areKaiSprint2UploadFeaturesEnabled`
+ * composition idiom already established in this file. Does not change any
+ * existing flag's default.
+ */
+export function isKaiWorkerEnabled(env = process.env) {
+  return isEnabledValue(env.KAI_WORKER_ENABLED);
+}
+
+export function areKaiSprint2WorkerFeaturesEnabled(env = process.env) {
+  return isKaiSprint2Enabled(env) && isKaiWorkerEnabled(env);
+}
+
+/**
+ * KAI_P1_WORKER_SYNTHETIC_ORGANIZATION_ID: the smallest explicit
+ * tenant/organization-scoped configuration for the P1 worker's first
+ * synthetic-only production execution. Fails closed (returns null) when
+ * absent, blank, or padded with whitespace: absence of this configuration
+ * means the worker never sweeps any organization.
+ */
+export function getKaiP1WorkerSyntheticOrganizationId(env = process.env) {
+  const value = env.KAI_P1_WORKER_SYNTHETIC_ORGANIZATION_ID;
+  return typeof value === "string" && value.length > 0 && value === value.trim()
+    ? value
+    : null;
+}
+
 export function requireKaiSprint2Enabled(req, res, next) {
   if (isKaiSprint2Enabled()) return next();
 

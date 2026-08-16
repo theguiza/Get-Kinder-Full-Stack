@@ -1,31 +1,32 @@
 # KAI Sprint 2 P0 — Final Recovery and Implementation Plan
 
 ```text
-plan_version: 0.3.5
-plan_date: 2026-07-14
+plan_version: 0.3.6
+plan_date: 2026-08-14
 approval_status: OWNER_ACCEPTED
-approved_by_or_owner_reference: USER_CONFIRMED in the KAI Project conversation on 2026-07-14
-supersedes: KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.4.md
-review_basis: Evidence-Locked Accuracy Review, KAI Governance Resolution v1.0, authority-precedence reconciliation, the completed Codex read-only repository preflight, the owner-approved security-limit and upload-lifecycle decisions, the owner-directed runtime-timeout, synthetic-end-state, schema-compatibility, and distributed-concurrency clarifications, and the owner-directed evidence-labeling and first-write milestone-checkpoint amendment
+approved_by_or_owner_reference: USER_CONFIRMED in the KAI Project conversation on 2026-07-14; v0.3.6 Data Operating Model and Gate D reconciliation USER_CONFIRMED on 2026-08-14
+supersedes: KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md
+review_basis: Evidence-Locked Accuracy Review, KAI Governance Resolution v1.0, authority-precedence reconciliation, the completed Codex read-only repository preflight, the owner-approved security-limit and upload-lifecycle decisions, the owner-directed runtime-timeout, synthetic-end-state, schema-compatibility, and distributed-concurrency clarifications, the owner-directed evidence-labeling and first-write milestone-checkpoint amendment, the owner-accepted KAI_MVP_Sprint2_Data_Protection_and_Processing_Operating_Model_v0.2.md, and the Gate D operating-policy decisions accepted by the owner on 2026-08-14
 ```
 
-This document is the owner-accepted repository execution plan. It records the exact decision set accepted by the owner on 2026-07-14. It becomes the repository's living ExecPlan when installed locally under Phase 0-D. Plan acceptance does not authorize Gates A through D or any prohibited action listed below.
+This document is the owner-accepted repository execution plan. It records the exact decision set accepted by the owner on 2026-07-14, as reconciled by the owner-accepted Data Protection and Processing Operating Model v0.2 and the Gate D operating-policy decisions accepted on 2026-08-14. It becomes the repository's living ExecPlan when installed locally under Phase 0-D. Plan acceptance does not authorize Gates A through D or any prohibited action listed below. This v0.3.6 update is a documentation/governance reconciliation only; it does not itself establish runtime, production, database, contractual, or real-client-data readiness.
 
 ## Authorized end-state boundary
 
 Completion of the currently authorized scope through P0-07 establishes repository code completion and local synthetic acceptance only. It does not establish PostgreSQL persistence, deployed `kai.*` schema compatibility, database atomicity, nonproduction storage integration, live-upload readiness, production readiness, or real-client-data readiness. Do not report the result merely as `P0 complete`. Use the exact completion labels defined in P0-06A and P0-07 and retain all database, schema, storage, and real-data limitations as `NOT_CONFIRMED` until their separately authorized gates pass.
 
-`KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.4.md` is superseded and must not be installed or executed.
+`KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.4.md` and `KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md` are superseded and must not be installed or executed.
 
 ## Approval and execution conditions
 
 1. The owner confirmed that the corrected 7,997-character `KAI_Active_Execution_Project_Instructions_v1.0.2.md` replaced the earlier active version and is the sole active Project Instructions document: `USER_CONFIRMED`.
 2. The owner previously confirmed the five named authority sources are active in Project settings: Product Workflow, Roadmap, Backend Contract, Threat Model, and Data Operating Model: `USER_CONFIRMED`.
-3. The owner directed the v0.3.5 evidence-labeling and first-write milestone-checkpoint amendment and authorized creation of this plan: `USER_CONFIRMED`.
-4. The read-only repository preflight completed at `HEAD` `1b41a3d644e1afd811ad87162f25c15a08d51b39`; its results are recorded in Phase 1 as `USER_CONFIRMED` until the repository is freshly rechecked.
-5. P0-02 executes before P0-01 and records the owner-approved constants and lifecycle contract in the repository. Explicit owner-approved contract values are valid where repository inspection established that no value exists; they are not represented as `TOOL_VERIFIED` repository facts until installed and tested.
-6. Any new column, constraint, enum, migration, or database-dependent lifecycle behavior remains blocked by Gate A.
-7. Gates A through D remain unauthorized.
+3. The owner directed the v0.3.5 evidence-labeling and first-write milestone-checkpoint amendment and authorized creation of the v0.3.5 plan: `USER_CONFIRMED`.
+4. The owner accepted `KAI_MVP_Sprint2_Data_Protection_and_Processing_Operating_Model_v0.2.md`, superseding v0.1, and directed the Gate D operating-policy reconciliation recorded in this v0.3.6 update, on 2026-08-14: `USER_CONFIRMED`.
+5. The read-only repository preflight completed at `HEAD` `1b41a3d644e1afd811ad87162f25c15a08d51b39`; its results are recorded in Phase 1 as `USER_CONFIRMED` until the repository is freshly rechecked.
+6. P0-02 executes before P0-01 and records the owner-approved constants and lifecycle contract in the repository. Explicit owner-approved contract values are valid where repository inspection established that no value exists; they are not represented as `TOOL_VERIFIED` repository facts until installed and tested.
+7. Any new column, constraint, enum, migration, or database-dependent lifecycle behavior remains blocked by Gate A.
+8. Gates A through D remain unauthorized.
 
 ## Authorized execution order
 
@@ -110,7 +111,7 @@ P0 Backend Contract
 Threat Model
 → threat assumptions and required mitigations
 
-Data Operating Model
+Data Operating Model (KAI_MVP_Sprint2_Data_Protection_and_Processing_Operating_Model_v0.2.md)
 → data ownership, processing, retention, access, and real-data controls
 
 Inspected repository
@@ -2537,25 +2538,55 @@ P0_LIVE_UPLOAD_READY
 
 # Gate D — Real-client-data readiness
 
-Real data remains blocked until all operating-model requirements are accepted and verified:
+Gate D policy is governed by `KAI_MVP_Sprint2_Data_Protection_and_Processing_Operating_Model_v0.2.md` (Data Operating Model authority), reconciled here as owner-accepted operating decisions on 2026-08-14: `USER_CONFIRMED`. This section supersedes the prior v0.3.5 Gate D policy list wherever the two conflict. Reconciling this policy text does not itself prove runtime, production, database, contractual, or real-client-data readiness.
 
-* DPA and terms;
-* client ownership and processor role;
-* subprocessor list;
-* Canada-only raw-file storage in the contract-selected GCS location; for database, backups, logs, runtime, workers, support paths, and other processors, document the actual data location and apply any stricter contractual, client, provincial, sectoral, or qualified legal requirement. PIPEDA accountability continues for permitted cross-border processing and does not by itself establish a blanket domestic-only rule;
-* private storage;
-* retention schedule;
-* legal hold;
-* deletion and offboarding;
-* documented incident-response procedure meeting applicable contractual and legal obligations; a completed exercise is an additional owner-selected gate only when explicitly accepted and recorded;
+## Gate D operating decisions (owner-accepted 2026-08-14)
+
+1. **Data ownership and improvement.** Client owns client-uploaded data; Get Kinder/KAI processes it to provide the subscribed service. Get Kinder may use information covered by applicable participant/volunteer/client disclosure and consent arrangements to improve KAI, Get Kinder programs/services, program analysis, recommendations, impact measurement, and service quality. This is an authorized service/program-improvement purpose, not an unrelated secondary use.
+2. **Subscription data lifecycle.** Active subscription: retain data reasonably useful to operate, maintain, and improve the service. Cancellation/non-renewal: 90-day offboarding/recovery/export/reactivation period; no automatic destructive deletion. After 90 days: a GK retention-review action decides retain, anonymize, or delete; identifiable/raw data must not become intentionally permanent merely because no automated deletion exists. Raw files may remain during an active subscription for reprocessing, traceability, validation, or future client work, and should normally be among the first records considered for deletion or anonymization after offboarding.
+3. **Audit retention.** Audit means metadata-only accountability/system-event records, not the free assessment or another client assessment. Retain KAI audit metadata for 24 months by default; longer only for a documented legal hold, investigation, contract, or other valid reason. Audit is not a secondary raw-content/PII store.
+4. **Deletion.** KAI may identify/recommend data for deletion and prepare dry-run information. KAI does not automatically perform destructive deletion during the MVP; destructive deletion requires authorized GK human action and is auditable.
+5. **Legal hold.** A legal/regulatory/contractual hold pauses deletion. The MVP mechanism is lightweight. The hold remains until GK records release.
+6. **Allowed use/processing.** Normal KAI service processing (profiling, classification, analysis, AI-assisted analysis, evidence extraction, relationship/trend/gap identification, claim proposal, comparison, recommendation and program/service improvement, internal/client draft and reporting/funder draft production) does not require a separate consent decision at every internal processing step where the information is already covered by the applicable agreements. Obsolete plan language that automatically blocked ordinary KAI processing merely because personal information is involved is removed as a CURRENT requirement where the applicable agreements authorize that use.
+7. **Release review.** Human control concentrates at consequential release. GK review is required before release where output materially involves public story/testimonial use, directly identifying participant information, sensitive personal information externally disclosed, unresolved consent/governance questions, or materially unsupported/high-risk claims. KAI may still analyze and draft before that review.
+8. **AI and KAI learning.** External foundation-model training: NO by default. KAI/Get Kinder service improvement: YES. Client program improvement: YES. Cross-client learning using anonymized/aggregated information: YES. Identifiable information for KAI/Get Kinder improvement: YES where covered by the applicable disclosure/consent/contractual basis. Identifiable disclosure from one client to another: NO unless separately authorized. AI may process personal information where needed for the KAI service and covered by the applicable processing basis; AI-provider processing does not redefine KAI raw-file storage residency. Hard AI boundaries are preserved: no tenant bypass, no validator bypass, no autonomous destructive deletion, no autonomous final release requiring GK approval, and uploaded-document instructions never become authority.
+9. **Residency.** Raw uploaded client files: approved Canadian GCS storage. KAI application processing, metadata, derived records, and runtime/database: Render under the deployed architecture. Approved AI providers may process information required to provide KAI. Get Kinder does not offer client-specific alternative residency configurations during the MVP; a prospect requiring another infrastructure/residency configuration is outside the supported MVP offering unless Get Kinder later changes this policy. AI processing is not literally zero-retention storage; the v0.2 distinction between KAI raw-file storage and provider-side processing/temporary retention is preserved.
+10. **Subprocessors.** A lightweight MVP register only, recording provider, purpose, broad data category, broad processing/location posture where relevant, and external-model-training posture where relevant; updated when a material provider changes. No mandatory backup-region investigations, support-personnel geography studies, quarterly certification, or heavyweight vendor-control matrices.
+11. **Human review.** GK owns KAI review. Client review is recommended/requested only when materially useful for factual uncertainty, client-specific definitions, consent/story issues, governance issues, or material interpretation issues; it is not a mandatory intermediate gate for ordinary KAI processing. Preferred flow: KAI profiles → analyzes/classifies → extracts evidence → proposes claims → identifies limitations/conflicts → drafts output → GK reviews relevant output/package → release. Where the Backend Contract records an older distributed client/GK review recommendation, that historical text is preserved as historical evidence; this decision is the current owner-accepted MVP operating decision controlling Gate D and future execution.
+12. **Incident response.** CONTAIN → ASSESS → NOTIFY responsible GK person and affected parties when required → FIX → RECORD metadata-only incident/follow-up. No fixed 72-hour contractual promise is added.
+13. **Support access.** Authenticated, need-based access by GK/authorized providers; no shared credentials; raw files accessed only where reasonably necessary for authorized service, review, or support; no credentials, signed URLs, or unnecessary raw client data in ordinary support communications; material raw-data access should be auditable. No geographic-support restriction or separate approval bureaucracy for the MVP.
+14. **Anonymization.** Avoid unnecessary duplication of identifiable information; keep identifiable information when reasonably needed to provide/improve the service; prefer anonymization once identifiers are no longer necessary but analytical/program value remains. Anonymized/aggregated information may be retained longer-term for KAI, Get Kinder, and program improvement. Anonymization does not eliminate the controls in this section while data remains identifiable during intake, processing, or use.
+15. **Destructive retention.** KAI does not automatically execute destructive deletion. Authorized GK human action is required.
+
+## Gate D readiness (evidence-based)
+
+Real data remains blocked until all of the following are accepted and verified:
+
+* DPA and client terms reflect the v0.2 operating model;
+* client ownership and processor role (decision 1);
+* lightweight subprocessor register maintained (decision 10) — replaces the prior generic "subprocessor list" requirement;
+* Canada-only raw-file storage in the contract-selected GCS location; for database, backups, logs, runtime, workers, support paths, and other processors, document the actual data location and apply any stricter contractual, client, provincial, sectoral, or qualified legal requirement. PIPEDA accountability continues for permitted cross-border processing and does not by itself establish a blanket domestic-only rule. Get Kinder does not offer client-specific alternative residency configurations during the MVP (decision 9);
+* private/configured object storage;
+* applicable feature-flag state;
+* subscription/raw-file retention posture defined per decision 2 — replaces the prior generic "retention schedule" requirement;
+* legal hold mechanism in place (decision 5);
+* deletion and offboarding posture defined: no automatic destructive deletion; GK-authorized human action only (decisions 2 and 4);
+* documented incident-response procedure: CONTAIN → ASSESS → NOTIFY → FIX → RECORD; no fixed 72-hour contractual promise (decision 12);
 * malware and security operations;
-* allowed-use and consent controls;
-* human review ownership;
-* no unauthorized model training;
-* no cross-client reuse;
-* no assistant raw-file access;
-* schema and synthetic smoke verification;
-* operational monitoring and support access rules.
+* schema contract checks;
+* intake schema verification;
+* threat-model review;
+* allowed-use and consent controls reflecting the v0.2 allowed-use position (decision 6) and the release-review trigger list (decision 7);
+* human review ownership: GK owns KAI review; client review recommended/requested, not a mandatory intermediate gate for ordinary KAI processing (decision 11);
+* approved KAI-learning/external-model-training posture established: no unauthorized external model training; cross-client learning using anonymized/aggregated information is permitted (decision 8) — replaces the prior blanket "no cross-client reuse" requirement;
+* unrestricted assistant raw-file access blocked;
+* operational monitoring and support-access rules: authenticated, need-based access, no shared credentials, no geographic restriction or separate approval bureaucracy for the MVP (decision 13).
+
+Existing accepted Gate C/P0 evidence should be reused wherever it already proves one of these conditions. Completed work must not be rerun merely because Gate D references it. An unproved condition must not be declared complete.
+
+The following obsolete v0.3.5 Gate D requirements are removed as CURRENT requirements because they conflict with the owner-accepted v0.2 operating model: a blanket no-cross-client-learning/reuse rule; a mandatory client-specific custom-residency accommodation; a mandatory client intermediate review gate for ordinary KAI processing; and automatic no-LLM treatment merely because data contains personal information where authorized processing applies. Each is replaced by the corresponding decision above.
+
+The following controls are not weakened and remain in force: tenant isolation; validator boundaries; private raw storage; prompt-injection quarantine; raw-data logging restrictions; the unauthorized-external-model-training prohibition; the destructive-deletion human-authorization requirement; and the real-data readiness requirement itself.
 
 Only explicit owner acceptance may establish:
 
@@ -15278,3 +15309,2687 @@ Gate C ClamAV foundation reconciliation evidence (2026-08-13)
 - broader_tests: `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm run test:kai-sprint2` passed with local-listener escalation (1895 pass, 0 fail, 29 skipped). `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm test` passed with local-listener escalation (2000 pass, 0 fail, 29 skipped). `KAI_FILE_UPLOAD_ENABLED=false` was set to avoid local ambient feature-flag contamination of the default status test; no repository or production configuration was changed.
 - git_diff_check: `git diff --check` passed.
 - prohibited_actions_not_performed: no production access, deployment, canary execution, PostgreSQL/database/schema/migration mutation, GCP/IAM/GCS/Render/cloud mutation, feature/configuration change, credential/secret inspection, real client data handling, push, or destructive reset.
+
+P1 synthetic-production activation - repository package (2026-08-14)
+
+USER_CONFIRMED:
+
+- Owner-issued task: connect the current accepted P1 parser/profile implementation (`Backend/kai/parsing/parserProfileWorkerOrchestration.js`, `postgresParserRunRepository.js`) to the authoritative committed intake state that becomes eligible for P1 after the completed upload/security/policy path, without redesigning P1, without activating P2, and without reopening Gate C.
+
+TOOL_VERIFIED - preflight facts establishing the activation boundary:
+
+- `Backend/kai/parsing/parserProfileWorkerOrchestration.js` was, before this package, reachable only from its own tests (`grep -rln createParserProfileWorkerOrchestration Backend/kai __tests__` matched only the orchestration file itself and `__tests__/kai-sprint2-p1-03-parser-profile-worker-boundary.spec.js` / `.integration.spec.js`); it registers no route, listener, scheduler, or startup hook, and its own hardcoded audit-payload literal `route_contract: "unwired_synthetic_parser_profile_worker"` (left unchanged by this package, per the REUSE boundary on existing audit vocabulary) documents this directly.
+- The authoritative eligibility boundary already exists and is not invented here: `Backend/kai/upload/postgresUploadLifecycleRepository.js` `POLICY_DECISION_OUTCOMES.passed` transitions a confirmed intake file's `file_policy_status` to `'passed'` only after Gate C's own security-assessment-to-policy wiring (`kaiIntakeService.js#applyConfirmedSecurityAssessment`) runs; this package consumes that already-defined terminal value and invents no new lifecycle value.
+- `metadataOnlyAudit` (the `prepareMetadataOnlyAudit({payload}) -> {ok, publish()}` contract required by `postgresParserRunRepository.js` and every other P1/P2 dictionary repository) had no production composition anywhere in the repository before this package: `grep -rln "prepareMetadataOnlyAudit:" Backend/kai --include=*.js` (excluding `__tests__`) returned zero matches; every consuming service (e.g. `kaiIntakeSensitivityProfileService.js`) only forwards `dependencies.metadataOnlyAudit` unchanged.
+- `KAI_WORKER_ENABLED` does not exist anywhere in the current implementation (`grep -rn KAI_WORKER_ENABLED Backend/kai` returned no matches); per the task's own instruction this package does not add it. The status endpoint's existing `parser_worker_enabled` / `profiling_enabled` fields (`Backend/kai/routes/sprint2IntakeApi.js`) remain hardcoded `false`, unchanged by this package.
+- No existing background-worker/scheduler mechanism exists for KAI (only `node-cron` usage in the unrelated root `index.js` for product-wide email jobs, and one-off ephemeral-Postgres test runner scripts under `scripts/kai-sprint2-*-runner.js`), so this package adds the smallest DORMANT entrypoint rather than registering into an existing one.
+
+TOOL_VERIFIED - implementation:
+
+- `Backend/kai/parsing/parserProfileActivation.js` (new): `activateParserProfileWorkForIntakeFile({organizationId, intakeFileId, actorContext, retry})` is the smallest DORMANT repository entrypoint. It is not imported by any route, controller, or the process entrypoint (`grep -rln activateParserProfileWorkForIntakeFile Backend/kai index.js routes controllers services` matches only its own file). It fail-closes on `isKaiSprint2Enabled` first (no read occurs when disabled), reads one organization/file-scoped authoritative row via the new `getScopedIntakeFileParserProfileEligibilityFacts`, requires `file_policy_status === "passed"` before doing any queue/profile work, and otherwise composes the existing, unmodified `createParserProfileWorkerOrchestration` + `createPostgresParserRunRepository` with a per-file byte source and audit composition. It performs no P2/evidence/claim/generation/export activation and does not activate P2.
+- `Backend/kai/db/kaiIntakeQueries.js`: added `getScopedIntakeFileParserProfileEligibilityFacts({organizationId, intakeFileId})`, additive, mirroring the existing `getScopedIntakeFileSecurityAssessmentFacts` tenant-scoped SELECT shape and bigint-safe `verified_size_bytes` handling exactly; no other exported query changed.
+- `Backend/kai/parsing/p1ObjectVersionByteSource.js` (new): `createP1ObjectVersionByteSource` adapts the existing `objectVersionByteSource.readObjectVersion({objectVersionId}) -> {ok, data:{bytes}}` contract P1 already requires (the same shape `Backend/kai/storage/localDevStorageAdapter.js#readObjectVersion` already implements) to the GCS exact-generation case, by composing - not reimplementing - the existing `createBoundGcsAssessmentStorageAdapter` (GCS generation binding via `uploadLifecycleRepository.resolveGcsGenerationBinding`) and the existing `readVerifiedAssessmentBytes` checksum/size integrity bridge, both reused unchanged from Gate C's `productionSecurityAssessmentComposition.js` / `assessmentReadIntegrityBridge.js`. The only change to that Gate C file is exporting the previously-private `createBoundGcsAssessmentStorageAdapter` (one `export` keyword added; no behavior change, confirmed by the full existing Gate C test suite passing unchanged). A caller-supplied general-purpose `storageAdapter` (e.g. local-dev) is delegated to unchanged, with no new integrity logic layered on top.
+- `Backend/kai/services/kaiMetadataOnlyAuditComposition.js` (new): `createProductionMetadataOnlyAudit({organizationId, intakeFileId, engagementId, actorContext, now})` is the smallest production composition of the previously-unimplemented `metadataOnlyAudit` contract. `publish()` performs a real, durable insert via the existing `insertRequiredSuccessfulAuditEvent` (`Backend/kai/db/kaiAuditQueries.js`) into the existing `kai.audit_events` table - the same required-audit machinery Gate C's own `applyConfirmedSecurityAssessment` already uses - not a no-op, and not a second audit table or vocabulary. An invalid payload or a failed insert causes `publish()` to reject/return `ok:false`, preserving the existing repository contract that a rejected/failing required audit rolls back the domain mutation in the same call.
+- No schema/migration change. No route, controller, or worker/startup file was modified. No feature-flag value or default was changed. `KAI_SPRINT2_ENABLED` remains the sole, unchanged, fail-closed gate.
+
+TOOL_VERIFIED - tests:
+
+- New `__tests__/kai-sprint2-p1-activation.spec.js` (21 tests) proves: Sprint 2 disabled yields zero activation side effects (no authoritative-state read at all); an ineligible `file_policy_status` (`pending`/`blocked`/`failed`) performs no queue/profile work; an eligible `passed` file enters the existing P1 workflow and completes through the real orchestration; replay of the same identity preserves existing parser-run idempotency (no second profile/byte-read); concurrent activation for one identity preserves exactly one authoritative parser-run row and exactly one claim succeeds (the other fails closed, never double-claiming); cross-organization identities never share a read, queue, or run and a facts-row scoped to a different organization than requested is treated as `not_found`; a byte-source failure is safely recorded as a failed run with no profile persisted; a rejected/failing required audit prevents completion (rollback-preserving); explicit retry semantics are unchanged and no automatic retry occurs on plain replay; no raw file/row content appears in the activation result; the new byte source reuses the existing bound GCS adapter and integrity bridge (proven via a real `readVerifiedAssessmentBytes` call, including checksum-mismatch fail-closed and no-read on a mismatched requested `objectVersionId`) and delegates unchanged to a directly supplied storage adapter; the new metadata-only audit composition performs a real durable insert (not a no-op), rejects an invalid payload before any insert, and surfaces a rejection when the durable insert reports failure; the new tenant-scoped read helper's SQL is scoped by `organization_id`/`intake_file_id` and normalizes bigint `verified_size_bytes`.
+- focused_tests: `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel node --test __tests__/kai-sprint2-p1-activation.spec.js __tests__/kai-sprint2-p1-03-parser-profile-worker-boundary.spec.js __tests__/kai-sprint2-intake-queries.spec.js __tests__/kai-sprint2-assessment-byte-source-adapter.spec.js __tests__/kai-sprint2-assessment-read-integrity-bridge.spec.js __tests__/kai-sprint2-gate-c-security-handoff.spec.js __tests__/kai-sprint2-gate-c2-runtime-composition.spec.js __tests__/kai-sprint2-gate-c2a-signed-upload-confirmation.spec.js __tests__/kai-sprint2-gate-c1-gcs-provider-boundary.spec.js __tests__/kai-sprint2-intake-service.spec.js` passed (243 pass, 0 fail).
+- broader_tests: `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm run test:kai-sprint2` passed (1955 pass, 1 fail, 29 skipped) and `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm test` passed (2060 pass, 1 fail, 29 skipped). The single failure in both runs, `__tests__/kai-sprint2-p0-05f-combined-completeness.spec.js`, is pre-existing and unrelated to this package: it hardcodes the literal filename `KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md`, which no longer exists after the prior, separately-committed `ecb61b8` rename to `v0.3.6.md`; confirmed by `git log -1 --format=%H -- __tests__/kai-sprint2-p0-05f-combined-completeness.spec.js` resolving to a commit (`cb5bc5b`) predating this package's changes, and by `git status --porcelain` showing this package never touched that file.
+- git_diff_check: `git diff --check` passed.
+- prohibited_actions_not_performed: no production access, deployment, canary execution, PostgreSQL/database/schema/migration mutation, GCP/IAM/GCS/Render/cloud mutation, feature/configuration change, credential/secret inspection, real client data handling, push, or destructive reset. No P2/P3 activation. No Gate C behavior change (only one private helper made exportable; full Gate C suite re-verified passing unchanged).
+
+NOT_CONFIRMED:
+
+- Whether real production Gate C traffic has ever produced an intake file reaching `file_policy_status = 'passed'` is NOT_CONFIRMED (no production database access is authorized in this session); this package's activation and test coverage is synthetic-only, as required.
+- A scheduler/sweep mechanism to discover all eligible intake files across an organization (as opposed to activating one already-known organization/intake-file identity, the scope this package implements) remains unimplemented; adding one was judged out of the "smallest coherent change" boundary and is deferred to whatever later, separately-authorized worker/deployment package selects a runtime and invocation mechanism for `activateParserProfileWorkForIntakeFile`.
+- Deployment platform/runtime selection for actually invoking this dormant entrypoint continuously in production is NOT_CONFIRMED and was not selected by this package, per instruction.
+- `P0_LIVE_UPLOAD_READY` / production canary status is unchanged by this package and remains as previously recorded above.
+
+P1 activation package correction evidence (2026-08-14)
+
+Correction evidence:
+  - `__tests__/kai-sprint2-p0-05f-combined-completeness.spec.js` - updated the
+    hardcoded ExecPlan filename literal from the stale
+    `KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.5.md` to the
+    living `..._v0.3.6.md`, closing the pre-existing failure this package's
+    own evidence already identified above. No content assertion changed.
+  - `Backend/kai/parsing/postgresParserRunRepository.js` -
+    `prepareRequiredAudit` now accepts the same `tx` (the parser-run
+    repository's own transaction context, already opened by `runInTransaction`)
+    and forwards it as `db` into `metadataOnlyAudit.prepareMetadataOnlyAudit`.
+    Previously `db` was never passed, so `insertRequiredSuccessfulAuditEvent`
+    (`Backend/kai/db/kaiAuditQueries.js`) fell through to its own default
+    global pool connection instead of the parser-run mutation's transaction -
+    meaning the required audit INSERT could commit or fail independently of
+    the domain write it is supposed to be atomic with. All four call sites
+    (`claimQueuedParserRun`, `completeParserRunWithProfile`,
+    `failParserRunSafely`, `requeueFailedParserRunForRetry`) updated
+    identically. No new audit mechanism or transaction abstraction was added;
+    the existing single `tx` already threaded through each method is reused.
+  - `Backend/kai/services/kaiMetadataOnlyAuditComposition.js` -
+    `prepareMetadataOnlyAudit({payload, db})` now accepts and forwards the
+    caller-supplied `db` to `insertAuditEvent(metadata, db)` instead of
+    calling it with only `metadata` (which silently defaulted to the global
+    pool). The transaction context is passed as a plain argument, never
+    embedded in the audit `metadata` payload. Omitting `db` still falls back
+    to the pool default, so no other existing caller of this contract is
+    affected.
+  - `__tests__/kai-sprint2-p1-03-audit-transaction-propagation.spec.js`
+    (new): a fake transaction provider that behaves like a real pg client
+    (routes every query, including the audit_events insert performed by the
+    injected `insertAuditEvent`, through one connection object and logs which
+    connection issued each query) proves `claimQueuedParserRun`'s required
+    audit insert is issued on the exact same connection as its parser-run
+    `UPDATE`, and that `db` captured by the audit composition is `===` the
+    transaction context the repository received. Confirmed this test fails
+    against the pre-correction code (asserting `false !== true` on the
+    identity check) and passes after the fix.
+
+TOOL_VERIFIED:
+  - `node --test __tests__/kai-sprint2-p0-05f-combined-completeness.spec.js`
+    -> 11/11 pass.
+  - `node --test __tests__/kai-sprint2-p1-03-audit-transaction-propagation.spec.js`
+    -> 1/1 pass; confirmed failing (false !== true) against the
+    pre-correction working tree via `git stash`.
+  - `node --test __tests__/kai-sprint2-p1-03-parser-profile-worker-boundary.spec.js`
+    -> 9/9 pass.
+  - `node --test __tests__/kai-sprint2-p1-activation.spec.js` -> 21/21 pass.
+  - `DATABASE_URL=<sentinel> npm run test:kai-sprint2` -> 1966 pass, 1 fail,
+    29 skipped. The single failure,
+    `kai-sprint2-foundation-safety.spec.js` ("status reports only the
+    mounted metadata capability as enabled" / `file_upload_enabled` expected
+    `false`, actual `true`), is confirmed pre-existing and unrelated to this
+    correction: it reproduces identically via `git stash` against this
+    package's unmodified starting tree (`c242150`), before any file in this
+    correction was touched.
+  - `git diff --check` passed.
+  - prohibited_actions_not_performed: no production access, deployment,
+    PostgreSQL/database/schema/migration mutation, GCP/IAM/GCS/Render/cloud
+    mutation, feature/configuration change, credential/secret inspection,
+    real client data handling, push, or destructive reset. No new audit
+    mechanism or transaction abstraction introduced. No P1/P2/P3 repository
+    outside `postgresParserRunRepository.js` was modified.
+
+P1 runtime composition package evidence (2026-08-14)
+
+Contaminated test result closure:
+  - Re-ran `__tests__/kai-sprint2-p0-05f-combined-completeness.spec.js`,
+    `__tests__/kai-sprint2-p1-03-audit-transaction-propagation.spec.js`,
+    `__tests__/kai-sprint2-foundation-safety.spec.js`, and
+    `__tests__/kai-sprint2-p1-activation.spec.js` once, together, against the
+    unmodified starting tree (`f330722`) with the sentinel `DATABASE_URL` set:
+    51/51 pass (11 + 1 + 18 + 21). The prior recorded
+    `kai-sprint2-foundation-safety.spec.js` `file_upload_enabled` failure did
+    not reproduce. Recorded as TEST_ENVIRONMENT_CONTAMINATION - the previous
+    failing run's environment (not this repository's code) was the cause.
+
+Production-write static diagnostic (no database connection made):
+  - Statically inspected every `.integration.spec.js` file matched by
+    `npm run test:kai-sprint2`'s glob (`__tests__/kai-sprint2-*.spec.js`,
+    which does include the `.integration.spec.js` files). Every one of the 29
+    integration spec files gates its real-database path behind its own
+    suite-specific `KAI_<SUITE>_DATABASE_URL` opt-in variable (e.g.
+    `KAI_P1_03_PARSER_WORKER_DATABASE_URL`,
+    `KAI_P0_POSTGRES_ADAPTER_DATABASE_URL`), never the plain `DATABASE_URL`;
+    several additionally assert a loopback-only host and/or explicitly assert
+    that ambient `DATABASE_URL` is ignored. No guardless mutating-SQL path
+    (INSERT/UPDATE/DELETE/DDL) reachable from plain `DATABASE_URL` alone was
+    found. Result: `PROD_DB_MUTATION_FROM_CONTAMINATED_RUN = NOT_ESTABLISHED`.
+
+Implementation:
+  - `Backend/kai/config/kaiSprint2Config.js` - added `isKaiWorkerEnabled`
+    (reads `KAI_WORKER_ENABLED`, default false, same
+    true/1/yes/on normalization idiom as every other flag in this file) and
+    `areKaiSprint2WorkerFeaturesEnabled` (`isKaiSprint2Enabled &&
+    isKaiWorkerEnabled`, mirroring `areKaiSprint2UploadFeaturesEnabled`). Also
+    added `getKaiP1WorkerSyntheticOrganizationId`, the smallest explicit
+    synthetic-scope configuration: reads
+    `KAI_P1_WORKER_SYNTHETIC_ORGANIZATION_ID`, fails closed (returns `null`)
+    when absent, empty, or not already trimmed. No existing flag's default or
+    behavior changed.
+  - `Backend/kai/db/kaiIntakeQueries.js` - added
+    `listKaiP1WorkerSyntheticScopedEligibleIntakeFiles({ organizationId }, db)`,
+    a `SELECT organization_id, intake_file_id FROM kai.intake_files WHERE
+    organization_id = $1 AND file_policy_status = 'passed'` bound to exactly
+    one caller-supplied organization id, ordered, and capped at 25 rows. No
+    file-ID selector; no query in this module sweeps across organizations.
+  - `Backend/kai/parsing/p1WorkerRuntime.js` (new) - `runKaiP1WorkerTick`,
+    the small runtime seam. Fails closed to `{ activated: [], reason:
+    "worker_disabled" }` unless both `KAI_SPRINT2_ENABLED` and
+    `KAI_WORKER_ENABLED` are enabled, and to `{ activated: [], reason:
+    "synthetic_scope_not_configured" }` when no synthetic organization scope
+    is configured. Discovers eligible files only inside that one configured
+    organization (with a defense-in-depth re-check dropping any row whose
+    `organization_id` does not match, even though the query above already
+    scopes it), then calls the existing, unchanged
+    `activateParserProfileWorkForIntakeFile` once per file with `retry:
+    false` and a fixed `{ actorType: "system", actorUserId: null }` synthetic
+    actor context. Introduces no new queue, claim, lock, or retry logic of
+    its own - every one of those semantics is reused unmodified from the
+    existing P1 activation seam and its underlying
+    `parserProfileWorkerOrchestration.js` / `postgresParserRunRepository.js`.
+    Performs no P2/P3 (evidence/claim/generation/export) activation - the
+    module imports only config, the P1 activation seam, and the new
+    organization-scoped query.
+  - `Backend/kai/parsing/p1WorkerCron.js` (new) - `registerKaiP1WorkerCron`,
+    wiring `runKaiP1WorkerTick` onto the repository's existing `node-cron`
+    scheduling model (the same `node-cron` package `index.js` already uses
+    for the nudges, donation-policy, and daily-kindness jobs). Registers no
+    `cron.schedule` call at all unless both feature flags are already
+    enabled at registration time; the tick itself re-checks both flags and
+    the synthetic scope on every fire regardless. No new worker process,
+    Procfile, Render service, Bull/Redis queue, child process, or HTTP route
+    was added.
+  - `index.js` - imports and calls `registerKaiP1WorkerCron()` once, next to
+    the existing cron registrations, with no arguments (so it uses
+    `process.env` and the real `node-cron` library exactly as the other
+    cron jobs in this file do). No existing cron job or flag was changed.
+  - `Backend/kai/routes/sprint2IntakeApi.js` - `statusData()` now computes
+    `workerFeaturesEnabled = areKaiSprint2WorkerFeaturesEnabled(env)` and
+    reports `parser_worker_enabled` and `profiling_enabled` from that value
+    instead of a literal `false`. No other status field changed; production
+    default remains `false` because `KAI_WORKER_ENABLED` is unset by
+    default.
+  - `__tests__/kai-sprint2-api-contract.spec.js` - updated the one existing
+    assertion that matched the literal source text
+    `parser_worker_enabled:\s*false` to instead assert the route source uses
+    `areKaiSprint2WorkerFeaturesEnabled(env)` and assigns
+    `workerFeaturesEnabled` to both `parser_worker_enabled` and
+    `profiling_enabled`. This is the one pre-existing test this package's
+    required status-field change made stale; no unrelated assertion in that
+    file was touched.
+
+KAI_WORKER_ENABLED behavior: default false (unset/any non-true/1/yes/on
+value); P1 worker execution (both the cron tick's real work and the status
+endpoint's reported `parser_worker_enabled`/`profiling_enabled`) requires
+`KAI_SPRINT2_ENABLED` and `KAI_WORKER_ENABLED` to both be enabled. Neither
+flag's default or any other flag was changed.
+
+Synthetic scope mechanism: `KAI_P1_WORKER_SYNTHETIC_ORGANIZATION_ID`
+(`getKaiP1WorkerSyntheticOrganizationId` in `kaiSprint2Config.js`) - fails
+closed (no work) when unset; the worker never sweeps more than the one
+organization id this variable names, and never accepts a file-ID selector.
+
+Cron execution path: `index.js` calls `registerKaiP1WorkerCron()` at module
+load (next to the existing nudges/donation-policy/kindness `cron.schedule`
+registrations), which - only when both feature flags are already on -
+registers one `node-cron` `cron.schedule` job (`*/15 * * * *`,
+`America/Vancouver`) whose handler calls `runKaiP1WorkerTick({ env:
+process.env })` and logs/catches errors exactly like the other jobs in that
+file.
+
+New/changed runtime files: `Backend/kai/config/kaiSprint2Config.js`,
+`Backend/kai/db/kaiIntakeQueries.js`,
+`Backend/kai/parsing/p1WorkerRuntime.js` (new),
+`Backend/kai/parsing/p1WorkerCron.js` (new),
+`Backend/kai/routes/sprint2IntakeApi.js`, `index.js`.
+
+TOOL_VERIFIED - tests:
+
+- New `__tests__/kai-sprint2-p1-worker-runtime-composition.spec.js` (10
+  tests) proves: either `KAI_SPRINT2_ENABLED` or `KAI_WORKER_ENABLED` alone
+  disabled yields zero list/activation calls; a missing synthetic
+  organization scope yields zero list/activation calls even with both flags
+  enabled; an out-of-scope organization row returned by a (deliberately
+  misbehaving) dependency is never activated; an eligible in-scope file
+  reaches the existing activation seam exactly once with `retry: false` and
+  the fixed synthetic system actor context; two overlapping ticks each call
+  the activation seam once per discovered file (idempotency itself remains
+  owned by the unchanged parser-run repository, proven separately in
+  `kai-sprint2-p1-activation.spec.js` and
+  `kai-sprint2-p1-03-parser-profile-worker*.spec.js`); no call ever sets
+  `retry: true`; the runtime module's own import lines reference no
+  P2/P3 (evidence/claim/generation/export/review-cockpit/source-promotion/
+  data-dictionary) module; `registerKaiP1WorkerCron` registers no
+  `cron.schedule` call unless both flags are enabled at registration, reuses
+  the injected `node-cron`-shaped library unchanged, and its scheduled
+  handler never throws out of the callback even when the injected tick
+  rejects; and the status endpoint reports `parser_worker_enabled` /
+  `profiling_enabled` as `true` only when both flags are enabled together,
+  `false` when either or both are absent.
+- focused_tests:
+  `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false node --test __tests__/kai-sprint2-p1-worker-runtime-composition.spec.js __tests__/kai-sprint2-p1-activation.spec.js __tests__/kai-sprint2-p1-03-audit-transaction-propagation.spec.js __tests__/kai-sprint2-api-contract.spec.js __tests__/kai-sprint2-foundation-safety.spec.js __tests__/kai-sprint2-config.spec.js __tests__/kai-sprint2-pass2-api-contract.spec.js __tests__/kai-sprint2-pass2-metadata-intake-service.spec.js`
+  passed (158 pass, 0 fail).
+- broader_tests:
+  `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm run test:kai-sprint2`
+  passed (1977 pass, 0 fail, 29 skipped - the pre-existing integration specs
+  that each require their own suite-specific database opt-in variable, per
+  the static diagnostic above) and
+  `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm test`
+  passed (2082 pass, 0 fail, 29 skipped).
+- git_diff_check: `git diff --check` passed.
+- prohibited_actions_not_performed: no production access, deployment,
+  PostgreSQL/database/schema/migration mutation, GCP/IAM/GCS/Render/cloud
+  mutation, feature/configuration change, credential/secret inspection, real
+  client data handling, push, or destructive action. No new Render worker,
+  Procfile, Bull/Redis queue, child process, HTTP parsing route, or
+  scheduler was introduced - only the repository's existing `node-cron`
+  model was reused. No P2/P3 activation, evidence, claims, generation, or
+  export behavior was added. No existing P0/P1 activation, queue,
+  idempotency, locking, exact-version read, or audit-transaction semantics
+  were redesigned - all reused unmodified.
+
+NOT_CONFIRMED:
+
+- Whether this cron registration is ever actually reached in a deployed
+  process (i.e. whether `NODE_ENV`/`KAI_SPRINT2_ENABLED`/
+  `KAI_WORKER_ENABLED`/`KAI_P1_WORKER_SYNTHETIC_ORGANIZATION_ID` are set in
+  any real deployment target) is NOT_CONFIRMED - no production or deployment
+  configuration was inspected or changed by this package, and none of these
+  flags' values were changed.
+- Whether a `kai.intake_files` row with `file_policy_status = 'passed'`
+  currently exists in any real database for the synthetic organization scope
+  this package's owner ultimately configures is NOT_CONFIRMED - this
+  package's own test coverage is entirely synthetic/in-memory, per the
+  synthetic-only requirement.
+- Whether 15 minutes and the `America/Vancouver` timezone are the schedule
+  an owner ultimately wants for this job is NOT_CONFIRMED - these are this
+  package's smallest-reasonable defaults, both fully overridable via
+  `registerKaiP1WorkerCron`'s options, and neither was asserted by the task
+  instructions.
+
+P1 worker composition correction: authorize continuation into P1-04/P1-05 only,
+STOP before P1-06 (2026-08-15)
+
+Fresh repository preflight: `git status` clean at `70421cd` (the accepted P1
+worker runtime commit); re-read
+`Backend/kai/parsing/p1WorkerRuntime.js`, `p1WorkerCron.js`,
+`parserProfileActivation.js`, `parserProfileWorkerOrchestration.js`, the P1-04
+`kaiDataDictionaryService.js` / `postgresDataDictionaryRepository.js`, the
+P1-05 `kaiIntakeSensitivityProfileService.js` /
+`postgresIntakeSensitivityProfileRepository.js`, and the P1-06
+`kaiReviewQueueService.js` `AUTH-KAI-003` mapped-human-actor gate
+(`isMappedHumanActor`, `actorContext.actorType === "human"`) to confirm the
+reported state matched before implementing directly, per the owner's
+instruction.
+
+Implementation:
+  - `Backend/kai/parsing/p1WorkerRuntime.js` - `runKaiP1WorkerTick` now
+    continues, strictly in order, past a fresh P1-03 `activated: true`
+    completion into the existing, unmodified P1-04
+    `createDraftDataDictionary` and P1-05 `persistIntakeSensitivityProfile`
+    service seams, then stops. The authoritative `output_profile_id` P1-03
+    just committed (`result.data.run.run.output_profile_id`) is passed as
+    P1-04's `fileProfileId`; P1-04's own returned
+    `dictionary.data_dictionary_id` is passed as P1-05's `dataDictionaryId`.
+    Neither downstream call is attempted unless the prior stage returned
+    `ok: true` with the expected identity present, so a P1-04 failure stops
+    the chain before P1-05 is ever invoked, and a P1-03 result that is not a
+    fresh completion (already-failed, or a replay lacking
+    `activated: true`) never reaches P1-04. A `metadataOnlyAudit` instance is
+    constructed via the existing `createProductionMetadataOnlyAudit`
+    composition (unchanged) and shared across the P1-04/P1-05 calls for that
+    file. Neither `parserProfileActivation.js` nor
+    `parserProfileWorkerOrchestration.js` nor
+    `postgresParserRunRepository.js` was touched: P1-03's own
+    `parser_status = 'completed'` transition and audit remain exactly as
+    committed in `70421cd`. No P1-06 (`kaiReviewQueueService.js`,
+    `createSensitivityReviewQueueItem`) import, call, or write seam of any
+    kind was added - the runtime module still imports nothing from that
+    file, and no worker/system/internal actor can reach it: `AUTH-KAI-003`'s
+    mapped-human-actor requirement in `kaiReviewQueueService.js` is
+    unmodified. No P1-07/P1-08/P1-09/P2/P3 module was imported or invoked.
+    No schema, production config, feature flag, cloud, or deployment file
+    was changed. The existing synthetic-org scope check,
+    `KAI_SPRINT2_ENABLED`/`KAI_WORKER_ENABLED` composition, tenant-boundary
+    defense-in-depth check, `retry: false` (no automatic parser retry), and
+    conservative-unknown-defaults behavior owned by the injected P1-05
+    repository are all unchanged.
+  - `__tests__/kai-sprint2-p1-worker-runtime-composition.spec.js` - updated
+    the existing import-boundary test (previously asserting the module
+    imported no `dataDictionary`-named module at all) to instead assert the
+    module's import lines reference no P1-06-and-beyond module
+    (`reviewQueue`/`review-?queue`/`sourceCandidate`/`sourcePromotion`/
+    `evidence`/`claim`/`generat`/`review-?cockpit`/`exportReview`/
+    `exportCandidate`/`humanAuthority`) while positively asserting the new
+    `createDraftDataDictionary` and `persistIntakeSensitivityProfile` seams
+    are present, since P1-04/P1-05 are now the authorized continuation.
+    Added five new tests: a fresh P1-03 completion reaches P1-04 then P1-05,
+    in that order, with the correct identity at each stage, and never
+    reaches any P1-06 seam (a spy `createSensitivityReviewQueueItem`
+    dependency is supplied but is unreachable since the runtime never wires
+    or calls it); replaying the same tick calls P1-04/P1-05 again with the
+    identical `fileProfileId`/`dataDictionaryId` identity each time, which is
+    what lets their own idempotent repositories replay instead of
+    duplicating (per the existing, separately-tested P1-04/P1-05 replay
+    contracts); a P1-04 failure stops the chain before P1-05 is ever
+    invoked; a P1-03 result that is not a fresh completion (`ok: false`, or
+    `ok: true` with `activated: false`) never reaches P1-04; and a dedicated
+    static check that no P1-06 seam name appears in the module's import
+    lines or as a called identifier.
+
+TOOL_VERIFIED - tests:
+
+- `node --test __tests__/kai-sprint2-p1-worker-runtime-composition.spec.js`
+  passed (15 pass, 0 fail) - the pre-existing 10 tests plus the 5 new ones
+  above.
+- focused_tests:
+  `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false node --test __tests__/kai-sprint2-p1-worker-runtime-composition.spec.js __tests__/kai-sprint2-p1-activation.spec.js __tests__/kai-sprint2-p1-03-audit-transaction-propagation.spec.js __tests__/kai-sprint2-api-contract.spec.js __tests__/kai-sprint2-foundation-safety.spec.js __tests__/kai-sprint2-config.spec.js __tests__/kai-sprint2-pass2-api-contract.spec.js __tests__/kai-sprint2-pass2-metadata-intake-service.spec.js`
+  passed (163 pass, 0 fail).
+- broader_tests:
+  `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm run test:kai-sprint2`
+  passed (1982 pass, 0 fail, 29 skipped - the same pre-existing
+  suite-specific-opt-in integration specs noted above, unaffected by this
+  correction) and
+  `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm test`
+  passed (2087 pass, 0 fail, 29 skipped).
+- Without the `DATABASE_URL`/`KAI_FILE_UPLOAD_ENABLED` overrides, plain
+  `npm test` reproduces exactly one failure,
+  `kai-sprint2-foundation-safety.spec.js` ("status reports only the mounted
+  metadata capability as enabled" / `file_upload_enabled` expected `false`,
+  actual `true`) - confirmed pre-existing and unrelated to this correction by
+  reproducing it identically via `git stash` against the unmodified starting
+  tree (`70421cd`) before any file in this correction was touched.
+- git_diff_check: `git diff --check` passed.
+- prohibited_actions_not_performed: no production access, deployment,
+  PostgreSQL/database/schema/migration mutation, GCP/IAM/GCS/Render/cloud
+  mutation, feature/configuration change, credential/secret inspection, real
+  client data handling, push, or destructive action. P1-03's
+  `parser_status = 'completed'` transition was not moved or redefined. No
+  P1-06 review-queue item, human actor, or system/internal write seam was
+  created or fabricated; `AUTH-KAI-003` was not weakened. No P1-07/P1-08/
+  P1-09/P2/P3 module was invoked. No schema, production config, flag, cloud,
+  or deployment change was made.
+
+One local commit was made on this branch recording this correction. No push,
+no deploy.
+
+P1 repository closure: P1-04/P1-05 audit atomicity and downstream resumability
+(2026-08-15)
+
+Fresh preflight: `git status` clean at `01f4049` (the accepted P1-04/P1-05
+worker-continuation commit); branch `fix/kai-gate-c-assessment-byte-source`.
+Re-read `postgresDataDictionaryRepository.js`,
+`postgresIntakeSensitivityProfileRepository.js`, `p1WorkerRuntime.js`,
+`parserProfileActivation.js`, `parserProfileWorkerOrchestration.js`, and
+`postgresParserRunRepository.js` before implementing.
+
+P1-04 audit same-transaction correction: `prepareRequiredAudit` in
+`postgresDataDictionaryRepository.js` now takes the repository's own `tx`
+and forwards it as `metadataOnlyAudit.prepareMetadataOnlyAudit({ payload,
+db: tx })`, mirroring the pattern already proven for P1-03 in
+`postgresParserRunRepository.js`. Previously `db` was never forwarded, so
+`insertRequiredSuccessfulAuditEvent`/any injected `insertAuditEvent` fell
+through to its own `db = pool` default - a separate connection outside the
+repository's transaction, breaking atomicity between the dictionary/field/
+mapping/finding writes and their required audit. Audit payload, audit
+operation, repository identity/idempotency rules, service API,
+`kaiMetadataOnlyAuditComposition.js`, and schema/migrations are unchanged.
+Result: **SAME_TRANSACTION**.
+
+P1-05 audit same-transaction correction: identical fix in
+`postgresIntakeSensitivityProfileRepository.js`'s `prepareRequiredAudit`.
+Sensitivity derivation, conservative unknown/default behavior, idempotency/
+replay, service API, audit composition, and schema/migrations are
+unchanged. Result: **SAME_TRANSACTION**.
+
+Downstream resumability correction: `activateParserProfileWorkForIntakeFile`
+in `parserProfileActivation.js` previously handed an already-completed P1-03
+replay straight to `runQueuedParserProfileWork`/`retryParserProfileWork`,
+which only ever claims a `queued` row - so a completed replay always
+produced a spurious `conflict_current_state_changed` and hid the completed
+run's `output_profile_id` from any later caller. The fix is a return-shape-
+only change: when `queueParserProfileWork` reports `replayed: true` and the
+replayed run's `parser_status === "completed"` (and no explicit `retry` was
+requested), activation now returns that authoritative completed run
+directly - `{ ok: true, data: { activated: false, queued, run: { run,
+replayed: true } } }` - instead of attempting a reclaim. P1-03 persistence,
+queueing/claiming, `parser_status` transitions, retry_count, retry behavior,
+exact-version byte reads, and idempotency are all untouched;
+`parserProfileWorkerOrchestration.js` and `postgresParserRunRepository.js`
+were not modified.
+
+`p1WorkerRuntime.js`'s continuation predicate was changed to match: it no
+longer requires `result.data.activated === true` (which is `false` on a
+completed replay), and instead requires `result.ok === true` AND
+`result.data.run.run.parser_status === "completed"` AND a non-empty
+`output_profile_id` - true whether P1-03 completed fresh this tick or via an
+idempotent replay of an already-completed run. A later cron tick never
+re-profiles or re-queues an already-completed P1-03 run merely to resume
+P1-04/P1-05, since the replay short-circuit above never reaches
+`claimQueuedParserRun`/`requeueFailedParserRunForRetry`.
+
+TOOL_VERIFIED - tests:
+
+- New `__tests__/kai-sprint2-p1-04-p1-05-audit-transaction-propagation.spec.js`
+  (2 tests, mirroring `kai-sprint2-p1-03-audit-transaction-propagation.spec.js`'s
+  proven fake-connection pattern) proves P1-04's and P1-05's required audit
+  insert is issued on the exact same transaction connection as their domain
+  mutation. Confirmed failing against the pre-fix tree (`git stash`): both
+  tests fail (`false !== true`) because the audit composition never received
+  a `db`/tx context.
+- Updated `__tests__/kai-sprint2-p1-activation.spec.js`'s replay-idempotency
+  test, which previously asserted the defect itself (a second activation of
+  an already-completed identity returns `ok: false` /
+  `conflict_current_state_changed`) as correct behavior. It now asserts the
+  corrected contract: the second activation returns `ok: true`,
+  `activated: false`, `run.replayed: true`, the same `output_profile_id`, and
+  that `claimQueuedParserRun` is never called a second time for the
+  completed identity.
+- Updated `__tests__/kai-sprint2-p1-04-data-dictionary-quality-boundary.spec.js`
+  and `__tests__/kai-sprint2-p1-05-intake-sensitivity-profile-boundary.spec.js`'s
+  own-boolean-data-property predicate tests to call `prepareRequiredAudit`
+  with the new `(metadataOnlyAudit, tx, record)` arity and additionally
+  assert the audit composition receives that exact `tx` as `db`.
+- Rewrote `__tests__/kai-sprint2-p1-worker-runtime-composition.spec.js`'s
+  fresh-vs-replay coverage into five explicit cases: (A) a fresh P1-03
+  completion continues through P1-04 then P1-05 in order, then stops; (B) a
+  P1-04 failure on tick 1 (P1-05 never called) is retried/succeeds on tick 2
+  against an `activated: false` replayed-completed P1-03 result carrying the
+  same `output_profile_id`; (C) a P1-05 failure on tick 1 is retried/
+  succeeds on tick 2, with P1-04 idempotently replaying the same dictionary
+  identity both times (no duplicate authoritative record); (D) non-completed
+  P1-03 results - `ok: false`, `activated: false`/ineligible, `parser_status`
+  of `queued`/`running`/`failed`, and a malformed result with unrelated
+  truthy `activated`/data but no completed run - never reach P1-04; (E) the
+  P1-06 boundary check (no reachable import/call path) still passes.
+- `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false node --test __tests__/kai-sprint2-p1-worker-runtime-composition.spec.js __tests__/kai-sprint2-p1-04-p1-05-audit-transaction-propagation.spec.js __tests__/kai-sprint2-p1-activation.spec.js __tests__/kai-sprint2-p1-03-parser-profile-worker-boundary.spec.js __tests__/kai-sprint2-p1-03-audit-transaction-propagation.spec.js __tests__/kai-sprint2-p1-04-data-dictionary-quality-boundary.spec.js __tests__/kai-sprint2-p1-04-data-dictionary-quality.integration.spec.js __tests__/kai-sprint2-p1-05-intake-sensitivity-profile-boundary.spec.js __tests__/kai-sprint2-p1-05-intake-sensitivity-profile.integration.spec.js __tests__/kai-sprint2-p1-06-review-queue-boundary.spec.js`
+  passed (98 pass, 0 fail, 2 skipped - the same pre-existing suite-specific
+  integration opt-in specs).
+- `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm run test:kai-sprint2`
+  passed (1986 pass, 0 fail, 29 skipped).
+- `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm test`
+  passed (2091 pass, 0 fail, 29 skipped).
+- git_diff_check: `git diff --check` passed.
+- prohibited_actions_not_performed: no production access, deployment,
+  PostgreSQL/database/schema/migration mutation, GCP/IAM/GCS/Render/cloud
+  mutation, feature/configuration change, credential/secret inspection, real
+  client data handling, push, or destructive action. P1-06
+  (`createSensitivityReviewQueueItem`, `kaiReviewQueueService.js`,
+  `postgresReviewQueueRepository.js`) and P2/P3 were never imported or
+  called; `AUTH-KAI-003` was not weakened; no worker/system/internal P1-06
+  bypass was created. `00_KAI_CURRENT_STATE.md` was not updated.
+
+One local commit was made on this branch recording this closure. No push,
+no deploy.
+
+## P2-01 operational composition - internal evidence-lineage extraction route (completed 2026-08-15)
+
+Status: accepted for this local package as one bounded, authenticated
+internal mutation route wired to the existing dormant P2-01
+`extractEvidenceFromSourceVersion` service. P2-01's foundation (schema,
+migrations, repository, validators, lineage gates, replay rules, and
+evidence-review semantics) was not reopened or rebuilt. P2-01 does not run
+automatically from P1 source promotion; no cron, worker, scheduler, listener,
+or promotion hook was added. No P2-02 through P2-08 or P3 service was
+imported or invoked.
+
+Implementation evidence:
+  - Backend/kai/routes/sprint2IntakeApi.js - adds exactly one mounted route,
+    `router.post("/admin/organizations/:organizationId/source-versions/
+    :sourceVersionId/evidence-extraction")`, on the existing mounted Sprint 2
+    intake router, placed after the last existing route (immediately before
+    `export default router;`) so it does not fall inside any prior route's
+    source-slice test window. The path/HTTP-parameter convention was derived
+    from the existing P3-07/P3-10/P3-14 export-review routes rather than
+    invented: those are the only existing routes whose actorContext
+    derivation matches what `extractEvidenceFromSourceVersion` requires -
+    an already-resolved `actorContext` taken directly from
+    `sprint2MappedActorContext(req)` (the middleware-populated
+    `req.kaiSprint2ActorContext`), with no server-side re-resolution from a
+    bare authenticated-user id the way the review-cockpit routes'
+    `authorizeReviewCockpitRequest`/`resolveKaiActorContext` path does. The
+    export-review routes also nest `organizationId` as a path parameter
+    under `/admin/organizations/:organizationId/...` rather than a query
+    parameter, which was reused unchanged for consistency with that same
+    actorContext convention. `sourceVersionId` is transported as a path
+    parameter (not a body field) because, like the export-review routes'
+    identifiers, it is resource identity, not request data, and the route
+    requires an otherwise-empty JSON body (any key present is rejected as
+    `validation_blocker`) since no field beyond resource identity is needed.
+    Two new helpers, `sourceVersionEvidenceExtractionIdentifiers` (path
+    UUID/lowercase-canonical validation, mirroring
+    `exportReviewPacketIdentifiers`) and
+    `validateEvidenceExtractionRequestOrSend`, plus a `getEvidenceLineageService()`
+    lazy-import getter following the existing `getExportReviewService()`
+    pattern (including its override-detection convention:
+    `intakeServiceOverride?.extractEvidenceFromSourceVersion`), are the only
+    additions. The service is called with exactly four values -
+    organizationId/sourceVersionId from the validated path parameters,
+    actorContext from `sprint2MappedActorContext(req)`, and now from a fresh
+    server-side `new Date().toISOString()` call made inside the request
+    handler - the client cannot supply or influence actorContext or now, and
+    any body field is rejected before the service is ever called. Calls
+    `extractEvidenceFromSourceVersion` exactly once. The new route handler
+    and its two helper functions contain no SQL, no pool/repository import,
+    no direct `kai.*` access, and no evidence/locator/review-queue/audit
+    write logic - all of that remains inside the unmodified P2-01 service
+    and repository layers.
+  - Backend/kai/services/kaiMetadataOnlyAuditComposition.js - adds
+    `createProductionMetadataOnlyAuditForSourceVersion`, the real production
+    `metadataOnlyAudit` dependency for this route, alongside the existing
+    P1 `createProductionMetadataOnlyAudit` (unchanged). The existing P1
+    factory could not be reused directly: it requires an `intakeFileId` and
+    unconditionally writes it as `object_id`, and P2-01 extracts evidence
+    from an already-promoted `source_version`, which has no intake-file
+    identity of its own - reusing it would have meant fabricating an
+    intake-file identity for a request that has none. The new factory is
+    the smallest adapter around the same existing required-audit mechanism:
+    it calls the same `insertRequiredSuccessfulAuditEvent` writing into the
+    same `kai.audit_events` table, and builds `prepareMetadataOnlyAudit`'s
+    metadata using the caller-supplied `organizationId`/`sourceVersionId`
+    (as the already-allowlisted `object_id` field) and the payload's own
+    `attempted_operation`/`object_type`/`validator_key` fields exactly as
+    `postgresEvidenceLineageRepository.js`'s `buildEvidenceLineageAuditPayload`
+    already builds them - no new identifier was invented, no P2-01 audit
+    payload field was changed, and no second audit table or framework was
+    created.
+  - __tests__/kai-sprint2-p2-01-evidence-extraction-route.spec.js (new) -
+    covers: exactly one mounted authenticated POST route at the documented
+    path; unauthenticated requests fail (401) before the service is ever
+    called; an authenticated mapped human in the correct organization
+    reaches `extractEvidenceFromSourceVersion` exactly once with the server
+    organizationId, the requested sourceVersionId, the server-resolved
+    actorContext, and a server-generated now falling inside the request's
+    own wall-clock window, alongside a production `metadataOnlyAudit`
+    dependency whose `prepareMetadataOnlyAudit` returns a real
+    `{ ok: true, publish }` shape; client-supplied `organization_id` (query
+    or body), `actorContext`, and `now` cannot override the server-resolved
+    values, and any body field at all is rejected as `validation_blocker`
+    before the service is invoked; malformed path UUIDs (non-UUID or not
+    already lowercased, for either identifier) use the existing safe
+    `validation_blocker` envelope; every listed service-result error code
+    (`feature_disabled`, `invalid_request`, `unauthorized`,
+    `mapped_kai_user_required`, `authorization_denied`,
+    `tenant_boundary_violation`, `not_found`, `conflict_current_state_changed`,
+    `system_error`) maps through the existing safe envelope with no
+    blocker/warning/data leakage; `KAI_SPRINT2_ENABLED=false` returns the
+    existing outer feature-gate's 403 with zero service calls; and a
+    source-slice scan proving the new route region contains no SQL keyword,
+    no db/repository/postgres import, no pool/kaiDb/repository reference,
+    and no P2-02/P2-03/P2-04/P2-05+ service reference.
+  - __tests__/kai-sprint2-pass2-route-runtime.spec.js - the one required,
+    additive update: the existing exhaustive mounted-route-path enumeration
+    test now includes the new P2-01 path immediately after the last
+    export-review path (alphabetically adjacent); every previously listed
+    path is preserved verbatim and unreordered.
+
+TOOL_VERIFIED:
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false node --test __tests__/kai-sprint2-p2-01-evidence-extraction-route.spec.js`
+    -> 9/9 pass.
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false node --test __tests__/kai-sprint2-p2-01-evidence-lineage-boundary.spec.js __tests__/kai-sprint2-p2-01-evidence-lineage-runner-self-test.spec.js __tests__/kai-sprint2-p2-01-evidence-lineage-schema-contract.spec.js`
+    -> 46/46 pass (unchanged; the P2-01 service/repository boundary is
+    untouched by this route package).
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false node --test __tests__/kai-sprint2-p3-07-export-review-packet-route.spec.js __tests__/kai-sprint2-p3-10-export-review-start-route.spec.js __tests__/kai-sprint2-p3-14-export-review-complete-route.spec.js`
+    -> 35/35 pass (unaffected by the new route's insertion point).
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm run verify:kai-sprint2-p2-01-evidence-lineage`
+    -> P2-01 evidence-lineage integration tests passed (17/17), using a real
+    ephemeral local PostgreSQL instance, then removed.
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm run test:kai-sprint2`
+    -> complete Sprint 2 suite: 1995 pass, 0 fail, 29 skip.
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm test`
+    -> complete repository suite: 2100 pass, 0 fail, 29 skip.
+  - `git diff --check` -> clean (no whitespace errors).
+
+USER_CONFIRMED:
+  - P2-01 through P2-08 are accepted and closed as backend foundations;
+    P2-01 is human-authorized under its existing AUTH-KAI-003 rules and
+    gated by KAI_SPRINT2_ENABLED alone (KAI_EVIDENCE_LINEAGE_ENABLED was not
+    added or restored).
+  - This P2-01 operational-composition package (exposing the existing
+    `extractEvidenceFromSourceVersion` through the existing authenticated
+    internal KAI human application surface) is authorized as one bounded
+    route addition.
+
+NOT_CONFIRMED:
+  - No push, merge, deploy, flag enablement, P2-02 through P2-08 or P3
+    invocation, cron/worker/scheduler/listener/promotion-hook creation,
+    schema/migration change, or new review cycle was performed. Real
+    client data was not used. `00_KAI_CURRENT_STATE.md` and the
+    Implementation Baseline were not updated.
+
+One local commit was made on this branch recording this package. No push,
+no deploy.
+
+## P2-01 operational audit correction (completed 2026-08-15)
+
+Status: accepted for this local package as two minimal, additions-only
+corrections to the P2-01 operational-composition package immediately above.
+The mounted route, `extractEvidenceFromSourceVersion`, the AUTH-KAI-003
+human boundary, the source/current-lineage validators,
+evidence/locator/evidence_review persistence, replay/idempotency,
+migrations/schema, and the P2-01 service contract were not reopened or
+changed.
+
+Implementation evidence:
+  - Backend/kai/dictionary/postgresEvidenceLineageRepository.js -
+    `prepareRequiredAudit(metadataOnlyAudit, context)` is corrected to
+    `prepareRequiredAudit(metadataOnlyAudit, tx, context)`, and now calls
+    `metadataOnlyAudit.prepareMetadataOnlyAudit({ payload:
+    buildEvidenceLineageAuditPayload(context), db: tx })`, forwarding the
+    repository's own existing fresh-write transaction as `db`. Before this
+    correction, `db` was never supplied, so the required-audit insert issued
+    by a real production `metadataOnlyAudit` dependency ran outside this
+    call's own transaction (or against `undefined`) instead of on the same
+    connection as the domain writes it is meant to audit alongside - the
+    exact same class of defect already corrected for P1-04/P1-05 in
+    `kai-sprint2-p1-04-p1-05-audit-transaction-propagation.spec.js`. The one
+    call site (inside the existing fresh-write branch, immediately before
+    `preparedAudit.publish()`) is unchanged in every other respect: no second
+    transaction is opened, `publish()` is still awaited inside the same
+    transaction callback, and the existing P2-01 audit payload
+    (`buildEvidenceLineageAuditPayload`, `object_type: "evidence_item"`
+    included) is untouched.
+  - Backend/kai/services/kaiMetadataOnlyAuditComposition.js -
+    `createProductionMetadataOnlyAuditForSourceVersion`'s
+    `prepareMetadataOnlyAudit` no longer derives its generic audit event's
+    `object_type`/`target_object_type` from the caller's `payload.object_type`
+    (which, for every real P2-01 caller, is always the repository's own
+    internal `"evidence_item"` lineage-payload contract field). Both fields
+    are now the fixed literal `"source_version"`, truthfully describing the
+    object that actually triggered this adapter's operation - the
+    `source_version` identified by the already-correct `object_id:
+    sourceVersionId`. No database enum, constraint, migration, or
+    `insertRequiredSuccessfulAuditEvent` resolver/fallback behavior was
+    changed; `"source_version"` was not added anywhere as a new persisted
+    enum value, only as adapter-level metadata content. The sibling P1
+    factory, `createProductionMetadataOnlyAudit` (used by
+    `postgresParserRunRepository.js`/`parserProfileWorkerOrchestration.js`),
+    is unchanged.
+  - __tests__/kai-sprint2-p2-01-audit-transaction-propagation.spec.js (new) -
+    covers: (1) a full `extractEvidenceFromSourceVersion` fresh-write call
+    through a fake multi-connection transaction provider, proving the
+    `audit_events` insert issued via `createProductionMetadataOnlyAuditForSourceVersion`
+    lands on the exact same connection as the `evidence_items` domain
+    insert; (2) `createProductionMetadataOnlyAuditForSourceVersion`'s
+    generic adapter metadata is `object_type = "source_version"`,
+    `target_object_type = "source_version"`, `object_id` = the requested
+    sourceVersionId, even when given a payload whose own `object_type` is
+    `"evidence_item"`; (3) the repository's own
+    `buildEvidenceLineageAuditPayload` payload, as observed by a capturing
+    `metadataOnlyAudit` double, still declares `object_type: "evidence_item"`
+    unchanged. Existing P2-01 lineage/replay/rollback coverage is not
+    duplicated here; it remains owned by
+    `__tests__/kai-sprint2-p2-01-evidence-lineage-boundary.spec.js` and the
+    P2-01 verifier script.
+
+TOOL_VERIFIED:
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false node --test __tests__/kai-sprint2-p2-01-audit-transaction-propagation.spec.js __tests__/kai-sprint2-p2-01-evidence-lineage-boundary.spec.js __tests__/kai-sprint2-p2-01-evidence-lineage.integration.spec.js`
+    -> 32/32 pass (31 pass, 1 skip - the runner-owned-database integration
+    test, which requires the local ephemeral PostgreSQL harness run
+    separately below).
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm run verify:kai-sprint2-p2-01-evidence-lineage`
+    -> P2-01 evidence-lineage integration tests passed (17/17), using a real
+    ephemeral local PostgreSQL instance, then removed.
+  - `git diff --check` -> clean (no whitespace errors).
+
+USER_CONFIRMED:
+  - P2-01's two operational-audit defects (missing transaction propagation
+    into the required-audit insert; the generic adapter's audit-event
+    object identity following the internal evidence_item payload contract
+    instead of the source_version that triggered the operation) are
+    authorized for correction as one bounded, additions-only package.
+
+NOT_CONFIRMED:
+  - No push, merge, deploy, flag enablement, P2-02+ or P3 invocation,
+    cron/worker/scheduler/listener/promotion-hook creation, schema/migration
+    change, new database enum value, or new review cycle was performed.
+    Real client data was not used. `00_KAI_CURRENT_STATE.md` and the
+    Implementation Baseline were not updated.
+
+One local commit was made on this branch recording this package. No push,
+no deploy.
+
+## P2-02 operational composition - internal evidence-coverage-assessment route (completed 2026-08-15)
+
+Status: accepted for this local package as one bounded, authenticated,
+read-only internal GET route wired to the existing accepted, dormant P2-02
+`assessEvidenceCoverageForSourceVersion` service. P2-02's foundation (the ten
+dimension assessors, the reused lineage/permission gate, the repository read
+logic) was not reopened or rebuilt. No persistence, audit write, SQL, or
+direct repository access was added in the route. No P2-03 through P2-08 or
+P3 service was imported or invoked. No worker/cron/listener/scheduler or
+automatic P1->P2 chaining was added.
+
+Implementation evidence:
+  - Backend/kai/routes/sprint2IntakeApi.js - adds exactly one mounted route,
+    `router.get("/admin/organizations/:organizationId/source-versions/
+    :sourceVersionId/evidence-coverage-assessment")`, on the existing
+    mounted Sprint 2 intake router, placed immediately after the P2-01
+    evidence-extraction route (before `export default router;`). Reuses the
+    existing P2-01 `sourceVersionEvidenceExtractionIdentifiers` path-UUID
+    validator and `sprint2MappedActorContext(req)` actorContext derivation
+    unchanged - both already scope to the identical organizationId/
+    sourceVersionId resource identity `assessEvidenceCoverageForSourceVersion`
+    expects, so no new identifier-validation or actor-derivation helper was
+    written. One new helper, `getEvidenceCoverageAssessmentService()`, is a
+    lazy-import getter following the exact existing
+    `getEvidenceLineageService()` pattern (including its override-detection
+    convention: `intakeServiceOverride?.assessEvidenceCoverageForSourceVersion`).
+    The route calls the service with exactly three values -
+    organizationId/sourceVersionId from the validated path parameters and
+    actorContext from `sprint2MappedActorContext(req)` - matching the
+    service's exact accepted input shape
+    (`{ organizationId, sourceVersionId, actorContext }`, no `now`). No
+    request body is read or required. The route handler and its one new
+    helper contain no SQL, no pool/repository import, no direct `kai.*`
+    access, and pass no `metadataOnlyAudit` dependency at all, since
+    `assessEvidenceCoverageForSourceVersion` performs no write and requires
+    none.
+  - __tests__/kai-sprint2-p2-02-evidence-coverage-assessment-route.spec.js
+    (new) - covers: exactly one mounted authenticated GET route at the
+    documented path; unauthenticated requests fail (401) before the service
+    is ever called; an authenticated mapped human in the correct
+    organization reaches `assessEvidenceCoverageForSourceVersion` exactly
+    once with the server-resolved organizationId/sourceVersionId/
+    actorContext and no `metadataOnlyAudit` dependency; caller-supplied
+    query-string identity (`organization_id`, `actorContext`) cannot replace
+    the server-resolved actor or path-scoped tenant identity, since the
+    route never reads them; malformed path UUIDs (non-UUID or not already
+    lowercased, for either identifier) use the existing safe
+    `validation_blocker` envelope; every listed service-result error code
+    (`feature_disabled`, `invalid_request`, `unauthorized`,
+    `mapped_kai_user_required`, `authorization_denied`,
+    `tenant_boundary_violation`, `not_found`, `conflict_current_state_changed`,
+    `system_error` - covering unmapped/unauthorized/non-human/cross-tenant
+    rejection, all of which the existing service already enforces) maps
+    through the existing safe envelope with no blocker/warning/data leakage;
+    `KAI_SPRINT2_ENABLED=false` returns the existing outer feature-gate's
+    403 with zero service calls; and a source-slice scan proving the new
+    route region contains no SQL keyword, no db/repository/postgres import,
+    no pool/kaiDb/repository reference, no `metadataOnlyAudit` reference,
+    and no P2-03 through P2-08 service reference. Existing P2-02
+    assessment/lineage-gate/database-read coverage is not duplicated here;
+    it remains owned by
+    `__tests__/kai-sprint2-p2-02-evidence-coverage-assessment-boundary.spec.js`
+    and the P2-02 verifier script.
+  - __tests__/kai-sprint2-pass2-route-runtime.spec.js - the one required,
+    additive update: the existing exhaustive mounted-route-path enumeration
+    test now includes the new P2-02 path immediately before the P2-01
+    evidence-extraction path (alphabetically adjacent - `evidence-coverage-
+    assessment` sorts before `evidence-extraction`); every previously listed
+    path is preserved verbatim and unreordered.
+  - __tests__/kai-sprint2-p2-01-evidence-extraction-route.spec.js - the one
+    required, corrective update: the existing P2-01 source-slice test's end
+    anchor is narrowed from `export default router;` to the new
+    `async function getEvidenceCoverageAssessmentService` marker, so the
+    P2-01-only source-slice assertions (no SQL, no P2-02+ reference) stop
+    incidentally spanning the newly appended P2-02 route region (whose own
+    doc comment names "P2-02", which the P2-01 test's own forbidden-pattern
+    regex would otherwise - falsely - flag). No P2-01 behavioral assertion
+    was changed.
+
+TOOL_VERIFIED:
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false node --test __tests__/kai-sprint2-p2-02-evidence-coverage-assessment-route.spec.js`
+    -> 9/9 pass.
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false node --test __tests__/kai-sprint2-pass2-route-runtime.spec.js __tests__/kai-sprint2-p2-01-evidence-extraction-route.spec.js`
+    -> 36/36 pass.
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm run verify:kai-sprint2-p2-02-evidence-coverage-assessment`
+    -> P2-02 evidence-coverage-assessment integration tests passed (7/7),
+    using a real ephemeral local PostgreSQL instance, then removed.
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm run test:kai-sprint2`
+    -> complete Sprint 2 suite: 2007 pass, 0 fail, 29 skip.
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm test`
+    -> complete repository suite: 2112 pass, 0 fail, 29 skip.
+  - `git diff --check` -> clean (no whitespace errors).
+
+USER_CONFIRMED:
+  - P2-02 is accepted and closed as a backend foundation; this operational-
+    composition package (exposing the existing
+    `assessEvidenceCoverageForSourceVersion` through the existing
+    authenticated internal KAI human application surface, as one bounded,
+    read-only route addition) is authorized.
+
+NOT_CONFIRMED:
+  - No push, merge, deploy, flag enablement, P2-03 through P2-08 or P3
+    invocation, cron/worker/scheduler/listener/promotion-hook creation,
+    schema/migration change, persistence, or audit-write path was added.
+    Real client data was not used. `00_KAI_CURRENT_STATE.md` and the
+    Implementation Baseline were not updated.
+
+One local commit was made on this branch recording this package. No push,
+no deploy.
+
+## P2-03 operational composition - internal claim-proposal route plus audit-transaction correction (completed 2026-08-15)
+
+Status: accepted for this local package as one bounded, authenticated,
+human-only internal POST route wired to the existing accepted, dormant P2-03
+`proposeClaim` service, plus the one required tx-propagation correction found
+already missing at the start of this package. P2-03's foundation (the
+deterministic claim derivation, AUTH-KAI-003 human boundary, lineage/
+promotion/requirement-coverage validators, claim/claim_evidence_link/
+claim_review persistence, replay/concurrency handling) was not reopened or
+rebuilt. No SQL or direct repository access was added in the route. No
+P2-04 through P2-08 or P3 service was imported or invoked. No
+worker/cron/listener/scheduler or automatic P2-01/P2-02->P2-03 chaining was
+added.
+
+Implementation evidence:
+  - Backend/kai/dictionary/postgresClaimProposalRepository.js -
+    `prepareRequiredAudit(metadataOnlyAudit, context)` was still missing tx
+    propagation at the start of this package (the exact P1-04/P1-05/P2-01
+    defect class). Corrected to
+    `prepareRequiredAudit(metadataOnlyAudit, tx, context)`, now calling
+    `metadataOnlyAudit.prepareMetadataOnlyAudit({ payload:
+    buildClaimProposalAuditPayload(context), db: tx })`, forwarding the
+    repository's own existing fresh-write transaction as `db`. The one call
+    site (inside the existing fresh-write branch, immediately before
+    `preparedAudit.publish()`) is unchanged in every other respect: no
+    second transaction is opened, `publish()` is still awaited inside the
+    same transaction callback, the existing `upload_lifecycle_audit` write
+    is untouched, and `buildClaimProposalAuditPayload` (including its
+    internal `route_contract: "unwired_synthetic_claim_proposal"` value,
+    which is not read by the new production adapter) is unchanged.
+  - Backend/kai/services/kaiMetadataOnlyAuditComposition.js - adds
+    `createProductionMetadataOnlyAuditForClaimProposal`, the smallest new
+    production adapter around the existing `insertRequiredSuccessfulAuditEvent`
+    mechanism, bound at construction only to organizationId/evidenceItemId/
+    actorContext/now - never a claimId. Its `prepareMetadataOnlyAudit({
+    payload, db })` requires `payload.claim_id` to match the repository's
+    existing UUID convention; a payload with a missing or malformed
+    `claim_id` returns `{ ok: false }` rather than substituting
+    evidenceItemId or any other identifier. For a valid payload, the generic
+    audit metadata sets `object_type: "claim"`, `target_object_type:
+    "claim"`, `object_id: payload.claim_id`, and identifies the mounted
+    operation as `route: "p2_03_claim_proposal"` (not the internal
+    `"unwired_synthetic_claim_proposal"` route_contract value from the
+    repository's own payload). No audit enum/schema/constraint was changed;
+    the existing `resolveAuditObjectType` resolver/fallback in
+    `Backend/kai/db/kaiAuditQueries.js` is untouched, so an unlisted `"claim"`
+    enum label still falls back to `"other"` exactly as it does today for
+    every other adapter here. Publication passes the exact supplied `db`
+    through to `insertAuditEvent` unchanged. The sibling P1/P2-01 factories
+    are unchanged.
+  - Backend/kai/routes/sprint2IntakeApi.js - adds exactly one mounted route,
+    `router.post("/admin/organizations/:organizationId/evidence-items/
+    :evidenceItemId/claim-proposal")`, on the existing mounted Sprint 2
+    intake router, placed immediately after the P2-02
+    evidence-coverage-assessment route (before `export default router;`).
+    The resource identity is the evidenceItemId (P2-03's own resource),
+    scoped under the same `/admin/organizations/:organizationId/...`
+    convention already used by the P2-01/P2-02 routes. Two new helpers
+    mirror the existing P2-01 identifier/body-validation pattern exactly:
+    `evidenceItemClaimProposalIdentifiers(req)` (organizationId/evidenceItemId
+    path-UUID validation, lowercase-only, following
+    `sourceVersionEvidenceExtractionIdentifiers`) and
+    `validateClaimProposalRequestOrSend(req, res)` (content-type check plus
+    the existing P2-01 empty-body requirement - any request body, including
+    an attempt to inject `actorUserId`/`actorType`/`roles`/`memberships`/
+    `actorContext`/`now`/`claim_id`/`claim_type`/`claim_status`/
+    `claim_review_status`/`claim_strength`/`public_use_allowed`/
+    `export_ready`, is rejected as `validation_blocker` before the service is
+    ever reached). One new lazy-import getter,
+    `getClaimProposalService()`, follows the exact existing
+    `getEvidenceLineageService()`/`getEvidenceCoverageAssessmentService()`
+    pattern (including the override-detection convention:
+    `intakeServiceOverride?.proposeClaim`). The route derives
+    `organizationId`/`evidenceItemId` only from the validated path,
+    `actorContext` only from `sprint2MappedActorContext(req)`
+    (`req.kaiSprint2ActorContext`, the existing server-authenticated/mapped
+    context - never request body/query), and `now` only from a fresh
+    server-side `new Date().toISOString()`, then delegates to
+    `proposeClaim({ organizationId, evidenceItemId, actorContext, now },
+    { metadataOnlyAudit })` exactly once, with `metadataOnlyAudit` the new
+    production adapter above constructed from the same server-derived
+    values. The route and its two new helpers contain no SQL, no
+    pool/repository import, and no direct `kai.*` access, and import/invoke
+    no P2-04 through P2-08 service. No occurrence of the literal token
+    `req.user` was introduced anywhere in the file.
+  - __tests__/kai-sprint2-p2-03-claim-proposal-route.spec.js (new) - covers:
+    exactly one mounted authenticated POST route at the documented path;
+    unauthenticated requests fail (401) before the service is ever called;
+    an authenticated mapped human in the correct organization reaches
+    `proposeClaim` exactly once with the server-resolved
+    organizationId/evidenceItemId/actorContext/a server-generated `now`
+    (bounded within the request window) and a production
+    `metadataOnlyAudit` dependency whose `prepareMetadataOnlyAudit` refuses
+    a payload with no `claim_id` and accepts one with a valid `claim_id`;
+    a request body attempting to inject actor/time/claim/audience fields is
+    rejected as `validation_blocker` with zero service calls; malformed path
+    UUIDs (non-UUID or not already lowercased, for either identifier) use
+    the existing safe `validation_blocker` envelope; every listed
+    service-result error code (`feature_disabled`, `invalid_request`,
+    `unauthorized`, `mapped_kai_user_required`, `authorization_denied`,
+    `tenant_boundary_violation`, `not_found`, `conflict_current_state_changed`,
+    `system_error`) maps through the existing safe envelope with no
+    blocker/warning/data leakage; `KAI_SPRINT2_ENABLED=false` returns the
+    existing outer feature-gate's 403 with zero service calls; a
+    source-slice scan proving the new route region contains no SQL keyword,
+    no db/repository/postgres import, no pool/kaiDb/repository reference,
+    and no P2-04 through P2-08 service reference; and a whole-file scan
+    proving the literal token `req.user` never appears. Existing P2-03
+    claim-derivation/lineage/persistence/concurrency/rollback/immutable-
+    column coverage is not duplicated here; it remains owned by
+    `__tests__/kai-sprint2-p2-03-claim-proposal-boundary.spec.js` and the
+    P2-03 verifier script.
+  - __tests__/kai-sprint2-p2-03-audit-transaction-propagation.spec.js (new) -
+    mirrors `kai-sprint2-p2-01-audit-transaction-propagation.spec.js`.
+    Covers: (1) a full `proposeClaim` fresh-write call through a fake
+    multi-connection transaction provider, proving the `audit_events` insert
+    issued via `createProductionMetadataOnlyAuditForClaimProposal` lands on
+    the exact same connection as the `claims` domain insert (the
+    SAME_TRANSACTION proof); (2) the production adapter refuses a payload
+    with a missing or malformed `claim_id` rather than substituting
+    evidenceItemId, and for a valid `claim_id` its generic adapter metadata
+    is `object_type = "claim"`, `target_object_type = "claim"`, `object_id`
+    = the payload's `claim_id` (not the evidenceItemId the factory was
+    constructed with); (3) the factory itself does not accept or require a
+    claimId at construction time; (4) the repository's own
+    `buildClaimProposalAuditPayload` payload, as observed by a capturing
+    `metadataOnlyAudit` double, still declares `object_type: "claim"` and
+    the authoritative `claim_id`, and `prepareMetadataOnlyAudit` still
+    receives the repository's own tx as `db`. Existing P2-03
+    lineage/replay/rollback coverage is not duplicated here; it remains
+    owned by the existing P2-03 boundary spec and verifier script.
+  - __tests__/kai-sprint2-p2-02-evidence-coverage-assessment-route.spec.js -
+    the one required, corrective update: the existing P2-02 source-slice
+    test's end anchor is narrowed from `export default router;` to the new
+    `async function getClaimProposalService` marker, so the P2-02-only
+    source-slice assertions (no SQL, no `metadataOnlyAudit` reference, no
+    P2-03+ reference) stop incidentally spanning the newly appended P2-03
+    claim-proposal route region (whose own code references
+    `metadataOnlyAudit` and imports `kaiClaimProposalService.js`, which the
+    P2-02 test's own forbidden-pattern regex would otherwise - falsely -
+    flag). No P2-02 behavioral assertion was changed.
+  - __tests__/kai-sprint2-pass2-route-runtime.spec.js - the one required,
+    additive update: the existing exhaustive mounted-route-path enumeration
+    test now includes the new P2-03 path, alphabetically ordered
+    immediately before the generated-content-drafts export-review-queue
+    paths; every previously listed path is preserved verbatim and
+    unreordered.
+
+TOOL_VERIFIED:
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false node --test __tests__/kai-sprint2-p2-03-claim-proposal-route.spec.js __tests__/kai-sprint2-p2-03-audit-transaction-propagation.spec.js __tests__/kai-sprint2-p2-03-claim-proposal-boundary.spec.js __tests__/kai-sprint2-p2-03-claim-proposal-schema-contract.spec.js __tests__/kai-sprint2-p2-03-claim-proposal-runner-self-test.spec.js __tests__/kai-sprint2-p2-01-evidence-extraction-route.spec.js __tests__/kai-sprint2-p2-02-evidence-coverage-assessment-route.spec.js __tests__/kai-sprint2-api-contract.spec.js __tests__/kai-sprint2-foundation-safety.spec.js __tests__/kai-sprint2-pass2-route-runtime.spec.js`
+    -> 142/142 pass.
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm run verify:kai-sprint2-p2-03-claim-proposal`
+    -> P2-03 claim-proposal integration tests passed (15/15), using a real
+    ephemeral local PostgreSQL instance, then removed.
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm run test:kai-sprint2`
+    -> complete Sprint 2 suite: 2021 pass, 0 fail, 29 skip (2050 total).
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm test`
+    -> complete repository suite: 2126 pass, 0 fail, 29 skip (2155 total).
+  - `git diff --check` -> clean (no whitespace errors).
+
+USER_CONFIRMED:
+  - P2-03 is accepted and closed as a backend foundation; this operational-
+    composition package (exposing the existing `proposeClaim` through the
+    existing authenticated internal KAI human application surface, as one
+    bounded POST route addition, plus the one required tx-propagation
+    correction found already missing) is authorized.
+
+NOT_CONFIRMED:
+  - No push, merge, deploy, flag enablement, P2-04 through P2-08 or P3
+    invocation, cron/worker/scheduler/listener/promotion-hook creation,
+    schema/migration change, new database enum value, or new review cycle
+    was performed. Real client data was not used. `00_KAI_CURRENT_STATE.md`
+    and the Implementation Baseline were not updated.
+
+One local commit was made on this branch recording this package. No push,
+no deploy.
+
+## P2-04 operational composition - internal claim-gap/client-followup route plus audit-transaction correction (completed 2026-08-15)
+
+Status: accepted for this local package as one bounded, authenticated,
+human-only internal POST route wired to the existing accepted, dormant P2-04
+`generateClaimGapFollowups` service, plus the one required tx-propagation
+correction found already missing at the start of this package. P2-04's
+foundation (dimension derivation reusing the exact P2-02 assessment
+functions, lineage/permission validators, client-followup routing gate,
+gap_log_items/client_followup_items/review_queue_items persistence, replay/
+concurrency/partial-state handling) was not reopened or rebuilt. No SQL or
+direct repository access was added in the route. No P2-05 through P2-08 or
+P3 service was imported or invoked. No worker/cron/listener/scheduler or
+automatic P2-03->P2-04 or P2-04->P2-05 chaining was added.
+
+Implementation evidence:
+  - Backend/kai/dictionary/postgresClaimGapFollowupRepository.js -
+    `prepareRequiredAudit(metadataOnlyAudit, context)` was still missing tx
+    propagation at the start of this package (the exact P1-04/P1-05/P2-01/
+    P2-03 defect class). Corrected to
+    `prepareRequiredAudit(metadataOnlyAudit, tx, context)`, now calling
+    `metadataOnlyAudit.prepareMetadataOnlyAudit({ payload:
+    buildClaimGapFollowupAuditPayload(context), db: tx })`, forwarding the
+    repository's own existing fresh-write transaction as `db`. The one call
+    site (inside the existing fresh-write branch, immediately before
+    `preparedAudit.publish()`) is unchanged in every other respect: no
+    second transaction is opened, `publish()` is still awaited inside the
+    same transaction callback, the existing `upload_lifecycle_audit` write
+    is untouched, and `buildClaimGapFollowupAuditPayload` (including its
+    internal `route_contract: "unwired_synthetic_claim_gap_followup"` value,
+    which is not read by the new production adapter) is unchanged.
+  - Backend/kai/services/kaiMetadataOnlyAuditComposition.js - adds
+    `createProductionMetadataOnlyAuditForClaimGapFollowup`, the smallest new
+    production adapter around the existing `insertRequiredSuccessfulAuditEvent`
+    mechanism, bound at construction to organizationId/claimId/actorContext/
+    now - the route's own resource identity, unlike the P2-03 adapter which
+    binds no claimId. Its `prepareMetadataOnlyAudit({ payload, db })`
+    requires `payload.claim_id` to be a valid UUID AND to equal the
+    constructed claimId; a payload with a missing, malformed, or mismatched
+    `claim_id` returns `{ ok: false }` - it never falls back to the
+    constructed claimId or fabricates/selects a gap_log_item/
+    client_followup_item id, since one P2-04 execution may create multiple
+    such records. For a valid, matching payload, the generic audit metadata
+    sets `object_type: "claim"`, `target_object_type: "claim"`,
+    `object_id: payload.claim_id`, and identifies the mounted operation as
+    `route: "p2_04_claim_gap_followup"`. No audit enum/schema/constraint was
+    changed; the existing `resolveAuditObjectType` resolver/fallback in
+    `Backend/kai/db/kaiAuditQueries.js` is untouched. Publication passes the
+    exact supplied `db` through to `insertAuditEvent` unchanged. The sibling
+    P1/P2-01/P2-03 factories are unchanged.
+  - Backend/kai/routes/sprint2IntakeApi.js - adds exactly one mounted route,
+    `router.post("/admin/organizations/:organizationId/claims/:claimId/
+    claim-gap-followups")`, on the existing mounted Sprint 2 intake router,
+    placed immediately after the P2-03 claim-proposal route (before
+    `export default router;`). The resource identity is the claimId (P2-04's
+    own resource, the already-proposed P2-03 claim), scoped under the same
+    `/admin/organizations/:organizationId/...` convention already used by
+    the P2-01/P2-02/P2-03 routes. Two new helpers mirror the existing P2-03
+    identifier/body-validation pattern exactly:
+    `claimGapFollowupIdentifiers(req)` (organizationId/claimId path-UUID
+    validation, lowercase-only) and
+    `validateClaimGapFollowupRequestOrSend(req, res)` (content-type check
+    plus the existing P2-01/P2-03 empty-body requirement - any request
+    body, including an attempt to inject `actorUserId`/`actorType`/`roles`/
+    `memberships`/`actorContext`/`now`/`claim_id`/`dimension_key`/
+    `assessment_status`/`queue_status`, is rejected as `validation_blocker`
+    before the service is ever reached). One new lazy-import getter,
+    `getClaimGapFollowupService()`, follows the exact existing
+    `getClaimProposalService()` pattern (including the override-detection
+    convention: `intakeServiceOverride?.generateClaimGapFollowups`). The
+    route derives `organizationId`/`claimId` only from the validated path,
+    `actorContext` only from `sprint2MappedActorContext(req)` (the existing
+    server-authenticated/mapped context - never request body/query), and
+    `now` only from a fresh server-side `new Date().toISOString()`, then
+    delegates to `generateClaimGapFollowups({ organizationId, claimId,
+    actorContext, now }, { metadataOnlyAudit })` exactly once, with
+    `metadataOnlyAudit` the new production adapter above constructed from
+    the same server-derived values. The route and its two new helpers
+    contain no SQL, no pool/repository import, and no direct `kai.*`
+    access, and import/invoke no P2-05 through P2-08 service. No occurrence
+    of the literal token `req.user` was introduced anywhere in the file.
+  - __tests__/kai-sprint2-p2-04-claim-gap-followup-route.spec.js (new) -
+    covers: exactly one mounted authenticated POST route at the documented
+    path; unauthenticated requests fail (401) before the service is ever
+    called; an authenticated mapped human in the correct organization
+    reaches `generateClaimGapFollowups` exactly once with the
+    server-resolved organizationId/claimId/actorContext/a server-generated
+    `now` (bounded within the request window) and a production
+    `metadataOnlyAudit` dependency whose `prepareMetadataOnlyAudit` refuses
+    a payload with no `claim_id`, refuses one with a `claim_id` that does
+    not match the route's claimId, and accepts one with the matching valid
+    `claim_id`; a request body attempting to inject actor/time/gap/followup
+    fields is rejected as `validation_blocker` with zero service calls;
+    malformed path UUIDs (non-UUID or not already lowercased, for either
+    identifier) use the existing safe `validation_blocker` envelope; every
+    listed service-result error code maps through the existing safe
+    envelope with no blocker/warning/data leakage; `KAI_SPRINT2_ENABLED=false`
+    returns the existing outer feature-gate's 403 with zero service calls; a
+    source-slice scan proving the new route region contains no SQL keyword,
+    no db/repository/postgres import, no pool/kaiDb/repository reference,
+    and no P2-05 through P2-08 service reference; and a whole-file scan
+    proving the literal token `req.user` never appears. Existing P2-04
+    dimension-derivation/lineage/persistence/concurrency/rollback coverage
+    is not duplicated here; it remains owned by
+    `__tests__/kai-sprint2-p2-04-claim-gap-followup-boundary.spec.js`,
+    `__tests__/kai-sprint2-p2-04-claim-gap-followup.integration.spec.js`,
+    and the P2-04 verifier script.
+  - __tests__/kai-sprint2-p2-04-audit-transaction-propagation.spec.js (new) -
+    mirrors `kai-sprint2-p2-03-audit-transaction-propagation.spec.js`.
+    Covers: (1) a full `generateClaimGapsAndFollowups` fresh-write call
+    (via an injected deterministic `computeDimensions` override, isolating
+    this proof from real dimension computation) through a fake
+    multi-connection transaction provider, proving the `audit_events`
+    insert issued via `createProductionMetadataOnlyAuditForClaimGapFollowup`
+    lands on the exact same connection as the `gap_log_items` domain insert
+    (the SAME_TRANSACTION proof); (2) the production adapter refuses a
+    payload with a missing or mismatched `claim_id`, and for a valid
+    matching `claim_id` its generic adapter metadata is
+    `object_type = "claim"`, `target_object_type = "claim"`, `object_id` =
+    the payload's `claim_id`; (3) the repository's own
+    `buildClaimGapFollowupAuditPayload` payload, as observed by a capturing
+    `metadataOnlyAudit` double, still declares `object_type: "claim"` and
+    the authoritative `claim_id`, and `prepareMetadataOnlyAudit` still
+    receives the repository's own tx as `db`. Existing P2-04 lineage/
+    replay/rollback coverage is not duplicated here; it remains owned by
+    the existing P2-04 boundary spec, integration spec, and verifier
+    script.
+  - __tests__/kai-sprint2-p2-03-claim-proposal-route.spec.js - the one
+    required, corrective update: the existing P2-03 source-slice test's
+    end anchor is narrowed from `export default router;` to the new
+    `async function getClaimGapFollowupService` marker, so the P2-03-only
+    source-slice assertions (no SQL, no P2-04+ reference) stop incidentally
+    spanning the newly appended P2-04 claim-gap-followup route region. No
+    P2-03 behavioral assertion was changed.
+  - __tests__/kai-sprint2-pass2-route-runtime.spec.js - the one required,
+    additive update: the existing exhaustive mounted-route-path enumeration
+    test now includes the new P2-04 path, alphabetically ordered
+    immediately after the last `/admin/files/...` path and before the P2-03
+    claim-proposal path; every previously listed path is preserved verbatim
+    and unreordered.
+
+TOOL_VERIFIED:
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false node --test __tests__/kai-sprint2-p2-04-claim-gap-followup-route.spec.js __tests__/kai-sprint2-p2-04-audit-transaction-propagation.spec.js __tests__/kai-sprint2-p2-03-claim-proposal-route.spec.js __tests__/kai-sprint2-p2-03-audit-transaction-propagation.spec.js __tests__/kai-sprint2-pass2-route-runtime.spec.js __tests__/kai-sprint2-p2-04-claim-gap-followup-boundary.spec.js`
+    -> 91/91 pass.
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm run verify:kai-sprint2-p2-04-claim-gap-followup`
+    -> P2-04 claim-gap/client-followup integration tests passed (18/18),
+    using a real ephemeral local PostgreSQL instance, then removed.
+  - `git diff --check` -> clean (no whitespace errors).
+
+USER_CONFIRMED:
+  - P2-04 is accepted and closed as a backend foundation; this operational-
+    composition package (exposing the existing `generateClaimGapFollowups`
+    through the existing authenticated internal KAI human application
+    surface, as one bounded POST route addition, plus the one required
+    tx-propagation correction found already missing) is authorized.
+
+NOT_CONFIRMED:
+  - No push, merge, deploy, flag enablement, P2-05 through P2-08 or P3
+    invocation, cron/worker/scheduler/listener/promotion-hook creation,
+    schema/migration change, new database enum value, or new review cycle
+    was performed. Real client data was not used. `00_KAI_CURRENT_STATE.md`
+    and the Implementation Baseline were not updated.
+
+One local commit was made on this branch recording this package. No push,
+no deploy.
+
+## P2-05 operational composition - internal potential-conflict-review-candidate route plus audit-transaction correction (completed 2026-08-15)
+
+Status: accepted for this local package as one bounded, authenticated,
+human-only internal POST route wired to the existing accepted, dormant P2-05
+`createConflictReviewCandidate` service, plus the one required tx-propagation
+correction found already missing at the start of this package. P2-05's
+foundation (claim-pair normalization, lineage/permission validators reused
+from P2-03/P2-04, unresolved `conflicting_source_indicators` gap prerequisite,
+conflict_groups/review_queue_items persistence, replay/concurrency/partial-
+state handling, potential-conflict-only semantics) was not reopened or
+rebuilt. No SQL or direct repository access was added in the route. No
+P2-04 or P2-06+ or P3 service was imported or invoked. No worker/cron/
+listener/scheduler or automatic P2-04->P2-05 or P2-05->P2-06 chaining was
+added.
+
+Implementation evidence:
+  - Backend/kai/dictionary/postgresConflictReviewCandidateRepository.js -
+    `prepareRequiredAudit(metadataOnlyAudit, context)` was still missing tx
+    propagation at the start of this package (the exact P1-04/P1-05/P2-01/
+    P2-03/P2-04 defect class). Corrected to
+    `prepareRequiredAudit(metadataOnlyAudit, tx, context)`, now passing
+    `db: tx` alongside the repository's own existing full required-audit
+    payload (which already carries the authoritative `conflict_group_id` of
+    the row just inserted/reread inside this package's own transaction, so
+    no additional field was added to that payload). The one call site
+    (inside the existing fresh-write branch, immediately before
+    `preparedAudit.publish()`) is unchanged in every other respect: no
+    second transaction is opened, `publish()` is still awaited inside the
+    same transaction callback (inside the existing try/catch that maps a
+    thrown or rejected `publish()` to `RequiredAuditRejectedError`), and the
+    existing `upload_lifecycle_audit` write is untouched.
+  - Backend/kai/services/kaiMetadataOnlyAuditComposition.js - adds
+    `createProductionMetadataOnlyAuditForConflictReviewCandidate`, the
+    smallest new production adapter around the existing
+    `insertRequiredSuccessfulAuditEvent` mechanism, bound at construction
+    only to organizationId/actorContext/now - never a claim or conflict-
+    group identity. Its `prepareMetadataOnlyAudit({ payload, db })` requires
+    `payload.conflict_group_id` to be present and a valid canonical UUID;
+    a payload with a missing or malformed `conflict_group_id` returns
+    `{ ok: false }`. The adapter never generates, hashes, or derives a
+    conflict-group identity from firstClaimId/secondClaimId - it only ever
+    reads the already-authoritative value the repository's own payload
+    supplies. For a valid payload, the generic audit metadata sets
+    `object_type: "conflict_group"`, `target_object_type: "conflict_group"`,
+    `object_id: payload.conflict_group_id`, and identifies the mounted
+    operation as `route: "p2_05_conflict_review_candidate"`. No audit
+    enum/schema/constraint was changed; the existing
+    `resolveAuditObjectType` resolver/fallback in
+    `Backend/kai/db/kaiAuditQueries.js` is untouched. Publication passes
+    the exact supplied `db` through to `insertAuditEvent` unchanged. The
+    sibling P1/P2-01/P2-03/P2-04 factories are unchanged.
+  - Backend/kai/routes/sprint2IntakeApi.js - adds exactly one mounted
+    route, `router.post("/admin/organizations/:organizationId/claims/
+    :firstClaimId/potential-conflicts/:secondClaimId")`, on the existing
+    mounted Sprint 2 intake router, placed immediately after the P2-04
+    claim-gap-followup route (before `export default router;`). Both claim
+    resource identifiers are carried in the path - the only existing
+    two-path-identifier convention on this router (mirroring the
+    export-review-queue routes' two path identifiers) - rather than
+    inventing a body-based transport; `organizationId` remains route-scoped
+    exactly as every other route on this router. Two new helpers mirror
+    the existing P2-03/P2-04 identifier/body-validation pattern exactly:
+    `conflictReviewCandidateIdentifiers(req)` (organizationId/firstClaimId/
+    secondClaimId path-UUID validation, lowercase-only) and
+    `validateConflictReviewCandidateRequestOrSend(req, res)` (content-type
+    check plus the existing empty-body requirement - any request body,
+    including an attempt to inject `actorUserId`/`actorType`/`roles`/
+    `memberships`/`actorContext`/`now`/`conflict_group_id`/`basis_code`/
+    `queue_status`, is rejected as `validation_blocker` before the service
+    is ever reached). One new lazy-import getter,
+    `getConflictReviewCandidateService()`, follows the exact existing
+    `getClaimGapFollowupService()` pattern (including the
+    override-detection convention:
+    `intakeServiceOverride?.createConflictReviewCandidate`). The route
+    derives `organizationId`/`firstClaimId`/`secondClaimId` only from the
+    validated path (forwarded to the service exactly as requested, with no
+    route-level reordering or normalization - `createConflictReviewCandidate`
+    alone owns lower/higher claim-pair normalization), `actorContext` only
+    from `sprint2MappedActorContext(req)` (the existing server-
+    authenticated/mapped context - never request body/query), and `now`
+    only from a fresh server-side `new Date().toISOString()`, then
+    delegates to `createConflictReviewCandidate({ organizationId,
+    firstClaimId, secondClaimId, actorContext, now }, { metadataOnlyAudit })`
+    exactly once, with `metadataOnlyAudit` the new production adapter above
+    constructed from the same server-derived values. The route and its two
+    new helpers contain no SQL, no pool/repository import, and no direct
+    `kai.*` access, and import/invoke no P2-04 or P2-06+ service. No
+    occurrence of the literal token `req.user` was introduced anywhere in
+    the file.
+  - __tests__/kai-sprint2-p2-05-conflict-review-candidate-route.spec.js
+    (new) - covers: exactly one mounted authenticated POST route at the
+    documented path; unauthenticated requests fail (401) before the
+    service is ever called; an authenticated mapped human in the correct
+    organization reaches `createConflictReviewCandidate` exactly once with
+    the exact requested firstClaimId/secondClaimId (never reordered or
+    normalized by the route), server-resolved organizationId/actorContext/
+    a server-generated `now` (bounded within the request window), and a
+    production `metadataOnlyAudit` dependency whose `prepareMetadataOnlyAudit`
+    refuses a payload with no `conflict_group_id` and accepts one with a
+    valid `conflict_group_id`; a request body attempting to inject
+    actor/time/conflict-group fields is rejected as `validation_blocker`
+    with zero service calls; malformed path UUIDs (non-UUID or not already
+    lowercased, for any of the three identifiers) use the existing safe
+    `validation_blocker` envelope; every listed service-result error code
+    maps through the existing safe envelope with no blocker/warning/data
+    leakage; `KAI_SPRINT2_ENABLED=false` returns the existing outer
+    feature-gate's 403 with zero service calls; a source-slice scan
+    proving the new route region contains no SQL keyword, no
+    db/repository/postgres import, no pool/kaiDb/repository reference, and
+    no P2-04 or P2-06+ service reference; and a whole-file scan proving
+    the literal token `req.user` never appears. Existing P2-05 claim-pair-
+    normalization/lineage/persistence/concurrency/rollback/potential-
+    conflict-only-semantics coverage is not duplicated here; it remains
+    owned by
+    `__tests__/kai-sprint2-p2-05-conflict-review-candidate-boundary.spec.js`,
+    `__tests__/kai-sprint2-p2-05-conflict-review-candidate.integration.spec.js`,
+    and the P2-05 verifier script.
+  - __tests__/kai-sprint2-p2-05-audit-transaction-propagation.spec.js (new) -
+    mirrors `kai-sprint2-p2-04-audit-transaction-propagation.spec.js`.
+    Covers: (1) a full `createConflictReviewCandidate` fresh-write call
+    through a fake multi-connection transaction provider (with the two
+    per-claim reads inside `readClaimBundle` parameterized by each call's
+    own claimId), proving the `audit_events` insert issued via
+    `createProductionMetadataOnlyAuditForConflictReviewCandidate` lands on
+    the exact same connection as the `conflict_groups` domain insert (the
+    SAME_TRANSACTION proof); (2) the production adapter refuses a payload
+    with a missing or malformed `conflict_group_id`, and for a valid one
+    its generic adapter metadata is `object_type = "conflict_group"`,
+    `target_object_type = "conflict_group"`, `object_id` = the payload's
+    `conflict_group_id` - distinct from either claim id, confirming no
+    conflict-group identity is ever fabricated from firstClaimId/
+    secondClaimId; (3) the repository's own required-audit payload, as
+    observed by a capturing `metadataOnlyAudit` double, already declares
+    `object_type: "conflict_group"` and the authoritative
+    `conflict_group_id` with no change required to add it, and
+    `prepareMetadataOnlyAudit` still receives the repository's own tx as
+    `db`. Existing P2-05 lineage/replay/rollback coverage is not
+    duplicated here; it remains owned by the existing P2-05 boundary spec,
+    integration spec, and verifier script.
+  - __tests__/kai-sprint2-p2-04-claim-gap-followup-route.spec.js - the one
+    required, corrective update: the existing P2-04 source-slice test's
+    end anchor is narrowed from `export default router;` back to the
+    `async function getConflictReviewCandidateService` marker (restoring
+    the exact boundary this file used before the temporary Package-1-only
+    commit state), so the P2-04-only source-slice assertions (no SQL, no
+    P2-05+ reference) stop incidentally spanning the newly appended P2-05
+    potential-conflict-review-candidate route region. No P2-04 behavioral
+    assertion was changed.
+  - __tests__/kai-sprint2-pass2-route-runtime.spec.js - the one required,
+    additive update: the existing exhaustive mounted-route-path enumeration
+    test now includes the new P2-05 path, alphabetically ordered
+    immediately after the P2-04 claim-gap-followups path and before the
+    P2-03 claim-proposal path; every previously listed path is preserved
+    verbatim and unreordered.
+
+TOOL_VERIFIED:
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false node --test __tests__/kai-sprint2-p2-05-conflict-review-candidate-route.spec.js __tests__/kai-sprint2-p2-05-audit-transaction-propagation.spec.js __tests__/kai-sprint2-p2-04-claim-gap-followup-route.spec.js __tests__/kai-sprint2-p2-04-audit-transaction-propagation.spec.js __tests__/kai-sprint2-p2-03-claim-proposal-route.spec.js __tests__/kai-sprint2-p2-03-audit-transaction-propagation.spec.js __tests__/kai-sprint2-pass2-route-runtime.spec.js __tests__/kai-sprint2-p2-05-conflict-review-candidate-boundary.spec.js`
+    -> 79/79 pass.
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm run verify:kai-sprint2-p2-05-conflict-review-candidate`
+    -> P2-05 conflict-review-candidate focused tests passed (18/18), using a
+    real ephemeral local PostgreSQL instance, then removed.
+  - `git diff --check` -> clean (no whitespace errors).
+
+USER_CONFIRMED:
+  - P2-05 is accepted and closed as a backend foundation; this operational-
+    composition package (exposing the existing
+    `createConflictReviewCandidate` through the existing authenticated
+    internal KAI human application surface, as one bounded POST route
+    addition, plus the one required tx-propagation correction found
+    already missing) is authorized.
+
+NOT_CONFIRMED:
+  - No push, merge, deploy, flag enablement, P2-04/P2-06 through P2-08 or
+    P3 invocation, cron/worker/scheduler/listener/promotion-hook creation,
+    schema/migration change, new database enum value, or new review cycle
+    was performed. Real client data was not used. `00_KAI_CURRENT_STATE.md`
+    and the Implementation Baseline were not updated.
+
+One local commit was made on this branch recording this package. No push,
+no deploy.
+
+## P2-06 operational composition - internal human claim-traceability read route (completed 2026-08-15)
+
+Status: accepted for this local package as one bounded, authenticated,
+human-only internal GET route wired to the existing accepted, dormant P2-06
+`getClaimTraceabilitySummary` service. P2-06's foundation (eligibility
+evaluator reuse, blocker ordering, traceability DTO, tenant/role rules, and
+the REPEATABLE READ READ ONLY transaction behavior owned by
+`Backend/kai/dictionary/postgresClaimTraceabilityRepository.js`) was not
+reopened, reworked, or rebuilt. No SQL or direct repository access was added
+in the route. No P2-07/P2-08/P3 service was imported or invoked. No
+worker/cron/listener/scheduler or automatic chaining was added. No metadata-
+only audit or persistence of any kind was introduced, because
+`getClaimTraceabilitySummary` is itself strictly read-only.
+
+Implementation evidence:
+  - Backend/kai/routes/sprint2IntakeApi.js - adds exactly one mounted route,
+    `router.get("/admin/organizations/:organizationId/claims/:claimId/
+    traceability")`, on the existing mounted Sprint 2 intake router, placed
+    immediately after the P2-05 potential-conflict-review-candidate route
+    (before `export default router;`). The organizationId/claimId path pair
+    reuses the existing `claimGapFollowupIdentifiers(req)` helper unchanged
+    (the identical organizationId/claimId identity P2-04 already validates),
+    rather than duplicating an equivalent identifier function. One new lazy-
+    import getter, `getClaimTraceabilityService()`, follows the exact
+    existing `getClaimGapFollowupService()` pattern (including the override-
+    detection convention: `intakeServiceOverride?.getClaimTraceabilitySummary`).
+    Because this is the first GET route on this router carrying an
+    enumerated caller-controlled field, one new helper,
+    `claimTraceabilityRequestedAudienceFromQuery(req)`, transports
+    `requestedAudience` as a dedicated `requested_audience` query-string
+    parameter (the router's existing GET query convention already reserves
+    query-string parameters for pagination/organization_id; this route adds
+    exactly one more, validated against the same
+    `internal`/`funder`/`public` enum the service itself already enforces,
+    with any other or missing query key failing closed as
+    `validation_blocker` before the service is ever reached - matching this
+    router's existing "reject unknown fields outright" convention rather
+    than silently ignoring them). `organizationId`/`claimId` are always
+    taken from the validated path, and `actorContext` only from
+    `sprint2MappedActorContext(req)` (the existing server-authenticated/
+    mapped context - never request body/query), so no caller-supplied field
+    can override actor identity, roles, memberships, or tenant
+    authorization; the service's own `validateActorCanPerformOperation` and
+    `validateTenantBoundaryConsistency` calls remain the sole tenant/role
+    authorization boundary, unchanged. The route delegates to
+    `getClaimTraceabilitySummary({ organizationId, claimId,
+    requestedAudience, actorContext })` exactly once, with no route-level
+    transformation of the result beyond the router's existing
+    `sendServiceResult` envelope. The route and its two new helpers contain
+    no SQL, no pool/repository import, and no direct `kai.*` access, and
+    import/invoke no P2-07/P2-08 service. No occurrence of the literal
+    token `req.user` was introduced anywhere in the new route region.
+  - __tests__/kai-sprint2-p2-06-claim-traceability-route.spec.js (new) -
+    covers: exactly one mounted authenticated GET route at the documented
+    path; unauthenticated requests fail (401) before the service is ever
+    called; an authenticated mapped human in the correct organization
+    reaches `getClaimTraceabilitySummary` exactly once with the exact
+    expected `{ organizationId, claimId, requestedAudience, actorContext }`
+    inputs; a caller attempt to smuggle an alternate organization/actor
+    identity alongside `requested_audience` is rejected as an unknown-field
+    combination before the service is ever called, while a clean request
+    reaches the service using exclusively the server-derived
+    organizationId/claimId/actorContext; invalid or missing
+    `requestedAudience` (absent, an unrecognized value, or an extra query
+    key) fails closed as `validation_blocker` with zero service calls;
+    malformed path UUIDs (non-UUID or not already lowercased) use the
+    existing safe `validation_blocker` envelope; every listed service-result
+    error code maps through the existing safe envelope with no
+    blocker/warning/data leakage; `KAI_SPRINT2_ENABLED=false` returns the
+    existing outer feature-gate's 403 with zero service calls; a source-
+    slice scan proving the new route region contains no SQL keyword, no
+    db/repository/postgres import, no pool/kaiDb/repository/kai-schema
+    reference, no audit dependency injection, and no P2-07/P2-08 service
+    reference; and a whole-file-region scan proving the literal token
+    `req.user` never appears in the new route region. Existing P2-06
+    evaluator/blocker-ordering/traceability-DTO/tenant-role/transaction
+    coverage is not duplicated here; it remains owned by
+    `__tests__/kai-sprint2-p2-06-claim-traceability-boundary.spec.js`,
+    `__tests__/kai-sprint2-p2-06-claim-traceability.integration.spec.js`,
+    and the P2-06 verifier script.
+  - __tests__/kai-sprint2-p2-05-conflict-review-candidate-route.spec.js -
+    the one required, corrective update: the existing P2-05 source-slice
+    test's end anchor is narrowed from `export default router;` to the new
+    `let claimTraceabilityServicePromise` marker (the exact P1-04/P2-04/
+    P2-05 defect class recurring one package later), so the P2-05-only
+    source-slice assertions (no SQL, no P2-06+ reference) stop incidentally
+    spanning the newly appended P2-06 route region. No P2-05 behavioral
+    assertion was changed.
+  - __tests__/kai-sprint2-pass2-route-runtime.spec.js - the one required,
+    additive update: the existing exhaustive mounted-route-path enumeration
+    test now includes the new P2-06 path, alphabetically ordered
+    immediately after the P2-04 claim-gap-followups path and before the
+    P2-05 potential-conflicts path; every previously listed path is
+    preserved verbatim and unreordered.
+
+TOOL_VERIFIED:
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false node --test __tests__/kai-sprint2-p2-06-claim-traceability-route.spec.js __tests__/kai-sprint2-p2-05-conflict-review-candidate-route.spec.js __tests__/kai-sprint2-pass2-route-runtime.spec.js __tests__/kai-sprint2-p2-06-claim-traceability-boundary.spec.js`
+    -> all pass.
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm run verify:kai-sprint2-p2-06-claim-traceability`
+    -> P2-06 claim-traceability focused tests passed (11/11), using a real
+    ephemeral local PostgreSQL instance, then removed.
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm run verify:kai-sprint2-api-contract`
+    -> 60/60 pass.
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm run test:kai-sprint2`
+    -> 2059/2088 pass, 29 skipped, 0 fail.
+  - `git diff --check` -> clean (no whitespace errors).
+
+USER_CONFIRMED:
+  - P2-06 is accepted and closed as a backend foundation; this operational-
+    composition package (exposing the existing `getClaimTraceabilitySummary`
+    through the existing authenticated internal KAI human application
+    surface, as one bounded, strictly read-only GET route addition) is
+    authorized.
+
+NOT_CONFIRMED:
+  - No push, merge, deploy, flag enablement, P2-07/P2-08 or P3 invocation,
+    cron/worker/scheduler/listener/promotion-hook creation, schema/migration
+    change, new database enum value, write/mutation of any kind, or new
+    review cycle was performed. Real client data was not used.
+    `00_KAI_CURRENT_STATE.md` and the Implementation Baseline were not
+    updated.
+
+One local commit was made on this branch recording this package. No push,
+no deploy.
+
+## P2-08 operational composition - internal human eligible-claims-for-audience read route (completed 2026-08-15)
+
+Status: accepted for this local package as one bounded, authenticated,
+human-only internal GET route wired to the existing accepted, dormant P2-08
+`listEligibleClaimsForAudience` service. P2-08's foundation (P2-06 evaluator
+reuse inside one REPEATABLE READ READ ONLY transaction, snapshot
+consistency, ascending claim ordering, cursor/pagination semantics, the
+500-candidate scan cap, `eligible:false` omission, malformed-authoritative-
+state fail-closed behavior, and the output DTO contract) was not reopened,
+reworked, or rebuilt. No SQL or direct repository access was added in the
+route. No P2-07/P3 service was imported or invoked. No worker/cron/
+listener/scheduler or automatic chaining was added. No metadata-only audit
+or persistence of any kind was introduced, because
+`listEligibleClaimsForAudience` is itself strictly read-only.
+
+Implementation evidence:
+  - Backend/kai/routes/sprint2IntakeApi.js - adds exactly one mounted route,
+    `router.get("/admin/organizations/:organizationId/eligible-claims")`, on
+    the existing mounted Sprint 2 intake router, placed immediately after
+    the P2-06 claim-traceability route (before `export default router;`).
+    One new identifier helper,
+    `eligibleClaimsForAudienceOrganizationIdentifier(req)`, mirrors the
+    existing single-organizationId-path-segment identifier shape already
+    used elsewhere on this router. One new lazy-import getter,
+    `getEligibleClaimsForAudienceService()`, follows the exact existing
+    `getClaimTraceabilityService()` pattern (including the override-
+    detection convention:
+    `intakeServiceOverride?.listEligibleClaimsForAudience`). One new query
+    helper, `eligibleClaimsForAudienceQuery(req)`, reuses the P2-06
+    `requested_audience` query-parameter shape/enum unchanged, plus this
+    router's existing `limit` string-digit query convention (as already
+    used by the review-queue and intake-batch-files list routes), clamped
+    to the exact 1-100 range the P2-08 service itself already enforces
+    (default 25, matching this router's existing list-route default,
+    rather than inventing a new default). `afterClaimId` travels as a plain
+    `after_claim_id` UUID query parameter, because the P2-08 service's own
+    cursor is already a raw claimId - not an opaque encoded cursor object
+    like the older review-queue/intake-batch-files list routes - so no new
+    cursor-encoding scheme was introduced. Any other, missing, or invalid
+    query field fails closed as `validation_blocker` before the service is
+    ever reached, matching this router's existing "reject unknown fields
+    outright" convention. `organizationId` is always taken from the
+    validated path, and `actorContext` only from
+    `sprint2MappedActorContext(req)` (the existing server-authenticated/
+    mapped context - never request body/query), so no caller-supplied field
+    can override actor identity, roles, memberships, or tenant
+    authorization; the service's own `validateActorCanPerformOperation` and
+    `validateTenantBoundaryConsistency` calls remain the sole tenant/role
+    authorization boundary, unchanged. The route delegates to
+    `listEligibleClaimsForAudience({ organizationId, requestedAudience,
+    limit, afterClaimId, actorContext })` exactly once, with no route-level
+    transformation of the result beyond the router's existing
+    `sendServiceResult` envelope. The route and its three new helpers
+    contain no SQL, no pool/repository import, and no direct `kai.*`
+    access, and import/invoke no P2-07 or P3 service. No occurrence of the
+    literal token `req.user` was introduced anywhere in the new route
+    region.
+  - __tests__/kai-sprint2-p2-08-eligible-claims-for-audience-route.spec.js
+    (new) - covers: exactly one mounted authenticated GET route at the
+    documented path; unauthenticated requests fail (401) before the service
+    is ever called; an authenticated mapped human in the correct
+    organization reaches `listEligibleClaimsForAudience` exactly once with
+    the exact expected `{ organizationId, requestedAudience, limit,
+    afterClaimId, actorContext }` inputs, including the default limit when
+    omitted; caller-supplied `limit`/`after_claim_id` are forwarded exactly
+    as the service expects; a caller attempt to smuggle an alternate
+    organization/actor identity alongside `requested_audience` is rejected
+    as an unknown-field combination before the service is ever called,
+    while a clean request reaches the service using exclusively the
+    server-derived organizationId/actorContext; invalid or missing query
+    fields (absent audience, an unrecognized audience, out-of-range or
+    non-numeric limit, a malformed `after_claim_id`, or an extra query key)
+    fail closed as `validation_blocker` with zero service calls; a
+    malformed organizationId path value (non-UUID or not already
+    lowercased) uses the existing safe `validation_blocker` envelope; every
+    listed service-result error code maps through the existing safe
+    envelope with no blocker/warning/data leakage; `KAI_SPRINT2_ENABLED=false`
+    returns the existing outer feature-gate's 403 with zero service calls;
+    a source-slice scan proving the new route region contains no SQL
+    keyword, no db/repository/postgres import, no pool/kaiDb/repository/
+    kai-schema reference, no audit dependency injection, and no P2-07/P3
+    service reference; and a source-slice scan proving the literal token
+    `req.user` never appears in the new route region. Existing P2-08
+    evaluator-reuse/snapshot/ordering/pagination/scan-cap/eligibility/output-
+    DTO coverage is not duplicated here; it remains owned by
+    `__tests__/kai-sprint2-p2-08-eligible-claims-for-audience-boundary.spec.js`,
+    `__tests__/kai-sprint2-p2-08-eligible-claims-for-audience.integration.spec.js`,
+    and the P2-08 verifier script.
+  - __tests__/kai-sprint2-p2-06-claim-traceability-route.spec.js - the one
+    required, corrective update: the existing P2-06 source-slice tests' end
+    anchor is narrowed from `export default router;` to the new
+    `let eligibleClaimsForAudienceServicePromise` marker (the exact
+    P1-04/P2-04/P2-05/P2-06 defect class recurring one package later), so
+    the P2-06-only source-slice assertions (no SQL, no P2-07/P2-08
+    reference) stop incidentally spanning the newly appended P2-08 route
+    region. No P2-06 behavioral assertion was changed.
+  - __tests__/kai-sprint2-pass2-route-runtime.spec.js - the one required,
+    additive update: the existing exhaustive mounted-route-path enumeration
+    test now includes the new P2-08 path, alphabetically ordered
+    immediately after the P2-05 potential-conflicts path and before the
+    P2-03 claim-proposal path; every previously listed path is preserved
+    verbatim and unreordered.
+
+TOOL_VERIFIED:
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false node --test __tests__/kai-sprint2-p2-08-eligible-claims-for-audience-route.spec.js __tests__/kai-sprint2-p2-06-claim-traceability-route.spec.js __tests__/kai-sprint2-p2-05-conflict-review-candidate-route.spec.js __tests__/kai-sprint2-pass2-route-runtime.spec.js __tests__/kai-sprint2-p2-08-eligible-claims-for-audience-boundary.spec.js`
+    -> all pass.
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm run verify:kai-sprint2-p2-08-eligible-claims-for-audience`
+    -> P2-08 eligible-claims focused tests passed (14/14), using a real
+    ephemeral local PostgreSQL instance, then removed.
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm run verify:kai-sprint2-api-contract`
+    -> 60/60 pass.
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm run test:kai-sprint2`
+    -> 2071/2100 pass, 29 skipped, 0 fail.
+  - `git diff --check` -> clean (no whitespace errors).
+
+USER_CONFIRMED:
+  - P2-08 is accepted and closed as a backend foundation; this operational-
+    composition package (exposing the existing
+    `listEligibleClaimsForAudience` through the existing authenticated
+    internal KAI human application surface, as one bounded, strictly
+    read-only GET route addition) is authorized.
+
+NOT_CONFIRMED:
+  - No push, merge, deploy, flag enablement, P2-07 or P3 invocation,
+    cron/worker/scheduler/listener/promotion-hook creation, schema/migration
+    change, new database enum value, write/mutation of any kind, or new
+    review cycle was performed. Real client data was not used.
+    `00_KAI_CURRENT_STATE.md` and the Implementation Baseline were not
+    updated.
+
+One local commit was made on this branch recording this package. No push,
+no deploy.
+
+## P2-09 human evidence-review / claim-review internal-usability transition (completed 2026-08-15)
+
+Implemented the smallest authoritative HUMAN review path that lets a P2
+claim/evidence chain move from its review-gated proposed state toward
+INTERNAL usability, reusing P2-06's own eligibility evaluator as the sole
+authority on what internal eligibility requires. Neither evidence-review nor
+claim-review/internal-approval transitions previously existed in current
+source (P3-17's human-authority contract only enumerates
+`client_reviewed`/`funder_ready`/`public_ready`/`export_authority_granted` -
+none compatible), so this package built both from scratch.
+
+DISCOVERY - P2-06 blocker analysis showed two blocker families are
+unconditional stubs unrelated to review-gate state and cannot be cleared by
+any review transition without reopening P2-06 eligibility itself (explicitly
+out of scope): `approvalForAudience()` (always returns unapproved for every
+audience) and four permanently-`unresolved` coverage-dimension validators.
+Because of this, P2-06 `eligible=true` for `internal` is not reachable in
+this package. This package's scope was therefore narrowed, with the user's
+explicit sign-off, to: prove the three review-gated blockers this package
+CAN affect - `evidence_review_unresolved`, `claim_review_unresolved`,
+`support_strength_unassessed` - clear correctly via the new human transitions,
+and defer the `eligible=true` proof to a follow-up P2-06-completion package
+that finishes `approvalForAudience` and the coverage-dimension validators.
+That follow-up is out of scope here and was not started.
+
+IMPLEMENTATION:
+  - New repository `Backend/kai/dictionary/postgresHumanReviewRepository.js`:
+    `completeEvidenceReview` and `completeClaimReviewInternalApproval`, both
+    compare-and-set on the linked `evidence_review`/`claim_review`
+    `kai.review_queue_items` row (`queue_status`/`review_status`:
+    `open`/`needs_gk_review` -> `resolved`/`resolved`, already an accepted
+    P1-06 vocabulary - no widening needed there) plus one companion write
+    (`evidence_items.support_strength` / `claims.claim_strength`:
+    `unassessed` -> `reviewed_supported`), guarded by
+    `expected_updated_at` optimistic concurrency, re-verified lineage
+    (evidence item -> locator -> source -> current source_version ->
+    source candidate), post-write validation, and a required same-transaction
+    metadata-only audit. `completeClaimReviewInternalApproval` additionally
+    requires the linked evidence item's own `evidence_review` queue item to
+    already be `resolved` before proceeding (`evidence_review_unresolved`,
+    409) - the one non-approval blocker this transition may require clear
+    first. Neither transition touches `evidence_review_status`,
+    `claim_status`, or `claim_review_status`: those columns are read
+    elsewhere by P2-05's own conflict-candidate-detection contract check
+    (`claim_status = 'proposed' AND claim_review_status = 'needs_gk_review'`)
+    and by P2-06's traceability output, and changing them was not required to
+    clear the three targeted blockers, so P2-05's foundation is undisturbed.
+    Idempotent full-state replay is supported; a stale/mismatched
+    `expected_updated_at` against a still-open row is a genuine conflict.
+  - New service `Backend/kai/services/kaiHumanReviewService.js`:
+    `completeEvidenceReview`/`completeClaimReviewInternalApproval`, both
+    `gk_reviewer`/`gk_admin` only (mirroring the existing
+    `COMPLETE_GENERATED_CONTENT_REVIEW_ALLOWED_ROLES` precedent in
+    `kaiGeneratedContentService.js` exactly - no `gk_operator`, `client`,
+    `assistant`, or generic system actor), requiring a mapped human actor
+    before any repository call.
+  - Two new audit-composition factories in
+    `Backend/kai/services/kaiMetadataOnlyAuditComposition.js`
+    (`createProductionMetadataOnlyAuditForEvidenceReview`/
+    `ForClaimReview`), each bound at construction to the route's own
+    resource identity and refusing a payload whose identifier does not match.
+  - Two new authenticated POST routes on the existing Sprint 2 intake router
+    (`Backend/kai/routes/sprint2IntakeApi.js`):
+    `/admin/organizations/:organizationId/evidence-items/:evidenceItemId/evidence-review/:reviewQueueItemId/complete`
+    and
+    `/admin/organizations/:organizationId/claims/:claimId/claim-review/:reviewQueueItemId/complete`,
+    both accepting only `{ expected_updated_at }` (no reviewer-supplied
+    decision vocabulary at all - completing either review has exactly one
+    accepted outcome, mirroring the P3-04
+    `completeGeneratedContentReview` convention). Routes contain no SQL,
+    import no repository/pool, derive actor/tenant identity server-side, and
+    delegate exactly once. Evidence review never invokes the claim-review
+    service; claim review never invokes P2-08, any Impact Evidence Library
+    service, or any P3/generation/export service.
+  - Two new request-schema validators in
+    `Backend/kai/validators/kaiSprint2RequestSchemas.js`
+    (`validateCompleteEvidenceReviewRequest`/`validateCompleteClaimReviewRequest`),
+    mirroring `validateCompleteExportReviewRequest` exactly.
+  - Forward migration
+    `migrations/kai_sprint2_p2_09_human_review_internal_approval.sql` (+
+    rollback draft) widens exactly two CHECK constraints -
+    `evidence_items_p2_01_support_strength_check` and
+    `claims_p2_03_claim_strength_check` - to admit `reviewed_supported`
+    alongside `unassessed`, adds the two new operation values
+    (`evidence_review_completed`, `claim_review_completed_internal_approval`)
+    to `upload_lifecycle_audit_gate_a_operation_check`, and adds one
+    metadata-only-object CHECK per new operation. No other column, table, or
+    constraint was touched; accepted P2-01/P2-03 migration bytes are
+    unchanged (confirmed by `git status` showing no diff on those files).
+  - Corrective, additive-only updates (same pattern every prior P2 package
+    used when appending a new route/constant region): the P2-08 route
+    boundary-scan test's slice end marker moved from `export default
+    router;` to the new `let evidenceReviewServicePromise` marker so it stops
+    incidentally spanning this package's region, and
+    `kai-sprint2-pass2-route-runtime.spec.js`'s exhaustive mounted-route
+    enumeration now includes both new paths, alphabetically ordered, every
+    prior path preserved verbatim.
+
+ELIGIBILITY PROOF (via the new
+`__tests__/kai-sprint2-p2-09-human-review.integration.spec.js`, real
+ephemeral PostgreSQL):
+  - Before review: P2-06 internal blockerCodes include
+    `evidence_review_unresolved`, `claim_review_unresolved`,
+    `support_strength_unassessed`; P2-08 omits the claim for `internal`.
+  - After `completeEvidenceReview`: `evidence_review_unresolved` clears;
+    `claim_review_unresolved`/`support_strength_unassessed` remain (claim
+    review still pending) - same-transaction audit row present
+    (`evidence_review_completed`).
+  - After `completeClaimReviewInternalApproval` (only reachable once evidence
+    review is resolved - proven as its own negative case): all three targeted
+    blockers clear; `coverage_dimension_unresolved` and
+    `claim_not_approved_for_requested_audience` remain (the permanently-
+    stubbed, out-of-scope blockers); `eligible` stays `false` for `internal`,
+    `funder`, and `public` - as expected and explicitly deferred, not a
+    defect of this package. P2-08 continues to omit the claim for `internal`.
+    Same-transaction audit row present (`claim_review_completed_internal_approval`).
+  - Authority/safety: non-human actor, wrong role (`gk_operator`),
+    cross-tenant access, stale `expected_updated_at`, a mismatched
+    `reviewQueueItemId`, and `KAI_SPRINT2_ENABLED=false` are all rejected
+    with zero mutation; a rejected audit `publish()` rolls back the whole
+    transition (queue status and support_strength/claim_strength both
+    verified unchanged afterward).
+
+TOOL_VERIFIED:
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-09-human-review`
+    -> P2-09 human-review focused tests passed (16/16), using a real
+    ephemeral local PostgreSQL instance, then removed.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-06-claim-traceability`
+    -> 11/11 pass (P2-06 eligibility logic unchanged).
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-08-eligible-claims-for-audience`
+    -> 14/14 pass.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-01-evidence-lineage`
+    -> 17/17 pass (original extraction path unaffected by the widened
+    `support_strength` CHECK).
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p2-03-claim-proposal`
+    -> 15/15 pass (original proposal path unaffected by the widened
+    `claim_strength` CHECK).
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm run verify:kai-sprint2-api-contract`
+    -> 60/60 pass (route added to the mounted-route enumeration).
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm run test:kai-sprint2`
+    -> 2083/2083 pass, 30 skipped, 0 fail.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel KAI_FILE_UPLOAD_ENABLED=false npm test`
+    -> 2188/2188 pass, 30 skipped, 0 fail.
+  - `git diff --check` -> clean (no whitespace errors).
+
+USER_CONFIRMED:
+  - Re-scoped acceptance (dropping the `eligible=true` end-to-end proof in
+    favor of proving the three review-gated blockers clear, with
+    `eligible=true` explicitly deferred to a separately authorized P2-06-
+    completion follow-up) was authorized after the discovery above showed
+    the originally-specified acceptance criterion was unreachable without
+    reopening P2-06 eligibility logic, which remains out of scope.
+
+NOT_CONFIRMED / RECOMMENDED FOLLOW-UP:
+  - **P2-06 completion: audience approval + coverage-dimension resolution.**
+    A separately-authorized package is needed to implement
+    `approvalForAudience` for `internal` (deriving it from this package's new
+    review state; funder/public remain hardcoded closed) and to resolve or
+    intentionally retire the four permanently-`unresolved` coverage-dimension
+    validators, before `P2-06 internal eligible=true` / `P2-08 internal
+    claim present` become achievable for any claim.
+  - No push, merge, deploy, flag enablement, Impact Evidence Library, P3/
+    generation/export work, funder/public/export approval, assistant runtime
+    work, or shared/staging/production database access was performed. Real
+    client data was not used. `00_KAI_CURRENT_STATE.md` and the
+    Implementation Baseline were not updated.
+
+One local commit was made on this branch recording this package. No push,
+no deploy.
+
+## P2-10 - Phase 11 internal coverage authority + P2-06 internal eligibility completion (completed 2026-08-15)
+
+Implemented the owner-authorized `accepted_internal_with_limitation` GK
+reviewer decision and finished P2-06's internal-audience policy (the two
+seams P2-09 explicitly deferred), producing the first P2 claim path that can
+legitimately reach `internal` eligibility while every unresolved limitation
+stays truthfully visible.
+
+IMPLEMENTATION:
+  - Pure vocabulary/fingerprint module
+    `Backend/kai/validators/kaiCoverageReviewDecisionValidators.js`:
+    `computeCoverageReviewDecisionFingerprint` is the single authoritative
+    "current state" binding, imported unchanged by both the write path and
+    P2-06's read path - never reimplemented twice.
+  - New durable authority: migration
+    `migrations/kai_sprint2_p2_10_coverage_review_decision.sql` (+ rollback)
+    adds `kai.coverage_review_decisions` (organization_id, claim_id,
+    dimension_key, decision pinned to
+    `accepted_internal_with_limitation`, state_fingerprint,
+    decided_by/decided_by_role pinned to `gk_reviewer`, created_by_type
+    pinned to `human`), append-only by trigger (mirroring the P3-17 ledger
+    precedent), with a composite FK to `kai.gap_log_items` enforcing at the
+    database level that a current P2-04 gap row already exists for the exact
+    claim/dimension targeted, and a widened
+    `upload_lifecycle_audit_gate_a_operation_check` plus a new metadata-object
+    CHECK for the one new audit operation.
+  - New repository
+    `Backend/kai/dictionary/postgresCoverageReviewDecisionRepository.js`:
+    `acceptInternalCoverageLimitation` reuses P2-06's own
+    `evaluateClaimTraceabilityInTransaction` as the sole source of current
+    state (no second evaluator), rejects unless both P2-09 evidence/claim
+    review blockers are already absent (`human_review_incomplete`), the
+    target dimension's CURRENT `assessment_status` is exactly `unresolved`
+    (`dimension_not_unresolved` - `resolved_risk_flagged` and `resolved_clear`
+    are both refused, so a risk-flagged dimension can never be waived), and a
+    current P2-04 gap row exists. Insert is `ON CONFLICT
+    (organization_id, claim_id, dimension_key, state_fingerprint) DO NOTHING`
+    with a reread-and-return-replayed path - exact replay creates no
+    duplicate authority row or audit. The required same-transaction
+    metadata-only audit publish failure rolls back the fresh insert.
+  - New service `Backend/kai/services/kaiCoverageReviewDecisionService.js`:
+    allowed role is `gk_reviewer` ONLY - `gk_operator`, `gk_admin`, client
+    actors, `system`, `assistant`, import, and code actors are all denied by
+    construction; the decided-by role is server-derived, never accepted from
+    the caller.
+  - New audit-composition factory
+    `createProductionMetadataOnlyAuditForCoverageReviewDecision` in
+    `Backend/kai/services/kaiMetadataOnlyAuditComposition.js`, bound to
+    organizationId/claimId, refusing a payload whose claim_id/dimension_key
+    don't match.
+  - New authenticated POST route on the existing Sprint 2 intake router:
+    `/admin/organizations/:organizationId/claims/:claimId/coverage-dimensions/:dimensionKey/internal-acceptance`,
+    empty body (mirroring the P2-04/P2-05 claim-scoped convention exactly) -
+    actor, tenant, decision value, audience (always internal), and timestamp
+    are all server-controlled.
+  - P2-06 completion in
+    `Backend/kai/dictionary/postgresClaimTraceabilityRepository.js`:
+    `approvalForAudience` now returns `approved:true/gateOpen:true/
+    authorityPresent:true` unconditionally for `requestedAudience ===
+    "internal"` (funder/public unchanged, still unconditionally fail-closed) -
+    the three blockers this stub used to raise unconditionally
+    (`claim_not_approved_for_requested_audience`, `audience_gate_closed`,
+    `requirement_authority_absent`) no longer fire for internal merely
+    because of the old stub; P2-09 completeness remains independently
+    enforced by `evidence_review_unresolved`/`claim_review_unresolved`. The
+    per-dimension `coverage_dimension_unresolved` loop now reads every
+    accepted decision for the claim and recomputes each dimension's expected
+    fingerprint fresh every call; for `requestedAudience === "internal"`, an
+    unresolved dimension with a matching current acceptance no longer blocks
+    - for funder/public, or any dimension without a matching acceptance, it
+    blocks exactly as before. The traceability DTO's `dimensions` map gained
+    two metadata-safe fields per dimension - `internal_limitation_accepted`
+    and `blocks_requested_audience` - computed regardless of requested
+    audience so acceptance is always disclosed truthfully; `assessment_status`
+    itself is never relabeled `resolved_clear`. Zero changes to P2-02, P2-04,
+    or P2-05.
+  - Every existing runner script whose fixtures reach
+    `evaluateClaimTraceabilityInTransaction` (`kai-sprint2-p2-06-*`,
+    `kai-sprint2-p2-07-*`, `kai-sprint2-p2-08-*`,
+    `kai-sprint2-p2-09-*-local-postgres.js`) now also applies the P2-10
+    migration - this new table is queried unconditionally, so every ephemeral
+    schema chain that exercises P2-06 needs it present.
+
+DISCOVERY / STOPPED-AND-REPORTED CONTRADICTION - P2-02's
+`denominator_clarity` and `time_period_clarity` dimensions are
+unconditionally `unresolved` by design (no committed fact ever satisfies
+them - see `kaiEvidenceCoverageAssessmentValidators.js`), so P2-04 always
+opens a `client_followup_item` (`queue_status='waiting_on_client'`) for both,
+for every claim ever proposed, and no P2 package through P2-09 built a route
+to resolve one. `client_followup_unresolved` is therefore an independent,
+pre-existing blocker on every claim in the current schema, and per this
+package's explicit hard boundary it was neither resolved, mutated, nor
+silently suppressed. This means full coverage acceptance clears
+`coverage_dimension_unresolved` completely (proven end-to-end), but
+`eligible=true` is not reachable for any claim in the smoke-seed fixture
+today - the one remaining, independent, untouched blocker is
+`client_followup_unresolved`. This was surfaced to the user mid-package (per
+the package's own STOP instruction) and the user confirmed: commit P2-10 as
+designed, and report this finding rather than inventing a client-response
+mechanism. `eligibleClaims`/P2-08 stay perfectly consistent with P2-06
+throughout - no second eligibility model exists.
+
+VERIFICATION:
+  - `verify:kai-sprint2-p2-10-coverage-review-decision` (new, 28/28 passing):
+    schema verifier plus boundary (21 cases: authority/role/tenant/feature/
+    fabricated-dimension/resolved-risk-flagged/resolved-clear/gap-absent/
+    replay/audit-rollback negatives and positives) and integration suites
+    (7 cases: authority safety zero-mutation, a real unresolved P2-05
+    conflict remaining blocking after full coverage acceptance, zero/partial/
+    full coverage acceptance end-to-end, audit-failure rollback).
+  - `verify:kai-sprint2-p2-09-human-review`: 16/16 (one pre-existing
+    assertion updated to reflect the corrected internal-audience policy).
+  - `verify:kai-sprint2-p2-06-claim-traceability`: 11/11 (one pre-existing
+    assertion updated for the same reason).
+  - `verify:kai-sprint2-p2-08-eligible-claims-for-audience`: 14/14 unchanged.
+  - `verify:kai-sprint2-api-contract`: 59/60 (the one failure,
+    `file_upload_enabled` in `kai-sprint2-foundation-safety.spec.js`, is
+    pre-existing/environment-dependent and reproduces identically on the
+    pre-P2-10 tree; the Pass-2 route inventory was updated with the one new
+    route path).
+  - `npm run test:kai-sprint2`: 2105/2106 non-skipped (same single
+    pre-existing failure). `npm test`: 2210/2211 non-skipped (same). `git
+    diff --check`: clean.
+
+NOT_CONFIRMED / RECOMMENDED FOLLOW-UP:
+  - **P2-04 client-followup resolution.** No route or mechanism currently
+    lets a client answer (and thereby resolve) a `client_followup_item`. Until
+    one is built, `client_followup_unresolved` blocks every claim's internal
+    eligibility unconditionally, regardless of P2-10 coverage acceptance.
+    This is the load-bearing gap for the stated product outcome ("first
+    normal claim usable for INTERNAL purposes") and needs a separately
+    authorized package.
+  - P3 packages' own `-local-postgres.js` runners (export-review,
+    generated-content, export-candidate, human-authority-decision-ledger,
+    etc.) were not updated to include the new P2-10 migration in their own
+    ephemeral schema chains, per this package's explicit package-boundary
+    instruction not to reflexively rerun/fix unrelated packages. Any of them
+    that exercise `evaluateClaimTraceabilityInTransaction` will need that one
+    additive migration line added to their own chain before they can pass
+    again.
+  - No push, merge, deploy, flag enablement, Impact Evidence Library, P3/
+    generation/export work, funder/public/export approval, assistant runtime
+    work, or shared/staging/production database access was performed. Real
+    client data was not used. `00_KAI_CURRENT_STATE.md` and the
+    Implementation Baseline were not updated.
+
+One local commit was made on this branch recording this package. No push,
+no deploy.
+
+STOP BEFORE IMPACT EVIDENCE LIBRARY.
+
+## P2-11 - client follow-up disposition -> first internally eligible claim (completed 2026-08-15)
+
+Closed P2-10's own recommended-follow-up gap: no route previously let anyone
+resolve a `client_followup` workflow, so `client_followup_unresolved` blocked
+`eligible=true` for every claim in the schema regardless of P2-09/P2-10
+completion. This package adds the smallest authorized transition that lets an
+organization-scoped `client_reviewer` dispose of a CURRENT `client_followup`
+workflow as "reviewed, no additional client information supplied" - a
+workflow disposition, never a client answer - producing the first claim that
+can legitimately reach `eligible=true` for the `internal` audience.
+
+IMPLEMENTATION:
+  - Existing-transition search: no compatible client_followup completion
+    transition existed anywhere in the repository (P2-09's evidence/claim
+    review completions and P2-10's coverage acceptance are the only prior
+    review-queue completions, none targeting `queue_type='client_followup'`).
+    Built the smallest dedicated transition, mirroring P2-09's
+    `completeEvidenceReview` concurrency/replay/audit shape exactly.
+  - New migration `migrations/kai_sprint2_p2_11_client_followup_completion.sql`
+    (+ rollback): widens the existing P2-04
+    `review_queue_items_p2_04_client_followup_contract_check` CHECK to admit
+    exactly one additional branch - `queue_status='resolved' AND
+    review_status='resolved'` - alongside the original
+    `waiting_on_client`/`proposed` branch, with every other client_followup
+    field (target_object_type, priority, summary, required_action,
+    assigned_to, due_at) still pinned exactly as P2-04 wrote it. Also widens
+    `upload_lifecycle_audit_gate_a_operation_check` for the one new
+    `client_followup_completed` operation and adds a matching metadata-object
+    CHECK requiring `disposition = 'no_additional_client_information'` and
+    explicitly forbidding `answer`/`client_answer`/`question_text`/
+    `safe_summary`/`raw_value` keys. This migration was required: the P2-04
+    CHECK admitted only the fresh state.
+  - DISCOVERY mid-package: P2-06's own `evaluateClaimTraceabilityInTransaction`
+    (`Backend/kai/dictionary/postgresClaimTraceabilityRepository.js`) reuses a
+    shared pure lineage-integrity check, `queueRowsMatchExpectation` (from
+    `Backend/kai/dictionary/postgresClaimGapFollowupRepository.js`'s own
+    `__claimGapFollowupRepositoryTestables`), which hard-pinned every
+    client_followup queue row to the exact P2-04 fresh shape
+    (`waiting_on_client`/`proposed`) as its definition of "not corrupted." A
+    resolved row therefore made the WHOLE evaluator fail closed with
+    `conflict_current_state_changed` before it ever reached the per-row
+    blocker loop - not a policy weakening, a lineage-integrity gate that had
+    no legitimate resolved shape to recognize yet. Fixed by adding
+    `CLIENT_FOLLOWUP_RESOLVED_QUEUE_STATUS`/`CLIENT_FOLLOWUP_RESOLVED_REVIEW_STATUS`
+    (`Backend/kai/validators/kaiClaimGapFollowupValidators.js`) and widening
+    `queueRowsMatchExpectation` to accept either the fresh pair or the
+    resolved pair as equally CURRENT, leaving every other field-match
+    requirement, the per-row blocker loop
+    (`unresolvedReviewStatus(row.review_status) || row.queue_status ===
+    "waiting_on_client"`), P2-08, and P2-10 completely untouched. This is the
+    only reason P2-06/P2-08 source changed in this package - zero change to
+    blocker semantics or eligibility policy.
+  - New repository
+    `Backend/kai/dictionary/postgresClientFollowupCompletionRepository.js`:
+    `completeClientFollowup` writes exactly one row - the linked
+    `client_followup` `kai.review_queue_items` row's own
+    `queue_status`/`review_status`/`updated_at` (`waiting_on_client`/`proposed`
+    -> `resolved`/`resolved`) - and nothing else. Never touches
+    `kai.client_followup_items` (fixed question preserved), `kai.gap_log_items`
+    (P2-04 gap preserved, never resolved/deleted), or any P2-02
+    `assessment_status`. Accepts no answer/free-text/raw value from the caller
+    - the input contract has no such field. Optimistic-concurrency-guarded via
+    `expected_updated_at` (fails closed on stale state), exact-replay
+    idempotent (rereads and returns `replayed:true`, publishes no second
+    audit), and the same-transaction required metadata-only audit publish
+    failure rolls back the fresh queue-row write.
+  - New service `Backend/kai/services/kaiClientFollowupCompletionService.js`:
+    allowed role is exactly `client_reviewer` - the literal already
+    established for org-scoped client access by
+    `KAI_SPRINT2_P0_OPERATION_ROLES.read_intake`
+    (`Backend/kai/config/kaiSprint2P0Contract.js`). `gk_reviewer`, `gk_admin`,
+    `gk_operator`, `client_admin`, `client_contributor`, `system`,
+    `assistant`, import, and code actors are all denied by construction -
+    never broadened by analogy.
+  - New audit-composition factory
+    `createProductionMetadataOnlyAuditForClientFollowupCompletion` in
+    `Backend/kai/services/kaiMetadataOnlyAuditComposition.js`, bound to
+    organizationId/claimId, refusing a payload whose claim_id/
+    client_followup_item_id don't match.
+  - New request schema `validateCompleteClientFollowupRequest` in
+    `Backend/kai/validators/kaiSprint2RequestSchemas.js`: `expected_updated_at`
+    is the only accepted field - no answer/free-text/disposition vocabulary is
+    ever accepted from the caller.
+  - New authenticated POST route on the existing Sprint 2 intake router:
+    `/admin/organizations/:organizationId/claims/:claimId/client-followups/:clientFollowupItemId/complete`,
+    body `{ expected_updated_at }` only. No SQL/direct data-access-layer calls
+    in the route; delegates exactly once to the service. Never automatically
+    invokes P2-06/P2-08/P3 or another mutation. The Pass-2 route inventory
+    (`__tests__/kai-sprint2-pass2-route-runtime.spec.js`) was updated with the
+    one new route path.
+  - P2-10 compatibility: confirmed `computeCoverageReviewDecisionFingerprint`
+    (`Backend/kai/validators/kaiCoverageReviewDecisionValidators.js`) binds
+    only claim/evidence/dimension/gap/review-strength state - it does not read
+    client_followup queue status at all - so P2-10 needed zero changes, and
+    none were made.
+  - Zero changes to P2-02, P2-04's own write path, P2-05, P2-09's own write
+    path, P2-06's blocker semantics, or P2-08's eligibility model.
+
+LOAD-BEARING PROOF (`__tests__/kai-sprint2-p2-11-client-followup-completion.integration.spec.js`,
+runner-owned ephemeral PostgreSQL):
+  - BEFORE: after P2-09 review + full P2-10 coverage acceptance,
+    `blockerCodes` is exactly `["client_followup_unresolved"]`; P2-08 internal
+    omits the claim.
+  - PARTIAL: resolving one of >=2 current client_followup workflows still
+    leaves `eligible=false` with `client_followup_unresolved` still present.
+  - COMPLETE: resolving every remaining current workflow yields
+    `eligible=true`, `blockerCodes=[]`; P2-08 internal returns the same claim.
+  - TRUTH: P2-02 dimensions stay `unresolved`; P2-04 gap rows and
+    client_followup_items rows remain (never deleted); queue items are
+    resolved, not deleted; P2-10 authority rows remain current; no
+    answer/client_answer/raw_value/free_text column was ever introduced.
+  - EXTERNAL: funder/public stay ineligible throughout.
+  - CONFLICT: a real unresolved P2-05 conflict (candidate created before
+    either claim's own claim_review was touched) still blocks internal
+    eligibility on the second claim even after that claim's own full
+    P2-09/P2-10/P2-11 completion.
+  - SAFETY: non-human, wrong-role (`gk_reviewer`, `client_admin`),
+    cross-tenant, wrong-target, and disabled-feature attempts all fail closed
+    with zero mutation; a rejected required audit rolls back the fresh
+    queue-row write; exact replay (twice) creates no duplicate mutation or
+    audit.
+
+VERIFICATION:
+  - `verify:kai-sprint2-p2-11-client-followup-completion` (new, 28/28
+    passing): schema verifier plus the full load-bearing proof above,
+    integration (10 cases) and boundary (17 cases).
+  - `verify:kai-sprint2-p2-10-coverage-review-decision`: 28/28 unchanged.
+  - `verify:kai-sprint2-p2-06-claim-traceability`: 11/11 unchanged.
+  - `verify:kai-sprint2-p2-08-eligible-claims-for-audience`: 14/14 unchanged.
+  - `verify:kai-sprint2-p2-04-claim-gap-followup`: 18/18 unchanged.
+  - `verify:kai-sprint2-api-contract`: 59/60 (the one failure,
+    `file_upload_enabled` in `kai-sprint2-foundation-safety.spec.js`, is the
+    same pre-existing/environment-dependent failure recorded at P2-10 and
+    reproduces identically here - not a new provenance loop).
+  - `npm run test:kai-sprint2`: 2124/2125 non-skipped (same single
+    pre-existing failure). `npm test`: 2229/2230 non-skipped (same). `git
+    diff --check`: clean.
+
+NOT_CONFIRMED / RECOMMENDED FOLLOW-UP:
+  - No push, merge, deploy, flag enablement, Impact Evidence Library, P3/
+    generation/export work, funder/public/export approval, assistant runtime
+    work, or shared/staging/production database access was performed. Real
+    client data was not used. `00_KAI_CURRENT_STATE.md` and the
+    Implementation Baseline were not updated.
+
+One local commit was made on this branch recording this package. No push,
+no deploy.
+
+STOP AFTER P2-11.
+
+## Phase-12 Impact Evidence Library Claims + Traceability vertical slice - completed 2026-08-15
+
+SCOPE:
+  - Built the first read-only Impact Evidence Library product slice inside the
+    existing authenticated admin dashboard/cockpit surface. No separate
+    application, router, design system, eligibility model, blocker model,
+    generation, export, assistant-runtime, or P3 work was introduced.
+  - P2-08 remains authoritative for usable-claim enumeration by selected
+    audience (`internal`, `funder`, `public`). P2-06 remains authoritative for
+    selected-claim eligibility, blocker, limitation, lineage, review/followup,
+    conflict, and allowed-audience explanation.
+
+IMPLEMENTATION:
+  - Added `frontend/ImpactEvidenceLibrary.jsx` and
+    `frontend/impactEvidenceLibraryLogic.js`, mounted from the existing
+    `frontend/adminDashboard.jsx` navigation as `Evidence Library`.
+  - The UI issues only authenticated same-origin GET requests:
+    `/admin/organizations/:organizationId/eligible-claims` with the selected
+    `requested_audience`, `/admin/organizations/:organizationId/claim-library/candidates`
+    for review-candidate identities, and
+    `/admin/organizations/:organizationId/claims/:claimId/traceability` for the
+    selected claim plus selected audience. There is no browser eligibility or
+    blocker algorithm; the browser only projects safe DTO fields.
+  - Existing cockpit/review reads were insufficient for claim-library
+    navigation because P1-09's read model intentionally allowlists only
+    `intake_file_review`, `sensitivity_review`, and `source_candidate_review`
+    targets, not P2 claim/evidence/followup/conflict claim identities.
+  - Added exactly one minimal read-only index:
+    `Backend/kai/db/kaiClaimLibraryReadModels.js`,
+    `Backend/kai/services/kaiClaimLibraryService.js`, and
+    `GET /admin/organizations/:organizationId/claim-library/candidates` in the
+    existing Sprint 2 intake router. It enumerates organization-scoped claim IDs
+    already linked to existing P2 `claim_review`, `evidence_review`,
+    `client_followup`, or `conflict_resolution` queue rows, with bounded
+    claim-id pagination and metadata-safe queue status fields only. It does not
+    calculate eligibility, blocker state, limitation acceptance, or audience
+    authority.
+  - Access control reuses the existing internal cockpit/read pattern:
+    `KAI_SPRINT2_ENABLED`, mapped human actor, tenant-bound organization, generic
+    `read_intake`, then role-narrowed `gk_admin`/`gk_operator`/`gk_reviewer`.
+    Client roles and non-human actors do not gain access from the Library.
+  - Unresolved dimensions with `internal_limitation_accepted=true` render as
+    `known limitation`, never as resolved/clear. Resolved P2-11 followups render
+    as completed workflow obligations, not as evidence that the missing fact was
+    supplied.
+  - Updated `__tests__/kai-sprint2-pass2-route-runtime.spec.js` for the one new
+    read-only route inventory entry.
+
+SAFETY:
+  - The Library is read-only: no P2 mutation endpoint/service is invoked, no
+    approval/review/followup/conflict/coverage completion control is rendered,
+    and no audit write is required by the new index.
+  - No raw uploaded content, raw row payloads, raw client answers, storage object
+    locations, signed URLs, credentials, unrestricted audit metadata, or unsafe
+    internal fields are exposed by the new DTO projection.
+  - Organization and actor authority remain server-controlled; client request
+    data cannot replace actor context or tenant authorization.
+
+VERIFICATION:
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test
+    __tests__/kai-sprint2-impact-evidence-library.spec.js` -> 7/7 passing.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run build` -> Vite
+    production build passed. No `typecheck` or `lint` npm scripts exist in the
+    current root `package.json`.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run
+    verify:kai-sprint2-api-contract` -> 59/60 passing; the sole failure is the
+    established environment-dependent `foundation-safety file_upload_enabled`
+    expectation (`true !== false`) recorded as the known starting baseline.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run
+    test:kai-sprint2` -> 2131 passed, 32 skipped, 1 failed; same known
+    `file_upload_enabled` baseline only.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test` -> 2236 passed,
+    32 skipped, 1 failed; same known `file_upload_enabled` baseline only.
+  - `git diff --check` -> clean.
+
+NOT_CONFIRMED / RECOMMENDED FOLLOW-UP:
+  - No push, deploy, shared/staging/production database mutation, feature-flag
+    enablement, credential/secret inspection, real client data access,
+    assistant-runtime work, export, generation, P3 work, `00_KAI_CURRENT_STATE.md`
+    update, or Implementation Baseline update was performed.
+
+One targeted local commit was made on this branch recording the Phase-12 Impact
+Evidence Library Claims + Traceability vertical slice. No push, no deploy.
+
+STOP BEFORE P3.
+
+## Phase-13 Stage A internal evidence-summary generation path - completed 2026-08-15
+
+SCOPE:
+  - Mounted the smallest real P3-01 -> P3-02 internal generation path:
+    internal eligible Library claims -> existing `createEvidenceSummaryDraft`
+    service/repository/validators -> persisted citation-backed draft -> existing
+    generated-draft review packet read.
+  - This slice is `content_type=evidence_summary` and
+    `requested_audience=internal` only. No funder/public generation, export
+    composition, finalization, approval, feature-flag mutation, schema change,
+    P2 redesign, Library redesign, chatbot/tool runtime, raw-file-to-model path,
+    or arbitrary browser prompt path was introduced.
+
+IMPLEMENTATION:
+  - Added `Backend/kai/services/kaiEvidenceSummaryDraftGenerator.js`, a narrow
+    Anthropic SDK adapter around the existing production model dependency. It
+    accepts only the governed P3-01 generator projection, sends no tools/history/
+    browser prompt/raw files/source rows/credentials, and normalizes provider
+    JSON into the exact `{ blocks }` draftGenerator contract. Tests inject the
+    provider call; no external model call is made in verification.
+  - Added a production metadata-only audit composition for generated-content
+    draft creation and mounted two authenticated HUMAN routes on the existing
+    Sprint 2 intake router:
+    `POST /admin/organizations/:organizationId/generated-content-drafts/evidence-summary`
+    accepting only `claim_ids` and `idempotency_key`, and
+    `GET /admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/review-packet`
+    delegating to P3-02.
+  - The route supplies organization/tenant authority, mapped actor context,
+    `requestedAudience=internal`, `now`, production draftGenerator, and
+    production metadata-only audit. It performs no SQL/direct repository access
+    and accepts no generated text, citations, evidence IDs, prompts, actor/role
+    data, approval/export state, or generation content type.
+  - Extended the existing Impact Evidence Library to show
+    `Generate evidence summary` only in the internal flow. Claim selection is
+    convenience only and is limited to P2-08 usable claims; P3-01 remains
+    authoritative and revalidates eligibility server-side. After create, the UI
+    reads the persisted draft back through P3-02 rather than trusting the POST
+    response as the review representation.
+  - Updated the P3-01 runner-owned PostgreSQL verifier to load the existing
+    P2-10 coverage-review-decision migration required by the current
+    P2-06/P3-01 evaluator path.
+
+SAFETY:
+  - Preserved the accepted P3-01 service/repository path, including
+    `KAI_SPRINT2_ENABLED`, `KAI_GENERATION_ENABLED`, mapped-human/tenant/role
+    authority, deterministic idempotency, P2 eligibility revalidation, generator
+    input allowlist, output/citation contract, VAL-GEN validators, second
+    pre-persistence eligibility validation, draft-only persistence,
+    generated-content-review queue creation, metadata-only required audit, and
+    transaction rollback semantics.
+  - The provider receives only content type, internal requested audience, and
+    claim projections containing claim/evidence/source/source-version IDs,
+    claim statement/type, and limitation codes. It receives no uploaded file
+    bytes, raw files, raw source rows, storage locations, signed URLs,
+    credentials, unrestricted evidence objects, arbitrary prompt text,
+    chatbot history, or tool-runtime state.
+
+VERIFICATION:
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test
+    __tests__/kai-sprint2-p3-01-generated-content-drafts-boundary.spec.js` ->
+    6/6 passing.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test
+    __tests__/kai-sprint2-impact-evidence-library.spec.js` -> 10/10 passing
+    with temporary loopback-server permission.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run
+    verify:kai-sprint2-p3-01-generated-content-drafts` -> 19/19 passing with
+    runner-owned PostgreSQL permission.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run
+    verify:kai-sprint2-p3-02-generated-draft-review-packet` -> 16/16 passing
+    with runner-owned PostgreSQL permission.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run
+    verify:kai-sprint2-api-contract` -> 59/60 passing; sole failure is the
+    established environment-dependent `foundation-safety file_upload_enabled`
+    baseline (`true !== false`).
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run build` -> Vite
+    production build passed.
+  - `git diff --check` -> clean.
+
+One targeted local Stage-A commit was made on this branch. No push, deploy,
+config/flag mutation, credential/secret inspection, shared/staging/production
+database mutation, real client data access, export work, or current-state /
+baseline update was performed.
+
+## Phase-13 Stage B generated-content human review lifecycle - completed 2026-08-15
+
+SCOPE:
+  - Continued only because Stage A proved a compatible production
+    `draftGenerator` adapter, mounted P3-01 create route, persisted
+    citation-backed `evidence_summary` draft, and P3-02 read path.
+  - Added the smallest generated-content human-review lifecycle over the
+    existing generated-content draft and review queue contract:
+    `open/needs_gk_review` -> `in_progress/needs_gk_review` ->
+    `resolved/resolved`.
+  - No schema/migration change, export composition, finalization authority,
+    funder/public generation, AI approval, draft text mutation, citation
+    mutation, feature-flag mutation, or P2/Library redesign was introduced.
+
+IMPLEMENTATION:
+  - Added `startGeneratedContentReview` to the generated-content service and
+    PostgreSQL repository. It follows existing KAI flag gates, mapped-human
+    tenant authority, `gk_reviewer`/`gk_admin` role authority, optimistic
+    `expectedUpdatedAt` concurrency, same-transaction metadata-only required
+    audit, stale-state failure, and deterministic replay conventions.
+  - Reused the existing P3-04 `completeGeneratedContentReview` service for the
+    resolved transition and mounted the smallest authenticated HUMAN routes:
+    `POST /admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/generated-content-review-queue/:reviewQueueItemId/start`
+    and
+    `POST /admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/generated-content-review-queue/:reviewQueueItemId/complete`.
+    Each route accepts only `expected_updated_at`; actor, tenant, role, `now`,
+    and metadata-only audit composition are server-controlled.
+  - Extended P3-02 to read the authoritative review queue `updated_at` token and
+    to represent the current generated-content-review lifecycle state without
+    mutating the immutable generated draft graph.
+  - Extended the Impact Evidence Library generated-draft panel with minimal
+    `Start Review` and `Complete Review` controls. Each mutation re-fetches the
+    P3-02 packet and performs no browser-side lifecycle authority.
+
+SAFETY:
+  - Start and completion transitions never change `draft_status`, generated
+    blocks, citations, requested audience, export authority, final gates, or
+    export artifacts.
+  - Cross-tenant, wrong-role, stale-token, wrong-state, and audit-failure paths
+    fail closed with no queue mutation or draft mutation.
+  - Metadata-only audit composition carries identifiers, actor, timestamps, and
+    lifecycle state only; it carries no draft text, claim/evidence text, raw
+    source rows, prompts, credentials, signed URLs, or file bytes.
+
+VERIFICATION:
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test
+    __tests__/kai-sprint2-p3-04-generated-content-review-completion-boundary.spec.js`
+    -> 22/22 passing.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test
+    __tests__/kai-sprint2-p3-02-generated-draft-review-packet-boundary.spec.js`
+    -> 8/8 passing.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test
+    __tests__/kai-sprint2-impact-evidence-library.spec.js` -> 11/11 passing
+    with temporary loopback-server permission.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run
+    verify:kai-sprint2-p3-02-generated-draft-review-packet` -> 16/16 passing
+    with runner-owned PostgreSQL permission.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run
+    verify:kai-sprint2-p3-04-generated-content-review-completion` -> 62/62
+    passing with runner-owned PostgreSQL permission.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run
+    verify:kai-sprint2-api-contract` -> 59/60 passing; sole failure is the
+    established environment-dependent `foundation-safety file_upload_enabled`
+    baseline (`true !== false`).
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run build` -> Vite
+    production build passed.
+  - `git diff --check` -> clean.
+
+One targeted local Stage-B commit was prepared on this branch. No push, deploy,
+config/flag mutation, credential/secret inspection, shared/staging/production
+database mutation, real client data access, export work, or current-state /
+baseline update was performed.
+
+## Phase-13 Stage C persistent Generated Drafts library index - completed 2026-08-16
+
+SCOPE:
+  - Continued only because Stage A/B proved a persisted, citation-backed
+    `evidence_summary`/`internal` generated-content draft and its
+    open/needs_gk_review -> in_progress/needs_gk_review -> resolved/resolved
+    generated-content-review lifecycle, both read through the existing P3-02
+    packet.
+  - Added the smallest read-only Generated Drafts index so a persisted draft
+    remains rediscoverable from a fresh Impact Evidence Library load,
+    independent of any transient browser-only generation state. No
+    generation, provider adapter, review-lifecycle, schema/migration, or P2
+    change was introduced.
+
+IMPLEMENTATION:
+  - Added `Backend/kai/db/kaiGeneratedDraftLibraryReadModels.js`
+    (`listGeneratedDraftLibraryIndex`), a bounded, organization-scoped,
+    deterministically ordered (`generated_content_draft_id ASC`, cursor
+    pagination) read-only query joining `kai.generated_content_drafts` to its
+    existing `generated_content_review` queue row, filtered to
+    `content_type=evidence_summary` and `requested_audience=internal` for this
+    MVP slice. No INSERT/UPDATE/DELETE/FOR UPDATE.
+  - Added `Backend/kai/services/kaiGeneratedDraftLibraryService.js`
+    (`listGeneratedDraftLibraryIndex`), following the exact P2-08/claim-library
+    service shape: `KAI_SPRINT2_ENABLED`/`KAI_GENERATION_ENABLED` gates,
+    mapped-human/tenant authority, and the existing P3-02
+    `get_generated_draft_review_packet` operation plus its
+    `gk_admin`/`gk_reviewer` allowed-roles Set reused verbatim (imported from
+    `kaiGeneratedContentService.js`'s `__generatedContentServiceContract`, not
+    reinvented). The response DTO returns only
+    `generatedContentDraftId, contentType, requestedAudience, draftStatus,
+    reviewQueueItemId, queueStatus, reviewStatus, createdAt` - no block text,
+    citations, evidence/source content, or storage identifiers - and rejects
+    (system_error) any row failing that shape or a non-`draft` `draftStatus`.
+  - Mounted one authenticated HUMAN read route on the existing Sprint 2 intake
+    router: `GET /admin/organizations/:organizationId/generated-content-drafts`
+    accepting only `limit`/`after_generated_content_draft_id`, performing no
+    SQL/direct repository access and no audit write.
+  - Extended the existing Impact Evidence Library with a `Generated Drafts`
+    panel that fetches this index whenever the organization id changes
+    (independent of the existing claims-load button), rendering
+    open/needs_gk_review -> "Needs review",
+    in_progress/needs_gk_review -> "In review", and
+    resolved/resolved -> "Review completed" from authoritative server state
+    only, never "final"/"approved"/"export-ready". Selecting a listed draft
+    fetches the existing P3-02 review packet by its `generatedContentDraftId`
+    and reuses the existing Start/Complete Review controls and their P3-02
+    refetch unchanged. After a successful `Generate evidence summary` call,
+    the panel refreshes from this index and opens the persisted draft through
+    P3-02, rather than keeping a browser-only generated object as state.
+
+SAFETY:
+  - The list route and service never call the model/provider and never import
+    the P3-01 draft-generator adapter; listing/opening a draft is a pure read
+    of already-persisted rows.
+  - Cross-tenant membership, disallowed role, and feature-disabled requests
+    fail closed (`authorization_denied` / `feature_disabled`) with no read
+    model invocation.
+  - No table, column, feature-flag, credential, or role policy was added or
+    changed; the exact existing P3-02 read-authority Set is reused, not
+    duplicated.
+
+VERIFICATION:
+  - `DATABASE_URL=postgres://127.0.0.1:1/sentinel_do_not_use node --test
+    __tests__/kai-sprint2-generated-drafts-library.spec.js` -> 8/8 passing.
+  - `DATABASE_URL=postgres://127.0.0.1:1/sentinel_do_not_use node --test
+    __tests__/kai-sprint2-impact-evidence-library.spec.js` -> 11/11 passing
+    unchanged.
+  - `DATABASE_URL=postgres://127.0.0.1:1/sentinel_do_not_use npm run
+    verify:kai-sprint2-api-contract` -> 59/60 passing; sole failure is the
+    established environment-dependent `foundation-safety file_upload_enabled`
+    baseline (`true !== false`) - the same known baseline, not a new
+    regression. The Pass 2 route-runtime mounted-route-list snapshot was
+    updated additively for the one new read-only route.
+  - `DATABASE_URL=postgres://127.0.0.1:1/sentinel_do_not_use npm run build`
+    -> Vite production build passed.
+  - `DATABASE_URL=postgres://127.0.0.1:1/sentinel_do_not_use npm run
+    test:kai-sprint2` -> 2147/2148 passing; sole failure is the same known
+    `file_upload_enabled` baseline.
+  - `DATABASE_URL=postgres://127.0.0.1:1/sentinel_do_not_use npm test` ->
+    2252/2253 passing; sole failure is the same known baseline.
+  - `git diff --check` -> clean.
+
+One targeted local Stage-C commit was made on this branch. No push, deploy,
+config/flag mutation, credential/secret inspection, shared/staging/production
+database mutation, real client data access, export/export-review work,
+schema/migration, new dependency, or current-state / baseline update was
+performed.
+
+## MVP UAT enablement - browser reachability for the internal synthetic journey (completed 2026-08-16)
+
+SCOPE:
+  - Made every HUMAN action required for the current internal synthetic MVP
+    journey reachable through the existing /admin browser product, leaving
+    SYSTEM/WORKER actions automated and unchanged. No intake/storage/security
+    foundation, parser/profile/source workflow, P2 evidence/claim/review/
+    internal-eligibility service, Impact Evidence Library service, INTERNAL
+    evidence_summary generation, generated-content human-review lifecycle, or
+    Generated Drafts service was reopened, redesigned, or given new backend
+    policy. No export/export-review work was introduced. No new role,
+    permission, or authorization bypass was added; every mutation still
+    resolves organization/actor/role authority server-side.
+
+IMPLEMENTATION (MISSING_UI_COMPOSITION additions, each the smallest frontend/
+route composition over an already-accepted, unmodified service):
+  - `frontend/KaiWebIntake.jsx` + `frontend/kaiWebIntakeLogic.js` (new): a web
+    intake panel, mounted from the existing `adminDashboard.jsx` navigation as
+    `KAI Web Intake`. Composes only existing routes -
+    `POST /admin/batches`, `POST /admin/batches/:intakeBatchId/file-reservations`,
+    `POST /admin/files/:intakeFileId/upload` (raw `application/octet-stream`
+    body, no multipart wrapper), `POST /admin/files/:intakeFileId/confirm-upload`,
+    `GET /admin/files/:intakeFileId`, `GET /admin/batches/:intakeBatchId/files` -
+    with a client-side SHA-256 checksum (browser `crypto.subtle`, no new
+    dependency) computed for the reservation step. No new backend route,
+    service, or persistence was added.
+  - `views/kai-review-cockpit.ejs` (new) + one additive `app.get(
+    "/gk-admin/kai-review-cockpit", ensureAuthenticated, ensureAdmin, ...)`
+    route in `index.js`: the smallest host page for the already-accepted,
+    already-unchanged P1-09 `window.renderKaiReviewCockpit` entry point and
+    its four existing cockpit routes, which previously had no browser page at
+    all. Mirrors the exact existing `/gk-admin/...` `gk-export-review-detail`
+    page pattern (same auth gate, same asset-tag/CSRF/props composition). No
+    cockpit component, service, or route was changed.
+  - `frontend/impactEvidenceLibraryLogic.js` and `frontend/ImpactEvidenceLibrary.jsx`
+    (additive only): a `Claim & evidence workflow` panel added to the existing
+    Impact Evidence Library, composing six already-accepted, human-authorized
+    P2 routes that previously had no browser control - evidence-extraction,
+    evidence-coverage-assessment (read), claim-proposal, claim-gap-followups,
+    potential-conflicts, and coverage-dimension internal-acceptance. Every
+    mutation sends the exact empty JSON body (`{}`) those routes already
+    require; no eligibility, blocker, or coverage computation was added to the
+    browser, and dimension-key selection uses the fixed ten-item vocabulary
+    already enforced server-side. No new backend route or service was added.
+  - `__tests__/fixtures/kai-uat-synthetic-intake-sample.csv` (new): a tiny,
+    obviously synthetic four-row CSV (`text/csv`, already-supported extension)
+    with no real client/user data, used as the UAT upload fixture.
+  - `__tests__/kai-sprint2-uat-enablement-frontend.spec.js` (new): proves the
+    new frontend paths reuse the exact existing mounted routes, that
+    governance mutation calls send only the required empty body, that the raw
+    upload uses `application/octet-stream` with the file as the body (no
+    multipart wrapper), that the new surfaces add no export/assistant/
+    eligibility/unsafe-field composition, and that the cockpit host page
+    reuses the unmodified existing component/entry point.
+  - `__tests__/kai-sprint2-p3-08-gk-export-review-detail.spec.js`,
+    `__tests__/kai-sprint2-p3-12-gk-export-review-start-control.spec.js`,
+    `__tests__/kai-sprint2-p3-15-gk-export-review-complete-control.spec.js`
+    (additive corrections only): each asserted exactly one `/gk-admin/` page
+    route existed in `index.js`; updated from one to two to reflect the one
+    new `/gk-admin/kai-review-cockpit` page route added by this package. No
+    other assertion in any of the three files was changed.
+
+REMAINING_BLOCKERS (genuine backend read gap, not fixable as UI composition):
+  - The P2-09 evidence-review-completion, claim-review-completion, and P2-11
+    client-followup-completion routes each require an `expected_updated_at`
+    optimistic-concurrency token compared against the live
+    `kai.review_queue_items.updated_at` column. No existing read route or
+    service response (the P2-06 traceability packet, the P2-03 claim-proposal
+    response, the P2-04 claim-gap-followup response, or the P1-06/P1-09
+    review-queue reads, which are scoped only to `intake_file_review`/
+    `sensitivity_review`/`source_candidate_review`) ever returns that
+    timestamp for an `evidence_review`, `claim_review`, or `client_followup`
+    queue item. Building a new read route to expose it would mean designing
+    new backend response surface beyond the smallest-HTTP-composition rule
+    this package is bounded to, so these three completions were left
+    unreachable from the browser and are reported here rather than worked
+    around. `client_followup` completion is additionally scoped to the
+    `client_reviewer` role, never a GK role.
+
+SAFETY:
+  - Every new control calls an already-accepted, already-authorized service
+    unchanged; every mutation still requires the existing
+    `KAI_SPRINT2_ENABLED`/tenant/mapped-human/role authorization chain, and
+    every response is re-fetched from the server afterward rather than
+    trusted from the mutation's own response.
+  - No SQL, database pool, or repository import was added to any frontend
+    file. No raw content, storage location, signed URL, credential, or
+    unrestricted audit field is rendered by any new control.
+  - No export, export-review, finalization, or approval-authority surface was
+    introduced or exposed from any new page.
+
+VERIFICATION:
+  - `DATABASE_URL=postgres://127.0.0.1:1/sentinel_do_not_use node --test
+    __tests__/kai-sprint2-uat-enablement-frontend.spec.js` -> 6/6 passing.
+  - `DATABASE_URL=postgres://127.0.0.1:1/sentinel_do_not_use node --test
+    __tests__/kai-sprint2-impact-evidence-library.spec.js` -> 11/11 passing
+    unchanged.
+  - `DATABASE_URL=postgres://127.0.0.1:1/sentinel_do_not_use npm run
+    verify:kai-sprint2-api-contract` -> 59/60 passing; sole failure is the
+    established `foundation-safety file_upload_enabled` baseline
+    (`true !== false`), the same known baseline, not a new regression.
+  - `DATABASE_URL=postgres://127.0.0.1:1/sentinel_do_not_use npm run build`
+    -> Vite production build passed; the regenerated
+    `public/js/bundles/entry.js` artifact was restored to its committed
+    content via `git checkout --` and is not part of this commit.
+  - `DATABASE_URL=postgres://127.0.0.1:1/sentinel_do_not_use npm run
+    test:kai-sprint2` -> 2153/2154 passing; sole failure is the same known
+    `file_upload_enabled` baseline.
+  - `DATABASE_URL=postgres://127.0.0.1:1/sentinel_do_not_use npm test` ->
+    2258/2259 passing; sole failure is the same known baseline.
+  - `git diff --check` -> clean.
+
+One targeted local commit was made on this branch recording this MVP
+UAT-enablement package. No push, deploy, config/flag mutation, credential/
+secret inspection, shared/staging/production database mutation, real client
+data access, export/export-review work, schema/migration, new dependency, or
+current-state/baseline update was performed.
+
+## MVP UAT final completion - closing the four real browser composition gaps (completed 2026-08-16)
+
+SCOPE:
+  - Closed exactly the four composition gaps the prior UAT-enablement package
+    exposed, without reopening P0-P3 backend policy, the review cockpit, the
+    Evidence Library architecture, internal generation, Generated Drafts, or
+    generated-content review.
+
+REVIEW CONCURRENCY (P2-09):
+  - `Backend/kai/dictionary/postgresClaimTraceabilityRepository.js`: P2-06's
+    `evidence` and `claim_review` DTO subobjects each gained one additive
+    `updated_at` field, sourced only from the already-read
+    `kai.review_queue_items.updated_at` row value (never derived/manufactured
+    in the browser). No new read API, no queue_metadata/assigned_to/audit/
+    actor exposure, no concurrency weakening.
+  - `frontend/impactEvidenceLibraryLogic.js` / `ImpactEvidenceLibrary.jsx`:
+    added `evidenceReviewCompletePath`/`claimReviewCompletePath` (reusing the
+    exact existing P2-09 completion routes) and `canCompleteEvidenceReview`/
+    `canCompleteClaimReview` display gates mirroring the accepted P3-04
+    `canStartGeneratedContentReview`/`canCompleteGeneratedContentReview`
+    pattern. Each control sends exactly `{ expected_updated_at }` from the
+    P2-06 read and refetches P2-06 traceability after success. Claim-review
+    display stays gated on evidence-review already reading `resolved`. Server
+    remains authoritative for role/tenant/state/stale-token handling.
+
+CLIENT FOLLOWUP (P2-11):
+  - No existing client_reviewer-authorized read of client_followup queue
+    state existed, so exactly one minimal read was added:
+    `Backend/kai/db/kaiIntakeQueries.js#listClientFollowupWorkflowsForOrganization`
+    (SELECT only, joins `kai.client_followup_items` to its own
+    `kai.review_queue_items` row) plus
+    `Backend/kai/services/kaiClientFollowupReadService.js#listClientFollowupWorkflows`,
+    gated to exactly `client_reviewer` (the same role as the P2-11 completion
+    service) with mapped-human/active-membership/tenant checks that fail
+    closed on wrong role or cross-tenant access. Exposed fields: claim_id,
+    client_followup_item_id, dimension_key, the fixed P2-04
+    `question_text`, review_queue_item_id, queue_status, review_status,
+    updated_at - no raw evidence, free text, rationale, PII, or unrestricted
+    queue/audit metadata.
+  - New route: `GET /admin/organizations/:organizationId/client-followups`
+    on the existing Sprint 2 intake router.
+  - New client-facing page: `views/kai-client-followups.ejs` +
+    `frontend/KaiClientFollowupReview.jsx` +
+    `frontend/kaiClientFollowupReviewLogic.js`, mounted at
+    `GET /kai/client-followups` in `index.js`, gated by `ensureAuthenticated`
+    only - never `ensureAdmin` and never the `/admin` site surface. The
+    client_reviewer KAI role itself remains an org-scoped server-side
+    authorization decision, independent of this page's reachability. The
+    completion control sends only `{ expected_updated_at }` to the existing
+    P2-11 completion route and refetches the read after success. Copy reads
+    "Reviewed - no additional client information is being supplied for this
+    internal workflow," never implying an answer was supplied or the P2-02
+    gap resolved.
+
+INTAKE CONTEXT:
+  - No existing repository-authorized listing of engagements existed (only
+    a lookup-by-id, `getEngagementTenantState`); one minimal read was added:
+    `Backend/kai/db/kaiQueries.js#listEngagementsForOrganization` (SELECT
+    engagement_id/organization_id only - the same minimal field set every
+    other engagement read in this codebase already uses) plus
+    `Backend/kai/services/kaiEngagementContextService.js#listAuthorizedEngagements`,
+    gated to exactly `gk_admin`/`gk_operator` (the same roles as
+    `create_intake_batch`). New route:
+    `GET /admin/organizations/:organizationId/engagements`.
+  - `frontend/KaiWebIntake.jsx`: removed `generateEngagementId`/"Generate"
+    button entirely; the engagement id is now selected from a dropdown
+    populated by the new read, never typed or fabricated. Batch creation is
+    disabled until an existing engagement is selected.
+
+SIGNED UPLOAD (Gate C-2A browser composition):
+  - `frontend/KaiWebIntake.jsx` no longer calls
+    `POST /admin/files/:intakeFileId/upload` (the server-streaming route,
+    left in place and unmodified for any other caller). The browser flow is
+    now: file-reservation (unchanged) -> `POST
+    /admin/batches/:intakeBatchId/files/upload-url` (existing, unchanged
+    `requestUploadUrl` route/contract) -> a same-call browser `fetch(...,
+    {method: upload_method, headers: upload_headers})` PUT straight to the
+    returned signed GCS URL, using only the server-issued Content-Type header
+    and no application cookies/Authorization/CSRF/other app header -> `POST
+    /admin/files/:intakeFileId/confirm-upload` (existing, unchanged
+    `confirmUpload` route/contract, already re-verifies the exact GCS
+    generation server-side).
+  - `frontend/kaiWebIntakeLogic.js`: removed `uploadPath`/`postBytes`; added
+    `requestUploadUrlPath` and `putToSignedUrl`. The signed URL/headers exist
+    only as function parameters for the duration of the PUT - never stored in
+    component state, rendered, logged, or persisted to any web storage.
+  - Backend `requestUploadUrl`/`confirmUpload` service contracts in
+    `Backend/kai/services/kaiIntakeService.js` were not modified.
+
+FOCUSED ACCEPTANCE (new/affected tests):
+  - `__tests__/kai-sprint2-uat-final-completion-boundary.spec.js` (new):
+    P2-11 read role/tenant/feature-flag boundary and safe-field-set proof;
+    engagement-context read role/tenant/feature-flag boundary proof.
+  - `__tests__/kai-sprint2-uat-enablement-frontend.spec.js` (updated):
+    replaced the removed `postBytes`/`uploadPath` assertions with the
+    reserve -> requestUploadUrl -> signed-PUT -> confirmUpload composition
+    proof (signed URL never leaks outside its own PUT call, no app
+    credentials/headers on the PUT, server-streaming route no longer
+    invoked, no `Generate engagement`/`crypto.randomUUID` text), plus new
+    engagement-read, client-followup-page, and evidence/claim-review-control
+    composition assertions.
+  - `__tests__/kai-sprint2-pass2-route-runtime.spec.js` (additive-only
+    correction): the exhaustive mounted-route snapshot gained the two new
+    read-only routes.
+
+VERIFICATION:
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test
+    __tests__/kai-sprint2-uat-final-completion-boundary.spec.js` -> 11/11
+    passing.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test
+    __tests__/kai-sprint2-uat-enablement-frontend.spec.js` -> 10/10 passing.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test
+    __tests__/kai-sprint2-p2-06-claim-traceability-boundary.spec.js
+    __tests__/kai-sprint2-p2-06-claim-traceability-route.spec.js
+    __tests__/kai-sprint2-p2-09-human-review-boundary.spec.js
+    __tests__/kai-sprint2-p2-11-client-followup-completion-boundary.spec.js`
+    -> 42/42 passing unchanged (P2-09/P2-11 mutation contracts untouched).
+  - `npm run verify:kai-sprint2-p2-06-claim-traceability` -> 11/11 passing
+    against a fresh runner-owned ephemeral local PostgreSQL instance,
+    including the additive `updated_at` DTO fields.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test
+    __tests__/kai-sprint2-gate-c2a-signed-upload-confirmation.spec.js` ->
+    26/26 passing unchanged (backend signed-upload service untouched).
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run
+    verify:kai-sprint2-api-contract` -> 59/60 passing; sole failure is the
+    established `foundation-safety file_upload_enabled` baseline, the same
+    known baseline, not a new regression.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npx vite build` ->
+    production build passed; `public/js/bundles/entry.js` regenerated and
+    included in this commit.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run
+    test:kai-sprint2` -> 2200/2201 passing; sole failure is the same known
+    baseline.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test` -> 2305/2306
+    passing; sole failure is the same known baseline.
+  - `git diff --check` -> clean.
+
+RUNTIME NOT_CONFIRMED (deployment/production boundary, not a repository
+blocker): production KAI_SPRINT2_ENABLED/KAI_FILE_UPLOAD_ENABLED/GCS-provider
+flag state, deployed GCS credentials/runtime, browser CORS behavior for the
+signed PUT against the real bucket, and an actual browser click-through of
+this journey. None of these were exercised or asserted locally, and none of
+them are treated as repository blockers.
+
+One targeted local commit was made on this branch recording this MVP UAT
+final-completion package. No push, deploy, config/flag mutation,
+credential/secret inspection, shared/staging/production database mutation,
+real client data access, export/export-review work, schema/migration, new
+dependency, live model/cloud call, or current-state/baseline update was
+performed.

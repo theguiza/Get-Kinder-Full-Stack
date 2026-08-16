@@ -47,6 +47,17 @@ export const CLIENT_FOLLOWUP_REVIEW_STATUS = "proposed";
 export const CLIENT_FOLLOWUP_PRIORITY = "normal";
 export const CLIENT_FOLLOWUP_SUMMARY = "Client clarification is required for an unresolved claim gap.";
 
+// KAI P2-11: the one additional CURRENT (never stale/corrupted) terminal
+// shape a client_followup queue row may legitimately reach, once an
+// authorized client_reviewer disposes of it
+// (Backend/kai/dictionary/postgresClientFollowupCompletionRepository.js).
+// Every other field on the row (queue_type, target_object_type, priority,
+// summary, required_action, assigned_to, due_at) stays pinned exactly as
+// P2-04 wrote it - only queue_status/review_status move together from the
+// fresh pair above to this resolved pair.
+export const CLIENT_FOLLOWUP_RESOLVED_QUEUE_STATUS = "resolved";
+export const CLIENT_FOLLOWUP_RESOLVED_REVIEW_STATUS = "resolved";
+
 function isNonEmptyString(value) {
   return typeof value === "string" && value.length > 0;
 }

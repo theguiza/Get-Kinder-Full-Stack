@@ -287,6 +287,56 @@ export async function casSecurityAssessmentFilePolicyDecision(
   return rows[0] || null;
 }
 
+/**
+ * P1 activation: narrow, organization/file-scoped read of exactly the
+ * authoritative facts needed to decide whether a confirmed intake file is
+ * eligible for the existing P1 parser/profile workflow, and the trusted facts
+ * to run it. Mirrors `getScopedIntakeFileSecurityAssessmentFacts` above
+ * (same table, same tenant-scoped WHERE clause shape, same bigint-safe
+ * `verified_size_bytes` handling); it is additive and changes no other query.
+ */
+export async function getScopedIntakeFileParserProfileEligibilityFacts(
+  { organizationId, intakeFileId },
+  db = pool,
+) {
+  const { rows } = await db.query(
+    `SELECT organization_id, intake_file_id, intake_batch_id, engagement_id,
+            object_version_id, verified_checksum, verified_size_bytes,
+            mime_type, file_extension, file_policy_status,
+            storage_provider, storage_object_key
+       FROM kai.intake_files
+      WHERE organization_id = $1
+        AND intake_file_id = $2
+      LIMIT 1`,
+    [organizationId, intakeFileId],
+  );
+  return withSafeIntegerVerifiedSizeBytes(rows[0] || null);
+}
+
+const P1_WORKER_SYNTHETIC_SCOPE_SWEEP_LIMIT = 25;
+
+/**
+ * P1 worker runtime composition: lists authoritative `file_policy_status =
+ * 'passed'` intake files inside exactly one configured organization scope. No
+ * file-ID selector, no cross-organization sweep - the WHERE clause is bound to
+ * the single organizationId the caller supplies.
+ */
+export async function listKaiP1WorkerSyntheticScopedEligibleIntakeFiles(
+  { organizationId },
+  db = pool,
+) {
+  const { rows } = await db.query(
+    `SELECT organization_id, intake_file_id
+       FROM kai.intake_files
+      WHERE organization_id = $1
+        AND file_policy_status = 'passed'
+      ORDER BY intake_file_id ASC
+      LIMIT ${P1_WORKER_SYNTHETIC_SCOPE_SWEEP_LIMIT}`,
+    [organizationId],
+  );
+  return rows;
+}
+
 export async function getScopedIntakeFileReviewQueueItem(
   organizationId,
   reviewQueueItemId,
@@ -851,4 +901,28 @@ export async function getScopedSourceVersionByCandidateIdentity(
     [organizationId, intakeSourceCandidateId],
   );
   return rows[0] || null;
+}
+
+/**
+ * KAI P2-11 client-reviewer-facing read: the minimal current `client_followup`
+ * workflow state for an organization, joined to its own review-queue row.
+ * Returns only the fixed, already-established-safe fields - never raw
+ * evidence, claim text, or free-text/answer content.
+ */
+export async function listClientFollowupWorkflowsForOrganization({ organizationId }, db = pool) {
+  const { rows } = await db.query(
+    `SELECT cf.claim_id, cf.client_followup_item_id, cf.dimension_key, cf.question_text,
+            rq.review_queue_item_id, rq.queue_status, rq.review_status, rq.updated_at
+       FROM kai.client_followup_items cf
+       JOIN kai.review_queue_items rq
+         ON rq.organization_id = cf.organization_id
+        AND rq.queue_type = 'client_followup'
+        AND rq.target_object_type = 'client_followup_item'
+        AND rq.target_object_id = cf.client_followup_item_id
+      WHERE cf.organization_id = $1
+      ORDER BY rq.updated_at DESC, cf.client_followup_item_id ASC
+      LIMIT 100`,
+    [organizationId],
+  );
+  return rows;
 }

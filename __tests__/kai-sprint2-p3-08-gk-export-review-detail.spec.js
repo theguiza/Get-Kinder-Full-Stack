@@ -233,7 +233,10 @@ test("P3-08 route is registered with existing site authentication and no other a
     /app\.get\(\s*\n\s*"\/gk-admin\/organizations\/:organizationId\/generated-content-drafts\/:generatedContentDraftId\/export-review-queue\/:exportReviewQueueItemId",\s*\n\s*ensureAuthenticated,\s*\n\s*ensureAdmin,/,
   );
   const matches = source.match(/app\.get\(\s*\n?\s*"\/gk-admin\//g) || [];
-  assert.equal(matches.length, 1);
+  // KAI UAT-enablement package additively mounted a second /gk-admin page
+  // route (the internal review cockpit host page) after this P3-08 route was
+  // accepted; this assertion is updated additively to reflect that.
+  assert.equal(matches.length, 2);
 });
 
 test("P3-08 entry.jsx mounts exactly one new render function and leaves existing render functions intact", () => {

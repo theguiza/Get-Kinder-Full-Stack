@@ -138,3 +138,22 @@ export async function getIntakeBatchTenantState(intakeBatchId, organizationId, d
   );
   return rows[0] || null;
 }
+
+/**
+ * KAI intake-context read: existing engagement contexts already scoped to an
+ * organization. Returns only engagement_id/organization_id - the same
+ * minimal, already-established-safe field set every other engagement read in
+ * this codebase (getEngagementTenantState) uses. Never creates a row.
+ */
+export async function listEngagementsForOrganization({ organizationId }, db = pool) {
+  if (!organizationId) return [];
+  const { rows } = await db.query(
+    `SELECT engagement_id, organization_id
+       FROM kai.engagements
+      WHERE organization_id = $1
+      ORDER BY engagement_id ASC
+      LIMIT 100`,
+    [organizationId],
+  );
+  return rows;
+}

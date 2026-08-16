@@ -149,5 +149,8 @@ test("P3-15 no new page route, navigation entry, or entry.jsx mount point was ad
   const gkExportMatches = entrySource.match(/window\.renderGkExportReviewDetail\s*=/g) || [];
   assert.equal(gkExportMatches.length, 1);
   const routeMatches = indexSource.match(/app\.get\(\s*\n?\s*"\/gk-admin\//g) || [];
-  assert.equal(routeMatches.length, 1);
+  // KAI UAT-enablement package additively mounted a second /gk-admin page
+  // route (the internal review cockpit host page) after this P3-15 control
+  // was accepted; this assertion is updated additively to reflect that.
+  assert.equal(routeMatches.length, 2);
 });

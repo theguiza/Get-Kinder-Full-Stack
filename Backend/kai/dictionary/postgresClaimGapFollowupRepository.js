@@ -34,6 +34,8 @@ import {
   CLIENT_FOLLOWUP_TARGET_OBJECT_TYPE,
   CLIENT_FOLLOWUP_QUEUE_STATUS,
   CLIENT_FOLLOWUP_REVIEW_STATUS,
+  CLIENT_FOLLOWUP_RESOLVED_QUEUE_STATUS,
+  CLIENT_FOLLOWUP_RESOLVED_REVIEW_STATUS,
   CLIENT_FOLLOWUP_PRIORITY,
   CLIENT_FOLLOWUP_SUMMARY,
 } from "../validators/kaiClaimGapFollowupValidators.js";
@@ -362,11 +364,18 @@ function queueRowsMatchExpectation(existingQueueRows, existingFollowupRows) {
     const followupRow = followupById.get(queueRow.target_object_id);
     if (!followupRow) return false;
     const expectedQuestion = CLIENT_FOLLOWUP_QUESTION_BY_DIMENSION[followupRow.dimension_key];
+    // KAI P2-11: a client_followup queue row that an authorized
+    // client_reviewer has since disposed of (queue_status/review_status both
+    // 'resolved') is just as CURRENT/non-corrupted as the original P2-04
+    // fresh pair - it is never treated as stale by this lineage check. Every
+    // other field must still match the exact P2-04 fixed contract.
+    const statusPairIsCurrent =
+      (queueRow.queue_status === CLIENT_FOLLOWUP_QUEUE_STATUS && queueRow.review_status === CLIENT_FOLLOWUP_REVIEW_STATUS) ||
+      (queueRow.queue_status === CLIENT_FOLLOWUP_RESOLVED_QUEUE_STATUS && queueRow.review_status === CLIENT_FOLLOWUP_RESOLVED_REVIEW_STATUS);
     return (
       queueRow.queue_type === CLIENT_FOLLOWUP_QUEUE_TYPE &&
       queueRow.target_object_type === CLIENT_FOLLOWUP_TARGET_OBJECT_TYPE &&
-      queueRow.queue_status === CLIENT_FOLLOWUP_QUEUE_STATUS &&
-      queueRow.review_status === CLIENT_FOLLOWUP_REVIEW_STATUS &&
+      statusPairIsCurrent &&
       queueRow.priority === CLIENT_FOLLOWUP_PRIORITY &&
       queueRow.summary === CLIENT_FOLLOWUP_SUMMARY &&
       queueRow.required_action === expectedQuestion &&
@@ -697,9 +706,10 @@ function buildClaimGapFollowupAuditPayload(context) {
   };
 }
 
-function prepareRequiredAudit(metadataOnlyAudit, context) {
+function prepareRequiredAudit(metadataOnlyAudit, tx, context) {
   const prepared = metadataOnlyAudit.prepareMetadataOnlyAudit({
     payload: buildClaimGapFollowupAuditPayload(context),
+    db: tx,
   });
 
   const okDescriptor =
@@ -1025,7 +1035,7 @@ export function createPostgresClaimGapFollowupRepository({
             followupDimensionKeys: expectedFollowupDimensionKeys,
             freshWriteCount: insertedGapRows.length + insertedFollowupRows.length + insertedQueueRows.length,
           };
-          const preparedAudit = prepareRequiredAudit(metadataOnlyAudit, auditContext);
+          const preparedAudit = prepareRequiredAudit(metadataOnlyAudit, tx, auditContext);
           await insertAudit(tx, {
             organizationId,
             intakeFileId: candidateRow.intake_file_id,

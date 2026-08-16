@@ -475,9 +475,10 @@ function buildEvidenceLineageAuditPayload(context) {
  * P1-05 through P1-08's `prepareRequiredAudit`: an own-property descriptor read
  * (never a getter) whose `value` is exactly `true`, alongside a callable `publish`.
  */
-function prepareRequiredAudit(metadataOnlyAudit, context) {
+function prepareRequiredAudit(metadataOnlyAudit, tx, context) {
   const prepared = metadataOnlyAudit.prepareMetadataOnlyAudit({
     payload: buildEvidenceLineageAuditPayload(context),
+    db: tx,
   });
 
   const okDescriptor =
@@ -713,7 +714,7 @@ export function createPostgresEvidenceLineageRepository({
             reviewQueueItemCount: totals.queueItemCount,
             freshWriteCount,
           };
-          const preparedAudit = prepareRequiredAudit(metadataOnlyAudit, auditContext);
+          const preparedAudit = prepareRequiredAudit(metadataOnlyAudit, tx, auditContext);
           await insertAudit(tx, {
             organizationId,
             intakeFileId: candidateRow.intake_file_id,

@@ -2,6 +2,7 @@ import express from "express";
 import { KAI_ERROR_STATUS, sendKaiError } from "../errors/kaiErrors.js";
 import {
   areKaiSprint2UploadFeaturesEnabled,
+  areKaiSprint2WorkerFeaturesEnabled,
   requireKaiSprint2Enabled,
 } from "../config/kaiSprint2Config.js";
 import { isKaiGateC1GcsProviderEnabled } from "../config/kaiSprint2GcsConfig.js";
@@ -15,6 +16,9 @@ import {
   setKaiSprint2NoStore,
 } from "../middleware/kaiSprint2RequestSafety.js";
 import {
+  validateCompleteClaimReviewRequest,
+  validateCompleteClientFollowupRequest,
+  validateCompleteEvidenceReviewRequest,
   validateCompleteExportReviewRequest,
   validateIntakeBatchFilesQuery,
   validateFilePolicyBlockRequest,
@@ -27,6 +31,18 @@ import {
   validateReviewCockpitQueueQuery,
   validateSourceCandidateDecisionRequest,
 } from "../validators/kaiReviewCockpitRequestSchemas.js";
+import {
+  createProductionMetadataOnlyAuditForClaimGapFollowup,
+  createProductionMetadataOnlyAuditForClaimProposal,
+  createProductionMetadataOnlyAuditForClaimReview,
+  createProductionMetadataOnlyAuditForClientFollowupCompletion,
+  createProductionMetadataOnlyAuditForConflictReviewCandidate,
+  createProductionMetadataOnlyAuditForCoverageReviewDecision,
+  createProductionMetadataOnlyAuditForEvidenceReview,
+  createProductionMetadataOnlyAuditForGeneratedContentDraft,
+  createProductionMetadataOnlyAuditForGeneratedContentReview,
+  createProductionMetadataOnlyAuditForSourceVersion,
+} from "../services/kaiMetadataOnlyAuditComposition.js";
 
 const router = express.Router();
 let intakeServiceOverride = null;
@@ -34,6 +50,12 @@ let intakeServicePromise = null;
 let reviewQueueServicePromise = null;
 let reviewCockpitServicePromise = null;
 let exportReviewServicePromise = null;
+let evidenceLineageServicePromise = null;
+let evidenceCoverageAssessmentServicePromise = null;
+let claimProposalServicePromise = null;
+let claimGapFollowupServicePromise = null;
+let conflictReviewCandidateServicePromise = null;
+let generatedContentServicePromise = null;
 
 export function sendServiceResult(res, result, successStatus = 200) {
   if (result?.ok) {
@@ -604,6 +626,7 @@ router.use(attachTemporarySafeIntakeRouteLogger);
 function statusData(env = process.env) {
   const uploadFeaturesEnabled = areKaiSprint2UploadFeaturesEnabled(env);
   const storageProviderEnabled = isKaiGateC1GcsProviderEnabled(env);
+  const workerFeaturesEnabled = areKaiSprint2WorkerFeaturesEnabled(env);
   return {
     feature_enabled: true,
     route: "/api/kai/sprint2/intake",
@@ -616,8 +639,8 @@ function statusData(env = process.env) {
     storage_upload_enabled: uploadFeaturesEnabled,
     signed_upload_enabled: uploadFeaturesEnabled && storageProviderEnabled,
     signed_read_enabled: false,
-    parser_worker_enabled: false,
-    profiling_enabled: false,
+    parser_worker_enabled: workerFeaturesEnabled,
+    profiling_enabled: workerFeaturesEnabled,
     data_dictionary_generation_enabled: false,
     source_promotion_enabled: false,
     evidence_creation_enabled: false,
@@ -984,6 +1007,35 @@ router.post(
   },
 );
 
+let engagementContextServicePromise = null;
+async function getEngagementContextService() {
+  if (intakeServiceOverride?.listAuthorizedEngagements) return intakeServiceOverride;
+  engagementContextServicePromise ||= import("../services/kaiEngagementContextService.js");
+  return engagementContextServicePromise;
+}
+
+/**
+ * KAI intake-context read: existing tenant-authoritative engagement contexts
+ * for an organization, so the Web Intake UI never has to fabricate one.
+ * Read-only; gated the same as `create_intake_batch` (enforced inside the
+ * service, not here).
+ */
+router.get("/admin/organizations/:organizationId/engagements", async (req, res) => {
+  const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) || organizationId !== organizationId.toLowerCase()) {
+    return sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id")],
+    });
+  }
+  return invokeService(res, async () => {
+    const service = await getEngagementContextService();
+    return service.listAuthorizedEngagements({
+      organizationId,
+      actorContext: sprint2MappedActorContext(req),
+    });
+  });
+});
+
 router.post("/admin/batches", async (req, res) => {
   const payload = requestPayload(req);
   if (!validateMutationRequestOrSend(req, res, "create_intake_batch")) return;
@@ -1025,6 +1077,1169 @@ router.post("/admin/batches/:intakeBatchId/file-reservations", async (req, res) 
   }, 201);
 });
 
+async function getEvidenceLineageService() {
+  if (intakeServiceOverride?.extractEvidenceFromSourceVersion) return intakeServiceOverride;
+  evidenceLineageServicePromise ||= import("../services/kaiEvidenceLineageService.js");
+  return evidenceLineageServicePromise;
+}
+
+function sourceVersionEvidenceExtractionIdentifiers(req = {}) {
+  const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+  const sourceVersionId = typeof req.params?.sourceVersionId === "string" ? req.params.sourceVersionId : "";
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) || organizationId !== organizationId.toLowerCase()) return null;
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(sourceVersionId) || sourceVersionId !== sourceVersionId.toLowerCase()) return null;
+  return { organizationId, sourceVersionId };
+}
+
+function validateEvidenceExtractionRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = sourceVersionEvidenceExtractionIdentifiers(req);
+  if (!identifiers) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_or_source_version_id")],
+    });
+    return null;
+  }
+  if (Object.keys(requestPayload(req)).length !== 0) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("unknown_field", "body")],
+    });
+    return null;
+  }
+  return identifiers;
+}
+
+/**
+ * KAI P2-01 evidence-lineage extraction route. Mirrors the export-review
+ * routes' organization-scoped path convention and actorContext derivation
+ * (`sprint2MappedActorContext`) exactly, because - like those routes, and
+ * unlike the review-cockpit routes - `extractEvidenceFromSourceVersion` expects
+ * an already-resolved `actorContext`, not a raw authenticated-user identifier
+ * for the service to resolve itself.
+ */
+router.post(
+  "/admin/organizations/:organizationId/source-versions/:sourceVersionId/evidence-extraction",
+  async (req, res) => {
+    const identifiers = validateEvidenceExtractionRequestOrSend(req, res);
+    if (!identifiers) return;
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getEvidenceLineageService();
+      return service.extractEvidenceFromSourceVersion({
+        organizationId: identifiers.organizationId,
+        sourceVersionId: identifiers.sourceVersionId,
+        actorContext,
+        now,
+      }, {
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForSourceVersion({
+          organizationId: identifiers.organizationId,
+          sourceVersionId: identifiers.sourceVersionId,
+          actorContext,
+          now,
+        }),
+      });
+    });
+  },
+);
+
+async function getEvidenceCoverageAssessmentService() {
+  if (intakeServiceOverride?.assessEvidenceCoverageForSourceVersion) return intakeServiceOverride;
+  evidenceCoverageAssessmentServicePromise ||= import("../services/kaiEvidenceCoverageAssessmentService.js");
+  return evidenceCoverageAssessmentServicePromise;
+}
+
+/**
+ * KAI P2-02 evidence-coverage-assessment route. Reuses the exact P2-01
+ * organization/source-version path identity and identifier validation
+ * (`sourceVersionEvidenceExtractionIdentifiers`) and actorContext derivation
+ * (`sprint2MappedActorContext`) unchanged, on the same mounted router, since
+ * `assessEvidenceCoverageForSourceVersion` is scoped to the identical
+ * organizationId/sourceVersionId resource identity and also expects an
+ * already-resolved actorContext. Read-only: no body, no persistence, no
+ * audit write - the service only reads already-committed rows and returns a
+ * computed-fresh result.
+ */
+router.get(
+  "/admin/organizations/:organizationId/source-versions/:sourceVersionId/evidence-coverage-assessment",
+  async (req, res) => {
+    const identifiers = sourceVersionEvidenceExtractionIdentifiers(req);
+    if (!identifiers) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_or_source_version_id")],
+      });
+    }
+    return invokeService(res, async () => {
+      const service = await getEvidenceCoverageAssessmentService();
+      return service.assessEvidenceCoverageForSourceVersion({
+        organizationId: identifiers.organizationId,
+        sourceVersionId: identifiers.sourceVersionId,
+        actorContext: sprint2MappedActorContext(req),
+      });
+    });
+  },
+);
+
+async function getClaimProposalService() {
+  if (intakeServiceOverride?.proposeClaim) return intakeServiceOverride;
+  claimProposalServicePromise ||= import("../services/kaiClaimProposalService.js");
+  return claimProposalServicePromise;
+}
+
+function evidenceItemClaimProposalIdentifiers(req = {}) {
+  const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+  const evidenceItemId = typeof req.params?.evidenceItemId === "string" ? req.params.evidenceItemId : "";
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) || organizationId !== organizationId.toLowerCase()) return null;
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(evidenceItemId) || evidenceItemId !== evidenceItemId.toLowerCase()) return null;
+  return { organizationId, evidenceItemId };
+}
+
+function validateClaimProposalRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = evidenceItemClaimProposalIdentifiers(req);
+  if (!identifiers) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_or_evidence_item_id")],
+    });
+    return null;
+  }
+  if (Object.keys(requestPayload(req)).length !== 0) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("unknown_field", "body")],
+    });
+    return null;
+  }
+  return identifiers;
+}
+
+/**
+ * KAI P2-03 claim-proposal route. Mirrors the P2-01 evidence-extraction
+ * route's organization-scoped path convention, empty-body requirement, and
+ * actorContext/now derivation exactly, on the same mounted router - the
+ * resource identity here is the evidenceItemId, not the sourceVersionId,
+ * because `proposeClaim` is scoped to an already-committed evidence item.
+ */
+router.post(
+  "/admin/organizations/:organizationId/evidence-items/:evidenceItemId/claim-proposal",
+  async (req, res) => {
+    const identifiers = validateClaimProposalRequestOrSend(req, res);
+    if (!identifiers) return;
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getClaimProposalService();
+      return service.proposeClaim({
+        organizationId: identifiers.organizationId,
+        evidenceItemId: identifiers.evidenceItemId,
+        actorContext,
+        now,
+      }, {
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForClaimProposal({
+          organizationId: identifiers.organizationId,
+          evidenceItemId: identifiers.evidenceItemId,
+          actorContext,
+          now,
+        }),
+      });
+    });
+  },
+);
+
+async function getClaimGapFollowupService() {
+  if (intakeServiceOverride?.generateClaimGapFollowups) return intakeServiceOverride;
+  claimGapFollowupServicePromise ||= import("../services/kaiClaimGapFollowupService.js");
+  return claimGapFollowupServicePromise;
+}
+
+function claimGapFollowupIdentifiers(req = {}) {
+  const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+  const claimId = typeof req.params?.claimId === "string" ? req.params.claimId : "";
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) || organizationId !== organizationId.toLowerCase()) return null;
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(claimId) || claimId !== claimId.toLowerCase()) return null;
+  return { organizationId, claimId };
+}
+
+function validateClaimGapFollowupRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = claimGapFollowupIdentifiers(req);
+  if (!identifiers) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_or_claim_id")],
+    });
+    return null;
+  }
+  if (Object.keys(requestPayload(req)).length !== 0) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("unknown_field", "body")],
+    });
+    return null;
+  }
+  return identifiers;
+}
+
+/**
+ * KAI P2-04 claim-gap/client-followup route. Mirrors the P2-03 claim-proposal
+ * route's organization-scoped path convention, empty-body requirement, and
+ * actorContext/now derivation exactly, on the same mounted router - the
+ * resource identity here is the claimId, not the evidenceItemId, because
+ * `generateClaimGapFollowups` is scoped to an already-proposed P2-03 claim.
+ */
+router.post(
+  "/admin/organizations/:organizationId/claims/:claimId/claim-gap-followups",
+  async (req, res) => {
+    const identifiers = validateClaimGapFollowupRequestOrSend(req, res);
+    if (!identifiers) return;
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getClaimGapFollowupService();
+      return service.generateClaimGapFollowups({
+        organizationId: identifiers.organizationId,
+        claimId: identifiers.claimId,
+        actorContext,
+        now,
+      }, {
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForClaimGapFollowup({
+          organizationId: identifiers.organizationId,
+          claimId: identifiers.claimId,
+          actorContext,
+          now,
+        }),
+      });
+    });
+  },
+);
+
+async function getConflictReviewCandidateService() {
+  if (intakeServiceOverride?.createConflictReviewCandidate) return intakeServiceOverride;
+  conflictReviewCandidateServicePromise ||= import("../services/kaiConflictReviewCandidateService.js");
+  return conflictReviewCandidateServicePromise;
+}
+
+function conflictReviewCandidateIdentifiers(req = {}) {
+  const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+  const firstClaimId = typeof req.params?.firstClaimId === "string" ? req.params.firstClaimId : "";
+  const secondClaimId = typeof req.params?.secondClaimId === "string" ? req.params.secondClaimId : "";
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) || organizationId !== organizationId.toLowerCase()) return null;
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(firstClaimId) || firstClaimId !== firstClaimId.toLowerCase()) return null;
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(secondClaimId) || secondClaimId !== secondClaimId.toLowerCase()) return null;
+  return { organizationId, firstClaimId, secondClaimId };
+}
+
+function validateConflictReviewCandidateRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = conflictReviewCandidateIdentifiers(req);
+  if (!identifiers) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_first_claim_id_or_second_claim_id")],
+    });
+    return null;
+  }
+  if (Object.keys(requestPayload(req)).length !== 0) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("unknown_field", "body")],
+    });
+    return null;
+  }
+  return identifiers;
+}
+
+/**
+ * KAI P2-05 potential conflict-review candidate route. Mirrors the preceding
+ * claim-scoped routes' organization-scoped path convention, empty-body
+ * requirement, and actorContext/now derivation exactly, on the same mounted
+ * router. Both claim resource identifiers are carried in the path, following
+ * this router's existing nested-resource-id convention (e.g. the
+ * export-review-queue routes' two path identifiers), rather than inventing a
+ * body-based transport; `createConflictReviewCandidate` alone owns
+ * lower/higher claim normalization, so the route forwards
+ * firstClaimId/secondClaimId unchanged and never reinterprets their order.
+ */
+router.post(
+  "/admin/organizations/:organizationId/claims/:firstClaimId/potential-conflicts/:secondClaimId",
+  async (req, res) => {
+    const identifiers = validateConflictReviewCandidateRequestOrSend(req, res);
+    if (!identifiers) return;
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getConflictReviewCandidateService();
+      return service.createConflictReviewCandidate({
+        organizationId: identifiers.organizationId,
+        firstClaimId: identifiers.firstClaimId,
+        secondClaimId: identifiers.secondClaimId,
+        actorContext,
+        now,
+      }, {
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForConflictReviewCandidate({
+          organizationId: identifiers.organizationId,
+          actorContext,
+          now,
+        }),
+      });
+    });
+  },
+);
+
+let claimTraceabilityServicePromise = null;
+async function getClaimTraceabilityService() {
+  if (intakeServiceOverride?.getClaimTraceabilitySummary) return intakeServiceOverride;
+  claimTraceabilityServicePromise ||= import("../services/kaiClaimTraceabilityService.js");
+  return claimTraceabilityServicePromise;
+}
+
+const KAI_P2_06_REQUESTED_AUDIENCES = new Set(["internal", "funder", "public"]);
+
+/**
+ * KAI P2-06 requestedAudience query-string convention: this router's existing
+ * GET routes never carry an enumerated caller-controlled field via query
+ * string (only pagination/organization_id), so requestedAudience travels as
+ * its own dedicated query parameter (`requested_audience`) rather than
+ * reusing an unrelated key or inventing a body on a GET request. The value is
+ * validated against the exact enum
+ * `kaiClaimTraceabilityService.js`'s `REQUESTED_AUDIENCES` already accepts, so
+ * an invalid audience fails closed here with the router's standard
+ * validation_blocker shape before the service is ever called.
+ */
+function claimTraceabilityRequestedAudienceFromQuery(req = {}) {
+  const keys = Object.keys(req.query || {});
+  if (keys.length !== 1 || keys[0] !== "requested_audience") return null;
+  const value = req.query.requested_audience;
+  return typeof value === "string" && KAI_P2_06_REQUESTED_AUDIENCES.has(value) ? value : null;
+}
+
+/**
+ * KAI P2-06 human claim-traceability read route. Reuses the exact
+ * organizationId/claimId path identity and validation
+ * (`claimGapFollowupIdentifiers`) already proven by the P2-04 route above,
+ * and the same actorContext derivation (`sprint2MappedActorContext`)
+ * unchanged, on the same mounted router - the resource identity here is the
+ * same claimId, because `getClaimTraceabilitySummary` is scoped to the
+ * identical organizationId/claimId pair. Strictly read-only: the route
+ * performs no SQL, no direct database or kai schema access, no audit
+ * dependency injection, and no audit write - it derives organizationId
+ * (path) and actorContext (server session) and delegates exactly once to
+ * the already-accepted P2-06 service, which alone owns eligibility
+ * evaluation, blocker ordering, and tenant/role authorization.
+ */
+router.get(
+  "/admin/organizations/:organizationId/claims/:claimId/traceability",
+  async (req, res) => {
+    const identifiers = claimGapFollowupIdentifiers(req);
+    const requestedAudience = claimTraceabilityRequestedAudienceFromQuery(req);
+    if (!identifiers || !requestedAudience) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker(
+          "invalid_uuid_field_or_requested_audience",
+          "organization_id_claim_id_or_requested_audience",
+        )],
+      });
+    }
+    return invokeService(res, async () => {
+      const service = await getClaimTraceabilityService();
+      return service.getClaimTraceabilitySummary({
+        organizationId: identifiers.organizationId,
+        claimId: identifiers.claimId,
+        requestedAudience,
+        actorContext: sprint2MappedActorContext(req),
+      });
+    });
+  },
+);
+
+let eligibleClaimsForAudienceServicePromise = null;
+async function getEligibleClaimsForAudienceService() {
+  if (intakeServiceOverride?.listEligibleClaimsForAudience) return intakeServiceOverride;
+  eligibleClaimsForAudienceServicePromise ||= import("../services/kaiEligibleClaimsForAudienceService.js");
+  return eligibleClaimsForAudienceServicePromise;
+}
+
+let claimLibraryServicePromise = null;
+async function getClaimLibraryService() {
+  if (intakeServiceOverride?.listClaimLibraryCandidates) return intakeServiceOverride;
+  claimLibraryServicePromise ||= import("../services/kaiClaimLibraryService.js");
+  return claimLibraryServicePromise;
+}
+
+const KAI_P2_08_DEFAULT_LIMIT = 25;
+const KAI_P2_08_MAX_LIMIT = 100;
+
+function eligibleClaimsForAudienceOrganizationIdentifier(req = {}) {
+  const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) || organizationId !== organizationId.toLowerCase()) return null;
+  return { organizationId };
+}
+
+/**
+ * KAI P2-08 requestedAudience/limit/afterClaimId query-string convention:
+ * reuses the exact P2-06 `requested_audience` query-parameter shape and
+ * enum, plus this router's existing `limit` string-digit query convention
+ * (as already used by the review-queue and intake-batch-files list routes),
+ * clamped to the exact 1-100 range
+ * `kaiEligibleClaimsForAudienceService.js` itself already enforces (not the
+ * narrower 25-item cap those older list routes use for their own resources).
+ * `afterClaimId` travels as a plain `after_claim_id` UUID query parameter,
+ * because the P2-08 service's own cursor is already a raw claimId - not an
+ * opaque encoded cursor object like the older review-queue/intake-batch-
+ * files list routes - so no new cursor-encoding scheme is introduced. Any
+ * other or missing/invalid query field fails closed as `validation_blocker`
+ * before the service is ever reached.
+ */
+function eligibleClaimsForAudienceQuery(req = {}) {
+  const allowedKeys = new Set(["requested_audience", "limit", "after_claim_id"]);
+  const keys = Object.keys(req.query || {});
+  if (keys.length === 0 || !keys.every((key) => allowedKeys.has(key))) return null;
+
+  const requestedAudience = req.query.requested_audience;
+  if (typeof requestedAudience !== "string" || !KAI_P2_06_REQUESTED_AUDIENCES.has(requestedAudience)) return null;
+
+  let limit = KAI_P2_08_DEFAULT_LIMIT;
+  if (req.query.limit !== undefined) {
+    if (typeof req.query.limit !== "string" || !/^\d+$/.test(req.query.limit)) return null;
+    limit = Number(req.query.limit);
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > KAI_P2_08_MAX_LIMIT) return null;
+  }
+
+  let afterClaimId = null;
+  if (req.query.after_claim_id !== undefined) {
+    const candidate = normalizedUuid(req.query.after_claim_id);
+    if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(candidate)) return null;
+    afterClaimId = candidate;
+  }
+
+  return { requestedAudience, limit, afterClaimId };
+}
+
+/**
+ * KAI P2-08 human eligible-claims-for-audience read route. Reuses the exact
+ * organization-scoped path convention already proven above (a single
+ * organizationId path segment, as on the review-cockpit/review-queue list
+ * routes), and the same actorContext derivation (`sprint2MappedActorContext`)
+ * unchanged, on the same mounted router. Strictly read-only: the route
+ * performs no SQL, no direct database or kai schema access, no audit
+ * dependency injection, and no audit write - it derives organizationId
+ * (path) and actorContext (server session), accepts only the
+ * requestedAudience/limit/afterClaimId fields the existing P2-08 service
+ * already accepts, and delegates exactly once to that already-accepted
+ * service, which alone owns the P2-06 evaluator reuse, snapshot
+ * consistency, candidate-scan cap, ordering, pagination, and eligibility
+ * semantics.
+ */
+router.get(
+  "/admin/organizations/:organizationId/eligible-claims",
+  async (req, res) => {
+    const identifiers = eligibleClaimsForAudienceOrganizationIdentifier(req);
+    const query = eligibleClaimsForAudienceQuery(req);
+    if (!identifiers || !query) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker(
+          "invalid_organization_id_or_query",
+          "organization_id_requested_audience_limit_or_after_claim_id",
+        )],
+      });
+    }
+    return invokeService(res, async () => {
+      const service = await getEligibleClaimsForAudienceService();
+      return service.listEligibleClaimsForAudience({
+        organizationId: identifiers.organizationId,
+        requestedAudience: query.requestedAudience,
+        limit: query.limit,
+        afterClaimId: query.afterClaimId,
+        actorContext: sprint2MappedActorContext(req),
+      });
+    });
+  },
+);
+
+function claimLibraryIndexQuery(req = {}) {
+  const allowedKeys = new Set(["limit", "after_claim_id"]);
+  const keys = Object.keys(req.query || {});
+  if (!keys.every((key) => allowedKeys.has(key))) return null;
+
+  let limit = 25;
+  if (req.query.limit !== undefined) {
+    if (typeof req.query.limit !== "string" || !/^\d+$/.test(req.query.limit)) return null;
+    limit = Number(req.query.limit);
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 25) return null;
+  }
+
+  let afterClaimId = null;
+  if (req.query.after_claim_id !== undefined) {
+    const candidate = normalizedUuid(req.query.after_claim_id);
+    if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(candidate)) return null;
+    afterClaimId = candidate;
+  }
+
+  return { limit, afterClaimId };
+}
+
+/**
+ * First Impact Evidence Library navigation read. This route only enumerates
+ * metadata-safe claim identities connected to existing P2 review/followup/conflict
+ * queues. It does not calculate audience eligibility or blockers; the Library UI
+ * must obtain usable claims from P2-08 and selected-claim explanations from P2-06.
+ */
+router.get(
+  "/admin/organizations/:organizationId/claim-library/candidates",
+  async (req, res) => {
+    const identifiers = eligibleClaimsForAudienceOrganizationIdentifier(req);
+    const query = claimLibraryIndexQuery(req);
+    if (!identifiers || !query) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker(
+          "invalid_organization_id_or_query",
+          "organization_id_limit_or_after_claim_id",
+        )],
+      });
+    }
+    return invokeService(res, async () => {
+      const service = await getClaimLibraryService();
+      return service.listClaimLibraryCandidates({
+        organizationId: identifiers.organizationId,
+        limit: query.limit,
+        afterClaimId: query.afterClaimId,
+        actorContext: sprint2MappedActorContext(req),
+      });
+    });
+  },
+);
+
+async function getGeneratedContentService() {
+  if (
+    intakeServiceOverride?.createEvidenceSummaryDraft
+    || intakeServiceOverride?.getGeneratedDraftReviewPacket
+    || intakeServiceOverride?.startGeneratedContentReview
+    || intakeServiceOverride?.completeGeneratedContentReview
+  ) return intakeServiceOverride;
+  generatedContentServicePromise ||= import("../services/kaiGeneratedContentService.js");
+  return generatedContentServicePromise;
+}
+
+let generatedDraftLibraryServicePromise = null;
+async function getGeneratedDraftLibraryService() {
+  if (intakeServiceOverride?.listGeneratedDraftLibraryIndex) return intakeServiceOverride;
+  generatedDraftLibraryServicePromise ||= import("../services/kaiGeneratedDraftLibraryService.js");
+  return generatedDraftLibraryServicePromise;
+}
+
+const KAI_GENERATED_DRAFT_LIBRARY_DEFAULT_LIMIT = 25;
+const KAI_GENERATED_DRAFT_LIBRARY_MAX_LIMIT = 25;
+
+function generatedDraftLibraryIndexQuery(req = {}) {
+  const allowedKeys = new Set(["limit", "after_generated_content_draft_id"]);
+  const keys = Object.keys(req.query || {});
+  if (!keys.every((key) => allowedKeys.has(key))) return null;
+
+  let limit = KAI_GENERATED_DRAFT_LIBRARY_DEFAULT_LIMIT;
+  if (req.query.limit !== undefined) {
+    if (typeof req.query.limit !== "string" || !/^\d+$/.test(req.query.limit)) return null;
+    limit = Number(req.query.limit);
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > KAI_GENERATED_DRAFT_LIBRARY_MAX_LIMIT) return null;
+  }
+
+  let afterGeneratedContentDraftId = null;
+  if (req.query.after_generated_content_draft_id !== undefined) {
+    const candidate = normalizedUuid(req.query.after_generated_content_draft_id);
+    if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(candidate)) return null;
+    afterGeneratedContentDraftId = candidate;
+  }
+
+  return { limit, afterGeneratedContentDraftId };
+}
+
+/**
+ * Persistent Impact Evidence Library generated-drafts index. This route only
+ * enumerates metadata-safe `evidence_summary`/`internal` generated-content-draft
+ * identities already persisted through the accepted P3-01 path, so a persisted
+ * draft remains rediscoverable across a fresh Library load independently of any
+ * transient browser-only generation state. It performs no SQL/direct database
+ * access itself and never invokes the model/provider; detailed draft content
+ * (blocks, citations, limitations) remains P3-02's responsibility.
+ */
+router.get(
+  "/admin/organizations/:organizationId/generated-content-drafts",
+  async (req, res) => {
+    const identifiers = eligibleClaimsForAudienceOrganizationIdentifier(req);
+    const query = generatedDraftLibraryIndexQuery(req);
+    if (!identifiers || !query) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker(
+          "invalid_organization_id_or_query",
+          "organization_id_limit_or_after_generated_content_draft_id",
+        )],
+      });
+    }
+    return invokeService(res, async () => {
+      const service = await getGeneratedDraftLibraryService();
+      return service.listGeneratedDraftLibraryIndex({
+        organizationId: identifiers.organizationId,
+        limit: query.limit,
+        afterGeneratedContentDraftId: query.afterGeneratedContentDraftId,
+        actorContext: sprint2MappedActorContext(req),
+      });
+    });
+  },
+);
+
+function generatedContentDraftIdentifier(req = {}) {
+  const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+  const generatedContentDraftId = typeof req.params?.generatedContentDraftId === "string"
+    ? req.params.generatedContentDraftId
+    : "";
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) || organizationId !== organizationId.toLowerCase()) return null;
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(generatedContentDraftId) || generatedContentDraftId !== generatedContentDraftId.toLowerCase()) return null;
+  return { organizationId, generatedContentDraftId };
+}
+
+function validateCreateEvidenceSummaryRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = eligibleClaimsForAudienceOrganizationIdentifier(req);
+  const payload = requestPayload(req);
+  const keys = Object.keys(payload);
+  if (
+    !identifiers
+    || keys.length !== 2
+    || !keys.every((key) => key === "claim_ids" || key === "idempotency_key")
+    || !Array.isArray(payload.claim_ids)
+    || payload.claim_ids.length < 1
+    || payload.claim_ids.length > 20
+    || payload.claim_ids.some((claimId) => typeof claimId !== "string" || !KAI_SPRINT2_P0_PATTERNS.uuid.test(claimId) || claimId !== claimId.toLowerCase())
+    || payload.claim_ids.length !== new Set(payload.claim_ids).size
+    || typeof payload.idempotency_key !== "string"
+    || payload.idempotency_key !== payload.idempotency_key.trim()
+    || !/^[ -~]{8,128}$/.test(payload.idempotency_key)
+  ) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker(
+        "invalid_internal_evidence_summary_generation_request",
+        "organization_id_claim_ids_or_idempotency_key",
+      )],
+    });
+    return null;
+  }
+  return {
+    organizationId: identifiers.organizationId,
+    claimIds: [...payload.claim_ids].sort(),
+    idempotencyKey: payload.idempotency_key,
+  };
+}
+
+router.post(
+  "/admin/organizations/:organizationId/generated-content-drafts/evidence-summary",
+  async (req, res) => {
+    const parsed = validateCreateEvidenceSummaryRequestOrSend(req, res);
+    if (!parsed) return;
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getGeneratedContentService();
+      const { createProductionEvidenceSummaryDraftGenerator } = await import("../services/kaiEvidenceSummaryDraftGenerator.js");
+      return service.createEvidenceSummaryDraft({
+        organizationId: parsed.organizationId,
+        requestedAudience: "internal",
+        claimIds: parsed.claimIds,
+        idempotencyKey: parsed.idempotencyKey,
+        actorContext,
+        now,
+      }, {
+        draftGenerator: createProductionEvidenceSummaryDraftGenerator(),
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForGeneratedContentDraft({
+          organizationId: parsed.organizationId,
+          actorContext,
+          now,
+        }),
+      });
+    }, 201);
+  },
+);
+
+router.get(
+  "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/review-packet",
+  async (req, res) => {
+    const identifiers = generatedContentDraftIdentifier(req);
+    if (!identifiers || Object.keys(req.query || {}).length !== 0) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker(
+          "invalid_organization_id_generated_content_draft_id_or_query",
+          "organization_id_generated_content_draft_id",
+        )],
+      });
+    }
+    return invokeService(res, async () => {
+      const service = await getGeneratedContentService();
+      return service.getGeneratedDraftReviewPacket({
+        organizationId: identifiers.organizationId,
+        generatedContentDraftId: identifiers.generatedContentDraftId,
+        actorContext: sprint2MappedActorContext(req),
+      });
+    });
+  },
+);
+
+function generatedContentReviewQueueIdentifier(req = {}) {
+  const root = generatedContentDraftIdentifier(req);
+  const reviewQueueItemId = typeof req.params?.reviewQueueItemId === "string" ? req.params.reviewQueueItemId : "";
+  if (!root) return null;
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(reviewQueueItemId) || reviewQueueItemId !== reviewQueueItemId.toLowerCase()) return null;
+  return { ...root, reviewQueueItemId };
+}
+
+function validateGeneratedContentReviewTransitionRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = generatedContentReviewQueueIdentifier(req);
+  if (!identifiers) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker(
+        "invalid_organization_id_generated_content_draft_id_or_review_queue_item_id",
+        "organization_id_generated_content_draft_id_or_review_queue_item_id",
+      )],
+    });
+    return null;
+  }
+  const result = validateStartExportReviewRequest(req.body);
+  if (!result.ok) {
+    sendKaiError(res, "validation_blocker", { blockers: result.blockers });
+    return null;
+  }
+  return identifiers;
+}
+
+router.post(
+  "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/generated-content-review-queue/:reviewQueueItemId/start",
+  async (req, res) => {
+    const identifiers = validateGeneratedContentReviewTransitionRequestOrSend(req, res);
+    if (!identifiers) return;
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    const payload = requestPayload(req);
+    return invokeService(res, async () => {
+      const service = await getGeneratedContentService();
+      return service.startGeneratedContentReview({
+        organizationId: identifiers.organizationId,
+        generatedContentDraftId: identifiers.generatedContentDraftId,
+        reviewQueueItemId: identifiers.reviewQueueItemId,
+        expectedUpdatedAt: payload.expected_updated_at,
+        actorContext,
+        now,
+      }, {
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForGeneratedContentReview({
+          organizationId: identifiers.organizationId,
+          generatedContentDraftId: identifiers.generatedContentDraftId,
+          reviewQueueItemId: identifiers.reviewQueueItemId,
+          actorContext,
+          now,
+        }),
+      });
+    });
+  },
+);
+
+router.post(
+  "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/generated-content-review-queue/:reviewQueueItemId/complete",
+  async (req, res) => {
+    const identifiers = validateGeneratedContentReviewTransitionRequestOrSend(req, res);
+    if (!identifiers) return;
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    const payload = requestPayload(req);
+    return invokeService(res, async () => {
+      const service = await getGeneratedContentService();
+      return service.completeGeneratedContentReview({
+        organizationId: identifiers.organizationId,
+        generatedContentDraftId: identifiers.generatedContentDraftId,
+        reviewQueueItemId: identifiers.reviewQueueItemId,
+        expectedUpdatedAt: payload.expected_updated_at,
+        actorContext,
+        now,
+      }, {
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForGeneratedContentReview({
+          organizationId: identifiers.organizationId,
+          generatedContentDraftId: identifiers.generatedContentDraftId,
+          reviewQueueItemId: identifiers.reviewQueueItemId,
+          actorContext,
+          now,
+        }),
+      });
+    });
+  },
+);
+
+let evidenceReviewServicePromise = null;
+async function getHumanReviewServiceForEvidenceReview() {
+  if (intakeServiceOverride?.completeEvidenceReview) return intakeServiceOverride;
+  evidenceReviewServicePromise ||= import("../services/kaiHumanReviewService.js");
+  return evidenceReviewServicePromise;
+}
+
+let claimReviewServicePromise = null;
+async function getHumanReviewServiceForClaimReview() {
+  if (intakeServiceOverride?.completeClaimReviewInternalApproval) return intakeServiceOverride;
+  claimReviewServicePromise ||= import("../services/kaiHumanReviewService.js");
+  return claimReviewServicePromise;
+}
+
+function evidenceReviewCompletionIdentifiers(req = {}) {
+  const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+  const evidenceItemId = typeof req.params?.evidenceItemId === "string" ? req.params.evidenceItemId : "";
+  const reviewQueueItemId = typeof req.params?.reviewQueueItemId === "string" ? req.params.reviewQueueItemId : "";
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) || organizationId !== organizationId.toLowerCase()) return null;
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(evidenceItemId) || evidenceItemId !== evidenceItemId.toLowerCase()) return null;
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(reviewQueueItemId) || reviewQueueItemId !== reviewQueueItemId.toLowerCase()) return null;
+  return { organizationId, evidenceItemId, reviewQueueItemId };
+}
+
+function validateEvidenceReviewCompletionRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = evidenceReviewCompletionIdentifiers(req);
+  if (!identifiers) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker(
+        "invalid_uuid_field",
+        "organization_id_evidence_item_id_or_review_queue_item_id",
+      )],
+    });
+    return null;
+  }
+  const result = validateCompleteEvidenceReviewRequest(req.body);
+  if (!result.ok) {
+    sendKaiError(res, "validation_blocker", { blockers: result.blockers });
+    return null;
+  }
+  return identifiers;
+}
+
+/**
+ * KAI P2-09 human evidence-review completion route. Mirrors the sibling
+ * generated-content-review-completion route's `expected_updated_at` body
+ * convention exactly, on the same mounted router. Contains no SQL, imports no
+ * data-access layer, derives actor/tenant identity exclusively server-side
+ * from `sprint2MappedActorContext`, and delegates exactly once to the
+ * authorized P2-09 service, which alone owns the compare-and-set write,
+ * post-write validation, and required same-transaction audit. Never
+ * completes, resolves, or references the linked claim's own claim_review
+ * queue item - completing an evidence review can never approve a claim.
+ */
+router.post(
+  "/admin/organizations/:organizationId/evidence-items/:evidenceItemId/evidence-review/:reviewQueueItemId/complete",
+  async (req, res) => {
+    const identifiers = validateEvidenceReviewCompletionRequestOrSend(req, res);
+    if (!identifiers) return;
+    const payload = requestPayload(req);
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getHumanReviewServiceForEvidenceReview();
+      return service.completeEvidenceReview({
+        organizationId: identifiers.organizationId,
+        evidenceItemId: identifiers.evidenceItemId,
+        reviewQueueItemId: identifiers.reviewQueueItemId,
+        expectedUpdatedAt: payload.expected_updated_at,
+        actorContext,
+        now,
+      }, {
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForEvidenceReview({
+          organizationId: identifiers.organizationId,
+          evidenceItemId: identifiers.evidenceItemId,
+          actorContext,
+          now,
+        }),
+      });
+    });
+  },
+);
+
+function claimReviewCompletionIdentifiers(req = {}) {
+  const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+  const claimId = typeof req.params?.claimId === "string" ? req.params.claimId : "";
+  const reviewQueueItemId = typeof req.params?.reviewQueueItemId === "string" ? req.params.reviewQueueItemId : "";
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) || organizationId !== organizationId.toLowerCase()) return null;
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(claimId) || claimId !== claimId.toLowerCase()) return null;
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(reviewQueueItemId) || reviewQueueItemId !== reviewQueueItemId.toLowerCase()) return null;
+  return { organizationId, claimId, reviewQueueItemId };
+}
+
+function validateClaimReviewCompletionRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = claimReviewCompletionIdentifiers(req);
+  if (!identifiers) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker(
+        "invalid_uuid_field",
+        "organization_id_claim_id_or_review_queue_item_id",
+      )],
+    });
+    return null;
+  }
+  const result = validateCompleteClaimReviewRequest(req.body);
+  if (!result.ok) {
+    sendKaiError(res, "validation_blocker", { blockers: result.blockers });
+    return null;
+  }
+  return identifiers;
+}
+
+/**
+ * KAI P2-09 human claim-review/internal-approval completion route. Mirrors
+ * the evidence-review completion route above exactly. It never invokes the
+ * P2-08 eligible-claims-for-audience service, any Impact Evidence Library
+ * service, or any P3/generation/export service - approving a claim internally
+ * triggers no automatic downstream chaining.
+ */
+router.post(
+  "/admin/organizations/:organizationId/claims/:claimId/claim-review/:reviewQueueItemId/complete",
+  async (req, res) => {
+    const identifiers = validateClaimReviewCompletionRequestOrSend(req, res);
+    if (!identifiers) return;
+    const payload = requestPayload(req);
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getHumanReviewServiceForClaimReview();
+      return service.completeClaimReviewInternalApproval({
+        organizationId: identifiers.organizationId,
+        claimId: identifiers.claimId,
+        reviewQueueItemId: identifiers.reviewQueueItemId,
+        expectedUpdatedAt: payload.expected_updated_at,
+        actorContext,
+        now,
+      }, {
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForClaimReview({
+          organizationId: identifiers.organizationId,
+          claimId: identifiers.claimId,
+          actorContext,
+          now,
+        }),
+      });
+    });
+  },
+);
+
+let coverageReviewDecisionServicePromise = null;
+async function getCoverageReviewDecisionService() {
+  if (intakeServiceOverride?.acceptInternalCoverageLimitation) return intakeServiceOverride;
+  coverageReviewDecisionServicePromise ||= import("../services/kaiCoverageReviewDecisionService.js");
+  return coverageReviewDecisionServicePromise;
+}
+
+const KAI_P2_10_DIMENSION_KEYS = new Set([
+  "missingness",
+  "duplicates",
+  "definition_clarity",
+  "denominator_clarity",
+  "time_period_clarity",
+  "entity_level_clarity",
+  "small_cell_risk",
+  "conflicting_source_indicators",
+  "requirement_alignment",
+  "coverage_gaps",
+]);
+
+function coverageReviewDecisionIdentifiers(req = {}) {
+  const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+  const claimId = typeof req.params?.claimId === "string" ? req.params.claimId : "";
+  const dimensionKey = typeof req.params?.dimensionKey === "string" ? req.params.dimensionKey : "";
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) || organizationId !== organizationId.toLowerCase()) return null;
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(claimId) || claimId !== claimId.toLowerCase()) return null;
+  if (!KAI_P2_10_DIMENSION_KEYS.has(dimensionKey)) return null;
+  return { organizationId, claimId, dimensionKey };
+}
+
+function validateCoverageReviewDecisionRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = coverageReviewDecisionIdentifiers(req);
+  if (!identifiers) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker(
+        "invalid_uuid_field_or_dimension_key",
+        "organization_id_claim_id_or_dimension_key",
+      )],
+    });
+    return null;
+  }
+  if (Object.keys(requestPayload(req)).length !== 0) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("unknown_field", "body")],
+    });
+    return null;
+  }
+  return identifiers;
+}
+
+/**
+ * KAI P2-10 owner-policy internal-coverage-acceptance route. Mirrors the
+ * P2-04/P2-05 claim-scoped routes' organization-scoped path convention and
+ * empty-body requirement exactly, on the same mounted router. The caller
+ * identifies only the target claim and dimension via the path; actor, tenant,
+ * decision value, audience (always internal), and decision timestamp are all
+ * server-controlled by the authorized P2-10 service layer, never accepted
+ * from the request body.
+ */
+router.post(
+  "/admin/organizations/:organizationId/claims/:claimId/coverage-dimensions/:dimensionKey/internal-acceptance",
+  async (req, res) => {
+    const identifiers = validateCoverageReviewDecisionRequestOrSend(req, res);
+    if (!identifiers) return;
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getCoverageReviewDecisionService();
+      return service.acceptInternalCoverageLimitation({
+        organizationId: identifiers.organizationId,
+        claimId: identifiers.claimId,
+        dimensionKey: identifiers.dimensionKey,
+        actorContext,
+        now,
+      }, {
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForCoverageReviewDecision({
+          organizationId: identifiers.organizationId,
+          claimId: identifiers.claimId,
+          actorContext,
+          now,
+        }),
+      });
+    }, 201);
+  },
+);
+
+let clientFollowupCompletionServicePromise = null;
+async function getClientFollowupCompletionService() {
+  if (intakeServiceOverride?.completeClientFollowup) return intakeServiceOverride;
+  clientFollowupCompletionServicePromise ||= import("../services/kaiClientFollowupCompletionService.js");
+  return clientFollowupCompletionServicePromise;
+}
+
+let clientFollowupReadServicePromise = null;
+async function getClientFollowupReadService() {
+  if (intakeServiceOverride?.listClientFollowupWorkflows) return intakeServiceOverride;
+  clientFollowupReadServicePromise ||= import("../services/kaiClientFollowupReadService.js");
+  return clientFollowupReadServicePromise;
+}
+
+/**
+ * KAI P2-11 client-reviewer-facing read route. Exactly one organization-scoped
+ * role - `client_reviewer` - is authorized (enforced inside the service, not
+ * here). Read-only: exposes only the fixed, already-established-safe
+ * client_followup workflow fields, never raw evidence/claim/answer content.
+ */
+router.get("/admin/organizations/:organizationId/client-followups", async (req, res) => {
+  const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) || organizationId !== organizationId.toLowerCase()) {
+    return sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id")],
+    });
+  }
+  return invokeService(res, async () => {
+    const service = await getClientFollowupReadService();
+    return service.listClientFollowupWorkflows({
+      organizationId,
+      actorContext: sprint2MappedActorContext(req),
+    });
+  });
+});
+
+function clientFollowupCompletionIdentifiers(req = {}) {
+  const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+  const claimId = typeof req.params?.claimId === "string" ? req.params.claimId : "";
+  const clientFollowupItemId = typeof req.params?.clientFollowupItemId === "string" ? req.params.clientFollowupItemId : "";
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) || organizationId !== organizationId.toLowerCase()) return null;
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(claimId) || claimId !== claimId.toLowerCase()) return null;
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(clientFollowupItemId) || clientFollowupItemId !== clientFollowupItemId.toLowerCase()) return null;
+  return { organizationId, claimId, clientFollowupItemId };
+}
+
+function validateClientFollowupCompletionRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = clientFollowupCompletionIdentifiers(req);
+  if (!identifiers) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker(
+        "invalid_uuid_field",
+        "organization_id_claim_id_or_client_followup_item_id",
+      )],
+    });
+    return null;
+  }
+  const result = validateCompleteClientFollowupRequest(req.body);
+  if (!result.ok) {
+    sendKaiError(res, "validation_blocker", { blockers: result.blockers });
+    return null;
+  }
+  return identifiers;
+}
+
+/**
+ * KAI P2-11 client-followup-completion route. Mirrors the P2-09 evidence-
+ * review/claim-review completion routes' `expected_updated_at` body
+ * convention exactly, on the same mounted router. The only role ever
+ * authorized for this route is the organization-scoped `client_reviewer` -
+ * never a GK role, `client_admin`, or `client_contributor`. This records a
+ * workflow disposition (the fixed follow-up question was reviewed and no
+ * additional client information is being supplied), never a client answer:
+ * the request body carries no answer/free-text field, and the route contains
+ * no SQL or direct data-access-layer calls, delegating exactly once to the
+ * authorized P2-11 service. It never invokes P2-06/P2-08 or any other
+ * mutation - completing this workflow triggers no automatic downstream
+ * chaining.
+ */
+router.post(
+  "/admin/organizations/:organizationId/claims/:claimId/client-followups/:clientFollowupItemId/complete",
+  async (req, res) => {
+    const identifiers = validateClientFollowupCompletionRequestOrSend(req, res);
+    if (!identifiers) return;
+    const payload = requestPayload(req);
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getClientFollowupCompletionService();
+      return service.completeClientFollowup({
+        organizationId: identifiers.organizationId,
+        claimId: identifiers.claimId,
+        clientFollowupItemId: identifiers.clientFollowupItemId,
+        expectedUpdatedAt: payload.expected_updated_at,
+        actorContext,
+        now,
+      }, {
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForClientFollowupCompletion({
+          organizationId: identifiers.organizationId,
+          claimId: identifiers.claimId,
+          actorContext,
+          now,
+        }),
+      });
+    });
+  },
+);
+
 export default router;
 
 export const __testables = {
@@ -1052,6 +2267,27 @@ export const __testables = {
   sprint2MappedActorContext,
   validateStartExportReviewRequestOrSend,
   validateCompleteExportReviewRequestOrSend,
+  sourceVersionEvidenceExtractionIdentifiers,
+  validateEvidenceExtractionRequestOrSend,
+  evidenceItemClaimProposalIdentifiers,
+  validateClaimProposalRequestOrSend,
+  claimGapFollowupIdentifiers,
+  validateClaimGapFollowupRequestOrSend,
+  conflictReviewCandidateIdentifiers,
+  validateConflictReviewCandidateRequestOrSend,
+  claimTraceabilityRequestedAudienceFromQuery,
+  eligibleClaimsForAudienceOrganizationIdentifier,
+  eligibleClaimsForAudienceQuery,
+  claimLibraryIndexQuery,
+  generatedDraftLibraryIndexQuery,
+  evidenceReviewCompletionIdentifiers,
+  validateEvidenceReviewCompletionRequestOrSend,
+  claimReviewCompletionIdentifiers,
+  validateClaimReviewCompletionRequestOrSend,
+  coverageReviewDecisionIdentifiers,
+  validateCoverageReviewDecisionRequestOrSend,
+  clientFollowupCompletionIdentifiers,
+  validateClientFollowupCompletionRequestOrSend,
   setIntakeServiceForTest(service) {
     intakeServiceOverride = service;
     return () => {

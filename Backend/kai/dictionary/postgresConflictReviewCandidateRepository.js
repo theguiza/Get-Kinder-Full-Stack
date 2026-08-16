@@ -469,7 +469,7 @@ class RequiredAuditRejectedError extends Error {
   }
 }
 
-function prepareRequiredAudit(metadataOnlyAudit, context) {
+function prepareRequiredAudit(metadataOnlyAudit, tx, context) {
   const prepared = metadataOnlyAudit.prepareMetadataOnlyAudit({
     payload: {
       attempted_operation: CONFLICT_REVIEW_CANDIDATE_AUDIT_OPERATION,
@@ -486,6 +486,7 @@ function prepareRequiredAudit(metadataOnlyAudit, context) {
       review_queue_item_count: 1,
       fresh_write_count: context.freshWriteCount,
     },
+    db: tx,
   });
 
   const okDescriptor =
@@ -670,7 +671,7 @@ export function createPostgresConflictReviewCandidateRepository({
             higherGapId,
             freshWriteCount: 2,
           };
-          const preparedAudit = prepareRequiredAudit(metadataOnlyAudit, auditContext);
+          const preparedAudit = prepareRequiredAudit(metadataOnlyAudit, tx, auditContext);
           await insertAudit(tx, {
             organizationId,
             intakeFileId: auditClaimBundle.candidateRow.intake_file_id,

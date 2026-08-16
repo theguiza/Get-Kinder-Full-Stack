@@ -408,9 +408,10 @@ class RequiredAuditRejectedError extends Error {
   }
 }
 
-function prepareRequiredAudit(metadataOnlyAudit, record) {
+function prepareRequiredAudit(metadataOnlyAudit, tx, record) {
   const prepared = metadataOnlyAudit.prepareMetadataOnlyAudit({
     payload: buildDictionaryAuditPayload(record),
+    db: tx,
   });
 
   const okDescriptor =
@@ -585,7 +586,7 @@ export function createPostgresDataDictionaryRepository({ runInTransaction = with
             finding_count: derivedFindings.length,
           };
 
-          const preparedAudit = prepareRequiredAudit(metadataOnlyAudit, record);
+          const preparedAudit = prepareRequiredAudit(metadataOnlyAudit, tx, record);
           await insertAudit(tx, {
             organizationId: profileRow.organization_id,
             intakeFileId: profileRow.intake_file_id,

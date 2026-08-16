@@ -339,9 +339,10 @@ class RequiredAuditRejectedError extends Error {
   }
 }
 
-function prepareRequiredAudit(metadataOnlyAudit, record, attemptedOperation) {
+function prepareRequiredAudit(metadataOnlyAudit, tx, record, attemptedOperation) {
   const prepared = metadataOnlyAudit.prepareMetadataOnlyAudit({
     payload: buildParserRunAuditPayload(record, attemptedOperation),
+    db: tx,
   });
 
   const okDescriptor =
@@ -477,7 +478,7 @@ export function createPostgresParserRunRepository({ runInTransaction = withTrans
           if (updated.rowCount !== 1) return parserRunFailure("conflict_current_state_changed");
 
           const running = await readParserRun(tx, identity);
-          const preparedAudit = prepareRequiredAudit(metadataOnlyAudit, running, "parser_run_claimed");
+          const preparedAudit = prepareRequiredAudit(metadataOnlyAudit, tx, running, "parser_run_claimed");
           await insertAudit(tx, {
             identity,
             operation: PARSER_RUN_AUDIT_OPERATION,
@@ -550,7 +551,7 @@ export function createPostgresParserRunRepository({ runInTransaction = withTrans
           if (runUpdate.rowCount !== 1) return parserRunFailure("conflict_current_state_changed");
 
           const completed = await readParserRun(tx, identity);
-          const preparedAudit = prepareRequiredAudit(metadataOnlyAudit, completed, "parser_run_completed");
+          const preparedAudit = prepareRequiredAudit(metadataOnlyAudit, tx, completed, "parser_run_completed");
           await insertAudit(tx, {
             identity,
             operation: FILE_PROFILE_AUDIT_OPERATION,
@@ -612,7 +613,7 @@ export function createPostgresParserRunRepository({ runInTransaction = withTrans
           if (updated.rowCount !== 1) return parserRunFailure("conflict_current_state_changed");
 
           const failed = await readParserRun(tx, identity);
-          const preparedAudit = prepareRequiredAudit(metadataOnlyAudit, failed, "parser_run_failed_safely");
+          const preparedAudit = prepareRequiredAudit(metadataOnlyAudit, tx, failed, "parser_run_failed_safely");
           await insertAudit(tx, {
             identity,
             operation: PARSER_RUN_AUDIT_OPERATION,
@@ -672,7 +673,7 @@ export function createPostgresParserRunRepository({ runInTransaction = withTrans
           if (updated.rowCount !== 1) return parserRunFailure("conflict_current_state_changed");
 
           const requeued = await readParserRun(tx, identity);
-          const preparedAudit = prepareRequiredAudit(metadataOnlyAudit, requeued, "parser_run_requeued_for_retry");
+          const preparedAudit = prepareRequiredAudit(metadataOnlyAudit, tx, requeued, "parser_run_requeued_for_retry");
           await insertAudit(tx, {
             identity,
             operation: PARSER_RUN_AUDIT_OPERATION,

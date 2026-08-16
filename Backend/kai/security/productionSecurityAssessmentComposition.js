@@ -100,7 +100,7 @@ function adaptAssessmentByteSource(source) {
  * server-side from stored intake_files columns, and the generation is
  * resolved from the existing Gate C-1 binding, not re-derived.
  */
-function createBoundGcsAssessmentStorageAdapter({ facts, gcsProvider, uploadLifecycleRepository }) {
+export function createBoundGcsAssessmentStorageAdapter({ facts, gcsProvider, uploadLifecycleRepository }) {
   if (
     !isGcsExactGenerationProvider(gcsProvider)
     || !isGcsBindingRepository(uploadLifecycleRepository)

@@ -15,6 +15,7 @@ import DonorDashboard from "./donorDashboard.jsx";
 import DonatePage from "./donate.jsx";
 import AdminDashboard from "./adminDashboard.jsx";
 import KaiReviewCockpit from "./kaiReviewCockpit.jsx";
+import KaiClientFollowupReview from "./KaiClientFollowupReview.jsx";
 import GkExportReviewDetail from "./gkExportReviewDetail.jsx";
 import { renderOrgPortal, renderKpiStrip } from "./orgPortal.jsx";
 import { renderOrgWorkspace } from "./orgWorkspace.jsx";
@@ -140,6 +141,21 @@ window.renderGkExportReviewDetail = (selector = "#gk-export-review-detail-root",
   root.render(
     <React.StrictMode>
       <GkExportReviewDetail {...props} />
+    </React.StrictMode>
+  );
+};
+
+// KAI P2-11 client-reviewer-facing follow-up disposition page. Reachable under
+// ordinary site authentication only - the client_reviewer KAI role is
+// enforced server-side by the underlying read/completion routes, not by this
+// page.
+window.renderKaiClientFollowupReview = (selector = "#kai-client-followup-review-root", props = {}) => {
+  const el = typeof selector === "string" ? document.querySelector(selector) : selector;
+  if (!el) return;
+  const root = getOrCreateRoot(el);
+  root.render(
+    <React.StrictMode>
+      <KaiClientFollowupReview {...props} />
     </React.StrictMode>
   );
 };

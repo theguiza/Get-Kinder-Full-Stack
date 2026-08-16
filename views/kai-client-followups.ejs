@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="csrf-token" content="<%= csrfToken %>">
+  <title>KAI Client Follow-ups</title>
+  <link rel="stylesheet" href="/css/style.css" />
+  <link rel="icon" href="/images/favicon.png" sizes="32x32" type="image/png" />
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-SgOJa3DmI69IUzQ2PVdRZhwQ+dy64/BUtbMJw1MZ8t5HZApcHrRKUc4W0kG879m7" crossorigin="anonymous"/>
+</head>
+<body style="background:#f5f7fb; padding-top: clamp(88px, 14vw, 112px);">
+  <%- include("partials/site-header", { currentPage: "kai-client-followups" }) %>
+
+  <main class="container-fluid admin-shell-container py-4 px-0">
+    <div id="kai-client-followup-review-root"></div>
+  </main>
+
+  <%- include("partials/site-footer") %>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/js/bootstrap.bundle.min.js" integrity="sha384-k6d4wzSIapyDyv1kpU366/PK5hCdSbCRGRCMv+eplOQJWyd1fbcAu9OCUj5zNLiq" crossorigin="anonymous"></script>
+  <script type="application/json" id="kai-client-followup-review-props">
+    <%- JSON.stringify({ organizationId }) %>
+  </script>
+  <script src="/js/bundles/entry.js?<%= assetTag %>"></script>
+  <script>
+    window.renderKaiClientFollowupReview(
+      "#kai-client-followup-review-root",
+      JSON.parse(document.getElementById("kai-client-followup-review-props").textContent)
+    );
+  </script>
+</body>
+</html>
