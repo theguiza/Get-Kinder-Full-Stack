@@ -203,8 +203,15 @@ function sanitizeServiceData(data) {
 function safeAuthenticatedUser(req = {}) {
   const user = req?.["user"];
   if (!user || typeof user !== "object" || Array.isArray(user)) return null;
+
+  const email =
+    typeof user.email === "string" && user.email.trim()
+      ? user.email.trim()
+      : null;
+
   return {
     id: user.id,
+    email,
   };
 }
 

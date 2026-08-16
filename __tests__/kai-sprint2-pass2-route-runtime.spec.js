@@ -210,7 +210,9 @@ test("admin batch list route delegates sanitized query scope with no direct data
     assert.equal(serviceInput.organizationId, "org-1");
     assert.equal(serviceInput.route, "/api/kai/sprint2/intake/admin/batches");
     assert.notEqual(serviceInput.req, originalReq);
-    assert.deepEqual(serviceInput.req, { user: { id: 46 } });
+    assert.deepEqual(serviceInput.req, {
+      user: { id: 46, email: "email-sentinel@example.test" },
+    });
     assert.deepEqual(serviceInput.payload, {});
     assert.equal("headers" in serviceInput, false);
     assert.equal("cookies" in serviceInput, false);
@@ -266,6 +268,7 @@ test("admin access route delegates to checkAdminAccess with sanitized request co
     assert.deepEqual(serviceInput.req, {
       user: {
         id: 46,
+        email: "email-sentinel@example.test",
       },
     });
     assert.equal("headers" in serviceInput, false);
@@ -302,7 +305,9 @@ test("admin organizations bootstrap route delegates to listAuthorizedOrganizatio
 
     assert.equal(res.statusCode, 200);
     assert.deepEqual(res.body.data.items, [{ organization_id: "org-1" }]);
-    assert.deepEqual(serviceInput, { req: { user: { id: 46 } } });
+    assert.deepEqual(serviceInput, {
+      req: { user: { id: 46, email: "email-sentinel@example.test" } },
+    });
     assert.equal("headers" in serviceInput, false);
     assert.equal("cookies" in serviceInput, false);
     assert.equal("session" in serviceInput, false);
@@ -338,7 +343,9 @@ test("admin organizations engagements route delegates to listAuthorizedEngagemen
 
     assert.equal(res.statusCode, 200);
     assert.equal(serviceInput.organizationId, organizationId);
-    assert.deepEqual(serviceInput.req, { user: { id: 46 } });
+    assert.deepEqual(serviceInput.req, {
+      user: { id: 46, email: "email-sentinel@example.test" },
+    });
     assert.equal("headers" in serviceInput, false);
     assert.equal("cookies" in serviceInput, false);
     assert.equal("session" in serviceInput, false);
@@ -857,4 +864,51 @@ test("auth preflight route applies the Sprint 2 gate without calling intake serv
   assert.match(route, /requireKaiSprint2Enabled/);
   assert.match(route, /router\.use\(requireKaiSprint2Enabled\)/);
   assert.doesNotMatch(route, /kaiIntakeService|kaiIntakeQueries|kaiQueries|kaiDb|pool\.query/);
+});
+
+test("admin organizations bootstrap preserves authenticated email required for KAI JIT provisioning while excluding unrelated user fields", async () => {
+  let serviceInput = null;
+
+  const restore = intakeRouteTestables.setIntakeServiceForTest({
+    async listAuthorizedOrganizations(input) {
+      serviceInput = input;
+      return {
+        ok: true,
+        data: { items: [] },
+        warnings: [],
+      };
+    },
+  });
+
+  try {
+    const originalReq = {
+      query: {},
+      params: {},
+      body: {},
+      user: {
+        id: 46,
+        email: "  admin@example.com  ",
+        password_hash: "must-not-pass-through",
+        some_other_field: "must-not-pass-through",
+      },
+    };
+
+    const res = await invokeRoute("/admin/organizations", "get", originalReq);
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(serviceInput.req.user, {
+      id: 46,
+      email: "admin@example.com",
+    });
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(serviceInput.req.user, "password_hash"),
+      false,
+    );
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(serviceInput.req.user, "some_other_field"),
+      false,
+    );
+  } finally {
+    restore();
+  }
 });

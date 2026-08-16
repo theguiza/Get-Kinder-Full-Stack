@@ -490,7 +490,7 @@ test("real upload route streams through service boundary with safe identifiers",
     assert.equal(serviceInput.intakeBatchId, intakeBatchId);
     assert.equal(serviceInput.intakeFileId, intakeFileId);
     assert.equal(serviceInput.route, "/api/kai/sprint2/intake/admin/files/:intakeFileId/upload");
-    assert.deepEqual(serviceInput.req.user, { id: 46 });
+    assert.deepEqual(serviceInput.req.user, { id: 46, email: null });
     assert.equal(typeof serviceInput.signal.aborted, "boolean");
     assert.equal(JSON.stringify(res.body).includes("must-not-pass"), false);
   } finally {
@@ -506,7 +506,7 @@ test("real confirm-upload route rejects caller verification facts and delegates 
       assert.equal(input.organizationId, organizationId);
       assert.equal(input.intakeFileId, intakeFileId);
       assert.equal(input.route, "/api/kai/sprint2/intake/admin/files/:intakeFileId/confirm-upload");
-      assert.deepEqual(input.req.user, { id: 46 });
+      assert.deepEqual(input.req.user, { id: 46, email: null });
       return {
         ok: true,
         data: {
@@ -585,7 +585,7 @@ test("contract upload-url route rejects storage overrides and delegates only saf
       assert.equal(input.intakeBatchId, intakeBatchId);
       assert.equal(input.intakeFileId, intakeFileId);
       assert.equal(input.route, "/api/kai/sprint2/intake/admin/batches/:intakeBatchId/files/upload-url");
-      assert.deepEqual(input.req.user, { id: 46 });
+      assert.deepEqual(input.req.user, { id: 46, email: null });
       assert.equal(input.bucket, undefined);
       assert.equal(input.objectKey, undefined);
       assert.equal(input.storageObjectKey, undefined);
