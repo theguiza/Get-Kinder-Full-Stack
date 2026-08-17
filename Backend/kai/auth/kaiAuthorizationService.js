@@ -134,9 +134,12 @@ export function validateActorCanPerformOperation(actorContext, operation, organi
   }
 
   const allowedRoles = options.allowedRoles || OPERATION_ROLES[operation] || OPERATION_ROLES.read_intake;
+  const hasGlobalCapabilityRole =
+    Boolean(options.combineGlobalRoles) &&
+    (actorContext.kaiRoles || []).some((role) => allowedRoles.has(role));
   const hasAllowedRole = P0_MUTATING_OPERATIONS.has(operation)
     ? true
-    : memberships.some((membership) => allowedRoles.has(membership.role_name));
+    : hasGlobalCapabilityRole || memberships.some((membership) => allowedRoles.has(membership.role_name));
   if (!hasAllowedRole) {
     return {
       ok: false,

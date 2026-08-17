@@ -413,9 +413,16 @@ test("P1-09 service (role enforcement): only gk_admin/gk_operator/gk_reviewer wi
 
   const deniedScenarios = [
     humanActor({ organizationMemberships: [] }),
-    humanActor({ organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "org_viewer" }] }),
+    humanActor({
+      kaiRoles: [],
+      organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "org_viewer" }],
+    }),
     humanActor({ organizationMemberships: [{ organization_id: ORG, membership_status: "revoked", role_name: "gk_operator" }] }),
     humanActor({ organizationMemberships: [{ organization_id: ORG, membership_status: "invited", role_name: "gk_operator" }] }),
+    humanActor({
+      kaiRoles: [],
+      organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_admin" }],
+    }),
   ];
   for (const actorContext of deniedScenarios) {
     const calls = [];
@@ -423,10 +430,52 @@ test("P1-09 service (role enforcement): only gk_admin/gk_operator/gk_reviewer wi
       { organizationId: ORG, actorContext, selection: {} },
       readDependencies({ async listReviewCockpitQueueItems() { calls.push("queue"); return []; } }),
     );
-    assert.equal(result.ok, false, JSON.stringify(actorContext.organizationMemberships));
+    assert.equal(result.ok, false, JSON.stringify(actorContext));
     assert.equal(result.error.code, "authorization_denied");
     assert.deepEqual(calls, []);
   }
+});
+
+test("P1-09 service (role enforcement): a global gk_admin/gk_operator/gk_reviewer capability combines with active org-scoped membership of any read_intake-eligible role", async () => {
+  for (const role of ["gk_admin", "gk_operator", "gk_reviewer"]) {
+    const result = await listReviewCockpitQueue(
+      {
+        organizationId: ORG,
+        actorContext: humanActor({
+          kaiRoles: [role],
+          organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_admin" }],
+        }),
+        selection: {},
+      },
+      readDependencies(),
+    );
+    assert.equal(result.ok, true, role);
+  }
+
+  const withoutOrgAccess = await listReviewCockpitQueue(
+    {
+      organizationId: ORG,
+      actorContext: humanActor({ kaiRoles: ["gk_admin"], organizationMemberships: [] }),
+      selection: {},
+    },
+    readDependencies(),
+  );
+  assert.equal(withoutOrgAccess.ok, false);
+  assert.equal(withoutOrgAccess.error.code, "authorization_denied");
+
+  const crossTenantMembership = await listReviewCockpitQueue(
+    {
+      organizationId: ORG,
+      actorContext: humanActor({
+        kaiRoles: ["gk_admin"],
+        organizationMemberships: [{ organization_id: OTHER_ORG, membership_status: "active", role_name: "org_viewer" }],
+      }),
+      selection: {},
+    },
+    readDependencies(),
+  );
+  assert.equal(crossTenantMembership.ok, false);
+  assert.equal(crossTenantMembership.error.code, "authorization_denied");
 });
 
 test("P1-09 service (tenant isolation): an actor with membership only in another organization is denied, and every read is scoped to the requested organization_id", async () => {

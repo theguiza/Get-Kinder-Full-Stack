@@ -188,7 +188,7 @@ async function authorizeReviewCockpitRequest(input, dependencies) {
     actorContext,
     REVIEW_COCKPIT_READ_OPERATION,
     organizationId,
-    { allowedRoles: REVIEW_COCKPIT_READ_ROLES },
+    { allowedRoles: REVIEW_COCKPIT_READ_ROLES, combineGlobalRoles: true },
   );
   if (!roleAuth.ok) {
     return { ok: false, error: buildKaiError(roleAuth.error_code, { blockers: roleAuth.blockers }) };
