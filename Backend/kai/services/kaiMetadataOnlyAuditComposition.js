@@ -797,6 +797,71 @@ export function createProductionMetadataOnlyAuditForGeneratedContentReview({
   });
 }
 
+/**
+ * Production composition of the `metadataOnlyAudit` contract for the KAI
+ * organization-enablement package (Get Kinder organization -> KAI
+ * organization/binding/initial-engagement provisioning). Bound at
+ * construction to the newly bound kaiOrganizationId, mirroring the P2-01
+ * source-version adapter's identity discipline: this operation's object
+ * identity is the KAI organization itself, not a caller-supplied field, so no
+ * payload field is required to derive it.
+ */
+export function createProductionMetadataOnlyAuditForOrganizationKaiEnablement({
+  kaiOrganizationId,
+  actorContext,
+  now,
+  insertAuditEvent = insertRequiredSuccessfulAuditEvent,
+} = {}) {
+  if (typeof kaiOrganizationId !== "string" || kaiOrganizationId.length === 0) {
+    throw new TypeError("createProductionMetadataOnlyAuditForOrganizationKaiEnablement requires kaiOrganizationId.");
+  }
+
+  function isPlainObject(value) {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  }
+
+  return Object.freeze({
+    prepareMetadataOnlyAudit({ payload, db } = {}) {
+      if (!isPlainObject(payload)) return { ok: false };
+
+      const metadata = {
+        organization_id: kaiOrganizationId,
+        engagement_id: typeof payload.engagement_id === "string" ? payload.engagement_id : null,
+        object_type: "organization",
+        target_object_type: "organization",
+        object_id: kaiOrganizationId,
+        operation: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "enable_kai_for_organization",
+        operation_type: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "enable_kai_for_organization",
+        validator_key: typeof payload.validator_key === "string" ? payload.validator_key : null,
+        actor_type: actorContext?.actorType || "human",
+        actor_user_id: actorContext?.actorUserId || null,
+        request_id: actorContext?.requestId || null,
+        route: "kai_organization_enablement",
+        created_at: typeof now === "string" ? now : new Date().toISOString(),
+        metadata_only: true,
+        contains_raw_file_content: false,
+        contains_raw_parsed_rows: false,
+        contains_client_pii: false,
+        contains_prompt_text: false,
+        contains_unsafe_generated_text: false,
+        contains_signed_urls: false,
+        contains_storage_credentials: false,
+      };
+
+      return {
+        ok: true,
+        async publish() {
+          const result = await insertAuditEvent(metadata, db);
+          if (!result || result.ok !== true) {
+            throw new Error("kai_organization_enablement_metadata_only_audit_publish_failed");
+          }
+          return result;
+        },
+      };
+    },
+  });
+}
+
 export const __testables = Object.freeze({
   createProductionMetadataOnlyAudit,
   createProductionMetadataOnlyAuditForSourceVersion,
@@ -809,4 +874,5 @@ export const __testables = Object.freeze({
   createProductionMetadataOnlyAuditForClientFollowupCompletion,
   createProductionMetadataOnlyAuditForGeneratedContentDraft,
   createProductionMetadataOnlyAuditForGeneratedContentReview,
+  createProductionMetadataOnlyAuditForOrganizationKaiEnablement,
 });

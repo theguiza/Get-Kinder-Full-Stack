@@ -108,6 +108,10 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     "/admin/files/:intakeFileId/block",
     "/admin/files/:intakeFileId/confirm-upload",
     "/admin/files/:intakeFileId/upload",
+    // Get Kinder organization -> KAI provisioning (enableKaiForOrganization):
+    // read (GET) and write (POST) on the same path, additive, and every
+    // prior entry preserved verbatim.
+    "/admin/gk-organizations/:gkOrganizationId/kai-enablement",
     // KAI Web Intake organization bootstrap: read-only, additive, and every
     // prior entry preserved verbatim.
     "/admin/organizations",

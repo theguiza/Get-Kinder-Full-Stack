@@ -558,7 +558,8 @@ function validateReviewQueueStatusRequestOrSend(req, res) {
 async function invokeService(res, serviceCall, successStatus = 200, exceptionData = null) {
   try {
     return sendServiceResult(res, await serviceCall(), successStatus);
-  } catch {
+  } catch (error) {
+    console.error("[kai-sprint2-intake] system_error", error);
     if (exceptionData) {
       return sendServiceResult(res, {
         ok: false,
@@ -1021,6 +1022,15 @@ async function getOrganizationContextService() {
   return organizationContextServicePromise;
 }
 
+let organizationEnablementServicePromise = null;
+async function getOrganizationEnablementService() {
+  if (intakeServiceOverride?.enableKaiForOrganization) return intakeServiceOverride;
+  organizationEnablementServicePromise ||= import("../services/kaiOrganizationEnablementService.js");
+  return organizationEnablementServicePromise;
+}
+
+const GK_ORGANIZATION_ID_PATTERN = /^[1-9][0-9]{0,9}$/;
+
 /**
  * KAI Web Intake organization-bootstrap read: the authenticated actor's own
  * organizations authorized for ordinary intake, so the browser never has to
@@ -1055,6 +1065,58 @@ router.get("/admin/organizations/:organizationId/engagements", async (req, res) 
       req: { user: safeAuthenticatedUser(req) },
     });
   });
+});
+
+function validateGkOrganizationIdParamOrSend(req, res) {
+  const gkOrganizationId = typeof req.params?.gkOrganizationId === "string" ? req.params.gkOrganizationId : "";
+  if (!GK_ORGANIZATION_ID_PATTERN.test(gkOrganizationId)) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("invalid_gk_organization_id_field", "gk_organization_id")],
+    });
+    return null;
+  }
+  return Number(gkOrganizationId);
+}
+
+/**
+ * Get Kinder organization -> KAI provisioning read: lets the organization
+ * administration UI show "Not enabled" / "Enable KAI" versus "Enabled" /
+ * "Open KAI" without ever creating anything. Read-only.
+ */
+router.get("/admin/gk-organizations/:gkOrganizationId/kai-enablement", async (req, res) => {
+  const gkOrganizationId = validateGkOrganizationIdParamOrSend(req, res);
+  if (gkOrganizationId === null) return;
+  return invokeService(res, async () => {
+    const service = await getOrganizationEnablementService();
+    return service.getKaiEnablementStatusForOrganization({
+      gkOrganizationId,
+      req: { user: safeAuthenticatedUser(req) },
+    });
+  });
+});
+
+/**
+ * Get Kinder organization -> KAI provisioning write: creates or reuses the
+ * KAI organization binding and its one initial engagement for the requesting
+ * Get Kinder organization administrator's own organization. No body is
+ * accepted - the browser never supplies a kai_organization_id, engagement_id,
+ * or binding id.
+ */
+router.post("/admin/gk-organizations/:gkOrganizationId/kai-enablement", async (req, res) => {
+  const gkOrganizationId = validateGkOrganizationIdParamOrSend(req, res);
+  if (gkOrganizationId === null) return;
+  if (Object.keys(requestPayload(req)).length !== 0) {
+    return sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("unknown_field", "body")],
+    });
+  }
+  return invokeService(res, async () => {
+    const service = await getOrganizationEnablementService();
+    return service.enableKaiForOrganization({
+      gkOrganizationId,
+      req: { user: safeAuthenticatedUser(req) },
+    });
+  }, 201);
 });
 
 router.post("/admin/batches", async (req, res) => {

@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import ReactDOM from "react-dom/client";
+import { enableKai, getKaiEnablementStatus } from "./kaiOrgEnablementLogic.js";
 
 const MOCK_EVENTS = [
   {
@@ -373,10 +374,74 @@ function LeftSidebar({ orgName }) {
   );
 }
 
-function RightSidebar({ orgName }) {
+function KaiEnablementPanel({ gkOrganizationId }) {
+  const [status, setStatus] = useState("loading");
+  const [kaiOrganizationId, setKaiOrganizationId] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!gkOrganizationId) {
+      setStatus("unavailable");
+      return;
+    }
+    getKaiEnablementStatus(gkOrganizationId).then(({ statusCode, body }) => {
+      if (cancelled) return;
+      if (statusCode === 200 && body?.ok) {
+        setStatus(body.data?.kai_enabled ? "enabled" : "disabled");
+        setKaiOrganizationId(body.data?.kai_organization_id || null);
+      } else {
+        setStatus("unavailable");
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [gkOrganizationId]);
+
+  async function handleEnable() {
+    setStatus("enabling");
+    const { statusCode, body } = await enableKai(gkOrganizationId);
+    if (statusCode === 201 && body?.ok) {
+      setStatus("enabled");
+      setKaiOrganizationId(body.data?.kai_organization_id || null);
+    } else {
+      setStatus("disabled");
+    }
+  }
+
+  return (
+    <section className="orgw-kai-panel">
+      <h2>KAI</h2>
+      {status === "loading" && <p className="orgw-kai-status">Checking…</p>}
+      {status === "unavailable" && <p className="orgw-kai-status">Unavailable</p>}
+      {(status === "disabled" || status === "enabling") && (
+        <>
+          <p className="orgw-kai-status">Not enabled</p>
+          <button
+            type="button"
+            className="orgw-btn orgw-btn-coral"
+            onClick={handleEnable}
+            disabled={status === "enabling"}
+          >
+            {status === "enabling" ? "Enabling…" : "Enable KAI"}
+          </button>
+        </>
+      )}
+      {status === "enabled" && (
+        <>
+          <p className="orgw-kai-status">Enabled</p>
+          <a className="orgw-kai-button" href="/kai/client-followups">Open KAI</a>
+        </>
+      )}
+    </section>
+  );
+}
+
+function RightSidebar({ orgName, gkOrganizationId }) {
   const initials = initialsFromName(orgName);
   return (
     <aside className="orgw-right">
+      <KaiEnablementPanel gkOrganizationId={gkOrganizationId} />
       <section>
         <h2>ABOUT</h2>
         <p>
@@ -433,7 +498,7 @@ function RightSidebar({ orgName }) {
   );
 }
 
-function OrgWorkspace({ orgName = "Get Kinder", eventId = null }) {
+function OrgWorkspace({ orgName = "Get Kinder", eventId = null, activeOrgId = null }) {
   const [selectedEventId, setSelectedEventId] = useState(eventId || null);
   const activeEventId = selectedEventId || eventId;
 
@@ -448,7 +513,7 @@ function OrgWorkspace({ orgName = "Get Kinder", eventId = null }) {
           <EventsList onSelectEvent={setSelectedEventId} />
         )}
       </main>
-      <RightSidebar orgName={orgName} />
+      <RightSidebar orgName={orgName} gkOrganizationId={activeOrgId} />
     </div>
   );
 }
@@ -537,6 +602,17 @@ function OrgWorkspaceStyles() {
         font-size: 11px;
         height: 30px;
         width: 30px;
+      }
+
+      .orgw-kai-panel .orgw-kai-status {
+        color: #8290aa;
+        font-size: 13px;
+        margin: 0 0 8px;
+      }
+
+      .orgw-kai-panel a.orgw-btn {
+        display: inline-block;
+        text-decoration: none;
       }
 
       .orgw-org-card strong,
