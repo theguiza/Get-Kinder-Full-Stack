@@ -74,19 +74,31 @@ CREATE TYPE kai.anonymization_action_enum AS ENUM ('none', 'pseudonymize', 'aggr
 CREATE TYPE kai.legal_hold_status_enum AS ENUM ('none', 'active');
 CREATE TYPE kai.classification_review_status_enum AS ENUM ('proposed', 'confirmed');
 CREATE TYPE kai.classification_source_enum AS ENUM ('imported', 'rule_assigned', 'human');
--- Both labels the current repository's review-queue producers can actually write
--- are included: 'normal' (the only distinct `PRIORITY = "<label>"` value under
--- Backend/kai/ - postgresReviewQueueRepository, postgresSourceCandidateRepository,
--- kaiConflictGroupValidators, kaiClaimGapFollowupValidators,
--- exportReviewQueueContract) and 'medium' (the insert fallback in
--- Backend/kai/db/kaiIntakeQueries.js). Production confirms the column is this
--- enum with default 'medium', but the full label set was never captured, so
--- whether production's own priority_enum carries 'normal' is NOT_CONFIRMED. The
--- corrected preflight reads the labels from pg_enum and fails closed on any
--- missing one; this fixture stands up the passing case so the rest of the proof
--- can run.
-CREATE TYPE kai.priority_enum AS ENUM ('low', 'normal', 'medium', 'high', 'urgent');
+-- Production evidence supplied on 2026-08-17 proves review_queue_items.priority
+-- starts as kai.priority_enum, default 'medium', with these labels and no
+-- 'normal'. The cutover itself reconciles that shared-schema compatibility
+-- problem; the fixture must not pre-normalize it.
+CREATE TYPE kai.priority_enum AS ENUM (
+  'mandatory',
+  'immediate_fix',
+  'high',
+  'medium',
+  'low',
+  'backlog',
+  'not_applicable',
+  'unknown'
+);
 CREATE TYPE kai.gap_type_enum AS ENUM ('data_quality', 'coverage', 'consent');
+
+CREATE OR REPLACE FUNCTION kai.set_updated_at()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  NEW.updated_at := now();
+  RETURN NEW;
+END;
+$$;
 
 -- ==========================================================================
 -- 1. Minimal synthetic referents for base tables the captured FKs point at.
@@ -1137,5 +1149,42 @@ INSERT INTO kai.review_queue_items (
   ('11110000-0000-4000-8000-0000000000a5', '00000000-0000-4000-8000-000000000001',
    'e0000000-0000-4000-8000-000000000001', 'evidence_review', 'evidence_item',
    'f2000000-0000-4000-8000-00000000f001', 'open', 'Legacy evidence review', NULL, '2026-01-15T05:00:00Z');
+
+CREATE TRIGGER trg_data_dictionaries_updated_at
+  BEFORE UPDATE ON kai.data_dictionaries
+  FOR EACH ROW EXECUTE FUNCTION kai.set_updated_at();
+CREATE TRIGGER trg_data_dictionary_fields_updated_at
+  BEFORE UPDATE ON kai.data_dictionary_fields
+  FOR EACH ROW EXECUTE FUNCTION kai.set_updated_at();
+CREATE TRIGGER trg_data_dictionary_mappings_updated_at
+  BEFORE UPDATE ON kai.data_dictionary_mappings
+  FOR EACH ROW EXECUTE FUNCTION kai.set_updated_at();
+CREATE TRIGGER trg_data_quality_findings_updated_at
+  BEFORE UPDATE ON kai.data_quality_findings
+  FOR EACH ROW EXECUTE FUNCTION kai.set_updated_at();
+CREATE TRIGGER trg_evidence_items_updated_at
+  BEFORE UPDATE ON kai.evidence_items
+  FOR EACH ROW EXECUTE FUNCTION kai.set_updated_at();
+CREATE TRIGGER trg_intake_file_profiles_updated_at
+  BEFORE UPDATE ON kai.intake_file_profiles
+  FOR EACH ROW EXECUTE FUNCTION kai.set_updated_at();
+CREATE TRIGGER trg_intake_parser_runs_updated_at
+  BEFORE UPDATE ON kai.intake_parser_runs
+  FOR EACH ROW EXECUTE FUNCTION kai.set_updated_at();
+CREATE TRIGGER trg_intake_sensitivity_profiles_updated_at
+  BEFORE UPDATE ON kai.intake_sensitivity_profiles
+  FOR EACH ROW EXECUTE FUNCTION kai.set_updated_at();
+CREATE TRIGGER trg_intake_source_candidates_updated_at
+  BEFORE UPDATE ON kai.intake_source_candidates
+  FOR EACH ROW EXECUTE FUNCTION kai.set_updated_at();
+CREATE TRIGGER trg_source_locators_updated_at
+  BEFORE UPDATE ON kai.source_locators
+  FOR EACH ROW EXECUTE FUNCTION kai.set_updated_at();
+CREATE TRIGGER trg_source_versions_updated_at
+  BEFORE UPDATE ON kai.source_versions
+  FOR EACH ROW EXECUTE FUNCTION kai.set_updated_at();
+CREATE TRIGGER trg_sources_updated_at
+  BEFORE UPDATE ON kai.sources
+  FOR EACH ROW EXECUTE FUNCTION kai.set_updated_at();
 
 COMMIT;

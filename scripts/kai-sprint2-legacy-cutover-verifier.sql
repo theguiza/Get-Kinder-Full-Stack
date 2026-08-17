@@ -164,6 +164,49 @@ checks AS (
          CASE WHEN obj_description((SELECT oid FROM pg_namespace WHERE nspname = 'kai_legacy_20260817'), 'pg_namespace')
                    IS NOT NULL THEN 'PASS' ELSE 'FAIL' END,
          'the preserved schema records what it is, so it cannot be mistaken for a canonical namespace'
+  UNION ALL
+  SELECT 'LEGACY_PRESERVATION', 'UPDATED_AT_TRIGGER_PRESERVED',
+         'kai_legacy_20260817.' || split_part(spec, '@', 1) || '.' || split_part(spec, '@', 2),
+         CASE WHEN EXISTS (
+           SELECT 1 FROM pg_trigger tg
+             JOIN pg_class r ON r.oid = tg.tgrelid
+             JOIN pg_namespace n ON n.oid = r.relnamespace
+             JOIN pg_proc p ON p.oid = tg.tgfoid
+             JOIN pg_namespace pn ON pn.oid = p.pronamespace
+            WHERE n.nspname = 'kai_legacy_20260817'
+              AND r.relname = split_part(spec, '@', 1)
+              AND tg.tgname = split_part(spec, '@', 2)
+              AND NOT tg.tgisinternal
+              AND pn.nspname = 'kai'
+              AND p.proname = 'set_updated_at'
+              AND pg_get_triggerdef(tg.oid) = format('CREATE TRIGGER %I BEFORE UPDATE ON kai_legacy_20260817.%I FOR EACH ROW EXECUTE FUNCTION kai.set_updated_at()', split_part(spec, '@', 2), split_part(spec, '@', 1))
+         ) THEN 'PASS' ELSE 'FAIL' END,
+         'allowed legacy row-maintenance trigger remains attached to the preserved legacy relation'
+    FROM unnest(ARRAY[
+      'data_dictionaries@trg_data_dictionaries_updated_at',
+      'data_dictionary_fields@trg_data_dictionary_fields_updated_at',
+      'data_dictionary_mappings@trg_data_dictionary_mappings_updated_at',
+      'data_quality_findings@trg_data_quality_findings_updated_at',
+      'evidence_items@trg_evidence_items_updated_at',
+      'intake_file_profiles@trg_intake_file_profiles_updated_at',
+      'intake_parser_runs@trg_intake_parser_runs_updated_at',
+      'intake_sensitivity_profiles@trg_intake_sensitivity_profiles_updated_at',
+      'intake_source_candidates@trg_intake_source_candidates_updated_at',
+      'source_locators@trg_source_locators_updated_at',
+      'source_versions@trg_source_versions_updated_at',
+      'sources@trg_sources_updated_at'
+    ]) AS spec
+  UNION ALL
+  SELECT 'LEGACY_PRESERVATION', 'NO_CANONICAL_REPLACEMENT_TRIGGER', 'kai.* relocation replacements',
+         CASE WHEN NOT EXISTS (
+           SELECT 1 FROM pg_trigger tg
+             JOIN pg_class r ON r.oid = tg.tgrelid
+             JOIN pg_namespace n ON n.oid = r.relnamespace
+            WHERE n.nspname = 'kai'
+              AND r.relname IN (SELECT table_name FROM material)
+              AND NOT tg.tgisinternal
+         ) THEN 'PASS' ELSE 'FAIL' END,
+         'new canonical replacement tables must not inherit legacy updated_at triggers'
 
   -- 5. Material FK / dependency preservation.
   UNION ALL
@@ -275,20 +318,21 @@ checks AS (
   UNION ALL
   SELECT 'SHARED', 'QUEUE_PRIORITY_LABEL_STILL_WRITABLE',
          'kai.review_queue_items.priority=' || required_priority,
-         CASE WHEN NOT EXISTS (
-           SELECT 1 FROM pg_attribute a
-             JOIN pg_class r ON r.oid = a.attrelid
+         CASE WHEN EXISTS (
+           SELECT 1 FROM information_schema.columns c
+            WHERE c.table_schema = 'kai' AND c.table_name = 'review_queue_items'
+              AND c.column_name = 'priority' AND c.data_type = 'text'
+              AND c.column_default = '''medium''::text'
+         ) AND EXISTS (
+           SELECT 1 FROM pg_constraint pc JOIN pg_class r ON r.oid = pc.conrelid
              JOIN pg_namespace n ON n.oid = r.relnamespace
-             JOIN pg_type ty ON ty.oid = a.atttypid
             WHERE n.nspname = 'kai' AND r.relname = 'review_queue_items'
-              AND a.attname = 'priority' AND ty.typtype = 'e'
-              AND NOT EXISTS (
-                SELECT 1 FROM pg_enum e
-                 WHERE e.enumtypid = a.atttypid AND e.enumlabel = required_priority
-              )
+              AND pc.conname = 'review_queue_items_cutover_priority_compat_check'
+              AND pg_get_constraintdef(pc.oid) LIKE '%' || quote_literal(required_priority) || '%'
          ) THEN 'PASS' ELSE 'FAIL' END,
          'a priority label the current repository review-queue producers write; the shared column must still accept it after the cutover'
-    FROM unnest(ARRAY['normal', 'medium']) AS required_priority
+    FROM unnest(ARRAY['mandatory','immediate_fix','high','medium','low','backlog',
+                      'not_applicable','unknown','normal']) AS required_priority
   UNION ALL
   SELECT 'SHARED', 'AUDIT_WRITER_COLUMN_STILL_PRESENT',
          'kai.upload_lifecycle_audit.' || required_column,

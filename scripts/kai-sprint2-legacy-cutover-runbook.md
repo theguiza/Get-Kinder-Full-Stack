@@ -64,18 +64,21 @@ fabricates legacy P2 rows into the canonical generation.
      all thirteen objects, and `STARTING_STATE_IS_COHERENT` must pass. An
      `UNRECOGNIZED` classification means production has a third shape this
      package has never seen; do not proceed and do not guess.
-   - `PREREQUISITE / AUDIT_OPERATION_ALREADY_PERMITTED` must pass for all seven
-     operations the canonical producer chain writes. The bundle deliberately
-     never rewrites that live vocabulary, so if any is missing it must be widened
-     in its own separately reviewed change first.
-   - `PREREQUISITE / QUEUE_PRIORITY_ACCEPTS_CANONICAL_LITERAL` must pass.
-     Production's `review_queue_items.priority` is an enum whose labels no
-     supplied capture enumerates, and the canonical P1-06 producer writes
-     `'normal'`. If the live enum lacks that label, widen it in its own reviewed
-     change first - the bundle will not alter a shared live type.
-   - `DEPENDENCY / *` must pass. A view, materialized view, user trigger or
-     `kai` function body that references a relocation candidate is a dependency
-     this bundle does not model, and it fails closed.
+   - `PREREQUISITE / AUDIT_OPERATION_STARTING_OR_CONVERGED` must pass. A
+     Gate-A-only `upload_lifecycle_audit` operation CHECK is a supported
+     starting state; the bundle widens it atomically to the cumulative P1
+     producer vocabulary. An already-cumulative CHECK is accepted for rerun.
+   - `PREREQUISITE / QUEUE_PRIORITY_STARTING_OR_CONVERGED` must pass.
+     Production evidence shows `review_queue_items.priority` starts as
+     `kai.priority_enum` with default `'medium'` and no `'normal'`; the bundle
+     converts only that shared column to text with a compatibility CHECK that
+     preserves every production label and permits canonical `'normal'`.
+   - `DEPENDENCY / *` must pass. A view, materialized view, unexpected trigger,
+     unexpected trigger function/timing/event/relation, or `kai` function body
+     that references a relocation candidate is a dependency this bundle does
+     not model, and it fails closed. The exact production-supported
+     `BEFORE UPDATE FOR EACH ROW EXECUTE FUNCTION kai.set_updated_at()` trigger
+     set is allowed and verified by relation OID during relocation.
 
 4. **Establish and prove quiescence** for every writer of the thirteen
    relocation candidates and of `kai.review_queue_items`. From current HEAD, the
@@ -112,10 +115,12 @@ fabricates legacy P2 rows into the canonical generation.
 7. **Require every verifier row to be `PASS`.** It proves the canonical P1/P2-01
    objects and the exact column/constraint contracts the current code reads,
    schema-only empty canonical P2-01 installation, legacy preservation and row
-   counts, material foreign-key preservation, retained-dependent edges still
-   pointing at the preserved objects, shared-object contracts unnarrowed, that
-   no legacy queue target can be misread as canonical work, that no legacy
-   identity appears in a canonical table, and that the exact current source-candidate,
+   counts, allowed legacy `updated_at` triggers still attached to the preserved
+   relations, no inherited triggers on canonical replacements, material
+   foreign-key preservation, retained-dependent edges still pointing at the
+   preserved objects, shared-object contracts unnarrowed, that no legacy queue
+   target can be misread as canonical work, that no legacy identity appears in a
+   canonical table, and that the exact current source-candidate,
    promotion-decision and cockpit-queue projections compile and execute.
 
    If a check fails, use `migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql`
@@ -143,10 +148,13 @@ fabricates legacy P2 rows into the canonical generation.
 `migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql` is a
 **`PRE_REPROCESSING_ROLLBACK` only**. It is valid between step 5 and step 9,
 while the canonical tables are still empty. It removes the additive
-`review_queue_items` changes and the legacy-generation queue markers, drops the
-empty canonical tables, and moves every preserved legacy table back to `kai`,
-restoring names, locations, rows, identities, constraints, indexes and dependency
-edges. It refuses to run if any canonical row exists.
+`review_queue_items` changes and the legacy-generation queue markers, restores
+`review_queue_items.priority` to the pre-cutover enum/default when no
+post-cutover-only priority value has been written, restores the Gate-A audit
+constraints, drops the empty canonical tables, and moves every preserved legacy
+table back to `kai`, restoring names, locations, rows, identities, constraints,
+indexes and dependency edges. It refuses to run if any canonical row exists or
+if priority values outside the pre-cutover enum vocabulary exist.
 
 `POST_REPROCESSING_RECOVERY` - recovery after step 9 has produced genuine
 canonical records - is **not implemented**. Dropping the canonical tables then
@@ -171,10 +179,13 @@ ephemeral, loopback-only PostgreSQL 16 instance, builds the production-shaped
 legacy fixture from the four owner-supplied production captures, and proves, in
 order: the fixture matches every captured structure; the real 42703 failure
 reproduces pre-cutover; the preflight is fully green on the expected legacy state
-and fails closed on an unrecognized variation; a forced mid-cutover failure
-leaves the database byte-identical; the bundle applies; the verifier is fully
-green; legacy rows, relationships, retained dependents and shared contracts all
-survive; the pre-reprocessing rollback restores the exact fixture; re-applying
-and re-running the bundle are convergent no-ops; the real producer chain yields a
-working Review Cockpit detail with tenant isolation and convergent replay; and
-the rollback refuses once canonical rows exist. It never touches a real database.
+and fails closed on an unrecognized variation, unexpected trigger, unsupported
+priority shape, incompatible audit vocabulary, and unsatisfiable audit column; a
+forced mid-cutover failure leaves the database byte-identical; the bundle
+applies; priority `normal`/`medium` and the cumulative audit producer operations
+are writable; the verifier is fully green; legacy rows, relationships, retained
+dependents, updated_at triggers and shared contracts all survive; the
+pre-reprocessing rollback restores the exact fixture; re-applying and re-running
+the bundle are convergent no-ops; the real producer chain yields a working
+Review Cockpit detail with tenant isolation and convergent replay; and the
+rollback refuses once canonical rows exist. It never touches a real database.

@@ -18197,3 +18197,71 @@ steps passed after the correction. One additional local corrective commit was
 made; no push, deploy, production access/mutation, feature-flag/env/cloud/
 credential change, real client data use, historical migration edit, or
 `00_KAI_CURRENT_STATE.md` update was performed.
+
+Final production-compatibility correction (2026-08-17): The owner supplied two
+additional pgAdmin CSV captures after the preceding corrective HEAD
+`6447884b393584110fc6171855b86f107ebcce15`. USER_CONFIRMED production evidence:
+`data-1787005835934.csv` is the corrected read-only production preflight output
+with nine FAIL rows collapsing to three compatibility subjects; and
+`data-1787005970997.csv` proves the exact subject details: twelve legacy
+relocation-candidate `BEFORE UPDATE FOR EACH ROW EXECUTE FUNCTION
+kai.set_updated_at()` triggers, `kai.review_queue_items.priority` as
+`kai.priority_enum` defaulting to `'medium'::kai.priority_enum` with labels
+`mandatory`, `immediate_fix`, `high`, `medium`, `low`, `backlog`,
+`not_applicable`, `unknown` and no `normal`, plus Gate-A-only
+`kai.upload_lifecycle_audit.operation` vocabulary on text columns.
+
+TOOL_VERIFIED repository correction:
+  - `scripts/kai-sprint2-legacy-cutover-preflight.sql` now treats the exact
+    updated_at trigger set, exact production priority enum/default/vocabulary,
+    and Gate-A-only audit operation CHECK as supported transformable starting
+    state while still failing closed on unknown shapes.
+  - `migrations/kai_sprint2_legacy_generation_cutover_20260817.sql` preserves
+    the allowed trigger set by relation OID during relocation, proves the
+    trigger function remains `kai.set_updated_at`, proves canonical replacement
+    tables do not inherit those triggers, converts only
+    `kai.review_queue_items.priority` to text with a compatibility CHECK that
+    preserves every production label and permits canonical `normal`, and widens
+    `kai.upload_lifecycle_audit` to the cumulative Gate-A + P1 operation and
+    metadata contract inside the same atomic transaction.
+  - `migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql`
+    truthfully restores the pre-cutover priority enum/default only while no
+    non-precutover priority value exists, restores the Gate-A audit constraints,
+    and still refuses after canonical reprocessing.
+  - The production-shaped fixture now starts with the exact supplied production
+    priority labels and Gate-A-only audit vocabulary; it no longer pre-widens
+    either destination contract before preflight.
+  - The runbook and verifier now report the corrected shared-contract and
+    trigger-preservation proofs.
+
+TOOL_VERIFIED local proof:
+  - `DATABASE_URL=postgresql://127.0.0.1:1/kai_sentinel node
+    scripts/kai-sprint2-legacy-cutover-local-postgres.js` required sandbox
+    escalation because `initdb` shared memory is blocked in the sandbox; run
+    outside the sandbox it passed all 16 ordered proof stages on an ephemeral,
+    loopback-only, runner-created PostgreSQL instance. Covered positives and
+    negatives include exact trigger set acceptance, extra trigger rejection,
+    wrong trigger function rejection, wrong timing/event rejection, unexpected
+    trigger relation rejection, priority starting-shape acceptance, unsupported
+    priority shape rejection, `normal` and `medium` write probes after cutover,
+    exact pre-reprocessing priority rollback, Gate-A-only audit starting-state
+    acceptance, incompatible audit CHECK rejection, cumulative P1 audit write
+    probes, Gate-A audit rollback, deterministic reapplication, converged
+    rerun/no-op, canonical producer-chain reprocessing, Review Cockpit success,
+    and rollback refusal after canonical rows exist.
+  - Affected verification rerun under the same sentinel passed:
+    `verify:kai-sprint2-p1-parser-run-file-profile` (verification passed),
+    `verify:kai-sprint2-p1-04-data-dictionary-quality` (12/12),
+    `verify:kai-sprint2-p1-05-intake-sensitivity-profile` (15/15),
+    `verify:kai-sprint2-p1-06-review-queue` (11/11),
+    `verify:kai-sprint2-p1-07-source-candidate` (11/11),
+    `verify:kai-sprint2-p1-08-source-promotion` (19/19), and
+    `verify:kai-sprint2-p2-01-evidence-lineage` (17/17).
+
+NOT_CONFIRMED remaining for this correction: no unresolved repository fact is
+required before rerunning the corrected read-only production preflight. Actual
+production execution remains separately unauthorized. No push, deploy,
+production access/mutation, production SQL execution, feature-flag/env/cloud
+change, credential/secret access, real client data use, historical migration
+edit, reset, rebase, amend, discard, or `00_KAI_CURRENT_STATE.md` update was
+performed.

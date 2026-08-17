@@ -122,6 +122,12 @@ WITH cols AS (
 ), idx AS (
   SELECT schemaname || '.' || tablename || '.' || indexname || ':' || indexdef AS item
     FROM pg_indexes WHERE schemaname IN ('kai', 'kai_legacy_20260817')
+), trg AS (
+  SELECT n.nspname || '.' || r.relname || '.' || tg.tgname || ':' || pg_get_triggerdef(tg.oid) AS item
+    FROM pg_trigger tg
+    JOIN pg_class r ON r.oid = tg.tgrelid
+    JOIN pg_namespace n ON n.oid = r.relnamespace
+   WHERE n.nspname IN ('kai', 'kai_legacy_20260817') AND NOT tg.tgisinternal
 ), counts AS (
   SELECT n.nspname || '.' || r.relname || '=' ||
          (xpath('/row/c/text()', query_to_xml(format('SELECT count(*) AS c FROM %I.%I', n.nspname, r.relname), false, true, '')))[1]::text AS item
@@ -130,7 +136,8 @@ WITH cols AS (
 )
 SELECT md5(string_agg(item, '|' ORDER BY item))
   FROM (SELECT item FROM cols UNION ALL SELECT item FROM cons
-        UNION ALL SELECT item FROM idx UNION ALL SELECT item FROM counts) all_items;
+        UNION ALL SELECT item FROM idx UNION ALL SELECT item FROM trg
+        UNION ALL SELECT item FROM counts) all_items;
 `;
 
 function fingerprint() {
@@ -192,24 +199,6 @@ try {
   psqlFile("scripts/kai-sprint2-gate-a-smoke-seed.sql");
   psqlFile("scripts/kai-sprint2-legacy-cutover-legacy-shape-seed.sql");
 
-  // The Gate A policy-decision migration installs the narrower Gate A operation
-  // vocabulary. Production is at a later, wider state; the corrected bundle
-  // deliberately refuses to widen a live vocabulary itself, so the fixture must
-  // stand the two canonical operations up the way production already has them.
-  // This mirrors the production precondition the preflight asserts, and is the
-  // only fixture-side change made to a shared object.
-  psqlCommand(`
-    ALTER TABLE kai.upload_lifecycle_audit
-      DROP CONSTRAINT IF EXISTS upload_lifecycle_audit_gate_a_operation_check,
-      ADD CONSTRAINT upload_lifecycle_audit_gate_a_operation_check
-        CHECK (operation IN ('reserve_upload','start_upload','complete_object_version','confirm_upload',
-                             'block_upload','abandon_upload','expire_upload',
-                             'policy_decision_compare_and_set','parser_run_recorded','file_profile_persisted',
-                             'data_dictionary_draft_persisted','intake_sensitivity_profile_persisted',
-                             'sensitivity_review_queue_item_created','intake_source_candidate_persisted',
-                             'source_promotion_decision_persisted'));
-  `);
-
   // ------------------------------------------------------------------------
   proofStep("fixture matches every material structure from all four evidence captures");
   // The preflight's structural signature is transcribed directly from the four
@@ -251,6 +240,42 @@ try {
   `.replace(/\n/g, " ")));
   if (legacyTargetRows < 1) throw new Error("fixture must contain at least one legacy-target review_queue_items row");
   console.log(`legacy-target review_queue_items rows in fixture: ${legacyTargetRows}`);
+  assertEqual(
+    psqlValue(`
+      SELECT string_agg(e.enumlabel, ',' ORDER BY e.enumsortorder)
+        FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace
+        JOIN pg_enum e ON e.enumtypid = t.oid
+       WHERE n.nspname = 'kai' AND t.typname = 'priority_enum'
+    `.replace(/\n/g, " ")),
+    "mandatory,immediate_fix,high,medium,low,backlog,not_applicable,unknown",
+    "fixture priority_enum must match production evidence and omit normal",
+  );
+  assertEqual(
+    psqlValue(`
+      SELECT count(*)::text
+        FROM pg_trigger tg
+        JOIN pg_class r ON r.oid = tg.tgrelid
+        JOIN pg_namespace n ON n.oid = r.relnamespace
+       WHERE n.nspname = 'kai'
+         AND r.relname = ANY(ARRAY[${MATERIAL_TABLES.map((t) => `'${t}'`).join(",")}])
+         AND NOT tg.tgisinternal
+    `.replace(/\n/g, " ")),
+    "12",
+    "fixture must carry the exact production-supported updated_at trigger set",
+  );
+  assertEqual(
+    psqlValue(`
+      SELECT CASE WHEN pg_get_constraintdef(c.oid) LIKE '%''parser_run_recorded''%'
+                  THEN 'widened' ELSE 'gate_a_only' END
+        FROM pg_constraint c
+        JOIN pg_class r ON r.oid = c.conrelid
+        JOIN pg_namespace n ON n.oid = r.relnamespace
+       WHERE n.nspname = 'kai' AND r.relname = 'upload_lifecycle_audit'
+         AND c.conname = 'upload_lifecycle_audit_gate_a_operation_check'
+    `.replace(/\n/g, " ")),
+    "gate_a_only",
+    "fixture audit operation constraint must start Gate-A-only",
+  );
 
   const preCutoverFingerprint = fingerprint();
   console.log(`pre-cutover fingerprint: ${preCutoverFingerprint}`);
@@ -300,17 +325,107 @@ try {
   assertEqual(fingerprint(), preCutoverFingerprint, "reverting the mutation must restore the exact fixture");
   assertNoFail("legacy-cutover preflight (after reverting the mutation)", psqlFile(PREFLIGHT_SQL).stdout);
 
-  // ------------------------------------------------------------------------
-  proofStep("shared-object producer-compatibility checks fail closed");
-  // These guard the two shared contracts whose production shape the captures do
-  // not fully supply, so they are read from the live catalog instead. Each is
-  // proven to FAIL when the compatibility a current producer needs is absent -
-  // otherwise a passing preflight would mean nothing.
   function preflightRows(pattern) {
     const result = run(psql, ["-v", "ON_ERROR_STOP=1", "-d", dbName, "-t", "-A", "-F", "\t", "-f", PREFLIGHT_SQL], { capture: true });
     return result.stdout.split("\n").filter((line) => line.includes(pattern));
   }
-  // (a) kai.review_queue_items.priority missing a label a current producer writes.
+
+  // ------------------------------------------------------------------------
+  proofStep("relocation trigger compatibility checks fail closed");
+  psqlCommand(`
+    CREATE TRIGGER trg_unexpected_relocation_probe
+      BEFORE UPDATE ON kai.sources
+      FOR EACH ROW EXECUTE FUNCTION kai.set_updated_at();
+  `);
+  {
+    const rows = preflightRows("ALLOWED_UPDATED_AT_TRIGGER_SIGNATURE");
+    if (!rows.some((line) => line.includes("FAIL"))) {
+      throw new Error(`preflight failed to reject an additional unexpected trigger\n${rows.join("\n")}`);
+    }
+    const refused = psqlFile(CUTOVER_SQL, { allowFail: true });
+    if (refused.status === 0) throw new Error("cutover bundle accepted an additional unexpected trigger");
+    console.log("preflight and bundle both fail closed on an additional unexpected trigger.");
+  }
+  psqlCommand("DROP TRIGGER trg_unexpected_relocation_probe ON kai.sources");
+  assertEqual(fingerprint(), preCutoverFingerprint, "reverting the extra-trigger probe must restore the exact fixture");
+
+  psqlCommand(`
+    CREATE OR REPLACE FUNCTION kai.set_updated_at_probe()
+    RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      NEW.updated_at := now();
+      RETURN NEW;
+    END;
+    $$;
+    DROP TRIGGER trg_sources_updated_at ON kai.sources;
+    CREATE TRIGGER trg_sources_updated_at
+      BEFORE UPDATE ON kai.sources
+      FOR EACH ROW EXECUTE FUNCTION kai.set_updated_at_probe();
+  `);
+  {
+    const rows = preflightRows("ALLOWED_UPDATED_AT_TRIGGER_SIGNATURE");
+    if (!rows.some((line) => line.includes("FAIL"))) {
+      throw new Error(`preflight failed to reject an unexpected trigger function\n${rows.join("\n")}`);
+    }
+    const refused = psqlFile(CUTOVER_SQL, { allowFail: true });
+    if (refused.status === 0) throw new Error("cutover bundle accepted an unexpected trigger function");
+    console.log("preflight and bundle both fail closed on an unexpected trigger function.");
+  }
+  psqlCommand(`
+    DROP TRIGGER trg_sources_updated_at ON kai.sources;
+    DROP FUNCTION kai.set_updated_at_probe();
+    CREATE TRIGGER trg_sources_updated_at
+      BEFORE UPDATE ON kai.sources
+      FOR EACH ROW EXECUTE FUNCTION kai.set_updated_at();
+  `);
+  assertEqual(fingerprint(), preCutoverFingerprint, "reverting the trigger-function probe must restore the exact fixture");
+
+  psqlCommand(`
+    DROP TRIGGER trg_sources_updated_at ON kai.sources;
+    CREATE TRIGGER trg_sources_updated_at
+      AFTER UPDATE ON kai.sources
+      FOR EACH ROW EXECUTE FUNCTION kai.set_updated_at();
+  `);
+  {
+    const rows = preflightRows("ALLOWED_UPDATED_AT_TRIGGER_SIGNATURE");
+    if (!rows.some((line) => line.includes("FAIL"))) {
+      throw new Error(`preflight failed to reject an unexpected trigger timing/event\n${rows.join("\n")}`);
+    }
+    const refused = psqlFile(CUTOVER_SQL, { allowFail: true });
+    if (refused.status === 0) throw new Error("cutover bundle accepted an unexpected trigger timing/event");
+    console.log("preflight and bundle both fail closed on unexpected trigger timing/event.");
+  }
+  psqlCommand(`
+    DROP TRIGGER trg_sources_updated_at ON kai.sources;
+    CREATE TRIGGER trg_sources_updated_at
+      BEFORE UPDATE ON kai.sources
+      FOR EACH ROW EXECUTE FUNCTION kai.set_updated_at();
+  `);
+  assertEqual(fingerprint(), preCutoverFingerprint, "reverting the trigger timing/event probe must restore the exact fixture");
+
+  psqlCommand(`
+    CREATE TRIGGER trg_sources_updated_at
+      BEFORE UPDATE ON kai.intake_promotion_decisions
+      FOR EACH ROW EXECUTE FUNCTION kai.set_updated_at();
+  `);
+  {
+    const rows = preflightRows("ALLOWED_UPDATED_AT_TRIGGER_SIGNATURE");
+    if (!rows.some((line) => line.includes("FAIL"))) {
+      throw new Error(`preflight failed to reject an unexpected trigger relation binding\n${rows.join("\n")}`);
+    }
+    const refused = psqlFile(CUTOVER_SQL, { allowFail: true });
+    if (refused.status === 0) throw new Error("cutover bundle accepted an unexpected trigger relation binding");
+    console.log("preflight and bundle both fail closed on an unexpected trigger relation binding.");
+  }
+  psqlCommand("DROP TRIGGER trg_sources_updated_at ON kai.intake_promotion_decisions");
+  assertEqual(fingerprint(), preCutoverFingerprint, "reverting the trigger relation probe must restore the exact fixture");
+  assertNoFail("legacy-cutover preflight (after reverting the trigger probes)", psqlFile(PREFLIGHT_SQL).stdout);
+
+  // ------------------------------------------------------------------------
+  proofStep("shared-object producer-compatibility checks fail closed");
+  // These guard the shared contracts proven by the owner-supplied production
+  // evidence. Each is proven to fail closed for an unsupported shape.
+  // (a) kai.review_queue_items.priority with an unsupported enum shape.
   psqlCommand(`
     CREATE TYPE kai.priority_enum_probe AS ENUM ('low', 'medium', 'high');
     ALTER TABLE kai.review_queue_items ALTER COLUMN priority DROP DEFAULT;
@@ -318,16 +433,15 @@ try {
       USING priority::text::kai.priority_enum_probe;
   `);
   {
-    const rows = preflightRows("QUEUE_PRIORITY_LABEL_WRITABLE");
-    const normalRow = rows.find((line) => line.includes("priority=normal"));
-    if (!normalRow || !normalRow.includes("FAIL")) {
-      throw new Error(`preflight failed to reject a priority enum without the 'normal' label\n${rows.join("\n")}`);
+    const rows = preflightRows("QUEUE_PRIORITY_STARTING_OR_CONVERGED");
+    if (!rows.some((line) => line.includes("FAIL"))) {
+      throw new Error(`preflight failed to reject an unsupported priority enum shape\n${rows.join("\n")}`);
     }
     const beforeRefusal = fingerprint();
     const refused = psqlFile(CUTOVER_SQL, { allowFail: true });
-    if (refused.status === 0) throw new Error("cutover bundle accepted a priority enum it cannot write to");
+    if (refused.status === 0) throw new Error("cutover bundle accepted an unsupported priority enum shape");
     assertEqual(fingerprint(), beforeRefusal, "a refused cutover must not mutate anything");
-    console.log("preflight and bundle both fail closed on a priority enum missing 'normal'.");
+    console.log("preflight and bundle both fail closed on an unsupported priority enum shape.");
   }
   psqlCommand(`
     ALTER TABLE kai.review_queue_items ALTER COLUMN priority TYPE kai.priority_enum
@@ -337,10 +451,8 @@ try {
   `);
   assertEqual(fingerprint(), preCutoverFingerprint, "reverting the priority probe must restore the exact fixture");
 
-  // (b) kai.upload_lifecycle_audit vocabulary narrower than the current producers
-  //     need. PostgreSQL renders `IN (...)` as `= ANY (ARRAY[...])`, so this proof
-  //     also pins that the check reads the real rendering rather than the literal
-  //     text "IN" - matching on "IN" silently passed everything.
+  // (b) kai.upload_lifecycle_audit vocabulary that is neither Gate-A-only nor
+  //     cumulative P1.
   psqlCommand(`
     ALTER TABLE kai.upload_lifecycle_audit
       DROP CONSTRAINT upload_lifecycle_audit_gate_a_operation_check,
@@ -348,16 +460,15 @@ try {
         CHECK (operation IN ('reserve_upload', 'parser_run_recorded', 'file_profile_persisted'));
   `);
   {
-    const rows = preflightRows("AUDIT_OPERATION_ALREADY_PERMITTED");
-    const failing = rows.filter((line) => line.includes("FAIL"));
-    if (failing.length !== 5) {
-      throw new Error(`expected the 5 removed audit operations to FAIL, got ${failing.length}\n${rows.join("\n")}`);
+    const rows = preflightRows("AUDIT_OPERATION_STARTING_OR_CONVERGED");
+    if (!rows.some((line) => line.includes("FAIL"))) {
+      throw new Error(`preflight failed to reject an incompatible audit operation vocabulary\n${rows.join("\n")}`);
     }
     const beforeRefusal = fingerprint();
     const refused = psqlFile(CUTOVER_SQL, { allowFail: true });
-    if (refused.status === 0) throw new Error("cutover bundle accepted a narrowed audit operation vocabulary");
+    if (refused.status === 0) throw new Error("cutover bundle accepted an incompatible audit operation vocabulary");
     assertEqual(fingerprint(), beforeRefusal, "a refused cutover must not mutate anything");
-    console.log("preflight and bundle both fail closed on a narrowed upload_lifecycle_audit vocabulary.");
+    console.log("preflight and bundle both fail closed on an incompatible upload_lifecycle_audit vocabulary.");
   }
   // (c) a NOT NULL column with no default outside the writers' insert list.
   psqlCommand(`
@@ -366,10 +477,7 @@ try {
       ADD CONSTRAINT upload_lifecycle_audit_gate_a_operation_check
         CHECK (operation IN ('reserve_upload','start_upload','complete_object_version','confirm_upload',
                              'block_upload','abandon_upload','expire_upload',
-                             'policy_decision_compare_and_set','parser_run_recorded','file_profile_persisted',
-                             'data_dictionary_draft_persisted','intake_sensitivity_profile_persisted',
-                             'sensitivity_review_queue_item_created','intake_source_candidate_persisted',
-                             'source_promotion_decision_persisted'));
+                             'policy_decision_compare_and_set'));
     ALTER TABLE kai.upload_lifecycle_audit ADD COLUMN probe_required text;
     UPDATE kai.upload_lifecycle_audit SET probe_required = 'x';
     ALTER TABLE kai.upload_lifecycle_audit ALTER COLUMN probe_required SET NOT NULL;
@@ -415,6 +523,110 @@ try {
   proofStep("the atomic cutover bundle applies");
   psqlFile(CUTOVER_SQL);
   const postCutoverFingerprint = fingerprint();
+
+  assertEqual(
+    psqlValue("SELECT data_type || ':' || column_default FROM information_schema.columns WHERE table_schema='kai' AND table_name='review_queue_items' AND column_name='priority'"),
+    "text:'medium'::text",
+    "review_queue_items.priority must be converted to reversible text compatibility shape",
+  );
+  for (const priority of ["normal", "medium"]) {
+    psqlCommand(`
+      BEGIN;
+      INSERT INTO kai.review_queue_items (
+        review_queue_item_id, organization_id, queue_type, target_object_type,
+        target_object_id, priority, queue_status, summary
+      ) VALUES (
+        gen_random_uuid(), '00000000-0000-4000-8000-000000000001',
+        'intake_file_review', 'intake_file', gen_random_uuid(), '${priority}',
+        'open', 'priority compatibility probe'
+      );
+      ROLLBACK;
+    `);
+  }
+  const auditMetadataByOperation = {
+    reserve_upload: { metadata_only: true },
+    parser_run_recorded: {
+      metadata_only: true, contract: "probe", parser_name: "safe_parser",
+      parser_version: "v1", checksum_bound: true, parser_status: "completed",
+      retry_count: 0, error_code: null, error_message_safe: null, validator_key: "probe",
+    },
+    file_profile_persisted: {
+      metadata_only: true, contract: "probe", parser_name: "safe_parser",
+      parser_version: "v1", checksum_bound: true,
+      profile_canonical_sha256: "a".repeat(64), validator_key: "probe",
+    },
+    data_dictionary_draft_persisted: {
+      metadata_only: true, contract: "probe", file_profile_id: "probe",
+      profile_canonical_sha256: "a".repeat(64), dictionary_status: "draft",
+      field_count: 1, mapping_count: 1, finding_count: 0, validator_key: "probe",
+    },
+    intake_sensitivity_profile_persisted: {
+      metadata_only: true, contract: "probe", file_profile_id: "probe",
+      data_dictionary_id: "probe", profile_canonical_sha256: "a".repeat(64),
+      human_review_required: true, validator_key: "probe",
+    },
+    sensitivity_review_queue_item_created: {
+      metadata_only: true, contract: "probe", queue_type: "sensitivity_review",
+      target_object_type: "intake_sensitivity_profile", target_object_id: "probe",
+      queue_status: "open", validator_key: "probe",
+    },
+    intake_source_candidate_persisted: {
+      metadata_only: true, contract: "probe", intake_sensitivity_profile_id: "probe",
+      profile_canonical_sha256: "a".repeat(64), proposed_source_type: "uploaded_file",
+      candidate_status: "proposed", queue_type: "source_candidate_review",
+      target_object_type: "intake_source_candidate", target_object_id: "probe",
+      queue_status: "open", validator_key: "probe",
+    },
+    source_promotion_decision_persisted: {
+      metadata_only: true, contract: "probe", intake_source_candidate_id: "probe",
+      intake_sensitivity_profile_id: "probe", profile_canonical_sha256: "a".repeat(64),
+      reviewed_source_type: "uploaded_file", decision_status: "approved",
+      candidate_status: "promoted", queue_status: "resolved", source_id: "probe",
+      source_version_id: "probe", validator_key: "probe",
+    },
+  };
+  for (const [operation, metadata] of Object.entries(auditMetadataByOperation)) {
+    psqlCommand(`
+      BEGIN;
+      INSERT INTO kai.upload_lifecycle_audit (
+        organization_id, intake_file_id, operation, from_state, to_state,
+        outcome, metadata, created_at
+      ) VALUES (
+        '00000000-0000-4000-8000-000000000001',
+        '20000000-0000-4000-8000-000000000001',
+        '${operation}', 'reserved', 'reserved', 'success',
+        '${JSON.stringify(metadata).replace(/'/g, "''")}'::jsonb, now()
+      );
+      ROLLBACK;
+    `);
+  }
+  assertEqual(
+    psqlValue(`
+      SELECT count(*)::text
+        FROM pg_trigger tg
+        JOIN pg_class r ON r.oid = tg.tgrelid
+        JOIN pg_namespace n ON n.oid = r.relnamespace
+       WHERE n.nspname = 'kai_legacy_20260817'
+         AND r.relname = ANY(ARRAY[${MATERIAL_TABLES.map((t) => `'${t}'`).join(",")}])
+         AND NOT tg.tgisinternal
+    `.replace(/\n/g, " ")),
+    "12",
+    "allowed updated_at triggers must remain on preserved legacy relations",
+  );
+  assertEqual(
+    psqlValue(`
+      SELECT count(*)::text
+        FROM pg_trigger tg
+        JOIN pg_class r ON r.oid = tg.tgrelid
+        JOIN pg_namespace n ON n.oid = r.relnamespace
+       WHERE n.nspname = 'kai'
+         AND r.relname = ANY(ARRAY[${MATERIAL_TABLES.map((t) => `'${t}'`).join(",")}])
+         AND NOT tg.tgisinternal
+    `.replace(/\n/g, " ")),
+    "0",
+    "canonical replacement tables must not carry legacy updated_at triggers",
+  );
+  console.log("priority, audit and relocated-trigger post-cutover probes passed.");
 
   // ------------------------------------------------------------------------
   proofStep("post-cutover verifier is fully green");

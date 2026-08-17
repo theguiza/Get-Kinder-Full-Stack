@@ -234,6 +234,21 @@ WITH signature (
        'evidence_items_p2_01_support_strength_check'])
 ),
 
+allowed_updated_at_triggers (table_name, trigger_name) AS (VALUES
+  ('data_dictionaries', 'trg_data_dictionaries_updated_at'),
+  ('data_dictionary_fields', 'trg_data_dictionary_fields_updated_at'),
+  ('data_dictionary_mappings', 'trg_data_dictionary_mappings_updated_at'),
+  ('data_quality_findings', 'trg_data_quality_findings_updated_at'),
+  ('evidence_items', 'trg_evidence_items_updated_at'),
+  ('intake_file_profiles', 'trg_intake_file_profiles_updated_at'),
+  ('intake_parser_runs', 'trg_intake_parser_runs_updated_at'),
+  ('intake_sensitivity_profiles', 'trg_intake_sensitivity_profiles_updated_at'),
+  ('intake_source_candidates', 'trg_intake_source_candidates_updated_at'),
+  ('source_locators', 'trg_source_locators_updated_at'),
+  ('source_versions', 'trg_source_versions_updated_at'),
+  ('sources', 'trg_sources_updated_at')
+),
+
 -- Multi-factor classification. Each element is evaluated independently so a
 -- shape can never be classified from one marker.
 classified AS (
@@ -420,56 +435,45 @@ checks AS (
   --   'medium'  - the insert fallback in the already-live intake path,
   --               Backend/kai/db/kaiIntakeQueries.js:181 (`item.priority || "medium"`).
   --
-  -- Production confirms the column is kai.priority_enum with default 'medium', but
-  -- the full label set was never captured, so it is read from pg_enum here. If any
-  -- label a current producer can write is missing, the producer cannot run after
-  -- the cutover, and the cutover must not proceed on the assumption that it can.
-  -- The text-typed branch exists only so this script is correct against a
-  -- non-enum column; it is not the production case.
-  SELECT 'PREREQUISITE', 'QUEUE_PRIORITY_LABEL_WRITABLE',
-         'kai.review_queue_items.priority=' || required_priority,
+  -- Production evidence now proves the supported starting shape is an enum
+  -- column that does NOT yet contain 'normal'. That is transformable because the
+  -- cutover converts only this shared column to text with an explicit CHECK,
+  -- preserving every existing enum label and default while allowing canonical
+  -- 'normal'. A text column with that final CHECK is also accepted for a safe
+  -- converged rerun.
+  SELECT 'PREREQUISITE', 'QUEUE_PRIORITY_STARTING_OR_CONVERGED',
+         'kai.review_queue_items.priority',
          CASE
-           WHEN NOT EXISTS (
-             SELECT 1 FROM pg_attribute a
-               JOIN pg_class r ON r.oid = a.attrelid
-               JOIN pg_namespace n ON n.oid = r.relnamespace
-              WHERE n.nspname = 'kai' AND r.relname = 'review_queue_items' AND a.attname = 'priority'
-           ) THEN 'FAIL'
-           -- enum-typed column (the production case): the label must exist in pg_enum
            WHEN EXISTS (
              SELECT 1 FROM pg_attribute a
                JOIN pg_class r ON r.oid = a.attrelid
                JOIN pg_namespace n ON n.oid = r.relnamespace
                JOIN pg_type ty ON ty.oid = a.atttypid
               WHERE n.nspname = 'kai' AND r.relname = 'review_queue_items'
-                AND a.attname = 'priority' AND ty.typtype = 'e'
-           ) THEN
-             CASE WHEN EXISTS (
-               SELECT 1 FROM pg_attribute a
-                 JOIN pg_class r ON r.oid = a.attrelid
-                 JOIN pg_namespace n ON n.oid = r.relnamespace
-                 JOIN pg_enum e ON e.enumtypid = a.atttypid
-                WHERE n.nspname = 'kai' AND r.relname = 'review_queue_items'
-                  AND a.attname = 'priority' AND e.enumlabel = required_priority
-             ) THEN 'PASS' ELSE 'FAIL' END
-           -- text-typed column: no vocabulary CHECK on priority may exclude the
-           -- label. A vocabulary CHECK is detected by how PostgreSQL actually
-           -- renders one - `col = ANY (ARRAY[...])` for a multi-value IN, or
-           -- `col = 'x'` for a single value - never by looking for the literal
-           -- text "IN", which pg_get_constraintdef never emits.
-           WHEN NOT EXISTS (
-             SELECT 1 FROM pg_constraint c
-               JOIN pg_class r ON r.oid = c.conrelid
+                AND a.attname = 'priority' AND ty.typnamespace = n.oid
+                AND ty.typname = 'priority_enum' AND ty.typtype = 'e'
+                AND pg_get_expr((SELECT d.adbin FROM pg_attrdef d WHERE d.adrelid = r.oid AND d.adnum = a.attnum), r.oid) = '''medium''::kai.priority_enum'
+                AND ARRAY(
+                  SELECT e.enumlabel::text FROM pg_enum e
+                   WHERE e.enumtypid = ty.oid ORDER BY e.enumsortorder
+                ) = ARRAY['mandatory','immediate_fix','high','medium','low','backlog','not_applicable','unknown']::text[]
+           ) THEN 'PASS'
+           WHEN EXISTS (
+             SELECT 1 FROM information_schema.columns c
+              WHERE c.table_schema = 'kai' AND c.table_name = 'review_queue_items'
+                AND c.column_name = 'priority' AND c.data_type = 'text'
+                AND c.column_default = '''medium''::text'
+           ) AND EXISTS (
+             SELECT 1 FROM pg_constraint pc JOIN pg_class r ON r.oid = pc.conrelid
                JOIN pg_namespace n ON n.oid = r.relnamespace
-              WHERE n.nspname = 'kai' AND r.relname = 'review_queue_items' AND c.contype = 'c'
-                AND (pg_get_constraintdef(c.oid) LIKE '%priority = ANY (ARRAY[%'
-                     OR pg_get_constraintdef(c.oid) LIKE '%priority = ''%')
-                AND pg_get_constraintdef(c.oid) NOT LIKE '%''' || required_priority || '''%'
+              WHERE n.nspname = 'kai' AND r.relname = 'review_queue_items'
+                AND pc.conname = 'review_queue_items_cutover_priority_compat_check'
+                AND pg_get_constraintdef(pc.oid) LIKE '%''normal''%'
+                AND pg_get_constraintdef(pc.oid) LIKE '%''medium''%'
            ) THEN 'PASS'
            ELSE 'FAIL'
          END,
-         'a priority label the current repository review-queue producers can write; it must already be accepted by the live column'
-    FROM unnest(ARRAY['normal', 'medium']) AS required_priority
+         'supported starting state: production priority_enum/default without normal, or converged text compatibility CHECK with normal'
   UNION ALL
   -- The live enum's actual label set, reported so the operator can see exactly
   -- what the production type carries (metadata only - enum labels are schema, not
@@ -485,12 +489,10 @@ checks AS (
             WHERE n.nspname = 'kai' AND r.relname = 'review_queue_items' AND a.attname = 'priority'
          ), 'not an enum-typed column')
 
-  -- kai.upload_lifecycle_audit: the table itself is left COMPLETELY unchanged by
-  -- the cutover - no column, constraint, index, trigger or vocabulary of it is
-  -- added, narrowed or replaced. Its full production shape was never captured, so
-  -- rather than assert a whole shape, these checks verify exactly the minimal
-  -- compatibility subset the CURRENT audit-writer code path actually needs, and
-  -- nothing beyond it.
+  -- kai.upload_lifecycle_audit: Gate-A-only operation vocabulary is a supported
+  -- starting state. The cutover widens it in the same transaction to the exact
+  -- cumulative P1 producer vocabulary and metadata branches. A cumulative
+  -- already-converged shape is also accepted for rerun.
   --
   -- Derived by inspecting every current writer of this table. All of them issue
   -- the identical statement shape (a repo-wide scan of the column list following
@@ -537,28 +539,29 @@ checks AS (
          ) THEN 'PASS' ELSE 'FAIL' END,
          'a NOT NULL column with no default outside the writers'' insert list would break every current audit write'
   UNION ALL
-  SELECT 'PREREQUISITE', 'AUDIT_OPERATION_ALREADY_PERMITTED',
-         'kai.upload_lifecycle_audit.operation=' || required_operation,
-         -- A vocabulary CHECK is detected by how PostgreSQL actually renders one:
-         -- `operation = ANY (ARRAY[...])` for a multi-value IN, or
-         -- `operation = 'x'` for a single value. pg_get_constraintdef never emits
-         -- the literal text "IN", and matching merely "%operation%" would also
-         -- catch the metadata CHECK's `operation <> '...'` clauses, which do not
-         -- constrain the vocabulary at all. No vocabulary CHECK on operation may
-         -- exclude a literal a current producer writes.
-         CASE WHEN NOT EXISTS (
+  SELECT 'PREREQUISITE', 'AUDIT_OPERATION_STARTING_OR_CONVERGED',
+         'kai.upload_lifecycle_audit.operation',
+         CASE WHEN EXISTS (
            SELECT 1 FROM pg_constraint c JOIN pg_class r ON r.oid = c.conrelid
              JOIN pg_namespace n ON n.oid = r.relnamespace
             WHERE n.nspname = 'kai' AND r.relname = 'upload_lifecycle_audit' AND c.contype = 'c'
-              AND (pg_get_constraintdef(c.oid) LIKE '%operation = ANY (ARRAY[%'
-                   OR pg_get_constraintdef(c.oid) LIKE '%operation = ''%')
-              AND pg_get_constraintdef(c.oid) NOT LIKE '%''' || required_operation || '''%'
+              AND c.conname = 'upload_lifecycle_audit_gate_a_operation_check'
+              AND pg_get_constraintdef(c.oid) LIKE '%''reserve_upload''%'
+              AND pg_get_constraintdef(c.oid) LIKE '%''policy_decision_compare_and_set''%'
+              AND (
+                pg_get_constraintdef(c.oid) NOT LIKE '%''parser_run_recorded''%'
+                OR (
+                  pg_get_constraintdef(c.oid) LIKE '%''parser_run_recorded''%'
+                  AND pg_get_constraintdef(c.oid) LIKE '%''file_profile_persisted''%'
+                  AND pg_get_constraintdef(c.oid) LIKE '%''data_dictionary_draft_persisted''%'
+                  AND pg_get_constraintdef(c.oid) LIKE '%''intake_sensitivity_profile_persisted''%'
+                  AND pg_get_constraintdef(c.oid) LIKE '%''sensitivity_review_queue_item_created''%'
+                  AND pg_get_constraintdef(c.oid) LIKE '%''intake_source_candidate_persisted''%'
+                  AND pg_get_constraintdef(c.oid) LIKE '%''source_promotion_decision_persisted''%'
+                )
+              )
          ) THEN 'PASS' ELSE 'FAIL' END,
-         'written by a current cutover-adjacent producer; the cutover never widens or narrows this live vocabulary, so it must already be permitted'
-    FROM unnest(ARRAY['parser_run_recorded','file_profile_persisted','data_dictionary_draft_persisted',
-                      'intake_sensitivity_profile_persisted','sensitivity_review_queue_item_created',
-                      'intake_source_candidate_persisted','source_promotion_decision_persisted'
-                     ]) AS required_operation
+         'supported starting Gate-A-only operation CHECK or already-converged cumulative P1 CHECK'
   UNION ALL
   -- Every current writer hardcodes outcome = 'success'.
   SELECT 'PREREQUISITE', 'AUDIT_OUTCOME_ALREADY_PERMITTED',
@@ -649,15 +652,62 @@ checks AS (
          ) THEN 'PASS' ELSE 'FAIL' END,
          'a view or materialized view over a relocation candidate would change meaning under SET SCHEMA'
   UNION ALL
-  SELECT 'DEPENDENCY', 'NO_USER_TRIGGER_ON_RELOCATION_CANDIDATE', 'kai.* triggers',
+  SELECT 'DEPENDENCY', 'ALLOWED_UPDATED_AT_TRIGGER_SIGNATURE', 'kai.* triggers',
          CASE WHEN NOT EXISTS (
            SELECT 1 FROM pg_trigger tg
              JOIN pg_class r ON r.oid = tg.tgrelid
              JOIN pg_namespace n ON n.oid = r.relnamespace
+             JOIN pg_proc p ON p.oid = tg.tgfoid
+             JOIN pg_namespace pn ON pn.oid = p.pronamespace
+             LEFT JOIN allowed_updated_at_triggers allow
+               ON allow.table_name = r.relname AND allow.trigger_name = tg.tgname
             WHERE n.nspname = 'kai' AND r.relname IN (SELECT table_name FROM signature)
               AND NOT tg.tgisinternal
+              AND (
+                allow.trigger_name IS NULL
+                OR pn.nspname <> 'kai'
+                OR p.proname <> 'set_updated_at'
+                OR pg_get_triggerdef(tg.oid) <> format('CREATE TRIGGER %I BEFORE UPDATE ON kai.%I FOR EACH ROW EXECUTE FUNCTION kai.set_updated_at()', tg.tgname, r.relname)
+              )
          ) THEN 'PASS' ELSE 'FAIL' END,
-         'a user trigger on a relocation candidate is a dependency this cutover does not model'
+         'only the exact production-supported BEFORE UPDATE FOR EACH ROW kai.set_updated_at() triggers are allowed'
+  UNION ALL
+  SELECT 'DEPENDENCY', 'ALLOWED_UPDATED_AT_TRIGGER_SET_COMPLETE',
+         'kai.' || table_name || '.' || trigger_name,
+         CASE
+           WHEN (SELECT count(*) FROM final_class WHERE classification = 'LEGACY_EXPECTED')
+                = (SELECT count(*) FROM final_class)
+           THEN CASE WHEN EXISTS (
+             SELECT 1 FROM pg_trigger tg
+               JOIN pg_class r ON r.oid = tg.tgrelid
+               JOIN pg_namespace n ON n.oid = r.relnamespace
+               JOIN pg_proc p ON p.oid = tg.tgfoid
+               JOIN pg_namespace pn ON pn.oid = p.pronamespace
+              WHERE n.nspname = 'kai' AND r.relname = table_name
+                AND tg.tgname = trigger_name AND NOT tg.tgisinternal
+                AND pn.nspname = 'kai' AND p.proname = 'set_updated_at'
+                AND pg_get_triggerdef(tg.oid) = format('CREATE TRIGGER %I BEFORE UPDATE ON kai.%I FOR EACH ROW EXECUTE FUNCTION kai.set_updated_at()', trigger_name, table_name)
+           ) THEN 'PASS' ELSE 'FAIL' END
+           WHEN (SELECT count(*) FROM final_class WHERE classification IN ('CANONICAL_EXPECTED','ABSENT'))
+                = (SELECT count(*) FROM final_class)
+                AND (SELECT count(*) FROM signature s
+                      WHERE to_regclass('kai_legacy_20260817.' || s.table_name) IS NOT NULL)
+                    = (SELECT count(*) FROM signature)
+           THEN CASE WHEN EXISTS (
+             SELECT 1 FROM pg_trigger tg
+               JOIN pg_class r ON r.oid = tg.tgrelid
+               JOIN pg_namespace n ON n.oid = r.relnamespace
+               JOIN pg_proc p ON p.oid = tg.tgfoid
+               JOIN pg_namespace pn ON pn.oid = p.pronamespace
+              WHERE n.nspname = 'kai_legacy_20260817' AND r.relname = table_name
+                AND tg.tgname = trigger_name AND NOT tg.tgisinternal
+                AND pn.nspname = 'kai' AND p.proname = 'set_updated_at'
+                AND pg_get_triggerdef(tg.oid) = format('CREATE TRIGGER %I BEFORE UPDATE ON kai_legacy_20260817.%I FOR EACH ROW EXECUTE FUNCTION kai.set_updated_at()', trigger_name, table_name)
+           ) THEN 'PASS' ELSE 'FAIL' END
+           ELSE 'FAIL'
+         END,
+         'production-supported updated_at trigger expected on this relocation candidate'
+    FROM allowed_updated_at_triggers
   UNION ALL
   SELECT 'DEPENDENCY', 'NO_FUNCTION_BODY_RESOLVES_RELOCATION_CANDIDATE', 'kai.* functions',
          CASE WHEN NOT EXISTS (

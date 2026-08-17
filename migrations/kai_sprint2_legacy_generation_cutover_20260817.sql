@@ -345,6 +345,26 @@ INSERT INTO kai_cutover_signature VALUES
  ARRAY['evidence_items_p2_01_identity_unique','evidence_items_p2_01_statement_fingerprint_check',
        'evidence_items_p2_01_support_strength_check']);
 
+CREATE TEMPORARY TABLE kai_cutover_allowed_updated_at_trigger (
+  table_name   text PRIMARY KEY,
+  trigger_name text NOT NULL,
+  relation_oid oid
+) ON COMMIT DROP;
+
+INSERT INTO kai_cutover_allowed_updated_at_trigger (table_name, trigger_name) VALUES
+('data_dictionaries', 'trg_data_dictionaries_updated_at'),
+('data_dictionary_fields', 'trg_data_dictionary_fields_updated_at'),
+('data_dictionary_mappings', 'trg_data_dictionary_mappings_updated_at'),
+('data_quality_findings', 'trg_data_quality_findings_updated_at'),
+('evidence_items', 'trg_evidence_items_updated_at'),
+('intake_file_profiles', 'trg_intake_file_profiles_updated_at'),
+('intake_parser_runs', 'trg_intake_parser_runs_updated_at'),
+('intake_sensitivity_profiles', 'trg_intake_sensitivity_profiles_updated_at'),
+('intake_source_candidates', 'trg_intake_source_candidates_updated_at'),
+('source_locators', 'trg_source_locators_updated_at'),
+('source_versions', 'trg_source_versions_updated_at'),
+('sources', 'trg_sources_updated_at');
+
 -- --------------------------------------------------------------------------
 -- 2. In-transaction starting-state revalidation and shape classification.
 --
@@ -543,6 +563,7 @@ BEGIN
   -- presence fails closed. Incoming foreign keys are exempt and enumerated
   -- separately below, because a foreign key binds to the referenced table's OID
   -- and therefore survives the move pointing at exactly the same rows.
+  IF legacy_count = total_count THEN
   IF EXISTS (
     SELECT 1
       FROM pg_depend d
@@ -561,11 +582,45 @@ BEGIN
     SELECT 1 FROM pg_trigger tg
       JOIN pg_class r ON r.oid = tg.tgrelid
       JOIN pg_namespace n ON n.oid = r.relnamespace
+      JOIN pg_proc p ON p.oid = tg.tgfoid
+      JOIN pg_namespace pn ON pn.oid = p.pronamespace
+      LEFT JOIN kai_cutover_allowed_updated_at_trigger allow
+        ON allow.table_name = r.relname AND allow.trigger_name = tg.tgname
      WHERE n.nspname = 'kai'
        AND r.relname IN (SELECT table_name FROM kai_cutover_signature)
        AND NOT tg.tgisinternal
+       AND (
+         allow.trigger_name IS NULL
+         OR pn.nspname <> 'kai'
+         OR p.proname <> 'set_updated_at'
+         OR pg_get_triggerdef(tg.oid) <> format('CREATE TRIGGER %I BEFORE UPDATE ON kai.%I FOR EACH ROW EXECUTE FUNCTION kai.set_updated_at()', tg.tgname, r.relname)
+       )
   ) THEN
-    RAISE EXCEPTION 'a user trigger exists on a relocation candidate; this bundle does not understand that dependency and refuses to relocate';
+    RAISE EXCEPTION 'an unexpected user trigger exists on a relocation candidate; only the exact production-supported BEFORE UPDATE kai.set_updated_at() trigger set is allowed';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM kai_cutover_allowed_updated_at_trigger allow
+     WHERE NOT EXISTS (
+       SELECT 1 FROM pg_trigger tg
+         JOIN pg_class r ON r.oid = tg.tgrelid
+         JOIN pg_namespace n ON n.oid = r.relnamespace
+         JOIN pg_proc p ON p.oid = tg.tgfoid
+         JOIN pg_namespace pn ON pn.oid = p.pronamespace
+        WHERE n.nspname = 'kai'
+          AND r.relname = allow.table_name
+          AND tg.tgname = allow.trigger_name
+          AND NOT tg.tgisinternal
+          AND pn.nspname = 'kai'
+          AND p.proname = 'set_updated_at'
+          AND pg_get_triggerdef(tg.oid) = format('CREATE TRIGGER %I BEFORE UPDATE ON kai.%I FOR EACH ROW EXECUTE FUNCTION kai.set_updated_at()', tg.tgname, r.relname)
+     )
+  ) THEN
+    RAISE EXCEPTION 'the expected production-supported updated_at trigger set is incomplete or has a non-matching signature';
+  END IF;
+  UPDATE kai_cutover_allowed_updated_at_trigger allow
+     SET relation_oid = r.oid
+    FROM pg_class r JOIN pg_namespace n ON n.oid = r.relnamespace
+   WHERE n.nspname = 'kai' AND r.relname = allow.table_name;
   END IF;
   IF EXISTS (
     SELECT 1 FROM pg_proc p
@@ -657,6 +712,31 @@ BEGIN
   END LOOP;
 END $cutover_relocate$;
 
+DO $cutover_trigger_relocation_assert$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+      FROM kai_cutover_allowed_updated_at_trigger allow
+      JOIN pg_class r ON r.oid = allow.relation_oid
+      JOIN pg_namespace n ON n.oid = r.relnamespace
+      LEFT JOIN pg_trigger tg
+        ON tg.tgrelid = r.oid AND tg.tgname = allow.trigger_name AND NOT tg.tgisinternal
+      LEFT JOIN pg_proc p ON p.oid = tg.tgfoid
+      LEFT JOIN pg_namespace pn ON pn.oid = p.pronamespace
+     WHERE allow.relation_oid IS NOT NULL
+       AND (
+         n.nspname <> 'kai_legacy_20260817'
+         OR r.relname <> allow.table_name
+         OR tg.oid IS NULL
+         OR pn.nspname <> 'kai'
+         OR p.proname <> 'set_updated_at'
+         OR pg_get_triggerdef(tg.oid) <> format('CREATE TRIGGER %I BEFORE UPDATE ON kai_legacy_20260817.%I FOR EACH ROW EXECUTE FUNCTION kai.set_updated_at()', allow.trigger_name, allow.table_name)
+       )
+  ) THEN
+    RAISE EXCEPTION 'allowed updated_at trigger did not remain attached to its preserved legacy relation after relocation';
+  END IF;
+END $cutover_trigger_relocation_assert$;
+
 -- --------------------------------------------------------------------------
 -- 5. Install the required canonical objects at the freed kai.* names.
 --
@@ -706,60 +786,91 @@ END $cutover_relocate$;
 -- --------------------------------------------------------------------------
 DO $cutover_shared$
 DECLARE
-  required_operation text;
-  required_priority text;
+  priority_default text;
 BEGIN
-  -- Fail closed rather than narrow: the canonical P1 producers write these two
-  -- upload_lifecycle_audit operations, so the live vocabulary must already
-  -- permit them. This bundle asserts that instead of replacing the constraint,
-  -- because the production constraint may legitimately be WIDER than any single
-  -- historical migration's version and must never be shrunk back.
-  FOREACH required_operation IN ARRAY ARRAY[
-    'parser_run_recorded',
-    'file_profile_persisted',
-    'data_dictionary_draft_persisted',
-    'intake_sensitivity_profile_persisted',
-    'sensitivity_review_queue_item_created',
-    'intake_source_candidate_persisted',
-    'source_promotion_decision_persisted'
-  ] LOOP
-    IF NOT EXISTS (
-      SELECT 1 FROM pg_constraint c JOIN pg_class r ON r.oid = c.conrelid
-        JOIN pg_namespace n ON n.oid = r.relnamespace
-       WHERE n.nspname = 'kai' AND r.relname = 'upload_lifecycle_audit' AND c.contype = 'c'
-         AND c.conname = 'upload_lifecycle_audit_gate_a_operation_check'
-         AND pg_get_constraintdef(c.oid) LIKE '%' || required_operation || '%'
-    ) THEN
-      RAISE EXCEPTION 'kai.upload_lifecycle_audit.upload_lifecycle_audit_gate_a_operation_check does not already permit %, which the canonical P1 producer chain writes. This bundle will not widen or replace a live audit vocabulary; widen it in its own reviewed change first.', required_operation;
-    END IF;
-  END LOOP;
-
-  -- kai.review_queue_items.priority is an enum in production (capture 1) whose
-  -- labels no capture enumerates, so they are read from pg_enum here. Every label
-  -- the current repository's review-queue producers can write must already exist,
-  -- or the canonical producer chain could not run after this cutover - so the
-  -- cutover refuses rather than commit a state whose own producers are broken.
-  --   'normal' - the only distinct `PRIORITY = "<label>"` value under Backend/kai/
-  --              (postgresReviewQueueRepository, postgresSourceCandidateRepository,
-  --              kaiConflictGroupValidators, kaiClaimGapFollowupValidators,
-  --              exportReviewQueueContract)
-  --   'medium' - the insert fallback in Backend/kai/db/kaiIntakeQueries.js
-  FOREACH required_priority IN ARRAY ARRAY['normal', 'medium'] LOOP
-    IF EXISTS (
-      SELECT 1 FROM pg_attribute a
-        JOIN pg_class r ON r.oid = a.attrelid
-        JOIN pg_namespace n ON n.oid = r.relnamespace
-        JOIN pg_type ty ON ty.oid = a.atttypid
-       WHERE n.nspname = 'kai' AND r.relname = 'review_queue_items'
-         AND a.attname = 'priority' AND ty.typtype = 'e'
-         AND NOT EXISTS (
-           SELECT 1 FROM pg_enum e
-            WHERE e.enumtypid = a.atttypid AND e.enumlabel = required_priority
+  -- Gate-A-only upload_lifecycle_audit operation vocabulary is a supported
+  -- starting state. The atomic cutover below widens it to the accepted
+  -- cumulative P1 destination contract; an already-cumulative shape is accepted
+  -- for deterministic rerun.
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint c JOIN pg_class r ON r.oid = c.conrelid
+      JOIN pg_namespace n ON n.oid = r.relnamespace
+     WHERE n.nspname = 'kai' AND r.relname = 'upload_lifecycle_audit' AND c.contype = 'c'
+       AND c.conname = 'upload_lifecycle_audit_gate_a_operation_check'
+       AND pg_get_constraintdef(c.oid) LIKE '%''reserve_upload''%'
+       AND pg_get_constraintdef(c.oid) LIKE '%''start_upload''%'
+       AND pg_get_constraintdef(c.oid) LIKE '%''complete_object_version''%'
+       AND pg_get_constraintdef(c.oid) LIKE '%''confirm_upload''%'
+       AND pg_get_constraintdef(c.oid) LIKE '%''block_upload''%'
+       AND pg_get_constraintdef(c.oid) LIKE '%''abandon_upload''%'
+       AND pg_get_constraintdef(c.oid) LIKE '%''expire_upload''%'
+       AND pg_get_constraintdef(c.oid) LIKE '%''policy_decision_compare_and_set''%'
+       AND (
+         pg_get_constraintdef(c.oid) NOT LIKE '%''parser_run_recorded''%'
+         OR (
+           pg_get_constraintdef(c.oid) LIKE '%''parser_run_recorded''%'
+           AND pg_get_constraintdef(c.oid) LIKE '%''file_profile_persisted''%'
+           AND pg_get_constraintdef(c.oid) LIKE '%''data_dictionary_draft_persisted''%'
+           AND pg_get_constraintdef(c.oid) LIKE '%''intake_sensitivity_profile_persisted''%'
+           AND pg_get_constraintdef(c.oid) LIKE '%''sensitivity_review_queue_item_created''%'
+           AND pg_get_constraintdef(c.oid) LIKE '%''intake_source_candidate_persisted''%'
+           AND pg_get_constraintdef(c.oid) LIKE '%''source_promotion_decision_persisted''%'
          )
-    ) THEN
-      RAISE EXCEPTION 'kai.review_queue_items.priority is an enum that does not accept the label %, which a current repository review-queue producer writes. Widen that enum in its own reviewed change first; this bundle will not alter a live shared type.', required_priority;
-    END IF;
-  END LOOP;
+       )
+  ) THEN
+    RAISE EXCEPTION 'kai.upload_lifecycle_audit operation CHECK is neither the supported Gate-A starting vocabulary nor the cumulative P1 destination vocabulary';
+  END IF;
+
+  SELECT pg_get_expr(d.adbin, d.adrelid)
+    INTO priority_default
+    FROM pg_attrdef d
+    JOIN pg_class r ON r.oid = d.adrelid
+    JOIN pg_namespace n ON n.oid = r.relnamespace
+    JOIN pg_attribute a ON a.attrelid = r.oid AND a.attnum = d.adnum
+   WHERE n.nspname = 'kai' AND r.relname = 'review_queue_items' AND a.attname = 'priority';
+
+  IF EXISTS (
+    SELECT 1 FROM pg_attribute a
+      JOIN pg_class r ON r.oid = a.attrelid
+      JOIN pg_namespace n ON n.oid = r.relnamespace
+      JOIN pg_type ty ON ty.oid = a.atttypid
+     WHERE n.nspname = 'kai' AND r.relname = 'review_queue_items'
+       AND a.attname = 'priority' AND ty.typnamespace = n.oid
+       AND ty.typname = 'priority_enum' AND ty.typtype = 'e'
+       AND priority_default = '''medium''::kai.priority_enum'
+       AND ARRAY(
+         SELECT e.enumlabel::text FROM pg_enum e
+          WHERE e.enumtypid = ty.oid ORDER BY e.enumsortorder
+       ) = ARRAY['mandatory','immediate_fix','high','medium','low','backlog','not_applicable','unknown']::text[]
+  ) THEN
+    ALTER TABLE kai.review_queue_items
+      ALTER COLUMN priority DROP DEFAULT;
+    ALTER TABLE kai.review_queue_items
+      ALTER COLUMN priority TYPE text USING priority::text;
+    ALTER TABLE kai.review_queue_items
+      ALTER COLUMN priority SET DEFAULT 'medium';
+  ELSIF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns c
+     WHERE c.table_schema = 'kai' AND c.table_name = 'review_queue_items'
+       AND c.column_name = 'priority' AND c.data_type = 'text'
+       AND c.column_default = '''medium''::text'
+  ) THEN
+    RAISE EXCEPTION 'kai.review_queue_items.priority is not the supported production enum starting shape or the converged text compatibility shape';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint c JOIN pg_class r ON r.oid = c.conrelid
+      JOIN pg_namespace n ON n.oid = r.relnamespace
+     WHERE n.nspname = 'kai' AND r.relname = 'review_queue_items'
+       AND c.conname = 'review_queue_items_cutover_priority_compat_check'
+  ) THEN
+    ALTER TABLE kai.review_queue_items
+      ADD CONSTRAINT review_queue_items_cutover_priority_compat_check
+      CHECK (priority IN (
+        'mandatory', 'immediate_fix', 'high', 'medium', 'low', 'backlog',
+        'not_applicable', 'unknown', 'normal'
+      ));
+  END IF;
 
   IF NOT EXISTS (
     SELECT 1 FROM pg_constraint c JOIN pg_class r ON r.oid = c.conrelid
@@ -804,6 +915,244 @@ BEGIN
       CHECK (queue_status IN ('open', 'in_progress', 'blocked', 'waiting_on_client', 'waiting_on_gk', 'resolved', 'cancelled'));
   END IF;
 END $cutover_shared$;
+
+ALTER TABLE kai.upload_lifecycle_audit
+  DROP CONSTRAINT IF EXISTS upload_lifecycle_audit_gate_a_operation_check,
+  ADD CONSTRAINT upload_lifecycle_audit_gate_a_operation_check
+    CHECK (operation IN (
+      'reserve_upload',
+      'start_upload',
+      'complete_object_version',
+      'confirm_upload',
+      'block_upload',
+      'abandon_upload',
+      'expire_upload',
+      'policy_decision_compare_and_set',
+      'parser_run_recorded',
+      'file_profile_persisted',
+      'data_dictionary_draft_persisted',
+      'intake_sensitivity_profile_persisted',
+      'sensitivity_review_queue_item_created',
+      'intake_source_candidate_persisted',
+      'source_promotion_decision_persisted'
+    ));
+
+ALTER TABLE kai.upload_lifecycle_audit
+  DROP CONSTRAINT IF EXISTS upload_lifecycle_audit_gate_a_metadata_object_check,
+  ADD CONSTRAINT upload_lifecycle_audit_gate_a_metadata_object_check
+    CHECK (
+      jsonb_typeof(metadata) = 'object'
+      AND kai.gate_a_p0_jsonb_metadata_only(metadata)
+      AND (
+        operation <> 'policy_decision_compare_and_set'
+        OR (
+          metadata ? 'metadata_only'
+          AND metadata ? 'contract'
+          AND metadata ? 'file_policy_status'
+          AND metadata ? 'policy_decision_outcome'
+          AND metadata ? 'object_version_bound'
+          AND metadata ? 'verified_checksum_bound'
+          AND metadata ? 'verified_size_bytes_bound'
+          AND metadata ? 'declared_mime'
+          AND metadata ? 'extension'
+          AND metadata ? 'replay_contract_version'
+          AND metadata ? 'validator_key'
+          AND NOT metadata ? 'sanitized_result'
+          AND metadata - ARRAY[
+            'metadata_only',
+            'contract',
+            'file_policy_status',
+            'policy_decision_outcome',
+            'object_version_bound',
+            'verified_checksum_bound',
+            'verified_size_bytes_bound',
+            'declared_mime',
+            'extension',
+            'replay_contract_version',
+            'validator_key'
+          ] = '{}'::jsonb
+        )
+      )
+      AND (
+        operation <> 'parser_run_recorded'
+        OR (
+          metadata ? 'metadata_only'
+          AND metadata ? 'contract'
+          AND metadata ? 'parser_name'
+          AND metadata ? 'parser_version'
+          AND metadata ? 'checksum_bound'
+          AND metadata ? 'parser_status'
+          AND metadata ? 'retry_count'
+          AND metadata ? 'error_code'
+          AND metadata ? 'error_message_safe'
+          AND metadata ? 'validator_key'
+          AND metadata - ARRAY[
+            'metadata_only',
+            'contract',
+            'parser_name',
+            'parser_version',
+            'checksum_bound',
+            'parser_status',
+            'retry_count',
+            'error_code',
+            'error_message_safe',
+            'validator_key'
+          ] = '{}'::jsonb
+        )
+      )
+      AND (
+        operation <> 'file_profile_persisted'
+        OR (
+          metadata ? 'metadata_only'
+          AND metadata ? 'contract'
+          AND metadata ? 'parser_name'
+          AND metadata ? 'parser_version'
+          AND metadata ? 'checksum_bound'
+          AND metadata ? 'profile_canonical_sha256'
+          AND metadata ? 'validator_key'
+          AND NOT metadata ? 'profile'
+          AND metadata - ARRAY[
+            'metadata_only',
+            'contract',
+            'parser_name',
+            'parser_version',
+            'checksum_bound',
+            'profile_canonical_sha256',
+            'validator_key'
+          ] = '{}'::jsonb
+        )
+      )
+      AND (
+        operation <> 'data_dictionary_draft_persisted'
+        OR (
+          metadata ? 'metadata_only'
+          AND metadata ? 'contract'
+          AND metadata ? 'file_profile_id'
+          AND metadata ? 'profile_canonical_sha256'
+          AND metadata ? 'dictionary_status'
+          AND metadata ? 'field_count'
+          AND metadata ? 'mapping_count'
+          AND metadata ? 'finding_count'
+          AND metadata ? 'validator_key'
+          AND NOT metadata ? 'profile'
+          AND metadata - ARRAY[
+            'metadata_only',
+            'contract',
+            'file_profile_id',
+            'profile_canonical_sha256',
+            'dictionary_status',
+            'field_count',
+            'mapping_count',
+            'finding_count',
+            'validator_key'
+          ] = '{}'::jsonb
+        )
+      )
+      AND (
+        operation <> 'intake_sensitivity_profile_persisted'
+        OR (
+          metadata ? 'metadata_only'
+          AND metadata ? 'contract'
+          AND metadata ? 'file_profile_id'
+          AND metadata ? 'data_dictionary_id'
+          AND metadata ? 'profile_canonical_sha256'
+          AND metadata ? 'human_review_required'
+          AND metadata ? 'validator_key'
+          AND metadata - ARRAY[
+            'metadata_only',
+            'contract',
+            'file_profile_id',
+            'data_dictionary_id',
+            'profile_canonical_sha256',
+            'human_review_required',
+            'validator_key'
+          ] = '{}'::jsonb
+        )
+      )
+      AND (
+        operation <> 'sensitivity_review_queue_item_created'
+        OR (
+          metadata ? 'metadata_only'
+          AND metadata ? 'contract'
+          AND metadata ? 'queue_type'
+          AND metadata ? 'target_object_type'
+          AND metadata ? 'target_object_id'
+          AND metadata ? 'queue_status'
+          AND metadata ? 'validator_key'
+          AND metadata - ARRAY[
+            'metadata_only',
+            'contract',
+            'queue_type',
+            'target_object_type',
+            'target_object_id',
+            'queue_status',
+            'validator_key'
+          ] = '{}'::jsonb
+        )
+      )
+      AND (
+        operation <> 'intake_source_candidate_persisted'
+        OR (
+          metadata ? 'metadata_only'
+          AND metadata ? 'contract'
+          AND metadata ? 'intake_sensitivity_profile_id'
+          AND metadata ? 'profile_canonical_sha256'
+          AND metadata ? 'proposed_source_type'
+          AND metadata ? 'candidate_status'
+          AND metadata ? 'queue_type'
+          AND metadata ? 'target_object_type'
+          AND metadata ? 'target_object_id'
+          AND metadata ? 'queue_status'
+          AND metadata ? 'validator_key'
+          AND metadata - ARRAY[
+            'metadata_only',
+            'contract',
+            'intake_sensitivity_profile_id',
+            'profile_canonical_sha256',
+            'proposed_source_type',
+            'candidate_status',
+            'queue_type',
+            'target_object_type',
+            'target_object_id',
+            'queue_status',
+            'validator_key'
+          ] = '{}'::jsonb
+        )
+      )
+      AND (
+        operation <> 'source_promotion_decision_persisted'
+        OR (
+          metadata ? 'metadata_only'
+          AND metadata ? 'contract'
+          AND metadata ? 'intake_source_candidate_id'
+          AND metadata ? 'intake_sensitivity_profile_id'
+          AND metadata ? 'profile_canonical_sha256'
+          AND metadata ? 'reviewed_source_type'
+          AND metadata ? 'decision_status'
+          AND metadata ? 'candidate_status'
+          AND metadata ? 'queue_status'
+          AND metadata ? 'source_id'
+          AND metadata ? 'source_version_id'
+          AND metadata ? 'validator_key'
+          AND NOT metadata ? 'storage_uri'
+          AND NOT metadata ? 'signed_url'
+          AND metadata - ARRAY[
+            'metadata_only',
+            'contract',
+            'intake_source_candidate_id',
+            'intake_sensitivity_profile_id',
+            'profile_canonical_sha256',
+            'reviewed_source_type',
+            'decision_status',
+            'candidate_status',
+            'queue_status',
+            'source_id',
+            'source_version_id',
+            'validator_key'
+          ] = '{}'::jsonb
+        )
+      )
+    );
 
 -- =====================================================================
 -- Canonical DDL extracted from migrations/kai_sprint2_p1_parser_run_and_file_profile.sql
@@ -2405,6 +2754,35 @@ BEGIN
       RAISE EXCEPTION 'assertion failed: shared kai.upload_lifecycle_audit operation vocabulary no longer permits %', offender;
     END IF;
   END LOOP;
+  FOREACH offender IN ARRAY ARRAY[
+    'mandatory', 'immediate_fix', 'high', 'medium', 'low', 'backlog',
+    'not_applicable', 'unknown', 'normal'
+  ] LOOP
+    IF NOT EXISTS (
+      SELECT 1 FROM information_schema.columns c
+       WHERE c.table_schema = 'kai' AND c.table_name = 'review_queue_items'
+         AND c.column_name = 'priority' AND c.data_type = 'text'
+         AND c.column_default = '''medium''::text'
+    ) OR NOT EXISTS (
+      SELECT 1 FROM pg_constraint c JOIN pg_class r ON r.oid = c.conrelid
+        JOIN pg_namespace n ON n.oid = r.relnamespace
+       WHERE n.nspname = 'kai' AND r.relname = 'review_queue_items'
+         AND c.conname = 'review_queue_items_cutover_priority_compat_check'
+         AND pg_get_constraintdef(c.oid) LIKE '%' || quote_literal(offender) || '%'
+    ) THEN
+      RAISE EXCEPTION 'assertion failed: shared kai.review_queue_items.priority does not permit % after compatibility conversion', offender;
+    END IF;
+  END LOOP;
+  IF EXISTS (
+    SELECT 1 FROM pg_trigger tg
+      JOIN pg_class r ON r.oid = tg.tgrelid
+      JOIN pg_namespace n ON n.oid = r.relnamespace
+     WHERE n.nspname = 'kai'
+       AND r.relname IN (SELECT table_name FROM kai_cutover_signature)
+       AND NOT tg.tgisinternal
+  ) THEN
+    RAISE EXCEPTION 'assertion failed: a canonical replacement table inherited or gained a legacy relocation trigger';
+  END IF;
 
   -- 7i. No queue row whose target was preserved into the legacy schema can be
   --     read as canonical work: every one carries the marker, and no marked row
