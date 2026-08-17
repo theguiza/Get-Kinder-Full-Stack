@@ -150,12 +150,15 @@ function actorError(actorResult) {
 }
 
 /**
- * The single, shared authorization sequence for every P1-09 endpoint, in the exact
- * order the accepted P1-05 through P1-08 services already use: feature gate ->
- * explicit tenant identifier shape -> mapped actor resolution -> mapped-human-only
- * gate -> generic operation authorization -> role-narrowed operation authorization
- * -> explicit tenant-boundary consistency. No assistant/AI actor and no inactive
- * membership can reach any read or write below it.
+ * The single, shared authorization sequence for every P1-09 endpoint: feature gate
+ * -> explicit tenant identifier shape -> mapped actor resolution -> mapped-human-only
+ * gate -> active-membership-plus-global-GK-role operation authorization -> explicit
+ * tenant-boundary consistency. No assistant/AI actor and no inactive membership can
+ * reach any read or write below it. The role check requires an active organization
+ * membership for the requested organization (validated inside
+ * validateActorCanPerformOperation) AND a global gk_admin/gk_operator/gk_reviewer
+ * capability role (globalRolesOnly): an org-scoped role_name is tenant scope only
+ * and never substitutes for the required global capability.
  */
 async function authorizeReviewCockpitRequest(input, dependencies) {
   if (!isKaiSprint2Enabled(dependencies.env || process.env)) {
@@ -175,20 +178,11 @@ async function authorizeReviewCockpitRequest(input, dependencies) {
     return { ok: false, error: buildKaiError("authorization_denied") };
   }
 
-  const genericAuth = validateActorCanPerformOperation(
-    actorContext,
-    REVIEW_COCKPIT_READ_OPERATION,
-    organizationId,
-  );
-  if (!genericAuth.ok) {
-    return { ok: false, error: buildKaiError(genericAuth.error_code, { blockers: genericAuth.blockers }) };
-  }
-
   const roleAuth = validateActorCanPerformOperation(
     actorContext,
     REVIEW_COCKPIT_READ_OPERATION,
     organizationId,
-    { allowedRoles: REVIEW_COCKPIT_READ_ROLES, combineGlobalRoles: true },
+    { allowedRoles: REVIEW_COCKPIT_READ_ROLES, globalRolesOnly: true },
   );
   if (!roleAuth.ok) {
     return { ok: false, error: buildKaiError(roleAuth.error_code, { blockers: roleAuth.blockers }) };

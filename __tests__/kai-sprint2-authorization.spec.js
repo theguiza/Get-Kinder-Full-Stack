@@ -184,6 +184,39 @@ test("without combineGlobalRoles, a matching global role alone (no matching memb
   assert.equal(result.blockers[0].blocking_reason, "role_not_allowed");
 });
 
+test("globalRolesOnly: an org-scoped role_name matching allowedRoles, with no corresponding global role, is denied (tenant scope must not substitute for the global capability)", () => {
+  const result = validateActorCanPerformOperation(
+    {
+      actorType: "human",
+      actorUserId: "user-1",
+      kaiRoles: [],
+      organizationMemberships: [{ organization_id: "org-1", role_name: "gk_operator", membership_status: "active" }],
+    },
+    "read_intake",
+    "org-1",
+    { allowedRoles: new Set(["gk_admin", "gk_operator", "gk_reviewer"]), globalRolesOnly: true },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.blockers[0].blocking_reason, "role_not_allowed");
+});
+
+test("globalRolesOnly: a global gk_operator role plus active org membership whose scoped role is client_admin (a non-GK role) is allowed", () => {
+  const result = validateActorCanPerformOperation(
+    {
+      actorType: "human",
+      actorUserId: "user-1",
+      kaiRoles: ["gk_operator"],
+      organizationMemberships: [{ organization_id: "org-1", role_name: "client_admin", membership_status: "active" }],
+    },
+    "read_intake",
+    "org-1",
+    { allowedRoles: new Set(["gk_admin", "gk_operator", "gk_reviewer"]), globalRolesOnly: true },
+  );
+
+  assert.equal(result.ok, true);
+});
+
 test("assistant/system actors cannot promote, approve, finalize, export, access raw URLs, or convert parser output", () => {
   for (const operation of ["promote_source", "approve", "finalize", "export", "access_raw_file_url", "convert_parser_output_to_claims"]) {
     const result = validateActorCanPerformOperation(

@@ -391,7 +391,7 @@ test("P1-09 service: every endpoint rejects non-human actors with zero read-mode
   }
 });
 
-test("P1-09 service (role enforcement): only gk_admin/gk_operator/gk_reviewer with active membership in the requested organization are allowed", async () => {
+test("P1-09 service (role enforcement): only a GLOBAL gk_admin/gk_operator/gk_reviewer role, plus active membership in the requested organization, is allowed", async () => {
   assert.deepEqual(
     [...__reviewCockpitServiceContract.REVIEW_COCKPIT_READ_ROLES].sort(),
     ["gk_admin", "gk_operator", "gk_reviewer"],
@@ -402,6 +402,7 @@ test("P1-09 service (role enforcement): only gk_admin/gk_operator/gk_reviewer wi
       {
         organizationId: ORG,
         actorContext: humanActor({
+          kaiRoles: [role],
           organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: role }],
         }),
         selection: {},
@@ -410,6 +411,16 @@ test("P1-09 service (role enforcement): only gk_admin/gk_operator/gk_reviewer wi
     );
     assert.equal(result.ok, true, role);
   }
+
+  // An org-scoped role_name is tenant scope only: it must never substitute for the
+  // required global GK capability role, even when it names gk_admin/gk_operator/
+  // gk_reviewer and the membership is active.
+  const scopedOnlyDenials = ["gk_admin", "gk_operator", "gk_reviewer"].map((role) =>
+    humanActor({
+      kaiRoles: [],
+      organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: role }],
+    }),
+  );
 
   const deniedScenarios = [
     humanActor({ organizationMemberships: [] }),
@@ -423,6 +434,7 @@ test("P1-09 service (role enforcement): only gk_admin/gk_operator/gk_reviewer wi
       kaiRoles: [],
       organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_admin" }],
     }),
+    ...scopedOnlyDenials,
   ];
   for (const actorContext of deniedScenarios) {
     const calls = [];
