@@ -20,7 +20,8 @@ async function runLegacyCutoverIntegrationSuite() {
   const { createSourceCandidateStub } = await import("../Backend/kai/services/kaiSourceCandidateService.js");
   const { createPostgresSourceCandidateRepository } = await import("../Backend/kai/dictionary/postgresSourceCandidateRepository.js");
   const { getReviewCockpitSourceCandidateDetail } = await import("../Backend/kai/services/kaiReviewCockpitService.js");
-  const { getReviewCockpitSourceCandidateRecord } = await import("../Backend/kai/db/kaiReviewCockpitReadModels.js");
+  const { getReviewCockpitSourceCandidateRecord, listReviewCockpitQueueItems } =
+    await import("../Backend/kai/db/kaiReviewCockpitReadModels.js");
   const { getScopedSourceCandidateByIdentityForDisplay } = await import("../Backend/kai/db/kaiIntakeQueries.js");
   const { createProductionMetadataOnlyAudit } = await import("../Backend/kai/services/kaiMetadataOnlyAuditComposition.js");
 
@@ -29,6 +30,10 @@ async function runLegacyCutoverIntegrationSuite() {
   const OTHER_ORG = "00000000-0000-4000-8000-000000000002";
   const BATCH = "10000000-0000-4000-8000-000000000001";
   const LEGACY_CANDIDATE_ID = "9f1e0000-0000-4000-8000-00000000c0c0";
+  const LEGACY_SENSITIVITY_PROFILE_ID = "d1000000-0000-4000-8000-00000000f001";
+  const LEGACY_DATA_DICTIONARY_ID = "c1000000-0000-4000-8000-00000000f001";
+  const LEGACY_EVIDENCE_ITEM_ID = "f2000000-0000-4000-8000-00000000f001";
+  const SHARED_INTAKE_FILE_ID = "20000000-0000-4000-8000-000000000001";
   const NOW = "2026-08-17T12:00:00.000Z";
   const ACTOR = {
     actorType: "human",
@@ -203,14 +208,35 @@ async function runLegacyCutoverIntegrationSuite() {
     assert.equal(canonicalRow.rows[0].profile_canonical_sha256, realHash.rows[0].profile_canonical_sha256);
     assert.equal(canonicalRow.rows[0].candidate_status, "needs_gk_review");
 
-    // The queue item created above references the canonical candidate's own
-    // sensitivity-profile identity, per the P1-07 target_object contract.
+    // Exactly one CANONICAL source_candidate_review queue row exists for this
+    // organization. The preserved legacy generation's own source_candidate_review
+    // row is still there, untouched, but it carries the legacy-generation marker,
+    // so canonical work and legacy work are cleanly separable.
     const queueRow = await withClient((client) => client.query(
       `SELECT target_object_id, queue_type FROM kai.review_queue_items
-        WHERE organization_id = $1 AND queue_type = 'source_candidate_review'`,
+        WHERE organization_id = $1 AND queue_type = 'source_candidate_review'
+          AND NOT (queue_metadata ? 'kai_legacy_generation_target')`,
       [ORG],
     ));
     assert.equal(queueRow.rows.length, 1);
+    // The new canonical source_candidate_review row targets the NEW canonical
+    // candidate, never the preserved legacy one.
+    assert.equal(queueRow.rows[0].target_object_id, intakeSourceCandidateId);
+    assert.notEqual(queueRow.rows[0].target_object_id, LEGACY_CANDIDATE_ID);
+    const legacyQueueRow = await withClient((client) => client.query(
+      `SELECT queue_status, review_status, target_object_id, summary, required_action
+         FROM kai.review_queue_items
+        WHERE organization_id = $1 AND queue_type = 'source_candidate_review'
+          AND queue_metadata ? 'kai_legacy_generation_target'`,
+      [ORG],
+    ));
+    assert.equal(legacyQueueRow.rows.length, 1);
+    // Nothing about the legacy row's own facts was changed or fabricated.
+    assert.equal(legacyQueueRow.rows[0].queue_status, "open");
+    assert.equal(legacyQueueRow.rows[0].review_status, "needs_gk_review");
+    assert.equal(legacyQueueRow.rows[0].target_object_id, LEGACY_CANDIDATE_ID);
+    assert.equal(legacyQueueRow.rows[0].summary, "Legacy source candidate review");
+    assert.equal(legacyQueueRow.rows[0].required_action, "Review legacy candidate");
 
     // The actual production read model + service composition now succeeds.
     const record = await getReviewCockpitSourceCandidateRecord(ORG, intakeSourceCandidateId, pool);
@@ -237,5 +263,100 @@ async function runLegacyCutoverIntegrationSuite() {
     );
     assert.equal(crossTenant.ok, false);
     assert.equal(crossTenant.error.code, "not_found");
+
+    // The cockpit queue reader never presents a preserved legacy target as
+    // canonical work, while every canonical row it should show is still shown.
+    const cockpitQueue = await listReviewCockpitQueueItems(
+      ORG,
+      {
+        limit: 50,
+        queueTypes: ["intake_file_review", "source_candidate_review", "sensitivity_review",
+          "data_dictionary_review", "evidence_review"],
+        queueStatuses: ["open", "in_progress", "blocked", "waiting_on_client", "waiting_on_gk"],
+      },
+      pool,
+    );
+    const listedTargets = cockpitQueue.map((row) => row.target_object_id);
+    assert.ok(!listedTargets.includes(LEGACY_CANDIDATE_ID),
+      "the cockpit must not list a preserved legacy source candidate as canonical work");
+    assert.ok(!listedTargets.includes(LEGACY_SENSITIVITY_PROFILE_ID),
+      "the cockpit must not list a preserved legacy sensitivity profile as canonical work");
+    assert.ok(!listedTargets.includes(LEGACY_DATA_DICTIONARY_ID),
+      "the cockpit must not list a preserved legacy data dictionary as canonical work");
+    assert.ok(!listedTargets.includes(LEGACY_EVIDENCE_ITEM_ID),
+      "the cockpit must not list a preserved legacy evidence item as canonical work");
+    // The non-legacy shared intake_file_review row is untouched and still listed.
+    assert.ok(listedTargets.includes(SHARED_INTAKE_FILE_ID),
+      "the cockpit must still list the shared intake-file review row the cutover never marked");
+    // And the canonical work produced above is listed.
+    assert.ok(listedTargets.includes(intakeSensitivityProfileId),
+      "the cockpit must list the canonical sensitivity-review work produced by the real producer chain");
+
+    // Replaying the canonical producer chain on the same identities is
+    // convergent, per each producer's own idempotency contract: no duplicate
+    // dictionary, sensitivity profile, queue item or candidate is created, and the
+    // candidate identity does not change.
+    const replayDictionary = await createDraftDataDictionary(
+      { organizationId: ORG, fileProfileId, now: NOW },
+      { ...depsWithAudit, dataDictionaryRepository },
+    );
+    assert.equal(replayDictionary.ok, true, JSON.stringify(replayDictionary));
+    assert.equal(replayDictionary.data.dictionary.data_dictionary_id, dataDictionaryId);
+
+    const replaySensitivity = await persistIntakeSensitivityProfile(
+      { organizationId: ORG, fileProfileId, dataDictionaryId, now: NOW },
+      { ...depsWithAudit, intakeSensitivityProfileRepository },
+    );
+    assert.equal(replaySensitivity.ok, true, JSON.stringify(replaySensitivity));
+    assert.equal(
+      replaySensitivity.data.sensitivityProfile.intake_sensitivity_profile_id,
+      intakeSensitivityProfileId,
+    );
+
+    const replayQueueItem = await createSensitivityReviewQueueItem(
+      { organizationId: ORG, intakeSensitivityProfileId, actorContext: ACTOR, now: NOW },
+      { ...depsWithAudit, reviewQueueRepository },
+    );
+    assert.equal(replayQueueItem.ok, true, JSON.stringify(replayQueueItem));
+
+    const replayCandidate = await createSourceCandidateStub(
+      { organizationId: ORG, intakeSensitivityProfileId, actorContext: ACTOR, now: NOW },
+      { ...depsWithAudit, sourceCandidateRepository },
+    );
+    assert.equal(replayCandidate.ok, true, JSON.stringify(replayCandidate));
+    assert.equal(
+      replayCandidate.data.sourceCandidate.intake_source_candidate_id,
+      intakeSourceCandidateId,
+    );
+
+    const convergedCounts = await withClient((client) => client.query(
+      `SELECT
+         (SELECT count(*)::int FROM kai.data_dictionaries WHERE organization_id = $1) AS dictionaries,
+         (SELECT count(*)::int FROM kai.intake_sensitivity_profiles WHERE organization_id = $1) AS sensitivity_profiles,
+         (SELECT count(*)::int FROM kai.intake_source_candidates WHERE organization_id = $1) AS candidates,
+         (SELECT count(*)::int FROM kai.review_queue_items
+           WHERE organization_id = $1 AND NOT (queue_metadata ? 'kai_legacy_generation_target')) AS canonical_queue_rows,
+         (SELECT count(*)::int FROM kai.review_queue_items
+           WHERE organization_id = $1 AND queue_metadata ? 'kai_legacy_generation_target') AS legacy_queue_rows`,
+      [ORG],
+    ));
+    assert.equal(convergedCounts.rows[0].dictionaries, 1);
+    assert.equal(convergedCounts.rows[0].sensitivity_profiles, 1);
+    assert.equal(convergedCounts.rows[0].candidates, 1);
+    // The pre-existing shared intake_file_review row plus the canonical
+    // sensitivity_review and source_candidate_review rows produced above.
+    assert.equal(convergedCounts.rows[0].canonical_queue_rows, 3);
+    assert.equal(convergedCounts.rows[0].legacy_queue_rows, 4);
+
+    // The preserved legacy graph is completely unaffected by canonical reprocessing.
+    const legacyStillIntact = await withClient((client) => client.query(
+      `SELECT
+         (SELECT count(*)::int FROM kai_legacy_20260817.intake_source_candidates) AS candidates,
+         (SELECT count(*)::int FROM kai_legacy_20260817.evidence_items) AS evidence_items,
+         (SELECT count(*)::int FROM kai_legacy_20260817.source_locators) AS source_locators`,
+    ));
+    assert.equal(legacyStillIntact.rows[0].candidates, 1);
+    assert.equal(legacyStillIntact.rows[0].evidence_items, 1);
+    assert.equal(legacyStillIntact.rows[0].source_locators, 1);
   });
 }

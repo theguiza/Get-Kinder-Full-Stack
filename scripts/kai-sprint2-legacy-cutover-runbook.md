@@ -1,109 +1,182 @@
-# KAI legacy-generation cutover — production runbook
+# KAI legacy-generation cutover - production runbook (corrected, 2026-08-17)
 
-Operator surface: authenticated pgAdmin against the production PostgreSQL
-instance. Do not use `psql`, `DATABASE_URL`, or any other transport. Nothing in
-this runbook is executed by this task — it is prepared for separate,
-explicit operator authorization and execution.
+Do **not** execute this runbook as part of any repository task. It is the
+authorized operator procedure, and every step below is a deliberate production
+action.
 
-## Background
+## What this cutover is for
 
-`GET /api/kai/sprint2/intake/admin/review-cockpit/source-candidates/:id` fails
-with `column "file_profile_id" does not exist` because production's
-`kai.intake_source_candidates` (and its P1-04/P1-05/P1-08 lineage neighbors)
-are a different, older data-model generation than the current repository's P1
-migrations and code require — confirmed against a real, read-only production
-catalog dump on 2026-08-17. This cutover relocates the incompatible legacy
-tables intact into a preserved schema and installs the canonical P1 tables at
-their expected names, then a separate, explicitly-authorized reprocessing step
-regenerates real canonical records for any file the operator chooses.
+Production's `kai.intake_source_candidates` - and twelve of its lineage
+neighbours - are an older data-model generation than the current repository's
+canonical P1 contract requires. Review Cockpit source-candidate detail therefore
+fails in production with `column "file_profile_id" does not exist` (SQLSTATE
+42703), because the deployed read model selects the canonical P1-07 lineage
+columns (`file_profile_id`, `data_dictionary_id`,
+`intake_sensitivity_profile_id`, `profile_canonical_sha256`) that the legacy
+table does not have.
 
-## Order of operations
+The cutover relocates the proven-legacy tables **intact** into
+`kai_legacy_20260817` and installs the canonical tables at the freed `kai.*`
+names. It never translates a legacy row into a canonical row and never fabricates
+a hash, a lineage tuple, a promotion decision or a review decision. Genuine
+canonical records are produced afterwards, only by the real current producer
+chain, as a separate authorized operation.
 
-1. **Read-only preflight.** Run `scripts/kai-sprint2-legacy-cutover-preflight.sql`
-   in pgAdmin against production. Every row's `status` column must be `PASS`.
-   If any row is `FAIL`, STOP — do not proceed. The most likely `FAIL` causes:
-   - A table already exists in a shape this migration doesn't recognize
-     (neither the supplied-catalog legacy shape nor the canonical shape).
-   - `kai.source_locators`/`kai.evidence_items`/`kai.gap_log_items` already
-     exist against a still-legacy `kai.source_versions` (would indicate this
-     preflight's premises are stale and need re-verification against a fresh
-     catalog dump).
+## Objects and treatment
 
-2. **Cutover migration.** With every preflight check `PASS`, run
-   `migrations/kai_sprint2_legacy_generation_cutover_20260817.sql` as one
-   transaction in pgAdmin. It:
-   - Relocates `kai.intake_file_profiles`, `kai.data_dictionaries`,
-     `kai.intake_sensitivity_profiles`, `kai.intake_source_candidates`,
-     `kai.intake_promotion_decisions`, `kai.sources`, `kai.source_versions` —
-     each byte-for-byte, all rows and identities preserved — into schema
-     `kai_legacy_20260817`, only for tables it can prove are the exact legacy
-     shape from the supplied catalog.
-   - Leaves `kai.intake_files`, `kai.upload_lifecycle_audit`, and
-     `kai.review_queue_items` in place (proven canonical/shared-live; never
-     relocated). Adds two named CHECK constraints and two partial unique
-     indexes to `kai.review_queue_items` — additive only, scoped to
-     `queue_type` values no legacy or currently-wired code writes.
-   - Fails the whole transaction (`RAISE EXCEPTION`, automatic rollback) if any
-     table doesn't match a recognized shape. Nothing partial is ever left
-     behind.
-   - Is safe to re-run: a prior successful run is detected and treated as a
-     no-op.
+| Treatment | Objects |
+| --- | --- |
+| `RELOCATE_LEGACY` (moved intact into `kai_legacy_20260817`) | `intake_parser_runs`, `intake_file_profiles`, `data_dictionaries`, `data_dictionary_fields`, `data_dictionary_mappings`, `data_quality_findings`, `intake_sensitivity_profiles`, `intake_source_candidates`, `intake_promotion_decisions`, `sources`, `source_versions`, `source_locators`, `evidence_items` |
+| `KEEP_SHARED_IN_KAI` (never moved, never replaced; only the additive changes in the bundle's section 4) | `intake_files`, `review_queue_items`, `upload_lifecycle_audit`, `organizations`, `engagements`, `users` |
+| `NOT_REQUIRED_FOR_CURRENT_CUTOVER` (left in `kai`; their foreign keys follow their parent into the preserved schema by OID and keep referencing exactly the same rows) | `claim_evidence_links`, `funder_requirements`, `funders` |
+| `REPLACE_WITH_CANONICAL` | none - no object is replaced in place; the canonical tables are created at names the relocation has just freed |
+| `UNRESOLVED_CONFLICT` | none |
 
-3. **Install the canonical P1 tables.** Run each of the following, in this
-   exact order, unmodified, exactly as already accepted (none of these files
-   are changed by this cutover):
-   - `migrations/kai_sprint2_p1_parser_run_and_file_profile.sql`
-   - `migrations/kai_sprint2_p1_04_data_dictionary_and_quality.sql`
-   - `migrations/kai_sprint2_p1_05_intake_sensitivity_profile.sql`
-   - `migrations/kai_sprint2_p1_06_review_queue.sql`
-   - `migrations/kai_sprint2_p1_07_intake_source_candidate.sql`
-   - `migrations/kai_sprint2_p1_08_source_promotion.sql`
+**P2-01 decision: `P2_01_NOT_REQUIRED_NOW`.** No canonical `kai.source_locators`
+or `kai.evidence_items` is installed. Repository proof at current HEAD: the
+Review Cockpit read models and service reference neither table; the only
+scheduled worker surface (`Backend/kai/parsing/`) touches only `intake_files`,
+`intake_parser_runs`, `intake_file_profiles` and `upload_lifecycle_audit`; there
+is no boot-time schema probe. The P2-01+ HTTP routes are mounted behind the
+single `KAI_SPRINT2_ENABLED` gate (owner-confirmed enabled) and are reachable on
+an explicit operator request - but they cannot succeed today either, because
+`Backend/kai/dictionary/postgresEvidenceLineageRepository.js` writes the
+canonical `coordinates` / `locator_fingerprint` / `statement_fingerprint` columns
+that the production legacy shapes do not have. The cutover therefore removes no
+working behaviour; it changes an already-failing operator action from
+`undefined_column` to `undefined_table`.
 
-4. **Post-migration verifier.** Run
-   `scripts/kai-sprint2-legacy-cutover-verifier.sql`. Every row's `status`
-   must be `PASS`.
+## Steps
 
-5. **Retest the production request.** Re-issue the original failing request:
-   `GET /api/kai/sprint2/intake/admin/review-cockpit/source-candidates/<id>?organization_id=<org>`.
-   It will now return `not_found` for any existing (legacy) candidate id — the
-   legacy candidate was never translated into a canonical one — rather than a
-   `system_error`. This confirms the schema-level 500 is resolved.
+1. **Open an authenticated pgAdmin Query Tool session** against the production
+   database, as a role that owns the `kai` schema and the thirteen relocation
+   candidates. No `psql`, no `\i`, no `DATABASE_URL`, no migration runner.
 
-6. **Separately authorized: reprocess real files.** No candidate exists yet
-   for any real intake file until it is reprocessed through the real P1
-   producer chain. For each file the operator selects (separately authorized,
-   one at a time), run
-   `scripts/kai-sprint2-legacy-cutover-synthetic-reprocessor.js
-   --organization-id=<uuid> --intake-file-id=<uuid> --actor-user-id=<uuid>`
-   against the target database. It composes the existing
-   `activateParserProfileWorkForIntakeFile` → `createDraftDataDictionary` →
-   `persistIntakeSensitivityProfile` → `createSensitivityReviewQueueItem` →
-   `createSourceCandidateStub` seam, unmodified, producing a genuinely new
-   candidate id with real lineage. Only after this step will the Review
-   Cockpit detail read return data for that file.
+2. **Run the read-only preflight**, in full, in one Query Tool tab:
+   `scripts/kai-sprint2-legacy-cutover-preflight.sql`.
+   It mutates nothing. It emits one result set of
+   `result_type, check_name, object_name, status, detail`, containing catalog
+   metadata, structural classifications and aggregate counts only - no PII, no
+   filenames, no storage locations, no raw business content, no queue-row
+   contents and no target object identifiers.
+
+3. **Require every preflight row to be `PASS`.** Stop on any `FAIL`. In
+   particular:
+   - `SHAPE_CLASSIFICATION / STRUCTURAL_SIGNATURE` must be `LEGACY_EXPECTED` for
+     all thirteen objects, and `STARTING_STATE_IS_COHERENT` must pass. An
+     `UNRECOGNIZED` classification means production has a third shape this
+     package has never seen; do not proceed and do not guess.
+   - `PREREQUISITE / AUDIT_OPERATION_ALREADY_PERMITTED` must pass for all seven
+     operations the canonical producer chain writes. The bundle deliberately
+     never rewrites that live vocabulary, so if any is missing it must be widened
+     in its own separately reviewed change first.
+   - `PREREQUISITE / QUEUE_PRIORITY_ACCEPTS_CANONICAL_LITERAL` must pass.
+     Production's `review_queue_items.priority` is an enum whose labels no
+     supplied capture enumerates, and the canonical P1-06 producer writes
+     `'normal'`. If the live enum lacks that label, widen it in its own reviewed
+     change first - the bundle will not alter a shared live type.
+   - `DEPENDENCY / *` must pass. A view, materialized view, user trigger or
+     `kai` function body that references a relocation candidate is a dependency
+     this bundle does not model, and it fails closed.
+
+4. **Establish and prove quiescence** for every writer of the thirteen
+   relocation candidates and of `kai.review_queue_items`. From current HEAD, the
+   writers are: the mounted `/api/kai/sprint2/intake` router
+   (`Backend/kai/routes/sprint2IntakeApi.js`), the P2/P3 services it lazily
+   imports, and the P1 parser/profile worker registered by
+   `registerKaiP1WorkerCron()` (`Backend/kai/parsing/p1WorkerCron.js`). Quiesce
+   them by the deployment's own operational means - **do not change
+   `KAI_SPRINT2_ENABLED` or any other feature flag as part of this cutover.**
+   Confirm no in-flight request or worker tick remains before step 5.
+
+   `NOT_CONFIRMED`: this repository defines no `lock_timeout` /
+   `statement_timeout` convention anywhere in `migrations/` or `scripts/`, so the
+   bundle invents none. Choosing whether to set a session-level
+   `lock_timeout`/`statement_timeout` in the Query Tool before step 5, and to
+   what value, is an operational decision that has not been made. The bundle
+   takes only the locks `ALTER TABLE ... SET SCHEMA`, `ALTER TABLE ... ADD
+   CONSTRAINT`, `CREATE TABLE`, `CREATE INDEX` and one narrow `UPDATE` require;
+   without a timeout, an unquiesced writer can block it for as long as it holds
+   its own lock.
+
+5. **Execute the ONE atomic forward bundle**, whole, in a single Query Tool
+   execution: `migrations/kai_sprint2_legacy_generation_cutover_20260817.sql`.
+   It is one `BEGIN` ... `COMMIT` with no nested transaction boundaries. It
+   revalidates the expected starting state inside its own transaction before
+   mutating anything, and runs structural assertions before `COMMIT`. Any error
+   rolls the entire cutover back; there is no committed state in which legacy
+   names have moved but canonical replacements are missing. Do **not** run any
+   historical migration file before, during or after this step.
+
+6. **Run the post-cutover verifier**, read-only:
+   `scripts/kai-sprint2-legacy-cutover-verifier.sql`.
+
+7. **Require every verifier row to be `PASS`.** It proves the canonical P1
+   objects and the exact column/constraint contracts the current code reads, the
+   `P2_01_NOT_REQUIRED_NOW` state, legacy preservation and row counts, material
+   foreign-key preservation, retained-dependent edges still pointing at the
+   preserved objects, shared-object contracts unnarrowed, that no legacy queue
+   target can be misread as canonical work, that no legacy identity appears in a
+   canonical table, and that the exact current source-candidate,
+   promotion-decision and cockpit-queue projections compile and execute.
+
+   If a check fails, use `migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql`
+   - but only while step 9 has not yet run. See "Rollback" below.
+
+8. **Release quiescence** by the same operational means used in step 4, in
+   reverse. No feature-flag change.
+
+9. **Separately, and under its own authorization, run one synthetic canonical
+   reprocessing operation** using `scripts/kai-sprint2-legacy-cutover-synthetic-reprocessor.js`.
+   It drives the real current producer chain
+   (`activateParserProfileWorkForIntakeFile` -> `createDraftDataDictionary` ->
+   `persistIntakeSensitivityProfile` -> `createSensitivityReviewQueueItem` ->
+   `createSourceCandidateStub`). The real `profile_canonical_sha256` comes from
+   the authoritative profile producer; the executor does not accept it as input.
+   The new canonical candidate will normally have a **new** UUID - that is
+   expected and correct, not a defect.
+
+10. **Test the new canonical candidate through Review Cockpit** in the
+    application. Its source-candidate detail must return successfully. The
+    preserved legacy candidate must not appear as canonical cockpit work.
 
 ## Rollback
 
-- **Before step 3 (canonical install) has run:** run
-  `migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql`.
-  This is lossless — it only reverses the schema relocation.
-- **After step 3 has run:** the cutover's own rollback file refuses to run
-  (by design). A rollback at this point requires first running each of the P1
-  migrations' own accepted `.rollback.sql` files, in reverse order (P1-08 →
-  P1-07 → P1-06 → P1-05 → P1-04 → parser-run), to remove the canonical tables
-  those migrations installed, and only then running the cutover's rollback
-  file. This is NOT a single-command operation and has not been exercised
-  end-to-end by this task's tests — treat it as a documented procedure, not a
-  proven one, until it is separately verified.
-- **After step 6 (reprocessing) has produced real canonical rows:** no
-  automated rollback is provided or safe to assume. Any rollback at this point
-  requires a manually reviewed data-preservation plan.
+`migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql` is a
+**`PRE_REPROCESSING_ROLLBACK` only**. It is valid between step 5 and step 9,
+while the canonical tables are still empty. It removes the additive
+`review_queue_items` changes and the legacy-generation queue markers, drops the
+empty canonical tables, and moves every preserved legacy table back to `kai`,
+restoring names, locations, rows, identities, constraints, indexes and dependency
+edges. It refuses to run if any canonical row exists.
 
-## What this runbook does not do
+`POST_REPROCESSING_RECOVERY` - recovery after step 9 has produced genuine
+canonical records - is **not implemented**. Dropping the canonical tables then
+would destroy authentic producer- and human-generated records with no legacy
+equivalent. If that recovery is ever needed it must be designed, reviewed and
+proved as its own package. Do not approximate it with the rollback file.
 
-- Does not translate, backfill, or relabel any legacy row as canonical.
-- Does not fabricate `profile_canonical_sha256` or any other lineage value.
-- Does not alter Review Cockpit routes, services, or read models.
-- Does not touch `kai.sources`/`kai.source_versions` unless step 2 proves they
-  are in the exact legacy shape — if some other, third shape is present, the
-  migration refuses to run rather than guess.
+## Known deferred follow-up
+
+`kai.claim_evidence_links` is deliberately retained in `kai`, and after the
+cutover its foreign key references `kai_legacy_20260817.evidence_items`. A future
+P2-01/P2-03 package **must** handle it explicitly: the
+`CREATE TABLE IF NOT EXISTS kai.claim_evidence_links` in
+`migrations/kai_sprint2_p2_03_claim_proposal.sql` would silently skip over the
+retained legacy table and reproduce exactly this class of incident. The
+post-cutover verifier reports this as a `DEFERRED` row so it cannot be forgotten.
+
+## Local proof behind this runbook
+
+`node scripts/kai-sprint2-legacy-cutover-local-postgres.js` stands up its own
+ephemeral, loopback-only PostgreSQL 16 instance, builds the production-shaped
+legacy fixture from the four owner-supplied production captures, and proves, in
+order: the fixture matches every captured structure; the real 42703 failure
+reproduces pre-cutover; the preflight is fully green on the expected legacy state
+and fails closed on an unrecognized variation; a forced mid-cutover failure
+leaves the database byte-identical; the bundle applies; the verifier is fully
+green; legacy rows, relationships, retained dependents and shared contracts all
+survive; the pre-reprocessing rollback restores the exact fixture; re-applying
+and re-running the bundle are convergent no-ops; the real producer chain yields a
+working Review Cockpit detail with tenant isolation and convergent replay; and
+the rollback refuses once canonical rows exist. It never touches a real database.
