@@ -208,7 +208,7 @@ function validFollowupRoutingInput(overrides = {}) {
       target_object_id: FOLLOWUP,
       queue_status: "waiting_on_client",
       review_status: "proposed",
-      priority: "normal",
+      priority: "medium",
       summary: "Client clarification is required for an unresolved claim gap.",
       required_action: question,
       assigned_to: null,

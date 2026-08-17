@@ -33,7 +33,7 @@ const SOURCE_CANDIDATE_STATUS = "needs_gk_review";
 
 const SOURCE_CANDIDATE_REVIEW_QUEUE_TYPE = "source_candidate_review";
 const SOURCE_CANDIDATE_REVIEW_TARGET_OBJECT_TYPE = "intake_source_candidate";
-const SOURCE_CANDIDATE_REVIEW_PRIORITY = "normal";
+const SOURCE_CANDIDATE_REVIEW_PRIORITY = "medium";
 const SOURCE_CANDIDATE_REVIEW_QUEUE_STATUS = "open";
 const SOURCE_CANDIDATE_REVIEW_SUMMARY =
   "Review intake source-candidate stub for human classification.";

@@ -11,7 +11,7 @@ export const CONFLICT_RESOLUTION_QUEUE_TYPE = "conflict_resolution";
 export const CONFLICT_RESOLUTION_TARGET_OBJECT_TYPE = "conflict_group";
 export const CONFLICT_RESOLUTION_QUEUE_STATUS = "open";
 export const CONFLICT_RESOLUTION_REVIEW_STATUS = "needs_gk_review";
-export const CONFLICT_RESOLUTION_PRIORITY = "normal";
+export const CONFLICT_RESOLUTION_PRIORITY = "medium";
 export const CONFLICT_RESOLUTION_REQUIRED_ACTION =
   "Compare both claims, their evidence lineage, definitions, reporting periods, entity levels, denominators, and support limitations. Record whether a conflict exists. Do not approve or promote either claim.";
 

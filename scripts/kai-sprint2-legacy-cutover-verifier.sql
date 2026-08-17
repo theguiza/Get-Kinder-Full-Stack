@@ -316,23 +316,23 @@ checks AS (
     FROM unnest(ARRAY['open','in_progress','blocked','waiting_on_client','waiting_on_gk',
                       'resolved','cancelled']) AS lit
   UNION ALL
-  SELECT 'SHARED', 'QUEUE_PRIORITY_LABEL_STILL_WRITABLE',
-         'kai.review_queue_items.priority=' || required_priority,
+  SELECT 'SHARED', 'QUEUE_PRIORITY_PRODUCTION_NATIVE',
+         'kai.review_queue_items.priority',
          CASE WHEN EXISTS (
-           SELECT 1 FROM information_schema.columns c
-            WHERE c.table_schema = 'kai' AND c.table_name = 'review_queue_items'
-              AND c.column_name = 'priority' AND c.data_type = 'text'
-              AND c.column_default = '''medium''::text'
-         ) AND EXISTS (
-           SELECT 1 FROM pg_constraint pc JOIN pg_class r ON r.oid = pc.conrelid
+           SELECT 1 FROM pg_attribute a
+             JOIN pg_class r ON r.oid = a.attrelid
              JOIN pg_namespace n ON n.oid = r.relnamespace
+             JOIN pg_type ty ON ty.oid = a.atttypid
             WHERE n.nspname = 'kai' AND r.relname = 'review_queue_items'
-              AND pc.conname = 'review_queue_items_cutover_priority_compat_check'
-              AND pg_get_constraintdef(pc.oid) LIKE '%' || quote_literal(required_priority) || '%'
+              AND a.attname = 'priority' AND ty.typnamespace = n.oid
+              AND ty.typname = 'priority_enum' AND ty.typtype = 'e'
+              AND pg_get_expr((SELECT d.adbin FROM pg_attrdef d WHERE d.adrelid = r.oid AND d.adnum = a.attnum), r.oid) = '''medium''::kai.priority_enum'
+              AND ARRAY(
+                SELECT e.enumlabel::text FROM pg_enum e
+                 WHERE e.enumtypid = ty.oid ORDER BY e.enumsortorder
+              ) = ARRAY['mandatory','immediate_fix','high','medium','low','backlog','not_applicable','unknown']::text[]
          ) THEN 'PASS' ELSE 'FAIL' END,
-         'a priority label the current repository review-queue producers write; the shared column must still accept it after the cutover'
-    FROM unnest(ARRAY['mandatory','immediate_fix','high','medium','low','backlog',
-                      'not_applicable','unknown','normal']) AS required_priority
+         'shared production priority enum/default/labels must remain unchanged by the cutover'
   UNION ALL
   SELECT 'SHARED', 'AUDIT_WRITER_COLUMN_STILL_PRESENT',
          'kai.upload_lifecycle_audit.' || required_column,

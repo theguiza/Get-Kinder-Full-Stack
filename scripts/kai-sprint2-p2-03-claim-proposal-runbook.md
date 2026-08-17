@@ -205,7 +205,7 @@ returned in the service's success result.
 
 Exactly one `kai.review_queue_items` row per fresh claim: `queue_type =
 'claim_review'`, `target_object_type = 'claim'`, `target_object_id = claim_id`,
-`priority = 'normal'`, `queue_status = 'open'`, `review_status =
+`priority = 'medium'`, `queue_status = 'open'`, `review_status =
 'needs_gk_review'`, `summary = 'Review proposed internal-only claim.'`,
 `required_action = "Review the claim's evidence lineage, support strength,
 limitations, requirement coverage, and audience eligibility before any use."`.

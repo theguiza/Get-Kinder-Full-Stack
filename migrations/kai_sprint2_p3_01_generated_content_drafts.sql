@@ -133,7 +133,7 @@ ALTER TABLE kai.review_queue_items
         target_object_type = 'generated_content_draft'
         AND queue_status = 'open'
         AND review_status = 'needs_gk_review'
-        AND priority = 'normal'
+        AND priority = 'medium'
         AND summary = 'Generated draft requires human review.'
         AND required_action = 'Review citations, audience eligibility, limitations, unsupported claims, and numeric or causal assertions before any use.'
         AND assigned_to IS NULL

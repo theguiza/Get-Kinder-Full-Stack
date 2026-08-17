@@ -56,7 +56,7 @@ BEGIN
 
   queue_insert_reached := true;
   INSERT INTO kai.review_queue_items (organization_id, queue_type, target_object_type, target_object_id, priority, queue_status, review_status, summary, required_action, queue_metadata, created_by_type)
-  VALUES (org1, 'claim_review', 'claim', claim1, 'normal', 'open', 'needs_gk_review', 'Review proposed internal-only claim.', required_action1, '{}'::jsonb, 'system');
+  VALUES (org1, 'claim_review', 'claim', claim1, 'medium', 'open', 'needs_gk_review', 'Review proposed internal-only claim.', required_action1, '{}'::jsonb, 'system');
 
   audit_insert_reached := true;
   INSERT INTO kai.upload_lifecycle_audit (organization_id, intake_file_id, operation, from_state, to_state, outcome, metadata)
@@ -149,13 +149,13 @@ BEGIN
   -- integration spec, not by this smoke verifier).
   BEGIN
     INSERT INTO kai.review_queue_items (organization_id, queue_type, target_object_type, target_object_id, priority, queue_status, review_status, summary, required_action, queue_metadata, created_by_type)
-    VALUES (org1, 'claim_review', 'claim', claim1, 'normal', 'open', 'needs_gk_review', 'Review proposed internal-only claim.', required_action1, '{}'::jsonb, 'system');
+    VALUES (org1, 'claim_review', 'claim', claim1, 'medium', 'open', 'needs_gk_review', 'Review proposed internal-only claim.', required_action1, '{}'::jsonb, 'system');
   EXCEPTION WHEN unique_violation THEN
     NULL;
   END;
   BEGIN
     INSERT INTO kai.review_queue_items (organization_id, queue_type, target_object_type, target_object_id, priority, queue_status, review_status, summary, required_action, queue_metadata, created_by_type)
-    VALUES (org1, 'claim_review', 'claim', claim1, 'normal', 'open', 'needs_gk_review', 'Review proposed internal-only claim.', required_action1, '{}'::jsonb, 'system');
+    VALUES (org1, 'claim_review', 'claim', claim1, 'medium', 'open', 'needs_gk_review', 'Review proposed internal-only claim.', required_action1, '{}'::jsonb, 'system');
     INSERT INTO p2_03_results VALUES ('concurrent_insert_convergence_second_attempt_rejected', 'FAIL', 'second concurrent-identity insert unexpectedly succeeded');
   EXCEPTION WHEN unique_violation THEN
     INSERT INTO p2_03_results VALUES ('concurrent_insert_convergence_second_attempt_rejected', 'PASS', 'safe unique-violation failure on the second concurrent attempt');
@@ -195,7 +195,7 @@ BEGIN
       VALUES (org1, forced_claim_id, evidence1);
 
       INSERT INTO kai.review_queue_items (organization_id, queue_type, target_object_type, target_object_id, priority, queue_status, review_status, summary, required_action, queue_metadata, created_by_type)
-      VALUES (org1, 'claim_review', 'claim', forced_claim_id, 'normal', 'open', 'needs_gk_review', 'Review proposed internal-only claim.', required_action1, '{}'::jsonb, 'system');
+      VALUES (org1, 'claim_review', 'claim', forced_claim_id, 'medium', 'open', 'needs_gk_review', 'Review proposed internal-only claim.', required_action1, '{}'::jsonb, 'system');
 
       INSERT INTO kai.upload_lifecycle_audit (organization_id, intake_file_id, operation, from_state, to_state, outcome, metadata)
       VALUES (

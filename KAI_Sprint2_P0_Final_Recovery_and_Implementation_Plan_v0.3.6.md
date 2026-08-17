@@ -18265,3 +18265,70 @@ production access/mutation, production SQL execution, feature-flag/env/cloud
 change, credential/secret access, real client data use, historical migration
 edit, reset, rebase, amend, discard, or `00_KAI_CURRENT_STATE.md` update was
 performed.
+
+Small production-native shared-contract correction to 151b892 (2026-08-17):
+The owner explicitly superseded the prior current-runtime `normal` priority
+decision after supplying `data-1787005970997.csv`. USER_CONFIRMED production
+catalog state from that diagnostic: `kai.review_queue_items.priority` is
+`kai.priority_enum`, default `'medium'::kai.priority_enum`, exact labels
+`mandatory`, `immediate_fix`, `high`, `medium`, `low`, `backlog`,
+`not_applicable`, `unknown`, with no `normal`; `kai.upload_lifecycle_audit`
+starts with the exact eight Gate-A operations and the existing
+`upload_lifecycle_audit_gate_a_metadata_object_check` metadata contract; the
+twelve allowed legacy updated-at triggers are all `BEFORE UPDATE FOR EACH ROW
+EXECUTE FUNCTION kai.set_updated_at()`.
+
+TOOL_VERIFIED correction:
+  - Removed the `review_queue_items.priority` enum-to-text strategy from the
+    forward cutover and rollback. The corrected cutover preserves the production
+    enum type, default and labels exactly; no migration adds `normal`, no
+    forward SQL alters the priority column type, and rollback has no priority
+    restoration work.
+  - Updated current KAI review-queue producers and current producer tests from
+    `normal` to `medium` where they write or assert rows that can reach
+    `kai.review_queue_items`. Remaining `normal` occurrences are either
+    "no normal" documentation, an unrelated assistant safe-output word list, or
+    an intentional negative insert in the cutover runner.
+  - Removed the cumulative metadata-CHECK rewrite from forward and rollback SQL.
+    The corrected cutover widens only `upload_lifecycle_audit.operation` from
+    the exact eight Gate-A operations to the exact fifteen cumulative Gate-A/P1
+    operations, and PRE_REPROCESSING_ROLLBACK restores exactly fifteen to eight.
+    The runner captures normalized `pg_get_constraintdef(...)` for the metadata
+    CHECK and proves before-forward, after-forward, and after-rollback equality.
+  - Preserved the 151b892 trigger correction unchanged: exact twelve-trigger
+    allowlist, relation-OID preservation through `SET SCHEMA`, function binding
+    to `kai.set_updated_at()`, canonical-table noninheritance, and fail-closed
+    negatives for unexpected trigger, function, timing/event and relation.
+
+TOOL_VERIFIED local proof after this correction:
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node
+    scripts/kai-sprint2-legacy-cutover-local-postgres.js` passed all 16 ordered
+    proof stages under sandbox escalation required for local PostgreSQL shared
+    memory. It proved the production-shaped fixture, read-only preflight,
+    original 42703 reproduction, enum/default/label preservation before/after/
+    rollback, current producer-chain `medium` queue rows, exact audit operation
+    transition eight to fifteen to eight, unchanged metadata CHECK, Gate-A and P1
+    audit producer writes, trigger preservation and negatives, legacy/shared
+    state preservation, Review Cockpit synthetic candidate success,
+    deterministic reapplication, converged rerun, and rollback refusal after
+    canonical application data exists.
+  - Affected verifier commands passed under the same sentinel:
+    `verify:kai-sprint2-p1-06-review-queue` (11/11),
+    `verify:kai-sprint2-p1-07-source-candidate` (11/11),
+    `verify:kai-sprint2-p1-08-source-promotion` (19/19),
+    `verify:kai-sprint2-p2-01-evidence-lineage` (17/17),
+    `verify:kai-sprint2-p2-02-evidence-coverage-assessment` (7/7),
+    `verify:kai-sprint2-p2-03-claim-proposal` (15/15),
+    `verify:kai-sprint2-p2-04-claim-gap-followup` (18/18),
+    `verify:kai-sprint2-p2-05-conflict-review-candidate` (18/18),
+    `verify:kai-sprint2-p3-16-export-candidate-foundation` (184 tests,
+    183 pass, 1 skipped), and
+    `verify:kai-sprint2-p3-17-human-authority-decision-ledger` (217 tests,
+    216 pass, 1 skipped).
+  - A changed Node-spec batch passed: 318 tests, 305 passing, 13 skipped, 0
+    failing. `git diff --check` and final diff inspection were required before
+    the local corrective commit.
+
+NOT_CONFIRMED remaining after this correction: no unresolved repository fact is
+required before rerunning the corrected read-only production preflight.
+Production execution remains separately unauthorized.

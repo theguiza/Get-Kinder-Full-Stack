@@ -226,7 +226,7 @@ async function runP302IntegrationSuite() {
      )
      VALUES (
        '10000000-0000-4000-8000-000000000012'::uuid,$1::uuid,'claim_review','claim',
-       $2::uuid,'normal','open','needs_gk_review','New claim requires GK review.',
+       $2::uuid,'medium','open','needs_gk_review','New claim requires GK review.',
        'Review the proposed claim before use.','{}'::jsonb,'system'
      )`,
     [ORG, CLAIM],
@@ -345,7 +345,7 @@ async function runP302IntegrationSuite() {
            queue_metadata, created_by_type
          )
          VALUES ($1::uuid,'generated_content_review','generated_content_draft',
-                 '10000000-0000-4000-8000-000000000099'::uuid,'normal','open',
+                 '10000000-0000-4000-8000-000000000099'::uuid,'medium','open',
                  'needs_gk_review','Generated draft requires human review.',
                  'Review citations only before use.','{}'::jsonb,'system')`,
         [ORG],

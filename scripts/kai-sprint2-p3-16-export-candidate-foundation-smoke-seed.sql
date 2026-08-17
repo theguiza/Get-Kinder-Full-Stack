@@ -70,10 +70,10 @@ BEGIN
   VALUES (block1, org1, claim1, evidence1), (block1, org1, claim2, evidence2);
 
   INSERT INTO kai.review_queue_items (organization_id, queue_type, target_object_type, target_object_id, priority, queue_status, review_status, summary, required_action, queue_metadata, created_by_type)
-  VALUES (org1, 'generated_content_review', 'generated_content_draft', draft1, 'normal', 'resolved', 'resolved', 'Generated draft requires human review.', 'Review citations, audience eligibility, limitations, unsupported claims, and numeric or causal assertions before any use.', '{}'::jsonb, 'system');
+  VALUES (org1, 'generated_content_review', 'generated_content_draft', draft1, 'medium', 'resolved', 'resolved', 'Generated draft requires human review.', 'Review citations, audience eligibility, limitations, unsupported claims, and numeric or causal assertions before any use.', '{}'::jsonb, 'system');
 
   INSERT INTO kai.review_queue_items (organization_id, queue_type, target_object_type, target_object_id, priority, queue_status, review_status, summary, required_action, queue_metadata, created_by_type)
-  VALUES (org1, 'export_review', 'generated_content_draft', draft1, 'normal', 'resolved', 'resolved', 'Generated draft requires export review.', 'Review audience authority, current eligibility, citations, and the final export gate before any export.', '{}'::jsonb, 'system');
+  VALUES (org1, 'export_review', 'generated_content_draft', draft1, 'medium', 'resolved', 'resolved', 'Generated draft requires export review.', 'Review audience authority, current eligibility, citations, and the final export gate before any export.', '{}'::jsonb, 'system');
 END $$;
 
 COMMIT;

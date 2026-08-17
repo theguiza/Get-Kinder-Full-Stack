@@ -202,7 +202,7 @@ follow-ups (`kai.client_followup_items`, one per open gap on
 `entity_level_clarity` only, using one of exactly four fixed server-owned
 question templates), atomically compounded with each follow-up's
 `client_followup` `kai.review_queue_items` item (`queue_status =
-'waiting_on_client'`, `review_status = 'proposed'`, `priority = 'normal'`,
+'waiting_on_client'`, `review_status = 'proposed'`, `priority = 'medium'`,
 fixed `summary`, `required_action` = the exact question, `assigned_to`/
 `due_at` always `NULL`). Gated by `KAI_SPRINT2_ENABLED`, a mapped human actor
 (`gk_admin`/`gk_operator`/`gk_reviewer`) with active organization membership,

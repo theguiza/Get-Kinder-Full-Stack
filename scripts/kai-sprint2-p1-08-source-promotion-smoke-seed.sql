@@ -26,7 +26,7 @@ INSERT INTO kai.review_queue_items (
   priority, queue_status, summary, required_action, queue_metadata, created_by_type
 )
 SELECT organization_id, 'source_candidate_review', 'intake_source_candidate', '90000000-0000-4000-8000-000000000001'::uuid,
-       'normal', 'open', 'Review intake source-candidate stub for human classification.',
+       'medium', 'open', 'Review intake source-candidate stub for human classification.',
        'Human review is required. This is a review-only source-candidate stub: source promotion is not authorized, and no source or source_version has been created.',
        jsonb_build_object('p0_stub', true), 'human'
   FROM kai.intake_source_candidates WHERE intake_source_candidate_id = '90000000-0000-4000-8000-000000000001';
@@ -45,7 +45,7 @@ INSERT INTO kai.review_queue_items (
   priority, queue_status, summary, required_action, queue_metadata, created_by_type
 )
 SELECT organization_id, 'source_candidate_review', 'intake_source_candidate', '90000000-0000-4000-8000-000000000002'::uuid,
-       'normal', 'open', 'Review intake source-candidate stub for human classification.',
+       'medium', 'open', 'Review intake source-candidate stub for human classification.',
        'Human review is required. This is a review-only source-candidate stub: source promotion is not authorized, and no source or source_version has been created.',
        jsonb_build_object('p0_stub', true), 'human'
   FROM kai.intake_source_candidates WHERE intake_source_candidate_id = '90000000-0000-4000-8000-000000000002';

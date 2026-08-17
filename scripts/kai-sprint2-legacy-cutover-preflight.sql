@@ -249,6 +249,21 @@ allowed_updated_at_triggers (table_name, trigger_name) AS (VALUES
   ('sources', 'trg_sources_updated_at')
 ),
 
+audit_operation_vocab AS (
+  SELECT ARRAY(
+           SELECT m[1]
+             FROM regexp_matches(pg_get_constraintdef(c.oid), '''([^'']+)''::text', 'g') WITH ORDINALITY AS rx(m, ord)
+            ORDER BY ord
+         ) AS labels
+    FROM pg_constraint c
+    JOIN pg_class r ON r.oid = c.conrelid
+    JOIN pg_namespace n ON n.oid = r.relnamespace
+   WHERE n.nspname = 'kai'
+     AND r.relname = 'upload_lifecycle_audit'
+     AND c.contype = 'c'
+     AND c.conname = 'upload_lifecycle_audit_gate_a_operation_check'
+),
+
 -- Multi-factor classification. Each element is evaluated independently so a
 -- shape can never be classified from one marker.
 classified AS (
@@ -415,33 +430,10 @@ checks AS (
          ) THEN 'PASS' ELSE 'FAIL' END,
          'the cutover adds the P1-06-named CHECK over this same vocabulary; it must already be permitted'
   UNION ALL
-  -- kai.review_queue_items.priority: every priority label the CURRENT repository's
-  -- review-queue producers can actually write, verified against the live enum's
-  -- own pg_enum labels rather than against any assumed default.
-  --
-  -- Labels derived by inspecting current HEAD, not assumed:
-  --   'normal'  - written by every repository-side review_queue_items producer.
-  --               Backend/kai/dictionary/postgresReviewQueueRepository.js:34
-  --               (SENSITIVITY_REVIEW_PRIORITY) and its insert fallback at :174;
-  --               postgresSourceCandidateRepository.js:36
-  --               (SOURCE_CANDIDATE_REVIEW_PRIORITY);
-  --               validators/kaiConflictGroupValidators.js:14
-  --               (CONFLICT_RESOLUTION_PRIORITY);
-  --               validators/kaiClaimGapFollowupValidators.js:47
-  --               (CLIENT_FOLLOWUP_PRIORITY);
-  --               dictionary/exportReviewQueueContract.js:4 (EXPORT_REVIEW_PRIORITY).
-  --               A repo-wide scan for `PRIORITY = "<label>"` under Backend/kai/
-  --               yields exactly one distinct value: 'normal'.
-  --   'medium'  - the insert fallback in the already-live intake path,
-  --               Backend/kai/db/kaiIntakeQueries.js:181 (`item.priority || "medium"`).
-  --
-  -- Production evidence now proves the supported starting shape is an enum
-  -- column that does NOT yet contain 'normal'. That is transformable because the
-  -- cutover converts only this shared column to text with an explicit CHECK,
-  -- preserving every existing enum label and default while allowing canonical
-  -- 'normal'. A text column with that final CHECK is also accepted for a safe
-  -- converged rerun.
-  SELECT 'PREREQUISITE', 'QUEUE_PRIORITY_STARTING_OR_CONVERGED',
+  -- kai.review_queue_items.priority: production-native shared contract. Current
+  -- queue producers write the existing enum label 'medium', so the cutover must
+  -- not convert this shared column to text or add a 'normal' label.
+  SELECT 'PREREQUISITE', 'QUEUE_PRIORITY_PRODUCTION_NATIVE',
          'kai.review_queue_items.priority',
          CASE
            WHEN EXISTS (
@@ -458,22 +450,9 @@ checks AS (
                    WHERE e.enumtypid = ty.oid ORDER BY e.enumsortorder
                 ) = ARRAY['mandatory','immediate_fix','high','medium','low','backlog','not_applicable','unknown']::text[]
            ) THEN 'PASS'
-           WHEN EXISTS (
-             SELECT 1 FROM information_schema.columns c
-              WHERE c.table_schema = 'kai' AND c.table_name = 'review_queue_items'
-                AND c.column_name = 'priority' AND c.data_type = 'text'
-                AND c.column_default = '''medium''::text'
-           ) AND EXISTS (
-             SELECT 1 FROM pg_constraint pc JOIN pg_class r ON r.oid = pc.conrelid
-               JOIN pg_namespace n ON n.oid = r.relnamespace
-              WHERE n.nspname = 'kai' AND r.relname = 'review_queue_items'
-                AND pc.conname = 'review_queue_items_cutover_priority_compat_check'
-                AND pg_get_constraintdef(pc.oid) LIKE '%''normal''%'
-                AND pg_get_constraintdef(pc.oid) LIKE '%''medium''%'
-           ) THEN 'PASS'
            ELSE 'FAIL'
          END,
-         'supported starting state: production priority_enum/default without normal, or converged text compatibility CHECK with normal'
+         'supported starting state: production priority_enum/default with exact production labels and no normal'
   UNION ALL
   -- The live enum's actual label set, reported so the operator can see exactly
   -- what the production type carries (metadata only - enum labels are schema, not
@@ -489,10 +468,10 @@ checks AS (
             WHERE n.nspname = 'kai' AND r.relname = 'review_queue_items' AND a.attname = 'priority'
          ), 'not an enum-typed column')
 
-  -- kai.upload_lifecycle_audit: Gate-A-only operation vocabulary is a supported
-  -- starting state. The cutover widens it in the same transaction to the exact
-  -- cumulative P1 producer vocabulary and metadata branches. A cumulative
-  -- already-converged shape is also accepted for rerun.
+  -- kai.upload_lifecycle_audit: Gate-A-only operation vocabulary is the
+  -- production-native starting state. The cutover widens only this operation
+  -- vocabulary to the exact cumulative P1 producer vocabulary and leaves the
+  -- existing metadata CHECK unchanged.
   --
   -- Derived by inspecting every current writer of this table. All of them issue
   -- the identical statement shape (a repo-wide scan of the column list following
@@ -542,24 +521,19 @@ checks AS (
   SELECT 'PREREQUISITE', 'AUDIT_OPERATION_STARTING_OR_CONVERGED',
          'kai.upload_lifecycle_audit.operation',
          CASE WHEN EXISTS (
-           SELECT 1 FROM pg_constraint c JOIN pg_class r ON r.oid = c.conrelid
-             JOIN pg_namespace n ON n.oid = r.relnamespace
-            WHERE n.nspname = 'kai' AND r.relname = 'upload_lifecycle_audit' AND c.contype = 'c'
-              AND c.conname = 'upload_lifecycle_audit_gate_a_operation_check'
-              AND pg_get_constraintdef(c.oid) LIKE '%''reserve_upload''%'
-              AND pg_get_constraintdef(c.oid) LIKE '%''policy_decision_compare_and_set''%'
-              AND (
-                pg_get_constraintdef(c.oid) NOT LIKE '%''parser_run_recorded''%'
-                OR (
-                  pg_get_constraintdef(c.oid) LIKE '%''parser_run_recorded''%'
-                  AND pg_get_constraintdef(c.oid) LIKE '%''file_profile_persisted''%'
-                  AND pg_get_constraintdef(c.oid) LIKE '%''data_dictionary_draft_persisted''%'
-                  AND pg_get_constraintdef(c.oid) LIKE '%''intake_sensitivity_profile_persisted''%'
-                  AND pg_get_constraintdef(c.oid) LIKE '%''sensitivity_review_queue_item_created''%'
-                  AND pg_get_constraintdef(c.oid) LIKE '%''intake_source_candidate_persisted''%'
-                  AND pg_get_constraintdef(c.oid) LIKE '%''source_promotion_decision_persisted''%'
-                )
-              )
+           SELECT 1 FROM audit_operation_vocab
+            WHERE labels = ARRAY['reserve_upload','start_upload','complete_object_version',
+                                 'confirm_upload','block_upload','abandon_upload',
+                                 'expire_upload','policy_decision_compare_and_set']::text[]
+               OR labels = ARRAY['reserve_upload','start_upload','complete_object_version',
+                                  'confirm_upload','block_upload','abandon_upload',
+                                  'expire_upload','policy_decision_compare_and_set',
+                                  'parser_run_recorded','file_profile_persisted',
+                                  'data_dictionary_draft_persisted',
+                                  'intake_sensitivity_profile_persisted',
+                                  'sensitivity_review_queue_item_created',
+                                  'intake_source_candidate_persisted',
+                                  'source_promotion_decision_persisted']::text[]
          ) THEN 'PASS' ELSE 'FAIL' END,
          'supported starting Gate-A-only operation CHECK or already-converged cumulative P1 CHECK'
   UNION ALL

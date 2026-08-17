@@ -68,11 +68,11 @@ fabricates legacy P2 rows into the canonical generation.
      Gate-A-only `upload_lifecycle_audit` operation CHECK is a supported
      starting state; the bundle widens it atomically to the cumulative P1
      producer vocabulary. An already-cumulative CHECK is accepted for rerun.
-   - `PREREQUISITE / QUEUE_PRIORITY_STARTING_OR_CONVERGED` must pass.
+   - `PREREQUISITE / QUEUE_PRIORITY_PRODUCTION_NATIVE` must pass.
      Production evidence shows `review_queue_items.priority` starts as
      `kai.priority_enum` with default `'medium'` and no `'normal'`; the bundle
-     converts only that shared column to text with a compatibility CHECK that
-     preserves every production label and permits canonical `'normal'`.
+     preserves that shared enum/default/label contract and current producers
+     write `'medium'`.
    - `DEPENDENCY / *` must pass. A view, materialized view, unexpected trigger,
      unexpected trigger function/timing/event/relation, or `kai` function body
      that references a relocation candidate is a dependency this bundle does
@@ -182,7 +182,7 @@ reproduces pre-cutover; the preflight is fully green on the expected legacy stat
 and fails closed on an unrecognized variation, unexpected trigger, unsupported
 priority shape, incompatible audit vocabulary, and unsatisfiable audit column; a
 forced mid-cutover failure leaves the database byte-identical; the bundle
-applies; priority `normal`/`medium` and the cumulative audit producer operations
+applies; priority `medium` and the cumulative audit producer operations
 are writable; the verifier is fully green; legacy rows, relationships, retained
 dependents, updated_at triggers and shared contracts all survive; the
 pre-reprocessing rollback restores the exact fixture; re-applying and re-running

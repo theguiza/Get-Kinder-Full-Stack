@@ -46,7 +46,7 @@ ALTER TABLE kai.review_queue_items
           OR (queue_status = 'in_progress' AND review_status = 'needs_gk_review')
           OR (queue_status = 'resolved' AND review_status = 'resolved')
         )
-        AND priority = 'normal'
+        AND priority = 'medium'
         AND summary = 'Generated draft requires export review.'
         AND required_action = 'Review audience authority, current eligibility, citations, and the final export gate before any export.'
         AND blocked_reason IS NULL

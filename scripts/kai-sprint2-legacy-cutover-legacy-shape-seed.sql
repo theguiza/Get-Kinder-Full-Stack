@@ -76,8 +76,8 @@ CREATE TYPE kai.classification_review_status_enum AS ENUM ('proposed', 'confirme
 CREATE TYPE kai.classification_source_enum AS ENUM ('imported', 'rule_assigned', 'human');
 -- Production evidence supplied on 2026-08-17 proves review_queue_items.priority
 -- starts as kai.priority_enum, default 'medium', with these labels and no
--- 'normal'. The cutover itself reconciles that shared-schema compatibility
--- problem; the fixture must not pre-normalize it.
+-- 'normal'. The cutover preserves that shared production contract exactly;
+-- current queue producers use 'medium' instead of mutating the shared enum.
 CREATE TYPE kai.priority_enum AS ENUM (
   'mandatory',
   'immediate_fix',

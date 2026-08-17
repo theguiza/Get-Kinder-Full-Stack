@@ -53,7 +53,7 @@ function queuePlan(overrides = {}) {
     target_object_id: GROUP,
     queue_status: "open",
     review_status: "needs_gk_review",
-    priority: "normal",
+    priority: "medium",
     summary: CONFLICT_GROUP_SAFE_SUMMARY,
     required_action: CONFLICT_RESOLUTION_REQUIRED_ACTION,
     assigned_to: null,
@@ -135,7 +135,7 @@ test("validateConflictGroupCompleteness enforces the exact conflict_resolution q
   assert.equal(queuePlan().target_object_type, "conflict_group");
   assert.equal(queuePlan().queue_status, "open");
   assert.equal(queuePlan().review_status, "needs_gk_review");
-  assert.equal(queuePlan().priority, "normal");
+  assert.equal(queuePlan().priority, "medium");
   assert.equal(queuePlan().assigned_to, null);
   assert.equal(queuePlan().due_at, null);
   assert.equal(queuePlan().required_action, CONFLICT_RESOLUTION_REQUIRED_ACTION);

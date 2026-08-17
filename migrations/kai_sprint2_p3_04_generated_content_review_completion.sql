@@ -38,7 +38,7 @@ ALTER TABLE kai.review_queue_items
           OR (queue_status = 'in_progress' AND review_status = 'needs_gk_review')
           OR (queue_status = 'resolved' AND review_status = 'resolved')
         )
-        AND priority = 'normal'
+        AND priority = 'medium'
         AND summary = 'Generated draft requires human review.'
         AND required_action = 'Review citations, audience eligibility, limitations, unsupported claims, and numeric or causal assertions before any use.'
         AND assigned_to IS NULL

@@ -117,29 +117,7 @@ BEGIN
   ALTER TABLE kai.review_queue_items
     DROP CONSTRAINT IF EXISTS review_queue_items_p1_06_queue_type_check,
     DROP CONSTRAINT IF EXISTS review_queue_items_p1_06_queue_status_check,
-    DROP CONSTRAINT IF EXISTS review_queue_items_p1_08_identity_unique,
-    DROP CONSTRAINT IF EXISTS review_queue_items_cutover_priority_compat_check;
-
-  IF EXISTS (
-    SELECT 1 FROM information_schema.columns c
-     WHERE c.table_schema = 'kai' AND c.table_name = 'review_queue_items'
-       AND c.column_name = 'priority' AND c.data_type = 'text'
-  ) THEN
-    IF EXISTS (
-      SELECT 1 FROM kai.review_queue_items
-       WHERE priority NOT IN (
-         'mandatory', 'immediate_fix', 'high', 'medium', 'low', 'backlog',
-         'not_applicable', 'unknown'
-       )
-    ) THEN
-      RAISE EXCEPTION 'review_queue_items.priority contains values outside the pre-cutover priority_enum vocabulary; this is PRE_REPROCESSING_ROLLBACK only and will not discard or remap canonical priority values';
-    END IF;
-
-    ALTER TABLE kai.review_queue_items ALTER COLUMN priority DROP DEFAULT;
-    ALTER TABLE kai.review_queue_items
-      ALTER COLUMN priority TYPE kai.priority_enum USING priority::kai.priority_enum;
-    ALTER TABLE kai.review_queue_items ALTER COLUMN priority SET DEFAULT 'medium'::kai.priority_enum;
-  END IF;
+    DROP CONSTRAINT IF EXISTS review_queue_items_p1_08_identity_unique;
 
   ALTER TABLE kai.upload_lifecycle_audit
     DROP CONSTRAINT IF EXISTS upload_lifecycle_audit_gate_a_operation_check,
@@ -154,44 +132,6 @@ BEGIN
         'expire_upload'::text,
         'policy_decision_compare_and_set'::text
       ]));
-
-  ALTER TABLE kai.upload_lifecycle_audit
-    DROP CONSTRAINT IF EXISTS upload_lifecycle_audit_gate_a_metadata_object_check,
-    ADD CONSTRAINT upload_lifecycle_audit_gate_a_metadata_object_check
-      CHECK (
-        jsonb_typeof(metadata) = 'object'::text
-        AND kai.gate_a_p0_jsonb_metadata_only(metadata)
-        AND (
-          operation <> 'policy_decision_compare_and_set'::text
-          OR (
-            metadata ? 'metadata_only'::text
-            AND metadata ? 'contract'::text
-            AND metadata ? 'file_policy_status'::text
-            AND metadata ? 'policy_decision_outcome'::text
-            AND metadata ? 'object_version_bound'::text
-            AND metadata ? 'verified_checksum_bound'::text
-            AND metadata ? 'verified_size_bytes_bound'::text
-            AND metadata ? 'declared_mime'::text
-            AND metadata ? 'extension'::text
-            AND metadata ? 'replay_contract_version'::text
-            AND metadata ? 'validator_key'::text
-            AND NOT metadata ? 'sanitized_result'::text
-            AND (metadata - ARRAY[
-              'metadata_only'::text,
-              'contract'::text,
-              'file_policy_status'::text,
-              'policy_decision_outcome'::text,
-              'object_version_bound'::text,
-              'verified_checksum_bound'::text,
-              'verified_size_bytes_bound'::text,
-              'declared_mime'::text,
-              'extension'::text,
-              'replay_contract_version'::text,
-              'validator_key'::text
-            ]) = '{}'::jsonb
-          )
-        )
-      );
 
   DROP INDEX IF EXISTS kai.ux_review_queue_items_p2_01_evidence_review_identity;
   DROP INDEX IF EXISTS kai.ux_review_queue_items_p1_06_sensitivity_review_identity;

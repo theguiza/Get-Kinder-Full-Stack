@@ -724,7 +724,7 @@ async function persistCompleteSet(tx, { input, runId, generatorResult, validatio
        priority, queue_status, review_status, blocked_reason, assigned_to, due_at,
        summary, required_action, queue_metadata, created_by, created_by_type, created_at, updated_at
      )
-     VALUES ($1::uuid,NULL,$2,$3,$4::uuid,'normal','open',$5,NULL,NULL,NULL,$6,$7,'{}'::jsonb,NULL,'system',$8::timestamptz,$8::timestamptz)
+     VALUES ($1::uuid,NULL,$2,$3,$4::uuid,'medium','open',$5,NULL,NULL,NULL,$6,$7,'{}'::jsonb,NULL,'system',$8::timestamptz,$8::timestamptz)
      RETURNING review_queue_item_id::text AS review_queue_item_id`,
     [input.organizationId, REVIEW_QUEUE_TYPE, REVIEW_TARGET_TYPE, draftId, REVIEW_STATUS, REVIEW_SUMMARY, REVIEW_REQUIRED_ACTION, input.now],
   );

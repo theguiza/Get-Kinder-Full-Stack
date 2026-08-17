@@ -335,7 +335,7 @@ async function runP206IntegrationSuite() {
            organization_id, queue_type, target_object_type, target_object_id,
            priority, queue_status, review_status, summary, required_action,
            queue_metadata, created_by_type
-         ) VALUES ($1::uuid,'evidence_review','evidence_item',$2::uuid,'normal','open','needs_gk_review',
+         ) VALUES ($1::uuid,'evidence_review','evidence_item',$2::uuid,'medium','open','needs_gk_review',
            'Review evidence lineage before claim use.','Review evidence lineage before claim use.','{}'::jsonb,'system')`,
         [ORG, evidenceId],
       );
@@ -360,7 +360,7 @@ async function runP206IntegrationSuite() {
            organization_id, queue_type, target_object_type, target_object_id,
            priority, queue_status, review_status, summary, required_action,
            queue_metadata, created_by_type
-         ) VALUES ($1::uuid,'claim_review','claim',$2::uuid,'normal','open','needs_gk_review',
+         ) VALUES ($1::uuid,'claim_review','claim',$2::uuid,'medium','open','needs_gk_review',
            'Review claim before audience use.','Review claim before audience use.','{}'::jsonb,'system')`,
         [ORG, peerClaimId],
       );
@@ -396,7 +396,7 @@ async function runP206IntegrationSuite() {
            organization_id, queue_type, target_object_type, target_object_id,
            queue_status, review_status, priority, summary, required_action,
            assigned_to, due_at, queue_metadata, created_by_type
-         ) VALUES ($1::uuid,'conflict_resolution','conflict_group',$2::uuid,'open','needs_gk_review','normal','Potential claim conflict requires GK review.','Compare both claims, their evidence lineage, definitions, reporting periods, entity levels, denominators, and support limitations. Record whether a conflict exists. Do not approve or promote either claim.',NULL,NULL,'{}'::jsonb,'system')
+         ) VALUES ($1::uuid,'conflict_resolution','conflict_group',$2::uuid,'open','needs_gk_review','medium','Potential claim conflict requires GK review.','Compare both claims, their evidence lineage, definitions, reporting periods, entity levels, denominators, and support limitations. Record whether a conflict exists. Do not approve or promote either claim.',NULL,NULL,'{}'::jsonb,'system')
          ON CONFLICT (organization_id, queue_type, target_object_type, target_object_id)
            WHERE queue_type = 'conflict_resolution'
            DO NOTHING`,

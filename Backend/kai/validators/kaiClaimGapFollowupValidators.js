@@ -44,7 +44,7 @@ export const CLIENT_FOLLOWUP_QUEUE_TYPE = "client_followup";
 export const CLIENT_FOLLOWUP_TARGET_OBJECT_TYPE = "client_followup_item";
 export const CLIENT_FOLLOWUP_QUEUE_STATUS = "waiting_on_client";
 export const CLIENT_FOLLOWUP_REVIEW_STATUS = "proposed";
-export const CLIENT_FOLLOWUP_PRIORITY = "normal";
+export const CLIENT_FOLLOWUP_PRIORITY = "medium";
 export const CLIENT_FOLLOWUP_SUMMARY = "Client clarification is required for an unresolved claim gap.";
 
 // KAI P2-11: the one additional CURRENT (never stale/corrupted) terminal

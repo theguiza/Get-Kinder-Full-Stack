@@ -1,7 +1,7 @@
 export const EXPORT_REVIEW_QUEUE_STATIC_CONTRACT = Object.freeze({
   queueType: "export_review",
   targetObjectType: "generated_content_draft",
-  priority: "normal",
+  priority: "medium",
   summary: "Generated draft requires export review.",
   requiredAction:
     "Review audience authority, current eligibility, citations, and the final export gate before any export.",

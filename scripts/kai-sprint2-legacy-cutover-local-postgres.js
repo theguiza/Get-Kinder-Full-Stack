@@ -100,6 +100,56 @@ function assertEqual(actual, expected, label) {
   }
 }
 
+function constraintDef(name) {
+  return psqlValue(`
+    SELECT regexp_replace(pg_get_constraintdef(c.oid), '\\s+', ' ', 'g')
+      FROM pg_constraint c
+      JOIN pg_class r ON r.oid = c.conrelid
+      JOIN pg_namespace n ON n.oid = r.relnamespace
+     WHERE n.nspname = 'kai'
+       AND r.relname = 'upload_lifecycle_audit'
+       AND c.conname = '${name}'
+  `.replace(/\n/g, " "));
+}
+
+function auditOperationVocabulary() {
+  return psqlValue(`
+    SELECT string_agg(op, ',' ORDER BY ord)
+      FROM (
+        SELECT m[1] AS op, min(ord) AS ord
+          FROM regexp_matches(
+                 (SELECT pg_get_constraintdef(c.oid)
+                    FROM pg_constraint c
+                    JOIN pg_class r ON r.oid = c.conrelid
+                    JOIN pg_namespace n ON n.oid = r.relnamespace
+                   WHERE n.nspname = 'kai'
+                     AND r.relname = 'upload_lifecycle_audit'
+                     AND c.conname = 'upload_lifecycle_audit_gate_a_operation_check'),
+                 '''([^'']+)''::text',
+                 'g'
+               ) WITH ORDINALITY AS rx(m, ord)
+         GROUP BY m[1]
+      ) ops
+  `.replace(/\n/g, " "));
+}
+
+function priorityShape() {
+  return psqlValue(`
+    SELECT format_type(a.atttypid, a.atttypmod) || ':' ||
+           pg_get_expr(d.adbin, d.adrelid) || ':' ||
+           string_agg(e.enumlabel, ',' ORDER BY e.enumsortorder)
+      FROM pg_attribute a
+      JOIN pg_class r ON r.oid = a.attrelid
+      JOIN pg_namespace n ON n.oid = r.relnamespace
+      JOIN pg_attrdef d ON d.adrelid = r.oid AND d.adnum = a.attnum
+      JOIN pg_enum e ON e.enumtypid = a.atttypid
+     WHERE n.nspname = 'kai'
+       AND r.relname = 'review_queue_items'
+       AND a.attname = 'priority'
+     GROUP BY a.atttypid, a.atttypmod, d.adbin, d.adrelid
+  `.replace(/\n/g, " "));
+}
+
 // A structural + row-count fingerprint of the whole material graph, used to prove
 // that a forced mid-cutover failure and the pre-reprocessing rollback both restore
 // the exact starting state.
@@ -241,6 +291,11 @@ try {
   if (legacyTargetRows < 1) throw new Error("fixture must contain at least one legacy-target review_queue_items row");
   console.log(`legacy-target review_queue_items rows in fixture: ${legacyTargetRows}`);
   assertEqual(
+    priorityShape(),
+    "kai.priority_enum:'medium'::kai.priority_enum:mandatory,immediate_fix,high,medium,low,backlog,not_applicable,unknown",
+    "fixture review_queue_items.priority must start as the production enum/default/labels",
+  );
+  assertEqual(
     psqlValue(`
       SELECT string_agg(e.enumlabel, ',' ORDER BY e.enumsortorder)
         FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace
@@ -276,8 +331,15 @@ try {
     "gate_a_only",
     "fixture audit operation constraint must start Gate-A-only",
   );
+  assertEqual(
+    auditOperationVocabulary(),
+    "reserve_upload,start_upload,complete_object_version,confirm_upload,block_upload,abandon_upload,expire_upload,policy_decision_compare_and_set",
+    "fixture audit operation vocabulary must start as the exact Gate-A 8-operation set",
+  );
 
   const preCutoverFingerprint = fingerprint();
+  const preCutoverPriorityShape = priorityShape();
+  const preCutoverAuditMetadataDef = constraintDef("upload_lifecycle_audit_gate_a_metadata_object_check");
   console.log(`pre-cutover fingerprint: ${preCutoverFingerprint}`);
 
   // ------------------------------------------------------------------------
@@ -433,7 +495,7 @@ try {
       USING priority::text::kai.priority_enum_probe;
   `);
   {
-    const rows = preflightRows("QUEUE_PRIORITY_STARTING_OR_CONVERGED");
+    const rows = preflightRows("QUEUE_PRIORITY_PRODUCTION_NATIVE");
     if (!rows.some((line) => line.includes("FAIL"))) {
       throw new Error(`preflight failed to reject an unsupported priority enum shape\n${rows.join("\n")}`);
     }
@@ -525,23 +587,46 @@ try {
   const postCutoverFingerprint = fingerprint();
 
   assertEqual(
-    psqlValue("SELECT data_type || ':' || column_default FROM information_schema.columns WHERE table_schema='kai' AND table_name='review_queue_items' AND column_name='priority'"),
-    "text:'medium'::text",
-    "review_queue_items.priority must be converted to reversible text compatibility shape",
+    priorityShape(),
+    preCutoverPriorityShape,
+    "review_queue_items.priority enum/default/labels must be unchanged by forward cutover",
   );
-  for (const priority of ["normal", "medium"]) {
-    psqlCommand(`
+  assertEqual(
+    auditOperationVocabulary(),
+    "reserve_upload,start_upload,complete_object_version,confirm_upload,block_upload,abandon_upload,expire_upload,policy_decision_compare_and_set,parser_run_recorded,file_profile_persisted,data_dictionary_draft_persisted,intake_sensitivity_profile_persisted,sensitivity_review_queue_item_created,intake_source_candidate_persisted,source_promotion_decision_persisted",
+    "forward cutover must widen audit operation vocabulary exactly 8 -> 15",
+  );
+  assertEqual(
+    constraintDef("upload_lifecycle_audit_gate_a_metadata_object_check"),
+    preCutoverAuditMetadataDef,
+    "audit metadata CHECK must be unchanged by forward cutover",
+  );
+  psqlCommand(`
+    BEGIN;
+    INSERT INTO kai.review_queue_items (
+      review_queue_item_id, organization_id, queue_type, target_object_type,
+      target_object_id, priority, queue_status, summary
+    ) VALUES (
+      gen_random_uuid(), '00000000-0000-4000-8000-000000000001',
+      'intake_file_review', 'intake_file', gen_random_uuid(), 'medium',
+      'open', 'priority compatibility probe'
+    );
+    ROLLBACK;
+  `);
+  {
+    const rejected = psqlCommand(`
       BEGIN;
       INSERT INTO kai.review_queue_items (
         review_queue_item_id, organization_id, queue_type, target_object_type,
         target_object_id, priority, queue_status, summary
       ) VALUES (
         gen_random_uuid(), '00000000-0000-4000-8000-000000000001',
-        'intake_file_review', 'intake_file', gen_random_uuid(), '${priority}',
-        'open', 'priority compatibility probe'
+        'intake_file_review', 'intake_file', gen_random_uuid(), 'normal',
+        'open', 'priority rejection probe'
       );
       ROLLBACK;
-    `);
+    `, { allowFail: true });
+    if (rejected.status === 0) throw new Error("normal priority must remain rejected by production priority_enum");
   }
   const auditMetadataByOperation = {
     reserve_upload: { metadata_only: true },
@@ -679,6 +764,13 @@ try {
   psqlFile(ROLLBACK_SQL);
   assertEqual(fingerprint(), preCutoverFingerprint,
     "the pre-reprocessing rollback must restore the exact pre-cutover fixture");
+  assertEqual(priorityShape(), preCutoverPriorityShape,
+    "review_queue_items.priority enum/default/labels must be unchanged by rollback");
+  assertEqual(auditOperationVocabulary(),
+    "reserve_upload,start_upload,complete_object_version,confirm_upload,block_upload,abandon_upload,expire_upload,policy_decision_compare_and_set",
+    "pre-reprocessing rollback must restore the exact Gate-A 8-operation vocabulary");
+  assertEqual(constraintDef("upload_lifecycle_audit_gate_a_metadata_object_check"), preCutoverAuditMetadataDef,
+    "audit metadata CHECK must remain unchanged after rollback");
   assertNoFail("legacy-cutover preflight (after pre-reprocessing rollback)", psqlFile(PREFLIGHT_SQL).stdout);
   console.log("pre-reprocessing rollback restored the exact pre-cutover fixture; preflight is green again.");
 
