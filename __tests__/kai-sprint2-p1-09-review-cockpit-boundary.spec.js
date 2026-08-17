@@ -9,7 +9,10 @@ import {
   submitSourceCandidateDecision,
   __reviewCockpitServiceContract,
 } from "../Backend/kai/services/kaiReviewCockpitService.js";
-import { listReviewCockpitQueueItems } from "../Backend/kai/db/kaiReviewCockpitReadModels.js";
+import {
+  listReviewCockpitQueueItems,
+  getReviewCockpitSourceCandidateRecord,
+} from "../Backend/kai/db/kaiReviewCockpitReadModels.js";
 import { __testables as intakeRouteTestables } from "../Backend/kai/routes/sprint2IntakeApi.js";
 import {
   REVIEW_COCKPIT_QUEUE_TYPES,
@@ -269,6 +272,77 @@ test("P1-09 read models and services contain no mutation SQL and the service imp
   assert.doesNotMatch(readModelSource, /FOR UPDATE/);
   assert.doesNotMatch(serviceSource, /\bSELECT\b|\bINSERT INTO\b|\bDELETE FROM\b/);
   assert.doesNotMatch(serviceSource, /import\s+pool\s+from/);
+});
+
+/**
+ * Regression for the production review-cockpit source-candidate detail 500:
+ * getReviewCockpitSourceCandidateRecord composed its reads from the P1-07/P1-08
+ * write-path `getScoped*` lookups in kaiIntakeQueries.js, which take a `FOR UPDATE`
+ * row lock so the P1-07/P1-08 repositories can decide replay-vs-write inside one
+ * transaction. Reusing those exact queries for this display-only GET meant every
+ * source-candidate detail request issued three standalone `SELECT ... FOR UPDATE`
+ * statements outside of any write transaction - taking a real row lock (and
+ * requiring UPDATE table privilege) purely to render a page. The static source
+ * check above only ever scanned this file's own text, so it could not catch a
+ * `FOR UPDATE` pulled in transitively through an import; this test instead spies on
+ * every query the real read model issues (through the real kaiIntakeQueries.js
+ * functions, not a stubbed reader) and asserts none of them lock a row.
+ */
+test("P1-09 read model: the source-candidate detail read never issues a locking (FOR UPDATE) query", async () => {
+  const issuedQueries = [];
+  const db = {
+    async query(sql, params) {
+      issuedQueries.push(sql);
+      if (/FROM kai\.intake_source_candidates/.test(sql)) {
+        return {
+          rows: [{
+            intake_source_candidate_id: CANDIDATE,
+            organization_id: ORG,
+            intake_file_id: INTAKE_FILE,
+            file_profile_id: FILE_PROFILE,
+            data_dictionary_id: DATA_DICTIONARY,
+            intake_sensitivity_profile_id: SENSITIVITY,
+            profile_canonical_sha256: SHA,
+            proposed_source_type: "unknown",
+            candidate_status: "needs_gk_review",
+            created_at: CREATED_AT,
+          }],
+        };
+      }
+      if (/FROM kai\.review_queue_items/.test(sql)) {
+        return {
+          rows: [{
+            review_queue_item_id: QUEUE_ITEM,
+            organization_id: ORG,
+            queue_type: "source_candidate_review",
+            target_object_type: "intake_source_candidate",
+            target_object_id: CANDIDATE,
+            priority: "normal",
+            queue_status: "open",
+            review_status: "needs_gk_review",
+            assigned_to: null,
+            due_at: null,
+            summary: "Review intake source-candidate stub for human classification.",
+            required_action: "Human review is required.",
+            queue_metadata: {},
+            created_at: CREATED_AT,
+            updated_at: UPDATED_AT,
+          }],
+        };
+      }
+      return { rows: [] };
+    },
+  };
+
+  const record = await getReviewCockpitSourceCandidateRecord(ORG, CANDIDATE, db);
+  assert.equal(record.sourceCandidate.intake_source_candidate_id, CANDIDATE);
+  assert.equal(record.reviewQueueItem.review_status, "needs_gk_review");
+  assert.equal(record.promotionDecision, null);
+
+  assert.ok(issuedQueries.length >= 3, "expected the candidate, queue-item, and decision reads to all run");
+  for (const sql of issuedQueries) {
+    assert.doesNotMatch(sql, /FOR UPDATE/i);
+  }
 });
 
 test("P1-09 routes call authorized services only: no SQL, no pool import, no kai.* access, no KAI DB helper call", () => {

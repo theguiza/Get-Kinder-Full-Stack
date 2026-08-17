@@ -1,8 +1,8 @@
 import pool from "./kaiDb.js";
 import {
-  getScopedSourceCandidateByIdentity,
-  getScopedSourceCandidateReviewQueueItemByIdentity,
-  getScopedSourcePromotionDecisionByIdentity,
+  getScopedSourceCandidateByIdentityForDisplay,
+  getScopedSourceCandidateReviewQueueItemByIdentityForDisplay,
+  getScopedSourcePromotionDecisionByIdentityForDisplay,
   getScopedSourceById,
   getScopedSourceVersionById,
 } from "./kaiIntakeQueries.js";
@@ -159,7 +159,12 @@ export async function getReviewCockpitFileProfileRecord(organizationId, fileProf
 
 /**
  * Read-only, tenant-scoped source-candidate review record, composed entirely from
- * the already-accepted P1-07/P1-08 `getScoped*` lookups. The source and
+ * the already-accepted P1-07/P1-08 `getScoped*` lookups - using their `ForDisplay`,
+ * non-locking counterparts. The write-path `getScoped*` lookups take a row lock
+ * (via the SQL clause that follows a SELECT to bind it to the current transaction)
+ * because they back a same-transaction replay-vs-write decision; this
+ * cockpit detail never writes anything, so it must never take a row lock (or
+ * require UPDATE table privilege) merely to display one. The source and
  * source_version are read only through the identifiers the committed decision row
  * is already bound to, so this never infers a promotion result that the decision
  * row does not itself record.
@@ -170,14 +175,14 @@ export async function getReviewCockpitSourceCandidateRecord(
   db = pool,
 ) {
   const identity = { organizationId, intakeSourceCandidateId };
-  const sourceCandidate = await getScopedSourceCandidateByIdentity(identity, db);
+  const sourceCandidate = await getScopedSourceCandidateByIdentityForDisplay(identity, db);
   if (!sourceCandidate) return null;
 
-  const reviewQueueItem = await getScopedSourceCandidateReviewQueueItemByIdentity(
+  const reviewQueueItem = await getScopedSourceCandidateReviewQueueItemByIdentityForDisplay(
     { organizationId, targetObjectId: sourceCandidate.intake_source_candidate_id },
     db,
   );
-  const promotionDecision = await getScopedSourcePromotionDecisionByIdentity(identity, db);
+  const promotionDecision = await getScopedSourcePromotionDecisionByIdentityForDisplay(identity, db);
   const source = promotionDecision?.source_id
     ? await getScopedSourceById({ organizationId, sourceId: promotionDecision.source_id }, db)
     : null;

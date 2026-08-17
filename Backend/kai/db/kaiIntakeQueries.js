@@ -452,6 +452,34 @@ export async function getScopedSourceCandidateReviewQueueItemByIdentity(
 }
 
 /**
+ * P1-09 narrow, tenant-scoped, NON-LOCKING read of the same
+ * 'source_candidate_review' identity as getScopedSourceCandidateReviewQueueItemByIdentity
+ * above, for the review-cockpit's display-only detail read. That sibling query locks
+ * FOR UPDATE because it backs the P1-07 write path's own replay-vs-insert decision
+ * inside a transaction; the cockpit never writes anything from this read, so it must
+ * never take a row lock (or require UPDATE privilege) just to display one. Also
+ * selects review_status, which the locking sibling omits (it never needed the
+ * column). Additive: does not change any other exported query in this module.
+ */
+export async function getScopedSourceCandidateReviewQueueItemByIdentityForDisplay(
+  { organizationId, targetObjectId },
+  db = pool,
+) {
+  const { rows } = await db.query(
+    `SELECT review_queue_item_id, organization_id, queue_type, target_object_type,
+            target_object_id, priority, queue_status, review_status, assigned_to, due_at,
+            summary, required_action, queue_metadata, created_at, updated_at
+       FROM kai.review_queue_items
+      WHERE organization_id = $1
+        AND queue_type = 'source_candidate_review'
+        AND target_object_type = 'intake_source_candidate'
+        AND target_object_id = $2`,
+    [organizationId, targetObjectId],
+  );
+  return rows[0] || null;
+}
+
+/**
  * P1-08 narrow, tenant-scoped authoritative lookup of the P1-07 source candidate
  * this package promotes. Locks the row FOR UPDATE so the P1-08 repository can
  * decide between "replay an existing promotion decision" and "safe to promote"
@@ -476,6 +504,29 @@ export async function getScopedSourceCandidateByIdentity(
 }
 
 /**
+ * P1-09 narrow, tenant-scoped, NON-LOCKING read of the same identity as
+ * getScopedSourceCandidateByIdentity above, for the review-cockpit's display-only
+ * detail read. See getScopedSourceCandidateReviewQueueItemByIdentityForDisplay for
+ * why the cockpit never reuses a FOR UPDATE lookup for a read. Additive: does not
+ * change any other exported query in this module.
+ */
+export async function getScopedSourceCandidateByIdentityForDisplay(
+  { organizationId, intakeSourceCandidateId },
+  db = pool,
+) {
+  const { rows } = await db.query(
+    `SELECT intake_source_candidate_id, organization_id, intake_file_id, file_profile_id,
+            data_dictionary_id, intake_sensitivity_profile_id, profile_canonical_sha256,
+            proposed_source_type, candidate_status, created_at
+       FROM kai.intake_source_candidates
+      WHERE organization_id = $1
+        AND intake_source_candidate_id = $2`,
+    [organizationId, intakeSourceCandidateId],
+  );
+  return rows[0] || null;
+}
+
+/**
  * P1-08 narrow, tenant-scoped authoritative lookup by the P1-08 promotion-decision
  * idempotency identity (organization_id + intake_source_candidate_id). Locks the row
  * FOR UPDATE. Additive: no other exported query in this module is changed.
@@ -492,6 +543,30 @@ export async function getScopedSourcePromotionDecisionByIdentity(
       WHERE organization_id = $1
         AND intake_source_candidate_id = $2
       FOR UPDATE`,
+    [organizationId, intakeSourceCandidateId],
+  );
+  return rows[0] || null;
+}
+
+/**
+ * P1-09 narrow, tenant-scoped, NON-LOCKING read of the same identity as
+ * getScopedSourcePromotionDecisionByIdentity above, for the review-cockpit's
+ * display-only detail read. See
+ * getScopedSourceCandidateReviewQueueItemByIdentityForDisplay for why the cockpit
+ * never reuses a FOR UPDATE lookup for a read. Additive: does not change any other
+ * exported query in this module.
+ */
+export async function getScopedSourcePromotionDecisionByIdentityForDisplay(
+  { organizationId, intakeSourceCandidateId },
+  db = pool,
+) {
+  const { rows } = await db.query(
+    `SELECT intake_promotion_decision_id, organization_id, intake_source_candidate_id,
+            review_queue_item_id, reviewed_source_type, decision_status, source_id,
+            source_version_id, created_at, decided_at, promoted_at
+       FROM kai.intake_promotion_decisions
+      WHERE organization_id = $1
+        AND intake_source_candidate_id = $2`,
     [organizationId, intakeSourceCandidateId],
   );
   return rows[0] || null;
