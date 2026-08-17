@@ -1,22 +1,18 @@
 import pool from "./kaiDb.js";
 import { KAI_SPRINT2_P0_PATTERNS } from "../config/kaiSprint2P0Contract.js";
-import {
-  listActiveGkOrganizationBindingsForGkOrganizationIds,
-  upsertGkOrganizationBinding,
-} from "./kaiOrganizationBindingQueries.js";
 
 const UUID_RE = KAI_SPRINT2_P0_PATTERNS.uuid;
 
-// Distinct from kaiQueries.js#KAI_USER_PROVISIONING_LOCK_NAMESPACE (913_224_001).
-const KAI_ORGANIZATION_ENABLEMENT_LOCK_NAMESPACE = 913_224_002;
+export const KAI_ORGANIZATION_ENABLEMENT_LOCK_NAMESPACE = 913_224_002;
 
-// No engagement_code convention exists anywhere in this repository (confirmed
-// by repository-wide search before this package). This is the first
-// established convention: a single, deterministic code for the one initial
-// engagement every newly KAI-enabled organization receives, so repeated
-// enablement requests converge on the same kai.engagements row via the
-// existing UNIQUE (organization_id, engagement_code) constraint instead of
-// requiring an application-level lock.
+// No engagement_code convention exists anywhere in this repository. This
+// remains the first, NOT_CONFIRMED convention introduced by the original
+// organization-enablement package: a single, deterministic code for the one
+// initial engagement every newly KAI-enabled organization receives, so
+// repeated enablement requests converge on the same kai.engagements row via
+// the established UNIQUE (organization_id, engagement_code) constraint. Its
+// durable product status remains NOT_CONFIRMED pending an owner decision;
+// this correction package does not ratify it and does not rename it.
 export const DEFAULT_INITIAL_ENGAGEMENT_CODE = "initial-pilot-assessment";
 
 function normalizeGkOrganizationId(value) {
@@ -24,109 +20,168 @@ function normalizeGkOrganizationId(value) {
   return Number.isInteger(numeric) && numeric > 0 ? numeric : null;
 }
 
+function normalizeRequiredName(value) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 /**
- * Confirms the requested Get Kinder organization exists. Read-only; does not
- * expose any field beyond the id required to proceed.
+ * All functions in this module are pure DB primitives: each accepts the
+ * caller-supplied `db` (a pool for standalone reads, or a transaction-scoped
+ * client when called as part of the single-transaction organization
+ * enablement flow orchestrated by kaiOrganizationEnablementService.js) and
+ * never opens or commits its own transaction. Transaction ownership belongs
+ * exclusively to that orchestration layer (Backend/kai/db/kaiDb.js#withTransaction).
+ */
+
+export async function acquireOrganizationEnablementLock(gkOrganizationId, db = pool) {
+  const normalized = normalizeGkOrganizationId(gkOrganizationId);
+  if (!normalized) return;
+  await db.query("SELECT pg_advisory_xact_lock($1, $2)", [
+    KAI_ORGANIZATION_ENABLEMENT_LOCK_NAMESPACE,
+    normalized,
+  ]);
+}
+
+/**
+ * Confirms the requested Get Kinder organization exists and returns the
+ * authoritative name used to provision the KAI organization. Read-only;
+ * exposes only id/name.
  */
 export async function selectGkOrganizationRow(gkOrganizationId, db = pool) {
   const normalizedGkOrganizationId = normalizeGkOrganizationId(gkOrganizationId);
   if (!normalizedGkOrganizationId) return null;
   const { rows } = await db.query(
-    `SELECT id FROM public.organizations WHERE id = $1 LIMIT 1`,
+    `SELECT id, name FROM public.organizations WHERE id = $1 LIMIT 1`,
     [normalizedGkOrganizationId],
   );
   return rows[0] || null;
 }
 
 /**
- * Idempotent, concurrency-safe create-or-reuse of the active
- * kai.gk_organization_bindings row for a Get Kinder organization.
- *
- * kai.organizations is not created or migrated by this repository (confirmed
- * by repository-wide search before this package) and kai.gk_organization_bindings
- * .kai_organization_id carries no foreign key to it - the binding migration's
- * own comment records that this is deliberate: no relationship is fabricated
- * against a schema this repository does not own or confirm. Accordingly this
- * function mints a new kai_organization_id (a fresh UUID) only when no active
- * binding already exists, and never writes to kai.organizations. Whether a
- * corresponding kai.organizations row is separately created by KAI's own
- * (external) system for that id is NOT_CONFIRMED by this repository.
- *
- * Concurrency safety mirrors kaiQueries.js#findOrCreateKaiUserByLegacyPublicUserdataId:
- * a Postgres advisory transaction lock keyed on the Get Kinder organization id
- * serializes concurrent first-enablement attempts, so two simultaneous
- * requests for the same organization cannot both observe "no active binding"
- * and both mint/insert a different kai_organization_id.
+ * Read-only existence check for a kai.organizations row by its primary key.
+ * Used to detect an active kai.gk_organization_bindings row whose
+ * kai_organization_id no longer resolves to a real organization row (an
+ * inconsistent state this operation must fail closed on, never repair).
  */
-export async function findOrCreateActiveKaiOrganizationBindingForGkOrganization(
-  { gkOrganizationId } = {},
-  db = pool,
-) {
+export async function selectKaiOrganizationRow(kaiOrganizationId, db = pool) {
+  if (typeof kaiOrganizationId !== "string" || !UUID_RE.test(kaiOrganizationId)) return null;
+  const { rows } = await db.query(
+    `SELECT organization_id FROM kai.organizations WHERE organization_id = $1 LIMIT 1`,
+    [kaiOrganizationId.toLowerCase()],
+  );
+  return rows[0] || null;
+}
+
+/**
+ * INSERTs exactly one kai.organizations row. Only name,
+ * legacy_public_organization_id, and legacy_public_organization_source are
+ * supplied - organization_id, organization_type, status, created_by_type,
+ * created_at, and updated_at are left entirely to their PostgreSQL defaults
+ * (status in particular uses kai.engagement_status_enum; this function never
+ * writes a literal into it), and organization_code is left NULL.
+ *
+ * legacy_public_organization_id carries a NON-UNIQUE index in production and
+ * is never used here (or by any caller) as an uniqueness/idempotency
+ * authority - idempotency for the overall enablement operation is the
+ * caller's responsibility (advisory lock + active-binding lookup), not this
+ * function's. Fails closed with no INSERT executed when name is missing or
+ * blank after trim - never manufactures a fallback name.
+ */
+export async function insertKaiOrganization({ name, legacyPublicOrganizationId } = {}, db = pool) {
+  const normalizedName = normalizeRequiredName(name);
+  if (!normalizedName) {
+    return { ok: false, error_code: "invalid_organization_name" };
+  }
+  const normalizedLegacyId = normalizeGkOrganizationId(legacyPublicOrganizationId);
+  if (!normalizedLegacyId) {
+    return { ok: false, error_code: "invalid_gk_organization_id" };
+  }
+  const { rows } = await db.query(
+    `INSERT INTO kai.organizations (name, legacy_public_organization_id, legacy_public_organization_source)
+     VALUES ($1, $2, 'public.organizations')
+     RETURNING organization_id`,
+    [normalizedName, normalizedLegacyId],
+  );
+  return { ok: true, organizationId: rows[0].organization_id };
+}
+
+/**
+ * INSERTs exactly one active kai.gk_organization_bindings row. Deliberately
+ * NOT a wrapper around kaiOrganizationBindingQueries.js#upsertGkOrganizationBinding:
+ * that function detects "is this a pool or an already-open transaction
+ * client" via `typeof db.connect === "function"`, but a real pg.Client
+ * obtained from Pool#connect() also exposes `.connect` (inherited from the
+ * Client prototype - verified empirically before writing this comment), so
+ * passing this module's shared transaction client into that function would
+ * make it open and COMMIT its own nested transaction, prematurely committing
+ * the enclosing single-transaction enablement flow this module exists to
+ * guarantee. This function is a plain INSERT with no transaction control of
+ * its own, safe to call with any `db` that exposes `.query`. The caller is
+ * expected to have already confirmed, inside the same transaction and under
+ * the organization-enablement advisory lock, that no active binding exists
+ * for this Get Kinder organization - the 23505 handling here is
+ * defense-in-depth against the partial unique indexes, not the primary
+ * idempotency mechanism.
+ */
+export async function insertGkOrganizationBinding({ gkOrganizationId, kaiOrganizationId } = {}, db = pool) {
   const normalizedGkOrganizationId = normalizeGkOrganizationId(gkOrganizationId);
   if (!normalizedGkOrganizationId) {
     return { ok: false, error_code: "invalid_gk_organization_id" };
   }
-
-  const isRealPool = typeof db.connect === "function";
-  const client = isRealPool ? await db.connect() : db;
+  if (typeof kaiOrganizationId !== "string" || !UUID_RE.test(kaiOrganizationId)) {
+    return { ok: false, error_code: "invalid_kai_organization_id" };
+  }
   try {
-    if (isRealPool) await client.query("BEGIN");
-    await client.query("SELECT pg_advisory_xact_lock($1, $2)", [
-      KAI_ORGANIZATION_ENABLEMENT_LOCK_NAMESPACE,
-      normalizedGkOrganizationId,
-    ]);
-
-    const existingBindings = await listActiveGkOrganizationBindingsForGkOrganizationIds(
-      [normalizedGkOrganizationId],
-      client,
+    const { rows } = await db.query(
+      `INSERT INTO kai.gk_organization_bindings (gk_organization_id, kai_organization_id, status)
+       VALUES ($1, $2, 'active')
+       RETURNING gk_organization_binding_id, gk_organization_id, kai_organization_id, status, created_at, updated_at`,
+      [normalizedGkOrganizationId, kaiOrganizationId.toLowerCase()],
     );
-    if (existingBindings[0]) {
-      if (isRealPool) await client.query("COMMIT");
-      return { ok: true, binding: existingBindings[0], created: false };
-    }
-
-    const { rows: [minted] } = await client.query("SELECT gen_random_uuid()::text AS id");
-    const upsertResult = await upsertGkOrganizationBinding(
-      { gkOrganizationId: normalizedGkOrganizationId, kaiOrganizationId: minted.id },
-      client,
-    );
-    if (!upsertResult.ok) {
-      if (isRealPool) await client.query("ROLLBACK").catch(() => {});
-      return upsertResult;
-    }
-    if (isRealPool) await client.query("COMMIT");
-    return { ok: true, binding: upsertResult.binding, created: upsertResult.created };
+    return { ok: true, binding: rows[0] };
   } catch (error) {
-    if (isRealPool) await client.query("ROLLBACK").catch(() => {});
+    if (error?.code === "23505") {
+      return { ok: false, error_code: "conflicting_binding" };
+    }
     throw error;
-  } finally {
-    if (isRealPool) client.release();
   }
 }
 
-async function selectEngagementByOrganizationAndCode(db, organizationId, engagementCode) {
+/**
+ * SELECT-only lookup of the one initial kai.engagements row for a KAI
+ * organization. Never inserts. Safe to call from a read-only status check.
+ */
+export async function selectInitialEngagementForOrganization(
+  { organizationId, engagementCode = DEFAULT_INITIAL_ENGAGEMENT_CODE } = {},
+  db = pool,
+) {
+  if (typeof organizationId !== "string" || !UUID_RE.test(organizationId)) return null;
+  const normalizedEngagementCode =
+    typeof engagementCode === "string" && engagementCode.length > 0 ? engagementCode : DEFAULT_INITIAL_ENGAGEMENT_CODE;
   const { rows } = await db.query(
     `SELECT engagement_id, organization_id, engagement_code
        FROM kai.engagements
       WHERE organization_id = $1
         AND engagement_code = $2
       LIMIT 1`,
-    [organizationId, engagementCode],
+    [organizationId, normalizedEngagementCode],
   );
   return rows[0] || null;
 }
 
 /**
- * Idempotent create-or-reuse of the one initial kai.engagements row for a
- * newly (or already) KAI-enabled organization. Relies on the established
- * production UNIQUE (organization_id, engagement_code) constraint rather than
- * an advisory lock - mirrors kaiOrganizationBindingQueries.js#upsertGkOrganizationBinding's
- * check-then-insert-catch-23505 shape. Only inserts organization_id,
- * engagement_code, created_by - every other column (engagement_type,
- * engagement_status, created_by_type, project_metadata) is left to its
- * established production default.
+ * INSERTs the one initial kai.engagements row. Only organization_id,
+ * engagement_code, created_by are supplied - engagement_type,
+ * engagement_status, created_by_type, project_metadata are left to their
+ * established production defaults. The caller (orchestration layer) is
+ * expected to have already confirmed no row exists for this
+ * (organization_id, engagement_code) pair inside the same transaction; the
+ * 23505 handling here is defense-in-depth, not the primary idempotency
+ * mechanism (the advisory lock in the orchestration layer is).
  */
-export async function findOrCreateInitialEngagementForOrganization(
+export async function insertInitialEngagement(
   { organizationId, engagementCode = DEFAULT_INITIAL_ENGAGEMENT_CODE, createdByUserId = null } = {},
   db = pool,
 ) {
@@ -134,40 +189,19 @@ export async function findOrCreateInitialEngagementForOrganization(
     return { ok: false, error_code: "invalid_organization_id" };
   }
   const normalizedEngagementCode =
-    typeof engagementCode === "string" && engagementCode.length > 0
-      ? engagementCode
-      : DEFAULT_INITIAL_ENGAGEMENT_CODE;
-
-  const isRealPool = typeof db.connect === "function";
-  const client = isRealPool ? await db.connect() : db;
+    typeof engagementCode === "string" && engagementCode.length > 0 ? engagementCode : DEFAULT_INITIAL_ENGAGEMENT_CODE;
   try {
-    if (isRealPool) await client.query("BEGIN");
-
-    const existing = await selectEngagementByOrganizationAndCode(client, organizationId, normalizedEngagementCode);
-    if (existing) {
-      if (isRealPool) await client.query("COMMIT");
-      return { ok: true, engagement: existing, created: false };
+    const { rows } = await db.query(
+      `INSERT INTO kai.engagements (organization_id, engagement_code, created_by)
+       VALUES ($1, $2, $3)
+       RETURNING engagement_id, organization_id, engagement_code`,
+      [organizationId, normalizedEngagementCode, createdByUserId],
+    );
+    return { ok: true, engagement: rows[0] };
+  } catch (error) {
+    if (error?.code === "23505") {
+      return { ok: false, error_code: "conflicting_engagement" };
     }
-
-    try {
-      const { rows } = await client.query(
-        `INSERT INTO kai.engagements (organization_id, engagement_code, created_by)
-         VALUES ($1, $2, $3)
-         RETURNING engagement_id, organization_id, engagement_code`,
-        [organizationId, normalizedEngagementCode, createdByUserId],
-      );
-      if (isRealPool) await client.query("COMMIT");
-      return { ok: true, engagement: rows[0], created: true };
-    } catch (error) {
-      if (isRealPool) await client.query("ROLLBACK").catch(() => {});
-      if (error?.code === "23505") {
-        const reselected = await selectEngagementByOrganizationAndCode(db, organizationId, normalizedEngagementCode);
-        if (reselected) return { ok: true, engagement: reselected, created: false };
-        return { ok: false, error_code: "conflicting_engagement" };
-      }
-      throw error;
-    }
-  } finally {
-    if (isRealPool) client.release();
+    throw error;
   }
 }
