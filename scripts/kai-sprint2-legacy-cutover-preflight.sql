@@ -400,60 +400,200 @@ checks AS (
          ) THEN 'PASS' ELSE 'FAIL' END,
          'the cutover adds the P1-06-named CHECK over this same vocabulary; it must already be permitted'
   UNION ALL
-  -- Production's kai.review_queue_items.priority is an enum (capture 1), and the
-  -- canonical P1-06 producer writes the literal 'normal'
-  -- (Backend/kai/dictionary/postgresReviewQueueRepository.js). The captures do not
-  -- enumerate that enum's labels, so this must be checked against the live
-  -- catalog rather than assumed - if it does not already accept 'normal', the
-  -- canonical review-queue producer cannot run after the cutover, and the cutover
-  -- must not proceed on the assumption that it can. Handles both an enum-typed and
-  -- a text-plus-CHECK column.
-  SELECT 'PREREQUISITE', 'QUEUE_PRIORITY_ACCEPTS_CANONICAL_LITERAL',
-         'kai.review_queue_items.priority=normal',
+  -- kai.review_queue_items.priority: every priority label the CURRENT repository's
+  -- review-queue producers can actually write, verified against the live enum's
+  -- own pg_enum labels rather than against any assumed default.
+  --
+  -- Labels derived by inspecting current HEAD, not assumed:
+  --   'normal'  - written by every repository-side review_queue_items producer.
+  --               Backend/kai/dictionary/postgresReviewQueueRepository.js:34
+  --               (SENSITIVITY_REVIEW_PRIORITY) and its insert fallback at :174;
+  --               postgresSourceCandidateRepository.js:36
+  --               (SOURCE_CANDIDATE_REVIEW_PRIORITY);
+  --               validators/kaiConflictGroupValidators.js:14
+  --               (CONFLICT_RESOLUTION_PRIORITY);
+  --               validators/kaiClaimGapFollowupValidators.js:47
+  --               (CLIENT_FOLLOWUP_PRIORITY);
+  --               dictionary/exportReviewQueueContract.js:4 (EXPORT_REVIEW_PRIORITY).
+  --               A repo-wide scan for `PRIORITY = "<label>"` under Backend/kai/
+  --               yields exactly one distinct value: 'normal'.
+  --   'medium'  - the insert fallback in the already-live intake path,
+  --               Backend/kai/db/kaiIntakeQueries.js:181 (`item.priority || "medium"`).
+  --
+  -- Production confirms the column is kai.priority_enum with default 'medium', but
+  -- the full label set was never captured, so it is read from pg_enum here. If any
+  -- label a current producer can write is missing, the producer cannot run after
+  -- the cutover, and the cutover must not proceed on the assumption that it can.
+  -- The text-typed branch exists only so this script is correct against a
+  -- non-enum column; it is not the production case.
+  SELECT 'PREREQUISITE', 'QUEUE_PRIORITY_LABEL_WRITABLE',
+         'kai.review_queue_items.priority=' || required_priority,
          CASE
-           WHEN EXISTS (
+           WHEN NOT EXISTS (
              SELECT 1 FROM pg_attribute a
                JOIN pg_class r ON r.oid = a.attrelid
                JOIN pg_namespace n ON n.oid = r.relnamespace
-               JOIN pg_enum e ON e.enumtypid = a.atttypid
-              WHERE n.nspname = 'kai' AND r.relname = 'review_queue_items'
-                AND a.attname = 'priority' AND e.enumlabel = 'normal'
-           ) THEN 'PASS'
+              WHERE n.nspname = 'kai' AND r.relname = 'review_queue_items' AND a.attname = 'priority'
+           ) THEN 'FAIL'
+           -- enum-typed column (the production case): the label must exist in pg_enum
            WHEN EXISTS (
              SELECT 1 FROM pg_attribute a
                JOIN pg_class r ON r.oid = a.attrelid
                JOIN pg_namespace n ON n.oid = r.relnamespace
                JOIN pg_type ty ON ty.oid = a.atttypid
               WHERE n.nspname = 'kai' AND r.relname = 'review_queue_items'
-                AND a.attname = 'priority' AND ty.typtype <> 'e'
-                AND NOT EXISTS (
-                  SELECT 1 FROM pg_constraint c
-                   WHERE c.conrelid = r.oid AND c.contype = 'c'
-                     AND pg_get_constraintdef(c.oid) LIKE '%priority%'
-                     AND pg_get_constraintdef(c.oid) NOT LIKE '%''normal''%'
-                )
+                AND a.attname = 'priority' AND ty.typtype = 'e'
+           ) THEN
+             CASE WHEN EXISTS (
+               SELECT 1 FROM pg_attribute a
+                 JOIN pg_class r ON r.oid = a.attrelid
+                 JOIN pg_namespace n ON n.oid = r.relnamespace
+                 JOIN pg_enum e ON e.enumtypid = a.atttypid
+                WHERE n.nspname = 'kai' AND r.relname = 'review_queue_items'
+                  AND a.attname = 'priority' AND e.enumlabel = required_priority
+             ) THEN 'PASS' ELSE 'FAIL' END
+           -- text-typed column: no vocabulary CHECK on priority may exclude the
+           -- label. A vocabulary CHECK is detected by how PostgreSQL actually
+           -- renders one - `col = ANY (ARRAY[...])` for a multi-value IN, or
+           -- `col = 'x'` for a single value - never by looking for the literal
+           -- text "IN", which pg_get_constraintdef never emits.
+           WHEN NOT EXISTS (
+             SELECT 1 FROM pg_constraint c
+               JOIN pg_class r ON r.oid = c.conrelid
+               JOIN pg_namespace n ON n.oid = r.relnamespace
+              WHERE n.nspname = 'kai' AND r.relname = 'review_queue_items' AND c.contype = 'c'
+                AND (pg_get_constraintdef(c.oid) LIKE '%priority = ANY (ARRAY[%'
+                     OR pg_get_constraintdef(c.oid) LIKE '%priority = ''%')
+                AND pg_get_constraintdef(c.oid) NOT LIKE '%''' || required_priority || '''%'
            ) THEN 'PASS'
            ELSE 'FAIL'
          END,
-         'the canonical P1-06 review-queue producer writes priority = ''normal''; if this column cannot accept it, the producer cannot run after the cutover'
+         'a priority label the current repository review-queue producers can write; it must already be accepted by the live column'
+    FROM unnest(ARRAY['normal', 'medium']) AS required_priority
   UNION ALL
-  -- The cutover deliberately never replaces upload_lifecycle_audit's operation
-  -- vocabulary (that would risk narrowing a live one), so the operations the
-  -- canonical P1 producers write must already be permitted.
+  -- The live enum's actual label set, reported so the operator can see exactly
+  -- what the production type carries (metadata only - enum labels are schema, not
+  -- business data).
+  SELECT 'PREREQUISITE', 'QUEUE_PRIORITY_ENUM_LABELS_PRESENT',
+         'kai.review_queue_items.priority type labels', 'PASS',
+         coalesce((
+           SELECT string_agg(e.enumlabel, ',' ORDER BY e.enumsortorder)
+             FROM pg_attribute a
+             JOIN pg_class r ON r.oid = a.attrelid
+             JOIN pg_namespace n ON n.oid = r.relnamespace
+             JOIN pg_enum e ON e.enumtypid = a.atttypid
+            WHERE n.nspname = 'kai' AND r.relname = 'review_queue_items' AND a.attname = 'priority'
+         ), 'not an enum-typed column')
+
+  -- kai.upload_lifecycle_audit: the table itself is left COMPLETELY unchanged by
+  -- the cutover - no column, constraint, index, trigger or vocabulary of it is
+  -- added, narrowed or replaced. Its full production shape was never captured, so
+  -- rather than assert a whole shape, these checks verify exactly the minimal
+  -- compatibility subset the CURRENT audit-writer code path actually needs, and
+  -- nothing beyond it.
+  --
+  -- Derived by inspecting every current writer of this table. All of them issue
+  -- the identical statement shape (a repo-wide scan of the column list following
+  -- `INSERT INTO kai.upload_lifecycle_audit` yields exactly one distinct list):
+  --   INSERT INTO kai.upload_lifecycle_audit
+  --     (organization_id, intake_file_id, operation, from_state, to_state,
+  --      outcome, metadata, created_at)
+  --   VALUES (uuid, uuid, <operation>, <upload_state>, <upload_state>,
+  --           'success', <jsonb>, <timestamptz>)
+  -- The cutover-adjacent producers and the operation literal each writes:
+  --   parsing/postgresParserRunRepository.js:27,28        parser_run_recorded,
+  --                                                       file_profile_persisted
+  --   dictionary/postgresDataDictionaryRepository.js:25    data_dictionary_draft_persisted
+  --   dictionary/postgresIntakeSensitivityProfileRepository.js:33
+  --                                                       intake_sensitivity_profile_persisted
+  --   dictionary/postgresReviewQueueRepository.js:42       sensitivity_review_queue_item_created
+  --   dictionary/postgresSourceCandidateRepository.js:53   intake_source_candidate_persisted
+  --   dictionary/postgresSourcePromotionRepository.js:117  source_promotion_decision_persisted
+  UNION ALL
+  SELECT 'PREREQUISITE', 'AUDIT_WRITER_COLUMN_PRESENT',
+         'kai.upload_lifecycle_audit.' || split_part(required_column, ':', 1),
+         CASE WHEN EXISTS (
+           SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'kai' AND table_name = 'upload_lifecycle_audit'
+              AND column_name = split_part(required_column, ':', 1)
+              AND data_type = split_part(required_column, ':', 2)
+         ) THEN 'PASS' ELSE 'FAIL' END,
+         'inserted by every current upload_lifecycle_audit writer; nothing beyond this column set is required'
+    FROM unnest(ARRAY['organization_id:uuid','intake_file_id:uuid','operation:text','from_state:text',
+                      'to_state:text','outcome:text','metadata:jsonb',
+                      'created_at:timestamp with time zone']) AS required_column
+  UNION ALL
+  -- Any column the writers do NOT supply must be nullable or defaulted, otherwise
+  -- every one of those inserts fails. This is the only whole-table property the
+  -- writers actually depend on.
+  SELECT 'PREREQUISITE', 'AUDIT_NO_UNSATISFIABLE_REQUIRED_COLUMN', 'kai.upload_lifecycle_audit',
+         CASE WHEN NOT EXISTS (
+           SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'kai' AND table_name = 'upload_lifecycle_audit'
+              AND is_nullable = 'NO' AND column_default IS NULL
+              AND is_generated = 'NEVER'
+              AND column_name NOT IN ('organization_id','intake_file_id','operation','from_state',
+                                      'to_state','outcome','metadata','created_at')
+         ) THEN 'PASS' ELSE 'FAIL' END,
+         'a NOT NULL column with no default outside the writers'' insert list would break every current audit write'
+  UNION ALL
   SELECT 'PREREQUISITE', 'AUDIT_OPERATION_ALREADY_PERMITTED',
          'kai.upload_lifecycle_audit.operation=' || required_operation,
-         CASE WHEN EXISTS (
+         -- A vocabulary CHECK is detected by how PostgreSQL actually renders one:
+         -- `operation = ANY (ARRAY[...])` for a multi-value IN, or
+         -- `operation = 'x'` for a single value. pg_get_constraintdef never emits
+         -- the literal text "IN", and matching merely "%operation%" would also
+         -- catch the metadata CHECK's `operation <> '...'` clauses, which do not
+         -- constrain the vocabulary at all. No vocabulary CHECK on operation may
+         -- exclude a literal a current producer writes.
+         CASE WHEN NOT EXISTS (
            SELECT 1 FROM pg_constraint c JOIN pg_class r ON r.oid = c.conrelid
              JOIN pg_namespace n ON n.oid = r.relnamespace
             WHERE n.nspname = 'kai' AND r.relname = 'upload_lifecycle_audit' AND c.contype = 'c'
-              AND c.conname = 'upload_lifecycle_audit_gate_a_operation_check'
-              AND pg_get_constraintdef(c.oid) LIKE '%' || required_operation || '%'
+              AND (pg_get_constraintdef(c.oid) LIKE '%operation = ANY (ARRAY[%'
+                   OR pg_get_constraintdef(c.oid) LIKE '%operation = ''%')
+              AND pg_get_constraintdef(c.oid) NOT LIKE '%''' || required_operation || '''%'
          ) THEN 'PASS' ELSE 'FAIL' END,
-         'written by the canonical P1 producer chain; the cutover never widens or narrows this live vocabulary, so it must already be permitted'
+         'written by a current cutover-adjacent producer; the cutover never widens or narrows this live vocabulary, so it must already be permitted'
     FROM unnest(ARRAY['parser_run_recorded','file_profile_persisted','data_dictionary_draft_persisted',
                       'intake_sensitivity_profile_persisted','sensitivity_review_queue_item_created',
                       'intake_source_candidate_persisted','source_promotion_decision_persisted'
                      ]) AS required_operation
+  UNION ALL
+  -- Every current writer hardcodes outcome = 'success'.
+  SELECT 'PREREQUISITE', 'AUDIT_OUTCOME_ALREADY_PERMITTED',
+         'kai.upload_lifecycle_audit.outcome=success',
+         CASE WHEN NOT EXISTS (
+           SELECT 1 FROM pg_constraint c JOIN pg_class r ON r.oid = c.conrelid
+             JOIN pg_namespace n ON n.oid = r.relnamespace
+            WHERE n.nspname = 'kai' AND r.relname = 'upload_lifecycle_audit' AND c.contype = 'c'
+              AND (pg_get_constraintdef(c.oid) LIKE '%outcome = ANY (ARRAY[%'
+                   OR pg_get_constraintdef(c.oid) LIKE '%outcome = ''%')
+              AND pg_get_constraintdef(c.oid) NOT LIKE '%''success''%'
+         ) THEN 'PASS' ELSE 'FAIL' END,
+         'every current writer hardcodes outcome = ''success''; no other outcome value is required by this cutover'
+  UNION ALL
+  -- Reported, not asserted: which of the required operations the live metadata
+  -- CHECK carries a per-operation clause for. A clause that exists was installed
+  -- by the same accepted migration as the writer that satisfies it, and an absent
+  -- clause is permissive - so neither state is a cutover blocker. Emitted so the
+  -- operator sees it rather than it being silently ignored.
+  SELECT 'PREREQUISITE', 'AUDIT_METADATA_CHECK_CLAUSES_REPORTED',
+         'kai.upload_lifecycle_audit.metadata', 'PASS',
+         coalesce((
+           SELECT string_agg(op, ',' ORDER BY op)
+             FROM unnest(ARRAY['parser_run_recorded','file_profile_persisted',
+                               'data_dictionary_draft_persisted','intake_sensitivity_profile_persisted',
+                               'sensitivity_review_queue_item_created','intake_source_candidate_persisted',
+                               'source_promotion_decision_persisted']) AS op
+            WHERE EXISTS (
+              SELECT 1 FROM pg_constraint c JOIN pg_class r ON r.oid = c.conrelid
+                JOIN pg_namespace n ON n.oid = r.relnamespace
+               WHERE n.nspname = 'kai' AND r.relname = 'upload_lifecycle_audit' AND c.contype = 'c'
+                 AND pg_get_constraintdef(c.oid) LIKE '%metadata%'
+                 AND pg_get_constraintdef(c.oid) LIKE '%' || op || '%'
+            )
+         ), 'no per-operation metadata clause present (permissive)')
 
   -- 2. Destination-schema collision state.
   UNION ALL

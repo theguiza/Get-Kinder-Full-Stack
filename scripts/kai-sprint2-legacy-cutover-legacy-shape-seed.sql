@@ -74,14 +74,17 @@ CREATE TYPE kai.anonymization_action_enum AS ENUM ('none', 'pseudonymize', 'aggr
 CREATE TYPE kai.legal_hold_status_enum AS ENUM ('none', 'active');
 CREATE TYPE kai.classification_review_status_enum AS ENUM ('proposed', 'confirmed');
 CREATE TYPE kai.classification_source_enum AS ENUM ('imported', 'rule_assigned', 'human');
--- 'normal' is included because the canonical P1-06 review-queue producer
--- (Backend/kai/dictionary/postgresReviewQueueRepository.js) writes
--- priority = 'normal', and production's kai.review_queue_items.priority is this
--- enum. Capture 1 records the column's type and its 'medium' default but does
--- not enumerate the enum's labels, so whether production's own priority_enum
--- already carries 'normal' is NOT_CONFIRMED. The corrected preflight checks it
--- explicitly and fails closed; this fixture assumes the passing case so the rest
--- of the proof can run.
+-- Both labels the current repository's review-queue producers can actually write
+-- are included: 'normal' (the only distinct `PRIORITY = "<label>"` value under
+-- Backend/kai/ - postgresReviewQueueRepository, postgresSourceCandidateRepository,
+-- kaiConflictGroupValidators, kaiClaimGapFollowupValidators,
+-- exportReviewQueueContract) and 'medium' (the insert fallback in
+-- Backend/kai/db/kaiIntakeQueries.js). Production confirms the column is this
+-- enum with default 'medium', but the full label set was never captured, so
+-- whether production's own priority_enum carries 'normal' is NOT_CONFIRMED. The
+-- corrected preflight reads the labels from pg_enum and fails closed on any
+-- missing one; this fixture stands up the passing case so the rest of the proof
+-- can run.
 CREATE TYPE kai.priority_enum AS ENUM ('low', 'normal', 'medium', 'high', 'urgent');
 CREATE TYPE kai.gap_type_enum AS ENUM ('data_quality', 'coverage', 'consent');
 

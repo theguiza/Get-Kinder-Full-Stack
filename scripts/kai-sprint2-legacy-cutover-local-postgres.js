@@ -301,6 +301,91 @@ try {
   assertNoFail("legacy-cutover preflight (after reverting the mutation)", psqlFile(PREFLIGHT_SQL).stdout);
 
   // ------------------------------------------------------------------------
+  proofStep("shared-object producer-compatibility checks fail closed");
+  // These guard the two shared contracts whose production shape the captures do
+  // not fully supply, so they are read from the live catalog instead. Each is
+  // proven to FAIL when the compatibility a current producer needs is absent -
+  // otherwise a passing preflight would mean nothing.
+  function preflightRows(pattern) {
+    const result = run(psql, ["-v", "ON_ERROR_STOP=1", "-d", dbName, "-t", "-A", "-F", "\t", "-f", PREFLIGHT_SQL], { capture: true });
+    return result.stdout.split("\n").filter((line) => line.includes(pattern));
+  }
+  // (a) kai.review_queue_items.priority missing a label a current producer writes.
+  psqlCommand(`
+    CREATE TYPE kai.priority_enum_probe AS ENUM ('low', 'medium', 'high');
+    ALTER TABLE kai.review_queue_items ALTER COLUMN priority DROP DEFAULT;
+    ALTER TABLE kai.review_queue_items ALTER COLUMN priority TYPE kai.priority_enum_probe
+      USING priority::text::kai.priority_enum_probe;
+  `);
+  {
+    const rows = preflightRows("QUEUE_PRIORITY_LABEL_WRITABLE");
+    const normalRow = rows.find((line) => line.includes("priority=normal"));
+    if (!normalRow || !normalRow.includes("FAIL")) {
+      throw new Error(`preflight failed to reject a priority enum without the 'normal' label\n${rows.join("\n")}`);
+    }
+    const beforeRefusal = fingerprint();
+    const refused = psqlFile(CUTOVER_SQL, { allowFail: true });
+    if (refused.status === 0) throw new Error("cutover bundle accepted a priority enum it cannot write to");
+    assertEqual(fingerprint(), beforeRefusal, "a refused cutover must not mutate anything");
+    console.log("preflight and bundle both fail closed on a priority enum missing 'normal'.");
+  }
+  psqlCommand(`
+    ALTER TABLE kai.review_queue_items ALTER COLUMN priority TYPE kai.priority_enum
+      USING priority::text::kai.priority_enum;
+    ALTER TABLE kai.review_queue_items ALTER COLUMN priority SET DEFAULT 'medium';
+    DROP TYPE kai.priority_enum_probe;
+  `);
+  assertEqual(fingerprint(), preCutoverFingerprint, "reverting the priority probe must restore the exact fixture");
+
+  // (b) kai.upload_lifecycle_audit vocabulary narrower than the current producers
+  //     need. PostgreSQL renders `IN (...)` as `= ANY (ARRAY[...])`, so this proof
+  //     also pins that the check reads the real rendering rather than the literal
+  //     text "IN" - matching on "IN" silently passed everything.
+  psqlCommand(`
+    ALTER TABLE kai.upload_lifecycle_audit
+      DROP CONSTRAINT upload_lifecycle_audit_gate_a_operation_check,
+      ADD CONSTRAINT upload_lifecycle_audit_gate_a_operation_check
+        CHECK (operation IN ('reserve_upload', 'parser_run_recorded', 'file_profile_persisted'));
+  `);
+  {
+    const rows = preflightRows("AUDIT_OPERATION_ALREADY_PERMITTED");
+    const failing = rows.filter((line) => line.includes("FAIL"));
+    if (failing.length !== 5) {
+      throw new Error(`expected the 5 removed audit operations to FAIL, got ${failing.length}\n${rows.join("\n")}`);
+    }
+    const beforeRefusal = fingerprint();
+    const refused = psqlFile(CUTOVER_SQL, { allowFail: true });
+    if (refused.status === 0) throw new Error("cutover bundle accepted a narrowed audit operation vocabulary");
+    assertEqual(fingerprint(), beforeRefusal, "a refused cutover must not mutate anything");
+    console.log("preflight and bundle both fail closed on a narrowed upload_lifecycle_audit vocabulary.");
+  }
+  // (c) a NOT NULL column with no default outside the writers' insert list.
+  psqlCommand(`
+    ALTER TABLE kai.upload_lifecycle_audit
+      DROP CONSTRAINT upload_lifecycle_audit_gate_a_operation_check,
+      ADD CONSTRAINT upload_lifecycle_audit_gate_a_operation_check
+        CHECK (operation IN ('reserve_upload','start_upload','complete_object_version','confirm_upload',
+                             'block_upload','abandon_upload','expire_upload',
+                             'policy_decision_compare_and_set','parser_run_recorded','file_profile_persisted',
+                             'data_dictionary_draft_persisted','intake_sensitivity_profile_persisted',
+                             'sensitivity_review_queue_item_created','intake_source_candidate_persisted',
+                             'source_promotion_decision_persisted'));
+    ALTER TABLE kai.upload_lifecycle_audit ADD COLUMN probe_required text;
+    UPDATE kai.upload_lifecycle_audit SET probe_required = 'x';
+    ALTER TABLE kai.upload_lifecycle_audit ALTER COLUMN probe_required SET NOT NULL;
+  `);
+  {
+    const rows = preflightRows("AUDIT_NO_UNSATISFIABLE_REQUIRED_COLUMN");
+    if (!rows.some((line) => line.includes("FAIL"))) {
+      throw new Error(`preflight failed to reject an unsatisfiable NOT NULL audit column\n${rows.join("\n")}`);
+    }
+    console.log("preflight fails closed on a NOT NULL audit column the current writers never supply.");
+  }
+  psqlCommand("ALTER TABLE kai.upload_lifecycle_audit DROP COLUMN probe_required");
+  assertEqual(fingerprint(), preCutoverFingerprint, "reverting the audit probes must restore the exact fixture");
+  assertNoFail("legacy-cutover preflight (after reverting the shared-object probes)", psqlFile(PREFLIGHT_SQL).stdout);
+
+  // ------------------------------------------------------------------------
   proofStep("a forced mid-cutover failure rolls the complete cutover back");
   {
     const bundle = readFileSync(join(repoRoot, CUTOVER_SQL), "utf8");

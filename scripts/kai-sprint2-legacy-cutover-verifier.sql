@@ -253,7 +253,8 @@ checks AS (
     FROM unnest(ARRAY['open','in_progress','blocked','waiting_on_client','waiting_on_gk',
                       'resolved','cancelled']) AS lit
   UNION ALL
-  SELECT 'SHARED', 'QUEUE_PRIORITY_ACCEPTS_CANONICAL_LITERAL', 'kai.review_queue_items.priority=normal',
+  SELECT 'SHARED', 'QUEUE_PRIORITY_LABEL_STILL_WRITABLE',
+         'kai.review_queue_items.priority=' || required_priority,
          CASE WHEN NOT EXISTS (
            SELECT 1 FROM pg_attribute a
              JOIN pg_class r ON r.oid = a.attrelid
@@ -262,10 +263,23 @@ checks AS (
             WHERE n.nspname = 'kai' AND r.relname = 'review_queue_items'
               AND a.attname = 'priority' AND ty.typtype = 'e'
               AND NOT EXISTS (
-                SELECT 1 FROM pg_enum e WHERE e.enumtypid = a.atttypid AND e.enumlabel = 'normal'
+                SELECT 1 FROM pg_enum e
+                 WHERE e.enumtypid = a.atttypid AND e.enumlabel = required_priority
               )
          ) THEN 'PASS' ELSE 'FAIL' END,
-         'the canonical P1-06 review-queue producer writes priority = ''normal''; the shared column must still accept it'
+         'a priority label the current repository review-queue producers write; the shared column must still accept it after the cutover'
+    FROM unnest(ARRAY['normal', 'medium']) AS required_priority
+  UNION ALL
+  SELECT 'SHARED', 'AUDIT_WRITER_COLUMN_STILL_PRESENT',
+         'kai.upload_lifecycle_audit.' || required_column,
+         CASE WHEN EXISTS (
+           SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'kai' AND table_name = 'upload_lifecycle_audit'
+              AND column_name = required_column
+         ) THEN 'PASS' ELSE 'FAIL' END,
+         'the cutover leaves this table completely unchanged; the current writers'' column set must still be intact'
+    FROM unnest(ARRAY['organization_id','intake_file_id','operation','from_state','to_state',
+                      'outcome','metadata','created_at']) AS required_column
   UNION ALL
   SELECT 'SHARED', 'AUDIT_OPERATION_VOCABULARY_NOT_NARROWED', 'kai.upload_lifecycle_audit.operation=' || lit,
          CASE WHEN EXISTS (
@@ -397,12 +411,58 @@ checks AS (
          ) >= 0 THEN 'PASS' ELSE 'FAIL' END,
          'includes the legacy-target exclusion predicate the corrected cockpit reader uses'
 
-  -- 10. Deferred, explicitly-recorded follow-up (reported, never silently ignored).
+  -- 10. Retained kai.claim_evidence_links: its foreign key is NEVER retargeted by
+  --     this cutover. These checks ASSERT (not merely report) that every existing
+  --     claim-evidence relationship is still correctly attached to the preserved
+  --     legacy evidence_items rows after the OID-preserving relocation - nothing
+  --     silently broke, and nothing now points at a canonical table or at nothing.
+  UNION ALL
+  SELECT 'DEFERRED_ATTACHMENT', 'FK_STILL_TARGETS_PRESERVED_LEGACY_BY_OID',
+         'kai.claim_evidence_links.claim_evidence_links_evidence_item_id_fkey',
+         CASE
+           WHEN to_regclass('kai.claim_evidence_links') IS NULL THEN 'PASS'
+           WHEN EXISTS (
+             SELECT 1 FROM pg_constraint pc
+               JOIN pg_class dr ON dr.oid = pc.conrelid
+               JOIN pg_namespace dn ON dn.oid = dr.relnamespace
+              WHERE pc.contype = 'f' AND dn.nspname = 'kai' AND dr.relname = 'claim_evidence_links'
+                AND pc.conname = 'claim_evidence_links_evidence_item_id_fkey'
+                -- confrelid is the OID of the preserved, relocated legacy table
+                AND pc.confrelid = to_regclass('kai_legacy_20260817.evidence_items')
+           ) THEN 'PASS'
+           ELSE 'FAIL'
+         END,
+         'the foreign key must still bind, by referenced-table OID, to the relocated kai_legacy_20260817.evidence_items - never to a canonical table and never to a dropped relation'
+  UNION ALL
+  SELECT 'DEFERRED_ATTACHMENT', 'EVERY_LINK_ROW_STILL_RESOLVES', 'kai.claim_evidence_links',
+         CASE
+           WHEN to_regclass('kai.claim_evidence_links') IS NULL THEN 'PASS'
+           WHEN NOT EXISTS (
+             SELECT 1 FROM kai.claim_evidence_links l
+              WHERE NOT EXISTS (
+                SELECT 1 FROM kai_legacy_20260817.evidence_items e
+                 WHERE e.evidence_item_id = l.evidence_item_id
+              )
+           ) THEN 'PASS'
+           ELSE 'FAIL'
+         END,
+         'every retained claim-evidence link row must still resolve to a surviving preserved legacy evidence item; an orphan would prove the relationship broke'
+  UNION ALL
+  SELECT 'DEFERRED_ATTACHMENT', 'LINK_ROW_COUNT_AND_RESOLVED_COUNT_MATCH', 'kai.claim_evidence_links',
+         CASE
+           WHEN to_regclass('kai.claim_evidence_links') IS NULL THEN 'PASS'
+           WHEN (SELECT count(*) FROM kai.claim_evidence_links)
+                = (SELECT count(*) FROM kai.claim_evidence_links l
+                     JOIN kai_legacy_20260817.evidence_items e
+                       ON e.evidence_item_id = l.evidence_item_id)
+           THEN 'PASS' ELSE 'FAIL' END,
+         coalesce((SELECT count(*)::text FROM kai.claim_evidence_links), '0')
+         || ' link row(s); the join against the preserved legacy evidence items must return exactly the same count'
   UNION ALL
   SELECT 'DEFERRED', 'LEGACY_AT_CANONICAL_NAME_OUTSIDE_THIS_CUTOVER', 'kai.claim_evidence_links',
          'PASS',
          CASE WHEN to_regclass('kai.claim_evidence_links') IS NOT NULL
-              THEN 'present and retained in kai by design; its foreign key now references kai_legacy_20260817.evidence_items. A future P2-01/P2-03 cutover MUST handle it explicitly, because migrations/kai_sprint2_p2_03_claim_proposal.sql uses CREATE TABLE IF NOT EXISTS and would silently skip over it.'
+              THEN 'present and retained in kai by design, foreign key never retargeted. A future P2-01/P2-03 cutover MUST handle it explicitly, because migrations/kai_sprint2_p2_03_claim_proposal.sql uses CREATE TABLE IF NOT EXISTS and would silently skip over it.'
               ELSE 'absent; nothing deferred' END
 )
 SELECT * FROM checks

@@ -717,6 +717,7 @@ END $cutover_relocate$;
 DO $cutover_shared$
 DECLARE
   required_operation text;
+  required_priority text;
 BEGIN
   -- Fail closed rather than narrow: the canonical P1 producers write these two
   -- upload_lifecycle_audit operations, so the live vocabulary must already
@@ -743,24 +744,32 @@ BEGIN
     END IF;
   END LOOP;
 
-  -- Production's kai.review_queue_items.priority is an enum (capture 1) whose
-  -- labels no capture enumerates, and the canonical P1-06 producer writes the
-  -- literal 'normal'. If the live column cannot accept it, the canonical
-  -- review-queue producer could not run after this cutover, so the cutover
-  -- refuses rather than commit a state whose own producer chain is broken.
-  IF EXISTS (
-    SELECT 1 FROM pg_attribute a
-      JOIN pg_class r ON r.oid = a.attrelid
-      JOIN pg_namespace n ON n.oid = r.relnamespace
-      JOIN pg_type ty ON ty.oid = a.atttypid
-     WHERE n.nspname = 'kai' AND r.relname = 'review_queue_items'
-       AND a.attname = 'priority' AND ty.typtype = 'e'
-       AND NOT EXISTS (
-         SELECT 1 FROM pg_enum e WHERE e.enumtypid = a.atttypid AND e.enumlabel = 'normal'
-       )
-  ) THEN
-    RAISE EXCEPTION 'kai.review_queue_items.priority is an enum that does not accept the literal ''normal'', which the canonical P1-06 review-queue producer writes. Widen that enum in its own reviewed change first; this bundle will not alter a live shared type.';
-  END IF;
+  -- kai.review_queue_items.priority is an enum in production (capture 1) whose
+  -- labels no capture enumerates, so they are read from pg_enum here. Every label
+  -- the current repository's review-queue producers can write must already exist,
+  -- or the canonical producer chain could not run after this cutover - so the
+  -- cutover refuses rather than commit a state whose own producers are broken.
+  --   'normal' - the only distinct `PRIORITY = "<label>"` value under Backend/kai/
+  --              (postgresReviewQueueRepository, postgresSourceCandidateRepository,
+  --              kaiConflictGroupValidators, kaiClaimGapFollowupValidators,
+  --              exportReviewQueueContract)
+  --   'medium' - the insert fallback in Backend/kai/db/kaiIntakeQueries.js
+  FOREACH required_priority IN ARRAY ARRAY['normal', 'medium'] LOOP
+    IF EXISTS (
+      SELECT 1 FROM pg_attribute a
+        JOIN pg_class r ON r.oid = a.attrelid
+        JOIN pg_namespace n ON n.oid = r.relnamespace
+        JOIN pg_type ty ON ty.oid = a.atttypid
+       WHERE n.nspname = 'kai' AND r.relname = 'review_queue_items'
+         AND a.attname = 'priority' AND ty.typtype = 'e'
+         AND NOT EXISTS (
+           SELECT 1 FROM pg_enum e
+            WHERE e.enumtypid = a.atttypid AND e.enumlabel = required_priority
+         )
+    ) THEN
+      RAISE EXCEPTION 'kai.review_queue_items.priority is an enum that does not accept the label %, which a current repository review-queue producer writes. Widen that enum in its own reviewed change first; this bundle will not alter a live shared type.', required_priority;
+    END IF;
+  END LOOP;
 
   IF NOT EXISTS (
     SELECT 1 FROM pg_constraint c JOIN pg_class r ON r.oid = c.conrelid
