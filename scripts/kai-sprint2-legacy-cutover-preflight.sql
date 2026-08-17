@@ -686,13 +686,13 @@ checks AS (
 
   -- 5. The atomic cutover's own applicability.
   UNION ALL
-  SELECT 'APPLICABILITY', 'P2_01_DECISION_HOLDS', 'kai.source_locators / kai.evidence_items',
+  SELECT 'APPLICABILITY', 'P2_01_CANONICAL_INSTALL_REQUIRED', 'kai.source_locators / kai.evidence_items',
          CASE WHEN (SELECT classification FROM final_class WHERE table_name = 'source_locators')
-                     IN ('LEGACY_EXPECTED','ABSENT')
+                     IN ('LEGACY_EXPECTED','CANONICAL_EXPECTED','ABSENT')
                AND (SELECT classification FROM final_class WHERE table_name = 'evidence_items')
-                     IN ('LEGACY_EXPECTED','ABSENT')
+                     IN ('LEGACY_EXPECTED','CANONICAL_EXPECTED','ABSENT')
               THEN 'PASS' ELSE 'FAIL' END,
-         'P2_01_NOT_REQUIRED_NOW: the cutover relocates these legacy tables and installs no canonical P2-01 object; a canonical shape already here would contradict that decision'
+         'P2_01_REQUIRED_FOR_REACHABLE_OPERATION: legacy/absent P2 tables can be safely relocated/replaced by empty canonical P2-01 objects, and canonical P2-01 tables are valid in a converged state; an unrecognized shape remains a hard fail'
   UNION ALL
   SELECT 'APPLICABILITY', 'NO_HISTORICAL_MIGRATION_REPLAY_REQUIRED', 'migrations/kai_sprint2_p1_*.sql',
          'PASS',

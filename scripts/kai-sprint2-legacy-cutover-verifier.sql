@@ -18,8 +18,8 @@ WITH material (table_name) AS (VALUES
   ('source_locators'), ('evidence_items')
 ),
 -- The subset the canonical P1 contract must own at kai.* after this cutover.
--- source_locators / evidence_items are excluded because the proved decision is
--- P2_01_NOT_REQUIRED_NOW.
+-- source_locators / evidence_items are handled separately below because their
+-- legacy rows are preserved while empty canonical P2-01 tables are installed.
 canonical_expected (table_name) AS (VALUES
   ('intake_parser_runs'), ('intake_file_profiles'), ('data_dictionaries'),
   ('data_dictionary_fields'), ('data_dictionary_mappings'), ('data_quality_findings'),
@@ -116,21 +116,41 @@ checks AS (
       'intake_promotion_decisions_p1_08_identity_unique',
       'sources_p1_08_identity_unique',
       'source_versions_p1_08_id_org_unique',
+      'source_versions_p2_01_id_source_org_unique',
+      'source_locators_p2_01_identity_unique',
+      'source_locators_p2_01_id_org_unique',
+      'source_locators_p2_01_source_version_fk',
+      'source_locators_p2_01_locator_type_check',
+      'source_locators_p2_01_coordinates_check',
+      'source_locators_p2_01_fingerprint_check',
+      'evidence_items_p2_01_identity_unique',
+      'evidence_items_p2_01_id_org_unique',
+      'evidence_items_p2_01_source_version_fk',
+      'evidence_items_p2_01_source_locator_fk',
+      'evidence_items_p2_01_evidence_type_check',
+      'evidence_items_p2_01_statement_fingerprint_check',
+      'evidence_items_p2_01_support_strength_check',
       'review_queue_items_p1_06_queue_type_check',
       'review_queue_items_p1_06_queue_status_check',
       'review_queue_items_p1_08_identity_unique'
     ]) AS required_conname
 
-  -- 3. P2-01 state matches the proved decision exactly.
+  -- 3. P2-01 legacy preservation and canonical schema-only install.
   UNION ALL
-  SELECT 'P2_01_DECISION', 'NOT_REQUIRED_NOW_REFLECTED', 'kai.' || t,
-         CASE WHEN to_regclass('kai.' || t) IS NULL THEN 'PASS' ELSE 'FAIL' END,
-         'P2_01_NOT_REQUIRED_NOW: no canonical P2-01 object is installed, and the legacy one was preserved out of kai'
+  SELECT 'P2_01_DECISION', 'CANONICAL_SCHEMA_INSTALLED', 'kai.' || t,
+         CASE WHEN to_regclass('kai.' || t) IS NOT NULL THEN 'PASS' ELSE 'FAIL' END,
+         'P2_01_REQUIRED_FOR_REACHABLE_OPERATION: canonical P2-01 schema exists for the mounted human-authorized P2 routes'
+    FROM unnest(ARRAY['source_locators','evidence_items']) AS t
+  UNION ALL
+  SELECT 'P2_01_DECISION', 'CANONICAL_TABLE_EMPTY', 'kai.' || t,
+         CASE WHEN ((xpath('/row/c/text()', query_to_xml(format('SELECT count(*) AS c FROM kai.%I', t), false, true, '')))[1]::text)::bigint = 0
+              THEN 'PASS' ELSE 'FAIL' END,
+         'the cutover installs schema only; P2 rows must be produced later by P2-01, never translated from legacy rows'
     FROM unnest(ARRAY['source_locators','evidence_items']) AS t
   UNION ALL
   SELECT 'P2_01_DECISION', 'LEGACY_PRESERVED', 'kai_legacy_20260817.' || t,
          CASE WHEN to_regclass('kai_legacy_20260817.' || t) IS NOT NULL THEN 'PASS' ELSE 'FAIL' END,
-         'the legacy P2 graph is preserved intact rather than installed canonically or destroyed'
+         'the legacy P2 graph is preserved intact and remains separate from the empty canonical P2-01 schema'
     FROM unnest(ARRAY['source_locators','evidence_items']) AS t
 
   -- 4. Every legacy object is preserved at the selected location.

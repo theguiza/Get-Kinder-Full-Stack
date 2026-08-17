@@ -32,19 +32,17 @@ chain, as a separate authorized operation.
 | `REPLACE_WITH_CANONICAL` | none - no object is replaced in place; the canonical tables are created at names the relocation has just freed |
 | `UNRESOLVED_CONFLICT` | none |
 
-**P2-01 decision: `P2_01_NOT_REQUIRED_NOW`.** No canonical `kai.source_locators`
-or `kai.evidence_items` is installed. Repository proof at current HEAD: the
-Review Cockpit read models and service reference neither table; the only
-scheduled worker surface (`Backend/kai/parsing/`) touches only `intake_files`,
-`intake_parser_runs`, `intake_file_profiles` and `upload_lifecycle_audit`; there
-is no boot-time schema probe. The P2-01+ HTTP routes are mounted behind the
-single `KAI_SPRINT2_ENABLED` gate (owner-confirmed enabled) and are reachable on
-an explicit operator request - but they cannot succeed today either, because
-`Backend/kai/dictionary/postgresEvidenceLineageRepository.js` writes the
-canonical `coordinates` / `locator_fingerprint` / `statement_fingerprint` columns
-that the production legacy shapes do not have. The cutover therefore removes no
-working behaviour; it changes an already-failing operator action from
-`undefined_column` to `undefined_table`.
+**P2-01 decision: `P2_01_REQUIRED_FOR_REACHABLE_OPERATION`.** The legacy
+`kai.source_locators` and `kai.evidence_items` rows are preserved intact under
+`kai_legacy_20260817`, and empty canonical P2-01 tables are installed at
+`kai.source_locators` and `kai.evidence_items`. Repository proof at current
+HEAD: Review Cockpit itself does not read these tables, but the accepted P2-01
+and P2-02 routes are mounted behind only `KAI_SPRINT2_ENABLED`, and the admin
+Impact Evidence Library UI exposes those calls. Because production
+`KAI_SPRINT2_ENABLED` is owner-confirmed enabled, leaving these canonical tables
+absent would leave a currently reachable human-authorized operation
+structurally broken. The cutover still never translates, copies, relabels, or
+fabricates legacy P2 rows into the canonical generation.
 
 ## Steps
 
@@ -111,13 +109,13 @@ working behaviour; it changes an already-failing operator action from
 6. **Run the post-cutover verifier**, read-only:
    `scripts/kai-sprint2-legacy-cutover-verifier.sql`.
 
-7. **Require every verifier row to be `PASS`.** It proves the canonical P1
-   objects and the exact column/constraint contracts the current code reads, the
-   `P2_01_NOT_REQUIRED_NOW` state, legacy preservation and row counts, material
-   foreign-key preservation, retained-dependent edges still pointing at the
-   preserved objects, shared-object contracts unnarrowed, that no legacy queue
-   target can be misread as canonical work, that no legacy identity appears in a
-   canonical table, and that the exact current source-candidate,
+7. **Require every verifier row to be `PASS`.** It proves the canonical P1/P2-01
+   objects and the exact column/constraint contracts the current code reads,
+   schema-only empty canonical P2-01 installation, legacy preservation and row
+   counts, material foreign-key preservation, retained-dependent edges still
+   pointing at the preserved objects, shared-object contracts unnarrowed, that
+   no legacy queue target can be misread as canonical work, that no legacy
+   identity appears in a canonical table, and that the exact current source-candidate,
    promotion-decision and cockpit-queue projections compile and execute.
 
    If a check fails, use `migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql`

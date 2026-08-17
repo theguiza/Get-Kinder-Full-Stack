@@ -18034,8 +18034,12 @@ from the fact that an object appeared in a foreign-key edge):
     retargeted; each follows its parent by referenced-table OID and keeps
     resolving to exactly the same preserved rows.
   - REPLACE_WITH_CANONICAL: none. UNRESOLVED_CONFLICT: none.
-  - P2-01 decision: P2_01_NOT_REQUIRED_NOW, from current mounted/enabled caller
-    analysis. No canonical P2-01 object is installed.
+  - P2-01 decision corrected by the Codex takeover review:
+    P2_01_REQUIRED_FOR_REACHABLE_OPERATION. The legacy P2 rows are still
+    preserved intact under `kai_legacy_20260817`, but empty canonical
+    `kai.source_locators` and `kai.evidence_items` tables are installed because
+    current mounted P2-01/P2-02 routes and the admin Impact Evidence Library are
+    reachable behind `KAI_SPRINT2_ENABLED`.
 
 ARTIFACTS:
   - `migrations/kai_sprint2_legacy_generation_cutover_20260817.sql`: rebuilt as
@@ -18112,7 +18116,9 @@ LOCAL EVIDENCE:
     mid-cutover failure leaves the database byte-identical by structural and
     row-count fingerprint; the bundle applies; the verifier is fully green;
     legacy rows, legacy-to-legacy and legacy-to-shared foreign keys, retained
-    dependents and shared contracts all survive; the pre-reprocessing rollback
+    dependents and shared contracts all survive; empty canonical P2-01
+    `kai.source_locators`/`kai.evidence_items` exist with the required
+    constraints and no translated rows; the pre-reprocessing rollback
     restores the exact pre-cutover fingerprint; re-applying and re-running the
     bundle are convergent no-ops; the real current producer chain yields a
     working Review Cockpit source-candidate detail with tenant isolation,
@@ -18172,3 +18178,22 @@ shared/staging/production database access or mutation, real client data access,
 production SQL execution, historical-migration edit, new dependency, live
 model/cloud call, or current-state/baseline update was performed. Nothing in
 this package has been executed against, or accepted into, production.
+
+Codex takeover correction (2026-08-17): Current repository review rejected the
+prior P2_01_NOT_REQUIRED_NOW conclusion. TOOL_VERIFIED code facts: the accepted
+P2-01 evidence-extraction route and P2-02 evidence-coverage route are mounted
+under `Backend/kai/routes/sprint2IntakeApi.js`, gated by `KAI_SPRINT2_ENABLED`;
+`frontend/adminDashboard.jsx` mounts the Impact Evidence Library, whose
+frontend logic calls the same P2 routes; and the P2 repositories structurally
+use canonical `kai.source_locators` / `kai.evidence_items`. The smallest local
+correction keeps legacy rows preserved and separate, installs empty canonical
+P2-01 tables plus the producer-required evidence-review unique index in the
+atomic bundle, updates the preflight/verifier/runbook/rollback, and deliberately
+does not add the P2-01 `review_queue_items` required-action CHECK because that
+would narrow captured live legacy evidence-review rows. TOOL_VERIFIED:
+`DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node
+scripts/kai-sprint2-legacy-cutover-local-postgres.js` -> all 15 ordered proof
+steps passed after the correction. One additional local corrective commit was
+made; no push, deploy, production access/mutation, feature-flag/env/cloud/
+credential change, real client data use, historical migration edit, or
+`00_KAI_CURRENT_STATE.md` update was performed.

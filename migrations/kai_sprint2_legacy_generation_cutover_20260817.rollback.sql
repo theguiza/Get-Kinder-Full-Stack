@@ -96,6 +96,8 @@ BEGIN
   ALTER TABLE IF EXISTS kai.intake_parser_runs
     DROP CONSTRAINT IF EXISTS intake_parser_runs_p1_output_profile_fk;
 
+  DROP TABLE IF EXISTS kai.evidence_items;
+  DROP TABLE IF EXISTS kai.source_locators;
   DROP TABLE IF EXISTS kai.intake_promotion_decisions;
   DROP TABLE IF EXISTS kai.source_versions;
   DROP TABLE IF EXISTS kai.sources;
@@ -117,6 +119,7 @@ BEGIN
     DROP CONSTRAINT IF EXISTS review_queue_items_p1_06_queue_status_check,
     DROP CONSTRAINT IF EXISTS review_queue_items_p1_08_identity_unique;
 
+  DROP INDEX IF EXISTS kai.ux_review_queue_items_p2_01_evidence_review_identity;
   DROP INDEX IF EXISTS kai.ux_review_queue_items_p1_06_sensitivity_review_identity;
   DROP INDEX IF EXISTS kai.ux_review_queue_items_p1_07_source_candidate_review_identity;
   DROP INDEX IF EXISTS kai.ix_review_queue_items_p1_06_tenant_queue;

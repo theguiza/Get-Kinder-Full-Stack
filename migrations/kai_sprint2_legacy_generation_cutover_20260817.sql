@@ -75,30 +75,19 @@
 --   skip over the retained legacy table, reproducing this same class of
 --   incident).
 --
---   P2-01 DECISION: P2_01_NOT_REQUIRED_NOW.
---   Repository proof at current HEAD: neither
---   Backend/kai/db/kaiReviewCockpitReadModels.js nor
---   Backend/kai/services/kaiReviewCockpitService.js references source_locators
---   or evidence_items at all; the Review Cockpit source-candidate detail is
---   composed only from the P1-07/P1-08 getScoped* lookups in
---   Backend/kai/db/kaiIntakeQueries.js over kai.intake_source_candidates,
---   kai.review_queue_items, kai.intake_promotion_decisions, kai.sources and
---   kai.source_versions. Nothing at boot, in Backend/kai/parsing/ (the only
---   scheduled worker surface, whose entire SQL footprint is intake_files,
---   intake_parser_runs, intake_file_profiles and upload_lifecycle_audit), or in
---   any startup schema probe requires the canonical P2-01 tables. Therefore this
---   bundle installs NO canonical P2-01 object, and after it commits
---   kai.source_locators and kai.evidence_items do not exist - which is exactly
---   the starting state migrations/kai_sprint2_p2_01_evidence_lineage.sql expects.
---   Disclosed caveat, not a reason to install P2-01 here: the P2-01+ HTTP routes
---   ARE mounted behind the single KAI_SPRINT2_ENABLED gate (owner-confirmed
---   enabled in production) and are reachable on an explicit operator request.
---   Those routes cannot succeed today either: the repository's
---   Backend/kai/dictionary/postgresEvidenceLineageRepository.js inserts the
---   canonical coordinates/locator_fingerprint/statement_fingerprint columns,
---   which the production legacy shapes do not have. This cutover therefore
---   removes no working behaviour; it changes an already-failing operator action
---   from undefined_column to undefined_table.
+--   P2-01 DECISION: P2_01_REQUIRED_FOR_REACHABLE_OPERATION.
+--   Repository proof at current HEAD: the Review Cockpit source-candidate detail
+--   itself still does not read source_locators or evidence_items, but the
+--   authenticated Sprint 2 intake router mounts the accepted P2-01
+--   evidence-extraction route and P2-02 evidence-coverage route behind only
+--   KAI_SPRINT2_ENABLED. The admin Impact Evidence Library UI also exposes those
+--   calls. Because KAI_SPRINT2_ENABLED is owner-confirmed enabled in production,
+--   leaving kai.source_locators/kai.evidence_items absent after this cutover
+--   would leave a currently mounted, human-authorized operation structurally
+--   broken. This bundle therefore preserves the legacy P2 graph intact under
+--   kai_legacy_20260817 and installs EMPTY canonical P2-01 source_locators and
+--   evidence_items tables. It still never translates, copies, relabels, or
+--   fabricates any legacy row into the canonical P2 generation.
 --
 -- WHAT THIS BUNDLE NEVER DOES
 --   * never translates a legacy row into a canonical row
@@ -682,8 +671,9 @@ END $cutover_relocate$;
 --    converged rerun is a genuine no-op; no constraint definition is otherwise
 --    altered.
 --
---    No canonical P2-01 object is installed: see the P2_01_NOT_REQUIRED_NOW
---    decision in this file's header.
+--    Empty canonical P2-01 source_locators/evidence_items objects are installed
+--    after relocation because those names are used by accepted mounted P2
+--    operations. No legacy P2 row is translated into them.
 -- --------------------------------------------------------------------------
 
 -- --------------------------------------------------------------------------
@@ -1966,6 +1956,158 @@ BEGIN
       ON DELETE RESTRICT;
   END IF;
 END $idem$;
+
+-- =====================================================================
+-- Canonical DDL extracted from migrations/kai_sprint2_p2_01_evidence_lineage.sql
+-- (P2-01 evidence lineage). Installs empty canonical P2-01 objects after the
+-- preserved legacy tables have been relocated out of kai. This is schema only:
+-- no legacy locator or evidence row is translated or copied.
+-- =====================================================================
+DO $$
+BEGIN
+  IF to_regclass('kai.source_versions') IS NULL THEN
+    RAISE EXCEPTION 'kai.source_versions is required before P2-01 evidence-lineage migration';
+  END IF;
+  IF to_regclass('kai.review_queue_items') IS NULL THEN
+    RAISE EXCEPTION 'kai.review_queue_items is required before P2-01 evidence-lineage migration';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1
+      FROM pg_constraint c
+      JOIN pg_class r ON r.oid = c.conrelid
+      JOIN pg_namespace n ON n.oid = r.relnamespace
+     WHERE n.nspname = 'kai'
+       AND r.relname = 'source_versions'
+       AND c.conname = 'source_versions_p1_08_id_org_unique'
+  ) THEN
+    RAISE EXCEPTION 'kai.source_versions_p1_08_id_org_unique is required before P2-01 evidence-lineage migration';
+  END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS kai.source_locators (
+  source_locator_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  source_version_id uuid NOT NULL,
+  locator_type text NOT NULL,
+  coordinates jsonb NOT NULL,
+  locator_fingerprint text NOT NULL,
+
+  created_by_type text NOT NULL DEFAULT 'system',
+  created_at timestamptz NOT NULL DEFAULT now(),
+
+  CONSTRAINT source_locators_p2_01_identity_unique
+    UNIQUE (organization_id, source_version_id, locator_fingerprint),
+  CONSTRAINT source_locators_p2_01_id_org_unique
+    UNIQUE (source_locator_id, organization_id),
+  CONSTRAINT source_locators_p2_01_source_version_fk
+    FOREIGN KEY (source_version_id, organization_id)
+    REFERENCES kai.source_versions (source_version_id, organization_id)
+    ON DELETE RESTRICT,
+  CONSTRAINT source_locators_p2_01_locator_type_check
+    CHECK (locator_type = 'column'),
+  CONSTRAINT source_locators_p2_01_coordinates_check
+    CHECK (
+      jsonb_typeof(coordinates) = 'object'
+      AND coordinates ? 'column_name'
+      AND coordinates - ARRAY['column_name'] = '{}'::jsonb
+      AND jsonb_typeof(coordinates->'column_name') = 'string'
+    ),
+  CONSTRAINT source_locators_p2_01_fingerprint_check
+    CHECK (locator_fingerprint ~ '^[a-f0-9]{64}$'),
+  CONSTRAINT source_locators_p2_01_created_by_type_check
+    CHECK (created_by_type IN ('human', 'system'))
+);
+
+CREATE INDEX IF NOT EXISTS ix_source_locators_p2_01_tenant_version
+  ON kai.source_locators (organization_id, source_version_id);
+
+DO $idem$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint pc JOIN pg_class r ON r.oid = pc.conrelid
+      JOIN pg_namespace nn ON nn.oid = r.relnamespace
+     WHERE nn.nspname = 'kai' AND r.relname = 'source_versions' AND pc.conname = 'source_versions_p2_01_id_source_org_unique'
+  ) THEN
+    ALTER TABLE kai.source_versions
+      ADD CONSTRAINT source_versions_p2_01_id_source_org_unique
+      UNIQUE (source_version_id, source_id, organization_id);
+  END IF;
+END $idem$;
+
+CREATE TABLE IF NOT EXISTS kai.evidence_items (
+  evidence_item_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  source_id uuid NOT NULL,
+  source_version_id uuid NOT NULL,
+  source_locator_id uuid NOT NULL,
+  evidence_type text NOT NULL,
+  data_class text NOT NULL,
+  sensitivity_level text NOT NULL,
+  support_strength text NOT NULL,
+  statement text NOT NULL,
+  statement_fingerprint text NOT NULL,
+
+  evidence_review_status text NOT NULL DEFAULT 'needs_gk_review',
+  internal_only boolean NOT NULL DEFAULT true,
+  public_use_allowed boolean NOT NULL DEFAULT false,
+  funder_use_allowed boolean NOT NULL DEFAULT false,
+  llm_processing_allowed boolean NOT NULL DEFAULT false,
+  product_learning_allowed boolean NOT NULL DEFAULT false,
+
+  created_by uuid,
+  created_by_type text NOT NULL DEFAULT 'system',
+  created_at timestamptz NOT NULL DEFAULT now(),
+
+  CONSTRAINT evidence_items_p2_01_identity_unique
+    UNIQUE (organization_id, source_version_id, statement_fingerprint),
+  CONSTRAINT evidence_items_p2_01_id_org_unique
+    UNIQUE (evidence_item_id, organization_id),
+  CONSTRAINT evidence_items_p2_01_source_version_fk
+    FOREIGN KEY (source_version_id, source_id, organization_id)
+    REFERENCES kai.source_versions (source_version_id, source_id, organization_id)
+    ON DELETE RESTRICT,
+  CONSTRAINT evidence_items_p2_01_source_locator_fk
+    FOREIGN KEY (source_locator_id, organization_id)
+    REFERENCES kai.source_locators (source_locator_id, organization_id)
+    ON DELETE RESTRICT,
+  CONSTRAINT evidence_items_p2_01_evidence_type_check
+    CHECK (evidence_type = 'dictionary_field_presence_fact'),
+  CONSTRAINT evidence_items_p2_01_data_class_check
+    CHECK (data_class = 'organization_committed_metadata'),
+  CONSTRAINT evidence_items_p2_01_sensitivity_level_check
+    CHECK (sensitivity_level = 'unknown'),
+  CONSTRAINT evidence_items_p2_01_support_strength_check
+    CHECK (support_strength = 'unassessed'),
+  CONSTRAINT evidence_items_p2_01_statement_check
+    CHECK (
+      length(statement) BETWEEN 1 AND 500
+      AND statement !~* '(https?://|/Users/|/private/|/var/|/etc/|password|secret|api[_-]?key|token|credential|Bearer\s|stack ?trace|traceback|\s{2}at [A-Za-z])'
+    ),
+  CONSTRAINT evidence_items_p2_01_statement_fingerprint_check
+    CHECK (statement_fingerprint ~ '^[a-f0-9]{64}$'),
+  CONSTRAINT evidence_items_p2_01_review_status_check
+    CHECK (evidence_review_status = 'needs_gk_review'),
+  CONSTRAINT evidence_items_p2_01_internal_only_check
+    CHECK (internal_only = true),
+  CONSTRAINT evidence_items_p2_01_public_use_check
+    CHECK (public_use_allowed = false),
+  CONSTRAINT evidence_items_p2_01_funder_use_check
+    CHECK (funder_use_allowed = false),
+  CONSTRAINT evidence_items_p2_01_llm_processing_check
+    CHECK (llm_processing_allowed = false),
+  CONSTRAINT evidence_items_p2_01_product_learning_check
+    CHECK (product_learning_allowed = false),
+  CONSTRAINT evidence_items_p2_01_created_by_type_check
+    CHECK (created_by_type IN ('human', 'system'))
+);
+
+CREATE INDEX IF NOT EXISTS ix_evidence_items_p2_01_tenant_version
+  ON kai.evidence_items (organization_id, source_version_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_review_queue_items_p2_01_evidence_review_identity
+  ON kai.review_queue_items (organization_id, queue_type, target_object_type, target_object_id)
+  WHERE queue_type = 'evidence_review';
+
 -- --------------------------------------------------------------------------
 -- 6. Legacy review-queue target treatment.
 --
@@ -2157,7 +2299,6 @@ BEGIN
   -- 7e. Required canonical P1 objects exist at the kai.* names, with the exact
   --     canonical signatures the current repository contract needs.
   FOR sig IN SELECT * FROM kai_cutover_signature ORDER BY table_name LOOP
-    CONTINUE WHEN sig.table_name IN ('source_locators', 'evidence_items');
     IF to_regclass('kai.' || sig.table_name) IS NULL THEN
       RAISE EXCEPTION 'assertion failed: canonical kai.% was not installed', sig.table_name;
     END IF;
@@ -2185,10 +2326,11 @@ BEGIN
     END IF;
   END LOOP;
 
-  -- 7f. The P2_01_NOT_REQUIRED_NOW decision is reflected exactly: no canonical
-  --     P2-01 object was installed by this bundle.
-  IF to_regclass('kai.source_locators') IS NOT NULL OR to_regclass('kai.evidence_items') IS NOT NULL THEN
-    RAISE EXCEPTION 'assertion failed: a kai.source_locators/kai.evidence_items relation exists, but this bundle proved P2_01_NOT_REQUIRED_NOW and installs neither';
+  -- 7f. The P2-01 objects are canonical schema-only installs. The legacy rows
+  --     remain preserved under kai_legacy_20260817 and are not translated into
+  --     the empty canonical tables by this cutover.
+  IF EXISTS (SELECT 1 FROM kai.source_locators) OR EXISTS (SELECT 1 FROM kai.evidence_items) THEN
+    RAISE EXCEPTION 'assertion failed: canonical kai.source_locators/kai.evidence_items must be empty immediately after cutover; P2 rows must be produced later by P2-01, not translated';
   END IF;
 
   -- 7g. No legacy row was translated, copied or relabelled into the canonical

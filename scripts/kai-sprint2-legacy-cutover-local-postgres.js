@@ -457,6 +457,10 @@ try {
   assertEqual(psqlValue(
     "SELECT count(*)::text FROM kai.review_queue_items WHERE queue_metadata ? 'kai_legacy_generation_target'",
   ), String(legacyTargetRows), "exactly the legacy-target queue rows were marked");
+  assertEqual(psqlValue("SELECT count(*)::text FROM kai.source_locators"), "0",
+    "canonical kai.source_locators is installed empty; no legacy locator row was translated");
+  assertEqual(psqlValue("SELECT count(*)::text FROM kai.evidence_items"), "0",
+    "canonical kai.evidence_items is installed empty; no legacy evidence row was translated");
 
   // ------------------------------------------------------------------------
   proofStep("PRE_REPROCESSING_ROLLBACK restores the exact pre-cutover fixture");
