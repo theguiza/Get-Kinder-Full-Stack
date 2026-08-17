@@ -17993,3 +17993,182 @@ credential/secret inspection, shared/staging/production database mutation,
 real client data access, export/export-review work, schema/migration, new
 dependency, live model/cloud call, or current-state/baseline update was
 performed.
+
+## KAI legacy-generation cutover correction - local artifacts and proof only (completed 2026-08-17)
+
+SCOPE:
+  - Corrected the local, not-yet-executed legacy-generation cutover package
+    added by the immediately preceding commit, against four owner-supplied
+    read-only production catalog captures. Purely repository artifact and local
+    proof work: no production SQL was executed, no database was connected to,
+    no schema was migrated anywhere, and nothing in this package has been
+    accepted, deployed, or run against production.
+  - The preceding package's own preflight, when the owner ran it read-only
+    against the real production catalog, returned four FAILs. That result plus
+    the four captures is the entire basis for this correction.
+
+WHY THE PRECEDING PACKAGE WAS WRONG:
+  - It assumed seven legacy-shaped tables and assumed
+    `kai.intake_parser_runs`, `kai.data_dictionary_fields`,
+    `kai.data_dictionary_mappings`, `kai.data_quality_findings`,
+    `kai.source_locators`, `kai.evidence_items` were absent or already
+    canonical. The captures prove all thirteen are the same older generation.
+  - `data_dictionary_mappings` and `data_quality_findings` had returned PASS
+    only because shapes were classified by a SINGLE marker column that both
+    generations happen to carry. Owner has since confirmed their
+    reclassification to RELOCATE_LEGACY.
+
+PER-OBJECT TREATMENT (classified from the captures plus current-HEAD code, never
+from the fact that an object appeared in a foreign-key edge):
+  - RELOCATE_LEGACY (13, moved intact into `kai_legacy_20260817`):
+    intake_parser_runs, intake_file_profiles, data_dictionaries,
+    data_dictionary_fields, data_dictionary_mappings, data_quality_findings,
+    intake_sensitivity_profiles, intake_source_candidates,
+    intake_promotion_decisions, sources, source_versions, source_locators,
+    evidence_items. No row of any of them is translated, copied, relabelled or
+    fabricated into the canonical generation.
+  - KEEP_SHARED_IN_KAI: intake_files, review_queue_items,
+    upload_lifecycle_audit, organizations, engagements, users.
+  - NOT_REQUIRED_FOR_CURRENT_CUTOVER: claim_evidence_links,
+    funder_requirements, funders - left in `kai`, foreign keys never
+    retargeted; each follows its parent by referenced-table OID and keeps
+    resolving to exactly the same preserved rows.
+  - REPLACE_WITH_CANONICAL: none. UNRESOLVED_CONFLICT: none.
+  - P2-01 decision: P2_01_NOT_REQUIRED_NOW, from current mounted/enabled caller
+    analysis. No canonical P2-01 object is installed.
+
+ARTIFACTS:
+  - `migrations/kai_sprint2_legacy_generation_cutover_20260817.sql`: rebuilt as
+    ONE atomic pgAdmin-Query-Tool-executable transaction - a single
+    BEGIN/COMMIT, no nested historical-migration transaction boundaries,
+    in-transaction starting-state revalidation, relocation, inline canonical
+    object installation extracted from the current canonical migrations, the
+    legacy queue-target treatment, and transaction-local structural assertions
+    before COMMIT. Accepted historical migrations are neither edited nor
+    executed as production steps. The twelve
+    `ALTER TABLE kai.upload_lifecycle_audit` constraint REPLACEMENTS those
+    migrations carry are deliberately excluded, so no live vocabulary can be
+    narrowed by a replay.
+  - `scripts/kai-sprint2-legacy-cutover-preflight.sql` and
+    `scripts/kai-sprint2-legacy-cutover-verifier.sql`: read-only, metadata and
+    aggregate counts only. Shape classification replaced with a multi-factor
+    structural signature - required columns AND their information_schema
+    data-type classes, primary-key column set, named unique/check/foreign-key
+    constraints, named indexes - with UNRECOGNIZED a hard FAIL.
+  - `migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql`:
+    PRE_REPROCESSING_ROLLBACK only, refusing to run once any canonical row
+    exists. POST_REPROCESSING_RECOVERY is explicitly not implemented and is not
+    approximated.
+  - `scripts/kai-sprint2-legacy-cutover-legacy-shape-seed.sql`: production
+    shape of all thirteen tables plus the three captured incoming dependency
+    edges and legacy-target queue rows.
+  - `scripts/kai-sprint2-legacy-cutover-runbook.md`: authorized operator
+    procedure. Recorded as a procedure only; it was not executed.
+
+SHARED-OBJECT COMPATIBILITY DISCOVERED BY THE CORRECTED LOCAL PROOF:
+  - `kai.review_queue_items.priority` is an enum in production whose labels no
+    capture enumerates, while current producers write `'normal'`
+    (the only distinct `PRIORITY = "<label>"` value under `Backend/kai/`) and
+    `'medium'` (`Backend/kai/db/kaiIntakeQueries.js` insert fallback). The
+    preflight now reads the labels from `pg_enum` and fails closed on any
+    missing one; the bundle refuses rather than commit a state whose own
+    producer chain cannot run.
+  - `kai.upload_lifecycle_audit` is left completely unchanged. Instead of
+    asserting an uncaptured whole shape, the preflight verifies exactly the
+    minimal compatibility subset the current writers need, derived by
+    inspecting every writer of that table: the one distinct inserted column set
+    (`organization_id, intake_file_id, operation, from_state, to_state,
+    outcome, metadata, created_at`), no NOT NULL column without a default
+    outside that list, `outcome = 'success'`, and the seven operation literals
+    the cutover-adjacent producers write. Nothing beyond that is required.
+  - Defect found and fixed while proving the above: `pg_get_constraintdef`
+    renders `IN (...)` as `= ANY (ARRAY[...])`, so an earlier
+    `LIKE '%operation IN %'` guard matched nothing and passed every input. The
+    vocabulary checks now match the real rendering.
+  - Defect found and fixed in the signature logic itself: an unnest alias named
+    `conname` was shadowed by `pg_constraint.conname`, making every constraint
+    comparison trivially true. Renamed, so the structural signature is really
+    evaluated.
+
+APPLICATION CODE BOUNDARY:
+  - Exactly one change, required by the queue-target treatment:
+    `Backend/kai/db/kaiReviewCockpitReadModels.js#listReviewCockpitQueueItems`
+    gained `AND NOT (queue_metadata ? 'kai_legacy_generation_target')`.
+    `target_object_id` carries no foreign key and the reader never joins its
+    target, so nothing else could distinguish a preserved legacy target. This
+    narrows the canonical read model to canonical work; no canonical contract
+    is weakened and no read model is taught to tolerate a legacy shape.
+
+LOCAL EVIDENCE:
+  - `DATABASE_URL=<non-listening loopback sentinel> node
+    scripts/kai-sprint2-legacy-cutover-local-postgres.js` -> all 15 ordered
+    proof steps passed on an ephemeral, loopback-only, runner-created and
+    runner-destroyed PostgreSQL 16 instance: fixture matches every captured
+    structure; the real 42703 undefined_column failure on `file_profile_id`
+    reproduces pre-cutover through the unmodified current read query; the
+    preflight is fully green on the expected legacy state and fails closed on
+    an unrecognized shape, on a priority enum missing `'normal'`, on a narrowed
+    audit vocabulary, and on an unsatisfiable NOT NULL audit column; a forced
+    mid-cutover failure leaves the database byte-identical by structural and
+    row-count fingerprint; the bundle applies; the verifier is fully green;
+    legacy rows, legacy-to-legacy and legacy-to-shared foreign keys, retained
+    dependents and shared contracts all survive; the pre-reprocessing rollback
+    restores the exact pre-cutover fingerprint; re-applying and re-running the
+    bundle are convergent no-ops; the real current producer chain yields a
+    working Review Cockpit source-candidate detail with tenant isolation,
+    correct null promotion_decision, and convergent replay; and the rollback
+    refuses once canonical rows exist.
+  - `kai.claim_evidence_links` attachment is asserted, not merely reported: the
+    verifier proves the foreign key still binds by referenced-table OID to the
+    relocated `kai_legacy_20260817.evidence_items`, that every link row still
+    resolves to a surviving preserved evidence item, and that the link count
+    equals the resolved-join count. All three were confirmed to FAIL when the
+    attachment is deliberately broken.
+  - `node --test __tests__/kai-sprint2-p1-09-review-cockpit-boundary.spec.js`
+    -> 23/23. `node --test
+    __tests__/kai-sprint2-p1-09-review-cockpit.integration.spec.js` -> 16/16.
+  - `npm run verify:kai-sprint2-p1-06-review-queue`,
+    `verify:kai-sprint2-p1-07-source-candidate`,
+    `verify:kai-sprint2-p1-08-source-promotion` -> all passed.
+  - `DATABASE_URL=<sentinel> npm run test:kai-sprint2` -> 2247 tests,
+    2211 passing, 35 skipped, 1 failing; the sole failure is the established
+    `foundation-safety file_upload_enabled` baseline, not a new regression. It
+    was proved unchanged from baseline by stashing this package's entire diff
+    and re-running that spec at the prior commit, where it fails identically.
+  - `DATABASE_URL=<sentinel> npm test` -> 2352 tests, 2316 passing, 35 skipped,
+    1 failing; the same known baseline and no additional failure.
+  - `git diff --check` -> clean.
+
+NOT_CONFIRMED (explicitly unresolved, not repository blockers):
+  - Operational `lock_timeout` / `statement_timeout` for the production
+    execution window. This repository defines no such convention anywhere in
+    `migrations/` or `scripts/`, so none was invented in the bundle or the
+    runbook. This decision has not been made and must be made before any real
+    production execution.
+  - `kai.priority_enum`'s full production label set, and `kai.upload_lifecycle_
+    audit`'s full production shape. Both are now read from the live catalog by
+    the preflight and fail closed, rather than assumed.
+  - Capture 1 is internally inconsistent for `kai.sources`: it lists no
+    `parse_status` column while its captured `idx_sources_engagement_status`
+    is defined over that column. The fixture keeps the captured index, which
+    forces the column to exist; the contradiction is not silently resolved.
+  - The fixture's enum label vocabularies are narrower than production's, and
+    `claim_evidence_links`/`funder_requirements`/`funders` are modelled only as
+    far as the captured edges require.
+  - `kai.claims` is out of scope; no repository evidence requires reasoning
+    about it for this cutover.
+  - Deferred follow-up, reported by the verifier so it cannot be forgotten: a
+    future P2-01/P2-03 package must handle `kai.claim_evidence_links`
+    explicitly, because `migrations/kai_sprint2_p2_03_claim_proposal.sql` uses
+    `CREATE TABLE IF NOT EXISTS` and would silently skip the retained legacy
+    table.
+
+Three local commits were made on this branch for this package: one recording the
+corrected cutover artifacts and proof, one recording the owner-directed
+shared-object producer-compatibility checks and the asserted
+`claim_evidence_links` attachment proof, and one recording this ExecPlan update.
+No push, deploy, config/flag mutation, credential/secret inspection,
+shared/staging/production database access or mutation, real client data access,
+production SQL execution, historical-migration edit, new dependency, live
+model/cloud call, or current-state/baseline update was performed. Nothing in
+this package has been executed against, or accepted into, production.
