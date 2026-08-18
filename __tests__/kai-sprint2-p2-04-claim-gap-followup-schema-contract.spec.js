@@ -125,7 +125,7 @@ test("P2-04 enforces the complete fixed client_followup queue contract at the da
   assert.match(body, /target_object_type = 'client_followup_item'/);
   assert.match(body, /queue_status = 'waiting_on_client'/);
   assert.match(body, /review_status = 'proposed'/);
-  assert.match(body, /priority = 'normal'/);
+  assert.match(body, /priority = 'medium'/);
   assert.match(body, /summary = 'Client clarification is required for an unresolved claim gap\.'/);
   assert.match(body, /assigned_to IS NULL/);
   assert.match(body, /due_at IS NULL/);

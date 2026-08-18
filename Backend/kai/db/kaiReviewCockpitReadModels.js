@@ -1,8 +1,8 @@
 import pool from "./kaiDb.js";
 import {
-  getScopedSourceCandidateByIdentity,
-  getScopedSourceCandidateReviewQueueItemByIdentity,
-  getScopedSourcePromotionDecisionByIdentity,
+  getScopedSourceCandidateByIdentityForDisplay,
+  getScopedSourceCandidateReviewQueueItemByIdentityForDisplay,
+  getScopedSourcePromotionDecisionByIdentityForDisplay,
   getScopedSourceById,
   getScopedSourceVersionById,
 } from "./kaiIntakeQueries.js";
@@ -41,6 +41,18 @@ export const REVIEW_COCKPIT_MAX_QUALITY_FINDINGS = 50;
  * `queueTypes` and `queueStatuses` are canonical, already-validated, non-empty
  * vocabularies supplied by the caller's validator; they are bound as parameters and
  * never interpolated as caller text.
+ *
+ * The `queue_metadata ? 'kai_legacy_generation_target'` exclusion is the reader half
+ * of the 2026-08-17 legacy-generation cutover's review-queue treatment
+ * (migrations/kai_sprint2_legacy_generation_cutover_20260817.sql, section 6). Rows
+ * carrying that marker are live production queue rows whose target object belongs to
+ * the preserved pre-Sprint2 generation in kai_legacy_20260817 - they are never
+ * deleted, resolved, retargeted or relabelled, but their targets are not canonical
+ * work and this cockpit must not present them as such. `target_object_id` carries no
+ * foreign key (it is polymorphic across queue_types, as the P1-06 migration
+ * explains), so nothing else in this query could distinguish them. This narrows the
+ * canonical read model to canonical work; it does not teach it to tolerate a legacy
+ * shape.
  */
 export async function listReviewCockpitQueueItems(
   organizationId,
@@ -77,6 +89,7 @@ export async function listReviewCockpitQueueItems(
             created_at, updated_at
        FROM kai.review_queue_items
       WHERE organization_id = $1
+        AND NOT (queue_metadata ? 'kai_legacy_generation_target')
         AND queue_type IN (${typePlaceholders.join(", ")})
         AND queue_status IN (${statusPlaceholders.join(", ")})${cursorPredicate}
       ORDER BY created_at DESC, review_queue_item_id DESC
@@ -159,7 +172,12 @@ export async function getReviewCockpitFileProfileRecord(organizationId, fileProf
 
 /**
  * Read-only, tenant-scoped source-candidate review record, composed entirely from
- * the already-accepted P1-07/P1-08 `getScoped*` lookups. The source and
+ * the already-accepted P1-07/P1-08 `getScoped*` lookups - using their `ForDisplay`,
+ * non-locking counterparts. The write-path `getScoped*` lookups take a row lock
+ * (via the SQL clause that follows a SELECT to bind it to the current transaction)
+ * because they back a same-transaction replay-vs-write decision; this
+ * cockpit detail never writes anything, so it must never take a row lock (or
+ * require UPDATE table privilege) merely to display one. The source and
  * source_version are read only through the identifiers the committed decision row
  * is already bound to, so this never infers a promotion result that the decision
  * row does not itself record.
@@ -170,14 +188,14 @@ export async function getReviewCockpitSourceCandidateRecord(
   db = pool,
 ) {
   const identity = { organizationId, intakeSourceCandidateId };
-  const sourceCandidate = await getScopedSourceCandidateByIdentity(identity, db);
+  const sourceCandidate = await getScopedSourceCandidateByIdentityForDisplay(identity, db);
   if (!sourceCandidate) return null;
 
-  const reviewQueueItem = await getScopedSourceCandidateReviewQueueItemByIdentity(
+  const reviewQueueItem = await getScopedSourceCandidateReviewQueueItemByIdentityForDisplay(
     { organizationId, targetObjectId: sourceCandidate.intake_source_candidate_id },
     db,
   );
-  const promotionDecision = await getScopedSourcePromotionDecisionByIdentity(identity, db);
+  const promotionDecision = await getScopedSourcePromotionDecisionByIdentityForDisplay(identity, db);
   const source = promotionDecision?.source_id
     ? await getScopedSourceById({ organizationId, sourceId: promotionDecision.source_id }, db)
     : null;

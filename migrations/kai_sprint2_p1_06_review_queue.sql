@@ -37,7 +37,7 @@ END $$;
 -- queue_type/queue_status vocabularies below as required). This migration creates the
 -- full canonical table - not a P1-06-only narrow subset - so every existing and future
 -- queue_type keeps working unmodified. P1-06 itself only ever writes queue_type =
--- 'sensitivity_review', queue_status = 'open', priority = 'normal' rows: the wider
+-- 'sensitivity_review', queue_status = 'open', priority = 'medium' rows: the wider
 -- vocabulary below exists because the table is shared, not because P1-06 uses it.
 CREATE TABLE IF NOT EXISTS kai.review_queue_items (
   review_queue_item_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -86,7 +86,16 @@ CREATE TABLE IF NOT EXISTS kai.review_queue_items (
   CONSTRAINT review_queue_items_p1_06_review_status_check
     CHECK (review_status IN ('proposed', 'needs_gk_review', 'resolved')),
   CONSTRAINT review_queue_items_p1_06_priority_check
-    CHECK (priority IN ('low', 'normal', 'medium', 'high', 'urgent')),
+    CHECK (priority IN (
+      'mandatory',
+      'immediate_fix',
+      'high',
+      'medium',
+      'low',
+      'backlog',
+      'not_applicable',
+      'unknown'
+    )),
   CONSTRAINT review_queue_items_p1_06_created_by_type_check
     CHECK (created_by_type IN ('human', 'system')),
   CONSTRAINT review_queue_items_p1_06_target_object_type_check

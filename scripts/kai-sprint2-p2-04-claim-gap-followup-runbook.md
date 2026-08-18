@@ -179,7 +179,7 @@ of the four authorized keys, the target gap exists and is tenant/dimension-
 matched to the claim, the follow-up and queue write plans carry the exact fixed
 contract (dimension/question pairing, `queue_type = 'client_followup'`,
 `target_object_type = 'client_followup_item'`, `queue_status =
-'waiting_on_client'`, `review_status = 'proposed'`, `priority = 'normal'`,
+'waiting_on_client'`, `review_status = 'proposed'`, `priority = 'medium'`,
 `summary = 'Client clarification is required for an unresolved claim gap.'`,
 `required_action` = the exact fixed question, `assigned_to = NULL`, `due_at =
 NULL`), and that no field beyond that fixed allowlist is present - so no

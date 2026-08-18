@@ -435,7 +435,7 @@ test("P3-05 an existing export_review row without a matching audit conflicts rat
     queue_type: "export_review",
     target_object_type: "generated_content_draft",
     target_object_id: DRAFT,
-    priority: "normal",
+    priority: "medium",
     queue_status: "open",
     review_status: "needs_gk_review",
     blocked_reason: null,

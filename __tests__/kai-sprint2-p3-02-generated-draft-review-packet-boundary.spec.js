@@ -114,7 +114,7 @@ function state(overrides = {}) {
       queue_type: "generated_content_review",
       target_object_type: "generated_content_draft",
       target_object_id: DRAFT,
-      priority: "normal",
+      priority: "medium",
       queue_status: "open",
       review_status: "needs_gk_review",
       assigned_to: null,

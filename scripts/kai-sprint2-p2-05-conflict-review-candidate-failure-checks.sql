@@ -49,7 +49,7 @@ BEGIN
       queue_status, review_status, priority, summary, required_action, queue_metadata, created_by_type
     ) VALUES (
       org_id, 'conflict_resolution', 'conflict_group', group_id,
-      'open', 'needs_gk_review', 'normal', 'Potential claim conflict requires GK review.',
+      'open', 'needs_gk_review', 'medium', 'Potential claim conflict requires GK review.',
       'Record a proven conflict.', '{}'::jsonb, 'system'
     );
     INSERT INTO p2_05_failure_results VALUES ('queue_required_action_exact', 'FAIL', 'wrong conflict_resolution required_action was unexpectedly accepted');
@@ -63,7 +63,7 @@ BEGIN
       queue_status, review_status, priority, summary, required_action, assigned_to, queue_metadata, created_by_type
     ) VALUES (
       org_id, 'conflict_resolution', 'conflict_group', group_id,
-      'open', 'needs_gk_review', 'normal', 'Potential claim conflict requires GK review.',
+      'open', 'needs_gk_review', 'medium', 'Potential claim conflict requires GK review.',
       'Compare both claims, their evidence lineage, definitions, reporting periods, entity levels, denominators, and support limitations. Record whether a conflict exists. Do not approve or promote either claim.',
       '90000000-0000-4000-8000-000000000001', '{}'::jsonb, 'system'
     );

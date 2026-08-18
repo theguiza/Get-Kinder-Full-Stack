@@ -118,7 +118,7 @@ returns `system_error`, publishes no audit, and rolls back the transaction.
 The caller supplies only `organizationId`, `intakeSensitivityProfileId`,
 `actorContext`, and `now`. `queue_type` (`'sensitivity_review'`), `target_object_type`
 (`'intake_sensitivity_profile'`), `target_object_id` (the re-read
-`intake_sensitivity_profile_id`), `queue_status` (`'open'`), `priority` (`'normal'`),
+`intake_sensitivity_profile_id`), `queue_status` (`'open'`), `priority` (`'medium'`),
 `summary`, `required_action`, `assigned_to` (`null`), and `due_at` (`null`) are all
 server-pinned constants or server-derived; the caller cannot provide or override any
 of them, nor any lineage, classification, consent, allowed-use, audience-eligibility,

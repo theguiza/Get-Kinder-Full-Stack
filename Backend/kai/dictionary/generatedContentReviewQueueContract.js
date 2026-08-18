@@ -1,7 +1,7 @@
 export const GENERATED_CONTENT_REVIEW_QUEUE_STATIC_CONTRACT = Object.freeze({
   queueType: "generated_content_review",
   targetObjectType: "generated_content_draft",
-  priority: "normal",
+  priority: "medium",
   summary: "Generated draft requires human review.",
   requiredAction:
     "Review citations, audience eligibility, limitations, unsupported claims, and numeric or causal assertions before any use.",

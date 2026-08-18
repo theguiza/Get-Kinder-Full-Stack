@@ -192,7 +192,7 @@ async function runP303IntegrationSuite() {
      )
      VALUES (
        '10000000-0000-4000-8000-000000000025'::uuid,$1::uuid,'claim_review','claim',
-       $2::uuid,'normal','open','needs_gk_review','New claim requires GK review.',
+       $2::uuid,'medium','open','needs_gk_review','New claim requires GK review.',
        'Review the proposed claim before use.','{}'::jsonb,'system'
      )`,
     [ORG, CLAIM],

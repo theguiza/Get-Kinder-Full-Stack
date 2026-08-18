@@ -98,7 +98,7 @@ BEGIN
     priority, queue_status, summary, required_action, queue_metadata, created_by_type
   ) VALUES (
     org1, 'source_candidate_review', 'intake_source_candidate', candidate1,
-    'normal', 'open', 'Review intake source-candidate stub for human classification.',
+    'medium', 'open', 'Review intake source-candidate stub for human classification.',
     'Human review is required.', jsonb_build_object('p0_stub', true), 'human'
   ) RETURNING review_queue_item_id INTO review_item1;
 

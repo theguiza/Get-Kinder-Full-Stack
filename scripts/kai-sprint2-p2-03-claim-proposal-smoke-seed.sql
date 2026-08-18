@@ -46,7 +46,7 @@ BEGIN
   VALUES (field1_evidence_id, org1, source1, source_version1, field1_locator_id, 'dictionary_field_presence_fact', 'organization_committed_metadata', 'unknown', 'unassessed', field1_statement, field1_fingerprint, 'human');
 
   INSERT INTO kai.review_queue_items (organization_id, queue_type, target_object_type, target_object_id, priority, queue_status, review_status, summary, required_action, queue_metadata, created_by_type)
-  VALUES (org1, 'evidence_review', 'evidence_item', field1_evidence_id, 'normal', 'open', 'needs_gk_review', 'New evidence item requires GK review.', required_action1, '{}'::jsonb, 'system');
+  VALUES (org1, 'evidence_review', 'evidence_item', field1_evidence_id, 'medium', 'open', 'needs_gk_review', 'New evidence item requires GK review.', required_action1, '{}'::jsonb, 'system');
 END $$;
 
 COMMIT;

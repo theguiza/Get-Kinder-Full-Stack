@@ -40,7 +40,7 @@ ALTER TABLE kai.review_queue_items
         target_object_type = 'client_followup_item'
         AND queue_status = 'waiting_on_client'
         AND review_status = 'proposed'
-        AND priority = 'normal'
+        AND priority = 'medium'
         AND summary = 'Client clarification is required for an unresolved claim gap.'
         AND assigned_to IS NULL
         AND due_at IS NULL

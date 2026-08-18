@@ -83,7 +83,7 @@ ALTER TABLE kai.review_queue_items
         target_object_type = 'conflict_group'
         AND queue_status = 'open'
         AND review_status = 'needs_gk_review'
-        AND priority = 'normal'
+        AND priority = 'medium'
         AND summary = 'Potential claim conflict requires GK review.'
         AND required_action = 'Compare both claims, their evidence lineage, definitions, reporting periods, entity levels, denominators, and support limitations. Record whether a conflict exists. Do not approve or promote either claim.'
         AND assigned_to IS NULL

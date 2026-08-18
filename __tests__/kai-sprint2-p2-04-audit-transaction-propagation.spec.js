@@ -292,7 +292,7 @@ function fakeQueryHandler(sql) {
           queue_type: "client_followup",
           target_object_type: "client_followup_item",
           target_object_id: FOLLOWUP_ID,
-          priority: "normal",
+          priority: "medium",
           queue_status: "waiting_on_client",
           review_status: "proposed",
           assigned_to: null,

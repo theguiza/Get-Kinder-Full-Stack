@@ -31,7 +31,7 @@ BEGIN
     priority, queue_status, summary, required_action, created_by_type
   ) VALUES (
     first_item_id, org1, 'sensitivity_review', 'intake_sensitivity_profile', sensitivity1,
-    'normal', 'open',
+    'medium', 'open',
     'Review intake sensitivity and allowed-use profile.',
     'Review classifications, consent basis, allowed-use restrictions, and governance requirements before source-candidate work.',
     'human'
@@ -96,7 +96,7 @@ BEGIN
       priority, queue_status, summary, required_action, created_by_type
     ) VALUES (
       org1, 'sensitivity_review', 'intake_sensitivity_profile', sensitivity1,
-      'urgent', 'open', 'a different summary', 'a different required action', 'human'
+      'high', 'open', 'a different summary', 'a different required action', 'human'
     );
     INSERT INTO p1_06_results VALUES ('duplicate_identity_rejected', 'FAIL', 'duplicate organization_id + queue_type + target_object_type + target_object_id unexpectedly succeeded');
   EXCEPTION WHEN unique_violation THEN
@@ -114,7 +114,7 @@ BEGIN
       priority, queue_status, summary, required_action, created_by_type
     ) VALUES (
       org1, 'sensitivity_review', 'intake_sensitivity_profile', sensitivity2,
-      'normal', 'open', 'Review intake sensitivity and allowed-use profile.',
+      'medium', 'open', 'Review intake sensitivity and allowed-use profile.',
       'Review classifications, consent basis, allowed-use restrictions, and governance requirements before source-candidate work.',
       'human'
     );
@@ -127,7 +127,7 @@ BEGIN
       priority, queue_status, summary, required_action, created_by_type
     ) VALUES (
       org1, 'sensitivity_review', 'intake_sensitivity_profile', sensitivity2,
-      'normal', 'open', 'Review intake sensitivity and allowed-use profile.',
+      'medium', 'open', 'Review intake sensitivity and allowed-use profile.',
       'Review classifications, consent basis, allowed-use restrictions, and governance requirements before source-candidate work.',
       'human'
     );
@@ -179,7 +179,7 @@ BEGIN
       priority, queue_status, summary, required_action, created_by_type
     ) VALUES (
       fresh_item, org1, 'sensitivity_review', 'intake_sensitivity_profile', gen_random_uuid(),
-      'normal', 'open', 'Review intake sensitivity and allowed-use profile.',
+      'medium', 'open', 'Review intake sensitivity and allowed-use profile.',
       'Review classifications, consent basis, allowed-use restrictions, and governance requirements before source-candidate work.',
       'human'
     );

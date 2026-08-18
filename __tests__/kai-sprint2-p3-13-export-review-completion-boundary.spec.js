@@ -60,7 +60,7 @@ function makeExportReviewRow(overrides = {}) {
     queue_type: "export_review",
     target_object_type: "generated_content_draft",
     target_object_id: DRAFT,
-    priority: "normal",
+    priority: "medium",
     queue_status: "in_progress",
     review_status: "needs_gk_review",
     blocked_reason: null,
@@ -515,7 +515,7 @@ test("P3-06 real packet reports resolved/resolved, exportEligible=false, draftSt
         return { rows: [{ generated_content_citation_id: "00000000-0000-4000-8000-000000000804", generated_content_block_id: "00000000-0000-4000-8000-000000000803", organization_id: ORG, claim_id: "00000000-0000-4000-8000-000000000805", evidence_item_id: "00000000-0000-4000-8000-000000000806", block_ordinal: 1 }] };
       }
       if (s.includes("FROM kai.review_queue_items") && s.includes("target_object_type = $2") && s.includes("queue_type = $4")) {
-        return { rows: [{ review_queue_item_id: "00000000-0000-4000-8000-000000000809", organization_id: ORG, queue_type: "generated_content_review", target_object_type: "generated_content_draft", target_object_id: DRAFT, priority: "normal", queue_status: "resolved", review_status: "resolved", assigned_to: null, due_at: null, summary: "Generated draft requires human review.", required_action: "Review citations, audience eligibility, limitations, unsupported claims, and numeric or causal assertions before any use." }] };
+        return { rows: [{ review_queue_item_id: "00000000-0000-4000-8000-000000000809", organization_id: ORG, queue_type: "generated_content_review", target_object_type: "generated_content_draft", target_object_id: DRAFT, priority: "medium", queue_status: "resolved", review_status: "resolved", assigned_to: null, due_at: null, summary: "Generated draft requires human review.", required_action: "Review citations, audience eligibility, limitations, unsupported claims, and numeric or causal assertions before any use." }] };
       }
       return baseTx.query(sql, params);
     },

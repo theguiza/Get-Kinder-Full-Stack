@@ -49,7 +49,7 @@ BEGIN
     priority, queue_status, summary, required_action, queue_metadata, created_by_type
   ) VALUES (
     org1, 'source_candidate_review', 'intake_source_candidate', candidate1,
-    'normal', 'open',
+    'medium', 'open',
     'Review intake source-candidate stub for human classification.',
     'Human review is required. This is a review-only source-candidate stub: source promotion is not authorized, and no source or source_version has been created.',
     jsonb_build_object('p0_stub', true),
@@ -230,7 +230,7 @@ BEGIN
       priority, queue_status, summary, required_action, queue_metadata, created_by_type
     ) VALUES (
       org1, 'source_candidate_review', 'intake_source_candidate', fresh_candidate,
-      'normal', 'open',
+      'medium', 'open',
       'Review intake source-candidate stub for human classification.',
       'Human review is required. This is a review-only source-candidate stub: source promotion is not authorized, and no source or source_version has been created.',
       jsonb_build_object('p0_stub', true),

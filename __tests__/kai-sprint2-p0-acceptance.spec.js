@@ -193,7 +193,7 @@ function createMetadataRepository() {
       queue_type: "intake_file_review",
       target_object_type: "intake_file",
       target_object_id: file.intake_file_id,
-      priority: "normal",
+      priority: "medium",
       queue_status: "open",
       due_at: null,
       summary: "Review quarantined intake file.",

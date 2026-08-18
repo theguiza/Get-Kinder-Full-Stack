@@ -251,7 +251,7 @@ async function insertEvidenceReviewQueueItemIfAbsent(tx, { organizationId, evide
     `INSERT INTO kai.review_queue_items (
        organization_id, queue_type, target_object_type, target_object_id,
        priority, queue_status, review_status, summary, required_action, queue_metadata, created_by_type
-     ) VALUES ($1,$2,$3,$4::uuid,'normal',$5,$6,$7,$8,'{}'::jsonb,$9)
+     ) VALUES ($1,$2,$3,$4::uuid,'medium',$5,$6,$7,$8,'{}'::jsonb,$9)
      ON CONFLICT (organization_id, queue_type, target_object_type, target_object_id)
        WHERE queue_type = 'evidence_review'
        DO NOTHING

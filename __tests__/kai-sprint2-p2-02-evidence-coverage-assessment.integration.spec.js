@@ -226,7 +226,7 @@ async function runEvidenceCoverageAssessmentIntegrationSuite() {
          organization_id, queue_type, target_object_type, target_object_id,
          priority, queue_status, review_status, summary, required_action, queue_metadata, created_by_type
        ) VALUES ($1::uuid, 'source_candidate_review', 'intake_source_candidate', $2::uuid,
-                 'normal', 'resolved', 'resolved', 'Review intake source-candidate stub for human classification.',
+                 'medium', 'resolved', 'resolved', 'Review intake source-candidate stub for human classification.',
                  'Human review is required.', '{"p0_stub":true}'::jsonb, 'human')
        RETURNING review_queue_item_id::text AS review_queue_item_id`,
       [organizationId, intakeSourceCandidateId],

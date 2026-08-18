@@ -172,7 +172,7 @@ test("P1-06 repository: row locking for the sensitivity_review identity happens 
 test("P1-06 repository never lets the caller override any server-pinned or server-derived field", () => {
   assert.equal(__reviewQueueRepositoryContract.SENSITIVITY_REVIEW_QUEUE_TYPE, "sensitivity_review");
   assert.equal(__reviewQueueRepositoryContract.SENSITIVITY_REVIEW_TARGET_OBJECT_TYPE, "intake_sensitivity_profile");
-  assert.equal(__reviewQueueRepositoryContract.SENSITIVITY_REVIEW_PRIORITY, "normal");
+  assert.equal(__reviewQueueRepositoryContract.SENSITIVITY_REVIEW_PRIORITY, "medium");
   assert.equal(__reviewQueueRepositoryContract.SENSITIVITY_REVIEW_QUEUE_STATUS, "open");
   assert.equal(__reviewQueueRepositoryContract.SENSITIVITY_REVIEW_SUMMARY, "Review intake sensitivity and allowed-use profile.");
   assert.equal(
@@ -256,7 +256,7 @@ test("P1-06 repository: identical replay returns the existing row with zero audi
     queue_type: "sensitivity_review",
     target_object_type: "intake_sensitivity_profile",
     target_object_id: PROFILE,
-    priority: "normal",
+    priority: "medium",
     queue_status: "open",
     assigned_to: null,
     due_at: null,

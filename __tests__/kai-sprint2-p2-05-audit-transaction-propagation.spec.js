@@ -283,7 +283,7 @@ function fakeQueryHandler(sql, params = []) {
           queue_type: "claim_review",
           target_object_type: "claim",
           target_object_id: claimId,
-          priority: "normal",
+          priority: "medium",
           queue_status: "open",
           review_status: "needs_gk_review",
           assigned_to: null,
@@ -334,7 +334,7 @@ function fakeQueryHandler(sql, params = []) {
           target_object_id: CONFLICT_GROUP_ID,
           queue_status: "open",
           review_status: "needs_gk_review",
-          priority: "normal",
+          priority: "medium",
           summary: "Potential claim conflict requires GK review.",
           required_action:
             "Compare both claims, their evidence lineage, definitions, reporting periods, entity levels, denominators, and support limitations. Record whether a conflict exists. Do not approve or promote either claim.",

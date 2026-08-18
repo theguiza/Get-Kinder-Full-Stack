@@ -69,8 +69,8 @@ BEGIN
   queue_insert_reached := true;
   INSERT INTO kai.review_queue_items (organization_id, queue_type, target_object_type, target_object_id, priority, queue_status, review_status, summary, required_action, queue_metadata, created_by_type)
   VALUES
-    (org1, 'evidence_review', 'evidence_item', field1_evidence_id, 'normal', 'open', 'needs_gk_review', 'New evidence item requires GK review.', required_action1, '{}'::jsonb, 'system'),
-    (org1, 'evidence_review', 'evidence_item', field2_evidence_id, 'normal', 'open', 'needs_gk_review', 'New evidence item requires GK review.', required_action1, '{}'::jsonb, 'system');
+    (org1, 'evidence_review', 'evidence_item', field1_evidence_id, 'medium', 'open', 'needs_gk_review', 'New evidence item requires GK review.', required_action1, '{}'::jsonb, 'system'),
+    (org1, 'evidence_review', 'evidence_item', field2_evidence_id, 'medium', 'open', 'needs_gk_review', 'New evidence item requires GK review.', required_action1, '{}'::jsonb, 'system');
 
   audit_insert_reached := true;
   INSERT INTO kai.upload_lifecycle_audit (organization_id, intake_file_id, operation, from_state, to_state, outcome, metadata)
@@ -156,13 +156,13 @@ BEGIN
   -- form, mirroring the established P1-04 through P1-08 SQL-level convention).
   BEGIN
     INSERT INTO kai.review_queue_items (organization_id, queue_type, target_object_type, target_object_id, priority, queue_status, review_status, summary, required_action, queue_metadata, created_by_type)
-    VALUES (org1, 'evidence_review', 'evidence_item', field1_evidence_id, 'normal', 'open', 'needs_gk_review', 'New evidence item requires GK review.', required_action1, '{}'::jsonb, 'system');
+    VALUES (org1, 'evidence_review', 'evidence_item', field1_evidence_id, 'medium', 'open', 'needs_gk_review', 'New evidence item requires GK review.', required_action1, '{}'::jsonb, 'system');
   EXCEPTION WHEN unique_violation THEN
     NULL;
   END;
   BEGIN
     INSERT INTO kai.review_queue_items (organization_id, queue_type, target_object_type, target_object_id, priority, queue_status, review_status, summary, required_action, queue_metadata, created_by_type)
-    VALUES (org1, 'evidence_review', 'evidence_item', field1_evidence_id, 'normal', 'open', 'needs_gk_review', 'New evidence item requires GK review.', required_action1, '{}'::jsonb, 'system');
+    VALUES (org1, 'evidence_review', 'evidence_item', field1_evidence_id, 'medium', 'open', 'needs_gk_review', 'New evidence item requires GK review.', required_action1, '{}'::jsonb, 'system');
     INSERT INTO p2_01_results VALUES ('concurrent_insert_convergence_second_attempt_rejected', 'FAIL', 'second concurrent-identity insert unexpectedly succeeded');
   EXCEPTION WHEN unique_violation THEN
     INSERT INTO p2_01_results VALUES ('concurrent_insert_convergence_second_attempt_rejected', 'PASS', 'safe unique-violation failure on the second concurrent attempt');
@@ -205,7 +205,7 @@ BEGIN
       VALUES (forced_evidence_id, org1, source1, source_version1, forced_locator_id, 'dictionary_field_presence_fact', 'organization_committed_metadata', 'unknown', 'unassessed', forced_statement, forced_fingerprint);
 
       INSERT INTO kai.review_queue_items (organization_id, queue_type, target_object_type, target_object_id, priority, queue_status, review_status, summary, required_action, queue_metadata, created_by_type)
-      VALUES (org1, 'evidence_review', 'evidence_item', forced_evidence_id, 'normal', 'open', 'needs_gk_review', 'New evidence item requires GK review.', required_action1, '{}'::jsonb, 'system');
+      VALUES (org1, 'evidence_review', 'evidence_item', forced_evidence_id, 'medium', 'open', 'needs_gk_review', 'New evidence item requires GK review.', required_action1, '{}'::jsonb, 'system');
 
       INSERT INTO kai.upload_lifecycle_audit (organization_id, intake_file_id, operation, from_state, to_state, outcome, metadata)
       VALUES (

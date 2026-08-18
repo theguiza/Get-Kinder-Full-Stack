@@ -163,7 +163,7 @@ async function runReviewQueueIntegrationSuite() {
     assert.equal(result.data.replayed, false);
     const item = result.data.reviewQueueItem;
     assert.equal(item.queue_status, "open");
-    assert.equal(item.priority, "normal");
+    assert.equal(item.priority, "medium");
     assert.equal(item.target_object_type, "intake_sensitivity_profile");
     assert.equal(item.target_object_id, intakeSensitivityProfileId);
     assert.equal(item.assigned_to, null);

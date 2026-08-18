@@ -83,7 +83,7 @@ BEGIN
     priority, queue_status, review_status, summary, required_action, queue_metadata, created_by_type
   ) VALUES (
     org1, 'source_candidate_review', 'intake_source_candidate', candidate1,
-    'normal', 'resolved', 'resolved', 'Review intake source-candidate stub for human classification.',
+    'medium', 'resolved', 'resolved', 'Review intake source-candidate stub for human classification.',
     'Human review is required.', jsonb_build_object('p0_stub', true), 'human'
   ) RETURNING review_queue_item_id INTO decision_review_item1;
   INSERT INTO kai.sources (source_id, organization_id, source_code, reviewed_source_type, created_by_type)
@@ -110,7 +110,7 @@ BEGIN
     priority, queue_status, review_status, summary, required_action, queue_metadata, created_by_type
   ) VALUES (
     org1, 'evidence_review', 'evidence_item', evidence1,
-    'normal', 'open', 'needs_gk_review', 'New evidence item requires GK review.',
+    'medium', 'open', 'needs_gk_review', 'New evidence item requires GK review.',
     'Review the evidence item''s lineage, sensitivity, support strength, and audience eligibility before use.',
     '{}'::jsonb, 'system'
   );
@@ -262,7 +262,7 @@ BEGIN
 
     BEGIN
       INSERT INTO kai.review_queue_items (organization_id, queue_type, target_object_type, target_object_id, queue_status, review_status, priority, summary, required_action, queue_metadata, created_by_type)
-      VALUES (org1, 'client_followup', 'client_followup_item', followup1, 'open', 'proposed', 'normal', 'Client clarification is required for an unresolved claim gap.', 'Confirm the business meaning of the unresolved field or measure.', '{}'::jsonb, 'system');
+      VALUES (org1, 'client_followup', 'client_followup_item', followup1, 'open', 'proposed', 'medium', 'Client clarification is required for an unresolved claim gap.', 'Confirm the business meaning of the unresolved field or measure.', '{}'::jsonb, 'system');
       INSERT INTO p2_04_failure_results VALUES ('queue_client_followup_queue_status_enforced', 'FAIL', 'a non-waiting_on_client queue_status was unexpectedly accepted for a client_followup row');
     EXCEPTION WHEN check_violation THEN
       INSERT INTO p2_04_failure_results VALUES ('queue_client_followup_queue_status_enforced', 'PASS', 'safe check-violation failure');
@@ -270,7 +270,7 @@ BEGIN
 
     BEGIN
       INSERT INTO kai.review_queue_items (organization_id, queue_type, target_object_type, target_object_id, queue_status, review_status, priority, summary, required_action, assigned_to, queue_metadata, created_by_type)
-      VALUES (org1, 'client_followup', 'client_followup_item', followup1, 'waiting_on_client', 'proposed', 'normal', 'Client clarification is required for an unresolved claim gap.', 'Confirm the business meaning of the unresolved field or measure.', '90000000-0000-4000-8000-000000000001', '{}'::jsonb, 'system');
+      VALUES (org1, 'client_followup', 'client_followup_item', followup1, 'waiting_on_client', 'proposed', 'medium', 'Client clarification is required for an unresolved claim gap.', 'Confirm the business meaning of the unresolved field or measure.', '90000000-0000-4000-8000-000000000001', '{}'::jsonb, 'system');
       INSERT INTO p2_04_failure_results VALUES ('queue_client_followup_assigned_to_null_enforced', 'FAIL', 'a non-null assigned_to was unexpectedly accepted for a client_followup row');
     EXCEPTION WHEN check_violation THEN
       INSERT INTO p2_04_failure_results VALUES ('queue_client_followup_assigned_to_null_enforced', 'PASS', 'safe check-violation failure');
@@ -278,17 +278,17 @@ BEGIN
 
     BEGIN
       INSERT INTO kai.review_queue_items (organization_id, queue_type, target_object_type, target_object_id, queue_status, review_status, priority, summary, required_action, queue_metadata, created_by_type)
-      VALUES (org1, 'client_followup', 'client_followup_item', followup1, 'waiting_on_client', 'proposed', 'normal', 'Client clarification is required for an unresolved claim gap.', 'A conflict was detected between two sources.', '{}'::jsonb, 'system');
+      VALUES (org1, 'client_followup', 'client_followup_item', followup1, 'waiting_on_client', 'proposed', 'medium', 'Client clarification is required for an unresolved claim gap.', 'A conflict was detected between two sources.', '{}'::jsonb, 'system');
       INSERT INTO p2_04_failure_results VALUES ('queue_client_followup_required_action_vocabulary_enforced', 'FAIL', 'an unsupported required_action was unexpectedly accepted for a client_followup row');
     EXCEPTION WHEN check_violation THEN
       INSERT INTO p2_04_failure_results VALUES ('queue_client_followup_required_action_vocabulary_enforced', 'PASS', 'safe check-violation failure');
     END;
 
     INSERT INTO kai.review_queue_items (organization_id, queue_type, target_object_type, target_object_id, queue_status, review_status, priority, summary, required_action, queue_metadata, created_by_type)
-    VALUES (org1, 'client_followup', 'client_followup_item', followup1, 'waiting_on_client', 'proposed', 'normal', 'Client clarification is required for an unresolved claim gap.', 'Confirm the business meaning of the unresolved field or measure.', '{}'::jsonb, 'system');
+    VALUES (org1, 'client_followup', 'client_followup_item', followup1, 'waiting_on_client', 'proposed', 'medium', 'Client clarification is required for an unresolved claim gap.', 'Confirm the business meaning of the unresolved field or measure.', '{}'::jsonb, 'system');
     BEGIN
       INSERT INTO kai.review_queue_items (organization_id, queue_type, target_object_type, target_object_id, queue_status, review_status, priority, summary, required_action, queue_metadata, created_by_type)
-      VALUES (org1, 'client_followup', 'client_followup_item', followup1, 'waiting_on_client', 'proposed', 'normal', 'Client clarification is required for an unresolved claim gap.', 'Confirm the business meaning of the unresolved field or measure.', '{}'::jsonb, 'system');
+      VALUES (org1, 'client_followup', 'client_followup_item', followup1, 'waiting_on_client', 'proposed', 'medium', 'Client clarification is required for an unresolved claim gap.', 'Confirm the business meaning of the unresolved field or measure.', '{}'::jsonb, 'system');
       INSERT INTO p2_04_failure_results VALUES ('queue_client_followup_identity_unique_enforced', 'FAIL', 'duplicate client_followup queue item unexpectedly accepted');
     EXCEPTION WHEN unique_violation THEN
       INSERT INTO p2_04_failure_results VALUES ('queue_client_followup_identity_unique_enforced', 'PASS', 'safe unique-violation failure via ux_review_queue_items_p2_04_client_followup_identity');

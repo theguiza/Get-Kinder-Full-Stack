@@ -134,9 +134,17 @@ export function validateActorCanPerformOperation(actorContext, operation, organi
   }
 
   const allowedRoles = options.allowedRoles || OPERATION_ROLES[operation] || OPERATION_ROLES.read_intake;
+  const hasGlobalCapabilityRole = (actorContext.kaiRoles || []).some((role) => allowedRoles.has(role));
+  // globalRolesOnly: caller (e.g. Review Cockpit) requires a global GK capability
+  // role in addition to the active organization membership already verified above;
+  // an org-scoped role_name matching allowedRoles is tenant scope only and must not
+  // substitute for the global role.
   const hasAllowedRole = P0_MUTATING_OPERATIONS.has(operation)
     ? true
-    : memberships.some((membership) => allowedRoles.has(membership.role_name));
+    : options.globalRolesOnly
+      ? hasGlobalCapabilityRole
+      : (Boolean(options.combineGlobalRoles) && hasGlobalCapabilityRole) ||
+        memberships.some((membership) => allowedRoles.has(membership.role_name));
   if (!hasAllowedRole) {
     return {
       ok: false,

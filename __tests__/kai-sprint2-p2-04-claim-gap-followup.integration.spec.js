@@ -191,7 +191,7 @@ async function runClaimGapFollowupIntegrationSuite() {
          organization_id, queue_type, target_object_type, target_object_id,
          priority, queue_status, review_status, summary, required_action, queue_metadata, created_by_type
        ) VALUES ($1::uuid, 'source_candidate_review', 'intake_source_candidate', $2::uuid,
-                 'normal', 'resolved', 'resolved', 'Review intake source-candidate stub for human classification.',
+                 'medium', 'resolved', 'resolved', 'Review intake source-candidate stub for human classification.',
                  'Human review is required.', '{"p0_stub":true}'::jsonb, 'human')
        RETURNING review_queue_item_id::text AS review_queue_item_id`,
       [organizationId, intakeSourceCandidateId],
@@ -240,7 +240,7 @@ async function runClaimGapFollowupIntegrationSuite() {
     const evidenceItemId = evidenceResult.rows[0].evidence_item_id;
     await withClient((client) => client.query(
       `INSERT INTO kai.review_queue_items (organization_id, queue_type, target_object_type, target_object_id, priority, queue_status, review_status, summary, required_action, queue_metadata, created_by_type)
-       VALUES ($1::uuid, 'evidence_review', 'evidence_item', $2::uuid, 'normal', 'open', 'needs_gk_review', 'New evidence item requires GK review.',
+       VALUES ($1::uuid, 'evidence_review', 'evidence_item', $2::uuid, 'medium', 'open', 'needs_gk_review', 'New evidence item requires GK review.',
                'Review the evidence item''s lineage, sensitivity, support strength, and audience eligibility before use.', '{}'::jsonb, 'system')`,
       [organizationId, evidenceItemId],
     ));
@@ -333,7 +333,7 @@ async function runClaimGapFollowupIntegrationSuite() {
       assert.ok(followup, "client_followup queue target must be the follow-up ID");
       assert.equal(queueItem.queue_status, "waiting_on_client");
       assert.equal(queueItem.review_status, "proposed");
-      assert.equal(queueItem.priority, "normal");
+      assert.equal(queueItem.priority, "medium");
       assert.equal(queueItem.assigned_to, null);
       assert.equal(queueItem.due_at, null);
     }

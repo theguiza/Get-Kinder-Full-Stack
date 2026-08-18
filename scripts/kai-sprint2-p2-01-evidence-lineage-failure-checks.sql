@@ -78,7 +78,7 @@ BEGIN
     priority, queue_status, review_status, summary, required_action, queue_metadata, created_by_type
   ) VALUES (
     org1, 'source_candidate_review', 'intake_source_candidate', candidate1,
-    'normal', 'resolved', 'resolved', 'Review intake source-candidate stub for human classification.',
+    'medium', 'resolved', 'resolved', 'Review intake source-candidate stub for human classification.',
     'Human review is required.', jsonb_build_object('p0_stub', true), 'human'
   ) RETURNING review_queue_item_id INTO decision_review_item1;
   INSERT INTO kai.sources (source_id, organization_id, source_code, reviewed_source_type, created_by_type)
@@ -301,7 +301,7 @@ BEGIN
     priority, queue_status, review_status, summary, required_action, queue_metadata, created_by_type
   ) VALUES (
     org1, 'evidence_review', 'evidence_item', evidence1,
-    'normal', 'open', 'needs_gk_review', 'New evidence item requires GK review.',
+    'medium', 'open', 'needs_gk_review', 'New evidence item requires GK review.',
     'Review the evidence item''s lineage, sensitivity, support strength, and audience eligibility before use.',
     '{}'::jsonb, 'system'
   );
@@ -311,7 +311,7 @@ BEGIN
       priority, queue_status, review_status, summary, required_action, queue_metadata, created_by_type
     ) VALUES (
       org1, 'evidence_review', 'evidence_item', evidence1,
-      'normal', 'open', 'needs_gk_review', 'New evidence item requires GK review.',
+      'medium', 'open', 'needs_gk_review', 'New evidence item requires GK review.',
       'Review the evidence item''s lineage, sensitivity, support strength, and audience eligibility before use.',
       '{}'::jsonb, 'system'
     );
@@ -328,7 +328,7 @@ BEGIN
       priority, queue_status, review_status, summary, required_action, queue_metadata, created_by_type
     ) VALUES (
       org1, 'evidence_review', 'evidence_item', evidence1,
-      'normal', 'open', 'needs_gk_review', 'New evidence item requires GK review.', NULL, '{}'::jsonb, 'system'
+      'medium', 'open', 'needs_gk_review', 'New evidence item requires GK review.', NULL, '{}'::jsonb, 'system'
     );
     INSERT INTO p2_01_failure_results VALUES ('evidence_review_required_action_enforced', 'FAIL', 'a null required_action for an evidence_review queue item was unexpectedly accepted');
   EXCEPTION WHEN check_violation THEN
@@ -340,7 +340,7 @@ BEGIN
       priority, queue_status, review_status, summary, required_action, queue_metadata, created_by_type
     ) VALUES (
       org1, 'evidence_review', 'evidence_item', evidence1,
-      'normal', 'open', 'needs_gk_review', 'New evidence item requires GK review.', '   ', '{}'::jsonb, 'system'
+      'medium', 'open', 'needs_gk_review', 'New evidence item requires GK review.', '   ', '{}'::jsonb, 'system'
     );
     INSERT INTO p2_01_failure_results VALUES ('evidence_review_required_action_blank_rejected', 'FAIL', 'a blank required_action for an evidence_review queue item was unexpectedly accepted');
   EXCEPTION WHEN check_violation THEN

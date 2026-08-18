@@ -61,10 +61,10 @@ BEGIN
     VALUES (block1, org1, claim1, evidence1);
 
     INSERT INTO kai.review_queue_items (organization_id, queue_type, target_object_type, target_object_id, priority, queue_status, review_status, summary, required_action, queue_metadata, created_by_type)
-    VALUES (org1, 'generated_content_review', 'generated_content_draft', draft1, 'normal', 'resolved', 'resolved', 'Generated draft requires human review.', 'Review citations, audience eligibility, limitations, unsupported claims, and numeric or causal assertions before any use.', '{}'::jsonb, 'system');
+    VALUES (org1, 'generated_content_review', 'generated_content_draft', draft1, 'medium', 'resolved', 'resolved', 'Generated draft requires human review.', 'Review citations, audience eligibility, limitations, unsupported claims, and numeric or causal assertions before any use.', '{}'::jsonb, 'system');
 
     INSERT INTO kai.review_queue_items (organization_id, queue_type, target_object_type, target_object_id, priority, queue_status, review_status, summary, required_action, queue_metadata, created_by_type)
-    VALUES (org1, 'export_review', 'generated_content_draft', draft1, 'normal', 'resolved', 'resolved', 'Generated draft requires export review.', 'Review audience authority, current eligibility, citations, and the final export gate before any export.', '{}'::jsonb, 'system');
+    VALUES (org1, 'export_review', 'generated_content_draft', draft1, 'medium', 'resolved', 'resolved', 'Generated draft requires export review.', 'Review audience authority, current eligibility, citations, and the final export gate before any export.', '{}'::jsonb, 'system');
 
     INSERT INTO kai.limitation_snapshots (limitation_snapshot_id, organization_id, generated_content_draft_id, confirmed_by, confirmed_by_role, entries_fingerprint, created_by_type)
     VALUES (snapshot1, org1, draft1, org1, 'gk_reviewer', encode(digest('p3-17-smoke-seed-snapshot-' || audience, 'sha256'), 'hex'), 'human');

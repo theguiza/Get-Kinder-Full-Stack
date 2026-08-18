@@ -31,7 +31,7 @@ const REVIEW_QUEUE_RESULT_STATUS = Object.freeze({
 
 const SENSITIVITY_REVIEW_QUEUE_TYPE = "sensitivity_review";
 const SENSITIVITY_REVIEW_TARGET_OBJECT_TYPE = "intake_sensitivity_profile";
-const SENSITIVITY_REVIEW_PRIORITY = "normal";
+const SENSITIVITY_REVIEW_PRIORITY = "medium";
 const SENSITIVITY_REVIEW_QUEUE_STATUS = "open";
 const SENSITIVITY_REVIEW_SUMMARY = "Review intake sensitivity and allowed-use profile.";
 const SENSITIVITY_REVIEW_REQUIRED_ACTION =
@@ -171,7 +171,7 @@ async function insertSensitivityReviewQueueItemIfAbsent(tx, item) {
       item.queueType,
       item.targetObjectType,
       item.targetObjectId,
-      item.priority || "normal",
+      item.priority || "medium",
       item.queueStatus || "open",
       item.reviewStatus || "needs_gk_review",
       item.blockedReason || null,

@@ -117,6 +117,106 @@ test("authorization requires global GK write role even with active organization 
   assert.equal(result.blockers[0].blocking_reason, "missing_global_gk_write_role");
 });
 
+test("combineGlobalRoles: a global capability role plus active org membership of any role is allowed for a non-mutating operation", () => {
+  const result = validateActorCanPerformOperation(
+    {
+      actorType: "human",
+      actorUserId: "user-1",
+      kaiRoles: ["gk_reviewer"],
+      organizationMemberships: [{ organization_id: "org-1", role_name: "org_viewer", membership_status: "active" }],
+    },
+    "read_intake",
+    "org-1",
+    { allowedRoles: new Set(["gk_admin", "gk_operator", "gk_reviewer"]), combineGlobalRoles: true },
+  );
+
+  assert.equal(result.ok, true);
+});
+
+test("combineGlobalRoles: a global capability role without active membership in the requested organization is still denied", () => {
+  const result = validateActorCanPerformOperation(
+    {
+      actorType: "human",
+      actorUserId: "user-1",
+      kaiRoles: ["gk_admin"],
+      organizationMemberships: [],
+    },
+    "read_intake",
+    "org-1",
+    { allowedRoles: new Set(["gk_admin", "gk_operator", "gk_reviewer"]), combineGlobalRoles: true },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.blockers[0].blocking_reason, "missing_active_organization_membership");
+});
+
+test("combineGlobalRoles: client_admin without the required global capability is denied even with active membership", () => {
+  const result = validateActorCanPerformOperation(
+    {
+      actorType: "human",
+      actorUserId: "user-1",
+      kaiRoles: [],
+      organizationMemberships: [{ organization_id: "org-1", role_name: "client_admin", membership_status: "active" }],
+    },
+    "read_intake",
+    "org-1",
+    { allowedRoles: new Set(["gk_admin", "gk_operator", "gk_reviewer"]), combineGlobalRoles: true },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.blockers[0].blocking_reason, "role_not_allowed");
+});
+
+test("without combineGlobalRoles, a matching global role alone (no matching membership role_name) is still denied, preserving prior callers' behavior", () => {
+  const result = validateActorCanPerformOperation(
+    {
+      actorType: "human",
+      actorUserId: "user-1",
+      kaiRoles: ["gk_reviewer"],
+      organizationMemberships: [{ organization_id: "org-1", role_name: "org_viewer", membership_status: "active" }],
+    },
+    "read_intake",
+    "org-1",
+    { allowedRoles: new Set(["gk_admin", "gk_operator", "gk_reviewer"]) },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.blockers[0].blocking_reason, "role_not_allowed");
+});
+
+test("globalRolesOnly: an org-scoped role_name matching allowedRoles, with no corresponding global role, is denied (tenant scope must not substitute for the global capability)", () => {
+  const result = validateActorCanPerformOperation(
+    {
+      actorType: "human",
+      actorUserId: "user-1",
+      kaiRoles: [],
+      organizationMemberships: [{ organization_id: "org-1", role_name: "gk_operator", membership_status: "active" }],
+    },
+    "read_intake",
+    "org-1",
+    { allowedRoles: new Set(["gk_admin", "gk_operator", "gk_reviewer"]), globalRolesOnly: true },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.blockers[0].blocking_reason, "role_not_allowed");
+});
+
+test("globalRolesOnly: a global gk_operator role plus active org membership whose scoped role is client_admin (a non-GK role) is allowed", () => {
+  const result = validateActorCanPerformOperation(
+    {
+      actorType: "human",
+      actorUserId: "user-1",
+      kaiRoles: ["gk_operator"],
+      organizationMemberships: [{ organization_id: "org-1", role_name: "client_admin", membership_status: "active" }],
+    },
+    "read_intake",
+    "org-1",
+    { allowedRoles: new Set(["gk_admin", "gk_operator", "gk_reviewer"]), globalRolesOnly: true },
+  );
+
+  assert.equal(result.ok, true);
+});
+
 test("assistant/system actors cannot promote, approve, finalize, export, access raw URLs, or convert parser output", () => {
   for (const operation of ["promote_source", "approve", "finalize", "export", "access_raw_file_url", "convert_parser_output_to_claims"]) {
     const result = validateActorCanPerformOperation(

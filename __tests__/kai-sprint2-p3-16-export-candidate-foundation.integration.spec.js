@@ -157,13 +157,13 @@ async function runP316IntegrationSuite() {
 
     const genQueueRows = await query(
       `INSERT INTO kai.review_queue_items (organization_id, queue_type, target_object_type, target_object_id, priority, queue_status, review_status, summary, required_action, queue_metadata, created_by_type, created_at, updated_at)
-       VALUES ($1::uuid,'generated_content_review','generated_content_draft',$2::uuid,'normal',$3,$4,'Generated draft requires human review.','Review citations, audience eligibility, limitations, unsupported claims, and numeric or causal assertions before any use.','{}'::jsonb,'system',$5::timestamptz,$5::timestamptz)
+       VALUES ($1::uuid,'generated_content_review','generated_content_draft',$2::uuid,'medium',$3,$4,'Generated draft requires human review.','Review citations, audience eligibility, limitations, unsupported claims, and numeric or causal assertions before any use.','{}'::jsonb,'system',$5::timestamptz,$5::timestamptz)
        RETURNING review_queue_item_id::text AS review_queue_item_id`,
       [ORG, draftId, resolveGeneratedContentReview ? "resolved" : "open", resolveGeneratedContentReview ? "resolved" : "needs_gk_review", NOW],
     );
     await query(
       `INSERT INTO kai.review_queue_items (organization_id, queue_type, target_object_type, target_object_id, priority, queue_status, review_status, summary, required_action, queue_metadata, created_by_type, created_at, updated_at)
-       VALUES ($1::uuid,'export_review','generated_content_draft',$2::uuid,'normal',$3,$4,'Generated draft requires export review.','Review audience authority, current eligibility, citations, and the final export gate before any export.','{}'::jsonb,'system',$5::timestamptz,$5::timestamptz)`,
+       VALUES ($1::uuid,'export_review','generated_content_draft',$2::uuid,'medium',$3,$4,'Generated draft requires export review.','Review audience authority, current eligibility, citations, and the final export gate before any export.','{}'::jsonb,'system',$5::timestamptz,$5::timestamptz)`,
       [ORG, draftId, resolveExportReview ? "resolved" : "open", resolveExportReview ? "resolved" : "needs_gk_review", NOW],
     );
 
