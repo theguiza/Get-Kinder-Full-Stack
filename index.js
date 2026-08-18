@@ -2934,7 +2934,6 @@ app.get("/gk-admin/kai-review-cockpit", ensureAuthenticated, ensureAdmin, (req, 
     assetTag,
     user: req.user,
     csrfToken: req.session.csrfToken,
-    organizationId: typeof req.query.organizationId === "string" ? req.query.organizationId : "",
   });
 });
 

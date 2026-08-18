@@ -120,13 +120,13 @@ window.renderAdmin = (selector = "#admin-root", props = {}) => {
 // KAI P1-09 internal review cockpit. Internal/GK-only: the component itself renders
 // nothing unless the KAI_SPRINT2_ENABLED-gated internal API answers its status
 // probe, so this entry point exposes no client-facing surface.
-window.renderKaiReviewCockpit = (selector = "#kai-review-cockpit-root", props = {}) => {
+window.renderKaiReviewCockpit = (selector = "#kai-review-cockpit-root") => {
   const el = typeof selector === "string" ? document.querySelector(selector) : selector;
   if (!el) return;
   const root = getOrCreateRoot(el);
   root.render(
     <React.StrictMode>
-      <KaiReviewCockpit {...props} />
+      <KaiReviewCockpit />
     </React.StrictMode>
   );
 };

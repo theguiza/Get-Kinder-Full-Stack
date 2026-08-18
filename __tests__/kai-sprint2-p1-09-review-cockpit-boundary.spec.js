@@ -25,11 +25,17 @@ const SERVICE_PATH = "Backend/kai/services/kaiReviewCockpitService.js";
 const READ_MODEL_PATH = "Backend/kai/db/kaiReviewCockpitReadModels.js";
 const ROUTE_PATH = "Backend/kai/routes/sprint2IntakeApi.js";
 const UI_PATH = "frontend/kaiReviewCockpit.jsx";
+const ENTRY_PATH = "frontend/entry.jsx";
+const HOST_PATH = "index.js";
+const TEMPLATE_PATH = "views/kai-review-cockpit.ejs";
 
 const serviceSource = readFileSync(new URL(`../${SERVICE_PATH}`, import.meta.url), "utf8");
 const readModelSource = readFileSync(new URL(`../${READ_MODEL_PATH}`, import.meta.url), "utf8");
 const routeSource = readFileSync(new URL(`../${ROUTE_PATH}`, import.meta.url), "utf8");
 const uiSource = readFileSync(new URL(`../${UI_PATH}`, import.meta.url), "utf8");
+const entrySource = readFileSync(new URL(`../${ENTRY_PATH}`, import.meta.url), "utf8");
+const hostSource = readFileSync(new URL(`../${HOST_PATH}`, import.meta.url), "utf8");
+const templateSource = readFileSync(new URL(`../${TEMPLATE_PATH}`, import.meta.url), "utf8");
 
 const ORG = "a5d17c5a-c55f-43af-9b21-fe63aafe733f";
 const OTHER_ORG = "b5d17c5a-c55f-43af-9b21-fe63aafe733f";
@@ -825,4 +831,58 @@ test("P1-09 UI hides the decision controls when the promotion flag is off and ne
   assert.match(uiSource, /if \(!detail\?\.decision_controls_enabled\) \{\n\s+return <p className="kai-cockpit-note">Source-decision controls are disabled\.<\/p>;/);
   assert.match(uiSource, /if \(featureEnabled !== true\) return null;/);
   assert.doesNotMatch(uiSource, /\bpg\b|\bpool\b|connectionString|process\.env/);
+});
+
+test("P1-09 host bootstrap no longer treats organizationId query text as cockpit tenant authority", () => {
+  const hostRoute = hostSource.match(/app\.get\("\/gk-admin\/kai-review-cockpit"[\s\S]*?\n\}\);/)?.[0];
+  assert.ok(hostRoute);
+  assert.doesNotMatch(hostRoute, /req\.query\.organizationId/);
+  assert.doesNotMatch(hostRoute, /organizationId:/);
+  assert.doesNotMatch(templateSource, /kai-review-cockpit-props|organizationId|JSON\.parse\(document\.getElementById/);
+  assert.match(templateSource, /window\.renderKaiReviewCockpit\("#kai-review-cockpit-root"\);/);
+  assert.match(entrySource, /window\.renderKaiReviewCockpit = \(selector = "#kai-review-cockpit-root"\) =>/);
+  assert.match(entrySource, /<KaiReviewCockpit \/>/);
+  assert.doesNotMatch(entrySource, /renderKaiReviewCockpit[\s\S]*<KaiReviewCockpit \{\.\.\.props\}/);
+});
+
+test("P1-09 UI bootstraps cockpit organization context only from authorized organizations", () => {
+  assert.match(uiSource, /import \{ organizationsPath \} from "\.\/kaiWebIntakeLogic\.js";/);
+  assert.match(uiSource, /getJson\(organizationsPath\(\)\)/);
+  assert.match(uiSource, /setOrganization\(items\.length === 1 \? items\[0\]\.organization_id : ""\)/);
+  assert.match(uiSource, /organizations\.some\(\(item\) => item\.organization_id === nextOrganizationId\)/);
+  assert.match(uiSource, /value=\{organization\}[\s\S]{0,160}onChange=\{handleOrganizationChange\}/);
+  assert.doesNotMatch(uiSource, /export default function KaiReviewCockpit\(\{ organizationId/);
+  assert.doesNotMatch(uiSource, /useState\(organizationId\)/);
+  assert.doesNotMatch(uiSource, /<input[^>]*value=\{organization\}/);
+  assert.doesNotMatch(uiSource, /setOrganization\(event\.target\.value\.trim\(\)\)/);
+  assert.doesNotMatch(uiSource, /localStorage|sessionStorage|window\.location|URLSearchParams\(window\.location/);
+});
+
+test("P1-09 UI blocks queue reads until organization bootstrap establishes an authorized tenant", () => {
+  assert.match(uiSource, /const organizationUnavailable =[\s\S]*organizationsLoaded && organizations\.length === 0/);
+  assert.match(uiSource, /const organizationSelectionRequired =[\s\S]*organizations\.length > 1 && !organization/);
+  assert.match(uiSource, /const queueDisabled =[\s\S]*loadingOrganizations[\s\S]*organizationBootstrapError[\s\S]*organizationUnavailable[\s\S]*organizationSelectionRequired[\s\S]*!organization/);
+  assert.match(uiSource, /No authorized KAI organization is available for this account\./);
+  assert.match(uiSource, /Loading authorized KAI organizations\.\.\./);
+  assert.match(uiSource, /Unable to load authorized KAI organizations\./);
+});
+
+test("P1-09 UI keeps candidate and organization identifiers separated during queue/detail flows", () => {
+  assert.match(uiSource, /new URLSearchParams\(\{ organization_id: organization \}\)/);
+  assert.match(uiSource, /\$\{COCKPIT_PATH\}\/source-candidates\/\$\{item\.target_object_id\}/);
+  assert.match(uiSource, /\$\{path\}\?organization_id=\$\{encodeURIComponent\(organization\)\}/);
+  assert.match(uiSource, /const candidateId = detail\.source_candidate\.intake_source_candidate_id;/);
+  assert.match(uiSource, /\$\{COCKPIT_PATH\}\/source-candidates\/\$\{candidateId\}\/decision\?organization_id=\$\{encodeURIComponent\(organization\)\}/);
+  assert.match(uiSource, /\$\{COCKPIT_PATH\}\/source-candidates\/\$\{candidateId\}\?organization_id=\$\{encodeURIComponent\(organization\)\}/);
+  assert.doesNotMatch(uiSource, /setOrganization\(item\.target_object_id\)/);
+  assert.doesNotMatch(uiSource, /setOrganization\(candidateId\)/);
+  assert.doesNotMatch(uiSource, /setOrganization\(detail\.source_candidate\.intake_source_candidate_id\)/);
+});
+
+test("P1-09 UI clears tenant-scoped queue and detail state when organization context changes", () => {
+  assert.match(uiSource, /function clearTenantScopedState\(\) \{[\s\S]*setQueue\(null\);[\s\S]*setDetail\(null\);[\s\S]*setDetailKind\(null\);[\s\S]*setSelectedItemId\(null\);[\s\S]*setDecisionResult\(""\);[\s\S]*\}/);
+  assert.match(uiSource, /setOrganization\(nextOrganizationId\);[\s\S]*clearTenantScopedState\(\);/);
+  assert.match(uiSource, /const activeOrganizationRef = useRef\(""\);/);
+  assert.match(uiSource, /activeOrganizationRef\.current = organization;/);
+  assert.match(uiSource, /if \(activeOrganizationRef\.current !== organization\) return;/);
 });
