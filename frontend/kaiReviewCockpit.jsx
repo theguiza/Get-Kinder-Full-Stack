@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { organizationsPath } from "./kaiWebIntakeLogic.js";
 
 /**
  * KAI P1-09 internal review cockpit (GK-internal only).
@@ -42,6 +43,8 @@ const DECISION_OUTCOME_OPTIONS = [
   { value: "rejected", label: "Reject" },
   { value: "promoted", label: "Promote" },
 ];
+
+const ORGANIZATION_BOOTSTRAP_ERROR = "Unable to load authorized KAI organizations.";
 
 async function readJson(response) {
   try {
@@ -268,9 +271,14 @@ function SourceCandidateDetail({ detail, onSubmitDecision, busy, decisionResult 
   );
 }
 
-export default function KaiReviewCockpit({ organizationId = "" }) {
+export default function KaiReviewCockpit() {
   const [featureEnabled, setFeatureEnabled] = useState(null);
-  const [organization, setOrganization] = useState(organizationId);
+  const [organizations, setOrganizations] = useState([]);
+  const [organization, setOrganization] = useState("");
+  const activeOrganizationRef = useRef("");
+  const [loadingOrganizations, setLoadingOrganizations] = useState(true);
+  const [organizationsLoaded, setOrganizationsLoaded] = useState(false);
+  const [organizationBootstrapError, setOrganizationBootstrapError] = useState("");
   const [queueType, setQueueType] = useState("");
   const [queueStatus, setQueueStatus] = useState("");
   const [queue, setQueue] = useState(null);
@@ -294,9 +302,59 @@ export default function KaiReviewCockpit({ organizationId = "" }) {
     return () => { cancelled = true; };
   }, []);
 
+  useEffect(() => {
+    activeOrganizationRef.current = organization;
+  }, [organization]);
+
+  function clearTenantScopedState() {
+    setQueue(null);
+    setDetail(null);
+    setDetailKind(null);
+    setSelectedItemId(null);
+    setDecisionResult("");
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoadingOrganizations(true);
+      setOrganizationBootstrapError("");
+      let result;
+      try {
+        result = await getJson(organizationsPath());
+      } catch {
+        if (cancelled) return;
+        setLoadingOrganizations(false);
+        setOrganizationsLoaded(true);
+        setOrganizations([]);
+        setOrganization("");
+        clearTenantScopedState();
+        setOrganizationBootstrapError(`${ORGANIZATION_BOOTSTRAP_ERROR} Request failed (network error).`);
+        return;
+      }
+      if (cancelled) return;
+      setLoadingOrganizations(false);
+      setOrganizationsLoaded(true);
+      if (result.statusCode !== 200 || !result.body?.ok) {
+        setOrganizations([]);
+        setOrganization("");
+        clearTenantScopedState();
+        setOrganizationBootstrapError(`${ORGANIZATION_BOOTSTRAP_ERROR} ${errorText(result)}`);
+        return;
+      }
+
+      const items = Array.isArray(result.body.data?.items) ? result.body.data.items : [];
+      setOrganizations(items);
+      clearTenantScopedState();
+      setMessage("");
+      setOrganization(items.length === 1 ? items[0].organization_id : "");
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   const loadQueue = useCallback(async () => {
     if (!organization) {
-      setMessage("An organization id is required.");
+      setMessage("Select an authorized KAI organization first.");
       return;
     }
     setBusy(true);
@@ -305,6 +363,7 @@ export default function KaiReviewCockpit({ organizationId = "" }) {
     if (queueType) params.set("queue_type", queueType);
     if (queueStatus) params.set("queue_status", queueStatus);
     const result = await getJson(`${COCKPIT_PATH}/queue?${params.toString()}`);
+    if (activeOrganizationRef.current !== organization) return;
     setBusy(false);
     if (result.statusCode !== 200 || !result.body?.ok) {
       setQueue(null);
@@ -315,6 +374,7 @@ export default function KaiReviewCockpit({ organizationId = "" }) {
   }, [organization, queueType, queueStatus]);
 
   const openDetail = useCallback(async (item) => {
+    if (!organization) return;
     setDecisionResult("");
     setSelectedItemId(item.review_queue_item_id);
     setBusy(true);
@@ -322,6 +382,7 @@ export default function KaiReviewCockpit({ organizationId = "" }) {
       ? `${COCKPIT_PATH}/source-candidates/${item.target_object_id}`
       : `${COCKPIT_PATH}/file-profiles/${item.target_object_id}`;
     const result = await getJson(`${path}?organization_id=${encodeURIComponent(organization)}`);
+    if (activeOrganizationRef.current !== organization) return;
     setBusy(false);
     if (result.statusCode !== 200 || !result.body?.ok) {
       setDetail(null);
@@ -335,13 +396,14 @@ export default function KaiReviewCockpit({ organizationId = "" }) {
   }, [organization]);
 
   const submitDecision = useCallback(async (payload) => {
-    if (!detail?.source_candidate) return;
+    if (!organization || !detail?.source_candidate) return;
     setBusy(true);
     const candidateId = detail.source_candidate.intake_source_candidate_id;
     const result = await postJson(
       `${COCKPIT_PATH}/source-candidates/${candidateId}/decision?organization_id=${encodeURIComponent(organization)}`,
       payload,
     );
+    if (activeOrganizationRef.current !== organization) return;
     setBusy(false);
     if (result.statusCode !== 200 || !result.body?.ok) {
       // A stale/terminal conflict is displayed as its own typed result and is never
@@ -356,18 +418,59 @@ export default function KaiReviewCockpit({ organizationId = "" }) {
     const refreshed = await getJson(
       `${COCKPIT_PATH}/source-candidates/${candidateId}?organization_id=${encodeURIComponent(organization)}`,
     );
+    if (activeOrganizationRef.current !== organization) return;
     if (refreshed.statusCode === 200 && refreshed.body?.ok) setDetail(refreshed.body.data);
   }, [detail, organization]);
 
+  const handleOrganizationChange = useCallback((event) => {
+    const nextOrganizationId = event.target.value;
+    const authorized = organizations.some((item) => item.organization_id === nextOrganizationId);
+    if (!authorized && nextOrganizationId !== "") return;
+    setOrganization(nextOrganizationId);
+    clearTenantScopedState();
+    setMessage("");
+  }, [organizations]);
+
   if (featureEnabled !== true) return null;
+
+  const organizationUnavailable =
+    organizationsLoaded && organizations.length === 0 && !organizationBootstrapError;
+  const organizationSelectionRequired =
+    organizations.length > 1 && !organization;
+  const queueDisabled =
+    busy ||
+    loadingOrganizations ||
+    Boolean(organizationBootstrapError) ||
+    organizationUnavailable ||
+    organizationSelectionRequired ||
+    !organization;
 
   return (
     <div className="kai-cockpit">
       <h2>KAI internal review cockpit</h2>
       <div className="kai-cockpit-controls">
         <label>
-          Organization id
-          <input value={organization} onChange={(event) => setOrganization(event.target.value.trim())} />
+          Organization
+          {loadingOrganizations ? (
+            <span className="kai-cockpit-note">Loading authorized KAI organizations...</span>
+          ) : organizationBootstrapError ? (
+            <span className="kai-cockpit-note">{organizationBootstrapError}</span>
+          ) : organizationUnavailable ? (
+            <span className="kai-cockpit-note">No authorized KAI organization is available for this account.</span>
+          ) : (
+            <select
+              value={organization}
+              onChange={handleOrganizationChange}
+              disabled={organizations.length <= 1}
+            >
+              {organizations.length > 1 ? <option value="">Select an organization</option> : null}
+              {organizations.map((item) => (
+                <option key={item.organization_id} value={item.organization_id}>
+                  {item.organization_id}
+                </option>
+              ))}
+            </select>
+          )}
         </label>
         <label>
           Queue type
@@ -385,7 +488,7 @@ export default function KaiReviewCockpit({ organizationId = "" }) {
             ))}
           </select>
         </label>
-        <button type="button" onClick={loadQueue} disabled={busy}>Load queue</button>
+        <button type="button" onClick={loadQueue} disabled={queueDisabled}>Load queue</button>
       </div>
 
       {message ? <p className="kai-cockpit-note">{message}</p> : null}
