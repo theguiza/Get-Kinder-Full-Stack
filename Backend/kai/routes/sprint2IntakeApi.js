@@ -823,7 +823,7 @@ router.post("/admin/review-queue/:reviewQueueItemId/status", async (req, res) =>
  * authorized service function, which performs its own feature gating, actor/role/
  * tenant authorization, tenant-scoped reads, and response DTO allowlisting.
  *
- * All four are already behind this router's `requireKaiSprint2Enabled` gate (and
+ * All routes are already behind this router's `requireKaiSprint2Enabled` gate (and
  * the mount-level gate in index.js), so KAI_SPRINT2_ENABLED gates every one of
  * them. The decision route additionally requires KAI_SOURCE_PROMOTION_ENABLED,
  * enforced inside the service, which returns the canonical feature_disabled result
@@ -855,6 +855,19 @@ router.get("/admin/review-cockpit/file-profiles/:fileProfileId", async (req, res
       ...requestContext(req, "/api/kai/sprint2/intake/admin/review-cockpit/file-profiles/:fileProfileId"),
       organizationId: identifiers.organizationId,
       fileProfileId: identifiers.objectId,
+    });
+  });
+});
+
+router.get("/admin/review-cockpit/sensitivity-profiles/:intakeSensitivityProfileId", async (req, res) => {
+  const identifiers = reviewCockpitIdentifiers(req, "intakeSensitivityProfileId");
+  if (!identifiers) return sendKaiError(res, "invalid_request");
+  return invokeService(res, async () => {
+    const service = await getReviewCockpitService();
+    return service.getReviewCockpitSensitivityProfileDetail({
+      ...requestContext(req, "/api/kai/sprint2/intake/admin/review-cockpit/sensitivity-profiles/:intakeSensitivityProfileId"),
+      organizationId: identifiers.organizationId,
+      intakeSensitivityProfileId: identifiers.objectId,
     });
   });
 });

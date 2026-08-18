@@ -45,6 +45,29 @@ const DECISION_OUTCOME_OPTIONS = [
 ];
 
 const ORGANIZATION_BOOTSTRAP_ERROR = "Unable to load authorized KAI organizations.";
+const UNSUPPORTED_DETAIL_TARGET_MESSAGE = "This review queue target is not supported by the cockpit.";
+
+function detailRouteForQueueItem(item) {
+  if (
+    item?.queue_type === "source_candidate_review"
+    && item?.target_object_type === "intake_source_candidate"
+  ) {
+    return {
+      path: `${COCKPIT_PATH}/source-candidates/${item.target_object_id}`,
+      kind: "source_candidate",
+    };
+  }
+  if (
+    item?.queue_type === "sensitivity_review"
+    && item?.target_object_type === "intake_sensitivity_profile"
+  ) {
+    return {
+      path: `${COCKPIT_PATH}/sensitivity-profiles/${item.target_object_id}`,
+      kind: "file_profile",
+    };
+  }
+  return null;
+}
 
 async function readJson(response) {
   try {
@@ -377,11 +400,15 @@ export default function KaiReviewCockpit() {
     if (!organization) return;
     setDecisionResult("");
     setSelectedItemId(item.review_queue_item_id);
+    const route = detailRouteForQueueItem(item);
+    if (!route) {
+      setDetail(null);
+      setDetailKind(null);
+      setMessage(UNSUPPORTED_DETAIL_TARGET_MESSAGE);
+      return;
+    }
     setBusy(true);
-    const path = item.queue_type === "source_candidate_review"
-      ? `${COCKPIT_PATH}/source-candidates/${item.target_object_id}`
-      : `${COCKPIT_PATH}/file-profiles/${item.target_object_id}`;
-    const result = await getJson(`${path}?organization_id=${encodeURIComponent(organization)}`);
+    const result = await getJson(`${route.path}?organization_id=${encodeURIComponent(organization)}`);
     if (activeOrganizationRef.current !== organization) return;
     setBusy(false);
     if (result.statusCode !== 200 || !result.body?.ok) {
@@ -392,7 +419,7 @@ export default function KaiReviewCockpit() {
     }
     setMessage("");
     setDetail(result.body.data);
-    setDetailKind(item.queue_type === "source_candidate_review" ? "source_candidate" : "file_profile");
+    setDetailKind(route.kind);
   }, [organization]);
 
   const submitDecision = useCallback(async (payload) => {

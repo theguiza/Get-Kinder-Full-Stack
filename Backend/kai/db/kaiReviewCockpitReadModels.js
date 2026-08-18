@@ -118,7 +118,33 @@ export async function getReviewCockpitFileProfileRecord(organizationId, fileProf
   );
   const fileProfile = fileProfileResult.rows[0] || null;
   if (!fileProfile) return null;
+  return getReviewCockpitFileProfileRecordForResolvedProfile(organizationId, fileProfile, db);
+}
 
+export async function getReviewCockpitSensitivityProfileRecord(
+  organizationId,
+  intakeSensitivityProfileId,
+  db = pool,
+) {
+  const fileProfileResult = await db.query(
+    `SELECT p.file_profile_id, p.organization_id, p.intake_file_id, p.parser_name,
+            p.parser_version, p.checksum, p.profile_canonical_sha256, p.created_at
+       FROM kai.intake_sensitivity_profiles s
+       JOIN kai.intake_file_profiles p
+         ON p.organization_id = s.organization_id
+        AND p.file_profile_id = s.file_profile_id
+      WHERE s.organization_id = $1
+        AND s.intake_sensitivity_profile_id = $2
+      LIMIT 1`,
+    [organizationId, intakeSensitivityProfileId],
+  );
+  const fileProfile = fileProfileResult.rows[0] || null;
+  if (!fileProfile) return null;
+  return getReviewCockpitFileProfileRecordForResolvedProfile(organizationId, fileProfile, db);
+}
+
+async function getReviewCockpitFileProfileRecordForResolvedProfile(organizationId, fileProfile, db) {
+  const resolvedFileProfileId = fileProfile.file_profile_id;
   const dataDictionaryResult = await db.query(
     `SELECT d.data_dictionary_id, d.organization_id, d.intake_file_id, d.file_profile_id,
             d.dictionary_status, d.profile_canonical_sha256, d.created_at,
@@ -130,7 +156,7 @@ export async function getReviewCockpitFileProfileRecord(organizationId, fileProf
       WHERE d.organization_id = $1
         AND d.file_profile_id = $2
       LIMIT 1`,
-    [organizationId, fileProfileId],
+    [organizationId, resolvedFileProfileId],
   );
   const dataDictionary = dataDictionaryResult.rows[0] || null;
 
@@ -159,7 +185,7 @@ export async function getReviewCockpitFileProfileRecord(organizationId, fileProf
       WHERE organization_id = $1
         AND file_profile_id = $2
       LIMIT 1`,
-    [organizationId, fileProfileId],
+    [organizationId, resolvedFileProfileId],
   );
 
   return {
