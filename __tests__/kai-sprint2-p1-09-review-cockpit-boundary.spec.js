@@ -4,12 +4,15 @@ import { readFileSync } from "node:fs";
 
 import {
   getReviewCockpitFileProfileDetail,
+  getReviewCockpitSensitivityProfileDetail,
   getReviewCockpitSourceCandidateDetail,
   listReviewCockpitQueue,
   submitSourceCandidateDecision,
   __reviewCockpitServiceContract,
 } from "../Backend/kai/services/kaiReviewCockpitService.js";
 import {
+  getReviewCockpitFileProfileRecord,
+  getReviewCockpitSensitivityProfileRecord,
   listReviewCockpitQueueItems,
   getReviewCockpitSourceCandidateRecord,
 } from "../Backend/kai/db/kaiReviewCockpitReadModels.js";
@@ -218,6 +221,9 @@ function readDependencies(overrides = {}) {
     async getReviewCockpitFileProfileRecord() {
       return fileProfileRecord();
     },
+    async getReviewCockpitSensitivityProfileRecord() {
+      return fileProfileRecord();
+    },
     async getReviewCockpitSourceCandidateRecord() {
       return sourceCandidateRecord();
     },
@@ -271,6 +277,61 @@ test("P1-09 read model: cockpit queue list is organization-scoped, canonically f
   assert.match(secondPage.sql, /created_at < \$4/);
   assert.match(secondPage.sql, /created_at = \$4 AND review_queue_item_id < \$5/);
   assert.deepEqual(secondPage.params, [ORG, "source_candidate_review", "open", CREATED_AT, QUEUE_ITEM, 3]);
+});
+
+test("P1-09 read model: file-profile detail remains strict to file_profile_id", async () => {
+  let fileProfileLookup = null;
+  await getReviewCockpitFileProfileRecord(
+    ORG,
+    FILE_PROFILE,
+    {
+      async query(sql, params) {
+        fileProfileLookup = fileProfileLookup || { sql, params };
+        return { rows: [] };
+      },
+    },
+  );
+
+  assert.match(fileProfileLookup.sql, /FROM kai\.intake_file_profiles/);
+  assert.match(fileProfileLookup.sql, /file_profile_id = \$2/);
+  assert.doesNotMatch(fileProfileLookup.sql, /intake_sensitivity_profile_id = \$2/);
+  assert.doesNotMatch(fileProfileLookup.sql, /p\.intake_file_id = \$2/);
+  assert.deepEqual(fileProfileLookup.params, [ORG, FILE_PROFILE]);
+});
+
+test("P1-09 read model: sensitivity detail resolves organization-scoped sensitivity profile to its stored file_profile_id", async () => {
+  const calls = [];
+  await getReviewCockpitSensitivityProfileRecord(
+    ORG,
+    SENSITIVITY,
+    {
+      async query(sql, params) {
+        calls.push({ sql, params });
+        if (/FROM kai\.intake_sensitivity_profiles s/.test(sql)) {
+          return {
+            rows: [{
+              file_profile_id: FILE_PROFILE,
+              organization_id: ORG,
+              intake_file_id: INTAKE_FILE,
+              parser_name: "kai_local_profiling_kernel",
+              parser_version: "1.0.0",
+              checksum: SHA,
+              profile_canonical_sha256: SHA,
+              created_at: CREATED_AT,
+            }],
+          };
+        }
+        return { rows: [] };
+      },
+    },
+  );
+
+  assert.match(calls[0].sql, /FROM kai\.intake_sensitivity_profiles s/);
+  assert.match(calls[0].sql, /JOIN kai\.intake_file_profiles p/);
+  assert.match(calls[0].sql, /s\.organization_id = \$1/);
+  assert.match(calls[0].sql, /s\.intake_sensitivity_profile_id = \$2/);
+  assert.deepEqual(calls[0].params, [ORG, SENSITIVITY]);
+  assert.deepEqual(calls[1].params, [ORG, FILE_PROFILE]);
 });
 
 test("P1-09 read models and services contain no mutation SQL and the service imports no database pool", () => {
@@ -359,12 +420,26 @@ test("P1-09 routes call authorized services only: no SQL, no pool import, no kai
   for (const path of [
     '"/admin/review-cockpit/queue"',
     '"/admin/review-cockpit/file-profiles/:fileProfileId"',
+    '"/admin/review-cockpit/sensitivity-profiles/:intakeSensitivityProfileId"',
     '"/admin/review-cockpit/source-candidates/:intakeSourceCandidateId"',
     '"/admin/review-cockpit/source-candidates/:intakeSourceCandidateId/decision"',
   ]) {
     assert.ok(routeSource.includes(path), path);
   }
   assert.doesNotMatch(routeSource, /\/internal\/kai/);
+});
+
+test("P1-09 frontend dispatches review-cockpit details by queue_type plus target_object_type and fails closed", () => {
+  assert.match(
+    uiSource,
+    /queue_type === "source_candidate_review"[\s\S]*target_object_type === "intake_source_candidate"[\s\S]*\/source-candidates\/\$\{item\.target_object_id\}/,
+  );
+  assert.match(
+    uiSource,
+    /queue_type === "sensitivity_review"[\s\S]*target_object_type === "intake_sensitivity_profile"[\s\S]*\/sensitivity-profiles\/\$\{item\.target_object_id\}/,
+  );
+  assert.doesNotMatch(uiSource, /item\.queue_type === "source_candidate_review"\s*\?[\s\S]*:[\s\S]*\/file-profiles\/\$\{item\.target_object_id\}/);
+  assert.match(uiSource, /const route = detailRouteForQueueItem\(item\);[\s\S]*if \(!route\)[\s\S]*return;/);
 });
 
 test("P1-09 route identifiers require an explicit organization scope and a canonical lowercase object id", () => {
@@ -391,12 +466,14 @@ test("P1-09 service: KAI_SPRINT2_ENABLED disabled returns feature_disabled with 
       env,
       async listReviewCockpitQueueItems() { calls.push("queue"); return []; },
       async getReviewCockpitFileProfileRecord() { calls.push("file"); return null; },
+      async getReviewCockpitSensitivityProfileRecord() { calls.push("sensitivity"); return null; },
       async getReviewCockpitSourceCandidateRecord() { calls.push("candidate"); return null; },
       async createSourcePromotionDecision() { calls.push("decision"); return { ok: true, data: {}, error: null }; },
     });
     const results = [
       await listReviewCockpitQueue({ organizationId: ORG, actorContext: humanActor(), selection: {} }, dependencies),
       await getReviewCockpitFileProfileDetail({ organizationId: ORG, actorContext: humanActor(), fileProfileId: FILE_PROFILE }, dependencies),
+      await getReviewCockpitSensitivityProfileDetail({ organizationId: ORG, actorContext: humanActor(), intakeSensitivityProfileId: SENSITIVITY }, dependencies),
       await getReviewCockpitSourceCandidateDetail({ organizationId: ORG, actorContext: humanActor(), intakeSourceCandidateId: CANDIDATE }, dependencies),
       await submitSourceCandidateDecision({ organizationId: ORG, actorContext: humanActor(), intakeSourceCandidateId: CANDIDATE, payload: { outcome: "rejected" } }, dependencies),
     ];
@@ -419,6 +496,10 @@ test("P1-09 service: with KAI_SPRINT2_ENABLED on and KAI_SOURCE_PROMOTION_ENABLE
   assert.equal(queue.ok, true);
   const fileProfile = await getReviewCockpitFileProfileDetail({ organizationId: ORG, actorContext: humanActor(), fileProfileId: FILE_PROFILE }, dependencies);
   assert.equal(fileProfile.ok, true);
+  const sensitivityProfile = await getReviewCockpitSensitivityProfileDetail({ organizationId: ORG, actorContext: humanActor(), intakeSensitivityProfileId: SENSITIVITY }, dependencies);
+  assert.equal(sensitivityProfile.ok, true);
+  assert.equal(sensitivityProfile.data.file_profile.file_profile_id, FILE_PROFILE);
+  assert.equal(sensitivityProfile.data.sensitivity_posture.intake_sensitivity_profile_id, SENSITIVITY);
   const candidate = await getReviewCockpitSourceCandidateDetail({ organizationId: ORG, actorContext: humanActor(), intakeSourceCandidateId: CANDIDATE }, dependencies);
   assert.equal(candidate.ok, true);
   assert.equal(candidate.data.decision_controls_enabled, false);
@@ -454,6 +535,7 @@ test("P1-09 service: every endpoint rejects non-human actors with zero read-mode
       env: BOTH_ENABLED,
       async listReviewCockpitQueueItems() { calls.push("queue"); return []; },
       async getReviewCockpitFileProfileRecord() { calls.push("file"); return null; },
+      async getReviewCockpitSensitivityProfileRecord() { calls.push("sensitivity"); return null; },
       async getReviewCockpitSourceCandidateRecord() { calls.push("candidate"); return null; },
       async createSourcePromotionDecision() { calls.push("decision"); return { ok: true, data: {}, error: null }; },
     });
@@ -461,6 +543,7 @@ test("P1-09 service: every endpoint rejects non-human actors with zero read-mode
     for (const result of [
       await listReviewCockpitQueue({ organizationId: ORG, actorContext, selection: {} }, dependencies),
       await getReviewCockpitFileProfileDetail({ organizationId: ORG, actorContext, fileProfileId: FILE_PROFILE }, dependencies),
+      await getReviewCockpitSensitivityProfileDetail({ organizationId: ORG, actorContext, intakeSensitivityProfileId: SENSITIVITY }, dependencies),
       await getReviewCockpitSourceCandidateDetail({ organizationId: ORG, actorContext, intakeSourceCandidateId: CANDIDATE }, dependencies),
       await submitSourceCandidateDecision({ organizationId: ORG, actorContext, intakeSourceCandidateId: CANDIDATE, payload: { outcome: "rejected" } }, dependencies),
     ]) {
@@ -607,18 +690,21 @@ test("P1-09 service (tenant isolation): an actor with membership only in another
 
   for (const [reader, input] of [
     ["getReviewCockpitFileProfileRecord", { fileProfileId: FILE_PROFILE }],
+    ["getReviewCockpitSensitivityProfileRecord", { intakeSensitivityProfileId: SENSITIVITY }],
     ["getReviewCockpitSourceCandidateRecord", { intakeSourceCandidateId: CANDIDATE }],
   ]) {
     const seen = [];
     const dependencies = readDependencies({
       [reader]: async (organizationId) => {
         seen.push(organizationId);
-        return reader === "getReviewCockpitFileProfileRecord" ? fileProfileRecord() : sourceCandidateRecord();
+        return reader === "getReviewCockpitSourceCandidateRecord" ? sourceCandidateRecord() : fileProfileRecord();
       },
     });
     const detail = reader === "getReviewCockpitFileProfileRecord"
       ? await getReviewCockpitFileProfileDetail({ organizationId: ORG, actorContext: humanActor(), ...input }, dependencies)
-      : await getReviewCockpitSourceCandidateDetail({ organizationId: ORG, actorContext: humanActor(), ...input }, dependencies);
+      : reader === "getReviewCockpitSensitivityProfileRecord"
+        ? await getReviewCockpitSensitivityProfileDetail({ organizationId: ORG, actorContext: humanActor(), ...input }, dependencies)
+        : await getReviewCockpitSourceCandidateDetail({ organizationId: ORG, actorContext: humanActor(), ...input }, dependencies);
     assert.equal(detail.ok, true, reader);
     assert.deepEqual(seen, [ORG], reader);
   }
@@ -647,6 +733,12 @@ test("P1-09 DTO allowlists: no raw content, storage location, object key, signed
     "checksum", "created_at", "file_profile_id", "intake_file_id", "organization_id",
     "parser_name", "parser_version", "profile_canonical_sha256",
   ]);
+
+  const sensitivityProfile = await getReviewCockpitSensitivityProfileDetail({ organizationId: ORG, actorContext: humanActor(), intakeSensitivityProfileId: SENSITIVITY }, dependencies);
+  assert.equal(sensitivityProfile.ok, true);
+  assertNoForbiddenFields(sensitivityProfile);
+  assert.equal(sensitivityProfile.data.file_profile.file_profile_id, FILE_PROFILE);
+  assert.equal(sensitivityProfile.data.sensitivity_posture.intake_sensitivity_profile_id, SENSITIVITY);
 
   const candidate = await getReviewCockpitSourceCandidateDetail({ organizationId: ORG, actorContext: humanActor(), intakeSourceCandidateId: CANDIDATE }, dependencies);
   assert.equal(candidate.ok, true);
@@ -686,8 +778,9 @@ test("P1-09 file-profile review is read-only: the package exposes no file-profil
 test("P1-09 queue reads never invoke, import, or imply a promotion call", () => {
   const listBody = serviceSource.match(/export async function listReviewCockpitQueue\([\s\S]*?\n}\n/)?.[0];
   const fileBody = serviceSource.match(/export async function getReviewCockpitFileProfileDetail\([\s\S]*?\n}\n/)?.[0];
+  const sensitivityBody = serviceSource.match(/export async function getReviewCockpitSensitivityProfileDetail\([\s\S]*?\n}\n/)?.[0];
   const candidateBody = serviceSource.match(/export async function getReviewCockpitSourceCandidateDetail\([\s\S]*?\n}\n/)?.[0];
-  for (const body of [listBody, fileBody, candidateBody]) {
+  for (const body of [listBody, fileBody, sensitivityBody, candidateBody]) {
     assert.ok(body);
     assert.doesNotMatch(body, /createSourcePromotionDecision/);
   }
@@ -870,7 +963,8 @@ test("P1-09 UI blocks queue reads until organization bootstrap establishes an au
 test("P1-09 UI keeps candidate and organization identifiers separated during queue/detail flows", () => {
   assert.match(uiSource, /new URLSearchParams\(\{ organization_id: organization \}\)/);
   assert.match(uiSource, /\$\{COCKPIT_PATH\}\/source-candidates\/\$\{item\.target_object_id\}/);
-  assert.match(uiSource, /\$\{path\}\?organization_id=\$\{encodeURIComponent\(organization\)\}/);
+  assert.match(uiSource, /\$\{COCKPIT_PATH\}\/sensitivity-profiles\/\$\{item\.target_object_id\}/);
+  assert.match(uiSource, /\$\{route\.path\}\?organization_id=\$\{encodeURIComponent\(organization\)\}/);
   assert.match(uiSource, /const candidateId = detail\.source_candidate\.intake_source_candidate_id;/);
   assert.match(uiSource, /\$\{COCKPIT_PATH\}\/source-candidates\/\$\{candidateId\}\/decision\?organization_id=\$\{encodeURIComponent\(organization\)\}/);
   assert.match(uiSource, /\$\{COCKPIT_PATH\}\/source-candidates\/\$\{candidateId\}\?organization_id=\$\{encodeURIComponent\(organization\)\}/);

@@ -18332,3 +18332,65 @@ TOOL_VERIFIED local proof after this correction:
 NOT_CONFIRMED remaining after this correction: no unresolved repository fact is
 required before rerunning the corrected read-only production preflight.
 Production execution remains separately unauthorized.
+
+Review Cockpit production 404 correction (2026-08-18):
+USER_REPORTED production symptom: authenticated internal Review Cockpit GET
+`/api/kai/sprint2/intake/admin/review-cockpit/file-profiles/76020411-c5ed-4f32-aa45-93d585bad2a2?organization_id=a5d17c5a-c55f-43af-9b21-fe63aafe733f`
+returned `404 not_found` from the read-only detail route. No production access,
+production SQL, credential/secret inspection, cloud mutation, deployment, push, or
+real-client-data access was performed.
+
+TOOL_VERIFIED correction:
+  - Root cause was a Review Cockpit identifier-shape mismatch: the UI opens every
+    non-`source_candidate_review` queue row through the existing read-only
+    file-profile detail route using `review_queue_items.target_object_id`, while
+    canonical `sensitivity_review` queue rows target
+    `intake_sensitivity_profile_id`, not `file_profile_id`.
+  - `Backend/kai/db/kaiReviewCockpitReadModels.js` keeps the established
+    file-profile detail read strict to
+    `organization_id + kai.intake_file_profiles.file_profile_id` and adds a
+    separate read-only sensitivity profile resolver. The sensitivity resolver
+    uses `organization_id + intake_sensitivity_profile_id` to read the exact
+    tenant-scoped `kai.intake_sensitivity_profiles` row, follows its stored
+    `file_profile_id`, and then reuses the same safe file-profile detail
+    composition path. The `intake_file_id` alias branch from 58f958e was removed
+    because `kai.intake_file_profiles` is not unique by
+    `organization_id + intake_file_id`.
+  - `Backend/kai/routes/sprint2IntakeApi.js` adds
+    `GET /admin/review-cockpit/sensitivity-profiles/:intakeSensitivityProfileId`;
+    `GET /admin/review-cockpit/file-profiles/:fileProfileId` remains typed to
+    `file_profile_id`.
+  - `frontend/kaiReviewCockpit.jsx` now dispatches only recognized
+    `queue_type + target_object_type` pairs: `source_candidate_review` plus
+    `intake_source_candidate` to source-candidate detail, and
+    `sensitivity_review` plus `intake_sensitivity_profile` to the new
+    sensitivity route. Unsupported or mismatched pairs fail closed before any
+    detail request.
+  - Regression coverage was added in
+    `__tests__/kai-sprint2-p1-09-review-cockpit-boundary.spec.js` for strict SQL
+    identity, typed frontend dispatch, route presence, auth, tenant scoping, and
+    safe DTO allowlists; in
+    `__tests__/kai-sprint2-p1-09-review-cockpit.integration.spec.js` for the
+    production-shaped distinct-ID sensitivity path; and in
+    `__tests__/kai-sprint2-pass2-route-runtime.spec.js` for the additive route.
+
+TOOL_VERIFIED local proof:
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test
+    __tests__/kai-sprint2-p1-09-review-cockpit-boundary.spec.js` passed: 31
+    tests, 31 passing, 0 failing.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test
+    __tests__/kai-sprint2-p1-09-review-cockpit.integration.spec.js` passed under
+    sandbox escalation required only for the local HTTP listener: 17 tests, 17
+    passing, 0 failing.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel
+    KAI_FILE_UPLOAD_ENABLED=false KAI_WORKER_ENABLED=false npm run
+    test:kai-sprint2` passed under the same local-listener escalation: 2256
+    tests, 2221 passing, 35 skipped, 0 failing.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel
+    KAI_FILE_UPLOAD_ENABLED=false KAI_WORKER_ENABLED=false npm test` passed
+    under the same local-listener escalation: 2361 tests, 2326 passing, 35
+    skipped, 0 failing.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel
+    KAI_FILE_UPLOAD_ENABLED=false KAI_WORKER_ENABLED=false npm run build`
+    passed.
+  - `git diff --check` passed.

@@ -9,6 +9,7 @@ import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationServic
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
 import {
   getReviewCockpitFileProfileRecord as readFileProfileRecord,
+  getReviewCockpitSensitivityProfileRecord as readSensitivityProfileRecord,
   getReviewCockpitSourceCandidateRecord as readSourceCandidateRecord,
   listReviewCockpitQueueItems as readReviewCockpitQueueItems,
 } from "../db/kaiReviewCockpitReadModels.js";
@@ -629,8 +630,41 @@ export async function getReviewCockpitFileProfileDetail(input = {}, dependencies
   if (!record) return buildKaiError("not_found");
   if (!isPlainObject(record)) return buildKaiError("system_error");
 
+  const detail = composeReviewCockpitFileProfileDetail(record, organizationId);
+  if (!detail.ok) return detail;
+  if (detail.data.file_profile.file_profile_id !== fileProfileId) return buildKaiError("system_error");
+  return detail;
+}
+
+export async function getReviewCockpitSensitivityProfileDetail(input = {}, dependencies = {}) {
+  const deps = resolvedDependencies(dependencies);
+  const authorization = await authorizeReviewCockpitRequest(input, deps);
+  if (!authorization.ok) return authorization.error;
+  const { organizationId } = authorization;
+
+  const intakeSensitivityProfileId = typeof input.intakeSensitivityProfileId === "string"
+    ? input.intakeSensitivityProfileId
+    : "";
+  if (!canonicalUuid(intakeSensitivityProfileId)) return buildKaiError("invalid_request");
+
+  const readRecord = deps.getReviewCockpitSensitivityProfileRecord || readSensitivityProfileRecord;
+  const record = await readRecord(organizationId, intakeSensitivityProfileId);
+  if (!record) return buildKaiError("not_found");
+  if (!isPlainObject(record)) return buildKaiError("system_error");
+
+  const detail = composeReviewCockpitFileProfileDetail(record, organizationId);
+  if (!detail.ok) return detail;
+  if (detail.data.sensitivity_posture?.intake_sensitivity_profile_id !== intakeSensitivityProfileId) {
+    return buildKaiError("system_error");
+  }
+  return detail;
+}
+
+function composeReviewCockpitFileProfileDetail(record, organizationId) {
   const fileProfile = responseFileProfile(record.fileProfile, organizationId);
-  if (!fileProfile || fileProfile.file_profile_id !== fileProfileId) return buildKaiError("system_error");
+  if (!fileProfile) {
+    return buildKaiError("system_error");
+  }
 
   const dataDictionary = responseDataDictionarySummary(record.dataDictionary ?? null, organizationId);
   if (dataDictionary === undefined) return buildKaiError("system_error");

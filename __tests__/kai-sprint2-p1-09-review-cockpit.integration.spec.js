@@ -254,6 +254,7 @@ function fileProfileRecord(organizationId) {
  * about that matrix itself; P1-08's own suites do.
  */
 const repositoryCallLog = [];
+const cockpitReadLog = [];
 
 function createSyntheticSourcePromotionRepository() {
   return {
@@ -395,7 +396,13 @@ function cockpitDependencies({ promotionEnabled }) {
       return rows.slice(0, limit + 1);
     },
     async getReviewCockpitFileProfileRecord(organizationId, fileProfileId) {
+      cockpitReadLog.push({ reader: "file_profile", organizationId, fileProfileId });
       if (fileProfileId !== FILE_PROFILE) return null;
+      return fileProfileRecord(organizationId);
+    },
+    async getReviewCockpitSensitivityProfileRecord(organizationId, intakeSensitivityProfileId) {
+      cockpitReadLog.push({ reader: "sensitivity_profile", organizationId, intakeSensitivityProfileId });
+      if (intakeSensitivityProfileId !== SENSITIVITY) return null;
       return fileProfileRecord(organizationId);
     },
     async getReviewCockpitSourceCandidateRecord(organizationId, intakeSourceCandidateId) {
@@ -490,6 +497,10 @@ function candidateDetailPath(id, organizationId = ORG) {
   return `${cockpitPath}/source-candidates/${id}?organization_id=${organizationId}`;
 }
 
+function sensitivityDetailPath(id, organizationId = ORG) {
+  return `${cockpitPath}/sensitivity-profiles/${id}?organization_id=${organizationId}`;
+}
+
 test("P1-09 integrated synthetic P1 acceptance: intake candidate -> review -> all three decisions -> source/source_version result", async (t) => {
   const previousFlag = process.env.KAI_SPRINT2_ENABLED;
   process.env.KAI_SPRINT2_ENABLED = "true";
@@ -563,6 +574,53 @@ test("P1-09 integrated synthetic P1 acceptance: intake candidate -> review -> al
       });
       assert.equal(attempt.statusCode, 404, method);
     }
+  });
+
+  await t.test("review: production-shaped sensitivity target resolves through the typed sensitivity route only", async () => {
+    const queue = await request(server, { method: "GET", path: queuePath("queue_type=sensitivity_review&queue_status=open") });
+    assert.equal(queue.statusCode, 200);
+    assert.equal(queue.body.data.items.length, 1);
+    assert.equal(queue.body.data.items[0].queue_type, "sensitivity_review");
+    assert.equal(queue.body.data.items[0].target_object_type, "intake_sensitivity_profile");
+    assert.equal(queue.body.data.items[0].target_object_id, SENSITIVITY);
+    assert.notEqual(SENSITIVITY, FILE_PROFILE);
+
+    const strictFileProfile = await request(server, {
+      method: "GET",
+      path: `${cockpitPath}/file-profiles/${SENSITIVITY}?organization_id=${ORG}`,
+    });
+    assert.equal(strictFileProfile.statusCode, 404);
+    assert.equal(strictFileProfile.body.error.code, "not_found");
+
+    const before = cockpitReadLog.length;
+    const result = await request(server, {
+      method: "GET",
+      path: sensitivityDetailPath(SENSITIVITY),
+    });
+    assert.equal(result.statusCode, 200);
+    assert.equal(result.body.data.file_profile.file_profile_id, FILE_PROFILE);
+    assert.equal(result.body.data.file_profile.intake_file_id, INTAKE_FILE);
+    assert.equal(result.body.data.sensitivity_posture.intake_sensitivity_profile_id, SENSITIVITY);
+    assert.equal(result.body.data.read_only, true);
+    assert.deepEqual(cockpitReadLog.slice(before), [{
+      reader: "sensitivity_profile",
+      organizationId: ORG,
+      intakeSensitivityProfileId: SENSITIVITY,
+    }]);
+
+    const wrongOrg = await request(server, {
+      method: "GET",
+      path: sensitivityDetailPath(SENSITIVITY, OTHER_ORG),
+    });
+    assert.equal(wrongOrg.statusCode, 403);
+    assert.equal(wrongOrg.body.error.code, "authorization_denied");
+
+    const nonexistent = await request(server, {
+      method: "GET",
+      path: sensitivityDetailPath("80000000-0000-4000-8000-000000000099"),
+    });
+    assert.equal(nonexistent.statusCode, 404);
+    assert.equal(nonexistent.body.error.code, "not_found");
   });
 
   await t.test("review: the source-candidate detail shows pre-decision lineage, checksum, and queue state", async () => {
@@ -769,6 +827,7 @@ test("P1-09 integrated: with KAI_SPRINT2_ENABLED off, every cockpit route is fea
   for (const [method, path, body] of [
     ["GET", queuePath(), null],
     ["GET", `${cockpitPath}/file-profiles/${FILE_PROFILE}?organization_id=${ORG}`, null],
+    ["GET", sensitivityDetailPath(SENSITIVITY), null],
     ["GET", candidateDetailPath(candidateId(1)), null],
     ["POST", decisionPath(candidateId(1)), { outcome: "rejected" }],
   ]) {

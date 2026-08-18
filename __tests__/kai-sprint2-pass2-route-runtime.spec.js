@@ -174,6 +174,7 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // preserved verbatim).
     "/admin/review-cockpit/file-profiles/:fileProfileId",
     "/admin/review-cockpit/queue",
+    "/admin/review-cockpit/sensitivity-profiles/:intakeSensitivityProfileId",
     "/admin/review-cockpit/source-candidates/:intakeSourceCandidateId",
     "/admin/review-cockpit/source-candidates/:intakeSourceCandidateId/decision",
     "/admin/review-queue",
