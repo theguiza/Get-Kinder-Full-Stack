@@ -276,6 +276,7 @@ test("Gate C-1 signed PUT fails closed without a configured upload-size bound", 
   const result = await provider.createSignedUploadUrl({ objectKey: "k", contentType: "application/pdf" });
   assert.equal(result.ok, false);
   assert.equal(result.error.code, "storage_provider_not_configured");
+  assert.equal(result.data.exact_verification_phase, "upload_url_gcs_provider_max_upload_size_missing");
 });
 
 test("Gate C-1 signed PUT validates required inputs before calling the SDK", async () => {

@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 
 import { Storage } from "@google-cloud/storage";
-import { buildKaiError } from "../errors/kaiErrors.js";
+import { buildKaiError, withUploadUrlPhase } from "../errors/kaiErrors.js";
 
 // Gate C-1: dormant GCS provider foundation. This provider is a real,
 // SDK-backed implementation, but it is disabled unless explicitly
@@ -279,10 +279,13 @@ export class GoogleCloudStorageProvider {
       return sanitizedGcsFailure("create_signed_upload_url", "validation_blocker", "contentType is required.");
     }
     if (!this.maxUploadSizeBytes) {
-      return sanitizedGcsFailure(
-        "create_signed_upload_url",
-        "storage_provider_not_configured",
-        "Upload size bound is not configured.",
+      return withUploadUrlPhase(
+        sanitizedGcsFailure(
+          "create_signed_upload_url",
+          "storage_provider_not_configured",
+          "Upload size bound is not configured.",
+        ),
+        "upload_url_gcs_provider_max_upload_size_missing",
       );
     }
 

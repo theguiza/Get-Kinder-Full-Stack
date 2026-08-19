@@ -7,7 +7,7 @@ import {
   KAI_SPRINT2_MAX_FILE_SIZE_BYTES,
   KAI_SPRINT2_P0_PATTERNS,
 } from "../config/kaiSprint2P0Contract.js";
-import { buildKaiError, validationBlocked } from "../errors/kaiErrors.js";
+import { buildKaiError, validationBlocked, withUploadUrlPhase } from "../errors/kaiErrors.js";
 import { kaiIdempotentWriteConflict } from "../internal/kaiIdempotentWriteConflict.js";
 import { resolveKaiActorContext } from "../auth/kaiActorContext.js";
 import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationService.js";
@@ -2231,6 +2231,9 @@ export async function createIntakeBatch(input = {}, dependencies = {}) {
       createdByType: actorContext.actorType,
     });
   } catch (error) {
+    if (error?.code === "23505" && error?.constraint === "ux_intake_batches_org_batch_code") {
+      return buildKaiError("batch_code_conflict");
+    }
     if (error !== kaiIdempotentWriteConflict) throw error;
     const conflictedExisting = await findExisting(idempotencyLookup);
     if (!conflictedExisting) return buildKaiError("duplicate_conflict");
@@ -2659,24 +2662,36 @@ export async function requestUploadUrl(input = {}, dependencies = {}) {
 
   const { organizationId, intakeFileId, intakeBatchId, metadata } = auth;
   if (metadata.storage_provider !== "gcs") {
-    return buildKaiError("storage_provider_not_configured");
+    return withUploadUrlPhase(
+      buildKaiError("storage_provider_not_configured"),
+      "upload_url_storage_provider_not_gcs",
+    );
   }
   if (typeof metadata.storage_object_key !== "string" || metadata.storage_object_key.length === 0) {
-    return buildKaiError("storage_provider_not_configured", {
-      message: "Reservation is missing its server-owned storage object key.",
-    });
+    return withUploadUrlPhase(
+      buildKaiError("storage_provider_not_configured", {
+        message: "Reservation is missing its server-owned storage object key.",
+      }),
+      "upload_url_object_key_missing",
+    );
   }
   if (typeof metadata.mime_type !== "string" || metadata.mime_type.length === 0) {
-    return buildKaiError("storage_provider_not_configured", {
-      message: "Reservation is missing its declared MIME type.",
-    });
+    return withUploadUrlPhase(
+      buildKaiError("storage_provider_not_configured", {
+        message: "Reservation is missing its declared MIME type.",
+      }),
+      "upload_url_mime_type_missing",
+    );
   }
 
   const lifecycleRepository = dependencies.uploadLifecycleRepository || dependencies.lifecycleRepository;
   if (!lifecycleRepository || typeof lifecycleRepository.getUploadLifecycle !== "function") {
-    return buildKaiError("storage_provider_not_configured", {
-      message: "Upload lifecycle repository is not configured.",
-    });
+    return withUploadUrlPhase(
+      buildKaiError("storage_provider_not_configured", {
+        message: "Upload lifecycle repository is not configured.",
+      }),
+      "upload_url_lifecycle_repository_missing",
+    );
   }
 
   let lifecycle;
@@ -2690,17 +2705,44 @@ export async function requestUploadUrl(input = {}, dependencies = {}) {
   }
 
   const gcsProvider = dependencies.gcsProvider;
-  if (!gcsProvider || gcsProvider.enabled !== true || typeof gcsProvider.createSignedUploadUrl !== "function") {
-    return buildKaiError("storage_provider_not_configured", {
-      message: "GCS signed-upload provider is not configured.",
-    });
+  if (!gcsProvider) {
+    return withUploadUrlPhase(
+      buildKaiError("storage_provider_not_configured", {
+        message: "GCS signed-upload provider is not configured.",
+      }),
+      "upload_url_gcs_provider_missing",
+    );
+  }
+  if (gcsProvider.enabled !== true) {
+    return withUploadUrlPhase(
+      buildKaiError("storage_provider_not_configured", {
+        message: "GCS signed-upload provider is not configured.",
+      }),
+      "upload_url_gcs_provider_disabled",
+    );
+  }
+  if (typeof gcsProvider.createSignedUploadUrl !== "function") {
+    return withUploadUrlPhase(
+      buildKaiError("storage_provider_not_configured", {
+        message: "GCS signed-upload provider is not configured.",
+      }),
+      "upload_url_gcs_provider_signed_url_capability_missing",
+    );
   }
 
   const signed = await gcsProvider.createSignedUploadUrl({
     objectKey: metadata.storage_object_key,
     contentType: metadata.mime_type,
   });
-  if (signed?.ok !== true) return signed;
+  if (signed?.ok !== true) {
+    if (
+      signed?.error?.code === "storage_provider_not_configured"
+      && typeof signed?.data?.exact_verification_phase !== "string"
+    ) {
+      return withUploadUrlPhase(signed, "upload_url_gcs_provider_unclassified_storage_not_configured");
+    }
+    return signed;
+  }
 
   return {
     ok: true,

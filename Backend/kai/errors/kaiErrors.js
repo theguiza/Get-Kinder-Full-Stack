@@ -17,6 +17,7 @@ export const KAI_ERROR_STATUS = Object.freeze({
   duplicate_conflict: 409,
   human_review_incomplete: 409,
   dimension_not_unresolved: 409,
+  batch_code_conflict: 409,
   storage_provider_not_configured: 503,
   operation_not_enabled: 422,
   state_transition_denied: 422,
@@ -46,6 +47,7 @@ export const KAI_ERROR_MESSAGES = Object.freeze({
   duplicate_conflict: "Idempotency key conflicts with a different payload.",
   human_review_incomplete: "P2-09 evidence-review and claim-review must be complete before a coverage decision can be recorded.",
   dimension_not_unresolved: "Target coverage dimension is not currently unresolved.",
+  batch_code_conflict: "That batch number is already in use. Enter a different batch number.",
   storage_provider_not_configured: "Storage adapter unavailable.",
   operation_not_enabled: "Operation is not enabled for KAI Sprint 2 P0.",
   state_transition_denied: "State transition is not allowed.",
@@ -75,6 +77,23 @@ export function buildKaiError(code, overrides = {}) {
 export function sendKaiError(res, code, overrides = {}) {
   const body = buildKaiError(code, overrides);
   return res.status(body.error.status).json(body);
+}
+
+export function withUploadUrlPhase(result, phase) {
+  const existingData =
+    result?.data
+    && typeof result.data === "object"
+    && !Array.isArray(result.data)
+      ? result.data
+      : {};
+
+  return {
+    ...result,
+    data: {
+      ...existingData,
+      exact_verification_phase: phase,
+    },
+  };
 }
 
 export function featureDisabled(overrides = {}) {

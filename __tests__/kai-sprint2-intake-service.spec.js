@@ -461,6 +461,108 @@ test("createIntakeBatch writes metadata through service dependency when enabled"
   assert.equal(result.data.batch_code, "NCWS-001");
 });
 
+test("createIntakeBatch returns a structured 409 conflict when the insert hits the batch-code unique constraint", async () => {
+  const result = await createIntakeBatch(
+    {
+      actorContext,
+      organizationId: ids.organizationId,
+      engagementId: ids.engagementId,
+      batchCode: "NCWS-001",
+      idempotencyKey: "kai-intake-batch-002",
+    },
+    {
+      env: { KAI_SPRINT2_ENABLED: "true" },
+      async getEngagementTenantState() {
+        return { engagement_id: ids.engagementId, organization_id: ids.organizationId };
+      },
+      async findIntakeBatchByIdempotencyKey() {
+        return null;
+      },
+      async insertIntakeBatchMetadata() {
+        const error = new Error(
+          'duplicate key value violates unique constraint "ux_intake_batches_org_batch_code"',
+        );
+        error.code = "23505";
+        error.constraint = "ux_intake_batches_org_batch_code";
+        error.detail = "Key (organization_id, batch_code)=(a5d17c5a-c55f-43af-9b21-fe63aafe733f, NCWS-001) already exists.";
+        error.table = "intake_batches";
+        error.schema = "kai";
+        throw error;
+      },
+    },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.status, 409);
+  assert.equal(result.error.code, "batch_code_conflict");
+  assert.equal(result.error.message, "That batch number is already in use. Enter a different batch number.");
+
+  const serialized = JSON.stringify(result);
+  assert.ok(!serialized.includes("23505"));
+  assert.ok(!serialized.includes("ux_intake_batches_org_batch_code"));
+  assert.ok(!serialized.includes("intake_batches"));
+  assert.ok(!serialized.toLowerCase().includes("unique constraint"));
+});
+
+test("createIntakeBatch does not classify a 23505 on a different constraint as a batch-code conflict", async () => {
+  const error = new Error('duplicate key value violates unique constraint "ux_intake_batches_idempotency"');
+  error.code = "23505";
+  error.constraint = "ux_intake_batches_idempotency";
+
+  const failure = await createIntakeBatch(
+    {
+      actorContext,
+      organizationId: ids.organizationId,
+      engagementId: ids.engagementId,
+      batchCode: "NCWS-001",
+      idempotencyKey: "kai-intake-batch-003",
+    },
+    {
+      env: { KAI_SPRINT2_ENABLED: "true" },
+      async getEngagementTenantState() {
+        return { engagement_id: ids.engagementId, organization_id: ids.organizationId };
+      },
+      async findIntakeBatchByIdempotencyKey() {
+        return null;
+      },
+      async insertIntakeBatchMetadata() {
+        throw error;
+      },
+    },
+  ).catch((thrown) => thrown);
+
+  assert.equal(failure, error, "a 23505 on a different constraint must propagate unchanged");
+});
+
+test("createIntakeBatch preserves existing behavior for a non-23505 insert failure", async () => {
+  const error = new Error("connection terminated unexpectedly");
+  error.code = "57P01";
+
+  const failure = await createIntakeBatch(
+    {
+      actorContext,
+      organizationId: ids.organizationId,
+      engagementId: ids.engagementId,
+      batchCode: "NCWS-001",
+      idempotencyKey: "kai-intake-batch-004",
+    },
+    {
+      env: { KAI_SPRINT2_ENABLED: "true" },
+      async getEngagementTenantState() {
+        return { engagement_id: ids.engagementId, organization_id: ids.organizationId };
+      },
+      async findIntakeBatchByIdempotencyKey() {
+        return null;
+      },
+      async insertIntakeBatchMetadata() {
+        throw error;
+      },
+    },
+  ).catch((thrown) => thrown);
+
+  assert.equal(failure, error, "a non-23505 database error must propagate unchanged");
+});
+
 test("reserveIntakeFileMetadata returns validator blocker as ok false without raw upload", async () => {
   const result = await reserveIntakeFileMetadata(
     {
@@ -717,6 +819,188 @@ test("requestUploadUrl remains fail-closed in P0", async () => {
   });
   assert.equal(enabledResult.ok, false);
   assert.equal(enabledResult.error.code, "storage_provider_not_configured");
+  assert.equal(enabledResult.data.exact_verification_phase, "upload_url_storage_provider_not_gcs");
+});
+
+test("requestUploadUrl identifies the exact predicate for each storage_provider_not_configured exit", async () => {
+  const gcsProviderReady = {
+    enabled: true,
+    async createSignedUploadUrl() {
+      throw new Error("createSignedUploadUrl should not run for this case");
+    },
+  };
+  const lifecycleRepositoryReady = {
+    async getUploadLifecycle() {
+      return { ok: true, data: { record: { upload_state: "reserved" } } };
+    },
+  };
+
+  const cases = [
+    {
+      name: "missing storage_object_key",
+      row: intakeFileRow({ storage_provider: "gcs", storage_object_key: "", mime_type: "application/pdf" }),
+      dependencies: { uploadLifecycleRepository: lifecycleRepositoryReady, gcsProvider: gcsProviderReady },
+      phase: "upload_url_object_key_missing",
+    },
+    {
+      name: "missing mime_type",
+      row: intakeFileRow({ storage_provider: "gcs", storage_object_key: "orgs/o/files/f", mime_type: "" }),
+      dependencies: { uploadLifecycleRepository: lifecycleRepositoryReady, gcsProvider: gcsProviderReady },
+      phase: "upload_url_mime_type_missing",
+    },
+    {
+      name: "missing lifecycle repository",
+      row: intakeFileRow({ storage_provider: "gcs", storage_object_key: "orgs/o/files/f", mime_type: "application/pdf" }),
+      dependencies: { gcsProvider: gcsProviderReady },
+      phase: "upload_url_lifecycle_repository_missing",
+    },
+    {
+      name: "missing gcsProvider",
+      row: intakeFileRow({ storage_provider: "gcs", storage_object_key: "orgs/o/files/f", mime_type: "application/pdf" }),
+      dependencies: { uploadLifecycleRepository: lifecycleRepositoryReady },
+      phase: "upload_url_gcs_provider_missing",
+    },
+    {
+      name: "gcsProvider disabled",
+      row: intakeFileRow({ storage_provider: "gcs", storage_object_key: "orgs/o/files/f", mime_type: "application/pdf" }),
+      dependencies: {
+        uploadLifecycleRepository: lifecycleRepositoryReady,
+        gcsProvider: { enabled: false, async createSignedUploadUrl() {} },
+      },
+      phase: "upload_url_gcs_provider_disabled",
+    },
+    {
+      name: "gcsProvider missing createSignedUploadUrl",
+      row: intakeFileRow({ storage_provider: "gcs", storage_object_key: "orgs/o/files/f", mime_type: "application/pdf" }),
+      dependencies: {
+        uploadLifecycleRepository: lifecycleRepositoryReady,
+        gcsProvider: { enabled: true },
+      },
+      phase: "upload_url_gcs_provider_signed_url_capability_missing",
+    },
+  ];
+
+  for (const testCase of cases) {
+    const result = await requestUploadUrl(confirmInput(), {
+      env: enabledUploadEnv,
+      async getIntakeFileMetadata() {
+        return testCase.row;
+      },
+      ...testCase.dependencies,
+    });
+    assert.equal(result.ok, false, testCase.name);
+    assert.equal(result.error.code, "storage_provider_not_configured", testCase.name);
+    assert.equal(result.error.status, 503, testCase.name);
+    assert.equal(result.data.exact_verification_phase, testCase.phase, testCase.name);
+  }
+});
+
+test("requestUploadUrl decorates an unclassified provider storage_provider_not_configured result without altering it", async () => {
+  const providerResult = {
+    ok: false,
+    error: { code: "storage_provider_not_configured", message: "Storage adapter unavailable.", status: 503 },
+    data: { operation: "create_signed_upload_url", provider: "gcs" },
+  };
+  const result = await requestUploadUrl(confirmInput(), {
+    env: enabledUploadEnv,
+    async getIntakeFileMetadata() {
+      return intakeFileRow({ storage_provider: "gcs", storage_object_key: "orgs/o/files/f", mime_type: "application/pdf" });
+    },
+    uploadLifecycleRepository: {
+      async getUploadLifecycle() {
+        return { ok: true, data: { record: { upload_state: "reserved" } } };
+      },
+    },
+    gcsProvider: {
+      enabled: true,
+      async createSignedUploadUrl() {
+        return providerResult;
+      },
+    },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "storage_provider_not_configured");
+  assert.equal(result.data.operation, "create_signed_upload_url");
+  assert.equal(result.data.provider, "gcs");
+  assert.equal(result.data.exact_verification_phase, "upload_url_gcs_provider_unclassified_storage_not_configured");
+});
+
+test("requestUploadUrl leaves an already-classified provider storage_provider_not_configured result unchanged", async () => {
+  const providerResult = {
+    ok: false,
+    error: { code: "storage_provider_not_configured", message: "Storage adapter unavailable.", status: 503 },
+    data: { operation: "create_signed_upload_url", provider: "gcs", exact_verification_phase: "upload_url_gcs_provider_max_upload_size_missing" },
+  };
+  const result = await requestUploadUrl(confirmInput(), {
+    env: enabledUploadEnv,
+    async getIntakeFileMetadata() {
+      return intakeFileRow({ storage_provider: "gcs", storage_object_key: "orgs/o/files/f", mime_type: "application/pdf" });
+    },
+    uploadLifecycleRepository: {
+      async getUploadLifecycle() {
+        return { ok: true, data: { record: { upload_state: "reserved" } } };
+      },
+    },
+    gcsProvider: {
+      enabled: true,
+      async createSignedUploadUrl() {
+        return providerResult;
+      },
+    },
+  });
+  assert.deepEqual(result, providerResult);
+});
+
+test("requestUploadUrl leaves non-storage_provider_not_configured provider failures unchanged", async () => {
+  const providerResult = {
+    ok: false,
+    error: { code: "validation_blocker", message: "contentType is required.", status: 422 },
+    data: { operation: "create_signed_upload_url", provider: "gcs" },
+  };
+  const result = await requestUploadUrl(confirmInput(), {
+    env: enabledUploadEnv,
+    async getIntakeFileMetadata() {
+      return intakeFileRow({ storage_provider: "gcs", storage_object_key: "orgs/o/files/f", mime_type: "application/pdf" });
+    },
+    uploadLifecycleRepository: {
+      async getUploadLifecycle() {
+        return { ok: true, data: { record: { upload_state: "reserved" } } };
+      },
+    },
+    gcsProvider: {
+      enabled: true,
+      async createSignedUploadUrl() {
+        return providerResult;
+      },
+    },
+  });
+  assert.deepEqual(result, providerResult);
+});
+
+test("requestUploadUrl succeeds unchanged when the provider returns a signed URL", async () => {
+  const result = await requestUploadUrl(confirmInput(), {
+    env: enabledUploadEnv,
+    async getIntakeFileMetadata() {
+      return intakeFileRow({ storage_provider: "gcs", storage_object_key: "orgs/o/files/f", mime_type: "application/pdf" });
+    },
+    uploadLifecycleRepository: {
+      async getUploadLifecycle() {
+        return { ok: true, data: { record: { upload_state: "reserved" } } };
+      },
+    },
+    gcsProvider: {
+      enabled: true,
+      async createSignedUploadUrl() {
+        return {
+          ok: true,
+          data: { url: "https://storage.googleapis.com/signed", method: "PUT", headers: {}, expires_in_seconds: 600 },
+        };
+      },
+    },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.data.upload_url, "https://storage.googleapis.com/signed");
+  assert.equal("exact_verification_phase" in result.data, false);
 });
 
 test("confirmUpload fails either feature gate before repository or storage calls", async () => {

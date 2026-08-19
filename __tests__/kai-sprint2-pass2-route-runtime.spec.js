@@ -385,6 +385,46 @@ test("admin batch route delegates to createIntakeBatch without direct DB access"
   }
 });
 
+test("admin batch route serializes a duplicate batch-code conflict as the public batch_code_conflict message", async () => {
+  const restore = intakeRouteTestables.setIntakeServiceForTest({
+    async createIntakeBatch() {
+      return {
+        ok: false,
+        error: {
+          code: "batch_code_conflict",
+          message: "That batch number is already in use. Enter a different batch number.",
+          status: 409,
+        },
+      };
+    },
+  });
+
+  try {
+    const res = await invokeRoute("/admin/batches", "post", {
+      user: { id: 46, email: "email-sentinel@example.test" },
+      body: {
+        organization_id: organizationId,
+        engagement_id: engagementId,
+        batch_code: "BATCH-001",
+        idempotency_key: "idem-001",
+      },
+    });
+
+    assert.equal(res.statusCode, 409);
+    assert.equal(res.body.error.code, "batch_code_conflict");
+    assert.equal(res.body.error.message, "That batch number is already in use. Enter a different batch number.");
+    assert.equal(res.body.error.status, 409);
+
+    const serialized = JSON.stringify(res.body);
+    assert.ok(!serialized.includes("23505"));
+    assert.ok(!serialized.includes("ux_intake_batches_org_batch_code"));
+    assert.ok(!serialized.includes("intake_batches"));
+    assert.ok(!serialized.toLowerCase().includes("unique constraint"));
+  } finally {
+    restore();
+  }
+});
+
 test("file reservation route rejects multipart before service and otherwise delegates metadata only", async () => {
   let serviceCalls = 0;
   let serviceInput = null;
@@ -862,4 +902,40 @@ test("auth preflight route applies the Sprint 2 gate without calling intake serv
   assert.match(route, /requireKaiSprint2Enabled/);
   assert.match(route, /router\.use\(requireKaiSprint2Enabled\)/);
   assert.doesNotMatch(route, /kaiIntakeService|kaiIntakeQueries|kaiQueries|kaiDb|pool\.query/);
+});
+
+test("sendServiceResult surfaces an approved upload-url exact_verification_phase through sanitization", () => {
+  const res = createResponse();
+  intakeRouteTestables.sendServiceResult(res, {
+    ok: false,
+    error: { code: "storage_provider_not_configured" },
+    data: { exact_verification_phase: "upload_url_gcs_provider_disabled" },
+  });
+  assert.equal(res.statusCode, 503);
+  assert.equal(res.body.error.code, "storage_provider_not_configured");
+  assert.equal(res.body.data.exact_verification_phase, "upload_url_gcs_provider_disabled");
+});
+
+test("sendServiceResult strips an unapproved exact_verification_phase token", () => {
+  const res = createResponse();
+  intakeRouteTestables.sendServiceResult(res, {
+    ok: false,
+    error: { code: "storage_provider_not_configured" },
+    data: { exact_verification_phase: "not_a_real_phase" },
+  });
+  assert.equal(res.statusCode, 503);
+  assert.equal(res.body.error.code, "storage_provider_not_configured");
+  assert.equal(res.body.data, null);
+});
+
+test("sendServiceResult leaves successful upload-url responses unchanged", () => {
+  const res = createResponse();
+  intakeRouteTestables.sendServiceResult(res, {
+    ok: true,
+    data: { upload_url: "https://storage.googleapis.com/signed", upload_method: "PUT" },
+    warnings: [],
+  });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.ok, true);
+  assert.equal(res.body.data.upload_url, "https://storage.googleapis.com/signed");
 });
