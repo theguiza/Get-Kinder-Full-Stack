@@ -2,7 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { createSourcePromotionDecision } from "../Backend/kai/services/kaiSourcePromotionService.js";
+import {
+  createSourcePromotionDecision,
+  __sourcePromotionServiceContract,
+} from "../Backend/kai/services/kaiSourcePromotionService.js";
 import {
   createPostgresSourcePromotionRepository,
   __sourcePromotionRepositoryContract,
@@ -47,7 +50,7 @@ function createRepositoryProbe(result) {
   };
 }
 
-const bothEnabled = { KAI_SPRINT2_ENABLED: "true", KAI_SOURCE_PROMOTION_ENABLED: "true" };
+const sprint2Enabled = { KAI_SPRINT2_ENABLED: "true" };
 const successResult = {
   ok: true,
   data: {
@@ -61,13 +64,11 @@ const successResult = {
   error: null,
 };
 
-test("P1-08 service: either feature flag disabled returns feature_disabled with zero repository calls", async () => {
+test("P1-08 service: KAI_SPRINT2_ENABLED disabled returns feature_disabled with zero repository calls", async () => {
   for (const env of [
     {},
-    { KAI_SPRINT2_ENABLED: "true" },
-    { KAI_SOURCE_PROMOTION_ENABLED: "true" },
-    { KAI_SPRINT2_ENABLED: "false", KAI_SOURCE_PROMOTION_ENABLED: "true" },
-    { KAI_SPRINT2_ENABLED: "true", KAI_SOURCE_PROMOTION_ENABLED: "0" },
+    { KAI_SPRINT2_ENABLED: "false" },
+    { KAI_SPRINT2_ENABLED: "0" },
   ]) {
     for (const outcome of ["needs_more_information", "rejected", "promoted"]) {
       const probe = createRepositoryProbe(successResult);
@@ -104,10 +105,15 @@ test("P1-08 service: rejects input shapes outside the accepted allowlist without
   ];
   for (const input of invalidInputs) {
     const probe = createRepositoryProbe(successResult);
-    const result = await createSourcePromotionDecision(input, { env: bothEnabled, sourcePromotionRepository: probe.sourcePromotionRepository });
+    const result = await createSourcePromotionDecision(input, { env: sprint2Enabled, sourcePromotionRepository: probe.sourcePromotionRepository });
     assert.equal(result.ok, false);
     assert.equal(result.error.code, "validation_blocker", JSON.stringify(input));
     assert.equal(probe.calls.length, 0);
+    assert.equal(
+      result.data?.exact_verification_phase,
+      __sourcePromotionServiceContract.SOURCE_PROMOTION_SERVICE_INPUT_SHAPE_PHASE,
+      JSON.stringify(input),
+    );
   }
 });
 
@@ -116,7 +122,7 @@ test("P1-08 service: accepts valid needs_more_information and rejected inputs (n
     const probe = createRepositoryProbe(successResult);
     const result = await createSourcePromotionDecision(
       { organizationId: ORG, intakeSourceCandidateId: CANDIDATE, outcome, actorContext: humanActor(), now: NOW },
-      { env: bothEnabled, sourcePromotionRepository: probe.sourcePromotionRepository },
+      { env: sprint2Enabled, sourcePromotionRepository: probe.sourcePromotionRepository },
     );
     assert.equal(result.ok, true, outcome);
     assert.equal(probe.calls.length, 1);
@@ -131,7 +137,7 @@ test("P1-08 service (AUTH-KAI-003): rejects every non-human actor type outright,
       const probe = createRepositoryProbe(successResult);
       const input = { organizationId: ORG, intakeSourceCandidateId: CANDIDATE, outcome, actorContext: humanActor({ actorType }), now: NOW };
       if (outcome === "promoted") input.reviewedSourceType = REVIEWED_TYPE;
-      const result = await createSourcePromotionDecision(input, { env: bothEnabled, sourcePromotionRepository: probe.sourcePromotionRepository });
+      const result = await createSourcePromotionDecision(input, { env: sprint2Enabled, sourcePromotionRepository: probe.sourcePromotionRepository });
       assert.equal(result.ok, false);
       assert.equal(result.error.code, "authorization_denied");
       assert.equal(probe.calls.length, 0);
@@ -150,7 +156,7 @@ test("P1-08 service (VAL-TEN-001): rejects a human actor with no active, correct
     const probe = createRepositoryProbe(successResult);
     const result = await createSourcePromotionDecision(
       { organizationId: ORG, intakeSourceCandidateId: CANDIDATE, outcome: "promoted", reviewedSourceType: REVIEWED_TYPE, actorContext, now: NOW },
-      { env: bothEnabled, sourcePromotionRepository: probe.sourcePromotionRepository },
+      { env: sprint2Enabled, sourcePromotionRepository: probe.sourcePromotionRepository },
     );
     assert.equal(result.ok, false);
     assert.equal(result.error.code, "tenant_boundary_violation");
@@ -170,7 +176,7 @@ test("P1-08 service: accepts gk_admin, gk_operator, and gk_reviewer, and forward
         actorContext: humanActor({ organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: role }] }),
         now: NOW,
       },
-      { env: bothEnabled, sourcePromotionRepository: probe.sourcePromotionRepository },
+      { env: sprint2Enabled, sourcePromotionRepository: probe.sourcePromotionRepository },
     );
     assert.equal(result.ok, true);
     assert.equal(probe.calls.length, 1);
@@ -321,6 +327,343 @@ function auditProbe() {
   };
 }
 
+test("P1-08 repository: validation_blocker for a malformed repository-level input shape carries the repository-input-shape diagnostic phase", async () => {
+  const repository = createPostgresSourcePromotionRepository({
+    runInTransaction: (callback) => callback(fakeTxFor({ candidateRow: completeCandidateRow(), reviewItemRow: openReviewItemRow() })),
+  });
+  const result = await repository.createSourcePromotionDecision({
+    identity: { organizationId: ORG, intakeSourceCandidateId: CANDIDATE },
+    outcome: "not_a_real_outcome",
+    actorUserId: "user-1",
+    now: NOW,
+    metadataOnlyAudit: auditAlwaysOk,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "validation_blocker");
+  assert.equal(
+    result.data?.exact_verification_phase,
+    __sourcePromotionRepositoryContract.SOURCE_PROMOTION_EXACT_VERIFICATION_PHASE.REPOSITORY_INPUT_SHAPE,
+  );
+});
+
+test("P1-08 repository: a rejected required metadata-only audit rolls back and returns validation_blocker with the required-audit-rejected diagnostic phase", async () => {
+  const candidateRow = completeCandidateRow();
+  const reviewItemRow = openReviewItemRow();
+  const tx = {
+    async query(sql, params) {
+      if (sql.includes("FROM kai.intake_promotion_decisions") && sql.includes("FOR UPDATE")) return { rows: [] };
+      if (sql.includes("FROM kai.intake_source_candidates") && sql.includes("FOR UPDATE")) return { rows: [candidateRow] };
+      if (sql.includes("FROM kai.review_queue_items") && sql.includes("FOR UPDATE")) return { rows: [reviewItemRow] };
+      if (sql.includes("FROM kai.intake_files")) return { rows: [{ upload_state: "confirmed" }] };
+      if (sql.includes("UPDATE kai.intake_source_candidates")) return { rows: [{ ...candidateRow, candidate_status: "rejected" }] };
+      if (sql.includes("UPDATE kai.review_queue_items")) return { rows: [{ ...reviewItemRow, queue_status: "resolved", review_status: "resolved" }] };
+      if (sql.includes("INSERT INTO kai.intake_promotion_decisions")) {
+        return { rows: [{
+          intake_promotion_decision_id: "d-new", organization_id: ORG, intake_source_candidate_id: CANDIDATE,
+          review_queue_item_id: reviewItemRow.review_queue_item_id, reviewed_source_type: null, decision_status: "rejected",
+          source_id: null, source_version_id: null, created_at: NOW, decided_at: NOW, promoted_at: null,
+        }] };
+      }
+      throw new Error(`unexpected query: ${sql}`);
+    },
+  };
+  const repository = createPostgresSourcePromotionRepository({ runInTransaction: (callback) => callback(tx) });
+  const result = await repository.createSourcePromotionDecision({
+    identity: { organizationId: ORG, intakeSourceCandidateId: CANDIDATE },
+    outcome: "rejected",
+    actorUserId: "user-1",
+    now: NOW,
+    metadataOnlyAudit: { prepareMetadataOnlyAudit: () => ({ ok: false }) },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "validation_blocker");
+  assert.equal(
+    result.data?.exact_verification_phase,
+    __sourcePromotionRepositoryContract.SOURCE_PROMOTION_EXACT_VERIFICATION_PHASE.REQUIRED_AUDIT_REJECTED,
+  );
+});
+
+test("P1-08 repository: a Postgres check-constraint violation surfaces as validation_blocker with the db-constraint-violation diagnostic phase", async () => {
+  const constraintError = Object.assign(new Error("check constraint violated"), { code: "23514" });
+  const repository = createPostgresSourcePromotionRepository({
+    runInTransaction: () => { throw constraintError; },
+  });
+  const result = await repository.createSourcePromotionDecision({
+    identity: { organizationId: ORG, intakeSourceCandidateId: CANDIDATE },
+    outcome: "rejected",
+    actorUserId: "user-1",
+    now: NOW,
+    metadataOnlyAudit: auditAlwaysOk,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "validation_blocker");
+  assert.equal(
+    result.data?.exact_verification_phase,
+    __sourcePromotionRepositoryContract.SOURCE_PROMOTION_EXACT_VERIFICATION_PHASE.DB_CONSTRAINT_VIOLATION,
+  );
+});
+
+test("P1-08 repository: a grouped-SQLSTATE error thrown before any tagged tx.query() call (e.g. runInTransaction/connect itself) still falls back to the umbrella db-constraint-violation phase, never a fabricated operation token", async () => {
+  for (const code of ["23514", "P0001", "22P02"]) {
+    const error = Object.assign(new Error("connect-time failure"), { code });
+    const repository = createPostgresSourcePromotionRepository({
+      runInTransaction: () => { throw error; },
+    });
+    const result = await repository.createSourcePromotionDecision({
+      identity: { organizationId: ORG, intakeSourceCandidateId: CANDIDATE },
+      outcome: "rejected",
+      actorUserId: "user-1",
+      now: NOW,
+      metadataOnlyAudit: auditAlwaysOk,
+    });
+    assert.equal(result.ok, false, code);
+    assert.equal(result.error.code, "validation_blocker", code);
+    assert.equal(
+      result.data?.exact_verification_phase,
+      __sourcePromotionRepositoryContract.SOURCE_PROMOTION_EXACT_VERIFICATION_PHASE.DB_CONSTRAINT_VIOLATION,
+      code,
+    );
+  }
+});
+
+/**
+ * Builds a fake transaction context covering every read/write this repository
+ * can issue for a null -> rejected decision, except that `throwAtSubstring`
+ * (a unique substring of exactly one query's SQL text) throws `error` instead
+ * of returning rows - simulating a real PostgreSQL error raised by that one
+ * single-query stage, without ever converting it into a normal return from
+ * inside the transaction (the thrown error propagates to withTransaction's
+ * own catch/ROLLBACK, exactly as an unmodified tx.query() rejection would).
+ */
+function txThrowingDuringRejectedDecisionAt(throwAtSubstring, error, { candidateRow, reviewItemRow } = {}) {
+  const candidate = candidateRow ?? completeCandidateRow();
+  const reviewItem = reviewItemRow ?? openReviewItemRow();
+  return {
+    async query(sql) {
+      if (sql.includes(throwAtSubstring)) throw error;
+      if (sql.includes("FROM kai.intake_promotion_decisions") && sql.includes("FOR UPDATE")) return { rows: [] };
+      if (sql.includes("FROM kai.intake_source_candidates") && sql.includes("FOR UPDATE")) return { rows: [candidate] };
+      if (sql.includes("FROM kai.review_queue_items") && sql.includes("FOR UPDATE")) return { rows: [reviewItem] };
+      if (sql.includes("UPDATE kai.intake_source_candidates")) return { rows: [{ ...candidate, candidate_status: "rejected" }] };
+      if (sql.includes("UPDATE kai.review_queue_items")) return { rows: [{ ...reviewItem, queue_status: "resolved", review_status: "resolved" }] };
+      if (sql.includes("INSERT INTO kai.intake_promotion_decisions")) {
+        return { rows: [{
+          intake_promotion_decision_id: "d-new", organization_id: ORG, intake_source_candidate_id: CANDIDATE,
+          review_queue_item_id: reviewItem.review_queue_item_id, reviewed_source_type: null, decision_status: "rejected",
+          source_id: null, source_version_id: null, created_at: NOW, decided_at: NOW, promoted_at: null,
+        }] };
+      }
+      if (sql.includes("FROM kai.intake_files")) return { rows: [{ upload_state: "confirmed" }] };
+      if (sql.includes("INSERT INTO kai.upload_lifecycle_audit")) return { rows: [] };
+      throw new Error(`unexpected query in fake transaction: ${sql}`);
+    },
+  };
+}
+
+const SOURCE_PROMOTION_SQLSTATE_TO_TOKEN = { 23514: "23514", P0001: "p0001", "22P02": "22p02" };
+
+test("P1-08 repository: each grouped SQLSTATE (23514, P0001, 22P02) thrown by a single tagged query stage produces that stage's exact operation-specific exact_verification_phase, not the umbrella phase", async () => {
+  for (const code of ["23514", "P0001", "22P02"]) {
+    const error = Object.assign(new Error(`postgres error ${code}`), { code });
+    const tx = txThrowingDuringRejectedDecisionAt("UPDATE kai.intake_source_candidates", error);
+    const repository = createPostgresSourcePromotionRepository({
+      runInTransaction: (callback) => callback(tx),
+    });
+    const result = await repository.createSourcePromotionDecision({
+      identity: { organizationId: ORG, intakeSourceCandidateId: CANDIDATE },
+      outcome: "rejected",
+      actorUserId: "user-1",
+      now: NOW,
+      metadataOnlyAudit: auditAlwaysOk,
+    });
+    assert.equal(result.ok, false, code);
+    assert.equal(result.error.code, "validation_blocker", code);
+    assert.equal(
+      result.data?.exact_verification_phase,
+      `source_promotion_candidate_status_update_${SOURCE_PROMOTION_SQLSTATE_TO_TOKEN[code]}`,
+      code,
+    );
+    assert.notEqual(
+      result.data?.exact_verification_phase,
+      __sourcePromotionRepositoryContract.SOURCE_PROMOTION_EXACT_VERIFICATION_PHASE.DB_CONSTRAINT_VIOLATION,
+      code,
+    );
+  }
+});
+
+test("P1-08 repository: two distinct DB operations hitting the same SQLSTATE produce two distinct operation-specific exact_verification_phase tokens", async () => {
+  const code = "23514";
+
+  const txAtCandidateUpdate = txThrowingDuringRejectedDecisionAt(
+    "UPDATE kai.intake_source_candidates",
+    Object.assign(new Error("check constraint violated"), { code }),
+  );
+  const repositoryA = createPostgresSourcePromotionRepository({ runInTransaction: (callback) => callback(txAtCandidateUpdate) });
+  const resultA = await repositoryA.createSourcePromotionDecision({
+    identity: { organizationId: ORG, intakeSourceCandidateId: CANDIDATE },
+    outcome: "rejected",
+    actorUserId: "user-1",
+    now: NOW,
+    metadataOnlyAudit: auditAlwaysOk,
+  });
+
+  const txAtDecisionInsert = txThrowingDuringRejectedDecisionAt(
+    "INSERT INTO kai.intake_promotion_decisions",
+    Object.assign(new Error("check constraint violated"), { code }),
+  );
+  const repositoryB = createPostgresSourcePromotionRepository({ runInTransaction: (callback) => callback(txAtDecisionInsert) });
+  const resultB = await repositoryB.createSourcePromotionDecision({
+    identity: { organizationId: ORG, intakeSourceCandidateId: CANDIDATE },
+    outcome: "rejected",
+    actorUserId: "user-1",
+    now: NOW,
+    metadataOnlyAudit: auditAlwaysOk,
+  });
+
+  assert.equal(resultA.data?.exact_verification_phase, "source_promotion_candidate_status_update_23514");
+  assert.equal(resultB.data?.exact_verification_phase, "source_promotion_decision_insert_23514");
+  assert.notEqual(resultA.data?.exact_verification_phase, resultB.data?.exact_verification_phase);
+});
+
+test("P1-08 repository: the sensitivity-profile read stage (reachable only on the 'promoted' outcome) tags 22P02 with its own operation-specific phase", async () => {
+  const error = Object.assign(new Error("invalid input syntax for type uuid"), { code: "22P02" });
+  const candidate = completeCandidateRow();
+  const reviewItem = openReviewItemRow();
+  const tx = {
+    async query(sql) {
+      if (sql.includes("FROM kai.intake_sensitivity_profiles")) throw error;
+      if (sql.includes("FROM kai.intake_promotion_decisions") && sql.includes("FOR UPDATE")) return { rows: [] };
+      if (sql.includes("FROM kai.intake_source_candidates") && sql.includes("FOR UPDATE")) return { rows: [candidate] };
+      if (sql.includes("FROM kai.review_queue_items") && sql.includes("FOR UPDATE")) return { rows: [reviewItem] };
+      throw new Error(`unexpected query in fake transaction: ${sql}`);
+    },
+  };
+  const repository = createPostgresSourcePromotionRepository({ runInTransaction: (callback) => callback(tx) });
+  const result = await repository.createSourcePromotionDecision({
+    identity: { organizationId: ORG, intakeSourceCandidateId: CANDIDATE },
+    outcome: "promoted",
+    reviewedSourceType: REVIEWED_TYPE,
+    actorUserId: "user-1",
+    now: NOW,
+    metadataOnlyAudit: auditAlwaysOk,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "validation_blocker");
+  assert.equal(result.data?.exact_verification_phase, "source_promotion_sensitivity_profile_read_22p02");
+});
+
+test("P1-08 repository: every whitelisted query-stage x grouped-SQLSTATE combination is a defined, distinct operation-specific phase token - no reachable stage can silently fall back to the umbrella phase", () => {
+  const byStage = __sourcePromotionRepositoryContract.SOURCE_PROMOTION_OPERATION_PHASE_BY_STAGE_AND_SQLSTATE;
+  const expectedStages = [
+    "sensitivity_profile_read",
+    "upload_state_read",
+    "decision_insert",
+    "decision_transition",
+    "source_insert",
+    "source_version_insert",
+    "candidate_status_update",
+    "review_queue_resolve",
+    "review_queue_waiting_on_client",
+    "audit_insert",
+  ];
+  assert.deepEqual(Object.keys(byStage).sort(), [...expectedStages].sort());
+
+  const allTokens = new Set();
+  for (const stage of expectedStages) {
+    for (const [sqlstate, token] of Object.entries({ 23514: "23514", P0001: "p0001", "22P02": "22p02" })) {
+      const phase = byStage[stage][sqlstate];
+      assert.equal(typeof phase, "string", `${stage}/${sqlstate}`);
+      assert.equal(phase, `source_promotion_${stage}_${token}`, `${stage}/${sqlstate}`);
+      assert.notEqual(
+        phase,
+        __sourcePromotionRepositoryContract.SOURCE_PROMOTION_EXACT_VERIFICATION_PHASE.DB_CONSTRAINT_VIOLATION,
+        `${stage}/${sqlstate}`,
+      );
+      allTokens.add(phase);
+    }
+  }
+  // 10 stages x 3 grouped SQLSTATEs = 30 distinct tokens, zero collisions.
+  assert.equal(allTokens.size, expectedStages.length * 3);
+});
+
+test("P1-08 repository: an unrelated/unclassified PostgreSQL error retains its previous system_error behavior regardless of which tagged stage threw it", async () => {
+  const unrelatedError = Object.assign(new Error("relation does not exist"), { code: "42P01" });
+  const tx = txThrowingDuringRejectedDecisionAt("UPDATE kai.intake_source_candidates", unrelatedError);
+  const repository = createPostgresSourcePromotionRepository({ runInTransaction: (callback) => callback(tx) });
+  const result = await repository.createSourcePromotionDecision({
+    identity: { organizationId: ORG, intakeSourceCandidateId: CANDIDATE },
+    outcome: "rejected",
+    actorUserId: "user-1",
+    now: NOW,
+    metadataOnlyAudit: auditAlwaysOk,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "system_error");
+  assert.equal(result.data, null);
+});
+
+test("P1-08 repository: a tagged query-stage failure still propagates as a rejection through runInTransaction rather than being swallowed into a normal return from inside the callback", async () => {
+  const error = Object.assign(new Error("check constraint violated"), { code: "23514" });
+  const tx = txThrowingDuringRejectedDecisionAt("UPDATE kai.intake_source_candidates", error);
+  let callbackRejected = false;
+  const repository = createPostgresSourcePromotionRepository({
+    runInTransaction: async (callback) => {
+      try {
+        return await callback(tx);
+      } catch (caught) {
+        callbackRejected = true;
+        throw caught;
+      }
+    },
+  });
+  const result = await repository.createSourcePromotionDecision({
+    identity: { organizationId: ORG, intakeSourceCandidateId: CANDIDATE },
+    outcome: "rejected",
+    actorUserId: "user-1",
+    now: NOW,
+    metadataOnlyAudit: auditAlwaysOk,
+  });
+  assert.equal(callbackRejected, true, "the transaction callback must observe a thrown rejection, not a swallowed return, so withTransaction's ROLLBACK path runs");
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "validation_blocker");
+  assert.equal(result.data?.exact_verification_phase, "source_promotion_candidate_status_update_23514");
+});
+
+test("P1-08 repository: a successful rejected-decision path (no thrown error) is unaffected by the query-stage tagging", async () => {
+  const candidate = completeCandidateRow();
+  const reviewItem = openReviewItemRow();
+  const tx = txThrowingDuringRejectedDecisionAt("__never_matches__", new Error("unused"), { candidateRow: candidate, reviewItemRow: reviewItem });
+  const repository = createPostgresSourcePromotionRepository({ runInTransaction: (callback) => callback(tx) });
+  const result = await repository.createSourcePromotionDecision({
+    identity: { organizationId: ORG, intakeSourceCandidateId: CANDIDATE },
+    outcome: "rejected",
+    actorUserId: "user-1",
+    now: NOW,
+    metadataOnlyAudit: auditAlwaysOk,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.data.promotionDecision.decision_status, "rejected");
+  assert.equal(result.error, null);
+});
+
+test("P1-08 service: a repository validation_blocker's exact_verification_phase propagates unchanged through the service to the caller", async () => {
+  const probe = createRepositoryProbe({
+    ok: false,
+    data: { exact_verification_phase: __sourcePromotionRepositoryContract.SOURCE_PROMOTION_EXACT_VERIFICATION_PHASE.PERMISSION_PREDICATE_FAILED },
+    error: { code: "validation_blocker", status: 422 },
+  });
+  const result = await createSourcePromotionDecision(
+    { organizationId: ORG, intakeSourceCandidateId: CANDIDATE, outcome: "rejected", actorContext: humanActor(), now: NOW },
+    { env: sprint2Enabled, sourcePromotionRepository: probe.sourcePromotionRepository },
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "validation_blocker");
+  assert.equal(
+    result.data?.exact_verification_phase,
+    __sourcePromotionRepositoryContract.SOURCE_PROMOTION_EXACT_VERIFICATION_PHASE.PERMISSION_PREDICATE_FAILED,
+  );
+});
+
 test("P1-08 repository: not_found when the identity has no committed P1-07 candidate row (tenant isolation on the candidate read)", async () => {
   const repository = createPostgresSourcePromotionRepository({
     runInTransaction: (callback) => callback(fakeTxFor({ candidateRow: null })),
@@ -368,6 +711,11 @@ test("P1-08 repository (VAL-KAI-P1-08-003): validation_blocker for an unrecogniz
     });
     assert.equal(result.ok, false, reviewedSourceType);
     assert.equal(result.error.code, "validation_blocker");
+    assert.equal(
+      result.data?.exact_verification_phase,
+      __sourcePromotionRepositoryContract.SOURCE_PROMOTION_EXACT_VERIFICATION_PHASE.REVIEWED_SOURCE_TYPE_INVALID,
+      reviewedSourceType,
+    );
   }
 });
 
@@ -404,6 +752,11 @@ test("P1-08 repository (VAL-KAI-P1-08-001): validation_blocker when the review i
     const result = await repository2.createSourcePromotionDecision(input);
     assert.equal(result.ok, false, outcome);
     assert.equal(result.error.code, "validation_blocker", outcome);
+    assert.equal(
+      result.data?.exact_verification_phase,
+      __sourcePromotionRepositoryContract.SOURCE_PROMOTION_EXACT_VERIFICATION_PHASE.CANDIDATE_REVIEW_INCOMPLETE,
+      outcome,
+    );
   }
 });
 
@@ -453,6 +806,11 @@ test("P1-08 repository (VAL-KAI-P1-08-002): validation_blocker when the reapplie
     });
     assert.equal(result.ok, false, JSON.stringify(overrides));
     assert.equal(result.error.code, "validation_blocker");
+    assert.equal(
+      result.data?.exact_verification_phase,
+      __sourcePromotionRepositoryContract.SOURCE_PROMOTION_EXACT_VERIFICATION_PHASE.PERMISSION_PREDICATE_FAILED,
+      JSON.stringify(overrides),
+    );
   }
 });
 
@@ -857,18 +1215,27 @@ test("P1-08 own-boolean-data-property audit predicate rejects a getter-backed ok
     candidateRecord: { candidate_status: "promoted" },
     reviewQueueRecord: { queue_status: "resolved" },
   };
+  const fakeTx = { query: async () => ({ rows: [], rowCount: 0 }) };
 
   const getterBacked = { prepareMetadataOnlyAudit() { return Object.defineProperty({}, "ok", { get() { return true; }, enumerable: true }); } };
-  assert.throws(() => prepareRequiredAudit(getterBacked, context), RequiredAuditRejectedError);
+  assert.throws(() => prepareRequiredAudit(getterBacked, fakeTx, context), RequiredAuditRejectedError);
 
   const arrayShaped = { prepareMetadataOnlyAudit() { return Object.assign([], { ok: true, publish() {} }); } };
-  assert.throws(() => prepareRequiredAudit(arrayShaped, context), RequiredAuditRejectedError);
+  assert.throws(() => prepareRequiredAudit(arrayShaped, fakeTx, context), RequiredAuditRejectedError);
 
   const missingPublish = { prepareMetadataOnlyAudit() { return { ok: true }; } };
-  assert.throws(() => prepareRequiredAudit(missingPublish, context), RequiredAuditRejectedError);
+  assert.throws(() => prepareRequiredAudit(missingPublish, fakeTx, context), RequiredAuditRejectedError);
 
-  const accepted = { prepareMetadataOnlyAudit() { return { ok: true, publish: async () => {} }; } };
-  assert.equal(typeof prepareRequiredAudit(accepted, context).publish, "function");
+  let capturedDb;
+  const accepted = {
+    prepareMetadataOnlyAudit({ db } = {}) {
+      capturedDb = db;
+      return { ok: true, publish: async () => {} };
+    },
+  };
+  const prepared = prepareRequiredAudit(accepted, fakeTx, context);
+  assert.equal(typeof prepared.publish, "function");
+  assert.equal(capturedDb, fakeTx, "the repository's transaction must be forwarded as the audit's db context");
 });
 
 test("P1-08 repository resolves concurrent identical creation/transition via ON CONFLICT ... DO NOTHING RETURNING / compare-and-set UPDATE plus an authoritative re-read, not a raised 23505 catch or an in-process lock", () => {

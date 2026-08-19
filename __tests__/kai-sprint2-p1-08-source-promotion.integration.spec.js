@@ -563,7 +563,7 @@ async function runSourcePromotionIntegrationSuite() {
 
       const deniedResult = await createSourcePromotionDecision(
         { ...input, actorContext: humanActor({ actorType: "ai" }) },
-        { env: { KAI_SPRINT2_ENABLED: "true", KAI_SOURCE_PROMOTION_ENABLED: "true" }, sourcePromotionRepository: repository, metadataOnlyAudit: createAuditProbe().dependency },
+        { env: { KAI_SPRINT2_ENABLED: "true" }, sourcePromotionRepository: repository, metadataOnlyAudit: createAuditProbe().dependency },
       );
       assert.equal(deniedResult.ok, false, outcome);
       assert.equal(deniedResult.error.code, "authorization_denied", outcome);
@@ -678,7 +678,7 @@ async function runSourcePromotionIntegrationSuite() {
     const result = await createSourcePromotionDecision(
       { organizationId: ORG, intakeSourceCandidateId: pair.intakeSourceCandidateId, outcome: "promoted", reviewedSourceType: REVIEWED_TYPE, actorContext: humanActor(), now: NOW },
       {
-        env: { KAI_SPRINT2_ENABLED: "true", KAI_SOURCE_PROMOTION_ENABLED: "true" },
+        env: { KAI_SPRINT2_ENABLED: "true" },
         sourcePromotionRepository: repository,
         metadataOnlyAudit: createAuditProbe().dependency,
       },
@@ -688,7 +688,7 @@ async function runSourcePromotionIntegrationSuite() {
 
     const deniedResult = await createSourcePromotionDecision(
       { organizationId: ORG, intakeSourceCandidateId: pair.intakeSourceCandidateId, outcome: "promoted", reviewedSourceType: REVIEWED_TYPE, actorContext: humanActor({ actorType: "ai" }), now: NOW },
-      { env: { KAI_SPRINT2_ENABLED: "true", KAI_SOURCE_PROMOTION_ENABLED: "true" }, sourcePromotionRepository: repository, metadataOnlyAudit: createAuditProbe().dependency },
+      { env: { KAI_SPRINT2_ENABLED: "true" }, sourcePromotionRepository: repository, metadataOnlyAudit: createAuditProbe().dependency },
     );
     assert.equal(deniedResult.ok, false);
     assert.equal(deniedResult.error.code, "authorization_denied");

@@ -116,10 +116,107 @@ const SOURCE_PROMOTION_PERMISSION_VALIDATOR_KEY = "VAL-KAI-P1-08-002";
 const SOURCE_PROMOTION_TYPE_VALIDATOR_KEY = "VAL-KAI-P1-08-003";
 const SOURCE_PROMOTION_AUDIT_OPERATION = "source_promotion_decision_persisted";
 
-function sourcePromotionFailure(code) {
+/**
+ * Diagnostic-only exact_verification_phase tokens: non-sensitive, stable labels
+ * identifying which materially distinct validation_blocker branch produced a
+ * given failure result. These carry no SQL, row data, or infrastructure detail -
+ * only which fail-closed predicate or error-shaping branch was hit. They ride
+ * the existing `data` propagation convention already used by GCS upload
+ * verification (see sprint2IntakeApi.js's EXACT_VERIFICATION_PHASE_PATTERN) and
+ * do not change `error.code`, `blockers`, or HTTP status for any branch.
+ */
+const SOURCE_PROMOTION_EXACT_VERIFICATION_PHASE = Object.freeze({
+  REPOSITORY_INPUT_SHAPE: "source_promotion_repository_input_shape",
+  REQUIRED_AUDIT_REJECTED: "source_promotion_required_audit_rejected",
+  DB_CONSTRAINT_VIOLATION: "source_promotion_db_constraint_violation",
+  REVIEWED_SOURCE_TYPE_INVALID: "source_promotion_reviewed_source_type_invalid",
+  PERMISSION_PREDICATE_FAILED: "source_promotion_permission_predicate_failed",
+  CANDIDATE_REVIEW_INCOMPLETE: "source_promotion_candidate_review_incomplete",
+});
+
+/**
+ * Query-level granularity for this module's own single-query helpers (the
+ * repository's own SQL, per the module doc comment - never the reused P1-08
+ * `getScoped*` lookups in kaiIntakeQueries.js, which remain shared read
+ * helpers outside this package's own SQL surface). Each stage identifies
+ * exactly one tx.query() call site reachable during the promoted transaction,
+ * used only to tag a thrown PostgreSQL error with which single-query stage
+ * raised it - never SQL text, parameters, row contents, or constraint names.
+ */
+const SOURCE_PROMOTION_QUERY_STAGE = Object.freeze({
+  SENSITIVITY_PROFILE_READ: "sensitivity_profile_read",
+  UPLOAD_STATE_READ: "upload_state_read",
+  DECISION_INSERT: "decision_insert",
+  DECISION_TRANSITION: "decision_transition",
+  SOURCE_INSERT: "source_insert",
+  SOURCE_VERSION_INSERT: "source_version_insert",
+  CANDIDATE_STATUS_UPDATE: "candidate_status_update",
+  REVIEW_QUEUE_RESOLVE: "review_queue_resolve",
+  REVIEW_QUEUE_WAITING_ON_CLIENT: "review_queue_waiting_on_client",
+  AUDIT_INSERT: "audit_insert",
+});
+
+const SOURCE_PROMOTION_SQLSTATE_TOKEN = Object.freeze({
+  23514: "23514",
+  P0001: "p0001",
+  "22P02": "22p02",
+});
+
+/**
+ * The complete, whitelisted set of operation-specific exact_verification_phase
+ * tokens this module can ever emit for a grouped SQLSTATE (23514 / P0001 /
+ * 22P02): every known query stage crossed with every grouped SQLSTATE. Built
+ * once from the two enumerations above so a reachable stage can never
+ * silently fall back to the umbrella DB_CONSTRAINT_VIOLATION phase - the
+ * fallback below is reachable only for an error this module's own tagging
+ * never touched (e.g. a failure before any tx.query() call, such as
+ * `runInTransaction` itself throwing).
+ */
+const SOURCE_PROMOTION_OPERATION_PHASE_BY_STAGE_AND_SQLSTATE = Object.freeze(
+  Object.fromEntries(
+    Object.values(SOURCE_PROMOTION_QUERY_STAGE).map((stage) => [
+      stage,
+      Object.freeze(
+        Object.fromEntries(
+          Object.entries(SOURCE_PROMOTION_SQLSTATE_TOKEN).map(([sqlstate, token]) => [
+            sqlstate,
+            `source_promotion_${stage}_${token}`,
+          ]),
+        ),
+      ),
+    ]),
+  ),
+);
+
+const SOURCE_PROMOTION_QUERY_STAGE_TAG = Symbol("kaiSourcePromotionQueryStage");
+
+/**
+ * Runs one tx.query() call tagged with its single-query stage. On a thrown
+ * PostgreSQL error, attaches a non-enumerable stage marker and rethrows the
+ * exact same error unchanged - never converted into a return value, so the
+ * surrounding transaction's rollback (see withTransaction in kaiDb.js) is
+ * never suppressed or altered by this diagnostic tagging.
+ */
+async function taggedQuery(tx, stage, sql, params) {
+  try {
+    return await tx.query(sql, params);
+  } catch (error) {
+    if (error && typeof error === "object" && !(SOURCE_PROMOTION_QUERY_STAGE_TAG in error)) {
+      try {
+        Object.defineProperty(error, SOURCE_PROMOTION_QUERY_STAGE_TAG, { value: stage, enumerable: false });
+      } catch {
+        // Non-extensible error object: fall through and rethrow untagged -
+        // shapeSourcePromotionError's fallback still applies.
+      }
+    }
+    throw error;
+  }
+}
+
+function sourcePromotionFailure(code, data = null) {
   return {
     ok: false,
-    data: null,
+    data,
     error: {
       code,
       status: SOURCE_PROMOTION_RESULT_STATUS[code],
@@ -212,7 +309,9 @@ function computeSourceCode({ organizationId, intakeSensitivityProfileId, profile
  * perform against the same table.
  */
 async function readScopedSensitivityProfile(tx, organizationId, intakeSensitivityProfileId) {
-  const result = await tx.query(
+  const result = await taggedQuery(
+    tx,
+    SOURCE_PROMOTION_QUERY_STAGE.SENSITIVITY_PROFILE_READ,
     `SELECT organization_id::text AS organization_id,
             intake_sensitivity_profile_id::text AS intake_sensitivity_profile_id,
             intake_file_id::text AS intake_file_id,
@@ -316,7 +415,9 @@ function satisfiesLineageMatchPredicate(candidateRow, profileRow) {
 }
 
 async function insertDecisionRow(tx, decision) {
-  const result = await tx.query(
+  const result = await taggedQuery(
+    tx,
+    SOURCE_PROMOTION_QUERY_STAGE.DECISION_INSERT,
     `INSERT INTO kai.intake_promotion_decisions (
        organization_id,
        intake_source_candidate_id,
@@ -351,7 +452,9 @@ async function insertDecisionRow(tx, decision) {
 }
 
 async function transitionDecisionRowIfNeedsMoreInformation(tx, decision) {
-  const result = await tx.query(
+  const result = await taggedQuery(
+    tx,
+    SOURCE_PROMOTION_QUERY_STAGE.DECISION_TRANSITION,
     `UPDATE kai.intake_promotion_decisions
         SET decision_status = $3,
             reviewed_source_type = $4,
@@ -379,7 +482,9 @@ async function transitionDecisionRowIfNeedsMoreInformation(tx, decision) {
 }
 
 async function insertSourceIfAbsent(tx, source) {
-  const result = await tx.query(
+  const result = await taggedQuery(
+    tx,
+    SOURCE_PROMOTION_QUERY_STAGE.SOURCE_INSERT,
     `INSERT INTO kai.sources (
        organization_id,
        source_code,
@@ -396,7 +501,9 @@ async function insertSourceIfAbsent(tx, source) {
 }
 
 async function insertSourceVersionIfAbsent(tx, version) {
-  const result = await tx.query(
+  const result = await taggedQuery(
+    tx,
+    SOURCE_PROMOTION_QUERY_STAGE.SOURCE_VERSION_INSERT,
     `INSERT INTO kai.source_versions (
        organization_id,
        source_id,
@@ -431,7 +538,9 @@ async function insertSourceVersionIfAbsent(tx, version) {
  * 'promoted' or 'rejected'.
  */
 async function setCandidateStatusIfCurrent(tx, { organizationId, intakeSourceCandidateId, toStatus }) {
-  const result = await tx.query(
+  const result = await taggedQuery(
+    tx,
+    SOURCE_PROMOTION_QUERY_STAGE.CANDIDATE_STATUS_UPDATE,
     `UPDATE kai.intake_source_candidates
         SET candidate_status = $3
       WHERE organization_id = $1::uuid
@@ -452,7 +561,9 @@ async function setCandidateStatusIfCurrent(tx, { organizationId, intakeSourceCan
  * for a needs_more_information -> rejected/promoted follow-up).
  */
 async function resolveReviewQueueItemIfCurrent(tx, { organizationId, reviewQueueItemId, fromQueueStatus }) {
-  const result = await tx.query(
+  const result = await taggedQuery(
+    tx,
+    SOURCE_PROMOTION_QUERY_STAGE.REVIEW_QUEUE_RESOLVE,
     `UPDATE kai.review_queue_items
         SET queue_status = $3,
             review_status = $4
@@ -473,7 +584,9 @@ async function resolveReviewQueueItemIfCurrent(tx, { organizationId, reviewQueue
  * needs_more_information).
  */
 async function setReviewQueueItemWaitingOnClientIfOpen(tx, { organizationId, reviewQueueItemId, requiredAction }) {
-  const result = await tx.query(
+  const result = await taggedQuery(
+    tx,
+    SOURCE_PROMOTION_QUERY_STAGE.REVIEW_QUEUE_WAITING_ON_CLIENT,
     `UPDATE kai.review_queue_items
         SET queue_status = $3,
             required_action = $4
@@ -616,9 +729,10 @@ function buildSourcePromotionAuditPayload({ decisionRecord, candidateRecord, rev
  * P1-05/P1-06/P1-07's `prepareRequiredAudit`: an own-property descriptor read
  * (never a getter) whose `value` is exactly `true`, alongside a callable `publish`.
  */
-function prepareRequiredAudit(metadataOnlyAudit, context) {
+function prepareRequiredAudit(metadataOnlyAudit, tx, context) {
   const prepared = metadataOnlyAudit.prepareMetadataOnlyAudit({
     payload: buildSourcePromotionAuditPayload(context),
+    db: tx,
   });
 
   const okDescriptor =
@@ -640,7 +754,9 @@ function prepareRequiredAudit(metadataOnlyAudit, context) {
 }
 
 async function readScopedUploadState(tx, organizationId, intakeFileId) {
-  const result = await tx.query(
+  const result = await taggedQuery(
+    tx,
+    SOURCE_PROMOTION_QUERY_STAGE.UPLOAD_STATE_READ,
     `SELECT upload_state
        FROM kai.intake_files
       WHERE organization_id = $1::uuid
@@ -651,7 +767,9 @@ async function readScopedUploadState(tx, organizationId, intakeFileId) {
 }
 
 async function insertAudit(tx, { organizationId, intakeFileId, uploadState, metadata, now }) {
-  await tx.query(
+  await taggedQuery(
+    tx,
+    SOURCE_PROMOTION_QUERY_STAGE.AUDIT_INSERT,
     `INSERT INTO kai.upload_lifecycle_audit (
        organization_id, intake_file_id, operation, from_state, to_state, outcome, metadata, created_at
      )
@@ -663,10 +781,18 @@ async function insertAudit(tx, { organizationId, intakeFileId, uploadState, meta
 function shapeSourcePromotionError(error) {
   if (error instanceof MalformedInsertedRowError) return sourcePromotionFailure("system_error");
   if (error instanceof ConcurrentStateChangedError) return sourcePromotionFailure("conflict_current_state_changed");
-  if (error instanceof RequiredAuditRejectedError) return sourcePromotionFailure("validation_blocker");
+  if (error instanceof RequiredAuditRejectedError) {
+    return sourcePromotionFailure("validation_blocker", {
+      exact_verification_phase: SOURCE_PROMOTION_EXACT_VERIFICATION_PHASE.REQUIRED_AUDIT_REJECTED,
+    });
+  }
   if (error?.code === "23503") return sourcePromotionFailure("not_found");
   if (error?.code === "23514" || error?.code === "P0001" || error?.code === "22P02") {
-    return sourcePromotionFailure("validation_blocker");
+    const stage = error && typeof error === "object" ? error[SOURCE_PROMOTION_QUERY_STAGE_TAG] : undefined;
+    const operationPhase = typeof stage === "string" ? SOURCE_PROMOTION_OPERATION_PHASE_BY_STAGE_AND_SQLSTATE[stage]?.[error.code] : undefined;
+    return sourcePromotionFailure("validation_blocker", {
+      exact_verification_phase: operationPhase ?? SOURCE_PROMOTION_EXACT_VERIFICATION_PHASE.DB_CONSTRAINT_VIOLATION,
+    });
   }
   return sourcePromotionFailure("system_error");
 }
@@ -770,7 +896,10 @@ export function createPostgresSourcePromotionRepository({
    */
   async function performPromotionSourceWork(tx, { candidateRow, reviewedSourceType, actorUserId }) {
     if (!satisfiesReviewedSourceTypePredicate(reviewedSourceType)) {
-      return { blocker: "validation_blocker" };
+      return {
+        blocker: "validation_blocker",
+        exactVerificationPhase: SOURCE_PROMOTION_EXACT_VERIFICATION_PHASE.REVIEWED_SOURCE_TYPE_INVALID,
+      };
     }
 
     const profileRow = await readScopedSensitivityProfile(tx, candidateRow.organization_id, candidateRow.intake_sensitivity_profile_id);
@@ -781,7 +910,10 @@ export function createPostgresSourcePromotionRepository({
     }
 
     if (!satisfiesPermissionPredicate(profileRow)) {
-      return { blocker: "validation_blocker" };
+      return {
+        blocker: "validation_blocker",
+        exactVerificationPhase: SOURCE_PROMOTION_EXACT_VERIFICATION_PHASE.PERMISSION_PREDICATE_FAILED,
+      };
     }
 
     const sourceCode = computeSourceCode({
@@ -861,7 +993,7 @@ export function createPostgresSourcePromotionRepository({
     const uploadState = await readScopedUploadState(tx, candidateRow.organization_id, candidateRow.intake_file_id);
     if (!uploadState) return sourcePromotionFailure("not_found");
 
-    const preparedAudit = prepareRequiredAudit(metadataOnlyAudit, {
+    const preparedAudit = prepareRequiredAudit(metadataOnlyAudit, tx, {
       decisionRecord,
       candidateRecord,
       reviewQueueRecord,
@@ -902,7 +1034,11 @@ export function createPostgresSourcePromotionRepository({
      * synchronization primitive is used to coordinate this.
      */
     async createSourcePromotionDecision(input) {
-      if (!validateCreateInput(input)) return sourcePromotionFailure("validation_blocker");
+      if (!validateCreateInput(input)) {
+        return sourcePromotionFailure("validation_blocker", {
+          exact_verification_phase: SOURCE_PROMOTION_EXACT_VERIFICATION_PHASE.REPOSITORY_INPUT_SHAPE,
+        });
+      }
       const { identity, outcome, reviewedSourceType, actorUserId, now, metadataOnlyAudit } = input;
       try {
         return await runInTransaction(async (tx) => {
@@ -1003,7 +1139,12 @@ export function createPostgresSourcePromotionRepository({
 
             // outcome === DECISION_STATUS_PROMOTED
             const promotionWork = await performPromotionSourceWork(tx, { candidateRow, reviewedSourceType, actorUserId });
-            if (promotionWork.blocker) return sourcePromotionFailure(promotionWork.blocker);
+            if (promotionWork.blocker) {
+              return sourcePromotionFailure(
+                promotionWork.blocker,
+                promotionWork.exactVerificationPhase ? { exact_verification_phase: promotionWork.exactVerificationPhase } : null,
+              );
+            }
             const { sourceRecord, sourceVersionRecord } = promotionWork;
 
             const promotedCandidateRow = await setCandidateStatusIfCurrent(tx, {
@@ -1098,7 +1239,9 @@ export function createPostgresSourcePromotionRepository({
                 return sourcePromotionSuccess(await buildReplayPayload(tx, identity, replayValidation.record));
               }
             }
-            return sourcePromotionFailure("validation_blocker");
+            return sourcePromotionFailure("validation_blocker", {
+              exact_verification_phase: SOURCE_PROMOTION_EXACT_VERIFICATION_PHASE.CANDIDATE_REVIEW_INCOMPLETE,
+            });
           }
 
           if (outcome === DECISION_STATUS_NEEDS_MORE_INFORMATION) {
@@ -1182,7 +1325,12 @@ export function createPostgresSourcePromotionRepository({
 
           // outcome === DECISION_STATUS_PROMOTED
           const promotionWork = await performPromotionSourceWork(tx, { candidateRow, reviewedSourceType, actorUserId });
-          if (promotionWork.blocker) return sourcePromotionFailure(promotionWork.blocker);
+          if (promotionWork.blocker) {
+            return sourcePromotionFailure(
+              promotionWork.blocker,
+              promotionWork.exactVerificationPhase ? { exact_verification_phase: promotionWork.exactVerificationPhase } : null,
+            );
+          }
           const { sourceRecord, sourceVersionRecord } = promotionWork;
 
           const promotedCandidateRow = await setCandidateStatusIfCurrent(tx, {
@@ -1240,6 +1388,9 @@ export function createPostgresSourcePromotionRepository({
 }
 
 export const __sourcePromotionRepositoryContract = Object.freeze({
+  SOURCE_PROMOTION_EXACT_VERIFICATION_PHASE,
+  SOURCE_PROMOTION_QUERY_STAGE,
+  SOURCE_PROMOTION_OPERATION_PHASE_BY_STAGE_AND_SQLSTATE,
   ALLOWED_REVIEWED_SOURCE_TYPES: Object.freeze([...ALLOWED_REVIEWED_SOURCE_TYPES]),
   ALLOWED_DECISION_OUTCOMES: Object.freeze([...ALLOWED_DECISION_OUTCOMES]),
   CANDIDATE_STATUS_NEEDS_REVIEW,

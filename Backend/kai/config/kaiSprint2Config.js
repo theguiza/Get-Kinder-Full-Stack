@@ -17,21 +17,6 @@ export function areKaiSprint2UploadFeaturesEnabled(env = process.env) {
   return isKaiSprint2Enabled(env) && isKaiFileUploadEnabled(env);
 }
 
-/**
- * KAI_SOURCE_PROMOTION_ENABLED (P1-08 owner decision): added here with default
- * false (any unset/non-truthy value returns false via isEnabledValue), following
- * the exact `isKaiFileUploadEnabled`/`areKaiSprint2UploadFeaturesEnabled`
- * composition idiom already established in this file. Neither flag is enabled by
- * this package.
- */
-export function isKaiSourcePromotionEnabled(env = process.env) {
-  return isEnabledValue(env.KAI_SOURCE_PROMOTION_ENABLED);
-}
-
-export function areKaiSprint2SourcePromotionFeaturesEnabled(env = process.env) {
-  return isKaiSprint2Enabled(env) && isKaiSourcePromotionEnabled(env);
-}
-
 export function isKaiGenerationEnabled(env = process.env) {
   return isEnabledValue(env.KAI_GENERATION_ENABLED);
 }

@@ -355,11 +355,10 @@ function createSyntheticSourcePromotionRepository() {
   }
 }
 
-function cockpitDependencies({ promotionEnabled }) {
+function cockpitDependencies() {
   return {
     env: {
       KAI_SPRINT2_ENABLED: "true",
-      ...(promotionEnabled ? { KAI_SOURCE_PROMOTION_ENABLED: "true" } : {}),
     },
     now: () => Date.parse("2026-08-05T12:00:00.000Z"),
     sourcePromotionRepository: createSyntheticSourcePromotionRepository(),
@@ -505,7 +504,7 @@ test("P1-09 integrated synthetic P1 acceptance: intake candidate -> review -> al
   const previousFlag = process.env.KAI_SPRINT2_ENABLED;
   process.env.KAI_SPRINT2_ENABLED = "true";
   const restoreDependencies = reviewCockpitServiceTestables.setReviewCockpitDependenciesForTest(
-    cockpitDependencies({ promotionEnabled: true }),
+    cockpitDependencies(),
   );
   const server = await listen(createAssembledApplication());
 
@@ -770,11 +769,11 @@ test("P1-09 integrated synthetic P1 acceptance: intake candidate -> review -> al
   });
 });
 
-test("P1-09 integrated: with KAI_SOURCE_PROMOTION_ENABLED off, reads stay available and the decision route returns a clean feature_disabled", async (t) => {
+test("P1-09 integrated: with only KAI_SPRINT2_ENABLED set (no separate source-promotion flag), reads and the decision route are both reachable", async (t) => {
   const previousFlag = process.env.KAI_SPRINT2_ENABLED;
   process.env.KAI_SPRINT2_ENABLED = "true";
   const restoreDependencies = reviewCockpitServiceTestables.setReviewCockpitDependenciesForTest(
-    cockpitDependencies({ promotionEnabled: false }),
+    cockpitDependencies(),
   );
   const server = await listen(createAssembledApplication());
 
@@ -798,8 +797,11 @@ test("P1-09 integrated: with KAI_SOURCE_PROMOTION_ENABLED off, reads stay availa
 
   const detail = await request(server, { method: "GET", path: candidateDetailPath(candidate) });
   assert.equal(detail.statusCode, 200);
-  assert.equal(detail.body.data.decision_controls_enabled, false);
-  assert.deepEqual(detail.body.data.allowed_reviewed_source_types, []);
+  assert.equal(detail.body.data.decision_controls_enabled, true);
+  assert.deepEqual(
+    [...detail.body.data.allowed_reviewed_source_types].sort(),
+    ["organization_primary_record", "organization_secondary_record", "public_record", "third_party_provided_record"],
+  );
 
   const before = repositoryCallLog.length;
   const decision = await request(server, {
@@ -807,10 +809,9 @@ test("P1-09 integrated: with KAI_SOURCE_PROMOTION_ENABLED off, reads stay availa
     path: decisionPath(candidate),
     body: { outcome: "rejected" },
   });
-  assert.equal(decision.statusCode, 403);
-  assert.equal(decision.body.ok, false);
-  assert.equal(decision.body.error.code, "feature_disabled");
-  assert.equal(repositoryCallLog.length, before);
+  assert.equal(decision.statusCode, 200);
+  assert.equal(decision.body.ok, true);
+  assert.equal(repositoryCallLog.length, before + 1);
 });
 
 test("P1-09 integrated: with KAI_SPRINT2_ENABLED off, every cockpit route is feature-gated before authentication", async (t) => {

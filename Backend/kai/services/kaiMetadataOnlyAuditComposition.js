@@ -160,6 +160,77 @@ export function createProductionMetadataOnlyAuditForSourceVersion({
 const CLAIM_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
+ * Production composition of the `metadataOnlyAudit` contract required by P1-08's
+ * `createSourcePromotionDecision` repository write
+ * (`Backend/kai/dictionary/postgresSourcePromotionRepository.js`), which builds
+ * its own full audit payload (`buildSourcePromotionAuditPayload`) keyed by
+ * `object_type: "intake_promotion_decision"`. Bound at construction to
+ * organizationId/intakeSourceCandidateId - the identity the P1-09 review-cockpit
+ * decision route already has before the decision row exists - mirroring the
+ * P2-01 source-version adapter's identity discipline: no decision/source/
+ * source-version identifier is fabricated or predicted here, only the request's
+ * own candidate identity is used.
+ */
+export function createProductionMetadataOnlyAuditForSourcePromotion({
+  organizationId,
+  intakeSourceCandidateId,
+  actorContext,
+  now,
+  insertAuditEvent = insertRequiredSuccessfulAuditEvent,
+} = {}) {
+  if (typeof organizationId !== "string" || organizationId.length === 0) {
+    throw new TypeError("createProductionMetadataOnlyAuditForSourcePromotion requires organizationId.");
+  }
+  if (typeof intakeSourceCandidateId !== "string" || intakeSourceCandidateId.length === 0) {
+    throw new TypeError("createProductionMetadataOnlyAuditForSourcePromotion requires intakeSourceCandidateId.");
+  }
+
+  function isPlainObject(value) {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  }
+
+  return Object.freeze({
+    prepareMetadataOnlyAudit({ payload, db } = {}) {
+      if (!isPlainObject(payload)) return { ok: false };
+
+      const metadata = {
+        organization_id: organizationId,
+        object_type: "intake_promotion_decision",
+        target_object_type: "intake_promotion_decision",
+        object_id: intakeSourceCandidateId,
+        operation: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "p1_08_source_promotion_decision_persisted",
+        operation_type: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "p1_08_source_promotion_decision_persisted",
+        validator_key: typeof payload.validator_key === "string" ? payload.validator_key : null,
+        actor_type: actorContext?.actorType || "human",
+        actor_user_id: actorContext?.actorUserId || null,
+        request_id: actorContext?.requestId || null,
+        route: "p1_08_source_promotion_decision",
+        created_at: typeof now === "string" ? now : new Date().toISOString(),
+        metadata_only: true,
+        contains_raw_file_content: false,
+        contains_raw_parsed_rows: false,
+        contains_client_pii: false,
+        contains_prompt_text: false,
+        contains_unsafe_generated_text: false,
+        contains_signed_urls: false,
+        contains_storage_credentials: false,
+      };
+
+      return {
+        ok: true,
+        async publish() {
+          const result = await insertAuditEvent(metadata, db);
+          if (!result || result.ok !== true) {
+            throw new Error("p1_08_source_promotion_metadata_only_audit_publish_failed");
+          }
+          return result;
+        },
+      };
+    },
+  });
+}
+
+/**
  * Production composition of the `metadataOnlyAudit` contract required by P2-03
  * (`Backend/kai/dictionary/postgresClaimProposalRepository.js`), which supplies
  * its own full audit payload (`buildClaimProposalAuditPayload`) including the
@@ -865,6 +936,7 @@ export function createProductionMetadataOnlyAuditForOrganizationKaiEnablement({
 export const __testables = Object.freeze({
   createProductionMetadataOnlyAudit,
   createProductionMetadataOnlyAuditForSourceVersion,
+  createProductionMetadataOnlyAuditForSourcePromotion,
   createProductionMetadataOnlyAuditForClaimProposal,
   createProductionMetadataOnlyAuditForClaimGapFollowup,
   createProductionMetadataOnlyAuditForConflictReviewCandidate,

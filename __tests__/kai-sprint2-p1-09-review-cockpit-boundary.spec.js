@@ -17,6 +17,7 @@ import {
   getReviewCockpitSourceCandidateRecord,
 } from "../Backend/kai/db/kaiReviewCockpitReadModels.js";
 import { __testables as intakeRouteTestables } from "../Backend/kai/routes/sprint2IntakeApi.js";
+import { __sourcePromotionRepositoryContract } from "../Backend/kai/dictionary/postgresSourcePromotionRepository.js";
 import {
   REVIEW_COCKPIT_QUEUE_TYPES,
   encodeReviewCockpitQueueCursor,
@@ -56,7 +57,6 @@ const UPDATED_AT = "2026-07-15T11:00:00.000Z";
 const SHA = "a".repeat(64);
 
 const SPRINT2_ONLY = { KAI_SPRINT2_ENABLED: "true" };
-const BOTH_ENABLED = { KAI_SPRINT2_ENABLED: "true", KAI_SOURCE_PROMOTION_ENABLED: "true" };
 
 /**
  * Sentinels for every field class the P1-09 spec forbids from any response. They are
@@ -460,7 +460,7 @@ test("P1-09 route identifiers require an explicit organization scope and a canon
 });
 
 test("P1-09 service: KAI_SPRINT2_ENABLED disabled returns feature_disabled with zero read-model calls on every endpoint", async () => {
-  for (const env of [{}, { KAI_SPRINT2_ENABLED: "false" }, { KAI_SOURCE_PROMOTION_ENABLED: "true" }]) {
+  for (const env of [{}, { KAI_SPRINT2_ENABLED: "false" }]) {
     const calls = [];
     const dependencies = readDependencies({
       env,
@@ -485,7 +485,7 @@ test("P1-09 service: KAI_SPRINT2_ENABLED disabled returns feature_disabled with 
   }
 });
 
-test("P1-09 service: with KAI_SPRINT2_ENABLED on and KAI_SOURCE_PROMOTION_ENABLED off, reads stay available and only the decision seam is disabled", async () => {
+test("P1-09 service: with KAI_SPRINT2_ENABLED on, reads are available, decision controls are enabled, and the decision seam is reachable", async () => {
   const decisionCalls = [];
   const dependencies = readDependencies({
     env: SPRINT2_ONLY,
@@ -502,23 +502,148 @@ test("P1-09 service: with KAI_SPRINT2_ENABLED on and KAI_SOURCE_PROMOTION_ENABLE
   assert.equal(sensitivityProfile.data.sensitivity_posture.intake_sensitivity_profile_id, SENSITIVITY);
   const candidate = await getReviewCockpitSourceCandidateDetail({ organizationId: ORG, actorContext: humanActor(), intakeSourceCandidateId: CANDIDATE }, dependencies);
   assert.equal(candidate.ok, true);
-  assert.equal(candidate.data.decision_controls_enabled, false);
-  assert.deepEqual(candidate.data.allowed_reviewed_source_types, []);
+  assert.equal(candidate.data.decision_controls_enabled, true);
+  assert.deepEqual(
+    [...candidate.data.allowed_reviewed_source_types].sort(),
+    ["organization_primary_record", "organization_secondary_record", "public_record", "third_party_provided_record"],
+  );
 
   const decision = await submitSourceCandidateDecision(
     { organizationId: ORG, actorContext: humanActor(), intakeSourceCandidateId: CANDIDATE, payload: { outcome: "rejected" } },
     dependencies,
   );
-  assert.equal(decision.ok, false);
-  assert.equal(decision.error.code, "feature_disabled");
-  assert.equal(decision.error.status, 403);
-  assert.deepEqual(decisionCalls, []);
+  assert.notEqual(decision.error?.code, "feature_disabled");
+  assert.equal(decisionCalls.length, 1, "the decision seam must be reached rather than short-circuited");
 });
 
-test("P1-09 service: with both flags enabled the source-candidate detail advertises the P1-08 reviewed-source-type vocabulary", async () => {
+test("P1-09 service: a P1-08 validation_blocker's exact_verification_phase propagates unchanged through submitSourceCandidateDecision to the route logger", async () => {
+  const PHASE = __sourcePromotionRepositoryContract.SOURCE_PROMOTION_EXACT_VERIFICATION_PHASE.CANDIDATE_REVIEW_INCOMPLETE;
+  const dependencies = readDependencies({
+    env: SPRINT2_ONLY,
+    async createSourcePromotionDecision() {
+      return {
+        ok: false,
+        data: { exact_verification_phase: PHASE },
+        error: { code: "validation_blocker", status: 422 },
+      };
+    },
+  });
+
+  const result = await submitSourceCandidateDecision(
+    { organizationId: ORG, actorContext: humanActor(), intakeSourceCandidateId: CANDIDATE, payload: { outcome: "rejected" } },
+    dependencies,
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "validation_blocker");
+  assert.equal(result.data?.exact_verification_phase, PHASE);
+
+  // Same behavior/blockers/status the route already sends for validation_blocker,
+  // now with a non-null, sanitized exact_verification_phase reaching the logger.
+  let jsonBody = null;
+  const res = {
+    statusCode: null,
+    status(code) { this.statusCode = code; return this; },
+    json(body) { jsonBody = body; return this; },
+  };
+  intakeRouteTestables.sendServiceResult(res, result, 200);
+  assert.equal(res.statusCode, 422);
+  assert.equal(jsonBody.ok, false);
+  assert.equal(jsonBody.error.code, "validation_blocker");
+  assert.deepEqual(jsonBody.blockers, []);
+  assert.equal(jsonBody.data.exact_verification_phase, PHASE);
+
+  const logCalls = [];
+  const originalLog = console.log;
+  console.log = (...args) => logCalls.push(args);
+  try {
+    intakeRouteTestables.logKaiSprint2IntakeRequest(
+      { method: "POST", path: "/admin/review-cockpit/source-candidates/x/decision" },
+      { statusCode: res.statusCode },
+      jsonBody,
+    );
+  } finally {
+    console.log = originalLog;
+  }
+  assert.equal(logCalls.length, 1);
+  assert.equal(logCalls[0][1].exact_verification_phase, PHASE);
+  assert.equal(logCalls[0][1]["error.code"], "validation_blocker");
+});
+
+test("P1-09 service: an operation-specific source-promotion DB-constraint exact_verification_phase (source_promotion_<operation>_23514/p0001/22p02) propagates unchanged through submitSourceCandidateDecision, sendServiceResult, and the route logger with unchanged status/error.code/blockers", async () => {
+  const PHASE = "source_promotion_decision_insert_23514";
+  const dependencies = readDependencies({
+    env: SPRINT2_ONLY,
+    async createSourcePromotionDecision() {
+      return {
+        ok: false,
+        data: { exact_verification_phase: PHASE },
+        error: { code: "validation_blocker", status: 422 },
+      };
+    },
+  });
+
+  const result = await submitSourceCandidateDecision(
+    { organizationId: ORG, actorContext: humanActor(), intakeSourceCandidateId: CANDIDATE, payload: { outcome: "rejected" } },
+    dependencies,
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "validation_blocker");
+  assert.equal(result.data?.exact_verification_phase, PHASE);
+
+  let jsonBody = null;
+  const res = {
+    statusCode: null,
+    status(code) { this.statusCode = code; return this; },
+    json(body) { jsonBody = body; return this; },
+  };
+  intakeRouteTestables.sendServiceResult(res, result, 200);
+  assert.equal(res.statusCode, 422);
+  assert.equal(jsonBody.ok, false);
+  assert.equal(jsonBody.error.code, "validation_blocker");
+  assert.deepEqual(jsonBody.blockers, []);
+  assert.equal(jsonBody.data.exact_verification_phase, PHASE);
+
+  const logCalls = [];
+  const originalLog = console.log;
+  console.log = (...args) => logCalls.push(args);
+  try {
+    intakeRouteTestables.logKaiSprint2IntakeRequest(
+      { method: "POST", path: "/admin/review-cockpit/source-candidates/x/decision" },
+      { statusCode: res.statusCode },
+      jsonBody,
+    );
+  } finally {
+    console.log = originalLog;
+  }
+  assert.equal(logCalls.length, 1);
+  assert.equal(logCalls[0][1].exact_verification_phase, PHASE);
+  assert.equal(logCalls[0][1]["error.code"], "validation_blocker");
+});
+
+test("P1-09 route sanitization: every whitelisted operation-specific source-promotion phase token from the repository's own stage x SQLSTATE mapping survives sendServiceResult sanitization unchanged", () => {
+  const byStage = __sourcePromotionRepositoryContract.SOURCE_PROMOTION_OPERATION_PHASE_BY_STAGE_AND_SQLSTATE;
+  const allTokens = Object.values(byStage).flatMap((byCode) => Object.values(byCode));
+  assert.ok(allTokens.length >= 30, `expected at least 30 tokens, saw ${allTokens.length}`);
+  for (const phase of allTokens) {
+    let jsonBody = null;
+    const res = {
+      statusCode: null,
+      status(code) { this.statusCode = code; return this; },
+      json(body) { jsonBody = body; return this; },
+    };
+    intakeRouteTestables.sendServiceResult(
+      res,
+      { ok: false, error: { code: "validation_blocker", status: 422 }, data: { exact_verification_phase: phase } },
+      200,
+    );
+    assert.equal(jsonBody.data?.exact_verification_phase, phase, phase);
+  }
+});
+
+test("P1-09 service: with KAI_SPRINT2_ENABLED enabled the source-candidate detail advertises the P1-08 reviewed-source-type vocabulary", async () => {
   const result = await getReviewCockpitSourceCandidateDetail(
     { organizationId: ORG, actorContext: humanActor(), intakeSourceCandidateId: CANDIDATE },
-    readDependencies({ env: BOTH_ENABLED }),
+    readDependencies({ env: SPRINT2_ONLY }),
   );
   assert.equal(result.ok, true);
   assert.equal(result.data.decision_controls_enabled, true);
@@ -532,7 +657,7 @@ test("P1-09 service: every endpoint rejects non-human actors with zero read-mode
   for (const actorType of ["ai", "system", "import", "code", "generic_service"]) {
     const calls = [];
     const dependencies = readDependencies({
-      env: BOTH_ENABLED,
+      env: SPRINT2_ONLY,
       async listReviewCockpitQueueItems() { calls.push("queue"); return []; },
       async getReviewCockpitFileProfileRecord() { calls.push("file"); return null; },
       async getReviewCockpitSensitivityProfileRecord() { calls.push("sensitivity"); return null; },
@@ -711,7 +836,7 @@ test("P1-09 service (tenant isolation): an actor with membership only in another
 });
 
 test("P1-09 DTO allowlists: no raw content, storage location, object key, signed URL, credential, prompt, internal note, or unrestricted audit metadata reaches any response", async () => {
-  const dependencies = readDependencies({ env: BOTH_ENABLED });
+  const dependencies = readDependencies({ env: SPRINT2_ONLY });
 
   const queue = await listReviewCockpitQueue({ organizationId: ORG, actorContext: humanActor(), selection: {} }, dependencies);
   assert.equal(queue.ok, true);
@@ -799,7 +924,7 @@ test("P1-09 queue reads never invoke, import, or imply a promotion call", () => 
 test("P1-09 decision seam: passes the request through to P1-08 unchanged and never retries or coerces a conflict", async () => {
   const calls = [];
   const dependencies = readDependencies({
-    env: BOTH_ENABLED,
+    env: SPRINT2_ONLY,
     now: () => Date.parse("2026-08-05T12:00:00.000Z"),
     async createSourcePromotionDecision(input, injected) {
       calls.push({ input, injected });
@@ -823,13 +948,57 @@ test("P1-09 decision seam: passes the request through to P1-08 unchanged and nev
   assert.equal(calls[0].input.now, "2026-08-05T12:00:00.000Z");
 });
 
+test("P1-09 decision seam: the real/default runtime path composes a production metadataOnlyAudit dependency, not only a test double", async () => {
+  const calls = [];
+  const dependencies = readDependencies({
+    env: SPRINT2_ONLY,
+    now: () => Date.parse("2026-08-05T12:00:00.000Z"),
+    async createSourcePromotionDecision(input, injected) {
+      calls.push(injected);
+      return { ok: true, data: {}, error: null };
+    },
+  });
+  assert.equal("metadataOnlyAudit" in dependencies, false, "this dependency set supplies no test double");
+
+  await submitSourceCandidateDecision(
+    { organizationId: ORG, actorContext: humanActor(), intakeSourceCandidateId: CANDIDATE, payload: { outcome: "rejected" } },
+    dependencies,
+  );
+  assert.equal(calls.length, 1, "the decision seam must be reached rather than short-circuited");
+  const composedAudit = calls[0].metadataOnlyAudit;
+  assert.equal(typeof composedAudit?.prepareMetadataOnlyAudit, "function");
+  const prepared = composedAudit.prepareMetadataOnlyAudit({ payload: { attempted_operation: "source_promotion_decision_persisted" } });
+  assert.equal(prepared.ok, true);
+  assert.equal(typeof prepared.publish, "function");
+});
+
+test("P1-09 decision seam: a caller-supplied metadataOnlyAudit test double always overrides the production composition", async () => {
+  const calls = [];
+  const testDouble = { prepareMetadataOnlyAudit: () => ({ ok: true, publish: async () => ({ ok: true }) }) };
+  const dependencies = readDependencies({
+    env: SPRINT2_ONLY,
+    metadataOnlyAudit: testDouble,
+    async createSourcePromotionDecision(input, injected) {
+      calls.push(injected);
+      return { ok: true, data: {}, error: null };
+    },
+  });
+
+  await submitSourceCandidateDecision(
+    { organizationId: ORG, actorContext: humanActor(), intakeSourceCandidateId: CANDIDATE, payload: { outcome: "rejected" } },
+    dependencies,
+  );
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].metadataOnlyAudit, testDouble);
+});
+
 test("P1-09 decision seam: non-promoted outcomes forward no reviewedSourceType at all", async () => {
   for (const outcome of ["needs_more_information", "rejected"]) {
     const calls = [];
     const result = await submitSourceCandidateDecision(
       { organizationId: ORG, actorContext: humanActor(), intakeSourceCandidateId: CANDIDATE, payload: { outcome } },
       readDependencies({
-        env: BOTH_ENABLED,
+        env: SPRINT2_ONLY,
         async createSourcePromotionDecision(input) {
           calls.push(input);
           return { ok: false, data: null, error: { code: "not_found", status: 404 } };
@@ -971,6 +1140,28 @@ test("P1-09 UI keeps candidate and organization identifiers separated during que
   assert.doesNotMatch(uiSource, /setOrganization\(item\.target_object_id\)/);
   assert.doesNotMatch(uiSource, /setOrganization\(candidateId\)/);
   assert.doesNotMatch(uiSource, /setOrganization\(detail\.source_candidate\.intake_source_candidate_id\)/);
+});
+
+test("P1-09 UI decision submit CTA is derived deterministically from the selected outcome and never adds a second submission path", () => {
+  assert.match(
+    uiSource,
+    /function decisionSubmitLabel\(outcome\) \{\n\s+if \(outcome === "promoted"\) return "Promote";\n\s+if \(outcome === "rejected"\) return "Reject";\n\s+return "Record decision";\n\}/,
+  );
+  assert.match(uiSource, /<button type="submit" disabled=\{busy \|\| \(promotionSelected && !reviewedSourceType\)\}>\s*\n\s*\{decisionSubmitLabel\(outcome\)\}/);
+  // Exactly one submit control renders inside the decision form - no second button
+  // or second submission mechanism was added alongside it.
+  const formBody = uiSource.match(/function SourceDecisionControls\([\s\S]*?\n}\n/)?.[0];
+  assert.ok(formBody);
+  assert.equal((formBody.match(/<button/g) || []).length, 1);
+  assert.equal((formBody.match(/type="submit"/g) || []).length, 1);
+  assert.doesNotMatch(formBody, /onClick=\{.*onSubmit/);
+});
+
+test("P1-09 UI decision payload omits reviewed_source_type for every non-promoted outcome and includes it only for promoted", () => {
+  assert.match(
+    uiSource,
+    /onSubmit\(promotionSelected \? \{ outcome, reviewed_source_type: reviewedSourceType \} : \{ outcome \}\);/,
+  );
 });
 
 test("P1-09 UI clears tenant-scoped queue and detail state when organization context changes", () => {
