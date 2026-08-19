@@ -86,6 +86,27 @@ export async function sha256HexOfFile(file) {
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+export function generateIdempotencyKey() {
+  const bytes = new Uint8Array(16);
+  globalThis.crypto.getRandomValues(bytes);
+  return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+// Resolves the idempotency key for one logical file-reservation operation.
+// The server blocks duplicate declared checksums, so browser retries must key
+// the reservation by the same batch + checksum identity that the server uses.
+export function resolveFileReservationIdempotencyKey(previousIdentity, intakeBatchId, checksum) {
+  const key = `file-${intakeBatchId}-${checksum}`;
+  if (
+    previousIdentity &&
+    previousIdentity.intakeBatchId === intakeBatchId &&
+    previousIdentity.checksum === checksum
+  ) {
+    return previousIdentity;
+  }
+  return { intakeBatchId, checksum, key };
+}
+
 export function fileExtensionOf(filename) {
   const match = /\.[^.]+$/.exec(filename || "");
   return match ? match[0].toLowerCase() : "";

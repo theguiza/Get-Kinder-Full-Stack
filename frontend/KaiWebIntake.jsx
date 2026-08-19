@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   batchFilesPath,
   confirmUploadPath,
@@ -8,11 +8,13 @@ import {
   fileDetailPath,
   fileExtensionOf,
   fileReservationsPath,
+  generateIdempotencyKey,
   getJson,
   organizationsPath,
   postJson,
   putToSignedUrl,
   requestUploadUrlPath,
+  resolveFileReservationIdempotencyKey,
   sha256HexOfFile,
 } from "./kaiWebIntakeLogic.js";
 
@@ -42,6 +44,9 @@ export default function KaiWebIntake() {
   const [batchFiles, setBatchFiles] = useState([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const createBatchIdempotencyKeyRef = useRef(null);
+  const fileReservationIdempotencyKeyRef = useRef(null);
+  const fileReservationIdentityRef = useRef(null);
 
   // The browser never types or fabricates an organization id: it always
   // bootstraps from the server-authoritative list of organizations the
@@ -104,18 +109,23 @@ export default function KaiWebIntake() {
       setMessage("Organization id, an existing engagement, and batch code are required.");
       return;
     }
+    if (!createBatchIdempotencyKeyRef.current) {
+      createBatchIdempotencyKeyRef.current = generateIdempotencyKey();
+    }
     setBusy(true);
     setMessage("");
     const result = await postJson(createBatchPath(), {
       organization_id: organizationId,
       engagement_id: engagementId,
       batch_code: batchCode,
+      idempotency_key: createBatchIdempotencyKeyRef.current,
     });
     setBusy(false);
     if (result.statusCode !== 201 && result.statusCode !== 200) {
       setMessage(errorText(result));
       return;
     }
+    createBatchIdempotencyKeyRef.current = null;
     setIntakeBatchId(result.body?.data?.intake_batch_id || "");
     setMessage(`Batch created: ${result.body?.data?.intake_batch_id}`);
   }, [organizationId, engagementId, batchCode]);
@@ -127,7 +137,19 @@ export default function KaiWebIntake() {
     }
     setBusy(true);
     setMessage("");
+
     const checksum = await sha256HexOfFile(file);
+
+    // The server's preliminary duplicate protection is checksum-based, so
+    // retrying the same file content in the same batch must replay the same
+    // reservation key instead of minting a fresh key that trips VAL-IDEMP-006.
+    fileReservationIdentityRef.current = resolveFileReservationIdempotencyKey(
+      fileReservationIdentityRef.current,
+      intakeBatchId,
+      checksum,
+    );
+    fileReservationIdempotencyKeyRef.current = fileReservationIdentityRef.current.key;
+
     const reserveResult = await postJson(fileReservationsPath(intakeBatchId), {
       organization_id: organizationId,
       engagement_id: engagementId,
@@ -137,6 +159,7 @@ export default function KaiWebIntake() {
       file_size_bytes: file.size,
       checksum,
       hash_algorithm: "sha256",
+      idempotency_key: fileReservationIdempotencyKeyRef.current,
     });
     if (reserveResult.statusCode !== 201 && reserveResult.statusCode !== 200) {
       setBusy(false);
@@ -177,6 +200,8 @@ export default function KaiWebIntake() {
       setMessage(errorText(confirmResult));
       return;
     }
+    fileReservationIdentityRef.current = null;
+    fileReservationIdempotencyKeyRef.current = null;
     setMessage("File reserved, uploaded, and confirmed.");
   }, [organizationId, engagementId, intakeBatchId, file]);
 
