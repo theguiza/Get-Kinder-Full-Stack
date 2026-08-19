@@ -1,5 +1,4 @@
 import {
-  areKaiSprint2SourcePromotionFeaturesEnabled,
   isKaiSprint2Enabled,
 } from "../config/kaiSprint2Config.js";
 import { KAI_SPRINT2_P0_PATTERNS } from "../config/kaiSprint2P0Contract.js";
@@ -22,6 +21,7 @@ import {
 } from "../validators/kaiReviewCockpitRequestSchemas.js";
 import { createSourcePromotionDecision } from "./kaiSourcePromotionService.js";
 import { __sourcePromotionRepositoryContract } from "../dictionary/postgresSourcePromotionRepository.js";
+import { createProductionMetadataOnlyAuditForSourcePromotion } from "./kaiMetadataOnlyAuditComposition.js";
 
 /**
  * KAI P1-09 internal review cockpit service.
@@ -45,11 +45,16 @@ import { __sourcePromotionRepositoryContract } from "../dictionary/postgresSourc
  *   URL, credential, prompt, internal note, raw sample, or unrestricted audit
  *   metadata can ever reach a response.
  *
- * P1-08's repository requires an injected metadata-only audit dependency. P1-09
- * introduces no audit provider of its own (that would be new abstraction outside
- * this package's scope): `dependencies.metadataOnlyAudit` is forwarded unchanged,
- * and when it is absent P1-08's own fail-closed validator returns a clean
- * validation_blocker rather than any partial write.
+ * P1-08's repository requires an injected metadata-only audit dependency. A
+ * caller-supplied `dependencies.metadataOnlyAudit` (test double) is always
+ * forwarded unchanged; on the real/default runtime path this seam composes the
+ * approved production provider itself
+ * (`createProductionMetadataOnlyAuditForSourcePromotion`, the same
+ * `insertRequiredSuccessfulAuditEvent`-backed mechanism every other P1/P2/P3
+ * mutation route composes), bound to this request's own
+ * organizationId/intakeSourceCandidateId. If a provider cannot be composed (or
+ * a caller-supplied double is missing/invalid), P1-08's own fail-closed
+ * validator returns a clean validation_blocker rather than any partial write.
  */
 
 const REVIEW_COCKPIT_READ_ROLES = new Set(["gk_admin", "gk_operator", "gk_reviewer"]);
@@ -704,12 +709,10 @@ function composeReviewCockpitFileProfileDetail(record, organizationId) {
  * checksum, queue state, decision state, and the source/source_version result the
  * committed decision row is bound to.
  *
- * `decision_controls_enabled` reflects KAI_SOURCE_PROMOTION_ENABLED (composed with
- * KAI_SPRINT2_ENABLED) so the internal UI can hide or disable its decision controls
- * without guessing; the detail itself remains fully available under
- * KAI_SPRINT2_ENABLED alone. `allowed_reviewed_source_types` is read from P1-08's
- * own exported contract rather than restated here, and is empty whenever the
- * decision controls are disabled.
+ * `decision_controls_enabled` reflects KAI_SPRINT2_ENABLED so the internal UI can
+ * show or hide its decision controls without guessing. `allowed_reviewed_source_types`
+ * is read from P1-08's own exported contract rather than restated here, and is
+ * empty whenever decision controls are disabled.
  */
 export async function getReviewCockpitSourceCandidateDetail(input = {}, dependencies = {}) {
   const deps = resolvedDependencies(dependencies);
@@ -745,7 +748,7 @@ export async function getReviewCockpitSourceCandidateDetail(input = {}, dependen
     return buildKaiError("system_error");
   }
 
-  const decisionControlsEnabled = areKaiSprint2SourcePromotionFeaturesEnabled(deps.env || process.env);
+  const decisionControlsEnabled = isKaiSprint2Enabled(deps.env || process.env);
 
   return {
     ok: true,
@@ -779,7 +782,7 @@ export async function submitSourceCandidateDecision(input = {}, dependencies = {
   const deps = resolvedDependencies(dependencies);
   const env = deps.env || process.env;
 
-  if (!areKaiSprint2SourcePromotionFeaturesEnabled(env)) {
+  if (!isKaiSprint2Enabled(env)) {
     return buildKaiError("feature_disabled");
   }
 
@@ -798,6 +801,13 @@ export async function submitSourceCandidateDecision(input = {}, dependencies = {
   const outcome = input.payload.outcome;
   const now = (deps.now ? new Date(deps.now()) : new Date()).toISOString();
 
+  const metadataOnlyAudit = deps.metadataOnlyAudit || createProductionMetadataOnlyAuditForSourcePromotion({
+    organizationId,
+    intakeSourceCandidateId,
+    actorContext,
+    now,
+  });
+
   const decide = deps.createSourcePromotionDecision || createSourcePromotionDecision;
   const result = await decide(
     {
@@ -811,12 +821,14 @@ export async function submitSourceCandidateDecision(input = {}, dependencies = {
     {
       env,
       ...(deps.sourcePromotionRepository ? { sourcePromotionRepository: deps.sourcePromotionRepository } : {}),
-      ...(deps.metadataOnlyAudit ? { metadataOnlyAudit: deps.metadataOnlyAudit } : {}),
+      metadataOnlyAudit,
     },
   );
 
   if (!result?.ok) {
-    return buildKaiError(result?.error?.code || "system_error");
+    return buildKaiError(result?.error?.code || "system_error", {
+      ...(result?.data ? { data: result.data } : {}),
+    });
   }
 
   const data = isPlainObject(result.data) ? result.data : null;

@@ -1,4 +1,4 @@
-import { areKaiSprint2SourcePromotionFeaturesEnabled } from "../config/kaiSprint2Config.js";
+import { isKaiSprint2Enabled } from "../config/kaiSprint2Config.js";
 import { buildKaiError } from "../errors/kaiErrors.js";
 import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationService.js";
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
@@ -6,6 +6,14 @@ import { createPostgresSourcePromotionRepository } from "../dictionary/postgresS
 
 const SOURCE_PROMOTION_ALLOWED_ROLES = new Set(["gk_admin", "gk_operator", "gk_reviewer"]);
 const SOURCE_PROMOTION_OPERATION = "create_source_promotion_decision";
+
+/**
+ * Diagnostic-only exact_verification_phase token for the one validation_blocker
+ * branch this service returns directly (before ever calling the repository).
+ * Rides the same non-sensitive data-propagation convention the repository uses;
+ * changes no error.code, blockers, or HTTP status.
+ */
+const SOURCE_PROMOTION_SERVICE_INPUT_SHAPE_PHASE = "source_promotion_service_input_shape";
 
 /**
  * P1-08 CORRECTION: the decision outcome vocabulary the service accepts as
@@ -67,12 +75,10 @@ function isMappedHumanActor(actorContext) {
  * Human-authorized creation of exactly one `kai.intake_promotion_decisions` row
  * for a complete, immutable P1-07 candidate/review pair, compounded atomically
  * with deterministic `kai.sources`/`kai.source_versions` creation-or-authoritative-
- * replay and the candidate's/review item's required transitions. Requires both
- * `KAI_SPRINT2_ENABLED` and `KAI_SOURCE_PROMOTION_ENABLED` before any repository
- * read, lock, validator side effect, or audit activity - if either flag is
- * disabled, this returns the canonical `feature_disabled` result with zero
- * repository calls. It is not composed into any route, listener, scheduler, or
- * production path.
+ * replay and the candidate's/review item's required transitions. Requires
+ * `KAI_SPRINT2_ENABLED` before any repository read, lock, validator side effect,
+ * or audit activity - if disabled, this returns the canonical `feature_disabled`
+ * result with zero repository calls.
  *
  * Contains no SQL and imports no database pool: persistence, lineage re-reads, and
  * every fail-closed validator are delegated entirely to the injected P1-08
@@ -82,11 +88,13 @@ function isMappedHumanActor(actorContext) {
  * structured blockers are preserved on the returned error.
  */
 export async function createSourcePromotionDecision(input, dependencies = {}) {
-  if (!areKaiSprint2SourcePromotionFeaturesEnabled(dependencies.env || process.env)) {
+  if (!isKaiSprint2Enabled(dependencies.env || process.env)) {
     return buildKaiError("feature_disabled");
   }
   if (!isCreateSourcePromotionDecisionInput(input)) {
-    return buildKaiError("validation_blocker");
+    return buildKaiError("validation_blocker", {
+      data: { exact_verification_phase: SOURCE_PROMOTION_SERVICE_INPUT_SHAPE_PHASE },
+    });
   }
 
   const { actorContext } = input;
@@ -127,7 +135,10 @@ export async function createSourcePromotionDecision(input, dependencies = {}) {
   });
 
   if (!result.ok) {
-    return buildKaiError(result.error.code, { status: result.error.status });
+    return buildKaiError(result.error.code, {
+      status: result.error.status,
+      ...(result.data ? { data: result.data } : {}),
+    });
   }
   return { ok: true, data: result.data, error: null };
 }
@@ -136,4 +147,5 @@ export const __sourcePromotionServiceContract = Object.freeze({
   SOURCE_PROMOTION_OPERATION,
   SOURCE_PROMOTION_ALLOWED_ROLES,
   ALLOWED_DECISION_OUTCOMES: Object.freeze([...ALLOWED_DECISION_OUTCOMES]),
+  SOURCE_PROMOTION_SERVICE_INPUT_SHAPE_PHASE,
 });

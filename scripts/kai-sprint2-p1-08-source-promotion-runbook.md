@@ -61,15 +61,19 @@ lookups added to `Backend/kai/db/kaiIntakeQueries.js`
 `getScopedSourceVersionByCandidateIdentity`, `getScopedSourceVersionById`).
 `createSourcePromotionDecision` (`Backend/kai/services/kaiSourcePromotionService.js`)
 contains no SQL and imports no database pool: it validates its input allowlist,
-checks **both** `KAI_SPRINT2_ENABLED` and `KAI_SOURCE_PROMOTION_ENABLED` before any
-repository read, lock, validator side effect, or audit activity, enforces AUTH-KAI-003
-(reapplied from P1-06/P1-07: a local, strictly narrower human-actor gate than the
-shared assistant-boundary allowlist), and then delegates tenant-membership and role
-authorization to the existing shared validator-group mechanisms
-(`validateActorCanPerformOperation`, `validateTenantBoundaryConsistency`). It is not
-composed into any route, listener, scheduler, or production path, and neither feature
-flag is enabled by this package (`KAI_SOURCE_PROMOTION_ENABLED` is added to
-`Backend/kai/config/kaiSprint2Config.js` with default false).
+checks `KAI_SPRINT2_ENABLED` before any repository read, lock, validator side effect,
+or audit activity, enforces AUTH-KAI-003 (reapplied from P1-06/P1-07: a local,
+strictly narrower human-actor gate than the shared assistant-boundary allowlist), and
+then delegates tenant-membership and role authorization to the existing shared
+validator-group mechanisms (`validateActorCanPerformOperation`,
+`validateTenantBoundaryConsistency`).
+
+**Owner correction (2026-08-18):** this package originally also required a separate
+`KAI_SOURCE_PROMOTION_ENABLED` enablement flag on top of `KAI_SPRINT2_ENABLED`. That
+flag was found to be an additional, redundant enablement gate - not the
+implementation of any independent authorization, tenant, validation, state-transition,
+transaction, idempotency, or audit control - and has been removed. `KAI_SPRINT2_ENABLED`
+is now the sole feature gate for this path.
 
 **AUTH-KAI-003** (human-actor authorization): `actorContext.actorType` must be exactly
 `"human"` with a non-empty `actorUserId`. Every non-human actor type is rejected with
@@ -170,9 +174,9 @@ path, URL, prompt, credential, signed URL, or unrestricted storage path. `source
 and `source_version_id` are opaque server-generated identifiers, never storage
 pointers.
 
-When `KAI_SPRINT2_ENABLED` or `KAI_SOURCE_PROMOTION_ENABLED` is disabled, the service
-returns the canonical `feature_disabled` result with zero repository reads, locks,
-validator side effects, or audit activity.
+When `KAI_SPRINT2_ENABLED` is disabled, the service returns the canonical
+`feature_disabled` result with zero repository reads, locks, validator side effects,
+or audit activity.
 
 This package does not add a route, listener, scheduler, timer, polling loop, startup
 hook, public barrel export, production composition, feature-flag default enablement,

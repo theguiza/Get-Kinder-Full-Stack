@@ -33,8 +33,8 @@
 //     --organization-id=<uuid> --intake-file-id=<uuid> --actor-user-id=<uuid>
 //
 // Requires the same DATABASE_URL/DATABASE_URL_LOCAL selection already used by
-// Backend/db/pg.js, and KAI_SPRINT2_ENABLED=true /
-// KAI_SOURCE_PROMOTION_ENABLED not required (this script stops before P1-08).
+// Backend/db/pg.js, and KAI_SPRINT2_ENABLED=true (this script stops before P1-08
+// and never invokes the source-promotion decision path).
 
 import { activateParserProfileWorkForIntakeFile } from "../Backend/kai/parsing/parserProfileActivation.js";
 import { createDraftDataDictionary } from "../Backend/kai/services/kaiDataDictionaryService.js";
