@@ -79,7 +79,7 @@ export function sendServiceResult(res, result, successStatus = 200) {
 }
 
 const EXACT_VERIFICATION_PHASE_PATTERN =
-  /^(confirm_upload_authorization|upload_lifecycle_read|gcs_generation_binding_lookup|gcs_head_object|gcs_stat_exact_generation|gcs_open_exact_generation|gcs_stream_exact_generation|gcs_size_check|gcs_checksum_check|gcs_lifecycle_start|gcs_lifecycle_complete|gcs_generation_bind|gcs_lifecycle_confirm|confirm_upload_route_service)$/;
+  /^(confirm_upload_authorization|upload_lifecycle_read|gcs_generation_binding_lookup|gcs_head_object|gcs_stat_exact_generation|gcs_open_exact_generation|gcs_stream_exact_generation|gcs_size_check|gcs_checksum_check|gcs_lifecycle_start|gcs_lifecycle_complete|gcs_generation_bind|gcs_lifecycle_confirm|confirm_upload_route_service|source_promotion_repository_input_shape|source_promotion_required_audit_rejected|source_promotion_db_constraint_violation|source_promotion_reviewed_source_type_invalid|source_promotion_permission_predicate_failed|source_promotion_candidate_review_incomplete|source_promotion_service_input_shape|source_promotion_sensitivity_profile_read_23514|source_promotion_sensitivity_profile_read_p0001|source_promotion_sensitivity_profile_read_22p02|source_promotion_upload_state_read_23514|source_promotion_upload_state_read_p0001|source_promotion_upload_state_read_22p02|source_promotion_decision_insert_23514|source_promotion_decision_insert_p0001|source_promotion_decision_insert_22p02|source_promotion_decision_transition_23514|source_promotion_decision_transition_p0001|source_promotion_decision_transition_22p02|source_promotion_source_insert_23514|source_promotion_source_insert_p0001|source_promotion_source_insert_22p02|source_promotion_source_version_insert_23514|source_promotion_source_version_insert_p0001|source_promotion_source_version_insert_22p02|source_promotion_candidate_status_update_23514|source_promotion_candidate_status_update_p0001|source_promotion_candidate_status_update_22p02|source_promotion_review_queue_resolve_23514|source_promotion_review_queue_resolve_p0001|source_promotion_review_queue_resolve_22p02|source_promotion_review_queue_waiting_on_client_23514|source_promotion_review_queue_waiting_on_client_p0001|source_promotion_review_queue_waiting_on_client_22p02|source_promotion_audit_insert_23514|source_promotion_audit_insert_p0001|source_promotion_audit_insert_22p02)$/;
 
 const SAFE_SERVICE_WARNING_MESSAGES = Object.freeze({
   blocked_attempt_audit_not_written: "Blocked-attempt audit was not written.",
@@ -825,10 +825,7 @@ router.post("/admin/review-queue/:reviewQueueItemId/status", async (req, res) =>
  *
  * All routes are already behind this router's `requireKaiSprint2Enabled` gate (and
  * the mount-level gate in index.js), so KAI_SPRINT2_ENABLED gates every one of
- * them. The decision route additionally requires KAI_SOURCE_PROMOTION_ENABLED,
- * enforced inside the service, which returns the canonical feature_disabled result
- * rather than an error or a partial write when that flag is off. The three
- * read-only routes remain available under KAI_SPRINT2_ENABLED alone.
+ * them, including the decision route.
  */
 router.get("/admin/review-cockpit/queue", async (req, res) => {
   const organizationId = normalizedUuid(req.query?.organization_id);
@@ -2384,6 +2381,8 @@ export const __testables = {
   validateCoverageReviewDecisionRequestOrSend,
   clientFollowupCompletionIdentifiers,
   validateClientFollowupCompletionRequestOrSend,
+  safeKaiResponseSummary,
+  logKaiSprint2IntakeRequest,
   setIntakeServiceForTest(service) {
     intakeServiceOverride = service;
     return () => {

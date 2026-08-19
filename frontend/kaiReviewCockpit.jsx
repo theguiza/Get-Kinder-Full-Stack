@@ -12,9 +12,8 @@ import { organizationsPath } from "./kaiWebIntakeLogic.js";
  *
  * Source-decision controls are rendered only when the source-candidate detail
  * response reports `decision_controls_enabled: true`, which mirrors
- * KAI_SOURCE_PROMOTION_ENABLED composed with KAI_SPRINT2_ENABLED. When that flag is
- * off, the controls are not rendered at all - the read-only review detail remains
- * fully available.
+ * KAI_SPRINT2_ENABLED. When that flag is off, the controls are not rendered at
+ * all - the read-only review detail remains fully available.
  */
 
 const BASE_PATH = "/api/kai/sprint2/intake";
@@ -181,12 +180,18 @@ function FileProfileDetail({ detail }) {
   );
 }
 
+function decisionSubmitLabel(outcome) {
+  if (outcome === "promoted") return "Promote";
+  if (outcome === "rejected") return "Reject";
+  return "Record decision";
+}
+
 function SourceDecisionControls({ detail, onSubmit, busy }) {
   const [outcome, setOutcome] = useState("needs_more_information");
   const [reviewedSourceType, setReviewedSourceType] = useState("");
 
-  // KAI_SOURCE_PROMOTION_ENABLED (composed with KAI_SPRINT2_ENABLED) is off: the
-  // decision controls are not rendered at all, not merely made non-functional.
+  // KAI_SPRINT2_ENABLED is off: the decision controls are not rendered at all,
+  // not merely made non-functional.
   if (!detail?.decision_controls_enabled) {
     return <p className="kai-cockpit-note">Source-decision controls are disabled.</p>;
   }
@@ -227,7 +232,7 @@ function SourceDecisionControls({ detail, onSubmit, busy }) {
         </label>
       ) : null}
       <button type="submit" disabled={busy || (promotionSelected && !reviewedSourceType)}>
-        Record decision
+        {decisionSubmitLabel(outcome)}
       </button>
     </form>
   );
