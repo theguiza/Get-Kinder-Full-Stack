@@ -1,9 +1,13 @@
 import { validateAssistantBoundary } from "../validators/assistantBoundaryValidators.js";
+
 import { KAI_SPRINT2_P0_OPERATION_ROLES } from "../config/kaiSprint2P0Contract.js";
 
 const OPERATION_ROLES = Object.freeze(
   Object.fromEntries(
-    Object.entries(KAI_SPRINT2_P0_OPERATION_ROLES).map(([operation, roles]) => [operation, new Set(roles)]),
+    Object.entries(KAI_SPRINT2_P0_OPERATION_ROLES).map(([operation, roles]) => [
+      operation,
+      new Set(roles),
+    ]),
   ),
 );
 
@@ -17,15 +21,8 @@ const P0_MUTATING_OPERATIONS = new Set([
 
 const P0_GLOBAL_WRITE_ROLES = new Set(KAI_SPRINT2_P0_OPERATION_ROLES.create_intake_batch);
 
-// Owner-authorized minimum DDL-backed exception: an org-scoped client_admin
-// (derived only from an active kai.gk_organization_bindings row - see
-// gkOrganizationBindingAuthority.js) may perform ordinary intake for its own
-// bound organization without holding a global gk_admin/gk_operator role.
-// This is intentionally narrower than P0_MUTATING_OPERATIONS: it does not
-// extend to review-queue administration, file-policy administration, or any
-// other governance operation, which still require a global GK write role
-// exactly as before.
 const P0_CLIENT_WRITE_OPERATIONS = new Set(["create_intake_batch", "create_intake_file"]);
+
 const P0_CLIENT_WRITE_ROLES = new Set(["client_admin"]);
 
 function activeMembershipsForOrg(actorContext, organizationId) {
@@ -38,6 +35,7 @@ function activeMembershipsForOrg(actorContext, organizationId) {
 
 export function validateActorCanPerformOperation(actorContext, operation, organizationId, options = {}) {
   const assistantBoundary = validateAssistantBoundary({ actorContext, operation });
+
   if (assistantBoundary.severity === "blocker") {
     return { ok: false, blockers: [assistantBoundary], error_code: "authorization_denied" };
   }
@@ -82,6 +80,7 @@ export function validateActorCanPerformOperation(actorContext, operation, organi
   }
 
   const memberships = activeMembershipsForOrg(actorContext, organizationId);
+
   if (memberships.length === 0) {
     return {
       ok: false,
@@ -103,10 +102,15 @@ export function validateActorCanPerformOperation(actorContext, operation, organi
 
   if (P0_MUTATING_OPERATIONS.has(operation)) {
     const globalRoles = new Set(actorContext.kaiRoles || []);
-    const hasGlobalWriteRole = [...P0_GLOBAL_WRITE_ROLES].some((role) => globalRoles.has(role));
+
+    const hasGlobalWriteRole = [...P0_GLOBAL_WRITE_ROLES].some((role) =>
+      globalRoles.has(role),
+    );
+
     const hasClientWriteRole =
       P0_CLIENT_WRITE_OPERATIONS.has(operation) &&
       memberships.some((membership) => P0_CLIENT_WRITE_ROLES.has(membership.role_name));
+
     if (!hasGlobalWriteRole && !hasClientWriteRole) {
       return {
         ok: false,
@@ -118,7 +122,8 @@ export function validateActorCanPerformOperation(actorContext, operation, organi
             object_type: "operation",
             object_code: operation,
             object_id: organizationId,
-            message: "P0 write operation requires a global GK write role or an org-scoped client write role.",
+            message:
+              "P0 write operation requires a global GK write role or an org-scoped client write role.",
             blocking_reason: "missing_global_gk_write_role",
             required_fix:
               "Assign gk_admin or gk_operator in kai.user_roles, or bind this organization to a KAI tenant so its admin-role members hold client_admin.",
@@ -133,18 +138,33 @@ export function validateActorCanPerformOperation(actorContext, operation, organi
     }
   }
 
-  const allowedRoles = options.allowedRoles || OPERATION_ROLES[operation] || OPERATION_ROLES.read_intake;
-  const hasGlobalCapabilityRole = (actorContext.kaiRoles || []).some((role) => allowedRoles.has(role));
-  // globalRolesOnly: caller (e.g. Review Cockpit) requires a global GK capability
-  // role in addition to the active organization membership already verified above;
-  // an org-scoped role_name matching allowedRoles is tenant scope only and must not
-  // substitute for the global role.
+  const allowedRoles =
+    options.allowedRoles || OPERATION_ROLES[operation] || OPERATION_ROLES.read_intake;
+
+  const hasGlobalCapabilityRole = (actorContext.kaiRoles || []).some((role) =>
+    allowedRoles.has(role),
+  );
+
   const hasAllowedRole = P0_MUTATING_OPERATIONS.has(operation)
     ? true
     : options.globalRolesOnly
       ? hasGlobalCapabilityRole
       : (Boolean(options.combineGlobalRoles) && hasGlobalCapabilityRole) ||
         memberships.some((membership) => allowedRoles.has(membership.role_name));
+
+  console.log(JSON.stringify({
+    event: "KAI_AUTHORIZATION_ROLE_DENIED_DEBUG",
+    operation,
+    organizationId,
+    actorUserId: actorContext?.actorUserId,
+    kaiRoles: actorContext?.kaiRoles,
+    memberships,
+    allowedRoles: [...allowedRoles],
+    options,
+    hasGlobalCapabilityRole,
+    hasAllowedRole
+  }, null, 2));
+
   if (!hasAllowedRole) {
     return {
       ok: false,
