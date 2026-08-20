@@ -1,5 +1,6 @@
 import express from "express";
 import { KAI_ERROR_STATUS, sendKaiError } from "../errors/kaiErrors.js";
+import { attachKaiSprint2ActorContext } from "../middleware/kaiSprint2Authentication.js";
 import {
   areKaiSprint2UploadFeaturesEnabled,
   areKaiSprint2WorkerFeaturesEnabled,
@@ -46,6 +47,7 @@ import {
 
 const router = express.Router();
 let intakeServiceOverride = null;
+let actorContextMiddlewareOverride = null;
 let intakeServicePromise = null;
 let reviewQueueServicePromise = null;
 let reviewCockpitServicePromise = null;
@@ -624,6 +626,18 @@ router.use(requireKaiSprint2Enabled);
 router.use(setKaiSprint2NoStore);
 router.use(attachTemporarySafeIntakeRouteLogger);
 
+/**
+ * Attaches the resolved Sprint 2 actor context. Applied directly to only the
+ * specific route registrations below whose handlers read
+ * sprint2MappedActorContext(req) - not router-wide - because several routes on
+ * this router (e.g. the organizations/engagements/kai-enablement/batch routes)
+ * resolve actor identity through their own service-level path instead and must
+ * not pay this resolver's cost or failure modes.
+ */
+function sprint2ActorContextMiddleware(req, res, next) {
+  return (actorContextMiddlewareOverride || attachKaiSprint2ActorContext)(req, res, next);
+}
+
 function statusData(env = process.env) {
   const uploadFeaturesEnabled = areKaiSprint2UploadFeaturesEnabled(env);
   const storageProviderEnabled = isKaiGateC1GcsProviderEnabled(env);
@@ -917,6 +931,7 @@ async function getExportReviewService() {
 
 router.get(
   "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-review-queue/:exportReviewQueueItemId/packet",
+  sprint2ActorContextMiddleware,
   async (req, res) => {
     const identifiers = exportReviewPacketIdentifiers(req);
     if (!identifiers) return sendKaiError(res, "invalid_request");
@@ -957,6 +972,7 @@ function validateStartExportReviewRequestOrSend(req, res) {
 
 router.post(
   "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-review-queue/:exportReviewQueueItemId/start",
+  sprint2ActorContextMiddleware,
   async (req, res) => {
     const identifiers = validateStartExportReviewRequestOrSend(req, res);
     if (!identifiers) return;
@@ -1000,6 +1016,7 @@ function validateCompleteExportReviewRequestOrSend(req, res) {
 
 router.post(
   "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-review-queue/:exportReviewQueueItemId/complete",
+  sprint2ActorContextMiddleware,
   async (req, res) => {
     const identifiers = validateCompleteExportReviewRequestOrSend(req, res);
     if (!identifiers) return;
@@ -1215,6 +1232,7 @@ function validateEvidenceExtractionRequestOrSend(req, res) {
  */
 router.post(
   "/admin/organizations/:organizationId/source-versions/:sourceVersionId/evidence-extraction",
+  sprint2ActorContextMiddleware,
   async (req, res) => {
     const identifiers = validateEvidenceExtractionRequestOrSend(req, res);
     if (!identifiers) return;
@@ -1258,6 +1276,7 @@ async function getEvidenceCoverageAssessmentService() {
  */
 router.get(
   "/admin/organizations/:organizationId/source-versions/:sourceVersionId/evidence-coverage-assessment",
+  sprint2ActorContextMiddleware,
   async (req, res) => {
     const identifiers = sourceVersionEvidenceExtractionIdentifiers(req);
     if (!identifiers) {
@@ -1320,6 +1339,7 @@ function validateClaimProposalRequestOrSend(req, res) {
  */
 router.post(
   "/admin/organizations/:organizationId/evidence-items/:evidenceItemId/claim-proposal",
+  sprint2ActorContextMiddleware,
   async (req, res) => {
     const identifiers = validateClaimProposalRequestOrSend(req, res);
     if (!identifiers) return;
@@ -1388,6 +1408,7 @@ function validateClaimGapFollowupRequestOrSend(req, res) {
  */
 router.post(
   "/admin/organizations/:organizationId/claims/:claimId/claim-gap-followups",
+  sprint2ActorContextMiddleware,
   async (req, res) => {
     const identifiers = validateClaimGapFollowupRequestOrSend(req, res);
     if (!identifiers) return;
@@ -1462,6 +1483,7 @@ function validateConflictReviewCandidateRequestOrSend(req, res) {
  */
 router.post(
   "/admin/organizations/:organizationId/claims/:firstClaimId/potential-conflicts/:secondClaimId",
+  sprint2ActorContextMiddleware,
   async (req, res) => {
     const identifiers = validateConflictReviewCandidateRequestOrSend(req, res);
     if (!identifiers) return;
@@ -1529,6 +1551,7 @@ function claimTraceabilityRequestedAudienceFromQuery(req = {}) {
  */
 router.get(
   "/admin/organizations/:organizationId/claims/:claimId/traceability",
+  sprint2ActorContextMiddleware,
   async (req, res) => {
     const identifiers = claimGapFollowupIdentifiers(req);
     const requestedAudience = claimTraceabilityRequestedAudienceFromQuery(req);
@@ -1632,6 +1655,7 @@ function eligibleClaimsForAudienceQuery(req = {}) {
  */
 router.get(
   "/admin/organizations/:organizationId/eligible-claims",
+  sprint2ActorContextMiddleware,
   async (req, res) => {
     const identifiers = eligibleClaimsForAudienceOrganizationIdentifier(req);
     const query = eligibleClaimsForAudienceQuery(req);
@@ -1686,6 +1710,7 @@ function claimLibraryIndexQuery(req = {}) {
  */
 router.get(
   "/admin/organizations/:organizationId/claim-library/candidates",
+  sprint2ActorContextMiddleware,
   async (req, res) => {
     const identifiers = eligibleClaimsForAudienceOrganizationIdentifier(req);
     const query = claimLibraryIndexQuery(req);
@@ -1763,6 +1788,7 @@ function generatedDraftLibraryIndexQuery(req = {}) {
  */
 router.get(
   "/admin/organizations/:organizationId/generated-content-drafts",
+  sprint2ActorContextMiddleware,
   async (req, res) => {
     const identifiers = eligibleClaimsForAudienceOrganizationIdentifier(req);
     const query = generatedDraftLibraryIndexQuery(req);
@@ -1834,6 +1860,7 @@ function validateCreateEvidenceSummaryRequestOrSend(req, res) {
 
 router.post(
   "/admin/organizations/:organizationId/generated-content-drafts/evidence-summary",
+  sprint2ActorContextMiddleware,
   async (req, res) => {
     const parsed = validateCreateEvidenceSummaryRequestOrSend(req, res);
     if (!parsed) return;
@@ -1863,6 +1890,7 @@ router.post(
 
 router.get(
   "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/review-packet",
+  sprint2ActorContextMiddleware,
   async (req, res) => {
     const identifiers = generatedContentDraftIdentifier(req);
     if (!identifiers || Object.keys(req.query || {}).length !== 0) {
@@ -1917,6 +1945,7 @@ function validateGeneratedContentReviewTransitionRequestOrSend(req, res) {
 
 router.post(
   "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/generated-content-review-queue/:reviewQueueItemId/start",
+  sprint2ActorContextMiddleware,
   async (req, res) => {
     const identifiers = validateGeneratedContentReviewTransitionRequestOrSend(req, res);
     if (!identifiers) return;
@@ -1947,6 +1976,7 @@ router.post(
 
 router.post(
   "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/generated-content-review-queue/:reviewQueueItemId/complete",
+  sprint2ActorContextMiddleware,
   async (req, res) => {
     const identifiers = validateGeneratedContentReviewTransitionRequestOrSend(req, res);
     if (!identifiers) return;
@@ -2035,6 +2065,7 @@ function validateEvidenceReviewCompletionRequestOrSend(req, res) {
  */
 router.post(
   "/admin/organizations/:organizationId/evidence-items/:evidenceItemId/evidence-review/:reviewQueueItemId/complete",
+  sprint2ActorContextMiddleware,
   async (req, res) => {
     const identifiers = validateEvidenceReviewCompletionRequestOrSend(req, res);
     if (!identifiers) return;
@@ -2104,6 +2135,7 @@ function validateClaimReviewCompletionRequestOrSend(req, res) {
  */
 router.post(
   "/admin/organizations/:organizationId/claims/:claimId/claim-review/:reviewQueueItemId/complete",
+  sprint2ActorContextMiddleware,
   async (req, res) => {
     const identifiers = validateClaimReviewCompletionRequestOrSend(req, res);
     if (!identifiers) return;
@@ -2196,6 +2228,7 @@ function validateCoverageReviewDecisionRequestOrSend(req, res) {
  */
 router.post(
   "/admin/organizations/:organizationId/claims/:claimId/coverage-dimensions/:dimensionKey/internal-acceptance",
+  sprint2ActorContextMiddleware,
   async (req, res) => {
     const identifiers = validateCoverageReviewDecisionRequestOrSend(req, res);
     if (!identifiers) return;
@@ -2241,7 +2274,7 @@ async function getClientFollowupReadService() {
  * here). Read-only: exposes only the fixed, already-established-safe
  * client_followup workflow fields, never raw evidence/claim/answer content.
  */
-router.get("/admin/organizations/:organizationId/client-followups", async (req, res) => {
+router.get("/admin/organizations/:organizationId/client-followups", sprint2ActorContextMiddleware, async (req, res) => {
   const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
   if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) || organizationId !== organizationId.toLowerCase()) {
     return sendKaiError(res, "validation_blocker", {
@@ -2306,6 +2339,7 @@ function validateClientFollowupCompletionRequestOrSend(req, res) {
  */
 router.post(
   "/admin/organizations/:organizationId/claims/:claimId/client-followups/:clientFollowupItemId/complete",
+  sprint2ActorContextMiddleware,
   async (req, res) => {
     const identifiers = validateClientFollowupCompletionRequestOrSend(req, res);
     if (!identifiers) return;
@@ -2387,6 +2421,12 @@ export const __testables = {
     intakeServiceOverride = service;
     return () => {
       intakeServiceOverride = null;
+    };
+  },
+  setActorContextMiddlewareForTest(middleware) {
+    actorContextMiddlewareOverride = middleware;
+    return () => {
+      actorContextMiddlewareOverride = null;
     };
   },
 };

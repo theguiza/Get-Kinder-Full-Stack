@@ -6,7 +6,10 @@ import { readFileSync } from "node:fs";
 
 import sprint2IntakeApiRouter, { __testables as intakeRouteTestables } from "../Backend/kai/routes/sprint2IntakeApi.js";
 import { requireKaiSprint2Enabled } from "../Backend/kai/config/kaiSprint2Config.js";
-import { requireKaiSprint2Authenticated } from "../Backend/kai/middleware/kaiSprint2Authentication.js";
+import {
+  createAttachKaiSprint2ActorContext,
+  requireKaiSprint2Authenticated,
+} from "../Backend/kai/middleware/kaiSprint2Authentication.js";
 import {
   handleKaiSprint2JsonParserError,
   kaiSprint2ActorMutationLimiter,
@@ -81,10 +84,18 @@ function createApp(getScenario) {
     req.isAuthenticated = () => current.authenticated;
     if (current.authenticated) {
       req.user = { id: 46 };
-      req.kaiSprint2ActorContext = current.actorContext;
     }
     return next();
   });
+  // Real attachment middleware, stubbed only at the resolver seam so the
+  // route is exercised exactly as production mounts it (no manual
+  // req.kaiSprint2ActorContext injection that would mask the middleware
+  // being missing from the chain).
+  const restoreActorContextMiddleware = intakeRouteTestables.setActorContextMiddlewareForTest(
+    createAttachKaiSprint2ActorContext({
+      resolveActorContext: async () => ({ ok: true, actorContext: getScenario().actorContext }),
+    }),
+  );
   app.use(
     basePath,
     requireKaiSprint2Enabled,
@@ -93,7 +104,7 @@ function createApp(getScenario) {
     requireKaiSprint2Authenticated,
     sprint2IntakeApiRouter,
   );
-  return app;
+  return { app, restoreActorContextMiddleware };
 }
 
 async function listen(app) {
@@ -158,10 +169,12 @@ test("Generated Drafts index route delegates to the generated-draft library serv
   });
   const originalFeatureFlag = process.env.KAI_SPRINT2_ENABLED;
   process.env.KAI_SPRINT2_ENABLED = "true";
-  const server = await listen(createApp(() => current));
+  const { app, restoreActorContextMiddleware } = createApp(() => current);
+  const server = await listen(app);
 
   t.after(async () => {
     restore();
+    restoreActorContextMiddleware();
     if (originalFeatureFlag === undefined) delete process.env.KAI_SPRINT2_ENABLED;
     else process.env.KAI_SPRINT2_ENABLED = originalFeatureFlag;
     await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
@@ -188,6 +201,74 @@ test("Generated Drafts index route delegates to the generated-draft library serv
   assert.equal(second.statusCode, 200);
   assert.equal(second.body.data.items[0].generatedContentDraftId, draftId);
   assert.equal(current.calls.length, 2);
+});
+
+test("Generated Drafts index route populates req.kaiSprint2ActorContext through the real attachment middleware, not manual test injection", async (t) => {
+  // Unlike createApp() above, this app never assigns req.kaiSprint2ActorContext
+  // directly. It only sets req.user and req.isAuthenticated, then relies on the
+  // production middleware chain (requireKaiSprint2Authenticated followed by the
+  // router-mounted attachKaiSprint2ActorContext) to populate the actor context
+  // from a stubbed resolver, exactly as production does from the real one.
+  let observedResolverCalls = 0;
+  const restoreActorContextMiddleware = intakeRouteTestables.setActorContextMiddlewareForTest(
+    createAttachKaiSprint2ActorContext({
+      resolveActorContext: async () => {
+        observedResolverCalls += 1;
+        return { ok: true, actorContext };
+      },
+    }),
+  );
+
+  const calls = [];
+  const restoreService = intakeRouteTestables.setIntakeServiceForTest({
+    async listGeneratedDraftLibraryIndex(input) {
+      calls.push(input);
+      return {
+        ok: true,
+        data: { items: [], limit: 25, afterGeneratedContentDraftId: null, truncated: false, nextAfterGeneratedContentDraftId: null },
+        error: null,
+      };
+    },
+  });
+
+  const originalFeatureFlag = process.env.KAI_SPRINT2_ENABLED;
+  process.env.KAI_SPRINT2_ENABLED = "true";
+
+  const app = express();
+  app.use(basePath, setKaiSprint2NoStore, requireKaiSprint2Enabled, kaiSprint2MetadataJsonParser);
+  app.use(basePath, handleKaiSprint2JsonParserError);
+  app.use(basePath, (req, res, next) => {
+    req.isAuthenticated = () => true;
+    req.user = { id: 46 };
+    return next();
+  });
+  app.use(
+    basePath,
+    requireKaiSprint2Enabled,
+    kaiSprint2OrganizationMutationLimiter,
+    kaiSprint2ActorMutationLimiter,
+    requireKaiSprint2Authenticated,
+    sprint2IntakeApiRouter,
+  );
+  const server = await listen(app);
+
+  t.after(async () => {
+    restoreActorContextMiddleware();
+    restoreService();
+    if (originalFeatureFlag === undefined) delete process.env.KAI_SPRINT2_ENABLED;
+    else process.env.KAI_SPRINT2_ENABLED = originalFeatureFlag;
+    await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+  });
+
+  const path = `${basePath}/admin/organizations/${organizationId}/generated-content-drafts?limit=25`;
+  const response = await requestJson(server, path);
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(observedResolverCalls, 1);
+  assert.equal(calls.length, 1);
+  // The service must receive the resolver's full actor context (roles,
+  // memberships, etc.), not a hand-built {actorType, actorUserId} stub.
+  assert.deepEqual(calls[0].actorContext, actorContext);
 });
 
 test("Generated Drafts library service authorizes like the existing generated-draft read packet and fails closed", async () => {
