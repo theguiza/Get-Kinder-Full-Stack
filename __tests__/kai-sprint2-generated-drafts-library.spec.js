@@ -293,6 +293,21 @@ test("Generated Drafts library service authorizes like the existing generated-dr
   assert.equal(allowed.data.items[0].draftStatus, "draft");
   assert.equal(JSON.stringify(allowed).includes("must not render"), false);
 
+  const globalAdmin = await listGeneratedDraftLibraryIndex(
+    {
+      organizationId,
+      limit: 25,
+      afterGeneratedContentDraftId: null,
+      actorContext: {
+        ...actorContext,
+        kaiRoles: ["gk_admin"],
+        organizationMemberships: [{ organization_id: organizationId, membership_status: "active", role_name: "client_contributor" }],
+      },
+    },
+    deps,
+  );
+  assert.equal(globalAdmin.ok, true);
+
   // Cross-tenant: actor has no active membership in the requested organization.
   const crossTenant = await listGeneratedDraftLibraryIndex(
     { organizationId: otherOrganizationId, limit: 25, afterGeneratedContentDraftId: null, actorContext },

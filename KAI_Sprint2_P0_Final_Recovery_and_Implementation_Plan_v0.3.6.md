@@ -17725,6 +17725,34 @@ database mutation, real client data access, export/export-review work,
 schema/migration, new dependency, or current-state / baseline update was
 performed.
 
+2026-08-20 TARGETED FOLLOW-UP EVIDENCE:
+  - TOOL_VERIFIED: `Backend/kai/services/kaiGeneratedDraftLibraryService.js`
+    now passes `combineGlobalRoles: true` when authorizing
+    `listGeneratedDraftLibraryIndex`, aligning the generated-drafts index with
+    the existing P3-02 `get_generated_draft_review_packet` read behavior while
+    still requiring active organization membership.
+  - TOOL_VERIFIED: `__tests__/kai-sprint2-generated-drafts-library.spec.js`
+    now covers a global `gk_admin` with active organization membership whose
+    scoped role is not a review role, while preserving the denied
+    organization-scoped `gk_operator` case.
+  - TOOL_VERIFIED: `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node
+    --test __tests__/kai-sprint2-generated-drafts-library.spec.js` -> 9/9
+    passing when run with local loopback listener permission.
+  - TOOL_VERIFIED: `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run
+    test:kai-sprint2-p3-01-generated-content-drafts` -> 6/6 passing.
+  - TOOL_VERIFIED: `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node
+    --test __tests__/kai-sprint2-authorization.spec.js
+    __tests__/kai-sprint2-p3-02-generated-draft-review-packet-boundary.spec.js`
+    -> 22/22 passing.
+  - TOOL_VERIFIED: `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run
+    verify:kai-sprint2-p3-01-generated-content-drafts` -> 19/19 passing with
+    the script-owned ephemeral loopback PostgreSQL instance.
+  - TOOL_VERIFIED: `git diff --check` -> clean.
+  - No push, deploy, config/flag mutation, credential/secret inspection,
+    shared/staging/production database mutation, real client data access,
+    schema/migration, new dependency, or current-state / baseline update was
+    performed.
+
 ## MVP UAT enablement - browser reachability for the internal synthetic journey (completed 2026-08-16)
 
 SCOPE:

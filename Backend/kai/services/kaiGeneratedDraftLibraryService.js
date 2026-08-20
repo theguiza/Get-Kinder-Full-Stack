@@ -94,7 +94,10 @@ export async function listGeneratedDraftLibraryIndex(input = {}, dependencies = 
     input.actorContext,
     GENERATED_DRAFT_LIBRARY_READ_OPERATION,
     organizationId,
-    { allowedRoles: GENERATED_DRAFT_LIBRARY_READ_ROLES },
+    {
+      allowedRoles: GENERATED_DRAFT_LIBRARY_READ_ROLES,
+      combineGlobalRoles: true,
+    },
   );
   if (!auth.ok) {
     return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });
