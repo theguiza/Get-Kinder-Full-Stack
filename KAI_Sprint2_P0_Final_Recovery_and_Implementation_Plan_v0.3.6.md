@@ -17726,6 +17726,20 @@ schema/migration, new dependency, or current-state / baseline update was
 performed.
 
 2026-08-20 TARGETED FOLLOW-UP EVIDENCE:
+  - TOOL_VERIFIED: `Backend/kai/db/kaiGeneratedDraftLibraryReadModels.js`
+    now filters the persistent Generated Drafts index to the accepted
+    immutable `draft_status='draft'`, static generated-content review queue
+    contract fields, and the three accepted generated-content lifecycle pairs
+    before service DTO validation, preventing stale/non-contract queue states
+    from causing a whole-index `system_error`.
+  - TOOL_VERIFIED: `__tests__/kai-sprint2-generated-drafts-library.spec.js`
+    now asserts those read-model SQL guards.
+  - TOOL_VERIFIED: `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node
+    --test __tests__/kai-sprint2-generated-drafts-library.spec.js` -> 9/9
+    passing with temporary loopback-server permission.
+  - TOOL_VERIFIED: `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run
+    test:kai-sprint2-p3-01-generated-content-drafts` -> 6/6 passing.
+  - TOOL_VERIFIED: `git diff --check` -> clean.
   - TOOL_VERIFIED: `Backend/kai/services/kaiGeneratedDraftLibraryService.js`
     now passes `combineGlobalRoles: true` when authorizing
     `listGeneratedDraftLibraryIndex`, aligning the generated-drafts index with

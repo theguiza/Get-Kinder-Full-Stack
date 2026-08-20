@@ -38,6 +38,18 @@ export async function listGeneratedDraftLibraryIndex(
       WHERE d.organization_id = $1::uuid
         AND d.content_type = 'evidence_summary'
         AND d.requested_audience = 'internal'
+        AND d.draft_status = 'draft'
+        AND q.priority = 'medium'
+        AND q.summary = 'Generated draft requires human review.'
+        AND q.required_action = 'Review citations, audience eligibility, limitations, unsupported claims, and numeric or causal assertions before any use.'
+        AND q.assigned_to IS NULL
+        AND q.due_at IS NULL
+        AND q.created_by_type = 'system'
+        AND (
+          (q.queue_status = 'open' AND q.review_status = 'needs_gk_review')
+          OR (q.queue_status = 'in_progress' AND q.review_status = 'needs_gk_review')
+          OR (q.queue_status = 'resolved' AND q.review_status = 'resolved')
+        )
         ${cursorClause}
       ORDER BY d.generated_content_draft_id ASC
       LIMIT $2::int`,

@@ -372,6 +372,14 @@ test("Generated Drafts read model is bounded, organization-scoped, deterministic
   assert.match(observed.sql, /WHERE d\.organization_id = \$1::uuid/);
   assert.match(observed.sql, /AND d\.content_type = 'evidence_summary'/);
   assert.match(observed.sql, /AND d\.requested_audience = 'internal'/);
+  assert.match(observed.sql, /AND d\.draft_status = 'draft'/);
+  assert.match(observed.sql, /AND q\.priority = 'medium'/);
+  assert.match(observed.sql, /AND q\.assigned_to IS NULL/);
+  assert.match(observed.sql, /AND q\.due_at IS NULL/);
+  assert.match(observed.sql, /AND q\.created_by_type = 'system'/);
+  assert.match(observed.sql, /\(q\.queue_status = 'open' AND q\.review_status = 'needs_gk_review'\)/);
+  assert.match(observed.sql, /\(q\.queue_status = 'in_progress' AND q\.review_status = 'needs_gk_review'\)/);
+  assert.match(observed.sql, /\(q\.queue_status = 'resolved' AND q\.review_status = 'resolved'\)/);
   assert.match(observed.sql, /AND d\.generated_content_draft_id > \$3::uuid/);
   assert.match(observed.sql, /ORDER BY d\.generated_content_draft_id ASC/);
   assert.match(observed.sql, /LIMIT \$2::int/);
