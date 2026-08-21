@@ -86,6 +86,13 @@ function toEligibleClaim(resultData) {
   };
 }
 
+function isUnusableCandidateResult(result) {
+  return (
+    result?.ok === false &&
+    (result.error?.code === "not_found" || result.error?.code === "conflict_current_state_changed")
+  );
+}
+
 function shapeError(error) {
   if (error?.code === "22P02") return failure("validation_blocker");
   if (error?.code === "25001") return failure("conflict_current_state_changed");
@@ -132,6 +139,7 @@ export function createPostgresEligibleClaimsForAudienceRepository({ runInTransac
                 claimId: candidate.claim_id,
                 requestedAudience,
               });
+              if (isUnusableCandidateResult(result)) continue;
               if (!result.ok) return failure("conflict_current_state_changed");
               if (result.data.eligible === true) eligibleClaims.push(toEligibleClaim(result.data));
               if (eligibleClaims.length >= limit + 1 || inspected >= MAX_CANDIDATES) break;

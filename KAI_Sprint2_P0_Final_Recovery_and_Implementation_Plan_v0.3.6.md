@@ -15405,6 +15405,57 @@ TOOL_VERIFIED:
     package's unmodified starting tree (`c242150`), before any file in this
     correction was touched.
   - `git diff --check` passed.
+
+P2-08 eligible-claims production 409 correction (2026-08-21):
+USER_REPORTED production symptom: authenticated internal GET
+`/api/kai/sprint2/intake/admin/organizations/a5d17c5a-c55f-43af-9b21-fe63aafe733f/eligible-claims?requested_audience=internal&limit=25`
+returned `409 conflict_current_state_changed`. No production access,
+production SQL, credential/secret inspection, cloud mutation, deployment, push,
+or real-client-data access was performed.
+
+TOOL_VERIFIED correction:
+  - Root cause was the P2-08 repository scan behavior: it enumerated every
+    organization-scoped `kai.claims` row in order and returned a whole-list
+    `conflict_current_state_changed` when P2-06 traceability returned
+    `not_found` or `conflict_current_state_changed` for any individual scanned
+    candidate. One incomplete, superseded, or otherwise non-usable claim could
+    therefore poison the read-only eligible-claims index for the organization.
+  - `Backend/kai/dictionary/postgresEligibleClaimsForAudienceRepository.js` now
+    treats per-candidate P2-06 `not_found` and
+    `conflict_current_state_changed` as "not eligible for this list" and
+    continues scanning. Unexpected evaluator failures still fail the list
+    closed as `conflict_current_state_changed`; the route, service,
+    authorization, output DTO, read-only transaction, scan cap, and pagination
+    contract remain unchanged.
+  - `__tests__/kai-sprint2-p2-08-eligible-claims-for-audience-boundary.spec.js`
+    now proves missing lineage is omitted without poisoning the list, a
+    current-state conflict on one candidate is skipped while pagination
+    advances past it, and an unexpected evaluator failure still fails the list
+    closed.
+
+TOOL_VERIFIED local proof:
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel
+    KAI_FILE_UPLOAD_ENABLED=false node --test
+    __tests__/kai-sprint2-p2-08-eligible-claims-for-audience-boundary.spec.js`
+    passed: 13 tests, 13 passing, 0 failing.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel
+    KAI_FILE_UPLOAD_ENABLED=false node --test
+    __tests__/kai-sprint2-p2-08-eligible-claims-for-audience-route.spec.js
+    __tests__/kai-sprint2-p2-06-claim-traceability-route.spec.js
+    __tests__/kai-sprint2-pass2-route-runtime.spec.js` required sandbox
+    escalation for local HTTP listeners and passed: 56 tests, 56 passing, 0
+    failing.
+  - `git diff --check` passed.
+
+NOT_CONFIRMED:
+  - `npm run verify:kai-sprint2-p2-08-eligible-claims-for-audience` was not run:
+    the approval policy rejected the command because the verifier starts and
+    mutates an ephemeral local PostgreSQL database under the current repository
+    restrictions. Production execution, deployment, push, shared/staging/
+    production database access or mutation, feature-flag/env/cloud change,
+    credential/secret access, real client data use, and
+    `00_KAI_CURRENT_STATE.md` update remain separately unauthorized and were not
+    performed.
   - prohibited_actions_not_performed: no production access, deployment,
     PostgreSQL/database/schema/migration mutation, GCP/IAM/GCS/Render/cloud
     mutation, feature/configuration change, credential/secret inspection,

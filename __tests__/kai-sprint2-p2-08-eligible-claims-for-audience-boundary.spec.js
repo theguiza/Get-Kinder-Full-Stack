@@ -256,7 +256,7 @@ test("P2-08 repository: 500-candidate cap truncates on the real final inspected 
   assert.deepEqual(result.data.eligibleClaims.map((claim) => claim.claimId), [id(250)]);
 });
 
-test("P2-08 repository: malformed authoritative state fails the whole list request", async () => {
+test("P2-08 repository: unusable candidate state is omitted without poisoning the whole list request", async () => {
   const failures = new Map([[id(2), { ok: false, data: null, error: { code: "not_found", status: 404 } }]]);
   const { repository } = repositoryWithCandidates({
     candidateIds: [id(1), id(2), id(3)],
@@ -269,6 +269,43 @@ test("P2-08 repository: malformed authoritative state fails the whole list reque
     limit: 10,
     afterClaimId: null,
   });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.data.eligibleClaims.map((claim) => claim.claimId), [id(1), id(3)]);
+});
+
+test("P2-08 repository: current-state conflicts on one candidate are skipped and pagination advances past them", async () => {
+  const failures = new Map([[id(2), { ok: false, data: null, error: { code: "conflict_current_state_changed", status: 409 } }]]);
+  const { repository } = repositoryWithCandidates({
+    candidateIds: [id(1), id(2), id(3), id(4)],
+    eligibleIds: new Set([id(1), id(3), id(4)]),
+    failures,
+  });
+  const result = await repository.listEligibleClaimsForAudience({
+    organizationId: ORG,
+    requestedAudience: "internal",
+    limit: 2,
+    afterClaimId: null,
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.data.eligibleClaims.map((claim) => claim.claimId), [id(1), id(3)]);
+  assert.equal(result.data.truncated, true);
+  assert.equal(result.data.nextAfterClaimId, id(3));
+});
+
+test("P2-08 repository: unexpected evaluator failures still fail the whole list request", async () => {
+  const failures = new Map([[id(2), { ok: false, data: null, error: { code: "system_error", status: 500 } }]]);
+  const { repository } = repositoryWithCandidates({
+    candidateIds: [id(1), id(2), id(3)],
+    eligibleIds: new Set([id(1), id(3)]),
+    failures,
+  });
+  const result = await repository.listEligibleClaimsForAudience({
+    organizationId: ORG,
+    requestedAudience: "internal",
+    limit: 10,
+    afterClaimId: null,
+  });
+  assert.equal(result.ok, false);
   assert.equal(result.error.code, "conflict_current_state_changed");
 });
 
