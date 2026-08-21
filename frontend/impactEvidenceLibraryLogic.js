@@ -1,5 +1,10 @@
 export const LIBRARY_AUDIENCES = Object.freeze(["internal", "funder", "public"]);
 export const BASE_PATH = "/api/kai/sprint2/intake";
+const ROUTE_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+export function isRouteUuid(value) {
+  return typeof value === "string" && ROUTE_UUID_PATTERN.test(value);
+}
 
 export function eligibleClaimsPath(organizationId, audience) {
   const params = new URLSearchParams({ requested_audience: audience, limit: "25" });
@@ -158,7 +163,11 @@ export function projectEligibleClaims(dto) {
     sourceVersionId: claim.sourceVersionId,
     requestedAudience: claim.requestedAudience,
     libraryStatus: "usable",
-  })).filter((claim) => typeof claim.claimId === "string" && claim.requestedAudience === dto?.requestedAudience);
+  })).filter((claim) => (
+    isRouteUuid(claim.claimId)
+    && isRouteUuid(claim.evidenceItemId)
+    && claim.requestedAudience === dto?.requestedAudience
+  ));
 }
 
 export function projectCandidateClaims(dto) {
@@ -178,7 +187,7 @@ export function projectCandidateClaims(dto) {
       reviewStatus: item.review_status,
     })),
     libraryStatus: "needs_review",
-  })).filter((claim) => typeof claim.claimId === "string");
+  })).filter((claim) => isRouteUuid(claim.claimId) && isRouteUuid(claim.evidenceItemId));
 }
 
 export function mergeClaims(usableClaims, candidateClaims) {

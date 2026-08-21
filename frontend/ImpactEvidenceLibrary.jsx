@@ -24,6 +24,7 @@ import {
   generatedDraftReviewLabel,
   generatedDraftReviewPacketPath,
   getJson,
+  isRouteUuid,
   mergeClaims,
   postJson,
   potentialConflictsPath,
@@ -258,7 +259,11 @@ export default function ImpactEvidenceLibrary() {
   }, [organizationId, sourceVersionId, workflowPending]);
 
   const runClaimProposal = useCallback(async () => {
-    if (!organizationId || !selectedClaim?.evidenceItemId || workflowPending) return;
+    if (!organizationId || workflowPending) return;
+    if (!isRouteUuid(selectedClaim?.evidenceItemId)) {
+      setWorkflowResult("Select a claim with a server-issued evidence item id before proposing a claim.");
+      return;
+    }
     setWorkflowPending(true);
     setWorkflowResult("");
     const result = await postJson(claimProposalPath(organizationId, selectedClaim.evidenceItemId), {});
@@ -552,7 +557,7 @@ export default function ImpactEvidenceLibrary() {
                 <div className="small text-muted">Selected claim: {selectedClaimId || "none"} · evidence item: {selectedClaim?.evidenceItemId || "none"}</div>
               </div>
               <div className="col-6 col-lg-4">
-                <button type="button" className="btn btn-sm btn-outline-primary w-100" onClick={runClaimProposal} disabled={workflowPending || !selectedClaim?.evidenceItemId}>
+                <button type="button" className="btn btn-sm btn-outline-primary w-100" onClick={runClaimProposal} disabled={workflowPending || !isRouteUuid(selectedClaim?.evidenceItemId)}>
                   Propose claim
                 </button>
               </div>

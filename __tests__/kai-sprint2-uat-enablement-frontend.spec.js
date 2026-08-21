@@ -13,8 +13,11 @@ import {
   evidenceCoverageAssessmentPath,
   evidenceExtractionPath,
   evidenceReviewCompletePath,
+  isRouteUuid,
   potentialConflictsPath,
   postJson,
+  projectCandidateClaims,
+  projectEligibleClaims,
 } from "../frontend/impactEvidenceLibraryLogic.js";
 import {
   batchFilesPath,
@@ -106,6 +109,36 @@ test("KAI UAT-enablement governance mutation calls send only an empty body, matc
     assert.equal(call.init.credentials, "same-origin");
     assert.deepEqual(JSON.parse(call.init.body), {});
   }
+});
+
+test("KAI UAT-enablement claim proposal UI refuses placeholder evidence item route ids", () => {
+  assert.equal(isRouteUuid(evidenceItemId), true);
+  assert.equal(isRouteUuid("EVIDENCE_ITEM_ID_1"), false);
+
+  assert.deepEqual(
+    projectEligibleClaims({
+      requestedAudience: "internal",
+      eligibleClaims: [
+        { claimId, evidenceItemId: "EVIDENCE_ITEM_ID_1", requestedAudience: "internal" },
+        { claimId: secondClaimId, evidenceItemId, requestedAudience: "internal" },
+      ],
+    }).map((claim) => claim.evidenceItemId),
+    [evidenceItemId],
+  );
+
+  assert.deepEqual(
+    projectCandidateClaims({
+      items: [
+        { claimId, evidenceItemId: "EVIDENCE_ITEM_ID_1" },
+        { claimId: secondClaimId, evidenceItemId },
+      ],
+    }).map((claim) => claim.evidenceItemId),
+    [evidenceItemId],
+  );
+
+  const librarySource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+  assert.match(librarySource, /!isRouteUuid\(selectedClaim\?\.evidenceItemId\)/);
+  assert.doesNotMatch(librarySource, /disabled=\{workflowPending \|\| !selectedClaim\?\.evidenceItemId\}/);
 });
 
 test("KAI UAT-enablement web-intake frontend paths reuse the exact existing mounted intake routes", () => {
