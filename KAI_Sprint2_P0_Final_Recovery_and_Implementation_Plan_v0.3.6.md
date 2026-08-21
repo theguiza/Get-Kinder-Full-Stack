@@ -17426,11 +17426,10 @@ IMPLEMENTATION:
     `Backend/kai/services/kaiClaimLibraryService.js`, and
     `GET /admin/organizations/:organizationId/claim-library/candidates` in the
     existing Sprint 2 intake router. It enumerates organization-scoped claim IDs
-    already linked to existing P2 `claim_review`, `evidence_review`,
-    `client_followup`, or `conflict_resolution` queue rows, with bounded
-    claim-id pagination and metadata-safe queue status fields only. It does not
-    calculate eligibility, blocker state, limitation acceptance, or audience
-    authority.
+    already linked to existing P2 `claim_review` or `evidence_review` queue
+    rows, with bounded claim-id pagination and metadata-safe queue status fields
+    only. It does not calculate eligibility, blocker state, limitation
+    acceptance, or audience authority.
   - Access control reuses the existing internal cockpit/read pattern:
     `KAI_SPRINT2_ENABLED`, mapped human actor, tenant-bound organization, generic
     `read_intake`, then role-narrowed `gk_admin`/`gk_operator`/`gk_reviewer`.
@@ -17468,6 +17467,24 @@ VERIFICATION:
   - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm test` -> 2236 passed,
     32 skipped, 1 failed; same known `file_upload_enabled` baseline only.
   - `git diff --check` -> clean.
+
+PRODUCTION CORRECTION 2026-08-21:
+  - Narrowed `Backend/kai/db/kaiClaimLibraryReadModels.js` so the first
+    claim-library candidate index no longer hard-depends on
+    `kai.client_followup_items` or `kai.conflict_groups`. Those later workflow
+    details remain available through the selected-claim P2-06 traceability read;
+    the index only needs the canonical claim/evidence review queues to enumerate
+    candidate claim identities.
+  - Normalized claim/evidence/review UUIDs to `text` in the read model result,
+    following the surrounding KAI repository pattern before the strict service
+    DTO validator projects safe fields.
+  - Added regression coverage in
+    `__tests__/kai-sprint2-impact-evidence-library.spec.js` proving the read
+    model remains bounded, read-only, text-normalized, and independent from the
+    optional follow-up/conflict workflow tables.
+  - Verification:
+    `DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel node --test __tests__/kai-sprint2-impact-evidence-library.spec.js`
+    -> 11/11 passing; `git diff --check` -> clean.
 
 NOT_CONFIRMED / RECOMMENDED FOLLOW-UP:
   - No push, deploy, shared/staging/production database mutation, feature-flag

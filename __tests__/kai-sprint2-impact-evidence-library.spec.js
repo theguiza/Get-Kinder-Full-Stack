@@ -441,6 +441,9 @@ test("Impact Evidence Library read model is bounded, organization-scoped, ordere
   assert.match(observed.sql, /AND c\.claim_id > \$3::uuid/);
   assert.match(observed.sql, /ORDER BY claim_id ASC/);
   assert.match(observed.sql, /LIMIT \$2::int/);
+  assert.match(observed.sql, /claim_id::text AS claim_id/);
+  assert.match(observed.sql, /review_queue_item_id::text/);
+  assert.doesNotMatch(observed.sql, /kai\.client_followup_items|kai\.conflict_groups/);
   assert.deepEqual(observed.params, [organizationId, 26, claimId]);
   assert.doesNotMatch(observed.sql, /\bINSERT\b|\bUPDATE\b|\bDELETE\b|\bTRUNCATE\b|FOR UPDATE/i);
 });
