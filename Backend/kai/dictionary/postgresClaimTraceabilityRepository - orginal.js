@@ -87,21 +87,6 @@ function failure(code) {
   };
 }
 
-// TEMPORARY traceability diagnostic. Preserves the exact code/status of
-// failure("conflict_current_state_changed") (409) so endpoint behavior is
-// unchanged, and adds error.reason to distinguish which branch fired.
-function failureWithReason(reason) {
-  return {
-    ok: false,
-    data: null,
-    error: {
-      code: "conflict_current_state_changed",
-      status: CLAIM_TRACEABILITY_RESULT_STATUS.conflict_current_state_changed,
-      reason,
-    },
-  };
-}
-
 function success(data) {
   return { ok: true, data, error: null };
 }
@@ -383,7 +368,7 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
   const claimEvidenceLinkRow = await getScopedClaimEvidenceLinkByClaimId({ organizationId, claimId }, tx);
   if (!claimEvidenceLinkRow) return failure("not_found");
   if (claimEvidenceLinkRow.evidence_item_id !== claimRow.evidence_item_id) {
-    return failureWithReason("claim_evidence_link_mismatch");
+    return failure("conflict_current_state_changed");
   }
 
   const evidenceItemRow = await getScopedEvidenceItemById(
@@ -403,9 +388,7 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
     tx,
   );
   if (!sourceVersionRow) return failure("not_found");
-  if (sourceVersionRow.is_current !== true) {
-    return failureWithReason("source_version_not_current");
-  }
+  if (sourceVersionRow.is_current !== true) return failure("conflict_current_state_changed");
   const candidateRow = await readSourceCandidate(
     tx,
     { organizationId, intakeSourceCandidateId: sourceVersionRow.intake_source_candidate_id },
@@ -475,9 +458,7 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
   const noPersistedP204 = gapRows.length === 0 && followupRows.length === 0 && followupQueueRows.length === 0;
   if (noPersistedP204) {
     const allClear = DIMENSION_KEYS.every((dimensionKey) => !dimensionResultRequiresGap(dimensions[dimensionKey]));
-    if (!allClear) {
-      return failureWithReason("gap_dimension_requires_missing_p204_state");
-    }
+    if (!allClear) return failure("conflict_current_state_changed");
   } else {
     const gapsMatch = gapRowsMatchExpectation(gapRows, expectedGapPlans, {
       evidenceItemId: evidenceItemRow.evidence_item_id,
@@ -487,7 +468,7 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
       gapsMatch && followupRowsMatchExpectation(followupRows, expectedFollowupDimensionKeys, gapRows, { claimId });
     const queuesMatch = followupsMatch && queueRowsMatchExpectation(followupQueueRows, followupRows);
     if (!gapsMatch || !followupsMatch || !queuesMatch) {
-      return failureWithReason("gap_followup_queue_mismatch");
+      return failure("conflict_current_state_changed");
     }
   }
 
@@ -498,9 +479,7 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
     organizationId,
     conflictGroupIds: returnedGroupRows.map((row) => row.conflict_group_id),
   });
-  if (conflictQueueRows.length !== returnedGroupRows.length) {
-    return failureWithReason("conflict_queue_count_mismatch");
-  }
+  if (conflictQueueRows.length !== returnedGroupRows.length) return failure("conflict_current_state_changed");
   const conflictQueueByTarget = new Map(conflictQueueRows.map((row) => [row.target_object_id, row]));
   const potentialConflictGroups = [];
   for (const groupRow of returnedGroupRows) {
@@ -509,9 +488,7 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
       conflictGroup: toConflictGroupValidatorRecord(groupRow),
       queueItem: queueRow ? toConflictQueueValidatorRecord(queueRow) : null,
     });
-    if (validation?.severity !== "pass") {
-      return failureWithReason("conflict_group_validation_failed");
-    }
+    if (validation?.severity !== "pass") return failure("conflict_current_state_changed");
     potentialConflictGroups.push({
       conflict_group_id: groupRow.conflict_group_id,
       lower_claim_id: groupRow.lower_claim_id,
