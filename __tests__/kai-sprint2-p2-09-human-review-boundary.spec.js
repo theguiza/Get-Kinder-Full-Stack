@@ -94,6 +94,117 @@ test("P2-09 completeClaimReviewInternalApproval rejects a wrong role (gk_operato
   assert.equal(result.error.code, "authorization_denied");
 });
 
+test("P2-09 completeEvidenceReview allows a global gk_reviewer whose active org-scoped membership role is gk_operator (production regression: VAL-AUT-004 must not fire when the global capability role is present)", async () => {
+  const calls = [];
+  const result = await completeEvidenceReview(
+    {
+      organizationId: ORG,
+      evidenceItemId: EVIDENCE,
+      reviewQueueItemId: QUEUE,
+      expectedUpdatedAt: NOW,
+      actorContext: {
+        actorType: "human",
+        actorUserId: "90000000-0000-4000-8000-000000000099",
+        kaiRoles: ["gk_admin", "gk_operator", "gk_reviewer"],
+        organizationMemberships: [
+          { organization_id: ORG, membership_status: "active", role_name: "gk_operator" },
+          { organization_id: ORG, membership_status: "active", role_name: "client_admin" },
+        ],
+      },
+      now: NOW,
+    },
+    {
+      env: enabledEnv,
+      humanReviewRepository: {
+        async completeEvidenceReview(input) {
+          calls.push(input);
+          return { ok: true, data: { evidence_item_id: EVIDENCE, review_queue_item_id: QUEUE, queue_status: "resolved", review_status: "resolved", support_strength: "reviewed_supported", replayed: false }, error: null };
+        },
+      },
+      metadataOnlyAudit: stubMetadataOnlyAudit(),
+    },
+  );
+  assert.equal(result.ok, true);
+  assert.equal(calls.length, 1);
+});
+
+test("P2-09 completeClaimReviewInternalApproval allows the same global gk_reviewer/gk_operator-membership actor shape", async () => {
+  const calls = [];
+  const result = await completeClaimReviewInternalApproval(
+    {
+      organizationId: ORG,
+      claimId: CLAIM,
+      reviewQueueItemId: QUEUE,
+      expectedUpdatedAt: NOW,
+      actorContext: {
+        actorType: "human",
+        actorUserId: "90000000-0000-4000-8000-000000000099",
+        kaiRoles: ["gk_admin", "gk_operator", "gk_reviewer"],
+        organizationMemberships: [
+          { organization_id: ORG, membership_status: "active", role_name: "gk_operator" },
+          { organization_id: ORG, membership_status: "active", role_name: "client_admin" },
+        ],
+      },
+      now: NOW,
+    },
+    {
+      env: enabledEnv,
+      humanReviewRepository: {
+        async completeClaimReviewInternalApproval(input) {
+          calls.push(input);
+          return { ok: true, data: { claim_id: CLAIM, review_queue_item_id: QUEUE, queue_status: "resolved", review_status: "resolved", claim_strength: "reviewed_supported", replayed: false }, error: null };
+        },
+      },
+      metadataOnlyAudit: stubMetadataOnlyAudit(),
+    },
+  );
+  assert.equal(result.ok, true);
+  assert.equal(calls.length, 1);
+});
+
+test("P2-09 completeEvidenceReview still denies a global gk_reviewer/gk_admin actor with no active membership in the target organization (combineGlobalRoles never bypasses tenant isolation)", async () => {
+  const OTHER_ORG = "00000000-0000-4000-8000-000000000005";
+  const result = await completeEvidenceReview(
+    {
+      organizationId: ORG,
+      evidenceItemId: EVIDENCE,
+      reviewQueueItemId: QUEUE,
+      expectedUpdatedAt: NOW,
+      actorContext: {
+        actorType: "human",
+        actorUserId: "cross-tenant",
+        kaiRoles: ["gk_admin", "gk_reviewer"],
+        organizationMemberships: [{ organization_id: OTHER_ORG, membership_status: "active", role_name: "gk_reviewer" }],
+      },
+      now: NOW,
+    },
+    { env: enabledEnv, humanReviewRepository: { async completeEvidenceReview() { throw new Error("must not be called"); } }, metadataOnlyAudit: stubMetadataOnlyAudit() },
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "authorization_denied");
+});
+
+test("P2-09 completeEvidenceReview denies an actor whose only kaiRoles come from actorContext but hold no allowed role and no allowed org-scoped membership role (still gk_operator only, no escalation via an empty/forged kaiRoles field)", async () => {
+  const result = await completeEvidenceReview(
+    {
+      organizationId: ORG,
+      evidenceItemId: EVIDENCE,
+      reviewQueueItemId: QUEUE,
+      expectedUpdatedAt: NOW,
+      actorContext: {
+        actorType: "human",
+        actorUserId: "op-only",
+        kaiRoles: ["gk_operator"],
+        organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "gk_operator" }],
+      },
+      now: NOW,
+    },
+    { env: enabledEnv, humanReviewRepository: { async completeEvidenceReview() { throw new Error("must not be called"); } }, metadataOnlyAudit: stubMetadataOnlyAudit() },
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "authorization_denied");
+});
+
 test("P2-09 KAI_SPRINT2_ENABLED=false yields feature_disabled with zero repository calls for both transitions", async () => {
   const evidenceResult = await completeEvidenceReview(
     { organizationId: ORG, evidenceItemId: EVIDENCE, reviewQueueItemId: QUEUE, expectedUpdatedAt: NOW, actorContext: reviewerActor, now: NOW },

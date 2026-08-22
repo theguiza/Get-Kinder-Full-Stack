@@ -85,7 +85,7 @@ export async function completeEvidenceReview(input, dependencies = {}) {
     actorContext,
     COMPLETE_EVIDENCE_REVIEW_OPERATION,
     input.organizationId,
-    { allowedRoles: COMPLETE_EVIDENCE_REVIEW_ALLOWED_ROLES },
+    { allowedRoles: COMPLETE_EVIDENCE_REVIEW_ALLOWED_ROLES, combineGlobalRoles: true },
   );
   if (!auth.ok) {
     return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });
@@ -138,7 +138,7 @@ export async function completeClaimReviewInternalApproval(input, dependencies = 
     actorContext,
     COMPLETE_CLAIM_REVIEW_OPERATION,
     input.organizationId,
-    { allowedRoles: COMPLETE_CLAIM_REVIEW_ALLOWED_ROLES },
+    { allowedRoles: COMPLETE_CLAIM_REVIEW_ALLOWED_ROLES, combineGlobalRoles: true },
   );
   if (!auth.ok) {
     return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });
