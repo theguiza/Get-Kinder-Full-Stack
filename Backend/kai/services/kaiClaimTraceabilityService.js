@@ -87,6 +87,11 @@ export async function getClaimTraceabilitySummary(input, dependencies = {}) {
   });
 
   if (!result.ok) {
+    console.error("CLAIM_TRACEABILITY_RESULT_ERROR", {
+      code: result.error.code,
+      status: result.error.status,
+      reason: result.error.reason ?? null,
+    });
     return buildKaiError(result.error.code, { status: result.error.status });
   }
   return { ok: true, data: result.data, error: null };
