@@ -60,6 +60,7 @@ function successDto(overrides = {}) {
       review_queue_item_id: "00000000-0000-4000-8000-000000000301",
       review_queue_status: "open",
       review_status: "needs_gk_review",
+      updated_at: "2026-08-22T20:00:00.000Z",
     },
     locator: { source_locator_id: "00000000-0000-4000-8000-000000000401" },
     source: { source_id: "00000000-0000-4000-8000-000000000501", source_code: "annual_report" },
@@ -68,11 +69,17 @@ function successDto(overrides = {}) {
       review_queue_item_id: "00000000-0000-4000-8000-000000000701",
       queue_status: "open",
       review_status: "needs_gk_review",
+      updated_at: "2026-08-22T20:00:00.000Z",
     },
     candidate: { intake_source_candidate_id: "00000000-0000-4000-8000-000000000801" },
     promotion_decision: { intake_promotion_decision_id: "00000000-0000-4000-8000-000000000901" },
     dimensions: {
-      missingness: { assessment_status: "unresolved", validator_key: "VAL-KAI-P2-02-missingness" },
+      missingness: {
+        assessment_status: "unresolved",
+        validator_key: "VAL-KAI-P2-02-missingness",
+        internal_limitation_accepted: false,
+        blocks_requested_audience: true,
+      },
     },
     gap_items: [
       {

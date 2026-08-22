@@ -122,10 +122,25 @@ function prepareRequiredAudit(metadataOnlyAudit, payload, tx) {
   return prepared;
 }
 
+function logValidationBlockerClassification(reason, error) {
+  console.error(JSON.stringify({
+    event: "KAI_P2_09_HUMAN_REVIEW_VALIDATION_BLOCKER_CLASSIFICATION",
+    reason,
+    pg_code: error?.code || null,
+    pg_constraint: error?.constraint || null,
+  }));
+}
+
 function shapeError(error) {
   if (error instanceof MalformedResultRowError) return failure("system_error");
-  if (error instanceof RequiredAuditRejectedError) return failure("validation_blocker");
-  if (error?.code === "23514" || error?.code === "22P02") return failure("validation_blocker");
+  if (error instanceof RequiredAuditRejectedError) {
+    logValidationBlockerClassification("required_audit_rejected", error);
+    return failure("validation_blocker");
+  }
+  if (error?.code === "23514" || error?.code === "22P02") {
+    logValidationBlockerClassification(error.code === "23514" ? "check_constraint_violation" : "invalid_input_syntax", error);
+    return failure("validation_blocker");
+  }
   if (error?.code === "25001") return failure("conflict_current_state_changed");
   return failure("system_error");
 }

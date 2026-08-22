@@ -63,6 +63,7 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 const CANONICAL_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const HASH_PATTERN = /^[0-9a-f]{32,128}$/i;
 const SAFE_CODE_PATTERN = /^[a-z][a-z0-9_:-]*$/i;
+const ISO_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
 function isEnabledValue(value) {
   return value === true || value === "true" || value === "1" || value === 1;
@@ -127,6 +128,7 @@ function validateEligibleClaimsArgumentsShape(args) {
 }
 
 function safeStringForKey(key, value) {
+  if (key === "updated_at" && ISO_TIMESTAMP_PATTERN.test(value)) return true;
   if (UUID_PATTERN.test(value) || HASH_PATTERN.test(value) || SAFE_CODE_PATTERN.test(value)) return true;
   return SAFE_STATUS_VALUES.has(value) || ID_OR_CODE_KEY_PATTERN.test(key);
 }
@@ -140,15 +142,107 @@ function validateMetadataSafeValue(key, value) {
   return Object.entries(value).every(([childKey, childValue]) => validateMetadataSafeValue(childKey, childValue));
 }
 
+const TRACEABILITY_DIMENSION_KEYS = new Set([
+  "assessment_status",
+  "validator_key",
+  "internal_limitation_accepted",
+  "blocks_requested_audience",
+]);
+const TRACEABILITY_CLAIM_KEYS = new Set([
+  "claim_id",
+  "claim_type",
+  "claim_status",
+  "claim_review_status",
+  "claim_strength",
+  "audience_gates",
+]);
+const TRACEABILITY_AUDIENCE_GATE_KEYS = new Set([
+  "internal_only",
+  "public_use_allowed",
+  "funder_use_allowed",
+  "export_ready",
+]);
+const TRACEABILITY_EVIDENCE_KEYS = new Set([
+  "evidence_item_id",
+  "evidence_review_status",
+  "support_strength",
+  "review_queue_item_id",
+  "review_queue_status",
+  "review_status",
+  "updated_at",
+]);
+const TRACEABILITY_LOCATOR_KEYS = new Set(["source_locator_id"]);
+const TRACEABILITY_SOURCE_KEYS = new Set(["source_id", "source_code"]);
+const TRACEABILITY_SOURCE_VERSION_KEYS = new Set(["source_version_id", "is_current"]);
+const TRACEABILITY_CLAIM_REVIEW_KEYS = new Set([
+  "review_queue_item_id",
+  "queue_status",
+  "review_status",
+  "updated_at",
+]);
+const TRACEABILITY_CANDIDATE_KEYS = new Set(["intake_source_candidate_id"]);
+const TRACEABILITY_PROMOTION_DECISION_KEYS = new Set(["intake_promotion_decision_id"]);
+const TRACEABILITY_GAP_ITEM_KEYS = new Set([
+  "gap_log_item_id",
+  "dimension_key",
+  "assessment_status",
+  "validator_key",
+]);
+const TRACEABILITY_FOLLOWUP_WORKFLOW_KEYS = new Set([
+  "client_followup_item_id",
+  "gap_log_item_id",
+  "dimension_key",
+  "workflow_status",
+  "review_status",
+  "review_queue_item_id",
+]);
+const TRACEABILITY_CONFLICT_GROUP_KEYS = new Set([
+  "conflict_group_id",
+  "lower_claim_id",
+  "higher_claim_id",
+  "lower_claim_conflict_gap_id",
+  "higher_claim_conflict_gap_id",
+  "basis_code",
+  "review_queue_item_id",
+  "review_status",
+  "workflow_status",
+]);
+
+function validateExactSafeObject(value, keys) {
+  return hasExactKeys(value, keys) && Object.entries(value).every(([key, childValue]) => validateMetadataSafeValue(key, childValue));
+}
+
+function validateClaim(claim) {
+  return (
+    validateExactSafeObject(claim, TRACEABILITY_CLAIM_KEYS) &&
+    validateExactSafeObject(claim.audience_gates, TRACEABILITY_AUDIENCE_GATE_KEYS)
+  );
+}
+
+function validateArrayEntries(entries, keys) {
+  return Array.isArray(entries) && entries.every((entry) => validateExactSafeObject(entry, keys));
+}
+
 function validateDimensions(dimensions) {
   if (!isPlainObject(dimensions)) return false;
+
   return Object.values(dimensions).every(
     (dimension) =>
-      hasExactKeys(dimension, new Set(["assessment_status", "validator_key"])) &&
+      hasExactKeys(dimension, TRACEABILITY_DIMENSION_KEYS) &&
       typeof dimension.assessment_status === "string" &&
       typeof dimension.validator_key === "string" &&
+      typeof dimension.internal_limitation_accepted === "boolean" &&
+      typeof dimension.blocks_requested_audience === "boolean" &&
       validateMetadataSafeValue("assessment_status", dimension.assessment_status) &&
-      validateMetadataSafeValue("validator_key", dimension.validator_key),
+      validateMetadataSafeValue("validator_key", dimension.validator_key) &&
+      validateMetadataSafeValue(
+        "internal_limitation_accepted",
+        dimension.internal_limitation_accepted,
+      ) &&
+      validateMetadataSafeValue(
+        "blocks_requested_audience",
+        dimension.blocks_requested_audience,
+      ),
   );
 }
 
@@ -176,17 +270,17 @@ function validateSuccessDto(data) {
   return (
     hasExactKeys(data, rootKeys) &&
     validateDimensions(data.dimensions) &&
-    validateMetadataSafeValue("claim", data.claim) &&
-    validateMetadataSafeValue("evidence", data.evidence) &&
-    validateMetadataSafeValue("locator", data.locator) &&
-    validateMetadataSafeValue("source", data.source) &&
-    validateMetadataSafeValue("source_version", data.source_version) &&
-    validateMetadataSafeValue("claim_review", data.claim_review) &&
-    validateMetadataSafeValue("candidate", data.candidate) &&
-    validateMetadataSafeValue("promotion_decision", data.promotion_decision) &&
-    validateMetadataSafeValue("gap_items", data.gap_items) &&
-    validateMetadataSafeValue("client_followup_workflows", data.client_followup_workflows) &&
-    validateMetadataSafeValue("potential_conflict_groups", data.potential_conflict_groups) &&
+    validateClaim(data.claim) &&
+    validateExactSafeObject(data.evidence, TRACEABILITY_EVIDENCE_KEYS) &&
+    validateExactSafeObject(data.locator, TRACEABILITY_LOCATOR_KEYS) &&
+    validateExactSafeObject(data.source, TRACEABILITY_SOURCE_KEYS) &&
+    validateExactSafeObject(data.source_version, TRACEABILITY_SOURCE_VERSION_KEYS) &&
+    validateExactSafeObject(data.claim_review, TRACEABILITY_CLAIM_REVIEW_KEYS) &&
+    validateExactSafeObject(data.candidate, TRACEABILITY_CANDIDATE_KEYS) &&
+    validateExactSafeObject(data.promotion_decision, TRACEABILITY_PROMOTION_DECISION_KEYS) &&
+    validateArrayEntries(data.gap_items, TRACEABILITY_GAP_ITEM_KEYS) &&
+    validateArrayEntries(data.client_followup_workflows, TRACEABILITY_FOLLOWUP_WORKFLOW_KEYS) &&
+    validateArrayEntries(data.potential_conflict_groups, TRACEABILITY_CONFLICT_GROUP_KEYS) &&
     validateMetadataSafeValue("requestedAudience", data.requestedAudience) &&
     validateMetadataSafeValue("eligible", data.eligible) &&
     validateMetadataSafeValue("blockerCodes", data.blockerCodes) &&

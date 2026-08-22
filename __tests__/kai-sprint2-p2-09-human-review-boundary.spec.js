@@ -8,6 +8,10 @@ import {
   validateCompleteClaimReviewRequest,
 } from "../Backend/kai/validators/kaiSprint2RequestSchemas.js";
 import { __testables as intakeRouteTestables } from "../Backend/kai/routes/sprint2IntakeApi.js";
+import {
+  createPostgresHumanReviewRepository,
+  __humanReviewRepositoryTestables,
+} from "../Backend/kai/dictionary/postgresHumanReviewRepository.js";
 
 const {
   evidenceReviewCompletionIdentifiers,
@@ -274,6 +278,86 @@ test("P2-09 route request validators reject an unsupported media type and unknow
   const rejected = validateClaimReviewCompletionRequestOrSend(badBodyReq, res);
   assert.equal(rejected, null);
   assert.equal(sent.code, 422);
+});
+
+function repositoryInput() {
+  return {
+    organizationId: ORG,
+    evidenceItemId: EVIDENCE,
+    reviewQueueItemId: QUEUE,
+    expectedUpdatedAt: NOW,
+    actorUserId: reviewerActor.actorUserId,
+    now: NOW,
+    metadataOnlyAudit: stubMetadataOnlyAudit(),
+  };
+}
+
+test("P2-09 repository shapeError: a rejected required audit maps to validation_blocker/422 and logs a distinguishable classification", async () => {
+  const originalConsoleError = console.error;
+  const logged = [];
+  console.error = (line) => logged.push(line);
+  try {
+    const repo = createPostgresHumanReviewRepository({
+      runInTransaction: async () => {
+        throw new __humanReviewRepositoryTestables.RequiredAuditRejectedError();
+      },
+    });
+    const result = await repo.completeEvidenceReview(repositoryInput());
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "validation_blocker");
+    assert.equal(result.error.status, 422);
+    const parsed = logged.map((line) => JSON.parse(line));
+    assert.ok(parsed.some((entry) => entry.event === "KAI_P2_09_HUMAN_REVIEW_VALIDATION_BLOCKER_CLASSIFICATION" && entry.reason === "required_audit_rejected"));
+  } finally {
+    console.error = originalConsoleError;
+  }
+});
+
+test("P2-09 repository shapeError: a PostgreSQL 23514 CHECK violation maps to validation_blocker/422 and logs its own distinguishable classification (never confused with a rejected audit)", async () => {
+  const originalConsoleError = console.error;
+  const logged = [];
+  console.error = (line) => logged.push(line);
+  try {
+    const repo = createPostgresHumanReviewRepository({
+      runInTransaction: async () => {
+        const error = new Error("check constraint violated");
+        error.code = "23514";
+        error.constraint = "upload_lifecycle_audit_gate_a_operation_check";
+        throw error;
+      },
+    });
+    const result = await repo.completeEvidenceReview(repositoryInput());
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "validation_blocker");
+    assert.equal(result.error.status, 422);
+    const parsed = logged.map((line) => JSON.parse(line));
+    assert.ok(parsed.some((entry) => entry.event === "KAI_P2_09_HUMAN_REVIEW_VALIDATION_BLOCKER_CLASSIFICATION" && entry.reason === "check_constraint_violation" && entry.pg_constraint === "upload_lifecycle_audit_gate_a_operation_check"));
+  } finally {
+    console.error = originalConsoleError;
+  }
+});
+
+test("P2-09 repository shapeError: a PostgreSQL 22P02 invalid-input-syntax error maps to validation_blocker/422 and logs its own distinguishable classification", async () => {
+  const originalConsoleError = console.error;
+  const logged = [];
+  console.error = (line) => logged.push(line);
+  try {
+    const repo = createPostgresHumanReviewRepository({
+      runInTransaction: async () => {
+        const error = new Error("invalid input syntax");
+        error.code = "22P02";
+        throw error;
+      },
+    });
+    const result = await repo.completeEvidenceReview(repositoryInput());
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "validation_blocker");
+    assert.equal(result.error.status, 422);
+    const parsed = logged.map((line) => JSON.parse(line));
+    assert.ok(parsed.some((entry) => entry.event === "KAI_P2_09_HUMAN_REVIEW_VALIDATION_BLOCKER_CLASSIFICATION" && entry.reason === "invalid_input_syntax"));
+  } finally {
+    console.error = originalConsoleError;
+  }
 });
 
 test("P2-09 route source contains no SQL, imports no repository or database module, and never references req.user", () => {
