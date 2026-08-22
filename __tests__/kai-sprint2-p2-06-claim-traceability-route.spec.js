@@ -273,6 +273,32 @@ test("P2-06 claim-traceability route", async (t) => {
       }
     },
   );
+
+  await t.test("traceability conflict diagnostics preserve only the safe reason field", async () => {
+    scenario = createScenario({
+      serviceResult: buildKaiError("conflict_current_state_changed", {
+        data: {
+          traceability_conflict_reason: "gap_followup_queue_mismatch",
+          partial: "must not leak",
+        },
+        blockers: [{ validator_key: "unsafe", evidence: { secret: true } }],
+        warnings: [{ code: "unsafe_warning", message: "must not leak" }],
+      }),
+    });
+    const response = await requestJson(server, concretePath());
+
+    assert.equal(response.statusCode, 409);
+    assert.equal(response.body.error.code, "conflict_current_state_changed");
+    assert.deepEqual(response.body.data, {
+      traceability_conflict_reason: "gap_followup_queue_mismatch",
+    });
+    assert.equal(response.body.blockers.length, 1);
+    assert.equal(response.body.blockers[0].validator_key, "unsafe");
+    assert.deepEqual(response.body.blockers[0].evidence, {});
+    assert.deepEqual(response.body.warnings, []);
+    assert.equal(JSON.stringify(response.body).includes("must not leak"), false);
+    assert.equal(JSON.stringify(response.body).includes("secret"), false);
+  });
 });
 
 test("P2-06 claim-traceability route: KAI_SPRINT2_ENABLED=false produces zero P2-06 service activity", async (t) => {

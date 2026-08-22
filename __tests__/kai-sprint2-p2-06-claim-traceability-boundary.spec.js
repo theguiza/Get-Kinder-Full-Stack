@@ -46,6 +46,50 @@ test("P2-06 service: forwards exactly organizationId, claimId, and requestedAudi
   assert.deepEqual(seen, [{ organizationId: ORG, claimId: CLAIM, requestedAudience: "public" }]);
 });
 
+test("P2-06 service: preserves only allowlisted traceability conflict reasons", async () => {
+  const repository = {
+    async getClaimTraceabilitySummary() {
+      return {
+        ok: false,
+        data: null,
+        error: {
+          code: "conflict_current_state_changed",
+          status: 409,
+          reason: "source_version_not_current",
+        },
+      };
+    },
+  };
+  const result = await getClaimTraceabilitySummary(input(), {
+    env: { KAI_SPRINT2_ENABLED: "true" },
+    claimTraceabilityRepository: repository,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "conflict_current_state_changed");
+  assert.deepEqual(result.data, { traceability_conflict_reason: "source_version_not_current" });
+
+  const unsafeRepository = {
+    async getClaimTraceabilitySummary() {
+      return {
+        ok: false,
+        data: null,
+        error: {
+          code: "conflict_current_state_changed",
+          status: 409,
+          reason: "unsafe_detail",
+        },
+      };
+    },
+  };
+  const unsafeResult = await getClaimTraceabilitySummary(input(), {
+    env: { KAI_SPRINT2_ENABLED: "true" },
+    claimTraceabilityRepository: unsafeRepository,
+  });
+  assert.equal(unsafeResult.ok, false);
+  assert.equal(unsafeResult.error.code, "conflict_current_state_changed");
+  assert.equal("data" in unsafeResult, false);
+});
+
 test("P2-06 service lazy-loads the database-capable repository only after the feature gate", () => {
   const source = readFileSync(new URL("../Backend/kai/services/kaiClaimTraceabilityService.js", import.meta.url), "utf8");
   assert.doesNotMatch(source, /^import .*postgresClaimTraceabilityRepository/m);

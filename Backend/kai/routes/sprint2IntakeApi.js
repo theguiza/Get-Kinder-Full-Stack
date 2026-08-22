@@ -154,6 +154,12 @@ function sanitizeServiceData(data) {
     sanitized.diagnostic_code = data.diagnostic_code;
   }
   if (
+    typeof data.traceability_conflict_reason === "string"
+    && /^(claim_evidence_link_mismatch|source_version_not_current|gap_dimension_requires_missing_p204_state|gap_followup_queue_mismatch|conflict_queue_count_mismatch|conflict_group_validation_failed)$/.test(data.traceability_conflict_reason)
+  ) {
+    sanitized.traceability_conflict_reason = data.traceability_conflict_reason;
+  }
+  if (
     Number.isSafeInteger(data.provider_http_status)
     && data.provider_http_status >= 100
     && data.provider_http_status <= 599

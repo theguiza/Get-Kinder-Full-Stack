@@ -6,6 +6,14 @@ import { validateTenantBoundaryConsistency } from "../validators/tenantValidator
 const CLAIM_TRACEABILITY_ALLOWED_ROLES = new Set(["gk_admin", "gk_operator", "gk_reviewer"]);
 const CLAIM_TRACEABILITY_OPERATION = "get_claim_traceability_summary";
 const REQUESTED_AUDIENCES = new Set(["internal", "funder", "public"]);
+const TRACEABILITY_CONFLICT_REASONS = new Set([
+  "claim_evidence_link_mismatch",
+  "source_version_not_current",
+  "gap_dimension_requires_missing_p204_state",
+  "gap_followup_queue_mismatch",
+  "conflict_queue_count_mismatch",
+  "conflict_group_validation_failed",
+]);
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -87,12 +95,22 @@ export async function getClaimTraceabilitySummary(input, dependencies = {}) {
   });
 
   if (!result.ok) {
+    const traceabilityConflictReason =
+      result.error.code === "conflict_current_state_changed" &&
+      TRACEABILITY_CONFLICT_REASONS.has(result.error.reason)
+        ? result.error.reason
+        : null;
     console.error("CLAIM_TRACEABILITY_RESULT_ERROR", {
       code: result.error.code,
       status: result.error.status,
-      reason: result.error.reason ?? null,
+      reason: traceabilityConflictReason,
     });
-    return buildKaiError(result.error.code, { status: result.error.status });
+    return buildKaiError(result.error.code, {
+      status: result.error.status,
+      ...(traceabilityConflictReason
+        ? { data: { traceability_conflict_reason: traceabilityConflictReason } }
+        : {}),
+    });
   }
   return { ok: true, data: result.data, error: null };
 }
@@ -101,4 +119,5 @@ export const __claimTraceabilityServiceContract = Object.freeze({
   CLAIM_TRACEABILITY_ALLOWED_ROLES,
   CLAIM_TRACEABILITY_OPERATION,
   REQUESTED_AUDIENCES,
+  TRACEABILITY_CONFLICT_REASONS,
 });
