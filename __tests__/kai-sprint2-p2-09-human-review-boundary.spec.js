@@ -58,6 +58,24 @@ test("P2-09 completeEvidenceReview rejects a non-human actor before any reposito
   assert.equal(result.error.code, "authorization_denied");
 });
 
+test("P2-09 completeEvidenceReview reports missing actor context as unauthorized instead of opaque validation_blocker", async () => {
+  const result = await completeEvidenceReview(
+    {
+      organizationId: ORG,
+      evidenceItemId: EVIDENCE,
+      reviewQueueItemId: QUEUE,
+      expectedUpdatedAt: NOW,
+      actorContext: undefined,
+      now: NOW,
+    },
+    { env: enabledEnv, humanReviewRepository: { async completeEvidenceReview() { throw new Error("must not be called"); } }, metadataOnlyAudit: stubMetadataOnlyAudit() },
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "unauthorized");
+  assert.equal(result.error.status, 401);
+  assert.equal(result.blockers?.[0]?.blocking_reason, "missing_actor_context");
+});
+
 test("P2-09 completeEvidenceReview rejects a wrong role (gk_operator) before any repository call", async () => {
   const result = await completeEvidenceReview(
     {
@@ -76,6 +94,24 @@ test("P2-09 completeEvidenceReview rejects a wrong role (gk_operator) before any
   );
   assert.equal(result.ok, false);
   assert.equal(result.error.code, "authorization_denied");
+});
+
+test("P2-09 completeClaimReviewInternalApproval reports missing actor context as unauthorized instead of opaque validation_blocker", async () => {
+  const result = await completeClaimReviewInternalApproval(
+    {
+      organizationId: ORG,
+      claimId: CLAIM,
+      reviewQueueItemId: QUEUE,
+      expectedUpdatedAt: NOW,
+      actorContext: null,
+      now: NOW,
+    },
+    { env: enabledEnv, humanReviewRepository: { async completeClaimReviewInternalApproval() { throw new Error("must not be called"); } }, metadataOnlyAudit: stubMetadataOnlyAudit() },
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "unauthorized");
+  assert.equal(result.error.status, 401);
+  assert.equal(result.blockers?.[0]?.blocking_reason, "missing_actor_context");
 });
 
 test("P2-09 completeClaimReviewInternalApproval rejects a wrong role (gk_operator) before any repository call", async () => {

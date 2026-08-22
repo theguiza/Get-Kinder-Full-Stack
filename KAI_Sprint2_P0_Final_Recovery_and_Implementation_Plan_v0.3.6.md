@@ -18504,3 +18504,36 @@ TOOL_VERIFIED local proof:
     KAI_FILE_UPLOAD_ENABLED=false KAI_WORKER_ENABLED=false npm run build`
     passed.
   - `git diff --check` passed.
+
+P2-09 evidence-review completion opaque validation correction (2026-08-22):
+USER_REPORTED production symptom: authenticated browser POST
+`/api/kai/sprint2/intake/admin/organizations/a5d17c5a-c55f-43af-9b21-fe63aafe733f/evidence-items/0cbae5b2-e4e9-4a81-9545-315de16a8a5e/evidence-review/acb23c27-20a4-455b-937c-4d86c677b53d/complete`
+returned `422 validation_blocker` with empty `blockers` and `warnings`. No
+production access, production SQL, credential/secret inspection, cloud mutation,
+deployment, push, or real-client-data access was performed.
+
+TOOL_VERIFIED correction:
+  - Root cause was an error-classification gap in
+    `Backend/kai/services/kaiHumanReviewService.js`: the P2-09 service-level
+    input guard required `actorContext` to already be a plain object, so a route
+    call whose resolved actor context was missing or malformed failed before the
+    authorization validator could emit its existing `unauthorized` /
+    `missing_actor_context` blocker. That produced the opaque
+    `validation_blocker` envelope shown in the browser.
+  - `completeEvidenceReview` and `completeClaimReviewInternalApproval` now keep
+    malformed mutation fields as `validation_blocker`, but route-assembled
+    inputs with absent/malformed actor context are delegated to the established
+    authorization validator and return `401 unauthorized` with
+    `blocking_reason = missing_actor_context`. Non-human actors and wrong roles
+    keep their prior authorization-denied behavior.
+  - Regression coverage was added to
+    `__tests__/kai-sprint2-p2-09-human-review-boundary.spec.js` for both
+    evidence-review completion and claim-review completion so this exact
+    empty-blocker validation envelope cannot recur for missing actor context.
+
+TOOL_VERIFIED local proof:
+  - `DATABASE_URL=postgres://127.0.0.1:1/kai_sentinel
+    KAI_FILE_UPLOAD_ENABLED=false node --test
+    __tests__/kai-sprint2-p2-09-human-review-boundary.spec.js` passed: 19 tests,
+    19 passing, 0 failing.
+  - `git diff --check` passed.

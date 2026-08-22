@@ -44,7 +44,7 @@ function isCompleteEvidenceReviewInput(value) {
     isNonEmptyString(value.evidenceItemId) &&
     isNonEmptyString(value.reviewQueueItemId) &&
     isNormalizedNow(value.expectedUpdatedAt) &&
-    isPlainObject(value.actorContext) &&
+    Object.hasOwn(value, "actorContext") &&
     isNormalizedNow(value.now)
   );
 }
@@ -57,7 +57,7 @@ function isCompleteClaimReviewInput(value) {
     isNonEmptyString(value.claimId) &&
     isNonEmptyString(value.reviewQueueItemId) &&
     isNormalizedNow(value.expectedUpdatedAt) &&
-    isPlainObject(value.actorContext) &&
+    Object.hasOwn(value, "actorContext") &&
     isNormalizedNow(value.now)
   );
 }
@@ -77,7 +77,16 @@ export async function completeEvidenceReview(input, dependencies = {}) {
   }
 
   const { actorContext } = input;
-  if (!isMappedHumanActor(actorContext)) {
+  if (!isPlainObject(actorContext) || !actorContext?.actorUserId) {
+    const auth = validateActorCanPerformOperation(
+      actorContext,
+      COMPLETE_EVIDENCE_REVIEW_OPERATION,
+      input.organizationId,
+      { allowedRoles: COMPLETE_EVIDENCE_REVIEW_ALLOWED_ROLES, combineGlobalRoles: true },
+    );
+    return buildKaiError(auth.error_code || "unauthorized", { blockers: auth.blockers });
+  }
+  if (actorContext.actorType !== "human") {
     return buildKaiError("authorization_denied");
   }
 
@@ -130,7 +139,16 @@ export async function completeClaimReviewInternalApproval(input, dependencies = 
   }
 
   const { actorContext } = input;
-  if (!isMappedHumanActor(actorContext)) {
+  if (!isPlainObject(actorContext) || !actorContext?.actorUserId) {
+    const auth = validateActorCanPerformOperation(
+      actorContext,
+      COMPLETE_CLAIM_REVIEW_OPERATION,
+      input.organizationId,
+      { allowedRoles: COMPLETE_CLAIM_REVIEW_ALLOWED_ROLES, combineGlobalRoles: true },
+    );
+    return buildKaiError(auth.error_code || "unauthorized", { blockers: auth.blockers });
+  }
+  if (actorContext.actorType !== "human") {
     return buildKaiError("authorization_denied");
   }
 
