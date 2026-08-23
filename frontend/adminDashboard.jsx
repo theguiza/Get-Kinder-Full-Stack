@@ -1,6 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ImpactEvidenceLibrary from "./ImpactEvidenceLibrary.jsx";
 import KaiWebIntake from "./KaiWebIntake.jsx";
+import {
+  KAI_ORGANIZATION_ROLE_OPTIONS,
+  adminUserLookupPath,
+  buildKaiOrganizationMembershipPayload,
+  describeKaiAccessAuthoritySource,
+  kaiAccessRowKey,
+  kaiOrganizationAccessPath,
+  kaiOrganizationMembershipPath,
+} from "./kaiOrganizationAccessLogic.js";
 
 const NAV_ITEMS = [
   { key: "overview", label: "Overview", icon: "fa-gauge-high" },
@@ -42,6 +51,22 @@ const FUNDING_CLASS_OPTIONS = [
   { value: "mixed", label: "Mixed" },
   { value: "commercial", label: "Commercial" },
 ];
+const INITIAL_KAI_ACCESS_MODAL = Object.freeze({
+  open: false,
+  organizationId: null,
+  organizationName: "",
+  kaiOrganizationId: null,
+  loading: false,
+  error: "",
+  access: [],
+  globalRolesVisible: false,
+  emailInput: "",
+  roleInput: KAI_ORGANIZATION_ROLE_OPTIONS[0],
+  submitting: false,
+  formError: "",
+  rowDrafts: {},
+  rowSavingKey: null,
+});
 const OVERRIDE_BOOLEAN_OPTIONS = [
   { value: "", label: "Inherit" },
   { value: "true", label: "Yes" },
@@ -510,6 +535,41 @@ function ConfirmDialog({ open, title, body, confirmLabel, onCancel, onConfirm, v
   );
 }
 
+function KaiAccessRosterRow({ row, roleOptions, draftRole, onDraftChange, onSave, saving }) {
+  const displayName = row.email || (row.legacy_public_userdata_id ? `User #${row.legacy_public_userdata_id}` : "Unknown user");
+  return (
+    <tr>
+      <td>{displayName}</td>
+      <td>{row.effective_role_name || "—"}</td>
+      <td>{row.effective_membership_status || "—"}</td>
+      <td>{describeKaiAccessAuthoritySource(row.authority_source)}</td>
+      <td>
+        {row.editable ? (
+          <div className="d-flex gap-1">
+            <select
+              className="form-select form-select-sm"
+              style={{ minWidth: 140 }}
+              value={draftRole}
+              onChange={(e) => onDraftChange(e.target.value)}
+            >
+              {roleOptions.map((role) => (
+                <option key={role} value={role}>
+                  {role}
+                </option>
+              ))}
+            </select>
+            <button type="button" className="btn btn-outline-primary btn-sm" disabled={saving} onClick={onSave}>
+              {saving ? "Saving…" : "Save"}
+            </button>
+          </div>
+        ) : (
+          <span className="text-muted small">Derived — not editable here</span>
+        )}
+      </td>
+    </tr>
+  );
+}
+
 function buildPageItems(page, totalPages) {
   const safePage = Math.max(1, safeNumber(page, 1));
   const safeTotalPages = Math.max(0, safeNumber(totalPages, 0));
@@ -715,6 +775,9 @@ export default function AdminDashboard() {
     submitting: false,
   });
 
+  const [kaiAccessModal, setKaiAccessModal] = useState(() => INITIAL_KAI_ACCESS_MODAL);
+  const kaiAccessRequestRef = useRef(0);
+
   const [eventEdit, setEventEdit] = useState(null);
   const [volunteerEdit, setVolunteerEdit] = useState(null);
   const [selectedCreditRequests, setSelectedCreditRequests] = useState({});
@@ -766,6 +829,47 @@ export default function AdminDashboard() {
         body: JSON.stringify(body || {}),
       }),
     [requestJson, csrfToken]
+  );
+
+  // KAI Sprint 2 Package 2 error responses shape their error as
+  // { error: { code, message, status } } (Backend/kai/errors/kaiErrors.js),
+  // not the { error: "string" } shape the rest of this admin API uses -
+  // requestJson's error extraction above would stringify that object into
+  // "[object Object]". These thin wrappers unwrap the KAI error shape
+  // without touching requestJson/mutateJson (and every other admin flow
+  // that already depends on their exact behavior).
+  const kaiRequestJson = useCallback(async (url, options = {}) => {
+    const response = await fetch(url, { credentials: "same-origin", ...options });
+    const raw = await response.text();
+    let payload = null;
+    try {
+      payload = raw ? JSON.parse(raw) : null;
+    } catch {
+      payload = null;
+    }
+    if (!response.ok) {
+      const kaiMessage = payload?.error && typeof payload.error === "object" ? payload.error.message : null;
+      const errorMessage =
+        kaiMessage ||
+        (typeof payload?.error === "string" ? payload.error : null) ||
+        payload?.message ||
+        `Request failed (${response.status})`;
+      throw new Error(errorMessage);
+    }
+    return payload;
+  }, []);
+
+  const kaiMutateJson = useCallback(
+    (url, method, body) =>
+      kaiRequestJson(url, {
+        method,
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": csrfToken || "",
+        },
+        body: JSON.stringify(body || {}),
+      }),
+    [kaiRequestJson, csrfToken]
   );
 
   const getOrgPolicyDraft = useCallback(
@@ -1384,6 +1488,143 @@ export default function AdminDashboard() {
       loadOrganizations();
     },
     [csrfToken, loadOrganizations, pushToast]
+  );
+
+  // Loads the KAI access roster for one explicit (organizationId,
+  // kaiOrganizationId) pair from the Package 2 GET endpoint. Every state
+  // update is gated on the modal still being open for that same
+  // organizationId, and a monotonically increasing request token discards
+  // any response that arrives after the modal has moved on to a different
+  // organization - together these prevent Organization A's modal from ever
+  // displaying or mutating Organization B's data because of a slow/late
+  // network response (stale-state protection).
+  const loadKaiAccess = useCallback(
+    async (organizationId, kaiOrganizationId) => {
+      const requestToken = ++kaiAccessRequestRef.current;
+      if (!kaiOrganizationId) {
+        setKaiAccessModal((curr) =>
+          curr.organizationId === organizationId
+            ? { ...curr, loading: false, access: [], globalRolesVisible: false }
+            : curr
+        );
+        return;
+      }
+      try {
+        const payload = await requestJson(kaiOrganizationAccessPath(kaiOrganizationId));
+        if (kaiAccessRequestRef.current !== requestToken) return;
+        const data = payload?.data || {};
+        setKaiAccessModal((curr) =>
+          curr.organizationId === organizationId
+            ? {
+                ...curr,
+                loading: false,
+                error: "",
+                access: Array.isArray(data.access) ? data.access : [],
+                globalRolesVisible: data.global_roles_visible === true,
+              }
+            : curr
+        );
+      } catch (err) {
+        if (kaiAccessRequestRef.current !== requestToken) return;
+        setKaiAccessModal((curr) =>
+          curr.organizationId === organizationId
+            ? { ...curr, loading: false, error: err?.message || "Unable to load KAI access." }
+            : curr
+        );
+      }
+    },
+    [requestJson]
+  );
+
+  const openKaiAccessModal = useCallback(
+    (org) => {
+      const kaiOrganizationId = org?.kai_organization_id || null;
+      setKaiAccessModal({
+        ...INITIAL_KAI_ACCESS_MODAL,
+        open: true,
+        organizationId: org.id,
+        organizationName: org.name || "",
+        kaiOrganizationId,
+        loading: Boolean(kaiOrganizationId),
+        error: kaiOrganizationId
+          ? ""
+          : "This organization has no active KAI organization binding yet, so KAI access cannot be viewed or changed here.",
+      });
+      loadKaiAccess(org.id, kaiOrganizationId);
+    },
+    [loadKaiAccess]
+  );
+
+  const closeKaiAccessModal = useCallback(() => {
+    kaiAccessRequestRef.current += 1;
+    setKaiAccessModal(INITIAL_KAI_ACCESS_MODAL);
+  }, []);
+
+  const submitKaiAccessGrant = useCallback(async () => {
+    const { organizationId, kaiOrganizationId, emailInput, roleInput, submitting } = kaiAccessModal;
+    if (submitting || !kaiOrganizationId) return;
+    const email = String(emailInput || "").trim().toLowerCase();
+    if (!email || !email.includes("@")) {
+      setKaiAccessModal((curr) => ({ ...curr, formError: "Enter a valid email address." }));
+      return;
+    }
+
+    setKaiAccessModal((curr) => ({ ...curr, submitting: true, formError: "" }));
+    try {
+      // Exact-email, read-only lookup only - never the mutating
+      // POST /organizations/:id/admins endpoint, which would unintentionally
+      // grant organization-panel admin access as a side effect.
+      const lookupPayload = await requestJson(adminUserLookupPath(email));
+      const legacyUserId = lookupPayload?.user?.id;
+      if (!legacyUserId) throw new Error("user_not_found");
+
+      const payload = buildKaiOrganizationMembershipPayload(roleInput, "active");
+      await kaiMutateJson(kaiOrganizationMembershipPath(kaiOrganizationId, legacyUserId), "PUT", payload);
+
+      pushToast(`Granted ${roleInput.replace(/_/g, " ")} access to ${email}.`, "success");
+      setKaiAccessModal((curr) =>
+        curr.organizationId === organizationId ? { ...curr, submitting: false, emailInput: "" } : { ...curr, submitting: false }
+      );
+      // Authoritative refresh from the server - never fabricate the
+      // resulting roster locally.
+      loadKaiAccess(organizationId, kaiOrganizationId);
+    } catch (err) {
+      const message =
+        err?.message === "user_not_found"
+          ? `No existing Get Kinder account found for ${email}.`
+          : err?.message || "Unable to grant KAI access.";
+      setKaiAccessModal((curr) => ({ ...curr, submitting: false, formError: message }));
+    }
+  }, [kaiAccessModal, requestJson, kaiMutateJson, pushToast, loadKaiAccess]);
+
+  const submitKaiAccessRoleChange = useCallback(
+    async (row, newRole) => {
+      const { organizationId, kaiOrganizationId } = kaiAccessModal;
+      const legacyUserId = row?.legacy_public_userdata_id;
+      if (!kaiOrganizationId || !legacyUserId || !row?.editable) return;
+      const rowKey = kaiAccessRowKey(row);
+
+      setKaiAccessModal((curr) => ({ ...curr, rowSavingKey: rowKey, error: "" }));
+      try {
+        const payload = buildKaiOrganizationMembershipPayload(newRole, "active");
+        await kaiMutateJson(kaiOrganizationMembershipPath(kaiOrganizationId, legacyUserId), "PUT", payload);
+        pushToast(`Updated KAI role for ${row.email || `user #${legacyUserId}`}.`, "success");
+        setKaiAccessModal((curr) =>
+          curr.organizationId === organizationId ? { ...curr, rowSavingKey: null } : { ...curr, rowSavingKey: null }
+        );
+        // Authoritative refresh from the server - never fabricate the
+        // resulting roster locally, and never retry with weaker semantics
+        // (e.g. a last-admin-protection rejection is surfaced as-is below).
+        loadKaiAccess(organizationId, kaiOrganizationId);
+      } catch (err) {
+        setKaiAccessModal((curr) =>
+          curr.organizationId === organizationId
+            ? { ...curr, rowSavingKey: null, error: err?.message || "Unable to update KAI role." }
+            : { ...curr, rowSavingKey: null }
+        );
+      }
+    },
+    [kaiAccessModal, kaiMutateJson, pushToast, loadKaiAccess]
   );
 
   const runOrgSuspendToggle = useCallback(
@@ -2534,6 +2775,13 @@ export default function AdminDashboard() {
                                   onClick={() => runOrgAddAdmin(org)}
                                 >
                                   +Admin
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn-outline-primary btn-sm"
+                                  onClick={() => openKaiAccessModal(org)}
+                                >
+                                  KAI Access
                                 </button>
                                 <button
                                   type="button"
@@ -3821,6 +4069,126 @@ export default function AdminDashboard() {
               >
                 {donationAllocationModal.submitting ? "Saving…" : "Save allocation"}
               </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {kaiAccessModal.open ? (
+        <div className="admin-edit-backdrop">
+          <div className="admin-edit-card admin-edit-card-wide">
+            <div className="d-flex justify-content-between align-items-start mb-2">
+              <div>
+                <h5 className="mb-1">KAI Access — {kaiAccessModal.organizationName}</h5>
+                <div className="small text-muted">
+                  Assign or change organization-scoped KAI roles for existing Get Kinder users.
+                </div>
+              </div>
+              <button type="button" className="btn-close" onClick={closeKaiAccessModal} />
+            </div>
+
+            {kaiAccessModal.error ? (
+              <div className="alert alert-warning py-2 small mb-2">{kaiAccessModal.error}</div>
+            ) : null}
+
+            <div className="table-responsive mb-3" style={{ maxHeight: 280, overflowY: "auto" }}>
+              <table className="table table-sm mb-0">
+                <thead>
+                  <tr>
+                    <th>Email / user</th>
+                    <th>Effective role</th>
+                    <th>Status</th>
+                    <th>Source</th>
+                    <th>Change role</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {kaiAccessModal.loading ? (
+                    <tr>
+                      <td colSpan={5} className="text-muted small">
+                        Loading…
+                      </td>
+                    </tr>
+                  ) : kaiAccessModal.access.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="text-muted small">
+                        No KAI access recorded for this organization.
+                      </td>
+                    </tr>
+                  ) : (
+                    kaiAccessModal.access.map((row) => {
+                      const rowKey = kaiAccessRowKey(row);
+                      const draftRole =
+                        kaiAccessModal.rowDrafts[rowKey] ||
+                        row.stored_membership?.role_name ||
+                        row.effective_role_name ||
+                        KAI_ORGANIZATION_ROLE_OPTIONS[0];
+                      return (
+                        <KaiAccessRosterRow
+                          key={rowKey}
+                          row={row}
+                          roleOptions={KAI_ORGANIZATION_ROLE_OPTIONS}
+                          draftRole={draftRole}
+                          onDraftChange={(value) =>
+                            setKaiAccessModal((curr) => ({
+                              ...curr,
+                              rowDrafts: { ...curr.rowDrafts, [rowKey]: value },
+                            }))
+                          }
+                          onSave={() => submitKaiAccessRoleChange(row, draftRole)}
+                          saving={kaiAccessModal.rowSavingKey === rowKey}
+                        />
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="border-top pt-3">
+              <div className="row g-2 align-items-end">
+                <div className="col-12 col-md-5">
+                  <label className="form-label small">Email</label>
+                  <input
+                    type="email"
+                    className="form-control form-control-sm"
+                    value={kaiAccessModal.emailInput}
+                    onChange={(e) =>
+                      setKaiAccessModal((curr) => ({ ...curr, emailInput: e.target.value, formError: "" }))
+                    }
+                    placeholder="user@example.org"
+                    disabled={kaiAccessModal.submitting || !kaiAccessModal.kaiOrganizationId}
+                  />
+                </div>
+                <div className="col-8 col-md-4">
+                  <label className="form-label small">KAI role</label>
+                  <select
+                    className="form-select form-select-sm"
+                    value={kaiAccessModal.roleInput}
+                    onChange={(e) => setKaiAccessModal((curr) => ({ ...curr, roleInput: e.target.value }))}
+                    disabled={kaiAccessModal.submitting || !kaiAccessModal.kaiOrganizationId}
+                  >
+                    {KAI_ORGANIZATION_ROLE_OPTIONS.map((role) => (
+                      <option key={role} value={role}>
+                        {role}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="col-4 col-md-3">
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm w-100"
+                    disabled={kaiAccessModal.submitting || !kaiAccessModal.kaiOrganizationId}
+                    onClick={submitKaiAccessGrant}
+                  >
+                    {kaiAccessModal.submitting ? "Saving…" : "Grant KAI Access"}
+                  </button>
+                </div>
+              </div>
+              {kaiAccessModal.formError ? (
+                <div className="text-danger small mt-2">{kaiAccessModal.formError}</div>
+              ) : null}
             </div>
           </div>
         </div>

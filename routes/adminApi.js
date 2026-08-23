@@ -10,6 +10,10 @@ import { createProgram } from "../Backend/services/programsService.js";
 import { createProject } from "../Backend/services/projectsService.js";
 import { createFundingCreditFromAdminTopup } from "../services/fundingCreditService.js";
 import { hasUserOrgMembershipTable } from "../services/orgScopeService.js";
+import {
+  resolveActiveKaiOrganizationIdsByGkOrganizationId,
+  findExistingGkUserByExactEmail,
+} from "../Backend/kai/services/kaiAccessAdminReadService.js";
 
 const adminApiRouter = express.Router();
 const CSRF_HEADER_NAME = "X-CSRF-Token";
@@ -865,6 +869,15 @@ adminApiRouter.get("/organizations", async (req, res) => {
       dataParams
     );
 
+    // Read-only augmentation: attach each organization's active KAI
+    // organization UUID binding (if any), so the admin frontend's "KAI
+    // Access" control can call the Package 2 access-administration API with
+    // the KAI organization UUID it actually expects, rather than assuming
+    // this Get Kinder organization id is interchangeable with it. This never
+    // creates/changes a binding - it only reads, via the read service.
+    const orgIds = rows.map((row) => Number(row.id)).filter((id) => Number.isInteger(id) && id > 0);
+    const kaiOrganizationIdByGkOrgId = await resolveActiveKaiOrganizationIdsByGkOrganizationId(orgIds);
+
     return res.json({
       data: rows.map((row) => ({
       id: row.id,
@@ -880,6 +893,7 @@ adminApiRouter.get("/organizations", async (req, res) => {
       funding_notes: row.funding_notes || "",
       rep_email: row.rep_email,
       rep_name: `${row.rep_firstname || ""} ${row.rep_lastname || ""}`.trim(),
+      kai_organization_id: kaiOrganizationIdByGkOrgId.get(Number(row.id)) || null,
       })),
       pagination: buildPagination(page, limit, totalRows),
     });
@@ -1567,6 +1581,36 @@ adminApiRouter.patch("/organizations/:id/funding-policy", async (req, res) => {
     return res.json({ success: true, organization });
   } catch (err) {
     console.error("PATCH /api/admin/organizations/:id/funding-policy error:", err);
+    return res.status(500).json({ error: "server_error" });
+  }
+});
+
+// Read-only, exact-email, existing-user-only lookup. Added specifically so
+// the KAI Access workflow (assigning organization-scoped client_admin /
+// client_reviewer / client_contributor roles) never has to call the
+// mutating POST /organizations/:id/admins endpoint below just to resolve an
+// email to a legacy user id - that endpoint grants organization-panel admin
+// access as a side effect, which this lookup must never do. Protected by
+// the same site-superuser-only ensureAdminApi gate already applied to every
+// route on this router (see adminApiRouter.use(ensureAdminApi) above).
+// Creates nothing, mutates nothing, and returns only the minimum fields
+// this workflow needs.
+adminApiRouter.get("/users/lookup", async (req, res) => {
+  try {
+    const email = String(req.query.email || "").trim().toLowerCase();
+    if (!email || !email.includes("@")) {
+      return res.status(400).json({ error: "invalid_request" });
+    }
+
+    const member = await findExistingGkUserByExactEmail(email);
+
+    if (!member) {
+      return res.status(404).json({ error: "user_not_found" });
+    }
+
+    return res.json({ user: member });
+  } catch (err) {
+    console.error("GET /api/admin/users/lookup error:", err);
     return res.status(500).json({ error: "server_error" });
   }
 });

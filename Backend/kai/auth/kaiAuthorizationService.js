@@ -231,19 +231,6 @@ export function validateActorCanPerformOperation(actorContext, operation, organi
       : (Boolean(options.combineGlobalRoles) && hasGlobalCapabilityRole) ||
         memberships.some((membership) => allowedRoles.has(membership.role_name));
 
-  console.log(JSON.stringify({
-    event: "KAI_AUTHORIZATION_ROLE_DENIED_DEBUG",
-    operation,
-    organizationId,
-    actorUserId: actorContext?.actorUserId,
-    kaiRoles: actorContext?.kaiRoles,
-    memberships,
-    allowedRoles: [...allowedRoles],
-    options,
-    hasGlobalCapabilityRole,
-    hasAllowedRole
-  }, null, 2));
-
   if (!hasAllowedRole) {
     return {
       ok: false,
