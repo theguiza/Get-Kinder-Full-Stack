@@ -35,6 +35,20 @@ const operatorActor = Object.freeze({
   actorUserId: "90000000-0000-4000-8000-000000000003",
   organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "gk_operator" }],
 });
+const clientAdminActor = Object.freeze({
+  actorType: "human",
+  actorUserId: "90000000-0000-4000-8000-000000000006",
+  kaiRoles: [],
+  organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_admin" }],
+});
+const platformSuperuserActor = Object.freeze({
+  actorType: "human",
+  actorUserId: "90000000-0000-4000-8000-000000000005",
+  kaiRoles: [],
+  organizationMemberships: [],
+  platformSuperuser: true,
+  platformSuperuserAuthority: "get_kinder_site_admin",
+});
 const aiActor = Object.freeze({
   actorType: "ai",
   actorUserId: "90000000-0000-4000-8000-000000000004",
@@ -90,6 +104,92 @@ test("P2-10 service rejects gk_admin before any repository call", async () => {
   );
   assert.equal(result.ok, false);
   assert.equal(result.error.code, "authorization_denied");
+});
+
+test("P2-10 service still rejects client_admin before any repository call", async () => {
+  const result = await acceptInternalCoverageLimitation(
+    { organizationId: ORG, claimId: CLAIM, dimensionKey: "denominator_clarity", actorContext: clientAdminActor, now: NOW },
+    { env: enabledEnv, coverageReviewDecisionRepository: { async acceptInternalCoverageLimitation() { throw new Error("must not be called"); } } },
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "authorization_denied");
+});
+
+test("P2-10 service allows platform superuser through central authorization without changing the local gk_reviewer role set", async () => {
+  const calls = [];
+  const result = await acceptInternalCoverageLimitation(
+    {
+      organizationId: ORG,
+      claimId: CLAIM,
+      dimensionKey: "denominator_clarity",
+      actorContext: platformSuperuserActor,
+      now: NOW,
+    },
+    {
+      env: enabledEnv,
+      coverageReviewDecisionRepository: {
+        async acceptInternalCoverageLimitation(input) {
+          calls.push(input);
+          return { ok: true, data: { replayed: false }, error: null };
+        },
+      },
+    },
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].actorUserId, platformSuperuserActor.actorUserId);
+  assert.equal(calls[0].actorRole, "gk_reviewer");
+  assert.deepEqual(
+    [...__coverageReviewDecisionServiceContract.ACCEPT_INTERNAL_COVERAGE_LIMITATION_ALLOWED_ROLES],
+    ["gk_reviewer"],
+  );
+});
+
+test("P2-10 service platform superuser cannot bypass downstream repository validation", async () => {
+  const result = await acceptInternalCoverageLimitation(
+    {
+      organizationId: ORG,
+      claimId: CLAIM,
+      dimensionKey: "denominator_clarity",
+      actorContext: platformSuperuserActor,
+      now: NOW,
+    },
+    {
+      env: enabledEnv,
+      coverageReviewDecisionRepository: {
+        async acceptInternalCoverageLimitation() {
+          return { ok: false, data: null, error: { code: "dimension_not_unresolved", status: 409 } };
+        },
+      },
+    },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "dimension_not_unresolved");
+});
+
+test("P2-10 service platform superuser still requires explicit organization context", async () => {
+  const result = await acceptInternalCoverageLimitation(
+    {
+      organizationId: "",
+      claimId: CLAIM,
+      dimensionKey: "denominator_clarity",
+      actorContext: platformSuperuserActor,
+      now: NOW,
+    },
+    {
+      env: enabledEnv,
+      coverageReviewDecisionRepository: {
+        async acceptInternalCoverageLimitation() {
+          throw new Error("must not be called");
+        },
+      },
+    },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "validation_blocker");
 });
 
 test("P2-10 service rejects a wrong-tenant actor before any repository call", async () => {

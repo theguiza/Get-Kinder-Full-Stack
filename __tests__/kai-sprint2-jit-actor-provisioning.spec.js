@@ -155,6 +155,8 @@ function fakeGetKinderUser(overrides = {}) {
 }
 
 test("resolveKaiActorContext auto-provisions an authenticated Get Kinder user with no pre-existing kai.users mapping", async () => {
+  const originalAdminEmails = process.env.ADMIN_EMAILS;
+  process.env.ADMIN_EMAILS = "";
   let createCalls = 0;
   const dependencies = {
     async findOrCreateKaiUserByLegacyPublicUserdataId({ legacyPublicUserdataId, email }) {
@@ -178,15 +180,130 @@ test("resolveKaiActorContext auto-provisions an authenticated Get Kinder user wi
     },
   };
 
-  const result = await resolveKaiActorContext({ user: fakeGetKinderUser() }, dependencies);
+  try {
+    const result = await resolveKaiActorContext({ user: fakeGetKinderUser() }, dependencies);
 
-  assert.equal(createCalls, 1);
+    assert.equal(createCalls, 1);
+    assert.equal(result.ok, true);
+    assert.notEqual(result.error_code, "mapped_kai_user_required");
+    assert.equal(result.actorContext.actorUserId, "jit-kai-user-46");
+    assert.equal(result.actorContext.legacyPublicUserdataId, 46);
+    assert.deepEqual(result.actorContext.kaiRoles, []);
+    assert.deepEqual(result.actorContext.organizationMemberships, []);
+    assert.equal(result.actorContext.platformSuperuser, false);
+    assert.equal(result.actorContext.platformSuperuserAuthority, null);
+  } finally {
+    if (originalAdminEmails === undefined) delete process.env.ADMIN_EMAILS;
+    else process.env.ADMIN_EMAILS = originalAdminEmails;
+  }
+});
+
+test("resolveKaiActorContext carries canonical Get Kinder is_admin authority as platform superuser", async () => {
+  const dependencies = {
+    async findOrCreateKaiUserByLegacyPublicUserdataId({ legacyPublicUserdataId, email }) {
+      return {
+        user_id: "jit-kai-user-46",
+        legacy_identity_source: "public.userdata",
+        legacy_public_userdata_id: legacyPublicUserdataId,
+        status: "active",
+        email,
+      };
+    },
+    async listKaiRolesForUser() {
+      return [];
+    },
+    async listOrganizationMembershipsForUser() {
+      return [];
+    },
+    async resolveEffectiveClientOrganizationMembershipsForLegacyUser() {
+      return [];
+    },
+  };
+
+  const result = await resolveKaiActorContext({ user: fakeGetKinderUser({ is_admin: true }) }, dependencies);
+
   assert.equal(result.ok, true);
-  assert.notEqual(result.error_code, "mapped_kai_user_required");
-  assert.equal(result.actorContext.actorUserId, "jit-kai-user-46");
-  assert.equal(result.actorContext.legacyPublicUserdataId, 46);
+  assert.equal(result.actorContext.platformSuperuser, true);
+  assert.equal(result.actorContext.platformSuperuserAuthority, "get_kinder_site_admin");
   assert.deepEqual(result.actorContext.kaiRoles, []);
   assert.deepEqual(result.actorContext.organizationMemberships, []);
+});
+
+test("resolveKaiActorContext reuses existing ADMIN_EMAILS admin fallback without new KAI role inference", async () => {
+  const originalAdminEmails = process.env.ADMIN_EMAILS;
+  process.env.ADMIN_EMAILS = "kai@getkinder.ai";
+  try {
+    const dependencies = {
+      async findOrCreateKaiUserByLegacyPublicUserdataId({ legacyPublicUserdataId, email }) {
+        return {
+          user_id: "jit-kai-user-46",
+          legacy_identity_source: "public.userdata",
+          legacy_public_userdata_id: legacyPublicUserdataId,
+          status: "active",
+          email,
+        };
+      },
+      async listKaiRolesForUser() {
+        return [];
+      },
+      async listOrganizationMembershipsForUser() {
+        return [];
+      },
+      async resolveEffectiveClientOrganizationMembershipsForLegacyUser() {
+        return [];
+      },
+    };
+
+    const result = await resolveKaiActorContext({ user: fakeGetKinderUser() }, dependencies);
+
+    assert.equal(result.ok, true);
+    assert.equal(result.actorContext.platformSuperuser, true);
+    assert.deepEqual(result.actorContext.kaiRoles, []);
+    assert.deepEqual(result.actorContext.organizationMemberships, []);
+  } finally {
+    if (originalAdminEmails === undefined) delete process.env.ADMIN_EMAILS;
+    else process.env.ADMIN_EMAILS = originalAdminEmails;
+  }
+});
+
+test("resolveKaiActorContext ignores fabricated body and session platform-superuser fields", async () => {
+  const originalAdminEmails = process.env.ADMIN_EMAILS;
+  process.env.ADMIN_EMAILS = "";
+  const dependencies = {
+    async findOrCreateKaiUserByLegacyPublicUserdataId({ legacyPublicUserdataId, email }) {
+      return {
+        user_id: "jit-kai-user-46",
+        legacy_identity_source: "public.userdata",
+        legacy_public_userdata_id: legacyPublicUserdataId,
+        status: "active",
+        email,
+      };
+    },
+    async listKaiRolesForUser() {
+      return [];
+    },
+    async listOrganizationMembershipsForUser() {
+      return [];
+    },
+    async resolveEffectiveClientOrganizationMembershipsForLegacyUser() {
+      return [];
+    },
+  };
+
+  try {
+    const result = await resolveKaiActorContext({
+      user: fakeGetKinderUser({ is_admin: false, platformSuperuser: true }),
+      body: { platformSuperuser: true, is_admin: true },
+      session: { platformSuperuser: true, is_admin: true },
+    }, dependencies);
+
+    assert.equal(result.ok, true);
+    assert.equal(result.actorContext.platformSuperuser, false);
+    assert.equal(result.actorContext.platformSuperuserAuthority, null);
+  } finally {
+    if (originalAdminEmails === undefined) delete process.env.ADMIN_EMAILS;
+    else process.env.ADMIN_EMAILS = originalAdminEmails;
+  }
 });
 
 test("resolveKaiActorContext resolution is idempotent and returns a deterministic actor identity across repeated requests", async () => {

@@ -117,3 +117,4 @@ export {
 } from "./validators/auditValidators.js";
 export { PASS1E_AUDIT_CONTRACT, recordBlockedAttemptAudit } from "./services/auditService.js";
 export { default as sprint2IntakeApiRouter } from "./routes/sprint2IntakeApi.js";
+export { default as kaiAccessAdministrationApiRouter } from "./routes/kaiAccessAdministrationApi.js";

@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 const routeSource = readFileSync("Backend/kai/routes/sprint2IntakeApi.js", "utf8");
 const authPreflightRouteSource = readFileSync("Backend/kai/routes/sprint2IntakeAuthPreflightApi.js", "utf8");
 const legacyKaiRouteSource = readFileSync("Backend/routes/kaiApi.js", "utf8");
+const accessAdministrationRouteSource = readFileSync("Backend/kai/routes/kaiAccessAdministrationApi.js", "utf8");
 const indexSource = readFileSync("index.js", "utf8");
 const kaiDbSource = readFileSync("Backend/kai/db/kaiDb.js", "utf8");
 const kaiBackendIndexSource = readFileSync("Backend/kai/index.js", "utf8");
@@ -85,7 +86,7 @@ test("Pass 1F API contract tests do not import pg or initialize a pool", () => {
 });
 
 test("route files contain no direct SQL against kai schema", () => {
-  for (const source of [routeSource, authPreflightRouteSource, legacyKaiRouteSource]) {
+  for (const source of [routeSource, authPreflightRouteSource, legacyKaiRouteSource, accessAdministrationRouteSource]) {
     assert.doesNotMatch(source, /\b(?:SELECT|INSERT|UPDATE|DELETE)\b[\s\S]{0,200}\bkai\./i);
     assert.doesNotMatch(source, /\bkai\.(?!js\b)[a-z_]+\b/i);
   }

@@ -54,6 +54,13 @@ const SAFE_AUDIT_METADATA_KEYS = new Set([
   "contains_storage_credentials",
   "created_by_service",
   "metadata_only",
+  "target_user_id",
+  "role_name",
+  "previous_role_name",
+  "resulting_role_name",
+  "previous_membership_status",
+  "resulting_membership_status",
+  "authority_source",
 ]);
 
 const FORCED_FALSE_METADATA_FLAGS = [

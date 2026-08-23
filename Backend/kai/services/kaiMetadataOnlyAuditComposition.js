@@ -933,6 +933,87 @@ export function createProductionMetadataOnlyAuditForOrganizationKaiEnablement({
   });
 }
 
+/**
+ * Production composition of the `metadataOnlyAudit` contract required by
+ * Package 2's governed role/organization-membership administration
+ * (Backend/kai/services/kaiAccessAdministrationService.js). organizationId is
+ * null for the platform-superuser-only global-role path, which is not
+ * tenant-scoped; every allowlisted metadata key here
+ * (target_user_id/role_name/previous_role_name/resulting_role_name/
+ * previous_membership_status/resulting_membership_status/authority_source)
+ * is one Backend/kai/db/kaiAuditQueries.js's SAFE_AUDIT_METADATA_KEYS
+ * allowlist already accepts - no new audit vocabulary or table is created.
+ */
+export function createProductionMetadataOnlyAuditForAccessAdministration({
+  organizationId = null,
+  targetUserId,
+  objectType,
+  actorContext,
+  now,
+  insertAuditEvent = insertRequiredSuccessfulAuditEvent,
+} = {}) {
+  if (typeof targetUserId !== "string" || targetUserId.length === 0) {
+    throw new TypeError("createProductionMetadataOnlyAuditForAccessAdministration requires targetUserId.");
+  }
+  if (typeof objectType !== "string" || objectType.length === 0) {
+    throw new TypeError("createProductionMetadataOnlyAuditForAccessAdministration requires objectType.");
+  }
+
+  function isPlainObject(value) {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  }
+
+  return Object.freeze({
+    prepareMetadataOnlyAudit({ payload, db } = {}) {
+      if (!isPlainObject(payload)) return { ok: false };
+      if (payload.target_user_id !== targetUserId) return { ok: false };
+
+      const metadata = {
+        organization_id: organizationId,
+        object_type: objectType,
+        target_object_type: objectType,
+        object_id: targetUserId,
+        target_user_id: targetUserId,
+        role_name: typeof payload.role_name === "string" ? payload.role_name : null,
+        previous_role_name: typeof payload.previous_role_name === "string" ? payload.previous_role_name : null,
+        resulting_role_name: typeof payload.resulting_role_name === "string" ? payload.resulting_role_name : null,
+        previous_membership_status:
+          typeof payload.previous_membership_status === "string" ? payload.previous_membership_status : null,
+        resulting_membership_status:
+          typeof payload.resulting_membership_status === "string" ? payload.resulting_membership_status : null,
+        authority_source: typeof payload.authority_source === "string" ? payload.authority_source : null,
+        operation: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "kai_access_administration",
+        operation_type: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "kai_access_administration",
+        validator_key: typeof payload.validator_key === "string" ? payload.validator_key : null,
+        actor_type: actorContext?.actorType || "human",
+        actor_user_id: actorContext?.actorUserId || null,
+        request_id: actorContext?.requestId || null,
+        route: "kai_access_administration",
+        created_at: typeof now === "string" ? now : new Date().toISOString(),
+        metadata_only: true,
+        contains_raw_file_content: false,
+        contains_raw_parsed_rows: false,
+        contains_client_pii: false,
+        contains_prompt_text: false,
+        contains_unsafe_generated_text: false,
+        contains_signed_urls: false,
+        contains_storage_credentials: false,
+      };
+
+      return {
+        ok: true,
+        async publish() {
+          const result = await insertAuditEvent(metadata, db);
+          if (!result || result.ok !== true) {
+            throw new Error("kai_access_administration_metadata_only_audit_publish_failed");
+          }
+          return result;
+        },
+      };
+    },
+  });
+}
+
 export const __testables = Object.freeze({
   createProductionMetadataOnlyAudit,
   createProductionMetadataOnlyAuditForSourceVersion,
@@ -947,4 +1028,5 @@ export const __testables = Object.freeze({
   createProductionMetadataOnlyAuditForGeneratedContentDraft,
   createProductionMetadataOnlyAuditForGeneratedContentReview,
   createProductionMetadataOnlyAuditForOrganizationKaiEnablement,
+  createProductionMetadataOnlyAuditForAccessAdministration,
 });

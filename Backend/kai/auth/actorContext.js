@@ -12,11 +12,19 @@ WHERE legacy_identity_source = 'public.userdata'
 LIMIT 1
 `.trim();
 
+// organization_id/engagement_id are both nullable on the deployed
+// kai.user_roles table; only a row with both NULL, active = true, and
+// revoked_at IS NULL is effective global KAI capability - an org- or
+// engagement-scoped (or inactive/revoked) row must never be counted here.
 export const KAI_USER_ROLE_NAMES_SQL = `
 SELECT r.role_name
 FROM kai.user_roles ur
 JOIN kai.roles r ON r.role_id = ur.role_id
 WHERE ur.user_id = $1
+  AND ur.organization_id IS NULL
+  AND ur.engagement_id IS NULL
+  AND ur.active = true
+  AND ur.revoked_at IS NULL
 `.trim();
 
 function actorContextBlocker(blockingReason, message) {

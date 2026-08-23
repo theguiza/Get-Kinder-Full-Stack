@@ -3,6 +3,7 @@ import {
   listKaiRolesForUser,
   listOrganizationMembershipsForUser,
 } from "../db/kaiQueries.js";
+import { isAdminRequest } from "../../middleware/ensureAdmin.js";
 import { resolveEffectiveClientOrganizationMembershipsForLegacyUser } from "./gkOrganizationBindingAuthority.js";
 
 export function pickSafeLegacyUser(user = {}) {
@@ -31,7 +32,9 @@ export function pickSafeLegacyUser(user = {}) {
  * tenant is added to organizationMemberships (see
  * gkOrganizationBindingAuthority.js). That derived membership never
  * overrides or removes internal kai.organization_memberships rows; both are
- * merged so existing internal/legacy KAI actors are unaffected.
+ * merged so existing internal/legacy KAI actors are unaffected. Existing Get
+ * Kinder site-wide admin authority is carried separately as platformSuperuser;
+ * it is never converted into a synthetic KAI role or organization membership.
  */
 export async function resolveKaiActorContext(reqOrUser, dependencies = {}) {
   const user = reqOrUser?.user || reqOrUser;
@@ -69,6 +72,8 @@ export async function resolveKaiActorContext(reqOrUser, dependencies = {}) {
     resolveEffectiveClientMemberships(user.id, dependencies),
   ]);
   const organizationMemberships = [...internalOrganizationMemberships, ...effectiveClientOrganizationMemberships];
+  const reqForAdminAuthority = reqOrUser?.user ? reqOrUser : { user };
+  const platformSuperuser = isAdminRequest(reqForAdminAuthority);
 
   return {
     ok: true,
@@ -82,6 +87,8 @@ export async function resolveKaiActorContext(reqOrUser, dependencies = {}) {
       kaiUserStatus: kaiUser.status || null,
       kaiRoles,
       organizationMemberships,
+      platformSuperuser,
+      platformSuperuserAuthority: platformSuperuser ? "get_kinder_site_admin" : null,
       safeLegacyUser: pickSafeLegacyUser(user),
     },
   };

@@ -19,6 +19,64 @@ test("authorization blocks actor outside organization with no gk_admin bypass", 
   assert.equal(result.blockers[0].evidence.bypass_allowed, false);
 });
 
+test("platform superuser satisfies central role/membership authorization without synthetic organization membership", () => {
+  const result = validateActorCanPerformOperation(
+    {
+      actorType: "human",
+      actorUserId: "platform-user-1",
+      kaiRoles: [],
+      organizationMemberships: [],
+      platformSuperuser: true,
+      platformSuperuserAuthority: "get_kinder_site_admin",
+    },
+    "accept_internal_coverage_limitation",
+    "org-1",
+    { allowedRoles: new Set(["gk_reviewer"]) },
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.platformSuperuserAuthorized, true);
+  assert.deepEqual(result.memberships, []);
+});
+
+test("platform superuser still requires explicit organization context", () => {
+  const result = validateActorCanPerformOperation(
+    {
+      actorType: "human",
+      actorUserId: "platform-user-1",
+      kaiRoles: [],
+      organizationMemberships: [],
+      platformSuperuser: true,
+      platformSuperuserAuthority: "get_kinder_site_admin",
+    },
+    "accept_internal_coverage_limitation",
+    null,
+    { allowedRoles: new Set(["gk_reviewer"]) },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error_code, "tenant_boundary_violation");
+  assert.equal(result.blockers[0].blocking_reason, "missing_organization_scope");
+});
+
+test("a role named like platform authority does not create platform superuser authorization", () => {
+  const result = validateActorCanPerformOperation(
+    {
+      actorType: "human",
+      actorUserId: "ordinary-user-1",
+      kaiRoles: ["platform_superuser", "get_kinder_site_admin"],
+      organizationMemberships: [],
+    },
+    "accept_internal_coverage_limitation",
+    "org-1",
+    { allowedRoles: new Set(["gk_reviewer"]) },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error_code, "authorization_denied");
+  assert.equal(result.blockers[0].blocking_reason, "missing_active_organization_membership");
+});
+
 test("authorization allows P0 write with global GK role plus active organization membership", () => {
   const result = validateActorCanPerformOperation(
     {

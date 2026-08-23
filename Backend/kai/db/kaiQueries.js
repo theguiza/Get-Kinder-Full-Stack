@@ -79,12 +79,36 @@ export async function findOrCreateKaiUserByLegacyPublicUserdataId(
   }
 }
 
+/**
+ * Read-only lookup companion to findOrCreateKaiUserByLegacyPublicUserdataId:
+ * used where a caller must never provision a new kai.users row (e.g. listing
+ * effective access for administration) and only wants the mapping if one
+ * already exists.
+ */
+export async function findKaiUserByLegacyPublicUserdataId(legacyPublicUserdataId, db = pool) {
+  if (!Number.isInteger(legacyPublicUserdataId) || legacyPublicUserdataId <= 0) return null;
+  return selectKaiUserByLegacyPublicUserdataId(db, legacyPublicUserdataId);
+}
+
+/**
+ * Global KAI capability roles for one user. organization_id and
+ * engagement_id are both nullable on the deployed kai.user_roles table, so a
+ * row scoped to an organization or engagement is not global capability -
+ * only a row with both NULL, active = true, and revoked_at IS NULL is an
+ * effective global role. Without this filter an org- or engagement-scoped
+ * (or inactive/revoked) row would be treated as global capability by every
+ * caller of actorContext.kaiRoles.
+ */
 export async function listKaiRolesForUser(userId, db = pool) {
   const { rows } = await db.query(
     `SELECT r.role_name
        FROM kai.user_roles ur
        JOIN kai.roles r ON r.role_id = ur.role_id
       WHERE ur.user_id = $1
+        AND ur.organization_id IS NULL
+        AND ur.engagement_id IS NULL
+        AND ur.active = true
+        AND ur.revoked_at IS NULL
       ORDER BY r.role_name`,
     [userId],
   );

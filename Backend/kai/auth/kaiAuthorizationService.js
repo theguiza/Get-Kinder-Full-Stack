@@ -33,6 +33,75 @@ function activeMembershipsForOrg(actorContext, organizationId) {
   );
 }
 
+export function hasPlatformSuperuserAuthority(actorContext) {
+  return actorContext?.actorType === "human" && actorContext?.platformSuperuser === true;
+}
+
+/**
+ * Central authorization for platform-superuser-only, non-tenant-scoped
+ * operations (currently: manage_global_kai_role). Global KAI staff role
+ * assignment is not organization-scoped, so it deliberately does not go
+ * through validateActorCanPerformOperation's mandatory organizationId check -
+ * that check exists to enforce tenant boundaries, which do not apply here.
+ * Platform-superuser authority itself is still resolved exactly the same way
+ * (actorContext.platformSuperuser, carried from the existing Get Kinder
+ * site-admin authority - see kaiActorContext.js) and no role recorded in
+ * kai.user_roles/kai.organization_memberships can satisfy this check.
+ */
+export function validateActorCanPerformPlatformOperation(actorContext, operation) {
+  const assistantBoundary = validateAssistantBoundary({ actorContext, operation });
+
+  if (assistantBoundary.severity === "blocker") {
+    return { ok: false, blockers: [assistantBoundary], error_code: "authorization_denied" };
+  }
+
+  if (!actorContext?.actorUserId) {
+    return {
+      ok: false,
+      error_code: "unauthorized",
+      blockers: [
+        {
+          validator_key: "VAL-AUT-001",
+          severity: "blocker",
+          object_type: "actor",
+          object_code: operation,
+          object_id: null,
+          message: "Mapped KAI actor is required.",
+          blocking_reason: "missing_actor_context",
+          required_fix: "Map public.userdata.id to kai.users before authorizing.",
+          evidence: {},
+        },
+      ],
+    };
+  }
+
+  if (!hasPlatformSuperuserAuthority(actorContext)) {
+    return {
+      ok: false,
+      error_code: "authorization_denied",
+      blockers: [
+        {
+          validator_key: "VAL-AUT-005",
+          severity: "blocker",
+          object_type: "operation",
+          object_code: operation,
+          object_id: null,
+          message: "Only platform superuser authority may perform this operation.",
+          blocking_reason: "platform_superuser_required",
+          required_fix: "This operation is restricted to the existing Get Kinder platform-superuser authority.",
+          evidence: { bypass_allowed: false },
+        },
+      ],
+    };
+  }
+
+  return {
+    ok: true,
+    platformSuperuserAuthorized: true,
+    platformSuperuserAuthority: actorContext.platformSuperuserAuthority || "get_kinder_site_admin",
+  };
+}
+
 export function validateActorCanPerformOperation(actorContext, operation, organizationId, options = {}) {
   const assistantBoundary = validateAssistantBoundary({ actorContext, operation });
 
@@ -80,6 +149,16 @@ export function validateActorCanPerformOperation(actorContext, operation, organi
   }
 
   const memberships = activeMembershipsForOrg(actorContext, organizationId);
+  const platformSuperuserAuthorized = hasPlatformSuperuserAuthority(actorContext);
+
+  if (platformSuperuserAuthorized) {
+    return {
+      ok: true,
+      memberships,
+      platformSuperuserAuthorized: true,
+      platformSuperuserAuthority: actorContext.platformSuperuserAuthority || "get_kinder_site_admin",
+    };
+  }
 
   if (memberships.length === 0) {
     return {

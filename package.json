@@ -48,6 +48,7 @@
     "verify:kai-sprint2-gate-c1-gcs-generation-binding": "node scripts/kai-sprint2-gate-c1-gcs-generation-binding-local-postgres.js",
     "verify:kai-sprint2-gk-organization-tenant-binding": "node scripts/kai-sprint2-gk-organization-tenant-binding-local-postgres.js",
     "verify:kai-sprint2-organization-enablement": "node scripts/kai-sprint2-organization-enablement-local-postgres.js",
+    "verify:kai-sprint2-p2-access-administration": "node scripts/kai-sprint2-p2-access-administration-local-postgres.js",
     "verify:kai-sprint2-gate-b1-gcs": "node scripts/kai-sprint2-gate-b1-gcs-verifier.js",
     "test:kai-sprint2-p3-01-generated-content-drafts": "node --test __tests__/kai-sprint2-p3-01-generated-content-drafts-boundary.spec.js",
     "test:kai-sprint2-p3-03-export-manifest-eligibility": "node --test __tests__/kai-sprint2-p3-03-export-manifest-eligibility-boundary.spec.js",

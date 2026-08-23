@@ -26,6 +26,9 @@ export const KAI_ERROR_STATUS = Object.freeze({
   audit_payload_rejected: 422,
   not_implemented: 501,
   system_error: 500,
+  role_not_found: 404,
+  last_admin_protection: 409,
+  membership_state_conflict: 409,
 });
 
 export const KAI_ERROR_MESSAGES = Object.freeze({
@@ -56,6 +59,9 @@ export const KAI_ERROR_MESSAGES = Object.freeze({
   audit_payload_rejected: "Blocked-attempt audit payload is not metadata-safe.",
   not_implemented: "Operation is not implemented for KAI Sprint 2 P0.",
   system_error: "KAI Sprint 2 server error.",
+  role_not_found: "Requested KAI role does not exist.",
+  last_admin_protection: "This change would leave the organization with no effective active client_admin.",
+  membership_state_conflict: "More than one stored client-role row exists for this user in this organization; resolve the conflict before mutating.",
 });
 
 export function buildKaiError(code, overrides = {}) {

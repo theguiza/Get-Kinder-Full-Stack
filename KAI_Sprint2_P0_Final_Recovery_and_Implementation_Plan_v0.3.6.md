@@ -18537,3 +18537,80 @@ TOOL_VERIFIED local proof:
     __tests__/kai-sprint2-p2-09-human-review-boundary.spec.js` passed: 19 tests,
     19 passing, 0 failing.
   - `git diff --check` passed.
+
+KAI authorization package 1 platform-superuser authority recognition (2026-08-22):
+USER_CONFIRMED owner decision: the existing Get Kinder site-wide superuser
+authority is the KAI platform-superuser authority; do not create a duplicate
+`kai_superuser` role; `gk_admin`, `gk_operator`, and `gk_reviewer` remain KAI
+working roles.
+
+TOOL_VERIFIED repository source of authority:
+  - `Backend/middleware/ensureAdmin.js#isAdminRequest` is the existing
+    site-wide admin authority used by `ensureAdmin` / `ensureAdminApi`. It
+    authorizes only an authenticated `req.user` with `is_admin === true` or the
+    existing `ADMIN_EMAILS` fallback. No KAI role, organization membership,
+    user ID, arbitrary request body, or session flag is the source of this
+    authority.
+
+TOOL_VERIFIED implementation:
+  - `Backend/kai/auth/kaiActorContext.js#resolveKaiActorContext` now carries
+    `platformSuperuser` and `platformSuperuserAuthority:
+    "get_kinder_site_admin"` from `isAdminRequest(req)` after active KAI user
+    mapping. It does not add or persist any KAI role, and it does not fabricate
+    any `kai.organization_memberships` row.
+  - `Backend/kai/auth/kaiAuthorizationService.js#validateActorCanPerformOperation`
+    now has one explicit central platform-superuser path. After assistant
+    boundary, mapped-actor, and explicit `organizationId` checks, an authenticated
+    mapped human with the canonical platform-superuser flag satisfies
+    role/membership authorization for the requested operation and returns the
+    actual matching memberships, which may be empty. Downstream tenant/object
+    validation, state-transition validation, evidence/review requirements,
+    transaction and audit controls, feature gates, and human-only checks remain
+    in the existing service/repository flow.
+  - The `accept_internal_coverage_limitation` service-local allowed-role set
+    remains `gk_reviewer` only. `gk_admin`, `gk_operator`, and `client_admin`
+    ordinary behavior remains unchanged there.
+
+TOOL_VERIFIED regression coverage:
+  - `__tests__/kai-sprint2-authorization.spec.js` covers platform superuser
+    central authorization without synthetic membership, explicit organization
+    scope still required, and KAI role-name fabrication not creating platform
+    authority.
+  - `__tests__/kai-sprint2-jit-actor-provisioning.spec.js` covers actor-context
+    propagation from canonical `is_admin`, existing `ADMIN_EMAILS` fallback
+    reuse without KAI-role inference, and ignored fabricated body/session fields.
+  - `__tests__/kai-sprint2-p2-10-coverage-review-decision-boundary.spec.js`
+    covers the coverage-limitation regression: ordinary `gk_reviewer` allowed,
+    ordinary `gk_admin`/`gk_operator`/`client_admin` denied as before, platform
+    superuser allowed through central authorization, and downstream repository
+    validation still enforced.
+
+TOOL_VERIFIED local proof:
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test
+    __tests__/kai-sprint2-authorization.spec.js
+    __tests__/kai-sprint2-jit-actor-provisioning.spec.js
+    __tests__/kai-sprint2-actor-context-middleware.spec.js
+    __tests__/kai-sprint2-p2-10-coverage-review-decision-boundary.spec.js`
+    passed: 59 tests, 59 passing, 0 failing.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node --test
+    __tests__/kai-sprint2-client-org-authorization.spec.js
+    __tests__/kai-sprint2-pass2-admin-authz.spec.js
+    __tests__/kai-sprint2-review-queue-route.spec.js
+    __tests__/kai-sprint2-intake-service-contract.spec.js
+    __tests__/kai-sprint2-intake-service.spec.js
+    __tests__/kai-sprint2-pass2-metadata-intake-service.spec.js
+    __tests__/kai-sprint2-tenant-authorization.spec.js` passed all assertions
+    except the sandbox-denied local HTTP listener in
+    `kai-sprint2-review-queue-route.spec.js` (`listen EPERM: operation not
+    permitted 127.0.0.1`). Rerunning that route suite outside the sandbox with
+    the same sentinel passed: 16 tests, 16 passing, 0 failing.
+  - `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel node
+    scripts/kai-sprint2-p2-10-coverage-review-decision-local-postgres.js`
+    required sandbox escalation because local PostgreSQL shared memory was
+    blocked during `initdb`; run outside the sandbox it passed: 32 tests, 32
+    passing, 0 failing.
+
+NOT_CONFIRMED remaining for this package: no production, database, deployment,
+cloud, feature-flag, tenant, credential, secret, real-client-data, push, or
+`00_KAI_CURRENT_STATE.md` action was performed. No local commit was created
+because the package request explicitly withheld commit authorization.
