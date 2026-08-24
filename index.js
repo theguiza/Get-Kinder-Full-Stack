@@ -3407,6 +3407,8 @@ const HOME_PATH_SECTIONS = {
   "/home/faq": "faq",
   "/home/book": "book",
   "/impact-reporting-assessment": "assessment",
+  "/impact-evidence": "assessment",
+  "/impact-evidience": "assessment",
   "/nonprofit-data-readiness": "assessment",
   "/reporting-readiness-call": "book",
   "/data-safety-for-nonprofits": "trust"

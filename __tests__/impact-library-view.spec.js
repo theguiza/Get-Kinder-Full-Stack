@@ -10,6 +10,13 @@ test("GET /impact-library is registered with ensureAuthenticated and renders \"i
   );
 });
 
+test("legacy impact evidence slugs route to the home assessment section", () => {
+  const index = readFileSync("index.js", "utf8");
+  assert.match(index, /"\/impact-evidence": "assessment"/);
+  assert.match(index, /"\/impact-evidience": "assessment"/);
+  assert.match(index, /app\.get\(Object\.keys\(HOME_PATH_SECTIONS\),/);
+});
+
 test("views/impact-library.ejs exists and contains impact-evidence-library-root", () => {
   const view = readFileSync("views/impact-library.ejs", "utf8");
   assert.match(view, /id="impact-evidence-library-root"/);
