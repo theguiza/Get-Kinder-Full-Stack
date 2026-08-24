@@ -299,10 +299,13 @@ function SourceCandidateDetail({ detail, onSubmitDecision, busy, decisionResult 
   );
 }
 
-export default function KaiReviewCockpit() {
+export default function KaiReviewCockpit(props = {}) {
+  const parentOrganizationId =
+    typeof props.organizationId === "string" ? props.organizationId : "";
   const [featureEnabled, setFeatureEnabled] = useState(null);
   const [organizations, setOrganizations] = useState([]);
-  const [organization, setOrganization] = useState("");
+  const [localOrganization, setLocalOrganization] = useState("");
+  const organization = parentOrganizationId || localOrganization;
   const activeOrganizationRef = useRef("");
   const [loadingOrganizations, setLoadingOrganizations] = useState(true);
   const [organizationsLoaded, setOrganizationsLoaded] = useState(false);
@@ -332,6 +335,13 @@ export default function KaiReviewCockpit() {
 
   useEffect(() => {
     activeOrganizationRef.current = organization;
+    setQueue(null);
+    setDetail(null);
+    setDetailKind(null);
+    setSelectedItemId(null);
+    setDecisionResult("");
+    setBusy(false);
+    setMessage("");
   }, [organization]);
 
   function clearTenantScopedState() {
@@ -343,6 +353,15 @@ export default function KaiReviewCockpit() {
   }
 
   useEffect(() => {
+    if (parentOrganizationId) {
+      setOrganizations([]);
+      setLocalOrganization("");
+      setLoadingOrganizations(false);
+      setOrganizationsLoaded(true);
+      setOrganizationBootstrapError("");
+      return undefined;
+    }
+
     let cancelled = false;
     (async () => {
       setLoadingOrganizations(true);
@@ -355,7 +374,7 @@ export default function KaiReviewCockpit() {
         setLoadingOrganizations(false);
         setOrganizationsLoaded(true);
         setOrganizations([]);
-        setOrganization("");
+        setLocalOrganization("");
         clearTenantScopedState();
         setOrganizationBootstrapError(`${ORGANIZATION_BOOTSTRAP_ERROR} Request failed (network error).`);
         return;
@@ -365,7 +384,7 @@ export default function KaiReviewCockpit() {
       setOrganizationsLoaded(true);
       if (result.statusCode !== 200 || !result.body?.ok) {
         setOrganizations([]);
-        setOrganization("");
+        setLocalOrganization("");
         clearTenantScopedState();
         setOrganizationBootstrapError(`${ORGANIZATION_BOOTSTRAP_ERROR} ${errorText(result)}`);
         return;
@@ -375,10 +394,10 @@ export default function KaiReviewCockpit() {
       setOrganizations(items);
       clearTenantScopedState();
       setMessage("");
-      setOrganization(items.length === 1 ? items[0].organization_id : "");
+      setLocalOrganization(items.length === 1 ? items[0].organization_id : "");
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [parentOrganizationId]);
 
   const loadQueue = useCallback(async () => {
     if (!organization) {
@@ -458,7 +477,7 @@ export default function KaiReviewCockpit() {
     const nextOrganizationId = event.target.value;
     const authorized = organizations.some((item) => item.organization_id === nextOrganizationId);
     if (!authorized && nextOrganizationId !== "") return;
-    setOrganization(nextOrganizationId);
+    setLocalOrganization(nextOrganizationId);
     clearTenantScopedState();
     setMessage("");
   }, [organizations]);
@@ -466,9 +485,9 @@ export default function KaiReviewCockpit() {
   if (featureEnabled !== true) return null;
 
   const organizationUnavailable =
-    organizationsLoaded && organizations.length === 0 && !organizationBootstrapError;
+    !parentOrganizationId && organizationsLoaded && organizations.length === 0;
   const organizationSelectionRequired =
-    organizations.length > 1 && !organization;
+    !parentOrganizationId && organizations.length > 1 && !organization;
   const queueDisabled =
     busy ||
     loadingOrganizations ||
@@ -481,29 +500,31 @@ export default function KaiReviewCockpit() {
     <div className="kai-cockpit">
       <h2>KAI internal review cockpit</h2>
       <div className="kai-cockpit-controls">
-        <label>
-          Organization
-          {loadingOrganizations ? (
-            <span className="kai-cockpit-note">Loading authorized KAI organizations...</span>
-          ) : organizationBootstrapError ? (
-            <span className="kai-cockpit-note">{organizationBootstrapError}</span>
-          ) : organizationUnavailable ? (
-            <span className="kai-cockpit-note">No authorized KAI organization is available for this account.</span>
-          ) : (
-            <select
-              value={organization}
-              onChange={handleOrganizationChange}
-              disabled={organizations.length <= 1}
-            >
-              {organizations.length > 1 ? <option value="">Select an organization</option> : null}
-              {organizations.map((item) => (
-                <option key={item.organization_id} value={item.organization_id}>
-                  {item.organization_id}
-                </option>
-              ))}
-            </select>
-          )}
-        </label>
+        {parentOrganizationId ? null : (
+          <label>
+            Organization
+            {loadingOrganizations ? (
+              <span className="kai-cockpit-note">Loading authorized KAI organizations...</span>
+            ) : organizationBootstrapError ? (
+              <span className="kai-cockpit-note">{organizationBootstrapError}</span>
+            ) : organizationUnavailable ? (
+              <span className="kai-cockpit-note">No authorized KAI organization is available for this account.</span>
+            ) : (
+              <select
+                value={organization}
+                onChange={handleOrganizationChange}
+                disabled={organizations.length <= 1}
+              >
+                {organizations.length > 1 ? <option value="">Select an organization</option> : null}
+                {organizations.map((item) => (
+                  <option key={item.organization_id} value={item.organization_id}>
+                    {item.organization_id}
+                  </option>
+                ))}
+              </select>
+            )}
+          </label>
+        )}
         <label>
           Queue type
           <select value={queueType} onChange={(event) => setQueueType(event.target.value)}>

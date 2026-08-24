@@ -1110,7 +1110,7 @@ test("P1-09 host bootstrap no longer treats organizationId query text as cockpit
 test("P1-09 UI bootstraps cockpit organization context only from authorized organizations", () => {
   assert.match(uiSource, /import \{ organizationsPath \} from "\.\/kaiWebIntakeLogic\.js";/);
   assert.match(uiSource, /getJson\(organizationsPath\(\)\)/);
-  assert.match(uiSource, /setOrganization\(items\.length === 1 \? items\[0\]\.organization_id : ""\)/);
+  assert.match(uiSource, /setLocalOrganization\(items\.length === 1 \? items\[0\]\.organization_id : ""\)/);
   assert.match(uiSource, /organizations\.some\(\(item\) => item\.organization_id === nextOrganizationId\)/);
   assert.match(uiSource, /value=\{organization\}[\s\S]{0,160}onChange=\{handleOrganizationChange\}/);
   assert.doesNotMatch(uiSource, /export default function KaiReviewCockpit\(\{ organizationId/);
@@ -1166,7 +1166,7 @@ test("P1-09 UI decision payload omits reviewed_source_type for every non-promote
 
 test("P1-09 UI clears tenant-scoped queue and detail state when organization context changes", () => {
   assert.match(uiSource, /function clearTenantScopedState\(\) \{[\s\S]*setQueue\(null\);[\s\S]*setDetail\(null\);[\s\S]*setDetailKind\(null\);[\s\S]*setSelectedItemId\(null\);[\s\S]*setDecisionResult\(""\);[\s\S]*\}/);
-  assert.match(uiSource, /setOrganization\(nextOrganizationId\);[\s\S]*clearTenantScopedState\(\);/);
+  assert.match(uiSource, /setLocalOrganization\(nextOrganizationId\);[\s\S]*clearTenantScopedState\(\);/);
   assert.match(uiSource, /const activeOrganizationRef = useRef\(""\);/);
   assert.match(uiSource, /activeOrganizationRef\.current = organization;/);
   assert.match(uiSource, /if \(activeOrganizationRef\.current !== organization\) return;/);

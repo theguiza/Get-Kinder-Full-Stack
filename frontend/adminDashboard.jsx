@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ImpactEvidenceLibrary from "./ImpactEvidenceLibrary.jsx";
 import KaiWebIntake from "./KaiWebIntake.jsx";
+import KaiReviewCockpit from "./kaiReviewCockpit.jsx";
 import {
   KAI_ORGANIZATION_ROLE_OPTIONS,
   adminUserLookupPath,
@@ -21,6 +22,7 @@ const NAV_ITEMS = [
   { key: "donors", label: "Donors", icon: "fa-hand-holding-heart" },
   { key: "reportingReadiness", label: "Reporting Readiness", icon: "fa-clipboard-list" },
   { key: "kaiWebIntake", label: "KAI Web Intake", icon: "fa-upload" },
+  { key: "kaiReview", label: "KAI Review", icon: "fa-clipboard-list" },
   { key: "impactEvidenceLibrary", label: "Evidence Library", icon: "fa-folder-tree" },
 ];
 
@@ -2359,6 +2361,8 @@ export default function AdminDashboard() {
           )}
 
           {activeSection === "kaiWebIntake" && <KaiWebIntake />}
+
+          {activeSection === "kaiReview" && <KaiReviewCockpit />}
 
           {activeSection === "impactEvidenceLibrary" && <ImpactEvidenceLibrary />}
 

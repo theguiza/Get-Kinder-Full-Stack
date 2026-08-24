@@ -27,9 +27,10 @@ function ValueRow({ label, value }) {
   );
 }
 
-export default function KaiWebIntake() {
+export default function KaiWebIntake({ organizationId: parentOrganizationId = "" }) {
   const [organizations, setOrganizations] = useState([]);
-  const [organizationId, setOrganizationId] = useState("");
+  const [localOrganizationId, setLocalOrganizationId] = useState("");
+  const organizationId = parentOrganizationId || localOrganizationId;
   const [loadingOrganizations, setLoadingOrganizations] = useState(true);
   const [organizationsLoaded, setOrganizationsLoaded] = useState(false);
   const [engagements, setEngagements] = useState([]);
@@ -52,6 +53,13 @@ export default function KaiWebIntake() {
   // bootstraps from the server-authoritative list of organizations the
   // already-resolved actor is authorized to use for ordinary intake.
   useEffect(() => {
+    if (parentOrganizationId) {
+      setOrganizations([]);
+      setLoadingOrganizations(false);
+      setOrganizationsLoaded(true);
+      return undefined;
+    }
+
     let cancelled = false;
     (async () => {
       setLoadingOrganizations(true);
@@ -67,13 +75,31 @@ export default function KaiWebIntake() {
       const items = result.body.data?.items || [];
       setOrganizations(items);
       if (items.length === 1) {
-        setOrganizationId(items[0].organization_id);
+        setLocalOrganizationId(items[0].organization_id);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [parentOrganizationId]);
+
+  useEffect(() => {
+    setEngagements([]);
+    setEngagementId("");
+    setEngagementsLoaded(false);
+    setBatchCode("");
+    setIntakeBatchId("");
+    setFile(null);
+    setIntakeFileId("");
+    setFileStatus(null);
+    setBatchFiles([]);
+    setBusy(false);
+    setMessage("");
+
+    createBatchIdempotencyKeyRef.current = null;
+    fileReservationIdempotencyKeyRef.current = null;
+    fileReservationIdentityRef.current = null;
+  }, [organizationId]);
 
   const loadEngagements = useCallback(async (orgId) => {
     if (!orgId) {
@@ -239,8 +265,9 @@ export default function KaiWebIntake() {
       <div className="admin-card mb-3">
         <h5 className="mb-2">1. Batch</h5>
         <div className="row g-2 align-items-end mb-2">
-          <div className="col-12 col-lg-4">
-            <label className="form-label small fw-semibold">Organization</label>
+          {parentOrganizationId ? null : (
+            <div className="col-12 col-lg-4">
+              <label className="form-label small fw-semibold">Organization</label>
             {loadingOrganizations ? (
               <div className="small text-muted">Loading your organizations...</div>
             ) : organizationsLoaded && organizations.length === 0 ? (
@@ -249,7 +276,7 @@ export default function KaiWebIntake() {
               <select
                 className="form-select form-select-sm"
                 value={organizationId}
-                onChange={(event) => setOrganizationId(event.target.value)}
+                onChange={(event) => setLocalOrganizationId(event.target.value)}
                 disabled={organizations.length <= 1}
               >
                 {organizations.map((item) => (
@@ -258,6 +285,7 @@ export default function KaiWebIntake() {
               </select>
             )}
           </div>
+          )}
           <div className="col-12 col-lg-5">
             <label className="form-label small fw-semibold">Engagement</label>
             {loadingEngagements ? (

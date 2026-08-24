@@ -191,7 +191,7 @@ test("KAI Web Intake bootstraps its organization/engagement selection from the s
 
   // The organization list bootstraps from the server on mount and auto-selects a single result.
   assert.match(intakeUiSource, /useEffect\(\(\) => \{[\s\S]*?getJson\(organizationsPath\(\)\)/);
-  assert.match(intakeUiSource, /items\.length === 1[\s\S]{0,80}setOrganizationId\(items\[0\]\.organization_id\)/);
+  assert.match(intakeUiSource, /items\.length === 1[\s\S]{0,80}setLocalOrganizationId\(items\[0\]\.organization_id\)/);
 
   // Selecting an organization automatically chains into the existing engagements read.
   assert.match(intakeUiSource, /loadEngagements\(organizationId\)/);
