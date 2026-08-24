@@ -234,7 +234,7 @@ test("separate actor and organization mutation limiters count safe attempts and 
 
 test("status reports only the mounted metadata capability as enabled", () => {
   const res = createResponse();
-  sendStatus({}, res);
+  sendStatus({ kaiSprint2StatusEnv: {} }, res);
   assert.equal(res.body.data.metadata_write_enabled, true);
   for (const field of [
     "file_upload_enabled",

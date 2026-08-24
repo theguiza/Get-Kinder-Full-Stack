@@ -94,41 +94,52 @@ test("admin access check blocks missing engagement_id with metadata-only audit",
 });
 
 test("missing kai.users mapping is auto-provisioned and then fails closed on missing org membership, not mapped_kai_user_required or 500", async () => {
+  const originalAdminEmails = process.env.ADMIN_EMAILS;
+  process.env.ADMIN_EMAILS = "";
   let created = false;
-  const result = await createIntakeBatch(
-    {
-      req: { user: { id: 46, email: "kai@getkinder.ai" } },
-      organizationId,
-      engagementId,
-      batchCode: "NCWS-P0-PASS2-METADATA-001",
-    },
-    {
-      env: { KAI_SPRINT2_ENABLED: "true" },
-      async findOrCreateKaiUserByLegacyPublicUserdataId({ legacyPublicUserdataId }) {
-        created = true;
-        return {
-          user_id: "jit-kai-user-46",
-          legacy_identity_source: "public.userdata",
-          legacy_public_userdata_id: legacyPublicUserdataId,
-          status: "active",
-          email: "kai@getkinder.ai",
-        };
-      },
-      async listKaiRolesForUser() {
-        return [];
-      },
-      async listOrganizationMembershipsForUser() {
-        return [];
-      },
-      async resolveEffectiveClientOrganizationMembershipsForLegacyUser() {
-        return [];
-      },
-    },
-  );
 
-  assert.equal(created, true);
-  assert.equal(result.ok, false);
-  assert.notEqual(result.error.code, "mapped_kai_user_required");
-  assert.equal(result.error.code, "authorization_denied");
-  assert.equal(result.error.status, 403);
+  try {
+    const result = await createIntakeBatch(
+      {
+        req: { user: { id: 46, email: "kai@getkinder.ai", is_admin: false } },
+        organizationId,
+        engagementId,
+        batchCode: "NCWS-P0-PASS2-METADATA-001",
+      },
+      {
+        env: { KAI_SPRINT2_ENABLED: "true" },
+        async findOrCreateKaiUserByLegacyPublicUserdataId({ legacyPublicUserdataId }) {
+          created = true;
+          return {
+            user_id: "jit-kai-user-46",
+            legacy_identity_source: "public.userdata",
+            legacy_public_userdata_id: legacyPublicUserdataId,
+            status: "active",
+            email: "kai@getkinder.ai",
+          };
+        },
+        async listKaiRolesForUser() {
+          return [];
+        },
+        async listOrganizationMembershipsForUser() {
+          return [];
+        },
+        async resolveEffectiveClientOrganizationMembershipsForLegacyUser() {
+          return [];
+        },
+        async getEngagementTenantState() {
+          throw new Error("engagement lookup must not run after missing-membership authorization denial");
+        },
+      },
+    );
+
+    assert.equal(created, true);
+    assert.equal(result.ok, false);
+    assert.notEqual(result.error.code, "mapped_kai_user_required");
+    assert.equal(result.error.code, "authorization_denied");
+    assert.equal(result.error.status, 403);
+  } finally {
+    if (originalAdminEmails === undefined) delete process.env.ADMIN_EMAILS;
+    else process.env.ADMIN_EMAILS = originalAdminEmails;
+  }
 });
