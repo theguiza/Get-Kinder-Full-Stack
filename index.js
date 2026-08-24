@@ -2943,7 +2943,14 @@ app.get("/gk-admin/kai-review-cockpit", ensureAuthenticated, ensureAdmin, (req, 
     csrfToken: req.session.csrfToken,
   });
 });
-
+app.get("/impact-library", ensureAuthenticated, (req, res) => {
+  const assetTag = Date.now();
+  res.render("impact-library", {
+    assetTag,
+    user: req.user,
+    csrfToken: req.session.csrfToken,
+  });
+});
 // KAI P3-08 read-only GK export-review detail page. Kept out of general
 // navigation; gk_admin authorization for the underlying packet remains the
 // accepted P3-07 API's responsibility, not this route's.

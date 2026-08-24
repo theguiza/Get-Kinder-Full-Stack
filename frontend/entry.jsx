@@ -19,6 +19,7 @@ import KaiClientFollowupReview from "./KaiClientFollowupReview.jsx";
 import GkExportReviewDetail from "./gkExportReviewDetail.jsx";
 import { renderOrgPortal, renderKpiStrip } from "./orgPortal.jsx";
 import { renderOrgWorkspace } from "./orgWorkspace.jsx";
+import ImpactEvidenceLibrary from "./ImpactEvidenceLibrary.jsx";
 
 const ROOTS = new WeakMap();
 
@@ -163,6 +164,17 @@ window.renderKaiClientFollowupReview = (selector = "#kai-client-followup-review-
 window.renderOrgPortal = renderOrgPortal;
 window.renderKpiStrip = renderKpiStrip;
 window.renderOrgWorkspace = renderOrgWorkspace;
+
+window.renderImpactEvidenceLibrary = (selector = "#impact-evidence-library-root", props = {}) => {
+  const el = typeof selector === "string" ? document.querySelector(selector) : selector;
+  if (!el) return;
+  const root = getOrCreateRoot(el);
+  root.render(
+    <React.StrictMode>
+      <ImpactEvidenceLibrary {...props} />
+    </React.StrictMode>
+  );
+};
 
 function readPropsFromDom(id = "events-props") {
   const el = document.getElementById(id);
