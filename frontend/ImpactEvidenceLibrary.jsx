@@ -36,6 +36,7 @@ import {
   projectTraceability,
   reviewTransitionBody,
 } from "./impactEvidenceLibraryLogic.js";
+import { organizationsPath } from "./kaiWebIntakeLogic.js";
 
 function ValueRow({ label, value }) {
   return (
@@ -53,7 +54,10 @@ function StatusBadge({ status }) {
 }
 
 export default function ImpactEvidenceLibrary() {
+  const [organizations, setOrganizations] = useState([]);
   const [organizationId, setOrganizationId] = useState("");
+  const [loadingOrganizations, setLoadingOrganizations] = useState(true);
+  const [organizationsLoaded, setOrganizationsLoaded] = useState(false);
   const [audience, setAudience] = useState("internal");
   const [claims, setClaims] = useState([]);
   const [selectedClaimId, setSelectedClaimId] = useState("");
@@ -79,6 +83,33 @@ export default function ImpactEvidenceLibrary() {
     () => claims.find((claim) => claim.claimId === selectedClaimId) || null,
     [claims, selectedClaimId],
   );
+
+  // The browser never types or fabricates an organization id: it always
+  // bootstraps from the same server-authoritative organizations list already
+  // used by the KAI Web Intake and Review Cockpit panels.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoadingOrganizations(true);
+      const result = await getJson(organizationsPath());
+      if (cancelled) return;
+      setLoadingOrganizations(false);
+      setOrganizationsLoaded(true);
+      if (result.statusCode !== 200 || !result.body?.ok) {
+        setOrganizations([]);
+        setMessage(errorText(result));
+        return;
+      }
+      const items = result.body.data?.items || [];
+      setOrganizations(items);
+      if (items.length === 1) {
+        setOrganizationId(items[0].organization_id);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const loadClaims = useCallback(async () => {
     if (!organizationId) {
@@ -342,12 +373,24 @@ export default function ImpactEvidenceLibrary() {
       <div className="admin-card mb-3">
         <div className="row g-3 align-items-end">
           <div className="col-12 col-lg-5">
-            <label className="form-label small fw-semibold">Organization id</label>
-            <input
-              className="form-control form-control-sm"
-              value={organizationId}
-              onChange={(event) => setOrganizationId(event.target.value.trim())}
-            />
+            <label className="form-label small fw-semibold">Organization</label>
+            {loadingOrganizations ? (
+              <div className="small text-muted">Loading your organizations...</div>
+            ) : organizationsLoaded && organizations.length === 0 ? (
+              <div className="small text-muted">No KAI organization is available for this account.</div>
+            ) : (
+              <select
+                className="form-select form-select-sm"
+                value={organizationId}
+                onChange={(event) => setOrganizationId(event.target.value)}
+                disabled={organizations.length <= 1}
+              >
+                {organizations.length > 1 ? <option value="">Select an organization</option> : null}
+                {organizations.map((item) => (
+                  <option key={item.organization_id} value={item.organization_id}>{item.organization_id}</option>
+                ))}
+              </select>
+            )}
           </div>
           <div className="col-12 col-lg-4">
             <label className="form-label small fw-semibold">Audience</label>

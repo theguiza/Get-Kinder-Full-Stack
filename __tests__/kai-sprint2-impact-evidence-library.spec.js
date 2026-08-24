@@ -603,3 +603,22 @@ test("Impact Evidence Library source has only the Stage-A internal generation ca
   assert.doesNotMatch(uiSource + logicSource, /\bPUT\b|\bPATCH\b|\bDELETE\b|assistant|export-review|export candidate/i);
   assert.doesNotMatch(uiSource + logicSource, /raw_content|signed_url|storage_object|api[_-]?key|secret/i);
 });
+
+test("Impact Evidence Library bootstraps its organization selection from the server, never from a typed or fabricated id", () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+
+  // No free-text organization id input: the browser can no longer type/guess one.
+  assert.doesNotMatch(uiSource, /<input[^>]*value=\{organizationId\}/);
+  assert.doesNotMatch(uiSource, /onChange=\{\(event\) => setOrganizationId\(event\.target\.value\.trim\(\)\)\}/);
+
+  // The organization list bootstraps from the existing server-authoritative
+  // /admin/organizations route on mount and auto-selects a single result,
+  // matching the established KAI Web Intake / Review Cockpit pattern.
+  assert.match(uiSource, /import \{ organizationsPath \} from "\.\/kaiWebIntakeLogic\.js";/);
+  assert.match(uiSource, /useEffect\(\(\) => \{[\s\S]*?getJson\(organizationsPath\(\)\)/);
+  assert.match(uiSource, /items\.length === 1[\s\S]{0,80}setOrganizationId\(items\[0\]\.organization_id\)/);
+
+  // Explicit empty/loading states are rendered rather than fabricating an id.
+  assert.match(uiSource, /Loading your organizations\.\.\./);
+  assert.match(uiSource, /No KAI organization is available for this account\./);
+});
