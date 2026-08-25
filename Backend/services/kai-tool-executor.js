@@ -7,6 +7,8 @@ import { getWalletSummary } from "../../services/walletService.js";
 import { fetchEventById, fetchEvents } from "../../services/eventsService.js";
 import { getMatchedEventsForUser } from "../../services/eventMatchingService.js";
 import { sendNudgeEmail } from "../../kindnessEmailer.js";
+import { resolveKaiActorContext } from "../kai/auth/kaiActorContext.js";
+import { getClaimTraceabilitySummaryTool } from "../kai/services/kaiAssistantClaimTraceabilityTool.js";
 
 const IC_RATE_BY_TIER = {
   standard: 10,
@@ -71,6 +73,9 @@ const GENERIC_SEARCH_STOP_WORDS = new Set([
 
 const columnExistsCache = new Map();
 const tableExistsCache = new Map();
+
+let resolveKaiActorContextImpl = resolveKaiActorContext;
+let getClaimTraceabilitySummaryToolImpl = getClaimTraceabilitySummaryTool;
 
 const PLATFORM_FAQ_KB = {
   ic: {
@@ -1466,6 +1471,43 @@ async function handleGeneratePostEventReport(toolInput = {}, _userId, orgId) {
   }
 }
 
+/**
+ * Bridges an authenticated production KAI request into the Sprint-2
+ * governed-claims wrapper. actorContext is resolved here from the trusted
+ * server-side userId this function receives (never from model/tool
+ * arguments) via the canonical Sprint-2 actor resolver
+ * (resolveKaiActorContext, the same resolver sprint2ActorContextMiddleware /
+ * attachKaiSprint2ActorContext uses for direct Sprint-2 API callers). A
+ * consumer/volunteer actor with no active GK staff role resolves to an
+ * actorContext the wrapper's own authorization checks deny before any
+ * governed claim data is read; an unmapped or unresolved actor is passed
+ * through as null and denied the same way.
+ *
+ * resolveKaiActorContext only ever returns ok:true after internally
+ * confirming the mapped kai.users row's legacy_identity_source is exactly
+ * "public.userdata" (see kaiActorContext.js's hasActivePublicUserdataMapping
+ * check), but it does not carry that fact forward under a `source` key -
+ * existing Sprint-2 admin-route authorization never needed it. The assistant
+ * wrapper's stricter mapped-human boundary does require actorContext.source
+ * === "public.userdata", so it is stamped here from a fact the resolver
+ * itself already verified, never invented and never taken from model/tool
+ * arguments.
+ */
+async function handleGovernedClaimsToolCall(toolName, toolInput = {}, userId) {
+  try {
+    const resolved = await resolveKaiActorContextImpl({ id: userId });
+    const actorContext = resolved?.ok ? { ...resolved.actorContext, source: "public.userdata" } : null;
+    return await getClaimTraceabilitySummaryToolImpl({
+      toolName,
+      arguments: toolInput,
+      actorContext,
+    });
+  } catch (error) {
+    console.error(`[kai-tool-executor] ${toolName} error:`, error);
+    return GENERIC_ERROR_RESPONSE;
+  }
+}
+
 const TOOL_HANDLERS = {
   platform_faq: handlePlatformFaq,
   get_reporting_readiness_info: handleGetReportingReadinessInfo,
@@ -1487,6 +1529,11 @@ const TOOL_HANDLERS = {
   send_volunteer_reminder: (toolInput, userId, orgId) => handleSendVolunteerReminder(toolInput, userId, orgId),
   auto_staff_event: (toolInput, userId, orgId) => handleAutoStaffEvent(toolInput, userId, orgId),
   generate_post_event_report: (toolInput, userId, orgId) => handleGeneratePostEventReport(toolInput, userId, orgId),
+  list_governed_claims: (toolInput, userId) => handleGovernedClaimsToolCall("list_governed_claims", toolInput, userId),
+  get_claim_traceability_summary: (toolInput, userId) =>
+    handleGovernedClaimsToolCall("get_claim_traceability_summary", toolInput, userId),
+  list_eligible_claims_for_audience: (toolInput, userId) =>
+    handleGovernedClaimsToolCall("list_eligible_claims_for_audience", toolInput, userId),
 };
 
 export async function executeToolCall(toolName, toolInput = {}, userId, orgId) {
@@ -1513,4 +1560,16 @@ export const __testables = {
   normalizeSearchQuery,
   buildSearchEventsIntro,
   resolveAcceptedRsvpStatus,
+  setResolveKaiActorContextForTests(fn) {
+    resolveKaiActorContextImpl = typeof fn === "function" ? fn : resolveKaiActorContextImpl;
+  },
+  resetResolveKaiActorContextForTests() {
+    resolveKaiActorContextImpl = resolveKaiActorContext;
+  },
+  setGetClaimTraceabilitySummaryToolForTests(fn) {
+    getClaimTraceabilitySummaryToolImpl = typeof fn === "function" ? fn : getClaimTraceabilitySummaryToolImpl;
+  },
+  resetGetClaimTraceabilitySummaryToolForTests() {
+    getClaimTraceabilitySummaryToolImpl = getClaimTraceabilitySummaryTool;
+  },
 };

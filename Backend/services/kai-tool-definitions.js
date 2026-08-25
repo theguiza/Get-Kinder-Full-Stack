@@ -286,7 +286,65 @@ export const TOOL_DEFINITIONS = {
       additionalProperties: false,
     },
   },
+  list_governed_claims: {
+    name: "list_governed_claims",
+    description:
+      "List an organization's governed claim inventory (Sprint-2 Claim Library) for GK staff review. Requires GK staff authorization for the organization; returns governed claims even when they are not yet eligible for any audience. Denied for non-GK-staff actors.",
+    input_schema: {
+      type: "object",
+      properties: {
+        organizationId: { type: "string", description: "KAI-scoped organization UUID." },
+        limit: { type: "integer", minimum: 1, maximum: 25, default: 10, description: "Max claims to return (1-25)." },
+        afterClaimId: {
+          type: ["string", "null"],
+          description: "Claim UUID cursor for pagination. Pass null for the first page.",
+        },
+      },
+      required: ["organizationId", "limit", "afterClaimId"],
+      additionalProperties: false,
+    },
+  },
+  get_claim_traceability_summary: {
+    name: "get_claim_traceability_summary",
+    description:
+      "Get the full governed traceability summary for one claim: review/coverage/follow-up state and audience eligibility with blockers. Requires GK staff authorization for the organization. Denied for non-GK-staff actors.",
+    input_schema: {
+      type: "object",
+      properties: {
+        organizationId: { type: "string", description: "KAI-scoped organization UUID." },
+        claimId: { type: "string", description: "Claim UUID." },
+        requestedAudience: { type: "string", enum: ["internal", "funder", "public"] },
+      },
+      required: ["organizationId", "claimId", "requestedAudience"],
+      additionalProperties: false,
+    },
+  },
+  list_eligible_claims_for_audience: {
+    name: "list_eligible_claims_for_audience",
+    description:
+      "List governed claims currently eligible for a specific requested audience (internal, funder, or public). Requires GK staff authorization for the organization. Denied for non-GK-staff actors.",
+    input_schema: {
+      type: "object",
+      properties: {
+        organizationId: { type: "string", description: "KAI-scoped organization UUID." },
+        requestedAudience: { type: "string", enum: ["internal", "funder", "public"] },
+        limit: { type: "integer", minimum: 1, maximum: 100, default: 10 },
+        afterClaimId: {
+          type: ["string", "null"],
+          description: "Claim UUID cursor for pagination. Pass null for the first page.",
+        },
+      },
+      required: ["organizationId", "requestedAudience", "limit", "afterClaimId"],
+      additionalProperties: false,
+    },
+  },
 };
+
+const GOVERNED_CLAIMS_TOOL_NAMES = [
+  "list_governed_claims",
+  "get_claim_traceability_summary",
+  "list_eligible_claims_for_audience",
+];
 
 export function getToolDefinitionsForTier(tier) {
   const toolNames = getAvailableTools(tier);
@@ -302,5 +360,9 @@ export function getToolDefinitionsForKaiContext(tier, { surface = "default" } = 
     ].map((toolName) => TOOL_DEFINITIONS[toolName]).filter(Boolean);
   }
 
-  return getToolDefinitionsForTier(tier);
+  const baseTools = getToolDefinitionsForTier(tier);
+  if (tier === "guest") return baseTools;
+
+  const governedClaimsTools = GOVERNED_CLAIMS_TOOL_NAMES.map((toolName) => TOOL_DEFINITIONS[toolName]).filter(Boolean);
+  return [...baseTools, ...governedClaimsTools];
 }
