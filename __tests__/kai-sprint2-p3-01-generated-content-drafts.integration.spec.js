@@ -200,45 +200,6 @@ async function runP301IntegrationSuite() {
     });
   }
 
-  // The real P2-06 evaluator returns additional evidence fields (e.g.
-  // updated_at, sensitivity_level) beyond the review-packet path's
-  // pre-existing, narrower validateTraceabilityData allow-list -- a
-  // pre-existing key-shape mismatch unrelated to Package 14-05 and out of
-  // this package's scope. This adapter reuses the real evaluator's real
-  // database-backed result (real eligibility, real blockers, real lineage)
-  // and narrows only the key shape, matching the pattern every existing
-  // P3-02 real-Postgres test already uses (an injected evaluator, never the
-  // raw default one, when reading a review packet).
-  async function realEvaluatorShapedForReviewPacket(tx, input) {
-    const result = await evaluateClaimTraceabilityInTransaction(tx, input);
-    if (!result.ok) return result;
-    const { claim, evidence, source, source_version: sourceVersion } = result.data;
-    return {
-      ...result,
-      data: {
-        ...result.data,
-        claim: {
-          claim_id: claim.claim_id,
-          claim_type: claim.claim_type,
-          claim_status: claim.claim_status,
-          claim_review_status: claim.claim_review_status,
-          claim_strength: claim.claim_strength,
-          audience_gates: claim.audience_gates,
-        },
-        evidence: {
-          evidence_item_id: evidence.evidence_item_id,
-          evidence_review_status: evidence.evidence_review_status,
-          support_strength: evidence.support_strength,
-          review_queue_item_id: evidence.review_queue_item_id,
-          review_queue_status: evidence.review_queue_status,
-          review_status: evidence.review_status,
-        },
-        source: { source_id: source.source_id, source_code: source.source_code },
-        source_version: { source_version_id: sourceVersion.source_version_id, is_current: sourceVersion.is_current },
-      },
-    };
-  }
-
   async function countsForKey(idempotencyKey) {
     const rows = await query(
       `WITH run AS (
@@ -332,22 +293,34 @@ async function runP301IntegrationSuite() {
     // blocker/review/lineage metadata preserved and truthful.
     const packetResult = await createPostgresGeneratedContentRepository({
       runInTransaction: withRunnerOwnedTransaction,
-      evaluator: realEvaluatorShapedForReviewPacket,
     }).getGeneratedDraftReviewPacket({
       organizationId: ORG,
       generatedContentDraftId: result.data.generatedContentDraftId,
     });
-    assert.equal(packetResult.ok, true);
+    assert.equal(packetResult.ok, true, packetResult.error?.code);
     assert.equal(packetResult.data.draftStatus, "draft");
     assert.equal(packetResult.data.currentUseEligible, false);
     assert.equal(packetResult.data.blocks.length, 1);
     const [citation] = packetResult.data.blocks[0].citations;
     assert.equal(citation.claimId, claim.claim_id);
     assert.equal(citation.evidenceItemId, claim.evidence_item_id);
+    assert.equal(citation.sourceId, postEligibility.data.source.source_id);
+    assert.equal(citation.sourceVersionId, postEligibility.data.source_version.source_version_id);
     assert.equal(citation.currentEligible, false);
-    assert.ok(Array.isArray(citation.blockerCodes) && citation.blockerCodes.length > 0);
-    assert.equal(typeof citation.claimReviewStatus, "string");
-    assert.equal(typeof citation.evidenceReviewStatus, "string");
+    assert.deepEqual(citation.blockerCodes, [...new Set(postEligibility.data.blockerCodes)]);
+    assert.equal(citation.supportStrength, postEligibility.data.evidence.support_strength);
+    assert.equal(citation.claimReviewStatus, postEligibility.data.claim.claim_review_status);
+    assert.equal(citation.evidenceReviewStatus, postEligibility.data.evidence.evidence_review_status);
+    assert.deepEqual(citation.affectedDimensionKeys, postEligibility.data.affectedDimensionKeys);
+    assert.deepEqual(citation.affectedObjectIds, postEligibility.data.affectedObjectIds);
+
+    const afterReadEligibility = await withRunnerOwnedTransaction((tx) => evaluateClaimTraceabilityInTransaction(tx, {
+      organizationId: ORG,
+      claimId: claim.claim_id,
+      requestedAudience: "internal",
+    }));
+    assert.equal(afterReadEligibility.ok, true);
+    assert.equal(afterReadEligibility.data.eligible, false);
 
     // DOWNSTREAM SAFETY (P2-08): the currently-ineligible claim continues to
     // be excluded from the P2-08 eligible-claims-for-audience result.

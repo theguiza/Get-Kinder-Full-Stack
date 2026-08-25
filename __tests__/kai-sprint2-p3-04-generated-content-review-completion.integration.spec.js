@@ -130,6 +130,8 @@ async function runP304IntegrationSuite() {
           review_queue_item_id: "10000000-0000-4000-8000-000000000021",
           review_queue_status: "open",
           review_status: eligible ? "approved" : "needs_gk_review",
+          updated_at: "2026-08-06T09:00:00.000Z",
+          sensitivity_level: "unknown",
         },
         locator: { source_locator_id: "10000000-0000-4000-8000-000000000022" },
         source: { source_id: "10000000-0000-4000-8000-000000000023", source_code: null },

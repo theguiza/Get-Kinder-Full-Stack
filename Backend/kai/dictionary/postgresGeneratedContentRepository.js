@@ -37,6 +37,7 @@ const AUDIT_OPERATION = "generated_content_draft_created";
 const AUDIT_CONTRACT = "p3_01_generated_content_draft_v1";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const AUDIENCES = new Set(["internal", "funder", "public"]);
+const EVIDENCE_SENSITIVITY_LEVELS = new Set(["unknown"]);
 const SHA256_LOWER_PATTERN = /^[0-9a-f]{64}$/;
 
 const COMPLETE_REVIEW_FRESH_PROFILE = GENERATED_CONTENT_REVIEW_LIFECYCLE_PROFILES[1];
@@ -541,7 +542,7 @@ function validateTraceabilityData(data, { claimId, requestedAudience }) {
   if (data.requestedAudience !== requestedAudience || typeof data.eligible !== "boolean") return false;
   if (!Array.isArray(data.blockerCodes) || !Array.isArray(data.affectedDimensionKeys) || !Array.isArray(data.affectedObjectIds)) return false;
   if (!hasOnlyAllowedKeys(data.claim, new Set(["claim_id", "claim_type", "claim_status", "claim_review_status", "claim_strength", "audience_gates"]))) return false;
-  if (!hasOnlyAllowedKeys(data.evidence, new Set(["evidence_item_id", "evidence_review_status", "support_strength", "review_queue_item_id", "review_queue_status", "review_status"]))) return false;
+  if (!hasOnlyAllowedKeys(data.evidence, new Set(["evidence_item_id", "evidence_review_status", "support_strength", "review_queue_item_id", "review_queue_status", "review_status", "updated_at", "sensitivity_level"]))) return false;
   if (!hasOnlyAllowedKeys(data.source, new Set(["source_id", "source_code"]))) return false;
   if (!hasOnlyAllowedKeys(data.source_version, new Set(["source_version_id", "is_current"]))) return false;
   return data.claim.claim_id === claimId
@@ -550,6 +551,8 @@ function validateTraceabilityData(data, { claimId, requestedAudience }) {
     && UUID_PATTERN.test(data.source_version.source_version_id)
     && data.source_version.is_current === true
     && typeof data.evidence.support_strength === "string"
+    && isCanonicalUtcTimestamp(data.evidence.updated_at)
+    && EVIDENCE_SENSITIVITY_LEVELS.has(data.evidence.sensitivity_level)
     && typeof data.claim.claim_review_status === "string"
     && typeof data.evidence.evidence_review_status === "string";
 }

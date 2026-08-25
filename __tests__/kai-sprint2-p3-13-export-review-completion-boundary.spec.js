@@ -524,7 +524,7 @@ test("P3-06 real packet reports resolved/resolved, exportEligible=false, draftSt
     ok: true,
     data: {
       claim: { claim_id: evalInput.claimId, claim_type: "finding", claim_status: "proposed", claim_review_status: "approved", claim_strength: "unassessed", audience_gates: {} },
-      evidence: { evidence_item_id: "00000000-0000-4000-8000-000000000806", evidence_review_status: "approved", support_strength: "unassessed", review_queue_item_id: "00000000-0000-4000-8000-000000000045", review_queue_status: "open", review_status: "approved" },
+      evidence: { evidence_item_id: "00000000-0000-4000-8000-000000000806", evidence_review_status: "approved", support_strength: "unassessed", review_queue_item_id: "00000000-0000-4000-8000-000000000045", review_queue_status: "open", review_status: "approved", updated_at: "2026-08-06T09:00:00.000Z", sensitivity_level: "unknown" },
       locator: { source_locator_id: "00000000-0000-4000-8000-000000000042" },
       source: { source_id: "00000000-0000-4000-8000-000000000043", source_code: null },
       source_version: { source_version_id: "00000000-0000-4000-8000-000000000044", is_current: true },

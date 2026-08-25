@@ -173,6 +173,8 @@ function evaluator(state) {
         review_queue_item_id: "10000000-0000-4000-8000-000000000021",
         review_queue_status: "resolved",
         review_status: "approved",
+        updated_at: "2026-08-06T09:00:00.000Z",
+        sensitivity_level: "unknown",
       },
       locator: { source_locator_id: "10000000-0000-4000-8000-000000000022" },
       source: { source_id: SOURCE, source_code: null },

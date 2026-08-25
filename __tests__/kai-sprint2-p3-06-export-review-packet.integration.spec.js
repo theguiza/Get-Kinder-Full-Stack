@@ -129,6 +129,8 @@ async function runP306IntegrationSuite() {
           review_queue_item_id: "10000000-0000-4000-8000-000000000061",
           review_queue_status: "resolved",
           review_status: eligible ? "approved" : "needs_gk_review",
+          updated_at: "2026-08-06T09:00:00.000Z",
+          sensitivity_level: "unknown",
         },
         locator: { source_locator_id: "10000000-0000-4000-8000-000000000062" },
         source: { source_id: "10000000-0000-4000-8000-000000000063", source_code: null },

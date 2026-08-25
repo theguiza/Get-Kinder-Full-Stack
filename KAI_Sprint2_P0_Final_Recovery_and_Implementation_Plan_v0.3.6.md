@@ -19206,3 +19206,68 @@ This closes the mismatch between the executed request-ownership predicates and t
 - `sprint2IntakeApi.js` and `kaiGeneratedContentService.js` were inspected and confirmed to already have no `eligible=true` enforcement of their own (matching the accepted starting context); they were not modified and their behavior was not independently re-derived beyond that inspection plus the full suite pass.
 
 **Scope:** no P2-08 implementation, export eligibility/manifest validator, export review lifecycle, final-human-authority logic, migration, schema, package dependency, database/cloud config, feature-flag, or `00_KAI_CURRENT_STATE.md` change. `sprint2IntakeApi.js` and `kaiGeneratedContentService.js` were inspected but not modified (no functional need found). Not pushed, not deployed.
+
+## Package 14-05 — Closure correction: P2-06 traceability DTO / P3-02 review-packet compatibility
+
+**Date:** 2026-08-25
+**Fresh starting HEAD:** `9cbc0a2b603aa98236b10d28e7717218cc2ceb99` ("Decouple internal draft generation from use eligibility"), branch `main`, clean working tree at preflight.
+
+**Raw-default-evaluator red proof before production correction:**
+- Test-only change first removed the 14-05 review-packet shaping helper from `__tests__/kai-sprint2-p3-01-generated-content-drafts.integration.spec.js` and removed the `evaluator: realEvaluatorShapedForReviewPacket` injection from the 14-05 review-packet read. Production code was still unchanged for this red run.
+- `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p3-01-generated-content-drafts` (full log: `/tmp/kai-14-05-closure-red-p3-01.log`) proved draft creation reached the later read path, then failed exactly at `assert.equal(packetResult.ok, true, packetResult.error?.code)` with `packetResult.ok === false` and `packetResult.error.code === "conflict_current_state_changed"`.
+- TAP result for the red run: 19 tests, 18 passed, 1 failed, exit 1. This established RAW DEFAULT EVALUATOR + OLD CONSUMER = FAIL without reopening the 14-05 generation semantics.
+
+**Exact producer/consumer DTO drift:**
+- Current P2-06 producer evidence contract from `Backend/kai/dictionary/postgresClaimTraceabilityRepository.js` emits: `evidence_item_id`, `evidence_review_status`, `support_strength`, `review_queue_item_id`, `review_queue_status`, `review_status`, `updated_at`, `sensitivity_level`.
+- Stale P3-02 consumer evidence contract in `Backend/kai/dictionary/postgresGeneratedContentRepository.js` accepted only: `evidence_item_id`, `evidence_review_status`, `support_strength`, `review_queue_item_id`, `review_queue_status`, `review_status`.
+- Fresh inspection found no demonstrated drift in the other exact-key objects currently checked by `validateTraceabilityData`: `claim`, `source`, and `source_version` matched their producer shapes. Root keys already matched the producer shape, including current review, blocker, coverage/follow-up, lineage, and evidence metadata containers.
+- Legitimate mismatches added to the consumer contract: `evidence.updated_at` and `evidence.sensitivity_level`.
+- Value validation applied: `evidence.updated_at` must pass the repository's existing canonical UTC timestamp check (`isCanonicalUtcTimestamp`); `evidence.sensitivity_level` must be in the current schema-backed sensitivity set, presently `["unknown"]` per the active `kai.evidence_items` check constraint and existing P2-06 integration assertion that the DTO preserves the persisted value.
+
+**Implementation:**
+- Production change: `validateTraceabilityData(...)` in `Backend/kai/dictionary/postgresGeneratedContentRepository.js` now explicitly allow-lists `evidence.updated_at` and `evidence.sensitivity_level` and validates their values. Strict closed-shape validation remains via `hasOnlyAllowedKeys`.
+- The P2-06 producer was not modified.
+- The 14-05 P3-01 shaping workaround was permanently removed; the authentic 14-05 review-packet read now constructs `createPostgresGeneratedContentRepository({ runInTransaction: withRunnerOwnedTransaction })` with no `evaluator` injection.
+- Public P3-02 review-packet DTO shape was not widened: citations still return `claimId`, `evidenceItemId`, `sourceId`, `sourceVersionId`, `supportStrength`, `claimReviewStatus`, `evidenceReviewStatus`, `currentEligible`, `blockerCodes`, `affectedDimensionKeys`, and `affectedObjectIds`. The newly accepted internal producer fields are not surfaced on citations, blocks, or packet top-level DTOs.
+- Downstream test fixtures in P3-03/P3-04/P3-05/P3-06/P3-13 that exercise the shared P3-02 composition were updated only to emit the current P2-06 evidence shape; no export/review production semantics changed.
+
+**Closed-shape proof:**
+- Added P3-02 boundary regression: `P3-02 review-packet composition accepts the current P2-06 evidence DTO shape but still rejects unknown evidence fields`.
+- Legitimate current P2-06 DTO result: `evaluateGeneratedDraftReviewPacketInTransaction(...)` returned `ok === true` when the evaluator supplied `evidence.updated_at` and `evidence.sensitivity_level`.
+- Arbitrary unknown-key result: the same DTO plus `evidence.unexpected_evidence_field` returned `conflict_current_state_changed` with `data === null`.
+
+**Default-evaluator green proof:**
+- `npm run verify:kai-sprint2-p3-01-generated-content-drafts` after the production correction passed 19/19, exit 0 (log: `/tmp/kai-14-05-closure-green-p3-01.log`).
+- The authentic 14-05 fixture proved before generation: real/current P2-06 `eligible === false` and blocker codes were non-empty.
+- Generation: INTERNAL draft creation succeeded, the generator was called once, and one generation run, draft, block, citation, generated-content review queue item, and metadata-only audit persisted.
+- Review-packet read: used the default/current P2-06 evaluator through the repository default path with no `evaluator` injection and returned `ok === true`.
+- Packet and citation facts: `currentUseEligible === false`; citation `currentEligible === false`; blocker codes, support strength, claim review status, evidence review status, affected dimension keys, affected object IDs, claim/evidence/source/source-version lineage all matched the direct post-generation P2-06 result.
+- After the read, a fresh direct P2-06 evaluation still returned `eligible === false`.
+
+**Verification** (`DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel` set for every Node/npm command):
+- `node --test __tests__/kai-sprint2-p3-02-generated-draft-review-packet-boundary.spec.js` — 9 tests, 9 passed, 0 failed, 0 skipped, exit 0.
+- `npm run verify:kai-sprint2-p3-01-generated-content-drafts` — 19 tests, 19 passed, 0 failed, 0 skipped, exit 0.
+- `npm run verify:kai-sprint2-p3-02-generated-draft-review-packet` — 17 tests, 17 passed, 0 failed, 0 skipped, exit 0.
+- `npm run verify:kai-sprint2-p3-03-export-manifest-eligibility` — 26 tests, 26 passed, 0 failed, 0 skipped, exit 0.
+- `npm run test:kai-sprint2` — 2410 tests, 2374 passed, 0 failed, 36 skipped, 0 cancelled/todo, exit 0.
+- `git diff --check` — passed, exit 0.
+
+**Exact changed files:**
+- `Backend/kai/dictionary/postgresGeneratedContentRepository.js`
+- `__tests__/kai-sprint2-p3-01-generated-content-drafts.integration.spec.js`
+- `__tests__/kai-sprint2-p3-02-generated-draft-review-packet-boundary.spec.js`
+- `__tests__/kai-sprint2-p3-02-generated-draft-review-packet.integration.spec.js`
+- `__tests__/kai-sprint2-p3-03-export-manifest-eligibility.integration.spec.js`
+- `__tests__/kai-sprint2-p3-04-generated-content-review-completion-boundary.spec.js`
+- `__tests__/kai-sprint2-p3-04-generated-content-review-completion.integration.spec.js`
+- `__tests__/kai-sprint2-p3-05-export-review-request-boundary.spec.js`
+- `__tests__/kai-sprint2-p3-05-export-review-request.integration.spec.js`
+- `__tests__/kai-sprint2-p3-06-export-review-packet-boundary.spec.js`
+- `__tests__/kai-sprint2-p3-06-export-review-packet.integration.spec.js`
+- `__tests__/kai-sprint2-p3-13-export-review-completion-boundary.spec.js`
+- `__tests__/kai-sprint2-p3-13-export-review-completion.integration.spec.js`
+- `KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.6.md` (this additions-only evidence entry)
+
+**NOT_CONFIRMED:** none for this bounded closure correction.
+
+**Scope:** no frontend change, no P2-08 change, no generation validator/service semantic change, no export/review production change, no migration/schema/dependency change, no database/cloud/feature-flag mutation, no real-client-data access, no `00_KAI_CURRENT_STATE.md` update, no push, and no deploy.

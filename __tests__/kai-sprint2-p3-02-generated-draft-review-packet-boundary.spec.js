@@ -6,7 +6,10 @@ import {
   getGeneratedDraftReviewPacket,
   __generatedContentReviewPacketServiceTestables,
 } from "../Backend/kai/services/kaiGeneratedContentService.js";
-import { __generatedContentRepositoryTestables } from "../Backend/kai/dictionary/postgresGeneratedContentRepository.js";
+import {
+  evaluateGeneratedDraftReviewPacketInTransaction,
+  __generatedContentRepositoryTestables,
+} from "../Backend/kai/dictionary/postgresGeneratedContentRepository.js";
 
 const ORG = "00000000-0000-4000-8000-000000000001";
 const OTHER_ORG = "00000000-0000-4000-8000-000000000002";
@@ -144,6 +147,8 @@ function evaluated(claimId = CLAIM, overrides = {}) {
       review_queue_item_id: "00000000-0000-4000-8000-000000000601",
       review_queue_status: "closed",
       review_status: "approved",
+      updated_at: "2026-08-06T09:00:00.000Z",
+      sensitivity_level: "unknown",
     },
     locator: { source_locator_id: "00000000-0000-4000-8000-000000000602" },
     source: { source_id: SOURCE, source_code: null },
@@ -166,6 +171,20 @@ function evaluated(claimId = CLAIM, overrides = {}) {
     affectedObjectIds: [],
     truncated: false,
     ...overrides,
+  };
+}
+
+function txForReviewPacketState(packetState = state()) {
+  return {
+    async query(sql) {
+      if (/FROM kai\.generated_content_drafts\s+WHERE organization_id/.test(sql)) return { rows: [packetState.draft] };
+      if (/FROM kai\.generation_runs/.test(sql)) return { rows: [packetState.run] };
+      if (/FROM kai\.generated_content_drafts\s+WHERE generation_run_id/.test(sql)) return { rows: packetState.siblingDrafts };
+      if (/FROM kai\.generated_content_blocks/.test(sql)) return { rows: packetState.blocks };
+      if (/FROM kai\.generated_content_citations/.test(sql)) return { rows: packetState.citations };
+      if (/FROM kai\.review_queue_items/.test(sql)) return { rows: packetState.queues };
+      throw new Error(`unexpected query in review-packet boundary test: ${sql}`);
+    },
   };
 }
 
@@ -219,6 +238,34 @@ test("P3-02 repository validators require complete graph and full generated_cont
 test("P3-02 repository validator treats unexpected internal row fields as system_error", () => {
   const { validateReviewPacketRows } = __generatedContentRepositoryTestables;
   assert.equal(validateReviewPacketRows(state({ run: { ...state().run, prompt: "blocked" } }), { organizationId: ORG, generatedContentDraftId: DRAFT }), "system_error");
+});
+
+test("P3-02 review-packet composition accepts the current P2-06 evidence DTO shape but still rejects unknown evidence fields", async () => {
+  const currentTraceability = evaluated();
+  const currentResult = await evaluateGeneratedDraftReviewPacketInTransaction(
+    txForReviewPacketState(),
+    { organizationId: ORG, generatedContentDraftId: DRAFT },
+    async () => ({ ok: true, data: currentTraceability, error: null }),
+  );
+  assert.equal(currentResult.ok, true);
+  const [citation] = currentResult.data.blocks[0].citations;
+  assert.equal(citation.claimId, CLAIM);
+  assert.equal(citation.evidenceItemId, EVIDENCE);
+  assert.equal(citation.currentEligible, true);
+  assert.equal("updated_at" in citation, false);
+  assert.equal("sensitivity_level" in citation, false);
+
+  const unknownEvidenceFieldResult = await evaluateGeneratedDraftReviewPacketInTransaction(
+    txForReviewPacketState(),
+    { organizationId: ORG, generatedContentDraftId: DRAFT },
+    async () => ({
+      ok: true,
+      data: evaluated(CLAIM, { evidence: { ...currentTraceability.evidence, unexpected_evidence_field: "blocked" } }),
+      error: null,
+    }),
+  );
+  assert.equal(unknownEvidenceFieldResult.error.code, "conflict_current_state_changed");
+  assert.equal(unknownEvidenceFieldResult.data, null);
 });
 
 test("P3-02 DTO shape is exact and keeps potential conflicts as potential only", () => {
