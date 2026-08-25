@@ -32,12 +32,16 @@ import {
   generatedDraftReviewPacketPath,
   getJson,
   mergeClaims,
+  nextLibraryStateForAudienceChange,
+  nextLibraryStateForOrganizationChange,
   postJson,
   projectCandidateClaims,
   projectEligibleClaims,
   projectGeneratedDraftPacket,
   projectTraceability,
   reviewTransitionBody,
+  shouldApplyCandidateResponse,
+  shouldApplyEligibilityResponse,
 } from "../frontend/impactEvidenceLibraryLogic.js";
 
 const basePath = "/api/kai/sprint2/intake";
@@ -814,14 +818,169 @@ test("Package 14-04: the historical eligible-claims-failure setClaims([]) cleari
   assert.match(uiSource, /<div className="list-group">\s*\{claims\.map/);
 
   // Case I/J: organization changes reset stale state, and independently
-  // in-flight requests are invalidated via a generation guard so a late
-  // cross-organization response cannot populate the new view.
-  assert.match(uiSource, /useEffect\(\(\) => \{\s*requestGenerationRef\.current \+= 1;[\s\S]*?\}, \[organizationId\]\);/);
-  assert.match(uiSource, /requestGenerationRef\.current !== generation/);
+  // in-flight requests are invalidated via separate generation guards so a
+  // late cross-organization response cannot populate the new view. These are
+  // supplemental structural/wiring checks only — the authoritative proof of
+  // the transition and acceptance-predicate behavior is the executed
+  // pure-function regressions below (14-04 lifecycle closure).
+  assert.match(uiSource, /import \{[\s\S]*?nextLibraryStateForOrganizationChange[\s\S]*?\} from "\.\/impactEvidenceLibraryLogic\.js";/);
+  assert.match(uiSource, /import \{[\s\S]*?nextLibraryStateForAudienceChange[\s\S]*?\} from "\.\/impactEvidenceLibraryLogic\.js";/);
+  assert.match(uiSource, /import \{[\s\S]*?shouldApplyCandidateResponse[\s\S]*?\} from "\.\/impactEvidenceLibraryLogic\.js";/);
+  assert.match(uiSource, /import \{[\s\S]*?shouldApplyEligibilityResponse[\s\S]*?\} from "\.\/impactEvidenceLibraryLogic\.js";/);
+  assert.match(uiSource, /useEffect\(\(\) => \{\s*candidateRequestGenerationRef\.current \+= 1;\s*eligibleRequestGenerationRef\.current \+= 1;[\s\S]*?nextLibraryStateForOrganizationChange\(\)[\s\S]*?\}, \[organizationId\]\);/);
+  assert.match(uiSource, /useEffect\(\(\) => \{\s*eligibleRequestGenerationRef\.current \+= 1;[\s\S]*?nextLibraryStateForAudienceChange\(\)[\s\S]*?\}, \[audience\]\);/);
+  assert.match(uiSource, /shouldApplyCandidateResponse\(\{/);
+  assert.match(uiSource, /shouldApplyEligibilityResponse\(\{/);
 
   // Case K: no deployed-assistant capability claim is made anywhere in the
   // human-facing Impact Evidence Library UI or logic.
   const logicSource = readFileSync("frontend/impactEvidenceLibraryLogic.js", "utf8");
   assert.doesNotMatch(uiSource + logicSource, /Available to KAI/i);
   assert.match(uiSource, /internally available \(governed\)/);
+});
+
+// 14-04 lifecycle closure: two concrete defects (organization change can
+// strand loading flags; old audience eligibility can be shown under a new
+// audience's label) are corrected via pure, executed transition/predicate
+// functions rather than source-pattern assertions. See
+// nextLibraryStateForOrganizationChange, nextLibraryStateForAudienceChange,
+// shouldApplyCandidateResponse, shouldApplyEligibilityResponse.
+
+test("14-04 closure case A: organization change resets both loading flags and clears organization-scoped state", () => {
+  const next = nextLibraryStateForOrganizationChange();
+  assert.equal(next.loadingCandidateClaims, false);
+  assert.equal(next.loadingEligibleClaims, false);
+  assert.deepEqual(next.candidateClaims, []);
+  assert.deepEqual(next.eligibleClaims, []);
+  assert.equal(next.candidateClaimsError, "");
+  assert.equal(next.eligibleClaimsError, "");
+  assert.equal(next.eligibleRequestState, "idle");
+  assert.equal(next.selectedClaimId, "");
+  assert.deepEqual(next.selectedGenerationClaimIds, []);
+  assert.equal(next.traceability, null);
+  assert.equal(next.generatedDraftPacket, null);
+});
+
+test("14-04 closure case B/F: organization change invalidates both candidate and eligibility request identities, rejecting late org-A responses", () => {
+  const orgA = "00000000-0000-4000-8000-000000000001";
+  const orgB = "00000000-0000-4000-8000-000000000002";
+
+  // Candidate request started under org A, generation 1.
+  const candidateAccepted = shouldApplyCandidateResponse({
+    requestGeneration: 1,
+    currentGeneration: 1,
+    requestOrganizationId: orgA,
+    currentOrganizationId: orgA,
+  });
+  assert.equal(candidateAccepted, true);
+
+  // Organization changes to org B: generation advances to 2 and the current
+  // organization is now org B. The stale org-A/generation-1 response must be
+  // rejected on both dimensions.
+  const candidateRejected = shouldApplyCandidateResponse({
+    requestGeneration: 1,
+    currentGeneration: 2,
+    requestOrganizationId: orgA,
+    currentOrganizationId: orgB,
+  });
+  assert.equal(candidateRejected, false);
+
+  const eligibilityRejected = shouldApplyEligibilityResponse({
+    requestGeneration: 1,
+    currentGeneration: 2,
+    requestOrganizationId: orgA,
+    currentOrganizationId: orgB,
+    requestAudience: "internal",
+    currentAudience: "internal",
+  });
+  assert.equal(eligibilityRejected, false);
+});
+
+test("14-04 closure case C: audience change preserves candidateClaims and resets only the eligibility dimension", () => {
+  const candidateClaims = [{ claimId, libraryStatus: "needs_review" }];
+  const next = nextLibraryStateForAudienceChange();
+  assert.equal("candidateClaims" in next, false);
+  assert.deepEqual(next.eligibleClaims, []);
+  assert.equal(next.eligibleClaimsError, "");
+  assert.equal(next.eligibleRequestState, "idle");
+  assert.equal(next.loadingEligibleClaims, false);
+  // candidateClaims is untouched by this transition: applying it must not
+  // overwrite the caller's existing candidateClaims array.
+  assert.deepEqual(candidateClaims, [{ claimId, libraryStatus: "needs_review" }]);
+});
+
+test("14-04 closure case D: an old audience's eligibility result cannot be applied once the audience changes", () => {
+  // Eligibility request started while audience = internal, generation 1.
+  const acceptedWhileInternal = shouldApplyEligibilityResponse({
+    requestGeneration: 1,
+    currentGeneration: 1,
+    requestOrganizationId: organizationId,
+    currentOrganizationId: organizationId,
+    requestAudience: "internal",
+    currentAudience: "internal",
+  });
+  assert.equal(acceptedWhileInternal, true);
+
+  // Audience changes to public: eligibility generation advances to 2, and
+  // the current audience is now "public". The late internal-audience
+  // response must never attach itself to the public audience.
+  const rejectedAfterAudienceChange = shouldApplyEligibilityResponse({
+    requestGeneration: 1,
+    currentGeneration: 2,
+    requestOrganizationId: organizationId,
+    currentOrganizationId: organizationId,
+    requestAudience: "internal",
+    currentAudience: "public",
+  });
+  assert.equal(rejectedAfterAudienceChange, false);
+});
+
+test("14-04 closure case E: audience change does not invalidate or reject an in-flight governed candidate request", () => {
+  // A candidate (Claim Library) request is active for the current
+  // organization at generation 1. Audience change bumps only the
+  // eligibility generation (modeled here by leaving the candidate
+  // generation/organization untouched), so the candidate request's own
+  // acceptance predicate must still accept its own response.
+  const candidateStillAccepted = shouldApplyCandidateResponse({
+    requestGeneration: 1,
+    currentGeneration: 1,
+    requestOrganizationId: organizationId,
+    currentOrganizationId: organizationId,
+  });
+  assert.equal(candidateStillAccepted, true);
+});
+
+test("14-04 closure case G: a stale earlier response cannot clear or overwrite state owned by a newer request of the same dimension", () => {
+  // Request 1 (stale) and request 2 (current) both target the same
+  // organization/audience; only request 2's generation is current.
+  const staleRequestAccepted = shouldApplyEligibilityResponse({
+    requestGeneration: 1,
+    currentGeneration: 2,
+    requestOrganizationId: organizationId,
+    currentOrganizationId: organizationId,
+    requestAudience: "internal",
+    currentAudience: "internal",
+  });
+  assert.equal(staleRequestAccepted, false);
+
+  const currentRequestAccepted = shouldApplyEligibilityResponse({
+    requestGeneration: 2,
+    currentGeneration: 2,
+    requestOrganizationId: organizationId,
+    currentOrganizationId: organizationId,
+    requestAudience: "internal",
+    currentAudience: "internal",
+  });
+  assert.equal(currentRequestAccepted, true);
+});
+
+test("14-04 closure case H: 14-04 governed availability / audience eligibility semantics remain intact", () => {
+  const governedClaim = { claimId, claimReviewStatus: "needs_gk_review", claimStrength: "unassessed", libraryStatus: "needs_review" };
+  const annotated = annotateGovernedAvailability([governedClaim], [governedClaim], [], "success");
+  assert.equal(annotated[0].governedAvailable, true);
+  assert.equal(annotated[0].audienceEligibility, "not_eligible");
+
+  const onFailure = annotateGovernedAvailability([governedClaim], [governedClaim], [], "error");
+  assert.equal(onFailure[0].governedAvailable, true);
+  assert.equal(onFailure[0].audienceEligibility, "eligibility_unavailable");
 });

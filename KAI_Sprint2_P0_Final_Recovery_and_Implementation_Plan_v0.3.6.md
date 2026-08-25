@@ -19050,3 +19050,51 @@ Case G (partial loading) and Case L (existing behavior) are proved structurally 
 NOT_CONFIRMED:
 - Carried forward: live deployed KAI assistant invocation of governed discovery remains unconfirmed in the supplied evidence; this package does not change that, and its UI copy was deliberately worded to avoid asserting it.
 - The claims-list "not in current governed result" branch (a claim present only in `eligibleClaims` but absent from `candidateClaims`, e.g. from independent `limit=25` pagination on each endpoint) is exercised by a direct unit test (Case F) but not observed against a live paginated dataset in this session.
+
+---
+
+## Package 14-04 — Lifecycle Closure (Impact Evidence Library async state + race-safety correction)
+
+**Date:** 2026-08-25
+**Starting HEAD:** `990d259` ("Separate governed availability from audience eligibility") — confirmed by `git log -1` and `git merge-base --is-ancestor 990d259 HEAD` before any edit.
+**Pre-existing owner work preserved:** the unstaged `AGENTS.md` modification present at session start was left untouched throughout (not staged, not read as part of scope, not restored/overwritten).
+
+**Two defects confirmed against the current (990d259) source before editing:**
+1. **Organization change can strand loading flags.** `loadCandidateClaims`/`loadEligibleClaims` checked `requestGenerationRef.current !== generation` and returned *before* `setLoadingX(false)`. The organization-change effect bumped `requestGenerationRef` and cleared data/errors but never dispatched a replacement request (UX is click-to-load). A response arriving after an organization change therefore hit the stale-generation branch and returned without ever clearing its own loading flag, permanently disabling the "Load claims" button.
+2. **Old audience eligibility can be shown under a new label.** No effect existed keyed on `audience`. `eligibleClaims`/`eligibleRequestState`/`eligibleClaimsError` from a previously-loaded audience persisted unchanged after the audience `<select>` changed, so the UI's `{audience} audience eligibility: ...` label reused the old audience's result under the new audience's name.
+
+**Request identity redesign:** replaced the single shared `requestGenerationRef` with two independent refs, `candidateRequestGenerationRef` and `eligibleRequestGenerationRef` (`frontend/ImpactEvidenceLibrary.jsx`). Organization change now increments both; audience change increments only the eligibility ref. `organizationIdRef`/`audienceRef` track the latest values for response-time comparison (assigned each render, avoiding stale-closure reads in the async response handlers).
+
+**Pure lifecycle helpers added to `frontend/impactEvidenceLibraryLogic.js`:**
+- `nextLibraryStateForOrganizationChange()` — returns the full organization-scoped reset object: both claim arrays, both errors, `eligibleRequestState: "idle"`, both loading flags `false`, and cleared selection/traceability/generated-draft state.
+- `nextLibraryStateForAudienceChange()` — returns only the eligibility-scoped reset object (`eligibleClaims`, `eligibleClaimsError`, `eligibleRequestState`, `loadingEligibleClaims`); deliberately omits `candidateClaims` so a caller cannot accidentally clear the governed Claim Library from this transition.
+- `shouldApplyCandidateResponse({ requestGeneration, currentGeneration, requestOrganizationId, currentOrganizationId })` — pure predicate, generation AND organization must both match.
+- `shouldApplyEligibilityResponse({ requestGeneration, currentGeneration, requestOrganizationId, currentOrganizationId, requestAudience, currentAudience })` — pure predicate, generation AND organization AND audience must all match.
+
+**Component delegation (`frontend/ImpactEvidenceLibrary.jsx`):** the organization-change `useEffect` now calls `nextLibraryStateForOrganizationChange()` and applies every field via the existing setters (including both loading flags, which is the actual defect-1 fix: the invalidating transition restores loading itself rather than relying on a stale response to do it). A new audience-change `useEffect` calls `nextLibraryStateForAudienceChange()` and applies only the eligibility fields, leaving `candidateClaims` untouched (defect-2 fix). `loadCandidateClaims` captures `requestGeneration`/`requestOrganizationId` and gates its response with `shouldApplyCandidateResponse`; `loadEligibleClaims` captures `requestGeneration`/`requestOrganizationId`/`requestAudience` and gates its response with `shouldApplyEligibilityResponse`. Neither loader resets a loading flag on the "response rejected" path — that flag is owned by whichever transition invalidated the request.
+
+**Executed lifecycle regressions added (`__tests__/kai-sprint2-impact-evidence-library.spec.js`), all calling the extracted pure functions directly (no source-regex substitute for behavior):**
+- Case A — `nextLibraryStateForOrganizationChange()` returns both loading flags `false` and all cleared/idle organization-scoped fields — EXECUTED PURE FUNCTION.
+- Case B/F — `shouldApplyCandidateResponse`/`shouldApplyEligibilityResponse` reject a stale org-A request once generation and organization both advance to org B — EXECUTED PURE FUNCTION.
+- Case C — `nextLibraryStateForAudienceChange()` never includes a `candidateClaims` key and resets only eligibility fields — EXECUTED PURE FUNCTION.
+- Case D — `shouldApplyEligibilityResponse` accepts a same-generation/same-audience response and rejects the same request identity once the eligibility generation and current audience both advance — EXECUTED PURE FUNCTION.
+- Case E — `shouldApplyCandidateResponse` still accepts an in-flight candidate request's own identity, proving an audience-only change does not disturb the candidate dimension — EXECUTED PURE FUNCTION.
+- Case G — `shouldApplyEligibilityResponse` rejects a stale generation-1 response and accepts the current generation-2 response for the identical organization/audience, proving newer-request ownership is preserved — EXECUTED PURE FUNCTION.
+- Case H — `annotateGovernedAvailability` re-run to confirm 14-04 governed-availability/audience-eligibility independence semantics remain intact after this closure — EXECUTED PURE FUNCTION (pre-existing behavior, re-asserted here as a regression guard).
+
+**Supplemental source-contract assertions retained/updated (structural wiring only, not behavioral proof):** the existing "historical eligible-claims-failure `setClaims([])`" test's Case I/J assertions were updated (the old `requestGenerationRef`-based regex no longer matches the two-generation design) to confirm: the component imports all four new lifecycle helpers; the organization-change effect body contains both generation increments and calls `nextLibraryStateForOrganizationChange()`; the audience-change effect body increments the eligibility generation and calls `nextLibraryStateForAudienceChange()`; and both loaders call their respective `shouldApply*Response({` predicate. These assertions prove the component *calls* the tested functions — they do not, and are not relied on to, prove the functions' behavior.
+
+**Component wiring gap check:** confirmed by direct inspection that `loadCandidateClaims`/`loadEligibleClaims` no longer perform their own inline generation comparison — both now delegate entirely to the imported predicates, so a supplemental structural check on predicate usage is meaningful (not vacuous).
+
+**Test commands run** (`DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel` set before every command):
+- `node --test __tests__/kai-sprint2-impact-evidence-library.spec.js` — 29 passed, 0 failed, 0 skipped.
+- `node --test __tests__/kai-sprint2-p2-08-eligible-claims-for-audience-boundary.spec.js` — 13 passed, 0 failed, 0 skipped.
+- `npm run test:kai-sprint2` — 2402 tests, 2366 passed, 0 failed, 36 skipped (pre-existing unrelated DB-gated skips, unchanged from the 14-04 baseline).
+- `git diff --check` — passed (exit 0).
+
+**Diff scope confirmed:** exactly `frontend/ImpactEvidenceLibrary.jsx`, `frontend/impactEvidenceLibraryLogic.js`, and `__tests__/kai-sprint2-impact-evidence-library.spec.js` changed (288 insertions / 19 deletions across the three files), plus this ExecPlan addition. The pre-existing unstaged `AGENTS.md` change was left unstaged and unmodified. No backend file, no P2-08 implementation file, no assistant/runtime/generated-content/export/release file, no schema/migration file, and no `00_KAI_CURRENT_STATE.md` was touched.
+
+**NOT_CONFIRMED (carried forward, genuinely unresolved by this package):**
+- 14-02 Claim Library SQL live authorized Postgres execution.
+- Stale Claim Library route comment (if any remains from earlier packages — not re-audited in this bounded closure).
+- Live deployed KAI assistant governed-discovery invocation.

@@ -214,6 +214,72 @@ export function annotateGovernedAvailability(mergedClaims, candidateClaims, elig
   }));
 }
 
+// Organization change invalidates both the governed Claim Library and the
+// audience-scoped eligibility dimension: every piece of organization-scoped
+// state (including both loading flags) is reset here, in the transition
+// itself, because no replacement request is automatically dispatched
+// (the UX is click-to-load) and a stale response must not be relied on to
+// restore a loading flag it no longer owns.
+export function nextLibraryStateForOrganizationChange() {
+  return {
+    candidateClaims: [],
+    eligibleClaims: [],
+    candidateClaimsError: "",
+    eligibleClaimsError: "",
+    eligibleRequestState: "idle",
+    loadingCandidateClaims: false,
+    loadingEligibleClaims: false,
+    selectedClaimId: "",
+    selectedGenerationClaimIds: [],
+    traceability: null,
+    generatedDraftPacket: null,
+  };
+}
+
+// Audience change invalidates only the audience-scoped eligibility
+// dimension. The governed Claim Library (candidateClaims) is untouched:
+// callers must not include it in the state they apply from this transition.
+export function nextLibraryStateForAudienceChange() {
+  return {
+    eligibleClaims: [],
+    eligibleClaimsError: "",
+    eligibleRequestState: "idle",
+    loadingEligibleClaims: false,
+  };
+}
+
+// A Claim Library response may be applied only if it belongs to the
+// generation and organization still current when it resolves.
+export function shouldApplyCandidateResponse({
+  requestGeneration,
+  currentGeneration,
+  requestOrganizationId,
+  currentOrganizationId,
+}) {
+  return (
+    requestGeneration === currentGeneration
+    && requestOrganizationId === currentOrganizationId
+  );
+}
+
+// An eligibility response may be applied only if it belongs to the
+// generation, organization, AND audience still current when it resolves,
+// so a late response from one audience can never be attached to another.
+export function shouldApplyEligibilityResponse({
+  requestGeneration,
+  currentGeneration,
+  requestOrganizationId,
+  currentOrganizationId,
+  requestAudience,
+  currentAudience,
+}) {
+  return (
+    requestGeneration === currentGeneration
+    && requestOrganizationId === currentOrganizationId
+    && requestAudience === currentAudience
+  );
+}
+
 export function projectTraceability(dto) {
   if (!dto || typeof dto !== "object") return null;
   const dimensions = Object.entries(dto.dimensions || {}).map(([dimensionKey, value]) => ({

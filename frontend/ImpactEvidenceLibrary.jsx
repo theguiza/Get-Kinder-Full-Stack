@@ -27,6 +27,8 @@ import {
   getJson,
   isRouteUuid,
   mergeClaims,
+  nextLibraryStateForAudienceChange,
+  nextLibraryStateForOrganizationChange,
   postJson,
   potentialConflictsPath,
   projectCandidateClaims,
@@ -36,6 +38,8 @@ import {
   projectGeneratedDraftPacket,
   projectTraceability,
   reviewTransitionBody,
+  shouldApplyCandidateResponse,
+  shouldApplyEligibilityResponse,
 } from "./impactEvidenceLibraryLogic.js";
 import { organizationsPath } from "./kaiWebIntakeLogic.js";
 
@@ -70,7 +74,16 @@ export default function ImpactEvidenceLibrary() {
   const [candidateClaimsError, setCandidateClaimsError] = useState("");
   const [eligibleClaimsError, setEligibleClaimsError] = useState("");
   const [eligibleRequestState, setEligibleRequestState] = useState("idle");
-  const requestGenerationRef = useRef(0);
+  // Candidate (governed Claim Library) and eligibility (audience-scoped)
+  // requests are invalidated independently: organization change invalidates
+  // both, audience change invalidates eligibility only. See
+  // nextLibraryStateForOrganizationChange / nextLibraryStateForAudienceChange.
+  const candidateRequestGenerationRef = useRef(0);
+  const eligibleRequestGenerationRef = useRef(0);
+  const organizationIdRef = useRef(organizationId);
+  const audienceRef = useRef(audience);
+  organizationIdRef.current = organizationId;
+  audienceRef.current = audience;
   const [selectedClaimId, setSelectedClaimId] = useState("");
   const [selectedGenerationClaimIds, setSelectedGenerationClaimIds] = useState([]);
   const [generatedDraftPacket, setGeneratedDraftPacket] = useState(null);
@@ -134,25 +147,47 @@ export default function ImpactEvidenceLibrary() {
   // in-flight requests for the previous organization so a late response
   // cannot populate the newly selected organization's view.
   useEffect(() => {
-    requestGenerationRef.current += 1;
-    setCandidateClaims([]);
-    setEligibleClaims([]);
-    setCandidateClaimsError("");
-    setEligibleClaimsError("");
-    setEligibleRequestState("idle");
-    setSelectedClaimId("");
-    setSelectedGenerationClaimIds([]);
-    setTraceability(null);
-    setGeneratedDraftPacket(null);
+    candidateRequestGenerationRef.current += 1;
+    eligibleRequestGenerationRef.current += 1;
+    const next = nextLibraryStateForOrganizationChange();
+    setCandidateClaims(next.candidateClaims);
+    setEligibleClaims(next.eligibleClaims);
+    setCandidateClaimsError(next.candidateClaimsError);
+    setEligibleClaimsError(next.eligibleClaimsError);
+    setEligibleRequestState(next.eligibleRequestState);
+    setLoadingCandidateClaims(next.loadingCandidateClaims);
+    setLoadingEligibleClaims(next.loadingEligibleClaims);
+    setSelectedClaimId(next.selectedClaimId);
+    setSelectedGenerationClaimIds(next.selectedGenerationClaimIds);
+    setTraceability(next.traceability);
+    setGeneratedDraftPacket(next.generatedDraftPacket);
   }, [organizationId]);
+
+  // Audience change invalidates the eligibility dimension only: the governed
+  // Claim Library (candidateClaims) is left untouched so the old audience's
+  // eligibility result can never be shown under the new audience's label.
+  useEffect(() => {
+    eligibleRequestGenerationRef.current += 1;
+    const next = nextLibraryStateForAudienceChange();
+    setEligibleClaims(next.eligibleClaims);
+    setEligibleClaimsError(next.eligibleClaimsError);
+    setEligibleRequestState(next.eligibleRequestState);
+    setLoadingEligibleClaims(next.loadingEligibleClaims);
+  }, [audience]);
 
   const loadCandidateClaims = useCallback(async () => {
     if (!organizationId) return;
-    const generation = requestGenerationRef.current;
+    const requestGeneration = candidateRequestGenerationRef.current;
+    const requestOrganizationId = organizationId;
     setLoadingCandidateClaims(true);
     setCandidateClaimsError("");
     const result = await getJson(claimLibraryCandidatesPath(organizationId));
-    if (requestGenerationRef.current !== generation) return;
+    if (!shouldApplyCandidateResponse({
+      requestGeneration,
+      currentGeneration: candidateRequestGenerationRef.current,
+      requestOrganizationId,
+      currentOrganizationId: organizationIdRef.current,
+    })) return;
     setLoadingCandidateClaims(false);
     if (result.statusCode !== 200 || !result.body?.ok) {
       setCandidateClaimsError(errorText(result));
@@ -163,12 +198,21 @@ export default function ImpactEvidenceLibrary() {
 
   const loadEligibleClaims = useCallback(async () => {
     if (!organizationId) return;
-    const generation = requestGenerationRef.current;
+    const requestGeneration = eligibleRequestGenerationRef.current;
+    const requestOrganizationId = organizationId;
+    const requestAudience = audience;
     setLoadingEligibleClaims(true);
     setEligibleClaimsError("");
     setEligibleRequestState("loading");
     const result = await getJson(eligibleClaimsPath(organizationId, audience));
-    if (requestGenerationRef.current !== generation) return;
+    if (!shouldApplyEligibilityResponse({
+      requestGeneration,
+      currentGeneration: eligibleRequestGenerationRef.current,
+      requestOrganizationId,
+      currentOrganizationId: organizationIdRef.current,
+      requestAudience,
+      currentAudience: audienceRef.current,
+    })) return;
     setLoadingEligibleClaims(false);
     if (result.statusCode !== 200 || !result.body?.ok) {
       // Scoped to audience eligibility only: the all-state Claim Library
