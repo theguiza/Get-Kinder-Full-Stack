@@ -19001,3 +19001,52 @@ Verification commands run (`DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel` se
 - `git diff --check` — passed (exit 0).
 
 Confirmed no runtime, eligibility, security, or schema behavior changed: `git diff` for the functional change is confined to the new assertions inside the one existing integration test (additive-only diff, no lines removed); no production file, migration, or route was touched; `list_governed_claims`/`get_claim_traceability_summary`/`list_eligible_claims_for_audience` behavior is unaffected — the added assertions only read already-computed `result.data` fields and an already-scoped `SELECT`, no gating logic was added or altered.
+
+---
+
+**14-04 — Impact Evidence Library governed availability + independent loading — 2026-08-25:**
+
+Starting HEAD: `1a2733c72ea10818214f69db2486a289728cb54e` ("Add direct P2-06 sensitivity regression"), confirmed as an ancestor of and equal to current HEAD before editing; branch `main`; the only pre-existing working-tree change was an unstaged `AGENTS.md` modification, preserved untouched and unstaged throughout.
+
+**Files changed:**
+- `frontend/ImpactEvidenceLibrary.jsx`
+- `frontend/impactEvidenceLibraryLogic.js`
+- `__tests__/kai-sprint2-impact-evidence-library.spec.js`
+
+**Pre-change coupling (file:line as of starting HEAD):** `loadClaims` in `frontend/ImpactEvidenceLibrary.jsx:125-156` fetched the audience-scoped eligible-claims request (`eligibleClaimsPath`, P2-08) and the all-state Claim Library request (`claimLibraryCandidatesPath`) via a single `Promise.all`, sharing one `loadingClaims` flag and one `message` error field. The exact defect: `ImpactEvidenceLibrary.jsx:138-141` — `if (eligibleResult.statusCode !== 200 || !eligibleResult.body?.ok) { setClaims([]); setMessage(errorText(eligibleResult)); return; }` — unconditionally cleared the single `claims` state (which held the all-state Claim Library merge result) on any eligible-claims failure, before the successful `candidateResult` was ever merged in. This is the historical/current equivalent of the previously-audited defect (no line drift from the 14-03c baseline; same file, functionally unchanged since 14-02).
+
+**Removal:** That branch, and the shared `claims`/`loadingClaims` state it read from, was removed entirely. The all-state Claim Library request (`claimLibraryCandidatesPath`) and the audience-eligible-claims request (`eligibleClaimsPath`) are now two independent async functions — `loadCandidateClaims` and `loadEligibleClaims` — each with its own loading flag (`loadingCandidateClaims`/`loadingEligibleClaims`), its own data state (`candidateClaims`/`eligibleClaims`), and its own scoped error state (`candidateClaimsError`/`eligibleClaimsError`). Neither function's failure or empty-result branch touches the other's state. The rendered `claims` list is a `useMemo` derived from `mergeClaims(eligibleClaims, candidateClaims)` (the existing, unmodified merge function) annotated by a new pure function, `annotateGovernedAvailability(mergedClaims, candidateClaims, eligibleClaims, eligibleRequestState)` (added to `impactEvidenceLibraryLogic.js`), which independently marks each claim `governedAvailable` (true iff present in `candidateClaims`, the all-state Claim Library result) and `audienceEligibility` (`"eligible"` / `"not_eligible"` / `"eligibility_unavailable"`, driven only by `eligibleClaims` membership and whether the eligible-claims request itself last succeeded).
+
+**Independent loading/state:** `requestGenerationRef` (a `useRef` counter) is incremented in a new effect keyed on `[organizationId]` that also synchronously clears `candidateClaims`, `eligibleClaims`, both error strings, `eligibleRequestState`, `selectedClaimId`, `selectedGenerationClaimIds`, `traceability`, and `generatedDraftPacket` — so an organization change discards stale prior-organization state immediately. Both `loadCandidateClaims` and `loadEligibleClaims` capture the current generation before awaiting their `fetch` and discard their result if the generation has since advanced (`requestGenerationRef.current !== generation`), so a late response from a superseded organization can never populate the newly selected organization's view.
+
+**Governed-availability wording:** claims list rows render `Governed internal availability: internally available (governed)` / `not in current governed result`; the Traceability panel renders a fixed `Governed internal availability: internally available (governed)` row (truthful because the panel only renders once the per-claim traceability fetch has itself succeeded). Neither string, nor any other string added in this package, contains "Available to KAI" or equivalent deployed-assistant-capability language — confirmed by a new source-grep regression (`Package 14-04: the historical eligible-claims-failure setClaims([]) clearing path is removed from the component`) asserting `doesNotMatch(uiSource + logicSource, /Available to KAI/i)` across both changed files.
+
+**Audience-eligibility wording:** claims list rows render `{audience} audience eligibility: eligible / not currently eligible / eligibility unavailable`; the Traceability panel's former `Can use: yes/no` row was replaced with `{requestedAudience} audience eligibility: eligible / not currently eligible` (data source `traceability.eligible`, unchanged) and the `Blockers` row was relabeled `Blockers / limitations` (value unchanged). No P2-08 logic, and no field in `projectTraceability`/`projectEligibleClaims`/`projectCandidateClaims`, was altered.
+
+**Sensitivity:** the P2-06 traceability response already includes `evidence.sensitivity_level` (confirmed present via the existing `projectTraceability` pass-through, `evidence: dto.evidence || null`); a new `ValueRow label="Evidence sensitivity" value={traceability.evidence?.sensitivity_level || "unknown"}` renders it in the Traceability panel using the already-fetched response — no new fetch, schema field, or backend change was added.
+
+**Browser transport confirmed unchanged:** the component continues to call only the existing Sprint-2 `getJson`/`postJson` HTTP helpers against `eligibleClaimsPath`/`claimLibraryCandidatesPath`/`claimTraceabilityPath`; no import of `kai-tool-executor.js`, `kaiAssistantClaimTraceabilityTool.js`, or any LLM/tool-invocation channel was added.
+
+**Tests added (`__tests__/kai-sprint2-impact-evidence-library.spec.js`, all new, all passing):**
+- Case A/B/H — governed availability and audience eligibility are independently true/false/eligible/not_eligible for the same claim.
+- Case C — unresolved `claimReviewStatus`/`claimStrength` survive annotation unchanged.
+- Case D/E — eligible-claims failure (`eligibleRequestState: "error"`) and empty success both leave the governed claim present with `governedAvailable: true`.
+- Case F — a Claim Library failure (empty `candidateClaims`) does not fabricate `governedAvailable: true` for an eligible-only claim.
+- Case M — sensitivity metadata passes through `projectTraceability` without altering `eligible`/`libraryStatus`.
+- Source-pattern regression — asserts `setClaims([])` no longer appears in the component; asserts independent loading/error state names exist; asserts the claims list renders unconditionally (`<div className="list-group">` immediately followed by `{claims.map`, not gated by either loading flag); asserts the organization-change reset effect and the `requestGenerationRef.current !== generation` guard exist; asserts no "Available to KAI" language anywhere in the changed files.
+
+Case G (partial loading) and Case L (existing behavior) are proved structurally rather than by a dedicated new test: `claims` is a `useMemo` over `candidateClaims`/`eligibleClaims`/`eligibleRequestState` with no loading flag in its dependency array or render condition (Case G), and every pre-existing test in this file (routes, projections, org-bootstrap source checks) continues to pass unmodified against the new component (Case L).
+
+**Tests/commands run** (`DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel` set before every Node/npm command):
+- `node --test __tests__/kai-sprint2-impact-evidence-library.spec.js` — 22 passed, 0 failed, 0 skipped.
+- `node --test __tests__/kai-sprint2-p2-08-eligible-claims-for-audience-boundary.spec.js` — 13 passed, 0 failed, 0 skipped.
+- `node --test __tests__/kai-sprint2-p2-06-claim-traceability-boundary.spec.js __tests__/kai-sprint2-p2-06-claim-traceability-route.spec.js` — 17 passed, 0 failed, 0 skipped.
+- `npm run test:kai-sprint2` — 2395 tests, 2359 passed, 0 failed, 36 skipped (pre-existing unrelated DB-gated skips).
+- `git diff --check` — passed (exit 0).
+- `git diff --cached --check` (after staging exactly the three Package 14-04 files) — passed (exit 0).
+
+**Diff scope confirmed:** `git status` shows exactly `frontend/ImpactEvidenceLibrary.jsx`, `frontend/impactEvidenceLibraryLogic.js`, and `__tests__/kai-sprint2-impact-evidence-library.spec.js` modified, plus the pre-existing unstaged `AGENTS.md` change left untouched. No 14-05 generated-content/generation-admission file, no export/release file, no `Backend/kai/db/kaiClaimLibraryReadModels.js`, no `postgresEligibleClaimsForAudienceRepository.js`, no `postgresClaimTraceabilityRepository.js`, no `kai-tool-executor.js`/`kai-tool-definitions.js`, no migration, and no `00_KAI_CURRENT_STATE.md` was touched.
+
+NOT_CONFIRMED:
+- Carried forward: live deployed KAI assistant invocation of governed discovery remains unconfirmed in the supplied evidence; this package does not change that, and its UI copy was deliberately worded to avoid asserting it.
+- The claims-list "not in current governed result" branch (a claim present only in `eligibleClaims` but absent from `candidateClaims`, e.g. from independent `limit=25` pagination on each endpoint) is exercised by a direct unit test (Case F) but not observed against a live paginated dataset in this session.

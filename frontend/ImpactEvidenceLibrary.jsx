@@ -1,7 +1,8 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   LIBRARY_AUDIENCES,
   COVERAGE_DIMENSION_KEYS,
+  annotateGovernedAvailability,
   canCompleteClaimReview,
   canCompleteEvidenceReview,
   canCompleteGeneratedContentReview,
@@ -59,7 +60,17 @@ export default function ImpactEvidenceLibrary() {
   const [loadingOrganizations, setLoadingOrganizations] = useState(true);
   const [organizationsLoaded, setOrganizationsLoaded] = useState(false);
   const [audience, setAudience] = useState("internal");
-  const [claims, setClaims] = useState([]);
+  // The all-state governed Claim Library and the audience-scoped eligible-claims
+  // result are independent requests with independent loading/data/error state:
+  // a failure or empty result on one must never clear or gate the other.
+  const [candidateClaims, setCandidateClaims] = useState([]);
+  const [eligibleClaims, setEligibleClaims] = useState([]);
+  const [loadingCandidateClaims, setLoadingCandidateClaims] = useState(false);
+  const [loadingEligibleClaims, setLoadingEligibleClaims] = useState(false);
+  const [candidateClaimsError, setCandidateClaimsError] = useState("");
+  const [eligibleClaimsError, setEligibleClaimsError] = useState("");
+  const [eligibleRequestState, setEligibleRequestState] = useState("idle");
+  const requestGenerationRef = useRef(0);
   const [selectedClaimId, setSelectedClaimId] = useState("");
   const [selectedGenerationClaimIds, setSelectedGenerationClaimIds] = useState([]);
   const [generatedDraftPacket, setGeneratedDraftPacket] = useState(null);
@@ -67,7 +78,6 @@ export default function ImpactEvidenceLibrary() {
   const [selectedGeneratedDraftId, setSelectedGeneratedDraftId] = useState("");
   const [loadingGeneratedDrafts, setLoadingGeneratedDrafts] = useState(false);
   const [traceability, setTraceability] = useState(null);
-  const [loadingClaims, setLoadingClaims] = useState(false);
   const [loadingTraceability, setLoadingTraceability] = useState(false);
   const [generatingDraft, setGeneratingDraft] = useState(false);
   const [reviewTransitionPending, setReviewTransitionPending] = useState(false);
@@ -78,6 +88,14 @@ export default function ImpactEvidenceLibrary() {
   const [coverageDimensionKey, setCoverageDimensionKey] = useState(COVERAGE_DIMENSION_KEYS[0]);
   const [workflowPending, setWorkflowPending] = useState(false);
   const [workflowResult, setWorkflowResult] = useState("");
+
+  // Governed internal availability (the all-state Claim Library) and audience
+  // eligibility are independent dimensions: neither request may clear, gate, or
+  // invalidate the other's successful result. See annotateGovernedAvailability.
+  const claims = useMemo(() => {
+    const merged = mergeClaims(eligibleClaims, candidateClaims);
+    return annotateGovernedAvailability(merged, candidateClaims, eligibleClaims, eligibleRequestState);
+  }, [candidateClaims, eligibleClaims, eligibleRequestState]);
 
   const selectedClaim = useMemo(
     () => claims.find((claim) => claim.claimId === selectedClaimId) || null,
@@ -111,38 +129,74 @@ export default function ImpactEvidenceLibrary() {
     };
   }, []);
 
-  const loadClaims = useCallback(async () => {
+  // Changing organization must discard the previous organization's governed
+  // Claim Library / eligibility state immediately, and must invalidate any
+  // in-flight requests for the previous organization so a late response
+  // cannot populate the newly selected organization's view.
+  useEffect(() => {
+    requestGenerationRef.current += 1;
+    setCandidateClaims([]);
+    setEligibleClaims([]);
+    setCandidateClaimsError("");
+    setEligibleClaimsError("");
+    setEligibleRequestState("idle");
+    setSelectedClaimId("");
+    setSelectedGenerationClaimIds([]);
+    setTraceability(null);
+    setGeneratedDraftPacket(null);
+  }, [organizationId]);
+
+  const loadCandidateClaims = useCallback(async () => {
+    if (!organizationId) return;
+    const generation = requestGenerationRef.current;
+    setLoadingCandidateClaims(true);
+    setCandidateClaimsError("");
+    const result = await getJson(claimLibraryCandidatesPath(organizationId));
+    if (requestGenerationRef.current !== generation) return;
+    setLoadingCandidateClaims(false);
+    if (result.statusCode !== 200 || !result.body?.ok) {
+      setCandidateClaimsError(errorText(result));
+      return;
+    }
+    setCandidateClaims(projectCandidateClaims(result.body.data));
+  }, [organizationId]);
+
+  const loadEligibleClaims = useCallback(async () => {
+    if (!organizationId) return;
+    const generation = requestGenerationRef.current;
+    setLoadingEligibleClaims(true);
+    setEligibleClaimsError("");
+    setEligibleRequestState("loading");
+    const result = await getJson(eligibleClaimsPath(organizationId, audience));
+    if (requestGenerationRef.current !== generation) return;
+    setLoadingEligibleClaims(false);
+    if (result.statusCode !== 200 || !result.body?.ok) {
+      // Scoped to audience eligibility only: the all-state Claim Library
+      // (candidateClaims) is never touched by this failure.
+      setEligibleRequestState("error");
+      setEligibleClaimsError(errorText(result));
+      return;
+    }
+    setEligibleRequestState("success");
+    setEligibleClaims(projectEligibleClaims(result.body.data));
+  }, [audience, organizationId]);
+
+  const loadClaims = useCallback(() => {
     if (!organizationId) {
       setMessage("An organization id is required.");
       return;
     }
-    setLoadingClaims(true);
     setMessage("");
     setTraceability(null);
-    const [eligibleResult, candidateResult] = await Promise.all([
-      getJson(eligibleClaimsPath(organizationId, audience)),
-      getJson(claimLibraryCandidatesPath(organizationId)),
-    ]);
-    setLoadingClaims(false);
-    if (eligibleResult.statusCode !== 200 || !eligibleResult.body?.ok) {
-      setClaims([]);
-      setMessage(errorText(eligibleResult));
-      return;
-    }
-    if (candidateResult.statusCode !== 200 || !candidateResult.body?.ok) {
-      setClaims(projectEligibleClaims(eligibleResult.body.data));
-      setMessage(errorText(candidateResult));
-      return;
-    }
-    const merged = mergeClaims(
-      projectEligibleClaims(eligibleResult.body.data),
-      projectCandidateClaims(candidateResult.body.data),
-    );
-    setClaims(merged);
     setGeneratedDraftPacket(null);
-    setSelectedGenerationClaimIds((current) => current.filter((claimId) => merged.some((claim) => claim.claimId === claimId && claim.libraryStatus === "usable")));
-    setSelectedClaimId((current) => (merged.some((claim) => claim.claimId === current) ? current : merged[0]?.claimId || ""));
-  }, [audience, organizationId]);
+    loadCandidateClaims();
+    loadEligibleClaims();
+  }, [organizationId, loadCandidateClaims, loadEligibleClaims]);
+
+  useEffect(() => {
+    setSelectedGenerationClaimIds((current) => current.filter((claimId) => claims.some((claim) => claim.claimId === claimId && claim.libraryStatus === "usable")));
+    setSelectedClaimId((current) => (claims.some((claim) => claim.claimId === current) ? current : claims[0]?.claimId || ""));
+  }, [claims]);
 
   const loadTraceability = useCallback(async (claimId = selectedClaimId) => {
     if (!organizationId || !claimId) return;
@@ -399,8 +453,13 @@ export default function ImpactEvidenceLibrary() {
             </select>
           </div>
           <div className="col-12 col-lg-3">
-            <button type="button" className="btn btn-sm btn-primary w-100" onClick={loadClaims} disabled={loadingClaims}>
-              {loadingClaims ? "Loading..." : "Load claims"}
+            <button
+              type="button"
+              className="btn btn-sm btn-primary w-100"
+              onClick={loadClaims}
+              disabled={loadingCandidateClaims || loadingEligibleClaims}
+            >
+              {loadingCandidateClaims || loadingEligibleClaims ? "Loading..." : "Load claims"}
             </button>
           </div>
         </div>
@@ -415,8 +474,19 @@ export default function ImpactEvidenceLibrary() {
               <h5 className="mb-0">Claims</h5>
               <span className="text-muted small">{claims.length} shown</span>
             </div>
-            {loadingClaims ? <div className="text-muted">Loading claims...</div> : null}
-            {!loadingClaims && claims.length === 0 ? <div className="text-muted">No usable or review-candidate claims returned.</div> : null}
+            {candidateClaimsError ? (
+              <div className="alert alert-warning py-2 small">Claim Library: {candidateClaimsError}</div>
+            ) : null}
+            {eligibleClaimsError ? (
+              <div className="alert alert-warning py-2 small">
+                {audience} audience eligibility is currently unavailable: {eligibleClaimsError}
+              </div>
+            ) : null}
+            {loadingCandidateClaims ? <div className="text-muted">Loading governed Claim Library...</div> : null}
+            {loadingEligibleClaims ? <div className="text-muted">Checking {audience} audience eligibility...</div> : null}
+            {!loadingCandidateClaims && !loadingEligibleClaims && claims.length === 0 ? (
+              <div className="text-muted">No governed or review-candidate claims returned.</div>
+            ) : null}
             <div className="list-group">
               {claims.map((claim) => (
                 <button
@@ -442,6 +512,17 @@ export default function ImpactEvidenceLibrary() {
                   ) : null}
                   <div className="small mt-1">
                     {claim.claimType || "claim"} · {claim.claimReviewStatus || claim.claimStatus || "status unknown"}
+                  </div>
+                  <div className="small mt-1">
+                    Governed internal availability: {claim.governedAvailable ? "internally available (governed)" : "not in current governed result"}
+                  </div>
+                  <div className="small mt-1">
+                    {audience} audience eligibility:{" "}
+                    {claim.audienceEligibility === "eligible"
+                      ? "eligible"
+                      : claim.audienceEligibility === "not_eligible"
+                        ? "not currently eligible"
+                        : "eligibility unavailable"}
                   </div>
                   {claim.reviewQueueItems?.length ? (
                     <div className="small mt-1">
@@ -501,13 +582,17 @@ export default function ImpactEvidenceLibrary() {
             {loadingTraceability ? <div className="text-muted">Loading traceability...</div> : null}
             {traceability ? (
               <>
-                <ValueRow label="Requested audience" value={traceability.requestedAudience} />
-                <ValueRow label="Can use" value={traceability.eligible ? "yes" : "no"} />
+                <ValueRow label="Governed internal availability" value="internally available (governed)" />
+                <ValueRow
+                  label={`${traceability.requestedAudience || audience} audience eligibility`}
+                  value={traceability.eligible ? "eligible" : "not currently eligible"}
+                />
                 <ValueRow label="Allowed audience" value={JSON.stringify(traceability.audienceGates)} />
                 <ValueRow label="Evidence item" value={traceability.evidence?.evidence_item_id} />
+                <ValueRow label="Evidence sensitivity" value={traceability.evidence?.sensitivity_level || "unknown"} />
                 <ValueRow label="Source" value={traceability.source?.source_id} />
                 <ValueRow label="Source version" value={traceability.sourceVersion?.source_version_id} />
-                <ValueRow label="Blockers" value={traceability.blockerCodes.length ? traceability.blockerCodes.join(", ") : "none"} />
+                <ValueRow label="Blockers / limitations" value={traceability.blockerCodes.length ? traceability.blockerCodes.join(", ") : "none"} />
 
                 <h6 className="mt-3">Limitations</h6>
                 {traceability.dimensions.filter((dimension) => dimension.displayStatus === "known_limitation").length === 0 ? (

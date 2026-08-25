@@ -20,6 +20,7 @@ import {
 } from "../Backend/kai/services/kaiClaimLibraryService.js";
 import { listClaimLibraryReviewCandidates } from "../Backend/kai/db/kaiClaimLibraryReadModels.js";
 import {
+  annotateGovernedAvailability,
   canCompleteGeneratedContentReview,
   canStartGeneratedContentReview,
   claimLibraryCandidatesPath,
@@ -712,4 +713,115 @@ test("Impact Evidence Library bootstraps its organization selection from the ser
   // Explicit empty/loading states are rendered rather than fabricating an id.
   assert.match(uiSource, /Loading your organizations\.\.\./);
   assert.match(uiSource, /No KAI organization is available for this account\./);
+});
+
+// Package 14-04: governed internal availability, audience eligibility, and
+// review/strength/coverage/follow-up state are independent dimensions. None
+// of them may be derived from, or gate, one another.
+
+test("Package 14-04 case A/B/H: governed availability and audience eligibility are independent per claim", () => {
+  const governedClaim = { claimId, claimReviewStatus: "needs_gk_review", claimStrength: "unassessed", libraryStatus: "needs_review" };
+  const otherClaimId = "00000000-0000-4000-8000-000000000102";
+  const eligibleClaim = { claimId: otherClaimId, libraryStatus: "usable" };
+
+  // Case A: governed + ineligible claim remains present and is marked governed.
+  const ineligibleAnnotated = annotateGovernedAvailability([governedClaim], [governedClaim], [], "success");
+  assert.equal(ineligibleAnnotated.length, 1);
+  assert.equal(ineligibleAnnotated[0].governedAvailable, true);
+  assert.equal(ineligibleAnnotated[0].audienceEligibility, "not_eligible");
+
+  // Case B: the two dimensions are reported separately, never collapsed.
+  assert.notEqual(ineligibleAnnotated[0].governedAvailable, ineligibleAnnotated[0].audienceEligibility === "eligible");
+
+  // Case H: a genuinely eligible claim still reports eligible.
+  const bothAnnotated = annotateGovernedAvailability([governedClaim], [governedClaim], [governedClaim], "success");
+  assert.equal(bothAnnotated[0].governedAvailable, true);
+  assert.equal(bothAnnotated[0].audienceEligibility, "eligible");
+});
+
+test("Package 14-04 case C: unresolved review/strength state travels with the governed claim, unaltered by eligibility", () => {
+  const unresolvedClaim = {
+    claimId,
+    claimReviewStatus: "needs_gk_review",
+    claimStrength: "unassessed",
+    libraryStatus: "needs_review",
+  };
+  const [annotated] = annotateGovernedAvailability([unresolvedClaim], [unresolvedClaim], [], "success");
+  assert.equal(annotated.claimReviewStatus, "needs_gk_review");
+  assert.equal(annotated.claimStrength, "unassessed");
+  assert.equal(annotated.audienceEligibility, "not_eligible");
+  assert.equal(annotated.governedAvailable, true);
+});
+
+test("Package 14-04 case D/E: an eligible-claims failure or empty result never removes a governed claim", () => {
+  const governedClaim = { claimId, libraryStatus: "needs_review" };
+
+  // Case D: eligible-claims request rejected -> eligibleRequestState "error".
+  // The claim from the all-state Claim Library remains in the annotated list.
+  const onFailure = annotateGovernedAvailability([governedClaim], [governedClaim], [], "error");
+  assert.equal(onFailure.length, 1);
+  assert.equal(onFailure[0].governedAvailable, true);
+  assert.equal(onFailure[0].audienceEligibility, "eligibility_unavailable");
+
+  // Case E: eligible-claims request succeeded with no matching claim for the
+  // audience -> eligibleRequestState "success", eligibleClaims empty.
+  const onEmpty = annotateGovernedAvailability([governedClaim], [governedClaim], [], "success");
+  assert.equal(onEmpty.length, 1);
+  assert.equal(onEmpty[0].governedAvailable, true);
+  assert.equal(onEmpty[0].audienceEligibility, "not_eligible");
+});
+
+test("Package 14-04 case F: a Claim Library failure does not fabricate governed availability for an eligible-only claim", () => {
+  const eligibleOnlyClaim = { claimId, libraryStatus: "usable" };
+  const [annotated] = annotateGovernedAvailability([eligibleOnlyClaim], [], [eligibleOnlyClaim], "success");
+  assert.equal(annotated.governedAvailable, false);
+  assert.equal(annotated.audienceEligibility, "eligible");
+});
+
+test("Package 14-04 case M: sensitivity metadata renders independently and does not affect eligibility/availability data", () => {
+  const traceability = projectTraceability({
+    requestedAudience: "internal",
+    eligible: false,
+    blockerCodes: ["coverage_dimension_unresolved"],
+    claim: { audience_gates: {} },
+    evidence: { evidence_item_id: evidenceItemId, sensitivity_level: "unknown" },
+    dimensions: {},
+    client_followup_workflows: [],
+    potential_conflict_groups: [],
+  });
+  assert.equal(traceability.evidence.sensitivity_level, "unknown");
+  assert.equal(traceability.eligible, false);
+  assert.equal(traceability.libraryStatus, "blocked");
+});
+
+test("Package 14-04: the historical eligible-claims-failure setClaims([]) clearing path is removed from the component", () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+
+  // The all-state Claim Library and audience-eligible-claims requests are
+  // fetched, loaded, and errored independently.
+  assert.match(uiSource, /loadCandidateClaims/);
+  assert.match(uiSource, /loadEligibleClaims/);
+  assert.match(uiSource, /loadingCandidateClaims/);
+  assert.match(uiSource, /loadingEligibleClaims/);
+  assert.match(uiSource, /candidateClaimsError/);
+  assert.match(uiSource, /eligibleClaimsError/);
+
+  // The eligible-claims failure branch no longer clears all-state claim data.
+  assert.doesNotMatch(uiSource, /setClaims\(\[\]\)/);
+
+  // Case G: the claims list renders unconditionally, not gated behind either
+  // request's own loading state.
+  assert.match(uiSource, /<div className="list-group">\s*\{claims\.map/);
+
+  // Case I/J: organization changes reset stale state, and independently
+  // in-flight requests are invalidated via a generation guard so a late
+  // cross-organization response cannot populate the new view.
+  assert.match(uiSource, /useEffect\(\(\) => \{\s*requestGenerationRef\.current \+= 1;[\s\S]*?\}, \[organizationId\]\);/);
+  assert.match(uiSource, /requestGenerationRef\.current !== generation/);
+
+  // Case K: no deployed-assistant capability claim is made anywhere in the
+  // human-facing Impact Evidence Library UI or logic.
+  const logicSource = readFileSync("frontend/impactEvidenceLibraryLogic.js", "utf8");
+  assert.doesNotMatch(uiSource + logicSource, /Available to KAI/i);
+  assert.match(uiSource, /internally available \(governed\)/);
 });

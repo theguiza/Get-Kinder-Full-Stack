@@ -197,6 +197,23 @@ export function mergeClaims(usableClaims, candidateClaims) {
   return [...byId.values()].sort((a, b) => a.claimId.localeCompare(b.claimId));
 }
 
+// Governed internal availability and audience eligibility are independent
+// dimensions: a claim's presence in the all-state Claim Library (candidateClaims,
+// from claim-library/candidates) is not derived from, and must not be gated by,
+// whether it is also present in the audience-scoped eligible-claims response.
+export function annotateGovernedAvailability(mergedClaims, candidateClaims, eligibleClaims, eligibleRequestState) {
+  const candidateIds = new Set(candidateClaims.map((claim) => claim.claimId));
+  const eligibleIds = new Set(eligibleClaims.map((claim) => claim.claimId));
+  return mergedClaims.map((claim) => ({
+    ...claim,
+    governedAvailable: candidateIds.has(claim.claimId),
+    audienceEligibility:
+      eligibleRequestState !== "success"
+        ? "eligibility_unavailable"
+        : eligibleIds.has(claim.claimId) ? "eligible" : "not_eligible",
+  }));
+}
+
 export function projectTraceability(dto) {
   if (!dto || typeof dto !== "object") return null;
   const dimensions = Object.entries(dto.dimensions || {}).map(([dimensionKey, value]) => ({
