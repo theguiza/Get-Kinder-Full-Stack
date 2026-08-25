@@ -35,6 +35,7 @@ const NON_HUMAN_ACTOR_TYPES = new Set(["assistant", "ai", "system", "internal_se
 const CLAIM_TRACEABILITY_METADATA_OPERATIONS = new Set([
   "get_claim_traceability_summary",
   "list_eligible_claims_for_audience",
+  "list_governed_claims",
 ]);
 const APPROVAL_OPERATION_PATTERN = /(approve|approval|finalize|promote|resolve|delete|retention)/i;
 const RAW_ACCESS_OPERATION_PATTERN = /(raw|file|row|sample|storage|object_key|signed_url|url)/i;

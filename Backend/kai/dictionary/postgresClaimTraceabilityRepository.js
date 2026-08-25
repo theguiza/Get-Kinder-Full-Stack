@@ -624,6 +624,7 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
       review_queue_status: evidenceReviewQueueItemRow.queue_status,
       review_status: evidenceReviewQueueItemRow.review_status,
       updated_at: rowIso(evidenceReviewQueueItemRow.updated_at),
+      sensitivity_level: evidenceItemRow.sensitivity_level,
     },
     locator: { source_locator_id: locatorRow.source_locator_id },
     source: { source_id: sourceRow.source_id, source_code: sourceRow.source_code ?? null },

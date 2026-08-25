@@ -85,6 +85,7 @@ function traceabilitySuccess(overrides = {}) {
       review_queue_status: "closed",
       review_status: "approved",
       updated_at: "2026-08-22T20:00:00.000Z",
+      sensitivity_level: "unknown",
     },
     locator: { source_locator_id: id(401) },
     source: { source_id: id(501), source_code: "annual_report" },
@@ -316,7 +317,7 @@ test("P2-08 repository: unexpected evaluator failures still fail the whole list 
   assert.equal(result.error.code, "conflict_current_state_changed");
 });
 
-test("P2-08 wrapper: traceability operation remains unchanged and only two assistant operations are allowlisted", async () => {
+test("P2-08 wrapper: traceability operation remains unchanged and exactly three assistant operations are allowlisted", async () => {
   const traceResult = { ok: true, data: traceabilitySuccess({ eligible: false }), error: null };
   const observed = [];
   const result = await getClaimTraceabilitySummaryTool(traceabilityRequest(), {
@@ -334,9 +335,11 @@ test("P2-08 wrapper: traceability operation remains unchanged and only two assis
   assert.deepEqual([...__assistantClaimTraceabilityToolContract.TOOL_NAMES].sort(), [
     "get_claim_traceability_summary",
     "list_eligible_claims_for_audience",
+    "list_governed_claims",
   ]);
   assert.equal(validateAssistantToolAuthorization({ operation: "get_claim_traceability_summary" }).severity, "pass");
   assert.equal(validateAssistantToolAuthorization({ operation: "list_eligible_claims_for_audience" }).severity, "pass");
+  assert.equal(validateAssistantToolAuthorization({ operation: "list_governed_claims" }).severity, "pass");
   assert.equal(validateAssistantToolAuthorization({ operation: "get_claims" }).severity, "blocker");
 });
 

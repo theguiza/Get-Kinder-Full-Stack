@@ -61,6 +61,7 @@ function successDto(overrides = {}) {
       review_queue_status: "open",
       review_status: "needs_gk_review",
       updated_at: "2026-08-22T20:00:00.000Z",
+      sensitivity_level: "unknown",
     },
     locator: { source_locator_id: "00000000-0000-4000-8000-000000000401" },
     source: { source_id: "00000000-0000-4000-8000-000000000501", source_code: "annual_report" },
@@ -125,6 +126,60 @@ function successDto(overrides = {}) {
 function serviceReturning(result, calls = []) {
   return async () => ({
     async getClaimTraceabilitySummary(payload, dependencies) {
+      calls.push({ payload, dependencies });
+      return result;
+    },
+  });
+}
+
+function governedClaimsRequest(overrides = {}) {
+  return {
+    toolName: "list_governed_claims",
+    arguments: { organizationId: ORG, limit: 10, afterClaimId: null },
+    actorContext,
+    ...overrides,
+  };
+}
+
+function governedQueueItem(overrides = {}) {
+  return {
+    review_queue_item_id: "00000000-0000-4000-8000-000000000301",
+    queue_type: "claim_review",
+    target_object_type: "claim",
+    target_object_id: CLAIM,
+    queue_status: "open",
+    review_status: "needs_gk_review",
+    ...overrides,
+  };
+}
+
+function governedClaimEntry(overrides = {}) {
+  return {
+    claimId: CLAIM,
+    evidenceItemId: "00000000-0000-4000-8000-000000000201",
+    claimType: "finding",
+    claimStatus: "proposed",
+    claimReviewStatus: "needs_gk_review",
+    claimStrength: "unassessed",
+    reviewQueueItems: [governedQueueItem()],
+    ...overrides,
+  };
+}
+
+function governedListSuccess(overrides = {}) {
+  return {
+    items: [governedClaimEntry()],
+    limit: 10,
+    afterClaimId: null,
+    truncated: false,
+    nextAfterClaimId: null,
+    ...overrides,
+  };
+}
+
+function claimLibraryServiceReturning(result, calls = []) {
+  return async () => ({
+    async listClaimLibraryCandidates(payload, dependencies) {
       calls.push({ payload, dependencies });
       return result;
     },
@@ -319,4 +374,203 @@ test("P2-07 source contract: no top-level P2-06 service, DB, pg, route, listener
     "claimId",
     "requestedAudience",
   ]);
+});
+
+test("P2-07/14-03a wrapper: valid list_governed_claims request delegates exactly once to the Claim Library service and validates output allowlist", async () => {
+  const calls = [];
+  const serviceResult = { ok: true, data: governedListSuccess(), warnings: [] };
+  const result = await getClaimTraceabilitySummaryTool(governedClaimsRequest(), {
+    env: enabledEnv,
+    claimLibraryServiceDependencies: { env: { KAI_SPRINT2_ENABLED: "true" }, marker: "p2-14-03a" },
+    importClaimLibraryService: claimLibraryServiceReturning(serviceResult, calls),
+  });
+  assert.equal(result, serviceResult);
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].payload, { organizationId: ORG, limit: 10, afterClaimId: null, actorContext });
+  assert.equal(calls[0].dependencies.marker, "p2-14-03a");
+});
+
+test("P2-07/14-03a wrapper: list_governed_claims does not require eligible:true and is unaffected by unresolved review/coverage/followup state", async () => {
+  const item = governedClaimEntry({ claimReviewStatus: "needs_gk_review", claimStrength: "unassessed" });
+  const serviceResult = { ok: true, data: governedListSuccess({ items: [item] }), warnings: [] };
+  const result = await getClaimTraceabilitySummaryTool(governedClaimsRequest(), {
+    env: enabledEnv,
+    importClaimLibraryService: claimLibraryServiceReturning(serviceResult),
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.data.items[0].claimId, CLAIM);
+  assert.equal(result.data.items[0].claimReviewStatus, "needs_gk_review");
+  assert.equal(result.data.items[0].claimStrength, "unassessed");
+});
+
+test("P2-07/14-03a security: actor-source boundary is enforced before Claim Library delegation for list_governed_claims", async () => {
+  const cases = [
+    { actorType: "human", actorUserId: actorContext.actorUserId, organizationMemberships: actorContext.organizationMemberships },
+    { actorType: "human", actorUserId: actorContext.actorUserId, source: "some_other_source", organizationMemberships: actorContext.organizationMemberships },
+  ];
+  for (const badActor of cases) {
+    let calls = 0;
+    const result = await getClaimTraceabilitySummaryTool(governedClaimsRequest({ actorContext: badActor }), {
+      env: enabledEnv,
+      importClaimLibraryService: async () => ({
+        async listClaimLibraryCandidates() {
+          calls += 1;
+          throw new Error("must not call Claim Library service");
+        },
+      }),
+    });
+    assert.equal(result.error.code, "authorization_denied");
+    assert.equal(calls, 0);
+  }
+});
+
+test("P2-07/14-03a security: list_governed_claims malformed calls, disabled flags, wrong tenant, and disallowed role cause zero Claim Library service calls", async () => {
+  const inputsAndEnvs = [
+    [governedClaimsRequest(), {}],
+    [governedClaimsRequest(), { KAI_SPRINT2_ENABLED: "false", KAI_ASSISTANT_TOOLS_ENABLED: "true" }],
+    [governedClaimsRequest(), { KAI_SPRINT2_ENABLED: "true", KAI_ASSISTANT_TOOLS_ENABLED: "false" }],
+    [governedClaimsRequest({ arguments: { organizationId: ORG, limit: 10 } }), enabledEnv],
+    [governedClaimsRequest({ arguments: { organizationId: ORG, limit: 10, afterClaimId: null, requestedAudience: "internal" } }), enabledEnv],
+    [governedClaimsRequest({ arguments: { organizationId: ORG, limit: 0, afterClaimId: null } }), enabledEnv],
+    [governedClaimsRequest({ arguments: { organizationId: ORG, limit: 26, afterClaimId: null } }), enabledEnv],
+    [governedClaimsRequest({ actorContext: { ...actorContext, organizationMemberships: [] } }), enabledEnv],
+    [governedClaimsRequest({ arguments: { organizationId: OTHER_ORG, limit: 10, afterClaimId: null } }), enabledEnv],
+    [
+      governedClaimsRequest({
+        actorContext: {
+          ...actorContext,
+          organizationMemberships: [
+            { organization_id: ORG, membership_status: "active", role_name: "client_admin" },
+          ],
+        },
+      }),
+      enabledEnv,
+    ],
+    [{ toolName: "list_claims", arguments: { organizationId: ORG, limit: 10, afterClaimId: null }, actorContext }, enabledEnv],
+  ];
+  for (const [input, env] of inputsAndEnvs) {
+    let calls = 0;
+    const result = await getClaimTraceabilitySummaryTool(input, {
+      env,
+      importClaimLibraryService: async () => ({
+        async listClaimLibraryCandidates() {
+          calls += 1;
+          throw new Error("must not call Claim Library service");
+        },
+      }),
+    });
+    assert.equal(result.ok, false);
+    assert.equal(calls, 0);
+  }
+});
+
+test("P2-07/14-03a security: list_governed_claims output tampering fails closed with system_error and no data", async () => {
+  for (const data of [
+    governedListSuccess({ extra: true }),
+    governedListSuccess({ items: [governedClaimEntry({ claimText: "unsafe" })] }),
+    governedListSuccess({ items: [governedClaimEntry({ evidenceItemId: undefined })] }),
+    governedListSuccess({
+      items: [
+        governedClaimEntry({ reviewQueueItems: [governedQueueItem({ filename: "private.pdf" })] }),
+      ],
+    }),
+  ]) {
+    const result = await getClaimTraceabilitySummaryTool(governedClaimsRequest(), {
+      env: enabledEnv,
+      importClaimLibraryService: async () => ({
+        async listClaimLibraryCandidates() {
+          return { ok: true, data, warnings: [] };
+        },
+      }),
+    });
+    assert.equal(result.error.code, "system_error");
+    assert.equal("data" in result, false);
+  }
+});
+
+test("P2-07/14-03a: five-state regression — list_governed_claims surfaces a governed claim with all five conditions unresolved, and get_claim_traceability_summary reports it eligible:false with intact blockers", async () => {
+  const listCalls = [];
+  const listResult = { ok: true, data: governedListSuccess(), warnings: [] };
+  const listOutcome = await getClaimTraceabilitySummaryTool(governedClaimsRequest(), {
+    env: enabledEnv,
+    importClaimLibraryService: claimLibraryServiceReturning(listResult, listCalls),
+  });
+  assert.equal(listOutcome.ok, true);
+  assert.equal(listOutcome.data.items.length, 1);
+  assert.equal(listOutcome.data.items[0].claimId, CLAIM);
+  assert.equal(listOutcome.data.items[0].claimReviewStatus, "needs_gk_review");
+  assert.equal(listOutcome.data.items[0].claimStrength, "unassessed");
+  assert.equal(listCalls.length, 1);
+
+  const traceabilityDto = successDto({
+    eligible: false,
+    blockerCodes: [
+      "claim_review_unresolved",
+      "evidence_review_unresolved",
+      "support_strength_unassessed",
+      "coverage_dimension_unresolved",
+      "client_followup_unresolved",
+    ],
+    affectedDimensionKeys: ["missingness"],
+  });
+  const traceCalls = [];
+  const traceOutcome = await getClaimTraceabilitySummaryTool(request(), {
+    env: enabledEnv,
+    importClaimTraceabilityService: serviceReturning({ ok: true, data: traceabilityDto, error: null }, traceCalls),
+  });
+  assert.equal(traceOutcome.ok, true);
+  assert.equal(traceOutcome.data.eligible, false);
+  assert.deepEqual(traceOutcome.data.blockerCodes, [
+    "claim_review_unresolved",
+    "evidence_review_unresolved",
+    "support_strength_unassessed",
+    "coverage_dimension_unresolved",
+    "client_followup_unresolved",
+  ]);
+  assert.equal(traceOutcome.data.claim.claim_review_status, "needs_gk_review");
+  assert.equal(traceOutcome.data.evidence.evidence_review_status, "needs_gk_review");
+  assert.equal(traceOutcome.data.claim.claim_strength, "unassessed");
+  assert.deepEqual(traceOutcome.data.affectedDimensionKeys, ["missingness"]);
+  assert.equal(traceOutcome.data.evidence.sensitivity_level, "unknown");
+  assert.equal(traceCalls.length, 1);
+});
+
+test("P2-07/14-03a: three-way separation — list_governed_claims includes the claim, list_eligible_claims_for_audience excludes it, get_claim_traceability_summary reports eligible:false with blockers intact", async () => {
+  const governedOutcome = await getClaimTraceabilitySummaryTool(governedClaimsRequest(), {
+    env: enabledEnv,
+    importClaimLibraryService: claimLibraryServiceReturning({ ok: true, data: governedListSuccess(), warnings: [] }),
+  });
+  assert.equal(governedOutcome.ok, true);
+  assert.ok(governedOutcome.data.items.some((item) => item.claimId === CLAIM));
+
+  const eligibleOutcome = await getClaimTraceabilitySummaryTool(
+    { toolName: "list_eligible_claims_for_audience", arguments: { organizationId: ORG, requestedAudience: "internal", limit: 10, afterClaimId: null }, actorContext },
+    {
+      env: enabledEnv,
+      importEligibleClaimsForAudienceService: async () => ({
+        async listEligibleClaimsForAudience() {
+          return {
+            ok: true,
+            data: { requestedAudience: "internal", eligibleClaims: [], limit: 10, afterClaimId: null, truncated: false, nextAfterClaimId: null },
+            error: null,
+          };
+        },
+      }),
+    },
+  );
+  assert.equal(eligibleOutcome.ok, true);
+  assert.equal(eligibleOutcome.data.eligibleClaims.some((entry) => entry.claimId === CLAIM), false);
+
+  const traceOutcome = await getClaimTraceabilitySummaryTool(request(), {
+    env: enabledEnv,
+    importClaimTraceabilityService: serviceReturning({
+      ok: true,
+      data: successDto({ eligible: false, blockerCodes: ["claim_not_approved_for_requested_audience"] }),
+      error: null,
+    }),
+  });
+  assert.equal(traceOutcome.ok, true);
+  assert.equal(traceOutcome.data.claim.claim_id, CLAIM);
+  assert.equal(traceOutcome.data.eligible, false);
+  assert.deepEqual(traceOutcome.data.blockerCodes, ["claim_not_approved_for_requested_audience"]);
 });

@@ -11,10 +11,13 @@ import { validateTenantBoundaryConsistency } from "../validators/tenantValidator
 
 const TRACEABILITY_TOOL_NAME = "get_claim_traceability_summary";
 const ELIGIBLE_CLAIMS_TOOL_NAME = "list_eligible_claims_for_audience";
-const TOOL_NAMES = new Set([TRACEABILITY_TOOL_NAME, ELIGIBLE_CLAIMS_TOOL_NAME]);
+const GOVERNED_CLAIMS_TOOL_NAME = "list_governed_claims";
+const TOOL_NAMES = new Set([TRACEABILITY_TOOL_NAME, ELIGIBLE_CLAIMS_TOOL_NAME, GOVERNED_CLAIMS_TOOL_NAME]);
 const TOP_LEVEL_KEYS = new Set(["toolName", "arguments", "actorContext"]);
 const TRACEABILITY_ARGUMENT_KEYS = new Set(["organizationId", "claimId", "requestedAudience"]);
 const ELIGIBLE_CLAIMS_ARGUMENT_KEYS = new Set(["organizationId", "requestedAudience", "limit", "afterClaimId"]);
+const GOVERNED_CLAIMS_ARGUMENT_KEYS = new Set(["organizationId", "limit", "afterClaimId"]);
+const GOVERNED_CLAIMS_MAX_LIMIT = 25;
 const REQUESTED_AUDIENCES = new Set(["internal", "funder", "public"]);
 const ALLOWED_ROLES = new Set(["gk_admin", "gk_operator", "gk_reviewer"]);
 const PRESERVED_FAILURE_CODES = new Set([
@@ -127,6 +130,18 @@ function validateEligibleClaimsArgumentsShape(args) {
   );
 }
 
+function validateGovernedClaimsArgumentsShape(args) {
+  return (
+    hasExactKeys(args, GOVERNED_CLAIMS_ARGUMENT_KEYS) &&
+    isNonEmptyString(args.organizationId) &&
+    Number.isInteger(args.limit) &&
+    args.limit >= 1 &&
+    args.limit <= GOVERNED_CLAIMS_MAX_LIMIT &&
+    (args.afterClaimId === null ||
+      (typeof args.afterClaimId === "string" && CANONICAL_UUID_PATTERN.test(args.afterClaimId)))
+  );
+}
+
 function safeStringForKey(key, value) {
   if (key === "updated_at" && ISO_TIMESTAMP_PATTERN.test(value)) return true;
   if (UUID_PATTERN.test(value) || HASH_PATTERN.test(value) || SAFE_CODE_PATTERN.test(value)) return true;
@@ -170,6 +185,24 @@ const TRACEABILITY_EVIDENCE_KEYS = new Set([
   "review_queue_status",
   "review_status",
   "updated_at",
+  "sensitivity_level",
+]);
+const GOVERNED_CLAIM_KEYS = new Set([
+  "claimId",
+  "evidenceItemId",
+  "claimType",
+  "claimStatus",
+  "claimReviewStatus",
+  "claimStrength",
+  "reviewQueueItems",
+]);
+const GOVERNED_CLAIM_REVIEW_QUEUE_ITEM_KEYS = new Set([
+  "review_queue_item_id",
+  "queue_type",
+  "target_object_type",
+  "target_object_id",
+  "queue_status",
+  "review_status",
 ]);
 const TRACEABILITY_LOCATOR_KEYS = new Set(["source_locator_id"]);
 const TRACEABILITY_SOURCE_KEYS = new Set(["source_id", "source_code"]);
@@ -352,12 +385,54 @@ function validateEligibleClaimsServiceResult(result) {
   return result.error === null && validateEligibleClaimsSuccessDto(result.data);
 }
 
+function validateGovernedClaimEntry(entry) {
+  return (
+    hasExactKeys(entry, GOVERNED_CLAIM_KEYS) &&
+    Object.entries(entry).every(([key, value]) => {
+      if (key === "reviewQueueItems") {
+        return validateArrayEntries(value, GOVERNED_CLAIM_REVIEW_QUEUE_ITEM_KEYS);
+      }
+      return validateMetadataSafeValue(key, value);
+    })
+  );
+}
+
+function validateGovernedClaimsSuccessDto(data) {
+  const rootKeys = new Set(["items", "limit", "afterClaimId", "truncated", "nextAfterClaimId"]);
+  return (
+    hasExactKeys(data, rootKeys) &&
+    Array.isArray(data.items) &&
+    data.items.every(validateGovernedClaimEntry) &&
+    Number.isInteger(data.limit) &&
+    data.limit >= 1 &&
+    data.limit <= GOVERNED_CLAIMS_MAX_LIMIT &&
+    (data.afterClaimId === null ||
+      (typeof data.afterClaimId === "string" && CANONICAL_UUID_PATTERN.test(data.afterClaimId))) &&
+    typeof data.truncated === "boolean" &&
+    (data.nextAfterClaimId === null ||
+      (typeof data.nextAfterClaimId === "string" && CANONICAL_UUID_PATTERN.test(data.nextAfterClaimId))) &&
+    (data.truncated === false || data.nextAfterClaimId !== null)
+  );
+}
+
+function validateGovernedClaimsServiceResult(result) {
+  if (!isPlainObject(result) || typeof result.ok !== "boolean") return false;
+  if (result.ok !== true) {
+    return result.data == null && isPlainObject(result.error) && PRESERVED_FAILURE_CODES.has(result.error.code);
+  }
+  return result.error == null && validateGovernedClaimsSuccessDto(result.data);
+}
+
 async function importDefaultClaimTraceabilityService() {
   return import("./kaiClaimTraceabilityService.js");
 }
 
 async function importDefaultEligibleClaimsForAudienceService() {
   return import("./kaiEligibleClaimsForAudienceService.js");
+}
+
+async function importDefaultClaimLibraryService() {
+  return import("./kaiClaimLibraryService.js");
 }
 
 export async function getClaimTraceabilitySummaryTool(input, dependencies = {}) {
@@ -369,6 +444,9 @@ export async function getClaimTraceabilitySummaryTool(input, dependencies = {}) 
   if (!TOOL_NAMES.has(input.toolName)) return validationBlocker();
   if (input.toolName === TRACEABILITY_TOOL_NAME && !validateArgumentsShape(input.arguments)) return validationBlocker();
   if (input.toolName === ELIGIBLE_CLAIMS_TOOL_NAME && !validateEligibleClaimsArgumentsShape(input.arguments)) {
+    return validationBlocker();
+  }
+  if (input.toolName === GOVERNED_CLAIMS_TOOL_NAME && !validateGovernedClaimsArgumentsShape(input.arguments)) {
     return validationBlocker();
   }
 
@@ -426,6 +504,24 @@ export async function getClaimTraceabilitySummaryTool(input, dependencies = {}) 
     return result;
   }
 
+  if (input.toolName === GOVERNED_CLAIMS_TOOL_NAME) {
+    const serviceModule = await (dependencies.importClaimLibraryService || importDefaultClaimLibraryService)();
+    if (typeof serviceModule?.listClaimLibraryCandidates !== "function") return systemError();
+
+    const result = await serviceModule.listClaimLibraryCandidates(
+      {
+        organizationId: input.arguments.organizationId,
+        limit: input.arguments.limit,
+        afterClaimId: input.arguments.afterClaimId,
+        actorContext,
+      },
+      dependencies.claimLibraryServiceDependencies || { env },
+    );
+
+    if (!validateGovernedClaimsServiceResult(result)) return systemError();
+    return result;
+  }
+
   const serviceModule = await (dependencies.importClaimTraceabilityService || importDefaultClaimTraceabilityService)();
   if (typeof serviceModule?.getClaimTraceabilitySummary !== "function") return systemError();
 
@@ -450,6 +546,7 @@ export const __assistantClaimTraceabilityToolContract = Object.freeze({
   ARGUMENT_KEYS: TRACEABILITY_ARGUMENT_KEYS,
   TRACEABILITY_ARGUMENT_KEYS,
   ELIGIBLE_CLAIMS_ARGUMENT_KEYS,
+  GOVERNED_CLAIMS_ARGUMENT_KEYS,
   REQUESTED_AUDIENCES,
   ALLOWED_ROLES,
 });
