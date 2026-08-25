@@ -3,6 +3,7 @@ import {
   LIBRARY_AUDIENCES,
   COVERAGE_DIMENSION_KEYS,
   annotateGovernedAvailability,
+  canSelectClaimForInternalGeneration,
   canCompleteClaimReview,
   canCompleteEvidenceReview,
   canCompleteGeneratedContentReview,
@@ -238,9 +239,9 @@ export default function ImpactEvidenceLibrary() {
   }, [organizationId, loadCandidateClaims, loadEligibleClaims]);
 
   useEffect(() => {
-    setSelectedGenerationClaimIds((current) => current.filter((claimId) => claims.some((claim) => claim.claimId === claimId && claim.libraryStatus === "usable")));
+    setSelectedGenerationClaimIds((current) => current.filter((claimId) => claims.some((claim) => claim.claimId === claimId && canSelectClaimForInternalGeneration(claim, audience))));
     setSelectedClaimId((current) => (claims.some((claim) => claim.claimId === current) ? current : claims[0]?.claimId || ""));
-  }, [claims]);
+  }, [claims, audience]);
 
   const loadTraceability = useCallback(async (claimId = selectedClaimId) => {
     if (!organizationId || !claimId) return;
@@ -261,13 +262,13 @@ export default function ImpactEvidenceLibrary() {
   }, [audience, selectedClaimId, loadTraceability]);
 
   const toggleGenerationClaim = useCallback((claim) => {
-    if (claim.libraryStatus !== "usable") return;
+    if (!canSelectClaimForInternalGeneration(claim, audience)) return;
     setSelectedGenerationClaimIds((current) => (
       current.includes(claim.claimId)
         ? current.filter((claimId) => claimId !== claim.claimId)
         : [...current, claim.claimId].sort()
     ));
-  }, []);
+  }, [audience]);
 
   const loadGeneratedDrafts = useCallback(async () => {
     if (!organizationId) return;
@@ -543,7 +544,7 @@ export default function ImpactEvidenceLibrary() {
                     <span className="text-break">{claim.claimId}</span>
                     <StatusBadge status={claim.libraryStatus} />
                   </div>
-                  {audience === "internal" && claim.libraryStatus === "usable" ? (
+                  {canSelectClaimForInternalGeneration(claim, audience) ? (
                     <div className="form-check small mt-2" onClick={(event) => event.stopPropagation()}>
                       <input
                         className="form-check-input"

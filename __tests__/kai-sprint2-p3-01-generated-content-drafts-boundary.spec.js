@@ -50,7 +50,7 @@ function eligibleClaim(overrides = {}) {
     sourceVersionId: "00000000-0000-4000-8000-000000000401",
     requestedAudience: "internal",
     limitationCodes: [],
-    revalidatedEligible: true,
+    revalidatedForGeneration: true,
     audienceAuthority: { internal: true, funder: false, public: false },
     ...overrides,
   };
@@ -130,38 +130,48 @@ test("P3-01 generator input and output contracts reject unknown keys, bad ordina
   assert.equal(validateGeneratorResult({ blocks: [{ ...blocks()[0], text: "x".repeat(4001) }] }), false);
 });
 
-test("P3-01 validators VAL-GEN-001 through VAL-GEN-005 enforce eligibility, citations, unauthorized references, numeric/causal assertions, and audience authority", () => {
+test("P3-01 validators VAL-GEN-001 through VAL-GEN-005 enforce generation revalidation, citations, unauthorized references, numeric/causal assertions, and audience authority", () => {
   assert.equal(validateGeneratedContentDraft({
     requestedAudience: "internal",
-    eligibleClaims: [eligibleClaim()],
+    generationClaims: [eligibleClaim()],
     blocks: blocks(),
   }).ok, true);
   assert.deepEqual(validateGeneratedContentDraft({
     requestedAudience: "internal",
-    eligibleClaims: [eligibleClaim({ revalidatedEligible: false })],
+    generationClaims: [eligibleClaim({ revalidatedForGeneration: false })],
     blocks: blocks(),
   }).blockers.map((blocker) => blocker.validator_key), ["VAL-GEN-001"]);
   assert.ok(validateGeneratedContentDraft({
     requestedAudience: "internal",
-    eligibleClaims: [eligibleClaim()],
+    generationClaims: [eligibleClaim()],
     blocks: [{ ...blocks()[0], text: "Narrative without citation.", citations: [] }],
   }).blockers.some((blocker) => blocker.validator_key === "VAL-GEN-002"));
   assert.ok(validateGeneratedContentDraft({
     requestedAudience: "internal",
-    eligibleClaims: [eligibleClaim()],
+    generationClaims: [eligibleClaim()],
     blocks: [{ ...blocks()[0], citations: [{ claimId: CLAIM, evidenceItemId: "00000000-0000-4000-8000-000000000999" }] }],
   }).blockers.some((blocker) => blocker.validator_key === "VAL-GEN-003"));
   assert.ok(validateGeneratedContentDraft({
     requestedAudience: "internal",
-    eligibleClaims: [eligibleClaim({ claimStatement: "Enrollment was 12% in 2025." })],
+    generationClaims: [eligibleClaim({ claimStatement: "Enrollment was 12% in 2025." })],
     blocks: [{ ...blocks()[0], text: "Enrollment caused 13% growth in 2025." }],
   }).blockers.some((blocker) => blocker.validator_key === "VAL-GEN-004"));
   assert.deepEqual(validateGeneratedContentDraft({
     requestedAudience: "public",
-    eligibleClaims: [eligibleClaim({ requestedAudience: "public", audienceAuthority: { internal: true, funder: false, public: false } })],
+    generationClaims: [eligibleClaim({ requestedAudience: "public", audienceAuthority: { internal: true, funder: false, public: false } })],
     blocks: blocks(),
     draftAudience: "public",
   }).blockers.map((blocker) => blocker.validator_key), ["VAL-GEN-005"]);
+
+  // Package 14-05: a governed claim's current audience/use eligibility being
+  // false must not, by itself, produce a VAL-GEN-001 blocker -- only a
+  // missing/failed generation revalidation or a requestedAudience mismatch
+  // may. currentEligible is preserved as a separate truthful fact.
+  assert.equal(validateGeneratedContentDraft({
+    requestedAudience: "internal",
+    generationClaims: [eligibleClaim({ currentEligible: false })],
+    blocks: blocks(),
+  }).ok, true);
 });
 
 test("P3-01 request fingerprint is deterministic and sensitive only to content type, audience, and ordered claim ids", () => {

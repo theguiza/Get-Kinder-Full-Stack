@@ -19129,3 +19129,80 @@ This closes the mismatch between the executed request-ownership predicates and t
 - `git diff --check` — passed.
 
 **Scope:** no backend, P2-08 implementation, runtime, generation, export/release, schema, migration, dependency, database, production, or `00_KAI_CURRENT_STATE.md` change. Pre-existing `AGENTS.md` owner work remains unrelated and unstaged.
+
+## Package 14-05 — Internal generation availability / audience-eligibility decoupling
+
+**Date:** 2026-08-25
+**Starting HEAD:** `9759565` ("part way through making all data avail for kai")
+
+**Goal:** allow an authorized governed claim from the all-state Claim Library to participate in INTERNAL evidence-summary draft generation even when its current audience/use eligibility is false, while preserving governed internal availability != current audience/use eligibility != export/release authority.
+
+**Frontend old admission gates (removed):**
+- `frontend/ImpactEvidenceLibrary.jsx` used `claim.libraryStatus === "usable"` / `!== "usable"` as the INTERNAL-generation admission rule in three places: pruning `selectedGenerationClaimIds`, the `toggleGenerationClaim` selection guard, and the generation-checkbox render condition.
+
+**New governed-availability helper and wiring:**
+- Added `canSelectClaimForInternalGeneration(claim, audience)` to `frontend/impactEvidenceLibraryLogic.js`: returns `audience === "internal" && claim.governedAvailable === true`, and nothing else (never derives admission from `libraryStatus`, `audienceEligibility`, `eligible`, review status, support strength, blocker count, coverage state, or client-followup state).
+- Wired all three admission locations in `frontend/ImpactEvidenceLibrary.jsx` to this helper (pruning effect now also depends on `audience`; `toggleGenerationClaim` now also depends on `audience`).
+
+**Executed helper regressions** (`__tests__/kai-sprint2-impact-evidence-library.spec.js`): cases A-E execute the helper directly (blocked/needs_review governed claim admitted; usable governed claim admitted; non-governed eligible-only entry rejected; funder audience rejected; public audience rejected), plus one regression proving admission is independent of every disqualifying-looking display field. A separate wiring-only test proves via source-pattern match that the three component admission sites delegate to the helper and that no `claim.libraryStatus === "usable"` / `!== "usable"` check remains in the component; this wiring test is explicitly not treated as proof of the admission decision itself.
+
+**Backend — pre-generation `eligible=true` gate removed, P2-06 integrity checks retained:**
+- `Backend/kai/dictionary/postgresGeneratedContentRepository.js` `createEvidenceSummaryDraft()`: renamed `eligibleResults` to `traceabilityResults`. The pre-generation per-claim gate no longer requires `result.data.eligible === true`. It still requires: evaluator `result.ok === true`; `result.data.requestedAudience === input.requestedAudience`; `result.data.claim.claim_id === claimId` (requested claim identity); `result.data.evidence.evidence_item_id` present (evidence identity exists); and, against the freshly loaded tenant-scoped projection, `projection.evidenceItemId === traceability.evidence.evidence_item_id` (projection/evidence identity match).
+- **Limitation/blocker propagation:** for each requested claim, `traceability.blockerCodes` (deduplicated via `Set`, then sorted for deterministic ordering) is merged into `projection.limitationCodes`, the existing generator `limitationCodes` channel — no fabricated codes, no schema change.
+- **Post-generation revalidation retained:** the second P2-06 evaluation after the generator runs no longer requires `eligible === true`. It still fails closed if the evaluator fails, or if `result.data.claim.claim_id !== claim.claimId` or `result.data.evidence.evidence_item_id !== claim.evidenceItemId` (wrong claim/evidence identity), i.e. it remains a current-state/lineage integrity check only.
+
+**Validator semantic correction** (`Backend/kai/validators/kaiGeneratedContentValidators.js`):
+- Renamed the `validateGeneratedContentDraft` input parameter `eligibleClaims` to `generationClaims` (and the internal helper `eligibleByClaimId` to `generationClaimsById`); this is the only production caller (`postgresGeneratedContentRepository.js`), confirmed via `git grep -n "validateGeneratedContentDraft"`.
+- VAL-GEN-001 no longer means "every claim was eligible for the requested audience." It now requires `claim.revalidatedForGeneration === true && claim.requestedAudience === requestedAudience` for every supplied claim (blocker reason renamed `claim_not_revalidated_for_generation`). The repository no longer stamps a fabricated `revalidatedEligible: true`; it stamps the truthful `revalidatedForGeneration: true` plus a separately preserved `currentEligible` fact (`traceability.eligible === true`) that is not used as a gate.
+- VAL-GEN-002 (exact citations), VAL-GEN-003 (unauthorized references), VAL-GEN-004 (numeric/causal assertions) are unchanged.
+- VAL-GEN-005 is unchanged in logic (audience-authority check via `audienceAllowed(claim, requestedAudience)` against `claim.audienceAuthority`); it already never depended on eligibility, so a governed INTERNAL claim with `audienceAuthority.internal === true` now correctly passes regardless of current eligibility, and funder/public audience-authority behavior is untouched.
+
+**Three-state P3-01 regression transition** (`DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel`, `npm run verify:kai-sprint2-p3-01-generated-content-drafts`):
+- **old-test / old-code = PASS:** before any production edit, the existing integration test "P3-01 real service path keeps accepted proposed internal-only claims ineligible with zero generation, queue, or audit effects" passed (19/19 total in the P3-01 verifier run), proving the real (default, unmodified P2-06) evaluator against a freshly proposed internal-only claim returned `validation_blocker` with zero generator calls and zero generation/draft/queue/audit row effects.
+- **old-test / new-code = FAIL:** after the production edit, rerunning the same unmodified old test against the new code failed with:
+  ```
+  Expected values to be strictly equal:
+  + actual - expected
+  + 'system_error'
+  - 'validation_blocker'
+  ```
+  at `assert.equal(result.error.code, "validation_blocker")` (line 251 pre-edit). The failure occurred because the pre-generation `eligible=true` gate no longer rejects the claim; execution proceeded to the injected `draftGenerator` stub, which threw `"must not call"`, propagating as an uncaught error caught by the outer `system_error` handler instead of the removed gate's `validation_blocker`. This demonstrates the production gate was actually removed (18 pass / 1 fail out of 19).
+- **new-test / new-code = PASS:** the old test was replaced with "Package 14-05: P3-01 real service path allows an internally governed but currently ineligible claim to generate an internal draft, while eligibility and blockers remain truthful before, during, and after generation" in `__tests__/kai-sprint2-p3-01-generated-content-drafts.integration.spec.js`. Full verifier run: 19/19 passed.
+
+**Real P3-01 PostgreSQL proof** (same new test, real ephemeral loopback PostgreSQL, real default P2-06 evaluator, no injected `eligible:true` stub):
+- BEFORE: a claim proposed through the real evidence-extraction/claim-proposal/gap-followup path is confirmed `eligible: false` via the real evaluator, with a non-empty real `blockerCodes` array (observed: `claim_review_unresolved`, `evidence_review_unresolved`, `support_strength_unassessed`, `coverage_dimension_unresolved`, `client_followup_unresolved`).
+- CREATE: `createEvidenceSummaryDraft()` with `requestedAudience: "internal"` against this real ineligible claim succeeds (`result.ok === true`, `replayed: false`); the draft generator is called exactly once and receives the real governed claim id/evidence item id and the real, deduplicated, sorted current blocker codes on `limitationCodes`; one generation run, draft, block, citation, review-queue item, and metadata-only audit row are persisted (`{ runs: 1, drafts: 1, blocks: 1, citations: 1, queues: 1, audits: 1 }`); draft status is `draft`.
+- AFTER: re-evaluating current traceability directly shows the claim remains `eligible: false` — generation did not itself alter review/eligibility state.
+- Review-packet proof: reading the created draft back through the real `getGeneratedDraftReviewPacket()` repository surface (using a thin key-shaping wrapper around the real evaluator solely to match a pre-existing, out-of-scope key-allowlist in `validateTraceabilityData` that does not yet include the real evaluator's `updated_at`/`sensitivity_level` evidence fields — the same reason every existing P3-02 real-Postgres test already injects a shaping evaluator rather than the raw default) confirms `currentUseEligible === false`, and the citation reports `currentEligible === false` with a non-empty `blockerCodes` array and populated `claimReviewStatus`/`evidenceReviewStatus`.
+- P2-08 proof: `listEligibleClaimsForAudience()` against the real repository for `requestedAudience: "internal"` continues to exclude this now-internally-drafted, still-ineligible claim from its `eligibleClaims` result.
+
+**Downstream safety (unchanged, re-verified against real PostgreSQL):**
+- P3-02: `npm run verify:kai-sprint2-p3-02-generated-draft-review-packet` — 16/16 passed. Review-packet `currentUseEligible` computation and per-citation blocker/lineage metadata are untouched.
+- P3-03: `npm run verify:kai-sprint2-p3-03-export-manifest-eligibility` — 26/26 passed, including "P3-03 current ineligibility blocks via current_use_ineligible", proving export eligibility remains blocked when `currentUseEligible === false`.
+- P2-08 (`postgresEligibleClaimsForAudienceRepository.js`, `kaiEligibleClaimsForAudienceService.js`), export manifest/eligibility validators, export review lifecycle, and final-human-authority/final-gate logic were not modified.
+- Generated-content review lifecycle, review-queue creation, and draft `draft` status are unchanged.
+
+**Exact test/verifier commands and counts** (`DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel` set for every command):
+- `npm run verify:kai-sprint2-p3-01-generated-content-drafts` — 19 passed, 0 failed (baseline old-code run); 18 passed / 1 failed (old-test/new-code transition run, expected); 19 passed, 0 failed (final new-test/new-code run).
+- `npm run verify:kai-sprint2-p3-02-generated-draft-review-packet` — 16 passed, 0 failed, 0 skipped.
+- `npm run verify:kai-sprint2-p3-03-export-manifest-eligibility` — 26 passed, 0 failed, 0 skipped.
+- `node --test __tests__/kai-sprint2-impact-evidence-library.spec.js` — 36 passed, 0 failed, 0 skipped (29 pre-existing + 7 new Package 14-05 executed/wiring regressions).
+- `node --test __tests__/kai-sprint2-p3-01-generated-content-drafts-boundary.spec.js` — 6 passed, 0 failed, 0 skipped.
+- `npm run test:kai-sprint2` — 2409 tests, 2373 passed, 0 failed, 36 skipped, 0 cancelled/todo.
+- `git diff --check` — passed (exit 0).
+
+**Exact changed files:**
+- `frontend/ImpactEvidenceLibrary.jsx`
+- `frontend/impactEvidenceLibraryLogic.js`
+- `Backend/kai/dictionary/postgresGeneratedContentRepository.js`
+- `Backend/kai/validators/kaiGeneratedContentValidators.js`
+- `__tests__/kai-sprint2-impact-evidence-library.spec.js`
+- `__tests__/kai-sprint2-p3-01-generated-content-drafts-boundary.spec.js`
+- `__tests__/kai-sprint2-p3-01-generated-content-drafts.integration.spec.js`
+- `KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.6.md` (this evidence entry)
+
+**NOT_CONFIRMED:**
+- P3-02/P3-03 boundary specs were not individually re-run in isolation outside the full `npm run test:kai-sprint2` pass and their dedicated real-Postgres verifiers; their pass is confirmed only via those two channels, not a third standalone `node --test` invocation of the boundary files alone.
+- `sprint2IntakeApi.js` and `kaiGeneratedContentService.js` were inspected and confirmed to already have no `eligible=true` enforcement of their own (matching the accepted starting context); they were not modified and their behavior was not independently re-derived beyond that inspection plus the full suite pass.
+
+**Scope:** no P2-08 implementation, export eligibility/manifest validator, export review lifecycle, final-human-authority logic, migration, schema, package dependency, database/cloud config, feature-flag, or `00_KAI_CURRENT_STATE.md` change. `sprint2IntakeApi.js` and `kaiGeneratedContentService.js` were inspected but not modified (no functional need found). Not pushed, not deployed.

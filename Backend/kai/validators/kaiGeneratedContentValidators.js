@@ -31,32 +31,42 @@ function unique(values) {
   return [...new Set(values)];
 }
 
-function eligibleByClaimId(eligibleClaims) {
-  return new Map(eligibleClaims.map((claim) => [claim.claimId, claim]));
+function generationClaimsById(generationClaims) {
+  return new Map(generationClaims.map((claim) => [claim.claimId, claim]));
 }
 
-function requestedCitationSet(eligibleClaims) {
-  return new Set(eligibleClaims.map((claim) => `${claim.claimId}:${claim.evidenceItemId}`));
+function requestedCitationSet(generationClaims) {
+  return new Set(generationClaims.map((claim) => `${claim.claimId}:${claim.evidenceItemId}`));
 }
 
+// Package 14-05: `generationClaims` is the set of governed claims freshly
+// traceability-revalidated for THIS generation transaction. It is not, and
+// must not be treated as, "every claim eligible for the requested audience" —
+// a governed claim may participate in INTERNAL generation while its current
+// audience/use eligibility (claim.currentEligible, if present) is false.
+// Use/export eligibility remains a separate, stricter downstream fact.
 export function validateGeneratedContentDraft({
   requestedAudience,
-  eligibleClaims,
+  generationClaims,
   blocks,
   draftAudience = requestedAudience,
 } = {}) {
-  const claimById = eligibleByClaimId(eligibleClaims || []);
-  const citationSet = requestedCitationSet(eligibleClaims || []);
+  const claimById = generationClaimsById(generationClaims || []);
+  const citationSet = requestedCitationSet(generationClaims || []);
   const results = [];
 
-  const allRevalidated = (eligibleClaims || []).length > 0
-    && (eligibleClaims || []).every(
-      (claim) => claim.revalidatedEligible === true && claim.requestedAudience === requestedAudience,
+  // VAL-GEN-001 now proves truthful generation revalidation, not audience
+  // eligibility: every supplied claim must have been freshly
+  // traceability-revalidated for this generation transaction and belong to
+  // the requested generation context (requestedAudience match).
+  const allRevalidated = (generationClaims || []).length > 0
+    && (generationClaims || []).every(
+      (claim) => claim.revalidatedForGeneration === true && claim.requestedAudience === requestedAudience,
     );
   results.push(
     allRevalidated
-      ? pass("VAL-GEN-001", { claim_count: eligibleClaims.length })
-      : blocker("VAL-GEN-001", "claim_not_revalidated_for_requested_audience"),
+      ? pass("VAL-GEN-001", { claim_count: generationClaims.length })
+      : blocker("VAL-GEN-001", "claim_not_revalidated_for_generation"),
   );
 
   const exactCitations = Array.isArray(blocks)
@@ -109,8 +119,12 @@ export function validateGeneratedContentDraft({
         }),
   );
 
+  // VAL-GEN-005 checks the draft's requested-audience authority only. It must
+  // not become a substitute eligibility gate: a governed INTERNAL claim with
+  // audienceAuthority.internal === true passes regardless of its current
+  // audience/use eligibility.
   const audienceOk = draftAudience === requestedAudience
-    && (eligibleClaims || []).every((claim) => audienceAllowed(claim, requestedAudience));
+    && (generationClaims || []).every((claim) => audienceAllowed(claim, requestedAudience));
   results.push(
     audienceOk
       ? pass("VAL-GEN-005", { requested_audience: requestedAudience })

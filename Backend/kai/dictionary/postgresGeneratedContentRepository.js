@@ -1558,27 +1558,46 @@ export function createPostgresGeneratedContentRepository({
           const reservation = await insertRunReservation(tx, input, requestFingerprint);
           if (!reservation) return rereadAsResult(tx, input, requestFingerprint, true);
 
-          const eligibleResults = [];
+          // Package 14-05: governed INTERNAL draft generation requires fresh
+          // P2-06 traceability revalidation of every requested claim -- proof
+          // that the transaction is still about the same governed claim and
+          // evidence object -- but current audience/use eligibility
+          // (result.data.eligible) is a separate, stricter downstream fact
+          // and is intentionally NOT required here. `eligible=false` alone
+          // must never reject INTERNAL draft creation.
+          const traceabilityResults = [];
           for (const claimId of input.claimIds) {
             const result = await evaluator(tx, {
               organizationId: input.organizationId,
               claimId,
               requestedAudience: input.requestedAudience,
             });
-            if (!result.ok || result.data?.eligible !== true || result.data?.requestedAudience !== input.requestedAudience) {
+            if (
+              !result.ok
+              || result.data?.requestedAudience !== input.requestedAudience
+              || result.data?.claim?.claim_id !== claimId
+              || !result.data?.evidence?.evidence_item_id
+            ) {
               rollbackFailure("validation_blocker");
             }
-            eligibleResults.push(result.data);
+            traceabilityResults.push(result.data);
           }
 
           const projections = await loadGenerationProjection(tx, input);
           if (!projections) rollbackFailure("conflict_current_state_changed");
           const projectionByClaim = new Map(projections.map((claim) => [claim.claimId, claim]));
-          for (const eligible of eligibleResults) {
-            const projection = projectionByClaim.get(eligible.claim.claim_id);
-            if (!projection || projection.evidenceItemId !== eligible.evidence.evidence_item_id) {
+          const traceabilityByClaimId = new Map(traceabilityResults.map((traceability) => [traceability.claim.claim_id, traceability]));
+          for (const traceability of traceabilityResults) {
+            const projection = projectionByClaim.get(traceability.claim.claim_id);
+            if (!projection || projection.evidenceItemId !== traceability.evidence.evidence_item_id) {
               rollbackFailure("conflict_current_state_changed");
             }
+            // Preserve real current limitations/blockers into the existing
+            // limitationCodes generator channel: an internally admitted but
+            // currently ineligible claim must not have its blockers silently
+            // erased. Deterministic ordering, de-duplicated, no fabrication.
+            const blockerCodes = Array.isArray(traceability.blockerCodes) ? traceability.blockerCodes : [];
+            projection.limitationCodes = [...new Set(blockerCodes)].sort();
           }
 
           const generatorInput = toGeneratorInput({ requestedAudience: input.requestedAudience, projections });
@@ -1587,22 +1606,32 @@ export function createPostgresGeneratedContentRepository({
 
           const validation = validateGeneratedContentDraft({
             requestedAudience: input.requestedAudience,
-            eligibleClaims: projections.map((projection) => ({
+            generationClaims: projections.map((projection) => ({
               ...projection,
-              revalidatedEligible: true,
+              revalidatedForGeneration: true,
+              currentEligible: traceabilityByClaimId.get(projection.claimId)?.eligible === true,
             })),
             blocks: generatorResult.blocks,
             draftAudience: input.requestedAudience,
           });
           if (!validation.ok) rollbackFailure("validation_blocker");
 
+          // Post-generation revalidation remains a current-state/lineage
+          // integrity check only: it must still fail closed if traceability
+          // fails, or returns a different claim/evidence identity than the
+          // object generation began against. It must NOT require
+          // eligible=true, and must NOT convert eligible=false into true.
           for (const claim of projections) {
             const result = await evaluator(tx, {
               organizationId: input.organizationId,
               claimId: claim.claimId,
               requestedAudience: input.requestedAudience,
             });
-            if (!result.ok || result.data?.eligible !== true || result.data?.evidence?.evidence_item_id !== claim.evidenceItemId) {
+            if (
+              !result.ok
+              || result.data?.claim?.claim_id !== claim.claimId
+              || result.data?.evidence?.evidence_item_id !== claim.evidenceItemId
+            ) {
               rollbackFailure("conflict_current_state_changed");
             }
           }

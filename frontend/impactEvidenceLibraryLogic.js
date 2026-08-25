@@ -214,6 +214,18 @@ export function annotateGovernedAvailability(mergedClaims, candidateClaims, elig
   }));
 }
 
+// Package 14-05: internal evidence-summary draft generation is gated on
+// governed internal availability (presence in the all-state Claim Library),
+// not on audience/use eligibility. A claim that is governed but currently
+// ineligible for its audience may still be selected for INTERNAL generation;
+// funder/public audiences may never select for generation regardless of
+// governed availability. This function must not infer admission from
+// libraryStatus, audienceEligibility, eligible, review status, support
+// strength, blocker count, coverage state, or client-followup state.
+export function canSelectClaimForInternalGeneration(claim, audience) {
+  return audience === "internal" && claim?.governedAvailable === true;
+}
+
 // Organization change invalidates both the governed Claim Library and the
 // audience-scoped eligibility dimension: every piece of organization-scoped
 // state (including both loading flags) is reset here, in the transition

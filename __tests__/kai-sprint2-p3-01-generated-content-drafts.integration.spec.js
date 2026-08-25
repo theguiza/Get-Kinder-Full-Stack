@@ -36,6 +36,7 @@ async function runP301IntegrationSuite() {
   const { proposeClaim } = await import("../Backend/kai/services/kaiClaimProposalService.js");
   const { generateClaimGapFollowups } = await import("../Backend/kai/services/kaiClaimGapFollowupService.js");
   const { createEvidenceSummaryDraft } = await import("../Backend/kai/services/kaiGeneratedContentService.js");
+  const { evaluateClaimTraceabilityInTransaction } = await import("../Backend/kai/dictionary/postgresClaimTraceabilityRepository.js");
   const { createPostgresEvidenceLineageRepository } = await import("../Backend/kai/dictionary/postgresEvidenceLineageRepository.js");
   const { createPostgresClaimProposalRepository } = await import("../Backend/kai/dictionary/postgresClaimProposalRepository.js");
   const { createPostgresClaimGapFollowupRepository } = await import("../Backend/kai/dictionary/postgresClaimGapFollowupRepository.js");
@@ -199,6 +200,45 @@ async function runP301IntegrationSuite() {
     });
   }
 
+  // The real P2-06 evaluator returns additional evidence fields (e.g.
+  // updated_at, sensitivity_level) beyond the review-packet path's
+  // pre-existing, narrower validateTraceabilityData allow-list -- a
+  // pre-existing key-shape mismatch unrelated to Package 14-05 and out of
+  // this package's scope. This adapter reuses the real evaluator's real
+  // database-backed result (real eligibility, real blockers, real lineage)
+  // and narrows only the key shape, matching the pattern every existing
+  // P3-02 real-Postgres test already uses (an injected evaluator, never the
+  // raw default one, when reading a review packet).
+  async function realEvaluatorShapedForReviewPacket(tx, input) {
+    const result = await evaluateClaimTraceabilityInTransaction(tx, input);
+    if (!result.ok) return result;
+    const { claim, evidence, source, source_version: sourceVersion } = result.data;
+    return {
+      ...result,
+      data: {
+        ...result.data,
+        claim: {
+          claim_id: claim.claim_id,
+          claim_type: claim.claim_type,
+          claim_status: claim.claim_status,
+          claim_review_status: claim.claim_review_status,
+          claim_strength: claim.claim_strength,
+          audience_gates: claim.audience_gates,
+        },
+        evidence: {
+          evidence_item_id: evidence.evidence_item_id,
+          evidence_review_status: evidence.evidence_review_status,
+          support_strength: evidence.support_strength,
+          review_queue_item_id: evidence.review_queue_item_id,
+          review_queue_status: evidence.review_queue_status,
+          review_status: evidence.review_status,
+        },
+        source: { source_id: source.source_id, source_code: source.source_code },
+        source_version: { source_version_id: sourceVersion.source_version_id, is_current: sourceVersion.is_current },
+      },
+    };
+  }
+
   async function countsForKey(idempotencyKey) {
     const rows = await query(
       `WITH run AS (
@@ -230,27 +270,98 @@ async function runP301IntegrationSuite() {
     return rows[0];
   }
 
-  test("P3-01 real service path keeps accepted proposed internal-only claims ineligible with zero generation, queue, or audit effects", async () => {
+  test("Package 14-05: P3-01 real service path allows an internally governed but currently ineligible claim to generate an internal draft, while eligibility and blockers remain truthful before, during, and after generation", async () => {
     const claim = await prepareClaim();
-    const before = await countsForKey("real-block");
-    let generatorCalls = 0;
+    const key = "real-allow-ineligible";
+    const before = await countsForKey(key);
+
+    // BEFORE CREATION: the claim exists through the real governed path, and
+    // the real (unmodified default) P2-06 evaluator reports it ineligible --
+    // this freshly proposed claim has not completed evidence/claim review.
+    const preEligibility = await withRunnerOwnedTransaction((tx) => evaluateClaimTraceabilityInTransaction(tx, {
+      organizationId: ORG,
+      claimId: claim.claim_id,
+      requestedAudience: "internal",
+    }));
+    assert.equal(preEligibility.ok, true);
+    assert.equal(preEligibility.data.eligible, false);
+    const preBlockerCodes = preEligibility.data.blockerCodes;
+    assert.ok(Array.isArray(preBlockerCodes) && preBlockerCodes.length > 0);
+
+    // CREATE: the real default (unmodified) evaluator is used -- no injected
+    // eligible:true stub -- and the real repository/service path is exercised
+    // end to end.
+    const calls = [];
+    const published = [];
     const result = await createEvidenceSummaryDraft(
-      serviceInput(claim, "real-block"),
+      serviceInput(claim, key),
       {
         env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" },
         generatedContentRepository: createPostgresGeneratedContentRepository({
           runInTransaction: withRunnerOwnedTransaction,
         }),
-        draftGenerator() {
-          generatorCalls += 1;
-          throw new Error("must not call");
-        },
-        metadataOnlyAudit: auditRecorder(),
+        draftGenerator: generator({ calls }),
+        metadataOnlyAudit: auditRecorder({ published }),
       },
     );
-    assert.equal(result.error.code, "validation_blocker");
-    assert.equal(generatorCalls, 0);
-    assert.deepEqual(await countsForKey("real-block"), before);
+    assert.equal(result.ok, true);
+    assert.equal(result.data.replayed, false);
+    assert.equal(calls.length, 1);
+    // The generator received the real governed claim and its real current
+    // limitation/blocker codes on the existing limitationCodes channel.
+    assert.equal(calls[0].claims[0].claimId, claim.claim_id);
+    assert.equal(calls[0].claims[0].evidenceItemId, claim.evidence_item_id);
+    assert.deepEqual(calls[0].claims[0].limitationCodes, [...new Set(preBlockerCodes)].sort());
+
+    assert.deepEqual(await countsForKey(key), { runs: 1, drafts: 1, blocks: 1, citations: 1, queues: 1, audits: 1 });
+    assert.deepEqual(published, [true]);
+
+    // AFTER CREATION: re-evaluate current traceability directly -- generation
+    // must not itself alter review/eligibility state.
+    const postEligibility = await withRunnerOwnedTransaction((tx) => evaluateClaimTraceabilityInTransaction(tx, {
+      organizationId: ORG,
+      claimId: claim.claim_id,
+      requestedAudience: "internal",
+    }));
+    assert.equal(postEligibility.ok, true);
+    assert.equal(postEligibility.data.eligible, false);
+
+    // REQUIRED REVIEW-PACKET PROOF (spec section 13): read the newly-created
+    // draft back through the real review-packet repository surface and prove
+    // currentUseEligible=false and citation currentEligible=false, with
+    // blocker/review/lineage metadata preserved and truthful.
+    const packetResult = await createPostgresGeneratedContentRepository({
+      runInTransaction: withRunnerOwnedTransaction,
+      evaluator: realEvaluatorShapedForReviewPacket,
+    }).getGeneratedDraftReviewPacket({
+      organizationId: ORG,
+      generatedContentDraftId: result.data.generatedContentDraftId,
+    });
+    assert.equal(packetResult.ok, true);
+    assert.equal(packetResult.data.draftStatus, "draft");
+    assert.equal(packetResult.data.currentUseEligible, false);
+    assert.equal(packetResult.data.blocks.length, 1);
+    const [citation] = packetResult.data.blocks[0].citations;
+    assert.equal(citation.claimId, claim.claim_id);
+    assert.equal(citation.evidenceItemId, claim.evidence_item_id);
+    assert.equal(citation.currentEligible, false);
+    assert.ok(Array.isArray(citation.blockerCodes) && citation.blockerCodes.length > 0);
+    assert.equal(typeof citation.claimReviewStatus, "string");
+    assert.equal(typeof citation.evidenceReviewStatus, "string");
+
+    // DOWNSTREAM SAFETY (P2-08): the currently-ineligible claim continues to
+    // be excluded from the P2-08 eligible-claims-for-audience result.
+    const { listEligibleClaimsForAudience } = await import("../Backend/kai/services/kaiEligibleClaimsForAudienceService.js");
+    const { createPostgresEligibleClaimsForAudienceRepository } = await import("../Backend/kai/dictionary/postgresEligibleClaimsForAudienceRepository.js");
+    const eligibleClaimsResult = await listEligibleClaimsForAudience(
+      { organizationId: ORG, requestedAudience: "internal", limit: 25, afterClaimId: null, actorContext },
+      {
+        env: { KAI_SPRINT2_ENABLED: "true" },
+        eligibleClaimsForAudienceRepository: createPostgresEligibleClaimsForAudienceRepository({ runInTransaction: withRunnerOwnedTransaction }),
+      },
+    );
+    assert.equal(eligibleClaimsResult.ok, true);
+    assert.ok(!eligibleClaimsResult.data.eligibleClaims.some((item) => item.claimId === claim.claim_id));
   });
 
   test("P3-01 injected repository path persists one complete run/draft/block/citation/queue/audit set and exact generator input", async () => {

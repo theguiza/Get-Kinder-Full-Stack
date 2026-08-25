@@ -22,6 +22,7 @@ import { listClaimLibraryReviewCandidates } from "../Backend/kai/db/kaiClaimLibr
 import {
   annotateGovernedAvailability,
   canCompleteGeneratedContentReview,
+  canSelectClaimForInternalGeneration,
   canStartGeneratedContentReview,
   claimLibraryCandidatesPath,
   claimTraceabilityPath,
@@ -984,6 +985,98 @@ test("14-04 closure case G: a stale earlier response cannot clear or overwrite s
     currentAudience: "internal",
   });
   assert.equal(currentRequestAccepted, true);
+});
+
+// Package 14-05: internal evidence-summary generation admission is governed
+// internal availability (presence in the all-state Claim Library), not
+// audience/use eligibility (libraryStatus === "usable"). These are EXECUTED
+// assertions against the pure helper itself -- the authoritative proof of the
+// admission decision. Source-pattern assertions further below prove only
+// that the component WIRES its three admission locations to this helper;
+// they are not proof of the decision's correctness.
+
+test("Package 14-05 case A: a governed claim that is blocked/needs_review is still admitted for internal generation", () => {
+  assert.equal(canSelectClaimForInternalGeneration(
+    { claimId, governedAvailable: true, libraryStatus: "blocked" },
+    "internal",
+  ), true);
+  assert.equal(canSelectClaimForInternalGeneration(
+    { claimId, governedAvailable: true, libraryStatus: "needs_review" },
+    "internal",
+  ), true);
+});
+
+test("Package 14-05 case B: a governed claim that is currently eligible/usable is still admitted for internal generation", () => {
+  assert.equal(canSelectClaimForInternalGeneration(
+    { claimId, governedAvailable: true, libraryStatus: "usable" },
+    "internal",
+  ), true);
+});
+
+test("Package 14-05 case C: a non-governed (eligible-only merge) entry is never admitted, even if it appears usable/eligible", () => {
+  assert.equal(canSelectClaimForInternalGeneration(
+    { claimId, governedAvailable: false, libraryStatus: "usable" },
+    "internal",
+  ), false);
+});
+
+test("Package 14-05 case D: the funder audience never admits internal generation, regardless of governed availability", () => {
+  assert.equal(canSelectClaimForInternalGeneration(
+    { claimId, governedAvailable: true, libraryStatus: "usable" },
+    "funder",
+  ), false);
+});
+
+test("Package 14-05 case E: the public audience never admits internal generation, regardless of governed availability", () => {
+  assert.equal(canSelectClaimForInternalGeneration(
+    { claimId, governedAvailable: true, libraryStatus: "usable" },
+    "public",
+  ), false);
+});
+
+test("Package 14-05: canSelectClaimForInternalGeneration never derives admission from libraryStatus, audienceEligibility, eligible, review status, support strength, blocker count, coverage, or client-followup state", () => {
+  // A claim with every disqualifying-looking display field, but governed and
+  // internal, must still be admitted -- proving the decision is not derived
+  // from any of those fields.
+  assert.equal(canSelectClaimForInternalGeneration({
+    claimId,
+    governedAvailable: true,
+    libraryStatus: "blocked",
+    audienceEligibility: "not_eligible",
+    eligible: false,
+    claimReviewStatus: "needs_gk_review",
+    supportStrength: "unassessed",
+    blockerCodes: ["claim_review_unresolved", "evidence_review_unresolved"],
+  }, "internal"), true);
+});
+
+// Component wiring (source-pattern assertions only): these prove the three
+// admission locations in ImpactEvidenceLibrary.jsx delegate to the tested
+// helper above. They do NOT prove the admission decision is correct -- that
+// is proven exclusively by the executed cases A-E above.
+
+test("Package 14-05 wiring: the component's three admission locations delegate to canSelectClaimForInternalGeneration (wiring only, not decision proof)", () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+
+  assert.match(uiSource, /import \{[\s\S]*?canSelectClaimForInternalGeneration[\s\S]*?\} from "\.\/impactEvidenceLibraryLogic\.js";/);
+
+  // libraryStatus === "usable" / !== "usable" is no longer an admission rule
+  // anywhere in the component.
+  assert.doesNotMatch(uiSource, /claim\.libraryStatus\s*===\s*"usable"/);
+  assert.doesNotMatch(uiSource, /claim\.libraryStatus\s*!==\s*"usable"/);
+
+  // 1. pruning selectedGenerationClaimIds
+  assert.match(
+    uiSource,
+    /setSelectedGenerationClaimIds\(\(current\) => current\.filter\(\(claimId\) => claims\.some\(\(claim\) => claim\.claimId === claimId && canSelectClaimForInternalGeneration\(claim, audience\)\)\)\);/,
+  );
+  // 2. generation-selection toggle/admission
+  assert.match(
+    uiSource,
+    /const toggleGenerationClaim = useCallback\(\(claim\) => \{\s*if \(!canSelectClaimForInternalGeneration\(claim, audience\)\) return;/,
+  );
+  // 3. generation-checkbox/control admission
+  assert.match(uiSource, /\{canSelectClaimForInternalGeneration\(claim, audience\) \? \(/);
 });
 
 test("14-04 closure case H: 14-04 governed availability / audience eligibility semantics remain intact", () => {
