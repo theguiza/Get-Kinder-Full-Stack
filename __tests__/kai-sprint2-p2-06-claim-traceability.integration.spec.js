@@ -175,6 +175,16 @@ async function runP206IntegrationSuite() {
     assert.equal(transactionLog.some((sql) => /\bINSERT\b|\bUPDATE\b|\bDELETE\b|upload_lifecycle_audit/.test(sql)), false);
     const afterAudit = await query(`SELECT count(*)::int AS count FROM kai.upload_lifecycle_audit`);
     assert.deepEqual(afterAudit, beforeAudit);
+    const [persistedEvidenceRow] = await query(
+      `SELECT sensitivity_level
+         FROM kai.evidence_items
+        WHERE organization_id = $1::uuid
+          AND evidence_item_id = $2::uuid`,
+      [ORG, result.data.evidence.evidence_item_id],
+    );
+    assert.equal(persistedEvidenceRow.sensitivity_level, "unknown");
+    assert.equal(result.data.evidence.sensitivity_level, persistedEvidenceRow.sensitivity_level);
+    assert.equal(result.data.evidence.sensitivity_level, "unknown");
   });
 
   test("P2-06 rejects absent P2-04 rows instead of inferring clear coverage", async () => {

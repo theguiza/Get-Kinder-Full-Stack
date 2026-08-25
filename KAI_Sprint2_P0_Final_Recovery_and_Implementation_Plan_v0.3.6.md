@@ -18980,3 +18980,24 @@ NOT_CONFIRMED:
 - Carried forward from 14-03a: the stale Claim Library route comment (`sprint2IntakeApi.js`) was not touched — runtime integration did not require touching that exact route.
 - New: the Section 11 P2-06 direct repository-level sensitivity regression (row fixture → DTO, bypassing a live database) was not added, for the reasons stated above; the existing wrapper-level `sensitivity_level` assertions were reconfirmed passing instead.
 - New: `getClaimTraceabilitySummaryToolImpl`'s default (production) call path passes no `dependencies.env` override, so it reads `process.env.KAI_SPRINT2_ENABLED`/`KAI_ASSISTANT_TOOLS_ENABLED` directly, exactly like every other production KAI tool handler reads live config — this was exercised in this package only by temporarily setting `process.env` inside tests (restored via `t.after`), not by a live deployed-config read.
+
+---
+
+**14-03c acceptance closure (P2-06 direct sensitivity regression) — 2026-08-25:**
+
+Closed the Section 11 gap recorded above: a direct, real-repository regression proving the persisted `kai.evidence_items.sensitivity_level` row value survives the actual PostgreSQL → `postgresClaimTraceabilityRepository.js` → P2-06 DTO path (not merely a mocked-repository wrapper-level assertion).
+
+- Test changed: `__tests__/kai-sprint2-p2-06-claim-traceability.integration.spec.js` — extended the existing normal-successful-path test ("P2-06 recomputes P2-02, validates P2-04, uses one read-only repeatable-read transaction, and keeps proposed internal-only claims ineligible") with a direct scoped read of the persisted evidence row and a comparison against the returned DTO field. No new fixture, wrapper, or synthetic repository was added.
+- Persisted evidence-row value verified: `sensitivity_level = "unknown"` (the schema-legal value seeded via `data_dictionary_fields.sensitivity` → `postgresEvidenceLineageRepository.js` extraction, copied verbatim into `kai.evidence_items.sensitivity_level`).
+- DTO assertion added: `result.data.evidence.sensitivity_level === persistedEvidenceRow.sensitivity_level === "unknown"`, where `persistedEvidenceRow` is read via a fresh `SELECT sensitivity_level FROM kai.evidence_items WHERE organization_id = $1 AND evidence_item_id = $2` keyed off `result.data.evidence.evidence_item_id`.
+- Confirmed the real P2-06 PostgreSQL repository path was exercised: the assertion runs inside the existing runner-owned-loopback-only integration suite (`runP206IntegrationSuite`), which constructs `traceRepo` via `createPostgresClaimTraceabilityRepository({ runInTransaction: withRunnerOwnedTransaction })` against the ephemeral local PostgreSQL started by `scripts/kai-sprint2-p2-06-claim-traceability-local-postgres.js` — the same transaction/connection already used by the rest of that test.
+- Confirmed production mapping remained unchanged: fresh inspection of `Backend/kai/dictionary/postgresClaimTraceabilityRepository.js:627` (`sensitivity_level: evidenceItemRow.sensitivity_level`) and `Backend/kai/db/kaiIntakeQueries.js:828-844` (`getScopedEvidenceItemById` selects `sensitivity_level` from `kai.evidence_items`) confirms both were already exactly as reported in 14-03c; neither file was edited.
+
+Verification commands run (`DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel` set before every Node/npm command):
+
+- `npm run verify:kai-sprint2-p2-06-claim-traceability` — 12 passed, 0 failed, 0 skipped.
+- `node --test __tests__/kai-sprint2-p2-06-claim-traceability-boundary.spec.js __tests__/kai-sprint2-p2-07-assistant-claim-traceability-tool-boundary.spec.js __tests__/kai-sprint2-p2-08-eligible-claims-for-audience-boundary.spec.js __tests__/kai-runtime-governed-claims.spec.js` — 46 passed, 0 failed, 0 skipped.
+- `npm run test:kai-sprint2` — 2389 tests, 2353 passed, 0 failed, 36 skipped (pre-existing unrelated DB-gated skips).
+- `git diff --check` — passed (exit 0).
+
+Confirmed no runtime, eligibility, security, or schema behavior changed: `git diff` for the functional change is confined to the new assertions inside the one existing integration test (additive-only diff, no lines removed); no production file, migration, or route was touched; `list_governed_claims`/`get_claim_traceability_summary`/`list_eligible_claims_for_audience` behavior is unaffected — the added assertions only read already-computed `result.data` fields and an already-scoped `SELECT`, no gating logic was added or altered.
