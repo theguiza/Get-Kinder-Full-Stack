@@ -19098,3 +19098,34 @@ NOT_CONFIRMED:
 - 14-02 Claim Library SQL live authorized Postgres execution.
 - Stale Claim Library route comment (if any remains from earlier packages — not re-audited in this bounded closure).
 - Live deployed KAI assistant governed-discovery invocation.
+
+---
+
+## Package 14-04 — Per-request generation ownership closure
+
+**Date:** 2026-08-25
+
+Closed the remaining 14-04 request-identity acceptance gap after lifecycle commit `c75ab5c`.
+
+The candidate and eligibility response predicates already rejected stale generations correctly, but the component previously captured each generation without incrementing it when dispatching a new request. Successive requests of the same dimension could therefore share one generation, meaning the executed stale-vs-current predicate regression was stronger than the component wiring actually guaranteed.
+
+**Correction:**
+- `frontend/ImpactEvidenceLibrary.jsx`
+  - candidate request dispatch now allocates a fresh identity with `++candidateRequestGenerationRef.current`;
+  - eligibility request dispatch now allocates a fresh identity with `++eligibleRequestGenerationRef.current`.
+- Existing lifecycle invalidation remains unchanged:
+  - organization change invalidates candidate + eligibility generations;
+  - audience change invalidates eligibility generation only.
+- `__tests__/kai-sprint2-impact-evidence-library.spec.js`
+  - retained the executed pure-function stale/current-generation regressions;
+  - added supplemental component-wiring assertions proving both loaders actually allocate a new generation on each dispatched request.
+
+This closes the mismatch between the executed request-ownership predicates and the component behavior that instantiates those generations.
+
+**Verification** (`DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel`):
+- `node --test __tests__/kai-sprint2-impact-evidence-library.spec.js` — 29 passed, 0 failed, 0 skipped.
+- `node --test __tests__/kai-sprint2-p2-08-eligible-claims-for-audience-boundary.spec.js` — 13 passed, 0 failed, 0 skipped.
+- `npm run test:kai-sprint2` — 2402 tests, 2366 passed, 0 failed, 36 skipped.
+- `git diff --check` — passed.
+
+**Scope:** no backend, P2-08 implementation, runtime, generation, export/release, schema, migration, dependency, database, production, or `00_KAI_CURRENT_STATE.md` change. Pre-existing `AGENTS.md` owner work remains unrelated and unstaged.

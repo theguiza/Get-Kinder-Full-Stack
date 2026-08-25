@@ -832,6 +832,18 @@ test("Package 14-04: the historical eligible-claims-failure setClaims([]) cleari
   assert.match(uiSource, /shouldApplyCandidateResponse\(\{/);
   assert.match(uiSource, /shouldApplyEligibilityResponse\(\{/);
 
+  // Each dispatched request must allocate a new generation so the executed
+  // stale/newer-response predicates model behavior the component can actually
+  // produce, not only manually constructed generation values in unit tests.
+  assert.match(
+    uiSource,
+    /const requestGeneration = \+\+candidateRequestGenerationRef\.current;/,
+  );
+  assert.match(
+    uiSource,
+    /const requestGeneration = \+\+eligibleRequestGenerationRef\.current;/,
+  );
+
   // Case K: no deployed-assistant capability claim is made anywhere in the
   // human-facing Impact Evidence Library UI or logic.
   const logicSource = readFileSync("frontend/impactEvidenceLibraryLogic.js", "utf8");

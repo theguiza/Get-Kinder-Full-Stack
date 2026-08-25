@@ -177,7 +177,7 @@ export default function ImpactEvidenceLibrary() {
 
   const loadCandidateClaims = useCallback(async () => {
     if (!organizationId) return;
-    const requestGeneration = candidateRequestGenerationRef.current;
+    const requestGeneration = ++candidateRequestGenerationRef.current;
     const requestOrganizationId = organizationId;
     setLoadingCandidateClaims(true);
     setCandidateClaimsError("");
@@ -198,7 +198,7 @@ export default function ImpactEvidenceLibrary() {
 
   const loadEligibleClaims = useCallback(async () => {
     if (!organizationId) return;
-    const requestGeneration = eligibleRequestGenerationRef.current;
+    const requestGeneration = ++eligibleRequestGenerationRef.current;
     const requestOrganizationId = organizationId;
     const requestAudience = audience;
     setLoadingEligibleClaims(true);
