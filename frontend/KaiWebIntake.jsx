@@ -27,7 +27,10 @@ function ValueRow({ label, value }) {
   );
 }
 
-export default function KaiWebIntake({ organizationId: parentOrganizationId = "" }) {
+export default function KaiWebIntake({
+  organizationId: parentOrganizationId = "",
+  embedded = false,
+}) {
   const [organizations, setOrganizations] = useState([]);
   const [localOrganizationId, setLocalOrganizationId] = useState("");
   const organizationId = parentOrganizationId || localOrganizationId;
@@ -259,7 +262,11 @@ export default function KaiWebIntake({ organizationId: parentOrganizationId = ""
 
   return (
     <section>
-      <h1 className="admin-title mb-3">KAI Web Intake</h1>
+      {embedded ? (
+        <h2 className="h4 mb-3">KAI Web Intake</h2>
+      ) : (
+        <h1 className="admin-title mb-3">KAI Web Intake</h1>
+      )}
       {message ? <div className="alert alert-warning py-2">{message}</div> : null}
 
       <div className="admin-card mb-3">

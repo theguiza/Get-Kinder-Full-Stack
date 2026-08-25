@@ -392,3 +392,17 @@ test("KAI UAT-enablement review-cockpit host page reuses the unchanged existing 
   assert.match(entrySource, /window\.renderKaiReviewCockpit/);
   assert.doesNotMatch(cockpitSource, /\bPUT\b|\bPATCH\b|\bDELETE\b/);
 });
+
+test("KAI Web Intake preserves standalone heading behavior and supports embedded rendering", () => {
+  const uiSource = readFileSync("frontend/KaiWebIntake.jsx", "utf8");
+
+  assert.match(
+    uiSource,
+    /organizationId: parentOrganizationId = "",\s*embedded = false,/,
+  );
+
+  assert.match(
+    uiSource,
+    /embedded \? \([\s\S]*?<h2 className="h4 mb-3">KAI Web Intake<\/h2>[\s\S]*?<h1 className="admin-title mb-3">KAI Web Intake<\/h1>/,
+  );
+});

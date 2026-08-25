@@ -43,6 +43,7 @@ import {
   shouldApplyEligibilityResponse,
 } from "./impactEvidenceLibraryLogic.js";
 import { organizationsPath } from "./kaiWebIntakeLogic.js";
+import KaiWebIntake from "./KaiWebIntake.jsx";
 
 function ValueRow({ label, value }) {
   return (
@@ -509,6 +510,10 @@ export default function ImpactEvidenceLibrary() {
           </div>
         </div>
       </div>
+
+      {organizationId ? (
+        <KaiWebIntake organizationId={organizationId} embedded />
+      ) : null}
 
       {message ? <div className="alert alert-warning py-2">{message}</div> : null}
 

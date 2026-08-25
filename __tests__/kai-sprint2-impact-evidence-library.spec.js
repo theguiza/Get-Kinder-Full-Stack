@@ -1089,3 +1089,17 @@ test("14-04 closure case H: 14-04 governed availability / audience eligibility s
   assert.equal(onFailure[0].governedAvailable, true);
   assert.equal(onFailure[0].audienceEligibility, "eligibility_unavailable");
 });
+
+test("Impact Evidence Library mounts KAI Web Intake under its authorized organization context", () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+
+  assert.match(
+    uiSource,
+    /import KaiWebIntake from "\.\/KaiWebIntake\.jsx";/,
+  );
+
+  assert.match(
+    uiSource,
+    /\{organizationId \? \([\s\S]*?<KaiWebIntake organizationId=\{organizationId\} embedded \/>[\s\S]*?\) : null\}/,
+  );
+});
