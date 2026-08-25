@@ -448,6 +448,97 @@ test("Impact Evidence Library read model is bounded, organization-scoped, ordere
   assert.doesNotMatch(observed.sql, /\bINSERT\b|\bUPDATE\b|\bDELETE\b|\bTRUNCATE\b|FOR UPDATE/i);
 });
 
+test("Impact Evidence Library read model admits claims from kai.claims without requiring a review queue match", async () => {
+  let observed = null;
+  await listClaimLibraryReviewCandidates(organizationId, { limit: 25, afterClaimId: null }, {
+    async query(sql, params) {
+      observed = { sql, params };
+      return { rows: [] };
+    },
+  });
+  // The claim base is a plain FROM kai.claims with an optional LEFT JOIN, so a
+  // claim with zero matching review_queue_items rows must still be selected.
+  assert.match(observed.sql, /FROM kai\.claims c\s+LEFT JOIN kai\.review_queue_items q/);
+  assert.doesNotMatch(observed.sql, /(?<!LEFT )JOIN kai\.review_queue_items/);
+  assert.match(observed.sql, /q\.organization_id = c\.organization_id/);
+  assert.match(
+    observed.sql,
+    /COALESCE\(\s*jsonb_agg\([\s\S]*?\)\s*FILTER \(WHERE q\.review_queue_item_id IS NOT NULL\),\s*'\[\]'::jsonb\s*\)/,
+  );
+});
+
+test("Impact Evidence Library service exposes reviewQueueItems: [] and preserves unresolved claim state when no queue rows exist", async () => {
+  const noQueueRow = row({ review_queue_items: [] });
+  const deps = {
+    env: { KAI_SPRINT2_ENABLED: "true" },
+    async listClaimLibraryReviewCandidates() {
+      return [noQueueRow];
+    },
+  };
+  const result = await listClaimLibraryCandidates({ organizationId, limit: 25, afterClaimId: null, actorContext }, deps);
+  assert.equal(result.ok, true);
+  assert.equal(result.data.items.length, 1);
+  const candidate = result.data.items[0];
+  assert.equal(candidate.claimId, claimId);
+  assert.equal(candidate.evidenceItemId, evidenceItemId);
+  assert.deepEqual(candidate.reviewQueueItems, []);
+  // Unresolved/unassessed state is returned unchanged; availability did not
+  // require clearing claim_review_status or claim_strength.
+  assert.equal(candidate.claimReviewStatus, "needs_gk_review");
+  assert.equal(candidate.claimStrength, "unassessed");
+});
+
+test("Impact Evidence Library service returns exactly one claim when both claim_review and evidence_review metadata exist", async () => {
+  const evidenceReviewQueueItemId = "00000000-0000-4000-8000-000000000302";
+  const bothQueuesRow = row({
+    review_queue_items: [
+      {
+        review_queue_item_id: reviewQueueItemId,
+        queue_type: "claim_review",
+        target_object_type: "claim",
+        target_object_id: claimId,
+        queue_status: "blocked",
+        review_status: "needs_gk_review",
+      },
+      {
+        review_queue_item_id: evidenceReviewQueueItemId,
+        queue_type: "evidence_review",
+        target_object_type: "evidence_item",
+        target_object_id: evidenceItemId,
+        queue_status: "open",
+        review_status: "needs_gk_review",
+      },
+    ],
+  });
+  const deps = {
+    env: { KAI_SPRINT2_ENABLED: "true" },
+    async listClaimLibraryReviewCandidates() {
+      return [bothQueuesRow];
+    },
+  };
+  const result = await listClaimLibraryCandidates({ organizationId, limit: 25, afterClaimId: null, actorContext }, deps);
+  assert.equal(result.ok, true);
+  assert.equal(result.data.items.length, 1);
+  assert.equal(result.data.items[0].reviewQueueItems.length, 2);
+  assert.deepEqual(
+    result.data.items[0].reviewQueueItems.map((item) => item.review_queue_item_id),
+    [reviewQueueItemId, evidenceReviewQueueItemId],
+  );
+});
+
+test("Impact Evidence Library read model scopes both the claim base and the optional queue join to the requested organization", async () => {
+  let observed = null;
+  await listClaimLibraryReviewCandidates(organizationId, { limit: 25, afterClaimId: null }, {
+    async query(sql, params) {
+      observed = { sql, params };
+      return { rows: [] };
+    },
+  });
+  assert.match(observed.sql, /WHERE c\.organization_id = \$1::uuid/);
+  assert.match(observed.sql, /q\.organization_id = c\.organization_id/);
+  assert.deepEqual(observed.params, [organizationId, 26]);
+});
+
 test("Impact Evidence Library frontend paths preserve audience, claim, and server-owned organization transport", async () => {
   assert.equal(
     eligibleClaimsPath(organizationId, "funder"),

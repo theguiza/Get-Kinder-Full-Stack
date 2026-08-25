@@ -18614,3 +18614,255 @@ NOT_CONFIRMED remaining for this package: no production, database, deployment,
 cloud, feature-flag, tenant, credential, secret, real-client-data, push, or
 `00_KAI_CURRENT_STATE.md` action was performed. No local commit was created
 because the package request explicitly withheld commit authorization.
+## Phase-14 — KAI governed internal-analysis availability decoupling
+
+Status: OWNER_AUTHORIZED FOR REPOSITORY INSPECTION AND IMPLEMENTATION — 2026-08-25
+
+### Purpose
+
+Correct the coupling between claim/evidence eligibility and KAI internal-analysis availability.
+
+The existing P2-06/P2-08/P2-09/P2-10/P2-11 and Phase-12 foundations remain accepted and are not reopened merely because ordinary evidence-quality, review, coverage, or follow-up state remains unresolved.
+
+The implementation must stop requiring every evidence-quality or review condition to resolve before authorized governed organizational information can be available to KAI for internal analysis.
+
+### Product rule
+
+For an actor already authorized to access the organization:
+
+authorized governed organizational data
+-> available through the KAI internal-analysis surface
+
+The following state remains attached to the data but does not by itself make the data unavailable to KAI:
+
+- evidence review unresolved
+- claim review unresolved
+- support strength unassessed
+- evidence-strength limitations
+- coverage dimensions unresolved
+- client follow-up outstanding
+- gaps
+- conflicts
+- missing or unclear definitions
+- missing or unclear denominators
+- missing or unclear entity level
+- missing or unclear time period
+- sensitivity classification
+- personal or sensitive population classification
+
+`eligible = false` must not by itself mean that the underlying governed evidence, claim, lineage, limitation, gap, conflict, follow-up, review state, or sensitivity state is unavailable to KAI internal analysis.
+
+### Separate concepts
+
+The implementation must preserve three separate concepts:
+
+1. Access and authorization
+
+Existing organization, membership, role, actor, operation, and tenant-boundary enforcement remains authoritative.
+
+Unauthorized or cross-tenant access remains a hard blocker.
+
+2. Internal-analysis availability
+
+Authorized governed organizational information is available to KAI together with its limitations and state.
+
+Evidence-quality, review, coverage, follow-up, conflict, and sensitivity state are information KAI can reason over and are not general internal-analysis exclusion filters.
+
+3. Assertion / audience / release eligibility
+
+Existing eligibility and traceability machinery may continue to determine whether a particular claim satisfies requirements for a particular use or audience.
+
+This eligibility surface must not be used as the sole source of KAI organizational knowledge.
+
+### Sensitivity rule
+
+Sensitivity is a classification and handling property, not an automatic exclusion from KAI analysis.
+
+Authorized sensitive organizational information must not disappear merely because it concerns youth, personal information, health, housing, stories/testimonials, or another sensitive population or data class.
+
+Sensitivity metadata must remain available with the governed information so later KAI functions can apply appropriate handling and output controls.
+
+### Preserved hard boundaries
+
+This package must preserve:
+
+- existing actor resolution;
+- existing KAI role architecture;
+- existing organization-membership architecture;
+- tenant-scoped reads;
+- cross-tenant denial;
+- operation authorization;
+- existing assistant raw-file boundary;
+- destructive-action authorization;
+- server-controlled writes;
+- traceability;
+- evidence lineage;
+- review history;
+- gaps, conflicts, and follow-up state.
+
+Authorization/actor/role/membership implementation must not be redesigned unless inspection proves a specific defect in that implementation makes this package impossible or unsafe.
+
+### Existing packages not reopened
+
+Do not reopen or modify completed P2-09, P2-10, or P2-11 workflow semantics merely to make test evidence pass internal availability.
+
+In particular, do not:
+
+- complete evidence review artificially;
+- complete claim review artificially;
+- invent support strength;
+- convert unresolved dimensions into resolved dimensions;
+- create limitation-acceptance decisions solely to obtain KAI visibility;
+- complete client follow-ups solely to obtain KAI visibility;
+- delete blockers from traceability;
+- weaken traceability consistency;
+- fabricate evidence quality.
+
+Legitimately unresolved state must remain legitimately unresolved.
+
+### Repository inspection requirement
+
+Before implementation, trace the current repository path:
+
+evidence / claims
+-> P2-06 traceability
+-> P2-08 eligible-claims
+-> Phase-12 Impact Evidence Library
+-> current KAI assistant/tool/read surfaces
+
+Identify every point where `eligible = false`, blocker codes, or equivalent eligibility state causes:
+
+- a governed record to be omitted;
+- an otherwise valid organization-scoped read to fail;
+- the assistant/tool surface to lose access to the governed information;
+- the Impact Evidence Library to conflate internal availability with audience eligibility.
+
+Only proven coupling points are implementation targets.
+
+### Preferred implementation
+
+Prefer service/read-model/tool/UI separation over schema expansion.
+
+Do not introduce a database column such as:
+
+- kai_visible
+- assistant_visible
+- internal_analysis_allowed
+
+unless repository and DDL inspection proves an additional persisted fact is genuinely required.
+
+Internal-analysis availability should normally derive from existing governed-object existence and existing authorization/tenant controls.
+
+### Required regression fixture
+
+A governed same-organization claim carrying all of:
+
+- claim_review_unresolved
+- evidence_review_unresolved
+- support_strength_unassessed
+- coverage_dimension_unresolved
+- client_followup_unresolved
+
+must remain unresolved and nevertheless be returned through the authorized KAI internal-analysis surface together with:
+
+- claim identity;
+- source/evidence lineage;
+- evidence state;
+- claim state;
+- all blocker/limitation codes;
+- coverage state;
+- outstanding follow-up state;
+- sensitivity metadata where applicable.
+
+The implementation fails this package if one or more of those unresolved conditions must be cleared merely to make the information visible to KAI.
+
+### Security regression
+
+The corresponding tests must also prove:
+
+same-organization authorized request
+-> governed information returned
+
+wrong-organization / cross-tenant request
+-> denied
+
+unauthorized operation
+-> denied
+
+assistant raw-file request
+-> denied under the existing raw-file boundary
+
+sensitive authorized governed evidence
+-> returned with sensitivity metadata retained
+
+unauthorized destructive action
+-> denied
+
+### Impact Evidence Library behavior
+
+The Impact Evidence Library must stop conflating ordinary unresolved quality/review state with absence of internal availability.
+
+Where authoritative backend state establishes that governed information is available internally, the UI should represent separately:
+
+- internal availability;
+- review state;
+- support/strength state;
+- limitations;
+- gaps/conflicts;
+- follow-up state;
+- sensitivity;
+- audience/use eligibility where implemented.
+
+A universal `Blocked` / `Can use: no` presentation must not be derived solely from ordinary evidence-quality or review limitations when the governed information remains available for KAI internal analysis.
+
+### Acceptance
+
+This package is complete when repository evidence proves:
+
+1. The existing eligibility-to-availability coupling points have been identified.
+2. Authorized governed organizational evidence can reach KAI internal analysis without requiring `eligible = true`.
+3. Existing unresolved review, strength, coverage, gap, conflict, follow-up, and sensitivity state remains intact.
+4. The five-blocker regression fixture is available to KAI without clearing any of those blockers.
+5. Existing tenant and authorization controls remain effective.
+6. Existing assistant raw-file restrictions remain effective.
+7. Existing destructive-action protections remain effective.
+8. Sensitive evidence is not excluded merely because it is sensitive.
+9. `eligible-claims` remains available for its separate audience/use-eligibility purpose.
+10. No schema change is introduced unless inspection proves it necessary.
+11. Required focused and broader tests pass.
+12. `git diff --check` passes.
+13. The complete diff is inspected before package completion.
+
+### Package 14-02 — Backend governed all-state Claim Library read/service
+
+Status: COMPLETE — 2026-08-25
+
+Files changed:
+
+- `Backend/kai/db/kaiClaimLibraryReadModels.js`
+- `__tests__/kai-sprint2-impact-evidence-library.spec.js`
+
+`Backend/kai/services/kaiClaimLibraryService.js` required no change: it already accepted `reviewQueueItems: []` and already owned the authorization boundary (`KAI_SPRINT2_ENABLED`, canonical UUID/limit/cursor validation, mapped-human check, generic + role-scoped `validateActorCanPerformOperation`, `CLAIM_LIBRARY_READ_ROLES`, `validateTenantBoundaryConsistency`) unchanged.
+
+Admission coupling removed: `listClaimLibraryReviewCandidates()` previously required an `INNER JOIN`/`UNION ALL` match against `kai.review_queue_items` (via `claim_review` or `evidence_review` queue rows) for a claim to be selected at all. That admission gate is removed.
+
+All-state behavior established: the read now selects from `kai.claims c WHERE c.organization_id = $1::uuid` as the sole admission condition (plus the existing deterministic cursor `c.claim_id > $3::uuid` and `ORDER BY claim_id ASC` / `LIMIT $2::int` convention, unchanged). Relevant `claim_review`/`evidence_review` queue rows are attached via `LEFT JOIN kai.review_queue_items q ON q.organization_id = c.organization_id AND (...)`, aggregated with `COALESCE(jsonb_agg(...) FILTER (WHERE q.review_queue_item_id IS NOT NULL), '[]'::jsonb)` so a claim with no matching queue row returns `review_queue_items: []` rather than `[null]`. `GROUP BY` is keyed on the claim's own columns, so a claim with both a `claim_review` and an `evidence_review` row is still returned exactly once with both rows aggregated in existing `created_at DESC, review_queue_item_id DESC` order.
+
+Schema/DTO compatibility (section 4A) result: inspected `migrations/kai_sprint2_p2_03_claim_proposal.sql` and `migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.sql`. `kai.claims.evidence_item_id` is `NOT NULL` with a FK to `kai.evidence_items`; `claim_type` is fixed by `CHECK (claim_type = 'finding')`; `claim_status` is fixed by `CHECK (claim_status = 'proposed')`; `claim_review_status` is fixed by `CHECK (claim_review_status = 'needs_gk_review')` (never widened in any later migration); `claim_strength` was widened from `CHECK (claim_strength = 'unassessed')` to `CHECK (claim_strength IN ('unassessed', 'reviewed_supported'))`. Every legal value on every field is a lowercase machine token matching the service's `MACHINE_TOKEN_RE = /^[a-z0-9_]{1,64}$/`, and `evidence_item_id` is always a canonical UUID. No schema-valid `kai.claims` row can be rejected by `responseClaimCandidate()`, so widening the population cannot poison the page; no STOP condition under section 4A was triggered and `responseClaimCandidate()` was left unmodified.
+
+Unresolved state confirmed unchanged: no migration, review-queue completion, or claim-review/evidence-review status was touched or fabricated; `claim_review_status = 'needs_gk_review'` and `claim_strength = 'unassessed'` continue to flow through unmodified, and the new read model contains no `INSERT`/`UPDATE`/`DELETE`/`TRUNCATE`/`FOR UPDATE`.
+
+P2-08 unchanged: `Backend/kai/dictionary/postgresEligibleClaimsForAudienceRepository.js` and `Backend/kai/services/kaiEligibleClaimsForAudienceService.js` were not touched; `__tests__/kai-sprint2-p2-08-eligible-claims-for-audience-boundary.spec.js` reruns unmodified and passes in full.
+
+No route, frontend, assistant, generated-content, export/release, or schema/migration file was changed.
+
+Tests/commands run (all with `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel` set before the first Node command):
+
+- `node --test __tests__/kai-sprint2-impact-evidence-library.spec.js` — 16 passed, 0 failed (4 new tests added covering: no-queue-row admission, single-claim dedup across both queue types, and organization scoping of both the claim base and the optional queue join).
+- `node --test __tests__/kai-sprint2-p2-08-eligible-claims-for-audience-boundary.spec.js` — 13 passed, 0 failed, unmodified.
+- `node --test __tests__/kai-sprint2-*.spec.js` — 2382 tests, 2346 passed, 0 failed, 36 skipped (pre-existing DB-gated skips, unrelated to this package).
+- `git diff --check` — passed (no output, exit 0).
+
+Complete diff inspected: confirmed the only functional changes are within `Backend/kai/db/kaiClaimLibraryReadModels.js` (SQL shape only) and its test file (additive tests); the pre-existing owner-authorized `AGENTS.md` modification and this ExecPlan's prior Phase-14 content were left untouched aside from this evidence addition.
+
+NOT_CONFIRMED: Tests 1–6 of section 7 are proven at the SQL-shape and service-mapping level using mocked `db.query`/`listClaimLibraryReviewCandidates` dependencies, per existing repository test convention (no live database access is authorized in this session); the actual Postgres `LEFT JOIN` + `COALESCE`/`FILTER` execution semantics against a running `kai.claims`/`kai.review_queue_items` schema remain unexercised by an integration test and would need a separately authorized database target to confirm end-to-end.
