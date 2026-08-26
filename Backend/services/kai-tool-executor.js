@@ -9,6 +9,7 @@ import { getMatchedEventsForUser } from "../../services/eventMatchingService.js"
 import { sendNudgeEmail } from "../../kindnessEmailer.js";
 import { resolveKaiActorContext } from "../kai/auth/kaiActorContext.js";
 import { getClaimTraceabilitySummaryTool } from "../kai/services/kaiAssistantClaimTraceabilityTool.js";
+import { buildKaiError } from "../kai/errors/kaiErrors.js";
 
 const IC_RATE_BY_TIER = {
   standard: 10,
@@ -1493,10 +1494,20 @@ async function handleGeneratePostEventReport(toolInput = {}, _userId, orgId) {
  * itself already verified, never invented and never taken from model/tool
  * arguments.
  */
-async function handleGovernedClaimsToolCall(toolName, toolInput = {}, userId) {
+async function handleGovernedClaimsToolCall(toolName, toolInput = {}, userId, kaiContext) {
   try {
-    const resolved = await resolveKaiActorContextImpl({ id: userId });
-    const actorContext = resolved?.ok ? { ...resolved.actorContext, source: "public.userdata" } : null;
+    const composedOrganizationId = kaiContext?.organizationContext?.organizationId;
+    if (composedOrganizationId && toolInput?.organizationId !== composedOrganizationId) {
+      // A server-composed request organization exists: the model/tool call
+      // cannot switch governed execution to a different organization.
+      return buildKaiError("tenant_boundary_violation");
+    }
+
+    let actorContext = kaiContext?.actorContext ? { ...kaiContext.actorContext, source: "public.userdata" } : null;
+    if (!actorContext) {
+      const resolved = await resolveKaiActorContextImpl({ id: userId });
+      actorContext = resolved?.ok ? { ...resolved.actorContext, source: "public.userdata" } : null;
+    }
     return await getClaimTraceabilitySummaryToolImpl({
       toolName,
       arguments: toolInput,
@@ -1529,14 +1540,15 @@ const TOOL_HANDLERS = {
   send_volunteer_reminder: (toolInput, userId, orgId) => handleSendVolunteerReminder(toolInput, userId, orgId),
   auto_staff_event: (toolInput, userId, orgId) => handleAutoStaffEvent(toolInput, userId, orgId),
   generate_post_event_report: (toolInput, userId, orgId) => handleGeneratePostEventReport(toolInput, userId, orgId),
-  list_governed_claims: (toolInput, userId) => handleGovernedClaimsToolCall("list_governed_claims", toolInput, userId),
-  get_claim_traceability_summary: (toolInput, userId) =>
-    handleGovernedClaimsToolCall("get_claim_traceability_summary", toolInput, userId),
-  list_eligible_claims_for_audience: (toolInput, userId) =>
-    handleGovernedClaimsToolCall("list_eligible_claims_for_audience", toolInput, userId),
+  list_governed_claims: (toolInput, userId, orgId, kaiContext) =>
+    handleGovernedClaimsToolCall("list_governed_claims", toolInput, userId, kaiContext),
+  get_claim_traceability_summary: (toolInput, userId, orgId, kaiContext) =>
+    handleGovernedClaimsToolCall("get_claim_traceability_summary", toolInput, userId, kaiContext),
+  list_eligible_claims_for_audience: (toolInput, userId, orgId, kaiContext) =>
+    handleGovernedClaimsToolCall("list_eligible_claims_for_audience", toolInput, userId, kaiContext),
 };
 
-export async function executeToolCall(toolName, toolInput = {}, userId, orgId) {
+export async function executeToolCall(toolName, toolInput = {}, userId, orgId, kaiContext) {
   if ((userId === null || userId === undefined) && !GUEST_TOOL_ALLOWLIST.has(toolName)) {
     return {
       status: "error",
@@ -1551,7 +1563,7 @@ export async function executeToolCall(toolName, toolInput = {}, userId, orgId) {
       message: `Unknown tool: ${toolName}`,
     };
   }
-  return handler(toolInput || {}, userId, orgId);
+  return handler(toolInput || {}, userId, orgId, kaiContext);
 }
 
 export const __testables = {

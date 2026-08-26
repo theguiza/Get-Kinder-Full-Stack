@@ -9,6 +9,7 @@ import {
 import { getToolDefinitionsForKaiContext } from "./kai-tool-definitions.js";
 import { executeToolCall } from "./kai-tool-executor.js";
 import { determineKaiTier, getModelForTier } from "../middleware/kai-tier.js";
+import { resolveKaiRequestContext } from "../kai/services/kaiContextService.js";
 
 const anthropic = new Anthropic();
 const GUEST_TOOL_ALLOWLIST = new Set([
@@ -18,6 +19,7 @@ const GUEST_TOOL_ALLOWLIST = new Set([
   "assess_reporting_readiness_question",
 ]);
 let anthropicCreateImpl = (payload) => anthropic.messages.create(payload);
+let resolveKaiRequestContextImpl = resolveKaiRequestContext;
 
 const MAX_HISTORY_MESSAGES = 40;
 const MAX_LOOPS = 10;
@@ -549,7 +551,15 @@ function enrichMessageForClaude(userMessage, tier = null, surface = "default") {
   return userMessage + '\n\n[System instruction: ' + hints.join(' ') + ']';
 }
 
-export async function handleKaiMessage({ userId, userMessage, conversationId, tier, surface = "default" } = {}) {
+export async function handleKaiMessage({
+  userId,
+  userMessage,
+  conversationId,
+  tier,
+  surface = "default",
+  requestedOrganizationId,
+  requestedEngagementId,
+} = {}) {
   let resolvedConversationId = conversationId || null;
 
   try {
@@ -566,6 +576,7 @@ export async function handleKaiMessage({ userId, userMessage, conversationId, ti
     const isGuest = userId === null || userId === undefined;
     let user = null;
     let orgContext = null;
+    let kaiContext = null;
     let resolvedTier = isGuest ? "guest" : tier;
     let messages = [];
     let isNewConversation = false;
@@ -574,6 +585,36 @@ export async function handleKaiMessage({ userId, userMessage, conversationId, ti
       user = await getUserRow(userId);
       if (user?.org_rep === true) {
         orgContext = await getOrgContextForUser(userId);
+      }
+
+      const governedContextRequested =
+        requestedOrganizationId !== undefined || requestedEngagementId !== undefined;
+      if (governedContextRequested) {
+        let kaiContextResult;
+        try {
+          kaiContextResult = await resolveKaiRequestContextImpl({
+            req: { id: userId },
+            requestedOrganizationId,
+            requestedEngagementId,
+          });
+        } catch (contextError) {
+          console.error("[kai] governed context resolution error:", contextError);
+          return {
+            message: ANTHROPIC_FAILURE_MESSAGE,
+            conversationId: resolvedConversationId,
+            error: true,
+          };
+        }
+        if (!kaiContextResult.ok) {
+          // A requested organization/engagement context must fail closed here
+          // rather than silently falling back to ungoverned execution.
+          return {
+            message: ANTHROPIC_FAILURE_MESSAGE,
+            conversationId: resolvedConversationId,
+            error: true,
+          };
+        }
+        kaiContext = kaiContextResult.data;
       }
       if (!resolvedTier) {
         resolvedTier = determineKaiTier(user);
@@ -683,7 +724,8 @@ export async function handleKaiMessage({ userId, userMessage, conversationId, ti
           toolUse.name,
           toolUse.input,
           userId ?? null,
-          orgContext?.orgId ?? null
+          orgContext?.orgId ?? null,
+          kaiContext
         );
         if ((toolUse.name === "search_events" || toolUse.name === "get_matched_events") && result && typeof result === "object") {
           structuredEvents = result;
@@ -746,6 +788,12 @@ export const __testables = {
   },
   resetAnthropicCreateForTests() {
     anthropicCreateImpl = (payload) => anthropic.messages.create(payload);
+  },
+  setResolveKaiRequestContextForTests(fn) {
+    resolveKaiRequestContextImpl = typeof fn === "function" ? fn : resolveKaiRequestContextImpl;
+  },
+  resetResolveKaiRequestContextForTests() {
+    resolveKaiRequestContextImpl = resolveKaiRequestContext;
   },
 };
 
