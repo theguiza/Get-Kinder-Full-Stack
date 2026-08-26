@@ -11,11 +11,13 @@
   const GENERATED_CONTENT_REVIEW_ALLOWED_ROLES = new Set(["gk_admin", "gk_reviewer"]);
   const COMPLETE_GENERATED_CONTENT_REVIEW_ALLOWED_ROLES = new Set(["gk_reviewer", "gk_admin"]);
   const CREATE_EVIDENCE_SUMMARY_OPERATION = "create_evidence_summary_draft";
+  const CREATE_IMPACT_NARRATIVE_OPERATION = "create_impact_narrative_draft";
   const GET_GENERATED_DRAFT_REVIEW_PACKET_OPERATION = "get_generated_draft_review_packet";
   const START_GENERATED_CONTENT_REVIEW_OPERATION = "start_generated_content_review";
   const COMPLETE_GENERATED_CONTENT_REVIEW_OPERATION = "complete_generated_content_review";
   const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
   const AUDIENCES = new Set(["internal", "funder", "public"]);
+  const ALLOWED_GENERATED_CONTENT_TYPES = new Set(["evidence_summary", "impact_narrative"]);
 
   function hasExactKeys(value, allowed) {
     return Boolean(value)
@@ -50,6 +52,10 @@
       && !Array.isArray(input.actorContext)
       && typeof input.now === "string"
       && normalizedNow === input.now;
+  }
+
+  function isCreateImpactNarrativeDraftInput(input) {
+    return isCreateEvidenceSummaryDraftInput(input) && input.requestedAudience === "internal";
   }
 
   function isMappedHumanActor(actorContext) {
@@ -145,6 +151,47 @@
     return { ok: true, data: result.data, error: null };
   }
 
+  export async function createImpactNarrativeDraft(input, dependencies = {}) {
+    const env = dependencies.env || process.env;
+    if (!isKaiSprint2Enabled(env)) return buildKaiError("feature_disabled");
+    if (!isKaiGenerationEnabled(env) || !areKaiSprint2GenerationFeaturesEnabled(env)) {
+      return buildKaiError("feature_disabled");
+    }
+    if (!isCreateImpactNarrativeDraftInput(input)) {
+      return buildKaiError("validation_blocker");
+    }
+    if (!isMappedHumanActor(input.actorContext)) {
+      return buildKaiError("authorization_denied");
+    }
+
+    const auth = validateActorCanPerformOperation(
+      input.actorContext,
+      CREATE_IMPACT_NARRATIVE_OPERATION,
+      input.organizationId,
+      { allowedRoles: GENERATED_CONTENT_ALLOWED_ROLES },
+    );
+    if (!auth.ok) {
+      return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });
+    }
+
+    const tenant = validateTenantBoundaryConsistency({
+      expectedOrganizationId: input.organizationId,
+      payload: { organization_id: input.organizationId },
+    });
+    if (tenant.severity === "blocker") {
+      return buildKaiError("tenant_boundary_violation", { blockers: [tenant] });
+    }
+
+    const repository =
+      dependencies.generatedContentRepository || (await createDefaultGeneratedContentRepository());
+    const result = await repository.createImpactNarrativeDraft(input, {
+      draftGenerator: dependencies.draftGenerator,
+      metadataOnlyAudit: dependencies.metadataOnlyAudit,
+    });
+    if (!result.ok) return buildKaiError(result.error.code, { status: result.error.status });
+    return { ok: true, data: result.data, error: null };
+  }
+
   const PACKET_KEYS = new Set([
     "generationRunId",
     "generatedContentDraftId",
@@ -181,7 +228,7 @@
     if (!hasExactKeys(data, PACKET_KEYS)) return false;
     if (!UUID_PATTERN.test(data.generationRunId)) return false;
     if (!UUID_PATTERN.test(data.generatedContentDraftId)) return false;
-    if (data.contentType !== "evidence_summary") return false;
+    if (!ALLOWED_GENERATED_CONTENT_TYPES.has(data.contentType)) return false;
     if (data.draftStatus !== "draft") return false;
     if (!AUDIENCES.has(data.requestedAudience)) return false;
     if (!UUID_PATTERN.test(data.reviewQueueItemId)) return false;
@@ -325,9 +372,11 @@
     GENERATED_CONTENT_REVIEW_ALLOWED_ROLES,
     COMPLETE_GENERATED_CONTENT_REVIEW_ALLOWED_ROLES,
     CREATE_EVIDENCE_SUMMARY_OPERATION,
+    CREATE_IMPACT_NARRATIVE_OPERATION,
     GET_GENERATED_DRAFT_REVIEW_PACKET_OPERATION,
     START_GENERATED_CONTENT_REVIEW_OPERATION,
     COMPLETE_GENERATED_CONTENT_REVIEW_OPERATION,
+    ALLOWED_GENERATED_CONTENT_TYPES,
   });
 
   export const __generatedContentReviewPacketServiceTestables = Object.freeze({

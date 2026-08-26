@@ -164,6 +164,10 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // verbatim).
     "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/review-packet",
     "/admin/organizations/:organizationId/generated-content-drafts/evidence-summary",
+    // KAI P13-01 internal impact-narrative generation surface, reusing the
+    // existing P3-01 governed generation vertical (additive; every prior
+    // entry preserved verbatim).
+    "/admin/organizations/:organizationId/generated-content-drafts/impact-narrative",
     // KAI P2-02 evidence-coverage-assessment surface (additive; every prior
     // entry preserved verbatim).
     "/admin/organizations/:organizationId/source-versions/:sourceVersionId/evidence-coverage-assessment",

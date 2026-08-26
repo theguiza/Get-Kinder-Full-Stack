@@ -4,11 +4,12 @@ import pool from "./kaiDb.js";
  * Read-only Impact Evidence Library generated-drafts index.
  *
  * This deliberately small read model only enumerates organization-scoped
- * `evidence_summary`/`internal` generated-content-draft identities already
- * persisted through the accepted P3-01 path, joined to their existing
- * `generated_content_review` queue row. It carries no generated block text,
- * citation detail, evidence/source content, or storage identifiers; P3-02
- * remains authoritative for the full draft/review packet.
+ * `internal`-audience generated-content-draft identities already persisted
+ * through the accepted P3-01/P13-01 paths (content types: `evidence_summary`,
+ * `impact_narrative`), joined to their existing `generated_content_review`
+ * queue row. It carries no generated block text, citation detail,
+ * evidence/source content, or storage identifiers; P3-02 remains
+ * authoritative for the full draft/review packet.
  */
 export async function listGeneratedDraftLibraryIndex(
   organizationId,
@@ -36,7 +37,7 @@ export async function listGeneratedDraftLibraryIndex(
         AND q.target_object_type = 'generated_content_draft'
         AND q.target_object_id = d.generated_content_draft_id
       WHERE d.organization_id = $1::uuid
-        AND d.content_type = 'evidence_summary'
+        AND d.content_type IN ('evidence_summary', 'impact_narrative')
         AND d.requested_audience = 'internal'
         AND d.draft_status = 'draft'
         AND q.priority = 'medium'

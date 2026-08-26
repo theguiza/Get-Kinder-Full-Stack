@@ -15,6 +15,7 @@ import {
   claimTraceabilityPath,
   coverageInternalAcceptancePath,
   createEvidenceSummaryPath,
+  createImpactNarrativePath,
   eligibleClaimsPath,
   errorText,
   evidenceCoverageAssessmentPath,
@@ -346,14 +347,14 @@ export default function ImpactEvidenceLibrary() {
     setGeneratedDraftPacket(projectGeneratedDraftPacket(packetResult.body.data));
   }, [organizationId]);
 
-  const generateEvidenceSummary = useCallback(async () => {
+  const generateDraft = useCallback(async (pathBuilder, idempotencyPrefix) => {
     if (audience !== "internal" || selectedGenerationClaimIds.length === 0) return;
     setGeneratingDraft(true);
     setMessage("");
     setGeneratedDraftPacket(null);
-    const createResult = await postJson(createEvidenceSummaryPath(organizationId), {
+    const createResult = await postJson(pathBuilder(organizationId), {
       claim_ids: selectedGenerationClaimIds,
-      idempotency_key: `evidence-summary-${selectedGenerationClaimIds.join("-")}`,
+      idempotency_key: `${idempotencyPrefix}-${selectedGenerationClaimIds.join("-")}`,
     });
     if (createResult.statusCode !== 201 && createResult.statusCode !== 200) {
       setGeneratingDraft(false);
@@ -376,6 +377,16 @@ export default function ImpactEvidenceLibrary() {
     }
     setGeneratedDraftPacket(projectGeneratedDraftPacket(packetResult.body.data));
   }, [audience, organizationId, selectedGenerationClaimIds, loadGeneratedDrafts]);
+
+  const generateEvidenceSummary = useCallback(
+    () => generateDraft(createEvidenceSummaryPath, "evidence-summary"),
+    [generateDraft],
+  );
+
+  const generateImpactNarrative = useCallback(
+    () => generateDraft(createImpactNarrativePath, "impact-narrative"),
+    [generateDraft],
+  );
 
   const refetchGeneratedDraftPacket = useCallback(async (draftId) => {
     const packetResult = await getJson(generatedDraftReviewPacketPath(organizationId, draftId));
@@ -656,6 +667,16 @@ export default function ImpactEvidenceLibrary() {
                 disabled={generatingDraft || selectedGenerationClaimIds.length === 0}
               >
                 {generatingDraft ? "Generating..." : "Generate evidence summary"}
+              </button>
+            ) : null}
+            {audience === "internal" ? (
+              <button
+                type="button"
+                className="btn btn-sm btn-outline-primary mt-2 w-100"
+                onClick={generateImpactNarrative}
+                disabled={generatingDraft || selectedGenerationClaimIds.length === 0}
+              >
+                {generatingDraft ? "Generating..." : "Generate Impact Narrative"}
               </button>
             ) : null}
           </div>

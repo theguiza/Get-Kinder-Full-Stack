@@ -16,6 +16,7 @@ const GENERATED_DRAFT_LIBRARY_MAX_LIMIT = 25;
 const UUID_RE = KAI_SPRINT2_P0_PATTERNS.uuid;
 const REVIEW_QUEUE_STATUSES = new Set(["open", "in_progress", "resolved", "blocked"]);
 const REVIEW_STATUSES = new Set(["needs_gk_review", "resolved"]);
+const LIBRARY_CONTENT_TYPES = new Set(["evidence_summary", "impact_narrative"]);
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -51,7 +52,7 @@ function responseDraftSummary(row, organizationId) {
     || !canonicalUuid(row.generated_content_draft_id)
     || !canonicalUuid(row.organization_id)
     || row.organization_id !== organizationId
-    || row.content_type !== "evidence_summary"
+    || !LIBRARY_CONTENT_TYPES.has(row.content_type)
     || row.requested_audience !== "internal"
     || row.draft_status !== "draft"
     || !canonicalUuid(row.review_queue_item_id)

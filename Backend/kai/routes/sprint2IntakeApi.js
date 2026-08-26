@@ -1743,6 +1743,7 @@ router.get(
 async function getGeneratedContentService() {
   if (
     intakeServiceOverride?.createEvidenceSummaryDraft
+    || intakeServiceOverride?.createImpactNarrativeDraft
     || intakeServiceOverride?.getGeneratedDraftReviewPacket
     || intakeServiceOverride?.startGeneratedContentReview
     || intakeServiceOverride?.completeGeneratedContentReview
@@ -1888,6 +1889,73 @@ router.post(
           organizationId: parsed.organizationId,
           actorContext,
           now,
+        }),
+      });
+    }, 201);
+  },
+);
+
+function validateCreateImpactNarrativeRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = eligibleClaimsForAudienceOrganizationIdentifier(req);
+  const payload = requestPayload(req);
+  const keys = Object.keys(payload);
+  if (
+    !identifiers
+    || keys.length !== 2
+    || !keys.every((key) => key === "claim_ids" || key === "idempotency_key")
+    || !Array.isArray(payload.claim_ids)
+    || payload.claim_ids.length < 1
+    || payload.claim_ids.length > 20
+    || payload.claim_ids.some((claimId) => typeof claimId !== "string" || !KAI_SPRINT2_P0_PATTERNS.uuid.test(claimId) || claimId !== claimId.toLowerCase())
+    || payload.claim_ids.length !== new Set(payload.claim_ids).size
+    || typeof payload.idempotency_key !== "string"
+    || payload.idempotency_key !== payload.idempotency_key.trim()
+    || !/^[ -~]{8,128}$/.test(payload.idempotency_key)
+  ) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker(
+        "invalid_internal_impact_narrative_generation_request",
+        "organization_id_claim_ids_or_idempotency_key",
+      )],
+    });
+    return null;
+  }
+  return {
+    organizationId: identifiers.organizationId,
+    claimIds: [...payload.claim_ids].sort(),
+    idempotencyKey: payload.idempotency_key,
+  };
+}
+
+router.post(
+  "/admin/organizations/:organizationId/generated-content-drafts/impact-narrative",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const parsed = validateCreateImpactNarrativeRequestOrSend(req, res);
+    if (!parsed) return;
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getGeneratedContentService();
+      const { createProductionImpactNarrativeDraftGenerator } = await import("../services/kaiImpactNarrativeDraftGenerator.js");
+      return service.createImpactNarrativeDraft({
+        organizationId: parsed.organizationId,
+        requestedAudience: "internal",
+        claimIds: parsed.claimIds,
+        idempotencyKey: parsed.idempotencyKey,
+        actorContext,
+        now,
+      }, {
+        draftGenerator: createProductionImpactNarrativeDraftGenerator(),
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForGeneratedContentDraft({
+          organizationId: parsed.organizationId,
+          actorContext,
+          now,
+          route: "p13_01_create_impact_narrative_draft",
         }),
       });
     }, 201);

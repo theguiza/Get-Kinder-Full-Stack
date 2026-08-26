@@ -35,7 +35,7 @@ async function runP301IntegrationSuite() {
   const { extractEvidenceFromSourceVersion } = await import("../Backend/kai/services/kaiEvidenceLineageService.js");
   const { proposeClaim } = await import("../Backend/kai/services/kaiClaimProposalService.js");
   const { generateClaimGapFollowups } = await import("../Backend/kai/services/kaiClaimGapFollowupService.js");
-  const { createEvidenceSummaryDraft } = await import("../Backend/kai/services/kaiGeneratedContentService.js");
+  const { createEvidenceSummaryDraft, createImpactNarrativeDraft } = await import("../Backend/kai/services/kaiGeneratedContentService.js");
   const { evaluateClaimTraceabilityInTransaction } = await import("../Backend/kai/dictionary/postgresClaimTraceabilityRepository.js");
   const { createPostgresEvidenceLineageRepository } = await import("../Backend/kai/dictionary/postgresEvidenceLineageRepository.js");
   const { createPostgresClaimProposalRepository } = await import("../Backend/kai/dictionary/postgresClaimProposalRepository.js");
@@ -44,6 +44,7 @@ async function runP301IntegrationSuite() {
     createPostgresGeneratedContentRepository,
     fingerprintEvidenceSummaryRequest,
   } = await import("../Backend/kai/dictionary/postgresGeneratedContentRepository.js");
+  const { listGeneratedDraftLibraryIndex: readGeneratedDraftLibraryIndex } = await import("../Backend/kai/db/kaiGeneratedDraftLibraryReadModels.js");
 
   const ORG = "00000000-0000-4000-8000-000000000001";
   const NOW = "2026-08-06T10:00:00.000Z";
@@ -470,5 +471,141 @@ async function runP301IntegrationSuite() {
       assert.equal(result.ok, false);
       assert.deepEqual(await countsForKey(key), { runs: 0, drafts: 0, blocks: 0, citations: 0, queues: 0, audits: 0 });
     });
+  }
+
+  if (process.env.KAI_P13_01_IMPACT_NARRATIVE_DATABASE_URL) {
+  test("P13-01 impact-narrative real service path persists contentType=impact_narrative/requestedAudience=internal through the existing generated-content architecture, enters the existing review lane, and is enumerated by the Generated Drafts library", async () => {
+    const claim = await prepareClaim();
+    const key = "p13-01-impact-narrative-fresh";
+    const calls = [];
+    const published = [];
+    const result = await createImpactNarrativeDraft(
+      serviceInput(claim, key),
+      {
+        env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" },
+        generatedContentRepository: generatedRepo(),
+        draftGenerator: generator({ calls }),
+        metadataOnlyAudit: auditRecorder({ published }),
+      },
+    );
+    assert.equal(result.ok, true, result.error?.code);
+    assert.equal(result.data.replayed, false);
+    assert.equal(result.data.requestedAudience, "internal");
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].contentType, "impact_narrative");
+    assert.deepEqual(await countsForKey(key), { runs: 1, drafts: 1, blocks: 1, citations: 1, queues: 1, audits: 1 });
+    assert.deepEqual(published, [true]);
+
+    const persistedRows = await query(
+      `SELECT content_type, requested_audience FROM kai.generated_content_drafts WHERE generated_content_draft_id = $1::uuid`,
+      [result.data.generatedContentDraftId],
+    );
+    assert.equal(persistedRows[0].content_type, "impact_narrative");
+    assert.equal(persistedRows[0].requested_audience, "internal");
+
+    // Reuses the existing generated-content review lane -- open/needs review,
+    // no automatic approval or finalization.
+    const queueRows = await query(
+      `SELECT queue_status, review_status FROM kai.review_queue_items
+        WHERE queue_type = 'generated_content_review' AND target_object_id = $1::uuid`,
+      [result.data.generatedContentDraftId],
+    );
+    assert.equal(queueRows[0].queue_status, "open");
+    assert.equal(queueRows[0].review_status, "needs_gk_review");
+
+    // Reuses the existing Generated Drafts library read model.
+    const libraryRows = await readGeneratedDraftLibraryIndex(ORG, { limit: 25, afterGeneratedContentDraftId: null }, pool);
+    assert.ok(libraryRows.some((row) =>
+      row.generated_content_draft_id === result.data.generatedContentDraftId
+      && row.content_type === "impact_narrative"
+      && row.requested_audience === "internal"));
+  });
+
+  test("P13-01 exact impact-narrative replay is deterministic: identical input returns the same draft with zero additional generator calls or writes", async () => {
+    const claim = await prepareClaim();
+    const calls = [];
+    const replay = await createImpactNarrativeDraft(
+      serviceInput(claim, "p13-01-impact-narrative-fresh"),
+      {
+        env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" },
+        generatedContentRepository: generatedRepo(),
+        draftGenerator: generator({ calls }),
+        metadataOnlyAudit: auditRecorder(),
+      },
+    );
+    assert.equal(replay.ok, true);
+    assert.equal(replay.data.replayed, true);
+    assert.equal(calls.length, 0);
+    assert.deepEqual(await countsForKey("p13-01-impact-narrative-fresh"), { runs: 1, drafts: 1, blocks: 1, citations: 1, queues: 1, audits: 1 });
+  });
+
+  test("P13-01 data-integrity invariant: evidence_summary and impact_narrative sharing the same org/audience/claims/idempotency key never replay as each other", async () => {
+    const claim = await prepareClaim();
+    const key = "p13-01-cross-content-type-collision";
+
+    const evidenceSummaryResult = await createEvidenceSummaryDraft(
+      serviceInput(claim, key),
+      {
+        env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" },
+        generatedContentRepository: generatedRepo(),
+        draftGenerator: generator(),
+        metadataOnlyAudit: auditRecorder(),
+      },
+    );
+    assert.equal(evidenceSummaryResult.ok, true);
+    assert.equal(evidenceSummaryResult.data.replayed, false);
+
+    let impactNarrativeGeneratorCalls = 0;
+    const impactNarrativeResult = await createImpactNarrativeDraft(
+      serviceInput(claim, key),
+      {
+        env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" },
+        generatedContentRepository: generatedRepo(),
+        draftGenerator: async () => {
+          impactNarrativeGeneratorCalls += 1;
+          throw new Error("must not call");
+        },
+        metadataOnlyAudit: auditRecorder(),
+      },
+    );
+    // The evidence_summary reservation already owns (organization_id,
+    // idempotency_key); the impact_narrative request must fail closed as a
+    // conflict rather than silently returning the evidence_summary draft, or
+    // silently creating a second colliding row.
+    assert.equal(impactNarrativeResult.ok, false);
+    assert.equal(impactNarrativeResult.error.code, "duplicate_conflict");
+    assert.equal(impactNarrativeGeneratorCalls, 0);
+
+    const rows = await query(
+      `SELECT d.content_type AS content_type FROM kai.generated_content_drafts d
+         JOIN kai.generation_runs r ON r.generation_run_id = d.generation_run_id
+        WHERE r.organization_id = $1::uuid AND r.idempotency_key = $2`,
+      [ORG, key],
+    );
+    assert.deepEqual(rows.map((row) => row.content_type), ["evidence_summary"]);
+  });
+
+  test("P13-01 VAL-GEN-004 blocks an impact-narrative draft that invents a number or causal claim not present in the cited governed claim statement", async () => {
+    const claim = await prepareClaim();
+    const key = "p13-01-invented-number-blocked";
+    const result = await createImpactNarrativeDraft(
+      serviceInput(claim, key),
+      {
+        env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" },
+        generatedContentRepository: generatedRepo(),
+        draftGenerator: async (generatorInput) => ({
+          blocks: [{
+            ordinal: 1,
+            text: "This program caused a 42% increase not present in any cited claim.",
+            citations: [{ claimId: generatorInput.claims[0].claimId, evidenceItemId: generatorInput.claims[0].evidenceItemId }],
+          }],
+        }),
+        metadataOnlyAudit: auditRecorder(),
+      },
+    );
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "validation_blocker");
+    assert.deepEqual(await countsForKey(key), { runs: 0, drafts: 0, blocks: 0, citations: 0, queues: 0, audits: 0 });
+  });
   }
 }

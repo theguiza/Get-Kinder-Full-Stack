@@ -27,6 +27,8 @@ const RESULT_STATUS = Object.freeze({
 });
 
 const CONTENT_TYPE = "evidence_summary";
+const IMPACT_NARRATIVE_CONTENT_TYPE = "impact_narrative";
+const ALLOWED_GENERATED_CONTENT_TYPES = new Set([CONTENT_TYPE, IMPACT_NARRATIVE_CONTENT_TYPE]);
 const DRAFT_STATUS = "draft";
 const REVIEW_STATUS = GENERATED_CONTENT_REVIEW_QUEUE_CONTRACT.reviewStatus;
 const REVIEW_QUEUE_TYPE = GENERATED_CONTENT_REVIEW_QUEUE_CONTRACT.queueType;
@@ -110,11 +112,19 @@ function canonicalJson(value) {
   return JSON.stringify(value);
 }
 
-export function fingerprintEvidenceSummaryRequest({ requestedAudience, claimIds }) {
+function fingerprintGeneratedContentRequest(contentType, { requestedAudience, claimIds }) {
   return crypto
     .createHash("sha256")
-    .update(canonicalJson({ contentType: CONTENT_TYPE, requestedAudience, claimIds }))
+    .update(canonicalJson({ contentType, requestedAudience, claimIds }))
     .digest("hex");
+}
+
+export function fingerprintEvidenceSummaryRequest({ requestedAudience, claimIds }) {
+  return fingerprintGeneratedContentRequest(CONTENT_TYPE, { requestedAudience, claimIds });
+}
+
+export function fingerprintImpactNarrativeRequest({ requestedAudience, claimIds }) {
+  return fingerprintGeneratedContentRequest(IMPACT_NARRATIVE_CONTENT_TYPE, { requestedAudience, claimIds });
 }
 
 function hasExactKeys(value, allowed) {
@@ -193,7 +203,7 @@ function validateCompleteReviewInput(input) {
 
 function validateGeneratorInput(input) {
   if (!hasExactKeys(input, new Set(["contentType", "requestedAudience", "claims"]))) return false;
-  if (input.contentType !== CONTENT_TYPE || !AUDIENCES.has(input.requestedAudience)) return false;
+  if (!ALLOWED_GENERATED_CONTENT_TYPES.has(input.contentType) || !AUDIENCES.has(input.requestedAudience)) return false;
   if (!Array.isArray(input.claims) || input.claims.length === 0) return false;
   const allowedClaimKeys = new Set([
     "claimId",
@@ -255,7 +265,7 @@ function prepareRequiredAudit(metadataOnlyAudit, payload) {
   return prepared;
 }
 
-async function insertRunReservation(tx, input, requestFingerprint) {
+async function insertRunReservation(tx, input, requestFingerprint, contentType) {
   const { rows } = await tx.query(
     `INSERT INTO kai.generation_runs (
        organization_id, idempotency_key, request_fingerprint, content_type,
@@ -264,7 +274,7 @@ async function insertRunReservation(tx, input, requestFingerprint) {
      VALUES ($1::uuid,$2,$3,$4,$5,'system',$6::timestamptz)
      ON CONFLICT (organization_id, idempotency_key) DO NOTHING
      RETURNING generation_run_id::text AS generation_run_id`,
-    [input.organizationId, input.idempotencyKey, requestFingerprint, CONTENT_TYPE, input.requestedAudience, input.now],
+    [input.organizationId, input.idempotencyKey, requestFingerprint, contentType, input.requestedAudience, input.now],
   );
   return rows[0] || null;
 }
@@ -410,15 +420,15 @@ async function readReviewPacketState(tx, { organizationId, generatedContentDraft
   };
 }
 
-function validateExistingState(state, requestFingerprint, requestedAudience) {
+function validateExistingState(state, requestFingerprint, requestedAudience, contentType) {
   if (!state?.run) return false;
   if (state.run.request_fingerprint !== requestFingerprint) return "duplicate_conflict";
-  if (state.run.content_type !== CONTENT_TYPE || state.run.requested_audience !== requestedAudience || state.run.created_by_type !== "system") return false;
+  if (state.run.content_type !== contentType || state.run.requested_audience !== requestedAudience || state.run.created_by_type !== "system") return false;
   if (state.drafts.length !== 1 || state.queues.length !== 1 || state.blocks.length < 1) return false;
   const draft = state.drafts[0];
   if (
     draft.generation_run_id !== state.run.generation_run_id ||
-    draft.content_type !== CONTENT_TYPE ||
+    draft.content_type !== contentType ||
     draft.requested_audience !== requestedAudience ||
     draft.draft_status !== DRAFT_STATUS ||
     draft.review_status !== REVIEW_STATUS ||
@@ -452,7 +462,7 @@ function validateImmutableGraphRows(state, { organizationId, generatedContentDra
   if (!hasOnlyAllowedKeys(state.run, runKeys) || !hasOnlyAllowedKeys(state.draft, draftKeys)) return "system_error";
   if (!state.blocks.every((block) => hasOnlyAllowedKeys(block, blockKeys))) return "system_error";
   if (!state.citations.every((citation) => hasOnlyAllowedKeys(citation, citationKeys))) return "system_error";
-  if (state.run.organization_id !== organizationId || state.run.content_type !== CONTENT_TYPE) return false;
+  if (state.run.organization_id !== organizationId || !ALLOWED_GENERATED_CONTENT_TYPES.has(state.run.content_type)) return false;
   if (!SHA256_LOWER_PATTERN.test(state.run.request_fingerprint)) return false;
   if (state.siblingDrafts.length !== 1) return false;
   if (state.siblingDrafts[0].generated_content_draft_id !== generatedContentDraftId) return false;
@@ -460,7 +470,7 @@ function validateImmutableGraphRows(state, { organizationId, generatedContentDra
     state.draft.generated_content_draft_id !== generatedContentDraftId ||
     state.draft.organization_id !== organizationId ||
     state.draft.generation_run_id !== state.run.generation_run_id ||
-    state.draft.content_type !== CONTENT_TYPE ||
+    state.draft.content_type !== state.run.content_type ||
     state.draft.draft_status !== DRAFT_STATUS ||
     state.draft.requested_audience !== state.run.requested_audience ||
     state.draft.review_status !== REVIEW_STATUS
@@ -661,9 +671,9 @@ async function loadGenerationProjection(tx, { organizationId, claimIds, requeste
   }));
 }
 
-function toGeneratorInput({ requestedAudience, projections }) {
+function toGeneratorInput({ requestedAudience, projections, contentType }) {
   const input = {
-    contentType: CONTENT_TYPE,
+    contentType,
     requestedAudience,
     claims: projections.map((claim) => ({
       claimId: claim.claimId,
@@ -679,7 +689,7 @@ function toGeneratorInput({ requestedAudience, projections }) {
   return input;
 }
 
-async function persistCompleteSet(tx, { input, runId, generatorResult, validation, projections }) {
+async function persistCompleteSet(tx, { input, runId, generatorResult, validation, projections, contentType }) {
   const draftRows = await tx.query(
     `INSERT INTO kai.generated_content_drafts (
        generation_run_id, organization_id, content_type, requested_audience,
@@ -690,7 +700,7 @@ async function persistCompleteSet(tx, { input, runId, generatorResult, validatio
     [
       runId,
       input.organizationId,
-      CONTENT_TYPE,
+      contentType,
       input.requestedAudience,
       DRAFT_STATUS,
       REVIEW_STATUS,
@@ -797,9 +807,130 @@ function toResult(state, replayed = false) {
   };
 }
 
-async function rereadAsResult(tx, input, requestFingerprint, replayed) {
+async function createGeneratedContentDraft(contentType, fingerprintRequest, input, dependencies, { runInTransaction, evaluator, afterPersist }) {
+  if (!validateInput(input)) return failure("validation_blocker");
+  if (contentType === IMPACT_NARRATIVE_CONTENT_TYPE && input.requestedAudience !== "internal") return failure("validation_blocker");
+  if (typeof dependencies.draftGenerator !== "function") return failure("validation_blocker");
+  if (!dependencies.metadataOnlyAudit) return failure("validation_blocker");
+  const requestFingerprint = fingerprintRequest(input);
+
+  try {
+    return await runInTransaction(async (tx) => {
+      const reservation = await insertRunReservation(tx, input, requestFingerprint, contentType);
+      if (!reservation) return rereadAsResult(tx, input, requestFingerprint, true, contentType);
+
+      // Package 14-05: governed INTERNAL draft generation requires fresh
+      // P2-06 traceability revalidation of every requested claim -- proof
+      // that the transaction is still about the same governed claim and
+      // evidence object -- but current audience/use eligibility
+      // (result.data.eligible) is a separate, stricter downstream fact
+      // and is intentionally NOT required here. `eligible=false` alone
+      // must never reject INTERNAL draft creation.
+      const traceabilityResults = [];
+      for (const claimId of input.claimIds) {
+        const result = await evaluator(tx, {
+          organizationId: input.organizationId,
+          claimId,
+          requestedAudience: input.requestedAudience,
+        });
+        if (
+          !result.ok
+          || result.data?.requestedAudience !== input.requestedAudience
+          || result.data?.claim?.claim_id !== claimId
+          || !result.data?.evidence?.evidence_item_id
+        ) {
+          rollbackFailure("validation_blocker");
+        }
+        traceabilityResults.push(result.data);
+      }
+
+      const projections = await loadGenerationProjection(tx, input);
+      if (!projections) rollbackFailure("conflict_current_state_changed");
+      const projectionByClaim = new Map(projections.map((claim) => [claim.claimId, claim]));
+      const traceabilityByClaimId = new Map(traceabilityResults.map((traceability) => [traceability.claim.claim_id, traceability]));
+      for (const traceability of traceabilityResults) {
+        const projection = projectionByClaim.get(traceability.claim.claim_id);
+        if (!projection || projection.evidenceItemId !== traceability.evidence.evidence_item_id) {
+          rollbackFailure("conflict_current_state_changed");
+        }
+        // Preserve real current limitations/blockers into the existing
+        // limitationCodes generator channel: an internally admitted but
+        // currently ineligible claim must not have its blockers silently
+        // erased. Deterministic ordering, de-duplicated, no fabrication.
+        const blockerCodes = Array.isArray(traceability.blockerCodes) ? traceability.blockerCodes : [];
+        projection.limitationCodes = [...new Set(blockerCodes)].sort();
+      }
+
+      const generatorInput = toGeneratorInput({ requestedAudience: input.requestedAudience, projections, contentType });
+      const generatorResult = await dependencies.draftGenerator(generatorInput);
+      if (!validateGeneratorResult(generatorResult)) rollbackFailure("validation_blocker");
+
+      const validation = validateGeneratedContentDraft({
+        requestedAudience: input.requestedAudience,
+        generationClaims: projections.map((projection) => ({
+          ...projection,
+          revalidatedForGeneration: true,
+          currentEligible: traceabilityByClaimId.get(projection.claimId)?.eligible === true,
+        })),
+        blocks: generatorResult.blocks,
+        draftAudience: input.requestedAudience,
+      });
+      if (!validation.ok) rollbackFailure("validation_blocker");
+
+      // Post-generation revalidation remains a current-state/lineage
+      // integrity check only: it must still fail closed if traceability
+      // fails, or returns a different claim/evidence identity than the
+      // object generation began against. It must NOT require
+      // eligible=true, and must NOT convert eligible=false into true.
+      for (const claim of projections) {
+        const result = await evaluator(tx, {
+          organizationId: input.organizationId,
+          claimId: claim.claimId,
+          requestedAudience: input.requestedAudience,
+        });
+        if (
+          !result.ok
+          || result.data?.claim?.claim_id !== claim.claimId
+          || result.data?.evidence?.evidence_item_id !== claim.evidenceItemId
+        ) {
+          rollbackFailure("conflict_current_state_changed");
+        }
+      }
+
+      const persisted = await persistCompleteSet(tx, {
+        input,
+        runId: reservation.generation_run_id,
+        generatorResult,
+        validation,
+        projections,
+        contentType,
+      });
+      await afterPersist(tx, persisted);
+      const postWrite = await rereadAsResult(tx, input, requestFingerprint, false, contentType);
+      if (!postWrite.ok) throw new RollbackResultError(postWrite);
+
+      const preparedAudit = prepareRequiredAudit(dependencies.metadataOnlyAudit, {
+        attempted_operation: AUDIT_OPERATION,
+        actor_type: "human",
+        object_type: "generated_content_draft",
+        request_scope: "organization_generated_content_draft",
+        contract: AUDIT_CONTRACT,
+      });
+      await insertAudit(tx, { input, persisted, projections });
+      await preparedAudit.publish();
+      return postWrite;
+    });
+  } catch (error) {
+    if (error instanceof RollbackResultError) return error.result;
+    if (error?.code === "23505") return failure("conflict_current_state_changed");
+    if (error?.code === "23503" || error?.code === "22P02" || error?.code === "23514") return failure("validation_blocker");
+    return failure("system_error");
+  }
+}
+
+async function rereadAsResult(tx, input, requestFingerprint, replayed, contentType) {
   const state = await readExistingState(tx, input);
-  const validation = validateExistingState(state, requestFingerprint, input.requestedAudience);
+  const validation = validateExistingState(state, requestFingerprint, input.requestedAudience, contentType);
   if (validation === "duplicate_conflict") return failure("duplicate_conflict");
   if (validation !== true) return failure("conflict_current_state_changed");
   return success(toResult(state, replayed));
@@ -1551,122 +1682,22 @@ export function createPostgresGeneratedContentRepository({
       }
     },
     async createEvidenceSummaryDraft(input, dependencies = {}) {
-      if (!validateInput(input)) return failure("validation_blocker");
-      if (typeof dependencies.draftGenerator !== "function") return failure("validation_blocker");
-      if (!dependencies.metadataOnlyAudit) return failure("validation_blocker");
-      const requestFingerprint = fingerprintEvidenceSummaryRequest(input);
-
-      try {
-        return await runInTransaction(async (tx) => {
-          const reservation = await insertRunReservation(tx, input, requestFingerprint);
-          if (!reservation) return rereadAsResult(tx, input, requestFingerprint, true);
-
-          // Package 14-05: governed INTERNAL draft generation requires fresh
-          // P2-06 traceability revalidation of every requested claim -- proof
-          // that the transaction is still about the same governed claim and
-          // evidence object -- but current audience/use eligibility
-          // (result.data.eligible) is a separate, stricter downstream fact
-          // and is intentionally NOT required here. `eligible=false` alone
-          // must never reject INTERNAL draft creation.
-          const traceabilityResults = [];
-          for (const claimId of input.claimIds) {
-            const result = await evaluator(tx, {
-              organizationId: input.organizationId,
-              claimId,
-              requestedAudience: input.requestedAudience,
-            });
-            if (
-              !result.ok
-              || result.data?.requestedAudience !== input.requestedAudience
-              || result.data?.claim?.claim_id !== claimId
-              || !result.data?.evidence?.evidence_item_id
-            ) {
-              rollbackFailure("validation_blocker");
-            }
-            traceabilityResults.push(result.data);
-          }
-
-          const projections = await loadGenerationProjection(tx, input);
-          if (!projections) rollbackFailure("conflict_current_state_changed");
-          const projectionByClaim = new Map(projections.map((claim) => [claim.claimId, claim]));
-          const traceabilityByClaimId = new Map(traceabilityResults.map((traceability) => [traceability.claim.claim_id, traceability]));
-          for (const traceability of traceabilityResults) {
-            const projection = projectionByClaim.get(traceability.claim.claim_id);
-            if (!projection || projection.evidenceItemId !== traceability.evidence.evidence_item_id) {
-              rollbackFailure("conflict_current_state_changed");
-            }
-            // Preserve real current limitations/blockers into the existing
-            // limitationCodes generator channel: an internally admitted but
-            // currently ineligible claim must not have its blockers silently
-            // erased. Deterministic ordering, de-duplicated, no fabrication.
-            const blockerCodes = Array.isArray(traceability.blockerCodes) ? traceability.blockerCodes : [];
-            projection.limitationCodes = [...new Set(blockerCodes)].sort();
-          }
-
-          const generatorInput = toGeneratorInput({ requestedAudience: input.requestedAudience, projections });
-          const generatorResult = await dependencies.draftGenerator(generatorInput);
-          if (!validateGeneratorResult(generatorResult)) rollbackFailure("validation_blocker");
-
-          const validation = validateGeneratedContentDraft({
-            requestedAudience: input.requestedAudience,
-            generationClaims: projections.map((projection) => ({
-              ...projection,
-              revalidatedForGeneration: true,
-              currentEligible: traceabilityByClaimId.get(projection.claimId)?.eligible === true,
-            })),
-            blocks: generatorResult.blocks,
-            draftAudience: input.requestedAudience,
-          });
-          if (!validation.ok) rollbackFailure("validation_blocker");
-
-          // Post-generation revalidation remains a current-state/lineage
-          // integrity check only: it must still fail closed if traceability
-          // fails, or returns a different claim/evidence identity than the
-          // object generation began against. It must NOT require
-          // eligible=true, and must NOT convert eligible=false into true.
-          for (const claim of projections) {
-            const result = await evaluator(tx, {
-              organizationId: input.organizationId,
-              claimId: claim.claimId,
-              requestedAudience: input.requestedAudience,
-            });
-            if (
-              !result.ok
-              || result.data?.claim?.claim_id !== claim.claimId
-              || result.data?.evidence?.evidence_item_id !== claim.evidenceItemId
-            ) {
-              rollbackFailure("conflict_current_state_changed");
-            }
-          }
-
-          const persisted = await persistCompleteSet(tx, {
-            input,
-            runId: reservation.generation_run_id,
-            generatorResult,
-            validation,
-            projections,
-          });
-          await afterPersist(tx, persisted);
-          const postWrite = await rereadAsResult(tx, input, requestFingerprint, false);
-          if (!postWrite.ok) throw new RollbackResultError(postWrite);
-
-          const preparedAudit = prepareRequiredAudit(dependencies.metadataOnlyAudit, {
-            attempted_operation: AUDIT_OPERATION,
-            actor_type: "human",
-            object_type: "generated_content_draft",
-            request_scope: "organization_generated_content_draft",
-            contract: AUDIT_CONTRACT,
-          });
-          await insertAudit(tx, { input, persisted, projections });
-          await preparedAudit.publish();
-          return postWrite;
-        });
-      } catch (error) {
-        if (error instanceof RollbackResultError) return error.result;
-        if (error?.code === "23505") return failure("conflict_current_state_changed");
-        if (error?.code === "23503" || error?.code === "22P02" || error?.code === "23514") return failure("validation_blocker");
-        return failure("system_error");
-      }
+      return createGeneratedContentDraft(
+        CONTENT_TYPE,
+        fingerprintEvidenceSummaryRequest,
+        input,
+        dependencies,
+        { runInTransaction, evaluator, afterPersist },
+      );
+    },
+    async createImpactNarrativeDraft(input, dependencies = {}) {
+      return createGeneratedContentDraft(
+        IMPACT_NARRATIVE_CONTENT_TYPE,
+        fingerprintImpactNarrativeRequest,
+        input,
+        dependencies,
+        { runInTransaction, evaluator, afterPersist },
+      );
     },
     async startGeneratedContentReview(input, dependencies = {}) {
       if (!validateCompleteReviewInput(input)) return failure("validation_blocker");
@@ -2248,6 +2279,8 @@ async function evaluateCompleteExportReviewReplayOrConflict(tx, input) {
 
 export const __generatedContentRepositoryContract = Object.freeze({
   CONTENT_TYPE,
+  IMPACT_NARRATIVE_CONTENT_TYPE,
+  ALLOWED_GENERATED_CONTENT_TYPES,
   DRAFT_STATUS,
   REVIEW_STATUS,
   REVIEW_QUEUE_TYPE,
@@ -2295,6 +2328,7 @@ export const __generatedContentRepositoryTestables = Object.freeze({
   validateReviewPacketRows,
   validateCompleteReviewInput,
   fingerprintEvidenceSummaryRequest,
+  fingerprintImpactNarrativeRequest,
   prepareRequiredAudit,
   validateRequestExportReviewInput,
   validateExportReviewRequestStateInput,

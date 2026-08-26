@@ -751,10 +751,14 @@ export function createProductionMetadataOnlyAuditForGeneratedContentDraft({
   organizationId,
   actorContext,
   now,
+  route = "p3_01_create_evidence_summary_draft",
   insertAuditEvent = insertRequiredSuccessfulAuditEvent,
 } = {}) {
   if (typeof organizationId !== "string" || organizationId.length === 0) {
     throw new TypeError("createProductionMetadataOnlyAuditForGeneratedContentDraft requires organizationId.");
+  }
+  if (typeof route !== "string" || route.length === 0) {
+    throw new TypeError("createProductionMetadataOnlyAuditForGeneratedContentDraft requires route.");
   }
 
   function isPlainObject(value) {
@@ -778,7 +782,7 @@ export function createProductionMetadataOnlyAuditForGeneratedContentDraft({
         actor_type: actorContext?.actorType || "human",
         actor_user_id: actorContext?.actorUserId || null,
         request_id: actorContext?.requestId || null,
-        route: "p3_01_create_evidence_summary_draft",
+        route,
         created_at: typeof now === "string" ? now : new Date().toISOString(),
         metadata_only: true,
         contains_raw_file_content: false,

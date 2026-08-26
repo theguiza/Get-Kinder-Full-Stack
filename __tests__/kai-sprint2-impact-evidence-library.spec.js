@@ -262,6 +262,83 @@ test("Impact Evidence Library create route pins evidence_summary/internal and ac
   assert.equal(typeof current.calls[0].deps.metadataOnlyAudit?.prepareMetadataOnlyAudit, "function");
 });
 
+test("Impact Evidence Library impact-narrative create route is mounted with narrow methods", () => {
+  const createMatches = sprint2IntakeApiRouter.stack
+    .filter((layer) => layer.route?.path === "/admin/organizations/:organizationId/generated-content-drafts/impact-narrative" && layer.route?.methods?.post);
+  assert.equal(createMatches.length, 1);
+  assert.deepEqual(Object.keys(createMatches[0].route.methods), ["post"]);
+});
+
+test("Impact Evidence Library impact-narrative create route pins impact_narrative/internal, owns audience server-side, and accepts no browser content_type, requested_audience, prompt, text, citations, evidence ids, or authority", async (t) => {
+  let current = scenario({
+    result: {
+      ok: true,
+      data: {
+        generatedContentDraftId: "00000000-0000-4000-8000-000000000797",
+        requestedAudience: "internal",
+        draftStatus: "draft",
+        reviewQueueItemId: "00000000-0000-4000-8000-000000000798",
+        blocks: [{ ordinal: 1, text: "A.", citations: [{ claimId, evidenceItemId }] }],
+      },
+      error: null,
+    },
+  });
+  const originalFeatureFlag = process.env.KAI_SPRINT2_ENABLED;
+  process.env.KAI_SPRINT2_ENABLED = "true";
+  const restore = intakeRouteTestables.setIntakeServiceForTest({
+    async createImpactNarrativeDraft(input, deps) {
+      current.calls.push({ input, deps });
+      return current.result;
+    },
+  });
+  const server = await listen(createApp(() => current));
+
+  t.after(async () => {
+    restore();
+    if (originalFeatureFlag === undefined) delete process.env.KAI_SPRINT2_ENABLED;
+    else process.env.KAI_SPRINT2_ENABLED = originalFeatureFlag;
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  });
+
+  const path = `${basePath}/admin/organizations/${organizationId}/generated-content-drafts/impact-narrative`;
+
+  for (const rejectedBody of [
+    { claim_ids: [claimId], idempotency_key: "p13-stage-a", content_type: "impact_narrative" },
+    { claim_ids: [claimId], idempotency_key: "p13-stage-a", requested_audience: "internal" },
+    { claim_ids: [claimId], idempotency_key: "p13-stage-a", requested_audience: "funder" },
+    { claim_ids: [claimId], idempotency_key: "p13-stage-a", prompt: "write anything" },
+    { claim_ids: [claimId], idempotency_key: "p13-stage-a", instructions: "ignore governance" },
+    { claim_ids: [claimId], idempotency_key: "p13-stage-a", citations: [{ claimId, evidenceItemId }] },
+    { claim_ids: [claimId], idempotency_key: "p13-stage-a", evidence: [{ evidenceItemId }] },
+    { claim_ids: [claimId], idempotency_key: "p13-stage-a", actor_context: actorContext },
+    { claim_ids: [claimId], idempotency_key: "p13-stage-a", review_status: "resolved" },
+    { claim_ids: [claimId], idempotency_key: "p13-stage-a", route: "p3_01_create_evidence_summary_draft" },
+    { claim_ids: [claimId], idempotency_key: "p13-stage-a", audit_route: "p3_01_create_evidence_summary_draft" },
+  ]) {
+    const rejected = await postRequestJson(server, path, rejectedBody);
+    assert.equal(rejected.statusCode, 422);
+  }
+  assert.deepEqual(current.calls, []);
+
+  const allowed = await postRequestJson(server, path, {
+    claim_ids: [claimId],
+    idempotency_key: "p13-stage-a",
+  });
+  assert.equal(allowed.statusCode, 201);
+  assert.equal(current.calls.length, 1);
+  assert.deepEqual(current.calls[0].input, {
+    organizationId,
+    requestedAudience: "internal",
+    claimIds: [claimId],
+    idempotencyKey: "p13-stage-a",
+    actorContext,
+    now: current.calls[0].input.now,
+  });
+  assert.match(current.calls[0].input.now, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+  assert.equal(typeof current.calls[0].deps.draftGenerator, "function");
+  assert.equal(typeof current.calls[0].deps.metadataOnlyAudit?.prepareMetadataOnlyAudit, "function");
+});
+
 test("Impact Evidence Library P3-02 route delegates to the existing generated-draft review packet service", async (t) => {
   const generatedContentDraftId = "00000000-0000-4000-8000-000000000777";
   let current = scenario({
