@@ -346,6 +346,8 @@ const GOVERNED_CLAIMS_TOOL_NAMES = [
   "list_eligible_claims_for_audience",
 ];
 
+export const IMPACT_EVIDENCE_LIBRARY_SURFACE = "impact_evidence_library";
+
 export function getToolDefinitionsForTier(tier) {
   const toolNames = getAvailableTools(tier);
   return toolNames.map((toolName) => TOOL_DEFINITIONS[toolName]).filter(Boolean);
@@ -358,6 +360,10 @@ export function getToolDefinitionsForKaiContext(tier, { surface = "default" } = 
       "get_reporting_readiness_info",
       "assess_reporting_readiness_question",
     ].map((toolName) => TOOL_DEFINITIONS[toolName]).filter(Boolean);
+  }
+
+  if (surface === IMPACT_EVIDENCE_LIBRARY_SURFACE) {
+    return GOVERNED_CLAIMS_TOOL_NAMES.map((toolName) => TOOL_DEFINITIONS[toolName]).filter(Boolean);
   }
 
   const baseTools = getToolDefinitionsForTier(tier);

@@ -5,8 +5,9 @@ import {
   getGuestSystemPrompt,
   getOrgSystemPrompt,
   getReportingReadinessSystemPrompt,
+  getImpactEvidenceLibrarySystemPrompt,
 } from "./kai-prompts.js";
-import { getToolDefinitionsForKaiContext } from "./kai-tool-definitions.js";
+import { getToolDefinitionsForKaiContext, IMPACT_EVIDENCE_LIBRARY_SURFACE } from "./kai-tool-definitions.js";
 import { executeToolCall } from "./kai-tool-executor.js";
 import { determineKaiTier, getModelForTier } from "../middleware/kai-tier.js";
 import { resolveKaiRequestContext } from "../kai/services/kaiContextService.js";
@@ -559,6 +560,7 @@ export async function handleKaiMessage({
   surface = "default",
   requestedOrganizationId,
   requestedEngagementId,
+  persistConversation = true,
 } = {}) {
   let resolvedConversationId = conversationId || null;
 
@@ -620,21 +622,29 @@ export async function handleKaiMessage({
         resolvedTier = determineKaiTier(user);
       }
 
-      let existingConversationId = null;
-      if (conversationId) {
-        const { rows } = await pool.query(
-          "SELECT id FROM kai_conversations WHERE id = $1 AND user_id = $2 LIMIT 1",
-          [conversationId, userId]
-        );
-        existingConversationId = rows?.[0]?.id || null;
+      if (persistConversation) {
+        let existingConversationId = null;
+        if (conversationId) {
+          const { rows } = await pool.query(
+            "SELECT id FROM kai_conversations WHERE id = $1 AND user_id = $2 LIMIT 1",
+            [conversationId, userId]
+          );
+          existingConversationId = rows?.[0]?.id || null;
+        }
+
+        resolvedConversationId = await resolveConversationIdForUser(userId, conversationId);
+        isNewConversation = Boolean(resolvedConversationId) && !existingConversationId;
+        const historyRows = await loadConversationRows(resolvedConversationId);
+        messages = rowsToClaudeMessages(historyRows);
+
+        await saveUserMessage(resolvedConversationId, rawUserMessage);
+      } else {
+        // Ephemeral governed surface (e.g. the Impact Evidence Library):
+        // no conversationId is resolved/created, no history is loaded, and
+        // no previous-session summary is injected below. This request's
+        // messages array only ever holds this single turn.
+        resolvedConversationId = null;
       }
-
-      resolvedConversationId = await resolveConversationIdForUser(userId, conversationId);
-      isNewConversation = Boolean(resolvedConversationId) && !existingConversationId;
-      const historyRows = await loadConversationRows(resolvedConversationId);
-      messages = rowsToClaudeMessages(historyRows);
-
-      await saveUserMessage(resolvedConversationId, rawUserMessage);
     } else {
       resolvedTier = "guest";
       resolvedConversationId = null;
@@ -644,8 +654,11 @@ export async function handleKaiMessage({
     messages = groupConsecutiveRoles(messages);
 
     const isReportingReadinessSurface = surface === "reporting_readiness";
+    const isImpactEvidenceLibrarySurface = surface === IMPACT_EVIDENCE_LIBRARY_SURFACE;
     const isOrgRep = user?.org_rep === true;
-    let systemPrompt = isReportingReadinessSurface
+    let systemPrompt = isImpactEvidenceLibrarySurface
+      ? getImpactEvidenceLibrarySystemPrompt(user, kaiContext)
+      : isReportingReadinessSurface
       ? getReportingReadinessSystemPrompt(user)
       : isGuest
         ? getGuestSystemPrompt()

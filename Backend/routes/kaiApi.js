@@ -1,5 +1,6 @@
 import express from "express";
 import { handleKaiMessage, getConversationHistory } from "../services/kai.js";
+import { IMPACT_EVIDENCE_LIBRARY_SURFACE } from "../services/kai-tool-definitions.js";
 import { determineKaiTier } from "../middleware/kai-tier.js";
 import pool from "../db/pg.js";
 import { getBearerToken, verifyBearerToken } from "../../middleware/auth.js";
@@ -9,6 +10,7 @@ import {
   classifyGuestDiscoveryQuery,
   emitGuestDiscoveryTelemetry,
 } from "../services/kai-guest-telemetry.js";
+import { resolveKaiRequestContext } from "../kai/services/kaiContextService.js";
 
 const router = express.Router();
 
@@ -134,6 +136,82 @@ router.post("/message", async (req, res) => {
     });
   } catch (error) {
     console.error("[kaiApi] POST /message error:", error);
+    return res.status(500).json({
+      success: false,
+      error: "KAI is having trouble right now. Please try again.",
+    });
+  }
+});
+
+function isNonEmptyString(value) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+// POST /api/kai/impact-library/message
+// Governed, single-turn Impact Evidence Library KAI surface. Authenticated
+// only; requires a requested organization and engagement, both re-authorized
+// server-side through resolveKaiRequestContext() before any model/tool
+// execution. Does not accept a conversationId and does not persist into the
+// general KAI conversation store (see handleKaiMessage persistConversation).
+router.post("/impact-library/message", async (req, res) => {
+  try {
+    const authenticatedUser = await resolveAuthenticatedKaiUser(req);
+    if (!authenticatedUser) {
+      return res.status(401).json({ success: false, error: "Unauthorized" });
+    }
+
+    const { message, organizationId, engagementId } = req.body || {};
+    const validation = validateIncomingMessage(message);
+    if (!validation.valid) {
+      return res.status(400).json({
+        success: false,
+        error: "Message must be a non-empty string up to 2000 characters.",
+      });
+    }
+    if (!isNonEmptyString(organizationId) || !isNonEmptyString(engagementId)) {
+      return res.status(400).json({
+        success: false,
+        error: "organizationId and engagementId are required.",
+      });
+    }
+
+    const tier = determineKaiTier(req.user);
+    const rateLimitKey = String(req.user?.id ?? "");
+    if (hitRateLimitIfNeeded({ key: rateLimitKey, tier, res })) return;
+
+    const contextResult = await resolveKaiRequestContext({
+      req,
+      requestedOrganizationId: organizationId,
+      requestedEngagementId: engagementId,
+    });
+    if (!contextResult.ok) {
+      return res.status(contextResult.error.status).json(contextResult);
+    }
+
+    const result = await handleKaiMessage({
+      userId: req.user.id,
+      userMessage: validation.value,
+      conversationId: null,
+      tier,
+      surface: IMPACT_EVIDENCE_LIBRARY_SURFACE,
+      requestedOrganizationId: organizationId,
+      requestedEngagementId: engagementId,
+      persistConversation: false,
+    });
+
+    if (result?.error) {
+      return res.status(500).json({
+        success: false,
+        error: "KAI is having trouble right now. Please try again.",
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: result.message,
+    });
+  } catch (error) {
+    console.error("[kaiApi] POST /impact-library/message error:", error);
     return res.status(500).json({
       success: false,
       error: "KAI is having trouble right now. Please try again.",

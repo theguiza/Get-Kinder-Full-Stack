@@ -43,7 +43,9 @@ import {
   shouldApplyEligibilityResponse,
 } from "./impactEvidenceLibraryLogic.js";
 import { organizationsPath } from "./kaiWebIntakeLogic.js";
+import { engagementsPath } from "./kaiWebIntakeLogic.js";
 import KaiWebIntake from "./KaiWebIntake.jsx";
+import ImpactLibraryKai from "./ImpactLibraryKai.jsx";
 
 function ValueRow({ label, value }) {
   return (
@@ -65,6 +67,15 @@ export default function ImpactEvidenceLibrary() {
   const [organizationId, setOrganizationId] = useState("");
   const [loadingOrganizations, setLoadingOrganizations] = useState(true);
   const [organizationsLoaded, setOrganizationsLoaded] = useState(false);
+  // Engagement selection for the governed Impact Library KAI surface: KAI
+  // must never have to be told which organization/engagement it is
+  // operating in, so this is lifted to page state (distinct from the
+  // engagement selection embedded inside KaiWebIntake below) and passed to
+  // ImpactLibraryKai as requested context re-authorized server-side.
+  const [engagements, setEngagements] = useState([]);
+  const [engagementId, setEngagementId] = useState("");
+  const [loadingEngagements, setLoadingEngagements] = useState(false);
+  const [engagementsLoaded, setEngagementsLoaded] = useState(false);
   const [audience, setAudience] = useState("internal");
   // The all-state governed Claim Library and the audience-scoped eligible-claims
   // result are independent requests with independent loading/data/error state:
@@ -163,6 +174,37 @@ export default function ImpactEvidenceLibrary() {
     setSelectedGenerationClaimIds(next.selectedGenerationClaimIds);
     setTraceability(next.traceability);
     setGeneratedDraftPacket(next.generatedDraftPacket);
+  }, [organizationId]);
+
+  // Engagement selection is scoped to the selected organization: changing
+  // organization must discard the previous organization's engagement
+  // selection before a new engagement list is requested.
+  useEffect(() => {
+    setEngagements([]);
+    setEngagementId("");
+    setEngagementsLoaded(false);
+    if (!organizationId) return;
+    let cancelled = false;
+    (async () => {
+      setLoadingEngagements(true);
+      const result = await getJson(engagementsPath(organizationId));
+      if (cancelled) return;
+      setLoadingEngagements(false);
+      setEngagementsLoaded(true);
+      if (result.statusCode !== 200 || !result.body?.ok) {
+        setEngagements([]);
+        setMessage(errorText(result));
+        return;
+      }
+      const items = result.body.data?.items || [];
+      setEngagements(items);
+      if (items.length === 1) {
+        setEngagementId(items[0].engagement_id);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [organizationId]);
 
   // Audience change invalidates the eligibility dimension only: the governed
@@ -493,6 +535,28 @@ export default function ImpactEvidenceLibrary() {
             )}
           </div>
           <div className="col-12 col-lg-4">
+            <label className="form-label small fw-semibold">Engagement</label>
+            {!organizationId ? (
+              <div className="small text-muted">Select an organization first.</div>
+            ) : loadingEngagements ? (
+              <div className="small text-muted">Loading engagements...</div>
+            ) : engagementsLoaded && engagements.length === 0 ? (
+              <div className="small text-muted">No engagement is available for this organization.</div>
+            ) : (
+              <select
+                className="form-select form-select-sm"
+                value={engagementId}
+                onChange={(event) => setEngagementId(event.target.value)}
+                disabled={engagements.length <= 1}
+              >
+                {engagements.length > 1 ? <option value="">Select an engagement</option> : null}
+                {engagements.map((item) => (
+                  <option key={item.engagement_id} value={item.engagement_id}>{item.engagement_id}</option>
+                ))}
+              </select>
+            )}
+          </div>
+          <div className="col-12 col-lg-4">
             <label className="form-label small fw-semibold">Audience</label>
             <select className="form-select form-select-sm" value={audience} onChange={(event) => setAudience(event.target.value)}>
               {LIBRARY_AUDIENCES.map((value) => <option key={value} value={value}>{value}</option>)}
@@ -510,6 +574,8 @@ export default function ImpactEvidenceLibrary() {
           </div>
         </div>
       </div>
+
+      <ImpactLibraryKai organizationId={organizationId} engagementId={engagementId} />
 
       {organizationId ? (
         <KaiWebIntake organizationId={organizationId} embedded />
