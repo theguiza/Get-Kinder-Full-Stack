@@ -135,6 +135,33 @@ export async function listIntakeFileReviewQueueItems(
   return rows;
 }
 
+const SECURITY_ASSESSMENT_AUDIT_ACTIONS = Object.freeze([
+  "apply_security_assessment_policy_decision",
+  "record_security_assessment_diagnostic",
+]);
+
+/**
+ * Narrow, organization/file-scoped read of the single most recent
+ * security-assessment audit event for one intake file, used only to build
+ * the safe `security_assessment` projection on the file-detail response.
+ * Explicit columns only (action, reason_code, and the one bounded
+ * assessment_category metadata field) - never the raw metadata jsonb, actor
+ * fields, or any other audit_events column.
+ */
+export async function getScopedLatestSecurityAssessmentAuditProjection(organizationId, intakeFileId, db = pool) {
+  const { rows } = await db.query(
+    `SELECT action, reason_code, metadata->>'assessment_category' AS assessment_category
+       FROM kai.audit_events
+      WHERE organization_id = $1
+        AND metadata->>'object_id' = $2
+        AND action = ANY($3::text[])
+      ORDER BY created_at DESC
+      LIMIT 1`,
+    [organizationId, intakeFileId, SECURITY_ASSESSMENT_AUDIT_ACTIONS],
+  );
+  return rows[0] || null;
+}
+
 export async function getDataDictionaryDraftSummary(organizationId, dataDictionaryId, db = pool) {
   const { rows } = await db.query(
     `SELECT data_dictionary_id, organization_id, engagement_id, intake_batch_id,

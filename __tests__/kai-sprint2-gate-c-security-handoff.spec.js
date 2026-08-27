@@ -141,6 +141,7 @@ test("fresh confirmed facts with an eligible outcome apply exactly one mutation 
     verifiedChecksum,
     verifiedSizeBytes,
     newFilePolicyStatus: "passed",
+    newMalwareScanStatus: "passed",
   });
   assert.equal(harness.writeCalls[0].transactionContext, harness.transactionContext);
   assert.ok(harness.auditMetadata);
@@ -184,7 +185,7 @@ test("changed immutable facts fail closed with no mutation and no audit", async 
   assert.equal(harness.auditMetadata, null);
 });
 
-test("not_configured malware result cannot produce a policy pass: null outcome leaves the file pending", async () => {
+test("not_configured malware result cannot produce a policy pass: null outcome leaves the file pending, but the safe category is preserved as a diagnostic audit", async () => {
   const harness = createHarness({
     assessmentResult: {
       ok: true,
@@ -194,7 +195,33 @@ test("not_configured malware result cannot produce a policy pass: null outcome l
   await applyConfirmedSecurityAssessment(baseInput(), dependenciesFromHarness(harness));
 
   assert.equal(harness.writeCalls.length, 0);
-  assert.equal(harness.auditMetadata, null);
+  assert.ok(harness.auditMetadata);
+  assert.equal(harness.auditMetadata.operation, "record_security_assessment_diagnostic");
+  assert.equal(harness.auditMetadata.assessment_category, "malware_scan_not_configured");
+  assert.equal(harness.auditMetadata.reason_code, "no_policy_decision");
+  assert.equal(harness.auditMetadata.from_state, "pending");
+  assert.equal(harness.auditMetadata.to_state, "pending");
+  assert.equal(harness.auditMetadata.organization_id, organizationId);
+  assert.equal(harness.auditMetadata.object_id, intakeFileId);
+});
+
+test("not_configured malware result whose diagnostic audit fails to persist fails closed: no phase claims a durable explanation exists", async () => {
+  const harness = createHarness({
+    assessmentResult: {
+      ok: true,
+      data: { assessmentResult: { status: "failed", category: "malware_scan_not_configured" }, policyDecisionOutcome: null },
+    },
+    throwOnAudit: true,
+  });
+  const lines = await captureConsoleLog(() => applyConfirmedSecurityAssessment(baseInput(), dependenciesFromHarness(harness)));
+
+  assert.equal(harness.writeCalls.length, 0);
+  // The diagnostic insert was attempted (and its metadata captured before the
+  // synthetic failure), but never confirmed durable - so the phase log must
+  // fail closed instead of claiming the pending state is operator-explained.
+  assert.ok(harness.auditMetadata);
+  assert.equal(harness.auditMetadata.operation, "record_security_assessment_diagnostic");
+  assert.deepEqual(gateCPhaseLines(lines), ["KAI_GATE_C_SECURITY_PHASE=pre_assessment_failure"]);
 });
 
 test("integrity/executor failure prevents any policy mutation", async () => {

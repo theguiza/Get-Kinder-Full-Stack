@@ -349,6 +349,7 @@ export default function KaiWebIntake({
                 <ValueRow label="Processing" value={fileStatus.processing_status} />
                 <ValueRow label="Malware scan" value={fileStatus.malware_scan_status} />
                 <ValueRow label="File policy" value={fileStatus.file_policy_status} />
+                <ValueRow label="Security assessment" value={fileStatus.security_assessment?.category ?? fileStatus.security_assessment?.policy_outcome} />
                 <ValueRow label="Parse status" value={fileStatus.parse_status} />
                 <ValueRow label="Review status" value={fileStatus.review_status} />
               </>

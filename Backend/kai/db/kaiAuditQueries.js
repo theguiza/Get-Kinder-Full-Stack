@@ -26,6 +26,7 @@ const SAFE_AUDIT_METADATA_KEYS = new Set([
   "blocker_code",
   "blocker_codes",
   "blocking_reason_code",
+  "reason_code",
   "object_type",
   "target_object_type",
   "object_id",
@@ -42,6 +43,7 @@ const SAFE_AUDIT_METADATA_KEYS = new Set([
   "to_state",
   "prior_status",
   "new_status",
+  "assessment_category",
   "created_at",
   "http_status",
   "safe_message",
@@ -115,10 +117,10 @@ function normalizeStringArray(value) {
 
 function normalizeAuditMetadataValue(key, value) {
   if (key.endsWith("_id")) return normalizeUuid(value);
-  if (["operation", "validator_key", "blocker_code", "object_type", "target_object_type", "actor_type", "created_by_service", "p0_pass"].includes(key)) {
+  if (["operation", "validator_key", "blocker_code", "object_type", "target_object_type", "actor_type", "created_by_service", "p0_pass", "assessment_category"].includes(key)) {
     return normalizeIdentifier(value);
   }
-  if (["operation_type", "blocking_reason_code", "from_state", "to_state", "prior_status", "new_status"].includes(key)) {
+  if (["operation_type", "blocking_reason_code", "reason_code", "from_state", "to_state", "prior_status", "new_status"].includes(key)) {
     return normalizeIdentifier(value);
   }
   if (key === "blocker_codes" || key === "validator_keys") return normalizeStringArray(value);

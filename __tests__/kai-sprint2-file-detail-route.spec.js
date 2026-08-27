@@ -7,6 +7,7 @@ import express from "express";
 import { requireKaiSprint2Enabled } from "../Backend/kai/config/kaiSprint2Config.js";
 import {
   getIntakeFileMetadata as readIntakeFileMetadata,
+  getScopedLatestSecurityAssessmentAuditProjection as readLatestSecurityAssessmentAuditProjection,
 } from "../Backend/kai/db/kaiReadModels.js";
 import { buildKaiError } from "../Backend/kai/errors/kaiErrors.js";
 import { requireKaiSprint2Authenticated } from "../Backend/kai/middleware/kaiSprint2Authentication.js";
@@ -45,6 +46,7 @@ const fileDetailKeys = Object.freeze([
   "review_status",
   "created_at",
   "updated_at",
+  "security_assessment",
 ].sort());
 
 const forbiddenRowSentinels = Object.freeze({
@@ -98,6 +100,7 @@ const expectedFileDto = Object.freeze({
   review_status: "proposed",
   created_at: "2026-07-15T10:00:00.000Z",
   updated_at: "2026-07-15T11:00:00.000Z",
+  security_assessment: { category: null, policy_outcome: null },
 });
 
 const crossTenantFileRow = Object.freeze({
@@ -196,6 +199,9 @@ function scenarioDependencies(scenario) {
     async getIntakeFileById() {
       scenario.fallbackCalls.push("id_only");
       throw new Error("ID-only fallback must not execute");
+    },
+    async getScopedLatestSecurityAssessmentAuditProjection() {
+      return null;
     },
   };
 }
@@ -308,7 +314,50 @@ test("the file-detail read model selects only the DTO from one tenant-and-file-s
   }
 });
 
-test("the direct file-detail service returns exactly the 14-field allowlist", async () => {
+test("the security-assessment audit projection read model is organization-and-file scoped, explicit-column only", async () => {
+  let queryCall = null;
+  const row = await readLatestSecurityAssessmentAuditProjection(organizationId, intakeFileId, {
+    async query(sql, params) {
+      queryCall = { sql, params };
+      return { rows: [{ action: "apply_security_assessment_policy_decision", reason_code: "passed", assessment_category: null }] };
+    },
+  });
+
+  assert.deepEqual(row, { action: "apply_security_assessment_policy_decision", reason_code: "passed", assessment_category: null });
+  assert.match(queryCall.sql, /WHERE organization_id = \$1/);
+  assert.match(queryCall.sql, /metadata->>'object_id' = \$2/);
+  assert.match(queryCall.sql, /LIMIT 1/);
+  assert.deepEqual(queryCall.params, [organizationId, intakeFileId, [
+    "apply_security_assessment_policy_decision",
+    "record_security_assessment_diagnostic",
+  ]]);
+  assert.doesNotMatch(queryCall.sql, /SELECT \*/);
+  assert.doesNotMatch(queryCall.sql, /\bmetadata\b(?!->>)/);
+});
+
+test("a cross-tenant organization_id can never retrieve another organization's security-assessment audit projection", async () => {
+  const otherOrgProjectionRow = { action: "apply_security_assessment_policy_decision", reason_code: "blocked", assessment_category: "malware_failed" };
+  const result = await getIntakeFileDetail(
+    { actorContext: readActorContext, organizationId, intakeFileId },
+    {
+      env: { KAI_SPRINT2_ENABLED: "true" },
+      async getIntakeFileMetadata() {
+        return safeFileRow;
+      },
+      async getScopedLatestSecurityAssessmentAuditProjection(requestedOrganizationId) {
+        // Simulates a tenant-scoped repository: a mismatched organization_id yields nothing.
+        return requestedOrganizationId === organizationId ? null : otherOrgProjectionRow;
+      },
+    },
+  );
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.data.security_assessment, { category: null, policy_outcome: null });
+  const serialized = JSON.stringify(result);
+  assert.equal(serialized.includes("malware_failed"), false);
+});
+
+test("the direct file-detail service returns exactly the 15-field allowlist", async () => {
   const repositoryCalls = [];
   const result = await getIntakeFileDetail(
     { actorContext: readActorContext, organizationId, intakeFileId },
@@ -317,6 +366,9 @@ test("the direct file-detail service returns exactly the 14-field allowlist", as
       async getIntakeFileMetadata(requestedOrganizationId, requestedIntakeFileId) {
         repositoryCalls.push({ requestedOrganizationId, requestedIntakeFileId });
         return safeFileRow;
+      },
+      async getScopedLatestSecurityAssessmentAuditProjection() {
+        return null;
       },
     },
   );
@@ -329,6 +381,91 @@ test("the direct file-detail service returns exactly the 14-field allowlist", as
     requestedIntakeFileId: intakeFileId,
   }]);
   assertForbiddenSentinelsAbsent(result);
+});
+
+test("a persisted policy-decision audit row projects category and policy_outcome onto security_assessment", async () => {
+  const projectionCalls = [];
+  const result = await getIntakeFileDetail(
+    { actorContext: readActorContext, organizationId, intakeFileId },
+    {
+      env: { KAI_SPRINT2_ENABLED: "true" },
+      async getIntakeFileMetadata() {
+        return safeFileRow;
+      },
+      async getScopedLatestSecurityAssessmentAuditProjection(requestedOrganizationId, requestedIntakeFileId) {
+        projectionCalls.push({ requestedOrganizationId, requestedIntakeFileId });
+        return { action: "apply_security_assessment_policy_decision", reason_code: "failed", assessment_category: "malware_scan_failed" };
+      },
+    },
+  );
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.data.security_assessment, { category: "malware_scan_failed", policy_outcome: "failed" });
+  assert.deepEqual(projectionCalls, [{ requestedOrganizationId: organizationId, requestedIntakeFileId: intakeFileId }]);
+});
+
+test("a diagnostic-only audit row (no policy mutation) projects category with a null policy_outcome", async () => {
+  const result = await getIntakeFileDetail(
+    { actorContext: readActorContext, organizationId, intakeFileId },
+    {
+      env: { KAI_SPRINT2_ENABLED: "true" },
+      async getIntakeFileMetadata() {
+        return safeFileRow;
+      },
+      async getScopedLatestSecurityAssessmentAuditProjection() {
+        return { action: "record_security_assessment_diagnostic", reason_code: "no_policy_decision", assessment_category: "malware_scan_not_configured" };
+      },
+    },
+  );
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.data.security_assessment, { category: "malware_scan_not_configured", policy_outcome: null });
+});
+
+test("a projection read failure never blocks the file-detail response and defaults security_assessment to null/null", async () => {
+  const result = await getIntakeFileDetail(
+    { actorContext: readActorContext, organizationId, intakeFileId },
+    {
+      env: { KAI_SPRINT2_ENABLED: "true" },
+      async getIntakeFileMetadata() {
+        return safeFileRow;
+      },
+      async getScopedLatestSecurityAssessmentAuditProjection() {
+        throw new Error("synthetic projection read failure");
+      },
+    },
+  );
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.data.security_assessment, { category: null, policy_outcome: null });
+});
+
+test("the security_assessment projection response never exposes raw audit metadata, actor, or storage fields", async () => {
+  const result = await getIntakeFileDetail(
+    { actorContext: readActorContext, organizationId, intakeFileId },
+    {
+      env: { KAI_SPRINT2_ENABLED: "true" },
+      async getIntakeFileMetadata() {
+        return safeFileRow;
+      },
+      async getScopedLatestSecurityAssessmentAuditProjection() {
+        return {
+          action: "apply_security_assessment_policy_decision",
+          reason_code: "blocked",
+          assessment_category: "malware_failed",
+          // A read model that leaked extra columns must still not surface them.
+          actor_user_id: "actor-sentinel",
+          metadata: { storage_object_key: "storage-object-key-sentinel", raw_error: "raw-error-sentinel" },
+        };
+      },
+    },
+  );
+
+  assert.deepEqual(Object.keys(result.data.security_assessment).sort(), ["category", "policy_outcome"]);
+  const serialized = JSON.stringify(result);
+  assert.equal(serialized.includes("actor-sentinel"), false);
+  assert.equal(serialized.includes("storage-object-key-sentinel"), false);
+  assert.equal(serialized.includes("raw-error-sentinel"), false);
 });
 
 test("canonical file UUID validation rejects malformed, uppercase, and padded values before reads", async () => {

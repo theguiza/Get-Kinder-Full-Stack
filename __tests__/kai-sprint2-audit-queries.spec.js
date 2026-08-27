@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   buildBlockedAttemptAuditEventRecord,
+  buildSuccessfulMutationAuditEventRecord,
   insertBlockedAttemptAuditEvent,
   sanitizeAuditMetadataForStorage,
 } from "../Backend/kai/db/kaiAuditQueries.js";
@@ -168,6 +169,31 @@ test("audit metadata sanitizer keeps only metadata-safe fields", () => {
   assert.equal(metadata.contains_unsafe_generated_text, false);
   assert.equal(metadata.contains_signed_urls, false);
   assert.equal(metadata.contains_storage_credentials, false);
+});
+
+// Regression: a policy-decision audit event (e.g.
+// applyConfirmedSecurityAssessment's "apply_security_assessment_policy_decision")
+// supplies reason_code (not blocking_reason_code) as the outcome. If the
+// sanitizer silently dropped reason_code, buildSuccessfulMutationAuditEventRecord
+// would fall back to the generic "state_transition_completed" default instead
+// of the real outcome, breaking the operator-visible policy_outcome
+// projection for every persisted policy decision.
+test("audit metadata sanitizer keeps reason_code (distinct from blocking_reason_code)", () => {
+  const metadata = sanitizeAuditMetadataForStorage({ reason_code: "passed" });
+  assert.equal(metadata.reason_code, "passed");
+});
+
+test("buildSuccessfulMutationAuditEventRecord uses metadata.reason_code as the stored reason_code when no blocking_reason_code is present", () => {
+  const record = buildSuccessfulMutationAuditEventRecord(
+    {
+      operation: "apply_security_assessment_policy_decision",
+      object_type: "intake_file",
+      target_object_type: "intake_file",
+      reason_code: "passed",
+    },
+    "other",
+  );
+  assert.equal(record.reason_code, "passed");
 });
 
 test("recordBlockedAttempt passes sanitized action/metadata shape to the audit dependency", async () => {

@@ -264,14 +264,30 @@ export async function getScopedIntakeFileSecurityAssessmentFacts(
  * facts match exactly; any mismatch (facts changed, already terminal) is a
  * no-op (0 rows), never an overwrite. Additive: no other exported query in
  * this module is changed.
+ *
+ * newMalwareScanStatus is optional: pass it only when the assessment result
+ * itself establishes a known malware outcome (clean, malware detected, or
+ * the malware scan step itself failing) for this exact decision. Passing
+ * null/undefined leaves the file's existing malware_scan_status untouched
+ * (COALESCE), so a policy decision produced by a non-malware detector (e.g.
+ * a CSV row-limit block) never fabricates a malware result.
  */
 export async function casSecurityAssessmentFilePolicyDecision(
-  { organizationId, intakeFileId, objectVersionId, verifiedChecksum, verifiedSizeBytes, newFilePolicyStatus },
+  {
+    organizationId,
+    intakeFileId,
+    objectVersionId,
+    verifiedChecksum,
+    verifiedSizeBytes,
+    newFilePolicyStatus,
+    newMalwareScanStatus = null,
+  },
   db = pool,
 ) {
   const { rows } = await db.query(
     `UPDATE kai.intake_files
-        SET file_policy_status = $6
+        SET file_policy_status = $6,
+            malware_scan_status = COALESCE($7::text, malware_scan_status)
       WHERE organization_id = $1
         AND intake_file_id = $2
         AND file_policy_status = 'pending'
@@ -282,7 +298,7 @@ export async function casSecurityAssessmentFilePolicyDecision(
         mime_type, file_size_bytes, file_policy_status, malware_scan_status, processing_status,
         parse_status, review_status, object_version_id, verified_checksum, verified_size_bytes,
         created_at, updated_at`,
-    [organizationId, intakeFileId, objectVersionId, verifiedChecksum, verifiedSizeBytes, newFilePolicyStatus],
+    [organizationId, intakeFileId, objectVersionId, verifiedChecksum, verifiedSizeBytes, newFilePolicyStatus, newMalwareScanStatus],
   );
   return rows[0] || null;
 }

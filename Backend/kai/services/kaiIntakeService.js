@@ -32,6 +32,7 @@ import {
   getIntakeBatchDetail as readIntakeBatchDetail,
   getIntakeFileMetadata as readIntakeFileMetadata,
   getIntakeFileUploadMetadata as readIntakeFileUploadMetadata,
+  getScopedLatestSecurityAssessmentAuditProjection as readLatestSecurityAssessmentAuditProjection,
   listIntakeBatchesForOrganization as readIntakeBatchesForOrganization,
   listIntakeFilesForBatch as readIntakeFilesForBatch,
   listIntakeFileReviewQueueItems as readIntakeFileReviewQueueItems,
@@ -287,6 +288,36 @@ function responseFileSummary(row) {
     review_status: row.review_status,
     created_at: row.created_at,
     updated_at: row.updated_at,
+  };
+}
+
+const SECURITY_ASSESSMENT_POLICY_DECISION_ACTION = "apply_security_assessment_policy_decision";
+const SECURITY_ASSESSMENT_POLICY_OUTCOMES = Object.freeze(new Set(["passed", "blocked", "failed"]));
+
+/**
+ * Bounded, explicit-column projection of the latest security-assessment
+ * audit event for the file-detail response only. category is the safe
+ * machine-code assessment_category (or null when no assessment has been
+ * persisted yet); policy_outcome is populated only for an actual persisted
+ * policy-decision audit row (never inferred for a diagnostic-only row, whose
+ * category is known but which produced no policy mutation).
+ */
+function securityAssessmentProjection(projectionRow) {
+  if (!projectionRow || typeof projectionRow !== "object") {
+    return { category: null, policy_outcome: null };
+  }
+  const category = typeof projectionRow.assessment_category === "string" ? projectionRow.assessment_category : null;
+  const policyOutcome = projectionRow.action === SECURITY_ASSESSMENT_POLICY_DECISION_ACTION
+    && SECURITY_ASSESSMENT_POLICY_OUTCOMES.has(projectionRow.reason_code)
+    ? projectionRow.reason_code
+    : null;
+  return { category, policy_outcome: policyOutcome };
+}
+
+function responseFileDetail(row, assessmentProjectionRow) {
+  return {
+    ...responseFileSummary(row),
+    security_assessment: securityAssessmentProjection(assessmentProjectionRow),
   };
 }
 
@@ -725,9 +756,19 @@ export async function getIntakeFileDetail(input = {}, dependencies = {}) {
   });
   if (tenantResult.severity === "blocker") return buildKaiError("not_found");
 
+  const readAssessmentProjection = dependencies.getScopedLatestSecurityAssessmentAuditProjection
+    || readLatestSecurityAssessmentAuditProjection;
+  let assessmentProjectionRow = null;
+  try {
+    assessmentProjectionRow = await readAssessmentProjection(organizationId, intakeFileId);
+  } catch {
+    // Diagnostic-only projection: a read failure never blocks the file-detail response.
+    assessmentProjectionRow = null;
+  }
+
   return {
     ok: true,
-    data: responseFileSummary(row),
+    data: responseFileDetail(row, assessmentProjectionRow),
     warnings: [],
   };
 }
@@ -1115,6 +1156,39 @@ function logGateCPostConfirmSecurityPhase(phase) {
   console.log(`KAI_GATE_C_SECURITY_PHASE=${phase}`);
 }
 
+// The one block category the malware step itself can ever produce (malware
+// detected). Every other block category comes from a non-malware detector
+// (type agreement, CSV row limit, OOXML archive limits, PDF pre-parse gate)
+// and must never be reflected onto malware_scan_status.
+const MALWARE_DETECTED_BLOCK_CATEGORY = "malware_failed";
+const MALWARE_SCAN_STEP_FAILURE_CATEGORY = "malware_scan_failed";
+
+/**
+ * Server-derived-only assessment category for the operator-visible
+ * projection and audit trail. Never accepts a caller-supplied value: the
+ * only input is the trusted assessor result already produced by
+ * runProductionSecurityAssessment.
+ */
+function assessmentCategoryFromResult(assessmentResult) {
+  return typeof assessmentResult?.category === "string" ? assessmentResult.category : null;
+}
+
+/**
+ * Derives the true malware_scan_status implied by this exact assessment
+ * result, or null when the malware-scan step never actually ran (an earlier
+ * non-malware detector already blocked/failed the file first) - in which
+ * case the column must be left untouched rather than overwritten with a
+ * fabricated malware outcome. The malware step is the bounded assessor's
+ * only source of a bare {policy:"pass"} result, so a "passed" outcome
+ * always proves a clean malware scan.
+ */
+function malwareScanStatusForAssessment(outcome, assessmentResult) {
+  if (outcome === "passed") return "passed";
+  if (outcome === "blocked" && assessmentResult?.category === MALWARE_DETECTED_BLOCK_CATEGORY) return "failed";
+  if (outcome === "failed" && assessmentResult?.category === MALWARE_SCAN_STEP_FAILURE_CATEGORY) return "failed";
+  return null;
+}
+
 /**
  * Gate C production post-confirm security-assessment handoff.
  *
@@ -1199,45 +1273,84 @@ export async function applyConfirmedSecurityAssessment(
   }
 
   const outcome = assessment.data.policyDecisionOutcome;
+  const assessmentResult = assessment.data.assessmentResult;
+  const assessmentCategory = assessmentCategoryFromResult(assessmentResult);
   const newFilePolicyStatus = SECURITY_ASSESSMENT_POLICY_OUTCOME_TO_STATUS[outcome];
-  if (!newFilePolicyStatus) {
-    // outcome is not policy-eligible (null/undefined). Only attribute this to
-    // malware_not_configured when the assessment result actually proves that
-    // fixed category; never infer it from anything else.
-    if (assessment.data.assessmentResult?.category === "malware_scan_not_configured") {
-      logGateCPostConfirmSecurityPhase("malware_not_configured");
-    } else {
-      logGateCPostConfirmSecurityPhase("pre_assessment_failure");
-    }
+  const isEligible = Boolean(newFilePolicyStatus);
+  // outcome === null already proves the assessor produced a known, classified
+  // (though non-eligible) category - see policyDecisionOutcomeForAssessmentResult.
+  // outcome === undefined is an unclassified/fail-closed result and must
+  // never be preserved as if it were a trusted category, so no diagnostic
+  // audit is attempted for it - there is nothing safe to explain.
+  const hasDiagnosticCategory = !isEligible && outcome === null && Boolean(assessmentCategory);
+  if (!isEligible && !hasDiagnosticCategory) {
+    logGateCPostConfirmSecurityPhase("pre_assessment_failure");
     return;
   }
 
+  const newMalwareScanStatus = isEligible ? malwareScanStatusForAssessment(outcome, assessmentResult) : null;
+  const createdAt = (dependencies.now ? new Date(dependencies.now()) : new Date()).toISOString();
+
+  // One direct call site handles both the eligible policy-decision mutation
+  // (CAS + apply_security_assessment_policy_decision audit) and the
+  // non-eligible diagnostic case (no mutation + record_security_assessment_diagnostic
+  // audit only) through the same governed required-audit mechanism: the
+  // explanatory audit row is itself the "required" write when there is no
+  // state mutation to make durable, so a diagnostic audit that fails to
+  // persist fails this call closed exactly like a failed policy mutation
+  // does, rather than silently claiming the pending state is now
+  // operator-explained.
   try {
     await orchestrateMutationWithRequiredAudit(
       {
-        mutation: { organizationId, intakeFileId, objectVersionId, verifiedChecksum, verifiedSizeBytes, newFilePolicyStatus },
-        requiredAuditMetadata: {
-          operation: "apply_security_assessment_policy_decision",
-          operation_type: "apply_security_assessment_policy_decision",
-          actor_user_id: actorContext?.actorUserId || null,
-          actor_type: actorContext?.actorType || "system",
-          organization_id: organizationId,
-          object_type: "intake_file",
-          target_object_type: "intake_file",
-          object_id: intakeFileId,
-          reason_code: newFilePolicyStatus,
-          validator_key: "VAL-STA-001",
-          request_id: requestId,
-          route: "/api/kai/sprint2/intake/admin/files/:intakeFileId/confirm-upload",
-          from_state: "pending",
-          to_state: newFilePolicyStatus,
-          prior_status: "pending",
-          new_status: newFilePolicyStatus,
-          created_at: (dependencies.now ? new Date(dependencies.now()) : new Date()).toISOString(),
-        },
+        mutation: isEligible
+          ? { organizationId, intakeFileId, objectVersionId, verifiedChecksum, verifiedSizeBytes, newFilePolicyStatus, newMalwareScanStatus }
+          : null,
+        requiredAuditMetadata: isEligible
+          ? {
+            operation: "apply_security_assessment_policy_decision",
+            operation_type: "apply_security_assessment_policy_decision",
+            actor_user_id: actorContext?.actorUserId || null,
+            actor_type: actorContext?.actorType || "system",
+            organization_id: organizationId,
+            object_type: "intake_file",
+            target_object_type: "intake_file",
+            object_id: intakeFileId,
+            reason_code: newFilePolicyStatus,
+            assessment_category: assessmentCategory,
+            validator_key: "VAL-STA-001",
+            request_id: requestId,
+            route: "/api/kai/sprint2/intake/admin/files/:intakeFileId/confirm-upload",
+            from_state: "pending",
+            to_state: newFilePolicyStatus,
+            prior_status: "pending",
+            new_status: newFilePolicyStatus,
+            created_at: createdAt,
+          }
+          : {
+            operation: "record_security_assessment_diagnostic",
+            operation_type: "record_security_assessment_diagnostic",
+            actor_user_id: actorContext?.actorUserId || null,
+            actor_type: actorContext?.actorType || "system",
+            organization_id: organizationId,
+            object_type: "intake_file",
+            target_object_type: "intake_file",
+            object_id: intakeFileId,
+            reason_code: "no_policy_decision",
+            assessment_category: assessmentCategory,
+            validator_key: "VAL-STA-001",
+            request_id: requestId,
+            route: "/api/kai/sprint2/intake/admin/files/:intakeFileId/confirm-upload",
+            from_state: "pending",
+            to_state: "pending",
+            prior_status: "pending",
+            new_status: "pending",
+            created_at: createdAt,
+          },
       },
       {
         async persistMutation(mutation, transactionContext) {
+          if (!mutation) return null;
           const updated = await casPolicy(mutation, transactionContext);
           if (!updated) throw new KaiRouteMutationError("conflict_current_state_changed");
           return { ok: true, data: updated };
@@ -1249,12 +1362,20 @@ export async function applyConfirmedSecurityAssessment(
       (callback) => runInTransaction(callback),
     );
   } catch {
-    // Fail closed: no partial policy mutation is left standing. A future
-    // confirmUpload replay for the same file retries this handoff.
-    logGateCPostConfirmSecurityPhase("policy_persist_failure");
+    // Fail closed: no partial policy mutation is left standing, and a
+    // diagnostic audit that failed to persist must not be reported as if it
+    // had. A future confirmUpload replay for the same file retries this
+    // handoff.
+    logGateCPostConfirmSecurityPhase(isEligible ? "policy_persist_failure" : "pre_assessment_failure");
     return;
   }
-  logGateCPostConfirmSecurityPhase("policy_persisted");
+  if (isEligible) {
+    logGateCPostConfirmSecurityPhase("policy_persisted");
+  } else if (assessmentCategory === "malware_scan_not_configured") {
+    logGateCPostConfirmSecurityPhase("malware_not_configured");
+  } else {
+    logGateCPostConfirmSecurityPhase("pre_assessment_failure");
+  }
 }
 
 function uploadNewReservationRequiredResult() {
@@ -2963,4 +3084,7 @@ export const __testables = {
   isValidSecurityAssessmentFactsRow,
   logGateCPostConfirmSecurityPhase,
   GATE_C_POST_CONFIRM_SECURITY_PHASES,
+  assessmentCategoryFromResult,
+  malwareScanStatusForAssessment,
+  securityAssessmentProjection,
 };
