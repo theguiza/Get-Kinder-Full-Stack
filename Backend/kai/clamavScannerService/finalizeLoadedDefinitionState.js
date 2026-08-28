@@ -6,7 +6,8 @@
 // on a timer and never re-validates definitions itself - it only records
 // that clamd successfully started against what was already validated.
 import { readClamavDefinitionMirrorConfig } from "./clamavDefinitionMirror.js";
-import { finalizeLoadedDefinitionState } from "./loadedDefinitionState.js";
+import { finalizeLoadedDefinitionState, readLoadedDefinitionState } from "./loadedDefinitionState.js";
+import { emitLoadedStateFinalizedTelemetry } from "./clamavScannerTelemetry.js";
 
 const config = readClamavDefinitionMirrorConfig(process.env);
 if (!config.ok) {
@@ -21,3 +22,6 @@ if (result.ok !== true) {
 }
 
 console.log("[kai-clamav-scanner] loaded definition state finalized");
+
+const finalizedState = await readLoadedDefinitionState({ filePath: config.loadedStatePath });
+emitLoadedStateFinalizedTelemetry({ loadedState: finalizedState });

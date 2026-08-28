@@ -1,4 +1,5 @@
 import { compareDefinitionStates, manifestFromPointer, validateDefinitionManifest } from "./clamavDefinitionMirror.js";
+import { computeManifestFingerprint } from "./clamavScannerTelemetry.js";
 
 // /livez must never hang on this lookup: a slow or wedged mirror read would
 // otherwise keep the recovery-aware liveness request open indefinitely,
@@ -82,12 +83,17 @@ export async function evaluateRecoveryEligibility({
   const currentManifest = manifestFromPointer(current.pointer);
   if (!currentManifest) return { recoverable: "NOT_PROVEN", reason: "mirror_malformed_pointer" };
 
+  // Derived from the manifest already read above for the existing recovery
+  // comparison - never an additional mirror read. Telemetry correlation only,
+  // never a substitute for the semantic comparison below.
+  const mirrorStateFingerprint = computeManifestFingerprint(currentManifest);
+
   const validation = validateDefinitionManifest(currentManifest, { maxAgeSeconds, now });
-  if (!validation.ok) return { recoverable: "NOT_PROVEN", reason: `mirror_${validation.reason}` };
+  if (!validation.ok) return { recoverable: "NOT_PROVEN", reason: `mirror_${validation.reason}`, mirrorStateFingerprint };
 
   const ordering = compareDefinitionStates(currentManifest, loadedManifest);
-  if (ordering === "NEWER") return { recoverable: "YES", ordering };
-  return { recoverable: "NO", ordering };
+  if (ordering === "NEWER") return { recoverable: "YES", ordering, mirrorStateFingerprint };
+  return { recoverable: "NO", ordering, mirrorStateFingerprint };
 }
 
 export const __testables = Object.freeze({

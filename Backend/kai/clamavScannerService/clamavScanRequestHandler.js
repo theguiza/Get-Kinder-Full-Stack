@@ -5,6 +5,13 @@
 
 import { evaluateLoadedDefinitionFreshness } from "./loadedDefinitionState.js";
 import { evaluateRecoveryEligibility } from "./loadedDefinitionRecovery.js";
+import { computeLoadedStateFingerprint, createLivenessDecisionTelemetryRecorder } from "./clamavScannerTelemetry.js";
+
+// Process-local default recorder: one liveness-decision transition log
+// stream per scanner process, shared across repeated Cloud Run probe
+// evaluations so identical decisions are not logged on every probe. Tests
+// inject their own recorder instances instead of relying on this shared one.
+const defaultLivenessTelemetryRecorder = createLivenessDecisionTelemetryRecorder();
 
 function errorResponse(httpStatus, reason) {
   return { httpStatus, body: { status: "error", reason } };
@@ -94,25 +101,79 @@ export async function handleClamavLivenessRequest({
   definitionStore,
   now = new Date(),
   mirrorLookupTimeoutMs,
+  telemetry = defaultLivenessTelemetryRecorder,
 } = {}) {
   const freshness = loadedDefinitionFreshness({ loadedDefinitionState, maxAgeSeconds, now });
+  const loadedStateFingerprint = computeLoadedStateFingerprint(loadedDefinitionState);
+  const freshnessLabel = freshness.ok ? "fresh" : freshness.reason === "stale_loaded_definitions" ? "stale" : "invalid";
+  const baseTelemetryFields = {
+    loaded_state_fingerprint: loadedStateFingerprint,
+    freshness: freshnessLabel,
+    freshness_reason: freshness.reason ?? "not_applicable",
+    age_seconds: freshness.age_seconds ?? null,
+    max_age_seconds: freshness.max_age_seconds ?? null,
+  };
 
-  if (!freshness.ok && freshness.reason !== "stale_loaded_definitions") {
+  function record(fields) {
+    telemetry?.record?.({ ...baseTelemetryFields, ...fields });
+  }
+
+  if (freshnessLabel === "invalid") {
+    record({
+      clamd: "not_checked",
+      recovery_evaluated: "no",
+      recovery_result: "not_applicable",
+      recovery_reason: "not_applicable",
+      mirror_state_fingerprint: "not_applicable",
+      liveness: "not_live",
+      decision_reason: "invalid_loaded_state",
+    });
     return { httpStatus: 503, body: { status: "not_live" } };
   }
 
   if (!clamdClient || typeof clamdClient.checkReadiness !== "function") {
+    record({
+      clamd: "unhealthy",
+      recovery_evaluated: "no",
+      recovery_result: "not_applicable",
+      recovery_reason: "not_applicable",
+      mirror_state_fingerprint: "not_applicable",
+      liveness: "not_live",
+      decision_reason: "clamd_unhealthy",
+    });
     return { httpStatus: 503, body: { status: "not_live" } };
   }
   let readiness;
   try {
     readiness = await clamdClient.checkReadiness();
   } catch {
+    readiness = { ready: false };
+  }
+  if (readiness?.ready !== true) {
+    record({
+      clamd: "unhealthy",
+      recovery_evaluated: "no",
+      recovery_result: "not_applicable",
+      recovery_reason: "not_applicable",
+      mirror_state_fingerprint: "not_applicable",
+      liveness: "not_live",
+      decision_reason: "clamd_unhealthy",
+    });
     return { httpStatus: 503, body: { status: "not_live" } };
   }
-  if (readiness?.ready !== true) return { httpStatus: 503, body: { status: "not_live" } };
 
-  if (freshness.ok) return { httpStatus: 200, body: { status: "live" } };
+  if (freshness.ok) {
+    record({
+      clamd: "healthy",
+      recovery_evaluated: "no",
+      recovery_result: "not_applicable",
+      recovery_reason: "not_applicable",
+      mirror_state_fingerprint: "not_applicable",
+      liveness: "live",
+      decision_reason: "fresh_loaded_state_healthy",
+    });
+    return { httpStatus: 200, body: { status: "live" } };
+  }
 
   const recovery = await evaluateRecoveryEligibility({
     loadedState: loadedDefinitionState,
@@ -121,6 +182,26 @@ export async function handleClamavLivenessRequest({
     now,
     ...(mirrorLookupTimeoutMs === undefined ? {} : { mirrorLookupTimeoutMs }),
   });
+  const recoveryResult =
+    recovery.recoverable === "YES" ? "recoverable" : recovery.recoverable === "NO" ? "not_recoverable" : "not_proven";
+  const decisionReason =
+    recovery.recoverable === "YES"
+      ? "stale_loaded_state_recoverable"
+      : recovery.recoverable === "NO"
+        ? "stale_loaded_state_not_recoverable"
+        : "stale_loaded_state_recovery_not_proven";
+  const liveness = recovery.recoverable === "YES" ? "not_live" : "live";
+
+  record({
+    clamd: "healthy",
+    recovery_evaluated: "yes",
+    recovery_result: recoveryResult,
+    recovery_reason: recovery.reason ?? "not_applicable",
+    mirror_state_fingerprint: recovery.mirrorStateFingerprint ?? "not_applicable",
+    liveness,
+    decision_reason: decisionReason,
+  });
+
   if (recovery.recoverable === "YES") return { httpStatus: 503, body: { status: "not_live" } };
   return { httpStatus: 200, body: { status: "live" } };
 }
