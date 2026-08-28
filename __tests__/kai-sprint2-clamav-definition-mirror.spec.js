@@ -677,6 +677,7 @@ test("CASE 7D - repeated legitimate generation conflicts exhaust the bounded ret
     extractDatabaseMetadata: makeVersionedExtractor({ versions: candidateVersions }),
   });
 
+  assert.equal(result.ok, false);
   assert.equal(result.published, false);
   assert.equal(result.reason, "pointer_publication_conflict_retry_exhausted");
   assert.notDeepEqual(store.pointer(), currentBefore);
@@ -740,6 +741,7 @@ test("CASE 7F - a real conflict whose re-read state is ambiguous fails closed wi
     extractDatabaseMetadata: makeVersionedExtractor({ versions: { main: "150", daily: "550", bytecode: "250" } }),
   });
 
+  assert.equal(result.ok, false);
   assert.equal(result.published, false);
   assert.equal(result.reason, "ambiguous_definition_ordering");
   assert.deepEqual(store.pointer(), ambiguousPointer);

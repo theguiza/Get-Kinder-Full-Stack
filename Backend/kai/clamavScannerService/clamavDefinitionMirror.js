@@ -438,7 +438,16 @@ export async function updateClamavDefinitionMirror({
 
     const publication = await reconcileAndPublish({ store, manifest, current });
     if (!publication.published) {
-      return { ok: true, generation: generationId, artifact_count: manifest.artifacts.length, published: false, reason: publication.reason };
+      const executionFailed =
+        publication.reason === "ambiguous_definition_ordering" ||
+        publication.reason === "pointer_publication_conflict_retry_exhausted";
+      return {
+        ok: !executionFailed,
+        generation: generationId,
+        artifact_count: manifest.artifacts.length,
+        published: false,
+        reason: publication.reason,
+      };
     }
     return { ok: true, generation: generationId, artifact_count: manifest.artifacts.length, published: true };
   } finally {
