@@ -77,8 +77,12 @@ export async function handleClamavReadinessRequest({
 }
 
 // Recovery-aware liveness. A missing/malformed loaded state signals an
-// actually broken instance and fails liveness directly. A stale loaded state
-// only fails liveness when the authoritative mirror can be proven, via the
+// actually broken instance and fails liveness directly, with no clamd check
+// needed. Otherwise - fresh or stale alike - a genuinely broken clamd always
+// fails liveness on its own, before the mirror is ever read: a dead scanner
+// justifies replacement regardless of definition freshness or mirror
+// recoverability. Only once clamd is confirmed healthy does a stale loaded
+// state go on to ask whether the authoritative mirror can be proven, via the
 // existing Package 1 semantic comparator, to be strictly newer than what
 // this instance loaded - never merely because the mirror's storage
 // generation differs. Otherwise liveness stays healthy so Cloud Run never
@@ -93,23 +97,22 @@ export async function handleClamavLivenessRequest({
 } = {}) {
   const freshness = loadedDefinitionFreshness({ loadedDefinitionState, maxAgeSeconds, now });
 
-  if (freshness.ok) {
-    if (!clamdClient || typeof clamdClient.checkReadiness !== "function") {
-      return { httpStatus: 503, body: { status: "not_live" } };
-    }
-    let readiness;
-    try {
-      readiness = await clamdClient.checkReadiness();
-    } catch {
-      return { httpStatus: 503, body: { status: "not_live" } };
-    }
-    if (readiness?.ready === true) return { httpStatus: 200, body: { status: "live" } };
+  if (!freshness.ok && freshness.reason !== "stale_loaded_definitions") {
     return { httpStatus: 503, body: { status: "not_live" } };
   }
 
-  if (freshness.reason !== "stale_loaded_definitions") {
+  if (!clamdClient || typeof clamdClient.checkReadiness !== "function") {
     return { httpStatus: 503, body: { status: "not_live" } };
   }
+  let readiness;
+  try {
+    readiness = await clamdClient.checkReadiness();
+  } catch {
+    return { httpStatus: 503, body: { status: "not_live" } };
+  }
+  if (readiness?.ready !== true) return { httpStatus: 503, body: { status: "not_live" } };
+
+  if (freshness.ok) return { httpStatus: 200, body: { status: "live" } };
 
   const recovery = await evaluateRecoveryEligibility({
     loadedState: loadedDefinitionState,

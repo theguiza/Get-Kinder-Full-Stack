@@ -403,6 +403,114 @@ test("O: readiness/liveness/scan evaluation performs zero mirror reads when the 
   assert.equal(readCalls, 0);
 });
 
+// Q. Stale loaded state + clamd unavailable (ready:false) + equivalent
+// mirror: a genuinely broken clamd must fail liveness without ever reading
+// the mirror, regardless of definition staleness or mirror recoverability.
+test("Q: stale loaded state with clamd not ready fails liveness and never reads the mirror", async () => {
+  const loadedState = loadedStateFixture({ generation: "gen-1", buildTimestamp: STALE_BUILD });
+  let readCalls = 0;
+  const store = {
+    async readCurrent() {
+      readCalls += 1;
+      return { exists: true, generation: "1", pointer: __testables.pointerFromManifest(manifestFixture({ generation: "gen-2", versions: BASELINE_VERSIONS })) };
+    },
+  };
+  const clamdClient = unavailableClamdClient();
+
+  const liveness = await handleClamavLivenessRequest({
+    clamdClient,
+    loadedDefinitionState: loadedState,
+    maxAgeSeconds: MAX_AGE_SECONDS,
+    definitionStore: store,
+    now: NOW,
+  });
+
+  assert.equal(liveness.httpStatus, 503);
+  assert.equal(readCalls, 0);
+});
+
+// R. Stale loaded state + clamd checkReadiness throws + unavailable mirror:
+// same fail-fast-on-clamd behavior when the readiness call itself throws.
+test("R: stale loaded state with a throwing clamd checkReadiness fails liveness and never reads the mirror", async () => {
+  const loadedState = loadedStateFixture({ generation: "gen-1", buildTimestamp: STALE_BUILD });
+  let readCalls = 0;
+  const store = {
+    async readCurrent() {
+      readCalls += 1;
+      throw new Error("should never be called");
+    },
+  };
+  const clamdClient = {
+    async scanBytes() {
+      throw new Error("synthetic clamd unavailable");
+    },
+    async checkReadiness() {
+      throw new Error("synthetic checkReadiness failure");
+    },
+  };
+
+  const liveness = await handleClamavLivenessRequest({
+    clamdClient,
+    loadedDefinitionState: loadedState,
+    maxAgeSeconds: MAX_AGE_SECONDS,
+    definitionStore: store,
+    now: NOW,
+  });
+
+  assert.equal(liveness.httpStatus, 503);
+  assert.equal(readCalls, 0);
+});
+
+// S. Stale loaded state + clamd healthy + unavailable mirror: liveness stays
+// healthy (anti-restart-loop preserved) but the mirror lookup does occur, and
+// readiness/scan remain blocked - proving replacement is not forced merely
+// because the local scanner itself is healthy.
+test("S: stale loaded state with healthy clamd and an unavailable mirror stays live while readiness and scan stay blocked", async () => {
+  const loadedState = loadedStateFixture({ generation: "gen-1", buildTimestamp: STALE_BUILD });
+  const store = unavailableStore();
+  const clamdClient = cleanClamdClient();
+
+  const liveness = await handleClamavLivenessRequest({
+    clamdClient,
+    loadedDefinitionState: loadedState,
+    maxAgeSeconds: MAX_AGE_SECONDS,
+    definitionStore: store,
+    now: NOW,
+  });
+  const readiness = await handleClamavReadinessRequest({ clamdClient, loadedDefinitionState: loadedState, maxAgeSeconds: MAX_AGE_SECONDS, now: NOW });
+  const scan = await handleClamavScanRequest({
+    bytes: Buffer.from("bytes"),
+    clamdClient,
+    maxBytes: 1024,
+    loadedDefinitionState: loadedState,
+    maxAgeSeconds: MAX_AGE_SECONDS,
+    now: NOW,
+  });
+
+  assert.equal(liveness.httpStatus, 200);
+  assert.equal(readiness.httpStatus, 503);
+  assert.equal(scan.httpStatus, 503);
+  assert.equal(clamdClient.scanCalls(), 0);
+});
+
+// T. Stale loaded state + clamd healthy + semantically newer fresh mirror:
+// replacement eligibility is preserved once clamd itself is healthy.
+test("T: stale loaded state with healthy clamd and a semantically newer fresh mirror still fails liveness", async () => {
+  const loadedState = loadedStateFixture({ generation: "gen-1", buildTimestamp: STALE_BUILD });
+  const store = pointerStore({ generation: "gen-2", versions: { main: "200", daily: "600", bytecode: "300" } });
+  const clamdClient = cleanClamdClient();
+
+  const liveness = await handleClamavLivenessRequest({
+    clamdClient,
+    loadedDefinitionState: loadedState,
+    maxAgeSeconds: MAX_AGE_SECONDS,
+    definitionStore: store,
+    now: NOW,
+  });
+
+  assert.equal(liveness.httpStatus, 503);
+});
+
 test("evaluateRecoveryEligibility never calls the store for a malformed loaded state", async () => {
   let called = false;
   const store = { async readCurrent() { called = true; return { exists: false }; } };
