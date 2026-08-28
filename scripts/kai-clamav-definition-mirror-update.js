@@ -16,12 +16,15 @@ async function main() {
   });
   const result = await updateClamavDefinitionMirror({
     store,
+    maxAgeSeconds: config.maxAgeSeconds,
     args: process.argv.slice(2),
   });
   console.log(JSON.stringify({
-    status: "updated",
+    status: result.published ? "updated" : "superseded",
     generation: result.generation,
     artifact_count: result.artifact_count,
+    published: result.published,
+    reason: result.reason,
   }));
 }
 

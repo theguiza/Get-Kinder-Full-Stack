@@ -289,17 +289,115 @@ function manifestFromPointer(pointer) {
   return pointer.manifest;
 }
 
+function parseComparableVersion(value) {
+  if (typeof value !== "string" || value.trim().length === 0) return null;
+  if (!/^\d+$/.test(value.trim())) return null;
+  return Number.parseInt(value.trim(), 10);
+}
+
+function artifactsByDatabase(manifest) {
+  const map = new Map();
+  for (const artifact of manifest.artifacts) {
+    if (map.has(artifact.database)) return null;
+    map.set(artifact.database, artifact);
+  }
+  return map;
+}
+
+// Per-database semantic verdict, derived from the CVD's own authoritative
+// `Version` field (sigtool-reported). Distinct from freshness (build_timestamp)
+// and from the storage generation token, neither of which may substitute for
+// this comparison.
+function compareDatabaseArtifact(candidateArtifact, currentArtifact) {
+  const candidateVersion = parseComparableVersion(candidateArtifact?.metadata?.version);
+  const currentVersion = parseComparableVersion(currentArtifact?.metadata?.version);
+  if (candidateVersion === null || currentVersion === null) return "AMBIGUOUS";
+  if (candidateVersion > currentVersion) return "NEWER";
+  if (candidateVersion < currentVersion) return "REGRESSIVE";
+  if (typeof candidateArtifact.sha256 !== "string" || typeof currentArtifact.sha256 !== "string") return "AMBIGUOUS";
+  return candidateArtifact.sha256 === currentArtifact.sha256 ? "EQUIVALENT" : "AMBIGUOUS";
+}
+
+// Semantic ClamAV definition ordering, derived from a deterministic per-database
+// comparison of authoritative CVD versions (and identity/checksum metadata to
+// disambiguate equal versions). This is distinct from definition freshness
+// (build_timestamp) and from the storage generation token used only as an
+// optimistic-concurrency precondition on the current-pointer write; neither
+// timing nor a single aggregate timestamp may substitute for this comparison.
+// A single component moving backward makes the whole candidate REGRESSIVE,
+// even when other required components advanced.
+export function compareDefinitionStates(candidateManifest, currentManifest) {
+  if (!currentManifest) return "INITIAL";
+  const candidateByDatabase = artifactsByDatabase(candidateManifest);
+  const currentByDatabase = artifactsByDatabase(currentManifest);
+  if (!candidateByDatabase || !currentByDatabase) return "AMBIGUOUS";
+
+  const verdicts = [];
+  for (const database of REQUIRED_DATABASES) {
+    const candidateArtifact = candidateByDatabase.get(database);
+    const currentArtifact = currentByDatabase.get(database);
+    if (!candidateArtifact || !currentArtifact) {
+      verdicts.push("AMBIGUOUS");
+      continue;
+    }
+    verdicts.push(compareDatabaseArtifact(candidateArtifact, currentArtifact));
+  }
+  if (verdicts.includes("AMBIGUOUS")) return "AMBIGUOUS";
+  if (verdicts.includes("REGRESSIVE")) return "REGRESSIVE";
+  return verdicts.includes("NEWER") ? "NEWER" : "EQUIVALENT";
+}
+
+const MAX_POINTER_PUBLISH_ATTEMPTS = 3;
+
+// A failed `ifGenerationMatch` precondition surfaces from @google-cloud/storage
+// (via gaxios) as a GaxiosError whose `code` carries the HTTP status (412);
+// see node_modules/gaxios/build/esm/src/common.js. Only that structured signal
+// may enter the CAS reconciliation path — any other failure (auth, network,
+// malformed request) must propagate untouched.
+function isGenerationPreconditionConflict(error) {
+  return Boolean(error) && Number(error.code) === 412;
+}
+
+async function reconcileAndPublish({ store, manifest, current, maxAttempts = MAX_POINTER_PUBLISH_ATTEMPTS }) {
+  let currentState = current;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const currentManifest = manifestFromPointer(currentState.pointer);
+    const ordering = compareDefinitionStates(manifest, currentManifest);
+
+    if (ordering === "AMBIGUOUS") return { published: false, reason: "ambiguous_definition_ordering" };
+    if (ordering === "REGRESSIVE") return { published: false, reason: "candidate_older_than_current" };
+    if (ordering === "EQUIVALENT") return { published: false, reason: "candidate_equivalent_to_current" };
+
+    try {
+      await store.replaceCurrent({
+        pointer: pointerFromManifest(manifest),
+        ifGenerationMatch: currentState.exists ? currentState.generation : 0,
+      });
+      return { published: true };
+    } catch (error) {
+      if (!isGenerationPreconditionConflict(error)) throw error;
+      if (attempt >= maxAttempts) return { published: false, reason: "pointer_publication_conflict_retry_exhausted" };
+      currentState = await store.readCurrent();
+    }
+  }
+  return { published: false, reason: "pointer_publication_conflict_retry_exhausted" };
+}
+
 export async function updateClamavDefinitionMirror({
   store,
   workDir,
   runUpdate = runCvdUpdate,
   extractDatabaseMetadata = extractClamavDatabaseMetadataWithSigtool,
   generationIdFactory = randomUUID,
+  maxAgeSeconds,
   args = [],
   now = new Date(),
 } = {}) {
   assertNoUpdaterInput(args);
   if (!store) throw new Error("ClamAV definition store is required.");
+  if (!Number.isSafeInteger(maxAgeSeconds) || maxAgeSeconds <= 0) {
+    throw new Error("ClamAV definition mirror update requires maxAgeSeconds configuration.");
+  }
   const parentDir = workDir || os.tmpdir();
   const downloadDir = path.join(parentDir, `kai-clamav-definitions-${randomUUID()}`);
   await mkdir(downloadDir, { recursive: true });
@@ -314,6 +412,9 @@ export async function updateClamavDefinitionMirror({
       extractDatabaseMetadata,
       now,
     });
+
+    const validation = validateDefinitionManifest(manifest, { maxAgeSeconds, now });
+    if (!validation.ok) throw new Error(`ClamAV definition candidate failed validation: ${validation.reason}`);
 
     for (const artifact of manifest.artifacts) {
       const bytes = await readFile(path.join(downloadDir, artifact.filename));
@@ -335,11 +436,11 @@ export async function updateClamavDefinitionMirror({
       throw new Error("Uploaded ClamAV definition manifest validation failed.");
     }
 
-    await store.replaceCurrent({
-      pointer: pointerFromManifest(manifest),
-      ifGenerationMatch: current.exists ? current.generation : 0,
-    });
-    return { ok: true, generation: generationId, artifact_count: manifest.artifacts.length };
+    const publication = await reconcileAndPublish({ store, manifest, current });
+    if (!publication.published) {
+      return { ok: true, generation: generationId, artifact_count: manifest.artifacts.length, published: false, reason: publication.reason };
+    }
+    return { ok: true, generation: generationId, artifact_count: manifest.artifacts.length, published: true };
   } finally {
     await rm(downloadDir, { recursive: true, force: true }).catch(() => {});
   }
