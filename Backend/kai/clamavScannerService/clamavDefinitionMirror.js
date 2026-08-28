@@ -51,7 +51,12 @@ export function readClamavDefinitionMirrorConfig(env = process.env) {
     return { ok: false, reason: "missing_or_malformed_definition_local_dir" };
   }
 
-  return { ok: true, bucketName, prefix, maxAgeSeconds, localDir };
+  const loadedStatePath = env.KAI_GATE_C_CLAMAV_LOADED_STATE_PATH || "/var/run/kai-clamav/loaded-definition-state.json";
+  if (typeof loadedStatePath !== "string" || loadedStatePath.trim().length === 0 || !path.isAbsolute(loadedStatePath)) {
+    return { ok: false, reason: "missing_or_malformed_loaded_state_path" };
+  }
+
+  return { ok: true, bucketName, prefix, maxAgeSeconds, localDir, loadedStatePath };
 }
 
 export function createGcsClamavDefinitionStore({ storageClient = new Storage(), bucketName, prefix } = {}) {
@@ -281,7 +286,7 @@ function pointerFromManifest(manifest) {
   };
 }
 
-function manifestFromPointer(pointer) {
+export function manifestFromPointer(pointer) {
   if (!pointer || pointer.schema !== POINTER_SCHEMA || typeof pointer.generation !== "string") {
     return null;
   }
@@ -490,7 +495,7 @@ export async function bootstrapClamavDefinitions({
     }
     await rm(localDir, { recursive: true, force: true });
     await rename(tempDir, localDir);
-    return { ok: true, generation: manifest.generation };
+    return { ok: true, generation: manifest.generation, manifest };
   } catch (error) {
     if (error?.code === "ENOENT" || error?.code === 404) return { ok: false, reason: "incomplete_generation" };
     return { ok: false, reason: "definition_bootstrap_failed" };

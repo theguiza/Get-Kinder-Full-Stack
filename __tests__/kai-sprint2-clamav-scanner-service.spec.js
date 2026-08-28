@@ -9,6 +9,25 @@ import {
   handleClamavScanRequest,
 } from "../Backend/kai/clamavScannerService/clamavScanRequestHandler.js";
 import { createClamavScannerHttpApp } from "../Backend/kai/clamavScannerService/server.js";
+import { buildLoadedDefinitionStateFromManifest } from "../Backend/kai/clamavScannerService/loadedDefinitionState.js";
+
+// Pre-existing-behavior fixtures: these tests predate the runtime
+// loaded-definition-freshness gate and only ever exercised clamd
+// transport/HTTP-boundary behavior, so they use a fixed fresh loaded state
+// and fixed "now" that always passes that gate rather than re-deriving it.
+const FIXTURE_NOW = new Date("2026-08-28T12:00:00.000Z");
+const FIXTURE_MAX_AGE_SECONDS = 172800;
+const FRESH_LOADED_DEFINITION_STATE = buildLoadedDefinitionStateFromManifest(
+  {
+    generation: "gen-fixture-fresh",
+    artifacts: [
+      { database: "main", sha256: "a".repeat(64), metadata: { version: "100", build_timestamp: "2026-08-28T06:00:00.000Z" } },
+      { database: "daily", sha256: "b".repeat(64), metadata: { version: "500", build_timestamp: "2026-08-28T06:00:00.000Z" } },
+      { database: "bytecode", sha256: "c".repeat(64), metadata: { version: "200", build_timestamp: "2026-08-28T06:00:00.000Z" } },
+    ],
+  },
+  { loadedAt: FIXTURE_NOW },
+);
 
 function startFakeClamd(onData) {
   return new Promise((resolve) => {
@@ -173,24 +192,30 @@ test("scan request handler rejects oversized input before invoking clamd", async
 });
 
 test("scan request handler maps clean and found results and fails closed on scanner error", async () => {
-  const cleanResponse = await handleClamavScanRequest({
-    bytes: Buffer.from("bytes", "utf8"),
+  const fixture = {
     maxBytes: 1024,
+    loadedDefinitionState: FRESH_LOADED_DEFINITION_STATE,
+    maxAgeSeconds: FIXTURE_MAX_AGE_SECONDS,
+    now: FIXTURE_NOW,
+  };
+  const cleanResponse = await handleClamavScanRequest({
+    ...fixture,
+    bytes: Buffer.from("bytes", "utf8"),
     clamdClient: { async scanBytes() { return { status: "clean" }; } },
   });
   const foundResponse = await handleClamavScanRequest({
+    ...fixture,
     bytes: Buffer.from("bytes", "utf8"),
-    maxBytes: 1024,
     clamdClient: { async scanBytes() { return { status: "found" }; } },
   });
   const errorResponse = await handleClamavScanRequest({
+    ...fixture,
     bytes: Buffer.from("bytes", "utf8"),
-    maxBytes: 1024,
     clamdClient: { async scanBytes() { return { status: "error", reason: "timeout" }; } },
   });
   const throwingResponse = await handleClamavScanRequest({
+    ...fixture,
     bytes: Buffer.from("bytes", "utf8"),
-    maxBytes: 1024,
     clamdClient: { async scanBytes() { throw new Error("synthetic clamd throw"); } },
   });
 
@@ -203,10 +228,12 @@ test("scan request handler maps clean and found results and fails closed on scan
 });
 
 test("readiness handler reports ready/not_ready without leaking clamd infrastructure detail", async () => {
-  const ready = await handleClamavReadinessRequest({ clamdClient: { async checkReadiness() { return { ready: true }; } } });
-  const notReady = await handleClamavReadinessRequest({ clamdClient: { async checkReadiness() { return { ready: false }; } } });
+  const freshFixture = { loadedDefinitionState: FRESH_LOADED_DEFINITION_STATE, maxAgeSeconds: FIXTURE_MAX_AGE_SECONDS, now: FIXTURE_NOW };
+  const ready = await handleClamavReadinessRequest({ ...freshFixture, clamdClient: { async checkReadiness() { return { ready: true }; } } });
+  const notReady = await handleClamavReadinessRequest({ ...freshFixture, clamdClient: { async checkReadiness() { return { ready: false }; } } });
   const missingClient = await handleClamavReadinessRequest({});
   const throwing = await handleClamavReadinessRequest({
+    ...freshFixture,
     clamdClient: { async checkReadiness() { throw new Error("127.0.0.1:3310 unreachable"); } },
   });
 
@@ -220,6 +247,9 @@ test("readiness handler reports ready/not_ready without leaking clamd infrastruc
 test("HTTP scanner boundary accepts octet-stream scans, rejects other routes, and sanitizes responses", async () => {
   const app = createClamavScannerHttpApp({
     maxBytes: 16,
+    loadedDefinitionState: FRESH_LOADED_DEFINITION_STATE,
+    maxAgeSeconds: FIXTURE_MAX_AGE_SECONDS,
+    now: () => FIXTURE_NOW,
     clamdClient: {
       async checkReadiness() {
         return { ready: true };

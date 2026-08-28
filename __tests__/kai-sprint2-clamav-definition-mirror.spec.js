@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { handleClamavReadinessRequest } from "../Backend/kai/clamavScannerService/clamavScanRequestHandler.js";
+import { buildLoadedDefinitionStateFromManifest } from "../Backend/kai/clamavScannerService/loadedDefinitionState.js";
 import {
   __testables,
   bootstrapClamavDefinitions,
@@ -243,9 +244,14 @@ test("valid fresh checksum-verified definitions can bootstrap before EICAR readi
   });
   const ready = await handleClamavReadinessRequest({
     clamdClient: { async checkReadiness() { return { ready: true }; } },
+    loadedDefinitionState: buildLoadedDefinitionStateFromManifest(bootstrap.manifest, { loadedAt: FRESH_NOW }),
+    maxAgeSeconds: 86400,
+    now: FRESH_NOW,
   });
 
-  assert.deepEqual(bootstrap, { ok: true, generation: "gen-ready" });
+  assert.equal(bootstrap.ok, true);
+  assert.equal(bootstrap.generation, "gen-ready");
+  assert.equal(bootstrap.manifest?.generation, "gen-ready");
   assert.equal((await readFile(path.join(localDir, "daily.cvd"))).toString("utf8"), definitionBytes("daily.cvd").toString("utf8"));
   assert.deepEqual(ready, { httpStatus: 200, body: { status: "ready" } });
 });
