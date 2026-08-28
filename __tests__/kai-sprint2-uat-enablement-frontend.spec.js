@@ -406,3 +406,22 @@ test("KAI Web Intake preserves standalone heading behavior and supports embedded
     /embedded \? \([\s\S]*?<h2 className="h4 mb-3">KAI Web Intake<\/h2>[\s\S]*?<h1 className="admin-title mb-3">KAI Web Intake<\/h1>/,
   );
 });
+
+test("KAI Web Intake skips its own organization bootstrap fetch when a parent-scoped organizationId is supplied, and still performs it standalone", () => {
+  const uiSource = readFileSync("frontend/KaiWebIntake.jsx", "utf8");
+
+  const bootstrapEffectIndex = uiSource.indexOf("useEffect(() => {\n    if (parentOrganizationId) {");
+  assert.ok(bootstrapEffectIndex > -1, "organization bootstrap effect not found");
+  const bootstrapEffectSource = uiSource.slice(bootstrapEffectIndex, uiSource.indexOf("}, [parentOrganizationId]);") + "}, [parentOrganizationId]);".length);
+
+  // Parent-scoped: bail out before ever calling organizationsPath()/getJson.
+  assert.match(
+    bootstrapEffectSource,
+    /if \(parentOrganizationId\) \{\s*setOrganizations\(\[\]\);\s*setLoadingOrganizations\(false\);\s*setOrganizationsLoaded\(true\);\s*return undefined;\s*\}/,
+  );
+  const parentBranchEnd = bootstrapEffectSource.indexOf("return undefined;");
+  assert.doesNotMatch(bootstrapEffectSource.slice(0, parentBranchEnd), /organizationsPath\(\)|getJson\(/);
+
+  // Standalone: the fetch still runs when no parent organization is supplied.
+  assert.match(bootstrapEffectSource, /getJson\(organizationsPath\(\)\)/);
+});
