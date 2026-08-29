@@ -329,26 +329,98 @@ export async function getScopedIntakeFileParserProfileEligibilityFacts(
   return withSafeIntegerVerifiedSizeBytes(rows[0] || null);
 }
 
-const P1_WORKER_SYNTHETIC_SCOPE_SWEEP_LIMIT = 25;
+const P1_WORKER_CANDIDATE_SWEEP_LIMIT = 25;
 
 /**
- * P1 worker runtime composition: lists authoritative `file_policy_status =
- * 'passed'` intake files inside exactly one configured organization scope. No
- * file-ID selector, no cross-organization sweep - the WHERE clause is bound to
- * the single organizationId the caller supplies.
+ * P1 worker runtime composition: lists ACTIONABLE_AUTOMATIC_P1_WORK candidates
+ * across every organization - a file for which the existing automatic worker
+ * seam (`activateParserProfileWorkForIntakeFile` called with `retry: false`)
+ * can make persistent forward progress on its own, with no explicit retry,
+ * manual action, or other external state change.
+ *
+ * Eligibility requires the existing Gate C boundary
+ * (`file_policy_status = 'passed'`), and excludes two independent classes of
+ * work so neither can permanently occupy this bounded window:
+ *
+ *  - automatically satisfied: a persisted P1-05
+ *    `kai.intake_sensitivity_profiles` row already exists (the chain already
+ *    reached P1-03 -> P1-04 -> P1-05 -> STOP);
+ *  - not automatically actionable under `retry: false` FOR THE FILE'S CURRENT
+ *    PARSER-RUN IDENTITY: `activateParserProfileWorkForIntakeFile` always
+ *    re-derives its parser-run identity fresh from the file's *current*
+ *    confirmed `checksum` and extension (`parserRunIdentity` in
+ *    `parserProfileWorkerOrchestration.js`) - `parser_name`/`parser_version`
+ *    are fixed per extension by `PARSER_REGISTRY` in that same module, not a
+ *    per-file selectable value, and `verified_checksum` is set exactly once
+ *    at `confirmed` and never overwritten afterward for a given
+ *    `intake_file_id` (`AUTHORIZED_EDGES` in
+ *    `postgresUploadLifecycleRepository.js` has no edge back out of
+ *    `confirmed` other than to the terminal `policy_blocked`, and the only
+ *    `verified_checksum`-nulling reset requires it already be `NULL`). So a
+ *    `kai.intake_parser_runs` row for this `(organization_id, intake_file_id)`
+ *    is only relevant to a *fresh* activation call if its `checksum` still
+ *    matches the file's current `verified_checksum`: an older row under a
+ *    now-superseded checksum (e.g. a prior confirmed version before a
+ *    corrected re-intake) reflects a parser-run identity that fresh
+ *    activation will never reuse - `ensureQueuedParserRun` computes a new,
+ *    independent identity and inserts a brand-new `queued` row regardless of
+ *    that old row's status - so it must never block this file's current
+ *    identity from selection. Matching on `checksum` only reuses the
+ *    file-level immutable fact this query already reads; it does not
+ *    reimplement `PARSER_REGISTRY`'s extension->parser mapping in SQL. Only
+ *    `running` (only a `queued` row is claimable - see
+ *    `claimQueuedParserRun` in `postgresParserRunRepository.js` - so a
+ *    `running` row can never be reclaimed automatically, whether mid-flight
+ *    or orphaned by a crashed worker), `failed` (only explicit
+ *    `retry: true`, which this automatic worker never passes, re-queues a
+ *    failed run - see `requeueFailedParserRunForRetry`), and `cancelled`
+ *    (terminal; `requeueFailedParserRunForRetry` explicitly refuses to
+ *    re-queue it) block selection, and only for the file's current checksum.
+ *    `queued` and `completed` rows, and files with no matching parser run at
+ *    all, are left selectable: `queued` and absent rows fall through to
+ *    `runQueuedParserProfileWork` and get claimed/profiled, and a `completed`
+ *    row is the P1-04/P1-05 recovery path handled by
+ *    `activateParserProfileWorkForIntakeFile`'s own completed-replay branch.
+ *
+ * Ordering is the file's own `created_at` ascending (oldest first), with
+ * `organization_id`/`intake_file_id` as a deterministic tie-break for equal
+ * timestamps. `created_at` is set once, at row creation, and is never
+ * rewritten afterward, so every candidate holds a fixed position in this
+ * total order for as long as it remains actionable. This bounds cross-
+ * organization starvation regardless of how many distinct organizations have
+ * actionable work: any later-arriving row (in any organization, including one
+ * with a large, continuously replenished backlog) is necessarily newer and so
+ * can never be ordered ahead of an already-waiting candidate elsewhere: each
+ * tick can only reduce the number of candidates strictly older than a fixed
+ * one, and that count is finite, so a fixed actionable candidate is
+ * guaranteed to enter the window within a bounded number of ticks rather than
+ * being pushed out indefinitely (which a per-organization round-robin scheme
+ * cannot guarantee once more organizations than `LIMIT` are simultaneously
+ * backlogged). No file-ID selector, no process-global organization scope -
+ * every candidate carries its own persisted `organization_id`.
  */
-export async function listKaiP1WorkerSyntheticScopedEligibleIntakeFiles(
-  { organizationId },
-  db = pool,
-) {
+export async function listActionableKaiP1WorkCandidates(db = pool) {
   const { rows } = await db.query(
-    `SELECT organization_id, intake_file_id
-       FROM kai.intake_files
-      WHERE organization_id = $1
-        AND file_policy_status = 'passed'
-      ORDER BY intake_file_id ASC
-      LIMIT ${P1_WORKER_SYNTHETIC_SCOPE_SWEEP_LIMIT}`,
-    [organizationId],
+    `SELECT f.organization_id::text AS organization_id,
+            f.intake_file_id::text AS intake_file_id
+       FROM kai.intake_files f
+      WHERE f.file_policy_status = 'passed'
+        AND NOT EXISTS (
+          SELECT 1
+            FROM kai.intake_sensitivity_profiles s
+           WHERE s.organization_id = f.organization_id
+             AND s.intake_file_id = f.intake_file_id
+        )
+        AND NOT EXISTS (
+          SELECT 1
+            FROM kai.intake_parser_runs r
+           WHERE r.organization_id = f.organization_id
+             AND r.intake_file_id = f.intake_file_id
+             AND r.checksum = f.verified_checksum
+             AND r.parser_status IN ('running', 'failed', 'cancelled')
+        )
+      ORDER BY f.created_at ASC, f.organization_id ASC, f.intake_file_id ASC
+      LIMIT ${P1_WORKER_CANDIDATE_SWEEP_LIMIT}`,
   );
   return rows;
 }

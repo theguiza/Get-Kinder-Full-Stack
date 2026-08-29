@@ -9,12 +9,15 @@ import {
 import { registerKaiP1WorkerCron } from "../Backend/kai/parsing/p1WorkerCron.js";
 import { sendStatus } from "../Backend/kai/routes/sprint2IntakeApi.js";
 
-const IN_SCOPE_ORG = "a5d17c5a-c55f-43af-9b21-fe63aafe733f";
-const OUT_OF_SCOPE_ORG = "9fe568b1-5c05-4c42-bb1f-6e20de216c7b";
+const ORG_A = "a5d17c5a-c55f-43af-9b21-fe63aafe733f";
+const ORG_B = "9fe568b1-5c05-4c42-bb1f-6e20de216c7b";
+// Retained only as the smallest-possible regression proof that this
+// configuration key is no longer required for normal worker execution -
+// TEST 1 in the P1 single-organization-dependency repair package. It is
+// deliberately absent from `ENABLED_ENV`.
 const ENABLED_ENV = Object.freeze({
   KAI_SPRINT2_ENABLED: "true",
   KAI_WORKER_ENABLED: "true",
-  KAI_P1_WORKER_SYNTHETIC_ORGANIZATION_ID: IN_SCOPE_ORG,
 });
 
 function createResponse() {
@@ -77,17 +80,17 @@ function fakeReplayedCompletedActivation(calls) {
   };
 }
 
-test("either feature flag disabled => zero worker work", async () => {
+test("TEST 1/2/3: either Sprint 2 or worker feature flag disabled => zero candidate discovery and zero activation, with no synthetic-organization variable set anywhere in the environment", async () => {
   const activationCalls = [];
   const listCalls = [];
-  const listFiles = async (input) => {
-    listCalls.push(input);
-    return [{ organization_id: IN_SCOPE_ORG, intake_file_id: "file-1" }];
+  const listCandidates = async () => {
+    listCalls.push(true);
+    return [{ organization_id: ORG_A, intake_file_id: "file-1" }];
   };
 
   const sprint2Off = await runKaiP1WorkerTick({
     env: { ...ENABLED_ENV, KAI_SPRINT2_ENABLED: "false" },
-    listKaiP1WorkerSyntheticScopedEligibleIntakeFiles: listFiles,
+    listActionableKaiP1WorkCandidates: listCandidates,
     activateParserProfileWorkForIntakeFile: fakeActivation(activationCalls),
   });
   assert.equal(sprint2Off.ok, true);
@@ -96,7 +99,7 @@ test("either feature flag disabled => zero worker work", async () => {
 
   const workerOff = await runKaiP1WorkerTick({
     env: { ...ENABLED_ENV, KAI_WORKER_ENABLED: "false" },
-    listKaiP1WorkerSyntheticScopedEligibleIntakeFiles: listFiles,
+    listActionableKaiP1WorkCandidates: listCandidates,
     activateParserProfileWorkForIntakeFile: fakeActivation(activationCalls),
   });
   assert.equal(workerOff.ok, true);
@@ -105,33 +108,31 @@ test("either feature flag disabled => zero worker work", async () => {
 
   assert.equal(listCalls.length, 0);
   assert.equal(activationCalls.length, 0);
+  assert.equal("KAI_P1_WORKER_SYNTHETIC_ORGANIZATION_ID" in ENABLED_ENV, false);
 });
 
-test("missing synthetic scope => zero worker work", async () => {
+test("TEST 10: no actionable automatic P1 work => safe no-op, zero activation", async () => {
   const activationCalls = [];
-  const listCalls = [];
   const result = await runKaiP1WorkerTick({
-    env: { KAI_SPRINT2_ENABLED: "true", KAI_WORKER_ENABLED: "true" },
-    listKaiP1WorkerSyntheticScopedEligibleIntakeFiles: async (input) => {
-      listCalls.push(input);
-      return [];
-    },
+    env: ENABLED_ENV,
+    listActionableKaiP1WorkCandidates: async () => [],
     activateParserProfileWorkForIntakeFile: fakeActivation(activationCalls),
   });
 
   assert.equal(result.ok, true);
   assert.deepEqual(result.data.activated, []);
-  assert.equal(result.data.reason, "synthetic_scope_not_configured");
-  assert.equal(listCalls.length, 0);
   assert.equal(activationCalls.length, 0);
 });
 
-test("out-of-scope tenant rows are never activated, even if a dependency returns one", async () => {
+test("a malformed candidate row missing either half of its tenant identity is never activated, even if a dependency returns one", async () => {
   const activationCalls = [];
   const result = await runKaiP1WorkerTick({
     env: ENABLED_ENV,
-    listKaiP1WorkerSyntheticScopedEligibleIntakeFiles: async () => [
-      { organization_id: OUT_OF_SCOPE_ORG, intake_file_id: "out-of-scope-file" },
+    listActionableKaiP1WorkCandidates: async () => [
+      { organization_id: ORG_A, intake_file_id: "" },
+      { organization_id: "", intake_file_id: "file-1" },
+      { intake_file_id: "file-1" },
+      { organization_id: ORG_A },
     ],
     activateParserProfileWorkForIntakeFile: fakeActivation(activationCalls),
   });
@@ -141,24 +142,50 @@ test("out-of-scope tenant rows are never activated, even if a dependency returns
   assert.equal(activationCalls.length, 0);
 });
 
-test("an eligible in-scope file reaches the existing activation seam with the synthetic system actor and no retry", async () => {
+test("TEST 4/5/6: multi-organization discovery - candidates in two different organizations are each discovered and activated with their own organization_id, without any environment change", async () => {
   const activationCalls = [];
   const result = await runKaiP1WorkerTick({
     env: ENABLED_ENV,
-    listKaiP1WorkerSyntheticScopedEligibleIntakeFiles: async (input) => {
-      assert.deepEqual(input, { organizationId: IN_SCOPE_ORG });
-      return [{ organization_id: IN_SCOPE_ORG, intake_file_id: "file-1" }];
-    },
+    listActionableKaiP1WorkCandidates: async () => [
+      { organization_id: ORG_A, intake_file_id: "file-a" },
+      { organization_id: ORG_B, intake_file_id: "file-b" },
+    ],
     activateParserProfileWorkForIntakeFile: fakeActivation(activationCalls),
   });
 
   assert.equal(result.ok, true);
-  assert.equal(result.data.organizationId, IN_SCOPE_ORG);
+  assert.equal(result.data.activated.length, 2);
+  assert.equal(result.data.activated[0].organizationId, ORG_A);
+  assert.equal(result.data.activated[0].intakeFileId, "file-a");
+  assert.equal(result.data.activated[1].organizationId, ORG_B);
+  assert.equal(result.data.activated[1].intakeFileId, "file-b");
+
+  assert.equal(activationCalls.length, 2);
+  assert.equal(activationCalls[0].organizationId, ORG_A);
+  assert.equal(activationCalls[0].intakeFileId, "file-a");
+  assert.equal(activationCalls[1].organizationId, ORG_B);
+  assert.equal(activationCalls[1].intakeFileId, "file-b");
+  for (const call of activationCalls) {
+    assert.equal(call.retry, false);
+    assert.deepEqual(call.actorContext, KAI_P1_WORKER_SYNTHETIC_ACTOR_CONTEXT);
+  }
+});
+
+test("an eligible candidate reaches the existing activation seam with the synthetic system actor and no retry", async () => {
+  const activationCalls = [];
+  const result = await runKaiP1WorkerTick({
+    env: ENABLED_ENV,
+    listActionableKaiP1WorkCandidates: async () => [{ organization_id: ORG_A, intake_file_id: "file-1" }],
+    activateParserProfileWorkForIntakeFile: fakeActivation(activationCalls),
+  });
+
+  assert.equal(result.ok, true);
   assert.equal(result.data.activated.length, 1);
+  assert.equal(result.data.activated[0].organizationId, ORG_A);
   assert.equal(result.data.activated[0].intakeFileId, "file-1");
 
   assert.equal(activationCalls.length, 1);
-  assert.equal(activationCalls[0].organizationId, IN_SCOPE_ORG);
+  assert.equal(activationCalls[0].organizationId, ORG_A);
   assert.equal(activationCalls[0].intakeFileId, "file-1");
   assert.equal(activationCalls[0].retry, false);
   assert.deepEqual(activationCalls[0].actorContext, KAI_P1_WORKER_SYNTHETIC_ACTOR_CONTEXT);
@@ -166,10 +193,10 @@ test("an eligible in-scope file reaches the existing activation seam with the sy
 
 test("repeated/overlapping ticks preserve existing idempotency: the activation seam, not the tick, owns dedupe", async () => {
   const activationCalls = [];
-  const listFiles = async () => [{ organization_id: IN_SCOPE_ORG, intake_file_id: "file-1" }];
+  const listFiles = async () => [{ organization_id: ORG_A, intake_file_id: "file-1" }];
   const dependencies = {
     env: ENABLED_ENV,
-    listKaiP1WorkerSyntheticScopedEligibleIntakeFiles: listFiles,
+    listActionableKaiP1WorkCandidates: listFiles,
     activateParserProfileWorkForIntakeFile: fakeActivation(activationCalls),
   };
 
@@ -194,9 +221,9 @@ test("no automatic retry: the tick never sets retry: true", async () => {
   const activationCalls = [];
   await runKaiP1WorkerTick({
     env: ENABLED_ENV,
-    listKaiP1WorkerSyntheticScopedEligibleIntakeFiles: async () => [
-      { organization_id: IN_SCOPE_ORG, intake_file_id: "file-1" },
-      { organization_id: IN_SCOPE_ORG, intake_file_id: "file-2" },
+    listActionableKaiP1WorkCandidates: async () => [
+      { organization_id: ORG_A, intake_file_id: "file-1" },
+      { organization_id: ORG_A, intake_file_id: "file-2" },
     ],
     activateParserProfileWorkForIntakeFile: fakeActivation(activationCalls),
   });
@@ -300,8 +327,8 @@ test("A. fresh success: a fresh P1-03 completion continues through P1-04 then P1
 
   const result = await runKaiP1WorkerTick({
     env: ENABLED_ENV,
-    listKaiP1WorkerSyntheticScopedEligibleIntakeFiles: async () => [
-      { organization_id: IN_SCOPE_ORG, intake_file_id: "file-1" },
+    listActionableKaiP1WorkCandidates: async () => [
+      { organization_id: ORG_A, intake_file_id: "file-1" },
     ],
     activateParserProfileWorkForIntakeFile: fakeCompletedActivation(activationCalls),
     createDraftDataDictionary: async (input) => {
@@ -326,11 +353,11 @@ test("A. fresh success: a fresh P1-03 completion continues through P1-04 then P1
   assert.equal(activationCalls.length, 1);
 
   assert.equal(dictionaryCalls.length, 1);
-  assert.deepEqual(dictionaryCalls[0].organizationId, IN_SCOPE_ORG);
+  assert.deepEqual(dictionaryCalls[0].organizationId, ORG_A);
   assert.deepEqual(dictionaryCalls[0].fileProfileId, OUTPUT_PROFILE_ID);
 
   assert.equal(sensitivityCalls.length, 1);
-  assert.equal(sensitivityCalls[0].organizationId, IN_SCOPE_ORG);
+  assert.equal(sensitivityCalls[0].organizationId, ORG_A);
   assert.equal(sensitivityCalls[0].fileProfileId, OUTPUT_PROFILE_ID);
   assert.equal(sensitivityCalls[0].dataDictionaryId, DATA_DICTIONARY_ID);
 
@@ -348,8 +375,8 @@ test("replaying the same tick does not duplicate P1-04 or P1-05 work", async () 
 
   const dependencies = {
     env: ENABLED_ENV,
-    listKaiP1WorkerSyntheticScopedEligibleIntakeFiles: async () => [
-      { organization_id: IN_SCOPE_ORG, intake_file_id: "file-1" },
+    listActionableKaiP1WorkCandidates: async () => [
+      { organization_id: ORG_A, intake_file_id: "file-1" },
     ],
     activateParserProfileWorkForIntakeFile: fakeCompletedActivation(activationCalls),
     createDraftDataDictionary: async (input) => {
@@ -387,8 +414,8 @@ test("a P1-04 failure stops the chain before P1-05 is ever invoked", async () =>
 
   const result = await runKaiP1WorkerTick({
     env: ENABLED_ENV,
-    listKaiP1WorkerSyntheticScopedEligibleIntakeFiles: async () => [
-      { organization_id: IN_SCOPE_ORG, intake_file_id: "file-1" },
+    listActionableKaiP1WorkCandidates: async () => [
+      { organization_id: ORG_A, intake_file_id: "file-1" },
     ],
     activateParserProfileWorkForIntakeFile: fakeCompletedActivation(activationCalls),
     createDraftDataDictionary: async (input) => {
@@ -423,8 +450,8 @@ test("B. P1-04 recovery: a P1-04 failure on tick 1 is retried on tick 2 against 
 
   const dependencies = {
     env: ENABLED_ENV,
-    listKaiP1WorkerSyntheticScopedEligibleIntakeFiles: async () => [
-      { organization_id: IN_SCOPE_ORG, intake_file_id: "file-1" },
+    listActionableKaiP1WorkCandidates: async () => [
+      { organization_id: ORG_A, intake_file_id: "file-1" },
     ],
     activateParserProfileWorkForIntakeFile,
     createDraftDataDictionary: async (input) => {
@@ -470,8 +497,8 @@ test("C. P1-05 recovery: a P1-05 failure on tick 1 is retried on tick 2, idempot
 
   const dependencies = {
     env: ENABLED_ENV,
-    listKaiP1WorkerSyntheticScopedEligibleIntakeFiles: async () => [
-      { organization_id: IN_SCOPE_ORG, intake_file_id: "file-1" },
+    listActionableKaiP1WorkCandidates: async () => [
+      { organization_id: ORG_A, intake_file_id: "file-1" },
     ],
     activateParserProfileWorkForIntakeFile,
     createDraftDataDictionary: async (input) => {
@@ -543,8 +570,8 @@ test("D. non-completed P1-03 results never reach P1-04, even a malformed/fake re
     // eslint-disable-next-line no-await-in-loop
     await runKaiP1WorkerTick({
       env: ENABLED_ENV,
-      listKaiP1WorkerSyntheticScopedEligibleIntakeFiles: async () => [
-        { organization_id: IN_SCOPE_ORG, intake_file_id: "file-1" },
+      listActionableKaiP1WorkCandidates: async () => [
+        { organization_id: ORG_A, intake_file_id: "file-1" },
       ],
       activateParserProfileWorkForIntakeFile,
       createDraftDataDictionary: async (input) => {

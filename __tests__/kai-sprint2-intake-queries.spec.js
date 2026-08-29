@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   findIntakeFileReservationByChecksum,
   getScopedIntakeFileSecurityAssessmentFacts,
+  listActionableKaiP1WorkCandidates,
 } from "../Backend/kai/db/kaiIntakeQueries.js";
 import { getIntakeFileUploadMetadata } from "../Backend/kai/db/kaiReadModels.js";
 
@@ -149,4 +150,59 @@ test("upload-authorization metadata read includes private storage facts for uplo
   assert.match(queryText, /storage_object_key/);
   assert.match(queryText, /checksum/);
   assert.match(queryText, /hash_algorithm/);
+});
+
+test("P1 worker candidate discovery sweeps every organization, bounded at 25, excluding already-satisfied and non-automatically-actionable P1 work", async () => {
+  let queryText = null;
+  let queryParams = null;
+  const rows = [
+    { organization_id: "a5d17c5a-c55f-43af-9b21-fe63aafe733f", intake_file_id: "9fe568b1-5c05-4c42-bb1f-6e20de216c7b" },
+    { organization_id: "b6e28d6b-d66f-54bf-ac32-0f74bbf844f0", intake_file_id: "7d5482be-ad6b-4ed5-95cc-1a1bf4fcb749" },
+  ];
+
+  const result = await listActionableKaiP1WorkCandidates({
+    async query(text, params) {
+      queryText = text;
+      queryParams = params;
+      return { rows };
+    },
+  });
+
+  assert.deepEqual(result, rows);
+  assert.deepEqual(queryParams, undefined);
+  // No organization_id bound as a query parameter - the candidate sweep is not
+  // scoped to any one organization.
+  assert.match(queryText, /FROM kai\.intake_files f/);
+  assert.match(queryText, /file_policy_status = 'passed'/);
+  // Satisfied automatic P1 work (a persisted P1-05 sensitivity profile) is
+  // excluded so it can never permanently occupy the bounded window.
+  assert.match(queryText, /NOT EXISTS[\s\S]*kai\.intake_sensitivity_profiles s[\s\S]*s\.organization_id = f\.organization_id[\s\S]*s\.intake_file_id = f\.intake_file_id/);
+  // A parser run stuck running/failed/cancelled can never auto-advance under
+  // retry:false (only a queued row is claimable, and only explicit retry:true
+  // - never issued by the automatic worker - re-queues a failed run), so it
+  // is excluded rather than permanently occupying the window - but only for
+  // the file's CURRENT parser-run identity: a historical row under a
+  // superseded checksum is irrelevant to a fresh activation call (which
+  // always re-derives its identity from the file's current checksum), so the
+  // exclusion is scoped by checksum, never by organization_id/intake_file_id
+  // alone.
+  assert.match(queryText, /NOT EXISTS[\s\S]*kai\.intake_parser_runs r[\s\S]*r\.organization_id = f\.organization_id[\s\S]*r\.intake_file_id = f\.intake_file_id[\s\S]*r\.checksum = f\.verified_checksum[\s\S]*r\.parser_status IN \('running', 'failed', 'cancelled'\)/);
+  // Global chronological (created_at) ordering, not a per-organization rank:
+  // a fixed candidate's position relative to every other candidate never
+  // moves once created, so no organization's backlog - however large or
+  // continuously replenished, and regardless of how many other organizations
+  // are simultaneously backlogged - can push a fixed candidate out of the
+  // bounded window indefinitely.
+  assert.doesNotMatch(queryText, /ROW_NUMBER/);
+  assert.doesNotMatch(queryText, /PARTITION BY/);
+  assert.match(queryText, /ORDER BY f\.created_at ASC, f\.organization_id ASC, f\.intake_file_id ASC/);
+  assert.match(queryText, /LIMIT 25/);
+  assert.doesNotMatch(queryText, /WHERE.*organization_id = \$1/s);
+});
+
+test("P1 worker candidate discovery returns organization_id and intake_file_id on every candidate", async () => {
+  const rows = [{ organization_id: "org-a", intake_file_id: "file-a" }];
+  const result = await listActionableKaiP1WorkCandidates({ async query() { return { rows }; } });
+  assert.equal(result[0].organization_id, "org-a");
+  assert.equal(result[0].intake_file_id, "file-a");
 });
