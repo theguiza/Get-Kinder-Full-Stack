@@ -1,5 +1,6 @@
 import cron from "node-cron";
 import { areKaiSprint2WorkerFeaturesEnabled } from "../config/kaiSprint2Config.js";
+import { createKaiIntakeRuntimeDependencies } from "../services/kaiIntakeRuntimeService.js";
 import { runKaiP1WorkerTick } from "./p1WorkerRuntime.js";
 
 const DEFAULT_SCHEDULE = "*/15 * * * *";
@@ -22,16 +23,23 @@ export function registerKaiP1WorkerCron({
   schedule = DEFAULT_SCHEDULE,
   timezone = DEFAULT_TIMEZONE,
   runTick = runKaiP1WorkerTick,
+  createRuntimeDependencies = createKaiIntakeRuntimeDependencies,
 } = {}) {
   if (!areKaiSprint2WorkerFeaturesEnabled(env)) {
     return { scheduled: false, task: null };
   }
 
+  const runtimeDependencies = createRuntimeDependencies(env);
+
   const task = cronLib.schedule(
     schedule,
     async () => {
       try {
-        const result = await runTick({ env });
+        const result = await runTick({
+          ...runtimeDependencies,
+          env,
+        });
+
         if (result?.data?.activated?.length) {
           console.log(`[kai-p1-worker] activated=${result.data.activated.length}`);
         }
