@@ -346,11 +346,29 @@ export default function KaiWebIntake({
             </div>
             {!fileStatus ? <div className="text-muted small">No file status loaded yet.</div> : (
               <>
-                <ValueRow label="Processing" value={fileStatus.processing_status} />
+                <ValueRow
+                  label="P1 processing"
+                  value={fileStatus.p1_lifecycle?.automatic_stage ?? "not started"}
+                />
                 <ValueRow label="Malware scan" value={fileStatus.malware_scan_status} />
                 <ValueRow label="File policy" value={fileStatus.file_policy_status} />
                 <ValueRow label="Security assessment" value={fileStatus.security_assessment?.category ?? fileStatus.security_assessment?.policy_outcome} />
-                <ValueRow label="Parse status" value={fileStatus.parse_status} />
+                <ValueRow
+                  label="Parser/profile"
+                  value={
+                    fileStatus.p1_lifecycle?.file_profile_complete
+                      ? "complete"
+                      : (fileStatus.p1_lifecycle?.parser_status ?? "not started")
+                  }
+                />
+                <ValueRow
+                  label="Data dictionary"
+                  value={fileStatus.p1_lifecycle?.data_dictionary_complete ? "complete" : "not complete"}
+                />
+                <ValueRow
+                  label="Sensitivity profile"
+                  value={fileStatus.p1_lifecycle?.sensitivity_profile_complete ? "complete" : "not complete"}
+                />
                 <ValueRow label="Review status" value={fileStatus.review_status} />
               </>
             )}
@@ -365,7 +383,7 @@ export default function KaiWebIntake({
             {batchFiles.length === 0 ? <div className="text-muted small">No files listed yet.</div> : (
               <ul className="small mb-0">
                 {batchFiles.map((item) => (
-                  <li key={item.intake_file_id}>{item.safe_filename} &mdash; {item.processing_status}</li>
+                  <li key={item.intake_file_id}>{item.safe_filename} &mdash; P1: {item.p1_lifecycle?.automatic_stage ?? "not started"}</li>
                 ))}
               </ul>
             )}

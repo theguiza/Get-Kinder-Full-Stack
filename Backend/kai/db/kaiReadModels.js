@@ -59,8 +59,49 @@ export async function listIntakeFilesForBatch(
   const { rows } = await db.query(
     `SELECT intake_file_id, intake_batch_id, organization_id, engagement_id, safe_filename,
             mime_type, file_size_bytes, file_policy_status, malware_scan_status, processing_status,
-            parse_status, review_status, created_at, updated_at
+            parse_status, review_status, created_at, updated_at,
+            r.parser_status,
+            (
+              r.parser_status = 'completed'
+              AND r.output_profile_id IS NOT NULL
+              AND EXISTS (
+                SELECT 1
+                  FROM kai.intake_file_profiles p
+                 WHERE p.organization_id = kai.intake_files.organization_id
+                   AND p.intake_file_id = kai.intake_files.intake_file_id
+                   AND p.file_profile_id = r.output_profile_id
+              )
+            ) AS file_profile_complete,
+            (
+              r.parser_status = 'completed'
+              AND EXISTS (
+                SELECT 1
+                  FROM kai.data_dictionaries d
+                 WHERE d.organization_id = kai.intake_files.organization_id
+                   AND d.intake_file_id = kai.intake_files.intake_file_id
+                   AND d.file_profile_id = r.output_profile_id
+              )
+            ) AS data_dictionary_complete,
+            (
+              r.parser_status = 'completed'
+              AND EXISTS (
+                SELECT 1
+                  FROM kai.intake_sensitivity_profiles sp
+                 WHERE sp.organization_id = kai.intake_files.organization_id
+                   AND sp.intake_file_id = kai.intake_files.intake_file_id
+                   AND sp.file_profile_id = r.output_profile_id
+              )
+            ) AS sensitivity_profile_complete
        FROM kai.intake_files
+       LEFT JOIN LATERAL (
+         SELECT pr.parser_status, pr.output_profile_id
+           FROM kai.intake_parser_runs pr
+          WHERE pr.organization_id = kai.intake_files.organization_id
+            AND pr.intake_file_id = kai.intake_files.intake_file_id
+            AND pr.checksum = kai.intake_files.verified_checksum
+          ORDER BY pr.created_at DESC, pr.parser_run_id DESC
+          LIMIT 1
+       ) r ON true
       WHERE organization_id = $1
         AND intake_batch_id = $2${cursorPredicate}
       ORDER BY created_at DESC, intake_file_id DESC
@@ -159,6 +200,79 @@ export async function getScopedLatestSecurityAssessmentAuditProjection(organizat
       LIMIT 1`,
     [organizationId, intakeFileId, SECURITY_ASSESSMENT_AUDIT_ACTIONS],
   );
+  return rows[0] || null;
+}
+
+/**
+ * Read-only, tenant/file-scoped projection of the automatic P1 lifecycle.
+ *
+ * The parser run is bound to the intake file's CURRENT verified checksum,
+ * so a historical run for an older object version cannot make the current
+ * file appear complete.
+ *
+ * No raw profile, dictionary, sensitivity, storage, or object-version data
+ * is returned.
+ */
+export async function getScopedIntakeFileP1Lifecycle(
+  organizationId,
+  intakeFileId,
+  db = pool,
+) {
+  const { rows } = await db.query(
+    `SELECT
+       f.organization_id,
+       f.intake_file_id,
+       r.parser_status,
+       (
+         r.parser_status = 'completed'
+         AND p.file_profile_id IS NOT NULL
+       ) AS file_profile_complete,
+       (
+         r.parser_status = 'completed'
+         AND p.file_profile_id IS NOT NULL
+         AND EXISTS (
+           SELECT 1
+             FROM kai.data_dictionaries d
+            WHERE d.organization_id = f.organization_id
+              AND d.intake_file_id = f.intake_file_id
+              AND d.file_profile_id = p.file_profile_id
+         )
+       ) AS data_dictionary_complete,
+       (
+         r.parser_status = 'completed'
+         AND p.file_profile_id IS NOT NULL
+         AND EXISTS (
+           SELECT 1
+             FROM kai.intake_sensitivity_profiles s
+            WHERE s.organization_id = f.organization_id
+              AND s.intake_file_id = f.intake_file_id
+              AND s.file_profile_id = p.file_profile_id
+         )
+       ) AS sensitivity_profile_complete
+       FROM kai.intake_files f
+       LEFT JOIN LATERAL (
+         SELECT
+           pr.parser_status,
+           pr.output_profile_id,
+           pr.created_at,
+           pr.parser_run_id
+           FROM kai.intake_parser_runs pr
+          WHERE pr.organization_id = f.organization_id
+            AND pr.intake_file_id = f.intake_file_id
+            AND pr.checksum = f.verified_checksum
+          ORDER BY pr.created_at DESC, pr.parser_run_id DESC
+          LIMIT 1
+       ) r ON true
+       LEFT JOIN kai.intake_file_profiles p
+         ON p.organization_id = f.organization_id
+        AND p.intake_file_id = f.intake_file_id
+        AND p.file_profile_id = r.output_profile_id
+      WHERE f.organization_id = $1
+        AND f.intake_file_id = $2
+      LIMIT 1`,
+    [organizationId, intakeFileId],
+  );
+
   return rows[0] || null;
 }
 

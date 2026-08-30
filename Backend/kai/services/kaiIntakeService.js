@@ -33,6 +33,7 @@ import {
   getIntakeFileMetadata as readIntakeFileMetadata,
   getIntakeFileUploadMetadata as readIntakeFileUploadMetadata,
   getScopedLatestSecurityAssessmentAuditProjection as readLatestSecurityAssessmentAuditProjection,
+  getScopedIntakeFileP1Lifecycle as readIntakeFileP1Lifecycle,
   listIntakeBatchesForOrganization as readIntakeBatchesForOrganization,
   listIntakeFilesForBatch as readIntakeFilesForBatch,
   listIntakeFileReviewQueueItems as readIntakeFileReviewQueueItems,
@@ -314,10 +315,54 @@ function securityAssessmentProjection(projectionRow) {
   return { category, policy_outcome: policyOutcome };
 }
 
-function responseFileDetail(row, assessmentProjectionRow) {
+const P1_PARSER_STATUSES = Object.freeze(
+  new Set(["queued", "running", "completed", "failed", "cancelled"]),
+);
+
+function p1LifecycleProjection(projectionRow) {
+  const parserStatus = P1_PARSER_STATUSES.has(projectionRow?.parser_status)
+    ? projectionRow.parser_status
+    : null;
+
+  const fileProfileComplete =
+    parserStatus === "completed"
+    && projectionRow?.file_profile_complete === true;
+
+  const dataDictionaryComplete =
+    fileProfileComplete
+    && projectionRow?.data_dictionary_complete === true;
+
+  const sensitivityProfileComplete =
+    dataDictionaryComplete
+    && projectionRow?.sensitivity_profile_complete === true;
+
+  let automaticStage = "not_started";
+
+  if (parserStatus === "failed" || parserStatus === "cancelled") {
+    automaticStage = parserStatus;
+  } else if (parserStatus === "queued" || parserStatus === "running") {
+    automaticStage = "parser";
+  } else if (parserStatus === "completed") {
+    if (!fileProfileComplete) automaticStage = "parser";
+    else if (!dataDictionaryComplete) automaticStage = "dictionary";
+    else if (!sensitivityProfileComplete) automaticStage = "sensitivity";
+    else automaticStage = "complete";
+  }
+
+  return {
+    parser_status: parserStatus,
+    file_profile_complete: fileProfileComplete,
+    data_dictionary_complete: dataDictionaryComplete,
+    sensitivity_profile_complete: sensitivityProfileComplete,
+    automatic_stage: automaticStage,
+  };
+}
+
+function responseFileDetail(row, assessmentProjectionRow, p1LifecycleRow) {
   return {
     ...responseFileSummary(row),
     security_assessment: securityAssessmentProjection(assessmentProjectionRow),
+    p1_lifecycle: p1LifecycleProjection(p1LifecycleRow),
   };
 }
 
@@ -766,9 +811,31 @@ export async function getIntakeFileDetail(input = {}, dependencies = {}) {
     assessmentProjectionRow = null;
   }
 
+  const readP1Lifecycle = dependencies.getScopedIntakeFileP1Lifecycle
+    || readIntakeFileP1Lifecycle;
+
+  let p1LifecycleRow = null;
+  try {
+    p1LifecycleRow = await readP1Lifecycle(organizationId, intakeFileId);
+
+    if (
+      p1LifecycleRow
+      && (
+        String(p1LifecycleRow.organization_id || "") !== organizationId
+        || String(p1LifecycleRow.intake_file_id || "") !== intakeFileId
+      )
+    ) {
+      p1LifecycleRow = null;
+    }
+  } catch {
+    // Read-only observability projection. A projection-read failure must not
+    // make the otherwise-authorized file-detail request unavailable.
+    p1LifecycleRow = null;
+  }
+
   return {
     ok: true,
-    data: responseFileDetail(row, assessmentProjectionRow),
+    data: responseFileDetail(row, assessmentProjectionRow, p1LifecycleRow),
     warnings: [],
   };
 }
@@ -951,7 +1018,10 @@ export async function listIntakeFilesForBatch(input = {}, dependencies = {}) {
   const readFiles = dependencies.listIntakeFilesForBatch || readIntakeFilesForBatch;
   const rows = await readFiles(organizationId, intakeBatchId, { limit, cursor });
   const hasNextPage = rows.length > limit;
-  const items = rows.slice(0, limit).map((row) => responseFileSummary(row));
+  const items = rows.slice(0, limit).map((row) => ({
+    ...responseFileSummary(row),
+    p1_lifecycle: p1LifecycleProjection(row),
+  }));
   const finalItem = items.at(-1);
 
   return {
@@ -3087,4 +3157,5 @@ export const __testables = {
   assessmentCategoryFromResult,
   malwareScanStatusForAssessment,
   securityAssessmentProjection,
+  p1LifecycleProjection,
 };
