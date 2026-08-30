@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   batchFilesPath,
+  batchesPath,
   confirmUploadPath,
   createBatchPath,
   engagementsPath,
@@ -41,6 +42,7 @@ export default function KaiWebIntake({
   const [loadingEngagements, setLoadingEngagements] = useState(false);
   const [engagementsLoaded, setEngagementsLoaded] = useState(false);
   const [batchCode, setBatchCode] = useState("");
+  const [batches, setBatches] = useState([]);
   const [intakeBatchId, setIntakeBatchId] = useState("");
   const [file, setFile] = useState(null);
   const [intakeFileId, setIntakeFileId] = useState("");
@@ -91,6 +93,7 @@ export default function KaiWebIntake({
     setEngagementId("");
     setEngagementsLoaded(false);
     setBatchCode("");
+    setBatches([]);
     setIntakeBatchId("");
     setFile(null);
     setIntakeFileId("");
@@ -132,6 +135,23 @@ export default function KaiWebIntake({
   useEffect(() => {
     loadEngagements(organizationId);
   }, [organizationId, loadEngagements]);
+
+  const loadBatches = useCallback(async () => {
+    if (!organizationId) return;
+
+    setBusy(true);
+    setMessage("");
+    const result = await getJson(batchesPath(organizationId));
+    setBusy(false);
+
+    if (result.statusCode !== 200 || !result.body?.ok) {
+      setBatches([]);
+      setMessage(errorText(result));
+      return;
+    }
+
+    setBatches(result.body.data?.batches || []);
+  }, [organizationId]);
 
   const createBatch = useCallback(async () => {
     if (!organizationId || !engagementId || !batchCode) {
@@ -320,8 +340,44 @@ export default function KaiWebIntake({
             <input className="form-control form-control-sm" value={batchCode} onChange={(event) => setBatchCode(event.target.value.trim())} />
           </div>
         </div>
-        <button type="button" className="btn btn-sm btn-primary" onClick={createBatch} disabled={busy || !organizationId || !engagementId}>Create batch</button>
+        <div className="d-flex gap-2">
+          <button type="button" className="btn btn-sm btn-primary" onClick={createBatch} disabled={busy || !organizationId || !engagementId}>
+            Create batch
+          </button>
+          <button type="button" className="btn btn-sm btn-outline-primary" onClick={loadBatches} disabled={busy || !organizationId}>
+            Load existing batches
+          </button>
+        </div>
         {intakeBatchId ? <div className="small mt-2">Batch id: {intakeBatchId}</div> : null}
+        {batches.length > 0 ? (
+          <ul className="small mt-3 mb-0">
+            {batches.map((item) => (
+              <li
+                key={item.intake_batch_id}
+                className="d-flex justify-content-between align-items-center gap-2"
+              >
+                <span>
+                  {item.batch_code || item.intake_batch_id}
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline-primary"
+                  onClick={() => {
+                    setEngagementId(item.engagement_id || "");
+                    setIntakeBatchId(item.intake_batch_id);
+                    setBatchFiles([]);
+                    setIntakeFileId("");
+                    setFileStatus(null);
+                    setMessage("");
+                  }}
+                  disabled={busy}
+                >
+                  Select
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </div>
 
       <div className="admin-card mb-3">
@@ -383,7 +439,26 @@ export default function KaiWebIntake({
             {batchFiles.length === 0 ? <div className="text-muted small">No files listed yet.</div> : (
               <ul className="small mb-0">
                 {batchFiles.map((item) => (
-                  <li key={item.intake_file_id}>{item.safe_filename} &mdash; P1: {item.p1_lifecycle?.automatic_stage ?? "not started"}</li>
+                  <li
+                    key={item.intake_file_id}
+                    className="d-flex justify-content-between align-items-center gap-2"
+                  >
+                    <span>
+                      {item.safe_filename} &mdash; P1: {item.p1_lifecycle?.automatic_stage ?? "not started"}
+                    </span>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline-primary"
+                      onClick={() => {
+                        setIntakeFileId(item.intake_file_id);
+                        setFileStatus(null);
+                        setMessage("");
+                      }}
+                      disabled={busy}
+                    >
+                      Select
+                    </button>
+                  </li>
                 ))}
               </ul>
             )}
