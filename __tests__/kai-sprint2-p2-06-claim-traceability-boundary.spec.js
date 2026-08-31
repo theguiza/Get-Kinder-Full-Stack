@@ -115,3 +115,11 @@ test("P2-06 repository contract fixes blocker ordering and exposes potential gro
   assert.doesNotMatch(source, /confirmed_conflict|proven_conflict|conflict_exists/);
   assert.doesNotMatch(source, /\bINSERT\b|\bUPDATE\b|\bDELETE\b|prepareMetadataOnlyAudit|upload_lifecycle_audit/);
 });
+
+test("KAI B1A-3B: the traceability DTO's candidate object exposes intake_sensitivity_profile_id (server-grounded identity for the Impact Evidence Library's Phase-5 review entry point)", () => {
+  const source = readFileSync(new URL("../Backend/kai/dictionary/postgresClaimTraceabilityRepository.js", import.meta.url), "utf8");
+  assert.match(
+    source,
+    /candidate:\s*\{\s*\n\s*intake_source_candidate_id:\s*candidateRow\.intake_source_candidate_id,\s*\n\s*intake_sensitivity_profile_id:\s*candidateRow\.intake_sensitivity_profile_id,/,
+  );
+});

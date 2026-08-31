@@ -176,9 +176,18 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     "/admin/organizations/:organizationId/source-versions/:sourceVersionId/evidence-extraction",
     // KAI P1-09 internal review-cockpit surface (additive; every prior entry
     // preserved verbatim).
+    // KAI B1A-3B: safe capability probe, additive (see kaiReviewCockpitService.js
+    // getReviewCockpitCapabilities).
+    "/admin/review-cockpit/capabilities",
     "/admin/review-cockpit/file-profiles/:fileProfileId",
     "/admin/review-cockpit/queue",
     "/admin/review-cockpit/sensitivity-profiles/:intakeSensitivityProfileId",
+    // KAI B1A-2 Phase-5 sensitivity/allowed-use human-decision route (additive).
+    "/admin/review-cockpit/sensitivity-profiles/:intakeSensitivityProfileId/decision",
+    // KAI B1A-2R review-work route: closes the missing P1-05 -> P1-06 lifecycle
+    // edge so the B1A-2 decision route above becomes normally reachable
+    // (additive; every prior entry preserved verbatim).
+    "/admin/review-cockpit/sensitivity-profiles/:intakeSensitivityProfileId/review-work",
     "/admin/review-cockpit/source-candidates/:intakeSourceCandidateId",
     "/admin/review-cockpit/source-candidates/:intakeSourceCandidateId/decision",
     "/admin/review-queue",
@@ -424,6 +433,91 @@ test("admin batch route serializes a duplicate batch-code conflict as the public
     assert.ok(!serialized.includes("ux_intake_batches_org_batch_code"));
     assert.ok(!serialized.includes("intake_batches"));
     assert.ok(!serialized.toLowerCase().includes("unique constraint"));
+  } finally {
+    restore();
+  }
+});
+
+test("B1A-2R review-work route requires an explicit organization_id query parameter plus a canonical path id, rejects a non-empty body, and otherwise delegates a sanitized req/organizationId/intakeSensitivityProfileId to ensureSensitivityReviewQueueItem with no other field", async () => {
+  let serviceCalls = 0;
+  let serviceInput = null;
+  const restore = intakeRouteTestables.setIntakeServiceForTest({
+    async ensureSensitivityReviewQueueItem(input) {
+      serviceCalls += 1;
+      serviceInput = input;
+      return {
+        ok: true,
+        data: { reviewQueueItem: { review_queue_item_id: "q-1" }, replayed: false },
+        warnings: [],
+      };
+    },
+  });
+
+  try {
+    const sensitivityProfileId = "80000000-0000-4000-8000-000000000001";
+
+    // Missing organization_id query parameter is rejected before the service.
+    const missingOrg = await invokeRoute(
+      "/admin/review-cockpit/sensitivity-profiles/:intakeSensitivityProfileId/review-work",
+      "post",
+      { params: { intakeSensitivityProfileId: sensitivityProfileId }, query: {}, body: {}, user: { id: 46 } },
+    );
+    assert.equal(missingOrg.statusCode, 422);
+    assert.equal(missingOrg.body.error.code, "validation_blocker");
+    assert.equal(serviceCalls, 0);
+
+    // A non-empty body is rejected before the service - the caller cannot smuggle
+    // any field (queue_type, target_object_type, queue_status, decision, ...)
+    // through this route at all.
+    const nonEmptyBody = await invokeRoute(
+      "/admin/review-cockpit/sensitivity-profiles/:intakeSensitivityProfileId/review-work",
+      "post",
+      {
+        params: { intakeSensitivityProfileId: sensitivityProfileId },
+        query: { organization_id: organizationId },
+        body: { queue_status: "resolved" },
+        user: { id: 46 },
+      },
+    );
+    assert.equal(nonEmptyBody.statusCode, 422);
+    assert.equal(nonEmptyBody.body.error.code, "validation_blocker");
+    assert.equal(serviceCalls, 0);
+
+    const originalReq = {
+      params: { intakeSensitivityProfileId: sensitivityProfileId },
+      query: { organization_id: organizationId },
+      body: {},
+      headers: { cookie: "session=secret-cookie-sentinel" },
+      cookies: { session: "secret-cookie-sentinel" },
+      session: { id: "session-value-sentinel" },
+      user: { id: 46, email: "email-sentinel@example.test", token: "secret-token-sentinel" },
+    };
+
+    const res = await invokeRoute(
+      "/admin/review-cockpit/sensitivity-profiles/:intakeSensitivityProfileId/review-work",
+      "post",
+      originalReq,
+    );
+
+    assert.equal(res.statusCode, 201);
+    assert.equal(serviceCalls, 1);
+    assert.equal(serviceInput.organizationId, organizationId);
+    assert.equal(serviceInput.intakeSensitivityProfileId, sensitivityProfileId);
+    assert.notEqual(serviceInput.req, originalReq);
+    assert.deepEqual(serviceInput.req, { user: { id: 46 } });
+    assert.equal("headers" in serviceInput, false);
+    assert.equal("cookies" in serviceInput, false);
+    assert.equal("session" in serviceInput, false);
+    assert.equal("actorContext" in serviceInput, false, "the route never resolves or forwards an actor context itself");
+    assert.equal("queueType" in serviceInput, false);
+    assert.equal("queueStatus" in serviceInput, false);
+    assert.equal("targetObjectType" in serviceInput, false);
+    assert.equal("decision" in serviceInput, false);
+    assert.deepEqual(res.body, {
+      ok: true,
+      data: { reviewQueueItem: { review_queue_item_id: "q-1" }, replayed: false },
+      warnings: [],
+    });
   } finally {
     restore();
   }

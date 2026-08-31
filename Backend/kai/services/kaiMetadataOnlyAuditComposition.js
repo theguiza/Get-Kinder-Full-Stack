@@ -1018,8 +1018,171 @@ export function createProductionMetadataOnlyAuditForAccessAdministration({
   });
 }
 
+const INTAKE_SENSITIVITY_PROFILE_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Production composition of the `metadataOnlyAudit` contract required by B1A-2's
+ * Phase-5 sensitivity/allowed-use decision recording
+ * (Backend/kai/dictionary/postgresSensitivityAllowedUseReviewRepository.js), which
+ * supplies its own full audit payload including the authoritative
+ * `intake_sensitivity_profile_id` the route was invoked for. Bound at construction
+ * to organizationId/intakeSensitivityProfileId, mirroring the P2-09/P2-12
+ * evidence-review adapter's identity discipline exactly: a payload whose
+ * intake_sensitivity_profile_id does not match the route's own id is refused, as is
+ * a payload with no valid id at all.
+ *
+ * The audit row carries decision identity and queue-transition metadata only - never
+ * the reviewed Phase-5 classification snapshot itself.
+ */
+export function createProductionMetadataOnlyAuditForSensitivityAllowedUseDecision({
+  organizationId,
+  intakeSensitivityProfileId,
+  actorContext,
+  now,
+  insertAuditEvent = insertRequiredSuccessfulAuditEvent,
+} = {}) {
+  if (typeof organizationId !== "string" || organizationId.length === 0) {
+    throw new TypeError("createProductionMetadataOnlyAuditForSensitivityAllowedUseDecision requires organizationId.");
+  }
+  if (typeof intakeSensitivityProfileId !== "string" || intakeSensitivityProfileId.length === 0) {
+    throw new TypeError(
+      "createProductionMetadataOnlyAuditForSensitivityAllowedUseDecision requires intakeSensitivityProfileId.",
+    );
+  }
+
+  function isPlainObject(value) {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  }
+
+  return Object.freeze({
+    prepareMetadataOnlyAudit({ payload, db } = {}) {
+      if (!isPlainObject(payload)) return { ok: false };
+      const payloadProfileId = payload.intake_sensitivity_profile_id;
+      if (typeof payloadProfileId !== "string" || !INTAKE_SENSITIVITY_PROFILE_ID_PATTERN.test(payloadProfileId)) {
+        return { ok: false };
+      }
+      if (payloadProfileId !== intakeSensitivityProfileId) return { ok: false };
+
+      const metadata = {
+        organization_id: organizationId,
+        object_type: "intake_sensitivity_profile",
+        target_object_type: "intake_sensitivity_profile",
+        object_id: payloadProfileId,
+        operation: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "sensitivity_review_decision_recorded",
+        operation_type: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "sensitivity_review_decision_recorded",
+        validator_key: typeof payload.validator_key === "string" ? payload.validator_key : null,
+        actor_type: actorContext?.actorType || "human",
+        actor_user_id: actorContext?.actorUserId || null,
+        request_id: actorContext?.requestId || null,
+        route: "b1a_02_sensitivity_allowed_use_decision",
+        created_at: typeof now === "string" ? now : new Date().toISOString(),
+        metadata_only: true,
+        contains_raw_file_content: false,
+        contains_raw_parsed_rows: false,
+        contains_client_pii: false,
+        contains_prompt_text: false,
+        contains_unsafe_generated_text: false,
+        contains_signed_urls: false,
+        contains_storage_credentials: false,
+      };
+
+      return {
+        ok: true,
+        async publish() {
+          const result = await insertAuditEvent(metadata, db);
+          if (!result || result.ok !== true) {
+            throw new Error("b1a_02_sensitivity_allowed_use_decision_metadata_only_audit_publish_failed");
+          }
+          return result;
+        },
+      };
+    },
+  });
+}
+
+/**
+ * Production composition of the `metadataOnlyAudit` contract required by P1-06's
+ * `createSensitivityReviewQueueItem` seam
+ * (Backend/kai/dictionary/postgresReviewQueueRepository.js), used by the B1A-2R
+ * review-work route/service to actually reach it. Bound at construction to
+ * organizationId/intakeSensitivityProfileId exactly like the sibling B1A-2
+ * decision adapter above, but the repository's own
+ * `buildSensitivityReviewAuditPayload` never places an id on the payload it hands
+ * to `prepareMetadataOnlyAudit` - only fixed operation/contract/queue metadata -
+ * so this adapter validates that fixed shape instead of an id match, and always
+ * stamps the route's own bound identity onto the published audit row.
+ */
+export function createProductionMetadataOnlyAuditForSensitivityReviewQueueItem({
+  organizationId,
+  intakeSensitivityProfileId,
+  actorContext,
+  now,
+  insertAuditEvent = insertRequiredSuccessfulAuditEvent,
+} = {}) {
+  if (typeof organizationId !== "string" || organizationId.length === 0) {
+    throw new TypeError("createProductionMetadataOnlyAuditForSensitivityReviewQueueItem requires organizationId.");
+  }
+  if (typeof intakeSensitivityProfileId !== "string" || intakeSensitivityProfileId.length === 0) {
+    throw new TypeError(
+      "createProductionMetadataOnlyAuditForSensitivityReviewQueueItem requires intakeSensitivityProfileId.",
+    );
+  }
+
+  function isPlainObject(value) {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  }
+
+  return Object.freeze({
+    prepareMetadataOnlyAudit({ payload, db } = {}) {
+      if (!isPlainObject(payload)) return { ok: false };
+      if (payload.object_type !== "review_queue_item") return { ok: false };
+      if (typeof payload.queue_status !== "string" || payload.queue_status.length === 0) return { ok: false };
+
+      const metadata = {
+        organization_id: organizationId,
+        object_type: "intake_sensitivity_profile",
+        target_object_type: "intake_sensitivity_profile",
+        object_id: intakeSensitivityProfileId,
+        operation: typeof payload.attempted_operation === "string"
+          ? payload.attempted_operation
+          : "sensitivity_review_queue_item_created",
+        operation_type: typeof payload.attempted_operation === "string"
+          ? payload.attempted_operation
+          : "sensitivity_review_queue_item_created",
+        validator_key: typeof payload.validator_key === "string" ? payload.validator_key : null,
+        actor_type: actorContext?.actorType || "human",
+        actor_user_id: actorContext?.actorUserId || null,
+        request_id: actorContext?.requestId || null,
+        route: "p1_06_sensitivity_review_queue_item",
+        created_at: typeof now === "string" ? now : new Date().toISOString(),
+        metadata_only: true,
+        contains_raw_file_content: false,
+        contains_raw_parsed_rows: false,
+        contains_client_pii: false,
+        contains_prompt_text: false,
+        contains_unsafe_generated_text: false,
+        contains_signed_urls: false,
+        contains_storage_credentials: false,
+      };
+
+      return {
+        ok: true,
+        async publish() {
+          const result = await insertAuditEvent(metadata, db);
+          if (!result || result.ok !== true) {
+            throw new Error("p1_06_sensitivity_review_queue_item_metadata_only_audit_publish_failed");
+          }
+          return result;
+        },
+      };
+    },
+  });
+}
+
 export const __testables = Object.freeze({
   createProductionMetadataOnlyAudit,
+  createProductionMetadataOnlyAuditForSensitivityAllowedUseDecision,
+  createProductionMetadataOnlyAuditForSensitivityReviewQueueItem,
   createProductionMetadataOnlyAuditForSourceVersion,
   createProductionMetadataOnlyAuditForSourcePromotion,
   createProductionMetadataOnlyAuditForClaimProposal,

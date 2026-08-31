@@ -349,12 +349,24 @@ function p1LifecycleProjection(projectionRow) {
     else automaticStage = "complete";
   }
 
+  // KAI B1A-3B-R2: server-grounded P1-05 profile identity, exposed only once
+  // the deterministic completeness chain above has actually reached
+  // "sensitivity" (never surfaced from a stray/partial row, and never
+  // fabricated client-side). A missing/incomplete profile returns null, per
+  // existing response conventions for every other field in this projection.
+  const intakeSensitivityProfileId =
+    sensitivityProfileComplete
+    && UUID_RE.test(String(projectionRow?.intake_sensitivity_profile_id || ""))
+      ? projectionRow.intake_sensitivity_profile_id
+      : null;
+
   return {
     parser_status: parserStatus,
     file_profile_complete: fileProfileComplete,
     data_dictionary_complete: dataDictionaryComplete,
     sensitivity_profile_complete: sensitivityProfileComplete,
     automatic_stage: automaticStage,
+    intake_sensitivity_profile_id: intakeSensitivityProfileId,
   };
 }
 

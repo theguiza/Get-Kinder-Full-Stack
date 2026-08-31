@@ -6,6 +6,7 @@ import {
   getReviewCockpitFileProfileDetail,
   getReviewCockpitSensitivityProfileDetail,
   getReviewCockpitSourceCandidateDetail,
+  getReviewCockpitCapabilities,
   listReviewCockpitQueue,
   submitSourceCandidateDecision,
   __reviewCockpitServiceContract,
@@ -893,9 +894,16 @@ test("P1-09 file-profile review is read-only: the package exposes no file-profil
   assert.deepEqual(fileProfileRoutes, [
     'router.get("/admin/review-cockpit/file-profiles/:fileProfileId"',
   ]);
-  // The only mutating cockpit route is the source-candidate decision route.
+  // The only mutating cockpit routes are the two human-decision routes (P1-08's
+  // source-candidate promotion decision and B1A-2's Phase-5 sensitivity/allowed-use
+  // decision) plus B1A-2R's review-work route, which only ensures the P1-06
+  // 'sensitivity_review' work item exists - it starts no substantive review
+  // authority and records no classification/consent/allowed-use/decision. None of
+  // the three mutates a file profile, and no other cockpit POST exists.
   const cockpitPosts = routeSource.match(/router\.post\("\/admin\/review-cockpit[^"]*"/g) || [];
   assert.deepEqual(cockpitPosts, [
+    'router.post("/admin/review-cockpit/sensitivity-profiles/:intakeSensitivityProfileId/decision"',
+    'router.post("/admin/review-cockpit/sensitivity-profiles/:intakeSensitivityProfileId/review-work"',
     'router.post("/admin/review-cockpit/source-candidates/:intakeSourceCandidateId/decision"',
   ]);
 });
@@ -1170,4 +1178,77 @@ test("P1-09 UI clears tenant-scoped queue and detail state when organization con
   assert.match(uiSource, /const activeOrganizationRef = useRef\(""\);/);
   assert.match(uiSource, /activeOrganizationRef\.current = organization;/);
   assert.match(uiSource, /if \(activeOrganizationRef\.current !== organization\) return;/);
+});
+
+// --- KAI B1A-3B ---------------------------------------------------------
+//
+// The B1A-3B product workflow lives exclusively in frontend/ImpactEvidenceLibrary.jsx
+// and frontend/impactEvidenceLibraryLogic.js. frontend/kaiReviewCockpit.jsx (the
+// admin surface asserted above) must carry no B1A-3B decision/review-work
+// controls: this test proves the admin file was not touched to add them.
+test("KAI B1A-3B: the admin Review Cockpit UI carries no Phase-5 sensitivity decision/review-work controls added by this package", () => {
+  assert.doesNotMatch(uiSource, /reviewed_llm_processing_allowed|reviewed_public_use_allowed|reviewed_funder_use_allowed|reviewed_product_learning_allowed/);
+  assert.doesNotMatch(uiSource, /\/review-work/);
+  assert.doesNotMatch(uiSource, /sensitivity-profiles\/.*\/decision/);
+});
+
+function readCapabilitiesDependencies(overrides = {}) {
+  return { env: SPRINT2_ONLY, ...overrides };
+}
+
+test("KAI B1A-3B getReviewCockpitCapabilities: an authorized global GK role gets true, an authenticated actor lacking that role gets false (200, not an error), and a non-human actor gets false", async () => {
+  const dependencies = readCapabilitiesDependencies();
+
+  const authorized = await getReviewCockpitCapabilities(
+    { organizationId: ORG, actorContext: humanActor({ kaiRoles: ["gk_reviewer"] }) },
+    dependencies,
+  );
+  assert.equal(authorized.ok, true);
+  assert.deepEqual(authorized.data, { can_manage_sensitivity_review: true });
+
+  const wrongRole = await getReviewCockpitCapabilities(
+    { organizationId: ORG, actorContext: humanActor({ kaiRoles: [], organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_admin" }] }) },
+    dependencies,
+  );
+  assert.equal(wrongRole.ok, true);
+  assert.deepEqual(wrongRole.data, { can_manage_sensitivity_review: false });
+
+  const nonHuman = await getReviewCockpitCapabilities(
+    { organizationId: ORG, actorContext: { actorType: "system", actorUserId: "7fe568b1-5c05-4c42-bb1f-6e20de216c7b" } },
+    dependencies,
+  );
+  assert.equal(nonHuman.ok, true);
+  assert.deepEqual(nonHuman.data, { can_manage_sensitivity_review: false });
+});
+
+test("KAI B1A-3B getReviewCockpitCapabilities: never touches queue/profile/decision data, and fails closed on a disabled feature flag or invalid organization id", async () => {
+  const dependencies = readCapabilitiesDependencies({ env: {} });
+  const disabled = await getReviewCockpitCapabilities(
+    { organizationId: ORG, actorContext: humanActor() },
+    dependencies,
+  );
+  assert.equal(disabled.ok, false);
+  assert.equal(disabled.error.code, "feature_disabled");
+
+  const invalidOrg = await getReviewCockpitCapabilities(
+    { organizationId: "not-a-uuid", actorContext: humanActor() },
+    readCapabilitiesDependencies(),
+  );
+  assert.equal(invalidOrg.ok, false);
+  assert.equal(invalidOrg.error.code, "invalid_request");
+
+  const source = readFileSync(new URL("../Backend/kai/services/kaiReviewCockpitService.js", import.meta.url), "utf8");
+  const fnBody = source.match(/export async function getReviewCockpitCapabilities\([\s\S]*?\n}\n/)?.[0];
+  assert.ok(fnBody);
+  assert.doesNotMatch(fnBody, /getReviewCockpitSensitivityProfileRecord|readSensitivityProfileRecord|listReviewCockpitQueueItems/);
+});
+
+test("KAI B1A-3B: the /admin/review-cockpit/capabilities route is mounted and preserves the existing router-level authentication gate (no new anonymous access)", () => {
+  const routeSource = readFileSync(new URL("../Backend/kai/routes/sprint2IntakeApi.js", import.meta.url), "utf8");
+  assert.match(routeSource, /router\.get\("\/admin\/review-cockpit\/capabilities", async \(req, res\) => \{/);
+  // The route sits below the same router.use(requireKaiSprint2Enabled) gate as
+  // every other route in this file - no per-route bypass of it is introduced.
+  const capabilitiesBlock = routeSource.match(/router\.get\("\/admin\/review-cockpit\/capabilities"[\s\S]*?\n\}\);\n/)?.[0];
+  assert.ok(capabilitiesBlock);
+  assert.doesNotMatch(capabilitiesBlock, /ensureAdmin|skipAuth|bypassAuth/);
 });

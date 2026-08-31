@@ -48,6 +48,7 @@ test("P1 lifecycle read is tenant/file scoped and bound to the current verified 
   assert.match(queryText, /kai\.intake_file_profiles/);
   assert.match(queryText, /kai\.data_dictionaries/);
   assert.match(queryText, /kai\.intake_sensitivity_profiles/);
+  assert.match(queryText, /intake_sensitivity_profile_id/);
   assert.match(queryText, /f\.organization_id = \$1/);
   assert.match(queryText, /f\.intake_file_id = \$2/);
 
@@ -58,12 +59,14 @@ test("P1 lifecycle read is tenant/file scoped and bound to the current verified 
 });
 
 test("P1 lifecycle projection reports the completed automatic P1 chain", () => {
+  const intakeSensitivityProfileId = "3c9a6f0e-2f0e-4a2a-9a9e-1a2b3c4d5e6f";
   assert.deepEqual(
     p1LifecycleProjection({
       parser_status: "completed",
       file_profile_complete: true,
       data_dictionary_complete: true,
       sensitivity_profile_complete: true,
+      intake_sensitivity_profile_id: intakeSensitivityProfileId,
     }),
     {
       parser_status: "completed",
@@ -71,6 +74,7 @@ test("P1 lifecycle projection reports the completed automatic P1 chain", () => {
       data_dictionary_complete: true,
       sensitivity_profile_complete: true,
       automatic_stage: "complete",
+      intake_sensitivity_profile_id: intakeSensitivityProfileId,
     },
   );
 });
@@ -82,6 +86,7 @@ test("P1 lifecycle projection does not claim downstream completion from incomple
       file_profile_complete: true,
       data_dictionary_complete: false,
       sensitivity_profile_complete: true,
+      intake_sensitivity_profile_id: "3c9a6f0e-2f0e-4a2a-9a9e-1a2b3c4d5e6f",
     }),
     {
       parser_status: "completed",
@@ -89,6 +94,7 @@ test("P1 lifecycle projection does not claim downstream completion from incomple
       data_dictionary_complete: false,
       sensitivity_profile_complete: false,
       automatic_stage: "dictionary",
+      intake_sensitivity_profile_id: null,
     },
   );
 
@@ -100,6 +106,36 @@ test("P1 lifecycle projection does not claim downstream completion from incomple
   assert.equal(
     p1LifecycleProjection(null).automatic_stage,
     "not_started",
+  );
+});
+
+// KAI B1A-3B-R2: server-grounded P1-05 profile-id projection.
+test("P1 lifecycle projection exposes intake_sensitivity_profile_id only when the profile is actually complete and a valid uuid", () => {
+  assert.equal(
+    p1LifecycleProjection({
+      parser_status: "completed",
+      file_profile_complete: true,
+      data_dictionary_complete: true,
+      sensitivity_profile_complete: false,
+      intake_sensitivity_profile_id: "3c9a6f0e-2f0e-4a2a-9a9e-1a2b3c4d5e6f",
+    }).intake_sensitivity_profile_id,
+    null,
+  );
+
+  assert.equal(
+    p1LifecycleProjection({
+      parser_status: "completed",
+      file_profile_complete: true,
+      data_dictionary_complete: true,
+      sensitivity_profile_complete: true,
+      intake_sensitivity_profile_id: "not-a-uuid",
+    }).intake_sensitivity_profile_id,
+    null,
+  );
+
+  assert.equal(
+    p1LifecycleProjection(null).intake_sensitivity_profile_id,
+    null,
   );
 });
 

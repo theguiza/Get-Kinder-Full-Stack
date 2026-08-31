@@ -21,13 +21,22 @@ import {
 import { listClaimLibraryReviewCandidates } from "../Backend/kai/db/kaiClaimLibraryReadModels.js";
 import {
   annotateGovernedAvailability,
+  canCompleteClaimReview,
+  canCompleteEvidenceReview,
   canCompleteGeneratedContentReview,
   canSelectClaimForInternalGeneration,
   canStartGeneratedContentReview,
   claimLibraryCandidatesPath,
+  claimReviewDecisionBody,
+  claimReviewDecisionValidationError,
   claimTraceabilityPath,
+  cleanLimitationNotes,
   createEvidenceSummaryPath,
+  decisionRequiresApprovedAudiences,
+  decisionRequiresLimitationNotes,
   eligibleClaimsPath,
+  evidenceReviewDecisionBody,
+  evidenceReviewDecisionValidationError,
   generatedContentReviewCompletePath,
   generatedContentReviewStartPath,
   generatedDraftReviewPacketPath,
@@ -43,6 +52,21 @@ import {
   reviewTransitionBody,
   shouldApplyCandidateResponse,
   shouldApplyEligibilityResponse,
+  sensitivityCapabilitiesPath,
+  sensitivityProfilePath,
+  sensitivityReviewWorkPath,
+  sensitivityReviewQueuePath,
+  sensitivityDecisionPath,
+  projectSensitivityReviewQueueItems,
+  SENSITIVITY_PRESENCE_FIELDS,
+  SENSITIVITY_ALLOWED_USE_FIELD,
+  SENSITIVITY_PERMISSION_FIELDS,
+  defaultSensitivityReviewFormState,
+  restrictedPermissionEligible,
+  publicUseAllowedEligible,
+  buildReviewedSnapshotBody,
+  buildSensitivityDecisionRequestBody,
+  projectSensitivityDetail,
 } from "../frontend/impactEvidenceLibraryLogic.js";
 
 const basePath = "/api/kai/sprint2/intake";
@@ -719,6 +743,10 @@ test("Impact Evidence Library frontend projections compose P2-08 and P2-06 witho
   assert.equal(traceability.dimensions[0].displayStatus, "known_limitation");
   assert.equal(traceability.clientFollowupWorkflows[0].workflowDisposition, "completed_workflow_obligation");
   assert.equal(JSON.stringify(traceability).includes("must not render"), false);
+  // A1C-1: with no decision field present in the DTO at all, the projection
+  // must not fabricate one.
+  assert.equal(traceability.evidenceReviewDecision, null);
+  assert.equal(traceability.claimReviewDecision, null);
 
   const packet = projectGeneratedDraftPacket({
     generatedContentDraftId: "00000000-0000-4000-8000-000000000777",
@@ -756,6 +784,60 @@ test("Impact Evidence Library frontend projections compose P2-08 and P2-06 witho
   assert.equal(JSON.stringify(packet).includes("must not render"), false);
 
   assert.deepEqual(mergeClaims(usable, candidates).map((claim) => claim.libraryStatus), ["usable", "needs_review"]);
+});
+
+test("A1C-1: projectTraceability reads the durable evidence/claim review decision straight through from the DTO, including approved_audiences exactly, and returns null when the DTO field is null", () => {
+  const withDecisions = projectTraceability({
+    requestedAudience: "internal",
+    eligible: true,
+    blockerCodes: [],
+    affectedDimensionKeys: [],
+    affectedObjectIds: [],
+    claim: { audience_gates: {} },
+    evidence: {},
+    claim_review: {},
+    dimensions: {},
+    gap_items: [],
+    client_followup_workflows: [],
+    potential_conflict_groups: [],
+    evidence_review_decision: {
+      decision_id: "00000000-0000-4000-8000-000000000901",
+      decision_outcome: "supported_with_limitation",
+    },
+    claim_review_decision: {
+      decision_id: "00000000-0000-4000-8000-000000000902",
+      decision_outcome: "approved",
+      approved_audiences: ["internal", "funder"],
+    },
+  });
+  assert.deepEqual(withDecisions.evidenceReviewDecision, {
+    decisionId: "00000000-0000-4000-8000-000000000901",
+    decisionOutcome: "supported_with_limitation",
+  });
+  assert.deepEqual(withDecisions.claimReviewDecision, {
+    decisionId: "00000000-0000-4000-8000-000000000902",
+    decisionOutcome: "approved",
+    approvedAudiences: ["internal", "funder"],
+  });
+
+  const withoutDecisions = projectTraceability({
+    requestedAudience: "internal",
+    eligible: false,
+    blockerCodes: ["evidence_review_unresolved"],
+    affectedDimensionKeys: [],
+    affectedObjectIds: [],
+    claim: { audience_gates: {} },
+    evidence: {},
+    claim_review: {},
+    dimensions: {},
+    gap_items: [],
+    client_followup_workflows: [],
+    potential_conflict_groups: [],
+    evidence_review_decision: null,
+    claim_review_decision: null,
+  });
+  assert.equal(withoutDecisions.evidenceReviewDecision, null);
+  assert.equal(withoutDecisions.claimReviewDecision, null);
 });
 
 test("Impact Evidence Library source has only the Stage-A internal generation call and no assistant, export, or raw-source paths", () => {
@@ -1167,6 +1249,225 @@ test("14-04 closure case H: 14-04 governed availability / audience eligibility s
   assert.equal(onFailure[0].audienceEligibility, "eligibility_unavailable");
 });
 
+// KAI P2-12 (Problem A1) frontend decision-body builders. The server
+// rejects limitation_notes/approved_audiences entirely (unexpected_*) when
+// the chosen decision does not require them, so these builders must omit
+// the key rather than send null/[] placeholders.
+
+test("cleanLimitationNotes trims each line and drops blank lines", () => {
+  assert.deepEqual(cleanLimitationNotes("  first note  \n\n  second note\n   \nthird"), [
+    "first note",
+    "second note",
+    "third",
+  ]);
+  assert.deepEqual(cleanLimitationNotes(""), []);
+  assert.deepEqual(cleanLimitationNotes(null), []);
+});
+
+test("decisionRequiresLimitationNotes/decisionRequiresApprovedAudiences match the server's exact per-decision requirements", () => {
+  assert.equal(decisionRequiresLimitationNotes("supported_with_limitation"), true);
+  assert.equal(decisionRequiresLimitationNotes("approved_with_limitation"), true);
+  for (const decision of ["supported", "not_supported", "needs_more_information", "approved", "rejected"]) {
+    assert.equal(decisionRequiresLimitationNotes(decision), false);
+  }
+  assert.equal(decisionRequiresApprovedAudiences("approved"), true);
+  assert.equal(decisionRequiresApprovedAudiences("approved_with_limitation"), true);
+  for (const decision of ["rejected", "needs_more_information", "supported", "supported_with_limitation", "not_supported"]) {
+    assert.equal(decisionRequiresApprovedAudiences(decision), false);
+  }
+});
+
+test("evidenceReviewDecisionBody omits limitation_notes for every outcome except supported_with_limitation, and includes it only then", () => {
+  const expectedUpdatedAt = "2026-08-15T10:00:00.000Z";
+  for (const decision of ["supported", "not_supported", "needs_more_information"]) {
+    const body = evidenceReviewDecisionBody({ expectedUpdatedAt, decision, limitationNotes: "should be ignored" });
+    assert.deepEqual(body, { expected_updated_at: expectedUpdatedAt, decision });
+    assert.equal("limitation_notes" in body, false);
+  }
+
+  const withLimitation = evidenceReviewDecisionBody({
+    expectedUpdatedAt,
+    decision: "supported_with_limitation",
+    limitationNotes: "  small cell risk in rural sites  \n\n  denominator unclear\n",
+  });
+  assert.deepEqual(withLimitation, {
+    expected_updated_at: expectedUpdatedAt,
+    decision: "supported_with_limitation",
+    limitation_notes: ["small cell risk in rural sites", "denominator unclear"],
+  });
+});
+
+test("claimReviewDecisionBody omits approved_audiences/limitation_notes appropriately per outcome, including approved_audiences only for approved/approved_with_limitation", () => {
+  const expectedUpdatedAt = "2026-08-15T10:00:00.000Z";
+
+  const rejected = claimReviewDecisionBody({
+    expectedUpdatedAt,
+    decision: "rejected",
+    limitationNotes: "ignored",
+    approvedAudiences: ["internal"],
+  });
+  assert.deepEqual(rejected, { expected_updated_at: expectedUpdatedAt, decision: "rejected" });
+  assert.equal("limitation_notes" in rejected, false);
+  assert.equal("approved_audiences" in rejected, false);
+
+  const needsMoreInfo = claimReviewDecisionBody({
+    expectedUpdatedAt,
+    decision: "needs_more_information",
+    limitationNotes: "ignored",
+    approvedAudiences: ["public"],
+  });
+  assert.deepEqual(needsMoreInfo, { expected_updated_at: expectedUpdatedAt, decision: "needs_more_information" });
+  assert.equal("limitation_notes" in needsMoreInfo, false);
+  assert.equal("approved_audiences" in needsMoreInfo, false);
+
+  const approved = claimReviewDecisionBody({
+    expectedUpdatedAt,
+    decision: "approved",
+    limitationNotes: "ignored",
+    approvedAudiences: ["internal", "funder"],
+  });
+  assert.deepEqual(approved, {
+    expected_updated_at: expectedUpdatedAt,
+    decision: "approved",
+    approved_audiences: ["internal", "funder"],
+  });
+  assert.equal("limitation_notes" in approved, false);
+
+  const approvedWithLimitation = claimReviewDecisionBody({
+    expectedUpdatedAt,
+    decision: "approved_with_limitation",
+    limitationNotes: "coverage gap in 2024\ndefinition ambiguity",
+    approvedAudiences: ["internal"],
+  });
+  assert.deepEqual(approvedWithLimitation, {
+    expected_updated_at: expectedUpdatedAt,
+    decision: "approved_with_limitation",
+    limitation_notes: ["coverage gap in 2024", "definition ambiguity"],
+    approved_audiences: ["internal"],
+  });
+});
+
+test("evidenceReviewDecisionValidationError/claimReviewDecisionValidationError enforce required fields client-side before submission", () => {
+  assert.match(evidenceReviewDecisionValidationError({ decision: "", limitationNotes: "" }), /decision/i);
+  assert.equal(evidenceReviewDecisionValidationError({ decision: "supported", limitationNotes: "" }), "");
+  assert.match(
+    evidenceReviewDecisionValidationError({ decision: "supported_with_limitation", limitationNotes: "   \n  " }),
+    /limitation/i,
+  );
+  assert.equal(
+    evidenceReviewDecisionValidationError({ decision: "supported_with_limitation", limitationNotes: "known gap" }),
+    "",
+  );
+
+  assert.match(claimReviewDecisionValidationError({ decision: "", limitationNotes: "", approvedAudiences: [] }), /decision/i);
+  assert.match(
+    claimReviewDecisionValidationError({ decision: "approved", limitationNotes: "", approvedAudiences: [] }),
+    /audience/i,
+  );
+  assert.equal(
+    claimReviewDecisionValidationError({ decision: "approved", limitationNotes: "", approvedAudiences: ["internal"] }),
+    "",
+  );
+  assert.match(
+    claimReviewDecisionValidationError({ decision: "approved_with_limitation", limitationNotes: "", approvedAudiences: ["internal"] }),
+    /limitation/i,
+  );
+  assert.equal(
+    claimReviewDecisionValidationError({
+      decision: "approved_with_limitation",
+      limitationNotes: "gap",
+      approvedAudiences: ["funder"],
+    }),
+    "",
+  );
+  assert.equal(
+    claimReviewDecisionValidationError({ decision: "rejected", limitationNotes: "", approvedAudiences: [] }),
+    "",
+  );
+});
+
+// P2-12 gating: needs_more_information reopens a previously-resolved review
+// queue item back into open/needs_gk_review (postgresHumanReviewRepository.js,
+// updateReviewQueueCompareAndSet targets FRESH_QUEUE_STATUS/FRESH_REVIEW_STATUS
+// for any non-terminal outcome) - so a first-pass outstanding review and a
+// reopened-after-resolution review are the same single observable state, and
+// the decision controls must render for it either way. A genuinely resolved
+// (resolved/resolved) or otherwise-blocked queue item must not render them.
+
+test("canCompleteEvidenceReview admits the outstanding queue state (first-pass or reopened-after-resolution) and nothing else", () => {
+  assert.equal(canCompleteEvidenceReview({ review_queue_status: "open", review_status: "needs_gk_review" }), true);
+  assert.equal(canCompleteEvidenceReview({ review_queue_status: "resolved", review_status: "resolved" }), false);
+  assert.equal(canCompleteEvidenceReview({ review_queue_status: "blocked", review_status: "needs_gk_review" }), false);
+  assert.equal(canCompleteEvidenceReview({ review_queue_status: "resolved", review_status: "needs_gk_review" }), false);
+  assert.equal(canCompleteEvidenceReview(null), false);
+});
+
+test("canCompleteClaimReview admits the outstanding queue state once its linked evidence review is resolved, and never before", () => {
+  const resolvedEvidence = { review_status: "resolved" };
+  const unresolvedEvidence = { review_status: "needs_gk_review" };
+  assert.equal(
+    canCompleteClaimReview(resolvedEvidence, { queue_status: "open", review_status: "needs_gk_review" }),
+    true,
+  );
+  assert.equal(
+    canCompleteClaimReview(resolvedEvidence, { queue_status: "resolved", review_status: "resolved" }),
+    false,
+  );
+  assert.equal(
+    canCompleteClaimReview(unresolvedEvidence, { queue_status: "open", review_status: "needs_gk_review" }),
+    false,
+  );
+  assert.equal(
+    canCompleteClaimReview(resolvedEvidence, { queue_status: "blocked", review_status: "needs_gk_review" }),
+    false,
+  );
+});
+
+// A1C-1: this repo has no DOM-rendering test harness for this component, so
+// durable-display proof is at the source level, mirroring the existing
+// "mounts KAI Web Intake" pattern above: (1) the labeled rows exist and read
+// from the traceability projection (not from any transient POST/local state),
+// and (2) after a successful review POST, only the existing traceability GET
+// (loadTraceability) is what can ever update what is displayed - proving a
+// refresh/re-fetch shows exactly what the last GET returned.
+test("Impact Evidence Library renders the durable evidence/claim review decision and human-approved scope from the traceability projection", () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+
+  assert.match(
+    uiSource,
+    /<ValueRow label="Evidence review decision" value=\{traceability\.evidenceReviewDecision\?\.decisionOutcome\} \/>/,
+  );
+  assert.match(
+    uiSource,
+    /<ValueRow label="Claim review decision" value=\{traceability\.claimReviewDecision\?\.decisionOutcome\} \/>/,
+  );
+  assert.match(uiSource, /label="Human-approved scope"/);
+  assert.match(uiSource, /traceability\.claimReviewDecision\?\.approvedAudiences/);
+});
+
+test("Impact Evidence Library refreshes traceability via the existing GET after a successful evidence/claim review POST, never displaying transient POST/local state as the durable decision", () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+
+  // setTraceability is only ever assigned from a GET response projected
+  // through projectTraceability - never from a POST's response body.
+  const setTraceabilityCalls = [...uiSource.matchAll(/setTraceability\([^;]*?\);/g)].map((match) => match[0]);
+  assert.ok(setTraceabilityCalls.length > 0);
+  for (const call of setTraceabilityCalls) {
+    assert.ok(
+      /setTraceability\(projectTraceability\(result\.body\.data\)\);|setTraceability\(next\.traceability\);|setTraceability\(null\);/.test(call),
+      `unexpected setTraceability call: ${call}`,
+    );
+  }
+
+  const runEvidenceReview = uiSource.slice(
+    uiSource.indexOf("const runCompleteEvidenceReview"),
+    uiSource.indexOf("const runCompleteClaimReview"),
+  );
+  assert.match(runEvidenceReview, /await loadTraceability\(selectedClaimId\)/);
+  const runClaimReview = uiSource.slice(uiSource.indexOf("const runCompleteClaimReview"));
+  assert.match(runClaimReview, /await loadTraceability\(selectedClaimId\)/);
+});
+
 test("Impact Evidence Library mounts KAI Web Intake under its authorized organization context", () => {
   const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
 
@@ -1177,6 +1478,517 @@ test("Impact Evidence Library mounts KAI Web Intake under its authorized organiz
 
   assert.match(
     uiSource,
-    /\{organizationId \? \([\s\S]*?<KaiWebIntake organizationId=\{organizationId\} embedded \/>[\s\S]*?\) : null\}/,
+    /\{organizationId \? \([\s\S]*?<KaiWebIntake[\s\S]*?organizationId=\{organizationId\}[\s\S]*?embedded[\s\S]*?\/>[\s\S]*?\) : null\}/,
   );
+});
+
+// --- KAI B1A-3B: Phase-5 sensitivity/allowed-use review on /impact-library ---
+
+test("KAI B1A-3B path builders use the review-cockpit sub-tree's organization_id QUERY STRING convention, distinct from this file's path-segment convention", () => {
+  const org = organizationId;
+  const profile = "80000000-0000-4000-8000-000000000001";
+  assert.equal(sensitivityCapabilitiesPath(org), `${basePath}/admin/review-cockpit/capabilities?organization_id=${org}`);
+  assert.equal(
+    sensitivityProfilePath(org, profile),
+    `${basePath}/admin/review-cockpit/sensitivity-profiles/${profile}?organization_id=${org}`,
+  );
+  assert.equal(
+    sensitivityReviewWorkPath(org, profile),
+    `${basePath}/admin/review-cockpit/sensitivity-profiles/${profile}/review-work?organization_id=${org}`,
+  );
+  assert.equal(
+    sensitivityDecisionPath(org, profile),
+    `${basePath}/admin/review-cockpit/sensitivity-profiles/${profile}/decision?organization_id=${org}`,
+  );
+});
+
+test("KAI B1A-3B defaultSensitivityReviewFormState: every presence dimension and allowed-use start at unknown, every permission starts false", () => {
+  const state = defaultSensitivityReviewFormState();
+  for (const field of SENSITIVITY_PRESENCE_FIELDS) assert.equal(state[field], "unknown");
+  assert.equal(state[SENSITIVITY_ALLOWED_USE_FIELD], "unknown");
+  for (const field of SENSITIVITY_PERMISSION_FIELDS) assert.equal(state[field], false);
+});
+
+test("KAI B1A-3B client-side gating mirrors the server's fail-closed invariant: restricted permissions require allowed-use=allowed; public use additionally requires consent=present and governance=absent", () => {
+  const base = defaultSensitivityReviewFormState();
+  assert.equal(restrictedPermissionEligible(base), false);
+  assert.equal(publicUseAllowedEligible(base), false);
+
+  const allowed = { ...base, [SENSITIVITY_ALLOWED_USE_FIELD]: "allowed" };
+  assert.equal(restrictedPermissionEligible(allowed), true);
+  assert.equal(publicUseAllowedEligible(allowed), false);
+
+  const consentOnly = { ...allowed, reviewed_consent_basis_status: "present" };
+  assert.equal(publicUseAllowedEligible(consentOnly), false, "governance must independently gate public use");
+
+  const governancePresent = { ...consentOnly, reviewed_indigenous_governance_status: "present" };
+  assert.equal(publicUseAllowedEligible(governancePresent), false);
+
+  const governanceUnknown = { ...consentOnly, reviewed_indigenous_governance_status: "unknown" };
+  assert.equal(publicUseAllowedEligible(governanceUnknown), false);
+
+  const established = { ...consentOnly, reviewed_indigenous_governance_status: "absent" };
+  assert.equal(publicUseAllowedEligible(established), true);
+});
+
+test("KAI B1A-3B buildReviewedSnapshotBody: emits exactly the 14 contract keys, never coerces unknown, and force-clears any permission the client-side gate would disable", () => {
+  const formState = {
+    ...defaultSensitivityReviewFormState(),
+    reviewed_personal_data_status: "present",
+    reviewed_indigenous_governance_status: "unknown",
+    // These permissions are set true in form state even though the gate
+    // would disable them (allowed-use is still "unknown") - the snapshot
+    // builder must force them back to false rather than trust stale UI state.
+    reviewed_llm_processing_allowed: true,
+    reviewed_public_use_allowed: true,
+  };
+  const snapshot = buildReviewedSnapshotBody(formState);
+  assert.deepEqual([...Object.keys(snapshot)].sort(), [
+    ...SENSITIVITY_PRESENCE_FIELDS,
+    SENSITIVITY_ALLOWED_USE_FIELD,
+    ...SENSITIVITY_PERMISSION_FIELDS,
+  ].sort());
+  assert.equal(snapshot.reviewed_personal_data_status, "present");
+  assert.equal(snapshot.reviewed_indigenous_governance_status, "unknown");
+  assert.equal(snapshot.reviewed_llm_processing_allowed, false);
+  assert.equal(snapshot.reviewed_public_use_allowed, false);
+
+  const eligible = {
+    ...defaultSensitivityReviewFormState(),
+    [SENSITIVITY_ALLOWED_USE_FIELD]: "allowed",
+    reviewed_consent_basis_status: "present",
+    reviewed_indigenous_governance_status: "absent",
+    reviewed_llm_processing_allowed: true,
+    reviewed_public_use_allowed: true,
+  };
+  const eligibleSnapshot = buildReviewedSnapshotBody(eligible);
+  assert.equal(eligibleSnapshot.reviewed_llm_processing_allowed, true);
+  assert.equal(eligibleSnapshot.reviewed_public_use_allowed, true);
+});
+
+test("KAI B1A-3B buildSensitivityDecisionRequestBody: includes reviewed_snapshot only for a 'reviewed' outcome, never for needs_more_information", () => {
+  const queueItemId = "90000000-0000-4000-8000-000000000099";
+  const updatedAt = "2026-08-31T10:00:00.000Z";
+  const formState = defaultSensitivityReviewFormState();
+
+  const reviewed = buildSensitivityDecisionRequestBody({
+    decision: "reviewed",
+    expectedUpdatedAt: updatedAt,
+    reviewQueueItemId: queueItemId,
+    formState,
+  });
+  assert.deepEqual([...Object.keys(reviewed)].sort(), ["decision", "expected_updated_at", "review_queue_item_id", "reviewed_snapshot"]);
+  assert.equal(reviewed.decision, "reviewed");
+
+  const needsInfo = buildSensitivityDecisionRequestBody({
+    decision: "needs_more_information",
+    expectedUpdatedAt: updatedAt,
+    reviewQueueItemId: queueItemId,
+    formState,
+  });
+  assert.deepEqual([...Object.keys(needsInfo)].sort(), ["decision", "expected_updated_at", "review_queue_item_id"]);
+  assert.equal("reviewed_snapshot" in needsInfo, false);
+});
+
+test("KAI B1A-3B projectSensitivityDetail: light pass-through projection of the GET sensitivity-profile detail response, null-safe", () => {
+  assert.equal(projectSensitivityDetail(null), null);
+  assert.equal(projectSensitivityDetail(undefined), null);
+  const projected = projectSensitivityDetail({
+    sensitivity_posture: { pii_status: "unknown" },
+    allowed_use_restrictions: { llm_processing_allowed: false },
+    sensitivity_review_queue_item: { review_queue_item_id: "x", queue_status: "open" },
+    current_decision: { decision_outcome: "reviewed" },
+    decision_controls_enabled: true,
+  });
+  assert.deepEqual(projected, {
+    sensitivityPosture: { pii_status: "unknown" },
+    allowedUseRestrictions: { llm_processing_allowed: false },
+    reviewQueueItem: { review_queue_item_id: "x", queue_status: "open" },
+    currentDecision: { decision_outcome: "reviewed" },
+    decisionControlsEnabled: true,
+  });
+  const empty = projectSensitivityDetail({});
+  assert.equal(empty.reviewQueueItem, null);
+  assert.equal(empty.currentDecision, null);
+  assert.equal(empty.decisionControlsEnabled, false);
+});
+
+test("KAI B1A-3B projectTraceability exposes the server-grounded candidate.intake_sensitivity_profile_id, never fabricating one", () => {
+  const profileId = "80000000-0000-4000-8000-000000000001";
+  const withCandidate = projectTraceability({
+    dimensions: {},
+    candidate: { intake_source_candidate_id: "c1", intake_sensitivity_profile_id: profileId },
+  });
+  assert.equal(withCandidate.candidate.intake_sensitivity_profile_id, profileId);
+
+  const withoutCandidate = projectTraceability({ dimensions: {} });
+  assert.equal(withoutCandidate.candidate, null);
+});
+
+test("KAI B1A-3B UI: Phase-5 fetch/render is gated on the server-grounded capability, never on decision_controls_enabled and never on a hardcoded GK role list", () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+  assert.match(uiSource, /sensitivityCapabilitiesPath\(organizationId\)/);
+  assert.match(uiSource, /sensitivityCapability === true && intakeSensitivityProfileId/);
+  assert.doesNotMatch(uiSource, /gk_admin.*gk_operator.*gk_reviewer|gk_reviewer.*gk_operator.*gk_admin/s);
+  // The section that renders actionable Phase-5 controls only mounts once
+  // the capability check has passed.
+  assert.match(uiSource, /intakeSensitivityProfileId && sensitivityCapability === true \? \(/);
+});
+
+test("KAI B1A-3B UI: review-work POST sends an empty body, and both review-work and decision submissions always refetch the GET detail rather than trusting the POST response", () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+  assert.match(uiSource, /postJson\(sensitivityReviewWorkPath\(organizationId, intakeSensitivityProfileId\), \{\}\)/);
+  const startFn = uiSource.slice(
+    uiSource.indexOf("const startSensitivityReviewWork"),
+    uiSource.indexOf("const submitSensitivityDecision"),
+  );
+  assert.match(startFn, /await loadSensitivityDetail\(\)/);
+  const submitFn = uiSource.slice(
+    uiSource.indexOf("const submitSensitivityDecision"),
+    uiSource.indexOf("return (\n    <section>"),
+  );
+  assert.match(submitFn, /await loadSensitivityDetail\(\)/);
+  // No optimistic state: the mutation result string is set from the HTTP
+  // outcome, but sensitivityDetail is only ever set from loadSensitivityDetail.
+  assert.doesNotMatch(submitFn, /setSensitivityDetail\(/);
+});
+
+test("KAI B1A-3B UI: a stale OCC conflict on the decision POST is not auto-retried - it is surfaced and the state is refetched exactly like any other outcome", () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+  const submitFn = uiSource.slice(
+    uiSource.indexOf("const submitSensitivityDecision"),
+    uiSource.indexOf("return (\n    <section>"),
+  );
+  assert.match(submitFn, /statusCode === 409/);
+  // No looping/recursive retry mechanism - only the single postJson call
+  // above and the required refetch. The explanatory "No auto-retry" comment
+  // itself is not a retry mechanism, so this checks for actual retry
+  // machinery (a loop, or the function calling itself again), not the word.
+  assert.doesNotMatch(submitFn, /while\s*\(|for\s*\(.*statusCode|submitSensitivityDecision\(decision\)/);
+});
+
+test("KAI B1A-3B: needs_more_information and review-work-start never render as approved/complete/funder-ready/public-ready/release-ready", () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+  assert.doesNotMatch(uiSource, /funder-ready|public-ready|release-ready/i);
+});
+
+// --- KAI B1A-3B-R1: pre-claim Phase-5 reachability repair ---
+//
+// Before R1, Phase-5 was reachable ONLY through: selected claim -> claim
+// traceability -> candidate.intake_sensitivity_profile_id. These tests prove
+// the repaired path - the SAME organization-scoped, same-capability-gated
+// review-cockpit queue the admin cockpit already exposes
+// (queue_type='sensitivity_review'), reused as-is - reaches Phase-5 with no
+// claim, no claim traceability, no evidence item, and no promoted source, and
+// that the pre-existing claim-traceability path still works unchanged and
+// still feeds the one single review card (no duplicate control introduced).
+
+test("KAI B1A-3B-R1 sensitivityReviewQueuePath: organization-scoped, filtered to open sensitivity_review work, same query-string convention as the other review-cockpit builders", () => {
+  const org = organizationId;
+  assert.equal(
+    sensitivityReviewQueuePath(org),
+    `${basePath}/admin/review-cockpit/queue?organization_id=${org}&queue_type=sensitivity_review&queue_status=open`,
+  );
+});
+
+test("KAI B1A-3B-R1 projectSensitivityReviewQueueItems: extracts the server-grounded intake_sensitivity_profile_id from target_object_id, never fabricating one", () => {
+  const profileIdA = "80000000-0000-4000-8000-000000000010";
+  const profileIdB = "80000000-0000-4000-8000-000000000011";
+  const items = projectSensitivityReviewQueueItems({
+    items: [
+      {
+        review_queue_item_id: "90000000-0000-4000-8000-000000000010",
+        queue_type: "sensitivity_review",
+        target_object_type: "intake_sensitivity_profile",
+        target_object_id: profileIdA,
+        queue_status: "open",
+        summary: "Sensitivity review needed",
+        created_at: "2026-08-01T00:00:00.000Z",
+        updated_at: "2026-08-01T00:00:00.000Z",
+      },
+      {
+        review_queue_item_id: "90000000-0000-4000-8000-000000000011",
+        queue_type: "sensitivity_review",
+        target_object_type: "intake_sensitivity_profile",
+        target_object_id: profileIdB,
+        queue_status: "open",
+        summary: "Second profile",
+        created_at: "2026-08-01T00:00:00.000Z",
+        updated_at: "2026-08-01T00:00:00.000Z",
+      },
+      // A differently-typed queue row (e.g. source_candidate_review) must
+      // never be treated as a sensitivity-profile id, even though its
+      // target_object_id happens to be a well-formed UUID.
+      {
+        review_queue_item_id: "90000000-0000-4000-8000-000000000012",
+        queue_type: "source_candidate_review",
+        target_object_type: "intake_source_candidate",
+        target_object_id: "80000000-0000-4000-8000-000000000099",
+        queue_status: "open",
+        summary: "Not a sensitivity row",
+        created_at: "2026-08-01T00:00:00.000Z",
+        updated_at: "2026-08-01T00:00:00.000Z",
+      },
+      // A malformed row (non-UUID target) must be dropped, not passed through.
+      {
+        review_queue_item_id: "90000000-0000-4000-8000-000000000013",
+        queue_type: "sensitivity_review",
+        target_object_type: "intake_sensitivity_profile",
+        target_object_id: "not-a-uuid",
+        queue_status: "open",
+        summary: "Malformed",
+        created_at: "2026-08-01T00:00:00.000Z",
+        updated_at: "2026-08-01T00:00:00.000Z",
+      },
+    ],
+  });
+  assert.equal(items.length, 2);
+  assert.deepEqual(items.map((item) => item.intakeSensitivityProfileId), [profileIdA, profileIdB]);
+  assert.equal(items[0].reviewQueueItemId, "90000000-0000-4000-8000-000000000010");
+  assert.equal(items[0].queueStatus, "open");
+
+  assert.deepEqual(projectSensitivityReviewQueueItems(null), []);
+  assert.deepEqual(projectSensitivityReviewQueueItems({}), []);
+});
+
+test("KAI B1A-3B-R1 UI: the pre-claim review-queue is fetched only once the server-grounded capability check passes, and is wired independently of any claim, traceability, evidence item, or source promotion", () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+  assert.match(uiSource, /getJson\(sensitivityReviewQueuePath\(organizationId\)\)/);
+
+  // The fetch effect's dependency array is [organizationId, sensitivityCapability]
+  // only - no selectedClaimId, traceability, evidenceItemId, or source/promotion
+  // state is a dependency, so it can never require any of them to run.
+  const queueEffect = uiSource.slice(
+    uiSource.indexOf("useEffect(() => {\n    setSensitivityReviewQueueItems([]);"),
+    uiSource.indexOf("useEffect(() => {\n    setSensitivityReviewQueueItems([]);") + 900,
+  );
+  assert.match(queueEffect, /\}, \[organizationId, sensitivityCapability\]\);/);
+  assert.match(queueEffect, /sensitivityCapability !== true/);
+  assert.doesNotMatch(queueEffect, /selectedClaimId|traceability|evidenceItemId|sourceVersionId/);
+});
+
+test("KAI B1A-3B-R1 UI: selecting a pre-claim review-queue item feeds the SAME single selectedSensitivityProfileId that claim traceability also feeds - no second/duplicate review control is introduced", () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+
+  // The pre-claim list only ever *selects* a profile id - it renders no
+  // sensitivity-posture, decision, or review-work UI of its own.
+  const queueSection = uiSource.slice(
+    uiSource.indexOf('<h5 className="mb-0">Sources needing sensitivity'),
+    uiSource.indexOf('<h5 className="mb-0">Sensitivity &amp; allowed-use review</h5>'),
+  );
+  assert.match(queueSection, /onClick=\{\(\) => setSelectedSensitivityProfileId\(item\.intakeSensitivityProfileId\)\}/);
+  assert.doesNotMatch(queueSection, /submitSensitivityDecision|startSensitivityReviewWork|sensitivityFormState/);
+
+  // Exactly one actionable "Sensitivity & allowed-use review" detail card
+  // exists in the whole component - the pre-claim list is a selector into it,
+  // not a second copy of it.
+  const detailCardMatches = uiSource.match(/<h5 className="mb-0">Sensitivity &amp; allowed-use review<\/h5>/g) || [];
+  assert.equal(detailCardMatches.length, 1);
+
+  // Claim traceability still independently sets the same selection state -
+  // the pre-claim and post-claim paths converge on one variable, not two
+  // competing ones.
+  assert.match(
+    uiSource,
+    /useEffect\(\(\) => \{\s*const candidateProfileId = traceability\?\.candidate\?\.intake_sensitivity_profile_id \|\| "";\s*if \(candidateProfileId\) setSelectedSensitivityProfileId\(candidateProfileId\);\s*\}, \[traceability\]\);/,
+  );
+  assert.match(uiSource, /const intakeSensitivityProfileId = selectedSensitivityProfileId;/);
+});
+
+test("KAI B1A-3B-R1 UI: selecting a new organization discards the pre-claim review-queue list and the selected profile id, exactly like every other organization-scoped dimension on this page", () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+  const orgChangeEffect = uiSource.slice(
+    uiSource.indexOf("useEffect(() => {\n    candidateRequestGenerationRef.current += 1;"),
+    uiSource.indexOf("}, [organizationId]);") + "}, [organizationId]);".length,
+  );
+  assert.match(orgChangeEffect, /setSensitivityReviewQueueItems\(\[\]\);/);
+  assert.match(orgChangeEffect, /setSensitivityReviewQueueError\(""\);/);
+  assert.match(orgChangeEffect, /setSelectedSensitivityProfileId\(""\);/);
+});
+
+test("KAI B1A-3B-R1 fixture: P1-05 sensitivity profile exists, no evidence item, no claim - the pre-claim queue projection alone is sufficient to reach a reviewable profile id", () => {
+  // This models the exact P1 lifecycle state the living ExecPlan requires be
+  // reachable: a sensitivity_review queue item for a profile that exists
+  // independent of any claim, evidence item, or source candidate/promotion.
+  // No `claim`, `evidence`, `candidate`, `source`, or `sourceVersion` field is
+  // present anywhere in this fixture, and the projection still yields the
+  // profile id needed to open the existing Sensitivity & allowed-use review
+  // card.
+  const intakeSensitivityProfileId = "80000000-0000-4000-8000-000000000042";
+  const queueResponse = {
+    items: [{
+      review_queue_item_id: "90000000-0000-4000-8000-000000000042",
+      organization_id: organizationId,
+      queue_type: "sensitivity_review",
+      target_object_type: "intake_sensitivity_profile",
+      target_object_id: intakeSensitivityProfileId,
+      priority: "normal",
+      queue_status: "open",
+      due_at: null,
+      summary: "Sensitivity & allowed-use review needed",
+      required_action: "Review sensitivity and allowed-use posture",
+      created_at: "2026-08-01T00:00:00.000Z",
+      updated_at: "2026-08-01T00:00:00.000Z",
+    }],
+    filters: { queue_types: ["sensitivity_review"], queue_statuses: ["open"] },
+    pagination: { limit: 25, next_cursor: null },
+  };
+  const projected = projectSensitivityReviewQueueItems(queueResponse);
+  assert.equal(projected.length, 1);
+  assert.equal(projected[0].intakeSensitivityProfileId, intakeSensitivityProfileId);
+});
+
+test("KAI B1A-3B-R1: existing claim traceability still exposes intake_sensitivity_profile_id as traceability metadata, unchanged", () => {
+  const profileId = "80000000-0000-4000-8000-000000000001";
+  const withCandidate = projectTraceability({
+    dimensions: {},
+    candidate: { intake_source_candidate_id: "c1", intake_sensitivity_profile_id: profileId },
+  });
+  assert.equal(withCandidate.candidate.intake_sensitivity_profile_id, profileId);
+});
+
+test("KAI B1A-3B-R1: /impact-library remains the sole product surface for this change - no route or component under the admin Review Cockpit (frontend/kaiReviewCockpit.jsx) was touched", () => {
+  const cockpitSource = readFileSync("frontend/kaiReviewCockpit.jsx", "utf8");
+  assert.doesNotMatch(cockpitSource, /sensitivityReviewQueuePath|projectSensitivityReviewQueueItems|selectedSensitivityProfileId/);
+});
+
+// --- KAI B1A-3B-R2: zero-queue first-review bootstrap repair ---
+//
+// R1 removed the claim dependency for profiles that already have an OPEN
+// sensitivity_review queue item - but sensitivityReviewQueuePath() only ever
+// queries EXISTING review_queue_items rows (queue_type=sensitivity_review,
+// queue_status=open), so a profile with NO queue item yet (the true
+// first-review/zero-queue state) was still unreachable through either the R1
+// list or claim traceability. R2 adds a THIRD, additive path into the exact
+// same selectedSensitivityProfileId: the server-grounded
+// intake_sensitivity_profile_id KaiWebIntake already resolves from its own
+// ordinary file-detail GET, reported through an explicit opt-in callback
+// prop - never a new authority system, review queue, or page.
+
+test("KAI B1A-3B-R2: R1_REQUIRES_EXISTING_QUEUE - sensitivityReviewQueuePath queries only existing review_queue_items rows, never creates or discovers a profile that has none", () => {
+  assert.equal(
+    sensitivityReviewQueuePath(organizationId),
+    `${basePath}/admin/review-cockpit/queue?organization_id=${organizationId}&queue_type=sensitivity_review&queue_status=open`,
+  );
+  // The path only ever reads kai.review_queue_items rows already filtered to
+  // queue_status=open - there is no server-side "create if absent" semantic
+  // reachable from this GET, so a profile with zero queue rows can never be
+  // discovered through it.
+});
+
+test("KAI B1A-3B-R2: the file-detail P1 lifecycle read model additively projects intake_sensitivity_profile_id, deterministically and tenant-scoped, with no unordered/newest-row guess", () => {
+  const readModelSource = readFileSync("Backend/kai/db/kaiReadModels.js", "utf8");
+  const start = readModelSource.indexOf("export async function getScopedIntakeFileP1Lifecycle");
+  const end = readModelSource.indexOf("export async function getDataDictionaryDraftSummary", start);
+  const region = readModelSource.slice(start, end);
+
+  assert.match(region, /s\.intake_sensitivity_profile_id AS intake_sensitivity_profile_id/);
+  assert.match(region, /LEFT JOIN kai\.intake_sensitivity_profiles s/);
+  assert.match(region, /s\.organization_id = f\.organization_id/);
+  assert.match(region, /s\.intake_file_id = f\.intake_file_id/);
+  assert.match(region, /s\.file_profile_id = p\.file_profile_id/);
+  // The sensitivity-profile join itself carries no ORDER BY/LIMIT of its
+  // own - it is a plain equi-join on the unique (organization_id,
+  // file_profile_id) lineage, not a "most recent row" pick.
+  const sensitivityJoinStart = region.indexOf("LEFT JOIN kai.intake_sensitivity_profiles s");
+  const sensitivityJoinClause = region.slice(sensitivityJoinStart, region.indexOf("WHERE f.organization_id", sensitivityJoinStart));
+  assert.doesNotMatch(sensitivityJoinClause, /ORDER BY|LIMIT/i);
+});
+
+test("KAI B1A-3B-R2: the file-detail service exposes intake_sensitivity_profile_id only once the completeness chain has actually reached sensitivity, and only as a valid route uuid", () => {
+  const serviceSource = readFileSync("Backend/kai/services/kaiIntakeService.js", "utf8");
+  const start = serviceSource.indexOf("function p1LifecycleProjection");
+  const end = serviceSource.indexOf("function responseFileDetail", start);
+  const region = serviceSource.slice(start, end);
+
+  assert.match(region, /sensitivityProfileComplete\s*\n?\s*&&\s*UUID_RE\.test/);
+  assert.match(region, /intake_sensitivity_profile_id: intakeSensitivityProfileId/);
+});
+
+test("KAI B1A-3B-R2: KaiWebIntake exposes an explicit opt-in onSensitivityProfileDiscovered seam, never an unconditional Phase-5 UI element in the shared component", () => {
+  const intakeSource = readFileSync("frontend/KaiWebIntake.jsx", "utf8");
+
+  assert.match(intakeSource, /onSensitivityProfileDiscovered,?\s*\n\}\)/);
+  assert.match(
+    intakeSource,
+    /if \(typeof onSensitivityProfileDiscovered === "function"\)/,
+  );
+  assert.match(
+    intakeSource,
+    /reportSensitivityProfileDiscovered\(result\.body\.data\?\.p1_lifecycle\?\.intake_sensitivity_profile_id \|\| null\)/,
+  );
+
+  // No hardcoded Phase-5 review card/form was added to the shared component
+  // itself - ImpactEvidenceLibrary alone owns the one Phase-5 review card.
+  assert.doesNotMatch(intakeSource, /Sensitivity &amp; allowed-use review/);
+  assert.doesNotMatch(intakeSource, /startSensitivityReviewWork|submitSensitivityDecision/);
+});
+
+test("KAI B1A-3B-R2: adminDashboard's standalone KAI Web Intake mount does not opt in, so its behavior is unchanged", () => {
+  const dashboardSource = readFileSync("frontend/adminDashboard.jsx", "utf8");
+  assert.match(dashboardSource, /<KaiWebIntake \/>/);
+  assert.doesNotMatch(dashboardSource, /onSensitivityProfileDiscovered/);
+});
+
+test("KAI B1A-3B-R2 UI: ImpactEvidenceLibrary opts in to the KaiWebIntake seam and feeds the discovered id into the SAME canonical selectedSensitivityProfileId, guarded by isRouteUuid, never fabricated", () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+
+  assert.match(uiSource, /onSensitivityProfileDiscovered=\{handleSensitivityProfileDiscoveredFromIntake\}/);
+
+  const handlerStart = uiSource.indexOf("const handleSensitivityProfileDiscoveredFromIntake");
+  const handlerRegion = uiSource.slice(handlerStart, handlerStart + 400);
+  assert.match(handlerRegion, /isRouteUuid\(intakeSensitivityProfileId\)/);
+  assert.match(handlerRegion, /setSelectedSensitivityProfileId\(intakeSensitivityProfileId\)/);
+
+  // A null/absent report (e.g. the reviewer changed the file selection inside
+  // KaiWebIntake without yet reaching a complete profile) must never clear an
+  // already-selected profile out from under an in-progress review.
+  assert.doesNotMatch(handlerRegion, /setSelectedSensitivityProfileId\(""\)/);
+});
+
+test("KAI B1A-3B-R2: still exactly one Phase-5 review card/form on /impact-library after adding the third discovery path", () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+  const detailCardMatches = uiSource.match(/<h5 className="mb-0">Sensitivity &amp; allowed-use review<\/h5>/g) || [];
+  assert.equal(detailCardMatches.length, 1);
+});
+
+test("KAI B1A-3B-R2 UI: the first-review bootstrap action (existing) sends exactly {} to review-work and always refetches the authoritative GET afterward - unchanged by adding the zero-queue discovery path", () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+  const region = uiSource.slice(
+    uiSource.indexOf("const startSensitivityReviewWork"),
+    uiSource.indexOf("const submitSensitivityDecision"),
+  );
+  assert.match(region, /postJson\(sensitivityReviewWorkPath\(organizationId, intakeSensitivityProfileId\), \{\}\)/);
+  assert.match(region, /await loadSensitivityDetail\(\);/);
+
+  // The zero-queue first-review action is rendered exactly when the
+  // authoritative GET has confirmed there is no queue item yet - it is never
+  // triggered merely by loading/discovering a profile id.
+  const cardStart = uiSource.indexOf('<h5 className="mb-0">Sensitivity &amp; allowed-use review</h5>');
+  const cardRegion = uiSource.slice(cardStart, cardStart + 2500);
+  assert.match(cardRegion, /onClick=\{startSensitivityReviewWork\}/);
+  assert.doesNotMatch(uiSource, /useEffect\([^)]*loadSensitivityDetail[^)]*startSensitivityReviewWork/);
+});
+
+test("KAI B1A-3B-R2: organization change still clears selectedSensitivityProfileId, so a stale file-discovered id from a prior organization can never leak into the new one", () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+  const orgChangeEffect = uiSource.slice(
+    uiSource.indexOf("useEffect(() => {\n    candidateRequestGenerationRef.current += 1;"),
+    uiSource.indexOf("}, [organizationId]);") + "}, [organizationId]);".length,
+  );
+  assert.match(orgChangeEffect, /setSelectedSensitivityProfileId\(""\);/);
+});
+
+test("KAI B1A-3B-R2: resolved profiles remain discoverable through the same file-detail seam, since KaiWebIntake reports the file's current profile id regardless of the profile's review/decision state", () => {
+  const intakeSource = readFileSync("frontend/KaiWebIntake.jsx", "utf8");
+  // The seam is fed directly from the file-detail response's p1_lifecycle
+  // projection, not from any queue-status or decision-status condition - so a
+  // profile with a resolved/superseded decision is reported exactly the same
+  // way as a brand-new one.
+  const refreshRegion = intakeSource.slice(
+    intakeSource.indexOf("const refreshFileStatus"),
+    intakeSource.indexOf("const loadBatchFiles"),
+  );
+  assert.doesNotMatch(refreshRegion, /review_status|queue_status|current_decision/);
+  assert.match(refreshRegion, /reportSensitivityProfileDiscovered\(result\.body\.data\?\.p1_lifecycle\?\.intake_sensitivity_profile_id \|\| null\)/);
 });

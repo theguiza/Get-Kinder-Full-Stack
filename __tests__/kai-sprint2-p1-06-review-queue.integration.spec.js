@@ -14,7 +14,9 @@ async function runReviewQueueIntegrationSuite() {
   const { createPostgresReviewQueueRepository } = await import(
     "../Backend/kai/dictionary/postgresReviewQueueRepository.js"
   );
-  const { createSensitivityReviewQueueItem } = await import("../Backend/kai/services/kaiReviewQueueService.js");
+  const { createSensitivityReviewQueueItem, ensureSensitivityReviewQueueItem } = await import(
+    "../Backend/kai/services/kaiReviewQueueService.js"
+  );
 
   const DATABASE_URL = process.env.KAI_P1_06_REVIEW_QUEUE_DATABASE_URL;
   const ORG = "00000000-0000-4000-8000-000000000001";
@@ -406,5 +408,182 @@ async function runReviewQueueIntegrationSuite() {
     );
     assert.equal(deniedResult.ok, false);
     assert.equal(deniedResult.error.code, "authorization_denied");
+  });
+
+  // KAI B1A-2R: `ensureSensitivityReviewQueueItem` is the route-facing seam that
+  // closes the missing P1-05 -> P1-06 lifecycle edge (see
+  // Backend/kai/routes/sprint2IntakeApi.js's
+  // POST /admin/review-cockpit/sensitivity-profiles/:id/review-work). These
+  // integration tests prove it end to end against real PostgreSQL, using only
+  // the P1-06 repository's own idempotency/authorization - never a second
+  // mechanism and never a manually-inserted review_queue_items row.
+  test("B1A-2R: an authorized human ensures the sensitivity_review work item exists against real PostgreSQL", async () => {
+    const { intakeSensitivityProfileId } = await seedPredicateSatisfyingSensitivityProfile(10);
+
+    const result = await ensureSensitivityReviewQueueItem(
+      { organizationId: ORG, intakeSensitivityProfileId, actorContext: humanActor(), now: NOW },
+      { env: { KAI_SPRINT2_ENABLED: "true" }, reviewQueueRepository: repository, metadataOnlyAudit: createAuditProbe().dependency },
+    );
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.data.replayed, false);
+    assert.equal(result.data.reviewQueueItem.queue_status, "open");
+    assert.equal(result.data.reviewQueueItem.target_object_type, "intake_sensitivity_profile");
+    assert.equal(result.data.reviewQueueItem.target_object_id, intakeSensitivityProfileId);
+    assert.equal("current_decision" in result.data.reviewQueueItem, false, "ensuring work records no decision of its own");
+
+    const rowCount = await withClient((client) => client.query(
+      `SELECT count(*)::int AS count FROM kai.review_queue_items
+        WHERE organization_id = $1::uuid AND queue_type = 'sensitivity_review' AND target_object_id = $2::uuid`,
+      [ORG, intakeSensitivityProfileId],
+    ));
+    assert.equal(rowCount.rows[0].count, 1);
+  });
+
+  test("B1A-2R: an identical replay returns the same queue identity, and concurrent repeated requests never create a duplicate", async () => {
+    const { intakeSensitivityProfileId } = await seedPredicateSatisfyingSensitivityProfile(11);
+
+    const first = await ensureSensitivityReviewQueueItem(
+      { organizationId: ORG, intakeSensitivityProfileId, actorContext: humanActor(), now: NOW },
+      { env: { KAI_SPRINT2_ENABLED: "true" }, reviewQueueRepository: repository, metadataOnlyAudit: createAuditProbe().dependency },
+    );
+    assert.equal(first.ok, true, JSON.stringify(first));
+    assert.equal(first.data.replayed, false);
+
+    const replay = await ensureSensitivityReviewQueueItem(
+      { organizationId: ORG, intakeSensitivityProfileId, actorContext: humanActor(), now: NOW },
+      { env: { KAI_SPRINT2_ENABLED: "true" }, reviewQueueRepository: repository, metadataOnlyAudit: createAuditProbe().dependency },
+    );
+    assert.equal(replay.ok, true, JSON.stringify(replay));
+    assert.equal(replay.data.replayed, true);
+    assert.equal(replay.data.reviewQueueItem.review_queue_item_id, first.data.reviewQueueItem.review_queue_item_id);
+
+    // Two genuinely concurrent requests for the same identity: exactly one
+    // authoritative row, resolved by the P1-06 repository's own partial unique
+    // index - never a second, route-level idempotency mechanism.
+    const { intakeSensitivityProfileId: concurrentProfileId } = await seedPredicateSatisfyingSensitivityProfile(12);
+    const [concurrentFirst, concurrentSecond] = await Promise.all([
+      ensureSensitivityReviewQueueItem(
+        { organizationId: ORG, intakeSensitivityProfileId: concurrentProfileId, actorContext: humanActor(), now: NOW },
+        { env: { KAI_SPRINT2_ENABLED: "true" }, reviewQueueRepository: repository, metadataOnlyAudit: createAuditProbe().dependency },
+      ),
+      ensureSensitivityReviewQueueItem(
+        { organizationId: ORG, intakeSensitivityProfileId: concurrentProfileId, actorContext: humanActor(), now: NOW },
+        { env: { KAI_SPRINT2_ENABLED: "true" }, reviewQueueRepository: repository, metadataOnlyAudit: createAuditProbe().dependency },
+      ),
+    ]);
+    assert.equal(concurrentFirst.ok, true, JSON.stringify(concurrentFirst));
+    assert.equal(concurrentSecond.ok, true, JSON.stringify(concurrentSecond));
+    assert.equal(
+      concurrentFirst.data.reviewQueueItem.review_queue_item_id,
+      concurrentSecond.data.reviewQueueItem.review_queue_item_id,
+    );
+    const replayFlags = [concurrentFirst.data.replayed, concurrentSecond.data.replayed].sort();
+    assert.deepEqual(replayFlags, [false, true]);
+
+    const rowCount = await withClient((client) => client.query(
+      `SELECT count(*)::int AS count FROM kai.review_queue_items
+        WHERE organization_id = $1::uuid AND queue_type = 'sensitivity_review' AND target_object_id = $2::uuid`,
+      [ORG, concurrentProfileId],
+    ));
+    assert.equal(rowCount.rows[0].count, 1);
+  });
+
+  test("B1A-2R: a caller cannot choose queue_type, target_object_type, queue_status, or any decision field - they are silently ignored, never forwarded", async () => {
+    const { intakeSensitivityProfileId } = await seedPredicateSatisfyingSensitivityProfile(13);
+
+    const result = await ensureSensitivityReviewQueueItem(
+      {
+        organizationId: ORG,
+        intakeSensitivityProfileId,
+        actorContext: humanActor(),
+        now: NOW,
+        queueType: "escalated_review",
+        targetObjectType: "intake_file",
+        queueStatus: "resolved",
+        priority: "urgent",
+        decision: "reviewed",
+        reviewedSnapshot: { reviewed_public_use_allowed: true },
+      },
+      { env: { KAI_SPRINT2_ENABLED: "true" }, reviewQueueRepository: repository, metadataOnlyAudit: createAuditProbe().dependency },
+    );
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.data.reviewQueueItem.queue_type, "sensitivity_review");
+    assert.equal(result.data.reviewQueueItem.target_object_type, "intake_sensitivity_profile");
+    assert.equal(result.data.reviewQueueItem.target_object_id, intakeSensitivityProfileId);
+    assert.equal(result.data.reviewQueueItem.queue_status, "open");
+    assert.equal(result.data.reviewQueueItem.priority, "medium");
+
+    const row = await withClient((client) => client.query(
+      `SELECT queue_type, target_object_type, queue_status, priority
+         FROM kai.review_queue_items WHERE target_object_id = $1::uuid`,
+      [intakeSensitivityProfileId],
+    ));
+    assert.equal(row.rows.length, 1);
+    assert.equal(row.rows[0].queue_type, "sensitivity_review");
+    assert.equal(row.rows[0].target_object_type, "intake_sensitivity_profile");
+    assert.equal(row.rows[0].queue_status, "open");
+    assert.equal(row.rows[0].priority, "medium");
+  });
+
+  test("B1A-2R: system/ai actors, an unauthorized role, and a cross-tenant request all fail against real PostgreSQL with zero rows written", async () => {
+    const { intakeSensitivityProfileId } = await seedPredicateSatisfyingSensitivityProfile(14);
+
+    for (const actorContext of [humanActor({ actorType: "ai" }), humanActor({ actorType: "system" })]) {
+      // eslint-disable-next-line no-await-in-loop
+      const result = await ensureSensitivityReviewQueueItem(
+        { organizationId: ORG, intakeSensitivityProfileId, actorContext, now: NOW },
+        { env: { KAI_SPRINT2_ENABLED: "true" }, reviewQueueRepository: repository, metadataOnlyAudit: createAuditProbe().dependency },
+      );
+      assert.equal(result.ok, false);
+      assert.equal(result.error.code, "authorization_denied");
+    }
+
+    const unauthorizedRole = await ensureSensitivityReviewQueueItem(
+      {
+        organizationId: ORG,
+        intakeSensitivityProfileId,
+        actorContext: humanActor({
+          organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_viewer" }],
+        }),
+        now: NOW,
+      },
+      { env: { KAI_SPRINT2_ENABLED: "true" }, reviewQueueRepository: repository, metadataOnlyAudit: createAuditProbe().dependency },
+    );
+    assert.equal(unauthorizedRole.ok, false);
+    assert.equal(unauthorizedRole.error.code, "tenant_boundary_violation");
+
+    const inactiveMembership = await ensureSensitivityReviewQueueItem(
+      {
+        organizationId: ORG,
+        intakeSensitivityProfileId,
+        actorContext: humanActor({
+          organizationMemberships: [{ organization_id: ORG, membership_status: "revoked", role_name: "gk_operator" }],
+        }),
+        now: NOW,
+      },
+      { env: { KAI_SPRINT2_ENABLED: "true" }, reviewQueueRepository: repository, metadataOnlyAudit: createAuditProbe().dependency },
+    );
+    assert.equal(inactiveMembership.ok, false);
+    assert.equal(inactiveMembership.error.code, "tenant_boundary_violation");
+
+    const crossTenant = await ensureSensitivityReviewQueueItem(
+      {
+        organizationId: OTHER_ORG,
+        intakeSensitivityProfileId,
+        actorContext: humanActor({
+          organizationMemberships: [{ organization_id: OTHER_ORG, membership_status: "active", role_name: "gk_operator" }],
+        }),
+        now: NOW,
+      },
+      { env: { KAI_SPRINT2_ENABLED: "true" }, reviewQueueRepository: repository, metadataOnlyAudit: createAuditProbe().dependency },
+    );
+    assert.equal(crossTenant.ok, false);
+    assert.equal(crossTenant.error.code, "not_found");
+
+    const rowCount = await withClient((client) => client.query(
+      `SELECT count(*)::int AS count FROM kai.review_queue_items WHERE target_object_id = $1::uuid`,
+      [intakeSensitivityProfileId],
+    ));
+    assert.equal(rowCount.rows[0].count, 0);
   });
 }

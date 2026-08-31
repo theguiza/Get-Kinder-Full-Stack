@@ -248,7 +248,17 @@ export async function getScopedIntakeFileP1Lifecycle(
               AND s.intake_file_id = f.intake_file_id
               AND s.file_profile_id = p.file_profile_id
          )
-       ) AS sensitivity_profile_complete
+       ) AS sensitivity_profile_complete,
+       -- KAI B1A-3B-R2: the server-grounded P1-05 sensitivity profile identity for
+       -- this exact file lineage. kai.intake_sensitivity_profiles carries
+       -- UNIQUE (organization_id, file_profile_id, data_dictionary_id), and
+       -- kai.data_dictionaries carries UNIQUE (organization_id, file_profile_id)
+       -- (data_dictionaries_p1_04_bundle_identity_unique) - so for the single
+       -- current file_profile_id resolved above (bound to the file's current
+       -- verified_checksum, same as every other completeness flag in this
+       -- projection) there is at most one intake_sensitivity_profile row. This
+       -- is a deterministic lookup, never an unordered/newest-row guess.
+       s.intake_sensitivity_profile_id AS intake_sensitivity_profile_id
        FROM kai.intake_files f
        LEFT JOIN LATERAL (
          SELECT
@@ -267,6 +277,10 @@ export async function getScopedIntakeFileP1Lifecycle(
          ON p.organization_id = f.organization_id
         AND p.intake_file_id = f.intake_file_id
         AND p.file_profile_id = r.output_profile_id
+       LEFT JOIN kai.intake_sensitivity_profiles s
+         ON s.organization_id = f.organization_id
+        AND s.intake_file_id = f.intake_file_id
+        AND s.file_profile_id = p.file_profile_id
       WHERE f.organization_id = $1
         AND f.intake_file_id = $2
       LIMIT 1`,

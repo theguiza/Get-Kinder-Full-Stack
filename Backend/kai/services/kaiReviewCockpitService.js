@@ -19,9 +19,21 @@ import {
   validateReviewCockpitQueueSelection,
   validateSourceCandidateDecisionRequest,
 } from "../validators/kaiReviewCockpitRequestSchemas.js";
+import { validateSensitivityProfileDecisionRequest } from "../validators/kaiSprint2RequestSchemas.js";
 import { createSourcePromotionDecision } from "./kaiSourcePromotionService.js";
 import { __sourcePromotionRepositoryContract } from "../dictionary/postgresSourcePromotionRepository.js";
-import { createProductionMetadataOnlyAuditForSourcePromotion } from "./kaiMetadataOnlyAuditComposition.js";
+import { recordSensitivityAllowedUseDecision } from "./kaiSensitivityAllowedUseReviewService.js";
+import {
+  SENSITIVITY_ALLOWED_USE_DECISION_OUTCOMES,
+  SENSITIVITY_PRESENCE_DECISION_FIELDS,
+  SENSITIVITY_PERMISSION_DECISION_FIELDS,
+  SENSITIVITY_ALLOWED_USE_DECISION_FIELD,
+  sensitivityAuthorityFromCurrentDecision,
+} from "../dictionary/sensitivityAllowedUseDecisionContract.js";
+import {
+  createProductionMetadataOnlyAuditForSensitivityAllowedUseDecision,
+  createProductionMetadataOnlyAuditForSourcePromotion,
+} from "./kaiMetadataOnlyAuditComposition.js";
 
 /**
  * KAI P1-09 internal review cockpit service.
@@ -103,6 +115,8 @@ const SENSITIVITY_RESTRICTION_FLAGS = Object.freeze([
   "funder_use_allowed",
   "human_review_required",
 ]);
+const SENSITIVITY_DECISION_OUTCOME_SET = new Set(SENSITIVITY_ALLOWED_USE_DECISION_OUTCOMES);
+const SENSITIVITY_DECISION_ROLE_SET = new Set(["gk_admin", "gk_operator", "gk_reviewer"]);
 const DECISION_STATUS_SET = new Set(__sourcePromotionRepositoryContract.ALLOWED_DECISION_OUTCOMES);
 const CANDIDATE_STATUS_SET = new Set([
   __sourcePromotionRepositoryContract.CANDIDATE_STATUS_NEEDS_REVIEW,
@@ -203,6 +217,59 @@ async function authorizeReviewCockpitRequest(input, dependencies) {
   }
 
   return { ok: true, organizationId, actorContext };
+}
+
+/**
+ * KAI B1A-3B: a safe, read-only "can I" probe for the Impact Library product
+ * page (and any other authenticated product surface) to decide
+ * whether to fetch/show actionable Phase-5 sensitivity-review controls,
+ * without duplicating the role list in the browser and without the browser
+ * ever attempting the GK-only sensitivity-profile routes just to read a 403.
+ *
+ * This intentionally does NOT reuse authorizeReviewCockpitRequest's combined
+ * authentication+authorization result as-is: that function collapses "not
+ * authenticated" and "authenticated but not authorized" into the same
+ * ok:false shape, which is correct for a route that should refuse to serve
+ * data either way. Here the two must be told apart - a genuinely
+ * unauthenticated request (no session-resolvable actor at all) still gets the
+ * existing authentication failure unchanged; only "authenticated but not
+ * mapped / not the right role" is turned into a plain false. No DB read
+ * beyond actor resolution happens, and no queue/profile/decision data is
+ * touched.
+ */
+export async function getReviewCockpitCapabilities(input = {}, dependencies = {}) {
+  const deps = resolvedDependencies(dependencies);
+  if (!isKaiSprint2Enabled(deps.env || process.env)) {
+    return buildKaiError("feature_disabled");
+  }
+
+  const organizationId = String(input.organizationId || "").trim().toLowerCase();
+  if (!UUID_RE.test(organizationId)) return buildKaiError("invalid_request");
+
+  const actorResult = input.actorContext
+    ? { ok: true, actorContext: input.actorContext }
+    : await resolveKaiActorContext(input.req, deps);
+
+  if (!actorResult.ok && actorResult.error_code !== "mapped_kai_user_required") {
+    return buildKaiError("unauthorized");
+  }
+  if (!actorResult.ok) {
+    return { ok: true, data: { can_manage_sensitivity_review: false } };
+  }
+
+  const actorContext = actorResult.actorContext;
+  if (actorContext.actorType !== "human") {
+    return { ok: true, data: { can_manage_sensitivity_review: false } };
+  }
+
+  const roleAuth = validateActorCanPerformOperation(
+    actorContext,
+    REVIEW_COCKPIT_READ_OPERATION,
+    organizationId,
+    { allowedRoles: REVIEW_COCKPIT_READ_ROLES, globalRolesOnly: true },
+  );
+
+  return { ok: true, data: { can_manage_sensitivity_review: roleAuth.ok === true } };
 }
 
 function responseReviewCockpitQueueItem(row, organizationId) {
@@ -398,6 +465,89 @@ function responseAllowedUseRestrictions(row) {
     restrictions[flag] = row[flag];
   }
   return restrictions;
+}
+
+/**
+ * KAI B1A-2: the narrow queue projection carried alongside a sensitivity-profile
+ * detail. Identical to responseQueueState but additionally emits `updated_at`,
+ * which the cockpit needs as the optimistic-concurrency stamp when submitting a
+ * Phase-5 decision. It still never emits queue_metadata, assigned_to,
+ * blocked_reason, priority, summary, or required_action.
+ */
+function responseSensitivityQueueState(row, organizationId) {
+  if (row === null) return null;
+  const base = responseQueueState(row, organizationId);
+  if (base === undefined || base === null) return base;
+  const updatedAt = canonicalTimestamp(row.updated_at);
+  if (updatedAt === undefined) return undefined;
+  if (base.queue_type !== "sensitivity_review" || base.target_object_type !== "intake_sensitivity_profile") {
+    return undefined;
+  }
+  return { ...base, updated_at: updatedAt };
+}
+
+/**
+ * KAI B1A-2: the current Phase-5 decision projection. Only ever built from the
+ * decision-lineage head (the row with no successor) that the read model returns;
+ * a superseded decision is never passed in, and nothing here is ever manufactured
+ * from queue state, role possession, or the machine-written P1-05 profile row.
+ *
+ * `authority` is the contract module's own fail-closed projection: no head means
+ * nothing permitted, a needs_more_information head means nothing permitted, and a
+ * terminal reviewed head permits exactly and only what the row stores as true.
+ */
+function responseSensitivityDecision(row, organizationId, intakeSensitivityProfileId) {
+  if (row === null) return null;
+  if (!isPlainObject(row)) return undefined;
+  const createdAt = canonicalTimestamp(row.created_at);
+  const supersedesDecisionId = row.supersedes_decision_id ?? null;
+  if (
+    !canonicalUuid(row.decision_id)
+    || !canonicalUuid(row.organization_id)
+    || row.organization_id !== organizationId
+    || !canonicalUuid(row.intake_sensitivity_profile_id)
+    || row.intake_sensitivity_profile_id !== intakeSensitivityProfileId
+    || !canonicalUuid(row.review_queue_item_id)
+    || !SENSITIVITY_DECISION_OUTCOME_SET.has(row.decision_outcome)
+    || !canonicalUuid(row.decided_by)
+    || !SENSITIVITY_DECISION_ROLE_SET.has(row.decided_by_role)
+    || row.created_by_type !== "human"
+    || (supersedesDecisionId !== null && !canonicalUuid(supersedesDecisionId))
+    || createdAt === undefined
+  ) {
+    return undefined;
+  }
+
+  const isReviewed = row.decision_outcome === "reviewed";
+  const decision = {
+    decision_id: row.decision_id,
+    organization_id: row.organization_id,
+    intake_sensitivity_profile_id: row.intake_sensitivity_profile_id,
+    review_queue_item_id: row.review_queue_item_id,
+    decision_outcome: row.decision_outcome,
+    decided_by: row.decided_by,
+    decided_by_role: row.decided_by_role,
+    created_by_type: row.created_by_type,
+    supersedes_decision_id: supersedesDecisionId,
+    created_at: createdAt,
+  };
+
+  for (const field of SENSITIVITY_PRESENCE_DECISION_FIELDS) {
+    const value = row[field] ?? null;
+    if (isReviewed ? !THREE_STATE_PRESENCE.has(value) : value !== null) return undefined;
+    decision[field] = value;
+  }
+  const allowedUse = row[SENSITIVITY_ALLOWED_USE_DECISION_FIELD] ?? null;
+  if (isReviewed ? !ALLOWED_USE_STATUSES.has(allowedUse) : allowedUse !== null) return undefined;
+  decision[SENSITIVITY_ALLOWED_USE_DECISION_FIELD] = allowedUse;
+  for (const field of SENSITIVITY_PERMISSION_DECISION_FIELDS) {
+    const value = row[field] ?? null;
+    if (isReviewed ? typeof value !== "boolean" : value !== null) return undefined;
+    decision[field] = value;
+  }
+
+  decision.authority = sensitivityAuthorityFromCurrentDecision(row);
+  return decision;
 }
 
 function responseSourceCandidate(row, organizationId) {
@@ -662,7 +812,147 @@ export async function getReviewCockpitSensitivityProfileDetail(input = {}, depen
   if (detail.data.sensitivity_posture?.intake_sensitivity_profile_id !== intakeSensitivityProfileId) {
     return buildKaiError("system_error");
   }
-  return detail;
+
+  // KAI B1A-2: the durable readback of the Phase-5 human authority record. This is
+  // the CURRENT decision-lineage head only (the row with no successor) - never a
+  // superseded decision, and never manufactured from queue state. `null` means no
+  // decision has ever been recorded, which the fail-closed authority projection
+  // treats as nothing permitted. `read_only` remains true for the profile itself:
+  // this endpoint still writes nothing, and the P1-05 profile row is still never
+  // mutated by any path in this package.
+  // The Phase-5 decision head travels on the same read-model record the posture
+  // came from (getReviewCockpitSensitivityProfileRecord), so there is exactly one
+  // tenant-scoped read per detail request and exactly one injection seam. A record
+  // that carries no decision field at all is read as "no decision recorded", which
+  // the fail-closed authority projection treats as nothing permitted - it is never
+  // read as an implicit approval.
+  if (record.sensitivityDecisionLineageAmbiguous === true) return buildKaiError("system_error");
+  const currentDecision = responseSensitivityDecision(
+    record.sensitivityDecision ?? null,
+    organizationId,
+    intakeSensitivityProfileId,
+  );
+  const sensitivityReviewQueueItem = responseSensitivityQueueState(
+    record.sensitivityReviewQueueItem ?? null,
+    organizationId,
+  );
+  if (currentDecision === undefined || sensitivityReviewQueueItem === undefined) {
+    return buildKaiError("system_error");
+  }
+
+  return {
+    ...detail,
+    data: {
+      ...detail.data,
+      sensitivity_review_queue_item: sensitivityReviewQueueItem,
+      current_decision: currentDecision,
+      decision_controls_enabled: isKaiSprint2Enabled(deps.env || process.env),
+    },
+  };
+}
+
+/**
+ * The KAI B1A-2 Phase-5 decision seam: validate the request DTO, then hand the
+ * decision to the accepted kaiSensitivityAllowedUseReviewService and marshal its
+ * result.
+ *
+ * This function implements no decision, transition, terminal-state, replay, or
+ * idempotency logic of its own - exactly like submitSourceCandidateDecision below.
+ * A conflict_current_state_changed result is returned to the caller as produced:
+ * never retried, never re-requested with a different outcome, and never coerced
+ * into any other result. It writes nothing itself, creates no queue item, and
+ * touches no P1-05 column and no downstream approval, generation, or
+ * external-release authority of any kind (see
+ * Backend/kai/dictionary/postgresSensitivityAllowedUseReviewRepository.js for the
+ * exhaustive list of what the write path is forbidden from touching).
+ */
+export async function submitSensitivityProfileDecision(input = {}, dependencies = {}) {
+  const deps = resolvedDependencies(dependencies);
+  const env = deps.env || process.env;
+
+  if (!isKaiSprint2Enabled(env)) {
+    return buildKaiError("feature_disabled");
+  }
+
+  const authorization = await authorizeReviewCockpitRequest(input, deps);
+  if (!authorization.ok) return authorization.error;
+  const { organizationId, actorContext } = authorization;
+
+  const intakeSensitivityProfileId = typeof input.intakeSensitivityProfileId === "string"
+    ? input.intakeSensitivityProfileId
+    : "";
+  if (!canonicalUuid(intakeSensitivityProfileId)) return buildKaiError("invalid_request");
+
+  const bodyValidation = validateSensitivityProfileDecisionRequest(input.payload);
+  if (!bodyValidation.ok) return validationBlocked(bodyValidation.blockers);
+
+  const now = (deps.now ? new Date(deps.now()) : new Date()).toISOString();
+
+  const metadataOnlyAudit = deps.metadataOnlyAudit
+    || createProductionMetadataOnlyAuditForSensitivityAllowedUseDecision({
+      organizationId,
+      intakeSensitivityProfileId,
+      actorContext,
+      now,
+    });
+
+  // Named distinctly from submitSourceCandidateDecision's own `decide` seam so the
+  // P1-08 promotion service remains resolved and invoked exactly once in this
+  // module, in that function only.
+  const recordDecision = deps.recordSensitivityAllowedUseDecision || recordSensitivityAllowedUseDecision;
+  const result = await recordDecision(
+    {
+      organizationId,
+      intakeSensitivityProfileId,
+      reviewQueueItemId: input.payload.review_queue_item_id,
+      expectedUpdatedAt: input.payload.expected_updated_at,
+      decision: input.payload.decision,
+      ...(input.payload.decision === "reviewed" ? { reviewedSnapshot: input.payload.reviewed_snapshot } : {}),
+      actorContext,
+      now,
+    },
+    {
+      env,
+      ...(deps.sensitivityAllowedUseReviewRepository
+        ? { sensitivityAllowedUseReviewRepository: deps.sensitivityAllowedUseReviewRepository }
+        : {}),
+      metadataOnlyAudit,
+    },
+  );
+
+  if (!result?.ok) {
+    return buildKaiError(result?.error?.code || "system_error", {
+      ...(result?.data ? { data: result.data } : {}),
+    });
+  }
+
+  const data = isPlainObject(result.data) ? result.data : null;
+  if (!data) return buildKaiError("system_error");
+
+  const currentDecision = responseSensitivityDecision(
+    data.decision ?? null,
+    organizationId,
+    intakeSensitivityProfileId,
+  );
+  const reviewQueueItem = responseSensitivityQueueState(data.reviewQueueItem ?? null, organizationId);
+  if (
+    !currentDecision
+    || reviewQueueItem === undefined
+    || reviewQueueItem === null
+    || typeof data.replayed !== "boolean"
+  ) {
+    return buildKaiError("system_error");
+  }
+
+  return {
+    ok: true,
+    data: {
+      current_decision: currentDecision,
+      sensitivity_review_queue_item: reviewQueueItem,
+      replayed: data.replayed,
+    },
+    warnings: [],
+  };
 }
 
 function composeReviewCockpitFileProfileDetail(record, organizationId) {
@@ -877,6 +1167,8 @@ export const __testables = Object.freeze({
   responseQualityFinding,
   responseSensitivityPosture,
   responseAllowedUseRestrictions,
+  responseSensitivityDecision,
+  responseSensitivityQueueState,
   responseSourceCandidate,
   responsePromotionDecision,
   setReviewCockpitDependenciesForTest(dependencies) {

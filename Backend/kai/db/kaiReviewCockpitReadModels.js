@@ -140,7 +140,23 @@ export async function getReviewCockpitSensitivityProfileRecord(
   );
   const fileProfile = fileProfileResult.rows[0] || null;
   if (!fileProfile) return null;
-  return getReviewCockpitFileProfileRecordForResolvedProfile(organizationId, fileProfile, db);
+  const record = await getReviewCockpitFileProfileRecordForResolvedProfile(organizationId, fileProfile, db);
+
+  // KAI B1A-2: the Phase-5 human authority record for this exact profile, carried
+  // alongside the read-only posture. Only the CURRENT decision-lineage head is ever
+  // returned - see getReviewCockpitSensitivityDecisionRecord at the end of this file.
+  const decisionRecord = await getReviewCockpitSensitivityDecisionRecord(
+    organizationId,
+    intakeSensitivityProfileId,
+    db,
+  );
+
+  return {
+    ...record,
+    sensitivityReviewQueueItem: decisionRecord.reviewQueueItem,
+    sensitivityDecision: decisionRecord.currentDecision,
+    sensitivityDecisionLineageAmbiguous: decisionRecord.lineageAmbiguous,
+  };
 }
 
 async function getReviewCockpitFileProfileRecordForResolvedProfile(organizationId, fileProfile, db) {
@@ -233,4 +249,71 @@ export async function getReviewCockpitSourceCandidateRecord(
     : null;
 
   return { sourceCandidate, reviewQueueItem, promotionDecision, source, sourceVersion };
+}
+
+/**
+ * KAI B1A-2 read-only, tenant-scoped Phase-5 decision record for one sensitivity
+ * profile: the linked P1-06 'sensitivity_review' queue item (for its
+ * optimistic-concurrency stamp and current status) and the CURRENT decision-lineage
+ * head from kai.intake_sensitivity_review_decisions.
+ *
+ * "Current" is the row with no successor, expressed with the same NOT EXISTS
+ * predicate the write path uses
+ * (Backend/kai/dictionary/postgresSensitivityAllowedUseDecisionRepository.js): a
+ * superseded decision can never be returned, and nothing is ever manufactured from
+ * queue state - if no decision row exists, currentDecision is null. This read takes
+ * no row lock: the cockpit detail never writes.
+ *
+ * If more than one head row is somehow present (lineage corruption that the
+ * ledger's own root-per-lineage and single-successor partial unique indexes make
+ * unreachable), this returns `currentDecision: null` and `lineageAmbiguous: true` so
+ * the caller fails closed rather than displaying an arbitrary decision as current.
+ */
+export async function getReviewCockpitSensitivityDecisionRecord(
+  organizationId,
+  intakeSensitivityProfileId,
+  db = pool,
+) {
+  const reviewQueueItemResult = await db.query(
+    `SELECT review_queue_item_id, organization_id, queue_type, target_object_type,
+            target_object_id, queue_status, review_status, updated_at
+       FROM kai.review_queue_items
+      WHERE organization_id = $1
+        AND queue_type = 'sensitivity_review'
+        AND target_object_type = 'intake_sensitivity_profile'
+        AND target_object_id = $2
+      LIMIT 1`,
+    [organizationId, intakeSensitivityProfileId],
+  );
+
+  const currentDecisionResult = await db.query(
+    `SELECT d.decision_id, d.organization_id, d.intake_sensitivity_profile_id,
+            d.review_queue_item_id, d.decision_outcome,
+            d.reviewed_personal_data_status, d.reviewed_minor_data_status,
+            d.reviewed_health_housing_justice_immigration_status,
+            d.reviewed_indigenous_governance_status, d.reviewed_staff_notes_status,
+            d.reviewed_story_testimonial_status, d.reviewed_small_cell_risk_status,
+            d.reviewed_financial_records_status, d.reviewed_consent_basis_status,
+            d.reviewed_allowed_use_status, d.reviewed_llm_processing_allowed,
+            d.reviewed_product_learning_allowed, d.reviewed_public_use_allowed,
+            d.reviewed_funder_use_allowed, d.decided_by, d.decided_by_role,
+            d.supersedes_decision_id, d.created_by_type, d.created_at
+       FROM kai.intake_sensitivity_review_decisions d
+      WHERE d.organization_id = $1
+        AND d.intake_sensitivity_profile_id = $2
+        AND NOT EXISTS (
+              SELECT 1 FROM kai.intake_sensitivity_review_decisions s
+               WHERE s.supersedes_decision_id = d.decision_id
+            )
+      LIMIT 2`,
+    [organizationId, intakeSensitivityProfileId],
+  );
+
+  const lineageAmbiguous = currentDecisionResult.rows.length > 1;
+
+  return {
+    reviewQueueItem: reviewQueueItemResult.rows[0] || null,
+    currentDecision: lineageAmbiguous ? null : (currentDecisionResult.rows[0] || null),
+    lineageAmbiguous,
+  };
 }

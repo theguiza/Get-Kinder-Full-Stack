@@ -37,8 +37,14 @@ SELECT 'claim_strength_widened',
             THEN 'PASS' ELSE 'FAIL' END,
        'claims.claim_strength admits unassessed and reviewed_supported only';
 
+-- KAI P2-12 (Problem A1) superseded this assertion: evidence_review_status is
+-- now widened to also admit 'reviewed' (see
+-- kai_sprint2_p2_12_human_review_decision_ledger.sql), because "queue
+-- resolved alone" is no longer sufficient proof of review - a decision-
+-- ledger row is now also required. This script's own migration list includes
+-- p2_12, so the constraint is asserted in its POST-p2_12 shape here.
 INSERT INTO p2_09_results
-SELECT 'evidence_review_status_unchanged',
+SELECT 'evidence_review_status_widened_by_p2_12',
        CASE WHEN EXISTS (
               SELECT 1
                 FROM pg_constraint c
@@ -47,13 +53,17 @@ SELECT 'evidence_review_status_unchanged',
                WHERE n.nspname = 'kai'
                  AND r.relname = 'evidence_items'
                  AND c.conname = 'evidence_items_p2_01_review_status_check'
-                 AND pg_get_constraintdef(c.oid) = 'CHECK ((evidence_review_status = ''needs_gk_review''::text))'
+                 AND pg_get_constraintdef(c.oid) LIKE '%needs_gk_review%'
+                 AND pg_get_constraintdef(c.oid) LIKE '%reviewed%'
             )
             THEN 'PASS' ELSE 'FAIL' END,
-       'evidence_items.evidence_review_status is deliberately left pinned - P2-06 reads the review_queue_items row instead';
+       'evidence_items.evidence_review_status admits needs_gk_review and reviewed (widened by P2-12) - P2-06 additionally requires a decision-ledger head, not this column alone';
 
+-- KAI P2-12 superseded the claim_review_status half of this assertion (now
+-- widened to admit 'reviewed'); claim_status stays deliberately pinned to
+-- 'proposed' - P2-05 conflict-candidate detection still depends on it.
 INSERT INTO p2_09_results
-SELECT 'claim_status_and_claim_review_status_unchanged',
+SELECT 'claim_status_unchanged_claim_review_status_widened_by_p2_12',
        CASE WHEN EXISTS (
               SELECT 1
                 FROM pg_constraint c
@@ -72,10 +82,11 @@ SELECT 'claim_status_and_claim_review_status_unchanged',
                WHERE n.nspname = 'kai'
                  AND r.relname = 'claims'
                  AND c.conname = 'claims_p2_03_claim_review_status_check'
-                 AND pg_get_constraintdef(c.oid) = 'CHECK ((claim_review_status = ''needs_gk_review''::text))'
+                 AND pg_get_constraintdef(c.oid) LIKE '%needs_gk_review%'
+                 AND pg_get_constraintdef(c.oid) LIKE '%reviewed%'
             )
             THEN 'PASS' ELSE 'FAIL' END,
-       'claims.claim_status/claim_review_status are deliberately left pinned - P2-05 conflict-candidate detection depends on them';
+       'claims.claim_status is deliberately left pinned (P2-05 depends on it); claim_review_status is widened by P2-12';
 
 INSERT INTO p2_09_results
 SELECT 'audit_operations_allowed',
@@ -132,16 +143,15 @@ SELECT 'no_funder_public_export_state_introduced',
             THEN 'PASS' ELSE 'FAIL' END,
        'P2-09 introduces no funder/public/export-authority column anywhere in kai schema';
 
+-- KAI P2-12 superseded this assertion: it deliberately DOES add a decision
+-- table (kai.evidence_review_decisions/kai.claim_review_decisions) - the
+-- repaired contract this package originally warned was missing.
 INSERT INTO p2_09_results
-SELECT 'no_new_tables',
-       CASE WHEN NOT EXISTS (
-              SELECT 1
-                FROM information_schema.tables
-               WHERE table_schema = 'kai'
-                 AND table_name IN ('evidence_review_decisions', 'claim_review_decisions', 'human_review_decisions')
-            )
+SELECT 'p2_12_decision_ledger_tables_present',
+       CASE WHEN to_regclass('kai.evidence_review_decisions') IS NOT NULL
+                AND to_regclass('kai.claim_review_decisions') IS NOT NULL
             THEN 'PASS' ELSE 'FAIL' END,
-       'P2-09 reuses kai.evidence_items/kai.claims/kai.review_queue_items - no new decision table';
+       'P2-12 introduces kai.evidence_review_decisions/kai.claim_review_decisions - the append-only decision ledger';
 
 SELECT * FROM p2_09_results ORDER BY check_name;
 

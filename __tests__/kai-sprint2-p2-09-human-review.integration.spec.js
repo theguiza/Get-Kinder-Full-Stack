@@ -37,7 +37,7 @@ async function runP209IntegrationSuite() {
   const { generateClaimGapFollowups } = await import("../Backend/kai/services/kaiClaimGapFollowupService.js");
   const { getClaimTraceabilitySummary } = await import("../Backend/kai/services/kaiClaimTraceabilityService.js");
   const { listEligibleClaimsForAudience } = await import("../Backend/kai/services/kaiEligibleClaimsForAudienceService.js");
-  const { completeEvidenceReview, completeClaimReviewInternalApproval } = await import("../Backend/kai/services/kaiHumanReviewService.js");
+  const { recordEvidenceReviewDecision, recordClaimReviewDecision } = await import("../Backend/kai/services/kaiHumanReviewService.js");
   const { createPostgresEvidenceLineageRepository } = await import("../Backend/kai/dictionary/postgresEvidenceLineageRepository.js");
   const { createPostgresClaimProposalRepository } = await import("../Backend/kai/dictionary/postgresClaimProposalRepository.js");
   const { createPostgresClaimGapFollowupRepository } = await import("../Backend/kai/dictionary/postgresClaimGapFollowupRepository.js");
@@ -215,7 +215,7 @@ async function runP209IntegrationSuite() {
     return rows[0];
   }
 
-  test("P2-09 before human review: internal is ineligible for the required reasons and the claim is absent from eligible-claims-for-audience", async () => {
+  test("P2-12 before human review: internal is ineligible for the required reasons and the claim is absent from eligible-claims-for-audience", async () => {
     const [alpha] = await prepareTwoClaims();
     const before = await trace(alpha.claimId);
     assert.equal(before.ok, true);
@@ -229,31 +229,32 @@ async function runP209IntegrationSuite() {
     assert.ok(!eligible.data.eligibleClaims.some((row) => row.claimId === alpha.claimId));
   });
 
-  test("P2-09 evidence-review completion: authority/safety negatives, then success, same-transaction audit, idempotent replay, and the claim stays review-gated", async () => {
+  test("P2-12 evidence-review decision recording: authority/safety negatives, then success, same-transaction audit, idempotent replay, and the claim stays review-gated", async () => {
     const [alpha] = await prepareTwoClaims();
     const evidenceQueueItem = await evidenceReviewQueueItem(alpha.evidenceItemId);
     const expectedUpdatedAt = new Date(evidenceQueueItem.updated_at).toISOString();
 
-    const nonHuman = await completeEvidenceReview(
-      { organizationId: ORG, evidenceItemId: alpha.evidenceItemId, reviewQueueItemId: evidenceQueueItem.review_queue_item_id, expectedUpdatedAt, actorContext: aiActor, now: NOW },
+    const nonHuman = await recordEvidenceReviewDecision(
+      { organizationId: ORG, evidenceItemId: alpha.evidenceItemId, reviewQueueItemId: evidenceQueueItem.review_queue_item_id, expectedUpdatedAt, decision: "supported", actorContext: aiActor, now: NOW },
       { env: { KAI_SPRINT2_ENABLED: "true" }, humanReviewRepository: humanReviewRepo, metadataOnlyAudit: auditRecorder() },
     );
     assert.equal(nonHuman.ok, false);
     assert.equal(nonHuman.error.code, "authorization_denied");
 
-    const wrongRole = await completeEvidenceReview(
-      { organizationId: ORG, evidenceItemId: alpha.evidenceItemId, reviewQueueItemId: evidenceQueueItem.review_queue_item_id, expectedUpdatedAt, actorContext: operatorActor, now: NOW },
+    const wrongRole = await recordEvidenceReviewDecision(
+      { organizationId: ORG, evidenceItemId: alpha.evidenceItemId, reviewQueueItemId: evidenceQueueItem.review_queue_item_id, expectedUpdatedAt, decision: "supported", actorContext: operatorActor, now: NOW },
       { env: { KAI_SPRINT2_ENABLED: "true" }, humanReviewRepository: humanReviewRepo, metadataOnlyAudit: auditRecorder() },
     );
     assert.equal(wrongRole.ok, false);
     assert.equal(wrongRole.error.code, "authorization_denied");
 
-    const crossTenant = await completeEvidenceReview(
+    const crossTenant = await recordEvidenceReviewDecision(
       {
         organizationId: OTHER_ORG,
         evidenceItemId: alpha.evidenceItemId,
         reviewQueueItemId: evidenceQueueItem.review_queue_item_id,
         expectedUpdatedAt,
+        decision: "supported",
         actorContext: { ...reviewerActor, organizationMemberships: [{ organization_id: OTHER_ORG, membership_status: "active", role_name: "gk_reviewer" }] },
         now: NOW,
       },
@@ -262,47 +263,52 @@ async function runP209IntegrationSuite() {
     assert.equal(crossTenant.ok, false);
     assert.equal(crossTenant.error.code, "not_found");
 
-    const stale = await completeEvidenceReview(
-      { organizationId: ORG, evidenceItemId: alpha.evidenceItemId, reviewQueueItemId: evidenceQueueItem.review_queue_item_id, expectedUpdatedAt: "2020-01-01T00:00:00.000Z", actorContext: reviewerActor, now: NOW },
+    const stale = await recordEvidenceReviewDecision(
+      { organizationId: ORG, evidenceItemId: alpha.evidenceItemId, reviewQueueItemId: evidenceQueueItem.review_queue_item_id, expectedUpdatedAt: "2020-01-01T00:00:00.000Z", decision: "supported", actorContext: reviewerActor, now: NOW },
       { env: { KAI_SPRINT2_ENABLED: "true" }, humanReviewRepository: humanReviewRepo, metadataOnlyAudit: auditRecorder() },
     );
     assert.equal(stale.ok, false);
     assert.equal(stale.error.code, "conflict_current_state_changed");
 
-    const disabled = await completeEvidenceReview(
-      { organizationId: ORG, evidenceItemId: alpha.evidenceItemId, reviewQueueItemId: evidenceQueueItem.review_queue_item_id, expectedUpdatedAt, actorContext: reviewerActor, now: NOW },
+    const disabled = await recordEvidenceReviewDecision(
+      { organizationId: ORG, evidenceItemId: alpha.evidenceItemId, reviewQueueItemId: evidenceQueueItem.review_queue_item_id, expectedUpdatedAt, decision: "supported", actorContext: reviewerActor, now: NOW },
       { env: { KAI_SPRINT2_ENABLED: "false" }, humanReviewRepository: humanReviewRepo, metadataOnlyAudit: auditRecorder() },
     );
     assert.equal(disabled.ok, false);
     assert.equal(disabled.error.code, "feature_disabled");
 
     const beforeAudit = await query(`SELECT count(*)::int AS count FROM kai.upload_lifecycle_audit WHERE operation = 'evidence_review_completed'`);
-    const auditFailure = await completeEvidenceReview(
-      { organizationId: ORG, evidenceItemId: alpha.evidenceItemId, reviewQueueItemId: evidenceQueueItem.review_queue_item_id, expectedUpdatedAt, actorContext: reviewerActor, now: NOW },
+    const beforeDecisions = await query(`SELECT count(*)::int AS count FROM kai.evidence_review_decisions WHERE organization_id = $1::uuid AND evidence_item_id = $2::uuid`, [ORG, alpha.evidenceItemId]);
+    const auditFailure = await recordEvidenceReviewDecision(
+      { organizationId: ORG, evidenceItemId: alpha.evidenceItemId, reviewQueueItemId: evidenceQueueItem.review_queue_item_id, expectedUpdatedAt, decision: "supported", actorContext: reviewerActor, now: NOW },
       { env: { KAI_SPRINT2_ENABLED: "true" }, humanReviewRepository: humanReviewRepo, metadataOnlyAudit: auditRecorder({ rejectPublish: true }) },
     );
     assert.equal(auditFailure.ok, false);
     const afterFailureAudit = await query(`SELECT count(*)::int AS count FROM kai.upload_lifecycle_audit WHERE operation = 'evidence_review_completed'`);
     assert.equal(afterFailureAudit[0].count, beforeAudit[0].count);
+    const afterFailureDecisions = await query(`SELECT count(*)::int AS count FROM kai.evidence_review_decisions WHERE organization_id = $1::uuid AND evidence_item_id = $2::uuid`, [ORG, alpha.evidenceItemId]);
+    assert.equal(afterFailureDecisions[0].count, beforeDecisions[0].count);
     const rolledBackEvidence = (await query(`SELECT support_strength FROM kai.evidence_items WHERE organization_id = $1::uuid AND evidence_item_id = $2::uuid`, [ORG, alpha.evidenceItemId]))[0];
     assert.equal(rolledBackEvidence.support_strength, "unassessed");
     const rolledBackQueueRow = (await query(`SELECT queue_status, review_status FROM kai.review_queue_items WHERE review_queue_item_id = $1::uuid`, [evidenceQueueItem.review_queue_item_id]))[0];
     assert.equal(rolledBackQueueRow.queue_status, "open");
     assert.equal(rolledBackQueueRow.review_status, "needs_gk_review");
 
-    const result = await completeEvidenceReview(
-      { organizationId: ORG, evidenceItemId: alpha.evidenceItemId, reviewQueueItemId: evidenceQueueItem.review_queue_item_id, expectedUpdatedAt, actorContext: adminActor, now: NOW },
+    const result = await recordEvidenceReviewDecision(
+      { organizationId: ORG, evidenceItemId: alpha.evidenceItemId, reviewQueueItemId: evidenceQueueItem.review_queue_item_id, expectedUpdatedAt, decision: "supported", actorContext: adminActor, now: NOW },
       { env: { KAI_SPRINT2_ENABLED: "true" }, humanReviewRepository: humanReviewRepo, metadataOnlyAudit: auditRecorder() },
     );
     assert.equal(result.ok, true);
     assert.equal(result.data.queue_status, "resolved");
     assert.equal(result.data.review_status, "resolved");
     assert.equal(result.data.support_strength, "reviewed_supported");
+    assert.equal(result.data.decision_outcome, "supported");
+    assert.ok(result.data.decision_id);
     assert.equal(result.data.replayed, false);
 
     const evidenceRow = (await query(`SELECT support_strength, evidence_review_status FROM kai.evidence_items WHERE organization_id = $1::uuid AND evidence_item_id = $2::uuid`, [ORG, alpha.evidenceItemId]))[0];
     assert.equal(evidenceRow.support_strength, "reviewed_supported");
-    assert.equal(evidenceRow.evidence_review_status, "needs_gk_review");
+    assert.equal(evidenceRow.evidence_review_status, "reviewed");
 
     const afterAudit = await query(`SELECT count(*)::int AS count FROM kai.upload_lifecycle_audit WHERE operation = 'evidence_review_completed'`);
     assert.equal(afterAudit[0].count, beforeAudit[0].count + 1);
@@ -313,19 +319,33 @@ async function runP209IntegrationSuite() {
     assert.ok(traced.data.blockerCodes.includes("claim_review_unresolved"));
     assert.ok(traced.data.blockerCodes.includes("support_strength_unassessed"));
 
-    const replay = await completeEvidenceReview(
-      { organizationId: ORG, evidenceItemId: alpha.evidenceItemId, reviewQueueItemId: evidenceQueueItem.review_queue_item_id, expectedUpdatedAt, actorContext: reviewerActor, now: LATER },
+    const replay = await recordEvidenceReviewDecision(
+      { organizationId: ORG, evidenceItemId: alpha.evidenceItemId, reviewQueueItemId: evidenceQueueItem.review_queue_item_id, expectedUpdatedAt, decision: "supported", actorContext: reviewerActor, now: LATER },
       { env: { KAI_SPRINT2_ENABLED: "true" }, humanReviewRepository: humanReviewRepo, metadataOnlyAudit: auditRecorder() },
     );
     assert.equal(replay.ok, true);
     assert.equal(replay.data.replayed, true);
+
+    const decisionRows = await query(`SELECT decision_id FROM kai.evidence_review_decisions WHERE organization_id = $1::uuid AND evidence_item_id = $2::uuid`, [ORG, alpha.evidenceItemId]);
+    assert.equal(decisionRows.length, 1);
+
+    // Append-only proof: a direct UPDATE/DELETE against the decision row is rejected.
+    await assert.rejects(query(`UPDATE kai.evidence_review_decisions SET decision_outcome = 'not_supported' WHERE decision_id = $1::uuid`, [decisionRows[0].decision_id]), /append-only/);
+    await assert.rejects(query(`DELETE FROM kai.evidence_review_decisions WHERE decision_id = $1::uuid`, [decisionRows[0].decision_id]), /append-only/);
+
+    // Non-human/system actor cannot produce a decision row at the DB level.
+    await assert.rejects(query(
+      `INSERT INTO kai.evidence_review_decisions (organization_id, evidence_item_id, review_queue_item_id, decision_outcome, decided_by, decided_by_role, target_updated_at, created_by_type)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, 'supported', $4::uuid, 'gk_reviewer', now(), 'system')`,
+      [ORG, alpha.evidenceItemId, evidenceQueueItem.review_queue_item_id, reviewerActor.actorUserId],
+    ));
   });
 
   test("P2-09 claim-review/internal-approval requires the linked evidence_review to already be resolved", async () => {
     const [, beta] = await prepareTwoClaims();
     const claimQueueItem = await claimReviewQueueItem(beta.claimId);
-    const result = await completeClaimReviewInternalApproval(
-      { organizationId: ORG, claimId: beta.claimId, reviewQueueItemId: claimQueueItem.review_queue_item_id, expectedUpdatedAt: new Date(claimQueueItem.updated_at).toISOString(), actorContext: reviewerActor, now: NOW },
+    const result = await recordClaimReviewDecision(
+      { organizationId: ORG, claimId: beta.claimId, reviewQueueItemId: claimQueueItem.review_queue_item_id, expectedUpdatedAt: new Date(claimQueueItem.updated_at).toISOString(), decision: "approved", approvedAudiences: ["internal"], actorContext: reviewerActor, now: NOW },
       { env: { KAI_SPRINT2_ENABLED: "true" }, humanReviewRepository: humanReviewRepo, metadataOnlyAudit: auditRecorder() },
     );
     assert.equal(result.ok, false);
@@ -336,8 +356,8 @@ async function runP209IntegrationSuite() {
     const [, beta] = await prepareTwoClaims();
 
     const evidenceQueueItem = await evidenceReviewQueueItem(beta.evidenceItemId);
-    const evidenceResult = await completeEvidenceReview(
-      { organizationId: ORG, evidenceItemId: beta.evidenceItemId, reviewQueueItemId: evidenceQueueItem.review_queue_item_id, expectedUpdatedAt: new Date(evidenceQueueItem.updated_at).toISOString(), actorContext: reviewerActor, now: NOW },
+    const evidenceResult = await recordEvidenceReviewDecision(
+      { organizationId: ORG, evidenceItemId: beta.evidenceItemId, reviewQueueItemId: evidenceQueueItem.review_queue_item_id, expectedUpdatedAt: new Date(evidenceQueueItem.updated_at).toISOString(), decision: "supported", actorContext: reviewerActor, now: NOW },
       { env: { KAI_SPRINT2_ENABLED: "true" }, humanReviewRepository: humanReviewRepo, metadataOnlyAudit: auditRecorder() },
     );
     assert.equal(evidenceResult.ok, true);
@@ -345,33 +365,43 @@ async function runP209IntegrationSuite() {
     const claimQueueItem = await claimReviewQueueItem(beta.claimId);
     const expectedUpdatedAt = new Date(claimQueueItem.updated_at).toISOString();
 
-    const wrongRole = await completeClaimReviewInternalApproval(
-      { organizationId: ORG, claimId: beta.claimId, reviewQueueItemId: claimQueueItem.review_queue_item_id, expectedUpdatedAt, actorContext: operatorActor, now: NOW },
+    const wrongRole = await recordClaimReviewDecision(
+      { organizationId: ORG, claimId: beta.claimId, reviewQueueItemId: claimQueueItem.review_queue_item_id, expectedUpdatedAt, decision: "approved", approvedAudiences: ["internal"], actorContext: operatorActor, now: NOW },
       { env: { KAI_SPRINT2_ENABLED: "true" }, humanReviewRepository: humanReviewRepo, metadataOnlyAudit: auditRecorder() },
     );
     assert.equal(wrongRole.ok, false);
     assert.equal(wrongRole.error.code, "authorization_denied");
 
-    const replayed = await completeClaimReviewInternalApproval(
-      { organizationId: ORG, claimId: beta.claimId, reviewQueueItemId: "00000000-0000-4000-8000-0000000000ff", expectedUpdatedAt, actorContext: reviewerActor, now: NOW },
+    const replayed = await recordClaimReviewDecision(
+      { organizationId: ORG, claimId: beta.claimId, reviewQueueItemId: "00000000-0000-4000-8000-0000000000ff", expectedUpdatedAt, decision: "approved", approvedAudiences: ["internal"], actorContext: reviewerActor, now: NOW },
       { env: { KAI_SPRINT2_ENABLED: "true" }, humanReviewRepository: humanReviewRepo, metadataOnlyAudit: auditRecorder() },
     );
     assert.equal(replayed.ok, false);
     assert.equal(replayed.error.code, "not_found");
 
+    const governanceCeiling = await recordClaimReviewDecision(
+      { organizationId: ORG, claimId: beta.claimId, reviewQueueItemId: claimQueueItem.review_queue_item_id, expectedUpdatedAt, decision: "approved", approvedAudiences: ["internal", "funder"], actorContext: reviewerActor, now: NOW },
+      { env: { KAI_SPRINT2_ENABLED: "true" }, humanReviewRepository: humanReviewRepo, metadataOnlyAudit: auditRecorder() },
+    );
+    assert.equal(governanceCeiling.ok, false);
+    assert.equal(governanceCeiling.error.code, "governance_ceiling_exceeded");
+    const noPersistFromCeiling = await query(`SELECT count(*)::int AS count FROM kai.claim_review_decisions WHERE organization_id = $1::uuid AND claim_id = $2::uuid`, [ORG, beta.claimId]);
+    assert.equal(noPersistFromCeiling[0].count, 0);
+
     const beforeAudit = await query(`SELECT count(*)::int AS count FROM kai.upload_lifecycle_audit WHERE operation = 'claim_review_completed_internal_approval'`);
-    const claimResult = await completeClaimReviewInternalApproval(
-      { organizationId: ORG, claimId: beta.claimId, reviewQueueItemId: claimQueueItem.review_queue_item_id, expectedUpdatedAt, actorContext: reviewerActor, now: NOW },
+    const claimResult = await recordClaimReviewDecision(
+      { organizationId: ORG, claimId: beta.claimId, reviewQueueItemId: claimQueueItem.review_queue_item_id, expectedUpdatedAt, decision: "approved", approvedAudiences: ["internal"], actorContext: reviewerActor, now: NOW },
       { env: { KAI_SPRINT2_ENABLED: "true" }, humanReviewRepository: humanReviewRepo, metadataOnlyAudit: auditRecorder() },
     );
     assert.equal(claimResult.ok, true);
     assert.equal(claimResult.data.queue_status, "resolved");
     assert.equal(claimResult.data.claim_strength, "reviewed_supported");
+    assert.deepEqual(claimResult.data.approved_audiences, ["internal"]);
 
     const claimRow = (await query(`SELECT claim_strength, claim_status, claim_review_status FROM kai.claims WHERE organization_id = $1::uuid AND claim_id = $2::uuid`, [ORG, beta.claimId]))[0];
     assert.equal(claimRow.claim_strength, "reviewed_supported");
     assert.equal(claimRow.claim_status, "proposed");
-    assert.equal(claimRow.claim_review_status, "needs_gk_review");
+    assert.equal(claimRow.claim_review_status, "reviewed");
 
     const afterAudit = await query(`SELECT count(*)::int AS count FROM kai.upload_lifecycle_audit WHERE operation = 'claim_review_completed_internal_approval'`);
     assert.equal(afterAudit[0].count, beforeAudit[0].count + 1);
@@ -382,12 +412,6 @@ async function runP209IntegrationSuite() {
     assert.ok(!tracedInternal.data.blockerCodes.includes("claim_review_unresolved"));
     assert.ok(!tracedInternal.data.blockerCodes.includes("support_strength_unassessed"));
     assert.ok(tracedInternal.data.blockerCodes.includes("coverage_dimension_unresolved"));
-    // KAI P2-10: for requestedAudience = "internal", claim_not_approved_for_
-    // requested_audience/audience_gate_closed/requirement_authority_absent no
-    // longer fire merely because the old stub returned false - P2-09
-    // completeness is fully satisfied here (both blockers cleared above), so
-    // none of the three fire; the claim stays ineligible solely because no
-    // coverage-dimension acceptance has been recorded yet.
     assert.ok(!tracedInternal.data.blockerCodes.includes("claim_not_approved_for_requested_audience"));
     assert.equal(tracedInternal.data.eligible, false);
 

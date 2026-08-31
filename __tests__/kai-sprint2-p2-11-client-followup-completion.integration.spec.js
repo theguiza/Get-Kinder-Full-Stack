@@ -36,7 +36,7 @@ async function runP211IntegrationSuite() {
   const { proposeClaim } = await import("../Backend/kai/services/kaiClaimProposalService.js");
   const { generateClaimGapFollowups } = await import("../Backend/kai/services/kaiClaimGapFollowupService.js");
   const { createConflictReviewCandidate } = await import("../Backend/kai/services/kaiConflictReviewCandidateService.js");
-  const { completeEvidenceReview, completeClaimReviewInternalApproval } = await import("../Backend/kai/services/kaiHumanReviewService.js");
+  const { recordEvidenceReviewDecision, recordClaimReviewDecision } = await import("../Backend/kai/services/kaiHumanReviewService.js");
   const { acceptInternalCoverageLimitation } = await import("../Backend/kai/services/kaiCoverageReviewDecisionService.js");
   const { completeClientFollowup } = await import("../Backend/kai/services/kaiClientFollowupCompletionService.js");
   const { getClaimTraceabilitySummary } = await import("../Backend/kai/services/kaiClaimTraceabilityService.js");
@@ -224,10 +224,10 @@ async function runP211IntegrationSuite() {
         WHERE organization_id = $1::uuid AND queue_type = 'evidence_review' AND target_object_type = 'evidence_item' AND target_object_id = $2::uuid`,
       [ORG, evidenceItemId],
     );
-    const evidenceResult = await completeEvidenceReview(
+    const evidenceResult = await recordEvidenceReviewDecision(
       {
         organizationId: ORG, evidenceItemId, reviewQueueItemId: evidenceQueueRows[0].review_queue_item_id,
-        expectedUpdatedAt: new Date(evidenceQueueRows[0].updated_at).toISOString(), actorContext: gkReviewerActor, now: NOW,
+        expectedUpdatedAt: new Date(evidenceQueueRows[0].updated_at).toISOString(), decision: "supported", actorContext: gkReviewerActor, now: NOW,
       },
       { env: { KAI_SPRINT2_ENABLED: "true" }, humanReviewRepository: humanReviewRepo, metadataOnlyAudit: auditRecorder() },
     );
@@ -239,10 +239,10 @@ async function runP211IntegrationSuite() {
         WHERE organization_id = $1::uuid AND queue_type = 'claim_review' AND target_object_type = 'claim' AND target_object_id = $2::uuid`,
       [ORG, claimId],
     );
-    const claimResult = await completeClaimReviewInternalApproval(
+    const claimResult = await recordClaimReviewDecision(
       {
         organizationId: ORG, claimId, reviewQueueItemId: claimQueueRows[0].review_queue_item_id,
-        expectedUpdatedAt: new Date(claimQueueRows[0].updated_at).toISOString(), actorContext: gkReviewerActor, now: NOW,
+        expectedUpdatedAt: new Date(claimQueueRows[0].updated_at).toISOString(), decision: "approved", approvedAudiences: ["internal"], actorContext: gkReviewerActor, now: NOW,
       },
       { env: { KAI_SPRINT2_ENABLED: "true" }, humanReviewRepository: humanReviewRepo, metadataOnlyAudit: auditRecorder() },
     );

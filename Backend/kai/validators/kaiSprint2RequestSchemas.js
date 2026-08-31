@@ -4,6 +4,29 @@ import {
   KAI_SPRINT2_P0_REQUEST_LIMITS,
   KAI_SPRINT2_P0_STRING_LIMITS,
 } from "../config/kaiSprint2P0Contract.js";
+import {
+  EVIDENCE_REVIEW_DECISION_OUTCOMES,
+  CLAIM_REVIEW_DECISION_OUTCOMES,
+  CLAIM_REVIEW_APPROVED_AUDIENCE_VALUES,
+  evidenceReviewLimitationNotesRequired,
+  claimReviewLimitationNotesRequired,
+  claimReviewApprovedAudiencesRequired,
+} from "../dictionary/humanReviewDecisionContract.js";
+import {
+  SENSITIVITY_ALLOWED_USE_DECISION_OUTCOMES,
+  sensitivityReviewedSnapshotRequired,
+  validateSensitivityReviewedSnapshot,
+} from "../dictionary/sensitivityAllowedUseDecisionContract.js";
+
+const SENSITIVITY_PROFILE_DECISION_REQUEST_KEYS = new Set([
+  "expected_updated_at",
+  "review_queue_item_id",
+  "decision",
+  "reviewed_snapshot",
+]);
+
+const HUMAN_REVIEW_LIMITATION_NOTE_MAX_LENGTH = 500;
+const HUMAN_REVIEW_LIMITATION_NOTES_MAX_COUNT = 20;
 
 export const INTAKE_BATCH_FILES_DEFAULT_LIMIT = 25;
 export const INTAKE_BATCH_FILES_MAX_LIMIT = 25;
@@ -40,9 +63,14 @@ const COMPLETE_EXPORT_REVIEW_REQUEST_KEYS = new Set([
 ]);
 const COMPLETE_EVIDENCE_REVIEW_REQUEST_KEYS = new Set([
   "expected_updated_at",
+  "decision",
+  "limitation_notes",
 ]);
 const COMPLETE_CLAIM_REVIEW_REQUEST_KEYS = new Set([
   "expected_updated_at",
+  "decision",
+  "limitation_notes",
+  "approved_audiences",
 ]);
 const COMPLETE_CLIENT_FOLLOWUP_REQUEST_KEYS = new Set([
   "expected_updated_at",
@@ -467,13 +495,27 @@ export function validateCompleteExportReviewRequest(payload) {
   return { ok: true, blockers: [] };
 }
 
+function isNonEmptyTrimmedString(value, maxLength) {
+  return typeof value === "string" && value.trim().length > 0 && value.length <= maxLength;
+}
+
+function isValidLimitationNotes(value) {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.length <= HUMAN_REVIEW_LIMITATION_NOTES_MAX_COUNT &&
+    value.every((entry) => isNonEmptyTrimmedString(entry, HUMAN_REVIEW_LIMITATION_NOTE_MAX_LENGTH))
+  );
+}
+
 /**
- * P2-09 human evidence-review completion request. Mirrors
- * validateCompleteExportReviewRequest's body shape exactly: the request
- * carries no reviewer-supplied decision vocabulary at all - completing this
- * review has exactly one accepted outcome, so `expected_updated_at` (the
- * optimistic-concurrency stamp for the linked `evidence_review` review-queue
- * item) is the only field this route accepts.
+ * P2-12 (Problem A1) human evidence-review decision request. Repairs the
+ * superseded P2-09 contract, which accepted no reviewer decision content at
+ * all: `expected_updated_at` remains the optimistic-concurrency stamp for the
+ * linked `evidence_review` review-queue item; `decision` is now required and
+ * must be one of EVIDENCE_REVIEW_DECISION_OUTCOMES; `limitation_notes` is
+ * required (a non-empty array of non-empty, length-bounded strings) if and
+ * only if decision === 'supported_with_limitation', and forbidden otherwise.
  */
 export function validateCompleteEvidenceReviewRequest(payload) {
   if (!isPlainObject(payload)) {
@@ -485,29 +527,47 @@ export function validateCompleteEvidenceReviewRequest(payload) {
     if (!COMPLETE_EVIDENCE_REVIEW_REQUEST_KEYS.has(key)) {
       return { ok: false, blockers: [requestBlocker("unknown_field", `body.${key}`)] };
     }
-    const value = payload[key];
-    if (value === null) return { ok: false, blockers: [requestBlocker("null_field_not_allowed", `body.${key}`)] };
-    if (Array.isArray(value)) return { ok: false, blockers: [requestBlocker("array_field_not_allowlisted", `body.${key}`)] };
-    if (isPlainObject(value)) return { ok: false, blockers: [requestBlocker("nested_object_not_allowed", `body.${key}`)] };
-    if (typeof value !== "string") return { ok: false, blockers: [requestBlocker("invalid_string_field", `body.${key}`)] };
-    if (!canonicalIsoTimestamp(value)) {
-      return { ok: false, blockers: [requestBlocker("invalid_expected_updated_at", `body.${key}`)] };
-    }
   }
 
-  for (const key of COMPLETE_EVIDENCE_REVIEW_REQUEST_KEYS) {
-    if (!Object.hasOwn(payload, key)) {
-      return { ok: false, blockers: [requestBlocker("required_field_missing", `body.${key}`)] };
+  if (!Object.hasOwn(payload, "expected_updated_at")) {
+    return { ok: false, blockers: [requestBlocker("required_field_missing", "body.expected_updated_at")] };
+  }
+  const expectedUpdatedAt = payload.expected_updated_at;
+  if (typeof expectedUpdatedAt !== "string" || !canonicalIsoTimestamp(expectedUpdatedAt)) {
+    return { ok: false, blockers: [requestBlocker("invalid_expected_updated_at", "body.expected_updated_at")] };
+  }
+
+  if (!Object.hasOwn(payload, "decision")) {
+    return { ok: false, blockers: [requestBlocker("required_field_missing", "body.decision")] };
+  }
+  const decision = payload.decision;
+  if (typeof decision !== "string" || !EVIDENCE_REVIEW_DECISION_OUTCOMES.includes(decision)) {
+    return { ok: false, blockers: [requestBlocker("invalid_decision", "body.decision")] };
+  }
+
+  const limitationNotesRequired = evidenceReviewLimitationNotesRequired(decision);
+  const hasLimitationNotes = Object.hasOwn(payload, "limitation_notes");
+  if (limitationNotesRequired) {
+    if (!hasLimitationNotes) {
+      return { ok: false, blockers: [requestBlocker("required_field_missing", "body.limitation_notes")] };
     }
+    if (!isValidLimitationNotes(payload.limitation_notes)) {
+      return { ok: false, blockers: [requestBlocker("invalid_limitation_notes", "body.limitation_notes")] };
+    }
+  } else if (hasLimitationNotes) {
+    return { ok: false, blockers: [requestBlocker("unexpected_limitation_notes", "body.limitation_notes")] };
   }
 
   return { ok: true, blockers: [] };
 }
 
 /**
- * P2-09 human claim-review/internal-approval completion request. Mirrors
- * validateCompleteEvidenceReviewRequest exactly, for the linked `claim_review`
- * review-queue item's own optimistic-concurrency stamp.
+ * P2-12 (Problem A1) human claim-review decision request. Mirrors
+ * validateCompleteEvidenceReviewRequest, extended with `approved_audiences`:
+ * required (a non-empty array of unique values from
+ * CLAIM_REVIEW_APPROVED_AUDIENCE_VALUES) if and only if decision is
+ * 'approved'/'approved_with_limitation', and forbidden otherwise.
+ * `limitation_notes` is required iff decision === 'approved_with_limitation'.
  */
 export function validateCompleteClaimReviewRequest(payload) {
   if (!isPlainObject(payload)) {
@@ -519,20 +579,54 @@ export function validateCompleteClaimReviewRequest(payload) {
     if (!COMPLETE_CLAIM_REVIEW_REQUEST_KEYS.has(key)) {
       return { ok: false, blockers: [requestBlocker("unknown_field", `body.${key}`)] };
     }
-    const value = payload[key];
-    if (value === null) return { ok: false, blockers: [requestBlocker("null_field_not_allowed", `body.${key}`)] };
-    if (Array.isArray(value)) return { ok: false, blockers: [requestBlocker("array_field_not_allowlisted", `body.${key}`)] };
-    if (isPlainObject(value)) return { ok: false, blockers: [requestBlocker("nested_object_not_allowed", `body.${key}`)] };
-    if (typeof value !== "string") return { ok: false, blockers: [requestBlocker("invalid_string_field", `body.${key}`)] };
-    if (!canonicalIsoTimestamp(value)) {
-      return { ok: false, blockers: [requestBlocker("invalid_expected_updated_at", `body.${key}`)] };
-    }
   }
 
-  for (const key of COMPLETE_CLAIM_REVIEW_REQUEST_KEYS) {
-    if (!Object.hasOwn(payload, key)) {
-      return { ok: false, blockers: [requestBlocker("required_field_missing", `body.${key}`)] };
+  if (!Object.hasOwn(payload, "expected_updated_at")) {
+    return { ok: false, blockers: [requestBlocker("required_field_missing", "body.expected_updated_at")] };
+  }
+  const expectedUpdatedAt = payload.expected_updated_at;
+  if (typeof expectedUpdatedAt !== "string" || !canonicalIsoTimestamp(expectedUpdatedAt)) {
+    return { ok: false, blockers: [requestBlocker("invalid_expected_updated_at", "body.expected_updated_at")] };
+  }
+
+  if (!Object.hasOwn(payload, "decision")) {
+    return { ok: false, blockers: [requestBlocker("required_field_missing", "body.decision")] };
+  }
+  const decision = payload.decision;
+  if (typeof decision !== "string" || !CLAIM_REVIEW_DECISION_OUTCOMES.includes(decision)) {
+    return { ok: false, blockers: [requestBlocker("invalid_decision", "body.decision")] };
+  }
+
+  const limitationNotesRequired = claimReviewLimitationNotesRequired(decision);
+  const hasLimitationNotes = Object.hasOwn(payload, "limitation_notes");
+  if (limitationNotesRequired) {
+    if (!hasLimitationNotes) {
+      return { ok: false, blockers: [requestBlocker("required_field_missing", "body.limitation_notes")] };
     }
+    if (!isValidLimitationNotes(payload.limitation_notes)) {
+      return { ok: false, blockers: [requestBlocker("invalid_limitation_notes", "body.limitation_notes")] };
+    }
+  } else if (hasLimitationNotes) {
+    return { ok: false, blockers: [requestBlocker("unexpected_limitation_notes", "body.limitation_notes")] };
+  }
+
+  const audiencesRequired = claimReviewApprovedAudiencesRequired(decision);
+  const hasAudiences = Object.hasOwn(payload, "approved_audiences");
+  if (audiencesRequired) {
+    if (!hasAudiences) {
+      return { ok: false, blockers: [requestBlocker("required_field_missing", "body.approved_audiences")] };
+    }
+    const audiences = payload.approved_audiences;
+    const isValidAudienceArray =
+      Array.isArray(audiences) &&
+      audiences.length > 0 &&
+      audiences.every((entry) => typeof entry === "string" && CLAIM_REVIEW_APPROVED_AUDIENCE_VALUES.includes(entry)) &&
+      new Set(audiences).size === audiences.length;
+    if (!isValidAudienceArray) {
+      return { ok: false, blockers: [requestBlocker("invalid_approved_audiences", "body.approved_audiences")] };
+    }
+  } else if (hasAudiences) {
+    return { ok: false, blockers: [requestBlocker("unexpected_approved_audiences", "body.approved_audiences")] };
   }
 
   return { ok: true, blockers: [] };
@@ -571,6 +665,84 @@ export function validateCompleteClientFollowupRequest(payload) {
     if (!Object.hasOwn(payload, key)) {
       return { ok: false, blockers: [requestBlocker("required_field_missing", `body.${key}`)] };
     }
+  }
+
+  return { ok: true, blockers: [] };
+}
+
+/**
+ * KAI B1A-2 Phase-5 sensitivity/allowed-use decision request.
+ *
+ * `expected_updated_at` is the optimistic-concurrency stamp for the linked P1-06
+ * 'sensitivity_review' review-queue item (the same OCC discipline P2-12 uses).
+ * `review_queue_item_id` binds the decision to that exact queue item; the server
+ * independently re-verifies, inside the decision transaction, that the item is a
+ * 'sensitivity_review' item targeting this exact sensitivity profile.
+ * `decision` must be one of SENSITIVITY_ALLOWED_USE_DECISION_OUTCOMES.
+ * `reviewed_snapshot` is required (a complete, exact-keyed Phase-5 snapshot) if
+ * and only if decision === 'reviewed', and forbidden otherwise - so a
+ * needs_more_information request is structurally incapable of carrying a
+ * permission.
+ *
+ * Reviewer identity, reviewer role, and organization are deliberately NOT accepted
+ * here: the route derives the tenant from its own scope and the actor from the
+ * authenticated actor context.
+ */
+export function validateSensitivityProfileDecisionRequest(payload) {
+  if (!isPlainObject(payload)) {
+    return { ok: false, blockers: [requestBlocker("request_body_must_be_object", "body")] };
+  }
+
+  for (const key of Object.keys(payload)) {
+    if (!SENSITIVITY_PROFILE_DECISION_REQUEST_KEYS.has(key)) {
+      return { ok: false, blockers: [requestBlocker("unknown_field", `body.${key}`)] };
+    }
+  }
+
+  if (!Object.hasOwn(payload, "expected_updated_at")) {
+    return { ok: false, blockers: [requestBlocker("required_field_missing", "body.expected_updated_at")] };
+  }
+  if (typeof payload.expected_updated_at !== "string" || !canonicalIsoTimestamp(payload.expected_updated_at)) {
+    return { ok: false, blockers: [requestBlocker("invalid_expected_updated_at", "body.expected_updated_at")] };
+  }
+
+  if (!Object.hasOwn(payload, "review_queue_item_id")) {
+    return { ok: false, blockers: [requestBlocker("required_field_missing", "body.review_queue_item_id")] };
+  }
+  const reviewQueueItemId = payload.review_queue_item_id;
+  if (
+    typeof reviewQueueItemId !== "string"
+    || !KAI_SPRINT2_P0_PATTERNS.uuid.test(reviewQueueItemId)
+    || reviewQueueItemId !== reviewQueueItemId.toLowerCase()
+  ) {
+    return { ok: false, blockers: [requestBlocker("invalid_uuid_field", "body.review_queue_item_id")] };
+  }
+
+  if (!Object.hasOwn(payload, "decision")) {
+    return { ok: false, blockers: [requestBlocker("required_field_missing", "body.decision")] };
+  }
+  const decision = payload.decision;
+  if (typeof decision !== "string" || !SENSITIVITY_ALLOWED_USE_DECISION_OUTCOMES.includes(decision)) {
+    return { ok: false, blockers: [requestBlocker("invalid_decision", "body.decision")] };
+  }
+
+  const snapshotRequired = sensitivityReviewedSnapshotRequired(decision);
+  const hasSnapshot = Object.hasOwn(payload, "reviewed_snapshot");
+  if (!snapshotRequired) {
+    if (hasSnapshot) {
+      return { ok: false, blockers: [requestBlocker("unexpected_reviewed_snapshot", "body.reviewed_snapshot")] };
+    }
+    return { ok: true, blockers: [] };
+  }
+  if (!hasSnapshot) {
+    return { ok: false, blockers: [requestBlocker("required_field_missing", "body.reviewed_snapshot")] };
+  }
+  if (!isPlainObject(payload.reviewed_snapshot)) {
+    return { ok: false, blockers: [requestBlocker("invalid_reviewed_snapshot", "body.reviewed_snapshot")] };
+  }
+  const snapshotValidation = validateSensitivityReviewedSnapshot(payload.reviewed_snapshot);
+  if (!snapshotValidation.ok) {
+    return { ok: false, blockers: [requestBlocker(snapshotValidation.reason, "body.reviewed_snapshot")] };
   }
 
   return { ok: true, blockers: [] };

@@ -9,30 +9,37 @@ import {
   getScopedClaimEvidenceLinkByClaimId,
   getScopedClaimReviewQueueItemByClaimId,
 } from "../db/kaiIntakeQueries.js";
+import {
+  findCurrentEvidenceReviewDecision,
+  findCurrentClaimReviewDecision,
+  insertEvidenceReviewDecision,
+  insertClaimReviewDecision,
+} from "./postgresHumanReviewDecisionRepository.js";
+import {
+  isEvidenceReviewTerminalOutcome,
+  isClaimReviewTerminalOutcome,
+  evidenceReviewStatusForOutcome,
+  claimReviewStatusForOutcome,
+  supportStrengthForOutcome,
+  claimStrengthForOutcome,
+} from "./humanReviewDecisionContract.js";
 
 /**
- * KAI P2-09 human evidence-review and claim-review/internal-approval
- * repository: the smallest authoritative transition that lets a valid P2
- * claim/evidence chain move from its review-gated proposed state to INTERNAL
- * usability, exactly as required by P2-06's own eligibility evaluator
- * (Backend/kai/dictionary/postgresClaimTraceabilityRepository.js). P2-06's
- * `support_strength_unassessed` blocker fires whenever
- * evidence_items.support_strength or claims.claim_strength still reads
- * 'unassessed'; its `evidence_review_unresolved`/`claim_review_unresolved`
- * blockers fire whenever the linked `evidence_review`/`claim_review`
- * kai.review_queue_items row's own review_status is not 'resolved'/'approved'/
- * 'complete'. This module writes exactly those fields and nothing else: it
- * never touches evidence_items.evidence_review_status, claims.claim_status, or
- * claims.claim_review_status (P2-05's own conflict-candidate detection,
- * Backend/kai/dictionary/postgresConflictReviewCandidateRepository.js,
- * requires claim_status = 'proposed' AND claim_review_status =
- * 'needs_gk_review' for its own contract check - this package must not
- * disturb that foundation), and it never touches audience-gate booleans,
- * export_ready, or the P2-06 evaluator's audience-approval/coverage-dimension
- * logic. Both transitions are human-only (`gk_reviewer`/`gk_admin`), tenant-
- * scoped, optimistic-concurrency-guarded (`expected_updated_at` against the
- * queue item's own `updated_at`), idempotent on exact replay, and rolled back
- * whole on any post-write validation or required-audit failure.
+ * KAI P2-12 (Problem A1) human evidence-review and claim-review repository:
+ * repairs the P2-09 contract, which could only ever write ONE outcome
+ * (support_strength/claim_strength = 'reviewed_supported'), accepted no
+ * reviewer decision content, and let `queue resolved` alone stand in for
+ * "reviewed" with no persisted decision. This module now binds every queue/
+ * domain-column transition to a real, immutable, append-only decision row in
+ * kai.evidence_review_decisions / kai.claim_review_decisions (see
+ * Backend/kai/dictionary/postgresHumanReviewDecisionRepository.js and
+ * migrations/kai_sprint2_p2_12_human_review_decision_ledger.sql) in the same
+ * transaction as the queue CAS, the domain-column write, and the required
+ * audit. It never touches claims.claim_status or any audience-gate boolean -
+ * P2-05's own conflict-candidate detection
+ * (Backend/kai/dictionary/postgresConflictReviewCandidateRepository.js)
+ * still depends on claim_status='proposed', which this package leaves
+ * completely untouched.
  */
 
 const HUMAN_REVIEW_RESULT_STATUS = Object.freeze({
@@ -40,6 +47,7 @@ const HUMAN_REVIEW_RESULT_STATUS = Object.freeze({
   conflict_current_state_changed: 409,
   not_found: 404,
   evidence_review_unresolved: 409,
+  governance_ceiling_exceeded: 422,
   system_error: 500,
 });
 
@@ -55,12 +63,12 @@ const RESOLVED_REVIEW_STATUS = "resolved";
 const UNASSESSED_STRENGTH = "unassessed";
 const REVIEWED_SUPPORTED_STRENGTH = "reviewed_supported";
 
-const EVIDENCE_REVIEW_AUDIT_CONTRACT = "p2_09_evidence_review_completion_v1";
-const CLAIM_REVIEW_AUDIT_CONTRACT = "p2_09_claim_review_internal_approval_v1";
+const EVIDENCE_REVIEW_AUDIT_CONTRACT = "p2_12_evidence_review_decision_v1";
+const CLAIM_REVIEW_AUDIT_CONTRACT = "p2_12_claim_review_decision_v1";
 const EVIDENCE_REVIEW_AUDIT_OPERATION = "evidence_review_completed";
 const CLAIM_REVIEW_AUDIT_OPERATION = "claim_review_completed_internal_approval";
-const EVIDENCE_REVIEW_VALIDATOR_KEY = "VAL-KAI-P2-09-001";
-const CLAIM_REVIEW_VALIDATOR_KEY = "VAL-KAI-P2-09-002";
+const EVIDENCE_REVIEW_VALIDATOR_KEY = "VAL-KAI-P2-12-001";
+const CLAIM_REVIEW_VALIDATOR_KEY = "VAL-KAI-P2-12-002";
 
 function failure(code) {
   return { ok: false, data: null, error: { code, status: HUMAN_REVIEW_RESULT_STATUS[code] || 500 } };
@@ -87,6 +95,11 @@ function isNormalizedNow(value) {
   const parsed = Date.parse(value);
   if (!Number.isFinite(parsed)) return false;
   return new Date(parsed).toISOString() === value;
+}
+
+function isNullableNonEmptyStringArray(value) {
+  if (value === null || value === undefined) return true;
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string" && entry.length > 0);
 }
 
 function isMetadataOnlyAuditDependency(value) {
@@ -124,7 +137,7 @@ function prepareRequiredAudit(metadataOnlyAudit, payload, tx) {
 
 function logValidationBlockerClassification(reason, error) {
   console.error(JSON.stringify({
-    event: "KAI_P2_09_HUMAN_REVIEW_VALIDATION_BLOCKER_CLASSIFICATION",
+    event: "KAI_P2_12_HUMAN_REVIEW_VALIDATION_BLOCKER_CLASSIFICATION",
     reason,
     pg_code: error?.code || null,
     pg_constraint: error?.constraint || null,
@@ -189,7 +202,20 @@ async function insertUploadLifecycleAudit(tx, { organizationId, intakeFileId, op
   );
 }
 
-async function updateReviewQueueCompareAndSet(tx, { organizationId, reviewQueueItemId, queueType, targetObjectType, targetObjectId, expectedUpdatedAt, now }) {
+/**
+ * Compare-and-set the linked review_queue_items row from EITHER of its two
+ * coherent starting states ("fresh": open/needs_gk_review, or "re-review":
+ * resolved/resolved) to the state this decisionOutcome projects
+ * (resolved/resolved for a terminal outcome; open/needs_gk_review for
+ * needs_more_information - which correctly reopens a previously-resolved
+ * item, and is a no-op transition for an already-fresh one). Any other
+ * queue_status/review_status combination (in_progress, blocked, cancelled,
+ * waiting_on_client, ...) does not match either branch and yields 0 rows,
+ * exactly like a genuine conflict.
+ */
+async function updateReviewQueueCompareAndSet(tx, { organizationId, reviewQueueItemId, queueType, targetObjectType, targetObjectId, expectedUpdatedAt, now, isTerminal }) {
+  const targetQueueStatus = isTerminal ? RESOLVED_QUEUE_STATUS : FRESH_QUEUE_STATUS;
+  const targetReviewStatus = isTerminal ? RESOLVED_REVIEW_STATUS : FRESH_REVIEW_STATUS;
   const result = await tx.query(
     `UPDATE kai.review_queue_items
         SET queue_status = $1,
@@ -200,14 +226,16 @@ async function updateReviewQueueCompareAndSet(tx, { organizationId, reviewQueueI
         AND queue_type = $6
         AND target_object_type = $7
         AND target_object_id = $8::uuid
-        AND queue_status = $9
-        AND review_status = $10
-        AND date_trunc('milliseconds', updated_at) = date_trunc('milliseconds', $11::timestamptz)
+        AND (
+          (queue_status = $9 AND review_status = $10)
+          OR (queue_status = $11 AND review_status = $12)
+        )
+        AND date_trunc('milliseconds', updated_at) = date_trunc('milliseconds', $13::timestamptz)
       RETURNING review_queue_item_id, organization_id, queue_type, target_object_type,
                 target_object_id, queue_status, review_status, updated_at`,
     [
-      RESOLVED_QUEUE_STATUS,
-      RESOLVED_REVIEW_STATUS,
+      targetQueueStatus,
+      targetReviewStatus,
       now,
       organizationId,
       reviewQueueItemId,
@@ -216,6 +244,8 @@ async function updateReviewQueueCompareAndSet(tx, { organizationId, reviewQueueI
       targetObjectId,
       FRESH_QUEUE_STATUS,
       FRESH_REVIEW_STATUS,
+      RESOLVED_QUEUE_STATUS,
+      RESOLVED_REVIEW_STATUS,
       expectedUpdatedAt,
     ],
   );
@@ -237,8 +267,27 @@ async function readReviewQueueItemById(tx, { organizationId, reviewQueueItemId, 
   return rows[0] || null;
 }
 
-function isResolvedQueueRow(row) {
-  return Boolean(row) && row.queue_status === RESOLVED_QUEUE_STATUS && row.review_status === RESOLVED_REVIEW_STATUS;
+function isQueueRowInState(row, queueStatus, reviewStatus) {
+  return Boolean(row) && row.queue_status === queueStatus && row.review_status === reviewStatus;
+}
+
+/**
+ * A replay is recognized when: the current decision-lineage head already
+ * carries this exact decisionOutcome AND was recorded against this exact
+ * expectedUpdatedAt (the optimistic-concurrency stamp this request targeted -
+ * proof this is the same request re-sent, not a new/different one) AND the
+ * queue row is currently in the state this decisionOutcome projects. Any
+ * other post-CAS-miss state is a genuine conflict.
+ */
+function isReplayOfDecision({ currentHead, decisionOutcome, expectedUpdatedAt, existingQueueRow, isTerminal }) {
+  if (!currentHead) return false;
+  if (currentHead.decision_outcome !== decisionOutcome) return false;
+  const headTargetMs = Date.parse(new Date(currentHead.target_updated_at).toISOString());
+  const expectedMs = Date.parse(expectedUpdatedAt);
+  if (!Number.isFinite(headTargetMs) || !Number.isFinite(expectedMs) || headTargetMs !== expectedMs) return false;
+  const expectedQueueStatus = isTerminal ? RESOLVED_QUEUE_STATUS : FRESH_QUEUE_STATUS;
+  const expectedReviewStatus = isTerminal ? RESOLVED_REVIEW_STATUS : FRESH_REVIEW_STATUS;
+  return isQueueRowInState(existingQueueRow, expectedQueueStatus, expectedReviewStatus);
 }
 
 async function resolveDefaultRunInTransaction() {
@@ -246,58 +295,74 @@ async function resolveDefaultRunInTransaction() {
   return withTransaction;
 }
 
-function isCompleteEvidenceReviewInput(input) {
-  const allowedKeys = new Set([
-    "organizationId", "evidenceItemId", "reviewQueueItemId", "expectedUpdatedAt",
-    "actorUserId", "now", "metadataOnlyAudit",
-  ]);
-  if (!isPlainObject(input) || !hasOnlyKeys(input, allowedKeys)) return false;
+const EVIDENCE_REVIEW_INPUT_ALLOWED_KEYS = new Set([
+  "organizationId", "evidenceItemId", "reviewQueueItemId", "expectedUpdatedAt",
+  "decisionOutcome", "limitationNotes", "actorUserId", "actorRole", "now", "metadataOnlyAudit",
+]);
+
+function isRecordEvidenceReviewDecisionInput(input) {
+  if (!isPlainObject(input) || !hasOnlyKeys(input, EVIDENCE_REVIEW_INPUT_ALLOWED_KEYS)) return false;
   return (
     isNonEmptyString(input.organizationId) &&
     isNonEmptyString(input.evidenceItemId) &&
     isNonEmptyString(input.reviewQueueItemId) &&
     isNormalizedNow(input.expectedUpdatedAt) &&
+    isNonEmptyString(input.decisionOutcome) &&
+    isNullableNonEmptyStringArray(input.limitationNotes) &&
     isNonEmptyString(input.actorUserId) &&
+    isNonEmptyString(input.actorRole) &&
     isNormalizedNow(input.now) &&
     isMetadataOnlyAuditDependency(input.metadataOnlyAudit)
   );
 }
 
-function isCompleteClaimReviewInput(input) {
-  const allowedKeys = new Set([
-    "organizationId", "claimId", "reviewQueueItemId", "expectedUpdatedAt",
-    "actorUserId", "now", "metadataOnlyAudit",
-  ]);
-  if (!isPlainObject(input) || !hasOnlyKeys(input, allowedKeys)) return false;
+const CLAIM_REVIEW_INPUT_ALLOWED_KEYS = new Set([
+  "organizationId", "claimId", "reviewQueueItemId", "expectedUpdatedAt",
+  "decisionOutcome", "limitationNotes", "approvedAudiences", "actorUserId", "actorRole", "now", "metadataOnlyAudit",
+]);
+
+function isRecordClaimReviewDecisionInput(input) {
+  if (!isPlainObject(input) || !hasOnlyKeys(input, CLAIM_REVIEW_INPUT_ALLOWED_KEYS)) return false;
   return (
     isNonEmptyString(input.organizationId) &&
     isNonEmptyString(input.claimId) &&
     isNonEmptyString(input.reviewQueueItemId) &&
     isNormalizedNow(input.expectedUpdatedAt) &&
+    isNonEmptyString(input.decisionOutcome) &&
+    isNullableNonEmptyStringArray(input.limitationNotes) &&
+    isNullableNonEmptyStringArray(input.approvedAudiences) &&
     isNonEmptyString(input.actorUserId) &&
+    isNonEmptyString(input.actorRole) &&
     isNormalizedNow(input.now) &&
     isMetadataOnlyAuditDependency(input.metadataOnlyAudit)
   );
 }
 
-function toEvidenceReviewResult(queueRow, evidenceItemId, supportStrength, replayed) {
+function toEvidenceReviewResult(queueRow, evidenceItemId, evidenceReviewStatus, supportStrength, decisionId, decisionOutcome, replayed) {
   return {
     evidence_item_id: evidenceItemId,
     review_queue_item_id: queueRow.review_queue_item_id,
     queue_status: queueRow.queue_status,
     review_status: queueRow.review_status,
+    evidence_review_status: evidenceReviewStatus,
     support_strength: supportStrength,
+    decision_id: decisionId,
+    decision_outcome: decisionOutcome,
     replayed,
   };
 }
 
-function toClaimReviewResult(queueRow, claimId, claimStrength, replayed) {
+function toClaimReviewResult(queueRow, claimId, claimReviewStatus, claimStrength, decisionId, decisionOutcome, approvedAudiences, replayed) {
   return {
     claim_id: claimId,
     review_queue_item_id: queueRow.review_queue_item_id,
     queue_status: queueRow.queue_status,
     review_status: queueRow.review_status,
+    claim_review_status: claimReviewStatus,
     claim_strength: claimStrength,
+    decision_id: decisionId,
+    decision_outcome: decisionOutcome,
+    approved_audiences: approvedAudiences,
     replayed,
   };
 }
@@ -305,16 +370,20 @@ function toClaimReviewResult(queueRow, claimId, claimStrength, replayed) {
 export function createPostgresHumanReviewRepository({ runInTransaction } = {}) {
   return Object.freeze({
     /**
-     * Human evidence-review completion: the GK reviewer's positive support-
-     * strength finding on one already-committed, still-authoritative P2-01
-     * evidence item. Resolves the linked `evidence_review` queue item and
-     * writes evidence_items.support_strength = 'reviewed_supported' atomically,
-     * with a required same-transaction metadata-only audit. Never touches
-     * claim state, audience gates, or export_ready.
+     * Human evidence-review decision recording: writes exactly one new
+     * append-only row to kai.evidence_review_decisions, then transitions the
+     * linked `evidence_review` queue item and evidence_items.
+     * evidence_review_status/support_strength atomically, with a required
+     * same-transaction audit. Never touches claim state, audience gates, or
+     * export_ready.
      */
-    async completeEvidenceReview(input) {
-      if (!isCompleteEvidenceReviewInput(input)) return failure("validation_blocker");
-      const { organizationId, evidenceItemId, reviewQueueItemId, expectedUpdatedAt, actorUserId, now, metadataOnlyAudit } = input;
+    async recordEvidenceReviewDecision(input) {
+      if (!isRecordEvidenceReviewDecisionInput(input)) return failure("validation_blocker");
+      const {
+        organizationId, evidenceItemId, reviewQueueItemId, expectedUpdatedAt,
+        decisionOutcome, limitationNotes, actorUserId, actorRole, now, metadataOnlyAudit,
+      } = input;
+      const isTerminal = isEvidenceReviewTerminalOutcome(decisionOutcome);
       const run = runInTransaction || (await resolveDefaultRunInTransaction());
       try {
         return await run(async (tx) => {
@@ -324,6 +393,16 @@ export function createPostgresHumanReviewRepository({ runInTransaction } = {}) {
           const intakeFileId = await readLineageIntakeFileId(tx, { organizationId, evidenceItemId });
           if (!intakeFileId) return failure("conflict_current_state_changed");
 
+          const currentHead = await findCurrentEvidenceReviewDecision(tx, { organizationId, evidenceItemId });
+
+          const preImageQueueRow = await readReviewQueueItemById(tx, {
+            organizationId,
+            reviewQueueItemId,
+            queueType: EVIDENCE_REVIEW_QUEUE_TYPE,
+            targetObjectType: EVIDENCE_REVIEW_TARGET_TYPE,
+            targetObjectId: evidenceItemId,
+          });
+
           const queueRow = await updateReviewQueueCompareAndSet(tx, {
             organizationId,
             reviewQueueItemId,
@@ -332,6 +411,7 @@ export function createPostgresHumanReviewRepository({ runInTransaction } = {}) {
             targetObjectId: evidenceItemId,
             expectedUpdatedAt,
             now,
+            isTerminal,
           });
 
           if (!queueRow) {
@@ -343,26 +423,46 @@ export function createPostgresHumanReviewRepository({ runInTransaction } = {}) {
               targetObjectId: evidenceItemId,
             });
             if (!existingQueueRow) return failure("not_found");
-            const existingEvidenceRow = await getScopedEvidenceItemById({ organizationId, evidenceItemId }, tx);
-            if (
-              isResolvedQueueRow(existingQueueRow) &&
-              existingEvidenceRow?.support_strength === REVIEWED_SUPPORTED_STRENGTH
-            ) {
-              return success(toEvidenceReviewResult(existingQueueRow, evidenceItemId, REVIEWED_SUPPORTED_STRENGTH, true));
+            if (isReplayOfDecision({ currentHead, decisionOutcome, expectedUpdatedAt, existingQueueRow, isTerminal })) {
+              const existingEvidenceRow = await getScopedEvidenceItemById({ organizationId, evidenceItemId }, tx);
+              return success(toEvidenceReviewResult(
+                existingQueueRow,
+                evidenceItemId,
+                existingEvidenceRow?.evidence_review_status ?? evidenceReviewStatusForOutcome(decisionOutcome),
+                existingEvidenceRow?.support_strength ?? supportStrengthForOutcome(decisionOutcome),
+                currentHead.decision_id,
+                currentHead.decision_outcome,
+                true,
+              ));
             }
             return failure("conflict_current_state_changed");
           }
 
+          const projectedReviewStatus = evidenceReviewStatusForOutcome(decisionOutcome);
+          const projectedStrength = supportStrengthForOutcome(decisionOutcome);
+
           const strengthResult = await tx.query(
             `UPDATE kai.evidence_items
-                SET support_strength = $1
-              WHERE organization_id = $2::uuid
-                AND evidence_item_id = $3::uuid
-                AND support_strength = $4
-              RETURNING support_strength`,
-            [REVIEWED_SUPPORTED_STRENGTH, organizationId, evidenceItemId, UNASSESSED_STRENGTH],
+                SET evidence_review_status = $1,
+                    support_strength = $2
+              WHERE organization_id = $3::uuid
+                AND evidence_item_id = $4::uuid
+              RETURNING evidence_review_status, support_strength`,
+            [projectedReviewStatus, projectedStrength, organizationId, evidenceItemId],
           );
           if (strengthResult.rows.length !== 1) throw new MalformedResultRowError("evidence_items");
+
+          const decisionRow = await insertEvidenceReviewDecision(tx, {
+            organizationId,
+            evidenceItemId,
+            reviewQueueItemId,
+            decisionOutcome,
+            limitationNotes: limitationNotes || null,
+            decidedBy: actorUserId,
+            decidedByRole: actorRole,
+            targetUpdatedAt: expectedUpdatedAt,
+            supersedesDecisionId: currentHead ? currentHead.decision_id : null,
+          });
 
           const uploadState = await readScopedUploadState(tx, organizationId, intakeFileId);
           if (!uploadState) throw new MalformedResultRowError("intake_files");
@@ -372,13 +472,17 @@ export function createPostgresHumanReviewRepository({ runInTransaction } = {}) {
             contract: EVIDENCE_REVIEW_AUDIT_CONTRACT,
             evidence_item_id: evidenceItemId,
             review_queue_item_id: reviewQueueItemId,
-            previous_queue_status: FRESH_QUEUE_STATUS,
-            resulting_queue_status: RESOLVED_QUEUE_STATUS,
-            previous_review_status: FRESH_REVIEW_STATUS,
-            resulting_review_status: RESOLVED_REVIEW_STATUS,
-            previous_support_strength: UNASSESSED_STRENGTH,
-            resulting_support_strength: REVIEWED_SUPPORTED_STRENGTH,
+            previous_queue_status: preImageQueueRow.queue_status,
+            resulting_queue_status: queueRow.queue_status,
+            previous_review_status: preImageQueueRow.review_status,
+            resulting_review_status: queueRow.review_status,
+            previous_support_strength: evidenceItemRow.support_strength,
+            resulting_support_strength: projectedStrength,
+            previous_evidence_review_status: evidenceItemRow.evidence_review_status,
+            resulting_evidence_review_status: projectedReviewStatus,
             validator_key: EVIDENCE_REVIEW_VALIDATOR_KEY,
+            decision_id: decisionRow.decision_id,
+            decision_outcome: decisionOutcome,
           };
 
           const preparedAudit = prepareRequiredAudit(metadataOnlyAudit, {
@@ -400,7 +504,15 @@ export function createPostgresHumanReviewRepository({ runInTransaction } = {}) {
           });
           await preparedAudit.publish();
 
-          return success(toEvidenceReviewResult(queueRow, evidenceItemId, REVIEWED_SUPPORTED_STRENGTH, false));
+          return success(toEvidenceReviewResult(
+            queueRow,
+            evidenceItemId,
+            projectedReviewStatus,
+            projectedStrength,
+            decisionRow.decision_id,
+            decisionOutcome,
+            false,
+          ));
         });
       } catch (error) {
         return shapeError(error);
@@ -408,19 +520,21 @@ export function createPostgresHumanReviewRepository({ runInTransaction } = {}) {
     },
 
     /**
-     * Human claim-review/internal-approval completion: only after the linked
-     * P2-01 evidence item's own `evidence_review` queue item is already
-     * 'resolved' (the one non-approval blocker this transition is authorized
-     * to require clear first) does this resolve the claim's `claim_review`
-     * queue item and write claims.claim_strength = 'reviewed_supported'
-     * atomically, with a required same-transaction metadata-only audit. This
-     * never writes claim_status, claim_review_status, or any audience-gate/
-     * export_ready column, and never invokes P2-06/P2-08 or any generation
-     * path.
+     * Human claim-review decision recording: only after the linked P2-01
+     * evidence item's own decision-lineage head is a TERMINAL evidence
+     * outcome (never absent, never needs_more_information) does this write a
+     * new append-only kai.claim_review_decisions row and transition the
+     * claim's `claim_review` queue item and claims.claim_review_status/
+     * claim_strength atomically, with a required same-transaction audit.
+     * Never writes claim_status or any audience-gate/export_ready column.
      */
-    async completeClaimReviewInternalApproval(input) {
-      if (!isCompleteClaimReviewInput(input)) return failure("validation_blocker");
-      const { organizationId, claimId, reviewQueueItemId, expectedUpdatedAt, actorUserId, now, metadataOnlyAudit } = input;
+    async recordClaimReviewDecision(input) {
+      if (!isRecordClaimReviewDecisionInput(input)) return failure("validation_blocker");
+      const {
+        organizationId, claimId, reviewQueueItemId, expectedUpdatedAt,
+        decisionOutcome, limitationNotes, approvedAudiences, actorUserId, actorRole, now, metadataOnlyAudit,
+      } = input;
+      const isTerminal = isClaimReviewTerminalOutcome(decisionOutcome);
       const run = runInTransaction || (await resolveDefaultRunInTransaction());
       try {
         return await run(async (tx) => {
@@ -447,6 +561,44 @@ export function createPostgresHumanReviewRepository({ runInTransaction } = {}) {
           ) {
             return failure("evidence_review_unresolved");
           }
+          const evidenceHead = await findCurrentEvidenceReviewDecision(tx, { organizationId, evidenceItemId });
+          if (!evidenceHead || !isEvidenceReviewTerminalOutcome(evidenceHead.decision_outcome)) {
+            return failure("evidence_review_unresolved");
+          }
+
+          // Governance ceiling (Problem B is NOT opened here): funder/public
+          // may only ever be requested if the bound claim's AND evidence
+          // item's own funder_use_allowed/public_use_allowed booleans are
+          // both true. Both are still hard-pinned false everywhere in this
+          // schema, so only 'internal' can ever legitimately pass today.
+          // This runs before any write in this transaction, so a rejection
+          // here persists nothing.
+          if (Array.isArray(approvedAudiences)) {
+            const evidenceItemRow = await getScopedEvidenceItemById({ organizationId, evidenceItemId }, tx);
+            if (!evidenceItemRow) return failure("not_found");
+            for (const audience of approvedAudiences) {
+              if (audience === "internal") continue;
+              if (audience === "funder") {
+                if (claimRow.funder_use_allowed === true && evidenceItemRow.funder_use_allowed === true) continue;
+                return failure("governance_ceiling_exceeded");
+              }
+              if (audience === "public") {
+                if (claimRow.public_use_allowed === true && evidenceItemRow.public_use_allowed === true) continue;
+                return failure("governance_ceiling_exceeded");
+              }
+              return failure("validation_blocker");
+            }
+          }
+
+          const currentHead = await findCurrentClaimReviewDecision(tx, { organizationId, claimId });
+
+          const preImageQueueRow = await readReviewQueueItemById(tx, {
+            organizationId,
+            reviewQueueItemId,
+            queueType: CLAIM_REVIEW_QUEUE_TYPE,
+            targetObjectType: CLAIM_REVIEW_TARGET_TYPE,
+            targetObjectId: claimId,
+          });
 
           const queueRow = await updateReviewQueueCompareAndSet(tx, {
             organizationId,
@@ -456,6 +608,7 @@ export function createPostgresHumanReviewRepository({ runInTransaction } = {}) {
             targetObjectId: claimId,
             expectedUpdatedAt,
             now,
+            isTerminal,
           });
 
           if (!queueRow) {
@@ -467,26 +620,48 @@ export function createPostgresHumanReviewRepository({ runInTransaction } = {}) {
               targetObjectId: claimId,
             });
             if (!existingQueueRow) return failure("not_found");
-            const existingClaimRow = await getScopedClaimById({ organizationId, claimId }, tx);
-            if (
-              isResolvedQueueRow(existingQueueRow) &&
-              existingClaimRow?.claim_strength === REVIEWED_SUPPORTED_STRENGTH
-            ) {
-              return success(toClaimReviewResult(existingQueueRow, claimId, REVIEWED_SUPPORTED_STRENGTH, true));
+            if (isReplayOfDecision({ currentHead, decisionOutcome, expectedUpdatedAt, existingQueueRow, isTerminal })) {
+              const existingClaimRow = await getScopedClaimById({ organizationId, claimId }, tx);
+              return success(toClaimReviewResult(
+                existingQueueRow,
+                claimId,
+                existingClaimRow?.claim_review_status ?? claimReviewStatusForOutcome(decisionOutcome),
+                existingClaimRow?.claim_strength ?? claimStrengthForOutcome(decisionOutcome),
+                currentHead.decision_id,
+                currentHead.decision_outcome,
+                currentHead.approved_audiences ?? null,
+                true,
+              ));
             }
             return failure("conflict_current_state_changed");
           }
 
+          const projectedReviewStatus = claimReviewStatusForOutcome(decisionOutcome);
+          const projectedStrength = claimStrengthForOutcome(decisionOutcome);
+
           const strengthResult = await tx.query(
             `UPDATE kai.claims
-                SET claim_strength = $1
-              WHERE organization_id = $2::uuid
-                AND claim_id = $3::uuid
-                AND claim_strength = $4
-              RETURNING claim_strength`,
-            [REVIEWED_SUPPORTED_STRENGTH, organizationId, claimId, UNASSESSED_STRENGTH],
+                SET claim_review_status = $1,
+                    claim_strength = $2
+              WHERE organization_id = $3::uuid
+                AND claim_id = $4::uuid
+              RETURNING claim_review_status, claim_strength`,
+            [projectedReviewStatus, projectedStrength, organizationId, claimId],
           );
           if (strengthResult.rows.length !== 1) throw new MalformedResultRowError("claims");
+
+          const decisionRow = await insertClaimReviewDecision(tx, {
+            organizationId,
+            claimId,
+            reviewQueueItemId,
+            decisionOutcome,
+            limitationNotes: limitationNotes || null,
+            approvedAudiences: approvedAudiences || null,
+            decidedBy: actorUserId,
+            decidedByRole: actorRole,
+            targetUpdatedAt: expectedUpdatedAt,
+            supersedesDecisionId: currentHead ? currentHead.decision_id : null,
+          });
 
           const uploadState = await readScopedUploadState(tx, organizationId, intakeFileId);
           if (!uploadState) throw new MalformedResultRowError("intake_files");
@@ -497,13 +672,18 @@ export function createPostgresHumanReviewRepository({ runInTransaction } = {}) {
             claim_id: claimId,
             evidence_item_id: evidenceItemId,
             review_queue_item_id: reviewQueueItemId,
-            previous_queue_status: FRESH_QUEUE_STATUS,
-            resulting_queue_status: RESOLVED_QUEUE_STATUS,
-            previous_review_status: FRESH_REVIEW_STATUS,
-            resulting_review_status: RESOLVED_REVIEW_STATUS,
-            previous_claim_strength: UNASSESSED_STRENGTH,
-            resulting_claim_strength: REVIEWED_SUPPORTED_STRENGTH,
+            previous_queue_status: preImageQueueRow.queue_status,
+            resulting_queue_status: queueRow.queue_status,
+            previous_review_status: preImageQueueRow.review_status,
+            resulting_review_status: queueRow.review_status,
+            previous_claim_strength: claimRow.claim_strength,
+            resulting_claim_strength: projectedStrength,
+            previous_claim_review_status: claimRow.claim_review_status,
+            resulting_claim_review_status: projectedReviewStatus,
             validator_key: CLAIM_REVIEW_VALIDATOR_KEY,
+            decision_id: decisionRow.decision_id,
+            decision_outcome: decisionOutcome,
+            approved_audiences: approvedAudiences || null,
           };
 
           const preparedAudit = prepareRequiredAudit(metadataOnlyAudit, {
@@ -525,7 +705,16 @@ export function createPostgresHumanReviewRepository({ runInTransaction } = {}) {
           });
           await preparedAudit.publish();
 
-          return success(toClaimReviewResult(queueRow, claimId, REVIEWED_SUPPORTED_STRENGTH, false));
+          return success(toClaimReviewResult(
+            queueRow,
+            claimId,
+            projectedReviewStatus,
+            projectedStrength,
+            decisionRow.decision_id,
+            decisionOutcome,
+            approvedAudiences || null,
+            false,
+          ));
         });
       } catch (error) {
         return shapeError(error);
@@ -553,4 +742,5 @@ export const __humanReviewRepositoryTestables = Object.freeze({
   MalformedResultRowError,
   RequiredAuditRejectedError,
   prepareRequiredAudit,
+  isReplayOfDecision,
 });

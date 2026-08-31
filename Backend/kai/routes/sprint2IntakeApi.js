@@ -26,6 +26,7 @@ import {
   validateKaiSprint2MutationRequest,
   validateReviewQueueQuery,
   validateReviewQueueStatusRequest,
+  validateSensitivityProfileDecisionRequest,
   validateStartExportReviewRequest,
 } from "../validators/kaiSprint2RequestSchemas.js";
 import {
@@ -586,7 +587,9 @@ async function getIntakeService() {
 }
 
 async function getReviewQueueService() {
-  if (intakeServiceOverride?.updateReviewQueueStatus) return intakeServiceOverride;
+  if (intakeServiceOverride?.updateReviewQueueStatus || intakeServiceOverride?.ensureSensitivityReviewQueueItem) {
+    return intakeServiceOverride;
+  }
   reviewQueueServicePromise ||= import("../services/kaiReviewQueueService.js");
   return reviewQueueServicePromise;
 }
@@ -847,6 +850,31 @@ router.post("/admin/review-queue/:reviewQueueItemId/status", async (req, res) =>
  * the mount-level gate in index.js), so KAI_SPRINT2_ENABLED gates every one of
  * them, including the decision route.
  */
+/**
+ * KAI B1A-3B: a safe, read-only capability probe so a product-facing page
+ * (e.g. the Impact Evidence Library) can decide whether to fetch/show
+ * actionable Phase-5 sensitivity-review controls, without ever hardcoding the
+ * GK role list client-side and without attempting the GK-only sensitivity
+ * routes just to read a 403. Never returns queue/profile/decision data;
+ * always 200 for an authenticated actor regardless of authorization outcome
+ * (the boolean itself IS the answer) - a genuinely unauthenticated request is
+ * still rejected the same way every other route on this router already
+ * rejects one.
+ */
+router.get("/admin/review-cockpit/capabilities", async (req, res) => {
+  const organizationId = normalizedUuid(req.query?.organization_id);
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId)) {
+    return sendKaiError(res, "invalid_request");
+  }
+  return invokeService(res, async () => {
+    const service = await getReviewCockpitService();
+    return service.getReviewCockpitCapabilities({
+      ...requestContext(req, "/api/kai/sprint2/intake/admin/review-cockpit/capabilities"),
+      organizationId,
+    });
+  });
+});
+
 router.get("/admin/review-cockpit/queue", async (req, res) => {
   const organizationId = normalizedUuid(req.query?.organization_id);
   const queryResult = validateReviewCockpitQueueQuery(req.query);
@@ -887,6 +915,80 @@ router.get("/admin/review-cockpit/sensitivity-profiles/:intakeSensitivityProfile
       intakeSensitivityProfileId: identifiers.objectId,
     });
   });
+});
+
+/**
+ * KAI B1A-2 Phase-5 sensitivity/allowed-use decision route. Structurally identical
+ * to the source-candidate decision route below (validator -> service ->
+ * repository): it contains no SQL, imports no database pool, and calls exactly one
+ * authorized service function, which performs its own feature gating, mapped-human
+ * actor/role/tenant authorization, optimistic-concurrency check, transactional
+ * append-only ledger write, P1-06 queue transition, and required same-transaction
+ * audit. The reviewer identity and organization are never taken from the body.
+ */
+router.post("/admin/review-cockpit/sensitivity-profiles/:intakeSensitivityProfileId/decision", async (req, res) => {
+  if (!metadataContentTypeIsSupported(req)) return sendKaiError(res, "unsupported_media_type");
+  const identifiers = reviewCockpitIdentifiers(req, "intakeSensitivityProfileId");
+  if (!identifiers) {
+    return sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_or_intake_sensitivity_profile_id")],
+    });
+  }
+  const bodyResult = validateSensitivityProfileDecisionRequest(req.body);
+  if (!bodyResult.ok) {
+    return sendKaiError(res, "validation_blocker", { blockers: bodyResult.blockers });
+  }
+  return invokeService(res, async () => {
+    const service = await getReviewCockpitService();
+    return service.submitSensitivityProfileDecision({
+      ...requestContext(req, "/api/kai/sprint2/intake/admin/review-cockpit/sensitivity-profiles/:intakeSensitivityProfileId/decision"),
+      organizationId: identifiers.organizationId,
+      intakeSensitivityProfileId: identifiers.objectId,
+      payload: requestPayload(req),
+    });
+  });
+});
+
+/**
+ * KAI B1A-2R review-work route: closes the one missing P1-05 -> P1-06 lifecycle
+ * edge. Normal runtime creates a P1-05 sensitivity profile, but no normal
+ * application path previously created the corresponding P1-06
+ * 'sensitivity_review' work item, which left B1A-2's already-built Phase-5
+ * decision route above practically unreachable outside manual/synthetic
+ * database seeding. This route means exactly "ensure the sensitivity_review
+ * work item exists" - it starts no substantive review authority, records no
+ * classification/consent/allowed-use, grants no LLM/funder/public/product-
+ * learning permission, and records or resolves no Phase-5 decision. Contains no
+ * SQL and imports no database pool: it validates its request shape (an explicit
+ * organization_id query parameter, the path's own intake_sensitivity_profile_id,
+ * and a strictly empty body - the caller cannot choose actor identity, role,
+ * queue_type, target_object_type, queue_status, priority, or any classification/
+ * decision field) and then delegates entirely, exactly once, to the existing,
+ * unmodified P1-06 `createSensitivityReviewQueueItem` via
+ * `ensureSensitivityReviewQueueItem`, which reuses AUTH-KAI-003 and
+ * VAL-FUP-001-P0 as-is rather than reimplementing either.
+ */
+router.post("/admin/review-cockpit/sensitivity-profiles/:intakeSensitivityProfileId/review-work", async (req, res) => {
+  if (!metadataContentTypeIsSupported(req)) return sendKaiError(res, "unsupported_media_type");
+  const identifiers = reviewCockpitIdentifiers(req, "intakeSensitivityProfileId");
+  if (!identifiers) {
+    return sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_or_intake_sensitivity_profile_id")],
+    });
+  }
+  if (Object.keys(requestPayload(req)).length !== 0) {
+    return sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("unknown_field", "body")],
+    });
+  }
+  return invokeService(res, async () => {
+    const service = await getReviewQueueService();
+    return service.ensureSensitivityReviewQueueItem({
+      ...requestContext(req, "/api/kai/sprint2/intake/admin/review-cockpit/sensitivity-profiles/:intakeSensitivityProfileId/review-work"),
+      organizationId: identifiers.organizationId,
+      intakeSensitivityProfileId: identifiers.objectId,
+    });
+  }, 201);
 });
 
 router.get("/admin/review-cockpit/source-candidates/:intakeSourceCandidateId", async (req, res) => {
@@ -2081,14 +2183,14 @@ router.post(
 
 let evidenceReviewServicePromise = null;
 async function getHumanReviewServiceForEvidenceReview() {
-  if (intakeServiceOverride?.completeEvidenceReview) return intakeServiceOverride;
+  if (intakeServiceOverride?.recordEvidenceReviewDecision) return intakeServiceOverride;
   evidenceReviewServicePromise ||= import("../services/kaiHumanReviewService.js");
   return evidenceReviewServicePromise;
 }
 
 let claimReviewServicePromise = null;
 async function getHumanReviewServiceForClaimReview() {
-  if (intakeServiceOverride?.completeClaimReviewInternalApproval) return intakeServiceOverride;
+  if (intakeServiceOverride?.recordClaimReviewDecision) return intakeServiceOverride;
   claimReviewServicePromise ||= import("../services/kaiHumanReviewService.js");
   return claimReviewServicePromise;
 }
@@ -2127,15 +2229,17 @@ function validateEvidenceReviewCompletionRequestOrSend(req, res) {
 }
 
 /**
- * KAI P2-09 human evidence-review completion route. Mirrors the sibling
- * generated-content-review-completion route's `expected_updated_at` body
- * convention exactly, on the same mounted router. Contains no SQL, imports no
- * data-access layer, derives actor/tenant identity exclusively server-side
+ * KAI P2-12 (Problem A1) human evidence-review decision route. Mirrors the
+ * sibling generated-content-review-completion route's `expected_updated_at`
+ * body convention, on the same mounted router, extended with the reviewer's
+ * decision content (`decision`, `limitation_notes`). Contains no SQL, imports
+ * no data-access layer, derives actor/tenant identity exclusively server-side
  * from `sprint2MappedActorContext`, and delegates exactly once to the
- * authorized P2-09 service, which alone owns the compare-and-set write,
- * post-write validation, and required same-transaction audit. Never
- * completes, resolves, or references the linked claim's own claim_review
- * queue item - completing an evidence review can never approve a claim.
+ * authorized service, which alone owns writing the new append-only decision-
+ * ledger row, the compare-and-set queue/domain-column write, post-write
+ * validation, and required same-transaction audit. Never completes,
+ * resolves, or references the linked claim's own claim_review queue item -
+ * completing an evidence review can never approve a claim.
  */
 router.post(
   "/admin/organizations/:organizationId/evidence-items/:evidenceItemId/evidence-review/:reviewQueueItemId/complete",
@@ -2148,11 +2252,13 @@ router.post(
     const now = new Date().toISOString();
     return invokeService(res, async () => {
       const service = await getHumanReviewServiceForEvidenceReview();
-      return service.completeEvidenceReview({
+      return service.recordEvidenceReviewDecision({
         organizationId: identifiers.organizationId,
         evidenceItemId: identifiers.evidenceItemId,
         reviewQueueItemId: identifiers.reviewQueueItemId,
         expectedUpdatedAt: payload.expected_updated_at,
+        decision: payload.decision,
+        limitationNotes: payload.limitation_notes,
         actorContext,
         now,
       }, {
@@ -2201,11 +2307,12 @@ function validateClaimReviewCompletionRequestOrSend(req, res) {
 }
 
 /**
- * KAI P2-09 human claim-review/internal-approval completion route. Mirrors
- * the evidence-review completion route above exactly. It never invokes the
- * P2-08 eligible-claims-for-audience service, any Impact Evidence Library
- * service, or any P3/generation/export service - approving a claim internally
- * triggers no automatic downstream chaining.
+ * KAI P2-12 (Problem A1) human claim-review decision route. Mirrors the
+ * evidence-review decision route above, extended with `approved_audiences`.
+ * It never invokes the P2-08 eligible-claims-for-audience service, any
+ * Impact Evidence Library service, or any P3/generation/export service -
+ * recording a claim-review decision internally triggers no automatic
+ * downstream chaining.
  */
 router.post(
   "/admin/organizations/:organizationId/claims/:claimId/claim-review/:reviewQueueItemId/complete",
@@ -2218,11 +2325,14 @@ router.post(
     const now = new Date().toISOString();
     return invokeService(res, async () => {
       const service = await getHumanReviewServiceForClaimReview();
-      return service.completeClaimReviewInternalApproval({
+      return service.recordClaimReviewDecision({
         organizationId: identifiers.organizationId,
         claimId: identifiers.claimId,
         reviewQueueItemId: identifiers.reviewQueueItemId,
         expectedUpdatedAt: payload.expected_updated_at,
+        decision: payload.decision,
+        limitationNotes: payload.limitation_notes,
+        approvedAudiences: payload.approved_audiences,
         actorContext,
         now,
       }, {

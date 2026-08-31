@@ -93,6 +93,7 @@ try {
   psqlFile("migrations/kai_sprint2_p2_09_human_review_internal_approval.sql");
   psqlFile("migrations/kai_sprint2_p2_10_coverage_review_decision.sql");
   psqlFile("migrations/kai_sprint2_p2_11_client_followup_completion.sql");
+  psqlFile("migrations/kai_sprint2_p2_12_human_review_decision_ledger.sql");
   psqlFile("scripts/kai-sprint2-p2-11-client-followup-completion-verifier.sql");
   psqlFile("scripts/kai-sprint2-gate-a-smoke-seed.sql");
   psqlFile("scripts/kai-sprint2-p1-04-data-dictionary-quality-smoke-seed.sql");

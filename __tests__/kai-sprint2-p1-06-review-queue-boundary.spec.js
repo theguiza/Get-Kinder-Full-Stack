@@ -2,7 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { createSensitivityReviewQueueItem } from "../Backend/kai/services/kaiReviewQueueService.js";
+import {
+  createSensitivityReviewQueueItem,
+  ensureSensitivityReviewQueueItem,
+} from "../Backend/kai/services/kaiReviewQueueService.js";
 import {
   createPostgresReviewQueueRepository,
   __reviewQueueRepositoryContract,
@@ -156,6 +159,177 @@ test("P1-06 service: createSensitivityReviewQueueItem itself contains no SQL and
   assert.ok(createSensitivityReviewQueueItemBody, "expected to find the createSensitivityReviewQueueItem function body");
   assert.doesNotMatch(createSensitivityReviewQueueItemBody, /\bimport\s+pool\b/);
   assert.doesNotMatch(createSensitivityReviewQueueItemBody, /\bSELECT\b|\bINSERT INTO\b|\bUPDATE\b|\bDELETE FROM\b/i);
+});
+
+// KAI B1A-2R: `ensureSensitivityReviewQueueItem` is the route-facing seam that
+// closes the missing P1-05 -> P1-06 lifecycle edge. These tests prove it
+// delegates every authorization/idempotency decision to the existing,
+// unmodified `createSensitivityReviewQueueItem` above rather than duplicating
+// or weakening AUTH-KAI-003, and that a caller cannot smuggle any queue_type,
+// target_object_type, queue_status, or decision field through it.
+test("B1A-2R service: disabled KAI_SPRINT2_ENABLED returns feature_disabled with zero P1-06 calls", async () => {
+  for (const env of [{}, { KAI_SPRINT2_ENABLED: "false" }]) {
+    let calls = 0;
+    const result = await ensureSensitivityReviewQueueItem(
+      { organizationId: ORG, intakeSensitivityProfileId: PROFILE, actorContext: humanActor() },
+      { env, createSensitivityReviewQueueItem: async () => { calls += 1; return successResult; } },
+    );
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "feature_disabled");
+    assert.equal(calls, 0);
+  }
+});
+
+test("B1A-2R service: rejects a malformed organization_id or intake_sensitivity_profile_id without calling P1-06", async () => {
+  for (const badInput of [
+    { organizationId: "", intakeSensitivityProfileId: PROFILE, actorContext: humanActor() },
+    { organizationId: ORG, intakeSensitivityProfileId: "not-a-uuid", actorContext: humanActor() },
+    { organizationId: ORG, intakeSensitivityProfileId: "8000000a-0000-4000-8000-00000000000A", actorContext: humanActor() },
+  ]) {
+    let calls = 0;
+    const result = await ensureSensitivityReviewQueueItem(badInput, {
+      env: enabled,
+      createSensitivityReviewQueueItem: async () => { calls += 1; return successResult; },
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "validation_blocker");
+    assert.equal(calls, 0);
+  }
+});
+
+test("B1A-2R service: forwards only organizationId/intakeSensitivityProfileId/actorContext/now to the real P1-06 seam - a caller cannot smuggle queue_type, target_object_type, queue_status, priority, or any decision field through it", async () => {
+  const calls = [];
+  const maliciousInput = {
+    organizationId: ORG,
+    intakeSensitivityProfileId: PROFILE,
+    actorContext: humanActor(),
+    now: NOW,
+    queueType: "escalated_review",
+    targetObjectType: "intake_file",
+    queueStatus: "resolved",
+    priority: "urgent",
+    decision: "reviewed",
+    decidedBy: "someone-else",
+  };
+  const result = await ensureSensitivityReviewQueueItem(maliciousInput, {
+    env: enabled,
+    createSensitivityReviewQueueItem: async (calledInput) => {
+      calls.push(calledInput);
+      return successResult;
+    },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(calls.length, 1);
+  assert.deepEqual(Object.keys(calls[0]).sort(), ["actorContext", "intakeSensitivityProfileId", "now", "organizationId"]);
+  assert.equal(calls[0].organizationId, ORG);
+  assert.equal(calls[0].intakeSensitivityProfileId, PROFILE);
+  assert.equal(calls[0].now, NOW);
+});
+
+test("B1A-2R service: this is the ONLY seam invoked - it is exactly the exported createSensitivityReviewQueueItem, never a reimplementation, when no override is supplied", async () => {
+  const probe = createRepositoryProbe(successResult);
+  const result = await ensureSensitivityReviewQueueItem(
+    { organizationId: ORG, intakeSensitivityProfileId: PROFILE, actorContext: humanActor(), now: NOW },
+    { env: enabled, reviewQueueRepository: probe.reviewQueueRepository, metadataOnlyAudit: { prepareMetadataOnlyAudit: () => ({ ok: true, publish: async () => {} }) } },
+  );
+  assert.equal(result.ok, true);
+  assert.equal(probe.calls.length, 1, "the real createSensitivityReviewQueueItem must reach the P1-06 repository exactly once");
+  assert.deepEqual(probe.calls[0].identity, { organizationId: ORG, intakeSensitivityProfileId: PROFILE });
+});
+
+test("B1A-2R service (AUTH-KAI-003 reuse, not duplication): every non-human actor type is rejected by the real P1-06 authorization, with zero repository calls", async () => {
+  for (const actorType of ["ai", "system", "import", "code", "generic_service"]) {
+    const probe = createRepositoryProbe(successResult);
+    const result = await ensureSensitivityReviewQueueItem(
+      { organizationId: ORG, intakeSensitivityProfileId: PROFILE, actorContext: humanActor({ actorType }), now: NOW },
+      { env: enabled, reviewQueueRepository: probe.reviewQueueRepository },
+    );
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "authorization_denied");
+    assert.equal(probe.calls.length, 0);
+  }
+});
+
+test("B1A-2R service (VAL-TEN-001 reuse): an unauthorized role or missing/inactive organization membership is rejected with zero repository calls", async () => {
+  const scenarios = [
+    humanActor({ organizationMemberships: [] }),
+    humanActor({ organizationMemberships: [{ organization_id: OTHER_ORG, membership_status: "active", role_name: "gk_operator" }] }),
+    humanActor({ organizationMemberships: [{ organization_id: ORG, membership_status: "revoked", role_name: "gk_operator" }] }),
+    humanActor({ organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "read_only_role" }] }),
+  ];
+  for (const actorContext of scenarios) {
+    const probe = createRepositoryProbe(successResult);
+    const result = await ensureSensitivityReviewQueueItem(
+      { organizationId: ORG, intakeSensitivityProfileId: PROFILE, actorContext, now: NOW },
+      { env: enabled, reviewQueueRepository: probe.reviewQueueRepository },
+    );
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "tenant_boundary_violation");
+    assert.equal(probe.calls.length, 0);
+  }
+});
+
+test("B1A-2R service: a cross-tenant organizationId is rejected before any repository call", async () => {
+  const probe = createRepositoryProbe(successResult);
+  const result = await ensureSensitivityReviewQueueItem(
+    {
+      organizationId: OTHER_ORG,
+      intakeSensitivityProfileId: PROFILE,
+      actorContext: humanActor(),
+      now: NOW,
+    },
+    { env: enabled, reviewQueueRepository: probe.reviewQueueRepository },
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "tenant_boundary_violation");
+  assert.equal(probe.calls.length, 0);
+});
+
+test("B1A-2R service: when no explicit actorContext is supplied, the actor is resolved from the request via the same resolveKaiActorContext seam updateReviewQueueStatus already uses (never assumed, never defaulted to a privileged identity)", async () => {
+  const req = { user: { id: 42 } };
+  let mappedUserCalls = 0;
+  const calls = [];
+  const result = await ensureSensitivityReviewQueueItem(
+    { organizationId: ORG, intakeSensitivityProfileId: PROFILE, req },
+    {
+      env: enabled,
+      async findOrCreateKaiUserByLegacyPublicUserdataId({ legacyPublicUserdataId }) {
+        mappedUserCalls += 1;
+        assert.equal(legacyPublicUserdataId, 42);
+        return {
+          user_id: "user-1",
+          legacy_identity_source: "public.userdata",
+          legacy_public_userdata_id: "42",
+          status: "active",
+        };
+      },
+      listKaiRolesForUser: async () => [],
+      listOrganizationMembershipsForUser: async () => [
+        { organization_id: ORG, membership_status: "active", role_name: "gk_operator" },
+      ],
+      resolveEffectiveClientOrganizationMembershipsForLegacyUser: async () => [],
+      createSensitivityReviewQueueItem: async (calledInput) => {
+        calls.push(calledInput);
+        return successResult;
+      },
+    },
+  );
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(mappedUserCalls, 1, "actor context must be resolved from the request, not assumed");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].actorContext.actorType, "human");
+  assert.equal(calls[0].actorContext.actorUserId, "user-1");
+});
+
+test("B1A-2R service: an unmapped/unauthenticated request is rejected without calling P1-06", async () => {
+  const probe = createRepositoryProbe(successResult);
+  const result = await ensureSensitivityReviewQueueItem(
+    { organizationId: ORG, intakeSensitivityProfileId: PROFILE, req: { user: null } },
+    { env: enabled, reviewQueueRepository: probe.reviewQueueRepository },
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "unauthorized");
+  assert.equal(probe.calls.length, 0);
 });
 
 test("P1-06 repository: row locking for the sensitivity_review identity happens FOR UPDATE (shared query module), and the insert uses ON CONFLICT ... RETURNING against the existing partial unique index (kept local to the P1-06 repository)", () => {

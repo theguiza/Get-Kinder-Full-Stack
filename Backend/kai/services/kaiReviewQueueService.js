@@ -24,6 +24,7 @@ import { validateReviewQueueType } from "../validators/intakeValidators.js";
 import { validateReviewQueueStatusRequest } from "../validators/kaiSprint2RequestSchemas.js";
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
 import { createPostgresReviewQueueRepository } from "../dictionary/postgresReviewQueueRepository.js";
+import { createProductionMetadataOnlyAuditForSensitivityReviewQueueItem } from "./kaiMetadataOnlyAuditComposition.js";
 
 const UUID_RE = KAI_SPRINT2_P0_PATTERNS.uuid;
 const REVIEW_QUEUE_STATUS_SET = new Set(KAI_SPRINT2_P0_REVIEW_QUEUE_STATUSES);
@@ -471,4 +472,88 @@ export async function createSensitivityReviewQueueItem(input, dependencies = {})
     return buildKaiError(result.error.code, { status: result.error.status });
   }
   return { ok: true, data: result.data, error: null };
+}
+
+/**
+ * KAI B1A-2R: closes the one missing P1-05 -> P1-06 lifecycle edge. Normal
+ * runtime creates a P1-05 `intake_sensitivity_profile`, but until this seam
+ * existed there was no normal application path that created the corresponding
+ * P1-06 'sensitivity_review' work item, which left B1A-2's already-built Phase-5
+ * decision endpoint reachable only via manual/synthetic database seeding (it
+ * requires an existing `review_queue_item_id`).
+ *
+ * This function implements no authorization, idempotency, replay, or
+ * persistence logic of its own. It resolves the request's actor context using
+ * the exact same seam `updateReviewQueueStatus` above already uses, then hands
+ * the operation entirely to the existing, unmodified `createSensitivityReviewQueueItem`:
+ * AUTH-KAI-003 (mapped-human-only, gk_admin/gk_operator/gk_reviewer,
+ * active-membership), VAL-FUP-001-P0 (the fail-closed creation-trigger
+ * predicate), and the partial-unique-index create/replay semantics all continue
+ * to live there, untouched and not reimplemented. This creates no new queue
+ * table, no new queue abstraction, and no parallel review-work service; it never
+ * writes a queue_type other than 'sensitivity_review', never asserts a
+ * queue_status, priority, summary, or required_action of its own, and records or
+ * resolves no classification, consent, allowed-use, or Phase-5 decision of any
+ * kind - ensuring the work item exists grants zero substantive authority.
+ */
+export async function ensureSensitivityReviewQueueItem(input = {}, dependencies = {}) {
+  if (!isKaiSprint2Enabled(dependencies.env || process.env)) {
+    return buildKaiError("feature_disabled");
+  }
+
+  const organizationId = typeof input.organizationId === "string"
+    ? input.organizationId.trim().toLowerCase()
+    : "";
+  const intakeSensitivityProfileId = typeof input.intakeSensitivityProfileId === "string"
+    ? input.intakeSensitivityProfileId
+    : "";
+  if (
+    !UUID_RE.test(organizationId)
+    || !UUID_RE.test(intakeSensitivityProfileId)
+    || intakeSensitivityProfileId !== intakeSensitivityProfileId.toLowerCase()
+  ) {
+    return buildKaiError("validation_blocker");
+  }
+
+  const actorResult = input.actorContext
+    ? { ok: true, actorContext: input.actorContext }
+    : await resolveKaiActorContext(input.req, dependencies);
+  if (!actorResult.ok) return actorError(actorResult);
+  const actorContext = actorResult.actorContext;
+
+  const now = isNormalizedNow(input.now)
+    ? input.now
+    : (dependencies.now ? new Date(dependencies.now()) : new Date()).toISOString();
+
+  const metadataOnlyAudit = dependencies.metadataOnlyAudit
+    || createProductionMetadataOnlyAuditForSensitivityReviewQueueItem({
+      organizationId,
+      intakeSensitivityProfileId,
+      actorContext,
+      now,
+    });
+
+  // Named distinctly from the local `createSensitivityReviewQueueItem` binding
+  // so a caller-supplied override never masks the fact that, by default, this
+  // seam is the one and only P1-06 operation actually invoked below.
+  const ensureQueueItem = dependencies.createSensitivityReviewQueueItem || createSensitivityReviewQueueItem;
+  const result = await ensureQueueItem(
+    { organizationId, intakeSensitivityProfileId, actorContext, now },
+    {
+      env: dependencies.env,
+      ...(dependencies.reviewQueueRepository ? { reviewQueueRepository: dependencies.reviewQueueRepository } : {}),
+      metadataOnlyAudit,
+    },
+  );
+
+  if (!result.ok) return result;
+
+  return {
+    ok: true,
+    data: {
+      reviewQueueItem: result.data.reviewQueueItem,
+      replayed: result.data.replayed,
+    },
+    error: null,
+  };
 }

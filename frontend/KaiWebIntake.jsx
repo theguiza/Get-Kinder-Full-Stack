@@ -31,7 +31,22 @@ function ValueRow({ label, value }) {
 export default function KaiWebIntake({
   organizationId: parentOrganizationId = "",
   embedded = false,
+  // KAI B1A-3B-R2: explicit opt-in seam only. When a parent passes this
+  // callback, KaiWebIntake reports the ONE server-grounded fact a Phase-5
+  // caller needs - the current selected file's P1-05
+  // intake_sensitivity_profile_id (or null once no authoritative profile is
+  // selected/known) - straight from the existing file-detail GET response,
+  // never derived or fabricated client-side. Every existing mount that does
+  // not pass this prop (e.g. the standalone adminDashboard KAI Web Intake
+  // panel) is completely unaffected: the callback is simply never invoked.
+  onSensitivityProfileDiscovered,
 }) {
+  const reportSensitivityProfileDiscovered = useCallback((intakeSensitivityProfileId) => {
+    if (typeof onSensitivityProfileDiscovered === "function") {
+      onSensitivityProfileDiscovered(intakeSensitivityProfileId || null);
+    }
+  }, [onSensitivityProfileDiscovered]);
+
   const [organizations, setOrganizations] = useState([]);
   const [localOrganizationId, setLocalOrganizationId] = useState("");
   const organizationId = parentOrganizationId || localOrganizationId;
@@ -105,6 +120,10 @@ export default function KaiWebIntake({
     createBatchIdempotencyKeyRef.current = null;
     fileReservationIdempotencyKeyRef.current = null;
     fileReservationIdentityRef.current = null;
+    // Organization change invalidates any previously reported profile
+    // identity: it belonged to the prior organization's file selection.
+    reportSensitivityProfileDiscovered(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [organizationId]);
 
   const loadEngagements = useCallback(async (orgId) => {
@@ -262,10 +281,15 @@ export default function KaiWebIntake({
     if (result.statusCode !== 200 || !result.body?.ok) {
       setFileStatus(null);
       setMessage(errorText(result));
+      reportSensitivityProfileDiscovered(null);
       return;
     }
     setFileStatus(result.body.data);
-  }, [organizationId, intakeFileId]);
+    // KAI B1A-3B-R2: report the server-grounded P1-05 profile id from this
+    // same authoritative file-detail response - the ONLY thing forwarded
+    // through the opt-in seam, never the raw fileStatus payload.
+    reportSensitivityProfileDiscovered(result.body.data?.p1_lifecycle?.intake_sensitivity_profile_id || null);
+  }, [organizationId, intakeFileId, reportSensitivityProfileDiscovered]);
 
   const loadBatchFiles = useCallback(async () => {
     if (!organizationId || !intakeBatchId) return;
@@ -369,6 +393,7 @@ export default function KaiWebIntake({
                     setIntakeFileId("");
                     setFileStatus(null);
                     setMessage("");
+                    reportSensitivityProfileDiscovered(null);
                   }}
                   disabled={busy}
                 >
@@ -453,6 +478,7 @@ export default function KaiWebIntake({
                         setIntakeFileId(item.intake_file_id);
                         setFileStatus(null);
                         setMessage("");
+                        reportSensitivityProfileDiscovered(null);
                       }}
                       disabled={busy}
                     >

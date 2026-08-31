@@ -30,6 +30,10 @@ import { __claimGapFollowupRepositoryTestables } from "./postgresClaimGapFollowu
 import { __evidenceCoverageAssessmentRepositoryTestables } from "./postgresEvidenceCoverageAssessmentRepository.js";
 import { validateConflictGroupCompleteness } from "../validators/kaiConflictGroupValidators.js";
 import { computeCoverageReviewDecisionFingerprint } from "../validators/kaiCoverageReviewDecisionValidators.js";
+import {
+  findCurrentEvidenceReviewDecision,
+  findCurrentClaimReviewDecision,
+} from "./postgresHumanReviewDecisionRepository.js";
 
 const CLAIM_TRACEABILITY_RESULT_STATUS = Object.freeze({
   validation_blocker: 422,
@@ -566,6 +570,18 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
     }),
   );
 
+  // KAI P2-12 (Problem A1): `queue_status/review_status = resolved` alone is
+  // no longer sufficient proof of review - a decision-lineage head must also
+  // exist and be a TERMINAL outcome (never absent, never
+  // needs_more_information). This closes the legacy gap where a queue item
+  // resolved by the old pre-P2-12 code path (no decision ever recorded) would
+  // otherwise read as resolved/clear here.
+  const evidenceReviewHead = await findCurrentEvidenceReviewDecision(tx, {
+    organizationId,
+    evidenceItemId: evidenceItemRow.evidence_item_id,
+  });
+  const claimReviewHead = await findCurrentClaimReviewDecision(tx, { organizationId, claimId });
+
   const blockers = new Set();
   const affectedDimensionKeys = new Set();
   const affectedObjectIds = new Set();
@@ -573,15 +589,28 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
   if (!audienceApproval.approved) addOrderedBlocker(blockers, "claim_not_approved_for_requested_audience");
   if (!audienceApproval.gateOpen) addOrderedBlocker(blockers, "audience_gate_closed");
   if (!audienceApproval.authorityPresent) addOrderedBlocker(blockers, "requirement_authority_absent");
-  if (unresolvedReviewStatus(claimReviewQueueItemRow.review_status)) {
+  if (
+    unresolvedReviewStatus(claimReviewQueueItemRow.review_status) ||
+    !claimReviewHead ||
+    claimReviewHead.decision_outcome === "needs_more_information"
+  ) {
     addOrderedBlocker(blockers, "claim_review_unresolved");
     affectedObjectIds.add(claimReviewQueueItemRow.review_queue_item_id);
   }
-  if (unresolvedReviewStatus(evidenceReviewQueueItemRow.review_status)) {
+  if (
+    unresolvedReviewStatus(evidenceReviewQueueItemRow.review_status) ||
+    !evidenceReviewHead ||
+    evidenceReviewHead.decision_outcome === "needs_more_information"
+  ) {
     addOrderedBlocker(blockers, "evidence_review_unresolved");
     affectedObjectIds.add(evidenceReviewQueueItemRow.review_queue_item_id);
   }
-  if (claimRow.claim_strength === "unassessed" || evidenceItemRow.support_strength === "unassessed") {
+  // Fires whenever either strength column is anything other than
+  // 'reviewed_supported' - an unassessed value AND a negative terminal
+  // ('reviewed_not_supported') decision must both remain permanently
+  // ineligible here. Same blocker code as before (support_strength_unassessed)
+  // - only the triggering condition is broadened.
+  if (claimRow.claim_strength !== "reviewed_supported" || evidenceItemRow.support_strength !== "reviewed_supported") {
     addOrderedBlocker(blockers, "support_strength_unassessed");
     affectedObjectIds.add(claimId);
     affectedObjectIds.add(evidenceItemRow.evidence_item_id);
@@ -638,7 +667,28 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
       review_status: claimReviewQueueItemRow.review_status,
       updated_at: rowIso(claimReviewQueueItemRow.updated_at),
     },
-    candidate: { intake_source_candidate_id: candidateRow.intake_source_candidate_id },
+    // KAI A1C-1: current lineage-head decisions, reusing evidenceReviewHead/
+    // claimReviewHead already loaded above for blocker evaluation - no second
+    // lookup. null when no decision has ever been recorded; a superseded
+    // decision is never the head returned by findCurrent*ReviewDecision, so it
+    // is never disclosed here.
+    evidence_review_decision: evidenceReviewHead
+      ? {
+          decision_id: evidenceReviewHead.decision_id,
+          decision_outcome: evidenceReviewHead.decision_outcome,
+        }
+      : null,
+    claim_review_decision: claimReviewHead
+      ? {
+          decision_id: claimReviewHead.decision_id,
+          decision_outcome: claimReviewHead.decision_outcome,
+          approved_audiences: claimReviewHead.approved_audiences,
+        }
+      : null,
+    candidate: {
+      intake_source_candidate_id: candidateRow.intake_source_candidate_id,
+      intake_sensitivity_profile_id: candidateRow.intake_sensitivity_profile_id,
+    },
     promotion_decision: { intake_promotion_decision_id: decisionRow.intake_promotion_decision_id },
     dimensions: safeDimensionStatuses(dimensions, internalLimitationAcceptance),
     gap_items: safeGapRows(gapRows),

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { completeEvidenceReview, completeClaimReviewInternalApproval, __humanReviewServiceContract } from "../Backend/kai/services/kaiHumanReviewService.js";
+import { recordEvidenceReviewDecision, recordClaimReviewDecision, __humanReviewServiceContract } from "../Backend/kai/services/kaiHumanReviewService.js";
 import {
   validateCompleteEvidenceReviewRequest,
   validateCompleteClaimReviewRequest,
@@ -37,38 +37,40 @@ function stubMetadataOnlyAudit() {
   return { prepareMetadataOnlyAudit() { return { ok: true, async publish() {} }; } };
 }
 
-test("P2-09 allowed roles are gk_reviewer and gk_admin only - never gk_operator, client, or a generic system actor", () => {
-  assert.deepEqual([...__humanReviewServiceContract.COMPLETE_EVIDENCE_REVIEW_ALLOWED_ROLES].sort(), ["gk_admin", "gk_reviewer"]);
-  assert.deepEqual([...__humanReviewServiceContract.COMPLETE_CLAIM_REVIEW_ALLOWED_ROLES].sort(), ["gk_admin", "gk_reviewer"]);
+test("P2-12 allowed roles are gk_reviewer and gk_admin only - never gk_operator, client, or a generic system actor", () => {
+  assert.deepEqual([...__humanReviewServiceContract.RECORD_EVIDENCE_REVIEW_DECISION_ALLOWED_ROLES].sort(), ["gk_admin", "gk_reviewer"]);
+  assert.deepEqual([...__humanReviewServiceContract.RECORD_CLAIM_REVIEW_DECISION_ALLOWED_ROLES].sort(), ["gk_admin", "gk_reviewer"]);
 });
 
-test("P2-09 completeEvidenceReview rejects a non-human actor before any repository call", async () => {
-  const result = await completeEvidenceReview(
+test("P2-12 recordEvidenceReviewDecision rejects a non-human actor before any repository call", async () => {
+  const result = await recordEvidenceReviewDecision(
     {
       organizationId: ORG,
       evidenceItemId: EVIDENCE,
       reviewQueueItemId: QUEUE,
       expectedUpdatedAt: NOW,
+      decision: "supported",
       actorContext: { actorType: "ai", actorUserId: "x" },
       now: NOW,
     },
-    { env: enabledEnv, humanReviewRepository: { async completeEvidenceReview() { throw new Error("must not be called"); } }, metadataOnlyAudit: stubMetadataOnlyAudit() },
+    { env: enabledEnv, humanReviewRepository: { async recordEvidenceReviewDecision() { throw new Error("must not be called"); } }, metadataOnlyAudit: stubMetadataOnlyAudit() },
   );
   assert.equal(result.ok, false);
   assert.equal(result.error.code, "authorization_denied");
 });
 
-test("P2-09 completeEvidenceReview reports missing actor context as unauthorized instead of opaque validation_blocker", async () => {
-  const result = await completeEvidenceReview(
+test("P2-12 recordEvidenceReviewDecision reports missing actor context as unauthorized instead of opaque validation_blocker", async () => {
+  const result = await recordEvidenceReviewDecision(
     {
       organizationId: ORG,
       evidenceItemId: EVIDENCE,
       reviewQueueItemId: QUEUE,
       expectedUpdatedAt: NOW,
+      decision: "supported",
       actorContext: undefined,
       now: NOW,
     },
-    { env: enabledEnv, humanReviewRepository: { async completeEvidenceReview() { throw new Error("must not be called"); } }, metadataOnlyAudit: stubMetadataOnlyAudit() },
+    { env: enabledEnv, humanReviewRepository: { async recordEvidenceReviewDecision() { throw new Error("must not be called"); } }, metadataOnlyAudit: stubMetadataOnlyAudit() },
   );
   assert.equal(result.ok, false);
   assert.equal(result.error.code, "unauthorized");
@@ -76,13 +78,14 @@ test("P2-09 completeEvidenceReview reports missing actor context as unauthorized
   assert.equal(result.blockers?.[0]?.blocking_reason, "missing_actor_context");
 });
 
-test("P2-09 completeEvidenceReview rejects a wrong role (gk_operator) before any repository call", async () => {
-  const result = await completeEvidenceReview(
+test("P2-12 recordEvidenceReviewDecision rejects a wrong role (gk_operator) before any repository call", async () => {
+  const result = await recordEvidenceReviewDecision(
     {
       organizationId: ORG,
       evidenceItemId: EVIDENCE,
       reviewQueueItemId: QUEUE,
       expectedUpdatedAt: NOW,
+      decision: "supported",
       actorContext: {
         actorType: "human",
         actorUserId: "op",
@@ -90,23 +93,25 @@ test("P2-09 completeEvidenceReview rejects a wrong role (gk_operator) before any
       },
       now: NOW,
     },
-    { env: enabledEnv, humanReviewRepository: { async completeEvidenceReview() { throw new Error("must not be called"); } }, metadataOnlyAudit: stubMetadataOnlyAudit() },
+    { env: enabledEnv, humanReviewRepository: { async recordEvidenceReviewDecision() { throw new Error("must not be called"); } }, metadataOnlyAudit: stubMetadataOnlyAudit() },
   );
   assert.equal(result.ok, false);
   assert.equal(result.error.code, "authorization_denied");
 });
 
-test("P2-09 completeClaimReviewInternalApproval reports missing actor context as unauthorized instead of opaque validation_blocker", async () => {
-  const result = await completeClaimReviewInternalApproval(
+test("P2-12 recordClaimReviewDecision reports missing actor context as unauthorized instead of opaque validation_blocker", async () => {
+  const result = await recordClaimReviewDecision(
     {
       organizationId: ORG,
       claimId: CLAIM,
       reviewQueueItemId: QUEUE,
       expectedUpdatedAt: NOW,
+      decision: "approved",
+      approvedAudiences: ["internal"],
       actorContext: null,
       now: NOW,
     },
-    { env: enabledEnv, humanReviewRepository: { async completeClaimReviewInternalApproval() { throw new Error("must not be called"); } }, metadataOnlyAudit: stubMetadataOnlyAudit() },
+    { env: enabledEnv, humanReviewRepository: { async recordClaimReviewDecision() { throw new Error("must not be called"); } }, metadataOnlyAudit: stubMetadataOnlyAudit() },
   );
   assert.equal(result.ok, false);
   assert.equal(result.error.code, "unauthorized");
@@ -114,13 +119,15 @@ test("P2-09 completeClaimReviewInternalApproval reports missing actor context as
   assert.equal(result.blockers?.[0]?.blocking_reason, "missing_actor_context");
 });
 
-test("P2-09 completeClaimReviewInternalApproval rejects a wrong role (gk_operator) before any repository call", async () => {
-  const result = await completeClaimReviewInternalApproval(
+test("P2-12 recordClaimReviewDecision rejects a wrong role (gk_operator) before any repository call", async () => {
+  const result = await recordClaimReviewDecision(
     {
       organizationId: ORG,
       claimId: CLAIM,
       reviewQueueItemId: QUEUE,
       expectedUpdatedAt: NOW,
+      decision: "approved",
+      approvedAudiences: ["internal"],
       actorContext: {
         actorType: "human",
         actorUserId: "op",
@@ -128,20 +135,21 @@ test("P2-09 completeClaimReviewInternalApproval rejects a wrong role (gk_operato
       },
       now: NOW,
     },
-    { env: enabledEnv, humanReviewRepository: { async completeClaimReviewInternalApproval() { throw new Error("must not be called"); } }, metadataOnlyAudit: stubMetadataOnlyAudit() },
+    { env: enabledEnv, humanReviewRepository: { async recordClaimReviewDecision() { throw new Error("must not be called"); } }, metadataOnlyAudit: stubMetadataOnlyAudit() },
   );
   assert.equal(result.ok, false);
   assert.equal(result.error.code, "authorization_denied");
 });
 
-test("P2-09 completeEvidenceReview allows a global gk_reviewer whose active org-scoped membership role is gk_operator (production regression: VAL-AUT-004 must not fire when the global capability role is present)", async () => {
+test("P2-12 recordEvidenceReviewDecision allows a global gk_reviewer whose active org-scoped membership role is gk_operator (production regression: VAL-AUT-004 must not fire when the global capability role is present)", async () => {
   const calls = [];
-  const result = await completeEvidenceReview(
+  const result = await recordEvidenceReviewDecision(
     {
       organizationId: ORG,
       evidenceItemId: EVIDENCE,
       reviewQueueItemId: QUEUE,
       expectedUpdatedAt: NOW,
+      decision: "supported",
       actorContext: {
         actorType: "human",
         actorUserId: "90000000-0000-4000-8000-000000000099",
@@ -156,9 +164,9 @@ test("P2-09 completeEvidenceReview allows a global gk_reviewer whose active org-
     {
       env: enabledEnv,
       humanReviewRepository: {
-        async completeEvidenceReview(input) {
+        async recordEvidenceReviewDecision(input) {
           calls.push(input);
-          return { ok: true, data: { evidence_item_id: EVIDENCE, review_queue_item_id: QUEUE, queue_status: "resolved", review_status: "resolved", support_strength: "reviewed_supported", replayed: false }, error: null };
+          return { ok: true, data: { evidence_item_id: EVIDENCE, review_queue_item_id: QUEUE, queue_status: "resolved", review_status: "resolved", evidence_review_status: "reviewed", support_strength: "reviewed_supported", decision_id: "d1", decision_outcome: "supported", replayed: false }, error: null };
         },
       },
       metadataOnlyAudit: stubMetadataOnlyAudit(),
@@ -166,16 +174,19 @@ test("P2-09 completeEvidenceReview allows a global gk_reviewer whose active org-
   );
   assert.equal(result.ok, true);
   assert.equal(calls.length, 1);
+  assert.ok(["gk_reviewer", "gk_admin"].includes(calls[0].actorRole));
 });
 
-test("P2-09 completeClaimReviewInternalApproval allows the same global gk_reviewer/gk_operator-membership actor shape", async () => {
+test("P2-12 recordClaimReviewDecision allows the same global gk_reviewer/gk_operator-membership actor shape", async () => {
   const calls = [];
-  const result = await completeClaimReviewInternalApproval(
+  const result = await recordClaimReviewDecision(
     {
       organizationId: ORG,
       claimId: CLAIM,
       reviewQueueItemId: QUEUE,
       expectedUpdatedAt: NOW,
+      decision: "approved",
+      approvedAudiences: ["internal"],
       actorContext: {
         actorType: "human",
         actorUserId: "90000000-0000-4000-8000-000000000099",
@@ -190,9 +201,9 @@ test("P2-09 completeClaimReviewInternalApproval allows the same global gk_review
     {
       env: enabledEnv,
       humanReviewRepository: {
-        async completeClaimReviewInternalApproval(input) {
+        async recordClaimReviewDecision(input) {
           calls.push(input);
-          return { ok: true, data: { claim_id: CLAIM, review_queue_item_id: QUEUE, queue_status: "resolved", review_status: "resolved", claim_strength: "reviewed_supported", replayed: false }, error: null };
+          return { ok: true, data: { claim_id: CLAIM, review_queue_item_id: QUEUE, queue_status: "resolved", review_status: "resolved", claim_review_status: "reviewed", claim_strength: "reviewed_supported", decision_id: "d2", decision_outcome: "approved", approved_audiences: ["internal"], replayed: false }, error: null };
         },
       },
       metadataOnlyAudit: stubMetadataOnlyAudit(),
@@ -202,14 +213,15 @@ test("P2-09 completeClaimReviewInternalApproval allows the same global gk_review
   assert.equal(calls.length, 1);
 });
 
-test("P2-09 completeEvidenceReview still denies a global gk_reviewer/gk_admin actor with no active membership in the target organization (combineGlobalRoles never bypasses tenant isolation)", async () => {
+test("P2-12 recordEvidenceReviewDecision still denies a global gk_reviewer/gk_admin actor with no active membership in the target organization (combineGlobalRoles never bypasses tenant isolation)", async () => {
   const OTHER_ORG = "00000000-0000-4000-8000-000000000005";
-  const result = await completeEvidenceReview(
+  const result = await recordEvidenceReviewDecision(
     {
       organizationId: ORG,
       evidenceItemId: EVIDENCE,
       reviewQueueItemId: QUEUE,
       expectedUpdatedAt: NOW,
+      decision: "supported",
       actorContext: {
         actorType: "human",
         actorUserId: "cross-tenant",
@@ -218,59 +230,82 @@ test("P2-09 completeEvidenceReview still denies a global gk_reviewer/gk_admin ac
       },
       now: NOW,
     },
-    { env: enabledEnv, humanReviewRepository: { async completeEvidenceReview() { throw new Error("must not be called"); } }, metadataOnlyAudit: stubMetadataOnlyAudit() },
+    { env: enabledEnv, humanReviewRepository: { async recordEvidenceReviewDecision() { throw new Error("must not be called"); } }, metadataOnlyAudit: stubMetadataOnlyAudit() },
   );
   assert.equal(result.ok, false);
   assert.equal(result.error.code, "authorization_denied");
 });
 
-test("P2-09 completeEvidenceReview denies an actor whose only kaiRoles come from actorContext but hold no allowed role and no allowed org-scoped membership role (still gk_operator only, no escalation via an empty/forged kaiRoles field)", async () => {
-  const result = await completeEvidenceReview(
-    {
-      organizationId: ORG,
-      evidenceItemId: EVIDENCE,
-      reviewQueueItemId: QUEUE,
-      expectedUpdatedAt: NOW,
-      actorContext: {
-        actorType: "human",
-        actorUserId: "op-only",
-        kaiRoles: ["gk_operator"],
-        organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "gk_operator" }],
-      },
-      now: NOW,
-    },
-    { env: enabledEnv, humanReviewRepository: { async completeEvidenceReview() { throw new Error("must not be called"); } }, metadataOnlyAudit: stubMetadataOnlyAudit() },
-  );
-  assert.equal(result.ok, false);
-  assert.equal(result.error.code, "authorization_denied");
-});
-
-test("P2-09 KAI_SPRINT2_ENABLED=false yields feature_disabled with zero repository calls for both transitions", async () => {
-  const evidenceResult = await completeEvidenceReview(
-    { organizationId: ORG, evidenceItemId: EVIDENCE, reviewQueueItemId: QUEUE, expectedUpdatedAt: NOW, actorContext: reviewerActor, now: NOW },
-    { env: { KAI_SPRINT2_ENABLED: "false" }, humanReviewRepository: { async completeEvidenceReview() { throw new Error("must not be called"); } } },
+test("P2-12 KAI_SPRINT2_ENABLED=false yields feature_disabled with zero repository calls for both transitions", async () => {
+  const evidenceResult = await recordEvidenceReviewDecision(
+    { organizationId: ORG, evidenceItemId: EVIDENCE, reviewQueueItemId: QUEUE, expectedUpdatedAt: NOW, decision: "supported", actorContext: reviewerActor, now: NOW },
+    { env: { KAI_SPRINT2_ENABLED: "false" }, humanReviewRepository: { async recordEvidenceReviewDecision() { throw new Error("must not be called"); } } },
   );
   assert.equal(evidenceResult.ok, false);
   assert.equal(evidenceResult.error.code, "feature_disabled");
 
-  const claimResult = await completeClaimReviewInternalApproval(
-    { organizationId: ORG, claimId: CLAIM, reviewQueueItemId: QUEUE, expectedUpdatedAt: NOW, actorContext: reviewerActor, now: NOW },
-    { env: { KAI_SPRINT2_ENABLED: "false" }, humanReviewRepository: { async completeClaimReviewInternalApproval() { throw new Error("must not be called"); } } },
+  const claimResult = await recordClaimReviewDecision(
+    { organizationId: ORG, claimId: CLAIM, reviewQueueItemId: QUEUE, expectedUpdatedAt: NOW, decision: "approved", approvedAudiences: ["internal"], actorContext: reviewerActor, now: NOW },
+    { env: { KAI_SPRINT2_ENABLED: "false" }, humanReviewRepository: { async recordClaimReviewDecision() { throw new Error("must not be called"); } } },
   );
   assert.equal(claimResult.ok, false);
   assert.equal(claimResult.error.code, "feature_disabled");
 });
 
-test("P2-09 completeEvidenceReview delegates to the injected repository exactly once with the derived actor/tenant identity", async () => {
-  const calls = [];
-  const result = await completeEvidenceReview(
-    { organizationId: ORG, evidenceItemId: EVIDENCE, reviewQueueItemId: QUEUE, expectedUpdatedAt: NOW, actorContext: reviewerActor, now: NOW },
+test("P2-12 recordEvidenceReviewDecision rejects an outcome outside the evidence-review vocabulary", async () => {
+  const result = await recordEvidenceReviewDecision(
+    { organizationId: ORG, evidenceItemId: EVIDENCE, reviewQueueItemId: QUEUE, expectedUpdatedAt: NOW, decision: "approved", actorContext: reviewerActor, now: NOW },
+    { env: enabledEnv, humanReviewRepository: { async recordEvidenceReviewDecision() { throw new Error("must not be called"); } }, metadataOnlyAudit: stubMetadataOnlyAudit() },
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "validation_blocker");
+});
+
+test("P2-12 recordEvidenceReviewDecision requires non-empty limitation_notes iff decision is supported_with_limitation", async () => {
+  const missing = await recordEvidenceReviewDecision(
+    { organizationId: ORG, evidenceItemId: EVIDENCE, reviewQueueItemId: QUEUE, expectedUpdatedAt: NOW, decision: "supported_with_limitation", actorContext: reviewerActor, now: NOW },
+    { env: enabledEnv, humanReviewRepository: { async recordEvidenceReviewDecision() { throw new Error("must not be called"); } }, metadataOnlyAudit: stubMetadataOnlyAudit() },
+  );
+  assert.equal(missing.ok, false);
+  assert.equal(missing.error.code, "validation_blocker");
+
+  const unexpected = await recordEvidenceReviewDecision(
+    { organizationId: ORG, evidenceItemId: EVIDENCE, reviewQueueItemId: QUEUE, expectedUpdatedAt: NOW, decision: "supported", limitationNotes: ["should not be here"], actorContext: reviewerActor, now: NOW },
+    { env: enabledEnv, humanReviewRepository: { async recordEvidenceReviewDecision() { throw new Error("must not be called"); } }, metadataOnlyAudit: stubMetadataOnlyAudit() },
+  );
+  assert.equal(unexpected.ok, false);
+  assert.equal(unexpected.error.code, "validation_blocker");
+});
+
+test("P2-12 recordClaimReviewDecision governance ceiling: requesting funder/public in approvedAudiences is delegated to the repository, which fails closed atomically", async () => {
+  const result = await recordClaimReviewDecision(
+    { organizationId: ORG, claimId: CLAIM, reviewQueueItemId: QUEUE, expectedUpdatedAt: NOW, decision: "approved", approvedAudiences: ["internal", "funder"], actorContext: reviewerActor, now: NOW },
     {
       env: enabledEnv,
       humanReviewRepository: {
-        async completeEvidenceReview(input) {
+        async recordClaimReviewDecision(input) {
+          assert.deepEqual(input.approvedAudiences, ["internal", "funder"]);
+          return { ok: false, data: null, error: { code: "governance_ceiling_exceeded", status: 422 } };
+        },
+      },
+      metadataOnlyAudit: stubMetadataOnlyAudit(),
+    },
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "governance_ceiling_exceeded");
+  assert.equal(result.error.status, 422);
+});
+
+test("P2-12 recordEvidenceReviewDecision delegates to the injected repository exactly once with the derived actor/tenant identity and decision", async () => {
+  const calls = [];
+  const result = await recordEvidenceReviewDecision(
+    { organizationId: ORG, evidenceItemId: EVIDENCE, reviewQueueItemId: QUEUE, expectedUpdatedAt: NOW, decision: "supported", actorContext: reviewerActor, now: NOW },
+    {
+      env: enabledEnv,
+      humanReviewRepository: {
+        async recordEvidenceReviewDecision(input) {
           calls.push(input);
-          return { ok: true, data: { evidence_item_id: EVIDENCE, review_queue_item_id: QUEUE, queue_status: "resolved", review_status: "resolved", support_strength: "reviewed_supported", replayed: false }, error: null };
+          return { ok: true, data: { evidence_item_id: EVIDENCE, review_queue_item_id: QUEUE, queue_status: "resolved", review_status: "resolved", evidence_review_status: "reviewed", support_strength: "reviewed_supported", decision_id: "d1", decision_outcome: "supported", replayed: false }, error: null };
         },
       },
       metadataOnlyAudit: stubMetadataOnlyAudit(),
@@ -280,20 +315,57 @@ test("P2-09 completeEvidenceReview delegates to the injected repository exactly 
   assert.equal(calls.length, 1);
   assert.equal(calls[0].actorUserId, reviewerActor.actorUserId);
   assert.equal(calls[0].organizationId, ORG);
+  assert.equal(calls[0].decisionOutcome, "supported");
 });
 
-test("P2-09 request-body validators accept only expected_updated_at and reject unknown fields", () => {
-  const ok = validateCompleteEvidenceReviewRequest({ expected_updated_at: NOW });
+test("P2-12 request-body validators require decision and reject unknown fields", () => {
+  const ok = validateCompleteEvidenceReviewRequest({ expected_updated_at: NOW, decision: "supported" });
   assert.equal(ok.ok, true);
-  const unknown = validateCompleteEvidenceReviewRequest({ expected_updated_at: NOW, decision: "supported" });
+  const missingDecision = validateCompleteEvidenceReviewRequest({ expected_updated_at: NOW });
+  assert.equal(missingDecision.ok, false);
+  const unknown = validateCompleteEvidenceReviewRequest({ expected_updated_at: NOW, decision: "supported", extra_field: true });
   assert.equal(unknown.ok, false);
   const missing = validateCompleteClaimReviewRequest({});
   assert.equal(missing.ok, false);
-  const badTimestamp = validateCompleteClaimReviewRequest({ expected_updated_at: "not-a-timestamp" });
+  const badTimestamp = validateCompleteClaimReviewRequest({ expected_updated_at: "not-a-timestamp", decision: "approved", approved_audiences: ["internal"] });
   assert.equal(badTimestamp.ok, false);
 });
 
-test("P2-09 route identifier helpers require canonical lowercase UUIDs for every path segment", () => {
+test("P2-12 evidence-review validator requires limitation_notes iff supported_with_limitation", () => {
+  const okWithNotes = validateCompleteEvidenceReviewRequest({
+    expected_updated_at: NOW, decision: "supported_with_limitation", limitation_notes: ["one caveat"],
+  });
+  assert.equal(okWithNotes.ok, true);
+  const missingNotes = validateCompleteEvidenceReviewRequest({ expected_updated_at: NOW, decision: "supported_with_limitation" });
+  assert.equal(missingNotes.ok, false);
+  const unexpectedNotes = validateCompleteEvidenceReviewRequest({ expected_updated_at: NOW, decision: "supported", limitation_notes: ["nope"] });
+  assert.equal(unexpectedNotes.ok, false);
+  const emptyNotes = validateCompleteEvidenceReviewRequest({ expected_updated_at: NOW, decision: "supported_with_limitation", limitation_notes: [] });
+  assert.equal(emptyNotes.ok, false);
+  const blankNote = validateCompleteEvidenceReviewRequest({ expected_updated_at: NOW, decision: "supported_with_limitation", limitation_notes: ["   "] });
+  assert.equal(blankNote.ok, false);
+});
+
+test("P2-12 claim-review validator requires approved_audiences iff approved/approved_with_limitation, forbidden otherwise, and rejects funder/public presence at the schema layer as a valid-shape-but-governance-checked value", () => {
+  const okInternal = validateCompleteClaimReviewRequest({ expected_updated_at: NOW, decision: "approved", approved_audiences: ["internal"] });
+  assert.equal(okInternal.ok, true);
+  const missingAudiences = validateCompleteClaimReviewRequest({ expected_updated_at: NOW, decision: "approved" });
+  assert.equal(missingAudiences.ok, false);
+  const unexpectedAudiences = validateCompleteClaimReviewRequest({ expected_updated_at: NOW, decision: "rejected", approved_audiences: ["internal"] });
+  assert.equal(unexpectedAudiences.ok, false);
+  const duplicateAudiences = validateCompleteClaimReviewRequest({ expected_updated_at: NOW, decision: "approved", approved_audiences: ["internal", "internal"] });
+  assert.equal(duplicateAudiences.ok, false);
+  const badAudienceValue = validateCompleteClaimReviewRequest({ expected_updated_at: NOW, decision: "approved", approved_audiences: ["nonsense"] });
+  assert.equal(badAudienceValue.ok, false);
+  // funder/public are valid SHAPE (schema-layer accepts them, since they are
+  // legitimate vocabulary members) - the governance ceiling that rejects them
+  // given today's schema is enforced downstream, atomically, in the
+  // repository - not at this shape-validation layer.
+  const shapeValidFunder = validateCompleteClaimReviewRequest({ expected_updated_at: NOW, decision: "approved", approved_audiences: ["internal", "funder"] });
+  assert.equal(shapeValidFunder.ok, true);
+});
+
+test("P2-12 route identifier helpers require canonical lowercase UUIDs for every path segment", () => {
   assert.deepEqual(
     evidenceReviewCompletionIdentifiers({ params: { organizationId: ORG, evidenceItemId: EVIDENCE, reviewQueueItemId: QUEUE } }),
     { organizationId: ORG, evidenceItemId: EVIDENCE, reviewQueueItemId: QUEUE },
@@ -302,8 +374,8 @@ test("P2-09 route identifier helpers require canonical lowercase UUIDs for every
   assert.equal(claimReviewCompletionIdentifiers({ params: { organizationId: ORG, claimId: "not-a-uuid", reviewQueueItemId: QUEUE } }), null);
 });
 
-test("P2-09 route request validators reject an unsupported media type and unknown body fields", () => {
-  const jsonReq = { headers: { "content-type": "application/json" }, params: { organizationId: ORG, evidenceItemId: EVIDENCE, reviewQueueItemId: QUEUE }, body: { expected_updated_at: NOW } };
+test("P2-12 route request validators reject an unsupported media type and unknown body fields", () => {
+  const jsonReq = { headers: { "content-type": "application/json" }, params: { organizationId: ORG, evidenceItemId: EVIDENCE, reviewQueueItemId: QUEUE }, body: { expected_updated_at: NOW, decision: "supported" } };
   let sent = null;
   const res = { status(code) { sent = { code }; return { json(body) { sent.body = body; } }; } };
   const ok = validateEvidenceReviewCompletionRequestOrSend(jsonReq, res);
@@ -322,13 +394,16 @@ function repositoryInput() {
     evidenceItemId: EVIDENCE,
     reviewQueueItemId: QUEUE,
     expectedUpdatedAt: NOW,
+    decisionOutcome: "supported",
+    limitationNotes: null,
     actorUserId: reviewerActor.actorUserId,
+    actorRole: "gk_reviewer",
     now: NOW,
     metadataOnlyAudit: stubMetadataOnlyAudit(),
   };
 }
 
-test("P2-09 repository shapeError: a rejected required audit maps to validation_blocker/422 and logs a distinguishable classification", async () => {
+test("P2-12 repository shapeError: a rejected required audit maps to validation_blocker/422 and logs a distinguishable classification", async () => {
   const originalConsoleError = console.error;
   const logged = [];
   console.error = (line) => logged.push(line);
@@ -338,18 +413,18 @@ test("P2-09 repository shapeError: a rejected required audit maps to validation_
         throw new __humanReviewRepositoryTestables.RequiredAuditRejectedError();
       },
     });
-    const result = await repo.completeEvidenceReview(repositoryInput());
+    const result = await repo.recordEvidenceReviewDecision(repositoryInput());
     assert.equal(result.ok, false);
     assert.equal(result.error.code, "validation_blocker");
     assert.equal(result.error.status, 422);
     const parsed = logged.map((line) => JSON.parse(line));
-    assert.ok(parsed.some((entry) => entry.event === "KAI_P2_09_HUMAN_REVIEW_VALIDATION_BLOCKER_CLASSIFICATION" && entry.reason === "required_audit_rejected"));
+    assert.ok(parsed.some((entry) => entry.event === "KAI_P2_12_HUMAN_REVIEW_VALIDATION_BLOCKER_CLASSIFICATION" && entry.reason === "required_audit_rejected"));
   } finally {
     console.error = originalConsoleError;
   }
 });
 
-test("P2-09 repository shapeError: a PostgreSQL 23514 CHECK violation maps to validation_blocker/422 and logs its own distinguishable classification (never confused with a rejected audit)", async () => {
+test("P2-12 repository shapeError: a PostgreSQL 23514 CHECK violation maps to validation_blocker/422 and logs its own distinguishable classification (never confused with a rejected audit)", async () => {
   const originalConsoleError = console.error;
   const logged = [];
   console.error = (line) => logged.push(line);
@@ -362,18 +437,18 @@ test("P2-09 repository shapeError: a PostgreSQL 23514 CHECK violation maps to va
         throw error;
       },
     });
-    const result = await repo.completeEvidenceReview(repositoryInput());
+    const result = await repo.recordEvidenceReviewDecision(repositoryInput());
     assert.equal(result.ok, false);
     assert.equal(result.error.code, "validation_blocker");
     assert.equal(result.error.status, 422);
     const parsed = logged.map((line) => JSON.parse(line));
-    assert.ok(parsed.some((entry) => entry.event === "KAI_P2_09_HUMAN_REVIEW_VALIDATION_BLOCKER_CLASSIFICATION" && entry.reason === "check_constraint_violation" && entry.pg_constraint === "upload_lifecycle_audit_gate_a_operation_check"));
+    assert.ok(parsed.some((entry) => entry.event === "KAI_P2_12_HUMAN_REVIEW_VALIDATION_BLOCKER_CLASSIFICATION" && entry.reason === "check_constraint_violation" && entry.pg_constraint === "upload_lifecycle_audit_gate_a_operation_check"));
   } finally {
     console.error = originalConsoleError;
   }
 });
 
-test("P2-09 repository shapeError: a PostgreSQL 22P02 invalid-input-syntax error maps to validation_blocker/422 and logs its own distinguishable classification", async () => {
+test("P2-12 repository shapeError: a PostgreSQL 22P02 invalid-input-syntax error maps to validation_blocker/422 and logs its own distinguishable classification", async () => {
   const originalConsoleError = console.error;
   const logged = [];
   console.error = (line) => logged.push(line);
@@ -385,25 +460,25 @@ test("P2-09 repository shapeError: a PostgreSQL 22P02 invalid-input-syntax error
         throw error;
       },
     });
-    const result = await repo.completeEvidenceReview(repositoryInput());
+    const result = await repo.recordEvidenceReviewDecision(repositoryInput());
     assert.equal(result.ok, false);
     assert.equal(result.error.code, "validation_blocker");
     assert.equal(result.error.status, 422);
     const parsed = logged.map((line) => JSON.parse(line));
-    assert.ok(parsed.some((entry) => entry.event === "KAI_P2_09_HUMAN_REVIEW_VALIDATION_BLOCKER_CLASSIFICATION" && entry.reason === "invalid_input_syntax"));
+    assert.ok(parsed.some((entry) => entry.event === "KAI_P2_12_HUMAN_REVIEW_VALIDATION_BLOCKER_CLASSIFICATION" && entry.reason === "invalid_input_syntax"));
   } finally {
     console.error = originalConsoleError;
   }
 });
 
-test("P2-09 route source contains no SQL, imports no repository or database module, and never references req.user", () => {
+test("P2-12 route source contains no SQL, imports no repository or database module, and never references req.user", () => {
   const source = readFileSync("Backend/kai/routes/sprint2IntakeApi.js", "utf8");
   const slice = source.slice(
     source.indexOf("let evidenceReviewServicePromise"),
     source.indexOf("export default router;"),
   );
-  assert.match(slice, /completeEvidenceReview/);
-  assert.match(slice, /completeClaimReviewInternalApproval/);
+  assert.match(slice, /recordEvidenceReviewDecision/);
+  assert.match(slice, /recordClaimReviewDecision/);
   assert.doesNotMatch(slice, /from\s+["'][^"']*(?:db|repository|postgres|kaiDb|kaiQueries|kaiReadModels)[^"']*["']/i);
   assert.doesNotMatch(slice, /\b(?:SELECT|INSERT|UPDATE|DELETE)\b|\bpool\b|\bkaiDb\b|\brepository\b/i);
   assert.doesNotMatch(slice, /req\.user/);

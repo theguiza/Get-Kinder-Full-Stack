@@ -24,10 +24,13 @@ import {
 } from "../Backend/kai/services/kaiGeneratedDraftLibraryService.js";
 import { listGeneratedDraftLibraryIndex as readGeneratedDraftLibraryIndex } from "../Backend/kai/db/kaiGeneratedDraftLibraryReadModels.js";
 import {
+  CLAIM_REVIEW_DECISIONS,
   generatedDraftLibraryIndexPath,
   generatedDraftReviewLabel,
   generatedDraftReviewPacketPath,
   projectGeneratedDraftLibraryItems,
+  projectGeneratedDraftPacket,
+  projectTraceability,
 } from "../frontend/impactEvidenceLibraryLogic.js";
 
 const basePath = "/api/kai/sprint2/intake";
@@ -427,7 +430,46 @@ test("Generated Drafts library source causes no model/provider call and no unsaf
   assert.doesNotMatch(readModelSource, /\bINSERT\b|\bUPDATE\b|\bDELETE\b|\bTRUNCATE\b|FOR UPDATE/i);
   assert.match(uiSource, /Generated Drafts/);
   assert.match(uiSource + logicSource, /generatedDraftLibraryIndexPath|generated-content-drafts\?limit/);
-  assert.doesNotMatch(uiSource + logicSource, /\bfinal\b|\bapproved\b|export-ready/i);
+
+  // A1C-2: the old file-wide `/\bfinal\b|\bapproved\b|export-ready/i` ban
+  // regressed once A1/A1C-1 legitimately added human-review wire vocabulary
+  // ("approved", "approved_with_limitation") - plus the safety disclaimer
+  // that spells out this very invariant in prose ("not final ... release
+  // authority") - elsewhere in these two SHARED component files. That
+  // vocabulary is legitimate and must not be renamed just to satisfy a test.
+  // The test boundary is repaired, not the vocabulary: the ban is narrowed to
+  // exactly the Generated-Drafts-only source regions, located by stable,
+  // unique code markers (not line numbers) so the slice tracks the file
+  // instead of a snapshot of it.
+  function sliceBetween(source, startMarker, endMarker) {
+    const start = source.indexOf(startMarker);
+    assert.ok(start !== -1, `A1C-2 test-boundary marker not found: ${startMarker}`);
+    if (endMarker === null) return source.slice(start);
+    const end = source.indexOf(endMarker, start + startMarker.length);
+    assert.ok(end !== -1, `A1C-2 test-boundary marker not found: ${endMarker}`);
+    return source.slice(start, end);
+  }
+
+  const generatedDraftsUiSurface = [
+    sliceBetween(uiSource, "const loadGeneratedDrafts = useCallback", "const runExtractEvidence = useCallback"),
+    sliceBetween(uiSource, '<h5 className="mb-0">Generated Drafts</h5>', '<div className="admin-card'),
+    sliceBetween(uiSource, "{generatedDraftPacket ? (", null),
+  ].join("\n");
+  const generatedDraftsLogicSurface = [
+    sliceBetween(logicSource, "export function generatedDraftLibraryIndexPath", "export function evidenceExtractionPath"),
+    sliceBetween(logicSource, "export function generatedContentReviewStartPath", "export function reviewTransitionBody"),
+    sliceBetween(logicSource, "export function projectGeneratedDraftPacket", null),
+  ].join("\n");
+  const generatedDraftsSurface = generatedDraftsUiSurface + generatedDraftsLogicSurface;
+
+  // Does not expose final/export-ready/released state, and does not infer
+  // release authority from claim approval: "approved" is legitimate
+  // vocabulary elsewhere in these files, but nothing in the Generated-Drafts-
+  // only surface needs to reason about claim/evidence approval to decide what
+  // a generated draft looks like, so it must never appear here either.
+  assert.doesNotMatch(generatedDraftsSurface, /\bfinal\b|export-ready|\breleased?\b|\bapproved\b/i);
+  // Does not expose prohibited/raw/private fields (whole-file: legitimate
+  // nowhere in this component).
   assert.doesNotMatch(uiSource + logicSource, /raw_content|signed_url|storage_object|api[_-]?key|secret/i);
 
   assert.deepEqual(
@@ -436,4 +478,69 @@ test("Generated Drafts library source causes no model/provider call and no unsaf
   );
   assert.equal(__generatedDraftLibraryServiceContract.GENERATED_DRAFT_LIBRARY_READ_OPERATION, "get_generated_draft_review_packet");
   assert.equal(typeof generatedDraftLibraryServiceTestables.responseDraftSummary, "function");
+});
+
+test("A1C-2 regression: a claim review decision of 'approved' is real wire vocabulary, and it confers no final/export/release authority on generated drafts", async () => {
+  // Fact 1: "approved" is legitimate, current claim-review wire vocabulary -
+  // not something this suite may rename or remove - and the traceability
+  // projection surfaces it verbatim.
+  assert.ok(CLAIM_REVIEW_DECISIONS.includes("approved"));
+  const traceability = projectTraceability({
+    requestedAudience: "internal",
+    eligible: true,
+    blockerCodes: [],
+    affectedDimensionKeys: [],
+    affectedObjectIds: [],
+    claim: { audience_gates: {} },
+    evidence: {},
+    claim_review: {},
+    dimensions: {},
+    gap_items: [],
+    client_followup_workflows: [],
+    potential_conflict_groups: [],
+    claim_review_decision: {
+      decision_id: "00000000-0000-4000-8000-000000000902",
+      decision_outcome: "approved",
+      approved_audiences: ["internal", "funder"],
+    },
+  });
+  assert.equal(traceability.claimReviewDecision.decisionOutcome, "approved");
+
+  // Fact 2: that same approved claim decision has zero bearing on what a
+  // generated draft is allowed to look like. The generated-draft projection
+  // and the read-only service both still pin draftStatus to "draft" and
+  // requestedAudience to "internal" regardless, and expose no final/export/
+  // released/approved field of their own.
+  const packet = projectGeneratedDraftPacket({
+    generatedContentDraftId: draftId,
+    contentType: "evidence_summary",
+    draftStatus: "draft",
+    requestedAudience: "internal",
+    reviewQueueItemId,
+    queueStatus: "resolved",
+    reviewStatus: "resolved",
+    currentUseEligible: true,
+    blocks: [{ ordinal: 1, text: "Enrollment increased.", citations: [] }],
+  });
+  assert.equal(packet.draftStatus, "draft");
+  assert.doesNotMatch(JSON.stringify(packet), /\bfinal\b|export-ready|\breleased?\b|\bapproved\b/i);
+
+  const deps = {
+    env: enabledEnv,
+    async listGeneratedDraftLibraryIndex() {
+      // Simulating the read model returning a draft whose linked claim has
+      // already been through an "approved" human review - the read model
+      // itself never even carries a decision_outcome/approved field, since
+      // it is scoped to kai.generated_content_drafts + its own review queue.
+      return [draftRow({ queue_status: "resolved", review_status: "resolved" })];
+    },
+  };
+  const result = await listGeneratedDraftLibraryIndex(
+    { organizationId, limit: 25, afterGeneratedContentDraftId: null, actorContext },
+    deps,
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.data.items[0].draftStatus, "draft");
+  assert.equal(result.data.items[0].requestedAudience, "internal");
+  assert.doesNotMatch(JSON.stringify(result), /\bfinal\b|export-ready|\breleased?\b|\bapproved\b/i);
 });
