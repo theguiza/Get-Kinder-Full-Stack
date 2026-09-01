@@ -98,6 +98,37 @@ test("getImpactEvidenceLibrarySystemPrompt does not fabricate a display name whe
   assert.match(prompt, /Engagement ID: not set/);
 });
 
+test("getImpactEvidenceLibrarySystemPrompt forbids the confirmed gap-status over-interpretations", () => {
+  const prompt = getImpactEvidenceLibrarySystemPrompt(null, {
+    organizationContext: { organizationId: ORG },
+    engagementContext: { engagementId: ENGAGEMENT },
+  });
+
+  // unresolved != unassessed / human-review-not-occurred
+  assert.match(prompt, /"unresolved" means only that no committed governed fact yet establishes an outcome/);
+  assert.match(prompt, /Do not describe it as "unassessed"/);
+
+  // unresolved != client action required
+  assert.match(prompt, /or as meaning client action is required/);
+
+  // resolved_risk_flagged != human reviewed / cleared
+  assert.match(prompt, /"resolved_risk_flagged" means only that a committed governed fact discloses a risk, gap, or clarity issue/);
+  assert.match(prompt, /Do not describe it as meaning a human reviewed it, that client action is required, or that the issue is cleared/);
+
+  // gap status alone != audience blocker
+  assert.match(prompt, /Never state or imply that a gap status blocks or affects eligibility for an audience/);
+  assert.match(prompt, /Only say that if governed traceability or eligibility output for that claim actually establishes it/);
+
+  // gap status alone != client action required (separate boundary line)
+  assert.match(prompt, /Never state or imply that client input or action is required because of a gap's status alone/);
+  assert.match(prompt, /Only say that if a governed client-follow-up result establishes an outstanding workflow/);
+
+  // gap presence/status != governed priority ranking
+  assert.match(prompt, /list_organization_evidence_gaps does not rank gaps by importance, severity, or priority/);
+  assert.match(prompt, /report the gaps using their actual properties \(claim, dimension, assessment status\)/);
+  assert.match(prompt, /do not present list order, status, or count as a priority ranking/);
+});
+
 test("source contract: handleKaiMessage's legacy org prompt path cannot be reached for the Impact Evidence Library surface", () => {
   const source = readFileSync(new URL("../Backend/services/kai.js", import.meta.url), "utf8");
   const promptSelectionIndex = source.indexOf("let systemPrompt = isImpactEvidenceLibrarySurface");
