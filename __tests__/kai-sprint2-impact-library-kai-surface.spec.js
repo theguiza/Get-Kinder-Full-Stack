@@ -51,6 +51,7 @@ test("Impact Evidence Library surface exposes only the governed evidence tools",
     "list_client_followup_workflows",
     "list_eligible_claims_for_audience",
     "list_governed_claims",
+    "list_organization_evidence_gaps",
   ]);
 });
 

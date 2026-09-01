@@ -37,6 +37,7 @@ const CLAIM_TRACEABILITY_METADATA_OPERATIONS = new Set([
   "list_eligible_claims_for_audience",
   "list_governed_claims",
   "list_client_followup_workflows",
+  "list_organization_evidence_gaps",
 ]);
 const APPROVAL_OPERATION_PATTERN = /(approve|approval|finalize|promote|resolve|delete|retention)/i;
 const RAW_ACCESS_OPERATION_PATTERN = /(raw|file|row|sample|storage|object_key|signed_url|url)/i;

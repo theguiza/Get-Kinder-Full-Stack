@@ -13,18 +13,22 @@ const TRACEABILITY_TOOL_NAME = "get_claim_traceability_summary";
 const ELIGIBLE_CLAIMS_TOOL_NAME = "list_eligible_claims_for_audience";
 const GOVERNED_CLAIMS_TOOL_NAME = "list_governed_claims";
 const CLIENT_FOLLOWUP_TOOL_NAME = "list_client_followup_workflows";
+const ORGANIZATION_EVIDENCE_GAPS_TOOL_NAME = "list_organization_evidence_gaps";
 const TOOL_NAMES = new Set([
   TRACEABILITY_TOOL_NAME,
   ELIGIBLE_CLAIMS_TOOL_NAME,
   GOVERNED_CLAIMS_TOOL_NAME,
   CLIENT_FOLLOWUP_TOOL_NAME,
+  ORGANIZATION_EVIDENCE_GAPS_TOOL_NAME,
 ]);
 const TOP_LEVEL_KEYS = new Set(["toolName", "arguments", "actorContext"]);
 const TRACEABILITY_ARGUMENT_KEYS = new Set(["organizationId", "claimId", "requestedAudience"]);
 const ELIGIBLE_CLAIMS_ARGUMENT_KEYS = new Set(["organizationId", "requestedAudience", "limit", "afterClaimId"]);
 const GOVERNED_CLAIMS_ARGUMENT_KEYS = new Set(["organizationId", "limit", "afterClaimId"]);
 const CLIENT_FOLLOWUP_ARGUMENT_KEYS = new Set(["organizationId"]);
+const ORGANIZATION_EVIDENCE_GAPS_ARGUMENT_KEYS = new Set(["organizationId", "limit", "afterGapLogItemId"]);
 const GOVERNED_CLAIMS_MAX_LIMIT = 25;
+const ORGANIZATION_EVIDENCE_GAPS_MAX_LIMIT = 25;
 const REQUESTED_AUDIENCES = new Set(["internal", "funder", "public"]);
 const ALLOWED_ROLES = new Set(["gk_admin", "gk_operator", "gk_reviewer"]);
 // The impact_evidence_library surface (this wrapper) is only ever reachable
@@ -41,6 +45,10 @@ const ALLOWED_ROLES = new Set(["gk_admin", "gk_operator", "gk_reviewer"]);
 // (kaiClientFollowupReadService.js#listClientFollowupWorkflows), which keeps
 // its own original role boundary for its own existing caller, untouched.
 const CLIENT_FOLLOWUP_ALLOWED_ROLES = ALLOWED_ROLES;
+// Same governed-claims boundary: an organization-level enumeration of the
+// same gap_log_items rows already exposed per-claim (gap_items,
+// TRACEABILITY_GAP_ITEM_KEYS) to this exact role set.
+const ORGANIZATION_EVIDENCE_GAPS_ALLOWED_ROLES = ALLOWED_ROLES;
 const PRESERVED_FAILURE_CODES = new Set([
   "not_found",
   "conflict_current_state_changed",
@@ -165,6 +173,18 @@ function validateGovernedClaimsArgumentsShape(args) {
 
 function validateClientFollowupArgumentsShape(args) {
   return hasExactKeys(args, CLIENT_FOLLOWUP_ARGUMENT_KEYS) && isNonEmptyString(args.organizationId);
+}
+
+function validateOrganizationEvidenceGapsArgumentsShape(args) {
+  return (
+    hasExactKeys(args, ORGANIZATION_EVIDENCE_GAPS_ARGUMENT_KEYS) &&
+    isNonEmptyString(args.organizationId) &&
+    Number.isInteger(args.limit) &&
+    args.limit >= 1 &&
+    args.limit <= ORGANIZATION_EVIDENCE_GAPS_MAX_LIMIT &&
+    (args.afterGapLogItemId === null ||
+      (typeof args.afterGapLogItemId === "string" && CANONICAL_UUID_PATTERN.test(args.afterGapLogItemId)))
+  );
 }
 
 function safeStringForKey(key, value) {
@@ -502,6 +522,47 @@ function validateClientFollowupWorkflowsServiceResult(result) {
   return result.error == null && validateClientFollowupWorkflowsSuccessDto(result.data);
 }
 
+const ORGANIZATION_EVIDENCE_GAP_KEYS = new Set([
+  "gap_log_item_id",
+  "claim_id",
+  "dimension_key",
+  "assessment_status",
+  "validator_key",
+]);
+
+function validateOrganizationEvidenceGapEntry(entry) {
+  return (
+    hasExactKeys(entry, ORGANIZATION_EVIDENCE_GAP_KEYS) &&
+    Object.entries(entry).every(([key, value]) => validateMetadataSafeValue(key, value))
+  );
+}
+
+function validateOrganizationEvidenceGapsSuccessDto(data) {
+  const rootKeys = new Set(["items", "limit", "afterGapLogItemId", "truncated", "nextAfterGapLogItemId"]);
+  return (
+    hasExactKeys(data, rootKeys) &&
+    Array.isArray(data.items) &&
+    data.items.every(validateOrganizationEvidenceGapEntry) &&
+    Number.isInteger(data.limit) &&
+    data.limit >= 1 &&
+    data.limit <= ORGANIZATION_EVIDENCE_GAPS_MAX_LIMIT &&
+    (data.afterGapLogItemId === null ||
+      (typeof data.afterGapLogItemId === "string" && CANONICAL_UUID_PATTERN.test(data.afterGapLogItemId))) &&
+    typeof data.truncated === "boolean" &&
+    (data.nextAfterGapLogItemId === null ||
+      (typeof data.nextAfterGapLogItemId === "string" && CANONICAL_UUID_PATTERN.test(data.nextAfterGapLogItemId))) &&
+    (data.truncated === false || data.nextAfterGapLogItemId !== null)
+  );
+}
+
+function validateOrganizationEvidenceGapsServiceResult(result) {
+  if (!isPlainObject(result) || typeof result.ok !== "boolean") return false;
+  if (result.ok !== true) {
+    return result.data == null && isPlainObject(result.error) && PRESERVED_FAILURE_CODES.has(result.error.code);
+  }
+  return result.error == null && validateOrganizationEvidenceGapsSuccessDto(result.data);
+}
+
 async function importDefaultClaimTraceabilityService() {
   return import("./kaiClaimTraceabilityService.js");
 }
@@ -516,6 +577,10 @@ async function importDefaultClaimLibraryService() {
 
 async function importDefaultClientFollowupReadService() {
   return import("./kaiClientFollowupReadService.js");
+}
+
+async function importDefaultOrganizationEvidenceGapReadService() {
+  return import("./kaiOrganizationEvidenceGapReadService.js");
 }
 
 export async function getClaimTraceabilitySummaryTool(input, dependencies = {}) {
@@ -535,12 +600,22 @@ export async function getClaimTraceabilitySummaryTool(input, dependencies = {}) 
   if (input.toolName === CLIENT_FOLLOWUP_TOOL_NAME && !validateClientFollowupArgumentsShape(input.arguments)) {
     return validationBlocker();
   }
+  if (
+    input.toolName === ORGANIZATION_EVIDENCE_GAPS_TOOL_NAME &&
+    !validateOrganizationEvidenceGapsArgumentsShape(input.arguments)
+  ) {
+    return validationBlocker();
+  }
 
   const { actorContext } = input;
   if (!isMappedHumanActor(actorContext)) return buildKaiError("authorization_denied");
 
   const allowedRolesForOperation =
-    input.toolName === CLIENT_FOLLOWUP_TOOL_NAME ? CLIENT_FOLLOWUP_ALLOWED_ROLES : ALLOWED_ROLES;
+    input.toolName === CLIENT_FOLLOWUP_TOOL_NAME
+      ? CLIENT_FOLLOWUP_ALLOWED_ROLES
+      : input.toolName === ORGANIZATION_EVIDENCE_GAPS_TOOL_NAME
+        ? ORGANIZATION_EVIDENCE_GAPS_ALLOWED_ROLES
+        : ALLOWED_ROLES;
   const auth = validateActorCanPerformOperation(
     actorContext,
     input.toolName,
@@ -628,6 +703,26 @@ export async function getClaimTraceabilitySummaryTool(input, dependencies = {}) 
     return result;
   }
 
+  if (input.toolName === ORGANIZATION_EVIDENCE_GAPS_TOOL_NAME) {
+    const serviceModule = await (
+      dependencies.importOrganizationEvidenceGapReadService || importDefaultOrganizationEvidenceGapReadService
+    )();
+    if (typeof serviceModule?.listOrganizationEvidenceGapsForImpactLibrary !== "function") return systemError();
+
+    const result = await serviceModule.listOrganizationEvidenceGapsForImpactLibrary(
+      {
+        organizationId: input.arguments.organizationId,
+        limit: input.arguments.limit,
+        afterGapLogItemId: input.arguments.afterGapLogItemId,
+        actorContext,
+      },
+      dependencies.organizationEvidenceGapReadServiceDependencies || { env },
+    );
+
+    if (!validateOrganizationEvidenceGapsServiceResult(result)) return systemError();
+    return result;
+  }
+
   const serviceModule = await (dependencies.importClaimTraceabilityService || importDefaultClaimTraceabilityService)();
   if (typeof serviceModule?.getClaimTraceabilitySummary !== "function") return systemError();
 
@@ -654,7 +749,9 @@ export const __assistantClaimTraceabilityToolContract = Object.freeze({
   ELIGIBLE_CLAIMS_ARGUMENT_KEYS,
   GOVERNED_CLAIMS_ARGUMENT_KEYS,
   CLIENT_FOLLOWUP_ARGUMENT_KEYS,
+  ORGANIZATION_EVIDENCE_GAPS_ARGUMENT_KEYS,
   REQUESTED_AUDIENCES,
   ALLOWED_ROLES,
   CLIENT_FOLLOWUP_ALLOWED_ROLES,
+  ORGANIZATION_EVIDENCE_GAPS_ALLOWED_ROLES,
 });

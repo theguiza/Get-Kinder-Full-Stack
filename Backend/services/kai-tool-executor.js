@@ -1548,6 +1548,8 @@ const TOOL_HANDLERS = {
     handleGovernedClaimsToolCall("list_eligible_claims_for_audience", toolInput, userId, kaiContext),
   list_client_followup_workflows: (toolInput, userId, orgId, kaiContext) =>
     handleGovernedClaimsToolCall("list_client_followup_workflows", toolInput, userId, kaiContext),
+  list_organization_evidence_gaps: (toolInput, userId, orgId, kaiContext) =>
+    handleGovernedClaimsToolCall("list_organization_evidence_gaps", toolInput, userId, kaiContext),
 };
 
 export async function executeToolCall(toolName, toolInput = {}, userId, orgId, kaiContext) {

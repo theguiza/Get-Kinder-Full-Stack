@@ -351,6 +351,24 @@ export const TOOL_DEFINITIONS = {
       additionalProperties: false,
     },
   },
+  list_organization_evidence_gaps: {
+    name: "list_organization_evidence_gaps",
+    description:
+      "List this organization's governed evidence gaps on impact_evidence_library (which claim and dimension each gap affects, and its assessment status), without fetching claim-by-claim traceability. Bounded, cursor-paginated. Requires an active gk_admin, gk_operator, or gk_reviewer organization membership - the same role set as the other governed Impact Library tools. Denied for client-only actors.",
+    input_schema: {
+      type: "object",
+      properties: {
+        organizationId: { type: "string", description: "KAI-scoped organization UUID." },
+        limit: { type: "integer", minimum: 1, maximum: 25, default: 25 },
+        afterGapLogItemId: {
+          type: ["string", "null"],
+          description: "Gap log item UUID cursor for pagination. Pass null for the first page.",
+        },
+      },
+      required: ["organizationId", "limit", "afterGapLogItemId"],
+      additionalProperties: false,
+    },
+  },
 };
 
 const GOVERNED_CLAIMS_TOOL_NAMES = [
@@ -363,6 +381,7 @@ export const IMPACT_EVIDENCE_LIBRARY_SURFACE = "impact_evidence_library";
 const IMPACT_EVIDENCE_LIBRARY_ONLY_TOOL_NAMES = [
   ...GOVERNED_CLAIMS_TOOL_NAMES,
   "list_client_followup_workflows",
+  "list_organization_evidence_gaps",
 ];
 
 export function getToolDefinitionsForTier(tier) {

@@ -120,7 +120,7 @@ test("list_client_followup_workflows is model-visible only on the impact_evidenc
   assert.equal(definition.input_schema.additionalProperties, false);
 });
 
-test("assistant boundary allowlists exactly four metadata-read operations", () => {
+test("assistant boundary allowlists exactly five metadata-read operations", () => {
   assert.deepEqual(
     [...__assistantClaimTraceabilityToolContract.TOOL_NAMES].sort(),
     [
@@ -128,6 +128,7 @@ test("assistant boundary allowlists exactly four metadata-read operations", () =
       "list_client_followup_workflows",
       "list_eligible_claims_for_audience",
       "list_governed_claims",
+      "list_organization_evidence_gaps",
     ],
   );
   assert.equal(validateAssistantToolAuthorization({ operation: "list_client_followup_workflows" }).severity, "pass");
