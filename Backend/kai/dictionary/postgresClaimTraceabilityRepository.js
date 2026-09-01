@@ -724,3 +724,16 @@ export const __claimTraceabilityRepositoryContract = Object.freeze({
   BLOCKER_ORDER,
   DIMENSION_KEYS,
 });
+
+// Exposed so other read-only Package 4 capabilities that must reach the same
+// current/stale judgment as evaluateClaimTraceabilityInTransaction (rather
+// than a per-claim fan-out call into it) can reuse these exact pure
+// record-shaping helpers instead of reimplementing them. These functions
+// contain no semantic rule of their own - they only project already-read rows
+// into the fixed field allowlists validateConflictGroupCompleteness requires.
+export const __claimTraceabilityRepositoryTestables = Object.freeze({
+  computeDimensions,
+  toConflictGroupValidatorRecord,
+  toConflictQueueValidatorRecord,
+  rowIso,
+});

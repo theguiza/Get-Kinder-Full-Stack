@@ -60,6 +60,25 @@ const enabledEnv = Object.freeze({
   KAI_ASSISTANT_TOOLS_ENABLED: "true",
 });
 
+// The Package 4 repair reads candidate gaps and batch-validates their owning
+// claims' current-state in one shared read-only transaction/snapshot
+// (Backend/kai/dictionary/postgresOrganizationEvidenceGapCurrentStateRepository.js).
+// These wiring/pagination tests are not exercising that current-state
+// semantic gate at all (that is covered by
+// __tests__/kai-package-4-organization-evidence-gaps-semantic-parity.spec.js
+// and __tests__/kai-package-4-organization-evidence-gaps-repair.spec.js), so
+// `runInTransaction` is stubbed to call straight through with an opaque fake
+// tx (never touching a real database connection) and
+// `filterCurrentOrganizationEvidenceGaps` is stubbed as an identity
+// pass-through over the already-paginated candidate rows.
+function noDbDependencies(extra = {}) {
+  return {
+    runInTransaction: (callback) => callback({ query: async () => ({ rows: [] }) }),
+    filterCurrentOrganizationEvidenceGaps: async (_tx, { candidateGapRows }) => candidateGapRows,
+    ...extra,
+  };
+}
+
 function request(overrides = {}) {
   return {
     toolName: "list_organization_evidence_gaps",
@@ -329,16 +348,21 @@ test("the pre-existing governed operations are unaffected by the new operation's
 test("listOrganizationEvidenceGapsForImpactLibrary denies client_reviewer and authorizes GK staff via exactly one organization-scoped read call", async () => {
   const deniedForClientReviewer = await listOrganizationEvidenceGapsForImpactLibrary(
     { organizationId: ORG, limit: 10, afterGapLogItemId: null, actorContext: clientReviewerActorContext },
-    { env: enabledEnv, listOrganizationEvidenceGaps: async () => { throw new Error("must not be called"); } },
+    noDbDependencies({ env: enabledEnv, listOrganizationEvidenceGaps: async () => { throw new Error("must not be called"); } }),
   );
   assert.equal(deniedForClientReviewer.ok, false);
   assert.equal(deniedForClientReviewer.error.code, "authorization_denied");
 
+  // "Current" gap: filterCurrentOrganizationEvidenceGaps is stubbed as an
+  // identity pass-through here (this test is about authorization/read-call
+  // wiring, not current-state semantics, which is covered elsewhere), so
+  // every candidate row returned by listOrganizationEvidenceGaps is treated
+  // as current.
   const row = gapEntry();
   let queryCalls = 0;
   const allowedForGkReviewer = await listOrganizationEvidenceGapsForImpactLibrary(
     { organizationId: ORG, limit: 10, afterGapLogItemId: null, actorContext: gkReviewerActorContext },
-    {
+    noDbDependencies({
       env: enabledEnv,
       listOrganizationEvidenceGaps: async (organizationId, options) => {
         queryCalls += 1;
@@ -346,10 +370,10 @@ test("listOrganizationEvidenceGapsForImpactLibrary denies client_reviewer and au
         assert.deepEqual(options, { limit: 10, afterGapLogItemId: null });
         return [row];
       },
-    },
+    }),
   );
   assert.equal(allowedForGkReviewer.ok, true);
-  assert.equal(queryCalls, 1, "exactly one bounded organization-scoped query, no per-claim fan-out");
+  assert.equal(queryCalls, 1, "exactly one bounded organization-scoped candidate-page query, no per-claim fan-out");
   assert.deepEqual(allowedForGkReviewer.data.items, [row]);
   assert.equal(allowedForGkReviewer.data.truncated, false);
   assert.equal(allowedForGkReviewer.data.nextAfterGapLogItemId, null);
@@ -360,13 +384,13 @@ test("listOrganizationEvidenceGapsForImpactLibrary paginates via keyset cursor (
   let capturedOptions = null;
   const result = await listOrganizationEvidenceGapsForImpactLibrary(
     { organizationId: ORG, limit: 2, afterGapLogItemId: null, actorContext: gkReviewerActorContext },
-    {
+    noDbDependencies({
       env: enabledEnv,
       listOrganizationEvidenceGaps: async (organizationId, options) => {
         capturedOptions = options;
         return rows; // limit+1 lookahead row present
       },
-    },
+    }),
   );
   assert.deepEqual(capturedOptions, { limit: 2, afterGapLogItemId: null });
   assert.equal(result.data.items.length, 2);
@@ -377,19 +401,19 @@ test("listOrganizationEvidenceGapsForImpactLibrary paginates via keyset cursor (
 test("listOrganizationEvidenceGapsForImpactLibrary fails closed for cross-tenant, disabled-feature, and malformed-row reads", async () => {
   const crossTenant = await listOrganizationEvidenceGapsForImpactLibrary(
     { organizationId: ORG, limit: 10, afterGapLogItemId: null, actorContext: { ...gkReviewerActorContext, organizationMemberships: [] } },
-    { env: enabledEnv, listOrganizationEvidenceGaps: async () => { throw new Error("must not be called"); } },
+    noDbDependencies({ env: enabledEnv, listOrganizationEvidenceGaps: async () => { throw new Error("must not be called"); } }),
   );
   assert.equal(crossTenant.ok, false);
 
   const disabled = await listOrganizationEvidenceGapsForImpactLibrary(
     { organizationId: ORG, limit: 10, afterGapLogItemId: null, actorContext: gkReviewerActorContext },
-    { env: {}, listOrganizationEvidenceGaps: async () => { throw new Error("must not be called"); } },
+    noDbDependencies({ env: {}, listOrganizationEvidenceGaps: async () => { throw new Error("must not be called"); } }),
   );
   assert.equal(disabled.error.code, "feature_disabled");
 
   const malformedRow = await listOrganizationEvidenceGapsForImpactLibrary(
     { organizationId: ORG, limit: 10, afterGapLogItemId: null, actorContext: gkReviewerActorContext },
-    { env: enabledEnv, listOrganizationEvidenceGaps: async () => [{ gap_log_item_id: "not-a-uuid" }] },
+    noDbDependencies({ env: enabledEnv, listOrganizationEvidenceGaps: async () => [{ gap_log_item_id: "not-a-uuid" }] }),
   );
   assert.equal(malformedRow.error.code, "system_error");
 });

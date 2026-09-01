@@ -276,6 +276,7 @@ function buildFakeTx({ qualityFindingRows }) {
   };
   const dictionaryFieldRows = [
     {
+      data_dictionary_id: DICTIONARY_ID,
       data_dictionary_field_id: "00000000-0000-4000-8000-000000001201",
       profile_field_key: "field_a",
       data_type: "string",
@@ -284,7 +285,7 @@ function buildFakeTx({ qualityFindingRows }) {
       sensitivity: "low",
     },
   ];
-  const evidenceFieldKeyRows = [{ profile_field_key: "field_a" }];
+  const evidenceFieldKeyRows = [{ source_version_id: SOURCE_VERSION_ID, profile_field_key: "field_a" }];
   const gapRows = persistedGapRows();
   const followupRows = persistedFollowupRows();
   const followupQueueRows = persistedFollowupQueueRows();
@@ -296,6 +297,7 @@ function buildFakeTx({ qualityFindingRows }) {
       const sql = typeof rawSql === "string" ? rawSql : rawSql?.text ?? "";
       calls.push(sql);
 
+      if (sql.startsWith("SET TRANSACTION ISOLATION LEVEL")) return { rows: [] };
       if (sql.includes("FROM kai.gap_log_items")) return { rows: gapRows };
       if (sql.includes("FROM kai.client_followup_items")) return { rows: followupRows };
       if (sql.includes("kai.review_queue_items") && sql.includes("queue_type = 'client_followup'")) {
@@ -311,7 +313,7 @@ function buildFakeTx({ qualityFindingRows }) {
         return { rows: [] };
       }
       if (sql.includes("FROM kai.coverage_review_decisions")) return { rows: [] };
-      if (sql.includes("FROM kai.conflict_groups")) return { rows: [] };
+      if (sql.includes("kai.conflict_groups")) return { rows: [] };
       if (sql.includes("FROM kai.intake_source_candidates")) return { rows: [candidateRow] };
       if (sql.includes("FROM kai.intake_promotion_decisions")) return { rows: [decisionRow] };
       if (sql.includes("FROM kai.intake_sensitivity_profiles")) return { rows: [profileRow] };
@@ -350,7 +352,18 @@ async function runTraceability(fakeTx) {
   );
 }
 
-async function runOrganizationEvidenceGaps() {
+/**
+ * Runs the REAL Package 4 repair end to end: the real
+ * filterCurrentOrganizationEvidenceGaps (postgresOrganizationEvidenceGapCurrentStateRepository.js)
+ * batch-validates the same persisted kai.gap_log_items candidate page against
+ * the SAME fakeTx used for traceability above - one shared authoritative
+ * state, read through the identical query-routing fake. Only
+ * `listOrganizationEvidenceGaps` (the plain SELECT over kai.gap_log_items) and
+ * `runInTransaction` (so this test never opens a real DB connection) are
+ * stubbed; the current-state batch-read/classification logic itself is not
+ * stubbed at all.
+ */
+async function runOrganizationEvidenceGaps(fakeTx) {
   return listOrganizationEvidenceGapsForImpactLibrary(
     {
       organizationId: ORG,
@@ -360,12 +373,15 @@ async function runOrganizationEvidenceGaps() {
     },
     {
       env: { KAI_SPRINT2_ENABLED: "true" },
+      runInTransaction: (callback) => callback(fakeTx),
       // The real DB read (kaiOrganizationEvidenceGapReadModels.js#listOrganizationEvidenceGaps)
       // is a plain SELECT over kai.gap_log_items with no join back to
       // data_quality_findings/dictionary/profile state - so it returns
       // exactly the same persisted rows regardless of those inputs. This stub
       // returns that identical persisted content, in the DB's own column
-      // shape, for both the matching and mismatched cases.
+      // shape, for both the matching and mismatched cases; the real
+      // filterCurrentOrganizationEvidenceGaps (not stubbed) is what now
+      // recomputes current-state against fakeTx.
       listOrganizationEvidenceGaps: async () =>
         persistedGapRows().map((row) => ({
           gap_log_item_id: row.gap_log_item_id,
@@ -387,14 +403,14 @@ test("Case A (current/matching): traceability accepts the persisted gap and the 
   assert.equal(missingnessGap.gap_log_item_id, GAP_IDS.missingness);
   assert.equal(missingnessGap.assessment_status, "unresolved");
 
-  const orgGaps = await runOrganizationEvidenceGaps();
+  const orgGaps = await runOrganizationEvidenceGaps(fakeTx);
   assert.equal(orgGaps.ok, true, JSON.stringify(orgGaps));
   const orgMissingnessGap = orgGaps.data.items.find((item) => item.gap_log_item_id === GAP_IDS.missingness);
   assert.ok(orgMissingnessGap, "list_organization_evidence_gaps returns the same current gap");
   assert.equal(orgMissingnessGap.claim_id, CLAIM_ID);
 });
 
-test("Case B (persisted-but-mismatched): a new open kai.data_quality_findings row (no write to gap_log_items) makes traceability reject the persisted gap as stale, but list_organization_evidence_gaps still returns it as current", async () => {
+test("Case B (persisted-but-mismatched, REPAIRED): a new open kai.data_quality_findings row (no write to gap_log_items) makes traceability reject the persisted gap as stale, and list_organization_evidence_gaps now omits it too", async () => {
   // The ONE authoritative input that changes relative to Case A: a
   // data_quality_findings row for the same dictionary now exists with
   // finding_type='missingness', finding_status='open'. Nothing writes to
@@ -405,6 +421,7 @@ test("Case B (persisted-but-mismatched): a new open kai.data_quality_findings ro
   // open_finding_count:1 instead of the persisted row's "unresolved"/null.
   const qualityFindingRows = [
     {
+      data_dictionary_id: DICTIONARY_ID,
       data_quality_finding_id: "00000000-0000-4000-8000-000000001301",
       profile_field_key: "field_a",
       finding_type: "missingness",
@@ -423,15 +440,32 @@ test("Case B (persisted-but-mismatched): a new open kai.data_quality_findings ro
     "the real gapRowsMatchExpectation comparator (postgresClaimGapFollowupRepository.js) is what rejects the stale row",
   );
 
-  // The SAME underlying persisted kai.gap_log_items rows, read through the
-  // real Package 4 service, with no recomputation against current
-  // data_quality_findings state.
-  const orgGaps = await runOrganizationEvidenceGaps();
+  // BEFORE the repair, this same persisted kai.gap_log_items row was still
+  // disclosed as current by list_organization_evidence_gaps (the accepted
+  // defect proven by this file before the repair). After the repair,
+  // filterCurrentOrganizationEvidenceGaps batch-validates the claim this gap
+  // belongs to against the SAME fakeTx/authoritative state traceability just
+  // rejected it against, and the claim fails the identical
+  // gapRowsMatchExpectation gate - so the gap is omitted here too. This is
+  // REQUIRED_INVARIANT: the organization-level capability must never present
+  // a gap as current when the authoritative traceability path would refuse to
+  // expose that gap as current governed state.
+  const orgGaps = await runOrganizationEvidenceGaps(fakeTx);
   assert.equal(orgGaps.ok, true, JSON.stringify(orgGaps));
   const orgMissingnessGap = orgGaps.data.items.find((item) => item.gap_log_item_id === GAP_IDS.missingness);
-  assert.ok(
+  assert.equal(
     orgMissingnessGap,
-    "SEMANTIC DEFECT: list_organization_evidence_gaps still returns the gap_log_items row that get_claim_traceability_summary just rejected as no longer matching current state",
+    undefined,
+    "REPAIRED: list_organization_evidence_gaps no longer returns a gap_log_items row that get_claim_traceability_summary rejects as no longer matching current state",
   );
-  assert.equal(orgMissingnessGap.assessment_status, "unresolved", "the org-level DTO still discloses the stale, no-longer-current assessment_status");
+  // Every other persisted gap for the SAME claim is also stale for the same
+  // reason (the claim-level gate, not a per-gap gate, is what fails) - none
+  // of this claim's gaps are exposed as current.
+  for (const dimensionKey of EXPECTED_GAP_DIMENSIONS) {
+    assert.equal(
+      orgGaps.data.items.find((item) => item.gap_log_item_id === GAP_IDS[dimensionKey]),
+      undefined,
+      `REPAIRED: no gap for claim ${CLAIM_ID} is exposed as current while the claim itself fails the current-state gate (dimension ${dimensionKey})`,
+    );
+  }
 });
