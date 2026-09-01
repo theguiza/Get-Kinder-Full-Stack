@@ -19473,3 +19473,71 @@ This closes the mismatch between the executed request-ownership predicates and t
 - Whether `kai.organizations`'s primary key is in fact the single column `organization_id` (versus, say, a composite key) beyond the owner's stated fact was not independently re-inspected against a live catalog in this pass.
 
 **Package A1.1 remaining work:** NONE for this bounded package. Framework, evaluation, criterion-result, provenance, requirement, funder, gap, UI, and AI-evaluation functionality are explicitly out of scope and not started. Stopped after A1.1 as instructed.
+
+## Package A1.2 — Versioned Impact Evaluation Framework + Criteria
+
+**Evidence-correction note:** this entry is appended retroactively by a repository-closure-correction pass to record evidence for an already-completed, already-committed package (local commit `0fbf73d`). No migration, rollback, or test file was modified to produce this entry.
+
+**Local commit:** `0fbf73d` — "KAI Package A1.2: Versioned Impact Evaluation Framework + Criteria".
+
+**Scope:** `kai.impact_evaluation_framework_versions` and `kai.impact_evaluation_criteria` — the persisted KAI-owned methodology layer (framework version → version-scoped criteria). `framework_code`+`version_label` is the immutable version identity (draft/active/retired lifecycle, at most one active per code); `criterion_key`/`display_order` are unique only within their own `framework_version_id`. No evaluation, criterion-result, provenance, requirement, funder, or gap object is introduced; `kai.impact_outcome_contexts` (A1.1) is untouched.
+
+**Schema objects/constraints added:** tables `kai.impact_evaluation_framework_versions`, `kai.impact_evaluation_criteria`; framework-version identity/lifecycle constraints (immutable code+version_label identity, at-most-one-active-per-code); criterion uniqueness scoped to `framework_version_id`; forward migration `migrations/kai_sprint2_a1_2_impact_evaluation_framework_and_criteria.sql` and `migrations/kai_sprint2_a1_2_impact_evaluation_framework_and_criteria.rollback.sql`.
+
+**Focused A1 test result:** `__tests__/kai-sprint2-a1-2-impact-evaluation-framework-criteria-schema-contract.spec.js` contains 17 static assertions (statically counted in this correction pass by inspecting the file; the suite was not re-executed in this correction pass per task instruction not to rerun A1 tests).
+
+**KAI-suite result and unchanged known unrelated failure set:** NOT independently re-run in this correction pass (per task instruction not to rerun A1 tests). No suite pass/fail counts for this package were recorded in the original commit message or elsewhere in this ExecPlan, so none are asserted here.
+
+**`git diff --check` result:** not applicable to the original package commit retroactively; `git diff --check` for this correction pass itself is reported in this task's own closure report.
+
+**Local commit:** `0fbf73d` (see above).
+
+**Real PostgreSQL migration execution:** `NOT_CONFIRMED`.
+
+**Push/deploy/database mutation:** NONE performed, then or in this correction pass.
+
+## Package A1.3 — Evaluation Snapshots + Criterion Results
+
+**Evidence-correction note:** this entry is appended retroactively by a repository-closure-correction pass to record evidence for an already-completed, already-committed package (local commit `10d029a`). No migration, rollback, or test file was modified to produce this entry.
+
+**Local commit:** `10d029a` — "KAI Package A1.3: Evaluation Snapshots + Criterion Results".
+
+**Scope:** `kai.impact_evaluations` and `kai.impact_evaluation_results` — immutable historical evaluation snapshots and their per-criterion analytical results. An evaluation is bound to its A1.1 outcome context via a tenant-safe composite FK (rejects cross-organization binding) and pinned to exactly one A1.2 `framework_version_id`. A result is pinned to its own evaluation's tenant and framework version via a composite FK against a new `impact_evaluations_a1_3_id_org_framework_unique` identity on A1.3, and its criterion is pinned to the same framework version via a second composite FK against a smallest-possible compatibility `UNIQUE` constraint added to A1.2's `kai.impact_evaluation_criteria` (no other change to A1.2). `assessment_state` is a closed five-value analytical vocabulary; `supported_with_limitation` requires non-empty `limitation_notes`, every other state forbids it.
+
+**Schema objects/constraints added:** tables `kai.impact_evaluations`, `kai.impact_evaluation_results`; composite FKs described above; compatibility `UNIQUE` constraint added to A1.2's `kai.impact_evaluation_criteria` (no other A1.2 change); `assessment_state` closed-vocabulary CHECK and conditional `limitation_notes` CHECK; forward migration `migrations/kai_sprint2_a1_3_impact_evaluations_and_results.sql` and `migrations/kai_sprint2_a1_3_impact_evaluations_and_results.rollback.sql`.
+
+**Focused A1 test result:** `__tests__/kai-sprint2-a1-3-impact-evaluations-results-schema-contract.spec.js` contains 20 static assertions (statically counted in this correction pass by inspecting the file; the suite was not re-executed in this correction pass per task instruction not to rerun A1 tests).
+
+**KAI-suite result and unchanged known unrelated failure set:** NOT independently re-run in this correction pass (per task instruction not to rerun A1 tests). No suite pass/fail counts for this package were recorded in the original commit message or elsewhere in this ExecPlan, so none are asserted here.
+
+**`git diff --check` result:** not applicable to the original package commit retroactively; `git diff --check` for this correction pass itself is reported in this task's own closure report.
+
+**Local commit:** `10d029a` (see above).
+
+**Real PostgreSQL migration execution:** `NOT_CONFIRMED`.
+
+**Push/deploy/database mutation:** NONE performed, then or in this correction pass.
+
+## Package A1.4 — Impact Evaluation Provenance Links
+
+**Evidence-correction note:** this entry is appended retroactively by a repository-closure-correction pass to record evidence for an already-completed, already-committed package (local commit `adca19c`). No migration, rollback, or test file was modified to produce this entry.
+
+**Local commit:** `adca19c` — "KAI Package A1.4: Impact Evaluation Provenance Links".
+
+**Scope:** `kai.impact_evaluation_result_evidence_links` and `kai.impact_evaluation_result_claim_links` — two separate, tenant-safe junction tables (no polymorphic target) recording only that a governed evidence item or claim was used as traceable support for one Impact Evaluation criterion result. Each link's result-side tenant is pinned via a composite FK to a smallest-possible compatibility `UNIQUE(impact_evaluation_result_id, organization_id)` added to A1.3's `kai.impact_evaluation_results` (no other change to A1.3); each link's evidence/claim side reuses `kai.evidence_items`'/`kai.claims`' own existing `(id, organization_id)` tenant identities unchanged. Duplicate result/evidence and result/claim links are rejected by per-pair `UNIQUE` constraints. No evidence/claim content is copied and no qualifying metadata (role, weight, confidence) is added.
+
+**Schema objects/constraints added:** tables `kai.impact_evaluation_result_evidence_links`, `kai.impact_evaluation_result_claim_links`; composite tenant-pinning FKs; compatibility `UNIQUE(impact_evaluation_result_id, organization_id)` added to A1.3's `kai.impact_evaluation_results` (no other A1.3 change); per-pair duplicate-link `UNIQUE` constraints; forward migration `migrations/kai_sprint2_a1_4_impact_evaluation_result_provenance_links.sql` and `migrations/kai_sprint2_a1_4_impact_evaluation_result_provenance_links.rollback.sql`.
+
+**Focused A1 test result:** `__tests__/kai-sprint2-a1-4-impact-evaluation-result-provenance-links-schema-contract.spec.js` contains 14 static assertions (statically counted in this correction pass by inspecting the file; the suite was not re-executed in this correction pass per task instruction not to rerun A1 tests).
+
+**KAI-suite result and unchanged known unrelated failure set:** NOT independently re-run in this correction pass (per task instruction not to rerun A1 tests). No suite pass/fail counts for this package were recorded in the original commit message or elsewhere in this ExecPlan, so none are asserted here.
+
+**`git diff --check` result:** not applicable to the original package commit retroactively; `git diff --check` for this correction pass itself is reported in this task's own closure report.
+
+**Local commit:** `adca19c` (see above).
+
+**Real PostgreSQL migration execution:** `NOT_CONFIRMED`.
+
+**Push/deploy/database mutation:** NONE performed, then or in this correction pass.
+
+**A1 (A1.1-A1.4) closure-correction remaining work:** NONE. This correction pass adds only the missing A1.2/A1.3/A1.4 ExecPlan evidence entries above; it does not modify any migration, rollback, schema-contract test, service, route, UI, or schema design, does not start A2, and does not update `00_KAI_CURRENT_STATE.md`.
