@@ -48,9 +48,21 @@ test("Impact Evidence Library surface exposes only the governed evidence tools",
   const names = tools.map((tool) => tool.name).sort();
   assert.deepEqual(names, [
     "get_claim_traceability_summary",
+    "list_client_followup_workflows",
     "list_eligible_claims_for_audience",
     "list_governed_claims",
   ]);
+});
+
+test("default surface and reporting_readiness surface are not widened by the new client-followup tool", () => {
+  const defaultTools = getToolDefinitionsForKaiContext("pro", {}).map((tool) => tool.name);
+  const guestTools = getToolDefinitionsForKaiContext("guest", {}).map((tool) => tool.name);
+  const reportingTools = getToolDefinitionsForKaiContext("pro", { surface: "reporting_readiness" }).map(
+    (tool) => tool.name,
+  );
+  assert.ok(!defaultTools.includes("list_client_followup_workflows"));
+  assert.ok(!guestTools.includes("list_client_followup_workflows"));
+  assert.ok(!reportingTools.includes("list_client_followup_workflows"));
 });
 
 test("Impact Evidence Library surface tool allowlist is unaffected by tier", () => {

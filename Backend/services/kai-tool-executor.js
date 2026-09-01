@@ -1546,6 +1546,8 @@ const TOOL_HANDLERS = {
     handleGovernedClaimsToolCall("get_claim_traceability_summary", toolInput, userId, kaiContext),
   list_eligible_claims_for_audience: (toolInput, userId, orgId, kaiContext) =>
     handleGovernedClaimsToolCall("list_eligible_claims_for_audience", toolInput, userId, kaiContext),
+  list_client_followup_workflows: (toolInput, userId, orgId, kaiContext) =>
+    handleGovernedClaimsToolCall("list_client_followup_workflows", toolInput, userId, kaiContext),
 };
 
 export async function executeToolCall(toolName, toolInput = {}, userId, orgId, kaiContext) {

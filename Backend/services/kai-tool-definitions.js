@@ -338,6 +338,19 @@ export const TOOL_DEFINITIONS = {
       additionalProperties: false,
     },
   },
+  list_client_followup_workflows: {
+    name: "list_client_followup_workflows",
+    description:
+      "List every currently open client-follow-up question required across this organization's governed evidence (which claim it blocks, what needs to be confirmed, and its review status). Requires an active client_reviewer organization membership. Denied for GK-staff-only actors without that membership.",
+    input_schema: {
+      type: "object",
+      properties: {
+        organizationId: { type: "string", description: "KAI-scoped organization UUID." },
+      },
+      required: ["organizationId"],
+      additionalProperties: false,
+    },
+  },
 };
 
 const GOVERNED_CLAIMS_TOOL_NAMES = [
@@ -347,6 +360,10 @@ const GOVERNED_CLAIMS_TOOL_NAMES = [
 ];
 
 export const IMPACT_EVIDENCE_LIBRARY_SURFACE = "impact_evidence_library";
+const IMPACT_EVIDENCE_LIBRARY_ONLY_TOOL_NAMES = [
+  ...GOVERNED_CLAIMS_TOOL_NAMES,
+  "list_client_followup_workflows",
+];
 
 export function getToolDefinitionsForTier(tier) {
   const toolNames = getAvailableTools(tier);
@@ -363,7 +380,7 @@ export function getToolDefinitionsForKaiContext(tier, { surface = "default" } = 
   }
 
   if (surface === IMPACT_EVIDENCE_LIBRARY_SURFACE) {
-    return GOVERNED_CLAIMS_TOOL_NAMES.map((toolName) => TOOL_DEFINITIONS[toolName]).filter(Boolean);
+    return IMPACT_EVIDENCE_LIBRARY_ONLY_TOOL_NAMES.map((toolName) => TOOL_DEFINITIONS[toolName]).filter(Boolean);
   }
 
   const baseTools = getToolDefinitionsForTier(tier);

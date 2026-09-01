@@ -317,7 +317,7 @@ test("P2-08 repository: unexpected evaluator failures still fail the whole list 
   assert.equal(result.error.code, "conflict_current_state_changed");
 });
 
-test("P2-08 wrapper: traceability operation remains unchanged and exactly three assistant operations are allowlisted", async () => {
+test("P2-08 wrapper: traceability operation remains unchanged and exactly four assistant operations are allowlisted", async () => {
   const traceResult = { ok: true, data: traceabilitySuccess({ eligible: false }), error: null };
   const observed = [];
   const result = await getClaimTraceabilitySummaryTool(traceabilityRequest(), {
@@ -334,12 +334,14 @@ test("P2-08 wrapper: traceability operation remains unchanged and exactly three 
 
   assert.deepEqual([...__assistantClaimTraceabilityToolContract.TOOL_NAMES].sort(), [
     "get_claim_traceability_summary",
+    "list_client_followup_workflows",
     "list_eligible_claims_for_audience",
     "list_governed_claims",
   ]);
   assert.equal(validateAssistantToolAuthorization({ operation: "get_claim_traceability_summary" }).severity, "pass");
   assert.equal(validateAssistantToolAuthorization({ operation: "list_eligible_claims_for_audience" }).severity, "pass");
   assert.equal(validateAssistantToolAuthorization({ operation: "list_governed_claims" }).severity, "pass");
+  assert.equal(validateAssistantToolAuthorization({ operation: "list_client_followup_workflows" }).severity, "pass");
   assert.equal(validateAssistantToolAuthorization({ operation: "get_claims" }).severity, "blocker");
 });
 

@@ -12,14 +12,25 @@ import { validateTenantBoundaryConsistency } from "../validators/tenantValidator
 const TRACEABILITY_TOOL_NAME = "get_claim_traceability_summary";
 const ELIGIBLE_CLAIMS_TOOL_NAME = "list_eligible_claims_for_audience";
 const GOVERNED_CLAIMS_TOOL_NAME = "list_governed_claims";
-const TOOL_NAMES = new Set([TRACEABILITY_TOOL_NAME, ELIGIBLE_CLAIMS_TOOL_NAME, GOVERNED_CLAIMS_TOOL_NAME]);
+const CLIENT_FOLLOWUP_TOOL_NAME = "list_client_followup_workflows";
+const TOOL_NAMES = new Set([
+  TRACEABILITY_TOOL_NAME,
+  ELIGIBLE_CLAIMS_TOOL_NAME,
+  GOVERNED_CLAIMS_TOOL_NAME,
+  CLIENT_FOLLOWUP_TOOL_NAME,
+]);
 const TOP_LEVEL_KEYS = new Set(["toolName", "arguments", "actorContext"]);
 const TRACEABILITY_ARGUMENT_KEYS = new Set(["organizationId", "claimId", "requestedAudience"]);
 const ELIGIBLE_CLAIMS_ARGUMENT_KEYS = new Set(["organizationId", "requestedAudience", "limit", "afterClaimId"]);
 const GOVERNED_CLAIMS_ARGUMENT_KEYS = new Set(["organizationId", "limit", "afterClaimId"]);
+const CLIENT_FOLLOWUP_ARGUMENT_KEYS = new Set(["organizationId"]);
 const GOVERNED_CLAIMS_MAX_LIMIT = 25;
 const REQUESTED_AUDIENCES = new Set(["internal", "funder", "public"]);
 const ALLOWED_ROLES = new Set(["gk_admin", "gk_operator", "gk_reviewer"]);
+// P2-11's read companion is deliberately scoped to client_reviewer only (see
+// kaiClientFollowupReadService.js) - a different, narrower authority than the
+// GK-staff-only ALLOWED_ROLES above, never unioned with it.
+const CLIENT_FOLLOWUP_ALLOWED_ROLES = new Set(["client_reviewer"]);
 const PRESERVED_FAILURE_CODES = new Set([
   "not_found",
   "conflict_current_state_changed",
@@ -142,6 +153,10 @@ function validateGovernedClaimsArgumentsShape(args) {
   );
 }
 
+function validateClientFollowupArgumentsShape(args) {
+  return hasExactKeys(args, CLIENT_FOLLOWUP_ARGUMENT_KEYS) && isNonEmptyString(args.organizationId);
+}
+
 function safeStringForKey(key, value) {
   if (key === "updated_at" && ISO_TIMESTAMP_PATTERN.test(value)) return true;
   if (UUID_PATTERN.test(value) || HASH_PATTERN.test(value) || SAFE_CODE_PATTERN.test(value)) return true;
@@ -204,6 +219,30 @@ const GOVERNED_CLAIM_REVIEW_QUEUE_ITEM_KEYS = new Set([
   "queue_status",
   "review_status",
 ]);
+const CLIENT_FOLLOWUP_WORKFLOW_KEYS = new Set([
+  "claim_id",
+  "client_followup_item_id",
+  "dimension_key",
+  "question_text",
+  "review_queue_item_id",
+  "queue_status",
+  "review_status",
+  "updated_at",
+]);
+// Mirrors the DB-enforced fixed dimension/question pairing (CHECK constraints
+// client_followup_items_p2_04_question_text_check and
+// _dimension_question_pairing_check in migrations/kai_sprint2_p2_04_claim_gap_followup.sql).
+// question_text is one of exactly four server-owned template strings, never
+// caller-supplied or free-form - so, unlike other string fields, it is
+// validated against this closed set rather than the generic
+// validateMetadataSafeValue (whose PROHIBITED_OUTPUT_KEY_PATTERN deliberately
+// rejects any key named "question"/"text" as a general free-text guard).
+const CLIENT_FOLLOWUP_QUESTION_BY_DIMENSION = Object.freeze({
+  definition_clarity: "Confirm the business meaning of the unresolved field or measure.",
+  denominator_clarity: "Confirm the denominator and how it is calculated.",
+  time_period_clarity: "Confirm the reporting period represented by this source.",
+  entity_level_clarity: "Confirm the entity level represented by the unresolved field or measure.",
+});
 const TRACEABILITY_LOCATOR_KEYS = new Set(["source_locator_id"]);
 const TRACEABILITY_SOURCE_KEYS = new Set(["source_id", "source_code"]);
 const TRACEABILITY_SOURCE_VERSION_KEYS = new Set(["source_version_id", "is_current"]);
@@ -423,6 +462,36 @@ function validateGovernedClaimsServiceResult(result) {
   return result.error == null && validateGovernedClaimsSuccessDto(result.data);
 }
 
+function validateClientFollowupWorkflowEntry(entry) {
+  if (!hasExactKeys(entry, CLIENT_FOLLOWUP_WORKFLOW_KEYS)) return false;
+  const expectedQuestionText = CLIENT_FOLLOWUP_QUESTION_BY_DIMENSION[entry.dimension_key];
+  if (!expectedQuestionText || entry.question_text !== expectedQuestionText) return false;
+  return (
+    validateMetadataSafeValue("claim_id", entry.claim_id) &&
+    validateMetadataSafeValue("client_followup_item_id", entry.client_followup_item_id) &&
+    validateMetadataSafeValue("review_queue_item_id", entry.review_queue_item_id) &&
+    validateMetadataSafeValue("queue_status", entry.queue_status) &&
+    validateMetadataSafeValue("review_status", entry.review_status) &&
+    validateMetadataSafeValue("updated_at", entry.updated_at)
+  );
+}
+
+function validateClientFollowupWorkflowsSuccessDto(data) {
+  return (
+    hasExactKeys(data, new Set(["items"])) &&
+    Array.isArray(data.items) &&
+    data.items.every(validateClientFollowupWorkflowEntry)
+  );
+}
+
+function validateClientFollowupWorkflowsServiceResult(result) {
+  if (!isPlainObject(result) || typeof result.ok !== "boolean") return false;
+  if (result.ok !== true) {
+    return result.data == null && isPlainObject(result.error) && PRESERVED_FAILURE_CODES.has(result.error.code);
+  }
+  return result.error == null && validateClientFollowupWorkflowsSuccessDto(result.data);
+}
+
 async function importDefaultClaimTraceabilityService() {
   return import("./kaiClaimTraceabilityService.js");
 }
@@ -433,6 +502,10 @@ async function importDefaultEligibleClaimsForAudienceService() {
 
 async function importDefaultClaimLibraryService() {
   return import("./kaiClaimLibraryService.js");
+}
+
+async function importDefaultClientFollowupReadService() {
+  return import("./kaiClientFollowupReadService.js");
 }
 
 export async function getClaimTraceabilitySummaryTool(input, dependencies = {}) {
@@ -449,15 +522,20 @@ export async function getClaimTraceabilitySummaryTool(input, dependencies = {}) 
   if (input.toolName === GOVERNED_CLAIMS_TOOL_NAME && !validateGovernedClaimsArgumentsShape(input.arguments)) {
     return validationBlocker();
   }
+  if (input.toolName === CLIENT_FOLLOWUP_TOOL_NAME && !validateClientFollowupArgumentsShape(input.arguments)) {
+    return validationBlocker();
+  }
 
   const { actorContext } = input;
   if (!isMappedHumanActor(actorContext)) return buildKaiError("authorization_denied");
 
+  const allowedRolesForOperation =
+    input.toolName === CLIENT_FOLLOWUP_TOOL_NAME ? CLIENT_FOLLOWUP_ALLOWED_ROLES : ALLOWED_ROLES;
   const auth = validateActorCanPerformOperation(
     actorContext,
     input.toolName,
     input.arguments.organizationId,
-    { allowedRoles: ALLOWED_ROLES },
+    { allowedRoles: allowedRolesForOperation },
   );
   if (!auth.ok) {
     if (auth.blockers?.some((blocker) => blocker.blocking_reason === "missing_active_organization_membership")) {
@@ -522,6 +600,24 @@ export async function getClaimTraceabilitySummaryTool(input, dependencies = {}) 
     return result;
   }
 
+  if (input.toolName === CLIENT_FOLLOWUP_TOOL_NAME) {
+    const serviceModule = await (
+      dependencies.importClientFollowupReadService || importDefaultClientFollowupReadService
+    )();
+    if (typeof serviceModule?.listClientFollowupWorkflows !== "function") return systemError();
+
+    const result = await serviceModule.listClientFollowupWorkflows(
+      {
+        organizationId: input.arguments.organizationId,
+        actorContext,
+      },
+      dependencies.clientFollowupReadServiceDependencies || { env },
+    );
+
+    if (!validateClientFollowupWorkflowsServiceResult(result)) return systemError();
+    return result;
+  }
+
   const serviceModule = await (dependencies.importClaimTraceabilityService || importDefaultClaimTraceabilityService)();
   if (typeof serviceModule?.getClaimTraceabilitySummary !== "function") return systemError();
 
@@ -547,6 +643,8 @@ export const __assistantClaimTraceabilityToolContract = Object.freeze({
   TRACEABILITY_ARGUMENT_KEYS,
   ELIGIBLE_CLAIMS_ARGUMENT_KEYS,
   GOVERNED_CLAIMS_ARGUMENT_KEYS,
+  CLIENT_FOLLOWUP_ARGUMENT_KEYS,
   REQUESTED_AUDIENCES,
   ALLOWED_ROLES,
+  CLIENT_FOLLOWUP_ALLOWED_ROLES,
 });
