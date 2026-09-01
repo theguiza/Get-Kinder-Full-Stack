@@ -72,7 +72,15 @@ function successDto(overrides = {}) {
       review_status: "needs_gk_review",
       updated_at: "2026-08-22T20:00:00.000Z",
     },
-    candidate: { intake_source_candidate_id: "00000000-0000-4000-8000-000000000801" },
+    evidence_review_decision: {
+      decision_id: "00000000-0000-4000-8000-000000000811",
+      decision_outcome: "needs_more_information",
+    },
+    claim_review_decision: null,
+    candidate: {
+      intake_source_candidate_id: "00000000-0000-4000-8000-000000000801",
+      intake_sensitivity_profile_id: "00000000-0000-4000-8000-000000000802",
+    },
     promotion_decision: { intake_promotion_decision_id: "00000000-0000-4000-8000-000000000901" },
     dimensions: {
       missingness: {

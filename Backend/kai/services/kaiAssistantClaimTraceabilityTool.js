@@ -282,7 +282,9 @@ const TRACEABILITY_CLAIM_REVIEW_KEYS = new Set([
   "review_status",
   "updated_at",
 ]);
-const TRACEABILITY_CANDIDATE_KEYS = new Set(["intake_source_candidate_id"]);
+const TRACEABILITY_CANDIDATE_KEYS = new Set(["intake_source_candidate_id", "intake_sensitivity_profile_id"]);
+const TRACEABILITY_EVIDENCE_REVIEW_DECISION_KEYS = new Set(["decision_id", "decision_outcome"]);
+const TRACEABILITY_CLAIM_REVIEW_DECISION_KEYS = new Set(["decision_id", "decision_outcome", "approved_audiences"]);
 const TRACEABILITY_PROMOTION_DECISION_KEYS = new Set(["intake_promotion_decision_id"]);
 const TRACEABILITY_GAP_ITEM_KEYS = new Set([
   "gap_log_item_id",
@@ -312,6 +314,10 @@ const TRACEABILITY_CONFLICT_GROUP_KEYS = new Set([
 
 function validateExactSafeObject(value, keys) {
   return hasExactKeys(value, keys) && Object.entries(value).every(([key, childValue]) => validateMetadataSafeValue(key, childValue));
+}
+
+function validateNullableExactSafeObject(value, keys) {
+  return value === null || validateExactSafeObject(value, keys);
 }
 
 function validateClaim(claim) {
@@ -356,6 +362,8 @@ function validateSuccessDto(data) {
     "source",
     "source_version",
     "claim_review",
+    "evidence_review_decision",
+    "claim_review_decision",
     "candidate",
     "promotion_decision",
     "dimensions",
@@ -378,6 +386,8 @@ function validateSuccessDto(data) {
     validateExactSafeObject(data.source, TRACEABILITY_SOURCE_KEYS) &&
     validateExactSafeObject(data.source_version, TRACEABILITY_SOURCE_VERSION_KEYS) &&
     validateExactSafeObject(data.claim_review, TRACEABILITY_CLAIM_REVIEW_KEYS) &&
+    validateNullableExactSafeObject(data.evidence_review_decision, TRACEABILITY_EVIDENCE_REVIEW_DECISION_KEYS) &&
+    validateNullableExactSafeObject(data.claim_review_decision, TRACEABILITY_CLAIM_REVIEW_DECISION_KEYS) &&
     validateExactSafeObject(data.candidate, TRACEABILITY_CANDIDATE_KEYS) &&
     validateExactSafeObject(data.promotion_decision, TRACEABILITY_PROMOTION_DECISION_KEYS) &&
     validateArrayEntries(data.gap_items, TRACEABILITY_GAP_ITEM_KEYS) &&
