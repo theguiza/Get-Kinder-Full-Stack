@@ -334,7 +334,7 @@ async function loadCurrentStateBatches(tx, { organizationId, claimIds }) {
 
   const followupRows = await batchRead(
     tx, organizationId, claimIds,
-    `SELECT client_followup_item_id, organization_id, claim_id, gap_log_item_id, dimension_key
+    `SELECT client_followup_item_id, organization_id, claim_id, gap_log_item_id, dimension_key, question_text
        FROM kai.client_followup_items
       WHERE organization_id = $1::uuid AND claim_id = ANY($2::uuid[])
       ORDER BY claim_id ASC, dimension_key ASC, client_followup_item_id ASC`,
