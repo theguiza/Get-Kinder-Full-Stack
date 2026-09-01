@@ -17,6 +17,20 @@ import { listClientFollowupWorkflowsForOrganization } from "../db/kaiIntakeQueri
 const LIST_CLIENT_FOLLOWUP_WORKFLOWS_ALLOWED_ROLES = new Set(["client_reviewer"]);
 const LIST_CLIENT_FOLLOWUP_WORKFLOWS_OPERATION = "list_client_followup_workflows";
 
+/**
+ * Assistant-specific read boundary for the impact_evidence_library KAI
+ * surface. This is NOT the P2-11 client_reviewer read above - it is a
+ * separate authorization boundary (gk_admin/gk_operator/gk_reviewer, the
+ * same role set already governing the other three Impact Library tools and
+ * already governing this same follow-up state as surfaced per-claim by
+ * get_claim_traceability_summary) layered over the *same* tenant-scoped
+ * query and DTO shape, so the P2-11 client_reviewer route/service keeps its
+ * original role boundary and route semantics untouched.
+ */
+const IMPACT_LIBRARY_CLIENT_FOLLOWUP_ALLOWED_ROLES = new Set(["gk_admin", "gk_operator", "gk_reviewer"]);
+const LIST_CLIENT_FOLLOWUP_WORKFLOWS_FOR_IMPACT_LIBRARY_OPERATION =
+  "list_client_followup_workflows_impact_library";
+
 function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -85,9 +99,48 @@ export async function listClientFollowupWorkflows(input, dependencies = {}) {
   return { ok: true, data: { items: rows.map(toSafeWorkflow) }, error: null };
 }
 
+export async function listClientFollowupWorkflowsForImpactLibrary(input, dependencies = {}) {
+  if (!isKaiSprint2Enabled(dependencies.env || process.env)) {
+    return buildKaiError("feature_disabled");
+  }
+  if (!isListClientFollowupWorkflowsInput(input)) {
+    return buildKaiError("validation_blocker");
+  }
+
+  const { actorContext } = input;
+  if (!isMappedHumanActor(actorContext)) {
+    return buildKaiError("authorization_denied");
+  }
+
+  const auth = validateActorCanPerformOperation(
+    actorContext,
+    LIST_CLIENT_FOLLOWUP_WORKFLOWS_FOR_IMPACT_LIBRARY_OPERATION,
+    input.organizationId,
+    { allowedRoles: IMPACT_LIBRARY_CLIENT_FOLLOWUP_ALLOWED_ROLES },
+  );
+  if (!auth.ok) {
+    return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });
+  }
+
+  const tenant = validateTenantBoundaryConsistency({
+    expectedOrganizationId: input.organizationId,
+    payload: { organization_id: input.organizationId },
+  });
+  if (tenant.severity === "blocker") {
+    return buildKaiError("tenant_boundary_violation", { blockers: [tenant] });
+  }
+
+  const listWorkflows = dependencies.listClientFollowupWorkflowsForOrganization || listClientFollowupWorkflowsForOrganization;
+  const rows = await listWorkflows({ organizationId: input.organizationId });
+
+  return { ok: true, data: { items: rows.map(toSafeWorkflow) }, error: null };
+}
+
 export const __clientFollowupReadServiceContract = Object.freeze({
   LIST_CLIENT_FOLLOWUP_WORKFLOWS_ALLOWED_ROLES,
   LIST_CLIENT_FOLLOWUP_WORKFLOWS_OPERATION,
+  IMPACT_LIBRARY_CLIENT_FOLLOWUP_ALLOWED_ROLES,
+  LIST_CLIENT_FOLLOWUP_WORKFLOWS_FOR_IMPACT_LIBRARY_OPERATION,
 });
 
 export const __clientFollowupReadServiceTestables = Object.freeze({

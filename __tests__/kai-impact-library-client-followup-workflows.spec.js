@@ -11,19 +11,30 @@ import {
   IMPACT_EVIDENCE_LIBRARY_SURFACE,
 } from "../Backend/services/kai-tool-definitions.js";
 import { executeToolCall, __testables as executorTestables } from "../Backend/services/kai-tool-executor.js";
-import { listClientFollowupWorkflows } from "../Backend/kai/services/kaiClientFollowupReadService.js";
+import {
+  listClientFollowupWorkflows,
+  listClientFollowupWorkflowsForImpactLibrary,
+} from "../Backend/kai/services/kaiClientFollowupReadService.js";
 
 /**
- * Impact Evidence Intelligence (Capability C — "required action"): the first
+ * Impact Evidence Intelligence (Capability C - "required action"): the first
  * KAI Impact Evidence Library capability this repository did not already
  * expose. The existing three governed tools (list_governed_claims,
  * get_claim_traceability_summary, list_eligible_claims_for_audience) never
  * surface a client-follow-up's dimension_key/question_text at any scope, and
  * only get_claim_traceability_summary surfaces follow-up state at all - and
- * only for one already-known claimId. This wraps the existing, already-
- * governed, already-tested P2-11 read companion
- * (kaiClientFollowupReadService.listClientFollowupWorkflows) as a fourth
- * operation on the same P2-07 assistant wrapper, scoped only to the
+ * only for one already-known claimId, to the same gk_admin/gk_operator/
+ * gk_reviewer role set that already governs every other tool on this
+ * surface (and, one layer up, that already governs whether an actor can even
+ * establish /impact-library engagement context in the first place -
+ * kaiEngagementContextService.listAuthorizedEngagements is gk_admin/
+ * gk_operator only). This wraps a NEW assistant-specific read boundary,
+ * listClientFollowupWorkflowsForImpactLibrary, layered over the same
+ * tenant-scoped query/DTO shape as the existing, already-governed,
+ * already-tested P2-11 client_reviewer-only read companion
+ * (kaiClientFollowupReadService.listClientFollowupWorkflows) - which keeps
+ * its own original role boundary and route untouched - as a fourth operation
+ * on the same P2-07 assistant wrapper, scoped only to the
  * impact_evidence_library KAI surface.
  */
 
@@ -47,6 +58,14 @@ const gkReviewerActorContext = Object.freeze({
     { organization_id: ORG, membership_status: "active", role_name: "gk_reviewer" },
   ],
 });
+const gkAdminActorContext = Object.freeze({
+  actorType: "human",
+  actorUserId: "90000000-0000-4000-8000-000000000003",
+  source: "public.userdata",
+  organizationMemberships: [
+    { organization_id: ORG, membership_status: "active", role_name: "gk_admin" },
+  ],
+});
 const enabledEnv = Object.freeze({
   KAI_SPRINT2_ENABLED: "true",
   KAI_ASSISTANT_TOOLS_ENABLED: "true",
@@ -56,7 +75,7 @@ function request(overrides = {}) {
   return {
     toolName: "list_client_followup_workflows",
     arguments: { organizationId: ORG },
-    actorContext: clientReviewerActorContext,
+    actorContext: gkReviewerActorContext,
     ...overrides,
   };
 }
@@ -114,16 +133,25 @@ test("assistant boundary allowlists exactly four metadata-read operations", () =
   assert.equal(validateAssistantToolAuthorization({ operation: "list_client_followup_workflows" }).severity, "pass");
 });
 
+// --- role authority: this operation now uses the same role set as the other three governed tools ---
+
+test("the assistant-surface role set for list_client_followup_workflows is the same ALLOWED_ROLES as the other three governed tools", () => {
+  assert.deepEqual(
+    [...__assistantClaimTraceabilityToolContract.CLIENT_FOLLOWUP_ALLOWED_ROLES].sort(),
+    [...__assistantClaimTraceabilityToolContract.ALLOWED_ROLES].sort(),
+  );
+});
+
 // --- 6: the intended governed service/read path is used ---
 
-test("wrapper delegates exactly once to kaiClientFollowupReadService.listClientFollowupWorkflows and passes through its result", async () => {
+test("wrapper delegates exactly once to kaiClientFollowupReadService.listClientFollowupWorkflowsForImpactLibrary and passes through its result", async () => {
   const serviceResult = { ok: true, data: { items: [workflowEntry()] }, error: null };
   const calls = [];
   const result = await getClaimTraceabilitySummaryTool(request(), {
     env: enabledEnv,
     clientFollowupReadServiceDependencies: { env: { KAI_SPRINT2_ENABLED: "true" }, marker: "impact-c" },
     importClientFollowupReadService: async () => ({
-      async listClientFollowupWorkflows(payload, dependencies) {
+      async listClientFollowupWorkflowsForImpactLibrary(payload, dependencies) {
         calls.push({ payload, dependencies });
         return serviceResult;
       },
@@ -131,7 +159,7 @@ test("wrapper delegates exactly once to kaiClientFollowupReadService.listClientF
   });
   assert.equal(result, serviceResult);
   assert.equal(calls.length, 1);
-  assert.deepEqual(calls[0].payload, { organizationId: ORG, actorContext: clientReviewerActorContext });
+  assert.deepEqual(calls[0].payload, { organizationId: ORG, actorContext: gkReviewerActorContext });
   assert.equal(calls[0].dependencies.marker, "impact-c");
 });
 
@@ -148,7 +176,7 @@ test("a tool-supplied organizationId that does not match the server-composed org
     { organizationId: OTHER_ORG },
     USER_ID,
     null,
-    { organizationContext: { organizationId: ORG }, actorContext: clientReviewerActorContext },
+    { organizationContext: { organizationId: ORG }, actorContext: gkReviewerActorContext },
   );
   assert.equal(result.ok, false);
   assert.equal(result.error.code, "tenant_boundary_violation");
@@ -161,8 +189,8 @@ test("wrapper: malformed calls, disabled flags, wrong role, and cross-tenant cal
   const cases = [
     request({ arguments: { organizationId: ORG, extra: true } }),
     request({ arguments: { organizationId: "" } }),
-    request({ actorContext: gkReviewerActorContext }),
-    request({ actorContext: { ...clientReviewerActorContext, organizationMemberships: [] } }),
+    request({ actorContext: clientReviewerActorContext }),
+    request({ actorContext: { ...gkReviewerActorContext, organizationMemberships: [] } }),
     request({ actorContext: { actorType: "assistant" } }),
   ];
   for (const input of cases) {
@@ -170,7 +198,7 @@ test("wrapper: malformed calls, disabled flags, wrong role, and cross-tenant cal
     const result = await getClaimTraceabilitySummaryTool(input, {
       env: enabledEnv,
       importClientFollowupReadService: async () => ({
-        async listClientFollowupWorkflows() {
+        async listClientFollowupWorkflowsForImpactLibrary() {
           calls += 1;
           throw new Error("must not be called");
         },
@@ -183,7 +211,7 @@ test("wrapper: malformed calls, disabled flags, wrong role, and cross-tenant cal
   const disabledResult = await getClaimTraceabilitySummaryTool(request(), {
     env: {},
     importClientFollowupReadService: async () => ({
-      async listClientFollowupWorkflows() {
+      async listClientFollowupWorkflowsForImpactLibrary() {
         throw new Error("must not be called");
       },
     }),
@@ -191,13 +219,32 @@ test("wrapper: malformed calls, disabled flags, wrong role, and cross-tenant cal
   assert.equal(disabledResult.error.code, "feature_disabled");
 });
 
-// --- gk staff denied; client_reviewer authorized (role/authority semantics preserved) ---
+// --- production defect this package repairs: GK staff are the only actors who
+// can ever reach /impact-library (establishing engagement context already
+// requires gk_admin/gk_operator), so they must be authorized here; a
+// client-only actor, who can never reach this surface's engagement context in
+// the first place, is denied ---
 
-test("a GK-staff-only actor without a client_reviewer membership is denied authorization_denied", async () => {
-  const result = await getClaimTraceabilitySummaryTool(request({ actorContext: gkReviewerActorContext }), {
+test("a GK-staff actor (gk_admin, gk_operator, or gk_reviewer) with active membership is authorized", async () => {
+  for (const actorContext of [gkReviewerActorContext, gkAdminActorContext]) {
+    const serviceResult = { ok: true, data: { items: [] }, error: null };
+    const result = await getClaimTraceabilitySummaryTool(request({ actorContext }), {
+      env: enabledEnv,
+      importClientFollowupReadService: async () => ({
+        async listClientFollowupWorkflowsForImpactLibrary() {
+          return serviceResult;
+        },
+      }),
+    });
+    assert.equal(result, serviceResult);
+  }
+});
+
+test("a client-only actor without a GK role is denied authorization_denied", async () => {
+  const result = await getClaimTraceabilitySummaryTool(request({ actorContext: clientReviewerActorContext }), {
     env: enabledEnv,
     importClientFollowupReadService: async () => ({
-      async listClientFollowupWorkflows() {
+      async listClientFollowupWorkflowsForImpactLibrary() {
         throw new Error("must not be called");
       },
     }),
@@ -220,7 +267,7 @@ test("wrapper: output tampering or prohibited fields fail closed with system_err
     const result = await getClaimTraceabilitySummaryTool(request(), {
       env: enabledEnv,
       importClientFollowupReadService: async () => ({
-        async listClientFollowupWorkflows() {
+        async listClientFollowupWorkflowsForImpactLibrary() {
           return { ok: true, data, error: null };
         },
       }),
@@ -235,7 +282,7 @@ test("wrapper: a well-formed workflow list passes output validation unchanged", 
   const result = await getClaimTraceabilitySummaryTool(request(), {
     env: enabledEnv,
     importClientFollowupReadService: async () => ({
-      async listClientFollowupWorkflows() {
+      async listClientFollowupWorkflowsForImpactLibrary() {
         return serviceResult;
       },
     }),
@@ -271,13 +318,73 @@ test("the three pre-existing governed operations are unaffected by the new opera
   assert.equal(result, governedResult);
 });
 
-// --- 11: reuses the already-governed P2-11 service directly (no second source of truth) ---
+// --- 11: the original P2-11 client_reviewer-only service remains untouched by this wiring;
+// the new assistant-specific function is a separate authorization boundary over the same query ---
 
-test("the underlying P2-11 service itself remains client_reviewer-only and untouched by this wiring", async () => {
-  const result = await listClientFollowupWorkflows(
+test("the original P2-11 service (listClientFollowupWorkflows) remains client_reviewer-only and untouched by this wiring", async () => {
+  const deniedForGk = await listClientFollowupWorkflows(
     { organizationId: ORG, actorContext: gkReviewerActorContext },
     { env: enabledEnv, listClientFollowupWorkflowsForOrganization: async () => { throw new Error("must not be called"); } },
   );
-  assert.equal(result.ok, false);
-  assert.equal(result.error.code, "authorization_denied");
+  assert.equal(deniedForGk.ok, false);
+  assert.equal(deniedForGk.error.code, "authorization_denied");
+
+  const row = workflowEntry();
+  const allowedForClientReviewer = await listClientFollowupWorkflows(
+    { organizationId: ORG, actorContext: clientReviewerActorContext },
+    { env: enabledEnv, listClientFollowupWorkflowsForOrganization: async () => [row] },
+  );
+  assert.equal(allowedForClientReviewer.ok, true);
+  assert.deepEqual(allowedForClientReviewer.data.items, [row]);
+});
+
+test("the new assistant-specific function (listClientFollowupWorkflowsForImpactLibrary) denies client_reviewer and authorizes GK staff, reusing the same tenant-scoped query and DTO shape", async () => {
+  const deniedForClientReviewer = await listClientFollowupWorkflowsForImpactLibrary(
+    { organizationId: ORG, actorContext: clientReviewerActorContext },
+    { env: enabledEnv, listClientFollowupWorkflowsForOrganization: async () => { throw new Error("must not be called"); } },
+  );
+  assert.equal(deniedForClientReviewer.ok, false);
+  assert.equal(deniedForClientReviewer.error.code, "authorization_denied");
+
+  const row = workflowEntry();
+  let queryCalls = 0;
+  const allowedForGkReviewer = await listClientFollowupWorkflowsForImpactLibrary(
+    { organizationId: ORG, actorContext: gkReviewerActorContext },
+    {
+      env: enabledEnv,
+      listClientFollowupWorkflowsForOrganization: async ({ organizationId }) => {
+        queryCalls += 1;
+        assert.equal(organizationId, ORG);
+        return [row];
+      },
+    },
+  );
+  assert.equal(allowedForGkReviewer.ok, true);
+  assert.equal(queryCalls, 1);
+  assert.deepEqual(allowedForGkReviewer.data.items, [
+    {
+      claim_id: row.claim_id,
+      client_followup_item_id: row.client_followup_item_id,
+      dimension_key: row.dimension_key,
+      question_text: row.question_text,
+      review_queue_item_id: row.review_queue_item_id,
+      queue_status: row.queue_status,
+      review_status: row.review_status,
+      updated_at: row.updated_at,
+    },
+  ]);
+});
+
+test("the new assistant-specific function fails closed for cross-tenant and disabled-feature attempts, same as the original", async () => {
+  const crossTenant = await listClientFollowupWorkflowsForImpactLibrary(
+    { organizationId: ORG, actorContext: { ...gkReviewerActorContext, organizationMemberships: [] } },
+    { env: enabledEnv, listClientFollowupWorkflowsForOrganization: async () => { throw new Error("must not be called"); } },
+  );
+  assert.equal(crossTenant.ok, false);
+
+  const disabled = await listClientFollowupWorkflowsForImpactLibrary(
+    { organizationId: ORG, actorContext: gkReviewerActorContext },
+    { env: {}, listClientFollowupWorkflowsForOrganization: async () => { throw new Error("must not be called"); } },
+  );
+  assert.equal(disabled.error.code, "feature_disabled");
 });

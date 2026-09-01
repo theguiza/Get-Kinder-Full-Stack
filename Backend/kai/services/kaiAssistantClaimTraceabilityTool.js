@@ -27,10 +27,20 @@ const CLIENT_FOLLOWUP_ARGUMENT_KEYS = new Set(["organizationId"]);
 const GOVERNED_CLAIMS_MAX_LIMIT = 25;
 const REQUESTED_AUDIENCES = new Set(["internal", "funder", "public"]);
 const ALLOWED_ROLES = new Set(["gk_admin", "gk_operator", "gk_reviewer"]);
-// P2-11's read companion is deliberately scoped to client_reviewer only (see
-// kaiClientFollowupReadService.js) - a different, narrower authority than the
-// GK-staff-only ALLOWED_ROLES above, never unioned with it.
-const CLIENT_FOLLOWUP_ALLOWED_ROLES = new Set(["client_reviewer"]);
+// The impact_evidence_library surface (this wrapper) is only ever reachable
+// by gk_admin/gk_operator/gk_reviewer actors - establishing /impact-library
+// engagement context itself already requires gk_admin/gk_operator
+// (kaiEngagementContextService.listAuthorizedEngagements), and the other
+// three governed tools on this surface already require this exact role set.
+// get_claim_traceability_summary already exposes this same follow-up
+// workflow state (dimension_key/workflow_status/review_status) to this same
+// role set, per claim - so list_client_followup_workflows uses ALLOWED_ROLES
+// here too, via the separate assistant-specific authorization boundary in
+// kaiClientFollowupReadService.js#listClientFollowupWorkflowsForImpactLibrary.
+// This is intentionally NOT the P2-11 client_reviewer-only read
+// (kaiClientFollowupReadService.js#listClientFollowupWorkflows), which keeps
+// its own original role boundary for its own existing caller, untouched.
+const CLIENT_FOLLOWUP_ALLOWED_ROLES = ALLOWED_ROLES;
 const PRESERVED_FAILURE_CODES = new Set([
   "not_found",
   "conflict_current_state_changed",
@@ -604,9 +614,9 @@ export async function getClaimTraceabilitySummaryTool(input, dependencies = {}) 
     const serviceModule = await (
       dependencies.importClientFollowupReadService || importDefaultClientFollowupReadService
     )();
-    if (typeof serviceModule?.listClientFollowupWorkflows !== "function") return systemError();
+    if (typeof serviceModule?.listClientFollowupWorkflowsForImpactLibrary !== "function") return systemError();
 
-    const result = await serviceModule.listClientFollowupWorkflows(
+    const result = await serviceModule.listClientFollowupWorkflowsForImpactLibrary(
       {
         organizationId: input.arguments.organizationId,
         actorContext,

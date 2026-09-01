@@ -341,7 +341,7 @@ export const TOOL_DEFINITIONS = {
   list_client_followup_workflows: {
     name: "list_client_followup_workflows",
     description:
-      "List every currently open client-follow-up question required across this organization's governed evidence (which claim it blocks, what needs to be confirmed, and its review status). Requires an active client_reviewer organization membership. Denied for GK-staff-only actors without that membership.",
+      "List every currently open client-follow-up question required across this organization's governed evidence (which claim it blocks, what needs to be confirmed, and its review status). Requires an active gk_admin, gk_operator, or gk_reviewer organization membership - the same role set as the other governed Impact Library tools. Denied for client-only actors.",
     input_schema: {
       type: "object",
       properties: {
