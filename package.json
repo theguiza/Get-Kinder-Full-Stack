@@ -29,6 +29,8 @@
     "verify:kai-sprint2-a2-impact-evaluation": "node scripts/kai-sprint2-a2-impact-evaluation-local-postgres.js",
     "verify:kai-sprint2-b1-1-baseline-impact-requirements": "node scripts/kai-sprint2-b1-1-baseline-impact-requirements-local-postgres.js",
     "test:kai-sprint2-b1-1-baseline-impact-requirements": "node --test __tests__/kai-sprint2-b1-1-baseline-impact-requirements-schema-contract.spec.js",
+    "verify:kai-sprint2-b1-3-accepted-catalogue-persistence": "node scripts/kai-sprint2-b1-3-accepted-catalogue-persistence-local-postgres.js",
+    "test:kai-sprint2-b1-3-accepted-catalogue-persistence": "node --test __tests__/kai-sprint2-b1-3-accepted-catalogue-persistence-schema-contract.spec.js",
     "verify:kai-sprint2-p2-07-assistant-claim-traceability-tool": "node scripts/kai-sprint2-p2-07-assistant-claim-traceability-tool-local-postgres.js",
     "verify:kai-sprint2-p2-08-eligible-claims-for-audience": "node scripts/kai-sprint2-p2-08-eligible-claims-for-audience-local-postgres.js",
     "verify:kai-sprint2-p2-09-human-review": "node scripts/kai-sprint2-p2-09-human-review-local-postgres.js",
