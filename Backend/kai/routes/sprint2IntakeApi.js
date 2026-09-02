@@ -43,6 +43,7 @@ import {
   createProductionMetadataOnlyAuditForEvidenceReview,
   createProductionMetadataOnlyAuditForGeneratedContentDraft,
   createProductionMetadataOnlyAuditForGeneratedContentReview,
+  createProductionMetadataOnlyAuditForRequirementAssessment,
   createProductionMetadataOnlyAuditForSourceVersion,
 } from "../services/kaiMetadataOnlyAuditComposition.js";
 
@@ -2551,6 +2552,112 @@ router.post(
   },
 );
 
+let requirementAssessmentServicePromise = null;
+async function getRequirementAssessmentService() {
+  if (intakeServiceOverride?.assessOrganizationRequirement) return intakeServiceOverride;
+  requirementAssessmentServicePromise ||= import("../services/kaiRequirementAssessmentService.js");
+  return requirementAssessmentServicePromise;
+}
+
+function requirementAssessmentIdentifiers(req = {}) {
+  const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+  const requirementId = typeof req.params?.requirementId === "string" ? req.params.requirementId : "";
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) || organizationId !== organizationId.toLowerCase()) return null;
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(requirementId) || requirementId !== requirementId.toLowerCase()) return null;
+  return { organizationId, requirementId };
+}
+
+function validateAssessRequirementRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = requirementAssessmentIdentifiers(req);
+  if (!identifiers) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_or_requirement_id")],
+    });
+    return null;
+  }
+  if (Object.keys(requestPayload(req)).length !== 0) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("unknown_field", "body")],
+    });
+    return null;
+  }
+  return identifiers;
+}
+
+/**
+ * KAI C3.A2 organization-scope requirement-assessment write route: creates
+ * or replays a deterministic assessment of exactly `ir_contrib_002`
+ * ("Known limitations affecting confidence in a reported result are
+ * documented") against the organization's current governed evidence/claim
+ * strength state. The caller identifies only the target organization and
+ * requirement via the path; actor, tenant, assessment content (state/
+ * explanation/fingerprint), and provenance are all server-controlled by the
+ * authorized C3.A2 service/repository, never accepted from the request
+ * body. Any requirement other than `ir_contrib_002` fails closed with
+ * `unsupported_requirement` before any write, exactly like every other
+ * "fail closed on the wrong resource" route on this router.
+ */
+router.post(
+  "/admin/organizations/:organizationId/requirements/:requirementId/assessment",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const identifiers = validateAssessRequirementRequestOrSend(req, res);
+    if (!identifiers) return;
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getRequirementAssessmentService();
+      return service.assessOrganizationRequirement({
+        organizationId: identifiers.organizationId,
+        requirementId: identifiers.requirementId,
+        actorContext,
+        now,
+      }, {
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForRequirementAssessment({
+          organizationId: identifiers.organizationId,
+          requirementId: identifiers.requirementId,
+          actorContext,
+          now,
+        }),
+      });
+    }, 201);
+  },
+);
+
+/**
+ * KAI C3.A2 organization-scope requirement-assessment read-back route.
+ * Strictly read-only: recomputes the state_fingerprint live from the
+ * organization's current governed evidence/claim state and returns exactly
+ * the persisted assessment matching that fingerprint (the C2.1 recompute-
+ * and-compare currency mechanism), together with its exact provenance link
+ * sets. Contains no SQL and no direct database access, delegating exactly
+ * once to the authorized C3.A2 service.
+ */
+router.get(
+  "/admin/organizations/:organizationId/requirements/:requirementId/assessment",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const identifiers = requirementAssessmentIdentifiers(req);
+    if (!identifiers) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_or_requirement_id")],
+      });
+    }
+    return invokeService(res, async () => {
+      const service = await getRequirementAssessmentService();
+      return service.getOrganizationRequirementAssessment({
+        organizationId: identifiers.organizationId,
+        requirementId: identifiers.requirementId,
+        actorContext: sprint2MappedActorContext(req),
+      });
+    });
+  },
+);
+
 export default router;
 
 export const __testables = {
@@ -2599,6 +2706,8 @@ export const __testables = {
   validateCoverageReviewDecisionRequestOrSend,
   clientFollowupCompletionIdentifiers,
   validateClientFollowupCompletionRequestOrSend,
+  requirementAssessmentIdentifiers,
+  validateAssessRequirementRequestOrSend,
   safeKaiResponseSummary,
   logKaiSprint2IntakeRequest,
   setIntakeServiceForTest(service) {
