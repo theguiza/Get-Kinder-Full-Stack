@@ -72,6 +72,7 @@ import {
 import sprint2IntakeAuthPreflightApiRouter from "./Backend/kai/routes/sprint2IntakeAuthPreflightApi.js";
 import sprint2IntakeApiRouter from "./Backend/kai/routes/sprint2IntakeApi.js";
 import kaiAccessAdministrationApiRouter from "./Backend/kai/routes/kaiAccessAdministrationApi.js";
+import impactEvaluationApiRouter from "./Backend/kai/routes/impactEvaluationApi.js";
 import { registerKaiP1WorkerCron } from "./Backend/kai/parsing/p1WorkerCron.js";
 import {
   legacyKaiDeprecatedJson,
@@ -542,6 +543,12 @@ app.use(
   requireKaiSprint2Enabled,
   requireKaiSprint2Authenticated,
   kaiAccessAdministrationApiRouter
+);
+app.use(
+  "/api/kai/sprint2/impact-evaluation",
+  requireKaiSprint2Enabled,
+  requireKaiSprint2Authenticated,
+  impactEvaluationApiRouter
 );
 app.use("/api/organizations", organizationsApiRouter);
 app.use("/api/events", eventsApiRouter);
