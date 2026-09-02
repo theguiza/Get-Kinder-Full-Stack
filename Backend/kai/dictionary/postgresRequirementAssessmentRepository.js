@@ -1,8 +1,13 @@
 import {
   SUPPORTED_REQUIREMENT_KEY,
-  computeRequirementAssessmentFingerprint,
-  deriveRequirementAssessmentState,
+  computeRequirementAssessmentFingerprint as computeIrContrib002Fingerprint,
+  deriveRequirementAssessmentState as deriveIrContrib002State,
 } from "../validators/kaiRequirementAssessmentValidators.js";
+import {
+  REQUIREMENT_KEY as IR_COMM_002_REQUIREMENT_KEY,
+  computeRequirementAssessmentFingerprint as computeIrComm002Fingerprint,
+  deriveRequirementAssessmentState as deriveIrComm002State,
+} from "../validators/kaiCommunicationAccountabilityAssessmentValidators.js";
 
 /**
  * KAI C3.A3.B durable organization-scope requirement assessment for exactly
@@ -162,7 +167,8 @@ async function loadCurrentEvidenceDecisionsByItemId(tx, { organizationId }) {
 
 async function loadCurrentClaimDecisionsByClaimId(tx, { organizationId }) {
   const { rows } = await tx.query(
-    `SELECT decision_id::text AS decision_id, claim_id::text AS claim_id, decision_outcome
+    `SELECT decision_id::text AS decision_id, claim_id::text AS claim_id, decision_outcome,
+            decided_by::text AS decided_by, decided_by_role
        FROM kai.claim_review_decisions d
       WHERE organization_id = $1::uuid
         AND NOT EXISTS (
@@ -234,19 +240,164 @@ async function loadGovernedAssessmentInputs(tx, { organizationId, filterCurrentG
 }
 
 /**
- * Verifies the requirement exists at all and, if so, that it is the one
- * requirement this package supports. Returns either
- * { ok: true, requirement } or { ok: false, failure: <failure(...) result> }.
+ * `ir_comm_002` governed inputs - claims only (no evidence items, no
+ * gaps). Reuses `loadGovernedClaimIds` and
+ * `loadCurrentClaimDecisionsByClaimId` verbatim, unchanged from the
+ * ir_contrib_002 path above, since the "current lineage-head decision per
+ * claim_id" fact is identical for both requirements - only what each
+ * requirement does with that fact differs.
+ */
+async function loadGovernedCommunicationAccountabilityInputs(tx, { organizationId }) {
+  const claimIds = await loadGovernedClaimIds(tx, { organizationId });
+  const claimDecisionsByClaimId = await loadCurrentClaimDecisionsByClaimId(tx, { organizationId });
+
+  const claims = claimIds.map((claimId) => {
+    const decision = claimDecisionsByClaimId.get(claimId) || null;
+    return {
+      claimId,
+      decisionId: decision ? decision.decision_id : null,
+      decidedBy: decision ? decision.decided_by : null,
+      decidedByRole: decision ? decision.decided_by_role : null,
+    };
+  });
+
+  return { claims };
+}
+
+/**
+ * Explicit two-entry rule table (NOT a generic plugin/catalogue system):
+ * exactly the two requirement keys this repository supports, each mapped to
+ * its own loader/state-derivation/fingerprint/provenance-write/expected-
+ * provenance-ids functions plus its own audit labels. `ir_contrib_002`'s
+ * entry is byte-identical in behavior to the pre-C3.B2 code path - it still
+ * calls the same `loadGovernedAssessmentInputs`/`deriveIrContrib002State`/
+ * `computeIrContrib002Fingerprint` functions and writes the same five link
+ * tables. `ir_comm_002`'s entry writes only claim membership and claim
+ * review-decision provenance - never evidence or gap provenance.
+ */
+const REQUIREMENT_ASSESSMENT_RULES = Object.freeze({
+  [SUPPORTED_REQUIREMENT_KEY]: Object.freeze({
+    requirementKey: SUPPORTED_REQUIREMENT_KEY,
+    async loadInputs(tx, { organizationId, filterCurrentGaps }) {
+      return loadGovernedAssessmentInputs(tx, { organizationId, filterCurrentGaps });
+    },
+    deriveState(inputs) {
+      return deriveIrContrib002State(inputs);
+    },
+    computeFingerprint(inputs) {
+      return computeIrContrib002Fingerprint(inputs);
+    },
+    async writeProvenance(tx, { organizationId, requirementAssessmentId, inputs }) {
+      for (const evidenceItem of inputs.evidenceItems) {
+        await insertEvidenceLink(tx, {
+          organizationId,
+          requirementAssessmentId,
+          evidenceItemId: evidenceItem.evidenceItemId,
+        });
+        if (evidenceItem.decisionId !== null) {
+          await insertEvidenceDecisionLink(tx, {
+            organizationId,
+            requirementAssessmentId,
+            evidenceItemId: evidenceItem.evidenceItemId,
+            decisionId: evidenceItem.decisionId,
+          });
+        }
+      }
+      for (const claim of inputs.claims) {
+        await insertClaimLink(tx, {
+          organizationId,
+          requirementAssessmentId,
+          claimId: claim.claimId,
+        });
+        if (claim.decisionId !== null) {
+          await insertClaimDecisionLink(tx, {
+            organizationId,
+            requirementAssessmentId,
+            claimId: claim.claimId,
+            decisionId: claim.decisionId,
+          });
+        }
+        for (const gap of claim.gaps) {
+          await insertGapLink(tx, {
+            organizationId,
+            requirementAssessmentId,
+            claimId: claim.claimId,
+            gap,
+          });
+        }
+      }
+    },
+    expectedProvenanceIds(inputs) {
+      return {
+        evidenceItemIds: inputs.evidenceItems.map((row) => row.evidenceItemId),
+        claimIds: inputs.claims.map((row) => row.claimId),
+        evidenceDecisionIds: inputs.evidenceItems.filter((row) => row.decisionId !== null).map((row) => row.decisionId),
+        claimDecisionIds: inputs.claims.filter((row) => row.decisionId !== null).map((row) => row.decisionId),
+        gapLogItemIds: inputs.claims.flatMap((claim) => claim.gaps.map((gap) => gap.gapLogItemId)),
+      };
+    },
+    attemptedOperation: "c3_a2_requirement_assessment_created",
+    validatorKey: "VAL-KAI-C3-A2-001",
+  }),
+  [IR_COMM_002_REQUIREMENT_KEY]: Object.freeze({
+    requirementKey: IR_COMM_002_REQUIREMENT_KEY,
+    async loadInputs(tx, { organizationId }) {
+      return loadGovernedCommunicationAccountabilityInputs(tx, { organizationId });
+    },
+    deriveState(inputs) {
+      return deriveIrComm002State(inputs);
+    },
+    computeFingerprint(inputs) {
+      return computeIrComm002Fingerprint(inputs);
+    },
+    async writeProvenance(tx, { organizationId, requirementAssessmentId, inputs }) {
+      for (const claim of inputs.claims) {
+        await insertClaimLink(tx, {
+          organizationId,
+          requirementAssessmentId,
+          claimId: claim.claimId,
+        });
+        if (claim.decisionId !== null) {
+          await insertClaimDecisionLink(tx, {
+            organizationId,
+            requirementAssessmentId,
+            claimId: claim.claimId,
+            decisionId: claim.decisionId,
+          });
+        }
+      }
+    },
+    expectedProvenanceIds(inputs) {
+      return {
+        evidenceItemIds: [],
+        claimIds: inputs.claims.map((row) => row.claimId),
+        evidenceDecisionIds: [],
+        claimDecisionIds: inputs.claims.filter((row) => row.decisionId !== null).map((row) => row.decisionId),
+        gapLogItemIds: [],
+      };
+    },
+    attemptedOperation: "c3_b_communication_accountability_requirement_assessment_created",
+    validatorKey: "VAL-KAI-C3-B2-001",
+  }),
+});
+
+/**
+ * Verifies the requirement exists at all and, if so, that it is one of the
+ * exactly two requirements this package supports. Returns either
+ * { ok: true, requirement, rule } or { ok: false, failure: <failure(...) result> }.
  * Callers must check this before touching kai.requirement_assessments or any
  * link table at all - zero writes on an unsupported/nonexistent requirement.
  */
 async function loadSupportedRequirementOrFail(tx, { requirementId }) {
   const requirement = await loadRequirement(tx, { requirementId });
   if (!requirement) return { ok: false, failure: failure("not_found") };
-  if (requirement.requirement_key !== SUPPORTED_REQUIREMENT_KEY) {
+  const rule = Object.hasOwn(REQUIREMENT_ASSESSMENT_RULES, requirement.requirement_key)
+    ? REQUIREMENT_ASSESSMENT_RULES[requirement.requirement_key]
+    : null;
+  if (!rule) {
     return { ok: false, failure: failure("unsupported_requirement") };
   }
-  return { ok: true, requirement };
+  return { ok: true, requirement, rule };
 }
 
 async function insertAssessmentRow(tx, { organizationId, requirementId, assessmentState, explanation, stateFingerprint, actorUserId, now }) {
@@ -472,14 +623,12 @@ export function createPostgresRequirementAssessmentRepository({ runInTransaction
         return await run(async (tx) => {
           const requirementLookup = await loadSupportedRequirementOrFail(tx, { requirementId });
           if (!requirementLookup.ok) return requirementLookup.failure;
+          const rule = requirementLookup.rule;
 
-          const { evidenceItems, claims } = await loadGovernedAssessmentInputs(tx, {
-            organizationId,
-            filterCurrentGaps: filterCurrentGapsFn,
-          });
+          const inputs = await rule.loadInputs(tx, { organizationId, filterCurrentGaps: filterCurrentGapsFn });
 
-          const { assessmentState, explanation } = deriveRequirementAssessmentState({ evidenceItems, claims });
-          const stateFingerprint = computeRequirementAssessmentFingerprint({ evidenceItems, claims });
+          const { assessmentState, explanation } = rule.deriveState(inputs);
+          const stateFingerprint = rule.computeFingerprint(inputs);
 
           const insertedRow = await insertAssessmentRow(tx, {
             organizationId,
@@ -508,67 +657,20 @@ export function createPostgresRequirementAssessmentRepository({ runInTransaction
           // committed.
           const requirementAssessmentId = insertedRow.requirement_assessment_id;
 
-          for (const evidenceItem of evidenceItems) {
-            await insertEvidenceLink(tx, {
-              organizationId,
-              requirementAssessmentId,
-              evidenceItemId: evidenceItem.evidenceItemId,
-            });
-            if (evidenceItem.decisionId !== null) {
-              await insertEvidenceDecisionLink(tx, {
-                organizationId,
-                requirementAssessmentId,
-                evidenceItemId: evidenceItem.evidenceItemId,
-                decisionId: evidenceItem.decisionId,
-              });
-            }
-          }
-          for (const claim of claims) {
-            await insertClaimLink(tx, {
-              organizationId,
-              requirementAssessmentId,
-              claimId: claim.claimId,
-            });
-            if (claim.decisionId !== null) {
-              await insertClaimDecisionLink(tx, {
-                organizationId,
-                requirementAssessmentId,
-                claimId: claim.claimId,
-                decisionId: claim.decisionId,
-              });
-            }
-            for (const gap of claim.gaps) {
-              await insertGapLink(tx, {
-                organizationId,
-                requirementAssessmentId,
-                claimId: claim.claimId,
-                gap,
-              });
-            }
-          }
+          await rule.writeProvenance(tx, { organizationId, requirementAssessmentId, inputs });
 
           const persistedProvenance = await readAssessmentProvenance(tx, {
             organizationId,
             requirementAssessmentId,
           });
-          const expectedEvidenceDecisionIds = evidenceItems
-            .filter((row) => row.decisionId !== null)
-            .map((row) => row.decisionId);
-          const expectedClaimDecisionIds = claims
-            .filter((row) => row.decisionId !== null)
-            .map((row) => row.decisionId);
-          const expectedGapLogItemIds = claims.flatMap((claim) => claim.gaps.map((gap) => gap.gapLogItemId));
+          const expectedProvenanceIds = rule.expectedProvenanceIds(inputs);
           if (!persistedAssessmentMatchesExpected(insertedRow, persistedProvenance, {
             organizationId,
             requirementId,
             assessmentState,
             explanation,
             stateFingerprint,
-            evidenceItemIds: evidenceItems.map((row) => row.evidenceItemId),
-            claimIds: claims.map((row) => row.claimId),
-            evidenceDecisionIds: expectedEvidenceDecisionIds,
-            claimDecisionIds: expectedClaimDecisionIds,
-            gapLogItemIds: expectedGapLogItemIds,
+            ...expectedProvenanceIds,
           })) {
             rollbackFailure("system_error");
           }
@@ -576,10 +678,10 @@ export function createPostgresRequirementAssessmentRepository({ runInTransaction
           let preparedAudit;
           try {
             preparedAudit = prepareRequiredAudit(metadataOnlyAudit, {
-              attempted_operation: "c3_a2_requirement_assessment_created",
+              attempted_operation: rule.attemptedOperation,
               requirement_id: requirementId,
               requirement_assessment_id: requirementAssessmentId,
-              validator_key: "VAL-KAI-C3-A2-001",
+              validator_key: rule.validatorKey,
             }, tx);
           } catch {
             rollbackFailure("validation_blocker");
@@ -608,12 +710,10 @@ export function createPostgresRequirementAssessmentRepository({ runInTransaction
           const requirementLookup = await loadSupportedRequirementOrFail(tx, { requirementId });
           if (!requirementLookup.ok) return requirementLookup.failure;
           const requirement = requirementLookup.requirement;
+          const rule = requirementLookup.rule;
 
-          const { evidenceItems, claims } = await loadGovernedAssessmentInputs(tx, {
-            organizationId,
-            filterCurrentGaps: filterCurrentGapsFn,
-          });
-          const stateFingerprint = computeRequirementAssessmentFingerprint({ evidenceItems, claims });
+          const inputs = await rule.loadInputs(tx, { organizationId, filterCurrentGaps: filterCurrentGapsFn });
+          const stateFingerprint = rule.computeFingerprint(inputs);
 
           const currentRow = await readExistingAssessmentRow(tx, { organizationId, requirementId, stateFingerprint });
           if (!currentRow) return failure("not_found");

@@ -36,6 +36,8 @@
     "verify:kai-sprint2-c3-a3-requirement-assessment-decision-gap-provenance": "node scripts/kai-sprint2-c3-a3-requirement-assessment-decision-gap-provenance-local-postgres.js",
     "verify:kai-sprint2-c3-a3-b-ir-contrib-002-repair": "node scripts/kai-sprint2-c3-a3-b-ir-contrib-002-repair-local-postgres.js",
     "test:kai-sprint2-c3-a3-b-ir-contrib-002-repair": "node --test __tests__/kai-sprint2-c3-a3-b-ir-contrib-002-repair-validators.spec.js",
+    "verify:kai-sprint2-c3-b2-ir-comm-002": "node scripts/kai-sprint2-c3-b2-ir-comm-002-local-postgres.js",
+    "test:kai-sprint2-c3-b2-ir-comm-002": "node --test __tests__/kai-sprint2-c3-b2-ir-comm-002-validators.spec.js",
     "verify:kai-sprint2-p2-07-assistant-claim-traceability-tool": "node scripts/kai-sprint2-p2-07-assistant-claim-traceability-tool-local-postgres.js",
     "verify:kai-sprint2-p2-08-eligible-claims-for-audience": "node scripts/kai-sprint2-p2-08-eligible-claims-for-audience-local-postgres.js",
     "verify:kai-sprint2-p2-09-human-review": "node scripts/kai-sprint2-p2-09-human-review-local-postgres.js",
