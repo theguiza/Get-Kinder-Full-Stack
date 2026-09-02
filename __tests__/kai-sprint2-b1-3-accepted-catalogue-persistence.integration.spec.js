@@ -172,6 +172,19 @@ async function runIntegrationSuite() {
     return pool.query(migrationSql);
   }
 
+  test("canonical drift safety: conflicting source_name fails closed and leaves no partial catalogue change", async () => {
+    const before = await catalogueCounts();
+    await pool.query(
+      "UPDATE kai.requirement_sources SET source_name = 'Tampered Source Name' WHERE source_type = 'kai_standard' AND source_code = 'kai_baseline_impact_requirements'",
+    );
+    await assert.rejects(runMigration(), /B1\.3 canonical drift/);
+    const after = await catalogueCounts();
+    assert.deepEqual(after, before);
+    await pool.query(
+      "UPDATE kai.requirement_sources SET source_name = 'KAI Baseline Impact Requirements' WHERE source_type = 'kai_standard' AND source_code = 'kai_baseline_impact_requirements'",
+    );
+  });
+
   test("canonical drift safety: conflicting framework_name fails closed and leaves no partial catalogue change", async () => {
     const before = await catalogueCounts();
     await pool.query(
