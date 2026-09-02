@@ -5,22 +5,38 @@ import {
 } from "../validators/kaiRequirementAssessmentValidators.js";
 
 /**
- * KAI C3.A2 durable organization-scope requirement assessment for exactly
+ * KAI C3.A3.B durable organization-scope requirement assessment for exactly
  * one requirement - `ir_contrib_002`. This module owns exactly two
  * operations: (1) `assessOrganizationRequirement`, an append-only,
  * idempotent-replay write mirroring C2.1's own
  * `ux_requirement_assessments_c2_1_org_scope_fingerprint` partial-unique-
  * index shape (organization_id, requirement_id, state_fingerprint) WHERE
  * engagement_id IS NULL, plus this requirement's exact evidence/claim
- * provenance links; and (2) `readOrganizationRequirementAssessment`, a
- * read-only recompute-and-compare currency lookup. Neither operation ever
- * accepts or references an engagement_id - organization-level scope only,
- * per C3.A1's owner decision. Neither operation ever writes to
+ * provenance links (C2.1, unchanged), the current review-decision links,
+ * and the current-gap links (both C3.A3's provenance foundation); and
+ * (2) `readOrganizationRequirementAssessment`, a read-only recompute-and-
+ * compare currency lookup. Neither operation ever accepts or references an
+ * engagement_id - organization-level scope only, per C3.A1's owner
+ * decision, unchanged by this repair. Neither operation ever writes to
  * kai.requirement_assessment_evaluation_result_links (impact_evaluation_
  * results is not a material input for ir_contrib_002), and neither ever
- * attempts an UPDATE/DELETE against kai.requirement_assessments or its link
- * tables - the table's own append-only trigger already enforces that at the
- * database level.
+ * attempts an UPDATE/DELETE against kai.requirement_assessments or any of
+ * its link tables - each table's own append-only trigger already enforces
+ * that at the database level.
+ *
+ * C3A3.B replaces the retired C3.A2 N/R algorithm completely: governed
+ * evidence_items/claims are still the universe, but each object's material
+ * state is now its CURRENT P2-12 review-decision-ledger lineage-head
+ * (never the support_strength/claim_strength projection column, and never
+ * a superseded decision), plus, for claims, every currently-applicable
+ * confidence-relevant kai.gap_log_items row - determined by the exact same
+ * fail-closed currency gate claim traceability already uses
+ * (filterCurrentOrganizationEvidenceGaps,
+ * postgresOrganizationEvidenceGapCurrentStateRepository.js). See
+ * Backend/kai/validators/kaiRequirementAssessmentValidators.js for the
+ * classification/fingerprint/state rules themselves - this module only
+ * loads the governed inputs, writes the resulting row plus its provenance,
+ * and rereads/verifies.
  */
 
 const RESULT_STATUS = Object.freeze({
@@ -87,6 +103,11 @@ async function resolveDefaultRunInTransaction() {
   return withTransaction;
 }
 
+async function resolveDefaultGapCurrentStateFilter() {
+  const { filterCurrentOrganizationEvidenceGaps } = await import("./postgresOrganizationEvidenceGapCurrentStateRepository.js");
+  return filterCurrentOrganizationEvidenceGaps;
+}
+
 async function loadRequirement(tx, { requirementId }) {
   const { rows } = await tx.query(
     `SELECT requirement_id::text AS requirement_id, requirement_key, requirement_label
@@ -97,26 +118,119 @@ async function loadRequirement(tx, { requirementId }) {
   return rows[0] || null;
 }
 
-async function loadGovernedEvidenceItems(tx, { organizationId }) {
+async function loadGovernedEvidenceItemIds(tx, { organizationId }) {
   const { rows } = await tx.query(
-    `SELECT evidence_item_id::text AS evidence_item_id, support_strength
+    `SELECT evidence_item_id::text AS evidence_item_id
        FROM kai.evidence_items
       WHERE organization_id = $1::uuid
       ORDER BY evidence_item_id ASC`,
     [organizationId],
   );
-  return rows.map((row) => ({ evidenceItemId: row.evidence_item_id, supportStrength: row.support_strength }));
+  return rows.map((row) => row.evidence_item_id);
 }
 
-async function loadGovernedClaims(tx, { organizationId }) {
+async function loadGovernedClaimIds(tx, { organizationId }) {
   const { rows } = await tx.query(
-    `SELECT claim_id::text AS claim_id, claim_strength
+    `SELECT claim_id::text AS claim_id
        FROM kai.claims
       WHERE organization_id = $1::uuid
       ORDER BY claim_id ASC`,
     [organizationId],
   );
-  return rows.map((row) => ({ claimId: row.claim_id, claimStrength: row.claim_strength }));
+  return rows.map((row) => row.claim_id);
+}
+
+/**
+ * Current lineage-head decision per evidence_item_id/claim_id: the P2-12
+ * ledger's own invariant guarantees a single chain per (organization,
+ * subject), so "the row nothing else supersedes" is exactly one row per
+ * subject that has any decision history at all - never a superseded row,
+ * regardless of how long the chain is.
+ */
+async function loadCurrentEvidenceDecisionsByItemId(tx, { organizationId }) {
+  const { rows } = await tx.query(
+    `SELECT decision_id::text AS decision_id, evidence_item_id::text AS evidence_item_id, decision_outcome
+       FROM kai.evidence_review_decisions d
+      WHERE organization_id = $1::uuid
+        AND NOT EXISTS (
+          SELECT 1 FROM kai.evidence_review_decisions s WHERE s.supersedes_decision_id = d.decision_id
+        )`,
+    [organizationId],
+  );
+  return new Map(rows.map((row) => [row.evidence_item_id, row]));
+}
+
+async function loadCurrentClaimDecisionsByClaimId(tx, { organizationId }) {
+  const { rows } = await tx.query(
+    `SELECT decision_id::text AS decision_id, claim_id::text AS claim_id, decision_outcome
+       FROM kai.claim_review_decisions d
+      WHERE organization_id = $1::uuid
+        AND NOT EXISTS (
+          SELECT 1 FROM kai.claim_review_decisions s WHERE s.supersedes_decision_id = d.decision_id
+        )`,
+    [organizationId],
+  );
+  return new Map(rows.map((row) => [row.claim_id, row]));
+}
+
+/**
+ * Every gap_log_items row for this organization's claims, narrowed to
+ * exactly the currently-applicable subset via the same fail-closed gate
+ * claim traceability itself uses - no new currency rule, no reimplementation
+ * of P2-02 dimension recomputation here.
+ */
+async function loadCurrentGapsByClaimId(tx, { organizationId, filterCurrentGaps }) {
+  const { rows } = await tx.query(
+    `SELECT gap_log_item_id::text AS gap_log_item_id, claim_id::text AS claim_id,
+            evidence_item_id::text AS evidence_item_id, source_version_id::text AS source_version_id,
+            dimension_key, assessment_status
+       FROM kai.gap_log_items
+      WHERE organization_id = $1::uuid`,
+    [organizationId],
+  );
+  const currentRows = await filterCurrentGaps(tx, { organizationId, candidateGapRows: rows });
+  const byClaimId = new Map();
+  for (const row of currentRows) {
+    if (!byClaimId.has(row.claim_id)) byClaimId.set(row.claim_id, []);
+    byClaimId.get(row.claim_id).push(row);
+  }
+  return byClaimId;
+}
+
+async function loadGovernedAssessmentInputs(tx, { organizationId, filterCurrentGaps }) {
+  const evidenceItemIds = await loadGovernedEvidenceItemIds(tx, { organizationId });
+  const claimIds = await loadGovernedClaimIds(tx, { organizationId });
+  const evidenceDecisionsByItemId = await loadCurrentEvidenceDecisionsByItemId(tx, { organizationId });
+  const claimDecisionsByClaimId = await loadCurrentClaimDecisionsByClaimId(tx, { organizationId });
+  const gapsByClaimId = await loadCurrentGapsByClaimId(tx, { organizationId, filterCurrentGaps });
+
+  const evidenceItems = evidenceItemIds.map((evidenceItemId) => {
+    const decision = evidenceDecisionsByItemId.get(evidenceItemId) || null;
+    return {
+      evidenceItemId,
+      decisionId: decision ? decision.decision_id : null,
+      decisionOutcome: decision ? decision.decision_outcome : null,
+    };
+  });
+
+  const claims = claimIds.map((claimId) => {
+    const decision = claimDecisionsByClaimId.get(claimId) || null;
+    const gaps = (gapsByClaimId.get(claimId) || []).map((gap) => ({
+      gapLogItemId: gap.gap_log_item_id,
+      dimensionKey: gap.dimension_key,
+      assessmentStatus: gap.assessment_status,
+      evidenceItemId: gap.evidence_item_id,
+      sourceVersionId: gap.source_version_id,
+    }));
+    return {
+      claimId,
+      decisionId: decision ? decision.decision_id : null,
+      decisionOutcome: decision ? decision.decision_outcome : null,
+      gaps,
+    };
+  });
+
+  return { evidenceItems, claims };
 }
 
 /**
@@ -182,6 +296,31 @@ async function insertClaimLink(tx, { organizationId, requirementAssessmentId, cl
   );
 }
 
+async function insertEvidenceDecisionLink(tx, { organizationId, requirementAssessmentId, evidenceItemId, decisionId }) {
+  await tx.query(
+    `INSERT INTO kai.ra_evidence_review_decision_links (organization_id, requirement_assessment_id, evidence_item_id, decision_id)
+     VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid)`,
+    [organizationId, requirementAssessmentId, evidenceItemId, decisionId],
+  );
+}
+
+async function insertClaimDecisionLink(tx, { organizationId, requirementAssessmentId, claimId, decisionId }) {
+  await tx.query(
+    `INSERT INTO kai.ra_claim_review_decision_links (organization_id, requirement_assessment_id, claim_id, decision_id)
+     VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid)`,
+    [organizationId, requirementAssessmentId, claimId, decisionId],
+  );
+}
+
+async function insertGapLink(tx, { organizationId, requirementAssessmentId, claimId, gap }) {
+  await tx.query(
+    `INSERT INTO kai.ra_gap_links
+       (organization_id, requirement_assessment_id, gap_log_item_id, claim_id, evidence_item_id, source_version_id, dimension_key, assessment_status)
+     VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6::uuid, $7, $8)`,
+    [organizationId, requirementAssessmentId, gap.gapLogItemId, claimId, gap.evidenceItemId, gap.sourceVersionId, gap.dimensionKey, gap.assessmentStatus],
+  );
+}
+
 async function readAssessmentProvenance(tx, { organizationId, requirementAssessmentId }) {
   const evidenceLinkRows = await tx.query(
     `SELECT evidence_item_id::text AS evidence_item_id
@@ -197,9 +336,34 @@ async function readAssessmentProvenance(tx, { organizationId, requirementAssessm
       ORDER BY claim_id ASC`,
     [organizationId, requirementAssessmentId],
   );
+  const evidenceDecisionLinkRows = await tx.query(
+    `SELECT evidence_item_id::text AS evidence_item_id, decision_id::text AS decision_id
+       FROM kai.ra_evidence_review_decision_links
+      WHERE organization_id = $1::uuid AND requirement_assessment_id = $2::uuid
+      ORDER BY evidence_item_id ASC`,
+    [organizationId, requirementAssessmentId],
+  );
+  const claimDecisionLinkRows = await tx.query(
+    `SELECT claim_id::text AS claim_id, decision_id::text AS decision_id
+       FROM kai.ra_claim_review_decision_links
+      WHERE organization_id = $1::uuid AND requirement_assessment_id = $2::uuid
+      ORDER BY claim_id ASC`,
+    [organizationId, requirementAssessmentId],
+  );
+  const gapLinkRows = await tx.query(
+    `SELECT gap_log_item_id::text AS gap_log_item_id, claim_id::text AS claim_id,
+            dimension_key, assessment_status
+       FROM kai.ra_gap_links
+      WHERE organization_id = $1::uuid AND requirement_assessment_id = $2::uuid
+      ORDER BY gap_log_item_id ASC`,
+    [organizationId, requirementAssessmentId],
+  );
   return {
     evidenceItemIds: evidenceLinkRows.rows.map((row) => row.evidence_item_id),
     claimIds: claimLinkRows.rows.map((row) => row.claim_id),
+    evidenceDecisionLinks: evidenceDecisionLinkRows.rows,
+    claimDecisionLinks: claimDecisionLinkRows.rows,
+    gapLinks: gapLinkRows.rows,
   };
 }
 
@@ -258,12 +422,17 @@ function toAssessmentRecord(row, replayed) {
   };
 }
 
+function sortedIds(ids) {
+  return [...ids].sort();
+}
+
 /**
  * Post-write validation (mirroring A1.4/A2.2's re-read-and-verify
  * discipline): rereads exactly what was just inserted inside the same
  * transaction and proves it matches the in-memory intended write byte-for-
  * byte before any audit is prepared or the transaction is allowed to
- * commit.
+ * commit. Now covers the C3.A3 decision-link and gap-link provenance too,
+ * not just C2.1's bare evidence/claim membership links.
  */
 function persistedAssessmentMatchesExpected(persistedRow, persistedProvenance, expected) {
   if (!persistedRow) return false;
@@ -275,29 +444,39 @@ function persistedAssessmentMatchesExpected(persistedRow, persistedProvenance, e
     persistedRow.assessment_explanation !== expected.explanation ||
     persistedRow.state_fingerprint !== expected.stateFingerprint
   ) return false;
-  const persistedEvidenceIds = [...persistedProvenance.evidenceItemIds].sort();
-  const persistedClaimIds = [...persistedProvenance.claimIds].sort();
-  const expectedEvidenceIds = [...expected.evidenceItemIds].sort();
-  const expectedClaimIds = [...expected.claimIds].sort();
-  if (JSON.stringify(persistedEvidenceIds) !== JSON.stringify(expectedEvidenceIds)) return false;
-  if (JSON.stringify(persistedClaimIds) !== JSON.stringify(expectedClaimIds)) return false;
+
+  if (JSON.stringify(sortedIds(persistedProvenance.evidenceItemIds)) !== JSON.stringify(sortedIds(expected.evidenceItemIds))) return false;
+  if (JSON.stringify(sortedIds(persistedProvenance.claimIds)) !== JSON.stringify(sortedIds(expected.claimIds))) return false;
+
+  const persistedEvidenceDecisionIds = sortedIds(persistedProvenance.evidenceDecisionLinks.map((row) => row.decision_id));
+  if (JSON.stringify(persistedEvidenceDecisionIds) !== JSON.stringify(sortedIds(expected.evidenceDecisionIds))) return false;
+
+  const persistedClaimDecisionIds = sortedIds(persistedProvenance.claimDecisionLinks.map((row) => row.decision_id));
+  if (JSON.stringify(persistedClaimDecisionIds) !== JSON.stringify(sortedIds(expected.claimDecisionIds))) return false;
+
+  const persistedGapIds = sortedIds(persistedProvenance.gapLinks.map((row) => row.gap_log_item_id));
+  if (JSON.stringify(persistedGapIds) !== JSON.stringify(sortedIds(expected.gapLogItemIds))) return false;
+
   return true;
 }
 
-export function createPostgresRequirementAssessmentRepository({ runInTransaction } = {}) {
+export function createPostgresRequirementAssessmentRepository({ runInTransaction, filterCurrentGaps } = {}) {
   return Object.freeze({
     async assessOrganizationRequirement(input) {
       if (!isAssessOrganizationRequirementInput(input)) return failure("validation_blocker");
       const { organizationId, requirementId, actorUserId, now, metadataOnlyAudit } = input;
       const run = runInTransaction || (await resolveDefaultRunInTransaction());
+      const filterCurrentGapsFn = filterCurrentGaps || (await resolveDefaultGapCurrentStateFilter());
 
       try {
         return await run(async (tx) => {
           const requirementLookup = await loadSupportedRequirementOrFail(tx, { requirementId });
           if (!requirementLookup.ok) return requirementLookup.failure;
 
-          const evidenceItems = await loadGovernedEvidenceItems(tx, { organizationId });
-          const claims = await loadGovernedClaims(tx, { organizationId });
+          const { evidenceItems, claims } = await loadGovernedAssessmentInputs(tx, {
+            organizationId,
+            filterCurrentGaps: filterCurrentGapsFn,
+          });
 
           const { assessmentState, explanation } = deriveRequirementAssessmentState({ evidenceItems, claims });
           const stateFingerprint = computeRequirementAssessmentFingerprint({ evidenceItems, claims });
@@ -327,25 +506,58 @@ export function createPostgresRequirementAssessmentRepository({ runInTransaction
           // assessment (row without its full provenance, or an audited row
           // whose provenance failed to verify) can never be observed or
           // committed.
+          const requirementAssessmentId = insertedRow.requirement_assessment_id;
+
           for (const evidenceItem of evidenceItems) {
             await insertEvidenceLink(tx, {
               organizationId,
-              requirementAssessmentId: insertedRow.requirement_assessment_id,
+              requirementAssessmentId,
               evidenceItemId: evidenceItem.evidenceItemId,
             });
+            if (evidenceItem.decisionId !== null) {
+              await insertEvidenceDecisionLink(tx, {
+                organizationId,
+                requirementAssessmentId,
+                evidenceItemId: evidenceItem.evidenceItemId,
+                decisionId: evidenceItem.decisionId,
+              });
+            }
           }
           for (const claim of claims) {
             await insertClaimLink(tx, {
               organizationId,
-              requirementAssessmentId: insertedRow.requirement_assessment_id,
+              requirementAssessmentId,
               claimId: claim.claimId,
             });
+            if (claim.decisionId !== null) {
+              await insertClaimDecisionLink(tx, {
+                organizationId,
+                requirementAssessmentId,
+                claimId: claim.claimId,
+                decisionId: claim.decisionId,
+              });
+            }
+            for (const gap of claim.gaps) {
+              await insertGapLink(tx, {
+                organizationId,
+                requirementAssessmentId,
+                claimId: claim.claimId,
+                gap,
+              });
+            }
           }
 
           const persistedProvenance = await readAssessmentProvenance(tx, {
             organizationId,
-            requirementAssessmentId: insertedRow.requirement_assessment_id,
+            requirementAssessmentId,
           });
+          const expectedEvidenceDecisionIds = evidenceItems
+            .filter((row) => row.decisionId !== null)
+            .map((row) => row.decisionId);
+          const expectedClaimDecisionIds = claims
+            .filter((row) => row.decisionId !== null)
+            .map((row) => row.decisionId);
+          const expectedGapLogItemIds = claims.flatMap((claim) => claim.gaps.map((gap) => gap.gapLogItemId));
           if (!persistedAssessmentMatchesExpected(insertedRow, persistedProvenance, {
             organizationId,
             requirementId,
@@ -354,6 +566,9 @@ export function createPostgresRequirementAssessmentRepository({ runInTransaction
             stateFingerprint,
             evidenceItemIds: evidenceItems.map((row) => row.evidenceItemId),
             claimIds: claims.map((row) => row.claimId),
+            evidenceDecisionIds: expectedEvidenceDecisionIds,
+            claimDecisionIds: expectedClaimDecisionIds,
+            gapLogItemIds: expectedGapLogItemIds,
           })) {
             rollbackFailure("system_error");
           }
@@ -363,7 +578,7 @@ export function createPostgresRequirementAssessmentRepository({ runInTransaction
             preparedAudit = prepareRequiredAudit(metadataOnlyAudit, {
               attempted_operation: "c3_a2_requirement_assessment_created",
               requirement_id: requirementId,
-              requirement_assessment_id: insertedRow.requirement_assessment_id,
+              requirement_assessment_id: requirementAssessmentId,
               validator_key: "VAL-KAI-C3-A2-001",
             }, tx);
           } catch {
@@ -386,6 +601,7 @@ export function createPostgresRequirementAssessmentRepository({ runInTransaction
       if (!isReadOrganizationRequirementAssessmentInput(input)) return failure("validation_blocker");
       const { organizationId, requirementId } = input;
       const run = runInTransaction || (await resolveDefaultRunInTransaction());
+      const filterCurrentGapsFn = filterCurrentGaps || (await resolveDefaultGapCurrentStateFilter());
 
       try {
         return await run(async (tx) => {
@@ -393,8 +609,10 @@ export function createPostgresRequirementAssessmentRepository({ runInTransaction
           if (!requirementLookup.ok) return requirementLookup.failure;
           const requirement = requirementLookup.requirement;
 
-          const evidenceItems = await loadGovernedEvidenceItems(tx, { organizationId });
-          const claims = await loadGovernedClaims(tx, { organizationId });
+          const { evidenceItems, claims } = await loadGovernedAssessmentInputs(tx, {
+            organizationId,
+            filterCurrentGaps: filterCurrentGapsFn,
+          });
           const stateFingerprint = computeRequirementAssessmentFingerprint({ evidenceItems, claims });
 
           const currentRow = await readExistingAssessmentRow(tx, { organizationId, requirementId, stateFingerprint });
@@ -414,6 +632,9 @@ export function createPostgresRequirementAssessmentRepository({ runInTransaction
             assessment: toAssessmentRecord(currentRow, false),
             evidence_item_ids: provenance.evidenceItemIds,
             claim_ids: provenance.claimIds,
+            evidence_review_decision_ids: provenance.evidenceDecisionLinks.map((row) => row.decision_id),
+            claim_review_decision_ids: provenance.claimDecisionLinks.map((row) => row.decision_id),
+            current_gap_log_item_ids: provenance.gapLinks.map((row) => row.gap_log_item_id),
           });
         });
       } catch (error) {
@@ -431,4 +652,5 @@ export const __requirementAssessmentRepositoryTestables = Object.freeze({
   isAssessOrganizationRequirementInput,
   isReadOrganizationRequirementAssessmentInput,
   persistedAssessmentMatchesExpected,
+  loadGovernedAssessmentInputs,
 });
