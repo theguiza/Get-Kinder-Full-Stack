@@ -355,6 +355,40 @@ async function runIntegrationSuite() {
     assert.ok(result.rows[0].requirement_assessment_id);
   });
 
+  test("1b: an organization-level assessment (engagement_id NULL) succeeds", async () => {
+    const requirement = await makeRequirement("t1b");
+    const fingerprint = sha256hex("t1b-fingerprint");
+    const result = await insertAssessment({
+      organizationId: orgA,
+      engagementId: null,
+      requirementId: requirement.requirement_id,
+      state: "satisfied",
+      explanation: "Organization-level assessment.",
+      fingerprint,
+    });
+    assert.ok(result.rows[0].requirement_assessment_id);
+    const { rows } = await pool.query(
+      `SELECT engagement_id FROM kai.requirement_assessments WHERE requirement_assessment_id = $1`,
+      [result.rows[0].requirement_assessment_id],
+    );
+    assert.equal(rows[0].engagement_id, null);
+  });
+
+  test("1c: all four valid assessment_state values succeed", async () => {
+    const requirement = await makeRequirement("t1c");
+    for (const state of ["satisfied", "partially_satisfied", "not_satisfied", "needs_review"]) {
+      const result = await insertAssessment({
+        organizationId: orgA,
+        engagementId: engagementA,
+        requirementId: requirement.requirement_id,
+        state,
+        explanation: `Assessment state ${state}.`,
+        fingerprint: sha256hex(`t1c-${state}`),
+      });
+      assert.ok(result.rows[0].requirement_assessment_id, `expected ${state} to succeed`);
+    }
+  });
+
   test("2: an invalid (non-existent) requirement fails", async () => {
     await assert.rejects(
       insertAssessment({
@@ -609,28 +643,114 @@ async function runIntegrationSuite() {
     assert.equal(rows[0].assessment_state, "not_satisfied");
   });
 
-  test("8: an invalid assessment_state fails, including the excluded P2-02 vocabulary", async () => {
+  test("8: an invalid assessment_state fails, including the excluded P2-02 vocabulary and not_applicable", async () => {
     const requirement = await makeRequirement("t8");
+    for (const [suffix, state] of [
+      ["bogus", "bogus"],
+      ["p2-02-vocabulary", "SUPPORTED_INPUT_EXISTS"],
+      ["p2-02-vocabulary-2", "PARTIAL_INPUT_EXISTS"],
+      ["p2-02-vocabulary-3", "NO_CURRENT_INPUT"],
+      ["not-applicable", "not_applicable"],
+    ]) {
+      await assert.rejects(
+        insertAssessment({
+          organizationId: orgA,
+          engagementId: engagementA,
+          requirementId: requirement.requirement_id,
+          state,
+          explanation: "Invalid state must be rejected.",
+          fingerprint: sha256hex(`t8-${suffix}`),
+        }),
+        `expected state "${state}" to be rejected`,
+      );
+    }
+  });
+
+  test("10: identical organization-scope fingerprint replay fails; a different organization-scope fingerprint reassessment succeeds", async () => {
+    const requirement = await makeRequirement("t10");
+    const fingerprint = sha256hex("t10-fingerprint");
+    await insertAssessment({
+      organizationId: orgA,
+      engagementId: null,
+      requirementId: requirement.requirement_id,
+      state: "satisfied",
+      explanation: "First organization-level assessment.",
+      fingerprint,
+    });
+    await assert.rejects(
+      insertAssessment({
+        organizationId: orgA,
+        engagementId: null,
+        requirementId: requirement.requirement_id,
+        state: "satisfied",
+        explanation: "Identical-fingerprint replay must be rejected.",
+        fingerprint,
+      }),
+    );
+    const reassessment = await insertAssessment({
+      organizationId: orgA,
+      engagementId: null,
+      requirementId: requirement.requirement_id,
+      state: "not_satisfied",
+      explanation: "Different-fingerprint reassessment must succeed.",
+      fingerprint: sha256hex("t10-fingerprint-2"),
+    });
+    assert.ok(reassessment.rows[0].requirement_assessment_id);
+  });
+
+  test("11: identical engagement-scope fingerprint replay fails; a different engagement-scope fingerprint reassessment succeeds", async () => {
+    const requirement = await makeRequirement("t11");
+    const fingerprint = sha256hex("t11-fingerprint");
+    await insertAssessment({
+      organizationId: orgA,
+      engagementId: engagementA,
+      requirementId: requirement.requirement_id,
+      state: "satisfied",
+      explanation: "First engagement-level assessment.",
+      fingerprint,
+    });
     await assert.rejects(
       insertAssessment({
         organizationId: orgA,
         engagementId: engagementA,
         requirementId: requirement.requirement_id,
-        state: "bogus",
-        explanation: "Invalid state.",
-        fingerprint: sha256hex("t8-bogus"),
+        state: "satisfied",
+        explanation: "Identical-fingerprint replay must be rejected.",
+        fingerprint,
       }),
     );
-    await assert.rejects(
-      insertAssessment({
-        organizationId: orgA,
-        engagementId: engagementA,
-        requirementId: requirement.requirement_id,
-        state: "SUPPORTED_INPUT_EXISTS",
-        explanation: "P2-02 vocabulary must never be accepted here.",
-        fingerprint: sha256hex("t8-p2-02-vocabulary"),
-      }),
-    );
+    const reassessment = await insertAssessment({
+      organizationId: orgA,
+      engagementId: engagementA,
+      requirementId: requirement.requirement_id,
+      state: "not_satisfied",
+      explanation: "Different-fingerprint reassessment must succeed.",
+      fingerprint: sha256hex("t11-fingerprint-2"),
+    });
+    assert.ok(reassessment.rows[0].requirement_assessment_id);
+  });
+
+  test("12: an organization-scope fingerprint and an equal-valued engagement-scope fingerprint do not collide (scopes are independent)", async () => {
+    const requirement = await makeRequirement("t12");
+    const fingerprint = sha256hex("t12-fingerprint");
+    const orgLevel = await insertAssessment({
+      organizationId: orgA,
+      engagementId: null,
+      requirementId: requirement.requirement_id,
+      state: "satisfied",
+      explanation: "Organization-level assessment.",
+      fingerprint,
+    });
+    const engagementLevel = await insertAssessment({
+      organizationId: orgA,
+      engagementId: engagementA,
+      requirementId: requirement.requirement_id,
+      state: "satisfied",
+      explanation: "Engagement-level assessment with the same fingerprint value.",
+      fingerprint,
+    });
+    assert.ok(orgLevel.rows[0].requirement_assessment_id);
+    assert.ok(engagementLevel.rows[0].requirement_assessment_id);
   });
 
   test("9: the underlying requirement definition (B1.1 catalogue data) remains unchanged across assessments/reassessments", async () => {

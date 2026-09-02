@@ -55,43 +55,58 @@ BEGIN
   END IF;
 END $$;
 
--- C2.1 owner decision (Requirement Assessment Persistence), following the
--- C2A design: this migration is a pure persistence foundation - it stores
--- only "does current governed organizational knowledge satisfy this
--- requirement" as a two-state value plus its explanation, together with
--- exact provenance to the governed objects that grounded it. It never
--- computes that state, never scores readiness, never encodes human
--- approval, and never generates a gap or recommendation - all of that is
--- explicitly out of scope for C2.1 and left to a later behavioral package.
+-- C2.1 owner decision (Requirement Assessment Persistence), corrected under
+-- C2.2A (assessment-state vocabulary, organization vs engagement scope),
+-- following the C2A design: this migration is a pure persistence
+-- foundation - it stores only "does current governed organizational
+-- knowledge satisfy this requirement" as an assessment-state value plus its
+-- explanation, together with exact provenance to the governed objects that
+-- grounded it. It never computes that state, never scores readiness, never
+-- encodes human approval, and never generates a gap or recommendation -
+-- all of that is explicitly out of scope for C2.1/C2.2A and left to a later
+-- behavioral package.
 --
--- Scope identity (C2A section 1): kai.requirements (B1.1) carries no
--- organization_id or engagement_id - it is shared catalogue data, and the
--- only existing mechanism that scopes a requirement to a tenant is
--- kai.engagement_requirement_sets (organization_id + engagement_id). A
--- requirement assessment is therefore identified by
--- organization_id + engagement_id + requirement_id: an engagement is
--- mandatory, never optional, matching the same composite-FK-to-engagements
--- convention B1.1 and A1.1 already established.
+-- Scope identity (C2.2A): kai.requirements (B1.1) carries no
+-- organization_id or engagement_id - it is shared catalogue data. A
+-- requirement assessment may be organization-level
+-- (organization_id + requirement_id, engagement_id NULL) or
+-- engagement-level (organization_id + engagement_id + requirement_id).
+-- engagement_id is therefore nullable rather than mandatory; when present it
+-- still carries the same tenant-safe composite FK to kai.engagements
+-- (engagement_id, organization_id) that B1.1 and A1.1 already established.
+-- Postgres MATCH SIMPLE leaves that FK unchecked whenever engagement_id is
+-- NULL, so no sentinel engagement row is ever required for the
+-- organization-level case.
 --
--- State vocabulary (C2A section 2): 'satisfied' | 'not_satisfied' is new,
--- smallest-fitting vocabulary. It is not P2-02/P2-04's
+-- State vocabulary (C2.2A): 'satisfied' | 'partially_satisfied' |
+-- 'not_satisfied' | 'needs_review' is the corrected, smallest-fitting
+-- vocabulary. It is not P2-02/P2-04's
 -- SUPPORTED_INPUT_EXISTS/PARTIAL_INPUT_EXISTS/NO_CURRENT_INPUT vocabulary
 -- (that is a static, design-time judgment about whether a schema field
 -- exists to map to - not a live judgment about current governed
 -- knowledge), not engagement_requirement_sets.applicability_status (a
 -- lifecycle state, not a satisfaction judgment), and not
 -- coverage_review_decisions.decision (a human-approval vocabulary this
--- package is explicitly forbidden from encoding).
+-- package is explicitly forbidden from encoding). 'needs_review' names an
+-- assessment outcome the governed knowledge itself is ambiguous about - it
+-- is never a stand-in for human approval, and 'not_applicable' is
+-- deliberately excluded.
 --
--- History (C2A section 3): append-only fingerprint ledger, structurally
--- analogous to P2-10's kai.coverage_review_decisions - never a literal
--- reuse of that table. state_fingerprint binds one assessment row to the
--- exact governed state it was computed against; a later reassessment is a
--- new INSERT under a new fingerprint, the prior row is never updated or
--- deleted, and the append-only trigger below rejects any UPDATE/DELETE
--- outright. Currency is derived at read time (recompute-and-compare), the
--- same mechanism P2-10 already established - no separate
--- superseded_at/is_current/version column is required.
+-- History (C2A section 3, unchanged by C2.2A): append-only fingerprint
+-- ledger, structurally analogous to P2-10's kai.coverage_review_decisions -
+-- never a literal reuse of that table. state_fingerprint binds one
+-- assessment row to the exact governed state it was computed against; a
+-- later reassessment is a new INSERT under a new fingerprint, the prior row
+-- is never updated or deleted, and the append-only trigger below rejects
+-- any UPDATE/DELETE outright. Currency is derived at read time
+-- (recompute-and-compare), the same mechanism P2-10 already established -
+-- no separate superseded_at/is_current/version column is required.
+-- Replay protection (C2.2A): a plain UNIQUE constraint over
+-- (organization_id, engagement_id, requirement_id, state_fingerprint) would
+-- treat every NULL engagement_id as distinct from every other, silently
+-- allowing identical-fingerprint organization-level replays through. Two
+-- scope-aware partial unique indexes below enforce replay protection
+-- independently for organization-level and engagement-level assessments.
 --
 -- Provenance (C2A "Provenance shape"): exactly three new, additive,
 -- tenant-safe junction tables, mirroring A1.4's own explicit rejection of
@@ -106,7 +121,7 @@ END $$;
 CREATE TABLE IF NOT EXISTS kai.requirement_assessments (
   requirement_assessment_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id uuid NOT NULL,
-  engagement_id uuid NOT NULL,
+  engagement_id uuid,
   requirement_id uuid NOT NULL,
   assessment_state text NOT NULL,
   assessment_explanation text NOT NULL,
@@ -118,17 +133,11 @@ CREATE TABLE IF NOT EXISTS kai.requirement_assessments (
 
   CONSTRAINT requirement_assessments_c2_1_id_org_unique
     UNIQUE (requirement_assessment_id, organization_id),
-  -- Idempotent-replay / append-only identity, following the P2-10
-  -- precedent exactly: a second INSERT under an identical recomputed
-  -- fingerprint is a replay of the same assessment, not a new historical
-  -- row. A materially different governed state produces a different
-  -- fingerprint and is free to insert its own new row alongside every
-  -- prior one.
-  CONSTRAINT requirement_assessments_c2_1_identity_fingerprint_unique
-    UNIQUE (organization_id, engagement_id, requirement_id, state_fingerprint),
-  -- Engagement-side tenant-safe FK: the requirement assessment's
-  -- engagement_id must belong to the exact same organization_id this row
-  -- claims. requirement_id is deliberately a bare single-column FK to
+  -- Engagement-side tenant-safe FK: when engagement_id is present, it must
+  -- belong to the exact same organization_id this row claims. When
+  -- engagement_id is NULL (organization-level assessment), Postgres MATCH
+  -- SIMPLE leaves this FK unchecked - never a sentinel engagement.
+  -- requirement_id is deliberately a bare single-column FK to
   -- kai.requirements: that table carries no organization_id of its own
   -- (B1.1 shared/organization catalogue data), so there is no tenant pair
   -- to pin on the requirement side.
@@ -141,7 +150,7 @@ CREATE TABLE IF NOT EXISTS kai.requirement_assessments (
     REFERENCES kai.requirements (requirement_id)
     ON DELETE RESTRICT,
   CONSTRAINT requirement_assessments_c2_1_assessment_state_check
-    CHECK (assessment_state IN ('satisfied', 'not_satisfied')),
+    CHECK (assessment_state IN ('satisfied', 'partially_satisfied', 'not_satisfied', 'needs_review')),
   CONSTRAINT requirement_assessments_c2_1_state_fingerprint_check
     CHECK (state_fingerprint ~ '^[0-9a-f]{64}$'),
   CONSTRAINT requirement_assessments_c2_1_created_by_type_check
@@ -150,6 +159,23 @@ CREATE TABLE IF NOT EXISTS kai.requirement_assessments (
 
 CREATE INDEX IF NOT EXISTS ix_requirement_assessments_c2_1_tenant_engagement_requirement
   ON kai.requirement_assessments (organization_id, engagement_id, requirement_id);
+
+-- Idempotent-replay / append-only identity, following the P2-10 precedent:
+-- a second INSERT under an identical recomputed fingerprint is a replay of
+-- the same assessment, not a new historical row. A materially different
+-- governed state produces a different fingerprint and is free to insert its
+-- own new row alongside every prior one. Scope-aware (C2.2A): organization-
+-- level (engagement_id IS NULL) and engagement-level (engagement_id IS NOT
+-- NULL) replay protection are enforced by two separate partial unique
+-- indexes, since a single UNIQUE constraint would treat every NULL
+-- engagement_id as distinct and fail to catch organization-level replays.
+CREATE UNIQUE INDEX IF NOT EXISTS ux_requirement_assessments_c2_1_org_scope_fingerprint
+  ON kai.requirement_assessments (organization_id, requirement_id, state_fingerprint)
+  WHERE engagement_id IS NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_requirement_assessments_c2_1_engagement_scope_fingerprint
+  ON kai.requirement_assessments (organization_id, engagement_id, requirement_id, state_fingerprint)
+  WHERE engagement_id IS NOT NULL;
 
 CREATE OR REPLACE FUNCTION kai.c2_1_reject_requirement_assessment_mutation()
 RETURNS trigger

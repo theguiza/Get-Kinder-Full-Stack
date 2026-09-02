@@ -89,22 +89,19 @@ test("C2.1 requirement_assessments declares the required minimum columns and ide
     migrationSource,
     /requirement_assessments_c2_1_id_org_unique\s+UNIQUE \(requirement_assessment_id, organization_id\)/,
   );
-  assert.match(
-    migrationSource,
-    /requirement_assessments_c2_1_identity_fingerprint_unique\s+UNIQUE \(organization_id, engagement_id, requirement_id, state_fingerprint\)/,
-  );
 });
 
-test("C2.1 requirement_assessments assessment_state vocabulary is exactly satisfied/not_satisfied - never the excluded P2-02 vocabulary or human-approval encoding", () => {
+test("C2.1 requirement_assessments assessment_state vocabulary is exactly satisfied/partially_satisfied/not_satisfied/needs_review - never not_applicable, the excluded P2-02 vocabulary, or human-approval encoding", () => {
   const check = migrationSource.match(/requirement_assessments_c2_1_assessment_state_check\s+CHECK \(assessment_state IN \(([^)]+)\)\)/);
   assert.ok(check, "expected assessment_state CHECK constraint");
   const values = check[1].split(",").map((v) => v.trim().replace(/'/g, ""));
-  assert.deepEqual(values.sort(), ["not_satisfied", "satisfied"]);
+  assert.deepEqual(values.sort(), ["needs_review", "not_satisfied", "partially_satisfied", "satisfied"]);
   for (const forbidden of [
     /SUPPORTED_INPUT_EXISTS/,
     /PARTIAL_INPUT_EXISTS/,
     /NO_CURRENT_INPUT/,
     /accepted_internal_with_limitation/,
+    /not_applicable/,
     /approved/i,
     /readiness/i,
   ]) {
@@ -112,7 +109,9 @@ test("C2.1 requirement_assessments assessment_state vocabulary is exactly satisf
   }
 });
 
-test("C2.1 requirement_assessments is tenant-scoped through the composite engagements FK and a bare requirement_id FK (requirements carries no organization_id)", () => {
+test("C2.1 requirement_assessments is tenant-scoped through the composite engagements FK (engagement_id nullable) and a bare requirement_id FK (requirements carries no organization_id)", () => {
+  assert.match(migrationSource, /engagement_id uuid,/);
+  assert.doesNotMatch(migrationSource, /engagement_id uuid NOT NULL/);
   assert.match(
     migrationSource,
     /requirement_assessments_c2_1_engagement_fk\s+FOREIGN KEY \(engagement_id, organization_id\)\s+REFERENCES kai\.engagements \(engagement_id, organization_id\)\s+ON DELETE RESTRICT/,
@@ -120,6 +119,17 @@ test("C2.1 requirement_assessments is tenant-scoped through the composite engage
   assert.match(
     migrationSource,
     /requirement_assessments_c2_1_requirement_fk\s+FOREIGN KEY \(requirement_id\)\s+REFERENCES kai\.requirements \(requirement_id\)\s+ON DELETE RESTRICT/,
+  );
+});
+
+test("C2.1 requirement_assessments enforces scope-aware fingerprint-replay uniqueness independently for organization-level and engagement-level assessments", () => {
+  assert.match(
+    migrationSource,
+    /CREATE UNIQUE INDEX IF NOT EXISTS ux_requirement_assessments_c2_1_org_scope_fingerprint\s+ON kai\.requirement_assessments \(organization_id, requirement_id, state_fingerprint\)\s+WHERE engagement_id IS NULL;/,
+  );
+  assert.match(
+    migrationSource,
+    /CREATE UNIQUE INDEX IF NOT EXISTS ux_requirement_assessments_c2_1_engagement_scope_fingerprint\s+ON kai\.requirement_assessments \(organization_id, engagement_id, requirement_id, state_fingerprint\)\s+WHERE engagement_id IS NOT NULL;/,
   );
 });
 
@@ -163,6 +173,8 @@ test("C2.1 rollback removes exactly the four C2.1 objects plus the trigger/funct
   }
   assert.match(rollbackSource, /DROP TRIGGER IF EXISTS trg_c2_1_requirement_assessments_append_only/);
   assert.match(rollbackSource, /DROP FUNCTION IF EXISTS kai\.c2_1_reject_requirement_assessment_mutation/);
+  assert.match(rollbackSource, /DROP INDEX IF EXISTS kai\.ux_requirement_assessments_c2_1_org_scope_fingerprint/);
+  assert.match(rollbackSource, /DROP INDEX IF EXISTS kai\.ux_requirement_assessments_c2_1_engagement_scope_fingerprint/);
   assert.doesNotMatch(rollbackSource, /kai\.organizations\b/);
   assert.doesNotMatch(rollbackSource, /kai\.engagements\b/);
   assert.doesNotMatch(rollbackSource, /kai\.requirements\b(?!_assessment)/);

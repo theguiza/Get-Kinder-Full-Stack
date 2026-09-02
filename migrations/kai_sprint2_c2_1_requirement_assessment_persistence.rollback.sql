@@ -15,6 +15,8 @@ DROP TABLE IF EXISTS kai.requirement_assessment_evidence_links;
 DROP TRIGGER IF EXISTS trg_c2_1_requirement_assessments_append_only ON kai.requirement_assessments;
 DROP FUNCTION IF EXISTS kai.c2_1_reject_requirement_assessment_mutation();
 
+DROP INDEX IF EXISTS kai.ux_requirement_assessments_c2_1_engagement_scope_fingerprint;
+DROP INDEX IF EXISTS kai.ux_requirement_assessments_c2_1_org_scope_fingerprint;
 DROP INDEX IF EXISTS kai.ix_requirement_assessments_c2_1_tenant_engagement_requirement;
 DROP TABLE IF EXISTS kai.requirement_assessments;
 
