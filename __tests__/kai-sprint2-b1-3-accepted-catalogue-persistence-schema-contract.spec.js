@@ -80,20 +80,20 @@ test("B1.3 migration persists the fixed identity: kai_standard/kai_baseline_impa
   assert.doesNotMatch(migrationSource, /'active'/);
 });
 
-test("B1.3 migration inserts exactly the 10 accepted set keys, each guarded by WHERE NOT EXISTS", () => {
+test("B1.3 migration inserts exactly the 10 accepted set keys, each guarded by a canonical-drift existing-row lookup", () => {
   for (const setKey of SET_ORDER) {
     const pattern = new RegExp(
-      `INSERT INTO kai\\.requirement_sets[\\s\\S]*?SELECT v_framework_version_id, '${setKey}',[\\s\\S]*?WHERE NOT EXISTS`,
+      `SELECT set_name INTO v_existing_text FROM kai\\.requirement_sets[\\s\\S]*?set_key = '${setKey}';[\\s\\S]*?IF v_existing_text IS NULL THEN[\\s\\S]*?VALUES \\(v_framework_version_id, '${setKey}',[\\s\\S]*?ELSIF v_existing_text IS DISTINCT FROM[\\s\\S]*?RAISE EXCEPTION 'B1\\.3 canonical drift`,
     );
-    assert.match(migrationSource, pattern, `expected guarded insert for set ${setKey}`);
+    assert.match(migrationSource, pattern, `expected drift-guarded insert for set ${setKey}`);
   }
-  const setKeyMatches = [...migrationSource.matchAll(/SELECT v_framework_version_id, '([a-z_]+)',/g)].map((m) => m[1]);
+  const setKeyMatches = [...migrationSource.matchAll(/VALUES \(v_framework_version_id, '([a-z_]+)',/g)].map((m) => m[1]);
   assert.deepEqual(setKeyMatches.sort(), [...SET_ORDER].sort());
 });
 
-test("B1.3 migration inserts exactly the 21 accepted requirement keys, each attached to its expected set, guarded by WHERE NOT EXISTS", () => {
+test("B1.3 migration inserts exactly the 21 accepted requirement keys, each attached to its expected set, guarded by a canonical-drift existing-row lookup", () => {
   const requirementInsertRegex =
-    /SELECT v_set_id, '(ir_\w+)', '((?:[^']|'')*)', '((?:[^']|'')*)', (\d+)\s*\n\s*WHERE NOT EXISTS/g;
+    /VALUES \(v_set_id, '(ir_\w+)', '((?:[^']|'')*)', '((?:[^']|'')*)', (\d+)\);/g;
   const found = [];
   let m;
   while ((m = requirementInsertRegex.exec(migrationSource)) !== null) {
@@ -127,14 +127,22 @@ test("B1.3 migration inserts exactly the 21 accepted requirement keys, each atta
 
 test("B1.3 migration attaches every requirement to its accepted set via the same v_set_id in its enclosing block", () => {
   for (const setKey of SET_ORDER) {
-    const setBlockRegex = new RegExp(
-      `SELECT v_framework_version_id, '${setKey}',[\\s\\S]*?(?=\\n\\s*-- |END \\$\\$;)`,
-    );
+    const setBlockRegex = new RegExp(`-- ${setKey}\\n[\\s\\S]*?(?=\\n\\s*-- |END \\$\\$;)`);
     const block = migrationSource.match(setBlockRegex);
     assert.ok(block, `expected a block for set ${setKey}`);
-    const keysInBlock = [...block[0].matchAll(/SELECT v_set_id, '(ir_\w+)'/g)].map((m) => m[1]);
+    const keysInBlock = [...block[0].matchAll(/VALUES \(v_set_id, '(ir_\w+)'/g)].map((m) => m[1]);
     assert.deepEqual(keysInBlock, MEMBERSHIP[setKey], `set ${setKey} must contain exactly its accepted requirement keys in order`);
   }
+});
+
+test("B1.3 migration fails closed (RAISE EXCEPTION) on conflicting B1.3-owned fields at every persisted level", () => {
+  assert.match(migrationSource, /RAISE EXCEPTION 'B1\.3 canonical drift: kai\.requirement_sources/);
+  assert.match(migrationSource, /RAISE EXCEPTION 'B1\.3 canonical drift: kai\.requirement_framework_versions/);
+  assert.match(migrationSource, /RAISE EXCEPTION 'B1\.3 canonical drift: kai\.requirement_sets/);
+  const requirementDriftExceptions = [
+    ...migrationSource.matchAll(/RAISE EXCEPTION 'B1\.3 canonical drift: kai\.requirements \(requirement_set_id=%, requirement_key=(ir_\w+)\)/g),
+  ].map((m) => m[1]);
+  assert.deepEqual(requirementDriftExceptions.sort(), [...ALL_REQUIREMENT_KEYS].sort());
 });
 
 test("labels and descriptions embedded in the migration are exact SQL-escaped copies of the canonical artefact", () => {
