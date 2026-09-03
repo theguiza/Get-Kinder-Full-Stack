@@ -8,6 +8,41 @@ import {
   computeRequirementAssessmentFingerprint as computeIrComm002Fingerprint,
   deriveRequirementAssessmentState as deriveIrComm002State,
 } from "../validators/kaiCommunicationAccountabilityAssessmentValidators.js";
+import {
+  REQUIREMENT_KEY as IR_PUR_001_REQUIREMENT_KEY,
+  computeRequirementAssessmentFingerprint as computeIrPur001Fingerprint,
+  deriveRequirementAssessmentState as deriveIrPur001State,
+} from "../validators/kaiOutcomeDefinedAssessmentValidators.js";
+import {
+  REQUIREMENT_KEY as IR_STK_001_REQUIREMENT_KEY,
+  computeRequirementAssessmentFingerprint as computeIrStk001Fingerprint,
+  deriveRequirementAssessmentState as deriveIrStk001State,
+} from "../validators/kaiStakeholderIdentifiedAssessmentValidators.js";
+import {
+  REQUIREMENT_KEY as IR_DATA_001_REQUIREMENT_KEY,
+  computeRequirementAssessmentFingerprint as computeIrData001Fingerprint,
+  deriveRequirementAssessmentState as deriveIrData001State,
+} from "../validators/kaiSourceGovernanceAssessmentValidators.js";
+import {
+  REQUIREMENT_KEY as IR_DATA_002_REQUIREMENT_KEY,
+  computeRequirementAssessmentFingerprint as computeIrData002Fingerprint,
+  deriveRequirementAssessmentState as deriveIrData002State,
+} from "../validators/kaiDataQualityDocumentedAssessmentValidators.js";
+import {
+  REQUIREMENT_KEY as IR_DATA_003_REQUIREMENT_KEY,
+  computeRequirementAssessmentFingerprint as computeIrData003Fingerprint,
+  deriveRequirementAssessmentState as deriveIrData003State,
+} from "../validators/kaiClaimEvidenceTraceabilityAssessmentValidators.js";
+import {
+  REQUIREMENT_KEY as IR_CONTRIB_003_REQUIREMENT_KEY,
+  computeRequirementAssessmentFingerprint as computeIrContrib003Fingerprint,
+  deriveRequirementAssessmentState as deriveIrContrib003State,
+} from "../validators/kaiConflictGapTrackedAssessmentValidators.js";
+import {
+  REQUIREMENT_KEY as IR_COMM_001_REQUIREMENT_KEY,
+  computeRequirementAssessmentFingerprint as computeIrComm001Fingerprint,
+  deriveRequirementAssessmentState as deriveIrComm001State,
+} from "../validators/kaiAudiencePermissionKnownAssessmentValidators.js";
 
 /**
  * KAI C3.A3.B durable organization-scope requirement assessment for exactly
@@ -186,15 +221,7 @@ async function loadCurrentClaimDecisionsByClaimId(tx, { organizationId }) {
  * of P2-02 dimension recomputation here.
  */
 async function loadCurrentGapsByClaimId(tx, { organizationId, filterCurrentGaps }) {
-  const { rows } = await tx.query(
-    `SELECT gap_log_item_id::text AS gap_log_item_id, claim_id::text AS claim_id,
-            evidence_item_id::text AS evidence_item_id, source_version_id::text AS source_version_id,
-            dimension_key, assessment_status
-       FROM kai.gap_log_items
-      WHERE organization_id = $1::uuid`,
-    [organizationId],
-  );
-  const currentRows = await filterCurrentGaps(tx, { organizationId, candidateGapRows: rows });
+  const currentRows = await loadCurrentGapRowsForOrganization(tx, { organizationId, filterCurrentGaps });
   const byClaimId = new Map();
   for (const row of currentRows) {
     if (!byClaimId.has(row.claim_id)) byClaimId.set(row.claim_id, []);
@@ -261,6 +288,175 @@ async function loadGovernedCommunicationAccountabilityInputs(tx, { organizationI
     };
   });
 
+  return { claims };
+}
+
+/**
+ * `ir_pur_001`/`ir_stk_001` governed inputs - every organization-scope
+ * (engagement_id IS NULL) kai.impact_outcome_contexts row. Shared verbatim
+ * by both rules since they govern the same object.
+ */
+async function loadGovernedOutcomeContexts(tx, { organizationId }) {
+  const { rows } = await tx.query(
+    `SELECT impact_outcome_context_id::text AS impact_outcome_context_id, outcome_key, outcome_statement,
+            stakeholder_key, stakeholder_label
+       FROM kai.impact_outcome_contexts
+      WHERE organization_id = $1::uuid AND engagement_id IS NULL
+      ORDER BY impact_outcome_context_id ASC`,
+    [organizationId],
+  );
+  return rows.map((row) => ({
+    impactOutcomeContextId: row.impact_outcome_context_id,
+    outcomeKey: row.outcome_key,
+    outcomeStatement: row.outcome_statement,
+    stakeholderKey: row.stakeholder_key,
+    stakeholderLabel: row.stakeholder_label,
+  }));
+}
+
+/**
+ * `ir_data_001` governed inputs - every kai.evidence_items row for the
+ * organization, joined to its exact source/source_version/promotion-
+ * decision identity. evidence_items.source_id/source_version_id are always
+ * populated (NOT NULL), and a source_version only exists once its
+ * candidate has been promoted, so this INNER JOIN chain never silently
+ * drops a governed evidence item.
+ */
+async function loadGovernedEvidenceSourceInputs(tx, { organizationId }) {
+  const { rows } = await tx.query(
+    `SELECT ei.evidence_item_id::text AS evidence_item_id,
+            ei.source_id::text AS source_id,
+            ei.source_version_id::text AS source_version_id,
+            sv.intake_source_candidate_id::text AS intake_source_candidate_id,
+            sv.is_current AS is_current,
+            ipd.intake_promotion_decision_id::text AS intake_promotion_decision_id,
+            ipd.decision_status AS decision_status,
+            ipd.reviewed_source_type AS reviewed_source_type
+       FROM kai.evidence_items ei
+       JOIN kai.source_versions sv
+         ON sv.source_version_id = ei.source_version_id AND sv.organization_id = ei.organization_id
+       JOIN kai.intake_promotion_decisions ipd
+         ON ipd.organization_id = ei.organization_id AND ipd.intake_source_candidate_id = sv.intake_source_candidate_id
+      WHERE ei.organization_id = $1::uuid
+      ORDER BY ei.evidence_item_id ASC`,
+    [organizationId],
+  );
+  return rows.map((row) => ({
+    evidenceItemId: row.evidence_item_id,
+    sourceId: row.source_id,
+    sourceVersionId: row.source_version_id,
+    intakeSourceCandidateId: row.intake_source_candidate_id,
+    isCurrent: row.is_current,
+    intakePromotionDecisionId: row.intake_promotion_decision_id,
+    decisionStatus: row.decision_status,
+    reviewedSourceType: row.reviewed_source_type,
+  }));
+}
+
+/**
+ * Shared current-gap query underlying both `loadCurrentGapsByClaimId`
+ * (ir_contrib_002, grouped by claim) and the flat, ungrouped universe
+ * `ir_data_002`/`ir_contrib_003` need - identical SQL/currency-gate, two
+ * different shapes of the same result.
+ */
+async function loadCurrentGapRowsForOrganization(tx, { organizationId, filterCurrentGaps }) {
+  const { rows } = await tx.query(
+    `SELECT gap_log_item_id::text AS gap_log_item_id, claim_id::text AS claim_id,
+            evidence_item_id::text AS evidence_item_id, source_version_id::text AS source_version_id,
+            dimension_key, assessment_status
+       FROM kai.gap_log_items
+      WHERE organization_id = $1::uuid`,
+    [organizationId],
+  );
+  return filterCurrentGaps(tx, { organizationId, candidateGapRows: rows });
+}
+
+async function loadCurrentGapsFlatForOrganization(tx, { organizationId, filterCurrentGaps }) {
+  const currentRows = await loadCurrentGapRowsForOrganization(tx, { organizationId, filterCurrentGaps });
+  return currentRows.map((row) => ({
+    gapLogItemId: row.gap_log_item_id,
+    claimId: row.claim_id,
+    evidenceItemId: row.evidence_item_id,
+    sourceVersionId: row.source_version_id,
+    dimensionKey: row.dimension_key,
+    assessmentStatus: row.assessment_status,
+  }));
+}
+
+/**
+ * `ir_data_003` governed inputs - every kai.claims row for the
+ * organization, joined (LEFT) to its at-most-one kai.claim_evidence_links
+ * row (claim_evidence_links_p2_03_one_link_per_claim_unique guarantees at
+ * most one).
+ */
+async function loadGovernedClaimEvidenceTraceabilityInputs(tx, { organizationId }) {
+  const { rows } = await tx.query(
+    `SELECT c.claim_id::text AS claim_id, cel.evidence_item_id::text AS evidence_item_id
+       FROM kai.claims c
+       LEFT JOIN kai.claim_evidence_links cel
+         ON cel.claim_id = c.claim_id AND cel.organization_id = c.organization_id
+      WHERE c.organization_id = $1::uuid
+      ORDER BY c.claim_id ASC`,
+    [organizationId],
+  );
+  return rows.map((row) => ({ claimId: row.claim_id, evidenceItemId: row.evidence_item_id }));
+}
+
+/**
+ * `ir_contrib_003` conflict-pairing provenance input - every
+ * kai.conflict_groups row for the organization (append-only, no UPDATE
+ * path). Expanded into one (conflictGroupId, claimId) row per participant
+ * claim so both sides of a pairing get their own citation.
+ */
+async function loadGovernedConflictGroupClaimLinks(tx, { organizationId }) {
+  const { rows } = await tx.query(
+    `SELECT conflict_group_id::text AS conflict_group_id, lower_claim_id::text AS lower_claim_id,
+            higher_claim_id::text AS higher_claim_id
+       FROM kai.conflict_groups
+      WHERE organization_id = $1::uuid
+      ORDER BY conflict_group_id ASC`,
+    [organizationId],
+  );
+  const links = [];
+  for (const row of rows) {
+    links.push({ conflictGroupId: row.conflict_group_id, claimId: row.lower_claim_id });
+    links.push({ conflictGroupId: row.conflict_group_id, claimId: row.higher_claim_id });
+  }
+  return links;
+}
+
+/**
+ * `ir_comm_001` governed inputs - every kai.claims row for the
+ * organization, joined to its current (non-superseded) lineage-head
+ * kai.claim_review_decisions row, additionally selecting
+ * approved_audiences (not needed by ir_comm_002, so kept as its own query
+ * rather than widening `loadCurrentClaimDecisionsByClaimId`'s existing
+ * shape/callers).
+ */
+async function loadCurrentClaimAudienceDecisionsByClaimId(tx, { organizationId }) {
+  const { rows } = await tx.query(
+    `SELECT decision_id::text AS decision_id, claim_id::text AS claim_id, approved_audiences
+       FROM kai.claim_review_decisions d
+      WHERE organization_id = $1::uuid
+        AND NOT EXISTS (
+          SELECT 1 FROM kai.claim_review_decisions s WHERE s.supersedes_decision_id = d.decision_id
+        )`,
+    [organizationId],
+  );
+  return new Map(rows.map((row) => [row.claim_id, row]));
+}
+
+async function loadGovernedAudiencePermissionInputs(tx, { organizationId }) {
+  const claimIds = await loadGovernedClaimIds(tx, { organizationId });
+  const decisionsByClaimId = await loadCurrentClaimAudienceDecisionsByClaimId(tx, { organizationId });
+  const claims = claimIds.map((claimId) => {
+    const decision = decisionsByClaimId.get(claimId) || null;
+    return {
+      claimId,
+      decisionId: decision ? decision.decision_id : null,
+      approvedAudiences: decision ? decision.approved_audiences : null,
+    };
+  });
   return { claims };
 }
 
@@ -379,6 +575,206 @@ const REQUIREMENT_ASSESSMENT_RULES = Object.freeze({
     attemptedOperation: "c3_b_communication_accountability_requirement_assessment_created",
     validatorKey: "VAL-KAI-C3-B2-001",
   }),
+  [IR_PUR_001_REQUIREMENT_KEY]: Object.freeze({
+    requirementKey: IR_PUR_001_REQUIREMENT_KEY,
+    async loadInputs(tx, { organizationId }) {
+      const outcomeContexts = await loadGovernedOutcomeContexts(tx, { organizationId });
+      return { outcomeContexts };
+    },
+    deriveState(inputs) {
+      return deriveIrPur001State(inputs);
+    },
+    computeFingerprint(inputs) {
+      return computeIrPur001Fingerprint(inputs);
+    },
+    async writeProvenance(tx, { organizationId, requirementAssessmentId, inputs }) {
+      for (const context of inputs.outcomeContexts) {
+        await insertOutcomeContextLink(tx, { organizationId, requirementAssessmentId, context });
+      }
+    },
+    expectedProvenanceIds(inputs) {
+      return {
+        evidenceItemIds: [], claimIds: [], evidenceDecisionIds: [], claimDecisionIds: [], gapLogItemIds: [],
+        outcomeContextIds: inputs.outcomeContexts.map((row) => row.impactOutcomeContextId),
+      };
+    },
+    attemptedOperation: "c3_b3_ir_pur_001_requirement_assessment_created",
+    validatorKey: "VAL-KAI-C3-B3-IR-PUR-001",
+  }),
+  [IR_STK_001_REQUIREMENT_KEY]: Object.freeze({
+    requirementKey: IR_STK_001_REQUIREMENT_KEY,
+    async loadInputs(tx, { organizationId }) {
+      const outcomeContexts = await loadGovernedOutcomeContexts(tx, { organizationId });
+      return { outcomeContexts };
+    },
+    deriveState(inputs) {
+      return deriveIrStk001State(inputs);
+    },
+    computeFingerprint(inputs) {
+      return computeIrStk001Fingerprint(inputs);
+    },
+    async writeProvenance(tx, { organizationId, requirementAssessmentId, inputs }) {
+      for (const context of inputs.outcomeContexts) {
+        await insertOutcomeContextLink(tx, { organizationId, requirementAssessmentId, context });
+      }
+    },
+    expectedProvenanceIds(inputs) {
+      return {
+        evidenceItemIds: [], claimIds: [], evidenceDecisionIds: [], claimDecisionIds: [], gapLogItemIds: [],
+        outcomeContextIds: inputs.outcomeContexts.map((row) => row.impactOutcomeContextId),
+      };
+    },
+    attemptedOperation: "c3_b3_ir_stk_001_requirement_assessment_created",
+    validatorKey: "VAL-KAI-C3-B3-IR-STK-001",
+  }),
+  [IR_DATA_001_REQUIREMENT_KEY]: Object.freeze({
+    requirementKey: IR_DATA_001_REQUIREMENT_KEY,
+    async loadInputs(tx, { organizationId }) {
+      const evidenceSources = await loadGovernedEvidenceSourceInputs(tx, { organizationId });
+      return { evidenceSources };
+    },
+    deriveState(inputs) {
+      return deriveIrData001State(inputs);
+    },
+    computeFingerprint(inputs) {
+      return computeIrData001Fingerprint(inputs);
+    },
+    async writeProvenance(tx, { organizationId, requirementAssessmentId, inputs }) {
+      for (const evidenceSource of inputs.evidenceSources) {
+        await insertEvidenceLink(tx, { organizationId, requirementAssessmentId, evidenceItemId: evidenceSource.evidenceItemId });
+        await insertSourcePromotionLink(tx, { organizationId, requirementAssessmentId, evidenceSource });
+      }
+    },
+    expectedProvenanceIds(inputs) {
+      return {
+        evidenceItemIds: inputs.evidenceSources.map((row) => row.evidenceItemId),
+        claimIds: [], evidenceDecisionIds: [], claimDecisionIds: [], gapLogItemIds: [],
+        sourcePromotionEvidenceItemIds: inputs.evidenceSources.map((row) => row.evidenceItemId),
+      };
+    },
+    attemptedOperation: "c3_b3_ir_data_001_requirement_assessment_created",
+    validatorKey: "VAL-KAI-C3-B3-IR-DATA-001",
+  }),
+  [IR_DATA_002_REQUIREMENT_KEY]: Object.freeze({
+    requirementKey: IR_DATA_002_REQUIREMENT_KEY,
+    async loadInputs(tx, { organizationId, filterCurrentGaps }) {
+      const gaps = await loadCurrentGapsFlatForOrganization(tx, { organizationId, filterCurrentGaps });
+      return { gaps };
+    },
+    deriveState(inputs) {
+      return deriveIrData002State(inputs);
+    },
+    computeFingerprint(inputs) {
+      return computeIrData002Fingerprint(inputs);
+    },
+    async writeProvenance(tx, { organizationId, requirementAssessmentId, inputs }) {
+      for (const gap of inputs.gaps) {
+        await insertGapLink(tx, { organizationId, requirementAssessmentId, claimId: gap.claimId, gap });
+      }
+    },
+    expectedProvenanceIds(inputs) {
+      return {
+        evidenceItemIds: [], claimIds: [], evidenceDecisionIds: [], claimDecisionIds: [],
+        gapLogItemIds: inputs.gaps.map((row) => row.gapLogItemId),
+      };
+    },
+    attemptedOperation: "c3_b3_ir_data_002_requirement_assessment_created",
+    validatorKey: "VAL-KAI-C3-B3-IR-DATA-002",
+  }),
+  [IR_DATA_003_REQUIREMENT_KEY]: Object.freeze({
+    requirementKey: IR_DATA_003_REQUIREMENT_KEY,
+    async loadInputs(tx, { organizationId }) {
+      const claims = await loadGovernedClaimEvidenceTraceabilityInputs(tx, { organizationId });
+      return { claims };
+    },
+    deriveState(inputs) {
+      return deriveIrData003State(inputs);
+    },
+    computeFingerprint(inputs) {
+      return computeIrData003Fingerprint(inputs);
+    },
+    async writeProvenance(tx, { organizationId, requirementAssessmentId, inputs }) {
+      for (const claim of inputs.claims) {
+        await insertClaimLink(tx, { organizationId, requirementAssessmentId, claimId: claim.claimId });
+        if (claim.evidenceItemId !== null) {
+          await insertEvidenceLink(tx, { organizationId, requirementAssessmentId, evidenceItemId: claim.evidenceItemId });
+        }
+      }
+    },
+    expectedProvenanceIds(inputs) {
+      return {
+        evidenceItemIds: inputs.claims.filter((row) => row.evidenceItemId !== null).map((row) => row.evidenceItemId),
+        claimIds: inputs.claims.map((row) => row.claimId),
+        evidenceDecisionIds: [], claimDecisionIds: [], gapLogItemIds: [],
+      };
+    },
+    attemptedOperation: "c3_b3_ir_data_003_requirement_assessment_created",
+    validatorKey: "VAL-KAI-C3-B3-IR-DATA-003",
+  }),
+  [IR_CONTRIB_003_REQUIREMENT_KEY]: Object.freeze({
+    requirementKey: IR_CONTRIB_003_REQUIREMENT_KEY,
+    async loadInputs(tx, { organizationId, filterCurrentGaps }) {
+      const gaps = await loadCurrentGapsFlatForOrganization(tx, { organizationId, filterCurrentGaps });
+      const conflictLinks = await loadGovernedConflictGroupClaimLinks(tx, { organizationId });
+      return { gaps, conflictLinks };
+    },
+    deriveState(inputs) {
+      return deriveIrContrib003State(inputs);
+    },
+    computeFingerprint(inputs) {
+      return computeIrContrib003Fingerprint(inputs);
+    },
+    async writeProvenance(tx, { organizationId, requirementAssessmentId, inputs }) {
+      for (const gap of inputs.gaps) {
+        await insertGapLink(tx, { organizationId, requirementAssessmentId, claimId: gap.claimId, gap });
+      }
+      for (const link of inputs.conflictLinks) {
+        await insertConflictResolutionLink(tx, {
+          organizationId, requirementAssessmentId, claimId: link.claimId, conflictGroupId: link.conflictGroupId,
+        });
+      }
+    },
+    expectedProvenanceIds(inputs) {
+      return {
+        evidenceItemIds: [], claimIds: [], evidenceDecisionIds: [], claimDecisionIds: [],
+        gapLogItemIds: inputs.gaps.map((row) => row.gapLogItemId),
+        conflictResolutionPairs: inputs.conflictLinks.map((row) => `${row.conflictGroupId}:${row.claimId}`),
+      };
+    },
+    attemptedOperation: "c3_b3_ir_contrib_003_requirement_assessment_created",
+    validatorKey: "VAL-KAI-C3-B3-IR-CONTRIB-003",
+  }),
+  [IR_COMM_001_REQUIREMENT_KEY]: Object.freeze({
+    requirementKey: IR_COMM_001_REQUIREMENT_KEY,
+    async loadInputs(tx, { organizationId }) {
+      return loadGovernedAudiencePermissionInputs(tx, { organizationId });
+    },
+    deriveState(inputs) {
+      return deriveIrComm001State(inputs);
+    },
+    computeFingerprint(inputs) {
+      return computeIrComm001Fingerprint(inputs);
+    },
+    async writeProvenance(tx, { organizationId, requirementAssessmentId, inputs }) {
+      for (const claim of inputs.claims) {
+        await insertClaimLink(tx, { organizationId, requirementAssessmentId, claimId: claim.claimId });
+        if (claim.decisionId !== null) {
+          await insertClaimDecisionLink(tx, { organizationId, requirementAssessmentId, claimId: claim.claimId, decisionId: claim.decisionId });
+        }
+      }
+    },
+    expectedProvenanceIds(inputs) {
+      return {
+        evidenceItemIds: [],
+        claimIds: inputs.claims.map((row) => row.claimId),
+        evidenceDecisionIds: [],
+        claimDecisionIds: inputs.claims.filter((row) => row.decisionId !== null).map((row) => row.decisionId),
+        gapLogItemIds: [],
+      };
+    },
+    attemptedOperation: "c3_b3_ir_comm_001_requirement_assessment_created",
+    validatorKey: "VAL-KAI-C3-B3-IR-COMM-001",
+  }),
 });
 
 /**
@@ -472,6 +868,37 @@ async function insertGapLink(tx, { organizationId, requirementAssessmentId, clai
   );
 }
 
+async function insertOutcomeContextLink(tx, { organizationId, requirementAssessmentId, context }) {
+  await tx.query(
+    `INSERT INTO kai.ra_outcome_context_links
+       (organization_id, requirement_assessment_id, impact_outcome_context_id, outcome_key, outcome_statement, stakeholder_key, stakeholder_label)
+     VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7)`,
+    [organizationId, requirementAssessmentId, context.impactOutcomeContextId, context.outcomeKey, context.outcomeStatement, context.stakeholderKey, context.stakeholderLabel],
+  );
+}
+
+async function insertSourcePromotionLink(tx, { organizationId, requirementAssessmentId, evidenceSource }) {
+  await tx.query(
+    `INSERT INTO kai.ra_source_promotion_links
+       (organization_id, requirement_assessment_id, evidence_item_id, source_id, source_version_id,
+        intake_source_candidate_id, intake_promotion_decision_id, is_current, decision_status, reviewed_source_type)
+     VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6::uuid, $7::uuid, $8, $9, $10)`,
+    [
+      organizationId, requirementAssessmentId, evidenceSource.evidenceItemId, evidenceSource.sourceId,
+      evidenceSource.sourceVersionId, evidenceSource.intakeSourceCandidateId, evidenceSource.intakePromotionDecisionId,
+      evidenceSource.isCurrent, evidenceSource.decisionStatus, evidenceSource.reviewedSourceType,
+    ],
+  );
+}
+
+async function insertConflictResolutionLink(tx, { organizationId, requirementAssessmentId, claimId, conflictGroupId }) {
+  await tx.query(
+    `INSERT INTO kai.ra_conflict_resolution_links (organization_id, requirement_assessment_id, claim_id, conflict_group_id)
+     VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid)`,
+    [organizationId, requirementAssessmentId, claimId, conflictGroupId],
+  );
+}
+
 async function readAssessmentProvenance(tx, { organizationId, requirementAssessmentId }) {
   const evidenceLinkRows = await tx.query(
     `SELECT evidence_item_id::text AS evidence_item_id
@@ -509,12 +936,36 @@ async function readAssessmentProvenance(tx, { organizationId, requirementAssessm
       ORDER BY gap_log_item_id ASC`,
     [organizationId, requirementAssessmentId],
   );
+  const outcomeContextLinkRows = await tx.query(
+    `SELECT impact_outcome_context_id::text AS impact_outcome_context_id
+       FROM kai.ra_outcome_context_links
+      WHERE organization_id = $1::uuid AND requirement_assessment_id = $2::uuid
+      ORDER BY impact_outcome_context_id ASC`,
+    [organizationId, requirementAssessmentId],
+  );
+  const sourcePromotionLinkRows = await tx.query(
+    `SELECT evidence_item_id::text AS evidence_item_id, intake_promotion_decision_id::text AS intake_promotion_decision_id
+       FROM kai.ra_source_promotion_links
+      WHERE organization_id = $1::uuid AND requirement_assessment_id = $2::uuid
+      ORDER BY evidence_item_id ASC`,
+    [organizationId, requirementAssessmentId],
+  );
+  const conflictResolutionLinkRows = await tx.query(
+    `SELECT conflict_group_id::text AS conflict_group_id, claim_id::text AS claim_id
+       FROM kai.ra_conflict_resolution_links
+      WHERE organization_id = $1::uuid AND requirement_assessment_id = $2::uuid
+      ORDER BY conflict_group_id ASC, claim_id ASC`,
+    [organizationId, requirementAssessmentId],
+  );
   return {
     evidenceItemIds: evidenceLinkRows.rows.map((row) => row.evidence_item_id),
     claimIds: claimLinkRows.rows.map((row) => row.claim_id),
     evidenceDecisionLinks: evidenceDecisionLinkRows.rows,
     claimDecisionLinks: claimDecisionLinkRows.rows,
     gapLinks: gapLinkRows.rows,
+    outcomeContextIds: outcomeContextLinkRows.rows.map((row) => row.impact_outcome_context_id),
+    sourcePromotionEvidenceItemIds: sourcePromotionLinkRows.rows.map((row) => row.evidence_item_id),
+    conflictResolutionPairs: conflictResolutionLinkRows.rows.map((row) => `${row.conflict_group_id}:${row.claim_id}`),
   };
 }
 
@@ -607,6 +1058,15 @@ function persistedAssessmentMatchesExpected(persistedRow, persistedProvenance, e
 
   const persistedGapIds = sortedIds(persistedProvenance.gapLinks.map((row) => row.gap_log_item_id));
   if (JSON.stringify(persistedGapIds) !== JSON.stringify(sortedIds(expected.gapLogItemIds))) return false;
+
+  const persistedOutcomeContextIds = sortedIds(persistedProvenance.outcomeContextIds);
+  if (JSON.stringify(persistedOutcomeContextIds) !== JSON.stringify(sortedIds(expected.outcomeContextIds || []))) return false;
+
+  const persistedSourcePromotionIds = sortedIds(persistedProvenance.sourcePromotionEvidenceItemIds);
+  if (JSON.stringify(persistedSourcePromotionIds) !== JSON.stringify(sortedIds(expected.sourcePromotionEvidenceItemIds || []))) return false;
+
+  const persistedConflictPairs = sortedIds(persistedProvenance.conflictResolutionPairs);
+  if (JSON.stringify(persistedConflictPairs) !== JSON.stringify(sortedIds(expected.conflictResolutionPairs || []))) return false;
 
   return true;
 }
@@ -735,6 +1195,9 @@ export function createPostgresRequirementAssessmentRepository({ runInTransaction
             evidence_review_decision_ids: provenance.evidenceDecisionLinks.map((row) => row.decision_id),
             claim_review_decision_ids: provenance.claimDecisionLinks.map((row) => row.decision_id),
             current_gap_log_item_ids: provenance.gapLinks.map((row) => row.gap_log_item_id),
+            outcome_context_ids: provenance.outcomeContextIds,
+            source_promotion_evidence_item_ids: provenance.sourcePromotionEvidenceItemIds,
+            conflict_resolution_pairs: provenance.conflictResolutionPairs,
           });
         });
       } catch (error) {

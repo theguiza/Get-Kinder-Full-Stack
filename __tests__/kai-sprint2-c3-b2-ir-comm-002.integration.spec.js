@@ -411,7 +411,12 @@ async function runIntegrationSuite() {
 
   test("C6: unsupported_requirement still fails closed for a third fabricated requirement_key, zero writes", async () => {
     const orgA = crypto.randomUUID();
-    const otherRequirement = await makeRequirement("c6", "ir_pur_001");
+    // ir_pur_002 remains genuinely unsupported (PARTIAL_INPUT_EXISTS in the
+    // accepted catalogue, not part of any implemented dispatcher entry) -
+    // ir_pur_001 was used here historically but became a real dispatcher
+    // entry in KAI Package C3.B3, so it can no longer serve as an
+    // "unsupported requirement" fixture.
+    const otherRequirement = await makeRequirement("c6", "ir_pur_002");
     const before = await auditEventCount(orgA);
     const result = await assess(orgA, otherRequirement.requirement_id);
     assert.equal(result.ok, false);

@@ -121,6 +121,7 @@ try {
   psqlFile("migrations/kai_sprint2_b1_1_baseline_impact_requirements.sql");
   psqlFile("migrations/kai_sprint2_c2_1_requirement_assessment_persistence.sql");
   psqlFile("migrations/kai_sprint2_c3_a3_requirement_assessment_decision_gap_provenance.sql");
+  psqlFile("migrations/kai_sprint2_c3_a4_requirement_assessment_provenance_extension.sql");
 
   // Smoke-seed chain (mirrors scripts/kai-sprint2-p2-06-claim-traceability-local-postgres.js)
   // that gives the real P2-01/P2-02/P2-04 service stack one pre-promoted,

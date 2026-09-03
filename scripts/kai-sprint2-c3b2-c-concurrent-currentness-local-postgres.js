@@ -120,6 +120,7 @@ try {
   psqlFile("migrations/kai_sprint2_b1_1_baseline_impact_requirements.sql");
   psqlFile("migrations/kai_sprint2_c2_1_requirement_assessment_persistence.sql");
   psqlFile("migrations/kai_sprint2_c3_a3_requirement_assessment_decision_gap_provenance.sql");
+  psqlFile("migrations/kai_sprint2_c3_a4_requirement_assessment_provenance_extension.sql");
 
   const testResult = spawnSync("node", [
     "--test",

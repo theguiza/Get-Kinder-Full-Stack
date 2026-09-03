@@ -36,6 +36,8 @@
     "verify:kai-sprint2-c3-a3-requirement-assessment-decision-gap-provenance": "node scripts/kai-sprint2-c3-a3-requirement-assessment-decision-gap-provenance-local-postgres.js",
     "verify:kai-sprint2-c3-a4-requirement-assessment-provenance-extension": "node scripts/kai-sprint2-c3-a4-requirement-assessment-provenance-extension-local-postgres.js",
     "test:kai-sprint2-c3-a4-requirement-assessment-provenance-extension": "node --test __tests__/kai-sprint2-c3-a4-requirement-assessment-provenance-extension-schema-contract.spec.js",
+    "verify:kai-sprint2-c3-b3-seven-rules": "node scripts/kai-sprint2-c3-b3-seven-rules-local-postgres.js",
+    "test:kai-sprint2-c3-b3-seven-rules": "node --test __tests__/kai-sprint2-c3-b3-seven-rules-validators.spec.js",
     "verify:kai-sprint2-c3-a3-b-ir-contrib-002-repair": "node scripts/kai-sprint2-c3-a3-b-ir-contrib-002-repair-local-postgres.js",
     "test:kai-sprint2-c3-a3-b-ir-contrib-002-repair": "node --test __tests__/kai-sprint2-c3-a3-b-ir-contrib-002-repair-validators.spec.js",
     "verify:kai-sprint2-c3-b2-ir-comm-002": "node scripts/kai-sprint2-c3-b2-ir-comm-002-local-postgres.js",
