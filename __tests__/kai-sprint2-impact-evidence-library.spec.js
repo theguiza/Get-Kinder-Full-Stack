@@ -1630,6 +1630,188 @@ test("Impact Evidence Library refreshes traceability via the existing GET after 
   assert.match(runClaimReview, /await loadTraceability\(selectedClaimId\)/);
 });
 
+// KAI Review Queue -> Traceability user path regression. This repository has
+// no DOM/component rendering harness (no jsdom/@testing-library, confirmed by
+// package.json devDependencies), so the "Review this claim" button's inline
+// onClick handler cannot literally be clicked. Rather than settling for a
+// regex/text match on the handler's source (which only proves the text is
+// present, never that it behaves correctly), this extracts the EXACT,
+// unmodified onClick handler source from the committed JSX via string
+// slicing and executes it for real via `new Function`, passing in only the
+// three identifiers the real closure captures (`item`, `setSelectedClaimId`,
+// `traceabilityPanelRef`). Because `new Function` resolves free identifiers
+// against nothing but its declared parameters and true globals, successful
+// execution is itself proof the handler references nothing else (no
+// postJson, no evidenceReviewCompletePath/claimReviewCompletePath, no fetch)
+// - an undeclared reference would throw a ReferenceError at call time, not
+// merely fail a text match.
+function extractReviewThisClaimHandlerSource(uiSource) {
+  const openMarker = "onClick={() => {\n                    setSelectedClaimId(item.claimId);";
+  const openIdx = uiSource.indexOf(openMarker);
+  assert.notEqual(openIdx, -1, "could not locate the Review this claim onClick handler");
+  const arrowStart = openIdx + "onClick={".length;
+  const tailMarker = "\n                  }}\n                >\n                  Review this claim\n                </button>";
+  const tailIdx = uiSource.indexOf(tailMarker, openIdx);
+  assert.notEqual(tailIdx, -1, "could not locate the end of the Review this claim onClick handler");
+  const arrowEnd = tailIdx + "\n                  }".length;
+  return uiSource.slice(arrowStart, arrowEnd);
+}
+
+test("Review Queue 'Review this claim' handler: exact extracted source is a real, standalone arrow function referencing only item/setSelectedClaimId/traceabilityPanelRef", () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+  const handlerSource = extractReviewThisClaimHandlerSource(uiSource);
+  assert.equal(
+    handlerSource,
+    "() => {\n"
+      + "                    setSelectedClaimId(item.claimId);\n"
+      + "                    traceabilityPanelRef.current?.scrollIntoView({ behavior: \"smooth\", block: \"start\" });\n"
+      + "                    traceabilityPanelRef.current?.focus();\n"
+      + "                  }",
+  );
+  // Constructing the callable at all proves the extracted text still parses
+  // as a valid arrow function expression.
+  assert.doesNotThrow(() => new Function("item", "setSelectedClaimId", "traceabilityPanelRef", `return (${handlerSource});`));
+});
+
+test("Review Queue 'Review this claim' click: selects the EXACT claim represented by that queue item (real handler execution, not a shadow re-implementation)", () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+  const handlerSource = extractReviewThisClaimHandlerSource(uiSource);
+  const buildHandler = new Function(
+    "item", "setSelectedClaimId", "traceabilityPanelRef",
+    `return (${handlerSource});`,
+  );
+
+  // Two distinct synthetic queue items (no production UUID) prove the real
+  // per-iteration closure - as it would be created fresh by
+  // reviewQueueItems.map((item) => ...) - selects each item's OWN claimId,
+  // never a shared/stale/wrong one.
+  const itemAlpha = { claimId: "00000000-0000-4000-8000-00000000a001" };
+  const itemBeta = { claimId: "00000000-0000-4000-8000-00000000b002" };
+
+  for (const item of [itemAlpha, itemBeta]) {
+    const selectedClaimIds = [];
+    const scrollCalls = [];
+    const focusCalls = [];
+    const panelNode = {
+      scrollIntoView(options) { scrollCalls.push(options); },
+      focus() { focusCalls.push(true); },
+    };
+    const traceabilityPanelRef = { current: panelNode };
+
+    const handler = buildHandler(item, (claimId) => selectedClaimIds.push(claimId), traceabilityPanelRef);
+    // Executing the real, unmodified production handler is itself the proof
+    // that it references nothing beyond these three identifiers - an
+    // undeclared reference (postJson, evidenceReviewCompletePath,
+    // claimReviewCompletePath, fetch, ...) would throw ReferenceError here.
+    assert.doesNotThrow(() => handler());
+
+    assert.deepEqual(selectedClaimIds, [item.claimId]);
+    assert.equal(scrollCalls.length, 1);
+    assert.deepEqual(scrollCalls[0], { behavior: "smooth", block: "start" });
+    assert.equal(focusCalls.length, 1);
+  }
+});
+
+test("Review Queue 'Review this claim' click: targets the SAME traceabilityPanelRef the Traceability section (0a7fe31) is attached to, and does not itself invoke any evidence/claim-review mutation", () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+
+  // Exactly one ref in the whole component is named traceabilityPanelRef,
+  // and it is attached (ref={traceabilityPanelRef}) to the admin-card div
+  // whose next child is the "Traceability" heading - the same panel
+  // 0a7fe31 introduced the scroll/focus fix for. This is a structural-wiring
+  // fact (which DOM node a ref attaches to) that this repository's available
+  // test surface cannot observe by rendering; it is proven here at the
+  // source level as a companion to the handler's real dynamic execution
+  // above, not a substitute for it.
+  const refDeclarations = [...uiSource.matchAll(/\bconst traceabilityPanelRef = useRef\(/g)];
+  assert.equal(refDeclarations.length, 1, "expected exactly one traceabilityPanelRef declaration");
+  const refAttachments = [...uiSource.matchAll(/ref=\{traceabilityPanelRef\}/g)];
+  assert.equal(refAttachments.length, 1, "expected exactly one element with ref={traceabilityPanelRef}");
+  const attachmentIdx = refAttachments[0].index;
+  const afterAttachment = uiSource.slice(attachmentIdx, attachmentIdx + 400);
+  assert.match(afterAttachment, /<h5 className="mb-0">Traceability<\/h5>/);
+
+  const handlerSource = extractReviewThisClaimHandlerSource(uiSource);
+  assert.match(handlerSource, /traceabilityPanelRef\.current\?\.scrollIntoView/);
+  assert.match(handlerSource, /traceabilityPanelRef\.current\?\.focus/);
+
+  // No-mutation-on-navigation: the extracted, real handler body references
+  // no review-completion path/POST helper at all. Combined with the dynamic
+  // proof above (execution never throws with ONLY item/setSelectedClaimId/
+  // traceabilityPanelRef declared), this rules out any call to postJson,
+  // evidenceReviewCompletePath, or claimReviewCompletePath from this handler.
+  assert.doesNotMatch(handlerSource, /postJson|evidenceReviewCompletePath|claimReviewCompletePath|fetch\(/);
+});
+
+// KAI Review Queue -> Traceability regression fixture (task section 3): the
+// exact production repro shape from the 08b8a00 actionability repair -
+// resolved/resolved on both evidence and claim review with no decision ever
+// recorded, an unresolved coverage dimension, and a client followup waiting
+// on the client. Proves the full Review Queue presentation, the review
+// controls' before/after-decision availability, and that selecting a claim
+// never mutates review state - end to end, using only the actual committed
+// pure functions (canCompleteEvidenceReview/canCompleteClaimReview/
+// reviewQueueBlockerActionability), never a reimplementation of them.
+test("Review Queue -> Traceability regression: legacy-repair evidence review is actionable, claim review waits on its prerequisite, and becomes actionable once that prerequisite is met", () => {
+  const claimId = "00000000-0000-4000-8000-00000000c003";
+  const item = {
+    claimId,
+    blockerCodes: [
+      "evidence_review_unresolved",
+      "claim_review_unresolved",
+      "coverage_dimension_unresolved",
+      "client_followup_unresolved",
+    ],
+    evidence: { review_queue_status: "resolved", review_status: "resolved" },
+    evidenceReviewDecision: null,
+    claimReview: { queue_status: "resolved", review_status: "resolved" },
+    claimReviewDecision: null,
+    clientFollowupWorkflows: [{ workflowStatus: "waiting_on_client" }],
+  };
+
+  // Review Queue presentation (task section 3's required outcome).
+  assert.equal(reviewQueueBlockerActionability("evidence_review_unresolved", item), "ACTION_REQUIRED");
+  assert.equal(reviewQueueBlockerActionability("claim_review_unresolved", item), "WAITING");
+  assert.equal(reviewQueueBlockerActionability("coverage_dimension_unresolved", item), "ACTION_REQUIRED");
+  assert.equal(reviewQueueBlockerActionability("client_followup_unresolved", item), "WAITING");
+
+  // Selecting/navigating to this exact claim (real handler execution).
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+  const handlerSource = extractReviewThisClaimHandlerSource(uiSource);
+  const buildHandler = new Function("item", "setSelectedClaimId", "traceabilityPanelRef", `return (${handlerSource});`);
+  let selected = null;
+  const panelNode = { scrollIntoView() {}, focus() {} };
+  const handler = buildHandler(item, (id) => { selected = id; }, { current: panelNode });
+  handler();
+  assert.equal(selected, claimId);
+
+  // Traceability panel, before any evidence decision: evidence review is a
+  // lawful P2-12 legacy-repair candidate (available); claim review is not
+  // independently available yet because its evidence prerequisite is unmet.
+  assert.equal(canCompleteEvidenceReview(item.evidence, item.evidenceReviewDecision), true);
+  assert.equal(
+    canCompleteClaimReview(item.evidence, item.claimReview, item.evidenceReviewDecision, item.claimReviewDecision),
+    false,
+  );
+  assert.equal(claimReviewEvidencePrerequisiteSatisfied(item.evidence, item.evidenceReviewDecision), false);
+
+  // Post-refresh authoritative state (task section 5): a genuine terminal
+  // evidence decision now exists (as the server would return after a real
+  // POST + GET refresh - never fabricated/cleared client-side), the claim
+  // queue is still resolved/resolved with no claim decision yet. The claim
+  // review prerequisite is now satisfied, so claim review becomes available.
+  const refreshedEvidence = { review_queue_status: "resolved", review_status: "resolved" };
+  const refreshedEvidenceReviewDecision = { decisionId: "00000000-0000-4000-8000-00000000d004", decisionOutcome: "supported" };
+  const refreshedClaimReview = { queue_status: "resolved", review_status: "resolved" };
+  const refreshedClaimReviewDecision = null;
+
+  assert.equal(claimReviewEvidencePrerequisiteSatisfied(refreshedEvidence, refreshedEvidenceReviewDecision), true);
+  assert.equal(
+    canCompleteClaimReview(refreshedEvidence, refreshedClaimReview, refreshedEvidenceReviewDecision, refreshedClaimReviewDecision),
+    true,
+  );
+});
+
 test("Impact Evidence Library mounts KAI Web Intake under its authorized organization context", () => {
   const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
 
