@@ -104,6 +104,40 @@ export function reviewQueueIsComplete(completeness) {
   return completeness?.truncated !== true && (completeness?.evaluationErrorCount || 0) === 0;
 }
 
+// KAI Review Queue closure: the SINGLE authority for whether the organization
+// truly has nothing needing attention across BOTH current-attention sources -
+// claim-traceability and sensitivity/allowed-use. Deliberately takes a
+// `reviewQueueRequestState` (not just `reviewQueueCompleteness`) so a
+// missing/malformed DTO can never by itself establish a successful,
+// complete read: `reviewQueueIsComplete(projectReviewQueueCompleteness(null))`
+// is true, but that can only ever surface here paired with
+// `reviewQueueRequestState !== "success"`, which fails this gate regardless.
+// Every input is request-state-first: "idle"/"loading"/"error" always return
+// false, matching sensitivityReviewQueueAttention's existing
+// never-show-0-while-unknown rule for the sensitivity half.
+export function reviewQueueIsConclusivelyEmpty({
+  reviewQueueRequestState,
+  reviewQueueCompleteness,
+  reviewQueueItemsLength,
+  sensitivityCapabilityRequestState,
+  sensitivityCapability,
+  sensitivityAttentionStatus,
+  sensitivityAttentionItemsLength,
+}) {
+  const claimConclusiveZero =
+    reviewQueueRequestState === "success"
+    && reviewQueueIsComplete(reviewQueueCompleteness)
+    && reviewQueueItemsLength === 0;
+
+  const sensitivityConclusiveZero =
+    sensitivityCapabilityRequestState === "success"
+    && sensitivityCapability === true
+    && sensitivityAttentionStatus === "ready"
+    && sensitivityAttentionItemsLength === 0;
+
+  return claimConclusiveZero && sensitivityConclusiveZero;
+}
+
 // Presentation-only actionability derivation for one Review Queue item's
 // blocker code. Deterministic and pure - never persisted, never a new
 // workflow authority. Reuses the exact same gates the Traceability panel

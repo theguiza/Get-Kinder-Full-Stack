@@ -54,6 +54,7 @@ import {
   projectReviewQueue,
   projectReviewQueueCompleteness,
   reviewQueueIsComplete,
+  reviewQueueIsConclusivelyEmpty,
   projectTraceability,
   reviewQueueBlockerActionability,
   sensitivityReviewQueueAttention,
@@ -178,6 +179,11 @@ export default function ImpactEvidenceLibrary() {
   // fetching/showing the GK-only Phase-5 section below, never a hardcoded
   // role list and never an attempt-and-catch-403 probe.
   const [sensitivityCapability, setSensitivityCapability] = useState(null);
+  // Request lifecycle for the capability fetch above, kept separate from
+  // `sensitivityCapability` itself so a request failure (unknown answer) is
+  // never conflated with a successful "false" answer (actor confirmed not
+  // permitted) - both previously collapsed to sensitivityCapability===false.
+  const [sensitivityCapabilityRequestState, setSensitivityCapabilityRequestState] = useState("idle");
   const [sensitivityDetail, setSensitivityDetail] = useState(null);
   const [sensitivityLoading, setSensitivityLoading] = useState(false);
   const [sensitivityError, setSensitivityError] = useState("");
@@ -223,6 +229,12 @@ export default function ImpactEvidenceLibrary() {
     truncated: false,
     evaluationErrorCount: 0,
   });
+  // Request lifecycle for the rollup fetch, independent of loadingReviewQueue/
+  // reviewQueueError: this is what reviewQueueIsConclusivelyEmpty gates on so
+  // that "idle" (never fetched) and "error" states can never be read as a
+  // successful complete result just because reviewQueueCompleteness still
+  // holds its default {truncated:false, evaluationErrorCount:0} value.
+  const [reviewQueueRequestState, setReviewQueueRequestState] = useState("idle");
 
   // Governed internal availability (the all-state Claim Library) and audience
   // eligibility are independent dimensions: neither request may clear, gate, or
@@ -245,6 +257,31 @@ export default function ImpactEvidenceLibrary() {
         sensitivityReviewQueueItems,
       }),
     [sensitivityCapability, loadingSensitivityReviewQueue, sensitivityReviewQueueError, sensitivityReviewQueueItems],
+  );
+
+  // Review Queue closure: the single pure authority for the organization-wide
+  // "Nothing currently needs attention" assertion - true only when BOTH the
+  // claim-attention rollup and the sensitivity/allowed-use rollup are
+  // conclusively, successfully empty. See reviewQueueIsConclusivelyEmpty.
+  const reviewQueueConclusivelyEmpty = useMemo(
+    () =>
+      reviewQueueIsConclusivelyEmpty({
+        reviewQueueRequestState,
+        reviewQueueCompleteness,
+        reviewQueueItemsLength: reviewQueueItems.length,
+        sensitivityCapabilityRequestState,
+        sensitivityCapability,
+        sensitivityAttentionStatus: sensitivityAttention.status,
+        sensitivityAttentionItemsLength: sensitivityAttention.items.length,
+      }),
+    [
+      reviewQueueRequestState,
+      reviewQueueCompleteness,
+      reviewQueueItems,
+      sensitivityCapabilityRequestState,
+      sensitivityCapability,
+      sensitivityAttention,
+    ],
   );
 
   const selectedClaim = useMemo(
@@ -299,6 +336,7 @@ export default function ImpactEvidenceLibrary() {
     setTraceability(next.traceability);
     setGeneratedDraftPacket(next.generatedDraftPacket);
     setSensitivityCapability(null);
+    setSensitivityCapabilityRequestState("idle");
     setSensitivityDetail(null);
     setSensitivityError("");
     setSensitivityActionResult("");
@@ -312,6 +350,7 @@ export default function ImpactEvidenceLibrary() {
     setReviewQueueError("");
     setLoadingReviewQueue(false);
     setReviewQueueCompleteness({ truncated: false, evaluationErrorCount: 0 });
+    setReviewQueueRequestState("idle");
   }, [organizationId]);
 
   // KAI B1A-3B authorization gate: fetch the server-grounded capability once
@@ -323,13 +362,16 @@ export default function ImpactEvidenceLibrary() {
     if (!organizationId) return;
     let cancelled = false;
     (async () => {
+      setSensitivityCapabilityRequestState("loading");
       const result = await getJson(sensitivityCapabilitiesPath(organizationId));
       if (cancelled) return;
       if (result.statusCode !== 200 || !result.body?.ok) {
         setSensitivityCapability(false);
+        setSensitivityCapabilityRequestState("error");
         return;
       }
       setSensitivityCapability(result.body.data?.can_manage_sensitivity_review === true);
+      setSensitivityCapabilityRequestState("success");
     })();
     return () => {
       cancelled = true;
@@ -589,16 +631,19 @@ export default function ImpactEvidenceLibrary() {
     if (!organizationId) return;
     setLoadingReviewQueue(true);
     setReviewQueueError("");
+    setReviewQueueRequestState("loading");
     const result = await getJson(organizationReviewQueuePath(organizationId));
     setLoadingReviewQueue(false);
     if (result.statusCode !== 200 || !result.body?.ok) {
       setReviewQueueItems([]);
       setReviewQueueCompleteness({ truncated: false, evaluationErrorCount: 0 });
       setReviewQueueError(errorText(result));
+      setReviewQueueRequestState("error");
       return;
     }
     setReviewQueueItems(projectReviewQueue(result.body.data));
     setReviewQueueCompleteness(projectReviewQueueCompleteness(result.body.data));
+    setReviewQueueRequestState("success");
   }, [organizationId]);
 
   // Rediscover current attention on every fresh Library load, exactly like
@@ -1102,10 +1147,7 @@ export default function ImpactEvidenceLibrary() {
           </div>
         ) : null}
 
-        {!loadingReviewQueue
-        && !reviewQueueError
-        && reviewQueueItems.length === 0
-        && !(sensitivityAttention.status === "ready" && sensitivityAttention.items.length > 0) ? (
+        {reviewQueueConclusivelyEmpty ? (
           <div className="text-muted small">Nothing currently needs attention for this organization.</div>
         ) : null}
         <ul className="list-group">

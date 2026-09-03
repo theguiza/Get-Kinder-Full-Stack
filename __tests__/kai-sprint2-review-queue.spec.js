@@ -18,6 +18,7 @@ import {
   projectReviewQueue,
   projectReviewQueueCompleteness,
   reviewQueueIsComplete,
+  reviewQueueIsConclusivelyEmpty,
   reviewQueueBlockerActionability,
   sensitivityReviewQueueAttention,
 } from "../frontend/impactEvidenceLibraryLogic.js";
@@ -374,6 +375,150 @@ test("projectReviewQueueCompleteness reports a rollup with evaluation errors as 
 test("projectReviewQueueCompleteness defaults to complete for a missing/malformed dto", () => {
   assert.deepEqual(projectReviewQueueCompleteness(null), { truncated: false, evaluationErrorCount: 0 });
   assert.equal(reviewQueueIsComplete(projectReviewQueueCompleteness(null)), true);
+});
+
+// Review Queue closure: conclusive global-empty decision (this package) -
+// reviewQueueIsConclusivelyEmpty is the ONLY authority for the
+// "Nothing currently needs attention for this organization." assertion. It
+// must return true ONLY when both the claim-attention rollup and the
+// sensitivity/allowed-use rollup are independently, successfully, and
+// conclusively empty - never merely because both happen to report zero
+// items while either side's request state is unknown, still loading, or
+// failed. `baseInputs` below is the fully-conclusive-zero case; each
+// regression below flips exactly one input away from that baseline.
+const conclusivelyEmptyBaseInputs = Object.freeze({
+  reviewQueueRequestState: "success",
+  reviewQueueCompleteness: { truncated: false, evaluationErrorCount: 0 },
+  reviewQueueItemsLength: 0,
+  sensitivityCapabilityRequestState: "success",
+  sensitivityCapability: true,
+  sensitivityAttentionStatus: "ready",
+  sensitivityAttentionItemsLength: 0,
+});
+
+test("reviewQueueIsConclusivelyEmpty: true only for a fully conclusive zero on both sides", () => {
+  assert.equal(reviewQueueIsConclusivelyEmpty(conclusivelyEmptyBaseInputs), true);
+});
+
+test("reviewQueueIsConclusivelyEmpty: false while the claim-attention request has not resolved", () => {
+  assert.equal(
+    reviewQueueIsConclusivelyEmpty({ ...conclusivelyEmptyBaseInputs, reviewQueueRequestState: "idle" }),
+    false,
+  );
+  assert.equal(
+    reviewQueueIsConclusivelyEmpty({ ...conclusivelyEmptyBaseInputs, reviewQueueRequestState: "loading" }),
+    false,
+  );
+});
+
+test("reviewQueueIsConclusivelyEmpty: false when the claim-attention request failed", () => {
+  assert.equal(
+    reviewQueueIsConclusivelyEmpty({ ...conclusivelyEmptyBaseInputs, reviewQueueRequestState: "error" }),
+    false,
+  );
+});
+
+test("reviewQueueIsConclusivelyEmpty: false when the claim-attention rollup was truncated", () => {
+  assert.equal(
+    reviewQueueIsConclusivelyEmpty({
+      ...conclusivelyEmptyBaseInputs,
+      reviewQueueCompleteness: { truncated: true, evaluationErrorCount: 0 },
+    }),
+    false,
+  );
+});
+
+test("reviewQueueIsConclusivelyEmpty: false when the claim-attention rollup has evaluation errors", () => {
+  assert.equal(
+    reviewQueueIsConclusivelyEmpty({
+      ...conclusivelyEmptyBaseInputs,
+      reviewQueueCompleteness: { truncated: false, evaluationErrorCount: 2 },
+    }),
+    false,
+  );
+});
+
+test("reviewQueueIsConclusivelyEmpty: false when the claim-attention rollup has items", () => {
+  assert.equal(
+    reviewQueueIsConclusivelyEmpty({ ...conclusivelyEmptyBaseInputs, reviewQueueItemsLength: 1 }),
+    false,
+  );
+});
+
+test("reviewQueueIsConclusivelyEmpty: false while the sensitivity capability is unknown/loading", () => {
+  assert.equal(
+    reviewQueueIsConclusivelyEmpty({
+      ...conclusivelyEmptyBaseInputs,
+      sensitivityCapabilityRequestState: "idle",
+      sensitivityCapability: null,
+      sensitivityAttentionStatus: "unavailable",
+      sensitivityAttentionItemsLength: 0,
+    }),
+    false,
+  );
+  assert.equal(
+    reviewQueueIsConclusivelyEmpty({
+      ...conclusivelyEmptyBaseInputs,
+      sensitivityCapabilityRequestState: "loading",
+      sensitivityCapability: null,
+      sensitivityAttentionStatus: "unavailable",
+      sensitivityAttentionItemsLength: 0,
+    }),
+    false,
+  );
+});
+
+test("reviewQueueIsConclusivelyEmpty: false when the sensitivity capability request failed", () => {
+  assert.equal(
+    reviewQueueIsConclusivelyEmpty({
+      ...conclusivelyEmptyBaseInputs,
+      sensitivityCapabilityRequestState: "error",
+      sensitivityCapability: false,
+      sensitivityAttentionStatus: "unavailable",
+      sensitivityAttentionItemsLength: 0,
+    }),
+    false,
+  );
+});
+
+test("reviewQueueIsConclusivelyEmpty: false when the sensitivity capability was successfully denied", () => {
+  assert.equal(
+    reviewQueueIsConclusivelyEmpty({
+      ...conclusivelyEmptyBaseInputs,
+      sensitivityCapabilityRequestState: "success",
+      sensitivityCapability: false,
+      sensitivityAttentionStatus: "unavailable",
+      sensitivityAttentionItemsLength: 0,
+    }),
+    false,
+  );
+});
+
+test("reviewQueueIsConclusivelyEmpty: false while the sensitivity queue read is loading", () => {
+  assert.equal(
+    reviewQueueIsConclusivelyEmpty({
+      ...conclusivelyEmptyBaseInputs,
+      sensitivityAttentionStatus: "loading",
+    }),
+    false,
+  );
+});
+
+test("reviewQueueIsConclusivelyEmpty: false when the sensitivity queue read failed", () => {
+  assert.equal(
+    reviewQueueIsConclusivelyEmpty({
+      ...conclusivelyEmptyBaseInputs,
+      sensitivityAttentionStatus: "error",
+    }),
+    false,
+  );
+});
+
+test("reviewQueueIsConclusivelyEmpty: false when the sensitivity queue has items", () => {
+  assert.equal(
+    reviewQueueIsConclusivelyEmpty({ ...conclusivelyEmptyBaseInputs, sensitivityAttentionItemsLength: 1 }),
+    false,
+  );
 });
 
 // Review Queue closure: sensitivity/allowed-use composition (section 6A) -
