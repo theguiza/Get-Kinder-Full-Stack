@@ -334,12 +334,23 @@ test("KAI UAT-enablement evidence/claim review controls send only the server-sup
     `/api/kai/sprint2/intake/admin/organizations/${organizationId}/claims/${claimId}/claim-review/q2/complete`,
   );
 
-  assert.equal(canCompleteEvidenceReview({ review_queue_status: "open", review_status: "needs_gk_review" }), true);
-  assert.equal(canCompleteEvidenceReview({ review_queue_status: "resolved", review_status: "resolved" }), false);
+  assert.equal(canCompleteEvidenceReview({ review_queue_status: "open", review_status: "needs_gk_review" }, null), true);
+  // A resolved/resolved queue with an existing terminal decision is genuinely
+  // done, not a P2-12 legacy-repair candidate (see the dedicated legacy-repair
+  // coverage in kai-sprint2-impact-evidence-library.spec.js).
+  assert.equal(
+    canCompleteEvidenceReview(
+      { review_queue_status: "resolved", review_status: "resolved" },
+      { decisionId: "d1", decisionOutcome: "supported" },
+    ),
+    false,
+  );
   assert.equal(
     canCompleteClaimReview(
       { review_status: "resolved" },
       { queue_status: "open", review_status: "needs_gk_review" },
+      { decisionOutcome: "supported" },
+      null,
     ),
     true,
   );
@@ -347,9 +358,11 @@ test("KAI UAT-enablement evidence/claim review controls send only the server-sup
     canCompleteClaimReview(
       { review_status: "needs_gk_review" },
       { queue_status: "open", review_status: "needs_gk_review" },
+      null,
+      null,
     ),
     false,
-    "claim review must stay gated on evidence review already being resolved",
+    "claim review must stay gated on the evidence review already having a terminal decision",
   );
 });
 

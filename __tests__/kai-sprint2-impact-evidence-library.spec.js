@@ -23,6 +23,8 @@ import {
   annotateGovernedAvailability,
   canCompleteClaimReview,
   canCompleteEvidenceReview,
+  claimReviewEvidencePrerequisiteSatisfied,
+  reviewQueueBlockerActionability,
   canCompleteGeneratedContentReview,
   canSelectClaimForInternalGeneration,
   canStartGeneratedContentReview,
@@ -1395,31 +1397,191 @@ test("evidenceReviewDecisionValidationError/claimReviewDecisionValidationError e
 // (resolved/resolved) or otherwise-blocked queue item must not render them.
 
 test("canCompleteEvidenceReview admits the outstanding queue state (first-pass or reopened-after-resolution) and nothing else", () => {
-  assert.equal(canCompleteEvidenceReview({ review_queue_status: "open", review_status: "needs_gk_review" }), true);
-  assert.equal(canCompleteEvidenceReview({ review_queue_status: "resolved", review_status: "resolved" }), false);
-  assert.equal(canCompleteEvidenceReview({ review_queue_status: "blocked", review_status: "needs_gk_review" }), false);
-  assert.equal(canCompleteEvidenceReview({ review_queue_status: "resolved", review_status: "needs_gk_review" }), false);
-  assert.equal(canCompleteEvidenceReview(null), false);
+  assert.equal(canCompleteEvidenceReview({ review_queue_status: "open", review_status: "needs_gk_review" }, null), true);
+  assert.equal(canCompleteEvidenceReview({ review_queue_status: "blocked", review_status: "needs_gk_review" }, null), false);
+  assert.equal(canCompleteEvidenceReview({ review_queue_status: "resolved", review_status: "needs_gk_review" }, null), false);
+  assert.equal(canCompleteEvidenceReview(null, null), false);
 });
 
-test("canCompleteClaimReview admits the outstanding queue state once its linked evidence review is resolved, and never before", () => {
-  const resolvedEvidence = { review_status: "resolved" };
+// KAI P2-12 legacy repair: `resolved/resolved` with no decision head ever
+// recorded is exactly the state the backend's resolved/resolved CAS branch
+// (postgresHumanReviewRepository.js) accepts a genuine first decision
+// against - proven by the "resolved queue without a decision head" P2-12
+// integration test. The frontend actionability gate must recognize this
+// state as actionable, not collapse it into BLOCKED alongside a genuinely
+// completed review.
+test("canCompleteEvidenceReview admits resolved/resolved as a lawful P2-12 legacy-repair candidate only when no current decision exists", () => {
+  const resolvedQueue = { review_queue_status: "resolved", review_status: "resolved" };
+  assert.equal(canCompleteEvidenceReview(resolvedQueue, null), true);
+  assert.equal(canCompleteEvidenceReview(resolvedQueue, undefined), true);
+});
+
+test("canCompleteEvidenceReview does NOT treat resolved/resolved as legacy-repair once a real decision head exists, terminal or reopened", () => {
+  const resolvedQueue = { review_queue_status: "resolved", review_status: "resolved" };
+  assert.equal(canCompleteEvidenceReview(resolvedQueue, { decisionId: "d1", decisionOutcome: "supported" }), false);
+  assert.equal(canCompleteEvidenceReview(resolvedQueue, { decisionId: "d1", decisionOutcome: "needs_more_information" }), false);
+});
+
+// A legitimate re-review (needs_more_information) always lands the queue
+// back in the ordinary open/needs_gk_review state - it must be admitted
+// through the normal outstanding-review path, not the legacy exception.
+test("canCompleteEvidenceReview admits a legitimate re-review (needs_more_information reopened to open/needs_gk_review) through the normal path", () => {
+  const reopenedQueue = { review_queue_status: "open", review_status: "needs_gk_review" };
+  assert.equal(
+    canCompleteEvidenceReview(reopenedQueue, { decisionId: "d1", decisionOutcome: "needs_more_information" }),
+    true,
+  );
+});
+
+test("claimReviewEvidencePrerequisiteSatisfied requires both a resolved evidence queue AND a terminal evidence decision head", () => {
+  assert.equal(claimReviewEvidencePrerequisiteSatisfied({ review_status: "resolved" }, null), false);
+  assert.equal(
+    claimReviewEvidencePrerequisiteSatisfied({ review_status: "resolved" }, { decisionOutcome: "needs_more_information" }),
+    false,
+  );
+  assert.equal(
+    claimReviewEvidencePrerequisiteSatisfied({ review_status: "needs_gk_review" }, { decisionOutcome: "supported" }),
+    false,
+  );
+  assert.equal(
+    claimReviewEvidencePrerequisiteSatisfied({ review_status: "resolved" }, { decisionOutcome: "supported" }),
+    true,
+  );
+});
+
+test("canCompleteClaimReview admits the outstanding queue state once its linked evidence review has a terminal decision, and never before", () => {
+  const resolvedEvidenceWithDecision = { review_status: "resolved" };
+  const terminalDecision = { decisionOutcome: "supported" };
   const unresolvedEvidence = { review_status: "needs_gk_review" };
   assert.equal(
-    canCompleteClaimReview(resolvedEvidence, { queue_status: "open", review_status: "needs_gk_review" }),
+    canCompleteClaimReview(
+      resolvedEvidenceWithDecision,
+      { queue_status: "open", review_status: "needs_gk_review" },
+      terminalDecision,
+      null,
+    ),
     true,
   );
   assert.equal(
-    canCompleteClaimReview(resolvedEvidence, { queue_status: "resolved", review_status: "resolved" }),
+    canCompleteClaimReview(
+      unresolvedEvidence,
+      { queue_status: "open", review_status: "needs_gk_review" },
+      null,
+      null,
+    ),
     false,
   );
   assert.equal(
-    canCompleteClaimReview(unresolvedEvidence, { queue_status: "open", review_status: "needs_gk_review" }),
+    canCompleteClaimReview(
+      resolvedEvidenceWithDecision,
+      { queue_status: "blocked", review_status: "needs_gk_review" },
+      terminalDecision,
+      null,
+    ),
     false,
   );
+  // resolved/resolved evidence with NO decision head: the prerequisite
+  // itself is unmet (not just "resolved"), so the claim is never admitted
+  // regardless of the claim's own queue shape.
   assert.equal(
-    canCompleteClaimReview(resolvedEvidence, { queue_status: "blocked", review_status: "needs_gk_review" }),
+    canCompleteClaimReview(
+      { review_status: "resolved" },
+      { queue_status: "open", review_status: "needs_gk_review" },
+      null,
+      null,
+    ),
     false,
+  );
+});
+
+test("canCompleteClaimReview admits resolved/resolved claim queue as legacy repair once the evidence prerequisite is satisfied and no current claim decision exists", () => {
+  const resolvedEvidenceWithDecision = { review_status: "resolved" };
+  const terminalDecision = { decisionOutcome: "supported" };
+  const resolvedClaimQueue = { queue_status: "resolved", review_status: "resolved" };
+  assert.equal(
+    canCompleteClaimReview(resolvedEvidenceWithDecision, resolvedClaimQueue, terminalDecision, null),
+    true,
+  );
+});
+
+test("canCompleteClaimReview does NOT treat a resolved/resolved claim queue as legacy repair once a current claim decision already exists", () => {
+  const resolvedEvidenceWithDecision = { review_status: "resolved" };
+  const terminalEvidenceDecision = { decisionOutcome: "supported" };
+  const resolvedClaimQueue = { queue_status: "resolved", review_status: "resolved" };
+  assert.equal(
+    canCompleteClaimReview(
+      resolvedEvidenceWithDecision,
+      resolvedClaimQueue,
+      terminalEvidenceDecision,
+      { decisionOutcome: "approved" },
+    ),
+    false,
+  );
+});
+
+test("reviewQueueBlockerActionability: evidence_review_unresolved is ACTION_REQUIRED for both a fresh review and a lawful P2-12 legacy-repair candidate", () => {
+  assert.equal(
+    reviewQueueBlockerActionability("evidence_review_unresolved", {
+      evidence: { review_queue_status: "open", review_status: "needs_gk_review" },
+      evidenceReviewDecision: null,
+    }),
+    "ACTION_REQUIRED",
+  );
+  assert.equal(
+    reviewQueueBlockerActionability("evidence_review_unresolved", {
+      evidence: { review_queue_status: "resolved", review_status: "resolved" },
+      evidenceReviewDecision: null,
+    }),
+    "ACTION_REQUIRED",
+  );
+});
+
+test("reviewQueueBlockerActionability: claim_review_unresolved is WAITING (a dependency, never a hard blocker) while the evidence prerequisite is unmet, and ACTION_REQUIRED once it is satisfied", () => {
+  assert.equal(
+    reviewQueueBlockerActionability("claim_review_unresolved", {
+      evidence: { review_status: "resolved" },
+      evidenceReviewDecision: null,
+      claimReview: { queue_status: "resolved", review_status: "resolved" },
+      claimReviewDecision: null,
+    }),
+    "WAITING",
+  );
+  assert.equal(
+    reviewQueueBlockerActionability("claim_review_unresolved", {
+      evidence: { review_status: "resolved" },
+      evidenceReviewDecision: { decisionOutcome: "supported" },
+      claimReview: { queue_status: "resolved", review_status: "resolved" },
+      claimReviewDecision: null,
+    }),
+    "ACTION_REQUIRED",
+  );
+});
+
+test("reviewQueueBlockerActionability: existing coverage_dimension_unresolved and client_followup_unresolved behavior is unchanged", () => {
+  assert.equal(reviewQueueBlockerActionability("coverage_dimension_unresolved", {}), "ACTION_REQUIRED");
+  assert.equal(
+    reviewQueueBlockerActionability("client_followup_unresolved", {
+      clientFollowupWorkflows: [{ workflowStatus: "waiting_on_client" }],
+    }),
+    "WAITING",
+  );
+  assert.equal(
+    reviewQueueBlockerActionability("client_followup_unresolved", { clientFollowupWorkflows: [] }),
+    "BLOCKED",
+  );
+});
+
+// A genuine hard blocker (any code this function does not recognize as one
+// of the four review-lifecycle-derived codes above) must remain BLOCKED -
+// the repaired distinction is only "lawful outstanding human review", never
+// a general weakening of BLOCKED.
+test("reviewQueueBlockerActionability: an unrecognized/genuine hard-blocker code remains BLOCKED regardless of queue or decision state", () => {
+  assert.equal(
+    reviewQueueBlockerActionability("support_strength_unassessed", {
+      evidence: { review_queue_status: "resolved", review_status: "resolved" },
+      evidenceReviewDecision: null,
+    }),
+    "BLOCKED",
   );
 });
 

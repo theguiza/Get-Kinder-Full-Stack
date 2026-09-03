@@ -146,10 +146,21 @@ export function reviewQueueIsConclusivelyEmpty({
 // from what the reviewer can actually do once they select the claim below.
 export function reviewQueueBlockerActionability(blockerCode, item) {
   if (blockerCode === "evidence_review_unresolved") {
-    return canCompleteEvidenceReview(item.evidence) ? "ACTION_REQUIRED" : "BLOCKED";
+    return canCompleteEvidenceReview(item.evidence, item.evidenceReviewDecision) ? "ACTION_REQUIRED" : "BLOCKED";
   }
   if (blockerCode === "claim_review_unresolved") {
-    return canCompleteClaimReview(item.evidence, item.claimReview) ? "ACTION_REQUIRED" : "BLOCKED";
+    // A claim cannot be independently reviewed until its linked evidence
+    // item's own decision-lineage head is a terminal outcome (the same
+    // prerequisite postgresHumanReviewRepository.js's recordClaimReviewDecision
+    // enforces). That is a dependency on other lawful work, not a genuine
+    // validator/governance hard blocker - present it with the same "WAITING"
+    // vocabulary already used for client-followup dependency, never BLOCKED.
+    if (!claimReviewEvidencePrerequisiteSatisfied(item.evidence, item.evidenceReviewDecision)) {
+      return "WAITING";
+    }
+    return canCompleteClaimReview(item.evidence, item.claimReview, item.evidenceReviewDecision, item.claimReviewDecision)
+      ? "ACTION_REQUIRED"
+      : "BLOCKED";
   }
   if (blockerCode === "coverage_dimension_unresolved") {
     // The existing "Accept internal limitation for selected dimension"
@@ -252,16 +263,64 @@ function isReviewOutstanding(queueStatus, reviewStatus) {
   return queueStatus === "open" && reviewStatus === "needs_gk_review";
 }
 
-export function canCompleteEvidenceReview(evidence) {
-  return Boolean(evidence) && isReviewOutstanding(evidence.review_queue_status, evidence.review_status);
+function isResolvedQueueState(queueStatus, reviewStatus) {
+  return queueStatus === "resolved" && reviewStatus === "resolved";
 }
 
-export function canCompleteClaimReview(evidence, claimReview) {
+// Mirrors Backend/kai/dictionary/humanReviewDecisionContract.js's
+// EVIDENCE_REVIEW_TERMINAL_OUTCOMES exactly (same mirroring convention this
+// file already uses for EVIDENCE_REVIEW_DECISIONS/CLAIM_REVIEW_DECISIONS
+// below) - the vocabulary of evidence-review outcomes that resolve the
+// review, as opposed to needs_more_information which reopens it.
+const EVIDENCE_REVIEW_TERMINAL_OUTCOMES = Object.freeze([
+  "supported",
+  "supported_with_limitation",
+  "not_supported",
+]);
+
+function isTerminalEvidenceReviewDecision(evidenceReviewDecision) {
   return (
-    Boolean(claimReview)
-    && evidence?.review_status === "resolved"
-    && isReviewOutstanding(claimReview.queue_status, claimReview.review_status)
+    Boolean(evidenceReviewDecision)
+    && EVIDENCE_REVIEW_TERMINAL_OUTCOMES.includes(evidenceReviewDecision.decisionOutcome)
   );
+}
+
+// KAI P2-12 legacy-repair recognition: `queue_status/review_status =
+// resolved` alone was the ENTIRE old pre-P2-12 proof of review - a queue row
+// can be sitting in that state with no decision ever recorded (see
+// postgresHumanReviewRepository.js's resolved/resolved CAS branch, proven by
+// the "resolved queue without a decision head" integration test). That state
+// is exactly as lawfully reviewable as a fresh open/needs_gk_review row: the
+// backend accepts a genuine first decision as a lineage root against it. Once
+// a real decision head exists, the row is no longer a repair candidate - a
+// terminal outcome means it is genuinely done, and needs_more_information
+// means the row is (or will be) back in the ordinary open/needs_gk_review
+// path, not this one.
+function isLegacyRepairCandidate(queueStatus, reviewStatus, currentDecision) {
+  return isResolvedQueueState(queueStatus, reviewStatus) && currentDecision == null;
+}
+
+export function canCompleteEvidenceReview(evidence, evidenceReviewDecision) {
+  if (!evidence) return false;
+  if (isReviewOutstanding(evidence.review_queue_status, evidence.review_status)) return true;
+  return isLegacyRepairCandidate(evidence.review_queue_status, evidence.review_status, evidenceReviewDecision);
+}
+
+// The claim-review prerequisite this repository's write layer enforces
+// (postgresHumanReviewRepository.js recordClaimReviewDecision): the linked
+// evidence item's own decision-lineage head must already be a TERMINAL
+// outcome - never absent, never needs_more_information. `evidence.review_status
+// === "resolved"` alone (the pre-P2-12 signal) is not sufficient proof by
+// itself; it must be paired with a genuine terminal decision head.
+export function claimReviewEvidencePrerequisiteSatisfied(evidence, evidenceReviewDecision) {
+  return evidence?.review_status === "resolved" && isTerminalEvidenceReviewDecision(evidenceReviewDecision);
+}
+
+export function canCompleteClaimReview(evidence, claimReview, evidenceReviewDecision, claimReviewDecision) {
+  if (!claimReviewEvidencePrerequisiteSatisfied(evidence, evidenceReviewDecision)) return false;
+  if (!claimReview) return false;
+  if (isReviewOutstanding(claimReview.queue_status, claimReview.review_status)) return true;
+  return isLegacyRepairCandidate(claimReview.queue_status, claimReview.review_status, claimReviewDecision);
 }
 
 export const EVIDENCE_REVIEW_DECISIONS = Object.freeze([

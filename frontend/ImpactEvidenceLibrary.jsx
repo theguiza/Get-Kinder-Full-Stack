@@ -841,7 +841,7 @@ export default function ImpactEvidenceLibrary() {
 
   const runCompleteEvidenceReview = useCallback(async () => {
     if (!organizationId || !traceability?.evidence || workflowPending) return;
-    if (!canCompleteEvidenceReview(traceability.evidence)) return;
+    if (!canCompleteEvidenceReview(traceability.evidence, traceability.evidenceReviewDecision)) return;
     if (evidenceDecisionValidationError) return;
     setWorkflowPending(true);
     setWorkflowResult("");
@@ -875,7 +875,7 @@ export default function ImpactEvidenceLibrary() {
 
   const runCompleteClaimReview = useCallback(async () => {
     if (!organizationId || !selectedClaimId || !traceability?.claimReview || workflowPending) return;
-    if (!canCompleteClaimReview(traceability.evidence, traceability.claimReview)) return;
+    if (!canCompleteClaimReview(traceability.evidence, traceability.claimReview, traceability.evidenceReviewDecision, traceability.claimReviewDecision)) return;
     if (claimDecisionValidationError) return;
     setWorkflowPending(true);
     setWorkflowResult("");
@@ -1383,7 +1383,7 @@ export default function ImpactEvidenceLibrary() {
                 <h6 className="mt-3">Reviews, followups, conflicts</h6>
                 <ValueRow label="Evidence review" value={`${traceability.evidence?.review_queue_status || "none"} / ${traceability.evidence?.review_status || "none"}`} />
                 <ValueRow label="Evidence review decision" value={traceability.evidenceReviewDecision?.decisionOutcome} />
-                {canCompleteEvidenceReview(traceability.evidence) ? (
+                {canCompleteEvidenceReview(traceability.evidence, traceability.evidenceReviewDecision) ? (
                   <div className="border rounded p-2 mt-2 mb-3">
                     <div className="small fw-semibold mb-2">Record evidence review decision</div>
                     <div className="d-flex flex-wrap gap-3 mb-2">
@@ -1431,7 +1431,7 @@ export default function ImpactEvidenceLibrary() {
                   label="Human-approved scope"
                   value={traceability.claimReviewDecision?.approvedAudiences?.length ? traceability.claimReviewDecision.approvedAudiences.join(", ") : undefined}
                 />
-                {canCompleteClaimReview(traceability.evidence, traceability.claimReview) ? (
+                {canCompleteClaimReview(traceability.evidence, traceability.claimReview, traceability.evidenceReviewDecision, traceability.claimReviewDecision) ? (
                   <div className="border rounded p-2 mt-2 mb-3">
                     <div className="small fw-semibold mb-2">Record claim review decision</div>
                     <div className="d-flex flex-wrap gap-3 mb-2">

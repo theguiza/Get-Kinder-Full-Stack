@@ -213,10 +213,20 @@ test("organizationReviewQueuePath builds the org-scoped review-queue path", () =
 // recorded (evidence_review_decision/claim_review_decision both null,
 // human-approved scope absent), a still-unresolved coverage dimension, and a
 // client follow-up whose workflow is proposed/waiting_on_client, must still
-// surface all four current blockers - the resolved queue/work lifecycle
-// must never suppress them, and the resolved queue row must never be
-// reinterpreted as an approved decision or offered a reopen/complete action.
-test("Review Queue projection: resolved evidence/claim review queue lifecycle never suppresses current blockers, and never invents an action for it", () => {
+// surface all four current blockers - the resolved queue/work lifecycle must
+// never suppress them, and the resolved queue row must never be reinterpreted
+// as an approved decision.
+//
+// Review-actionability repair: this exact shape - resolved/resolved with no
+// decision head ever recorded - is the lawful P2-12 legacy-repair state the
+// backend's resolved/resolved CAS branch (postgresHumanReviewRepository.js)
+// accepts a genuine first decision against (proven by the P2-12 "resolved
+// queue without a decision head" integration test). It must read as
+// ACTION_REQUIRED for evidence review, not BLOCKED. Claim review remains
+// non-actionable here only because its own prerequisite (a terminal evidence
+// decision) is not yet satisfied - that is a dependency on other lawful work,
+// not a genuine hard blocker, so it presents as WAITING.
+test("Review Queue projection: resolved evidence/claim review queue lifecycle never suppresses current blockers, and legacy-repair evidence review reads as actionable, not blocked", () => {
   const rawTraceabilityDto = {
     requestedAudience: "internal",
     eligible: false,
@@ -295,12 +305,12 @@ test("Review Queue projection: resolved evidence/claim review queue lifecycle ne
   assert.equal(item.claimReview.review_status, "resolved");
 
   // 6-7: the resolved queue row is never reinterpreted as an approved
-  // decision, and no reopen/complete action is invented for it - the
-  // existing decision controls only ever activate on an outstanding
-  // (open/needs_gk_review) queue row, so a resolved one derives BLOCKED,
-  // never ACTION_REQUIRED.
-  assert.equal(reviewQueueBlockerActionability("claim_review_unresolved", item), "BLOCKED");
-  assert.equal(reviewQueueBlockerActionability("evidence_review_unresolved", item), "BLOCKED");
+  // decision. Evidence review is a lawful P2-12 legacy-repair candidate
+  // (resolved/resolved, no decision head) so it reads as ACTION_REQUIRED, not
+  // BLOCKED. Claim review's own prerequisite (a terminal evidence decision)
+  // is not yet satisfied, so it is a dependency, not a hard blocker - WAITING.
+  assert.equal(reviewQueueBlockerActionability("claim_review_unresolved", item), "WAITING");
+  assert.equal(reviewQueueBlockerActionability("evidence_review_unresolved", item), "ACTION_REQUIRED");
   // coverage_dimension_unresolved has an existing, always-reachable internal
   // acceptance control once the claim is selected.
   assert.equal(reviewQueueBlockerActionability("coverage_dimension_unresolved", item), "ACTION_REQUIRED");
@@ -310,23 +320,40 @@ test("Review Queue projection: resolved evidence/claim review queue lifecycle ne
   assert.equal(reviewQueueBlockerActionability("client_followup_unresolved", item), "WAITING");
 });
 
-test("reviewQueueBlockerActionability grants ACTION_REQUIRED only while the underlying queue row is genuinely outstanding", () => {
+test("reviewQueueBlockerActionability grants ACTION_REQUIRED only while the underlying queue row is genuinely outstanding or a lawful P2-12 legacy-repair candidate", () => {
   const outstandingItem = {
     evidence: { review_queue_status: "open", review_status: "needs_gk_review" },
+    evidenceReviewDecision: null,
     claimReview: { queue_status: "open", review_status: "needs_gk_review" },
+    claimReviewDecision: null,
     clientFollowupWorkflows: [],
   };
   assert.equal(reviewQueueBlockerActionability("evidence_review_unresolved", outstandingItem), "ACTION_REQUIRED");
-  // Claim review cannot start until evidence review is resolved - matches
-  // canCompleteClaimReview's existing gate exactly.
-  assert.equal(reviewQueueBlockerActionability("claim_review_unresolved", outstandingItem), "BLOCKED");
+  // Claim review cannot independently start until evidence review has a
+  // terminal decision - that is a dependency, presented as WAITING, not a
+  // hard blocker.
+  assert.equal(reviewQueueBlockerActionability("claim_review_unresolved", outstandingItem), "WAITING");
 
-  const evidenceResolvedItem = {
+  const evidenceResolvedNoDecisionItem = {
     evidence: { review_queue_status: "resolved", review_status: "resolved" },
+    evidenceReviewDecision: null,
     claimReview: { queue_status: "open", review_status: "needs_gk_review" },
+    claimReviewDecision: null,
     clientFollowupWorkflows: [],
   };
-  assert.equal(reviewQueueBlockerActionability("claim_review_unresolved", evidenceResolvedItem), "ACTION_REQUIRED");
+  // `evidence.review_status === "resolved"` alone is not proof the evidence
+  // prerequisite is satisfied - no decision head exists yet, so claim review
+  // still waits.
+  assert.equal(reviewQueueBlockerActionability("claim_review_unresolved", evidenceResolvedNoDecisionItem), "WAITING");
+
+  const evidenceDecidedItem = {
+    evidence: { review_queue_status: "resolved", review_status: "resolved" },
+    evidenceReviewDecision: { decisionId: "d1", decisionOutcome: "supported" },
+    claimReview: { queue_status: "open", review_status: "needs_gk_review" },
+    claimReviewDecision: null,
+    clientFollowupWorkflows: [],
+  };
+  assert.equal(reviewQueueBlockerActionability("claim_review_unresolved", evidenceDecidedItem), "ACTION_REQUIRED");
 });
 
 test("reviewQueueBlockerActionability defaults to BLOCKED for a blocker code with no dedicated control", () => {
