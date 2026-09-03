@@ -139,7 +139,30 @@ try {
     KAI_C3_A3_B_IR_CONTRIB_002_REPAIR_DATABASE_URL: targetUrl,
     KAI_C3_B2_IR_COMM_002_DATABASE_URL: targetUrl,
     KAI_C3B2_C_CONCURRENT_CURRENTNESS_DATABASE_URL: targetUrl,
+    KAI_REQUIREMENTS_ROLLUP_DATABASE_URL: targetUrl,
   };
+
+  // Requirements-readiness-rollup proof runs FIRST, before every other
+  // suite below - kai.requirements.requirement_key is only unique per
+  // requirement_set (not globally: requirements_b1_1_identity_unique is
+  // UNIQUE(requirement_set_id, requirement_key)), so this is the only point
+  // in the whole run where kai.requirements is guaranteed empty and the
+  // nine supported requirement keys can be proven to appear exactly once.
+  // Every later suite's own fixture builders (e.g. C3.B3's own
+  // makeRequirement) insert additional rows sharing these same keys in
+  // their own, separate requirement_sets, which would make "exactly nine,
+  // each appearing once" unprovable if this ran after them.
+  const rollupResult = spawnSync("node", [
+    "--test",
+    "__tests__/kai-sprint2-requirements-readiness-rollup.integration.spec.js",
+  ], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    stdio: "inherit",
+    env: commonTestEnv,
+  });
+  if (rollupResult.status !== 0) throw new Error("requirements-readiness-rollup PostgreSQL integration proof failed");
+  console.log("requirements-readiness-rollup PostgreSQL integration proof passed.");
 
   // Regression suites run FIRST, before the C3.B3 focused suite - BUT
   // split into two groups around the smoke-seed application, because
