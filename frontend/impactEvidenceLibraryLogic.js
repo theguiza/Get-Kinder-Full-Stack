@@ -108,6 +108,43 @@ export function reviewQueueBlockerActionability(blockerCode, item) {
   return "BLOCKED";
 }
 
+// KAI Review Queue: composes the EXISTING Phase-5 sensitivity/allowed-use
+// review state (already fetched via sensitivityCapabilitiesPath/
+// sensitivityReviewQueuePath, projected via projectSensitivityReviewQueueItems)
+// into the same current-attention product surface as the claim-traceability
+// rollup above - without introducing any new sensitivity authority, decision
+// state, or queue row. This is a pure presentation projection over state the
+// caller already holds; it never fetches anything itself.
+//
+// `status` distinguishes the reasons a count can be absent so the caller
+// never has to guess whether "no items" means zero actionable work or merely
+// "not known yet":
+//   "unavailable" - actor lacks (or capability is not yet confirmed for) the
+//                    existing sensitivity-review capability; preserve the
+//                    existing authorization behavior (hide), never show 0.
+//   "loading"      - the authoritative queue read is in flight; never show 0.
+//   "error"        - the authoritative queue read failed; never show 0, and
+//                    never treat the whole Review Queue as empty because of it.
+//   "ready"        - an authorized, successful read completed; `items` is the
+//                    authoritative current list (possibly empty, i.e. a real 0).
+export function sensitivityReviewQueueAttention({
+  sensitivityCapability,
+  loadingSensitivityReviewQueue,
+  sensitivityReviewQueueError,
+  sensitivityReviewQueueItems,
+}) {
+  if (sensitivityCapability !== true) {
+    return { status: "unavailable", items: [] };
+  }
+  if (loadingSensitivityReviewQueue) {
+    return { status: "loading", items: [] };
+  }
+  if (sensitivityReviewQueueError) {
+    return { status: "error", items: [], error: sensitivityReviewQueueError };
+  }
+  return { status: "ready", items: asArray(sensitivityReviewQueueItems) };
+}
+
 export function projectRequirementsReadiness(dto) {
   return asArray(dto?.requirements).map((requirement) => ({
     requirementId: requirement.requirement_id,

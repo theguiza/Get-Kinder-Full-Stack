@@ -17,6 +17,7 @@ import {
   organizationReviewQueuePath,
   projectReviewQueue,
   reviewQueueBlockerActionability,
+  sensitivityReviewQueueAttention,
 } from "../frontend/impactEvidenceLibraryLogic.js";
 import { listOrganizationReviewQueue } from "../Backend/kai/services/kaiClaimTraceabilityService.js";
 
@@ -339,4 +340,80 @@ test("reviewQueueBlockerActionability defaults to BLOCKED for a blocker code wit
 test("projectReviewQueue returns an empty list for an empty rollup", () => {
   assert.deepEqual(projectReviewQueue({ items: [] }), []);
   assert.deepEqual(projectReviewQueue(null), []);
+});
+
+// Review Queue closure: sensitivity/allowed-use composition (section 6A) -
+// an authorized, successful, zero-item sensitivity read must render as a
+// genuine 0 while other current-attention items remain visible. The "other
+// attention items remain visible" half of this is already proven by the
+// claim-traceability rollup test above: sensitivityReviewQueueAttention is a
+// pure projection over its own inputs only and never touches reviewQueueItems,
+// so a zero-item sensitivity result can never suppress them.
+test("sensitivityReviewQueueAttention: authorized zero-item read is a genuine 0, independent of other current attention", () => {
+  const attention = sensitivityReviewQueueAttention({
+    sensitivityCapability: true,
+    loadingSensitivityReviewQueue: false,
+    sensitivityReviewQueueError: "",
+    sensitivityReviewQueueItems: [],
+  });
+  assert.deepEqual(attention, { status: "ready", items: [] });
+});
+
+test("sensitivityReviewQueueAttention: authorized non-empty read surfaces its existing items", () => {
+  const items = [{ reviewQueueItemId: "q1", intakeSensitivityProfileId: "p1", summary: "file.pdf" }];
+  const attention = sensitivityReviewQueueAttention({
+    sensitivityCapability: true,
+    loadingSensitivityReviewQueue: false,
+    sensitivityReviewQueueError: "",
+    sensitivityReviewQueueItems: items,
+  });
+  assert.equal(attention.status, "ready");
+  assert.deepEqual(attention.items, items);
+});
+
+// Review Queue closure: sensitivity/allowed-use composition (section 6B) -
+// none of capability unknown/loading, queue loading, queue error, or denied
+// capability may ever be reported as a successful zero-item result.
+test("sensitivityReviewQueueAttention: capability unknown/loading never renders as a successful zero", () => {
+  const attention = sensitivityReviewQueueAttention({
+    sensitivityCapability: null,
+    loadingSensitivityReviewQueue: false,
+    sensitivityReviewQueueError: "",
+    sensitivityReviewQueueItems: [],
+  });
+  assert.equal(attention.status, "unavailable");
+  assert.notEqual(attention.status, "ready");
+});
+
+test("sensitivityReviewQueueAttention: capability denied is preserved as unavailable, never a false 0", () => {
+  const attention = sensitivityReviewQueueAttention({
+    sensitivityCapability: false,
+    loadingSensitivityReviewQueue: false,
+    sensitivityReviewQueueError: "",
+    sensitivityReviewQueueItems: [],
+  });
+  assert.deepEqual(attention, { status: "unavailable", items: [] });
+});
+
+test("sensitivityReviewQueueAttention: queue read in flight never renders as a successful zero", () => {
+  const attention = sensitivityReviewQueueAttention({
+    sensitivityCapability: true,
+    loadingSensitivityReviewQueue: true,
+    sensitivityReviewQueueError: "",
+    sensitivityReviewQueueItems: [],
+  });
+  assert.equal(attention.status, "loading");
+  assert.notEqual(attention.status, "ready");
+});
+
+test("sensitivityReviewQueueAttention: queue read failure never renders as a successful zero", () => {
+  const attention = sensitivityReviewQueueAttention({
+    sensitivityCapability: true,
+    loadingSensitivityReviewQueue: false,
+    sensitivityReviewQueueError: "internal error",
+    sensitivityReviewQueueItems: [],
+  });
+  assert.equal(attention.status, "error");
+  assert.equal(attention.error, "internal error");
+  assert.notEqual(attention.status, "ready");
 });

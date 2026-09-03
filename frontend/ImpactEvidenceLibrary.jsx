@@ -54,6 +54,7 @@ import {
   projectReviewQueue,
   projectTraceability,
   reviewQueueBlockerActionability,
+  sensitivityReviewQueueAttention,
   reviewTransitionBody,
   shouldApplyCandidateResponse,
   shouldApplyEligibilityResponse,
@@ -219,6 +220,21 @@ export default function ImpactEvidenceLibrary() {
     const merged = mergeClaims(eligibleClaims, candidateClaims);
     return annotateGovernedAvailability(merged, candidateClaims, eligibleClaims, eligibleRequestState);
   }, [candidateClaims, eligibleClaims, eligibleRequestState]);
+
+  // Review Queue composition: the sensitivity/allowed-use category reuses the
+  // EXISTING Phase-5 capability/queue state already fetched above (see the
+  // sensitivityCapabilitiesPath/sensitivityReviewQueuePath effects) - no
+  // second fetch, no new authority, no duplicated mutation controls.
+  const sensitivityAttention = useMemo(
+    () =>
+      sensitivityReviewQueueAttention({
+        sensitivityCapability,
+        loadingSensitivityReviewQueue,
+        sensitivityReviewQueueError,
+        sensitivityReviewQueueItems,
+      }),
+    [sensitivityCapability, loadingSensitivityReviewQueue, sensitivityReviewQueueError, sensitivityReviewQueueItems],
+  );
 
   const selectedClaim = useMemo(
     () => claims.find((claim) => claim.claimId === selectedClaimId) || null,
@@ -1022,7 +1038,50 @@ export default function ImpactEvidenceLibrary() {
         </div>
         {reviewQueueError ? <div className="alert alert-warning py-2 small">{reviewQueueError}</div> : null}
         {loadingReviewQueue ? <div className="text-muted small">Loading review queue...</div> : null}
-        {!loadingReviewQueue && !reviewQueueError && reviewQueueItems.length === 0 ? (
+
+        {sensitivityAttention.status !== "unavailable" ? (
+          <div className="border rounded p-2 mb-2">
+            <div className="d-flex justify-content-between align-items-center">
+              <span className="small fw-semibold">Sensitivity / allowed-use</span>
+              {sensitivityAttention.status === "ready" ? (
+                <span className="badge text-bg-secondary">{sensitivityAttention.items.length}</span>
+              ) : null}
+            </div>
+            {sensitivityAttention.status === "loading" ? (
+              <div className="text-muted small">Loading sensitivity &amp; allowed-use review...</div>
+            ) : null}
+            {sensitivityAttention.status === "error" ? (
+              <div className="alert alert-warning py-2 small mb-0 mt-1">{sensitivityAttention.error}</div>
+            ) : null}
+            {sensitivityAttention.status === "ready" && sensitivityAttention.items.length === 0 ? (
+              <div className="text-muted small">No current sensitivity / allowed-use work.</div>
+            ) : null}
+            {sensitivityAttention.status === "ready" && sensitivityAttention.items.length > 0 ? (
+              <ul className="list-unstyled mt-1 mb-0">
+                {sensitivityAttention.items.map((item) => (
+                  <li
+                    key={item.reviewQueueItemId}
+                    className="d-flex justify-content-between align-items-center gap-2 mt-1"
+                  >
+                    <span className="small text-break">{item.summary || item.intakeSensitivityProfileId}</span>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline-primary flex-shrink-0"
+                      onClick={() => setSelectedSensitivityProfileId(item.intakeSensitivityProfileId)}
+                    >
+                      Review sensitivity &amp; allowed use
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
+
+        {!loadingReviewQueue
+        && !reviewQueueError
+        && reviewQueueItems.length === 0
+        && !(sensitivityAttention.status === "ready" && sensitivityAttention.items.length > 0) ? (
           <div className="text-muted small">Nothing currently needs attention for this organization.</div>
         ) : null}
         <ul className="list-group">
