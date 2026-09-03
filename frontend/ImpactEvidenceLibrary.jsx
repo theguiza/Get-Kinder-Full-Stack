@@ -141,6 +141,7 @@ export default function ImpactEvidenceLibrary() {
   // nextLibraryStateForOrganizationChange / nextLibraryStateForAudienceChange.
   const candidateRequestGenerationRef = useRef(0);
   const eligibleRequestGenerationRef = useRef(0);
+  const traceabilityPanelRef = useRef(null);
   const organizationIdRef = useRef(organizationId);
   const audienceRef = useRef(audience);
   organizationIdRef.current = organizationId;
@@ -1158,7 +1159,11 @@ export default function ImpactEvidenceLibrary() {
                 <button
                   type="button"
                   className="btn btn-sm btn-outline-primary flex-shrink-0"
-                  onClick={() => setSelectedClaimId(item.claimId)}
+                  onClick={() => {
+                    setSelectedClaimId(item.claimId);
+                    traceabilityPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                    traceabilityPanelRef.current?.focus();
+                  }}
                 >
                   Review this claim
                 </button>
@@ -1343,7 +1348,7 @@ export default function ImpactEvidenceLibrary() {
         </div>
 
         <div className="col-12 col-xl-7">
-          <div className="admin-card">
+          <div className="admin-card" ref={traceabilityPanelRef} tabIndex={-1}>
             <div className="d-flex justify-content-between align-items-center mb-2">
               <h5 className="mb-0">Traceability</h5>
               {traceability ? <StatusBadge status={traceability.libraryStatus} /> : null}
