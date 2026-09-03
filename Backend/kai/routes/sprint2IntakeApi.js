@@ -2658,6 +2658,33 @@ router.get(
   },
 );
 
+/**
+ * KAI requirements-readiness rollup read route: strictly read-only, exactly
+ * like the single-requirement GET above, but reports every requirement this
+ * repository supports in one response instead of requiring one round trip
+ * per requirement. Contains no SQL and no direct database access, delegating
+ * exactly once to the authorized requirement-assessment service.
+ */
+router.get(
+  "/admin/organizations/:organizationId/requirements",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const identifiers = eligibleClaimsForAudienceOrganizationIdentifier(req);
+    if (!identifiers) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id")],
+      });
+    }
+    return invokeService(res, async () => {
+      const service = await getRequirementAssessmentService();
+      return service.listOrganizationRequirementsReadiness({
+        organizationId: identifiers.organizationId,
+        actorContext: sprint2MappedActorContext(req),
+      });
+    });
+  },
+);
+
 export default router;
 
 export const __testables = {

@@ -138,6 +138,12 @@ function isReadOrganizationRequirementAssessmentInput(input) {
   return UUID_PATTERN.test(input.organizationId) && UUID_PATTERN.test(input.requirementId);
 }
 
+function isListOrganizationRequirementsReadinessInput(input) {
+  const allowedKeys = new Set(["organizationId"]);
+  if (!isPlainObject(input) || !hasOnlyKeys(input, allowedKeys)) return false;
+  return UUID_PATTERN.test(input.organizationId);
+}
+
 async function resolveDefaultRunInTransaction() {
   const { withTransaction } = await import("../db/kaiDb.js");
   return withTransaction;
@@ -156,6 +162,22 @@ async function loadRequirement(tx, { requirementId }) {
     [requirementId],
   );
   return rows[0] || null;
+}
+
+// Catalogue-only read (no organization scope, no assessment state): every
+// kai.requirements row whose requirement_key this repository actually has a
+// rule for, in the catalogue's own display order. Used only by
+// listOrganizationRequirementsReadiness below to discover which
+// requirements to report readiness for.
+async function loadSupportedRequirementsCatalogue(tx) {
+  const { rows } = await tx.query(
+    `SELECT requirement_id::text AS requirement_id, requirement_key, requirement_label, display_order
+       FROM kai.requirements
+      WHERE requirement_key = ANY($1::text[])
+      ORDER BY display_order ASC, requirement_key ASC`,
+    [Object.keys(REQUIREMENT_ASSESSMENT_RULES)],
+  );
+  return rows;
 }
 
 async function loadGovernedEvidenceItemIds(tx, { organizationId }) {
@@ -1205,6 +1227,49 @@ export function createPostgresRequirementAssessmentRepository({ runInTransaction
         return failure("system_error");
       }
     },
+
+    // Read-only readiness rollup across every requirement this repository
+    // supports: one snapshot transaction so every requirement's "current"
+    // determination shares the same instant, exactly like a single-
+    // requirement read. Never writes - `assessed: false` means live state
+    // has no matching persisted assessment (never assessed, or assessed
+    // state is now stale), the same "not_found" the single-requirement read
+    // already reports; the caller decides whether to (re-)assess via the
+    // existing write operation above.
+    async listOrganizationRequirementsReadiness(input) {
+      if (!isListOrganizationRequirementsReadinessInput(input)) return failure("validation_blocker");
+      const { organizationId } = input;
+      const run = runInTransaction || (await resolveDefaultRunInTransaction());
+      const filterCurrentGapsFn = filterCurrentGaps || (await resolveDefaultGapCurrentStateFilter());
+
+      try {
+        return await run(async (tx) => {
+          const catalogue = await loadSupportedRequirementsCatalogue(tx);
+          const requirements = [];
+          for (const requirement of catalogue) {
+            const rule = REQUIREMENT_ASSESSMENT_RULES[requirement.requirement_key];
+            const inputs = await rule.loadInputs(tx, { organizationId, filterCurrentGaps: filterCurrentGapsFn });
+            const stateFingerprint = rule.computeFingerprint(inputs);
+            const currentRow = await readExistingAssessmentRow(tx, {
+              organizationId,
+              requirementId: requirement.requirement_id,
+              stateFingerprint,
+            });
+            requirements.push({
+              requirement_id: requirement.requirement_id,
+              requirement_key: requirement.requirement_key,
+              requirement_label: requirement.requirement_label,
+              assessed: Boolean(currentRow),
+              assessment: currentRow ? toAssessmentRecord(currentRow, false) : null,
+            });
+          }
+          return success({ requirements });
+        });
+      } catch (error) {
+        if (error?.code === "22P02") return failure("validation_blocker");
+        return failure("system_error");
+      }
+    },
   });
 }
 
@@ -1214,6 +1279,7 @@ export const __requirementAssessmentRepositoryTestables = Object.freeze({
   RequiredAuditRejectedError,
   isAssessOrganizationRequirementInput,
   isReadOrganizationRequirementAssessmentInput,
+  isListOrganizationRequirementsReadinessInput,
   persistedAssessmentMatchesExpected,
   loadGovernedAssessmentInputs,
 });

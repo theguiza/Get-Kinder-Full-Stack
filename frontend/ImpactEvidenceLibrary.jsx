@@ -40,6 +40,8 @@ import {
   mergeClaims,
   nextLibraryStateForAudienceChange,
   nextLibraryStateForOrganizationChange,
+  organizationRequirementAssessmentPath,
+  organizationRequirementsReadinessPath,
   postJson,
   potentialConflictsPath,
   projectCandidateClaims,
@@ -47,6 +49,7 @@ import {
   projectEligibleClaims,
   projectGeneratedDraftLibraryItems,
   projectGeneratedDraftPacket,
+  projectRequirementsReadiness,
   projectTraceability,
   reviewTransitionBody,
   shouldApplyCandidateResponse,
@@ -188,6 +191,16 @@ export default function ImpactEvidenceLibrary() {
   const [sensitivityReviewQueueError, setSensitivityReviewQueueError] = useState("");
   const [selectedSensitivityProfileId, setSelectedSensitivityProfileId] = useState("");
 
+  // Funder-requirement readiness rollup: one server-authoritative, read-only
+  // snapshot of every requirement this organization is governed against.
+  // `assessingRequirementId` names the one requirement currently mid-POST (if
+  // any), so only that requirement's button shows a pending state - never the
+  // whole list.
+  const [requirementsReadiness, setRequirementsReadiness] = useState([]);
+  const [loadingRequirementsReadiness, setLoadingRequirementsReadiness] = useState(false);
+  const [requirementsReadinessError, setRequirementsReadinessError] = useState("");
+  const [assessingRequirementId, setAssessingRequirementId] = useState("");
+
   // Governed internal availability (the all-state Claim Library) and audience
   // eligibility are independent dimensions: neither request may clear, gate, or
   // invalidate the other's successful result. See annotateGovernedAvailability.
@@ -254,6 +267,9 @@ export default function ImpactEvidenceLibrary() {
     setSensitivityReviewQueueItems([]);
     setSensitivityReviewQueueError("");
     setSelectedSensitivityProfileId("");
+    setRequirementsReadiness([]);
+    setRequirementsReadinessError("");
+    setAssessingRequirementId("");
   }, [organizationId]);
 
   // KAI B1A-3B authorization gate: fetch the server-grounded capability once
@@ -500,6 +516,45 @@ export default function ImpactEvidenceLibrary() {
     setSelectedGeneratedDraftId("");
     if (organizationId) loadGeneratedDrafts();
   }, [organizationId, loadGeneratedDrafts]);
+
+  const loadRequirementsReadiness = useCallback(async () => {
+    if (!organizationId) return;
+    setLoadingRequirementsReadiness(true);
+    setRequirementsReadinessError("");
+    const result = await getJson(organizationRequirementsReadinessPath(organizationId));
+    setLoadingRequirementsReadiness(false);
+    if (result.statusCode !== 200 || !result.body?.ok) {
+      setRequirementsReadiness([]);
+      setRequirementsReadinessError(errorText(result));
+      return;
+    }
+    setRequirementsReadiness(projectRequirementsReadiness(result.body.data));
+  }, [organizationId]);
+
+  // Rediscover readiness on every fresh Library load, exactly like Generated
+  // Drafts above - this is a read-only rollup, so there is nothing to
+  // invalidate besides the previous organization's list.
+  useEffect(() => {
+    setRequirementsReadiness([]);
+    if (organizationId) loadRequirementsReadiness();
+  }, [organizationId, loadRequirementsReadiness]);
+
+  // Runs (or replays) the server-governed assessment for exactly one
+  // requirement, then refetches the whole readiness rollup - the POST
+  // response itself is never treated as durable state, matching every other
+  // mutation on this page.
+  const runAssessRequirement = useCallback(async (requirementId) => {
+    if (!organizationId || assessingRequirementId) return;
+    setAssessingRequirementId(requirementId);
+    setRequirementsReadinessError("");
+    const result = await postJson(organizationRequirementAssessmentPath(organizationId, requirementId), {});
+    setAssessingRequirementId("");
+    if (result.statusCode !== 201 && result.statusCode !== 200) {
+      setRequirementsReadinessError(errorText(result));
+      return;
+    }
+    await loadRequirementsReadiness();
+  }, [organizationId, assessingRequirementId, loadRequirementsReadiness]);
 
   const selectGeneratedDraft = useCallback(async (generatedContentDraftId) => {
     setSelectedGeneratedDraftId(generatedContentDraftId);
@@ -1003,6 +1058,48 @@ export default function ImpactEvidenceLibrary() {
                 {generatingDraft ? "Generating..." : "Generate Impact Narrative"}
               </button>
             ) : null}
+          </div>
+
+          <div className="admin-card mt-3">
+            <div className="d-flex justify-content-between align-items-center mb-2">
+              <h5 className="mb-0">Funder Requirements</h5>
+              <span className="text-muted small">{requirementsReadiness.length} shown</span>
+            </div>
+            {requirementsReadinessError ? (
+              <div className="alert alert-warning py-2 small">{requirementsReadinessError}</div>
+            ) : null}
+            {loadingRequirementsReadiness ? <div className="text-muted small">Loading requirements readiness...</div> : null}
+            {!loadingRequirementsReadiness && requirementsReadiness.length === 0 ? (
+              <div className="text-muted small">No baseline requirements are currently governed for this organization.</div>
+            ) : null}
+            <ul className="list-group">
+              {requirementsReadiness.map((requirement) => (
+                <li key={requirement.requirementId} className="list-group-item">
+                  <div className="d-flex justify-content-between align-items-start gap-2">
+                    <span className="small fw-semibold">{requirement.requirementLabel || requirement.requirementKey}</span>
+                    <span className={`badge ${requirement.assessed && requirement.assessmentState === "met" ? "text-bg-success" : requirement.assessed ? "text-bg-warning" : "text-bg-secondary"}`}>
+                      {requirement.assessed ? requirement.assessmentState || "assessed" : "needs assessment"}
+                    </span>
+                  </div>
+                  {requirement.assessed ? (
+                    <div className="small text-muted mt-1">{requirement.assessmentExplanation || "No explanation returned."}</div>
+                  ) : (
+                    <div className="small text-muted mt-1">
+                      Not yet assessed against the organization's current governed evidence and claims, or a prior
+                      assessment is now stale.
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-outline-primary mt-2"
+                    onClick={() => runAssessRequirement(requirement.requirementId)}
+                    disabled={Boolean(assessingRequirementId)}
+                  >
+                    {assessingRequirementId === requirement.requirementId ? "Assessing..." : "Assess now"}
+                  </button>
+                </li>
+              ))}
+            </ul>
           </div>
 
           <div className="admin-card mt-3">

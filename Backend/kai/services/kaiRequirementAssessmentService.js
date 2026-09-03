@@ -25,6 +25,12 @@ const ASSESS_REQUIREMENT_ALLOWED_ROLES = new Set(["gk_reviewer", "gk_admin"]);
 const ASSESS_REQUIREMENT_OPERATION = "assess_requirement_organization_scope";
 const READ_REQUIREMENT_ASSESSMENT_ALLOWED_ROLES = new Set(["gk_reviewer", "gk_operator", "gk_admin"]);
 const READ_REQUIREMENT_ASSESSMENT_OPERATION = "read_requirement_assessment";
+// Read-only rollup across every supported requirement: same read privilege
+// as reading one requirement's assessment back, since it exposes nothing a
+// caller who can already do that could not already learn one requirement at
+// a time.
+const LIST_REQUIREMENTS_READINESS_ALLOWED_ROLES = READ_REQUIREMENT_ASSESSMENT_ALLOWED_ROLES;
+const LIST_REQUIREMENTS_READINESS_OPERATION = "list_requirements_readiness_organization_scope";
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -68,6 +74,12 @@ function isGetOrganizationRequirementAssessmentInput(value) {
     isNonEmptyString(value.requirementId) &&
     isPlainObject(value.actorContext)
   );
+}
+
+function isListOrganizationRequirementsReadinessInput(value) {
+  const allowedKeys = new Set(["organizationId", "actorContext"]);
+  if (!isPlainObject(value) || !hasOnlyKeys(value, allowedKeys)) return false;
+  return isNonEmptyString(value.organizationId) && isPlainObject(value.actorContext);
 }
 
 export async function assessOrganizationRequirement(input, dependencies = {}) {
@@ -170,15 +182,60 @@ export async function getOrganizationRequirementAssessment(input, dependencies =
   return { ok: true, data: result.data, error: null };
 }
 
+export async function listOrganizationRequirementsReadiness(input, dependencies = {}) {
+  if (!isKaiSprint2Enabled(dependencies.env || process.env)) {
+    return buildKaiError("feature_disabled");
+  }
+  if (!isListOrganizationRequirementsReadinessInput(input)) {
+    return buildKaiError("validation_blocker");
+  }
+
+  const { actorContext } = input;
+  if (!isMappedHumanActor(actorContext)) {
+    return buildKaiError("authorization_denied");
+  }
+
+  const auth = validateActorCanPerformOperation(
+    actorContext,
+    LIST_REQUIREMENTS_READINESS_OPERATION,
+    input.organizationId,
+    { allowedRoles: LIST_REQUIREMENTS_READINESS_ALLOWED_ROLES },
+  );
+  if (!auth.ok) {
+    return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });
+  }
+
+  const tenant = validateTenantBoundaryConsistency({
+    expectedOrganizationId: input.organizationId,
+    payload: { organization_id: input.organizationId },
+  });
+  if (tenant.severity === "blocker") {
+    return buildKaiError("tenant_boundary_violation", { blockers: [tenant] });
+  }
+
+  const repository = dependencies.requirementAssessmentRepository || createPostgresRequirementAssessmentRepository();
+  const result = await repository.listOrganizationRequirementsReadiness({
+    organizationId: input.organizationId,
+  });
+
+  if (!result.ok) {
+    return buildKaiError(result.error.code, { status: result.error.status });
+  }
+  return { ok: true, data: result.data, error: null };
+}
+
 export const __requirementAssessmentServiceContract = Object.freeze({
   ASSESS_REQUIREMENT_ALLOWED_ROLES,
   ASSESS_REQUIREMENT_OPERATION,
   READ_REQUIREMENT_ASSESSMENT_ALLOWED_ROLES,
   READ_REQUIREMENT_ASSESSMENT_OPERATION,
+  LIST_REQUIREMENTS_READINESS_ALLOWED_ROLES,
+  LIST_REQUIREMENTS_READINESS_OPERATION,
 });
 
 export const __requirementAssessmentServiceTestables = Object.freeze({
   isAssessOrganizationRequirementInput,
   isGetOrganizationRequirementAssessmentInput,
+  isListOrganizationRequirementsReadinessInput,
   isMappedHumanActor,
 });

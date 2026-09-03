@@ -53,6 +53,27 @@ export function claimProposalPath(organizationId, evidenceItemId) {
     + `/evidence-items/${encodeURIComponent(evidenceItemId)}/claim-proposal`;
 }
 
+export function organizationRequirementsReadinessPath(organizationId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/requirements`;
+}
+
+export function organizationRequirementAssessmentPath(organizationId, requirementId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
+    + `/requirements/${encodeURIComponent(requirementId)}/assessment`;
+}
+
+export function projectRequirementsReadiness(dto) {
+  return asArray(dto?.requirements).map((requirement) => ({
+    requirementId: requirement.requirement_id,
+    requirementKey: requirement.requirement_key,
+    requirementLabel: requirement.requirement_label,
+    assessed: requirement.assessed === true,
+    assessmentState: requirement.assessment?.assessment_state || null,
+    assessmentExplanation: requirement.assessment?.assessment_explanation || null,
+    assessedAt: requirement.assessment?.created_at || null,
+  }));
+}
+
 export function claimGapFollowupsPath(organizationId, claimId) {
   return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
     + `/claims/${encodeURIComponent(claimId)}/claim-gap-followups`;
