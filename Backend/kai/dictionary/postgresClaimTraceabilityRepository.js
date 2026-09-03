@@ -133,6 +133,39 @@ function validateInput(input) {
   );
 }
 
+// KAI Review Queue rollup: this repository already computes, per claim, the
+// exact current-attention blocker set (BLOCKER_ORDER) that a Review Queue
+// product projection must reuse rather than reinvent. This section adds a
+// bounded organization-scope fan-out over evaluateClaimTraceabilityInTransaction
+// - the SAME function the single-claim route calls - so no blocker/decision
+// semantics are duplicated. Capped at REVIEW_QUEUE_CLAIM_LIMIT claims per
+// call (mirroring the existing conflict-groups truncation pattern above);
+// exceeding the cap sets `truncated: true` rather than silently dropping
+// claims without disclosure.
+const REVIEW_QUEUE_CLAIM_LIMIT = 500;
+
+function validateListOrganizationReviewQueueInput(input) {
+  const allowedKeys = new Set(["organizationId", "requestedAudience"]);
+  return (
+    isPlainObject(input) &&
+    hasOnlyKeys(input, allowedKeys) &&
+    isNonEmptyString(input.organizationId) &&
+    ["internal", "funder", "public"].includes(input.requestedAudience)
+  );
+}
+
+async function listOrganizationClaimIds(tx, { organizationId, limit }) {
+  const { rows } = await tx.query(
+    `SELECT claim_id::text AS claim_id
+       FROM kai.claims
+      WHERE organization_id = $1::uuid
+      ORDER BY claim_id ASC
+      LIMIT $2::int`,
+    [organizationId, limit + 1],
+  );
+  return rows.map((row) => row.claim_id);
+}
+
 function computeDimensions(rows) {
   return {
     missingness: assessMissingness(rows.qualityFindingRows),
@@ -717,12 +750,57 @@ export function createPostgresClaimTraceabilityRepository({ runInTransaction } =
         return shapeError(error);
       }
     },
+    // Organization-scope Review Queue rollup. Returns only claims whose
+    // current, freshly-recomputed blockerCodes are non-empty (i.e.
+    // `eligible !== true`) - a resolved review_queue_items lifecycle row
+    // never suppresses a claim here, because eligibility is derived the same
+    // way it always is: by evaluateClaimTraceabilityInTransaction re-reading
+    // the current decision-ledger head / coverage-acceptance fingerprint /
+    // followup queue state, not by reading queue_status alone. Per-claim
+    // evaluation failures (e.g. a referential mismatch surfaced as
+    // not_found/conflict_current_state_changed) are excluded from the
+    // returned items rather than failing the whole rollup, and counted in
+    // `evaluationErrorCount` for disclosure.
+    async listOrganizationReviewQueue(input) {
+      if (!validateListOrganizationReviewQueueInput(input)) return failure("validation_blocker");
+      const { organizationId, requestedAudience } = input;
+      const run = runInTransaction || (await resolveDefaultRunInTransaction());
+      try {
+        return await run(async (tx) => {
+          await tx.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
+          const claimIds = await listOrganizationClaimIds(tx, {
+            organizationId,
+            limit: REVIEW_QUEUE_CLAIM_LIMIT,
+          });
+          const truncated = claimIds.length > REVIEW_QUEUE_CLAIM_LIMIT;
+          const scopedClaimIds = claimIds.slice(0, REVIEW_QUEUE_CLAIM_LIMIT);
+          const items = [];
+          let evaluationErrorCount = 0;
+          for (const claimId of scopedClaimIds) {
+            const result = await evaluateClaimTraceabilityInTransaction(tx, {
+              organizationId,
+              claimId,
+              requestedAudience,
+            });
+            if (!result.ok) {
+              evaluationErrorCount += 1;
+              continue;
+            }
+            if (result.data.blockerCodes.length > 0) items.push(result.data);
+          }
+          return success({ items, truncated, evaluationErrorCount });
+        });
+      } catch (error) {
+        return shapeError(error);
+      }
+    },
   });
 }
 
 export const __claimTraceabilityRepositoryContract = Object.freeze({
   BLOCKER_ORDER,
   DIMENSION_KEYS,
+  REVIEW_QUEUE_CLAIM_LIMIT,
 });
 
 // Exposed so other read-only Package 4 capabilities that must reach the same

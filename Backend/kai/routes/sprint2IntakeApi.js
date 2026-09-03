@@ -2685,6 +2685,35 @@ router.get(
   },
 );
 
+/**
+ * KAI Review Queue rollup read route: organization-scope product projection
+ * of current attention needs, reusing the exact same
+ * evaluateClaimTraceabilityInTransaction blocker computation the
+ * single-claim traceability route above calls - never a second blocker
+ * system. Strictly read-only. Contains no SQL and no direct database
+ * access, delegating exactly once to the authorized claim-traceability
+ * service.
+ */
+router.get(
+  "/admin/organizations/:organizationId/review-queue",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const identifiers = eligibleClaimsForAudienceOrganizationIdentifier(req);
+    if (!identifiers) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id")],
+      });
+    }
+    return invokeService(res, async () => {
+      const service = await getClaimTraceabilityService();
+      return service.listOrganizationReviewQueue({
+        organizationId: identifiers.organizationId,
+        actorContext: sprint2MappedActorContext(req),
+      });
+    });
+  },
+);
+
 export default router;
 
 export const __testables = {

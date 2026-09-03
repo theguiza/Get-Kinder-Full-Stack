@@ -85,6 +85,8 @@
     "test:kai-sprint2-p3-17-human-authority-decision-ledger": "node --test __tests__/kai-sprint2-p3-17-human-authority-decision-ledger-boundary.spec.js",
     "test:kai-sprint2-gate-c1-gcs-generation-binding": "node --test __tests__/kai-sprint2-gate-c1-gcs-provider-boundary.spec.js",
     "verify:kai-sprint2-pass2-api": "node scripts/kai-sprint2-pass2-admin-metadata-intake-api-verifier.js",
+    "test:kai-sprint2-review-queue": "node --test __tests__/kai-sprint2-review-queue.spec.js __tests__/kai-sprint2-review-queue.integration.spec.js",
+    "verify:kai-sprint2-review-queue": "node scripts/kai-sprint2-review-queue-local-postgres.js",
     "backfill:surprises": "node scripts/backfillDailySurprises.js",
     "prestart": "npm run backfill:surprises || true",
     "seed:events": "node scripts/seedEvents.js"

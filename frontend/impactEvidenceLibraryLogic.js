@@ -62,6 +62,52 @@ export function organizationRequirementAssessmentPath(organizationId, requiremen
     + `/requirements/${encodeURIComponent(requirementId)}/assessment`;
 }
 
+export function organizationReviewQueuePath(organizationId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/review-queue`;
+}
+
+// KAI Review Queue: what currently needs human attention, derived from the
+// SAME per-claim traceability DTO shape the Traceability panel already
+// projects (projectTraceability) - never a second blocker system. A queue
+// item exists here only because the server-recomputed blockerCodes were
+// non-empty; a resolved review_queue_items lifecycle row never suppresses
+// it. `claimId` is read from the raw dto since projectTraceability does not
+// hoist it to the top level.
+export function projectReviewQueue(dto) {
+  return asArray(dto?.items).map((item) => ({
+    claimId: item.claim?.claim_id || null,
+    ...projectTraceability(item),
+  }));
+}
+
+// Presentation-only actionability derivation for one Review Queue item's
+// blocker code. Deterministic and pure - never persisted, never a new
+// workflow authority. Reuses the exact same gates the Traceability panel
+// already uses to decide whether to render its existing decision controls
+// (canCompleteEvidenceReview/canCompleteClaimReview) so this never diverges
+// from what the reviewer can actually do once they select the claim below.
+export function reviewQueueBlockerActionability(blockerCode, item) {
+  if (blockerCode === "evidence_review_unresolved") {
+    return canCompleteEvidenceReview(item.evidence) ? "ACTION_REQUIRED" : "BLOCKED";
+  }
+  if (blockerCode === "claim_review_unresolved") {
+    return canCompleteClaimReview(item.evidence, item.claimReview) ? "ACTION_REQUIRED" : "BLOCKED";
+  }
+  if (blockerCode === "coverage_dimension_unresolved") {
+    // The existing "Accept internal limitation for selected dimension"
+    // control (Claim & evidence workflow card) is reachable as soon as a
+    // claim is selected - no further current-state gate exists for it today.
+    return "ACTION_REQUIRED";
+  }
+  if (blockerCode === "client_followup_unresolved") {
+    const waitingOnClient = asArray(item.clientFollowupWorkflows).some(
+      (workflow) => workflow.workflowStatus === "waiting_on_client",
+    );
+    return waitingOnClient ? "WAITING" : "BLOCKED";
+  }
+  return "BLOCKED";
+}
+
 export function projectRequirementsReadiness(dto) {
   return asArray(dto?.requirements).map((requirement) => ({
     requirementId: requirement.requirement_id,

@@ -5,6 +5,18 @@ import { validateTenantBoundaryConsistency } from "../validators/tenantValidator
 
 const CLAIM_TRACEABILITY_ALLOWED_ROLES = new Set(["gk_admin", "gk_operator", "gk_reviewer"]);
 const CLAIM_TRACEABILITY_OPERATION = "get_claim_traceability_summary";
+// Review Queue rollup: read-only, organization-scope, same privilege as
+// reading one claim's traceability - it discloses nothing a caller who can
+// already call getClaimTraceabilitySummary per-claim could not already
+// learn one claim at a time (same precedent as
+// LIST_REQUIREMENTS_READINESS_ALLOWED_ROLES in kaiRequirementAssessmentService.js).
+const REVIEW_QUEUE_ALLOWED_ROLES = CLAIM_TRACEABILITY_ALLOWED_ROLES;
+const REVIEW_QUEUE_OPERATION = "list_organization_review_queue";
+// The Review Queue is an internal GK reviewer surface; it always evaluates
+// current attention against the "internal" requested audience (the same
+// default the /impact-library traceability panel itself uses), never
+// funder/public.
+const REVIEW_QUEUE_REQUESTED_AUDIENCE = "internal";
 const REQUESTED_AUDIENCES = new Set(["internal", "funder", "public"]);
 const TRACEABILITY_CONFLICT_REASONS = new Set([
   "claim_evidence_link_mismatch",
@@ -115,9 +127,71 @@ export async function getClaimTraceabilitySummary(input, dependencies = {}) {
   return { ok: true, data: result.data, error: null };
 }
 
+function isListOrganizationReviewQueueInput(value) {
+  const allowedKeys = new Set(["organizationId", "actorContext"]);
+  if (!isPlainObject(value) || !hasOnlyKeys(value, allowedKeys)) return false;
+  return isNonEmptyString(value.organizationId) && isPlainObject(value.actorContext);
+}
+
+/**
+ * KAI Review Queue rollup: organization-scope PRODUCT PROJECTION of current
+ * attention needs. Not a new persisted review authority - it is a read-only
+ * fan-out over the same evaluateClaimTraceabilityInTransaction the
+ * single-claim route already calls, returning only claims whose freshly
+ * recomputed blockerCodes are non-empty. A resolved review_queue_items
+ * lifecycle row never suppresses a claim here.
+ */
+export async function listOrganizationReviewQueue(input, dependencies = {}) {
+  if (!isKaiSprint2Enabled(dependencies.env || process.env)) {
+    return buildKaiError("feature_disabled");
+  }
+  if (!isListOrganizationReviewQueueInput(input)) {
+    return buildKaiError("validation_blocker");
+  }
+
+  const { actorContext } = input;
+  if (!isMappedHumanActor(actorContext)) {
+    return buildKaiError("authorization_denied");
+  }
+
+  const auth = validateActorCanPerformOperation(
+    actorContext,
+    REVIEW_QUEUE_OPERATION,
+    input.organizationId,
+    { allowedRoles: REVIEW_QUEUE_ALLOWED_ROLES },
+  );
+  if (!auth.ok) {
+    return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });
+  }
+
+  const tenant = validateTenantBoundaryConsistency({
+    expectedOrganizationId: input.organizationId,
+    payload: { organization_id: input.organizationId },
+  });
+  if (tenant.severity === "blocker") {
+    return buildKaiError("tenant_boundary_violation", { blockers: [tenant] });
+  }
+
+  const repository =
+    dependencies.claimTraceabilityRepository || (await createDefaultClaimTraceabilityRepository());
+
+  const result = await repository.listOrganizationReviewQueue({
+    organizationId: input.organizationId,
+    requestedAudience: REVIEW_QUEUE_REQUESTED_AUDIENCE,
+  });
+
+  if (!result.ok) {
+    return buildKaiError(result.error.code, { status: result.error.status });
+  }
+  return { ok: true, data: result.data, error: null };
+}
+
 export const __claimTraceabilityServiceContract = Object.freeze({
   CLAIM_TRACEABILITY_ALLOWED_ROLES,
   CLAIM_TRACEABILITY_OPERATION,
   REQUESTED_AUDIENCES,
   TRACEABILITY_CONFLICT_REASONS,
+  REVIEW_QUEUE_ALLOWED_ROLES,
+  REVIEW_QUEUE_OPERATION,
+  REVIEW_QUEUE_REQUESTED_AUDIENCE,
 });

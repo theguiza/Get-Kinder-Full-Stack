@@ -42,6 +42,7 @@ import {
   nextLibraryStateForOrganizationChange,
   organizationRequirementAssessmentPath,
   organizationRequirementsReadinessPath,
+  organizationReviewQueuePath,
   postJson,
   potentialConflictsPath,
   projectCandidateClaims,
@@ -50,7 +51,9 @@ import {
   projectGeneratedDraftLibraryItems,
   projectGeneratedDraftPacket,
   projectRequirementsReadiness,
+  projectReviewQueue,
   projectTraceability,
+  reviewQueueBlockerActionability,
   reviewTransitionBody,
   shouldApplyCandidateResponse,
   shouldApplyEligibilityResponse,
@@ -201,6 +204,14 @@ export default function ImpactEvidenceLibrary() {
   const [requirementsReadinessError, setRequirementsReadinessError] = useState("");
   const [assessingRequirementId, setAssessingRequirementId] = useState("");
 
+  // Review Queue: organization-scope current-attention rollup. This is a
+  // product PROJECTION of already-governed state (see
+  // projectReviewQueue/reviewQueueBlockerActionability) - it never persists
+  // anything of its own.
+  const [reviewQueueItems, setReviewQueueItems] = useState([]);
+  const [loadingReviewQueue, setLoadingReviewQueue] = useState(false);
+  const [reviewQueueError, setReviewQueueError] = useState("");
+
   // Governed internal availability (the all-state Claim Library) and audience
   // eligibility are independent dimensions: neither request may clear, gate, or
   // invalidate the other's successful result. See annotateGovernedAvailability.
@@ -270,6 +281,9 @@ export default function ImpactEvidenceLibrary() {
     setRequirementsReadiness([]);
     setRequirementsReadinessError("");
     setAssessingRequirementId("");
+    setReviewQueueItems([]);
+    setReviewQueueError("");
+    setLoadingReviewQueue(false);
   }, [organizationId]);
 
   // KAI B1A-3B authorization gate: fetch the server-grounded capability once
@@ -543,6 +557,28 @@ export default function ImpactEvidenceLibrary() {
   // requirement, then refetches the whole readiness rollup - the POST
   // response itself is never treated as durable state, matching every other
   // mutation on this page.
+  const loadReviewQueue = useCallback(async () => {
+    if (!organizationId) return;
+    setLoadingReviewQueue(true);
+    setReviewQueueError("");
+    const result = await getJson(organizationReviewQueuePath(organizationId));
+    setLoadingReviewQueue(false);
+    if (result.statusCode !== 200 || !result.body?.ok) {
+      setReviewQueueItems([]);
+      setReviewQueueError(errorText(result));
+      return;
+    }
+    setReviewQueueItems(projectReviewQueue(result.body.data));
+  }, [organizationId]);
+
+  // Rediscover current attention on every fresh Library load, exactly like
+  // the requirements-readiness rollup above - this is a read-only rollup, so
+  // there is nothing to invalidate besides the previous organization's list.
+  useEffect(() => {
+    setReviewQueueItems([]);
+    if (organizationId) loadReviewQueue();
+  }, [organizationId, loadReviewQueue]);
+
   const runAssessRequirement = useCallback(async (requirementId) => {
     if (!organizationId || assessingRequirementId) return;
     setAssessingRequirementId(requirementId);
@@ -972,6 +1008,57 @@ export default function ImpactEvidenceLibrary() {
       ) : null}
 
       {message ? <div className="alert alert-warning py-2">{message}</div> : null}
+
+      <div className="admin-card mb-3">
+        <div className="d-flex justify-content-between align-items-center mb-2">
+          <h5 className="mb-0">Review Queue</h5>
+          <span className="text-muted small">{reviewQueueItems.length} shown</span>
+        </div>
+        <div className="small text-muted mb-2">
+          What currently needs attention for this organization, recomputed from the claim's current governed
+          state - not merely which review-queue rows are still open. A resolved review or work-queue row does
+          not remove a claim from this list while a substantive human review decision, coverage acceptance, or
+          client follow-up is still outstanding.
+        </div>
+        {reviewQueueError ? <div className="alert alert-warning py-2 small">{reviewQueueError}</div> : null}
+        {loadingReviewQueue ? <div className="text-muted small">Loading review queue...</div> : null}
+        {!loadingReviewQueue && !reviewQueueError && reviewQueueItems.length === 0 ? (
+          <div className="text-muted small">Nothing currently needs attention for this organization.</div>
+        ) : null}
+        <ul className="list-group">
+          {reviewQueueItems.map((item) => (
+            <li key={item.claimId} className="list-group-item">
+              <div className="d-flex justify-content-between align-items-start gap-2">
+                <span className="small text-break fw-semibold">Claim {item.claimId}</span>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline-primary flex-shrink-0"
+                  onClick={() => setSelectedClaimId(item.claimId)}
+                >
+                  Review this claim
+                </button>
+              </div>
+              <ul className="list-unstyled mt-2 mb-0">
+                {item.blockerCodes.map((blockerCode) => {
+                  const actionability = reviewQueueBlockerActionability(blockerCode, item);
+                  const badgeClass =
+                    actionability === "ACTION_REQUIRED"
+                      ? "text-bg-warning"
+                      : actionability === "WAITING"
+                        ? "text-bg-info"
+                        : "text-bg-secondary";
+                  return (
+                    <li key={blockerCode} className="small d-flex align-items-center gap-2 mt-1">
+                      <span className={`badge ${badgeClass}`}>{actionability}</span>
+                      <span>{blockerCode}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </li>
+          ))}
+        </ul>
+      </div>
 
       <div className="row g-3">
         <div className="col-12 col-xl-5">
