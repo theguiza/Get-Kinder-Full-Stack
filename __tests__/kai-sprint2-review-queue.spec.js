@@ -16,6 +16,8 @@ import {
 import {
   organizationReviewQueuePath,
   projectReviewQueue,
+  projectReviewQueueCompleteness,
+  reviewQueueIsComplete,
   reviewQueueBlockerActionability,
   sensitivityReviewQueueAttention,
 } from "../frontend/impactEvidenceLibraryLogic.js";
@@ -340,6 +342,38 @@ test("reviewQueueBlockerActionability defaults to BLOCKED for a blocker code wit
 test("projectReviewQueue returns an empty list for an empty rollup", () => {
   assert.deepEqual(projectReviewQueue({ items: [] }), []);
   assert.deepEqual(projectReviewQueue(null), []);
+});
+
+// Review Queue closure: claim-attention completeness (this package) - the
+// frontend must be able to tell a genuinely complete, zero-item rollup apart
+// from a truncated or partially-failed one, since both currently reach
+// projectReviewQueue as the same empty `items` array. These DTO field names
+// (`truncated`, `evaluationErrorCount`) are the exact vocabulary returned by
+// postgresClaimTraceabilityRepository.js listOrganizationReviewQueue.
+test("projectReviewQueueCompleteness reports a genuinely complete rollup", () => {
+  const dto = { items: [], truncated: false, evaluationErrorCount: 0 };
+  const completeness = projectReviewQueueCompleteness(dto);
+  assert.deepEqual(completeness, { truncated: false, evaluationErrorCount: 0 });
+  assert.equal(reviewQueueIsComplete(completeness), true);
+});
+
+test("projectReviewQueueCompleteness reports a truncated rollup as incomplete", () => {
+  const dto = { items: [], truncated: true, evaluationErrorCount: 0 };
+  const completeness = projectReviewQueueCompleteness(dto);
+  assert.deepEqual(completeness, { truncated: true, evaluationErrorCount: 0 });
+  assert.equal(reviewQueueIsComplete(completeness), false);
+});
+
+test("projectReviewQueueCompleteness reports a rollup with evaluation errors as incomplete", () => {
+  const dto = { items: [], truncated: false, evaluationErrorCount: 3 };
+  const completeness = projectReviewQueueCompleteness(dto);
+  assert.deepEqual(completeness, { truncated: false, evaluationErrorCount: 3 });
+  assert.equal(reviewQueueIsComplete(completeness), false);
+});
+
+test("projectReviewQueueCompleteness defaults to complete for a missing/malformed dto", () => {
+  assert.deepEqual(projectReviewQueueCompleteness(null), { truncated: false, evaluationErrorCount: 0 });
+  assert.equal(reviewQueueIsComplete(projectReviewQueueCompleteness(null)), true);
 });
 
 // Review Queue closure: sensitivity/allowed-use composition (section 6A) -

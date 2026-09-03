@@ -52,6 +52,8 @@ import {
   projectGeneratedDraftPacket,
   projectRequirementsReadiness,
   projectReviewQueue,
+  projectReviewQueueCompleteness,
+  reviewQueueIsComplete,
   projectTraceability,
   reviewQueueBlockerActionability,
   sensitivityReviewQueueAttention,
@@ -212,6 +214,15 @@ export default function ImpactEvidenceLibrary() {
   const [reviewQueueItems, setReviewQueueItems] = useState([]);
   const [loadingReviewQueue, setLoadingReviewQueue] = useState(false);
   const [reviewQueueError, setReviewQueueError] = useState("");
+  // Completeness of the rollup that produced reviewQueueItems above - see
+  // projectReviewQueueCompleteness/reviewQueueIsComplete. Preserved
+  // separately so an empty reviewQueueItems list is never displayed as a
+  // conclusive "nothing needs attention" when the server-side scan was
+  // truncated or some claims failed evaluation.
+  const [reviewQueueCompleteness, setReviewQueueCompleteness] = useState({
+    truncated: false,
+    evaluationErrorCount: 0,
+  });
 
   // Governed internal availability (the all-state Claim Library) and audience
   // eligibility are independent dimensions: neither request may clear, gate, or
@@ -300,6 +311,7 @@ export default function ImpactEvidenceLibrary() {
     setReviewQueueItems([]);
     setReviewQueueError("");
     setLoadingReviewQueue(false);
+    setReviewQueueCompleteness({ truncated: false, evaluationErrorCount: 0 });
   }, [organizationId]);
 
   // KAI B1A-3B authorization gate: fetch the server-grounded capability once
@@ -581,10 +593,12 @@ export default function ImpactEvidenceLibrary() {
     setLoadingReviewQueue(false);
     if (result.statusCode !== 200 || !result.body?.ok) {
       setReviewQueueItems([]);
+      setReviewQueueCompleteness({ truncated: false, evaluationErrorCount: 0 });
       setReviewQueueError(errorText(result));
       return;
     }
     setReviewQueueItems(projectReviewQueue(result.body.data));
+    setReviewQueueCompleteness(projectReviewQueueCompleteness(result.body.data));
   }, [organizationId]);
 
   // Rediscover current attention on every fresh Library load, exactly like
@@ -1038,6 +1052,16 @@ export default function ImpactEvidenceLibrary() {
         </div>
         {reviewQueueError ? <div className="alert alert-warning py-2 small">{reviewQueueError}</div> : null}
         {loadingReviewQueue ? <div className="text-muted small">Loading review queue...</div> : null}
+        {!loadingReviewQueue && !reviewQueueError && !reviewQueueIsComplete(reviewQueueCompleteness) ? (
+          <div className="alert alert-warning py-2 small">
+            This result is incomplete
+            {reviewQueueCompleteness.truncated ? " - the organization has more claims than this rollup scanned" : ""}
+            {reviewQueueCompleteness.evaluationErrorCount > 0
+              ? `${reviewQueueCompleteness.truncated ? ";" : " -"} ${reviewQueueCompleteness.evaluationErrorCount} claim(s) could not be evaluated`
+              : ""}
+            . The claims shown below are not confirmed to be the organization's complete current-attention set.
+          </div>
+        ) : null}
 
         {sensitivityAttention.status !== "unavailable" ? (
           <div className="border rounded p-2 mb-2">

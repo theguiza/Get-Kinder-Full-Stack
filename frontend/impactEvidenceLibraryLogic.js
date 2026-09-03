@@ -80,6 +80,30 @@ export function projectReviewQueue(dto) {
   }));
 }
 
+// KAI Review Queue: completeness metadata for the organization-scope rollup,
+// projected separately from projectReviewQueue so existing callers of that
+// function (which returns a plain item array) are unaffected. `truncated`
+// means listOrganizationClaimIds hit REVIEW_QUEUE_CLAIM_LIMIT and claims
+// beyond the cap were never evaluated at all; `evaluationErrorCount` counts
+// claims whose per-claim evaluateClaimTraceabilityInTransaction call failed
+// and were excluded from `items` (see postgresClaimTraceabilityRepository.js
+// listOrganizationReviewQueue). Either condition means `items` cannot be
+// treated as the full current-attention set for the organization.
+export function projectReviewQueueCompleteness(dto) {
+  return {
+    truncated: dto?.truncated === true,
+    evaluationErrorCount: Number.isInteger(dto?.evaluationErrorCount) ? dto.evaluationErrorCount : 0,
+  };
+}
+
+// True only when the rollup that produced `completeness` covered every
+// organization claim without any per-claim evaluation failure - i.e. an
+// empty `items` list under this completeness may be reported as a real,
+// conclusive zero.
+export function reviewQueueIsComplete(completeness) {
+  return completeness?.truncated !== true && (completeness?.evaluationErrorCount || 0) === 0;
+}
+
 // Presentation-only actionability derivation for one Review Queue item's
 // blocker code. Deterministic and pure - never persisted, never a new
 // workflow authority. Reuses the exact same gates the Traceability panel
