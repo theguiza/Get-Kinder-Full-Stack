@@ -15,6 +15,7 @@ import {
   insertEvidenceReviewDecision,
   insertClaimReviewDecision,
 } from "./postgresHumanReviewDecisionRepository.js";
+import { resolveEffectiveFunderAuthority } from "./postgresEffectiveFunderAuthorityResolver.js";
 import {
   isEvidenceReviewTerminalOutcome,
   isClaimReviewTerminalOutcome,
@@ -566,20 +567,24 @@ export function createPostgresHumanReviewRepository({ runInTransaction } = {}) {
             return failure("evidence_review_unresolved");
           }
 
-          // Governance ceiling (Problem B is NOT opened here): funder/public
-          // may only ever be requested if the bound claim's AND evidence
-          // item's own funder_use_allowed/public_use_allowed booleans are
-          // both true. Both are still hard-pinned false everywhere in this
-          // schema, so only 'internal' can ever legitimately pass today.
-          // This runs before any write in this transaction, so a rejection
-          // here persists nothing.
+          // Governance ceiling (Problem B is NOT opened here): public remains
+          // exactly as it was - claim.public_use_allowed AND
+          // evidence.public_use_allowed, both still hard-pinned false
+          // everywhere in this schema, so 'public' can never legitimately
+          // pass here. Funder authority (KAI B1B) is now resolved through the
+          // shared Phase-5 effective-funder-authority resolver instead of the
+          // legacy funder_use_allowed booleans, which remain schema-pinned
+          // false and are never consulted. This runs before any write in this
+          // transaction, using this same tx/snapshot, so a rejection here
+          // persists nothing.
           if (Array.isArray(approvedAudiences)) {
             const evidenceItemRow = await getScopedEvidenceItemById({ organizationId, evidenceItemId }, tx);
             if (!evidenceItemRow) return failure("not_found");
             for (const audience of approvedAudiences) {
               if (audience === "internal") continue;
               if (audience === "funder") {
-                if (claimRow.funder_use_allowed === true && evidenceItemRow.funder_use_allowed === true) continue;
+                const funderAuthority = await resolveEffectiveFunderAuthority(tx, { organizationId, claimId });
+                if (funderAuthority.permitted) continue;
                 return failure("governance_ceiling_exceeded");
               }
               if (audience === "public") {

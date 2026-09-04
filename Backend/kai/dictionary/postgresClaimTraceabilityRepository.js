@@ -34,6 +34,7 @@ import {
   findCurrentEvidenceReviewDecision,
   findCurrentClaimReviewDecision,
 } from "./postgresHumanReviewDecisionRepository.js";
+import { resolveEffectiveFunderAuthority } from "./postgresEffectiveFunderAuthorityResolver.js";
 
 const CLAIM_TRACEABILITY_RESULT_STATUS = Object.freeze({
   validation_blocker: 422,
@@ -377,20 +378,51 @@ function audienceGateSummary(claimRow) {
 }
 
 /**
- * KAI P2-10 internal audience authority. For requestedAudience = "internal",
- * these three blockers (claim_not_approved_for_requested_audience,
- * audience_gate_closed, requirement_authority_absent) no longer fire merely
- * because this stub used to unconditionally return false: P2-09 evidence/
- * claim-review completeness is already independently enforced below by the
+ * KAI P2-10 internal audience authority, extended by KAI B1B for funder. For
+ * requestedAudience = "internal", these three blockers
+ * (claim_not_approved_for_requested_audience, audience_gate_closed,
+ * requirement_authority_absent) no longer fire merely because this stub used
+ * to unconditionally return false: P2-09 evidence/claim-review completeness
+ * is already independently enforced below by the
  * evidence_review_unresolved/claim_review_unresolved blockers, and per-
  * dimension internal coverage-acceptance is independently enforced by the
  * coverage_dimension_unresolved carve-out below - so no additional gate is
- * owned here for internal. For funder/public, this preserves the exact
- * unconditional fail-closed behavior this stub always had: P2-10 grants no
- * funder/public/export authority whatsoever.
+ * owned here for internal.
+ *
+ * For requestedAudience = "funder" (KAI B1B): approved only when BOTH (a) the
+ * current claim-review-head decision (claimReviewHead, already resolved by
+ * the caller via findCurrentClaimReviewDecision - the same authoritative
+ * current-head semantics claim_review_unresolved uses) is a terminal decision
+ * whose approved_audiences includes "funder", AND (b) the shared Phase-5
+ * effective-funder-authority resolver (postgresEffectiveFunderAuthorityResolver.js)
+ * reports permitted:true for this claim in this same tx/snapshot. A current
+ * decision recording only approved_audiences=["internal"] never satisfies
+ * (a), so funder stays ineligible regardless of Phase-5 state. Neither branch
+ * consults the legacy claims.funder_use_allowed/evidence_items.funder_use_allowed
+ * columns (schema-pinned false).
+ *
+ * For public, this preserves the exact unconditional fail-closed behavior
+ * this stub always had: no funder/public/export authority is granted here
+ * beyond what is described above.
  */
-function approvalForAudience({ requestedAudience } = {}) {
+async function approvalForAudience({ requestedAudience, organizationId, claimId, claimReviewHead, tx } = {}) {
   if (requestedAudience === "internal") {
+    return { approved: true, gateOpen: true, authorityPresent: true };
+  }
+  if (requestedAudience === "funder") {
+    const qualifyingReview = Boolean(
+      claimReviewHead
+      && claimReviewHead.decision_outcome !== "needs_more_information"
+      && Array.isArray(claimReviewHead.approved_audiences)
+      && claimReviewHead.approved_audiences.includes("funder"),
+    );
+    if (!qualifyingReview) {
+      return { approved: false, gateOpen: false, authorityPresent: false };
+    }
+    const funderAuthority = await resolveEffectiveFunderAuthority(tx, { organizationId, claimId });
+    if (!funderAuthority.permitted) {
+      return { approved: false, gateOpen: false, authorityPresent: false };
+    }
     return { approved: true, gateOpen: true, authorityPresent: true };
   }
   return { approved: false, gateOpen: false, authorityPresent: false };
@@ -618,7 +650,13 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
   const blockers = new Set();
   const affectedDimensionKeys = new Set();
   const affectedObjectIds = new Set();
-  const audienceApproval = approvalForAudience({ requestedAudience, claimRow });
+  const audienceApproval = await approvalForAudience({
+    requestedAudience,
+    organizationId,
+    claimId,
+    claimReviewHead,
+    tx,
+  });
   if (!audienceApproval.approved) addOrderedBlocker(blockers, "claim_not_approved_for_requested_audience");
   if (!audienceApproval.gateOpen) addOrderedBlocker(blockers, "audience_gate_closed");
   if (!audienceApproval.authorityPresent) addOrderedBlocker(blockers, "requirement_authority_absent");
@@ -814,4 +852,5 @@ export const __claimTraceabilityRepositoryTestables = Object.freeze({
   toConflictGroupValidatorRecord,
   toConflictQueueValidatorRecord,
   rowIso,
+  approvalForAudience,
 });
