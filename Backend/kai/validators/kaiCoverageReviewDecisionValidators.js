@@ -20,7 +20,12 @@ import { createHash } from "node:crypto";
  */
 
 export const COVERAGE_REVIEW_DECISION_TYPE = "accepted_internal_with_limitation";
+export const COVERAGE_REVIEW_FUNDER_DECISION_TYPE = "accepted_funder_with_limitation";
 export const COVERAGE_REVIEW_DECISION_ROLE = "gk_reviewer";
+
+export function isCoverageReviewDecisionType(value) {
+  return value === COVERAGE_REVIEW_DECISION_TYPE || value === COVERAGE_REVIEW_FUNDER_DECISION_TYPE;
+}
 
 export const COVERAGE_REVIEW_DIMENSION_KEYS = Object.freeze([
   "missingness",

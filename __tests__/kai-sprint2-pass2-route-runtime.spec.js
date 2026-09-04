@@ -127,8 +127,9 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // KAI P2-11 client-followup-completion surface (additive; every prior
     // entry preserved verbatim).
     "/admin/organizations/:organizationId/claims/:claimId/client-followups/:clientFollowupItemId/complete",
-    // KAI P2-10 owner-policy internal-coverage-acceptance surface (additive;
+    // KAI P2-10 owner-policy coverage-acceptance surfaces (additive;
     // every prior entry preserved verbatim).
+    "/admin/organizations/:organizationId/claims/:claimId/coverage-dimensions/:dimensionKey/funder-acceptance",
     "/admin/organizations/:organizationId/claims/:claimId/coverage-dimensions/:dimensionKey/internal-acceptance",
     // KAI P2-06 human claim-traceability read surface (additive; every prior
     // entry preserved verbatim).
@@ -168,6 +169,9 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // existing P3-01 governed generation vertical (additive; every prior
     // entry preserved verbatim).
     "/admin/organizations/:organizationId/generated-content-drafts/impact-narrative",
+    "/admin/organizations/:organizationId/requirements",
+    "/admin/organizations/:organizationId/requirements/:requirementId/assessment",
+    "/admin/organizations/:organizationId/review-queue",
     // KAI P2-02 evidence-coverage-assessment surface (additive; every prior
     // entry preserved verbatim).
     "/admin/organizations/:organizationId/source-versions/:sourceVersionId/evidence-coverage-assessment",

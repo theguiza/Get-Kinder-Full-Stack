@@ -9,15 +9,16 @@ import {
 } from "../validators/kaiCoverageReviewDecisionValidators.js";
 
 /**
- * KAI P2-10 owner-policy service: the only route allowed to create an
- * `accepted_internal_with_limitation` coverage decision. Exactly one role -
- * `gk_reviewer` - may perform this operation; `gk_operator`, `gk_admin`,
+ * KAI P2-10 owner-policy service: the only routes allowed to create coverage
+ * decisions. Exactly one role - `gk_reviewer` - may perform these operations;
+ * `gk_operator`, `gk_admin`,
  * client actors, `system`, `assistant`, import, and code actors are all
  * denied, by construction of `ACCEPT_INTERNAL_COVERAGE_LIMITATION_ALLOWED_ROLES`
  * never including any of them.
  */
 const ACCEPT_INTERNAL_COVERAGE_LIMITATION_ALLOWED_ROLES = new Set([COVERAGE_REVIEW_DECISION_ROLE]);
 const ACCEPT_INTERNAL_COVERAGE_LIMITATION_OPERATION = "accept_internal_coverage_limitation";
+const ACCEPT_FUNDER_COVERAGE_LIMITATION_OPERATION = "accept_funder_coverage_limitation";
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -51,6 +52,20 @@ function isAcceptInternalCoverageLimitationInput(value) {
 }
 
 export async function acceptInternalCoverageLimitation(input, dependencies = {}) {
+  return acceptCoverageLimitation(input, dependencies, {
+    operation: ACCEPT_INTERNAL_COVERAGE_LIMITATION_OPERATION,
+    repositoryMethod: "acceptInternalCoverageLimitation",
+  });
+}
+
+export async function acceptFunderCoverageLimitation(input, dependencies = {}) {
+  return acceptCoverageLimitation(input, dependencies, {
+    operation: ACCEPT_FUNDER_COVERAGE_LIMITATION_OPERATION,
+    repositoryMethod: "acceptFunderCoverageLimitation",
+  });
+}
+
+async function acceptCoverageLimitation(input, dependencies, { operation, repositoryMethod }) {
   if (!isKaiSprint2Enabled(dependencies.env || process.env)) {
     return buildKaiError("feature_disabled");
   }
@@ -65,7 +80,7 @@ export async function acceptInternalCoverageLimitation(input, dependencies = {})
 
   const auth = validateActorCanPerformOperation(
     actorContext,
-    ACCEPT_INTERNAL_COVERAGE_LIMITATION_OPERATION,
+    operation,
     input.organizationId,
     { allowedRoles: ACCEPT_INTERNAL_COVERAGE_LIMITATION_ALLOWED_ROLES },
   );
@@ -82,7 +97,7 @@ export async function acceptInternalCoverageLimitation(input, dependencies = {})
   }
 
   const repository = dependencies.coverageReviewDecisionRepository || createPostgresCoverageReviewDecisionRepository();
-  const result = await repository.acceptInternalCoverageLimitation({
+  const result = await repository[repositoryMethod]({
     organizationId: input.organizationId,
     claimId: input.claimId,
     dimensionKey: input.dimensionKey,
@@ -101,6 +116,7 @@ export async function acceptInternalCoverageLimitation(input, dependencies = {})
 export const __coverageReviewDecisionServiceContract = Object.freeze({
   ACCEPT_INTERNAL_COVERAGE_LIMITATION_ALLOWED_ROLES,
   ACCEPT_INTERNAL_COVERAGE_LIMITATION_OPERATION,
+  ACCEPT_FUNDER_COVERAGE_LIMITATION_OPERATION,
 });
 
 export const __coverageReviewDecisionServiceTestables = Object.freeze({

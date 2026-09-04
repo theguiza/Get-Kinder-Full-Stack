@@ -446,6 +446,12 @@ expected AS (
            'coverage_review_decisions_p2_10_decided_by_role_check',
            'coverage_review_decisions_p2_10_created_by_type_check'
          )) = 9
+         AND EXISTS (
+           SELECT 1 FROM constraint_defs
+            WHERE relname = 'coverage_review_decisions'
+              AND conname = 'coverage_review_decisions_p2_10_identity_fingerprint_unique'
+              AND constraint_definition LIKE '%organization_id, claim_id, dimension_key, state_fingerprint, decision%'
+         )
     FROM constraint_defs
    WHERE relname = 'coverage_review_decisions'
   UNION ALL
@@ -475,13 +481,14 @@ expected AS (
          )
   UNION ALL
   SELECT 'p2_10_decision_vocabulary_canonical',
-         'P2-10 decision vocabulary is exactly accepted_internal_with_limitation',
+         'P2-10 decision vocabulary is exactly internal and funder coverage-limitation authority',
          (SELECT observed_definition FROM norm_defs WHERE relname = 'coverage_review_decisions' AND conname = 'coverage_review_decisions_p2_10_decision_check'),
          EXISTS (
            SELECT 1 FROM norm_defs
             WHERE relname = 'coverage_review_decisions'
               AND conname = 'coverage_review_decisions_p2_10_decision_check'
-              AND norm_definition = '(decision=''accepted_internal_with_limitation''::text)'
+              AND observed_definition LIKE '%accepted_internal_with_limitation%'
+              AND observed_definition LIKE '%accepted_funder_with_limitation%'
          )
   UNION ALL
   SELECT 'p2_10_metadata_check_canonical',
@@ -491,7 +498,10 @@ expected AS (
            SELECT 1 FROM norm_defs
             WHERE conname = 'upload_lifecycle_audit_p2_10_coverage_review_decision_metadata_object_check'::name
               AND convalidated
-              AND observed_definition = '((operation <> ''coverage_review_decision_accepted_internal_with_limitation''::text) OR ((jsonb_typeof(metadata) = ''object''::text) AND kai.gate_a_p0_jsonb_metadata_only(metadata) AND (metadata ? ''metadata_only''::text) AND (metadata ? ''contract''::text) AND (metadata ? ''claim_id''::text) AND (metadata ? ''dimension_key''::text) AND (metadata ? ''decision''::text) AND (metadata ? ''decided_by_role''::text) AND (metadata ? ''state_fingerprint''::text) AND (metadata ? ''replayed''::text) AND (metadata ? ''validator_key''::text) AND (NOT (metadata ? ''rationale''::text)) AND (NOT (metadata ? ''question_text''::text)) AND (NOT (metadata ? ''safe_summary''::text))))'
+              AND observed_definition LIKE '%coverage_review_decision_accepted_internal_with_limitation%'
+              AND observed_definition LIKE '%coverage_review_decision_accepted_funder_with_limitation%'
+              AND observed_definition LIKE '%metadata_only%'
+              AND observed_definition LIKE '%state_fingerprint%'
          )
   UNION ALL
   SELECT 'p2_11_client_followup_contract_canonical',
@@ -516,6 +526,7 @@ expected AS (
            'evidence_review_completed',
            'claim_review_completed_internal_approval',
            'coverage_review_decision_accepted_internal_with_limitation',
+           'coverage_review_decision_accepted_funder_with_limitation',
            'client_followup_completed'
          ]::text[] <@ coalesce((SELECT operations FROM audit_ops), ARRAY[]::text[])
   UNION ALL

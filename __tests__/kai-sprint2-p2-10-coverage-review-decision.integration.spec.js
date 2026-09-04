@@ -39,7 +39,11 @@ async function runP210IntegrationSuite() {
   const { recordEvidenceReviewDecision, recordClaimReviewDecision } = await import("../Backend/kai/services/kaiHumanReviewService.js");
   const { getClaimTraceabilitySummary } = await import("../Backend/kai/services/kaiClaimTraceabilityService.js");
   const { listEligibleClaimsForAudience } = await import("../Backend/kai/services/kaiEligibleClaimsForAudienceService.js");
-  const { acceptInternalCoverageLimitation } = await import("../Backend/kai/services/kaiCoverageReviewDecisionService.js");
+  const { completeClientFollowup } = await import("../Backend/kai/services/kaiClientFollowupCompletionService.js");
+  const {
+    acceptInternalCoverageLimitation,
+    acceptFunderCoverageLimitation,
+  } = await import("../Backend/kai/services/kaiCoverageReviewDecisionService.js");
   const { createPostgresEvidenceLineageRepository } = await import("../Backend/kai/dictionary/postgresEvidenceLineageRepository.js");
   const { createPostgresClaimProposalRepository } = await import("../Backend/kai/dictionary/postgresClaimProposalRepository.js");
   const { createPostgresClaimGapFollowupRepository } = await import("../Backend/kai/dictionary/postgresClaimGapFollowupRepository.js");
@@ -48,6 +52,7 @@ async function runP210IntegrationSuite() {
   const { createPostgresClaimTraceabilityRepository } = await import("../Backend/kai/dictionary/postgresClaimTraceabilityRepository.js");
   const { createPostgresEligibleClaimsForAudienceRepository } = await import("../Backend/kai/dictionary/postgresEligibleClaimsForAudienceRepository.js");
   const { createPostgresCoverageReviewDecisionRepository } = await import("../Backend/kai/dictionary/postgresCoverageReviewDecisionRepository.js");
+  const { createPostgresClientFollowupCompletionRepository } = await import("../Backend/kai/dictionary/postgresClientFollowupCompletionRepository.js");
 
   const ORG = "00000000-0000-4000-8000-000000000001";
   const OTHER_ORG = "00000000-0000-4000-8000-000000000002";
@@ -115,6 +120,7 @@ async function runP210IntegrationSuite() {
   const traceRepo = createPostgresClaimTraceabilityRepository({ runInTransaction: withRunnerOwnedTransaction });
   const eligibleRepo = createPostgresEligibleClaimsForAudienceRepository({ runInTransaction: withRunnerOwnedTransaction });
   const coverageRepo = createPostgresCoverageReviewDecisionRepository({ runInTransaction: withRunnerOwnedTransaction });
+  const clientFollowupRepo = createPostgresClientFollowupCompletionRepository({ runInTransaction: withRunnerOwnedTransaction });
 
   test.after(async () => {
     await pool.end();
@@ -141,6 +147,18 @@ async function runP210IntegrationSuite() {
 
   async function accept(claimId, dimensionKey, actorContext = reviewerActor, dependencies = {}) {
     return acceptInternalCoverageLimitation(
+      { organizationId: ORG, claimId, dimensionKey, actorContext, now: NOW },
+      {
+        env: { KAI_SPRINT2_ENABLED: "true" },
+        coverageReviewDecisionRepository: coverageRepo,
+        metadataOnlyAudit: auditRecorder(),
+        ...dependencies,
+      },
+    );
+  }
+
+  async function acceptFunder(claimId, dimensionKey, actorContext = reviewerActor, dependencies = {}) {
+    return acceptFunderCoverageLimitation(
       { organizationId: ORG, claimId, dimensionKey, actorContext, now: NOW },
       {
         env: { KAI_SPRINT2_ENABLED: "true" },
@@ -225,6 +243,181 @@ async function runP210IntegrationSuite() {
       { env: { KAI_SPRINT2_ENABLED: "true" }, humanReviewRepository: humanReviewRepo, metadataOnlyAudit: auditRecorder() },
     );
     assert.equal(claimResult.ok, true);
+  }
+
+  async function completeHumanReviewForAudiences(claimId, evidenceItemId, approvedAudiences) {
+    const evidenceQueueRows = await query(
+      `SELECT review_queue_item_id, updated_at
+         FROM kai.review_queue_items
+        WHERE organization_id = $1::uuid AND queue_type = 'evidence_review' AND target_object_type = 'evidence_item' AND target_object_id = $2::uuid`,
+      [ORG, evidenceItemId],
+    );
+    const evidenceResult = await recordEvidenceReviewDecision(
+      {
+        organizationId: ORG, evidenceItemId, reviewQueueItemId: evidenceQueueRows[0].review_queue_item_id,
+        expectedUpdatedAt: new Date(evidenceQueueRows[0].updated_at).toISOString(), decision: "supported", actorContext: reviewerActor, now: NOW,
+      },
+      { env: { KAI_SPRINT2_ENABLED: "true" }, humanReviewRepository: humanReviewRepo, metadataOnlyAudit: auditRecorder() },
+    );
+    assert.equal(evidenceResult.ok, true);
+
+    const claimQueueRows = await query(
+      `SELECT review_queue_item_id, updated_at
+         FROM kai.review_queue_items
+        WHERE organization_id = $1::uuid AND queue_type = 'claim_review' AND target_object_type = 'claim' AND target_object_id = $2::uuid`,
+      [ORG, claimId],
+    );
+    const claimResult = await recordClaimReviewDecision(
+      {
+        organizationId: ORG, claimId, reviewQueueItemId: claimQueueRows[0].review_queue_item_id,
+        expectedUpdatedAt: new Date(claimQueueRows[0].updated_at).toISOString(), decision: "approved", approvedAudiences, actorContext: reviewerActor, now: NOW,
+      },
+      { env: { KAI_SPRINT2_ENABLED: "true" }, humanReviewRepository: humanReviewRepo, metadataOnlyAudit: auditRecorder() },
+    );
+    assert.equal(claimResult.ok, true);
+  }
+
+  async function reapproveClaimForAudiences(claimId, approvedAudiences) {
+    const claimQueueRows = await query(
+      `SELECT review_queue_item_id, updated_at
+         FROM kai.review_queue_items
+        WHERE organization_id = $1::uuid AND queue_type = 'claim_review' AND target_object_type = 'claim' AND target_object_id = $2::uuid`,
+      [ORG, claimId],
+    );
+    const claimResult = await recordClaimReviewDecision(
+      {
+        organizationId: ORG,
+        claimId,
+        reviewQueueItemId: claimQueueRows[0].review_queue_item_id,
+        expectedUpdatedAt: new Date(claimQueueRows[0].updated_at).toISOString(),
+        decision: "approved",
+        approvedAudiences,
+        actorContext: reviewerActor,
+        now: new Date(Date.parse(NOW) + 1000).toISOString(),
+      },
+      { env: { KAI_SPRINT2_ENABLED: "true" }, humanReviewRepository: humanReviewRepo, metadataOnlyAudit: auditRecorder() },
+    );
+    assert.equal(claimResult.ok, true, JSON.stringify(claimResult));
+  }
+
+  async function recordPhase5FunderAuthorityForClaim(claimId, { permitted }) {
+    const [lineage] = await query(
+      `SELECT sv.intake_sensitivity_profile_id
+         FROM kai.claims c
+         JOIN kai.evidence_items e
+           ON e.organization_id = c.organization_id
+          AND e.evidence_item_id = c.evidence_item_id
+         JOIN kai.source_versions sv
+           ON sv.organization_id = e.organization_id
+          AND sv.source_version_id = e.source_version_id
+        WHERE c.organization_id = $1::uuid
+          AND c.claim_id = $2::uuid`,
+      [ORG, claimId],
+    );
+    assert.ok(lineage);
+    let [queueItem] = await query(
+      `SELECT review_queue_item_id
+         FROM kai.review_queue_items
+        WHERE organization_id = $1::uuid
+          AND queue_type = 'sensitivity_review'
+          AND target_object_type = 'intake_sensitivity_profile'
+          AND target_object_id = $2::uuid`,
+      [ORG, lineage.intake_sensitivity_profile_id],
+    );
+    if (!queueItem) {
+      [queueItem] = await query(
+        `INSERT INTO kai.review_queue_items (
+           organization_id, queue_type, target_object_type, target_object_id,
+           priority, queue_status, review_status, summary, required_action,
+           queue_metadata, created_by_type
+         ) VALUES (
+           $1::uuid, 'sensitivity_review', 'intake_sensitivity_profile', $2::uuid,
+           'medium', 'open', 'needs_gk_review', 'Review sensitivity and allowed-use metadata.',
+           'Review sensitivity and allowed-use metadata before governed use.', '{}'::jsonb, 'human'
+         )
+         RETURNING review_queue_item_id`,
+        [ORG, lineage.intake_sensitivity_profile_id],
+      );
+    }
+
+    const [head] = await query(
+      `SELECT decision_id
+         FROM kai.intake_sensitivity_review_decisions d
+        WHERE d.organization_id = $1::uuid
+          AND d.intake_sensitivity_profile_id = $2::uuid
+          AND NOT EXISTS (
+                SELECT 1
+                  FROM kai.intake_sensitivity_review_decisions s
+                 WHERE s.supersedes_decision_id = d.decision_id
+              )`,
+      [ORG, lineage.intake_sensitivity_profile_id],
+    );
+    await pool.query(
+        `INSERT INTO kai.intake_sensitivity_review_decisions (
+         organization_id, intake_sensitivity_profile_id, review_queue_item_id,
+         decision_outcome, reviewed_personal_data_status, reviewed_minor_data_status,
+         reviewed_health_housing_justice_immigration_status, reviewed_indigenous_governance_status,
+         reviewed_staff_notes_status, reviewed_story_testimonial_status, reviewed_small_cell_risk_status,
+         reviewed_financial_records_status, reviewed_consent_basis_status, reviewed_allowed_use_status,
+         reviewed_llm_processing_allowed, reviewed_product_learning_allowed, reviewed_public_use_allowed,
+         reviewed_funder_use_allowed, decided_by, decided_by_role, target_updated_at,
+         supersedes_decision_id, created_by_type, created_at
+       ) VALUES (
+         $1::uuid, $2::uuid, $3::uuid,
+         'reviewed', 'unknown', 'unknown',
+         'unknown', 'unknown',
+         'unknown', 'unknown', 'unknown',
+         'unknown', 'present', $4,
+         false, false, false,
+         $5, $6::uuid, 'gk_reviewer', $7::timestamptz,
+         $8::uuid, 'human', now()
+       )`,
+      [
+        ORG,
+        lineage.intake_sensitivity_profile_id,
+        queueItem.review_queue_item_id,
+        permitted ? "allowed" : "not_allowed",
+        permitted,
+        reviewerActor.actorUserId,
+        NOW,
+        head?.decision_id || null,
+      ],
+    );
+  }
+
+  async function completeAllFollowups(claimId) {
+    const rows = await query(
+      `SELECT cfi.client_followup_item_id, rq.updated_at
+         FROM kai.client_followup_items cfi
+         JOIN kai.review_queue_items rq
+           ON rq.organization_id = cfi.organization_id
+          AND rq.queue_type = 'client_followup'
+          AND rq.target_object_type = 'client_followup_item'
+          AND rq.target_object_id = cfi.client_followup_item_id
+        WHERE cfi.organization_id = $1::uuid
+          AND cfi.claim_id = $2::uuid
+        ORDER BY cfi.dimension_key`,
+      [ORG, claimId],
+    );
+    const clientReviewerActor = {
+      actorType: "human",
+      actorUserId: "90000000-0000-4000-8000-000000000007",
+      organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_reviewer" }],
+    };
+    for (const row of rows) {
+      const result = await completeClientFollowup(
+        {
+          organizationId: ORG,
+          claimId,
+          clientFollowupItemId: row.client_followup_item_id,
+          expectedUpdatedAt: new Date(row.updated_at).toISOString(),
+          actorContext: clientReviewerActor,
+          now: NOW,
+        },
+        { env: { KAI_SPRINT2_ENABLED: "true" }, clientFollowupCompletionRepository: clientFollowupRepo, metadataOnlyAudit: auditRecorder() },
+      );
+      assert.equal(result.ok, true, JSON.stringify(result));
+    }
   }
 
   function unresolvedDimensionKeys(traceData) {
@@ -472,6 +665,119 @@ async function runP210IntegrationSuite() {
       assert.equal(externalEligible.ok, true);
       assert.ok(!externalEligible.data.eligibleClaims.some((row) => row.claimId === alpha.claimId));
     }
+  });
+
+  test("P2-10 funder write: missing or denied Phase-5 authority fails closed with zero coverage mutation", async () => {
+    const [alpha] = await prepareTwoClaims();
+    const traced = await trace(alpha.claimId, "internal");
+    const [dimensionKey] = unresolvedDimensionKeys(traced.data);
+
+    const beforeMissing = (await query(`SELECT count(*)::int AS count FROM kai.coverage_review_decisions`))[0].count;
+    const missing = await acceptFunder(alpha.claimId, dimensionKey);
+    assert.equal(missing.ok, false);
+    assert.equal(missing.error.code, "validation_blocker");
+    const afterMissing = (await query(`SELECT count(*)::int AS count FROM kai.coverage_review_decisions`))[0].count;
+    assert.equal(afterMissing, beforeMissing);
+
+    await recordPhase5FunderAuthorityForClaim(alpha.claimId, { permitted: false });
+    const beforeDenied = (await query(`SELECT count(*)::int AS count FROM kai.coverage_review_decisions`))[0].count;
+    const denied = await acceptFunder(alpha.claimId, dimensionKey);
+    assert.equal(denied.ok, false);
+    assert.equal(denied.error.code, "validation_blocker");
+    const afterDenied = (await query(`SELECT count(*)::int AS count FROM kai.coverage_review_decisions`))[0].count;
+    assert.equal(afterDenied, beforeDenied);
+  });
+
+  test("P2-10 funder coverage authority coexists with internal, is idempotent by decision, and is audience-specific in P2-06/P2-08", async () => {
+    const [alpha] = await prepareTwoClaims();
+    await recordPhase5FunderAuthorityForClaim(alpha.claimId, { permitted: true });
+
+    const beforeFunder = await trace(alpha.claimId, "funder");
+    assert.equal(beforeFunder.ok, true);
+    assert.ok(beforeFunder.data.blockerCodes.includes("coverage_dimension_unresolved"));
+    assert.ok(beforeFunder.data.blockerCodes.includes("claim_not_approved_for_requested_audience"));
+    assert.ok(beforeFunder.data.blockerCodes.includes("audience_gate_closed"));
+    assert.ok(beforeFunder.data.blockerCodes.includes("requirement_authority_absent"));
+
+    const unresolved = unresolvedDimensionKeys(beforeFunder.data);
+    assert.ok(unresolved.length > 0);
+    for (const dimensionKey of unresolved) {
+      assert.equal(beforeFunder.data.dimensions[dimensionKey].internal_limitation_accepted, true);
+      assert.equal(beforeFunder.data.dimensions[dimensionKey].funder_limitation_accepted, false);
+    }
+
+    const firstFunderAccept = await acceptFunder(alpha.claimId, unresolved[0]);
+    assert.equal(firstFunderAccept.ok, true, JSON.stringify(firstFunderAccept));
+    assert.equal(firstFunderAccept.data.decision, "accepted_funder_with_limitation");
+    assert.equal(firstFunderAccept.data.replayed, false);
+    const replay = await acceptFunder(alpha.claimId, unresolved[0]);
+    assert.equal(replay.ok, true);
+    assert.equal(replay.data.replayed, true);
+
+    const coexist = await query(
+      `SELECT decision, count(*)::int AS count
+         FROM kai.coverage_review_decisions
+        WHERE organization_id = $1::uuid
+          AND claim_id = $2::uuid
+          AND dimension_key = $3
+        GROUP BY decision
+        ORDER BY decision`,
+      [ORG, alpha.claimId, unresolved[0]],
+    );
+    assert.deepEqual(coexist.map((row) => [row.decision, row.count]), [
+      ["accepted_funder_with_limitation", 1],
+      ["accepted_internal_with_limitation", 1],
+    ]);
+
+    const partialFunder = await trace(alpha.claimId, "funder");
+    assert.equal(partialFunder.ok, true);
+    assert.ok(partialFunder.data.blockerCodes.includes("coverage_dimension_unresolved"));
+    assert.equal(partialFunder.data.dimensions[unresolved[0]].funder_limitation_accepted, true);
+    assert.equal(partialFunder.data.dimensions[unresolved[0]].blocks_requested_audience, false);
+
+    for (const dimensionKey of unresolved.slice(1)) {
+      const result = await acceptFunder(alpha.claimId, dimensionKey);
+      assert.equal(result.ok, true, JSON.stringify(result));
+    }
+
+    const intermediate = await trace(alpha.claimId, "funder");
+    assert.equal(intermediate.ok, true);
+    assert.ok(!intermediate.data.blockerCodes.includes("coverage_dimension_unresolved"));
+    assert.equal(intermediate.data.claim_review_decision.approved_audiences.includes("funder"), false);
+    assert.ok(intermediate.data.blockerCodes.includes("claim_not_approved_for_requested_audience"));
+    assert.ok(intermediate.data.blockerCodes.includes("audience_gate_closed"));
+    assert.ok(intermediate.data.blockerCodes.includes("requirement_authority_absent"));
+
+    const publicTrace = await trace(alpha.claimId, "public");
+    assert.equal(publicTrace.ok, true);
+    assert.ok(publicTrace.data.blockerCodes.includes("coverage_dimension_unresolved"));
+
+    await reapproveClaimForAudiences(alpha.claimId, ["internal", "funder"]);
+    await completeAllFollowups(alpha.claimId);
+    const finalFunder = await trace(alpha.claimId, "funder");
+    assert.equal(finalFunder.ok, true);
+    assert.equal(finalFunder.data.eligible, true);
+    assert.deepEqual(finalFunder.data.blockerCodes, []);
+
+    const eligibleFunder = await eligibleFor("funder");
+    assert.equal(eligibleFunder.ok, true);
+    assert.ok(eligibleFunder.data.eligibleClaims.some((row) => row.claimId === alpha.claimId));
+
+    const internalTrace = await trace(alpha.claimId, "internal");
+    assert.equal(internalTrace.ok, true);
+    assert.equal(internalTrace.data.eligible, true);
+
+    await pool.query(
+      `UPDATE kai.evidence_items
+          SET support_strength = 'unassessed'
+        WHERE organization_id = $1::uuid
+          AND evidence_item_id = $2::uuid`,
+      [ORG, alpha.evidenceItemId],
+    );
+    const stale = await trace(alpha.claimId, "funder");
+    assert.equal(stale.ok, true);
+    assert.ok(stale.data.blockerCodes.includes("coverage_dimension_unresolved"));
+    assert.ok(stale.data.blockerCodes.includes("support_strength_unassessed"));
   });
 
 }

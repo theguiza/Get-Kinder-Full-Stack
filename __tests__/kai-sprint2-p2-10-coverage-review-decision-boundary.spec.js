@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
+  acceptFunderCoverageLimitation,
   acceptInternalCoverageLimitation,
   __coverageReviewDecisionServiceContract,
 } from "../Backend/kai/services/kaiCoverageReviewDecisionService.js";
@@ -95,6 +97,27 @@ test("P2-10 service rejects gk_operator before any repository call", async () =>
   );
   assert.equal(result.ok, false);
   assert.equal(result.error.code, "authorization_denied");
+});
+
+test("P2-10 funder service rejects non-human and wrong-role actors before any repository call", async () => {
+  const repository = {
+    async acceptFunderCoverageLimitation() {
+      throw new Error("must not be called");
+    },
+  };
+  const nonHuman = await acceptFunderCoverageLimitation(
+    { organizationId: ORG, claimId: CLAIM, dimensionKey: "denominator_clarity", actorContext: aiActor, now: NOW },
+    { env: enabledEnv, coverageReviewDecisionRepository: repository },
+  );
+  assert.equal(nonHuman.ok, false);
+  assert.equal(nonHuman.error.code, "authorization_denied");
+
+  const wrongRole = await acceptFunderCoverageLimitation(
+    { organizationId: ORG, claimId: CLAIM, dimensionKey: "denominator_clarity", actorContext: operatorActor, now: NOW },
+    { env: enabledEnv, coverageReviewDecisionRepository: repository },
+  );
+  assert.equal(wrongRole.ok, false);
+  assert.equal(wrongRole.error.code, "authorization_denied");
 });
 
 test("P2-10 service rejects gk_admin before any repository call", async () => {
@@ -248,6 +271,31 @@ test("P2-10 service delegates to the injected repository exactly once, with the 
   assert.equal(calls[0].actorUserId, reviewerActor.actorUserId);
 });
 
+test("P2-10 funder service delegates only to the explicit funder repository method", async () => {
+  const calls = [];
+  const result = await acceptFunderCoverageLimitation(
+    { organizationId: ORG, claimId: CLAIM, dimensionKey: "denominator_clarity", actorContext: reviewerActor, now: NOW },
+    {
+      env: enabledEnv,
+      coverageReviewDecisionRepository: {
+        async acceptInternalCoverageLimitation() {
+          throw new Error("must not call internal method");
+        },
+        async acceptFunderCoverageLimitation(input) {
+          calls.push(input);
+          return { ok: true, data: { replayed: false }, error: null };
+        },
+      },
+    },
+  );
+  assert.equal(result.ok, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].organizationId, ORG);
+  assert.equal(calls[0].claimId, CLAIM);
+  assert.equal(calls[0].dimensionKey, "denominator_clarity");
+  assert.equal(calls[0].actorRole, "gk_reviewer");
+});
+
 test("P2-10 route identifiers accept only the ten known dimension keys and canonical-lowercase UUIDs", () => {
   const validReq = {
     params: { organizationId: ORG, claimId: CLAIM, dimensionKey: "coverage_gaps" },
@@ -273,6 +321,15 @@ test("P2-10 route rejects a non-empty request body", () => {
   const identifiers = validateCoverageReviewDecisionRequestOrSend(req, res);
   assert.equal(identifiers, null);
   assert.equal(calls[0], 422);
+});
+
+test("P2-10 route exposes explicit internal and funder siblings without arbitrary audience input", () => {
+  const source = readFileSync(new URL("../Backend/kai/routes/sprint2IntakeApi.js", import.meta.url), "utf8");
+  assert.match(source, /coverage-dimensions\/:dimensionKey\/internal-acceptance/);
+  assert.match(source, /coverage-dimensions\/:dimensionKey\/funder-acceptance/);
+  assert.match(source, /acceptInternalCoverageLimitation/);
+  assert.match(source, /acceptFunderCoverageLimitation/);
+  assert.doesNotMatch(source, /accept.*CoverageLimitation\(\{[^}]*requestedAudience/s);
 });
 
 test("P2-10 isCoverageReviewDimensionKey pins the exact ten P2-02 dimension keys", () => {
@@ -302,6 +359,23 @@ test("P2-10 fingerprint is deterministic and changes when any bound fact changes
 
   const changed = computeCoverageReviewDecisionFingerprint({ ...base, dimensionAssessmentStatus: "resolved_risk_flagged" });
   assert.notEqual(changed, fingerprintA);
+});
+
+test("P2-10 funder migration preserves historical internal rows and extends identity by decision", () => {
+  const migration = readFileSync(
+    new URL("../migrations/kai_sprint2_p2_10_funder_coverage_authority.sql", import.meta.url),
+    "utf8",
+  );
+  const rollback = readFileSync(
+    new URL("../migrations/kai_sprint2_p2_10_funder_coverage_authority.rollback.sql", import.meta.url),
+    "utf8",
+  );
+  assert.match(migration, /accepted_internal_with_limitation/);
+  assert.match(migration, /accepted_funder_with_limitation/);
+  assert.match(migration, /UNIQUE \(organization_id, claim_id, dimension_key, state_fingerprint, decision\)/);
+  assert.match(migration, /coverage_review_decision_accepted_funder_with_limitation/);
+  assert.doesNotMatch(migration, /\bauthority_scope\b|\brequested_audience\b/);
+  assert.match(rollback, /CHECK \(decision = 'accepted_internal_with_limitation'\)/);
 });
 
 function fakeTraceabilityResult(overrides = {}) {
@@ -459,6 +533,58 @@ test("P2-10 repository succeeds, writes the required same-transaction audit, and
   assert.equal(result.ok, true);
   assert.equal(result.data.replayed, false);
   assert.equal(audit.calls.filter((call) => call.type === "publish").length, 1);
+});
+
+test("P2-10 funder repository requires effective Phase-5 funder authority before any coverage insert", async () => {
+  const tx = fakeTx();
+  const repo = createPostgresCoverageReviewDecisionRepository({
+    runInTransaction: (cb) => cb(tx),
+    evaluateClaimTraceability: async () => fakeTraceabilityResult(),
+    resolveFunderAuthority: async () => ({ permitted: false, reason: "decision_missing" }),
+  });
+  const result = await repo.acceptFunderCoverageLimitation({
+    organizationId: ORG, claimId: CLAIM, dimensionKey: "denominator_clarity",
+    actorUserId: reviewerActor.actorUserId, actorRole: "gk_reviewer", now: NOW,
+    metadataOnlyAudit: stubMetadataOnlyAudit(),
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "validation_blocker");
+  assert.equal(tx.queries.some((query) => /INSERT INTO kai\.coverage_review_decisions/.test(query.sql)), false);
+});
+
+test("P2-10 funder repository writes the funder decision and audit operation when Phase-5 permits", async () => {
+  const tx = fakeTx({
+    insertRows: [{
+      coverage_review_decision_id: "dec-funder-1",
+      organization_id: ORG,
+      claim_id: CLAIM,
+      dimension_key: "denominator_clarity",
+      decision: "accepted_funder_with_limitation",
+      decided_by_role: "gk_reviewer",
+      created_at: new Date(NOW),
+    }],
+  });
+  const audit = stubMetadataOnlyAudit();
+  const repo = createPostgresCoverageReviewDecisionRepository({
+    runInTransaction: (cb) => cb(tx),
+    evaluateClaimTraceability: async (txArg, input) => {
+      assert.equal(input.requestedAudience, "funder");
+      return fakeTraceabilityResult();
+    },
+    resolveFunderAuthority: async () => ({ permitted: true }),
+  });
+  const result = await repo.acceptFunderCoverageLimitation({
+    organizationId: ORG, claimId: CLAIM, dimensionKey: "denominator_clarity",
+    actorUserId: reviewerActor.actorUserId, actorRole: "gk_reviewer", now: NOW,
+    metadataOnlyAudit: audit,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.data.decision, "accepted_funder_with_limitation");
+  assert.equal(result.data.replayed, false);
+  assert.equal(audit.calls[0].payload.attempted_operation, "coverage_review_decision_accepted_funder_with_limitation");
+  assert.equal(audit.calls[0].payload.decision, "accepted_funder_with_limitation");
+  const insert = tx.queries.find((query) => /INSERT INTO kai\.coverage_review_decisions/.test(query.sql));
+  assert.equal(insert.params[3], "accepted_funder_with_limitation");
 });
 
 test("P2-10 repository treats a conflicting insert as an exact replay - rereads the existing row and publishes no second audit", async () => {

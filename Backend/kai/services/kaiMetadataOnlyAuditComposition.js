@@ -635,19 +635,24 @@ export function createProductionMetadataOnlyAuditForCoverageReviewDecision({
       if (payloadClaimId !== claimId) return { ok: false };
       const dimensionKey = payload.dimension_key;
       if (typeof dimensionKey !== "string" || !DIMENSION_KEY_PATTERN.test(dimensionKey)) return { ok: false };
+      const operation = typeof payload.attempted_operation === "string"
+        ? payload.attempted_operation
+        : "p2_10_coverage_review_decision_accepted_internal_with_limitation";
 
       const metadata = {
         organization_id: organizationId,
         object_type: "claim",
         target_object_type: "claim",
         object_id: payloadClaimId,
-        operation: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "p2_10_coverage_review_decision_accepted_internal_with_limitation",
-        operation_type: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "p2_10_coverage_review_decision_accepted_internal_with_limitation",
+        operation,
+        operation_type: operation,
         validator_key: typeof payload.validator_key === "string" ? payload.validator_key : null,
         actor_type: actorContext?.actorType || "human",
         actor_user_id: actorContext?.actorUserId || null,
         request_id: actorContext?.requestId || null,
-        route: "p2_10_coverage_review_decision_internal_acceptance",
+        route: operation === "coverage_review_decision_accepted_funder_with_limitation"
+          ? "p2_10_coverage_review_decision_funder_acceptance"
+          : "p2_10_coverage_review_decision_internal_acceptance",
         created_at: typeof now === "string" ? now : new Date().toISOString(),
         metadata_only: true,
         contains_raw_file_content: false,

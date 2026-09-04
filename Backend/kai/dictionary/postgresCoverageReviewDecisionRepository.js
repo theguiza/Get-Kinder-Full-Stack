@@ -2,10 +2,12 @@ import { getScopedSourceCandidateByIdentity } from "../db/kaiIntakeQueries.js";
 import { evaluateClaimTraceabilityInTransaction } from "./postgresClaimTraceabilityRepository.js";
 import {
   COVERAGE_REVIEW_DECISION_ROLE,
+  COVERAGE_REVIEW_FUNDER_DECISION_TYPE,
   COVERAGE_REVIEW_DECISION_TYPE,
   computeCoverageReviewDecisionFingerprint,
   isCoverageReviewDimensionKey,
 } from "../validators/kaiCoverageReviewDecisionValidators.js";
+import { resolveEffectiveFunderAuthority } from "./postgresEffectiveFunderAuthorityResolver.js";
 
 /**
  * KAI P2-10 durable coverage authority: the owner-authorized
@@ -32,6 +34,7 @@ const COVERAGE_REVIEW_DECISION_RESULT_STATUS = Object.freeze({
 
 const COVERAGE_REVIEW_DECISION_AUDIT_CONTRACT = "p2_10_coverage_review_decision_v1";
 const COVERAGE_REVIEW_DECISION_AUDIT_OPERATION = "coverage_review_decision_accepted_internal_with_limitation";
+const COVERAGE_REVIEW_FUNDER_DECISION_AUDIT_OPERATION = "coverage_review_decision_accepted_funder_with_limitation";
 const COVERAGE_REVIEW_DECISION_VALIDATOR_KEY = "VAL-KAI-P2-10-001";
 
 function failure(code) {
@@ -133,7 +136,7 @@ async function readScopedUploadState(tx, organizationId, intakeFileId) {
   return rows[0]?.upload_state ?? null;
 }
 
-async function readExistingDecisionRow(tx, { organizationId, claimId, dimensionKey, stateFingerprint }) {
+async function readExistingDecisionRow(tx, { organizationId, claimId, dimensionKey, stateFingerprint, decision }) {
   const { rows } = await tx.query(
     `SELECT coverage_review_decision_id, organization_id, claim_id, dimension_key,
             decision, decided_by_role, created_at
@@ -141,19 +144,20 @@ async function readExistingDecisionRow(tx, { organizationId, claimId, dimensionK
       WHERE organization_id = $1::uuid
         AND claim_id = $2::uuid
         AND dimension_key = $3
-        AND state_fingerprint = $4`,
-    [organizationId, claimId, dimensionKey, stateFingerprint],
+        AND state_fingerprint = $4
+        AND decision = $5`,
+    [organizationId, claimId, dimensionKey, stateFingerprint, decision],
   );
   return rows[0] || null;
 }
 
-async function insertDecisionRow(tx, { organizationId, claimId, dimensionKey, stateFingerprint, actorUserId, actorRole, now }) {
+async function insertDecisionRow(tx, { organizationId, claimId, dimensionKey, stateFingerprint, decision, actorUserId, actorRole, now }) {
   const { rows } = await tx.query(
     `INSERT INTO kai.coverage_review_decisions (
        organization_id, claim_id, dimension_key, decision, state_fingerprint,
        decided_by, decided_by_role, created_by_type, created_at
      ) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6::uuid, $7, 'human', $8::timestamptz)
-     ON CONFLICT (organization_id, claim_id, dimension_key, state_fingerprint)
+     ON CONFLICT (organization_id, claim_id, dimension_key, state_fingerprint, decision)
        DO NOTHING
      RETURNING coverage_review_decision_id, organization_id, claim_id, dimension_key,
                decision, decided_by_role, created_at`,
@@ -161,7 +165,7 @@ async function insertDecisionRow(tx, { organizationId, claimId, dimensionKey, st
       organizationId,
       claimId,
       dimensionKey,
-      COVERAGE_REVIEW_DECISION_TYPE,
+      decision,
       stateFingerprint,
       actorUserId,
       actorRole,
@@ -186,130 +190,161 @@ function prepareRequiredAudit(metadataOnlyAudit, payload, tx) {
   return prepared;
 }
 
-export function createPostgresCoverageReviewDecisionRepository({ runInTransaction, evaluateClaimTraceability } = {}) {
-  return Object.freeze({
-    async acceptInternalCoverageLimitation(input) {
-      if (!isAcceptInternalCoverageLimitationInput(input)) return failure("validation_blocker");
-      const { organizationId, claimId, dimensionKey, actorUserId, actorRole, now, metadataOnlyAudit } = input;
-      const run = runInTransaction || (await resolveDefaultRunInTransaction());
-      const evaluate = evaluateClaimTraceability || evaluateClaimTraceabilityInTransaction;
+function operationForDecision(decision) {
+  return decision === COVERAGE_REVIEW_FUNDER_DECISION_TYPE
+    ? COVERAGE_REVIEW_FUNDER_DECISION_AUDIT_OPERATION
+    : COVERAGE_REVIEW_DECISION_AUDIT_OPERATION;
+}
 
-      try {
-        return await run(async (tx) => {
-          const traceability = await evaluate(tx, {
-            organizationId,
-            claimId,
-            requestedAudience: "internal",
-          });
-          if (!traceability.ok) return { ok: false, data: null, error: traceability.error };
+function requestedAudienceForDecision(decision) {
+  return decision === COVERAGE_REVIEW_FUNDER_DECISION_TYPE ? "funder" : "internal";
+}
 
-          const data = traceability.data;
-          if (
-            data.blockerCodes.includes("evidence_review_unresolved") ||
-            data.blockerCodes.includes("claim_review_unresolved")
-          ) {
-            return failure("human_review_incomplete");
-          }
+export function createPostgresCoverageReviewDecisionRepository({
+  runInTransaction,
+  evaluateClaimTraceability,
+  resolveFunderAuthority,
+} = {}) {
+  async function acceptCoverageLimitation(input, decision) {
+    if (!isAcceptInternalCoverageLimitationInput(input)) return failure("validation_blocker");
+    const { organizationId, claimId, dimensionKey, actorUserId, actorRole, now, metadataOnlyAudit } = input;
+    const run = runInTransaction || (await resolveDefaultRunInTransaction());
+    const evaluate = evaluateClaimTraceability || evaluateClaimTraceabilityInTransaction;
+    const resolveAuthority = resolveFunderAuthority || resolveEffectiveFunderAuthority;
+    const requestedAudience = requestedAudienceForDecision(decision);
+    const auditOperation = operationForDecision(decision);
 
-          const dimension = data.dimensions[dimensionKey];
-          if (!dimension) return failure("validation_blocker");
-          if (dimension.assessment_status !== "unresolved") return failure("dimension_not_unresolved");
+    try {
+      return await run(async (tx) => {
+        const traceability = await evaluate(tx, {
+          organizationId,
+          claimId,
+          requestedAudience,
+        });
+        if (!traceability.ok) return { ok: false, data: null, error: traceability.error };
 
-          const gapItem = data.gap_items.find((row) => row.dimension_key === dimensionKey);
-          if (!gapItem) return failure("conflict_current_state_changed");
+        const data = traceability.data;
+        if (
+          data.blockerCodes.includes("evidence_review_unresolved") ||
+          data.blockerCodes.includes("claim_review_unresolved")
+        ) {
+          return failure("human_review_incomplete");
+        }
 
-          const stateFingerprint = computeCoverageReviewDecisionFingerprint({
-            claimId,
-            dimensionKey,
-            evidenceItemId: data.evidence.evidence_item_id,
-            sourceVersionId: data.source_version.source_version_id,
-            dimensionAssessmentStatus: dimension.assessment_status,
-            dimensionValidatorKey: dimension.validator_key,
-            gapLogItemId: gapItem.gap_log_item_id,
-            gapAssessmentStatus: gapItem.assessment_status,
-            claimReviewStatus: data.claim_review.review_status,
-            evidenceReviewStatus: data.evidence.review_status,
-            claimStrength: data.claim.claim_strength,
-            supportStrength: data.evidence.support_strength,
-          });
+        if (decision === COVERAGE_REVIEW_FUNDER_DECISION_TYPE) {
+          const funderAuthority = await resolveAuthority(tx, { organizationId, claimId });
+          if (!funderAuthority?.permitted) return failure("validation_blocker");
+        }
 
-          const insertedRow = await insertDecisionRow(tx, {
+        const dimension = data.dimensions[dimensionKey];
+        if (!dimension) return failure("validation_blocker");
+        if (dimension.assessment_status !== "unresolved") return failure("dimension_not_unresolved");
+
+        const gapItem = data.gap_items.find((row) => row.dimension_key === dimensionKey);
+        if (!gapItem) return failure("conflict_current_state_changed");
+
+        const stateFingerprint = computeCoverageReviewDecisionFingerprint({
+          claimId,
+          dimensionKey,
+          evidenceItemId: data.evidence.evidence_item_id,
+          sourceVersionId: data.source_version.source_version_id,
+          dimensionAssessmentStatus: dimension.assessment_status,
+          dimensionValidatorKey: dimension.validator_key,
+          gapLogItemId: gapItem.gap_log_item_id,
+          gapAssessmentStatus: gapItem.assessment_status,
+          claimReviewStatus: data.claim_review.review_status,
+          evidenceReviewStatus: data.evidence.review_status,
+          claimStrength: data.claim.claim_strength,
+          supportStrength: data.evidence.support_strength,
+        });
+
+        const insertedRow = await insertDecisionRow(tx, {
+          organizationId,
+          claimId,
+          dimensionKey,
+          stateFingerprint,
+          decision,
+          actorUserId,
+          actorRole,
+          now,
+        });
+
+        if (!insertedRow) {
+          const existingRow = await readExistingDecisionRow(tx, {
             organizationId,
             claimId,
             dimensionKey,
             stateFingerprint,
-            actorUserId,
-            actorRole,
-            now,
+            decision,
           });
+          if (!existingRow) throw new MalformedResultRowError("coverage_review_decisions");
+          return success(toDecisionRecord(existingRow, true));
+        }
 
-          if (!insertedRow) {
-            const existingRow = await readExistingDecisionRow(tx, {
-              organizationId,
-              claimId,
-              dimensionKey,
-              stateFingerprint,
-            });
-            if (!existingRow) throw new MalformedResultRowError("coverage_review_decisions");
-            return success(toDecisionRecord(existingRow, true));
-          }
+        const candidateRow = await getScopedSourceCandidateByIdentity(
+          { organizationId, intakeSourceCandidateId: data.candidate.intake_source_candidate_id },
+          tx,
+        );
+        if (!candidateRow) throw new MalformedResultRowError("intake_source_candidates");
 
-          const candidateRow = await getScopedSourceCandidateByIdentity(
-            { organizationId, intakeSourceCandidateId: data.candidate.intake_source_candidate_id },
-            tx,
-          );
-          if (!candidateRow) throw new MalformedResultRowError("intake_source_candidates");
+        const uploadState = await readScopedUploadState(tx, organizationId, candidateRow.intake_file_id);
+        if (!uploadState) throw new MalformedResultRowError("intake_files");
 
-          const uploadState = await readScopedUploadState(tx, organizationId, candidateRow.intake_file_id);
-          if (!uploadState) throw new MalformedResultRowError("intake_files");
+        const preparedAudit = prepareRequiredAudit(metadataOnlyAudit, {
+          attempted_operation: auditOperation,
+          actor_type: "human",
+          actor_user_id: actorUserId,
+          contract: COVERAGE_REVIEW_DECISION_AUDIT_CONTRACT,
+          object_type: "claim",
+          claim_id: claimId,
+          dimension_key: dimensionKey,
+          decision,
+          decided_by_role: actorRole,
+          state_fingerprint: stateFingerprint,
+          replayed: false,
+          validator_key: COVERAGE_REVIEW_DECISION_VALIDATOR_KEY,
+        }, tx);
 
-          const preparedAudit = prepareRequiredAudit(metadataOnlyAudit, {
-            attempted_operation: COVERAGE_REVIEW_DECISION_AUDIT_OPERATION,
-            actor_type: "human",
-            actor_user_id: actorUserId,
-            contract: COVERAGE_REVIEW_DECISION_AUDIT_CONTRACT,
-            object_type: "claim",
-            claim_id: claimId,
-            dimension_key: dimensionKey,
-            decision: COVERAGE_REVIEW_DECISION_TYPE,
-            decided_by_role: actorRole,
-            state_fingerprint: stateFingerprint,
-            replayed: false,
-            validator_key: COVERAGE_REVIEW_DECISION_VALIDATOR_KEY,
-          }, tx);
+        await tx.query(
+          `INSERT INTO kai.upload_lifecycle_audit (
+             organization_id, intake_file_id, operation, from_state, to_state, outcome, metadata, created_at
+           )
+           VALUES ($1::uuid, $2::uuid, $3, $4, $4, 'success', $5::jsonb, $6::timestamptz)`,
+          [
+            organizationId,
+            candidateRow.intake_file_id,
+            auditOperation,
+            uploadState,
+            JSON.stringify({
+              metadata_only: true,
+              contract: COVERAGE_REVIEW_DECISION_AUDIT_CONTRACT,
+              claim_id: claimId,
+              dimension_key: dimensionKey,
+              decision,
+              decided_by_role: actorRole,
+              state_fingerprint: stateFingerprint,
+              replayed: false,
+              validator_key: COVERAGE_REVIEW_DECISION_VALIDATOR_KEY,
+            }),
+            now,
+          ],
+        );
 
-          await tx.query(
-            `INSERT INTO kai.upload_lifecycle_audit (
-               organization_id, intake_file_id, operation, from_state, to_state, outcome, metadata, created_at
-             )
-             VALUES ($1::uuid, $2::uuid, $3, $4, $4, 'success', $5::jsonb, $6::timestamptz)`,
-            [
-              organizationId,
-              candidateRow.intake_file_id,
-              COVERAGE_REVIEW_DECISION_AUDIT_OPERATION,
-              uploadState,
-              JSON.stringify({
-                metadata_only: true,
-                contract: COVERAGE_REVIEW_DECISION_AUDIT_CONTRACT,
-                claim_id: claimId,
-                dimension_key: dimensionKey,
-                decision: COVERAGE_REVIEW_DECISION_TYPE,
-                decided_by_role: actorRole,
-                state_fingerprint: stateFingerprint,
-                replayed: false,
-                validator_key: COVERAGE_REVIEW_DECISION_VALIDATOR_KEY,
-              }),
-              now,
-            ],
-          );
+        await preparedAudit.publish();
 
-          await preparedAudit.publish();
+        return success(toDecisionRecord(insertedRow, false));
+      });
+    } catch (error) {
+      return shapeError(error);
+    }
+  }
 
-          return success(toDecisionRecord(insertedRow, false));
-        });
-      } catch (error) {
-        return shapeError(error);
-      }
+  return Object.freeze({
+    async acceptInternalCoverageLimitation(input) {
+      return acceptCoverageLimitation(input, COVERAGE_REVIEW_DECISION_TYPE);
+    },
+    async acceptFunderCoverageLimitation(input) {
+      return acceptCoverageLimitation(input, COVERAGE_REVIEW_FUNDER_DECISION_TYPE);
     },
   });
 }
@@ -317,6 +352,7 @@ export function createPostgresCoverageReviewDecisionRepository({ runInTransactio
 export const __coverageReviewDecisionRepositoryContract = Object.freeze({
   COVERAGE_REVIEW_DECISION_AUDIT_CONTRACT,
   COVERAGE_REVIEW_DECISION_AUDIT_OPERATION,
+  COVERAGE_REVIEW_FUNDER_DECISION_AUDIT_OPERATION,
   COVERAGE_REVIEW_DECISION_VALIDATOR_KEY,
 });
 

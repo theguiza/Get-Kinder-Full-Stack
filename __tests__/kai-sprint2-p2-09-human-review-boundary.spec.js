@@ -557,7 +557,7 @@ test("P2-12 route source contains no SQL, imports no repository or database modu
   const source = readFileSync("Backend/kai/routes/sprint2IntakeApi.js", "utf8");
   const slice = source.slice(
     source.indexOf("let evidenceReviewServicePromise"),
-    source.indexOf("export default router;"),
+    source.indexOf("let coverageReviewDecisionServicePromise"),
   );
   assert.match(slice, /recordEvidenceReviewDecision/);
   assert.match(slice, /recordClaimReviewDecision/);
@@ -565,4 +565,53 @@ test("P2-12 route source contains no SQL, imports no repository or database modu
   assert.doesNotMatch(slice, /\b(?:SELECT|INSERT|UPDATE|DELETE)\b|\bpool\b|\bkaiDb\b|\brepository\b/i);
   assert.doesNotMatch(slice, /req\.user/);
   assert.doesNotMatch(slice, /p3-|kaiGeneratedContentDraft|eligibleClaimsForAudience|kaiAssistantClaimTraceabilityTool/i);
+});
+
+test("P2-10 coverage-review-decision routes (internal-acceptance and funder-acceptance) contain no SQL, import no repository or database module, and never reference req.user", () => {
+  const source = readFileSync("Backend/kai/routes/sprint2IntakeApi.js", "utf8");
+  const slice = source.slice(
+    source.indexOf("let coverageReviewDecisionServicePromise"),
+    source.indexOf("let clientFollowupCompletionServicePromise"),
+  );
+  assert.match(slice, /internal-acceptance/);
+  assert.match(slice, /funder-acceptance/);
+  assert.match(slice, /acceptInternalCoverageLimitation/);
+  assert.match(slice, /acceptFunderCoverageLimitation/);
+  assert.doesNotMatch(slice, /from\s+["'][^"']*(?:db|repository|postgres|kaiDb|kaiQueries|kaiReadModels)[^"']*["']/i);
+  assert.doesNotMatch(slice, /\b(?:SELECT|INSERT|UPDATE|DELETE)\b|\bpool\b|\bkaiDb\b|\brepository\b/i);
+  assert.doesNotMatch(slice, /req\.user/);
+});
+
+test("P2-11 client-followup routes contain no SQL, import no repository or database module, and never reference req.user", () => {
+  const source = readFileSync("Backend/kai/routes/sprint2IntakeApi.js", "utf8");
+  const slice = source.slice(
+    source.indexOf("let clientFollowupCompletionServicePromise"),
+    source.indexOf("let requirementAssessmentServicePromise"),
+  );
+  assert.match(slice, /completeClientFollowup/);
+  assert.match(slice, /listClientFollowupWorkflows/);
+  assert.doesNotMatch(slice, /from\s+["'][^"']*(?:db|repository|postgres|kaiDb|kaiQueries|kaiReadModels)[^"']*["']/i);
+  assert.doesNotMatch(slice, /\b(?:SELECT|INSERT|UPDATE|DELETE)\b|\bpool\b|\bkaiDb\b|\brepository\b/i);
+  assert.doesNotMatch(slice, /req\.user/);
+});
+
+test("requirement-assessment and review-queue routes (through end of file) contain no SQL, no direct repository/database-module import or access, and never reference req.user", () => {
+  const source = readFileSync("Backend/kai/routes/sprint2IntakeApi.js", "utf8");
+  const slice = source.slice(
+    source.indexOf("let requirementAssessmentServicePromise"),
+    source.indexOf("export default router;"),
+  );
+  assert.match(slice, /assessOrganizationRequirement/);
+  assert.match(slice, /getOrganizationRequirementAssessment/);
+  assert.match(slice, /listOrganizationRequirementsReadiness/);
+  assert.match(slice, /listOrganizationReviewQueue/);
+  // This slice's doc comments legitimately use the plain English word
+  // "repository" (e.g. "this repository supports", "service/repository") to
+  // describe the underlying data-repository concept, not a code import - so,
+  // unlike the sibling slices above, this check targets actual import
+  // statements and direct data-access calls rather than banning the bare word.
+  assert.doesNotMatch(slice, /from\s+["'][^"']*(?:db|repository|postgres|kaiDb|kaiQueries|kaiReadModels)[^"']*["']/i);
+  assert.doesNotMatch(slice, /require\(\s*["'][^"']*(?:db|repository|postgres|kaiDb|kaiQueries|kaiReadModels)[^"']*["']\s*\)/i);
+  assert.doesNotMatch(slice, /\b(?:SELECT|INSERT|UPDATE|DELETE)\b|\bpool\b|\bkaiDb\b|\bpg\.query\b|\bclient\.query\b|\bdb\.query\b/i);
+  assert.doesNotMatch(slice, /req\.user/);
 });

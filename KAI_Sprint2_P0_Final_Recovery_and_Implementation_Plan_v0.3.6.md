@@ -17295,6 +17295,149 @@ no deploy.
 
 STOP BEFORE IMPACT EVIDENCE LIBRARY.
 
+## P2-10 funder coverage-authority extension (implemented and verified 2026-09-04)
+
+Extended the existing P2-10 coverage-authority subsystem with an explicit
+funder-audience authority value while preserving the original internal
+meaning. The chosen representation is the smallest backward-compatible one:
+`kai.coverage_review_decisions.decision` now admits exactly
+`accepted_internal_with_limitation` and `accepted_funder_with_limitation`;
+no parallel audience/scope column was added, so authority cannot be
+double-encoded. The P2-10 identity constraint is widened to
+`(organization_id, claim_id, dimension_key, state_fingerprint, decision)`,
+allowing internal and funder authority to coexist for one exact current
+coverage fingerprint while keeping same-authority replay/idempotency
+constrained.
+
+The new write path is an explicit sibling operation:
+`POST /admin/organizations/:organizationId/claims/:claimId/coverage-dimensions/:dimensionKey/funder-acceptance`
+-> `acceptFunderCoverageLimitation` service -> P2-10 repository. It keeps the
+existing P2-10 human `gk_reviewer`, tenant, transaction, current-fingerprint,
+stale-state rejection, append-only insert, and same-transaction audit
+requirements, and additionally requires `resolveEffectiveFunderAuthority(...)`
+to return `permitted`. Missing, denied, ambiguous, or invalid Phase-5 funder
+authority fails closed before any coverage-decision mutation. It does not
+require reviewed LLM permission, P2-06 funder eligibility, or prior claim-review
+audience approval.
+
+P2-06 now evaluates P2-10 coverage acceptance by exact requested audience:
+internal authority clears only internal unresolved-coverage blocking; funder
+authority clears only funder unresolved-coverage blocking; public gets no P2-10
+coverage carve-out. Every carve-out still recomputes and matches the current
+coverage-state fingerprint, so stale authority clears nothing. P2-08 production
+code was not changed; the funder inclusion proof continues to pass through
+P2-06 delegation.
+
+Test-integrity correction (2026-09-04): the P2-12 route-boundary test in
+`__tests__/kai-sprint2-p2-09-human-review-boundary.spec.js` had been narrowed
+to a slice ending at `let coverageReviewDecisionServicePromise` (excluding the
+P2-10 internal/funder-acceptance routes, the P2-11 client-followup routes,
+and the requirement-assessment/review-queue routes near end of file from the
+"no SQL / no repository import / no req.user" proof), while its forbidden-
+pattern regex simultaneously dropped `\brepository\b` - an unjustified double
+loosening, since narrowing the slice alone already removed the two comment
+occurrences of the word "repository" that motivated dropping it. Fixed by
+restoring `\brepository\b` to the original P2-12 slice's forbidden-pattern
+regex (confirmed zero legitimate "repository" occurrences in that slice) and
+adding three new boundary tests in the same spec file that independently
+prove the same "no SQL, no repository/db-helper import or access, no
+req.user, delegates through the service layer" contract for: (1) the P2-10
+`internal-acceptance`/`funder-acceptance` coverage-review-decision routes,
+(2) the P2-11 client-followup routes, and (3) the requirement-assessment/
+review-queue routes through end of file - the last of which legitimately uses
+the plain-English word "repository" in doc comments (describing the
+requirement/read-model concept, not a code import), so that check targets
+actual `import`/`require` statements and direct `pg`/`db`/`client`.query
+calls rather than banning the bare word. No production route/service/
+repository/validator/migration file required a change - the current route
+source was already clean; only the tests were corrected. All 29 tests in the
+spec file pass, including the 3 new boundary tests.
+
+Decision-vocabulary verifier restored to an exact-set proof (2026-09-04):
+`scripts/kai-sprint2-p2-10-coverage-review-decision-verifier.sql`'s
+`decision_value_pinned` check previously used two `LIKE '%...%'` substring
+tests against `pg_get_constraintdef()`, which would keep passing even if a
+third value were later added to the CHECK constraint. Replaced with a check
+that parses the actual `... = ANY (ARRAY[...])` expression Postgres
+normalizes the migration's `CHECK (decision IN (...))` into, extracts every
+literal from that array, and asserts the resulting set is exactly
+`{accepted_internal_with_limitation, accepted_funder_with_limitation}` - both
+directions (all expected values present, no unexpected value present).
+Verified locally against a real ephemeral Postgres instance that this parsing
+correctly reports PASS for the current two-value constraint and would report
+FAIL if a third value were added. The production migration's constraint text
+itself needed no change - only the verifier's proof of it was weak.
+
+Verification evidence for this package (all freshly rerun 2026-09-04 with
+`DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel` set for every Node/npm
+invocation; each `verify:kai-sprint2-p2-*`/`verify:kai-sprint2-b1a-*` script
+spins up and tears down its own ephemeral local PostgreSQL instance via its
+established mechanism):
+  - `verify:kai-sprint2-p2-10-coverage-review-decision`: 40/40 passing
+    (includes the restored exact-two-value `decision_value_pinned` check and
+    the funder-authority integration scenarios below).
+  - `verify:kai-sprint2-p2-06-claim-traceability`: 13/13 passing.
+  - `verify:kai-sprint2-p2-08-eligible-claims-for-audience`: 16/16 passing.
+  - `verify:kai-sprint2-b1a-02-phase5-allowed-use-decision-ledger`: 34/34 passing.
+  - `verify:kai-sprint2-p2-09-human-review`: 35/35 passing.
+  - `verify:kai-sprint2-p2-11-client-followup-completion`: 28/28 passing.
+  - `verify:kai-sprint2-p2-12-human-review-decision-ledger`: 21/21 passing.
+  - `verify:kai-sprint2-p2-07-assistant-claim-traceability-tool`: 19/19 passing.
+  - `verify:kai-sprint2-p2-09-p2-10-p2-11-forward-reconciliation`: passing
+    (Production enum rollback / Unsupported production priority shape /
+    Contradictory P3 markers / P2-09 repaired / P2-11 repaired / P2-10
+    unchanged / later audit vocabulary preserved: all PASS).
+  - `verify:kai-sprint2-api-contract`: 67/67 passing.
+  - Focused boundary/source-level run (P2-10 boundary + integration, P2-06
+    missing-log regression, P2-07 boundary, P2-08 boundary, B1B effective-
+    funder-authority, corrected P2-09/P2-12 route boundaries, pass2 route
+    runtime, review-queue): 180/181 passing, 1 skipped (the integration
+    spec's own runner-owned-database guard test, which self-skips outside its
+    dedicated local-postgres runner), 0 failing.
+  - `npm run test:kai-sprint2` (full broad suite, freshly rerun): 2872
+    passing, 53 skipped, 7 failing (the exact same 4 pre-existing baseline
+    leaf-test identities as clean HEAD - "the child-file read model is
+    tenant-scoped, bounded, ordered, and uses the exclusive keyset predicate"
+    and "assembled production middleware and router enforce the batch-files
+    collection contract" in `__tests__/kai-sprint2-batch-files-route.spec.js`;
+    "the direct file-detail service returns exactly the 15-field allowlist"
+    and "assembled production middleware and router enforce the file-detail
+    contract" in `__tests__/kai-sprint2-file-detail-route.spec.js` - files
+    this package never touches). New regressions introduced by this package:
+    NONE. The pass count increased by exactly 3 over the prior active-tree
+    run (2869 -> 2872), matching the 3 new boundary tests added by the
+    test-integrity correction above.
+  - Critical funder-governance proof (TOOL_VERIFIED, executed as part of
+    `verify:kai-sprint2-p2-10-coverage-review-decision`'s integration spec
+    against its own ephemeral Postgres): "P2-10 end-to-end: partial
+    acceptance still leaves internal ineligible; full acceptance clears
+    coverage_dimension_unresolved completely ... funder/public stay
+    ineligible" (test 38) and "P2-10 funder coverage authority coexists with
+    internal, is idempotent by decision, and is audience-specific in
+    P2-06/P2-08" (test 40) both pass, together demonstrating: (a) valid
+    effective Phase-5 funder authority plus current funder P2-10 authority
+    for the unresolved blocking dimensions, with claim review still
+    `approved_audiences=["internal"]`, clears `coverage_dimension_unresolved`
+    while `claim_not_approved_for_requested_audience`/`audience_gate_closed`/
+    `requirement_authority_absent` remain - proving P2-10 funder authority
+    never silently bypasses the independent audience gate; (b) once claim
+    review is reapproved for `["internal","funder"]` and all other gates
+    clear, `requestedAudience=funder` reaches `eligible=true` with
+    `blockerCodes=[]`; and (c) P2-08 includes the claim only through existing
+    P2-06 delegation, with zero duplicate P2-08 policy.
+  - Clean-HEAD-vs-active-tree production-scope comparison (broad-suite
+    baseline identity, prior evidence from an earlier pass in this same
+    package, not rerun in this pass because nothing in this pass touched
+    production code): clean HEAD 2847 passing/11 failing (8 distinct)/53
+    skipped; active tree before this pass's test-integrity fix 2869
+    passing/7 failing (4 distinct, listed above)/53 skipped - confirming the
+    4 remaining failures are pre-existing baseline failures, not regressions
+    introduced by this package.
+
+No commit, push, deploy, production database access, production migration, real
+client data access, feature-flag change, P3 production change, or
+`00_KAI_CURRENT_STATE.md` update was performed for this package.
+
 ## P2-11 - client follow-up disposition -> first internally eligible claim (completed 2026-08-15)
 
 Closed P2-10's own recommended-follow-up gap: no route previously let anyone

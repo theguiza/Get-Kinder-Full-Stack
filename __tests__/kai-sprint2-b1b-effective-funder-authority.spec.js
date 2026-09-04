@@ -331,6 +331,18 @@ test("B1B: P2-06 - public audience remains unconditionally fail-closed (unchange
   assert.deepEqual(approval, { approved: false, gateOpen: false, authorityPresent: false });
 });
 
+test("P2-10/B1B wiring: coverage carve-out is exact-audience only and public has no carve-out", () => {
+  const source = readFileSync(
+    new URL("../Backend/kai/dictionary/postgresClaimTraceabilityRepository.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /row\.decision === COVERAGE_REVIEW_DECISION_TYPE/);
+  assert.match(source, /row\.decision === COVERAGE_REVIEW_FUNDER_DECISION_TYPE/);
+  assert.match(source, /requestedAudience === "internal" && internalAccepted/);
+  assert.match(source, /requestedAudience === "funder" && funderAccepted/);
+  assert.doesNotMatch(source, /requestedAudience === "public" && .*Accepted/);
+});
+
 test("B1B: no migration file was added or edited for this package", () => {
   // Sanity check against accidental schema changes: the resolver module
   // itself contains no DDL and imports no migration runner.

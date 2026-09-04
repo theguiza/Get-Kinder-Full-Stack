@@ -37,6 +37,7 @@ const chain = Object.freeze([
   "migrations/kai_sprint2_p3_13_export_review_completion.sql",
   "migrations/kai_sprint2_p3_16_export_candidate_foundation.sql",
   "migrations/kai_sprint2_p3_17_human_authority_decision_ledger.sql",
+  "migrations/kai_sprint2_p2_10_funder_coverage_authority.sql",
 ]);
 
 function run(command, args, context, options = {}) {
@@ -991,6 +992,7 @@ await withPostgres("Verified production topology", async (context) => {
     throw new Error("Verified production topology missing P3-01 metadata fingerprint");
   }
   psqlFile(context, "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.sql");
+  psqlFile(context, "migrations/kai_sprint2_p2_10_funder_coverage_authority.sql");
   runVerifier(context);
 
   const priorityAfter = assertProductionCompatibleEnumPriorityShape(
@@ -1010,7 +1012,11 @@ await withPostgres("Verified production topology", async (context) => {
     label: "Verified production topology post-state",
   });
 
-  const requiredAdditions = new Set(["client_followup_completed", "generated_content_draft_created"]);
+  const requiredAdditions = new Set([
+    "client_followup_completed",
+    "generated_content_draft_created",
+    "coverage_review_decision_accepted_funder_with_limitation",
+  ]);
   assertAuditOperationSet(context, new Set([...preOps, ...requiredAdditions]), "Verified production topology post-state");
   const p210After = captureP210Objects(context);
   const p301After = captureP301Objects(context);
@@ -1042,6 +1048,7 @@ await withPostgres("P2-11 verifier semantic corruption", async (context) => {
     context,
     "migrations/kai_sprint2_p2_11_client_followup_completion.sql",
   );
+  psqlFile(context, "migrations/kai_sprint2_p2_10_funder_coverage_authority.sql");
 
   runVerifier(context);
 
@@ -1146,6 +1153,7 @@ await withPostgres("Production enum rollback", async (context) => {
     context,
     "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.sql",
   );
+  psqlFile(context, "migrations/kai_sprint2_p2_10_funder_coverage_authority.sql");
 
   runVerifier(context);
 

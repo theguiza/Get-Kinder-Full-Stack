@@ -11,20 +11,46 @@ SELECT 'coverage_review_decisions_table_exists',
             THEN 'PASS' ELSE 'FAIL' END,
        'kai.coverage_review_decisions exists';
 
+-- decision_value_pinned proves the decision CHECK constraint's vocabulary is
+-- the EXACT closed two-value set {accepted_internal_with_limitation,
+-- accepted_funder_with_limitation} and no other value - not merely that
+-- those two substrings appear somewhere in the constraint text (a LIKE-based
+-- substring check would silently keep passing even if a third value were
+-- ever added to the constraint). It parses the actual
+-- pg_get_constraintdef() `= ANY (ARRAY[...])` expression Postgres normalizes
+-- an `IN (...)` CHECK into, extracts every literal in that array, and
+-- compares the resulting set against the expected two-element set for exact
+-- equality in both directions (every expected value present, no unexpected
+-- value present).
+WITH decision_constraint AS (
+  SELECT c.oid, pg_get_constraintdef(c.oid) AS def
+    FROM pg_constraint c
+    JOIN pg_class r ON r.oid = c.conrelid
+    JOIN pg_namespace n ON n.oid = r.relnamespace
+   WHERE n.nspname = 'kai'
+     AND r.relname = 'coverage_review_decisions'
+     AND c.conname = 'coverage_review_decisions_p2_10_decision_check'
+),
+decision_array_body AS (
+  SELECT regexp_replace(def, '^.*=\s*ANY\s*\(ARRAY\[(.*)\]\)\).*$', '\1') AS array_body
+    FROM decision_constraint
+   WHERE def ~ '=\s*ANY\s*\(ARRAY\['
+),
+decision_raw_values AS (
+  SELECT trim(both '''' from split_part(trim(elem), '::', 1)) AS val
+    FROM decision_array_body, unnest(string_to_array(array_body, ',')) AS elem
+),
+decision_values AS (
+  SELECT array_agg(val ORDER BY val) AS vals FROM decision_raw_values
+)
 INSERT INTO p2_10_results
 SELECT 'decision_value_pinned',
        CASE WHEN EXISTS (
-              SELECT 1
-                FROM pg_constraint c
-                JOIN pg_class r ON r.oid = c.conrelid
-                JOIN pg_namespace n ON n.oid = r.relnamespace
-               WHERE n.nspname = 'kai'
-                 AND r.relname = 'coverage_review_decisions'
-                 AND c.conname = 'coverage_review_decisions_p2_10_decision_check'
-                 AND pg_get_constraintdef(c.oid) LIKE '%accepted_internal_with_limitation%'
+              SELECT 1 FROM decision_values
+               WHERE vals = ARRAY['accepted_funder_with_limitation', 'accepted_internal_with_limitation']::text[]
             )
             THEN 'PASS' ELSE 'FAIL' END,
-       'decision column is pinned to the single accepted_internal_with_limitation value';
+       'decision column CHECK vocabulary is the exact closed two-value set {accepted_internal_with_limitation, accepted_funder_with_limitation} - no other value is permitted';
 
 INSERT INTO p2_10_results
 SELECT 'decided_by_role_pinned_to_gk_reviewer',
@@ -54,9 +80,10 @@ SELECT 'identity_fingerprint_unique',
                  AND r.relname = 'coverage_review_decisions'
                  AND c.conname = 'coverage_review_decisions_p2_10_identity_fingerprint_unique'
                  AND c.contype = 'u'
+                 AND pg_get_constraintdef(c.oid) LIKE '%organization_id, claim_id, dimension_key, state_fingerprint, decision%'
             )
             THEN 'PASS' ELSE 'FAIL' END,
-       '(organization_id, claim_id, dimension_key, state_fingerprint) is unique - exact replay is idempotent';
+       '(organization_id, claim_id, dimension_key, state_fingerprint, decision) is unique - exact replay is audience/authority-specific';
 
 INSERT INTO p2_10_results
 SELECT 'gap_log_item_fk_present',
@@ -98,9 +125,10 @@ SELECT 'audit_operation_allowed',
                  AND r.relname = 'upload_lifecycle_audit'
                  AND c.conname = 'upload_lifecycle_audit_gate_a_operation_check'
                  AND pg_get_constraintdef(c.oid) LIKE '%coverage_review_decision_accepted_internal_with_limitation%'
+                 AND pg_get_constraintdef(c.oid) LIKE '%coverage_review_decision_accepted_funder_with_limitation%'
             )
             THEN 'PASS' ELSE 'FAIL' END,
-       'upload_lifecycle_audit accepts the new P2-10 operation';
+       'upload_lifecycle_audit accepts both P2-10 internal and funder operations';
 
 INSERT INTO p2_10_results
 SELECT 'audit_metadata_contract_present',
@@ -127,6 +155,18 @@ SELECT 'no_raw_content_columns',
             )
             THEN 'PASS' ELSE 'FAIL' END,
        'kai.coverage_review_decisions persists no claim/evidence text, question text, raw values, or storage locations';
+
+INSERT INTO p2_10_results
+SELECT 'no_authority_scope_double_encoding',
+       CASE WHEN NOT EXISTS (
+              SELECT 1
+                FROM information_schema.columns
+               WHERE table_schema = 'kai'
+                 AND table_name = 'coverage_review_decisions'
+                 AND column_name IN ('audience', 'requested_audience', 'authority_scope', 'approved_audience')
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'coverage authority scope is encoded only by decision value - no contradictory audience/scope column exists';
 
 INSERT INTO p2_10_results
 SELECT 'no_funder_public_export_state_introduced',

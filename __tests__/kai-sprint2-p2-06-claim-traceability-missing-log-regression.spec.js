@@ -82,6 +82,7 @@ function realShapedRepositorySuccessDto() {
         assessment_status: "unresolved",
         validator_key: "VAL-KAI-P2-02-missingness",
         internal_limitation_accepted: false,
+        funder_limitation_accepted: false,
         blocks_requested_audience: true,
       },
     },

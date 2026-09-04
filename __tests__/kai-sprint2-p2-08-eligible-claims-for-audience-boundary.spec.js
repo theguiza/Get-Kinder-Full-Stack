@@ -96,13 +96,16 @@ function traceabilitySuccess(overrides = {}) {
       review_status: "approved",
       updated_at: "2026-08-22T20:00:00.000Z",
     },
-    candidate: { intake_source_candidate_id: id(801) },
+    evidence_review_decision: null,
+    claim_review_decision: null,
+    candidate: { intake_source_candidate_id: id(801), intake_sensitivity_profile_id: id(802) },
     promotion_decision: { intake_promotion_decision_id: id(901) },
     dimensions: {
       missingness: {
         assessment_status: "resolved",
         validator_key: "VAL-KAI-P2-02-missingness",
         internal_limitation_accepted: false,
+        funder_limitation_accepted: false,
         blocks_requested_audience: false,
       },
     },

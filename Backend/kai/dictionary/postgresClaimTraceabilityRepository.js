@@ -29,7 +29,11 @@ import {
 import { __claimGapFollowupRepositoryTestables } from "./postgresClaimGapFollowupRepository.js";
 import { __evidenceCoverageAssessmentRepositoryTestables } from "./postgresEvidenceCoverageAssessmentRepository.js";
 import { validateConflictGroupCompleteness } from "../validators/kaiConflictGroupValidators.js";
-import { computeCoverageReviewDecisionFingerprint } from "../validators/kaiCoverageReviewDecisionValidators.js";
+import {
+  COVERAGE_REVIEW_DECISION_TYPE,
+  COVERAGE_REVIEW_FUNDER_DECISION_TYPE,
+  computeCoverageReviewDecisionFingerprint,
+} from "../validators/kaiCoverageReviewDecisionValidators.js";
 import {
   findCurrentEvidenceReviewDecision,
   findCurrentClaimReviewDecision,
@@ -228,7 +232,7 @@ async function readFollowupQueueRows(tx, { organizationId, followupIds }) {
 
 async function readCoverageReviewDecisions(tx, { organizationId, claimId }) {
   const { rows } = await tx.query(
-    `SELECT dimension_key, state_fingerprint
+    `SELECT dimension_key, decision, state_fingerprint
        FROM kai.coverage_review_decisions
       WHERE organization_id = $1::uuid
         AND claim_id = $2::uuid`,
@@ -327,16 +331,17 @@ function orderedBlockers(blockers) {
   return BLOCKER_ORDER.filter((code) => blockers.has(code));
 }
 
-function safeDimensionStatuses(dimensions, internalLimitationAcceptance) {
+function safeDimensionStatuses(dimensions, limitationAcceptance) {
   return Object.fromEntries(
     DIMENSION_KEYS.map((dimensionKey) => {
-      const acceptance = internalLimitationAcceptance[dimensionKey];
+      const acceptance = limitationAcceptance[dimensionKey];
       return [
         dimensionKey,
         {
           assessment_status: dimensions[dimensionKey].evidence.assessment_status,
           validator_key: dimensions[dimensionKey].validator_key,
-          internal_limitation_accepted: acceptance.accepted,
+          internal_limitation_accepted: acceptance.internalAccepted,
+          funder_limitation_accepted: acceptance.funderAccepted,
           blocks_requested_audience: acceptance.blocksRequestedAudience,
         },
       ];
@@ -604,11 +609,12 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
   // of requestedAudience so the traceability DTO can always disclose it
   // truthfully - only its effect on blocking is audience-gated below.
   const coverageReviewDecisionRows = await readCoverageReviewDecisions(tx, { organizationId, claimId });
-  const internalLimitationAcceptance = Object.fromEntries(
+  const limitationAcceptance = Object.fromEntries(
     DIMENSION_KEYS.map((dimensionKey) => {
       const dimension = dimensions[dimensionKey];
       const gapItem = gapRows.find((row) => row.dimension_key === dimensionKey) || null;
-      let accepted = false;
+      let internalAccepted = false;
+      let funderAccepted = false;
       if (gapItem) {
         const expectedFingerprint = computeCoverageReviewDecisionFingerprint({
           claimId,
@@ -624,14 +630,24 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
           claimStrength: claimRow.claim_strength,
           supportStrength: evidenceItemRow.support_strength,
         });
-        accepted = coverageReviewDecisionRows.some(
-          (row) => row.dimension_key === dimensionKey && row.state_fingerprint === expectedFingerprint,
-        );
+        internalAccepted = coverageReviewDecisionRows.some((row) => (
+          row.dimension_key === dimensionKey
+          && row.state_fingerprint === expectedFingerprint
+          && row.decision === COVERAGE_REVIEW_DECISION_TYPE
+        ));
+        funderAccepted = coverageReviewDecisionRows.some((row) => (
+          row.dimension_key === dimensionKey
+          && row.state_fingerprint === expectedFingerprint
+          && row.decision === COVERAGE_REVIEW_FUNDER_DECISION_TYPE
+        ));
       }
+      const currentAudienceAccepted =
+        (requestedAudience === "internal" && internalAccepted)
+        || (requestedAudience === "funder" && funderAccepted);
       const blocksRequestedAudience =
         dimension.evidence.assessment_status === "unresolved" &&
-        !(requestedAudience === "internal" && accepted);
-      return [dimensionKey, { accepted, blocksRequestedAudience }];
+        !currentAudienceAccepted;
+      return [dimensionKey, { internalAccepted, funderAccepted, blocksRequestedAudience }];
     }),
   );
 
@@ -687,7 +703,7 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
     affectedObjectIds.add(evidenceItemRow.evidence_item_id);
   }
   for (const dimensionKey of DIMENSION_KEYS) {
-    if (internalLimitationAcceptance[dimensionKey].blocksRequestedAudience) {
+    if (limitationAcceptance[dimensionKey].blocksRequestedAudience) {
       addOrderedBlocker(blockers, "coverage_dimension_unresolved");
       affectedDimensionKeys.add(dimensionKey);
     }
@@ -761,7 +777,7 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
       intake_sensitivity_profile_id: candidateRow.intake_sensitivity_profile_id,
     },
     promotion_decision: { intake_promotion_decision_id: decisionRow.intake_promotion_decision_id },
-    dimensions: safeDimensionStatuses(dimensions, internalLimitationAcceptance),
+    dimensions: safeDimensionStatuses(dimensions, limitationAcceptance),
     gap_items: safeGapRows(gapRows),
     client_followup_workflows: safeFollowupRows(followupRows, followupQueueRows),
     potential_conflict_groups: potentialConflictGroups,

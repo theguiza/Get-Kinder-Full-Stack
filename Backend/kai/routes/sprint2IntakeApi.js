@@ -2350,7 +2350,10 @@ router.post(
 
 let coverageReviewDecisionServicePromise = null;
 async function getCoverageReviewDecisionService() {
-  if (intakeServiceOverride?.acceptInternalCoverageLimitation) return intakeServiceOverride;
+  if (
+    intakeServiceOverride?.acceptInternalCoverageLimitation
+    || intakeServiceOverride?.acceptFunderCoverageLimitation
+  ) return intakeServiceOverride;
   coverageReviewDecisionServicePromise ||= import("../services/kaiCoverageReviewDecisionService.js");
   return coverageReviewDecisionServicePromise;
 }
@@ -2422,6 +2425,34 @@ router.post(
     return invokeService(res, async () => {
       const service = await getCoverageReviewDecisionService();
       return service.acceptInternalCoverageLimitation({
+        organizationId: identifiers.organizationId,
+        claimId: identifiers.claimId,
+        dimensionKey: identifiers.dimensionKey,
+        actorContext,
+        now,
+      }, {
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForCoverageReviewDecision({
+          organizationId: identifiers.organizationId,
+          claimId: identifiers.claimId,
+          actorContext,
+          now,
+        }),
+      });
+    }, 201);
+  },
+);
+
+router.post(
+  "/admin/organizations/:organizationId/claims/:claimId/coverage-dimensions/:dimensionKey/funder-acceptance",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const identifiers = validateCoverageReviewDecisionRequestOrSend(req, res);
+    if (!identifiers) return;
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getCoverageReviewDecisionService();
+      return service.acceptFunderCoverageLimitation({
         organizationId: identifiers.organizationId,
         claimId: identifiers.claimId,
         dimensionKey: identifiers.dimensionKey,

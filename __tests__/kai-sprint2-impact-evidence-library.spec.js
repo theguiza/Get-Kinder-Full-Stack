@@ -726,6 +726,7 @@ test("Impact Evidence Library frontend projections compose P2-08 and P2-06 witho
         assessment_status: "unresolved",
         validator_key: "definition_clarity",
         internal_limitation_accepted: true,
+        funder_limitation_accepted: false,
         blocks_requested_audience: false,
       },
     },
