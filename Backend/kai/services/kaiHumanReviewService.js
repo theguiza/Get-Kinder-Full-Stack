@@ -264,7 +264,13 @@ export async function recordClaimReviewDecision(input, dependencies = {}) {
   });
 
   if (!result.ok) {
-    return buildKaiError(result.error.code, { status: result.error.status });
+    // The repository's governance-ceiling rejection is an internal/domain
+    // reason, not a public KAI API code (Backend Contract taxonomy: the
+    // claim-review transition itself is permitted, so this is a validator
+    // blocker, not a state-transition denial or a system error).
+    const publicCode =
+      result.error.code === "governance_ceiling_exceeded" ? "validation_blocker" : result.error.code;
+    return buildKaiError(publicCode, { status: result.error.status });
   }
   return { ok: true, data: result.data, error: null };
 }

@@ -387,7 +387,8 @@ async function runP212IntegrationSuite() {
         { env: { KAI_SPRINT2_ENABLED: "true" }, humanReviewRepository: humanReviewRepo, metadataOnlyAudit: auditRecorder() },
       );
       assert.equal(result.ok, false, `expected governance ceiling failure for audiences ${JSON.stringify(audiences)}`);
-      assert.equal(result.error.code, "governance_ceiling_exceeded");
+      assert.equal(result.error.code, "validation_blocker");
+      assert.equal(result.error.status, 422);
     }
 
     const afterCount = await query(`SELECT count(*)::int AS count FROM kai.claim_review_decisions WHERE organization_id = $1::uuid AND claim_id = $2::uuid`, [ORG, beta.claimId]);

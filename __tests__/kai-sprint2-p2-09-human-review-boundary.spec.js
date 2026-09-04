@@ -37,6 +37,21 @@ function stubMetadataOnlyAudit() {
   return { prepareMetadataOnlyAudit() { return { ok: true, async publish() {} }; } };
 }
 
+function fakeRes() {
+  return {
+    statusCode: null,
+    body: null,
+    status(code) {
+      this.statusCode = code;
+      return this;
+    },
+    json(body) {
+      this.body = body;
+      return this;
+    },
+  };
+}
+
 test("P2-12 allowed roles are gk_reviewer and gk_admin only - never gk_operator, client, or a generic system actor", () => {
   assert.deepEqual([...__humanReviewServiceContract.RECORD_EVIDENCE_REVIEW_DECISION_ALLOWED_ROLES].sort(), ["gk_admin", "gk_reviewer"]);
   assert.deepEqual([...__humanReviewServiceContract.RECORD_CLAIM_REVIEW_DECISION_ALLOWED_ROLES].sort(), ["gk_admin", "gk_reviewer"]);
@@ -277,7 +292,7 @@ test("P2-12 recordEvidenceReviewDecision requires non-empty limitation_notes iff
   assert.equal(unexpected.error.code, "validation_blocker");
 });
 
-test("P2-12 recordClaimReviewDecision governance ceiling: requesting funder/public in approvedAudiences is delegated to the repository, which fails closed atomically", async () => {
+test("P2-12 recordClaimReviewDecision governance ceiling: requesting funder/public in approvedAudiences is delegated to the repository, which fails closed atomically, and the service normalizes the internal governance_ceiling_exceeded reason to the public validation_blocker/422 contract", async () => {
   const result = await recordClaimReviewDecision(
     { organizationId: ORG, claimId: CLAIM, reviewQueueItemId: QUEUE, expectedUpdatedAt: NOW, decision: "approved", approvedAudiences: ["internal", "funder"], actorContext: reviewerActor, now: NOW },
     {
@@ -292,8 +307,75 @@ test("P2-12 recordClaimReviewDecision governance ceiling: requesting funder/publ
     },
   );
   assert.equal(result.ok, false);
-  assert.equal(result.error.code, "governance_ceiling_exceeded");
+  assert.equal(result.error.code, "validation_blocker");
   assert.equal(result.error.status, 422);
+  assert.notEqual(result.error.code, "governance_ceiling_exceeded");
+  assert.notEqual(result.error.code, "system_error");
+  assert.notEqual(result.error.status, 500);
+});
+
+test("P2-12 recordClaimReviewDecision governance-ceiling normalization crosses the public HTTP boundary as validation_blocker/422, never system_error/500", async () => {
+  const serviceResult = { ok: false, data: null, error: { code: "governance_ceiling_exceeded", status: 422 } };
+  const publicResult = await recordClaimReviewDecision(
+    { organizationId: ORG, claimId: CLAIM, reviewQueueItemId: QUEUE, expectedUpdatedAt: NOW, decision: "approved", approvedAudiences: ["internal", "public"], actorContext: reviewerActor, now: NOW },
+    {
+      env: enabledEnv,
+      humanReviewRepository: {
+        async recordClaimReviewDecision() {
+          return serviceResult;
+        },
+      },
+      metadataOnlyAudit: stubMetadataOnlyAudit(),
+    },
+  );
+
+  const res = fakeRes();
+  intakeRouteTestables.sendServiceResult(res, publicResult);
+  assert.equal(res.statusCode, 422);
+  assert.equal(res.body.ok, false);
+  assert.equal(res.body.error.code, "validation_blocker");
+  assert.equal(res.body.error.status, 422);
+  assert.notEqual(res.statusCode, 500);
+  assert.notEqual(res.body.error.code, "system_error");
+});
+
+test("P2-12 sendServiceResult unknown-error fail-safe is unchanged: a genuinely unknown internal code still maps to system_error/500", async () => {
+  const res = fakeRes();
+  intakeRouteTestables.sendServiceResult(res, { ok: false, data: null, error: { code: "some_unrecognized_internal_code", status: 422 } });
+  assert.equal(res.statusCode, 500);
+  assert.equal(res.body.error.code, "system_error");
+});
+
+test("P2-12 adjacent structured service errors (not_found, conflict_current_state_changed) are unaffected by the governance-ceiling normalization", async () => {
+  const notFound = await recordClaimReviewDecision(
+    { organizationId: ORG, claimId: CLAIM, reviewQueueItemId: QUEUE, expectedUpdatedAt: NOW, decision: "approved", approvedAudiences: ["internal"], actorContext: reviewerActor, now: NOW },
+    {
+      env: enabledEnv,
+      humanReviewRepository: {
+        async recordClaimReviewDecision() {
+          return { ok: false, data: null, error: { code: "not_found", status: 404 } };
+        },
+      },
+      metadataOnlyAudit: stubMetadataOnlyAudit(),
+    },
+  );
+  assert.equal(notFound.error.code, "not_found");
+  assert.equal(notFound.error.status, 404);
+
+  const conflict = await recordClaimReviewDecision(
+    { organizationId: ORG, claimId: CLAIM, reviewQueueItemId: QUEUE, expectedUpdatedAt: NOW, decision: "approved", approvedAudiences: ["internal"], actorContext: reviewerActor, now: NOW },
+    {
+      env: enabledEnv,
+      humanReviewRepository: {
+        async recordClaimReviewDecision() {
+          return { ok: false, data: null, error: { code: "conflict_current_state_changed", status: 409 } };
+        },
+      },
+      metadataOnlyAudit: stubMetadataOnlyAudit(),
+    },
+  );
+  assert.equal(conflict.error.code, "conflict_current_state_changed");
+  assert.equal(conflict.error.status, 409);
 });
 
 test("P2-12 recordEvidenceReviewDecision delegates to the injected repository exactly once with the derived actor/tenant identity and decision", async () => {
