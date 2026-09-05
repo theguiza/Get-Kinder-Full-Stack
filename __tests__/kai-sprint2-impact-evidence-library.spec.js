@@ -21,6 +21,7 @@ import {
 import { listClaimLibraryReviewCandidates } from "../Backend/kai/db/kaiClaimLibraryReadModels.js";
 import {
   annotateGovernedAvailability,
+  blockerDisplayText,
   canCompleteClaimReview,
   canCompleteEvidenceReview,
   claimReviewEvidencePrerequisiteSatisfied,
@@ -1731,6 +1732,30 @@ test("reviewQueueBlockerActionability: an unrecognized/genuine hard-blocker code
     }),
     "BLOCKED",
   );
+});
+
+test("requirement_authority_absent display explains funder audience authority without relabeling the blocker or implying Funder Requirements authority", () => {
+  const explanation = blockerDisplayText("requirement_authority_absent", "funder");
+  assert.equal(
+    explanation,
+    "Funder audience authority is not currently established: requires current claim-review approval for funder use and effective Phase-5 funder authority.",
+  );
+  assert.equal(blockerDisplayText("requirement_authority_absent", "internal"), "requirement_authority_absent");
+  assert.equal(blockerDisplayText("coverage_dimension_unresolved", "funder"), "coverage_dimension_unresolved");
+  assert.doesNotMatch(explanation, /Funder Requirements/i);
+
+  const traceability = projectTraceability({
+    requestedAudience: "funder",
+    eligible: false,
+    blockerCodes: ["requirement_authority_absent"],
+    dimensions: {},
+  });
+  assert.deepEqual(traceability.blockerCodes, ["requirement_authority_absent"]);
+
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+  assert.match(uiSource, /blockerDisplayText\(blockerCode, item\.requestedAudience \|\| audience\)/);
+  assert.match(uiSource, /blockerDisplayText\(\s*blockerCode,\s*traceability\.requestedAudience \|\| audience,/);
+  assert.doesNotMatch(uiSource, /traceability\.blockerCodes\.join\(", "\)/);
 });
 
 // A1C-1: this repo has no DOM-rendering test harness for this component, so

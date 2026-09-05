@@ -78,6 +78,7 @@ import {
   restrictedPermissionEligible,
   publicUseAllowedEligible,
   buildSensitivityDecisionRequestBody,
+  blockerDisplayText,
   projectSensitivityDetail,
 } from "./impactEvidenceLibraryLogic.js";
 import { organizationsPath } from "./kaiWebIntakeLogic.js";
@@ -1212,7 +1213,7 @@ export default function ImpactEvidenceLibrary() {
                   return (
                     <li key={blockerCode} className="small d-flex align-items-center gap-2 mt-1">
                       <span className={`badge ${badgeClass}`}>{actionability}</span>
-                      <span>{blockerCode}</span>
+                      <span>{blockerDisplayText(blockerCode, item.requestedAudience || audience)}</span>
                     </li>
                   );
                 })}
@@ -1399,7 +1400,15 @@ export default function ImpactEvidenceLibrary() {
                 <ValueRow label="Evidence sensitivity" value={traceability.evidence?.sensitivity_level || "unknown"} />
                 <ValueRow label="Source" value={traceability.source?.source_id} />
                 <ValueRow label="Source version" value={traceability.sourceVersion?.source_version_id} />
-                <ValueRow label="Blockers / limitations" value={traceability.blockerCodes.length ? traceability.blockerCodes.join(", ") : "none"} />
+                <ValueRow
+                  label="Blockers / limitations"
+                  value={traceability.blockerCodes.length
+                    ? traceability.blockerCodes.map((blockerCode) => blockerDisplayText(
+                      blockerCode,
+                      traceability.requestedAudience || audience,
+                    )).join(", ")
+                    : "none"}
+                />
 
                 <h6 className="mt-3">Limitations</h6>
                 {traceability.dimensions.filter((dimension) => dimension.displayStatus === "known_limitation").length === 0 ? (

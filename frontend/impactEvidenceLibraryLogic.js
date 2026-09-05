@@ -177,6 +177,13 @@ export function reviewQueueBlockerActionability(blockerCode, item) {
   return "BLOCKED";
 }
 
+export function blockerDisplayText(blockerCode, requestedAudience) {
+  if (blockerCode === "requirement_authority_absent" && requestedAudience === "funder") {
+    return "Funder audience authority is not currently established: requires current claim-review approval for funder use and effective Phase-5 funder authority.";
+  }
+  return blockerCode;
+}
+
 // KAI Review Queue: composes the EXISTING Phase-5 sensitivity/allowed-use
 // review state (already fetched via sensitivityCapabilitiesPath/
 // sensitivityReviewQueuePath, projected via projectSensitivityReviewQueueItems)
