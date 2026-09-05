@@ -15,6 +15,7 @@ const ORG_B = "00000000-0000-4000-8000-00000000000b";
 const ENGAGEMENT_A = "10000000-0000-4000-8000-00000000000a";
 const enabledEnv = Object.freeze({ KAI_SPRINT2_ENABLED: "true" });
 const kaiQueriesSource = readFileSync("Backend/kai/db/kaiQueries.js", "utf8");
+const requirementAssessmentRepositorySource = readFileSync("Backend/kai/dictionary/postgresRequirementAssessmentRepository.js", "utf8");
 
 const gkOperatorActor = Object.freeze({
   actorType: "human",
@@ -184,6 +185,10 @@ test("engagement applicability reader is organization scoped and read-only over 
   const reader = kaiQueriesSource.match(/export async function listEngagementRequirementSetsForOrganization[\s\S]*?^}/m)?.[0];
   assert.ok(reader);
   assert.match(reader, /FROM kai\.engagement_requirement_sets ers/);
+  assert.match(reader, /ers\.reviewed_by::text AS reviewed_by/);
+  assert.match(reader, /ers\.applicability_effective_state/);
+  assert.match(reader, /ers\.target_context_identity/);
+  assert.match(reader, /successor\.engagement_requirement_set_id::text AS superseded_by_engagement_requirement_set_id/);
   assert.match(reader, /WHERE ers\.organization_id = \$1\s+AND ers\.engagement_id = \$2/);
   assert.doesNotMatch(reader, /\bINSERT\b|\bUPDATE\b|\bDELETE\b/);
 });
@@ -198,6 +203,14 @@ test("package 1 read foundation adds no schema, applicability write, requirement
   assert.doesNotMatch(packageSources, /INSERT INTO kai\.engagement_requirement_sets|UPDATE kai\.engagement_requirement_sets|DELETE FROM kai\.engagement_requirement_sets/);
   assert.doesNotMatch(packageSources, /INSERT INTO kai\.requirements|UPDATE kai\.requirements|DELETE FROM kai\.requirements/);
   assert.doesNotMatch(packageSources, /INSERT INTO kai\.requirement_assessments|UPDATE kai\.requirement_assessments|DELETE FROM kai\.requirement_assessments/);
+});
+
+test("Package 2A does not create engagement-specific requirement assessments", () => {
+  const insertAssessmentRow = requirementAssessmentRepositorySource.match(/async function insertAssessmentRow[\s\S]*?^}/m)?.[0];
+  assert.ok(insertAssessmentRow);
+  assert.match(insertAssessmentRow, /organization_id, engagement_id, requirement_id/);
+  assert.match(insertAssessmentRow, /VALUES \(\$1::uuid, NULL, \$2::uuid/);
+  assert.match(insertAssessmentRow, /WHERE engagement_id IS NULL/);
 });
 
 test("valid engagement target write updates only the controlled project_metadata namespace and writes required audit in the same transaction", async () => {
@@ -401,7 +414,7 @@ test("classifier state 2: target_selected_no_authoritative_requirement_set exclu
   assert.equal(harness.calls.applicabilityReads.length, 0);
 });
 
-test("classifier state 2: target dimensions with no persistence mapping fail closed instead of matching a broader set", async () => {
+test("classifier state 3: target dimensions can be matched through Package 2A approved target-context identity", async () => {
   const harness = createClassifierHarness();
   const result = await classifyEngagementFunderRequirementsState(
     { organizationId: ORG_A, engagementId: ENGAGEMENT_A, actorContext: clientAdminActor },
@@ -409,15 +422,9 @@ test("classifier state 2: target dimensions with no persistence mapping fail clo
   );
 
   assert.equal(result.ok, true);
-  assert.equal(result.data.state, "target_selected_no_authoritative_requirement_set");
-  assert.deepEqual(result.data.authoritative_requirement_sets, []);
-  assert.deepEqual(result.data.missing_persistence, [
-    "requirement_set_target_grant_program_identity",
-    "requirement_set_target_report_identity",
-    "requirement_set_target_reporting_template_identity",
-    "requirement_set_effective_reporting_period",
-  ]);
-  assert.equal(harness.calls.authorityReads.length, 0);
+  assert.equal(result.data.state, "authoritative_requirement_set_not_applicable");
+  assert.equal(result.data.authoritative_requirement_sets.length, 1);
+  assert.equal(harness.calls.authorityReads.length, 1);
 });
 
 test("classifier state 3: authoritative_requirement_set_not_applicable is proven when active external authority exists but no current applicability can be proven", async () => {
@@ -494,6 +501,162 @@ test("mere applicability-row existence does not establish reviewed/current appli
     "superseded_by_or_replaced_by",
     "target_snapshot_at_approval",
   ]);
+});
+
+test("Package 2A proposed unreviewed applicability does not qualify", async () => {
+  const target = {
+    target_funder_id: validTarget.target_funder_id,
+    target_framework: validTarget.target_framework,
+  };
+  const harness = createClassifierHarness({
+    target,
+    applicabilityRows: [{
+      engagement_requirement_set_id: "50000000-0000-4000-8000-000000000006",
+      organization_id: ORG_A,
+      engagement_id: ENGAGEMENT_A,
+      requirement_set_id: activeExternalRequirementSet.requirement_set_id,
+      applicability_status: "proposed",
+      applicability_effective_state: "pending_review",
+      reviewed_by: null,
+      reviewed_by_role: null,
+      reviewed_at: null,
+      superseded_by_engagement_requirement_set_id: null,
+      target_context_identity: null,
+      created_by_type: "human",
+      created_at: "2026-09-05T00:00:00.000Z",
+      ...activeExternalRequirementSet,
+    }],
+  });
+  const result = await classifyEngagementFunderRequirementsState(
+    { organizationId: ORG_A, engagementId: ENGAGEMENT_A, actorContext: gkOperatorActor },
+    harness.dependencies,
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.state, "authoritative_requirement_set_not_applicable");
+  assert.equal(result.data.applicability_rows[0].applicability_conclusion, "NOT_CONFIRMED");
+  assert.deepEqual(result.data.applicable_requirement_sets, []);
+});
+
+test("Package 2A reviewed non-current and retired applicability do not qualify", async () => {
+  const target = {
+    target_funder_id: validTarget.target_funder_id,
+    target_framework: validTarget.target_framework,
+  };
+  for (const row of [
+    {
+      engagement_requirement_set_id: "50000000-0000-4000-8000-000000000007",
+      applicability_status: "confirmed",
+      applicability_effective_state: "not_applicable",
+      superseded_by_engagement_requirement_set_id: null,
+    },
+    {
+      engagement_requirement_set_id: "50000000-0000-4000-8000-000000000008",
+      applicability_status: "retired",
+      applicability_effective_state: "retired",
+      superseded_by_engagement_requirement_set_id: null,
+    },
+  ]) {
+    const harness = createClassifierHarness({
+      target,
+      applicabilityRows: [{
+        organization_id: ORG_A,
+        engagement_id: ENGAGEMENT_A,
+        requirement_set_id: activeExternalRequirementSet.requirement_set_id,
+        reviewed_by: gkOperatorActor.actorUserId,
+        reviewed_by_role: "gk_operator",
+        reviewed_at: "2026-09-05T00:00:00.000Z",
+        target_context_identity: target,
+        created_by_type: "human",
+        created_at: "2026-09-05T00:00:00.000Z",
+        ...activeExternalRequirementSet,
+        ...row,
+      }],
+    });
+    const result = await classifyEngagementFunderRequirementsState(
+      { organizationId: ORG_A, engagementId: ENGAGEMENT_A, actorContext: gkOperatorActor },
+      harness.dependencies,
+    );
+
+    assert.equal(result.ok, true, row.applicability_effective_state);
+    assert.equal(result.data.state, "authoritative_requirement_set_not_applicable", row.applicability_effective_state);
+    assert.notEqual(result.data.applicability_rows[0].applicability_conclusion, "CURRENT_APPLICABLE");
+    assert.deepEqual(result.data.applicable_requirement_sets, []);
+  }
+});
+
+test("Package 2A reviewed current applicable row establishes applicable_requirement_set_assessment_not_available", async () => {
+  const target = {
+    target_funder_id: validTarget.target_funder_id,
+    target_framework: validTarget.target_framework,
+  };
+  const harness = createClassifierHarness({
+    target,
+    applicabilityRows: [{
+      engagement_requirement_set_id: "50000000-0000-4000-8000-000000000003",
+      organization_id: ORG_A,
+      engagement_id: ENGAGEMENT_A,
+      requirement_set_id: activeExternalRequirementSet.requirement_set_id,
+      applicability_status: "confirmed",
+      applicability_effective_state: "applicable",
+      reviewed_by: gkOperatorActor.actorUserId,
+      reviewed_by_role: "gk_operator",
+      reviewed_at: "2026-09-05T00:00:00.000Z",
+      supersedes_engagement_requirement_set_id: null,
+      superseded_by_engagement_requirement_set_id: null,
+      target_context_identity: target,
+      created_by_type: "human",
+      created_at: "2026-09-05T00:00:00.000Z",
+      ...activeExternalRequirementSet,
+    }],
+  });
+  const result = await classifyEngagementFunderRequirementsState(
+    { organizationId: ORG_A, engagementId: ENGAGEMENT_A, actorContext: gkOperatorActor },
+    harness.dependencies,
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.state, "applicable_requirement_set_assessment_not_available");
+  assert.equal(result.data.applicability_conclusion, "CURRENT_APPLICABLE");
+  assert.equal(result.data.applicability_rows[0].applicability_conclusion, "CURRENT_APPLICABLE");
+  assert.equal(result.data.applicable_requirement_sets[0].requirement_set_id, activeExternalRequirementSet.requirement_set_id);
+  assert.deepEqual(result.data.not_confirmed_states, []);
+  assert.deepEqual(result.data.missing_persistence, []);
+});
+
+test("Package 2A superseded or stale-target rows do not establish current applicability", async () => {
+  const target = {
+    target_funder_id: validTarget.target_funder_id,
+    target_framework: validTarget.target_framework,
+  };
+  const harness = createClassifierHarness({
+    target,
+    applicabilityRows: [{
+      engagement_requirement_set_id: "50000000-0000-4000-8000-000000000004",
+      organization_id: ORG_A,
+      engagement_id: ENGAGEMENT_A,
+      requirement_set_id: activeExternalRequirementSet.requirement_set_id,
+      applicability_status: "confirmed",
+      applicability_effective_state: "applicable",
+      reviewed_by: gkOperatorActor.actorUserId,
+      reviewed_by_role: "gk_operator",
+      reviewed_at: "2026-09-05T00:00:00.000Z",
+      superseded_by_engagement_requirement_set_id: "50000000-0000-4000-8000-000000000005",
+      target_context_identity: { ...target, target_framework: "old_framework" },
+      created_by_type: "human",
+      created_at: "2026-09-05T00:00:00.000Z",
+      ...activeExternalRequirementSet,
+    }],
+  });
+  const result = await classifyEngagementFunderRequirementsState(
+    { organizationId: ORG_A, engagementId: ENGAGEMENT_A, actorContext: gkOperatorActor },
+    harness.dependencies,
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.state, "authoritative_requirement_set_not_applicable");
+  assert.equal(result.data.applicability_rows[0].applicability_conclusion, "NOT_CONFIRMED");
+  assert.deepEqual(result.data.applicable_requirement_sets, []);
 });
 
 test("target mismatch on an applicability row fails closed rather than inheriting old applicability", async () => {

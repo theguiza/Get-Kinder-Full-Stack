@@ -61,6 +61,8 @@ const CLASSIFIER_STATES = Object.freeze({
 });
 const APPLICABILITY_NOT_CONFIRMED_REASON =
   "engagement_requirement_sets lacks reviewed_by/reviewed_at/current_effective_state/supersession/target_snapshot provenance";
+const APPLICABILITY_CONFIRMED_REASON =
+  "engagement_requirement_sets has reviewed authority, current append-only lineage, effective applicability, and approved target snapshot";
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -231,16 +233,6 @@ function hasSelectedTarget(target) {
   return Object.keys(target || {}).length > 0;
 }
 
-function targetHasUnsupportedAuthorityDimensions(target) {
-  return Boolean(
-    target.grant_program_identity ||
-    target.report_identity ||
-    target.reporting_template_identity ||
-    target.reporting_period_start ||
-    target.reporting_period_end,
-  );
-}
-
 function requirementSetAuthorityDto(row = {}) {
   return {
     requirement_set_id: row.requirement_set_id,
@@ -273,6 +265,13 @@ function applicabilityRowDto(row = {}) {
     engagement_id: row.engagement_id,
     requirement_set_id: row.requirement_set_id,
     applicability_status: row.applicability_status,
+    applicability_effective_state: row.applicability_effective_state || null,
+    reviewed_by: row.reviewed_by || null,
+    reviewed_by_role: row.reviewed_by_role || null,
+    reviewed_at: row.reviewed_at instanceof Date ? row.reviewed_at.toISOString() : row.reviewed_at || null,
+    supersedes_engagement_requirement_set_id: row.supersedes_engagement_requirement_set_id || null,
+    superseded_by_engagement_requirement_set_id: row.superseded_by_engagement_requirement_set_id || null,
+    target_context_identity: isPlainObject(row.target_context_identity) ? row.target_context_identity : null,
     created_by_type: row.created_by_type,
     created_at: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at || null,
     requirement_framework_version: {
@@ -301,6 +300,40 @@ function rowMatchesTarget(row = {}, target = {}) {
   return row.source_code === target.target_funder_id && row.framework_code === target.target_framework;
 }
 
+function canonicalObject(value) {
+  if (!isPlainObject(value)) return null;
+  const output = {};
+  for (const key of Object.keys(value).sort()) {
+    const child = value[key];
+    if (isPlainObject(child)) {
+      output[key] = canonicalObject(child);
+    } else if (Array.isArray(child)) {
+      output[key] = child.map((item) => (isPlainObject(item) ? canonicalObject(item) : item));
+    } else {
+      output[key] = child;
+    }
+  }
+  return output;
+}
+
+function targetContextMatches(row = {}, target = {}) {
+  const normalized = normalizeEngagementRequirementTarget(row.target_context_identity || {});
+  if (!normalized.ok) return false;
+  return JSON.stringify(canonicalObject(normalized.target)) === JSON.stringify(canonicalObject(target));
+}
+
+function isCurrentReviewedApplicability(row = {}, target = {}) {
+  return (
+    row.applicability_status === "confirmed" &&
+    row.reviewed_by &&
+    row.reviewed_by_role &&
+    row.reviewed_at &&
+    ["applicable", "not_applicable"].includes(row.applicability_effective_state) &&
+    !row.superseded_by_engagement_requirement_set_id &&
+    targetContextMatches(row, target)
+  );
+}
+
 function classifyApplicabilityRows({ target, authoritativeRequirementSets, applicabilityRows }) {
   const authoritativeIds = new Set(authoritativeRequirementSets.map((row) => row.requirement_set_id));
   const matchingRows = applicabilityRows.filter((row) =>
@@ -308,18 +341,28 @@ function classifyApplicabilityRows({ target, authoritativeRequirementSets, appli
     isExternalAuthoritativeRequirementSet(row) &&
     rowMatchesTarget(row, target),
   );
-  return matchingRows.map((row) => ({
-    ...applicabilityRowDto(row),
-    applicability_conclusion: "NOT_CONFIRMED",
-    not_confirmed_reason: APPLICABILITY_NOT_CONFIRMED_REASON,
-    missing_persistence: [
-      "reviewed_by",
-      "reviewed_at",
-      "current_effective_state",
-      "superseded_by_or_replaced_by",
-      "target_snapshot_at_approval",
-    ],
-  }));
+  return matchingRows.map((row) => {
+    const dto = applicabilityRowDto(row);
+    if (isCurrentReviewedApplicability(row, target)) {
+      return {
+        ...dto,
+        applicability_conclusion: row.applicability_effective_state === "applicable" ? "CURRENT_APPLICABLE" : "CURRENT_NOT_APPLICABLE",
+        applicability_confirmed_reason: APPLICABILITY_CONFIRMED_REASON,
+      };
+    }
+    return {
+      ...dto,
+      applicability_conclusion: "NOT_CONFIRMED",
+      not_confirmed_reason: APPLICABILITY_NOT_CONFIRMED_REASON,
+      missing_persistence: [
+        "reviewed_by",
+        "reviewed_at",
+        "current_effective_state",
+        "superseded_by_or_replaced_by",
+        "target_snapshot_at_approval",
+      ],
+    };
+  });
 }
 
 export async function listAuthorizedEngagements(input, dependencies = {}) {
@@ -530,11 +573,7 @@ export async function classifyEngagementFunderRequirementsState(input, dependenc
     };
   }
 
-  if (
-    !target.target_funder_id ||
-    !target.target_framework ||
-    targetHasUnsupportedAuthorityDimensions(target)
-  ) {
+  if (!target.target_funder_id || !target.target_framework) {
     return {
       ok: true,
       data: {
@@ -545,14 +584,7 @@ export async function classifyEngagementFunderRequirementsState(input, dependenc
         applicability_rows: [],
         applicable_requirement_sets: [],
         not_confirmed_states: [CLASSIFIER_STATES.applicableRequirementSetAssessmentNotAvailable],
-        missing_persistence: targetHasUnsupportedAuthorityDimensions(target)
-          ? [
-              "requirement_set_target_grant_program_identity",
-              "requirement_set_target_report_identity",
-              "requirement_set_target_reporting_template_identity",
-              "requirement_set_effective_reporting_period",
-            ]
-          : [],
+        missing_persistence: [],
       },
       error: null,
     };
@@ -583,11 +615,32 @@ export async function classifyEngagementFunderRequirementsState(input, dependenc
     organizationId: input.organizationId,
     engagementId: input.engagementId,
   });
-  const notConfirmedApplicability = classifyApplicabilityRows({
+  const classifiedApplicability = classifyApplicabilityRows({
     target,
     authoritativeRequirementSets,
     applicabilityRows,
   });
+  const applicableRequirementSets = classifiedApplicability
+    .filter((row) => row.applicability_conclusion === "CURRENT_APPLICABLE")
+    .map(requirementSetAuthorityDto);
+
+  if (applicableRequirementSets.length > 0) {
+    return {
+      ok: true,
+      data: {
+        state: CLASSIFIER_STATES.applicableRequirementSetAssessmentNotAvailable,
+        engagement: engagementDto,
+        target,
+        authoritative_requirement_sets: authoritativeRequirementSets.map(requirementSetAuthorityDto),
+        applicability_rows: classifiedApplicability,
+        applicable_requirement_sets: applicableRequirementSets,
+        applicability_conclusion: "CURRENT_APPLICABLE",
+        not_confirmed_states: [],
+        missing_persistence: [],
+      },
+      error: null,
+    };
+  }
 
   return {
     ok: true,
@@ -596,11 +649,13 @@ export async function classifyEngagementFunderRequirementsState(input, dependenc
       engagement: engagementDto,
       target,
       authoritative_requirement_sets: authoritativeRequirementSets.map(requirementSetAuthorityDto),
-      applicability_rows: notConfirmedApplicability,
+      applicability_rows: classifiedApplicability,
       applicable_requirement_sets: [],
-      applicability_conclusion: notConfirmedApplicability.length > 0 ? "NOT_CONFIRMED" : "none",
+      applicability_conclusion: classifiedApplicability.length > 0
+        ? classifiedApplicability[0].applicability_conclusion
+        : "none",
       not_confirmed_states: [CLASSIFIER_STATES.applicableRequirementSetAssessmentNotAvailable],
-      missing_persistence: notConfirmedApplicability.length > 0
+      missing_persistence: classifiedApplicability.some((row) => row.applicability_conclusion === "NOT_CONFIRMED")
         ? [
             "reviewed_by",
             "reviewed_at",
@@ -625,6 +680,7 @@ export const __engagementContextServiceContract = Object.freeze({
   TARGET_FIELD_DEFINITIONS,
   CLASSIFIER_STATES,
   APPLICABILITY_NOT_CONFIRMED_REASON,
+  APPLICABILITY_CONFIRMED_REASON,
 });
 
 export const __engagementContextServiceTestables = Object.freeze({
@@ -636,4 +692,6 @@ export const __engagementContextServiceTestables = Object.freeze({
   serializeEngagementTarget,
   isExternalAuthoritativeRequirementSet,
   rowMatchesTarget,
+  targetContextMatches,
+  isCurrentReviewedApplicability,
 });

@@ -280,6 +280,13 @@ export async function listEngagementRequirementSetsForOrganization(
             ers.engagement_id::text AS engagement_id,
             ers.requirement_set_id::text AS requirement_set_id,
             ers.applicability_status,
+            ers.applicability_effective_state,
+            ers.reviewed_by::text AS reviewed_by,
+            ers.reviewed_by_role,
+            ers.reviewed_at,
+            ers.supersedes_engagement_requirement_set_id::text AS supersedes_engagement_requirement_set_id,
+            successor.engagement_requirement_set_id::text AS superseded_by_engagement_requirement_set_id,
+            ers.target_context_identity,
             ers.created_by::text AS created_by,
             ers.created_by_type,
             ers.created_at,
@@ -301,6 +308,8 @@ export async function listEngagementRequirementSetsForOrganization(
          ON rfv.requirement_framework_version_id = rs.requirement_framework_version_id
        JOIN kai.requirement_sources src
          ON src.requirement_source_id = rfv.requirement_source_id
+       LEFT JOIN kai.engagement_requirement_sets successor
+         ON successor.supersedes_engagement_requirement_set_id = ers.engagement_requirement_set_id
       WHERE ers.organization_id = $1
         AND ers.engagement_id = $2
       ORDER BY ers.created_at DESC, ers.engagement_requirement_set_id ASC

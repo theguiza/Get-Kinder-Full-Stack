@@ -19952,3 +19952,36 @@ Current requirement assessments operate on generic organization-scope requiremen
 **Persistence deficiency:** to genuinely represent `applicable_requirement_set_assessment_not_available`, existing persistence must add or otherwise expose reviewed/current applicability proof: `reviewed_by`, `reviewed_at`, current/effective state, supersession/replacement linkage, and target snapshot at approval. For grant/program/report/template/reporting-period-specific targets, requirement-set authority also needs persisted exact target/effective-period mapping fields; Package 1B does not add them.
 
 **Prohibited actions not performed:** no push, deploy, production/browser canary, production/shared database mutation, schema change, migration, cloud configuration, credential/secret access, feature-flag or tenant/environment change, real client-data handling, Generated Drafts/generation/export work, P2 eligibility-semantic change, `requirement_authority_absent` change, applicability write, requirement authority write, engagement-specific assessment creation, `/impact-library` presentation change, or `00_KAI_CURRENT_STATE.md` update.
+
+### Package 2A — Engagement Requirement Set Applicability Authority Schema
+
+**Date:** 2026-09-05
+
+**Scope (owner-authorized Package 2A):** local repository schema/migration work for `kai.engagement_requirement_sets` only, plus causally required read-service/model updates and synthetic/local tests, to represent reviewed applicability authority, current/effective applicability, supersession/replacement, and approved target-context identity. No production/shared database mutation, push, deploy, unrelated schema change, cloud/configuration/credential/feature-flag change, or real client data handling was performed.
+
+**Starting point:** branch `main`, starting HEAD `2b6eb0257d64e10948398380bc2da9d122a21977`, clean worktree.
+
+**Preflight:** read this living ExecPlan's Package 1B persistence-deficiency evidence; inspected the original B1.1 `kai.engagement_requirement_sets` migration/rollback, B1.1 schema/integration tests, Package 1B engagement target/applicability tests, current `listEngagementRequirementSetsForOrganization`, `classifyEngagementFunderRequirementsState`, and existing KAI supersession/decision patterns including P3-16 append-only backward-pointer lineage and P2-10 reviewed decision authority. Set `DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel` for every Node/npm command.
+
+**Implementation:**
+- `migrations/kai_sprint2_package_2a_engagement_requirement_sets_authority.sql` and rollback - new additive migration altering only `kai.engagement_requirement_sets`. Adds `reviewed_by`, `reviewed_by_role`, `reviewed_at`, `applicability_effective_state`, `supersedes_engagement_requirement_set_id`, and `target_context_identity`; replaces the old singleton `(organization_id, engagement_id, requirement_set_id)` uniqueness with insert-only lineage constraints; enforces one root and one direct successor; rejects self/cross-tenant/cross-engagement/cross-set replacement through composite FK shape; requires reviewed/effective rows to be `confirmed` with reviewed authority and target snapshot; adds an append-only `BEFORE UPDATE OR DELETE` trigger.
+- `Backend/kai/db/kaiQueries.js` - extends the existing read-only applicability reader to return Package 2A reviewed/current/target-snapshot fields and a successor-derived `superseded_by_engagement_requirement_set_id`; no write query added.
+- `Backend/kai/services/kaiEngagementContextService.js` - promotes `applicable_requirement_set_assessment_not_available` only when an applicability row is confirmed, reviewed, unsuperseded, effective `applicable`, and has an approved target-context identity exactly matching the selected governed engagement target. Existing/unreviewed rows still fail closed as `NOT_CONFIRMED`.
+- `__tests__/kai-sprint2-engagement-requirement-target.spec.js` - extends the Package 1B classifier tests for the new reviewed/current applicable path, proposed/unreviewed, legacy status-only confirmed, reviewed non-current, retired, stale/superseded target fail-closed behavior, generic organization-scope assessment preservation, and read-model column contract.
+- `__tests__/kai-sprint2-package-2a-engagement-requirement-sets-authority-schema-contract.spec.js` - new static migration/rollback contract tests proving the table-only schema boundary, bounded checks, append-only lineage, and rollback scope.
+- `__tests__/kai-sprint2-package-2a-engagement-requirement-sets-authority.integration.spec.js` and `scripts/kai-sprint2-package-2a-engagement-requirement-sets-authority-local-postgres.js` - new runner-owned local PostgreSQL proof over synthetic data only.
+- `package.json` - adds focused `test:` and `verify:` scripts for Package 2A.
+
+**Tests run:**
+- `DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel npm run test:kai-sprint2-package-2a-engagement-requirement-sets-authority` - 31/31 passed.
+- `DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-package-2a-engagement-requirement-sets-authority` - initial sandbox run failed during local PostgreSQL `initdb` with `Operation not permitted` shared-memory restriction before any database existed; rerun with approved local ephemeral PostgreSQL escalation passed 7/7 integration assertions plus rollback proof, and removed the ephemeral workdir.
+- `DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel npm run test:kai-sprint2-b1-1-baseline-impact-requirements` - 14/14 passed.
+- `git diff --check` - passed.
+
+**TOOL_VERIFIED:** Package 2A migration alters only `kai.engagement_requirement_sets`; reviewed authority, effective applicability, target snapshot, and insert-only replacement lineage are enforced by static contract and real PostgreSQL constraints; append-only update/delete rejection is proven; rollback removes Package 2A additions and restores the B1.1 identity constraint after synthetic cleanup; Package 1B classifier now recognizes only reviewed/current matching target applicability as `applicable_requirement_set_assessment_not_available`.
+
+**NOT_CONFIRMED:** no production/staging/shared database or real client-data verification was performed; no applicability writer, requirement-authority writer, engagement-specific assessment writer, `/impact-library` projection, feature flag, cloud configuration, deployment, or push was added.
+
+**Package remaining issue:** Package 2A closes the repository schema/read-model deficiency for representing reviewed/current applicability on `kai.engagement_requirement_sets`. A separately-authorized package is still required to create a governed applicability write workflow and to decide whether engagement-specific requirement assessments/projections should be added.
+
+**Prohibited actions not performed:** no push, deploy, production/browser canary, production/shared database mutation, unrelated schema change, cloud configuration, credential/secret access, feature-flag or tenant/environment change, real client-data handling, `00_KAI_CURRENT_STATE.md` update, applicability writer, requirement authority writer, or engagement-specific assessment writer.
