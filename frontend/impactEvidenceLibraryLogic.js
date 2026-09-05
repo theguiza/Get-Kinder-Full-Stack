@@ -371,6 +371,11 @@ export const CLAIM_REVIEW_DECISIONS = Object.freeze([
 
 export const APPROVED_AUDIENCE_VALUES = Object.freeze(["internal", "funder", "public"]);
 
+export function seedClaimApprovedAudiencesFromDecision(claimReviewDecision) {
+  return asArray(claimReviewDecision?.approvedAudiences)
+    .filter((audience) => APPROVED_AUDIENCE_VALUES.includes(audience));
+}
+
 export function decisionRequiresLimitationNotes(decision) {
   return decision === "supported_with_limitation" || decision === "approved_with_limitation";
 }

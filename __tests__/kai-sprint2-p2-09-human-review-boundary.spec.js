@@ -134,6 +134,24 @@ test("P2-12 recordClaimReviewDecision reports missing actor context as unauthori
   assert.equal(result.blockers?.[0]?.blocking_reason, "missing_actor_context");
 });
 
+test("P2-12 recordClaimReviewDecision rejects a non-human actor before any repository call", async () => {
+  const result = await recordClaimReviewDecision(
+    {
+      organizationId: ORG,
+      claimId: CLAIM,
+      reviewQueueItemId: QUEUE,
+      expectedUpdatedAt: NOW,
+      decision: "approved",
+      approvedAudiences: ["internal"],
+      actorContext: { actorType: "ai", actorUserId: "x" },
+      now: NOW,
+    },
+    { env: enabledEnv, humanReviewRepository: { async recordClaimReviewDecision() { throw new Error("must not be called"); } }, metadataOnlyAudit: stubMetadataOnlyAudit() },
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "authorization_denied");
+});
+
 test("P2-12 recordClaimReviewDecision rejects a wrong role (gk_operator) before any repository call", async () => {
   const result = await recordClaimReviewDecision(
     {

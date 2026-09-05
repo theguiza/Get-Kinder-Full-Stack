@@ -56,6 +56,7 @@ import {
   reviewTransitionBody,
   shouldApplyCandidateResponse,
   shouldApplyEligibilityResponse,
+  seedClaimApprovedAudiencesFromDecision,
   sensitivityCapabilitiesPath,
   sensitivityProfilePath,
   sensitivityReviewWorkPath,
@@ -1439,6 +1440,59 @@ test("evidenceReviewDecisionValidationError/claimReviewDecisionValidationError e
     claimReviewDecisionValidationError({ decision: "rejected", limitationNotes: "", approvedAudiences: [] }),
     "",
   );
+});
+
+test("claim re-review audience seed uses only the current durable claim-review decision projection", () => {
+  assert.deepEqual(
+    seedClaimApprovedAudiencesFromDecision({ decisionId: "d1", decisionOutcome: "approved", approvedAudiences: ["internal"] }),
+    ["internal"],
+  );
+  assert.deepEqual(
+    seedClaimApprovedAudiencesFromDecision({ decisionId: "d2", decisionOutcome: "approved", approvedAudiences: ["internal", "funder"] }),
+    ["internal", "funder"],
+  );
+  assert.deepEqual(
+    seedClaimApprovedAudiencesFromDecision({ decisionId: "d3", decisionOutcome: "rejected", approvedAudiences: null }),
+    [],
+  );
+  assert.deepEqual(seedClaimApprovedAudiencesFromDecision(null), []);
+});
+
+test("claim approved-audience checkbox editing can add funder, preserve internal, and deliberately remove internal", () => {
+  const toggle = (current, value) => (
+    current.includes(value) ? current.filter((entry) => entry !== value) : [...current, value]
+  );
+  assert.deepEqual(toggle(["internal"], "funder"), ["internal", "funder"]);
+  assert.deepEqual(toggle(["internal", "funder"], "internal"), ["funder"]);
+});
+
+test("Impact Evidence Library seeds claim re-review audiences once per selected claim and durable claim-review decision id", () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+
+  assert.match(uiSource, /const claimAudienceSeedIdentityRef = useRef\(""\);/);
+  assert.match(uiSource, /claimAudienceSeedIdentityRef\.current = "";/);
+
+  const seedEffect = uiSource.slice(
+    uiSource.indexOf("useEffect(() => {\n    if (!selectedClaimId || traceability?.claim?.claim_id !== selectedClaimId) return;"),
+    uiSource.indexOf("const toggleClaimApprovedAudience"),
+  );
+  assert.match(seedEffect, /traceability\?\.claim\?\.claim_id !== selectedClaimId/);
+  assert.match(seedEffect, /traceability\?\.claimReviewDecision\?\.decisionId \|\| "no-current-claim-review-decision"/);
+  assert.match(seedEffect, /const seedIdentity = `\$\{selectedClaimId\}:\$\{decisionId\}`;/);
+  assert.match(seedEffect, /if \(claimAudienceSeedIdentityRef\.current === seedIdentity\) return;/);
+  assert.match(seedEffect, /setClaimApprovedAudiences\(seedClaimApprovedAudiencesFromDecision\(traceability\?\.claimReviewDecision\)\);/);
+  assert.match(seedEffect, /\}, \[selectedClaimId, traceability\?\.claim\?\.claim_id, traceability\?\.claimReviewDecision\?\.decisionId\]\);/);
+  assert.doesNotMatch(seedEffect, /traceability\]/, "the seed effect must not synchronize on every traceability object identity");
+});
+
+test("Impact Evidence Library claim-review submit keeps using the governed path, sends edited approved_audiences, and refetches authoritative traceability on success", () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+  const runClaimReview = uiSource.slice(uiSource.indexOf("const runCompleteClaimReview"), uiSource.indexOf("  // Claim traceability still surfaces"));
+
+  assert.match(runClaimReview, /claimReviewCompletePath\(organizationId, selectedClaimId, traceability\.claimReview\.review_queue_item_id\)/);
+  assert.match(runClaimReview, /approvedAudiences: claimApprovedAudiences/);
+  assert.match(runClaimReview, /await loadTraceability\(selectedClaimId\)/);
+  assert.doesNotMatch(runClaimReview, /coverageFunderAcceptancePath|Funder Requirements|new endpoint/i);
 });
 
 // P2-12 gating: needs_more_information reopens a previously-resolved review

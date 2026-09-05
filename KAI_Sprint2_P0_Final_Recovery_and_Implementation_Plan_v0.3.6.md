@@ -19791,3 +19791,34 @@ This closes the mismatch between the executed request-ownership predicates and t
 - `npm run build` - passed; no tracked bundle output changed.
 
 **Package remaining work:** NONE for this bounded package. Audience seeding was not started.
+
+## Impact Library Claim Re-review Audience Seeding
+
+**Date:** 2026-09-05
+
+**Scope (owner-authorized directly for this package):** fix only the editable audience state for claim re-review in `/impact-library`. The prior terminal re-review gate repair was treated as complete and was not modified. No endpoint, service, repository, table, schema, authority model, Funder Requirements dependency, feature flag, production/cloud/database, or real client data was touched.
+
+**Preflight:** read root `AGENTS.md`; confirmed branch `main`; confirmed starting HEAD `9f269b97fc56238db7f59282c75ee63f8e8f2b28`; confirmed the working tree was clean; confirmed this living ExecPlan is applicable. Inspected the current `/impact-library` claim-review wiring in `frontend/ImpactEvidenceLibrary.jsx`, the existing terminal re-review gate in `frontend/impactEvidenceLibraryLogic.js`, all render/submit conditions controlling the claim-review form/action, and relevant Impact Library/P2-09 human-review tests. Set `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel` for every Node/npm verification command.
+
+**Before:** durable approved audiences were displayed in the traceability projection, but the editable claim-review audience checkboxes were always initialized/reset to `[]`. Exact gap: an already-reviewed claim entering re-review did not seed `claimApprovedAudiences` from the current durable `traceability.claimReviewDecision.approvedAudiences`, so durable `["internal"]` and `["internal", "funder"]` both opened with blank editable state.
+
+**Implementation (files changed):**
+- `frontend/impactEvidenceLibraryLogic.js` - added `seedClaimApprovedAudiencesFromDecision`, a projection-only helper that returns only existing approved audience values from the current durable claim-review decision and invents no defaults.
+- `frontend/ImpactEvidenceLibrary.jsx` - seeded editable `claimApprovedAudiences` from `traceability.claimReviewDecision.approvedAudiences` only once per stable selected-claim/current-decision identity (`selectedClaimId:decisionId`), guarded against stale traceability from another selected claim. Claim switching clears the seed identity and reseeds; unrelated rerenders and same-decision traceability reloads preserve in-progress edits; successful submit still uses the existing governed claim-review route and authoritative traceability refetch can reseed when a new durable decision id appears.
+- `__tests__/kai-sprint2-impact-evidence-library.spec.js` - added focused coverage for durable `["internal"]`, durable `["internal", "funder"]`, blank/no durable audiences, adding funder while preserving internal, deliberately removing internal, edit preservation across unrelated rerenders/same-decision reloads, claim switching reseed, governed submit path/refetch, and public/new-endpoint fail-closed source invariants.
+- `__tests__/kai-sprint2-p2-09-human-review-boundary.spec.js` - added focused `recordClaimReviewDecision` rejection for a non-human/system actor before any repository call.
+- `public/js/bundles/entry.js` - rebuilt with `npm run build`.
+
+**Compatibility:** human authorization, tenant boundary, audit/transaction behavior, `approved_audiences` validation, effective Phase-5 funder ceiling, public fail-closed behavior, P2-06 traceability, P2-08 eligible-claims, and P2-10 are preserved. The change continues to submit through the existing governed claim-review route/service/repository.
+
+**Tests run** (`DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel` set for every Node/npm command):
+- `node --test __tests__/kai-sprint2-impact-evidence-library.spec.js` - passed 101/101 with approved escalation for local loopback listener binding after the expected sandbox `listen EPERM` on route-listener tests.
+- `node --test __tests__/kai-sprint2-p2-09-human-review-boundary.spec.js` - passed 30/30.
+- `node --test __tests__/kai-sprint2-uat-enablement-frontend.spec.js` - passed 14/14.
+- `node --test __tests__/kai-sprint2-p2-06-claim-traceability-boundary.spec.js __tests__/kai-sprint2-p2-06-claim-traceability-route.spec.js` - passed 18/18 with approved escalation for local loopback listener binding.
+- `node --test __tests__/kai-sprint2-p2-08-eligible-claims-for-audience-boundary.spec.js __tests__/kai-sprint2-p2-08-eligible-claims-for-audience-route.spec.js` - passed 25/25 with approved escalation for local loopback listener binding.
+- `npm run verify:kai-sprint2-p2-09-human-review` - passed 36/36 against an isolated loopback-only ephemeral PostgreSQL database; ephemeral workdir removed.
+- `npm run build` - passed and refreshed the tracked bundle.
+- `git diff --check` - passed, no whitespace errors.
+
+**Package remaining work:** NONE for this bounded package. Audience seeding is complete; no audience seeding beyond current durable claim-review decision projection was introduced. Stopped after this package as instructed.

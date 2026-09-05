@@ -58,6 +58,7 @@ import {
   reviewQueueIsConclusivelyEmpty,
   projectTraceability,
   reviewQueueBlockerActionability,
+  seedClaimApprovedAudiencesFromDecision,
   sensitivityReviewQueueAttention,
   reviewTransitionBody,
   shouldApplyCandidateResponse,
@@ -143,6 +144,7 @@ export default function ImpactEvidenceLibrary() {
   const candidateRequestGenerationRef = useRef(0);
   const eligibleRequestGenerationRef = useRef(0);
   const traceabilityPanelRef = useRef(null);
+  const claimAudienceSeedIdentityRef = useRef("");
   const organizationIdRef = useRef(organizationId);
   const audienceRef = useRef(audience);
   organizationIdRef.current = organizationId;
@@ -565,7 +567,17 @@ export default function ImpactEvidenceLibrary() {
     setClaimDecision("");
     setClaimLimitationNotesText("");
     setClaimApprovedAudiences([]);
+    claimAudienceSeedIdentityRef.current = "";
   }, [selectedClaimId]);
+
+  useEffect(() => {
+    if (!selectedClaimId || traceability?.claim?.claim_id !== selectedClaimId) return;
+    const decisionId = traceability?.claimReviewDecision?.decisionId || "no-current-claim-review-decision";
+    const seedIdentity = `${selectedClaimId}:${decisionId}`;
+    if (claimAudienceSeedIdentityRef.current === seedIdentity) return;
+    claimAudienceSeedIdentityRef.current = seedIdentity;
+    setClaimApprovedAudiences(seedClaimApprovedAudiencesFromDecision(traceability?.claimReviewDecision));
+  }, [selectedClaimId, traceability?.claim?.claim_id, traceability?.claimReviewDecision?.decisionId]);
 
   const toggleClaimApprovedAudience = useCallback((value) => {
     setClaimApprovedAudiences((current) => (
