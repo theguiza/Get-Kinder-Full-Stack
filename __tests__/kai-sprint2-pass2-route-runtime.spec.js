@@ -146,6 +146,9 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // MVP UAT final completion: authoritative intake-context engagement read
     // (additive; every prior entry preserved verbatim).
     "/admin/organizations/:organizationId/engagements",
+    // KAI engagement requirement target foundation: governed target metadata
+    // replacement only, no generic project_metadata patching.
+    "/admin/organizations/:organizationId/engagements/:engagementId/requirement-target",
     // KAI P2-03 claim-proposal surface (additive; every prior entry preserved
     // verbatim).
     "/admin/organizations/:organizationId/evidence-items/:evidenceItemId/claim-proposal",
@@ -364,6 +367,79 @@ test("admin organizations engagements route delegates to listAuthorizedEngagemen
     assert.equal("headers" in serviceInput, false);
     assert.equal("cookies" in serviceInput, false);
     assert.equal("session" in serviceInput, false);
+  } finally {
+    restore();
+  }
+});
+
+test("admin engagement requirement-target route delegates to the governed target update service with sanitized req and explicit target only", async () => {
+  let serviceInput = null;
+  const target = {
+    target_funder_id: "funder:city-impact-fund",
+    target_framework: "framework:annual-outcomes-v1",
+  };
+  const restore = intakeRouteTestables.setIntakeServiceForTest({
+    async updateEngagementRequirementTarget(input) {
+      serviceInput = input;
+      return { ok: true, data: { engagement_id: input.engagementId, organization_id: input.organizationId, requirement_target: input.target }, warnings: [] };
+    },
+  });
+
+  try {
+    const originalReq = {
+      params: { organizationId, engagementId },
+      body: { target },
+      headers: { cookie: "session=secret-cookie-sentinel" },
+      cookies: { session: "secret-cookie-sentinel" },
+      session: { id: "session-value-sentinel" },
+      user: {
+        id: 46,
+        email: "email-sentinel@example.test",
+        token: "secret-token-sentinel",
+      },
+    };
+
+    const res = await invokeRoute(
+      "/admin/organizations/:organizationId/engagements/:engagementId/requirement-target",
+      "put",
+      originalReq,
+    );
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(serviceInput, {
+      organizationId,
+      engagementId,
+      target,
+      req: { user: { id: 46 } },
+    });
+  } finally {
+    restore();
+  }
+});
+
+test("admin engagement requirement-target route rejects arbitrary metadata body keys before service delegation", async () => {
+  let called = false;
+  const restore = intakeRouteTestables.setIntakeServiceForTest({
+    async updateEngagementRequirementTarget() {
+      called = true;
+      return { ok: true, data: null, warnings: [] };
+    },
+  });
+
+  try {
+    const res = await invokeRoute(
+      "/admin/organizations/:organizationId/engagements/:engagementId/requirement-target",
+      "put",
+      {
+        params: { organizationId, engagementId },
+        body: { target: {}, project_metadata: { arbitrary: true } },
+        user: { id: 46 },
+      },
+    );
+
+    assert.equal(res.statusCode, 422);
+    assert.equal(res.body.error.code, "validation_blocker");
+    assert.equal(called, false);
   } finally {
     restore();
   }

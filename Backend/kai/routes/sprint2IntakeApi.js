@@ -1146,7 +1146,9 @@ router.post(
 
 let engagementContextServicePromise = null;
 async function getEngagementContextService() {
-  if (intakeServiceOverride?.listAuthorizedEngagements) return intakeServiceOverride;
+  if (intakeServiceOverride?.listAuthorizedEngagements || intakeServiceOverride?.updateEngagementRequirementTarget) {
+    return intakeServiceOverride;
+  }
   engagementContextServicePromise ||= import("../services/kaiEngagementContextService.js");
   return engagementContextServicePromise;
 }
@@ -1198,6 +1200,39 @@ router.get("/admin/organizations/:organizationId/engagements", async (req, res) 
     const service = await getEngagementContextService();
     return service.listAuthorizedEngagements({
       organizationId,
+      req: { user: safeAuthenticatedUser(req) },
+    });
+  });
+});
+
+router.put("/admin/organizations/:organizationId/engagements/:engagementId/requirement-target", async (req, res) => {
+  const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+  const engagementId = typeof req.params?.engagementId === "string" ? req.params.engagementId : "";
+  if (
+    !KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) ||
+    organizationId !== organizationId.toLowerCase() ||
+    !KAI_SPRINT2_P0_PATTERNS.uuid.test(engagementId) ||
+    engagementId !== engagementId.toLowerCase()
+  ) {
+    return sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_or_engagement_id")],
+    });
+  }
+
+  const payload = requestPayload(req);
+  const payloadKeys = Object.keys(payload);
+  if (payloadKeys.length !== 1 || !Object.hasOwn(payload, "target")) {
+    return sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("unknown_field", "body")],
+    });
+  }
+
+  return invokeService(res, async () => {
+    const service = await getEngagementContextService();
+    return service.updateEngagementRequirementTarget({
+      organizationId,
+      engagementId,
+      target: payload.target,
       req: { user: safeAuthenticatedUser(req) },
     });
   });

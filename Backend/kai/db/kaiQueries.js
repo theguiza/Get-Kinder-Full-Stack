@@ -150,6 +150,19 @@ export async function getEngagementTenantState(engagementId, db = pool) {
   return rows[0] || null;
 }
 
+export async function getEngagementForOrganization({ organizationId, engagementId, lockForUpdate = false }, db = pool) {
+  if (!organizationId || !engagementId) return null;
+  const { rows } = await db.query(
+    `SELECT engagement_id, organization_id, engagement_type, engagement_status, project_metadata
+       FROM kai.engagements
+      WHERE organization_id = $1
+        AND engagement_id = $2
+      LIMIT 1${lockForUpdate ? " FOR UPDATE" : ""}`,
+    [organizationId, engagementId],
+  );
+  return rows[0] || null;
+}
+
 export async function getIntakeBatchTenantState(intakeBatchId, organizationId, db = pool) {
   if (!intakeBatchId || !organizationId) return null;
   const { rows } = await db.query(
@@ -172,7 +185,7 @@ export async function getIntakeBatchTenantState(intakeBatchId, organizationId, d
 export async function listEngagementsForOrganization({ organizationId }, db = pool) {
   if (!organizationId) return [];
   const { rows } = await db.query(
-    `SELECT engagement_id, organization_id
+    `SELECT engagement_id, organization_id, engagement_type, engagement_status, project_metadata
        FROM kai.engagements
       WHERE organization_id = $1
       ORDER BY engagement_id ASC
@@ -180,4 +193,19 @@ export async function listEngagementsForOrganization({ organizationId }, db = po
     [organizationId],
   );
   return rows;
+}
+
+export async function updateEngagementProjectMetadata(
+  { organizationId, engagementId, projectMetadata },
+  db = pool,
+) {
+  const { rows } = await db.query(
+    `UPDATE kai.engagements
+        SET project_metadata = $3::jsonb
+      WHERE organization_id = $1
+        AND engagement_id = $2
+      RETURNING engagement_id, organization_id, engagement_type, engagement_status, project_metadata`,
+    [organizationId, engagementId, JSON.stringify(projectMetadata || {})],
+  );
+  return rows[0] || null;
 }

@@ -19891,3 +19891,29 @@ Current requirement assessments operate on generic organization-scope requiremen
 **Package remaining issue:** engagement-specific funder/framework/reporting applicability authority is absent from executable code. This package stops at that boundary because inventing target metadata, mappings, rows, catalogues, or assessment semantics would create new requirement truth without owner authorization.
 
 **Prohibited actions not performed:** no push, deploy, production/browser canary, production/shared database mutation, schema change, migration, cloud configuration, credential/secret access, feature-flag or tenant/environment change, real client-data handling, Generated Drafts/generation/export work, P2 eligibility-semantic change, `requirement_authority_absent` change, or `00_KAI_CURRENT_STATE.md` update.
+
+### Package 1A — Engagement Requirement Target Foundation
+
+**Date:** 2026-09-05
+
+**Scope (owner-authorized Package 1 continuation):** implement only the engagement target foundation for KAI Engagement Requirement Applicability Package 1. `kai.engagements` remains the project/use-case object; existing engagement columns are reused where present; controlled `project_metadata` is used for `target_funder_id`, `target_framework`, grant/program/report identity, reporting-template identity, and reporting period fields. No schema, migration, separate project/workspace object, applicability writer, requirement authority, engagement-specific assessment, `/impact-library` presentation work, production/cloud/database mutation, P2 reopening, or Current State update was performed.
+
+**Preflight:** read root `AGENTS.md`; confirmed branch `main`; confirmed starting HEAD exactly `e5c9c4a8a6cbcd9ce61ce2d4568f5f92a80f55c0`; confirmed working tree clean; confirmed this work starts directly on top of the engagement-applicability investigation evidence commit. Inspected only current engagement storage, metadata validation/update conventions, service/route authorization paths, callers, and relevant tests. Set `DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel` for every Node verification command.
+
+**Implementation:**
+- `Backend/kai/db/kaiQueries.js` - extended the existing `kai.engagements` read surface to include `engagement_type`, `engagement_status`, and `project_metadata`; added organization-scoped engagement read with optional `FOR UPDATE`; added organization-scoped `project_metadata` update returning only engagement fields. No schema or migration.
+- `Backend/kai/services/kaiEngagementContextService.js` - added controlled target namespace `project_metadata.engagement_requirement_target`; explicit validation for exactly `target_funder_id`, `target_framework`, `grant_program_identity`, `report_identity`, `reporting_template_identity`, `reporting_period_start`, and `reporting_period_end`; optional absence is valid; unknown fields and invalid identifiers/labels/dates fail before persistence. Added `updateEngagementRequirementTarget` with existing actor resolution, `validateActorCanPerformOperation`, `validateTenantBoundaryConsistency`, `withTransaction`, and same-transaction `insertRequiredSuccessfulAuditEvent`. Reads serialize only engagement identity/status/type plus the governed target; arbitrary `project_metadata` does not leak.
+- `Backend/kai/routes/sprint2IntakeApi.js` - added `PUT /admin/organizations/:organizationId/engagements/:engagementId/requirement-target`, accepting only `{ target }`, preserving sanitized `req.user` delegation and avoiding unrestricted JSON patch behavior.
+- `__tests__/kai-sprint2-engagement-requirement-target.spec.js` - new service/contract coverage for valid target read/write, invalid controlled values, arbitrary target-field rejection, absent optional fields, cross-organization negative cases, same-transaction audit/update, existing engagement-list behavior, and proof that requirement data is not accepted as inferred target metadata.
+- `__tests__/kai-sprint2-pass2-route-runtime.spec.js` and `__tests__/kai-sprint2-uat-final-completion-boundary.spec.js` - updated route and existing engagement read expectations for the governed target projection.
+
+**Tests run** (`DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel` set for every Node command):
+- `node --test __tests__/kai-sprint2-engagement-requirement-target.spec.js __tests__/kai-sprint2-pass2-route-runtime.spec.js __tests__/kai-sprint2-uat-final-completion-boundary.spec.js __tests__/kai-sprint2-context-service.spec.js` - 69/69 passed.
+- `node --test __tests__/kai-sprint2-authorization.spec.js __tests__/kai-sprint2-tenant-validator.spec.js __tests__/kai-sprint2-organization-enablement.spec.js __tests__/kai-sprint2-organization-context-service.spec.js __tests__/kai-runtime-context-bootstrap.spec.js` - 59/59 passed.
+- `git diff --check` - passed.
+
+**TOOL_VERIFIED:** Package 1A executable target read/write contract; no schema/migration files changed; no `engagement_requirement_sets` writer; no requirement authority creation; no engagement-specific assessment; no `/impact-library` presentation change; organization/tenant and actor authorization are preserved through existing service-layer validators.
+
+**NOT_CONFIRMED:** no live database, production/staging, browser, cloud, or real-client-data verification was performed. No Package 1B instructions were present in the owner prompt after "below"; Package 1B was therefore not started.
+
+**Package remaining issue:** Package 1A closes only the engagement target foundation. Applicability read classification, applicability writer, requirement authority intake/review, engagement-specific assessments, and `/impact-library` projection remain outside this package.
