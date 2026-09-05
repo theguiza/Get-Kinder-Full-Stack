@@ -83,6 +83,44 @@ import {
  * the persisted assessment remains an accurate, fingerprinted record of
  * governed state at the moment it was written: it does not retroactively
  * assert that Package 2B applicability is still current after the fact.
+ *
+ * Package 3B: the read path closes the corresponding read-time gap. A
+ * persisted engagement-scope assessment row on its own only proves "this
+ * was a correct assessment when it was written" - it does not prove the
+ * governing Package 2B applicability is STILL current at read time.
+ * `getEngagementRequirementAssessment` therefore re-resolves the identical
+ * `resolveEngagementApplicabilityGate` (same governed data-access functions,
+ * same pure predicates, same fail-closed semantics as the write path) against
+ * live state before returning the repository's read. There is deliberately
+ * no new persisted column/table for this (no migration, no new schema): the
+ * existing kai.requirement_assessments row carries no reference to which
+ * kai.engagement_requirement_sets decision justified it, and no such
+ * reference is required, because Package 2B's own current-authority read
+ * (getEngagementForOrganization / listEngagementRequirementSetsForOrganization
+ * / getRequirementSetAuthority, plus Package 1A's serializeEngagementTarget
+ * and Package 2B's own pure predicates) already answers "is this
+ * (organization, engagement, requirement) triple CURRENTLY applicable, with
+ * what target, under what requirement-set authority" from first principles,
+ * every time, cheaply. A stale assessment row is never deleted, mutated, or
+ * hidden by this check - it simply stops being resolvable as CURRENT through
+ * this read once the gate it depended on no longer holds; the row itself
+ * remains intact, unmodified, historical provenance in
+ * kai.requirement_assessments and its link tables.
+ *
+ * One transition is NOT separately distinguishable from
+ * "the requirement's requirement set is no longer a governed/active external
+ * authority": a change to which requirement-set/framework-version is
+ * currently authoritative. This schema does not persist a "version" or
+ * "fingerprint" for an applicability decision independent of the requirement
+ * set's own `requirement_framework_versions.framework_status` column - a
+ * requirement row (`kai.requirements`) belongs to exactly one
+ * `requirement_set_id`/`requirement_framework_version_id` permanently, so a
+ * framework-version transition is represented by that version's
+ * `framework_status` moving away from 'active' (isExternalAuthoritativeRequirementSet
+ * already fails closed on that), not by a separate version-compare. No new
+ * schema is invented to distinguish "framework retired" from "framework
+ * superseded by a new version" any more finely than the existing
+ * `framework_status` column already does.
  */
 const ASSESS_ENGAGEMENT_REQUIREMENT_ALLOWED_ROLES = __requirementAssessmentServiceContract.ASSESS_REQUIREMENT_ALLOWED_ROLES;
 const ASSESS_ENGAGEMENT_REQUIREMENT_OPERATION = "assess_requirement_engagement_scope";
@@ -319,6 +357,44 @@ export async function getEngagementRequirementAssessment(input, dependencies = {
   });
   if (tenant.severity === "blocker") {
     return buildKaiError("tenant_boundary_violation", { blockers: [tenant] });
+  }
+
+  // Package 3B: a persisted engagement-scope assessment row is only ever a
+  // record of what was true when it was written - it is never retroactively
+  // re-asserted as still-current authority merely by existing. Before this
+  // read can hand a caller "here is the currently usable assessment for this
+  // engagement/requirement", it must re-resolve the exact same Package 2B +
+  // Package 1A prerequisite gate the write path resolved at write time
+  // (resolveEngagementApplicabilityGate, above) against LIVE governed state.
+  // If the governing applicability has since been superseded, turned
+  // not_applicable, been retired, lost target-context match, or the
+  // requirement's requirement-set authority is no longer governed/active
+  // (which is how a requirement-set/framework-version transition manifests
+  // in this schema - see module comment on resolveEngagementApplicabilityGate
+  // for why no separate persisted "version" concept exists to check), this
+  // read fails closed with the same gate-failure mapping the write path uses
+  // - it never fabricates a null/stale result and never silently swallows
+  // the requirement. The underlying kai.requirement_assessments row is never
+  // read, mutated, or deleted by this check: this is a read-time currentness
+  // gate only, not a write, so historical provenance remains completely
+  // intact in persistence regardless of the outcome here.
+  const gateDependencies = {
+    getEngagement: dependencies.getEngagementForOrganization || getEngagementForOrganization,
+    listApplicability: dependencies.listEngagementRequirementSetsForOrganization || listEngagementRequirementSetsForOrganization,
+    getRequirementSetId: dependencies.getRequirementSetIdForRequirement || getRequirementSetIdForRequirement,
+    getRequirementSetAuthority: dependencies.getRequirementSetAuthority || getRequirementSetAuthority,
+    serializeEngagementTarget: dependencies.serializeEngagementTarget || __engagementContextServiceTestables.serializeEngagementTarget,
+    isExternalAuthoritativeRequirementSet: dependencies.isExternalAuthoritativeRequirementSet || __engagementContextServiceTestables.isExternalAuthoritativeRequirementSet,
+    rowMatchesTarget: dependencies.rowMatchesTarget || __engagementContextServiceTestables.rowMatchesTarget,
+    isCurrentReviewedApplicability: dependencies.isCurrentReviewedApplicability || __engagementContextServiceTestables.isCurrentReviewedApplicability,
+  };
+
+  const gate = await resolveEngagementApplicabilityGate(
+    { organizationId: input.organizationId, engagementId: input.engagementId, requirementId: input.requirementId },
+    gateDependencies,
+  );
+  if (!gate.ok) {
+    return gateFailureToKaiError(gate);
   }
 
   const repository = dependencies.requirementAssessmentRepository || createPostgresRequirementAssessmentRepository();

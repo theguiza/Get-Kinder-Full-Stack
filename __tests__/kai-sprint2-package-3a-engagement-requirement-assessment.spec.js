@@ -428,7 +428,16 @@ test("Package 3A: the required metadataOnlyAudit contract is invoked exactly as 
   assert.equal(result.error.code, "validation_blocker");
 });
 
-test("Package 3A: read path never re-derives Package 2B gate state and returns whatever the repository's engagement-scoped read finds", async () => {
+test("Package 3A/3B: read path returns whatever the repository's engagement-scoped read finds, once Package 2B gate revalidation confirms current applicability", async () => {
+  // Superseded by Package 3B: the read path used to trust the repository's
+  // stored row without re-checking Package 2B currency at all. It now
+  // re-resolves the identical gate the write path uses (see
+  // resolveEngagementApplicabilityGate/gate revalidation added to
+  // getEngagementRequirementAssessment in kaiEngagementRequirementAssessmentService.js)
+  // before returning the repository's read - this test demonstrates that,
+  // given still-current gate dependencies, the previously-asserted pass-
+  // through behavior is preserved: the read still simply returns whatever
+  // the repository's own engagement-scoped read finds.
   const readResult = {
     ok: true,
     data: {
@@ -441,9 +450,7 @@ test("Package 3A: read path never re-derives Package 2B gate state and returns w
   const deps = {
     env: enabledEnv,
     requirementAssessmentRepository: repository,
-    async getEngagementForOrganization() {
-      return engagementRow();
-    },
+    ...createGateDependencies(),
   };
   const result = await getEngagementRequirementAssessment(baseReadInput({ actorContext: gkOperatorActor }), deps);
   assert.equal(result.ok, true);
