@@ -1557,7 +1557,7 @@ test("canCompleteClaimReview admits resolved/resolved claim queue as legacy repa
   );
 });
 
-test("canCompleteClaimReview does NOT treat a resolved/resolved claim queue as legacy repair once a current claim decision already exists", () => {
+test("canCompleteClaimReview admits terminal re-review through the resolved/resolved claim queue when a current terminal claim decision exists", () => {
   const resolvedEvidenceWithDecision = { review_status: "resolved" };
   const terminalEvidenceDecision = { decisionOutcome: "supported" };
   const resolvedClaimQueue = { queue_status: "resolved", review_status: "resolved" };
@@ -1568,7 +1568,48 @@ test("canCompleteClaimReview does NOT treat a resolved/resolved claim queue as l
       terminalEvidenceDecision,
       { decisionOutcome: "approved" },
     ),
+    true,
+  );
+  assert.equal(
+    canCompleteClaimReview(
+      resolvedEvidenceWithDecision,
+      resolvedClaimQueue,
+      terminalEvidenceDecision,
+      { decisionOutcome: "approved_with_limitation" },
+    ),
+    true,
+  );
+  assert.equal(
+    canCompleteClaimReview(
+      resolvedEvidenceWithDecision,
+      resolvedClaimQueue,
+      terminalEvidenceDecision,
+      { decisionOutcome: "rejected" },
+    ),
+    true,
+  );
+});
+
+test("canCompleteClaimReview keeps terminal re-review distinct from legacy repair and needs_more_information reopening", () => {
+  const resolvedEvidenceWithDecision = { review_status: "resolved" };
+  const terminalEvidenceDecision = { decisionOutcome: "supported" };
+  const resolvedClaimQueue = { queue_status: "resolved", review_status: "resolved" };
+  const reopenedClaimQueue = { queue_status: "open", review_status: "needs_gk_review" };
+
+  assert.equal(
+    canCompleteClaimReview(resolvedEvidenceWithDecision, resolvedClaimQueue, terminalEvidenceDecision, null),
+    true,
+    "legacy repair remains the no-current-decision resolved/resolved case",
+  );
+  assert.equal(
+    canCompleteClaimReview(resolvedEvidenceWithDecision, resolvedClaimQueue, terminalEvidenceDecision, { decisionOutcome: "needs_more_information" }),
     false,
+    "needs_more_information is not terminal re-review while the queue is resolved/resolved",
+  );
+  assert.equal(
+    canCompleteClaimReview(resolvedEvidenceWithDecision, reopenedClaimQueue, terminalEvidenceDecision, { decisionOutcome: "needs_more_information" }),
+    true,
+    "needs_more_information reopening remains admitted through the ordinary open/needs_gk_review path",
   );
 });
 

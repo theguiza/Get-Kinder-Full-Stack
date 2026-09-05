@@ -425,5 +425,49 @@ async function runP209IntegrationSuite() {
     const eligible = await eligibleInternal();
     assert.equal(eligible.ok, true);
     assert.ok(!eligible.data.eligibleClaims.some((row) => row.claimId === beta.claimId));
+
+    const postTerminalQueueItem = await claimReviewQueueItem(beta.claimId);
+    const terminalRereviewAuditBefore = await query(`SELECT count(*)::int AS count FROM kai.upload_lifecycle_audit WHERE operation = 'claim_review_completed_internal_approval'`);
+    const terminalRereview = await recordClaimReviewDecision(
+      {
+        organizationId: ORG,
+        claimId: beta.claimId,
+        reviewQueueItemId: postTerminalQueueItem.review_queue_item_id,
+        expectedUpdatedAt: new Date(postTerminalQueueItem.updated_at).toISOString(),
+        decision: "rejected",
+        actorContext: adminActor,
+        now: LATER,
+      },
+      { env: { KAI_SPRINT2_ENABLED: "true" }, humanReviewRepository: humanReviewRepo, metadataOnlyAudit: auditRecorder() },
+    );
+    assert.equal(terminalRereview.ok, true);
+    assert.equal(terminalRereview.data.queue_status, "resolved");
+    assert.equal(terminalRereview.data.review_status, "resolved");
+    assert.equal(terminalRereview.data.claim_strength, "reviewed_not_supported");
+    assert.equal(terminalRereview.data.decision_outcome, "rejected");
+    assert.equal(terminalRereview.data.approved_audiences, null);
+    assert.equal(terminalRereview.data.replayed, false);
+
+    const claimDecisionRows = await query(
+      `SELECT decision_id, decision_outcome, supersedes_decision_id
+         FROM kai.claim_review_decisions
+        WHERE organization_id = $1::uuid
+          AND claim_id = $2::uuid
+        ORDER BY created_at`,
+      [ORG, beta.claimId],
+    );
+    assert.equal(claimDecisionRows.length, 2);
+    assert.equal(claimDecisionRows[0].decision_outcome, "approved");
+    assert.equal(claimDecisionRows[0].supersedes_decision_id, null);
+    assert.equal(claimDecisionRows[1].decision_outcome, "rejected");
+    assert.equal(claimDecisionRows[1].supersedes_decision_id, claimDecisionRows[0].decision_id);
+
+    const terminalRereviewAuditAfter = await query(`SELECT count(*)::int AS count FROM kai.upload_lifecycle_audit WHERE operation = 'claim_review_completed_internal_approval'`);
+    assert.equal(terminalRereviewAuditAfter[0].count, terminalRereviewAuditBefore[0].count + 1);
+
+    const rereviewedTrace = await trace(beta.claimId, "internal");
+    assert.equal(rereviewedTrace.ok, true);
+    assert.ok(!rereviewedTrace.data.blockerCodes.includes("claim_review_unresolved"));
+    assert.equal(rereviewedTrace.data.claim_review_decision.decision_outcome, "rejected");
   });
 }

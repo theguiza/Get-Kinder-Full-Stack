@@ -294,6 +294,24 @@ function isTerminalEvidenceReviewDecision(evidenceReviewDecision) {
   );
 }
 
+// Mirrors Backend/kai/dictionary/humanReviewDecisionContract.js's
+// CLAIM_REVIEW_TERMINAL_OUTCOMES exactly. Unlike legacy repair (no current
+// decision head), a resolved/resolved claim review with one of these heads is
+// a deliberate terminal re-review candidate: the backend accepts this as the
+// governed "re-review" CAS branch and supersedes the current decision.
+const CLAIM_REVIEW_TERMINAL_OUTCOMES = Object.freeze([
+  "approved",
+  "approved_with_limitation",
+  "rejected",
+]);
+
+function isTerminalClaimReviewDecision(claimReviewDecision) {
+  return (
+    Boolean(claimReviewDecision)
+    && CLAIM_REVIEW_TERMINAL_OUTCOMES.includes(claimReviewDecision.decisionOutcome)
+  );
+}
+
 // KAI P2-12 legacy-repair recognition: `queue_status/review_status =
 // resolved` alone was the ENTIRE old pre-P2-12 proof of review - a queue row
 // can be sitting in that state with no decision ever recorded (see
@@ -307,6 +325,10 @@ function isTerminalEvidenceReviewDecision(evidenceReviewDecision) {
 // path, not this one.
 function isLegacyRepairCandidate(queueStatus, reviewStatus, currentDecision) {
   return isResolvedQueueState(queueStatus, reviewStatus) && currentDecision == null;
+}
+
+function isTerminalClaimRereviewCandidate(queueStatus, reviewStatus, currentDecision) {
+  return isResolvedQueueState(queueStatus, reviewStatus) && isTerminalClaimReviewDecision(currentDecision);
 }
 
 export function canCompleteEvidenceReview(evidence, evidenceReviewDecision) {
@@ -329,7 +351,8 @@ export function canCompleteClaimReview(evidence, claimReview, evidenceReviewDeci
   if (!claimReviewEvidencePrerequisiteSatisfied(evidence, evidenceReviewDecision)) return false;
   if (!claimReview) return false;
   if (isReviewOutstanding(claimReview.queue_status, claimReview.review_status)) return true;
-  return isLegacyRepairCandidate(claimReview.queue_status, claimReview.review_status, claimReviewDecision);
+  if (isLegacyRepairCandidate(claimReview.queue_status, claimReview.review_status, claimReviewDecision)) return true;
+  return isTerminalClaimRereviewCandidate(claimReview.queue_status, claimReview.review_status, claimReviewDecision);
 }
 
 export const EVIDENCE_REVIEW_DECISIONS = Object.freeze([

@@ -19764,3 +19764,30 @@ This closes the mismatch between the executed request-ownership predicates and t
 - The actor-role value recorded on the repository call (`actorRole`) is accepted per the required repository signature but is not persisted on `kai.requirement_assessments` (that table, unlike `kai.coverage_review_decisions`, carries no `decided_by_role` column) - this is a C2.1 schema fact, not a gap introduced by this package.
 
 **Package C3.A2 remaining work:** NONE for this bounded package. Engagement-scoped assessment, any requirement other than `ir_contrib_002`, gap/recommendation generation, human-approval workflow, funder overlays, readiness scoring, generation/UI, and any change to `kai.requirements`/`kai.evidence_items`/`kai.claims` are explicitly out of scope and not started. Stopped after C3.A2 as instructed.
+
+## Impact Library Terminal Claim Re-review Gate Repair
+
+**Date:** 2026-09-05
+
+**Scope (owner-authorized directly for this package):** fix only the `/impact-library` UI/logic gate that decides whether an already-reviewed terminal claim with a current durable claim-review decision can enter human re-review. P2-10 was treated as complete and was not modified. No endpoint, schema, cloud, feature-flag, production, database, client-data, audience-seeding, or real-data work was performed.
+
+**Preflight:** read root `AGENTS.md`; confirmed branch `main`; confirmed starting HEAD `e48224636c970f8a8fa1c9f91350f7fe72a36a44`; confirmed the working tree was clean; confirmed this living ExecPlan is applicable. Inspected `/impact-library` host (`views/impact-library.ejs`), frontend component/wiring (`frontend/ImpactEvidenceLibrary.jsx`, `frontend/impactEvidenceLibraryLogic.js`), every claim-review render/submit condition (`canCompleteClaimReview` in both render and `runCompleteClaimReview` guard), the governed route (`Backend/kai/routes/sprint2IntakeApi.js`), service (`Backend/kai/services/kaiHumanReviewService.js`), repository (`Backend/kai/dictionary/postgresHumanReviewRepository.js`), durable decision contract/repository (`Backend/kai/dictionary/humanReviewDecisionContract.js`, `Backend/kai/dictionary/postgresHumanReviewDecisionRepository.js`), and relevant claim-review/review-queue tests. Set `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel` for every Node/npm verification command.
+
+**Before:** terminal_claim_rereviewable was NO. Exact gate: `canCompleteClaimReview` admitted only the ordinary outstanding `open/needs_gk_review` state or `resolved/resolved` with no current claim-review decision head (legacy repair). Exact gap: `resolved/resolved` plus a current terminal durable claim-review decision (`approved`, `approved_with_limitation`, or `rejected`) fell through to false even though the backend repository already accepts `resolved/resolved` as the governed re-review CAS branch and records a successor decision.
+
+**Implementation (files changed):**
+- `frontend/impactEvidenceLibraryLogic.js` - added a local mirror of terminal claim-review outcomes and a distinct `isTerminalClaimRereviewCandidate` branch in `canCompleteClaimReview`, after the existing evidence prerequisite and separate from legacy repair.
+- `__tests__/kai-sprint2-impact-evidence-library.spec.js` - updated frontend gate coverage to prove terminal claim re-review is admitted, remains distinct from legacy repair, and does not change `needs_more_information` reopening behavior.
+- `__tests__/kai-sprint2-p2-09-human-review.integration.spec.js` - extended the existing governed P2-09 local-Postgres scenario to submit a second terminal claim-review decision through `recordClaimReviewDecision`, proving the current head is superseded, the queue remains resolved, audit is written, and `claim_review_unresolved` does not reappear.
+
+**Compatibility:** legacy repair (`resolved/resolved` with no decision head), first-time/outstanding review (`open/needs_gk_review`), `needs_more_information` reopening, the terminal evidence-review prerequisite, and unauthorized actor blocking are unchanged. Offering the form is still pure UI state; it performs no mutation until the existing claim-review POST is submitted, and successful POST handling still refetches traceability rather than trusting transient local state.
+
+**Tests run** (`DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel` set for every Node/npm command):
+- `node --test __tests__/kai-sprint2-p2-09-human-review-boundary.spec.js` - 29/29 passed.
+- `node --test __tests__/kai-sprint2-uat-enablement-frontend.spec.js` - 14/14 passed.
+- `node --test __tests__/kai-sprint2-impact-evidence-library.spec.js` - initially 92/97 passed, 5 failed with sandbox `listen EPERM` on route-listener tests; rerun with approved escalation for loopback listener binding passed 97/97.
+- `node --test __tests__/kai-sprint2-review-queue.spec.js` - initially 31/32 passed, 1 failed with sandbox `listen EPERM`; rerun with approved escalation for loopback listener binding passed 32/32.
+- `npm run verify:kai-sprint2-p2-09-human-review` - 35/35 passed against an isolated loopback-only ephemeral PostgreSQL database, including the new terminal claim re-review proof; ephemeral workdir removed.
+- `npm run build` - passed; no tracked bundle output changed.
+
+**Package remaining work:** NONE for this bounded package. Audience seeding was not started.
