@@ -318,3 +318,175 @@ export async function listEngagementRequirementSetsForOrganization(
   );
   return rows;
 }
+
+/**
+ * Package 2B-A governed-authority read: the exact source/framework/status
+ * identity of one requirement set, keyed by requirement_set_id. Used only to
+ * validate a proposed or reviewed engagement_requirement_sets row against its
+ * requirement-set authority (kai_standard exclusion, active-governed
+ * authority, exact source_code/framework_code target identity) - never to
+ * infer a target from set_key/set_name/labels.
+ */
+export async function getRequirementSetAuthority({ requirementSetId }, db = pool) {
+  if (!requirementSetId) return null;
+  const { rows } = await db.query(
+    `SELECT rs.requirement_set_id::text AS requirement_set_id,
+            rs.set_key,
+            rs.set_name,
+            rfv.requirement_framework_version_id::text AS requirement_framework_version_id,
+            rfv.framework_code,
+            rfv.framework_status,
+            src.requirement_source_id::text AS requirement_source_id,
+            src.source_type,
+            src.source_code
+       FROM kai.requirement_sets rs
+       JOIN kai.requirement_framework_versions rfv
+         ON rfv.requirement_framework_version_id = rs.requirement_framework_version_id
+       JOIN kai.requirement_sources src
+         ON src.requirement_source_id = rfv.requirement_source_id
+      WHERE rs.requirement_set_id = $1
+      LIMIT 1`,
+    [requirementSetId],
+  );
+  return rows[0] || null;
+}
+
+const ENGAGEMENT_REQUIREMENT_SET_RETURNING_COLUMNS = `
+            engagement_requirement_set_id::text AS engagement_requirement_set_id,
+            organization_id::text AS organization_id,
+            engagement_id::text AS engagement_id,
+            requirement_set_id::text AS requirement_set_id,
+            applicability_status,
+            applicability_effective_state,
+            reviewed_by::text AS reviewed_by,
+            reviewed_by_role,
+            reviewed_at,
+            supersedes_engagement_requirement_set_id::text AS supersedes_engagement_requirement_set_id,
+            target_context_identity,
+            created_by::text AS created_by,
+            created_by_type,
+            created_at`;
+
+/**
+ * Package 2B-A proposal writer: inserts the non-authoritative root row for
+ * one (organization, engagement, requirement_set) identity -
+ * applicability_status = 'proposed', applicability_effective_state left at
+ * its Package 2A default 'pending_review', reviewed_* and
+ * target_context_identity left NULL. Never establishes current applicability
+ * - the append-only schema's partial unique index already permits at most
+ * one such root row per identity (kai_sprint2_package_2a_..._current_identity).
+ */
+export async function insertEngagementRequirementSetProposal(
+  { organizationId, engagementId, requirementSetId, createdBy, createdByType },
+  db = pool,
+) {
+  const { rows } = await db.query(
+    `INSERT INTO kai.engagement_requirement_sets (
+       organization_id, engagement_id, requirement_set_id, applicability_status,
+       created_by, created_by_type
+     ) VALUES ($1, $2, $3, 'proposed', $4, $5)
+     RETURNING ${ENGAGEMENT_REQUIREMENT_SET_RETURNING_COLUMNS}`,
+    [organizationId, engagementId, requirementSetId, createdBy || null, createdByType],
+  );
+  return rows[0] || null;
+}
+
+/**
+ * Package 2B current-authority read: the Package 2A current-authority
+ * predicate itself - a row with no successor is the current/tip row for its
+ * (organization_id, engagement_id, requirement_set_id) identity, exactly the
+ * same derivation listEngagementRequirementSetsForOrganization uses for
+ * superseded_by_engagement_requirement_set_id, here applied directly to find
+ * "the current decision" for one governed identity rather than trusting a
+ * caller-supplied row id. This is what a governed replacement/lifecycle
+ * write (Package 2B-B) must look up before superseding: the current row may
+ * be the original non-authoritative proposal (Package 2B-A) or an already
+ * reviewed/confirmed decision (a Package 2B-B replacement). Scoped by
+ * organization_id and engagement_id so a caller can never resolve a row
+ * belonging to another tenant or engagement. Supports FOR UPDATE locking so
+ * a governed review transaction can serialize concurrent review attempts
+ * against the same identity; the partial unique index on
+ * supersedes_engagement_requirement_set_id (Package 2A) is still the actual
+ * conflict-safety backstop if two transactions race past this lock.
+ */
+export async function getCurrentEngagementRequirementSetForIdentity(
+  { organizationId, engagementId, requirementSetId, lockForUpdate = false },
+  db = pool,
+) {
+  if (!organizationId || !engagementId || !requirementSetId) return null;
+  const { rows } = await db.query(
+    `SELECT ers.engagement_requirement_set_id::text AS engagement_requirement_set_id,
+            ers.organization_id::text AS organization_id,
+            ers.engagement_id::text AS engagement_id,
+            ers.requirement_set_id::text AS requirement_set_id,
+            ers.applicability_status,
+            ers.applicability_effective_state,
+            ers.supersedes_engagement_requirement_set_id::text AS supersedes_engagement_requirement_set_id
+       FROM kai.engagement_requirement_sets ers
+      WHERE ers.organization_id = $1
+        AND ers.engagement_id = $2
+        AND ers.requirement_set_id = $3
+        AND NOT EXISTS (
+          SELECT 1
+            FROM kai.engagement_requirement_sets successor
+           WHERE successor.supersedes_engagement_requirement_set_id = ers.engagement_requirement_set_id
+        )
+      LIMIT 1${lockForUpdate ? " FOR UPDATE" : ""}`,
+    [organizationId, engagementId, requirementSetId],
+  );
+  return rows[0] || null;
+}
+
+/**
+ * Package 2B review/approval and Package 2B-B replacement writer: inserts
+ * the reviewed row that supersedes exactly one prior row - the locked
+ * current row read by getCurrentEngagementRequirementSetForIdentity, whether
+ * that prior row was a non-authoritative proposal or an already-reviewed
+ * decision being replaced. reviewed_by/reviewed_by_role/
+ * reviewed_at/target_context_identity are all caller-supplied here because
+ * the service layer - never the client - derives them (authenticated actor,
+ * fixed reviewer role, server clock, current governed engagement target).
+ * The Package 2A append-only schema itself still enforces reviewed-authority
+ * shape, effective-state values, approved-target-shape, not-self-superseding,
+ * and "at most one successor per superseded row".
+ */
+export async function insertEngagementRequirementSetReviewApproval(
+  {
+    organizationId,
+    engagementId,
+    requirementSetId,
+    supersedesEngagementRequirementSetId,
+    reviewedBy,
+    reviewedByRole,
+    reviewedAt,
+    applicabilityEffectiveState,
+    targetContextIdentity,
+    createdBy,
+    createdByType,
+  },
+  db = pool,
+) {
+  const { rows } = await db.query(
+    `INSERT INTO kai.engagement_requirement_sets (
+       organization_id, engagement_id, requirement_set_id, applicability_status,
+       reviewed_by, reviewed_by_role, reviewed_at, applicability_effective_state,
+       supersedes_engagement_requirement_set_id, target_context_identity,
+       created_by, created_by_type
+     ) VALUES ($1, $2, $3, 'confirmed', $4, $5, $6::timestamptz, $7, $8, $9::jsonb, $10, $11)
+     RETURNING ${ENGAGEMENT_REQUIREMENT_SET_RETURNING_COLUMNS}`,
+    [
+      organizationId,
+      engagementId,
+      requirementSetId,
+      reviewedBy,
+      reviewedByRole,
+      reviewedAt,
+      applicabilityEffectiveState,
+      supersedesEngagementRequirementSetId,
+      JSON.stringify(targetContextIdentity || {}),
+      createdBy,
+      createdByType,
+    ],
+  );
+  return rows[0] || null;
+}

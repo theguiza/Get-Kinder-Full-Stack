@@ -1157,6 +1157,18 @@ async function getEngagementContextService() {
   return engagementContextServicePromise;
 }
 
+let engagementRequirementApplicabilityServicePromise = null;
+async function getEngagementRequirementApplicabilityService() {
+  if (
+    intakeServiceOverride?.proposeEngagementRequirementSetApplicability ||
+    intakeServiceOverride?.approveEngagementRequirementSetApplicability
+  ) {
+    return intakeServiceOverride;
+  }
+  engagementRequirementApplicabilityServicePromise ||= import("../services/kaiEngagementRequirementApplicabilityService.js");
+  return engagementRequirementApplicabilityServicePromise;
+}
+
 let organizationContextServicePromise = null;
 async function getOrganizationContextService() {
   if (intakeServiceOverride?.listAuthorizedOrganizations) return intakeServiceOverride;
@@ -1265,6 +1277,120 @@ router.get("/admin/organizations/:organizationId/engagements/:engagementId/funde
     });
   });
 });
+
+/**
+ * KAI Package 2B-A: propose that an authoritative external requirement set
+ * applies to this engagement. Non-authoritative - it never establishes
+ * current applicability; the service validates organization/engagement
+ * ownership, that the requirement set exists and is external/governed
+ * (never `kai_standard`), and that its exact source_code/framework_code
+ * identity matches the engagement's current selected target. The request
+ * accepts only `requirementSetId`; the client cannot set applicability
+ * status, effective state, or any reviewed/target-snapshot field.
+ */
+router.post(
+  "/admin/organizations/:organizationId/engagements/:engagementId/requirement-set-applicability-proposals",
+  async (req, res) => {
+    const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+    const engagementId = typeof req.params?.engagementId === "string" ? req.params.engagementId : "";
+    if (
+      !KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) ||
+      organizationId !== organizationId.toLowerCase() ||
+      !KAI_SPRINT2_P0_PATTERNS.uuid.test(engagementId) ||
+      engagementId !== engagementId.toLowerCase()
+    ) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_or_engagement_id")],
+      });
+    }
+
+    const payload = requestPayload(req);
+    const payloadKeys = Object.keys(payload);
+    const requirementSetId = typeof payload.requirementSetId === "string" ? payload.requirementSetId : "";
+    if (
+      payloadKeys.length !== 1 ||
+      !Object.hasOwn(payload, "requirementSetId") ||
+      !KAI_SPRINT2_P0_PATTERNS.uuid.test(requirementSetId) ||
+      requirementSetId !== requirementSetId.toLowerCase()
+    ) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker("invalid_uuid_field", "requirement_set_id")],
+      });
+    }
+
+    return invokeService(res, async () => {
+      const service = await getEngagementRequirementApplicabilityService();
+      return service.proposeEngagementRequirementSetApplicability({
+        organizationId,
+        engagementId,
+        requirementSetId,
+        req: { user: safeAuthenticatedUser(req) },
+      });
+    });
+  },
+);
+
+const ENGAGEMENT_REQUIREMENT_SET_APPLICABILITY_REVIEW_DECISIONS = new Set(["applicable", "not_applicable", "retired"]);
+
+/**
+ * KAI Package 2B: authorized human review/approval of the current decision
+ * for one governed (organization, engagement, requirement_set) identity -
+ * the service resolves which row is "current" using the Package 2A
+ * current-authority predicate, so the client never supplies a row id to
+ * supersede. On a first review this confirms the non-authoritative proposal
+ * (Package 2B-A); on a later review it governedly replaces an already
+ * reviewed decision (Package 2B-B) - the prior row is preserved unchanged as
+ * history. The request body accepts only `decision`, constrained to the
+ * three reviewed states Package 2A's schema already supports (`applicable`,
+ * `not_applicable`, `retired`); reviewer identity, review timestamp,
+ * target snapshot, and supersession identity are all derived server-side
+ * inside a governed transaction, never accepted from the client. Only the
+ * fixed `gk_reviewer` role may review; the service itself rejects any
+ * non-human (AI/system) actor unconditionally.
+ */
+router.post(
+  "/admin/organizations/:organizationId/engagements/:engagementId/requirement-sets/:requirementSetId/applicability-review",
+  async (req, res) => {
+    const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+    const engagementId = typeof req.params?.engagementId === "string" ? req.params.engagementId : "";
+    const requirementSetId = typeof req.params?.requirementSetId === "string" ? req.params.requirementSetId : "";
+    if (
+      !KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) ||
+      organizationId !== organizationId.toLowerCase() ||
+      !KAI_SPRINT2_P0_PATTERNS.uuid.test(engagementId) ||
+      engagementId !== engagementId.toLowerCase() ||
+      !KAI_SPRINT2_P0_PATTERNS.uuid.test(requirementSetId) ||
+      requirementSetId !== requirementSetId.toLowerCase()
+    ) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_or_engagement_id_or_requirement_set_id")],
+      });
+    }
+
+    const payload = requestPayload(req);
+    const payloadKeys = Object.keys(payload);
+    if (
+      payloadKeys.length !== 1 ||
+      !Object.hasOwn(payload, "decision") ||
+      !ENGAGEMENT_REQUIREMENT_SET_APPLICABILITY_REVIEW_DECISIONS.has(payload.decision)
+    ) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker("invalid_enum_field", "decision")],
+      });
+    }
+
+    return invokeService(res, async () => {
+      const service = await getEngagementRequirementApplicabilityService();
+      return service.approveEngagementRequirementSetApplicability({
+        organizationId,
+        engagementId,
+        requirementSetId,
+        decision: payload.decision,
+        req: { user: safeAuthenticatedUser(req) },
+      });
+    });
+  },
+);
 
 function validateGkOrganizationIdParamOrSend(req, res) {
   const gkOrganizationId = typeof req.params?.gkOrganizationId === "string" ? req.params.gkOrganizationId : "";

@@ -193,14 +193,13 @@ test("engagement applicability reader is organization scoped and read-only over 
   assert.doesNotMatch(reader, /\bINSERT\b|\bUPDATE\b|\bDELETE\b/);
 });
 
-test("package 1 read foundation adds no schema, applicability write, requirement write, or assessment write", () => {
+test("package 1/2A read foundation adds no schema, requirement write, or assessment write (engagement_requirement_sets write is Package 2B-A's separately-authorized, separately-tested boundary)", () => {
   const packageSources = [
     kaiQueriesSource,
     readFileSync("Backend/kai/services/kaiEngagementContextService.js", "utf8"),
     readFileSync("Backend/kai/routes/sprint2IntakeApi.js", "utf8"),
   ].join("\n");
   assert.doesNotMatch(packageSources, /CREATE TABLE|ALTER TABLE|DROP TABLE/);
-  assert.doesNotMatch(packageSources, /INSERT INTO kai\.engagement_requirement_sets|UPDATE kai\.engagement_requirement_sets|DELETE FROM kai\.engagement_requirement_sets/);
   assert.doesNotMatch(packageSources, /INSERT INTO kai\.requirements|UPDATE kai\.requirements|DELETE FROM kai\.requirements/);
   assert.doesNotMatch(packageSources, /INSERT INTO kai\.requirement_assessments|UPDATE kai\.requirement_assessments|DELETE FROM kai\.requirement_assessments/);
 });

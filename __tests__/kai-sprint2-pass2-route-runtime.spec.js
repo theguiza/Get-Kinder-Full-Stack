@@ -149,6 +149,13 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // KAI engagement Funder Requirements state foundation: read-only
     // classifier, no applicability write.
     "/admin/organizations/:organizationId/engagements/:engagementId/funder-requirements-state",
+    // KAI Package 2B-A: non-authoritative proposal that an external, governed
+    // requirement set applies to this engagement.
+    "/admin/organizations/:organizationId/engagements/:engagementId/requirement-set-applicability-proposals",
+    // KAI Package 2B: authorized human review/approval (2B-A) and governed
+    // replacement (2B-B) of the current decision for one governed identity.
+    // Reviewer identity/timestamp/target snapshot are all server-derived.
+    "/admin/organizations/:organizationId/engagements/:engagementId/requirement-sets/:requirementSetId/applicability-review",
     // KAI engagement requirement target foundation: governed target metadata
     // replacement only, no generic project_metadata patching.
     "/admin/organizations/:organizationId/engagements/:engagementId/requirement-target",
