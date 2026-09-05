@@ -1146,7 +1146,11 @@ router.post(
 
 let engagementContextServicePromise = null;
 async function getEngagementContextService() {
-  if (intakeServiceOverride?.listAuthorizedEngagements || intakeServiceOverride?.updateEngagementRequirementTarget) {
+  if (
+    intakeServiceOverride?.listAuthorizedEngagements ||
+    intakeServiceOverride?.updateEngagementRequirementTarget ||
+    intakeServiceOverride?.classifyEngagementFunderRequirementsState
+  ) {
     return intakeServiceOverride;
   }
   engagementContextServicePromise ||= import("../services/kaiEngagementContextService.js");
@@ -1233,6 +1237,30 @@ router.put("/admin/organizations/:organizationId/engagements/:engagementId/requi
       organizationId,
       engagementId,
       target: payload.target,
+      req: { user: safeAuthenticatedUser(req) },
+    });
+  });
+});
+
+router.get("/admin/organizations/:organizationId/engagements/:engagementId/funder-requirements-state", async (req, res) => {
+  const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+  const engagementId = typeof req.params?.engagementId === "string" ? req.params.engagementId : "";
+  if (
+    !KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) ||
+    organizationId !== organizationId.toLowerCase() ||
+    !KAI_SPRINT2_P0_PATTERNS.uuid.test(engagementId) ||
+    engagementId !== engagementId.toLowerCase()
+  ) {
+    return sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_or_engagement_id")],
+    });
+  }
+
+  return invokeService(res, async () => {
+    const service = await getEngagementContextService();
+    return service.classifyEngagementFunderRequirementsState({
+      organizationId,
+      engagementId,
       req: { user: safeAuthenticatedUser(req) },
     });
   });

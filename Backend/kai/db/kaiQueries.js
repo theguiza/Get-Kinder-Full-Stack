@@ -209,3 +209,103 @@ export async function updateEngagementProjectMetadata(
   );
   return rows[0] || null;
 }
+
+export async function listExternalRequirementSetsForTarget(
+  { sourceCode, frameworkCode },
+  db = pool,
+) {
+  if (!sourceCode || !frameworkCode) return [];
+  const { rows } = await db.query(
+    `SELECT rs.requirement_set_id::text AS requirement_set_id,
+            rs.set_key,
+            rs.set_name,
+            rfv.requirement_framework_version_id::text AS requirement_framework_version_id,
+            rfv.framework_code,
+            rfv.framework_name,
+            rfv.version_label,
+            rfv.framework_status,
+            src.requirement_source_id::text AS requirement_source_id,
+            src.source_type,
+            src.source_code,
+            src.source_name,
+            count(r.requirement_id)::int AS requirement_count,
+            COALESCE(
+              jsonb_agg(
+                jsonb_build_object(
+                  'requirement_id', r.requirement_id::text,
+                  'requirement_key', r.requirement_key
+                )
+                ORDER BY r.display_order ASC, r.requirement_key ASC
+              ) FILTER (WHERE r.requirement_id IS NOT NULL),
+              '[]'::jsonb
+            ) AS requirements
+       FROM kai.requirement_sets rs
+       JOIN kai.requirement_framework_versions rfv
+         ON rfv.requirement_framework_version_id = rs.requirement_framework_version_id
+       JOIN kai.requirement_sources src
+         ON src.requirement_source_id = rfv.requirement_source_id
+       LEFT JOIN kai.requirements r
+         ON r.requirement_set_id = rs.requirement_set_id
+      WHERE src.source_type <> 'kai_standard'
+        AND src.source_code = $1
+        AND rfv.framework_code = $2
+        AND rfv.framework_status = 'active'
+      GROUP BY rs.requirement_set_id,
+               rs.set_key,
+               rs.set_name,
+               rfv.requirement_framework_version_id,
+               rfv.framework_code,
+               rfv.framework_name,
+               rfv.version_label,
+               rfv.framework_status,
+               src.requirement_source_id,
+               src.source_type,
+               src.source_code,
+               src.source_name
+      ORDER BY src.source_code ASC, rfv.framework_code ASC, rfv.version_label ASC, rs.set_key ASC
+      LIMIT 100`,
+    [sourceCode, frameworkCode],
+  );
+  return rows;
+}
+
+export async function listEngagementRequirementSetsForOrganization(
+  { organizationId, engagementId },
+  db = pool,
+) {
+  if (!organizationId || !engagementId) return [];
+  const { rows } = await db.query(
+    `SELECT ers.engagement_requirement_set_id::text AS engagement_requirement_set_id,
+            ers.organization_id::text AS organization_id,
+            ers.engagement_id::text AS engagement_id,
+            ers.requirement_set_id::text AS requirement_set_id,
+            ers.applicability_status,
+            ers.created_by::text AS created_by,
+            ers.created_by_type,
+            ers.created_at,
+            rs.set_key,
+            rs.set_name,
+            rfv.requirement_framework_version_id::text AS requirement_framework_version_id,
+            rfv.framework_code,
+            rfv.framework_name,
+            rfv.version_label,
+            rfv.framework_status,
+            src.requirement_source_id::text AS requirement_source_id,
+            src.source_type,
+            src.source_code,
+            src.source_name
+       FROM kai.engagement_requirement_sets ers
+       JOIN kai.requirement_sets rs
+         ON rs.requirement_set_id = ers.requirement_set_id
+       JOIN kai.requirement_framework_versions rfv
+         ON rfv.requirement_framework_version_id = rs.requirement_framework_version_id
+       JOIN kai.requirement_sources src
+         ON src.requirement_source_id = rfv.requirement_source_id
+      WHERE ers.organization_id = $1
+        AND ers.engagement_id = $2
+      ORDER BY ers.created_at DESC, ers.engagement_requirement_set_id ASC
+      LIMIT 100`,
+    [organizationId, engagementId],
+  );
+  return rows;
+}

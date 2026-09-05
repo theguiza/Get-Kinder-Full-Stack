@@ -4,6 +4,8 @@ import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationServic
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
 import {
   getEngagementForOrganization,
+  listEngagementRequirementSetsForOrganization,
+  listExternalRequirementSetsForTarget,
   listEngagementsForOrganization,
   updateEngagementProjectMetadata,
 } from "../db/kaiQueries.js";
@@ -28,8 +30,10 @@ const LIST_ENGAGEMENTS_ALLOWED_ROLES = new Set(["gk_admin", "gk_operator", "clie
 const LIST_ENGAGEMENTS_OPERATION = "list_engagement_contexts";
 const UPDATE_ENGAGEMENT_TARGET_ALLOWED_ROLES = new Set(["gk_admin", "gk_operator", "client_admin"]);
 const UPDATE_ENGAGEMENT_TARGET_OPERATION = "update_engagement_requirement_target";
+const CLASSIFY_FUNDER_REQUIREMENTS_ALLOWED_ROLES = new Set(["gk_admin", "gk_operator", "client_admin"]);
+const CLASSIFY_FUNDER_REQUIREMENTS_OPERATION = "classify_engagement_funder_requirements_state";
 const ENGAGEMENT_REQUIREMENT_TARGET_METADATA_KEY = "engagement_requirement_target";
-const SAFE_TARGET_IDENTIFIER_PATTERN = /^[A-Za-z][A-Za-z0-9._:-]{0,127}$/;
+const SAFE_TARGET_IDENTIFIER_PATTERN = /^[a-z][a-z0-9_]{0,95}$/;
 const SAFE_TARGET_LABEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 ._:/#()-]{0,199}$/;
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const TARGET_FIELD_DEFINITIONS = Object.freeze({
@@ -42,6 +46,21 @@ const TARGET_FIELD_DEFINITIONS = Object.freeze({
   reporting_period_end: "date",
 });
 const TARGET_FIELD_KEYS = new Set(Object.keys(TARGET_FIELD_DEFINITIONS));
+const EXTERNAL_REQUIREMENT_SOURCE_TYPES = new Set([
+  "funder",
+  "government_program",
+  "reporting_template",
+  "organization",
+  "standard_framework",
+]);
+const CLASSIFIER_STATES = Object.freeze({
+  noTargetSelected: "no_target_selected",
+  targetSelectedNoAuthoritativeRequirementSet: "target_selected_no_authoritative_requirement_set",
+  authoritativeRequirementSetNotApplicable: "authoritative_requirement_set_not_applicable",
+  applicableRequirementSetAssessmentNotAvailable: "applicable_requirement_set_assessment_not_available",
+});
+const APPLICABILITY_NOT_CONFIRMED_REASON =
+  "engagement_requirement_sets lacks reviewed_by/reviewed_at/current_effective_state/supersession/target_snapshot provenance";
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -173,9 +192,134 @@ function isUpdateEngagementTargetInput(value) {
   return isPlainObject(value.actorContext) || isPlainObject(value.req);
 }
 
+function isClassifyEngagementFunderRequirementsInput(value) {
+  const allowedKeys = new Set(["organizationId", "engagementId", "actorContext", "req"]);
+  if (!isPlainObject(value) || !Object.keys(value).every((key) => allowedKeys.has(key))) return false;
+  if (!isNonEmptyString(value.organizationId) || !isNonEmptyString(value.engagementId)) return false;
+  return isPlainObject(value.actorContext) || isPlainObject(value.req);
+}
+
 function actorError(actorResult) {
   if (actorResult.error_code === "mapped_kai_user_required") return buildKaiError("mapped_kai_user_required");
   return buildKaiError(actorResult.error_code || "unauthorized");
+}
+
+async function resolveAuthorizedHumanActor(input, operation, allowedRoles, dependencies) {
+  const actorResult = input.actorContext
+    ? { ok: true, actorContext: input.actorContext }
+    : await resolveKaiActorContext(input.req, dependencies);
+  if (!actorResult.ok) return actorError(actorResult);
+
+  const { actorContext } = actorResult;
+  if (!isMappedHumanActor(actorContext)) {
+    return buildKaiError("authorization_denied");
+  }
+
+  const auth = validateActorCanPerformOperation(
+    actorContext,
+    operation,
+    input.organizationId,
+    { allowedRoles },
+  );
+  if (!auth.ok) {
+    return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });
+  }
+  return { ok: true, actorContext };
+}
+
+function hasSelectedTarget(target) {
+  return Object.keys(target || {}).length > 0;
+}
+
+function targetHasUnsupportedAuthorityDimensions(target) {
+  return Boolean(
+    target.grant_program_identity ||
+    target.report_identity ||
+    target.reporting_template_identity ||
+    target.reporting_period_start ||
+    target.reporting_period_end,
+  );
+}
+
+function requirementSetAuthorityDto(row = {}) {
+  return {
+    requirement_set_id: row.requirement_set_id,
+    set_key: row.set_key,
+    requirement_count: Number(row.requirement_count || 0),
+    requirements: Array.isArray(row.requirements)
+      ? row.requirements.map((requirement) => ({
+          requirement_id: requirement.requirement_id,
+          requirement_key: requirement.requirement_key,
+        }))
+      : [],
+    requirement_framework_version: {
+      requirement_framework_version_id: row.requirement_framework_version_id,
+      framework_code: row.framework_code,
+      version_label: row.version_label,
+      framework_status: row.framework_status,
+    },
+    requirement_source: {
+      requirement_source_id: row.requirement_source_id,
+      source_type: row.source_type,
+      source_code: row.source_code,
+    },
+  };
+}
+
+function applicabilityRowDto(row = {}) {
+  return {
+    engagement_requirement_set_id: row.engagement_requirement_set_id,
+    organization_id: row.organization_id,
+    engagement_id: row.engagement_id,
+    requirement_set_id: row.requirement_set_id,
+    applicability_status: row.applicability_status,
+    created_by_type: row.created_by_type,
+    created_at: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at || null,
+    requirement_framework_version: {
+      requirement_framework_version_id: row.requirement_framework_version_id,
+      framework_code: row.framework_code,
+      version_label: row.version_label,
+      framework_status: row.framework_status,
+    },
+    requirement_source: {
+      requirement_source_id: row.requirement_source_id,
+      source_type: row.source_type,
+      source_code: row.source_code,
+    },
+  };
+}
+
+function isExternalAuthoritativeRequirementSet(row = {}) {
+  return (
+    EXTERNAL_REQUIREMENT_SOURCE_TYPES.has(row.source_type) &&
+    row.source_type !== "kai_standard" &&
+    row.framework_status === "active"
+  );
+}
+
+function rowMatchesTarget(row = {}, target = {}) {
+  return row.source_code === target.target_funder_id && row.framework_code === target.target_framework;
+}
+
+function classifyApplicabilityRows({ target, authoritativeRequirementSets, applicabilityRows }) {
+  const authoritativeIds = new Set(authoritativeRequirementSets.map((row) => row.requirement_set_id));
+  const matchingRows = applicabilityRows.filter((row) =>
+    authoritativeIds.has(row.requirement_set_id) &&
+    isExternalAuthoritativeRequirementSet(row) &&
+    rowMatchesTarget(row, target),
+  );
+  return matchingRows.map((row) => ({
+    ...applicabilityRowDto(row),
+    applicability_conclusion: "NOT_CONFIRMED",
+    not_confirmed_reason: APPLICABILITY_NOT_CONFIRMED_REASON,
+    missing_persistence: [
+      "reviewed_by",
+      "reviewed_at",
+      "current_effective_state",
+      "superseded_by_or_replaced_by",
+      "target_snapshot_at_approval",
+    ],
+  }));
 }
 
 export async function listAuthorizedEngagements(input, dependencies = {}) {
@@ -333,19 +477,163 @@ export async function updateEngagementRequirementTarget(input, dependencies = {}
   };
 }
 
+export async function classifyEngagementFunderRequirementsState(input, dependencies = {}) {
+  if (!isKaiSprint2Enabled(dependencies.env || process.env)) {
+    return buildKaiError("feature_disabled");
+  }
+  if (!isClassifyEngagementFunderRequirementsInput(input)) {
+    return buildKaiError("validation_blocker");
+  }
+
+  const actor = await resolveAuthorizedHumanActor(
+    input,
+    CLASSIFY_FUNDER_REQUIREMENTS_OPERATION,
+    CLASSIFY_FUNDER_REQUIREMENTS_ALLOWED_ROLES,
+    dependencies,
+  );
+  if (!actor.ok) return actor;
+
+  const readEngagement = dependencies.getEngagementForOrganization || getEngagementForOrganization;
+  const listAuthority = dependencies.listExternalRequirementSetsForTarget || listExternalRequirementSetsForTarget;
+  const listApplicability = dependencies.listEngagementRequirementSetsForOrganization || listEngagementRequirementSetsForOrganization;
+
+  const engagement = await readEngagement({
+    organizationId: input.organizationId,
+    engagementId: input.engagementId,
+  });
+  if (!engagement) return buildKaiError("not_found");
+
+  const tenant = validateTenantBoundaryConsistency({
+    expectedOrganizationId: input.organizationId,
+    payload: { organization_id: input.organizationId, engagement_id: input.engagementId },
+    engagementRecord: engagement,
+  });
+  if (tenant.severity === "blocker") {
+    return buildKaiError("tenant_boundary_violation", { blockers: [tenant] });
+  }
+
+  const engagementDto = serializeEngagementTarget(engagement);
+  const target = engagementDto.requirement_target;
+  if (!hasSelectedTarget(target)) {
+    return {
+      ok: true,
+      data: {
+        state: CLASSIFIER_STATES.noTargetSelected,
+        engagement: engagementDto,
+        target,
+        authoritative_requirement_sets: [],
+        applicability_rows: [],
+        applicable_requirement_sets: [],
+        not_confirmed_states: [CLASSIFIER_STATES.applicableRequirementSetAssessmentNotAvailable],
+      },
+      error: null,
+    };
+  }
+
+  if (
+    !target.target_funder_id ||
+    !target.target_framework ||
+    targetHasUnsupportedAuthorityDimensions(target)
+  ) {
+    return {
+      ok: true,
+      data: {
+        state: CLASSIFIER_STATES.targetSelectedNoAuthoritativeRequirementSet,
+        engagement: engagementDto,
+        target,
+        authoritative_requirement_sets: [],
+        applicability_rows: [],
+        applicable_requirement_sets: [],
+        not_confirmed_states: [CLASSIFIER_STATES.applicableRequirementSetAssessmentNotAvailable],
+        missing_persistence: targetHasUnsupportedAuthorityDimensions(target)
+          ? [
+              "requirement_set_target_grant_program_identity",
+              "requirement_set_target_report_identity",
+              "requirement_set_target_reporting_template_identity",
+              "requirement_set_effective_reporting_period",
+            ]
+          : [],
+      },
+      error: null,
+    };
+  }
+
+  const authoritativeRequirementSets = (await listAuthority({
+    sourceCode: target.target_funder_id,
+    frameworkCode: target.target_framework,
+  })).filter((row) => isExternalAuthoritativeRequirementSet(row) && rowMatchesTarget(row, target));
+
+  if (authoritativeRequirementSets.length === 0) {
+    return {
+      ok: true,
+      data: {
+        state: CLASSIFIER_STATES.targetSelectedNoAuthoritativeRequirementSet,
+        engagement: engagementDto,
+        target,
+        authoritative_requirement_sets: [],
+        applicability_rows: [],
+        applicable_requirement_sets: [],
+        not_confirmed_states: [CLASSIFIER_STATES.applicableRequirementSetAssessmentNotAvailable],
+      },
+      error: null,
+    };
+  }
+
+  const applicabilityRows = await listApplicability({
+    organizationId: input.organizationId,
+    engagementId: input.engagementId,
+  });
+  const notConfirmedApplicability = classifyApplicabilityRows({
+    target,
+    authoritativeRequirementSets,
+    applicabilityRows,
+  });
+
+  return {
+    ok: true,
+    data: {
+      state: CLASSIFIER_STATES.authoritativeRequirementSetNotApplicable,
+      engagement: engagementDto,
+      target,
+      authoritative_requirement_sets: authoritativeRequirementSets.map(requirementSetAuthorityDto),
+      applicability_rows: notConfirmedApplicability,
+      applicable_requirement_sets: [],
+      applicability_conclusion: notConfirmedApplicability.length > 0 ? "NOT_CONFIRMED" : "none",
+      not_confirmed_states: [CLASSIFIER_STATES.applicableRequirementSetAssessmentNotAvailable],
+      missing_persistence: notConfirmedApplicability.length > 0
+        ? [
+            "reviewed_by",
+            "reviewed_at",
+            "current_effective_state",
+            "superseded_by_or_replaced_by",
+            "target_snapshot_at_approval",
+          ]
+        : [],
+    },
+    error: null,
+  };
+}
+
 export const __engagementContextServiceContract = Object.freeze({
   LIST_ENGAGEMENTS_ALLOWED_ROLES,
   LIST_ENGAGEMENTS_OPERATION,
   UPDATE_ENGAGEMENT_TARGET_ALLOWED_ROLES,
   UPDATE_ENGAGEMENT_TARGET_OPERATION,
+  CLASSIFY_FUNDER_REQUIREMENTS_ALLOWED_ROLES,
+  CLASSIFY_FUNDER_REQUIREMENTS_OPERATION,
   ENGAGEMENT_REQUIREMENT_TARGET_METADATA_KEY,
   TARGET_FIELD_DEFINITIONS,
+  CLASSIFIER_STATES,
+  APPLICABILITY_NOT_CONFIRMED_REASON,
 });
 
 export const __engagementContextServiceTestables = Object.freeze({
   isListEngagementsInput,
   isUpdateEngagementTargetInput,
+  isClassifyEngagementFunderRequirementsInput,
   isMappedHumanActor,
   normalizeEngagementRequirementTarget,
   serializeEngagementTarget,
+  isExternalAuthoritativeRequirementSet,
+  rowMatchesTarget,
 });

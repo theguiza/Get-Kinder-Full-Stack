@@ -19917,3 +19917,38 @@ Current requirement assessments operate on generic organization-scope requiremen
 **NOT_CONFIRMED:** no live database, production/staging, browser, cloud, or real-client-data verification was performed. No Package 1B instructions were present in the owner prompt after "below"; Package 1B was therefore not started.
 
 **Package remaining issue:** Package 1A closes only the engagement target foundation. Applicability read classification, applicability writer, requirement authority intake/review, engagement-specific assessments, and `/impact-library` projection remain outside this package.
+
+### Package 1B — Engagement Requirement Applicability Read Foundation
+
+**Date:** 2026-09-05
+
+**Scope (owner-authorized Package 1 continuation):** implement only the remaining Package 1 read foundation: organization-scoped reader over existing `kai.engagement_requirement_sets`, explicit governed requirement-authority lookup through `requirement_sources -> requirement_framework_versions -> requirement_sets -> requirements`, and engagement Funder Requirements state classification. No schema, migration, applicability writer, requirement-authority writer, engagement-specific assessment creation, `/impact-library` presentation change, production/cloud/database mutation, P2 reopening, or Current State update was performed.
+
+**Starting point:** branch `main`, starting HEAD `2d5ebab3aaf83e78f9cc4a0728e8b28b67d179c6` (Package 1A), clean worktree.
+
+**Implementation:**
+- `Backend/kai/db/kaiQueries.js` - added read-only `listExternalRequirementSetsForTarget` over the existing governed hierarchy. It requires exact `source_code` and `framework_code`, excludes `source_type = 'kai_standard'`, requires `framework_status = 'active'`, and returns requirement-set/source/framework identifiers plus individual requirement IDs/keys only. Added read-only `listEngagementRequirementSetsForOrganization`, scoped by `organization_id` and `engagement_id`, over existing `kai.engagement_requirement_sets` joined to the governed requirement hierarchy.
+- `Backend/kai/services/kaiEngagementContextService.js` - added `classifyEngagementFunderRequirementsState` with precedence `no_target_selected`, `target_selected_no_authoritative_requirement_set`, `authoritative_requirement_set_not_applicable`, and `applicable_requirement_set_assessment_not_available`. The classifier reads controlled target metadata, performs exact external authority lookup, excludes generic KAI baseline authority, fails closed on unsupported grant/report/template/reporting-period dimensions without persisted authority mapping, and treats existing applicability rows as `NOT_CONFIRMED` because persistence lacks reviewed/current applicability proof.
+- `Backend/kai/routes/sprint2IntakeApi.js` - added read-only `GET /admin/organizations/:organizationId/engagements/:engagementId/funder-requirements-state`, delegating to the classifier with sanitized request context. No unrestricted metadata or applicability write route was added.
+- `__tests__/kai-sprint2-engagement-requirement-target.spec.js` - extended coverage for the read foundation: authority reader hierarchy/static contract, applicability reader read-only organization scope, prohibited write/schema classes, classifier state 1, classifier state 2 including generic `kai_standard` exclusion and unsupported target dimensions, classifier state 3, mere applicability-row existence not establishing authority, target mismatch fail-closed behavior, cross-organization negative, and tenant mismatch negative.
+- `__tests__/kai-sprint2-pass2-route-runtime.spec.js` - added route-list and sanitized-delegation coverage for the read-only classifier route.
+
+**Classifier states:**
+- `no_target_selected` - PROVEN.
+- `target_selected_no_authoritative_requirement_set` - PROVEN, including generic KAI baseline exclusion and fail-closed unsupported target dimensions.
+- `authoritative_requirement_set_not_applicable` - PROVEN for active external requirement authority with no current applicability proof.
+- `applicable_requirement_set_assessment_not_available` - NOT_CONFIRMED under current no-schema persistence. Existing `engagement_requirement_sets` rows, including `applicability_status = 'confirmed'`, do not prove the approved reviewed/current applicability contract.
+
+**Exact reviewed/current applicability evidence used:** none. Current B1.1 persistence provides `applicability_status`, `created_by`, `created_by_type`, and `created_at`, but lacks `reviewed_by`, `reviewed_at`, current/effective state, supersession/replacement linkage, and target snapshot at approval. The classifier therefore never promotes an applicability row to current applicability in Package 1B.
+
+**Tests run** (`DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel` set for every Node command):
+- `node --test __tests__/kai-sprint2-engagement-requirement-target.spec.js __tests__/kai-sprint2-pass2-route-runtime.spec.js __tests__/kai-sprint2-uat-final-completion-boundary.spec.js __tests__/kai-sprint2-context-service.spec.js` - 81/81 passed.
+- `node --test __tests__/kai-sprint2-requirements-readiness-rollup.spec.js` - rerun with approved loopback-listener escalation passed 6/6; existing generic organization-scope requirements readiness remained unchanged.
+- `node --test __tests__/kai-sprint2-authorization.spec.js __tests__/kai-sprint2-tenant-validator.spec.js __tests__/kai-sprint2-organization-enablement.spec.js __tests__/kai-sprint2-organization-context-service.spec.js __tests__/kai-runtime-context-bootstrap.spec.js` - 59/59 passed.
+- `git diff --check` - passed.
+
+**TOOL_VERIFIED:** organization-scoped applicability reader; explicit external active requirement-authority lookup; classifier precedence and fail-closed behavior; generic KAI baseline is not funder-specific authority; applicability-row existence alone does not establish reviewed/current applicability; target mismatch fails closed; cross-organization and tenant negatives pass; no schema/migration or prohibited write classes were introduced.
+
+**Persistence deficiency:** to genuinely represent `applicable_requirement_set_assessment_not_available`, existing persistence must add or otherwise expose reviewed/current applicability proof: `reviewed_by`, `reviewed_at`, current/effective state, supersession/replacement linkage, and target snapshot at approval. For grant/program/report/template/reporting-period-specific targets, requirement-set authority also needs persisted exact target/effective-period mapping fields; Package 1B does not add them.
+
+**Prohibited actions not performed:** no push, deploy, production/browser canary, production/shared database mutation, schema change, migration, cloud configuration, credential/secret access, feature-flag or tenant/environment change, real client-data handling, Generated Drafts/generation/export work, P2 eligibility-semantic change, `requirement_authority_absent` change, applicability write, requirement authority write, engagement-specific assessment creation, `/impact-library` presentation change, or `00_KAI_CURRENT_STATE.md` update.
