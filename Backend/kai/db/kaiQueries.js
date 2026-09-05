@@ -320,6 +320,26 @@ export async function listEngagementRequirementSetsForOrganization(
 }
 
 /**
+ * Package 3A read: the bare requirement_set_id a single kai.requirements row
+ * belongs to. kai.requirements (B1.1) carries no organization_id/engagement_id
+ * of its own - shared catalogue data - so this is only ever used to resolve
+ * a requirement_id into the requirement_set_id needed to look up that set's
+ * governed authority (getRequirementSetAuthority) and its engagement
+ * applicability (listEngagementRequirementSetsForOrganization).
+ */
+export async function getRequirementSetIdForRequirement({ requirementId }, db = pool) {
+  if (!requirementId) return null;
+  const { rows } = await db.query(
+    `SELECT requirement_id::text AS requirement_id, requirement_set_id::text AS requirement_set_id
+       FROM kai.requirements
+      WHERE requirement_id = $1
+      LIMIT 1`,
+    [requirementId],
+  );
+  return rows[0] || null;
+}
+
+/**
  * Package 2B-A governed-authority read: the exact source/framework/status
  * identity of one requirement set, keyed by requirement_set_id. Used only to
  * validate a proposed or reviewed engagement_requirement_sets row against its

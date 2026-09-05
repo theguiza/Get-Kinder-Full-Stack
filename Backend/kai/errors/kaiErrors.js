@@ -29,6 +29,7 @@ export const KAI_ERROR_STATUS = Object.freeze({
   role_not_found: 404,
   last_admin_protection: 409,
   membership_state_conflict: 409,
+  engagement_requirement_applicability_not_confirmed: 422,
 });
 
 export const KAI_ERROR_MESSAGES = Object.freeze({
@@ -62,6 +63,7 @@ export const KAI_ERROR_MESSAGES = Object.freeze({
   role_not_found: "Requested KAI role does not exist.",
   last_admin_protection: "This change would leave the organization with no effective active client_admin.",
   membership_state_conflict: "More than one stored client-role row exists for this user in this organization; resolve the conflict before mutating.",
+  engagement_requirement_applicability_not_confirmed: "This requirement's requirement set does not have current, reviewed, effective-applicable Package 2B applicability for this engagement against its current approved target.",
 });
 
 export function buildKaiError(code, overrides = {}) {

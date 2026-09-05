@@ -1343,6 +1343,90 @@ export function createProductionMetadataOnlyAuditForRequirementAssessment({
   });
 }
 
+/**
+ * Package 3A production composition of the `metadataOnlyAudit` contract
+ * required by the engagement-scoped requirement-assessment write
+ * (Backend/kai/dictionary/postgresRequirementAssessmentRepository.js#assessEngagementRequirement).
+ * Byte-identical discipline to
+ * `createProductionMetadataOnlyAuditForRequirementAssessment` above (bound
+ * identity, payload.requirement_id/requirement_assessment_id checks, never
+ * fabricates the generated assessment id), additionally bound to
+ * engagementId and additionally requiring payload.engagement_id to match it
+ * exactly - this is the one field that distinguishes an engagement-scope
+ * assessment audit from an organization-scope one. Never reused for the
+ * organization-scope (engagement_id NULL) write, and the organization-scope
+ * adapter above is never reused for this write either.
+ */
+export function createProductionMetadataOnlyAuditForEngagementRequirementAssessment({
+  organizationId,
+  engagementId,
+  requirementId,
+  actorContext,
+  now,
+  insertAuditEvent = insertRequiredSuccessfulAuditEvent,
+} = {}) {
+  if (typeof organizationId !== "string" || organizationId.length === 0) {
+    throw new TypeError("createProductionMetadataOnlyAuditForEngagementRequirementAssessment requires organizationId.");
+  }
+  if (typeof engagementId !== "string" || engagementId.length === 0) {
+    throw new TypeError("createProductionMetadataOnlyAuditForEngagementRequirementAssessment requires engagementId.");
+  }
+  if (typeof requirementId !== "string" || requirementId.length === 0) {
+    throw new TypeError("createProductionMetadataOnlyAuditForEngagementRequirementAssessment requires requirementId.");
+  }
+
+  function isPlainObject(value) {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  }
+
+  return Object.freeze({
+    prepareMetadataOnlyAudit({ payload, db } = {}) {
+      if (!isPlainObject(payload)) return { ok: false };
+      if (payload.requirement_id !== requirementId) return { ok: false };
+      if (payload.engagement_id !== engagementId) return { ok: false };
+      const requirementAssessmentId = payload.requirement_assessment_id;
+      if (typeof requirementAssessmentId !== "string" || !REQUIREMENT_ASSESSMENT_ID_PATTERN.test(requirementAssessmentId)) {
+        return { ok: false };
+      }
+
+      const metadata = {
+        organization_id: organizationId,
+        engagement_id: engagementId,
+        object_type: "requirement_assessment",
+        target_object_type: "requirement_assessment",
+        object_id: requirementAssessmentId,
+        operation: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "package_3a_engagement_requirement_assessment_created",
+        operation_type: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "package_3a_engagement_requirement_assessment_created",
+        validator_key: typeof payload.validator_key === "string" ? payload.validator_key : null,
+        actor_type: actorContext?.actorType || "human",
+        actor_user_id: actorContext?.actorUserId || null,
+        request_id: actorContext?.requestId || null,
+        route: "package_3a_engagement_requirement_assessment",
+        created_at: typeof now === "string" ? now : new Date().toISOString(),
+        metadata_only: true,
+        contains_raw_file_content: false,
+        contains_raw_parsed_rows: false,
+        contains_client_pii: false,
+        contains_prompt_text: false,
+        contains_unsafe_generated_text: false,
+        contains_signed_urls: false,
+        contains_storage_credentials: false,
+      };
+
+      return {
+        ok: true,
+        async publish() {
+          const result = await insertAuditEvent(metadata, db);
+          if (!result || result.ok !== true) {
+            throw new Error("package_3a_engagement_requirement_assessment_metadata_only_audit_publish_failed");
+          }
+          return result;
+        },
+      };
+    },
+  });
+}
+
 export const __testables = Object.freeze({
   createProductionMetadataOnlyAudit,
   createProductionMetadataOnlyAuditForSensitivityAllowedUseDecision,
@@ -1362,4 +1446,5 @@ export const __testables = Object.freeze({
   createProductionMetadataOnlyAuditForAccessAdministration,
   createProductionMetadataOnlyAuditForImpactEvaluation,
   createProductionMetadataOnlyAuditForRequirementAssessment,
+  createProductionMetadataOnlyAuditForEngagementRequirementAssessment,
 });

@@ -138,6 +138,43 @@ function isReadOrganizationRequirementAssessmentInput(input) {
   return UUID_PATTERN.test(input.organizationId) && UUID_PATTERN.test(input.requirementId);
 }
 
+/**
+ * Package 3A engagement-scope sibling of `isAssessOrganizationRequirementInput`:
+ * identical shape, plus a mandatory non-null engagementId. This repository
+ * never derives or checks Package 2B applicability itself (that gate is
+ * owned by the service layer, which must resolve it before calling
+ * `assessEngagementRequirement`) - the repository's own responsibility is
+ * exactly what it is for the organization-scope path: compute the
+ * requirement's deterministic state/fingerprint from governed inputs and
+ * persist it, now simply scoped to a non-null engagement_id identity.
+ */
+function isAssessEngagementRequirementInput(input) {
+  const allowedKeys = new Set([
+    "organizationId", "engagementId", "requirementId", "actorUserId", "actorRole", "now", "metadataOnlyAudit",
+  ]);
+  if (!isPlainObject(input) || !hasOnlyKeys(input, allowedKeys)) return false;
+  return (
+    UUID_PATTERN.test(input.organizationId) &&
+    UUID_PATTERN.test(input.engagementId) &&
+    UUID_PATTERN.test(input.requirementId) &&
+    isNonEmptyString(input.actorUserId) &&
+    isNonEmptyString(input.actorRole) &&
+    isCanonicalUtcTimestamp(input.now) &&
+    Boolean(input.metadataOnlyAudit) &&
+    typeof input.metadataOnlyAudit.prepareMetadataOnlyAudit === "function"
+  );
+}
+
+function isReadEngagementRequirementAssessmentInput(input) {
+  const allowedKeys = new Set(["organizationId", "engagementId", "requirementId"]);
+  if (!isPlainObject(input) || !hasOnlyKeys(input, allowedKeys)) return false;
+  return (
+    UUID_PATTERN.test(input.organizationId) &&
+    UUID_PATTERN.test(input.engagementId) &&
+    UUID_PATTERN.test(input.requirementId)
+  );
+}
+
 function isListOrganizationRequirementsReadinessInput(input) {
   const allowedKeys = new Set(["organizationId"]);
   if (!isPlainObject(input) || !hasOnlyKeys(input, allowedKeys)) return false;
@@ -893,6 +930,59 @@ async function readExistingAssessmentRow(tx, { organizationId, requirementId, st
   return rows[0] || null;
 }
 
+/**
+ * Package 3A engagement-scope sibling of `insertAssessmentRow`: identical
+ * shape, except engagement_id is the caller's non-null engagementId (never
+ * NULL) and the idempotent-replay conflict target is C2.1's own engagement-
+ * scope partial unique index
+ * (ux_requirement_assessments_c2_1_engagement_scope_fingerprint -
+ * `UNIQUE (organization_id, engagement_id, requirement_id, state_fingerprint)
+ * WHERE engagement_id IS NOT NULL`), never the organization-scope index the
+ * sibling above conflicts on. The FK `requirement_assessments_c2_1_engagement_fk`
+ * (engagement_id, organization_id) -> kai.engagements(engagement_id,
+ * organization_id) rejects (23503) an engagementId that does not belong to
+ * organizationId at the database level, as defense-in-depth behind the
+ * service-layer tenant check that is expected to have already resolved
+ * `getEngagementForOrganization` for this exact pair before this insert runs.
+ */
+async function insertEngagementAssessmentRow(tx, { organizationId, engagementId, requirementId, assessmentState, explanation, stateFingerprint, actorUserId, now }) {
+  const { rows } = await tx.query(
+    `INSERT INTO kai.requirement_assessments (
+       organization_id, engagement_id, requirement_id, assessment_state, assessment_explanation,
+       state_fingerprint, created_by, created_by_type, created_at
+     ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7::uuid, 'human', $8::timestamptz)
+     ON CONFLICT (organization_id, engagement_id, requirement_id, state_fingerprint) WHERE engagement_id IS NOT NULL
+       DO NOTHING
+     RETURNING requirement_assessment_id::text AS requirement_assessment_id, organization_id::text AS organization_id,
+               engagement_id::text AS engagement_id, requirement_id::text AS requirement_id, assessment_state, assessment_explanation,
+               state_fingerprint, created_at`,
+    [organizationId, engagementId, requirementId, assessmentState, explanation, stateFingerprint, actorUserId, now],
+  );
+  return rows[0] || null;
+}
+
+/**
+ * Package 3A engagement-scope sibling of `readExistingAssessmentRow`: reads
+ * strictly `WHERE engagement_id = $2` (never `IS NULL`) so this read can
+ * never observe, and can never be confused with, the organization-scope
+ * (engagement_id IS NULL) row for the same organization+requirement -
+ * distinct identity, distinct index, distinct query.
+ */
+async function readExistingEngagementAssessmentRow(tx, { organizationId, engagementId, requirementId, stateFingerprint }) {
+  const { rows } = await tx.query(
+    `SELECT requirement_assessment_id::text AS requirement_assessment_id, organization_id::text AS organization_id,
+            engagement_id::text AS engagement_id, requirement_id::text AS requirement_id, assessment_state, assessment_explanation,
+            state_fingerprint, created_at
+       FROM kai.requirement_assessments
+      WHERE organization_id = $1::uuid
+        AND engagement_id = $2::uuid
+        AND requirement_id = $3::uuid
+        AND state_fingerprint = $4`,
+    [organizationId, engagementId, requirementId, stateFingerprint],
+  );
+  return rows[0] || null;
+}
+
 async function insertEvidenceLink(tx, { organizationId, requirementAssessmentId, evidenceItemId }) {
   await tx.query(
     `INSERT INTO kai.requirement_assessment_evidence_links (organization_id, requirement_assessment_id, evidence_item_id)
@@ -1143,17 +1233,7 @@ function sortedIds(ids) {
  * commit. Now covers the C3.A3 decision-link and gap-link provenance too,
  * not just C2.1's bare evidence/claim membership links.
  */
-function persistedAssessmentMatchesExpected(persistedRow, persistedProvenance, expected) {
-  if (!persistedRow) return false;
-  if (
-    persistedRow.organization_id !== expected.organizationId ||
-    persistedRow.requirement_id !== expected.requirementId ||
-    persistedRow.engagement_id !== null ||
-    persistedRow.assessment_state !== expected.assessmentState ||
-    persistedRow.assessment_explanation !== expected.explanation ||
-    persistedRow.state_fingerprint !== expected.stateFingerprint
-  ) return false;
-
+function provenanceMatchesExpected(persistedProvenance, expected) {
   if (JSON.stringify(sortedIds(persistedProvenance.evidenceItemIds)) !== JSON.stringify(sortedIds(expected.evidenceItemIds))) return false;
   if (JSON.stringify(sortedIds(persistedProvenance.claimIds)) !== JSON.stringify(sortedIds(expected.claimIds))) return false;
 
@@ -1176,6 +1256,40 @@ function persistedAssessmentMatchesExpected(persistedRow, persistedProvenance, e
   if (JSON.stringify(persistedConflictPairs) !== JSON.stringify(sortedIds(expected.conflictResolutionPairs || []))) return false;
 
   return true;
+}
+
+function persistedAssessmentMatchesExpected(persistedRow, persistedProvenance, expected) {
+  if (!persistedRow) return false;
+  if (
+    persistedRow.organization_id !== expected.organizationId ||
+    persistedRow.requirement_id !== expected.requirementId ||
+    persistedRow.engagement_id !== null ||
+    persistedRow.assessment_state !== expected.assessmentState ||
+    persistedRow.assessment_explanation !== expected.explanation ||
+    persistedRow.state_fingerprint !== expected.stateFingerprint
+  ) return false;
+
+  return provenanceMatchesExpected(persistedProvenance, expected);
+}
+
+/**
+ * Package 3A engagement-scope sibling of `persistedAssessmentMatchesExpected`:
+ * identical provenance comparison, but the identity check requires
+ * `engagement_id` to equal the expected non-null engagementId instead of
+ * requiring it to be null.
+ */
+function persistedEngagementAssessmentMatchesExpected(persistedRow, persistedProvenance, expected) {
+  if (!persistedRow) return false;
+  if (
+    persistedRow.organization_id !== expected.organizationId ||
+    persistedRow.requirement_id !== expected.requirementId ||
+    persistedRow.engagement_id !== expected.engagementId ||
+    persistedRow.assessment_state !== expected.assessmentState ||
+    persistedRow.assessment_explanation !== expected.explanation ||
+    persistedRow.state_fingerprint !== expected.stateFingerprint
+  ) return false;
+
+  return provenanceMatchesExpected(persistedProvenance, expected);
 }
 
 export function createPostgresRequirementAssessmentRepository({ runInTransaction, filterCurrentGaps } = {}) {
@@ -1262,6 +1376,149 @@ export function createPostgresRequirementAssessmentRepository({ runInTransaction
         if (error instanceof MalformedResultRowError) return failure("system_error");
         if (error?.code === "23514" || error?.code === "22P02") return failure("validation_blocker");
         if (error?.code === "23503") return failure("conflict_current_state_changed");
+        return failure("system_error");
+      }
+    },
+
+    // Package 3A engagement-scope write: byte-identical to
+    // `assessOrganizationRequirement` above (same rule table, same
+    // deterministic loadInputs/deriveState/computeFingerprint/writeProvenance
+    // functions computed from the same organization-scope governed inputs -
+    // engagement_id never changes which governed rows are read), except the
+    // persisted identity is (organization_id, engagementId, requirement_id)
+    // instead of (organization_id, NULL, requirement_id), the idempotent-
+    // replay conflict target is the engagement-scope partial unique index
+    // instead of the organization-scope one, and the required
+    // metadataOnlyAudit adapter is expected to be
+    // createProductionMetadataOnlyAuditForEngagementRequirementAssessment
+    // (validates payload.engagement_id, not just payload.requirement_id).
+    // This repository never checks Package 2B applicability itself - the
+    // caller (kaiEngagementRequirementAssessmentService.js) must have already
+    // resolved that gate before calling this method.
+    async assessEngagementRequirement(input) {
+      if (!isAssessEngagementRequirementInput(input)) return failure("validation_blocker");
+      const { organizationId, engagementId, requirementId, actorUserId, now, metadataOnlyAudit } = input;
+      const run = runInTransaction || (await resolveDefaultRunInTransaction());
+      const filterCurrentGapsFn = filterCurrentGaps || (await resolveDefaultGapCurrentStateFilter());
+
+      try {
+        return await run(async (tx) => {
+          const requirementLookup = await loadSupportedRequirementOrFail(tx, { requirementId });
+          if (!requirementLookup.ok) return requirementLookup.failure;
+          const rule = requirementLookup.rule;
+
+          const inputs = await rule.loadInputs(tx, { organizationId, filterCurrentGaps: filterCurrentGapsFn });
+
+          const { assessmentState, explanation } = rule.deriveState(inputs);
+          const stateFingerprint = rule.computeFingerprint(inputs);
+
+          const insertedRow = await insertEngagementAssessmentRow(tx, {
+            organizationId,
+            engagementId,
+            requirementId,
+            assessmentState,
+            explanation,
+            stateFingerprint,
+            actorUserId,
+            now,
+          });
+
+          if (!insertedRow) {
+            // Replay: an identical-fingerprint row already exists for this
+            // org+engagement+requirement. A true replay is a complete no-op
+            // besides this reread - zero new provenance-link rows, zero new
+            // audit.
+            const existingRow = await readExistingEngagementAssessmentRow(tx, { organizationId, engagementId, requirementId, stateFingerprint });
+            if (!existingRow) throw new MalformedResultRowError("requirement_assessments");
+            return success(toAssessmentRecord(existingRow, true));
+          }
+
+          // From here on, nothing has been committed yet but writes have
+          // begun: every failure below must roll the transaction back
+          // instead of returning directly, exactly like the organization-
+          // scope path above.
+          const requirementAssessmentId = insertedRow.requirement_assessment_id;
+
+          await rule.writeProvenance(tx, { organizationId, requirementAssessmentId, inputs });
+
+          const persistedProvenance = await readAssessmentProvenance(tx, {
+            organizationId,
+            requirementAssessmentId,
+          });
+          const expectedProvenanceIds = rule.expectedProvenanceIds(inputs);
+          if (!persistedEngagementAssessmentMatchesExpected(insertedRow, persistedProvenance, {
+            organizationId,
+            engagementId,
+            requirementId,
+            assessmentState,
+            explanation,
+            stateFingerprint,
+            ...expectedProvenanceIds,
+          })) {
+            rollbackFailure("system_error");
+          }
+
+          let preparedAudit;
+          try {
+            preparedAudit = prepareRequiredAudit(metadataOnlyAudit, {
+              attempted_operation: rule.attemptedOperation,
+              requirement_id: requirementId,
+              engagement_id: engagementId,
+              requirement_assessment_id: requirementAssessmentId,
+              validator_key: rule.validatorKey,
+            }, tx);
+          } catch {
+            rollbackFailure("validation_blocker");
+          }
+          await preparedAudit.publish();
+
+          return success(toAssessmentRecord(insertedRow, false));
+        });
+      } catch (error) {
+        if (error instanceof RequirementAssessmentRollbackError) return error.result;
+        if (error instanceof MalformedResultRowError) return failure("system_error");
+        if (error?.code === "23514" || error?.code === "22P02") return failure("validation_blocker");
+        if (error?.code === "23503") return failure("conflict_current_state_changed");
+        return failure("system_error");
+      }
+    },
+
+    // Package 3A engagement-scope read: byte-identical recompute-and-compare
+    // discipline to `readOrganizationRequirementAssessment` below, strictly
+    // scoped to `engagement_id = engagementId` - never falls back to, and
+    // can never return, the organization-scope (engagement_id IS NULL) row.
+    async readEngagementRequirementAssessment(input) {
+      if (!isReadEngagementRequirementAssessmentInput(input)) return failure("validation_blocker");
+      const { organizationId, engagementId, requirementId } = input;
+      const run = runInTransaction || (await resolveDefaultRunInTransaction());
+      const filterCurrentGapsFn = filterCurrentGaps || (await resolveDefaultGapCurrentStateFilter());
+
+      try {
+        return await run(async (tx) => {
+          const requirementLookup = await loadSupportedRequirementOrFail(tx, { requirementId });
+          if (!requirementLookup.ok) return requirementLookup.failure;
+          const requirement = requirementLookup.requirement;
+          const rule = requirementLookup.rule;
+
+          const inputs = await rule.loadInputs(tx, { organizationId, filterCurrentGaps: filterCurrentGapsFn });
+          const stateFingerprint = rule.computeFingerprint(inputs);
+
+          const currentRow = await readExistingEngagementAssessmentRow(tx, { organizationId, engagementId, requirementId, stateFingerprint });
+          if (!currentRow) return failure("not_found");
+
+          const provenance = await readAssessmentProvenance(tx, {
+            organizationId,
+            requirementAssessmentId: currentRow.requirement_assessment_id,
+          });
+
+          return success({
+            requirement: toRequirementRecord(requirement),
+            assessment: toAssessmentRecord(currentRow, false),
+            ...toAssessmentProvenanceRecord(provenance),
+          });
+        });
+      } catch (error) {
+        if (error?.code === "22P02") return failure("validation_blocker");
         return failure("system_error");
       }
     },
@@ -1359,6 +1616,9 @@ export const __requirementAssessmentRepositoryTestables = Object.freeze({
   isAssessOrganizationRequirementInput,
   isReadOrganizationRequirementAssessmentInput,
   isListOrganizationRequirementsReadinessInput,
+  isAssessEngagementRequirementInput,
+  isReadEngagementRequirementAssessmentInput,
   persistedAssessmentMatchesExpected,
+  persistedEngagementAssessmentMatchesExpected,
   loadGovernedAssessmentInputs,
 });
