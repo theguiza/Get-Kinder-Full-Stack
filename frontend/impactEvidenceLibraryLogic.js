@@ -241,6 +241,15 @@ export function coverageInternalAcceptancePath(organizationId, claimId, dimensio
     + `/claims/${encodeURIComponent(claimId)}/coverage-dimensions/${encodeURIComponent(dimensionKey)}/internal-acceptance`;
 }
 
+// KAI P2-10 funder coverage-dimension acceptance, the funder-audience sibling
+// of coverageInternalAcceptancePath above - same path shape, same empty-body
+// convention, distinct terminal segment matching the existing governed
+// funder-acceptance route (sprint2IntakeApi.js).
+export function coverageFunderAcceptancePath(organizationId, claimId, dimensionKey) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
+    + `/claims/${encodeURIComponent(claimId)}/coverage-dimensions/${encodeURIComponent(dimensionKey)}/funder-acceptance`;
+}
+
 export function evidenceReviewCompletePath(organizationId, evidenceItemId, reviewQueueItemId) {
   return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
     + `/evidence-items/${encodeURIComponent(evidenceItemId)}/evidence-review/${encodeURIComponent(reviewQueueItemId)}/complete`;
@@ -783,6 +792,7 @@ export function projectTraceability(dto) {
     assessmentStatus: value?.assessment_status,
     validatorKey: value?.validator_key,
     internalLimitationAccepted: value?.internal_limitation_accepted === true,
+    funderLimitationAccepted: value?.funder_limitation_accepted === true,
     blocksRequestedAudience: value?.blocks_requested_audience === true,
     displayStatus:
       value?.assessment_status === "unresolved" && value?.internal_limitation_accepted === true

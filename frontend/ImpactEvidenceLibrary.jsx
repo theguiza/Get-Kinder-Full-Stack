@@ -19,6 +19,7 @@ import {
   claimReviewDecisionValidationError,
   claimTraceabilityPath,
   coverageInternalAcceptancePath,
+  coverageFunderAcceptancePath,
   createEvidenceSummaryPath,
   createImpactNarrativePath,
   decisionRequiresApprovedAudiences,
@@ -824,6 +825,25 @@ export default function ImpactEvidenceLibrary() {
       : errorText(result));
     if (result.statusCode === 200 || result.statusCode === 201) await loadTraceability(selectedClaimId);
   }, [organizationId, selectedClaimId, coverageDimensionKey, workflowPending, loadTraceability]);
+
+  const runCoverageFunderAcceptance = useCallback(async () => {
+    if (!organizationId || !selectedClaimId || !coverageDimensionKey || workflowPending) return;
+    setWorkflowPending(true);
+    setWorkflowResult("");
+    const result = await postJson(coverageFunderAcceptancePath(organizationId, selectedClaimId, coverageDimensionKey), {});
+    setWorkflowPending(false);
+    setWorkflowResult(result.statusCode === 200 || result.statusCode === 201
+      ? `Funder limitation accepted for ${coverageDimensionKey}.`
+      : errorText(result));
+    if (result.statusCode === 200 || result.statusCode === 201) await loadTraceability(selectedClaimId);
+  }, [organizationId, selectedClaimId, coverageDimensionKey, workflowPending, loadTraceability]);
+
+  const selectedDimensionAcceptance = useMemo(() => {
+    const dimension = traceability?.dimensions?.find((entry) => entry.dimensionKey === coverageDimensionKey);
+    if (!dimension) return "unknown";
+    return `internal: ${dimension.internalLimitationAccepted ? "accepted" : "not accepted"}`
+      + ` · funder: ${dimension.funderLimitationAccepted ? "accepted" : "not accepted"}`;
+  }, [traceability, coverageDimensionKey]);
 
   const evidenceDecisionValidationError = useMemo(
     () => evidenceReviewDecisionValidationError({ decision: evidenceDecision, limitationNotes: evidenceLimitationNotesText }),
@@ -1783,8 +1803,16 @@ export default function ImpactEvidenceLibrary() {
                 </select>
               </div>
               <div className="col-12">
+                <ValueRow label="Selected dimension acceptance" value={selectedDimensionAcceptance} />
+              </div>
+              <div className="col-12 col-lg-6">
                 <button type="button" className="btn btn-sm btn-outline-primary w-100" onClick={runCoverageInternalAcceptance} disabled={workflowPending || !selectedClaimId}>
                   Accept internal limitation for selected dimension
+                </button>
+              </div>
+              <div className="col-12 col-lg-6">
+                <button type="button" className="btn btn-sm btn-outline-primary w-100" onClick={runCoverageFunderAcceptance} disabled={workflowPending || !selectedClaimId}>
+                  Accept funder limitation for selected dimension
                 </button>
               </div>
             </div>

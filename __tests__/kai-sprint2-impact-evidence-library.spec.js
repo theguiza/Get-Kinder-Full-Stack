@@ -33,6 +33,8 @@ import {
   claimReviewDecisionValidationError,
   claimTraceabilityPath,
   cleanLimitationNotes,
+  coverageFunderAcceptancePath,
+  coverageInternalAcceptancePath,
   createEvidenceSummaryPath,
   decisionRequiresApprovedAudiences,
   decisionRequiresLimitationNotes,
@@ -679,6 +681,24 @@ test("Impact Evidence Library frontend paths preserve audience, claim, and serve
   }
 });
 
+test("KAI P2-10 operability: coverageFunderAcceptancePath matches the existing governed funder-acceptance route exactly", () => {
+  const dimensionKey = "definition_clarity";
+  assert.equal(
+    coverageFunderAcceptancePath(organizationId, claimId, dimensionKey),
+    `${basePath}/admin/organizations/${organizationId}/claims/${claimId}/coverage-dimensions/${dimensionKey}/funder-acceptance`,
+  );
+  // Same path shape as the internal-acceptance sibling, only the terminal
+  // segment differs - proving this is not a duplicate/parallel route.
+  assert.notEqual(
+    coverageFunderAcceptancePath(organizationId, claimId, dimensionKey),
+    coverageInternalAcceptancePath(organizationId, claimId, dimensionKey),
+  );
+  assert.equal(
+    coverageFunderAcceptancePath(organizationId, claimId, dimensionKey).replace("/funder-acceptance", "/internal-acceptance"),
+    coverageInternalAcceptancePath(organizationId, claimId, dimensionKey),
+  );
+});
+
 test("Impact Evidence Library frontend projections compose P2-08 and P2-06 without browser eligibility or blocker computation", () => {
   const usable = projectEligibleClaims({
     requestedAudience: "internal",
@@ -744,6 +764,11 @@ test("Impact Evidence Library frontend projections compose P2-08 and P2-06 witho
   });
   assert.equal(traceability.libraryStatus, "blocked");
   assert.equal(traceability.dimensions[0].displayStatus, "known_limitation");
+  // KAI P2-10 operability: internal and funder acceptance are read straight
+  // through from the DTO as two independent flags - internal acceptance for
+  // this dimension never fabricates/implies funder acceptance.
+  assert.equal(traceability.dimensions[0].internalLimitationAccepted, true);
+  assert.equal(traceability.dimensions[0].funderLimitationAccepted, false);
   assert.equal(traceability.clientFollowupWorkflows[0].workflowDisposition, "completed_workflow_obligation");
   assert.equal(JSON.stringify(traceability).includes("must not render"), false);
   // A1C-1: with no decision field present in the DTO at all, the projection
@@ -787,6 +812,33 @@ test("Impact Evidence Library frontend projections compose P2-08 and P2-06 witho
   assert.equal(JSON.stringify(packet).includes("must not render"), false);
 
   assert.deepEqual(mergeClaims(usable, candidates).map((claim) => claim.libraryStatus), ["usable", "needs_review"]);
+});
+
+test("KAI P2-10 operability: projectTraceability projects funderLimitationAccepted independently of internalLimitationAccepted in both directions", () => {
+  const funderOnly = projectTraceability({
+    requestedAudience: "funder",
+    eligible: false,
+    blockerCodes: ["coverage_dimension_unresolved"],
+    affectedDimensionKeys: ["small_cell_risk"],
+    affectedObjectIds: [],
+    claim: { audience_gates: {} },
+    evidence: {},
+    claim_review: {},
+    dimensions: {
+      small_cell_risk: {
+        assessment_status: "unresolved",
+        validator_key: "small_cell_risk",
+        internal_limitation_accepted: false,
+        funder_limitation_accepted: true,
+        blocks_requested_audience: false,
+      },
+    },
+    gap_items: [],
+    client_followup_workflows: [],
+    potential_conflict_groups: [],
+  });
+  assert.equal(funderOnly.dimensions[0].internalLimitationAccepted, false);
+  assert.equal(funderOnly.dimensions[0].funderLimitationAccepted, true);
 });
 
 test("A1C-1: projectTraceability reads the durable evidence/claim review decision straight through from the DTO, including approved_audiences exactly, and returns null when the DTO field is null", () => {
@@ -1629,6 +1681,63 @@ test("Impact Evidence Library refreshes traceability via the existing GET after 
   assert.match(runEvidenceReview, /await loadTraceability\(selectedClaimId\)/);
   const runClaimReview = uiSource.slice(uiSource.indexOf("const runCompleteClaimReview"));
   assert.match(runClaimReview, /await loadTraceability\(selectedClaimId\)/);
+});
+
+// KAI P2-10 funder coverage-dimension operability: the governed
+// acceptFunderCoverageLimitation backend capability (kaiCoverageReviewDecisionService.js)
+// existed before this package with no reachable product surface. This proves
+// the component now (1) posts to the real governed funder-acceptance route
+// via the shared postJson/errorText helpers - not a duplicate/local
+// endpoint, (2) surfaces the server's truthful blocked reason on failure
+// exactly like the pre-existing internal-acceptance control, and (3)
+// refreshes durable state via the existing traceability GET on success -
+// mirroring runCoverageInternalAcceptance's proven shape exactly.
+test("KAI P2-10 operability: runCoverageFunderAcceptance posts to the governed funder-acceptance route, surfaces the truthful blocked reason, and refreshes traceability on success", () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+
+  const runCoverageFunderAcceptance = uiSource.slice(
+    uiSource.indexOf("const runCoverageFunderAcceptance"),
+    uiSource.indexOf("const selectedDimensionAcceptance"),
+  );
+  assert.match(runCoverageFunderAcceptance, /coverageFunderAcceptancePath\(organizationId, selectedClaimId, coverageDimensionKey\)/);
+  assert.match(runCoverageFunderAcceptance, /errorText\(result\)/);
+  assert.match(runCoverageFunderAcceptance, /await loadTraceability\(selectedClaimId\)/);
+
+  // Same governed empty-body POST convention as the internal-acceptance
+  // sibling (no browser-supplied decision/authority in the request body).
+  const runCoverageInternalAcceptance = uiSource.slice(
+    uiSource.indexOf("const runCoverageInternalAcceptance"),
+    uiSource.indexOf("const runCoverageFunderAcceptance"),
+  );
+  const internalPostBody = /postJson\(coverageInternalAcceptancePath\([^)]*\), (\{\})\)/.exec(runCoverageInternalAcceptance);
+  const funderPostBody = /postJson\(coverageFunderAcceptancePath\([^)]*\), (\{\})\)/.exec(runCoverageFunderAcceptance);
+  assert.ok(internalPostBody);
+  assert.ok(funderPostBody);
+  assert.equal(internalPostBody[1], funderPostBody[1]);
+});
+
+test("KAI P2-10 operability: the Traceability panel exposes a control to accept the governed funder coverage-dimension decision and shows current acceptance state", () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+
+  assert.match(
+    uiSource,
+    /<button type="button" className="btn btn-sm btn-outline-primary w-100" onClick=\{runCoverageFunderAcceptance\} disabled=\{workflowPending \|\| !selectedClaimId\}>\s*Accept funder limitation for selected dimension/,
+  );
+  assert.match(
+    uiSource,
+    /<ValueRow label="Selected dimension acceptance" value=\{selectedDimensionAcceptance\} \/>/,
+  );
+
+  // selectedDimensionAcceptance itself must read only the existing per-
+  // dimension traceability projection - never infer funder acceptance from
+  // internal acceptance, claim approval, or any other signal.
+  const selectedDimensionAcceptance = uiSource.slice(
+    uiSource.indexOf("const selectedDimensionAcceptance"),
+    uiSource.indexOf("const evidenceDecisionValidationError"),
+  );
+  assert.match(selectedDimensionAcceptance, /entry\.dimensionKey === coverageDimensionKey/);
+  assert.match(selectedDimensionAcceptance, /dimension\.internalLimitationAccepted/);
+  assert.match(selectedDimensionAcceptance, /dimension\.funderLimitationAccepted/);
 });
 
 // KAI Review Queue -> Traceability user path regression. This repository has
