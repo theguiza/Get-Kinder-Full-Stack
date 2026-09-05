@@ -1326,13 +1326,43 @@ export default function ImpactEvidenceLibrary() {
               {requirementsReadiness.map((requirement) => (
                 <li key={requirement.requirementId} className="list-group-item">
                   <div className="d-flex justify-content-between align-items-start gap-2">
-                    <span className="small fw-semibold">{requirement.requirementLabel || requirement.requirementKey}</span>
-                    <span className={`badge ${requirement.assessed && requirement.assessmentState === "met" ? "text-bg-success" : requirement.assessed ? "text-bg-warning" : "text-bg-secondary"}`}>
+                    <div>
+                      <div className="small fw-semibold">{requirement.requirementLabel || requirement.requirementKey}</div>
+                      <div className="text-muted small">{requirement.requirementKey}</div>
+                    </div>
+                    <span className={`badge ${requirement.assessed && requirement.assessmentState === "satisfied" ? "text-bg-success" : requirement.assessed ? "text-bg-warning" : "text-bg-secondary"}`}>
                       {requirement.assessed ? requirement.assessmentState || "assessed" : "needs assessment"}
                     </span>
                   </div>
+                  {requirement.requirementDescription ? (
+                    <div className="small mt-2">{requirement.requirementDescription}</div>
+                  ) : null}
+                  <div className="small text-muted mt-2">
+                    Source: {requirement.requirementSource.sourceName || requirement.requirementSource.sourceCode || "none"}
+                    {requirement.requirementSource.sourceType ? ` (${requirement.requirementSource.sourceType})` : ""}
+                  </div>
+                  <div className="small text-muted">
+                    Framework: {requirement.requirementFrameworkVersion.frameworkName || requirement.requirementFrameworkVersion.frameworkCode || "none"}
+                    {requirement.requirementFrameworkVersion.versionLabel ? ` ${requirement.requirementFrameworkVersion.versionLabel}` : ""}
+                    {requirement.requirementFrameworkVersion.frameworkStatus ? ` · ${requirement.requirementFrameworkVersion.frameworkStatus}` : ""}
+                  </div>
+                  <div className="small text-muted">
+                    Set: {requirement.requirementSet.setName || requirement.requirementSet.setKey || "none"}
+                  </div>
                   {requirement.assessed ? (
-                    <div className="small text-muted mt-1">{requirement.assessmentExplanation || "No explanation returned."}</div>
+                    <>
+                      <div className="small text-muted mt-2">{requirement.assessmentExplanation || "No explanation returned."}</div>
+                      <div className="small text-muted mt-1">
+                        Provenance: {requirement.assessmentProvenance?.evidenceItemIds.length || 0} evidence
+                        {" · "}{requirement.assessmentProvenance?.claimIds.length || 0} claims
+                        {" · "}{requirement.assessmentProvenance?.currentGapLogItemIds.length || 0} current gaps
+                        {" · "}{(requirement.assessmentProvenance?.evidenceReviewDecisionIds.length || 0) + (requirement.assessmentProvenance?.claimReviewDecisionIds.length || 0)} review decisions
+                      </div>
+                      <div className="small text-muted">
+                        Assessment: {requirement.assessmentId || "none"}
+                        {requirement.assessedAt ? ` · ${requirement.assessedAt}` : ""}
+                      </div>
+                    </>
                   ) : (
                     <div className="small text-muted mt-1">
                       Not yet assessed against the organization's current governed evidence and claims, or a prior

@@ -156,9 +156,31 @@ async function resolveDefaultGapCurrentStateFilter() {
 
 async function loadRequirement(tx, { requirementId }) {
   const { rows } = await tx.query(
-    `SELECT requirement_id::text AS requirement_id, requirement_key, requirement_label
-       FROM kai.requirements
-      WHERE requirement_id = $1::uuid`,
+    `SELECT r.requirement_id::text AS requirement_id,
+            r.requirement_key,
+            r.requirement_label,
+            r.requirement_description,
+            r.display_order,
+            rs.requirement_set_id::text AS requirement_set_id,
+            rs.set_key,
+            rs.set_name,
+            rfv.requirement_framework_version_id::text AS requirement_framework_version_id,
+            rfv.framework_code,
+            rfv.framework_name,
+            rfv.version_label,
+            rfv.framework_status,
+            src.requirement_source_id::text AS requirement_source_id,
+            src.source_type,
+            src.source_code,
+            src.source_name
+       FROM kai.requirements r
+       JOIN kai.requirement_sets rs
+         ON rs.requirement_set_id = r.requirement_set_id
+       JOIN kai.requirement_framework_versions rfv
+         ON rfv.requirement_framework_version_id = rs.requirement_framework_version_id
+       JOIN kai.requirement_sources src
+         ON src.requirement_source_id = rfv.requirement_source_id
+      WHERE r.requirement_id = $1::uuid`,
     [requirementId],
   );
   return rows[0] || null;
@@ -171,10 +193,32 @@ async function loadRequirement(tx, { requirementId }) {
 // requirements to report readiness for.
 async function loadSupportedRequirementsCatalogue(tx) {
   const { rows } = await tx.query(
-    `SELECT requirement_id::text AS requirement_id, requirement_key, requirement_label, display_order
-       FROM kai.requirements
-      WHERE requirement_key = ANY($1::text[])
-      ORDER BY display_order ASC, requirement_key ASC`,
+    `SELECT r.requirement_id::text AS requirement_id,
+            r.requirement_key,
+            r.requirement_label,
+            r.requirement_description,
+            r.display_order,
+            rs.requirement_set_id::text AS requirement_set_id,
+            rs.set_key,
+            rs.set_name,
+            rfv.requirement_framework_version_id::text AS requirement_framework_version_id,
+            rfv.framework_code,
+            rfv.framework_name,
+            rfv.version_label,
+            rfv.framework_status,
+            src.requirement_source_id::text AS requirement_source_id,
+            src.source_type,
+            src.source_code,
+            src.source_name
+       FROM kai.requirements r
+       JOIN kai.requirement_sets rs
+         ON rs.requirement_set_id = r.requirement_set_id
+       JOIN kai.requirement_framework_versions rfv
+         ON rfv.requirement_framework_version_id = rs.requirement_framework_version_id
+       JOIN kai.requirement_sources src
+         ON src.requirement_source_id = rfv.requirement_source_id
+      WHERE r.requirement_key = ANY($1::text[])
+      ORDER BY r.display_order ASC, r.requirement_key ASC`,
     [Object.keys(REQUIREMENT_ASSESSMENT_RULES)],
   );
   return rows;
@@ -1046,6 +1090,47 @@ function toAssessmentRecord(row, replayed) {
   };
 }
 
+function toRequirementRecord(row) {
+  return {
+    requirement_id: row.requirement_id,
+    requirement_key: row.requirement_key,
+    requirement_label: row.requirement_label,
+    requirement_description: row.requirement_description,
+    display_order: row.display_order,
+    requirement_set: {
+      requirement_set_id: row.requirement_set_id,
+      set_key: row.set_key,
+      set_name: row.set_name,
+    },
+    requirement_framework_version: {
+      requirement_framework_version_id: row.requirement_framework_version_id,
+      framework_code: row.framework_code,
+      framework_name: row.framework_name,
+      version_label: row.version_label,
+      framework_status: row.framework_status,
+    },
+    requirement_source: {
+      requirement_source_id: row.requirement_source_id,
+      source_type: row.source_type,
+      source_code: row.source_code,
+      source_name: row.source_name,
+    },
+  };
+}
+
+function toAssessmentProvenanceRecord(provenance) {
+  return {
+    evidence_item_ids: provenance.evidenceItemIds,
+    claim_ids: provenance.claimIds,
+    evidence_review_decision_ids: provenance.evidenceDecisionLinks.map((row) => row.decision_id),
+    claim_review_decision_ids: provenance.claimDecisionLinks.map((row) => row.decision_id),
+    current_gap_log_item_ids: provenance.gapLinks.map((row) => row.gap_log_item_id),
+    outcome_context_ids: provenance.outcomeContextIds,
+    source_promotion_evidence_item_ids: provenance.sourcePromotionEvidenceItemIds,
+    conflict_resolution_pairs: provenance.conflictResolutionPairs,
+  };
+}
+
 function sortedIds(ids) {
   return [...ids].sort();
 }
@@ -1206,20 +1291,9 @@ export function createPostgresRequirementAssessmentRepository({ runInTransaction
           });
 
           return success({
-            requirement: {
-              requirement_id: requirement.requirement_id,
-              requirement_key: requirement.requirement_key,
-              requirement_label: requirement.requirement_label,
-            },
+            requirement: toRequirementRecord(requirement),
             assessment: toAssessmentRecord(currentRow, false),
-            evidence_item_ids: provenance.evidenceItemIds,
-            claim_ids: provenance.claimIds,
-            evidence_review_decision_ids: provenance.evidenceDecisionLinks.map((row) => row.decision_id),
-            claim_review_decision_ids: provenance.claimDecisionLinks.map((row) => row.decision_id),
-            current_gap_log_item_ids: provenance.gapLinks.map((row) => row.gap_log_item_id),
-            outcome_context_ids: provenance.outcomeContextIds,
-            source_promotion_evidence_item_ids: provenance.sourcePromotionEvidenceItemIds,
-            conflict_resolution_pairs: provenance.conflictResolutionPairs,
+            ...toAssessmentProvenanceRecord(provenance),
           });
         });
       } catch (error) {
@@ -1255,12 +1329,17 @@ export function createPostgresRequirementAssessmentRepository({ runInTransaction
               requirementId: requirement.requirement_id,
               stateFingerprint,
             });
+            const provenance = currentRow
+              ? await readAssessmentProvenance(tx, {
+                organizationId,
+                requirementAssessmentId: currentRow.requirement_assessment_id,
+              })
+              : null;
             requirements.push({
-              requirement_id: requirement.requirement_id,
-              requirement_key: requirement.requirement_key,
-              requirement_label: requirement.requirement_label,
+              ...toRequirementRecord(requirement),
               assessed: Boolean(currentRow),
               assessment: currentRow ? toAssessmentRecord(currentRow, false) : null,
+              assessment_provenance: provenance ? toAssessmentProvenanceRecord(provenance) : null,
             });
           }
           return success({ requirements });

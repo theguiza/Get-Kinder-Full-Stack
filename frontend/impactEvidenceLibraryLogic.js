@@ -226,10 +226,42 @@ export function projectRequirementsReadiness(dto) {
     requirementId: requirement.requirement_id,
     requirementKey: requirement.requirement_key,
     requirementLabel: requirement.requirement_label,
+    requirementDescription: requirement.requirement_description || null,
+    displayOrder: Number.isInteger(requirement.display_order) ? requirement.display_order : null,
+    requirementSet: {
+      requirementSetId: requirement.requirement_set?.requirement_set_id || null,
+      setKey: requirement.requirement_set?.set_key || null,
+      setName: requirement.requirement_set?.set_name || null,
+    },
+    requirementFrameworkVersion: {
+      requirementFrameworkVersionId: requirement.requirement_framework_version?.requirement_framework_version_id || null,
+      frameworkCode: requirement.requirement_framework_version?.framework_code || null,
+      frameworkName: requirement.requirement_framework_version?.framework_name || null,
+      versionLabel: requirement.requirement_framework_version?.version_label || null,
+      frameworkStatus: requirement.requirement_framework_version?.framework_status || null,
+    },
+    requirementSource: {
+      requirementSourceId: requirement.requirement_source?.requirement_source_id || null,
+      sourceType: requirement.requirement_source?.source_type || null,
+      sourceCode: requirement.requirement_source?.source_code || null,
+      sourceName: requirement.requirement_source?.source_name || null,
+    },
     assessed: requirement.assessed === true,
+    assessmentId: requirement.assessment?.requirement_assessment_id || null,
     assessmentState: requirement.assessment?.assessment_state || null,
     assessmentExplanation: requirement.assessment?.assessment_explanation || null,
+    assessmentFingerprint: requirement.assessment?.state_fingerprint || null,
     assessedAt: requirement.assessment?.created_at || null,
+    assessmentProvenance: requirement.assessment_provenance ? {
+      evidenceItemIds: asArray(requirement.assessment_provenance.evidence_item_ids),
+      claimIds: asArray(requirement.assessment_provenance.claim_ids),
+      evidenceReviewDecisionIds: asArray(requirement.assessment_provenance.evidence_review_decision_ids),
+      claimReviewDecisionIds: asArray(requirement.assessment_provenance.claim_review_decision_ids),
+      currentGapLogItemIds: asArray(requirement.assessment_provenance.current_gap_log_item_ids),
+      outcomeContextIds: asArray(requirement.assessment_provenance.outcome_context_ids),
+      sourcePromotionEvidenceItemIds: asArray(requirement.assessment_provenance.source_promotion_evidence_item_ids),
+      conflictResolutionPairs: asArray(requirement.assessment_provenance.conflict_resolution_pairs),
+    } : null,
   }));
 }
 

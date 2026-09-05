@@ -141,8 +141,8 @@ async function runIntegrationSuite() {
     const key = SUPPORTED_KEYS[i];
     const row = (
       await pool.query(
-        "INSERT INTO kai.requirements (requirement_set_id, requirement_key, requirement_label, display_order) VALUES ($1, $2, $3, $4) RETURNING requirement_id, requirement_key, requirement_label",
-        [requirementSetId, key, `Rollup label for ${key}`, i],
+        "INSERT INTO kai.requirements (requirement_set_id, requirement_key, requirement_label, requirement_description, display_order) VALUES ($1, $2, $3, $4, $5) RETURNING requirement_id, requirement_key, requirement_label, requirement_description, display_order",
+        [requirementSetId, key, `Rollup label for ${key}`, `Rollup description for ${key}`, i],
       )
     ).rows[0];
     catalogueRowsByKey.set(key, row);
@@ -196,6 +196,26 @@ async function runIntegrationSuite() {
       const expected = catalogueRowsByKey.get(row.requirement_key);
       assert.equal(row.requirement_id, expected.requirement_id, `requirement_id for ${row.requirement_key} must come from kai.requirements`);
       assert.equal(row.requirement_label, expected.requirement_label, `requirement_label for ${row.requirement_key} must come from kai.requirements`);
+      assert.equal(row.requirement_description, expected.requirement_description, `requirement_description for ${row.requirement_key} must come from kai.requirements`);
+      assert.equal(row.display_order, expected.display_order, `display_order for ${row.requirement_key} must come from kai.requirements`);
+      assert.deepEqual(row.requirement_source, {
+        requirement_source_id: requirementSourceId,
+        source_type: "kai_standard",
+        source_code: `src_rollup_${runSuffix}`,
+        source_name: "Rollup Fixture Source",
+      });
+      assert.deepEqual(row.requirement_framework_version, {
+        requirement_framework_version_id: frameworkVersionId,
+        framework_code: "fw_rollup",
+        framework_name: "Rollup Framework",
+        version_label: "v1",
+        framework_status: "draft",
+      });
+      assert.deepEqual(row.requirement_set, {
+        requirement_set_id: requirementSetId,
+        set_key: "set_rollup",
+        set_name: "Rollup Set",
+      });
     }
 
     // -----------------------------------------------------------------
@@ -231,6 +251,9 @@ async function runIntegrationSuite() {
     assert.equal(afterAssessPur001.assessment.requirement_assessment_id, assessed.data.requirement_assessment_id);
     assert.equal(afterAssessPur001.assessment.assessment_state, assessed.data.assessment_state);
     assert.equal(afterAssessPur001.assessment.state_fingerprint, assessed.data.state_fingerprint);
+    assert.deepEqual(afterAssessPur001.assessment_provenance.evidence_item_ids, []);
+    assert.deepEqual(afterAssessPur001.assessment_provenance.claim_ids, []);
+    assert.deepEqual(afterAssessPur001.assessment_provenance.outcome_context_ids.length, 1);
 
     // ir_stk_001 remains unassessed for orgA throughout - proves the
     // unassessed representation still holds alongside an assessed sibling.
