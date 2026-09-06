@@ -1066,6 +1066,52 @@ export async function getScopedSourceVersionByCandidateIdentity(
   return rows[0] || null;
 }
 
+const SOURCE_LIBRARY_LIMIT = 200;
+
+/**
+ * KAI Data Sources completion package: organization-scoped browse read of
+ * governed `kai.sources` rows (created only by the P1-08 source-promotion
+ * authority - never raw intake files or unpromoted candidates). Selects only
+ * the fixed, already-established-safe identity/classification fields already
+ * disclosed elsewhere on this same actor-role surface (the P1-08 replay read
+ * `getScopedSourceById` above returns this exact column set) - never
+ * created_by, storage locations, or any lineage/candidate identifier.
+ * Capped at SOURCE_LIBRARY_LIMIT, newest first.
+ */
+export async function listScopedSourcesForOrganization({ organizationId }, db = pool) {
+  const { rows } = await db.query(
+    `SELECT source_id, source_code, reviewed_source_type, created_at
+       FROM kai.sources
+      WHERE organization_id = $1
+      ORDER BY created_at DESC, source_id ASC
+      LIMIT $2`,
+    [organizationId, SOURCE_LIBRARY_LIMIT],
+  );
+  return rows;
+}
+
+/**
+ * KAI Data Sources completion package companion read: every `kai.source_versions`
+ * row (current and historical - `is_current` is already a governed,
+ * server-authoritative field this read discloses rather than hides) for the
+ * given already-scoped source_id set. Selects only source_version_id,
+ * source_id, is_current, created_at - never the intake_source_candidate_id/
+ * intake_sensitivity_profile_id/profile_canonical_sha256 lineage identifiers
+ * a browse/select surface has no need for.
+ */
+export async function listScopedSourceVersionsForSourceIds({ organizationId, sourceIds }, db = pool) {
+  if (!Array.isArray(sourceIds) || sourceIds.length === 0) return [];
+  const { rows } = await db.query(
+    `SELECT source_version_id, source_id, is_current, created_at
+       FROM kai.source_versions
+      WHERE organization_id = $1
+        AND source_id = ANY($2::uuid[])
+      ORDER BY source_id ASC, created_at DESC, source_version_id ASC`,
+    [organizationId, sourceIds],
+  );
+  return rows;
+}
+
 /**
  * KAI P2-11 client-reviewer-facing read: the minimal current `client_followup`
  * workflow state for an organization, joined to its own review-queue row.

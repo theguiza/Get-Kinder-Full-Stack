@@ -129,6 +129,34 @@ export function organizationReviewQueuePath(organizationId) {
   return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/review-queue`;
 }
 
+// KAI Data Sources completion package: organization-scoped browse read of
+// governed kai.sources + kai.source_versions rows, so a user can discover a
+// source_version_id instead of already knowing one.
+export function organizationSourcesPath(organizationId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/sources`;
+}
+
+// Projects the Data Sources DTO into exactly what the section renders: each
+// governed source with its own governed source_versions, using only the
+// safe fields the server already returns (source_code/reviewed_source_type/
+// is_current/created_at) - never a frontend-computed currentness or
+// eligibility rule. `isCurrent`/`createdAt` are display-only facts, not used
+// here to disable any action.
+export function projectOrganizationSources(dto) {
+  return asArray(dto?.sources).map((source) => ({
+    sourceId: source.source_id,
+    sourceCode: source.source_code,
+    reviewedSourceType: source.reviewed_source_type,
+    createdAt: source.created_at,
+    sourceVersions: asArray(source.source_versions).map((version) => ({
+      sourceVersionId: version.source_version_id,
+      sourceId: version.source_id,
+      isCurrent: version.is_current === true,
+      createdAt: version.created_at,
+    })),
+  }));
+}
+
 // KAI Review Queue: what currently needs human attention, derived from the
 // SAME per-claim traceability DTO shape the Traceability panel already
 // projects (projectTraceability) - never a second blocker system. A queue

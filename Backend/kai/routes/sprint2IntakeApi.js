@@ -2745,6 +2745,38 @@ router.get("/admin/organizations/:organizationId/client-followups", sprint2Actor
   });
 });
 
+let sourceLibraryServicePromise = null;
+async function getSourceLibraryService() {
+  if (intakeServiceOverride?.listOrganizationSources) return intakeServiceOverride;
+  sourceLibraryServicePromise ||= import("../services/kaiSourceLibraryService.js");
+  return sourceLibraryServicePromise;
+}
+
+/**
+ * KAI Data Sources completion package: organization-scoped browse read of
+ * governed sources and their source versions, so an authorized
+ * /impact-library user can discover a source_version_id instead of already
+ * knowing one before using the existing P2-01 evidence-extraction / P2-02
+ * evidence-coverage-assessment actions below. Read-only: no body, no SQL, no
+ * direct database or schema access - delegates exactly once to the
+ * authorized source-library service.
+ */
+router.get("/admin/organizations/:organizationId/sources", sprint2ActorContextMiddleware, async (req, res) => {
+  const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) || organizationId !== organizationId.toLowerCase()) {
+    return sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id")],
+    });
+  }
+  return invokeService(res, async () => {
+    const service = await getSourceLibraryService();
+    return service.listOrganizationSources({
+      organizationId,
+      actorContext: sprint2MappedActorContext(req),
+    });
+  });
+});
+
 function clientFollowupCompletionIdentifiers(req = {}) {
   const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
   const claimId = typeof req.params?.claimId === "string" ? req.params.claimId : "";

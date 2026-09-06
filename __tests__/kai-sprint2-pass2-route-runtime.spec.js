@@ -195,6 +195,10 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // KAI P2-01 evidence-lineage extraction surface (additive; every prior
     // entry preserved verbatim).
     "/admin/organizations/:organizationId/source-versions/:sourceVersionId/evidence-extraction",
+    // KAI Data Sources completion package: organization-scoped browse read of
+    // governed sources/source versions (additive; every prior entry
+    // preserved verbatim).
+    "/admin/organizations/:organizationId/sources",
     // KAI P1-09 internal review-cockpit surface (additive; every prior entry
     // preserved verbatim).
     // KAI B1A-3B: safe capability probe, additive (see kaiReviewCockpitService.js

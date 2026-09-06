@@ -44,6 +44,8 @@ import {
   organizationRequirementAssessmentPath,
   organizationRequirementsReadinessPath,
   organizationReviewQueuePath,
+  organizationSourcesPath,
+  projectOrganizationSources,
   engagementFunderRequirementsPath,
   projectEngagementFunderRequirements,
   ENGAGEMENT_FUNDER_REQUIREMENTS_STATES,
@@ -255,6 +257,16 @@ export default function ImpactEvidenceLibrary() {
   // successful complete result just because reviewQueueCompleteness still
   // holds its default {truncated:false, evaluationErrorCount:0} value.
   const [reviewQueueRequestState, setReviewQueueRequestState] = useState("idle");
+
+  // Data Sources: organization-scope browse/select of governed kai.sources +
+  // kai.source_versions rows (never raw intake files or unpromoted
+  // candidates - see projectOrganizationSources). Request lifecycle is
+  // tracked the same way as Review Queue above, so loading/error/empty are
+  // all explicit and distinct.
+  const [organizationSources, setOrganizationSources] = useState([]);
+  const [loadingOrganizationSources, setLoadingOrganizationSources] = useState(false);
+  const [organizationSourcesError, setOrganizationSourcesError] = useState("");
+  const [organizationSourcesRequestState, setOrganizationSourcesRequestState] = useState("idle");
 
   // Governed internal availability (the all-state Claim Library) and audience
   // eligibility are independent dimensions: neither request may clear, gate, or
@@ -726,6 +738,31 @@ export default function ImpactEvidenceLibrary() {
     setReviewQueueItems([]);
     if (organizationId) loadReviewQueue();
   }, [organizationId, loadReviewQueue]);
+
+  // Data Sources: fetches the governed kai.sources + kai.source_versions
+  // browse list for the selected organization. Read-only rollup, same
+  // request-lifecycle convention as loadReviewQueue above.
+  const loadOrganizationSources = useCallback(async () => {
+    if (!organizationId) return;
+    setLoadingOrganizationSources(true);
+    setOrganizationSourcesError("");
+    setOrganizationSourcesRequestState("loading");
+    const result = await getJson(organizationSourcesPath(organizationId));
+    setLoadingOrganizationSources(false);
+    if (result.statusCode !== 200 || !result.body?.ok) {
+      setOrganizationSources([]);
+      setOrganizationSourcesError(errorText(result));
+      setOrganizationSourcesRequestState("error");
+      return;
+    }
+    setOrganizationSources(projectOrganizationSources(result.body.data));
+    setOrganizationSourcesRequestState("success");
+  }, [organizationId]);
+
+  useEffect(() => {
+    setOrganizationSources([]);
+    if (organizationId) loadOrganizationSources();
+  }, [organizationId, loadOrganizationSources]);
 
   const runAssessRequirement = useCallback(async (requirementId) => {
     if (!organizationId || assessingRequirementId) return;
@@ -2077,6 +2114,62 @@ export default function ImpactEvidenceLibrary() {
               ) : null}
             </div>
           ) : null}
+
+          <div className="admin-card mt-3">
+            <h5 className="mb-2">Data Sources</h5>
+            <div className="small text-muted mb-2">
+              Governed sources and source versions already promoted for this organization. Select one to use it below - historical (non-current) versions remain visible, not hidden.
+            </div>
+            {organizationSourcesError ? <div className="alert alert-warning py-2 small">{organizationSourcesError}</div> : null}
+            {loadingOrganizationSources ? <div className="text-muted small">Loading data sources...</div> : null}
+            {!loadingOrganizationSources && !organizationSourcesError && organizationSourcesRequestState === "success" && organizationSources.length === 0 ? (
+              <div className="text-muted small">No governed sources found for this organization yet.</div>
+            ) : null}
+            {!loadingOrganizationSources && organizationSources.length > 0 ? (
+              <div className="table-responsive mb-2">
+                <table className="table table-sm align-middle mb-0">
+                  <thead>
+                    <tr>
+                      <th>Source</th>
+                      <th>Reviewed type</th>
+                      <th>Source version</th>
+                      <th>Current</th>
+                      <th>Created</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {organizationSources.flatMap((source) => (
+                      (source.sourceVersions.length > 0 ? source.sourceVersions : [null]).map((version, index) => (
+                        <tr key={version ? version.sourceVersionId : `${source.sourceId}-no-version`}>
+                          {index === 0 ? (
+                            <td rowSpan={source.sourceVersions.length || 1} className="small font-monospace">{source.sourceCode}</td>
+                          ) : null}
+                          {index === 0 ? (
+                            <td rowSpan={source.sourceVersions.length || 1} className="small">{source.reviewedSourceType}</td>
+                          ) : null}
+                          <td className="small font-monospace">{version ? version.sourceVersionId : "none"}</td>
+                          <td className="small">{version ? (version.isCurrent ? "current" : "historical") : ""}</td>
+                          <td className="small">{version ? version.createdAt : ""}</td>
+                          <td>
+                            {version ? (
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-outline-secondary"
+                                onClick={() => setSourceVersionId(version.sourceVersionId)}
+                              >
+                                Select
+                              </button>
+                            ) : null}
+                          </td>
+                        </tr>
+                      ))
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+          </div>
 
           <div className="admin-card mt-3">
             <h5 className="mb-2">Claim &amp; evidence workflow</h5>
