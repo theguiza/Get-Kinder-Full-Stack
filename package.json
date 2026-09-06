@@ -72,6 +72,7 @@
     "verify:kai-sprint2-p3-13-export-review-completion": "node scripts/kai-sprint2-p3-13-export-review-completion-local-postgres.js",
     "verify:kai-sprint2-p3-16-export-candidate-foundation": "node scripts/kai-sprint2-p3-16-export-candidate-foundation-local-postgres.js",
     "verify:kai-sprint2-p3-17-human-authority-decision-ledger": "node scripts/kai-sprint2-p3-17-human-authority-decision-ledger-local-postgres.js",
+    "verify:kai-sprint2-p3-18-real-persisted-final-gate-proof": "node scripts/kai-sprint2-p3-18-real-persisted-final-gate-proof-local-postgres.js",
     "verify:kai-sprint2-gate-c1-gcs-generation-binding": "node scripts/kai-sprint2-gate-c1-gcs-generation-binding-local-postgres.js",
     "verify:kai-sprint2-gk-organization-tenant-binding": "node scripts/kai-sprint2-gk-organization-tenant-binding-local-postgres.js",
     "verify:kai-sprint2-organization-enablement": "node scripts/kai-sprint2-organization-enablement-local-postgres.js",
