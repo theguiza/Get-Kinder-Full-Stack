@@ -620,8 +620,20 @@ export async function classifyEngagementFunderRequirementsState(input, dependenc
     authoritativeRequirementSets,
     applicabilityRows,
   });
+  // requirementSetAuthorityDto expects the flat listExternalRequirementSetsForTarget
+  // row shape (a top-level source_type/source_code plus an aggregated
+  // requirements array) - classifiedApplicability rows are instead
+  // listEngagementRequirementSetsForOrganization rows already reshaped by
+  // applicabilityRowDto (nested requirement_source/requirement_framework_version,
+  // no requirements array at all). Map each CURRENT_APPLICABLE row back to
+  // its already-validated authoritativeRequirementSets entry (same
+  // requirement_set_id) before projecting, so the governed requirement
+  // list/source/framework actually reach the caller instead of silently
+  // resolving to an empty list and undefined source/framework fields.
   const applicableRequirementSets = classifiedApplicability
     .filter((row) => row.applicability_conclusion === "CURRENT_APPLICABLE")
+    .map((row) => authoritativeRequirementSets.find((set) => set.requirement_set_id === row.requirement_set_id))
+    .filter(Boolean)
     .map(requirementSetAuthorityDto);
 
   if (applicableRequirementSets.length > 0) {
