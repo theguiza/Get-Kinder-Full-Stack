@@ -20356,6 +20356,8 @@ Registration preserves the required separations: it creates/replays only catalog
 
 **Disclosed, pre-existing, out-of-scope boundary (not fixed in this package):** `migrations/kai_sprint2_p3_01_generated_content_drafts.sql` enforces `CHECK (draft_status = 'draft')`, so no real `generated_content_drafts` row can ever fail `VAL-EXP-001`'s `draftIsStillDraft` gate as false; genuine `finalGate=true` PASS against real production data is not reachable today regardless of authority, and requires a future, separately authorized schema/product decision. Every PASS demonstration in both proof suites uses an injected `draftStatus` override on the review-packet input only (never on authority or currentness) to exercise the real validator's pass branch; this is disclosed, not silently assumed.
 
+**SUPERSEDED (see "Reconciliation — Real Persisted Pre-Artifact Final Eligibility Closure" at the end of this document):** the "real production PASS is not reachable / requires an injected draftStatus override" conclusion above was the correct description of the validator's behavior *as it existed at this point in the history*, but it was itself diagnosing a validator semantics defect, not a genuine schema gap. `9619a8d` corrected that defect (source-draft status is not the Phase-14 final-export lifecycle state and is no longer treated as a final-export blocker when `finalGate=true`), and `d30b0cc` + `9f56c5f` then proved a real-persisted, non-injected `draftIsStillDraft` (draft_status remains `'draft'` throughout) reaching PASS/BLOCKED end to end. Preserved here as historical evidence only; do not read it as a current blocker.
+
 **Files changed across the three prompts:** `Backend/kai/dictionary/postgresHumanAuthorityDecisionRepository.js`, `Backend/kai/routes/sprint2IntakeApi.js`, `Backend/kai/services/kaiHumanAuthorityDecisionService.js`, `Backend/kai/services/kaiMetadataOnlyAuditComposition.js`, `Backend/kai/validators/kaiSprint2RequestSchemas.js`, `Backend/kai/services/kaiFinalExportEligibilityGateService.js`, `package.json`, `__tests__/kai-sprint2-api-contract.spec.js`, `__tests__/kai-sprint2-p3-17-human-authority-decision-ledger-boundary.spec.js`, `__tests__/kai-sprint2-p3-17-human-final-release-authority-write.spec.js`, `__tests__/kai-sprint2-p3-export-operational-composition-route.spec.js`, `__tests__/kai-sprint2-p3-18-final-export-eligibility-gate-boundary.spec.js`, `__tests__/kai-sprint2-p3-18-final-export-eligibility-gate-authority-state-proof.spec.js`, `__tests__/kai-sprint2-p3-18-assembled-pre-artifact-release-proof.spec.js`, and this ExecPlan entry.
 
 **Verification:** `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel` set for every Node command across all three prompts. Final combined regression run in this closing prompt - assembled proof, authority-state proof, P3-18 boundary, P3-03 eligibility boundary+integration, P3-04 review-completion integration, P3-05/P3-06/P3-08/P3-09/P3-13/P3-15 export-review lifecycle, P3-16 candidate boundary+integration, P3-17 authority boundary+integration+write, export-operational-composition route, and API contract - `node --test` -> 259 passed, 4 skipped (DB-only integration cases against the non-listening loopback sentinel), 0 failed. `git diff --check` passed.
@@ -20363,3 +20365,36 @@ Registration preserves the required separations: it creates/replays only catalog
 **Final diff reviewed:** confined to the two new services, one exported (unmodified) helper, one new grant/revoke route, and their focused/state-proof/assembled-proof tests. No P3-16 currentness, P3-17 effectiveness/ledger, `VAL-EXP-001`, review, or schema semantics were changed; no manifest, artifact, renderer, signed URL, download/retrieval, or reuse behavior exists anywhere in this package.
 
 **Remaining work beyond pre-artifact release:** ARTIFACT CREATION (manifest persistence, renderer, Markdown/PDF/DOCX, artifact bytes/storage, signed URL, download/retrieval, reuse) - not authorized and not started.
+
+## Reconciliation — Real Persisted Pre-Artifact Final Eligibility Closure (documentation only)
+
+**Date:** 2026-09-06
+
+**Purpose:** this entry is a documentation-only reconciliation of the ExecPlan tail above with three later, already-committed repository corrections. No product code, schema, or migration was added by this entry; it records what the prior three commits already did.
+
+**Stale statement being reconciled:** the "Disclosed, pre-existing, out-of-scope boundary" paragraph earlier in the Pre-Artifact Governed Export Release section, which concluded that a real (non-injected) `generated_content_drafts` row could never reach `VAL-EXP-001` `finalGate=true` PASS because `draft_status` is schema-locked to the literal `'draft'`, and that resolving this required a future, separately authorized schema/product decision. That conclusion is superseded and must not be treated as a current blocker.
+
+**Superseding repository evidence, in order:**
+
+- `9619a8d` ("KAI correct VAL-EXP-001 source-draft semantics") — identified that the prior validator logic (`if (finalGate === true && draftIsStillDraft === true) failedGates.push("final_gate_true_while_draft")`) was itself the defect: it made a still-`'draft'` source object an unconditional final-export blocker even though `generated_content_draft` is designed to remain a permanently immutable draft object (`draft_status` stays `'draft'` by schema, unchanged). `VAL-EXP-001` was corrected to `if (finalGate !== true && draftIsStillDraft === true) failedGates.push("generated_content_still_draft")` in `Backend/kai/validators/kaiExportManifestEligibilityValidators.js` — a still-draft source now blocks only the pre-final workflow (`finalGate=false`), and is no longer evaluated as a blocker once `finalGate=true`. Review resolution, P3-16 candidate currentness, current-use eligibility, audience match, and P3-17 export authority remain independently required for `finalGate=true` PASS, unchanged by this correction. No schema or migration change was made or needed for this correction.
+- `d30b0cc` ("KAI repair P3-17 authority audit constraint") — repaired an unrelated, genuine schema gap (`upload_lifecycle_audit_gate_a_operation_check` did not yet admit the `human_authority_decision_recorded` audit operation), via an additive corrective migration, so that a real P3-17 grant/revoke write no longer fails at the database boundary.
+- `9f56c5f` ("KAI real-persisted pre-artifact final eligibility closure (STATE B/C/D)") — with both corrections in place, un-skipped and proved the real-persisted (non-injected) state machine against a real ephemeral local PostgreSQL instance:
+  - STATE A — no effective authority → BLOCKED
+  - STATE B — real effective P3-17 authority → PASS, with source `draft_status` proven unchanged (`'draft'`) both before and after
+  - STATE C — revoked authority → BLOCKED (`head_is_revoke`)
+  - STATE D — an independent candidate whose limitation snapshot is superseded → BLOCKED (`limitation_snapshot_superseded`), under P3-16's real currentness rules, distinct from the revoke path
+
+No mock was substituted for any service/repository call across STATE A-D; the only disclosed stand-in remains the pre-existing P2-06 current-use-eligibility seam (unrelated to draft_status).
+
+**Current status, restated accurately:**
+
+- `generated_content_draft` remains an immutable draft object; `draft_status` stays `'draft'` by schema and is unchanged by this reconciliation or by any of the three superseding commits.
+- Real persisted STATE B reaches `VAL-EXP-001` PASS while `draft_status` remains `'draft'`, using the real P3-16 currentness evaluator, the real P3-17 `evaluateEffectiveness`, and the real, unmodified final-gate composition — no injected `draftStatus` override.
+- P3-17 real authority write (grant/revoke) is closed: the audit-constraint gap is repaired and proven against a real database.
+- STATE C (revoke) and STATE D (stale candidate/limitation snapshot) each independently reach BLOCKED under the real currentness/effectiveness evaluators.
+- REAL PERSISTED PRE-ARTIFACT FINAL ELIGIBILITY is repository-closed. VAL-EXP-001, P3-16 candidate/currentness, P3-17 human release authority/effectiveness, and P3-18 final eligibility composition remain accepted and closed; none of these findings are reopened by this reconciliation.
+
+**NEXT PHASE-14 IMPLEMENTATION PACKAGE:**
+NOT YET DEFINED IN THIS EXECPLAN. No export-manifest table, final-output table, artifact schema, renderer, storage, signed-URL, download, or reuse work is authorized or scoped by this entry or by any prior entry. Any such package requires a separate, future owner authorization.
+
+**Files changed in this reconciliation:** this ExecPlan document only. No product code, test, schema, or migration file was changed.
