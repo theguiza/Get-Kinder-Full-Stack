@@ -370,15 +370,15 @@ test("export-candidate route delegates to the existing createGeneratedDraftExpor
   });
 });
 
-test("export operational composition route source stays service-only and does not implement final release authority", () => {
+test("export operational composition route source stays service-only and does not implement finalGate or artifacts", () => {
   const source = readFileSync("Backend/kai/routes/sprint2IntakeApi.js", "utf8");
   const slice = source.slice(
     source.indexOf("async function getExportReviewService"),
-    source.indexOf('router.get(\n  "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-review-queue/:exportReviewQueueItemId/packet"'),
+    source.indexOf('router.post(\n  "/admin/organizations/:organizationId/export-candidates/:exportCandidateId/final-release-authority"'),
   );
   assert.match(slice, /requestGeneratedDraftExportReview/);
   assert.match(slice, /createGeneratedDraftExportCandidate/);
   assert.doesNotMatch(slice, /from\s+["'][^"']*(?:db|repository|postgres|kaiDb|kaiQueries|kaiReadModels)[^"']*["']/i);
   assert.doesNotMatch(slice, /\b(?:SELECT|INSERT|UPDATE|DELETE|ALTER|CREATE|DROP)\b|\bpool\b|\bkaiDb\b|\brepository\b|\bkai\.(?!js\b)/i);
-  assert.doesNotMatch(slice, /finalGate\s*:\s*true|final_gate|human[-_ ]release[-_ ]authority|manifest|artifact|writeFile|createWriteStream/i);
+  assert.doesNotMatch(slice, /finalGate\s*:\s*true|final_gate|manifest|artifact|writeFile|createWriteStream/i);
 });

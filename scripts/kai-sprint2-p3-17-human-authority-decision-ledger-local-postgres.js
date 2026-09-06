@@ -128,6 +128,7 @@ try {
     "--test",
     "__tests__/kai-sprint2-p3-17-human-authority-decision-ledger.integration.spec.js",
     "__tests__/kai-sprint2-p3-17-human-authority-decision-ledger-boundary.spec.js",
+    "__tests__/kai-sprint2-p3-17-human-final-release-authority-write.spec.js",
     "__tests__/kai-sprint2-p3-16-export-candidate-foundation.integration.spec.js",
     "__tests__/kai-sprint2-p3-16-export-candidate-foundation-boundary.spec.js",
     "__tests__/kai-sprint2-p3-13-export-review-completion.integration.spec.js",

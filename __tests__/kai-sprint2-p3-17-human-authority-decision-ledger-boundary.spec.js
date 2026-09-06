@@ -207,9 +207,9 @@ test("P3-17 evaluateHumanAuthorityEffectivenessInTransaction reports effective o
 
 // --- scope-boundary self-checks ---
 
-test("P3-17 repository exposes only a read-only evaluator: no grant/revoke write method exists on the created repository", () => {
+test("P3-17 repository exposes only the authority write method and read-only evaluator", () => {
   const repo = createPostgresHumanAuthorityDecisionRepository({ runInTransaction: async (fn) => fn({ query: async () => ({ rows: [] }) }) });
-  assert.deepEqual(Object.keys(repo), ["evaluateEffectiveness"]);
+  assert.deepEqual(Object.keys(repo), ["recordDecision", "evaluateEffectiveness"]);
 });
 
 test("P3-17 repository source contains no route wiring and creates no finalGate/manifest/export-eligible state", () => {

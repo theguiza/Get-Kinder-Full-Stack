@@ -65,6 +65,10 @@ const REQUEST_EXPORT_REVIEW_REQUEST_KEYS = new Set([
   "requested_export_audience",
 ]);
 const CREATE_EXPORT_CANDIDATE_REQUEST_KEYS = new Set([]);
+const HUMAN_FINAL_RELEASE_AUTHORITY_REQUEST_KEYS = new Set([
+  "requested_audience",
+  "decision_action",
+]);
 const EXPORT_REVIEW_AUDIENCES = new Set(["internal", "funder", "public"]);
 const COMPLETE_EVIDENCE_REVIEW_REQUEST_KEYS = new Set([
   "expected_updated_at",
@@ -537,6 +541,39 @@ export function validateCreateExportCandidateRequest(payload) {
   if (keys.some((key) => !CREATE_EXPORT_CANDIDATE_REQUEST_KEYS.has(key))) {
     return { ok: false, blockers: [requestBlocker("unknown_field", "body")] };
   }
+  return { ok: true, blockers: [] };
+}
+
+export function validateHumanFinalReleaseAuthorityRequest(payload) {
+  if (!isPlainObject(payload)) {
+    return { ok: false, blockers: [requestBlocker("request_body_must_be_object", "body")] };
+  }
+
+  const keys = Object.keys(payload);
+  for (const key of keys) {
+    if (!HUMAN_FINAL_RELEASE_AUTHORITY_REQUEST_KEYS.has(key)) {
+      return { ok: false, blockers: [requestBlocker("unknown_field", `body.${key}`)] };
+    }
+    const value = payload[key];
+    if (value === null) return { ok: false, blockers: [requestBlocker("null_field_not_allowed", `body.${key}`)] };
+    if (Array.isArray(value)) return { ok: false, blockers: [requestBlocker("array_field_not_allowlisted", `body.${key}`)] };
+    if (isPlainObject(value)) return { ok: false, blockers: [requestBlocker("nested_object_not_allowed", `body.${key}`)] };
+    if (typeof value !== "string") return { ok: false, blockers: [requestBlocker("invalid_string_field", `body.${key}`)] };
+  }
+
+  for (const key of HUMAN_FINAL_RELEASE_AUTHORITY_REQUEST_KEYS) {
+    if (!Object.hasOwn(payload, key)) {
+      return { ok: false, blockers: [requestBlocker("required_field_missing", `body.${key}`)] };
+    }
+  }
+
+  if (!EXPORT_REVIEW_AUDIENCES.has(payload.requested_audience)) {
+    return { ok: false, blockers: [requestBlocker("invalid_requested_audience", "body.requested_audience")] };
+  }
+  if (!["grant", "revoke"].includes(payload.decision_action)) {
+    return { ok: false, blockers: [requestBlocker("invalid_decision_action", "body.decision_action")] };
+  }
+
   return { ok: true, blockers: [] };
 }
 
