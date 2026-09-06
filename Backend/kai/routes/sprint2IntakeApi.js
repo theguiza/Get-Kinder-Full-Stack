@@ -61,6 +61,7 @@ let claimGapFollowupServicePromise = null;
 let conflictReviewCandidateServicePromise = null;
 let generatedContentServicePromise = null;
 let dataDictionaryServicePromise = null;
+let externalRequirementSetRegistrationServicePromise = null;
 
 export function sendServiceResult(res, result, successStatus = 200) {
   if (result?.ok) {
@@ -1181,6 +1182,14 @@ async function getEngagementFunderRequirementsCompositionService() {
   return engagementFunderRequirementsCompositionServicePromise;
 }
 
+async function getExternalRequirementSetRegistrationService() {
+  if (intakeServiceOverride?.registerExternalRequirementSet) return intakeServiceOverride;
+  externalRequirementSetRegistrationServicePromise ||= import(
+    "../services/kaiExternalRequirementSetRegistrationService.js"
+  );
+  return externalRequirementSetRegistrationServicePromise;
+}
+
 let organizationContextServicePromise = null;
 async function getOrganizationContextService() {
   if (intakeServiceOverride?.listAuthorizedOrganizations) return intakeServiceOverride;
@@ -1232,6 +1241,39 @@ router.get("/admin/organizations/:organizationId/engagements", async (req, res) 
     });
   });
 });
+
+/**
+ * Structured external requirement-set registration: creates/replays only the
+ * existing catalogue objects (`requirement_sources` -> framework version ->
+ * requirement set -> requirements). It does not create
+ * engagement_requirement_sets applicability rows or requirement assessments.
+ * The route accepts only structured JSON and delegates authorization,
+ * validation, transaction, persistence, audit, and DTO allowlisting to the
+ * service layer.
+ */
+router.post(
+  "/admin/organizations/:organizationId/external-requirement-sets",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    if (!metadataContentTypeIsSupported(req)) {
+      return sendKaiError(res, "unsupported_media_type");
+    }
+    const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+    if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) || organizationId !== organizationId.toLowerCase()) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id")],
+      });
+    }
+    return invokeService(res, async () => {
+      const service = await getExternalRequirementSetRegistrationService();
+      return service.registerExternalRequirementSet({
+        organizationId,
+        payload: requestPayload(req),
+        actorContext: sprint2MappedActorContext(req),
+      });
+    });
+  },
+);
 
 router.put("/admin/organizations/:organizationId/engagements/:engagementId/requirement-target", async (req, res) => {
   const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";

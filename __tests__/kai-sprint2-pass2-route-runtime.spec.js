@@ -172,6 +172,10 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // KAI P2-09 human evidence-review completion surface (additive; every
     // prior entry preserved verbatim).
     "/admin/organizations/:organizationId/evidence-items/:evidenceItemId/evidence-review/:reviewQueueItemId/complete",
+    // KAI structured external requirement-set registration: catalogue-only
+    // write into requirement_sources/framework_versions/sets/requirements;
+    // no applicability or assessment authority is created.
+    "/admin/organizations/:organizationId/external-requirement-sets",
     // Generated Drafts library index: read-only, additive, and every prior
     // entry preserved verbatim.
     "/admin/organizations/:organizationId/generated-content-drafts",
