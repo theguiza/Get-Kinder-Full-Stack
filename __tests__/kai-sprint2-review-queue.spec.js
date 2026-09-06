@@ -634,6 +634,15 @@ test("sensitivityReviewQueueAttention: queue read failure never renders as a suc
 // per claim) - these tests build real raw traceability DTOs and push them through
 // the real projectReviewQueue pipeline first, exactly like the Review Queue tests
 // above, so the composition under test is the real one, not a hand-built shape.
+//
+// Package 5 repair: membership/currentness for gap_items/conflicts/followups is
+// read directly from the server-authoritative `is_current` field
+// (postgresClaimTraceabilityRepository.js#safeGapRows/safeFollowupRows/the
+// potentialConflictGroups construction loop) - these fixtures set `is_current`
+// explicitly, exactly as the real repository would, rather than deriving it
+// from raw status/queue-status strings in the test (which would silently
+// resurrect a frontend currentness rule). Coverage findings continue to use
+// the pre-existing, unchanged `dimensions[].blocks_requested_audience` field.
 function rawTraceabilityDtoFixture(overrides = {}) {
   return {
     requestedAudience: "internal",
@@ -676,7 +685,36 @@ function rawTraceabilityDtoFixture(overrides = {}) {
   };
 }
 
-test("projectOrganizationGapsAndRisks: a dimension that blocks the requested audience is a current gap; an accepted/non-blocking dimension is not", () => {
+test("projectOrganizationGapsAndRisks: a current (is_current: true) gap_item is a gap; a resolved (is_current: false) one is not - and it is never confused with a coverage/dimension finding", () => {
+  const dto = rawTraceabilityDtoFixture({
+    gap_items: [
+      { gap_log_item_id: "g-current", dimension_key: "denominator_clarity", assessment_status: "unresolved", validator_key: "VAL-KAI-P2-02-denominator_clarity", is_current: true },
+      { gap_log_item_id: "g-resolved", dimension_key: "time_period_clarity", assessment_status: "resolved", validator_key: "VAL-KAI-P2-02-time_period_clarity", is_current: false },
+    ],
+    dimensions: {
+      denominator_clarity: {
+        assessment_status: "unresolved",
+        validator_key: "VAL-KAI-P2-02-denominator_clarity",
+        internal_limitation_accepted: false,
+        funder_limitation_accepted: false,
+        blocks_requested_audience: true,
+      },
+    },
+  });
+  const items = projectReviewQueue({ items: [dto] });
+  const gapsAndRisks = projectOrganizationGapsAndRisks(items);
+  assert.deepEqual(gapsAndRisks.gapItems, [
+    { claimId, gapLogItemId: "g-current", dimensionKey: "denominator_clarity", assessmentStatus: "unresolved", validatorKey: "VAL-KAI-P2-02-denominator_clarity" },
+  ]);
+  // Coverage findings are a distinct category, sourced from `dimensions`, not `gap_items`.
+  assert.deepEqual(gapsAndRisks.coverageFindings, [
+    { claimId, dimensionKey: "denominator_clarity", assessmentStatus: "unresolved", validatorKey: "VAL-KAI-P2-02-denominator_clarity" },
+  ]);
+  assert.deepEqual(gapsAndRisks.conflicts, []);
+  assert.deepEqual(gapsAndRisks.followups, []);
+});
+
+test("projectOrganizationGapsAndRisks: a dimension that blocks the requested audience is a coverage finding; an accepted/non-blocking dimension is not", () => {
   const dto = rawTraceabilityDtoFixture({
     dimensions: {
       denominator_clarity: {
@@ -697,19 +735,18 @@ test("projectOrganizationGapsAndRisks: a dimension that blocks the requested aud
   });
   const items = projectReviewQueue({ items: [dto] });
   const gapsAndRisks = projectOrganizationGapsAndRisks(items);
-  assert.deepEqual(gapsAndRisks.gaps, [
+  assert.deepEqual(gapsAndRisks.coverageFindings, [
     { claimId, dimensionKey: "denominator_clarity", assessmentStatus: "unresolved", validatorKey: "VAL-KAI-P2-02-denominator_clarity" },
   ]);
-  assert.deepEqual(gapsAndRisks.conflicts, []);
-  assert.deepEqual(gapsAndRisks.followups, []);
+  assert.deepEqual(gapsAndRisks.gapItems, []);
 });
 
-test("projectOrganizationGapsAndRisks: a potential-conflict group is current unless its review AND workflow are both resolved/terminal", () => {
+test("projectOrganizationGapsAndRisks: a potential-conflict group is included only when the server marks it is_current: true", () => {
   const dto = rawTraceabilityDtoFixture({
     blockerCodes: ["potential_conflict_review_unresolved"],
     potential_conflict_groups: [
       {
-        conflict_group_id: "cg-open",
+        conflict_group_id: "cg-current",
         lower_claim_id: claimId,
         higher_claim_id: "00000000-0000-4000-8000-000000000999",
         lower_claim_conflict_gap_id: "g-lower",
@@ -718,68 +755,61 @@ test("projectOrganizationGapsAndRisks: a potential-conflict group is current unl
         review_queue_item_id: "q1",
         review_status: "needs_gk_review",
         workflow_status: "open",
+        is_current: true,
       },
       {
-        conflict_group_id: "cg-resolved-but-workflow-open",
+        conflict_group_id: "cg-resolved",
         lower_claim_id: claimId,
         higher_claim_id: "00000000-0000-4000-8000-000000000998",
         lower_claim_conflict_gap_id: "g-lower2",
         higher_claim_conflict_gap_id: "g-higher2",
-        basis_code: "overlapping_scope",
-        review_queue_item_id: "q2",
-        review_status: "resolved",
-        workflow_status: "open",
-      },
-      {
-        conflict_group_id: "cg-closed",
-        lower_claim_id: claimId,
-        higher_claim_id: "00000000-0000-4000-8000-000000000997",
-        lower_claim_conflict_gap_id: "g-lower3",
-        higher_claim_conflict_gap_id: "g-higher3",
         basis_code: "stale_source",
         review_queue_item_id: "q3",
         review_status: "resolved",
         workflow_status: "closed",
+        is_current: false,
       },
     ],
   });
   const items = projectReviewQueue({ items: [dto] });
   const gapsAndRisks = projectOrganizationGapsAndRisks(items);
-  const conflictGroupIds = gapsAndRisks.conflicts.map((conflict) => conflict.conflictGroupId);
-  assert.ok(conflictGroupIds.includes("cg-open"));
-  assert.ok(conflictGroupIds.includes("cg-resolved-but-workflow-open"));
-  assert.ok(!conflictGroupIds.includes("cg-closed"));
-  assert.equal(gapsAndRisks.conflicts.length, 2);
+  assert.deepEqual(gapsAndRisks.conflicts, [
+    {
+      claimId,
+      conflictGroupId: "cg-current",
+      lowerClaimId: claimId,
+      higherClaimId: "00000000-0000-4000-8000-000000000999",
+      basisCode: "contradictory_finding",
+      reviewStatus: "needs_gk_review",
+      workflowStatus: "open",
+    },
+  ]);
 });
 
-test("projectOrganizationGapsAndRisks: a client follow-up is current unless its review is resolved AND it is not waiting on the client", () => {
+test("projectOrganizationGapsAndRisks: a client follow-up is included only when the server marks it is_current: true", () => {
   const dto = rawTraceabilityDtoFixture({
     blockerCodes: ["client_followup_unresolved"],
-    gap_items: [{ gap_log_item_id: "g1", dimension_key: "denominator_clarity", assessment_status: "unresolved", validator_key: "VAL-KAI-P2-02-denominator_clarity" }],
+    gap_items: [{ gap_log_item_id: "g1", dimension_key: "denominator_clarity", assessment_status: "unresolved", validator_key: "VAL-KAI-P2-02-denominator_clarity", is_current: true }],
     client_followup_workflows: [
-      { client_followup_item_id: "cf-waiting", gap_log_item_id: "g1", dimension_key: "denominator_clarity", workflow_status: "waiting_on_client", review_status: "resolved", review_queue_item_id: "q4" },
-      { client_followup_item_id: "cf-proposed", gap_log_item_id: "g1", dimension_key: "denominator_clarity", workflow_status: "proposed", review_status: "needs_gk_review", review_queue_item_id: "q5" },
-      { client_followup_item_id: "cf-resolved", gap_log_item_id: "g1", dimension_key: "denominator_clarity", workflow_status: "closed", review_status: "resolved", review_queue_item_id: "q6" },
+      { client_followup_item_id: "cf-waiting", gap_log_item_id: "g1", dimension_key: "denominator_clarity", workflow_status: "waiting_on_client", review_status: "resolved", review_queue_item_id: "q4", is_current: true },
+      { client_followup_item_id: "cf-resolved", gap_log_item_id: "g1", dimension_key: "denominator_clarity", workflow_status: "closed", review_status: "resolved", review_queue_item_id: "q6", is_current: false },
     ],
   });
   const items = projectReviewQueue({ items: [dto] });
   const gapsAndRisks = projectOrganizationGapsAndRisks(items);
   const followupIds = gapsAndRisks.followups.map((followup) => followup.clientFollowupItemId);
-  assert.ok(followupIds.includes("cf-waiting"));
-  assert.ok(followupIds.includes("cf-proposed"));
-  assert.ok(!followupIds.includes("cf-resolved"));
-  assert.equal(gapsAndRisks.followups.length, 2);
+  assert.deepEqual(followupIds, ["cf-waiting"]);
 });
 
 test("projectOrganizationGapsAndRisks: an empty or missing rollup returns an explicit empty projection", () => {
-  assert.deepEqual(projectOrganizationGapsAndRisks([]), { gaps: [], conflicts: [], followups: [] });
-  assert.deepEqual(projectOrganizationGapsAndRisks(null), { gaps: [], conflicts: [], followups: [] });
+  assert.deepEqual(projectOrganizationGapsAndRisks([]), { gapItems: [], coverageFindings: [], conflicts: [], followups: [] });
+  assert.deepEqual(projectOrganizationGapsAndRisks(null), { gapItems: [], coverageFindings: [], conflicts: [], followups: [] });
 });
 
 const gapsAndRisksEmptyBaseInputs = Object.freeze({
   reviewQueueRequestState: "success",
   reviewQueueCompleteness: { truncated: false, evaluationErrorCount: 0 },
-  gapsAndRisks: { gaps: [], conflicts: [], followups: [] },
+  gapsAndRisks: { gapItems: [], coverageFindings: [], conflicts: [], followups: [] },
 });
 
 test("organizationGapsAndRisksIsConclusivelyEmpty: true only for a fully conclusive, successful, complete zero", () => {
@@ -814,25 +844,32 @@ test("organizationGapsAndRisksIsConclusivelyEmpty: false when the rollup was tru
   );
 });
 
-test("organizationGapsAndRisksIsConclusivelyEmpty: false when any one of gaps/conflicts/followups is non-empty", () => {
+test("organizationGapsAndRisksIsConclusivelyEmpty: false when any one of gapItems/coverageFindings/conflicts/followups is non-empty", () => {
   assert.equal(
     organizationGapsAndRisksIsConclusivelyEmpty({
       ...gapsAndRisksEmptyBaseInputs,
-      gapsAndRisks: { gaps: [{ claimId }], conflicts: [], followups: [] },
+      gapsAndRisks: { gapItems: [{ claimId }], coverageFindings: [], conflicts: [], followups: [] },
     }),
     false,
   );
   assert.equal(
     organizationGapsAndRisksIsConclusivelyEmpty({
       ...gapsAndRisksEmptyBaseInputs,
-      gapsAndRisks: { gaps: [], conflicts: [{ conflictGroupId: "cg1" }], followups: [] },
+      gapsAndRisks: { gapItems: [], coverageFindings: [{ claimId }], conflicts: [], followups: [] },
     }),
     false,
   );
   assert.equal(
     organizationGapsAndRisksIsConclusivelyEmpty({
       ...gapsAndRisksEmptyBaseInputs,
-      gapsAndRisks: { gaps: [], conflicts: [], followups: [{ clientFollowupItemId: "cf1" }] },
+      gapsAndRisks: { gapItems: [], coverageFindings: [], conflicts: [{ conflictGroupId: "cg1" }], followups: [] },
+    }),
+    false,
+  );
+  assert.equal(
+    organizationGapsAndRisksIsConclusivelyEmpty({
+      ...gapsAndRisksEmptyBaseInputs,
+      gapsAndRisks: { gapItems: [], coverageFindings: [], conflicts: [], followups: [{ clientFollowupItemId: "cf1" }] },
     }),
     false,
   );
@@ -860,4 +897,24 @@ test("Impact Evidence Library renders a dedicated organization-level Gaps and Ri
   assert.match(uiSource, /Review Queue<\/h5>/);
   // The existing Claims panel remains present and unchanged.
   assert.match(uiSource, /<h5 className="mb-0">Claims<\/h5>/);
+});
+
+// Package 5 repair: the frontend must not reproduce backend currentness
+// rules. This is a source-contract regression guard - if a future edit
+// reintroduces a local terminal-status/queue-status membership rule for this
+// section, this test fails.
+test("impactEvidenceLibraryLogic.js contains no Gaps-and-Risks-specific currentness/membership rule - only server-authoritative fields are read", () => {
+  const logicSource = readFileSync("frontend/impactEvidenceLibraryLogic.js", "utf8");
+  assert.doesNotMatch(logicSource, /isCurrentAttentionReviewStatus/);
+  assert.doesNotMatch(logicSource, /workflow_status === "open"/);
+  assert.doesNotMatch(logicSource, /workflowStatus === "waiting_on_client" && !/);
+  // projectOrganizationGapsAndRisks reads is_current/isCurrent directly.
+  const projectionSource = logicSource.slice(
+    logicSource.indexOf("export function projectOrganizationGapsAndRisks"),
+    logicSource.indexOf("export function organizationGapsAndRisksIsConclusivelyEmpty"),
+  );
+  assert.match(projectionSource, /gap\.is_current === true/);
+  assert.match(projectionSource, /group\.is_current === true/);
+  assert.match(projectionSource, /followup\.isCurrent === true/);
+  assert.doesNotMatch(projectionSource, /"resolved"|"approved"|"complete"/);
 });

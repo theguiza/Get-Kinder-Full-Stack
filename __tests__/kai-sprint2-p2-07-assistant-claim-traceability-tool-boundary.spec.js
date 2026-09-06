@@ -97,6 +97,7 @@ function successDto(overrides = {}) {
         dimension_key: "missingness",
         assessment_status: "unresolved",
         validator_key: "VAL-KAI-P2-02-missingness",
+        is_current: true,
       },
     ],
     client_followup_workflows: [
@@ -107,6 +108,7 @@ function successDto(overrides = {}) {
         workflow_status: "waiting_on_client",
         review_status: "needs_gk_review",
         review_queue_item_id: "00000000-0000-4000-8000-000000001201",
+        is_current: true,
       },
     ],
     potential_conflict_groups: [
@@ -120,6 +122,7 @@ function successDto(overrides = {}) {
         review_queue_item_id: "00000000-0000-4000-8000-000000001701",
         review_status: "needs_gk_review",
         workflow_status: "open",
+        is_current: true,
       },
     ],
     requestedAudience: "internal",

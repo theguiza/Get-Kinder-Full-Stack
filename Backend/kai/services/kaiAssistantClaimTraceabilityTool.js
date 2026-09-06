@@ -287,11 +287,17 @@ const TRACEABILITY_CANDIDATE_KEYS = new Set(["intake_source_candidate_id", "inta
 const TRACEABILITY_EVIDENCE_REVIEW_DECISION_KEYS = new Set(["decision_id", "decision_outcome"]);
 const TRACEABILITY_CLAIM_REVIEW_DECISION_KEYS = new Set(["decision_id", "decision_outcome", "approved_audiences"]);
 const TRACEABILITY_PROMOTION_DECISION_KEYS = new Set(["intake_promotion_decision_id"]);
+// `is_current` (Package 5 repair): the governed authority for whether each
+// gap/follow-up/conflict is still open, computed once by
+// postgresClaimTraceabilityRepository.js from the exact same predicate that
+// already drives the matching blocker code - never re-derived here or by any
+// caller.
 const TRACEABILITY_GAP_ITEM_KEYS = new Set([
   "gap_log_item_id",
   "dimension_key",
   "assessment_status",
   "validator_key",
+  "is_current",
 ]);
 const TRACEABILITY_FOLLOWUP_WORKFLOW_KEYS = new Set([
   "client_followup_item_id",
@@ -300,6 +306,7 @@ const TRACEABILITY_FOLLOWUP_WORKFLOW_KEYS = new Set([
   "workflow_status",
   "review_status",
   "review_queue_item_id",
+  "is_current",
 ]);
 const TRACEABILITY_CONFLICT_GROUP_KEYS = new Set([
   "conflict_group_id",
@@ -311,6 +318,7 @@ const TRACEABILITY_CONFLICT_GROUP_KEYS = new Set([
   "review_queue_item_id",
   "review_status",
   "workflow_status",
+  "is_current",
 ]);
 
 function validateExactSafeObject(value, keys) {

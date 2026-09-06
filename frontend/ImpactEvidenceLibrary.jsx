@@ -1180,14 +1180,18 @@ export default function ImpactEvidenceLibrary() {
         <div className="d-flex justify-content-between align-items-center mb-2">
           <h5 className="mb-0">Gaps and Risks</h5>
           <span className="text-muted small">
-            {organizationGapsAndRisks.gaps.length + organizationGapsAndRisks.conflicts.length + organizationGapsAndRisks.followups.length} shown
+            {organizationGapsAndRisks.gapItems.length
+              + organizationGapsAndRisks.coverageFindings.length
+              + organizationGapsAndRisks.conflicts.length
+              + organizationGapsAndRisks.followups.length} shown
           </span>
         </div>
         <div className="small text-muted mb-2">
-          This organization's current governed evidence-health problems - coverage gaps, potential conflicts, and
-          client follow-ups still outstanding - discoverable without selecting a claim first. Composed from the same
-          governed, freshly-recomputed claim-traceability state as the Review Queue below; it never relabels a
-          resolved, stale, or superseded item as current.
+          This organization's current governed evidence-health problems - gaps, coverage findings, potential
+          conflicts, and client follow-ups still outstanding - discoverable without selecting a claim first. Every
+          item below is server-determined as current directly from the same governed, freshly-recomputed
+          claim-traceability state as the Review Queue below; this page never decides for itself whether a gap,
+          conflict, or follow-up is current.
         </div>
         {reviewQueueError ? <div className="alert alert-warning py-2 small">{reviewQueueError}</div> : null}
         {loadingReviewQueue ? <div className="text-muted small">Loading organization evidence health...</div> : null}
@@ -1206,15 +1210,15 @@ export default function ImpactEvidenceLibrary() {
         ) : null}
         {!loadingReviewQueue && !reviewQueueError ? (
           <div className="row g-2">
-            <div className="col-12 col-md-4">
+            <div className="col-12 col-md-3">
               <div className="border rounded p-2 h-100">
                 <div className="d-flex justify-content-between align-items-center">
-                  <span className="small fw-semibold">Coverage gaps</span>
-                  <span className="badge text-bg-secondary">{organizationGapsAndRisks.gaps.length}</span>
+                  <span className="small fw-semibold">Gaps</span>
+                  <span className="badge text-bg-secondary">{organizationGapsAndRisks.gapItems.length}</span>
                 </div>
                 <ul className="list-unstyled mt-1 mb-0">
-                  {organizationGapsAndRisks.gaps.map((gap) => (
-                    <li key={`${gap.claimId}-${gap.dimensionKey}`} className="small d-flex justify-content-between align-items-center gap-2 mt-1">
+                  {organizationGapsAndRisks.gapItems.map((gap) => (
+                    <li key={gap.gapLogItemId} className="small d-flex justify-content-between align-items-center gap-2 mt-1">
                       <span className="text-break">{gap.dimensionKey}</span>
                       <button
                         type="button"
@@ -1232,7 +1236,33 @@ export default function ImpactEvidenceLibrary() {
                 </ul>
               </div>
             </div>
-            <div className="col-12 col-md-4">
+            <div className="col-12 col-md-3">
+              <div className="border rounded p-2 h-100">
+                <div className="d-flex justify-content-between align-items-center">
+                  <span className="small fw-semibold">Coverage findings</span>
+                  <span className="badge text-bg-secondary">{organizationGapsAndRisks.coverageFindings.length}</span>
+                </div>
+                <ul className="list-unstyled mt-1 mb-0">
+                  {organizationGapsAndRisks.coverageFindings.map((finding) => (
+                    <li key={`${finding.claimId}-${finding.dimensionKey}`} className="small d-flex justify-content-between align-items-center gap-2 mt-1">
+                      <span className="text-break">{finding.dimensionKey}</span>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline-primary flex-shrink-0"
+                        onClick={() => {
+                          setSelectedClaimId(finding.claimId);
+                          traceabilityPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                          traceabilityPanelRef.current?.focus();
+                        }}
+                      >
+                        Review claim
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+            <div className="col-12 col-md-3">
               <div className="border rounded p-2 h-100">
                 <div className="d-flex justify-content-between align-items-center">
                   <span className="small fw-semibold">Potential conflicts</span>
@@ -1258,7 +1288,7 @@ export default function ImpactEvidenceLibrary() {
                 </ul>
               </div>
             </div>
-            <div className="col-12 col-md-4">
+            <div className="col-12 col-md-3">
               <div className="border rounded p-2 h-100">
                 <div className="d-flex justify-content-between align-items-center">
                   <span className="small fw-semibold">Client follow-ups</span>

@@ -349,15 +349,27 @@ function safeDimensionStatuses(dimensions, limitationAcceptance) {
   );
 }
 
+// `is_current` is the single governed authority for whether this gap is still
+// open, computed with the exact same condition (`assessment_status ===
+// "unresolved"`) already validated (by gapRowsMatchExpectation, above in
+// evaluateClaimTraceabilityInTransaction) to match the live dimension
+// recomputation - never a second/independent currentness rule, and never
+// left for a caller to re-derive.
 function safeGapRows(rows) {
   return rows.map((row) => ({
     gap_log_item_id: row.gap_log_item_id,
     dimension_key: row.dimension_key,
     assessment_status: row.assessment_status,
     validator_key: row.validator_key,
+    is_current: row.assessment_status === "unresolved",
   }));
 }
 
+// `is_current` mirrors, per row, the exact condition the
+// client_followup_unresolved blocker itself already uses
+// (`unresolvedReviewStatus(review_status) || queue_status === "waiting_on_client"`)
+// - computed once, here, so no caller ever has to re-derive follow-up
+// currentness independently.
 function safeFollowupRows(rows, queueRows) {
   const queuesByTarget = new Map(queueRows.map((row) => [row.target_object_id, row]));
   return rows.map((row) => {
@@ -369,6 +381,9 @@ function safeFollowupRows(rows, queueRows) {
       workflow_status: queue?.queue_status ?? null,
       review_status: queue?.review_status ?? null,
       review_queue_item_id: queue?.review_queue_item_id ?? null,
+      is_current: queue
+        ? unresolvedReviewStatus(queue.review_status) || queue.queue_status === "waiting_on_client"
+        : true,
     };
   });
 }
@@ -586,6 +601,11 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
     if (validation?.severity !== "pass") {
       return failureWithReason("conflict_group_validation_failed");
     }
+    // `is_current` mirrors, per group, the exact condition the
+    // potential_conflict_review_unresolved blocker itself already uses below
+    // (`unresolvedReviewStatus(review_status) || queue_status === "open"`) -
+    // computed once, here, so no caller ever has to re-derive conflict
+    // currentness independently.
     potentialConflictGroups.push({
       conflict_group_id: groupRow.conflict_group_id,
       lower_claim_id: groupRow.lower_claim_id,
@@ -596,6 +616,7 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
       review_queue_item_id: queueRow.review_queue_item_id,
       review_status: queueRow.review_status,
       workflow_status: queueRow.queue_status,
+      is_current: unresolvedReviewStatus(queueRow.review_status) || queueRow.queue_status === "open",
     });
   }
 

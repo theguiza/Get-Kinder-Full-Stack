@@ -250,33 +250,38 @@ export function blockerDisplayText(blockerCode, requestedAudience) {
 // Capability B: organization-level Gaps and Risks. This is a pure
 // re-composition of state the Review Queue rollup already fetched and
 // projected (projectReviewQueue -> projectTraceability per claim) - no new
-// fetch, no new backend read, and no new currentness rule. "Current/
-// unresolved" for each category is decided by the exact same condition the
-// governed rollup itself already used to decide whether the owning claim's
-// blockerCodes include the matching blocker:
-// - coverage gaps: dimensions[].blocksRequestedAudience, computed server-side
-//   (postgresClaimTraceabilityRepository.js) as
-//   `dimension.evidence.assessment_status === "unresolved" && !currentAudienceAccepted`
-//   - the same flag that drives the coverage_dimension_unresolved blocker.
-// - conflicts / follow-ups: isCurrentAttentionReviewStatus below mirrors
-//   postgresClaimTraceabilityRepository.js#unresolvedReviewStatus exactly
-//   ("resolved"/"approved"/"complete" are the only terminal values), combined
-//   with the same "open"/"waiting_on_client" queue-status literal already
-//   used by that repository's potential_conflict_review_unresolved /
-//   client_followup_unresolved blocker conditions.
-function isCurrentAttentionReviewStatus(status) {
-  return status !== "resolved" && status !== "approved" && status !== "complete";
-}
-
+// fetch, no new backend read. Package 5 repair: membership/currentness for
+// every category is read directly from server-authoritative fields
+// (postgresClaimTraceabilityRepository.js) - `gapItems[].is_current`,
+// `potentialConflictGroups[].is_current`, `clientFollowupWorkflows[].isCurrent`,
+// and the pre-existing `dimensions[].blocksRequestedAudience` - never
+// re-derived from raw status/queue-status strings here. `gap_items` (governed
+// kai.gap_log_items rows) and coverage/dimension findings (the fixed
+// DIMENSION_KEYS computation) are kept as two distinct categories - a
+// dimension can be a current coverage finding with no persisted gap_log_item
+// yet, and a persisted gap_log_item is never treated as a coverage-dimension
+// finding.
 export function projectOrganizationGapsAndRisks(reviewQueueItems) {
-  const gaps = [];
+  const gapItems = [];
+  const coverageFindings = [];
   const conflicts = [];
   const followups = [];
   for (const item of asArray(reviewQueueItems)) {
     const claimId = item.claimId;
+    for (const gap of asArray(item.gapItems)) {
+      if (gap.is_current === true) {
+        gapItems.push({
+          claimId,
+          gapLogItemId: gap.gap_log_item_id,
+          dimensionKey: gap.dimension_key,
+          assessmentStatus: gap.assessment_status,
+          validatorKey: gap.validator_key,
+        });
+      }
+    }
     for (const dimension of asArray(item.dimensions)) {
       if (dimension.blocksRequestedAudience === true) {
-        gaps.push({
+        coverageFindings.push({
           claimId,
           dimensionKey: dimension.dimensionKey,
           assessmentStatus: dimension.assessmentStatus,
@@ -285,7 +290,7 @@ export function projectOrganizationGapsAndRisks(reviewQueueItems) {
       }
     }
     for (const group of asArray(item.potentialConflictGroups)) {
-      if (isCurrentAttentionReviewStatus(group.review_status) || group.workflow_status === "open") {
+      if (group.is_current === true) {
         conflicts.push({
           claimId,
           conflictGroupId: group.conflict_group_id,
@@ -298,7 +303,7 @@ export function projectOrganizationGapsAndRisks(reviewQueueItems) {
       }
     }
     for (const followup of asArray(item.clientFollowupWorkflows)) {
-      if (isCurrentAttentionReviewStatus(followup.reviewStatus) || followup.workflowStatus === "waiting_on_client") {
+      if (followup.isCurrent === true) {
         followups.push({
           claimId,
           clientFollowupItemId: followup.clientFollowupItemId,
@@ -309,12 +314,12 @@ export function projectOrganizationGapsAndRisks(reviewQueueItems) {
       }
     }
   }
-  return { gaps, conflicts, followups };
+  return { gapItems, coverageFindings, conflicts, followups };
 }
 
 // True only when the same rollup that feeds the Review Queue conclusively
 // covered every organization claim (reviewQueueIsComplete) AND every one of
-// the three Gaps and Risks categories above is genuinely empty. Deliberately
+// the four Gaps and Risks categories above is genuinely empty. Deliberately
 // independent of reviewQueueIsConclusivelyEmpty (which also folds in the
 // separate Phase-5 sensitivity/allowed-use rollup - out of scope here): this
 // section reports only claim-traceability-derived evidence-health state.
@@ -326,7 +331,8 @@ export function organizationGapsAndRisksIsConclusivelyEmpty({
   return (
     reviewQueueRequestState === "success"
     && reviewQueueIsComplete(reviewQueueCompleteness)
-    && (gapsAndRisks?.gaps?.length || 0) === 0
+    && (gapsAndRisks?.gapItems?.length || 0) === 0
+    && (gapsAndRisks?.coverageFindings?.length || 0) === 0
     && (gapsAndRisks?.conflicts?.length || 0) === 0
     && (gapsAndRisks?.followups?.length || 0) === 0
   );
@@ -1055,6 +1061,9 @@ export function projectTraceability(dto) {
       reviewStatus: item.review_status,
       reviewQueueItemId: item.review_queue_item_id,
       workflowDisposition: item.review_status === "resolved" ? "completed_workflow_obligation" : item.review_status,
+      // Server-authoritative (postgresClaimTraceabilityRepository.js#safeFollowupRows)
+      // - never re-derived here.
+      isCurrent: item.is_current === true,
     })),
     potentialConflictGroups: asArray(dto.potential_conflict_groups),
     libraryStatus: dto.eligible === true ? "usable" : (asArray(dto.blockerCodes).length ? "blocked" : "needs_review"),
