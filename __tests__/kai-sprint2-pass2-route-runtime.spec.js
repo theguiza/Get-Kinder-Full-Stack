@@ -146,6 +146,10 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // MVP UAT final completion: authoritative intake-context engagement read
     // (additive; every prior entry preserved verbatim).
     "/admin/organizations/:organizationId/engagements",
+    // KAI Package 4: read-only /impact-library Funder Requirements
+    // composition (classifier + Package 3A/3B current engagement assessment
+    // per applicable requirement), no applicability or assessment write.
+    "/admin/organizations/:organizationId/engagements/:engagementId/funder-requirements",
     // KAI engagement Funder Requirements state foundation: read-only
     // classifier, no applicability write.
     "/admin/organizations/:organizationId/engagements/:engagementId/funder-requirements-state",
@@ -450,6 +454,45 @@ test("admin engagement requirement-target route rejects arbitrary metadata body 
     assert.equal(res.statusCode, 422);
     assert.equal(res.body.error.code, "validation_blocker");
     assert.equal(called, false);
+  } finally {
+    restore();
+  }
+});
+
+test("admin engagement funder-requirements route delegates to the read-only Package 4 composition with sanitized req", async () => {
+  let serviceInput = null;
+  const restore = intakeRouteTestables.setIntakeServiceForTest({
+    async getEngagementFunderRequirementsForImpactLibrary(input) {
+      serviceInput = input;
+      return { ok: true, data: { state: "no_target_selected", engagement: { engagement_id: input.engagementId } }, warnings: [] };
+    },
+  });
+
+  try {
+    const originalReq = {
+      params: { organizationId, engagementId },
+      headers: { cookie: "session=secret-cookie-sentinel" },
+      cookies: { session: "secret-cookie-sentinel" },
+      session: { id: "session-value-sentinel" },
+      user: {
+        id: 46,
+        email: "email-sentinel@example.test",
+        token: "secret-token-sentinel",
+      },
+    };
+
+    const res = await invokeRoute(
+      "/admin/organizations/:organizationId/engagements/:engagementId/funder-requirements",
+      "get",
+      originalReq,
+    );
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(serviceInput, {
+      organizationId,
+      engagementId,
+      req: { user: { id: 46 } },
+    });
   } finally {
     restore();
   }

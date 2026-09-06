@@ -1169,6 +1169,17 @@ async function getEngagementRequirementApplicabilityService() {
   return engagementRequirementApplicabilityServicePromise;
 }
 
+let engagementFunderRequirementsCompositionServicePromise = null;
+async function getEngagementFunderRequirementsCompositionService() {
+  if (intakeServiceOverride?.getEngagementFunderRequirementsForImpactLibrary) {
+    return intakeServiceOverride;
+  }
+  engagementFunderRequirementsCompositionServicePromise ||= import(
+    "../services/kaiEngagementFunderRequirementsCompositionService.js"
+  );
+  return engagementFunderRequirementsCompositionServicePromise;
+}
+
 let organizationContextServicePromise = null;
 async function getOrganizationContextService() {
   if (intakeServiceOverride?.listAuthorizedOrganizations) return intakeServiceOverride;
@@ -1277,6 +1288,45 @@ router.get("/admin/organizations/:organizationId/engagements/:engagementId/funde
     });
   });
 });
+
+/**
+ * KAI Package 4: the read-only `/impact-library` Funder Requirements
+ * composition. Strictly read-only and additive to the Package 1B classifier
+ * route above - it delegates to the classifier for applicability state, and,
+ * only when that state is `applicable_requirement_set_assessment_not_available`
+ * (a currently applicable requirement set exists), further delegates to the
+ * Package 3A/3B engagement-scoped assessment read for each governed
+ * requirement in that set. Never touches the generic organization-scope
+ * (`engagement_id IS NULL`) requirement-assessment repository. Contains no
+ * SQL and no direct database access, delegating exactly once (per
+ * requirement) to the authorized composition service.
+ */
+router.get(
+  "/admin/organizations/:organizationId/engagements/:engagementId/funder-requirements",
+  async (req, res) => {
+    const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+    const engagementId = typeof req.params?.engagementId === "string" ? req.params.engagementId : "";
+    if (
+      !KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) ||
+      organizationId !== organizationId.toLowerCase() ||
+      !KAI_SPRINT2_P0_PATTERNS.uuid.test(engagementId) ||
+      engagementId !== engagementId.toLowerCase()
+    ) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_or_engagement_id")],
+      });
+    }
+
+    return invokeService(res, async () => {
+      const service = await getEngagementFunderRequirementsCompositionService();
+      return service.getEngagementFunderRequirementsForImpactLibrary({
+        organizationId,
+        engagementId,
+        req: { user: safeAuthenticatedUser(req) },
+      });
+    });
+  },
+);
 
 /**
  * KAI Package 2B-A: propose that an authoritative external requirement set

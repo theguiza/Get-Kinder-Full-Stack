@@ -44,6 +44,9 @@ import {
   organizationRequirementAssessmentPath,
   organizationRequirementsReadinessPath,
   organizationReviewQueuePath,
+  engagementFunderRequirementsPath,
+  projectEngagementFunderRequirements,
+  ENGAGEMENT_FUNDER_REQUIREMENTS_STATES,
   postJson,
   potentialConflictsPath,
   projectCandidateClaims,
@@ -217,6 +220,16 @@ export default function ImpactEvidenceLibrary() {
   const [loadingRequirementsReadiness, setLoadingRequirementsReadiness] = useState(false);
   const [requirementsReadinessError, setRequirementsReadinessError] = useState("");
   const [assessingRequirementId, setAssessingRequirementId] = useState("");
+
+  // KAI Package 4: the engagement-aware Funder Requirements card. Entirely
+  // separate from the generic KAI Baseline Readiness rollup above - this is
+  // keyed by the selected engagement (engagementId), never by organization
+  // alone, and is never populated from organizationRequirementsReadinessPath.
+  // `funderRequirements` defaults to the empty/no-target shape so nothing is
+  // shown before a fresh, engagement-scoped read completes.
+  const [funderRequirements, setFunderRequirements] = useState({ state: null, target: {}, requirements: [] });
+  const [loadingFunderRequirements, setLoadingFunderRequirements] = useState(false);
+  const [funderRequirementsError, setFunderRequirementsError] = useState("");
 
   // Review Queue: organization-scope current-attention rollup. This is a
   // product PROJECTION of already-governed state (see
@@ -637,6 +650,31 @@ export default function ImpactEvidenceLibrary() {
     setRequirementsReadiness([]);
     if (organizationId) loadRequirementsReadiness();
   }, [organizationId, loadRequirementsReadiness]);
+
+  const loadFunderRequirements = useCallback(async () => {
+    if (!organizationId || !engagementId) return;
+    setLoadingFunderRequirements(true);
+    setFunderRequirementsError("");
+    const result = await getJson(engagementFunderRequirementsPath(organizationId, engagementId));
+    setLoadingFunderRequirements(false);
+    if (result.statusCode !== 200 || !result.body?.ok) {
+      setFunderRequirements({ state: null, target: {}, requirements: [] });
+      setFunderRequirementsError(errorText(result));
+      return;
+    }
+    setFunderRequirements(projectEngagementFunderRequirements(result.body.data));
+  }, [organizationId, engagementId]);
+
+  // Changing the selected engagement (or organization) must discard the
+  // previous engagement's Funder Requirements projection completely before
+  // the new engagement's read completes - never show a stale engagement's
+  // applicability state, requirements, or assessments while a different
+  // engagement is selected or between selections.
+  useEffect(() => {
+    setFunderRequirements({ state: null, target: {}, requirements: [] });
+    setFunderRequirementsError("");
+    if (organizationId && engagementId) loadFunderRequirements();
+  }, [organizationId, engagementId, loadFunderRequirements]);
 
   // Runs (or replays) the server-governed assessment for exactly one
   // requirement, then refetches the whole readiness rollup - the POST
@@ -1312,8 +1350,12 @@ export default function ImpactEvidenceLibrary() {
 
           <div className="admin-card mt-3">
             <div className="d-flex justify-content-between align-items-center mb-2">
-              <h5 className="mb-0">Funder Requirements</h5>
+              <h5 className="mb-0">KAI Baseline Readiness</h5>
               <span className="text-muted small">{requirementsReadiness.length} shown</span>
+            </div>
+            <div className="text-muted small mb-2">
+              Generic KAI baseline requirements, organization-wide - independent of the selected engagement and never a
+              specific funder/framework/report's requirements.
             </div>
             {requirementsReadinessError ? (
               <div className="alert alert-warning py-2 small">{requirementsReadinessError}</div>
@@ -1380,6 +1422,80 @@ export default function ImpactEvidenceLibrary() {
                 </li>
               ))}
             </ul>
+          </div>
+
+          <div className="admin-card mt-3">
+            <div className="d-flex justify-content-between align-items-center mb-2">
+              <h5 className="mb-0">Funder Requirements</h5>
+              {funderRequirements.state === ENGAGEMENT_FUNDER_REQUIREMENTS_STATES.applicableRequirementSetAssessmentNotAvailable ? (
+                <span className="text-muted small">{funderRequirements.requirements.length} shown</span>
+              ) : null}
+            </div>
+            <div className="text-muted small mb-2">
+              The selected engagement's own applicable external funder/framework/reporting requirements - never the
+              generic KAI baseline requirements shown above.
+            </div>
+            {!engagementId ? (
+              <div className="text-muted small">Select an engagement to see its Funder Requirements.</div>
+            ) : (
+              <>
+                {funderRequirementsError ? (
+                  <div className="alert alert-warning py-2 small">{funderRequirementsError}</div>
+                ) : null}
+                {loadingFunderRequirements ? <div className="text-muted small">Loading Funder Requirements...</div> : null}
+                {!loadingFunderRequirements && !funderRequirementsError && funderRequirements.state === ENGAGEMENT_FUNDER_REQUIREMENTS_STATES.noTargetSelected ? (
+                  <div className="text-muted small">
+                    No funder/framework/report target is selected for this engagement yet.
+                  </div>
+                ) : null}
+                {!loadingFunderRequirements && !funderRequirementsError && funderRequirements.state === ENGAGEMENT_FUNDER_REQUIREMENTS_STATES.targetSelectedNoAuthoritativeRequirementSet ? (
+                  <div className="text-muted small">
+                    The selected target has no current governed external requirement set.
+                  </div>
+                ) : null}
+                {!loadingFunderRequirements && !funderRequirementsError && funderRequirements.state === ENGAGEMENT_FUNDER_REQUIREMENTS_STATES.authoritativeRequirementSetNotApplicable ? (
+                  <div className="text-muted small">
+                    A governed external requirement set exists for this target, but it is not currently confirmed
+                    applicable for this engagement.
+                  </div>
+                ) : null}
+                {!loadingFunderRequirements && !funderRequirementsError && funderRequirements.state === ENGAGEMENT_FUNDER_REQUIREMENTS_STATES.applicableRequirementSetAssessmentNotAvailable ? (
+                  <ul className="list-group">
+                    {funderRequirements.requirements.map((requirement) => (
+                      <li key={requirement.requirementId} className="list-group-item">
+                        <div className="d-flex justify-content-between align-items-start gap-2">
+                          <div>
+                            <div className="small fw-semibold">{requirement.requirementKey}</div>
+                            <div className="text-muted small">
+                              {requirement.requirementSource.sourceCode || "none"}
+                              {requirement.requirementSource.sourceType ? ` (${requirement.requirementSource.sourceType})` : ""}
+                              {" · "}{requirement.requirementFrameworkVersion.frameworkCode || "none"}
+                              {requirement.requirementFrameworkVersion.versionLabel ? ` ${requirement.requirementFrameworkVersion.versionLabel}` : ""}
+                            </div>
+                          </div>
+                          <span className={`badge ${requirement.currentAssessment?.assessmentState === "satisfied" ? "text-bg-success" : requirement.currentAssessment ? "text-bg-warning" : "text-bg-secondary"}`}>
+                            {requirement.currentAssessment ? requirement.currentAssessment.assessmentState || "assessed" : "no current assessment"}
+                          </span>
+                        </div>
+                        {requirement.currentAssessment ? (
+                          <>
+                            <div className="small text-muted mt-2">{requirement.currentAssessment.assessmentExplanation || "No explanation returned."}</div>
+                            <div className="small text-muted">
+                              Assessment: {requirement.currentAssessment.requirementAssessmentId || "none"}
+                              {requirement.currentAssessment.assessedAt ? ` · ${requirement.currentAssessment.assessedAt}` : ""}
+                            </div>
+                          </>
+                        ) : (
+                          <div className="small text-muted mt-1">
+                            No current engagement-specific assessment for this requirement.
+                          </div>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </>
+            )}
           </div>
 
           <div className="admin-card mt-3">

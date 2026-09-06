@@ -62,6 +62,69 @@ export function organizationRequirementAssessmentPath(organizationId, requiremen
     + `/requirements/${encodeURIComponent(requirementId)}/assessment`;
 }
 
+// KAI Package 4: the engagement-aware `/impact-library` Funder Requirements
+// read. Distinct from organizationRequirementsReadinessPath above (the
+// generic KAI baseline readiness rollup, engagement-independent) - this path
+// is keyed by the selected engagement and returns the Package 1B/2A/2B
+// applicability classification plus, only when a requirement set is
+// currently applicable, each governed requirement's CURRENT engagement-scope
+// assessment (Package 3A/3B). Never the source of KAI baseline requirements.
+export function engagementFunderRequirementsPath(organizationId, engagementId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
+    + `/engagements/${encodeURIComponent(engagementId)}/funder-requirements`;
+}
+
+export const ENGAGEMENT_FUNDER_REQUIREMENTS_STATES = Object.freeze({
+  noTargetSelected: "no_target_selected",
+  targetSelectedNoAuthoritativeRequirementSet: "target_selected_no_authoritative_requirement_set",
+  authoritativeRequirementSetNotApplicable: "authoritative_requirement_set_not_applicable",
+  applicableRequirementSetAssessmentNotAvailable: "applicable_requirement_set_assessment_not_available",
+});
+
+// Projects the Package 4 composition DTO into exactly what the Funder
+// Requirements card renders: the applicability state, the engagement's
+// current target (for display only - never editable here), and, only for
+// the applicable state, the flattened list of governed requirements with
+// their current engagement-scope assessment (or null - never a fallback to
+// the generic organization-scope assessment, and never a stale one: the
+// server never returns a non-current row through this path).
+export function projectEngagementFunderRequirements(dto) {
+  const state = dto?.state || null;
+  const requirementSets = asArray(dto?.applicable_requirement_sets);
+  const requirements = requirementSets.flatMap((requirementSet) =>
+    asArray(requirementSet.requirements).map((requirement) => ({
+      requirementId: requirement.requirement_id,
+      requirementKey: requirement.requirement_key,
+      requirementSetId: requirementSet.requirement_set_id,
+      requirementSetKey: requirementSet.set_key,
+      requirementSource: {
+        sourceType: requirementSet.requirement_source?.source_type || null,
+        sourceCode: requirementSet.requirement_source?.source_code || null,
+      },
+      requirementFrameworkVersion: {
+        frameworkCode: requirementSet.requirement_framework_version?.framework_code || null,
+        versionLabel: requirementSet.requirement_framework_version?.version_label || null,
+        frameworkStatus: requirementSet.requirement_framework_version?.framework_status || null,
+      },
+      currentAssessment: requirement.current_assessment ? {
+        requirementAssessmentId: requirement.current_assessment.assessment?.requirement_assessment_id || null,
+        assessmentState: requirement.current_assessment.assessment?.assessment_state || null,
+        assessmentExplanation: requirement.current_assessment.assessment?.assessment_explanation || null,
+        assessedAt: requirement.current_assessment.assessment?.created_at || null,
+      } : null,
+    })),
+  );
+  return {
+    state,
+    target: isPlainObjectForProjection(dto?.target) ? dto.target : {},
+    requirements,
+  };
+}
+
+function isPlainObjectForProjection(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
 export function organizationReviewQueuePath(organizationId) {
   return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/review-queue`;
 }
