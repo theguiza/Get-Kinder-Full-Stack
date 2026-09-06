@@ -247,6 +247,91 @@ export function blockerDisplayText(blockerCode, requestedAudience) {
   return blockerCode;
 }
 
+// Capability B: organization-level Gaps and Risks. This is a pure
+// re-composition of state the Review Queue rollup already fetched and
+// projected (projectReviewQueue -> projectTraceability per claim) - no new
+// fetch, no new backend read, and no new currentness rule. "Current/
+// unresolved" for each category is decided by the exact same condition the
+// governed rollup itself already used to decide whether the owning claim's
+// blockerCodes include the matching blocker:
+// - coverage gaps: dimensions[].blocksRequestedAudience, computed server-side
+//   (postgresClaimTraceabilityRepository.js) as
+//   `dimension.evidence.assessment_status === "unresolved" && !currentAudienceAccepted`
+//   - the same flag that drives the coverage_dimension_unresolved blocker.
+// - conflicts / follow-ups: isCurrentAttentionReviewStatus below mirrors
+//   postgresClaimTraceabilityRepository.js#unresolvedReviewStatus exactly
+//   ("resolved"/"approved"/"complete" are the only terminal values), combined
+//   with the same "open"/"waiting_on_client" queue-status literal already
+//   used by that repository's potential_conflict_review_unresolved /
+//   client_followup_unresolved blocker conditions.
+function isCurrentAttentionReviewStatus(status) {
+  return status !== "resolved" && status !== "approved" && status !== "complete";
+}
+
+export function projectOrganizationGapsAndRisks(reviewQueueItems) {
+  const gaps = [];
+  const conflicts = [];
+  const followups = [];
+  for (const item of asArray(reviewQueueItems)) {
+    const claimId = item.claimId;
+    for (const dimension of asArray(item.dimensions)) {
+      if (dimension.blocksRequestedAudience === true) {
+        gaps.push({
+          claimId,
+          dimensionKey: dimension.dimensionKey,
+          assessmentStatus: dimension.assessmentStatus,
+          validatorKey: dimension.validatorKey,
+        });
+      }
+    }
+    for (const group of asArray(item.potentialConflictGroups)) {
+      if (isCurrentAttentionReviewStatus(group.review_status) || group.workflow_status === "open") {
+        conflicts.push({
+          claimId,
+          conflictGroupId: group.conflict_group_id,
+          lowerClaimId: group.lower_claim_id,
+          higherClaimId: group.higher_claim_id,
+          basisCode: group.basis_code,
+          reviewStatus: group.review_status,
+          workflowStatus: group.workflow_status,
+        });
+      }
+    }
+    for (const followup of asArray(item.clientFollowupWorkflows)) {
+      if (isCurrentAttentionReviewStatus(followup.reviewStatus) || followup.workflowStatus === "waiting_on_client") {
+        followups.push({
+          claimId,
+          clientFollowupItemId: followup.clientFollowupItemId,
+          dimensionKey: followup.dimensionKey,
+          workflowStatus: followup.workflowStatus,
+          reviewStatus: followup.reviewStatus,
+        });
+      }
+    }
+  }
+  return { gaps, conflicts, followups };
+}
+
+// True only when the same rollup that feeds the Review Queue conclusively
+// covered every organization claim (reviewQueueIsComplete) AND every one of
+// the three Gaps and Risks categories above is genuinely empty. Deliberately
+// independent of reviewQueueIsConclusivelyEmpty (which also folds in the
+// separate Phase-5 sensitivity/allowed-use rollup - out of scope here): this
+// section reports only claim-traceability-derived evidence-health state.
+export function organizationGapsAndRisksIsConclusivelyEmpty({
+  reviewQueueRequestState,
+  reviewQueueCompleteness,
+  gapsAndRisks,
+}) {
+  return (
+    reviewQueueRequestState === "success"
+    && reviewQueueIsComplete(reviewQueueCompleteness)
+    && (gapsAndRisks?.gaps?.length || 0) === 0
+    && (gapsAndRisks?.conflicts?.length || 0) === 0
+    && (gapsAndRisks?.followups?.length || 0) === 0
+  );
+}
+
 // KAI Review Queue: composes the EXISTING Phase-5 sensitivity/allowed-use
 // review state (already fetched via sensitivityCapabilitiesPath/
 // sensitivityReviewQueuePath, projected via projectSensitivityReviewQueueItems)

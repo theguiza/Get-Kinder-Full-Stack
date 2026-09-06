@@ -57,6 +57,8 @@ import {
   projectRequirementsReadiness,
   projectReviewQueue,
   projectReviewQueueCompleteness,
+  projectOrganizationGapsAndRisks,
+  organizationGapsAndRisksIsConclusivelyEmpty,
   reviewQueueIsComplete,
   reviewQueueIsConclusivelyEmpty,
   projectTraceability,
@@ -300,6 +302,24 @@ export default function ImpactEvidenceLibrary() {
       sensitivityCapability,
       sensitivityAttention,
     ],
+  );
+
+  // Capability B: organization-level Gaps and Risks. Derived entirely from
+  // reviewQueueItems (already fetched by loadReviewQueue below) - no
+  // additional request, no per-claim fan-out.
+  const organizationGapsAndRisks = useMemo(
+    () => projectOrganizationGapsAndRisks(reviewQueueItems),
+    [reviewQueueItems],
+  );
+
+  const gapsAndRisksConclusivelyEmpty = useMemo(
+    () =>
+      organizationGapsAndRisksIsConclusivelyEmpty({
+        reviewQueueRequestState,
+        reviewQueueCompleteness,
+        gapsAndRisks: organizationGapsAndRisks,
+      }),
+    [reviewQueueRequestState, reviewQueueCompleteness, organizationGapsAndRisks],
   );
 
   const selectedClaim = useMemo(
@@ -1155,6 +1175,118 @@ export default function ImpactEvidenceLibrary() {
       ) : null}
 
       {message ? <div className="alert alert-warning py-2">{message}</div> : null}
+
+      <div className="admin-card mb-3">
+        <div className="d-flex justify-content-between align-items-center mb-2">
+          <h5 className="mb-0">Gaps and Risks</h5>
+          <span className="text-muted small">
+            {organizationGapsAndRisks.gaps.length + organizationGapsAndRisks.conflicts.length + organizationGapsAndRisks.followups.length} shown
+          </span>
+        </div>
+        <div className="small text-muted mb-2">
+          This organization's current governed evidence-health problems - coverage gaps, potential conflicts, and
+          client follow-ups still outstanding - discoverable without selecting a claim first. Composed from the same
+          governed, freshly-recomputed claim-traceability state as the Review Queue below; it never relabels a
+          resolved, stale, or superseded item as current.
+        </div>
+        {reviewQueueError ? <div className="alert alert-warning py-2 small">{reviewQueueError}</div> : null}
+        {loadingReviewQueue ? <div className="text-muted small">Loading organization evidence health...</div> : null}
+        {!loadingReviewQueue && !reviewQueueError && !reviewQueueIsComplete(reviewQueueCompleteness) ? (
+          <div className="alert alert-warning py-2 small">
+            This result is incomplete
+            {reviewQueueCompleteness.truncated ? " - the organization has more claims than this rollup scanned" : ""}
+            {reviewQueueCompleteness.evaluationErrorCount > 0
+              ? `${reviewQueueCompleteness.truncated ? ";" : " -"} ${reviewQueueCompleteness.evaluationErrorCount} claim(s) could not be evaluated`
+              : ""}
+            . The gaps and risks shown below are not confirmed to be the organization's complete current set.
+          </div>
+        ) : null}
+        {!loadingReviewQueue && !reviewQueueError && gapsAndRisksConclusivelyEmpty ? (
+          <div className="text-muted small">No current evidence-health gaps, conflicts, or follow-up items for this organization.</div>
+        ) : null}
+        {!loadingReviewQueue && !reviewQueueError ? (
+          <div className="row g-2">
+            <div className="col-12 col-md-4">
+              <div className="border rounded p-2 h-100">
+                <div className="d-flex justify-content-between align-items-center">
+                  <span className="small fw-semibold">Coverage gaps</span>
+                  <span className="badge text-bg-secondary">{organizationGapsAndRisks.gaps.length}</span>
+                </div>
+                <ul className="list-unstyled mt-1 mb-0">
+                  {organizationGapsAndRisks.gaps.map((gap) => (
+                    <li key={`${gap.claimId}-${gap.dimensionKey}`} className="small d-flex justify-content-between align-items-center gap-2 mt-1">
+                      <span className="text-break">{gap.dimensionKey}</span>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline-primary flex-shrink-0"
+                        onClick={() => {
+                          setSelectedClaimId(gap.claimId);
+                          traceabilityPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                          traceabilityPanelRef.current?.focus();
+                        }}
+                      >
+                        Review claim
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+            <div className="col-12 col-md-4">
+              <div className="border rounded p-2 h-100">
+                <div className="d-flex justify-content-between align-items-center">
+                  <span className="small fw-semibold">Potential conflicts</span>
+                  <span className="badge text-bg-secondary">{organizationGapsAndRisks.conflicts.length}</span>
+                </div>
+                <ul className="list-unstyled mt-1 mb-0">
+                  {organizationGapsAndRisks.conflicts.map((conflict) => (
+                    <li key={conflict.conflictGroupId} className="small d-flex justify-content-between align-items-center gap-2 mt-1">
+                      <span className="text-break">{conflict.basisCode}</span>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline-primary flex-shrink-0"
+                        onClick={() => {
+                          setSelectedClaimId(conflict.claimId);
+                          traceabilityPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                          traceabilityPanelRef.current?.focus();
+                        }}
+                      >
+                        Review claim
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+            <div className="col-12 col-md-4">
+              <div className="border rounded p-2 h-100">
+                <div className="d-flex justify-content-between align-items-center">
+                  <span className="small fw-semibold">Client follow-ups</span>
+                  <span className="badge text-bg-secondary">{organizationGapsAndRisks.followups.length}</span>
+                </div>
+                <ul className="list-unstyled mt-1 mb-0">
+                  {organizationGapsAndRisks.followups.map((followup) => (
+                    <li key={followup.clientFollowupItemId} className="small d-flex justify-content-between align-items-center gap-2 mt-1">
+                      <span className="text-break">{followup.dimensionKey}</span>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline-primary flex-shrink-0"
+                        onClick={() => {
+                          setSelectedClaimId(followup.claimId);
+                          traceabilityPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                          traceabilityPanelRef.current?.focus();
+                        }}
+                      >
+                        Review claim
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </div>
 
       <div className="admin-card mb-3">
         <div className="d-flex justify-content-between align-items-center mb-2">

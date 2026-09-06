@@ -13,10 +13,13 @@ import {
   kaiSprint2OrganizationMutationLimiter,
   setKaiSprint2NoStore,
 } from "../Backend/kai/middleware/kaiSprint2RequestSafety.js";
+import { readFileSync } from "node:fs";
 import {
   organizationReviewQueuePath,
   projectReviewQueue,
   projectReviewQueueCompleteness,
+  projectOrganizationGapsAndRisks,
+  organizationGapsAndRisksIsConclusivelyEmpty,
   reviewQueueIsComplete,
   reviewQueueIsConclusivelyEmpty,
   reviewQueueBlockerActionability,
@@ -623,4 +626,238 @@ test("sensitivityReviewQueueAttention: queue read failure never renders as a suc
   assert.equal(attention.status, "error");
   assert.equal(attention.error, "internal error");
   assert.notEqual(attention.status, "ready");
+});
+
+// Capability B: organization-level Gaps and Risks. projectOrganizationGapsAndRisks
+// is a pure re-composition over the SAME reviewQueueItems the Review Queue
+// section already fetches and projects (projectReviewQueue -> projectTraceability
+// per claim) - these tests build real raw traceability DTOs and push them through
+// the real projectReviewQueue pipeline first, exactly like the Review Queue tests
+// above, so the composition under test is the real one, not a hand-built shape.
+function rawTraceabilityDtoFixture(overrides = {}) {
+  return {
+    requestedAudience: "internal",
+    eligible: false,
+    blockerCodes: ["coverage_dimension_unresolved"],
+    affectedDimensionKeys: [],
+    affectedObjectIds: [],
+    claim: {
+      claim_id: claimId,
+      claim_type: "finding",
+      claim_status: "proposed",
+      claim_review_status: "needs_gk_review",
+      claim_strength: "unassessed",
+      audience_gates: { internal_only: true, public_use_allowed: false, funder_use_allowed: false, export_ready: false },
+    },
+    evidence: {
+      evidence_item_id: "00000000-0000-4000-8000-000000000902",
+      evidence_review_status: "needs_gk_review",
+      support_strength: "unassessed",
+      review_queue_item_id: "00000000-0000-4000-8000-000000000903",
+      review_queue_status: "resolved",
+      review_status: "resolved",
+      updated_at: "2026-08-01T00:00:00.000Z",
+      sensitivity_level: "unknown",
+    },
+    claim_review: {
+      review_queue_item_id: "00000000-0000-4000-8000-000000000904",
+      queue_status: "resolved",
+      review_status: "resolved",
+      updated_at: "2026-08-01T00:00:00.000Z",
+    },
+    evidence_review_decision: null,
+    claim_review_decision: null,
+    dimensions: {},
+    gap_items: [],
+    client_followup_workflows: [],
+    potential_conflict_groups: [],
+    truncated: false,
+    ...overrides,
+  };
+}
+
+test("projectOrganizationGapsAndRisks: a dimension that blocks the requested audience is a current gap; an accepted/non-blocking dimension is not", () => {
+  const dto = rawTraceabilityDtoFixture({
+    dimensions: {
+      denominator_clarity: {
+        assessment_status: "unresolved",
+        validator_key: "VAL-KAI-P2-02-denominator_clarity",
+        internal_limitation_accepted: false,
+        funder_limitation_accepted: false,
+        blocks_requested_audience: true,
+      },
+      time_period_clarity: {
+        assessment_status: "unresolved",
+        validator_key: "VAL-KAI-P2-02-time_period_clarity",
+        internal_limitation_accepted: true,
+        funder_limitation_accepted: false,
+        blocks_requested_audience: false,
+      },
+    },
+  });
+  const items = projectReviewQueue({ items: [dto] });
+  const gapsAndRisks = projectOrganizationGapsAndRisks(items);
+  assert.deepEqual(gapsAndRisks.gaps, [
+    { claimId, dimensionKey: "denominator_clarity", assessmentStatus: "unresolved", validatorKey: "VAL-KAI-P2-02-denominator_clarity" },
+  ]);
+  assert.deepEqual(gapsAndRisks.conflicts, []);
+  assert.deepEqual(gapsAndRisks.followups, []);
+});
+
+test("projectOrganizationGapsAndRisks: a potential-conflict group is current unless its review AND workflow are both resolved/terminal", () => {
+  const dto = rawTraceabilityDtoFixture({
+    blockerCodes: ["potential_conflict_review_unresolved"],
+    potential_conflict_groups: [
+      {
+        conflict_group_id: "cg-open",
+        lower_claim_id: claimId,
+        higher_claim_id: "00000000-0000-4000-8000-000000000999",
+        lower_claim_conflict_gap_id: "g-lower",
+        higher_claim_conflict_gap_id: "g-higher",
+        basis_code: "contradictory_finding",
+        review_queue_item_id: "q1",
+        review_status: "needs_gk_review",
+        workflow_status: "open",
+      },
+      {
+        conflict_group_id: "cg-resolved-but-workflow-open",
+        lower_claim_id: claimId,
+        higher_claim_id: "00000000-0000-4000-8000-000000000998",
+        lower_claim_conflict_gap_id: "g-lower2",
+        higher_claim_conflict_gap_id: "g-higher2",
+        basis_code: "overlapping_scope",
+        review_queue_item_id: "q2",
+        review_status: "resolved",
+        workflow_status: "open",
+      },
+      {
+        conflict_group_id: "cg-closed",
+        lower_claim_id: claimId,
+        higher_claim_id: "00000000-0000-4000-8000-000000000997",
+        lower_claim_conflict_gap_id: "g-lower3",
+        higher_claim_conflict_gap_id: "g-higher3",
+        basis_code: "stale_source",
+        review_queue_item_id: "q3",
+        review_status: "resolved",
+        workflow_status: "closed",
+      },
+    ],
+  });
+  const items = projectReviewQueue({ items: [dto] });
+  const gapsAndRisks = projectOrganizationGapsAndRisks(items);
+  const conflictGroupIds = gapsAndRisks.conflicts.map((conflict) => conflict.conflictGroupId);
+  assert.ok(conflictGroupIds.includes("cg-open"));
+  assert.ok(conflictGroupIds.includes("cg-resolved-but-workflow-open"));
+  assert.ok(!conflictGroupIds.includes("cg-closed"));
+  assert.equal(gapsAndRisks.conflicts.length, 2);
+});
+
+test("projectOrganizationGapsAndRisks: a client follow-up is current unless its review is resolved AND it is not waiting on the client", () => {
+  const dto = rawTraceabilityDtoFixture({
+    blockerCodes: ["client_followup_unresolved"],
+    gap_items: [{ gap_log_item_id: "g1", dimension_key: "denominator_clarity", assessment_status: "unresolved", validator_key: "VAL-KAI-P2-02-denominator_clarity" }],
+    client_followup_workflows: [
+      { client_followup_item_id: "cf-waiting", gap_log_item_id: "g1", dimension_key: "denominator_clarity", workflow_status: "waiting_on_client", review_status: "resolved", review_queue_item_id: "q4" },
+      { client_followup_item_id: "cf-proposed", gap_log_item_id: "g1", dimension_key: "denominator_clarity", workflow_status: "proposed", review_status: "needs_gk_review", review_queue_item_id: "q5" },
+      { client_followup_item_id: "cf-resolved", gap_log_item_id: "g1", dimension_key: "denominator_clarity", workflow_status: "closed", review_status: "resolved", review_queue_item_id: "q6" },
+    ],
+  });
+  const items = projectReviewQueue({ items: [dto] });
+  const gapsAndRisks = projectOrganizationGapsAndRisks(items);
+  const followupIds = gapsAndRisks.followups.map((followup) => followup.clientFollowupItemId);
+  assert.ok(followupIds.includes("cf-waiting"));
+  assert.ok(followupIds.includes("cf-proposed"));
+  assert.ok(!followupIds.includes("cf-resolved"));
+  assert.equal(gapsAndRisks.followups.length, 2);
+});
+
+test("projectOrganizationGapsAndRisks: an empty or missing rollup returns an explicit empty projection", () => {
+  assert.deepEqual(projectOrganizationGapsAndRisks([]), { gaps: [], conflicts: [], followups: [] });
+  assert.deepEqual(projectOrganizationGapsAndRisks(null), { gaps: [], conflicts: [], followups: [] });
+});
+
+const gapsAndRisksEmptyBaseInputs = Object.freeze({
+  reviewQueueRequestState: "success",
+  reviewQueueCompleteness: { truncated: false, evaluationErrorCount: 0 },
+  gapsAndRisks: { gaps: [], conflicts: [], followups: [] },
+});
+
+test("organizationGapsAndRisksIsConclusivelyEmpty: true only for a fully conclusive, successful, complete zero", () => {
+  assert.equal(organizationGapsAndRisksIsConclusivelyEmpty(gapsAndRisksEmptyBaseInputs), true);
+});
+
+test("organizationGapsAndRisksIsConclusivelyEmpty: false while the rollup request has not resolved", () => {
+  assert.equal(
+    organizationGapsAndRisksIsConclusivelyEmpty({ ...gapsAndRisksEmptyBaseInputs, reviewQueueRequestState: "loading" }),
+    false,
+  );
+  assert.equal(
+    organizationGapsAndRisksIsConclusivelyEmpty({ ...gapsAndRisksEmptyBaseInputs, reviewQueueRequestState: "error" }),
+    false,
+  );
+});
+
+test("organizationGapsAndRisksIsConclusivelyEmpty: false when the rollup was truncated or had evaluation errors", () => {
+  assert.equal(
+    organizationGapsAndRisksIsConclusivelyEmpty({
+      ...gapsAndRisksEmptyBaseInputs,
+      reviewQueueCompleteness: { truncated: true, evaluationErrorCount: 0 },
+    }),
+    false,
+  );
+  assert.equal(
+    organizationGapsAndRisksIsConclusivelyEmpty({
+      ...gapsAndRisksEmptyBaseInputs,
+      reviewQueueCompleteness: { truncated: false, evaluationErrorCount: 1 },
+    }),
+    false,
+  );
+});
+
+test("organizationGapsAndRisksIsConclusivelyEmpty: false when any one of gaps/conflicts/followups is non-empty", () => {
+  assert.equal(
+    organizationGapsAndRisksIsConclusivelyEmpty({
+      ...gapsAndRisksEmptyBaseInputs,
+      gapsAndRisks: { gaps: [{ claimId }], conflicts: [], followups: [] },
+    }),
+    false,
+  );
+  assert.equal(
+    organizationGapsAndRisksIsConclusivelyEmpty({
+      ...gapsAndRisksEmptyBaseInputs,
+      gapsAndRisks: { gaps: [], conflicts: [{ conflictGroupId: "cg1" }], followups: [] },
+    }),
+    false,
+  );
+  assert.equal(
+    organizationGapsAndRisksIsConclusivelyEmpty({
+      ...gapsAndRisksEmptyBaseInputs,
+      gapsAndRisks: { gaps: [], conflicts: [], followups: [{ clientFollowupItemId: "cf1" }] },
+    }),
+    false,
+  );
+});
+
+// Source-contract: the dedicated Gaps and Risks section must be discoverable
+// on /impact-library without a manual claim-id entry, must load the real
+// organization-scoped rollup (the existing review-queue endpoint - no new
+// route or fan-out), and must leave the existing Review Queue / Claims /
+// Traceability panels intact.
+test("Impact Evidence Library renders a dedicated organization-level Gaps and Risks section sourced from the existing review-queue rollup, with no new fetch and no manual claim-id entry", () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+
+  assert.match(uiSource, /import \{[\s\S]*?projectOrganizationGapsAndRisks[\s\S]*?\} from "\.\/impactEvidenceLibraryLogic\.js";/);
+  assert.match(uiSource, /import \{[\s\S]*?organizationGapsAndRisksIsConclusivelyEmpty[\s\S]*?\} from "\.\/impactEvidenceLibraryLogic\.js";/);
+  assert.match(uiSource, /Gaps and Risks/);
+  assert.match(uiSource, /projectOrganizationGapsAndRisks\(reviewQueueItems\)/);
+  // No second organization-scope fetch/path was introduced for this section -
+  // it is derived only from reviewQueueItems, which loadReviewQueue already
+  // populates from the existing organizationReviewQueuePath endpoint.
+  assert.doesNotMatch(uiSource, /gapsAndRisksPath|organizationGapsPath|OrganizationEvidenceGap/);
+  // No free-text claim-id input for this section.
+  assert.doesNotMatch(uiSource, /<input[^>]*value=\{selectedClaimId\}[^>]*onChange/);
+  // The existing Review Queue heading/section remains present and unchanged.
+  assert.match(uiSource, /Review Queue<\/h5>/);
+  // The existing Claims panel remains present and unchanged.
+  assert.match(uiSource, /<h5 className="mb-0">Claims<\/h5>/);
 });
