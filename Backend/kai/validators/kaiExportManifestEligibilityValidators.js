@@ -41,8 +41,7 @@ export function validateExportManifestEligibility(input) {
   } = input;
 
   const failedGates = [];
-  if (finalGate === true && draftIsStillDraft === true) failedGates.push("final_gate_true_while_draft");
-  if (draftIsStillDraft === true) failedGates.push("generated_content_still_draft");
+  if (finalGate !== true && draftIsStillDraft === true) failedGates.push("generated_content_still_draft");
   if (reviewIsResolved === false) failedGates.push("generated_content_review_unresolved");
   if (currentUseEligible === false) failedGates.push("current_use_ineligible");
   if (requestedExportAudience !== draftAudience) failedGates.push("export_audience_mismatch");

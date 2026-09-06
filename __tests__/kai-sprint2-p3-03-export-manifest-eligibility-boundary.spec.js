@@ -102,19 +102,19 @@ test("VAL-EXP-001 blocker result carries only failed_gates evidence with stable 
     draftIsStillDraft: true,
     reviewIsResolved: false,
     currentUseEligible: false,
-    finalGate: true,
+    finalGate: false,
     affirmativeHumanExportAuthority: false,
   });
   assert.equal(result.severity, "blocker");
   assert.equal(result.blocking_reason, "export_manifest_not_eligible");
   assert.deepEqual(Object.keys(result.evidence), ["failed_gates"]);
   assert.deepEqual(result.evidence.failed_gates, [
-    "final_gate_true_while_draft",
     "generated_content_still_draft",
     "generated_content_review_unresolved",
     "current_use_ineligible",
     "export_audience_mismatch",
     "affirmative_human_export_authority_absent",
+    "final_export_gate_absent",
   ]);
 });
 
@@ -138,8 +138,18 @@ test("VAL-EXP-001 the real repository path (no persisted authority or final gate
   ]);
 });
 
-test("VAL-EXP-001 final_gate_true_while_draft and final_export_gate_absent are mutually exclusive and never both fire", () => {
-  const bothOff = validateExportManifestEligibility({
+// --- VAL-EXP-001 SOURCE-DRAFT SEMANTIC CORRECTION -------------------------
+//
+// generated_content_drafts.draft_status remains permanently 'draft' (schema
+// CHECK constraint, unchanged). That source-draft status is NOT the
+// Phase-14 final-export lifecycle state. So for finalGate=true, the
+// immutable source draft remaining 'draft' must not, by itself, block
+// final-export eligibility - while for finalGate=false (the pre-final
+// workflow), the still-draft source state continues to block exactly as
+// before.
+
+test("PRE-FINAL: finalGate=false still blocks on generated_content_still_draft regardless of every other gate", () => {
+  const result = validateExportManifestEligibility({
     generatedContentDraftId: DRAFT,
     requestedExportAudience: "internal",
     draftAudience: "internal",
@@ -149,10 +159,15 @@ test("VAL-EXP-001 final_gate_true_while_draft and final_export_gate_absent are m
     finalGate: false,
     affirmativeHumanExportAuthority: true,
   });
-  assert.ok(!bothOff.evidence.failed_gates.includes("final_gate_true_while_draft"));
-  assert.ok(bothOff.evidence.failed_gates.includes("final_export_gate_absent"));
+  assert.equal(result.severity, "blocker");
+  assert.deepEqual(result.evidence.failed_gates, [
+    "generated_content_still_draft",
+    "final_export_gate_absent",
+  ]);
+});
 
-  const bothOn = validateExportManifestEligibility({
+test("FINAL E: finalGate=true + every other governed gate satisfied + source draft still 'draft' -> PASS (source-draft status alone is not a final-export blocker)", () => {
+  const result = validateExportManifestEligibility({
     generatedContentDraftId: DRAFT,
     requestedExportAudience: "internal",
     draftAudience: "internal",
@@ -162,8 +177,69 @@ test("VAL-EXP-001 final_gate_true_while_draft and final_export_gate_absent are m
     finalGate: true,
     affirmativeHumanExportAuthority: true,
   });
-  assert.ok(bothOn.evidence.failed_gates.includes("final_gate_true_while_draft"));
-  assert.ok(!bothOn.evidence.failed_gates.includes("final_export_gate_absent"));
+  assert.equal(result.severity, "pass");
+  assert.equal(result.blocking_reason, null);
+  assert.deepEqual(result.evidence, {});
+});
+
+test("FINAL A: finalGate=true + no effective human authority -> BLOCKED (source draft still 'draft' does not also fire)", () => {
+  const result = validateExportManifestEligibility({
+    generatedContentDraftId: DRAFT,
+    requestedExportAudience: "internal",
+    draftAudience: "internal",
+    draftIsStillDraft: true,
+    reviewIsResolved: true,
+    currentUseEligible: true,
+    finalGate: true,
+    affirmativeHumanExportAuthority: false,
+  });
+  assert.equal(result.severity, "blocker");
+  assert.deepEqual(result.evidence.failed_gates, ["affirmative_human_export_authority_absent"]);
+});
+
+test("FINAL B: finalGate=true + unresolved review -> BLOCKED", () => {
+  const result = validateExportManifestEligibility({
+    generatedContentDraftId: DRAFT,
+    requestedExportAudience: "internal",
+    draftAudience: "internal",
+    draftIsStillDraft: true,
+    reviewIsResolved: false,
+    currentUseEligible: true,
+    finalGate: true,
+    affirmativeHumanExportAuthority: true,
+  });
+  assert.equal(result.severity, "blocker");
+  assert.deepEqual(result.evidence.failed_gates, ["generated_content_review_unresolved"]);
+});
+
+test("FINAL C: finalGate=true + current-use/candidate ineligibility -> BLOCKED", () => {
+  const result = validateExportManifestEligibility({
+    generatedContentDraftId: DRAFT,
+    requestedExportAudience: "internal",
+    draftAudience: "internal",
+    draftIsStillDraft: true,
+    reviewIsResolved: true,
+    currentUseEligible: false,
+    finalGate: true,
+    affirmativeHumanExportAuthority: true,
+  });
+  assert.equal(result.severity, "blocker");
+  assert.deepEqual(result.evidence.failed_gates, ["current_use_ineligible"]);
+});
+
+test("FINAL D: finalGate=true + audience mismatch -> BLOCKED", () => {
+  const result = validateExportManifestEligibility({
+    generatedContentDraftId: DRAFT,
+    requestedExportAudience: "public",
+    draftAudience: "internal",
+    draftIsStillDraft: true,
+    reviewIsResolved: true,
+    currentUseEligible: true,
+    finalGate: true,
+    affirmativeHumanExportAuthority: true,
+  });
+  assert.equal(result.severity, "blocker");
+  assert.deepEqual(result.evidence.failed_gates, ["export_audience_mismatch"]);
 });
 
 test("VAL-EXP-001 rejects a non-exact input contract", () => {

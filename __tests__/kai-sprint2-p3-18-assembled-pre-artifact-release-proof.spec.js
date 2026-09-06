@@ -31,21 +31,16 @@
 // - plus the REAL, unmodified evaluateFinalExportEligibility and the REAL,
 // unmodified VAL-EXP-001 validator it calls.
 //
-// KNOWN, OUT-OF-SCOPE, PRE-EXISTING SCHEMA BOUNDARY (disclosed, not fixed):
-// migrations/kai_sprint2_p3_01_generated_content_drafts.sql enforces
-// `CHECK (draft_status = 'draft')` - no real generated_content_drafts row
-// can ever have any other draft_status. VAL-EXP-001 therefore always fails
-// `generated_content_still_draft` against genuinely real draft rows, so
-// finalGate=true PASS is not reachable against real production data today
-// regardless of authority; reaching it requires a future, separately
-// authorized schema/product decision (already flagged in the living
-// ExecPlan as follow-on work beyond P3-17/P3-18). To exercise the PASS
-// branch of the real, unmodified final-gate composition here, the resolved
-// export-review packet's draftStatus is injected as "final" - the exact
-// same synthetic-draftStatus technique already used, and already accepted,
-// in the STATE B case of the prior committed authority-state-proof file.
-// This override touches only the generated-content-review-packet input
-// field, never authority or currentness, which stay fully real throughout.
+// VAL-EXP-001 SOURCE-DRAFT SEMANTIC CORRECTION (resolves the prior
+// disclosed boundary below): migrations/kai_sprint2_p3_01_generated_content_drafts.sql
+// enforces `CHECK (draft_status = 'draft')` - no real generated_content_drafts
+// row can ever have any other draft_status, and generated_content_draft
+// remains permanently an immutable draft object. That source-draft status is
+// NOT the Phase-14 final-export lifecycle state, so VAL-EXP-001 no longer
+// treats it as a final-export blocker when finalGate=true (it still blocks
+// the pre-final, finalGate=false workflow exactly as before). The PASS case
+// below therefore runs against the real, schema-true draftStatus:"draft"
+// packet state - no synthetic draftStatus override is needed or used.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -263,7 +258,7 @@ function humanAuthorityRepository(rowsByQueryIndex) {
   return createPostgresHumanAuthorityDecisionRepository({ runInTransaction: async (callback) => callback(tx) });
 }
 
-function gateDependencies(state, { humanAuthorityDecisionRepository, draftStatusOverride }) {
+function gateDependencies(state, { humanAuthorityDecisionRepository }) {
   return {
     env: enabledEnv,
     runInTransaction: async (callback) => callback({ async query() { return { rows: [] }; } }),
@@ -278,7 +273,7 @@ function gateDependencies(state, { humanAuthorityDecisionRepository, draftStatus
       data: {
         generatedContentDraftId: state.draft.generatedContentDraftId,
         requestedExportAudience: state.exportReview.requestedExportAudience,
-        draftStatus: draftStatusOverride ?? state.draft.draftStatus,
+        draftStatus: state.draft.draftStatus,
         generatedContentReviewQueueStatus: state.draft.queueStatus,
         generatedContentReviewStatus: state.draft.reviewStatus,
         exportReviewQueueStatus: state.exportReview.queueStatus,
@@ -427,12 +422,7 @@ test("ASSEMBLED PRE-ARTIFACT RELEASE PROOF: generated draft -> ... -> P3-17 auth
     const repo = humanAuthorityRepository(rows);
     const result = await evaluateFinalExportEligibility(
       { organizationId: ORG, exportCandidateId: CANDIDATE, exportReviewQueueItemId: EXPORT_QUEUE, actorContext },
-      // draftStatus override: see file-header disclosure - the real schema's
-      // CHECK (draft_status = 'draft') means no real draft row can ever set
-      // this to anything but "draft"; this is the only synthetic override
-      // in this proof, and it touches review-packet state, never authority
-      // or currentness.
-      gateDependencies(state, { humanAuthorityDecisionRepository: repo, draftStatusOverride: "final" }),
+      gateDependencies(state, { humanAuthorityDecisionRepository: repo }),
     );
     assert.equal(result.ok, true);
     assert.equal(result.data.effectiveHumanExportAuthority, true);
@@ -476,7 +466,7 @@ test("ASSEMBLED PRE-ARTIFACT RELEASE PROOF: generated draft -> ... -> P3-17 auth
     const repo = humanAuthorityRepository(rows);
     const result = await evaluateFinalExportEligibility(
       { organizationId: ORG, exportCandidateId: CANDIDATE, exportReviewQueueItemId: EXPORT_QUEUE, actorContext },
-      gateDependencies(state, { humanAuthorityDecisionRepository: repo, draftStatusOverride: "final" }),
+      gateDependencies(state, { humanAuthorityDecisionRepository: repo }),
     );
     assert.equal(result.ok, true);
     assert.equal(result.data.effectiveHumanExportAuthority, false);

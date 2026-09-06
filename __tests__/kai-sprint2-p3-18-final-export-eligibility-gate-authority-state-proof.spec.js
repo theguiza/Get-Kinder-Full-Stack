@@ -151,7 +151,13 @@ function packet(overrides = {}) {
   return {
     generatedContentDraftId: DRAFT,
     requestedExportAudience: "internal",
-    draftStatus: "final",
+    // Real generated_content_drafts rows can never be anything but "draft"
+    // (schema CHECK (draft_status = 'draft'), unchanged). Per the
+    // VAL-EXP-001 source-draft semantic correction, finalGate=true no
+    // longer treats the immutable source draft's 'draft' status as a
+    // final-export blocker, so this fixture uses the real, schema-true
+    // value rather than a synthetic override.
+    draftStatus: "draft",
     generatedContentReviewQueueStatus: "resolved",
     generatedContentReviewStatus: "resolved",
     exportReviewQueueStatus: "resolved",

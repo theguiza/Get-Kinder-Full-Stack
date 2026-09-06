@@ -104,7 +104,7 @@ test("client-supplied finalGate/affirmativeHumanExportAuthority are rejected bef
   );
 });
 
-test("no effective P3-17 authority -> BLOCKED", async () => {
+test("FINAL A: no effective P3-17 authority -> BLOCKED", async () => {
   const { deps } = dependencies();
   const result = await evaluateFinalExportEligibility(input(), deps);
   assert.equal(result.ok, true);
@@ -114,9 +114,8 @@ test("no effective P3-17 authority -> BLOCKED", async () => {
   assert.ok(result.data.validatorResult.evidence.failed_gates.includes("affirmative_human_export_authority_absent"));
 });
 
-test("effective P3-17 authority and all existing validator requirements satisfied -> PASS", async () => {
+test("FINAL E: effective P3-17 authority and all other governed gates satisfied, source draft still 'draft' -> PASS", async () => {
   const { deps } = dependencies({
-    evaluatePacket: async () => ({ ok: true, data: packet({ draftStatus: "final" }), error: null }),
     humanAuthorityDecisionRepository: {
       evaluateEffectiveness: async () => ({
         ok: true,
@@ -132,7 +131,7 @@ test("effective P3-17 authority and all existing validator requirements satisfie
   assert.equal(result.data.validatorResult.severity, "pass");
 });
 
-test("effective authority present but review still unresolved stays BLOCKED (validator gates not duplicated/bypassed)", async () => {
+test("FINAL B: effective authority present but review still unresolved stays BLOCKED (validator gates not duplicated/bypassed)", async () => {
   const { deps } = dependencies({
     evaluatePacket: async () => ({ ok: true, data: packet({ exportReviewQueueStatus: "in_progress", exportReviewStatus: "needs_gk_review" }), error: null }),
     humanAuthorityDecisionRepository: {
@@ -142,6 +141,18 @@ test("effective authority present but review still unresolved stays BLOCKED (val
   const result = await evaluateFinalExportEligibility(input(), deps);
   assert.equal(result.data.finalExportEligible, false);
   assert.ok(result.data.validatorResult.evidence.failed_gates.includes("generated_content_review_unresolved"));
+});
+
+test("FINAL C: effective authority present but current-use ineligible stays BLOCKED", async () => {
+  const { deps } = dependencies({
+    evaluatePacket: async () => ({ ok: true, data: packet({ currentUseEligible: false }), error: null }),
+    humanAuthorityDecisionRepository: {
+      evaluateEffectiveness: async () => ({ ok: true, data: { effective: true, reason: null, headDecisionId: "decision-1" }, error: null }),
+    },
+  });
+  const result = await evaluateFinalExportEligibility(input(), deps);
+  assert.equal(result.data.finalExportEligible, false);
+  assert.ok(result.data.validatorResult.evidence.failed_gates.includes("current_use_ineligible"));
 });
 
 test("export candidate not found -> not_found", async () => {
