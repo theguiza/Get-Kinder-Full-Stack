@@ -3,6 +3,12 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { getClaimTraceabilitySummary } from "../Backend/kai/services/kaiClaimTraceabilityService.js";
 import { __claimTraceabilityRepositoryContract } from "../Backend/kai/dictionary/postgresClaimTraceabilityRepository.js";
+import {
+  composeClaimTraceabilityGraphRelationships,
+  validateGraphRelationshipEndpoints,
+  validateGraphTraceCompleteness,
+  __graphRelationshipContract,
+} from "../Backend/kai/validators/kaiGraphRelationshipValidators.js";
 
 const ORG = "00000000-0000-4000-8000-000000000001";
 const CLAIM = "00000000-0000-4000-8000-000000000101";
@@ -122,4 +128,80 @@ test("KAI B1A-3B: the traceability DTO's candidate object exposes intake_sensiti
     source,
     /candidate:\s*\{\s*\n\s*intake_source_candidate_id:\s*candidateRow\.intake_source_candidate_id,\s*\n\s*intake_sensitivity_profile_id:\s*candidateRow\.intake_sensitivity_profile_id,/,
   );
+});
+
+test("P2-06 graph relationships: canonical relational edges compose into endpoint-validated graph relationship DTOs", () => {
+  const rows = {
+    claimRow: { claim_id: "10000000-0000-4000-8000-000000000001" },
+    claimEvidenceLinkRow: {
+      claim_id: "10000000-0000-4000-8000-000000000001",
+      evidence_item_id: "20000000-0000-4000-8000-000000000001",
+    },
+    evidenceItemRow: {
+      evidence_item_id: "20000000-0000-4000-8000-000000000001",
+    },
+    locatorRow: { source_locator_id: "30000000-0000-4000-8000-000000000001" },
+    sourceRow: { source_id: "40000000-0000-4000-8000-000000000001" },
+    sourceVersionRow: { source_version_id: "50000000-0000-4000-8000-000000000001" },
+    candidateRow: {
+      intake_source_candidate_id: "60000000-0000-4000-8000-000000000001",
+    },
+    dictionaryRow: { data_dictionary_id: "70000000-0000-4000-8000-000000000001" },
+    profileRow: { intake_sensitivity_profile_id: "80000000-0000-4000-8000-000000000001" },
+    evidenceReviewQueueItemRow: { review_queue_item_id: "90000000-0000-4000-8000-000000000001" },
+    claimReviewQueueItemRow: { review_queue_item_id: "90000000-0000-4000-8000-000000000002" },
+  };
+
+  const relationships = composeClaimTraceabilityGraphRelationships(rows);
+
+  assert.deepEqual(
+    relationships.map((relationship) => relationship.relationship_type),
+    __graphRelationshipContract.GRAPH_RELATIONSHIP_TYPES,
+  );
+  assert.equal(relationships.every(validateGraphRelationshipEndpoints), true);
+  assert.deepEqual(validateGraphTraceCompleteness(relationships), {
+    complete: true,
+    missing_relationship_types: [],
+    invalid_relationship_count: 0,
+  });
+});
+
+test("P2-06 graph validation fails closed on endpoint-type mismatch, missing relationship type, or non-canonical endpoint id", () => {
+  const valid = __graphRelationshipContract.GRAPH_RELATIONSHIP_TYPES.map((type) => {
+    const [fromObjectType, toObjectType] = __graphRelationshipContract.GRAPH_RELATIONSHIP_ENDPOINTS[type];
+    return {
+      relationship_type: type,
+      from_object_type: fromObjectType,
+      from_object_id: "10000000-0000-4000-8000-000000000001",
+      to_object_type: toObjectType,
+      to_object_id: "20000000-0000-4000-8000-000000000001",
+    };
+  });
+
+  assert.equal(validateGraphRelationshipEndpoints({
+    ...valid[0],
+    to_object_type: "source",
+  }), false);
+  assert.equal(validateGraphRelationshipEndpoints({
+    ...valid[0],
+    from_object_id: "NOT-A-UUID",
+  }), false);
+
+  const incomplete = validateGraphTraceCompleteness(valid.slice(1));
+  assert.equal(incomplete.complete, false);
+  assert.deepEqual(incomplete.missing_relationship_types, ["claim_supported_by_evidence"]);
+  assert.equal(incomplete.invalid_relationship_count, 0);
+
+  const invalid = validateGraphTraceCompleteness([{ ...valid[0], to_object_id: "not-a-uuid" }, ...valid.slice(1)]);
+  assert.equal(invalid.complete, false);
+  assert.equal(invalid.invalid_relationship_count, 1);
+});
+
+test("P2-06 repository wires graph relationship endpoint and completeness validation into the traceability DTO", () => {
+  const source = readFileSync(new URL("../Backend/kai/dictionary/postgresClaimTraceabilityRepository.js", import.meta.url), "utf8");
+  assert.match(source, /composeClaimTraceabilityGraphRelationships/);
+  assert.match(source, /validateGraphTraceCompleteness/);
+  assert.match(source, /graph_relationships:\s*graphRelationships/);
+  assert.match(source, /graph_trace_completeness:\s*graphTraceCompleteness/);
+  assert.match(source, /if \(!graphTraceCompleteness\.complete\) addOrderedBlocker\(blockers, "traceability_incomplete"\)/);
 });

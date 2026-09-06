@@ -35,6 +35,10 @@ import {
   computeCoverageReviewDecisionFingerprint,
 } from "../validators/kaiCoverageReviewDecisionValidators.js";
 import {
+  composeClaimTraceabilityGraphRelationships,
+  validateGraphTraceCompleteness,
+} from "../validators/kaiGraphRelationshipValidators.js";
+import {
   findCurrentEvidenceReviewDecision,
   findCurrentClaimReviewDecision,
 } from "./postgresHumanReviewDecisionRepository.js";
@@ -687,6 +691,20 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
   const blockers = new Set();
   const affectedDimensionKeys = new Set();
   const affectedObjectIds = new Set();
+  const graphRelationships = composeClaimTraceabilityGraphRelationships({
+    claimRow,
+    claimEvidenceLinkRow,
+    evidenceItemRow,
+    locatorRow,
+    sourceRow,
+    sourceVersionRow,
+    candidateRow,
+    dictionaryRow,
+    profileRow,
+    evidenceReviewQueueItemRow,
+    claimReviewQueueItemRow,
+  });
+  const graphTraceCompleteness = validateGraphTraceCompleteness(graphRelationships);
   const audienceApproval = await approvalForAudience({
     requestedAudience,
     organizationId,
@@ -742,6 +760,7 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
     }
   }
   if (truncated) addOrderedBlocker(blockers, "traceability_incomplete");
+  if (!graphTraceCompleteness.complete) addOrderedBlocker(blockers, "traceability_incomplete");
 
   const blockerCodes = orderedBlockers(blockers);
   return success({
@@ -802,6 +821,8 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
     gap_items: safeGapRows(gapRows),
     client_followup_workflows: safeFollowupRows(followupRows, followupQueueRows),
     potential_conflict_groups: potentialConflictGroups,
+    graph_relationships: graphRelationships,
+    graph_trace_completeness: graphTraceCompleteness,
     requestedAudience,
     eligible: blockerCodes.length === 0,
     blockerCodes,

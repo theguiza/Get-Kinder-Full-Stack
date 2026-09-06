@@ -20246,3 +20246,33 @@ Current requirement assessments operate on generic organization-scope requiremen
 **Package remaining issue:** none for the owner-authorized scope above. A real local-PostgreSQL end-to-end proof of the new list route (mirroring the `scripts/*-local-postgres.js` convention) and a manual browser walkthrough remain optional future verification, not required by this package's read-only, no-new-persistence scope.
 
 **Prohibited actions not performed:** no push, deploy, production/browser canary, database/cloud access or mutation, credential/secret inspection, feature-flag/tenant/environment change, source-promotion authority change, new source lifecycle/currentness semantics, Funder Requirements/Gaps and Risks/Evidence/Claims/Generated Drafts/generation/export change, schema/migration, real client-data handling, retention/deletion, or `00_KAI_CURRENT_STATE.md` update.
+
+## Final bounded Phase-12 repository closure — Data Dictionary Entries + Graph Relationships
+
+**Date:** 2026-09-06
+**Starting state:** branch `main`; starting HEAD `7492691920a785cba537fce5d30f27fc2c37894b`; working tree clean. Root `AGENTS.md` read and followed. Scope was limited to the two owner-authorized disputed capabilities: Data Dictionary Entries and Graph Relationships.
+
+**Data Dictionary Entries:** current inspection found persisted `kai.data_dictionaries` / `kai.data_dictionary_fields` and internal consumers, but no authorized reusable read path returning actual field-level governed entries. Implemented the smallest read boundary over existing persisted fields only:
+- `Backend/kai/dictionary/postgresDataDictionaryRepository.js`: added `listDataDictionaryEntries`, a read-only repeatable-read transaction scoped by `organization_id` + `data_dictionary_id`, returning only allowlisted field identity/key, safe label, business meaning, entity level, data type, sensitivity, allowed use, quality notes, mapping confidence, and review status. No raw values, samples, source content, unrestricted metadata, storage location, or infrastructure field is selected.
+- `Backend/kai/services/kaiDataDictionaryService.js`: added `listDataDictionaryEntries` with `KAI_SPRINT2_ENABLED`, mapped-human actor, generic `read_intake`, GK reviewer/admin/operator role narrowing, tenant validation, and service-level safe DTO allowlisting/fail-closed output validation.
+- `Backend/kai/routes/sprint2IntakeApi.js`: added read-only `GET /admin/organizations/:organizationId/data-dictionaries/:dataDictionaryId/entries`; no SQL in route; delegates to the service.
+
+**Graph Relationships:** controlling repository contract and implementation use relational graph edges, not Neo4j, with `claim_evidence_links` and current traceability objects as canonical. No schema-backed `graph_relationship` persistence object is required by the inspected contract. Implemented the smallest canonical graph relationship composition inside the existing P2-06 traceability read:
+- `Backend/kai/validators/kaiGraphRelationshipValidators.js`: new pure validator/composer for canonical identifier-only graph relationship DTOs and the required `validateGraphRelationshipEndpoints` / `validateGraphTraceCompleteness` behavior.
+- `Backend/kai/dictionary/postgresClaimTraceabilityRepository.js`: `evaluateClaimTraceabilityInTransaction` now emits `graph_relationships` over existing edges only: claim -> evidence, evidence -> locator/source_version, source_version -> source/candidate, candidate -> dictionary/sensitivity profile, evidence -> review queue, claim -> review queue. It computes `graph_trace_completeness` and adds the existing `traceability_incomplete` blocker if validation is incomplete.
+- `Backend/kai/services/kaiAssistantClaimTraceabilityTool.js`: expanded the exact traceability output allowlist to pass through only the safe graph relationship/completeness DTO fields.
+
+**Tests/verification:** `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel` set before every Node/npm command.
+- Focused dictionary/graph/traceability/API route run: `node --test __tests__/kai-sprint2-p1-04-data-dictionary-quality-boundary.spec.js __tests__/kai-sprint2-p2-06-claim-traceability-boundary.spec.js __tests__/kai-sprint2-p2-06-claim-traceability-missing-log-regression.spec.js __tests__/kai-sprint2-p2-07-assistant-claim-traceability-tool-boundary.spec.js __tests__/kai-sprint2-p2-08-eligible-claims-for-audience-boundary.spec.js __tests__/kai-sprint2-pass2-route-runtime.spec.js` -> 95/95 passing.
+- Impact Library route regression (loopback permission required by local server tests): `node --test __tests__/kai-sprint2-impact-evidence-library.spec.js` -> 102/102 passing.
+- API contract regression (loopback permission required by local server tests): `npm run verify:kai-sprint2-api-contract` -> 71/71 passing.
+- Broader Sprint 2 regression (loopback permission required by local server tests): `npm run test:kai-sprint2` -> 3076 tests, 3010 passing, 10 failing, 56 skipped. The failing names are the same pre-existing unrelated batch-files/file-detail/export-route source-contract failures already recorded in preceding ExecPlan entries; the introduced traceability fixture failure observed during this package was fixed and absent from the final run.
+- `git diff --check` -> clean.
+
+**Build:** not run; no frontend source changed.
+
+**Full diff reviewed:** confined to data-dictionary read service/repository/route, graph relationship validator/composition, traceability assistant DTO allowlist, focused tests, route inventory, and this ExecPlan entry. No schema/migration, frontend, generation, export, Funder Requirements, Gaps and Risks, Data Sources, Evidence, Claims, Review Queue, Source Locators, Review Decisions, Citation Links, feature flag, tenant/environment, production, database, or cloud changes were made.
+
+**Final Phase-12 capability status:** Data Dictionary Entries PRESENT. Graph Relationships PRESENT. Phase 12 Impact Evidence Library repository closure is established locally after this package.
+
+**Prohibited actions not performed:** no schema or migration; no database access or mutation beyond non-listening sentinel configuration; no production/shared/staging access or mutation; no cloud/configuration/credential/secret access; no feature-flag, tenant, or environment change; no real client data; no push; no deploy; no `00_KAI_CURRENT_STATE.md` update.

@@ -98,6 +98,19 @@ function validateReadInput(input) {
   return isDraftIdentity(input.identity);
 }
 
+function validateEntriesReadInput(input) {
+  const allowedKeys = new Set(["identity"]);
+  const identityKeys = new Set(["organizationId", "dataDictionaryId"]);
+  if (!isPlainObject(input) || !hasOnlyKeys(input, allowedKeys)) return false;
+  const { identity } = input;
+  return (
+    isPlainObject(identity) &&
+    hasOnlyKeys(identity, identityKeys) &&
+    isNonEmptyString(identity.organizationId) &&
+    isNonEmptyString(identity.dataDictionaryId)
+  );
+}
+
 function asIso(value) {
   if (value === null || value === undefined) return null;
   if (value instanceof Date) return value.toISOString();
@@ -358,6 +371,23 @@ function rowToBundleRecord(row, counts) {
   };
 }
 
+function rowToDictionaryEntry(row) {
+  return {
+    data_dictionary_field_id: row.data_dictionary_field_id,
+    data_dictionary_id: row.data_dictionary_id,
+    profile_field_key: row.profile_field_key,
+    field_label_safe: row.field_label_safe,
+    business_meaning: row.business_meaning,
+    entity_level: row.entity_level,
+    data_type: row.data_type,
+    sensitivity: row.sensitivity,
+    allowed_use: row.allowed_use,
+    quality_notes_safe: row.quality_notes_safe,
+    mapping_confidence: row.mapping_confidence === null ? null : Number(row.mapping_confidence),
+    review_status: row.review_status,
+  };
+}
+
 function buildDictionaryAuditMetadata(record) {
   return {
     metadata_only: true,
@@ -612,6 +642,50 @@ export function createPostgresDataDictionaryRepository({ runInTransaction = with
           if (!existing) return dictionaryFailure("not_found");
           const counts = await readBundleCounts(tx, existing.data_dictionary_id);
           return dictionarySuccess({ dictionary: rowToBundleRecord(existing, counts) });
+        });
+      } catch (error) {
+        return shapeDictionaryError(error);
+      }
+    },
+
+    async listDataDictionaryEntries(input) {
+      if (!validateEntriesReadInput(input)) return dictionaryFailure("validation_blocker");
+      const { identity } = input;
+      try {
+        return await runInTransaction(async (tx) => {
+          await tx.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
+          const dictionaryResult = await tx.query(
+            `SELECT data_dictionary_id::text AS data_dictionary_id
+               FROM kai.data_dictionaries
+              WHERE organization_id = $1::uuid
+                AND data_dictionary_id = $2::uuid`,
+            [identity.organizationId, identity.dataDictionaryId],
+          );
+          if (dictionaryResult.rowCount !== 1) return dictionaryFailure("not_found");
+
+          const fieldsResult = await tx.query(
+            `SELECT data_dictionary_field_id::text AS data_dictionary_field_id,
+                    data_dictionary_id::text AS data_dictionary_id,
+                    profile_field_key,
+                    field_label_safe,
+                    business_meaning,
+                    entity_level,
+                    data_type,
+                    sensitivity,
+                    allowed_use,
+                    quality_notes_safe,
+                    mapping_confidence,
+                    review_status
+               FROM kai.data_dictionary_fields
+              WHERE organization_id = $1::uuid
+                AND data_dictionary_id = $2::uuid
+              ORDER BY profile_field_key ASC, data_dictionary_field_id ASC`,
+            [identity.organizationId, identity.dataDictionaryId],
+          );
+          return dictionarySuccess({
+            data_dictionary_id: identity.dataDictionaryId,
+            entries: fieldsResult.rows.map(rowToDictionaryEntry),
+          });
         });
       } catch (error) {
         return shapeDictionaryError(error);

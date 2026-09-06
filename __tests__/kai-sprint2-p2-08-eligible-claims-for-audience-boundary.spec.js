@@ -112,6 +112,20 @@ function traceabilitySuccess(overrides = {}) {
     gap_items: [],
     client_followup_workflows: [],
     potential_conflict_groups: [],
+    graph_relationships: [
+      {
+        relationship_type: "claim_supported_by_evidence",
+        from_object_type: "claim",
+        from_object_id: overrides.claimId || CLAIM,
+        to_object_type: "evidence_item",
+        to_object_id: id(201),
+      },
+    ],
+    graph_trace_completeness: {
+      complete: true,
+      missing_relationship_types: [],
+      invalid_relationship_count: 0,
+    },
     requestedAudience: overrides.requestedAudience || "internal",
     eligible: overrides.eligible ?? true,
     blockerCodes: overrides.eligible === false ? ["claim_not_approved_for_requested_audience"] : [],

@@ -60,6 +60,7 @@ let claimProposalServicePromise = null;
 let claimGapFollowupServicePromise = null;
 let conflictReviewCandidateServicePromise = null;
 let generatedContentServicePromise = null;
+let dataDictionaryServicePromise = null;
 
 export function sendServiceResult(res, result, successStatus = 200) {
   if (result?.ok) {
@@ -1937,6 +1938,12 @@ async function getClaimLibraryService() {
   return claimLibraryServicePromise;
 }
 
+async function getDataDictionaryService() {
+  if (intakeServiceOverride?.listDataDictionaryEntries) return intakeServiceOverride;
+  dataDictionaryServicePromise ||= import("../services/kaiDataDictionaryService.js");
+  return dataDictionaryServicePromise;
+}
+
 const KAI_P2_08_DEFAULT_LIMIT = 25;
 const KAI_P2_08_MAX_LIMIT = 100;
 
@@ -1944,6 +1951,14 @@ function eligibleClaimsForAudienceOrganizationIdentifier(req = {}) {
   const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
   if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) || organizationId !== organizationId.toLowerCase()) return null;
   return { organizationId };
+}
+
+function dataDictionaryEntriesIdentifier(req = {}) {
+  const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+  const dataDictionaryId = typeof req.params?.dataDictionaryId === "string" ? req.params.dataDictionaryId : "";
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) || organizationId !== organizationId.toLowerCase()) return null;
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(dataDictionaryId) || dataDictionaryId !== dataDictionaryId.toLowerCase()) return null;
+  return { organizationId, dataDictionaryId };
 }
 
 /**
@@ -3010,6 +3025,32 @@ router.get(
       const service = await getClaimTraceabilityService();
       return service.listOrganizationReviewQueue({
         organizationId: identifiers.organizationId,
+        actorContext: sprint2MappedActorContext(req),
+      });
+    });
+  },
+);
+
+/**
+ * KAI data-dictionary entries read route: organization-scoped, read-only,
+ * and safe-DTO-only. The route contains no SQL and delegates authorization,
+ * tenant checks, and field allowlisting to the data-dictionary service.
+ */
+router.get(
+  "/admin/organizations/:organizationId/data-dictionaries/:dataDictionaryId/entries",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const identifiers = dataDictionaryEntriesIdentifier(req);
+    if (!identifiers) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_or_data_dictionary_id")],
+      });
+    }
+    return invokeService(res, async () => {
+      const service = await getDataDictionaryService();
+      return service.listDataDictionaryEntries({
+        organizationId: identifiers.organizationId,
+        dataDictionaryId: identifiers.dataDictionaryId,
         actorContext: sprint2MappedActorContext(req),
       });
     });

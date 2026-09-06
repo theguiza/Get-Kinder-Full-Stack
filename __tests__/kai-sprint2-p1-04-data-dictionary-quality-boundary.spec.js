@@ -2,7 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { createDraftDataDictionary } from "../Backend/kai/services/kaiDataDictionaryService.js";
+import {
+  createDraftDataDictionary,
+  listDataDictionaryEntries,
+} from "../Backend/kai/services/kaiDataDictionaryService.js";
 import {
   __dataDictionaryRepositoryContract,
   __dataDictionaryRepositoryTestables,
@@ -19,7 +22,15 @@ const kaiBarrelSource = readFileSync(new URL("../Backend/kai/index.js", import.m
 
 const ORG = "00000000-0000-4000-8000-000000000001";
 const FILE_PROFILE = "50000000-0000-4000-8000-000000000001";
+const DATA_DICTIONARY = "60000000-0000-4000-8000-000000000001";
 const NOW = "2026-08-04T10:00:00.000Z";
+const actorContext = {
+  actorType: "human",
+  actorUserId: "90000000-0000-4000-8000-000000000001",
+  organizationMemberships: [
+    { organization_id: ORG, membership_status: "active", role_name: "gk_reviewer" },
+  ],
+};
 
 function createRepositoryProbe(result) {
   const calls = [];
@@ -85,6 +96,139 @@ test("P1-04 service: contains no SQL and imports no database pool", () => {
   assert.doesNotMatch(serviceSource, /\bimport\s+pool\b/);
   assert.doesNotMatch(serviceSource, /\bfrom\s+["']\.\.\/db\/(?:kaiDb|pg)\.js["']/);
   assert.doesNotMatch(serviceSource, /\bSELECT\b|\bINSERT INTO\b|\bUPDATE\b|\bDELETE FROM\b/i);
+});
+
+test("P1-04 dictionary-entry read service is gated, tenant-scoped, and forwards only the dictionary identity", async () => {
+  const calls = [];
+  const repository = {
+    async listDataDictionaryEntries(input) {
+      calls.push(input);
+      return {
+        ok: true,
+        data: {
+          data_dictionary_id: DATA_DICTIONARY,
+          entries: [
+            {
+              data_dictionary_field_id: "70000000-0000-4000-8000-000000000001",
+              data_dictionary_id: DATA_DICTIONARY,
+              profile_field_key: "household_count",
+              field_label_safe: "household_count",
+              business_meaning: "household count",
+              entity_level: "household",
+              data_type: "number",
+              sensitivity: "unknown",
+              allowed_use: "internal",
+              quality_notes_safe: "present_count=7",
+              mapping_confidence: 0.75,
+              review_status: "needs_gk_review",
+            },
+          ],
+        },
+        error: null,
+      };
+    },
+  };
+
+  const result = await listDataDictionaryEntries(
+    { organizationId: ORG, dataDictionaryId: DATA_DICTIONARY, actorContext },
+    { env: { KAI_SPRINT2_ENABLED: "true" }, dataDictionaryRepository: repository },
+  );
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls, [{
+    identity: { organizationId: ORG, dataDictionaryId: DATA_DICTIONARY },
+  }]);
+  assert.deepEqual(Object.keys(result.data.entries[0]).sort(), [
+    "allowed_use",
+    "business_meaning",
+    "data_dictionary_field_id",
+    "data_dictionary_id",
+    "data_type",
+    "entity_level",
+    "field_label_safe",
+    "mapping_confidence",
+    "profile_field_key",
+    "quality_notes_safe",
+    "review_status",
+    "sensitivity",
+  ].sort());
+});
+
+test("P1-04 dictionary-entry read service rejects disabled, malformed, non-human, and wrong-role requests before repository access", async () => {
+  let calls = 0;
+  const repository = {
+    async listDataDictionaryEntries() {
+      calls += 1;
+      throw new Error("must not call");
+    },
+  };
+  const enabled = { KAI_SPRINT2_ENABLED: "true" };
+
+  assert.equal((await listDataDictionaryEntries(
+    { organizationId: ORG, dataDictionaryId: DATA_DICTIONARY, actorContext },
+    { env: {}, dataDictionaryRepository: repository },
+  )).error.code, "feature_disabled");
+  assert.equal((await listDataDictionaryEntries(
+    { organizationId: ORG, dataDictionaryId: DATA_DICTIONARY, actorContext, raw: true },
+    { env: enabled, dataDictionaryRepository: repository },
+  )).error.code, "validation_blocker");
+  assert.equal((await listDataDictionaryEntries(
+    { organizationId: ORG, dataDictionaryId: DATA_DICTIONARY, actorContext: { actorType: "system", actorUserId: "svc" } },
+    { env: enabled, dataDictionaryRepository: repository },
+  )).error.code, "authorization_denied");
+  assert.equal((await listDataDictionaryEntries(
+    {
+      organizationId: ORG,
+      dataDictionaryId: DATA_DICTIONARY,
+      actorContext: {
+        ...actorContext,
+        organizationMemberships: [
+          { organization_id: ORG, membership_status: "active", role_name: "client_reviewer" },
+        ],
+      },
+    },
+    { env: enabled, dataDictionaryRepository: repository },
+  )).error.code, "authorization_denied");
+  assert.equal(calls, 0);
+});
+
+test("P1-04 dictionary-entry read service fails closed on unsafe or non-allowlisted repository output", async () => {
+  const enabled = { KAI_SPRINT2_ENABLED: "true" };
+  const unsafeRows = [
+    { data_dictionary_id: DATA_DICTIONARY, entries: [{ raw_value_sample: "Jane Example" }] },
+    {
+      data_dictionary_id: DATA_DICTIONARY,
+      entries: [{
+        data_dictionary_field_id: "70000000-0000-4000-8000-000000000001",
+        data_dictionary_id: DATA_DICTIONARY,
+        profile_field_key: "household_count",
+        field_label_safe: "household_count",
+        business_meaning: "household count",
+        entity_level: "household",
+        data_type: "number",
+        sensitivity: "unknown",
+        allowed_use: "internal",
+        quality_notes_safe: "present_count=7",
+        mapping_confidence: 1.25,
+        review_status: "needs_gk_review",
+      }],
+    },
+  ];
+
+  for (const unsafe of unsafeRows) {
+    const repository = {
+      async listDataDictionaryEntries() {
+        return { ok: true, data: unsafe, error: null };
+      },
+    };
+    const result = await listDataDictionaryEntries(
+      { organizationId: ORG, dataDictionaryId: DATA_DICTIONARY, actorContext },
+      { env: enabled, dataDictionaryRepository: repository },
+    );
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "system_error");
+    assert.equal("data" in result, false);
+  }
 });
 
 test("P1-04 repository: is the only place SQL and row locking for these tables appear, and never imports storage/parsers/LLM clients", () => {

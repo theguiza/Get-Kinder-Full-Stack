@@ -320,6 +320,18 @@ const TRACEABILITY_CONFLICT_GROUP_KEYS = new Set([
   "workflow_status",
   "is_current",
 ]);
+const TRACEABILITY_GRAPH_RELATIONSHIP_KEYS = new Set([
+  "relationship_type",
+  "from_object_type",
+  "from_object_id",
+  "to_object_type",
+  "to_object_id",
+]);
+const TRACEABILITY_GRAPH_COMPLETENESS_KEYS = new Set([
+  "complete",
+  "missing_relationship_types",
+  "invalid_relationship_count",
+]);
 
 function validateExactSafeObject(value, keys) {
   return hasExactKeys(value, keys) && Object.entries(value).every(([key, childValue]) => validateMetadataSafeValue(key, childValue));
@@ -384,6 +396,8 @@ function validateSuccessDto(data) {
     "gap_items",
     "client_followup_workflows",
     "potential_conflict_groups",
+    "graph_relationships",
+    "graph_trace_completeness",
     "requestedAudience",
     "eligible",
     "blockerCodes",
@@ -407,6 +421,8 @@ function validateSuccessDto(data) {
     validateArrayEntries(data.gap_items, TRACEABILITY_GAP_ITEM_KEYS) &&
     validateArrayEntries(data.client_followup_workflows, TRACEABILITY_FOLLOWUP_WORKFLOW_KEYS) &&
     validateArrayEntries(data.potential_conflict_groups, TRACEABILITY_CONFLICT_GROUP_KEYS) &&
+    validateArrayEntries(data.graph_relationships, TRACEABILITY_GRAPH_RELATIONSHIP_KEYS) &&
+    validateExactSafeObject(data.graph_trace_completeness, TRACEABILITY_GRAPH_COMPLETENESS_KEYS) &&
     validateMetadataSafeValue("requestedAudience", data.requestedAudience) &&
     validateMetadataSafeValue("eligible", data.eligible) &&
     validateMetadataSafeValue("blockerCodes", data.blockerCodes) &&
