@@ -20323,3 +20323,22 @@ Registration preserves the required separations: it creates/replays only catalog
 **Remaining work inside THIS package:** none.
 
 **Not performed:** no schema/migration, applicability semantics, assessment semantics, Funder Requirements redesign, document parsing/OCR/LLM extraction/template parsing/web scraping/funder discovery/automatic classification/automatic applicability/automatic approval/SFTP/Drive/SharePoint/CRM/generation/export, production/shared/staging access or mutation, cloud/config/credential/secret inspection, feature flag or tenant mutation, real client data, push, deploy, or `00_KAI_CURRENT_STATE.md` update.
+
+## Export-Review Request + Export-Candidate Operational Composition
+
+**Date:** 2026-09-06
+**Owner-authorized scope:** make only the existing `requestGeneratedDraftExportReview` and `createGeneratedDraftExportCandidate` services operationally reachable through existing route/service conventions. Human final-release authority, `finalGate=true`, artifact/manifest creation, schema changes, migrations, production/cloud/database access, push, and deploy remained out of scope.
+
+**Repository preflight:** root `/Users/mikewoz/Get-Kinder-Full-Stack-Deploy`; branch `main`; starting HEAD `03914fcc235ce19b3e18d8939cc13f9703df8da4`; working tree clean. Root `AGENTS.md` read and followed. Current inspection found both services and repositories present, export-review packet/start/complete already mounted, and no mounted request/candidate route at starting HEAD.
+
+**Existing services reused:** `Backend/kai/services/kaiExportReviewService.js#requestGeneratedDraftExportReview` and `Backend/kai/services/kaiExportCandidateService.js#createGeneratedDraftExportCandidate` are reused unchanged. The routes delegate to those services after route-shape validation, mapped actor-context middleware, server-side `now`, and metadata-only audit composition. Repository gate semantics remain unchanged: export-review request still depends on P3-05 service/repository rules; candidate creation still depends on resolved generated-content review, resolved export review, current limitation snapshot, requested audience, and canonical fingerprint/currentness rules.
+
+**Routes added:** `POST /api/kai/sprint2/intake/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-review-request` and `POST /api/kai/sprint2/intake/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-candidates`. Request route accepts only `requested_export_audience`; candidate route accepts only an empty JSON body. Neither route contains SQL, imports repository/DB helpers, creates artifacts/manifests, grants release authority, or wires `finalGate=true`.
+
+**Files changed:** `Backend/kai/routes/sprint2IntakeApi.js`, `Backend/kai/validators/kaiSprint2RequestSchemas.js`, `Backend/kai/services/kaiMetadataOnlyAuditComposition.js`, `__tests__/kai-sprint2-p3-export-operational-composition-route.spec.js`, `__tests__/kai-sprint2-api-contract.spec.js`, `__tests__/kai-sprint2-p3-07-export-review-packet-route.spec.js`, `__tests__/kai-sprint2-p3-10-export-review-start-route.spec.js`, `__tests__/kai-sprint2-p3-14-export-review-complete-route.spec.js`, and this ExecPlan entry.
+
+**Verification:** `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel` was set for every Node command. New operational composition route suite first failed in sandbox on local listener `EPERM`; approved loopback-listener rerun passed 13/13. Existing P3-05 export-review request boundary suite passed 21/21. Existing P3-16 export-candidate boundary suite passed 16/16. Adjacent export-review packet/start/complete route suites first exposed over-broad static source slices after the new route group was inserted; those source checks were narrowed to their intended route blocks and rerun passed 27/27. API contract suite passed 15/15. `git diff --check` passed.
+
+**Final diff reviewed:** confined to route/validator/audit composition and focused tests plus this evidence entry. No service or repository semantics were reopened; no schema or migration was added; no artifact/manifest/final release authority behavior was introduced.
+
+**Remaining work inside pre-artifact release path:** P3-17 HUMAN RELEASE AUTHORITY.

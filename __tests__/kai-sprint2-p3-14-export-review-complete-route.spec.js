@@ -263,7 +263,7 @@ test("P3-14 route source imports no database or repository layer and performs no
   const source = readFileSync("Backend/kai/routes/sprint2IntakeApi.js", "utf8");
   const slice = source.slice(
     source.indexOf("function validateCompleteExportReviewRequestOrSend"),
-    source.indexOf('router.post("/admin/batches"'),
+    source.indexOf("let engagementContextServicePromise"),
   );
   assert.match(source, /function validateCompleteExportReviewRequestOrSend/);
   assert.match(slice, /completeGeneratedDraftExportReview/);

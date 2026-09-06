@@ -21,9 +21,11 @@ import {
   validateCompleteClientFollowupRequest,
   validateCompleteEvidenceReviewRequest,
   validateCompleteExportReviewRequest,
+  validateCreateExportCandidateRequest,
   validateIntakeBatchFilesQuery,
   validateFilePolicyBlockRequest,
   validateKaiSprint2MutationRequest,
+  validateRequestExportReviewRequest,
   validateReviewQueueQuery,
   validateReviewQueueStatusRequest,
   validateSensitivityProfileDecisionRequest,
@@ -43,6 +45,8 @@ import {
   createProductionMetadataOnlyAuditForEvidenceReview,
   createProductionMetadataOnlyAuditForGeneratedContentDraft,
   createProductionMetadataOnlyAuditForGeneratedContentReview,
+  createProductionMetadataOnlyAuditForGeneratedDraftExportCandidate,
+  createProductionMetadataOnlyAuditForGeneratedDraftExportReview,
   createProductionMetadataOnlyAuditForRequirementAssessment,
   createProductionMetadataOnlyAuditForSourceVersion,
 } from "../services/kaiMetadataOnlyAuditComposition.js";
@@ -54,6 +58,7 @@ let intakeServicePromise = null;
 let reviewQueueServicePromise = null;
 let reviewCockpitServicePromise = null;
 let exportReviewServicePromise = null;
+let exportCandidateServicePromise = null;
 let evidenceLineageServicePromise = null;
 let evidenceCoverageAssessmentServicePromise = null;
 let claimProposalServicePromise = null;
@@ -1032,13 +1037,126 @@ router.post("/admin/review-cockpit/source-candidates/:intakeSourceCandidateId/de
 
 async function getExportReviewService() {
   if (
-    intakeServiceOverride?.getGeneratedDraftExportReviewPacket
+    intakeServiceOverride?.requestGeneratedDraftExportReview
+    || intakeServiceOverride?.getGeneratedDraftExportReviewPacket
     || intakeServiceOverride?.startGeneratedDraftExportReview
     || intakeServiceOverride?.completeGeneratedDraftExportReview
   ) return intakeServiceOverride;
   exportReviewServicePromise ||= import("../services/kaiExportReviewService.js");
   return exportReviewServicePromise;
 }
+
+async function getExportCandidateService() {
+  if (intakeServiceOverride?.createGeneratedDraftExportCandidate) return intakeServiceOverride;
+  exportCandidateServicePromise ||= import("../services/kaiExportCandidateService.js");
+  return exportCandidateServicePromise;
+}
+
+function generatedContentDraftIdentifiers(req = {}) {
+  const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+  const generatedContentDraftId = typeof req.params?.generatedContentDraftId === "string"
+    ? req.params.generatedContentDraftId
+    : "";
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) || organizationId !== organizationId.toLowerCase()) return null;
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(generatedContentDraftId) || generatedContentDraftId !== generatedContentDraftId.toLowerCase()) return null;
+  return { organizationId, generatedContentDraftId };
+}
+
+function validateRequestExportReviewRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = generatedContentDraftIdentifiers(req);
+  if (!identifiers) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_or_generated_content_draft_id")],
+    });
+    return null;
+  }
+  const result = validateRequestExportReviewRequest(req.body);
+  if (!result.ok) {
+    sendKaiError(res, "validation_blocker", { blockers: result.blockers });
+    return null;
+  }
+  return identifiers;
+}
+
+function validateCreateExportCandidateRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = generatedContentDraftIdentifiers(req);
+  if (!identifiers) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_or_generated_content_draft_id")],
+    });
+    return null;
+  }
+  const result = validateCreateExportCandidateRequest(req.body);
+  if (!result.ok) {
+    sendKaiError(res, "validation_blocker", { blockers: result.blockers });
+    return null;
+  }
+  return identifiers;
+}
+
+router.post(
+  "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-review-request",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const identifiers = validateRequestExportReviewRequestOrSend(req, res);
+    if (!identifiers) return;
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    const payload = requestPayload(req);
+    return invokeService(res, async () => {
+      const service = await getExportReviewService();
+      return service.requestGeneratedDraftExportReview({
+        organizationId: identifiers.organizationId,
+        generatedContentDraftId: identifiers.generatedContentDraftId,
+        requestedExportAudience: payload.requested_export_audience,
+        actorContext,
+        now,
+      }, {
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForGeneratedDraftExportReview({
+          organizationId: identifiers.organizationId,
+          generatedContentDraftId: identifiers.generatedContentDraftId,
+          actorContext,
+          now,
+        }),
+      });
+    }, 201);
+  },
+);
+
+router.post(
+  "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-candidates",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const identifiers = validateCreateExportCandidateRequestOrSend(req, res);
+    if (!identifiers) return;
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getExportCandidateService();
+      return service.createGeneratedDraftExportCandidate({
+        organizationId: identifiers.organizationId,
+        generatedContentDraftId: identifiers.generatedContentDraftId,
+        actorContext,
+        now,
+      }, {
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForGeneratedDraftExportCandidate({
+          organizationId: identifiers.organizationId,
+          generatedContentDraftId: identifiers.generatedContentDraftId,
+          actorContext,
+          now,
+        }),
+      });
+    }, 201);
+  },
+);
 
 router.get(
   "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-review-queue/:exportReviewQueueItemId/packet",
@@ -3122,6 +3240,9 @@ export const __testables = {
   validateConfirmUploadRequestOrSend,
   validateReviewQueueStatusRequestOrSend,
   reviewCockpitIdentifiers,
+  generatedContentDraftIdentifiers,
+  validateRequestExportReviewRequestOrSend,
+  validateCreateExportCandidateRequestOrSend,
   exportReviewPacketIdentifiers,
   sprint2MappedActorContext,
   validateStartExportReviewRequestOrSend,

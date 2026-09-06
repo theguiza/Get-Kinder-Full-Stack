@@ -877,6 +877,125 @@ export function createProductionMetadataOnlyAuditForGeneratedContentReview({
   });
 }
 
+export function createProductionMetadataOnlyAuditForGeneratedDraftExportReview({
+  organizationId,
+  generatedContentDraftId,
+  actorContext,
+  now,
+  route = "p3_05_export_review_request",
+  insertAuditEvent = insertRequiredSuccessfulAuditEvent,
+} = {}) {
+  if (typeof organizationId !== "string" || organizationId.length === 0) {
+    throw new TypeError("createProductionMetadataOnlyAuditForGeneratedDraftExportReview requires organizationId.");
+  }
+  if (typeof generatedContentDraftId !== "string" || !CLAIM_ID_PATTERN.test(generatedContentDraftId)) {
+    throw new TypeError("createProductionMetadataOnlyAuditForGeneratedDraftExportReview requires generatedContentDraftId.");
+  }
+
+  function isPlainObject(value) {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  }
+
+  return Object.freeze({
+    prepareMetadataOnlyAudit({ payload, db } = {}) {
+      if (!isPlainObject(payload)) return { ok: false };
+
+      const metadata = {
+        organization_id: organizationId,
+        object_type: "generated_content_draft",
+        target_object_type: "generated_content_draft",
+        object_id: generatedContentDraftId,
+        operation: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "export_review_requested",
+        operation_type: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "export_review_requested",
+        validator_key: typeof payload.validator_key === "string" ? payload.validator_key : null,
+        actor_type: actorContext?.actorType || "human",
+        actor_user_id: actorContext?.actorUserId || null,
+        request_id: actorContext?.requestId || null,
+        route,
+        created_at: typeof now === "string" ? now : new Date().toISOString(),
+        metadata_only: true,
+        contains_raw_file_content: false,
+        contains_raw_parsed_rows: false,
+        contains_client_pii: false,
+        contains_prompt_text: false,
+        contains_unsafe_generated_text: false,
+        contains_signed_urls: false,
+        contains_storage_credentials: false,
+      };
+
+      return {
+        ok: true,
+        async publish() {
+          const result = await insertAuditEvent(metadata, db);
+          if (!result || result.ok !== true) {
+            throw new Error("p3_05_export_review_metadata_only_audit_publish_failed");
+          }
+          return result;
+        },
+      };
+    },
+  });
+}
+
+export function createProductionMetadataOnlyAuditForGeneratedDraftExportCandidate({
+  organizationId,
+  generatedContentDraftId,
+  actorContext,
+  now,
+  insertAuditEvent = insertRequiredSuccessfulAuditEvent,
+} = {}) {
+  if (typeof organizationId !== "string" || organizationId.length === 0) {
+    throw new TypeError("createProductionMetadataOnlyAuditForGeneratedDraftExportCandidate requires organizationId.");
+  }
+  if (typeof generatedContentDraftId !== "string" || !CLAIM_ID_PATTERN.test(generatedContentDraftId)) {
+    throw new TypeError("createProductionMetadataOnlyAuditForGeneratedDraftExportCandidate requires generatedContentDraftId.");
+  }
+
+  function isPlainObject(value) {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  }
+
+  return Object.freeze({
+    prepareMetadataOnlyAudit({ payload, db } = {}) {
+      if (!isPlainObject(payload)) return { ok: false };
+
+      const metadata = {
+        organization_id: organizationId,
+        object_type: "generated_content_draft",
+        target_object_type: "generated_content_draft",
+        object_id: generatedContentDraftId,
+        operation: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "export_candidate_created",
+        operation_type: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "export_candidate_created",
+        validator_key: typeof payload.validator_key === "string" ? payload.validator_key : null,
+        actor_type: actorContext?.actorType || "human",
+        actor_user_id: actorContext?.actorUserId || null,
+        request_id: actorContext?.requestId || null,
+        route: "p3_16_export_candidate_creation",
+        created_at: typeof now === "string" ? now : new Date().toISOString(),
+        metadata_only: true,
+        contains_raw_file_content: false,
+        contains_raw_parsed_rows: false,
+        contains_client_pii: false,
+        contains_prompt_text: false,
+        contains_unsafe_generated_text: false,
+        contains_signed_urls: false,
+        contains_storage_credentials: false,
+      };
+
+      return {
+        ok: true,
+        async publish() {
+          const result = await insertAuditEvent(metadata, db);
+          if (!result || result.ok !== true) {
+            throw new Error("p3_16_export_candidate_metadata_only_audit_publish_failed");
+          }
+          return result;
+        },
+      };
+    },
+  });
+}
+
 /**
  * Production composition of the `metadataOnlyAudit` contract for the KAI
  * organization-enablement package (Get Kinder organization -> KAI
@@ -1442,6 +1561,8 @@ export const __testables = Object.freeze({
   createProductionMetadataOnlyAuditForClientFollowupCompletion,
   createProductionMetadataOnlyAuditForGeneratedContentDraft,
   createProductionMetadataOnlyAuditForGeneratedContentReview,
+  createProductionMetadataOnlyAuditForGeneratedDraftExportReview,
+  createProductionMetadataOnlyAuditForGeneratedDraftExportCandidate,
   createProductionMetadataOnlyAuditForOrganizationKaiEnablement,
   createProductionMetadataOnlyAuditForAccessAdministration,
   createProductionMetadataOnlyAuditForImpactEvaluation,

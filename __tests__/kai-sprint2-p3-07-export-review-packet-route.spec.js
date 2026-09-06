@@ -256,8 +256,8 @@ test("P3-07 route forwards only path identifiers and middleware actorContext onc
 test("P3-07 route source imports no database or repository layer and performs no writes", () => {
   const source = readFileSync("Backend/kai/routes/sprint2IntakeApi.js", "utf8");
   const slice = source.slice(
-    source.indexOf("async function getExportReviewService"),
-    source.indexOf('router.post("/admin/batches"'),
+    source.indexOf('router.get(\n  "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-review-queue/:exportReviewQueueItemId/packet"'),
+    source.indexOf("function validateStartExportReviewRequestOrSend"),
   );
   assert.match(source, /function exportReviewPacketIdentifiers/);
   assert.match(source, /function sprint2MappedActorContext/);

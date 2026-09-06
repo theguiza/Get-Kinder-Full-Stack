@@ -61,6 +61,11 @@ const START_EXPORT_REVIEW_REQUEST_KEYS = new Set([
 const COMPLETE_EXPORT_REVIEW_REQUEST_KEYS = new Set([
   "expected_updated_at",
 ]);
+const REQUEST_EXPORT_REVIEW_REQUEST_KEYS = new Set([
+  "requested_export_audience",
+]);
+const CREATE_EXPORT_CANDIDATE_REQUEST_KEYS = new Set([]);
+const EXPORT_REVIEW_AUDIENCES = new Set(["internal", "funder", "public"]);
 const COMPLETE_EVIDENCE_REVIEW_REQUEST_KEYS = new Set([
   "expected_updated_at",
   "decision",
@@ -466,6 +471,35 @@ export function validateStartExportReviewRequest(payload) {
   return { ok: true, blockers: [] };
 }
 
+export function validateRequestExportReviewRequest(payload) {
+  if (!isPlainObject(payload)) {
+    return { ok: false, blockers: [requestBlocker("request_body_must_be_object", "body")] };
+  }
+
+  const keys = Object.keys(payload);
+  for (const key of keys) {
+    if (!REQUEST_EXPORT_REVIEW_REQUEST_KEYS.has(key)) {
+      return { ok: false, blockers: [requestBlocker("unknown_field", `body.${key}`)] };
+    }
+    const value = payload[key];
+    if (value === null) return { ok: false, blockers: [requestBlocker("null_field_not_allowed", `body.${key}`)] };
+    if (Array.isArray(value)) return { ok: false, blockers: [requestBlocker("array_field_not_allowlisted", `body.${key}`)] };
+    if (isPlainObject(value)) return { ok: false, blockers: [requestBlocker("nested_object_not_allowed", `body.${key}`)] };
+    if (typeof value !== "string") return { ok: false, blockers: [requestBlocker("invalid_string_field", `body.${key}`)] };
+    if (!EXPORT_REVIEW_AUDIENCES.has(value)) {
+      return { ok: false, blockers: [requestBlocker("invalid_requested_export_audience", `body.${key}`)] };
+    }
+  }
+
+  for (const key of REQUEST_EXPORT_REVIEW_REQUEST_KEYS) {
+    if (!Object.hasOwn(payload, key)) {
+      return { ok: false, blockers: [requestBlocker("required_field_missing", `body.${key}`)] };
+    }
+  }
+
+  return { ok: true, blockers: [] };
+}
+
 export function validateCompleteExportReviewRequest(payload) {
   if (!isPlainObject(payload)) {
     return { ok: false, blockers: [requestBlocker("request_body_must_be_object", "body")] };
@@ -492,6 +526,17 @@ export function validateCompleteExportReviewRequest(payload) {
     }
   }
 
+  return { ok: true, blockers: [] };
+}
+
+export function validateCreateExportCandidateRequest(payload) {
+  if (!isPlainObject(payload)) {
+    return { ok: false, blockers: [requestBlocker("request_body_must_be_object", "body")] };
+  }
+  const keys = Object.keys(payload);
+  if (keys.some((key) => !CREATE_EXPORT_CANDIDATE_REQUEST_KEYS.has(key))) {
+    return { ok: false, blockers: [requestBlocker("unknown_field", "body")] };
+  }
   return { ok: true, blockers: [] };
 }
 
